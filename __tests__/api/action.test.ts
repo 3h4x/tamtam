@@ -1,109 +1,186 @@
-import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
+import { describe, it, expect, beforeAll, beforeEach, afterAll, afterEach, vi } from 'vitest';
 import { NextRequest } from 'next/server';
-import Database from 'better-sqlite3';
-import { drizzle } from 'drizzle-orm/better-sqlite3';
+import { sql } from 'drizzle-orm';
 import { mkdirSync, rmSync, existsSync, readFileSync, writeFileSync } from 'fs';
 import { join } from 'path';
 import { tmpdir } from 'os';
 import * as schema from '@/lib/db/schema';
+import { createTestPgDbEmpty, type TestDbHandle } from '@/__tests__/helpers/test-db';
 
-function createTestDb() {
-  const sqlite = new Database(':memory:');
-  sqlite.pragma('journal_mode = WAL');
-  sqlite.pragma('foreign_keys = ON');
+// Hoisted mock-state bag — every test mutates these refs and then the
+// module-scoped vi.mock factories below read them. This lets us register
+// `vi.mock(...)` once at module scope (so the route handler can be imported
+// a single time), instead of resetting the module graph per test.
+const state = vi.hoisted(() => {
+  return {
+    dbRef: { current: null as unknown as { select: unknown; insert: unknown; update: unknown } },
+    resolveProjectPathImpl: (_projectName: string): string | null => null,
+    loadFileConfigImpl: (_projectPath: string): { custom_actions?: unknown } | null => null,
+    writeFileConfigImpl: (_projectPath: string, _updates: unknown): void => {},
+    getSettingsImpl: (): { log_dir: string } => ({ log_dir: '/tmp/tamtam-action-default-logs' }),
+    jobsPausedResultMock: vi.fn(),
+    createJobMock: vi.fn(),
+    updateJobMock: vi.fn(),
+    spawnMock: vi.fn(),
+  };
+});
 
-  sqlite.exec(`
+vi.mock('@/lib/db', () => ({
+  get db() { return state.dbRef.current; },
+  schema,
+}));
+
+vi.mock('@/lib/shared/project-data', () => ({
+  resolveProjectPath: (projectName: string) => state.resolveProjectPathImpl(projectName),
+}));
+
+// Mock git-branch to avoid execFileSync('git', ...) shell calls in
+// loadFileConfig/writeFileConfig. The real file IO is preserved so the
+// file-mirroring tests still exercise the YAML read/write code path.
+vi.mock('@/lib/git/git-branch', () => ({
+  getBranchContext: () => ({ isDefaultBranch: true, defaultBranch: 'main', currentBranch: 'main' }),
+  getDefaultBranchSync: () => 'main',
+  getCurrentBranchSync: () => 'main',
+  gitShowSync: () => null,
+}));
+
+vi.mock('@/lib/skills/tamtam-file-config', async () => {
+  const actual = await vi.importActual<typeof import('@/lib/skills/tamtam-file-config')>(
+    '@/lib/skills/tamtam-file-config'
+  );
+  return {
+    ...actual,
+    loadFileConfig: (projectPath: string) => state.loadFileConfigImpl(projectPath),
+    writeFileConfig: (projectPath: string, updates: unknown) =>
+      state.writeFileConfigImpl(projectPath, updates),
+  };
+});
+
+vi.mock('@/lib/shared/config', () => ({
+  getSettings: () => state.getSettingsImpl(),
+}));
+
+vi.mock('@/lib/shared/job-control', () => ({
+  jobsPausedResult: (...args: unknown[]) => state.jobsPausedResultMock(...args),
+}));
+
+vi.mock('@/lib/jobs/job-storage', () => ({
+  createJob: (...args: unknown[]) => state.createJobMock(...args),
+  updateJob: (...args: unknown[]) => state.updateJobMock(...args),
+}));
+
+vi.mock('child_process', async () => {
+  const actual = await vi.importActual<typeof import('child_process')>('child_process');
+  return {
+    ...actual,
+    spawn: (...args: unknown[]) => state.spawnMock(...args),
+  };
+});
+
+// Import the route handler ONCE — the per-test isolation comes from mutating
+// `state.*` refs above, not from rebuilding the module graph.
+const routeMod = await import('@/app/api/projects/by-project/[projectName]/action/route');
+const { GET, PUT, POST } = routeMod;
+
+async function applyDdl(handle: TestDbHandle): Promise<void> {
+  await handle.db.execute(sql.raw(`
     CREATE TABLE IF NOT EXISTS projects (
-      name TEXT PRIMARY KEY,
-      path TEXT NOT NULL,
-      enabled INTEGER DEFAULT 0,
-      github TEXT,
-      priority TEXT,
-      custom_actions TEXT,
-      test_command TEXT,
-      tests_disabled INTEGER DEFAULT 0,
-      review_disabled INTEGER DEFAULT 0,
-      test_cron_enabled INTEGER DEFAULT 0,
-      test_cron_schedule TEXT,
-      auto_commit_enabled INTEGER DEFAULT 0,
-      auto_push_enabled INTEGER DEFAULT 0,
-      auto_pr_merge_enabled INTEGER DEFAULT 0,
-      pr_workflow_enabled INTEGER DEFAULT 0,
-      release_after_run INTEGER DEFAULT 0,
-      issue_auto_branch INTEGER DEFAULT 1,
-      last_push_error TEXT,
-      last_push_at REAL,
-      review_prompt_addendum TEXT,
-      fix_prompt_addendum TEXT,
-      website TEXT,
-      qa_url TEXT,
-      archived INTEGER NOT NULL DEFAULT 0,
-      paused INTEGER NOT NULL DEFAULT 0
-    );
+      name text PRIMARY KEY,
+      path text NOT NULL,
+      enabled boolean DEFAULT false,
+      github text,
+      priority text,
+      custom_actions text,
+      test_command text,
+      tests_disabled boolean DEFAULT false,
+      review_disabled boolean DEFAULT false,
+      test_cron_enabled boolean DEFAULT false,
+      test_cron_schedule text,
+      auto_commit_enabled boolean DEFAULT false,
+      auto_push_enabled boolean DEFAULT false,
+      auto_pr_merge_enabled boolean DEFAULT false,
+      pr_workflow_enabled boolean DEFAULT false,
+      release_after_run boolean DEFAULT false,
+      issue_auto_branch boolean DEFAULT true,
+      last_push_error text,
+      last_push_at double precision,
+      review_prompt_addendum text,
+      fix_prompt_addendum text,
+      website text,
+      qa_url text,
+      archived boolean NOT NULL DEFAULT false,
+      paused boolean NOT NULL DEFAULT false
+    )
+  `));
+  await handle.db.execute(sql.raw(`
     CREATE TABLE IF NOT EXISTS settings (
-      key TEXT PRIMARY KEY,
-      value TEXT NOT NULL
-    );
+      key text PRIMARY KEY,
+      value text NOT NULL
+    )
+  `));
+  await handle.db.execute(sql.raw(`
     CREATE TABLE IF NOT EXISTS jobs (
-      id TEXT PRIMARY KEY,
-      project TEXT NOT NULL,
-      kind TEXT NOT NULL,
-      prompt TEXT,
-      pid INTEGER NOT NULL,
-      log_path TEXT,
-      started_at REAL NOT NULL,
-      finished_at REAL,
-      exit_code INTEGER,
-      seen INTEGER DEFAULT 0,
-      duration_ms INTEGER,
-      input_tokens INTEGER,
-      output_tokens INTEGER,
-      cache_read_tokens INTEGER,
-      cache_create_tokens INTEGER,
-      session_id TEXT,
-      user_prompt TEXT,
-      context_meta TEXT,
-      parent_job_id TEXT,
-      gh_issue_number INTEGER,
-      gh_issue_repo TEXT,
-      gh_issue_title TEXT,
-      log_pruned INTEGER DEFAULT 0,
-      verdict TEXT,
-      cost_usd REAL,
-      model TEXT,
-      release_id TEXT,
-      aborted_at REAL,
-      prompt_bytes INTEGER,
-      work_summary TEXT,
-      modified_files TEXT,
-      provider TEXT
-    );
-  `);
-
-  return { sqlite, db: drizzle(sqlite, { schema }) };
+      id text PRIMARY KEY,
+      project text NOT NULL,
+      kind text NOT NULL,
+      prompt text,
+      pid integer NOT NULL,
+      log_path text,
+      started_at double precision NOT NULL,
+      finished_at double precision,
+      exit_code integer,
+      seen boolean DEFAULT false,
+      duration_ms integer,
+      input_tokens integer,
+      output_tokens integer,
+      cache_read_tokens integer,
+      cache_create_tokens integer,
+      session_id text,
+      user_prompt text,
+      context_meta text,
+      parent_job_id text,
+      gh_issue_number integer,
+      gh_issue_repo text,
+      gh_issue_title text,
+      log_pruned boolean DEFAULT false,
+      verdict text,
+      cost_usd double precision,
+      model text,
+      release_id text,
+      aborted_at double precision,
+      prompt_bytes integer,
+      work_summary text,
+      modified_files text,
+      provider text
+    )
+  `));
 }
 
+// Single PGlite instance shared across both DB-backed describes — booting
+// PGlite is the dominant per-suite cost, so reuse it after TRUNCATE between
+// tests. Hidden in a ref object so a separate describe can read it lazily.
+const sharedHandleRef: { handle: TestDbHandle } = { handle: null as unknown as TestDbHandle };
+
+beforeAll(async () => {
+  sharedHandleRef.handle = await createTestPgDbEmpty();
+  await applyDdl(sharedHandleRef.handle);
+});
+
+afterAll(async () => {
+  try {
+    await sharedHandleRef.handle[Symbol.asyncDispose]();
+  } catch {
+    // ignore
+  }
+});
+
 describe('action API (GET and PUT)', () => {
-  let testDb: ReturnType<typeof createTestDb>;
-  let GET: any;
-  let PUT: any;
-
   beforeEach(async () => {
-    vi.resetModules();
-    testDb = createTestDb();
-
-    vi.doMock('@/lib/db', () => ({
-      db: testDb.db,
-      schema,
-    }));
-
-    const mod = await import('@/app/api/projects/by-project/[projectName]/action/route');
-    GET = mod.GET;
-    PUT = mod.PUT;
-  });
-
-  afterEach(() => {
-    vi.resetModules();
+    state.dbRef.current = sharedHandleRef.handle.db as unknown as typeof state.dbRef.current;
+    state.resolveProjectPathImpl = () => null;
+    state.loadFileConfigImpl = () => null;
+    state.writeFileConfigImpl = () => {};
+    await sharedHandleRef.handle.db.execute(sql.raw('TRUNCATE projects, jobs, settings'));
   });
 
   describe('GET /projects/by-project/[projectName]/action', () => {
@@ -118,10 +195,9 @@ describe('action API (GET and PUT)', () => {
     });
 
     it('returns empty actions when project has no custom actions', async () => {
-      testDb.db
+      await sharedHandleRef.handle.db
         .insert(schema.projects)
-        .values({ name: 'proj1', path: '/path/to/proj1', customActions: null })
-        .run();
+        .values({ name: 'proj1', path: '/path/to/proj1', customActions: null });
 
       const request = new NextRequest('http://localhost/api/projects/by-project/proj1/action');
       const response = await GET(request, {
@@ -136,14 +212,13 @@ describe('action API (GET and PUT)', () => {
         { name: 'deploy', command: 'npm run deploy', color: 'green' },
         { name: 'test', command: 'npm test' },
       ];
-      testDb.db
+      await sharedHandleRef.handle.db
         .insert(schema.projects)
         .values({
           name: 'proj1',
           path: '/path/to/proj1',
           customActions: JSON.stringify(actions),
-        })
-        .run();
+        });
 
       const request = new NextRequest('http://localhost/api/projects/by-project/proj1/action');
       const response = await GET(request, {
@@ -157,14 +232,13 @@ describe('action API (GET and PUT)', () => {
     });
 
     it('returns empty actions when custom_actions is invalid JSON', async () => {
-      testDb.db
+      await sharedHandleRef.handle.db
         .insert(schema.projects)
         .values({
           name: 'proj1',
           path: '/path/to/proj1',
           customActions: 'not-valid-json',
-        })
-        .run();
+        });
 
       const request = new NextRequest('http://localhost/api/projects/by-project/proj1/action');
       const response = await GET(request, {
@@ -177,11 +251,10 @@ describe('action API (GET and PUT)', () => {
   });
 
   describe('PUT /projects/by-project/[projectName]/action', () => {
-    beforeEach(() => {
-      testDb.db
+    beforeEach(async () => {
+      await sharedHandleRef.handle.db
         .insert(schema.projects)
-        .values({ name: 'proj1', path: '/path/to/proj1' })
-        .run();
+        .values({ name: 'proj1', path: '/path/to/proj1' });
     });
 
     it('validates that actions is an array', async () => {
@@ -277,31 +350,39 @@ describe('action API (GET and PUT)', () => {
 // custom_actions to it, GET must prefer it over the DB, and an explicitly
 // empty file array must clear teammates' DB-stored actions.
 describe('action API — file mirroring (.tamtam/config.yml)', () => {
-  let testDb: ReturnType<typeof createTestDb>;
   let tmpDir: string;
-  let GET: any;
-  let PUT: any;
+  // We need the real loadFileConfig/writeFileConfig for these tests so the
+  // file IO happens. Re-import the actual module here once.
+  let realLoadFileConfig: typeof import('@/lib/skills/tamtam-file-config').loadFileConfig;
+  let realWriteFileConfig: typeof import('@/lib/skills/tamtam-file-config').writeFileConfig;
+
+  beforeAll(async () => {
+    const actual = await vi.importActual<typeof import('@/lib/skills/tamtam-file-config')>(
+      '@/lib/skills/tamtam-file-config'
+    );
+    realLoadFileConfig = actual.loadFileConfig;
+    realWriteFileConfig = actual.writeFileConfig;
+  });
 
   beforeEach(async () => {
-    vi.resetModules();
-    testDb = createTestDb();
+    await sharedHandleRef.handle.db.execute(sql.raw('TRUNCATE projects, jobs, settings'));
     tmpDir = join(tmpdir(), `tamtam-action-test-${Date.now()}-${Math.random().toString(36).slice(2)}`);
     mkdirSync(tmpDir, { recursive: true });
 
-    vi.doMock('@/lib/db', () => ({ db: testDb.db, schema }));
+    state.dbRef.current = sharedHandleRef.handle.db as unknown as typeof state.dbRef.current;
+    state.resolveProjectPathImpl = (projectName: string) => (projectName === 'proj1' ? tmpDir : null);
+    // Use the real file-IO implementations for these tests; git-branch is
+    // still mocked at module scope so no shell calls happen.
+    state.loadFileConfigImpl = (projectPath: string) => realLoadFileConfig(projectPath);
+    state.writeFileConfigImpl = (projectPath: string, updates: unknown) =>
+      realWriteFileConfig(projectPath, updates as Parameters<typeof realWriteFileConfig>[1]);
 
-    testDb.db
+    await sharedHandleRef.handle.db
       .insert(schema.projects)
-      .values({ name: 'proj1', path: tmpDir, enabled: true })
-      .run();
-
-    const mod = await import('@/app/api/projects/by-project/[projectName]/action/route');
-    GET = mod.GET;
-    PUT = mod.PUT;
+      .values({ name: 'proj1', path: tmpDir, enabled: true });
   });
 
   afterEach(() => {
-    vi.resetModules();
     if (existsSync(tmpDir)) rmSync(tmpDir, { recursive: true, force: true });
   });
 
@@ -329,9 +410,9 @@ describe('action API — file mirroring (.tamtam/config.yml)', () => {
 
   it('GET prefers .tamtam/config.yml over the DB column', async () => {
     // DB has one set of actions ...
-    testDb.sqlite
-      .prepare('UPDATE projects SET custom_actions = ? WHERE name = ?')
-      .run(JSON.stringify([{ name: 'db-only', command: 'echo db' }]), 'proj1');
+    await sharedHandleRef.handle.db.execute(sql.raw(
+      `UPDATE projects SET custom_actions = '${JSON.stringify([{ name: 'db-only', command: 'echo db' }]).replace(/'/g, "''")}' WHERE name = 'proj1'`
+    ));
 
     // ... and the file has a different set.
     mkdirSync(join(tmpDir, '.tamtam'), { recursive: true });
@@ -382,9 +463,9 @@ describe('action API — file mirroring (.tamtam/config.yml)', () => {
 
   it('GET returns [] when file declares an explicitly empty custom_actions (file is authoritative, not DB)', async () => {
     // DB still has actions ...
-    testDb.sqlite
-      .prepare('UPDATE projects SET custom_actions = ? WHERE name = ?')
-      .run(JSON.stringify([{ name: 'from-db', command: 'echo db' }]), 'proj1');
+    await sharedHandleRef.handle.db.execute(sql.raw(
+      `UPDATE projects SET custom_actions = '${JSON.stringify([{ name: 'from-db', command: 'echo db' }]).replace(/'/g, "''")}' WHERE name = 'proj1'`
+    ));
 
     // ... but the file declares custom_actions: [].
     mkdirSync(join(tmpDir, '.tamtam'), { recursive: true });
@@ -401,72 +482,51 @@ describe('action API — file mirroring (.tamtam/config.yml)', () => {
 });
 
 describe('action API POST pause gate', () => {
-  let POST: any;
   let tmpDir: string;
-  let jobsPausedResultMock: ReturnType<typeof vi.fn>;
-  let createJobMock: ReturnType<typeof vi.fn>;
-  let updateJobMock: ReturnType<typeof vi.fn>;
-  let spawnMock: ReturnType<typeof vi.fn>;
   let procOnMock: ReturnType<typeof vi.fn>;
   let procUnrefMock: ReturnType<typeof vi.fn>;
   let customActions: Array<{ name: string; command: string }>;
 
-  beforeEach(async () => {
-    vi.resetModules();
+  beforeEach(() => {
     tmpDir = join(tmpdir(), `tamtam-action-post-${Date.now()}-${Math.random().toString(36).slice(2)}`);
     mkdirSync(tmpDir, { recursive: true });
 
-    jobsPausedResultMock = vi.fn();
-    createJobMock = vi.fn(() => ({
+    state.dbRef.current = {} as unknown as typeof state.dbRef.current;
+    state.resolveProjectPathImpl = (projectName: string) =>
+      projectName === 'proj1' ? tmpDir : null;
+    state.getSettingsImpl = () => ({ log_dir: join(tmpDir, 'logs') });
+
+    customActions = [{ name: 'Deploy', command: 'pnpm deploy' }];
+    state.loadFileConfigImpl = () => ({ custom_actions: customActions });
+    state.writeFileConfigImpl = () => {};
+
+    state.jobsPausedResultMock.mockReset();
+    state.createJobMock.mockReset();
+    state.createJobMock.mockReturnValue({
       id: 'job-123',
       pid: 0,
       logPath: '',
       exitCode: null,
       finishedAt: null,
-    }));
-    updateJobMock = vi.fn();
+    });
+    state.updateJobMock.mockReset();
+
     procOnMock = vi.fn();
     procUnrefMock = vi.fn();
-    spawnMock = vi.fn(() => ({
+    state.spawnMock.mockReset();
+    state.spawnMock.mockReturnValue({
       pid: 4321,
       on: procOnMock,
       unref: procUnrefMock,
-    }));
-    customActions = [{ name: 'Deploy', command: 'pnpm deploy' }];
-
-    vi.doMock('@/lib/db', () => ({ db: {}, schema: {} }));
-    vi.doMock('@/lib/shared/project-data', () => ({
-      resolveProjectPath: (projectName: string) => projectName === 'proj1' ? tmpDir : null,
-    }));
-    vi.doMock('@/lib/shared/config', () => ({
-      getSettings: () => ({ log_dir: join(tmpDir, 'logs') }),
-    }));
-    vi.doMock('@/lib/shared/job-control', () => ({
-      jobsPausedResult: jobsPausedResultMock,
-    }));
-    vi.doMock('@/lib/jobs/job-storage', () => ({
-      createJob: createJobMock,
-      updateJob: updateJobMock,
-    }));
-    vi.doMock('@/lib/skills/tamtam-file-config', () => ({
-      loadFileConfig: () => ({ custom_actions: customActions }),
-      writeFileConfig: vi.fn(),
-    }));
-    vi.doMock('child_process', () => ({
-      spawn: spawnMock,
-    }));
-
-    const mod = await import('@/app/api/projects/by-project/[projectName]/action/route');
-    POST = mod.POST;
+    });
   });
 
   afterEach(() => {
-    vi.resetModules();
     if (existsSync(tmpDir)) rmSync(tmpDir, { recursive: true, force: true });
   });
 
   it('returns 409 and does not spawn when jobs are paused', async () => {
-    jobsPausedResultMock.mockReturnValue({
+    state.jobsPausedResultMock.mockReturnValue({
       ok: false,
       status: 409,
       detail: 'Jobs are paused globally. Turn the switch back on in Settings to run custom action "Deploy".',
@@ -484,13 +544,13 @@ describe('action API POST pause gate', () => {
     expect(await response.json()).toEqual({
       detail: 'Jobs are paused globally. Turn the switch back on in Settings to run custom action "Deploy".',
     });
-    expect(jobsPausedResultMock).toHaveBeenCalledWith('run custom action "Deploy"');
-    expect(createJobMock).not.toHaveBeenCalled();
-    expect(spawnMock).not.toHaveBeenCalled();
+    expect(state.jobsPausedResultMock).toHaveBeenCalledWith('run custom action "Deploy"');
+    expect(state.createJobMock).not.toHaveBeenCalled();
+    expect(state.spawnMock).not.toHaveBeenCalled();
   });
 
   it('starts the custom action normally after jobs resume', async () => {
-    jobsPausedResultMock.mockReturnValue(null);
+    state.jobsPausedResultMock.mockReturnValue(null);
 
     const response = await POST(
       new NextRequest('http://localhost/api/projects/by-project/proj1/action', {
@@ -507,8 +567,8 @@ describe('action API POST pause gate', () => {
       pid: 4321,
       action: 'Deploy',
     });
-    expect(createJobMock).toHaveBeenCalledWith('proj1', 'Deploy', 0, '');
-    const spawnArgs = spawnMock.mock.calls[0];
+    expect(state.createJobMock).toHaveBeenCalledWith('proj1', 'Deploy', 0, '');
+    const spawnArgs = state.spawnMock.mock.calls[0];
     expect(spawnArgs[0]).toBe('bash');
     expect(spawnArgs[1][0]).toBe('-lc');
     expect(spawnArgs[1][1]).toContain('pnpm deploy');
@@ -520,11 +580,11 @@ describe('action API POST pause gate', () => {
     }));
     expect(existsSync(join(tmpDir, 'logs', 'job-123.sh'))).toBe(false);
     expect(procUnrefMock).toHaveBeenCalledOnce();
-    expect(updateJobMock).toHaveBeenCalled();
+    expect(state.updateJobMock).toHaveBeenCalled();
   });
 
   it('does not persist a wrapper script when the action command contains inline secrets', async () => {
-    jobsPausedResultMock.mockReturnValue(null);
+    state.jobsPausedResultMock.mockReturnValue(null);
     customActions = [{
       name: 'Deploy',
       command: 'SERVICE_TOKEN=runtime-secret-value curl https://user:supersecret@example.com/path',
@@ -539,12 +599,12 @@ describe('action API POST pause gate', () => {
     );
 
     expect(response.status).toBe(200);
-    const spawnArgs = spawnMock.mock.calls[0];
+    const spawnArgs = state.spawnMock.mock.calls[0];
     expect(spawnArgs[1][0]).toBe('-lc');
     expect(spawnArgs[1][1]).toContain('SERVICE_TOKEN=runtime-secret-value');
     expect(spawnArgs[1][1]).toContain('https://user:supersecret@example.com/path');
     expect(existsSync(join(tmpDir, 'logs', 'job-123.sh'))).toBe(false);
     expect(procUnrefMock).toHaveBeenCalledOnce();
-    expect(updateJobMock).toHaveBeenCalled();
+    expect(state.updateJobMock).toHaveBeenCalled();
   });
 });

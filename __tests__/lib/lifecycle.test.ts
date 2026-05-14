@@ -1,80 +1,307 @@
-import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
-import Database from 'better-sqlite3';
-import { drizzle } from 'drizzle-orm/better-sqlite3';
+import { describe, it, expect, beforeAll, beforeEach, afterAll, afterEach, vi } from 'vitest';
 import * as schema from '@/lib/db/schema';
 import { writeFileSync, readFileSync, mkdtempSync, rmSync } from 'fs';
 import { join } from 'path';
 import { tmpdir } from 'os';
-import { eq } from 'drizzle-orm';
+import { eq, sql } from 'drizzle-orm';
 import type { JobData } from '@/lib/jobs/types';
+import { createTestPgDbEmpty, type TestDbHandle } from '@/__tests__/helpers/test-db';
 
-function createTestDb() {
-  const sqlite = new Database(':memory:');
-  sqlite.pragma('journal_mode = WAL');
-  sqlite.pragma('foreign_keys = ON');
-  sqlite.exec(`
+// ─── Shared test database ────────────────────────────────────────────────────
+let sharedHandle: TestDbHandle;
+
+async function applyDdl(handle: TestDbHandle): Promise<void> {
+  // PGlite rejects multi-statement prepared queries, so issue each DDL
+  // separately.
+  await handle.db.execute(sql.raw(`
     CREATE TABLE IF NOT EXISTS jobs (
-      id TEXT PRIMARY KEY,
-      project TEXT NOT NULL,
-      kind TEXT NOT NULL,
-      prompt TEXT,
-      pid INTEGER NOT NULL,
-      log_path TEXT,
-      started_at REAL NOT NULL,
-      finished_at REAL,
-      exit_code INTEGER,
-      seen INTEGER DEFAULT 0,
-      duration_ms INTEGER,
-      input_tokens INTEGER,
-      output_tokens INTEGER,
-      cache_read_tokens INTEGER,
-      cache_create_tokens INTEGER,
-      session_id TEXT,
-      user_prompt TEXT,
-      context_meta TEXT,
-      parent_job_id TEXT,
-      gh_issue_number INTEGER,
-      gh_issue_repo TEXT,
-      gh_issue_title TEXT,
-      log_pruned INTEGER DEFAULT 0,
-      verdict TEXT,
-      cost_usd REAL,
-      model TEXT,
-      release_id TEXT,
-      aborted_at REAL,
-      prompt_bytes INTEGER,
-      work_summary TEXT,
-      modified_files TEXT,
-      provider TEXT
-    );
+      id text PRIMARY KEY,
+      project text NOT NULL,
+      kind text NOT NULL,
+      prompt text,
+      pid integer NOT NULL,
+      log_path text,
+      started_at double precision NOT NULL,
+      finished_at double precision,
+      exit_code integer,
+      seen boolean DEFAULT false,
+      duration_ms integer,
+      input_tokens integer,
+      output_tokens integer,
+      cache_read_tokens integer,
+      cache_create_tokens integer,
+      session_id text,
+      user_prompt text,
+      context_meta text,
+      parent_job_id text,
+      gh_issue_number integer,
+      gh_issue_repo text,
+      gh_issue_title text,
+      log_pruned boolean DEFAULT false,
+      verdict text,
+      cost_usd double precision,
+      model text,
+      release_id text,
+      aborted_at double precision,
+      prompt_bytes integer,
+      work_summary text,
+      modified_files text,
+      provider text
+    )
+  `));
+  await handle.db.execute(sql.raw(`
     CREATE TABLE IF NOT EXISTS recommendations (
-      id TEXT PRIMARY KEY,
-      project TEXT NOT NULL,
-      source_kind TEXT NOT NULL,
-      source_id TEXT,
-      agent_id TEXT,
-      agent_name TEXT,
-      type TEXT NOT NULL,
-      title TEXT NOT NULL,
-      detail TEXT NOT NULL,
-      status TEXT NOT NULL DEFAULT 'open',
-      payload TEXT,
-      created_at REAL NOT NULL,
-      updated_at REAL NOT NULL
-    );
+      id text PRIMARY KEY,
+      project text NOT NULL,
+      source_kind text NOT NULL,
+      source_id text,
+      agent_id text,
+      agent_name text,
+      type text NOT NULL,
+      title text NOT NULL,
+      detail text NOT NULL,
+      status text NOT NULL DEFAULT 'open',
+      payload text,
+      created_at double precision NOT NULL,
+      updated_at double precision NOT NULL
+    )
+  `));
+  await handle.db.execute(sql.raw(`
     CREATE TABLE IF NOT EXISTS gh_issues_cache (
-      project TEXT PRIMARY KEY,
-      repo TEXT NOT NULL,
-      prs TEXT NOT NULL DEFAULT '[]',
-      issues TEXT NOT NULL DEFAULT '[]',
-      fetched_at REAL NOT NULL
-    );
+      project text PRIMARY KEY,
+      repo text NOT NULL,
+      prs text NOT NULL DEFAULT '[]',
+      issues text NOT NULL DEFAULT '[]',
+      fetched_at double precision NOT NULL
+    )
+  `));
+  await handle.db.execute(sql.raw(`
     CREATE TABLE IF NOT EXISTS settings (
-      key TEXT PRIMARY KEY,
-      value TEXT NOT NULL
-    );
-  `);
-  return { sqlite, db: drizzle(sqlite, { schema }) };
+      key text PRIMARY KEY,
+      value text NOT NULL
+    )
+  `));
+}
+
+// ─── Hoisted mock bag ────────────────────────────────────────────────────────
+// Stable mock fn references shared across the whole test file. Each
+// describe's `beforeEach` resets these and reapplies its specific defaults.
+// This avoids the per-test `vi.resetModules() + await import(...)` cost that
+// the old implementation paid 61 times.
+//
+// `vi.hoisted()` runs before the module body executes, so `vi.fn()` here is
+// the same instance the module-scope `vi.mock(...)` factories close over.
+const mocks = vi.hoisted(() => ({
+  db: { current: null as unknown as TestDbHandle['db'] },
+  // pm2-jobs
+  deleteJob: vi.fn(),
+  getJobStatus: vi.fn(),
+  // shared/shell
+  exec: vi.fn(),
+  // git/git-utils
+  markReviewed: vi.fn(),
+  setReviewedRef: vi.fn(),
+  getCurrentBranch: vi.fn(),
+  // shared/project-data
+  resolveProjectPath: vi.fn(),
+  // scheduling/scheduling
+  getProjectTestConfig: vi.fn(),
+  // pipeline/pipeline-lock
+  releaseLock: vi.fn(),
+  getLock: vi.fn(),
+  isLockOwnedByActiveRelease: vi.fn(),
+  // jobs/retention
+  pruneProjectLogs: vi.fn(),
+  // shared/notifications
+  notify: vi.fn(),
+  // shared/config
+  getSettings: vi.fn(),
+  // shared/job-control
+  runAutoChainGates: vi.fn(),
+  // pipeline/start-fix
+  startFixFromJob: vi.fn(),
+  // pipeline/start-fix-push
+  startFixPush: vi.fn(),
+  isHookRejection: vi.fn(),
+  isTestFailureRejection: vi.fn(),
+  // pipeline/review-exhaustion-fallback
+  fileReviewExhaustionIssue: vi.fn(),
+  // pipeline/start-commit
+  startProjectCommit: vi.fn(),
+  // pipeline/start-review
+  startProjectReview: vi.fn(),
+  // pipeline/start-test
+  startProjectTest: vi.fn(),
+  // pipeline/start-mark-dod
+  startMarkDod: vi.fn(),
+  // pipeline/start-pr-wait
+  launchPrWait: vi.fn(),
+  // jobs/verdict-retry
+  retryVerdictWithClaude: vi.fn(),
+  // agents/agent-run-report
+  finalizeAgentRunReport: vi.fn(),
+  // agents/pending-agent-run
+  drainNextAgentRun: vi.fn(),
+}));
+
+// Module-level mocks; the factories late-bind to the hoisted bag, so the
+// stable `mocks.*` fn refs survive `vi.resetAllMocks()` and per-describe
+// reconfiguration via `mockReset().mockResolvedValue(...)`.
+vi.mock('@/lib/db', () => ({
+  get db() {
+    return mocks.db.current;
+  },
+  schema,
+}));
+vi.mock('@/lib/jobs/pm2-jobs', () => ({
+  deleteJob: mocks.deleteJob,
+  getJobStatus: mocks.getJobStatus,
+}));
+vi.mock('@/lib/shared/shell', () => ({
+  exec: mocks.exec,
+}));
+vi.mock('@/lib/git/git-utils', () => ({
+  markReviewed: mocks.markReviewed,
+  setReviewedRef: mocks.setReviewedRef,
+  getCurrentBranch: mocks.getCurrentBranch,
+}));
+vi.mock('@/lib/shared/project-data', () => ({
+  resolveProjectPath: mocks.resolveProjectPath,
+}));
+vi.mock('@/lib/scheduling/scheduling', () => ({
+  getProjectTestConfig: mocks.getProjectTestConfig,
+}));
+vi.mock('@/lib/pipeline/pipeline-lock', () => ({
+  releaseLock: mocks.releaseLock,
+  getLock: mocks.getLock,
+  isLockOwnedByActiveRelease: mocks.isLockOwnedByActiveRelease,
+}));
+vi.mock('@/lib/jobs/retention', () => ({
+  pruneProjectLogs: mocks.pruneProjectLogs,
+}));
+vi.mock('@/lib/shared/notifications', () => ({
+  notify: mocks.notify,
+}));
+vi.mock('@/lib/shared/config', () => ({
+  getSettings: mocks.getSettings,
+}));
+vi.mock('@/lib/shared/job-control', () => ({
+  runAutoChainGates: mocks.runAutoChainGates,
+}));
+vi.mock('@/lib/pipeline/start-fix', () => ({
+  startFixFromJob: mocks.startFixFromJob,
+}));
+vi.mock('@/lib/pipeline/start-fix-push', () => ({
+  startFixPush: mocks.startFixPush,
+  isHookRejection: mocks.isHookRejection,
+  isTestFailureRejection: mocks.isTestFailureRejection,
+}));
+vi.mock('@/lib/pipeline/review-exhaustion-fallback', () => ({
+  fileReviewExhaustionIssue: mocks.fileReviewExhaustionIssue,
+}));
+vi.mock('@/lib/pipeline/start-commit', () => ({
+  startProjectCommit: mocks.startProjectCommit,
+}));
+vi.mock('@/lib/pipeline/start-review', () => ({
+  startProjectReview: mocks.startProjectReview,
+}));
+vi.mock('@/lib/pipeline/start-test', () => ({
+  startProjectTest: mocks.startProjectTest,
+}));
+vi.mock('@/lib/pipeline/start-mark-dod', () => ({
+  startMarkDod: mocks.startMarkDod,
+}));
+vi.mock('@/lib/pipeline/start-pr-wait', () => ({
+  launchPrWait: mocks.launchPrWait,
+}));
+vi.mock('@/lib/jobs/verdict-retry', () => ({
+  retryVerdictWithClaude: mocks.retryVerdictWithClaude,
+}));
+vi.mock('@/lib/agents/agent-run-report', () => ({
+  finalizeAgentRunReport: mocks.finalizeAgentRunReport,
+}));
+vi.mock('@/lib/agents/pending-agent-run', () => ({
+  drainNextAgentRun: mocks.drainNextAgentRun,
+}));
+
+// Late-bound module bindings. Imported once in `beforeAll` AFTER the test DB
+// is initialized so `vi.mock('@/lib/db')`'s factory returns a real Drizzle
+// handle. The `import` happens once for the whole file (vs 61 times in the
+// previous implementation), saving ~50-100ms per test.
+let markDone: typeof import('@/lib/jobs/job-storage').markDone;
+let reconcileStaleRelease: typeof import('@/lib/jobs/job-storage').reconcileStaleRelease;
+let runCompletionHooks: typeof import('@/lib/jobs/job-storage').runCompletionHooks;
+let jobsCache: Map<string, JobData>;
+
+beforeAll(async () => {
+  sharedHandle = await createTestPgDbEmpty();
+  await applyDdl(sharedHandle);
+  mocks.db.current = sharedHandle.db;
+  const mod = await import('@/lib/jobs/job-storage');
+  markDone = mod.markDone;
+  reconcileStaleRelease = mod.reconcileStaleRelease;
+  runCompletionHooks = mod.runCompletionHooks;
+  jobsCache = (await import('@/lib/jobs/storage')).jobsCache;
+});
+
+afterAll(async () => {
+  // Let any straggling fire-and-forget queries settle before closing.
+  await new Promise((r) => setTimeout(r, 30));
+  try {
+    await sharedHandle[Symbol.asyncDispose]();
+  } catch {
+    // ignore
+  }
+});
+
+// Default mock setup applied before each test; describes can override.
+// `vi.resetAllMocks()` clears call history + implementation in one shot, then
+// we reapply the few defaults that production code actually relies on.
+function applyDefaultMocks(): void {
+  vi.resetAllMocks();
+  mocks.deleteJob.mockResolvedValue(undefined);
+  mocks.exec.mockResolvedValue({ exitCode: 0, stdout: '', stderr: '' });
+  mocks.markReviewed.mockResolvedValue(undefined);
+  mocks.setReviewedRef.mockResolvedValue(undefined);
+  mocks.getCurrentBranch.mockResolvedValue('main');
+  mocks.resolveProjectPath.mockReturnValue(null);
+  mocks.getProjectTestConfig.mockReturnValue({
+    autoPushEnabled: false,
+    autoCommitEnabled: false,
+    releaseAfterRun: false,
+    prWorkflowEnabled: false,
+  });
+  mocks.getLock.mockReturnValue(null);
+  mocks.isLockOwnedByActiveRelease.mockReturnValue(false);
+  mocks.notify.mockResolvedValue(undefined);
+  mocks.getSettings.mockReturnValue({
+    fix_ci_max_retries: 0,
+    fix_ci_retry_window_seconds: 120,
+    fix_ci_fast_crash_ms: 5000,
+  });
+  mocks.runAutoChainGates.mockReturnValue(null);
+  mocks.startFixFromJob.mockResolvedValue({ ok: true, jobId: 'fix-auto' });
+  mocks.startFixPush.mockResolvedValue({ ok: true, jobId: 'fix-push-next' });
+  mocks.isHookRejection.mockReturnValue(false);
+  mocks.isTestFailureRejection.mockReturnValue(false);
+  mocks.fileReviewExhaustionIssue.mockResolvedValue({ ok: true, issueNumber: 7, issueUrl: 'https://github.com/owner/repo/issues/7' });
+  mocks.startProjectCommit.mockResolvedValue({ ok: true, commitSha: 'abc123', message: 'commit ok', jobId: 'commit-auto' });
+  mocks.startProjectReview.mockResolvedValue({ ok: true, jobId: 'review-next' });
+  mocks.startProjectTest.mockResolvedValue({ ok: true, jobId: 'test-next' });
+  mocks.startMarkDod.mockResolvedValue({ ok: true, verified: 1, total: 1, changed: false });
+  mocks.launchPrWait.mockReturnValue({ jobId: 'pr-wait-job' });
+  mocks.retryVerdictWithClaude.mockResolvedValue(null);
+  mocks.finalizeAgentRunReport.mockResolvedValue(undefined);
+  mocks.drainNextAgentRun.mockResolvedValue(undefined);
+}
+
+async function resetTestState(): Promise<void> {
+  jobsCache.clear();
+  // Single TRUNCATE — fast on small tables, single round-trip to PGlite.
+  await sharedHandle.db.execute(
+    sql.raw('TRUNCATE jobs, recommendations, gh_issues_cache, settings'),
+  );
+  applyDefaultMocks();
 }
 
 function makeJobRow<T extends Record<string, unknown>>(overrides: T) {
@@ -108,6 +335,58 @@ function makeJobRow<T extends Record<string, unknown>>(overrides: T) {
   };
 }
 
+// Lifecycle reads jobs from the in-memory jobsCache, not the DB. Tests that
+// insert rows directly into the DB must also populate the cache so
+// reconcile/markDone logic can find them.
+function populateJobCache(rows: ReadonlyArray<Record<string, unknown>>): void {
+  for (const r of rows) {
+    jobsCache.set(r.id as string, {
+      id: r.id as string,
+      project: r.project as string,
+      kind: r.kind as string,
+      prompt: (r.prompt as string | null | undefined) ?? null,
+      pid: (r.pid as number | undefined) ?? 0,
+      logPath: (r.logPath as string | null | undefined) ?? null,
+      startedAt: (r.startedAt as number | undefined) ?? Date.now() / 1000,
+      finishedAt: (r.finishedAt as number | null | undefined) ?? null,
+      exitCode: (r.exitCode as number | null | undefined) ?? null,
+      seen: (r.seen as boolean | undefined) ?? false,
+      durationMs: (r.durationMs as number | null | undefined) ?? null,
+      inputTokens: (r.inputTokens as number | null | undefined) ?? null,
+      outputTokens: (r.outputTokens as number | null | undefined) ?? null,
+      cacheReadTokens: (r.cacheReadTokens as number | null | undefined) ?? null,
+      cacheCreateTokens: (r.cacheCreateTokens as number | null | undefined) ?? null,
+      sessionId: (r.sessionId as string | null | undefined) ?? null,
+      contextMeta: (r.contextMeta as string | null | undefined) ?? null,
+      userPrompt: (r.userPrompt as string | null | undefined) ?? null,
+      parentJobId: (r.parentJobId as string | null | undefined) ?? null,
+      ghIssueNumber: (r.ghIssueNumber as number | null | undefined) ?? null,
+      ghIssueRepo: (r.ghIssueRepo as string | null | undefined) ?? null,
+      ghIssueTitle: (r.ghIssueTitle as string | null | undefined) ?? null,
+      logPruned: (r.logPruned as boolean | undefined) ?? false,
+      verdict: (r.verdict as string | null | undefined) ?? null,
+      costUsd: (r.costUsd as number | null | undefined) ?? null,
+      model: (r.model as string | null | undefined) ?? null,
+      releaseId: (r.releaseId as string | null | undefined) ?? null,
+      abortedAt: (r.abortedAt as number | null | undefined) ?? null,
+      promptBytes: (r.promptBytes as number | null | undefined) ?? null,
+      workSummary: (r.workSummary as string | null | undefined) ?? null,
+      modifiedFiles: (r.modifiedFiles as string | null | undefined) ?? null,
+      provider: (r.provider as string | null | undefined) ?? null,
+    });
+  }
+}
+
+// Insert one or more rows into the DB AND populate the jobsCache mirror.
+async function insertJobsAndCache(
+  db: TestDbHandle['db'],
+  rows: ReadonlyArray<Record<string, unknown>>,
+) {
+  if (rows.length === 0) return;
+  await db.insert(schema.jobs).values(rows as never);
+  populateJobCache(rows);
+}
+
 function ndjsonText(text: string): string {
   return JSON.stringify({
     type: 'stream_event',
@@ -119,11 +398,14 @@ function ndjsonText(text: string): string {
   });
 }
 
+// Lazy alias for code paths that previously read `testDb.db`.
+function getTestDb(): TestDbHandle['db'] {
+  return sharedHandle.db;
+}
+
 // ─── reconcileStaleRelease ────────────────────────────────────────────────────
 
 describe('reconcileStaleRelease', () => {
-  let testDb: ReturnType<typeof createTestDb>;
-  let releaseLockMock: ReturnType<typeof vi.fn>;
   let tempDir: string;
 
   function makeJob(kind: string, overrides: Partial<JobData> = {}): JobData {
@@ -150,138 +432,80 @@ describe('reconcileStaleRelease', () => {
   }
 
   beforeEach(async () => {
-    vi.resetModules();
-    testDb = createTestDb();
+    await resetTestState();
     tempDir = mkdtempSync(join(tmpdir(), 'tamtam-lifecycle-test-'));
-    releaseLockMock = vi.fn();
-
-    vi.doMock('@/lib/db', () => ({ db: testDb.db, schema }));
-    vi.doMock('@/lib/jobs/pm2-jobs', () => ({
-      deleteJob: vi.fn().mockResolvedValue(undefined),
-      getJobStatus: vi.fn(),
-    }));
-    vi.doMock('@/lib/shared/shell', () => ({
-      exec: vi.fn().mockResolvedValue({ exitCode: 0, stdout: '', stderr: '' }),
-    }));
-    vi.doMock('@/lib/git/git-utils', () => ({
-      markReviewed: vi.fn().mockResolvedValue(undefined),
-    }));
-    vi.doMock('@/lib/shared/project-data', () => ({
-      resolveProjectPath: vi.fn().mockReturnValue(null),
-    }));
-    vi.doMock('@/lib/scheduling/scheduling', () => ({
-      getProjectTestConfig: vi.fn().mockReturnValue({
-        autoPushEnabled: false,
-        autoCommitEnabled: false,
-        releaseAfterRun: false,
-        prWorkflowEnabled: false,
-      }),
-    }));
-    vi.doMock('@/lib/pipeline/pipeline-lock', () => ({
-      releaseLock: releaseLockMock,
-      getLock: vi.fn().mockReturnValue(null),
-      isLockOwnedByActiveRelease: vi.fn().mockReturnValue(false),
-    }));
-    vi.doMock('@/lib/jobs/retention', () => ({
-      pruneProjectLogs: vi.fn(),
-    }));
-    vi.doMock('@/lib/shared/notifications', () => ({
-      notify: vi.fn().mockResolvedValue(undefined),
-    }));
-    vi.doMock('@/lib/shared/config', () => ({
-      getSettings: vi.fn().mockReturnValue({
-        fix_ci_max_retries: 0,
-        fix_ci_retry_window_seconds: 120,
-        fix_ci_fast_crash_ms: 5000,
-      }),
-    }));
   });
 
   afterEach(() => {
-    vi.resetModules();
     rmSync(tempDir, { recursive: true, force: true });
   });
 
   it('returns early for non-pipeline-step job kinds (run)', async () => {
     const now = Date.now() / 1000;
-    testDb.db.insert(schema.jobs).values(
-      makeJobRow({ id: 'release-x', project: 'proj', kind: 'release', startedAt: now - 60 }) as any
-    ).run();
-
-    const { reconcileStaleRelease: fn } = await import('@/lib/jobs/job-storage');
+    await insertJobsAndCache(getTestDb(), [makeJobRow({ id: 'release-x', project: 'proj', kind: 'release', startedAt: now - 60 })]);
 
     const runJob = makeJob('run', { project: 'proj' });
-    await fn(runJob);
+    await reconcileStaleRelease(runJob);
 
     // Release must still be unfinished — reconcile should have done nothing
-    const row = testDb.db.select().from(schema.jobs).where(eq(schema.jobs.id, 'release-x')).get();
+    const row = (await getTestDb().select().from(schema.jobs).where(eq(schema.jobs.id, 'release-x'))).at(0);
     expect(row?.finishedAt).toBeNull();
   });
 
   it('returns early when no active release exists', async () => {
     const now = Date.now() / 1000;
     // Insert an already-finished release — findActiveReleaseJob won't pick it up
-    testDb.db.insert(schema.jobs).values(
-      makeJobRow({ id: 'done-release', project: 'proj', kind: 'release', startedAt: now - 120, finishedAt: now - 60, exitCode: 0 }) as any
-    ).run();
-
-    const { reconcileStaleRelease: fn } = await import('@/lib/jobs/job-storage');
+    await insertJobsAndCache(getTestDb(), [makeJobRow({ id: 'done-release', project: 'proj', kind: 'release', startedAt: now - 120, finishedAt: now - 60, exitCode: 0 })]);
 
     const testJob = makeJob('test', { project: 'proj' });
-    await fn(testJob);
+    await reconcileStaleRelease(testJob);
 
-    const row = testDb.db.select().from(schema.jobs).where(eq(schema.jobs.id, 'done-release')).get();
+    const row = (await getTestDb().select().from(schema.jobs).where(eq(schema.jobs.id, 'done-release'))).at(0);
     expect(row?.finishedAt).not.toBeNull(); // still the original value, unchanged
   });
 
   it('defers when a pipeline child is still running (finishedAt=null in cache)', async () => {
     const now = Date.now() / 1000;
-    testDb.db.insert(schema.jobs).values([
-      makeJobRow({ id: 'release-r1', project: 'proj', kind: 'release', startedAt: now - 60 }) as any,
-      makeJobRow({ id: 'test-r1', project: 'proj', kind: 'test', startedAt: now - 50, finishedAt: null }) as any,
-    ]).run();
-
-    const { reconcileStaleRelease: fn } = await import('@/lib/jobs/job-storage');
+    await insertJobsAndCache(getTestDb(), [
+      makeJobRow({ id: 'release-r1', project: 'proj', kind: 'release', startedAt: now - 60 }),
+      makeJobRow({ id: 'test-r1', project: 'proj', kind: 'test', startedAt: now - 50, finishedAt: null }),
+    ]);
 
     const doneJob = makeJob('push', { project: 'proj', finishedAt: now - 1, exitCode: 0 });
-    await fn(doneJob);
+    await reconcileStaleRelease(doneJob);
 
     // Release must still be active — child test job is still running
-    const row = testDb.db.select().from(schema.jobs).where(eq(schema.jobs.id, 'release-r1')).get();
+    const row = (await getTestDb().select().from(schema.jobs).where(eq(schema.jobs.id, 'release-r1'))).at(0);
     expect(row?.finishedAt).toBeNull();
   });
 
   it('defers when the chain finished but within the 5s grace window', async () => {
     const now = Date.now() / 1000;
     // Last step finished 2 seconds ago — within RELEASE_RECONCILE_GRACE_MS (5s)
-    testDb.db.insert(schema.jobs).values([
-      makeJobRow({ id: 'release-grace', project: 'proj', kind: 'release', startedAt: now - 30 }) as any,
-      makeJobRow({ id: 'push-grace', project: 'proj', kind: 'push', startedAt: now - 10, finishedAt: now - 2, exitCode: 0 }) as any,
-    ]).run();
-
-    const { reconcileStaleRelease: fn } = await import('@/lib/jobs/job-storage');
+    await insertJobsAndCache(getTestDb(), [
+      makeJobRow({ id: 'release-grace', project: 'proj', kind: 'release', startedAt: now - 30 }),
+      makeJobRow({ id: 'push-grace', project: 'proj', kind: 'push', startedAt: now - 10, finishedAt: now - 2, exitCode: 0 }),
+    ]);
 
     const pushJob = makeJob('push', { project: 'proj', finishedAt: now - 2, exitCode: 0 });
-    await fn(pushJob);
+    await reconcileStaleRelease(pushJob);
 
-    const row = testDb.db.select().from(schema.jobs).where(eq(schema.jobs.id, 'release-grace')).get();
+    const row = (await getTestDb().select().from(schema.jobs).where(eq(schema.jobs.id, 'release-grace'))).at(0);
     expect(row?.finishedAt).toBeNull();
   });
 
   it('finalizes release with exit 0 when all steps done and grace period has elapsed', async () => {
     const now = Date.now() / 1000;
-    testDb.db.insert(schema.jobs).values([
-      makeJobRow({ id: 'release-stale', project: 'proj', kind: 'release', startedAt: now - 60 }) as any,
-      makeJobRow({ id: 'test-stale', project: 'proj', kind: 'test', releaseId: 'release-stale', startedAt: now - 50, finishedAt: now - 30, exitCode: 0 }) as any,
-      makeJobRow({ id: 'push-stale', project: 'proj', kind: 'push', releaseId: 'release-stale', startedAt: now - 25, finishedAt: now - 15, exitCode: 0 }) as any,
-    ]).run();
-
-    const { reconcileStaleRelease: fn } = await import('@/lib/jobs/job-storage');
+    await insertJobsAndCache(getTestDb(), [
+      makeJobRow({ id: 'release-stale', project: 'proj', kind: 'release', startedAt: now - 60 }),
+      makeJobRow({ id: 'test-stale', project: 'proj', kind: 'test', releaseId: 'release-stale', startedAt: now - 50, finishedAt: now - 30, exitCode: 0 }),
+      makeJobRow({ id: 'push-stale', project: 'proj', kind: 'push', releaseId: 'release-stale', startedAt: now - 25, finishedAt: now - 15, exitCode: 0 }),
+    ]);
 
     const pushJob = makeJob('push', { project: 'proj', releaseId: 'release-stale', finishedAt: now - 15, exitCode: 0 });
-    await fn(pushJob);
+    await reconcileStaleRelease(pushJob);
 
-    const row = testDb.db.select().from(schema.jobs).where(eq(schema.jobs.id, 'release-stale')).get();
+    const row = (await getTestDb().select().from(schema.jobs).where(eq(schema.jobs.id, 'release-stale'))).at(0);
     expect(row?.finishedAt).not.toBeNull();
     expect(row?.exitCode).toBe(0);
   });
@@ -291,18 +515,16 @@ describe('reconcileStaleRelease', () => {
     // Chain ends at a hard failure (test exit 1, no follow-up fix). Reconciler
     // must finalize the release as a failure rather than treating it as a
     // resumable stuck pipeline (which only applies when the LAST step exited 0).
-    testDb.db.insert(schema.jobs).values([
-      makeJobRow({ id: 'release-fail', project: 'proj', kind: 'release', startedAt: now - 60 }) as any,
-      makeJobRow({ id: 'fix-fail', project: 'proj', kind: 'fix', releaseId: 'release-fail', startedAt: now - 50, finishedAt: now - 35, exitCode: 0 }) as any,
-      makeJobRow({ id: 'test-fail', project: 'proj', kind: 'test', releaseId: 'release-fail', startedAt: now - 30, finishedAt: now - 15, exitCode: 1 }) as any,
-    ]).run();
-
-    const { reconcileStaleRelease: fn } = await import('@/lib/jobs/job-storage');
+    await insertJobsAndCache(getTestDb(), [
+      makeJobRow({ id: 'release-fail', project: 'proj', kind: 'release', startedAt: now - 60 }),
+      makeJobRow({ id: 'fix-fail', project: 'proj', kind: 'fix', releaseId: 'release-fail', startedAt: now - 50, finishedAt: now - 35, exitCode: 0 }),
+      makeJobRow({ id: 'test-fail', project: 'proj', kind: 'test', releaseId: 'release-fail', startedAt: now - 30, finishedAt: now - 15, exitCode: 1 }),
+    ]);
 
     const testJob = makeJob('test', { project: 'proj', releaseId: 'release-fail', finishedAt: now - 15, exitCode: 1 });
-    await fn(testJob);
+    await reconcileStaleRelease(testJob);
 
-    const row = testDb.db.select().from(schema.jobs).where(eq(schema.jobs.id, 'release-fail')).get();
+    const row = (await getTestDb().select().from(schema.jobs).where(eq(schema.jobs.id, 'release-fail'))).at(0);
     expect(row?.finishedAt).not.toBeNull();
     expect(row?.exitCode).toBe(1);
   });
@@ -310,29 +532,28 @@ describe('reconcileStaleRelease', () => {
   it('breaks the chain and excludes jobs that start more than 60s after the previous edge', async () => {
     const now = Date.now() / 1000;
     // release → test (finishes at now-50) → review starts 90s later (gap > 60s → excluded from chain)
-    testDb.db.insert(schema.jobs).values([
-      makeJobRow({ id: 'release-gap', project: 'proj', kind: 'release', startedAt: now - 120 }) as any,
-      makeJobRow({ id: 'test-gap', project: 'proj', kind: 'test', startedAt: now - 110, finishedAt: now - 50, exitCode: 0 }) as any,
+    await insertJobsAndCache(getTestDb(), [
+      makeJobRow({ id: 'release-gap', project: 'proj', kind: 'release', startedAt: now - 120 }),
+      makeJobRow({ id: 'test-gap', project: 'proj', kind: 'test', startedAt: now - 110, finishedAt: now - 50, exitCode: 0 }),
       // review starts 90 seconds after test finished (now-50 + 90 = now+40) — but we keep it in the past:
       // use finishedAt = now - 55 so grace window passes, then review starts at now - 55 + 90 = now+35 — too far in future
       // Actually: release at now-200, test finishes at now-120, review starts at now-50 (gap = 70s > 60s)
-    ]).run();
+    ]);
     // Re-insert with correct timing: release at now-200, test at now-190 finishing at now-130, review at now-50 (gap 80s)
-    testDb.db.delete(schema.jobs).run();
-    testDb.db.insert(schema.jobs).values([
-      makeJobRow({ id: 'release-gap', project: 'proj', kind: 'release', startedAt: now - 200 }) as any,
-      makeJobRow({ id: 'test-gap', project: 'proj', kind: 'test', releaseId: 'release-gap', startedAt: now - 190, finishedAt: now - 130, exitCode: 0 }) as any,
+    await getTestDb().delete(schema.jobs);
+    jobsCache.clear();
+    await insertJobsAndCache(getTestDb(), [
+      makeJobRow({ id: 'release-gap', project: 'proj', kind: 'release', startedAt: now - 200 }),
+      makeJobRow({ id: 'test-gap', project: 'proj', kind: 'test', releaseId: 'release-gap', startedAt: now - 190, finishedAt: now - 130, exitCode: 0 }),
       // review starts 80 seconds after test finished (now-130 + 80 = now-50) — gap > 60s → excluded
-      makeJobRow({ id: 'review-gap', project: 'proj', kind: 'review', releaseId: 'release-gap', startedAt: now - 50, finishedAt: now - 20, exitCode: 0 }) as any,
-    ]).run();
-
-    const { reconcileStaleRelease: fn } = await import('@/lib/jobs/job-storage');
+      makeJobRow({ id: 'review-gap', project: 'proj', kind: 'review', releaseId: 'release-gap', startedAt: now - 50, finishedAt: now - 20, exitCode: 0 }),
+    ]);
 
     // Trigger via the review job finishing (it's within its own chain, but not the release's)
     const reviewJob = makeJob('review', { project: 'proj', releaseId: 'release-gap', finishedAt: now - 20, exitCode: 0 });
-    await fn(reviewJob);
+    await reconcileStaleRelease(reviewJob);
 
-    const row = testDb.db.select().from(schema.jobs).where(eq(schema.jobs.id, 'release-gap')).get();
+    const row = (await getTestDb().select().from(schema.jobs).where(eq(schema.jobs.id, 'release-gap'))).at(0);
     // The chain should include only the test step; the review is too far away.
     // Release is finalized because test finished long ago (now-130, well past the 5s grace).
     expect(row?.finishedAt).not.toBeNull();
@@ -341,11 +562,6 @@ describe('reconcileStaleRelease', () => {
 });
 
 describe('runCompletionHooks abort cleanup', () => {
-  let testDb: ReturnType<typeof createTestDb>;
-  let releaseLockMock: ReturnType<typeof vi.fn>;
-  let deleteJobMock: ReturnType<typeof vi.fn>;
-  let notifyMock: ReturnType<typeof vi.fn>;
-
   function makeJob(kind: string, overrides: Partial<JobData> = {}): JobData {
     const now = Date.now() / 1000;
     return {
@@ -370,68 +586,19 @@ describe('runCompletionHooks abort cleanup', () => {
   }
 
   beforeEach(async () => {
-    vi.resetModules();
-    testDb = createTestDb();
-    releaseLockMock = vi.fn();
-    deleteJobMock = vi.fn().mockResolvedValue(undefined);
-    notifyMock = vi.fn().mockResolvedValue(undefined);
-
-    vi.doMock('@/lib/db', () => ({ db: testDb.db, schema }));
-    vi.doMock('@/lib/jobs/pm2-jobs', () => ({
-      deleteJob: deleteJobMock,
-      getJobStatus: vi.fn(),
-    }));
-    vi.doMock('@/lib/shared/shell', () => ({
-      exec: vi.fn().mockResolvedValue({ exitCode: 0, stdout: '', stderr: '' }),
-    }));
-    vi.doMock('@/lib/git/git-utils', () => ({
-      markReviewed: vi.fn().mockResolvedValue(undefined),
-    }));
-    vi.doMock('@/lib/shared/project-data', () => ({
-      resolveProjectPath: vi.fn().mockReturnValue(null),
-    }));
-    vi.doMock('@/lib/scheduling/scheduling', () => ({
-      getProjectTestConfig: vi.fn().mockReturnValue({
-        autoPushEnabled: false,
-        autoCommitEnabled: false,
-        releaseAfterRun: false,
-        prWorkflowEnabled: false,
-      }),
-    }));
-    vi.doMock('@/lib/pipeline/pipeline-lock', () => ({
-      releaseLock: releaseLockMock,
-      getLock: vi.fn().mockReturnValue(null),
-      isLockOwnedByActiveRelease: vi.fn().mockReturnValue(false),
-    }));
-    vi.doMock('@/lib/jobs/retention', () => ({
-      pruneProjectLogs: vi.fn(),
-    }));
-    vi.doMock('@/lib/shared/notifications', () => ({
-      notify: notifyMock,
-    }));
-    vi.doMock('@/lib/shared/config', () => ({
-      getSettings: vi.fn().mockReturnValue({
-        fix_ci_max_retries: 0,
-        fix_ci_retry_window_seconds: 120,
-        fix_ci_fast_crash_ms: 5000,
-      }),
-    }));
-  });
-
-  afterEach(() => {
-    vi.resetModules();
+    await resetTestState();
   });
 
   it('finalizes an aborted release after the inline step finishes late', async () => {
     const now = Date.now() / 1000;
-    testDb.db.insert(schema.jobs).values([
+    await insertJobsAndCache(getTestDb(), [
       makeJobRow({
         id: 'release-timeout',
         project: 'proj',
         kind: 'release',
         startedAt: now - 60,
         abortedAt: now - 10,
-      }) as any,
+      }),
       makeJobRow({
         id: 'commit-timeout',
         project: 'proj',
@@ -440,10 +607,8 @@ describe('runCompletionHooks abort cleanup', () => {
         startedAt: now - 30,
         finishedAt: now - 1,
         exitCode: -3,
-      }) as any,
-    ]).run();
-
-    const { runCompletionHooks } = await import('@/lib/jobs/job-storage');
+      }),
+    ]);
 
     await runCompletionHooks(
       makeJob('commit', {
@@ -455,14 +620,14 @@ describe('runCompletionHooks abort cleanup', () => {
       }),
     );
 
-    const row = testDb.db.select().from(schema.jobs).where(eq(schema.jobs.id, 'release-timeout')).get();
+    const row = (await getTestDb().select().from(schema.jobs).where(eq(schema.jobs.id, 'release-timeout'))).at(0);
     expect(row?.finishedAt).not.toBeNull();
     expect(row?.exitCode).toBe(-3);
     expect(row?.abortedAt).not.toBeNull();
-    expect(releaseLockMock).toHaveBeenCalledWith('proj', 'release-timeout');
-    expect(deleteJobMock).toHaveBeenCalledTimes(1);
-    expect(deleteJobMock).toHaveBeenCalledWith('release-timeout');
-    expect(notifyMock).toHaveBeenCalledWith(expect.objectContaining({
+    expect(mocks.releaseLock).toHaveBeenCalledWith('proj', 'release-timeout');
+    expect(mocks.deleteJob).toHaveBeenCalledTimes(1);
+    expect(mocks.deleteJob).toHaveBeenCalledWith('release-timeout');
+    expect(mocks.notify).toHaveBeenCalledWith(expect.objectContaining({
       event: 'release_aborted',
       project: 'proj',
       job_id: 'release-timeout',
@@ -473,12 +638,6 @@ describe('runCompletionHooks abort cleanup', () => {
 // ─── reviewIsStuck convergence guard (tested through markDone) ───────────────
 
 describe('reviewIsStuck convergence guard', () => {
-  let testDb: ReturnType<typeof createTestDb>;
-  let markDoneFn: typeof import('@/lib/jobs/job-storage').markDone;
-  let startFixFromJobMock: ReturnType<typeof vi.fn>;
-  let fileReviewExhaustionIssueMock: ReturnType<typeof vi.fn>;
-  let startProjectCommitMock: ReturnType<typeof vi.fn>;
-  let notifyMock: ReturnType<typeof vi.fn>;
   let tempDir: string;
 
   function makeReviewJob(id: string, logPath: string | null, overrides: Partial<JobData> = {}): JobData {
@@ -505,65 +664,21 @@ describe('reviewIsStuck convergence guard', () => {
   }
 
   beforeEach(async () => {
-    vi.resetModules();
-    testDb = createTestDb();
+    await resetTestState();
     tempDir = mkdtempSync(join(tmpdir(), 'tamtam-stuck-test-'));
-    startFixFromJobMock = vi.fn().mockResolvedValue({ ok: true, jobId: 'fix-auto' });
-    fileReviewExhaustionIssueMock = vi.fn().mockResolvedValue({ ok: true, issueNumber: 42, issueUrl: 'https://github.com/owner/repo/issues/42' });
-    startProjectCommitMock = vi.fn().mockResolvedValue({ ok: true, commitSha: 'abc123', message: 'commit ok', jobId: 'commit-auto' });
-    notifyMock = vi.fn().mockResolvedValue(undefined);
-
-    vi.doMock('@/lib/db', () => ({ db: testDb.db, schema }));
-    vi.doMock('@/lib/jobs/pm2-jobs', () => ({
-      deleteJob: vi.fn().mockResolvedValue(undefined),
-      getJobStatus: vi.fn(),
-    }));
-    vi.doMock('@/lib/shared/shell', () => ({
-      exec: vi.fn().mockResolvedValue({ exitCode: 0, stdout: '', stderr: '' }),
-    }));
-    vi.doMock('@/lib/git/git-utils', () => ({
-      markReviewed: vi.fn().mockResolvedValue(undefined),
-    }));
-    vi.doMock('@/lib/shared/project-data', () => ({
-      resolveProjectPath: vi.fn().mockReturnValue(null),
-    }));
-    vi.doMock('@/lib/scheduling/scheduling', () => ({
-      getProjectTestConfig: vi.fn().mockReturnValue({
-        autoPushEnabled: true,
-        autoCommitEnabled: false,
-        releaseAfterRun: false,
-        prWorkflowEnabled: false,
-      }),
-    }));
-    vi.doMock('@/lib/pipeline/pipeline-lock', () => ({
-      releaseLock: vi.fn(),
-      getLock: vi.fn().mockReturnValue(null),
-      isLockOwnedByActiveRelease: vi.fn().mockReturnValue(false),
-    }));
-    vi.doMock('@/lib/jobs/retention', () => ({
-      pruneProjectLogs: vi.fn(),
-    }));
-    vi.doMock('@/lib/shared/notifications', () => ({
-      notify: notifyMock,
-    }));
-    vi.doMock('@/lib/shared/config', () => ({
-      getSettings: vi.fn().mockReturnValue({
-        review_fix_max_iterations: 3,
-      }),
-    }));
-    vi.doMock('@/lib/pipeline/start-fix', () => ({
-      startFixFromJob: startFixFromJobMock,
-    }));
-    vi.doMock('@/lib/pipeline/review-exhaustion-fallback', () => ({
-      fileReviewExhaustionIssue: fileReviewExhaustionIssueMock,
-    }));
-    vi.doMock('@/lib/pipeline/start-commit', () => ({
-      startProjectCommit: startProjectCommitMock,
-    }));
+    mocks.getProjectTestConfig.mockReturnValue({
+      autoPushEnabled: true,
+      autoCommitEnabled: false,
+      releaseAfterRun: false,
+      prWorkflowEnabled: false,
+    });
+    mocks.getSettings.mockReturnValue({
+      review_fix_max_iterations: 3,
+    });
+    mocks.fileReviewExhaustionIssue.mockResolvedValue({ ok: true, issueNumber: 42, issueUrl: 'https://github.com/owner/repo/issues/42' });
   });
 
   afterEach(() => {
-    vi.resetModules();
     rmSync(tempDir, { recursive: true, force: true });
   });
 
@@ -574,8 +689,8 @@ describe('reviewIsStuck convergence guard', () => {
     writeFileSync(prevLog, findings + 'Verdict: NEEDS ATTENTION\n');
 
     // Insert a previous review with same findings, already finished, in the same release
-    testDb.db.insert(schema.jobs).values([
-      makeJobRow({ id: 'release-stuck', project: 'proj', kind: 'release', startedAt: now - 120 }) as any,
+    await insertJobsAndCache(getTestDb(), [
+      makeJobRow({ id: 'release-stuck', project: 'proj', kind: 'release', startedAt: now - 120 }),
       makeJobRow({
         id: 'prev-review',
         project: 'proj',
@@ -585,11 +700,8 @@ describe('reviewIsStuck convergence guard', () => {
         startedAt: now - 90,
         finishedAt: now - 80,
         exitCode: 0,
-      }) as any,
-    ]).run();
-
-    const mod = await import('@/lib/jobs/job-storage');
-    markDoneFn = mod.markDone;
+      }),
+    ]);
 
     // Current review has identical findings — fix loop should be stopped
     const curLog = join(tempDir, 'cur-review.log');
@@ -599,9 +711,9 @@ describe('reviewIsStuck convergence guard', () => {
       startedAt: now - 60,
     });
 
-    await markDoneFn(curReview, 0);
+    await markDone(curReview, 0);
 
-    expect(startFixFromJobMock).not.toHaveBeenCalled();
+    expect(mocks.startFixFromJob).not.toHaveBeenCalled();
   });
 
   it('does NOT start a fix when structured finding IDs repeat with different wording', async () => {
@@ -609,8 +721,8 @@ describe('reviewIsStuck convergence guard', () => {
     const prevLog = join(tempDir, 'prev-structured-review.log');
     writeFileSync(prevLog, ndjsonText('Findings:\n- Finding ID: server-url-bypass\n  Root cause: missing server validation\nVerdict: DO NOT SHIP\n'));
 
-    testDb.db.insert(schema.jobs).values([
-      makeJobRow({ id: 'release-structured-stuck', project: 'proj', kind: 'release', startedAt: now - 120 }) as any,
+    await insertJobsAndCache(getTestDb(), [
+      makeJobRow({ id: 'release-structured-stuck', project: 'proj', kind: 'release', startedAt: now - 120 }),
       makeJobRow({
         id: 'prev-structured-review',
         project: 'proj',
@@ -620,11 +732,8 @@ describe('reviewIsStuck convergence guard', () => {
         startedAt: now - 90,
         finishedAt: now - 80,
         exitCode: 0,
-      }) as any,
-    ]).run();
-
-    const mod = await import('@/lib/jobs/job-storage');
-    markDoneFn = mod.markDone;
+      }),
+    ]);
 
     const curLog = join(tempDir, 'cur-structured-review.log');
     writeFileSync(curLog, ndjsonText('Findings:\n- Finding ID: server-url-bypass\n  Root cause: alternate API still bypasses canonical parser\nVerdict: DO NOT SHIP\n'));
@@ -633,9 +742,9 @@ describe('reviewIsStuck convergence guard', () => {
       startedAt: now - 60,
     });
 
-    await markDoneFn(curReview, 0);
+    await markDone(curReview, 0);
 
-    expect(startFixFromJobMock).not.toHaveBeenCalled();
+    expect(mocks.startFixFromJob).not.toHaveBeenCalled();
   });
 
   it('does NOT treat incidental id lines as structured finding IDs', async () => {
@@ -643,8 +752,8 @@ describe('reviewIsStuck convergence guard', () => {
     const prevLog = join(tempDir, 'prev-incidental-id-review.log');
     writeFileSync(prevLog, ndjsonText('Findings:\n- Root cause: missing auth\n  id: shared-placeholder\nVerdict: DO NOT SHIP\n'));
 
-    testDb.db.insert(schema.jobs).values([
-      makeJobRow({ id: 'release-incidental-id', project: 'proj', kind: 'release', startedAt: now - 120 }) as any,
+    await insertJobsAndCache(getTestDb(), [
+      makeJobRow({ id: 'release-incidental-id', project: 'proj', kind: 'release', startedAt: now - 120 }),
       makeJobRow({
         id: 'prev-incidental-id-review',
         project: 'proj',
@@ -654,11 +763,8 @@ describe('reviewIsStuck convergence guard', () => {
         startedAt: now - 90,
         finishedAt: now - 80,
         exitCode: 0,
-      }) as any,
-    ]).run();
-
-    const mod = await import('@/lib/jobs/job-storage');
-    markDoneFn = mod.markDone;
+      }),
+    ]);
 
     const curLog = join(tempDir, 'cur-incidental-id-review.log');
     writeFileSync(curLog, ndjsonText('Findings:\n- Root cause: missing cache invalidation\n  id: shared-placeholder\nVerdict: DO NOT SHIP\n'));
@@ -667,9 +773,9 @@ describe('reviewIsStuck convergence guard', () => {
       startedAt: now - 60,
     });
 
-    await markDoneFn(curReview, 0);
+    await markDone(curReview, 0);
 
-    expect(startFixFromJobMock).toHaveBeenCalledOnce();
+    expect(mocks.startFixFromJob).toHaveBeenCalledOnce();
   });
 
   it('stops before exhaustion fallback when repeated review findings stop convergence (DO NOT SHIP)', async () => {
@@ -680,8 +786,8 @@ describe('reviewIsStuck convergence guard', () => {
     const prevLog = join(tempDir, 'prev-review-final.log');
     writeFileSync(prevLog, ndjsonText(findings + 'Verdict: NEEDS ATTENTION\n'));
 
-    testDb.db.insert(schema.jobs).values([
-      makeJobRow({ id: 'release-stuck-final', project: 'proj', kind: 'release', logPath: releaseLog, startedAt: now - 120 }) as any,
+    await insertJobsAndCache(getTestDb(), [
+      makeJobRow({ id: 'release-stuck-final', project: 'proj', kind: 'release', logPath: releaseLog, startedAt: now - 120 }),
       makeJobRow({
         id: 'prev-review-final',
         project: 'proj',
@@ -691,11 +797,8 @@ describe('reviewIsStuck convergence guard', () => {
         startedAt: now - 90,
         finishedAt: now - 80,
         exitCode: 0,
-      }) as any,
-    ]).run();
-
-    const mod = await import('@/lib/jobs/job-storage');
-    markDoneFn = mod.markDone;
+      }),
+    ]);
 
     const curLog = join(tempDir, 'cur-review-final.log');
     writeFileSync(curLog, ndjsonText(findings + 'Verdict: DO NOT SHIP\n'));
@@ -704,11 +807,11 @@ describe('reviewIsStuck convergence guard', () => {
       startedAt: now - 60,
     });
 
-    await markDoneFn(curReview, 0);
+    await markDone(curReview, 0);
 
-    expect(fileReviewExhaustionIssueMock).not.toHaveBeenCalled();
-    expect(startProjectCommitMock).not.toHaveBeenCalled();
-    const notifyEvents = notifyMock.mock.calls.map((c) => c[0]?.event);
+    expect(mocks.fileReviewExhaustionIssue).not.toHaveBeenCalled();
+    expect(mocks.startProjectCommit).not.toHaveBeenCalled();
+    const notifyEvents = mocks.notify.mock.calls.map((c: unknown[]) => (c[0] as { event?: string })?.event);
     expect(notifyEvents).toContain('review_do_not_ship');
   });
 
@@ -717,8 +820,8 @@ describe('reviewIsStuck convergence guard', () => {
     const prevLog = join(tempDir, 'prev-review2.log');
     writeFileSync(prevLog, ndjsonText('## Findings\n- old bug in foo.ts\nVerdict: NEEDS ATTENTION\n'));
 
-    testDb.db.insert(schema.jobs).values([
-      makeJobRow({ id: 'release-diff', project: 'proj', kind: 'release', startedAt: now - 120 }) as any,
+    await insertJobsAndCache(getTestDb(), [
+      makeJobRow({ id: 'release-diff', project: 'proj', kind: 'release', startedAt: now - 120 }),
       makeJobRow({
         id: 'prev-review2',
         project: 'proj',
@@ -728,11 +831,8 @@ describe('reviewIsStuck convergence guard', () => {
         startedAt: now - 90,
         finishedAt: now - 80,
         exitCode: 0,
-      }) as any,
-    ]).run();
-
-    const mod = await import('@/lib/jobs/job-storage');
-    markDoneFn = mod.markDone;
+      }),
+    ]);
 
     // Current review has different findings — fix should proceed
     const curLog = join(tempDir, 'cur-review2.log');
@@ -742,9 +842,9 @@ describe('reviewIsStuck convergence guard', () => {
       startedAt: now - 60,
     });
 
-    await markDoneFn(curReview, 0);
+    await markDone(curReview, 0);
 
-    expect(startFixFromJobMock).toHaveBeenCalledWith('cur-review2');
+    expect(mocks.startFixFromJob).toHaveBeenCalledWith('cur-review2');
   });
 
   it('stops before exhaustion fallback when prior fix claimed an ID fixed but review still flags it (DO NOT SHIP)', async () => {
@@ -767,8 +867,8 @@ describe('reviewIsStuck convergence guard', () => {
       'Verdict: DO NOT SHIP',
     ].join('\n')));
 
-    testDb.db.insert(schema.jobs).values([
-      makeJobRow({ id: 'release-contradict', project: 'proj', kind: 'release', logPath: releaseLog, startedAt: now - 200 }) as any,
+    await insertJobsAndCache(getTestDb(), [
+      makeJobRow({ id: 'release-contradict', project: 'proj', kind: 'release', logPath: releaseLog, startedAt: now - 200 }),
       makeJobRow({
         id: 'prev-review-contradict',
         project: 'proj',
@@ -778,7 +878,7 @@ describe('reviewIsStuck convergence guard', () => {
         startedAt: now - 180,
         finishedAt: now - 170,
         exitCode: 0,
-      }) as any,
+      }),
       makeJobRow({
         id: 'fix-contradict',
         project: 'proj',
@@ -788,11 +888,8 @@ describe('reviewIsStuck convergence guard', () => {
         startedAt: now - 150,
         finishedAt: now - 100,
         exitCode: 0,
-      }) as any,
-    ]).run();
-
-    const mod = await import('@/lib/jobs/job-storage');
-    markDoneFn = mod.markDone;
+      }),
+    ]);
 
     const curLog = join(tempDir, 'cur-review-contradict.log');
     writeFileSync(curLog, ndjsonText([
@@ -806,12 +903,12 @@ describe('reviewIsStuck convergence guard', () => {
       startedAt: now - 60,
     });
 
-    await markDoneFn(curReview, 0);
+    await markDone(curReview, 0);
 
-    expect(startFixFromJobMock).not.toHaveBeenCalled();
-    expect(fileReviewExhaustionIssueMock).not.toHaveBeenCalled();
-    expect(startProjectCommitMock).not.toHaveBeenCalled();
-    const notifyEvents = notifyMock.mock.calls.map((c) => c[0]?.event);
+    expect(mocks.startFixFromJob).not.toHaveBeenCalled();
+    expect(mocks.fileReviewExhaustionIssue).not.toHaveBeenCalled();
+    expect(mocks.startProjectCommit).not.toHaveBeenCalled();
+    const notifyEvents = mocks.notify.mock.calls.map((c: unknown[]) => (c[0] as { event?: string })?.event);
     expect(notifyEvents).toContain('review_do_not_ship');
   });
 
@@ -825,8 +922,8 @@ describe('reviewIsStuck convergence guard', () => {
       '  Remaining risk: needs deeper refactor',
     ].join('\n')));
 
-    testDb.db.insert(schema.jobs).values([
-      makeJobRow({ id: 'release-honest', project: 'proj', kind: 'release', startedAt: now - 200 }) as any,
+    await insertJobsAndCache(getTestDb(), [
+      makeJobRow({ id: 'release-honest', project: 'proj', kind: 'release', startedAt: now - 200 }),
       makeJobRow({
         id: 'fix-honest',
         project: 'proj',
@@ -836,11 +933,8 @@ describe('reviewIsStuck convergence guard', () => {
         startedAt: now - 150,
         finishedAt: now - 100,
         exitCode: 0,
-      }) as any,
-    ]).run();
-
-    const mod = await import('@/lib/jobs/job-storage');
-    markDoneFn = mod.markDone;
+      }),
+    ]);
 
     const curLog = join(tempDir, 'cur-review-honest.log');
     writeFileSync(curLog, ndjsonText([
@@ -853,9 +947,9 @@ describe('reviewIsStuck convergence guard', () => {
       startedAt: now - 60,
     });
 
-    await markDoneFn(curReview, 0);
+    await markDone(curReview, 0);
 
-    expect(startFixFromJobMock).toHaveBeenCalledWith('cur-review-honest');
+    expect(mocks.startFixFromJob).toHaveBeenCalledWith('cur-review-honest');
   });
 
   it('DOES start a fix when fix claimed a different ID than the review now flags', async () => {
@@ -867,8 +961,8 @@ describe('reviewIsStuck convergence guard', () => {
       '  Status: fixed',
     ].join('\n')));
 
-    testDb.db.insert(schema.jobs).values([
-      makeJobRow({ id: 'release-different', project: 'proj', kind: 'release', startedAt: now - 200 }) as any,
+    await insertJobsAndCache(getTestDb(), [
+      makeJobRow({ id: 'release-different', project: 'proj', kind: 'release', startedAt: now - 200 }),
       makeJobRow({
         id: 'fix-different',
         project: 'proj',
@@ -878,11 +972,8 @@ describe('reviewIsStuck convergence guard', () => {
         startedAt: now - 150,
         finishedAt: now - 100,
         exitCode: 0,
-      }) as any,
-    ]).run();
-
-    const mod = await import('@/lib/jobs/job-storage');
-    markDoneFn = mod.markDone;
+      }),
+    ]);
 
     const curLog = join(tempDir, 'cur-review-different.log');
     writeFileSync(curLog, ndjsonText([
@@ -895,19 +986,14 @@ describe('reviewIsStuck convergence guard', () => {
       startedAt: now - 60,
     });
 
-    await markDoneFn(curReview, 0);
+    await markDone(curReview, 0);
 
-    expect(startFixFromJobMock).toHaveBeenCalledWith('cur-review-different');
+    expect(mocks.startFixFromJob).toHaveBeenCalledWith('cur-review-different');
   });
 
   it('starts a fix on the first review in a release (no previous to compare against)', async () => {
     const now = Date.now() / 1000;
-    testDb.db.insert(schema.jobs).values(
-      makeJobRow({ id: 'release-first', project: 'proj', kind: 'release', startedAt: now - 60 }) as any
-    ).run();
-
-    const mod = await import('@/lib/jobs/job-storage');
-    markDoneFn = mod.markDone;
+    await insertJobsAndCache(getTestDb(), [makeJobRow({ id: 'release-first', project: 'proj', kind: 'release', startedAt: now - 60 })]);
 
     const curLog = join(tempDir, 'first-review.log');
     writeFileSync(curLog, '## Findings\n- some issue in baz.ts\nVerdict: NEEDS ATTENTION\n');
@@ -916,20 +1002,15 @@ describe('reviewIsStuck convergence guard', () => {
       startedAt: now - 30,
     });
 
-    await markDoneFn(curReview, 0);
+    await markDone(curReview, 0);
 
-    expect(startFixFromJobMock).toHaveBeenCalledWith('first-review');
+    expect(mocks.startFixFromJob).toHaveBeenCalledWith('first-review');
   });
 });
 
 // ─── verification cap (counts reviews/tests, not fixes) ──────────────────────
 
 describe('fix→review review-count cap', () => {
-  let testDb: ReturnType<typeof createTestDb>;
-  let startProjectReviewMock: ReturnType<typeof vi.fn>;
-  let fileReviewExhaustionIssueMock: ReturnType<typeof vi.fn>;
-  let startProjectCommitMock: ReturnType<typeof vi.fn>;
-  let notifyMock: ReturnType<typeof vi.fn>;
   let tempDir: string;
 
   function makeFixJob(id: string, overrides: Partial<JobData> = {}): JobData {
@@ -955,51 +1036,18 @@ describe('fix→review review-count cap', () => {
     };
   }
 
-  beforeEach(() => {
-    vi.resetModules();
-    testDb = createTestDb();
+  beforeEach(async () => {
+    await resetTestState();
     tempDir = mkdtempSync(join(tmpdir(), 'tamtam-review-cap-'));
-    startProjectReviewMock = vi.fn().mockResolvedValue({ ok: true, jobId: 'review-next' });
-    fileReviewExhaustionIssueMock = vi.fn().mockResolvedValue({ ok: true, issueNumber: 7, issueUrl: 'https://github.com/owner/repo/issues/7' });
-    startProjectCommitMock = vi.fn().mockResolvedValue({ ok: true, commitSha: 'abc123', message: 'commit ok', jobId: 'commit-auto' });
-    notifyMock = vi.fn().mockResolvedValue(undefined);
-
-    vi.doMock('@/lib/db', () => ({ db: testDb.db, schema }));
-    vi.doMock('@/lib/jobs/pm2-jobs', () => ({
-      deleteJob: vi.fn().mockResolvedValue(undefined),
-      getJobStatus: vi.fn(),
-    }));
-    vi.doMock('@/lib/shared/shell', () => ({ exec: vi.fn().mockResolvedValue({ exitCode: 0, stdout: '', stderr: '' }) }));
-    vi.doMock('@/lib/git/git-utils', () => ({ markReviewed: vi.fn().mockResolvedValue(undefined) }));
-    vi.doMock('@/lib/shared/project-data', () => ({ resolveProjectPath: vi.fn().mockReturnValue(null) }));
-    vi.doMock('@/lib/scheduling/scheduling', () => ({
-      getProjectTestConfig: vi.fn().mockReturnValue({
-        autoPushEnabled: true, autoCommitEnabled: false, releaseAfterRun: false, prWorkflowEnabled: false,
-      }),
-    }));
-    vi.doMock('@/lib/pipeline/pipeline-lock', () => ({
-      releaseLock: vi.fn(),
-      getLock: vi.fn().mockReturnValue(null),
-      isLockOwnedByActiveRelease: vi.fn().mockReturnValue(false),
-    }));
-    vi.doMock('@/lib/jobs/retention', () => ({ pruneProjectLogs: vi.fn() }));
-    vi.doMock('@/lib/shared/notifications', () => ({ notify: notifyMock }));
-    vi.doMock('@/lib/shared/config', () => ({
-      getSettings: vi.fn().mockReturnValue({
-        review_fix_max_iterations: 3,
-      }),
-    }));
-    vi.doMock('@/lib/pipeline/start-review', () => ({ startProjectReview: startProjectReviewMock }));
-    vi.doMock('@/lib/pipeline/review-exhaustion-fallback', () => ({
-      fileReviewExhaustionIssue: fileReviewExhaustionIssueMock,
-    }));
-    vi.doMock('@/lib/pipeline/start-commit', () => ({
-      startProjectCommit: startProjectCommitMock,
-    }));
+    mocks.getProjectTestConfig.mockReturnValue({
+      autoPushEnabled: true, autoCommitEnabled: false, releaseAfterRun: false, prWorkflowEnabled: false,
+    });
+    mocks.getSettings.mockReturnValue({
+      review_fix_max_iterations: 3,
+    });
   });
 
   afterEach(() => {
-    vi.resetModules();
     rmSync(tempDir, { recursive: true, force: true });
   });
 
@@ -1009,16 +1057,14 @@ describe('fix→review review-count cap', () => {
     // The new cap must still trigger and skip the 4th review.
     const now = Date.now() / 1000;
     const releaseId = 'release-scope-creep';
-    testDb.db.insert(schema.jobs).values([
-      makeJobRow({ id: releaseId, project: 'proj', kind: 'release', startedAt: now - 600 }) as any,
-      makeJobRow({ id: 'r1', project: 'proj', kind: 'review', releaseId, startedAt: now - 500, finishedAt: now - 480, exitCode: 0 }) as any,
-      makeJobRow({ id: 'f1', project: 'proj', kind: 'fix', releaseId, parentJobId: 'r1', startedAt: now - 470, finishedAt: now - 450, exitCode: 0 }) as any,
-      makeJobRow({ id: 'r2', project: 'proj', kind: 'review', releaseId, startedAt: now - 440, finishedAt: now - 420, exitCode: 0 }) as any,
-      makeJobRow({ id: 'f2', project: 'proj', kind: 'fix', releaseId, parentJobId: 'r2', startedAt: now - 410, finishedAt: now - 390, exitCode: 0 }) as any,
-      makeJobRow({ id: 'r3', project: 'proj', kind: 'review', releaseId, startedAt: now - 380, finishedAt: now - 360, exitCode: 0 }) as any,
-    ]).run();
-
-    const { markDone } = await import('@/lib/jobs/job-storage');
+    await insertJobsAndCache(getTestDb(), [
+      makeJobRow({ id: releaseId, project: 'proj', kind: 'release', startedAt: now - 600 }),
+      makeJobRow({ id: 'r1', project: 'proj', kind: 'review', releaseId, startedAt: now - 500, finishedAt: now - 480, exitCode: 0 }),
+      makeJobRow({ id: 'f1', project: 'proj', kind: 'fix', releaseId, parentJobId: 'r1', startedAt: now - 470, finishedAt: now - 450, exitCode: 0 }),
+      makeJobRow({ id: 'r2', project: 'proj', kind: 'review', releaseId, startedAt: now - 440, finishedAt: now - 420, exitCode: 0 }),
+      makeJobRow({ id: 'f2', project: 'proj', kind: 'fix', releaseId, parentJobId: 'r2', startedAt: now - 410, finishedAt: now - 390, exitCode: 0 }),
+      makeJobRow({ id: 'r3', project: 'proj', kind: 'review', releaseId, startedAt: now - 380, finishedAt: now - 360, exitCode: 0 }),
+    ]);
 
     // The current fix's parent is r3 (a review) — fromTestFailure is false,
     // so we hit the fix→review branch where the cap should bite.
@@ -1026,27 +1072,25 @@ describe('fix→review review-count cap', () => {
 
     await markDone(f3, 0);
 
-    expect(startProjectReviewMock).not.toHaveBeenCalled();
+    expect(mocks.startProjectReview).not.toHaveBeenCalled();
     // fix_loop_exhausted should fire as the release-stop notification.
-    const notifyEvents = notifyMock.mock.calls.map((c) => c[0]?.event);
+    const notifyEvents = mocks.notify.mock.calls.map((c: unknown[]) => (c[0] as { event?: string })?.event);
     expect(notifyEvents).toContain('fix_loop_exhausted');
   });
 
   it('still chains to review when fewer than MAX reviews have run', async () => {
     const now = Date.now() / 1000;
     const releaseId = 'release-under-cap';
-    testDb.db.insert(schema.jobs).values([
-      makeJobRow({ id: releaseId, project: 'proj', kind: 'release', startedAt: now - 200 }) as any,
-      makeJobRow({ id: 'r1', project: 'proj', kind: 'review', releaseId, startedAt: now - 180, finishedAt: now - 160, exitCode: 0 }) as any,
-    ]).run();
-
-    const { markDone } = await import('@/lib/jobs/job-storage');
+    await insertJobsAndCache(getTestDb(), [
+      makeJobRow({ id: releaseId, project: 'proj', kind: 'release', startedAt: now - 200 }),
+      makeJobRow({ id: 'r1', project: 'proj', kind: 'review', releaseId, startedAt: now - 180, finishedAt: now - 160, exitCode: 0 }),
+    ]);
 
     const f1 = makeFixJob('f1', { releaseId, parentJobId: 'r1', startedAt: now - 30 });
     await markDone(f1, 0);
 
-    expect(startProjectReviewMock).toHaveBeenCalledOnce();
-    expect(startProjectReviewMock).toHaveBeenCalledWith('proj');
+    expect(mocks.startProjectReview).toHaveBeenCalledOnce();
+    expect(mocks.startProjectReview).toHaveBeenCalledWith('proj');
   });
 
   it('stops before exhaustion fallback when the capped review is DO NOT SHIP', async () => {
@@ -1059,40 +1103,31 @@ describe('fix→review review-count cap', () => {
       'Verdict: DO NOT SHIP',
     ].join('\n')));
 
-    testDb.db.insert(schema.jobs).values([
-      makeJobRow({ id: releaseId, project: 'proj', kind: 'release', startedAt: now - 600 }) as any,
-      makeJobRow({ id: 'r1', project: 'proj', kind: 'review', releaseId, startedAt: now - 500, finishedAt: now - 480, exitCode: 0 }) as any,
-      makeJobRow({ id: 'f1', project: 'proj', kind: 'fix', releaseId, parentJobId: 'r1', startedAt: now - 470, finishedAt: now - 450, exitCode: 0 }) as any,
-      makeJobRow({ id: 'r2', project: 'proj', kind: 'review', releaseId, startedAt: now - 440, finishedAt: now - 420, exitCode: 0 }) as any,
-      makeJobRow({ id: 'f2', project: 'proj', kind: 'fix', releaseId, parentJobId: 'r2', startedAt: now - 410, finishedAt: now - 390, exitCode: 0 }) as any,
-      makeJobRow({ id: 'r3', project: 'proj', kind: 'review', releaseId, logPath: reviewLog, startedAt: now - 380, finishedAt: now - 360, exitCode: 0 }) as any,
-    ]).run();
+    await insertJobsAndCache(getTestDb(), [
+      makeJobRow({ id: releaseId, project: 'proj', kind: 'release', startedAt: now - 600 }),
+      makeJobRow({ id: 'r1', project: 'proj', kind: 'review', releaseId, startedAt: now - 500, finishedAt: now - 480, exitCode: 0 }),
+      makeJobRow({ id: 'f1', project: 'proj', kind: 'fix', releaseId, parentJobId: 'r1', startedAt: now - 470, finishedAt: now - 450, exitCode: 0 }),
+      makeJobRow({ id: 'r2', project: 'proj', kind: 'review', releaseId, startedAt: now - 440, finishedAt: now - 420, exitCode: 0 }),
+      makeJobRow({ id: 'f2', project: 'proj', kind: 'fix', releaseId, parentJobId: 'r2', startedAt: now - 410, finishedAt: now - 390, exitCode: 0 }),
+      makeJobRow({ id: 'r3', project: 'proj', kind: 'review', releaseId, logPath: reviewLog, startedAt: now - 380, finishedAt: now - 360, exitCode: 0 }),
+    ]);
 
-    const { markDone } = await import('@/lib/jobs/job-storage');
     const f3 = makeFixJob('f3', { releaseId, parentJobId: 'r3', startedAt: now - 30, finishedAt: null, exitCode: null });
 
     await markDone(f3, 0);
 
-    expect(startProjectReviewMock).not.toHaveBeenCalled();
-    expect(fileReviewExhaustionIssueMock).not.toHaveBeenCalled();
-    expect(startProjectCommitMock).not.toHaveBeenCalled();
-    const releaseRow = testDb.db.select().from(schema.jobs).all().find((row) => row.id === releaseId);
+    expect(mocks.startProjectReview).not.toHaveBeenCalled();
+    expect(mocks.fileReviewExhaustionIssue).not.toHaveBeenCalled();
+    expect(mocks.startProjectCommit).not.toHaveBeenCalled();
+    const releaseRow = (await getTestDb().select().from(schema.jobs)).find((row) => row.id === releaseId);
     expect(releaseRow?.exitCode).toBe(1);
     expect(releaseRow?.finishedAt).not.toBeNull();
-    const notifyEvents = notifyMock.mock.calls.map((c) => c[0]?.event);
+    const notifyEvents = mocks.notify.mock.calls.map((c: unknown[]) => (c[0] as { event?: string })?.event);
     expect(notifyEvents).toContain('review_do_not_ship');
   });
 });
 
 describe('review_fix_max_iterations only caps review-side recovery', () => {
-  let testDb: ReturnType<typeof createTestDb>;
-  let startProjectTestMock: ReturnType<typeof vi.fn>;
-  let startProjectReviewMock: ReturnType<typeof vi.fn>;
-  let fileReviewExhaustionIssueMock: ReturnType<typeof vi.fn>;
-  let startProjectCommitMock: ReturnType<typeof vi.fn>;
-  let startFixFromJobMock: ReturnType<typeof vi.fn>;
-  let notifyMock: ReturnType<typeof vi.fn>;
-
   function makeFixJob(id: string, overrides: Partial<JobData> = {}): JobData {
     const now = Date.now() / 1000;
     return {
@@ -1116,97 +1151,56 @@ describe('review_fix_max_iterations only caps review-side recovery', () => {
     };
   }
 
-  beforeEach(() => {
-    vi.resetModules();
-    testDb = createTestDb();
-    startProjectTestMock = vi.fn().mockResolvedValue({ ok: true, jobId: 'test-next' });
-    startProjectReviewMock = vi.fn().mockResolvedValue({ ok: true, jobId: 'review-next' });
-    fileReviewExhaustionIssueMock = vi.fn().mockResolvedValue({ ok: true, issueNumber: 7, issueUrl: 'https://github.com/owner/repo/issues/7' });
-    startProjectCommitMock = vi.fn().mockResolvedValue({ ok: true, commitSha: 'abc123', message: 'commit ok', jobId: 'commit-auto' });
-    startFixFromJobMock = vi.fn().mockResolvedValue({ ok: true, jobId: 'fix-auto' });
-    notifyMock = vi.fn().mockResolvedValue(undefined);
-
-    vi.doMock('@/lib/db', () => ({ db: testDb.db, schema }));
-    vi.doMock('@/lib/jobs/pm2-jobs', () => ({
-      deleteJob: vi.fn().mockResolvedValue(undefined),
-      getJobStatus: vi.fn(),
-    }));
-    vi.doMock('@/lib/shared/shell', () => ({ exec: vi.fn().mockResolvedValue({ exitCode: 0, stdout: '', stderr: '' }) }));
-    vi.doMock('@/lib/git/git-utils', () => ({ markReviewed: vi.fn().mockResolvedValue(undefined) }));
-    vi.doMock('@/lib/shared/project-data', () => ({ resolveProjectPath: vi.fn().mockReturnValue(null) }));
-    vi.doMock('@/lib/scheduling/scheduling', () => ({
-      getProjectTestConfig: vi.fn().mockReturnValue({
-        autoPushEnabled: true, autoCommitEnabled: false, releaseAfterRun: false, prWorkflowEnabled: false,
-      }),
-    }));
-    vi.doMock('@/lib/pipeline/pipeline-lock', () => ({
-      releaseLock: vi.fn(),
-      getLock: vi.fn().mockReturnValue(null),
-      isLockOwnedByActiveRelease: vi.fn().mockReturnValue(false),
-    }));
-    vi.doMock('@/lib/jobs/retention', () => ({ pruneProjectLogs: vi.fn() }));
-    vi.doMock('@/lib/shared/notifications', () => ({ notify: notifyMock }));
-    vi.doMock('@/lib/shared/config', () => ({
-      getSettings: vi.fn().mockReturnValue({
-        review_fix_max_iterations: 1,
-      }),
-    }));
-    vi.doMock('@/lib/pipeline/start-test', () => ({ startProjectTest: startProjectTestMock }));
-    vi.doMock('@/lib/pipeline/start-review', () => ({ startProjectReview: startProjectReviewMock }));
-    vi.doMock('@/lib/pipeline/review-exhaustion-fallback', () => ({
-      fileReviewExhaustionIssue: fileReviewExhaustionIssueMock,
-    }));
-    vi.doMock('@/lib/pipeline/start-commit', () => ({
-      startProjectCommit: startProjectCommitMock,
-    }));
-    vi.doMock('@/lib/pipeline/start-fix', () => ({
-      startFixFromJob: startFixFromJobMock,
-    }));
+  beforeEach(async () => {
+    await resetTestState();
+    mocks.getProjectTestConfig.mockReturnValue({
+      autoPushEnabled: true, autoCommitEnabled: false, releaseAfterRun: false, prWorkflowEnabled: false,
+    });
+    mocks.getSettings.mockReturnValue({
+      review_fix_max_iterations: 1,
+    });
   });
 
   afterEach(() => {
     delete process.env.TAMTAM_MAX_STEP_ITERATIONS;
-    vi.resetModules();
   });
 
   it('still re-runs tests after a failed test fix when review_fix_max_iterations is 1', async () => {
     const now = Date.now() / 1000;
     const releaseId = 'release-test-retry';
-    testDb.db.insert(schema.jobs).values([
-      makeJobRow({ id: releaseId, project: 'proj', kind: 'release', startedAt: now - 200 }) as any,
-      makeJobRow({ id: 't1', project: 'proj', kind: 'test', releaseId, startedAt: now - 180, finishedAt: now - 160, exitCode: 1 }) as any,
-    ]).run();
+    await insertJobsAndCache(getTestDb(), [
+      makeJobRow({ id: releaseId, project: 'proj', kind: 'release', startedAt: now - 200 }),
+      makeJobRow({ id: 't1', project: 'proj', kind: 'test', releaseId, startedAt: now - 180, finishedAt: now - 160, exitCode: 1 }),
+    ]);
 
-    const { markDone } = await import('@/lib/jobs/job-storage');
     const fixJob = makeFixJob('f1', { releaseId, parentJobId: 't1', startedAt: now - 30 });
 
     await markDone(fixJob, 0);
 
-    expect(startProjectTestMock).toHaveBeenCalledOnce();
-    expect(startProjectTestMock).toHaveBeenCalledWith('proj');
-    expect(startProjectReviewMock).not.toHaveBeenCalled();
-    expect(fileReviewExhaustionIssueMock).not.toHaveBeenCalled();
-    const notifyEvents = notifyMock.mock.calls.map((c) => c[0]?.event);
+    expect(mocks.startProjectTest).toHaveBeenCalledOnce();
+    expect(mocks.startProjectTest).toHaveBeenCalledWith('proj');
+    expect(mocks.startProjectReview).not.toHaveBeenCalled();
+    expect(mocks.fileReviewExhaustionIssue).not.toHaveBeenCalled();
+    const notifyEvents = mocks.notify.mock.calls.map((c: unknown[]) => (c[0] as { event?: string })?.event);
     expect(notifyEvents).not.toContain('fix_loop_exhausted');
   });
 
   it('caps the next review when review_fix_max_iterations is 1', async () => {
     const now = Date.now() / 1000;
     const releaseId = 'release-review-cap-1';
-    testDb.db.insert(schema.jobs).values([
-      makeJobRow({ id: releaseId, project: 'proj', kind: 'release', startedAt: now - 200 }) as any,
-      makeJobRow({ id: 'r1', project: 'proj', kind: 'review', releaseId, startedAt: now - 180, finishedAt: now - 160, exitCode: 0 }) as any,
-    ]).run();
+    await insertJobsAndCache(getTestDb(), [
+      makeJobRow({ id: releaseId, project: 'proj', kind: 'release', startedAt: now - 200 }),
+      makeJobRow({ id: 'r1', project: 'proj', kind: 'review', releaseId, startedAt: now - 180, finishedAt: now - 160, exitCode: 0 }),
+    ]);
 
-    const { markDone } = await import('@/lib/jobs/job-storage');
     const fixJob = makeFixJob('f1', { releaseId, parentJobId: 'r1', startedAt: now - 30 });
 
     await markDone(fixJob, 0);
 
-    expect(startProjectReviewMock).not.toHaveBeenCalled();
-    expect(fileReviewExhaustionIssueMock).toHaveBeenCalledOnce();
-    expect(startProjectCommitMock).toHaveBeenCalledOnce();
-    const notifyEvents = notifyMock.mock.calls.map((c) => c[0]?.event);
+    expect(mocks.startProjectReview).not.toHaveBeenCalled();
+    expect(mocks.fileReviewExhaustionIssue).toHaveBeenCalledOnce();
+    expect(mocks.startProjectCommit).toHaveBeenCalledOnce();
+    const notifyEvents = mocks.notify.mock.calls.map((c: unknown[]) => (c[0] as { event?: string })?.event);
     expect(notifyEvents).toContain('fix_loop_exhausted');
   });
 
@@ -1221,19 +1215,18 @@ describe('review_fix_max_iterations only caps review-side recovery', () => {
         'Verdict: DO NOT SHIP',
       ].join('\n')));
 
-      testDb.db.insert(schema.jobs).values([
-        makeJobRow({ id: 'standalone-r1', project: 'proj', kind: 'review', logPath: reviewLog, startedAt: now - 180, finishedAt: now - 160, exitCode: 0 }) as any,
-      ]).run();
+      await insertJobsAndCache(getTestDb(), [
+        makeJobRow({ id: 'standalone-r1', project: 'proj', kind: 'review', logPath: reviewLog, startedAt: now - 180, finishedAt: now - 160, exitCode: 0 }),
+      ]);
 
-      const { markDone } = await import('@/lib/jobs/job-storage');
       const fixJob = makeFixJob('standalone-f1', { parentJobId: 'standalone-r1', startedAt: now - 30 });
 
       await markDone(fixJob, 0);
 
-      expect(startProjectReviewMock).not.toHaveBeenCalled();
-      expect(fileReviewExhaustionIssueMock).not.toHaveBeenCalled();
-      expect(startProjectCommitMock).not.toHaveBeenCalled();
-      const notifyEvents = notifyMock.mock.calls.map((c) => c[0]?.event);
+      expect(mocks.startProjectReview).not.toHaveBeenCalled();
+      expect(mocks.fileReviewExhaustionIssue).not.toHaveBeenCalled();
+      expect(mocks.startProjectCommit).not.toHaveBeenCalled();
+      const notifyEvents = mocks.notify.mock.calls.map((c: unknown[]) => (c[0] as { event?: string })?.event);
       expect(notifyEvents).toContain('review_do_not_ship');
     } finally {
       rmSync(tempDir, { recursive: true, force: true });
@@ -1241,26 +1234,25 @@ describe('review_fix_max_iterations only caps review-side recovery', () => {
   });
 
   it('stops the release when exhaustion issue filing succeeds but the follow-up commit cannot start', async () => {
-    startProjectCommitMock.mockResolvedValueOnce({ ok: false, detail: 'git status failed' });
+    mocks.startProjectCommit.mockResolvedValueOnce({ ok: false, detail: 'git status failed' });
     const now = Date.now() / 1000;
     const releaseId = 'release-review-cap-commit-fail';
-    testDb.db.insert(schema.jobs).values([
-      makeJobRow({ id: releaseId, project: 'proj', kind: 'release', startedAt: now - 200 }) as any,
-      makeJobRow({ id: 'r1', project: 'proj', kind: 'review', releaseId, startedAt: now - 180, finishedAt: now - 160, exitCode: 0 }) as any,
-    ]).run();
+    await insertJobsAndCache(getTestDb(), [
+      makeJobRow({ id: releaseId, project: 'proj', kind: 'release', startedAt: now - 200 }),
+      makeJobRow({ id: 'r1', project: 'proj', kind: 'review', releaseId, startedAt: now - 180, finishedAt: now - 160, exitCode: 0 }),
+    ]);
 
-    const { markDone } = await import('@/lib/jobs/job-storage');
     const fixJob = makeFixJob('f1', { releaseId, parentJobId: 'r1', startedAt: now - 30 });
 
     await markDone(fixJob, 0);
 
-    expect(startProjectReviewMock).not.toHaveBeenCalled();
-    expect(fileReviewExhaustionIssueMock).toHaveBeenCalledOnce();
-    expect(startProjectCommitMock).toHaveBeenCalledOnce();
-    const releaseRow = testDb.db.select().from(schema.jobs).all().find((row) => row.id === releaseId);
+    expect(mocks.startProjectReview).not.toHaveBeenCalled();
+    expect(mocks.fileReviewExhaustionIssue).toHaveBeenCalledOnce();
+    expect(mocks.startProjectCommit).toHaveBeenCalledOnce();
+    const releaseRow = (await getTestDb().select().from(schema.jobs)).find((row) => row.id === releaseId);
     expect(releaseRow?.exitCode).toBe(1);
     expect(releaseRow?.finishedAt).not.toBeNull();
-    const notifyEvents = notifyMock.mock.calls.map((c) => c[0]?.event);
+    const notifyEvents = mocks.notify.mock.calls.map((c: unknown[]) => (c[0] as { event?: string })?.event);
     expect(notifyEvents).toContain('fix_loop_exhausted');
   });
 
@@ -1268,11 +1260,10 @@ describe('review_fix_max_iterations only caps review-side recovery', () => {
     process.env.TAMTAM_MAX_STEP_ITERATIONS = '1';
     const now = Date.now() / 1000;
     const releaseId = 'release-commit-cap-fix';
-    testDb.db.insert(schema.jobs).values([
-      makeJobRow({ id: releaseId, project: 'proj', kind: 'release', startedAt: now - 200 }) as any,
-    ]).run();
+    await insertJobsAndCache(getTestDb(), [
+      makeJobRow({ id: releaseId, project: 'proj', kind: 'release', startedAt: now - 200 }),
+    ]);
 
-    const { markDone } = await import('@/lib/jobs/job-storage');
     const commitJob: JobData = {
       id: 'c1',
       project: 'proj',
@@ -1296,9 +1287,9 @@ describe('review_fix_max_iterations only caps review-side recovery', () => {
 
     await markDone(commitJob, 1);
 
-    expect(startFixFromJobMock).toHaveBeenCalledOnce();
-    expect(startFixFromJobMock).toHaveBeenCalledWith('c1');
-    const notifyEvents = notifyMock.mock.calls.map((c) => c[0]?.event);
+    expect(mocks.startFixFromJob).toHaveBeenCalledOnce();
+    expect(mocks.startFixFromJob).toHaveBeenCalledWith('c1');
+    const notifyEvents = mocks.notify.mock.calls.map((c: unknown[]) => (c[0] as { event?: string })?.event);
     expect(notifyEvents).not.toContain('fix_loop_exhausted');
     delete process.env.TAMTAM_MAX_STEP_ITERATIONS;
   });
@@ -1307,18 +1298,17 @@ describe('review_fix_max_iterations only caps review-side recovery', () => {
     process.env.TAMTAM_MAX_STEP_ITERATIONS = '1';
     const now = Date.now() / 1000;
     const releaseId = 'release-commit-cap-stop';
-    testDb.db.insert(schema.jobs).values([
-      makeJobRow({ id: releaseId, project: 'proj', kind: 'release', startedAt: now - 200 }) as any,
-      makeJobRow({ id: 'c1', project: 'proj', kind: 'commit', releaseId, startedAt: now - 180, finishedAt: now - 160, exitCode: 1 }) as any,
-    ]).run();
+    await insertJobsAndCache(getTestDb(), [
+      makeJobRow({ id: releaseId, project: 'proj', kind: 'release', startedAt: now - 200 }),
+      makeJobRow({ id: 'c1', project: 'proj', kind: 'commit', releaseId, startedAt: now - 180, finishedAt: now - 160, exitCode: 1 }),
+    ]);
 
-    const { markDone } = await import('@/lib/jobs/job-storage');
     const fixJob = makeFixJob('f-commit-cap', { releaseId, parentJobId: 'c1', startedAt: now - 30 });
 
     await markDone(fixJob, 0);
 
-    expect(startProjectCommitMock).not.toHaveBeenCalled();
-    const notifyEvents = notifyMock.mock.calls.map((c) => c[0]?.event);
+    expect(mocks.startProjectCommit).not.toHaveBeenCalled();
+    const notifyEvents = mocks.notify.mock.calls.map((c: unknown[]) => (c[0] as { event?: string })?.event);
     expect(notifyEvents).toContain('fix_loop_exhausted');
     delete process.env.TAMTAM_MAX_STEP_ITERATIONS;
   });
@@ -1326,11 +1316,10 @@ describe('review_fix_max_iterations only caps review-side recovery', () => {
   it('still starts a fix after a capped failed commit in standalone auto-push mode', async () => {
     process.env.TAMTAM_MAX_STEP_ITERATIONS = '1';
     const now = Date.now() / 1000;
-    testDb.db.insert(schema.jobs).values([
-      makeJobRow({ id: 'old-commit', project: 'proj', kind: 'commit', startedAt: now - 120, finishedAt: now - 110, exitCode: 1 }) as any,
-    ]).run();
+    await insertJobsAndCache(getTestDb(), [
+      makeJobRow({ id: 'old-commit', project: 'proj', kind: 'commit', startedAt: now - 120, finishedAt: now - 110, exitCode: 1 }),
+    ]);
 
-    const { markDone } = await import('@/lib/jobs/job-storage');
     const commitJob: JobData = {
       id: 'standalone-commit',
       project: 'proj',
@@ -1352,8 +1341,8 @@ describe('review_fix_max_iterations only caps review-side recovery', () => {
 
     await markDone(commitJob, 1);
 
-    expect(startFixFromJobMock).toHaveBeenCalledOnce();
-    expect(startFixFromJobMock).toHaveBeenCalledWith('standalone-commit');
+    expect(mocks.startFixFromJob).toHaveBeenCalledOnce();
+    expect(mocks.startFixFromJob).toHaveBeenCalledWith('standalone-commit');
     delete process.env.TAMTAM_MAX_STEP_ITERATIONS;
   });
 });
@@ -1361,9 +1350,6 @@ describe('review_fix_max_iterations only caps review-side recovery', () => {
 // ─── concurrent step finalization guard ──────────────────────────────────────
 
 describe('concurrent step finalization guard', () => {
-  let testDb: ReturnType<typeof createTestDb>;
-  let markDoneFn: typeof import('@/lib/jobs/job-storage').markDone;
-
   function makeInMemoryJob(id: string, kind: string, overrides: Partial<JobData> = {}): JobData {
     const now = Date.now() / 1000;
     return {
@@ -1388,65 +1374,16 @@ describe('concurrent step finalization guard', () => {
   }
 
   beforeEach(async () => {
-    vi.resetModules();
-    testDb = createTestDb();
-
-    vi.doMock('@/lib/db', () => ({ db: testDb.db, schema }));
-    vi.doMock('@/lib/jobs/pm2-jobs', () => ({
-      deleteJob: vi.fn().mockResolvedValue(undefined),
-      getJobStatus: vi.fn(),
-    }));
-    vi.doMock('@/lib/shared/shell', () => ({
-      exec: vi.fn().mockResolvedValue({ exitCode: 0, stdout: '', stderr: '' }),
-    }));
-    vi.doMock('@/lib/git/git-utils', () => ({
-      markReviewed: vi.fn().mockResolvedValue(undefined),
-    }));
-    vi.doMock('@/lib/shared/project-data', () => ({
-      resolveProjectPath: vi.fn().mockReturnValue(null),
-    }));
-    vi.doMock('@/lib/scheduling/scheduling', () => ({
-      getProjectTestConfig: vi.fn().mockReturnValue({
-        autoPushEnabled: false,
-        autoCommitEnabled: false,
-        releaseAfterRun: false,
-        prWorkflowEnabled: false,
-      }),
-    }));
-    vi.doMock('@/lib/pipeline/pipeline-lock', () => ({
-      releaseLock: vi.fn(),
-      getLock: vi.fn().mockReturnValue(null),
-      isLockOwnedByActiveRelease: vi.fn().mockReturnValue(false),
-    }));
-    vi.doMock('@/lib/jobs/retention', () => ({
-      pruneProjectLogs: vi.fn(),
-    }));
-    vi.doMock('@/lib/shared/notifications', () => ({
-      notify: vi.fn().mockResolvedValue(undefined),
-    }));
-    vi.doMock('@/lib/shared/config', () => ({
-      getSettings: vi.fn().mockReturnValue({
-        fix_ci_max_retries: 0,
-        fix_ci_retry_window_seconds: 120,
-        fix_ci_fast_crash_ms: 5000,
-      }),
-    }));
-  });
-
-  afterEach(() => {
-    vi.resetModules();
+    await resetTestState();
   });
 
   it('does NOT finalize the release when another pipeline step is still running', async () => {
     const now = Date.now() / 1000;
     // Insert an active release and a running test step (sibling, still running)
-    testDb.db.insert(schema.jobs).values([
-      makeJobRow({ id: 'rel-1', project: 'proj', kind: 'release', startedAt: now - 120 }) as any,
-      makeJobRow({ id: 'test-1', project: 'proj', kind: 'test', startedAt: now - 60, finishedAt: null }) as any,
-    ]).run();
-
-    const mod = await import('@/lib/jobs/job-storage');
-    markDoneFn = mod.markDone;
+    await insertJobsAndCache(getTestDb(), [
+      makeJobRow({ id: 'rel-1', project: 'proj', kind: 'release', startedAt: now - 120 }),
+      makeJobRow({ id: 'test-1', project: 'proj', kind: 'test', startedAt: now - 60, finishedAt: null }),
+    ]);
 
     // A review job finishes with exit 1 (crash/failure — no chaining path fires)
     const reviewJob = makeInMemoryJob('review-1', 'review', {
@@ -1454,72 +1391,56 @@ describe('concurrent step finalization guard', () => {
       releaseId: 'rel-1',
     });
 
-    await markDoneFn(reviewJob, 1);
+    await markDone(reviewJob, 1);
 
     // Release should NOT be finalized — the guard defers to the still-running test
-    const relRow = testDb.sqlite
-      .prepare('SELECT finished_at FROM jobs WHERE id = ?')
-      .get('rel-1') as { finished_at: number | null } | undefined;
-    expect(relRow?.finished_at).toBeNull();
+    const relRow = (await getTestDb().select().from(schema.jobs).where(eq(schema.jobs.id, 'rel-1'))).at(0);
+    expect(relRow?.finishedAt).toBeNull();
   });
 
   it('finalizes the release when no other step is running', async () => {
     const now = Date.now() / 1000;
     // Insert an active release with NO running siblings
-    testDb.db.insert(schema.jobs).values([
-      makeJobRow({ id: 'rel-2', project: 'proj', kind: 'release', startedAt: now - 120 }) as any,
-    ]).run();
-
-    const mod = await import('@/lib/jobs/job-storage');
-    markDoneFn = mod.markDone;
+    await insertJobsAndCache(getTestDb(), [
+      makeJobRow({ id: 'rel-2', project: 'proj', kind: 'release', startedAt: now - 120 }),
+    ]);
 
     const reviewJob = makeInMemoryJob('review-2', 'review', {
       startedAt: now - 30,
       releaseId: 'rel-2',
     });
 
-    await markDoneFn(reviewJob, 1);
+    await markDone(reviewJob, 1);
 
     // Release SHOULD be finalized since no sibling is running
-    const relRow = testDb.sqlite
-      .prepare('SELECT finished_at FROM jobs WHERE id = ?')
-      .get('rel-2') as { finished_at: number | null } | undefined;
-    expect(relRow?.finished_at).not.toBeNull();
+    const relRow = (await getTestDb().select().from(schema.jobs).where(eq(schema.jobs.id, 'rel-2'))).at(0);
+    expect(relRow?.finishedAt).not.toBeNull();
   });
 
   it('does not count a finished sibling step as "still running"', async () => {
     const now = Date.now() / 1000;
     // Test step is already finished
-    testDb.db.insert(schema.jobs).values([
-      makeJobRow({ id: 'rel-3', project: 'proj', kind: 'release', startedAt: now - 120 }) as any,
-      makeJobRow({ id: 'test-3', project: 'proj', kind: 'test', startedAt: now - 60, finishedAt: now - 30, exitCode: 0 }) as any,
-    ]).run();
-
-    const mod = await import('@/lib/jobs/job-storage');
-    markDoneFn = mod.markDone;
+    await insertJobsAndCache(getTestDb(), [
+      makeJobRow({ id: 'rel-3', project: 'proj', kind: 'release', startedAt: now - 120 }),
+      makeJobRow({ id: 'test-3', project: 'proj', kind: 'test', startedAt: now - 60, finishedAt: now - 30, exitCode: 0 }),
+    ]);
 
     const reviewJob = makeInMemoryJob('review-3', 'review', {
       startedAt: now - 25,
       releaseId: 'rel-3',
     });
 
-    await markDoneFn(reviewJob, 1);
+    await markDone(reviewJob, 1);
 
     // Finished sibling should NOT block finalization
-    const relRow = testDb.sqlite
-      .prepare('SELECT finished_at FROM jobs WHERE id = ?')
-      .get('rel-3') as { finished_at: number | null } | undefined;
-    expect(relRow?.finished_at).not.toBeNull();
+    const relRow = (await getTestDb().select().from(schema.jobs).where(eq(schema.jobs.id, 'rel-3'))).at(0);
+    expect(relRow?.finishedAt).not.toBeNull();
   });
 });
 
 // ─── verdict retry rescue (lifecycle integration) ──────────────────────────
 
 describe('verdict retry rescue', () => {
-  let testDb: ReturnType<typeof createTestDb>;
-  let markDoneFn: typeof import('@/lib/jobs/job-storage').markDone;
-  let startFixFromJobMock: ReturnType<typeof vi.fn>;
-  let retryVerdictMock: ReturnType<typeof vi.fn>;
   let tempDir: string;
 
   function makeReviewJob(id: string, logPath: string | null, overrides: Partial<JobData> = {}): JobData {
@@ -1548,75 +1469,28 @@ describe('verdict retry rescue', () => {
   }
 
   beforeEach(async () => {
-    vi.resetModules();
-    testDb = createTestDb();
+    await resetTestState();
     tempDir = mkdtempSync(join(tmpdir(), 'tamtam-retry-test-'));
-    startFixFromJobMock = vi.fn().mockResolvedValue({ ok: true, jobId: 'fix-auto' });
-    retryVerdictMock = vi.fn().mockResolvedValue(null);
-
-    vi.doMock('@/lib/db', () => ({ db: testDb.db, schema }));
-    vi.doMock('@/lib/jobs/pm2-jobs', () => ({
-      deleteJob: vi.fn().mockResolvedValue(undefined),
-      getJobStatus: vi.fn(),
-    }));
-    vi.doMock('@/lib/shared/shell', () => ({
-      exec: vi.fn().mockResolvedValue({ exitCode: 0, stdout: '', stderr: '' }),
-    }));
-    vi.doMock('@/lib/git/git-utils', () => ({
-      markReviewed: vi.fn().mockResolvedValue(undefined),
-    }));
-    vi.doMock('@/lib/shared/project-data', () => ({
-      resolveProjectPath: vi.fn().mockReturnValue(null),
-    }));
-    vi.doMock('@/lib/scheduling/scheduling', () => ({
-      getProjectTestConfig: vi.fn().mockReturnValue({
-        autoPushEnabled: true,
-        autoCommitEnabled: false,
-        releaseAfterRun: false,
-        prWorkflowEnabled: false,
-      }),
-    }));
-    vi.doMock('@/lib/pipeline/pipeline-lock', () => ({
-      releaseLock: vi.fn(),
-      getLock: vi.fn().mockReturnValue(null),
-      isLockOwnedByActiveRelease: vi.fn().mockReturnValue(false),
-    }));
-    vi.doMock('@/lib/jobs/retention', () => ({
-      pruneProjectLogs: vi.fn(),
-    }));
-    vi.doMock('@/lib/shared/notifications', () => ({
-      notify: vi.fn().mockResolvedValue(undefined),
-    }));
-    vi.doMock('@/lib/shared/config', () => ({
-      getSettings: vi.fn().mockReturnValue({
-        fix_ci_max_retries: 0,
-        fix_ci_retry_window_seconds: 120,
-        fix_ci_fast_crash_ms: 5000,
-        review_retry_on_parse_failure: true,
-      }),
-    }));
-    vi.doMock('@/lib/pipeline/start-fix', () => ({
-      startFixFromJob: startFixFromJobMock,
-    }));
-    vi.doMock('@/lib/jobs/verdict-retry', () => ({
-      retryVerdictWithClaude: retryVerdictMock,
-    }));
-    // Stub out the LGTM-path actions so they don't throw when retry succeeds
-    vi.doMock('@/lib/pipeline/start-commit', () => ({
-      startProjectCommit: vi.fn().mockResolvedValue({ ok: true, jobId: 'commit-1' }),
-    }));
-    vi.doMock('@/lib/pipeline/start-mark-dod', () => ({
-      startMarkDod: vi.fn().mockResolvedValue({ ok: false }),
-    }));
+    mocks.getProjectTestConfig.mockReturnValue({
+      autoPushEnabled: true,
+      autoCommitEnabled: false,
+      releaseAfterRun: false,
+      prWorkflowEnabled: false,
+    });
+    mocks.getSettings.mockReturnValue({
+      fix_ci_max_retries: 0,
+      fix_ci_retry_window_seconds: 120,
+      fix_ci_fast_crash_ms: 5000,
+      review_retry_on_parse_failure: true,
+    });
+    mocks.startProjectCommit.mockResolvedValue({ ok: true, jobId: 'commit-1' });
+    mocks.startMarkDod.mockResolvedValue({ ok: false });
 
     const now = Date.now() / 1000;
-    testDb.db.insert(schema.jobs).values(
-      makeJobRow({ id: 'release-retry', project: 'proj', kind: 'release', startedAt: now - 120 }) as any
-    ).run();
+    await insertJobsAndCache(getTestDb(), [makeJobRow({ id: 'release-retry', project: 'proj', kind: 'release', startedAt: now - 120 })]);
   });
 
   afterEach(() => {
-    vi.resetModules();
     rmSync(tempDir, { recursive: true, force: true });
   });
 
@@ -1624,82 +1498,62 @@ describe('verdict retry rescue', () => {
     const logPath = join(tempDir, 'no-verdict.log');
     writeFileSync(logPath, 'The code looks fine overall. No major issues spotted.\n');
 
-    const mod = await import('@/lib/jobs/job-storage');
-    markDoneFn = mod.markDone;
+    await markDone(makeReviewJob('rev-no-verdict', logPath), 0);
 
-    await markDoneFn(makeReviewJob('rev-no-verdict', logPath), 0);
-
-    expect(retryVerdictMock).toHaveBeenCalledOnce();
+    expect(mocks.retryVerdictWithClaude).toHaveBeenCalledOnce();
   });
 
   it('passes the source review provider into parse-retry for non-Claude reviews', async () => {
     const logPath = join(tempDir, 'no-verdict-codex.log');
     writeFileSync(logPath, 'Review text without a formal verdict line.\n');
 
-    const mod = await import('@/lib/jobs/job-storage');
-    markDoneFn = mod.markDone;
+    await markDone(makeReviewJob('rev-no-verdict-codex', logPath, { provider: 'codex' }), 0);
 
-    await markDoneFn(makeReviewJob('rev-no-verdict-codex', logPath, { provider: 'codex' }), 0);
-
-    expect(retryVerdictMock).toHaveBeenCalledWith(expect.objectContaining({
+    expect(mocks.retryVerdictWithClaude).toHaveBeenCalledWith(expect.objectContaining({
       id: 'rev-no-verdict-codex',
       provider: 'codex',
     }));
   });
 
   it('uses the rescued verdict from retry — LGTM → no fix started', async () => {
-    retryVerdictMock.mockResolvedValue('LGTM');
+    mocks.retryVerdictWithClaude.mockResolvedValue('LGTM');
     const logPath = join(tempDir, 'no-verdict-lgtm.log');
     writeFileSync(logPath, 'Everything looks good, tests pass.\n');
 
-    const mod = await import('@/lib/jobs/job-storage');
-    markDoneFn = mod.markDone;
+    await markDone(makeReviewJob('rev-rescued-lgtm', logPath), 0);
 
-    await markDoneFn(makeReviewJob('rev-rescued-lgtm', logPath), 0);
-
-    expect(retryVerdictMock).toHaveBeenCalledOnce();
-    expect(startFixFromJobMock).not.toHaveBeenCalled();
+    expect(mocks.retryVerdictWithClaude).toHaveBeenCalledOnce();
+    expect(mocks.startFixFromJob).not.toHaveBeenCalled();
   });
 
   it('defaults to NEEDS ATTENTION when retry also returns null → fix is started', async () => {
-    retryVerdictMock.mockResolvedValue(null);
+    mocks.retryVerdictWithClaude.mockResolvedValue(null);
     const logPath = join(tempDir, 'no-verdict-null.log');
     writeFileSync(logPath, 'Some concerns here but no verdict emitted.\n');
 
-    const mod = await import('@/lib/jobs/job-storage');
-    markDoneFn = mod.markDone;
+    await markDone(makeReviewJob('rev-retry-null', logPath), 0);
 
-    await markDoneFn(makeReviewJob('rev-retry-null', logPath), 0);
-
-    expect(retryVerdictMock).toHaveBeenCalledOnce();
-    expect(startFixFromJobMock).toHaveBeenCalledWith('rev-retry-null');
+    expect(mocks.retryVerdictWithClaude).toHaveBeenCalledOnce();
+    expect(mocks.startFixFromJob).toHaveBeenCalledWith('rev-retry-null');
   });
 
   it('swallows retryVerdictWithClaude throws — defaults to NEEDS ATTENTION and starts fix', async () => {
-    retryVerdictMock.mockRejectedValue(new Error('spawn ENOENT'));
+    mocks.retryVerdictWithClaude.mockRejectedValue(new Error('spawn ENOENT'));
     const logPath = join(tempDir, 'no-verdict-throw.log');
     writeFileSync(logPath, 'Review text that has no verdict line.\n');
 
-    const mod = await import('@/lib/jobs/job-storage');
-    markDoneFn = mod.markDone;
-
     // Must not throw even though retryVerdictWithClaude rejects
-    await expect(markDoneFn(makeReviewJob('rev-retry-throw', logPath), 0)).resolves.not.toThrow();
+    await expect(markDone(makeReviewJob('rev-retry-throw', logPath), 0)).resolves.not.toThrow();
 
-    expect(retryVerdictMock).toHaveBeenCalledOnce();
+    expect(mocks.retryVerdictWithClaude).toHaveBeenCalledOnce();
     // After swallowed throw, rawVerdict is null → defaults to NEEDS ATTENTION → fix started
-    expect(startFixFromJobMock).toHaveBeenCalledWith('rev-retry-throw');
+    expect(mocks.startFixFromJob).toHaveBeenCalledWith('rev-retry-throw');
   });
 });
 
 // ─── incremental review ref guard ────────────────────────────────────────────
 
 describe('setReviewedRef incremental_review_enabled guard', () => {
-  let testDb: ReturnType<typeof createTestDb>;
-  let markDoneFn: typeof import('@/lib/jobs/job-storage').markDone;
-  let setReviewedRefMock: ReturnType<typeof vi.fn>;
-  let getCurrentBranchMock: ReturnType<typeof vi.fn>;
-  let resolveProjectPathMock: ReturnType<typeof vi.fn>;
   let tempDir: string;
 
   function makeReviewJob(id: string, logPath: string, overrides: Partial<JobData> = {}): JobData {
@@ -1714,110 +1568,74 @@ describe('setReviewedRef incremental_review_enabled guard', () => {
     };
   }
 
-  function setupMocks(incrementalEnabled: boolean) {
-    vi.doMock('@/lib/db', () => ({ db: testDb.db, schema }));
-    vi.doMock('@/lib/jobs/pm2-jobs', () => ({ deleteJob: vi.fn().mockResolvedValue(undefined), getJobStatus: vi.fn() }));
-    vi.doMock('@/lib/shared/shell', () => ({ exec: vi.fn().mockResolvedValue({ exitCode: 0, stdout: '', stderr: '' }) }));
-    vi.doMock('@/lib/git/git-utils', () => ({
-      markReviewed: vi.fn().mockResolvedValue(undefined),
-      setReviewedRef: setReviewedRefMock,
-      getCurrentBranch: getCurrentBranchMock,
-    }));
-    vi.doMock('@/lib/shared/project-data', () => ({ resolveProjectPath: resolveProjectPathMock }));
-    vi.doMock('@/lib/scheduling/scheduling', () => ({
-      getProjectTestConfig: vi.fn().mockReturnValue({ autoPushEnabled: false, autoCommitEnabled: false, releaseAfterRun: false, prWorkflowEnabled: false }),
-    }));
-    vi.doMock('@/lib/pipeline/pipeline-lock', () => ({
-      releaseLock: vi.fn(), getLock: vi.fn().mockReturnValue(null), isLockOwnedByActiveRelease: vi.fn().mockReturnValue(false),
-    }));
-    vi.doMock('@/lib/jobs/retention', () => ({ pruneProjectLogs: vi.fn() }));
-    vi.doMock('@/lib/shared/notifications', () => ({ notify: vi.fn().mockResolvedValue(undefined) }));
-    vi.doMock('@/lib/shared/config', () => ({
-      getSettings: vi.fn().mockReturnValue({
-        fix_ci_max_retries: 0, fix_ci_retry_window_seconds: 120, fix_ci_fast_crash_ms: 5000,
-        incremental_review_enabled: incrementalEnabled,
-      }),
-    }));
+  function setIncremental(incrementalEnabled: boolean): void {
+    mocks.getSettings.mockReturnValue({
+      fix_ci_max_retries: 0, fix_ci_retry_window_seconds: 120, fix_ci_fast_crash_ms: 5000,
+      incremental_review_enabled: incrementalEnabled,
+    });
   }
 
   beforeEach(async () => {
-    vi.resetModules();
-    testDb = createTestDb();
+    await resetTestState();
     tempDir = mkdtempSync(join(tmpdir(), 'tamtam-inc-ref-'));
-    setReviewedRefMock = vi.fn().mockResolvedValue(undefined);
-    getCurrentBranchMock = vi.fn().mockResolvedValue('main');
-    resolveProjectPathMock = vi.fn().mockReturnValue('/path/to/proj');
+    mocks.resolveProjectPath.mockReturnValue('/path/to/proj');
+    mocks.getCurrentBranch.mockResolvedValue('main');
 
     const now = Date.now() / 1000;
-    testDb.db.insert(schema.jobs).values(
-      makeJobRow({ id: 'rel-inc', project: 'proj', kind: 'release', startedAt: now - 60 }) as any
-    ).run();
+    await insertJobsAndCache(getTestDb(), [makeJobRow({ id: 'rel-inc', project: 'proj', kind: 'release', startedAt: now - 60 })]);
   });
 
   afterEach(() => {
-    vi.resetModules();
     rmSync(tempDir, { recursive: true, force: true });
   });
 
   it('does NOT write reviewed ref when incremental_review_enabled is false', async () => {
-    setupMocks(false);
+    setIncremental(false);
     const logPath = join(tempDir, 'lgtm-off.log');
     writeFileSync(logPath, 'Findings: none\nVerdict: LGTM\n');
 
-    const mod = await import('@/lib/jobs/job-storage');
-    markDoneFn = mod.markDone;
-    await markDoneFn(makeReviewJob('rev-off', logPath), 0);
+    await markDone(makeReviewJob('rev-off', logPath), 0);
 
-    expect(setReviewedRefMock).not.toHaveBeenCalled();
+    expect(mocks.setReviewedRef).not.toHaveBeenCalled();
   });
 
   it('writes reviewed ref when incremental_review_enabled is true and project path resolves', async () => {
-    setupMocks(true);
+    setIncremental(true);
     const logPath = join(tempDir, 'lgtm-on.log');
     writeFileSync(logPath, 'Findings: none\nVerdict: LGTM\n');
 
-    const mod = await import('@/lib/jobs/job-storage');
-    markDoneFn = mod.markDone;
-    await markDoneFn(makeReviewJob('rev-on', logPath), 0);
+    await markDone(makeReviewJob('rev-on', logPath), 0);
 
-    expect(setReviewedRefMock).toHaveBeenCalledWith('/path/to/proj', 'main');
+    expect(mocks.setReviewedRef).toHaveBeenCalledWith('/path/to/proj', 'main');
   });
 
   it('does NOT write reviewed ref for LGTM PR reviews', async () => {
-    setupMocks(true);
+    setIncremental(true);
     const logPath = join(tempDir, 'lgtm-pr.log');
     writeFileSync(logPath, 'Findings: none\nVerdict: LGTM\n');
 
-    const mod = await import('@/lib/jobs/job-storage');
-    markDoneFn = mod.markDone;
-    await markDoneFn(
+    await markDone(
       makeReviewJob('rev-pr', logPath, {
         contextMeta: JSON.stringify({ sourceType: 'pr_review', prNumber: 7 }),
       }),
       0
     );
 
-    expect(setReviewedRefMock).not.toHaveBeenCalled();
+    expect(mocks.setReviewedRef).not.toHaveBeenCalled();
   });
 
   it('does NOT write reviewed ref for non-LGTM verdicts', async () => {
-    setupMocks(true);
+    setIncremental(true);
     const logPath = join(tempDir, 'needs-attn.log');
     writeFileSync(logPath, 'Findings:\n- Finding ID: x\n  Severity: low\nVerdict: NEEDS ATTENTION\n');
 
-    const mod = await import('@/lib/jobs/job-storage');
-    markDoneFn = mod.markDone;
-    await markDoneFn(makeReviewJob('rev-na', logPath), 0);
+    await markDone(makeReviewJob('rev-na', logPath), 0);
 
-    expect(setReviewedRefMock).not.toHaveBeenCalled();
+    expect(mocks.setReviewedRef).not.toHaveBeenCalled();
   });
 });
 
 describe('review completion preserves the git index', () => {
-  let testDb: ReturnType<typeof createTestDb>;
-  let markDoneFn: typeof import('@/lib/jobs/job-storage').markDone;
-  let execMock: ReturnType<typeof vi.fn>;
-  let markReviewedMock: ReturnType<typeof vi.fn>;
   let tempDir: string;
 
   function makeReviewJob(id: string, logPath: string, overrides: Partial<JobData> = {}): JobData {
@@ -1844,60 +1662,20 @@ describe('review completion preserves the git index', () => {
     };
   }
 
-  beforeEach(() => {
-    vi.resetModules();
-    testDb = createTestDb();
+  beforeEach(async () => {
+    await resetTestState();
     tempDir = mkdtempSync(join(tmpdir(), 'tamtam-review-index-'));
-    execMock = vi.fn().mockResolvedValue({ exitCode: 0, stdout: '', stderr: '' });
-    markReviewedMock = vi.fn().mockResolvedValue(undefined);
-
-    vi.doMock('@/lib/db', () => ({ db: testDb.db, schema }));
-    vi.doMock('@/lib/jobs/pm2-jobs', () => ({
-      deleteJob: vi.fn().mockResolvedValue(undefined),
-      getJobStatus: vi.fn(),
-    }));
-    vi.doMock('@/lib/shared/shell', () => ({ exec: execMock }));
-    vi.doMock('@/lib/git/git-utils', () => ({
-      markReviewed: markReviewedMock,
-      setReviewedRef: vi.fn().mockResolvedValue(undefined),
-      getCurrentBranch: vi.fn().mockResolvedValue('main'),
-    }));
-    vi.doMock('@/lib/shared/project-data', () => ({
-      resolveProjectPath: vi.fn().mockReturnValue('/path/to/proj'),
-    }));
-    vi.doMock('@/lib/scheduling/scheduling', () => ({
-      getProjectTestConfig: vi.fn().mockReturnValue({
-        autoPushEnabled: false,
-        autoCommitEnabled: false,
-        releaseAfterRun: false,
-        prWorkflowEnabled: false,
-      }),
-    }));
-    vi.doMock('@/lib/pipeline/pipeline-lock', () => ({
-      releaseLock: vi.fn(),
-      getLock: vi.fn().mockReturnValue(null),
-      isLockOwnedByActiveRelease: vi.fn().mockReturnValue(false),
-    }));
-    vi.doMock('@/lib/jobs/retention', () => ({ pruneProjectLogs: vi.fn() }));
-    vi.doMock('@/lib/shared/notifications', () => ({
-      notify: vi.fn().mockResolvedValue(undefined),
-    }));
-    vi.doMock('@/lib/shared/job-control', () => ({
-      runAutoChainGates: vi.fn().mockReturnValue(null),
-    }));
-    vi.doMock('@/lib/shared/config', () => ({
-      getSettings: vi.fn().mockReturnValue({
-        fix_ci_max_retries: 0,
-        fix_ci_retry_window_seconds: 120,
-        fix_ci_fast_crash_ms: 5000,
-        incremental_review_enabled: false,
-        review_retry_on_parse_failure: false,
-      }),
-    }));
+    mocks.resolveProjectPath.mockReturnValue('/path/to/proj');
+    mocks.getSettings.mockReturnValue({
+      fix_ci_max_retries: 0,
+      fix_ci_retry_window_seconds: 120,
+      fix_ci_fast_crash_ms: 5000,
+      incremental_review_enabled: false,
+      review_retry_on_parse_failure: false,
+    });
   });
 
   afterEach(() => {
-    vi.resetModules();
     rmSync(tempDir, { recursive: true, force: true });
   });
 
@@ -1905,39 +1683,31 @@ describe('review completion preserves the git index', () => {
     const logPath = join(tempDir, 'standalone.log');
     writeFileSync(logPath, 'Findings: none\nVerdict: LGTM\n');
 
-    const mod = await import('@/lib/jobs/job-storage');
-    markDoneFn = mod.markDone;
-    await markDoneFn(makeReviewJob('review-standalone', logPath), 0);
+    await markDone(makeReviewJob('review-standalone', logPath), 0);
 
-    expect(markReviewedMock).toHaveBeenCalledWith('proj', '/path/to/proj');
-    expect(execMock.mock.calls.some((call) => call[0] === 'git' && call[1][2] === 'add')).toBe(false);
+    expect(mocks.markReviewed).toHaveBeenCalledWith('proj', '/path/to/proj');
+    expect(mocks.exec.mock.calls.some((call: unknown[]) => call[0] === 'git' && (call[1] as string[])[2] === 'add')).toBe(false);
   });
 
   it('does not stage files after a successful PR review', async () => {
     const logPath = join(tempDir, 'pr-review.log');
     writeFileSync(logPath, 'Findings: none\nVerdict: LGTM\n');
 
-    const mod = await import('@/lib/jobs/job-storage');
-    markDoneFn = mod.markDone;
-    await markDoneFn(
+    await markDone(
       makeReviewJob('review-pr', logPath, {
         contextMeta: JSON.stringify({ sourceType: 'pr_review', prNumber: 7 }),
       }),
       0
     );
 
-    expect(markReviewedMock).not.toHaveBeenCalled();
-    expect(execMock.mock.calls.some((call) => call[0] === 'git' && call[1][2] === 'add')).toBe(false);
+    expect(mocks.markReviewed).not.toHaveBeenCalled();
+    expect(mocks.exec.mock.calls.some((call: unknown[]) => call[0] === 'git' && (call[1] as string[])[2] === 'add')).toBe(false);
   });
 });
 
 // ─── auto-mark seen on completion ────────────────────────────────────────────
 
 describe('auto-mark seen on completion', () => {
-  let testDb: ReturnType<typeof createTestDb>;
-  let markDoneFn: typeof import('@/lib/jobs/job-storage').markDone;
-  let finalizeAgentRunReportMock: ReturnType<typeof vi.fn>;
-
   function makeInMemoryJob(id: string, kind: string, overrides: Partial<JobData> = {}): JobData {
     const now = Date.now() / 1000;
     return {
@@ -1949,64 +1719,23 @@ describe('auto-mark seen on completion', () => {
     };
   }
 
-  beforeEach(() => {
-    vi.resetModules();
-    testDb = createTestDb();
-    finalizeAgentRunReportMock = vi.fn().mockResolvedValue(undefined);
-    vi.doMock('@/lib/db', () => ({ db: testDb.db, schema }));
-    vi.doMock('@/lib/jobs/pm2-jobs', () => ({
-      deleteJob: vi.fn().mockResolvedValue(undefined),
-      getJobStatus: vi.fn(),
-    }));
-    vi.doMock('@/lib/shared/shell', () => ({
-      exec: vi.fn().mockResolvedValue({ exitCode: 0, stdout: '', stderr: '' }),
-    }));
-    vi.doMock('@/lib/git/git-utils', () => ({ markReviewed: vi.fn().mockResolvedValue(undefined) }));
-    vi.doMock('@/lib/shared/project-data', () => ({
-      resolveProjectPath: vi.fn().mockReturnValue(null),
-    }));
-    vi.doMock('@/lib/scheduling/scheduling', () => ({
-      getProjectTestConfig: vi.fn().mockReturnValue({
-        autoPushEnabled: false, autoCommitEnabled: false,
-        releaseAfterRun: false, prWorkflowEnabled: false,
-      }),
-    }));
-    vi.doMock('@/lib/pipeline/pipeline-lock', () => ({
-      releaseLock: vi.fn(), getLock: vi.fn().mockReturnValue(null),
-      isLockOwnedByActiveRelease: vi.fn().mockReturnValue(false),
-    }));
-    vi.doMock('@/lib/jobs/retention', () => ({ pruneProjectLogs: vi.fn() }));
-    vi.doMock('@/lib/shared/notifications', () => ({ notify: vi.fn().mockResolvedValue(undefined) }));
-    vi.doMock('@/lib/shared/config', () => ({
-      getSettings: vi.fn().mockReturnValue({
-        fix_ci_max_retries: 0, fix_ci_retry_window_seconds: 120, fix_ci_fast_crash_ms: 5000,
-      }),
-    }));
-    // finalizeAgentRunReport would otherwise overwrite job.modifiedFiles based
-    // on git/log inspection. The auto-mark logic depends on the value present
-    // at lifecycle time, so leave whatever the test set.
-    vi.doMock('@/lib/agents/agent-run-report', () => ({
-      finalizeAgentRunReport: finalizeAgentRunReportMock,
-    }));
+  beforeEach(async () => {
+    await resetTestState();
   });
 
-  afterEach(() => vi.resetModules());
-
   async function runMarkDone(job: JobData, exitCode: number): Promise<boolean> {
-    const mod = await import('@/lib/jobs/job-storage');
-    markDoneFn = mod.markDone;
-    await markDoneFn(job, exitCode);
-    const row = testDb.sqlite
-      .prepare('SELECT seen FROM jobs WHERE id = ?')
-      .get(job.id) as { seen: number | boolean } | undefined;
+    await markDone(job, exitCode);
+    const row = (await getTestDb().select().from(schema.jobs).where(eq(schema.jobs.id, job.id))).at(0);
     return !!row?.seen;
   }
 
   it('auto-marks a successful pipeline child seen (commit / push / test)', async () => {
     for (const kind of ['commit', 'push', 'test', 'fix-push', 'mark-dod']) {
+      // Each iteration starts from a clean state so previous DB rows don't
+      // leak into subsequent assertions.
+      await resetTestState();
       const seen = await runMarkDone(makeInMemoryJob(`${kind}-ok`, kind), 0);
       expect(seen, `${kind} exit-0 should be auto-seen`).toBe(true);
-      vi.resetModules();
     }
   });
 
@@ -2031,7 +1760,7 @@ describe('auto-mark seen on completion', () => {
     const seenLgtm = await runMarkDone(makeInMemoryJob('rev-lgtm', 'review', { logPath: lgtmLog }), 0);
     expect(seenLgtm).toBe(true);
 
-    vi.resetModules();
+    await resetTestState();
     const naLog = join(mkdtempSync(join(tmpdir(), 'amark-')), 'na.log');
     writeFileSync(naLog, 'Findings:\n- Finding ID: x\nVerdict: NEEDS ATTENTION\n');
     const seenNa = await runMarkDone(makeInMemoryJob('rev-na', 'review', { logPath: naLog }), 0);
@@ -2045,7 +1774,7 @@ describe('auto-mark seen on completion', () => {
     );
     expect(seenNoop).toBe(true);
 
-    vi.resetModules();
+    await resetTestState();
     const seenActionable = await runMarkDone(
       makeInMemoryJob('agent-act', 'agent:improve', { modifiedFiles: '[{"path":"a.ts"}]' }),
       0,
@@ -2054,7 +1783,7 @@ describe('auto-mark seen on completion', () => {
   });
 
   it('keeps an agent run unseen when report extraction fails and modifiedFiles is missing', async () => {
-    finalizeAgentRunReportMock.mockRejectedValueOnce(new Error('git status failed'));
+    mocks.finalizeAgentRunReport.mockRejectedValueOnce(new Error('git status failed'));
     const seen = await runMarkDone(
       makeInMemoryJob('agent-report-fail', 'agent:improve', { modifiedFiles: null }),
       0,
@@ -2064,10 +1793,6 @@ describe('auto-mark seen on completion', () => {
 });
 
 describe('fix-push cap notifications', () => {
-  let testDb: ReturnType<typeof createTestDb>;
-  let markDoneFn: typeof import('@/lib/jobs/job-storage').markDone;
-  let notifyMock: ReturnType<typeof vi.fn>;
-  let startFixPushMock: ReturnType<typeof vi.fn>;
   let tempDir: string;
 
   function makePushJob(id: string, overrides: Partial<JobData> = {}): JobData {
@@ -2094,62 +1819,20 @@ describe('fix-push cap notifications', () => {
   }
 
   beforeEach(async () => {
-    vi.resetModules();
-    testDb = createTestDb();
+    await resetTestState();
     tempDir = mkdtempSync(join(tmpdir(), 'tamtam-fix-push-cap-'));
-    notifyMock = vi.fn().mockResolvedValue(undefined);
-    startFixPushMock = vi.fn().mockResolvedValue({ ok: true, jobId: 'fix-push-next' });
-
-    vi.doMock('@/lib/db', () => ({ db: testDb.db, schema }));
-    vi.doMock('@/lib/jobs/pm2-jobs', () => ({
-      deleteJob: vi.fn().mockResolvedValue(undefined),
-      getJobStatus: vi.fn(),
-    }));
-    vi.doMock('@/lib/shared/shell', () => ({
-      exec: vi.fn().mockResolvedValue({ exitCode: 0, stdout: '', stderr: '' }),
-    }));
-    vi.doMock('@/lib/git/git-utils', () => ({
-      markReviewed: vi.fn().mockResolvedValue(undefined),
-    }));
-    vi.doMock('@/lib/shared/project-data', () => ({
-      resolveProjectPath: vi.fn().mockReturnValue(null),
-    }));
-    vi.doMock('@/lib/scheduling/scheduling', () => ({
-      getProjectTestConfig: vi.fn().mockReturnValue({
-        autoPushEnabled: true,
-        autoCommitEnabled: false,
-        releaseAfterRun: false,
-        prWorkflowEnabled: false,
-        autoPrMergeEnabled: false,
-      }),
-    }));
-    vi.doMock('@/lib/pipeline/pipeline-lock', () => ({
-      releaseLock: vi.fn(),
-      getLock: vi.fn().mockReturnValue(null),
-      isLockOwnedByActiveRelease: vi.fn().mockReturnValue(false),
-    }));
-    vi.doMock('@/lib/jobs/retention', () => ({
-      pruneProjectLogs: vi.fn(),
-    }));
-    vi.doMock('@/lib/shared/notifications', () => ({
-      notify: notifyMock,
-    }));
-    vi.doMock('@/lib/shared/config', () => ({
-      getSettings: vi.fn().mockReturnValue({
-        fix_ci_max_retries: 0,
-        fix_ci_retry_window_seconds: 120,
-        fix_ci_fast_crash_ms: 5000,
-      }),
-    }));
-    vi.doMock('@/lib/pipeline/start-fix-push', () => ({
-      isHookRejection: vi.fn().mockReturnValue(true),
-      isTestFailureRejection: vi.fn().mockReturnValue(false),
-      startFixPush: startFixPushMock,
-    }));
+    mocks.getProjectTestConfig.mockReturnValue({
+      autoPushEnabled: true,
+      autoCommitEnabled: false,
+      releaseAfterRun: false,
+      prWorkflowEnabled: false,
+      autoPrMergeEnabled: false,
+    });
+    mocks.isHookRejection.mockReturnValue(true);
+    mocks.isTestFailureRejection.mockReturnValue(false);
   });
 
   afterEach(() => {
-    vi.resetModules();
     rmSync(tempDir, { recursive: true, force: true });
   });
 
@@ -2160,14 +1843,14 @@ describe('fix-push cap notifications', () => {
     writeFileSync(releaseLog, '# release start\n');
     writeFileSync(pushLog, 'husky - pre-push hook exited with code 1\n');
 
-    testDb.db.insert(schema.jobs).values([
+    await insertJobsAndCache(getTestDb(), [
       makeJobRow({
         id: 'release-fix-push-cap',
         project: 'proj',
         kind: 'release',
         logPath: releaseLog,
         startedAt: now - 300,
-      }) as any,
+      }),
       makeJobRow({
         id: 'fix-push-old-1',
         project: 'proj',
@@ -2175,7 +1858,7 @@ describe('fix-push cap notifications', () => {
         startedAt: now - 120,
         finishedAt: now - 110,
         exitCode: 0,
-      }) as any,
+      }),
       makeJobRow({
         id: 'fix-push-old-2',
         project: 'proj',
@@ -2183,11 +1866,8 @@ describe('fix-push cap notifications', () => {
         startedAt: now - 90,
         finishedAt: now - 80,
         exitCode: 0,
-      }) as any,
-    ]).run();
-
-    const { markDone } = await import('@/lib/jobs/job-storage');
-    markDoneFn = markDone;
+      }),
+    ]);
 
     const pushJob = makePushJob('push-cap-hit', {
       logPath: pushLog,
@@ -2195,21 +1875,20 @@ describe('fix-push cap notifications', () => {
       startedAt: now - 10,
     });
 
-    await markDoneFn(pushJob, 1);
+    await markDone(pushJob, 1);
 
-    expect(startFixPushMock).not.toHaveBeenCalled();
-    expect(notifyMock).toHaveBeenCalledWith(expect.objectContaining({
+    expect(mocks.startFixPush).not.toHaveBeenCalled();
+    expect(mocks.notify).toHaveBeenCalledWith(expect.objectContaining({
       event: 'fix_loop_exhausted',
       project: 'proj',
       job_id: 'push-cap-hit',
       status: 'failed',
     }));
 
-    const releaseRow = testDb.db
+    const releaseRow = (await getTestDb()
       .select()
       .from(schema.jobs)
-      .where(eq(schema.jobs.id, 'release-fix-push-cap'))
-      .get();
+      .where(eq(schema.jobs.id, 'release-fix-push-cap'))).at(0);
     expect(releaseRow?.exitCode).toBe(1);
     expect(releaseRow?.finishedAt).not.toBeNull();
     expect(releaseRow?.contextMeta).toContain('"releaseStopReason":"fix-push cap reached for proj');
@@ -2220,9 +1899,6 @@ describe('fix-push cap notifications', () => {
 // ─── agent drain hook ─────────────────────────────────────────────────────────
 
 describe('agent drain hook', () => {
-  let testDb: ReturnType<typeof createTestDb>;
-  let drainNextAgentRunMock: ReturnType<typeof vi.fn>;
-
   function makeAgentJob(id: string, kind: string, overrides: Partial<JobData> = {}): JobData {
     const now = Date.now() / 1000;
     return {
@@ -2234,89 +1910,43 @@ describe('agent drain hook', () => {
     };
   }
 
-  beforeEach(() => {
-    vi.resetModules();
-    testDb = createTestDb();
-    drainNextAgentRunMock = vi.fn().mockResolvedValue(undefined);
-
-    vi.doMock('@/lib/db', () => ({ db: testDb.db, schema }));
-    vi.doMock('@/lib/jobs/pm2-jobs', () => ({
-      deleteJob: vi.fn().mockResolvedValue(undefined),
-      getJobStatus: vi.fn(),
-    }));
-    vi.doMock('@/lib/shared/shell', () => ({
-      exec: vi.fn().mockResolvedValue({ exitCode: 0, stdout: '', stderr: '' }),
-    }));
-    vi.doMock('@/lib/git/git-utils', () => ({ markReviewed: vi.fn().mockResolvedValue(undefined) }));
-    vi.doMock('@/lib/shared/project-data', () => ({
-      resolveProjectPath: vi.fn().mockReturnValue(null),
-    }));
-    vi.doMock('@/lib/scheduling/scheduling', () => ({
-      getProjectTestConfig: vi.fn().mockReturnValue({
-        autoPushEnabled: false, autoCommitEnabled: false,
-        releaseAfterRun: false, prWorkflowEnabled: false,
-      }),
-    }));
-    vi.doMock('@/lib/pipeline/pipeline-lock', () => ({
-      releaseLock: vi.fn(), getLock: vi.fn().mockReturnValue(null),
-      isLockOwnedByActiveRelease: vi.fn().mockReturnValue(false),
-    }));
-    vi.doMock('@/lib/jobs/retention', () => ({ pruneProjectLogs: vi.fn() }));
-    vi.doMock('@/lib/shared/notifications', () => ({ notify: vi.fn().mockResolvedValue(undefined) }));
-    vi.doMock('@/lib/shared/config', () => ({
-      getSettings: vi.fn().mockReturnValue({
-        fix_ci_max_retries: 0, fix_ci_retry_window_seconds: 120, fix_ci_fast_crash_ms: 5000,
-      }),
-    }));
-    vi.doMock('@/lib/agents/agent-run-report', () => ({
-      finalizeAgentRunReport: vi.fn().mockResolvedValue(undefined),
-    }));
-    vi.doMock('@/lib/agents/pending-agent-run', () => ({
-      drainNextAgentRun: drainNextAgentRunMock,
-    }));
+  beforeEach(async () => {
+    await resetTestState();
   });
-
-  afterEach(() => vi.resetModules());
 
   it('calls drainNextAgentRun with the project when an agent job finishes', async () => {
     const job = makeAgentJob('agent-done', 'agent:improve');
-    testDb.db.insert(schema.jobs).values(makeJobRow({ id: job.id, project: job.project, kind: job.kind })).run();
+    await insertJobsAndCache(getTestDb(), [makeJobRow({ id: job.id, project: job.project, kind: job.kind })]);
 
-    const { markDone } = await import('@/lib/jobs/job-storage');
     await markDone(job, 0);
 
-    expect(drainNextAgentRunMock).toHaveBeenCalledOnce();
-    expect(drainNextAgentRunMock).toHaveBeenCalledWith('proj');
+    expect(mocks.drainNextAgentRun).toHaveBeenCalledOnce();
+    expect(mocks.drainNextAgentRun).toHaveBeenCalledWith('proj');
   });
 
   it('calls drainNextAgentRun even when the agent job fails', async () => {
     const job = makeAgentJob('agent-fail-drain', 'agent:tests');
-    testDb.db.insert(schema.jobs).values(makeJobRow({ id: job.id, project: job.project, kind: job.kind })).run();
+    await insertJobsAndCache(getTestDb(), [makeJobRow({ id: job.id, project: job.project, kind: job.kind })]);
 
-    const { markDone } = await import('@/lib/jobs/job-storage');
     await markDone(job, 1);
 
-    expect(drainNextAgentRunMock).toHaveBeenCalledOnce();
-    expect(drainNextAgentRunMock).toHaveBeenCalledWith('proj');
+    expect(mocks.drainNextAgentRun).toHaveBeenCalledOnce();
+    expect(mocks.drainNextAgentRun).toHaveBeenCalledWith('proj');
   });
 
   it('does NOT call drainNextAgentRun for non-agent jobs', async () => {
     const job = makeAgentJob('push-done', 'push');
-    testDb.db.insert(schema.jobs).values(makeJobRow({ id: job.id, project: job.project, kind: job.kind })).run();
+    await insertJobsAndCache(getTestDb(), [makeJobRow({ id: job.id, project: job.project, kind: job.kind })]);
 
-    const { markDone } = await import('@/lib/jobs/job-storage');
     await markDone(job, 0);
 
-    expect(drainNextAgentRunMock).not.toHaveBeenCalled();
+    expect(mocks.drainNextAgentRun).not.toHaveBeenCalled();
   });
 });
 
 // ─── agent run failure notification ──────────────────────────────────────────
 
 describe('agent run failure notification', () => {
-  let testDb: ReturnType<typeof createTestDb>;
-  let notifyMock: ReturnType<typeof vi.fn>;
-
   function makeAgentJob(id: string, kind: string, overrides: Partial<JobData> = {}): JobData {
     const now = Date.now() / 1000;
     return {
@@ -2328,58 +1958,17 @@ describe('agent run failure notification', () => {
     };
   }
 
-  beforeEach(() => {
-    vi.resetModules();
-    testDb = createTestDb();
-    notifyMock = vi.fn().mockResolvedValue(undefined);
-
-    vi.doMock('@/lib/db', () => ({ db: testDb.db, schema }));
-    vi.doMock('@/lib/jobs/pm2-jobs', () => ({
-      deleteJob: vi.fn().mockResolvedValue(undefined),
-      getJobStatus: vi.fn(),
-    }));
-    vi.doMock('@/lib/shared/shell', () => ({
-      exec: vi.fn().mockResolvedValue({ exitCode: 0, stdout: '', stderr: '' }),
-    }));
-    vi.doMock('@/lib/git/git-utils', () => ({ markReviewed: vi.fn().mockResolvedValue(undefined) }));
-    vi.doMock('@/lib/shared/project-data', () => ({
-      resolveProjectPath: vi.fn().mockReturnValue(null),
-    }));
-    vi.doMock('@/lib/scheduling/scheduling', () => ({
-      getProjectTestConfig: vi.fn().mockReturnValue({
-        autoPushEnabled: false, autoCommitEnabled: false,
-        releaseAfterRun: false, prWorkflowEnabled: false,
-      }),
-    }));
-    vi.doMock('@/lib/pipeline/pipeline-lock', () => ({
-      releaseLock: vi.fn(), getLock: vi.fn().mockReturnValue(null),
-      isLockOwnedByActiveRelease: vi.fn().mockReturnValue(false),
-    }));
-    vi.doMock('@/lib/jobs/retention', () => ({ pruneProjectLogs: vi.fn() }));
-    vi.doMock('@/lib/shared/notifications', () => ({ notify: notifyMock }));
-    vi.doMock('@/lib/shared/config', () => ({
-      getSettings: vi.fn().mockReturnValue({
-        fix_ci_max_retries: 0, fix_ci_retry_window_seconds: 120, fix_ci_fast_crash_ms: 5000,
-      }),
-    }));
-    vi.doMock('@/lib/agents/agent-run-report', () => ({
-      finalizeAgentRunReport: vi.fn().mockResolvedValue(undefined),
-    }));
-    vi.doMock('@/lib/agents/pending-agent-run', () => ({
-      drainNextAgentRun: vi.fn().mockResolvedValue(undefined),
-    }));
+  beforeEach(async () => {
+    await resetTestState();
   });
-
-  afterEach(() => vi.resetModules());
 
   it('emits agent_run_fail notification when an agent job exits non-zero', async () => {
     const job = makeAgentJob('agent-fail', 'agent:my-agent');
-    testDb.db.insert(schema.jobs).values(makeJobRow({ id: job.id, project: job.project, kind: job.kind })).run();
+    await insertJobsAndCache(getTestDb(), [makeJobRow({ id: job.id, project: job.project, kind: job.kind })]);
 
-    const { markDone } = await import('@/lib/jobs/job-storage');
     await markDone(job, 1);
 
-    const call = notifyMock.mock.calls.find(
+    const call = mocks.notify.mock.calls.find(
       (c: unknown[]) => (c[0] as { event?: string })?.event === 'agent_run_fail',
     );
     expect(call).toBeDefined();
@@ -2394,12 +1983,11 @@ describe('agent run failure notification', () => {
 
   it('does NOT emit agent_run_fail when the agent job succeeds', async () => {
     const job = makeAgentJob('agent-ok', 'agent:improve');
-    testDb.db.insert(schema.jobs).values(makeJobRow({ id: job.id, project: job.project, kind: job.kind })).run();
+    await insertJobsAndCache(getTestDb(), [makeJobRow({ id: job.id, project: job.project, kind: job.kind })]);
 
-    const { markDone } = await import('@/lib/jobs/job-storage');
     await markDone(job, 0);
 
-    const failCall = notifyMock.mock.calls.find(
+    const failCall = mocks.notify.mock.calls.find(
       (c: unknown[]) => (c[0] as { event?: string })?.event === 'agent_run_fail',
     );
     expect(failCall).toBeUndefined();
@@ -2407,12 +1995,11 @@ describe('agent run failure notification', () => {
 
   it('does NOT emit agent_run_fail for non-agent job failures', async () => {
     const job = makeAgentJob('test-fail', 'test');
-    testDb.db.insert(schema.jobs).values(makeJobRow({ id: job.id, project: job.project, kind: job.kind })).run();
+    await insertJobsAndCache(getTestDb(), [makeJobRow({ id: job.id, project: job.project, kind: job.kind })]);
 
-    const { markDone } = await import('@/lib/jobs/job-storage');
     await markDone(job, 1);
 
-    const failCall = notifyMock.mock.calls.find(
+    const failCall = mocks.notify.mock.calls.find(
       (c: unknown[]) => (c[0] as { event?: string })?.event === 'agent_run_fail',
     );
     expect(failCall).toBeUndefined();
@@ -2422,9 +2009,6 @@ describe('agent run failure notification', () => {
 // ─── orphan release lock release ─────────────────────────────────────────────
 
 describe('orphan release lock release', () => {
-  let testDb: ReturnType<typeof createTestDb>;
-  let releaseLockMock: ReturnType<typeof vi.fn>;
-
   function makeReleaseJob(id: string, overrides: Partial<JobData> = {}): JobData {
     const now = Date.now() / 1000;
     return {
@@ -2436,78 +2020,33 @@ describe('orphan release lock release', () => {
     };
   }
 
-  beforeEach(() => {
-    vi.resetModules();
-    testDb = createTestDb();
-    releaseLockMock = vi.fn();
-
-    vi.doMock('@/lib/db', () => ({ db: testDb.db, schema }));
-    vi.doMock('@/lib/jobs/pm2-jobs', () => ({
-      deleteJob: vi.fn().mockResolvedValue(undefined),
-      getJobStatus: vi.fn(),
-    }));
-    vi.doMock('@/lib/shared/shell', () => ({
-      exec: vi.fn().mockResolvedValue({ exitCode: 0, stdout: '', stderr: '' }),
-    }));
-    vi.doMock('@/lib/git/git-utils', () => ({ markReviewed: vi.fn().mockResolvedValue(undefined) }));
-    vi.doMock('@/lib/shared/project-data', () => ({
-      resolveProjectPath: vi.fn().mockReturnValue(null),
-    }));
-    vi.doMock('@/lib/scheduling/scheduling', () => ({
-      getProjectTestConfig: vi.fn().mockReturnValue({
-        autoPushEnabled: false, autoCommitEnabled: false,
-        releaseAfterRun: false, prWorkflowEnabled: false,
-      }),
-    }));
-    vi.doMock('@/lib/pipeline/pipeline-lock', () => ({
-      releaseLock: releaseLockMock,
-      getLock: vi.fn().mockReturnValue(null),
-      isLockOwnedByActiveRelease: vi.fn().mockReturnValue(false),
-    }));
-    vi.doMock('@/lib/jobs/retention', () => ({ pruneProjectLogs: vi.fn() }));
-    vi.doMock('@/lib/shared/notifications', () => ({ notify: vi.fn().mockResolvedValue(undefined) }));
-    vi.doMock('@/lib/shared/config', () => ({
-      getSettings: vi.fn().mockReturnValue({
-        fix_ci_max_retries: 0, fix_ci_retry_window_seconds: 120, fix_ci_fast_crash_ms: 5000,
-      }),
-    }));
-    vi.doMock('@/lib/agents/agent-run-report', () => ({
-      finalizeAgentRunReport: vi.fn().mockResolvedValue(undefined),
-    }));
+  beforeEach(async () => {
+    await resetTestState();
   });
-
-  afterEach(() => vi.resetModules());
 
   it('calls releaseLock with project and jobId when a release job completes', async () => {
     const job = makeReleaseJob('release-orphan');
-    testDb.db.insert(schema.jobs).values(makeJobRow({ id: job.id, project: job.project, kind: job.kind })).run();
+    await insertJobsAndCache(getTestDb(), [makeJobRow({ id: job.id, project: job.project, kind: job.kind })]);
 
-    const { markDone } = await import('@/lib/jobs/job-storage');
     await markDone(job, 0);
 
-    expect(releaseLockMock).toHaveBeenCalledWith('proj', 'release-orphan');
+    expect(mocks.releaseLock).toHaveBeenCalledWith('proj', 'release-orphan');
   });
 
   it('does NOT call releaseLock for interactive run jobs', async () => {
     const job = makeReleaseJob('run-job-1', { kind: 'run' });
-    testDb.db.insert(schema.jobs).values(makeJobRow({ id: job.id, project: job.project, kind: job.kind })).run();
+    await insertJobsAndCache(getTestDb(), [makeJobRow({ id: job.id, project: job.project, kind: job.kind })]);
 
-    const { markDone } = await import('@/lib/jobs/job-storage');
     await markDone(job, 0);
 
     // Neither the pipeline-step path nor the release-kind guard applies to `run` jobs
-    expect(releaseLockMock).not.toHaveBeenCalled();
+    expect(mocks.releaseLock).not.toHaveBeenCalled();
   });
 });
 
 // ─── push → dod target selection ─────────────────────────────────────────────
 
 describe('push → dod target selection', () => {
-  let testDb: ReturnType<typeof createTestDb>;
-  let startMarkDodMock: ReturnType<typeof vi.fn>;
-  let launchPrWaitMock: ReturnType<typeof vi.fn>;
-  let markDoneFn: typeof import('@/lib/jobs/job-storage').markDone;
-
   const prContextMeta = JSON.stringify({ prNumber: 42, prRepo: 'owner/repo', prUrl: 'https://github.com/owner/repo/pull/42' });
 
   function makePushJob(id: string, overrides: Partial<JobData> = {}): JobData {
@@ -2522,53 +2061,13 @@ describe('push → dod target selection', () => {
   }
 
   beforeEach(async () => {
-    vi.resetModules();
-    testDb = createTestDb();
-    startMarkDodMock = vi.fn().mockResolvedValue({ ok: true, verified: 1, total: 1, changed: false });
-    launchPrWaitMock = vi.fn().mockReturnValue({ jobId: 'pr-wait-job' });
-
-    vi.doMock('@/lib/db', () => ({ db: testDb.db, schema }));
-    vi.doMock('@/lib/jobs/pm2-jobs', () => ({
-      deleteJob: vi.fn().mockResolvedValue(undefined),
-      getJobStatus: vi.fn(),
-    }));
-    vi.doMock('@/lib/shared/shell', () => ({
-      exec: vi.fn().mockResolvedValue({ exitCode: 0, stdout: '', stderr: '' }),
-    }));
-    vi.doMock('@/lib/git/git-utils', () => ({ markReviewed: vi.fn().mockResolvedValue(undefined) }));
-    vi.doMock('@/lib/shared/project-data', () => ({
-      resolveProjectPath: vi.fn().mockReturnValue(null),
-    }));
-    vi.doMock('@/lib/scheduling/scheduling', () => ({
-      getProjectTestConfig: vi.fn().mockReturnValue({
-        autoPushEnabled: false, autoCommitEnabled: false,
-        releaseAfterRun: false, prWorkflowEnabled: false,
-        autoPrMergeEnabled: false,
-      }),
-    }));
-    vi.doMock('@/lib/pipeline/pipeline-lock', () => ({
-      releaseLock: vi.fn(),
-      getLock: vi.fn().mockReturnValue(null),
-      isLockOwnedByActiveRelease: vi.fn().mockReturnValue(false),
-    }));
-    vi.doMock('@/lib/jobs/retention', () => ({ pruneProjectLogs: vi.fn() }));
-    vi.doMock('@/lib/shared/notifications', () => ({ notify: vi.fn().mockResolvedValue(undefined) }));
-    vi.doMock('@/lib/shared/config', () => ({
-      getSettings: vi.fn().mockReturnValue({
-        fix_ci_max_retries: 0, fix_ci_retry_window_seconds: 120, fix_ci_fast_crash_ms: 5000,
-      }),
-    }));
-    vi.doMock('@/lib/pipeline/start-mark-dod', () => ({ startMarkDod: startMarkDodMock }));
-    vi.doMock('@/lib/pipeline/start-pr-wait', () => ({ launchPrWait: launchPrWaitMock }));
-    vi.doMock('@/lib/agents/agent-run-report', () => ({
-      finalizeAgentRunReport: vi.fn().mockResolvedValue(undefined),
-    }));
-
-    const mod = await import('@/lib/jobs/job-storage');
-    markDoneFn = mod.markDone;
+    await resetTestState();
+    mocks.getProjectTestConfig.mockReturnValue({
+      autoPushEnabled: false, autoCommitEnabled: false,
+      releaseAfterRun: false, prWorkflowEnabled: false,
+      autoPrMergeEnabled: false,
+    });
   });
-
-  afterEach(() => vi.resetModules());
 
   it('uses issue target when ghIssueNumber and ghIssueRepo are set', async () => {
     const job = makePushJob('push-issue-dod', {
@@ -2577,11 +2076,11 @@ describe('push → dod target selection', () => {
       ghIssueNumber: 7,
       ghIssueRepo: 'owner/repo',
     });
-    testDb.db.insert(schema.jobs).values(makeJobRow({ id: job.id, project: job.project, kind: job.kind })).run();
+    await insertJobsAndCache(getTestDb(), [makeJobRow({ id: job.id, project: job.project, kind: job.kind })]);
 
-    await markDoneFn(job, 0);
+    await markDone(job, 0);
 
-    expect(startMarkDodMock).toHaveBeenCalledWith('proj', { issueNumber: 7, repo: 'owner/repo' });
+    expect(mocks.startMarkDod).toHaveBeenCalledWith('proj', { issueNumber: 7, repo: 'owner/repo' });
   });
 
   it('falls back to PR target when ghIssueNumber is null', async () => {
@@ -2591,11 +2090,11 @@ describe('push → dod target selection', () => {
       ghIssueNumber: null,
       ghIssueRepo: null,
     });
-    testDb.db.insert(schema.jobs).values(makeJobRow({ id: job.id, project: job.project, kind: job.kind })).run();
+    await insertJobsAndCache(getTestDb(), [makeJobRow({ id: job.id, project: job.project, kind: job.kind })]);
 
-    await markDoneFn(job, 0);
+    await markDone(job, 0);
 
-    expect(startMarkDodMock).toHaveBeenCalledWith('proj', { prNumber: 42, repo: 'owner/repo' });
+    expect(mocks.startMarkDod).toHaveBeenCalledWith('proj', { prNumber: 42, repo: 'owner/repo' });
   });
 
   it('skips dod entirely when contextMeta has no prNumber', async () => {
@@ -2603,34 +2102,31 @@ describe('push → dod target selection', () => {
       exitCode: 0,
       contextMeta: JSON.stringify({ message: 'pushed ok' }),
     });
-    testDb.db.insert(schema.jobs).values(makeJobRow({ id: job.id, project: job.project, kind: job.kind })).run();
+    await insertJobsAndCache(getTestDb(), [makeJobRow({ id: job.id, project: job.project, kind: job.kind })]);
 
-    await markDoneFn(job, 0);
+    await markDone(job, 0);
 
-    expect(startMarkDodMock).not.toHaveBeenCalled();
+    expect(mocks.startMarkDod).not.toHaveBeenCalled();
   });
 
   it('launches pr-wait and skips dod when autoPrMergeEnabled is true', async () => {
-    vi.doMock('@/lib/scheduling/scheduling', () => ({
-      getProjectTestConfig: vi.fn().mockReturnValue({
-        autoPushEnabled: false, autoCommitEnabled: false,
-        releaseAfterRun: false, prWorkflowEnabled: false,
-        autoPrMergeEnabled: true,
-      }),
-    }));
+    mocks.getProjectTestConfig.mockReturnValue({
+      autoPushEnabled: false, autoCommitEnabled: false,
+      releaseAfterRun: false, prWorkflowEnabled: false,
+      autoPrMergeEnabled: true,
+    });
 
-    const mod = await import('@/lib/jobs/job-storage');
     const job = makePushJob('push-auto-merge', {
       exitCode: 0,
       contextMeta: prContextMeta,
       ghIssueNumber: 7,
       ghIssueRepo: 'owner/repo',
     });
-    testDb.db.insert(schema.jobs).values(makeJobRow({ id: job.id, project: job.project, kind: job.kind })).run();
+    await insertJobsAndCache(getTestDb(), [makeJobRow({ id: job.id, project: job.project, kind: job.kind })]);
 
-    await mod.markDone(job, 0);
+    await markDone(job, 0);
 
-    expect(launchPrWaitMock).toHaveBeenCalledWith('proj', 42, 'owner/repo', 'https://github.com/owner/repo/pull/42');
-    expect(startMarkDodMock).not.toHaveBeenCalled();
+    expect(mocks.launchPrWait).toHaveBeenCalledWith('proj', 42, 'owner/repo', 'https://github.com/owner/repo/pull/42');
+    expect(mocks.startMarkDod).not.toHaveBeenCalled();
   });
 });

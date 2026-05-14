@@ -3,7 +3,7 @@ import { mkdtemp, writeFile, chmod, rm, readFile } from 'fs/promises';
 import { tmpdir } from 'os';
 import { join } from 'path';
 import { spawn } from 'child_process';
-import { describe, it, expect, afterEach } from 'vitest';
+import { describe, it, expect, beforeAll, afterAll } from 'vitest';
 
 const _require = createRequire(import.meta.url);
 const shim = _require(join(process.cwd(), 'scripts/codex-shim.js')) as {
@@ -13,7 +13,45 @@ const shim = _require(join(process.cwd(), 'scripts/codex-shim.js')) as {
   approvalFor: (mode: string) => string;
 };
 
+// All temp dirs created during the suite. Cleared once in afterAll instead of
+// per-test so it.concurrent tests don't race over a shared list. Disk usage
+// per dir is a few hundred bytes (one tiny .js file), so retaining them for
+// the suite duration is cheap.
 const tempDirs: string[] = [];
+
+// Reused across all tests. Writing a fresh executable file per test costs
+// ~200ms on macOS (Gatekeeper/quarantine first-run scan). The dispatcher is
+// chmod +x once and reused; per-test behavior is loaded from a plain .js file
+// (no exec bit, no penalty) referenced via FAKE_CODEX_SCRIPT.
+let sharedRoot = '';
+let sharedFakeCodex = '';
+
+beforeAll(async () => {
+  sharedRoot = await mkdtemp(join(tmpdir(), 'tamtam-codex-shim-shared-'));
+  sharedFakeCodex = join(sharedRoot, 'codex');
+  await writeFile(sharedFakeCodex, `#!/usr/bin/env node
+const scriptPath = process.env.FAKE_CODEX_SCRIPT;
+if (!scriptPath) {
+  process.stderr.write('FAKE_CODEX_SCRIPT not set\\n');
+  process.exit(2);
+}
+require(scriptPath);
+`);
+  await chmod(sharedFakeCodex, 0o755);
+});
+
+afterAll(async () => {
+  await Promise.all(tempDirs.splice(0).map((dir) => rm(dir, { recursive: true, force: true })));
+  if (sharedRoot) await rm(sharedRoot, { recursive: true, force: true });
+});
+
+async function makeFakeCodex(behavior: string): Promise<{ dir: string; behaviorPath: string }> {
+  const dir = await mkdtemp(join(tmpdir(), 'tamtam-codex-shim-'));
+  tempDirs.push(dir);
+  const behaviorPath = join(dir, 'behavior.js');
+  await writeFile(behaviorPath, behavior);
+  return { dir, behaviorPath };
+}
 
 function runNode(args: string[], env: NodeJS.ProcessEnv): Promise<{ code: number | null; stdout: string; stderr: string }> {
   return new Promise((resolve, reject) => {
@@ -44,11 +82,7 @@ async function waitForFile(path: string, timeoutMs = 1000): Promise<string> {
   throw new Error(`timed out waiting for ${path}`);
 }
 
-describe('codex-shim', () => {
-  afterEach(async () => {
-    await Promise.all(tempDirs.splice(0).map((dir) => rm(dir, { recursive: true, force: true })));
-  });
-
+describe.concurrent('codex-shim', () => {
   it('maps bypassPermissions to Codex full approval and sandbox bypass', () => {
     const args = shim.permissionArgsFor('bypassPermissions');
     expect(args).toContain('--dangerously-bypass-approvals-and-sandbox');
@@ -85,11 +119,8 @@ describe('codex-shim', () => {
   });
 
   it('emits assistant text once and preserves the Codex session id', async () => {
-    const dir = await mkdtemp(join(tmpdir(), 'tamtam-codex-shim-'));
-    tempDirs.push(dir);
-    const fakeCodex = join(dir, 'codex');
     const sessionId = '019de76e-0ffe-7e43-9335-60c482aac2ea';
-    await writeFile(fakeCodex, `#!/usr/bin/env node
+    const { behaviorPath } = await makeFakeCodex(`
 const events = [
   { type: 'session_meta', payload: { id: '${sessionId}' } },
   { type: 'event_msg', payload: { type: 'agent_message', message: 'NEEDS ATTENTION', phase: 'final_answer' } },
@@ -99,7 +130,6 @@ const events = [
 ];
 for (const event of events) console.log(JSON.stringify(event));
 `);
-    await chmod(fakeCodex, 0o755);
 
     const result = await runNode([
       'scripts/codex-shim.js',
@@ -111,7 +141,8 @@ for (const event of events) console.log(JSON.stringify(event));
       'bypassPermissions',
     ], {
       ...process.env,
-      CODEX_BIN: fakeCodex,
+      CODEX_BIN: sharedFakeCodex,
+      FAKE_CODEX_SCRIPT: behaviorPath,
     });
 
     expect(result.code).toBe(0);
@@ -133,10 +164,7 @@ for (const event of events) console.log(JSON.stringify(event));
   });
 
   it('emits assistant response_item text without echoing prompt messages', async () => {
-    const dir = await mkdtemp(join(tmpdir(), 'tamtam-codex-shim-'));
-    tempDirs.push(dir);
-    const fakeCodex = join(dir, 'codex');
-    await writeFile(fakeCodex, `#!/usr/bin/env node
+    const { behaviorPath } = await makeFakeCodex(`
 const events = [
   { type: 'response_item', payload: { type: 'message', role: 'user', content: [{ type: 'input_text', text: 'DO NOT ECHO' }] } },
   { type: 'response_item', payload: { type: 'message', role: 'assistant', content: [{ type: 'output_text', text: 'Verdict: LGTM' }] } },
@@ -144,7 +172,6 @@ const events = [
 ];
 for (const event of events) console.log(JSON.stringify(event));
 `);
-    await chmod(fakeCodex, 0o755);
 
     const result = await runNode([
       'scripts/codex-shim.js',
@@ -154,7 +181,8 @@ for (const event of events) console.log(JSON.stringify(event));
       'sonnet',
     ], {
       ...process.env,
-      CODEX_BIN: fakeCodex,
+      CODEX_BIN: sharedFakeCodex,
+      FAKE_CODEX_SCRIPT: behaviorPath,
     });
 
     expect(result.code).toBe(0);
@@ -171,11 +199,8 @@ for (const event of events) console.log(JSON.stringify(event));
   });
 
   it('parses real Codex item.completed agent_message events', async () => {
-    const dir = await mkdtemp(join(tmpdir(), 'tamtam-codex-shim-'));
-    tempDirs.push(dir);
-    const fakeCodex = join(dir, 'codex');
     const sessionId = '019de81b-075a-7410-a6eb-0031655a589f';
-    await writeFile(fakeCodex, `#!/usr/bin/env node
+    const { behaviorPath } = await makeFakeCodex(`
 const events = [
   { type: 'thread.started', thread_id: '${sessionId}' },
   { type: 'turn.started' },
@@ -184,7 +209,6 @@ const events = [
 ];
 for (const event of events) console.log(JSON.stringify(event));
 `);
-    await chmod(fakeCodex, 0o755);
 
     const result = await runNode([
       'scripts/codex-shim.js',
@@ -194,7 +218,8 @@ for (const event of events) console.log(JSON.stringify(event));
       'sonnet',
     ], {
       ...process.env,
-      CODEX_BIN: fakeCodex,
+      CODEX_BIN: sharedFakeCodex,
+      FAKE_CODEX_SCRIPT: behaviorPath,
     });
 
     expect(result.code).toBe(0);
@@ -216,10 +241,7 @@ for (const event of events) console.log(JSON.stringify(event));
   });
 
   it('silently consumes Codex lifecycle events (item.started, turn.started, etc.) without echoing JSON', async () => {
-    const dir = await mkdtemp(join(tmpdir(), 'tamtam-codex-shim-'));
-    tempDirs.push(dir);
-    const fakeCodex = join(dir, 'codex');
-    await writeFile(fakeCodex, `#!/usr/bin/env node
+    const { behaviorPath } = await makeFakeCodex(`
 const events = [
   { type: 'thread.started', thread_id: 'sess-life' },
   { type: 'turn.started' },
@@ -230,7 +252,6 @@ const events = [
 ];
 for (const event of events) console.log(JSON.stringify(event));
 `);
-    await chmod(fakeCodex, 0o755);
 
     const result = await runNode([
       'scripts/codex-shim.js',
@@ -240,7 +261,8 @@ for (const event of events) console.log(JSON.stringify(event));
       'sonnet',
     ], {
       ...process.env,
-      CODEX_BIN: fakeCodex,
+      CODEX_BIN: sharedFakeCodex,
+      FAKE_CODEX_SCRIPT: behaviorPath,
     });
 
     expect(result.code).toBe(0);
@@ -256,10 +278,7 @@ for (const event of events) console.log(JSON.stringify(event));
   });
 
   it('reports Codex cached input separately instead of double-counting it as full-price input', async () => {
-    const dir = await mkdtemp(join(tmpdir(), 'tamtam-codex-shim-'));
-    tempDirs.push(dir);
-    const fakeCodex = join(dir, 'codex');
-    await writeFile(fakeCodex, `#!/usr/bin/env node
+    const { behaviorPath } = await makeFakeCodex(`
 const events = [
   { type: 'thread.started', thread_id: 'sess-cache' },
   { type: 'item.completed', item: { type: 'agent_message', text: 'done' } },
@@ -267,7 +286,6 @@ const events = [
 ];
 for (const event of events) console.log(JSON.stringify(event));
 `);
-    await chmod(fakeCodex, 0o755);
 
     const result = await runNode([
       'scripts/codex-shim.js',
@@ -277,7 +295,8 @@ for (const event of events) console.log(JSON.stringify(event));
       'sonnet',
     ], {
       ...process.env,
-      CODEX_BIN: fakeCodex,
+      CODEX_BIN: sharedFakeCodex,
+      FAKE_CODEX_SCRIPT: behaviorPath,
     });
 
     expect(result.code).toBe(0);
@@ -292,13 +311,9 @@ for (const event of events) console.log(JSON.stringify(event));
   });
 
   it('fails stream-json runs that produce no assistant output', async () => {
-    const dir = await mkdtemp(join(tmpdir(), 'tamtam-codex-shim-'));
-    tempDirs.push(dir);
-    const fakeCodex = join(dir, 'codex');
-    await writeFile(fakeCodex, `#!/usr/bin/env node
+    const { behaviorPath } = await makeFakeCodex(`
 console.log(JSON.stringify({ type: 'event_msg', payload: { type: 'token_count', info: { last_token_usage: { input_tokens: 10, output_tokens: 0 } } } }));
 `);
-    await chmod(fakeCodex, 0o755);
 
     const result = await runNode([
       'scripts/codex-shim.js',
@@ -308,7 +323,8 @@ console.log(JSON.stringify({ type: 'event_msg', payload: { type: 'token_count', 
       'sonnet',
     ], {
       ...process.env,
-      CODEX_BIN: fakeCodex,
+      CODEX_BIN: sharedFakeCodex,
+      FAKE_CODEX_SCRIPT: behaviorPath,
     });
 
     expect(result.code).toBe(1);
@@ -320,13 +336,9 @@ console.log(JSON.stringify({ type: 'event_msg', payload: { type: 'token_count', 
   });
 
   it('passes through plain JSON assistant output in text mode', async () => {
-    const dir = await mkdtemp(join(tmpdir(), 'tamtam-codex-shim-'));
-    tempDirs.push(dir);
-    const fakeCodex = join(dir, 'codex');
-    await writeFile(fakeCodex, `#!/usr/bin/env node
+    const { behaviorPath } = await makeFakeCodex(`
 console.log(JSON.stringify({ results: [{ index: 1, text: 'criterion', verified: true }] }));
 `);
-    await chmod(fakeCodex, 0o755);
 
     const result = await runNode([
       'scripts/codex-shim.js',
@@ -334,7 +346,8 @@ console.log(JSON.stringify({ results: [{ index: 1, text: 'criterion', verified: 
       'sonnet',
     ], {
       ...process.env,
-      CODEX_BIN: fakeCodex,
+      CODEX_BIN: sharedFakeCodex,
+      FAKE_CODEX_SCRIPT: behaviorPath,
     });
 
     expect(result.code).toBe(0);
@@ -344,17 +357,13 @@ console.log(JSON.stringify({ results: [{ index: 1, text: 'criterion', verified: 
   });
 
   it('passes through JSON assistant output with protocol-looking keys in text mode', async () => {
-    const dir = await mkdtemp(join(tmpdir(), 'tamtam-codex-shim-'));
-    tempDirs.push(dir);
-    const fakeCodex = join(dir, 'codex');
-    await writeFile(fakeCodex, `#!/usr/bin/env node
+    const { behaviorPath } = await makeFakeCodex(`
 console.log(JSON.stringify({
   type: 'verification_report',
   payload: { status: 'LGTM', item: { type: 'check', verified: true } },
   usage: { notes: 'assistant output, not Codex telemetry' },
 }));
 `);
-    await chmod(fakeCodex, 0o755);
 
     const result = await runNode([
       'scripts/codex-shim.js',
@@ -362,7 +371,8 @@ console.log(JSON.stringify({
       'sonnet',
     ], {
       ...process.env,
-      CODEX_BIN: fakeCodex,
+      CODEX_BIN: sharedFakeCodex,
+      FAKE_CODEX_SCRIPT: behaviorPath,
     });
 
     expect(result.code).toBe(0);
@@ -374,14 +384,10 @@ console.log(JSON.stringify({
   });
 
   it('emits a useful error when Codex exits non-zero without stderr', async () => {
-    const dir = await mkdtemp(join(tmpdir(), 'tamtam-codex-shim-'));
-    tempDirs.push(dir);
-    const fakeCodex = join(dir, 'codex');
-    await writeFile(fakeCodex, `#!/usr/bin/env node
+    const { behaviorPath } = await makeFakeCodex(`
 console.log(JSON.stringify({ type: 'item.completed', item: { type: 'agent_message', text: 'working on it' } }));
 process.exit(1);
 `);
-    await chmod(fakeCodex, 0o755);
 
     const result = await runNode([
       'scripts/codex-shim.js',
@@ -391,7 +397,8 @@ process.exit(1);
       'sonnet',
     ], {
       ...process.env,
-      CODEX_BIN: fakeCodex,
+      CODEX_BIN: sharedFakeCodex,
+      FAKE_CODEX_SCRIPT: behaviorPath,
     });
 
     expect(result.code).toBe(1);
@@ -403,13 +410,11 @@ process.exit(1);
   });
 
   it('forwards termination signals to the Codex child process', async () => {
-    const dir = await mkdtemp(join(tmpdir(), 'tamtam-codex-shim-'));
-    tempDirs.push(dir);
-    const fakeCodex = join(dir, 'codex');
+    const { dir, behaviorPath } = await makeFakeCodex('');
     const readyFile = join(dir, 'ready');
     const signalFile = join(dir, 'signal');
     const pidFile = join(dir, 'pid');
-    await writeFile(fakeCodex, `#!/usr/bin/env node
+    await writeFile(behaviorPath, `
 const fs = require('fs');
 fs.writeFileSync(${JSON.stringify(pidFile)}, String(process.pid));
 fs.writeFileSync(${JSON.stringify(readyFile)}, 'ready');
@@ -419,7 +424,6 @@ process.on('SIGTERM', () => {
 });
 setInterval(() => {}, 1000);
 `);
-    await chmod(fakeCodex, 0o755);
 
     const proc = spawn(process.execPath, [
       'scripts/codex-shim.js',
@@ -429,7 +433,7 @@ setInterval(() => {}, 1000);
       'sonnet',
     ], {
       cwd: process.cwd(),
-      env: { ...process.env, CODEX_BIN: fakeCodex },
+      env: { ...process.env, CODEX_BIN: sharedFakeCodex, FAKE_CODEX_SCRIPT: behaviorPath },
       stdio: ['pipe', 'pipe', 'pipe'],
     });
     proc.stdin.end('Review the diff');
@@ -457,11 +461,9 @@ setInterval(() => {}, 1000);
   });
 
   it('retries once when codex exits 1 with no stderr after streaming output (transient crash)', async () => {
-    const dir = await mkdtemp(join(tmpdir(), 'tamtam-codex-shim-'));
-    tempDirs.push(dir);
-    const fakeCodex = join(dir, 'codex');
+    const { dir, behaviorPath } = await makeFakeCodex('');
     const attemptFile = join(dir, 'attempt');
-    await writeFile(fakeCodex, `#!/usr/bin/env node
+    await writeFile(behaviorPath, `
 const fs = require('fs');
 const path = ${JSON.stringify(attemptFile)};
 let attempt = 0;
@@ -475,7 +477,6 @@ if (attempt === 0) {
 console.log(JSON.stringify({ type: 'response_item', payload: { type: 'message', role: 'assistant', content: [{ type: 'output_text', text: 'recovered' }] } }));
 console.log(JSON.stringify({ type: 'event_msg', payload: { type: 'token_count', info: { last_token_usage: { input_tokens: 5, output_tokens: 2, cached_input_tokens: 1 } } } }));
 `);
-    await chmod(fakeCodex, 0o755);
 
     const result = await runNode([
       'scripts/codex-shim.js',
@@ -485,7 +486,8 @@ console.log(JSON.stringify({ type: 'event_msg', payload: { type: 'token_count', 
       'sonnet',
     ], {
       ...process.env,
-      CODEX_BIN: fakeCodex,
+      CODEX_BIN: sharedFakeCodex,
+      FAKE_CODEX_SCRIPT: behaviorPath,
     });
 
     expect(parseInt(await readFile(attemptFile, 'utf8'), 10)).toBe(2);
@@ -510,11 +512,9 @@ console.log(JSON.stringify({ type: 'event_msg', payload: { type: 'token_count', 
   });
 
   it('does not retry when codex exits 1 with stderr (real failure)', async () => {
-    const dir = await mkdtemp(join(tmpdir(), 'tamtam-codex-shim-'));
-    tempDirs.push(dir);
-    const fakeCodex = join(dir, 'codex');
+    const { dir, behaviorPath } = await makeFakeCodex('');
     const attemptFile = join(dir, 'attempt');
-    await writeFile(fakeCodex, `#!/usr/bin/env node
+    await writeFile(behaviorPath, `
 const fs = require('fs');
 const path = ${JSON.stringify(attemptFile)};
 let attempt = 0;
@@ -524,7 +524,6 @@ console.log(JSON.stringify({ type: 'response_item', payload: { type: 'message', 
 process.stderr.write('apply_patch verification failed\\n');
 process.exit(1);
 `);
-    await chmod(fakeCodex, 0o755);
 
     const result = await runNode([
       'scripts/codex-shim.js',
@@ -534,7 +533,8 @@ process.exit(1);
       'sonnet',
     ], {
       ...process.env,
-      CODEX_BIN: fakeCodex,
+      CODEX_BIN: sharedFakeCodex,
+      FAKE_CODEX_SCRIPT: behaviorPath,
     });
 
     expect(parseInt(await readFile(attemptFile, 'utf8'), 10)).toBe(1);
@@ -545,11 +545,9 @@ process.exit(1);
   });
 
   it('does not duplicate an already-streamed prefix when the retry restarts the answer', async () => {
-    const dir = await mkdtemp(join(tmpdir(), 'tamtam-codex-shim-'));
-    tempDirs.push(dir);
-    const fakeCodex = join(dir, 'codex');
+    const { dir, behaviorPath } = await makeFakeCodex('');
     const attemptFile = join(dir, 'attempt');
-    await writeFile(fakeCodex, `#!/usr/bin/env node
+    await writeFile(behaviorPath, `
 const fs = require('fs');
 const path = ${JSON.stringify(attemptFile)};
 let attempt = 0;
@@ -562,7 +560,6 @@ if (attempt === 0) {
 console.log(JSON.stringify({ type: 'response_item', payload: { type: 'message', role: 'assistant', content: [{ type: 'output_text', text: 'Hello world' }] } }));
 console.log(JSON.stringify({ type: 'event_msg', payload: { type: 'token_count', info: { last_token_usage: { input_tokens: 7, output_tokens: 2 } } } }));
 `);
-    await chmod(fakeCodex, 0o755);
 
     const result = await runNode([
       'scripts/codex-shim.js',
@@ -572,7 +569,8 @@ console.log(JSON.stringify({ type: 'event_msg', payload: { type: 'token_count', 
       'sonnet',
     ], {
       ...process.env,
-      CODEX_BIN: fakeCodex,
+      CODEX_BIN: sharedFakeCodex,
+      FAKE_CODEX_SCRIPT: behaviorPath,
     });
 
     expect(parseInt(await readFile(attemptFile, 'utf8'), 10)).toBe(2);
@@ -590,11 +588,9 @@ console.log(JSON.stringify({ type: 'event_msg', payload: { type: 'token_count', 
   });
 
   it('exits 0 when the retry cleanly replays the exact same answer', async () => {
-    const dir = await mkdtemp(join(tmpdir(), 'tamtam-codex-shim-'));
-    tempDirs.push(dir);
-    const fakeCodex = join(dir, 'codex');
+    const { dir, behaviorPath } = await makeFakeCodex('');
     const attemptFile = join(dir, 'attempt');
-    await writeFile(fakeCodex, `#!/usr/bin/env node
+    await writeFile(behaviorPath, `
 const fs = require('fs');
 const path = ${JSON.stringify(attemptFile)};
 let attempt = 0;
@@ -606,7 +602,6 @@ if (attempt === 0) {
 }
 console.log(JSON.stringify({ type: 'event_msg', payload: { type: 'token_count', info: { last_token_usage: { input_tokens: 5, output_tokens: 1 } } } }));
 `);
-    await chmod(fakeCodex, 0o755);
 
     const result = await runNode([
       'scripts/codex-shim.js',
@@ -616,7 +611,8 @@ console.log(JSON.stringify({ type: 'event_msg', payload: { type: 'token_count', 
       'sonnet',
     ], {
       ...process.env,
-      CODEX_BIN: fakeCodex,
+      CODEX_BIN: sharedFakeCodex,
+      FAKE_CODEX_SCRIPT: behaviorPath,
     });
 
     expect(parseInt(await readFile(attemptFile, 'utf8'), 10)).toBe(2);

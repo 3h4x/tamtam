@@ -1,21 +1,19 @@
-import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
-import Database from 'better-sqlite3';
-import { drizzle } from 'drizzle-orm/better-sqlite3';
+import { describe, it, expect, beforeAll, beforeEach, afterAll, afterEach, vi } from 'vitest';
+import { sql } from 'drizzle-orm';
 import * as schema from '@/lib/db/schema';
+import { createTestPgDbEmpty, type TestDbHandle } from '@/__tests__/helpers/test-db';
 
-function createTestDb() {
-  const sqlite = new Database(':memory:');
-  sqlite.exec(`
+async function applyDdl(handle: TestDbHandle): Promise<void> {
+  await handle.db.execute(sql.raw(`
     CREATE TABLE IF NOT EXISTS settings (
-      key TEXT PRIMARY KEY,
-      value TEXT NOT NULL
-    );
-  `);
-  return { sqlite, db: drizzle(sqlite, { schema }) };
+      key text PRIMARY KEY,
+      value text NOT NULL
+    )
+  `));
 }
 
 describe('pending-release queue', () => {
-  let testDb: ReturnType<typeof createTestDb>;
+  let sharedHandle: TestDbHandle;
   let setPendingRelease: typeof import('@/lib/pipeline/pending-release').setPendingRelease;
   let getPendingRelease: typeof import('@/lib/pipeline/pending-release').getPendingRelease;
   let clearPendingRelease: typeof import('@/lib/pipeline/pending-release').clearPendingRelease;
@@ -23,10 +21,25 @@ describe('pending-release queue', () => {
   let drainPendingRelease: typeof import('@/lib/pipeline/pending-release').drainPendingRelease;
   let startReleaseMock: ReturnType<typeof vi.fn>;
 
+  beforeAll(async () => {
+    sharedHandle = await createTestPgDbEmpty();
+    await applyDdl(sharedHandle);
+  });
+
+  afterAll(async () => {
+    // Let any straggling fire-and-forget queries settle before closing.
+    await new Promise((r) => setTimeout(r, 30));
+    try {
+      await sharedHandle[Symbol.asyncDispose]();
+    } catch {
+      // ignore
+    }
+  });
+
   beforeEach(async () => {
     vi.resetModules();
-    testDb = createTestDb();
-    vi.doMock('@/lib/db', () => ({ db: testDb.db, schema }));
+    await sharedHandle.db.execute(sql.raw('TRUNCATE settings'));
+    vi.doMock('@/lib/db', () => ({ db: sharedHandle.db, schema }));
     startReleaseMock = vi.fn().mockResolvedValue({ ok: true, jobId: 'rel-1' });
     vi.doMock('@/lib/pipeline/start-release', () => ({ startRelease: startReleaseMock }));
 
@@ -38,7 +51,12 @@ describe('pending-release queue', () => {
     drainPendingRelease = mod.drainPendingRelease;
   });
 
-  afterEach(() => { vi.resetModules(); });
+  afterEach(async () => {
+    // Short settle: lets fire-and-forget inserts/deletes land before
+    // the next test truncates.
+    await new Promise((r) => setTimeout(r, 10));
+    vi.resetModules();
+  });
 
   it('starts unset', async () => {
     expect(await getPendingRelease('proj')).toBe(false);
@@ -102,6 +120,7 @@ describe('pending-release queue', () => {
     setPendingRelease('proj');
     await new Promise(r => setTimeout(r, 20));
     await expect(drainPendingRelease('proj')).resolves.toBeUndefined();
+    await new Promise(r => setTimeout(r, 20));
     expect(await getPendingRelease('proj')).toBe(true);
   });
 
@@ -114,6 +133,7 @@ describe('pending-release queue', () => {
     setPendingRelease('proj');
     await new Promise(r => setTimeout(r, 20));
     await expect(drainPendingRelease('proj')).resolves.toBeUndefined();
+    await new Promise(r => setTimeout(r, 20));
     expect(await getPendingRelease('proj')).toBe(true);
   });
 
@@ -127,6 +147,7 @@ describe('pending-release queue', () => {
     setPendingRelease('proj');
     await new Promise(r => setTimeout(r, 20));
     await expect(drainPendingRelease('proj')).resolves.toBeUndefined();
+    await new Promise(r => setTimeout(r, 20));
     expect(await getPendingRelease('proj')).toBe(true);
   });
 
@@ -135,6 +156,7 @@ describe('pending-release queue', () => {
     setPendingRelease('proj');
     await new Promise(r => setTimeout(r, 20));
     await expect(drainPendingRelease('proj')).resolves.toBeUndefined();
+    await new Promise(r => setTimeout(r, 20));
     expect(await getPendingRelease('proj')).toBe(true);
   });
 

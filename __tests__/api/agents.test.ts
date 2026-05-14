@@ -1,65 +1,64 @@
-import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
+import { describe, it, expect, beforeAll, beforeEach, afterAll, afterEach, vi } from 'vitest';
 import { NextRequest } from 'next/server';
-import Database from 'better-sqlite3';
-import { drizzle } from 'drizzle-orm/better-sqlite3';
+import { sql } from 'drizzle-orm';
 import * as schema from '@/lib/db/schema';
+import { createTestPgDbEmpty, type TestDbHandle } from '@/__tests__/helpers/test-db';
 
-function createTestDb() {
-  const sqlite = new Database(':memory:');
-  sqlite.pragma('journal_mode = WAL');
-  sqlite.pragma('foreign_keys = ON');
-
-  sqlite.exec(`
+async function applyDdl(handle: TestDbHandle): Promise<void> {
+  // PGlite rejects multi-statement prepared queries, so issue each DDL
+  // separately.
+  await handle.db.execute(sql.raw(`
     CREATE TABLE IF NOT EXISTS agents (
-      id TEXT PRIMARY KEY,
-      name TEXT NOT NULL,
-      project TEXT NOT NULL,
-      skill_ids TEXT NOT NULL DEFAULT '[]',
-      doc_paths TEXT NOT NULL DEFAULT '[]',
-      model TEXT NOT NULL DEFAULT 'sonnet',
-      prompt TEXT NOT NULL DEFAULT '',
-      schedule TEXT,
-      runner TEXT NOT NULL DEFAULT 'pm2',
-      enabled INTEGER NOT NULL DEFAULT 1,
-      provider TEXT,
-      prerequisite_command TEXT,
-      created_at REAL NOT NULL,
-      updated_at REAL NOT NULL
-    );
+      id text PRIMARY KEY,
+      name text NOT NULL,
+      project text NOT NULL,
+      skill_ids text NOT NULL DEFAULT '[]',
+      doc_paths text NOT NULL DEFAULT '[]',
+      model text NOT NULL DEFAULT 'sonnet',
+      prompt text NOT NULL DEFAULT '',
+      schedule text,
+      runner text NOT NULL DEFAULT 'pm2',
+      enabled boolean NOT NULL DEFAULT true,
+      provider text,
+      prerequisite_command text,
+      created_at double precision NOT NULL,
+      updated_at double precision NOT NULL
+    )
+  `));
+  await handle.db.execute(sql.raw(`
     CREATE TABLE IF NOT EXISTS projects (
-      name TEXT PRIMARY KEY,
-      path TEXT NOT NULL,
-      enabled INTEGER DEFAULT 0,
-      github TEXT,
-      priority TEXT,
-      custom_actions TEXT,
-      test_command TEXT,
-      tests_disabled INTEGER DEFAULT 0,
-      review_disabled INTEGER DEFAULT 0,
-      test_cron_enabled INTEGER DEFAULT 0,
-      test_cron_schedule TEXT,
-      auto_commit_enabled INTEGER DEFAULT 0,
-      auto_push_enabled INTEGER DEFAULT 0,
-      auto_pr_merge_enabled INTEGER DEFAULT 0,
-      release_after_run INTEGER DEFAULT 0,
-      pr_workflow_enabled INTEGER DEFAULT 0,
-      issue_auto_branch INTEGER DEFAULT 1,
-      last_push_error TEXT,
-      last_push_at REAL,
-      review_prompt_addendum TEXT,
-      fix_prompt_addendum TEXT,
-      website TEXT,
-      qa_url TEXT,
-      archived INTEGER NOT NULL DEFAULT 0,
-      paused INTEGER NOT NULL DEFAULT 0
-    );
-  `);
-
-  return { sqlite, db: drizzle(sqlite, { schema }) };
+      name text PRIMARY KEY,
+      path text NOT NULL,
+      enabled boolean DEFAULT false,
+      github text,
+      priority text,
+      custom_actions text,
+      test_command text,
+      tests_disabled boolean DEFAULT false,
+      review_disabled boolean DEFAULT false,
+      test_cron_enabled boolean DEFAULT false,
+      test_cron_schedule text,
+      auto_commit_enabled boolean DEFAULT false,
+      auto_push_enabled boolean DEFAULT false,
+      auto_pr_merge_enabled boolean DEFAULT false,
+      release_after_run boolean DEFAULT false,
+      pr_workflow_enabled boolean DEFAULT false,
+      issue_auto_branch boolean DEFAULT true,
+      last_push_error text,
+      last_push_at double precision,
+      review_prompt_addendum text,
+      fix_prompt_addendum text,
+      website text,
+      qa_url text,
+      archived boolean NOT NULL DEFAULT false,
+      paused boolean NOT NULL DEFAULT false
+    )
+  `));
 }
 
 describe('agents API', () => {
-  let testDb: ReturnType<typeof createTestDb>;
+  let sharedHandle: TestDbHandle;
+  const testDb = { get db() { return sharedHandle.db; } } as { db: TestDbHandle['db'] };
   let GET: any;
   let POST: any;
   let PATCH: any;
@@ -76,15 +75,31 @@ describe('agents API', () => {
   let setFileAgentOverrideMock: ReturnType<typeof vi.fn>;
   let resolveProjectPathMock: ReturnType<typeof vi.fn>;
 
+  beforeAll(async () => {
+    sharedHandle = await createTestPgDbEmpty();
+    await applyDdl(sharedHandle);
+  });
+
+  afterAll(async () => {
+    await new Promise((r) => setTimeout(r, 30));
+    try {
+      await sharedHandle[Symbol.asyncDispose]();
+    } catch {
+      // ignore
+    }
+  });
+
   beforeEach(async () => {
+    await sharedHandle.db.execute(sql.raw(
+      'TRUNCATE agents, projects',
+    ));
     vi.resetModules();
-    testDb = createTestDb();
 
     installAgentScheduleMock = vi.fn().mockResolvedValue(undefined);
     uninstallAgentScheduleMock = vi.fn().mockResolvedValue(undefined);
 
     vi.doMock('@/lib/db', () => ({
-      db: testDb.db,
+      db: sharedHandle.db,
       schema,
     }));
 
@@ -138,8 +153,23 @@ describe('agents API', () => {
     PATCH_BY_NAME = byNameRoute.PATCH;
   });
 
+  // GET routes call getAllAgentsCached (sync) which returns [] while the
+  // async refresh runs in the background. Tests that seed via direct
+  // db.insert must warm the cache before invoking GET so the route sees the
+  // freshly inserted rows. The route also reads enabled projects through a
+  // sibling cache that needs the same treatment for unfiltered GETs.
+  async function warmAgentsCache() {
+    const agentsMod = await import('@/lib/agents/agents-cache');
+    agentsMod.clearAgentsCache();
+    await agentsMod.getAllAgentsCachedAsync();
+    const projectsMod = await import('@/lib/shared/enabled-projects');
+    projectsMod.clearProjectsCache();
+    await projectsMod.refreshProjectsCacheSync();
+  }
+
   afterEach(() => {
     vi.resetModules();
+    vi.clearAllMocks();
   });
 
   describe('GET /agents', () => {
@@ -154,7 +184,7 @@ describe('agents API', () => {
     it('returns all agents', async () => {
       const db = testDb.db;
       const now = Date.now() / 1000;
-      db.insert(schema.agents)
+      await db.insert(schema.agents)
         .values({
           id: 'agent-1',
           name: 'Agent 1',
@@ -166,9 +196,8 @@ describe('agents API', () => {
           runner: 'pm2',
           createdAt: now,
           updatedAt: now,
-        })
-        .run();
-      db.insert(schema.agents)
+        });
+      await db.insert(schema.agents)
         .values({
           id: 'agent-2',
           name: 'Agent 2',
@@ -180,8 +209,8 @@ describe('agents API', () => {
           runner: 'launchctl',
           createdAt: now,
           updatedAt: now,
-        })
-        .run();
+        });
+      await warmAgentsCache();
 
       const request = new NextRequest('http://localhost/api/agents');
       const response = await GET(request);
@@ -195,8 +224,9 @@ describe('agents API', () => {
     it('filters agents by name', async () => {
       const db = testDb.db;
       const now = Date.now() / 1000;
-      db.insert(schema.agents).values({ id: 'agent-1', name: 'Alpha', project: 'proj1', skillIds: '[]', model: 'sonnet', prompt: '', schedule: null, runner: 'pm2', createdAt: now, updatedAt: now }).run();
-      db.insert(schema.agents).values({ id: 'agent-2', name: 'Beta', project: 'proj1', skillIds: '[]', model: 'sonnet', prompt: '', schedule: null, runner: 'pm2', createdAt: now, updatedAt: now }).run();
+      await db.insert(schema.agents).values({ id: 'agent-1', name: 'Alpha', project: 'proj1', skillIds: '[]', model: 'sonnet', prompt: '', schedule: null, runner: 'pm2', createdAt: now, updatedAt: now });
+      await db.insert(schema.agents).values({ id: 'agent-2', name: 'Beta', project: 'proj1', skillIds: '[]', model: 'sonnet', prompt: '', schedule: null, runner: 'pm2', createdAt: now, updatedAt: now });
+      await warmAgentsCache();
 
       const request = new NextRequest('http://localhost/api/agents?name=Alpha');
       const response = await GET(request);
@@ -209,8 +239,9 @@ describe('agents API', () => {
     it('filters agents by project and name', async () => {
       const db = testDb.db;
       const now = Date.now() / 1000;
-      db.insert(schema.agents).values({ id: 'agent-1', name: 'Alpha', project: 'proj1', skillIds: '[]', model: 'sonnet', prompt: '', schedule: null, runner: 'pm2', createdAt: now, updatedAt: now }).run();
-      db.insert(schema.agents).values({ id: 'agent-2', name: 'Alpha', project: 'proj2', skillIds: '[]', model: 'sonnet', prompt: '', schedule: null, runner: 'pm2', createdAt: now, updatedAt: now }).run();
+      await db.insert(schema.agents).values({ id: 'agent-1', name: 'Alpha', project: 'proj1', skillIds: '[]', model: 'sonnet', prompt: '', schedule: null, runner: 'pm2', createdAt: now, updatedAt: now });
+      await db.insert(schema.agents).values({ id: 'agent-2', name: 'Alpha', project: 'proj2', skillIds: '[]', model: 'sonnet', prompt: '', schedule: null, runner: 'pm2', createdAt: now, updatedAt: now });
+      await warmAgentsCache();
 
       const request = new NextRequest('http://localhost/api/agents?project=proj1&name=Alpha');
       const response = await GET(request);
@@ -223,7 +254,7 @@ describe('agents API', () => {
     it('filters agents by project', async () => {
       const db = testDb.db;
       const now = Date.now() / 1000;
-      db.insert(schema.agents)
+      await db.insert(schema.agents)
         .values({
           id: 'agent-1',
           name: 'Agent 1',
@@ -235,9 +266,8 @@ describe('agents API', () => {
           runner: 'pm2',
           createdAt: now,
           updatedAt: now,
-        })
-        .run();
-      db.insert(schema.agents)
+        });
+      await db.insert(schema.agents)
         .values({
           id: 'agent-2',
           name: 'Agent 2',
@@ -249,8 +279,8 @@ describe('agents API', () => {
           runner: 'pm2',
           createdAt: now,
           updatedAt: now,
-        })
-        .run();
+        });
+      await warmAgentsCache();
 
       const request = new NextRequest('http://localhost/api/agents?project=proj1');
       const response = await GET(request);
@@ -262,9 +292,9 @@ describe('agents API', () => {
 
     it('merges file agents from all enabled projects on unfiltered GET', async () => {
       const db = testDb.db;
-      db.insert(schema.projects).values({ name: 'proj1', path: '/p1', enabled: true }).run();
-      db.insert(schema.projects).values({ name: 'proj2', path: '/p2', enabled: true }).run();
-      db.insert(schema.projects).values({ name: 'projDisabled', path: '/pd', enabled: false }).run();
+      await db.insert(schema.projects).values({ name: 'proj1', path: '/p1', enabled: true });
+      await db.insert(schema.projects).values({ name: 'proj2', path: '/p2', enabled: true });
+      await db.insert(schema.projects).values({ name: 'projDisabled', path: '/pd', enabled: false });
 
       const fileAgentsMod = await import('@/lib/agents/tamtam-file-agents');
       const scanMock = fileAgentsMod.scanFileAgents as ReturnType<typeof vi.fn>;
@@ -287,6 +317,7 @@ describe('agents API', () => {
         }
         return [];
       });
+      await warmAgentsCache();
 
       const response = await GET(new NextRequest('http://localhost/api/agents'));
       const data = await response.json();
@@ -301,12 +332,12 @@ describe('agents API', () => {
     it('DB agent takes precedence over file agent with same project+name on unfiltered GET', async () => {
       const db = testDb.db;
       const now = Date.now() / 1000;
-      db.insert(schema.projects).values({ name: 'proj1', path: '/p1', enabled: true }).run();
-      db.insert(schema.agents).values({
+      await db.insert(schema.projects).values({ name: 'proj1', path: '/p1', enabled: true });
+      await db.insert(schema.agents).values({
         id: 'db-1', name: 'shared', project: 'proj1', skillIds: '[]',
         model: 'sonnet', prompt: 'db version', schedule: null, runner: 'pm2',
         createdAt: now, updatedAt: now,
-      }).run();
+      });
 
       const fileAgentsMod = await import('@/lib/agents/tamtam-file-agents');
       const scanMock = fileAgentsMod.scanFileAgents as ReturnType<typeof vi.fn>;
@@ -316,6 +347,7 @@ describe('agents API', () => {
         runner: 'pm2', enabled: true, createdAt: 0, updatedAt: 0,
         source: 'file', filePath: '/p1/.tamtam/agents/shared.md',
       }]);
+      await warmAgentsCache();
 
       const response = await GET(new NextRequest('http://localhost/api/agents'));
       const data = await response.json();
@@ -384,7 +416,7 @@ describe('agents API', () => {
 
     it('rejects duplicate agent names within the same project', async () => {
       const now = Date.now() / 1000;
-      testDb.db.insert(schema.agents).values({
+      await testDb.db.insert(schema.agents).values({
         id: 'agent-existing',
         name: 'Agent',
         project: 'proj1',
@@ -395,7 +427,7 @@ describe('agents API', () => {
         runner: 'pm2',
         createdAt: now,
         updatedAt: now,
-      }).run();
+      });
 
       const request = new NextRequest('http://localhost/api/agents', {
         method: 'POST',
@@ -412,7 +444,7 @@ describe('agents API', () => {
 
     it('rejects case-only duplicate agent names within the same project', async () => {
       const now = Date.now() / 1000;
-      testDb.db.insert(schema.agents).values({
+      await testDb.db.insert(schema.agents).values({
         id: 'agent-existing',
         name: 'Agent',
         project: 'proj1',
@@ -423,7 +455,7 @@ describe('agents API', () => {
         runner: 'pm2',
         createdAt: now,
         updatedAt: now,
-      }).run();
+      });
 
       const request = new NextRequest('http://localhost/api/agents', {
         method: 'POST',
@@ -625,7 +657,7 @@ describe('agents API', () => {
         'curl -fsS "http://localhost:1337/api/projects/by-project/proj1/issues?trusted_only=1"'
       );
 
-      const row = testDb.db.select().from(schema.agents).all().find((agent) => agent.id === data.agent.id);
+      const row = (await testDb.db.select().from(schema.agents)).find((agent) => agent.id === data.agent.id);
       expect(row?.prerequisiteCommand).toBe(
         'curl -fsS "http://localhost:1337/api/projects/by-project/proj1/issues?trusted_only=1"'
       );
@@ -648,7 +680,7 @@ describe('agents API', () => {
       expect(response.status).toBe(201);
       expect(data.agent.prerequisiteCommand).toBeNull();
 
-      const row = testDb.db.select().from(schema.agents).all().find((agent) => agent.id === data.agent.id);
+      const row = (await testDb.db.select().from(schema.agents)).find((agent) => agent.id === data.agent.id);
       expect(row?.prerequisiteCommand).toBe('');
     });
 
@@ -689,7 +721,7 @@ describe('agents API', () => {
       const agentGET = agentDetailRoute.GET;
       const db = testDb.db;
       const now = Date.now() / 1000;
-      db.insert(schema.agents)
+      await db.insert(schema.agents)
         .values({
           id: 'agent-123',
           name: 'Test Agent',
@@ -701,8 +733,7 @@ describe('agents API', () => {
           runner: 'pm2',
           createdAt: now,
           updatedAt: now,
-        })
-        .run();
+        });
 
       const response = await agentGET(
         new NextRequest('http://localhost/api/agents/agent-123'),
@@ -720,7 +751,7 @@ describe('agents API', () => {
       const agentDetailRoute = await import('@/app/api/agents/[agentId]/route');
       const agentGET = agentDetailRoute.GET;
       const now = Date.now() / 1000;
-      testDb.db.insert(schema.agents).values({
+      await testDb.db.insert(schema.agents).values({
         id: 'agent-issue',
         name: 'Issue Cruncher',
         project: 'proj1',
@@ -732,7 +763,7 @@ describe('agents API', () => {
         prerequisiteCommand: null,
         createdAt: now,
         updatedAt: now,
-      }).run();
+      });
 
       const response = await agentGET(
         new NextRequest('http://localhost/api/agents/agent-issue'),
@@ -750,7 +781,7 @@ describe('agents API', () => {
       const agentDetailRoute = await import('@/app/api/agents/[agentId]/route');
       const agentGET = agentDetailRoute.GET;
       const now = Date.now() / 1000;
-      testDb.db.insert(schema.agents).values({
+      await testDb.db.insert(schema.agents).values({
         id: 'agent-issue-cleared',
         name: 'Issue Cruncher',
         project: 'proj1',
@@ -762,7 +793,7 @@ describe('agents API', () => {
         prerequisiteCommand: '',
         createdAt: now,
         updatedAt: now,
-      }).run();
+      });
 
       const response = await agentGET(
         new NextRequest('http://localhost/api/agents/agent-issue-cleared'),
@@ -794,7 +825,7 @@ describe('agents API', () => {
     it('updates agent name', async () => {
       const db = testDb.db;
       const now = Date.now() / 1000;
-      db.insert(schema.agents)
+      await db.insert(schema.agents)
         .values({
           id: 'agent-123',
           name: 'Old Name',
@@ -806,8 +837,7 @@ describe('agents API', () => {
           runner: 'pm2',
           createdAt: now,
           updatedAt: now,
-        })
-        .run();
+        });
 
       const request = new NextRequest('http://localhost/api/agents/agent-123', {
         method: 'PATCH',
@@ -826,7 +856,7 @@ describe('agents API', () => {
     it('rejects unsafe agent names on update', async () => {
       const db = testDb.db;
       const now = Date.now() / 1000;
-      db.insert(schema.agents)
+      await db.insert(schema.agents)
         .values({
           id: 'agent-123',
           name: 'Old Name',
@@ -838,8 +868,7 @@ describe('agents API', () => {
           runner: 'pm2',
           createdAt: now,
           updatedAt: now,
-        })
-        .run();
+        });
 
       const response = await PATCH(new NextRequest('http://localhost/api/agents/agent-123', {
         method: 'PATCH',
@@ -857,7 +886,7 @@ describe('agents API', () => {
     it('rejects duplicate agent names on update', async () => {
       const db = testDb.db;
       const now = Date.now() / 1000;
-      db.insert(schema.agents)
+      await db.insert(schema.agents)
         .values({
           id: 'agent-123',
           name: 'Old Name',
@@ -869,9 +898,8 @@ describe('agents API', () => {
           runner: 'pm2',
           createdAt: now,
           updatedAt: now,
-        })
-        .run();
-      db.insert(schema.agents)
+        });
+      await db.insert(schema.agents)
         .values({
           id: 'agent-456',
           name: 'Taken',
@@ -883,8 +911,7 @@ describe('agents API', () => {
           runner: 'pm2',
           createdAt: now,
           updatedAt: now,
-        })
-        .run();
+        });
 
       const response = await PATCH(new NextRequest('http://localhost/api/agents/agent-123', {
         method: 'PATCH',
@@ -902,7 +929,7 @@ describe('agents API', () => {
     it('rejects case-only duplicate agent names on update', async () => {
       const db = testDb.db;
       const now = Date.now() / 1000;
-      db.insert(schema.agents)
+      await db.insert(schema.agents)
         .values({
           id: 'agent-123',
           name: 'Old Name',
@@ -914,9 +941,8 @@ describe('agents API', () => {
           runner: 'pm2',
           createdAt: now,
           updatedAt: now,
-        })
-        .run();
-      db.insert(schema.agents)
+        });
+      await db.insert(schema.agents)
         .values({
           id: 'agent-456',
           name: 'Taken',
@@ -928,8 +954,7 @@ describe('agents API', () => {
           runner: 'pm2',
           createdAt: now,
           updatedAt: now,
-        })
-        .run();
+        });
 
       const response = await PATCH(new NextRequest('http://localhost/api/agents/agent-123', {
         method: 'PATCH',
@@ -947,7 +972,7 @@ describe('agents API', () => {
     it('rejects names that collide with file agents on update', async () => {
       const db = testDb.db;
       const now = Date.now() / 1000;
-      db.insert(schema.agents)
+      await db.insert(schema.agents)
         .values({
           id: 'agent-123',
           name: 'Old Name',
@@ -959,8 +984,7 @@ describe('agents API', () => {
           runner: 'pm2',
           createdAt: now,
           updatedAt: now,
-        })
-        .run();
+        });
       resolveProjectPathMock.mockReturnValueOnce('/path/to/proj1');
       scanFileAgentsMock.mockReturnValueOnce([{
         id: 'file:proj1:Taken',
@@ -997,7 +1021,7 @@ describe('agents API', () => {
     it('rejects case-only names that collide with file agents on update', async () => {
       const db = testDb.db;
       const now = Date.now() / 1000;
-      db.insert(schema.agents)
+      await db.insert(schema.agents)
         .values({
           id: 'agent-123',
           name: 'Old Name',
@@ -1009,8 +1033,7 @@ describe('agents API', () => {
           runner: 'pm2',
           createdAt: now,
           updatedAt: now,
-        })
-        .run();
+        });
       resolveProjectPathMock.mockReturnValueOnce('/path/to/proj1');
       scanFileAgentsMock.mockReturnValueOnce([{
         id: 'file:proj1:Taken',
@@ -1047,7 +1070,7 @@ describe('agents API', () => {
     it('updates agent model and prompt', async () => {
       const db = testDb.db;
       const now = Date.now() / 1000;
-      db.insert(schema.agents)
+      await db.insert(schema.agents)
         .values({
           id: 'agent-123',
           name: 'Agent',
@@ -1059,8 +1082,7 @@ describe('agents API', () => {
           runner: 'pm2',
           createdAt: now,
           updatedAt: now,
-        })
-        .run();
+        });
 
       const request = new NextRequest('http://localhost/api/agents/agent-123', {
         method: 'PATCH',
@@ -1079,7 +1101,7 @@ describe('agents API', () => {
     it('keeps an explicitly cleared issue-cruncher prerequisite blank after PATCH by id', async () => {
       const db = testDb.db;
       const now = Date.now() / 1000;
-      db.insert(schema.agents)
+      await db.insert(schema.agents)
         .values({
           id: 'agent-issue',
           name: 'Issue Cruncher',
@@ -1092,8 +1114,7 @@ describe('agents API', () => {
           prerequisiteCommand: 'echo old',
           createdAt: now,
           updatedAt: now,
-        })
-        .run();
+        });
       resolveProjectPathMock.mockReturnValueOnce('/path/to/proj1');
 
       const response = await PATCH(new NextRequest('http://localhost/api/agents/agent-issue', {
@@ -1107,7 +1128,7 @@ describe('agents API', () => {
       const data = await response.json();
       expect(data.agent.prerequisiteCommand).toBeNull();
 
-      const row = testDb.db.select().from(schema.agents).all().find((agent) => agent.id === 'agent-issue');
+      const row = (await testDb.db.select().from(schema.agents)).find((agent) => agent.id === 'agent-issue');
       expect(row?.prerequisiteCommand).toBe('');
       expect(writeFileAgentMock).toHaveBeenCalledWith('/path/to/proj1', 'proj1', 'Issue Cruncher', expect.objectContaining({
         prerequisiteCommand: '',
@@ -1117,7 +1138,7 @@ describe('agents API', () => {
     it('rejects invalid model values on update', async () => {
       const db = testDb.db;
       const now = Date.now() / 1000;
-      db.insert(schema.agents)
+      await db.insert(schema.agents)
         .values({
           id: 'agent-123',
           name: 'Agent',
@@ -1129,8 +1150,7 @@ describe('agents API', () => {
           runner: 'pm2',
           createdAt: now,
           updatedAt: now,
-        })
-        .run();
+        });
 
       const request = new NextRequest('http://localhost/api/agents/agent-123', {
         method: 'PATCH',
@@ -1150,7 +1170,7 @@ describe('agents API', () => {
     it('rejects invalid schedule values on update', async () => {
       const db = testDb.db;
       const now = Date.now() / 1000;
-      db.insert(schema.agents)
+      await db.insert(schema.agents)
         .values({
           id: 'agent-123',
           name: 'Agent',
@@ -1162,8 +1182,7 @@ describe('agents API', () => {
           runner: 'pm2',
           createdAt: now,
           updatedAt: now,
-        })
-        .run();
+        });
 
       const request = new NextRequest('http://localhost/api/agents/agent-123', {
         method: 'PATCH',
@@ -1185,7 +1204,7 @@ describe('agents API', () => {
     it('updates skillIds as JSON array', async () => {
       const db = testDb.db;
       const now = Date.now() / 1000;
-      db.insert(schema.agents)
+      await db.insert(schema.agents)
         .values({
           id: 'agent-123',
           name: 'Agent',
@@ -1197,8 +1216,7 @@ describe('agents API', () => {
           runner: 'pm2',
           createdAt: now,
           updatedAt: now,
-        })
-        .run();
+        });
 
       const request = new NextRequest('http://localhost/api/agents/agent-123', {
         method: 'PATCH',
@@ -1216,7 +1234,7 @@ describe('agents API', () => {
     it('clears schedule when empty string provided', async () => {
       const db = testDb.db;
       const now = Date.now() / 1000;
-      db.insert(schema.agents)
+      await db.insert(schema.agents)
         .values({
           id: 'agent-123',
           name: 'Agent',
@@ -1228,8 +1246,7 @@ describe('agents API', () => {
           runner: 'pm2',
           createdAt: now,
           updatedAt: now,
-        })
-        .run();
+        });
 
       const request = new NextRequest('http://localhost/api/agents/agent-123', {
         method: 'PATCH',
@@ -1247,7 +1264,7 @@ describe('agents API', () => {
     it('updates updatedAt timestamp', async () => {
       const db = testDb.db;
       const oldTime = Date.now() / 1000 - 100;
-      db.insert(schema.agents)
+      await db.insert(schema.agents)
         .values({
           id: 'agent-123',
           name: 'Agent',
@@ -1259,8 +1276,7 @@ describe('agents API', () => {
           runner: 'pm2',
           createdAt: oldTime,
           updatedAt: oldTime,
-        })
-        .run();
+        });
 
       const before = Date.now() / 1000;
 
@@ -1534,7 +1550,7 @@ describe('agents API', () => {
     it('deletes agent by ID', async () => {
       const db = testDb.db;
       const now = Date.now() / 1000;
-      db.insert(schema.agents)
+      await db.insert(schema.agents)
         .values({
           id: 'agent-123',
           name: 'Agent',
@@ -1546,8 +1562,7 @@ describe('agents API', () => {
           runner: 'pm2',
           createdAt: now,
           updatedAt: now,
-        })
-        .run();
+        });
 
       const request = new NextRequest('http://localhost/api/agents/agent-123', {
         method: 'DELETE',
@@ -1581,7 +1596,7 @@ describe('agents API', () => {
       const agentGET = agentDetailRoute.GET;
       const db = testDb.db;
       const now = Date.now() / 1000;
-      db.insert(schema.agents)
+      await db.insert(schema.agents)
         .values({
           id: 'agent-del',
           name: 'To Delete',
@@ -1593,8 +1608,7 @@ describe('agents API', () => {
           runner: 'pm2',
           createdAt: now,
           updatedAt: now,
-        })
-        .run();
+        });
 
       const deleteReq = new NextRequest('http://localhost/api/agents/agent-del', {
         method: 'DELETE',
@@ -1611,7 +1625,7 @@ describe('agents API', () => {
     it('calls uninstallAgentSchedule when deleting', async () => {
       const db = testDb.db;
       const now = Date.now() / 1000;
-      db.insert(schema.agents)
+      await db.insert(schema.agents)
         .values({
           id: 'agent-123',
           name: 'Agent',
@@ -1623,8 +1637,7 @@ describe('agents API', () => {
           runner: 'pm2',
           createdAt: now,
           updatedAt: now,
-        })
-        .run();
+        });
 
       const request = new NextRequest('http://localhost/api/agents/agent-123', {
         method: 'DELETE',
@@ -1712,7 +1725,7 @@ describe('agents API', () => {
     it('calls installAgentSchedule when patching schedule on agent with prompt', async () => {
       const db = testDb.db;
       const now = Date.now() / 1000;
-      db.insert(schema.agents)
+      await db.insert(schema.agents)
         .values({
           id: 'agent-123',
           name: 'Agent',
@@ -1724,8 +1737,7 @@ describe('agents API', () => {
           runner: 'pm2',
           createdAt: now,
           updatedAt: now,
-        })
-        .run();
+        });
 
       const request = new NextRequest('http://localhost/api/agents/agent-123', {
         method: 'PATCH',
@@ -1748,7 +1760,7 @@ describe('agents API', () => {
     it('calls uninstallAgentSchedule when patching schedule to empty', async () => {
       const db = testDb.db;
       const now = Date.now() / 1000;
-      db.insert(schema.agents)
+      await db.insert(schema.agents)
         .values({
           id: 'agent-123',
           name: 'Agent',
@@ -1760,8 +1772,7 @@ describe('agents API', () => {
           runner: 'pm2',
           createdAt: now,
           updatedAt: now,
-        })
-        .run();
+        });
 
       const request = new NextRequest('http://localhost/api/agents/agent-123', {
         method: 'PATCH',
@@ -1777,7 +1788,7 @@ describe('agents API', () => {
     it('calls uninstallAgentSchedule when patching enabled to false', async () => {
       const db = testDb.db;
       const now = Date.now() / 1000;
-      db.insert(schema.agents)
+      await db.insert(schema.agents)
         .values({
           id: 'agent-123',
           name: 'Agent',
@@ -1789,8 +1800,7 @@ describe('agents API', () => {
           runner: 'pm2',
           createdAt: now,
           updatedAt: now,
-        })
-        .run();
+        });
 
       const request = new NextRequest('http://localhost/api/agents/agent-123', {
         method: 'PATCH',
@@ -1803,9 +1813,9 @@ describe('agents API', () => {
     });
 
   describe('PATCH /agents/by-name', () => {
-    function seedAgent(db: ReturnType<typeof createTestDb>['db'], overrides: Partial<typeof schema.agents.$inferInsert> = {}) {
+    async function seedAgent(db: TestDbHandle['db'], overrides: Partial<typeof schema.agents.$inferInsert> = {}) {
       const now = Date.now() / 1000;
-      db.insert(schema.agents).values({
+      await db.insert(schema.agents).values({
         id: 'agent-bn',
         name: 'Self',
         project: 'myproj',
@@ -1817,7 +1827,7 @@ describe('agents API', () => {
         createdAt: now,
         updatedAt: now,
         ...overrides,
-      }).run();
+      });
     }
 
     it('returns 400 when project or name missing', async () => {
@@ -1848,7 +1858,7 @@ describe('agents API', () => {
     });
 
     it('updates prompt by project+name', async () => {
-      seedAgent(testDb.db);
+      await seedAgent(testDb.db);
       const res = await PATCH_BY_NAME(new NextRequest('http://localhost/api/agents/by-name', {
         method: 'PATCH',
         body: JSON.stringify({ project: 'myproj', name: 'Self', prompt: 'improved prompt' }),
@@ -1859,7 +1869,7 @@ describe('agents API', () => {
     });
 
     it('looks up DB agents by project+name case-insensitively', async () => {
-      seedAgent(testDb.db);
+      await seedAgent(testDb.db);
       const res = await PATCH_BY_NAME(new NextRequest('http://localhost/api/agents/by-name', {
         method: 'PATCH',
         body: JSON.stringify({ project: 'myproj', name: 'self', prompt: 'improved prompt' }),
@@ -1871,7 +1881,7 @@ describe('agents API', () => {
     });
 
     it('renames DB agents with currentName + name', async () => {
-      seedAgent(testDb.db);
+      await seedAgent(testDb.db);
       resolveProjectPathMock.mockReturnValue('/path/to/myproj');
 
       const res = await PATCH_BY_NAME(new NextRequest('http://localhost/api/agents/by-name', {
@@ -1988,8 +1998,8 @@ describe('agents API', () => {
     });
 
     it('rejects case-only rename conflicts by project+name', async () => {
-      seedAgent(testDb.db);
-      seedAgent(testDb.db, { id: 'agent-other', name: 'Taken' });
+      await seedAgent(testDb.db);
+      await seedAgent(testDb.db, { id: 'agent-other', name: 'Taken' });
 
       const res = await PATCH_BY_NAME(new NextRequest('http://localhost/api/agents/by-name', {
         method: 'PATCH',
@@ -2003,7 +2013,7 @@ describe('agents API', () => {
     });
 
     it('updates prerequisiteCommand by project+name for DB agents', async () => {
-      seedAgent(testDb.db);
+      await seedAgent(testDb.db);
       resolveProjectPathMock.mockReturnValueOnce('/path/to/myproj');
 
       const res = await PATCH_BY_NAME(new NextRequest('http://localhost/api/agents/by-name', {
@@ -2019,7 +2029,7 @@ describe('agents API', () => {
       const data = await res.json();
       expect(data.agent.prerequisiteCommand).toBe('echo ready');
 
-      const row = testDb.db.select().from(schema.agents).all().find((agent) => agent.id === 'agent-bn');
+      const row = (await testDb.db.select().from(schema.agents)).find((agent) => agent.id === 'agent-bn');
       expect(row?.prerequisiteCommand).toBe('echo ready');
       expect(writeFileAgentMock).toHaveBeenCalledWith('/path/to/myproj', 'myproj', 'Self', expect.objectContaining({
         prerequisiteCommand: 'echo ready',
@@ -2027,7 +2037,7 @@ describe('agents API', () => {
     });
 
     it('clears prerequisiteCommand by project+name for DB agents', async () => {
-      seedAgent(testDb.db, { prerequisiteCommand: 'echo ready' });
+      await seedAgent(testDb.db, { prerequisiteCommand: 'echo ready' });
       resolveProjectPathMock.mockReturnValueOnce('/path/to/myproj');
 
       const res = await PATCH_BY_NAME(new NextRequest('http://localhost/api/agents/by-name', {
@@ -2043,7 +2053,7 @@ describe('agents API', () => {
       const data = await res.json();
       expect(data.agent.prerequisiteCommand).toBeNull();
 
-      const row = testDb.db.select().from(schema.agents).all().find((agent) => agent.id === 'agent-bn');
+      const row = (await testDb.db.select().from(schema.agents)).find((agent) => agent.id === 'agent-bn');
       expect(row?.prerequisiteCommand).toBe('');
       expect(writeFileAgentMock).toHaveBeenCalledWith('/path/to/myproj', 'myproj', 'Self', expect.objectContaining({
         prerequisiteCommand: '',
@@ -2051,7 +2061,7 @@ describe('agents API', () => {
     });
 
     it('keeps an explicitly cleared issue-cruncher prerequisite blank by project+name for DB agents', async () => {
-      seedAgent(testDb.db, {
+      await seedAgent(testDb.db, {
         skillIds: '["agent-issue-cruncher"]',
         prerequisiteCommand: 'echo ready',
       });
@@ -2070,7 +2080,7 @@ describe('agents API', () => {
       const data = await res.json();
       expect(data.agent.prerequisiteCommand).toBeNull();
 
-      const row = testDb.db.select().from(schema.agents).all().find((agent) => agent.id === 'agent-bn');
+      const row = (await testDb.db.select().from(schema.agents)).find((agent) => agent.id === 'agent-bn');
       expect(row?.prerequisiteCommand).toBe('');
       expect(writeFileAgentMock).toHaveBeenCalledWith('/path/to/myproj', 'myproj', 'Self', expect.objectContaining({
         prerequisiteCommand: '',
@@ -2078,7 +2088,7 @@ describe('agents API', () => {
     });
 
     it('updates model by project+name', async () => {
-      seedAgent(testDb.db);
+      await seedAgent(testDb.db);
       const res = await PATCH_BY_NAME(new NextRequest('http://localhost/api/agents/by-name', {
         method: 'PATCH',
         body: JSON.stringify({ project: 'myproj', name: 'Self', model: 'opus' }),
@@ -2088,7 +2098,7 @@ describe('agents API', () => {
     });
 
     it('rejects invalid model values by project+name', async () => {
-      seedAgent(testDb.db);
+      await seedAgent(testDb.db);
       const res = await PATCH_BY_NAME(new NextRequest('http://localhost/api/agents/by-name', {
         method: 'PATCH',
         body: JSON.stringify({ project: 'myproj', name: 'Self', model: 'smart --resume injected' }),
@@ -2100,7 +2110,7 @@ describe('agents API', () => {
     });
 
     it('rejects invalid schedule values by project+name', async () => {
-      seedAgent(testDb.db);
+      await seedAgent(testDb.db);
       const res = await PATCH_BY_NAME(new NextRequest('http://localhost/api/agents/by-name', {
         method: 'PATCH',
         body: JSON.stringify({ project: 'myproj', name: 'Self', schedule: '1w' }),
@@ -2114,7 +2124,7 @@ describe('agents API', () => {
     });
 
     it('normalizes schedule values by project+name before saving and scheduling', async () => {
-      seedAgent(testDb.db, { prompt: 'do work', schedule: null, enabled: true });
+      await seedAgent(testDb.db, { prompt: 'do work', schedule: null, enabled: true });
       const res = await PATCH_BY_NAME(new NextRequest('http://localhost/api/agents/by-name', {
         method: 'PATCH',
         body: JSON.stringify({ project: 'myproj', name: 'Self', schedule: ' 2H ' }),
@@ -2135,20 +2145,20 @@ describe('agents API', () => {
 
     it('does not affect an agent with the same name in a different project', async () => {
       const now = Date.now() / 1000;
-      seedAgent(testDb.db);
-      testDb.db.insert(schema.agents).values({ id: 'agent-other', name: 'Self', project: 'other', skillIds: '[]', model: 'haiku', prompt: 'other prompt', schedule: null, runner: 'pm2', createdAt: now, updatedAt: now }).run();
+      await seedAgent(testDb.db);
+      await testDb.db.insert(schema.agents).values({ id: 'agent-other', name: 'Self', project: 'other', skillIds: '[]', model: 'haiku', prompt: 'other prompt', schedule: null, runner: 'pm2', createdAt: now, updatedAt: now });
 
       await PATCH_BY_NAME(new NextRequest('http://localhost/api/agents/by-name', {
         method: 'PATCH',
         body: JSON.stringify({ project: 'myproj', name: 'Self', prompt: 'changed' }),
       }));
 
-      const other = testDb.db.select().from(schema.agents).all().find(a => a.id === 'agent-other');
+      const other = (await testDb.db.select().from(schema.agents)).find(a => a.id === 'agent-other');
       expect(other?.prompt).toBe('other prompt');
     });
 
     it('calls installAgentSchedule when prompt+schedule are set and enabled', async () => {
-      seedAgent(testDb.db, { prompt: 'do work', schedule: '1h', enabled: true });
+      await seedAgent(testDb.db, { prompt: 'do work', schedule: '1h', enabled: true });
       await PATCH_BY_NAME(new NextRequest('http://localhost/api/agents/by-name', {
         method: 'PATCH',
         body: JSON.stringify({ project: 'myproj', name: 'Self', prompt: 'updated work' }),
@@ -2157,7 +2167,7 @@ describe('agents API', () => {
     });
 
     it('calls installAgentSchedule for skills-only agent (no prompt) when schedule and enabled', async () => {
-      seedAgent(testDb.db, { prompt: '', skillIds: '["skill1"]', schedule: '1h', enabled: true });
+      await seedAgent(testDb.db, { prompt: '', skillIds: '["skill1"]', schedule: '1h', enabled: true });
       await PATCH_BY_NAME(new NextRequest('http://localhost/api/agents/by-name', {
         method: 'PATCH',
         body: JSON.stringify({ project: 'myproj', name: 'Self', model: 'opus' }),
@@ -2166,7 +2176,7 @@ describe('agents API', () => {
     });
 
     it('does not call installAgentSchedule when skills-only agent has no schedule', async () => {
-      seedAgent(testDb.db, { prompt: '', skillIds: '["skill1"]', schedule: null, enabled: true });
+      await seedAgent(testDb.db, { prompt: '', skillIds: '["skill1"]', schedule: null, enabled: true });
       await PATCH_BY_NAME(new NextRequest('http://localhost/api/agents/by-name', {
         method: 'PATCH',
         body: JSON.stringify({ project: 'myproj', name: 'Self', model: 'opus' }),
@@ -2175,7 +2185,7 @@ describe('agents API', () => {
     });
 
     it('calls uninstallAgentSchedule (not install) when agent has empty skills, no prompt, but has schedule', async () => {
-      seedAgent(testDb.db, { prompt: '', skillIds: '[]', schedule: '1h', enabled: true });
+      await seedAgent(testDb.db, { prompt: '', skillIds: '[]', schedule: '1h', enabled: true });
       await PATCH_BY_NAME(new NextRequest('http://localhost/api/agents/by-name', {
         method: 'PATCH',
         body: JSON.stringify({ project: 'myproj', name: 'Self', model: 'opus' }),
@@ -2185,7 +2195,7 @@ describe('agents API', () => {
     });
 
     it('calls uninstallAgentSchedule (not install) when skills-only agent is disabled', async () => {
-      seedAgent(testDb.db, { prompt: '', skillIds: '["skill1"]', schedule: '1h', enabled: false });
+      await seedAgent(testDb.db, { prompt: '', skillIds: '["skill1"]', schedule: '1h', enabled: false });
       await PATCH_BY_NAME(new NextRequest('http://localhost/api/agents/by-name', {
         method: 'PATCH',
         body: JSON.stringify({ project: 'myproj', name: 'Self', model: 'opus' }),
@@ -2363,7 +2373,7 @@ describe('agents API', () => {
     it('preserves provider when syncing a DB agent back to the file', async () => {
       const db = testDb.db;
       const now = Date.now() / 1000;
-      db.insert(schema.agents)
+      await db.insert(schema.agents)
         .values({
           id: 'agent-123',
           name: 'Agent',
@@ -2377,8 +2387,7 @@ describe('agents API', () => {
           provider: 'codex',
           createdAt: now,
           updatedAt: now,
-        })
-        .run();
+        });
       resolveProjectPathMock.mockReturnValueOnce('/path/to/proj1');
 
       const request = new NextRequest('http://localhost/api/agents/agent-123', {
@@ -2461,7 +2470,7 @@ describe('agents API', () => {
     it('calls installAgentSchedule when patching enabled to true on agent with schedule and prompt', async () => {
       const db = testDb.db;
       const now = Date.now() / 1000;
-      db.insert(schema.agents)
+      await db.insert(schema.agents)
         .values({
           id: 'agent-123',
           name: 'Agent',
@@ -2474,8 +2483,7 @@ describe('agents API', () => {
           enabled: false,
           createdAt: now,
           updatedAt: now,
-        })
-        .run();
+        });
 
       const request = new NextRequest('http://localhost/api/agents/agent-123', {
         method: 'PATCH',
@@ -2500,7 +2508,7 @@ describe('agents API', () => {
       const agentGET = agentDetailRoute.GET;
       const db = testDb.db;
       const now = Date.now() / 1000;
-      db.insert(schema.agents)
+      await db.insert(schema.agents)
         .values({
           id: 'agent-123',
           name: 'Agent',
@@ -2512,8 +2520,7 @@ describe('agents API', () => {
           runner: 'pm2',
           createdAt: now,
           updatedAt: now,
-        })
-        .run();
+        });
 
       const request = new NextRequest('http://localhost/api/agents/agent-123', {
         method: 'PATCH',

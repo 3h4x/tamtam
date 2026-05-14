@@ -1,83 +1,168 @@
-import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
-import Database from 'better-sqlite3';
-import { drizzle } from 'drizzle-orm/better-sqlite3';
+import { describe, it, expect, beforeAll, beforeEach, afterAll, afterEach, vi } from 'vitest';
+import { sql } from 'drizzle-orm';
 import * as schema from '@/lib/db/schema';
+import { createTestPgDbEmpty, type TestDbHandle } from '@/__tests__/helpers/test-db';
 import { JobData } from '@/lib/jobs/job-storage';
 import { writeFileSync, readFileSync, mkdtempSync, rmSync } from 'fs';
 import { join } from 'path';
 import { tmpdir } from 'os';
 
-function createTestDb() {
-  const dbPath = ':memory:';
-  const sqlite = new Database(dbPath);
-  sqlite.pragma('journal_mode = WAL');
-  sqlite.pragma('foreign_keys = ON');
-
-  sqlite.exec(`
+async function applyDdl(handle: TestDbHandle): Promise<void> {
+  // PGlite rejects multi-statement prepared queries, so issue each DDL
+  // separately.
+  await handle.db.execute(sql.raw(`
     CREATE TABLE IF NOT EXISTS jobs (
-      id TEXT PRIMARY KEY,
-      project TEXT NOT NULL,
-      kind TEXT NOT NULL,
-      prompt TEXT,
-      pid INTEGER NOT NULL,
-      log_path TEXT,
-      started_at REAL NOT NULL,
-      finished_at REAL,
-      exit_code INTEGER,
-      seen INTEGER DEFAULT 0,
-      duration_ms INTEGER,
-      input_tokens INTEGER,
-      output_tokens INTEGER,
-      cache_read_tokens INTEGER,
-      cache_create_tokens INTEGER,
-      session_id TEXT,
-      user_prompt TEXT,
-      context_meta TEXT,
-      parent_job_id TEXT,
-      gh_issue_number INTEGER,
-      gh_issue_repo TEXT,
-      gh_issue_title TEXT,
-      log_pruned INTEGER DEFAULT 0,
-      verdict TEXT,
-      cost_usd REAL,
-      model TEXT,
-      release_id TEXT,
-      aborted_at REAL,
-      prompt_bytes INTEGER,
-      work_summary TEXT,
-      modified_files TEXT,
-      provider TEXT
-    );
+      id text PRIMARY KEY,
+      project text NOT NULL,
+      kind text NOT NULL,
+      prompt text,
+      pid integer NOT NULL,
+      log_path text,
+      started_at double precision NOT NULL,
+      finished_at double precision,
+      exit_code integer,
+      seen boolean DEFAULT false,
+      duration_ms integer,
+      input_tokens integer,
+      output_tokens integer,
+      cache_read_tokens integer,
+      cache_create_tokens integer,
+      session_id text,
+      user_prompt text,
+      context_meta text,
+      parent_job_id text,
+      gh_issue_number integer,
+      gh_issue_repo text,
+      gh_issue_title text,
+      log_pruned boolean DEFAULT false,
+      verdict text,
+      cost_usd double precision,
+      model text,
+      release_id text,
+      aborted_at double precision,
+      prompt_bytes integer,
+      work_summary text,
+      modified_files text,
+      provider text
+    )
+  `));
+  await handle.db.execute(sql.raw(`
     CREATE TABLE IF NOT EXISTS recommendations (
-      id TEXT PRIMARY KEY,
-      project TEXT NOT NULL,
-      source_kind TEXT NOT NULL,
-      source_id TEXT,
-      agent_id TEXT,
-      agent_name TEXT,
-      type TEXT NOT NULL,
-      title TEXT NOT NULL,
-      detail TEXT NOT NULL,
-      status TEXT NOT NULL DEFAULT 'open',
-      payload TEXT,
-      created_at REAL NOT NULL,
-      updated_at REAL NOT NULL
-    );
+      id text PRIMARY KEY,
+      project text NOT NULL,
+      source_kind text NOT NULL,
+      source_id text,
+      agent_id text,
+      agent_name text,
+      type text NOT NULL,
+      title text NOT NULL,
+      detail text NOT NULL,
+      status text NOT NULL DEFAULT 'open',
+      payload text,
+      created_at double precision NOT NULL,
+      updated_at double precision NOT NULL
+    )
+  `));
+  await handle.db.execute(sql.raw(`
     CREATE TABLE IF NOT EXISTS gh_issues_cache (
-      project TEXT PRIMARY KEY,
-      repo TEXT NOT NULL,
-      prs TEXT NOT NULL DEFAULT '[]',
-      issues TEXT NOT NULL DEFAULT '[]',
-      fetched_at REAL NOT NULL
-    );
-  `);
+      project text PRIMARY KEY,
+      repo text NOT NULL,
+      prs text NOT NULL DEFAULT '[]',
+      issues text NOT NULL DEFAULT '[]',
+      fetched_at double precision NOT NULL
+    )
+  `));
+}
 
-  return { sqlite, db: drizzle(sqlite, { schema }) };
+let sharedHandle: TestDbHandle;
+
+beforeAll(async () => {
+  sharedHandle = await createTestPgDbEmpty();
+  await applyDdl(sharedHandle);
+});
+
+afterAll(async () => {
+  // Drain any straggling fire-and-forget queries via a no-op SELECT before
+  // closing. PGlite serializes queries on a single instance, so awaiting a
+  // SELECT 1 flushes anything queued ahead of it without a fixed sleep.
+  try {
+    await sharedHandle.db.execute(sql.raw('SELECT 1'));
+  } catch {
+    // ignore
+  }
+  try {
+    await sharedHandle[Symbol.asyncDispose]();
+  } catch {
+    // ignore
+  }
+});
+
+async function truncateAll(): Promise<void> {
+  // DELETE is faster than TRUNCATE on PGlite for small tables (no table rewrite,
+  // no extension reload). Single execute() with multi-statement is rejected by
+  // PGlite, so issue them via a single CTE-style query.
+  await sharedHandle.db.execute(sql.raw(
+    'WITH a AS (DELETE FROM jobs RETURNING 1), b AS (DELETE FROM recommendations RETURNING 1) DELETE FROM gh_issues_cache'
+  ));
+}
+
+// Getter shim so existing `testDb.db.*` test code keeps working while the
+// underlying connection is the shared PGlite handle.
+const testDb = {
+  get db() {
+    return sharedHandle.db;
+  },
+} as { db: TestDbHandle['db'] };
+
+// `getJob`/`listJobs` are cache-only since commit 1cc1db25 — tests that seed
+// rows via direct DB inserts must populate the in-memory cache too, or
+// lifecycle hooks (which call `getJob`/`findActiveReleaseJob`/`listJobs`)
+// won't see those rows. Call this after raw inserts and before invoking
+// `markDoneFn`/lifecycle code so the cache mirrors the DB.
+async function syncCacheFromDb(): Promise<void> {
+  const { jobsCache } = await import('@/lib/jobs/storage');
+  jobsCache.clear();
+  const rows = await sharedHandle.db.select().from(schema.jobs);
+  for (const row of rows) {
+    jobsCache.set(row.id, {
+      id: row.id,
+      project: row.project,
+      kind: row.kind,
+      prompt: row.prompt ?? null,
+      pid: row.pid,
+      logPath: row.logPath,
+      startedAt: row.startedAt,
+      finishedAt: row.finishedAt ?? null,
+      exitCode: row.exitCode ?? null,
+      seen: row.seen ?? false,
+      durationMs: row.durationMs ?? null,
+      inputTokens: row.inputTokens ?? null,
+      outputTokens: row.outputTokens ?? null,
+      cacheReadTokens: row.cacheReadTokens ?? null,
+      cacheCreateTokens: row.cacheCreateTokens ?? null,
+      sessionId: row.sessionId ?? null,
+      contextMeta: row.contextMeta ?? null,
+      userPrompt: row.userPrompt ?? null,
+      parentJobId: row.parentJobId ?? null,
+      ghIssueNumber: row.ghIssueNumber ?? null,
+      ghIssueRepo: row.ghIssueRepo ?? null,
+      ghIssueTitle: row.ghIssueTitle ?? null,
+      logPruned: row.logPruned ?? false,
+      verdict: row.verdict ?? null,
+      costUsd: row.costUsd ?? null,
+      model: row.model ?? null,
+      releaseId: row.releaseId ?? null,
+      abortedAt: row.abortedAt ?? null,
+      promptBytes: row.promptBytes ?? null,
+      workSummary: row.workSummary ?? null,
+      modifiedFiles: row.modifiedFiles ?? null,
+      provider: row.provider ?? null,
+    });
+  }
 }
 
 describe('job-storage', () => {
   let tempDir: string;
-  let testDb: ReturnType<typeof createTestDb>;
   let createJob: typeof import('@/lib/jobs/job-storage').createJob;
   let getJob: typeof import('@/lib/jobs/job-storage').getJob;
   let listJobs: typeof import('@/lib/jobs/job-storage').listJobs;
@@ -89,23 +174,27 @@ describe('job-storage', () => {
   let jobToDict: typeof import('@/lib/jobs/job-storage').jobToDict;
   let probeJobStatus: typeof import('@/lib/jobs/job-storage').probeJobStatus;
   let runWithParent: typeof import('@/lib/jobs/job-storage').runWithParent;
+  let storageCache: Map<string, JobData>;
 
-  beforeEach(async () => {
-    tempDir = mkdtempSync(join(tmpdir(), 'tamtam-job-test-'));
-
-    // Clear all mocks and modules
+  // All tests in this describe share the same mock setup, so install mocks
+  // and import the module once. Per-test isolation is achieved by clearing
+  // `jobsCache` and TRUNCATEing the shared PGlite tables in `beforeEach`.
+  // This avoids paying the ~5-15ms `vi.resetModules() + await import(...)`
+  // re-execution cost on every test.
+  beforeAll(async () => {
     vi.resetModules();
-
-    // Create a fresh test database
-    testDb = createTestDb();
-
-    // Mock the db module
     vi.doMock('@/lib/db', () => ({
-      db: testDb.db,
+      db: sharedHandle.db,
       schema,
     }));
-
-    // Now import job-storage (which will use the mocked db)
+    // Mock pm2-jobs so probeJobStatus does not shell out to a real `pm2
+    // jlist` (200+ms on macOS). Default to `unknown` status, which mirrors
+    // what real pm2 returns for jobs it does not know about.
+    vi.doMock('@/lib/jobs/pm2-jobs', () => ({
+      getJobStatus: vi.fn().mockResolvedValue({ status: 'unknown', exitCode: null }),
+      getJobPid: vi.fn().mockResolvedValue(null),
+      deleteJob: vi.fn().mockResolvedValue(undefined),
+    }));
     const jobStorage = await import('@/lib/jobs/job-storage');
     createJob = jobStorage.createJob;
     getJob = jobStorage.getJob;
@@ -118,13 +207,27 @@ describe('job-storage', () => {
     jobToDict = jobStorage.jobToDict;
     probeJobStatus = jobStorage.probeJobStatus;
     runWithParent = jobStorage.runWithParent;
+    storageCache = (await import('@/lib/jobs/storage')).jobsCache;
+  });
+
+  beforeEach(async () => {
+    tempDir = mkdtempSync(join(tmpdir(), 'tamtam-job-test-'));
+    // Reset both the in-memory cache (module-level state shared across all
+    // tests since we no longer reset modules) and the shared PGlite tables.
+    storageCache.clear();
+    await truncateAll();
   });
 
   afterEach(() => {
-    vi.resetModules();
     if (tempDir) {
       rmSync(tempDir, { recursive: true, force: true });
     }
+  });
+
+  afterAll(() => {
+    vi.doUnmock('@/lib/db');
+    vi.doUnmock('@/lib/jobs/pm2-jobs');
+    vi.resetModules();
   });
 
   describe('createJob', () => {
@@ -399,10 +502,16 @@ describe('job-storage', () => {
 
       vi.resetModules();
       vi.doMock('@/lib/db', () => ({
-        db: testDb.db,
+        db: sharedHandle.db,
         schema,
       }));
+      // Settle fire-and-forget saveToDb before reading from a fresh module.
+      // PGlite serializes queries, so a SELECT 1 flushes the pending INSERT.
+      await sharedHandle.db.execute(sql.raw('SELECT 1'));
       const reloaded = await import('@/lib/jobs/job-storage');
+      // `getJob` is cache-only; hydrate the fresh module's cache from the DB
+      // to simulate the production boot path that would call loadFromDb().
+      await reloaded.loadFromDb();
       const persisted = reloaded.getJob(release.id);
 
       expect(persisted?.ghIssueNumber).toBe(42);
@@ -428,10 +537,15 @@ describe('job-storage', () => {
 
       vi.resetModules();
       vi.doMock('@/lib/db', () => ({
-        db: testDb.db,
+        db: sharedHandle.db,
         schema,
       }));
+      // Settle fire-and-forget saveToDb before reading from a fresh module.
+      // PGlite serializes queries, so a SELECT 1 flushes the pending INSERT.
+      await sharedHandle.db.execute(sql.raw('SELECT 1'));
       const reloaded = await import('@/lib/jobs/job-storage');
+      // `getJob` is cache-only; hydrate the fresh module's cache from the DB.
+      await reloaded.loadFromDb();
       const persisted = reloaded.getJob(dod.id);
 
       expect(persisted?.ghIssueNumber).toBe(7);
@@ -1075,14 +1189,14 @@ describe('job-storage', () => {
 
 describe('readParsedLog', () => {
   let tempDir: string;
-  let testDb: ReturnType<typeof createTestDb>;
   let readParsedLog: typeof import('@/lib/jobs/job-storage').readParsedLog;
 
-  beforeEach(async () => {
-    tempDir = mkdtempSync(join(tmpdir(), 'tamtam-parsed-log-test-'));
+  // `readParsedLog` is a pure file-reading function with no DB writes or
+  // completion-hook side effects. Hoisting the import lets the 8 tests in
+  // this describe share a single module-load instead of paying it per test.
+  beforeAll(async () => {
     vi.resetModules();
-    testDb = createTestDb();
-    vi.doMock('@/lib/db', () => ({ db: testDb.db, schema }));
+    vi.doMock('@/lib/db', () => ({ db: sharedHandle.db, schema }));
     vi.doMock('@/lib/jobs/pm2-jobs', () => ({ getJobStatus: vi.fn(), deleteJob: vi.fn() }));
     vi.doMock('@/lib/shared/project-data', () => ({ resolveProjectPath: vi.fn().mockReturnValue(null) }));
 
@@ -1090,9 +1204,19 @@ describe('readParsedLog', () => {
     readParsedLog = mod.readParsedLog;
   });
 
+  beforeEach(() => {
+    tempDir = mkdtempSync(join(tmpdir(), 'tamtam-parsed-log-test-'));
+  });
+
   afterEach(() => {
-    vi.resetModules();
     rmSync(tempDir, { recursive: true, force: true });
+  });
+
+  afterAll(() => {
+    vi.doUnmock('@/lib/db');
+    vi.doUnmock('@/lib/jobs/pm2-jobs');
+    vi.doUnmock('@/lib/shared/project-data');
+    vi.resetModules();
   });
 
   function makeJob(overrides: Partial<JobData> = {}): JobData {
@@ -1182,24 +1306,45 @@ describe('readParsedLog', () => {
 });
 
 describe('probeJobStatus with pm2', () => {
-  let testDb: ReturnType<typeof createTestDb>;
   let probeJobStatusFn: typeof import('@/lib/jobs/job-storage').probeJobStatus;
-  let getJobStatusMock: ReturnType<typeof vi.fn>;
+  // Stable mock references captured by the hoisted `vi.doMock` factories.
+  // `beforeEach` calls `mockReset()` on each so per-test `mockResolvedValue`
+  // (or `mockResolvedValueOnce`) calls work the same as in the original
+  // per-test mock setup.
+  const getJobStatusMock = vi.fn();
+  const getJobPidMock = vi.fn();
+  const deleteJobMock = vi.fn();
+  const resolveProjectPathMock = vi.fn();
+  let storageCache: Map<string, JobData>;
 
-  beforeEach(async () => {
+  beforeAll(async () => {
     vi.resetModules();
-    testDb = createTestDb();
-    getJobStatusMock = vi.fn();
-
-    vi.doMock('@/lib/db', () => ({ db: testDb.db, schema }));
-    vi.doMock('@/lib/jobs/pm2-jobs', () => ({ getJobStatus: getJobStatusMock, getJobPid: vi.fn().mockResolvedValue(null), deleteJob: vi.fn() }));
-    vi.doMock('@/lib/shared/project-data', () => ({ resolveProjectPath: vi.fn().mockReturnValue(null) }));
+    vi.doMock('@/lib/db', () => ({ db: sharedHandle.db, schema }));
+    vi.doMock('@/lib/jobs/pm2-jobs', () => ({
+      getJobStatus: getJobStatusMock,
+      getJobPid: getJobPidMock,
+      deleteJob: deleteJobMock,
+    }));
+    vi.doMock('@/lib/shared/project-data', () => ({ resolveProjectPath: resolveProjectPathMock }));
 
     const mod = await import('@/lib/jobs/job-storage');
     probeJobStatusFn = mod.probeJobStatus;
+    storageCache = (await import('@/lib/jobs/storage')).jobsCache;
   });
 
-  afterEach(() => {
+  beforeEach(async () => {
+    storageCache.clear();
+    await truncateAll();
+    getJobStatusMock.mockReset();
+    getJobPidMock.mockReset().mockResolvedValue(null);
+    deleteJobMock.mockReset();
+    resolveProjectPathMock.mockReset().mockReturnValue(null);
+  });
+
+  afterAll(() => {
+    vi.doUnmock('@/lib/db');
+    vi.doUnmock('@/lib/jobs/pm2-jobs');
+    vi.doUnmock('@/lib/shared/project-data');
     vi.resetModules();
   });
 
@@ -1533,22 +1678,29 @@ describe('probeJobStatus with pm2', () => {
 });
 
 describe('probeJobStatus – test/action kind liveness via process.kill', () => {
-  let testDb: ReturnType<typeof createTestDb>;
   let probeJobStatusFn: typeof import('@/lib/jobs/job-storage').probeJobStatus;
+  let storageCache: Map<string, JobData>;
 
-  beforeEach(async () => {
+  beforeAll(async () => {
     vi.resetModules();
-    testDb = createTestDb();
-
-    vi.doMock('@/lib/db', () => ({ db: testDb.db, schema }));
+    vi.doMock('@/lib/db', () => ({ db: sharedHandle.db, schema }));
     vi.doMock('@/lib/jobs/pm2-jobs', () => ({ getJobStatus: vi.fn(), deleteJob: vi.fn() }));
     vi.doMock('@/lib/shared/project-data', () => ({ resolveProjectPath: vi.fn().mockReturnValue(null) }));
 
     const mod = await import('@/lib/jobs/job-storage');
     probeJobStatusFn = mod.probeJobStatus;
+    storageCache = (await import('@/lib/jobs/storage')).jobsCache;
   });
 
-  afterEach(() => {
+  beforeEach(async () => {
+    storageCache.clear();
+    await truncateAll();
+  });
+
+  afterAll(() => {
+    vi.doUnmock('@/lib/db');
+    vi.doUnmock('@/lib/jobs/pm2-jobs');
+    vi.doUnmock('@/lib/shared/project-data');
     vi.resetModules();
   });
 
@@ -1609,10 +1761,18 @@ describe('probeJobStatus – test/action kind liveness via process.kill', () => 
 });
 
 describe('runCompletionHooks – fix→review auto-trigger', () => {
-  let testDb: ReturnType<typeof createTestDb>;
-  let startProjectReviewMock: ReturnType<typeof vi.fn>;
-  let getJobStatusMock: ReturnType<typeof vi.fn>;
+  // Hoist mocks + module imports to `beforeAll`; reset stable mock refs in
+  // `beforeEach` to avoid the per-test `vi.resetModules() + await import(...)`
+  // re-execution cost.
+  const startProjectReviewMock = vi.fn();
+  const getJobStatusMock = vi.fn();
+  const deleteJobMock = vi.fn();
+  const execMock = vi.fn();
+  const markReviewedMock = vi.fn();
+  const resolveProjectPathMock = vi.fn();
+  const getProjectTestConfigMock = vi.fn();
   let probeJobStatusFn: typeof import('@/lib/jobs/job-storage').probeJobStatus;
+  let storageCache: Map<string, JobData>;
 
   function makeFixJob(overrides: Partial<JobData> = {}): JobData {
     return {
@@ -1636,43 +1796,49 @@ describe('runCompletionHooks – fix→review auto-trigger', () => {
     };
   }
 
-  beforeEach(async () => {
+  beforeAll(async () => {
     vi.resetModules();
-    testDb = createTestDb();
-    startProjectReviewMock = vi.fn().mockResolvedValue({ ok: true, jobId: 'rev-auto', pid: 999, logPath: '/tmp/rev.log' });
-    getJobStatusMock = vi.fn();
-
-    vi.doMock('@/lib/db', () => ({ db: testDb.db, schema }));
+    vi.doMock('@/lib/db', () => ({ db: sharedHandle.db, schema }));
     vi.doMock('@/lib/jobs/pm2-jobs', () => ({
       getJobStatus: getJobStatusMock,
-      deleteJob: vi.fn().mockResolvedValue(undefined),
+      deleteJob: deleteJobMock,
     }));
-    vi.doMock('@/lib/shared/shell', () => ({
-      exec: vi.fn().mockResolvedValue({ exitCode: 0, stdout: '', stderr: '' }),
-    }));
-    vi.doMock('@/lib/git/git-utils', () => ({
-      markReviewed: vi.fn().mockResolvedValue(undefined),
-    }));
-    vi.doMock('@/lib/shared/project-data', () => ({
-      resolveProjectPath: vi.fn().mockReturnValue(null),
-    }));
-    vi.doMock('@/lib/pipeline/start-review', () => ({
-      startProjectReview: startProjectReviewMock,
-    }));
-    vi.doMock('@/lib/scheduling/scheduling', () => ({
-      getProjectTestConfig: vi.fn().mockReturnValue({
-        testCommand: null,
-        testCronEnabled: false,
-        testCronSchedule: null,
-        autoPushEnabled: true,
-      }),
-    }));
+    vi.doMock('@/lib/shared/shell', () => ({ exec: execMock }));
+    vi.doMock('@/lib/git/git-utils', () => ({ markReviewed: markReviewedMock }));
+    vi.doMock('@/lib/shared/project-data', () => ({ resolveProjectPath: resolveProjectPathMock }));
+    vi.doMock('@/lib/pipeline/start-review', () => ({ startProjectReview: startProjectReviewMock }));
+    vi.doMock('@/lib/scheduling/scheduling', () => ({ getProjectTestConfig: getProjectTestConfigMock }));
 
     const mod = await import('@/lib/jobs/job-storage');
     probeJobStatusFn = mod.probeJobStatus;
+    storageCache = (await import('@/lib/jobs/storage')).jobsCache;
   });
 
-  afterEach(() => {
+  beforeEach(async () => {
+    storageCache.clear();
+    await truncateAll();
+    startProjectReviewMock.mockReset().mockResolvedValue({ ok: true, jobId: 'rev-auto', pid: 999, logPath: '/tmp/rev.log' });
+    getJobStatusMock.mockReset();
+    deleteJobMock.mockReset().mockResolvedValue(undefined);
+    execMock.mockReset().mockResolvedValue({ exitCode: 0, stdout: '', stderr: '' });
+    markReviewedMock.mockReset().mockResolvedValue(undefined);
+    resolveProjectPathMock.mockReset().mockReturnValue(null);
+    getProjectTestConfigMock.mockReset().mockReturnValue({
+      testCommand: null,
+      testCronEnabled: false,
+      testCronSchedule: null,
+      autoPushEnabled: true,
+    });
+  });
+
+  afterAll(() => {
+    vi.doUnmock('@/lib/db');
+    vi.doUnmock('@/lib/jobs/pm2-jobs');
+    vi.doUnmock('@/lib/shared/shell');
+    vi.doUnmock('@/lib/git/git-utils');
+    vi.doUnmock('@/lib/shared/project-data');
+    vi.doUnmock('@/lib/pipeline/start-review');
+    vi.doUnmock('@/lib/scheduling/scheduling');
     vi.resetModules();
   });
 
@@ -1725,7 +1891,6 @@ describe('runCompletionHooks – fix→review auto-trigger', () => {
 });
 
 describe('runCompletionHooks – auto-push pipeline', () => {
-  let testDb: ReturnType<typeof createTestDb>;
   let startProjectTestMock: ReturnType<typeof vi.fn>;
   let startProjectPushMock: ReturnType<typeof vi.fn>;
   let startProjectCommitMock: ReturnType<typeof vi.fn>;
@@ -1762,7 +1927,7 @@ describe('runCompletionHooks – auto-push pipeline', () => {
 
   beforeEach(async () => {
     vi.resetModules();
-    testDb = createTestDb();
+    await truncateAll();
     tempDir = mkdtempSync(join(tmpdir(), 'tamtam-autopush-test-'));
 
     startProjectTestMock = vi.fn().mockResolvedValue({ ok: true, jobId: 'test-auto', pid: 999, logPath: '/tmp/t.log', testCmd: 'pnpm test' });
@@ -1773,7 +1938,7 @@ describe('runCompletionHooks – auto-push pipeline', () => {
     resolveProjectPathMock = vi.fn().mockReturnValue('/proj');
     isReviewedMock = vi.fn().mockResolvedValue(false);
 
-    vi.doMock('@/lib/db', () => ({ db: testDb.db, schema }));
+    vi.doMock('@/lib/db', () => ({ db: sharedHandle.db, schema }));
     vi.doMock('@/lib/jobs/pm2-jobs', () => ({
       getJobStatus: vi.fn(),
       deleteJob: vi.fn().mockResolvedValue(undefined),
@@ -1820,36 +1985,38 @@ describe('runCompletionHooks – auto-push pipeline', () => {
 
   it('finalizes active release job with exit 0 when push succeeds', async () => {
     const now = Date.now() / 1000;
-    testDb.db.insert(schema.jobs).values({
+    await testDb.db.insert(schema.jobs).values({
       id: 'release-job-push', project: 'my-proj', kind: 'release',
       prompt: null, pid: 1, logPath: null,
       startedAt: now - 10, finishedAt: null, exitCode: null,
-      seen: 0, durationMs: null, inputTokens: null, outputTokens: null,
+      seen: false, durationMs: null, inputTokens: null, outputTokens: null,
       cacheReadTokens: null, cacheCreateTokens: null, sessionId: null,
-    } as any).run();
+    } as any);
+    await syncCacheFromDb();
 
     const job = makeJob('push', null, { releaseId: 'release-job-push' });
     await markDoneFn(job, 0);
 
-    const releaseRow = testDb.db.select().from(schema.jobs).all().find(r => r.id === 'release-job-push');
+    const releaseRow = (await testDb.db.select().from(schema.jobs)).find(r => r.id === 'release-job-push');
     expect(releaseRow?.finishedAt).not.toBeNull();
     expect(releaseRow?.exitCode).toBe(0);
   });
 
   it('finalizes active release job with exit 1 when push fails', async () => {
     const now = Date.now() / 1000;
-    testDb.db.insert(schema.jobs).values({
+    await testDb.db.insert(schema.jobs).values({
       id: 'release-job-push-fail', project: 'my-proj', kind: 'release',
       prompt: null, pid: 1, logPath: null,
       startedAt: now - 10, finishedAt: null, exitCode: null,
-      seen: 0, durationMs: null, inputTokens: null, outputTokens: null,
+      seen: false, durationMs: null, inputTokens: null, outputTokens: null,
       cacheReadTokens: null, cacheCreateTokens: null, sessionId: null,
-    } as any).run();
+    } as any);
+    await syncCacheFromDb();
 
     const job = makeJob('push', null, { releaseId: 'release-job-push-fail' });
     await markDoneFn(job, 1);
 
-    const releaseRow = testDb.db.select().from(schema.jobs).all().find(r => r.id === 'release-job-push-fail');
+    const releaseRow = (await testDb.db.select().from(schema.jobs)).find(r => r.id === 'release-job-push-fail');
     expect(releaseRow?.finishedAt).not.toBeNull();
     expect(releaseRow?.exitCode).toBe(1);
   });
@@ -1858,13 +2025,13 @@ describe('runCompletionHooks – auto-push pipeline', () => {
     const now = Date.now() / 1000;
     // Simulate a job that a concurrent probe already finalized in the DB,
     // but whose in-memory JobData still has finishedAt === null.
-    testDb.db.insert(schema.jobs).values({
+    await testDb.db.insert(schema.jobs).values({
       id: 'run-job', project: 'my-proj', kind: 'run',
       prompt: null, pid: 1, logPath: null,
       startedAt: now - 10, finishedAt: now - 1, exitCode: 0,
-      seen: 0, durationMs: null, inputTokens: null, outputTokens: null,
+      seen: false, durationMs: null, inputTokens: null, outputTokens: null,
       cacheReadTokens: null, cacheCreateTokens: null, sessionId: null,
-    } as any).run();
+    } as any);
 
     const job = makeJob('run', null); // in-memory finishedAt === null
     expect(job.finishedAt).toBeNull();
@@ -1881,19 +2048,19 @@ describe('runCompletionHooks – auto-push pipeline', () => {
 
   it('does not finalize a release job that is already done (idempotent)', async () => {
     const now = Date.now() / 1000;
-    testDb.db.insert(schema.jobs).values({
+    await testDb.db.insert(schema.jobs).values({
       id: 'release-job-already-done', project: 'my-proj', kind: 'release',
       prompt: null, pid: 1, logPath: null,
       startedAt: now - 20, finishedAt: now - 5, exitCode: 0,
-      seen: 0, durationMs: null, inputTokens: null, outputTokens: null,
+      seen: false, durationMs: null, inputTokens: null, outputTokens: null,
       cacheReadTokens: null, cacheCreateTokens: null, sessionId: null,
-    } as any).run();
+    } as any);
 
     const job = makeJob('push', null);
     await markDoneFn(job, 0);
 
     // Already-done release job should not be re-finalized (finishedAt stays the same)
-    const releaseRow = testDb.db.select().from(schema.jobs).all().find(r => r.id === 'release-job-already-done');
+    const releaseRow = (await testDb.db.select().from(schema.jobs)).find(r => r.id === 'release-job-already-done');
     expect(releaseRow?.exitCode).toBe(0);
   });
 
@@ -2004,7 +2171,7 @@ describe('runCompletionHooks – auto-push pipeline', () => {
   it('starts fix on test failure even when prior fix count would otherwise hit the cap (fixes are unbounded)', async () => {
     const now = Date.now() / 1000;
     for (let i = 0; i < 3; i++) {
-      testDb.db
+      await testDb.db
         .insert(schema.jobs)
         .values({
           id: `testfail-prior-fix-${i}`,
@@ -2016,15 +2183,14 @@ describe('runCompletionHooks – auto-push pipeline', () => {
           startedAt: now - 60 * i,
           finishedAt: now - 60 * i + 5,
           exitCode: 0,
-          seen: 1,
+          seen: true,
           durationMs: null,
           inputTokens: null,
           outputTokens: null,
           cacheReadTokens: null,
           cacheCreateTokens: null,
           sessionId: null,
-        } as any)
-        .run();
+        } as any);
     }
     const job = makeJob('test', null);
 
@@ -2037,13 +2203,14 @@ describe('runCompletionHooks – auto-push pipeline', () => {
     // Neither auto flag is set, but there's an active release job — should still fix.
     getProjectTestConfigMock.mockReturnValue({ testCommand: null, testCronEnabled: false, testCronSchedule: null, autoPushEnabled: false, autoCommitEnabled: false });
     const now = Date.now() / 1000;
-    testDb.db.insert(schema.jobs).values({
+    await testDb.db.insert(schema.jobs).values({
       id: 'active-release-for-testfail', project: 'my-proj', kind: 'release',
       prompt: null, pid: 1, logPath: null,
       startedAt: now - 10, finishedAt: null, exitCode: null,
-      seen: 0, durationMs: null, inputTokens: null, outputTokens: null,
+      seen: false, durationMs: null, inputTokens: null, outputTokens: null,
       cacheReadTokens: null, cacheCreateTokens: null, sessionId: null,
-    } as any).run();
+    } as any);
+    await syncCacheFromDb();
     const job = makeJob('test', null, { releaseId: 'active-release-for-testfail' });
 
     await markDoneFn(job, 1);
@@ -2092,7 +2259,7 @@ describe('runCompletionHooks – auto-push pipeline', () => {
 
   it('pushes directly when tests pass, worktree is clean, and a fresh LGTM already exists', async () => {
     const now = Date.now() / 1000;
-    testDb.db.insert(schema.jobs).values({
+    await testDb.db.insert(schema.jobs).values({
       id: 'fresh-lgtm-review',
       project: 'my-proj',
       kind: 'review',
@@ -2102,14 +2269,15 @@ describe('runCompletionHooks – auto-push pipeline', () => {
       startedAt: now - 60,
       finishedAt: now - 10,
       exitCode: 0,
-      seen: 1,
+      seen: true,
       durationMs: null,
       inputTokens: null,
       outputTokens: null,
       cacheReadTokens: null,
       cacheCreateTokens: null,
       sessionId: null,
-    } as any).run();
+    } as any);
+    await syncCacheFromDb();
     writeFileSync(join(tempDir, 'fresh-lgtm-review.log'), 'Verdict: LGTM\n');
     isReviewedMock.mockResolvedValue(true);
     execMock
@@ -2125,7 +2293,7 @@ describe('runCompletionHooks – auto-push pipeline', () => {
 
   it('re-runs review when tests pass, worktree is clean, and the LGTM is stale after a new commit', async () => {
     const now = Date.now() / 1000;
-    testDb.db.insert(schema.jobs).values({
+    await testDb.db.insert(schema.jobs).values({
       id: 'stale-lgtm-review',
       project: 'my-proj',
       kind: 'review',
@@ -2135,14 +2303,14 @@ describe('runCompletionHooks – auto-push pipeline', () => {
       startedAt: now - 60,
       finishedAt: now - 10,
       exitCode: 0,
-      seen: 1,
+      seen: true,
       durationMs: null,
       inputTokens: null,
       outputTokens: null,
       cacheReadTokens: null,
       cacheCreateTokens: null,
       sessionId: null,
-    } as any).run();
+    } as any);
     writeFileSync(join(tempDir, 'stale-lgtm-review.log'), 'Verdict: LGTM\n');
     isReviewedMock.mockResolvedValue(false);
     execMock
@@ -2209,7 +2377,7 @@ describe('runCompletionHooks – auto-push pipeline', () => {
   it('always starts fix on NEEDS ATTENTION even when prior fix count would otherwise hit the cap (fixes are unbounded)', async () => {
     const now = Date.now() / 1000;
     for (let i = 0; i < 3; i++) {
-      testDb.db
+      await testDb.db
         .insert(schema.jobs)
         .values({
           id: `prior-fix-${i}`,
@@ -2221,15 +2389,14 @@ describe('runCompletionHooks – auto-push pipeline', () => {
           startedAt: now - 60 * i,
           finishedAt: now - 60 * i + 5,
           exitCode: 0,
-          seen: 1,
+          seen: true,
           durationMs: null,
           inputTokens: null,
           outputTokens: null,
           cacheReadTokens: null,
           cacheCreateTokens: null,
           sessionId: null,
-        } as any)
-        .run();
+        } as any);
     }
 
     const logFile = join(tempDir, 'needs-cap.log');
@@ -2245,7 +2412,7 @@ describe('runCompletionHooks – auto-push pipeline', () => {
     const now = Date.now() / 1000;
     const releaseLog = join(tempDir, 'release-cap.log');
     writeFileSync(releaseLog, '# release start\n');
-    testDb.db.insert(schema.jobs).values({
+    await testDb.db.insert(schema.jobs).values({
       id: 'release-cap',
       project: 'my-proj',
       kind: 'release',
@@ -2255,16 +2422,16 @@ describe('runCompletionHooks – auto-push pipeline', () => {
       startedAt: now - 300,
       finishedAt: null,
       exitCode: null,
-      seen: 0,
+      seen: false,
       durationMs: null,
       inputTokens: null,
       outputTokens: null,
       cacheReadTokens: null,
       cacheCreateTokens: null,
       sessionId: null,
-    } as any).run();
+    } as any);
     for (let i = 0; i < 3; i++) {
-      testDb.db.insert(schema.jobs).values({
+      await testDb.db.insert(schema.jobs).values({
         id: `release-cap-fix-${i}`,
         project: 'my-proj',
         kind: 'fix',
@@ -2274,7 +2441,7 @@ describe('runCompletionHooks – auto-push pipeline', () => {
         startedAt: now - 240 + i,
         finishedAt: now - 230 + i,
         exitCode: 0,
-        seen: 1,
+        seen: true,
         durationMs: null,
         inputTokens: null,
         outputTokens: null,
@@ -2282,7 +2449,7 @@ describe('runCompletionHooks – auto-push pipeline', () => {
         cacheCreateTokens: null,
         sessionId: null,
         releaseId: 'release-cap',
-      } as any).run();
+      } as any);
     }
 
     const logFile = join(tempDir, 'review-cap.log');
@@ -2294,14 +2461,14 @@ describe('runCompletionHooks – auto-push pipeline', () => {
     expect(startFixFromJobMock).toHaveBeenCalledWith(job.id);
     // Release stays open — the trailing fix continues; the cap fires on the
     // next review (fix→review hook), not here.
-    const releaseRow = testDb.db.select().from(schema.jobs).all().find(r => r.id === 'release-cap');
+    const releaseRow = (await testDb.db.select().from(schema.jobs)).find(r => r.id === 'release-cap');
     expect(releaseRow?.finishedAt).toBeNull();
   });
 
   it('starts fix on NEEDS ATTENTION even with prior fixes in the same release (fixes are unbounded)', async () => {
     const now = Date.now() / 1000;
     for (let i = 0; i < 3; i++) {
-      testDb.db
+      await testDb.db
         .insert(schema.jobs)
         .values({
           id: `same-release-fix-${i}`,
@@ -2313,7 +2480,7 @@ describe('runCompletionHooks – auto-push pipeline', () => {
           startedAt: now - 60 * i,
           finishedAt: now - 60 * i + 5,
           exitCode: 0,
-          seen: 1,
+          seen: true,
           durationMs: null,
           inputTokens: null,
           outputTokens: null,
@@ -2321,8 +2488,7 @@ describe('runCompletionHooks – auto-push pipeline', () => {
           cacheCreateTokens: null,
           sessionId: null,
           releaseId: 'release-current',
-        } as any)
-        .run();
+        } as any);
     }
 
     const logFile = join(tempDir, 'release-scoped-cap.log');
@@ -2338,7 +2504,7 @@ describe('runCompletionHooks – auto-push pipeline', () => {
     const now = Date.now() / 1000;
     // 3 fix jobs from a PREVIOUS release — should not eat into current release's budget
     for (let i = 0; i < 3; i++) {
-      testDb.db
+      await testDb.db
         .insert(schema.jobs)
         .values({
           id: `old-release-fix-${i}`,
@@ -2350,7 +2516,7 @@ describe('runCompletionHooks – auto-push pipeline', () => {
           startedAt: now - 60 * i,
           finishedAt: now - 60 * i + 5,
           exitCode: 0,
-          seen: 1,
+          seen: true,
           durationMs: null,
           inputTokens: null,
           outputTokens: null,
@@ -2358,8 +2524,7 @@ describe('runCompletionHooks – auto-push pipeline', () => {
           cacheCreateTokens: null,
           sessionId: null,
           releaseId: 'release-previous',
-        } as any)
-        .run();
+        } as any);
     }
 
     const logFile = join(tempDir, 'new-release-not-capped.log');
@@ -2499,14 +2664,15 @@ describe('runCompletionHooks – auto-push pipeline', () => {
       // Insert 3 prior fix-ci jobs so the count gate trips.
       const now = Date.now() / 1000;
       for (let i = 0; i < 3; i++) {
-        testDb.db.insert(schema.jobs).values({
+        await testDb.db.insert(schema.jobs).values({
           id: `prior-fixci-${i}`, project: 'my-proj', kind: 'fix-ci',
           prompt: null, pid: 200 + i, logPath: null,
           startedAt: now - i, finishedAt: now - i + 1, exitCode: -1,
-          seen: 1, durationMs: null, inputTokens: null, outputTokens: null,
+          seen: true, durationMs: null, inputTokens: null, outputTokens: null,
           cacheReadTokens: null, cacheCreateTokens: null, sessionId: null,
-        } as any).run();
+        } as any);
       }
+      await syncCacheFromDb();
 
       const fetchMock = vi.fn().mockResolvedValue({ ok: true, json: async () => ({}) });
       vi.stubGlobal('fetch', fetchMock);
@@ -2536,7 +2702,6 @@ describe('runCompletionHooks – auto-push pipeline', () => {
 });
 
 describe('markDone – isClaudeKind exit-code override for new kinds', () => {
-  let testDb: ReturnType<typeof createTestDb>;
   let markDoneFn: typeof import('@/lib/jobs/job-storage').markDone;
   let tempDir: string;
 
@@ -2565,10 +2730,10 @@ describe('markDone – isClaudeKind exit-code override for new kinds', () => {
 
   beforeEach(async () => {
     vi.resetModules();
-    testDb = createTestDb();
+    await truncateAll();
     tempDir = mkdtempSync(join(tmpdir(), 'tamtam-isclaudekind-'));
 
-    vi.doMock('@/lib/db', () => ({ db: testDb.db, schema }));
+    vi.doMock('@/lib/db', () => ({ db: sharedHandle.db, schema }));
     vi.doMock('@/lib/jobs/pm2-jobs', () => ({
       getJobStatus: vi.fn(),
       deleteJob: vi.fn().mockResolvedValue(undefined),
@@ -2690,7 +2855,6 @@ describe('markDone – isClaudeKind exit-code override for new kinds', () => {
 });
 
 describe('runCompletionHooks – fix-push auto-fix chain', () => {
-  let testDb: ReturnType<typeof createTestDb>;
   let startFixPushMock: ReturnType<typeof vi.fn>;
   let startProjectPushMock: ReturnType<typeof vi.fn>;
   let startProjectCommitMock: ReturnType<typeof vi.fn>;
@@ -2725,9 +2889,9 @@ describe('runCompletionHooks – fix-push auto-fix chain', () => {
     };
   }
 
-  function insertActiveRelease() {
+  async function insertActiveRelease() {
     const now = Date.now() / 1000;
-    testDb.db.insert(schema.jobs).values({
+    await testDb.db.insert(schema.jobs).values({
       id: 'active-release-job',
       project: 'my-proj',
       kind: 'release',
@@ -2737,19 +2901,22 @@ describe('runCompletionHooks – fix-push auto-fix chain', () => {
       startedAt: now - 5,
       finishedAt: null,
       exitCode: null,
-      seen: 0,
+      seen: false,
       durationMs: null,
       inputTokens: null,
       outputTokens: null,
       cacheReadTokens: null,
       cacheCreateTokens: null,
       sessionId: null,
-    } as any).run();
+    } as any);
+    // Lifecycle hooks call getJob/findActiveReleaseJob which only read the
+    // in-memory cache; mirror the DB row so the active release is visible.
+    await syncCacheFromDb();
   }
 
   beforeEach(async () => {
     vi.resetModules();
-    testDb = createTestDb();
+    await truncateAll();
     tempDir = mkdtempSync(join(tmpdir(), 'tamtam-fixpush-chain-'));
 
     startFixPushMock = vi.fn().mockResolvedValue({ ok: true, jobId: 'fix-push-1', pid: 999, logPath: '/tmp/fp.log' });
@@ -2762,7 +2929,7 @@ describe('runCompletionHooks – fix-push auto-fix chain', () => {
     execMock = vi.fn().mockResolvedValue({ exitCode: 0, stdout: '', stderr: '' });
     resolveProjectPathMock = vi.fn().mockReturnValue('/proj');
 
-    vi.doMock('@/lib/db', () => ({ db: testDb.db, schema }));
+    vi.doMock('@/lib/db', () => ({ db: sharedHandle.db, schema }));
     vi.doMock('@/lib/jobs/pm2-jobs', () => ({
       getJobStatus: vi.fn(),
       deleteJob: vi.fn().mockResolvedValue(undefined),
@@ -2849,7 +3016,7 @@ describe('runCompletionHooks – fix-push auto-fix chain', () => {
     isHookRejectionMock.mockReturnValue(true);
     const now = Date.now() / 1000;
     for (let i = 0; i < 2; i++) {
-      testDb.db.insert(schema.jobs).values({
+      await testDb.db.insert(schema.jobs).values({
         id: `prior-fixpush-${i}`,
         project: 'my-proj',
         kind: 'fix-push',
@@ -2859,15 +3026,16 @@ describe('runCompletionHooks – fix-push auto-fix chain', () => {
         startedAt: now - i * 10,
         finishedAt: now - i * 10 + 5,
         exitCode: 0,
-        seen: 1,
+        seen: true,
         durationMs: null,
         inputTokens: null,
         outputTokens: null,
         cacheReadTokens: null,
         cacheCreateTokens: null,
         sessionId: null,
-      } as any).run();
+      } as any);
     }
+    await syncCacheFromDb();
     const logFile = join(tempDir, 'push-hook-capped.log');
     writeFileSync(logFile, 'pre-commit failed');
     const job = makeJob('push', logFile);
@@ -2880,7 +3048,7 @@ describe('runCompletionHooks – fix-push auto-fix chain', () => {
   it('still spawns fix-push when only 1 prior attempt exists (cap is 2)', async () => {
     isHookRejectionMock.mockReturnValue(true);
     const now = Date.now() / 1000;
-    testDb.db.insert(schema.jobs).values({
+    await testDb.db.insert(schema.jobs).values({
       id: 'prior-fixpush-0',
       project: 'my-proj',
       kind: 'fix-push',
@@ -2890,14 +3058,14 @@ describe('runCompletionHooks – fix-push auto-fix chain', () => {
       startedAt: now - 10,
       finishedAt: now - 5,
       exitCode: 0,
-      seen: 1,
+      seen: true,
       durationMs: null,
       inputTokens: null,
       outputTokens: null,
       cacheReadTokens: null,
       cacheCreateTokens: null,
       sessionId: null,
-    } as any).run();
+    } as any);
     const logFile = join(tempDir, 'push-hook-one-prior.log');
     writeFileSync(logFile, 'pre-commit failed');
     const job = makeJob('push', logFile);
@@ -2933,7 +3101,7 @@ describe('runCompletionHooks – fix-push auto-fix chain', () => {
 
   it('chains review LGTM → commit when inRelease even though auto-push is disabled', async () => {
     getProjectTestConfigMock.mockReturnValue({ autoPushEnabled: false });
-    insertActiveRelease();
+    await insertActiveRelease();
     const logFile = join(tempDir, 'lgtm-release.log');
     writeFileSync(logFile, 'Verdict: LGTM\n');
     const job = makeJob('review', logFile, { releaseId: 'active-release-job' });
@@ -2946,7 +3114,7 @@ describe('runCompletionHooks – fix-push auto-fix chain', () => {
 
   it('chains test pass → review when inRelease even though auto-push is disabled', async () => {
     getProjectTestConfigMock.mockReturnValue({ autoPushEnabled: false });
-    insertActiveRelease();
+    await insertActiveRelease();
     // Provide uncommitted changes so the hook routes to review rather than push.
     execMock.mockResolvedValueOnce({ exitCode: 0, stdout: 'M foo.ts\n', stderr: '' });
     const job = makeJob('test', null, { releaseId: 'active-release-job' });
@@ -2958,7 +3126,7 @@ describe('runCompletionHooks – fix-push auto-fix chain', () => {
 
   it('chains fix success → review when inRelease even though auto-push is disabled', async () => {
     getProjectTestConfigMock.mockReturnValue({ autoPushEnabled: false });
-    insertActiveRelease();
+    await insertActiveRelease();
     const job = makeJob('fix', null, { releaseId: 'active-release-job' });
 
     await markDoneFn(job, 0);
@@ -2979,7 +3147,6 @@ describe('runCompletionHooks – fix-push auto-fix chain', () => {
 });
 
 describe('runCompletionHooks – release-after-run', () => {
-  let testDb: ReturnType<typeof createTestDb>;
   let startReleaseMock: ReturnType<typeof vi.fn>;
   let getProjectTestConfigMock: ReturnType<typeof vi.fn>;
   let setPendingReleaseMock: ReturnType<typeof vi.fn>;
@@ -3016,7 +3183,7 @@ describe('runCompletionHooks – release-after-run', () => {
     schedulingModuleThrows?: boolean;
   } = {}) {
     vi.resetModules();
-    testDb = createTestDb();
+    await truncateAll();
     startReleaseMock = vi.fn().mockResolvedValue({ ok: true, step: 'review', jobId: 'rel-1', releaseJobId: 'rel-job-1', message: 'Running review' });
     getProjectTestConfigMock = vi.fn().mockReturnValue(
       releaseAfterRun === null
@@ -3026,7 +3193,7 @@ describe('runCompletionHooks – release-after-run', () => {
     setPendingReleaseMock = vi.fn();
     shouldKeepPendingReleaseMock = vi.fn().mockReturnValue(false);
 
-    vi.doMock('@/lib/db', () => ({ db: testDb.db, schema }));
+    vi.doMock('@/lib/db', () => ({ db: sharedHandle.db, schema }));
     vi.doMock('@/lib/jobs/pm2-jobs', () => ({
       getJobStatus: vi.fn(),
       deleteJob: vi.fn().mockResolvedValue(undefined),
@@ -3183,8 +3350,8 @@ describe('runCompletionHooks – release-after-run', () => {
 });
 
 describe('markDone – ghIssuesCache invalidation', () => {
-  let testDb: ReturnType<typeof createTestDb>;
   let markDoneFn: typeof import('@/lib/jobs/job-storage').markDone;
+  let storageCache: Map<string, JobData>;
 
   function makeJob(project: string, kind = 'run'): JobData {
     return {
@@ -3207,21 +3374,19 @@ describe('markDone – ghIssuesCache invalidation', () => {
     };
   }
 
-  function insertCacheRow(project: string) {
-    testDb.db.insert(schema.ghIssuesCache).values({
+  async function insertCacheRow(project: string) {
+    await testDb.db.insert(schema.ghIssuesCache).values({
       project,
       repo: `owner/${project}`,
       prs: '[]',
       issues: '[]',
       fetchedAt: Date.now() / 1000,
-    }).run();
+    });
   }
 
-  beforeEach(async () => {
+  beforeAll(async () => {
     vi.resetModules();
-    testDb = createTestDb();
-
-    vi.doMock('@/lib/db', () => ({ db: testDb.db, schema }));
+    vi.doMock('@/lib/db', () => ({ db: sharedHandle.db, schema }));
     vi.doMock('@/lib/jobs/pm2-jobs', () => ({
       getJobStatus: vi.fn(),
       deleteJob: vi.fn().mockResolvedValue(undefined),
@@ -3258,32 +3423,49 @@ describe('markDone – ghIssuesCache invalidation', () => {
 
     const mod = await import('@/lib/jobs/job-storage');
     markDoneFn = mod.markDone;
+    storageCache = (await import('@/lib/jobs/storage')).jobsCache;
   });
 
-  afterEach(() => {
+  beforeEach(async () => {
+    storageCache.clear();
+    await truncateAll();
+  });
+
+  afterAll(() => {
+    vi.doUnmock('@/lib/db');
+    vi.doUnmock('@/lib/jobs/pm2-jobs');
+    vi.doUnmock('@/lib/shared/shell');
+    vi.doUnmock('@/lib/git/git-utils');
+    vi.doUnmock('@/lib/shared/project-data');
+    vi.doUnmock('@/lib/scheduling/scheduling');
+    vi.doUnmock('@/lib/pipeline/start-review');
+    vi.doUnmock('@/lib/pipeline/start-push');
+    vi.doUnmock('@/lib/pipeline/start-fix');
+    vi.doUnmock('@/lib/pipeline/start-fix-push');
+    vi.doUnmock('@/lib/pipeline/start-release');
     vi.resetModules();
   });
 
   it('deletes the ghIssuesCache row for the job project on markDone', async () => {
-    insertCacheRow('my-proj');
-    const before = testDb.db.select().from(schema.ghIssuesCache).all();
+    await insertCacheRow('my-proj');
+    const before = await testDb.db.select().from(schema.ghIssuesCache);
     expect(before).toHaveLength(1);
 
     const job = makeJob('my-proj');
     await markDoneFn(job, 0);
 
-    const after = testDb.db.select().from(schema.ghIssuesCache).all();
+    const after = await testDb.db.select().from(schema.ghIssuesCache);
     expect(after).toHaveLength(0);
   });
 
   it('does not delete cache rows for other projects', async () => {
-    insertCacheRow('proj-a');
-    insertCacheRow('proj-b');
+    await insertCacheRow('proj-a');
+    await insertCacheRow('proj-b');
 
     const job = makeJob('proj-a');
     await markDoneFn(job, 0);
 
-    const remaining = testDb.db.select().from(schema.ghIssuesCache).all();
+    const remaining = await testDb.db.select().from(schema.ghIssuesCache);
     expect(remaining).toHaveLength(1);
     expect(remaining[0].project).toBe('proj-b');
   });
@@ -3294,17 +3476,16 @@ describe('markDone – ghIssuesCache invalidation', () => {
   });
 
   it('invalidates cache regardless of exit code', async () => {
-    insertCacheRow('failing-proj');
+    await insertCacheRow('failing-proj');
     const job = makeJob('failing-proj');
     await markDoneFn(job, 1);
 
-    const after = testDb.db.select().from(schema.ghIssuesCache).all();
+    const after = await testDb.db.select().from(schema.ghIssuesCache);
     expect(after).toHaveLength(0);
   });
 });
 
 describe('markDone – metadata extraction skipped for release kind', () => {
-  let testDb: ReturnType<typeof createTestDb>;
   let markDoneFn: typeof import('@/lib/jobs/job-storage').markDone;
   let tempDir: string;
 
@@ -3331,12 +3512,11 @@ describe('markDone – metadata extraction skipped for release kind', () => {
     };
   }
 
-  beforeEach(async () => {
-    vi.resetModules();
-    testDb = createTestDb();
-    tempDir = mkdtempSync(join(tmpdir(), 'tamtam-meta-'));
+  let storageCache: Map<string, JobData>;
 
-    vi.doMock('@/lib/db', () => ({ db: testDb.db, schema }));
+  beforeAll(async () => {
+    vi.resetModules();
+    vi.doMock('@/lib/db', () => ({ db: sharedHandle.db, schema }));
     vi.doMock('@/lib/jobs/pm2-jobs', () => ({
       getJobStatus: vi.fn(),
       deleteJob: vi.fn().mockResolvedValue(undefined),
@@ -3367,11 +3547,30 @@ describe('markDone – metadata extraction skipped for release kind', () => {
 
     const mod = await import('@/lib/jobs/job-storage');
     markDoneFn = mod.markDone;
+    storageCache = (await import('@/lib/jobs/storage')).jobsCache;
+  });
+
+  beforeEach(async () => {
+    storageCache.clear();
+    await truncateAll();
+    tempDir = mkdtempSync(join(tmpdir(), 'tamtam-meta-'));
   });
 
   afterEach(() => {
-    vi.resetModules();
     if (tempDir) rmSync(tempDir, { recursive: true, force: true });
+  });
+
+  afterAll(() => {
+    vi.doUnmock('@/lib/db');
+    vi.doUnmock('@/lib/jobs/pm2-jobs');
+    vi.doUnmock('@/lib/shared/shell');
+    vi.doUnmock('@/lib/shared/project-data');
+    vi.doUnmock('@/lib/scheduling/scheduling');
+    vi.doUnmock('@/lib/git/git-utils');
+    vi.doUnmock('@/lib/pipeline/start-review');
+    vi.doUnmock('@/lib/pipeline/start-push');
+    vi.doUnmock('@/lib/pipeline/start-fix-push');
+    vi.resetModules();
   });
 
   it('does NOT populate sessionId/tokens for release kind even when log has a result line', async () => {
@@ -3431,17 +3630,17 @@ describe('markDone – metadata extraction skipped for release kind', () => {
     const logFile = join(tempDir, 'run-db.log');
     writeFileSync(logFile, resultLine + '\n');
     const job = makeJob('run', logFile);
-    testDb.db.insert(schema.jobs).values({
+    await testDb.db.insert(schema.jobs).values({
       id: job.id, project: job.project, kind: job.kind,
       prompt: null, pid: job.pid, logPath: logFile,
       startedAt: job.startedAt, finishedAt: null, exitCode: null,
-      seen: 0, durationMs: null, inputTokens: null, outputTokens: null,
+      seen: false, durationMs: null, inputTokens: null, outputTokens: null,
       cacheReadTokens: null, cacheCreateTokens: null, sessionId: null,
-    } as any).run();
+    } as any);
 
     await markDoneFn(job, 0);
 
-    const row = testDb.db.select().from(schema.jobs).all().find(r => r.id === job.id);
+    const row = (await testDb.db.select().from(schema.jobs)).find(r => r.id === job.id);
     expect(row?.model).toBe('claude-sonnet');
     expect(row?.costUsd).toBeGreaterThan(0);
   });
@@ -3459,7 +3658,6 @@ describe('markDone – metadata extraction skipped for release kind', () => {
 });
 
 describe('runCompletionHooks – linked release scoping', () => {
-  let testDb: ReturnType<typeof createTestDb>;
   let markDoneFn: typeof import('@/lib/jobs/job-storage').markDone;
   let startProjectReviewMock: ReturnType<typeof vi.fn>;
   let startProjectPushMock: ReturnType<typeof vi.fn>;
@@ -3492,7 +3690,7 @@ describe('runCompletionHooks – linked release scoping', () => {
 
   beforeEach(async () => {
     vi.resetModules();
-    testDb = createTestDb();
+    await truncateAll();
     tempDir = mkdtempSync(join(tmpdir(), 'tamtam-linked-release-test-'));
 
     startProjectReviewMock = vi.fn().mockResolvedValue({ ok: true, jobId: 'rev-auto', pid: 1, logPath: '' });
@@ -3506,7 +3704,7 @@ describe('runCompletionHooks – linked release scoping', () => {
       prWorkflowEnabled: false,
     });
 
-    vi.doMock('@/lib/db', () => ({ db: testDb.db, schema }));
+    vi.doMock('@/lib/db', () => ({ db: sharedHandle.db, schema }));
     vi.doMock('@/lib/jobs/pm2-jobs', () => ({
       getJobStatus: vi.fn(),
       deleteJob: vi.fn().mockResolvedValue(undefined),
@@ -3556,7 +3754,7 @@ describe('runCompletionHooks – linked release scoping', () => {
     const now = Date.now() / 1000;
     const releaseLog = join(tempDir, 'active-release.log');
     writeFileSync(releaseLog, '# release start\n');
-    testDb.db.insert(schema.jobs).values({
+    await testDb.db.insert(schema.jobs).values({
       id: 'release-live',
       project: 'my-proj',
       kind: 'release',
@@ -3566,7 +3764,7 @@ describe('runCompletionHooks – linked release scoping', () => {
       startedAt: now - 20,
       finishedAt: null,
       exitCode: null,
-      seen: 0,
+      seen: false,
       durationMs: null,
       inputTokens: null,
       outputTokens: null,
@@ -3574,7 +3772,7 @@ describe('runCompletionHooks – linked release scoping', () => {
       cacheCreateTokens: null,
       sessionId: null,
       releaseId: 'release-live',
-    } as any).run();
+    } as any);
 
     const testLog = join(tempDir, 'standalone-test.log');
     writeFileSync(testLog, 'manual test output\n');
@@ -3587,7 +3785,7 @@ describe('runCompletionHooks – linked release scoping', () => {
     expect(startProjectPushMock).not.toHaveBeenCalled();
     expect(startProjectCommitMock).not.toHaveBeenCalled();
     expect(startFixFromJobMock).not.toHaveBeenCalled();
-    const releaseRow = testDb.db.select().from(schema.jobs).all().find(r => r.id === 'release-live');
+    const releaseRow = (await testDb.db.select().from(schema.jobs)).find(r => r.id === 'release-live');
     expect(releaseRow?.finishedAt).toBeNull();
   });
 
@@ -3595,7 +3793,7 @@ describe('runCompletionHooks – linked release scoping', () => {
     const now = Date.now() / 1000;
     const releaseLog = join(tempDir, 'linked-release.log');
     writeFileSync(releaseLog, '# release start\n');
-    testDb.db.insert(schema.jobs).values({
+    await testDb.db.insert(schema.jobs).values({
       id: 'release-linked',
       project: 'my-proj',
       kind: 'release',
@@ -3605,7 +3803,7 @@ describe('runCompletionHooks – linked release scoping', () => {
       startedAt: now - 20,
       finishedAt: null,
       exitCode: null,
-      seen: 0,
+      seen: false,
       durationMs: null,
       inputTokens: null,
       outputTokens: null,
@@ -3613,7 +3811,8 @@ describe('runCompletionHooks – linked release scoping', () => {
       cacheCreateTokens: null,
       sessionId: null,
       releaseId: 'release-linked',
-    } as any).run();
+    } as any);
+    await syncCacheFromDb();
 
     const childLog = join(tempDir, 'linked-pr-wait.log');
     writeFileSync(childLog, 'merge poll output\n');
@@ -3626,7 +3825,6 @@ describe('runCompletionHooks – linked release scoping', () => {
 });
 
 describe('runCompletionHooks – push→DoD (PR Workflow without auto-merge)', () => {
-  let testDb: ReturnType<typeof createTestDb>;
   let startMarkDodMock: ReturnType<typeof vi.fn>;
   let launchPrWaitMock: ReturnType<typeof vi.fn>;
   let getProjectTestConfigMock: ReturnType<typeof vi.fn>;
@@ -3655,18 +3853,14 @@ describe('runCompletionHooks – push→DoD (PR Workflow without auto-merge)', (
     };
   }
 
-  beforeEach(async () => {
-    vi.resetModules();
-    testDb = createTestDb();
-    tempDir = mkdtempSync(join(tmpdir(), 'tamtam-push-dod-test-'));
-    startMarkDodMock = vi.fn().mockResolvedValue({ ok: true, verified: 2, total: 2, changed: true, issueNumber: 55 });
-    getProjectTestConfigMock = vi.fn().mockReturnValue({
-      prWorkflowEnabled: true,
-      autoPrMergeEnabled: false,
-      autoPushEnabled: false,
-    });
+  let storageCache: Map<string, JobData>;
 
-    vi.doMock('@/lib/db', () => ({ db: testDb.db, schema }));
+  beforeAll(async () => {
+    vi.resetModules();
+    startMarkDodMock = vi.fn();
+    getProjectTestConfigMock = vi.fn();
+    launchPrWaitMock = vi.fn();
+    vi.doMock('@/lib/db', () => ({ db: sharedHandle.db, schema }));
     vi.doMock('@/lib/jobs/pm2-jobs', () => ({
       getJobStatus: vi.fn(),
       deleteJob: vi.fn().mockResolvedValue(undefined),
@@ -3681,16 +3875,45 @@ describe('runCompletionHooks – push→DoD (PR Workflow without auto-merge)', (
     vi.doMock('@/lib/pipeline/start-fix', () => ({ startFixFromJob: vi.fn() }));
     vi.doMock('@/lib/scheduling/scheduling', () => ({ getProjectTestConfig: getProjectTestConfigMock }));
     vi.doMock('@/lib/pipeline/start-mark-dod', () => ({ startMarkDod: startMarkDodMock }));
-    launchPrWaitMock = vi.fn().mockReturnValue({ jobId: 'prwait-1' });
     vi.doMock('@/lib/pipeline/start-pr-wait', () => ({ launchPrWait: launchPrWaitMock }));
 
     const mod = await import('@/lib/jobs/job-storage');
     markDoneFn = mod.markDone;
+    storageCache = (await import('@/lib/jobs/storage')).jobsCache;
+  });
+
+  beforeEach(async () => {
+    storageCache.clear();
+    await truncateAll();
+    tempDir = mkdtempSync(join(tmpdir(), 'tamtam-push-dod-test-'));
+    startMarkDodMock.mockReset().mockResolvedValue({ ok: true, verified: 2, total: 2, changed: true, issueNumber: 55 });
+    getProjectTestConfigMock.mockReset().mockReturnValue({
+      prWorkflowEnabled: true,
+      autoPrMergeEnabled: false,
+      autoPushEnabled: false,
+    });
+    launchPrWaitMock.mockReset().mockReturnValue({ jobId: 'prwait-1' });
   });
 
   afterEach(() => {
-    vi.resetModules();
     if (tempDir) rmSync(tempDir, { recursive: true, force: true });
+  });
+
+  afterAll(() => {
+    vi.doUnmock('@/lib/db');
+    vi.doUnmock('@/lib/jobs/pm2-jobs');
+    vi.doUnmock('@/lib/shared/shell');
+    vi.doUnmock('@/lib/git/git-utils');
+    vi.doUnmock('@/lib/shared/project-data');
+    vi.doUnmock('@/lib/pipeline/start-review');
+    vi.doUnmock('@/lib/pipeline/start-test');
+    vi.doUnmock('@/lib/pipeline/start-push');
+    vi.doUnmock('@/lib/pipeline/start-commit');
+    vi.doUnmock('@/lib/pipeline/start-fix');
+    vi.doUnmock('@/lib/scheduling/scheduling');
+    vi.doUnmock('@/lib/pipeline/start-mark-dod');
+    vi.doUnmock('@/lib/pipeline/start-pr-wait');
+    vi.resetModules();
   });
 
   it('calls startMarkDod when push succeeds with prWorkflowEnabled=true and contextMeta has prNumber', async () => {
@@ -3746,11 +3969,11 @@ describe('runCompletionHooks – push→DoD (PR Workflow without auto-merge)', (
 });
 
 describe('markDone – DB-level idempotency guard', () => {
-  let testDb: ReturnType<typeof createTestDb>;
   let markDoneFn: typeof import('@/lib/jobs/job-storage').markDone;
-  let startProjectReviewMock: ReturnType<typeof vi.fn>;
-  let startProjectPushMock: ReturnType<typeof vi.fn>;
+  const startProjectReviewMock = vi.fn();
+  const startProjectPushMock = vi.fn();
   let tempDir: string;
+  let storageCache: Map<string, JobData>;
 
   function makeJob(id: string, kind = 'push'): JobData {
     return {
@@ -3773,15 +3996,9 @@ describe('markDone – DB-level idempotency guard', () => {
     };
   }
 
-  beforeEach(async () => {
+  beforeAll(async () => {
     vi.resetModules();
-    testDb = createTestDb();
-    tempDir = mkdtempSync(join(tmpdir(), 'tamtam-db-guard-'));
-
-    startProjectReviewMock = vi.fn().mockResolvedValue({ ok: false, detail: 'guard' });
-    startProjectPushMock = vi.fn().mockResolvedValue({ ok: false, detail: 'guard' });
-
-    vi.doMock('@/lib/db', () => ({ db: testDb.db, schema }));
+    vi.doMock('@/lib/db', () => ({ db: sharedHandle.db, schema }));
     vi.doMock('@/lib/jobs/pm2-jobs', () => ({
       getJobStatus: vi.fn(),
       deleteJob: vi.fn().mockResolvedValue(undefined),
@@ -3818,24 +4035,47 @@ describe('markDone – DB-level idempotency guard', () => {
 
     const mod = await import('@/lib/jobs/job-storage');
     markDoneFn = mod.markDone;
+    storageCache = (await import('@/lib/jobs/storage')).jobsCache;
+  });
+
+  beforeEach(async () => {
+    storageCache.clear();
+    await truncateAll();
+    tempDir = mkdtempSync(join(tmpdir(), 'tamtam-db-guard-'));
+    startProjectReviewMock.mockReset().mockResolvedValue({ ok: false, detail: 'guard' });
+    startProjectPushMock.mockReset().mockResolvedValue({ ok: false, detail: 'guard' });
   });
 
   afterEach(() => {
-    vi.resetModules();
     if (tempDir) rmSync(tempDir, { recursive: true, force: true });
+  });
+
+  afterAll(() => {
+    vi.doUnmock('@/lib/db');
+    vi.doUnmock('@/lib/jobs/pm2-jobs');
+    vi.doUnmock('@/lib/shared/shell');
+    vi.doUnmock('@/lib/git/git-utils');
+    vi.doUnmock('@/lib/shared/project-data');
+    vi.doUnmock('@/lib/scheduling/scheduling');
+    vi.doUnmock('@/lib/pipeline/start-review');
+    vi.doUnmock('@/lib/pipeline/start-push');
+    vi.doUnmock('@/lib/pipeline/start-commit');
+    vi.doUnmock('@/lib/pipeline/start-fix');
+    vi.doUnmock('@/lib/pipeline/start-fix-push');
+    vi.resetModules();
   });
 
   it('returns early and syncs finishedAt when DB row is already finalized', async () => {
     const alreadyFinishedAt = Date.now() / 1000 - 60;
-    testDb.db.insert(schema.jobs).values({
+    await testDb.db.insert(schema.jobs).values({
       id: 'db-guard-job-1', project: 'guard-proj', kind: 'push',
       prompt: null, pid: 1, logPath: null,
       startedAt: alreadyFinishedAt - 10,
       finishedAt: alreadyFinishedAt,
       exitCode: 0,
-      seen: 0, durationMs: null, inputTokens: null, outputTokens: null,
+      seen: false, durationMs: null, inputTokens: null, outputTokens: null,
       cacheReadTokens: null, cacheCreateTokens: null, sessionId: null,
-    } as any).run();
+    } as any);
 
     const job = makeJob('db-guard-job-1');
     // Stale in-memory object: finishedAt is null even though DB says it's done
@@ -3852,41 +4092,41 @@ describe('markDone – DB-level idempotency guard', () => {
 
   it('does not overwrite the DB finishedAt when returning early from DB guard', async () => {
     const alreadyFinishedAt = Date.now() / 1000 - 60;
-    testDb.db.insert(schema.jobs).values({
+    await testDb.db.insert(schema.jobs).values({
       id: 'db-guard-job-2', project: 'guard-proj', kind: 'push',
       prompt: null, pid: 1, logPath: null,
       startedAt: alreadyFinishedAt - 10,
       finishedAt: alreadyFinishedAt,
       exitCode: 0,
-      seen: 0, durationMs: null, inputTokens: null, outputTokens: null,
+      seen: false, durationMs: null, inputTokens: null, outputTokens: null,
       cacheReadTokens: null, cacheCreateTokens: null, sessionId: null,
-    } as any).run();
+    } as any);
 
     const job = makeJob('db-guard-job-2');
     await markDoneFn(job, 99);
 
-    const row = testDb.db.select().from(schema.jobs).all().find(r => r.id === 'db-guard-job-2');
+    const row = (await testDb.db.select().from(schema.jobs)).find(r => r.id === 'db-guard-job-2');
     // DB row should still have the original finishedAt, not a new one
     expect(row?.finishedAt).toBe(alreadyFinishedAt);
     expect(row?.exitCode).toBe(0); // not overwritten with 99
   });
 
   it('proceeds normally when DB row has finishedAt = null', async () => {
-    testDb.db.insert(schema.jobs).values({
+    await testDb.db.insert(schema.jobs).values({
       id: 'db-guard-job-3', project: 'guard-proj', kind: 'push',
       prompt: null, pid: 1, logPath: null,
       startedAt: Date.now() / 1000 - 5,
       finishedAt: null,
       exitCode: null,
-      seen: 0, durationMs: null, inputTokens: null, outputTokens: null,
+      seen: false, durationMs: null, inputTokens: null, outputTokens: null,
       cacheReadTokens: null, cacheCreateTokens: null, sessionId: null,
-    } as any).run();
+    } as any);
 
     const job = makeJob('db-guard-job-3');
     await markDoneFn(job, 0);
 
     expect(job.finishedAt).not.toBeNull();
-    const row = testDb.db.select().from(schema.jobs).all().find(r => r.id === 'db-guard-job-3');
+    const row = (await testDb.db.select().from(schema.jobs)).find(r => r.id === 'db-guard-job-3');
     expect(row?.finishedAt).not.toBeNull();
     expect(row?.exitCode).toBe(0);
   });
@@ -3915,7 +4155,6 @@ describe('markDone – DB-level idempotency guard', () => {
 });
 
 describe('runCompletionHooks – abort short-circuit', () => {
-  let testDb: ReturnType<typeof createTestDb>;
   let markDoneFn: typeof import('@/lib/jobs/job-storage').markDone;
   let startProjectReviewMock: ReturnType<typeof vi.fn>;
   let startProjectPushMock: ReturnType<typeof vi.fn>;
@@ -3947,7 +4186,7 @@ describe('runCompletionHooks – abort short-circuit', () => {
 
   beforeEach(async () => {
     vi.resetModules();
-    testDb = createTestDb();
+    await truncateAll();
 
     startProjectReviewMock = vi.fn().mockResolvedValue({ ok: true, jobId: 'rev-1' });
     startProjectPushMock = vi.fn().mockResolvedValue({ ok: true });
@@ -3955,7 +4194,7 @@ describe('runCompletionHooks – abort short-circuit', () => {
     startFixFromJobMock = vi.fn().mockResolvedValue({ ok: true, jobId: 'fix-1' });
     getProjectTestConfigMock = vi.fn().mockReturnValue({ autoPushEnabled: true });
 
-    vi.doMock('@/lib/db', () => ({ db: testDb.db, schema }));
+    vi.doMock('@/lib/db', () => ({ db: sharedHandle.db, schema }));
     vi.doMock('@/lib/jobs/pm2-jobs', () => ({
       getJobStatus: vi.fn(),
       deleteJob: vi.fn().mockResolvedValue(undefined),
@@ -3988,14 +4227,15 @@ describe('runCompletionHooks – abort short-circuit', () => {
   it('does not chain to next step when active release has abortedAt set', async () => {
     const now = Date.now() / 1000;
     // Insert an aborted release job — finishedAt is set (as the abort handler does)
-    testDb.db.insert(schema.jobs).values({
+    await testDb.db.insert(schema.jobs).values({
       id: 'release-aborted', project: 'abort-proj', kind: 'release',
       prompt: null, pid: 0, logPath: null,
       startedAt: now - 30, finishedAt: now - 1, exitCode: -3,
-      seen: 0, durationMs: null, inputTokens: null, outputTokens: null,
+      seen: false, durationMs: null, inputTokens: null, outputTokens: null,
       cacheReadTokens: null, cacheCreateTokens: null, sessionId: null,
       abortedAt: now - 1,
-    } as any).run();
+    } as any);
+    await syncCacheFromDb();
 
     // Step job must carry releaseId so the abort check can find the release
     const reviewJob = makeJob('review', 'review-after-abort', { releaseId: 'release-aborted' });
@@ -4008,14 +4248,15 @@ describe('runCompletionHooks – abort short-circuit', () => {
 
   it('does not chain fix→review when active release is aborted', async () => {
     const now = Date.now() / 1000;
-    testDb.db.insert(schema.jobs).values({
+    await testDb.db.insert(schema.jobs).values({
       id: 'release-aborted-2', project: 'abort-proj', kind: 'release',
       prompt: null, pid: 0, logPath: null,
       startedAt: now - 30, finishedAt: now - 1, exitCode: -3,
-      seen: 0, durationMs: null, inputTokens: null, outputTokens: null,
+      seen: false, durationMs: null, inputTokens: null, outputTokens: null,
       cacheReadTokens: null, cacheCreateTokens: null, sessionId: null,
       abortedAt: now - 1,
-    } as any).run();
+    } as any);
+    await syncCacheFromDb();
 
     const fixJob = makeJob('fix', 'fix-after-abort', { releaseId: 'release-aborted-2' });
     await markDoneFn(fixJob, 0);
@@ -4025,45 +4266,55 @@ describe('runCompletionHooks – abort short-circuit', () => {
 });
 
 describe('persistVerdict', () => {
-  let testDb: ReturnType<typeof createTestDb>;
   let createJobFn: typeof import('@/lib/jobs/job-storage').createJob;
   let getJobFn: typeof import('@/lib/jobs/job-storage').getJob;
   let persistVerdictFn: typeof import('@/lib/jobs/job-storage').persistVerdict;
+  let storageCache: Map<string, JobData>;
 
-  beforeEach(async () => {
+  beforeAll(async () => {
     vi.resetModules();
-    testDb = createTestDb();
-    vi.doMock('@/lib/db', () => ({ db: testDb.db, schema }));
+    vi.doMock('@/lib/db', () => ({ db: sharedHandle.db, schema }));
     const mod = await import('@/lib/jobs/job-storage');
     createJobFn = mod.createJob;
     getJobFn = mod.getJob;
     persistVerdictFn = mod.persistVerdict;
+    storageCache = (await import('@/lib/jobs/storage')).jobsCache;
   });
 
-  afterEach(() => vi.resetModules());
+  beforeEach(async () => {
+    storageCache.clear();
+    await truncateAll();
+  });
 
-  it('writes verdict to DB and in-memory cache', () => {
+  afterAll(() => {
+    vi.doUnmock('@/lib/db');
+    vi.resetModules();
+  });
+
+  it('writes verdict to DB and in-memory cache', async () => {
     const job = createJobFn('proj', 'review', 1, '/log');
     persistVerdictFn(job.id, 'LGTM');
 
-    const stored = testDb.sqlite
-      .prepare('SELECT verdict FROM jobs WHERE id = ?')
-      .get(job.id) as { verdict: string };
-    expect(stored.verdict).toBe('LGTM');
+    await vi.waitFor(async () => {
+      const rows = await testDb.db.select().from(schema.jobs);
+      const stored = rows.find((r) => r.id === job.id);
+      expect(stored?.verdict).toBe('LGTM');
+    });
 
     const cached = getJobFn(job.id);
     expect(cached?.verdict).toBe('LGTM');
   });
 
-  it('updates an existing verdict', () => {
+  it('updates an existing verdict', async () => {
     const job = createJobFn('proj', 'review', 2, '/log');
     persistVerdictFn(job.id, 'NEEDS ATTENTION');
     persistVerdictFn(job.id, 'DO NOT SHIP');
 
-    const stored = testDb.sqlite
-      .prepare('SELECT verdict FROM jobs WHERE id = ?')
-      .get(job.id) as { verdict: string };
-    expect(stored.verdict).toBe('DO NOT SHIP');
+    await vi.waitFor(async () => {
+      const rows = await testDb.db.select().from(schema.jobs);
+      const stored = rows.find((r) => r.id === job.id);
+      expect(stored?.verdict).toBe('DO NOT SHIP');
+    });
     expect(getJobFn(job.id)?.verdict).toBe('DO NOT SHIP');
   });
 

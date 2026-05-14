@@ -40,6 +40,9 @@ describe('GET /api/streaming/[jobId]', () => {
   beforeEach(async () => {
     tempDir = mkdtempSync(join(tmpdir(), 'tamtam-streaming-test-'));
     vi.resetModules();
+    // Shrink the poll-fallback interval so the fs.watch-miss test doesn't
+    // wait a full production second per tick. Read once at module load.
+    process.env.TAMTAM_STREAM_POLL_MS = '25';
 
     getJobMock = vi.fn().mockReturnValue(null);
     probeJobStatusMock = vi.fn().mockResolvedValue('running');
@@ -352,9 +355,9 @@ describe('GET /api/streaming/[jobId]', () => {
     const response = await GET(request, { params: Promise.resolve({ jobId: 'job-poll' }) });
 
     // Flip the job to finished AFTER the stream has already started and replayed initial content.
-    setTimeout(() => { finished = true; }, 50);
+    setTimeout(() => { finished = true; }, 10);
 
-    const events = await collectSSEStream(response, ac, 2000);
+    const events = await collectSSEStream(response, ac, 500);
     const combined = events.join('');
     expect(combined).toContain('event: done');
     expect(combined).toContain('"exitCode":0');

@@ -1,11 +1,31 @@
-import { describe, it, expect, beforeEach, afterEach } from 'vitest';
+import { describe, it, expect, beforeEach, afterEach, beforeAll, afterAll, vi } from 'vitest';
 import { existsSync, mkdirSync, readFileSync, writeFileSync, rmSync } from 'fs';
 import { join } from 'path';
 import { tmpdir } from 'os';
+
+// Mock git-branch so loadFileConfig / writeFileConfig don't spawn `git`
+// subprocesses per call. Branch-aware behavior is covered separately by
+// __tests__/lib/tamtam-file-config-branch.test.ts; here we only need the
+// default-branch (working-tree) read/write path.
+vi.mock('@/lib/git/git-branch', () => ({
+  getBranchContext: vi.fn(() => ({
+    currentBranch: 'main',
+    defaultBranch: 'main',
+    isDefaultBranch: true,
+  })),
+  gitShowSync: vi.fn(() => null),
+  gitLsTreeSync: vi.fn(() => []),
+  getDefaultBranchSync: vi.fn(() => 'main'),
+  getCurrentBranchSync: vi.fn(() => 'main'),
+}));
+
 import { loadFileConfig, writeFileConfig } from '@/lib/skills/tamtam-file-config';
 
+let rootTmpDir: string;
+let tmpCounter = 0;
+
 function makeTmpDir(): string {
-  const dir = join(tmpdir(), `tamtam-cfg-test-${Date.now()}-${Math.random().toString(36).slice(2)}`);
+  const dir = join(rootTmpDir, `p-${++tmpCounter}`);
   mkdirSync(dir, { recursive: true });
   return dir;
 }
@@ -19,6 +39,15 @@ function writeConfig(dir: string, content: string) {
 // `.tamtam/config.yml` is the team contract: only test_command, custom_actions
 // and safe_users live here. Workflow flags (auto_push, pr_workflow, gates,
 // cron) are DB-only so each developer can opt in independently.
+
+beforeAll(() => {
+  rootTmpDir = join(tmpdir(), `tamtam-cfg-test-${Date.now()}-${Math.random().toString(36).slice(2)}`);
+  mkdirSync(rootTmpDir, { recursive: true });
+});
+
+afterAll(() => {
+  rmSync(rootTmpDir, { recursive: true, force: true });
+});
 
 describe('loadFileConfig', () => {
   let tmpDir: string;

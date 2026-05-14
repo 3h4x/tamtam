@@ -1,70 +1,78 @@
-import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
+import { describe, it, expect, beforeAll, beforeEach, afterAll, vi } from 'vitest';
 import { NextRequest } from 'next/server';
-import Database from 'better-sqlite3';
-import { drizzle } from 'drizzle-orm/better-sqlite3';
+import { sql } from 'drizzle-orm';
 import * as schema from '@/lib/db/schema';
+import { createTestPgDbEmpty, type TestDbHandle } from '@/__tests__/helpers/test-db';
 
-function createTestDb() {
-  const sqlite = new Database(':memory:');
-  sqlite.pragma('journal_mode = WAL');
-  sqlite.exec(`
+let sharedHandle: TestDbHandle;
+
+async function applyDdl(handle: TestDbHandle): Promise<void> {
+  await handle.db.execute(sql.raw(`
     CREATE TABLE IF NOT EXISTS jobs (
-      id TEXT PRIMARY KEY,
-      project TEXT NOT NULL,
-      kind TEXT NOT NULL,
-      prompt TEXT,
-      pid INTEGER NOT NULL DEFAULT 0,
-      log_path TEXT,
-      started_at REAL NOT NULL DEFAULT 0,
-      finished_at REAL,
-      exit_code INTEGER,
-      seen INTEGER DEFAULT 0,
-      duration_ms INTEGER,
-      input_tokens INTEGER,
-      output_tokens INTEGER,
-      cache_read_tokens INTEGER,
-      cache_create_tokens INTEGER,
-      session_id TEXT,
-      user_prompt TEXT,
-      context_meta TEXT,
-      parent_job_id TEXT,
-      gh_issue_number INTEGER,
-      gh_issue_repo TEXT,
-      gh_issue_title TEXT,
-      log_pruned INTEGER DEFAULT 0,
-      verdict TEXT,
-      cost_usd REAL,
-      model TEXT,
-      release_id TEXT,
-      aborted_at REAL,
-      prompt_bytes INTEGER,
-      work_summary TEXT,
-      modified_files TEXT,
-      provider TEXT
-    );
-  `);
-  return { sqlite, db: drizzle(sqlite, { schema }) };
+      id text PRIMARY KEY,
+      project text NOT NULL,
+      kind text NOT NULL,
+      prompt text,
+      pid integer NOT NULL DEFAULT 0,
+      log_path text,
+      started_at double precision NOT NULL DEFAULT 0,
+      finished_at double precision,
+      exit_code integer,
+      seen boolean DEFAULT false,
+      duration_ms integer,
+      input_tokens integer,
+      output_tokens integer,
+      cache_read_tokens integer,
+      cache_create_tokens integer,
+      session_id text,
+      user_prompt text,
+      context_meta text,
+      parent_job_id text,
+      gh_issue_number integer,
+      gh_issue_repo text,
+      gh_issue_title text,
+      log_pruned boolean DEFAULT false,
+      verdict text,
+      cost_usd double precision,
+      model text,
+      release_id text,
+      aborted_at double precision,
+      prompt_bytes integer,
+      work_summary text,
+      modified_files text,
+      provider text
+    )
+  `));
 }
 
 describe('GET /api/agents/stats', () => {
-  let GET: any;
-  let testDb: ReturnType<typeof createTestDb>;
+  let GET: typeof import('@/app/api/agents/stats/route').GET;
   const baseJob = {
     pid: 0,
     seen: false,
     logPruned: false,
   };
 
-  beforeEach(async () => {
-    vi.resetModules();
-    testDb = createTestDb();
-    vi.doMock('@/lib/db', () => ({ db: testDb.db, schema }));
-    const mod = await import('@/app/api/agents/stats/route');
-    GET = mod.GET;
+  beforeAll(async () => {
+    sharedHandle = await createTestPgDbEmpty();
+    await applyDdl(sharedHandle);
   });
 
-  afterEach(() => {
+  afterAll(async () => {
+    await new Promise((r) => setTimeout(r, 30));
+    try {
+      await sharedHandle[Symbol.asyncDispose]();
+    } catch {
+      // ignore
+    }
+  });
+
+  beforeEach(async () => {
     vi.resetModules();
+    await sharedHandle.db.execute(sql.raw('TRUNCATE jobs'));
+    vi.doMock('@/lib/db', () => ({ db: sharedHandle.db, schema }));
+    const mod = await import('@/app/api/agents/stats/route');
+    GET = mod.GET;
   });
 
   it('returns 400 when project is missing', async () => {
@@ -75,7 +83,7 @@ describe('GET /api/agents/stats', () => {
 
   it('aggregates duration, tokens, cost, and files per agent name', async () => {
     const now = Date.now() / 1000;
-    testDb.db.insert(schema.jobs).values([
+    await sharedHandle.db.insert(schema.jobs).values([
       {
         ...baseJob,
         id: 'j1', project: 'alpha', kind: 'agent:cto',
@@ -103,7 +111,7 @@ describe('GET /api/agents/stats', () => {
         startedAt: now - 100, finishedAt: now - 90, durationMs: 99999,
         inputTokens: 9999,
       },
-    ]).run();
+    ]);
 
     const req = new NextRequest('http://localhost/api/agents/stats?project=alpha');
     const res = await GET(req);
@@ -132,7 +140,7 @@ describe('GET /api/agents/stats', () => {
 
   it('counts fix-loop iterations for review-style agents via shared release_id', async () => {
     const now = Date.now() / 1000;
-    testDb.db.insert(schema.jobs).values([
+    await sharedHandle.db.insert(schema.jobs).values([
       {
         ...baseJob,
         id: 'rev-1', project: 'alpha', kind: 'agent:review-watch',
@@ -154,7 +162,7 @@ describe('GET /api/agents/stats', () => {
         id: 'fix-other', project: 'alpha', kind: 'fix',
         startedAt: now - 78, finishedAt: now - 70, releaseId: 'unrelated',
       },
-    ]).run();
+    ]);
 
     const req = new NextRequest('http://localhost/api/agents/stats?project=alpha');
     const res = await GET(req);

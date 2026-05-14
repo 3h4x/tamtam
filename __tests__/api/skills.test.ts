@@ -1,58 +1,69 @@
-import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
+import { describe, it, expect, beforeAll, beforeEach, afterAll, afterEach, vi } from 'vitest';
 import { NextRequest } from 'next/server';
-import Database from 'better-sqlite3';
-import { drizzle } from 'drizzle-orm/better-sqlite3';
+import { sql } from 'drizzle-orm';
 import * as schema from '@/lib/db/schema';
+import { createTestPgDbEmpty, type TestDbHandle } from '@/__tests__/helpers/test-db';
 
-function createTestDb() {
-  const sqlite = new Database(':memory:');
-  sqlite.pragma('journal_mode = WAL');
-  sqlite.pragma('foreign_keys = ON');
+let sharedHandle: TestDbHandle;
 
-  sqlite.exec(`
+async function applyDdl(handle: TestDbHandle): Promise<void> {
+  await handle.db.execute(sql.raw(`
     CREATE TABLE IF NOT EXISTS skills (
-      id TEXT PRIMARY KEY,
-      name TEXT NOT NULL,
-      description TEXT NOT NULL DEFAULT '',
-      content TEXT NOT NULL DEFAULT '',
-      created_at REAL NOT NULL,
-      updated_at REAL NOT NULL
-    );
+      id text PRIMARY KEY,
+      name text NOT NULL,
+      description text NOT NULL DEFAULT '',
+      content text NOT NULL DEFAULT '',
+      created_at double precision NOT NULL,
+      updated_at double precision NOT NULL
+    )
+  `));
+  await handle.db.execute(sql.raw(`
     CREATE TABLE IF NOT EXISTS agents (
-      id TEXT PRIMARY KEY,
-      name TEXT NOT NULL,
-      project TEXT NOT NULL,
-      skill_ids TEXT NOT NULL DEFAULT '[]',
-      doc_paths TEXT NOT NULL DEFAULT '[]',
-      model TEXT NOT NULL DEFAULT 'sonnet',
-      prompt TEXT NOT NULL DEFAULT '',
-      schedule TEXT,
-      runner TEXT NOT NULL DEFAULT 'pm2',
-      enabled INTEGER NOT NULL DEFAULT 1,
-      provider TEXT,
-      prerequisite_command TEXT,
-      created_at REAL NOT NULL,
-      updated_at REAL NOT NULL
-    );
-  `);
-
-  return { sqlite, db: drizzle(sqlite, { schema }) };
+      id text PRIMARY KEY,
+      name text NOT NULL,
+      project text NOT NULL,
+      skill_ids text NOT NULL DEFAULT '[]',
+      doc_paths text NOT NULL DEFAULT '[]',
+      model text NOT NULL DEFAULT 'sonnet',
+      prompt text NOT NULL DEFAULT '',
+      schedule text,
+      runner text NOT NULL DEFAULT 'pm2',
+      enabled boolean NOT NULL DEFAULT true,
+      provider text,
+      prerequisite_command text,
+      created_at double precision NOT NULL,
+      updated_at double precision NOT NULL
+    )
+  `));
 }
 
 describe('skills API', () => {
-  let testDb: ReturnType<typeof createTestDb>;
   let skillsGET: any;
   let skillsPOST: any;
   let skillDetailGET: any;
   let skillDetailPATCH: any;
   let skillDetailDELETE: any;
 
+  beforeAll(async () => {
+    sharedHandle = await createTestPgDbEmpty();
+    await applyDdl(sharedHandle);
+  });
+
+  afterAll(async () => {
+    await new Promise((r) => setTimeout(r, 30));
+    try {
+      await sharedHandle[Symbol.asyncDispose]();
+    } catch {
+      // ignore
+    }
+  });
+
   beforeEach(async () => {
     vi.resetModules();
-    testDb = createTestDb();
+    await sharedHandle.db.execute(sql.raw('TRUNCATE skills, agents'));
 
     vi.doMock('@/lib/db', () => ({
-      db: testDb.db,
+      db: sharedHandle.db,
       schema,
     }));
 
@@ -66,43 +77,42 @@ describe('skills API', () => {
     skillDetailDELETE = skillDetailRoute.DELETE;
   });
 
-  afterEach(() => {
+  afterEach(async () => {
+    await new Promise((r) => setTimeout(r, 10));
     vi.restoreAllMocks();
     vi.resetModules();
   });
 
   describe('GET /skills', () => {
     it('returns default agent skills on first call', async () => {
-      const response = await skillsGET();
-      const data = await response.json();
-
-      expect(data.skills.length).toBeGreaterThan(0);
-      expect(data.skills.some((s: any) => s.id === 'agent-cto')).toBe(true);
+      // seedDefaultSkills() fires inserts as fire-and-forget; wait briefly for
+      // them to flush before re-querying.
+      await skillsGET();
+      await vi.waitFor(async () => {
+        const response = await skillsGET();
+        const data = await response.json();
+        expect(data.skills.some((s: any) => s.id === 'agent-cto')).toBe(true);
+      });
     });
 
     it('returns all skills including user-created ones', async () => {
-      const db = testDb.db;
       const now = Date.now() / 1000;
-      db.insert(schema.skills)
-        .values({
-          id: 'skill-1',
-          name: 'Skill 1',
-          description: 'First skill',
-          content: 'Content 1',
-          createdAt: now,
-          updatedAt: now,
-        })
-        .run();
-      db.insert(schema.skills)
-        .values({
-          id: 'skill-2',
-          name: 'Skill 2',
-          description: 'Second skill',
-          content: 'Content 2',
-          createdAt: now,
-          updatedAt: now,
-        })
-        .run();
+      await sharedHandle.db.insert(schema.skills).values({
+        id: 'skill-1',
+        name: 'Skill 1',
+        description: 'First skill',
+        content: 'Content 1',
+        createdAt: now,
+        updatedAt: now,
+      });
+      await sharedHandle.db.insert(schema.skills).values({
+        id: 'skill-2',
+        name: 'Skill 2',
+        description: 'Second skill',
+        content: 'Content 2',
+        createdAt: now,
+        updatedAt: now,
+      });
 
       const response = await skillsGET();
       const data = await response.json();
@@ -209,18 +219,15 @@ describe('skills API', () => {
     });
 
     it('returns skill by ID', async () => {
-      const db = testDb.db;
       const now = Date.now() / 1000;
-      db.insert(schema.skills)
-        .values({
-          id: 'skill-123',
-          name: 'Test Skill',
-          description: 'A test skill',
-          content: 'Test content',
-          createdAt: now,
-          updatedAt: now,
-        })
-        .run();
+      await sharedHandle.db.insert(schema.skills).values({
+        id: 'skill-123',
+        name: 'Test Skill',
+        description: 'A test skill',
+        content: 'Test content',
+        createdAt: now,
+        updatedAt: now,
+      });
 
       const response = await skillDetailGET(
         new NextRequest('http://localhost/api/skills/skill-123'),
@@ -249,18 +256,15 @@ describe('skills API', () => {
     });
 
     it('updates skill name', async () => {
-      const db = testDb.db;
       const now = Date.now() / 1000;
-      db.insert(schema.skills)
-        .values({
-          id: 'skill-123',
-          name: 'Old Name',
-          description: 'Description',
-          content: 'Content',
-          createdAt: now,
-          updatedAt: now,
-        })
-        .run();
+      await sharedHandle.db.insert(schema.skills).values({
+        id: 'skill-123',
+        name: 'Old Name',
+        description: 'Description',
+        content: 'Content',
+        createdAt: now,
+        updatedAt: now,
+      });
 
       const request = new NextRequest('http://localhost/api/skills/skill-123', {
         method: 'PATCH',
@@ -277,18 +281,15 @@ describe('skills API', () => {
     });
 
     it('updates skill description', async () => {
-      const db = testDb.db;
       const now = Date.now() / 1000;
-      db.insert(schema.skills)
-        .values({
-          id: 'skill-123',
-          name: 'Name',
-          description: 'Old description',
-          content: 'Content',
-          createdAt: now,
-          updatedAt: now,
-        })
-        .run();
+      await sharedHandle.db.insert(schema.skills).values({
+        id: 'skill-123',
+        name: 'Name',
+        description: 'Old description',
+        content: 'Content',
+        createdAt: now,
+        updatedAt: now,
+      });
 
       const request = new NextRequest('http://localhost/api/skills/skill-123', {
         method: 'PATCH',
@@ -304,18 +305,15 @@ describe('skills API', () => {
     });
 
     it('trims updated name and description values', async () => {
-      const db = testDb.db;
       const now = Date.now() / 1000;
-      db.insert(schema.skills)
-        .values({
-          id: 'skill-123',
-          name: 'Name',
-          description: 'Description',
-          content: 'Content',
-          createdAt: now,
-          updatedAt: now,
-        })
-        .run();
+      await sharedHandle.db.insert(schema.skills).values({
+        id: 'skill-123',
+        name: 'Name',
+        description: 'Description',
+        content: 'Content',
+        createdAt: now,
+        updatedAt: now,
+      });
 
       const request = new NextRequest('http://localhost/api/skills/skill-123', {
         method: 'PATCH',
@@ -335,18 +333,15 @@ describe('skills API', () => {
     });
 
     it('updates skill content', async () => {
-      const db = testDb.db;
       const now = Date.now() / 1000;
-      db.insert(schema.skills)
-        .values({
-          id: 'skill-123',
-          name: 'Name',
-          description: 'Description',
-          content: 'Old content',
-          createdAt: now,
-          updatedAt: now,
-        })
-        .run();
+      await sharedHandle.db.insert(schema.skills).values({
+        id: 'skill-123',
+        name: 'Name',
+        description: 'Description',
+        content: 'Old content',
+        createdAt: now,
+        updatedAt: now,
+      });
 
       const request = new NextRequest('http://localhost/api/skills/skill-123', {
         method: 'PATCH',
@@ -362,18 +357,15 @@ describe('skills API', () => {
     });
 
     it('preserves content whitespace when updating content', async () => {
-      const db = testDb.db;
       const now = Date.now() / 1000;
-      db.insert(schema.skills)
-        .values({
-          id: 'skill-123',
-          name: 'Name',
-          description: 'Description',
-          content: 'Old content',
-          createdAt: now,
-          updatedAt: now,
-        })
-        .run();
+      await sharedHandle.db.insert(schema.skills).values({
+        id: 'skill-123',
+        name: 'Name',
+        description: 'Description',
+        content: 'Old content',
+        createdAt: now,
+        updatedAt: now,
+      });
 
       const request = new NextRequest('http://localhost/api/skills/skill-123', {
         method: 'PATCH',
@@ -389,18 +381,15 @@ describe('skills API', () => {
     });
 
     it('updates updatedAt timestamp', async () => {
-      const db = testDb.db;
       const now = Date.now() / 1000;
-      db.insert(schema.skills)
-        .values({
-          id: 'skill-123',
-          name: 'Name',
-          description: 'Description',
-          content: 'Content',
-          createdAt: now,
-          updatedAt: now,
-        })
-        .run();
+      await sharedHandle.db.insert(schema.skills).values({
+        id: 'skill-123',
+        name: 'Name',
+        description: 'Description',
+        content: 'Content',
+        createdAt: now,
+        updatedAt: now,
+      });
 
       const before = Date.now() / 1000;
 
@@ -420,18 +409,15 @@ describe('skills API', () => {
 
   describe('DELETE /skills/{skillId}', () => {
     it('deletes skill by ID', async () => {
-      const db = testDb.db;
       const now = Date.now() / 1000;
-      db.insert(schema.skills)
-        .values({
-          id: 'skill-123',
-          name: 'Name',
-          description: 'Description',
-          content: 'Content',
-          createdAt: now,
-          updatedAt: now,
-        })
-        .run();
+      await sharedHandle.db.insert(schema.skills).values({
+        id: 'skill-123',
+        name: 'Name',
+        description: 'Description',
+        content: 'Content',
+        createdAt: now,
+        updatedAt: now,
+      });
 
       const request = new NextRequest('http://localhost/api/skills/skill-123', {
         method: 'DELETE',

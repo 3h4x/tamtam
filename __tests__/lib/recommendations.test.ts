@@ -1,42 +1,62 @@
-import { beforeEach, describe, expect, it, vi } from 'vitest';
-import Database from 'better-sqlite3';
-import { drizzle } from 'drizzle-orm/better-sqlite3';
+import { beforeAll, beforeEach, afterAll, afterEach, describe, expect, it, vi } from 'vitest';
+import { sql } from 'drizzle-orm';
+import { createTestPgDbEmpty, type TestDbHandle } from '@/__tests__/helpers/test-db';
 import * as schema from '@/lib/db/schema';
 
-function createTestDb() {
-  const sqlite = new Database(':memory:');
-  sqlite.pragma('journal_mode = WAL');
-  sqlite.exec(`
+async function applyDdl(handle: TestDbHandle): Promise<void> {
+  // PGlite rejects multi-statement prepared queries, so issue each DDL
+  // separately.
+  await handle.db.execute(sql.raw(`
     CREATE TABLE IF NOT EXISTS recommendations (
-      id TEXT PRIMARY KEY,
-      project TEXT NOT NULL,
-      source_kind TEXT NOT NULL,
-      source_id TEXT,
-      agent_id TEXT,
-      agent_name TEXT,
-      type TEXT NOT NULL,
-      title TEXT NOT NULL,
-      detail TEXT NOT NULL,
-      status TEXT NOT NULL DEFAULT 'open',
-      payload TEXT,
-      created_at REAL NOT NULL,
-      updated_at REAL NOT NULL
-    );
-  `);
-  return { sqlite, db: drizzle(sqlite, { schema }) };
+      id text PRIMARY KEY,
+      project text NOT NULL,
+      source_kind text NOT NULL,
+      source_id text,
+      agent_id text,
+      agent_name text,
+      type text NOT NULL,
+      title text NOT NULL,
+      detail text NOT NULL,
+      status text NOT NULL DEFAULT 'open',
+      payload text,
+      created_at double precision NOT NULL,
+      updated_at double precision NOT NULL
+    )
+  `));
 }
 
 describe('recommendations storage', () => {
-  let testDb: ReturnType<typeof createTestDb>;
+  let sharedHandle: TestDbHandle;
+  // Back-compat shim so existing test bodies that use `handle.db` keep working.
+  const handle = { get db() { return sharedHandle.db; } } as { db: TestDbHandle['db'] };
   let upsertRecommendation: typeof import('@/lib/recommendations/recommendations').upsertRecommendation;
   let listRecommendations: typeof import('@/lib/recommendations/recommendations').listRecommendations;
   let updateRecommendationStatus: typeof import('@/lib/recommendations/recommendations').updateRecommendationStatus;
 
+  beforeAll(async () => {
+    sharedHandle = await createTestPgDbEmpty();
+    await applyDdl(sharedHandle);
+  });
+
+  afterAll(async () => {
+    await new Promise((r) => setTimeout(r, 30));
+    try {
+      await sharedHandle[Symbol.asyncDispose]();
+    } catch {
+      // ignore
+    }
+  });
+
   beforeEach(async () => {
     vi.resetModules();
-    testDb = createTestDb();
-    vi.doMock('@/lib/db', () => ({ db: testDb.db, schema }));
+    await sharedHandle.db.execute(sql.raw('TRUNCATE recommendations'));
+    vi.doMock('@/lib/db', () => ({ db: sharedHandle.db, schema }));
     ({ upsertRecommendation, listRecommendations, updateRecommendationStatus } = await import('@/lib/recommendations/recommendations'));
+  });
+
+  afterEach(async () => {
+    vi.resetModules();
+    vi.clearAllMocks();
   });
 
   it('upserts a recommendation with a stable sanitized id and parsed payload', async () => {
@@ -99,7 +119,7 @@ describe('recommendations storage', () => {
   });
 
   it('lists newest recommendations first and drops invalid JSON payloads to null', async () => {
-    testDb.db.insert(schema.recommendations).values([
+    await handle.db.insert(schema.recommendations).values([
       {
         id: 'rec-older',
         project: 'portal',
@@ -124,7 +144,7 @@ describe('recommendations storage', () => {
         createdAt: 11,
         updatedAt: 30,
       },
-    ]).run();
+    ]);
 
     const rows = await listRecommendations('portal');
 

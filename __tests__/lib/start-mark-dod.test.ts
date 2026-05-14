@@ -1,4 +1,4 @@
-import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
+import { describe, it, expect, beforeEach, vi } from 'vitest';
 import { extractCriteria, tickCriteria } from '@/lib/pipeline/mark-dod-criteria';
 
 // ─── Pure helpers ────────────────────────────────────────────────────────────
@@ -103,26 +103,102 @@ describe('tickCriteria', () => {
 
 // ─── startMarkDod ─────────────────────────────────────────────────────────────
 
+// Hoisted mock factories so module-level vi.mock can reference stable fns.
+// Mocking at module scope (rather than vi.doMock + vi.resetModules in
+// beforeEach) lets every test reuse the same compiled module graph for
+// start-mark-dod and its deps, which is much faster than rebuilding the
+// graph per test.
+const mocks = vi.hoisted(() => {
+  const execMock = vi.fn();
+  const listJobsMock = vi.fn();
+  const createJobMock = vi.fn();
+  const markDoneMock = vi.fn();
+  const updateJobMock = vi.fn();
+  const findActiveReleaseJobMock = vi.fn();
+  const getJobMock = vi.fn();
+  const resolveProjectPathMock = vi.fn();
+  const appendFileSyncMock = vi.fn();
+  const existsSyncMock = vi.fn();
+  const mkdirSyncMock = vi.fn();
+  const readFileSyncMock = vi.fn();
+  const writeFileSyncMock = vi.fn();
+  const unlinkSyncMock = vi.fn();
+  const readParsedLogMock = vi.fn();
+  const startJobMock = vi.fn();
+  const getJobStatusMock = vi.fn();
+  const deleteJobMock = vi.fn();
+  const ensureBranchForCtxMock = vi.fn();
+  return {
+    execMock, listJobsMock, createJobMock, markDoneMock, updateJobMock,
+    findActiveReleaseJobMock, getJobMock, resolveProjectPathMock,
+    appendFileSyncMock, existsSyncMock, mkdirSyncMock, readFileSyncMock,
+    writeFileSyncMock, unlinkSyncMock, readParsedLogMock, startJobMock,
+    getJobStatusMock, deleteJobMock, ensureBranchForCtxMock,
+  };
+});
+
+vi.mock('@/lib/shared/project-data', () => ({ resolveProjectPath: mocks.resolveProjectPathMock }));
+vi.mock('@/lib/scheduling/scheduling', () => ({
+  getImproveConfig: () => ({ claudeBin: 'claude', logDir: '/tmp/tamtam-logs', projects: {} }),
+}));
+vi.mock('@/lib/shared/shell', () => ({ exec: mocks.execMock }));
+vi.mock('@/lib/shared/config', () => ({
+  getPermissionModeFlag: () => '--permission-mode bypassPermissions',
+  getPipelineModel: () => 'haiku',
+  getSettings: () => ({ cli_enabled_providers: ['claude'] }),
+}));
+vi.mock('@/lib/jobs/job-storage', () => ({
+  createJob: mocks.createJobMock,
+  listJobs: mocks.listJobsMock,
+  markDone: mocks.markDoneMock,
+  updateJob: mocks.updateJobMock,
+  findActiveReleaseJob: mocks.findActiveReleaseJobMock,
+  getJob: mocks.getJobMock,
+  readParsedLog: mocks.readParsedLogMock,
+}));
+vi.mock('@/lib/jobs/storage', () => ({
+  listJobs: mocks.listJobsMock,
+  findActiveReleaseJob: mocks.findActiveReleaseJobMock,
+  getJob: mocks.getJobMock,
+}));
+// Default branch-switch to a no-op so the tests' explicit exec mock chain
+// isn't consumed by the gh pr lookup. Tests that exercise the branch-switch
+// behavior can re-mock this via the exposed mock fn.
+vi.mock('@/lib/pipeline/mark-dod-branch', () => ({
+  ensureBranchForCtx: mocks.ensureBranchForCtxMock,
+}));
+vi.mock('@/lib/jobs/pm2-jobs', () => ({
+  startJob: mocks.startJobMock,
+  getJobStatus: mocks.getJobStatusMock,
+  deleteJob: mocks.deleteJobMock,
+}));
+vi.mock('fs', () => ({
+  appendFileSync: mocks.appendFileSyncMock,
+  existsSync: mocks.existsSyncMock,
+  mkdirSync: mocks.mkdirSyncMock,
+  readFileSync: mocks.readFileSyncMock,
+  writeFileSync: mocks.writeFileSyncMock,
+  unlinkSync: mocks.unlinkSyncMock,
+}));
+// Stub out the file-config loader so wrapIfUntrusted does not shell out to
+// `git` (via getBranchContext → execFileSync) for every external author —
+// each real git invocation against a non-existent project path costs
+// ~10ms, and the tests call wrapIfUntrusted twice per claude-path test.
+vi.mock('@/lib/skills/tamtam-file-config', () => ({
+  loadFileConfig: () => null,
+}));
+
+// Import once at module scope; mocks above are hoisted before this resolves.
+import { startMarkDod } from '@/lib/pipeline/start-mark-dod';
+
 describe('startMarkDod', () => {
-  let startMarkDod: typeof import('@/lib/pipeline/start-mark-dod').startMarkDod;
-  let execMock: ReturnType<typeof vi.fn>;
-  let listJobsMock: ReturnType<typeof vi.fn>;
-  let createJobMock: ReturnType<typeof vi.fn>;
-  let markDoneMock: ReturnType<typeof vi.fn>;
-  let updateJobMock: ReturnType<typeof vi.fn>;
-  let findActiveReleaseJobMock: ReturnType<typeof vi.fn>;
-  let getJobMock: ReturnType<typeof vi.fn>;
-  let resolveProjectPathMock: ReturnType<typeof vi.fn>;
-  let appendFileSyncMock: ReturnType<typeof vi.fn>;
-  let existsSyncMock: ReturnType<typeof vi.fn>;
-  let mkdirSyncMock: ReturnType<typeof vi.fn>;
-  let readFileSyncMock: ReturnType<typeof vi.fn>;
-  let writeFileSyncMock: ReturnType<typeof vi.fn>;
-  let unlinkSyncMock: ReturnType<typeof vi.fn>;
-  let readParsedLogMock: ReturnType<typeof vi.fn>;
-  let startJobMock: ReturnType<typeof vi.fn>;
-  let getJobStatusMock: ReturnType<typeof vi.fn>;
-  let deleteJobMock: ReturnType<typeof vi.fn>;
+  const {
+    execMock, listJobsMock, createJobMock, markDoneMock, updateJobMock,
+    findActiveReleaseJobMock, getJobMock, resolveProjectPathMock,
+    appendFileSyncMock, existsSyncMock, mkdirSyncMock, readFileSyncMock,
+    writeFileSyncMock, unlinkSyncMock, readParsedLogMock, startJobMock,
+    getJobStatusMock, deleteJobMock, ensureBranchForCtxMock,
+  } = mocks;
 
   function resp(exitCode: number, stdout = '', stderr = '') {
     return Promise.resolve({ exitCode, stdout, stderr });
@@ -140,12 +216,31 @@ describe('startMarkDod', () => {
     };
   }
 
-  beforeEach(async () => {
-    vi.resetModules();
+  beforeEach(() => {
+    // Reset call history + implementations for every mock so each test starts
+    // from the same baseline, then re-install per-test defaults.
+    execMock.mockReset();
+    listJobsMock.mockReset();
+    createJobMock.mockReset();
+    markDoneMock.mockReset();
+    updateJobMock.mockReset();
+    findActiveReleaseJobMock.mockReset();
+    getJobMock.mockReset();
+    resolveProjectPathMock.mockReset();
+    appendFileSyncMock.mockReset();
+    existsSyncMock.mockReset();
+    mkdirSyncMock.mockReset();
+    readFileSyncMock.mockReset();
+    writeFileSyncMock.mockReset();
+    unlinkSyncMock.mockReset();
+    readParsedLogMock.mockReset();
+    startJobMock.mockReset();
+    getJobStatusMock.mockReset();
+    deleteJobMock.mockReset();
+    ensureBranchForCtxMock.mockReset();
 
-    execMock = vi.fn();
-    listJobsMock = vi.fn().mockReturnValue([makeRunJob()]);
-    createJobMock = vi.fn().mockImplementation((project: string, kind: string, pid: number) => ({
+    listJobsMock.mockReturnValue([makeRunJob()]);
+    createJobMock.mockImplementation((project: string, kind: string, pid: number) => ({
       id: `${kind}-job-id`,
       project,
       kind,
@@ -156,75 +251,23 @@ describe('startMarkDod', () => {
       exitCode: null,
       seen: false,
     }));
-    markDoneMock = vi.fn().mockResolvedValue(undefined);
-    updateJobMock = vi.fn();
-    findActiveReleaseJobMock = vi.fn().mockReturnValue(null);
-    getJobMock = vi.fn().mockReturnValue(null);
-    resolveProjectPathMock = vi.fn().mockReturnValue('/path/to/proj');
-    appendFileSyncMock = vi.fn();
-    existsSyncMock = vi.fn().mockReturnValue(true);
-    mkdirSyncMock = vi.fn();
-    readFileSyncMock = vi.fn().mockReturnValue(JSON.stringify({
+    markDoneMock.mockResolvedValue(undefined);
+    findActiveReleaseJobMock.mockReturnValue(null);
+    getJobMock.mockReturnValue(null);
+    resolveProjectPathMock.mockReturnValue('/path/to/proj');
+    existsSyncMock.mockReturnValue(true);
+    readFileSyncMock.mockReturnValue(JSON.stringify({
       results: [
         { index: 1, text: 'First criterion', verified: true, evidence: 'found in lib/auth.ts' },
         { index: 2, text: 'Second criterion', verified: false, evidence: 'not found' },
       ],
     }));
-    writeFileSyncMock = vi.fn();
-    unlinkSyncMock = vi.fn();
-    readParsedLogMock = vi.fn().mockReturnValue('');
-    startJobMock = vi.fn().mockResolvedValue(12345);
-    getJobStatusMock = vi.fn().mockResolvedValue({ status: 'done', exitCode: 0 });
-    deleteJobMock = vi.fn().mockResolvedValue(undefined);
-
-    vi.doMock('@/lib/shared/project-data', () => ({ resolveProjectPath: resolveProjectPathMock }));
-    vi.doMock('@/lib/scheduling/scheduling', () => ({
-      getImproveConfig: () => ({ claudeBin: 'claude', logDir: '/tmp/tamtam-logs', projects: {} }),
-    }));
-    vi.doMock('@/lib/shared/shell', () => ({ exec: execMock }));
-    vi.doMock('@/lib/shared/config', () => ({
-      getPermissionModeFlag: () => '--permission-mode bypassPermissions',
-      getPipelineModel: () => 'haiku',
-      getSettings: () => ({ cli_enabled_providers: ['claude'] }),
-    }));
-    vi.doMock('@/lib/jobs/job-storage', () => ({
-      createJob: createJobMock,
-      listJobs: listJobsMock,
-      markDone: markDoneMock,
-      updateJob: updateJobMock,
-      findActiveReleaseJob: findActiveReleaseJobMock,
-      getJob: getJobMock,
-      readParsedLog: readParsedLogMock,
-    }));
-    vi.doMock('@/lib/jobs/storage', () => ({
-      listJobs: listJobsMock,
-      findActiveReleaseJob: findActiveReleaseJobMock,
-      getJob: getJobMock,
-    }));
-    // Default branch-switch to a no-op so the tests' explicit exec mock
-    // chain isn't consumed by the gh pr lookup. Tests that exercise the
-    // branch-switch behavior re-mock this module directly.
-    vi.doMock('@/lib/pipeline/mark-dod-branch', () => ({
-      ensureBranchForCtx: vi.fn().mockResolvedValue({ switched: false, skipped: 'mocked in tests' }),
-    }));
-    vi.doMock('@/lib/jobs/pm2-jobs', () => ({
-      startJob: startJobMock,
-      getJobStatus: getJobStatusMock,
-      deleteJob: deleteJobMock,
-    }));
-    vi.doMock('fs', () => ({
-      appendFileSync: appendFileSyncMock,
-      existsSync: existsSyncMock,
-      mkdirSync: mkdirSyncMock,
-      readFileSync: readFileSyncMock,
-      writeFileSync: writeFileSyncMock,
-      unlinkSync: unlinkSyncMock,
-    }));
-
-    ({ startMarkDod } = await import('@/lib/pipeline/start-mark-dod'));
+    readParsedLogMock.mockReturnValue('');
+    startJobMock.mockResolvedValue(12345);
+    getJobStatusMock.mockResolvedValue({ status: 'done', exitCode: 0 });
+    deleteJobMock.mockResolvedValue(undefined);
+    ensureBranchForCtxMock.mockResolvedValue({ switched: false, skipped: 'mocked in tests' });
   });
-
-  afterEach(() => { vi.resetModules(); });
 
   const ISSUE_JSON = JSON.stringify({
     title: 'Add login feature',

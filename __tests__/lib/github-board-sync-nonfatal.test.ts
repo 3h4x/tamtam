@@ -1,72 +1,80 @@
-import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import Database from 'better-sqlite3';
-import { drizzle } from 'drizzle-orm/better-sqlite3';
+import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
+import { sql } from 'drizzle-orm';
+import { createTestPgDbEmpty, type TestDbHandle } from '@/__tests__/helpers/test-db';
 import * as schema from '@/lib/db/schema';
 
-function createTestDb() {
-  const sqlite = new Database(':memory:');
-  sqlite.pragma('journal_mode = WAL');
-  sqlite.exec(`
-    CREATE TABLE IF NOT EXISTS jobs (
-      id TEXT PRIMARY KEY,
-      project TEXT NOT NULL,
-      kind TEXT NOT NULL,
-      prompt TEXT,
-      pid INTEGER NOT NULL,
-      log_path TEXT,
-      started_at REAL NOT NULL,
-      finished_at REAL,
-      exit_code INTEGER,
-      seen INTEGER DEFAULT 0,
-      duration_ms INTEGER,
-      input_tokens INTEGER,
-      output_tokens INTEGER,
-      cache_read_tokens INTEGER,
-      cache_create_tokens INTEGER,
-      session_id TEXT,
-      user_prompt TEXT,
-      context_meta TEXT,
-      parent_job_id TEXT,
-      gh_issue_number INTEGER,
-      gh_issue_repo TEXT,
-      gh_issue_title TEXT,
-      log_pruned INTEGER DEFAULT 0,
-      verdict TEXT,
-      cost_usd REAL,
-      model TEXT,
-      release_id TEXT,
-      aborted_at REAL,
-      prompt_bytes INTEGER,
-      work_summary TEXT,
-      modified_files TEXT,
-      provider TEXT
-    );
-    CREATE TABLE IF NOT EXISTS gh_issues_cache (
-      project TEXT PRIMARY KEY,
-      repo TEXT NOT NULL,
-      prs TEXT NOT NULL DEFAULT '[]',
-      issues TEXT NOT NULL DEFAULT '[]',
-      fetched_at REAL NOT NULL
-    );
-  `);
-  return { sqlite, db: drizzle(sqlite, { schema }) };
+async function applyJobsSchema(handle: TestDbHandle): Promise<void> {
+  await handle.db.execute(sql.raw(`CREATE TABLE IF NOT EXISTS jobs (
+    id text PRIMARY KEY,
+    project text NOT NULL,
+    kind text NOT NULL,
+    prompt text,
+    pid integer NOT NULL,
+    log_path text,
+    started_at double precision NOT NULL,
+    finished_at double precision,
+    exit_code integer,
+    seen boolean DEFAULT false,
+    duration_ms integer,
+    input_tokens integer,
+    output_tokens integer,
+    cache_read_tokens integer,
+    cache_create_tokens integer,
+    session_id text,
+    user_prompt text,
+    context_meta text,
+    parent_job_id text,
+    gh_issue_number integer,
+    gh_issue_repo text,
+    gh_issue_title text,
+    log_pruned boolean DEFAULT false,
+    verdict text,
+    cost_usd double precision,
+    model text,
+    release_id text,
+    aborted_at double precision,
+    prompt_bytes integer,
+    work_summary text,
+    modified_files text,
+    provider text
+  )`));
+  await handle.db.execute(sql.raw(`CREATE TABLE IF NOT EXISTS gh_issues_cache (
+    project text PRIMARY KEY,
+    repo text NOT NULL,
+    prs text NOT NULL DEFAULT '[]',
+    issues text NOT NULL DEFAULT '[]',
+    fetched_at double precision NOT NULL
+  )`));
 }
 
 describe('GitHub board sync failures are non-fatal', () => {
-  let testDb: ReturnType<typeof createTestDb>;
+  let sharedHandle: TestDbHandle;
 
-  beforeEach(() => {
+  beforeAll(async () => {
+    sharedHandle = await createTestPgDbEmpty();
+    await applyJobsSchema(sharedHandle);
+  });
+
+  afterAll(async () => {
+    await new Promise((r) => setTimeout(r, 30));
+    try {
+      await sharedHandle[Symbol.asyncDispose]();
+    } catch {
+      // ignore
+    }
+  });
+
+  beforeEach(async () => {
     vi.resetModules();
-    testDb = createTestDb();
+    await sharedHandle.db.execute(sql.raw('TRUNCATE jobs, gh_issues_cache'));
+    vi.doMock('@/lib/db', () => ({ db: sharedHandle.db, schema }));
   });
 
   afterEach(() => {
     vi.resetModules();
-    testDb.sqlite.close();
   });
 
   it('still creates a job when the start sync fails', async () => {
-    vi.doMock('@/lib/db', () => ({ db: testDb.db, schema }));
     vi.doMock('@/lib/github/project-board', () => ({
       queueJobBoardSync: vi.fn().mockRejectedValue(new Error('boom')),
     }));
@@ -79,7 +87,6 @@ describe('GitHub board sync failures are non-fatal', () => {
   });
 
   it('still completes a job when the finish sync fails', async () => {
-    vi.doMock('@/lib/db', () => ({ db: testDb.db, schema }));
     vi.doMock('@/lib/github/project-board', () => ({
       queueJobBoardSync: vi.fn().mockRejectedValue(new Error('boom')),
     }));

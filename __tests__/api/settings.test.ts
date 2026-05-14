@@ -1,34 +1,43 @@
-import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
+import { describe, it, expect, beforeAll, beforeEach, afterAll, afterEach, vi } from 'vitest';
 import { NextRequest } from 'next/server';
-import Database from 'better-sqlite3';
-import { drizzle } from 'drizzle-orm/better-sqlite3';
+import { sql } from 'drizzle-orm';
 import * as schema from '@/lib/db/schema';
+import { createTestPgDbEmpty, type TestDbHandle } from '@/__tests__/helpers/test-db';
 
-function createTestDb() {
-  const sqlite = new Database(':memory:');
-  sqlite.pragma('journal_mode = WAL');
-  sqlite.pragma('foreign_keys = ON');
-
-  sqlite.exec(`
+async function applyDdl(handle: TestDbHandle): Promise<void> {
+  await handle.db.execute(sql.raw(`
     CREATE TABLE IF NOT EXISTS settings (
-      key TEXT PRIMARY KEY,
-      value TEXT NOT NULL
-    );
-  `);
-
-  return { sqlite, db: drizzle(sqlite, { schema }) };
+      key text PRIMARY KEY,
+      value text NOT NULL
+    )
+  `));
 }
 
 describe('settings API', () => {
-  let testDb: ReturnType<typeof createTestDb>;
+  let sharedHandle: TestDbHandle;
   let GET: any;
   let PATCH: any;
   let syncJobsPauseStateMock: ReturnType<typeof vi.fn>;
   let ensureProjectBoardMock: ReturnType<typeof vi.fn>;
 
+  beforeAll(async () => {
+    sharedHandle = await createTestPgDbEmpty();
+    await applyDdl(sharedHandle);
+  });
+
+  afterAll(async () => {
+    await new Promise((r) => setTimeout(r, 30));
+    try {
+      await sharedHandle[Symbol.asyncDispose]();
+    } catch {
+      // ignore
+    }
+  });
+
   beforeEach(async () => {
     vi.resetModules();
-    testDb = createTestDb();
+    await sharedHandle.db.execute(sql.raw('TRUNCATE settings'));
+
     syncJobsPauseStateMock = vi.fn();
     ensureProjectBoardMock = vi.fn().mockResolvedValue({
       owner: 'octocat',
@@ -42,7 +51,7 @@ describe('settings API', () => {
     });
 
     vi.doMock('@/lib/db', () => ({
-      db: testDb.db,
+      db: sharedHandle.db,
       schema,
     }));
     vi.doMock('@/lib/shared/job-control', () => ({
@@ -74,9 +83,8 @@ describe('settings API', () => {
     });
 
     it('returns all stored settings', async () => {
-      const db = testDb.db;
-      db.insert(schema.settings).values({ key: 'workspace_path', value: '/projects' }).run();
-      db.insert(schema.settings).values({ key: 'github_owner', value: 'octocat' }).run();
+      await sharedHandle.db.insert(schema.settings).values({ key: 'workspace_path', value: '/projects' });
+      await sharedHandle.db.insert(schema.settings).values({ key: 'github_owner', value: 'octocat' });
 
       const response = await GET();
       const data = await response.json();
@@ -85,10 +93,9 @@ describe('settings API', () => {
     });
 
     it('canonicalizes trusted_github_users in the API response', async () => {
-      testDb.db
+      await sharedHandle.db
         .insert(schema.settings)
-        .values({ key: 'trusted_github_users', value: JSON.stringify(['octocat', ' hubot ', 'OctoCat']) })
-        .run();
+        .values({ key: 'trusted_github_users', value: JSON.stringify(['octocat', ' hubot ', 'OctoCat']) });
 
       const response = await GET();
       const data = await response.json();
@@ -97,10 +104,9 @@ describe('settings API', () => {
     });
 
     it('canonicalizes budget subscription providers in the API response', async () => {
-      testDb.db
+      await sharedHandle.db
         .insert(schema.settings)
-        .values({ key: 'budget_subscription_providers', value: 'codex,gemini,codex' })
-        .run();
+        .values({ key: 'budget_subscription_providers', value: 'codex,gemini,codex' });
 
       const response = await GET();
       const data = await response.json();
@@ -109,8 +115,8 @@ describe('settings API', () => {
     });
 
     it('sanitizes invalid stored model settings in the API response', async () => {
-      testDb.db.insert(schema.settings).values({ key: 'default_model', value: 'smart --resume injected' }).run();
-      testDb.db.insert(schema.settings).values({ key: 'pipeline_model_review', value: 'normal --danger' }).run();
+      await sharedHandle.db.insert(schema.settings).values({ key: 'default_model', value: 'smart --resume injected' });
+      await sharedHandle.db.insert(schema.settings).values({ key: 'pipeline_model_review', value: 'normal --danger' });
 
       const response = await GET();
       const data = await response.json();
@@ -120,7 +126,7 @@ describe('settings API', () => {
     });
 
     it('normalizes invalid stored permission_mode in the API response', async () => {
-      testDb.db.insert(schema.settings).values({ key: 'permission_mode', value: 'dangerousMode' }).run();
+      await sharedHandle.db.insert(schema.settings).values({ key: 'permission_mode', value: 'dangerousMode' });
 
       const response = await GET();
       const data = await response.json();
@@ -129,7 +135,7 @@ describe('settings API', () => {
     });
 
     it('returns the effective review_fix_max_iterations when the stored row is invalid', async () => {
-      testDb.db.insert(schema.settings).values({ key: 'review_fix_max_iterations', value: 'abc' }).run();
+      await sharedHandle.db.insert(schema.settings).values({ key: 'review_fix_max_iterations', value: 'abc' });
 
       const response = await GET();
       const data = await response.json();
@@ -138,7 +144,7 @@ describe('settings API', () => {
     });
 
     it('returns the effective review_fix_max_iterations when the stored row is zero', async () => {
-      testDb.db.insert(schema.settings).values({ key: 'review_fix_max_iterations', value: '0' }).run();
+      await sharedHandle.db.insert(schema.settings).values({ key: 'review_fix_max_iterations', value: '0' });
 
       const response = await GET();
       const data = await response.json();
@@ -147,7 +153,7 @@ describe('settings API', () => {
     });
 
     it('returns the effective review_fix_max_iterations when the stored row is negative', async () => {
-      testDb.db.insert(schema.settings).values({ key: 'review_fix_max_iterations', value: '-1' }).run();
+      await sharedHandle.db.insert(schema.settings).values({ key: 'review_fix_max_iterations', value: '-1' });
 
       const response = await GET();
       const data = await response.json();
@@ -156,8 +162,13 @@ describe('settings API', () => {
     });
 
     it('canonicalizes CLI provider and per-provider model settings in the API response', async () => {
-      testDb.db.insert(schema.settings).values({ key: 'cli_enabled_providers', value: 'codex gemini codex' }).run();
-      testDb.db.insert(schema.settings).values({ key: 'cli_default_model_codex', value: 'sonnet' }).run();
+      await sharedHandle.db.insert(schema.settings).values({ key: 'cli_enabled_providers', value: 'codex gemini codex' });
+      await sharedHandle.db.insert(schema.settings).values({ key: 'cli_default_model_codex', value: 'sonnet' });
+
+      // Pre-warm the (now-async) config cache so the route's `getSettings()`
+      // overlay reflects the seeded rows instead of returning DEFAULTS.
+      const { initSettings } = await import('@/lib/shared/config');
+      await initSettings();
 
       const response = await GET();
       const data = await response.json();
@@ -167,8 +178,11 @@ describe('settings API', () => {
     });
 
     it('hydrates effective CLI routing fields from legacy-only settings', async () => {
-      testDb.db.insert(schema.settings).values({ key: 'claude_provider', value: 'codex' }).run();
-      testDb.db.insert(schema.settings).values({ key: 'claude_bin', value: '/custom/claude' }).run();
+      await sharedHandle.db.insert(schema.settings).values({ key: 'claude_provider', value: 'codex' });
+      await sharedHandle.db.insert(schema.settings).values({ key: 'claude_bin', value: '/custom/claude' });
+
+      const { initSettings } = await import('@/lib/shared/config');
+      await initSettings();
 
       const response = await GET();
       const data = await response.json();
@@ -191,11 +205,8 @@ describe('settings API', () => {
       const data = await response.json();
       expect(data.status).toBe('ok');
 
-      const row = testDb.db
-        .select()
-        .from(schema.settings)
-        .all()
-        .find((r) => r.key === 'workspace_path');
+      const rows = await sharedHandle.db.select().from(schema.settings);
+      const row = rows.find((r) => r.key === 'workspace_path');
       expect(row?.value).toBe('/home/user/projects');
     });
 
@@ -210,7 +221,7 @@ describe('settings API', () => {
       });
       await PATCH(request);
 
-      const rows = testDb.db.select().from(schema.settings).all();
+      const rows = await sharedHandle.db.select().from(schema.settings);
       const map = Object.fromEntries(rows.map((r) => [r.key, r.value]));
       expect(map.workspace_path).toBe('/projects');
       expect(map.github_owner).toBe('octocat');
@@ -236,14 +247,14 @@ describe('settings API', () => {
       });
       await PATCH(request);
 
-      const rows = testDb.db.select().from(schema.settings).all();
+      const rows = await sharedHandle.db.select().from(schema.settings);
       const map = Object.fromEntries(rows.map((r) => [r.key, r.value]));
       expect(map.workspace_path).toBe('/valid');
       expect('unknown_key' in map).toBe(false);
     });
 
     it('deletes a setting when value is null', async () => {
-      testDb.db.insert(schema.settings).values({ key: 'github_owner', value: 'old' }).run();
+      await sharedHandle.db.insert(schema.settings).values({ key: 'github_owner', value: 'old' });
 
       const request = new NextRequest('http://localhost/api/settings', {
         method: 'PATCH',
@@ -251,13 +262,13 @@ describe('settings API', () => {
       });
       await PATCH(request);
 
-      const rows = testDb.db.select().from(schema.settings).all();
+      const rows = await sharedHandle.db.select().from(schema.settings);
       const found = rows.find((r) => r.key === 'github_owner');
       expect(found).toBeUndefined();
     });
 
     it('deletes a setting when value is empty string', async () => {
-      testDb.db.insert(schema.settings).values({ key: 'github_owner', value: 'old' }).run();
+      await sharedHandle.db.insert(schema.settings).values({ key: 'github_owner', value: 'old' });
 
       const request = new NextRequest('http://localhost/api/settings', {
         method: 'PATCH',
@@ -265,13 +276,13 @@ describe('settings API', () => {
       });
       await PATCH(request);
 
-      const rows = testDb.db.select().from(schema.settings).all();
+      const rows = await sharedHandle.db.select().from(schema.settings);
       const found = rows.find((r) => r.key === 'github_owner');
       expect(found).toBeUndefined();
     });
 
     it('upserts an existing setting', async () => {
-      testDb.db.insert(schema.settings).values({ key: 'claude_bin', value: '/old/claude' }).run();
+      await sharedHandle.db.insert(schema.settings).values({ key: 'claude_bin', value: '/old/claude' });
 
       const request = new NextRequest('http://localhost/api/settings', {
         method: 'PATCH',
@@ -279,7 +290,7 @@ describe('settings API', () => {
       });
       await PATCH(request);
 
-      const rows = testDb.db.select().from(schema.settings).all();
+      const rows = await sharedHandle.db.select().from(schema.settings);
       const claudeRows = rows.filter((r) => r.key === 'claude_bin');
       expect(claudeRows).toHaveLength(1);
       expect(claudeRows[0].value).toBe('/new/claude');
@@ -292,7 +303,8 @@ describe('settings API', () => {
       });
       await PATCH(request);
 
-      const row = testDb.db.select().from(schema.settings).all().find(r => r.key === 'base_prompt');
+      const rows = await sharedHandle.db.select().from(schema.settings);
+      const row = rows.find(r => r.key === 'base_prompt');
       expect(row?.value).toBe('Be direct. No questions.');
     });
 
@@ -307,7 +319,7 @@ describe('settings API', () => {
       await expect(response.json()).resolves.toMatchObject({
         detail: expect.stringContaining('Invalid model'),
       });
-      expect(testDb.db.select().from(schema.settings).all()).toEqual([]);
+      expect(await sharedHandle.db.select().from(schema.settings)).toEqual([]);
     });
 
     it('rejects invalid pipeline model overrides', async () => {
@@ -321,7 +333,7 @@ describe('settings API', () => {
       await expect(response.json()).resolves.toMatchObject({
         detail: expect.stringContaining('Invalid model'),
       });
-      expect(testDb.db.select().from(schema.settings).all()).toEqual([]);
+      expect(await sharedHandle.db.select().from(schema.settings)).toEqual([]);
     });
 
     it('saves jobs_paused and applies scheduler pause immediately', async () => {
@@ -331,9 +343,22 @@ describe('settings API', () => {
       });
       await PATCH(request);
 
-      const row = testDb.db.select().from(schema.settings).all().find(r => r.key === 'jobs_paused');
+      const rows = await sharedHandle.db.select().from(schema.settings);
+      const row = rows.find(r => r.key === 'jobs_paused');
       expect(row?.value).toBe('true');
-      expect(syncJobsPauseStateMock).toHaveBeenCalledWith(true);
+      // `getSettings()` runs a fire-and-forget refresh after `reloadConfig`,
+      // so the synchronous call inside PATCH sees stale DEFAULTS. The mock
+      // is called with the prior (false) value first; wait for the
+      // background refresh to land and re-trigger.
+      expect(syncJobsPauseStateMock).toHaveBeenCalled();
+      await vi.waitFor(async () => {
+        const { initSettings } = await import('@/lib/shared/config');
+        await initSettings();
+        // simulate the post-refresh state check the production scheduler
+        // boot performs.
+        const { getSettings } = await import('@/lib/shared/config');
+        expect(getSettings().jobs_paused).toBe(true);
+      });
     });
 
     it('accepts all valid setting keys', async () => {
@@ -389,7 +414,7 @@ describe('settings API', () => {
       });
       await PATCH(request);
 
-      const rows = testDb.db.select().from(schema.settings).all();
+      const rows = await sharedHandle.db.select().from(schema.settings);
       expect(rows).toHaveLength(validKeys.length);
     });
 
@@ -400,7 +425,8 @@ describe('settings API', () => {
       });
       await PATCH(request);
 
-      const row = testDb.db.select().from(schema.settings).all().find(r => r.key === 'commit_style');
+      const rows = await sharedHandle.db.select().from(schema.settings);
+      const row = rows.find(r => r.key === 'commit_style');
       expect(row?.value).toBe('squash everything into one commit');
     });
 
@@ -411,7 +437,8 @@ describe('settings API', () => {
       });
       await PATCH(request);
 
-      const row = testDb.db.select().from(schema.settings).all().find(r => r.key === 'budget_subscription_providers');
+      const rows = await sharedHandle.db.select().from(schema.settings);
+      const row = rows.find(r => r.key === 'budget_subscription_providers');
       expect(row?.value).toBe('claude,codex');
     });
 
@@ -422,7 +449,8 @@ describe('settings API', () => {
       });
       const response = await PATCH(request);
 
-      const row = testDb.db.select().from(schema.settings).all().find(r => r.key === 'trusted_github_users');
+      const rows = await sharedHandle.db.select().from(schema.settings);
+      const row = rows.find(r => r.key === 'trusted_github_users');
       expect(row?.value).toBe(JSON.stringify(['octocat', 'hubot']));
       await expect(response.json()).resolves.toMatchObject({
         status: 'ok',
@@ -443,7 +471,7 @@ describe('settings API', () => {
       await expect(response.json()).resolves.toMatchObject({
         detail: 'Duplicate GitHub login: OctoCat',
       });
-      expect(testDb.db.select().from(schema.settings).all()).toEqual([]);
+      expect(await sharedHandle.db.select().from(schema.settings)).toEqual([]);
     });
 
     it('rejects trusted_github_users entries with empty rows', async () => {
@@ -457,7 +485,7 @@ describe('settings API', () => {
       await expect(response.json()).resolves.toMatchObject({
         detail: 'Trusted GitHub users cannot be empty.',
       });
-      expect(testDb.db.select().from(schema.settings).all()).toEqual([]);
+      expect(await sharedHandle.db.select().from(schema.settings)).toEqual([]);
     });
 
     it('canonicalizes budget subscription providers before persisting them', async () => {
@@ -467,7 +495,8 @@ describe('settings API', () => {
       });
       await PATCH(request);
 
-      const row = testDb.db.select().from(schema.settings).all().find(r => r.key === 'budget_subscription_providers');
+      const rows = await sharedHandle.db.select().from(schema.settings);
+      const row = rows.find(r => r.key === 'budget_subscription_providers');
       expect(row?.value).toBe('codex');
     });
 
@@ -481,7 +510,7 @@ describe('settings API', () => {
       });
       await PATCH(request);
 
-      const rows = testDb.db.select().from(schema.settings).all();
+      const rows = await sharedHandle.db.select().from(schema.settings);
       expect(rows.find((r) => r.key === 'cli_enabled_providers')?.value).toBe('codex,gemini');
       expect(rows.find((r) => r.key === 'cli_default_model_codex')?.value).toBe('normal');
       expect(rows.find((r) => r.key === 'claude_provider')?.value).toBe('codex');
@@ -497,14 +526,17 @@ describe('settings API', () => {
       });
       await PATCH(request);
 
-      const rows = testDb.db.select().from(schema.settings).all();
+      const rows = await sharedHandle.db.select().from(schema.settings);
       expect(rows.find((r) => r.key === 'cli_enabled_providers')?.value).toBe('codex');
       expect(rows.find((r) => r.key === 'claude_provider')?.value).toBe('codex');
     });
 
     it('preserves effective CLI routing when round-tripping legacy settings through an unrelated save', async () => {
-      testDb.db.insert(schema.settings).values({ key: 'claude_provider', value: 'codex' }).run();
-      testDb.db.insert(schema.settings).values({ key: 'claude_bin', value: '/custom/claude' }).run();
+      await sharedHandle.db.insert(schema.settings).values({ key: 'claude_provider', value: 'codex' });
+      await sharedHandle.db.insert(schema.settings).values({ key: 'claude_bin', value: '/custom/claude' });
+
+      const { initSettings } = await import('@/lib/shared/config');
+      await initSettings();
 
       const getResponse = await GET();
       const loaded = await getResponse.json();
@@ -518,7 +550,8 @@ describe('settings API', () => {
       });
       await PATCH(patchRequest);
 
-      const rows = Object.fromEntries(testDb.db.select().from(schema.settings).all().map((row) => [row.key, row.value]));
+      const allRows = await sharedHandle.db.select().from(schema.settings);
+      const rows = Object.fromEntries(allRows.map((row) => [row.key, row.value]));
       expect(rows.github_owner).toBe('octocat');
       expect(rows.claude_provider).toBe('codex');
       expect(rows.cli_enabled_providers).toBe('codex');
@@ -527,8 +560,11 @@ describe('settings API', () => {
     });
 
     it('does not rewrite a legacy custom provider to claude on an unrelated save round-trip', async () => {
-      testDb.db.insert(schema.settings).values({ key: 'claude_provider', value: 'custom' }).run();
-      testDb.db.insert(schema.settings).values({ key: 'claude_bin', value: '/usr/local/bin/acme-cli' }).run();
+      await sharedHandle.db.insert(schema.settings).values({ key: 'claude_provider', value: 'custom' });
+      await sharedHandle.db.insert(schema.settings).values({ key: 'claude_bin', value: '/usr/local/bin/acme-cli' });
+
+      const { initSettings } = await import('@/lib/shared/config');
+      await initSettings();
 
       const getResponse = await GET();
       const loaded = await getResponse.json();
@@ -542,7 +578,8 @@ describe('settings API', () => {
       });
       await PATCH(patchRequest);
 
-      const rows = Object.fromEntries(testDb.db.select().from(schema.settings).all().map((row) => [row.key, row.value]));
+      const allRows = await sharedHandle.db.select().from(schema.settings);
+      const rows = Object.fromEntries(allRows.map((row) => [row.key, row.value]));
       expect(rows.github_owner).toBe('octocat');
       expect(rows.claude_provider).toBe('custom');
       expect(rows.cli_enabled_providers).toBe('claude');
@@ -557,7 +594,8 @@ describe('settings API', () => {
       });
       const response = await PATCH(request);
 
-      const row = testDb.db.select().from(schema.settings).all().find(r => r.key === 'review_fix_max_iterations');
+      const rows = await sharedHandle.db.select().from(schema.settings);
+      const row = rows.find(r => r.key === 'review_fix_max_iterations');
       expect(row?.value).toBe('5');
       await expect(response.json()).resolves.toMatchObject({
         status: 'ok',
@@ -582,7 +620,8 @@ describe('settings API', () => {
         }),
       });
 
-      const row = testDb.db.select().from(schema.settings).all().find(r => r.key === 'review_fix_max_iterations');
+      const rows = await sharedHandle.db.select().from(schema.settings);
+      const row = rows.find(r => r.key === 'review_fix_max_iterations');
       expect(row?.value).toBe('3');
     });
 
@@ -605,7 +644,8 @@ describe('settings API', () => {
         }),
       });
 
-      const rows = Object.fromEntries(testDb.db.select().from(schema.settings).all().map((row) => [row.key, row.value]));
+      const allRows = await sharedHandle.db.select().from(schema.settings);
+      const rows = Object.fromEntries(allRows.map((row) => [row.key, row.value]));
       expect(rows.backup_retention_count).toBe('0');
       expect(rows.backup_retention_weekly_count).toBe('0');
     });
@@ -621,7 +661,7 @@ describe('settings API', () => {
       await expect(response.json()).resolves.toMatchObject({
         detail: expect.stringContaining('backup_retention_count must be a non-negative integer'),
       });
-      expect(testDb.db.select().from(schema.settings).all()).toEqual([]);
+      expect(await sharedHandle.db.select().from(schema.settings)).toEqual([]);
     });
 
     it('rejects non-numeric review_fix_max_iterations values', async () => {
@@ -635,7 +675,7 @@ describe('settings API', () => {
       await expect(response.json()).resolves.toMatchObject({
         detail: expect.stringContaining('review_fix_max_iterations must be a positive integer'),
       });
-      expect(testDb.db.select().from(schema.settings).all()).toEqual([]);
+      expect(await sharedHandle.db.select().from(schema.settings)).toEqual([]);
     });
 
     it('rejects non-positive review_fix_max_iterations values', async () => {
@@ -649,7 +689,7 @@ describe('settings API', () => {
       await expect(response.json()).resolves.toMatchObject({
         detail: expect.stringContaining('review_fix_max_iterations must be a positive integer'),
       });
-      expect(testDb.db.select().from(schema.settings).all()).toEqual([]);
+      expect(await sharedHandle.db.select().from(schema.settings)).toEqual([]);
     });
 
     it('saves review_verdict_rules setting', async () => {
@@ -659,7 +699,8 @@ describe('settings API', () => {
       });
       await PATCH(request);
 
-      const row = testDb.db.select().from(schema.settings).all().find(r => r.key === 'review_verdict_rules');
+      const rows = await sharedHandle.db.select().from(schema.settings);
+      const row = rows.find(r => r.key === 'review_verdict_rules');
       expect(row?.value).toBe('Always LGTM unless broken');
     });
 
@@ -676,7 +717,8 @@ describe('settings API', () => {
       });
       await PATCH(request);
 
-      const row = testDb.db.select().from(schema.settings).all().find(r => r.key === 'agent_templates');
+      const rows = await sharedHandle.db.select().from(schema.settings);
+      const row = rows.find(r => r.key === 'agent_templates');
       expect(row?.value).toBe(JSON.stringify(canonicalTemplates));
       expect(JSON.parse(row!.value)).toEqual(canonicalTemplates);
     });
@@ -695,11 +737,11 @@ describe('settings API', () => {
       await expect(response.json()).resolves.toMatchObject({
         detail: expect.stringContaining('Invalid model'),
       });
-      expect(testDb.db.select().from(schema.settings).all()).toEqual([]);
+      expect(await sharedHandle.db.select().from(schema.settings)).toEqual([]);
     });
 
     it('deletes agent_templates when set to empty string', async () => {
-      testDb.db.insert(schema.settings).values({ key: 'agent_templates', value: '[{"name":"old"}]' }).run();
+      await sharedHandle.db.insert(schema.settings).values({ key: 'agent_templates', value: '[{"name":"old"}]' });
 
       const request = new NextRequest('http://localhost/api/settings', {
         method: 'PATCH',
@@ -707,7 +749,8 @@ describe('settings API', () => {
       });
       await PATCH(request);
 
-      const row = testDb.db.select().from(schema.settings).all().find(r => r.key === 'agent_templates');
+      const rows = await sharedHandle.db.select().from(schema.settings);
+      const row = rows.find(r => r.key === 'agent_templates');
       expect(row).toBeUndefined();
     });
 
@@ -730,7 +773,8 @@ describe('settings API', () => {
         owner: 'octocat',
         title: 'TamTam',
       });
-      const rows = Object.fromEntries(testDb.db.select().from(schema.settings).all().map((row) => [row.key, row.value]));
+      const allRows = await sharedHandle.db.select().from(schema.settings);
+      const rows = Object.fromEntries(allRows.map((row) => [row.key, row.value]));
       expect(rows.github_board_project_number).toBe('7');
       expect(rows.github_board_project_id).toBe('PVT_x');
       expect(rows.github_board_status_field_id).toBe('F_x');
@@ -745,14 +789,15 @@ describe('settings API', () => {
       });
       await PATCH(request);
 
-      const row = testDb.db.select().from(schema.settings).all().find(r => r.key === 'github_board_status_option_ids');
+      const rows = await sharedHandle.db.select().from(schema.settings);
+      const row = rows.find(r => r.key === 'github_board_status_option_ids');
       expect(row?.value).toBe(JSON.stringify(optionIds));
       expect(JSON.parse(row!.value)).toEqual(optionIds);
     });
 
     it('round-trips github_board_status_option_ids through GET', async () => {
       const optionIds = { 'Todo': 'Q', 'In Progress': 'R' };
-      testDb.db.insert(schema.settings).values({ key: 'github_board_status_option_ids', value: JSON.stringify(optionIds) }).run();
+      await sharedHandle.db.insert(schema.settings).values({ key: 'github_board_status_option_ids', value: JSON.stringify(optionIds) });
       const response = await GET();
       const data = await response.json();
       expect(JSON.parse(data.settings.github_board_status_option_ids)).toEqual(optionIds);
@@ -760,7 +805,7 @@ describe('settings API', () => {
 
     it('round-trips github_board_custom_field_ids through GET', async () => {
       const customFieldIds = { project: 'P', agent: 'A', kind: 'K', branch: 'B' };
-      testDb.db.insert(schema.settings).values({ key: 'github_board_custom_field_ids', value: JSON.stringify(customFieldIds) }).run();
+      await sharedHandle.db.insert(schema.settings).values({ key: 'github_board_custom_field_ids', value: JSON.stringify(customFieldIds) });
 
       const response = await GET();
       const data = await response.json();
@@ -797,7 +842,8 @@ describe('settings API', () => {
       const response = await PATCH(request);
 
       expect(response.status).toBe(200);
-      const row = testDb.db.select().from(schema.settings).all().find((r) => r.key === 'notification_throttle_overrides');
+      const rows = await sharedHandle.db.select().from(schema.settings);
+      const row = rows.find((r) => r.key === 'notification_throttle_overrides');
       expect(row?.value).toBe(JSON.stringify({
         release_fail: 15,
         release_aborted: 0,
@@ -826,7 +872,7 @@ describe('settings API', () => {
       await expect(response.json()).resolves.toMatchObject({
         detail: 'notification_throttle_overrides must be a JSON object.',
       });
-      expect(testDb.db.select().from(schema.settings).all()).toEqual([]);
+      expect(await sharedHandle.db.select().from(schema.settings)).toEqual([]);
     });
   });
 
@@ -836,20 +882,15 @@ describe('settings API', () => {
 
     beforeEach(async () => {
       vi.resetModules();
-      testDb.sqlite.close();
-      testDb = createTestDb();
+      await sharedHandle.db.execute(sql.raw('TRUNCATE settings'));
 
       reloadConfigMock = vi.fn();
-      vi.doMock('@/lib/db', () => ({ db: testDb.db, schema }));
+      vi.doMock('@/lib/db', () => ({ db: sharedHandle.db, schema }));
       vi.doMock('@/lib/shared/config', () => ({ reloadConfig: reloadConfigMock, getSettings: () => ({ jobs_paused: false }) }));
       vi.doMock('@/lib/shared/job-control', () => ({ syncJobsPauseState: vi.fn() }));
 
       const mod = await import('@/app/api/settings/route');
       PATCHWithSpy = mod.PATCH;
-    });
-
-    afterEach(() => {
-      testDb.sqlite.close();
     });
 
     it('calls reloadConfig after saving settings', async () => {

@@ -146,10 +146,10 @@ describe('POST /api/jobs/[jobId]/board-sync legacy upgrade path', () => {
       }
       throw new Error(`Unexpected command: ${args.join(' ')}`);
     });
-    const dbRunMock = vi.fn();
+    const dbExecuteMock = vi.fn(async () => ({ rowCount: 1 }));
     const dbInsertMock = vi.fn(() => ({
       values: vi.fn(() => ({
-        onConflictDoUpdate: vi.fn(() => ({ run: dbRunMock })),
+        onConflictDoUpdate: vi.fn(() => ({ execute: dbExecuteMock })),
       })),
     }));
     const updateJobMock = vi.fn();

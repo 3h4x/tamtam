@@ -1,98 +1,114 @@
-import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import Database from 'better-sqlite3';
-import { drizzle } from 'drizzle-orm/better-sqlite3';
+import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
+import { sql } from 'drizzle-orm';
 import { mkdtempSync, mkdirSync, rmSync, writeFileSync } from 'fs';
 import { join } from 'path';
 import { tmpdir } from 'os';
 import * as schema from '@/lib/db/schema';
+import { createTestPgDbEmpty, type TestDbHandle } from '@/__tests__/helpers/test-db';
 
-function createTestDb() {
-  const sqlite = new Database(':memory:');
-  sqlite.pragma('journal_mode = WAL');
-  sqlite.exec(`
+async function applyDdl(handle: TestDbHandle): Promise<void> {
+  await handle.db.execute(sql.raw(`
     CREATE TABLE IF NOT EXISTS settings (
-      key TEXT PRIMARY KEY,
-      value TEXT NOT NULL
-    );
+      key text PRIMARY KEY,
+      value text NOT NULL
+    )
+  `));
+  await handle.db.execute(sql.raw(`
     CREATE TABLE IF NOT EXISTS skills (
-      id TEXT PRIMARY KEY,
-      name TEXT NOT NULL,
-      description TEXT NOT NULL DEFAULT '',
-      content TEXT NOT NULL DEFAULT '',
-      created_at REAL NOT NULL,
-      updated_at REAL NOT NULL
-    );
+      id text PRIMARY KEY,
+      name text NOT NULL,
+      description text NOT NULL DEFAULT '',
+      content text NOT NULL DEFAULT '',
+      created_at double precision NOT NULL,
+      updated_at double precision NOT NULL
+    )
+  `));
+  await handle.db.execute(sql.raw(`
     CREATE TABLE IF NOT EXISTS agents (
-      id TEXT PRIMARY KEY,
-      name TEXT NOT NULL,
-      project TEXT NOT NULL,
-      skill_ids TEXT NOT NULL DEFAULT '[]',
-      model TEXT NOT NULL DEFAULT 'normal',
-      prompt TEXT NOT NULL DEFAULT '',
-      schedule TEXT,
-      runner TEXT NOT NULL DEFAULT 'pm2',
-      enabled INTEGER NOT NULL DEFAULT 1,
-      doc_paths TEXT NOT NULL DEFAULT '[]',
-      provider TEXT,
-      prerequisite_command TEXT,
-      created_at REAL NOT NULL,
-      updated_at REAL NOT NULL
-    );
+      id text PRIMARY KEY,
+      name text NOT NULL,
+      project text NOT NULL,
+      skill_ids text NOT NULL DEFAULT '[]',
+      model text NOT NULL DEFAULT 'normal',
+      prompt text NOT NULL DEFAULT '',
+      schedule text,
+      runner text NOT NULL DEFAULT 'pm2',
+      enabled boolean NOT NULL DEFAULT true,
+      doc_paths text NOT NULL DEFAULT '[]',
+      provider text,
+      prerequisite_command text,
+      created_at double precision NOT NULL,
+      updated_at double precision NOT NULL
+    )
+  `));
+  await handle.db.execute(sql.raw(`
     CREATE TABLE IF NOT EXISTS projects (
-      name TEXT PRIMARY KEY,
-      path TEXT NOT NULL,
-      enabled INTEGER DEFAULT 0,
-      github TEXT,
-      priority TEXT,
-      custom_actions TEXT,
-      test_command TEXT,
-      tests_disabled INTEGER DEFAULT 0,
-      review_disabled INTEGER DEFAULT 0,
-      test_cron_enabled INTEGER DEFAULT 0,
-      test_cron_schedule TEXT,
-      auto_commit_enabled INTEGER DEFAULT 0,
-      auto_push_enabled INTEGER DEFAULT 0,
-      auto_pr_merge_enabled INTEGER DEFAULT 0,
-      release_after_run INTEGER DEFAULT 0,
-      issue_auto_branch INTEGER DEFAULT 1,
-      last_push_error TEXT,
-      last_push_at REAL,
-      review_prompt_addendum TEXT,
-      fix_prompt_addendum TEXT,
-      website TEXT,
-      qa_url TEXT,
-      archived INTEGER NOT NULL DEFAULT 0,
-      paused INTEGER NOT NULL DEFAULT 0
-    );
-  `);
-  return { sqlite, db: drizzle(sqlite, { schema }) };
+      name text PRIMARY KEY,
+      path text NOT NULL,
+      enabled boolean DEFAULT false,
+      github text,
+      priority text,
+      custom_actions text,
+      test_command text,
+      tests_disabled boolean DEFAULT false,
+      review_disabled boolean DEFAULT false,
+      test_cron_enabled boolean DEFAULT false,
+      test_cron_schedule text,
+      auto_commit_enabled boolean DEFAULT false,
+      auto_push_enabled boolean DEFAULT false,
+      auto_pr_merge_enabled boolean DEFAULT false,
+      release_after_run boolean DEFAULT false,
+      issue_auto_branch boolean DEFAULT true,
+      last_push_error text,
+      last_push_at double precision,
+      review_prompt_addendum text,
+      fix_prompt_addendum text,
+      website text,
+      qa_url text,
+      archived boolean NOT NULL DEFAULT false,
+      paused boolean NOT NULL DEFAULT false
+    )
+  `));
 }
 
 describe('collectProjectRetrievalSources', () => {
+  let sharedHandle: TestDbHandle;
   let projectPath: string;
-  let testDb: ReturnType<typeof createTestDb>;
   let listProjectDocumentsMock: ReturnType<typeof vi.fn>;
   let getBranchContextMock: ReturnType<typeof vi.fn>;
   let gitLsTreeSyncMock: ReturnType<typeof vi.fn>;
 
-  beforeEach(() => {
+  beforeAll(async () => {
+    sharedHandle = await createTestPgDbEmpty();
+    await applyDdl(sharedHandle);
+  });
+
+  afterAll(async () => {
+    await new Promise((r) => setTimeout(r, 30));
+    try {
+      await sharedHandle[Symbol.asyncDispose]();
+    } catch {
+      // ignore
+    }
+  });
+
+  beforeEach(async () => {
     vi.resetModules();
+    await sharedHandle.db.execute(sql.raw('TRUNCATE settings, skills, agents, projects'));
     projectPath = mkdtempSync(join(tmpdir(), 'tamtam-project-corpus-'));
     mkdirSync(join(projectPath, '.tamtam', 'agents'), { recursive: true });
-    testDb = createTestDb();
     listProjectDocumentsMock = vi.fn().mockReturnValue([]);
     getBranchContextMock = vi.fn().mockReturnValue({ isDefaultBranch: true, defaultBranch: 'master' });
     gitLsTreeSyncMock = vi.fn().mockReturnValue([]);
+    vi.doMock('@/lib/db', () => ({ db: sharedHandle.db, schema }));
   });
 
   afterEach(() => {
-    testDb.sqlite.close();
     rmSync(projectPath, { recursive: true, force: true });
     vi.resetModules();
   });
 
   async function importSubject() {
-    vi.doMock('@/lib/db', () => ({ db: testDb.db, schema }));
     vi.doMock('@/lib/shared/project-documents', () => ({
       listProjectDocuments: listProjectDocumentsMock,
     }));
@@ -101,6 +117,17 @@ describe('collectProjectRetrievalSources', () => {
       gitLsTreeSync: gitLsTreeSyncMock,
       gitShowSync: vi.fn(),
     }));
+    // The real getFileAgentOverrideSync is a stale-while-revalidate cache that
+    // returns null on the first call for a fresh DB row, so warm it up before
+    // collectProjectRetrievalSources reads it via scanFileAgents.
+    const overrides = await import('@/lib/agents/file-agent-overrides');
+    // First sync call kicks off a background refresh; await it via a fresh async read.
+    overrides.getFileAgentOverrideSync('myproject', 'qa');
+    await overrides.getFileAgentOverride('myproject', 'qa');
+    // Trigger a second sync read so the cache is populated for the eventual
+    // scanFileAgents path. The background-refresh promise from the first sync
+    // call has had a microtask to resolve by now.
+    await new Promise((resolve) => setTimeout(resolve, 20));
     return import('@/lib/agents/retrieval/project-corpus');
   }
 
@@ -110,15 +137,15 @@ describe('collectProjectRetrievalSources', () => {
       join(projectPath, '.tamtam', 'agents', 'qa.md'),
       `---\nskillIds: ["skill-from-file"]\n---\n\nRun checks.\n`
     );
-    await testDb.db.insert(schema.skills).values([
+    await sharedHandle.db.insert(schema.skills).values([
       { id: 'skill-from-file', name: 'File Skill', description: '', content: 'from file', createdAt: now, updatedAt: now },
       { id: 'skill-from-override', name: 'Override Skill', description: '', content: 'from override', createdAt: now, updatedAt: now },
     ]).execute();
-    await testDb.db.insert(schema.settings).values({
+    await sharedHandle.db.insert(schema.settings).values({
       key: 'agent_override:myproject:qa',
       value: JSON.stringify({ skillIds: ['skill-from-override'] }),
     }).execute();
-    await testDb.db.insert(schema.projects).values({ name: 'myproject', path: projectPath, enabled: true }).execute();
+    await sharedHandle.db.insert(schema.projects).values({ name: 'myproject', path: projectPath, enabled: true }).execute();
 
     const { collectProjectRetrievalSources } = await importSubject();
     const sources = await collectProjectRetrievalSources('myproject', projectPath);
@@ -134,12 +161,12 @@ describe('collectProjectRetrievalSources', () => {
       join(projectPath, '.tamtam', 'agents', 'qa.md'),
       `---\nskillIds: ["skill-from-file"]\n---\n\nRun checks.\n`
     );
-    await testDb.db.insert(schema.skills).values([
+    await sharedHandle.db.insert(schema.skills).values([
       { id: 'skill-from-db', name: 'DB Skill', description: '', content: 'from db', createdAt: now, updatedAt: now },
       { id: 'skill-from-file', name: 'File Skill', description: '', content: 'from file', createdAt: now, updatedAt: now },
       { id: 'skill-from-other-file-agent', name: 'Other File Skill', description: '', content: 'from other file agent', createdAt: now, updatedAt: now },
     ]).execute();
-    await testDb.db.insert(schema.agents).values({
+    await sharedHandle.db.insert(schema.agents).values({
       id: 'agent-1',
       name: 'qa',
       project: 'myproject',
@@ -159,7 +186,7 @@ describe('collectProjectRetrievalSources', () => {
       join(projectPath, '.tamtam', 'agents', 'docs.md'),
       `---\nskillIds: ["skill-from-other-file-agent"]\n---\n\nSync docs.\n`
     );
-    await testDb.db.insert(schema.projects).values({ name: 'myproject', path: projectPath, enabled: true }).execute();
+    await sharedHandle.db.insert(schema.projects).values({ name: 'myproject', path: projectPath, enabled: true }).execute();
 
     const { collectProjectRetrievalSources } = await importSubject();
     const sources = await collectProjectRetrievalSources('myproject', projectPath);
@@ -182,7 +209,7 @@ describe('collectProjectRetrievalSources', () => {
       return [readmePath, fileAgentPath];
     });
     getBranchContextMock.mockReturnValue({ isDefaultBranch: false, defaultBranch: 'master' });
-    await testDb.db.insert(schema.projects).values({ name: 'myproject', path: projectPath, enabled: true }).execute();
+    await sharedHandle.db.insert(schema.projects).values({ name: 'myproject', path: projectPath, enabled: true }).execute();
 
     const { collectProjectRetrievalSources } = await importSubject();
     const sources = await collectProjectRetrievalSources('myproject', projectPath);

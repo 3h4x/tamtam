@@ -170,7 +170,7 @@ export async function updateRecommendationStatusIfCurrent(
   nextStatus: RecommendationStatus,
 ): Promise<RecommendationRow | null> {
   const now = Date.now() / 1000;
-  const result = await db.update(schema.recommendations)
+  const updated = await db.update(schema.recommendations)
     .set({ status: nextStatus, updatedAt: now })
     .where(
       and(
@@ -179,7 +179,7 @@ export async function updateRecommendationStatusIfCurrent(
         eq(schema.recommendations.status, currentStatus),
       ),
     )
-    .execute();
-  if (!result.rowCount) return null;
+    .returning({ id: schema.recommendations.id });
+  if (updated.length === 0) return null;
   return getRecommendation(project, id);
 }

@@ -1,55 +1,57 @@
-import { describe, it, expect, beforeEach, vi } from 'vitest';
+import { describe, it, expect, beforeAll, beforeEach, afterAll, afterEach, vi } from 'vitest';
 import { NextRequest } from 'next/server';
-import Database from 'better-sqlite3';
-import { eq } from 'drizzle-orm';
-import { drizzle } from 'drizzle-orm/better-sqlite3';
+import { eq, sql } from 'drizzle-orm';
 import * as schema from '@/lib/db/schema';
+import { createTestPgDbEmpty, type TestDbHandle } from '@/__tests__/helpers/test-db';
 
-function createTestDb() {
-  const sqlite = new Database(':memory:');
-  sqlite.pragma('journal_mode = WAL');
-  sqlite.exec(`
+async function applyDdl(handle: TestDbHandle): Promise<void> {
+  // PGlite rejects multi-statement prepared queries, so issue each DDL
+  // separately.
+  await handle.db.execute(sql.raw(`
     CREATE TABLE IF NOT EXISTS agents (
-      id TEXT PRIMARY KEY,
-      name TEXT NOT NULL,
-      project TEXT NOT NULL,
-      skill_ids TEXT NOT NULL DEFAULT '[]',
-      doc_paths TEXT NOT NULL DEFAULT '[]',
-      model TEXT NOT NULL DEFAULT 'normal',
-      prompt TEXT NOT NULL DEFAULT '',
-      schedule TEXT,
-      runner TEXT NOT NULL DEFAULT 'pm2',
-      enabled INTEGER NOT NULL DEFAULT 1,
-      provider TEXT,
-      prerequisite_command TEXT,
-      created_at REAL NOT NULL,
-      updated_at REAL NOT NULL
-    );
+      id text PRIMARY KEY,
+      name text NOT NULL,
+      project text NOT NULL,
+      skill_ids text NOT NULL DEFAULT '[]',
+      doc_paths text NOT NULL DEFAULT '[]',
+      model text NOT NULL DEFAULT 'normal',
+      prompt text NOT NULL DEFAULT '',
+      schedule text,
+      runner text NOT NULL DEFAULT 'pm2',
+      enabled boolean NOT NULL DEFAULT true,
+      provider text,
+      prerequisite_command text,
+      created_at double precision NOT NULL,
+      updated_at double precision NOT NULL
+    )
+  `));
+  await handle.db.execute(sql.raw(`
     CREATE TABLE IF NOT EXISTS recommendations (
-      id TEXT PRIMARY KEY,
-      project TEXT NOT NULL,
-      source_kind TEXT NOT NULL,
-      source_id TEXT,
-      agent_id TEXT,
-      agent_name TEXT,
-      type TEXT NOT NULL,
-      title TEXT NOT NULL,
-      detail TEXT NOT NULL,
-      status TEXT NOT NULL DEFAULT 'open',
-      payload TEXT,
-      created_at REAL NOT NULL,
-      updated_at REAL NOT NULL
-    );
+      id text PRIMARY KEY,
+      project text NOT NULL,
+      source_kind text NOT NULL,
+      source_id text,
+      agent_id text,
+      agent_name text,
+      type text NOT NULL,
+      title text NOT NULL,
+      detail text NOT NULL,
+      status text NOT NULL DEFAULT 'open',
+      payload text,
+      created_at double precision NOT NULL,
+      updated_at double precision NOT NULL
+    )
+  `));
+  await handle.db.execute(sql.raw(`
     CREATE TABLE IF NOT EXISTS settings (
-      key TEXT PRIMARY KEY,
-      value TEXT NOT NULL
-    );
-  `);
-  return { sqlite, db: drizzle(sqlite, { schema }) };
+      key text PRIMARY KEY,
+      value text NOT NULL
+    )
+  `));
 }
 
 describe('/api/projects/by-project/[projectName]/recommendations', () => {
-  let testDb: ReturnType<typeof createTestDb>;
+  let sharedHandle: TestDbHandle;
   let GET: typeof import('@/app/api/projects/by-project/[projectName]/recommendations/route').GET;
   let PATCH: typeof import('@/app/api/projects/by-project/[projectName]/recommendations/route').PATCH;
   let APPLY: typeof import('@/app/api/projects/by-project/[projectName]/recommendations/apply/route').POST;
@@ -62,10 +64,26 @@ describe('/api/projects/by-project/[projectName]/recommendations', () => {
   let setFileAgentOverrideMock: ReturnType<typeof vi.fn>;
   let fileAgentState: Record<string, unknown> | null;
 
+  beforeAll(async () => {
+    sharedHandle = await createTestPgDbEmpty();
+    await applyDdl(sharedHandle);
+  });
+
+  afterAll(async () => {
+    await new Promise((r) => setTimeout(r, 30));
+    try {
+      await sharedHandle[Symbol.asyncDispose]();
+    } catch {
+      // ignore
+    }
+  });
+
   beforeEach(async () => {
+    await sharedHandle.db.execute(sql.raw(
+      'TRUNCATE agents, recommendations, settings',
+    ));
     vi.resetModules();
-    testDb = createTestDb();
-    vi.doMock('@/lib/db', () => ({ db: testDb.db, schema }));
+    vi.doMock('@/lib/db', () => ({ db: sharedHandle.db, schema }));
     installAgentScheduleMock = vi.fn().mockResolvedValue(undefined);
     uninstallAgentScheduleMock = vi.fn().mockResolvedValue(undefined);
     resolveProjectPathMock = vi.fn().mockReturnValue(null);
@@ -96,8 +114,14 @@ describe('/api/projects/by-project/[projectName]/recommendations', () => {
     ({ POST: APPLY } = await import('@/app/api/projects/by-project/[projectName]/recommendations/apply/route'));
   });
 
+  afterEach(async () => {
+    await new Promise((r) => setTimeout(r, 10));
+    vi.resetModules();
+    vi.clearAllMocks();
+  });
+
   it('lists project recommendations newest first with parsed payload', async () => {
-    testDb.db.insert(schema.recommendations).values({
+    await sharedHandle.db.insert(schema.recommendations).values({
       id: 'portal:agent_schedule_backoff:agent-1',
       project: 'portal',
       sourceKind: 'agent:tests',
@@ -111,7 +135,7 @@ describe('/api/projects/by-project/[projectName]/recommendations', () => {
       payload: JSON.stringify({ recommendedSchedule: '8h' }),
       createdAt: 100,
       updatedAt: 200,
-    }).run();
+    });
 
     const res = await GET(new NextRequest('http://test'), { params: Promise.resolve({ projectName: 'portal' }) });
     const data = await res.json();
@@ -121,7 +145,7 @@ describe('/api/projects/by-project/[projectName]/recommendations', () => {
   });
 
   it('updates recommendation status', async () => {
-    testDb.db.insert(schema.recommendations).values({
+    await sharedHandle.db.insert(schema.recommendations).values({
       id: 'rec-1',
       project: 'portal',
       sourceKind: 'agent:tests',
@@ -131,7 +155,7 @@ describe('/api/projects/by-project/[projectName]/recommendations', () => {
       status: 'open',
       createdAt: 100,
       updatedAt: 100,
-    }).run();
+    });
 
     const req = new NextRequest('http://test', {
       method: 'PATCH',
@@ -163,7 +187,7 @@ describe('/api/projects/by-project/[projectName]/recommendations', () => {
   });
 
   it('applies a recommendation through the dedicated server route', async () => {
-    testDb.db.insert(schema.agents).values({
+    await sharedHandle.db.insert(schema.agents).values({
       id: 'agent-1',
       name: 'tests',
       project: 'portal',
@@ -176,8 +200,8 @@ describe('/api/projects/by-project/[projectName]/recommendations', () => {
       enabled: true,
       createdAt: 100,
       updatedAt: 100,
-    }).run();
-    testDb.db.insert(schema.recommendations).values({
+    });
+    await sharedHandle.db.insert(schema.recommendations).values({
       id: 'rec-apply',
       project: 'portal',
       sourceKind: 'agent:tests',
@@ -191,7 +215,7 @@ describe('/api/projects/by-project/[projectName]/recommendations', () => {
       payload: JSON.stringify({ recommendedSchedule: '8h' }),
       createdAt: 100,
       updatedAt: 100,
-    }).run();
+    });
 
     const req = new NextRequest('http://test', {
       method: 'POST',
@@ -203,13 +227,13 @@ describe('/api/projects/by-project/[projectName]/recommendations', () => {
     expect(res.status).toBe(200);
     expect(data.recommendation.status).toBe('applied');
     expect(data.agent.schedule).toBe('8h');
-    const agent = testDb.db.select().from(schema.agents).where(eq(schema.agents.id, 'agent-1')).get();
-    expect(agent?.schedule).toBe('8h');
+    const agentRows = await sharedHandle.db.select().from(schema.agents).where(eq(schema.agents.id, 'agent-1'));
+    expect(agentRows[0]?.schedule).toBe('8h');
     expect(installAgentScheduleMock).toHaveBeenCalledTimes(1);
   });
 
   it('rejects stale recommendations before mutating the agent', async () => {
-    testDb.db.insert(schema.agents).values({
+    await sharedHandle.db.insert(schema.agents).values({
       id: 'agent-1',
       name: 'tests',
       project: 'portal',
@@ -222,8 +246,8 @@ describe('/api/projects/by-project/[projectName]/recommendations', () => {
       enabled: true,
       createdAt: 100,
       updatedAt: 100,
-    }).run();
-    testDb.db.insert(schema.recommendations).values({
+    });
+    await sharedHandle.db.insert(schema.recommendations).values({
       id: 'rec-dismissed',
       project: 'portal',
       sourceKind: 'agent:tests',
@@ -237,7 +261,7 @@ describe('/api/projects/by-project/[projectName]/recommendations', () => {
       payload: JSON.stringify({ recommendedSchedule: '8h' }),
       createdAt: 100,
       updatedAt: 100,
-    }).run();
+    });
 
     const req = new NextRequest('http://test', {
       method: 'POST',
@@ -253,7 +277,7 @@ describe('/api/projects/by-project/[projectName]/recommendations', () => {
   });
 
   it('rolls the agent schedule back if marking the recommendation applied loses the race', async () => {
-    testDb.db.insert(schema.agents).values({
+    await sharedHandle.db.insert(schema.agents).values({
       id: 'agent-1',
       name: 'tests',
       project: 'portal',
@@ -266,8 +290,8 @@ describe('/api/projects/by-project/[projectName]/recommendations', () => {
       enabled: true,
       createdAt: 100,
       updatedAt: 100,
-    }).run();
-    testDb.db.insert(schema.recommendations).values({
+    });
+    await sharedHandle.db.insert(schema.recommendations).values({
       id: 'rec-race',
       project: 'portal',
       sourceKind: 'agent:tests',
@@ -281,7 +305,7 @@ describe('/api/projects/by-project/[projectName]/recommendations', () => {
       payload: JSON.stringify({ recommendedSchedule: '8h' }),
       createdAt: 100,
       updatedAt: 100,
-    }).run();
+    });
 
     const recommendationsMod = await import('@/lib/recommendations/recommendations');
     const originalUpdateIfCurrent = recommendationsMod.updateRecommendationStatusIfCurrent;
@@ -303,16 +327,16 @@ describe('/api/projects/by-project/[projectName]/recommendations', () => {
 
     expect(res.status).toBe(409);
     expect(data.detail).toContain('already dismissed');
-    const agent = testDb.db.select().from(schema.agents).where(eq(schema.agents.id, 'agent-1')).get();
-    expect(agent?.schedule).toBe('1h');
-    const recommendation = testDb.db.select().from(schema.recommendations).where(eq(schema.recommendations.id, 'rec-race')).get();
-    expect(recommendation?.status).toBe('dismissed');
+    const agentRows = await sharedHandle.db.select().from(schema.agents).where(eq(schema.agents.id, 'agent-1'));
+    expect(agentRows[0]?.schedule).toBe('1h');
+    const recRows = await sharedHandle.db.select().from(schema.recommendations).where(eq(schema.recommendations.id, 'rec-race'));
+    expect(recRows[0]?.status).toBe('dismissed');
     expect(installAgentScheduleMock).toHaveBeenCalledTimes(2);
     raceSpy.mockRestore();
   });
 
   it('fails closed and rolls a DB agent schedule back when scheduler sync throws', async () => {
-    testDb.db.insert(schema.agents).values({
+    await sharedHandle.db.insert(schema.agents).values({
       id: 'agent-1',
       name: 'tests',
       project: 'portal',
@@ -325,8 +349,8 @@ describe('/api/projects/by-project/[projectName]/recommendations', () => {
       enabled: true,
       createdAt: 100,
       updatedAt: 100,
-    }).run();
-    testDb.db.insert(schema.recommendations).values({
+    });
+    await sharedHandle.db.insert(schema.recommendations).values({
       id: 'rec-scheduler-db-fail',
       project: 'portal',
       sourceKind: 'agent:tests',
@@ -340,7 +364,7 @@ describe('/api/projects/by-project/[projectName]/recommendations', () => {
       payload: JSON.stringify({ recommendedSchedule: '8h' }),
       createdAt: 100,
       updatedAt: 100,
-    }).run();
+    });
     installAgentScheduleMock.mockRejectedValueOnce(new Error('scheduler boom'));
 
     const req = new NextRequest('http://test', {
@@ -352,10 +376,10 @@ describe('/api/projects/by-project/[projectName]/recommendations', () => {
 
     expect(res.status).toBe(500);
     expect(data.detail).toContain('Failed to update live agent schedule');
-    const agent = testDb.db.select().from(schema.agents).where(eq(schema.agents.id, 'agent-1')).get();
-    expect(agent?.schedule).toBe('1h');
-    const recommendation = testDb.db.select().from(schema.recommendations).where(eq(schema.recommendations.id, 'rec-scheduler-db-fail')).get();
-    expect(recommendation?.status).toBe('open');
+    const agentRows = await sharedHandle.db.select().from(schema.agents).where(eq(schema.agents.id, 'agent-1'));
+    expect(agentRows[0]?.schedule).toBe('1h');
+    const recRows = await sharedHandle.db.select().from(schema.recommendations).where(eq(schema.recommendations.id, 'rec-scheduler-db-fail'));
+    expect(recRows[0]?.status).toBe('open');
     expect(installAgentScheduleMock).toHaveBeenCalledTimes(2);
   });
 
@@ -379,7 +403,7 @@ describe('/api/projects/by-project/[projectName]/recommendations', () => {
       source: 'file',
       filePath: '/tmp/portal/.tamtam/agents/tests.md',
     };
-    testDb.db.insert(schema.recommendations).values({
+    await sharedHandle.db.insert(schema.recommendations).values({
       id: 'rec-scheduler-file-fail',
       project: 'portal',
       sourceKind: 'agent:tests',
@@ -393,7 +417,7 @@ describe('/api/projects/by-project/[projectName]/recommendations', () => {
       payload: JSON.stringify({ recommendedSchedule: '8h' }),
       createdAt: 100,
       updatedAt: 100,
-    }).run();
+    });
     installAgentScheduleMock.mockRejectedValueOnce(new Error('scheduler boom'));
 
     const req = new NextRequest('http://test', {
@@ -406,15 +430,15 @@ describe('/api/projects/by-project/[projectName]/recommendations', () => {
     expect(res.status).toBe(500);
     expect(data.detail).toContain('Failed to update live agent schedule');
     expect(fileAgentState?.schedule).toBe('1h');
-    const recommendation = testDb.db.select().from(schema.recommendations).where(eq(schema.recommendations.id, 'rec-scheduler-file-fail')).get();
-    expect(recommendation?.status).toBe('open');
+    const recRows = await sharedHandle.db.select().from(schema.recommendations).where(eq(schema.recommendations.id, 'rec-scheduler-file-fail'));
+    expect(recRows[0]?.status).toBe('open');
     expect(setFileAgentOverrideMock).toHaveBeenNthCalledWith(1, 'portal', 'tests', { schedule: '8h' });
     expect(setFileAgentOverrideMock).toHaveBeenNthCalledWith(2, 'portal', 'tests', { schedule: '1h' });
     expect(installAgentScheduleMock).toHaveBeenCalledTimes(2);
   });
 
   it('rejects recommendations whose target agent belongs to a different project', async () => {
-    testDb.db.insert(schema.agents).values({
+    await sharedHandle.db.insert(schema.agents).values({
       id: 'agent-other',
       name: 'tests',
       project: 'other-project',
@@ -427,8 +451,8 @@ describe('/api/projects/by-project/[projectName]/recommendations', () => {
       enabled: true,
       createdAt: 100,
       updatedAt: 100,
-    }).run();
-    testDb.db.insert(schema.recommendations).values({
+    });
+    await sharedHandle.db.insert(schema.recommendations).values({
       id: 'rec-cross-project',
       project: 'portal',
       sourceKind: 'agent:tests',
@@ -442,7 +466,7 @@ describe('/api/projects/by-project/[projectName]/recommendations', () => {
       payload: JSON.stringify({ recommendedSchedule: '8h' }),
       createdAt: 100,
       updatedAt: 100,
-    }).run();
+    });
 
     const req = new NextRequest('http://test', {
       method: 'POST',
@@ -453,10 +477,10 @@ describe('/api/projects/by-project/[projectName]/recommendations', () => {
 
     expect(res.status).toBe(409);
     expect(data.detail).toContain('different project');
-    const agent = testDb.db.select().from(schema.agents).where(eq(schema.agents.id, 'agent-other')).get();
-    expect(agent?.schedule).toBe('1h');
-    const recommendation = testDb.db.select().from(schema.recommendations).where(eq(schema.recommendations.id, 'rec-cross-project')).get();
-    expect(recommendation?.status).toBe('open');
+    const agentRows = await sharedHandle.db.select().from(schema.agents).where(eq(schema.agents.id, 'agent-other'));
+    expect(agentRows[0]?.schedule).toBe('1h');
+    const recRows = await sharedHandle.db.select().from(schema.recommendations).where(eq(schema.recommendations.id, 'rec-cross-project'));
+    expect(recRows[0]?.status).toBe('open');
     expect(installAgentScheduleMock).not.toHaveBeenCalled();
     expect(uninstallAgentScheduleMock).not.toHaveBeenCalled();
   });

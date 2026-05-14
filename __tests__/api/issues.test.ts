@@ -1,35 +1,48 @@
-import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
+import { describe, it, expect, beforeAll, beforeEach, afterAll, afterEach, vi } from 'vitest';
 import { NextRequest } from 'next/server';
-import Database from 'better-sqlite3';
-import { drizzle } from 'drizzle-orm/better-sqlite3';
+import { sql, eq } from 'drizzle-orm';
 import * as schema from '@/lib/db/schema';
+import { createTestPgDbEmpty, type TestDbHandle } from '@/__tests__/helpers/test-db';
 
-function createTestDb() {
-  const sqlite = new Database(':memory:');
-  sqlite.exec(`
+let sharedHandle: TestDbHandle;
+
+async function applyDdl(handle: TestDbHandle): Promise<void> {
+  await handle.db.execute(sql.raw(`
     CREATE TABLE IF NOT EXISTS gh_issues_cache (
-      project TEXT PRIMARY KEY,
-      repo TEXT NOT NULL,
-      prs TEXT NOT NULL DEFAULT '[]',
-      issues TEXT NOT NULL DEFAULT '[]',
-      fetched_at REAL NOT NULL
-    );
-  `);
-  return { sqlite, db: drizzle(sqlite, { schema }) };
+      project text PRIMARY KEY,
+      repo text NOT NULL,
+      prs text NOT NULL DEFAULT '[]',
+      issues text NOT NULL DEFAULT '[]',
+      fetched_at double precision NOT NULL
+    )
+  `));
 }
+
+beforeAll(async () => {
+  sharedHandle = await createTestPgDbEmpty();
+  await applyDdl(sharedHandle);
+});
+
+afterAll(async () => {
+  await new Promise((r) => setTimeout(r, 30));
+  try {
+    await sharedHandle[Symbol.asyncDispose]();
+  } catch {
+    // ignore
+  }
+});
 
 describe('GET /api/projects/by-project/[projectName]/issues', () => {
   let GET: any;
-  let POST: any;
   let execMock: ReturnType<typeof vi.fn>;
   let resolveProjectPathMock: ReturnType<typeof vi.fn>;
   let loadFileConfigMock: ReturnType<typeof vi.fn>;
   let getSettingsMock: ReturnType<typeof vi.fn>;
-  let testDb: ReturnType<typeof createTestDb>;
 
   beforeEach(async () => {
     vi.resetModules();
-    testDb = createTestDb();
+    await sharedHandle.db.execute(sql.raw('TRUNCATE gh_issues_cache'));
+
     execMock = vi.fn();
     resolveProjectPathMock = vi.fn().mockReturnValue('/path/to/proj');
     loadFileConfigMock = vi.fn().mockReturnValue(null);
@@ -40,7 +53,7 @@ describe('GET /api/projects/by-project/[projectName]/issues', () => {
       clearProjectDataCache: vi.fn(),
     }));
     vi.doMock('@/lib/shared/shell', () => ({ exec: execMock }));
-    vi.doMock('@/lib/db', () => ({ db: testDb.db, schema }));
+    vi.doMock('@/lib/db', () => ({ db: sharedHandle.db, schema }));
     vi.doMock('@/lib/skills/tamtam-file-config', () => ({ loadFileConfig: loadFileConfigMock }));
     vi.doMock('@/lib/shared/config', async () => {
       const actual = await vi.importActual<typeof import('@/lib/shared/config')>('@/lib/shared/config');
@@ -52,12 +65,12 @@ describe('GET /api/projects/by-project/[projectName]/issues', () => {
 
     const mod = await import('@/app/api/projects/by-project/[projectName]/issues/route');
     GET = mod.GET;
-    POST = mod.POST;
   });
 
-  afterEach(() => {
+  afterEach(async () => {
+    await new Promise((r) => setTimeout(r, 10));
     vi.resetModules();
-    testDb.sqlite.close();
+    vi.clearAllMocks();
   });
 
   function resp(exitCode: number, stdout = '', stderr = '') {
@@ -73,13 +86,13 @@ describe('GET /api/projects/by-project/[projectName]/issues', () => {
 
   it('returns cached data when cache is fresh', async () => {
     const now = Date.now() / 1000;
-    testDb.db.insert(schema.ghIssuesCache).values({
+    await sharedHandle.db.insert(schema.ghIssuesCache).values({
       project: 'myproj',
       repo: 'owner/myproj',
       prs: JSON.stringify([{ number: 1, title: 'PR One' }]),
       issues: JSON.stringify([{ number: 2, title: 'Bug One' }]),
-      fetchedAt: now - 10, // 10 seconds ago, within 5-min TTL
-    }).run();
+      fetchedAt: now - 10,
+    });
 
     const req = new NextRequest('http://localhost/api/projects/by-project/myproj/issues');
     const res = await GET(req, { params: Promise.resolve({ projectName: 'myproj' }) });
@@ -94,14 +107,14 @@ describe('GET /api/projects/by-project/[projectName]/issues', () => {
   });
 
   it('fetches from gh when cache is stale', async () => {
-    const staleTime = Date.now() / 1000 - 400; // 400s ago, past 300s TTL
-    testDb.db.insert(schema.ghIssuesCache).values({
+    const staleTime = Date.now() / 1000 - 400;
+    await sharedHandle.db.insert(schema.ghIssuesCache).values({
       project: 'myproj',
       repo: 'owner/myproj',
       prs: '[]',
       issues: '[]',
       fetchedAt: staleTime,
-    }).run();
+    });
 
     execMock
       .mockImplementationOnce(() => resp(0, 'https://github.com/owner/myproj.git'))
@@ -119,13 +132,13 @@ describe('GET /api/projects/by-project/[projectName]/issues', () => {
 
   it('bypasses cache when refresh=1', async () => {
     const now = Date.now() / 1000;
-    testDb.db.insert(schema.ghIssuesCache).values({
+    await sharedHandle.db.insert(schema.ghIssuesCache).values({
       project: 'myproj',
       repo: 'owner/myproj',
       prs: JSON.stringify([{ number: 1, title: 'Old PR' }]),
       issues: '[]',
       fetchedAt: now - 10,
-    }).run();
+    });
 
     execMock
       .mockImplementationOnce(() => resp(0, 'git@github.com:owner/myproj.git'))
@@ -174,16 +187,16 @@ describe('GET /api/projects/by-project/[projectName]/issues', () => {
     const req = new NextRequest('http://localhost/api/projects/by-project/myproj/issues');
     await GET(req, { params: Promise.resolve({ projectName: 'myproj' }) });
 
-    const row = testDb.db.select().from(schema.ghIssuesCache)
-      .where(require('drizzle-orm').eq(schema.ghIssuesCache.project, 'myproj'))
-      .get();
+    const rows = await sharedHandle.db.select().from(schema.ghIssuesCache)
+      .where(eq(schema.ghIssuesCache.project, 'myproj'));
+    const row = rows[0];
     expect(row).toBeTruthy();
     expect(JSON.parse(row!.prs)).toHaveLength(1);
   });
 
   it('keeps only globally trusted issue authors when trusted_only=1', async () => {
     getSettingsMock.mockReturnValue({ trusted_github_users: ['trusted-user'], github_owner: '' });
-    testDb.db.insert(schema.ghIssuesCache).values({
+    await sharedHandle.db.insert(schema.ghIssuesCache).values({
       project: 'myproj',
       repo: 'owner/myproj',
       prs: JSON.stringify([{ number: 11, title: 'PR One' }]),
@@ -192,7 +205,7 @@ describe('GET /api/projects/by-project/[projectName]/issues', () => {
         { number: 2, title: 'Drop', author: { login: 'other-user' }, labels: [], assignees: [] },
       ]),
       fetchedAt: Date.now() / 1000,
-    }).run();
+    });
 
     const req = new NextRequest('http://localhost/api/projects/by-project/myproj/issues?trusted_only=1');
     const res = await GET(req, { params: Promise.resolve({ projectName: 'myproj' }) });
@@ -204,7 +217,7 @@ describe('GET /api/projects/by-project/[projectName]/issues', () => {
 
   it('keeps project safe_users issue authors when trusted_only=1', async () => {
     loadFileConfigMock.mockReturnValue({ safe_users: ['repo-owner'] });
-    testDb.db.insert(schema.ghIssuesCache).values({
+    await sharedHandle.db.insert(schema.ghIssuesCache).values({
       project: 'myproj',
       repo: 'owner/myproj',
       prs: '[]',
@@ -213,7 +226,7 @@ describe('GET /api/projects/by-project/[projectName]/issues', () => {
         { number: 2, title: 'Drop', author: { login: 'outsider' }, labels: [], assignees: [] },
       ]),
       fetchedAt: Date.now() / 1000,
-    }).run();
+    });
 
     const req = new NextRequest('http://localhost/api/projects/by-project/myproj/issues?trusted_only=1');
     const res = await GET(req, { params: Promise.resolve({ projectName: 'myproj' }) });
@@ -225,7 +238,7 @@ describe('GET /api/projects/by-project/[projectName]/issues', () => {
   it('unions global trusted_github_users with project safe_users when trusted_only=1', async () => {
     getSettingsMock.mockReturnValue({ trusted_github_users: ['octocat'], github_owner: '' });
     loadFileConfigMock.mockReturnValue({ safe_users: ['repo-owner'] });
-    testDb.db.insert(schema.ghIssuesCache).values({
+    await sharedHandle.db.insert(schema.ghIssuesCache).values({
       project: 'myproj',
       repo: 'owner/myproj',
       prs: '[]',
@@ -235,7 +248,7 @@ describe('GET /api/projects/by-project/[projectName]/issues', () => {
         { number: 3, title: 'Drop', author: { login: 'outsider' }, labels: [], assignees: [] },
       ]),
       fetchedAt: Date.now() / 1000,
-    }).run();
+    });
 
     const req = new NextRequest('http://localhost/api/projects/by-project/myproj/issues?trusted_only=1');
     const res = await GET(req, { params: Promise.resolve({ projectName: 'myproj' }) });
@@ -244,7 +257,7 @@ describe('GET /api/projects/by-project/[projectName]/issues', () => {
   });
 
   it('returns no issues when neither global nor project allowlists trust any author', async () => {
-    testDb.db.insert(schema.ghIssuesCache).values({
+    await sharedHandle.db.insert(schema.ghIssuesCache).values({
       project: 'myproj',
       repo: 'owner/myproj',
       prs: '[]',
@@ -252,7 +265,7 @@ describe('GET /api/projects/by-project/[projectName]/issues', () => {
         { number: 1, title: 'Drop', author: { login: 'outsider' }, labels: [], assignees: [] },
       ]),
       fetchedAt: Date.now() / 1000,
-    }).run();
+    });
 
     const req = new NextRequest('http://localhost/api/projects/by-project/myproj/issues?trusted_only=1');
     const res = await GET(req, { params: Promise.resolve({ projectName: 'myproj' }) });
@@ -263,7 +276,7 @@ describe('GET /api/projects/by-project/[projectName]/issues', () => {
   it('returns no issues when both allowlists are empty', async () => {
     getSettingsMock.mockReturnValue({ trusted_github_users: [], github_owner: '' });
     loadFileConfigMock.mockReturnValue({ safe_users: [] });
-    testDb.db.insert(schema.ghIssuesCache).values({
+    await sharedHandle.db.insert(schema.ghIssuesCache).values({
       project: 'myproj',
       repo: 'owner/myproj',
       prs: '[]',
@@ -271,7 +284,7 @@ describe('GET /api/projects/by-project/[projectName]/issues', () => {
         { number: 1, title: 'Drop', author: { login: 'outsider' }, labels: [], assignees: [] },
       ]),
       fetchedAt: Date.now() / 1000,
-    }).run();
+    });
 
     const req = new NextRequest('http://localhost/api/projects/by-project/myproj/issues?trusted_only=1');
     const res = await GET(req, { params: Promise.resolve({ projectName: 'myproj' }) });
@@ -281,7 +294,7 @@ describe('GET /api/projects/by-project/[projectName]/issues', () => {
 
   it('matches trusted authors case-insensitively when trusted_only=1', async () => {
     getSettingsMock.mockReturnValue({ trusted_github_users: ['Trusted-User'], github_owner: '' });
-    testDb.db.insert(schema.ghIssuesCache).values({
+    await sharedHandle.db.insert(schema.ghIssuesCache).values({
       project: 'myproj',
       repo: 'owner/myproj',
       prs: '[]',
@@ -289,7 +302,7 @@ describe('GET /api/projects/by-project/[projectName]/issues', () => {
         { number: 1, title: 'Keep', author: { login: 'trusted-user' }, labels: [], assignees: [] },
       ]),
       fetchedAt: Date.now() / 1000,
-    }).run();
+    });
 
     const req = new NextRequest('http://localhost/api/projects/by-project/myproj/issues?trusted_only=1');
     const res = await GET(req, { params: Promise.resolve({ projectName: 'myproj' }) });
@@ -299,7 +312,7 @@ describe('GET /api/projects/by-project/[projectName]/issues', () => {
 
   it('leaves prs untouched when trusted_only=1', async () => {
     getSettingsMock.mockReturnValue({ trusted_github_users: [], github_owner: '' });
-    testDb.db.insert(schema.ghIssuesCache).values({
+    await sharedHandle.db.insert(schema.ghIssuesCache).values({
       project: 'myproj',
       repo: 'owner/myproj',
       prs: JSON.stringify([
@@ -309,7 +322,7 @@ describe('GET /api/projects/by-project/[projectName]/issues', () => {
         { number: 1, title: 'Drop', author: { login: 'outsider' }, labels: [], assignees: [] },
       ]),
       fetchedAt: Date.now() / 1000,
-    }).run();
+    });
 
     const req = new NextRequest('http://localhost/api/projects/by-project/myproj/issues?trusted_only=1');
     const res = await GET(req, { params: Promise.resolve({ projectName: 'myproj' }) });
@@ -320,13 +333,13 @@ describe('GET /api/projects/by-project/[projectName]/issues', () => {
   });
 
   it('strips body and heavy fields by default (slim)', async () => {
-    testDb.db.insert(schema.ghIssuesCache).values({
+    await sharedHandle.db.insert(schema.ghIssuesCache).values({
       project: 'myproj',
       repo: 'owner/myproj',
       prs: JSON.stringify([{ number: 5, title: 'My PR', headRefName: 'feat/x', isDraft: false, labels: [{ id: '1', name: 'bug', description: '', color: 'red' }], author: { login: 'me' }, body: 'big pr body' }]),
       issues: JSON.stringify([{ number: 3, title: 'My Issue', labels: [{ id: '2', name: 'enhancement', description: '', color: 'blue' }], author: { login: 'me' }, body: 'long issue body', assignees: [] }]),
       fetchedAt: Date.now() / 1000,
-    }).run();
+    });
 
     const req = new NextRequest('http://localhost/api/projects/by-project/myproj/issues');
     const res = await GET(req, { params: Promise.resolve({ projectName: 'myproj' }) });
@@ -346,13 +359,13 @@ describe('GET /api/projects/by-project/[projectName]/issues', () => {
   });
 
   it('returns full issue data when full=1', async () => {
-    testDb.db.insert(schema.ghIssuesCache).values({
+    await sharedHandle.db.insert(schema.ghIssuesCache).values({
       project: 'myproj',
       repo: 'owner/myproj',
       prs: '[]',
       issues: JSON.stringify([{ number: 3, title: 'My Issue', labels: [], author: { login: 'me' }, body: 'long issue body', assignees: [] }]),
       fetchedAt: Date.now() / 1000,
-    }).run();
+    });
 
     const req = new NextRequest('http://localhost/api/projects/by-project/myproj/issues?full=1');
     const res = await GET(req, { params: Promise.resolve({ projectName: 'myproj' }) });
@@ -367,11 +380,11 @@ describe('POST /api/projects/by-project/[projectName]/issues', () => {
   let POST: any;
   let execMock: ReturnType<typeof vi.fn>;
   let resolveProjectPathMock: ReturnType<typeof vi.fn>;
-  let testDb: ReturnType<typeof createTestDb>;
 
   beforeEach(async () => {
     vi.resetModules();
-    testDb = createTestDb();
+    await sharedHandle.db.execute(sql.raw('TRUNCATE gh_issues_cache'));
+
     execMock = vi.fn();
     resolveProjectPathMock = vi.fn().mockReturnValue('/path/to/proj');
 
@@ -380,15 +393,16 @@ describe('POST /api/projects/by-project/[projectName]/issues', () => {
       clearProjectDataCache: vi.fn(),
     }));
     vi.doMock('@/lib/shared/shell', () => ({ exec: execMock }));
-    vi.doMock('@/lib/db', () => ({ db: testDb.db, schema }));
+    vi.doMock('@/lib/db', () => ({ db: sharedHandle.db, schema }));
 
     const mod = await import('@/app/api/projects/by-project/[projectName]/issues/route');
     POST = mod.POST;
   });
 
-  afterEach(() => {
+  afterEach(async () => {
+    await new Promise((r) => setTimeout(r, 10));
     vi.resetModules();
-    testDb.sqlite.close();
+    vi.clearAllMocks();
   });
 
   function resp(exitCode: number, stdout = '', stderr = '') {
@@ -434,7 +448,6 @@ describe('POST /api/projects/by-project/[projectName]/issues', () => {
     execMock
       .mockImplementationOnce(() => resp(0, 'https://github.com/owner/myproj.git')) // git remote get-url
       .mockImplementationOnce(() => resp(0, '')) // gh pr merge
-      // Post-merge cleanup chain (checkout back to main + pull):
       .mockImplementationOnce(() => resp(0, 'refs/remotes/origin/main\n')) // symbolic-ref
       .mockImplementationOnce(() => resp(0, 'fix/foo\n')) // branch --show-current
       .mockImplementationOnce(() => resp(0, '')) // status --porcelain (clean)
@@ -532,13 +545,13 @@ describe('POST /api/projects/by-project/[projectName]/issues', () => {
   });
 
   it('invalidates cache after successful merge', async () => {
-    testDb.db.insert(schema.ghIssuesCache).values({
+    await sharedHandle.db.insert(schema.ghIssuesCache).values({
       project: 'myproj',
       repo: 'owner/myproj',
       prs: '[]',
       issues: '[]',
       fetchedAt: Date.now() / 1000,
-    }).run();
+    });
 
     execMock
       .mockImplementationOnce(() => resp(0, 'https://github.com/owner/myproj.git'))
@@ -546,20 +559,19 @@ describe('POST /api/projects/by-project/[projectName]/issues', () => {
 
     await POST(makeReq({ prNumber: 1, action: 'merge' }), { params: Promise.resolve({ projectName: 'myproj' }) });
 
-    const row = testDb.db.select().from(schema.ghIssuesCache)
-      .where(require('drizzle-orm').eq(schema.ghIssuesCache.project, 'myproj'))
-      .get();
-    expect(row).toBeUndefined();
+    const rows = await sharedHandle.db.select().from(schema.ghIssuesCache)
+      .where(eq(schema.ghIssuesCache.project, 'myproj'));
+    expect(rows.length).toBe(0);
   });
 
   it('invalidates cache after successful approve', async () => {
-    testDb.db.insert(schema.ghIssuesCache).values({
+    await sharedHandle.db.insert(schema.ghIssuesCache).values({
       project: 'myproj',
       repo: 'owner/myproj',
       prs: '[]',
       issues: '[]',
       fetchedAt: Date.now() / 1000,
-    }).run();
+    });
 
     execMock
       .mockImplementationOnce(() => resp(0, 'https://github.com/owner/myproj.git'))
@@ -567,10 +579,9 @@ describe('POST /api/projects/by-project/[projectName]/issues', () => {
 
     await POST(makeReq({ prNumber: 2, action: 'approve' }), { params: Promise.resolve({ projectName: 'myproj' }) });
 
-    const row = testDb.db.select().from(schema.ghIssuesCache)
-      .where(require('drizzle-orm').eq(schema.ghIssuesCache.project, 'myproj'))
-      .get();
-    expect(row).toBeUndefined();
+    const rows = await sharedHandle.db.select().from(schema.ghIssuesCache)
+      .where(eq(schema.ghIssuesCache.project, 'myproj'));
+    expect(rows.length).toBe(0);
   });
 
   it('does not fall back to --auto when merge fails with unrelated error', async () => {

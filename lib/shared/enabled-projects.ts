@@ -1,4 +1,3 @@
-import { eq } from 'drizzle-orm';
 import { db, schema } from '@/lib/db';
 
 type ProjectRow = typeof schema.projects.$inferSelect;
@@ -38,6 +37,18 @@ function _getCachedRows(): ProjectRow[] {
 
 export function clearProjectsCache(): void {
   _projectsCache = null;
+}
+
+// Test-only: awaitable, blocking refresh so callers can prime the cache
+// without polling. Production code keeps the lazy fire-and-forget path.
+export async function refreshProjectsCacheSync(): Promise<void> {
+  const wasRefreshing = _projectsRefreshing;
+  _projectsRefreshing = false;
+  try {
+    await _doProjectsRefresh();
+  } finally {
+    if (wasRefreshing) _projectsRefreshing = true;
+  }
 }
 
 function normalizeRow(row: ProjectRow): EnabledProject {

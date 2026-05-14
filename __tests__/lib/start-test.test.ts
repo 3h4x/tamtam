@@ -51,48 +51,48 @@ describe('detectTestCommand', () => {
       probeJobStatus: vi.fn(), updateJob: vi.fn(), markDone: vi.fn(),
     }));
     const mod = await import('@/lib/pipeline/start-test');
-    expect(mod.detectTestCommand(projDir, 'myproj')).toBe('custom-test-runner');
+    await expect(mod.detectTestCommand(projDir, 'myproj')).resolves.toBe('custom-test-runner');
   });
 
-  it('detects pnpm test when pnpm-lock.yaml exists alongside package.json with test script', () => {
+  it('detects pnpm test when pnpm-lock.yaml exists alongside package.json with test script', async () => {
     writeFileSync(join(projDir, 'package.json'), JSON.stringify({ scripts: { test: 'vitest' } }));
     writeFileSync(join(projDir, 'pnpm-lock.yaml'), '');
-    expect(detectTestCommand(projDir)).toBe('pnpm test');
+    await expect(detectTestCommand(projDir)).resolves.toBe('pnpm test');
   });
 
-  it('detects npm test when no pnpm-lock.yaml', () => {
+  it('detects npm test when no pnpm-lock.yaml', async () => {
     writeFileSync(join(projDir, 'package.json'), JSON.stringify({ scripts: { test: 'jest' } }));
-    expect(detectTestCommand(projDir)).toBe('npm test');
+    await expect(detectTestCommand(projDir)).resolves.toBe('npm test');
   });
 
-  it('returns null when package.json has no test script', () => {
+  it('returns null when package.json has no test script', async () => {
     writeFileSync(join(projDir, 'package.json'), JSON.stringify({ scripts: { build: 'tsc' } }));
-    expect(detectTestCommand(projDir)).toBeNull();
+    await expect(detectTestCommand(projDir)).resolves.toBeNull();
   });
 
-  it('detects pytest when pyproject.toml exists', () => {
+  it('detects pytest when pyproject.toml exists', async () => {
     writeFileSync(join(projDir, 'pyproject.toml'), '[tool.pytest]');
-    expect(detectTestCommand(projDir)).toBe('python3 -m pytest');
+    await expect(detectTestCommand(projDir)).resolves.toBe('python3 -m pytest');
   });
 
-  it('detects pytest when requirements.txt exists (takes priority over Makefile)', () => {
+  it('detects pytest when requirements.txt exists (takes priority over Makefile)', async () => {
     writeFileSync(join(projDir, 'requirements.txt'), 'pytest');
-    expect(detectTestCommand(projDir)).toBe('python3 -m pytest');
+    await expect(detectTestCommand(projDir)).resolves.toBe('python3 -m pytest');
   });
 
-  it('detects forge test when foundry.toml exists', () => {
+  it('detects forge test when foundry.toml exists', async () => {
     writeFileSync(join(projDir, 'foundry.toml'), '[profile.default]');
-    expect(detectTestCommand(projDir)).toBe('forge test');
+    await expect(detectTestCommand(projDir)).resolves.toBe('forge test');
   });
 
-  it('detects cargo test when Cargo.toml exists', () => {
+  it('detects cargo test when Cargo.toml exists', async () => {
     writeFileSync(join(projDir, 'Cargo.toml'), '[package]');
-    expect(detectTestCommand(projDir)).toBe('cargo test');
+    await expect(detectTestCommand(projDir)).resolves.toBe('cargo test');
   });
 
-  it('detects go test when go.mod exists', () => {
+  it('detects go test when go.mod exists', async () => {
     writeFileSync(join(projDir, 'go.mod'), 'module example.com/foo');
-    expect(detectTestCommand(projDir)).toBe('go test ./...');
+    await expect(detectTestCommand(projDir)).resolves.toBe('go test ./...');
   });
 
   it('detects swift test when Package.swift exists and xcode-select succeeds', async () => {
@@ -112,7 +112,7 @@ describe('detectTestCommand', () => {
     }));
     const mod = await import('@/lib/pipeline/start-test');
     writeFileSync(join(projDir, 'Package.swift'), '// swift-tools-version:5.5');
-    expect(mod.detectTestCommand(projDir)).toBe('swift test');
+    await expect(mod.detectTestCommand(projDir)).resolves.toBe('swift test');
   });
 
   it('returns null when Package.swift exists but xcode-select is not configured', async () => {
@@ -132,21 +132,21 @@ describe('detectTestCommand', () => {
     }));
     const mod = await import('@/lib/pipeline/start-test');
     writeFileSync(join(projDir, 'Package.swift'), '// swift-tools-version:5.5');
-    expect(mod.detectTestCommand(projDir)).toBeNull();
+    await expect(mod.detectTestCommand(projDir)).resolves.toBeNull();
   });
 
-  it('detects make test when Makefile has a test target', () => {
+  it('detects make test when Makefile has a test target', async () => {
     writeFileSync(join(projDir, 'Makefile'), 'test:\n\techo running tests\n');
-    expect(detectTestCommand(projDir)).toBe('make test');
+    await expect(detectTestCommand(projDir)).resolves.toBe('make test');
   });
 
-  it('returns null when Makefile exists but has no test target', () => {
+  it('returns null when Makefile exists but has no test target', async () => {
     writeFileSync(join(projDir, 'Makefile'), 'build:\n\tmake build\n');
-    expect(detectTestCommand(projDir)).toBeNull();
+    await expect(detectTestCommand(projDir)).resolves.toBeNull();
   });
 
-  it('returns null for empty directory', () => {
-    expect(detectTestCommand(projDir)).toBeNull();
+  it('returns null for empty directory', async () => {
+    await expect(detectTestCommand(projDir)).resolves.toBeNull();
   });
 
   it('returns null when tests_disabled=true for the project, even if a test file exists', async () => {
@@ -163,6 +163,6 @@ describe('detectTestCommand', () => {
     const mod = await import('@/lib/pipeline/start-test');
     writeFileSync(join(projDir, 'package.json'), JSON.stringify({ scripts: { test: 'vitest' } }));
     writeFileSync(join(projDir, 'pnpm-lock.yaml'), '');
-    expect(mod.detectTestCommand(projDir, 'myproj')).toBeNull();
+    await expect(mod.detectTestCommand(projDir, 'myproj')).resolves.toBeNull();
   });
 });

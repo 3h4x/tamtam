@@ -1,90 +1,178 @@
-import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
-import Database from 'better-sqlite3';
-import { drizzle } from 'drizzle-orm/better-sqlite3';
+import { describe, it, expect, beforeAll, beforeEach, afterAll, afterEach, vi } from 'vitest';
+import { sql } from 'drizzle-orm';
 import * as schema from '@/lib/db/schema';
 import type { JobData } from '@/lib/jobs/job-storage';
 import { writeFileSync, mkdtempSync, rmSync } from 'fs';
 import { join } from 'path';
 import { tmpdir } from 'os';
+import { createTestPgDbEmpty, type TestDbHandle } from '@/__tests__/helpers/test-db';
 
-function createTestDb() {
-  const sqlite = new Database(':memory:');
-  sqlite.pragma('journal_mode = WAL');
-  sqlite.pragma('foreign_keys = ON');
-  sqlite.exec(`
+// Single PGlite instance + single module-load shared across both describe
+// blocks. Booting PGlite is ~200ms; doing it twice (one per describe) is
+// pure overhead. The two describes use stable mock fn references that get
+// reconfigured per-describe in their respective beforeAll hooks.
+let sharedHandle: TestDbHandle;
+const startMarkDodMock = vi.fn();
+const startProjectPushMock = vi.fn();
+const startProjectCommitMock = vi.fn();
+const startFixFromJobMock = vi.fn();
+const startProjectReviewMock = vi.fn();
+const startProjectTestMock = vi.fn();
+const startFixCiMock = vi.fn();
+const getProjectTestConfigMock = vi.fn();
+const notifyMock = vi.fn();
+const releaseLockMock = vi.fn();
+
+let markDoneFn: typeof import('@/lib/jobs/job-storage').markDone;
+let storageCache: Map<string, JobData>;
+
+beforeAll(async () => {
+  sharedHandle = await createTestPgDbEmpty();
+  await applyDdl(sharedHandle);
+
+  vi.resetModules();
+  vi.doMock('@/lib/db', () => ({ db: sharedHandle.db, schema }));
+  vi.doMock('@/lib/jobs/pm2-jobs', () => ({
+    getJobStatus: vi.fn(),
+    deleteJob: vi.fn().mockResolvedValue(undefined),
+  }));
+  vi.doMock('@/lib/shared/shell', () => ({
+    exec: vi.fn().mockResolvedValue({ exitCode: 0, stdout: '', stderr: '' }),
+  }));
+  vi.doMock('@/lib/git/git-utils', () => ({
+    markReviewed: vi.fn().mockResolvedValue(undefined),
+    setReviewedRef: vi.fn().mockResolvedValue(undefined),
+    getCurrentBranch: vi.fn().mockResolvedValue('master'),
+  }));
+  vi.doMock('@/lib/shared/project-data', () => ({
+    resolveProjectPath: vi.fn().mockReturnValue('/path/to/proj'),
+  }));
+  vi.doMock('@/lib/pipeline/start-mark-dod', () => ({ startMarkDod: startMarkDodMock }));
+  vi.doMock('@/lib/pipeline/start-push', () => ({ startProjectPush: startProjectPushMock }));
+  vi.doMock('@/lib/pipeline/start-commit', () => ({ startProjectCommit: startProjectCommitMock }));
+  vi.doMock('@/lib/pipeline/start-fix', () => ({ startFixFromJob: startFixFromJobMock }));
+  vi.doMock('@/lib/pipeline/start-review', () => ({ startProjectReview: startProjectReviewMock }));
+  vi.doMock('@/lib/pipeline/start-test', () => ({ startProjectTest: startProjectTestMock }));
+  vi.doMock('@/lib/pipeline/start-fix-ci', () => ({ startFixCi: startFixCiMock }));
+  vi.doMock('@/lib/scheduling/scheduling', () => ({
+    getProjectTestConfig: getProjectTestConfigMock,
+  }));
+  vi.doMock('@/lib/shared/notifications', () => ({ notify: notifyMock }));
+  vi.doMock('@/lib/pipeline/pipeline-lock', () => ({ releaseLock: releaseLockMock }));
+  // Skip retention's maintenance_status writes (table not in test DDL).
+  vi.doMock('@/lib/jobs/retention', () => ({
+    pruneProjectLogs: vi.fn(),
+  }));
+
+  const mod = await import('@/lib/jobs/job-storage');
+  markDoneFn = mod.markDone;
+  storageCache = (await import('@/lib/jobs/storage')).jobsCache;
+});
+
+afterAll(async () => {
+  // Drain any straggling fire-and-forget queries via a no-op SELECT before
+  // closing. PGlite serializes queries, so awaiting a SELECT 1 flushes
+  // anything queued ahead of it without a fixed sleep.
+  try {
+    await sharedHandle.db.execute(sql.raw('SELECT 1'));
+  } catch {
+    // ignore
+  }
+  try {
+    await sharedHandle[Symbol.asyncDispose]();
+  } catch {
+    // ignore
+  }
+  vi.doUnmock('@/lib/db');
+  vi.doUnmock('@/lib/jobs/pm2-jobs');
+  vi.resetModules();
+});
+
+async function truncateAll(): Promise<void> {
+  await sharedHandle.db.execute(sql.raw(
+    'WITH a AS (DELETE FROM jobs RETURNING 1), b AS (DELETE FROM recommendations RETURNING 1) DELETE FROM gh_issues_cache'
+  ));
+}
+
+async function applyDdl(handle: TestDbHandle): Promise<void> {
+  // PGlite rejects multi-statement prepared queries, so issue each DDL
+  // separately.
+  await handle.db.execute(sql.raw(`
     CREATE TABLE IF NOT EXISTS jobs (
-      id TEXT PRIMARY KEY,
-      project TEXT NOT NULL,
-      kind TEXT NOT NULL,
-      prompt TEXT,
-      pid INTEGER NOT NULL,
-      log_path TEXT,
-      started_at REAL NOT NULL,
-      finished_at REAL,
-      exit_code INTEGER,
-      seen INTEGER DEFAULT 0,
-      duration_ms INTEGER,
-      input_tokens INTEGER,
-      output_tokens INTEGER,
-      cache_read_tokens INTEGER,
-      cache_create_tokens INTEGER,
-      session_id TEXT,
-      user_prompt TEXT,
-      context_meta TEXT,
-      parent_job_id TEXT,
-      gh_issue_number INTEGER,
-      gh_issue_repo TEXT,
-      gh_issue_title TEXT,
-      log_pruned INTEGER DEFAULT 0,
-      verdict TEXT,
-      cost_usd REAL,
-      model TEXT,
-      release_id TEXT,
-      aborted_at REAL,
-      prompt_bytes INTEGER,
-      work_summary TEXT,
-      modified_files TEXT,
-      provider TEXT
-    );
+      id text PRIMARY KEY,
+      project text NOT NULL,
+      kind text NOT NULL,
+      prompt text,
+      pid integer NOT NULL,
+      log_path text,
+      started_at double precision NOT NULL,
+      finished_at double precision,
+      exit_code integer,
+      seen boolean DEFAULT false,
+      duration_ms integer,
+      input_tokens integer,
+      output_tokens integer,
+      cache_read_tokens integer,
+      cache_create_tokens integer,
+      session_id text,
+      user_prompt text,
+      context_meta text,
+      parent_job_id text,
+      gh_issue_number integer,
+      gh_issue_repo text,
+      gh_issue_title text,
+      log_pruned boolean DEFAULT false,
+      verdict text,
+      cost_usd double precision,
+      model text,
+      release_id text,
+      aborted_at double precision,
+      prompt_bytes integer,
+      work_summary text,
+      modified_files text,
+      provider text
+    )
+  `));
+  await handle.db.execute(sql.raw(`
     CREATE TABLE IF NOT EXISTS recommendations (
-      id TEXT PRIMARY KEY,
-      project TEXT NOT NULL,
-      source_kind TEXT NOT NULL,
-      source_id TEXT,
-      agent_id TEXT,
-      agent_name TEXT,
-      type TEXT NOT NULL,
-      title TEXT NOT NULL,
-      detail TEXT NOT NULL,
-      status TEXT NOT NULL DEFAULT 'open',
-      payload TEXT,
-      created_at REAL NOT NULL,
-      updated_at REAL NOT NULL
-    );
+      id text PRIMARY KEY,
+      project text NOT NULL,
+      source_kind text NOT NULL,
+      source_id text,
+      agent_id text,
+      agent_name text,
+      type text NOT NULL,
+      title text NOT NULL,
+      detail text NOT NULL,
+      status text NOT NULL DEFAULT 'open',
+      payload text,
+      created_at double precision NOT NULL,
+      updated_at double precision NOT NULL
+    )
+  `));
+  await handle.db.execute(sql.raw(`
     CREATE TABLE IF NOT EXISTS gh_issues_cache (
-      project TEXT PRIMARY KEY,
-      repo TEXT NOT NULL,
-      prs TEXT NOT NULL DEFAULT '[]',
-      issues TEXT NOT NULL DEFAULT '[]',
-      fetched_at REAL NOT NULL
-    );
-  `);
-  return { sqlite, db: drizzle(sqlite, { schema }) };
+      project text PRIMARY KEY,
+      repo text NOT NULL,
+      prs text NOT NULL DEFAULT '[]',
+      issues text NOT NULL DEFAULT '[]',
+      fetched_at double precision NOT NULL
+    )
+  `));
 }
 
 describe('runCompletionHooks – mark-dod integration', () => {
-  let testDb: ReturnType<typeof createTestDb>;
-  let startMarkDodMock: ReturnType<typeof vi.fn>;
-  let startProjectPushMock: ReturnType<typeof vi.fn>;
-  let startProjectCommitMock: ReturnType<typeof vi.fn>;
-  let startFixFromJobMock: ReturnType<typeof vi.fn>;
-  let getProjectTestConfigMock: ReturnType<typeof vi.fn>;
-  let markDoneFn: typeof import('@/lib/jobs/job-storage').markDone;
+  const handle = { get db() { return sharedHandle.db; } } as { db: TestDbHandle['db'] };
   let tempDir: string;
 
+  // Job IDs must be unique per test because `verdict.ts` caches the parsed
+  // verdict by `job.id` at module scope. Reusing 'review-job' across tests
+  // would return a stale cached verdict from a prior test (since we no
+  // longer reset modules between tests for speed).
+  let reviewJobCounter = 0;
   function makeReviewJob(logPath: string | null): JobData {
     return {
-      id: 'review-job',
+      id: `review-job-${++reviewJobCounter}`,
       project: 'my-proj',
       kind: 'review',
       prompt: null,
@@ -104,72 +192,71 @@ describe('runCompletionHooks – mark-dod integration', () => {
   }
 
   beforeEach(async () => {
-    vi.resetModules();
-    testDb = createTestDb();
+    await truncateAll();
+    storageCache.clear();
     tempDir = mkdtempSync(join(tmpdir(), 'tamtam-mark-dod-test-'));
 
-    startMarkDodMock = vi.fn().mockResolvedValue({
+    // Reset mock state and reapply default behavior for this describe block.
+    startMarkDodMock.mockReset();
+    startMarkDodMock.mockResolvedValue({
       ok: true, jobId: 'dod-job', issueNumber: 7, verified: 2, total: 2, changed: true,
     });
-    startProjectPushMock = vi.fn().mockResolvedValue({ ok: true, commitSha: 'abc', message: 'pushed' });
-    startProjectCommitMock = vi.fn().mockResolvedValue({ ok: true, commitSha: 'abc', message: 'committed' });
-    startFixFromJobMock = vi.fn().mockResolvedValue({ ok: true, jobId: 'fix-job' });
-    // Default: PR Workflow on + auto-push on — the conditions under which
-    // mark-dod should run. Individual tests override as needed.
-    getProjectTestConfigMock = vi.fn().mockReturnValue({
+    startProjectPushMock.mockReset();
+    startProjectPushMock.mockResolvedValue({ ok: true, commitSha: 'abc', message: 'pushed' });
+    startProjectCommitMock.mockReset();
+    startProjectCommitMock.mockResolvedValue({ ok: true, commitSha: 'abc', message: 'committed' });
+    startFixFromJobMock.mockReset();
+    startFixFromJobMock.mockResolvedValue({ ok: true, jobId: 'fix-job' });
+    startProjectReviewMock.mockReset();
+    startProjectReviewMock.mockResolvedValue({ ok: true, jobId: 'rev-job' });
+    startProjectTestMock.mockReset();
+    startProjectTestMock.mockResolvedValue({ ok: true, jobId: 'test-job' });
+    notifyMock.mockReset();
+    notifyMock.mockResolvedValue(undefined);
+    releaseLockMock.mockReset();
+    getProjectTestConfigMock.mockReset();
+    getProjectTestConfigMock.mockReturnValue({
       autoPushEnabled: true,
       autoCommitEnabled: false,
       prWorkflowEnabled: true,
     });
 
     // Seed an issue-linked "run" job so hasIssueContext is true.
-    testDb.db.insert(schema.jobs).values({
+    const runWithIssueStartedAt = Date.now() / 1000 - 60;
+    const runWithIssueFinishedAt = Date.now() / 1000 - 30;
+    await sharedHandle.db.insert(schema.jobs).values({
       id: 'run-with-issue',
       project: 'my-proj',
       kind: 'run',
       pid: 0,
-      startedAt: Date.now() / 1000 - 60,
-      finishedAt: Date.now() / 1000 - 30,
+      startedAt: runWithIssueStartedAt,
+      finishedAt: runWithIssueFinishedAt,
       exitCode: 0,
       ghIssueNumber: 7,
       ghIssueRepo: 'owner/repo',
       ghIssueTitle: 'sample',
-    }).run();
+    });
 
-    vi.doMock('@/lib/db', () => ({ db: testDb.db, schema }));
-    vi.doMock('@/lib/jobs/pm2-jobs', () => ({
-      getJobStatus: vi.fn(),
-      deleteJob: vi.fn().mockResolvedValue(undefined),
-    }));
-    vi.doMock('@/lib/shared/shell', () => ({
-      exec: vi.fn().mockResolvedValue({ exitCode: 0, stdout: '', stderr: '' }),
-    }));
-    vi.doMock('@/lib/git/git-utils', () => ({
-      markReviewed: vi.fn().mockResolvedValue(undefined),
-    }));
-    vi.doMock('@/lib/shared/project-data', () => ({
-      resolveProjectPath: vi.fn().mockReturnValue('/path/to/proj'),
-    }));
-    vi.doMock('@/lib/pipeline/start-mark-dod', () => ({ startMarkDod: startMarkDodMock }));
-    vi.doMock('@/lib/pipeline/start-push', () => ({ startProjectPush: startProjectPushMock }));
-    vi.doMock('@/lib/pipeline/start-commit', () => ({ startProjectCommit: startProjectCommitMock }));
-    vi.doMock('@/lib/pipeline/start-fix', () => ({ startFixFromJob: startFixFromJobMock }));
-    vi.doMock('@/lib/pipeline/start-review', () => ({
-      startProjectReview: vi.fn().mockResolvedValue({ ok: true, jobId: 'rev-job' }),
-    }));
-    vi.doMock('@/lib/pipeline/start-test', () => ({
-      startProjectTest: vi.fn().mockResolvedValue({ ok: true, jobId: 'test-job' }),
-    }));
-    vi.doMock('@/lib/scheduling/scheduling', () => ({
-      getProjectTestConfig: getProjectTestConfigMock,
-    }));
-
-    const mod = await import('@/lib/jobs/job-storage');
-    markDoneFn = mod.markDone;
+    // Storage functions like findLatestIssueRunContext read from the in-memory
+    // jobsCache (not the DB), so mirror the seeded row into the cache.
+    storageCache.set('run-with-issue', {
+      id: 'run-with-issue',
+      project: 'my-proj',
+      kind: 'run',
+      prompt: null,
+      pid: 0,
+      logPath: null,
+      startedAt: runWithIssueStartedAt,
+      finishedAt: runWithIssueFinishedAt,
+      exitCode: 0,
+      seen: false,
+      ghIssueNumber: 7,
+      ghIssueRepo: 'owner/repo',
+      ghIssueTitle: 'sample',
+    });
   });
 
   afterEach(() => {
-    vi.resetModules();
     if (tempDir) rmSync(tempDir, { recursive: true, force: true });
   });
 
@@ -263,13 +350,8 @@ describe('runCompletionHooks – mark-dod integration', () => {
   });
 
   it('does NOT call startMarkDod when there is no linked issue, even in PR Workflow', async () => {
-    // Drop the seeded issue-linked run so hasIssueContext is false.
-    testDb.db.delete(schema.jobs).where(
-      (testDb.db as unknown as { $(q: string): { run: () => void } })
-        ? undefined as never : undefined as never
-    );
-    // Simpler: clear the table.
-    testDb.sqlite.exec("DELETE FROM jobs");
+    await handle.db.execute(sql.raw('DELETE FROM jobs'));
+    storageCache.clear();
     const logFile = join(tempDir, 'lgtm-noissue.log');
     writeFileSync(logFile, 'Verdict: LGTM\n');
     await markDoneFn(makeReviewJob(logFile), 0);
@@ -278,9 +360,10 @@ describe('runCompletionHooks – mark-dod integration', () => {
   });
 
   it('still calls startMarkDod when the release-scoped source row is missing ghIssueRepo but a sibling row has it', async () => {
-    testDb.sqlite.exec('DELETE FROM jobs');
+    await handle.db.execute(sql.raw('DELETE FROM jobs'));
+    storageCache.clear();
     const now = Date.now() / 1000;
-    testDb.db.insert(schema.jobs).values([
+    const seededRows = [
       {
         id: 'release-active',
         project: 'my-proj',
@@ -292,7 +375,7 @@ describe('runCompletionHooks – mark-dod integration', () => {
         ghIssueNumber: 7,
         ghIssueRepo: null,
         ghIssueTitle: 'sample',
-      } as any,
+      },
       {
         id: 'issue-source-missing-repo',
         project: 'my-proj',
@@ -305,7 +388,7 @@ describe('runCompletionHooks – mark-dod integration', () => {
         ghIssueNumber: 7,
         ghIssueRepo: null,
         ghIssueTitle: 'sample',
-      } as any,
+      },
       {
         id: 'issue-sibling-with-repo',
         project: 'my-proj',
@@ -318,8 +401,17 @@ describe('runCompletionHooks – mark-dod integration', () => {
         ghIssueNumber: 7,
         ghIssueRepo: 'owner/repo',
         ghIssueTitle: 'sample',
-      } as any,
-    ]).run();
+      },
+    ];
+    await handle.db.insert(schema.jobs).values(seededRows);
+    for (const row of seededRows) {
+      storageCache.set(row.id, {
+        prompt: null,
+        logPath: null,
+        seen: false,
+        ...row,
+      } as JobData);
+    }
 
     const logFile = join(tempDir, 'lgtm-recover-repo.log');
     writeFileSync(logFile, 'Verdict: LGTM\n');
@@ -330,9 +422,6 @@ describe('runCompletionHooks – mark-dod integration', () => {
   });
 
   it('defers mark-dod (does NOT call it inline) when auto_pr_merge_enabled is true', async () => {
-    // PR Workflow + issue context + auto-merge → shouldDeferDod=true → mark-dod
-    // is left to launchPrWait post-merge. The release chain must still proceed
-    // to commit/push so the PR gets created.
     getProjectTestConfigMock.mockReturnValue({
       autoPushEnabled: true,
       autoCommitEnabled: false,
@@ -348,13 +437,11 @@ describe('runCompletionHooks – mark-dod integration', () => {
 });
 
 describe('runCompletionHooks – mark-dod excluded from pipeline endpoint', () => {
-  let testDb: ReturnType<typeof createTestDb>;
-  let markDoneFn: typeof import('@/lib/jobs/job-storage').markDone;
-  let notifyMock: ReturnType<typeof vi.fn>;
+  const handle = { get db() { return sharedHandle.db; } } as { db: TestDbHandle['db'] };
 
-  function insertReleaseJob(db: ReturnType<typeof createTestDb>['db'], id: string) {
+  async function insertReleaseJob(id: string) {
     const now = Date.now() / 1000;
-    db.insert(schema.jobs).values({
+    await handle.db.insert(schema.jobs).values({
       id,
       project: 'my-proj',
       kind: 'release',
@@ -364,19 +451,37 @@ describe('runCompletionHooks – mark-dod excluded from pipeline endpoint', () =
       startedAt: now - 10,
       finishedAt: null,
       exitCode: null,
-      seen: 0,
+      seen: false,
       durationMs: null,
       inputTokens: null,
       outputTokens: null,
       cacheReadTokens: null,
       cacheCreateTokens: null,
       sessionId: null,
-    } as any).run();
+    });
+    // Mirror into the in-memory jobsCache so getJob()/listJobs() in lifecycle
+    // hooks can find the release row.
+    storageCache.set(id, {
+      id,
+      project: 'my-proj',
+      kind: 'release',
+      prompt: null,
+      pid: 1,
+      logPath: null,
+      startedAt: now - 10,
+      finishedAt: null,
+      exitCode: null,
+      seen: false,
+    });
   }
 
+  // Job IDs must be unique per test because this describe shares the loaded
+  // module (and therefore module-level caches like `verdictCache`) with the
+  // first describe block. Reusing `${kind}-job` would let stale state leak.
+  let jobCounter = 0;
   function makeJob(kind: string, exitCodeOverride?: number): JobData {
     return {
-      id: `${kind}-job`,
+      id: `${kind}-job-${++jobCounter}`,
       project: 'my-proj',
       kind,
       prompt: null,
@@ -396,90 +501,69 @@ describe('runCompletionHooks – mark-dod excluded from pipeline endpoint', () =
   }
 
   beforeEach(async () => {
-    vi.resetModules();
-    testDb = createTestDb();
-    notifyMock = vi.fn().mockResolvedValue(undefined);
-
-    vi.doMock('@/lib/db', () => ({ db: testDb.db, schema }));
-    vi.doMock('@/lib/jobs/pm2-jobs', () => ({
-      getJobStatus: vi.fn(),
-      deleteJob: vi.fn().mockResolvedValue(undefined),
-    }));
-    vi.doMock('@/lib/shared/shell', () => ({
-      exec: vi.fn().mockResolvedValue({ exitCode: 0, stdout: '', stderr: '' }),
-    }));
-    vi.doMock('@/lib/git/git-utils', () => ({
-      markReviewed: vi.fn().mockResolvedValue(undefined),
-    }));
-    vi.doMock('@/lib/shared/project-data', () => ({
-      resolveProjectPath: vi.fn().mockReturnValue('/path/to/proj'),
-    }));
-    vi.doMock('@/lib/pipeline/start-mark-dod', () => ({
-      startMarkDod: vi.fn().mockResolvedValue({ ok: false, detail: 'no issue' }),
-    }));
-    vi.doMock('@/lib/pipeline/start-push', () => ({
-      startProjectPush: vi.fn().mockResolvedValue({ ok: false, detail: 'no remote' }),
-    }));
-    vi.doMock('@/lib/pipeline/start-commit', () => ({
-      startProjectCommit: vi.fn().mockResolvedValue({ ok: false, detail: 'nothing to commit' }),
-    }));
-    vi.doMock('@/lib/pipeline/start-fix', () => ({
-      startFixFromJob: vi.fn().mockResolvedValue({ ok: false, detail: 'no' }),
-    }));
-    vi.doMock('@/lib/pipeline/start-review', () => ({
-      startProjectReview: vi.fn().mockResolvedValue({ ok: false, detail: 'no' }),
-    }));
-    vi.doMock('@/lib/pipeline/start-test', () => ({
-      startProjectTest: vi.fn().mockResolvedValue({ ok: false, detail: 'no' }),
-    }));
-    vi.doMock('@/lib/scheduling/scheduling', () => ({
-      getProjectTestConfig: vi.fn().mockReturnValue({ autoPushEnabled: false, autoCommitEnabled: false }),
-    }));
-    vi.doMock('@/lib/shared/notifications', () => ({ notify: notifyMock }));
-    vi.doMock('@/lib/pipeline/pipeline-lock', () => ({ releaseLock: vi.fn() }));
-
-    const mod = await import('@/lib/jobs/job-storage');
-    markDoneFn = mod.markDone;
-  });
-
-  afterEach(() => {
-    vi.resetModules();
+    await truncateAll();
+    storageCache.clear();
+    // Reapply this describe block's failing-mocks defaults on top of the
+    // shared mock fns. The first describe configures them with success
+    // responses; this describe configures them with the no-op / failure
+    // responses these regression tests need.
+    startMarkDodMock.mockReset();
+    startMarkDodMock.mockResolvedValue({ ok: false, detail: 'no issue' });
+    startProjectPushMock.mockReset();
+    startProjectPushMock.mockResolvedValue({ ok: false, detail: 'no remote' });
+    startProjectCommitMock.mockReset();
+    startProjectCommitMock.mockResolvedValue({ ok: false, detail: 'nothing to commit' });
+    startFixFromJobMock.mockReset();
+    startFixFromJobMock.mockResolvedValue({ ok: false, detail: 'no' });
+    startProjectReviewMock.mockReset();
+    startProjectReviewMock.mockResolvedValue({ ok: false, detail: 'no' });
+    startProjectTestMock.mockReset();
+    startProjectTestMock.mockResolvedValue({ ok: false, detail: 'no' });
+    notifyMock.mockReset();
+    notifyMock.mockResolvedValue(undefined);
+    releaseLockMock.mockReset();
+    getProjectTestConfigMock.mockReset();
+    getProjectTestConfigMock.mockReturnValue({ autoPushEnabled: false, autoCommitEnabled: false });
   });
 
   it('does not finalize the active release job when mark-dod completes with exit 0', async () => {
-    insertReleaseJob(testDb.db, 'release-dod-0');
+    await insertReleaseJob('release-dod-0');
     await markDoneFn(makeJob('mark-dod'), 0);
-    const row = testDb.db.select().from(schema.jobs).all().find(r => r.id === 'release-dod-0');
+    const rows = await handle.db.select().from(schema.jobs);
+    const row = rows.find((r) => r.id === 'release-dod-0');
     expect(row?.finishedAt).toBeNull();
     expect(row?.exitCode).toBeNull();
   });
 
   it('does not finalize the active release job when mark-dod completes with exit 1', async () => {
-    insertReleaseJob(testDb.db, 'release-dod-1');
+    await insertReleaseJob('release-dod-1');
     await markDoneFn(makeJob('mark-dod'), 1);
-    const row = testDb.db.select().from(schema.jobs).all().find(r => r.id === 'release-dod-1');
+    const rows = await handle.db.select().from(schema.jobs);
+    const row = rows.find((r) => r.id === 'release-dod-1');
     expect(row?.finishedAt).toBeNull();
     expect(row?.exitCode).toBeNull();
   });
 
   it('does not send a notification when mark-dod completes', async () => {
-    insertReleaseJob(testDb.db, 'release-dod-notify');
+    await insertReleaseJob('release-dod-notify');
     await markDoneFn(makeJob('mark-dod'), 0);
     expect(notifyMock).not.toHaveBeenCalled();
   });
 
   it('pr-wait still finalizes the active release job with exit 0 (regression)', async () => {
-    insertReleaseJob(testDb.db, 'release-prwait-0');
+    await insertReleaseJob('release-prwait-0');
     await markDoneFn({ ...makeJob('pr-wait'), releaseId: 'release-prwait-0' }, 0);
-    const row = testDb.db.select().from(schema.jobs).all().find(r => r.id === 'release-prwait-0');
+    const rows = await handle.db.select().from(schema.jobs);
+    const row = rows.find((r) => r.id === 'release-prwait-0');
     expect(row?.finishedAt).not.toBeNull();
     expect(row?.exitCode).toBe(0);
   });
 
   it('pr-wait still finalizes the active release job with exit 1 (regression)', async () => {
-    insertReleaseJob(testDb.db, 'release-prwait-1');
+    await insertReleaseJob('release-prwait-1');
     await markDoneFn({ ...makeJob('pr-wait'), releaseId: 'release-prwait-1' }, 1);
-    const row = testDb.db.select().from(schema.jobs).all().find(r => r.id === 'release-prwait-1');
+    const rows = await handle.db.select().from(schema.jobs);
+    const row = rows.find((r) => r.id === 'release-prwait-1');
     expect(row?.finishedAt).not.toBeNull();
     expect(row?.exitCode).toBe(1);
   });

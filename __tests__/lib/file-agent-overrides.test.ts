@@ -1,30 +1,48 @@
-import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
-import Database from 'better-sqlite3';
-import { drizzle } from 'drizzle-orm/better-sqlite3';
+import { describe, it, expect, beforeAll, beforeEach, afterAll, afterEach, vi } from 'vitest';
+import { sql } from 'drizzle-orm';
+import { createTestPgDbEmpty, type TestDbHandle } from '@/__tests__/helpers/test-db';
 import * as schema from '@/lib/db/schema';
 
-function createTestDb() {
-  const sqlite = new Database(':memory:');
-  sqlite.pragma('journal_mode = WAL');
-  sqlite.exec(`
+async function applyDdl(handle: TestDbHandle): Promise<void> {
+  // PGlite rejects multi-statement prepared queries, so issue each DDL
+  // separately.
+  await handle.db.execute(sql.raw(`
     CREATE TABLE IF NOT EXISTS settings (
-      key TEXT PRIMARY KEY,
-      value TEXT NOT NULL
-    );
-  `);
-  return { sqlite, db: drizzle(sqlite, { schema }) };
+      key text PRIMARY KEY,
+      value text NOT NULL
+    )
+  `));
 }
 
 describe('file-agent-overrides', () => {
-  let testDb: ReturnType<typeof createTestDb>;
+  let sharedHandle: TestDbHandle;
+  // Backward-compat shim so existing test bodies referencing `handle.db` still
+  // hit the shared PGlite instance.
+  const handle = { get db() { return sharedHandle.db; } } as { db: TestDbHandle['db'] };
+
   let getFileAgentOverride: typeof import('@/lib/agents/file-agent-overrides').getFileAgentOverride;
   let setFileAgentOverride: typeof import('@/lib/agents/file-agent-overrides').setFileAgentOverride;
   let deleteFileAgentOverride: typeof import('@/lib/agents/file-agent-overrides').deleteFileAgentOverride;
 
+  beforeAll(async () => {
+    sharedHandle = await createTestPgDbEmpty();
+    await applyDdl(sharedHandle);
+  });
+
+  afterAll(async () => {
+    // Let any straggling fire-and-forget queries settle before closing.
+    await new Promise((r) => setTimeout(r, 30));
+    try {
+      await sharedHandle[Symbol.asyncDispose]();
+    } catch {
+      // ignore
+    }
+  });
+
   beforeEach(async () => {
     vi.resetModules();
-    testDb = createTestDb();
-    vi.doMock('@/lib/db', () => ({ db: testDb.db, schema }));
+    await sharedHandle.db.execute(sql.raw('TRUNCATE settings'));
+    vi.doMock('@/lib/db', () => ({ db: sharedHandle.db, schema }));
 
     const mod = await import('@/lib/agents/file-agent-overrides');
     getFileAgentOverride = mod.getFileAgentOverride;
@@ -32,10 +50,17 @@ describe('file-agent-overrides', () => {
     deleteFileAgentOverride = mod.deleteFileAgentOverride;
   });
 
-  afterEach(() => {
-    testDb.sqlite.close();
+  afterEach(async () => {
+    // Short settle: lets fire-and-forget DELETEs land before the next test
+    // truncates and inserts.
+    await new Promise((r) => setTimeout(r, 10));
     vi.resetModules();
+    vi.clearAllMocks();
   });
+
+  async function insertSetting(key: string, value: string) {
+    await handle.db.insert(schema.settings).values({ key, value });
+  }
 
   describe('getFileAgentOverride', () => {
     it('returns null when no override exists', async () => {
@@ -43,7 +68,7 @@ describe('file-agent-overrides', () => {
     });
 
     it('returns stored override', async () => {
-      testDb.sqlite.prepare(`INSERT INTO settings (key, value) VALUES (?, ?)`).run(
+      await insertSetting(
         'agent_override:myproject:myagent',
         JSON.stringify({ enabled: false, model: 'haiku' }),
       );
@@ -52,7 +77,7 @@ describe('file-agent-overrides', () => {
     });
 
     it('sanitizes an invalid stored model override back to normal', async () => {
-      testDb.sqlite.prepare(`INSERT INTO settings (key, value) VALUES (?, ?)`).run(
+      await insertSetting(
         'agent_override:myproject:myagent',
         JSON.stringify({ enabled: true, model: 'smart --resume injected' }),
       );
@@ -61,7 +86,7 @@ describe('file-agent-overrides', () => {
     });
 
     it('returns null for invalid JSON value', async () => {
-      testDb.sqlite.prepare(`INSERT INTO settings (key, value) VALUES (?, ?)`).run(
+      await insertSetting(
         'agent_override:myproject:myagent',
         'not-json{{{',
       );
@@ -69,7 +94,7 @@ describe('file-agent-overrides', () => {
     });
 
     it('returns null when value is a JSON primitive (not an object)', async () => {
-      testDb.sqlite.prepare(`INSERT INTO settings (key, value) VALUES (?, ?)`).run(
+      await insertSetting(
         'agent_override:myproject:myagent',
         '"just-a-string"',
       );
@@ -77,7 +102,7 @@ describe('file-agent-overrides', () => {
     });
 
     it('scopes by project and name — different names do not collide', async () => {
-      testDb.sqlite.prepare(`INSERT INTO settings (key, value) VALUES (?, ?)`).run(
+      await insertSetting(
         'agent_override:p1:a1',
         JSON.stringify({ enabled: true }),
       );
@@ -137,6 +162,8 @@ describe('file-agent-overrides', () => {
       await setFileAgentOverride('proj', 'agent', { enabled: false });
       expect(await getFileAgentOverride('proj', 'agent')).not.toBeNull();
       deleteFileAgentOverride('proj', 'agent');
+      // fire-and-forget delete; let it settle
+      await new Promise(r => setTimeout(r, 20));
       expect(await getFileAgentOverride('proj', 'agent')).toBeNull();
     });
 
@@ -148,6 +175,7 @@ describe('file-agent-overrides', () => {
       await setFileAgentOverride('proj', 'a1', { enabled: false });
       await setFileAgentOverride('proj', 'a2', { enabled: true });
       deleteFileAgentOverride('proj', 'a1');
+      await new Promise(r => setTimeout(r, 20));
       expect(await getFileAgentOverride('proj', 'a1')).toBeNull();
       expect(await getFileAgentOverride('proj', 'a2')).toEqual({ enabled: true });
     });

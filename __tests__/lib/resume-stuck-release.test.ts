@@ -1,50 +1,44 @@
-import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
-import Database from 'better-sqlite3';
-import { drizzle } from 'drizzle-orm/better-sqlite3';
+import { describe, it, expect, beforeAll, beforeEach, afterAll, afterEach, vi } from 'vitest';
+import { sql } from 'drizzle-orm';
+import { createTestPgDbEmpty, type TestDbHandle } from '@/__tests__/helpers/test-db';
 import * as schema from '@/lib/db/schema';
 import type { JobData } from '@/lib/jobs/types';
 
-function createTestDb() {
-  const sqlite = new Database(':memory:');
-  sqlite.pragma('journal_mode = WAL');
-  sqlite.pragma('foreign_keys = ON');
-  sqlite.exec(`
-    CREATE TABLE IF NOT EXISTS jobs (
-      id TEXT PRIMARY KEY,
-      project TEXT NOT NULL,
-      kind TEXT NOT NULL,
-      prompt TEXT,
-      pid INTEGER NOT NULL,
-      log_path TEXT,
-      started_at REAL NOT NULL,
-      finished_at REAL,
-      exit_code INTEGER,
-      seen INTEGER DEFAULT 0,
-      duration_ms INTEGER,
-      input_tokens INTEGER,
-      output_tokens INTEGER,
-      cache_read_tokens INTEGER,
-      cache_create_tokens INTEGER,
-      session_id TEXT,
-      user_prompt TEXT,
-      context_meta TEXT,
-      parent_job_id TEXT,
-      gh_issue_number INTEGER,
-      gh_issue_repo TEXT,
-      gh_issue_title TEXT,
-      log_pruned INTEGER DEFAULT 0,
-      verdict TEXT,
-      cost_usd REAL,
-      model TEXT,
-      release_id TEXT,
-      aborted_at REAL,
-      prompt_bytes INTEGER,
-      work_summary TEXT,
-      modified_files TEXT,
-      provider TEXT
-    );
-  `);
-  return { sqlite, db: drizzle(sqlite, { schema }) };
+async function applyJobsSchema(h: TestDbHandle): Promise<void> {
+  await h.db.execute(sql.raw(`CREATE TABLE IF NOT EXISTS jobs (
+    id text PRIMARY KEY,
+    project text NOT NULL,
+    kind text NOT NULL,
+    prompt text,
+    pid integer NOT NULL,
+    log_path text,
+    started_at double precision NOT NULL,
+    finished_at double precision,
+    exit_code integer,
+    seen boolean DEFAULT false,
+    duration_ms integer,
+    input_tokens integer,
+    output_tokens integer,
+    cache_read_tokens integer,
+    cache_create_tokens integer,
+    session_id text,
+    user_prompt text,
+    context_meta text,
+    parent_job_id text,
+    gh_issue_number integer,
+    gh_issue_repo text,
+    gh_issue_title text,
+    log_pruned boolean DEFAULT false,
+    verdict text,
+    cost_usd double precision,
+    model text,
+    release_id text,
+    aborted_at double precision,
+    prompt_bytes integer,
+    work_summary text,
+    modified_files text,
+    provider text
+  )`));
 }
 
 function makeJob(overrides: Partial<JobData> = {}): JobData {
@@ -86,8 +80,12 @@ function makeJob(overrides: Partial<JobData> = {}): JobData {
   };
 }
 
+let sharedHandle: TestDbHandle;
+
 describe('resume-stuck-release helpers', () => {
-  let testDb: ReturnType<typeof createTestDb>;
+  // Backward-compat shim so existing test bodies that reference `handle.db`
+  // still resolve to the shared instance.
+  const handle = { get db() { return sharedHandle.db; } } as { db: TestDbHandle['db'] };
   let getJobMock: ReturnType<typeof vi.fn>;
   let listJobsMock: ReturnType<typeof vi.fn>;
   let updateJobMock: ReturnType<typeof vi.fn>;
@@ -95,9 +93,23 @@ describe('resume-stuck-release helpers', () => {
   let acquireLockMock: ReturnType<typeof vi.fn>;
   let releaseLockMock: ReturnType<typeof vi.fn>;
 
-  beforeEach(() => {
+  beforeAll(async () => {
+    sharedHandle = await createTestPgDbEmpty();
+    await applyJobsSchema(sharedHandle);
+  });
+
+  afterAll(async () => {
+    await new Promise((r) => setTimeout(r, 30));
+    try {
+      await sharedHandle[Symbol.asyncDispose]();
+    } catch {
+      // ignore
+    }
+  });
+
+  beforeEach(async () => {
     vi.resetModules();
-    testDb = createTestDb();
+    await sharedHandle.db.execute(sql.raw('TRUNCATE jobs'));
     getJobMock = vi.fn().mockReturnValue(null);
     listJobsMock = vi.fn().mockReturnValue([]);
     updateJobMock = vi.fn();
@@ -108,7 +120,7 @@ describe('resume-stuck-release helpers', () => {
     });
     releaseLockMock = vi.fn();
 
-    vi.doMock('@/lib/db', () => ({ db: testDb.db, schema }));
+    vi.doMock('@/lib/db', () => ({ db: sharedHandle.db, schema }));
     vi.doMock('@/lib/jobs/job-storage', () => ({
       getJob: getJobMock,
       listJobs: listJobsMock,
@@ -124,9 +136,9 @@ describe('resume-stuck-release helpers', () => {
     }));
   });
 
-  afterEach(() => {
+  afterEach(async () => {
     vi.resetModules();
-    testDb.sqlite.close();
+    vi.clearAllMocks();
   });
 
   it('returns not_found when the release belongs to another project', async () => {
@@ -235,7 +247,7 @@ describe('resume-stuck-release helpers', () => {
 
   it('scans by release finishedAt, not startedAt', async () => {
     const now = Date.now() / 1000;
-    testDb.db.insert(schema.jobs).values({
+    await handle.db.insert(schema.jobs).values({
       id: 'release-old-start',
       project: 'proj',
       kind: 'release',
@@ -246,7 +258,7 @@ describe('resume-stuck-release helpers', () => {
       finishedAt: now - 30,
       exitCode: 0,
       seen: false,
-    } as any).run();
+    });
     listJobsMock.mockReturnValue([
       makeJob({
         id: 'test-1',
@@ -269,7 +281,7 @@ describe('resume-stuck-release helpers', () => {
 
   it('does not mark a finished release stuck when a later retry reused the release id after the chain gap', async () => {
     const now = Date.now() / 1000;
-    testDb.db.insert(schema.jobs).values({
+    await handle.db.insert(schema.jobs).values({
       id: 'release-gap',
       project: 'proj',
       kind: 'release',
@@ -280,7 +292,7 @@ describe('resume-stuck-release helpers', () => {
       finishedAt: now - 60,
       exitCode: 0,
       seen: false,
-    } as any).run();
+    });
     listJobsMock.mockReturnValue([
       makeJob({
         id: 'push-1',
@@ -416,7 +428,7 @@ describe('resume-stuck-release helpers', () => {
 
   it('does not spend the auto-resume budget when lock contention prevents reopening', async () => {
     const now = Date.now() / 1000;
-    testDb.db.insert(schema.jobs).values({
+    await handle.db.insert(schema.jobs).values({
       id: 'release-retry',
       project: 'proj',
       kind: 'release',
@@ -427,7 +439,7 @@ describe('resume-stuck-release helpers', () => {
       finishedAt: now - 60,
       exitCode: 0,
       seen: false,
-    } as any).run();
+    });
     listJobsMock.mockReturnValue([
       makeJob({
         id: 'test-1',
@@ -669,7 +681,7 @@ describe('resume-stuck-release helpers', () => {
 
   it('caps auto-resume after two attempted hook restarts', async () => {
     const now = Date.now() / 1000;
-    testDb.db.insert(schema.jobs).values({
+    await handle.db.insert(schema.jobs).values({
       id: 'release-max-attempts',
       project: 'proj',
       kind: 'release',
@@ -680,7 +692,7 @@ describe('resume-stuck-release helpers', () => {
       finishedAt: now - 60,
       exitCode: 0,
       seen: false,
-    } as any).run();
+    });
     listJobsMock.mockReturnValue([
       makeJob({
         id: 'commit-1',

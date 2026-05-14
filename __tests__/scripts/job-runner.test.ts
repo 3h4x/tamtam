@@ -1,24 +1,31 @@
-import { describe, it, expect, beforeEach, afterEach } from 'vitest';
+import { describe, it, expect, beforeAll, afterAll } from 'vitest';
 import { spawn } from 'child_process';
-import Database from 'better-sqlite3';
-import { mkdtempSync, rmSync, writeFileSync, readFileSync, mkdirSync, existsSync } from 'fs';
+import { mkdtempSync, rmSync, writeFileSync, readFileSync, existsSync } from 'fs';
 import { tmpdir } from 'os';
 import { join, resolve } from 'path';
+import { Client } from 'pg';
 
 const RUNNER = resolve(__dirname, '..', '..', 'scripts', 'job-runner.js');
 
+// Real-Postgres connection used by the spawned job-runner subprocess for the
+// pause check. PGlite is in-process and has no socket, so the subprocess
+// can't connect to it; the runner reads DATABASE_URL via `pg.Client`. The
+// admin URL (used to CREATE/DROP throwaway DBs) defaults to the local
+// Postgres on 5432.
+const ADMIN_DB_URL = process.env.TEST_PG_ADMIN_URL || 'postgres://localhost:5432/postgres';
+
 function runnerEnv(env: Record<string, string | undefined> = {}): NodeJS.ProcessEnv {
   const inherited = { ...process.env };
+  // Strip any inherited DATABASE_URL so each test fully controls whether the
+  // subprocess can reach a pause-check DB. Tests opt-in by passing their own
+  // DATABASE_URL value.
+  delete inherited.DATABASE_URL;
   delete inherited.TAMTAM_DB_PATH;
   return { ...inherited, ...env };
 }
 
 function runRunner(args: string[], env: Record<string, string | undefined> = {}): Promise<{ exitCode: number | null; signal: NodeJS.Signals | null; child: ReturnType<typeof spawn> }> {
   return new Promise((res) => {
-    // Strip the vitest-setup TAMTAM_DB_PATH so each test's TAMTAM_ROOT (or
-    // explicit TAMTAM_DB_PATH override) resolves to the throwaway DB it
-    // just populated — otherwise the runner reads the empty vitest temp DB
-    // and misses the `jobs_paused` row the test wrote.
     const child = spawn('node', [RUNNER, ...args], {
       stdio: ['ignore', 'pipe', 'pipe'],
       env: runnerEnv(env),
@@ -27,30 +34,96 @@ function runRunner(args: string[], env: Record<string, string | undefined> = {})
   });
 }
 
-function createSettingsDb(root: string, jobsPaused: boolean): void {
-  const dbDir = join(root, 'data', 'db');
-  mkdirSync(dbDir, { recursive: true });
-  const db = new Database(join(dbDir, 'tamtam.db'));
-  db.exec('CREATE TABLE settings (key TEXT PRIMARY KEY, value TEXT NOT NULL)');
-  db.prepare('INSERT INTO settings (key, value) VALUES (?, ?)').run('jobs_paused', jobsPaused ? 'true' : 'false');
-  db.close();
+// Track all throwaway databases so afterAll can drop them once. Per-test
+// teardown of these DBs is unnecessary — the names are unique per test
+// (pid+timestamp+random) and only a handful are created per run.
+const provisionedDbs: string[] = [];
+
+async function createPauseDb(jobsPaused: boolean): Promise<string> {
+  const dbName = `tamtam_jobrunner_test_${process.pid}_${Date.now()}_${Math.floor(Math.random() * 1e6)}`;
+  const admin = new Client({ connectionString: ADMIN_DB_URL });
+  await admin.connect();
+  try {
+    await admin.query(`CREATE DATABASE ${dbName}`);
+  } finally {
+    await admin.end();
+  }
+  provisionedDbs.push(dbName);
+
+  const target = new Client({ connectionString: dbUrlFor(dbName) });
+  await target.connect();
+  try {
+    await target.query('CREATE TABLE settings (key TEXT PRIMARY KEY, value TEXT NOT NULL)');
+    await target.query(
+      'INSERT INTO settings (key, value) VALUES ($1, $2)',
+      ['jobs_paused', jobsPaused ? 'true' : 'false'],
+    );
+  } finally {
+    await target.end();
+  }
+  return dbUrlFor(dbName);
 }
 
-function createSettingsDbAt(dbPath: string, jobsPaused: boolean): void {
-  mkdirSync(resolve(dbPath, '..'), { recursive: true });
-  const db = new Database(dbPath);
-  db.exec('CREATE TABLE settings (key TEXT PRIMARY KEY, value TEXT NOT NULL)');
-  db.prepare('INSERT INTO settings (key, value) VALUES (?, ?)').run('jobs_paused', jobsPaused ? 'true' : 'false');
-  db.close();
+function dbUrlFor(dbName: string): string {
+  // Reuse the admin connection target host/port/user but swap the database
+  // segment. Simple string surgery: replace the trailing `/<db>` with
+  // `/<dbName>`.
+  return ADMIN_DB_URL.replace(/\/[^/?]*(\?|$)/, `/${dbName}$1`);
 }
 
-describe('scripts/job-runner.js', () => {
-  let dir: string;
+async function dropProvisionedDbs(): Promise<void> {
+  if (provisionedDbs.length === 0) return;
+  const admin = new Client({ connectionString: ADMIN_DB_URL });
+  await admin.connect();
+  try {
+    for (const dbName of provisionedDbs.splice(0, provisionedDbs.length)) {
+      try {
+        await admin.query(
+          `SELECT pg_terminate_backend(pid) FROM pg_stat_activity WHERE datname = $1 AND pid <> pg_backend_pid()`,
+          [dbName],
+        );
+        await admin.query(`DROP DATABASE IF EXISTS ${dbName}`);
+      } catch {
+        // Best-effort; leftover throwaway DBs are harmless.
+      }
+    }
+  } finally {
+    await admin.end();
+  }
+}
 
-  beforeEach(() => { dir = mkdtempSync(join(tmpdir(), 'job-runner-test-')); });
-  afterEach(() => { rmSync(dir, { recursive: true, force: true }); });
+// All tmpdirs created by tests; cleaned up once after the suite. Each test
+// creates its own dir (unique mkdtemp suffix) so concurrency is safe.
+const tempDirs: string[] = [];
+function makeTempDir(): string {
+  const d = mkdtempSync(join(tmpdir(), 'job-runner-test-'));
+  tempDirs.push(d);
+  return d;
+}
 
+// Shared pause-check DBs created once for all tests. Provisioning a fresh
+// Postgres DB takes ~80-180ms; reusing two (one paused, one not) across the
+// three pause-related tests cuts the suite-level DB cost from ~540ms to ~180ms.
+let pausedDbUrl = '';
+let unpausedDbUrl = '';
+
+beforeAll(async () => {
+  [pausedDbUrl, unpausedDbUrl] = await Promise.all([
+    createPauseDb(true),
+    createPauseDb(false),
+  ]);
+});
+
+afterAll(async () => {
+  for (const d of tempDirs.splice(0)) {
+    try { rmSync(d, { recursive: true, force: true }); } catch { /* ignore */ }
+  }
+  await dropProvisionedDbs();
+});
+
+describe.concurrent('scripts/job-runner.js', () => {
   it('logs launch + exit breadcrumbs and propagates the child exit code', async () => {
+    const dir = makeTempDir();
     const logPath = join(dir, 'a.log');
     const promptPath = join(dir, 'a.prompt');
     writeFileSync(promptPath, 'hello');
@@ -58,7 +131,7 @@ describe('scripts/job-runner.js', () => {
     const { exitCode } = await runRunner([
       'job-a', logPath, promptPath,
       'bash', '-c', 'cat; echo done; exit 7',
-    ], { TAMTAM_ROOT: join(dir, 'no-db-root') });
+    ]);
 
     expect(exitCode).toBe(7);
     const log = readFileSync(logPath, 'utf-8');
@@ -69,17 +142,16 @@ describe('scripts/job-runner.js', () => {
   });
 
   it('refuses to spawn the child command when jobs are paused', async () => {
-    const root = join(dir, 'root');
+    const dir = makeTempDir();
     const logPath = join(dir, 'paused.log');
     const promptPath = join(dir, 'paused.prompt');
     const markerPath = join(dir, 'child-ran');
-    createSettingsDb(root, true);
     writeFileSync(promptPath, 'hello');
 
     const { exitCode } = await runRunner([
       'job-paused', logPath, promptPath,
       'bash', '-c', `touch "${markerPath}"`,
-    ], { TAMTAM_ROOT: root });
+    ], { DATABASE_URL: pausedDbUrl });
 
     expect(exitCode).toBe(75);
     expect(existsSync(markerPath)).toBe(false);
@@ -89,16 +161,15 @@ describe('scripts/job-runner.js', () => {
   });
 
   it('spawns the child command when jobs are not paused', async () => {
-    const root = join(dir, 'root');
+    const dir = makeTempDir();
     const logPath = join(dir, 'unpaused.log');
     const promptPath = join(dir, 'unpaused.prompt');
-    createSettingsDb(root, false);
     writeFileSync(promptPath, 'hello');
 
     const { exitCode } = await runRunner([
       'job-unpaused', logPath, promptPath,
       'bash', '-c', 'cat; echo done',
-    ], { TAMTAM_ROOT: root });
+    ], { DATABASE_URL: unpausedDbUrl });
 
     expect(exitCode).toBe(0);
     const log = readFileSync(logPath, 'utf-8');
@@ -108,6 +179,7 @@ describe('scripts/job-runner.js', () => {
   });
 
   it('redacts child output before writing the job log', async () => {
+    const dir = makeTempDir();
     const logPath = join(dir, 'redacted.log');
     const promptPath = join(dir, 'redacted.prompt');
     writeFileSync(promptPath, '');
@@ -115,7 +187,7 @@ describe('scripts/job-runner.js', () => {
     const { exitCode } = await runRunner([
       'job-redacted', logPath, promptPath,
       'bash', '-c', 'echo "token=ghp_abcdefghijklmnopqrstuvwxyz123456"; echo "ordinary line"',
-    ], { TAMTAM_ROOT: join(dir, 'no-db-root') });
+    ]);
 
     expect(exitCode).toBe(0);
     const log = readFileSync(logPath, 'utf-8');
@@ -124,19 +196,20 @@ describe('scripts/job-runner.js', () => {
     expect(log).not.toContain('ghp_abcdefghijklmnopqrstuvwxyz123456');
   });
 
-  it('uses TAMTAM_DB_PATH for the pause check when provided', async () => {
-    const root = join(dir, 'root');
-    const tempDbPath = join(dir, 'e2e-db', 'tamtam.db');
+  it('uses DATABASE_URL for the pause check when provided', async () => {
+    const dir = makeTempDir();
+    // The shared paused DB exists but the subprocess is pointed at the
+    // unpaused DB. Confirms the runner honors the DATABASE_URL env it
+    // receives rather than some out-of-band default.
+    void pausedDbUrl; // provisioned in beforeAll but not used by this subprocess
     const logPath = join(dir, 'custom-db.log');
     const promptPath = join(dir, 'custom-db.prompt');
-    createSettingsDb(root, true);
-    createSettingsDbAt(tempDbPath, false);
     writeFileSync(promptPath, 'hello');
 
     const { exitCode } = await runRunner([
       'job-custom-db', logPath, promptPath,
       'bash', '-c', 'cat; echo done',
-    ], { TAMTAM_ROOT: root, TAMTAM_DB_PATH: tempDbPath });
+    ], { DATABASE_URL: unpausedDbUrl });
 
     expect(exitCode).toBe(0);
     const log = readFileSync(logPath, 'utf-8');
@@ -145,6 +218,7 @@ describe('scripts/job-runner.js', () => {
   });
 
   it('exits 127 when the command binary does not exist', async () => {
+    const dir = makeTempDir();
     const logPath = join(dir, 'b.log');
     const promptPath = join(dir, 'b.prompt');
     writeFileSync(promptPath, '');
@@ -152,7 +226,7 @@ describe('scripts/job-runner.js', () => {
     const { exitCode } = await runRunner([
       'job-b', logPath, promptPath,
       '/no/such/binary-' + Date.now(),
-    ], { TAMTAM_ROOT: join(dir, 'no-db-root') });
+    ]);
 
     expect(exitCode).toBe(127);
     const log = readFileSync(logPath, 'utf-8');
@@ -160,6 +234,7 @@ describe('scripts/job-runner.js', () => {
   });
 
   it('forwards SIGTERM to the child so it actually dies (orphan fix)', async () => {
+    const dir = makeTempDir();
     const logPath = join(dir, 'c.log');
     const promptPath = join(dir, 'c.prompt');
     writeFileSync(promptPath, '');
@@ -176,18 +251,18 @@ describe('scripts/job-runner.js', () => {
       'node', '-e', childCode,
     ], {
       stdio: ['ignore', 'pipe', 'pipe'],
-      env: runnerEnv({ TAMTAM_ROOT: join(dir, 'no-db-root') }),
+      env: runnerEnv(),
     });
 
-    // Wait until the inner child has installed its handler.
+    // Wait until the inner child has installed its handler. Tight 10ms
+    // polling cuts the typical wait from ~50ms to a few ms.
     await new Promise<void>((res, rej) => {
-      const t = setTimeout(() => rej(new Error('child never said ready')), 5000);
-      const onData = () => {
+      const t = setTimeout(() => { clearInterval(poll); rej(new Error('child never said ready')); }, 5000);
+      const poll = setInterval(() => {
         let log = '';
         try { log = readFileSync(logPath, 'utf-8'); } catch { return; }
         if (log.includes('ready')) { clearTimeout(t); clearInterval(poll); res(); }
-      };
-      const poll = setInterval(onData, 50);
+      }, 10);
     });
 
     const exited = new Promise<number | null>(r => child.on('exit', code => r(code)));
@@ -204,7 +279,7 @@ describe('scripts/job-runner.js', () => {
   });
 
   it('refuses to start with too few args', async () => {
-    const { exitCode } = await runRunner(['only-jobid'], { TAMTAM_ROOT: join(dir, 'no-db-root') });
+    const { exitCode } = await runRunner(['only-jobid']);
     expect(exitCode).toBe(2);
   });
 });

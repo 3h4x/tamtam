@@ -8,6 +8,14 @@ import { errMsg } from '@/lib/shared/types';
 import { redactSecrets } from '@/lib/shared/log-redaction';
 import { readRedactedFileSync } from '@/lib/jobs/redacted-log-reader';
 
+// Poll interval for the fs.watch fallback. Read once at module load so tests
+// can shrink it via TAMTAM_STREAM_POLL_MS to keep the poll-path test fast.
+// Defaults to 1000ms in production; clamped to a positive integer.
+const STREAM_POLL_MS = (() => {
+  const raw = Number(process.env.TAMTAM_STREAM_POLL_MS);
+  return Number.isFinite(raw) && raw > 0 ? Math.floor(raw) : 1000;
+})();
+
 function getLogPath(jobId: string): string {
   const job = getJob(jobId);
   if (job?.logPath) return job.logPath;
@@ -343,22 +351,23 @@ export async function GET(
         watcher = watch(/*turbopackIgnore: true*/ logPath, () => { checkFinished(); });
       } catch {}
 
-      // Poll every 1s as a safety net — fs.watch can miss the finishedAt
+      // Poll every STREAM_POLL_MS as a safety net — fs.watch can miss the finishedAt
       // transition if the last log write happens before the job's exit handler runs.
-      // Probe PM2/process status less often (every ~5s) — probeJobStatus shells
-      // out `pm2 jlist` for claude-backed jobs, which is expensive to run per-second
-      // per open SSE client.
+      // Probe PM2/process status less often (every ~5s of wall time, i.e. every
+      // ceil(5000 / STREAM_POLL_MS) ticks) — probeJobStatus shells out `pm2 jlist`
+      // for claude-backed jobs, which is expensive to run per-second per open SSE client.
+      const PROBE_EVERY_TICKS = Math.max(1, Math.ceil(5000 / STREAM_POLL_MS));
       let tick = 0;
       pollTimer = setInterval(() => {
         tick++;
-        if (tick % 5 === 0) {
+        if (tick % PROBE_EVERY_TICKS === 0) {
           const jobForProbe = getJob(jobId);
           if (jobForProbe && !jobForProbe.finishedAt) {
             probeJobStatus(jobForProbe).catch(() => {});
           }
         }
         checkFinished();
-      }, 1000);
+      }, STREAM_POLL_MS);
 
       // Clean up on abort
       request.signal.addEventListener('abort', () => { cleanup(); });

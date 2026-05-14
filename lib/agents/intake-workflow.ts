@@ -175,7 +175,7 @@ async function composePromptStep(
     const { getJob, markDone } = await import('@/lib/jobs/job-storage');
 
     if (await isLockOwnedByActiveRelease(project)) {
-      const lock = await getLock(project);
+      await getLock(project);
       try {
         enqueueQueuedAgentRun(project, {
           project,

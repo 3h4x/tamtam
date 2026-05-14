@@ -525,46 +525,39 @@ Behavior:
 - Replacing a queue entry (same `agentId`, new `enqueuedAt`) resets the failure counter for that slot.
 - A successful drain or a terminal 400/404/409 (non-transient) drops the head and clears the counter without tripping the breaker.
 
-## Durable Agent Intake (Experimental)
+## Durable Agent Intake
 
-When `durable_agent_workflows_enabled` is `true` and the environment is configured with a Postgres world (see `docs/SETTINGS.md`), **read-only agent runs with no prerequisite command** take a durable two-step path instead of composing and spawning inline in the route handler.
+All agent runs go through `runAgentIntakeWorkflow()` in `lib/agents/intake-workflow.ts`. There is no flag and no alternate path; the workflow owns prompt composition, optional prerequisite execution, retrieval/memory injection, and the PM2 handoff. The function is declared with `'use workflow'` / `'use step'` directives and runs under the `workflow` package's Postgres-backed execution world, which persists step state so transient crashes or server restarts retry from the last completed step rather than restart the run.
 
-### What changes
+### Steps
 
-The run route delegates to `runAgentIntakeWorkflow()` in `lib/agents/intake-workflow.ts`. This function is declared with `'use workflow'` / `'use step'` directives and runs under the `workflow` package's Postgres-backed execution world, which persists step state so transient crashes or server restarts retry from the last completed step rather than starting over.
+**Step 1 — `runPrerequisiteStep`** (only when the agent has `prerequisiteCommand`): runs `bash -c <cmd>` in the project directory with cancellation support, captures stdout/stderr, and returns a `PrereqResult`. Cancelled prereqs short-circuit the workflow and mark the job done with exit 130.
 
-**Step 1 — `composePromptStep`**: reads agent skills and docs, runs `git rev-parse HEAD` and `git status` to capture a baseline snapshot, builds the full system prompt, resolves the CLI binary and env, and returns a `ComposeResult` struct.
+**Step 2 — `composePromptStep`**: re-checks the release lock and (for non-readOnly runs) the project-busy gate after the prereq, composes skills + docs, captures a `git rev-parse HEAD` + `git status` baseline, loads agent memory, queries pgvector retrieval when `retrieval_enabled` is on, resolves the CLI binary + env, and builds the full prompt.
 
-**Step 2 — `startAgentStep`**: updates the job row with the composed `contextMeta`, calls `startJob()` to hand off to PM2, and on failure writes an error artifact to the log file, marks the job done with `exitCode -1`, and rethrows so the workflow runtime can retry the step.
+**Step 3 — `startAgentStep`**: writes the prereq artifact to disk, updates the job row with the composed `contextMeta` (which includes `workflow: true`), and calls `startJob()` to hand off to PM2. On failure it writes an error breadcrumb to the log file, marks the job done with `exitCode -1`, and rethrows so the workflow runtime can retry.
 
-Everything after PM2 spawn — lifecycle hooks, SSE streaming, log tailing, completion detection, project recommendations — is unchanged.
+Everything after PM2 spawn — lifecycle hooks, SSE streaming, log tailing, completion detection, recommendation side effects — is unchanged.
 
 ### Response
 
-When the durable path handles a run, the `/api/agents/{agentId}/run` response includes `via: "workflow"`:
+The `/api/agents/{agentId}/run` success response always includes `via: "workflow"`:
 
 ```json
 {
   "status": "started",
   "job_id": "job-…",
+  "pid": 0,
   "via": "workflow",
   "agent": "My Agent"
 }
 ```
 
-### Eligibility
-
-When `durable_agent_workflows_enabled` is `true` **all** agent runs go through the workflow, including runs with prerequisite commands and non-read-only runs. The only condition is:
-- `durable_agent_workflows_enabled` setting is `true`
-- `WORKFLOW_TARGET_WORLD` env var is set (set in `.env.local`)
-
-When the flag is off, all runs use the direct inline path unchanged.
-
-Completed workflow runs have `"workflow": true` in `contextMeta` on the job row, which can be used to confirm the durable path was active.
+`pid` is `0` because the route returns before the workflow step has spawned the PM2 process; query `/api/jobs/<job_id>` later to get the actual PID.
 
 ### Setup
 
-See `docs/SETTINGS.md` → "Durable Agent Workflows" for Postgres provisioning, env vars, and the `workflow-postgres-setup` migration command. There is no Settings UI toggle — enable via `PATCH /api/settings` with `{"durable_agent_workflows_enabled": true}`.
+The workflow requires `WORKFLOW_TARGET_WORLD` to point at the `@workflow/world-postgres` world and `DATABASE_URL` to reach the same Postgres database the rest of TamTam uses. The world is started by `instrumentation-node.ts` at boot; if it fails to start, agent runs return `500 { detail: "Workflow failed to enqueue: …" }`.
 
 ## Example: Set Up a Weekly Review Agent
 
@@ -629,7 +622,7 @@ See `docs/SETTINGS.md` → "Durable Agent Workflows" for Postgres provisioning, 
 
 ### Instrumentation edge-runtime constraint
 
-Next.js compiles `instrumentation.ts` for **both** the Node and Edge runtimes. Anything the file imports — even transitively, and even through `await import(...)` — is traced into the Edge bundle. `lib/db` uses `path`, `fs`, and `better-sqlite3`, none of which exist on Edge, so a direct import produces:
+Next.js compiles `instrumentation.ts` for **both** the Node and Edge runtimes. Anything the file imports — even transitively, and even through `await import(...)` — is traced into the Edge bundle. `lib/db` uses `path`, `fs`, and `pg`, none of which exist on Edge, so a direct import produces:
 
 ```
 A Node.js module is loaded ('path' at line 4) which is not supported in the Edge Runtime.

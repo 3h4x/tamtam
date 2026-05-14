@@ -84,7 +84,6 @@ export interface TamTamConfig {
   retrieval_context_limit: number;
   retrieval_score_threshold: number;
   retrieval_manage_ollama: boolean;
-  durable_agent_workflows_enabled: boolean;
 }
 
 const DEFAULTS: TamTamConfig = {
@@ -165,7 +164,6 @@ const DEFAULTS: TamTamConfig = {
   retrieval_context_limit: 5,
   retrieval_score_threshold: 0.8,
   retrieval_manage_ollama: true,
-  durable_agent_workflows_enabled: false,
 };
 
 let _cache: { config: TamTamConfig; time: number } | null = null;
@@ -364,7 +362,6 @@ function _buildConfig(map: Record<string, string>): TamTamConfig {
       return Number.isFinite(v) ? v : DEFAULTS.retrieval_score_threshold;
     })(),
     retrieval_manage_ollama: map.retrieval_manage_ollama !== 'false',
-    durable_agent_workflows_enabled: map.durable_agent_workflows_enabled === 'true',
   };
   return config;
 }

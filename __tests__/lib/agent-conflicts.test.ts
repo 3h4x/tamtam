@@ -1,46 +1,61 @@
-import { describe, it, expect, beforeEach, vi } from 'vitest';
-import Database from 'better-sqlite3';
-import { drizzle } from 'drizzle-orm/better-sqlite3';
+import { describe, it, expect, beforeAll, beforeEach, afterAll, afterEach, vi } from 'vitest';
+import { sql } from 'drizzle-orm';
+import { createTestPgDbEmpty, type TestDbHandle } from '@/__tests__/helpers/test-db';
 import * as schema from '@/lib/db/schema';
-
-function createTestDb() {
-  const sqlite = new Database(':memory:');
-  sqlite.pragma('journal_mode = WAL');
-  sqlite.exec(`
-    CREATE TABLE IF NOT EXISTS agents (
-      id TEXT PRIMARY KEY,
-      name TEXT NOT NULL,
-      project TEXT NOT NULL,
-      skill_ids TEXT NOT NULL DEFAULT '[]',
-      doc_paths TEXT NOT NULL DEFAULT '[]',
-      model TEXT NOT NULL DEFAULT 'sonnet',
-      prompt TEXT NOT NULL DEFAULT '',
-      schedule TEXT,
-      runner TEXT NOT NULL DEFAULT 'pm2',
-      enabled INTEGER NOT NULL DEFAULT 1,
-      provider TEXT,
-      prerequisite_command TEXT,
-      created_at REAL NOT NULL,
-      updated_at REAL NOT NULL
-    );
-  `);
-  return { sqlite, db: drizzle(sqlite, { schema }) };
-}
 
 const scanFileAgentsMock = vi.fn();
 const resolveProjectPathMock = vi.fn();
 
+async function applyDdl(handle: TestDbHandle): Promise<void> {
+  // PGlite rejects multi-statement prepared queries, so issue each DDL
+  // separately.
+  await handle.db.execute(sql.raw(`
+    CREATE TABLE IF NOT EXISTS agents (
+      id text PRIMARY KEY,
+      name text NOT NULL,
+      project text NOT NULL,
+      skill_ids text NOT NULL DEFAULT '[]',
+      doc_paths text NOT NULL DEFAULT '[]',
+      model text NOT NULL DEFAULT 'sonnet',
+      prompt text NOT NULL DEFAULT '',
+      schedule text,
+      runner text NOT NULL DEFAULT 'pm2',
+      enabled boolean NOT NULL DEFAULT true,
+      provider text,
+      prerequisite_command text,
+      created_at double precision NOT NULL,
+      updated_at double precision NOT NULL
+    )
+  `));
+}
+
 describe('findAgentNameConflict', () => {
-  let testDb: ReturnType<typeof createTestDb>;
+  let sharedHandle: TestDbHandle;
+  const handle = { get db() { return sharedHandle.db; } } as { db: TestDbHandle['db'] };
   let findAgentNameConflict: (project: string, name: string, options?: { excludeDbAgentId?: string; excludeFileAgentName?: string }) => Promise<import('@/lib/agents/agent-conflicts').AgentNameConflict | null>;
+
+  beforeAll(async () => {
+    sharedHandle = await createTestPgDbEmpty();
+    await applyDdl(sharedHandle);
+  });
+
+  afterAll(async () => {
+    // Let any straggling fire-and-forget queries settle before closing.
+    await new Promise((r) => setTimeout(r, 30));
+    try {
+      await sharedHandle[Symbol.asyncDispose]();
+    } catch {
+      // ignore
+    }
+  });
 
   beforeEach(async () => {
     vi.resetModules();
-    testDb = createTestDb();
+    await sharedHandle.db.execute(sql.raw('TRUNCATE agents'));
     scanFileAgentsMock.mockReset();
     resolveProjectPathMock.mockReset();
 
-    vi.doMock('@/lib/db', () => ({ db: testDb.db, schema }));
+    vi.doMock('@/lib/db', () => ({ db: sharedHandle.db, schema }));
     vi.doMock('@/lib/agents/tamtam-file-agents', () => ({
       scanFileAgents: scanFileAgentsMock,
     }));
@@ -52,11 +67,26 @@ describe('findAgentNameConflict', () => {
     findAgentNameConflict = mod.findAgentNameConflict;
   });
 
-  function insertAgent(id: string, project: string, name: string) {
-    testDb.sqlite.prepare(`
-      INSERT INTO agents (id, name, project, skill_ids, doc_paths, model, prompt, runner, enabled, created_at, updated_at)
-      VALUES (?, ?, ?, '[]', '[]', 'sonnet', '', 'pm2', 1, ?, ?)
-    `).run(id, name, project, Date.now(), Date.now());
+  afterEach(async () => {
+    vi.resetModules();
+    vi.clearAllMocks();
+  });
+
+  async function insertAgent(id: string, project: string, name: string) {
+    const now = Date.now();
+    await handle.db.insert(schema.agents).values({
+      id,
+      name,
+      project,
+      skillIds: '[]',
+      docPaths: '[]',
+      model: 'sonnet',
+      prompt: '',
+      runner: 'pm2',
+      enabled: true,
+      createdAt: now,
+      updatedAt: now,
+    });
   }
 
   it('returns null when no DB agent and no file agents match', async () => {
@@ -66,7 +96,7 @@ describe('findAgentNameConflict', () => {
   });
 
   it('detects a DB agent name conflict (exact match)', async () => {
-    insertAgent('agent-1', 'myproject', 'my-agent');
+    await insertAgent('agent-1', 'myproject', 'my-agent');
     resolveProjectPathMock.mockReturnValue('/projects/myproject');
     scanFileAgentsMock.mockReturnValue([]);
 
@@ -75,7 +105,7 @@ describe('findAgentNameConflict', () => {
   });
 
   it('detects a DB agent name conflict case-insensitively', async () => {
-    insertAgent('agent-2', 'myproject', 'My-Agent');
+    await insertAgent('agent-2', 'myproject', 'My-Agent');
     resolveProjectPathMock.mockReturnValue('/projects/myproject');
     scanFileAgentsMock.mockReturnValue([]);
 
@@ -86,7 +116,7 @@ describe('findAgentNameConflict', () => {
   });
 
   it('skips DB agent when excludeDbAgentId matches', async () => {
-    insertAgent('agent-1', 'myproject', 'my-agent');
+    await insertAgent('agent-1', 'myproject', 'my-agent');
     resolveProjectPathMock.mockReturnValue('/projects/myproject');
     scanFileAgentsMock.mockReturnValue([]);
 
@@ -95,8 +125,8 @@ describe('findAgentNameConflict', () => {
   });
 
   it('does not skip a different DB agent when excludeDbAgentId is set', async () => {
-    insertAgent('agent-1', 'myproject', 'my-agent');
-    insertAgent('agent-2', 'myproject', 'other-agent');
+    await insertAgent('agent-1', 'myproject', 'my-agent');
+    await insertAgent('agent-2', 'myproject', 'other-agent');
     resolveProjectPathMock.mockReturnValue('/projects/myproject');
     scanFileAgentsMock.mockReturnValue([]);
 
@@ -125,7 +155,7 @@ describe('findAgentNameConflict', () => {
   });
 
   it('returns null when resolveProjectPath returns null (skips file scan)', async () => {
-    insertAgent('agent-x', 'other-project', 'shared-name');
+    await insertAgent('agent-x', 'other-project', 'shared-name');
     resolveProjectPathMock.mockReturnValue(null);
 
     const conflict = await findAgentNameConflict('myproject', 'shared-name');
@@ -134,7 +164,7 @@ describe('findAgentNameConflict', () => {
   });
 
   it('only matches agents belonging to the same project', async () => {
-    insertAgent('agent-a', 'project-a', 'shared-name');
+    await insertAgent('agent-a', 'project-a', 'shared-name');
     resolveProjectPathMock.mockReturnValue('/projects/project-b');
     scanFileAgentsMock.mockReturnValue([]);
 

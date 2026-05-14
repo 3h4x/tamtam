@@ -1,31 +1,44 @@
-import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
-import Database from 'better-sqlite3';
-import { drizzle } from 'drizzle-orm/better-sqlite3';
+import { describe, it, expect, beforeAll, beforeEach, afterAll, afterEach, vi } from 'vitest';
+import { sql } from 'drizzle-orm';
+import { createTestPgDbEmpty, type TestDbHandle } from '@/__tests__/helpers/test-db';
 import * as schema from '@/lib/db/schema';
 
-function createTestDb() {
-  const sqlite = new Database(':memory:');
-  sqlite.pragma('journal_mode = WAL');
-  sqlite.exec(`
+let sharedHandle: TestDbHandle;
+
+async function applyDdl(h: TestDbHandle): Promise<void> {
+  await h.db.execute(sql.raw(`
     CREATE TABLE IF NOT EXISTS agents (
-      id TEXT PRIMARY KEY,
-      name TEXT NOT NULL,
-      project TEXT NOT NULL,
-      skill_ids TEXT NOT NULL DEFAULT '[]',
-      doc_paths TEXT NOT NULL DEFAULT '[]',
-      model TEXT NOT NULL DEFAULT 'sonnet',
-      prompt TEXT NOT NULL DEFAULT '',
-      schedule TEXT,
-      runner TEXT NOT NULL DEFAULT 'pm2',
-      enabled INTEGER NOT NULL DEFAULT 1,
-      provider TEXT,
-      prerequisite_command TEXT,
-      created_at REAL NOT NULL,
-      updated_at REAL NOT NULL
-    );
-  `);
-  return { sqlite, db: drizzle(sqlite, { schema }) };
+      id text PRIMARY KEY,
+      name text NOT NULL,
+      project text NOT NULL,
+      skill_ids text NOT NULL DEFAULT '[]',
+      doc_paths text NOT NULL DEFAULT '[]',
+      model text NOT NULL DEFAULT 'sonnet',
+      prompt text NOT NULL DEFAULT '',
+      schedule text,
+      runner text NOT NULL DEFAULT 'pm2',
+      enabled boolean NOT NULL DEFAULT true,
+      provider text,
+      prerequisite_command text,
+      created_at double precision NOT NULL,
+      updated_at double precision NOT NULL
+    )
+  `));
 }
+
+beforeAll(async () => {
+  sharedHandle = await createTestPgDbEmpty();
+  await applyDdl(sharedHandle);
+});
+
+afterAll(async () => {
+  await new Promise((r) => setTimeout(r, 30));
+  try {
+    await sharedHandle[Symbol.asyncDispose]();
+  } catch {
+    // ignore
+  }
+});
 
 function makeAgentRow(overrides: Partial<typeof schema.agents.$inferSelect> = {}) {
   return {
@@ -48,17 +61,18 @@ function makeAgentRow(overrides: Partial<typeof schema.agents.$inferSelect> = {}
 }
 
 describe('normalizeAgent', () => {
+  const handle = { get db() { return sharedHandle.db; } } as { db: TestDbHandle['db'] };
   let normalizeAgent: typeof import('@/lib/agents/agents-cache').normalizeAgent;
 
   beforeEach(async () => {
     vi.resetModules();
-    const testDb = createTestDb();
-    vi.doMock('@/lib/db', () => ({ db: testDb.db, schema }));
+    await sharedHandle.db.execute(sql.raw('TRUNCATE agents'));
+    vi.doMock('@/lib/db', () => ({ db: sharedHandle.db, schema }));
     const mod = await import('@/lib/agents/agents-cache');
     normalizeAgent = mod.normalizeAgent;
   });
 
-  afterEach(() => {
+  afterEach(async () => {
     vi.resetModules();
   });
 
@@ -103,101 +117,106 @@ describe('normalizeAgent', () => {
     const result = normalizeAgent(row);
     expect(result.prerequisiteCommand).toBeNull();
   });
+  // reference handle so it is not flagged as unused
+  void handle;
 });
 
-describe('getAllAgentsCached', () => {
-  let testDb: ReturnType<typeof createTestDb>;
-  let getAllAgentsCached: typeof import('@/lib/agents/agents-cache').getAllAgentsCached;
+describe('getAllAgentsCachedAsync', () => {
+  const handle = { get db() { return sharedHandle.db; } } as { db: TestDbHandle['db'] };
+  let getAllAgentsCachedAsync: typeof import('@/lib/agents/agents-cache').getAllAgentsCachedAsync;
   let clearAgentsCache: typeof import('@/lib/agents/agents-cache').clearAgentsCache;
 
   beforeEach(async () => {
     vi.resetModules();
-    testDb = createTestDb();
-    vi.doMock('@/lib/db', () => ({ db: testDb.db, schema }));
+    await sharedHandle.db.execute(sql.raw('TRUNCATE agents'));
+    vi.doMock('@/lib/db', () => ({ db: sharedHandle.db, schema }));
     const mod = await import('@/lib/agents/agents-cache');
-    getAllAgentsCached = mod.getAllAgentsCached;
+    getAllAgentsCachedAsync = mod.getAllAgentsCachedAsync;
     clearAgentsCache = mod.clearAgentsCache;
     clearAgentsCache();
   });
 
-  afterEach(() => {
+  afterEach(async () => {
     vi.resetModules();
   });
 
-  it('returns empty array when no agents exist', () => {
-    const agents = getAllAgentsCached();
+  it('returns empty array when no agents exist', async () => {
+    const agents = await getAllAgentsCachedAsync();
     expect(agents).toEqual([]);
   });
 
-  it('returns agents from database', () => {
-    testDb.db.insert(schema.agents).values(makeAgentRow()).run();
-    const agents = getAllAgentsCached();
+  it('returns agents from database', async () => {
+    await handle.db.insert(schema.agents).values(makeAgentRow());
+    const agents = await getAllAgentsCachedAsync();
     expect(agents).toHaveLength(1);
     expect(agents[0].id).toBe('agent-1');
   });
 
-  it('returns multiple agents', () => {
-    testDb.db.insert(schema.agents).values(makeAgentRow({ id: 'a1', name: 'agent-one' })).run();
-    testDb.db.insert(schema.agents).values(makeAgentRow({ id: 'a2', name: 'agent-two' })).run();
-    const agents = getAllAgentsCached();
+  it('returns multiple agents', async () => {
+    await handle.db.insert(schema.agents).values(makeAgentRow({ id: 'a1', name: 'agent-one' }));
+    await handle.db.insert(schema.agents).values(makeAgentRow({ id: 'a2', name: 'agent-two' }));
+    const agents = await getAllAgentsCachedAsync();
     expect(agents).toHaveLength(2);
   });
 
-  it('returns cached results on second call (no DB re-query for same data)', () => {
-    testDb.db.insert(schema.agents).values(makeAgentRow()).run();
-    const first = getAllAgentsCached();
+  it('returns cached results on second call (no DB re-query for same data)', async () => {
+    await handle.db.insert(schema.agents).values(makeAgentRow());
+    const first = await getAllAgentsCachedAsync();
     // Add a second agent directly without clearing cache
-    testDb.db.insert(schema.agents).values(makeAgentRow({ id: 'a2', name: 'agent-two' })).run();
-    const second = getAllAgentsCached();
+    await handle.db.insert(schema.agents).values(makeAgentRow({ id: 'a2', name: 'agent-two' }));
+    const second = await getAllAgentsCachedAsync();
     // Should still return 1 agent from cache
     expect(first).toHaveLength(1);
     expect(second).toHaveLength(1);
     expect(second).toBe(first); // Same reference from cache
   });
 
-  it('returns fresh results after clearAgentsCache', () => {
-    testDb.db.insert(schema.agents).values(makeAgentRow()).run();
-    const first = getAllAgentsCached();
+  it('returns fresh results after clearAgentsCache', async () => {
+    await handle.db.insert(schema.agents).values(makeAgentRow());
+    const first = await getAllAgentsCachedAsync();
     expect(first).toHaveLength(1);
     // Add second agent and clear cache
-    testDb.db.insert(schema.agents).values(makeAgentRow({ id: 'a2', name: 'agent-two' })).run();
+    await handle.db.insert(schema.agents).values(makeAgentRow({ id: 'a2', name: 'agent-two' }));
     clearAgentsCache();
-    const second = getAllAgentsCached();
+    const second = await getAllAgentsCachedAsync();
     expect(second).toHaveLength(2);
   });
 
   it('re-fetches after TTL expires', async () => {
     vi.useFakeTimers();
-    testDb.db.insert(schema.agents).values(makeAgentRow()).run();
-    const first = getAllAgentsCached();
-    expect(first).toHaveLength(1);
+    try {
+      await handle.db.insert(schema.agents).values(makeAgentRow());
+      const first = await getAllAgentsCachedAsync();
+      expect(first).toHaveLength(1);
 
-    // Add second agent and advance time past TTL (10 seconds)
-    testDb.db.insert(schema.agents).values(makeAgentRow({ id: 'a2', name: 'agent-two' })).run();
-    vi.advanceTimersByTime(11_000);
+      // Add second agent and advance time past TTL (10 seconds)
+      await handle.db.insert(schema.agents).values(makeAgentRow({ id: 'a2', name: 'agent-two' }));
+      vi.advanceTimersByTime(11_000);
 
-    const second = getAllAgentsCached();
-    expect(second).toHaveLength(2);
-    vi.useRealTimers();
+      const second = await getAllAgentsCachedAsync();
+      expect(second).toHaveLength(2);
+    } finally {
+      vi.useRealTimers();
+    }
   });
 });
 
 describe('clearAgentsCache', () => {
-  let testDb: ReturnType<typeof createTestDb>;
-  let getAllAgentsCached: typeof import('@/lib/agents/agents-cache').getAllAgentsCached;
+  const handle = { get db() { return sharedHandle.db; } } as { db: TestDbHandle['db'] };
+  let getAllAgentsCachedAsync: typeof import('@/lib/agents/agents-cache').getAllAgentsCachedAsync;
   let clearAgentsCache: typeof import('@/lib/agents/agents-cache').clearAgentsCache;
 
   beforeEach(async () => {
     vi.resetModules();
-    testDb = createTestDb();
-    vi.doMock('@/lib/db', () => ({ db: testDb.db, schema }));
+    await sharedHandle.db.execute(sql.raw('TRUNCATE agents'));
+    vi.doMock('@/lib/db', () => ({ db: sharedHandle.db, schema }));
     const mod = await import('@/lib/agents/agents-cache');
-    getAllAgentsCached = mod.getAllAgentsCached;
+    getAllAgentsCachedAsync = mod.getAllAgentsCachedAsync;
     clearAgentsCache = mod.clearAgentsCache;
     clearAgentsCache();
   });
 
-  afterEach(() => {
+  afterEach(async () => {
     vi.resetModules();
   });
 
@@ -205,14 +224,14 @@ describe('clearAgentsCache', () => {
     expect(() => clearAgentsCache()).not.toThrow();
   });
 
-  it('forces a fresh DB read on next getAllAgentsCached call', () => {
-    testDb.db.insert(schema.agents).values(makeAgentRow({ id: 'a1', name: 'first' })).run();
-    getAllAgentsCached(); // populate cache
+  it('forces a fresh DB read on next getAllAgentsCachedAsync call', async () => {
+    await handle.db.insert(schema.agents).values(makeAgentRow({ id: 'a1', name: 'first' }));
+    await getAllAgentsCachedAsync(); // populate cache
 
     clearAgentsCache();
 
-    testDb.db.insert(schema.agents).values(makeAgentRow({ id: 'a2', name: 'second' })).run();
-    const agents = getAllAgentsCached();
+    await handle.db.insert(schema.agents).values(makeAgentRow({ id: 'a2', name: 'second' }));
+    const agents = await getAllAgentsCachedAsync();
     expect(agents).toHaveLength(2);
   });
 });

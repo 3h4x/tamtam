@@ -7,5 +7,5 @@ import { listAllOpenRecommendations } from '@/lib/recommendations/recommendation
 // scoping and PATCH; this route is read-only and never returns dismissed /
 // applied rows.
 export async function GET() {
-  return NextResponse.json({ recommendations: listAllOpenRecommendations() });
+  return NextResponse.json({ recommendations: await listAllOpenRecommendations() });
 }

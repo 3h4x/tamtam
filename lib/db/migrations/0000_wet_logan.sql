@@ -1,3 +1,5 @@
+CREATE EXTENSION IF NOT EXISTS vector;
+--> statement-breakpoint
 CREATE TABLE "agents" (
 	"id" text PRIMARY KEY NOT NULL,
 	"name" text NOT NULL,

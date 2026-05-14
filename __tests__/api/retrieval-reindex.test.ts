@@ -62,29 +62,38 @@ vi.mock('@/lib/agents/retrieval/pgvector-backend', () => ({
   }),
 }));
 
-vi.mock('@/lib/db', () => ({
-  db: {
-    select: vi.fn().mockReturnValue({
-      from: vi.fn().mockReturnValue({
-        where: vi.fn().mockReturnValue({
-          limit: vi.fn().mockResolvedValue([]),
-        }),
-        orderBy: vi.fn().mockReturnValue({
-          limit: vi.fn().mockResolvedValue([]),
+vi.mock('@/lib/db', () => {
+  const makeWhereChain = () => {
+    const chain: Record<string, unknown> = {
+      limit: vi.fn().mockResolvedValue([]),
+      orderBy: vi.fn().mockReturnValue({ limit: vi.fn().mockResolvedValue([]) }),
+      then: (resolve: (value: unknown[]) => unknown, reject?: (reason: unknown) => unknown) =>
+        Promise.resolve([...mockExistingRecords]).then(resolve, reject),
+    };
+    return chain;
+  };
+  return {
+    db: {
+      select: vi.fn().mockReturnValue({
+        from: vi.fn().mockReturnValue({
+          where: vi.fn().mockImplementation(() => makeWhereChain()),
+          orderBy: vi.fn().mockReturnValue({
+            limit: vi.fn().mockResolvedValue([]),
+          }),
         }),
       }),
-    }),
-    insert: vi.fn().mockReturnValue({
-      values: vi.fn().mockReturnValue({
-        onConflictDoUpdate: vi.fn().mockReturnValue({ execute: mockInsertRun }),
+      insert: vi.fn().mockReturnValue({
+        values: vi.fn().mockReturnValue({
+          onConflictDoUpdate: vi.fn().mockReturnValue({ execute: mockInsertRun }),
+        }),
       }),
-    }),
-    delete: vi.fn().mockReturnValue({
-      where: vi.fn().mockReturnValue({ execute: vi.fn().mockResolvedValue({}) }),
-    }),
-  },
-  schema: { retrievalRecords: { id: 'id', project: 'project', sourceKind: 'source_kind' } },
-}));
+      delete: vi.fn().mockReturnValue({
+        where: vi.fn().mockReturnValue({ execute: vi.fn().mockResolvedValue({}) }),
+      }),
+    },
+    schema: { retrievalRecords: { id: 'id', project: 'project', sourceKind: 'source_kind' } },
+  };
+});
 
 vi.mock('@/lib/shared/project-data', () => ({
   resolveProjectPath: vi.fn().mockReturnValue('/tmp/workspace/myproject'),

@@ -1,5 +1,7 @@
 # Durable Agent Orchestration Evaluation
 
+> **Update 2026-05-14:** This evaluation recommended deferring `workflow` adoption. That recommendation was reversed shortly afterward: TamTam moved to Postgres + `@workflow/world-postgres`, and the durable intake path is now the only agent intake path (see `docs/superpowers/specs/2026-05-14-postgres-workflow-cutover-design.md`). The body below is preserved for historical context.
+
 Date: 2026-05-13
 
 Issue: #145

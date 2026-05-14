@@ -191,7 +191,7 @@ Outbound webhook fired when the release pipeline reaches a terminal state. Suppo
 
 ### Retrieval
 
-Semantic retrieval layer — embeds agent run reports plus project-scoped knowledge into a local vector store (`sqlite-vec`) and injects relevant context into agent prompts at run time. The corpus includes committed project docs, DB-backed skills referenced by that project's agents, and synthesized project config guidance. Embeddings are generated locally via Ollama (`nomic-embed-text`). Everything is off by default (`retrieval_enabled = false`).
+Semantic retrieval layer — embeds agent run reports plus project-scoped knowledge into the `retrieval_chunks` table (a pgvector-backed column on the same Postgres database TamTam uses for everything else) and injects relevant context into agent prompts at run time. The corpus includes committed project docs, DB-backed skills referenced by that project's agents, and synthesized project config guidance. Embeddings are generated locally via Ollama (`nomic-embed-text`). Everything is off by default (`retrieval_enabled = false`).
 
 | Key | Type | Default | Description |
 |---|---|---|---|
@@ -202,31 +202,15 @@ Semantic retrieval layer — embeds agent run reports plus project-scoped knowle
 | `retrieval_score_threshold` | float | `0.8` | Min similarity score to include a result |
 | `retrieval_manage_ollama` | bool | `true` | Whether TamTam starts Ollama via PM2 if not running |
 
-When enabled, TamTam starts Ollama via PM2 (`ollama-serve`) on boot if not already reachable, pulls `nomic-embed-text` if not installed, and indexes completed agent run reports automatically. Use `POST /api/projects/[schedId]/retrieval/reindex` to refresh the project corpus on demand; that route reports whether sources were missing or stale before the refresh. Freshness behavior is source-specific: completed agent runs are indexed when they finish, while project docs, DB-backed skills, and synthesized project config are refreshed on explicit reindex against the current file/DB snapshot. At prompt time, TamTam records retrieval diagnostics on the run (`results`, `empty_corpus`, `no_results`, `below_threshold`, or `embed_failed`) so ineffective retrieval can be distinguished from a healthy hit. If the optional native `sqlite-vec` module is not installed in the current environment, retrieval stays unavailable at runtime: agent prompts skip retrieval context, completed runs are not marked as indexed, and the reindex route returns `503 { code: 'sqlite_vec_unavailable' }` instead of failing mid-request.
+When enabled, TamTam starts Ollama via PM2 (`ollama-serve`) on boot if not already reachable, pulls `nomic-embed-text` if not installed, and indexes completed agent run reports automatically. Use `POST /api/projects/[schedId]/retrieval/reindex` to refresh the project corpus on demand; that route reports whether sources were missing or stale before the refresh. Freshness behavior is source-specific: completed agent runs are indexed when they finish, while project docs, DB-backed skills, and synthesized project config are refreshed on explicit reindex against the current file/DB snapshot. At prompt time, TamTam records retrieval diagnostics on the run (`results`, `empty_corpus`, `no_results`, `below_threshold`, or `embed_failed`) so ineffective retrieval can be distinguished from a healthy hit.
 
 ### Durable Agent Workflows
 
-Durable intake for agent runs, backed by the `workflow` package and a Postgres world. When enabled, **all agent runs** — including runs with prerequisite commands and non-read-only runs — go through a durable workflow (`runPrerequisiteStep` → `composePromptStep` → `startAgentStep`) rather than the direct route path. The workflow state is persisted to Postgres so prompt composition and PM2 spawn are retried automatically on transient failures or server restarts. Everything after PM2 spawn (lifecycle hooks, SSE streaming, completion detection) is unchanged.
+All agent runs go through the workflow intake (`runPrerequisiteStep` → `composePromptStep` → `startAgentStep`). There is no setting and no alternate path; the workflow owns prompt composition, retrieval/memory injection, and the PM2 handoff. See `docs/AGENT.md` → "Durable Agent Intake" for the step-level breakdown.
 
-Requires: Postgres 17+ accessible to the TamTam process, with env vars set in `.env.local`:
-```
-WORKFLOW_TARGET_WORLD=@workflow/world-postgres
-WORKFLOW_POSTGRES_URL=postgres://user@host:5432/tamtam_workflow
-```
-Run `workflow-postgres-setup` (from `@workflow/world-postgres`) once to create the schema in `tamtam_workflow`.
+Requires: Postgres accessible to the TamTam process via `DATABASE_URL`, plus `WORKFLOW_TARGET_WORLD=@workflow/world-postgres` set in `.env.local`. Run `workflow-postgres-setup` (from `@workflow/world-postgres`) once against the same database to create the workflow schema.
 
-| Key | Type | Default | Description |
-|---|---|---|---|
-| `durable_agent_workflows_enabled` | bool | `false` | Master gate — off by default; enable after Postgres is provisioned |
-
-There is no Settings UI toggle for this key. Enable it via the API:
-```bash
-curl -X PATCH http://localhost:1337/api/settings \
-  -H "Content-Type: application/json" \
-  -d '{"durable_agent_workflows_enabled": true}'
-```
-
-The Postgres world worker starts automatically on TamTam boot when the flag is `true` and `WORKFLOW_TARGET_WORLD` is set. Run history and job rows remain SQLite-backed; only workflow execution state (runs, steps) lives in Postgres.
+The Postgres world worker starts automatically on TamTam boot when `WORKFLOW_TARGET_WORLD` is set. If it fails to start, agent runs return `500 { detail: "Workflow failed to enqueue: …" }`.
 
 ### Subscription Budget
 

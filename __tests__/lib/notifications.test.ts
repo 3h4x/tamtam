@@ -1,6 +1,6 @@
-import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
-import Database from 'better-sqlite3';
-import { drizzle } from 'drizzle-orm/better-sqlite3';
+import { describe, it, expect, beforeAll, afterAll, beforeEach, afterEach, vi } from 'vitest';
+import { sql, eq } from 'drizzle-orm';
+import { createTestPgDbEmpty, type TestDbHandle } from '@/__tests__/helpers/test-db';
 import * as schema from '@/lib/db/schema';
 
 type Settings = {
@@ -34,17 +34,12 @@ function defaultSettings(overrides: Partial<Settings> = {}): Settings {
   };
 }
 
-function createTestDb() {
-  const sqlite = new Database(':memory:');
-  sqlite.pragma('journal_mode = WAL');
-  sqlite.exec(`
-    CREATE TABLE notification_throttle (
-      key TEXT PRIMARY KEY,
-      last_sent_at INTEGER NOT NULL,
-      suppressed_count INTEGER NOT NULL DEFAULT 0
-    );
-  `);
-  return { sqlite, db: drizzle(sqlite, { schema }) };
+async function applyThrottleSchema(handle: TestDbHandle): Promise<void> {
+  await handle.db.execute(sql.raw(`CREATE TABLE notification_throttle (
+    key text PRIMARY KEY,
+    last_sent_at bigint NOT NULL,
+    suppressed_count integer NOT NULL DEFAULT 0
+  )`));
 }
 
 const SLACK_URL = 'https://hooks.slack.com/services/T000/B000/xxx';
@@ -54,31 +49,62 @@ const GENERIC_URL = 'https://ntfy.sh/my-topic';
 describe('lib/notifications', () => {
   let mockGetSettings: ReturnType<typeof vi.fn>;
   let mockFetch: ReturnType<typeof vi.fn>;
-  let testDb: ReturnType<typeof createTestDb>;
+  let handle: TestDbHandle;
+
+  async function getThrottleRow(key: string): Promise<{ key: string; lastSentAt: number; suppressedCount: number } | undefined> {
+    const rows = await handle.db.select().from(schema.notificationThrottle).where(eq(schema.notificationThrottle.key, key));
+    return rows[0];
+  }
+
+  async function getAllThrottleRows(): Promise<Array<{ key: string }>> {
+    const rows = await handle.db.select().from(schema.notificationThrottle);
+    return [...rows].sort((a, b) => a.key.localeCompare(b.key));
+  }
+
+  beforeAll(async () => {
+    handle = await createTestPgDbEmpty();
+    await applyThrottleSchema(handle);
+  });
+
+  afterAll(async () => {
+    try {
+      await handle[Symbol.asyncDispose]();
+    } catch {
+      // ignore
+    }
+  });
 
   beforeEach(async () => {
+    await handle.db.execute(sql.raw('TRUNCATE notification_throttle'));
     vi.resetModules();
-    testDb = createTestDb();
     mockGetSettings = vi.fn().mockReturnValue(defaultSettings());
     vi.doMock('@/lib/shared/config', () => ({ getSettings: mockGetSettings }));
     vi.doMock('@/lib/db', () => ({
-      db: testDb.db,
+      db: handle.db,
       schema,
     }));
     mockFetch = vi.fn().mockResolvedValue({ ok: true });
     vi.stubGlobal('fetch', mockFetch);
   });
 
-  afterEach(() => {
+  afterEach(async () => {
+    // Always restore real timers — tests that opt into vi.useFakeTimers() can
+    // throw before their explicit restore call, which would leak fake timers
+    // into the next test and hang any setTimeout-based await.
+    vi.useRealTimers();
     vi.unstubAllGlobals();
     vi.resetModules();
   });
 
   // Helper to flush the microtask / promise queue so fire-and-forget calls land.
+  // PGlite queries cross a WASM bridge and need a real timer tick to settle;
+  // tests that use vi.useFakeTimers() must call vi.useRealTimers() (and tick
+  // any pending fake timers via runAllTimersAsync) before awaiting flush().
   async function flush() {
-    for (let i = 0; i < 10; i += 1) {
+    for (let i = 0; i < 20; i += 1) {
       await Promise.resolve();
     }
+    await new Promise((r) => setTimeout(r, 5));
   }
 
   describe('notify()', () => {
@@ -216,10 +242,8 @@ describe('lib/notifications', () => {
       await flush();
 
       expect(mockFetch).toHaveBeenCalledOnce();
-      const row = testDb.sqlite
-        .prepare('SELECT * FROM notification_throttle WHERE key = ?')
-        .get('agent_run_fail:p:qa') as { suppressed_count: number } | undefined;
-      expect(row?.suppressed_count).toBe(1);
+      const row = await getThrottleRow('agent_run_fail:p:qa');
+      expect(row?.suppressedCount).toBe(1);
     });
 
     it('always sends release_fail when the default override disables throttling', async () => {
@@ -294,9 +318,7 @@ describe('lib/notifications', () => {
       await flush();
 
       expect(mockFetch).toHaveBeenCalledTimes(2);
-      const rows = testDb.sqlite
-        .prepare('SELECT key FROM notification_throttle ORDER BY key')
-        .all() as Array<{ key: string }>;
+      const rows = await getAllThrottleRows();
       expect(rows.map((row) => row.key)).toEqual([
         'budget_blocked:tamtam:budget:5h:2099-01-01T00:00:00Z',
         'budget_blocked:tamtam:budget:5h:2099-01-01T01:00:00Z',
@@ -333,10 +355,8 @@ describe('lib/notifications', () => {
       await flush();
 
       expect(mockFetch).toHaveBeenCalledOnce();
-      const row = testDb.sqlite
-        .prepare('SELECT * FROM notification_throttle WHERE key = ?')
-        .get('budget_blocked:tamtam:budget:5h:2099-01-01T00:00:00Z') as { suppressed_count: number } | undefined;
-      expect(row?.suppressed_count).toBe(1);
+      const row = await getThrottleRow('budget_blocked:tamtam:budget:5h:2099-01-01T00:00:00Z');
+      expect(row?.suppressedCount).toBe(1);
     });
 
     it('includes suppressedSince when sending after the throttle window expires', async () => {
@@ -375,18 +395,15 @@ describe('lib/notifications', () => {
 
       await notify({ event: 'release_success', project: 'p', job_id: 'j1', status: 'success', timestamp: 1000 });
       await vi.runAllTimersAsync();
+      vi.useRealTimers();
       await flush();
 
       expect(mockFetch).toHaveBeenCalledTimes(3);
-      const row = testDb.sqlite
-        .prepare('SELECT * FROM notification_throttle WHERE key = ?')
-        .get('release_success:p:release');
+      const row = await getThrottleRow('release_success:p:release');
       expect(row).toBeUndefined();
-      vi.useRealTimers();
     });
 
     it('keeps the last delivered throttle state when a resend after the window fails', async () => {
-      vi.useFakeTimers();
       mockGetSettings.mockReturnValue(
         defaultSettings({
           notification_webhook_url: GENERIC_URL,
@@ -405,20 +422,20 @@ describe('lib/notifications', () => {
 
       mockFetch.mockReset();
       mockFetch.mockRejectedValue(new Error('network down'));
+      // Only fake timers around the retry loop — keeps flush() (real setTimeout)
+      // working before and after.
+      vi.useFakeTimers();
       await notify({ event: 'agent_run_fail', project: 'p', agent: 'qa', job_id: 'j3', status: 'failed', timestamp: 12_000 });
       await vi.runAllTimersAsync();
+      vi.useRealTimers();
       await flush();
 
       expect(mockFetch).toHaveBeenCalledTimes(3);
-      const row = testDb.sqlite
-        .prepare('SELECT * FROM notification_throttle WHERE key = ?')
-        .get('agent_run_fail:p:qa') as { last_sent_at: number; suppressed_count: number } | undefined;
-      expect(row).toMatchObject({ key: 'agent_run_fail:p:qa', last_sent_at: 1000, suppressed_count: 1 });
-      vi.useRealTimers();
+      const row = await getThrottleRow('agent_run_fail:p:qa');
+      expect(row).toMatchObject({ key: 'agent_run_fail:p:qa', lastSentAt: 1000, suppressedCount: 1 });
     });
 
     it('retries with the accumulated suppressed count after a failed resend eventually succeeds', async () => {
-      vi.useFakeTimers();
       mockGetSettings.mockReturnValue(
         defaultSettings({
           notification_webhook_url: GENERIC_URL,
@@ -436,8 +453,10 @@ describe('lib/notifications', () => {
 
       mockFetch.mockReset();
       mockFetch.mockRejectedValue(new Error('network down'));
+      vi.useFakeTimers();
       await notify({ event: 'agent_run_fail', project: 'p', agent: 'qa', job_id: 'j3', status: 'failed', timestamp: 12_000 });
       await vi.runAllTimersAsync();
+      vi.useRealTimers();
       await flush();
 
       mockFetch.mockReset();
@@ -449,11 +468,8 @@ describe('lib/notifications', () => {
       const [, opts] = mockFetch.mock.calls[0];
       const body = JSON.parse(opts.body);
       expect(body.suppressedSince).toBe(1);
-      const row = testDb.sqlite
-        .prepare('SELECT * FROM notification_throttle WHERE key = ?')
-        .get('agent_run_fail:p:qa') as { last_sent_at: number; suppressed_count: number } | undefined;
-      expect(row).toMatchObject({ key: 'agent_run_fail:p:qa', last_sent_at: 13_000, suppressed_count: 0 });
-      vi.useRealTimers();
+      const row = await getThrottleRow('agent_run_fail:p:qa');
+      expect(row).toMatchObject({ key: 'agent_run_fail:p:qa', lastSentAt: 13_000, suppressedCount: 0 });
     });
   });
 

@@ -139,7 +139,7 @@ describe('Monitoring OverviewTab', () => {
     unmount()
   })
 
-  it('marks retention as an issue when sqlite maintenance failed and shows the sqlite error', () => {
+  it('marks retention as an issue when nightly cleanup reports a failure', () => {
     const data = buildMonitoringData({
       retention: {
         policy: {
@@ -149,14 +149,14 @@ describe('Monitoring OverviewTab', () => {
         },
         lastNightlyCleanup: {
           type: 'nightly',
-          status: 'completed',
+          status: 'failed',
           startedAt: 1_700_000_000,
           finishedAt: 1_700_000_010,
           rowsScanned: 4,
-          rowsDeleted: 3,
+          rowsDeleted: 0,
           skippedRunningRows: 0,
-          errorCount: 0,
-          lastError: null,
+          errorCount: 1,
+          lastError: 'connection refused',
         },
         lastProjectLogCleanup: {
           type: 'project_logs',
@@ -181,8 +181,8 @@ describe('Monitoring OverviewTab', () => {
     const cards = Array.from(container.querySelectorAll('div.rounded-lg.border'))
     const retentionCard = cards.find((card) => card.textContent?.includes('Retention'))
     expect(retentionCard?.className).toContain('text-status-warning')
-    expect(retentionCard?.textContent).toContain('SQLite failed')
-    expect(retentionCard?.textContent).toContain('SQLITE_BUSY')
+    expect(retentionCard?.textContent).toContain('failed')
+    expect(retentionCard?.textContent).toContain('connection refused')
 
     unmount()
   })

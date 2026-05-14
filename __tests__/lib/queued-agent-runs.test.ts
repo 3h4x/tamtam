@@ -1,67 +1,90 @@
-import Database from 'better-sqlite3';
-import { describe, it, expect, beforeEach, vi } from 'vitest';
+import { describe, it, expect, beforeAll, beforeEach, afterAll, vi } from 'vitest';
+import { sql } from 'drizzle-orm';
+import * as schema from '@/lib/db/schema';
+import { createTestPgDbEmpty, type TestDbHandle } from '@/__tests__/helpers/test-db';
 
-function createTestDb() {
-  const db = new Database(':memory:');
-  db.pragma('journal_mode = WAL');
-  db.exec(`
-    CREATE TABLE queued_agent_runs (
-      id INTEGER PRIMARY KEY AUTOINCREMENT,
-      project TEXT NOT NULL,
-      agent_id TEXT NOT NULL,
-      agent_name TEXT NOT NULL,
-      triggered_by TEXT NOT NULL DEFAULT 'manual',
-      prompt TEXT NOT NULL DEFAULT '',
-      enqueued_at REAL NOT NULL,
-      UNIQUE(project, agent_id)
+let sharedHandle: TestDbHandle;
+
+// Hoisted bag of shared mock state. All tests use these stable references and
+// override behavior per-test via `getLockMock.mockImplementation(...)` etc.
+// The hoisted bag is constructed before any vi.mock() factory runs so the
+// factory below can capture the fn via the bag.
+const mocks = vi.hoisted(() => ({
+  getLockMock: vi.fn().mockReturnValue(null),
+}));
+
+vi.mock('@/lib/db', () => ({
+  get db() {
+    return sharedHandle.db;
+  },
+  get schema() {
+    return schema;
+  },
+}));
+
+vi.mock('@/lib/pipeline/pipeline-lock', () => ({
+  getLock: mocks.getLockMock,
+}));
+
+// Top-level static import: now that mocks are installed at module-scope before
+// any subject-under-test load, we can import once and avoid the
+// vi.resetModules + await import per-test cost.
+import {
+  enqueueQueuedAgentRun,
+  listQueuedAgentRunsForProject,
+  listQueuedAgentRunProjects,
+  removeQueuedAgentRun,
+  clearQueuedAgentRunsForProject,
+  drainQueuedAgentRunsForProject,
+  drainQueuedAgentRunsForUnlockedProjects,
+} from '@/lib/agents/queued-agent-runs';
+
+async function applyDdl(handle: TestDbHandle): Promise<void> {
+  await handle.db.execute(sql.raw(`
+    CREATE TABLE IF NOT EXISTS queued_agent_runs (
+      id serial PRIMARY KEY,
+      project text NOT NULL,
+      agent_id text NOT NULL,
+      agent_name text NOT NULL,
+      triggered_by text NOT NULL DEFAULT 'manual',
+      prompt text NOT NULL DEFAULT '',
+      enqueued_at double precision NOT NULL
     )
-  `);
-  return db;
+  `));
+  await handle.db.execute(sql.raw(`
+    CREATE UNIQUE INDEX IF NOT EXISTS queued_agent_runs_project_agent
+      ON queued_agent_runs (project, agent_id)
+  `));
+}
+
+async function flush(): Promise<void> {
+  // Drain fire-and-forget inserts/deletes by awaiting a no-op SELECT on the
+  // same PGlite instance (queries are serialized). Cheaper than a fixed sleep.
+  await sharedHandle.db.execute(sql.raw('SELECT 1'));
 }
 
 describe('queued-agent-runs', () => {
-  let testDb: ReturnType<typeof createTestDb>;
-  let enqueueQueuedAgentRun: typeof import('@/lib/agents/queued-agent-runs').enqueueQueuedAgentRun;
-  let listQueuedAgentRunsForProject: typeof import('@/lib/agents/queued-agent-runs').listQueuedAgentRunsForProject;
-  let listQueuedAgentRunProjects: typeof import('@/lib/agents/queued-agent-runs').listQueuedAgentRunProjects;
-  let removeQueuedAgentRun: typeof import('@/lib/agents/queued-agent-runs').removeQueuedAgentRun;
-  let clearQueuedAgentRunsForProject: typeof import('@/lib/agents/queued-agent-runs').clearQueuedAgentRunsForProject;
-  let drainQueuedAgentRunsForProject: typeof import('@/lib/agents/queued-agent-runs').drainQueuedAgentRunsForProject;
-  let drainQueuedAgentRunsForUnlockedProjects: typeof import('@/lib/agents/queued-agent-runs').drainQueuedAgentRunsForUnlockedProjects;
+  beforeAll(async () => {
+    sharedHandle = await createTestPgDbEmpty();
+    await applyDdl(sharedHandle);
+  });
+
+  afterAll(async () => {
+    try {
+      await flush();
+      await sharedHandle[Symbol.asyncDispose]();
+    } catch {
+      // ignore
+    }
+  });
 
   beforeEach(async () => {
-    testDb = createTestDb();
-    vi.resetModules();
-    vi.doMock('@/lib/db', () => {
-      const { drizzle } = require('drizzle-orm/better-sqlite3');
-      const { sqliteTable, text, integer, real, uniqueIndex } = require('drizzle-orm/sqlite-core');
-      const queuedAgentRuns = sqliteTable('queued_agent_runs', {
-        id: integer('id').primaryKey({ autoIncrement: true }),
-        project: text('project').notNull(),
-        agentId: text('agent_id').notNull(),
-        agentName: text('agent_name').notNull(),
-        triggeredBy: text('triggered_by').notNull().default('manual'),
-        prompt: text('prompt').notNull().default(''),
-        enqueuedAt: real('enqueued_at').notNull(),
-      }, (t: { project: unknown; agentId: unknown }) => ({
-        projectAgentUniq: uniqueIndex('queued_agent_runs_project_agent').on(t.project, t.agentId),
-      }));
-      return {
-        db: drizzle(testDb),
-        schema: { queuedAgentRuns },
-      };
-    });
-    vi.doMock('@/lib/pipeline/pipeline-lock', () => ({
-      getLock: vi.fn().mockReturnValue(null),
-    }));
-    const mod = await import('@/lib/agents/queued-agent-runs');
-    enqueueQueuedAgentRun = mod.enqueueQueuedAgentRun;
-    listQueuedAgentRunsForProject = mod.listQueuedAgentRunsForProject;
-    listQueuedAgentRunProjects = mod.listQueuedAgentRunProjects;
-    removeQueuedAgentRun = mod.removeQueuedAgentRun;
-    clearQueuedAgentRunsForProject = mod.clearQueuedAgentRunsForProject;
-    drainQueuedAgentRunsForProject = mod.drainQueuedAgentRunsForProject;
-    drainQueuedAgentRunsForUnlockedProjects = mod.drainQueuedAgentRunsForUnlockedProjects;
+    // Ensure the table exists (one test drops it intentionally).
+    await applyDdl(sharedHandle);
+    await sharedHandle.db.execute(sql.raw('TRUNCATE queued_agent_runs RESTART IDENTITY'));
+    // Reset shared mock state without losing stable references.
+    mocks.getLockMock.mockReset();
+    mocks.getLockMock.mockReturnValue(null);
   });
 
   it('enqueues an agent run and lists it', async () => {
@@ -73,6 +96,7 @@ describe('queued-agent-runs', () => {
       prompt: 'update docs',
       enqueuedAt: 1_000_000,
     });
+    await flush();
     const rows = await listQueuedAgentRunsForProject('myproject');
     expect(rows).toHaveLength(1);
     expect(rows[0].agentId).toBe('agent-1');
@@ -91,6 +115,7 @@ describe('queued-agent-runs', () => {
       prompt: 'first prompt',
       enqueuedAt: 1_000,
     });
+    await flush();
     enqueueQueuedAgentRun('myproject', {
       project: 'myproject',
       agentId: 'agent-1',
@@ -99,6 +124,7 @@ describe('queued-agent-runs', () => {
       prompt: 'second prompt',
       enqueuedAt: 2_000,
     });
+    await flush();
     const rows = await listQueuedAgentRunsForProject('myproject');
     expect(rows).toHaveLength(1);
     expect(rows[0].prompt).toBe('second prompt');
@@ -114,6 +140,7 @@ describe('queued-agent-runs', () => {
       prompt: '',
       enqueuedAt: 1_000,
     });
+    await flush();
     enqueueQueuedAgentRun('myproject', {
       project: 'myproject',
       agentId: 'agent-2',
@@ -122,6 +149,7 @@ describe('queued-agent-runs', () => {
       prompt: '',
       enqueuedAt: 2_000,
     });
+    await flush();
     const rows = await listQueuedAgentRunsForProject('myproject');
     expect(rows).toHaveLength(2);
     expect(rows[0].agentId).toBe('agent-1'); // ordered by enqueuedAt asc
@@ -145,6 +173,7 @@ describe('queued-agent-runs', () => {
       prompt: '',
       enqueuedAt: 2_000,
     });
+    await flush();
     expect(await listQueuedAgentRunsForProject('project-a')).toHaveLength(1);
     expect(await listQueuedAgentRunsForProject('project-b')).toHaveLength(1);
     expect(await listQueuedAgentRunsForProject('project-c')).toHaveLength(0);
@@ -167,8 +196,10 @@ describe('queued-agent-runs', () => {
       prompt: '',
       enqueuedAt: 2_000,
     });
+    await flush();
     const before = await listQueuedAgentRunsForProject('myproject');
     removeQueuedAgentRun(before[0].id);
+    await flush();
     const after = await listQueuedAgentRunsForProject('myproject');
     expect(after).toHaveLength(1);
     expect(after[0].agentId).toBe('agent-2');
@@ -191,7 +222,9 @@ describe('queued-agent-runs', () => {
       prompt: '',
       enqueuedAt: 2_000,
     });
+    await flush();
     clearQueuedAgentRunsForProject('myproject');
+    await flush();
     expect(await listQueuedAgentRunsForProject('myproject')).toHaveLength(0);
     expect(await listQueuedAgentRunsForProject('other')).toHaveLength(1); // unaffected
   });
@@ -225,11 +258,12 @@ describe('queued-agent-runs', () => {
       prompt: '',
       enqueuedAt: 3_000,
     });
+    await flush();
     expect((await listQueuedAgentRunProjects()).sort()).toEqual(['project-a', 'project-b']);
   });
 
   it('silently swallows errors when the queue row cannot be persisted (fire-and-forget)', async () => {
-    testDb.exec('DROP TABLE queued_agent_runs');
+    await sharedHandle.db.execute(sql.raw('DROP TABLE queued_agent_runs'));
     const errorSpy = vi.spyOn(console, 'error').mockImplementation(() => {});
     // fire-and-forget: does not throw synchronously
     expect(() => enqueueQueuedAgentRun('myproject', {
@@ -240,7 +274,7 @@ describe('queued-agent-runs', () => {
       prompt: 'run docs',
       enqueuedAt: 1_000,
     })).not.toThrow();
-    await Promise.resolve();
+    await flush();
     expect(errorSpy).toHaveBeenCalledWith(
       expect.stringContaining('[queued-agent-runs] enqueue failed:'),
       expect.anything(),
@@ -257,6 +291,7 @@ describe('queued-agent-runs', () => {
       prompt: 'run docs',
       enqueuedAt: 1_000,
     });
+    await flush();
     vi.stubGlobal('fetch', vi.fn().mockResolvedValue({
       ok: false,
       status: 202,
@@ -281,6 +316,7 @@ describe('queued-agent-runs', () => {
       prompt: 'run docs',
       enqueuedAt: 1_000,
     });
+    await flush();
     vi.stubGlobal('fetch', vi.fn().mockResolvedValue({
       ok: false,
       status: 202,
@@ -305,6 +341,7 @@ describe('queued-agent-runs', () => {
       prompt: 'run docs',
       enqueuedAt: 1_000,
     });
+    await flush();
     vi.stubGlobal('fetch', vi.fn()
       .mockResolvedValueOnce({
         ok: false,
@@ -324,6 +361,7 @@ describe('queued-agent-runs', () => {
     expect(await listQueuedAgentRunsForProject('myproject')).toHaveLength(1);
 
     await drainQueuedAgentRunsForProject('myproject');
+    await flush();
     expect(await listQueuedAgentRunsForProject('myproject')).toHaveLength(0);
     vi.unstubAllGlobals();
   });
@@ -337,6 +375,7 @@ describe('queued-agent-runs', () => {
       prompt: 'run docs',
       enqueuedAt: 1_000,
     });
+    await flush();
     vi.stubGlobal('fetch', vi.fn().mockResolvedValue({
       ok: false,
       status: 409,
@@ -361,6 +400,7 @@ describe('queued-agent-runs', () => {
       prompt: 'run docs',
       enqueuedAt: 1_000,
     });
+    await flush();
     vi.stubGlobal('fetch', vi.fn()
       .mockResolvedValueOnce({
         ok: false,
@@ -381,6 +421,7 @@ describe('queued-agent-runs', () => {
     expect(await listQueuedAgentRunsForProject('myproject')).toHaveLength(1);
 
     await drainQueuedAgentRunsForProject('myproject');
+    await flush();
     expect(await listQueuedAgentRunsForProject('myproject')).toHaveLength(0);
     vi.unstubAllGlobals();
   });
@@ -394,6 +435,7 @@ describe('queued-agent-runs', () => {
       prompt: 'run docs',
       enqueuedAt: 1_000,
     });
+    await flush();
     vi.stubGlobal('fetch', vi.fn()
       .mockResolvedValueOnce({
         ok: false,
@@ -412,6 +454,7 @@ describe('queued-agent-runs', () => {
     expect(await listQueuedAgentRunsForProject('myproject')).toHaveLength(1);
 
     await drainQueuedAgentRunsForProject('myproject');
+    await flush();
     expect(await listQueuedAgentRunsForProject('myproject')).toHaveLength(0);
     vi.unstubAllGlobals();
   });
@@ -425,6 +468,7 @@ describe('queued-agent-runs', () => {
       prompt: 'run docs',
       enqueuedAt: 1_000,
     });
+    await flush();
     const timeoutError = Object.assign(new TypeError('fetch failed'), {
       cause: Object.assign(new Error('Headers Timeout Error'), {
         name: 'HeadersTimeoutError',
@@ -456,6 +500,7 @@ describe('queued-agent-runs', () => {
       prompt: 'run docs',
       enqueuedAt: 1_000,
     });
+    await flush();
 
     const fetchControl: { resolve: null | (() => void) } = { resolve: null };
     const fetchMock = vi.fn().mockImplementation(() => new Promise((resolve) => {
@@ -469,12 +514,14 @@ describe('queued-agent-runs', () => {
 
     const first = drainQueuedAgentRunsForProject('myproject');
     const second = drainQueuedAgentRunsForProject('myproject');
-    await Promise.resolve();
-    expect(fetchMock).toHaveBeenCalledTimes(1);
+    // Allow async DB SELECT (PGlite) to complete and the fetch call to fire,
+    // but not enough for the long-running fetch promise to resolve.
+    await vi.waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(1));
 
     if (!fetchControl.resolve) throw new Error('fetch was not started');
     fetchControl.resolve();
     await Promise.all([first, second]);
+    await flush();
 
     expect(await listQueuedAgentRunsForProject('myproject')).toHaveLength(0);
     vi.unstubAllGlobals();
@@ -489,6 +536,7 @@ describe('queued-agent-runs', () => {
       prompt: 'run docs',
       enqueuedAt: 1_000,
     });
+    await flush();
     vi.stubGlobal('fetch', vi.fn().mockResolvedValue({
       ok: false,
       status: 409,
@@ -513,6 +561,7 @@ describe('queued-agent-runs', () => {
       prompt: 'run docs',
       enqueuedAt: 1_000,
     });
+    await flush();
     vi.stubGlobal('fetch', vi.fn().mockResolvedValue({
       ok: false,
       status: 409,
@@ -537,6 +586,7 @@ describe('queued-agent-runs', () => {
       prompt: 'run docs',
       enqueuedAt: 1_000,
     });
+    await flush();
     vi.stubGlobal('fetch', vi.fn().mockResolvedValue({
       ok: false,
       status: 409,
@@ -561,6 +611,7 @@ describe('queued-agent-runs', () => {
       prompt: 'run docs',
       enqueuedAt: 1_000,
     });
+    await flush();
     vi.stubGlobal('fetch', vi.fn().mockResolvedValue({
       ok: false,
       status: 409,
@@ -585,6 +636,7 @@ describe('queued-agent-runs', () => {
       prompt: 'run docs',
       enqueuedAt: 1_000,
     });
+    await flush();
     vi.stubGlobal('fetch', vi.fn().mockResolvedValue({
       ok: false,
       status: 409,
@@ -608,6 +660,7 @@ describe('queued-agent-runs', () => {
       prompt: 'run docs',
       enqueuedAt: 1_000,
     });
+    await flush();
     const abortError = Object.assign(new Error('The operation was aborted'), {
       name: 'AbortError',
     });
@@ -636,6 +689,7 @@ describe('queued-agent-runs', () => {
       prompt: 'run docs',
       enqueuedAt: 1_000,
     });
+    await flush();
     vi.stubGlobal('fetch', vi.fn().mockResolvedValue({
       ok: false,
       status: 409,
@@ -646,6 +700,7 @@ describe('queued-agent-runs', () => {
     }));
 
     await drainQueuedAgentRunsForProject('myproject');
+    await flush();
 
     expect(await listQueuedAgentRunsForProject('myproject')).toHaveLength(0);
     vi.unstubAllGlobals();
@@ -660,6 +715,7 @@ describe('queued-agent-runs', () => {
       prompt: 'run docs',
       enqueuedAt: 1_000,
     });
+    await flush();
     vi.stubGlobal('fetch', vi.fn().mockResolvedValue({
       ok: false,
       status: 409,
@@ -669,6 +725,7 @@ describe('queued-agent-runs', () => {
     }));
 
     await drainQueuedAgentRunsForProject('myproject');
+    await flush();
 
     expect(await listQueuedAgentRunsForProject('myproject')).toHaveLength(0);
     vi.unstubAllGlobals();
@@ -683,6 +740,7 @@ describe('queued-agent-runs', () => {
       prompt: 'run docs',
       enqueuedAt: 1_000,
     });
+    await flush();
     vi.stubGlobal('fetch', vi.fn().mockResolvedValue({
       ok: false,
       status: 409,
@@ -693,41 +751,18 @@ describe('queued-agent-runs', () => {
     }));
 
     await drainQueuedAgentRunsForProject('myproject');
+    await flush();
 
     expect(await listQueuedAgentRunsForProject('myproject')).toHaveLength(0);
     vi.unstubAllGlobals();
   });
 
   it('drains queued runs for unlocked projects only', async () => {
-    vi.resetModules();
-    testDb = createTestDb();
-    const getLockMock = vi.fn((project: string) => (project === 'locked' ? { lockedByJobId: 'release-1' } : null));
-    vi.doMock('@/lib/db', () => {
-      const { drizzle } = require('drizzle-orm/better-sqlite3');
-      const { sqliteTable, text, integer, real, uniqueIndex } = require('drizzle-orm/sqlite-core');
-      const queuedAgentRuns = sqliteTable('queued_agent_runs', {
-        id: integer('id').primaryKey({ autoIncrement: true }),
-        project: text('project').notNull(),
-        agentId: text('agent_id').notNull(),
-        agentName: text('agent_name').notNull(),
-        triggeredBy: text('triggered_by').notNull().default('manual'),
-        prompt: text('prompt').notNull().default(''),
-        enqueuedAt: real('enqueued_at').notNull(),
-      }, (t: { project: unknown; agentId: unknown }) => ({
-        projectAgentUniq: uniqueIndex('queued_agent_runs_project_agent').on(t.project, t.agentId),
-      }));
-      return {
-        db: drizzle(testDb),
-        schema: { queuedAgentRuns },
-      };
-    });
-    vi.doMock('@/lib/pipeline/pipeline-lock', () => ({
-      getLock: getLockMock,
-    }));
-    const mod = await import('@/lib/agents/queued-agent-runs');
-    enqueueQueuedAgentRun = mod.enqueueQueuedAgentRun;
-    listQueuedAgentRunsForProject = mod.listQueuedAgentRunsForProject;
-    drainQueuedAgentRunsForUnlockedProjects = mod.drainQueuedAgentRunsForUnlockedProjects;
+    // Override the shared getLock mock for this test only — `unlocked` returns
+    // null (no lock), `locked` returns a lock object.
+    mocks.getLockMock.mockImplementation((project: string) =>
+      project === 'locked' ? { lockedByJobId: 'release-1' } : null,
+    );
 
     enqueueQueuedAgentRun('unlocked', {
       project: 'unlocked',
@@ -745,6 +780,7 @@ describe('queued-agent-runs', () => {
       prompt: 'run tests',
       enqueuedAt: 2_000,
     });
+    await flush();
     vi.stubGlobal('fetch', vi.fn().mockResolvedValue({
       ok: true,
       status: 200,
@@ -752,6 +788,7 @@ describe('queued-agent-runs', () => {
     }));
 
     await drainQueuedAgentRunsForUnlockedProjects();
+    await flush();
 
     expect(await listQueuedAgentRunsForProject('unlocked')).toHaveLength(0);
     expect(await listQueuedAgentRunsForProject('locked')).toHaveLength(1);

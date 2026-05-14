@@ -1,4 +1,4 @@
-import { eq, and, inArray, sql } from 'drizzle-orm';
+import { eq, and, sql } from 'drizzle-orm';
 import { db, schema } from '@/lib/db';
 import type { RetrievalBackend, RetrievalChunk, RetrievalResult, SourceKind } from './backend';
 

@@ -1,4 +1,7 @@
-import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
+import { describe, it, expect, beforeAll, beforeEach, afterAll, afterEach, vi } from 'vitest';
+import { sql } from 'drizzle-orm';
+import * as schema from '@/lib/db/schema';
+import { createTestPgDbEmpty, type TestDbHandle } from '@/__tests__/helpers/test-db';
 
 describe('GET /api/health', () => {
   let GET: any;
@@ -24,9 +27,29 @@ describe('GET /api/health', () => {
 describe('GET /api/projects', () => {
   let GET: any;
   let fetchProjectDataMock: ReturnType<typeof vi.fn>;
+  let sharedHandle: TestDbHandle;
+
+  beforeAll(async () => {
+    sharedHandle = await createTestPgDbEmpty();
+    await sharedHandle.db.execute(sql.raw(`
+      CREATE TABLE IF NOT EXISTS gh_issues_cache (
+        project text PRIMARY KEY,
+        repo text NOT NULL,
+        prs text NOT NULL DEFAULT '[]',
+        issues text NOT NULL DEFAULT '[]',
+        fetched_at double precision NOT NULL
+      )
+    `));
+  });
+
+  afterAll(async () => {
+    await sharedHandle[Symbol.asyncDispose]();
+  });
 
   beforeEach(async () => {
     vi.resetModules();
+
+    await sharedHandle.db.execute(sql.raw('DELETE FROM gh_issues_cache'));
 
     fetchProjectDataMock = vi.fn().mockResolvedValue({
       projects: {},
@@ -37,12 +60,15 @@ describe('GET /api/projects', () => {
       fetchProjectData: fetchProjectDataMock,
     }));
 
+    vi.doMock('@/lib/db', () => ({ db: sharedHandle.db, schema }));
+
     const mod = await import('@/app/api/projects/route');
     GET = mod.GET;
   });
 
   afterEach(() => {
     vi.resetModules();
+    vi.clearAllMocks();
   });
 
   it('returns empty tasks and priorities when no projects', async () => {

@@ -1,7 +1,7 @@
 export default function globalSetup() {
-  // Guard against accidentally running tests against the production Postgres DB.
-  // Tests that need a real DB connection should set DATABASE_URL themselves.
-  // Most tests use createTestDb() (in-memory better-sqlite3) and mock @/lib/db.
+  // Tests use PGlite via __tests__/helpers/test-db.ts and mock @/lib/db.
+  // Guard: if a test accidentally imports @/lib/db before installing its mock,
+  // make the connection point at an obviously-test URL rather than production.
   if (!process.env.DATABASE_URL) {
     process.env.DATABASE_URL = 'postgres://tamtam_test@localhost:5432/tamtam_test';
   }

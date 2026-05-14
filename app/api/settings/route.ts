@@ -139,7 +139,6 @@ const SETTING_KEYS = [
   'pipeline_model_commit',
   'dirty_worktree_block_threshold',
   'incremental_review_enabled',
-  'durable_agent_workflows_enabled',
 ] as const;
 
 function serializeSettingValue(key: string, value: unknown): string {
