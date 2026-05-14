@@ -1,15 +1,19 @@
 import { useState, useEffect, useRef } from 'react'
 import { useRouter } from 'next/navigation'
 import {
-  buildTerminalEntriesFromJobLog,
   terminalExitEntry,
   terminalStore,
   type TermEntry,
-  type SkillItem,
-  type DocItem,
 } from '@/lib/terminal/terminal-session-store'
 import { isClaudeJobKind } from '../TerminalTab'
 import { hasPrerequisiteContext } from './prerequisite-context'
+import {
+  buildEntriesForCompletedJobs,
+  contextItemsFromMeta,
+  countSessionJobs,
+  fetchSessionJobs,
+  isRestorableSessionKind,
+} from './session-restore'
 
 interface JobDict {
   id: string
@@ -130,11 +134,7 @@ export function useTerminalBootstrap({
       if (cur.restoredFor === initialSessionId && cur.history.length > 0) {
         const userEntries = cur.history.filter(h => h.role === 'user').length
         try {
-          const listRes = await fetch(`/api/jobs?project=${encodeURIComponent(projectName)}&session_id=${encodeURIComponent(initialSessionId)}&limit=200`)
-          const listData = await listRes.json()
-          const dbMatches = (listData.jobs ?? []).filter(
-            (j: JobDict) => (['run', 'review', 'fix', 'fix-ci'].includes(j.kind) || j.kind.startsWith('agent:')),
-          ).length
+          const dbMatches = await countSessionJobs(projectName, initialSessionId)
           if (dbMatches <= userEntries) return
         } catch {
           return
@@ -142,95 +142,44 @@ export function useTerminalBootstrap({
       }
 
       if (cancelled) return
-      await fetch(`/api/jobs?project=${encodeURIComponent(projectName)}&session_id=${encodeURIComponent(initialSessionId)}&limit=200`)
-      .then(r => r.json())
-      .then(async (data) => {
-        const jobs: JobDict[] = data.jobs ?? []
-        const isSessionKind = (k: string) =>
-          ['run', 'review', 'fix', 'fix-ci'].includes(k) || k.startsWith('agent:')
+      await fetchSessionJobs(projectName, initialSessionId)
+      .then(async (jobs) => {
         const matches = jobs
-          .filter(j => isSessionKind(j.kind))
+          .filter(j => isRestorableSessionKind(j.kind))
           .sort((a, b) => a.started_at - b.started_at)
         if (matches.length === 0) return
 
         const firstMatch = matches[0]
-        let loadedSkills: SkillItem[] = []
-        let loadedDocs: DocItem[] = []
-        if (firstMatch.context_meta) {
-          try {
-            const meta = JSON.parse(firstMatch.context_meta)
-            if (meta.skills && Array.isArray(meta.skills)) loadedSkills = meta.skills
-            if (meta.docs && Array.isArray(meta.docs)) loadedDocs = meta.docs
-          } catch {}
-        }
+        const { skills: loadedSkills, docs: loadedDocs } = contextItemsFromMeta(firstMatch.context_meta)
 
         const lastMatch = matches[matches.length - 1]
         const lastIsRunning = lastMatch.status !== 'done' && lastMatch.finished_at === null
         const completedMatches = lastIsRunning ? matches.slice(0, -1) : matches
 
-        const logData = await Promise.all(
-          completedMatches.map(m =>
-            fetch(`/api/jobs/${encodeURIComponent(m.id)}`).then(r => r.json()).catch(() => null)
-          )
-        )
-        const entries: TermEntry[] = []
-        completedMatches.forEach((m, i) => {
-          const prompt = m.user_prompt || m.prompt
-          if (prompt) entries.push({ role: 'user', text: prompt })
-          const jobEntry = logData[i]
-          const exitCode = typeof jobEntry?.exit_code === 'number' ? jobEntry.exit_code : m.exit_code
-          const exitEntry = exitCode !== null && exitCode !== undefined
-            ? terminalExitEntry(exitCode)
-            : null
-          if (jobEntry?.log) {
-            if (exitEntry?.text === 'cancelled') {
-              entries.push(...buildTerminalEntriesFromJobLog(jobEntry.log, {
-                passthrough: hasPrerequisiteContext(m.context_meta),
-              }))
-              entries.push(exitEntry)
-            } else if (exitCode !== null && exitCode !== undefined && exitCode !== 0) {
-              entries.push({ role: 'error', text: 'claude run failed' })
-              entries.push(...buildTerminalEntriesFromJobLog(jobEntry.log, {
-                passthrough: hasPrerequisiteContext(m.context_meta),
-                fallbackRole: 'error',
-              }))
-            } else {
-              entries.push(...buildTerminalEntriesFromJobLog(jobEntry.log, {
-                passthrough: hasPrerequisiteContext(m.context_meta),
-              }))
-            }
-          } else if (jobEntry?.log_pruned) {
-            entries.push({ role: 'status', text: 'Log file deleted by retention policy' })
-            if (exitEntry) {
-              entries.push(exitEntry)
-            }
-          } else if (exitEntry && exitCode !== 0) {
-            entries.push(exitEntry)
-          }
-        })
+        const entries = await buildEntriesForCompletedJobs(completedMatches)
 
         const sessionProvider = matches.find(m => m.provider)?.provider ?? null
-          if (lastIsRunning) {
-            const prompt = lastMatch.user_prompt || lastMatch.prompt
-            if (prompt) entries.push({ role: 'user', text: prompt })
-            terminalStore.update(projectName, () => ({
+        if (lastIsRunning) {
+          const prompt = lastMatch.user_prompt || lastMatch.prompt
+          if (prompt) entries.push({ role: 'user', text: prompt })
+          terminalStore.update(projectName, () => ({
             history: entries,
             claudeSessionId: initialSessionId,
             sessionKey: initialSessionId,
             sessionProvider,
             selectedItems: loadedSkills,
-              selectedDocs: loadedDocs,
-              restoredFor: initialSessionId,
-            }))
-            terminalStore.startStream(
-              projectName,
-              lastMatch.id,
-              false,
-              hasPrerequisiteContext(lastMatch.context_meta),
-            )
-          } else {
-            terminalStore.update(projectName, () => ({
-              history: entries,
+            selectedDocs: loadedDocs,
+            restoredFor: initialSessionId,
+          }))
+          terminalStore.startStream(
+            projectName,
+            lastMatch.id,
+            false,
+            hasPrerequisiteContext(lastMatch.context_meta),
+          )
+        } else {
+          terminalStore.update(projectName, () => ({
+            history: entries,
             claudeSessionId: initialSessionId,
             sessionKey: initialSessionId,
             sessionProvider,
@@ -341,11 +290,13 @@ export function useTerminalBootstrap({
       ) return
       try {
         // Polled every 1s on the terminal page — pull only running release
-        // rows to keep this cheap.
+        // rows to keep this cheap. Client-side filter remains so tests with
+        // generic /api/jobs mocks behave the same as before.
         const res = await fetch(`/api/jobs?project=${encodeURIComponent(projectName)}&kind=release&status=running&limit=5`)
         if (!res.ok) return
         const data = await res.json()
         const runningJobs: JobDict[] = (data.jobs ?? [])
+          .filter((job: JobDict) => job.kind === 'release' && job.status === 'running')
           .sort((a: JobDict, b: JobDict) => b.started_at - a.started_at)
         const target = runningJobs[0]
         if (!target || attachedExternalJobRef.current === target.id) return

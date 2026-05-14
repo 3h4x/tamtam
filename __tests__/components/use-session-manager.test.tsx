@@ -182,7 +182,7 @@ describe('useSessionManager', () => {
 
     vi.stubGlobal('fetch', vi.fn().mockImplementation(async (input: RequestInfo | URL) => {
       const url = String(input)
-      if (url === '/api/jobs?project=proj') {
+      if (url.startsWith('/api/jobs?project=proj')) {
         return {
           json: async () => ({
             jobs: [
