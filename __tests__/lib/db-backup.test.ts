@@ -1,16 +1,28 @@
-import { describe, expect, it, vi, beforeEach } from 'vitest';
-import { pruneBackupFiles, selectBackupsToPrune, type BackupFileEntry } from '@/lib/db/backup';
+import { describe, expect, it, vi, beforeEach, afterEach } from 'vitest';
+import {
+  createDatabaseBackup,
+  pruneBackupFiles,
+  selectBackupsToPrune,
+  type BackupFileEntry,
+} from '@/lib/db/backup';
 
-const { readdirSyncMock, rmSyncMock, statSyncMock } = vi.hoisted(() => ({
+const { execMock, mkdirSyncMock, readdirSyncMock, rmSyncMock, statSyncMock } = vi.hoisted(() => ({
+  execMock: vi.fn(),
+  mkdirSyncMock: vi.fn<(path: string, options?: { recursive?: boolean }) => void>(),
   readdirSyncMock: vi.fn<() => string[]>(() => []),
   rmSyncMock: vi.fn<(path: string, options?: { force?: boolean }) => void>(),
   statSyncMock: vi.fn<(path: string) => { mtimeMs: number }>(),
+}));
+
+vi.mock('@/lib/shared/shell', () => ({
+  exec: execMock,
 }));
 
 vi.mock('fs', async (importOriginal) => {
   const actual = await importOriginal<typeof import('fs')>();
   return {
     ...actual,
+    mkdirSync: mkdirSyncMock,
     readdirSync: readdirSyncMock,
     rmSync: rmSyncMock,
     statSync: statSyncMock,
@@ -26,6 +38,38 @@ describe('db backup retention', () => {
     readdirSyncMock.mockReset();
     rmSyncMock.mockReset();
     statSyncMock.mockReset();
+    mkdirSyncMock.mockReset();
+    execMock.mockReset();
+    execMock.mockResolvedValue({ stdout: '', stderr: '', exitCode: 0 });
+  });
+
+  afterEach(() => {
+    delete process.env.DATABASE_URL;
+  });
+
+  it('passes localhost, password, and URL options to pg_dump without putting the password in args', async () => {
+    process.env.DATABASE_URL = 'postgres://tamtam:p%40ss@localhost:5432/tamtam?sslmode=require&connect_timeout=7&application_name=tamtam-backup';
+
+    await createDatabaseBackup('/tmp/tamtam/backups/tamtam-20260514-1200.pgdump');
+
+    expect(mkdirSyncMock).toHaveBeenCalledWith('/tmp/tamtam/backups', { recursive: true });
+    expect(execMock).toHaveBeenCalledWith('pg_dump', [
+      '--format=custom',
+      '--file=/tmp/tamtam/backups/tamtam-20260514-1200.pgdump',
+      '--dbname=tamtam',
+      '--host=localhost',
+      '--port=5432',
+      '--username=tamtam',
+    ], {
+      timeout: 120_000,
+      env: {
+        PGPASSWORD: 'p@ss',
+        PGSSLMODE: 'require',
+        PGCONNECT_TIMEOUT: '7',
+        PGAPPNAME: 'tamtam-backup',
+      },
+    });
+    expect(JSON.stringify(execMock.mock.calls[0][1])).not.toContain('p@ss');
   });
 
   it('keeps the newest backups and one older backup per week', () => {

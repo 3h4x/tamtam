@@ -1,5 +1,5 @@
-import { join } from 'path';
-import { readdirSync, rmSync, statSync } from 'fs';
+import { dirname, join } from 'path';
+import { mkdirSync, readdirSync, rmSync, statSync } from 'fs';
 // exec wraps child_process.execFile safely (args are an array, no shell injection risk)
 import { exec } from '@/lib/shared/shell';
 
@@ -31,20 +31,16 @@ export async function createDatabaseBackup(destPath: string): Promise<void> {
   const dbUrl = process.env.DATABASE_URL;
   if (!dbUrl) throw new Error('[backup] DATABASE_URL not set');
 
-  const url = new URL(dbUrl);
+  const { args: connectionArgs, env } = pgEnvFromDatabaseUrl(dbUrl);
+  mkdirSync(/*turbopackIgnore: true*/ dirname(destPath), { recursive: true });
   const args = [
     '--format=custom',
-    `--dbname=${url.pathname.slice(1)}`,
     `--file=${destPath}`,
+    ...connectionArgs,
   ];
-  if (url.hostname && url.hostname !== 'localhost' && url.hostname !== '') {
-    args.push(`--host=${url.hostname}`);
-  }
-  if (url.port) args.push(`--port=${url.port}`);
-  if (url.username) args.push(`--username=${url.username}`);
 
   // pg_dump args are an array — no shell injection risk
-  const result = await exec('pg_dump', args, { timeout: 120_000 });
+  const result = await exec('pg_dump', args, { timeout: 120_000, env });
   if (result.exitCode !== 0) {
     throw new Error(`pg_dump failed (exit ${result.exitCode}): ${result.stderr}`);
   }
@@ -106,4 +102,26 @@ function getBackupWeekKey(name: string, mtimeMs: number): string {
   const yearStart = new Date(date.getFullYear(), 0, 1);
   const week = Math.ceil((((date.getTime() - yearStart.getTime()) / 86400000) + 1) / 7);
   return `${date.getFullYear()}-${String(week).padStart(2, '0')}`;
+}
+
+function pgEnvFromDatabaseUrl(dbUrl: string): { args: string[]; env: Record<string, string> } {
+  const url = new URL(dbUrl);
+  const args: string[] = [];
+  const env: Record<string, string> = {};
+  const database = decodeURIComponent(url.pathname.replace(/^\//, ''));
+
+  if (database) args.push(`--dbname=${database}`);
+  if (url.hostname) args.push(`--host=${url.hostname}`);
+  if (url.port) args.push(`--port=${url.port}`);
+  if (url.username) args.push(`--username=${decodeURIComponent(url.username)}`);
+  if (url.password) env.PGPASSWORD = decodeURIComponent(url.password);
+
+  const sslMode = url.searchParams.get('sslmode');
+  if (sslMode) env.PGSSLMODE = sslMode;
+  const connectTimeout = url.searchParams.get('connect_timeout');
+  if (connectTimeout) env.PGCONNECT_TIMEOUT = connectTimeout;
+  const applicationName = url.searchParams.get('application_name');
+  if (applicationName) env.PGAPPNAME = applicationName;
+
+  return { args, env };
 }

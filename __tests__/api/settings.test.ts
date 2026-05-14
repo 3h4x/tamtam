@@ -102,6 +102,41 @@ describe('settings API', () => {
       expect(data.settings.github_owner).toBe('octocat');
     });
 
+    it('does not expose removed settings left over from older releases', async () => {
+      await sharedHandle.db.insert(schema.settings).values({
+        key: 'durable_agent_workflows_enabled',
+        value: 'true',
+      });
+
+      const response = await GET();
+      const data = await response.json();
+
+      expect(data.settings).not.toHaveProperty('durable_agent_workflows_enabled');
+    });
+
+    it('returns persisted retrieval settings', async () => {
+      await sharedHandle.db.insert(schema.settings).values([
+        { key: 'retrieval_enabled', value: 'false' },
+        { key: 'retrieval_ollama_url', value: 'http://ollama.local:11434' },
+        { key: 'retrieval_embedding_model', value: 'custom-embed' },
+        { key: 'retrieval_context_limit', value: '8' },
+        { key: 'retrieval_score_threshold', value: '0.65' },
+        { key: 'retrieval_manage_ollama', value: 'false' },
+      ]);
+
+      const response = await GET();
+      const data = await response.json();
+
+      expect(data.settings).toMatchObject({
+        retrieval_enabled: 'false',
+        retrieval_ollama_url: 'http://ollama.local:11434',
+        retrieval_embedding_model: 'custom-embed',
+        retrieval_context_limit: '8',
+        retrieval_score_threshold: '0.65',
+        retrieval_manage_ollama: 'false',
+      });
+    });
+
     it('canonicalizes trusted_github_users in the API response', async () => {
       await sharedHandle.db
         .insert(schema.settings)
@@ -236,6 +271,56 @@ describe('settings API', () => {
       expect(map.workspace_path).toBe('/projects');
       expect(map.github_owner).toBe('octocat');
       expect(map.frequency).toBe('2h');
+    });
+
+    it('updates retrieval settings and returns their canonical values', async () => {
+      const request = new NextRequest('http://localhost/api/settings', {
+        method: 'PATCH',
+        body: JSON.stringify({
+          retrieval_enabled: false,
+          retrieval_ollama_url: 'http://ollama.local:11434',
+          retrieval_embedding_model: 'custom-embed',
+          retrieval_context_limit: '08',
+          retrieval_score_threshold: '0.70',
+          retrieval_manage_ollama: 'false',
+        }),
+      });
+      const response = await PATCH(request);
+      expect(response.status).toBe(200);
+
+      const rows = await sharedHandle.db.select().from(schema.settings);
+      const map = Object.fromEntries(rows.map((r) => [r.key, r.value]));
+      expect(map).toMatchObject({
+        retrieval_enabled: 'false',
+        retrieval_ollama_url: 'http://ollama.local:11434',
+        retrieval_embedding_model: 'custom-embed',
+        retrieval_context_limit: '8',
+        retrieval_score_threshold: '0.7',
+        retrieval_manage_ollama: 'false',
+      });
+
+      const data = await response.json();
+      expect(data.settings).toMatchObject({
+        retrieval_enabled: 'false',
+        retrieval_context_limit: '8',
+        retrieval_score_threshold: '0.7',
+        retrieval_manage_ollama: 'false',
+      });
+    });
+
+    it('rejects invalid retrieval settings', async () => {
+      const response = await PATCH(new NextRequest('http://localhost/api/settings', {
+        method: 'PATCH',
+        body: JSON.stringify({
+          retrieval_score_threshold: '1.5',
+        }),
+      }));
+
+      expect(response.status).toBe(400);
+      await expect(response.json()).resolves.toMatchObject({
+        detail: expect.stringContaining('retrieval_score_threshold'),
+      });
+      expect(await sharedHandle.db.select().from(schema.settings)).toEqual([]);
     });
 
     it('rejects invalid permission_mode values', async () => {

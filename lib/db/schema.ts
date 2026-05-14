@@ -86,7 +86,7 @@ export const jobs = pgTable('jobs', {
   model: text('model'),
   releaseId: text('release_id'),
   abortedAt: doublePrecision('aborted_at'),
-  releaseDeadlineAt: integer('release_deadline_at'),
+  releaseDeadlineAt: bigint('release_deadline_at', { mode: 'number' }),
   promptBytes: integer('prompt_bytes'),
   workSummary: text('work_summary'),
   modifiedFiles: text('modified_files'),

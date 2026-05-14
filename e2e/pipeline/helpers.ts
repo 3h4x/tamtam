@@ -160,7 +160,7 @@ export async function enableProject(
 ): Promise<void> {
   // Step 1: register (or update) the project in the DB with its path.
   // PATCH /api/config/projects expects { name, path, enabled } — must include path or
-  // SQLite rejects the insert due to the NOT NULL constraint.
+  // the insert is rejected by the NOT NULL constraint on `path`.
   await request.patch('/api/config/projects', {
     data: {
       projects: [{ name: project, path: join(WORKSPACE_DIR, project), enabled: true }],

@@ -1,23 +1,59 @@
-import { describe, it } from 'vitest';
+import { beforeEach, describe, expect, it, vi } from 'vitest';
+import { resolve } from 'path';
 
-// TODO(postgres-cutover): This test exercises the legacy SQLite-only
-// `scripts/db-restore.js`, which copies SQLite database files plus their
-// `-wal`/`-shm` sidecars and swaps them in place. The production database has
-// migrated to Postgres (see `docs/BACKUP.md`), and the cutover plan in
-// `docs/superpowers/plans/2026-05-14-postgres-workflow-cutover.md` calls for
-// `scripts/db-restore.js` to be rewritten on top of `pg_restore --clean
-// --if-exists --dbname=$DATABASE_URL <backup.pgdump>`, and for this test file
-// to be replaced with `vi.mock('child_process')` + assertions about the
-// `pg_restore` invocation (no more SQLite fixture DBs, no more `TAMTAM_DB_PATH`
-// env, no more WAL sidecar assertions).
-//
-// Until that script is ported, the entire SQLite-staged-swap behavior under
-// test no longer represents shipped behavior, so the suite is skipped wholesale
-// rather than migrated to PGlite — PGlite would not exercise anything the
-// production restore path actually does.
-describe.skip('scripts/db-restore.js', () => {
-  it('restores the backup via a staged swap on success', () => {});
-  it('rolls back the old database and restarts TamTam if the post-swap start fails', () => {});
-  it('aborts before swapping the live database when pnpm stop fails', () => {});
-  it('restores backup data that lives in the backup WAL sidecar', () => {});
+describe('scripts/db-restore.js', () => {
+  let existsSyncMock: ReturnType<typeof vi.fn>;
+  let spawnSyncMock: ReturnType<typeof vi.fn>;
+  let statSyncMock: ReturnType<typeof vi.fn>;
+
+  beforeEach(() => {
+    existsSyncMock = vi.fn().mockReturnValue(true);
+    spawnSyncMock = vi.fn().mockReturnValue({ status: 0 });
+    statSyncMock = vi.fn().mockReturnValue({ size: 123 });
+    existsSyncMock.mockReset();
+    existsSyncMock.mockReturnValue(true);
+    spawnSyncMock.mockReset();
+    spawnSyncMock.mockReturnValue({ status: 0 });
+    statSyncMock.mockReset();
+    statSyncMock.mockReturnValue({ size: 123 });
+  });
+
+  it('verifies the backup first, restores with libpq env, then verifies the live database', async () => {
+    const { main } = await import('../../scripts/db-restore.js');
+    const code = main({
+      argv: ['backup.pgdump'],
+      env: {
+        ...process.env,
+        DATABASE_URL: 'postgres://tamtam:p%40ss@localhost:5432/tamtam?sslmode=require',
+      },
+      existsSync: existsSyncMock,
+      spawnSync: spawnSyncMock,
+      statSync: statSyncMock,
+    });
+
+    const backupPath = resolve('backup.pgdump');
+    expect(code).toBe(0);
+    expect(spawnSyncMock.mock.calls.map((call) => [call[0], call[1]])).toEqual([
+      [process.execPath, [expect.stringContaining('db-verify.js'), '--backup', backupPath]],
+      ['pnpm', ['stop']],
+      ['pg_restore', [
+        '--clean',
+        '--if-exists',
+        '--no-owner',
+        '--exit-on-error',
+        '--dbname=tamtam',
+        '--host=localhost',
+        '--port=5432',
+        '--username=tamtam',
+        backupPath,
+      ]],
+      [process.execPath, [expect.stringContaining('db-verify.js')]],
+      ['pnpm', ['start']],
+    ]);
+    expect(spawnSyncMock.mock.calls[2][2].env).toMatchObject({
+      PGPASSWORD: 'p@ss',
+      PGSSLMODE: 'require',
+    });
+    expect(JSON.stringify(spawnSyncMock.mock.calls[2][1])).not.toContain('p@ss');
+  });
 });

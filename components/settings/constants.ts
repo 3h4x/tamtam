@@ -145,7 +145,7 @@ export const FIELDS: Record<SettingsFieldKey, FieldDef> = {
   },
   backup_retention_count: {
     label: 'Backup Retention (files)',
-    help: 'Keep this many newest SQLite backup files after each successful backup. Set to 0 to prune all older backups after each run while still keeping the newly created backup.',
+    help: 'Keep this many newest Postgres backup files after each successful backup. Set to 0 to prune all older backups after each run while still keeping the newly created backup.',
     group: 'pipeline',
     span: 1,
   },

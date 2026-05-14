@@ -21,20 +21,52 @@ The agent management dashboard built for Claude-compatible CLIs. Define skills, 
 | **Scheduling** | Built-in interval scheduler — daily reviews, nightly audits, whatever you need, running unattended |
 | **Release pipeline** | Quality-gated, branch-context-driven flow: test → review → fix loop → commit → push → DoD → merge. Default-branch releases push directly; non-default branches open or reuse a PR |
 | **Cross-project recommendations** | Open agent and scheduler suggestions across every project in `/recommendations` |
-| **Semantic retrieval** | Optional local context injection from project docs, DB-backed skills, and completed agent run reports via `sqlite-vec` + Ollama |
+| **Semantic retrieval** | Optional local context injection from project docs, DB-backed skills, and completed agent run reports via `pgvector` + Ollama |
 | **Pipeline health** | Live release pipeline metrics in `/pipeline` |
 | **Custom actions** | Per-project bash commands (deploy, migrate, seed) as colored buttons |
 | **Notifications** | Unseen run alerts with bell badge; outbound webhooks (Slack, Discord, ntfy, generic) for release success/fail/aborted, fix-loop-exhausted, review-do-not-ship, agent-run-fail, and budget-blocked events |
 
+## Architecture
+
+TamTam is a single Next.js 16 (App Router) application backed by Postgres and orchestrated through PM2. Agent runs are intake-protected by durable workflows so a crash or restart never loses an in-flight job.
+
+```
+       ┌──────────────────────────────────────────────────────────────┐
+       │                    Next.js 16 (App Router)                   │
+       │   pages + API routes + SSE streams + Server Components       │
+       │                                                              │
+       │  ┌───────────────────┐  ┌─────────────────────────────────┐  │
+       │  │  Agent intake     │→ │  Durable workflow (@workflow)   │  │
+       │  │  (POST /api/...)  │  │  composePrompt → startAgent     │  │
+       │  └───────────────────┘  └──────────────┬──────────────────┘  │
+       │                                        ▼                     │
+       │  ┌──────────────────────────────────────────────────────┐    │
+       │  │   PM2 supervises one-shot CLI jobs (claude/codex/…)  │    │
+       │  │   → log files → fs.watch → SSE token stream → UI     │    │
+       │  └──────────────────────────────────────────────────────┘    │
+       └────────────────┬──────────────────────────┬──────────────────┘
+                        │                          │
+                        ▼                          ▼
+        ┌─────────────────────────────┐   ┌────────────────────────┐
+        │ Postgres 16 + pgvector      │   │ Ollama (local, opt.)   │
+        │ (Drizzle ORM, node-postgres)│   │ embeddings for         │
+        │  · jobs, agents, skills,    │   │ pgvector retrieval     │
+        │    projects, settings…      │   └────────────────────────┘
+        │  · workflow state (durable) │
+        │  · pgvector retrieval index │
+        └─────────────────────────────┘
+```
+
 ## Stack
 
-- **Next.js 16** (App Router) — frontend + backend in one
-- **Drizzle ORM + better-sqlite3 + SQLite** — WAL mode, zero infra
+- **Next.js 16** (App Router) — frontend, API routes, and SSE streaming in one process
+- **Postgres 16 + pgvector** via `pg.Pool` + Drizzle ORM — single source of truth: jobs, agents, skills, settings, retrieval embeddings, **and** durable workflow state
+- **`workflow` + `@workflow/world-postgres`** — `"use workflow"` / `"use step"` orchestration for agent intake (`composePrompt` → `startAgent`), so a server restart between steps resumes instead of losing the run
+- **PM2** — supervises the long-running TamTam server and every one-shot CLI job (claude/codex/gemini/lmstudio shims)
+- **SSE** — token-by-token log streaming straight from PM2-managed log files via `fs.watch` + NDJSON parser
+- **Ollama** (optional, local) — embeddings for the pgvector-backed retrieval index
 - **Tailwind CSS v4**
-- **PM2** — process management for the production server and one-shot agent jobs
-- **SSE** — real-time log streaming without WebSocket overhead
-- **sqlite-vec + Ollama** — optional local semantic retrieval for project docs, skills, and agent run reports
-- **vitest + Playwright** — unit and e2e tests
+- **vitest** with PGlite for in-memory API tests; **Playwright** for browser + pipeline e2e
 
 ## Getting started
 
@@ -43,6 +75,9 @@ TamTam requires Node.js 24.x. The repo pins that version in [`.nvmrc`](.nvmrc) a
 ```bash
 nvm use               # or install Node.js 24.x with your preferred version manager
 pnpm install
+docker compose up -d postgres                                           # Postgres 16 + pgvector on :5432
+DATABASE_URL=postgres://tamtam:tamtam@localhost:5432/tamtam pnpm db:migrate
+echo 'DATABASE_URL=postgres://tamtam:tamtam@localhost:5432/tamtam' > .env.local
 pnpm run rebuild   # build + PM2-managed start/restart on :1337 (canonical after edits)
 ```
 
@@ -62,13 +97,13 @@ pnpm mcp:http <tool> [json_args]  # call local TamTam HTTP endpoints via .tamtam
 
 > `pnpm dev` is for active local debugging only — it runs foreground without PM2 and must not be left running as the long-lived server.
 
-> `pnpm dev:qa` starts a seeded TamTam instance at `http://localhost:1338` with `next dev` inside Docker. The working tree is bind-mounted, so code edits are picked up by the dev watcher without rebuilding the image. It uses mocked `git`, `gh`, `pm2`, and provider shims plus an isolated SQLite database and workspace under Compose volumes.
+> `pnpm dev:qa` starts a seeded TamTam instance at `http://localhost:1338` with `next dev` inside Docker. The working tree is bind-mounted, so code edits are picked up by the dev watcher without rebuilding the image. It uses mocked `git`, `gh`, `pm2`, and provider shims plus an isolated `pgvector/pgvector:pg16` Postgres and workspace under Compose volumes.
 
 > `pnpm mcp:http` uses the sibling `mcp-http-tools` checkout by default; set `MCP_HTTP_TOOLS_DIR` if that repo lives elsewhere.
 
 ## Configuration
 
-Runtime config, including notification throttle state, lives in the SQLite database by default (`data/db/tamtam.db`, override with `TAMTAM_DB_PATH`). Shared per-project settings can also be committed in `.tamtam/config.yml`, and file-agent prompts can live in `.tamtam/agents/*.md`.
+Runtime config, including notification throttle state, lives in the Postgres database referenced by `DATABASE_URL`. Shared per-project settings can also be committed in `.tamtam/config.yml`, and file-agent prompts can live in `.tamtam/agents/*.md`.
 
 The Settings area is split across `/settings/general`, `/settings/cli`, `/settings/pipeline`, `/settings/notifications`, `/settings/projects`, `/settings/templates`, and `/settings/database`.
 Bare `/settings` redirects to `/settings/general`, and legacy `/jobs` redirects to `/runs`.
@@ -90,8 +125,8 @@ Bare `/settings` redirects to `/settings/general`, and legacy `/jobs` redirects 
 Optional env vars:
 
 ```bash
+DATABASE_URL=...       # Required. Postgres connection string (e.g. postgres://tamtam:tamtam@localhost:5432/tamtam)
 GITHUB_OWNER=...       # GitHub org/user fallback for CI lookups
-TAMTAM_DB_PATH=...     # Override the SQLite database location (default: data/db/tamtam.db)
 TAMTAM_BASE_URL=...    # Base URL for outbound webhook log links (default: http://localhost:1337)
 PROMETHEUS_URL=...     # Prometheus base URL for monitoring dashboard (default: http://localhost:9090)
 LOKI_URL=...           # Loki base URL for log monitoring (default: http://localhost:3100)
@@ -131,7 +166,7 @@ pnpm type-check     # TypeScript
 pnpm check          # lint + type-check + test (all in one)
 ```
 
-API routes are covered by vitest tests in `__tests__/api/`, often with combined route coverage files. Follow the existing pattern: in-memory SQLite, mocked shell/PM2 calls.
+API routes are covered by vitest tests in `__tests__/api/`, often with combined route coverage files. Follow the existing pattern: in-memory PGlite via `__tests__/helpers/test-db.ts`, mocked shell/PM2 calls.
 
 ## Architecture notes
 

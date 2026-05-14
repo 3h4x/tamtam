@@ -335,14 +335,6 @@ describe('GET /api/monitoring', () => {
       skippedRunningRows: 1,
       errorCount: 0,
       lastError: null,
-      sqliteMaintenance: {
-        status: 'completed',
-        startedAt: 1700000005,
-        finishedAt: 1700000010,
-        activeJobs: 0,
-        checkpointRan: true,
-        vacuumRan: true,
-      },
     };
     const projectLogSummary = {
       type: 'project_logs',
@@ -393,15 +385,6 @@ describe('GET /api/monitoring', () => {
       skippedRunningRows: 0,
       errorCount: 1,
       lastError: 'disk full',
-      sqliteMaintenance: {
-        status: 'skipped',
-        startedAt: 1700000000,
-        finishedAt: 1700000000,
-        activeJobs: 0,
-        reason: 'no_deleted_rows',
-        checkpointRan: false,
-        vacuumRan: false,
-      },
     };
     await sharedHandle.db.execute(sql`
       INSERT INTO maintenance_status (key, value, updated_at)
@@ -440,45 +423,6 @@ describe('GET /api/monitoring', () => {
     const res = await GET(makeRequest());
     const data = await res.json();
     expect(data.retention.lastProjectLogCleanup.status).toBe('failed');
-    expect(data.hasIssues).toBe(true);
-  });
-
-  // TODO: sqliteMaintenance was a nested status produced by the legacy SQLite
-  // nightly checkpoint/vacuum substep. After the Postgres migration there is no
-  // equivalent maintenance step, so the field is no longer populated or
-  // propagated by /api/monitoring. Re-enable (or rewrite for the new
-  // equivalent) if/when a Postgres maintenance substep is introduced.
-  it.skip('sets hasIssues true when sqlite maintenance failed even if row deletion succeeded', async () => {
-    const nightlyWithFailedSqlite = {
-      type: 'nightly',
-      status: 'completed',
-      startedAt: 1700000000,
-      finishedAt: 1700000020,
-      rowsScanned: 3,
-      rowsDeleted: 2,
-      skippedRunningRows: 0,
-      errorCount: 0,
-      lastError: null,
-      sqliteMaintenance: {
-        status: 'failed',
-        startedAt: 1700000010,
-        finishedAt: 1700000020,
-        activeJobs: 0,
-        reason: 'error',
-        checkpointRan: false,
-        vacuumRan: false,
-        error: 'SQLITE_IOERR',
-      },
-    };
-    await sharedHandle.db.execute(sql`
-      INSERT INTO maintenance_status (key, value, updated_at)
-      VALUES ('retention:nightly:last', ${JSON.stringify(nightlyWithFailedSqlite)}, 1700000020)
-    `);
-    fetchSpy.mockRejectedValue(new Error('connection refused'));
-
-    const res = await GET(makeRequest());
-    const data = await res.json();
-    expect(data.retention.lastNightlyCleanup.sqliteMaintenance.status).toBe('failed');
     expect(data.hasIssues).toBe(true);
   });
 

@@ -1,28 +1,110 @@
 #!/usr/bin/env node
+// Verify either the live Postgres database (`pnpm db:verify`) or, with
+// `--backup <file>`, a custom-format dump produced by `pg_dump --format=custom`.
 
-const Database = require('better-sqlite3');
-const { join } = require('path');
+const { spawnSync } = require('child_process');
+const { existsSync, statSync } = require('fs');
+const { Client } = require('pg');
 
-const dbPath = process.argv[2] || process.env.TAMTAM_DB_PATH || join(process.cwd(), 'data', 'db', 'tamtam.db');
-let sqlite;
+async function main(deps = {}) {
+  const argv = deps.argv ?? process.argv.slice(2);
+  const env = deps.env ?? process.env;
+  const PgClient = deps.Client ?? Client;
+  const spawn = deps.spawnSync ?? spawnSync;
+  const exists = deps.existsSync ?? existsSync;
+  const stat = deps.statSync ?? statSync;
 
-try {
-  sqlite = new Database(dbPath, { readonly: true, fileMustExist: true });
-  const integrityRows = sqlite.pragma('integrity_check');
-  const integrity = integrityRows.map((row) => Object.values(row)[0]).filter(Boolean);
-  if (integrity.length !== 1 || integrity[0] !== 'ok') {
-    throw new Error(`integrity_check failed: ${integrity.join('; ') || 'no result'}`);
+  if (argv[0] === '--backup') {
+    return verifyBackup(argv[1], { spawn, exists, stat });
+  }
+  if (argv.length === 0) {
+    return verifyLiveDatabase(env.DATABASE_URL, PgClient);
+  }
+  if (argv.length === 1 && !argv[0].startsWith('-')) {
+    return verifyLiveDatabase(argv[0], PgClient);
   }
 
-  const foreignKeyRows = sqlite.pragma('foreign_key_check');
-  if (foreignKeyRows.length > 0) {
-    throw new Error(`foreign_key_check failed: ${foreignKeyRows.length} violation(s)`);
-  }
-
-  console.log(`Database verified: ${dbPath}`);
-} catch (error) {
-  console.error(`Database verification failed: ${error instanceof Error ? error.message : String(error)}`);
-  process.exitCode = 1;
-} finally {
-  if (sqlite) sqlite.close();
+  console.error('Usage: node scripts/db-verify.js [DATABASE_URL]');
+  console.error('       node scripts/db-verify.js --backup <path-to-backup.pgdump>');
+  return 1;
 }
+
+async function verifyLiveDatabase(dbUrl, PgClient = Client) {
+  if (!dbUrl) {
+    console.error('DATABASE_URL is required to verify the live database.');
+    return 1;
+  }
+  const client = new PgClient({ connectionString: dbUrl, connectionTimeoutMillis: 5000 });
+  try {
+    await client.connect();
+    const ext = await client.query("SELECT extname FROM pg_extension WHERE extname = 'vector'");
+    if (ext.rows.length === 0) {
+      throw new Error('pgvector extension missing');
+    }
+    const tables = await client.query(
+      "SELECT count(*)::int AS n FROM information_schema.tables WHERE table_schema = 'public'",
+    );
+    console.log(`Database verified: ${redactDbUrl(dbUrl)} (tables=${tables.rows[0].n})`);
+    return 0;
+  } catch (error) {
+    console.error(`Database verification failed: ${error instanceof Error ? error.message : String(error)}`);
+    return 1;
+  } finally {
+    await client.end().catch(() => {});
+  }
+}
+
+function verifyBackup(dumpPath, deps = {}) {
+  const spawn = deps.spawn ?? spawnSync;
+  const exists = deps.exists ?? existsSync;
+  const stat = deps.stat ?? statSync;
+  if (!dumpPath) {
+    console.error('Usage: node scripts/db-verify.js --backup <path-to-backup.pgdump>');
+    return 1;
+  }
+  if (!exists(dumpPath)) {
+    console.error(`Backup file not found: ${dumpPath}`);
+    return 1;
+  }
+  const size = stat(dumpPath).size;
+  if (size === 0) {
+    console.error(`Backup file is empty: ${dumpPath}`);
+    return 1;
+  }
+
+  const result = spawn('pg_restore', ['--list', dumpPath], { encoding: 'utf8' });
+  if (result.error) {
+    console.error('Failed to spawn pg_restore:', result.error.message);
+    return 1;
+  }
+  if (result.status !== 0) {
+    console.error(`pg_restore --list failed (exit ${result.status}):`);
+    console.error(result.stderr);
+    return 1;
+  }
+  const tocEntries = result.stdout.split('\n').filter((line) => /^\d/.test(line)).length;
+  console.log(`Backup verified: ${dumpPath} (${tocEntries} TOC entries, ${size} bytes)`);
+  return 0;
+}
+
+function redactDbUrl(dbUrl) {
+  try {
+    const url = new URL(dbUrl);
+    if (url.password) url.password = '***';
+    return url.toString();
+  } catch {
+    return '<database-url>';
+  }
+}
+
+if (require.main === module) {
+  void main().then((code) => {
+    if (code !== 0) process.exit(code);
+  });
+}
+
+module.exports = {
+  main,
+  verifyBackup,
+  verifyLiveDatabase,
+};

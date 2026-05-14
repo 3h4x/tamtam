@@ -462,6 +462,12 @@ async function drainBootRecoveryWork(): Promise<void> {
 export async function registerNode(): Promise<void> {
   await migrateLegacyFileWorkflowFlags();
   try {
+    const { loadFromDb } = await import('./lib/jobs/storage');
+    await loadFromDb();
+  } catch (err) {
+    console.error('[boot] jobs cache load failed:', err);
+  }
+  try {
     const { backfillIssueCruncherPrerequisites } = await import('./lib/agents/default-agent-skills');
     await backfillIssueCruncherPrerequisites();
   } catch (err) {

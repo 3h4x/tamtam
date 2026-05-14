@@ -1,6 +1,6 @@
 # Caching — How It Works
 
-Tamtam uses a layered caching strategy: in-memory TTL caches for hot read paths, a SQLite DB cache for expensive external calls. No Redis or external cache store required.
+Tamtam uses a layered caching strategy: in-memory TTL caches for hot read paths, a Postgres DB cache for expensive external calls. No Redis or external cache store required.
 
 ## When to read this
 
@@ -25,11 +25,11 @@ Live in the Next.js server process. Lost on restart — clients see a cold miss 
 
 ### 2. In-memory jobs Map (no TTL)
 
-`lib/job-storage.ts` keeps all active and recent jobs in a `Map<string, JobData>`. This is the authoritative live store — no DB query needed for most job reads. Written to SQLite via `saveToDb()` on every state change; read back from DB on cache miss (e.g. after server restart).
+`lib/job-storage.ts` keeps all active and recent jobs in a `Map<string, JobData>`. This is the authoritative live store — no DB query needed for most job reads. Written to Postgres via `saveToDb()` on every state change; read back from DB on cache miss (e.g. after server restart, via `loadFromDb()` at boot).
 
 Covers: `GET /api/jobs`, `GET /api/jobs/notifications`, `GET /api/jobs/[jobId]`
 
-### 3. SQLite DB caches
+### 3. Postgres DB caches
 
 Persist across restarts. Stale data is served until TTL expires or a force-refresh is triggered.
 

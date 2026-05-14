@@ -76,7 +76,7 @@ Audit trail for every run, review, fix, test, push, agent execution.
 | `parentJobId` | TEXT | — | nullable; parent job in pipeline chain |
 | `releaseId` | TEXT | — | nullable; parent release meta-job id for pipeline children |
 | `abortedAt` | REAL | — | nullable; Unix timestamp (seconds) when a job/release was cancelled |
-| `releaseDeadlineAt` | INTEGER | — | nullable; Unix timestamp (milliseconds) when a release meta-job should be auto-aborted |
+| `releaseDeadlineAt` | BIGINT | — | nullable; Unix timestamp (milliseconds) when a release meta-job should be auto-aborted |
 | `workSummary` | TEXT | — | nullable; concise agent-reported outcome summary |
 | `modifiedFiles` | TEXT | — | nullable; JSON array of files changed by an agent run |
 
@@ -273,6 +273,9 @@ curl -X POST http://localhost:1337/api/settings/backup
 # Verify the live DB (checks pgvector extension + table count)
 pnpm db:verify
 
+# Verify a .pgdump file without touching the live DB
+node scripts/db-verify.js --backup data/db/tamtam-YYYYMMDD-HHMM.pgdump
+
 # Restore a .pgdump (stops PM2, pg_restore --clean --if-exists, restart)
 pnpm db:restore data/db/tamtam-YYYYMMDD-HHMM.pgdump
 
@@ -314,26 +317,3 @@ TamTam stores concise agent and issue-run summaries in `jobs.work_summary`. If o
 | Issues/PRs show stale data | `ghIssuesCache` TTL not expired (5 min) | Force refresh via the Refresh button or `POST /api/projects/by-project/[name]/issues?refresh=1` |
 | Projects list empty after adding a repo | `projects` table not updated | Use Settings → workspace scan or `GET /api/config/projects` |
 | Deleted project still appears in job history | No FK cascade — jobs retain the project name string | Expected behavior; filter by project name in the Runs page |
-
----
-
-## One-time SQLite to Postgres migration
-
-Use `scripts/migrate-sqlite-to-pg.mjs` to copy data from the legacy SQLite database at `data/db/tamtam.db` (or `$TAMTAM_DB_PATH`) into the Postgres database referenced by `DATABASE_URL`. The script is committed for one full release cycle and removed afterward.
-
-```bash
-# Dry-run: report row counts without writing
-DATABASE_URL=postgres://user@localhost:5432/tamtam \
-  node scripts/migrate-sqlite-to-pg.mjs --dry-run
-
-# Apply: truncate each target table first, then copy
-DATABASE_URL=postgres://user@localhost:5432/tamtam \
-  node scripts/migrate-sqlite-to-pg.mjs --truncate
-
-# Migrate select tables only
-node scripts/migrate-sqlite-to-pg.mjs --only settings,projects
-```
-
-Without `--truncate`, the script uses `INSERT ... ON CONFLICT (<pk>) DO NOTHING` so re-runs are idempotent. The retrieval tables (`retrieval_records`, `retrieval_chunks`, `ollama_usage`) are not copied — they are recreated lazily as agents run with retrieval enabled.
-
-The source SQLite file is opened read-only. The target Postgres schema must already exist (run `pnpm db:migrate` first).

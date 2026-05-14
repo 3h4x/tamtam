@@ -60,7 +60,6 @@ const mocks = vi.hoisted(() => {
 vi.mock('@/lib/db', () => ({
   get db() { return mocks.db; },
   schema,
-  sqlite: {},
 }));
 
 vi.mock('workflow/api', () => ({
@@ -855,7 +854,7 @@ describe('POST /api/agents/{agentId}/run', () => {
     mocks.isLockOwnedByActiveRelease.mockReturnValue(true);
     mocks.getLock.mockReturnValue({ project: 'proj1', lockedByJobId: 'release-1' });
     mocks.enqueueQueuedAgentRun.mockImplementation(() => {
-      throw new Error('SQLITE_ERROR: no such table: queued_agent_runs');
+      throw new Error('relation "queued_agent_runs" does not exist');
     });
     const req = new NextRequest('http://localhost/api/agents/agent-123/run', {
       method: 'POST',
