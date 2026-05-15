@@ -2,7 +2,7 @@
 
 import { useState, useEffect, useRef, Suspense } from 'react'
 import { useParams, useRouter } from 'next/navigation'
-import { fixCi, releaseProject, fetchJobs, fetchProjectConfig, updateProjectConfig, fetchCustomActions, runCustomAction, saveCustomActions, pullProject, fetchBehind, PullDivergedError, testProject, fetchIssuesAndPRs, pushProject, fetchBranch, createProjectPR, CreatePRPrePushHookError } from '@/lib/client-api'
+import { fixCi, releaseProject, fetchJobs, fetchProjectConfig, updateProjectConfig, fetchCustomActions, runCustomAction, saveCustomActions, pullProject, fetchBehind, PullDivergedError, testProject, fetchIssuesAndPRs, fetchIssuesSummary, pushProject, fetchBranch, createProjectPR, CreatePRPrePushHookError } from '@/lib/client-api'
 import type { JobInfo, ProjectConfig, CustomAction } from '@/lib/client-api'
 import { FleetHealth } from '@/hooks/useProjectHealth'
 import { getAggregateCi } from '@/lib/shared/statusConstants'
@@ -158,20 +158,26 @@ export function ProjectDetailPage({
     }
   }, [])
 
-  // Poll issues/PRs + current/default branch together
+  // Poll issues/PRs + current/default branch together.
+  // The parent page only needs counts + the open-PR branch map to render the
+  // header badges and gate the Push-to-PR / Create PR buttons — it never
+  // renders the full PR/issue lists itself. Use the summary endpoint and a
+  // 30 s cadence (issue counts don't change faster than that, and the
+  // server-side cache TTL is 5 min anyway). The Issues tab does its own
+  // full-list fetch when the user opens it.
   useEffect(() => {
     if (!name || !projectId) return
     let active = true
     const poll = async () => {
       const [issuesRes, branchRes] = await Promise.allSettled([
-        fetchIssuesAndPRs(name),
+        fetchIssuesSummary(name),
         fetchBranch(name),
       ])
       if (!active) return
       if (issuesRes.status === 'fulfilled') {
-        setIssueCount({ prs: issuesRes.value.prs.length, issues: issuesRes.value.issues.length })
-        setOpenPrBranches(issuesRes.value.prs.map(pr => pr.headRefName))
-        setOpenPrByBranch(Object.fromEntries(issuesRes.value.prs.map(pr => [pr.headRefName, pr.number])))
+        setIssueCount({ prs: issuesRes.value.prCount, issues: issuesRes.value.issueCount })
+        setOpenPrBranches(issuesRes.value.openPrBranches.map(b => b.branch))
+        setOpenPrByBranch(Object.fromEntries(issuesRes.value.openPrBranches.map(b => [b.branch, b.number])))
       }
       if (branchRes.status === 'fulfilled') {
         setCurrentBranch(branchRes.value.branch)
@@ -180,7 +186,7 @@ export function ProjectDetailPage({
       }
     }
     poll()
-    const interval = setInterval(poll, 10000)
+    const interval = setInterval(poll, 30000)
     return () => { active = false; clearInterval(interval) }
   }, [name, projectId])
 

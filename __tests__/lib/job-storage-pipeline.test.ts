@@ -314,6 +314,9 @@ describe.skip('runCompletionHooks – auto-push pipeline', () => {
   const startProjectCommitMock = vi.fn();
   const startProjectReviewMock = vi.fn();
   const startFixFromJobMock = vi.fn();
+  const startReleaseMock = vi.fn();
+  const setPendingReleaseMock = vi.fn();
+  const shouldKeepPendingReleaseMock = vi.fn();
   const getProjectTestConfigMock = vi.fn();
   const execMock = vi.fn();
   const resolveProjectPathMock = vi.fn();
@@ -363,6 +366,11 @@ describe.skip('runCompletionHooks – auto-push pipeline', () => {
     vi.doMock('@/lib/pipeline/start-push', () => ({ startProjectPush: startProjectPushMock }));
     vi.doMock('@/lib/pipeline/start-commit', () => ({ startProjectCommit: startProjectCommitMock }));
     vi.doMock('@/lib/pipeline/start-fix', () => ({ startFixFromJob: startFixFromJobMock }));
+    vi.doMock('@/lib/pipeline/start-release', () => ({ startRelease: startReleaseMock }));
+    vi.doMock('@/lib/pipeline/pending-release', () => ({
+      setPendingRelease: setPendingReleaseMock,
+      shouldKeepPendingRelease: shouldKeepPendingReleaseMock,
+    }));
     vi.doMock('@/lib/scheduling/scheduling', () => ({ getProjectTestConfig: getProjectTestConfigMock }));
 
     const mod = await import('@/lib/jobs/job-storage');
@@ -385,6 +393,9 @@ describe.skip('runCompletionHooks – auto-push pipeline', () => {
     startProjectCommitMock.mockReset().mockResolvedValue({ ok: true, commitSha: 'abcd123', message: 'committed' });
     startProjectReviewMock.mockReset().mockResolvedValue({ ok: true, jobId: 'rev-auto', pid: 1, logPath: '' });
     startFixFromJobMock.mockReset().mockResolvedValue({ ok: true, jobId: 'fix-auto', pid: 2 });
+    startReleaseMock.mockReset().mockResolvedValue({ ok: true, jobId: 'release-auto', releaseJobId: 'release-auto', step: 'test', message: 'running' });
+    setPendingReleaseMock.mockReset();
+    shouldKeepPendingReleaseMock.mockReset().mockReturnValue(false);
     getProjectTestConfigMock.mockReset().mockReturnValue({ testCommand: null, testCronEnabled: false, testCronSchedule: null, autoPushEnabled: true });
     execMock.mockReset().mockResolvedValue({ exitCode: 0, stdout: '', stderr: '' });
     resolveProjectPathMock.mockReset().mockReturnValue('/proj');
@@ -403,6 +414,8 @@ describe.skip('runCompletionHooks – auto-push pipeline', () => {
     vi.doUnmock('@/lib/pipeline/start-push');
     vi.doUnmock('@/lib/pipeline/start-commit');
     vi.doUnmock('@/lib/pipeline/start-fix');
+    vi.doUnmock('@/lib/pipeline/start-release');
+    vi.doUnmock('@/lib/pipeline/pending-release');
     vi.doUnmock('@/lib/scheduling/scheduling');
     vi.resetModules();
   });
@@ -1078,7 +1091,6 @@ describe.skip('runCompletionHooks – auto-push pipeline', () => {
       job.startedAt = now - 30; // 30s of runtime — real failure, not boot crash
 
       await markDoneFn(job, 1);
-      await vi.runAllTimersAsync();
 
       expect(fetchMock).not.toHaveBeenCalled();
       vi.unstubAllGlobals();
@@ -1117,7 +1129,6 @@ describe.skip('runCompletionHooks – auto-push pipeline', () => {
       const job = makeJob('fix-ci', null);
       job.startedAt = Date.now() / 1000 - 1;
       await markDoneFn(job, 0);
-      await vi.runAllTimersAsync();
 
       expect(fetchMock).not.toHaveBeenCalled();
       vi.unstubAllGlobals();
@@ -1129,6 +1140,10 @@ describe('markDone – isClaudeKind exit-code override for new kinds', () => {
   let storageCache: Map<string, JobData>;
   let resetVerdictCache: () => void;
   let tempDir: string;
+  const startReleaseMock = vi.fn();
+  const setPendingReleaseMock = vi.fn();
+  const shouldKeepPendingReleaseMock = vi.fn();
+  const finalizeAgentRunReportMock = vi.fn();
 
   function makeJob(kind: string, logPath: string | null): JobData {
     return {
@@ -1178,12 +1193,22 @@ describe('markDone – isClaudeKind exit-code override for new kinds', () => {
     vi.doMock('@/lib/pipeline/start-push', () => ({
       startProjectPush: vi.fn().mockResolvedValue({ ok: false, status: 503, detail: 'test' }),
     }));
+    vi.doMock('@/lib/pipeline/start-release', () => ({
+      startRelease: startReleaseMock,
+    }));
+    vi.doMock('@/lib/pipeline/pending-release', () => ({
+      setPendingRelease: setPendingReleaseMock,
+      shouldKeepPendingRelease: shouldKeepPendingReleaseMock,
+    }));
     vi.doMock('@/lib/pipeline/push-rejection', () => ({
       isHookRejection: vi.fn().mockReturnValue(false),
       isTestFailureRejection: vi.fn().mockReturnValue(false),
     }));
     vi.doMock('@/lib/pipeline/start-fix', () => ({
       startFixFromJob: vi.fn().mockResolvedValue({ ok: false, status: 503, detail: 'test' }),
+    }));
+    vi.doMock('@/lib/agents/agent-run-report', () => ({
+      finalizeAgentRunReport: finalizeAgentRunReportMock,
     }));
 
     const mod = await import('@/lib/jobs/job-storage');
@@ -1197,6 +1222,10 @@ describe('markDone – isClaudeKind exit-code override for new kinds', () => {
     storageCache.clear();
     resetVerdictCache();
     await truncateAll();
+    startReleaseMock.mockReset().mockResolvedValue({ ok: true, jobId: 'release-1', releaseJobId: 'release-1', step: 'test', message: 'running' });
+    setPendingReleaseMock.mockReset();
+    shouldKeepPendingReleaseMock.mockReset().mockReturnValue(false);
+    finalizeAgentRunReportMock.mockReset().mockResolvedValue(undefined);
   });
 
   afterAll(() => {
@@ -1209,8 +1238,11 @@ describe('markDone – isClaudeKind exit-code override for new kinds', () => {
     vi.doUnmock('@/lib/git/git-utils');
     vi.doUnmock('@/lib/pipeline/start-review');
     vi.doUnmock('@/lib/pipeline/start-push');
+    vi.doUnmock('@/lib/pipeline/start-release');
+    vi.doUnmock('@/lib/pipeline/pending-release');
     vi.doUnmock('@/lib/pipeline/push-rejection');
     vi.doUnmock('@/lib/pipeline/start-fix');
+    vi.doUnmock('@/lib/agents/agent-run-report');
     vi.resetModules();
   });
 

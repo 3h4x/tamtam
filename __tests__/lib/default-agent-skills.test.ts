@@ -112,37 +112,41 @@ async function waitForFast(cb: () => unknown | Promise<unknown>): Promise<void> 
   await vi.waitFor(cb, { timeout: 5000, interval: 1 });
 }
 
-describe('seedDefaultSkills', () => {
-  let seedFn: typeof import('@/lib/agents/default-agent-skills').seedDefaultSkills;
+async function resetSeedModuleAndTables(): Promise<typeof import('@/lib/agents/default-agent-skills').seedDefaultSkills> {
+  // Reset the seed module's `seeded` guard. The module-scope vi.mock for
+  // `@/lib/db` survives this — only the seed module itself re-evaluates.
+  vi.resetModules();
+  // Drain any fire-and-forget seed writes from the prior test before we wipe
+  // the tables. TRUNCATE racing against a pending insert would leak rows into
+  // the next case.
+  for (let i = 0; i < 4; i++) {
+    await new Promise((r) => setImmediate(r));
+  }
+  await sharedHandle.db.execute(sql.raw('TRUNCATE skills, agents'));
+  const mod = await import('@/lib/agents/default-agent-skills');
+  return mod.seedDefaultSkills;
+}
 
-  beforeEach(async () => {
-    // Reset the seed module's `seeded` guard. The module-scope vi.mock for
-    // `@/lib/db` survives this — only the seed module itself re-evaluates.
-    // Done once here (not also in afterEach) — back-to-back resets do nothing.
-    vi.resetModules();
-    // Drain any fire-and-forget seed writes from the prior test before we
-    // wipe the tables — TRUNCATE racing against a pending insert would leak
-    // rows into the next test. A few microtask flushes settle any tail work
-    // not asserted on by the previous test (e.g. unobserved backfill update).
-    for (let i = 0; i < 4; i++) {
-      await new Promise((r) => setImmediate(r));
-    }
-    await sharedHandle.db.execute(sql.raw('TRUNCATE skills, agents'));
-    const mod = await import('@/lib/agents/default-agent-skills');
-    seedFn = mod.seedDefaultSkills;
-  });
+describe('seedDefaultSkills seeded defaults snapshot', () => {
+  let seededSkills: Map<string, Awaited<ReturnType<typeof selectAllSkills>>[number]>;
 
-  it('inserts all default skills on first call', async () => {
+  function getSeededSkill(id: string) {
+    return seededSkills.get(id);
+  }
+
+  beforeAll(async () => {
+    const seedFn = await resetSeedModuleAndTables();
     seedFn();
     await waitForSeedToSettle();
-    const skills = await selectAllSkills();
-    expect(skills.length).toBeGreaterThanOrEqual(9);
+    seededSkills = new Map((await selectAllSkills()).map((skill) => [skill.id, skill]));
   });
 
-  it('inserts agent-self-improve with correct fields', async () => {
-    seedFn();
-    await waitForSeedToSettle();
-    const skill = await findSkill('agent-self-improve');
+  it('inserts all default skills on first call', () => {
+    expect(seededSkills.size).toBeGreaterThanOrEqual(9);
+  });
+
+  it('inserts agent-self-improve with correct fields', () => {
+    const skill = getSeededSkill('agent-self-improve');
     expect(skill).toBeDefined();
     expect(skill!.name).toBe('agent:self-improve');
     expect(skill!.content).toContain('http://localhost:1337');
@@ -152,27 +156,21 @@ describe('seedDefaultSkills', () => {
     expect(skill!.description).toContain('TamTam');
   });
 
-  it('inserts agent-docs-claude with correct fields', async () => {
-    seedFn();
-    await waitForSeedToSettle();
-    const skill = await findSkill('agent-docs-claude');
+  it('inserts agent-docs-claude with correct fields', () => {
+    const skill = getSeededSkill('agent-docs-claude');
     expect(skill).toBeDefined();
     expect(skill!.name).toBe('agent:docs-claude');
     expect(skill!.description).toContain('CLAUDE.md');
     expect(skill!.content).toContain('CLAUDE.md');
     expect(skill!.content).toContain('package.json');
-    // Skill prompts must NOT instruct the model to run git — TamTam owns
-    // version control via the release pipeline.
     expect(skill!.content).not.toContain('git log');
     expect(skill!.content).not.toContain('git checkout');
     expect(skill!.content).not.toContain('git commit');
     expect(skill!.content).toContain("Don't run `git` commands");
   });
 
-  it('inserts agent-cto with correct fields', async () => {
-    seedFn();
-    await waitForSeedToSettle();
-    const skill = await findSkill('agent-cto');
+  it('inserts agent-cto with correct fields', () => {
+    const skill = getSeededSkill('agent-cto');
     expect(skill).toBeDefined();
     expect(skill!.name).toBe('agent:cto');
     expect(skill!.content).toContain('You are the CTO');
@@ -183,20 +181,16 @@ describe('seedDefaultSkills', () => {
     expect(skill!.content).toContain('- [ ]');
   });
 
-  it('inserts agent-senior-fullstack with correct fields', async () => {
-    seedFn();
-    await waitForSeedToSettle();
-    const skill = await findSkill('agent-senior-fullstack');
+  it('inserts agent-senior-fullstack with correct fields', () => {
+    const skill = getSeededSkill('agent-senior-fullstack');
     expect(skill).toBeDefined();
     expect(skill!.name).toBe('agent:senior-fullstack');
     expect(skill!.content).toContain('Senior fullstack engineer');
     expect(skill!.content).toContain('CLAUDE.md');
   });
 
-  it('inserts agent-security-review with correct fields', async () => {
-    seedFn();
-    await waitForSeedToSettle();
-    const skill = await findSkill('agent-security-review');
+  it('inserts agent-security-review with correct fields', () => {
+    const skill = getSeededSkill('agent-security-review');
     expect(skill).toBeDefined();
     expect(skill!.name).toBe('agent:security-review');
     expect(skill!.description).toContain('OWASP');
@@ -205,10 +199,8 @@ describe('seedDefaultSkills', () => {
     expect(skill!.content).toContain('CLEAN | FINDINGS');
   });
 
-  it('inserts agent-dependency-check with correct fields', async () => {
-    seedFn();
-    await waitForSeedToSettle();
-    const skill = await findSkill('agent-dependency-check');
+  it('inserts agent-dependency-check with correct fields', () => {
+    const skill = getSeededSkill('agent-dependency-check');
     expect(skill).toBeDefined();
     expect(skill!.name).toBe('agent:dependency-check');
     expect(skill!.description).toContain('staleness');
@@ -216,10 +208,8 @@ describe('seedDefaultSkills', () => {
     expect(skill!.content).toContain('outdated');
   });
 
-  it('inserts agent-blog with correct fields', async () => {
-    seedFn();
-    await waitForSeedToSettle();
-    const skill = await findSkill('agent-blog');
+  it('inserts agent-blog with correct fields', () => {
+    const skill = getSeededSkill('agent-blog');
     expect(skill).toBeDefined();
     expect(skill!.name).toBe('agent:blog');
     expect(skill!.description).toContain('blog');
@@ -229,10 +219,8 @@ describe('seedDefaultSkills', () => {
     expect(skill!.content).toContain('blog/');
   });
 
-  it('inserts agent-ci-monitor with correct fields', async () => {
-    seedFn();
-    await waitForSeedToSettle();
-    const skill = await findSkill('agent-ci-monitor');
+  it('inserts agent-ci-monitor with correct fields', () => {
+    const skill = getSeededSkill('agent-ci-monitor');
     expect(skill).toBeDefined();
     expect(skill!.name).toBe('agent:ci-monitor');
     expect(skill!.description).toContain('CI');
@@ -240,10 +228,8 @@ describe('seedDefaultSkills', () => {
     expect(skill!.content).toContain('gh run view');
   });
 
-  it('inserts agent-issue-cruncher with correct fields', async () => {
-    seedFn();
-    await waitForSeedToSettle();
-    const skill = await findSkill('agent-issue-cruncher');
+  it('inserts agent-issue-cruncher with correct fields', () => {
+    const skill = getSeededSkill('agent-issue-cruncher');
     expect(skill).toBeDefined();
     expect(skill!.name).toBe('agent:issue-cruncher');
     expect(skill!.description).toContain('ready-to-go issue');
@@ -255,6 +241,113 @@ describe('seedDefaultSkills', () => {
     expect(skill!.content).toContain('/api/projects/by-project/<project>/issue-branch');
     expect(skill!.content).not.toContain('git checkout');
     expect(skill!.content).not.toContain('git commit');
+  });
+
+  it('inserts agent-release-ready with correct fields', () => {
+    const skill = getSeededSkill('agent-release-ready');
+    expect(skill).toBeDefined();
+    expect(skill!.name).toBe('agent:release-ready');
+    expect(skill!.description).toContain('Pre-flight');
+    expect(skill!.content).toContain('READY');
+    expect(skill!.content).toContain('NOT READY');
+  });
+
+  it('inserts agent-gha-audit with correct fields', () => {
+    const skill = getSeededSkill('agent-gha-audit');
+    expect(skill).toBeDefined();
+    expect(skill!.name).toBe('agent:gha-audit');
+    expect(skill!.description).toContain('.github/workflows');
+    expect(skill!.content).toContain('.github/workflows/');
+    expect(skill!.content).toContain('CI workflow');
+  });
+
+  it('inserts agent-tests with correct fields', () => {
+    const skill = getSeededSkill('agent-tests');
+    expect(skill).toBeDefined();
+    expect(skill!.name).toBe('agent:tests');
+    expect(skill!.content).not.toContain('git log');
+    expect(skill!.content).toContain("Don't run `git` commands");
+    expect(skill!.content).toContain('vi.useFakeTimers()');
+    expect(skill!.content).toContain('test');
+  });
+
+  it('inserts agent-manage-agents with correct fields', () => {
+    const skill = getSeededSkill('agent-manage-agents');
+    expect(skill).toBeDefined();
+    expect(skill!.name).toBe('agent:manage-agents');
+    expect(skill!.content).toContain('http://localhost:1337');
+    expect(skill!.content).toContain('project name from the current repo directory name');
+    expect(skill!.content).toContain('if they disagree with the repo directory name, stop instead of guessing');
+    expect(skill!.content).toContain('/api/agents');
+  });
+
+  it('inserts agent-review-tuner with correct fields', () => {
+    const skill = getSeededSkill('agent-review-tuner');
+    expect(skill).toBeDefined();
+    expect(skill!.name).toBe('agent:review-tuner');
+    expect(skill!.description).toContain('review/fix prompt tweaks');
+    expect(skill!.content).toContain('Project name = current repo directory name');
+    expect(skill!.content).toContain('if they disagree with the repo directory name, stop instead of guessing');
+    expect(skill!.content).toContain('/api/projects/by-project/<name>/release/<id>');
+  });
+
+  it('inserts agent-qa with the supported Playwright MCP namespace', () => {
+    const skill = getSeededSkill('agent-qa');
+    expect(skill).toBeDefined();
+    expect(skill!.name).toBe('agent:qa');
+    expect(skill!.description).toContain('Playwright');
+    expect(skill!.content).toContain('mcp__plugin_playwright_playwright__browser_navigate');
+    expect(skill!.content).toContain('mcp__plugin_playwright_playwright__browser_snapshot');
+    expect(skill!.content).toContain('mcp__plugin_playwright_playwright__browser_console_messages');
+    expect(skill!.content).toContain('mcp__plugin_playwright_playwright__browser_take_screenshot');
+    expect(skill!.content).toContain('mcp__plugin_playwright_playwright__browser_wait_for');
+    expect(skill!.content).not.toMatch(/`browser_[^`]+`/);
+    expect(skill!.content).not.toContain('Read `.tamtam/agents/<this-agent-name>.md` in the working tree');
+    expect(skill!.content).not.toMatch(/read\s+`?\.tamtam\/agents/i);
+    expect(skill!.content).toContain('Do not read `.tamtam/` files directly');
+    expect(skill!.content).toContain('branch-aware config layer');
+    expect(skill!.content).toContain('Clean up artifacts');
+    expect(skill!.content).toContain('Track every artifact path you create during the run');
+    expect(skill!.content).not.toContain('rm -f ./*.png');
+    expect(skill!.content).not.toContain('rm -rf ./.playwright-mcp ./test-results ./playwright-report');
+    expect(skill!.content).not.toContain('rm -rf ./test-results');
+    expect(skill!.content).not.toContain('rm -rf ./playwright-report');
+    expect(skill!.content).toContain('/api/projects/by-project/<name>/config');
+    expect(skill!.content).toContain('QA_NO_TARGET');
+    expect(skill!.content).toMatch(/Fix up to 2/);
+    expect(skill!.content).toMatch(/Hard stop conditions/);
+    expect(skill!.content).not.toMatch(/cto agent|QA_NO_CTO/);
+  });
+
+  it('inserts agent-readme-sync with correct fields', () => {
+    const skill = getSeededSkill('agent-readme-sync');
+    expect(skill).toBeDefined();
+    expect(skill!.name).toBe('agent:readme-sync');
+    expect(skill!.description).toContain('README');
+    expect(skill!.content).toContain('README');
+    expect(skill!.content).not.toContain('git log');
+    expect(skill!.content).toContain('project manifest');
+    expect(skill!.content).toContain("Don't run `git` commands");
+  });
+
+  it('no default skill content tells the model to run git', () => {
+    const violators: string[] = [];
+    for (const skill of seededSkills.values()) {
+      if (!skill.id.startsWith('agent-')) continue;
+      const c = skill.content || '';
+      if (/\bgit (log|diff|checkout|commit|push|pull|status|branch|stash|rebase|merge|reset|tag)\b/.test(c)) {
+        violators.push(`${skill.id}: ${c.match(/\bgit \w+\b/)?.[0]}`);
+      }
+    }
+    expect(violators).toEqual([]);
+  });
+});
+
+describe('seedDefaultSkills isolated cases', () => {
+  let seedFn: typeof import('@/lib/agents/default-agent-skills').seedDefaultSkills;
+
+  beforeEach(async () => {
+    seedFn = await resetSeedModuleAndTables();
   });
 
   it('backfills the trusted-only prerequisite for existing issue-cruncher agents', async () => {

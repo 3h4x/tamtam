@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { eq } from 'drizzle-orm';
 import { db, schema } from '@/lib/db';
-import { getSettings, normalizePermissionMode, reloadConfig } from '@/lib/shared/config';
+import { buildConfigFromSettingsMap, normalizePermissionMode, reloadConfig } from '@/lib/shared/config';
 import { syncJobsPauseState } from '@/lib/shared/job-control';
 import {
   encodeBudgetSubscriptionProviders,
@@ -88,13 +88,14 @@ function parseUnitFloatSetting(
 
 async function buildSettingsResponse(): Promise<Record<string, string>> {
   const rows = await db.select().from(schema.settings);
+  const rowMap = Object.fromEntries(rows.map((row) => [row.key, row.value]));
   const settings: Record<string, string> = {};
   for (const row of rows) {
     if (!SETTING_KEYS.includes(row.key as (typeof SETTING_KEYS)[number])) continue;
     settings[row.key] = serializeSettingValue(row.key, row.value);
   }
 
-  const effective = getSettings();
+  const effective = buildConfigFromSettingsMap(rowMap);
   settings.claude_provider = serializeSettingValue('claude_provider', effective.claude_provider);
   settings.cli_enabled_providers = serializeSettingValue('cli_enabled_providers', effective.cli_enabled_providers);
   settings.review_fix_max_iterations = serializeSettingValue('review_fix_max_iterations', effective.review_fix_max_iterations);
@@ -381,7 +382,7 @@ export async function PATCH(request: NextRequest) {
         // state, so a GET→PATCH round-trip for an unrelated save must not
         // silently downgrade it back to plain Claude routing.
       } else {
-      claudeProviderEntry.value = syncedProvider;
+        claudeProviderEntry.value = syncedProvider;
       }
     } else {
       serializedEntries.push({
@@ -391,8 +392,10 @@ export async function PATCH(request: NextRequest) {
     }
   }
 
+  const currentRows = await db.select().from(schema.settings);
+  const currentMap = Object.fromEntries(currentRows.map((row) => [row.key, row.value]));
   const desired = {
-    ...getSettings(),
+    ...buildConfigFromSettingsMap(currentMap),
     ...Object.fromEntries(serializedEntries.map((entry) => [entry.key, entry.value])),
   } as Record<string, unknown>;
   if (desired.github_board_sync_enabled === 'true') {
@@ -426,6 +429,16 @@ export async function PATCH(request: NextRequest) {
     }
   }
 
+  const finalDesired: Record<string, string> = { ...currentMap };
+  for (const entry of serializedEntries) {
+    if (entry.value === null) {
+      delete finalDesired[entry.key];
+    } else {
+      finalDesired[entry.key] = entry.value;
+    }
+  }
+  const effectiveAfterSave = buildConfigFromSettingsMap(finalDesired);
+
   for (const { key, value } of serializedEntries) {
     if (value === null) {
       await db.delete(schema.settings).where(eq(schema.settings.key, key));
@@ -440,6 +453,6 @@ export async function PATCH(request: NextRequest) {
   }
 
   reloadConfig();
-  syncJobsPauseState(getSettings().jobs_paused);
+  syncJobsPauseState(effectiveAfterSave.jobs_paused);
   return NextResponse.json({ status: 'ok', settings: await buildSettingsResponse() });
 }
