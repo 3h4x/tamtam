@@ -8,7 +8,6 @@ export async function reinstallAgents(): Promise<void> {
   const { getSettings } = await import('./lib/shared/config');
   const { listEnabledProjects } = await import('./lib/shared/enabled-projects');
   type AgentInput = Parameters<typeof startInternalScheduler>[0][number];
-  const { reconcilePm2Schedules } = await import('./lib/scheduling/agent-scheduler');
 
   const allAgents = await db.select().from(schema.agents);
   const dbEnabled: AgentInput[] = allAgents
@@ -56,14 +55,6 @@ export async function reinstallAgents(): Promise<void> {
     // Settings table may be unavailable or partially mocked in tests.
   }
   startInternalScheduler([...dbEnabled, ...fileEnabled]);
-
-  // One-time cleanup: PM2 cron entries from the legacy installAgentSchedule
-  // path are dead weight now. Sweep them so `pm2 list` stops being noise.
-  try {
-    await reconcilePm2Schedules([]);
-  } catch (err) {
-    console.error('[scheduler] PM2 cleanup failed:', err);
-  }
 }
 
 // Periodic probe sweep. Two responsibilities, both orthogonal to whether
@@ -289,7 +280,6 @@ export async function reapOrphanReleases(): Promise<void> {
   try {
     const { listJobs, markDone, reconcileStaleRelease, getJob } = await import('./lib/jobs/job-storage');
     const { db, schema } = await import('./lib/db');
-    const { exec } = await import('./lib/shared/shell');
     const { eq } = await import('drizzle-orm');
 
     const candidates = listJobs().filter(j => j.kind === 'release' && j.finishedAt === null);
@@ -335,10 +325,8 @@ export async function reapOrphanReleases(): Promise<void> {
 
       if (latestFinishedChild && !quietLongEnough) continue;
 
-      try {
-        await exec('pm2', ['stop', job.id, '--silent'], { timeout: 5000 });
-        await exec('pm2', ['delete', job.id, '--silent'], { timeout: 5000 });
-      } catch { /* may not be in PM2 */ }
+      // (Per-release PM2 entries were retired with the bash release monitor —
+      // there's no PM2 process to stop/delete here anymore.)
 
       // Release the lock if this orphan owns it (or it's stuck on the
       // unfinished placeholder).

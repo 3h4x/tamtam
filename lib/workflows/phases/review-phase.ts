@@ -31,6 +31,7 @@ export type ReviewPhaseResult =
 
 export async function releaseReviewPhaseWorkflow(
   projectName: string,
+  releaseJobId?: string,
 ): Promise<ReviewPhaseResult> {
   'use workflow';
   const started = await spawnReviewStep(projectName);
@@ -45,6 +46,14 @@ export async function releaseReviewPhaseWorkflow(
   }
   const waited = await awaitReviewCompletionStep(started.jobId);
   const verdict = waited.finished ? await readReviewVerdictStep(started.jobId) : null;
+  // Close the loop: re-dispatch the orchestrator for this sub-step so the
+  // chain continues fully through workflow runs. Without this the legacy
+  // reconciler's hook re-fire is the only thing that moves the chain past
+  // review, and the release meta-job ends up finalized as exit=-1 by the
+  // reconciler instead of by the workflow runtime.
+  if (waited.finished && releaseJobId) {
+    await dispatchOrchestratorTickStep(started.jobId, projectName, releaseJobId);
+  }
   return {
     ok: true,
     jobId: started.jobId,
@@ -75,4 +84,19 @@ async function readReviewVerdictStep(jobId: string): Promise<ReviewVerdict> {
   const v = getVerdict(job);
   if (v === 'LGTM' || v === 'NEEDS ATTENTION' || v === 'DO NOT SHIP') return v;
   return null;
+}
+
+async function dispatchOrchestratorTickStep(
+  jobId: string,
+  projectName: string,
+  releaseJobId: string,
+): Promise<void> {
+  'use step';
+  try {
+    const { start } = await import('workflow/api');
+    const { releaseOrchestratorWorkflow } = await import('@/lib/workflows/release-orchestrator');
+    await start(releaseOrchestratorWorkflow, [jobId, { projectName, parentJobId: releaseJobId }]);
+  } catch (err) {
+    console.error('[review-phase] failed to re-dispatch orchestrator:', err);
+  }
 }

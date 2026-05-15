@@ -353,7 +353,7 @@ describe('instrumentation', () => {
 
     it('still reaps zero-child orphan releases directly', async () => {
       const release = { id: 'release-3', project: 'proj', kind: 'release', finishedAt: null, startedAt: 100 };
-      const { execMock, markDoneMock, reconcileStaleReleaseMock } = mockOrphanReleaseDeps({
+      const { markDoneMock, reconcileStaleReleaseMock } = mockOrphanReleaseDeps({
         jobs: [release],
       });
 
@@ -361,7 +361,8 @@ describe('instrumentation', () => {
       await reapOrphanReleases();
 
       expect(reconcileStaleReleaseMock).not.toHaveBeenCalled();
-      expect(execMock).toHaveBeenCalledTimes(2);
+      // PM2 stop/delete used to be invoked here; per-release PM2 entries
+      // were retired with the bash release monitor, so no shell calls now.
       expect(markDoneMock).toHaveBeenCalledWith(release, -1);
     });
   });
@@ -403,16 +404,8 @@ describe('instrumentation', () => {
       expect(startInternalSchedulerMock.mock.calls[0][0]).toHaveLength(0);
     });
 
-    it('sweeps any leftover PM2 cron entries (legacy cleanup)', async () => {
-      mockDeps([makeAgent()]);
-
-      const { reinstallAgents } = await import('@/instrumentation-node');
-      await reinstallAgents();
-
-      expect(reconcilePm2SchedulesMock).toHaveBeenCalledOnce();
-      // Called with empty array — the new model has zero PM2 cron entries by design.
-      expect(reconcilePm2SchedulesMock).toHaveBeenCalledWith([]);
-    });
+    // Legacy PM2-cron cleanup-on-boot was removed; reinstallAgents no longer
+    // calls reconcilePm2Schedules.
 
     it('does nothing when no agents exist', async () => {
       mockDeps([]);

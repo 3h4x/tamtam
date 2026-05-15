@@ -1,7 +1,22 @@
+// Thin facade over the in-process scheduler in `./internal-scheduler.ts`.
+//
+// All scheduling lives in `internal-scheduler` now — setTimeout fan-out per
+// enabled scheduled agent. This file exists for two reasons:
+//
+//   - Public API surface (installAgentSchedule / uninstallAgentSchedule /
+//     getSchedulerHealth) used by `/api/agents` routes and the recommendations
+//     applier, kept stable while the underlying implementation evolves.
+//   - One file-system side-effect: each agent's prompt is persisted to
+//     `<logDir>/agent-scripts/<agentId>.prompt.json` so out-of-band reruns
+//     can recover it after a server restart.
+//
+// The legacy PM2-cron scheduling path was retired with the rest of the
+// per-job PM2 infrastructure. Functions and types stay close to their
+// pre-retirement shape so callers don't have to change.
+
 import { writeFileSync, unlinkSync, existsSync, mkdirSync } from 'fs';
 import { join } from 'path';
 import { homedir } from 'os';
-import { exec } from '@/lib/shared/shell';
 import { getImproveConfig } from './scheduling';
 import { normalizeAgentScheduleOrThrow } from './agent-schedule';
 
@@ -10,11 +25,6 @@ function getLogDir(): string {
 }
 function getScriptsDir(): string {
   return join(getLogDir(), 'agent-scripts');
-}
-
-function pm2Name(agentId: string, project?: string, agentName?: string): string {
-  if (project && agentName) return `tamtam-${project}-agent-${agentName}`;
-  return `tamtam-agent-${agentId}`;
 }
 
 function agentPromptPath(agentId: string): string {
@@ -30,77 +40,11 @@ function cleanupFiles(agentId: string): void {
   }
 }
 
-// --- PM2 scheduling (legacy cleanup only) ---
-//
-// installPm2Schedule was removed: PM2 cron with --no-autostart silently
-// no-op'd, so registering an agent there had no effect. All scheduling now
-// lives in lib/internal-scheduler.ts. The uninstall + reconcile helpers stay
-// to clean up any legacy entries left over from before the migration.
-
-async function uninstallPm2Schedule(agentId: string, project?: string, agentName?: string): Promise<void> {
-  const name = pm2Name(agentId, project, agentName);
-  // pm2 delete returns non-zero if process doesn't exist, that's fine
-  await exec('pm2', ['delete', name]);
-  cleanupFiles(agentId);
-}
-
-async function isPm2ScheduleLoaded(agentId: string, project?: string, agentName?: string): Promise<boolean> {
-  const name = pm2Name(agentId, project, agentName);
-  const result = await exec('pm2', ['describe', name]);
-  return result.exitCode === 0;
-}
-
-// --- Reconciliation ---
-
-/**
- * Compare PM2's running `tamtam-*-agent-*` processes against the expected set
- * (enabled, scheduled, pm2-runner agents from the DB) and delete any orphans.
- *
- * This runs at startup to clean up stale entries left by renames, project
- * changes, runner switches, or failed uninstalls.
- */
-export async function reconcilePm2Schedules(
-  agents: Array<{ id: string; project: string; name: string; runner: string; schedule: string | null; enabled: boolean }>
-): Promise<void> {
-  let result: Awaited<ReturnType<typeof exec>>;
-  try {
-    result = await exec('pm2', ['jlist']);
-  } catch {
-    return;
-  }
-  if (result.exitCode !== 0 || !result.stdout.trim()) return;
-
-  let processes: Array<{ name: string }>;
-  try {
-    processes = JSON.parse(result.stdout);
-  } catch {
-    return;
-  }
-
-  const expectedNames = new Set<string>();
-  for (const agent of agents) {
-    if (!agent.schedule || !agent.enabled) continue;
-    expectedNames.add(pm2Name(agent.id, agent.project, agent.name));
-  }
-
-  for (const proc of processes) {
-    const { name } = proc;
-    if (!name || !name.startsWith('tamtam-') || !name.includes('-agent-')) continue;
-    if (expectedNames.has(name)) continue;
-    try {
-      await exec('pm2', ['delete', name]);
-      console.log(`[scheduler] reconciled orphan PM2 entry: ${name}`);
-    } catch (err) {
-      console.error(`[scheduler] failed to delete orphan ${name}:`, err);
-    }
-  }
-}
-
-// --- Public API ---
-
 function ensureDirs(): void {
   mkdirSync(/*turbopackIgnore: true*/ getScriptsDir(), { recursive: true });
 }
+
+// --- Public API ---
 
 export async function installAgentSchedule(
   agentId: string,
@@ -112,8 +56,6 @@ export async function installAgentSchedule(
 ): Promise<void> {
   const normalizedSchedule = normalizeAgentScheduleOrThrow(schedule);
   ensureDirs();
-  // Persist prompt next to the runtime artifacts so out-of-band reruns can
-  // recover it.
   writeFileSync(/*turbopackIgnore: true*/ agentPromptPath(agentId), JSON.stringify({ prompt }));
 
   const { upsertAgentSchedule } = await import('./internal-scheduler');
@@ -125,27 +67,27 @@ export async function installAgentSchedule(
     prompt,
     enabled: true,
   });
-  await uninstallPm2Schedule(agentId, project, agentName);
 }
 
 export async function uninstallAgentSchedule(
   agentId: string,
   _runner: string = 'pm2',
-  project?: string,
-  agentName?: string,
+  _project?: string,
+  _agentName?: string,
 ): Promise<void> {
   const { removeAgentSchedule } = await import('./internal-scheduler');
   removeAgentSchedule(agentId);
-  await uninstallPm2Schedule(agentId, project, agentName);
+  cleanupFiles(agentId);
 }
 
 export async function isAgentScheduleLoaded(
   agentId: string,
   _runner: string = 'pm2',
-  project?: string,
-  agentName?: string,
+  _project?: string,
+  _agentName?: string,
 ): Promise<boolean> {
-  return isPm2ScheduleLoaded(agentId, project, agentName);
+  const { dumpInternalScheduler } = await import('./internal-scheduler');
+  return dumpInternalScheduler().entries.some((e) => e.agentId === agentId);
 }
 
 // --- Health / verification ---
@@ -180,7 +122,9 @@ export async function getSchedulerHealth(
       name: a.name,
       runner: a.runner,
       schedule: a.schedule,
-      expectedName: pm2Name(a.id, a.project, a.name),
+      // expectedName retained for response-shape compatibility; uses the
+      // legacy `tamtam-<project>-agent-<name>` format readers may expect.
+      expectedName: a.project && a.name ? `tamtam-${a.project}-agent-${a.name}` : `tamtam-agent-${a.id}`,
     });
   }
 

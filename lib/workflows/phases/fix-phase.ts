@@ -28,7 +28,11 @@ export type FixPhaseResult =
       blockingJobId?: string;
     };
 
-export async function releaseFixPhaseWorkflow(sourceJobId: string): Promise<FixPhaseResult> {
+export async function releaseFixPhaseWorkflow(
+  sourceJobId: string,
+  projectName?: string,
+  releaseJobId?: string,
+): Promise<FixPhaseResult> {
   'use workflow';
   const started = await spawnFixStep(sourceJobId);
   if (!started.ok) {
@@ -42,6 +46,11 @@ export async function releaseFixPhaseWorkflow(sourceJobId: string): Promise<FixP
     };
   }
   const waited = await awaitFixCompletionStep(started.jobId);
+  // Re-dispatch the orchestrator so the chain progresses through workflow
+  // runs (typically fix → test for another verification round).
+  if (waited.finished && projectName && releaseJobId) {
+    await dispatchOrchestratorTickStep(started.jobId, projectName, releaseJobId);
+  }
   return {
     ok: true,
     jobId: started.jobId,
@@ -62,4 +71,19 @@ async function awaitFixCompletionStep(jobId: string): Promise<WaitForJobResult> 
   'use step';
   const { waitForJobCompletion } = await import('@/lib/workflows/wait-for-job');
   return waitForJobCompletion(jobId);
+}
+
+async function dispatchOrchestratorTickStep(
+  jobId: string,
+  projectName: string,
+  releaseJobId: string,
+): Promise<void> {
+  'use step';
+  try {
+    const { start } = await import('workflow/api');
+    const { releaseOrchestratorWorkflow } = await import('@/lib/workflows/release-orchestrator');
+    await start(releaseOrchestratorWorkflow, [jobId, { projectName, parentJobId: releaseJobId }]);
+  } catch (err) {
+    console.error('[fix-phase] failed to re-dispatch orchestrator:', err);
+  }
 }

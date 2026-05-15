@@ -25,6 +25,9 @@ vi.mock('@/lib/db', () => ({
 vi.mock('@/lib/pipeline/start-release', () => ({
   startRelease: (...args: unknown[]) => mocks.startReleaseMock(...args),
 }));
+vi.mock('@/lib/workflows/dispatch-release', () => ({
+  dispatchReleaseWorkflow: (...args: unknown[]) => mocks.startReleaseMock(...args),
+}));
 
 // Single top-level import — all tests below share this resolved module graph.
 import {

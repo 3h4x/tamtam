@@ -570,17 +570,6 @@ describe('DELETE /api/jobs/[jobId]', () => {
     expect(data.status).toBe('cancelled');
   });
 
-  it('calls pm2 stop and delete for running job', async () => {
-    const job = makeJob({ id: 'pm2-job', finishedAt: null });
-    mocks.getJob.mockReturnValue(job);
-
-    const req = new NextRequest('http://localhost/api/jobs/pm2-job', { method: 'DELETE' });
-    await jobDELETE(req, { params: Promise.resolve({ jobId: 'pm2-job' }) });
-
-    expect(mocks.exec).toHaveBeenCalledWith('pm2', ['stop', 'pm2-job', '--silent'], { timeout: 5000 });
-    expect(mocks.exec).toHaveBeenCalledWith('pm2', ['delete', 'pm2-job', '--silent'], { timeout: 5000 });
-  });
-
   it('sends SIGTERM to process by PID', async () => {
     const job = makeJob({ id: 'pid-job', pid: 5678, finishedAt: null });
     mocks.getJob.mockReturnValue(job);
@@ -653,19 +642,6 @@ describe('DELETE /api/jobs/[jobId]', () => {
     expect(job.exitCode).toBe(-2);
     expect(job.finishedAt).toBeGreaterThan(0);
     expect(mocks.updateJob).toHaveBeenCalledWith(job);
-  });
-
-  it('continues cancellation even when pm2 commands fail', async () => {
-    const job = makeJob({ id: 'no-pm2-job', pid: 1111, finishedAt: null });
-    mocks.getJob.mockReturnValue(job);
-    mocks.exec.mockRejectedValue(new Error('pm2 not found'));
-
-    const req = new NextRequest('http://localhost/api/jobs/no-pm2-job', { method: 'DELETE' });
-    const res = await jobDELETE(req, { params: Promise.resolve({ jobId: 'no-pm2-job' }) });
-
-    expect(res.status).toBe(200);
-    expect(killSpy).toHaveBeenCalledWith(1111, 'SIGTERM');
-    expect(mocks.updateJob).toHaveBeenCalled();
   });
 
   it('skips kill when pid is 0', async () => {

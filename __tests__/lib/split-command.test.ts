@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { splitCommand } from '@/lib/jobs/pm2-jobs';
+import { splitCommand } from '@/lib/shared/split-command';
 
 describe('splitCommand', () => {
   it('splits on whitespace', () => {

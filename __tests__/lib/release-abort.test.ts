@@ -193,10 +193,6 @@ describe('abortActiveRelease', () => {
       killed_job_id: null,
       httpStatus: 409,
     });
-    // PM2 stop/delete used to fire here, but per-job PM2 entries were
-    // retired when CLI spawning moved in-process. Termination of
-    // push/commit kinds is owned by requestJobCancellation.
-    expect(execMock).not.toHaveBeenCalledWith('pm2', expect.anything(), expect.anything());
     expect(requestJobCancellationMock).toHaveBeenCalledWith('commit-1', 20_000);
     expect(updateJobMock).toHaveBeenCalledWith(expect.objectContaining({ id: 'release-1', abortedAt: expect.any(Number) }));
     expect(updateJobMock).not.toHaveBeenCalledWith(expect.objectContaining({ id: 'commit-1' }));

@@ -519,6 +519,9 @@ describe('resume-stuck-release helpers', () => {
       vi.doMock('@/lib/pipeline/start-release', () => ({
         startRelease: startReleaseMock,
       }));
+      vi.doMock('@/lib/workflows/dispatch-release', () => ({
+        dispatchReleaseWorkflow: startReleaseMock,
+      }));
     });
 
     it('finds only the newest qualifying orphan per project and skips projects with newer pipeline activity', async () => {

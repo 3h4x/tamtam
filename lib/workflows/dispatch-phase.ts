@@ -64,12 +64,12 @@ export async function dispatchPhase(
     switch (decision.next) {
       case 'review': {
         const { releaseReviewPhaseWorkflow } = await import('@/lib/workflows/phases/review-phase');
-        run = await start(releaseReviewPhaseWorkflow, [ctx.projectName]);
+        run = await start(releaseReviewPhaseWorkflow, [ctx.projectName, ctx.parentJobId]);
         break;
       }
       case 'fix': {
         const { releaseFixPhaseWorkflow } = await import('@/lib/workflows/phases/fix-phase');
-        run = await start(releaseFixPhaseWorkflow, [ctx.prevJobId!]);
+        run = await start(releaseFixPhaseWorkflow, [ctx.prevJobId!, ctx.projectName, ctx.parentJobId]);
         break;
       }
       case 'push': {
@@ -84,7 +84,7 @@ export async function dispatchPhase(
       }
       case 'mark-dod': {
         const { releaseMarkDodPhaseWorkflow } = await import('@/lib/workflows/phases/mark-dod-phase');
-        run = await start(releaseMarkDodPhaseWorkflow, [ctx.projectName, ctx.dodOverride]);
+        run = await start(releaseMarkDodPhaseWorkflow, [ctx.projectName, ctx.dodOverride, ctx.parentJobId]);
         break;
       }
     }

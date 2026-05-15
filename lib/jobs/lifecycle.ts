@@ -1413,8 +1413,8 @@ async function runCompletionHooksInner(job: JobData): Promise<void> {
   // never recovers.
   if (job.kind === 'fix-ci' && job.exitCode === 0) {
     try {
-      const { startRelease } = await import('@/lib/pipeline/start-release');
-      const r = await startRelease(job.project, { queueIfBlocked: true, sourceJobId: job.id });
+      const { dispatchReleaseWorkflow } = await import('@/lib/workflows/dispatch-release');
+      const r = await dispatchReleaseWorkflow(job.project, { queueIfBlocked: true, sourceJobId: job.id });
       if (r.ok) {
         if ('status' in r && r.status === 'queued') {
           console.log(`[release-after-fix-ci] queued release for ${job.project} after fix-ci ${job.id}`);
@@ -1440,8 +1440,8 @@ async function runCompletionHooksInner(job: JobData): Promise<void> {
     try {
       const { releaseAfterRun } = await getProjectPipelineConfig(job.project);
       if (releaseAfterRun) {
-        const { startRelease } = await import('@/lib/pipeline/start-release');
-        const r = await startRelease(job.project, { queueIfBlocked: true, sourceJobId: job.id });
+        const { dispatchReleaseWorkflow } = await import('@/lib/workflows/dispatch-release');
+        const r = await dispatchReleaseWorkflow(job.project, { queueIfBlocked: true, sourceJobId: job.id });
         if (r.ok) {
           if ('status' in r && r.status === 'queued') {
             console.log(`[release-after-run] queued release for ${job.project} after run ${job.id}`);
@@ -1614,13 +1614,10 @@ export async function markDone(job: JobData, exitCode: number): Promise<void> {
       console.error(`[markDone] reconcileStaleRelease also failed for ${job.id}:`, reconcileErr);
     }
   }
-  // Clean up PM2 process now that it's saved to DB
-  try {
-    const { deleteJob } = await import('@/lib/jobs/pm2-jobs');
-    await deleteJob(job.id);
-  } catch {}
+  // (Per-job PM2 entries were retired when CLI spawning moved in-process;
+  // there is no PM2 entry to delete here anymore.)
   // Fallback: explicitly SIGKILL the bash wrapper and any children in case
-  // Claude CLI hung and escaped pm2's tree-kill.
+  // the spawned subprocess hung after Claude CLI's final result event.
   // Skip for inline kinds (push, commit) whose job.pid IS the server's own
   // process.pid — killing it would crash TamTam and cascade -1 exits onto
   // every other in-flight job. mark-dod and pr-wait already avoid this by

@@ -57,17 +57,23 @@ describe('dispatchPhase', () => {
     expect(startMock).not.toHaveBeenCalled();
   });
 
-  it('dispatches releaseReviewPhaseWorkflow for next=review', async () => {
+  it('dispatches releaseReviewPhaseWorkflow for next=review (with releaseJobId for re-dispatch)', async () => {
     const decision: NextPhase = { next: 'review', from: 'test' };
-    const r = await dispatchPhase(decision, { projectName: 'test-tt' });
-    expect(startMock).toHaveBeenCalledWith(phaseFns.review, ['test-tt']);
+    const r = await dispatchPhase(decision, { projectName: 'test-tt', parentJobId: 'release-meta-1' });
+    expect(startMock).toHaveBeenCalledWith(phaseFns.review, ['test-tt', 'release-meta-1']);
     expect(r).toEqual({ dispatched: true, phase: 'review', childRunId: 'wrun_child_1' });
   });
 
-  it('dispatches releaseFixPhaseWorkflow for next=fix with prevJobId', async () => {
+  it('passes undefined releaseJobId when parentJobId is not set', async () => {
+    const decision: NextPhase = { next: 'review', from: 'test' };
+    await dispatchPhase(decision, { projectName: 'test-tt' });
+    expect(startMock).toHaveBeenCalledWith(phaseFns.review, ['test-tt', undefined]);
+  });
+
+  it('dispatches releaseFixPhaseWorkflow for next=fix with prevJobId (forwards projectName + releaseJobId for re-dispatch)', async () => {
     const decision: NextPhase = { next: 'fix', from: 'test', testExitCode: 1 };
-    const r = await dispatchPhase(decision, { projectName: 'test-tt', prevJobId: 'test-job-1' });
-    expect(startMock).toHaveBeenCalledWith(phaseFns.fix, ['test-job-1']);
+    const r = await dispatchPhase(decision, { projectName: 'test-tt', prevJobId: 'test-job-1', parentJobId: 'release-meta-1' });
+    expect(startMock).toHaveBeenCalledWith(phaseFns.fix, ['test-job-1', 'test-tt', 'release-meta-1']);
     expect(r).toEqual({ dispatched: true, phase: 'fix', childRunId: 'wrun_child_1' });
   });
 
@@ -115,18 +121,18 @@ describe('dispatchPhase', () => {
     });
   });
 
-  it('dispatches releaseMarkDodPhaseWorkflow with optional override', async () => {
+  it('dispatches releaseMarkDodPhaseWorkflow with optional override + releaseJobId', async () => {
     const decision: NextPhase = { next: 'mark-dod', from: 'push' };
     const override = { issueNumber: 42, repo: 'owner/repo' };
-    const r = await dispatchPhase(decision, { projectName: 'test-tt', dodOverride: override });
-    expect(startMock).toHaveBeenCalledWith(phaseFns.markDod, ['test-tt', override]);
+    const r = await dispatchPhase(decision, { projectName: 'test-tt', dodOverride: override, parentJobId: 'release-meta-1' });
+    expect(startMock).toHaveBeenCalledWith(phaseFns.markDod, ['test-tt', override, 'release-meta-1']);
     expect(r.dispatched).toBe(true);
   });
 
   it('dispatches releaseMarkDodPhaseWorkflow with no override', async () => {
     const decision: NextPhase = { next: 'mark-dod', from: 'push' };
     const r = await dispatchPhase(decision, { projectName: 'test-tt' });
-    expect(startMock).toHaveBeenCalledWith(phaseFns.markDod, ['test-tt', undefined]);
+    expect(startMock).toHaveBeenCalledWith(phaseFns.markDod, ['test-tt', undefined, undefined]);
     expect(r.dispatched).toBe(true);
   });
 

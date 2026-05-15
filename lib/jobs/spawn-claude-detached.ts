@@ -17,7 +17,7 @@ import { openSync, closeSync, createReadStream, writeFileSync, mkdirSync, writeS
 import { join } from 'path';
 import { homedir } from 'os';
 import { getImproveConfig } from '@/lib/scheduling/scheduling';
-import { splitCommand } from './pm2-jobs';
+import { splitCommand } from '@/lib/shared/split-command';
 import { measurePrompt, checkPromptSize } from './prompt-size';
 import { redactSecrets } from '@/lib/shared/log-redaction';
 

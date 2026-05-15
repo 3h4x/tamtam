@@ -1,9 +1,38 @@
-import { existsSync, readFileSync } from 'fs';
-import { getJobStatus } from './pm2-jobs';
-import { saveToDb } from './storage';
+import { existsSync, readFileSync, statSync } from 'fs';
 import type { JobData } from './types';
 import { isClaudeBackedJobKind } from './kinds';
 import { getJobCancellationSignal } from './cancellation';
+import { hasCloseHandlerPending } from './spawned-close-pending';
+
+/** Read the sentinel exit-code file that `startProjectTest`'s spawned bash
+ *  writes immediately before exiting. Returns null when the file is missing
+ *  or unparseable so the caller can fall back to -1. */
+function readTestExitCodeSentinel(logPath: string | null | undefined): number | null {
+  if (!logPath) return null;
+  const sentinel = `${logPath}.exitcode`;
+  if (!existsSync(sentinel)) return null;
+  try {
+    const raw = readFileSync(sentinel, 'utf-8').trim();
+    const n = Number.parseInt(raw, 10);
+    return Number.isFinite(n) ? n : null;
+  } catch {
+    return null;
+  }
+}
+
+/** Returns true when the log file has been modified within `windowMs`. Used
+ *  as a fallback liveness check for test/action jobs whose pid wasn't
+ *  persisted to the DB — if the log is still being written, the spawned
+ *  process is still active even though we can't see its pid. */
+function logRecentlyWritten(logPath: string | null | undefined, windowMs: number): boolean {
+  if (!logPath || !existsSync(logPath)) return false;
+  try {
+    const stat = statSync(logPath);
+    return Date.now() - stat.mtimeMs < windowMs;
+  } catch {
+    return false;
+  }
+}
 
 // Returns the exit code implied by the Claude result line in the job's log:
 //   0  if is_error: false (or the line can't be parsed)
@@ -52,6 +81,11 @@ export async function probeJobStatus(job: JobData): Promise<'running' | 'done'> 
     await markDone(job, -1);
     return 'done';
   }
+  // Release meta-jobs are coordinators, not subprocesses. With workflow-driven
+  // orchestration the workflow runtime owns finalization — probing the meta-
+  // job's pid is meaningless. Trust the workflow / completion-hook chain to
+  // call finalizeReleaseJob; probe stays out of the way.
+  if (job.kind === 'release') return 'running';
   // Jobs are created with pid=0 and the real pid is persisted asynchronously
   // after `pm2 start` returns (can take up to pm2's 15 s timeout). During that
   // window, treat the job as still spawning rather than dead — otherwise a
@@ -62,6 +96,26 @@ export async function probeJobStatus(job: JobData): Promise<'running' | 'done'> 
   const PID_SPAWN_GRACE_SEC = 30;
   if (job.pid <= 0) {
     const ageSec = Date.now() / 1000 - job.startedAt;
+    // For test/action jobs the sentinel file is the authoritative completion
+    // signal — they often run longer than the spawn grace, and a server
+    // restart between spawn and `updateJob(pid)` can leave the row stuck at
+    // pid=0 even though the test is still running. Check sentinel/log mtime
+    // first so a test running for several minutes isn't falsely declared dead.
+    if (job.kind === 'test' || job.kind === 'action') {
+      const sentinelExitCode = readTestExitCodeSentinel(job.logPath);
+      if (sentinelExitCode != null) {
+        await markDone(job, sentinelExitCode);
+        return 'done';
+      }
+      // No sentinel yet. If the log was written recently the bash is still
+      // running; only declare dead when the log is stale (5 min window).
+      if (logRecentlyWritten(job.logPath, 5 * 60 * 1000)) return 'running';
+      // Also keep within the original spawn grace before failing — gives the
+      // post-spawn updateJob() a chance to backfill pid in normal startup.
+      if (ageSec < PID_SPAWN_GRACE_SEC) return 'running';
+      await markDone(job, -1);
+      return 'done';
+    }
     if (ageSec < PID_SPAWN_GRACE_SEC) return 'running';
     // Inline kinds run inside the next-server itself (pid intentionally 0
     // so markDone's SIGKILL fallback doesn't kill our own process). They
@@ -72,40 +126,11 @@ export async function probeJobStatus(job: JobData): Promise<'running' | 'done'> 
     if (job.kind === 'mark-dod' || job.kind === 'pr-wait') {
       return 'running';
     }
-    // Non-PM2 kinds (test/action) have no name to look up in pm2 — dead means dead.
-    if (job.kind === 'test' || job.kind === 'action') {
-      await markDone(job, -1);
-      return 'done';
-    }
-    // PM2-managed kinds: a race between `pm2 start` returning and `pm2 jlist`
-    // reflecting the new process can leave job.pid=0 even though pm2 knows
-    // about the job by name. Ask pm2 directly before declaring it dead —
-    // otherwise we incorrectly markDone(-1) long-running jobs (classic
-    // symptom: release jobs ending with exit_code=-1 despite the pipeline
-    // succeeding and writing `# release finished — exit 0`).
-    const { status, exitCode } = await getJobStatus(job.id);
-    if (status === 'running') {
-      // Opportunistically backfill pid so subsequent probes skip this path.
-      try {
-        const realPid = await (await import('@/lib/jobs/pm2-jobs')).getJobPid(job.id);
-        if (realPid && realPid > 0) {
-          job.pid = realPid;
-          saveToDb(job);
-        }
-      } catch {}
-      return 'running';
-    }
-    if (status === 'done') {
-      await markDone(job, exitCode ?? -1);
-      return 'done';
-    }
-    // status === 'unknown' — pm2 has no record. Before declaring dead, check
-    // whether a route handler is still managing this job inline (e.g. agent
-    // runs hold a cancellation signal while their prerequisite command is
-    // executing — `pnpm check` etc. routinely takes >30s, exceeding the
-    // pid-spawn grace). An un-aborted signal means the route is mid-prereq
-    // and will spawn into pm2 once it returns; killing it here would mutate
-    // the route's cached job reference and trip its post-prereq cancel check.
+    // For remaining kinds with pid=0 past the spawn grace: an un-aborted
+    // cancellation signal means a route handler is still managing the job
+    // inline (e.g. agent runs hold the signal while their prerequisite
+    // command — `pnpm check` etc. — runs). Killing the row here would mutate
+    // the route's cached JobData and trip its post-prereq cancel check.
     const inlineSignal = getJobCancellationSignal(job.id);
     if (inlineSignal && !inlineSignal.aborted) return 'running';
     await markDone(job, -1);
@@ -123,21 +148,29 @@ export async function probeJobStatus(job: JobData): Promise<'running' | 'done'> 
   }
   // Test/action jobs spawn directly (no PM2) — check liveness via pid only.
   if (job.kind === 'test' || job.kind === 'action') {
+    // The spawned child's `proc.on('close', …)` handler runs in this process
+    // and races against this probe. If we declare the job dead here while the
+    // close event is still queued in the event loop, our markDone(-1) wins
+    // and the real exit code from the child is overwritten. Skip the ESRCH
+    // path when the close handler is still pending so the close event lands
+    // first.
+    if (hasCloseHandlerPending(job.id)) return 'running';
     try {
       process.kill(job.pid, 0);
       return 'running';
     } catch (e: unknown) {
       if ((e as NodeJS.ErrnoException).code === 'EPERM') return 'running';
-      await markDone(job, -1);
+      // Process is dead. The spawned bash writes its real exit code to a
+      // `.exitcode` sentinel file before exiting. If that file is present,
+      // use it — otherwise the close handler was lost (e.g. Next.js restart
+      // mid-test) and we'd mis-record exit=-1 despite passing tests.
+      const sentinelExitCode = readTestExitCodeSentinel(job.logPath);
+      await markDone(job, sentinelExitCode ?? -1);
       return 'done';
     }
   }
-  const { status, exitCode } = await getJobStatus(job.id);
-  if (status === 'running') return 'running';
-  if (status === 'done') {
-    await markDone(job, exitCode ?? -1);
-    return 'done';
-  }
+  // Generic pid>0 liveness check. With per-job PM2 entries gone, the only
+  // way to tell whether a spawned subprocess is still alive is process.kill.
   try {
     process.kill(job.pid, 0);
     return 'running';

@@ -36,6 +36,16 @@ export async function releaseOrchestratorWorkflow(
   if (!waited.finished || !waited.job) return { waited, decision: null, dispatch: null };
   const decision = await decideStep(waited.job.id);
   const dispatch = await dispatchStep(decision, { ...ctx, prevJobId: waited.job.id });
+  // When the chain reaches a terminal decision (done / abort / unknown),
+  // finalize the release meta-job so its row in /runs reflects the actual
+  // outcome instead of staying open until the legacy reconciler reaps it.
+  if (
+    dispatch.dispatched === false &&
+    dispatch.reason === 'terminal' &&
+    ctx.parentJobId
+  ) {
+    await finalizeReleaseStep(ctx.parentJobId, dispatch.phase, waited.job.exitCode ?? 0);
+  }
   return { waited, decision, dispatch };
 }
 
@@ -62,4 +72,25 @@ async function dispatchStep(
   'use step';
   const { dispatchPhase } = await import('@/lib/workflows/dispatch-phase');
   return dispatchPhase(decision, ctx);
+}
+
+async function finalizeReleaseStep(
+  releaseJobId: string,
+  terminalPhase: 'done' | 'abort' | 'unknown',
+  lastStepExitCode: number,
+): Promise<void> {
+  'use step';
+  const { getJob } = await import('@/lib/jobs/job-storage');
+  const { finalizeReleaseJob, finalizeAbortedRelease } = await import('@/lib/jobs/lifecycle');
+  const release = getJob(releaseJobId);
+  if (!release || release.kind !== 'release' || release.finishedAt !== null) return;
+  if (terminalPhase === 'abort') {
+    await finalizeAbortedRelease(release);
+    return;
+  }
+  // 'done' or 'unknown' — use the last step's exit code as the release outcome.
+  // 'unknown' falls through too: if the orchestrator can't classify the last
+  // step (e.g. a release meta-job hitting the orchestrator directly), the
+  // safest outcome is to mirror its exit code rather than leave the row open.
+  await finalizeReleaseJob(release, lastStepExitCode);
 }

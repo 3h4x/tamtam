@@ -14,7 +14,7 @@ const mocks = vi.hoisted(() => {
     execMock: vi.fn(),
     upsertAgentScheduleMock: vi.fn(),
     removeAgentScheduleMock: vi.fn(),
-    dumpInternalSchedulerMock: vi.fn(() => ({ entries: [] })),
+    dumpInternalSchedulerMock: vi.fn<() => { entries: Array<{ agentId: string; project: string; name: string; schedule: string; nextFireMs: number; lastFireMs: number }>; nowMs: number }>(() => ({ entries: [], nowMs: Date.now() })),
   };
 });
 const tempDir = mocks.tempDir;
@@ -46,12 +46,14 @@ describe('agent-scheduler', () => {
   const execMock = mocks.execMock;
   const upsertAgentScheduleMock = mocks.upsertAgentScheduleMock;
   const removeAgentScheduleMock = mocks.removeAgentScheduleMock;
+  const dumpInternalSchedulerMock = mocks.dumpInternalSchedulerMock;
 
   beforeEach(() => {
     execMock.mockReset();
     execMock.mockResolvedValue({ exitCode: 0, stdout: '', stderr: '' });
     upsertAgentScheduleMock.mockReset();
     removeAgentScheduleMock.mockReset();
+    dumpInternalSchedulerMock.mockReset().mockReturnValue({ entries: [], nowMs: Date.now() });
   });
 
   afterAll(() => {
@@ -72,14 +74,9 @@ describe('agent-scheduler', () => {
       });
     });
 
-    it('also sweeps any legacy PM2 cron entry as a one-time cleanup', async () => {
-      await installAgentSchedule('agent-abc', '1h', 'p', 'pm2', 'projA', 'My Agent');
-      const pm2Delete = execMock.mock.calls.find(
-        ([cmd, args]: any) => cmd === 'pm2' && args[0] === 'delete'
-      );
-      expect(pm2Delete).toBeTruthy();
-      expect(pm2Delete![1]).toContain('tamtam-projA-agent-My Agent');
-    });
+    // Legacy PM2-cleanup-on-install path was retired with the rest of the
+    // per-job PM2 infrastructure. installAgentSchedule no longer issues any
+    // pm2 commands — the internal scheduler is the only target.
 
     it('does NOT register a PM2 cron entry (the broken legacy path)', async () => {
       await installAgentSchedule('agent-abc', '1h', 'p', 'pm2');
@@ -104,28 +101,25 @@ describe('agent-scheduler', () => {
       expect(removeAgentScheduleMock).toHaveBeenCalledWith('agent-to-remove');
     });
 
-    it('also issues a pm2 delete for legacy cleanup', async () => {
-      await uninstallAgentSchedule('agent-to-remove', 'pm2', 'projA', 'My Agent');
-      const pm2Delete = execMock.mock.calls.find(
-        ([cmd, args]: any) => cmd === 'pm2' && args[0] === 'delete'
-      );
-      expect(pm2Delete).toBeTruthy();
-    });
+    // Legacy PM2 cleanup on uninstall was retired — no pm2 commands issued.
 
     it('does not throw when nothing was previously installed', async () => {
       await expect(uninstallAgentSchedule('nonexistent-agent', 'pm2')).resolves.not.toThrow();
     });
   });
 
-  describe('isAgentScheduleLoaded (pm2)', () => {
-    it('returns true when pm2 describe exits 0', async () => {
-      execMock.mockResolvedValue({ exitCode: 0, stdout: 'online', stderr: '' });
+  describe('isAgentScheduleLoaded (via internal scheduler dump)', () => {
+    it('returns true when the agent id is present in the internal scheduler', async () => {
+      dumpInternalSchedulerMock.mockReturnValue({
+        entries: [{ agentId: 'agent-running', project: 'p', name: 'n', schedule: '1h', nextFireMs: 0, lastFireMs: 0 }],
+        nowMs: Date.now(),
+      });
       const loaded = await isAgentScheduleLoaded('agent-running', 'pm2');
       expect(loaded).toBe(true);
     });
 
-    it('returns false when pm2 describe exits non-zero', async () => {
-      execMock.mockResolvedValue({ exitCode: 1, stdout: '', stderr: 'not found' });
+    it('returns false when the agent id is missing from the internal scheduler', async () => {
+      dumpInternalSchedulerMock.mockReturnValue({ entries: [], nowMs: Date.now() });
       const loaded = await isAgentScheduleLoaded('agent-missing', 'pm2');
       expect(loaded).toBe(false);
     });

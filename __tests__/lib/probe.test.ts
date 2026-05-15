@@ -155,34 +155,11 @@ describe('probeJobStatus', () => {
       expect(markDoneMock).toHaveBeenCalledWith(job, -1);
     });
 
-    it('pid=0, age >= 30s, PM2 kind running → backfills pid if available, running', async () => {
-      getJobStatusMock.mockResolvedValue({ status: 'running', exitCode: null });
-      getJobPidMock.mockResolvedValue(5678);
-      const job = makeJob({ kind: 'review', pid: 0, startedAt: Date.now() / 1000 - 60 });
-      const result = await probeJobStatus(job);
-      expect(result).toBe('running');
-      expect(job.pid).toBe(5678);
-      expect(saveToDbMock).toHaveBeenCalledWith(job);
-    });
-
-    it('pid=0, age >= 30s, PM2 kind running with pid backfill failure → still running', async () => {
-      getJobStatusMock.mockResolvedValue({ status: 'running', exitCode: null });
-      getJobPidMock.mockRejectedValue(new Error('pm2 lookup failed'));
-      const job = makeJob({ kind: 'review', pid: 0, startedAt: Date.now() / 1000 - 60 });
-      const result = await probeJobStatus(job);
-      expect(result).toBe('running');
-      expect(job.pid).toBe(0);
-      expect(saveToDbMock).not.toHaveBeenCalled();
-      expect(markDoneMock).not.toHaveBeenCalled();
-    });
-
-    it('pid=0, age >= 30s, PM2 kind done → marks done with exit code', async () => {
-      getJobStatusMock.mockResolvedValue({ status: 'done', exitCode: 0 });
-      const job = makeJob({ kind: 'review', pid: 0, startedAt: Date.now() / 1000 - 60 });
-      const result = await probeJobStatus(job);
-      expect(result).toBe('done');
-      expect(markDoneMock).toHaveBeenCalledWith(job, 0);
-    });
+    // Per-job PM2 entries were retired; the PM2-status backfill paths these
+    // tests covered (pm2 jlist → pid backfill, pm2 reports done with exit
+    // code) no longer exist. The replacement behavior — pid=0 past grace +
+    // no inline cancellation signal → markDone(-1) — is asserted below in
+    // "pid=0, age >= 30s, PM2 unknown → marks done -1".
 
     it('pid=0, age >= 30s, PM2 unknown → marks done -1', async () => {
       getJobStatusMock.mockResolvedValue({ status: 'unknown', exitCode: null });
@@ -257,21 +234,23 @@ describe('probeJobStatus', () => {
       expect(markDoneMock).toHaveBeenCalledWith(job, 0);
     });
 
-    it('claude kind without result line → falls through to PM2 check', async () => {
+    it('claude kind without result line → falls through to pid liveness check', async () => {
       const logPath = join(tempDir, 'job5.log');
       writeFileSync(logPath, `{"type":"text","content":"thinking..."}\n`);
-      getJobStatusMock.mockResolvedValue({ status: 'running', exitCode: null });
+      const killSpy = vi.spyOn(process, 'kill').mockReturnValue(true as unknown as ReturnType<typeof process.kill>);
       const job = makeJob({ kind: 'run', pid: 1234, logPath });
       const result = await probeJobStatus(job);
       expect(result).toBe('running');
       expect(markDoneMock).not.toHaveBeenCalled();
+      killSpy.mockRestore();
     });
 
-    it('claude kind with no log file → falls through to PM2 check', async () => {
-      getJobStatusMock.mockResolvedValue({ status: 'running', exitCode: null });
+    it('claude kind with no log file → falls through to pid liveness check', async () => {
+      const killSpy = vi.spyOn(process, 'kill').mockReturnValue(true as unknown as ReturnType<typeof process.kill>);
       const job = makeJob({ kind: 'fix-ci', pid: 1234, logPath: null });
       const result = await probeJobStatus(job);
       expect(result).toBe('running');
+      killSpy.mockRestore();
     });
   });
 
@@ -315,16 +294,18 @@ describe('probeJobStatus', () => {
     });
   });
 
-  describe('pid > 0 — PM2-managed kinds', () => {
-    it('PM2 running → running', async () => {
-      getJobStatusMock.mockResolvedValue({ status: 'running', exitCode: null });
+  describe('pid > 0 — generic kinds via process.kill', () => {
+    it('process alive → running', async () => {
+      const killSpy = vi.spyOn(process, 'kill').mockReturnValue(true as unknown as ReturnType<typeof process.kill>);
       const job = makeJob({ kind: 'review', pid: 1234, logPath: null });
       const result = await probeJobStatus(job);
       expect(result).toBe('running');
       expect(markDoneMock).not.toHaveBeenCalled();
+      killSpy.mockRestore();
     });
 
-    it('PM2 done with exit 0 → marks done 0', async () => {
+    // Legacy PM2 status-check test removed (path no longer exists).
+    it.skip('PM2 done with exit 0 → marks done 0', async () => {
       getJobStatusMock.mockResolvedValue({ status: 'done', exitCode: 0 });
       const job = makeJob({ kind: 'review', pid: 1234, logPath: null });
       const result = await probeJobStatus(job);

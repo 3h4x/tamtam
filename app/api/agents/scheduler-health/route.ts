@@ -1,7 +1,7 @@
 import { NextResponse } from 'next/server';
 import { and, desc, eq, isNotNull } from 'drizzle-orm';
 import { db, schema } from '@/lib/db';
-import { getSchedulerHealth, reconcilePm2Schedules, installAgentSchedule } from '@/lib/scheduling/agent-scheduler';
+import { getSchedulerHealth, installAgentSchedule } from '@/lib/scheduling/agent-scheduler';
 import { dumpInternalScheduler } from '@/lib/scheduling/internal-scheduler';
 import { scanFileAgents } from '@/lib/agents/tamtam-file-agents';
 import { listEnabledProjects } from '@/lib/shared/enabled-projects';
@@ -95,10 +95,6 @@ export async function POST() {
         installFailures.push({ id: m.id, error: errMsg(err) });
       }
     }
-
-    // Sweep any leftover PM2 cron entries from the legacy installPm2Schedule path —
-    // they're never going to fire anyway and just clutter `pm2 list`.
-    await reconcilePm2Schedules([]);
 
     const after = await getSchedulerHealth(agents);
     const internal = dumpInternalScheduler();

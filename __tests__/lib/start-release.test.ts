@@ -253,12 +253,10 @@ describe('startRelease — release pipeline entry decision tree', () => {
     execMock
       .mockImplementationOnce(() => gitStatus(' M foo.ts\n'))
       .mockImplementationOnce(() => gitAhead('0'))
-      .mockImplementation((cmd: string, args: string[]) => {
-        if (cmd === 'pm2' && args[0] === 'start') {
-          return Promise.resolve({ exitCode: 1, stdout: '', stderr: 'pm2 start failed' });
-        }
-        return Promise.resolve({ exitCode: 0, stdout: '', stderr: '' });
-      });
+      .mockImplementation(defaultExec);
+    // Force the meta-job creation to fail (no PM2 spawn anymore — the only
+    // way the release-job creation can fail is if createJob throws).
+    createJobMock.mockImplementationOnce(() => { throw new Error('db unavailable'); });
 
     const r = await startRelease('proj');
 
@@ -313,7 +311,7 @@ describe('startRelease — release pipeline entry decision tree', () => {
     expect(createJobMock).toHaveBeenCalledWith(
       'proj',
       'release',
-      0,
+      process.pid,
       '',
       undefined,
       undefined,
@@ -757,7 +755,7 @@ describe('startRelease — release pipeline entry decision tree', () => {
       expect(createJobMock).toHaveBeenCalledWith(
         'proj',
         'release',
-        0,
+        process.pid,
         '',
         undefined,
         undefined,
