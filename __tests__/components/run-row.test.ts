@@ -238,6 +238,32 @@ describe('RunRow', () => {
     unmount()
   })
 
+  it('renders failed pipeline summary chips with the error tone', () => {
+    const entry = makeEntry({
+      kind: 'release',
+      bucket: 'release',
+      title: 'Release pipeline',
+      subtitle: null,
+      inputTokens: 0,
+      outputTokens: 0,
+      costUsd: 0,
+      navSessionId: null,
+      model: null,
+    })
+
+    const { container, unmount } = renderRow({
+      entry,
+      onClick: vi.fn(),
+      summary: 'test ✓ · push ✗1',
+    })
+
+    const successChip = Array.from(container.querySelectorAll('span')).find((node) => node.textContent === 'test ✓')
+    const failedChip = Array.from(container.querySelectorAll('span')).find((node) => node.textContent === 'push ✗1')
+    expect(successChip?.className).toContain('text-status-success')
+    expect(failedChip?.className).toContain('text-status-error')
+    unmount()
+  })
+
   it('labels the metadata chip as started instead of live or last', () => {
     const entry = makeEntry({
       status: 'running',
