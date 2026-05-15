@@ -32,9 +32,20 @@ vi.mock('@/lib/jobs/job-storage', () => ({
 import { releaseWorkflow, releaseObservationWorkflow } from '@/lib/workflows/release';
 
 describe('releaseWorkflow', () => {
+  // Drive mode is now the default. The tests below exercise the
+  // observation dispatch path (single-arg start) — pin DRIVE=0 here so
+  // env defaults don't pull the orchestrator path in. The dedicated
+  // `TAMTAM_RELEASE_WORKFLOW_DRIVE drive mode` sub-block toggles the env
+  // explicitly to cover both branches.
+  const savedDriveEnv = process.env.TAMTAM_RELEASE_WORKFLOW_DRIVE;
   beforeEach(() => {
+    process.env.TAMTAM_RELEASE_WORKFLOW_DRIVE = '0';
     startReleaseMock.mockReset();
     workflowStartMock.mockReset().mockResolvedValue({ runId: 'wrun_obs_1' });
+  });
+  afterEach(() => {
+    if (savedDriveEnv === undefined) delete process.env.TAMTAM_RELEASE_WORKFLOW_DRIVE;
+    else process.env.TAMTAM_RELEASE_WORKFLOW_DRIVE = savedDriveEnv;
   });
 
   it('delegates to startRelease with the same args', async () => {
@@ -129,8 +140,8 @@ describe('releaseWorkflow', () => {
       else process.env.TAMTAM_RELEASE_WORKFLOW_DRIVE = originalEnv;
     });
 
-    it('dispatches releaseOrchestratorWorkflow and stamps the workflowDriven flag when env=1', async () => {
-      process.env.TAMTAM_RELEASE_WORKFLOW_DRIVE = '1';
+    it('dispatches releaseOrchestratorWorkflow and stamps the workflowDriven flag by default (env unset)', async () => {
+      delete process.env.TAMTAM_RELEASE_WORKFLOW_DRIVE;
       const releaseMetaJob = {
         id: 'release-1',
         kind: 'release',
@@ -163,8 +174,8 @@ describe('releaseWorkflow', () => {
       expect((args as unknown[]).length).toBe(2);
     });
 
-    it('falls back to observation dispatch when env is unset (default behavior)', async () => {
-      delete process.env.TAMTAM_RELEASE_WORKFLOW_DRIVE;
+    it('falls back to observation dispatch when env=0 (opt-out)', async () => {
+      process.env.TAMTAM_RELEASE_WORKFLOW_DRIVE = '0';
       startReleaseMock.mockResolvedValue({
         ok: true,
         step: 'test',
@@ -184,8 +195,8 @@ describe('releaseWorkflow', () => {
       expect(args).toEqual(['test-job-1']);
     });
 
-    it('does not stamp the flag when env=1 but releaseJobId is missing (queued path)', async () => {
-      process.env.TAMTAM_RELEASE_WORKFLOW_DRIVE = '1';
+    it('does not stamp the flag when drive default is active but releaseJobId is missing (queued path)', async () => {
+      delete process.env.TAMTAM_RELEASE_WORKFLOW_DRIVE;
       // Queued release: no jobId means no first sub-step.
       startReleaseMock.mockResolvedValue({
         ok: true,
@@ -198,7 +209,7 @@ describe('releaseWorkflow', () => {
     });
 
     it('swallows stamping failures so the dispatch still proceeds', async () => {
-      process.env.TAMTAM_RELEASE_WORKFLOW_DRIVE = '1';
+      delete process.env.TAMTAM_RELEASE_WORKFLOW_DRIVE;
       getJobMock.mockImplementation(() => { throw new Error('cache miss'); });
       startReleaseMock.mockResolvedValue({
         ok: true,

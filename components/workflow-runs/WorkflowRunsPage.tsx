@@ -63,7 +63,7 @@ interface RunsMeta {
   workflowEnabled: boolean;
   releaseWorkflow: boolean;
   releaseWorkflowDrive: boolean;
-  mode: 'disabled' | 'observation_only' | 'drive';
+  mode: 'observation_only' | 'drive';
 }
 
 interface RunsResponse {
@@ -85,13 +85,6 @@ function modeBadge(mode: RunsMeta['mode'] | undefined): { label: string; classNa
         // Releases create workflow_runs but the chain is still driven by hooks.
         label: 'Release: workflow observes (hooks drive)',
         className: 'bg-accent/15 text-accent border-accent/30',
-      };
-    case 'disabled':
-      return {
-        // Release path is not wrapped in a workflow at all.
-        // Agent runs may still use workflows independently.
-        label: 'Release: hooks drive (default)',
-        className: 'bg-bg-tertiary text-text-tertiary border-border',
       };
     default:
       return {
@@ -194,8 +187,7 @@ export function WorkflowRunsPage() {
         {data.meta && (() => {
           const badge = modeBadge(data.meta.mode);
           const title =
-            `TAMTAM_RELEASE_WORKFLOW=${data.meta.releaseWorkflow ? '1' : 'unset'}, ` +
-            `TAMTAM_RELEASE_WORKFLOW_DRIVE=${data.meta.releaseWorkflowDrive ? '1' : 'unset'}`;
+            `TAMTAM_RELEASE_WORKFLOW_DRIVE=${data.meta.releaseWorkflowDrive ? 'on (default)' : '0 (observation fallback)'}`;
           return (
             <span className={`inline-block px-2 py-0.5 rounded border text-xs ${badge.className}`} title={title}>
               {badge.label}

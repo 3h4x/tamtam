@@ -73,25 +73,9 @@ describe('GET /api/workflow-runs', () => {
     expect(body.meta).toBeDefined();
   });
 
-  it('surfaces mode=disabled when TAMTAM_RELEASE_WORKFLOW is unset', async () => {
+  it('surfaces mode=observation_only when TAMTAM_RELEASE_WORKFLOW_DRIVE=0 (drive opt-out)', async () => {
     process.env.WORKFLOW_POSTGRES_URL = 'postgres://test/wf';
-    delete process.env.TAMTAM_RELEASE_WORKFLOW;
-    delete process.env.TAMTAM_RELEASE_WORKFLOW_DRIVE;
-    poolQueryMock.mockResolvedValueOnce({ rows: [] });
-    const { GET } = await importRoute();
-    const res = await GET(makeRequest());
-    const body = await res.json();
-    expect(body.meta).toMatchObject({
-      releaseWorkflow: false,
-      releaseWorkflowDrive: false,
-      mode: 'disabled',
-    });
-  });
-
-  it('surfaces mode=observation_only when only TAMTAM_RELEASE_WORKFLOW=1', async () => {
-    process.env.WORKFLOW_POSTGRES_URL = 'postgres://test/wf';
-    process.env.TAMTAM_RELEASE_WORKFLOW = '1';
-    delete process.env.TAMTAM_RELEASE_WORKFLOW_DRIVE;
+    process.env.TAMTAM_RELEASE_WORKFLOW_DRIVE = '0';
     poolQueryMock.mockResolvedValueOnce({ rows: [] });
     const { GET } = await importRoute();
     const res = await GET(makeRequest());
@@ -103,10 +87,9 @@ describe('GET /api/workflow-runs', () => {
     });
   });
 
-  it('surfaces mode=drive when both flags are set', async () => {
+  it('surfaces mode=drive by default (drive flag unset)', async () => {
     process.env.WORKFLOW_POSTGRES_URL = 'postgres://test/wf';
-    process.env.TAMTAM_RELEASE_WORKFLOW = '1';
-    process.env.TAMTAM_RELEASE_WORKFLOW_DRIVE = '1';
+    delete process.env.TAMTAM_RELEASE_WORKFLOW_DRIVE;
     poolQueryMock.mockResolvedValueOnce({ rows: [] });
     const { GET } = await importRoute();
     const res = await GET(makeRequest());

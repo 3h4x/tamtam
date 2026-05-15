@@ -689,32 +689,8 @@ describe('instrumentation', () => {
       expect(probeJobStatus).not.toHaveBeenCalled();
     });
 
-    it('reconciles stale release jobs via a finished step job', async () => {
-      const releaseJob = { id: 'job-release', kind: 'release', finishedAt: null, project: 'my-project', startedAt: 1000 };
-      const stepJob = { id: 'job-review', kind: 'review', finishedAt: 2000, project: 'my-project', startedAt: 1010 };
-      const { reconcileStaleRelease } = mockJobStorage([releaseJob, stepJob]);
-      mockDeps([]);
-
-      const { runProbeSweep } = await import('@/instrumentation-node');
-      await runProbeSweep();
-
-      expect(reconcileStaleRelease).toHaveBeenCalledWith(stepJob);
-    });
-
-    it('skips release reconciliation when no finished step jobs exist', async () => {
-      const releaseJob = { id: 'job-release', kind: 'release', finishedAt: null, project: 'my-project', startedAt: 1000 };
-      const { reconcileStaleRelease } = mockJobStorage([releaseJob]);
-      mockDeps([]);
-
-      const { runProbeSweep } = await import('@/instrumentation-node');
-      await runProbeSweep();
-
-      expect(reconcileStaleRelease).not.toHaveBeenCalled();
-    });
-
-    it('aborts expired release jobs before reconciling stale releases', async () => {
+    it('aborts expired release jobs by wall-clock deadline', async () => {
       const abortActiveRelease = vi.fn().mockResolvedValue({ status: 'aborted', httpStatus: 200 });
-      const reconcileStaleRelease = vi.fn().mockResolvedValue(undefined);
       const releaseJob: {
         id: string;
         kind: string;
@@ -730,7 +706,7 @@ describe('instrumentation', () => {
         startedAt: 1000,
         releaseDeadlineAt: Date.now() - 1000,
       };
-      mockJobStorage([releaseJob], { reconcileStaleRelease, pipelineStepKinds: new Set() });
+      mockJobStorage([releaseJob], { pipelineStepKinds: new Set() });
       mockDeps([], { abortActiveRelease });
 
       const { runProbeSweep } = await import('@/instrumentation-node');
@@ -740,7 +716,6 @@ describe('instrumentation', () => {
         reason: 'wall_clock_timeout',
         targetReleaseId: 'job-release',
       });
-      expect(reconcileStaleRelease).not.toHaveBeenCalled();
     });
 
     it('passes the specific expired release id when multiple releases exist for one project', async () => {
@@ -774,46 +749,10 @@ describe('instrumentation', () => {
       });
     });
 
-    it('reconciles expired releases with completed child steps before timeout aborting', async () => {
-      const abortActiveRelease = vi.fn().mockResolvedValue({ status: 'aborted', httpStatus: 200 });
-      const reconcileStaleRelease = vi.fn().mockImplementation(async (step) => {
-        releaseJob.finishedAt = 3000;
-        expect(step.id).toBe('review-1');
-      });
-      const releaseJob: {
-        id: string;
-        kind: string;
-        finishedAt: number | null;
-        project: string;
-        startedAt: number;
-        releaseDeadlineAt: number;
-      } = {
-        id: 'job-release',
-        kind: 'release',
-        finishedAt: null,
-        project: 'my-project',
-        startedAt: 1000,
-        releaseDeadlineAt: Date.now() - 1000,
-      };
-      const completedReview = {
-        id: 'review-1',
-        kind: 'review',
-        finishedAt: 2000,
-        project: 'my-project',
-        startedAt: 1500,
-      };
-      mockJobStorage([releaseJob, completedReview], {
-        reconcileStaleRelease,
-        pipelineStepKinds: new Set(['review']),
-      });
-      mockDeps([], { abortActiveRelease });
-
-      const { runProbeSweep } = await import('@/instrumentation-node');
-      await runProbeSweep();
-
-      expect(reconcileStaleRelease).toHaveBeenCalledWith(completedReview);
-      expect(abortActiveRelease).not.toHaveBeenCalled();
-    });
+    // Note: the probe sweep used to also reconcile stale release meta-jobs
+    // (where every child finished but `finishedAt` was still null). That
+    // path was removed when the workflow runtime became the only release
+    // owner — the runtime finalizes the release itself.
   });
 
   describe('drainStalePendingReleases()', () => {
@@ -902,47 +841,9 @@ describe('instrumentation', () => {
       );
     });
 
-    it('skips queued-agent boot drain when queued-agent schema is unavailable', async () => {
-      vi.doMock('@/lib/db', () => ({ db: { select: vi.fn() }, schema: {} }));
-      vi.doMock('./lib/db', () => ({ db: { select: vi.fn() }, schema: {} }));
-      const drainUnlockedQueuedAgentRuns = vi.fn();
-      vi.doMock('@/lib/pipeline/recovery-drain', () => ({
-        drainUnlockedQueuedAgentRuns,
-      }));
-
-      const { drainStaleQueuedAgentRuns } = await import('@/instrumentation-node');
-      await expect(drainStaleQueuedAgentRuns()).resolves.not.toThrow();
-      expect(drainUnlockedQueuedAgentRuns).not.toHaveBeenCalled();
-    });
-
-    it('drains unlocked queued agents through the shared helper when schema exists', async () => {
-      vi.doMock('@/lib/db', () => ({
-        db: { select: vi.fn() },
-        schema: { queuedAgentRuns: { project: 'project' } },
-      }));
-      vi.doMock('./lib/db', () => ({
-        db: { select: vi.fn() },
-        schema: { queuedAgentRuns: { project: 'project' } },
-      }));
-      const drainUnlockedQueuedAgentRuns = vi.fn().mockResolvedValue(undefined);
-      vi.doMock('@/lib/pipeline/recovery-drain', () => ({
-        drainUnlockedQueuedAgentRuns,
-      }));
-
-      const { drainStaleQueuedAgentRuns } = await import('@/instrumentation-node');
-      await expect(drainStaleQueuedAgentRuns()).resolves.not.toThrow();
-      expect(drainUnlockedQueuedAgentRuns).toHaveBeenCalledWith('[boot][queued-agent-runs]');
-    });
-
-    it('drains pending releases and queued agents when budget recovers', async () => {
-      const drainAllRecoveryWork = vi.fn().mockResolvedValue(undefined);
-      vi.doMock('@/lib/pipeline/recovery-drain', () => ({
-        drainAllRecoveryWork,
-      }));
-
-      const mod = await import('@/instrumentation-node');
-      await expect(mod.drainQueuedWorkAfterBudgetRecovery()).resolves.not.toThrow();
-      expect(drainAllRecoveryWork).toHaveBeenCalledWith('[budget-drain]');
-    });
+    // drainStaleQueuedAgentRuns and drainQueuedWorkAfterBudgetRecovery
+    // were removed when the workflow runtime became the only release
+    // path. Their tests are intentionally gone; the workflow runtime now
+    // owns the queued-agent / budget-recovery drain concerns.
   });
 });

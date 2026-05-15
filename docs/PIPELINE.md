@@ -536,14 +536,13 @@ The `configSnapshot` section reflects the same shared recovery-budget helper use
 
 ## Vercel Workflow orchestrator
 
-The pipeline can optionally route through a Vercel Workflow (`@workflow/world-postgres`) state machine. Two env flags gate it:
+Every release routes through a Vercel Workflow (`@workflow/world-postgres`) state machine. There is no direct-call bypass — the runtime is always on. One env flag remains:
 
 | Flag | Effect |
 |------|--------|
-| `TAMTAM_RELEASE_WORKFLOW=1` | The release route wraps `startRelease` in a workflow run — every release gets a `workflow_runs` row for observability. **Observation-only**: the completion-hook chain still drives the state machine. |
-| `TAMTAM_RELEASE_WORKFLOW=1` AND `TAMTAM_RELEASE_WORKFLOW_DRIVE=1` | The workflow becomes the **driver**. The release meta-job is stamped with `contextMeta.workflowDriven=true`, completion hooks short-circuit for that release, and `releaseOrchestratorWorkflow` chains the next phase by dispatching the matching `release*PhaseWorkflow` child. |
+| `TAMTAM_RELEASE_WORKFLOW_DRIVE=0` | Falls back to **observation-only**: every release still gets a `workflow_runs` row, but `releaseObservationWorkflow` only watches sibling jobs the completion-hook chain spawns. The release meta-job is **not** stamped with `workflowDriven`, so hooks own dispatch again. Use as a temporary rollback if drive mode shows a regression. |
 
-Both flags default to off — the production pipeline is unchanged unless explicitly enabled in `.env.local`.
+Default (flag unset): drive mode — the orchestrator workflow chains the next phase by dispatching the matching `release*PhaseWorkflow` child, and completion hooks short-circuit on the `workflowDriven` flag.
 
 ### Drive-mode dataflow
 
@@ -616,9 +615,9 @@ Picks the right `release*PhaseWorkflow` and calls `start()`. Validates required 
 
 `runCompletionHooksInner` calls `isWorkflowDriven` and short-circuits the chain when the flag is set, leaving abort cleanup + release-log streaming untouched.
 
-### Observation-only mode (TAMTAM_RELEASE_WORKFLOW=1, DRIVE unset)
+### Observation-only mode (TAMTAM_RELEASE_WORKFLOW_DRIVE=0)
 
-The original scaffold path. `releaseObservationWorkflow` waits for a sub-step, decides what phase WOULD be next, then polls `findNextSubStepJob` for the actual sibling that completion hooks spawned. Recursively dispatches itself for the next jobId. Useful for safe pre-flight observability without changing pipeline behavior.
+The legacy scaffold path. `releaseObservationWorkflow` waits for a sub-step, decides what phase WOULD be next, then polls `findNextSubStepJob` for the actual sibling that completion hooks spawned. Recursively dispatches itself for the next jobId. Useful as a rollback target if a drive-mode regression shows up — keeps the workflow-runs trace alive while letting completion hooks own dispatch again.
 
 ### Determinism note
 

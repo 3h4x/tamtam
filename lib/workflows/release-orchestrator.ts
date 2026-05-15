@@ -1,30 +1,21 @@
-// The state machine, finally.
+// The state machine.
 //
 // `releaseOrchestratorWorkflow` takes a sub-step jobId, waits for it to
 // finish, decides the next phase, and dispatches the matching phase
 // workflow — which itself is a child workflow that runs independently and,
 // when finished, can dispatch the next orchestrator tick for ITS sub-step
-// jobId. The chain self-perpetuates exactly like releaseObservationWorkflow
-// does today, but instead of POLLING for the next sibling job that
-// completion hooks spawned, it DRIVES the next phase directly.
+// jobId. The chain self-perpetuates, but instead of POLLING for the next
+// sibling job that completion hooks spawned, it DRIVES the next phase
+// directly.
 //
-// Not yet dispatched from anywhere — the existing
-// releaseObservationWorkflow still runs in production. Future iteration
-// flips the wiring: when TAMTAM_RELEASE_WORKFLOW_DRIVE=1, releaseWorkflow
-// dispatches releaseOrchestratorWorkflow instead of
-// releaseObservationWorkflow. The completion-hook chain for release kinds
-// would need to skip dispatching downstream steps when a workflow is
-// driving (otherwise we double-dispatch).
+// Active by default via `releaseWorkflow`. The release meta-job is stamped
+// with `contextMeta.workflowDriven = true`, and the completion-hook chain
+// in lib/jobs/lifecycle.ts short-circuits on that flag so the orchestrator
+// owns dispatch alone (no double-dispatch).
 //
-// Pre-conditions for that flip:
-//   1. Build a way to mark a release job as "workflow-driven" so hooks
-//      know to skip (e.g. job.context_meta.workflowDriven = true).
-//   2. Add the matching skip in lib/jobs/lifecycle.ts's chain logic.
-//   3. Add an env-gated branch in releaseWorkflow to dispatch this
-//      workflow instead of releaseObservationWorkflow.
-//
-// Until those land, this file is structural scaffolding that the dispatcher
-// can be exercised against in tests.
+// Set TAMTAM_RELEASE_WORKFLOW_DRIVE=0 to fall back to the polling
+// observation chain (releaseObservationWorkflow); the workflow runtime
+// itself is always on (no direct-call bypass).
 
 import type { WaitForJobResult } from '@/lib/workflows/wait-for-job';
 import type { NextPhase } from '@/lib/workflows/decide-next-phase';

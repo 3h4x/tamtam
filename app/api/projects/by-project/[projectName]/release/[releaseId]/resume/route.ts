@@ -3,9 +3,10 @@ import { resumeStuckRelease } from '@/lib/pipeline/resume-stuck-release';
 
 // POST /api/projects/by-project/<projectName>/release/<releaseId>/resume
 // Manually resume a release whose chain stopped at a non-terminal step
-// (test/fix/review/commit) but was already marked finished. The same logic
-// runs automatically on a 5-minute background ticker via
-// `autoResumeStuckReleases`; this endpoint is the on-demand handle.
+// (test/fix/review/commit) but was already marked finished. The workflow
+// runtime owns continuation, so a stuck release is rare; this endpoint is
+// the operator-facing handle for the cases that slip through (e.g. when
+// running under TAMTAM_RELEASE_WORKFLOW_DRIVE=0 observation fallback).
 export async function POST(
   _request: Request,
   { params }: { params: Promise<{ projectName: string; releaseId: string }> },

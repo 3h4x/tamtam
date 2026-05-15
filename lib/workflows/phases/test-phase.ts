@@ -14,12 +14,9 @@
 //      branch (next: review on success, next: fix on failure) without
 //      replicating decision logic.
 //
-// Not yet dispatched from releaseWorkflow. Future iterations replace the
-// observation chain's polling with direct dispatch of these phase workflows
-// — at which point the completion-hook chain for release kinds becomes
-// redundant and can be carved out step-by-step.
-//
-// Like the rest of lib/workflows/, this is gated behind TAMTAM_RELEASE_WORKFLOW.
+// Dispatched by releaseOrchestratorWorkflow when drive mode is active
+// (default; opt out via TAMTAM_RELEASE_WORKFLOW_DRIVE=0). The orchestrator
+// invokes one phase workflow per chain tick; this one wraps start-test.
 
 import type { StartTestResult } from '@/lib/pipeline/start-test';
 import type { WaitForJobResult } from '@/lib/workflows/wait-for-job';

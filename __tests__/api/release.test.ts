@@ -5,15 +5,33 @@ describe('POST /api/projects/by-project/{projectName}/release', () => {
   let POST: any;
   let startReleaseMock: ReturnType<typeof vi.fn>;
 
+  // These tests assert the route's response-shaping on top of startRelease.
+  // The workflow body runs inline (no real Vercel Workflow runtime in
+  // tests); `workflow/api`'s `start` is mocked to invoke releaseWorkflow
+  // directly and stub child workflow dispatches. DRIVE=0 keeps the workflow
+  // on the simpler observation path (no orchestrator meta-job lookup).
+  const savedDriveEnv = process.env.TAMTAM_RELEASE_WORKFLOW_DRIVE;
+
   beforeEach(async () => {
+    process.env.TAMTAM_RELEASE_WORKFLOW_DRIVE = '0';
     vi.resetModules();
     startReleaseMock = vi.fn();
     vi.doMock('@/lib/pipeline/start-release', () => ({ startRelease: startReleaseMock }));
+    vi.doMock('workflow/api', () => ({
+      start: async (fn: any, args: any[]) => {
+        if (fn?.name === 'releaseWorkflow') {
+          return { returnValue: Promise.resolve(await fn(...args)) };
+        }
+        return { returnValue: Promise.resolve({}) };
+      },
+    }));
     const mod = await import('@/app/api/projects/by-project/[projectName]/release/route');
     POST = mod.POST;
   });
 
   afterEach(() => {
+    if (savedDriveEnv === undefined) delete process.env.TAMTAM_RELEASE_WORKFLOW_DRIVE;
+    else process.env.TAMTAM_RELEASE_WORKFLOW_DRIVE = savedDriveEnv;
     vi.resetModules();
   });
 

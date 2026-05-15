@@ -100,12 +100,11 @@ export async function GET(request: Request): Promise<NextResponse> {
 // change them.
 function buildMeta() {
   const workflowEnabled = process.env.WORKFLOW_TARGET_WORLD != null && process.env.WORKFLOW_TARGET_WORLD.length > 0;
-  const releaseWorkflow = process.env.TAMTAM_RELEASE_WORKFLOW === '1';
-  const releaseWorkflowDrive = process.env.TAMTAM_RELEASE_WORKFLOW_DRIVE === '1';
-  let mode: 'disabled' | 'observation_only' | 'drive';
-  if (!releaseWorkflow) mode = 'disabled';
-  else if (!releaseWorkflowDrive) mode = 'observation_only';
-  else mode = 'drive';
+  const releaseWorkflowDrive = process.env.TAMTAM_RELEASE_WORKFLOW_DRIVE !== '0';
+  // releaseWorkflow is always true now — kept on the response shape so
+  // existing UI consumers keep rendering, but it's no longer toggleable.
+  const releaseWorkflow = true;
+  const mode: 'observation_only' | 'drive' = releaseWorkflowDrive ? 'drive' : 'observation_only';
   return {
     workflowEnabled,
     releaseWorkflow,

@@ -1,27 +1,22 @@
-// Vercel Workflow scaffold for the release pipeline.
+// Vercel Workflow runtime for the release pipeline. Every release routes
+// through this file — there is no legacy direct-call escape hatch.
 //
-// Two workflows live in this file:
+// Two workflows live here:
 //
-//   1. releaseWorkflow — the route-facing entry point. Today its body is a
-//      single 'use step' that delegates to startRelease, so the HTTP
-//      response resolves quickly (after the release meta-job is created
-//      and the first sub-step is spawned). The completion-hook chain in
-//      lib/jobs/lifecycle.ts drives the rest.
+//   1. releaseWorkflow — the route-facing entry point. Its body kicks off
+//      the release (creates the meta-job, spawns the first sub-step), then
+//      dispatches a child workflow that owns the rest of the chain.
 //
-//   2. releaseObservationWorkflow — a sibling workflow that observes a
-//      single sub-step's completion via waitForJobCompletion. Not yet
-//      dispatched from releaseWorkflow; future iterations will add a step
-//      that calls `start(releaseObservationWorkflow, [jobId])` after the
-//      kickoff, then returns. That gives the route fast response time
-//      while the observation workflow holds a workflow_runs row open for
-//      the full sub-step duration with the exit code in its output.
+//   2. releaseObservationWorkflow — a sibling workflow used only when
+//      TAMTAM_RELEASE_WORKFLOW_DRIVE=0 forces the observation fallback.
+//      Watches a sub-step via waitForJobCompletion and polls for the next
+//      sibling job that completion hooks spawned, recursively dispatching
+//      itself. Keeps the workflow_runs trace alive while leaving hooks in
+//      charge of dispatch.
 //
-// Eventually the body of releaseWorkflow becomes the full state machine
-// (test → review → fix loop → commit → push → dod → merge) with the route
-// detached via createHook so the HTTP response surfaces the kickoff result
-// independently of the workflow's total runtime.
-//
-// Wired behind TAMTAM_RELEASE_WORKFLOW=1.
+// The drive-mode path (default) dispatches `releaseOrchestratorWorkflow`
+// (see release-orchestrator.ts), which DRIVES the chain by deciding the
+// next phase and starting the matching phase workflow directly.
 
 import type { StartReleaseOptions, ReleaseResult } from '@/lib/pipeline/start-release';
 import type { WaitForJobResult } from '@/lib/workflows/wait-for-job';
@@ -36,16 +31,16 @@ export async function releaseWorkflow(
   'use workflow';
   const release = await kickoffReleaseStep(projectName, options);
   if (release.ok && release.jobId) {
-    // TAMTAM_RELEASE_WORKFLOW_DRIVE=1: workflow drives the chain via the
-    // orchestrator workflow. The orchestrator dispatches the next phase
-    // workflow directly instead of polling for the hook-spawned sibling.
-    // Completion hooks short-circuit via the workflowDriven contextMeta
-    // flag stamped on the release meta-job.
+    // Default: workflow drives the chain via the orchestrator workflow.
+    // The orchestrator dispatches the next phase workflow directly instead
+    // of polling for the hook-spawned sibling. Completion hooks
+    // short-circuit via the workflowDriven contextMeta flag stamped on
+    // the release meta-job.
     //
-    // TAMTAM_RELEASE_WORKFLOW_DRIVE unset/0 (default): observation-only
-    // mode. The polling observation chain runs alongside the hook-driven
-    // pipeline. No double-dispatch risk because the orchestrator path
-    // requires the workflowDriven flag, and observation doesn't stamp it.
+    // TAMTAM_RELEASE_WORKFLOW_DRIVE=0: observation-only fallback. The
+    // polling observation chain runs alongside the hook-driven pipeline.
+    // No double-dispatch risk because the orchestrator path requires the
+    // workflowDriven flag, and observation doesn't stamp it.
     const driveMode = await readDriveModeStep();
     if (driveMode && release.releaseJobId) {
       await dispatchOrchestratorStep(release.jobId, release.releaseJobId, projectName);
@@ -86,7 +81,7 @@ async function readDriveModeStep(): Promise<boolean> {
   // for replay. (If we read process.env directly in the workflow body, a
   // replay after a flag change would short-circuit the cached step but
   // re-evaluate the env read, mismatching the original execution path.)
-  return process.env.TAMTAM_RELEASE_WORKFLOW_DRIVE === '1';
+  return process.env.TAMTAM_RELEASE_WORKFLOW_DRIVE !== '0';
 }
 
 async function dispatchOrchestratorStep(
