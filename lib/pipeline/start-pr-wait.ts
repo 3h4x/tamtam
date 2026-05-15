@@ -51,7 +51,7 @@ interface PrStatus {
   }>;
 }
 
-async function getPrStatus(projPath: string, prNumber: number, repo: string): Promise<PrStatus | null> {
+export async function getPrStatus(projPath: string, prNumber: number, repo: string): Promise<PrStatus | null> {
   const r = await exec(
     'gh',
     ['pr', 'view', String(prNumber), '--repo', repo, '--json', 'state,mergeable,statusCheckRollup'],
@@ -85,7 +85,7 @@ function classifyCheck(c: PrStatus['checks'][number]): 'pass' | 'fail' | 'pendin
   return 'fail';
 }
 
-function checksConclusion(checks: PrStatus['checks']): 'pass' | 'fail' | 'pending' | 'none' {
+export function checksConclusion(checks: PrStatus['checks']): 'pass' | 'fail' | 'pending' | 'none' {
   if (checks.length === 0) return 'none';
   const classified = checks.map(classifyCheck);
   if (classified.includes('fail')) return 'fail';
@@ -95,7 +95,7 @@ function checksConclusion(checks: PrStatus['checks']): 'pass' | 'fail' | 'pendin
 
 type MergeOutcome = { ok: true } | { ok: false; permanent: boolean };
 
-async function doMerge(projPath: string, prNumber: number, repo: string, log: (s: string) => void): Promise<MergeOutcome> {
+export async function doMerge(projPath: string, prNumber: number, repo: string, log: (s: string) => void): Promise<MergeOutcome> {
   log(`\n# merging PR #${prNumber} with squash\n`);
   const args = ['pr', 'merge', String(prNumber), '--repo', repo, '--squash', '--delete-branch'];
   const r = await exec('gh', args, { cwd: projPath, timeout: 60000 });
@@ -120,7 +120,7 @@ async function doMerge(projPath: string, prNumber: number, repo: string, log: (s
   return { ok: true };
 }
 
-async function switchToDefault(projPath: string, log: (s: string) => void): Promise<{ ok: boolean; branch: string }> {
+export async function switchToDefault(projPath: string, log: (s: string) => void): Promise<{ ok: boolean; branch: string }> {
   try {
     const symR = await exec('git', ['-C', projPath, 'symbolic-ref', 'refs/remotes/origin/HEAD'], { timeout: 5000 });
     let mainBranch = 'main';
