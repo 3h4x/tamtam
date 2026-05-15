@@ -24,9 +24,6 @@ export function TrustedGithubUsersField({
   function updateUsers(nextUsers: string[]) {
     setUsers(nextUsers)
 
-    const nextError = validateTrustedGithubUsersEntries(nextUsers)
-    if (nextError) return
-
     const nextValue = serializeTrustedGithubUsers(nextUsers)
     if (nextValue !== value) onChange(nextValue)
   }

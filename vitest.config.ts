@@ -1,6 +1,8 @@
 import { defineConfig } from 'vitest/config';
 import path from 'path';
 
+const isCi = process.env.CI === 'true';
+
 export default defineConfig({
   resolve: {
     alias: {
@@ -12,7 +14,8 @@ export default defineConfig({
     include: ['__tests__/**/*.test.ts', '__tests__/**/*.test.tsx'],
     globalSetup: ['./__tests__/global-setup.ts'],
     pool: 'threads',
-    maxWorkers: 12,
+    maxWorkers: isCi ? 4 : 12,
+    hookTimeout: isCi ? 30000 : 10000,
     silent: 'passed-only',
   },
 });
