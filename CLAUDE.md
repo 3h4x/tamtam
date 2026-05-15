@@ -26,7 +26,7 @@ Steps are pluggable per project. The **🚀 Release** button triggers the pipeli
 - **Agent providers**: Claude-compatible CLI shims for Claude, Gemini, LM Studio, Codex, and custom providers
 - **Skills**: vendored file-based skills under `skills/docs/skills/` (engineering, product, marketing, leadership, business, delivery, research); user-defined skills in `data/skills/`
 - **Testing**: vitest + Playwright (e2e)
-- **Package Manager**: pnpm
+- **Package Manager**: pnpm 11.1.2
 - **Release**: semantic-release on push to master (GitHub releases only, no npm)
 
 ## Commands
@@ -181,14 +181,23 @@ commits:
   commit_style: |                 # per-project commit voice; overrides the global commit_style setting
     Conventional commits, imperative mood, subject under 72 chars, no trailing period.
     Format: <type>(<scope>): <description>.
+
+docs:
+  auto_attach_docs:               # word-boundary keyword → project doc; injected on first invocation of a session
+    - keywords: [test, tests, vitest, playwright]
+      doc: docs/TEST.md
+    - keywords: [deploy, release, pipeline]
+      doc: docs/PIPELINE.md
 ```
 
-Supported keys: `test_command`, `custom_actions`, `safe_users`, `commit_style`. **Workflow flags** (`auto_commit_enabled`, `auto_push_enabled`, `auto_pr_merge_enabled`, `release_after_run`, `test_cron_enabled`, `test_cron_schedule`, `tests_disabled`, `review_disabled`, `issue_auto_branch`) are **DB-only** — each developer opts in individually. Older `.tamtam/config.yml` files may still contain those keys; TamTam migrates them to the DB on startup and ignores them on subsequent reads.
+Supported keys: `test_command`, `custom_actions`, `safe_users`, `commit_style`, `auto_attach_docs`. **Workflow flags** (`auto_commit_enabled`, `auto_push_enabled`, `auto_pr_merge_enabled`, `release_after_run`, `test_cron_enabled`, `test_cron_schedule`, `tests_disabled`, `review_disabled`, `issue_auto_branch`) are **DB-only** — each developer opts in individually. Older `.tamtam/config.yml` files may still contain those keys; TamTam migrates them to the DB on startup and ignores them on subsequent reads.
 
 On a feature/PR branch, config is read from `origin/<defaultBranch>` (not the working tree) to prevent privilege escalation from untrusted branches.
 
 Reader: `lib/skills/tamtam-file-config.ts` → `loadFileConfig(projectPath)` / `writeFileConfig(projectPath, updates)`.
 The Config tab shows a banner listing which keys come from the file; saving writes back to `.tamtam/config.yml`.
+
+`auto_attach_docs` is enforced by `lib/skills/auto-attach-docs.ts` and is wired into the three "first-invocation" entry points: the terminal run route (`app/api/projects/by-project/[projectName]/run/route.ts`, gated on `!resumeSessionId`), the pipeline review step (`lib/pipeline/start-review.ts`, matching keywords against the review scope text), and agent intake (`lib/agents/intake-workflow.ts`, matching against the task prompt). Because pipeline phases share a CLI session via `--resume`, the attached doc carries forward to fix/commit/push without re-attachment — no cache thrash, no duplicated tokens. Each match records the attached doc paths under `contextMeta.autoAttachedDocs` for trace visibility.
 
 ### `.tamtam/agents/*.md`
 Each `.md` file defines one agent scoped to the project. Filename (minus `.md`) is the agent name. YAML frontmatter sets default metadata; body is the prompt.

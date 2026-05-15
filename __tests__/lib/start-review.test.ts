@@ -92,6 +92,13 @@ describe('startProjectReview', () => {
       mkdirSync: vi.fn(),
       appendFileSync: vi.fn(),
     }));
+    vi.doMock('@/lib/skills/tamtam-file-config', () => ({
+      loadFileConfig: vi.fn().mockReturnValue(null),
+    }));
+    vi.doMock('@/lib/skills/auto-attach-docs', () => ({
+      resolveAutoAttachedDocs: vi.fn().mockReturnValue([]),
+      formatAutoAttachedDocsBlock: vi.fn().mockReturnValue(null),
+    }));
 
     ({ startProjectReview } = await import('@/lib/pipeline/start-review'));
   });
@@ -262,6 +269,87 @@ describe('startProjectReview', () => {
     expect(prompt).toContain('Working-tree files to review');
     expect(prompt).toContain('- lib/foo.ts');
     expect(prompt).toContain('Working-tree tracked-file diff (vs HEAD)');
+  });
+
+  it('persists autoAttachedDocs on the review job contextMeta when a doc matches', async () => {
+    vi.resetModules();
+    execMock = vi.fn()
+      .mockResolvedValueOnce(resp(0, 'M  lib/foo.ts'))
+      .mockResolvedValueOnce(resp(0, ' lib/foo.ts | 2 +-\n'))
+      .mockResolvedValueOnce(resp(0, 'diff --git a/lib/foo.ts b/lib/foo.ts\n+x\n'));
+    createJobMock = vi.fn().mockImplementation((project: string, kind: string) => ({
+      id: `${project}-${kind}-id`, project, kind, pid: 0, logPath: '',
+      prompt: null, startedAt: 0, finishedAt: null, exitCode: null, seen: false,
+    }));
+
+    vi.doMock('@/lib/shared/shell', () => ({ exec: execMock }));
+    vi.doMock('@/lib/shared/project-data', () => ({
+      resolveProjectPath: vi.fn().mockReturnValue('/path/to/proj'),
+    }));
+    vi.doMock('@/lib/scheduling/scheduling', () => ({
+      getImproveConfig: () => ({ claudeBin: 'claude', projects: {}, logDir: '/tmp' }),
+      getProjectTestConfig: () => ({}),
+      getProjectPipelinePrompts: () => Promise.resolve({ reviewPromptAddendum: null }),
+    }));
+    vi.doMock('@/lib/jobs/job-storage', () => ({
+      createJob: createJobMock, updateJob: vi.fn(), listJobs: vi.fn().mockReturnValue([]),
+      readLog: vi.fn().mockReturnValue(''), readParsedLog: vi.fn().mockReturnValue(''),
+      probeJobStatus: vi.fn().mockResolvedValue('done'),
+    }));
+    vi.doMock('@/lib/jobs/pm2-jobs', () => ({ splitCommand: (line: string) => line.split(/\s+/).filter(Boolean) }));
+    vi.doMock('@/lib/jobs/spawn-claude-detached', () => ({ startJobInProcess: vi.fn().mockResolvedValue(9999) }));
+    vi.doMock('@/lib/shared/config', () => ({
+      getSettings: () => ({ review_verdict_rules: '' }),
+      withBasePrompt: (s: string) => s,
+      getPermissionModeFlag: () => '',
+      getPipelineModel: () => 'sonnet',
+    }));
+    vi.doMock('@/lib/pipeline/pipeline-lock', () => ({
+      getLock: vi.fn().mockReturnValue(null),
+      acquireLock: vi.fn().mockResolvedValue({ acquired: true }),
+      isLockOwnedByActiveRelease: vi.fn().mockReturnValue(false),
+    }));
+    vi.doMock('@/lib/skills/skills', () => ({ CODE_REVIEWER_SKILL: '/nonexistent/code-reviewer.md' }));
+    vi.doMock('@/lib/usage/resolve-provider', () => ({
+      checkCliStartGate: vi.fn().mockResolvedValue({ ok: true, provider: 'claude' }),
+    }));
+    vi.doMock('@/lib/skills/tamtam-file-config', () => ({
+      loadFileConfig: vi.fn().mockReturnValue({}),
+    }));
+    vi.doMock('@/lib/skills/auto-attach-docs', () => ({
+      resolveAutoAttachedDocs: vi.fn().mockReturnValue([
+        {
+          rulePath: 'docs/TEST.md',
+          absolutePath: '/path/to/proj/docs/TEST.md',
+          name: 'TEST.md',
+          content: 'TEST-DOC',
+          matchedKeyword: 'test',
+        },
+      ]),
+      formatAutoAttachedDocsBlock: vi.fn().mockReturnValue('## Auto-attached docs\n\n## TEST.md\nTEST-DOC'),
+    }));
+    vi.doMock('fs', () => ({
+      existsSync: vi.fn().mockReturnValue(false), lstatSync: vi.fn(),
+      readFileSync: vi.fn(), mkdirSync: vi.fn(), appendFileSync: vi.fn(),
+    }));
+
+    const { startProjectReview: fn } = await import('@/lib/pipeline/start-review');
+    const r = await fn('proj');
+    expect(r.ok).toBe(true);
+    const contextMeta = createJobMock.mock.calls[0][5];
+    expect(contextMeta).toBeTruthy();
+    expect(JSON.parse(contextMeta as string).autoAttachedDocs).toEqual(['docs/TEST.md']);
+  });
+
+  it('does not set contextMeta when no auto-attach rules match', async () => {
+    execMock
+      .mockResolvedValueOnce(resp(0, 'M  lib/foo.ts'))
+      .mockResolvedValueOnce(resp(0, ' lib/foo.ts | 2 +-\n'))
+      .mockResolvedValueOnce(resp(0, 'diff --git a/lib/foo.ts b/lib/foo.ts\n+x\n'));
+    const r = await startProjectReview('proj');
+    expect(r.ok).toBe(true);
+    const contextMeta = createJobMock.mock.calls[0][5];
+    expect(contextMeta).toBeUndefined();
   });
 
   it('omits untracked symlink contents from the review prompt', async () => {
@@ -602,7 +690,7 @@ describe('startProjectReview', () => {
       expect(r.pid).toBe(9999);
       expect(r.logPath).toMatch(/\.log$/);
     }
-    expect(createJobMock).toHaveBeenCalledWith('proj', 'review', 0, '');
+    expect(createJobMock).toHaveBeenCalledWith('proj', 'review', 0, '', undefined, undefined);
     expect(startJobMock).toHaveBeenCalled();
   });
 

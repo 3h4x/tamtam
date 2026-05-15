@@ -23,9 +23,8 @@ Complete reference for TamTam HTTP API routes. All routes live under `app/api/`.
 - `/api/projects/runtime` — Per-project runtime snapshot for the projects table (GET). Returns `{ projects }`, keyed by project name. Each value contains running-state flags (`hasRunningReview`, `hasRunningTest`, `hasRunningRelease`, `hasRunningPipelineChild`), `runningCount`, distinct `runningKinds`, `runningAgentNames`, the latest finished review verdict (`latestVerdict`, `latestVerdictAt`), `lastActivityAt`, and a compact `lastJob` object with camelCase fields (`id`, `kind`, `status`, `exitCode`, `startedAt`, `finishedAt`, `verdict`). The route is intentionally summary-only; use `/api/jobs` for paged run rows and `/api/jobs/counts` for aggregate totals.
 - `/api/projects/personas` — File-based skills from `skills/docs/skills/` (GET)
 - `/api/projects/[schedId]/priority` — Set project scheduling priority (PATCH)
-- `/api/projects/[schedId]/pause` — Pause project scheduling (POST)
-- `/api/projects/[schedId]/resume` — Resume project scheduling (POST)
 - `/api/projects/[schedId]/detail` — Project scheduling detail (GET)
+- Project pause/resume is handled by `PATCH /api/projects/by-project/[name]` via the `paused` flag; there is no standalone pause/resume route.
 - `/api/projects/[schedId]/retrieval/reindex` — Re-index the project retrieval corpus (POST). The corpus includes committed project docs, DB-backed skills referenced by that project's agents, and synthesized project config guidance. Returns `200 { chunks, indexedSources, skippedSources, diagnostics }` on success, where `diagnostics` includes pre-reindex `missingSourcesBeforeReindex`, `staleSourcesBeforeReindex`, and per-source counts. Returns `400 { error }` when retrieval is disabled and `404 { error }` when the project is unknown. The retrieval store is `retrieval_chunks` on the same Postgres instance as the rest of TamTam (pgvector-backed `embedding vector(768)` column); the `vector` extension must be installed (the initial migration creates it).
 - `/api/config/projects` — Scan workspace for git repos and configure projects (GET, PATCH)
 

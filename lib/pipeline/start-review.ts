@@ -12,6 +12,8 @@ import { getCurrentBranch, getReviewedRefSha, isAncestor, clearReviewedRef } fro
 import { normalizeModelInput } from '@/lib/agents/model-aliases';
 import { CODE_REVIEWER_SKILL } from '@/lib/skills/skills';
 import { withBasePrompt, getPermissionModeFlag, getSettings, getPipelineModel } from '@/lib/shared/config';
+import { loadFileConfig } from '@/lib/skills/tamtam-file-config';
+import { resolveAutoAttachedDocs, formatAutoAttachedDocsBlock } from '@/lib/skills/auto-attach-docs';
 import { getLock, acquireLock, isLockOwnedByActiveRelease } from './pipeline-lock';
 import { extractFindingIds, REVIEW_OUTPUT_CONTRACT, stripFinalVerdict } from './review-contract';
 import type { JobData } from '@/lib/jobs/types';
@@ -313,16 +315,27 @@ export async function startProjectReview(
     return { ok: false, status: 400, detail: scope.detail };
   }
 
-  const prompt = withBasePrompt(
-    (await loadReviewPrompt(projectName))
-      .replace('{project}', projectName)
-      .replace('{path}', projPath)
-      .replace('{review_scope}', scope.prompt)
-      .replace('{release_context}', releaseContextForReview(projectName)),
-    { projectPath: projPath, provider }
-  );
+  const renderedReviewPrompt = (await loadReviewPrompt(projectName))
+    .replace('{project}', projectName)
+    .replace('{path}', projPath)
+    .replace('{review_scope}', scope.prompt)
+    .replace('{release_context}', releaseContextForReview(projectName));
 
-  const job = createJob(projectName, 'review', 0, '');
+  // Auto-attach docs based on keywords in the review scope (file paths, diff
+  // hunks). The pipeline reuses this session via --resume in later phases,
+  // so the attached doc carries through to fix/commit without re-attachment.
+  const autoDocs = resolveAutoAttachedDocs(projPath, scope.prompt, loadFileConfig(projPath));
+  const autoBlock = formatAutoAttachedDocsBlock(autoDocs);
+  const promptWithDocs = autoBlock
+    ? `${autoBlock}\n\n---\n\n${renderedReviewPrompt}`
+    : renderedReviewPrompt;
+
+  const prompt = withBasePrompt(promptWithDocs, { projectPath: projPath, provider });
+
+  const contextMeta = autoDocs.length > 0
+    ? JSON.stringify({ autoAttachedDocs: autoDocs.map((d) => d.rulePath) })
+    : undefined;
+  const job = createJob(projectName, 'review', 0, '', undefined, contextMeta);
   job.provider = provider;
   const logPath = join(logDir, `${job.id}.log`);
   job.logPath = logPath;

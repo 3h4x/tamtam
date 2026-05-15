@@ -28,7 +28,7 @@ The agent management dashboard built for Claude-compatible CLIs. Define skills, 
 
 ## Architecture
 
-TamTam is a single Next.js 16 (App Router) application backed by Postgres and orchestrated through PM2. Agent runs are intake-protected by durable workflows so a crash or restart never loses an in-flight job.
+TamTam is a single Next.js 16 (App Router) application backed by Postgres. The Next.js server is supervised by PM2; agent intake runs through durable workflows so a crash or restart never loses an in-flight job.
 
 ```
        ┌──────────────────────────────────────────────────────────────┐
@@ -41,7 +41,7 @@ TamTam is a single Next.js 16 (App Router) application backed by Postgres and or
        │  └───────────────────┘  └──────────────┬──────────────────┘  │
        │                                        ▼                     │
        │  ┌──────────────────────────────────────────────────────┐    │
-       │  │   PM2 supervises one-shot CLI jobs (claude/codex/…)  │    │
+       │  │   Workflow steps spawn one-shot CLI jobs             │    │
        │  │   → log files → fs.watch → SSE token stream → UI     │    │
        │  └──────────────────────────────────────────────────────┘    │
        └────────────────┬──────────────────────────┬──────────────────┘
@@ -62,8 +62,9 @@ TamTam is a single Next.js 16 (App Router) application backed by Postgres and or
 - **Next.js 16** (App Router) — frontend, API routes, and SSE streaming in one process
 - **Postgres 16 + pgvector** via `pg.Pool` + Drizzle ORM — single source of truth: jobs, agents, skills, settings, retrieval embeddings, **and** durable workflow state
 - **`workflow` + `@workflow/world-postgres`** — `"use workflow"` / `"use step"` orchestration for agent intake (`composePrompt` → `startAgent`), so a server restart between steps resumes instead of losing the run
-- **PM2** — supervises the long-running TamTam server and every one-shot CLI job (claude/codex/gemini/lmstudio shims)
-- **SSE** — token-by-token log streaming straight from PM2-managed log files via `fs.watch` + NDJSON parser
+- **graphile-worker** — durable cron queue for scheduled agents and system maintenance
+- **PM2** — supervises the long-running TamTam server; one-shot CLI jobs are spawned in-process by workflow steps and route handlers
+- **SSE** — token-by-token log streaming straight from job log files via `fs.watch` + NDJSON parser
 - **Ollama** (optional, local) — embeddings for the pgvector-backed retrieval index
 - **Tailwind CSS v4**
 - **vitest** with PGlite for in-memory API tests; **Playwright** for browser + pipeline e2e
@@ -172,8 +173,8 @@ API routes are covered by vitest tests in `__tests__/api/`, often with combined 
 
 - Most CLI calls (git, gh, pm2, launchctl) go through `lib/shared/shell.ts`; a few specialized helpers use direct `child_process` spawning when they need tighter process control.
 - `lib/shared/project-data.ts` assembles project state with a 10s TTL cache
-- `instrumentation-node.ts` handles boot-time recovery, the 30s probe sweep, the 30s queued-agent recovery sweep, the 30s recovery reconcile sweep, the 5m auto-resume sweep, the 60s budget-recovery drain ticker, and nightly retention cleanup after startup
+- `instrumentation-node.ts` handles boot-time recovery, the 30s probe sweep, graphile-worker cron seeding/worker startup, and nightly retention cleanup after startup
 - Project detail tabs live at `/project/[name]` and `/project/[name]/[tab]` (`overview`, `config`, `history`, `terminal`, `changes`, `issues`, `docs`, `agents`)
 - Project release traces and task detail pages live at `/project/[name]/release/[releaseId]` and `/project/[name]/task/[task]`
-- Streaming uses the selected provider's `stream-json` output → PM2 log file → `fs.watch` → NDJSON parser → SSE
+- Streaming uses the selected provider's `stream-json` output → job log file → `fs.watch` → NDJSON parser → SSE
 - See `docs/STREAMING.md` for the full terminal streaming architecture

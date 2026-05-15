@@ -53,6 +53,7 @@ The following fields are automatically protected by default-branch pinning:
 | `test_command` | Verification command changed or weakened before release |
 | `custom_actions` | New project-page buttons run attacker-chosen shell commands |
 | `commit_style` | Commit-message generation prompt is steered by untrusted branch content |
+| `auto_attach_docs` | Keyword→doc rules are read from the trusted default branch; the **content** of the referenced docs is also fetched from `origin/<defaultBranch>` (not the working tree) so a feature branch cannot rewrite an already-trusted doc and have it injected into terminal, agent, or review prompts |
 | Any `.tamtam/agents/*.md` | New scheduled agent runs arbitrary prompts or committed prerequisite shell commands |
 
 ### Relationship to Other Defences
@@ -78,6 +79,7 @@ This is a defensive last-mile filter, not a complete secret-management system. I
 - `lib/git-branch.ts` — synchronous git helpers (`getBranchContext`, `gitShowSync`, `gitLsTreeSync`)
 - `lib/tamtam-file-config.ts` — `loadFileConfig` (branch-aware), `writeFileConfig`
 - `lib/tamtam-file-agents.ts` — `scanFileAgents`, `loadFileAgent` (both branch-aware)
+- `lib/skills/auto-attach-docs.ts` — `resolveAutoAttachedDocs` (branch-aware: reads doc content via `gitShowSync` on non-default branches to match the trust ref used by `loadFileConfig`)
 - `lib/shared/log-redaction.ts` — shared log redaction patterns and environment-value masking
 - `__tests__/lib/tamtam-file-config-branch.test.ts` — unit tests for config branch-pinning
 - `__tests__/lib/tamtam-file-agents-branch.test.ts` — unit tests for agent branch-pinning

@@ -105,6 +105,16 @@ export interface FileProjectConfig {
   // Lives in the file (not the DB) because it's a team contract — every
   // contributor's commits should follow the project's voice.
   commit_style?: string;
+  // Keyword → doc rules. When the first prompt of a CLI session contains one
+  // of the keywords (word-boundary, case-insensitive), the referenced doc is
+  // loaded into the prompt. Subsequent turns in the same session inherit it
+  // via --resume, so the doc is only attached once per session.
+  auto_attach_docs?: AutoAttachDocRule[];
+}
+
+export interface AutoAttachDocRule {
+  keywords: string[];
+  doc: string;
 }
 
 const GROUPS: { label: string; keys: (keyof FileProjectConfig)[] }[] = [
@@ -112,6 +122,7 @@ const GROUPS: { label: string; keys: (keyof FileProjectConfig)[] }[] = [
   { label: 'actions', keys: ['custom_actions'] },
   { label: 'security', keys: ['safe_users'] },
   { label: 'commits', keys: ['commit_style'] },
+  { label: 'docs', keys: ['auto_attach_docs'] },
 ];
 
 const ALL_KEYS = new Set<string>(GROUPS.flatMap(g => g.keys as string[]));
@@ -126,6 +137,21 @@ function parseCustomActions(raw: unknown): FileCustomAction[] | null {
     const action: FileCustomAction = { name: o.name, command: o.command };
     if (typeof o.color === 'string') action.color = o.color;
     out.push(action);
+  }
+  return out;
+}
+
+function parseAutoAttachDocs(raw: unknown): AutoAttachDocRule[] | null {
+  if (!Array.isArray(raw)) return null;
+  const out: AutoAttachDocRule[] = [];
+  for (const item of raw) {
+    if (!item || typeof item !== 'object') continue;
+    const o = item as Record<string, unknown>;
+    if (typeof o.doc !== 'string' || !o.doc.trim()) continue;
+    if (!Array.isArray(o.keywords)) continue;
+    const keywords = o.keywords.filter((k): k is string => typeof k === 'string' && k.trim().length > 0);
+    if (keywords.length === 0) continue;
+    out.push({ keywords, doc: o.doc.trim() });
   }
   return out;
 }
@@ -165,6 +191,9 @@ function parseConfigYaml(raw: string): FileProjectConfig | null {
     if (Array.isArray(flat.safe_users) && flat.safe_users.every(u => typeof u === 'string')) {
       config.safe_users = flat.safe_users as string[];
     }
+
+    const autoAttach = parseAutoAttachDocs(flat.auto_attach_docs);
+    if (autoAttach !== null && autoAttach.length > 0) config.auto_attach_docs = autoAttach;
 
     return Object.keys(config).length > 0 ? config : null;
   } catch {
@@ -208,7 +237,7 @@ export { getBranchContext } from '@/lib/git/git-branch';
  */
 export function writeFileConfig(
   projectPath: string,
-  updates: Partial<Record<keyof FileProjectConfig, string | number | string[] | FileCustomAction[] | null>>
+  updates: Partial<Record<keyof FileProjectConfig, string | number | string[] | FileCustomAction[] | AutoAttachDocRule[] | null>>
 ): void {
   const tamtamDir = join(projectPath, '.tamtam');
   const configPath = join(tamtamDir, 'config.yml');

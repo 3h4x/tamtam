@@ -194,6 +194,35 @@ gates:
     expect(loadFileConfig(tmpDir)?.commit_style).toBeUndefined();
   });
 
+  it('parses auto_attach_docs rules', () => {
+    writeConfig(tmpDir, `docs:
+  auto_attach_docs:
+    - keywords: [test, tests, vitest]
+      doc: docs/TEST.md
+    - keywords: [deploy]
+      doc: docs/PIPELINE.md
+`);
+    const cfg = loadFileConfig(tmpDir);
+    expect(cfg?.auto_attach_docs).toEqual([
+      { keywords: ['test', 'tests', 'vitest'], doc: 'docs/TEST.md' },
+      { keywords: ['deploy'], doc: 'docs/PIPELINE.md' },
+    ]);
+  });
+
+  it('drops auto_attach_docs entries missing doc or keywords', () => {
+    writeConfig(tmpDir, `auto_attach_docs:
+  - keywords: [ok]
+    doc: docs/OK.md
+  - keywords: [missing-doc]
+  - doc: docs/MISSING-KEYWORDS.md
+  - keywords: []
+    doc: docs/EMPTY.md
+`);
+    expect(loadFileConfig(tmpDir)?.auto_attach_docs).toEqual([
+      { keywords: ['ok'], doc: 'docs/OK.md' },
+    ]);
+  });
+
   it('drops custom_actions entries missing name or command', () => {
     writeConfig(tmpDir, `custom_actions:
   - name: ok

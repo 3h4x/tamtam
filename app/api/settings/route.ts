@@ -148,6 +148,7 @@ const SETTING_KEYS = [
   'log_retention_count',
   'log_retention_days',
   'job_row_retention_days',
+  'workflow_run_retention_days',
   'backup_retention_count',
   'backup_retention_weekly_count',
   'notification_webhook_url',
@@ -294,7 +295,11 @@ function validateAndSerializeSettingValue(
     return parsePositiveIntegerSetting(value, 'notification_throttle_window_seconds');
   }
 
-  if (key === 'backup_retention_count' || key === 'backup_retention_weekly_count') {
+  if (
+    key === 'workflow_run_retention_days' ||
+    key === 'backup_retention_count' ||
+    key === 'backup_retention_weekly_count'
+  ) {
     return parseNonNegativeIntegerSetting(value, key);
   }
 

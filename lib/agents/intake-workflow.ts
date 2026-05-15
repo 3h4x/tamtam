@@ -15,6 +15,8 @@ import { updateJob } from '@/lib/jobs/job-storage';
 import { startInProcessAgentJob } from '@/lib/jobs/inline-agent';
 import { errMsg } from '@/lib/shared/types';
 import { redactSecrets } from '@/lib/shared/log-redaction';
+import { loadFileConfig } from '@/lib/skills/tamtam-file-config';
+import { resolveAutoAttachedDocs, formatAutoAttachedDocsBlock } from '@/lib/skills/auto-attach-docs';
 import { writeFileSync } from 'fs';
 import { join } from 'path';
 
@@ -282,8 +284,21 @@ At the end of your run, include a short final section exactly named "TamTam Run 
 - Actionable work: "yes" or "no"
 - Schedule recommendation: optional; only suggest a less frequent schedule when this run found no actionable work`;
 
+  // Auto-attach project docs based on keywords in the task prompt. Agents are
+  // always single-shot (no --resume), so every run is a "first invocation".
+  let autoAttachBlock: string | null = null;
+  const autoAttachedDocPaths: string[] = [];
+  if (taskPrompt) {
+    const autoDocs = resolveAutoAttachedDocs(projPath, taskPrompt, loadFileConfig(projPath));
+    autoAttachBlock = formatAutoAttachedDocsBlock(autoDocs);
+    for (const d of autoDocs) autoAttachedDocPaths.push(d.rulePath);
+  }
+  if (autoAttachedDocPaths.length > 0) {
+    contextMetaObj.autoAttachedDocs = autoAttachedDocPaths;
+  }
+
   const allParts = [...composed.docParts, ...composed.parts];
-  const systemPrompt = [...allParts, prereqBlock, reportContract].filter(Boolean).join('\n\n---\n\n');
+  const systemPrompt = [...allParts, autoAttachBlock, prereqBlock, reportContract].filter(Boolean).join('\n\n---\n\n');
   const corePrompt =
     systemPrompt && taskPrompt
       ? `${systemPrompt}\n\n---\n\n${taskPrompt}`
