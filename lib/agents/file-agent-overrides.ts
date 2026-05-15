@@ -59,6 +59,37 @@ function invalidateOverrideCache(project: string, name: string): void {
   _overrideCache.delete(keyFor(project, name));
 }
 
+/**
+ * Bulk-load every override row from the DB into the sync cache. Async callers
+ * (e.g. the cron-task agent loader) can `await` this before scanning file
+ * agents so the SWR cache returns fresh data on the first sync read instead
+ * of `null` + a background refresh.
+ */
+export async function warmFileAgentOverrideCache(): Promise<void> {
+  try {
+    const rows = await db.select().from(schema.settings);
+    for (const row of rows) {
+      if (!row.key?.startsWith('agent_override:') || !row.value) continue;
+      const rest = row.key.slice('agent_override:'.length);
+      const sep = rest.indexOf(':');
+      if (sep === -1) continue;
+      try {
+        const parsed = JSON.parse(row.value) as FileAgentOverride;
+        if (parsed && typeof parsed === 'object') {
+          _overrideCache.set(row.key, {
+            ...parsed,
+            model: parsed.model === undefined ? undefined : normalizeModelInput(parsed.model, 'normal'),
+          });
+        }
+      } catch {
+        // skip malformed rows
+      }
+    }
+  } catch (e) {
+    console.error('[file-agent-overrides] warm cache failed:', e);
+  }
+}
+
 export async function getFileAgentOverride(project: string, name: string): Promise<FileAgentOverride | null> {
   try {
     const rows = await db

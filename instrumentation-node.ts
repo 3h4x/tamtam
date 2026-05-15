@@ -451,21 +451,31 @@ export async function registerNode(): Promise<void> {
               const all = await listEnabledScheduledAgents();
               return all.find((a) => a.id === agentId) ?? null;
             },
-            // For now defer prereq decisions to the existing internal-scheduler
-            // implementation (still runs in parallel). When we cut over, this
-            // gets the full pause/archive/branch-lock check.
-            prereqSkipReason: async () => null,
+            // Skip the fire (without breaking the chain — the cron task
+            // re-enqueues itself either way) when global jobs-paused is on
+            // or when the project is archived/paused. Each per-agent check
+            // is cheap enough to run inline; the cache primed by
+            // `listEnabledScheduledAgents` keeps the project lookup free.
+            prereqSkipReason: async (agent) => {
+              const { isJobsPaused } = await import('@/lib/shared/job-control');
+              if (isJobsPaused()) return 'jobs paused';
+              const { isProjectArchived, isProjectPaused } = await import('@/lib/shared/enabled-projects');
+              if (isProjectArchived(agent.project)) return 'project archived';
+              if (isProjectPaused(agent.project)) return 'project paused';
+              return null;
+            },
             startAgentRun: async (agent) => {
-              // Mirror the in-memory scheduler's invocation path so the cron
-              // path goes through the same prompt-build / skills compose /
-              // workflow-runtime entry as a manual UI Run click. The route
-              // handler ultimately calls `start(runAgentIntakeWorkflow,...)`
-              // with a fully-built AgentIntakeParams.
+              // Mirror the UI's "Run" button: POST { prompt } to the agent
+              // run route. The route requires a body prompt (or skill list)
+              // and rejects with 400 otherwise. The agent's own prompt is
+              // the natural choice; fall back to a synthesized line when an
+              // agent has neither prompt nor skills configured.
               const baseUrl = process.env.TAMTAM_BASE_URL ?? 'http://localhost:1337';
+              const prompt = agent.prompt?.trim() || `Run agent ${agent.name}`;
               const res = await fetch(`${baseUrl}/api/agents/${encodeURIComponent(agent.id)}/run`, {
                 method: 'POST',
                 headers: { 'content-type': 'application/json' },
-                body: JSON.stringify({}),
+                body: JSON.stringify({ prompt }),
               });
               if (!res.ok) {
                 console.warn(`[cron] agent ${agent.id} run POST returned ${res.status}`);

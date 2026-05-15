@@ -8,10 +8,20 @@
 // agents at boot.
 
 import { db, schema } from '@/lib/db';
-import { listEnabledProjects } from '@/lib/shared/enabled-projects';
+import { listEnabledProjects, refreshProjectsCacheSync } from '@/lib/shared/enabled-projects';
+import { warmFileAgentOverrideCache } from '@/lib/agents/file-agent-overrides';
 import type { AgentInput } from '@/lib/scheduling/agent-types';
 
 export async function listEnabledScheduledAgents(): Promise<AgentInput[]> {
+  // The cron-task handler in graphile-worker is the first caller of this in
+  // its own module realm, so the projects + file-agent-override caches are
+  // both cold on the first fire. `listEnabledProjects()` and the
+  // `getFileAgentOverrideSync` path inside `scanFileAgents` both fall back
+  // to empty on a cache miss while spawning a fire-and-forget refresh —
+  // which would make file agents invisible to seedAgentCrons / loadAgent
+  // on first contact, killing the cron chain. Prime both caches
+  // synchronously here so file-agent scanning always sees current state.
+  await Promise.all([refreshProjectsCacheSync(), warmFileAgentOverrideCache()]);
   const allAgents = await db.select().from(schema.agents);
   const dbEnabled: AgentInput[] = allAgents
     .filter((a) => a.enabled && a.schedule)
