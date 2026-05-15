@@ -6,7 +6,6 @@ import {
   SAFE_PID_FLOOR,
   shouldSignalJobPid,
 } from '@/lib/jobs/cancellation';
-import { exec } from '@/lib/shared/shell';
 import { appendRedactedFileSync } from '@/lib/jobs/redacted-log-writer';
 
 export type ReleaseAbortResult =
@@ -87,10 +86,10 @@ export async function abortActiveRelease(
   }
 
   if (runningStep) {
-    try {
-      await exec('pm2', ['stop', runningStep.id, '--silent'], { timeout: 5000 });
-      await exec('pm2', ['delete', runningStep.id, '--silent'], { timeout: 5000 });
-    } catch {}
+    // (PM2 stop/delete used to fire here, but per-job PM2 entries were
+    // retired when CLI spawning moved in-process. Job termination is
+    // handled by requestJobCancellation for push/commit kinds and by
+    // process.kill on the child PID for everything else.)
 
     if (runningStep.kind === 'push' || runningStep.kind === 'commit') {
       runningStep.cancelRequestedExitCode = -3;

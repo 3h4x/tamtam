@@ -64,7 +64,7 @@ function makePipelineResponse(overrides: Partial<PipelineResponse> = {}): Pipeli
       verdictRules: 'Emit LGTM or NEEDS ATTENTION.',
       commitStyle: 'Conventional commits.',
       maxStepIterations: 3,
-      maxFixPushAttempts: 2,
+      maxPushFixAttempts: 2,
       stepWindowSeconds: 1800,
     },
     ...overrides,

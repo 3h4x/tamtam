@@ -70,7 +70,8 @@ describe('POST /api/projects/by-project/[projectName]/fix-ci', () => {
       listJobs: listJobsMock,
       probeJobStatus: probeJobStatusMock,
     }));
-    vi.doMock('@/lib/jobs/pm2-jobs', () => ({ startJob: startJobMock }));
+    vi.doMock('@/lib/jobs/pm2-jobs', () => ({ startJob: startJobMock, splitCommand: (line: string) => line.split(/\s+/).filter(Boolean) }));
+    vi.doMock('@/lib/jobs/spawn-claude-detached', () => ({ startJobInProcess: startJobMock }));
     vi.doMock('@/lib/shared/shell', () => ({ exec: execMock }));
     vi.doMock('@/lib/shared/config', () => ({ getPermissionModeFlag: vi.fn().mockReturnValue(''), getSettings: vi.fn().mockReturnValue({ default_model: 'sonnet' }) }));
     vi.doMock('@/lib/usage/resolve-provider', () => ({
@@ -277,7 +278,8 @@ describe('POST /api/projects/by-project/[projectName]/fix-ci weekly model scorin
       listJobs: vi.fn().mockReturnValue([]),
       probeJobStatus: vi.fn().mockResolvedValue('done'),
     }));
-    vi.doMock('@/lib/jobs/pm2-jobs', () => ({ startJob: startJobMock }));
+    vi.doMock('@/lib/jobs/pm2-jobs', () => ({ startJob: startJobMock, splitCommand: (line: string) => line.split(/\s+/).filter(Boolean) }));
+    vi.doMock('@/lib/jobs/spawn-claude-detached', () => ({ startJobInProcess: startJobMock }));
     vi.doMock('@/lib/shared/shell', () => ({
       exec: vi.fn().mockResolvedValue({ exitCode: 0, stdout: 'Build failed\nError: test suite failed', stderr: '' }),
     }));

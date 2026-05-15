@@ -117,6 +117,14 @@ vi.mock('@/lib/jobs/project-active-job', () => ({
 
 vi.mock('@/lib/jobs/pm2-jobs', () => ({
   startJob: (...a: unknown[]) => mocks.startJob(...a),
+  splitCommand: (line: string) => line.split(/\s+/).filter(Boolean),
+}));
+
+// startAgentStep inside lib/agents/intake-workflow now spawns the CLI in
+// process via startInProcessAgentJob. Same call shape as startJob — route
+// tests still observe via mocks.startJob.
+vi.mock('@/lib/jobs/inline-agent', () => ({
+  startInProcessAgentJob: (...a: unknown[]) => mocks.startJob(...a),
 }));
 
 vi.mock('@/lib/skills/skills', () => ({

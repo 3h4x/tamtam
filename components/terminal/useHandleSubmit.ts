@@ -92,7 +92,7 @@ export function useHandleSubmit(deps: SubmitDeps) {
         : undefined
 
       if (!isFollowUp && cur.currentJobId) {
-        const inspectableKinds = ['release', 'push', 'fix-push', 'test', 'review', 'fix', 'fix-ci']
+        const inspectableKinds = ['release', 'commit', 'push', 'test', 'review', 'fix', 'fix-ci']
         const jobKindFromId = inspectableKinds.find(k => cur.currentJobId!.includes(`-${k}-`))
         if (jobKindFromId) {
           try {

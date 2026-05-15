@@ -34,7 +34,8 @@ vi.mock('@/lib/jobs/job-storage', () => ({
   listJobs: mocks.listJobsMock,
   probeJobStatus: mocks.probeJobStatusMock,
 }));
-vi.mock('@/lib/jobs/pm2-jobs', () => ({ startJob: mocks.startJobMock }));
+vi.mock('@/lib/jobs/pm2-jobs', () => ({ splitCommand: (line: string) => line.split(/\s+/).filter(Boolean) }));
+vi.mock('@/lib/jobs/spawn-claude-detached', () => ({ startJobInProcess: mocks.startJobMock }));
 vi.mock('@/lib/shared/config', () => ({
   getSettings: () => mocks.getSettingsMock(),
   withBasePrompt: (s: string) => s,

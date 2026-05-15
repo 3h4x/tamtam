@@ -92,13 +92,13 @@ describe('deriveBoardTransition', () => {
     expect(deriveBoardTransition(makeJob({ kind: 'commit', exitCode: 1, finishedAt: 2 }), 'finished').status).toBe('Blocked');
   });
 
-  it('maps fix-push and fix-ci started to Fixing', () => {
-    expect(deriveBoardTransition(makeJob({ kind: 'fix-push' }), 'started').status).toBe('Fixing');
+  it('maps fix and fix-ci started to Fixing', () => {
+    expect(deriveBoardTransition(makeJob({ kind: 'fix' }), 'started').status).toBe('Fixing');
     expect(deriveBoardTransition(makeJob({ kind: 'fix-ci' }), 'started').status).toBe('Fixing');
   });
 
-  it('maps fix-push and fix-ci finished pass/fail correctly', () => {
-    expect(deriveBoardTransition(makeJob({ kind: 'fix-push', exitCode: 0, finishedAt: 2 }), 'finished').status).toBe('In Progress');
+  it('maps fix and fix-ci finished pass/fail correctly', () => {
+    expect(deriveBoardTransition(makeJob({ kind: 'fix', exitCode: 0, finishedAt: 2 }), 'finished').status).toBe('In Progress');
     expect(deriveBoardTransition(makeJob({ kind: 'fix-ci', exitCode: 1, finishedAt: 2 }), 'finished').status).toBe('Blocked');
   });
 

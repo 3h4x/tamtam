@@ -117,7 +117,7 @@ function DurationRow({ label, stats }: { label: string; stats: DurationStats | u
   )
 }
 
-const STEP_KINDS = ['release', 'test', 'review', 'fix', 'commit', 'push', 'pr-wait', 'fix-push', 'mark-dod'] as const
+const STEP_KINDS = ['release', 'test', 'review', 'fix', 'commit', 'push', 'pr-wait', 'mark-dod'] as const
 
 export function PipelinePage() {
   const searchParams = useSearchParams()
@@ -345,7 +345,7 @@ export function PipelinePage() {
             <p className="text-xs text-text-tertiary mt-0.5">
               Review/test cap: {configSnapshot.maxStepIterations} iterations per step
               {' · '}
-              fix-push cap: {configSnapshot.maxFixPushAttempts} attempts
+              push fix cap: {configSnapshot.maxPushFixAttempts} attempts
             </p>
           </div>
           <div className="px-4 py-4 grid grid-cols-2 sm:grid-cols-4 gap-4 text-sm">
@@ -473,7 +473,7 @@ export function PipelinePage() {
                 Verdict rules · review/test cap: {configSnapshot.maxStepIterations} iterations per step
               </div>
               <div className="text-xs text-text-secondary mb-2">
-                fix-push cap: {configSnapshot.maxFixPushAttempts} attempts · standalone fallback window: {Math.round(configSnapshot.stepWindowSeconds / 60)} min
+                push fix cap: {configSnapshot.maxPushFixAttempts} attempts · standalone fallback window: {Math.round(configSnapshot.stepWindowSeconds / 60)} min
               </div>
               <pre className="text-xs text-text-secondary bg-bg-tertiary rounded p-3 whitespace-pre-wrap break-words">
                 {configSnapshot.verdictRules || '(using defaults)'}

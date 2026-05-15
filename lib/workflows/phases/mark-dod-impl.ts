@@ -1,0 +1,582 @@
+// Mark-dod implementation, split into step-friendly helpers.
+//
+// The phase workflow in mark-dod-phase.ts calls each helper from its own
+// `'use step'` body so the expensive Claude verification gets cached by
+// the workflow runtime — a workflow replay (e.g. after a server restart
+// between the verify and apply steps) reuses the verification result
+// instead of re-burning tokens.
+//
+// The legacy entry point `startMarkDod` in lib/pipeline/start-mark-dod.ts
+// composes these same helpers in sequence, so its observable behavior is
+// unchanged.
+
+import { existsSync, mkdirSync, readFileSync, writeFileSync, unlinkSync } from 'fs';
+import { join } from 'path';
+import { tmpdir } from 'os';
+import { resolveProjectPath } from '@/lib/shared/project-data';
+import { getImproveConfig } from '@/lib/scheduling/scheduling';
+import { resolveCliBin, resolveCliEnv } from '@/lib/shared/cli-bin';
+import { checkCliStartGate } from '@/lib/usage/resolve-provider';
+import { currentParent } from '@/lib/jobs/parent-context';
+import { exec as shellExec } from '@/lib/shared/shell';
+import { getPermissionModeFlag, getPipelineModel, getSettings } from '@/lib/shared/config';
+import {
+  createJob,
+  findActiveReleaseJob,
+  markDone,
+  updateJob,
+} from '@/lib/jobs/job-storage';
+import type { JobData } from '@/lib/jobs/types';
+import { wrapIfUntrusted, withUntrustedPreamble } from '@/lib/shared/untrusted';
+import { splitCommand } from '@/lib/shared/split-command';
+import { runSubprocess } from '@/lib/jobs/spawn-cli';
+import { appendRedactedFileSync } from '@/lib/jobs/redacted-log-writer';
+import { ensureBranchForCtx, type EnsureBranchResult } from '@/lib/pipeline/mark-dod-branch';
+import type { CliProvider } from '@/lib/usage/cli-providers';
+import {
+  findLatestIssueRunContext,
+  findLatestPrContext,
+  findReleaseScopedIssueContext,
+  findReleaseScopedPrContext,
+} from '@/lib/pipeline/release-context';
+import { extractCriteria, tickCriteria } from '@/lib/pipeline/mark-dod-criteria';
+
+export type ParsedCriterion = ReturnType<typeof extractCriteria>[number];
+
+export type MarkDodResult =
+  | { ok: true; jobId: string; issueNumber: number; verified: number; total: number; changed: boolean }
+  | { ok: false; status: number; detail: string };
+
+export interface MarkDodPrepBundle {
+  jobId: string;
+  projPath: string;
+  ctx: { number: number; repo: string; title?: string };
+  isPr: boolean;
+}
+
+/**
+ * Acquire a mutable JobData reference for the current step. In production
+ * job-storage returns the same in-memory object on every call; mutating it
+ * (e.g. `job.ghIssueTitle = …`) is visible to subsequent updateJob writes.
+ * In tests, `getJob` is mocked separately from `createJob`, so we keep a
+ * per-step lookup escape: callers in the same in-process flow pass the
+ * `job` ref directly when they have it.
+ */
+
+export interface MarkDodFetchBundle {
+  body: string;
+  title: string;
+  authorLogin: string | undefined;
+  criteria: ParsedCriterion[];
+  /** Optional terminal result (gh view failed, no criteria, …). */
+  terminal?: MarkDodResult;
+}
+
+export type MarkDodBranchSwitch = EnsureBranchResult;
+
+export interface MarkDodClaudeVerifyResult {
+  verifiedTexts: string[];
+  rawOutput: string;
+  exitCode: number;
+  timedOut: boolean;
+  /** Set when verification failed irrecoverably (no usable output). */
+  terminal?: MarkDodResult;
+}
+
+function buildMarkDodContextMeta(
+  ctx: { number: number; repo: string; title?: string },
+  isPr: boolean,
+  verified: number | null = null,
+  total: number | null = null,
+): string {
+  return JSON.stringify({
+    sourceType: isPr ? 'pr' : 'issue',
+    sourceNumber: ctx.number,
+    sourceRepo: ctx.repo,
+    sourceTitle: ctx.title ?? null,
+    verified,
+    total,
+  });
+}
+
+function appendLog(job: JobData | null, line: string): void {
+  if (!job?.logPath) return;
+  try {
+    appendRedactedFileSync(job.logPath, line);
+  } catch {
+    /* log-write failures are non-fatal */
+  }
+}
+
+function findIssueContext(projectName: string): { number: number; repo: string } | null {
+  const activeReleaseIssue = findReleaseScopedIssueContext(projectName);
+  if (activeReleaseIssue) {
+    return { number: activeReleaseIssue.number, repo: activeReleaseIssue.repo };
+  }
+  if (findActiveReleaseJob(projectName)) return null;
+  const issue = findLatestIssueRunContext(projectName);
+  if (!issue) return null;
+  return { number: issue.number, repo: issue.repo };
+}
+
+function findPrContext(projectName: string): { number: number; repo: string } | null {
+  const activeReleasePr = findReleaseScopedPrContext(projectName);
+  if (activeReleasePr) return { number: activeReleasePr.number, repo: activeReleasePr.repo };
+  if (findActiveReleaseJob(projectName)) return null;
+  const pr = findLatestPrContext(projectName);
+  if (!pr) return null;
+  return { number: pr.number, repo: pr.repo };
+}
+
+/** Resolve which issue or PR mark-dod should verify against. */
+export function resolveMarkDodContext(
+  projectName: string,
+  override?: { issueNumber?: number; prNumber?: number; repo?: string },
+): { ctx: { number: number; repo: string }; isPr: boolean } | null {
+  if (override?.repo && (override.issueNumber || override.prNumber)) {
+    if (override.issueNumber) {
+      return { ctx: { number: override.issueNumber, repo: override.repo }, isPr: false };
+    }
+    if (override.prNumber) {
+      return { ctx: { number: override.prNumber, repo: override.repo }, isPr: true };
+    }
+  }
+  const issueCtx = findIssueContext(projectName);
+  if (issueCtx) return { ctx: issueCtx, isPr: false };
+  const prCtx = findPrContext(projectName);
+  if (prCtx) return { ctx: prCtx, isPr: true };
+  return null;
+}
+
+export interface MarkDodPrepFull {
+  bundle: MarkDodPrepBundle;
+  job: JobData;
+}
+
+/** Resolve project + create the mark-dod job row. Terminal failures returned directly. */
+export async function prepareMarkDod(
+  projectName: string,
+  override?: { issueNumber?: number; prNumber?: number; repo?: string },
+): Promise<MarkDodPrepFull | { ok: false; status: number; detail: string }> {
+  const projPath = resolveProjectPath(projectName);
+  if (!projPath) return { ok: false, status: 404, detail: 'project not found' };
+
+  const resolved = resolveMarkDodContext(projectName, override);
+  if (!resolved) return { ok: false, status: 400, detail: 'no issue or PR context on latest run' };
+  const { ctx, isPr } = resolved;
+
+  const { logDir } = getImproveConfig();
+  mkdirSync(/*turbopackIgnore: true*/ logDir, { recursive: true });
+
+  const gate = await checkCliStartGate('start DoD verification', { parentJobId: currentParent() });
+  if (!gate.ok) return gate;
+
+  const job = createJob(projectName, 'mark-dod', 0, '');
+  job.provider = gate.provider;
+  job.ghIssueNumber = ctx.number;
+  job.ghIssueRepo = ctx.repo;
+  job.contextMeta = buildMarkDodContextMeta(ctx, isPr);
+  const logPath = join(/*turbopackIgnore: true*/ logDir, `${job.id}.log`);
+  job.logPath = logPath;
+  updateJob(job);
+
+  const ctxLabel = isPr ? 'PR' : 'issue';
+  appendLog(job, `# mark-dod start — ${new Date().toISOString()}\n# ${ctxLabel}: ${ctx.repo}#${ctx.number}\n`);
+
+  return { bundle: { jobId: job.id, projPath, ctx, isPr }, job };
+}
+
+/** Fetch the gh body + extract unchecked criteria. Returns terminal on failure / no-criteria. */
+export async function fetchAndExtractMarkDodCriteria(
+  bundle: MarkDodPrepBundle,
+  job: JobData | null,
+): Promise<MarkDodFetchBundle> {
+  const { jobId, projPath, ctx, isPr } = bundle;
+  const ctxLabel = isPr ? 'PR' : 'issue';
+
+  const viewArgs = isPr
+    ? ['pr', 'view', String(ctx.number), '--repo', ctx.repo, '--json', 'body,title,author']
+    : ['issue', 'view', String(ctx.number), '--repo', ctx.repo, '--json', 'body,title,author'];
+  const viewR = await shellExec('gh', viewArgs, { cwd: projPath, timeout: 15000 });
+  if (viewR.exitCode !== 0) {
+    appendLog(job, `# gh ${ctxLabel} view failed: ${viewR.stderr}\n`);
+    if (job) await markDone(job, 1);
+    return {
+      body: '',
+      title: '',
+      authorLogin: undefined,
+      criteria: [],
+      terminal: { ok: true, jobId, issueNumber: ctx.number, verified: 0, total: 0, changed: false },
+    };
+  }
+
+  let parsed: { body?: string; title?: string; author?: { login?: string } } = {};
+  try {
+    parsed = JSON.parse(viewR.stdout);
+  } catch {
+    /* keep parsed empty */
+  }
+  const body = parsed.body ?? '';
+  const title = parsed.title ?? '';
+  if (job) {
+    job.ghIssueTitle = title || null;
+    job.contextMeta = buildMarkDodContextMeta({ ...ctx, title }, isPr);
+    updateJob(job);
+  }
+  const authorLogin = parsed.author?.login;
+  const criteria = extractCriteria(body);
+
+  if (criteria.length === 0) {
+    appendLog(job, `# no unchecked DoD boxes — nothing to verify\n`);
+    if (job) await markDone(job, 0);
+    return {
+      body,
+      title,
+      authorLogin,
+      criteria: [],
+      terminal: { ok: true, jobId, issueNumber: ctx.number, verified: 0, total: 0, changed: false },
+    };
+  }
+
+  appendLog(job, `# found ${criteria.length} unchecked criteria to verify\n`);
+  return { body, title, authorLogin, criteria };
+}
+
+/** Switch the working tree to the issue/PR feature branch when possible. */
+export async function switchBranchForMarkDodVerification(
+  bundle: MarkDodPrepBundle,
+  job: JobData | null,
+): Promise<MarkDodBranchSwitch> {
+  const { projPath, ctx, isPr } = bundle;
+  const branchSwitch = await ensureBranchForCtx(projPath, ctx, isPr, (s) => appendLog(job, s));
+  if (branchSwitch.switched) {
+    appendLog(
+      job,
+      `# checked out ${branchSwitch.targetBranch} (was ${branchSwitch.originalBranch ?? 'detached'}) for verification\n`,
+    );
+  } else if (branchSwitch.skipped) {
+    appendLog(job, `# verification will run on current branch (${branchSwitch.skipped})\n`);
+  }
+  return branchSwitch;
+}
+
+/** Spawn Claude to verify criteria against the codebase. The expensive cached step. */
+export async function runMarkDodClaudeVerification(
+  bundle: MarkDodPrepBundle,
+  job: JobData | null,
+  projectName: string,
+  fetched: MarkDodFetchBundle,
+): Promise<MarkDodClaudeVerifyResult> {
+  const { jobId, projPath, ctx, isPr } = bundle;
+
+  appendLog(job, `# asking claude to verify each criterion against the codebase...\n`);
+
+  const settings = getSettings();
+  const provider = (job?.provider ?? 'claude') as CliProvider;
+  const claudeBin = resolveCliBin(provider, settings);
+  const cliEnv = resolveCliEnv(provider, settings);
+  const { logDir } = getImproveConfig();
+  mkdirSync(/*turbopackIgnore: true*/ logDir, { recursive: true });
+
+  const criteriaListRaw = fetched.criteria.map((c, i) => `${i + 1}. ${c.text}`).join('\n');
+  const wrappedTitle = wrapIfUntrusted(
+    fetched.title,
+    isPr ? 'github_pr_title' : 'github_issue_title',
+    fetched.authorLogin,
+    projPath,
+  );
+  const wrappedCriteria = wrapIfUntrusted(
+    criteriaListRaw,
+    isPr ? 'github_pr_body' : 'github_issue_body',
+    fetched.authorLogin,
+    projPath,
+  );
+  const prompt = `You are verifying whether each acceptance criterion below is ACTUALLY IMPLEMENTED on the current branch of this repository (cwd). Do not take claims at face value — check the code, tests, config, etc. For each criterion either confirm it against concrete evidence (file paths, symbol names, test names) or mark it unverified.
+
+Repository: ${projectName}
+${isPr ? 'PR' : 'Issue'} #${ctx.number}: ${wrappedTitle}
+
+Acceptance criteria:
+${wrappedCriteria}
+
+TASK:
+- Use your tools (Read / Grep / Glob) to inspect the repo as needed.
+- For each criterion decide: VERIFIED or NOT VERIFIED.
+- A criterion is VERIFIED only if you have seen the concrete implementation — not just intent, not just a TODO, not just "probably".
+- Output a single JSON object and nothing else. No prose, no markdown fences.
+
+JSON schema:
+{
+  "results": [
+    { "index": 1, "text": "<exact criterion text>", "verified": true|false, "evidence": "<one sentence — file/symbol/test, or why unverified>" }
+  ]
+}`;
+
+  const claudeJobId = `${jobId}-verify`;
+  const claudeLogPath = join(/*turbopackIgnore: true*/ logDir, `${claudeJobId}.log`);
+  const basePreamble =
+    'You verify whether acceptance criteria are implemented in a codebase. Use tools to inspect real code. Output strict JSON only.';
+  const fullPrompt = withUntrustedPreamble(`${basePreamble}\n\n---\n\n${prompt}`);
+  const claudeCommand = `${claudeBin} --print ${getPermissionModeFlag()} --model ${getPipelineModel('dod')} --allowed-tools Read,Grep,Glob`;
+
+  let rawOutput = '';
+  let exitCode = 1;
+  let timedOut = false;
+  try {
+    const claudePromptPath = join(/*turbopackIgnore: true*/ logDir, `${claudeJobId}.prompt`);
+    writeFileSync(/*turbopackIgnore: true*/ claudePromptPath, fullPrompt);
+    const argv = splitCommand(claudeCommand);
+    if (argv.length === 0) throw new Error(`empty claude command for ${claudeJobId}`);
+    const [bin, ...args] = argv;
+
+    const ac = new AbortController();
+    const timer = setTimeout(() => {
+      timedOut = true;
+      ac.abort();
+    }, 300_000);
+    try {
+      const result = await runSubprocess({
+        jobId: claudeJobId,
+        cmd: bin,
+        cmdArgs: args,
+        promptPath: claudePromptPath,
+        logPath: claudeLogPath,
+        env: cliEnv,
+        cwd: projPath,
+        abortSignal: ac.signal,
+      });
+      exitCode = result.exitCode;
+    } finally {
+      clearTimeout(timer);
+    }
+    if (existsSync(/*turbopackIgnore: true*/ claudeLogPath)) {
+      rawOutput = readFileSync(/*turbopackIgnore: true*/ claudeLogPath, 'utf-8');
+    }
+  } catch (e) {
+    appendLog(job, `# failed to start claude verification: ${e instanceof Error ? e.message : String(e)}\n`);
+  }
+
+  const stripped = rawOutput
+    .split('\n')
+    .filter((l) => !l.match(/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}: \[tamtam\]/))
+    .join('\n')
+    .trim();
+
+  appendLog(job, `# claude exit ${exitCode}${timedOut ? ' (timed out)' : ''}\n`);
+
+  if (exitCode !== 0 || !stripped) {
+    if (!stripped) appendLog(job, `# claude output: ${rawOutput.slice(0, 300).trim()}\n`);
+    appendLog(job, `# claude verification failed\n`);
+    if (job) {
+      job.contextMeta = buildMarkDodContextMeta({ ...ctx, title: fetched.title }, isPr, 0, fetched.criteria.length);
+      updateJob(job);
+      await markDone(job, 1);
+    }
+    return {
+      verifiedTexts: [],
+      rawOutput,
+      exitCode,
+      timedOut,
+      terminal: {
+        ok: true,
+        jobId,
+        issueNumber: ctx.number,
+        verified: 0,
+        total: fetched.criteria.length,
+        changed: false,
+      },
+    };
+  }
+
+  let jsonText = stripped;
+  const fenceMatch = jsonText.match(/```(?:json)?\n([\s\S]*?)\n```/);
+  if (fenceMatch) jsonText = fenceMatch[1];
+  else {
+    const braceStart = jsonText.indexOf('{');
+    const braceEnd = jsonText.lastIndexOf('}');
+    if (braceStart >= 0 && braceEnd > braceStart) jsonText = jsonText.slice(braceStart, braceEnd + 1);
+  }
+
+  let results: Array<{ text: string; verified: boolean; evidence?: string; index?: number }> = [];
+  try {
+    const parsed = JSON.parse(jsonText);
+    if (Array.isArray(parsed.results)) results = parsed.results;
+  } catch (e) {
+    appendLog(job, `# could not parse claude JSON: ${e}\n--- raw output ---\n${stripped.slice(0, 2000)}\n`);
+    if (job) {
+      job.contextMeta = buildMarkDodContextMeta({ ...ctx, title: fetched.title }, isPr, 0, fetched.criteria.length);
+      updateJob(job);
+      await markDone(job, 1);
+    }
+    return {
+      verifiedTexts: [],
+      rawOutput,
+      exitCode,
+      timedOut,
+      terminal: {
+        ok: true,
+        jobId,
+        issueNumber: ctx.number,
+        verified: 0,
+        total: fetched.criteria.length,
+        changed: false,
+      },
+    };
+  }
+
+  const verifiedTexts: string[] = [];
+  for (const r of results) {
+    if (r.verified !== true) continue;
+    const idx = typeof r.index === 'number' ? r.index - 1 : -1;
+    if (idx >= 0 && idx < fetched.criteria.length) {
+      verifiedTexts.push(fetched.criteria[idx].text);
+      continue;
+    }
+    const norm = (s: string) => s.replace(/[`*_]/g, '').replace(/\s+/g, ' ').trim().toLowerCase();
+    const want = norm(r.text ?? '');
+    const hit = fetched.criteria.find((c) => norm(c.text) === want);
+    if (hit) verifiedTexts.push(hit.text);
+  }
+  for (const r of results) {
+    appendLog(
+      job,
+      `# [${r.verified ? 'VERIFIED' : 'unverified'}] ${(r.text ?? '').slice(0, 120)}\n#   evidence: ${(r.evidence ?? '').slice(0, 300)}\n`,
+    );
+  }
+  appendLog(job, `# summary: ${verifiedTexts.length} / ${fetched.criteria.length} verified\n`);
+
+  return { verifiedTexts, rawOutput, exitCode, timedOut };
+}
+
+/** Apply the verified ticks via gh edit + restore branch + finalize. */
+export async function applyAndFinalizeMarkDod(
+  bundle: MarkDodPrepBundle,
+  job: JobData | null,
+  fetched: MarkDodFetchBundle,
+  verify: MarkDodClaudeVerifyResult,
+  branchSwitch: MarkDodBranchSwitch,
+): Promise<MarkDodResult> {
+  const { jobId, projPath, ctx, isPr } = bundle;
+  const ctxLabel = isPr ? 'PR' : 'issue';
+
+  try {
+    if (verify.verifiedTexts.length === 0) {
+      appendLog(job, `# no criteria verified — leaving ${ctxLabel} body unchanged\n`);
+      if (job) {
+        job.contextMeta = buildMarkDodContextMeta({ ...ctx, title: fetched.title }, isPr, 0, fetched.criteria.length);
+        updateJob(job);
+        await markDone(job, 0);
+      }
+      return {
+        ok: true,
+        jobId,
+        issueNumber: ctx.number,
+        verified: 0,
+        total: fetched.criteria.length,
+        changed: false,
+      };
+    }
+
+    const verifiedSet = new Set(verify.verifiedTexts);
+    const { body: updated, ticked } = tickCriteria(fetched.body, verifiedSet);
+
+    if (ticked === 0 || updated === fetched.body) {
+      appendLog(job, `# claude's verified texts didn't match any checkbox exactly — skipping edit\n`);
+      if (job) {
+        job.contextMeta = buildMarkDodContextMeta(
+          { ...ctx, title: fetched.title },
+          isPr,
+          verify.verifiedTexts.length,
+          fetched.criteria.length,
+        );
+        updateJob(job);
+        await markDone(job, 0);
+      }
+      return {
+        ok: true,
+        jobId,
+        issueNumber: ctx.number,
+        verified: verify.verifiedTexts.length,
+        total: fetched.criteria.length,
+        changed: false,
+      };
+    }
+
+    const tmpFile = join(tmpdir(), `tamtam-${ctxLabel}-${ctx.number}-${Date.now()}.md`);
+    writeFileSync(tmpFile, updated);
+    try {
+      const editArgs = isPr
+        ? ['pr', 'edit', String(ctx.number), '--repo', ctx.repo, '--body-file', tmpFile]
+        : ['issue', 'edit', String(ctx.number), '--repo', ctx.repo, '--body-file', tmpFile];
+      const editR = await shellExec('gh', editArgs, { cwd: projPath, timeout: 15000 });
+      if (editR.stdout) appendLog(job, editR.stdout);
+      if (editR.stderr) appendLog(job, editR.stderr);
+      if (editR.exitCode !== 0) {
+        appendLog(job, `# gh ${ctxLabel} edit failed\n`);
+        if (job) {
+          job.contextMeta = buildMarkDodContextMeta(
+            { ...ctx, title: fetched.title },
+            isPr,
+            verify.verifiedTexts.length,
+            fetched.criteria.length,
+          );
+          updateJob(job);
+          await markDone(job, 1);
+        }
+        return {
+          ok: true,
+          jobId,
+          issueNumber: ctx.number,
+          verified: verify.verifiedTexts.length,
+          total: fetched.criteria.length,
+          changed: false,
+        };
+      }
+      appendLog(job, `# DoD updated on ${ctx.repo}#${ctx.number}: ticked ${ticked} of ${fetched.criteria.length}\n`);
+      if (job) {
+        job.contextMeta = buildMarkDodContextMeta(
+          { ...ctx, title: fetched.title },
+          isPr,
+          verify.verifiedTexts.length,
+          fetched.criteria.length,
+        );
+        updateJob(job);
+        await markDone(job, 0);
+      }
+      return {
+        ok: true,
+        jobId,
+        issueNumber: ctx.number,
+        verified: verify.verifiedTexts.length,
+        total: fetched.criteria.length,
+        changed: true,
+      };
+    } finally {
+      try {
+        unlinkSync(tmpFile);
+      } catch {
+        /* swallow */
+      }
+    }
+  } catch (e) {
+    appendLog(job, `# mark-dod error: ${e instanceof Error ? e.message : String(e)}\n`);
+    if (job) await markDone(job, 1);
+    return { ok: false, status: 500, detail: `mark-dod failed: ${e instanceof Error ? e.message : String(e)}` };
+  } finally {
+    if (branchSwitch.switched && branchSwitch.originalBranch) {
+      const originalBranch = branchSwitch.originalBranch;
+      try {
+        const r = await shellExec('git', ['-C', projPath, 'checkout', originalBranch], { timeout: 10000 });
+        appendLog(
+          job,
+          `# restored branch ${originalBranch}${r.exitCode === 0 ? '' : ` (warning: ${(r.stderr || r.stdout).slice(0, 200)})`}\n`,
+        );
+      } catch (e) {
+        appendLog(
+          job,
+          `# WARNING: could not restore branch ${originalBranch}: ${e instanceof Error ? e.message : String(e)}\n`,
+        );
+      }
+    }
+  }
+}

@@ -238,7 +238,6 @@ describe('NotificationBell', () => {
   it.each([
     ['fix', 'fix-ok'],
     ['fix-ci', 'fix-ci-ok'],
-    ['fix-push', 'fix-push-ok'],
   ] as const)('keeps an older unseen failure visible over a newer successful %s', async (kind, successId) => {
     fetchNotificationsMock.mockResolvedValue({
       count: 2,

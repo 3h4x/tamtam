@@ -21,7 +21,7 @@ export interface BoardTransition {
 function startedStatus(job: JobData): BoardTransition {
   if (job.kind === 'release') return { status: 'Todo', summary: 'release queued' };
   if (job.kind === 'review') return { status: 'Review', summary: 'review started' };
-  if (job.kind === 'fix' || job.kind === 'fix-push' || job.kind === 'fix-ci') {
+  if (job.kind === 'fix' || job.kind === 'fix-ci') {
     return { status: 'Fixing', summary: `${job.kind} started` };
   }
   return { status: 'In Progress', summary: `${job.kind} started` };
@@ -41,7 +41,7 @@ function finishedStatus(job: JobData): BoardTransition {
       ? { status: 'In Progress', summary: 'tests passed' }
       : { status: 'Blocked', summary: `tests failed (exit ${job.exitCode ?? 1})` };
   }
-  if (job.kind === 'fix' || job.kind === 'fix-push' || job.kind === 'fix-ci') {
+  if (job.kind === 'fix' || job.kind === 'fix-ci') {
     return job.exitCode === 0
       ? { status: 'In Progress', summary: `${job.kind} finished` }
       : { status: 'Blocked', summary: `${job.kind} failed (exit ${job.exitCode ?? 1})` };

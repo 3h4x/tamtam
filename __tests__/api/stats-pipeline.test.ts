@@ -49,8 +49,11 @@ function makeFix(id: string, project: string, startedAt: number): JobData {
   return makeJob({ id, project, kind: 'fix', exitCode: 0, startedAt, finishedAt: startedAt + 60 });
 }
 
-function makeFixPush(id: string, project: string, startedAt: number): JobData {
-  return makeJob({ id, project, kind: 'fix-push', exitCode: 0, startedAt, finishedAt: startedAt + 60 });
+// After fix-push was unified into the generic fix kind, a "push fix" is
+// a fix job whose parentJobId points at a failed push. For these tests the
+// parent ID isn't asserted, so we synthesize a placeholder.
+function makePushFix(id: string, project: string, startedAt: number): JobData {
+  return makeJob({ id, project, kind: 'fix', exitCode: 0, startedAt, finishedAt: startedAt + 60, parentJobId: `${id}-parent-push` });
 }
 
 function writeReleaseLog(dir: string, name: string, stopReason?: string): string {
@@ -243,7 +246,7 @@ describe('GET /api/stats/pipeline', () => {
       logPath: writeReleaseLog(tempDir, 'rel-legacy', 'fix-push cap reached for legacy-proj (2/2) — push still blocked by hook rejection'),
     };
     const legacyFix = { ...makeFix('legacy-fix', 'legacy-proj', now - 1100), releaseId: null };
-    const legacyFixPush = { ...makeFixPush('legacy-fix-push', 'legacy-proj', now - 1000), releaseId: null };
+    const legacyFixPush = { ...makePushFix('legacy-fix-push', 'legacy-proj', now - 1000), releaseId: null };
     listJobsMock.mockReturnValue([release, legacyFix, legacyFixPush]);
 
     const res = await GET(new NextRequest('http://localhost/api/stats/pipeline?window=all'));
@@ -305,8 +308,8 @@ describe('GET /api/stats/pipeline', () => {
       logPath: writeReleaseLog(tempDir, 'rel-fix-push-cap', 'fix-push cap reached for p1 (2/2) — push still blocked by hook rejection'),
     };
     const fixPushes = [
-      { ...makeFixPush('fix-push-a', 'p1', now - 1100), releaseId: 'rel-fix-push-cap' },
-      { ...makeFixPush('fix-push-b', 'p1', now - 1000), releaseId: 'rel-fix-push-cap' },
+      { ...makePushFix('fix-push-a', 'p1', now - 1100), releaseId: 'rel-fix-push-cap' },
+      { ...makePushFix('fix-push-b', 'p1', now - 1000), releaseId: 'rel-fix-push-cap' },
     ];
     listJobsMock.mockReturnValue([release, ...fixPushes]);
 
@@ -325,8 +328,8 @@ describe('GET /api/stats/pipeline', () => {
       logPath: writeReleaseLog(tempDir, 'rel-fix-push-project', 'fix-push cap reached for proj-fix-push (2/2) — push still blocked by hook rejection'),
     };
     const fixPushes = [
-      { ...makeFixPush('proj-fix-push-a', 'proj-fix-push', now - 1100), releaseId: 'rel-fix-push-project' },
-      { ...makeFixPush('proj-fix-push-b', 'proj-fix-push', now - 1000), releaseId: 'rel-fix-push-project' },
+      { ...makePushFix('proj-fix-push-a', 'proj-fix-push', now - 1100), releaseId: 'rel-fix-push-project' },
+      { ...makePushFix('proj-fix-push-b', 'proj-fix-push', now - 1000), releaseId: 'rel-fix-push-project' },
     ];
     listJobsMock.mockReturnValue([release, ...fixPushes]);
 
@@ -381,8 +384,8 @@ describe('GET /api/stats/pipeline', () => {
       }),
     };
     const fixPushes = [
-      { ...makeFixPush('fix-push-pruned-a', 'proj-pruned-fix-push', now - 1100), releaseId: 'rel-pruned-fix-push-cap' },
-      { ...makeFixPush('fix-push-pruned-b', 'proj-pruned-fix-push', now - 1000), releaseId: 'rel-pruned-fix-push-cap' },
+      { ...makePushFix('fix-push-pruned-a', 'proj-pruned-fix-push', now - 1100), releaseId: 'rel-pruned-fix-push-cap' },
+      { ...makePushFix('fix-push-pruned-b', 'proj-pruned-fix-push', now - 1000), releaseId: 'rel-pruned-fix-push-cap' },
     ];
     listJobsMock.mockReturnValue([release, ...fixPushes]);
 
@@ -560,7 +563,7 @@ describe('GET /api/stats/pipeline', () => {
     expect(data.configSnapshot.verdictRules).toBe('default rules');
     expect(data.configSnapshot.commitStyle).toBe('conventional commits');
     expect(data.configSnapshot.maxStepIterations).toBe(3);
-    expect(data.configSnapshot.maxFixPushAttempts).toBe(2);
+    expect(data.configSnapshot.maxPushFixAttempts).toBe(2);
     expect(data.configSnapshot.stepWindowSeconds).toBe(1800);
   });
 

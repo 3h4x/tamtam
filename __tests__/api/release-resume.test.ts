@@ -59,7 +59,7 @@ describe('POST /api/projects/by-project/{projectName}/release/{releaseId}/resume
     }));
     vi.doMock('@/lib/jobs/lifecycle', () => ({
       runCompletionHooks: runCompletionHooksMock,
-      PIPELINE_STEP_KINDS: new Set(['test', 'review', 'fix', 'commit', 'push', 'fix-push', 'pr-wait', 'mark-dod']),
+      PIPELINE_STEP_KINDS: new Set(['test', 'review', 'fix', 'commit', 'push', 'pr-wait', 'mark-dod']),
     }));
     vi.doMock('@/lib/pipeline/pipeline-lock', () => ({
       acquireLock: acquireLockMock,

@@ -72,8 +72,32 @@ export async function loadFromDb(): Promise<void> {
   }
 }
 
+// Per-job in-flight write serialization. Without this, two back-to-back
+// `saveToDb(job)` calls (e.g. `createJob` then a follow-up `updateJob` to
+// stamp `logPath` after spawn) can race on the pg.Pool: the second insert
+// races ahead on a different pooled connection, the first lands later, and
+// the first's `onConflictDoUpdate` clobbers the second's payload with the
+// stale snapshot. Symptom: `pid=0`, `logPath=NULL` in the DB even though
+// the spawn succeeded and start-test wrote both fields. probe.ts then
+// declares the test job dead at the 30s spawn-grace and force-marks it
+// exit=-1 even though tests are still running.
+//
+// The chain serializes writes for the same `job.id` while leaving writes
+// for different jobs free to parallelize. Stays fire-and-forget at the
+// call site so existing helpers don't need to be made async.
+const inFlightSaves = new Map<string, Promise<void>>();
+
 export function saveToDb(job: JobData): void {
-  void db.insert(schema.jobs)
+  const prev = inFlightSaves.get(job.id) ?? Promise.resolve();
+  const next = prev.then(() => doSaveToDb(job));
+  inFlightSaves.set(job.id, next);
+  void next.finally(() => {
+    if (inFlightSaves.get(job.id) === next) inFlightSaves.delete(job.id);
+  });
+}
+
+function doSaveToDb(job: JobData): Promise<void> {
+  return db.insert(schema.jobs)
       .values({
         id: job.id,
         project: job.project,
@@ -143,7 +167,10 @@ export function saveToDb(job: JobData): void {
         },
       })
       .execute()
-      .catch(e => console.error(`Failed to save job ${job.id}:`, e));
+      .then(() => undefined)
+      .catch(e => {
+        console.error(`Failed to save job ${job.id}:`, e);
+      });
 }
 
 // Find the most recent in-flight release job for this project — the single

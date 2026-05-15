@@ -4,7 +4,7 @@ import { listJobs, getVerdict } from '@/lib/jobs/job-storage';
 import type { JobData } from '@/lib/jobs/job-storage';
 import { getSettings } from '@/lib/shared/config';
 import {
-  getFixPushAttemptCap,
+  getPushFixAttemptCap,
   getMaxStepIterations,
   getStepWindowSeconds,
 } from '@/lib/pipeline/recovery-budget';
@@ -69,15 +69,15 @@ export interface PipelineResponse {
     verdictRules: string;
     commitStyle: string;
     maxStepIterations: number;
-    maxFixPushAttempts: number;
+    maxPushFixAttempts: number;
     stepWindowSeconds: number;
   };
 }
 
 const MAX_STEP_ITERATIONS = getMaxStepIterations();
-const MAX_FIX_PUSH_ATTEMPTS = getFixPushAttemptCap();
+const MAX_PUSH_FIX_ATTEMPTS = getPushFixAttemptCap();
 const FIX_WINDOW_SECONDS = getStepWindowSeconds();
-const RECOVERY_STEP_KINDS = new Set<JobData['kind']>(['fix', 'fix-push']);
+const RECOVERY_STEP_KINDS = new Set<JobData['kind']>(['fix']);
 
 function parseJsonObject(value: string | null | undefined): Record<string, unknown> {
   if (!value) return {};
@@ -211,7 +211,7 @@ function buildDurationStats(durations: number[], costs: number[]): DurationStats
 }
 
 function computeStepDurations(jobs: JobData[]): Record<string, DurationStats> {
-  const STEP_KINDS = ['release', 'test', 'review', 'fix', 'commit', 'push', 'pr-wait', 'fix-push', 'mark-dod'];
+  const STEP_KINDS = ['release', 'test', 'review', 'fix', 'commit', 'push', 'pr-wait', 'mark-dod'];
   const result: Record<string, DurationStats> = {};
 
   // For the `release` step, "cost" is the total of all jobs sharing the release_id —
@@ -391,7 +391,7 @@ export async function GET(request: NextRequest) {
       verdictRules: settings.review_verdict_rules,
       commitStyle: settings.commit_style,
       maxStepIterations: MAX_STEP_ITERATIONS,
-      maxFixPushAttempts: MAX_FIX_PUSH_ATTEMPTS,
+      maxPushFixAttempts: MAX_PUSH_FIX_ATTEMPTS,
       stepWindowSeconds: FIX_WINDOW_SECONDS,
     },
   };

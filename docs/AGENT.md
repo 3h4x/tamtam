@@ -439,7 +439,7 @@ The scheduler tracks `nextFireMs`, `lastFireMs`, `fireCount`, `errorCount`, `ski
 
 #### Why PM2 cron is not used
 
-Older TamTam versions tried to register scheduled agents with PM2 cron. PM2's `cron_restart` combined with `--no-autostart` silently no-op'd: the cron tick updated PM2 metadata but never started the stopped process. That left legacy PM2 schedule rows behind that looked installed but never fired. The current implementation removes those rows and uses the in-process scheduler instead.
+Older TamTam versions tried to register scheduled agents with PM2 cron. PM2's `cron_restart` combined with `--no-autostart` silently no-op'd: the cron tick updated PM2 metadata but never started the stopped process. That left legacy PM2 schedule rows behind that looked installed but never fired. The current implementation uses the in-process scheduler instead and no longer attempts to clean up legacy PM2 cron rows on boot — any leftovers from old installs are inert and can be removed manually with `pm2 delete <name>` if desired.
 
 ### LaunchAgent (macOS)
 
@@ -614,7 +614,7 @@ The workflow requires `WORKFLOW_TARGET_WORLD` to point at the `@workflow/world-p
 | `app/api/agents/[agentId]/route.ts` | Get, update, delete agents |
 | `app/api/agents/[agentId]/run/route.ts` | Run agent on-demand (skill composition happens here) |
 | `app/api/agents/scheduler-health/route.ts` | Scheduler reconciliation + health view |
-| `lib/scheduling/agent-scheduler.ts` | Schedule install/uninstall + legacy PM2/launchctl cleanup |
+| `lib/scheduling/agent-scheduler.ts` | Schedule install/uninstall (thin facade over the internal scheduler) |
 | `lib/scheduling/internal-scheduler.ts` | In-process schedule timers, skip reasons, live state |
 | `lib/jobs/pm2-jobs.ts` | PM2 process lifecycle for actual agent runs |
 | `components/AgentsTab.tsx` | UI for agent management |

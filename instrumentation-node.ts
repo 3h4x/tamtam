@@ -1,78 +1,20 @@
-// Loads enabled scheduled agents from the DB and arms the internal scheduler.
-// In-process timers fire on cadence and POST to /api/agents/{id}/run — no
-// PM2 cron involvement (that path silently no-op'd; see lib/internal-scheduler.ts).
-export async function reinstallAgents(): Promise<void> {
-  const { db, schema } = await import('./lib/db');
-  const { startInternalScheduler } = await import('./lib/scheduling/internal-scheduler');
-  const { syncJobsPauseState } = await import('./lib/shared/job-control');
-  const { getSettings } = await import('./lib/shared/config');
-  const { listEnabledProjects } = await import('./lib/shared/enabled-projects');
-  type AgentInput = Parameters<typeof startInternalScheduler>[0][number];
-  const { reconcilePm2Schedules } = await import('./lib/scheduling/agent-scheduler');
+// `reinstallAgents()` and the in-memory scheduler it armed were retired
+// when graphile-cron took over (see `seedAgentCrons` + `startCronWorker`
+// at the bottom of this file). Scheduled agents are now durable across
+// restarts via graphile-worker's persistent job queue.
 
-  const allAgents = await db.select().from(schema.agents);
-  const dbEnabled: AgentInput[] = allAgents
-    .filter(a => a.enabled && a.schedule)
-    .map(a => ({
-      id: a.id,
-      project: a.project,
-      name: a.name,
-      schedule: a.schedule,
-      prompt: a.prompt ?? '',
-      enabled: !!a.enabled,
-    }));
-
-  // Also scan each enabled project for file-based agents (.tamtam/agents/*.md).
-  // File agents take a back seat to DB agents with the same name (DB precedence
-  // matches the rest of the system — see app/api/agents/route.ts GET).
-  const dbAgentKeys = new Set(dbEnabled.map(a => `${a.project}:${a.name}`));
-  const fileEnabled: AgentInput[] = [];
-  try {
-    const { scanFileAgents } = await import('./lib/agents/tamtam-file-agents');
-    for (const p of listEnabledProjects()) {
-      try {
-        const fileAgents = scanFileAgents(p.path, p.name);
-        for (const fa of fileAgents) {
-          if (!fa.enabled || !fa.schedule) continue;
-          if (dbAgentKeys.has(`${fa.project}:${fa.name}`)) continue;
-          fileEnabled.push({
-            id: fa.id,
-            project: fa.project,
-            name: fa.name,
-            schedule: fa.schedule,
-            prompt: fa.prompt,
-            enabled: fa.enabled,
-          });
-        }
-      } catch (err) {
-        console.error(`[scheduler] file-agent scan failed for ${p.name}:`, err);
-      }
-    }
-  } catch { /* projects table may not exist (test env) */ }
-
-  try {
-    syncJobsPauseState(getSettings().jobs_paused);
-  } catch {
-    // Settings table may be unavailable or partially mocked in tests.
-  }
-  startInternalScheduler([...dbEnabled, ...fileEnabled]);
-
-  // One-time cleanup: PM2 cron entries from the legacy installAgentSchedule
-  // path are dead weight now. Sweep them so `pm2 list` stops being noise.
-  try {
-    await reconcilePm2Schedules([]);
-  } catch (err) {
-    console.error('[scheduler] PM2 cleanup failed:', err);
-  }
-}
-
-// Periodic probe sweep: Claude CLI sometimes hangs after emitting its final
-// result event. `probeJobStatus` can detect this via the log's terminal
-// result line, but only when *something* polls — the UI, a pipeline hook,
-// or a duplicate-check. If nothing polls (e.g. no one has the history tab
-// open and the agent isn't part of an active release chain), the hung
-// process holds the job "running" indefinitely. A 30-second background
-// sweep fixes that: list running Claude-backed jobs and probe them.
+// Periodic probe sweep. Two responsibilities, both orthogonal to the
+// release pipeline orchestration:
+//
+//   1. Claude CLI sometimes hangs after emitting its final result event.
+//      `probeJobStatus` can detect this via the log's terminal result line,
+//      but only when *something* polls. The sweep is that something.
+//   2. Releases that blow past `releaseDeadlineAt` need to be aborted.
+//
+// The hook-failure recovery patterns (stale release reconcile, queued-agent
+// drain, generic reconcile sweep, auto-resume of stuck releases, quota
+// drain) used to live here too. They were removed when the workflow runtime
+// became the only release path — its durability owns those concerns now.
 export async function runProbeSweep(): Promise<void> {
   try {
     const jobStorage = await import('./lib/jobs/job-storage');
@@ -94,31 +36,6 @@ export async function runProbeSweep(): Promise<void> {
     }
   } catch (err) {
     console.error('[probe-sweep] error:', err);
-  }
-  // Reconcile stale release meta-jobs before timeout aborts. A release can
-  // have every child step finished yet still have `finishedAt === null` until
-  // the handoff reconciler finalizes the meta-job. Timeout logic must not
-  // abort that already-complete chain.
-  try {
-    const jobStorage = await import('./lib/jobs/job-storage');
-    const pipelineStepKinds = 'PIPELINE_STEP_KINDS' in jobStorage && jobStorage.PIPELINE_STEP_KINDS instanceof Set
-      ? jobStorage.PIPELINE_STEP_KINDS
-      : new Set<string>();
-    const reconcileStaleRelease = 'reconcileStaleRelease' in jobStorage ? jobStorage.reconcileStaleRelease : undefined;
-    const staleReleases = jobStorage.listJobs().filter(j => j.finishedAt === null && j.kind === 'release');
-    for (const release of staleReleases) {
-      const stepJob = jobStorage.listJobs().find(j =>
-        j.project === release.project
-        && pipelineStepKinds.has(j.kind)
-        && j.finishedAt !== null
-        && (j.startedAt ?? 0) >= (release.startedAt ?? 0) - 1
-      );
-      if (stepJob) {
-        try { await reconcileStaleRelease?.(stepJob); } catch {}
-      }
-    }
-  } catch (err) {
-    console.error('[probe-sweep] release reconcile error:', err);
   }
   try {
     const jobStorage = await import('./lib/jobs/job-storage');
@@ -307,9 +224,8 @@ const ORPHAN_RELEASE_HANDOFF_GRACE_SEC = 5;
 
 export async function reapOrphanReleases(): Promise<void> {
   try {
-    const { listJobs, markDone, reconcileStaleRelease, getJob } = await import('./lib/jobs/job-storage');
+    const { listJobs, markDone } = await import('./lib/jobs/job-storage');
     const { db, schema } = await import('./lib/db');
-    const { exec } = await import('./lib/shared/shell');
     const { eq } = await import('drizzle-orm');
 
     const candidates = listJobs().filter(j => j.kind === 'release' && j.finishedAt === null);
@@ -320,10 +236,10 @@ export async function reapOrphanReleases(): Promise<void> {
       const runningChild = releaseChildren.find((candidate) => candidate.finishedAt === null);
       if (runningChild) continue;
 
-      // Reap/reconcile only when the project lock is absent, still owned by
-      // this release, or stuck on the `${project}-release-pending`
-      // placeholder. Any other owner means a different release legitimately
-      // owns the project now.
+      // Reap only when the project lock is absent, still owned by this
+      // release, or stuck on the `${project}-release-pending` placeholder.
+      // Any other owner means a different release legitimately owns the
+      // project now.
       const lockRows = await db.select().from(schema.pipelineLocks).where(eq(schema.pipelineLocks.project, job.project)).limit(1);
       const lockRow = lockRows[0] ?? null;
       const placeholderId = `${job.project}-release-pending`;
@@ -332,33 +248,16 @@ export async function reapOrphanReleases(): Promise<void> {
       const ownsOrPlaceholder = !lockRow || lockedByThisRelease || lockedByPlaceholder;
       if (!ownsOrPlaceholder) continue;
 
-      // If at least one child step finished before the restart, prefer
-      // release reconciliation over force-reaping. That preserves the normal
-      // "release exit code mirrors the completed chain" behavior while still
-      // healing rows stranded after the last child's markDone path died.
+      // Only reap once the last child has been quiet for a grace window.
+      // Workflow-driven releases that complete cleanly finalize themselves
+      // via the orchestrator's terminal-decision step; anything stranded
+      // past this point really did get orphaned by a server restart.
       const latestFinishedChild = releaseChildren.find((candidate) => candidate.finishedAt !== null) ?? null;
       const newestChildEdge = latestFinishedChild
         ? Math.max(latestFinishedChild.finishedAt || 0, latestFinishedChild.startedAt || 0)
         : 0;
       const quietLongEnough = newestChildEdge === 0 || Date.now() / 1000 - newestChildEdge >= ORPHAN_RELEASE_HANDOFF_GRACE_SEC;
-      if (latestFinishedChild && quietLongEnough) {
-        try {
-          await reconcileStaleRelease(latestFinishedChild);
-        } catch (err) {
-          console.error(`[boot] reconcileStaleRelease failed for orphan release ${job.id}:`, err);
-        }
-        if (getJob(job.id)?.finishedAt != null) {
-          console.log(`[boot] reconciled stranded release ${job.id} from child ${latestFinishedChild.id}`);
-          continue;
-        }
-      }
-
       if (latestFinishedChild && !quietLongEnough) continue;
-
-      try {
-        await exec('pm2', ['stop', job.id, '--silent'], { timeout: 5000 });
-        await exec('pm2', ['delete', job.id, '--silent'], { timeout: 5000 });
-      } catch { /* may not be in PM2 */ }
 
       // Release the lock if this orphan owns it (or it's stuck on the
       // unfinished placeholder).
@@ -426,30 +325,6 @@ export async function drainStalePendingReleases(): Promise<void> {
   }
 }
 
-// At boot, drain any agents that were queued (due to a release lock) before a
-// restart. If the lock is still active, the drain will fire naturally when it
-// releases. If the lock is gone (clean finish before restart, or self-healed
-// stale lock), fire immediately.
-export async function drainStaleQueuedAgentRuns(): Promise<void> {
-  try {
-    const { schema } = await import('@/lib/db');
-    if (!schema.queuedAgentRuns?.project) return;
-    const { drainUnlockedQueuedAgentRuns } = await import('@/lib/pipeline/recovery-drain');
-    await drainUnlockedQueuedAgentRuns('[boot][queued-agent-runs]');
-  } catch (err) {
-    console.error('[boot] drainStaleQueuedAgentRuns failed:', err);
-  }
-}
-
-export async function drainQueuedWorkAfterBudgetRecovery(): Promise<void> {
-  try {
-    const { drainAllRecoveryWork } = await import('@/lib/pipeline/recovery-drain');
-    await drainAllRecoveryWork('[budget-drain]');
-  } catch (e) {
-    console.error('[budget-drain] recovery retry failed:', e);
-  }
-}
-
 async function drainBootRecoveryWork(): Promise<void> {
   try {
     const { drainAllRecoveryWork } = await import('@/lib/pipeline/recovery-drain');
@@ -477,13 +352,13 @@ export async function registerNode(): Promise<void> {
   void reapAbandonedInlineJobs();
   void reapOrphanReleases();
   void drainBootRecoveryWork();
-  void reinstallAgents();
+  // reinstallAgents() retired with the in-memory scheduler — graphile-cron
+  // (`seedAgentCrons` below) replaces it. Scheduled agents are durable
+  // across restarts via graphile-worker's persistent job queue now.
 
-  // Replay lifecycle hooks for any PM2 child that finished while the server
-  // was down. Without this, a restart between a child's exit and the next
-  // periodic sweep silently strands the pipeline (no follow-on step, no
-  // `# release finished` line, lock held until the bash monitor times out).
-  // Runs once at boot in addition to the 30-second interval below.
+  // One-shot probe at boot so we don't wait up to 30s for the first
+  // interval tick to detect a Claude CLI process that hung before the
+  // restart, or a release that already crossed its deadline.
   void runProbeSweep();
 
   // Start Ollama via PM2 when retrieval is enabled
@@ -519,7 +394,10 @@ export async function registerNode(): Promise<void> {
   }
 
   // Nightly DB cleanup: delete job rows older than job_row_retention_days.
-  // Run once at startup (catches drift from long downtimes) then every 24 h.
+  // Once at boot (catches drift from long downtimes); subsequent fires
+  // come from the `system-cron` graphile-worker task (see system-cron-task.ts
+  // wired below). The bare setInterval(runCleanup, 24h) was retired with
+  // the in-memory scheduler — graphile-worker is durable across restarts.
   const runCleanup = async () => {
     try {
       const { runNightlyCleanup } = await import('./lib/jobs/retention');
@@ -530,70 +408,119 @@ export async function registerNode(): Promise<void> {
     }
   };
   runCleanup();
-  setInterval(runCleanup, 24 * 60 * 60 * 1000);
+
+  // Phase 4 cron (graphile-worker): always-on now. The in-memory
+  // internal-scheduler.ts that ran in parallel during the verification
+  // window has been retired in favor of this graphile-worker pool.
+  if (process.env.WORKFLOW_TARGET_WORLD) {
+    void (async () => {
+      try {
+        const [
+          { seedAgentCrons },
+          { seedSystemCron },
+          { startCronWorker },
+          { SYSTEM_CRON_JOB_KEY },
+        ] = await Promise.all([
+          import('./lib/workflows/cron/seed-agent-crons'),
+          import('./lib/workflows/cron/seed-system-cron'),
+          import('./lib/workflows/cron/start-cron-worker'),
+          import('./lib/workflows/cron/system-cron-task'),
+        ]);
+        const { quickAddJob } = await import('graphile-worker');
+        const { listEnabledScheduledAgents } = await import('./lib/scheduling/internal-scheduler-helpers');
+
+        const connectionString = process.env.WORKFLOW_POSTGRES_URL ?? process.env.DATABASE_URL;
+        if (!connectionString) {
+          console.warn('[cron] no postgres URL — graphile cron disabled');
+          return;
+        }
+
+        // Seed enqueues
+        const agentSeed = await seedAgentCrons({
+          connectionString,
+          loadEnabledAgents: listEnabledScheduledAgents,
+        });
+        const systemSeed = await seedSystemCron({ connectionString });
+        console.log(`[cron] seeded ${agentSeed.enqueued} agent crons; system-cron: ${systemSeed.enqueued ? 'ok' : systemSeed.reason}`);
+
+        // Start the worker pool with both agent-cron + system-cron handlers
+        await startCronWorker({
+          connectionString,
+          agentCronDeps: {
+            loadAgent: async (agentId) => {
+              const all = await listEnabledScheduledAgents();
+              return all.find((a) => a.id === agentId) ?? null;
+            },
+            // Skip the fire (without breaking the chain — the cron task
+            // re-enqueues itself either way) when global jobs-paused is on
+            // or when the project is archived/paused. Each per-agent check
+            // is cheap enough to run inline; the cache primed by
+            // `listEnabledScheduledAgents` keeps the project lookup free.
+            prereqSkipReason: async (agent) => {
+              const { isJobsPaused } = await import('@/lib/shared/job-control');
+              if (isJobsPaused()) return 'jobs paused';
+              const { isProjectArchived, isProjectPaused } = await import('@/lib/shared/enabled-projects');
+              if (isProjectArchived(agent.project)) return 'project archived';
+              if (isProjectPaused(agent.project)) return 'project paused';
+              return null;
+            },
+            startAgentRun: async (agent) => {
+              // Mirror the UI's "Run" button: POST { prompt } to the agent
+              // run route. The route requires a body prompt (or skill list)
+              // and rejects with 400 otherwise. The agent's own prompt is
+              // the natural choice; fall back to a synthesized line when an
+              // agent has neither prompt nor skills configured.
+              const baseUrl = process.env.TAMTAM_BASE_URL ?? 'http://localhost:1337';
+              const prompt = agent.prompt?.trim() || `Run agent ${agent.name}`;
+              const res = await fetch(`${baseUrl}/api/agents/${encodeURIComponent(agent.id)}/run`, {
+                method: 'POST',
+                headers: { 'content-type': 'application/json' },
+                body: JSON.stringify({ prompt }),
+              });
+              if (!res.ok) {
+                console.warn(`[cron] agent ${agent.id} run POST returned ${res.status}`);
+                return null;
+              }
+              const data = await res.json().catch(() => ({}));
+              return (data?.runId ?? data?.jobId ?? null) as string | null;
+            },
+            enqueueNextFire: async (agentId, runAt) => {
+              await quickAddJob(
+                { connectionString },
+                'agent-cron',
+                { agentId },
+                { jobKey: `agent-cron-${agentId}`, jobKeyMode: 'replace', runAt, maxAttempts: 5 },
+              );
+            },
+          },
+          systemCronDeps: {
+            runRetentionCleanup: runCleanup,
+            enqueueNextFire: async (runAt) => {
+              await quickAddJob(
+                { connectionString },
+                'system-cron',
+                {},
+                { jobKey: SYSTEM_CRON_JOB_KEY, jobKeyMode: 'preserve_run_at', runAt, maxAttempts: 5 },
+              );
+            },
+          },
+        });
+
+        console.log('[cron] graphile-worker cron pool started (agent-cron + system-cron)');
+      } catch (err) {
+        console.error('[cron] boot failed:', err);
+      }
+    })();
+  }
 
   const probeIntervalMs = parseInt(process.env.TAMTAM_PROBE_INTERVAL_MS ?? '', 10) || 30_000;
   setInterval(runProbeSweep, probeIntervalMs);
-  setInterval(drainStaleQueuedAgentRuns, probeIntervalMs);
 
-  // Reconcile orphaned recovery flags. drainPendingRelease clears its flag
-  // and only re-stamps it on retryable failures, so any pending_release row
-  // with no real reason to wait (no lock holding, no pause, nothing to ship)
-  // is dropped on the next tick. Same for queued agent runs whose project is
-  // unlocked. This is the safety net behind the lifecycle/pipeline-lock
-  // hooks: if a hook ever fails to fire (server crash mid-write, code bug),
-  // the next reconcile loop heals the state without manual intervention.
-  const reconcileRecovery = async () => {
-    try {
-      const { drainAllRecoveryWork } = await import('@/lib/pipeline/recovery-drain');
-      await drainAllRecoveryWork('[reconcile]');
-    } catch (err) {
-      console.error('[reconcile] recovery sweep failed:', err);
-    }
-  };
-  setInterval(reconcileRecovery, probeIntervalMs);
-
-  // Auto-resume any release that was finalized as "done" while its chain
-  // actually stopped at a non-terminal step that exited 0 (test/fix/review/
-  // commit). Most common cause: completion hook crashed or server restarted
-  // between markDone() and the next step spawning. The reconciler now
-  // prevents this for live releases, but legacy stuck releases still need a
-  // sweep. Runs every 5 min — slow on purpose, this is recovery, not a hot
-  // path. The helper itself caps attempts per release id.
-  const autoResumeStuck = async () => {
-    try {
-      const { autoResumeStuckReleases, autoResumeOrphanedAgentRuns } = await import('@/lib/pipeline/resume-stuck-release');
-      await autoResumeStuckReleases();
-      // Agent / terminal runs that finished cleanly but never triggered a
-      // release on a project that has auto_commit / auto_push / release_after_run
-      // on. These look "fine" individually (exit 0, no chain) but the user's
-      // intent (ship after the agent finishes) was never honored.
-      await autoResumeOrphanedAgentRuns();
-    } catch (err) {
-      console.error('[auto-resume] sweep failed:', err);
-    }
-  };
-  void autoResumeStuck();
-  setInterval(autoResumeStuck, 5 * 60 * 1000);
-
-  // Quota drain ticker: every 5 min, refresh the cached subscription quota and,
-  // if we're below the block threshold, drain any releases or DB-queued agent
-  // fires that were deferred while the 5h window was full.
-  const { prefetchQuota, peekQuotaCache } = await import('@/lib/usage/quota');
-  const { getSettings } = await import('@/lib/shared/config');
-  let lastDrainPct: number | null = null;
-  setInterval(async () => {
-    prefetchQuota();
-    // Wait a beat for the prefetch to settle, then re-read cache.
-    await new Promise((r) => setTimeout(r, 1500));
-    const snap = peekQuotaCache();
-    if (!snap) return;
-    const limit = getSettings().budget_block_at_pct;
-    const pct = snap.fiveHour.utilization;
-    // Edge: dropped from over-limit back under. Drain pending releases.
-    if (lastDrainPct != null && lastDrainPct >= limit && pct < limit) {
-      await drainQueuedWorkAfterBudgetRecovery();
-    }
-    lastDrainPct = pct;
-  }, 300_000);
+  // Note: the hook-failure recovery loops that used to live here
+  // (drainStaleQueuedAgentRuns scheduler, reconcileRecovery sweep,
+  // autoResumeStuck, quota drain ticker) were removed when the workflow
+  // runtime became the only release path. The workflow runtime handles
+  // those concerns via its own durability. The on-demand resume route at
+  // /api/projects/by-project/<name>/release/<id>/resume remains available
+  // for manual operator intervention.
 }

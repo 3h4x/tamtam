@@ -27,7 +27,7 @@ import { type CliProvider } from '@/lib/usage/cli-providers'
 // parsing would silently drop every non-NDJSON line. Render it raw so the
 // user sees the full aggregated pipeline output.
 export function isClaudeJobKind(kind: string | undefined): boolean {
-  return ['run', 'review', 'fix', 'fix-ci', 'fix-push'].includes(kind ?? '') ||
+  return ['run', 'review', 'fix', 'fix-ci'].includes(kind ?? '') ||
     (typeof kind === 'string' && kind.startsWith('agent:'))
 }
 

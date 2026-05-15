@@ -316,17 +316,17 @@ describe('GET /api/projects/by-project/{name}/release/{releaseId}', () => {
     expect(kinds).not.toContain('run');
   });
 
-  it('includes fix-push step kind in aggregation', async () => {
+  it('includes the unified fix step kind in aggregation (replaces former fix-push)', async () => {
     const releaseJob = makeJob({ id: 'rel-1', project: 'proj1', kind: 'release', startedAt: 1000 });
     const pushStep = makeJob({ id: 'push-1', project: 'proj1', kind: 'push', startedAt: 1030, finishedAt: 1031, exitCode: 1, releaseId: 'rel-1' });
-    const fixPushStep = makeJob({ id: 'fp-1', project: 'proj1', kind: 'fix-push', startedAt: 1032, finishedAt: 1045, exitCode: 0, releaseId: 'rel-1' });
+    const fixFromPushStep = makeJob({ id: 'fp-1', project: 'proj1', kind: 'fix', parentJobId: 'push-1', startedAt: 1032, finishedAt: 1045, exitCode: 0, releaseId: 'rel-1' });
 
-    listJobsMock.mockReturnValue([releaseJob, pushStep, fixPushStep]);
+    listJobsMock.mockReturnValue([releaseJob, pushStep, fixFromPushStep]);
 
     const res = await GET(req(), params());
     const data = await res.json();
     const kinds = data.steps.map((s: { kind: string }) => s.kind);
     expect(kinds).toContain('push');
-    expect(kinds).toContain('fix-push');
+    expect(kinds).toContain('fix');
   });
 });

@@ -1,6 +1,5 @@
-import { mkdirSync, writeFileSync, chmodSync } from 'fs';
+import { mkdirSync } from 'fs';
 import { join } from 'path';
-import { homedir } from 'os';
 import { resolveProjectPath } from '@/lib/shared/project-data';
 import { isProjectArchived, isProjectPaused } from '@/lib/shared/enabled-projects';
 import { startProjectTest, detectTestCommand } from './start-test';
@@ -19,7 +18,7 @@ import type { IssueContext } from './release-context';
 import { appendRedactedFileSync } from '@/lib/jobs/redacted-log-writer';
 import { computeReleaseDeadlineAt } from './release-timeout';
 
-const RELEASE_PIPELINE_KINDS = new Set(['test', 'review', 'fix', 'push', 'fix-push', 'pr-wait', 'mark-dod', 'release']);
+const RELEASE_PIPELINE_KINDS = new Set(['test', 'review', 'fix', 'commit', 'push', 'pr-wait', 'mark-dod', 'release']);
 
 async function isReleasePipelineRunning(projectName: string): Promise<boolean> {
   const candidates = listJobs().filter(
@@ -63,10 +62,16 @@ async function resolveReleaseIssueContext(
   return hasIssueTaggedRun ? await findIssueContext(projectName, projPath) : null;
 }
 
-// Create a meta "release" job and start a PM2 monitor process for it.
-// The monitor polls the release log for the "# release finished" marker
-// written by finalizeReleaseJob() and exits with the embedded exit code,
-// giving the release job a real pid and PM2-managed lifecycle.
+// Create a "release" meta-job DB row. Workflow orchestration owns the
+// release's lifecycle now; there's no separate process to spawn.
+//
+// Historical context: this function used to write a bash script and start it
+// under PM2 as a per-release monitor that polled the log for the
+// `# release finished` marker. With workflow-driven releases that monitor is
+// dead weight — the orchestrator workflow waits for steps directly. The
+// release job's `pid` is set to `process.pid` so probeJobStatus's
+// inline-job logic treats it the same way it treats any other in-process
+// kind (push/commit/mark-dod/pr-wait).
 async function createReleaseJob(
   projectName: string,
   projectPath: string,
@@ -75,13 +80,11 @@ async function createReleaseJob(
 ): Promise<{ id: string; releaseId: string; logPath: string } | null> {
   try {
     const { logDir } = getImproveConfig();
-    mkdirSync(logDir, { recursive: true });
+    mkdirSync(/*turbopackIgnore: true*/ logDir, { recursive: true });
 
-    const job = createJob(projectName, 'release', 0, '', undefined, undefined, undefined, undefined, undefined, undefined, parentJobId);
+    const job = createJob(projectName, 'release', process.pid, '', undefined, undefined, undefined, undefined, undefined, undefined, parentJobId);
     job.releaseDeadlineAt = computeReleaseDeadlineAt(projectPath);
-    const logPath = join(logDir, `${job.id}.log`);
-    const scriptPath = join(logDir, `${job.id}.sh`);
-    const monitorLogPath = join(logDir, `${job.id}.monitor.log`);
+    const logPath = join(/*turbopackIgnore: true*/ logDir, `${job.id}.log`);
     job.logPath = logPath;
     if (issueContext) {
       job.ghIssueNumber = issueContext.number;
@@ -93,10 +96,7 @@ async function createReleaseJob(
     job.releaseId = job.id;
 
     // Record the triggering job (parent agent/terminal run) in the log header
-    // for traceability. The release trace UI surfaces this via parentJobId,
-    // so we deliberately do NOT mutate the trigger's releaseId — that would
-    // re-group the parent run under this release in /runs views and other
-    // dashboards that filter by releaseId.
+    // for traceability.
     let triggerLine = '';
     if (job.parentJobId) {
       const trigger = getJob(job.parentJobId);
@@ -106,70 +106,6 @@ async function createReleaseJob(
     }
 
     appendRedactedFileSync(logPath, `# release start — ${new Date().toISOString()}\n# project: ${projectName}\n${triggerLine}`);
-
-    // Bash monitor: polls the release log for the completion marker, then exits
-    // with the embedded exit code so PM2 records it correctly.
-    const scriptContent = [
-      '#!/bin/bash',
-      `export PATH="${process.env.PATH || ''}"`,
-      `export HOME="${homedir()}"`,
-      `RELEASE_LOG="${logPath}"`,
-      'TIMEOUT=14400',
-      'elapsed=0',
-      'echo "[tamtam] release monitor started"',
-      'while [ "$elapsed" -lt "$TIMEOUT" ]; do',
-      '  sleep 2',
-      '  elapsed=$((elapsed + 2))',
-      '  if [ -f "$RELEASE_LOG" ]; then',
-      "    line=$(grep -m1 '^# release finished' \"$RELEASE_LOG\" 2>/dev/null || true)",
-      '    if [ -n "$line" ]; then',
-      "      code=$(echo \"$line\" | sed 's/.*exit \\([0-9]*\\).*/\\1/')",
-      '      echo "[tamtam] release finished (exit $code)"',
-      '      exit "$code"',
-      '    fi',
-      '  fi',
-      'done',
-      'echo "[tamtam] release monitor timed out"',
-      'exit 1',
-    ].join('\n');
-
-    writeFileSync(scriptPath, scriptContent);
-    chmodSync(scriptPath, 0o755);
-
-    const pm2Result = await exec(
-      'pm2',
-      [
-        'start', scriptPath,
-        '--name', job.id,
-        '--no-autorestart',
-        '--output', monitorLogPath,
-        '--error', monitorLogPath,
-        '--merge-logs',
-      ],
-      { timeout: 15000 }
-    );
-
-    if (pm2Result.exitCode !== 0) {
-      throw new Error(`pm2 start failed: ${pm2Result.stderr}`);
-    }
-
-    // Retry jlist a few times — right after `pm2 start` returns, jlist can
-    // still show the new process with pid=0/undefined for up to ~1 s while
-    // PM2 wires it up. Storing pid=0 would later confuse probeJobStatus into
-    // thinking the release monitor died (→ exit_code=-1 for an otherwise
-    // successful release).
-    let pid = 0;
-    for (let attempt = 0; attempt < 5; attempt++) {
-      const jlistR = await exec('pm2', ['jlist'], { timeout: 10000 });
-      try {
-        const procs: Array<{ name: string; pid?: number }> = JSON.parse(jlistR.stdout);
-        const found = procs.find((p) => p.name === job.id)?.pid ?? 0;
-        if (found > 0) { pid = found; break; }
-      } catch {}
-      await new Promise((r) => setTimeout(r, 200));
-    }
-
-    job.pid = pid;
     updateJob(job);
     return { id: job.id, releaseId: job.id, logPath };
   } catch {

@@ -2,7 +2,7 @@ import { NextRequest, NextResponse } from 'next/server';
 import { eq } from 'drizzle-orm';
 import { db, schema } from '@/lib/db';
 import { clearProjectDataCache } from '@/lib/shared/project-data';
-import { removeAgentSchedule } from '@/lib/scheduling/internal-scheduler';
+import { uninstallAgentSchedule } from '@/lib/scheduling/agent-scheduler';
 
 export async function PATCH(
   request: NextRequest,
@@ -51,7 +51,7 @@ export async function PATCH(
       .select({ id: schema.agents.id })
       .from(schema.agents)
       .where(eq(schema.agents.project, projectName));
-    for (const a of agents) removeAgentSchedule(a.id);
+    for (const a of agents) await uninstallAgentSchedule(a.id);
   }
 
   return NextResponse.json({

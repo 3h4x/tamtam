@@ -1,11 +1,23 @@
-import { writeFileSync, unlinkSync, existsSync, mkdirSync, chmodSync } from 'fs';
-import { join } from 'path';
-import { homedir } from 'os';
-import { exec } from '@/lib/shared/shell';
+// In-process scheduler for per-project test cron.
+//
+// Previously this installed a PM2 cron entry per project. PM2's
+// `--no-autostart` + `--cron` combination silently no-ops (cron tick updates
+// metadata but never starts the stopped process), so test cron jobs registered
+// that way never actually fired. The current implementation uses a plain
+// in-process `setInterval` for each project, mirroring the pattern in
+// `internal-scheduler.ts` for scheduled agents.
+//
+// Each timer fires by POSTing `/api/projects/by-project/<projectName>/test`,
+// the same endpoint the manual "Test" button hits. Failures don't disable
+// the schedule — the next tick just tries again.
 
-const SCRIPTS_DIR = join(homedir(), 'logs', 'test-scheduler');
+import { stableHash } from './fire-times';
 
 export function parseTestScheduleToCron(schedule: string): string {
+  // Retained for the config-route validator. Returns the cron expression the
+  // legacy PM2 path used to install; today the value is only inspected for
+  // shape validity. Throws on unparseable input so the config route can
+  // surface a 400 before persisting bad data.
   const s = schedule.trim();
   if (s.endsWith('m')) {
     const mins = parseInt(s.slice(0, -1), 10);
@@ -25,47 +37,79 @@ export function parseTestScheduleToCron(schedule: string): string {
     if (days === 1) return `0 0 * * *`;
     return `0 0 */${days} * *`;
   }
-  // Allow raw cron expression (5 parts)
   if (s.split(/\s+/).length === 5) return s;
   throw new Error(`Invalid schedule: ${schedule} (use 30m, 1h, 6h, 1d, or cron expression)`);
 }
 
-function pm2Name(projectName: string): string {
-  return `tamtam-test-${projectName}`;
+function parseScheduleToIntervalMs(schedule: string): number {
+  const s = schedule.trim();
+  if (s.endsWith('m')) {
+    const mins = parseInt(s.slice(0, -1), 10);
+    if (!Number.isFinite(mins) || mins <= 0) throw new Error(`Invalid schedule: ${schedule}`);
+    return mins * 60_000;
+  }
+  if (s.endsWith('h')) {
+    const hours = parseInt(s.slice(0, -1), 10);
+    if (!Number.isFinite(hours) || hours <= 0) throw new Error(`Invalid schedule: ${schedule}`);
+    return hours * 3600_000;
+  }
+  if (s.endsWith('d')) {
+    const days = parseInt(s.slice(0, -1), 10);
+    if (!Number.isFinite(days) || days <= 0) throw new Error(`Invalid schedule: ${schedule}`);
+    return days * 86400_000;
+  }
+  throw new Error(`Cron expressions not supported by in-process test scheduler: ${schedule}`);
 }
 
-function scriptPath(projectName: string): string {
-  return join(SCRIPTS_DIR, `${projectName}.sh`);
-}
+type TestScheduleEntry = {
+  projectName: string;
+  intervalMs: number;
+  timer: NodeJS.Timeout;
+};
 
-function buildScript(projectName: string): string {
-  const port = process.env.PORT || '1337';
-  const url = `http://localhost:${port}/api/projects/by-project/${encodeURIComponent(projectName)}/test`;
-  return `#!/bin/bash
-/usr/bin/curl -s -X POST -H "Content-Type: application/json" "${url}"
-`;
-}
+type TestSchedulerGlobals = {
+  __tamtamTestScheduler?: { entries: Map<string, TestScheduleEntry>; baseUrl: string };
+};
 
-function ensureDirs(): void {
-  mkdirSync(SCRIPTS_DIR, { recursive: true });
+const g = globalThis as TestSchedulerGlobals;
+const state = (g.__tamtamTestScheduler ??= {
+  entries: new Map<string, TestScheduleEntry>(),
+  baseUrl: `http://127.0.0.1:${process.env.PORT || '1337'}`,
+});
+
+async function fire(projectName: string): Promise<void> {
+  try {
+    const url = `${state.baseUrl}/api/projects/by-project/${encodeURIComponent(projectName)}/test`;
+    const res = await fetch(url, { method: 'POST', headers: { 'X-Tamtam-Trigger': 'test-cron' } });
+    if (!res.ok) {
+      console.warn(`[test-scheduler] ${projectName} fire returned HTTP ${res.status}`);
+    }
+  } catch (err) {
+    console.warn(`[test-scheduler] ${projectName} fire threw:`, err instanceof Error ? err.message : err);
+  }
 }
 
 export async function installTestSchedule(projectName: string, schedule: string): Promise<void> {
-  ensureDirs();
   await uninstallTestSchedule(projectName);
-
-  const cron = parseTestScheduleToCron(schedule);
-  const path = scriptPath(projectName);
-  writeFileSync(path, buildScript(projectName));
-  chmodSync(path, 0o755);
-
-  await exec('pm2', ['start', path, '--name', pm2Name(projectName), '--no-autorestart', '--cron', cron]);
+  const intervalMs = parseScheduleToIntervalMs(schedule);
+  // Stagger the first fire by a stable per-project offset so multiple test
+  // crons registered around boot don't stampede the test queue together.
+  const initialDelay = Math.min(intervalMs, 30_000 + stableHash(`test-cron:${projectName}`, 60_000));
+  const timer = setTimeout(() => {
+    void fire(projectName);
+    const interval = setInterval(() => { void fire(projectName); }, intervalMs);
+    interval.unref?.();
+    const existing = state.entries.get(projectName);
+    if (existing) existing.timer = interval;
+  }, initialDelay);
+  timer.unref?.();
+  state.entries.set(projectName, { projectName, intervalMs, timer });
 }
 
 export async function uninstallTestSchedule(projectName: string): Promise<void> {
-  await exec('pm2', ['delete', pm2Name(projectName)]);
-  const path = scriptPath(projectName);
-  if (existsSync(path)) {
-    try { unlinkSync(path); } catch {}
-  }
+  const existing = state.entries.get(projectName);
+  if (!existing) return;
+  clearTimeout(existing.timer);
+  clearInterval(existing.timer);
+  state.entries.delete(projectName);
 }

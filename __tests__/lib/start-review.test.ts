@@ -63,7 +63,8 @@ describe('startProjectReview', () => {
       readParsedLog: readParsedLogMock,
       probeJobStatus: probeJobStatusMock,
     }));
-    vi.doMock('@/lib/jobs/pm2-jobs', () => ({ startJob: startJobMock }));
+    vi.doMock('@/lib/jobs/pm2-jobs', () => ({ splitCommand: (line: string) => line.split(/\s+/).filter(Boolean) }));
+    vi.doMock('@/lib/jobs/spawn-claude-detached', () => ({ startJobInProcess: startJobMock }));
     vi.doMock('@/lib/shared/config', () => ({
       getSettings: () => ({ review_verdict_rules: 'Use LGTM / NEEDS ATTENTION / DO NOT SHIP.' }),
       withBasePrompt: (s: string) => s,
@@ -111,7 +112,8 @@ describe('startProjectReview', () => {
       createJob: createJobMock, updateJob: updateJobMock,
       listJobs: vi.fn().mockReturnValue([]), readLog: readLogMock, readParsedLog: readParsedLogMock, probeJobStatus: probeJobStatusMock,
     }));
-    vi.doMock('@/lib/jobs/pm2-jobs', () => ({ startJob: startJobMock }));
+    vi.doMock('@/lib/jobs/pm2-jobs', () => ({ splitCommand: (line: string) => line.split(/\s+/).filter(Boolean) }));
+    vi.doMock('@/lib/jobs/spawn-claude-detached', () => ({ startJobInProcess: startJobMock }));
     vi.doMock('@/lib/shared/config', () => ({
       getSettings: () => ({ review_verdict_rules: '' }),
       withBasePrompt: (s: string) => s,
@@ -146,7 +148,8 @@ describe('startProjectReview', () => {
       createJob: createJobMock, updateJob: updateJobMock,
       listJobs: vi.fn().mockReturnValue([]), readLog: readLogMock, readParsedLog: readParsedLogMock, probeJobStatus: probeJobStatusMock,
     }));
-    vi.doMock('@/lib/jobs/pm2-jobs', () => ({ startJob: startJobMock }));
+    vi.doMock('@/lib/jobs/pm2-jobs', () => ({ splitCommand: (line: string) => line.split(/\s+/).filter(Boolean) }));
+    vi.doMock('@/lib/jobs/spawn-claude-detached', () => ({ startJobInProcess: startJobMock }));
     vi.doMock('@/lib/shared/config', () => ({
       getSettings: () => ({ review_verdict_rules: '' }),
       withBasePrompt: (s: string) => s,
@@ -283,7 +286,8 @@ describe('startProjectReview', () => {
       listJobs: vi.fn().mockReturnValue([]), readLog: vi.fn().mockReturnValue(''),
       readParsedLog: vi.fn().mockReturnValue(''), probeJobStatus: vi.fn().mockResolvedValue('done'),
     }));
-    vi.doMock('@/lib/jobs/pm2-jobs', () => ({ startJob: startJobMock }));
+    vi.doMock('@/lib/jobs/pm2-jobs', () => ({ splitCommand: (line: string) => line.split(/\s+/).filter(Boolean) }));
+    vi.doMock('@/lib/jobs/spawn-claude-detached', () => ({ startJobInProcess: startJobMock }));
     vi.doMock('@/lib/shared/config', () => ({
       getSettings: () => ({ review_verdict_rules: '' }),
       withBasePrompt: (s: string) => s,
@@ -338,7 +342,8 @@ describe('startProjectReview', () => {
       listJobs: vi.fn().mockReturnValue([]), readLog: vi.fn().mockReturnValue(''),
       readParsedLog: vi.fn().mockReturnValue(''), probeJobStatus: vi.fn().mockResolvedValue('done'),
     }));
-    vi.doMock('@/lib/jobs/pm2-jobs', () => ({ startJob: startJobMock }));
+    vi.doMock('@/lib/jobs/pm2-jobs', () => ({ splitCommand: (line: string) => line.split(/\s+/).filter(Boolean) }));
+    vi.doMock('@/lib/jobs/spawn-claude-detached', () => ({ startJobInProcess: startJobMock }));
     vi.doMock('@/lib/shared/config', () => ({
       getSettings: () => ({ review_verdict_rules: '' }),
       withBasePrompt: (s: string) => s,
@@ -444,7 +449,8 @@ describe('startProjectReview', () => {
       readParsedLog: vi.fn().mockReturnValue(''),
       probeJobStatus: vi.fn().mockResolvedValue('done'),
     }));
-    vi.doMock('@/lib/jobs/pm2-jobs', () => ({ startJob: startJobMock }));
+    vi.doMock('@/lib/jobs/pm2-jobs', () => ({ splitCommand: (line: string) => line.split(/\s+/).filter(Boolean) }));
+    vi.doMock('@/lib/jobs/spawn-claude-detached', () => ({ startJobInProcess: startJobMock }));
     vi.doMock('@/lib/shared/config', () => ({
       getSettings: () => ({ review_verdict_rules: '', incremental_review_enabled: true }),
       withBasePrompt: (s: string) => s,
@@ -502,7 +508,8 @@ describe('startProjectReview', () => {
       listJobs: vi.fn().mockReturnValue([]), readLog: vi.fn().mockReturnValue(''),
       readParsedLog: vi.fn().mockReturnValue(''), probeJobStatus: vi.fn().mockResolvedValue('done'),
     }));
-    vi.doMock('@/lib/jobs/pm2-jobs', () => ({ startJob: startJobMock }));
+    vi.doMock('@/lib/jobs/pm2-jobs', () => ({ splitCommand: (line: string) => line.split(/\s+/).filter(Boolean) }));
+    vi.doMock('@/lib/jobs/spawn-claude-detached', () => ({ startJobInProcess: startJobMock }));
     vi.doMock('@/lib/shared/config', () => ({
       getSettings: () => ({ review_verdict_rules: '', incremental_review_enabled: true }),
       withBasePrompt: (s: string) => s,
@@ -554,7 +561,8 @@ describe('startProjectReview', () => {
       listJobs: vi.fn().mockReturnValue([]), readLog: vi.fn().mockReturnValue(''),
       readParsedLog: vi.fn().mockReturnValue(''), probeJobStatus: vi.fn().mockResolvedValue('done'),
     }));
-    vi.doMock('@/lib/jobs/pm2-jobs', () => ({ startJob: startJobMock }));
+    vi.doMock('@/lib/jobs/pm2-jobs', () => ({ splitCommand: (line: string) => line.split(/\s+/).filter(Boolean) }));
+    vi.doMock('@/lib/jobs/spawn-claude-detached', () => ({ startJobInProcess: startJobMock }));
     vi.doMock('@/lib/shared/config', () => ({
       getSettings: () => ({ review_verdict_rules: '', incremental_review_enabled: true }),
       withBasePrompt: (s: string) => s,
@@ -796,7 +804,8 @@ describe('startProjectReview', () => {
       listJobs: vi.fn().mockReturnValue([]), readLog: vi.fn().mockReturnValue(''),
       readParsedLog: vi.fn().mockReturnValue(''), probeJobStatus: vi.fn().mockResolvedValue('done'),
     }));
-    vi.doMock('@/lib/jobs/pm2-jobs', () => ({ startJob: startJobMock }));
+    vi.doMock('@/lib/jobs/pm2-jobs', () => ({ splitCommand: (line: string) => line.split(/\s+/).filter(Boolean) }));
+    vi.doMock('@/lib/jobs/spawn-claude-detached', () => ({ startJobInProcess: startJobMock }));
     vi.doMock('@/lib/shared/config', () => ({
       getSettings: () => ({ review_verdict_rules: '' }),
       withBasePrompt: (s: string) => s,
@@ -886,7 +895,8 @@ describe('startProjectReview — default skill path', () => {
       readParsedLog: vi.fn().mockReturnValue(''),
       probeJobStatus: vi.fn().mockResolvedValue('done'),
     }));
-    vi.doMock('@/lib/jobs/pm2-jobs', () => ({ startJob: startJobMock }));
+    vi.doMock('@/lib/jobs/pm2-jobs', () => ({ splitCommand: (line: string) => line.split(/\s+/).filter(Boolean) }));
+    vi.doMock('@/lib/jobs/spawn-claude-detached', () => ({ startJobInProcess: startJobMock }));
     vi.doMock('@/lib/shared/config', () => ({
       getSettings: () => ({ review_verdict_rules: '' }),
       withBasePrompt: (s: string) => s,

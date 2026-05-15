@@ -301,7 +301,7 @@ export function ProjectDetailPage({
     .filter(j => j.kind === 'test' && j.status === 'done')
     .sort((a, b) => (b.finished_at || 0) - (a.finished_at || 0))[0]
 
-  const RELEASE_CHILD_KINDS = new Set(['test', 'review', 'fix', 'commit', 'push', 'fix-push', 'mark-dod', 'pr-wait'])
+  const RELEASE_CHILD_KINDS = new Set(['test', 'review', 'fix', 'commit', 'push', 'mark-dod', 'pr-wait'])
   const running = projectJobs.filter(j => j.status === 'running')
   const releaseRunning = running.some(j => j.kind === 'release')
   const runningJobs = (releaseRunning ? running.filter(j => !RELEASE_CHILD_KINDS.has(j.kind)) : running)

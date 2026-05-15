@@ -8,17 +8,16 @@ type Window = '7d' | '30d' | 'all'
 
 const WINDOWS: Window[] = ['7d', '30d', 'all']
 
-const STEP_ORDER = ['agent', 'test', 'review', 'fix', 'commit', 'push', 'pr-wait', 'fix-push', 'mark-dod'] as const
+const STEP_ORDER = ['agent', 'test', 'review', 'fix', 'commit', 'push', 'pr-wait', 'mark-dod'] as const
 
 const STEP_META: Record<(typeof STEP_ORDER)[number], { label: string; detail: string }> = {
   agent: { label: 'agent / trigger', detail: 'the run that kicked off each release — usually the longest + costliest step' },
   test: { label: 'tests', detail: 'verification before review' },
   review: { label: 'review', detail: 'provider verdict pass' },
-  fix: { label: 'fix', detail: 'apply review or test fixes' },
+  fix: { label: 'fix', detail: 'apply review, test, commit, or push hook fixes' },
   commit: { label: 'commit', detail: 'prepare release commit' },
   push: { label: 'push', detail: 'push direct to origin' },
   'pr-wait': { label: 'merge', detail: 'wait for PR gates and merge' },
-  'fix-push': { label: 'fix push', detail: 'push after a fix loop' },
   'mark-dod': { label: 'dod', detail: 'definition-of-done bookkeeping' },
 }
 
