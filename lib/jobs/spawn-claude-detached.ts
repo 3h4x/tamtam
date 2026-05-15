@@ -1,16 +1,26 @@
-// Fire-and-forget in-process spawn for Claude-CLI-backed pipeline jobs
-// (review, fix, pr-review). Same call shape as
-// lib/jobs/pm2-jobs.ts startJob() — writes prompt file, spawns detached,
-// returns child PID immediately. Lifecycle continues via child.on('close')
-// which calls markDone(); the pipeline completion-hook chain takes it from
-// there exactly as it did under PM2.
+// Fire-and-forget in-process spawn for Claude-CLI-backed jobs (review, fix,
+// pr-review, terminal `run`). Same call shape as the old PM2 startJob(): write
+// prompt file, spawn detached, return child PID immediately. Lifecycle
+// continues via child.on('exit') which calls markDone(); the completion-hook
+// chain takes it from there.
 //
-// Differences from inline-agent.ts startInProcessAgentJob:
-//   - Does NOT await the child's exit. The caller (completion-hook handler)
-//     fires the next pipeline step; we mustn't block that.
-//   - The child is detached + unref'd so a Next.js restart doesn't kill it
-//     (matches start-test.ts's existing pattern; the trade-off is the child
-//     becomes a true orphan on restart and lifecycle hooks for it are lost).
+// Surviving a Next.js restart:
+//   - `detached: true` + `child.unref()` puts the child in its own process
+//     group so SIGTERM to the parent (PM2 restart) does NOT propagate.
+//   - stdout/stderr are redirected to the log file's fd directly via
+//     `stdio: ['pipe', logFd, logFd]`. If we piped them back to Node instead,
+//     the pipe would break on parent death and the next child write would get
+//     SIGPIPE — killing it despite the detached process group. Writing to the
+//     fd means the kernel owns the connection; the child's own fd handle
+//     survives the parent disappearing.
+//   - When the parent does die mid-run, the child keeps writing to the log;
+//     on next boot, probeJobStatus uses `process.kill(pid, 0)` for liveness
+//     and getClaudeResultExitCode reads the trailing `"type":"result"` line
+//     from the log to recover the exit code without ever needing this
+//     in-process `child.on('exit')` handler.
+//   - The prompt is fed via stdin pipe and stdin closes within a few ms; by
+//     the time PM2 could possibly restart tamtam, stdin is long done, so the
+//     remaining stdin pipe breakage is harmless.
 
 import { spawn } from 'child_process';
 import { openSync, closeSync, createReadStream, writeFileSync, mkdirSync, writeSync } from 'fs';
@@ -79,8 +89,12 @@ export async function startJobInProcess(
 
   let child;
   try {
+    // Pass the log fd directly to the child for stdout/stderr. The kernel
+    // dup's it into the child process; the child keeps writing to the file
+    // even if our process disappears, so a PM2 restart no longer SIGPIPEs
+    // the codex/claude CLI on its next stdout write.
     child = spawn(bin, args, {
-      stdio: ['pipe', 'pipe', 'pipe'],
+      stdio: ['pipe', logFd, logFd],
       env: childEnv,
       cwd,
       detached: true,
@@ -93,8 +107,6 @@ export async function startJobInProcess(
 
   const pid = child.pid ?? 0;
 
-  child.stdout?.on('data', writeLog);
-  child.stderr?.on('data', writeLog);
   child.on('error', (err) => {
     logLine(`[tamtam] spawn error: ${err.message}`);
   });

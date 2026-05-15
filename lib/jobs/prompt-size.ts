@@ -17,7 +17,10 @@
  * site. ~4 bytes/token is a stable approximation for English-heavy prompts.
  */
 
-const DEFAULT_WARN_BYTES = 50_000 * 4; // ~50k tokens at ~4 bytes/token
+// 50 KB ≈ 12.5k tokens — about the floor where the cache-read cost of an
+// always-injected prefix (CLAUDE.md + skills) starts to matter. Override with
+// TAMTAM_PROMPT_WARN_BYTES.
+const DEFAULT_WARN_BYTES = 50_000;
 export const BYTES_PER_TOKEN = 4;
 
 function warnThreshold(): number {

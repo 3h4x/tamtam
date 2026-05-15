@@ -189,6 +189,15 @@ export async function POST(
   job.provider = provider;
   const logPath = join(logDir, `${job.id}.log`);
   job.logPath = logPath;
+  // When resuming an existing session, pin the session id on the row upfront.
+  // markDone usually fills this in from the CLI's `result` event, but if the
+  // run is killed (PM2 restart, manual cancel) before that event lands, the
+  // terminal page would otherwise lose the link back to the session. The
+  // CLI emits the same id on its own result event, so this is a no-op on
+  // success and a recovery aid on failure.
+  if (resumeSessionId) {
+    job.sessionId = resumeSessionId;
+  }
 
   let cmd = `${claudeBin} --print --output-format stream-json --include-partial-messages --verbose --model ${model} ${getPermissionModeFlag()}`;
   if (resumeSessionId) {

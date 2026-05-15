@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from 'next/server';
 import { eq } from 'drizzle-orm';
 import { db, schema } from '@/lib/db';
 import { clearProjectDataCache } from '@/lib/shared/project-data';
+import { refreshProjectsCacheSync } from '@/lib/shared/enabled-projects';
 import { uninstallAgentSchedule } from '@/lib/scheduling/agent-scheduler';
 
 export async function PATCH(
@@ -43,6 +44,10 @@ export async function PATCH(
     .where(eq(schema.projects.name, projectName));
 
   clearProjectDataCache();
+  // isProjectPaused/isProjectArchived read from a separate 10s TTL cache. Prime
+  // it synchronously so admission gates see the new state as soon as PATCH
+  // returns.
+  await refreshProjectsCacheSync();
 
   if (hasArchived && body.archived) {
     // Drop any scheduled agent timers belonging to this project so the

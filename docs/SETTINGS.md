@@ -151,7 +151,7 @@ All three are read live on each job (not cached), so changing them takes effect 
 
 | Key | Type | Default | Effect |
 |-----|------|---------|--------|
-| `dirty_worktree_block_threshold` | number | `20` | Block agent runs (manual + scheduled) when the project has at least this many uncommitted files (incl. untracked). Returns 409 `dirty_worktree` from `/api/agents/[id]/run`; scheduler skip-counts the fire and re-arms. Set to `0` to disable. |
+| `dirty_worktree_block_threshold` | number | `1` | Block agent runs (manual + scheduled) when the project has at least this many uncommitted files (incl. untracked). Default `1` means any dirty worktree blocks; raise to allow small WIP, or set to `0` to disable. Returns 409 `dirty_worktree` from `/api/agents/[id]/run`; scheduler skip-counts the fire and re-arms. |
 | `incremental_review_enabled` | boolean | `true` | After an `LGTM` verdict, narrow the next pipeline review's diff to commits since that LGTM (uses `refs/tamtam/reviewed/<branch>` git ref). Falls back to `@{u}..HEAD` when the ref is missing or no longer an ancestor of HEAD. |
 
 ### Log & History Retention

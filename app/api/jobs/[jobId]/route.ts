@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { getJob, jobToDict, readDisplayLog, readLog, probeJobStatus, updateJob } from '@/lib/jobs/job-storage';
+import { getJob, jobToDict, readDisplayLog, readLog, readLogHead, probeJobStatus, updateJob } from '@/lib/jobs/job-storage';
 import {
   getJobCancellationSignal,
   requestJobCancellation,
@@ -17,6 +17,18 @@ export async function GET(
     return NextResponse.json({ detail: `job '${jobId}' not found` }, { status: 404 });
   }
   await probeJobStatus(job);
+  // Recover session_id for runs that were killed before the CLI emitted its
+  // `result` event. The spawn helper writes the launch command to the top of
+  // the log; if it contains `--resume <uuid>`, that's the session this job
+  // belonged to. Backfill into the row so subsequent reads (and the terminal
+  // page's redirect) get the same answer without re-scanning the log.
+  if (!job.sessionId && job.kind === 'run' && job.logPath) {
+    const sid = extractResumeSessionId(readLogHead(job, 4096));
+    if (sid) {
+      job.sessionId = sid;
+      updateJob(job);
+    }
+  }
   const data = jobToDict(job);
   // Release logs are aggregates of child output (plain text + NDJSON mixed).
   // readParsedLog silently drops every non-NDJSON line, which hides test
@@ -24,6 +36,12 @@ export async function GET(
   // "open terminal on a release" shows the full pipeline output verbatim.
   data.log = job.kind === 'release' ? readLog(job) : readDisplayLog(job);
   return NextResponse.json(data);
+}
+
+const RESUME_RE = /--resume\s+([0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12})/i;
+function extractResumeSessionId(logHead: string): string | null {
+  const match = RESUME_RE.exec(logHead);
+  return match ? match[1] : null;
 }
 
 export async function DELETE(

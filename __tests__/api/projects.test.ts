@@ -301,6 +301,7 @@ describe('GET /api/projects/[schedId]/detail', () => {
 
 describe('PATCH /api/projects/by-project/[projectName]', () => {
   let PATCH: any;
+  let enabledProjects: typeof import('@/lib/shared/enabled-projects');
   const clearProjectDataCacheMock = vi.fn();
   const uninstallAgentScheduleMock = vi.fn().mockResolvedValue(undefined);
 
@@ -320,6 +321,7 @@ describe('PATCH /api/projects/by-project/[projectName]', () => {
     clearProjectDataCacheMock.mockClear();
     uninstallAgentScheduleMock.mockClear();
 
+    enabledProjects = await import('@/lib/shared/enabled-projects');
     const mod = await import('@/app/api/projects/by-project/[projectName]/route');
     PATCH = mod.PATCH;
   });
@@ -361,7 +363,7 @@ describe('PATCH /api/projects/by-project/[projectName]', () => {
     expect(res.status).toBe(404);
   });
 
-  it('archives an existing project, clears cache, and unschedules its agents', async () => {
+  it('archives an existing project, refreshes the project-state cache, and unschedules its agents', async () => {
     await seedProject('proj1');
     await sharedHandle.db.execute(sql.raw(
       `INSERT INTO agents (id, project, name, enabled) VALUES ('a1', 'proj1', 'qa', true)`,
@@ -369,6 +371,8 @@ describe('PATCH /api/projects/by-project/[projectName]', () => {
     await sharedHandle.db.execute(sql.raw(
       `INSERT INTO agents (id, project, name, enabled) VALUES ('a2', 'proj1', 'review', true)`,
     ));
+    await enabledProjects.refreshProjectsCacheSync();
+    expect(enabledProjects.isProjectArchived('proj1')).toBe(false);
 
     const req = new NextRequest('http://localhost/api/projects/by-project/proj1', {
       method: 'PATCH',
@@ -379,9 +383,28 @@ describe('PATCH /api/projects/by-project/[projectName]', () => {
     const data = await res.json();
     expect(data).toEqual({ project: 'proj1', archived: true, paused: false });
     expect(await archivedFlag('proj1')).toBe(true);
+    expect(enabledProjects.isProjectArchived('proj1')).toBe(true);
     expect(clearProjectDataCacheMock).toHaveBeenCalled();
     expect(uninstallAgentScheduleMock).toHaveBeenCalledWith('a1');
     expect(uninstallAgentScheduleMock).toHaveBeenCalledWith('a2');
+  });
+
+  it('pauses an existing project and refreshes the project-state cache', async () => {
+    await seedProject('proj1');
+    await enabledProjects.refreshProjectsCacheSync();
+    expect(enabledProjects.isProjectPaused('proj1')).toBe(false);
+
+    const req = new NextRequest('http://localhost/api/projects/by-project/proj1', {
+      method: 'PATCH',
+      body: JSON.stringify({ paused: true }),
+    });
+    const res = await PATCH(req, { params: Promise.resolve({ projectName: 'proj1' }) });
+    expect(res.status).toBe(200);
+    const data = await res.json();
+    expect(data).toEqual({ project: 'proj1', archived: false, paused: true });
+    expect(enabledProjects.isProjectPaused('proj1')).toBe(true);
+    expect(clearProjectDataCacheMock).toHaveBeenCalled();
+    expect(uninstallAgentScheduleMock).not.toHaveBeenCalled();
   });
 
   it('unarchives a project without touching scheduled agents', async () => {

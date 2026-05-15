@@ -24,9 +24,13 @@ For **pipeline jobs** (review/fix/commit/dod/push), each `lib/pipeline/start-*.t
 `lib/jobs/prompt-size.ts` exports:
 - `measurePrompt(prompt)` — UTF-8 byte length.
 - `estimateTokens(bytes)` — rough `bytes / 4` approximation.
-- `checkPromptSize(jobId, kind, bytes)` — `console.warn` when bytes exceed `TAMTAM_PROMPT_WARN_BYTES` (default 200 000 ≈ 50k tokens).
+- `checkPromptSize(jobId, kind, bytes)` — `console.warn` when bytes exceed `TAMTAM_PROMPT_WARN_BYTES` (default 50 000 bytes ≈ 12.5k tokens).
 
-`lib/jobs/pm2-jobs.ts startJob` measures every prompt before handing it to PM2 and persists `promptBytes` on the job row. `/api/stats/usage` aggregates `avgPromptBytes` / `avgPromptTokens` per `kind`.
+The current spawn paths measure and persist `promptBytes` on the job row:
+- `lib/jobs/spawn-claude-detached.ts startJobInProcess` for terminal runs and pipeline jobs.
+- `lib/jobs/inline-agent.ts startInProcessAgentJob` for agent intake workflow jobs.
+
+`/api/stats/usage` aggregates `avgPromptBytes` / `avgPromptTokens` per `kind`.
 
 ## Identified bloat sources
 
@@ -36,11 +40,11 @@ For **pipeline jobs** (review/fix/commit/dod/push), each `lib/pipeline/start-*.t
 
 ## When to investigate
 
-Watch `/stats` for kinds where `avgPromptTokens > 50 000`. The `[prompt-size] …` warning lines appear in the PM2 log. If a kind suddenly grows, check:
+Watch `/stats` for kinds where `avgPromptTokens > 12 500`. The `[prompt-size] …` warning lines appear in the TamTam server log. If a kind suddenly grows, check:
 - A new skill was attached to an agent.
 - A `.tamtam/agents/*.md` file gained boilerplate.
 - A docPath was added that pulls in a large file.
 
 ## Threshold tuning
 
-`TAMTAM_PROMPT_WARN_BYTES=300000 pnpm rebuild` raises the warn threshold to ~75k tokens. Default is 200 000 (≈ 50k tokens).
+`TAMTAM_PROMPT_WARN_BYTES=300000 pnpm run rebuild` raises the warn threshold to ~75k tokens. Default is 50 000 bytes (≈ 12.5k tokens).

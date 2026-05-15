@@ -32,6 +32,17 @@ export async function releaseOrchestratorWorkflow(
   const waited = await waitStep(jobId);
   if (!waited.finished || !waited.job) return { waited, decision: null, dispatch: null };
   const decision = await decideStep(waited.job.id);
+  // When the guard rewrote a DO NOT SHIP / NEEDS ATTENTION abort into a
+  // "ship anyway with follow-up issue" decision, file the GitHub issue with
+  // the persistent review findings before dispatching commit. Best-effort:
+  // commit still runs if the issue can't be filed (offline gh, permissions,
+  // etc.). Logged so operators can see what happened.
+  if (decision.next === 'commit' && decision.fileIssueForReviewId) {
+    await fileReviewExhaustionIssueStep(
+      decision.fileIssueForReviewId,
+      ctx.parentJobId ?? null,
+    );
+  }
   const dispatch = await dispatchStep(decision, { ...ctx, prevJobId: waited.job.id });
   // When the chain reaches a terminal decision (done / abort / unknown),
   // finalize the release meta-job so its row in /runs reflects the actual
@@ -78,9 +89,12 @@ async function decideStep(jobId: string): Promise<NextPhase> {
   const { getJob, getVerdict, listJobs, readParsedLog } = await import('@/lib/jobs/job-storage');
   const { decideNextPhase } = await import('@/lib/workflows/decide-next-phase');
   const { applyReleaseGuards } = await import('@/lib/workflows/guards/apply-release-guards');
-  const { getMaxStepIterations, getReviewFixMaxIterations, getPushFixAttemptCap } = await import(
-    '@/lib/pipeline/recovery-budget'
-  );
+  const {
+    getMaxStepIterations,
+    getReviewFixMaxIterations,
+    getPushFixAttemptCap,
+    getReviewDoNotShipAction,
+  } = await import('@/lib/pipeline/recovery-budget');
   const job = getJob(jobId);
   if (!job) return { next: 'unknown', from: 'unknown', reason: `job ${jobId} not found in cache` };
   const verdict = job.kind === 'review' ? getVerdict(job) : null;
@@ -101,6 +115,7 @@ async function decideStep(jobId: string): Promise<NextPhase> {
       maxStepIterations: getMaxStepIterations,
       reviewFixMaxIterations: getReviewFixMaxIterations,
       pushFixAttemptCap: getPushFixAttemptCap,
+      reviewDoNotShipAction: getReviewDoNotShipAction,
     },
   });
 }
@@ -112,6 +127,42 @@ async function dispatchStep(
   'use step';
   const { dispatchPhase } = await import('@/lib/workflows/dispatch-phase');
   return dispatchPhase(decision, ctx);
+}
+
+async function fileReviewExhaustionIssueStep(
+  reviewJobId: string,
+  releaseJobId: string | null,
+): Promise<void> {
+  'use step';
+  try {
+    const { getJob } = await import('@/lib/jobs/job-storage');
+    const { appendRedactedFileSync } = await import('@/lib/jobs/redacted-log-writer');
+    const { fileReviewExhaustionIssue } = await import('@/lib/pipeline/review-exhaustion-fallback');
+    const reviewJob = getJob(reviewJobId);
+    if (!reviewJob) return;
+    const r = await fileReviewExhaustionIssue(reviewJob);
+    const release = releaseJobId ? getJob(releaseJobId) : null;
+    if (r.ok) {
+      console.log(`[release] DO NOT SHIP → follow-up issue filed: ${r.issueUrl}; continuing to commit`);
+      if (release?.logPath) {
+        try {
+          appendRedactedFileSync(release.logPath, `# review do-not-ship → follow-up issue: ${r.issueUrl}\n`);
+        } catch {}
+      }
+    } else {
+      console.warn(`[release] DO NOT SHIP → failed to file follow-up issue: ${r.error}`);
+      if (release?.logPath) {
+        try {
+          appendRedactedFileSync(
+            release.logPath,
+            `# review do-not-ship → follow-up issue failed: ${r.error}\n`,
+          );
+        } catch {}
+      }
+    }
+  } catch (e) {
+    console.warn('[release] do-not-ship issue side effect threw:', e);
+  }
 }
 
 async function finalizeReleaseStep(

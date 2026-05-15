@@ -25,9 +25,9 @@
 export type NextPhase =
   | { next: 'test'; from: 'fix' }
   | { next: 'review'; from: 'test' | 'fix' }
-  | { next: 'commit'; from: 'review' | 'fix' }
+  | { next: 'commit'; from: 'review' | 'fix'; fileIssueForReviewId?: string }
   | { next: 'fix'; from: 'test'; testExitCode: number }
-  | { next: 'fix'; from: 'review'; verdict: 'NEEDS ATTENTION' }
+  | { next: 'fix'; from: 'review'; verdict: 'NEEDS ATTENTION' | 'DO NOT SHIP' }
   | { next: 'fix'; from: 'commit' }
   | { next: 'fix'; from: 'push' }
   | { next: 'push'; from: 'commit' | 'fix' }

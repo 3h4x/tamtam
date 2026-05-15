@@ -2,7 +2,7 @@ import { describe, it, expect, beforeAll, afterAll, beforeEach } from 'vitest';
 import { mkdtempSync, writeFileSync, rmSync } from 'fs';
 import { tmpdir } from 'os';
 import { join } from 'path';
-import { readLog, readParsedLog, readDisplayLog, getVerdict, _resetVerdictCache } from '@/lib/jobs/verdict';
+import { readLog, readLogHead, readParsedLog, readDisplayLog, getVerdict, _resetVerdictCache } from '@/lib/jobs/verdict';
 import type { JobData } from '@/lib/jobs/types';
 
 beforeEach(() => {
@@ -280,6 +280,19 @@ describe('readLog', () => {
     expect(result).not.toContain('aaa');
     expect(result).not.toContain('bbb');
     expect(result).toContain('eee');
+  });
+});
+
+describe('readLogHead', () => {
+  it('reads the beginning of a long log instead of the tail', () => {
+    const logPath = writeLog(`[tamtam] launching: claude --resume 12345678-1234-4234-8234-123456789abc\n${'x'.repeat(5000)}`);
+    const result = readLogHead(makeJob({ logPath }), 4096);
+    expect(result).toContain('--resume 12345678-1234-4234-8234-123456789abc');
+    expect(result).toHaveLength(4096);
+  });
+
+  it('returns empty string when the log file is unavailable', () => {
+    expect(readLogHead(makeJob({ logPath: join(dir, 'missing-head.log') }))).toBe('');
   });
 });
 

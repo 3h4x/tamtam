@@ -14,19 +14,24 @@ export type EnabledProject = {
 
 const PROJECTS_CACHE_TTL = 10; // seconds
 let _projectsCache: { rows: ProjectRow[]; time: number } | null = null;
-let _projectsRefreshing = false;
+let _projectsRefreshPromise: Promise<void> | null = null;
 
-async function _doProjectsRefresh(): Promise<void> {
-  if (_projectsRefreshing) return;
-  _projectsRefreshing = true;
+async function _refreshProjectsFromDb(): Promise<void> {
   try {
     const rows = await db.select().from(schema.projects);
     _projectsCache = { rows, time: Date.now() / 1000 };
   } catch (e) {
     console.error('[enabled-projects] refresh failed:', e);
-  } finally {
-    _projectsRefreshing = false;
   }
+}
+
+function _doProjectsRefresh(): Promise<void> {
+  if (!_projectsRefreshPromise) {
+    _projectsRefreshPromise = _refreshProjectsFromDb().finally(() => {
+      _projectsRefreshPromise = null;
+    });
+  }
+  return _projectsRefreshPromise;
 }
 
 function _getCachedRows(): ProjectRow[] {
@@ -40,16 +45,12 @@ export function clearProjectsCache(): void {
   _projectsCache = null;
 }
 
-// Test-only: awaitable, blocking refresh so callers can prime the cache
-// without polling. Production code keeps the lazy fire-and-forget path.
+// Awaitable, blocking refresh for write paths that must make the synchronous
+// readers observe fresh project state before returning.
 export async function refreshProjectsCacheSync(): Promise<void> {
-  const wasRefreshing = _projectsRefreshing;
-  _projectsRefreshing = false;
-  try {
-    await _doProjectsRefresh();
-  } finally {
-    if (wasRefreshing) _projectsRefreshing = true;
-  }
+  const inFlight = _projectsRefreshPromise;
+  if (inFlight) await inFlight;
+  await _refreshProjectsFromDb();
 }
 
 function normalizeRow(row: ProjectRow): EnabledProject {

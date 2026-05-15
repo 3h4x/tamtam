@@ -187,6 +187,7 @@ export interface JobInfo {
   work_summary?: string | null
   modified_files?: string | null
   provider?: string | null
+  prompt_bytes?: number | null
 }
 
 export interface PipelineDurationStats {

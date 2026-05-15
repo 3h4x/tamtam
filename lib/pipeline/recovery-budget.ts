@@ -1,4 +1,4 @@
-import { getSettings } from '@/lib/shared/config';
+import { getSettings, type ReviewDoNotShipAction } from '@/lib/shared/config';
 
 const DEFAULT_MAX_STEP_ITERATIONS = 3;
 const DEFAULT_PUSH_FIX_ATTEMPTS = 2;
@@ -27,6 +27,19 @@ export function getReviewFixMaxIterations(): number {
     return Number.isFinite(value) && value > 0 ? value : envValue;
   } catch {
     return envValue;
+  }
+}
+
+/** Policy applied when review returns `DO NOT SHIP`. Default `pass` files a
+ *  follow-up GitHub issue and continues with commit → push → mark-dod so the
+ *  release still ships; `fix` routes back through the fix loop (subject to the
+ *  review-fix iteration cap); `abort` keeps the legacy behavior of stopping
+ *  the release immediately. */
+export function getReviewDoNotShipAction(): ReviewDoNotShipAction {
+  try {
+    return getSettings().review_do_not_ship_action;
+  } catch {
+    return 'pass';
   }
 }
 
