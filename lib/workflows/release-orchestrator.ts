@@ -44,7 +44,28 @@ export async function releaseOrchestratorWorkflow(
     dispatch.reason === 'terminal' &&
     ctx.parentJobId
   ) {
-    await finalizeReleaseStep(ctx.parentJobId, dispatch.phase, waited.job.exitCode ?? 0);
+    // Stash the guard's stop reason on the release before finalizing so the
+    // UI / pipeline trace surfaces the abort cause. When the abort came
+    // from a review-side guard with a NEEDS ATTENTION verdict (not DO NOT
+    // SHIP), file the exhaustion-fallback GitHub issue with the persistent
+    // findings so the user has a follow-up artifact.
+    const stopReason = decision.next === 'abort' && 'stopReason' in decision
+      ? decision.stopReason
+      : undefined;
+    const fileExhaustionIssueForReviewId =
+      decision.next === 'abort' &&
+      decision.from === 'review' &&
+      decision.verdict === 'NEEDS ATTENTION' &&
+      waited.job.kind === 'review'
+        ? waited.job.id
+        : undefined;
+    await finalizeReleaseStep(
+      ctx.parentJobId,
+      dispatch.phase,
+      waited.job.exitCode ?? 0,
+      stopReason,
+      fileExhaustionIssueForReviewId,
+    );
   }
   return { waited, decision, dispatch };
 }
@@ -57,8 +78,12 @@ async function waitStep(jobId: string): Promise<WaitForJobResult> {
 
 async function decideStep(jobId: string): Promise<NextPhase> {
   'use step';
-  const { getJob, getVerdict } = await import('@/lib/jobs/job-storage');
+  const { getJob, getVerdict, listJobs, readParsedLog } = await import('@/lib/jobs/job-storage');
   const { decideNextPhase } = await import('@/lib/workflows/decide-next-phase');
+  const { applyReleaseGuards } = await import('@/lib/workflows/guards/apply-release-guards');
+  const { getMaxStepIterations, getReviewFixMaxIterations, getPushFixAttemptCap } = await import(
+    '@/lib/pipeline/recovery-budget'
+  );
   const job = getJob(jobId);
   if (!job) return { next: 'unknown', from: 'unknown', reason: `job ${jobId} not found in cache` };
   const verdict = job.kind === 'review' ? getVerdict(job) : null;
@@ -66,7 +91,21 @@ async function decideStep(jobId: string): Promise<NextPhase> {
   // Non-fix kinds ignore parentKind so this is harmless when not relevant.
   const parent = job.parentJobId ? getJob(job.parentJobId) : null;
   const parentKind = parent?.kind ?? null;
-  return decideNextPhase({ kind: job.kind, exitCode: job.exitCode ?? -1, verdict, parentKind });
+  const decision = decideNextPhase({ kind: job.kind, exitCode: job.exitCode ?? -1, verdict, parentKind });
+  // Pre-dispatch guards: convert `{ next: 'fix' }` into `{ next: 'abort' }`
+  // when the fix loop would not converge (reviewIsStuck/fixContradictsReview),
+  // or when an iteration cap (review/test/commit/push) is exhausted.
+  return applyReleaseGuards({
+    job,
+    decision,
+    deps: {
+      listJobs,
+      readParsedLog,
+      maxStepIterations: getMaxStepIterations,
+      reviewFixMaxIterations: getReviewFixMaxIterations,
+      pushFixAttemptCap: getPushFixAttemptCap,
+    },
+  });
 }
 
 async function dispatchStep(
@@ -82,12 +121,54 @@ async function finalizeReleaseStep(
   releaseJobId: string,
   terminalPhase: 'done' | 'abort' | 'unknown',
   lastStepExitCode: number,
+  stopReason?: string,
+  fileExhaustionIssueForReviewId?: string,
 ): Promise<void> {
   'use step';
-  const { getJob } = await import('@/lib/jobs/job-storage');
+  const { getJob, updateJob } = await import('@/lib/jobs/job-storage');
+  const { appendRedactedFileSync } = await import('@/lib/jobs/redacted-log-writer');
   const { finalizeReleaseJob, finalizeAbortedRelease } = await import('@/lib/jobs/lifecycle');
   const release = getJob(releaseJobId);
   if (!release || release.kind !== 'release' || release.finishedAt !== null) return;
+  // Persist the guard-supplied stop reason on the release row + log so the
+  // pipeline trace UI explains why the orchestrator aborted instead of just
+  // showing exit -3 with no explanation.
+  if (stopReason) {
+    try {
+      const meta = release.contextMeta ? JSON.parse(release.contextMeta) : {};
+      const merged = (meta && typeof meta === 'object' && !Array.isArray(meta)) ? meta as Record<string, unknown> : {};
+      merged.releaseStopReason = stopReason;
+      release.contextMeta = JSON.stringify(merged);
+      updateJob(release);
+    } catch {}
+    if (release.logPath) {
+      try { appendRedactedFileSync(release.logPath, `\n# release stopped — ${stopReason}\n`); } catch {}
+    }
+  }
+  // Exhaustion fallback: when the orchestrator aborts because the review-side
+  // guard exhausted (cap, stuck, contradiction) and the verdict was NEEDS
+  // ATTENTION (not DO NOT SHIP), file a GitHub issue with the persistent
+  // findings so the user has a concrete follow-up artifact instead of just
+  // a red release row. Best-effort: log + continue on failure.
+  if (fileExhaustionIssueForReviewId) {
+    try {
+      const reviewJob = getJob(fileExhaustionIssueForReviewId);
+      if (reviewJob) {
+        const { fileReviewExhaustionIssue } = await import('@/lib/pipeline/review-exhaustion-fallback');
+        const r = await fileReviewExhaustionIssue(reviewJob);
+        if (r.ok) {
+          console.log(`[release] exhaustion issue filed: ${r.issueUrl}`);
+          if (release.logPath) {
+            try { appendRedactedFileSync(release.logPath, `# exhaustion issue: ${r.issueUrl}\n`); } catch {}
+          }
+        } else {
+          console.warn(`[release] failed to file exhaustion issue: ${r.error}`);
+        }
+      }
+    } catch (e) {
+      console.warn('[release] exhaustion-issue side effect threw:', e);
+    }
+  }
   if (terminalPhase === 'abort') {
     await finalizeAbortedRelease(release);
     return;

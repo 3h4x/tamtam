@@ -13,7 +13,7 @@ before declaring the release dead. This is the contract:
 | `test` exit ≠ 0  | `fix` (sees test log) | re-run `test` | `TAMTAM_MAX_STEP_ITERATIONS` (default 3) |
 | `review` not LGTM | `fix` (sees review findings) | re-run `review` | `review_fix_max_iterations` |
 | `commit` exit ≠ 0 | `fix` (sees commit log) | re-run `commit` | `TAMTAM_MAX_STEP_ITERATIONS` |
-| `push` exit ≠ 0  | `fix-push` for hook nits, `fix` for tests | re-run `push` | `MAX_FIX_PUSH_ATTEMPTS=2` for fix-push; `TAMTAM_MAX_STEP_ITERATIONS` for test-driven push recovery |
+| `push` exit ≠ 0  | `fix` (reads hook log; bails if pre-push tests failed) | re-run `push` | `getPushFixAttemptCap()=2` for hook-rejection fix; `TAMTAM_MAX_STEP_ITERATIONS` for review-driven push recovery |
 
 Rules that hold for every recovery loop:
 
@@ -22,10 +22,12 @@ Rules that hold for every recovery loop:
   not before launching another `fix`. This guarantees that the trailing
   fix always lands; what we lose is *one* round of verification.
 - **A hook that errors mid-flight must NOT leave the release in `running`.**
-  Failure paths set `forcedReleaseExitCode = 1` where needed so the release
-  finalizes as failed, and `markDone` additionally wraps
-  `runCompletionHooks` in a try/catch and runs `reconcileStaleRelease` as a
-  belt-and-braces safety net for any throw inside the hook chain.
+  For workflow-driven releases (the default), the orchestrator
+  `finalizeReleaseStep` writes the terminal exit code on the meta-job when
+  it sees a terminal dispatch decision. For standalone (no-`releaseId`)
+  pipeline steps that still flow through the legacy chain, failure paths
+  set `forcedReleaseExitCode = 1` and `markDone` wraps `runCompletionHooks`
+  in a try/catch.
 - **Recovery never silently skips a verification step.** When a recovery
   fix succeeds, the next call MUST be the verification step that
   originally failed (re-test after test-fail, re-review after
@@ -33,14 +35,21 @@ Rules that hold for every recovery loop:
 - **Review and non-review loops use different caps.**
   `review_fix_max_iterations` governs only the review→fix verification
   budget. Test/commit/push verification rounds use the shared
-  `TAMTAM_MAX_STEP_ITERATIONS` env guard; `fix-push` has its own hard cap
-  (`MAX_FIX_PUSH_ATTEMPTS=2`). When the cap trips on review-side
-  exhaustion, file a follow-up GitHub issue with the unresolved findings
-  (see `lib/pipeline/review-exhaustion-fallback.ts`) and chain to commit +
-  push so partial work still ships. Test/commit/push caps still abort.
+  `TAMTAM_MAX_STEP_ITERATIONS` env guard; the push-fix retry (when a
+  pre-push hook rejects with lint/type nits) has its own hard cap
+  (`getPushFixAttemptCap()=2`, counted as `fix` jobs whose parent is a
+  `push` in the same release). When the cap trips on review-side
+  exhaustion, the orchestrator's `finalizeReleaseStep` files a follow-up
+  GitHub issue with the unresolved findings via
+  `fileReviewExhaustionIssue` and aborts the release. Test/commit/push
+  caps abort without filing an issue.
 
-Implementation lives in `lib/jobs/lifecycle.ts` `runCompletionHooks`. Any
-new pipeline step kind added to `PIPELINE_STEP_KINDS` must wire its
+Implementation lives in two places: workflow-driven release-linked
+flows go through `lib/workflows/release-orchestrator.ts` (`decideStep` →
+`applyReleaseGuards` → `dispatchStep`), with the guards under
+`lib/workflows/guards/`. Standalone (no-`releaseId`) pipeline steps fall
+through the legacy `lib/jobs/lifecycle.ts` `runCompletionHooks` chain.
+Any new pipeline step kind added to `PIPELINE_STEP_KINDS` must wire its
 failure path into one of these recovery loops or document why it is
 exempt.
 
@@ -229,7 +238,7 @@ The release meta-job (`kind='release'`) collects log sections from each step. It
 
 ### History view — release grouping
 
-In the per-project **History** tab, pipeline children (`test`, `review`, `fix`, `fix-push`, `commit`, `push`, `mark-dod`, `pr-wait`) are folded under their parent `release` row client-side. Grouping is a time-window match: a child whose `startedAt` falls inside a release's `[startedAt, finishedAt ?? ∞]` window attaches to that release. This is safe because the project-scoped `pipeline_locks` table guarantees only one release is active per project at a time, so no `parent_job_id` is needed. Clicking the parent row opens `/terminal?job=<release-id>`, which serves the **raw** aggregated log (not parsed stream-json) because the release log is a mix of plain text (test/commit/push output) and NDJSON (review/fix). See `components/ProjectRunsTab.tsx:groupReleaseChildren`, `components/TerminalTab.tsx:isClaudeJobKind` (deliberately excludes `release`), and `app/api/jobs/[jobId]/route.ts` (branches on `kind === 'release'` to return the raw log).
+In the per-project **History** tab, pipeline children (`test`, `review`, `fix`, `commit`, `push`, `mark-dod`, `pr-wait`) are folded under their parent `release` row client-side. Grouping is a time-window match: a child whose `startedAt` falls inside a release's `[startedAt, finishedAt ?? ∞]` window attaches to that release. This is safe because the project-scoped `pipeline_locks` table guarantees only one release is active per project at a time, so no `parent_job_id` is needed. Clicking the parent row opens `/terminal?job=<release-id>`, which serves the **raw** aggregated log (not parsed stream-json) because the release log is a mix of plain text (test/commit/push output) and NDJSON (review/fix). See `components/ProjectRunsTab.tsx:groupReleaseChildren`, `components/TerminalTab.tsx:isClaudeJobKind` (deliberately excludes `release`), and `app/api/jobs/[jobId]/route.ts` (branches on `kind === 'release'` to return the raw log).
 
 ---
 
@@ -242,8 +251,8 @@ Called by `markDone()` after every job finishes. Hooks run in order:
 3. **Review chaining**: If `review` exits 0 AND (in-release OR `auto_push_enabled`): LGTM → start PUSH; NEEDS ATTENTION / DO NOT SHIP → start FIX (within iteration cap), unless the new review repeats the previous findings or contradicts the most recent fix's `Status: fixed` claims for the same `Finding ID`s, in which case the release stops as non-converging.
 4. **Fix chaining**: If `fix` exits 0 AND (in-release OR `auto_push_enabled`): start REVIEW.
 5. **Test chaining**: If `test` exits 0 AND (in-release OR `auto_push_enabled`): start REVIEW.
-6. **Push hook fix**: If `push` exits ≠0 and log matches hook rejection patterns: start FIX-PUSH (within attempt cap).
-7. **Fix-push re-push**: If `fix-push` exits 0: start PUSH again.
+6. **Push hook fix**: If `push` exits ≠0 and log matches hook rejection patterns: start a generic `fix` job whose `parentJobId` points at the failed push (within `getPushFixAttemptCap()=2`). The fix prompt reads the hook error from the parent push's log.
+7. **Fix→push re-push**: When that `fix` (parent.kind === `push`) exits 0: re-run PUSH.
 8. **DoD**: If `push` exits 0 and the release is issue-linked, or the push produced a PR without issue context: start MARK-DOD unless auto-merge defers it to post-merge.
 9. **PR merge wait**: If a push produced a PR and `auto_pr_merge_enabled`: start PR-MERGE-WAIT; issue-linked DoD is deferred to post-merge on that path.
 10. **Release finalization**: If a pipeline job ran but no chaining happened, write `# release finished — exit {code}` to meta-log and mark the release job done.
@@ -334,7 +343,7 @@ Accepts markdown wrapping (`**LGTM**`, `` `LGTM` ``) and optional colon/dash del
 |-----|-------|--------|---------|
 | Review→Fix loop | unbounded fixes; configurable review verification rounds | per release; 30 min fallback for standalone chaining | `review_fix_max_iterations` (DB setting, default 3) governs the **review-side** verification budget only. Cap counts completed `review` runs, not fixes. On **NEEDS ATTENTION** review-side exhaustion (cap, stuck, fix-contradicts-review) TamTam files a follow-up issue and chains to commit+push (see step 13 above) instead of aborting. **DO NOT SHIP** review exhaustion still aborts before commit/push. |
 | Test / Commit / Push safety cap | configurable via env | per release; 30 min fallback for standalone chaining | `TAMTAM_MAX_STEP_ITERATIONS` (legacy alias `TAMTAM_MAX_FIX_ITERATIONS`, default 3) still guards `test`, `commit`, and `push` verification loops. `TAMTAM_STEP_WINDOW_SECONDS=1800` (alias `TAMTAM_FIX_WINDOW_SECONDS`) controls the standalone fallback window. These caps still abort when exhausted. |
-| Fix-Push attempts | 2 attempts | 30 min | hardcoded `MAX_FIX_PUSH_ATTEMPTS=2` |
+| Push-fix attempts | 2 attempts | per release | hardcoded `getPushFixAttemptCap()=2`. Counts `fix` jobs whose `parentJobId` is a `push` job in the same release. |
 | Fix-CI auto-retry | 2 attempts | 120 s | hardcoded constants in `lib/jobs/lifecycle.ts` (boot-crash recovery only — non-user-tunable since 2026-05) |
 | Fix-CI fast-crash | — | — | hardcoded `5000` ms — only retries if job died in under this |
 
@@ -358,7 +367,9 @@ When `auto_push_enabled` is **on**: the same review→fix→push chaining happen
 
 ## Hook rejection detection (`isHookRejection`)
 
-Checks the push job log for strings from husky, lint-staged, eslint, pre-commit hooks, and pre-push hooks. If matched, the push failure triggers `fix-push` instead of a hard release failure.
+Checks the push job log for strings from husky, lint-staged, eslint, pre-commit hooks, and pre-push hooks. If matched, the push failure triggers a generic `fix` job (with `parentJobId` pointing at the failed push) instead of a hard release failure. The fix prompt reads the hook error from the push log and edits the relevant files. When that fix exits 0, the orchestrator re-dispatches the push.
+
+`isTestFailureRejection` (sibling helper in `lib/pipeline/push-rejection.ts`) detects when the pre-push hook failed because tests broke. In that case TamTam stops the pipeline for human triage — fix loops aren't tuned for diagnosing test failures (especially flakes).
 
 ---
 
@@ -371,7 +382,7 @@ Checks the push job log for strings from husky, lint-staged, eslint, pre-commit 
 | `lib/start-fix.ts` | `startFixFromJob(reviewJob)` | Resumes review session for fix, or starts fresh |
 | `lib/start-test.ts` | `startProjectTest(project)` | Detects and runs test command |
 | `lib/start-push.ts` | `startProjectPush(project)` | git add → commit message → push |
-| `lib/start-fix-push.ts` | `startFixPush(project, log)` | Provides hook error context to Claude for fix |
+| `lib/pipeline/push-rejection.ts` | `isHookRejection`, `isTestFailureRejection` | Classifies push failure kind |
 | `lib/start-mark-dod.ts` | `startMarkDod(project)` | DoD verification against the linked issue or PR, with checkbox updates when issue criteria exist |
 | `lib/job-storage.ts` | `markDone(jobId, exitCode)` | Called by PM2 exit handler; triggers all completion hooks |
 
@@ -476,7 +487,7 @@ The `/pipeline` page (accessible from the main nav or via the **Pipeline** butto
 | **Review LGTM rate** | % of completed `review` jobs with a `LGTM` verdict |
 | **Fix loop convergence** | % of releases-with-fixes that eventually succeeded; "hit cap" = 3 fix jobs within 30 min without LGTM |
 | **Avg successful release time** | mean wall-clock time from `release` start to finish across successful releases only; the card also shows median and p95 |
-| **Step durations** | Avg, median, and p95 for each pipeline step: `release`, `test`, `review`, `fix`, `commit`, `push`, `pr-wait`, `fix-push`, `mark-dod` |
+| **Step durations** | Avg, median, and p95 for each pipeline step: `release`, `test`, `review`, `fix`, `commit`, `push`, `pr-wait`, `mark-dod` |
 | **Verdict distribution** | Stacked breakdown of LGTM / NEEDS ATTENTION / DO NOT SHIP / parse-failed across all reviews |
 
 All metrics support a **24h / 7d / 30d / all-time** filter.
@@ -512,12 +523,12 @@ The recommended **`agent:review-tuner`** built-in agent reads the last ~20 relea
 
 Returns `PipelineResponse` (see `app/api/stats/pipeline/route.ts` for full type). Cached 60 seconds per (window, project) pair.
 
-Recovery-loop attribution prefers explicit `releaseId` links on `fix` / `fix-push` jobs. For historical rows or partially stamped data where `releaseId` is absent, the stats API falls back to the release's `[startedAt, finishedAt]` window so older dashboards do not silently lose recovery iterations.
+Recovery-loop attribution prefers explicit `releaseId` links on `fix` jobs. For historical rows or partially stamped data where `releaseId` is absent, the stats API falls back to the release's `[startedAt, finishedAt]` window so older dashboards do not silently lose recovery iterations.
 
 The `configSnapshot` section reflects the same shared recovery-budget helper used by runtime enforcement:
 - review/test cap: `TAMTAM_MAX_STEP_ITERATIONS` with legacy fallback to `TAMTAM_MAX_FIX_ITERATIONS`
 - fallback window: `TAMTAM_STEP_WINDOW_SECONDS` (legacy alias: `TAMTAM_FIX_WINDOW_SECONDS`)
-- fix-push cap: hardcoded `2`
+- push-fix cap: hardcoded `2` (counted as `fix` jobs whose parent is a `push` in the same release)
 
 ---
 
@@ -528,7 +539,7 @@ The `configSnapshot` section reflects the same shared recovery-budget helper use
 | Pipeline stops after test with no next step | `auto_push_enabled` is off and no active Release | Use 🚀 Release button or enable `auto_push_enabled` |
 | Review exits 0 but no verdict found | Verdict buried early in a long log | Check last 2000 chars of log; rephrase review prompt to emit verdict at the end |
 | Fix loop runs 3 times then stops | Review/test verification cap reached within the configured fallback window | Fix manually, increase `TAMTAM_MAX_STEP_ITERATIONS` (legacy alias: `TAMTAM_MAX_FIX_ITERATIONS`), or wait for `TAMTAM_STEP_WINDOW_SECONDS` to reset |
-| Push fails, no `fix-push` triggered | Hook strings not matched by `isHookRejection` | Check the push log for hook output; add new hook string patterns to `lib/start-fix-push.ts` |
+| Push fails, no `fix` job spawned to recover | Hook strings not matched by `isHookRejection` | Check the push log for hook output; add new hook string patterns to `lib/pipeline/push-rejection.ts` |
 | Release button grayed out / 400 | No changes and no unpushed commits | Make a change or verify `git status` |
 | `DO NOT SHIP` verdict loops forever | Fix cap reached | Inspect fix logs; may need manual code changes |
 | DoD step skipped | No linked GitHub issue and no PR context from the push | DoD only runs when the release is issue-linked or the push produced a PR |
@@ -581,11 +592,12 @@ Each follows the same kickoff/await/return shape (with minor variations: push/co
 | `fix` | `fix-phase.ts` | `FixPhaseResult` — `{ jobId, sourceJobId, finished, reason, exitCode }` |
 | `push` | `push-phase.ts` | `PushPhaseResult` — `{ commitSha, message, prUrl?, prNumber?, prRepo? }` |
 | `commit` | `commit-phase.ts` | `CommitPhaseResult` — `{ commitSha, message, jobId? }` |
-| `fix-push` | `fix-push-phase.ts` | `FixPushPhaseResult` — `{ jobId, finished, reason, exitCode }` |
 | `mark-dod` | `mark-dod-phase.ts` | `MarkDodPhaseResult` — `{ jobId, issueNumber, verified, total, changed }` |
 | `pr-wait` | `pr-wait-phase.ts` | `PrWaitPhaseResult` — `{ jobId, finished, merged, reason, exitCode }` |
 
-All eight return discriminated unions with `ok: true | false` and a `reason` for the failure branch (`start_failed` / `launch_failed` / `mark_dod_failed`). Each has a focused unit test file with directive-source guards.
+All seven return discriminated unions with `ok: true | false` and a `reason` for the failure branch (`start_failed` / `launch_failed` / `mark_dod_failed`). Each has a focused unit test file with directive-source guards. The push-hook fix path no longer has its own phase — hook rejections spawn the generic `fix` phase with `parentJobId` pointing at the failed push.
+
+Each spawn step wraps its `startProject*` call in `runWithParent(releaseJobId, ...)` (from `lib/jobs/parent-context.ts`) so the spawned `test`/`review`/`commit`/`push`/`fix` row inherits `release_id` correctly via `parentContext` AsyncLocalStorage. This is load-bearing for the lifecycle hook's release-linked short-circuit: a missed `release_id` causes the legacy chain to double-dispatch alongside the orchestrator.
 
 ### Decision logic
 
@@ -595,7 +607,7 @@ All eight return discriminated unions with `ok: true | false` and a `reason` for
 decideNextPhase({ kind, exitCode, verdict }) → NextPhase
 ```
 
-Mirrors the rules in `runCompletionHooks` (test pass → review, review LGTM → push, push fail → fix-push, etc.) but as pure data → data. Shared by the orchestrator and reusable elsewhere if completion hooks ever need to call into it for parity checks. 20 dedicated tests.
+Pure data → data: takes the just-finished step's `kind`, `exitCode`, and (for review) `verdict`, plus the parent step's `kind` (used for `fix → re-verify` routing back to test/review/commit/push). Returns the next phase to dispatch. Shared by the orchestrator alone now — the legacy completion-hook chain owned the equivalent rules pre-migration. ~30 dedicated tests in `__tests__/lib/workflows/decide-next-phase.test.ts`.
 
 ### Dispatch logic
 
@@ -605,7 +617,19 @@ Mirrors the rules in `runCompletionHooks` (test pass → review, review LGTM →
 dispatchPhase(decision: NextPhase, ctx: DispatchContext) → DispatchPhaseOutcome
 ```
 
-Picks the right `release*PhaseWorkflow` and calls `start()`. Validates required context **before** invoking the runtime (e.g. `fix` needs `prevJobId`, `fix-push` needs `hookError`). Surfaces structured outcomes: `dispatched` / `terminal` / `missing_context` / `dispatch_failed`. 14 tests.
+Picks the right `release*PhaseWorkflow` and calls `start()`. Validates required context **before** invoking the runtime (e.g. `fix` needs `prevJobId` to point at the source job whose log it should read). Surfaces structured outcomes: `dispatched` / `terminal` / `missing_context` / `dispatch_failed`. 14 tests.
+
+### Pre-dispatch guard layer
+
+`lib/workflows/guards/apply-release-guards.ts` runs after `decideNextPhase` and before `dispatchPhase`. When a guard trips, the original decision is rewritten to `{ next: 'abort', stopReason }`. The orchestrator's `finalizeReleaseStep` persists the stop reason on the release row + log so the trace UI explains the abort.
+
+Three guards:
+
+- **`reviewIsStuck`** (`lib/workflows/guards/review-convergence.ts`) — aborts when the current review's findings fingerprint matches a previous review in the same release. Same fingerprint = same findings = fix not converging.
+- **`fixContradictsReview`** (same file) — aborts when the most recent fix in the release claimed `Status: fixed` for one or more `Finding ID`s that the current review still flags. The model and its own reviewer disagree; another iteration won't help.
+- **`checkIterationCap`** (`lib/workflows/guards/iteration-caps.ts`) — aborts when a `fix → re-verify` dispatch would exceed `maxStepIterations` (test/commit/push), `reviewFixMaxIterations` (review), or `getPushFixAttemptCap` (push-hook fix retry, special case where parent.kind === 'push').
+
+When a NEEDS-ATTENTION review-side guard aborts, `finalizeReleaseStep` calls `fileReviewExhaustionIssue` to file a follow-up GitHub issue with the persistent findings (see "Review-exhaustion fallback" above). DO NOT SHIP review aborts skip the issue (already explicit failure).
 
 ### workflowDriven flag
 
@@ -613,7 +637,7 @@ Picks the right `release*PhaseWorkflow` and calls `start()`. Validates required 
 - `markReleaseWorkflowDriven(release)` — stamps the release meta-job's `contextMeta` with `workflowDriven: true`. Idempotent. Preserves other fields.
 - `isWorkflowDriven(job, lookupRelease)` — reads the flag. For release-kind jobs reads their own meta; for sub-step jobs follows `releaseId` to the parent.
 
-`runCompletionHooksInner` calls `isWorkflowDriven` and short-circuits the chain when the flag is set, leaving abort cleanup + release-log streaming untouched.
+The flag is now informational. The legacy chain short-circuit in `runCompletionHooksInner` gates on `releaseId` directly (every release-linked pipeline step is owned by the orchestrator, regardless of the flag) — see the "release-linked chain short-circuit" comment in lifecycle.ts. The flag remains stamped on every workflow-driven release for telemetry / forward compatibility.
 
 ### Observation-only mode (TAMTAM_RELEASE_WORKFLOW_DRIVE=0)
 

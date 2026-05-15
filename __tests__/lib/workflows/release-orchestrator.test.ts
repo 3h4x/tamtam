@@ -8,16 +8,33 @@ const getVerdictMock = vi.fn();
 const dispatchPhaseMock = vi.fn();
 
 vi.mock('@/lib/workflows/wait-for-job', () => ({
-  waitForJobCompletion: (...args: unknown[]) => waitForJobCompletionMock(...args),
+  waitForJobCompletion: waitForJobCompletionMock,
 }));
 
+// Stubs for the convergence-guard deps; tests that exercise the guards
+// can override before calling.
+const listJobsMock = vi.fn();
+const readParsedLogMock = vi.fn();
+
 vi.mock('@/lib/jobs/job-storage', () => ({
-  getJob: (...args: unknown[]) => getJobMock(...args),
-  getVerdict: (...args: unknown[]) => getVerdictMock(...args),
+  getJob: getJobMock,
+  getVerdict: getVerdictMock,
+  listJobs: listJobsMock,
+  readParsedLog: readParsedLogMock,
+  updateJob: vi.fn(),
+}));
+
+vi.mock('@/lib/jobs/redacted-log-writer', () => ({
+  appendRedactedFileSync: vi.fn(),
+}));
+
+vi.mock('@/lib/jobs/lifecycle', () => ({
+  finalizeReleaseJob: vi.fn(),
+  finalizeAbortedRelease: vi.fn(),
 }));
 
 vi.mock('@/lib/workflows/dispatch-phase', () => ({
-  dispatchPhase: (...args: unknown[]) => dispatchPhaseMock(...args),
+  dispatchPhase: dispatchPhaseMock,
 }));
 
 import { releaseOrchestratorWorkflow } from '@/lib/workflows/release-orchestrator';
@@ -28,6 +45,164 @@ describe('releaseOrchestratorWorkflow', () => {
     getJobMock.mockReset();
     getVerdictMock.mockReset();
     dispatchPhaseMock.mockReset();
+    listJobsMock.mockReset().mockReturnValue([]);
+    readParsedLogMock.mockReset().mockReturnValue('');
+  });
+
+  describe('convergence guards (release-linked NEEDS ATTENTION → fix)', () => {
+    const SAME_FINDING_LOG = `
+Findings:
+- Finding ID: alpha
+  Severity: high
+Verdict: NEEDS ATTENTION
+`;
+
+    it('rewrites fix → abort when reviewIsStuck (same findings as prior review)', async () => {
+      const reviewJob = {
+        id: 'review-2',
+        kind: 'review',
+        exitCode: 0,
+        finishedAt: 200,
+        releaseId: 'rel-stuck',
+        project: 'p',
+        startedAt: 200,
+      };
+      const priorReview = {
+        id: 'review-1',
+        kind: 'review',
+        exitCode: 0,
+        startedAt: 100,
+        releaseId: 'rel-stuck',
+        project: 'p',
+      };
+      waitForJobCompletionMock.mockResolvedValue({
+        job: reviewJob,
+        finished: true,
+        reason: 'finished',
+      });
+      getJobMock.mockReturnValue(reviewJob);
+      getVerdictMock.mockReturnValue('NEEDS ATTENTION');
+      listJobsMock.mockReturnValue([priorReview, reviewJob]);
+      readParsedLogMock.mockReturnValue(SAME_FINDING_LOG);
+      dispatchPhaseMock.mockResolvedValue({
+        dispatched: false,
+        reason: 'terminal',
+        phase: 'abort',
+      });
+
+      const r = await releaseOrchestratorWorkflow('review-2', {
+        projectName: 'p',
+        parentJobId: 'rel-stuck',
+      });
+
+      expect(r.decision).toMatchObject({
+        next: 'abort',
+        from: 'review',
+        verdict: 'NEEDS ATTENTION',
+      });
+      expect(r.decision).toHaveProperty('stopReason');
+      // Whatever stop-reason text the guard chose must mention the project
+      // so a future trace UI can attribute the failure correctly.
+      const stopReason = (r.decision as { stopReason?: string }).stopReason;
+      expect(stopReason).toContain('p');
+      expect(dispatchPhaseMock).toHaveBeenCalledWith(
+        expect.objectContaining({ next: 'abort' }),
+        expect.any(Object),
+      );
+    });
+
+    it('rewrites fix → abort when fixContradictsReview (prior fix claimed ID fixed but review still flags)', async () => {
+      const reviewJob = {
+        id: 'review-2',
+        kind: 'review',
+        exitCode: 0,
+        finishedAt: 200,
+        releaseId: 'rel-contradict',
+        project: 'p',
+        startedAt: 200,
+      };
+      const priorFix = {
+        id: 'fix-1',
+        kind: 'fix',
+        exitCode: 0,
+        startedAt: 150,
+        releaseId: 'rel-contradict',
+        project: 'p',
+      };
+      waitForJobCompletionMock.mockResolvedValue({
+        job: reviewJob,
+        finished: true,
+        reason: 'finished',
+      });
+      getJobMock.mockReturnValue(reviewJob);
+      getVerdictMock.mockReturnValue('NEEDS ATTENTION');
+      listJobsMock.mockReturnValue([priorFix, reviewJob]);
+      readParsedLogMock.mockImplementation((j: { id: string }) => {
+        if (j.id === 'fix-1') return 'Fix checklist:\n- Finding ID: alpha\n  Status: fixed\n';
+        return 'Findings:\n- Finding ID: alpha\nVerdict: NEEDS ATTENTION\n';
+      });
+      dispatchPhaseMock.mockResolvedValue({
+        dispatched: false,
+        reason: 'terminal',
+        phase: 'abort',
+      });
+
+      const r = await releaseOrchestratorWorkflow('review-2', {
+        projectName: 'p',
+        parentJobId: 'rel-contradict',
+      });
+
+      expect(r.decision).toMatchObject({ next: 'abort', from: 'review' });
+      const stopReason = (r.decision as { stopReason?: string }).stopReason;
+      expect(stopReason).toContain('alpha');
+    });
+
+    it('lets fix proceed when reviews differ + no fix contradiction', async () => {
+      const reviewJob = {
+        id: 'review-2',
+        kind: 'review',
+        exitCode: 0,
+        finishedAt: 200,
+        releaseId: 'rel-progressing',
+        project: 'p',
+        startedAt: 200,
+      };
+      const priorReview = {
+        id: 'review-1',
+        kind: 'review',
+        exitCode: 0,
+        startedAt: 100,
+        releaseId: 'rel-progressing',
+        project: 'p',
+      };
+      waitForJobCompletionMock.mockResolvedValue({
+        job: reviewJob,
+        finished: true,
+        reason: 'finished',
+      });
+      getJobMock.mockReturnValue(reviewJob);
+      getVerdictMock.mockReturnValue('NEEDS ATTENTION');
+      listJobsMock.mockReturnValue([priorReview, reviewJob]);
+      let calls = 0;
+      readParsedLogMock.mockImplementation(() =>
+        // Different findings each call → different fingerprints → not stuck.
+        calls++ === 0
+          ? 'Findings:\n- Finding ID: alpha\nVerdict: NEEDS ATTENTION\n'
+          : 'Findings:\n- Finding ID: beta\nVerdict: NEEDS ATTENTION\n',
+      );
+      dispatchPhaseMock.mockResolvedValue({
+        dispatched: true,
+        phase: 'fix',
+        childRunId: 'wrun_fix_1',
+      });
+
+      const r = await releaseOrchestratorWorkflow('review-2', {
+        projectName: 'p',
+        parentJobId: 'rel-progressing',
+      });
+
+      expect(r.decision).toMatchObject({ next: 'fix', from: 'review' });
+    });
   });
 
   it('wait → decide → dispatch on a successful test step (next=review)', async () => {

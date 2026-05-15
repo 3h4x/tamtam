@@ -25,13 +25,13 @@
 export type NextPhase =
   | { next: 'test'; from: 'fix' }
   | { next: 'review'; from: 'test' | 'fix' }
-  | { next: 'commit'; from: 'fix' }
+  | { next: 'commit'; from: 'review' | 'fix' }
   | { next: 'fix'; from: 'test'; testExitCode: number }
   | { next: 'fix'; from: 'review'; verdict: 'NEEDS ATTENTION' }
   | { next: 'fix'; from: 'commit' }
   | { next: 'fix'; from: 'push' }
-  | { next: 'push'; from: 'review' | 'commit' | 'fix' }
-  | { next: 'abort'; from: 'review'; verdict: 'DO NOT SHIP' }
+  | { next: 'push'; from: 'commit' | 'fix' }
+  | { next: 'abort'; from: 'review'; verdict: 'DO NOT SHIP' | 'NEEDS ATTENTION'; stopReason?: string }
   | { next: 'mark-dod'; from: 'push' }
   | { next: 'done'; from: 'mark-dod' | 'pr-wait' | 'commit' | 'fix' | 'push' }
   | { next: 'unknown'; from: string; reason: string };
@@ -59,8 +59,22 @@ export function decideNextPhase(inputs: DecisionInputs): NextPhase {
       : { next: 'fix', from: 'test', testExitCode: exitCode };
   }
   if (kind === 'review') {
-    if (verdict === 'LGTM') return { next: 'push', from: 'review' };
-    if (verdict === 'DO NOT SHIP') return { next: 'abort', from: 'review', verdict: 'DO NOT SHIP' };
+    if (verdict === 'LGTM') {
+      // Route through commit so any agent-produced uncommitted edits land
+      // in a real commit before the push step. Without this, start-push
+      // returns "No changes to push" when the working tree has untracked
+      // files (the agent generated files but didn't commit them — by
+      // design; the pipeline owns commit+push).
+      return { next: 'commit', from: 'review' };
+    }
+    if (verdict === 'DO NOT SHIP') {
+      return {
+        next: 'abort',
+        from: 'review',
+        verdict: 'DO NOT SHIP',
+        stopReason: 'review verdict: DO NOT SHIP — release blocked',
+      };
+    }
     return { next: 'fix', from: 'review', verdict: 'NEEDS ATTENTION' };
   }
   if (kind === 'commit') {

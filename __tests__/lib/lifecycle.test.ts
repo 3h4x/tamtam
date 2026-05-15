@@ -476,7 +476,10 @@ describe('runCompletionHooks abort cleanup', () => {
 
 // ─── reviewIsStuck convergence guard (tested through markDone) ───────────────
 
-describe('reviewIsStuck convergence guard', () => {
+// Skipped: ported to __tests__/lib/workflows/guards/review-convergence.test.ts
+// + integration coverage in release-orchestrator.test.ts (see comment block
+// at "concurrent step finalization guard" describe above for full pointer).
+describe.skip('reviewIsStuck convergence guard', () => {
   let tempDir: string;
 
   function makeReviewJob(id: string, logPath: string | null, overrides: Partial<JobData> = {}): JobData {
@@ -849,7 +852,9 @@ describe('reviewIsStuck convergence guard', () => {
 
 // ─── verification cap (counts reviews/tests, not fixes) ──────────────────────
 
-describe('fix→review review-count cap', () => {
+// Skipped: ported to __tests__/lib/workflows/guards/iteration-caps.test.ts
+// (review-cap branch + integration in release-orchestrator.test.ts).
+describe.skip('fix→review review-count cap', () => {
   let tempDir: string;
 
   function makeFixJob(id: string, overrides: Partial<JobData> = {}): JobData {
@@ -966,7 +971,10 @@ describe('fix→review review-count cap', () => {
   });
 });
 
-describe('review_fix_max_iterations only caps review-side recovery', () => {
+// Skipped: cap differentiation lives in iteration-caps.ts now (different
+// caps per kind: reviewFixMaxIterations vs maxStepIterations vs
+// pushFixAttemptCap). Tests in iteration-caps.test.ts.
+describe.skip('review_fix_max_iterations only caps review-side recovery', () => {
   function makeFixJob(id: string, overrides: Partial<JobData> = {}): JobData {
     const now = Date.now() / 1000;
     return {
@@ -1188,7 +1196,17 @@ describe('review_fix_max_iterations only caps review-side recovery', () => {
 
 // ─── concurrent step finalization guard ──────────────────────────────────────
 
-describe('concurrent step finalization guard', () => {
+// Release-linked chain blocks short-circuit at lifecycle.ts ~line 488 — the
+// Vercel Workflow orchestrator owns chaining + finalization for any job
+// with a releaseId. The semantics these tests cover (concurrent-step
+// finalization, verdict retry rescue, reviewIsStuck convergence guard,
+// fix→review caps, push fix cap notifications) are now tested in:
+//   __tests__/lib/workflows/release-orchestrator.test.ts
+//   __tests__/lib/workflows/guards/review-convergence.test.ts
+//   __tests__/lib/workflows/guards/iteration-caps.test.ts
+// Skipped (not deleted) so the legacy semantics stay reviewable as long as
+// the standalone-job code path remains.
+describe.skip('concurrent step finalization guard', () => {
   function makeInMemoryJob(id: string, kind: string, overrides: Partial<JobData> = {}): JobData {
     const now = Date.now() / 1000;
     return {
@@ -1279,7 +1297,13 @@ describe('concurrent step finalization guard', () => {
 
 // ─── verdict retry rescue (lifecycle integration) ──────────────────────────
 
-describe('verdict retry rescue', () => {
+// Skipped: verdict-retry rescue runs inside the legacy review block which
+// is now release-linked-short-circuited. The rescue path itself
+// (lib/jobs/verdict-retry.ts) is still alive for standalone reviews and
+// for the orchestrator's getVerdict() call — coverage exists in
+// __tests__/lib/verdict-retry.test.ts. The lifecycle integration tested
+// here is no longer reachable on release-linked jobs.
+describe.skip('verdict retry rescue', () => {
   let tempDir: string;
 
   function makeReviewJob(id: string, logPath: string | null, overrides: Partial<JobData> = {}): JobData {
@@ -1392,7 +1416,11 @@ describe('verdict retry rescue', () => {
 
 // ─── incremental review ref guard ────────────────────────────────────────────
 
-describe('setReviewedRef incremental_review_enabled guard', () => {
+// Skipped: the markReviewed call lives inside the release-linked review
+// block which now short-circuits early. setReviewedRef itself is exercised
+// via the orchestrator's review-phase + start-review (see start-review.ts:
+// it sets the ref on its own non-pipeline path).
+describe.skip('setReviewedRef incremental_review_enabled guard', () => {
   let tempDir: string;
 
   function makeReviewJob(id: string, logPath: string, overrides: Partial<JobData> = {}): JobData {
@@ -1631,7 +1659,9 @@ describe('auto-mark seen on completion', () => {
   });
 });
 
-describe('push fix cap notifications', () => {
+// Skipped: push-fix cap is now in iteration-caps.ts (special-case for
+// fix-from-push) and exercised in iteration-caps.test.ts.
+describe.skip('push fix cap notifications', () => {
   let tempDir: string;
 
   function makePushJob(id: string, overrides: Partial<JobData> = {}): JobData {

@@ -86,11 +86,11 @@ Audit trail for every run, review, fix, test, push, agent execution.
 |------|-------------|
 | `run` | Interactive terminal session |
 | `review` | AI code review |
-| `fix` | AI fix from review session |
-| `fix-ci` | AI fix for CI failures (auto-retry capable) |
-| `fix-push` | AI fix for pre-commit/pre-push hook rejections |
+| `fix` | AI fix — single kind covering test/review/commit/push hook fix scenarios. The fix's `parentJobId` indicates which step kind triggered it (read by `start-fix.ts` to craft the prompt and by `decideNextPhase` to route the post-fix re-verification). |
+| `fix-ci` | AI fix for CI failures (auto-retry capable; manual-button trigger, distinct from in-pipeline `fix`) |
 | `test` | Project test command |
-| `push` | Git commit + push |
+| `commit` | Git commit step |
+| `push` | Git push step |
 | `release` | Meta-job wrapping the full pipeline |
 | `action` | Custom action (user-defined bash) |
 | `agent:{agentId}` | Scheduled agent execution |

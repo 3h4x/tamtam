@@ -122,7 +122,7 @@ Outbound webhooks for release pipeline events. Never blocks pipeline progress â€
 | `notification_on_release_success` | boolean | `false` | Stored as `'true'`/`'false'`. Notify when a release pipeline completes successfully. |
 | `notification_on_release_fail` | boolean | `false` | Notify when a release pipeline fails. |
 | `notification_on_release_aborted` | boolean | `false` | Notify when a release pipeline is aborted mid-run. |
-| `notification_on_fix_loop_exhausted` | boolean | `false` | Notify when a release exhausts automated recovery budget (`test`/`review` retries or `fix-push` attempts) or stops for non-converging fix/review loops. |
+| `notification_on_fix_loop_exhausted` | boolean | `false` | Notify when a release exhausts automated recovery budget (`test`/`review`/`commit`/`push` fix attempts) or stops for non-converging fix/review loops. |
 | `notification_on_review_do_not_ship` | boolean | `false` | Notify when a code review verdict is "DO NOT SHIP". |
 | `notification_on_agent_run_fail` | boolean | `false` | Notify when an agent run fails. |
 | `notification_on_budget_blocked` | boolean | `false` | Notify when a run is refused because the selected agent subscription budget threshold is exceeded. |
@@ -183,7 +183,7 @@ Outbound webhook fired when the release pipeline reaches a terminal state. Suppo
 | `notification_webhook_secret` | string | `''` | If set, every POST includes an `X-TamTam-Signature` HMAC-SHA256 hex header over the JSON body |
 | `notification_on_release_success` | boolean | `false` | Fire when the full release pipeline completes with exit 0 |
 | `notification_on_release_fail` | boolean | `false` | Fire when any pipeline step fails and the pipeline halts |
-| `notification_on_fix_loop_exhausted` | boolean | `false` | Fire when a release exhausts automated recovery budget (`test`/`review` retries or `fix-push` attempts) or stops because fix/review iterations are not converging |
+| `notification_on_fix_loop_exhausted` | boolean | `false` | Fire when a release exhausts automated recovery budget (`test`/`review`/`commit`/`push` fix attempts) or stops because fix/review iterations are not converging |
 | `notification_on_review_do_not_ship` | boolean | `false` | Fire when a review returns a DO NOT SHIP verdict |
 | `notification_on_agent_run_fail` | boolean | `false` | Fire when any scheduled agent job exits non-zero |
 | `notification_on_budget_blocked` | boolean | `false` | Fire when a run is refused because the selected agent subscription budget threshold is exceeded (debounced once per window+resetsAt) |

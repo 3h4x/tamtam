@@ -45,7 +45,7 @@ PM2 exit handler
 - On connect: reads full log file, sends existing content, records byte offset
 - `fs.watch` on the log file pushes new bytes as they arrive; 1s poll as fallback (override with `TAMTAM_STREAM_POLL_MS` env var — read once at module load; tests use a small value to exercise the poll path without the 1s wait)
 - When `job.finishedAt` is set: flushes remaining content, emits `done`, closes
-- **`?raw=1`**: forwards raw NDJSON lines unparsed (used by agent runs and `start-fix-push.ts`)
+- **`?raw=1`**: forwards raw NDJSON lines unparsed (used by agent runs)
 - **Default (parsed)**: runs content through `parseStreamLines()`, emits typed SSE events
 
 SSE event types (parsed mode):
@@ -200,14 +200,14 @@ Verdict detection (`getVerdict`) reads the **last 2000 chars** of the parsed log
 | Mode | URL | Use case |
 |------|-----|----------|
 | Parsed (default) | `/api/streaming/[jobId]` | Terminal UI — typed events (text, thinking, tool_use, done) |
-| Raw NDJSON | `/api/streaming/[jobId]?raw=1` | Agent runs, fix-push — full NDJSON lines unparsed |
+| Raw NDJSON | `/api/streaming/[jobId]?raw=1` | Agent runs — full NDJSON lines unparsed |
 
 ### Job kind → streaming mode
 
 | Kind | Format | Client parses |
 |------|--------|---------------|
 | `run` | `stream-json` NDJSON | text, thinking, tool_use, tool_result, done |
-| `review`, `fix`, `fix-push` | `stream-json` NDJSON | text, thinking, tool_use, tool_result, done |
+| `review`, `fix` | `stream-json` NDJSON | text, thinking, tool_use, tool_result, done |
 | `test`, `push`, `action` | Plain text | Text events + done |
 
 ### Log file locations

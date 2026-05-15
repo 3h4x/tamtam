@@ -88,7 +88,7 @@ describe('dispatchPhase', () => {
   });
 
   it('dispatches releasePushPhaseWorkflow for next=push (forwards releaseJobId for re-dispatch)', async () => {
-    const decision: NextPhase = { next: 'push', from: 'review' };
+    const decision: NextPhase = { next: 'push', from: 'commit' };
     const r = await dispatchPhase(decision, { projectName: 'test-tt', parentJobId: 'release-1' });
     expect(startMock).toHaveBeenCalledWith(phaseFns.push, ['test-tt', { parentJobId: 'release-1' }, 'release-1']);
     expect(r.dispatched).toBe(true);

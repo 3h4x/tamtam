@@ -28,18 +28,22 @@ describe('decideNextPhase', () => {
   });
 
   describe('review kind', () => {
-    it('verdict LGTM → push', () => {
+    it('verdict LGTM → commit (then commit→push chains in next tick)', () => {
+      // Routing through commit lets the pipeline pick up agent-produced
+      // uncommitted edits before push, which would otherwise return "No
+      // changes to push" for an untracked working tree.
       expect(decideNextPhase({ kind: 'review', exitCode: 0, verdict: 'LGTM' })).toEqual({
-        next: 'push',
+        next: 'commit',
         from: 'review',
       });
     });
 
-    it('verdict DO NOT SHIP → abort', () => {
+    it('verdict DO NOT SHIP → abort with stopReason', () => {
       expect(decideNextPhase({ kind: 'review', exitCode: 0, verdict: 'DO NOT SHIP' })).toEqual({
         next: 'abort',
         from: 'review',
         verdict: 'DO NOT SHIP',
+        stopReason: 'review verdict: DO NOT SHIP — release blocked',
       });
     });
 

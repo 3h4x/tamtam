@@ -469,18 +469,33 @@ async function runCompletionHooksInner(job: JobData): Promise<void> {
     }
   }
 
-  // Workflow-driven release short-circuit: when the release meta-job is
-  // marked as workflow-driven, the orchestrator workflow (see
-  // lib/workflows/release-orchestrator.ts) is responsible for chaining
-  // downstream steps. Skip the hook-driven chain to avoid double-dispatch.
-  // The abort + release-log-streaming paths above still run because they
-  // are observability/cleanup, not orchestration.
+  // Release-linked chain short-circuit: every release runs through the
+  // Vercel Workflow orchestrator (lib/workflows/release-orchestrator.ts),
+  // which now owns chaining + convergence guards + iteration caps +
+  // exhaustion fallback (see lib/workflows/guards/{review-convergence,
+  // iteration-caps,apply-release-guards}.ts).
+  //
+  // The chain-spawning blocks below (test→review, review→fix/push, commit
+  // →push, push→fix-from-hook, fix→re-verify) are now dead code for
+  // release-linked pipeline steps — every cascade since the parentContext
+  // fix lands here without ever falling through to a chain block.
+  //
+  // The abort + release-log-streaming + release-after-run + token-extract
+  // + notification + project-board-sync paths above the early-return are
+  // intentionally NOT short-circuited — they are observability /
+  // bookkeeping, not orchestration. Standalone (no-releaseId) pipeline
+  // jobs still flow through the chain blocks below: those have no
+  // orchestrator and the chain remains the only way they can recover.
+  //
+  // Earlier the short-circuit gated on `isWorkflowDriven`, but cascade #3
+  // proved that's fragile — when the workflow runtime failed to stamp
+  // `releaseId` on a spawned step (parentContext gap), `isWorkflowDriven`
+  // returned false and the chain blocks double-dispatched alongside the
+  // orchestrator. Gating on `releaseId` directly is defense in depth: any
+  // release-linked job is owned by the orchestrator, full stop.
   if (['test', 'review', 'fix', 'commit', 'push', 'mark-dod'].includes(job.kind) && job.releaseId) {
-    const { isWorkflowDriven } = await import('@/lib/workflows/workflow-driven-flag');
-    if (isWorkflowDriven(job, (id) => getJob(id))) {
-      console.log(`[release] job ${job.id} (${job.kind}) is workflow-driven — skipping hook chain`);
-      return;
-    }
+    console.log(`[release] job ${job.id} (${job.kind}) is release-linked — orchestrator owns chaining; skipping legacy hook chain`);
+    return;
   }
 
   // Auto-chain gate: the current step's results are already persisted; if a
