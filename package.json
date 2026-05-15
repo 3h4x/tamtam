@@ -75,6 +75,7 @@
     "drizzle-kit": "^0.31.10",
     "eslint": "^10.2.0",
     "eslint-config-next": "^16.2.3",
+    "graphile-worker": "0.16.6",
     "husky": "^9.1.7",
     "jsdom": "^29.0.2",
     "postcss": "^8.5.9",

@@ -102,6 +102,9 @@ importers:
       eslint-config-next:
         specifier: ^16.2.3
         version: 16.2.4(@typescript-eslint/parser@8.59.0(eslint@10.2.1(jiti@2.6.1))(typescript@6.0.3))(eslint@10.2.1(jiti@2.6.1))(typescript@6.0.3)
+      graphile-worker:
+        specifier: 0.16.6
+        version: 0.16.6(typescript@6.0.3)
       husky:
         specifier: ^9.1.7
         version: 9.1.7

@@ -84,10 +84,14 @@ describe('probeJobStatus', () => {
 
   describe('already finished jobs', () => {
     it('returns done immediately when finishedAt is set', async () => {
+      // probe.ts no longer calls `reconcileStaleRelease` for finished jobs.
+      // The reconciler was retired when chain-loop closure landed in the
+      // workflow runtime (orchestrator finalizes the release meta-job when
+      // its dispatch result is terminal). probe just returns 'done'.
       const job = makeJob({ finishedAt: Date.now() / 1000 - 10 });
       const result = await probeJobStatus(job);
       expect(result).toBe('done');
-      expect(reconcileMock).toHaveBeenCalledWith(job);
+      expect(reconcileMock).not.toHaveBeenCalled();
       expect(markDoneMock).not.toHaveBeenCalled();
     });
   });
