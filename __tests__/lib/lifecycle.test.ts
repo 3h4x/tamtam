@@ -2037,7 +2037,9 @@ describe('workflow-driven release short-circuit', () => {
         project: 'proj',
         kind: 'release',
         startedAt: now - 60,
-        contextMeta: JSON.stringify({ workflowDriven: true }),
+        // The legacy `workflowDriven: true` contextMeta stamp was retired;
+        // the lifecycle short-circuit now gates on `releaseId` directly.
+        contextMeta: null,
       }),
     ]);
     const testJob: JobData = {
@@ -2050,10 +2052,10 @@ describe('workflow-driven release short-circuit', () => {
     expect(mocks.startProjectReview).not.toHaveBeenCalled();
   });
 
-  // Note: a "still chains when flag not set" regression test isn't included
-  // here — the existing test suite (300+ tests in this file alone) exercises
-  // the hook chain extensively on releases without the workflowDriven flag,
-  // and continued to pass after this change landed.
+  // Note: the previous "workflowDriven flag" test family was removed when
+  // the lifecycle short-circuit moved to gating on `releaseId` directly
+  // (see lib/jobs/lifecycle.ts ~line 496). The release-linked job above
+  // is short-circuited regardless of any contextMeta marker.
 
   it('does not affect jobs outside a release (no releaseId)', async () => {
     const now = Date.now() / 1000;

@@ -631,13 +631,20 @@ Three guards:
 
 When a NEEDS-ATTENTION review-side guard aborts, `finalizeReleaseStep` calls `fileReviewExhaustionIssue` to file a follow-up GitHub issue with the persistent findings (see "Review-exhaustion fallback" above). DO NOT SHIP review aborts skip the issue (already explicit failure).
 
-### workflowDriven flag
+### Release-linked chain short-circuit
 
-`lib/workflows/workflow-driven-flag.ts`:
-- `markReleaseWorkflowDriven(release)` — stamps the release meta-job's `contextMeta` with `workflowDriven: true`. Idempotent. Preserves other fields.
-- `isWorkflowDriven(job, lookupRelease)` — reads the flag. For release-kind jobs reads their own meta; for sub-step jobs follows `releaseId` to the parent.
+`lib/jobs/lifecycle.ts:~496` gates the legacy chain on `job.releaseId` directly:
 
-The flag is now informational. The legacy chain short-circuit in `runCompletionHooksInner` gates on `releaseId` directly (every release-linked pipeline step is owned by the orchestrator, regardless of the flag) — see the "release-linked chain short-circuit" comment in lifecycle.ts. The flag remains stamped on every workflow-driven release for telemetry / forward compatibility.
+```ts
+if (['test','review','fix','commit','push','mark-dod'].includes(job.kind) && job.releaseId) {
+  console.log(`[release] job ${job.id} (${job.kind}) is release-linked — orchestrator owns chaining; skipping legacy hook chain`);
+  return;
+}
+```
+
+Every release-linked pipeline step is owned by the orchestrator. Standalone (no-`releaseId`) jobs still flow through the chain blocks below — those have no orchestrator and the chain remains the only way they can recover (manual `Run review`, manual push, etc.).
+
+The previous `workflowDriven` contextMeta flag (and the `lib/workflows/workflow-driven-flag.ts` module that managed it) was removed when this gate moved to `releaseId`-based: a stale flag stamp could let the chain fire alongside the orchestrator if the spawn site lost release linkage (cascade #3 was the canonical regression). Gating on linkage directly is robust by construction.
 
 ### Observation-only mode (TAMTAM_RELEASE_WORKFLOW_DRIVE=0)
 
@@ -662,7 +669,6 @@ Any `Date.now()`, `Math.random()`, settings read, env read, or branch-state read
 | `lib/workflows/wait-for-job.ts` | Bounded polling helper for sub-step completion |
 | `lib/workflows/decide-next-phase.ts` | Pure NextPhase decision logic |
 | `lib/workflows/dispatch-phase.ts` | NextPhase → start(matching phase workflow) |
-| `lib/workflows/workflow-driven-flag.ts` | Mark/check the contextMeta flag |
 | `lib/workflows/find-next-substep.ts` | Sibling-job matcher for observation-only mode |
 | `lib/workflows/decode-workflow-payload.ts` | CBOR + devalue payload decoder for the API |
 | `lib/workflows/phases/*.ts` | 8 per-phase driver workflows |

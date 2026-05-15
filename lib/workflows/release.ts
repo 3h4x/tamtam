@@ -5,8 +5,9 @@
 // next tick, and the chain finalizes when the orchestrator sees a terminal
 // decision.
 //
-// Completion hooks short-circuit via the `workflowDriven` contextMeta flag
-// stamped on the release meta-job — they no longer chain releases.
+// The legacy completion-hook chain in lib/jobs/lifecycle.ts short-circuits
+// on `releaseId` for any pipeline step linked to a release — the
+// orchestrator owns chaining alone.
 
 import type { StartReleaseOptions, ReleaseResult } from '@/lib/pipeline/start-release';
 
@@ -39,23 +40,13 @@ async function dispatchOrchestratorStep(
   projectName: string,
 ): Promise<void> {
   'use step';
-  // Stamp the release meta-job as workflow-driven so completion hooks
-  // short-circuit (see runCompletionHooksInner in lib/jobs/lifecycle.ts).
-  try {
-    const { getJob, updateJob } = await import('@/lib/jobs/job-storage');
-    const { markReleaseWorkflowDriven } = await import('@/lib/workflows/workflow-driven-flag');
-    const release = getJob(releaseJobId);
-    if (release && release.kind === 'release') {
-      markReleaseWorkflowDriven(release);
-      updateJob(release);
-    } else {
-      console.warn(`[release-workflow] release meta-job ${releaseJobId} not found — proceeding without flag; double-dispatch possible`);
-    }
-  } catch (err) {
-    console.error('[release-workflow] failed to stamp workflowDriven flag:', err);
-  }
-
-  // Dispatch the orchestrator child workflow. Independent run.
+  // The legacy `workflowDriven` contextMeta flag stamping was removed when
+  // the lifecycle short-circuit moved to gating on `releaseId` directly
+  // (see lib/jobs/lifecycle.ts: `if (job.releaseId) return;`). Every
+  // release-linked pipeline step is owned by the orchestrator regardless
+  // of any flag — gating on linkage is more robust than a stamped marker
+  // (cascade #3 in the migration session was the canonical proof: stale
+  // flag stamps caused double-dispatch when the spawn site lost releaseId).
   try {
     const { start } = await import('workflow/api');
     const { releaseOrchestratorWorkflow } = await import('@/lib/workflows/release-orchestrator');

@@ -73,7 +73,7 @@ describe('releaseWorkflow', () => {
     expect(workflowStartMock).not.toHaveBeenCalled();
   });
 
-  it('dispatches the orchestrator workflow on ok and stamps workflowDriven', async () => {
+  it('dispatches the orchestrator workflow on ok', async () => {
     const releaseMetaJob = { id: 'release-1', kind: 'release' as const, contextMeta: null as string | null };
     getJobMock.mockReturnValue(releaseMetaJob);
     startReleaseMock.mockResolvedValue({
@@ -86,10 +86,9 @@ describe('releaseWorkflow', () => {
 
     await releaseWorkflow('proj-1');
 
-    // contextMeta should hold workflowDriven flag.
-    expect(releaseMetaJob.contextMeta).toBe('{"workflowDriven":true}');
-    expect(updateJobMock).toHaveBeenCalledWith(releaseMetaJob);
-
+    // The legacy `workflowDriven` contextMeta stamp was removed when the
+    // lifecycle short-circuit moved to gating on `releaseId` directly. The
+    // orchestrator child must still get dispatched.
     expect(workflowStartMock).toHaveBeenCalledOnce();
     const [, args] = workflowStartMock.mock.calls[0];
     expect(args).toEqual([
