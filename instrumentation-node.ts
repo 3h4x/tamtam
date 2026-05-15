@@ -406,6 +406,21 @@ export async function registerNode(): Promise<void> {
     } catch (err) {
       console.error('[retention] nightly cleanup error:', err);
     }
+    // Also trim the workflow runtime's own tables (workflow_runs,
+    // workflow_events, workflow_steps, …) — the runtime never prunes
+    // its own rows, so they grow unbounded without this sweep.
+    try {
+      const { pruneOldWorkflowRuns } = await import('./lib/workflows/cron/workflow-retention');
+      const { getSettings } = await import('./lib/shared/config');
+      const summary = await pruneOldWorkflowRuns({
+        retentionDays: getSettings().workflow_run_retention_days,
+      });
+      if (summary.runsDeleted > 0 || summary.errorCount > 0) {
+        console.log(`[retention] workflow trim: runs=${summary.runsDeleted} events=${summary.eventsDeleted} steps=${summary.stepsDeleted} status=${summary.status}${summary.lastError ? ` err=${summary.lastError}` : ''}`);
+      }
+    } catch (err) {
+      console.error('[retention] workflow trim error:', err);
+    }
   };
   runCleanup();
 

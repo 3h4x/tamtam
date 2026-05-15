@@ -71,5 +71,21 @@ export async function DELETE(
     updateJob(job);
   }
 
+  // Propagate cancellation to the workflow runtime when the job was
+  // launched through Vercel Workflow (see app/api/agents/[agentId]/run/route.ts
+  // which records run.id on the job's context_meta). Without this, the
+  // workflow_runs row stays "completed" even though the CLI was killed —
+  // making restart-replay or operator inspection misleading.
+  try {
+    const meta = JSON.parse(job.contextMeta || '{}');
+    const workflowRunId = typeof meta.workflowRunId === 'string' ? meta.workflowRunId : null;
+    if (workflowRunId) {
+      const { getRun } = await import('workflow/api');
+      await getRun(workflowRunId).cancel();
+    }
+  } catch (e) {
+    console.warn(`[jobs] workflow cancel for ${job.id} failed:`, e instanceof Error ? e.message : String(e));
+  }
+
   return NextResponse.json({ status: 'cancelled' });
 }
