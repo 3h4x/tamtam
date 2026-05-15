@@ -61,6 +61,12 @@ export async function runProbeSweep(): Promise<void> {
   } catch (err) {
     console.error('[probe-sweep] release timeout sweep error:', err);
   }
+  try {
+    const { runReleaseReconcileSweep } = await import('./lib/jobs/release-reconcile');
+    await runReleaseReconcileSweep();
+  } catch (err) {
+    console.error('[probe-sweep] release reconcile sweep error:', err);
+  }
 }
 
 /**

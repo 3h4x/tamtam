@@ -28,9 +28,11 @@ vi.mock('@/lib/jobs/redacted-log-writer', () => ({
   appendRedactedFileSync: vi.fn(),
 }));
 
+const finalizeReleaseJobMock = vi.fn();
+const finalizeAbortedReleaseMock = vi.fn();
 vi.mock('@/lib/jobs/lifecycle', () => ({
-  finalizeReleaseJob: vi.fn(),
-  finalizeAbortedRelease: vi.fn(),
+  finalizeReleaseJob: finalizeReleaseJobMock,
+  finalizeAbortedRelease: finalizeAbortedReleaseMock,
 }));
 
 vi.mock('@/lib/workflows/dispatch-phase', () => ({
@@ -47,6 +49,8 @@ describe('releaseOrchestratorWorkflow', () => {
     dispatchPhaseMock.mockReset();
     listJobsMock.mockReset().mockReturnValue([]);
     readParsedLogMock.mockReset().mockReturnValue('');
+    finalizeReleaseJobMock.mockReset();
+    finalizeAbortedReleaseMock.mockReset();
   });
 
   describe('convergence guards (release-linked NEEDS ATTENTION → fix)', () => {
@@ -324,6 +328,84 @@ Verdict: NEEDS ATTENTION
       phase: 'review',
       error: 'runtime down',
     });
+  });
+
+  it('finalizes the release as aborted when dispatch_failed and parentJobId is set', async () => {
+    // Regression: a downstream `start(phase)` that throws used to leave the
+    // release row in `running` forever. The orchestrator must coerce
+    // dispatch_failed into an aborted finalize so the release doesn't sit
+    // until the wall-clock sweep reaps it.
+    const release = {
+      id: 'rel-1',
+      kind: 'release',
+      project: 'test-tt',
+      finishedAt: null,
+      contextMeta: null,
+      logPath: null,
+    };
+    waitForJobCompletionMock.mockResolvedValue({
+      job: { id: 'fix-1', kind: 'fix', exitCode: -1, finishedAt: 200 },
+      finished: true,
+      reason: 'finished',
+    });
+    getJobMock.mockImplementation((id: string) =>
+      id === 'rel-1'
+        ? release
+        : id === 'fix-1'
+          ? { id: 'fix-1', kind: 'fix', exitCode: -1, parentJobId: 'review-1' }
+          : id === 'review-1'
+            ? { id: 'review-1', kind: 'review' }
+            : null,
+    );
+    dispatchPhaseMock.mockResolvedValue({
+      dispatched: false,
+      reason: 'dispatch_failed',
+      phase: 'review',
+      error: 'queue down',
+    });
+    await releaseOrchestratorWorkflow('fix-1', {
+      projectName: 'test-tt',
+      parentJobId: 'rel-1',
+    });
+    expect(finalizeAbortedReleaseMock).toHaveBeenCalledWith(release);
+    expect(release.contextMeta).toContain('failed to dispatch review phase: queue down');
+  });
+
+  it('finalizes the release as aborted on missing_context dispatch outcome', async () => {
+    const release = {
+      id: 'rel-2',
+      kind: 'release',
+      project: 'test-tt',
+      finishedAt: null,
+      contextMeta: null,
+      logPath: null,
+    };
+    waitForJobCompletionMock.mockResolvedValue({
+      job: { id: 'fix-2', kind: 'fix', exitCode: 0, finishedAt: 300 },
+      finished: true,
+      reason: 'finished',
+    });
+    getJobMock.mockImplementation((id: string) =>
+      id === 'rel-2'
+        ? release
+        : id === 'fix-2'
+          ? { id: 'fix-2', kind: 'fix', exitCode: 0, parentJobId: 'push-2' }
+          : id === 'push-2'
+            ? { id: 'push-2', kind: 'push' }
+            : null,
+    );
+    dispatchPhaseMock.mockResolvedValue({
+      dispatched: false,
+      reason: 'missing_context',
+      phase: 'push',
+      missing: ['prevJobId'],
+    });
+    await releaseOrchestratorWorkflow('fix-2', {
+      projectName: 'test-tt',
+      parentJobId: 'rel-2',
+    });
+    expect(finalizeAbortedReleaseMock).toHaveBeenCalledWith(release);
+    expect(release.contextMeta).toContain('missing context for push dispatch: prevJobId');
   });
 
   it('forwards full DispatchContext (dodOverride, parentJobId, prevJobId)', async () => {

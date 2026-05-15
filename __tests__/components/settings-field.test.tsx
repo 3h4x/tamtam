@@ -95,4 +95,24 @@ describe('SettingsField', () => {
     expect(commitSelect.options[0]?.textContent).toBe('Default (Fast)')
     commitField.unmount()
   })
+
+  it('renders the DO NOT SHIP policy selector', () => {
+    const { container, onChange, unmount } = renderSettingsField({
+      fieldKey: 'review_do_not_ship_action',
+      provider: 'claude',
+      value: 'pass',
+    })
+
+    const select = container.querySelector('select')
+    if (!(select instanceof HTMLSelectElement)) throw new Error('select not found')
+
+    expect(Array.from(select.options).map((option) => option.value)).toEqual(['pass', 'fix', 'abort'])
+    expect(select.value).toBe('pass')
+
+    select.value = 'abort'
+    select.dispatchEvent(new Event('change', { bubbles: true }))
+    expect(onChange).toHaveBeenCalledWith('review_do_not_ship_action', 'abort')
+
+    unmount()
+  })
 })
