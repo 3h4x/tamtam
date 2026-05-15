@@ -161,6 +161,7 @@ All three are read live on each job (not cached), so changing them takes effect 
 | `log_retention_count` | number | `200` | Keep log files for the last N finished runs per project. On each run completion, the oldest log files beyond this count are deleted and the DB row is flagged `log_pruned`. Set to `0` to disable count-based pruning. |
 | `log_retention_days` | number | `30` | Delete log files older than this many days (per project, evaluated on each run completion). Set to `0` to disable age-based pruning. |
 | `job_row_retention_days` | number | `180` | Nightly cleanup: delete finished `jobs` DB rows older than this many days. Set to `0` to disable. Run rows older than this threshold are permanently removed. |
+| `workflow_run_retention_days` | number | `30` | Nightly cleanup: delete completed workflow runtime trace rows older than this many days from the `workflow.workflow_*` tables. Set to `0` to disable. |
 | `backup_retention_count` | number | `14` | Keep this many newest Postgres `tamtam-*.pgdump` backup files after each successful backup. Set to `0` to prune all older backups after each run while still keeping the newly created backup. |
 | `backup_retention_weekly_count` | number | `8` | Keep one additional older Postgres backup per week for this many weeks after the newest backups. The just-created backup is preserved separately and does not consume one of these weekly slots. Set to `0` to disable weekly retention. |
 
@@ -320,8 +321,9 @@ base_prompt, default_model, permission_mode, commit_style,
 review_verdict_rules, jobs_paused,
 review_fix_max_iterations, release_wall_clock_timeout_minutes,
 agent_templates, log_retention_count, log_retention_days,
-job_row_retention_days, backup_retention_count,
-backup_retention_weekly_count, notification_webhook_url,
+job_row_retention_days, workflow_run_retention_days,
+backup_retention_count, backup_retention_weekly_count,
+notification_webhook_url,
 notification_webhook_secret, notification_on_release_success,
 notification_on_release_fail, notification_on_release_aborted,
 notification_on_fix_loop_exhausted, notification_on_review_do_not_ship,

@@ -127,6 +127,7 @@ describe('config', () => {
         log_retention_count: 200,
         log_retention_days: 30,
         job_row_retention_days: 180,
+        workflow_run_retention_days: 30,
         backup_retention_count: 14,
         backup_retention_weekly_count: 8,
         notification_webhook_url: '',
@@ -629,7 +630,34 @@ describe('config', () => {
     });
   });
 
-  describe('backup retention settings', () => {
+  describe('retention settings', () => {
+    it('returns workflow run retention defaults when no DB rows exist', async () => {
+      await refresh();
+
+      expect(getSettings().workflow_run_retention_days).toBe(30);
+    });
+
+    it('parses workflow run retention values from DB as integers', async () => {
+      await setSetting('workflow_run_retention_days', '45');
+      await refresh();
+
+      expect(getSettings().workflow_run_retention_days).toBe(45);
+    });
+
+    it('preserves zero-valued workflow run retention settings from DB', async () => {
+      await setSetting('workflow_run_retention_days', '0');
+      await refresh();
+
+      expect(getSettings().workflow_run_retention_days).toBe(0);
+    });
+
+    it('falls back to default when workflow run retention is non-numeric', async () => {
+      await setSetting('workflow_run_retention_days', 'abc');
+      await refresh();
+
+      expect(getSettings().workflow_run_retention_days).toBe(30);
+    });
+
     it('returns backup retention defaults when no DB rows exist', async () => {
       await refresh();
 

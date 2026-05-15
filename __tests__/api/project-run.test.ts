@@ -45,6 +45,8 @@ const state = vi.hoisted(() => {
     skillsDir: '',
     cwdOverride: '',
     withBasePrompt: (p: string) => p as string,
+    resolveAutoAttachedDocs: (_projectPath: string, _prompt: string, _config: unknown) =>
+      [] as Array<{ rulePath: string; absolutePath: string; name: string; content: string; matchedKeyword: string }>,
   };
 });
 
@@ -89,6 +91,18 @@ vi.mock('@/lib/usage/resolve-provider', () => ({
 vi.mock('@/lib/usage/quota', () => ({
   getQuotaSnapshots: (...args: unknown[]) => state.fns.getQuotaSnapshots(...args),
 }));
+vi.mock('@/lib/skills/tamtam-file-config', () => ({
+  loadFileConfig: () => null,
+}));
+vi.mock('@/lib/skills/auto-attach-docs', async () => {
+  const actual = await vi.importActual<typeof import('@/lib/skills/auto-attach-docs')>(
+    '@/lib/skills/auto-attach-docs',
+  );
+  return {
+    ...actual,
+    resolveAutoAttachedDocs: (...args: unknown[]) => state.resolveAutoAttachedDocs(...(args as [string, string, never])),
+  };
+});
 
 // Import the route once — module-scope mocks above are hoisted before this.
 const routeModulePromise = import('@/app/api/projects/by-project/[projectName]/run/route');
@@ -108,6 +122,7 @@ describe('POST /api/projects/by-project/{projectName}/run', () => {
     state.skillsDir = skillsDir;
     state.cwdOverride = '';
     state.withBasePrompt = (p: string) => p;
+    state.resolveAutoAttachedDocs = () => [];
 
     state.fns.startJob.mockReset().mockResolvedValue(99999);
     state.fns.resolveProjectPath.mockReset().mockReturnValue('/path/to/project');
@@ -504,6 +519,56 @@ describe('POST /api/projects/by-project/{projectName}/run', () => {
     const [, , fullPrompt] = state.fns.startJob.mock.calls[0];
     expect(fullPrompt).toContain('BASE-PROMPT-SENTINEL');
     expect(fullPrompt).toContain('first message');
+  });
+
+  it('auto-attaches docs on initial turn when keyword matches', async () => {
+    state.resolveAutoAttachedDocs = () => [
+      {
+        rulePath: 'docs/TEST.md',
+        absolutePath: '/abs/docs/TEST.md',
+        name: 'TEST.md',
+        content: 'TEST-DOC-CONTENT',
+        matchedKeyword: 'test',
+      },
+    ];
+    const created = makeJob();
+    state.fns.createJob.mockImplementation(() => created);
+
+    const req = new NextRequest('http://localhost/api/projects/by-project/proj1/run', {
+      method: 'POST',
+      body: JSON.stringify({ prompt: 'fix the test' }),
+    });
+    await POST(req, { params: Promise.resolve({ projectName: 'proj1' }) });
+
+    const [, , fullPrompt] = state.fns.startJob.mock.calls[0];
+    expect(fullPrompt).toContain('TEST-DOC-CONTENT');
+    expect(fullPrompt).toContain('Auto-attached docs');
+
+    const contextMeta = state.fns.createJob.mock.calls[0][5];
+    expect(contextMeta).toBeTruthy();
+    expect(JSON.parse(contextMeta as string).autoAttachedDocs).toEqual(['docs/TEST.md']);
+  });
+
+  it('does NOT auto-attach docs on follow-up turns (resumeSessionId set)', async () => {
+    state.resolveAutoAttachedDocs = () => [
+      {
+        rulePath: 'docs/TEST.md',
+        absolutePath: '/abs/docs/TEST.md',
+        name: 'TEST.md',
+        content: 'TEST-DOC-CONTENT',
+        matchedKeyword: 'test',
+      },
+    ];
+
+    const req = new NextRequest('http://localhost/api/projects/by-project/proj1/run', {
+      method: 'POST',
+      body: JSON.stringify({ prompt: 'fix the test again', resumeSessionId: 'sess-1' }),
+    });
+    await POST(req, { params: Promise.resolve({ projectName: 'proj1' }) });
+
+    const [, , fullPrompt] = state.fns.startJob.mock.calls[0];
+    expect(fullPrompt).not.toContain('TEST-DOC-CONTENT');
+    expect(fullPrompt).not.toContain('Auto-attached docs');
   });
 
   it('passes ghIssue fields to createJob from JSON body', async () => {

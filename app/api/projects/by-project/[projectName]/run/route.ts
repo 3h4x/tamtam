@@ -16,6 +16,8 @@ import { resolveCliBin, resolveCliEnv } from '@/lib/shared/cli-bin';
 import { checkCliStartGate } from '@/lib/usage/resolve-provider';
 import { isCliProvider } from '@/lib/usage/cli-providers';
 import { findBlockingRunningJob } from '@/lib/jobs/project-active-job';
+import { loadFileConfig } from '@/lib/skills/tamtam-file-config';
+import { resolveAutoAttachedDocs, formatAutoAttachedDocsBlock } from '@/lib/skills/auto-attach-docs';
 
 export async function POST(
   request: NextRequest,
@@ -156,8 +158,26 @@ export async function POST(
       } catch {}
     }
   }
+  let autoAttachedDocNames: string[] = [];
   if (!resumeSessionId) {
+    const fileConfig = loadFileConfig(projPath);
+    const autoDocs = resolveAutoAttachedDocs(projPath, userPrompt || prompt, fileConfig);
+    if (autoDocs.length > 0) {
+      const block = formatAutoAttachedDocsBlock(autoDocs);
+      if (block) prompt = block + '\n\n---\n\n' + prompt;
+      autoAttachedDocNames = autoDocs.map((d) => d.rulePath);
+    }
     prompt = withBasePrompt(prompt, { projectPath: projPath, provider });
+  }
+
+  if (autoAttachedDocNames.length > 0) {
+    try {
+      const existing = contextMeta ? (JSON.parse(contextMeta) as Record<string, unknown>) : {};
+      existing.autoAttachedDocs = autoAttachedDocNames;
+      contextMeta = JSON.stringify(existing);
+    } catch {
+      contextMeta = JSON.stringify({ autoAttachedDocs: autoAttachedDocNames });
+    }
   }
 
   if (attachmentPaths.length > 0) {

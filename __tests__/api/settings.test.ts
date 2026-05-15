@@ -725,6 +725,7 @@ describe('settings API', () => {
       const request = new NextRequest('http://localhost/api/settings', {
         method: 'PATCH',
         body: JSON.stringify({
+          workflow_run_retention_days: '00',
           backup_retention_count: '0',
           backup_retention_weekly_count: '00',
         }),
@@ -735,6 +736,7 @@ describe('settings API', () => {
       await expect(response.json()).resolves.toMatchObject({
         status: 'ok',
         settings: expect.objectContaining({
+          workflow_run_retention_days: '0',
           backup_retention_count: '0',
           backup_retention_weekly_count: '0',
         }),
@@ -742,8 +744,23 @@ describe('settings API', () => {
 
       const allRows = await sharedHandle.db.select().from(schema.settings);
       const rows = Object.fromEntries(allRows.map((row) => [row.key, row.value]));
+      expect(rows.workflow_run_retention_days).toBe('0');
       expect(rows.backup_retention_count).toBe('0');
       expect(rows.backup_retention_weekly_count).toBe('0');
+    });
+
+    it('rejects negative workflow run retention settings', async () => {
+      const request = new NextRequest('http://localhost/api/settings', {
+        method: 'PATCH',
+        body: JSON.stringify({ workflow_run_retention_days: '-1' }),
+      });
+      const response = await PATCH(request);
+
+      expect(response.status).toBe(400);
+      await expect(response.json()).resolves.toMatchObject({
+        detail: expect.stringContaining('workflow_run_retention_days must be a non-negative integer'),
+      });
+      expect(await sharedHandle.db.select().from(schema.settings)).toEqual([]);
     });
 
     it('rejects negative backup retention settings', async () => {

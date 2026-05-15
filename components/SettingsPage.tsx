@@ -54,6 +54,7 @@ interface SettingsMap {
   log_retention_count: string
   log_retention_days: string
   job_row_retention_days: string
+  workflow_run_retention_days: string
   backup_retention_count: string
   backup_retention_weekly_count: string
   notification_webhook_url: string
