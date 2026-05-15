@@ -5,6 +5,7 @@ import Link from 'next/link'
 import { useRouter } from 'next/navigation'
 import { fetchJobs, releaseProject, pushProject, syncJobBoard } from '@/lib/client-api'
 import type { JobInfo } from '@/lib/client-api'
+import { Button } from '@/components/ui/Button'
 import {
   formatTokens,
   formatCost,
@@ -365,9 +366,11 @@ export function ProjectRunsTab({ projectName, jobsPaused = false }: ProjectRunsT
       (() => {
         const active = stepRetryState?.jobId === retryableStep.navJobId
         return (
-          <button
+          <Button
             type="button"
-            className="px-2 py-0.5 text-[10px] rounded border border-status-warning/40 text-status-warning bg-status-warning/10 hover:bg-status-warning/15 disabled:opacity-60 cursor-pointer"
+            variant="warning"
+            size="sm"
+            className="h-7 px-2 text-[11px]"
             disabled={jobsPaused || active}
             onClick={() => retryPipelineStep(e, retryableStep)}
             title={jobsPaused
@@ -375,7 +378,7 @@ export function ProjectRunsTab({ projectName, jobsPaused = false }: ProjectRunsT
               : 'Retry the failed commit step for this release'}
           >
             {active ? stepRetryState?.label : 'Retry commit'}
-          </button>
+          </Button>
         )
       })()
     ) : null
@@ -385,9 +388,11 @@ export function ProjectRunsTab({ projectName, jobsPaused = false }: ProjectRunsT
         const label = active ? releaseActionState.label : outcomeStatus === 'blocked' ? 'Retry release' : 'Continue release'
         const releaseBlocked = jobsPaused || active
         return (
-          <button
+          <Button
             type="button"
-            className="px-2 py-0.5 text-[10px] rounded border border-accent/40 text-accent bg-accent/10 hover:bg-accent/15 disabled:opacity-60 cursor-pointer"
+            variant="primary"
+            size="sm"
+            className="h-7 px-2 text-[11px]"
             disabled={releaseBlocked}
             onClick={() => retryRelease(e)}
             title={jobsPaused
@@ -395,16 +400,18 @@ export function ProjectRunsTab({ projectName, jobsPaused = false }: ProjectRunsT
               : 'Start a new release attempt from the current project state'}
           >
             {label}
-          </button>
+          </Button>
         )
       })()
     ) : null
     const boardActive = boardActionState?.jobId === e.navJobId
     const canManualSyncBoard = e.status !== 'running' && !entryIsRunning(e)
     const boardButton = canManualSyncBoard ? (
-      <button
+      <Button
         type="button"
-        className="px-2 py-0.5 text-[10px] rounded border border-border text-text-secondary bg-bg-primary hover:bg-bg-tertiary disabled:opacity-60 cursor-pointer"
+        variant="secondary"
+        size="sm"
+        className="h-7 px-2 text-[11px]"
         disabled={boardActive}
         onClick={async () => {
           setBoardActionState({ jobId: e.navJobId, label: 'syncing' })
@@ -421,7 +428,7 @@ export function ProjectRunsTab({ projectName, jobsPaused = false }: ProjectRunsT
         title="Recreate or refresh this run on the GitHub board"
       >
         {boardActive ? boardActionState?.label : 'Sync board'}
-      </button>
+      </Button>
     ) : null
     // Ordinary running jobs are cancelled through the job endpoint. Running
     // releases use the pipeline abort route so the active step is stopped and
@@ -432,20 +439,22 @@ export function ProjectRunsTab({ projectName, jobsPaused = false }: ProjectRunsT
     const showStop = stopTarget != null
     const stopActive = stopTarget != null && stopState?.jobId === stopTarget.jobId
     const stopButton = showStop ? (
-      <button
+      <Button
         type="button"
-        className="px-2 py-0.5 text-[10px] rounded border border-status-error/40 text-status-error bg-status-error/10 hover:bg-status-error/15 disabled:opacity-60 cursor-pointer"
+        variant="danger"
+        size="sm"
+        className="h-7 px-2 text-[11px]"
         disabled={stopActive}
         onClick={() => stopRun(e)}
         title="Send SIGTERM and mark this run cancelled"
       >
         {stopActive ? stopState?.label : 'Stop'}
-      </button>
+      </Button>
     ) : null
     const buttons = [stopButton, stepRetryButton, releaseButton, boardButton].filter(Boolean)
     if (buttons.length === 0) return null
     if (buttons.length === 1) return buttons[0]
-    return <div className="flex items-center gap-2">{buttons}</div>
+    return <div className="flex flex-wrap items-center justify-end gap-1.5">{buttons}</div>
   }
 
   return (
@@ -463,97 +472,112 @@ export function ProjectRunsTab({ projectName, jobsPaused = false }: ProjectRunsT
         </Link>
       )}
       {/* Search + summary */}
-      <div className="flex items-center gap-3 mb-3 flex-wrap">
-        <div className="relative flex-1 min-w-[240px]">
-          <input
-            type="text"
-            value={search}
-            onChange={(e) => setSearch(e.target.value)}
-            placeholder="Search prompts, models, session ids…"
-            className="w-full pl-8 pr-8 py-1.5 text-sm bg-bg-secondary border border-border rounded-md text-text-primary placeholder:text-text-tertiary focus:outline-none focus:ring-2 focus:ring-accent/20 focus:border-accent transition-colors"
-          />
-          <span className="absolute left-2.5 top-1/2 -translate-y-1/2 text-text-tertiary text-xs" aria-hidden>⌕</span>
-          {search && (
-            <button
-              type="button"
-              onClick={() => setSearch('')}
-              className="absolute right-2 top-1/2 -translate-y-1/2 text-text-tertiary hover:text-text-primary text-sm cursor-pointer"
-              title="Clear search"
-            >
-              ×
-            </button>
-          )}
-        </div>
-        <div className="text-xs text-text-tertiary font-mono whitespace-nowrap flex items-center gap-2 flex-wrap">
-          <span>
-            {summary ? (
-              <>
-                {summary.total} {summary.total === 1 ? 'entry' : 'entries'}
-                {jobs.length < summary.total && (
-                  <span className="text-text-tertiary/60"> · showing {filtered.length}</span>
-                )}
-              </>
-            ) : (
-              <>{filtered.length} {filtered.length === 1 ? 'entry' : 'entries'}</>
+      <div className="mb-3 rounded-lg border border-border bg-bg-secondary">
+        <div className="grid gap-3 border-b border-border p-3 lg:grid-cols-[minmax(280px,1fr)_auto] lg:items-start">
+        <div>
+          <div className="relative">
+            <input
+              type="text"
+              value={search}
+              onChange={(e) => setSearch(e.target.value)}
+              placeholder="Search prompts, models, session ids…"
+              className="w-full pl-8 pr-8 py-1.5 text-sm bg-bg-primary border border-border rounded-md text-text-primary placeholder:text-text-tertiary focus:outline-none focus:ring-2 focus:ring-accent/20 focus:border-accent transition-colors"
+            />
+            <span className="absolute left-2.5 top-1/2 -translate-y-1/2 text-text-tertiary text-xs" aria-hidden>⌕</span>
+            {search && (
+              <button
+                type="button"
+                onClick={() => setSearch('')}
+                className="absolute right-2 top-1/2 -translate-y-1/2 text-text-tertiary hover:text-text-primary text-sm cursor-pointer"
+                title="Clear search"
+              >
+                ×
+              </button>
             )}
-            {(summary?.byStatus.running ?? loadedTotals.running) > 0 && (
-              <> · <span className="text-status-info">{summary?.byStatus.running ?? loadedTotals.running} running</span></>
-            )}
-            {(summary?.tokens.total ?? loadedTotals.tokens) > 0 && <> · {formatTokens(summary?.tokens.total ?? loadedTotals.tokens)} tok</>}
-            {(summary?.cost.total ?? loadedTotals.costUsd) > 0 && <> · <span className="text-accent">{formatCost(summary?.cost.total ?? loadedTotals.costUsd)}</span></>}
-          </span>
-          {thisMonthCost > 0 && (
-            <span className="text-text-tertiary/60" title="Total cost for all runs this calendar month">
-              this month: <span className="text-text-secondary">{formatCost(thisMonthCost)}</span>
+          </div>
+          <div className="mt-2 flex items-center gap-2 text-[11px] text-text-tertiary">
+            <span className="font-mono">
+              showing {filtered.length} of {summary?.total ?? (totalJobs || entries.length)}
             </span>
-          )}
+            {(summary?.byStatus.running ?? loadedTotals.running) > 0 && (
+              <span className="font-mono text-status-info">
+                {summary?.byStatus.running ?? loadedTotals.running} running
+              </span>
+            )}
+            {(search.trim() || filter.kind !== 'all') && (
+              <button
+                type="button"
+                className="font-mono text-accent hover:text-accent-hover cursor-pointer"
+                onClick={() => { setSearch(''); setFilter({ kind: 'all' }) }}
+              >
+                clear filters
+              </button>
+            )}
+          </div>
         </div>
-      </div>
 
-      {/* Unified filter row: status shortcuts + kind breakdown, one axis.
-          overflow-x-auto prevents 13+ kind buttons from wrapping to multiple lines on narrow screens. */}
-      <div className="flex items-center gap-1.5 overflow-x-auto mb-3 pb-0.5 scrollbar-thin scrollbar-thumb-border scrollbar-track-transparent" style={{ scrollbarWidth: 'thin' }}>
-        {([
-          { f: { kind: 'all' } as Filter, label: 'all', tone: 'neutral' },
-          { f: { kind: 'running' } as Filter, label: 'running', tone: 'info' },
-          { f: { kind: 'failed' } as Filter, label: 'failed', tone: 'error' },
-        ] as const).map(({ f, label, tone }) => {
-          const count = counts[f.kind] ?? 0
-          if ((f.kind === 'running' || f.kind === 'failed') && count === 0 && filterKey(filter) !== filterKey(f)) return null
-          const active = filterKey(filter) === filterKey(f)
-          const toneCls =
-            tone === 'info' ? (active ? 'border-status-info bg-status-info/15 text-status-info' : 'border-border bg-bg-secondary text-text-secondary hover:text-status-info') :
-            tone === 'error' ? (active ? 'border-status-error bg-status-error/15 text-status-error' : 'border-border bg-bg-secondary text-text-secondary hover:text-status-error') :
-            (active ? 'border-accent bg-accent/15 text-accent' : 'border-border bg-bg-secondary text-text-secondary hover:text-text-primary')
-          return (
-            <button
-              key={label}
-              className={`shrink-0 px-2.5 py-1 text-xs rounded-full font-mono cursor-pointer border ${toneCls}`}
-              onClick={() => setFilter(f)}
-            >
-              {label} <span className="opacity-70">{count}</span>
-            </button>
-          )
-        })}
-        <span className="shrink-0 h-5 w-px bg-border mx-1" aria-hidden />
-        {(['run', 'release', 'review', 'test', 'fix', 'fix-ci', 'commit', 'push', 'mark-dod', 'pr-wait', 'agent', 'other'] as const).map((b) => {
-          const count = counts[b] ?? 0
-          const active = filter.kind === 'bucket' && filter.bucket === b
-          if (count === 0 && !active) return null
-          return (
-            <button
-              key={b}
-              className={`shrink-0 px-2.5 py-1 text-xs rounded-full font-mono cursor-pointer border ${
-                active
-                  ? 'border-accent bg-accent/15 text-accent'
-                  : 'border-border bg-bg-secondary text-text-secondary hover:text-text-primary'
-              }`}
-              onClick={() => setFilter({ kind: 'bucket', bucket: b })}
-            >
-              {KIND_LABEL[b]} <span className="opacity-70">{count}</span>
-            </button>
-          )
-        })}
+        <div className="grid grid-cols-2 gap-2 sm:grid-cols-4 lg:min-w-[520px]">
+          <div className="rounded-md border border-border bg-bg-primary px-3 py-2">
+            <div className="text-[10px] uppercase tracking-wider text-text-tertiary">entries</div>
+            <div className="mt-0.5 font-mono text-base font-semibold text-text-primary tabular-nums">{summary?.total ?? entries.length}</div>
+          </div>
+          <div className="rounded-md border border-border bg-bg-primary px-3 py-2">
+            <div className="text-[10px] uppercase tracking-wider text-text-tertiary">running</div>
+            <div className="mt-0.5 font-mono text-base font-semibold text-status-info tabular-nums">{summary?.byStatus.running ?? loadedTotals.running}</div>
+          </div>
+          <div className="rounded-md border border-border bg-bg-primary px-3 py-2">
+            <div className="text-[10px] uppercase tracking-wider text-text-tertiary">tokens</div>
+            <div className="mt-0.5 font-mono text-base font-semibold text-text-primary tabular-nums">{formatTokens(summary?.tokens.total ?? loadedTotals.tokens)}</div>
+          </div>
+          <div className="rounded-md border border-border bg-bg-primary px-3 py-2" title="Total cost for all runs this calendar month">
+            <div className="text-[10px] uppercase tracking-wider text-text-tertiary">month cost</div>
+            <div className="mt-0.5 font-mono text-base font-semibold text-accent tabular-nums">{formatCost(thisMonthCost)}</div>
+          </div>
+        </div>
+        </div>
+        <div className="flex items-center gap-1.5 overflow-x-auto p-1 scrollbar-thin scrollbar-thumb-border scrollbar-track-transparent" style={{ scrollbarWidth: 'thin' }}>
+          {([
+            { f: { kind: 'all' } as Filter, label: 'all', tone: 'neutral' },
+            { f: { kind: 'running' } as Filter, label: 'running', tone: 'info' },
+            { f: { kind: 'failed' } as Filter, label: 'failed', tone: 'error' },
+          ] as const).map(({ f, label, tone }) => {
+            const count = counts[f.kind] ?? 0
+            if ((f.kind === 'running' || f.kind === 'failed') && count === 0 && filterKey(filter) !== filterKey(f)) return null
+            const active = filterKey(filter) === filterKey(f)
+            const toneCls =
+              tone === 'info' ? (active ? 'border-status-info bg-status-info/15 text-status-info' : 'border-transparent text-text-secondary hover:text-status-info hover:bg-bg-primary') :
+              tone === 'error' ? (active ? 'border-status-error bg-status-error/15 text-status-error' : 'border-transparent text-text-secondary hover:text-status-error hover:bg-bg-primary') :
+              (active ? 'border-accent bg-accent/15 text-accent' : 'border-transparent text-text-secondary hover:text-text-primary hover:bg-bg-primary')
+            return (
+              <button
+                key={label}
+                className={`shrink-0 px-2.5 py-1 text-xs rounded-md font-mono cursor-pointer border ${toneCls}`}
+                onClick={() => setFilter(f)}
+              >
+                {label} <span className="opacity-70">{count}</span>
+              </button>
+            )
+          })}
+          <span className="shrink-0 h-5 w-px bg-border mx-1" aria-hidden />
+          {(['run', 'release', 'review', 'test', 'fix', 'fix-ci', 'commit', 'push', 'mark-dod', 'pr-wait', 'agent', 'other'] as const).map((b) => {
+            const count = counts[b] ?? 0
+            const active = filter.kind === 'bucket' && filter.bucket === b
+            if (count === 0 && !active) return null
+            return (
+              <button
+                key={b}
+                className={`shrink-0 px-2.5 py-1 text-xs rounded-md font-mono cursor-pointer border ${
+                  active
+                    ? 'border-accent bg-accent/15 text-accent'
+                    : 'border-transparent text-text-secondary hover:text-text-primary hover:bg-bg-primary'
+                }`}
+                onClick={() => setFilter({ kind: 'bucket', bucket: b })}
+              >
+                {KIND_LABEL[b]} <span className="opacity-70">{count}</span>
+              </button>
+            )
+          })}
+        </div>
       </div>
 
       {loading ? (
@@ -611,12 +635,14 @@ export function ProjectRunsTab({ projectName, jobsPaused = false }: ProjectRunsT
           )}
           {(search.trim() || filter.kind !== 'all') && (
             <div className="mt-2">
-              <button
-                className="px-3 py-1 text-xs border border-border rounded-md hover:bg-bg-tertiary cursor-pointer"
+              <Button
+                type="button"
+                size="sm"
+                variant="secondary"
                 onClick={() => { setSearch(''); setFilter({ kind: 'all' }) }}
               >
                 Clear filters
-              </button>
+              </Button>
             </div>
           )}
         </div>
@@ -629,7 +655,14 @@ export function ProjectRunsTab({ projectName, jobsPaused = false }: ProjectRunsT
                 <span className="text-[11px] text-text-tertiary font-mono">· {g.items.length}</span>
                 <div className="flex-1 h-px bg-border/60" />
               </div>
-              <div className="border border-border rounded-lg overflow-hidden bg-bg-secondary">
+              <div className="border border-border rounded-lg overflow-hidden bg-bg-primary">
+                <div className="hidden border-b border-border bg-bg-secondary px-3 py-1.5 text-[10px] font-medium uppercase tracking-wider text-text-tertiary lg:grid lg:grid-cols-[minmax(320px,1.35fr)_minmax(220px,1fr)_120px_110px_auto] lg:gap-3">
+                  <span>run</span>
+                  <span>state</span>
+                  <span className="text-right">duration</span>
+                  <span className="text-right">usage</span>
+                  <span className="text-right">actions</span>
+                </div>
                 {g.items.map((e) => {
                   // A row is expandable if it has any chainable children:
                   //   - releases with their pipeline children
@@ -687,13 +720,15 @@ export function ProjectRunsTab({ projectName, jobsPaused = false }: ProjectRunsT
           ))}
           {hasMore && (
             <div className="flex justify-center py-3">
-              <button
+              <Button
+                type="button"
                 onClick={loadMore}
                 disabled={loadingMore}
-                className="px-3 py-1.5 text-sm border border-border rounded-md bg-bg-secondary text-text-secondary hover:text-text-primary hover:bg-bg-tertiary cursor-pointer disabled:opacity-50 disabled:cursor-wait"
+                variant="secondary"
+                size="md"
               >
                 {loadingMore ? 'Loading…' : `Load older (${totalJobs - jobs.length} remaining)`}
-              </button>
+              </Button>
             </div>
           )}
         </div>
