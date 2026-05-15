@@ -6,7 +6,6 @@ import {
   SAFE_PID_FLOOR,
   shouldSignalJobPid,
 } from '@/lib/jobs/cancellation';
-import { exec } from '@/lib/shared/shell';
 
 export async function GET(
   _request: NextRequest,
@@ -40,11 +39,9 @@ export async function DELETE(
     return NextResponse.json({ detail: 'job already finished' }, { status: 409 });
   }
 
-  // Try pm2 stop first (for Claude/pm2 jobs)
-  try {
-    await exec('pm2', ['stop', jobId, '--silent'], { timeout: 5000 });
-    await exec('pm2', ['delete', jobId, '--silent'], { timeout: 5000 });
-  } catch {}
+  // (Per-job PM2 entries were retired — no `pm2 stop` / `pm2 delete` is
+  // needed before cancellation. Cooperative cancellation + process.kill
+  // cover every spawn pathway TamTam still uses.)
 
   const hasCooperativeCancellation = job.kind === 'push'
     || job.kind === 'commit'

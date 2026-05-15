@@ -64,6 +64,10 @@ describe('POST /api/projects/by-project/{projectName}/review-pr', () => {
 
     vi.doMock('@/lib/jobs/pm2-jobs', () => ({
       startJob: startJobMock,
+      splitCommand: (line: string) => line.split(/\s+/).filter(Boolean),
+    }));
+    vi.doMock('@/lib/jobs/spawn-claude-detached', () => ({
+      startJobInProcess: startJobMock,
     }));
 
     vi.doMock('@/lib/shared/shell', () => ({

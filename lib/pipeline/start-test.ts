@@ -10,6 +10,7 @@ import { createJob, listJobs, probeJobStatus, updateJob, markDone } from '@/lib/
 import { getLock, acquireLock, isLockOwnedByActiveRelease } from './pipeline-lock';
 import { checkCliStartGate } from '@/lib/usage/resolve-provider';
 import { findBlockingRunningJob } from '@/lib/jobs/project-active-job';
+import { markCloseHandlerPending, clearCloseHandlerPending } from '@/lib/jobs/spawned-close-pending';
 
 export async function detectTestCommand(projPath: string, projectName?: string): Promise<string | null> {
   // Explicit off-switch — overrides user/auto-detected command. Wrapped in
@@ -118,7 +119,19 @@ export async function startProjectTest(projectName: string): Promise<StartTestRe
   job.provider = gate.provider;
   const logPath = join(logDir, `${job.id}.log`);
   job.logPath = logPath;
+  // Persist logPath up-front so probeJobStatus can find the sentinel file
+  // even if a worker / Next.js restart kills us before the final updateJob.
+  // Without this, the row stays at logPath=null and probe falls through to
+  // markDone(-1) when tests run longer than the spawn grace period.
+  updateJob(job);
 
+  // Sentinel-file pattern. The spawned bash writes the test command's exit
+  // code to a `.exitcode` companion file BEFORE bash itself exits. probe.ts
+  // reads that file when it finds the process dead, so a Next.js restart
+  // between the test finishing and the in-process `proc.on('close')` handler
+  // firing doesn't lose the real exit code (otherwise the probe's ESRCH path
+  // wins and the job gets recorded as exit=-1 despite tests passing).
+  const exitCodePath = `${logPath}.exitcode`;
   const bashCommand = [
     'set -o pipefail',
     `export PATH=${shellQuote(process.env.PATH || '')}`,
@@ -129,7 +142,9 @@ export async function startProjectTest(projectName: string): Promise<StartTestRe
     `  printf '%s\\n' ${shellQuote('---')}`,
     `  ${testCmd}`,
     `} 2>&1 | node ${shellQuote(redactScriptPath)} ${shellQuote(logPath)}`,
-    'exit ${PIPESTATUS[0]}',
+    'rc=${PIPESTATUS[0]}',
+    `printf '%d' "$rc" > ${shellQuote(exitCodePath)}`,
+    'exit $rc',
   ].join('\n');
 
   writeFileSync(logPath, '');
@@ -142,6 +157,7 @@ export async function startProjectTest(projectName: string): Promise<StartTestRe
   job.pid = proc.pid ?? 0;
   proc.unref();
   updateJob(job);
+  markCloseHandlerPending(job.id);
 
   // Acquire pipeline lock — skip if we're running under a parent release lock
   // (the release meta-job owns the lock for the full pipeline duration).
@@ -154,7 +170,22 @@ export async function startProjectTest(projectName: string): Promise<StartTestRe
   }
 
   proc.on('close', (code) => {
-    markDone(job, code ?? -1).catch((e) => {
+    clearCloseHandlerPending(job.id);
+    // Prefer the sentinel file's exit code over the proc 'close' code when the
+    // close handler reports signal-kill (code=null). The sentinel is written
+    // by the spawned bash itself right before exit, so it represents the
+    // pipeline's real status even if the OS reaped the process via signal.
+    let finalCode = code ?? -1;
+    if (code == null) {
+      try {
+        if (existsSync(exitCodePath)) {
+          const raw = readFileSync(exitCodePath, 'utf-8').trim();
+          const n = Number.parseInt(raw, 10);
+          if (Number.isFinite(n)) finalCode = n;
+        }
+      } catch { /* fall back to -1 */ }
+    }
+    markDone(job, finalCode).catch((e) => {
       console.log(`[start-test] markDone failed for ${job.id}:`, e);
     });
   });

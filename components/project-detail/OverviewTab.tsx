@@ -75,7 +75,6 @@ export function OverviewTab({
       test: 0,
       fix: 0,
       'fix-ci': 0,
-      'fix-push': 0,
       commit: 0,
       push: 0,
       'mark-dod': 0,

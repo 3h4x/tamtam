@@ -50,8 +50,8 @@ describe('isPipelineBusy', () => {
     expect(isPipelineBusy(jobs)).toBe(false)
   })
 
-  it('includes fix-push (claude-driven push retry)', () => {
-    expect(isPipelineBusy([job({ kind: 'fix-push', status: 'running' })])).toBe(true)
+  it('includes commit (release pipeline step)', () => {
+    expect(isPipelineBusy([job({ kind: 'commit', status: 'running' })])).toBe(true)
   })
 
   it('returns true if any one of many jobs is a running pipeline kind', () => {

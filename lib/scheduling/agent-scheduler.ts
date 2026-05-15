@@ -1,9 +1,19 @@
+// Public scheduler API used by `/api/agents` routes and the recommendations
+// applier. Backed by graphile-worker since the in-memory scheduler was
+// retired (see `lib/workflows/cron/seed-agent-crons.ts` + `agent-cron-task.ts`
+// for the actual cron-tick handler).
+//
+// The same prompt-file persistence pattern from the in-memory era is kept
+// here: each agent's prompt is written to `<logDir>/agent-scripts/<agentId>.prompt.json`
+// so out-of-band reruns can recover it after a server restart.
+
 import { writeFileSync, unlinkSync, existsSync, mkdirSync } from 'fs';
 import { join } from 'path';
 import { homedir } from 'os';
-import { exec } from '@/lib/shared/shell';
+import { quickAddJob } from 'graphile-worker';
 import { getImproveConfig } from './scheduling';
 import { normalizeAgentScheduleOrThrow } from './agent-schedule';
+import { computeNextFire } from '@/lib/workflows/cron/parse-schedule';
 
 function getLogDir(): string {
   try { return getImproveConfig().logDir; } catch { return join(/*turbopackIgnore: true*/ homedir(), 'logs'); }
@@ -12,95 +22,32 @@ function getScriptsDir(): string {
   return join(getLogDir(), 'agent-scripts');
 }
 
-function pm2Name(agentId: string, project?: string, agentName?: string): string {
-  if (project && agentName) return `tamtam-${project}-agent-${agentName}`;
-  return `tamtam-agent-${agentId}`;
-}
-
 function agentPromptPath(agentId: string): string {
-  return join(getScriptsDir(), `${agentId}.prompt.json`);
+  return join(/*turbopackIgnore: true*/ getScriptsDir(), `${agentId}.prompt.json`);
 }
 
 function cleanupFiles(agentId: string): void {
-  // Older builds wrote a per-agent shell script next to the prompt; clean up
-  // either artifact if present so nothing lingers after an agent is removed.
-  for (const ext of ['sh', 'prompt.json']) {
-    const p = join(getScriptsDir(), `${agentId}.${ext}`);
+  try {
+    const p = agentPromptPath(agentId);
     if (existsSync(/*turbopackIgnore: true*/ p)) unlinkSync(/*turbopackIgnore: true*/ p);
-  }
-}
-
-// --- PM2 scheduling (legacy cleanup only) ---
-//
-// installPm2Schedule was removed: PM2 cron with --no-autostart silently
-// no-op'd, so registering an agent there had no effect. All scheduling now
-// lives in lib/internal-scheduler.ts. The uninstall + reconcile helpers stay
-// to clean up any legacy entries left over from before the migration.
-
-async function uninstallPm2Schedule(agentId: string, project?: string, agentName?: string): Promise<void> {
-  const name = pm2Name(agentId, project, agentName);
-  // pm2 delete returns non-zero if process doesn't exist, that's fine
-  await exec('pm2', ['delete', name]);
-  cleanupFiles(agentId);
-}
-
-async function isPm2ScheduleLoaded(agentId: string, project?: string, agentName?: string): Promise<boolean> {
-  const name = pm2Name(agentId, project, agentName);
-  const result = await exec('pm2', ['describe', name]);
-  return result.exitCode === 0;
-}
-
-// --- Reconciliation ---
-
-/**
- * Compare PM2's running `tamtam-*-agent-*` processes against the expected set
- * (enabled, scheduled, pm2-runner agents from the DB) and delete any orphans.
- *
- * This runs at startup to clean up stale entries left by renames, project
- * changes, runner switches, or failed uninstalls.
- */
-export async function reconcilePm2Schedules(
-  agents: Array<{ id: string; project: string; name: string; runner: string; schedule: string | null; enabled: boolean }>
-): Promise<void> {
-  let result: Awaited<ReturnType<typeof exec>>;
-  try {
-    result = await exec('pm2', ['jlist']);
   } catch {
-    return;
-  }
-  if (result.exitCode !== 0 || !result.stdout.trim()) return;
-
-  let processes: Array<{ name: string }>;
-  try {
-    processes = JSON.parse(result.stdout);
-  } catch {
-    return;
-  }
-
-  const expectedNames = new Set<string>();
-  for (const agent of agents) {
-    if (!agent.schedule || !agent.enabled) continue;
-    expectedNames.add(pm2Name(agent.id, agent.project, agent.name));
-  }
-
-  for (const proc of processes) {
-    const { name } = proc;
-    if (!name || !name.startsWith('tamtam-') || !name.includes('-agent-')) continue;
-    if (expectedNames.has(name)) continue;
-    try {
-      await exec('pm2', ['delete', name]);
-      console.log(`[scheduler] reconciled orphan PM2 entry: ${name}`);
-    } catch (err) {
-      console.error(`[scheduler] failed to delete orphan ${name}:`, err);
-    }
+    /* best-effort */
   }
 }
-
-// --- Public API ---
 
 function ensureDirs(): void {
   mkdirSync(/*turbopackIgnore: true*/ getScriptsDir(), { recursive: true });
 }
+
+function jobKey(agentId: string): string {
+  return `agent-cron-${agentId}`;
+}
+
+function resolveConnectionString(): string | null {
+  return process.env.WORKFLOW_POSTGRES_URL ?? process.env.DATABASE_URL ?? null;
+}
+
+// --- Public API ---
 
 export async function installAgentSchedule(
   agentId: string,
@@ -112,40 +59,70 @@ export async function installAgentSchedule(
 ): Promise<void> {
   const normalizedSchedule = normalizeAgentScheduleOrThrow(schedule);
   ensureDirs();
-  // Persist prompt next to the runtime artifacts so out-of-band reruns can
-  // recover it.
   writeFileSync(/*turbopackIgnore: true*/ agentPromptPath(agentId), JSON.stringify({ prompt }));
 
-  const { upsertAgentSchedule } = await import('./internal-scheduler');
-  upsertAgentSchedule({
-    id: agentId,
-    project: project ?? '',
-    name: agentName ?? agentId,
-    schedule: normalizedSchedule,
-    prompt,
-    enabled: true,
-  });
-  await uninstallPm2Schedule(agentId, project, agentName);
+  const connectionString = resolveConnectionString();
+  if (!connectionString) {
+    throw new Error('cannot install agent schedule: no postgres URL (WORKFLOW_POSTGRES_URL or DATABASE_URL)');
+  }
+  const runAt = new Date(computeNextFire(normalizedSchedule, agentId, Date.now()));
+  await quickAddJob(
+    { connectionString },
+    'agent-cron',
+    { agentId },
+    {
+      jobKey: jobKey(agentId),
+      jobKeyMode: 'replace',
+      runAt,
+      maxAttempts: 5,
+    },
+  );
+  // project + agentName are accepted for API compatibility; the cron task
+  // handler resolves them on each fire via listEnabledScheduledAgents().
+  void project;
+  void agentName;
 }
 
 export async function uninstallAgentSchedule(
   agentId: string,
   _runner: string = 'pm2',
-  project?: string,
-  agentName?: string,
+  _project?: string,
+  _agentName?: string,
 ): Promise<void> {
-  const { removeAgentSchedule } = await import('./internal-scheduler');
-  removeAgentSchedule(agentId);
-  await uninstallPm2Schedule(agentId, project, agentName);
+  const connectionString = resolveConnectionString();
+  if (connectionString) {
+    // Mark the next fire as one year out — the cron task handler will then
+    // load the agent fresh, see it's disabled (the caller already cleared
+    // `enabled` in the DB), and naturally terminate the chain without
+    // re-enqueuing. This is graphile-worker's idiomatic "cancel" since
+    // there's no removeJob primitive in the public API.
+    const farFuture = new Date(Date.now() + 365 * 24 * 60 * 60 * 1000);
+    try {
+      await quickAddJob(
+        { connectionString },
+        'agent-cron',
+        { agentId },
+        { jobKey: jobKey(agentId), jobKeyMode: 'replace', runAt: farFuture, maxAttempts: 5 },
+      );
+    } catch (err) {
+      console.warn(`[agent-scheduler] uninstall ${agentId} addJob failed:`, err);
+    }
+  }
+  cleanupFiles(agentId);
 }
 
 export async function isAgentScheduleLoaded(
   agentId: string,
   _runner: string = 'pm2',
-  project?: string,
-  agentName?: string,
+  _project?: string,
+  _agentName?: string,
 ): Promise<boolean> {
-  return isPm2ScheduleLoaded(agentId, project, agentName);
+  const connectionString = resolveConnectionString();
+  if (!connectionString) return false;
+  // Cheap check: prompt file exists. The actual queue state lives in
+  // graphile_worker.jobs but reading that is a heavier query; the prompt
+  // file is the canonical client-visible "agent installed?" marker.
+  return existsSync(/*turbopackIgnore: true*/ agentPromptPath(agentId));
 }
 
 // --- Health / verification ---
@@ -180,42 +157,59 @@ export async function getSchedulerHealth(
       name: a.name,
       runner: a.runner,
       schedule: a.schedule,
-      expectedName: pm2Name(a.id, a.project, a.name),
+      // expectedName retained for response-shape compatibility; uses the
+      // legacy `tamtam-<project>-agent-<name>` format readers may expect.
+      expectedName: a.project && a.name ? `tamtam-${a.project}-agent-${a.name}` : `tamtam-agent-${a.id}`,
     });
   }
 
+  // The graphile-worker cron pool is its own runtime — health here only
+  // reports whether the prompt file exists per agent, since the queue
+  // state lookup would require an extra DB round-trip and the legacy
+  // PM2-based actual list is no longer meaningful. `actual.pm2` keeps
+  // the response shape but always returns the empty list now.
   const errors: string[] = [];
-
-  const { dumpInternalScheduler } = await import('./internal-scheduler');
-  const internal = dumpInternalScheduler();
-  const internalIds = new Set(internal.entries.map((e) => e.agentId));
-
   const missing: SchedulerExpected[] = [];
   for (const e of expected) {
-    if (!internalIds.has(e.id)) missing.push(e);
+    if (!existsSync(/*turbopackIgnore: true*/ agentPromptPath(e.id))) {
+      missing.push(e);
+    }
   }
 
-  const expectedInternalIds = new Set(expected.map((e) => e.id));
-  const internalOrphans = internal.entries
-    .filter((e) => !expectedInternalIds.has(e.agentId))
-    .map((e) => `${e.project}/${e.name}`);
-
-  const orphans = { pm2: internalOrphans };
-  const internalNames = internal.entries.map((e) => `${e.project}/${e.name}`);
-
-  const ok = errors.length === 0 && missing.length === 0 && orphans.pm2.length === 0;
+  const ok = errors.length === 0 && missing.length === 0;
   return {
     ok,
     expected,
-    actual: { pm2: internalNames },
+    actual: { pm2: [] },
     missing,
-    orphans,
+    orphans: { pm2: [] },
     errors,
   };
 }
 
-/** Surface internal scheduler state (next-fire times, last-fire counts) for the monitoring panel. */
-export async function getInternalSchedulerDump() {
-  const { dumpInternalScheduler } = await import('./internal-scheduler');
-  return dumpInternalScheduler();
+/** Legacy export kept for the monitoring panel; returns an empty dump now
+ *  that the in-memory scheduler is gone. The /monitoring page can switch
+ *  to the graphile-worker queue API in a follow-up. */
+export interface SchedulerEntryDump {
+  agentId: string;
+  project: string;
+  name: string;
+  schedule: string;
+  nextFireMs: number;
+  fireCount: number;
+  lastFireMs: number | null;
+  lastJobMs?: number | null;
+  skippedCount: number;
+  lastSkippedReason: string | null;
+  enabled: boolean;
+}
+
+export interface InternalSchedulerDump {
+  started: boolean;
+  paused: boolean;
+  entries: SchedulerEntryDump[];
+}
+
+export async function getInternalSchedulerDump(): Promise<InternalSchedulerDump> {
+  return { started: false, paused: false, entries: [] };
 }

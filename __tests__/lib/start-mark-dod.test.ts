@@ -168,9 +168,22 @@ vi.mock('@/lib/pipeline/mark-dod-branch', () => ({
   ensureBranchForCtx: mocks.ensureBranchForCtxMock,
 }));
 vi.mock('@/lib/jobs/pm2-jobs', () => ({
-  startJob: mocks.startJobMock,
-  getJobStatus: mocks.getJobStatusMock,
-  deleteJob: mocks.deleteJobMock,
+  splitCommand: (line: string) => line.split(/\s+/).filter(Boolean),
+}));
+// start-mark-dod now spawns Claude via runSubprocess (awaiting variant).
+// The mock simulates "exited with code N + log file already on disk" and
+// preserves the old startJob call shape (jobId, command, prompt, cwd) so
+// existing assertions on startJobMock.mock.calls keep working.
+vi.mock('@/lib/jobs/spawn-cli', () => ({
+  runSubprocess: vi.fn().mockImplementation(async (opts: { jobId: string; cmd: string; cmdArgs: string[]; promptPath: string; cwd?: string }) => {
+    const command = [opts.cmd, ...(opts.cmdArgs ?? [])].join(' ');
+    const writes = mocks.writeFileSyncMock.mock.calls;
+    const promptWrite = writes.find((c: unknown[]) => c[0] === opts.promptPath);
+    const prompt = (promptWrite?.[1] as string | undefined) ?? '';
+    const status = await mocks.getJobStatusMock();
+    await mocks.startJobMock(opts.jobId, command, prompt, opts.cwd);
+    return { exitCode: status?.exitCode ?? 0, signal: null, pid: 12345 };
+  }),
 }));
 vi.mock('fs', () => ({
   appendFileSync: mocks.appendFileSyncMock,
@@ -294,7 +307,7 @@ describe('startMarkDod', () => {
 
   it('returns 400 when no issue-linked run job exists', async () => {
     listJobsMock.mockReturnValue([]);
-    const r = await startMarkDod('myproj', undefined, 0);
+    const r = await startMarkDod('myproj', undefined);
     expect(r.ok).toBe(false);
     if (!r.ok) {
       expect(r.status).toBe(400);
@@ -304,14 +317,14 @@ describe('startMarkDod', () => {
 
   it('returns 400 when latest run job has no ghIssueNumber', async () => {
     listJobsMock.mockReturnValue([makeRunJob({ ghIssueNumber: null })]);
-    const r = await startMarkDod('myproj', undefined, 0);
+    const r = await startMarkDod('myproj', undefined);
     expect(r.ok).toBe(false);
     if (!r.ok) expect(r.status).toBe(400);
   });
 
   it('returns 400 when latest run job has no ghIssueRepo', async () => {
     listJobsMock.mockReturnValue([makeRunJob({ ghIssueRepo: null })]);
-    const r = await startMarkDod('myproj', undefined, 0);
+    const r = await startMarkDod('myproj', undefined);
     expect(r.ok).toBe(false);
     if (!r.ok) expect(r.status).toBe(400);
   });
@@ -323,7 +336,7 @@ describe('startMarkDod', () => {
     ]);
     execMock.mockResolvedValue(resp(1, '', 'gh failed'));
 
-    const r = await startMarkDod('myproj', undefined, 0);
+    const r = await startMarkDod('myproj', undefined);
 
     expect(r.ok).toBe(true);
     const ghArgs: string[] = execMock.mock.calls[0][1];
@@ -338,7 +351,7 @@ describe('startMarkDod', () => {
       .mockImplementationOnce(() => resp(0, ''));
     readFileSyncMock.mockReturnValue(CLAUDE_JSON);
 
-    const r = await startMarkDod('myproj', undefined, 0);
+    const r = await startMarkDod('myproj', undefined);
 
     expect(r.ok).toBe(true);
     const job = createJobMock.mock.results[0]?.value;
@@ -357,7 +370,7 @@ describe('startMarkDod', () => {
 
   it('returns ok:true changed:false when gh issue view fails', async () => {
     execMock.mockResolvedValue(resp(1, '', 'not found'));
-    const r = await startMarkDod('myproj', undefined, 0);
+    const r = await startMarkDod('myproj', undefined);
     expect(r.ok).toBe(true);
     if (r.ok) {
       expect(r.changed).toBe(false);
@@ -368,7 +381,7 @@ describe('startMarkDod', () => {
 
   it('returns ok:true changed:false when issue body has no unchecked criteria', async () => {
     execMock.mockResolvedValue(resp(0, JSON.stringify({ title: 'T', body: 'No checkboxes here' })));
-    const r = await startMarkDod('myproj', undefined, 0);
+    const r = await startMarkDod('myproj', undefined);
     expect(r.ok).toBe(true);
     if (r.ok) {
       expect(r.changed).toBe(false);
@@ -379,7 +392,7 @@ describe('startMarkDod', () => {
 
   it('returns ok:true changed:false when all criteria are already checked', async () => {
     execMock.mockResolvedValue(resp(0, JSON.stringify({ title: 'T', body: '- [x] Already done' })));
-    const r = await startMarkDod('myproj', undefined, 0);
+    const r = await startMarkDod('myproj', undefined);
     expect(r.ok).toBe(true);
     if (r.ok) expect(r.changed).toBe(false);
   });
@@ -387,7 +400,7 @@ describe('startMarkDod', () => {
   it('returns ok:true changed:false when claude exits non-zero', async () => {
     execMock.mockResolvedValueOnce(resp(0, ISSUE_JSON));  // gh issue view
     getJobStatusMock.mockResolvedValue({ status: 'done', exitCode: 1 });
-    const r = await startMarkDod('myproj', undefined, 0);
+    const r = await startMarkDod('myproj', undefined);
     expect(r.ok).toBe(true);
     if (r.ok) {
       expect(r.changed).toBe(false);
@@ -400,7 +413,7 @@ describe('startMarkDod', () => {
   it('returns ok:true changed:false when claude returns empty output', async () => {
     execMock.mockResolvedValueOnce(resp(0, ISSUE_JSON));
     readFileSyncMock.mockReturnValue('');
-    const r = await startMarkDod('myproj', undefined, 0);
+    const r = await startMarkDod('myproj', undefined);
     expect(r.ok).toBe(true);
     if (r.ok) expect(r.changed).toBe(false);
   });
@@ -408,7 +421,7 @@ describe('startMarkDod', () => {
   it('returns ok:true changed:false when claude returns invalid JSON', async () => {
     execMock.mockResolvedValueOnce(resp(0, ISSUE_JSON));
     readFileSyncMock.mockReturnValue('not json at all');
-    const r = await startMarkDod('myproj', undefined, 0);
+    const r = await startMarkDod('myproj', undefined);
     expect(r.ok).toBe(true);
     if (r.ok) {
       expect(r.changed).toBe(false);
@@ -426,7 +439,7 @@ describe('startMarkDod', () => {
     });
     execMock.mockResolvedValueOnce(resp(0, ISSUE_JSON));
     readFileSyncMock.mockReturnValue(noneVerified);
-    const r = await startMarkDod('myproj', undefined, 0);
+    const r = await startMarkDod('myproj', undefined);
     expect(r.ok).toBe(true);
     if (r.ok) {
       expect(r.changed).toBe(false);
@@ -446,7 +459,7 @@ describe('startMarkDod', () => {
     });
     execMock.mockResolvedValueOnce(resp(0, ISSUE_JSON));
     readFileSyncMock.mockReturnValue(mismatch);
-    const r = await startMarkDod('myproj', undefined, 0);
+    const r = await startMarkDod('myproj', undefined);
     expect(r.ok).toBe(true);
     if (r.ok) expect(r.changed).toBe(false);
   });
@@ -463,7 +476,7 @@ describe('startMarkDod', () => {
       .mockResolvedValueOnce(resp(0, ISSUE_JSON))  // gh issue view
       .mockResolvedValueOnce(resp(0, ''));          // gh issue edit
     readFileSyncMock.mockReturnValue(stripped);
-    const r = await startMarkDod('myproj', undefined, 0);
+    const r = await startMarkDod('myproj', undefined);
     expect(r.ok).toBe(true);
     if (r.ok) {
       expect(r.changed).toBe(true);
@@ -475,7 +488,7 @@ describe('startMarkDod', () => {
     execMock
       .mockResolvedValueOnce(resp(0, ISSUE_JSON))         // gh issue view
       .mockResolvedValueOnce(resp(1, '', 'edit failed')); // gh issue edit
-    const r = await startMarkDod('myproj', undefined, 0);
+    const r = await startMarkDod('myproj', undefined);
     expect(r.ok).toBe(true);
     if (r.ok) {
       expect(r.changed).toBe(false);
@@ -488,7 +501,7 @@ describe('startMarkDod', () => {
     execMock
       .mockResolvedValueOnce(resp(0, ISSUE_JSON))  // gh issue view
       .mockResolvedValueOnce(resp(0, ''));          // gh issue edit
-    const r = await startMarkDod('myproj', undefined, 0);
+    const r = await startMarkDod('myproj', undefined);
     expect(r.ok).toBe(true);
     if (r.ok) {
       expect(r.changed).toBe(true);
@@ -503,9 +516,14 @@ describe('startMarkDod', () => {
     execMock
       .mockResolvedValueOnce(resp(0, ISSUE_JSON))
       .mockResolvedValueOnce(resp(0, ''));
-    await startMarkDod('myproj', undefined, 0);
-    expect(writeFileSyncMock).toHaveBeenCalledOnce();
-    const writtenContent: string = writeFileSyncMock.mock.calls[0][1];
+    await startMarkDod('myproj', undefined);
+    // Two writes now: (1) the Claude prompt file, (2) the gh issue edit body.
+    // The edit body contains rendered checkboxes; the prompt does not.
+    const ghEditWrite = writeFileSyncMock.mock.calls.find(
+      (c: unknown[]) => typeof c[1] === 'string' && (c[1] as string).includes('[x] First criterion'),
+    );
+    expect(ghEditWrite).toBeDefined();
+    const writtenContent: string = ghEditWrite![1];
     expect(writtenContent).toContain('[x] First criterion');
     expect(writtenContent).toContain('[ ] Second criterion');
   });
@@ -514,7 +532,7 @@ describe('startMarkDod', () => {
     execMock
       .mockResolvedValueOnce(resp(0, ISSUE_JSON))
       .mockResolvedValueOnce(resp(1, '', 'edit failed'));
-    await startMarkDod('myproj', undefined, 0);
+    await startMarkDod('myproj', undefined);
     expect(unlinkSyncMock).toHaveBeenCalledOnce();
   });
 
@@ -522,7 +540,7 @@ describe('startMarkDod', () => {
     execMock
       .mockResolvedValueOnce(resp(0, ISSUE_JSON))
       .mockResolvedValueOnce(resp(0, ''));
-    await startMarkDod('myproj', undefined, 0);
+    await startMarkDod('myproj', undefined);
     expect(unlinkSyncMock).toHaveBeenCalledOnce();
   });
 
@@ -534,7 +552,7 @@ describe('startMarkDod', () => {
     execMock
       .mockResolvedValueOnce(resp(0, ISSUE_JSON))
       .mockResolvedValueOnce(resp(0, ''));
-    const r = await startMarkDod('myproj', undefined, 0);
+    const r = await startMarkDod('myproj', undefined);
     expect(r.ok).toBe(true);
     if (r.ok) expect(r.issueNumber).toBe(42);
     // gh issue view should use issue 42
@@ -544,7 +562,7 @@ describe('startMarkDod', () => {
 
   it('creates a mark-dod job and logs start', async () => {
     execMock.mockResolvedValue(resp(1, '', 'fail'));  // gh view fails → early return
-    await startMarkDod('myproj', undefined, 0);
+    await startMarkDod('myproj', undefined);
     expect(createJobMock).toHaveBeenCalledWith('myproj', 'mark-dod', 0, '');
     expect(appendFileSyncMock).toHaveBeenCalled();
     const firstLog: string = appendFileSyncMock.mock.calls[0][1];
@@ -558,7 +576,7 @@ describe('startMarkDod', () => {
       .mockResolvedValueOnce(resp(0, ISSUE_JSON))
       .mockResolvedValueOnce(resp(0, ''));
     readFileSyncMock.mockReturnValue(fenced);
-    const r = await startMarkDod('myproj', undefined, 0);
+    const r = await startMarkDod('myproj', undefined);
     expect(r.ok).toBe(true);
     if (r.ok) expect(r.verified).toBe(1);
   });
@@ -569,7 +587,7 @@ describe('startMarkDod', () => {
       .mockResolvedValueOnce(resp(0, ISSUE_JSON))
       .mockResolvedValueOnce(resp(0, ''));
     readFileSyncMock.mockReturnValue(withProse);
-    const r = await startMarkDod('myproj', undefined, 0);
+    const r = await startMarkDod('myproj', undefined);
     expect(r.ok).toBe(true);
     if (r.ok) expect(r.verified).toBe(1);
   });
@@ -578,7 +596,7 @@ describe('startMarkDod', () => {
     execMock
       .mockResolvedValueOnce(resp(0, ISSUE_JSON))
       .mockResolvedValueOnce(resp(0, ''));
-    await startMarkDod('myproj', undefined, 0);
+    await startMarkDod('myproj', undefined);
     // startJob(jobId, command, prompt, cwd)
     expect(startJobMock).toHaveBeenCalledOnce();
     const [, command, , cwd] = startJobMock.mock.calls[0];
@@ -591,7 +609,7 @@ describe('startMarkDod', () => {
     execMock
       .mockResolvedValueOnce(resp(0, ISSUE_JSON))
       .mockResolvedValueOnce(resp(0, ''));
-    await startMarkDod('myproj', undefined, 0);
+    await startMarkDod('myproj', undefined);
     const [, command] = startJobMock.mock.calls[0];
     expect(command).toContain('--allowed-tools');
     expect(command).toContain('Read');
@@ -604,7 +622,7 @@ describe('startMarkDod', () => {
     execMock
       .mockResolvedValueOnce(resp(0, ISSUE_JSON))
       .mockResolvedValueOnce(resp(0, ''));
-    await startMarkDod('myproj', undefined, 0);
+    await startMarkDod('myproj', undefined);
     const [, , prompt] = startJobMock.mock.calls[0];
     expect(prompt).toContain('<untrusted');
     expect(prompt).toContain('Add login feature');
@@ -615,7 +633,7 @@ describe('startMarkDod', () => {
     execMock
       .mockResolvedValueOnce(resp(0, ISSUE_JSON))
       .mockResolvedValueOnce(resp(0, ''));
-    await startMarkDod('myproj', undefined, 0);
+    await startMarkDod('myproj', undefined);
     const [, , prompt] = startJobMock.mock.calls[0];
     expect(prompt).toContain('SECURITY:');
     expect(prompt.indexOf('SECURITY:')).toBeLessThan(prompt.indexOf('Add login feature'));
@@ -623,14 +641,14 @@ describe('startMarkDod', () => {
 
   it('fetches author field in gh view call', async () => {
     execMock.mockResolvedValue(resp(1, '', 'fail'));
-    await startMarkDod('myproj', undefined, 0);
+    await startMarkDod('myproj', undefined);
     const ghArgs: string[] = execMock.mock.calls[0][1];
     expect(ghArgs.join(' ')).toContain('author');
   });
 
   it('returns ok:false status:500 when an unexpected exception is thrown', async () => {
     execMock.mockRejectedValue(new Error('network error'));
-    const r = await startMarkDod('myproj', undefined, 0);
+    const r = await startMarkDod('myproj', undefined);
     expect(r.ok).toBe(false);
     if (!r.ok) {
       expect(r.status).toBe(500);
@@ -642,7 +660,7 @@ describe('startMarkDod', () => {
   it('uses issue number and repo from the matching job in gh commands', async () => {
     listJobsMock.mockReturnValue([makeRunJob({ ghIssueNumber: 99, ghIssueRepo: 'acme/widget' })]);
     execMock.mockResolvedValue(resp(1, '', 'fail'));
-    await startMarkDod('myproj', undefined, 0);
+    await startMarkDod('myproj', undefined);
     const ghArgs: string[] = execMock.mock.calls[0][1];
     expect(ghArgs).toContain('99');
     expect(ghArgs).toContain('acme/widget');
@@ -682,7 +700,7 @@ describe('startMarkDod', () => {
       makePushJob(JSON.stringify({ prNumber: 99, prRepo: 'owner/repo' })),
     ]);
     execMock.mockResolvedValue(resp(1, '', 'gh failed'));
-    const r = await startMarkDod('myproj', undefined, 0);
+    const r = await startMarkDod('myproj', undefined);
     // Should attempt gh pr view, not gh issue view
     const ghArgs: string[] = execMock.mock.calls[0][1];
     expect(ghArgs).toContain('pr');
@@ -695,7 +713,7 @@ describe('startMarkDod', () => {
     listJobsMock.mockReturnValue([
       makePushJob(JSON.stringify({ prRepo: 'owner/repo' })),
     ]);
-    const r = await startMarkDod('myproj', undefined, 0);
+    const r = await startMarkDod('myproj', undefined);
     expect(r.ok).toBe(false);
     if (!r.ok) expect(r.status).toBe(400);
   });
@@ -704,7 +722,7 @@ describe('startMarkDod', () => {
     listJobsMock.mockReturnValue([
       makePushJob('not-valid-json'),
     ]);
-    const r = await startMarkDod('myproj', undefined, 0);
+    const r = await startMarkDod('myproj', undefined);
     expect(r.ok).toBe(false);
     if (!r.ok) expect(r.status).toBe(400);
   });
@@ -715,7 +733,7 @@ describe('startMarkDod', () => {
       makePushJob(JSON.stringify({ prNumber: 99, prRepo: 'owner/repo' }), { startedAt: Date.now() / 1000 + 10 }),
     ]);
     execMock.mockResolvedValue(resp(1, '', 'fail'));
-    await startMarkDod('myproj', undefined, 0);
+    await startMarkDod('myproj', undefined);
     // Should use gh issue view (not gh pr view)
     const ghArgs: string[] = execMock.mock.calls[0][1];
     expect(ghArgs).toContain('issue');
@@ -732,7 +750,7 @@ describe('startMarkDod', () => {
     ]);
     execMock.mockResolvedValue(resp(1, '', 'gh failed'));
 
-    const r = await startMarkDod('myproj', undefined, 0);
+    const r = await startMarkDod('myproj', undefined);
 
     expect(r.ok).toBe(true);
     const ghArgs: string[] = execMock.mock.calls[0][1];
@@ -751,7 +769,7 @@ describe('startMarkDod', () => {
     ]);
     execMock.mockResolvedValue(resp(1, '', 'gh failed'));
 
-    const r = await startMarkDod('myproj', undefined, 0);
+    const r = await startMarkDod('myproj', undefined);
 
     expect(r.ok).toBe(true);
     const ghArgs: string[] = execMock.mock.calls[0][1];
@@ -779,7 +797,7 @@ describe('startMarkDod', () => {
     ]);
     execMock.mockResolvedValue(resp(1, '', 'gh failed'));
 
-    const r = await startMarkDod('myproj', undefined, 0);
+    const r = await startMarkDod('myproj', undefined);
 
     expect(r.ok).toBe(true);
     const ghArgs: string[] = execMock.mock.calls[0][1];
@@ -803,7 +821,7 @@ describe('startMarkDod', () => {
       .mockResolvedValueOnce(resp(0, prJson))  // gh pr view
       .mockResolvedValueOnce(resp(0, ''));     // gh pr edit
     readFileSyncMock.mockReturnValue(claudeJson);
-    const r = await startMarkDod('myproj', undefined, 0);
+    const r = await startMarkDod('myproj', undefined);
     expect(r.ok).toBe(true);
     if (r.ok) {
       expect(r.changed).toBe(true);
@@ -840,7 +858,7 @@ describe('startMarkDod', () => {
     startJobMock.mockResolvedValue(12345);
     getJobStatusMock.mockResolvedValue({ status: 'done', exitCode: 1 });
 
-    const r = await startMarkDod('myproj', undefined, 0);
+    const r = await startMarkDod('myproj', undefined);
 
     expect(r.ok).toBe(true);
     expect(startJobMock).toHaveBeenCalled();

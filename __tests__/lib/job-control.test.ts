@@ -7,8 +7,6 @@ describe('job-control', () => {
   let budgetBlockedResult: typeof import('@/lib/shared/job-control').budgetBlockedResult;
   let runGates: typeof import('@/lib/shared/job-control').runGates;
   let runAutoChainGates: typeof import('@/lib/shared/job-control').runAutoChainGates;
-  let pauseInternalSchedulerMock: ReturnType<typeof vi.fn>;
-  let resumeInternalSchedulerMock: ReturnType<typeof vi.fn>;
   let drainRecoveryWorkMock: ReturnType<typeof vi.fn>;
   let listQueuedProjectsMock: ReturnType<typeof vi.fn>;
   let drainQueuedAgentMock: ReturnType<typeof vi.fn>;
@@ -41,8 +39,6 @@ describe('job-control', () => {
 
   beforeEach(async () => {
     vi.resetModules();
-    pauseInternalSchedulerMock = vi.fn();
-    resumeInternalSchedulerMock = vi.fn();
     drainRecoveryWorkMock = vi.fn().mockResolvedValue(undefined);
     listQueuedProjectsMock = vi.fn().mockReturnValue([]);
     drainQueuedAgentMock = vi.fn().mockResolvedValue(undefined);
@@ -53,10 +49,6 @@ describe('job-control', () => {
     prefetchQuotaMock = vi.fn();
     prefetchQuotaProvidersMock = vi.fn();
     notifyMock = vi.fn().mockResolvedValue(undefined);
-    vi.doMock('@/lib/scheduling/internal-scheduler', () => ({
-      pauseInternalScheduler: pauseInternalSchedulerMock,
-      resumeInternalScheduler: resumeInternalSchedulerMock,
-    }));
     vi.doMock('@/lib/pipeline/recovery-drain', () => ({
       drainAllRecoveryWork: drainRecoveryWorkMock,
     }));
@@ -146,16 +138,19 @@ describe('job-control', () => {
   });
 
   describe('syncJobsPauseState', () => {
-    it('calls pauseInternalScheduler when paused=true', () => {
+    // The legacy scheduler-side pause/resume toggle was retired with the
+    // in-memory cron path. Pause state now lives only in this module's
+    // module-level flag (`runtimeJobsPaused`); the agent-cron task handler
+    // reads `isJobsPaused()` per fire instead of being globally toggled.
+    it('flips isJobsPaused() to true when paused=true', () => {
       syncJobsPauseState(true);
-      expect(pauseInternalSchedulerMock).toHaveBeenCalledOnce();
-      expect(resumeInternalSchedulerMock).not.toHaveBeenCalled();
+      expect(isJobsPaused()).toBe(true);
     });
 
-    it('calls resumeInternalScheduler when paused=false', () => {
+    it('flips isJobsPaused() back to false when paused=false', () => {
+      syncJobsPauseState(true);
       syncJobsPauseState(false);
-      expect(resumeInternalSchedulerMock).toHaveBeenCalledOnce();
-      expect(pauseInternalSchedulerMock).not.toHaveBeenCalled();
+      expect(isJobsPaused()).toBe(false);
     });
 
     it('toggles state correctly across multiple calls', () => {

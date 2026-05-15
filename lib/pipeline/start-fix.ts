@@ -5,7 +5,7 @@ import { resolveCliBin, resolveCliEnv } from '@/lib/shared/cli-bin';
 import { checkCliStartGate } from '@/lib/usage/resolve-provider';
 import { resolveProjectPath } from '@/lib/shared/project-data';
 import { getJob, createJob, readParsedLog, probeJobStatus, updateJob } from '@/lib/jobs/job-storage';
-import { startJob } from '@/lib/jobs/pm2-jobs';
+import { startJobInProcess } from '@/lib/jobs/spawn-claude-detached';
 import { acquireLock, isLockOwnedByActiveRelease } from './pipeline-lock';
 import { FIX_OUTPUT_CONTRACT, stripFinalVerdict } from './review-contract';
 
@@ -47,7 +47,29 @@ export async function startFixFromJob(sourceJobId: string): Promise<StartFixResu
     : '';
 
   let prompt: string;
-  if (resumeSessionId) {
+  if (sourceJob.kind === 'push') {
+    // Push failures land here — the push log carries the hook-rejection
+    // output (eslint/lint-staged/pre-commit). Keep the prompt tight: read
+    // the error, make surgical fixes, don't commit. Session resume doesn't
+    // apply since the push isn't a Claude job.
+    let errorContext = findingsBlock;
+    if (errorContext.length > 8000) errorContext = '...(truncated)...\n' + errorContext.slice(-8000);
+    if (!errorContext) return { ok: false, status: 400, detail: 'No push output to fix from' };
+    prompt = `A git push for the \`${projectName}\` project just failed because the pre-commit or pre-push hook rejected the commit.
+
+## Hook error
+
+\`\`\`
+${errorContext}
+\`\`\`
+
+Please:
+1. Read the hook error carefully and locate the offending file(s) + line(s).
+2. Fix the issue in the codebase. Small, surgical changes — don't refactor.
+3. Run the relevant linter/type-check locally to confirm the fix works.
+4. Do NOT commit — just make the code changes. The release pipeline will re-run the push automatically when you finish.${fixAddendum}
+`;
+  } else if (resumeSessionId) {
     if (findingsBlock) {
       prompt = `Apply fixes for ALL the findings from your review (reproduced below for clarity — work from this list, not from memory):
 
@@ -87,7 +109,7 @@ Do not commit — just make the code changes.${fixAddendum}
   job.promptBytes = Buffer.byteLength(prompt, 'utf8');
 
   try {
-    const pid = await startJob(
+    const pid = await startJobInProcess(
       job.id,
       `${cliBin} --print --output-format stream-json --include-partial-messages --verbose --model ${getPipelineModel('fix')} ${getPermissionModeFlag()}${resumeSessionId ? ` --resume ${resumeSessionId}` : ''}`,
       prompt,

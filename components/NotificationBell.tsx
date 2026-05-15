@@ -122,7 +122,7 @@ export function NotificationBell() {
         const KIND_PRIORITY: Record<string, number> = {
           release: 100, 'mark-dod': 90, 'pr-wait': 85,
           fix: 80, review: 75, test: 70, push: 65, commit: 60,
-          'fix-push': 55, run: 40, action: 35,
+          run: 40, action: 35,
         }
         const kindPriority = (k: string) => k.startsWith('agent:') ? 50 : (KIND_PRIORITY[k] ?? 30)
         const runningByProject = new Map<string, JobInfo>()

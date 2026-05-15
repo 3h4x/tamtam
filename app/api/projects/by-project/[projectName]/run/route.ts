@@ -7,7 +7,7 @@ import { getImproveConfig } from '@/lib/scheduling/scheduling';
 import { SKILLS_DIR, DATA_SKILLS_DIR } from '@/lib/skills/skills';
 import { resolveProjectPath } from '@/lib/shared/project-data';
 import { createJob, updateJob } from '@/lib/jobs/job-storage';
-import { startJob } from '@/lib/jobs/pm2-jobs';
+import { startJobInProcess as startJob } from '@/lib/jobs/spawn-claude-detached';
 import { withBasePrompt, getPermissionModeFlag } from '@/lib/shared/config';
 import { errMsg } from '@/lib/shared/types';
 import { parseOptionalKnownModelInput, type ModelTier } from '@/lib/agents/model-aliases';

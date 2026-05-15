@@ -40,9 +40,9 @@ describe('recovery-budget helpers', () => {
   it('shares the release fallback window with stats and lifecycle', async () => {
     process.env.TAMTAM_STEP_WINDOW_SECONDS = '2700';
 
-    const { getStepWindowSeconds, getFixPushAttemptCap } = await import('@/lib/pipeline/recovery-budget');
+    const { getStepWindowSeconds, getPushFixAttemptCap } = await import('@/lib/pipeline/recovery-budget');
     expect(getStepWindowSeconds()).toBe(2700);
-    expect(getFixPushAttemptCap()).toBe(2);
+    expect(getPushFixAttemptCap()).toBe(2);
   });
 
   it('falls back to the legacy TAMTAM_FIX_WINDOW_SECONDS when the new alias is unset', async () => {

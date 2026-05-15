@@ -129,7 +129,7 @@ describe('resume-stuck-release helpers', () => {
     }));
     vi.doMock('@/lib/jobs/lifecycle', () => ({
       runCompletionHooks: runCompletionHooksMock,
-      PIPELINE_STEP_KINDS: new Set(['test', 'review', 'fix', 'commit', 'push', 'fix-push', 'pr-wait', 'mark-dod']),
+      PIPELINE_STEP_KINDS: new Set(['test', 'review', 'fix', 'commit', 'push', 'pr-wait', 'mark-dod']),
     }));
     vi.doMock('@/lib/pipeline/pipeline-lock', () => ({
       acquireLock: acquireLockMock,
@@ -518,6 +518,9 @@ describe('resume-stuck-release helpers', () => {
       }));
       vi.doMock('@/lib/pipeline/start-release', () => ({
         startRelease: startReleaseMock,
+      }));
+      vi.doMock('@/lib/workflows/dispatch-release', () => ({
+        dispatchReleaseWorkflow: startReleaseMock,
       }));
     });
 

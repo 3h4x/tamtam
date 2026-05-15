@@ -87,8 +87,8 @@ export async function drainPendingRelease(project: string): Promise<void> {
   if (!(await getPendingRelease(project))) return;
   clearPendingRelease(project);
   try {
-    const { startRelease } = await import('@/lib/pipeline/start-release');
-    const r = await startRelease(project);
+    const { dispatchReleaseWorkflow } = await import('@/lib/workflows/dispatch-release');
+    const r = await dispatchReleaseWorkflow(project);
     if (r.ok) {
       console.log(`[pending-release] drained queue for ${project} → release ${r.jobId}`);
     } else if (shouldKeepPendingRelease(r)) {

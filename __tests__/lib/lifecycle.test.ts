@@ -121,8 +121,7 @@ const mocks = vi.hoisted(() => ({
   runAutoChainGates: vi.fn(),
   // pipeline/start-fix
   startFixFromJob: vi.fn(),
-  // pipeline/start-fix-push
-  startFixPush: vi.fn(),
+  // pipeline/push-rejection
   isHookRejection: vi.fn(),
   isTestFailureRejection: vi.fn(),
   // pipeline/review-exhaustion-fallback
@@ -192,8 +191,7 @@ vi.mock('@/lib/shared/job-control', () => ({
 vi.mock('@/lib/pipeline/start-fix', () => ({
   startFixFromJob: mocks.startFixFromJob,
 }));
-vi.mock('@/lib/pipeline/start-fix-push', () => ({
-  startFixPush: mocks.startFixPush,
+vi.mock('@/lib/pipeline/push-rejection', () => ({
   isHookRejection: mocks.isHookRejection,
   isTestFailureRejection: mocks.isTestFailureRejection,
 }));
@@ -230,7 +228,6 @@ vi.mock('@/lib/agents/pending-agent-run', () => ({
 // handle. The `import` happens once for the whole file (vs 61 times in the
 // previous implementation), saving ~50-100ms per test.
 let markDone: typeof import('@/lib/jobs/job-storage').markDone;
-let reconcileStaleRelease: typeof import('@/lib/jobs/job-storage').reconcileStaleRelease;
 let runCompletionHooks: typeof import('@/lib/jobs/job-storage').runCompletionHooks;
 let jobsCache: Map<string, JobData>;
 
@@ -240,7 +237,6 @@ beforeAll(async () => {
   mocks.db.current = sharedHandle.db;
   const mod = await import('@/lib/jobs/job-storage');
   markDone = mod.markDone;
-  reconcileStaleRelease = mod.reconcileStaleRelease;
   runCompletionHooks = mod.runCompletionHooks;
   jobsCache = (await import('@/lib/jobs/storage')).jobsCache;
 });
@@ -282,7 +278,6 @@ function applyDefaultMocks(): void {
   });
   mocks.runAutoChainGates.mockReturnValue(null);
   mocks.startFixFromJob.mockResolvedValue({ ok: true, jobId: 'fix-auto' });
-  mocks.startFixPush.mockResolvedValue({ ok: true, jobId: 'fix-push-next' });
   mocks.isHookRejection.mockReturnValue(false);
   mocks.isTestFailureRejection.mockReturnValue(false);
   mocks.fileReviewExhaustionIssue.mockResolvedValue({ ok: true, issueNumber: 7, issueUrl: 'https://github.com/owner/repo/issues/7' });
@@ -405,162 +400,7 @@ function getTestDb(): TestDbHandle['db'] {
 }
 
 // ─── reconcileStaleRelease ────────────────────────────────────────────────────
-
-describe('reconcileStaleRelease', () => {
-  let tempDir: string;
-
-  function makeJob(kind: string, overrides: Partial<JobData> = {}): JobData {
-    const now = Date.now() / 1000;
-    return {
-      id: `${kind}-job`,
-      project: 'proj',
-      kind,
-      prompt: null,
-      pid: 0,
-      logPath: null,
-      startedAt: now,
-      finishedAt: null,
-      exitCode: null,
-      seen: false,
-      durationMs: null,
-      inputTokens: null,
-      outputTokens: null,
-      cacheReadTokens: null,
-      cacheCreateTokens: null,
-      sessionId: null,
-      ...overrides,
-    };
-  }
-
-  beforeEach(async () => {
-    await resetTestState();
-    tempDir = mkdtempSync(join(tmpdir(), 'tamtam-lifecycle-test-'));
-  });
-
-  afterEach(() => {
-    rmSync(tempDir, { recursive: true, force: true });
-  });
-
-  it('returns early for non-pipeline-step job kinds (run)', async () => {
-    const now = Date.now() / 1000;
-    await insertJobsAndCache(getTestDb(), [makeJobRow({ id: 'release-x', project: 'proj', kind: 'release', startedAt: now - 60 })]);
-
-    const runJob = makeJob('run', { project: 'proj' });
-    await reconcileStaleRelease(runJob);
-
-    // Release must still be unfinished — reconcile should have done nothing
-    const row = (await getTestDb().select().from(schema.jobs).where(eq(schema.jobs.id, 'release-x'))).at(0);
-    expect(row?.finishedAt).toBeNull();
-  });
-
-  it('returns early when no active release exists', async () => {
-    const now = Date.now() / 1000;
-    // Insert an already-finished release — findActiveReleaseJob won't pick it up
-    await insertJobsAndCache(getTestDb(), [makeJobRow({ id: 'done-release', project: 'proj', kind: 'release', startedAt: now - 120, finishedAt: now - 60, exitCode: 0 })]);
-
-    const testJob = makeJob('test', { project: 'proj' });
-    await reconcileStaleRelease(testJob);
-
-    const row = (await getTestDb().select().from(schema.jobs).where(eq(schema.jobs.id, 'done-release'))).at(0);
-    expect(row?.finishedAt).not.toBeNull(); // still the original value, unchanged
-  });
-
-  it('defers when a pipeline child is still running (finishedAt=null in cache)', async () => {
-    const now = Date.now() / 1000;
-    await insertJobsAndCache(getTestDb(), [
-      makeJobRow({ id: 'release-r1', project: 'proj', kind: 'release', startedAt: now - 60 }),
-      makeJobRow({ id: 'test-r1', project: 'proj', kind: 'test', startedAt: now - 50, finishedAt: null }),
-    ]);
-
-    const doneJob = makeJob('push', { project: 'proj', finishedAt: now - 1, exitCode: 0 });
-    await reconcileStaleRelease(doneJob);
-
-    // Release must still be active — child test job is still running
-    const row = (await getTestDb().select().from(schema.jobs).where(eq(schema.jobs.id, 'release-r1'))).at(0);
-    expect(row?.finishedAt).toBeNull();
-  });
-
-  it('defers when the chain finished but within the 5s grace window', async () => {
-    const now = Date.now() / 1000;
-    // Last step finished 2 seconds ago — within RELEASE_RECONCILE_GRACE_MS (5s)
-    await insertJobsAndCache(getTestDb(), [
-      makeJobRow({ id: 'release-grace', project: 'proj', kind: 'release', startedAt: now - 30 }),
-      makeJobRow({ id: 'push-grace', project: 'proj', kind: 'push', startedAt: now - 10, finishedAt: now - 2, exitCode: 0 }),
-    ]);
-
-    const pushJob = makeJob('push', { project: 'proj', finishedAt: now - 2, exitCode: 0 });
-    await reconcileStaleRelease(pushJob);
-
-    const row = (await getTestDb().select().from(schema.jobs).where(eq(schema.jobs.id, 'release-grace'))).at(0);
-    expect(row?.finishedAt).toBeNull();
-  });
-
-  it('finalizes release with exit 0 when all steps done and grace period has elapsed', async () => {
-    const now = Date.now() / 1000;
-    await insertJobsAndCache(getTestDb(), [
-      makeJobRow({ id: 'release-stale', project: 'proj', kind: 'release', startedAt: now - 60 }),
-      makeJobRow({ id: 'test-stale', project: 'proj', kind: 'test', releaseId: 'release-stale', startedAt: now - 50, finishedAt: now - 30, exitCode: 0 }),
-      makeJobRow({ id: 'push-stale', project: 'proj', kind: 'push', releaseId: 'release-stale', startedAt: now - 25, finishedAt: now - 15, exitCode: 0 }),
-    ]);
-
-    const pushJob = makeJob('push', { project: 'proj', releaseId: 'release-stale', finishedAt: now - 15, exitCode: 0 });
-    await reconcileStaleRelease(pushJob);
-
-    const row = (await getTestDb().select().from(schema.jobs).where(eq(schema.jobs.id, 'release-stale'))).at(0);
-    expect(row?.finishedAt).not.toBeNull();
-    expect(row?.exitCode).toBe(0);
-  });
-
-  it('finalizes release with exit 1 when the last step of the chain failed', async () => {
-    const now = Date.now() / 1000;
-    // Chain ends at a hard failure (test exit 1, no follow-up fix). Reconciler
-    // must finalize the release as a failure rather than treating it as a
-    // resumable stuck pipeline (which only applies when the LAST step exited 0).
-    await insertJobsAndCache(getTestDb(), [
-      makeJobRow({ id: 'release-fail', project: 'proj', kind: 'release', startedAt: now - 60 }),
-      makeJobRow({ id: 'fix-fail', project: 'proj', kind: 'fix', releaseId: 'release-fail', startedAt: now - 50, finishedAt: now - 35, exitCode: 0 }),
-      makeJobRow({ id: 'test-fail', project: 'proj', kind: 'test', releaseId: 'release-fail', startedAt: now - 30, finishedAt: now - 15, exitCode: 1 }),
-    ]);
-
-    const testJob = makeJob('test', { project: 'proj', releaseId: 'release-fail', finishedAt: now - 15, exitCode: 1 });
-    await reconcileStaleRelease(testJob);
-
-    const row = (await getTestDb().select().from(schema.jobs).where(eq(schema.jobs.id, 'release-fail'))).at(0);
-    expect(row?.finishedAt).not.toBeNull();
-    expect(row?.exitCode).toBe(1);
-  });
-
-  it('breaks the chain and excludes jobs that start more than 60s after the previous edge', async () => {
-    const now = Date.now() / 1000;
-    // release → test (finishes at now-50) → review starts 90s later (gap > 60s → excluded from chain)
-    await insertJobsAndCache(getTestDb(), [
-      makeJobRow({ id: 'release-gap', project: 'proj', kind: 'release', startedAt: now - 120 }),
-      makeJobRow({ id: 'test-gap', project: 'proj', kind: 'test', startedAt: now - 110, finishedAt: now - 50, exitCode: 0 }),
-      // review starts 90 seconds after test finished (now-50 + 90 = now+40) — but we keep it in the past:
-      // use finishedAt = now - 55 so grace window passes, then review starts at now - 55 + 90 = now+35 — too far in future
-      // Actually: release at now-200, test finishes at now-120, review starts at now-50 (gap = 70s > 60s)
-    ]);
-    // Re-insert with correct timing: release at now-200, test at now-190 finishing at now-130, review at now-50 (gap 80s)
-    await getTestDb().delete(schema.jobs);
-    jobsCache.clear();
-    await insertJobsAndCache(getTestDb(), [
-      makeJobRow({ id: 'release-gap', project: 'proj', kind: 'release', startedAt: now - 200 }),
-      makeJobRow({ id: 'test-gap', project: 'proj', kind: 'test', releaseId: 'release-gap', startedAt: now - 190, finishedAt: now - 130, exitCode: 0 }),
-      // review starts 80 seconds after test finished (now-130 + 80 = now-50) — gap > 60s → excluded
-      makeJobRow({ id: 'review-gap', project: 'proj', kind: 'review', releaseId: 'release-gap', startedAt: now - 50, finishedAt: now - 20, exitCode: 0 }),
-    ]);
-
-    // Trigger via the review job finishing (it's within its own chain, but not the release's)
-    const reviewJob = makeJob('review', { project: 'proj', releaseId: 'release-gap', finishedAt: now - 20, exitCode: 0 });
-    await reconcileStaleRelease(reviewJob);
-
-    const row = (await getTestDb().select().from(schema.jobs).where(eq(schema.jobs.id, 'release-gap'))).at(0);
-    // The chain should include only the test step; the review is too far away.
-    // Release is finalized because test finished long ago (now-130, well past the 5s grace).
-    expect(row?.finishedAt).not.toBeNull();
-    expect(row?.exitCode).toBe(0); // only the test step (exit 0) is in the chain
-  });
-});
+// ─── reconcileStaleRelease tests removed: function retired with chain-loop closure
 
 describe('runCompletionHooks abort cleanup', () => {
   function makeJob(kind: string, overrides: Partial<JobData> = {}): JobData {
@@ -626,8 +466,6 @@ describe('runCompletionHooks abort cleanup', () => {
     expect(row?.exitCode).toBe(-3);
     expect(row?.abortedAt).not.toBeNull();
     expect(mocks.releaseLock).toHaveBeenCalledWith('proj', 'release-timeout');
-    expect(mocks.deleteJob).toHaveBeenCalledTimes(1);
-    expect(mocks.deleteJob).toHaveBeenCalledWith('release-timeout');
     expect(mocks.notify).toHaveBeenCalledWith(expect.objectContaining({
       event: 'release_aborted',
       project: 'proj',
@@ -638,7 +476,10 @@ describe('runCompletionHooks abort cleanup', () => {
 
 // ─── reviewIsStuck convergence guard (tested through markDone) ───────────────
 
-describe('reviewIsStuck convergence guard', () => {
+// Skipped: ported to __tests__/lib/workflows/guards/review-convergence.test.ts
+// + integration coverage in release-orchestrator.test.ts (see comment block
+// at "concurrent step finalization guard" describe above for full pointer).
+describe.skip('reviewIsStuck convergence guard', () => {
   let tempDir: string;
 
   function makeReviewJob(id: string, logPath: string | null, overrides: Partial<JobData> = {}): JobData {
@@ -1011,7 +852,9 @@ describe('reviewIsStuck convergence guard', () => {
 
 // ─── verification cap (counts reviews/tests, not fixes) ──────────────────────
 
-describe('fix→review review-count cap', () => {
+// Skipped: ported to __tests__/lib/workflows/guards/iteration-caps.test.ts
+// (review-cap branch + integration in release-orchestrator.test.ts).
+describe.skip('fix→review review-count cap', () => {
   let tempDir: string;
 
   function makeFixJob(id: string, overrides: Partial<JobData> = {}): JobData {
@@ -1128,7 +971,10 @@ describe('fix→review review-count cap', () => {
   });
 });
 
-describe('review_fix_max_iterations only caps review-side recovery', () => {
+// Skipped: cap differentiation lives in iteration-caps.ts now (different
+// caps per kind: reviewFixMaxIterations vs maxStepIterations vs
+// pushFixAttemptCap). Tests in iteration-caps.test.ts.
+describe.skip('review_fix_max_iterations only caps review-side recovery', () => {
   function makeFixJob(id: string, overrides: Partial<JobData> = {}): JobData {
     const now = Date.now() / 1000;
     return {
@@ -1350,7 +1196,17 @@ describe('review_fix_max_iterations only caps review-side recovery', () => {
 
 // ─── concurrent step finalization guard ──────────────────────────────────────
 
-describe('concurrent step finalization guard', () => {
+// Release-linked chain blocks short-circuit at lifecycle.ts ~line 488 — the
+// Vercel Workflow orchestrator owns chaining + finalization for any job
+// with a releaseId. The semantics these tests cover (concurrent-step
+// finalization, verdict retry rescue, reviewIsStuck convergence guard,
+// fix→review caps, push fix cap notifications) are now tested in:
+//   __tests__/lib/workflows/release-orchestrator.test.ts
+//   __tests__/lib/workflows/guards/review-convergence.test.ts
+//   __tests__/lib/workflows/guards/iteration-caps.test.ts
+// Skipped (not deleted) so the legacy semantics stay reviewable as long as
+// the standalone-job code path remains.
+describe.skip('concurrent step finalization guard', () => {
   function makeInMemoryJob(id: string, kind: string, overrides: Partial<JobData> = {}): JobData {
     const now = Date.now() / 1000;
     return {
@@ -1441,7 +1297,13 @@ describe('concurrent step finalization guard', () => {
 
 // ─── verdict retry rescue (lifecycle integration) ──────────────────────────
 
-describe('verdict retry rescue', () => {
+// Skipped: verdict-retry rescue runs inside the legacy review block which
+// is now release-linked-short-circuited. The rescue path itself
+// (lib/jobs/verdict-retry.ts) is still alive for standalone reviews and
+// for the orchestrator's getVerdict() call — coverage exists in
+// __tests__/lib/verdict-retry.test.ts. The lifecycle integration tested
+// here is no longer reachable on release-linked jobs.
+describe.skip('verdict retry rescue', () => {
   let tempDir: string;
 
   function makeReviewJob(id: string, logPath: string | null, overrides: Partial<JobData> = {}): JobData {
@@ -1554,7 +1416,11 @@ describe('verdict retry rescue', () => {
 
 // ─── incremental review ref guard ────────────────────────────────────────────
 
-describe('setReviewedRef incremental_review_enabled guard', () => {
+// Skipped: the markReviewed call lives inside the release-linked review
+// block which now short-circuits early. setReviewedRef itself is exercised
+// via the orchestrator's review-phase + start-review (see start-review.ts:
+// it sets the ref on its own non-pipeline path).
+describe.skip('setReviewedRef incremental_review_enabled guard', () => {
   let tempDir: string;
 
   function makeReviewJob(id: string, logPath: string, overrides: Partial<JobData> = {}): JobData {
@@ -1731,7 +1597,7 @@ describe('auto-mark seen on completion', () => {
   }
 
   it('auto-marks a successful pipeline child seen (commit / push / test)', async () => {
-    for (const kind of ['commit', 'push', 'test', 'fix-push', 'mark-dod']) {
+    for (const kind of ['commit', 'push', 'test', 'mark-dod']) {
       // Each iteration starts from a clean state so previous DB rows don't
       // leak into subsequent assertions.
       await resetTestState();
@@ -1793,7 +1659,9 @@ describe('auto-mark seen on completion', () => {
   });
 });
 
-describe('fix-push cap notifications', () => {
+// Skipped: push-fix cap is now in iteration-caps.ts (special-case for
+// fix-from-push) and exercised in iteration-caps.test.ts.
+describe.skip('push fix cap notifications', () => {
   let tempDir: string;
 
   function makePushJob(id: string, overrides: Partial<JobData> = {}): JobData {
@@ -1821,7 +1689,7 @@ describe('fix-push cap notifications', () => {
 
   beforeEach(async () => {
     await resetTestState();
-    tempDir = mkdtempSync(join(tmpdir(), 'tamtam-fix-push-cap-'));
+    tempDir = mkdtempSync(join(tmpdir(), 'tamtam-push-fix-cap-'));
     mocks.getProjectTestConfig.mockReturnValue({
       autoPushEnabled: true,
       autoCommitEnabled: false,
@@ -1837,7 +1705,7 @@ describe('fix-push cap notifications', () => {
     rmSync(tempDir, { recursive: true, force: true });
   });
 
-  it('emits fix_loop_exhausted when push hook retries hit the fix-push cap', async () => {
+  it('emits fix_loop_exhausted when push hook retries hit the cap (counts fix jobs whose parent is a push)', async () => {
     const now = Date.now() / 1000;
     const releaseLog = join(tempDir, 'release.log');
     const pushLog = join(tempDir, 'push.log');
@@ -1846,24 +1714,43 @@ describe('fix-push cap notifications', () => {
 
     await insertJobsAndCache(getTestDb(), [
       makeJobRow({
-        id: 'release-fix-push-cap',
+        id: 'release-push-fix-cap',
         project: 'proj',
         kind: 'release',
         logPath: releaseLog,
         startedAt: now - 300,
       }),
+      // Two prior failed pushes; each has a fix-from-push that counts toward the cap.
       makeJobRow({
-        id: 'fix-push-old-1',
+        id: 'push-old-1',
         project: 'proj',
-        kind: 'fix-push',
+        kind: 'push',
+        startedAt: now - 200,
+        finishedAt: now - 190,
+        exitCode: 1,
+      }),
+      makeJobRow({
+        id: 'fix-old-1',
+        project: 'proj',
+        kind: 'fix',
+        parentJobId: 'push-old-1',
         startedAt: now - 120,
         finishedAt: now - 110,
         exitCode: 0,
       }),
       makeJobRow({
-        id: 'fix-push-old-2',
+        id: 'push-old-2',
         project: 'proj',
-        kind: 'fix-push',
+        kind: 'push',
+        startedAt: now - 100,
+        finishedAt: now - 95,
+        exitCode: 1,
+      }),
+      makeJobRow({
+        id: 'fix-old-2',
+        project: 'proj',
+        kind: 'fix',
+        parentJobId: 'push-old-2',
         startedAt: now - 90,
         finishedAt: now - 80,
         exitCode: 0,
@@ -1872,13 +1759,13 @@ describe('fix-push cap notifications', () => {
 
     const pushJob = makePushJob('push-cap-hit', {
       logPath: pushLog,
-      releaseId: 'release-fix-push-cap',
+      releaseId: 'release-push-fix-cap',
       startedAt: now - 10,
     });
 
     await markDone(pushJob, 1);
 
-    expect(mocks.startFixPush).not.toHaveBeenCalled();
+    expect(mocks.startFixFromJob).not.toHaveBeenCalled();
     expect(mocks.notify).toHaveBeenCalledWith(expect.objectContaining({
       event: 'fix_loop_exhausted',
       project: 'proj',
@@ -1889,11 +1776,11 @@ describe('fix-push cap notifications', () => {
     const releaseRow = (await getTestDb()
       .select()
       .from(schema.jobs)
-      .where(eq(schema.jobs.id, 'release-fix-push-cap'))).at(0);
+      .where(eq(schema.jobs.id, 'release-push-fix-cap'))).at(0);
     expect(releaseRow?.exitCode).toBe(1);
     expect(releaseRow?.finishedAt).not.toBeNull();
-    expect(releaseRow?.contextMeta).toContain('"releaseStopReason":"fix-push cap reached for proj');
-    expect(readFileSync(releaseLog, 'utf8')).toContain('fix-push cap reached for proj');
+    expect(releaseRow?.contextMeta).toContain('"releaseStopReason":"push fix cap reached for proj');
+    expect(readFileSync(releaseLog, 'utf8')).toContain('push fix cap reached for proj');
   });
 });
 
@@ -2129,5 +2016,58 @@ describe('push → dod target selection', () => {
 
     expect(mocks.launchPrWait).toHaveBeenCalledWith('proj', 42, 'owner/repo', 'https://github.com/owner/repo/pull/42');
     expect(mocks.startMarkDod).not.toHaveBeenCalled();
+  });
+});
+
+describe('workflow-driven release short-circuit', () => {
+  beforeEach(async () => {
+    await resetTestState();
+    mocks.getProjectTestConfig.mockReturnValue({
+      autoPushEnabled: true, autoCommitEnabled: false, releaseAfterRun: false, prWorkflowEnabled: false,
+    });
+    mocks.getSettings.mockReturnValue({ review_fix_max_iterations: 3 });
+  });
+
+  it('skips startProjectReview when the release is workflow-driven (test → review chain)', async () => {
+    const now = Date.now() / 1000;
+    const releaseId = 'release-workflow-driven';
+    await insertJobsAndCache(getTestDb(), [
+      makeJobRow({
+        id: releaseId,
+        project: 'proj',
+        kind: 'release',
+        startedAt: now - 60,
+        // The legacy `workflowDriven: true` contextMeta stamp was retired;
+        // the lifecycle short-circuit now gates on `releaseId` directly.
+        contextMeta: null,
+      }),
+    ]);
+    const testJob: JobData = {
+      id: 'test-1', project: 'proj', kind: 'test', pid: 99999, logPath: null, prompt: null,
+      startedAt: now - 30, finishedAt: null, exitCode: null, seen: false, durationMs: null,
+      inputTokens: null, outputTokens: null, cacheReadTokens: null, cacheCreateTokens: null,
+      sessionId: null, releaseId,
+    } as JobData;
+    await markDone(testJob, 0);
+    expect(mocks.startProjectReview).not.toHaveBeenCalled();
+  });
+
+  // Note: the previous "workflowDriven flag" test family was removed when
+  // the lifecycle short-circuit moved to gating on `releaseId` directly
+  // (see lib/jobs/lifecycle.ts ~line 496). The release-linked job above
+  // is short-circuited regardless of any contextMeta marker.
+
+  it('does not affect jobs outside a release (no releaseId)', async () => {
+    const now = Date.now() / 1000;
+    // Standalone agent run — no releaseId — should never hit the workflow-driven guard.
+    const agentJob: JobData = {
+      id: 'agent-x', project: 'proj', kind: 'agent:tests', pid: 99999, logPath: null, prompt: null,
+      startedAt: now - 30, finishedAt: null, exitCode: null, seen: false, durationMs: null,
+      inputTokens: null, outputTokens: null, cacheReadTokens: null, cacheCreateTokens: null,
+      sessionId: null, releaseId: null,
+    } as JobData;
+    await markDone(agentJob, 0);
+    // Just asserts no crash. Agent runs don't trigger the chain anyway.
+    expect(mocks.startProjectReview).not.toHaveBeenCalled();
   });
 });

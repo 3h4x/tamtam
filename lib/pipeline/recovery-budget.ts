@@ -1,7 +1,7 @@
 import { getSettings } from '@/lib/shared/config';
 
 const DEFAULT_MAX_STEP_ITERATIONS = 3;
-const DEFAULT_FIX_PUSH_ATTEMPTS = 2;
+const DEFAULT_PUSH_FIX_ATTEMPTS = 2;
 const DEFAULT_STEP_WINDOW_SECONDS = 30 * 60;
 const DEFAULT_REVIEW_FIX_MAX_ITERATIONS = 3;
 
@@ -30,8 +30,12 @@ export function getReviewFixMaxIterations(): number {
   }
 }
 
-export function getFixPushAttemptCap(): number {
-  return DEFAULT_FIX_PUSH_ATTEMPTS;
+/** Cap on automatic fix attempts triggered by repeated push hook rejections.
+ *  Counted per project per `getStepWindowSeconds` window. Higher than 0
+ *  because a stubbornly-broken lint rule shouldn't stop the pipeline forever
+ *  in a tight loop. */
+export function getPushFixAttemptCap(): number {
+  return DEFAULT_PUSH_FIX_ATTEMPTS;
 }
 
 export function getStepWindowSeconds(): number {

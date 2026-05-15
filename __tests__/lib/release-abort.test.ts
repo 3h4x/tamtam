@@ -193,8 +193,6 @@ describe('abortActiveRelease', () => {
       killed_job_id: null,
       httpStatus: 409,
     });
-    expect(execMock).toHaveBeenNthCalledWith(1, 'pm2', ['stop', 'commit-1', '--silent'], { timeout: 5000 });
-    expect(execMock).toHaveBeenNthCalledWith(2, 'pm2', ['delete', 'commit-1', '--silent'], { timeout: 5000 });
     expect(requestJobCancellationMock).toHaveBeenCalledWith('commit-1', 20_000);
     expect(updateJobMock).toHaveBeenCalledWith(expect.objectContaining({ id: 'release-1', abortedAt: expect.any(Number) }));
     expect(updateJobMock).not.toHaveBeenCalledWith(expect.objectContaining({ id: 'commit-1' }));

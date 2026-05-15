@@ -210,15 +210,13 @@ describe('probeJobStatus with pm2', () => {
     vi.resetModules();
   });
 
-  it('returns running if pm2 reports running', async () => {
-    getJobStatusMock.mockResolvedValue({ status: 'running', exitCode: null });
-
+  it('returns running for pid>0 jobs whose process is still alive', async () => {
     const job: JobData = {
-      id: 'job-pm2-running',
+      id: 'job-alive',
       project: 'proj',
       kind: 'run',
       prompt: null,
-      pid: 9999,
+      pid: process.pid, // guaranteed alive
       logPath: null,
       startedAt: Date.now() / 1000,
       finishedAt: null,
@@ -231,15 +229,13 @@ describe('probeJobStatus with pm2', () => {
     expect(job.finishedAt).toBeNull();
   });
 
-  it('marks done with exit code if pm2 reports done', async () => {
-    getJobStatusMock.mockResolvedValue({ status: 'done', exitCode: 0 });
-
+  it('marks done for pid>0 jobs whose process is gone', async () => {
     const job: JobData = {
-      id: 'job-pm2-done',
+      id: 'job-dead',
       project: 'proj',
       kind: 'run',
       prompt: null,
-      pid: 9999,
+      pid: 9_999_999, // unlikely to be a live process
       logPath: null,
       startedAt: Date.now() / 1000,
       finishedAt: null,
@@ -250,7 +246,7 @@ describe('probeJobStatus with pm2', () => {
     const status = await probeJobStatusFn(job);
     expect(status).toBe('done');
     expect(job.finishedAt).not.toBeNull();
-    expect(job.exitCode).toBe(0);
+    expect(job.exitCode).toBe(-1);
   });
 
   it('marks done via process.kill when pid no longer exists', async () => {
@@ -523,11 +519,9 @@ describe('probeJobStatus with pm2', () => {
     expect(job.exitCode).toBeNull();
   });
 
-  it('pid=0 past grace and pm2 reports done 0 → markDone(0), not -1', async () => {
-    getJobStatusMock.mockResolvedValue({ status: 'done', exitCode: 0 });
-
+  it('release kind always reports running — workflow runtime owns finalization', async () => {
     const job: JobData = {
-      id: 'release-clean-finish',
+      id: 'release-running',
       project: 'proj',
       kind: 'release',
       prompt: null,
@@ -540,8 +534,8 @@ describe('probeJobStatus with pm2', () => {
     };
 
     const status = await probeJobStatusFn(job);
-    expect(status).toBe('done');
-    expect(job.exitCode).toBe(0);
+    expect(status).toBe('running');
+    expect(job.finishedAt).toBeNull();
   });
 });
 describe('probeJobStatus – test/action kind liveness via process.kill', () => {
@@ -571,7 +565,7 @@ describe('probeJobStatus – test/action kind liveness via process.kill', () => 
     vi.resetModules();
   });
 
-  it('test kind with live pid returns running (does not hit pm2)', async () => {
+  it('test kind with live pid returns running', async () => {
     const killSpy = vi.spyOn(process, 'kill').mockReturnValue(true as ReturnType<typeof process.kill>);
     const job: JobData = {
       id: 'job-test-live',
@@ -705,10 +699,9 @@ describe('markDone – ghIssuesCache invalidation', () => {
     vi.doMock('@/lib/pipeline/start-fix', () => ({
       startFixFromJob: vi.fn().mockResolvedValue({ ok: false }),
     }));
-    vi.doMock('@/lib/pipeline/start-fix-push', () => ({
+    vi.doMock('@/lib/pipeline/push-rejection', () => ({
       isHookRejection: vi.fn().mockReturnValue(false),
       isTestFailureRejection: vi.fn().mockReturnValue(false),
-      startFixPush: vi.fn().mockResolvedValue({ ok: false }),
     }));
     vi.doMock('@/lib/pipeline/start-release', () => ({
       startRelease: vi.fn().mockResolvedValue({ ok: false }),
@@ -734,7 +727,7 @@ describe('markDone – ghIssuesCache invalidation', () => {
     vi.doUnmock('@/lib/pipeline/start-review');
     vi.doUnmock('@/lib/pipeline/start-push');
     vi.doUnmock('@/lib/pipeline/start-fix');
-    vi.doUnmock('@/lib/pipeline/start-fix-push');
+    vi.doUnmock('@/lib/pipeline/push-rejection');
     vi.doUnmock('@/lib/pipeline/start-release');
     vi.resetModules();
   });
@@ -831,10 +824,9 @@ describe('markDone – metadata extraction skipped for release kind', () => {
     vi.doMock('@/lib/pipeline/start-push', () => ({
       startProjectPush: vi.fn().mockResolvedValue({ ok: false }),
     }));
-    vi.doMock('@/lib/pipeline/start-fix-push', () => ({
+    vi.doMock('@/lib/pipeline/push-rejection', () => ({
       isHookRejection: vi.fn().mockReturnValue(false),
       isTestFailureRejection: vi.fn().mockReturnValue(false),
-      startFixPush: vi.fn().mockResolvedValue({ ok: false }),
     }));
 
     const mod = await import('@/lib/jobs/job-storage');
@@ -858,7 +850,7 @@ describe('markDone – metadata extraction skipped for release kind', () => {
     vi.doUnmock('@/lib/git/git-utils');
     vi.doUnmock('@/lib/pipeline/start-review');
     vi.doUnmock('@/lib/pipeline/start-push');
-    vi.doUnmock('@/lib/pipeline/start-fix-push');
+    vi.doUnmock('@/lib/pipeline/push-rejection');
     vi.resetModules();
   });
 
@@ -1004,10 +996,9 @@ describe('markDone – DB-level idempotency guard', () => {
     vi.doMock('@/lib/pipeline/start-fix', () => ({
       startFixFromJob: vi.fn().mockResolvedValue({ ok: false, detail: 'guard' }),
     }));
-    vi.doMock('@/lib/pipeline/start-fix-push', () => ({
+    vi.doMock('@/lib/pipeline/push-rejection', () => ({
       isHookRejection: vi.fn().mockReturnValue(false),
       isTestFailureRejection: vi.fn().mockReturnValue(false),
-      startFixPush: vi.fn().mockResolvedValue({ ok: false, detail: 'guard' }),
     }));
 
     const mod = await import('@/lib/jobs/job-storage');
@@ -1035,7 +1026,7 @@ describe('markDone – DB-level idempotency guard', () => {
     vi.doUnmock('@/lib/pipeline/start-push');
     vi.doUnmock('@/lib/pipeline/start-commit');
     vi.doUnmock('@/lib/pipeline/start-fix');
-    vi.doUnmock('@/lib/pipeline/start-fix-push');
+    vi.doUnmock('@/lib/pipeline/push-rejection');
     vi.resetModules();
   });
 

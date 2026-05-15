@@ -1,7 +1,7 @@
 // Unit tests for the release-grouping helper and buildEntries in ProjectRunsTab.
 //
 // Time-window grouping: each `release` entry collects any pipeline-kind
-// entry (test/review/fix/commit/push/mark-dod/fix-push/pr-wait) whose
+// entry (test/review/fix/commit/push/mark-dod/pr-wait) whose
 // startedAt falls inside the release's [startedAt, finishedAt ?? ∞] window.
 //
 // The component rendering is React — we only import the pure helpers so
@@ -139,15 +139,15 @@ describe('groupReleaseChildren', () => {
     expect(out[0].children).toHaveLength(2);
   });
 
-  it('folds mark-dod and fix-push as pipeline children', () => {
+  it('folds mark-dod and fix as pipeline children', () => {
     const entries = [
       makeEntry({ id: 'rel', kind: 'release', startedAt: 100, finishedAt: 300 }),
       makeEntry({ id: 'md', kind: 'mark-dod', startedAt: 150 }),
-      makeEntry({ id: 'fp', kind: 'fix-push', startedAt: 200 }),
+      makeEntry({ id: 'fx', kind: 'fix', startedAt: 200 }),
     ];
     const out = groupReleaseChildren(entries);
     expect(out).toHaveLength(1);
-    expect(out[0].children!.map((c) => c.kind).sort()).toEqual(['fix-push', 'mark-dod']);
+    expect(out[0].children!.map((c) => c.kind).sort()).toEqual(['fix', 'mark-dod']);
   });
 
   it('clusters orphaned pipeline steps within 30 min into a virtual release group', () => {
@@ -187,7 +187,7 @@ describe('groupReleaseChildren', () => {
       makeEntry({ id: 'fix1', kind: 'fix', startedAt: 1020, finishedAt: 1080, exitCode: 0 }),
       makeEntry({ id: 't2', kind: 'test', startedAt: 1090, finishedAt: 1100, exitCode: 0 }),
       makeEntry({ id: 'p1', kind: 'push', startedAt: 1110, finishedAt: 1115, exitCode: 1 }),
-      makeEntry({ id: 'fp', kind: 'fix-push', startedAt: 1120, finishedAt: 1180, exitCode: 0 }),
+      makeEntry({ id: 'fp', kind: 'fix', startedAt: 1120, finishedAt: 1180, exitCode: 0 }),
       makeEntry({ id: 'p2', kind: 'push', startedAt: 1190, finishedAt: 1200, exitCode: 0 }),
     ];
     const out = groupReleaseChildren(entries);
@@ -220,10 +220,10 @@ describe('groupReleaseChildren', () => {
     expect(out[0].failureLabel).toBe('follow-up pending');
   });
 
-  it('cluster ending on a successful fix-push still reports attention until push reruns', () => {
+  it('cluster ending on a successful push-fix still reports attention until push reruns', () => {
     const entries = [
       makeEntry({ id: 'push', kind: 'push', startedAt: 1000, finishedAt: 1010, exitCode: 1 }),
-      makeEntry({ id: 'fix-push', kind: 'fix-push', startedAt: 1020, finishedAt: 1080, exitCode: 0 }),
+      makeEntry({ id: 'fix-push', kind: 'fix', startedAt: 1020, finishedAt: 1080, exitCode: 0 }),
     ];
     const out = groupReleaseChildren(entries);
     expect(out).toHaveLength(1);

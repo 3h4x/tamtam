@@ -6,7 +6,7 @@ import { checkCliStartGate } from '@/lib/usage/resolve-provider';
 import { currentParent } from '@/lib/jobs/parent-context';
 import { resolveProjectPath } from '@/lib/shared/project-data';
 import { createJob, listJobs, probeJobStatus, updateJob } from '@/lib/jobs/job-storage';
-import { startJob } from '@/lib/jobs/pm2-jobs';
+import { startJobInProcess } from '@/lib/jobs/spawn-claude-detached';
 import { exec } from '@/lib/shared/shell';
 import { CODE_REVIEWER_SKILL } from '@/lib/skills/skills';
 import { withBasePrompt, getPermissionModeFlag, getSettings } from '@/lib/shared/config';
@@ -100,7 +100,7 @@ export async function startPrReview(
 
   try {
     // Review only needs to read code — restrict to safe read-only tools.
-    const pid = await startJob(
+    const pid = await startJobInProcess(
       job.id,
       `${claudeBin} --print --output-format stream-json --verbose --include-partial-messages --model ${defaultModel} ${getPermissionModeFlag()} --allowed-tools Read,Grep,Glob`,
       prompt,

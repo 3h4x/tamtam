@@ -302,7 +302,7 @@ describe('GET /api/projects/[schedId]/detail', () => {
 describe('PATCH /api/projects/by-project/[projectName]', () => {
   let PATCH: any;
   const clearProjectDataCacheMock = vi.fn();
-  const removeAgentScheduleMock = vi.fn();
+  const uninstallAgentScheduleMock = vi.fn().mockResolvedValue(undefined);
 
   beforeEach(async () => {
     vi.resetModules();
@@ -313,12 +313,12 @@ describe('PATCH /api/projects/by-project/[projectName]', () => {
     vi.doMock('@/lib/shared/project-data', () => ({
       clearProjectDataCache: clearProjectDataCacheMock,
     }));
-    vi.doMock('@/lib/scheduling/internal-scheduler', () => ({
-      removeAgentSchedule: removeAgentScheduleMock,
+    vi.doMock('@/lib/scheduling/agent-scheduler', () => ({
+      uninstallAgentSchedule: uninstallAgentScheduleMock,
     }));
 
     clearProjectDataCacheMock.mockClear();
-    removeAgentScheduleMock.mockClear();
+    uninstallAgentScheduleMock.mockClear();
 
     const mod = await import('@/app/api/projects/by-project/[projectName]/route');
     PATCH = mod.PATCH;
@@ -380,8 +380,8 @@ describe('PATCH /api/projects/by-project/[projectName]', () => {
     expect(data).toEqual({ project: 'proj1', archived: true, paused: false });
     expect(await archivedFlag('proj1')).toBe(true);
     expect(clearProjectDataCacheMock).toHaveBeenCalled();
-    expect(removeAgentScheduleMock).toHaveBeenCalledWith('a1');
-    expect(removeAgentScheduleMock).toHaveBeenCalledWith('a2');
+    expect(uninstallAgentScheduleMock).toHaveBeenCalledWith('a1');
+    expect(uninstallAgentScheduleMock).toHaveBeenCalledWith('a2');
   });
 
   it('unarchives a project without touching scheduled agents', async () => {
@@ -396,6 +396,6 @@ describe('PATCH /api/projects/by-project/[projectName]', () => {
     expect(data).toEqual({ project: 'proj1', archived: false, paused: false });
     expect(await archivedFlag('proj1')).toBe(false);
     expect(clearProjectDataCacheMock).toHaveBeenCalled();
-    expect(removeAgentScheduleMock).not.toHaveBeenCalled();
+    expect(uninstallAgentScheduleMock).not.toHaveBeenCalled();
   });
 });

@@ -12,7 +12,7 @@ import { normalizeModelInput } from '@/lib/agents/model-aliases';
 import { resolveCliBin, resolveCliEnv } from '@/lib/shared/cli-bin';
 import { isCliProvider } from '@/lib/usage/cli-providers';
 import { updateJob } from '@/lib/jobs/job-storage';
-import { startJob } from '@/lib/jobs/pm2-jobs';
+import { startInProcessAgentJob } from '@/lib/jobs/inline-agent';
 import { errMsg } from '@/lib/shared/types';
 import { redactSecrets } from '@/lib/shared/log-redaction';
 import { writeFileSync } from 'fs';
@@ -370,7 +370,7 @@ async function startAgentStep(
   updateJob(job);
 
   try {
-    const pid = await startJob(jobId, cmd, fullPrompt, projPath, { env: cliEnv });
+    const pid = await startInProcessAgentJob(jobId, cmd, fullPrompt, projPath, { env: cliEnv });
     job.pid = pid;
     updateJob(job);
   } catch (e: unknown) {

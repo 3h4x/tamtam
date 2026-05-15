@@ -12,6 +12,5 @@ export function isClaudeBackedJobKind(kind: unknown): boolean {
     || normalized === 'review'
     || normalized === 'fix'
     || normalized === 'fix-ci'
-    || normalized === 'fix-push'
     || isAgentJobKind(normalized);
 }

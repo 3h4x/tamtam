@@ -181,11 +181,14 @@ describe('GET /api/jobs/notifications', () => {
     expect(data.jobs[0].id).toBe('test-fail');
   });
 
-  it('does not let a successful fix-push silence an older unseen pipeline failure', async () => {
+  it('does not let a successful push-fix silence an older unseen pipeline failure', async () => {
+    // After fix-push collapsed into the generic fix kind, the silencing
+    // guard still applies — successful fix steps must not silence prior
+    // pipeline failures because the fix needs a follow-up push to verify.
     const oldFail = makeJob({ id: 'push-fail', kind: 'push', exitCode: 1, finishedAt: 1000, seen: false });
-    const fixPushSuccess = makeJob({ id: 'fix-push-ok', kind: 'fix-push', exitCode: 0, finishedAt: 2000, seen: true });
+    const fixSuccess = makeJob({ id: 'fix-ok', kind: 'fix', parentJobId: 'push-fail', exitCode: 0, finishedAt: 2000, seen: true });
     unseenFinishedMock.mockReturnValue([oldFail]);
-    listJobsMock.mockReturnValue([oldFail, fixPushSuccess]);
+    listJobsMock.mockReturnValue([oldFail, fixSuccess]);
     const res = await GET();
     const data = await res.json();
     expect(data.count).toBe(1);

@@ -282,8 +282,8 @@ export async function autoResumeOrphanedAgentRuns(): Promise<void> {
       // gates on r.attempted. This way transient config errors and lock conflicts
       // don't exhaust the retry budget without an actual release being attempted.
       orphanResumeAttempts.set(o.jobId, attempts + 1);
-      const { startRelease } = await import('@/lib/pipeline/start-release');
-      const r = await startRelease(o.project, { queueIfBlocked: true, sourceJobId: o.jobId });
+      const { dispatchReleaseWorkflow } = await import('@/lib/workflows/dispatch-release');
+      const r = await dispatchReleaseWorkflow(o.project, { queueIfBlocked: true, sourceJobId: o.jobId });
       if (r.ok) {
         console.log(
           `[auto-resume-agent] kicked off release for ${o.project} after orphaned run ${o.jobId} (attempt ${attempts + 1}/${MAX_AUTO_RESUME_ATTEMPTS})`,

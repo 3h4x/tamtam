@@ -1,5 +1,4 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { startRelease } from '@/lib/pipeline/start-release';
 
 export async function POST(
   request: NextRequest,
@@ -10,10 +9,25 @@ export async function POST(
     queue_if_blocked?: unknown;
     source_job_id?: unknown;
   };
-  const r = await startRelease(projectName, {
+  const opts = {
     queueIfBlocked: body.queue_if_blocked === true,
     sourceJobId: typeof body.source_job_id === 'string' ? body.source_job_id : undefined,
-  });
+  };
+  // Every release routes through the Vercel Workflow scaffold. The workflow
+  // body delegates to startRelease for pre-flight + first-step kickoff,
+  // then dispatches the orchestrator to chain the rest. Awaiting the run's
+  // returnValue lets the route surface 4xx/5xx from pre-flight checks the
+  // same way a direct call would.
+  let r;
+  try {
+    const { start } = await import('workflow/api');
+    const { releaseWorkflow } = await import('@/lib/workflows/release');
+    const run = await start(releaseWorkflow, [projectName, opts]);
+    r = await run.returnValue;
+  } catch (e) {
+    const msg = e instanceof Error ? e.message : String(e);
+    return NextResponse.json({ detail: `Release workflow failed: ${msg}` }, { status: 500 });
+  }
   if (!r.ok) {
     const errorBody: { detail: string; blocking_job_id?: string } = { detail: r.detail };
     if (r.blockingJobId) errorBody.blocking_job_id = r.blockingJobId;
