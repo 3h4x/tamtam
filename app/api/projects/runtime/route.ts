@@ -36,7 +36,6 @@ const PIPELINE_CHILD_KINDS = new Set([
   'review',
   'fix',
   'fix-ci',
-  'fix-push',
   'commit',
   'push',
   'mark-dod',

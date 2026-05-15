@@ -26,7 +26,7 @@ export async function POST(request: NextRequest) {
   // child jobs (test/review/fix/commit/push/...) are routed to their release
   // root by syncJobToProjectBoard, so syncing them directly would just be
   // redundant queue work — skip them here.
-  const childKinds = new Set(['test', 'review', 'fix', 'fix-push', 'fix-ci', 'commit', 'push', 'mark-dod', 'pr-wait']);
+  const childKinds = new Set(['test', 'review', 'fix', 'fix-ci', 'commit', 'push', 'mark-dod', 'pr-wait']);
   // Newest jobs first so the budget gets spent on the most recent state.
   const jobs = listJobs()
     .filter((job) => {

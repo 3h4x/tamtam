@@ -125,7 +125,6 @@ describe('bucketOf', () => {
     ['test', 'test'],
     ['fix', 'fix'],
     ['fix-ci', 'fix-ci'],
-    ['fix-push', 'fix-push'],
     ['commit', 'commit'],
     ['push', 'push'],
     ['mark-dod', 'mark-dod'],
@@ -565,11 +564,9 @@ describe('flattenPipelineSteps', () => {
     expect(result[0].depth).toBe(3);
   });
 
-  it('assigns baseDepth+1 to fix-push steps', () => {
-    const fixPush = makeFlatEntry('fp-1', 'fix-push');
-    const result = flattenPipelineSteps([fixPush], 0);
-    expect(result[0].depth).toBe(1);
-  });
+  // fix-push collapsed into fix; depth assignment is exercised by the fix
+  // depth tests above. Keeping a placeholder here so this anchor in the
+  // test file remains discoverable.
 
   it('flattens chained children back to baseDepth after a fix', () => {
     // test → fix → review (review should resume at baseDepth, not fix depth)

@@ -68,7 +68,18 @@ export async function releaseMarkDodPhaseWorkflow(
 
   const prep = await prepareAndFetchStep(projectName, override);
   if (prep.stage === 'terminal') {
-    if (releaseJobId) await dispatchOrchestratorTickStep(prep.result.ok ? prep.result.jobId : '', projectName, releaseJobId);
+    // mark-dod is the terminal phase. If we bailed early (no context, no
+    // criteria, etc.) and have no sub-step jobId for the orchestrator to
+    // wait on, finalize the release directly so the meta-job row reflects
+    // the chain's outcome.
+    if (releaseJobId) {
+      const jobId = prep.result.ok ? prep.result.jobId : '';
+      if (jobId) {
+        await dispatchOrchestratorTickStep(jobId, projectName, releaseJobId);
+      } else {
+        await finalizeReleaseDirectlyStep(releaseJobId, 0);
+      }
+    }
     return toPhaseResult(prep.result);
   }
 
@@ -76,9 +87,14 @@ export async function releaseMarkDodPhaseWorkflow(
 
   const final = await applyAndFinalizeStep(prep.bundle, prep.fetched, verify, prep.branchSwitch);
   // mark-dod is a terminal phase. Re-dispatch the orchestrator so it sees
-  // decideNextPhase=done and finalizes the release meta-job.
-  if (releaseJobId && final.ok) {
-    await dispatchOrchestratorTickStep(final.jobId, projectName, releaseJobId);
+  // decideNextPhase=done and finalizes the release meta-job. If mark-dod's
+  // own job is unavailable, finalize the release directly.
+  if (releaseJobId) {
+    if (final.ok) {
+      await dispatchOrchestratorTickStep(final.jobId, projectName, releaseJobId);
+    } else {
+      await finalizeReleaseDirectlyStep(releaseJobId, final.status >= 500 ? 1 : 0);
+    }
   }
   return toPhaseResult(final);
 }
@@ -159,5 +175,22 @@ async function dispatchOrchestratorTickStep(
     await start(releaseOrchestratorWorkflow, [jobId, { projectName, parentJobId: releaseJobId }]);
   } catch (err) {
     console.error('[mark-dod-phase] failed to re-dispatch orchestrator:', err);
+  }
+}
+
+async function finalizeReleaseDirectlyStep(
+  releaseJobId: string,
+  exitCode: number,
+): Promise<void> {
+  'use step';
+  try {
+    const { getJob } = await import('@/lib/jobs/job-storage');
+    const { finalizeReleaseJob } = await import('@/lib/jobs/lifecycle');
+    const release = getJob(releaseJobId);
+    if (release && release.kind === 'release' && release.finishedAt == null) {
+      await finalizeReleaseJob(release, exitCode);
+    }
+  } catch (err) {
+    console.error('[mark-dod-phase] failed to finalize release directly:', err);
   }
 }

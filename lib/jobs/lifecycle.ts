@@ -17,12 +17,7 @@ import type { JobData } from './types';
 import { findingsIdentity, extractFindingIds, extractFixClaims } from '@/lib/pipeline/review-contract';
 import { hasFreshLgtm, hasLocalCommitsAhead } from '@/lib/pipeline/release-state';
 import {
-  buildReleaseStepChain,
-  getEffectiveReleaseChainTail,
-  RESUMABLE_RELEASE_STEP_KINDS,
-} from '@/lib/pipeline/release-chain';
-import {
-  getFixPushAttemptCap,
+  getPushFixAttemptCap,
   getMaxStepIterations,
   getReviewFixMaxIterations,
   getStepWindowSeconds,
@@ -119,9 +114,10 @@ function recentFixCiCount(projectName: string, windowSeconds: number): number {
   ).length;
 }
 
-// Cap auto-fix-push retries so a stubbornly-broken lint rule can't spin
-// Claude in a loop. Same 30min window as review-fix for consistency.
-const MAX_FIX_PUSH_ATTEMPTS = getFixPushAttemptCap();
+// Cap auto-fix-from-push retries so a stubbornly-broken lint rule can't spin
+// Claude in a loop. Counts fix jobs spawned from a parent push within the
+// configured step window. Same 30min window as review-fix for consistency.
+const MAX_PUSH_FIX_ATTEMPTS = getPushFixAttemptCap();
 
 function parseJsonObject(value: string | null | undefined): Record<string, unknown> {
   if (!value) return {};
@@ -142,11 +138,17 @@ function persistReleaseStopReason(release: JobData, stopReason: string): void {
   updateJob(release);
 }
 
-function recentFixPushCount(projectName: string): number {
+function recentFixFromPushCount(projectName: string): number {
   const cutoff = Date.now() / 1000 - stepWindowSeconds();
-  return listJobs().filter(
-    (j) => j.project === projectName && j.kind === 'fix-push' && j.startedAt >= cutoff
-  ).length;
+  // After fix-push was unified into the generic fix kind, a "fix from push"
+  // is identified by parentJobId pointing at a push job within the window.
+  return listJobs().filter((j) => {
+    if (j.project !== projectName || j.kind !== 'fix') return false;
+    if (j.startedAt < cutoff) return false;
+    if (!j.parentJobId) return false;
+    const parent = getJob(j.parentJobId);
+    return parent?.kind === 'push';
+  }).length;
 }
 
 // Count occurrences of a verification step in the current pipeline run.
@@ -403,148 +405,13 @@ function findLinkedActiveReleaseJob(job: JobData): JobData | null {
 // runs cheaply on every markDone call and only acts when the release has
 // no running children and its most recent child finished long enough ago
 // that we're confident nothing else is about to chain.
-export const PIPELINE_STEP_KINDS = new Set(['test', 'review', 'fix', 'commit', 'push', 'fix-push', 'pr-wait', 'mark-dod']);
-const RELEASE_RECONCILE_GRACE_MS = 5_000;
+export const PIPELINE_STEP_KINDS = new Set(['test', 'review', 'fix', 'commit', 'push', 'pr-wait', 'mark-dod']);
 
-// Steps from which the pipeline is expected to chain to another step when
-// exit 0. If the chain ends at one of these and we're past the grace window,
-// the completion hook never successfully ran (server restart, hook crash).
-// We re-fire it in `reconcileStaleRelease` so the pipeline picks up where
-// it stalled instead of being silently finalized as success.
-const EXPECTED_CHAIN_KINDS = RESUMABLE_RELEASE_STEP_KINDS;
-
-// Per (release, lastStep) re-fire attempt counter — if a re-fire still
-// produces no chain after this many attempts, fall through to the original
-// finalize-as-success behavior. Keeps a permanently-stuck step from looping
-// forever across probe sweeps.
-const MAX_RECONCILE_REFIRES = 2;
-const reconcileRefireAttempts = new Map<string, number>();
-
-export async function reconcileStaleRelease(job: JobData): Promise<void> {
-  if (!PIPELINE_STEP_KINDS.has(job.kind)) return;
-  const release = findLinkedActiveReleaseJob(job);
-  if (!release) return;
-  const now = Date.now() / 1000;
-  const releaseStart = release.startedAt || 0;
-  // Candidate children: pipeline-step jobs for this project that started at
-  // or after the release. Sorted by startedAt so we can walk the chain.
-  const candidates = listJobs()
-    .filter((j) => j.project === release.project
-      && PIPELINE_STEP_KINDS.has(j.kind)
-      && linkedReleaseId(j) === release.id
-      && (j.startedAt || 0) >= releaseStart - 1)
-    .sort((a, b) => (a.startedAt || 0) - (b.startedAt || 0));
-  const chain = buildReleaseStepChain(release, candidates);
-  let edge = releaseStart;
-  for (const c of chain) {
-    if (c.finishedAt === null) return;
-    edge = c.finishedAt || edge;
-  }
-  if (chain.length === 0) return;
-  if ((now - edge) * 1000 < RELEASE_RECONCILE_GRACE_MS) return;
-  // Belt-and-braces: the in-memory listJobs() snapshot can miss a running
-  // pipeline child if the cache was reloaded mid-job (server restart,
-  // reset, etc.). Before finalizing, query the DB directly for any
-  // pipeline-step job for this project that started at/after the release
-  // and is still running. If we find one, defer — the chain is active even
-  // if the cache says otherwise.
-  // This was the "Release seems broken" bug: a long-running review
-  // (>16 min) wasn't visible in listJobs() at probe time, so the chain
-  // walk found only the test step and finalized the release with exit 0
-  // before review/commit/push had a chance to chain.
-  try {
-    const allRows = await db
-      .select({ id: schema.jobs.id, kind: schema.jobs.kind, startedAt: schema.jobs.startedAt, finishedAt: schema.jobs.finishedAt })
-      .from(schema.jobs)
-      .where(eq(schema.jobs.project, release.project));
-    const stillRunning = allRows.filter(r =>
-      PIPELINE_STEP_KINDS.has(r.kind)
-      && r.finishedAt == null
-      && (r.startedAt ?? 0) >= releaseStart - 1,
-    );
-    if (stillRunning.length > 0) return;
-  } catch {
-    /* DB error → fall through; better to potentially over-finalize than to
-       leave the release "running" forever if the DB is unreachable. */
-  }
-  if (release.abortedAt != null) {
-    try {
-      await finalizeAbortedRelease(release);
-      await notifyReleaseAborted(release);
-      console.log(`[release] reconciled aborted release ${release.id} (${job.project})`);
-    } catch (e) {
-      console.log(`[release] aborted-release reconciler failed for ${release.id}:`, e);
-    }
-    return;
-  }
-
-  // Detect "incomplete pipeline": the chain ends at a step that should have
-  // chained to another step (test→review/commit/push, fix→test, review→commit/fix,
-  // commit→push) but no successor exists. This happens when the completion hook
-  // is interrupted — most often by a server rebuild that kills the Node process
-  // between markDone() and runCompletionHooks() persisting the next step. The
-  // old behavior was to silently finalize as success, leaving releases marked
-  // "done" but never committed/pushed/merged.
-  //
-  // Recovery: re-fire the completion hook for the last step. Hooks are designed
-  // to be idempotent (they re-check git state and pipeline locks before
-  // spawning), so re-running them either kicks off the missing step (chain
-  // alive again) or naturally finalizes the release if there really is nothing
-  // to do.
-  const lastStep = getEffectiveReleaseChainTail(chain);
-  if (!lastStep) return;
-  // Stuck signature: the LAST step ended exit 0 and is one from which the
-  // pipeline expects to chain further. Earlier failures in the chain are
-  // part of normal recovery (test fails → fix → test passes); they don't
-  // disqualify. Only the final step's outcome matters for "did the chain
-  // get cut short".
-  const lastStepLooksStuck = lastStep.exitCode === 0 && EXPECTED_CHAIN_KINDS.has(lastStep.kind);
-  const refireKey = `${release.id}:${lastStep.id}`;
-  if (
-    lastStepLooksStuck &&
-    (reconcileRefireAttempts.get(refireKey) ?? 0) < MAX_RECONCILE_REFIRES
-  ) {
-    const attempt = (reconcileRefireAttempts.get(refireKey) ?? 0) + 1;
-    reconcileRefireAttempts.set(refireKey, attempt);
-    console.log(
-      `[release] reconciler detected incomplete pipeline ${release.id} (${job.project}) — last step ${lastStep.kind} ${lastStep.id} exited 0 but did not chain; re-firing completion hooks (attempt ${attempt}/${MAX_RECONCILE_REFIRES})`
-    );
-    try {
-      await runCompletionHooks(lastStep);
-    } catch (e) {
-      console.log(`[release] re-fired completion hooks failed for ${lastStep.id}:`, e);
-    }
-    // Whether the hook chained a new step (next reconcile picks up the new
-    // chain) or finalized the release itself, return — do not also call
-    // finalizeReleaseJob below, that would double-finalize on success.
-    return;
-  }
-
-  const worstExit = chain.reduce((acc, c) => Math.max(acc, pipelineExitCodeForStep(c)), 0);
-  // If we hit the re-fire cap on a still-non-chaining step, finalize as
-  // failure so the user sees the release didn't ship instead of a misleading
-  // green. Stop reason is recorded for the trace UI.
-  let stopReason: string | null = null;
-  let finalExit = worstExit;
-  if (
-    lastStepLooksStuck &&
-    (reconcileRefireAttempts.get(refireKey) ?? 0) >= MAX_RECONCILE_REFIRES
-  ) {
-    stopReason = `pipeline incomplete: stuck at ${lastStep.kind} ${lastStep.id} — completion hook never chained the next step (likely interrupted by a server restart). Re-fire attempts exhausted.`;
-    finalExit = 1;
-    persistReleaseStopReason(release, stopReason);
-    if (release.logPath) {
-      try { appendRedactedFileSync(release.logPath, `\n# release stopped — ${stopReason}\n`); } catch {}
-    }
-    reconcileRefireAttempts.delete(refireKey);
-  }
-  try {
-    await finalizeReleaseJob(release, finalExit);
-    console.log(`[release] reconciled stale release ${release.id} (${job.project}) — ${chain.length} chained step${chain.length === 1 ? '' : 's'}, exit ${finalExit}${stopReason ? ` (${stopReason})` : ''}`);
-  } catch (e) {
-    console.log(`[release] reconciler failed for ${release.id}:`, e);
-  }
-}
+// `reconcileStaleRelease` was retired when chain-loop closure landed: phase
+// workflows now re-dispatch the orchestrator with their sub-step jobId, and
+// the orchestrator finalizes the release meta-job when its dispatch result
+// is terminal. The reconciler's job (re-firing completion hooks when a
+// chain stalled) is no longer needed.
 
 export async function finalizeReleaseJob(release: JobData, exitCode: number): Promise<void> {
   if (release.finishedAt !== null) return;
@@ -581,7 +448,7 @@ export async function runCompletionHooks(job: JobData): Promise<void> {
 async function runCompletionHooksInner(job: JobData): Promise<void> {
   // Stream per-step output into the active release meta-log so the user can
   // watch the whole pipeline in one terminal.
-  if (['test', 'review', 'fix', 'commit', 'push', 'fix-push', 'pr-wait', 'mark-dod'].includes(job.kind)) {
+  if (['test', 'review', 'fix', 'commit', 'push', 'pr-wait', 'mark-dod'].includes(job.kind)) {
     const release = findLinkedActiveReleaseJob(job);
     if (release) appendToReleaseLog(release, job.kind, job);
   }
@@ -608,7 +475,7 @@ async function runCompletionHooksInner(job: JobData): Promise<void> {
   // downstream steps. Skip the hook-driven chain to avoid double-dispatch.
   // The abort + release-log-streaming paths above still run because they
   // are observability/cleanup, not orchestration.
-  if (['test', 'review', 'fix', 'commit', 'push', 'fix-push', 'mark-dod'].includes(job.kind) && job.releaseId) {
+  if (['test', 'review', 'fix', 'commit', 'push', 'mark-dod'].includes(job.kind) && job.releaseId) {
     const { isWorkflowDriven } = await import('@/lib/workflows/workflow-driven-flag');
     if (isWorkflowDriven(job, (id) => getJob(id))) {
       console.log(`[release] job ${job.id} (${job.kind}) is workflow-driven — skipping hook chain`);
@@ -618,7 +485,7 @@ async function runCompletionHooksInner(job: JobData): Promise<void> {
 
   // Auto-chain gate: the current step's results are already persisted; if a
   // hard gate is closed (pause, 5h quota, credits), don't kick off the next one.
-  if (['test', 'review', 'fix', 'commit', 'push', 'fix-push', 'mark-dod'].includes(job.kind)) {
+  if (['test', 'review', 'fix', 'commit', 'push', 'mark-dod'].includes(job.kind)) {
     const { runAutoChainGates } = await import('@/lib/shared/job-control');
     const gate = runAutoChainGates(`continue ${job.kind} chain`);
     if (gate) {
@@ -864,8 +731,33 @@ async function runCompletionHooksInner(job: JobData): Promise<void> {
         const parent = job.parentJobId ? getJob(job.parentJobId) : null;
         const fromTestFailure = parent?.kind === 'test' && parent.exitCode !== null && parent.exitCode !== 0;
         const fromCommitFailure = parent?.kind === 'commit' && parent.exitCode !== null && parent.exitCode !== 0;
+        const fromPushFailure = parent?.kind === 'push' && parent.exitCode !== null && parent.exitCode !== 0;
 
-        if (fromCommitFailure) {
+        if (fromPushFailure) {
+          // Hook rejection (lint/typecheck) blocked the push. After the fix,
+          // re-attempt the push — the push helper internally re-stages and
+          // re-commits any newly-edited files, so we don't need an explicit
+          // commit step in between. Cap on push retries to avoid spinning
+          // on a stubbornly-broken hook.
+          const pushCount = recentStepCount(job.project, 'push', job);
+          if (pushCount >= maxStepIterations()) {
+            releaseStopReason = `push cap reached for ${job.project} (${pushCount}/${maxStepIterations()}) — push hook keeps rejecting, stopping`;
+            noteReleaseStop(releaseStopReason);
+            notificationEvent = 'fix_loop_exhausted';
+            forcedReleaseExitCode = 1;
+          } else {
+            const { startProjectPush } = await import('@/lib/pipeline/start-push');
+            const r = await startProjectPush(job.project);
+            if (r.ok) {
+              console.log(`[fix→push] re-running push after fix ${job.id} (push #${pushCount + 1})`);
+              chainedNext = true;
+            } else {
+              releaseStopReason = `skipped re-push for ${job.project}: ${r.detail}`;
+              noteReleaseStop(releaseStopReason);
+              forcedReleaseExitCode = 1;
+            }
+          }
+        } else if (fromCommitFailure) {
           // Symmetric to fromTestFailure: re-run the commit step that failed
           // (e.g. pre-commit hook caught a regression introduced by the
           // prior fix). Cap on number of commits so a stubbornly-failing
@@ -1223,61 +1115,46 @@ async function runCompletionHooksInner(job: JobData): Promise<void> {
     }
   }
 
-  // Auto-fix-push: when a push fails because of a pre-commit / pre-push hook
-  // (husky/eslint/lint-staged), spawn a Claude fix job targeting the exact
-  // hook error and re-trigger the push once it finishes. Bounded by
-  // MAX_FIX_PUSH_ATTEMPTS per window to prevent infinite loops on a
-  // fundamentally-broken lint rule.
+  // Auto-fix from a push hook rejection: when a push fails because of a
+  // pre-commit / pre-push hook (husky/eslint/lint-staged), spawn a generic
+  // fix job that reads the hook error from the push log and edits the code.
+  // The downstream `fix → re-push` chain is handled by the fromPushFailure
+  // branch below. Bounded by MAX_PUSH_FIX_ATTEMPTS per window to prevent
+  // infinite loops on a fundamentally-broken lint rule.
   if (job.kind === 'push' && job.exitCode !== 0) {
     try {
       const rawLog = readLog(job, 100_000);
-      const { isHookRejection, isTestFailureRejection, startFixPush } = await import('@/lib/pipeline/start-fix-push');
+      const { isHookRejection, isTestFailureRejection } = await import('@/lib/pipeline/push-rejection');
       if (isTestFailureRejection(rawLog)) {
-        // Pre-push hook ran tests and they failed. fix-push is the wrong loop
-        // here — it's tuned for lint/typecheck nits, not for diagnosing test
-        // failures (especially flakes). Stop the pipeline and surface the
-        // failure so a human can decide whether to skip, fix, or rerun.
+        // Pre-push hook ran tests and they failed. The fix loop is tuned for
+        // lint/typecheck nits, not for diagnosing test failures (especially
+        // flakes). Stop the pipeline and surface the failure so a human can
+        // decide whether to skip, fix, or rerun.
         releaseStopReason = `push blocked: pre-push hook tests failed for ${job.project}`;
         noteReleaseStop(releaseStopReason);
         forcedReleaseExitCode = 1;
-        console.log(`[push] pre-push tests failed for ${job.project} — not auto-retrying via fix-push`);
+        console.log(`[push] pre-push tests failed for ${job.project} — not auto-retrying`);
       } else if (isHookRejection(rawLog)) {
-        const attempts = recentFixPushCount(job.project);
-        if (attempts < MAX_FIX_PUSH_ATTEMPTS) {
-          const r = await startFixPush(job.project, rawLog);
+        const attempts = recentFixFromPushCount(job.project);
+        if (attempts < MAX_PUSH_FIX_ATTEMPTS) {
+          const { startFixFromJob } = await import('@/lib/pipeline/start-fix');
+          const r = await startFixFromJob(job.id);
           if (r.ok) {
-            console.log(`[push] hook rejection → auto-fix-push ${r.jobId} (attempt ${attempts + 1}/${MAX_FIX_PUSH_ATTEMPTS})`);
+            console.log(`[push] hook rejection → auto-fix ${r.jobId} (attempt ${attempts + 1}/${MAX_PUSH_FIX_ATTEMPTS})`);
             chainedNext = true;
           } else {
-            console.log(`[push] hook rejection — could not start fix-push: ${r.detail}`);
+            console.log(`[push] hook rejection — could not start fix: ${r.detail}`);
           }
         } else {
-          releaseStopReason = `fix-push cap reached for ${job.project} (${attempts}/${MAX_FIX_PUSH_ATTEMPTS}) — push hook failures still need recovery`;
+          releaseStopReason = `push fix cap reached for ${job.project} (${attempts}/${MAX_PUSH_FIX_ATTEMPTS}) — push hook failures still need recovery`;
           noteReleaseStop(releaseStopReason);
           notificationEvent = 'fix_loop_exhausted';
           forcedReleaseExitCode = 1;
-          console.log(`[push] hook rejection — fix-push cap reached (${attempts}/${MAX_FIX_PUSH_ATTEMPTS}) — surfacing error`);
+          console.log(`[push] hook rejection — fix cap reached (${attempts}/${MAX_PUSH_FIX_ATTEMPTS}) — surfacing error`);
         }
       }
     } catch (e) {
-      console.log(`[push] fix-push hook error for ${job.project}:`, e);
-    }
-  }
-
-  // Chain fix-push → commit → push when Claude finishes fixing.
-  if (job.kind === 'fix-push' && job.exitCode === 0) {
-    try {
-      const { startProjectCommit } = await import('@/lib/pipeline/start-commit');
-      const r = await startProjectCommit(job.project);
-      if (r.ok) {
-        console.log(`[fix-push→commit] committed ${job.project} (${r.commitSha || 'no-op'})`);
-        chainedNext = true;
-      } else {
-        console.log(`[fix-push→commit] commit still failing for ${job.project}: ${r.detail}`);
-        chainedNext = true; // Still mark as chained — commit job will finalize
-      }
-    } catch (e) {
-      console.log(`[fix-push→commit] retry error for ${job.project}:`, e);
+      console.log(`[push] fix hook error for ${job.project}:`, e);
     }
   }
 
@@ -1520,10 +1397,7 @@ async function retryFixCi(projectName: string): Promise<void> {
 
 export async function markDone(job: JobData, exitCode: number): Promise<void> {
   // Idempotent: if already finalized, don't double-fire hooks or rewrite DB.
-  if (job.finishedAt !== null) {
-    await reconcileStaleRelease(job);
-    return;
-  }
+  if (job.finishedAt !== null) return;
   // Also check the DB — two concurrent probes can each hold a fresh JobData
   // instance (fetched via separate listJobs() calls), both see finishedAt ===
   // null, and both run the completion hook, producing double "release
@@ -1534,10 +1408,6 @@ export async function markDone(job: JobData, exitCode: number): Promise<void> {
   const dbRow = dbRows[0] ?? null;
   if (dbRow?.finishedAt != null) {
     job.finishedAt = dbRow.finishedAt; // keep in-memory object in sync
-    // A concurrent markDone (e.g. another probe) finalized this job first.
-    // Its completion hook may have crashed before finalizing the release
-    // meta-job, leaving the pipeline UI stuck on "running". Reconcile here.
-    await reconcileStaleRelease(job);
     return;
   }
   job.finishedAt = Date.now() / 1000;
@@ -1598,21 +1468,12 @@ export async function markDone(job: JobData, exitCode: number): Promise<void> {
   saveToDb(job);
   void db.delete(schema.ghIssuesCache).where(eq(schema.ghIssuesCache.project, job.project)).execute().catch(() => {});
   // Wrap completion hooks so a thrown handler can't strand the release
-  // meta-job in `running`. Without this, an error inside e.g. the test→fix
-  // hook (dynamic import failure, helper crash) would propagate up to the
-  // PM2 onExit caller, skip the finalize block below, and leave the
-  // release pipeline lock held with no child running. The
-  // reconcileStaleRelease call after the catch is the safety net that
-  // walks the chain and finalizes the release with the worst child exit.
+  // meta-job in `running`. The orchestrator workflow finalizes the meta-job
+  // when its dispatch result is terminal; we just log here.
   try {
     await runCompletionHooks(job);
   } catch (hookErr) {
     console.error(`[markDone] completion hooks threw for ${job.id}:`, hookErr);
-    try {
-      await reconcileStaleRelease(job);
-    } catch (reconcileErr) {
-      console.error(`[markDone] reconcileStaleRelease also failed for ${job.id}:`, reconcileErr);
-    }
   }
   // (Per-job PM2 entries were retired when CLI spawning moved in-process;
   // there is no PM2 entry to delete here anymore.)

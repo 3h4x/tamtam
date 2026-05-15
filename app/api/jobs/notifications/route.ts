@@ -33,8 +33,8 @@ export async function GET() {
   // Per-project superseding: if a project's most recent finished job
   // succeeded in a terminal way, hide older unseen failures for that project
   // — they no longer describe the project's current state and just clutter
-  // the bell. Remediation steps like fix/fix-push are intentionally NOT
-  // terminal: a successful fix still needs a follow-up test/review/push.
+  // the bell. Remediation steps like fix are intentionally NOT terminal:
+  // a successful fix still needs a follow-up test/review/push.
   // We consider only pipeline-relevant kinds for "supersede" so that, say, a
   // successful agent run doesn't silence an unrelated failed pipeline step
   // (and vice-versa).
@@ -43,7 +43,7 @@ export async function GET() {
   // and PIPELINE_STEP_KINDS: it is not a standard release-chain step that the
   // orchestrator schedules, and the UI groups it as a top-level entry rather
   // than nesting it under a release card.
-  const PIPELINE_LIKE = new Set(['release', 'test', 'review', 'fix', 'fix-ci', 'commit', 'push', 'fix-push', 'pr-wait', 'mark-dod']);
+  const PIPELINE_LIKE = new Set(['release', 'test', 'review', 'fix', 'fix-ci', 'commit', 'push', 'pr-wait', 'mark-dod']);
   // mark-dod is advisory and can be followed by commit/push, so it must not
   // clear older failures on its own. Neither should intermediate green steps
   // like a passing test or LGTM review: those are step-local successes, not a
@@ -53,7 +53,7 @@ export async function GET() {
 
   const isTerminalSuccess = (j: JobData): boolean => {
     if (j.finishedAt == null || j.exitCode !== 0) return false;
-    if (j.kind === 'fix' || j.kind === 'fix-ci' || j.kind === 'fix-push') return false;
+    if (j.kind === 'fix' || j.kind === 'fix-ci') return false;
     if (j.kind === 'review') return j.verdict === 'LGTM';
     return true;
   };

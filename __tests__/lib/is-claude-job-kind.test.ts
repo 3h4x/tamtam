@@ -2,7 +2,7 @@ import { describe, it, expect } from 'vitest';
 import { isClaudeJobKind } from '../../components/TerminalTab';
 
 describe('isClaudeJobKind', () => {
-  it.each(['run', 'review', 'fix', 'fix-ci', 'fix-push'])(
+  it.each(['run', 'review', 'fix', 'fix-ci'])(
     'returns true for %s',
     (kind) => {
       expect(isClaudeJobKind(kind)).toBe(true);
@@ -33,8 +33,8 @@ describe('isClaudeJobKind', () => {
   });
 
   it('does not match partial kind names', () => {
-    // e.g. 'fix-push-extra' should not match 'fix-push' via substring
-    expect(isClaudeJobKind('fix-push-extra')).toBe(false);
+    // e.g. 'fix-extra' should not match 'fix' via substring
+    expect(isClaudeJobKind('fix-extra')).toBe(false);
     expect(isClaudeJobKind('release-candidate')).toBe(false);
     // 'notfix-ci' should not match 'fix-ci'
     expect(isClaudeJobKind('notfix-ci')).toBe(false);

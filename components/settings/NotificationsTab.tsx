@@ -67,7 +67,7 @@ export function NotificationsTab({
     { key: 'notification_on_release_success' as const, label: 'Release Success', description: 'When a release pipeline completes successfully' },
     { key: 'notification_on_release_fail' as const, label: 'Release Failure', description: 'When a release pipeline fails' },
     { key: 'notification_on_release_aborted' as const, label: 'Release Aborted', description: 'When a release pipeline is aborted mid-run' },
-    { key: 'notification_on_fix_loop_exhausted' as const, label: 'Fix Loop Exhausted', description: 'When automated recovery budget is exhausted (review/test retries or fix-push attempts)' },
+    { key: 'notification_on_fix_loop_exhausted' as const, label: 'Fix Loop Exhausted', description: 'When automated recovery budget is exhausted (review/test/commit/push fix attempts)' },
     { key: 'notification_on_review_do_not_ship' as const, label: 'Review: Do Not Ship', description: 'When a review verdict is "DO NOT SHIP"' },
     { key: 'notification_on_agent_run_fail' as const, label: 'Agent Run Failure', description: 'When an agent run fails' },
     { key: 'notification_on_budget_blocked' as const, label: 'Budget Blocked', description: 'When a run is refused because the active provider crosses the configured subscription budget threshold' },

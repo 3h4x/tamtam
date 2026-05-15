@@ -13,7 +13,6 @@ const phaseFns = {
   review: vi.fn(),
   fix: vi.fn(),
   push: vi.fn(),
-  fixPush: vi.fn(),
   markDod: vi.fn(),
   prWait: vi.fn(),
 };
@@ -21,7 +20,6 @@ vi.mock('@/lib/workflows/phases/test-phase', () => ({ releaseTestPhaseWorkflow: 
 vi.mock('@/lib/workflows/phases/review-phase', () => ({ releaseReviewPhaseWorkflow: phaseFns.review }));
 vi.mock('@/lib/workflows/phases/fix-phase', () => ({ releaseFixPhaseWorkflow: phaseFns.fix }));
 vi.mock('@/lib/workflows/phases/push-phase', () => ({ releasePushPhaseWorkflow: phaseFns.push }));
-vi.mock('@/lib/workflows/phases/fix-push-phase', () => ({ releaseFixPushPhaseWorkflow: phaseFns.fixPush }));
 vi.mock('@/lib/workflows/phases/mark-dod-phase', () => ({ releaseMarkDodPhaseWorkflow: phaseFns.markDod }));
 vi.mock('@/lib/workflows/phases/pr-wait-phase', () => ({ releasePrWaitPhaseWorkflow: phaseFns.prWait }));
 
@@ -89,36 +87,41 @@ describe('dispatchPhase', () => {
     });
   });
 
-  it('dispatches releasePushPhaseWorkflow for next=push with parentJobId option', async () => {
+  it('dispatches releasePushPhaseWorkflow for next=push (forwards releaseJobId for re-dispatch)', async () => {
     const decision: NextPhase = { next: 'push', from: 'review' };
     const r = await dispatchPhase(decision, { projectName: 'test-tt', parentJobId: 'release-1' });
-    expect(startMock).toHaveBeenCalledWith(phaseFns.push, ['test-tt', { parentJobId: 'release-1' }]);
+    expect(startMock).toHaveBeenCalledWith(phaseFns.push, ['test-tt', { parentJobId: 'release-1' }, 'release-1']);
     expect(r.dispatched).toBe(true);
   });
 
-  it('dispatches releaseFixPushPhaseWorkflow for next=fix-push with hookError', async () => {
-    const decision: NextPhase = { next: 'fix-push', from: 'push' };
+  it('dispatches releaseFixPhaseWorkflow for next=fix from a push source (unified fix)', async () => {
+    const decision: NextPhase = { next: 'fix', from: 'push' };
     const r = await dispatchPhase(decision, {
       projectName: 'test-tt',
-      hookError: 'eslint: no-unused-vars at line 5',
+      prevJobId: 'push-job-1',
+      parentJobId: 'release-1',
     });
-    expect(startMock).toHaveBeenCalledWith(phaseFns.fixPush, [
-      'test-tt',
-      'eslint: no-unused-vars at line 5',
-    ]);
+    expect(startMock).toHaveBeenCalledWith(phaseFns.fix, ['push-job-1', 'test-tt', 'release-1']);
     expect(r.dispatched).toBe(true);
   });
 
-  it('reports missing_context for next=fix-push without hookError', async () => {
-    const decision: NextPhase = { next: 'fix-push', from: 'push' };
-    const r = await dispatchPhase(decision, { projectName: 'test-tt' });
-    expect(startMock).not.toHaveBeenCalled();
-    expect(r).toEqual({
-      dispatched: false,
-      reason: 'missing_context',
-      phase: 'fix-push',
-      missing: ['hookError'],
-    });
+  it('dispatches releaseTestPhaseWorkflow for next=test (re-verify after fix)', async () => {
+    const decision: NextPhase = { next: 'test', from: 'fix' };
+    const r = await dispatchPhase(decision, { projectName: 'test-tt', parentJobId: 'release-1' });
+    expect(startMock).toHaveBeenCalledWith(phaseFns.test, ['test-tt', 'release-1']);
+    expect(r.dispatched).toBe(true);
+  });
+
+  it('dispatches releaseCommitPhaseWorkflow for next=commit (re-attempt after fix-from-commit)', async () => {
+    // commit-phase takes (projectName, options, releaseJobId).
+    const phaseFnsCommit = vi.fn();
+    vi.doMock('@/lib/workflows/phases/commit-phase', () => ({ releaseCommitPhaseWorkflow: phaseFnsCommit }));
+    const { dispatchPhase: dispatchPhaseFresh } = await import('@/lib/workflows/dispatch-phase');
+    const decision: NextPhase = { next: 'commit', from: 'fix' };
+    const r = await dispatchPhaseFresh(decision, { projectName: 'test-tt', parentJobId: 'release-1' });
+    expect(startMock).toHaveBeenCalledWith(phaseFnsCommit, ['test-tt', { parentJobId: 'release-1' }, 'release-1']);
+    expect(r.dispatched).toBe(true);
+    vi.doUnmock('@/lib/workflows/phases/commit-phase');
   });
 
   it('dispatches releaseMarkDodPhaseWorkflow with optional override + releaseJobId', async () => {

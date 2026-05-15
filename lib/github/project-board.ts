@@ -470,7 +470,7 @@ export async function ensureProjectBoard(overrides?: Partial<BoardSettingsSnapsh
 }
 
 function isPipelineChild(job: JobData): boolean {
-  return ['test', 'review', 'fix', 'commit', 'push', 'fix-push', 'mark-dod', 'pr-wait'].includes(job.kind);
+  return ['test', 'review', 'fix', 'commit', 'push', 'mark-dod', 'pr-wait'].includes(job.kind);
 }
 
 function resolveRootJob(job: JobData): JobData | null {

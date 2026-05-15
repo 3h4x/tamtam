@@ -40,9 +40,10 @@ export type TestPhaseResult =
 
 export async function releaseTestPhaseWorkflow(
   projectName: string,
+  releaseJobId?: string,
 ): Promise<TestPhaseResult> {
   'use workflow';
-  const started = await spawnTestStep(projectName);
+  const started = await spawnTestStep(projectName, releaseJobId);
   if (!started.ok) {
     return {
       ok: false,
@@ -53,6 +54,12 @@ export async function releaseTestPhaseWorkflow(
     };
   }
   const waited = await awaitTestCompletionStep(started.jobId);
+  // Close the loop: re-dispatch the orchestrator for this sub-step so the
+  // chain continues fully through workflow runs (test → review on pass,
+  // test → fix on fail).
+  if (waited.finished && releaseJobId) {
+    await dispatchOrchestratorTickStep(started.jobId, projectName, releaseJobId);
+  }
   return {
     ok: true,
     jobId: started.jobId,
@@ -63,14 +70,36 @@ export async function releaseTestPhaseWorkflow(
   };
 }
 
-async function spawnTestStep(projectName: string): Promise<StartTestResult> {
+async function spawnTestStep(
+  projectName: string,
+  releaseJobId?: string,
+): Promise<StartTestResult> {
   'use step';
   const { startProjectTest } = await import('@/lib/pipeline/start-test');
-  return startProjectTest(projectName);
+  // See review-phase.ts for the rationale: parentContext doesn't carry across
+  // workflow step boundaries, so wrap explicitly to preserve release linkage.
+  if (!releaseJobId) return startProjectTest(projectName);
+  const { runWithParent } = await import('@/lib/jobs/parent-context');
+  return runWithParent(releaseJobId, () => startProjectTest(projectName));
 }
 
 async function awaitTestCompletionStep(jobId: string): Promise<WaitForJobResult> {
   'use step';
   const { waitForJobCompletion } = await import('@/lib/workflows/wait-for-job');
   return waitForJobCompletion(jobId);
+}
+
+async function dispatchOrchestratorTickStep(
+  jobId: string,
+  projectName: string,
+  releaseJobId: string,
+): Promise<void> {
+  'use step';
+  try {
+    const { start } = await import('workflow/api');
+    const { releaseOrchestratorWorkflow } = await import('@/lib/workflows/release-orchestrator');
+    await start(releaseOrchestratorWorkflow, [jobId, { projectName, parentJobId: releaseJobId }]);
+  } catch (err) {
+    console.error('[test-phase] failed to re-dispatch orchestrator:', err);
+  }
 }

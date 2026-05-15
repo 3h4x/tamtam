@@ -34,7 +34,7 @@ export async function releaseReviewPhaseWorkflow(
   releaseJobId?: string,
 ): Promise<ReviewPhaseResult> {
   'use workflow';
-  const started = await spawnReviewStep(projectName);
+  const started = await spawnReviewStep(projectName, releaseJobId);
   if (!started.ok) {
     return {
       ok: false,
@@ -64,10 +64,21 @@ export async function releaseReviewPhaseWorkflow(
   };
 }
 
-async function spawnReviewStep(projectName: string): Promise<StartReviewResult> {
+async function spawnReviewStep(
+  projectName: string,
+  releaseJobId?: string,
+): Promise<StartReviewResult> {
   'use step';
   const { startProjectReview } = await import('@/lib/pipeline/start-review');
-  return startProjectReview(projectName);
+  // Wrap in parentContext so the spawned review job inherits release linkage.
+  // Without this, createJob() reads currentParent() as null inside the workflow
+  // runtime (AsyncLocalStorage doesn't carry across step boundaries) and the
+  // review row ends up with parent_job_id=NULL, release_id=NULL — which then
+  // causes isWorkflowDriven() to return false and the legacy lifecycle hook
+  // double-dispatches the next step.
+  if (!releaseJobId) return startProjectReview(projectName);
+  const { runWithParent } = await import('@/lib/jobs/parent-context');
+  return runWithParent(releaseJobId, () => startProjectReview(projectName));
 }
 
 async function awaitReviewCompletionStep(jobId: string): Promise<WaitForJobResult> {

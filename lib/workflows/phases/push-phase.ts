@@ -30,10 +30,14 @@ export type PushPhaseResult =
 export async function releasePushPhaseWorkflow(
   projectName: string,
   options: { parentJobId?: string | null } = {},
+  releaseJobId?: string,
 ): Promise<PushPhaseResult> {
   'use workflow';
-  const r = await pushStep(projectName, options);
+  const r = await pushStep(projectName, options, releaseJobId);
   if (!r.ok) {
+    if (releaseJobId && r.jobId) {
+      await dispatchOrchestratorTickStep(r.jobId, projectName, releaseJobId);
+    }
     return {
       ok: false,
       reason: 'push_failed',
@@ -41,6 +45,13 @@ export async function releasePushPhaseWorkflow(
       detail: r.detail,
       ...(r.blockingJobId ? { blockingJobId: r.blockingJobId } : {}),
     };
+  }
+  // Re-dispatch orchestrator so the chain continues into mark-dod (or back
+  // to fix if the hook rejected the push). Without this, the release
+  // meta-job would stay running because push is the chain's transition
+  // point into the post-push branch.
+  if (releaseJobId && r.jobId) {
+    await dispatchOrchestratorTickStep(r.jobId, projectName, releaseJobId);
   }
   return {
     ok: true,
@@ -55,8 +66,28 @@ export async function releasePushPhaseWorkflow(
 async function pushStep(
   projectName: string,
   options: { parentJobId?: string | null },
+  releaseJobId?: string,
 ): Promise<PushResult> {
   'use step';
   const { startProjectPush } = await import('@/lib/pipeline/start-push');
-  return startProjectPush(projectName, options);
+  // See review-phase.ts: wrap in parentContext so push row inherits release.
+  const parentForContext = releaseJobId ?? options.parentJobId ?? undefined;
+  if (!parentForContext) return startProjectPush(projectName, options);
+  const { runWithParent } = await import('@/lib/jobs/parent-context');
+  return runWithParent(parentForContext, () => startProjectPush(projectName, options));
+}
+
+async function dispatchOrchestratorTickStep(
+  jobId: string,
+  projectName: string,
+  releaseJobId: string,
+): Promise<void> {
+  'use step';
+  try {
+    const { start } = await import('workflow/api');
+    const { releaseOrchestratorWorkflow } = await import('@/lib/workflows/release-orchestrator');
+    await start(releaseOrchestratorWorkflow, [jobId, { projectName, parentJobId: releaseJobId }]);
+  } catch (err) {
+    console.error('[push-phase] failed to re-dispatch orchestrator:', err);
+  }
 }

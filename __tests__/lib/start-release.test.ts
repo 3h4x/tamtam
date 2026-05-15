@@ -467,9 +467,9 @@ describe('startRelease — release pipeline entry decision tree', () => {
     if (!r.ok) expect(r.status).toBe(409);
   });
 
-  it('returns 409 when a fix-push pipeline job is already running (fix-push is a pipeline kind)', async () => {
+  it('returns 409 when a commit pipeline job is already running (commit is a pipeline kind)', async () => {
     listJobsMock.mockReturnValue([
-      { id: 'j1', project: 'proj', kind: 'fix-push', finishedAt: null },
+      { id: 'j1', project: 'proj', kind: 'commit', finishedAt: null },
     ]);
     probeJobStatusMock.mockResolvedValue('running');
     const r = await startRelease('proj');

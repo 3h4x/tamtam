@@ -20,10 +20,10 @@ import { decidePrContext } from './pr-context';
 import { appendRedactedFileSync } from '@/lib/jobs/redacted-log-writer';
 
 export type PushResult =
-  | { ok: true; commitSha: string; message: string; prUrl?: string; prNumber?: number; prRepo?: string }
-  | { ok: false; status: number; detail: string; blockingJobId?: string };
+  | { ok: true; jobId?: string; commitSha: string; message: string; prUrl?: string; prNumber?: number; prRepo?: string }
+  | { ok: false; jobId?: string; status: number; detail: string; blockingJobId?: string };
 
-const RETRIABLE_RELEASE_STEP_KINDS = new Set(['test', 'review', 'fix', 'commit', 'push', 'mark-dod', 'pr-wait', 'fix-push']);
+const RETRIABLE_RELEASE_STEP_KINDS = new Set(['test', 'review', 'fix', 'commit', 'push', 'mark-dod', 'pr-wait']);
 
 export type ReleaseRetryValidation =
   | { ok: true; parentJobId: string | null; releaseLinkedRetry: boolean }
@@ -235,14 +235,14 @@ export async function startProjectPush(
     }
 
     await markDone(job, result.ok ? 0 : 1);
-    return result;
+    return { ...result, jobId: job.id };
   } catch (error) {
     if (!(error instanceof JobCancelledError)) throw error;
     append('\n# push cancelled\n');
     const exitCode = job.cancelRequestedExitCode ?? -3;
     if (exitCode === -3 && job.abortedAt == null) job.abortedAt = Date.now() / 1000;
     await markDone(job, exitCode);
-    return { ok: false, status: 499, detail: 'push cancelled' };
+    return { ok: false, status: 499, detail: 'push cancelled', jobId: job.id };
   } finally {
     finishJobCancellation(job.id);
   }

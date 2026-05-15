@@ -18,7 +18,7 @@ import type { IssueContext } from './release-context';
 import { appendRedactedFileSync } from '@/lib/jobs/redacted-log-writer';
 import { computeReleaseDeadlineAt } from './release-timeout';
 
-const RELEASE_PIPELINE_KINDS = new Set(['test', 'review', 'fix', 'push', 'fix-push', 'pr-wait', 'mark-dod', 'release']);
+const RELEASE_PIPELINE_KINDS = new Set(['test', 'review', 'fix', 'commit', 'push', 'pr-wait', 'mark-dod', 'release']);
 
 async function isReleasePipelineRunning(projectName: string): Promise<boolean> {
   const candidates = listJobs().filter(

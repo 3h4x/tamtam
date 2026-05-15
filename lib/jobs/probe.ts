@@ -63,15 +63,7 @@ export async function probeJobStatus(job: JobData): Promise<'running' | 'done'> 
   // Import markDone lazily to avoid circular deps (lifecycle → probe → lifecycle)
   const { markDone } = await import('./lifecycle');
 
-  if (job.finishedAt !== null) {
-    // Belt-and-braces: /api/jobs polls probeJobStatus frequently; use those
-    // ticks to reconcile any stranded release whose children are all done.
-    // Cheap (one listJobs filter) and no-op when the release has already
-    // been finalized by the normal path.
-    const { reconcileStaleRelease } = await import('./lifecycle');
-    await reconcileStaleRelease(job);
-    return 'done';
-  }
+  if (job.finishedAt !== null) return 'done';
   // Push and commit run inline in the Next.js server process. Their pid is
   // set to process.pid (the server's own PID) so we can detect restarts.
   // Same pid → still in-flight on this server instance; trust self-finalization.

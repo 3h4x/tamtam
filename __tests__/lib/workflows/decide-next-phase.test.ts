@@ -78,16 +78,83 @@ describe('decideNextPhase', () => {
       });
     });
 
-    it('exit 1 → fix-push (likely hook rejection)', () => {
+    it('exit 1 → fix (generic fix handles hook rejection from push)', () => {
       expect(decideNextPhase({ kind: 'push', exitCode: 1, verdict: null })).toEqual({
-        next: 'fix-push',
+        next: 'fix',
         from: 'push',
       });
     });
   });
 
+  describe('commit kind', () => {
+    it('exit 0 → push', () => {
+      expect(decideNextPhase({ kind: 'commit', exitCode: 0, verdict: null })).toEqual({
+        next: 'push',
+        from: 'commit',
+      });
+    });
+
+    it('exit 1 → fix (commit hook rejected — fix and re-commit)', () => {
+      expect(decideNextPhase({ kind: 'commit', exitCode: 1, verdict: null })).toEqual({
+        next: 'fix',
+        from: 'commit',
+      });
+    });
+  });
+
+  describe('fix kind — re-verifies the parent step', () => {
+    it('parent test → next: test (re-run tests after fix)', () => {
+      expect(decideNextPhase({ kind: 'fix', exitCode: 0, verdict: null, parentKind: 'test' })).toEqual({
+        next: 'test',
+        from: 'fix',
+      });
+    });
+
+    it('parent review → next: review (re-run review after fix)', () => {
+      expect(decideNextPhase({ kind: 'fix', exitCode: 0, verdict: null, parentKind: 'review' })).toEqual({
+        next: 'review',
+        from: 'fix',
+      });
+    });
+
+    it('parent commit → next: commit (re-attempt commit after fix)', () => {
+      expect(decideNextPhase({ kind: 'fix', exitCode: 0, verdict: null, parentKind: 'commit' })).toEqual({
+        next: 'commit',
+        from: 'fix',
+      });
+    });
+
+    it('parent push → next: push (re-attempt push after fix-from-hook-rejection)', () => {
+      expect(decideNextPhase({ kind: 'fix', exitCode: 0, verdict: null, parentKind: 'push' })).toEqual({
+        next: 'push',
+        from: 'fix',
+      });
+    });
+
+    it('no parent → done (no step to re-verify)', () => {
+      expect(decideNextPhase({ kind: 'fix', exitCode: 0, verdict: null })).toEqual({
+        next: 'done',
+        from: 'fix',
+      });
+    });
+
+    it('null parent → done', () => {
+      expect(decideNextPhase({ kind: 'fix', exitCode: 0, verdict: null, parentKind: null })).toEqual({
+        next: 'done',
+        from: 'fix',
+      });
+    });
+
+    it('unknown parent kind → done (defensive fallback)', () => {
+      expect(decideNextPhase({ kind: 'fix', exitCode: 0, verdict: null, parentKind: 'agent:foo' })).toEqual({
+        next: 'done',
+        from: 'fix',
+      });
+    });
+  });
+
   describe('terminal kinds', () => {
-    it.each(['commit', 'fix', 'fix-push', 'mark-dod', 'pr-wait'] as const)(
+    it.each(['mark-dod', 'pr-wait'] as const)(
       '%s → done',
       (kind) => {
         expect(decideNextPhase({ kind, exitCode: 0, verdict: null })).toEqual({
@@ -96,13 +163,6 @@ describe('decideNextPhase', () => {
         });
       },
     );
-
-    it('terminal kinds with non-zero exit still return done', () => {
-      expect(decideNextPhase({ kind: 'fix-push', exitCode: 1, verdict: null })).toEqual({
-        next: 'done',
-        from: 'fix-push',
-      });
-    });
   });
 
   describe('unknown kinds', () => {

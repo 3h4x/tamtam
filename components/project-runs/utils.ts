@@ -112,7 +112,6 @@ export type KindBucket =
   | 'test'
   | 'fix'
   | 'fix-ci'
-  | 'fix-push'
   | 'commit'
   | 'push'
   | 'mark-dod'
@@ -127,7 +126,6 @@ export const ACTIVE_WORK_BUCKET_ORDER: KindBucket[] = [
   'test',
   'fix',
   'fix-ci',
-  'fix-push',
   'commit',
   'push',
   'mark-dod',
@@ -143,7 +141,6 @@ export function bucketOf(kind: string): KindBucket {
   if (kind === 'test') return 'test'
   if (kind === 'fix') return 'fix'
   if (kind === 'fix-ci') return 'fix-ci'
-  if (kind === 'fix-push') return 'fix-push'
   if (kind === 'commit') return 'commit'
   if (kind === 'push') return 'push'
   if (kind === 'mark-dod') return 'mark-dod'
@@ -159,7 +156,6 @@ export const KIND_LABEL: Record<KindBucket, string> = {
   test: 'test',
   fix: 'fix',
   'fix-ci': 'fix-ci',
-  'fix-push': 'fix-push',
   commit: 'commit',
   push: 'push',
   'mark-dod': 'dod',
@@ -175,7 +171,6 @@ export const KIND_COLOR: Record<KindBucket, string> = {
   test: 'bg-status-success/15 text-status-success',
   fix: 'bg-status-warning/15 text-status-warning',
   'fix-ci': 'bg-status-warning/15 text-status-warning',
-  'fix-push': 'bg-status-warning/15 text-status-warning',
   commit: 'bg-status-success/15 text-status-success',
   push: 'bg-status-success/15 text-status-success',
   'mark-dod': 'bg-status-info/15 text-status-info',
@@ -194,7 +189,7 @@ export function activeWorkAccentClass(kind: string): string {
   if (bucket === 'run' || bucket === 'release') return 'border-l-accent'
   if (bucket === 'review' || bucket === 'mark-dod' || bucket === 'pr-wait') return 'border-l-status-info'
   if (bucket === 'test' || bucket === 'commit' || bucket === 'push') return 'border-l-status-success'
-  if (bucket === 'fix' || bucket === 'fix-ci' || bucket === 'fix-push') return 'border-l-status-warning'
+  if (bucket === 'fix' || bucket === 'fix-ci') return 'border-l-status-warning'
   return 'border-l-border'
 }
 
@@ -211,7 +206,7 @@ export function activeWorkTitle(job: JobInfo): string {
 // step, so the UI shows it as a top-level row rather than nesting it under a
 // release card. It IS included in PIPELINE_LIKE in the notifications route so
 // that a terminal release success can supersede an older fix-ci failure.
-export const PIPELINE_CHILD_KINDS = new Set(['test', 'review', 'fix', 'commit', 'push', 'mark-dod', 'fix-push', 'pr-wait'])
+export const PIPELINE_CHILD_KINDS = new Set(['test', 'review', 'fix', 'commit', 'push', 'mark-dod', 'pr-wait'])
 
 // An entry represents a single row in the history. For `run` jobs with a
 // session_id we collapse every turn of the conversation into one entry so the
@@ -297,7 +292,7 @@ function reviewNeedsAttention(e: Entry): boolean {
 }
 
 function nonTerminalRecoveryStep(e: Entry): boolean {
-  return e.kind === 'fix' || e.kind === 'fix-push'
+  return e.kind === 'fix'
 }
 
 function advisoryNonTerminalStep(e: Entry): boolean {
@@ -377,7 +372,6 @@ function titleForJob(job: JobInfo, bucket: KindBucket): string {
   if (bucket === 'test') return 'Test run'
   if (bucket === 'fix') return 'Auto-fix'
   if (bucket === 'fix-ci') return 'Fix CI'
-  if (bucket === 'fix-push') return 'Fix push failure'
   if (bucket === 'commit') return 'Commit'
   if (bucket === 'push') return 'Push'
   if (bucket === 'mark-dod') {
@@ -437,7 +431,7 @@ export function buildEntries(jobs: JobInfo[]): Entry[] {
     //    multi-turn on a single Entry, even though one turn is `agent:foo`
     //    and the next is `run`.
     //
-    // 2. Pipeline-step jobs (review, fix, fix-ci, fix-push, commit, push,
+    // 2. Pipeline-step jobs (review, fix, fix-ci, commit, push,
     //    mark-dod, pr-wait) only merge with another job of the *same* kind.
     //    A `fix` job that resumes a `review`'s Claude session via
     //    `--resume <sessionId>` shares Claude's conversation memory — but
@@ -712,7 +706,7 @@ export function groupReleaseChildren(entries: Entry[]): Entry[] {
         const status = virtualGroupStatus(cluster)
         const finished = status !== 'running'
         // Outcome is the chain's terminal state, but recovery steps are not
-        // terminal. A cluster ending on fix/fix-push or a non-LGTM review
+        // terminal. A cluster ending on fix or a non-LGTM review
         // still needs follow-up work before it can read green.
         const attention = finished ? virtualGroupAttentionState(cluster) : null
         const vgroup: Entry = {
@@ -806,7 +800,7 @@ function sortPipelineEntriesByActivity(children: Entry[]): Entry[] {
 }
 
 function releaseStepDepth(entry: Entry, baseDepth: number): number {
-  return entry.kind === 'fix' || entry.kind === 'fix-push'
+  return entry.kind === 'fix'
     ? baseDepth + 1
     : baseDepth
 }
@@ -859,7 +853,7 @@ export function flattenReleaseChildren(children: Entry[], baseDepth: number): Ar
 
 // Flatten the pipeline chain tree into a linear {entry, depth} list. Main
 // pipeline steps (test/review/commit/push/mark-dod/pr-wait) all appear at
-// `baseDepth`. fix/fix-push appear at baseDepth+1 so they read as an
+// `baseDepth`. fix appears at baseDepth+1 so it reads as an
 // indented remediation rather than as a separate tier. After any node its
 // chained children resume at `baseDepth` — a review that follows a fix is a
 // sibling of the preceding test, not its grandchild.

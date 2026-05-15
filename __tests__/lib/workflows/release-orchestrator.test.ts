@@ -111,19 +111,21 @@ describe('releaseOrchestratorWorkflow', () => {
   });
 
   it('records terminal dispatch outcome for next=done', async () => {
+    // mark-dod is the terminal step — orchestrator should finalize the
+    // release after dispatch returns terminal.
     waitForJobCompletionMock.mockResolvedValue({
-      job: { id: 'commit-1', kind: 'commit', exitCode: 0, finishedAt: 100 },
+      job: { id: 'mark-dod-1', kind: 'mark-dod', exitCode: 0, finishedAt: 100 },
       finished: true,
       reason: 'finished',
     });
-    getJobMock.mockReturnValue({ id: 'commit-1', kind: 'commit', exitCode: 0 });
+    getJobMock.mockReturnValue({ id: 'mark-dod-1', kind: 'mark-dod', exitCode: 0 });
     dispatchPhaseMock.mockResolvedValue({
       dispatched: false,
       reason: 'terminal',
       phase: 'done',
     });
-    const r = await releaseOrchestratorWorkflow('commit-1', { projectName: 'test-tt' });
-    expect(r.decision).toEqual({ next: 'done', from: 'commit' });
+    const r = await releaseOrchestratorWorkflow('mark-dod-1', { projectName: 'test-tt' });
+    expect(r.decision).toEqual({ next: 'done', from: 'mark-dod' });
     expect(r.dispatch).toEqual({ dispatched: false, reason: 'terminal', phase: 'done' });
   });
 
@@ -149,7 +151,7 @@ describe('releaseOrchestratorWorkflow', () => {
     });
   });
 
-  it('forwards full DispatchContext (hookError, dodOverride, parentJobId)', async () => {
+  it('forwards full DispatchContext (dodOverride, parentJobId, prevJobId)', async () => {
     waitForJobCompletionMock.mockResolvedValue({
       job: { id: 'push-1', kind: 'push', exitCode: 1, finishedAt: 100 },
       finished: true,
@@ -158,20 +160,18 @@ describe('releaseOrchestratorWorkflow', () => {
     getJobMock.mockReturnValue({ id: 'push-1', kind: 'push', exitCode: 1 });
     dispatchPhaseMock.mockResolvedValue({
       dispatched: true,
-      phase: 'fix-push',
+      phase: 'fix',
       childRunId: 'wrun',
     });
     await releaseOrchestratorWorkflow('push-1', {
       projectName: 'test-tt',
-      hookError: 'lint failed at line 42',
       parentJobId: 'release-1',
       dodOverride: { issueNumber: 99 },
     });
     expect(dispatchPhaseMock).toHaveBeenCalledWith(
-      expect.objectContaining({ next: 'fix-push' }),
+      expect.objectContaining({ next: 'fix' }),
       expect.objectContaining({
         projectName: 'test-tt',
-        hookError: 'lint failed at line 42',
         parentJobId: 'release-1',
         dodOverride: { issueNumber: 99 },
         prevJobId: 'push-1',

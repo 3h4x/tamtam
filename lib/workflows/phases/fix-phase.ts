@@ -34,7 +34,7 @@ export async function releaseFixPhaseWorkflow(
   releaseJobId?: string,
 ): Promise<FixPhaseResult> {
   'use workflow';
-  const started = await spawnFixStep(sourceJobId);
+  const started = await spawnFixStep(sourceJobId, releaseJobId);
   if (!started.ok) {
     return {
       ok: false,
@@ -61,10 +61,19 @@ export async function releaseFixPhaseWorkflow(
   };
 }
 
-async function spawnFixStep(sourceJobId: string): Promise<StartFixResult> {
+async function spawnFixStep(
+  sourceJobId: string,
+  releaseJobId?: string,
+): Promise<StartFixResult> {
   'use step';
   const { startFixFromJob } = await import('@/lib/pipeline/start-fix');
-  return startFixFromJob(sourceJobId);
+  // See review-phase.ts. start-fix already passes sourceJobId as parentJobId,
+  // but the release_id derivation in createJob walks parent.releaseId — so
+  // we still need the release in scope so a fix dispatched without a chain
+  // ancestor (cold restart) inherits it from the release meta-job.
+  if (!releaseJobId) return startFixFromJob(sourceJobId);
+  const { runWithParent } = await import('@/lib/jobs/parent-context');
+  return runWithParent(releaseJobId, () => startFixFromJob(sourceJobId));
 }
 
 async function awaitFixCompletionStep(jobId: string): Promise<WaitForJobResult> {

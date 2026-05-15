@@ -26,8 +26,6 @@ export interface DispatchContext {
   projectName: string;
   /** Only the just-finished sub-step's jobId. fix-phase needs this. */
   prevJobId?: string;
-  /** Push hook rejection text. fix-push needs this. */
-  hookError?: string;
   /** PR identity. pr-wait needs all three. */
   pr?: { prNumber: number; prRepo: string; prUrl: string };
   /** Targeting override for mark-dod (issueNumber / prNumber / repo). */
@@ -62,6 +60,11 @@ export async function dispatchPhase(
     const { start } = await import('workflow/api');
     let run;
     switch (decision.next) {
+      case 'test': {
+        const { releaseTestPhaseWorkflow } = await import('@/lib/workflows/phases/test-phase');
+        run = await start(releaseTestPhaseWorkflow, [ctx.projectName, ctx.parentJobId]);
+        break;
+      }
       case 'review': {
         const { releaseReviewPhaseWorkflow } = await import('@/lib/workflows/phases/review-phase');
         run = await start(releaseReviewPhaseWorkflow, [ctx.projectName, ctx.parentJobId]);
@@ -72,14 +75,14 @@ export async function dispatchPhase(
         run = await start(releaseFixPhaseWorkflow, [ctx.prevJobId!, ctx.projectName, ctx.parentJobId]);
         break;
       }
-      case 'push': {
-        const { releasePushPhaseWorkflow } = await import('@/lib/workflows/phases/push-phase');
-        run = await start(releasePushPhaseWorkflow, [ctx.projectName, { parentJobId: ctx.parentJobId ?? null }]);
+      case 'commit': {
+        const { releaseCommitPhaseWorkflow } = await import('@/lib/workflows/phases/commit-phase');
+        run = await start(releaseCommitPhaseWorkflow, [ctx.projectName, { parentJobId: ctx.parentJobId ?? null }, ctx.parentJobId]);
         break;
       }
-      case 'fix-push': {
-        const { releaseFixPushPhaseWorkflow } = await import('@/lib/workflows/phases/fix-push-phase');
-        run = await start(releaseFixPushPhaseWorkflow, [ctx.projectName, ctx.hookError!]);
+      case 'push': {
+        const { releasePushPhaseWorkflow } = await import('@/lib/workflows/phases/push-phase');
+        run = await start(releasePushPhaseWorkflow, [ctx.projectName, { parentJobId: ctx.parentJobId ?? null }, ctx.parentJobId]);
         break;
       }
       case 'mark-dod': {
@@ -107,9 +110,7 @@ function requiredContextMissing(phase: NextPhase['next'], ctx: DispatchContext):
   const missing: string[] = [];
   if (!ctx.projectName) missing.push('projectName');
   if (phase === 'fix' && !ctx.prevJobId) missing.push('prevJobId');
-  if (phase === 'fix-push' && !ctx.hookError) missing.push('hookError');
-  // review, push, mark-dod only need projectName.
-  // 'test' and 'pr-wait' are not destinations the orchestrator picks via
-  // NextPhase — they're invoked directly by the release entry point.
+  // test, review, commit, push, mark-dod only need projectName.
+  // 'pr-wait' is invoked directly by push-phase, not via NextPhase.
   return missing;
 }

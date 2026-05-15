@@ -1,5 +1,5 @@
 // Fire-and-forget in-process spawn for Claude-CLI-backed pipeline jobs
-// (review, fix, fix-push, pr-review). Same call shape as
+// (review, fix, pr-review). Same call shape as
 // lib/jobs/pm2-jobs.ts startJob() — writes prompt file, spawns detached,
 // returns child PID immediately. Lifecycle continues via child.on('close')
 // which calls markDone(); the pipeline completion-hook chain takes it from
@@ -126,7 +126,7 @@ export async function startJobInProcess(
     try { closeSync(logFd); } catch { /* noop */ }
     // markDone parses the log for tokens/cost, applies Claude is_error overrides,
     // persists, and fires the pipeline completion-hook chain that drives the next
-    // step (review → fix loop, fix → re-review, fix-push → push retry).
+    // step (review → fix loop, fix → re-review or re-push).
     const liveJob = jobsCache.get(jobId);
     if (liveJob) {
       markDone(liveJob, rc).catch((e) => {

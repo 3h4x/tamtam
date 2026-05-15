@@ -28,10 +28,17 @@ export type CommitPhaseResult =
 export async function releaseCommitPhaseWorkflow(
   projectName: string,
   options: { parentJobId?: string | null } = {},
+  releaseJobId?: string,
 ): Promise<CommitPhaseResult> {
   'use workflow';
-  const r = await commitStep(projectName, options);
+  const r = await commitStep(projectName, options, releaseJobId);
   if (!r.ok) {
+    // Commit failures route to fix via the orchestrator (commit fail → fix).
+    // We don't have a jobId here unless start-commit created a row; if it did,
+    // re-dispatch so the orchestrator can decide.
+    if (releaseJobId) {
+      await dispatchOrchestratorTickStep(null, projectName, releaseJobId);
+    }
     return {
       ok: false,
       reason: 'commit_failed',
@@ -39,6 +46,10 @@ export async function releaseCommitPhaseWorkflow(
       detail: r.detail,
       ...(r.blockingJobId ? { blockingJobId: r.blockingJobId } : {}),
     };
+  }
+  // commit success → re-dispatch so orchestrator chains into push.
+  if (releaseJobId && r.jobId) {
+    await dispatchOrchestratorTickStep(r.jobId, projectName, releaseJobId);
   }
   return {
     ok: true,
@@ -51,8 +62,29 @@ export async function releaseCommitPhaseWorkflow(
 async function commitStep(
   projectName: string,
   options: { parentJobId?: string | null },
+  releaseJobId?: string,
 ): Promise<CommitResult> {
   'use step';
   const { startProjectCommit } = await import('@/lib/pipeline/start-commit');
-  return startProjectCommit(projectName, options);
+  // See review-phase.ts: wrap in parentContext so commit row inherits release.
+  const parentForContext = releaseJobId ?? options.parentJobId ?? undefined;
+  if (!parentForContext) return startProjectCommit(projectName, options);
+  const { runWithParent } = await import('@/lib/jobs/parent-context');
+  return runWithParent(parentForContext, () => startProjectCommit(projectName, options));
+}
+
+async function dispatchOrchestratorTickStep(
+  jobId: string | null,
+  projectName: string,
+  releaseJobId: string,
+): Promise<void> {
+  'use step';
+  if (!jobId) return;
+  try {
+    const { start } = await import('workflow/api');
+    const { releaseOrchestratorWorkflow } = await import('@/lib/workflows/release-orchestrator');
+    await start(releaseOrchestratorWorkflow, [jobId, { projectName, parentJobId: releaseJobId }]);
+  } catch (err) {
+    console.error('[commit-phase] failed to re-dispatch orchestrator:', err);
+  }
 }

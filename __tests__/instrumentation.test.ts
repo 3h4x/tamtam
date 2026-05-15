@@ -311,7 +311,11 @@ describe('instrumentation', () => {
       return { execMock, markDoneMock, reconcileStaleReleaseMock, deleteRun };
     }
 
-    it('reconciles a stranded release from its newest finished child after the handoff grace', async () => {
+    it('finalizes a stranded release directly via markDone after the handoff grace', async () => {
+      // After the chain-loop closure landed, reapOrphanReleases no longer
+      // delegates to reconcileStaleRelease — it calls markDone(release, -1)
+      // directly because workflow-driven releases finalize themselves and
+      // anything stranded past the grace window really did get orphaned.
       vi.useFakeTimers();
       try {
         vi.setSystemTime(new Date('2026-05-10T12:00:00Z'));
@@ -319,18 +323,14 @@ describe('instrumentation', () => {
           id: 'release-1', project: 'proj', kind: 'release', finishedAt: null, startedAt: 100,
         };
         const push = { id: 'push-1', project: 'proj', kind: 'push', releaseId: 'release-1', finishedAt: 150, startedAt: 140 };
-        const { markDoneMock, reconcileStaleReleaseMock } = mockOrphanReleaseDeps({
+        const { markDoneMock } = mockOrphanReleaseDeps({
           jobs: [release, push],
-          reconcileStaleReleaseMock: vi.fn().mockImplementation(async () => {
-            release.finishedAt = 160;
-          }),
         });
 
         const { reapOrphanReleases } = await import('@/instrumentation-node');
         await reapOrphanReleases();
 
-        expect(reconcileStaleReleaseMock).toHaveBeenCalledWith(push);
-        expect(markDoneMock).not.toHaveBeenCalled();
+        expect(markDoneMock).toHaveBeenCalledWith(release, -1);
       } finally {
         vi.useRealTimers();
       }
@@ -566,7 +566,7 @@ describe('instrumentation', () => {
     ) {
       const probeJobStatus = options.probeJobStatus ?? vi.fn().mockResolvedValue(undefined);
       const reconcileStaleRelease = options.reconcileStaleRelease ?? vi.fn().mockResolvedValue(undefined);
-      const pipelineStepKinds = options.pipelineStepKinds ?? new Set(['test', 'review', 'fix', 'commit', 'push', 'fix-push', 'pr-wait', 'mark-dod']);
+      const pipelineStepKinds = options.pipelineStepKinds ?? new Set(['test', 'review', 'fix', 'commit', 'push', 'pr-wait', 'mark-dod']);
       vi.doMock('@/lib/jobs/job-storage', () => ({ listJobs: () => jobs, probeJobStatus, reconcileStaleRelease, PIPELINE_STEP_KINDS: pipelineStepKinds }));
       return { probeJobStatus, reconcileStaleRelease };
     }
@@ -581,7 +581,6 @@ describe('instrumentation', () => {
         makeJob('review'),
         makeJob('fix'),
         makeJob('fix-ci'),
-        makeJob('fix-push'),
         makeJob('agent:my-agent'),
       ]);
       mockDeps([]);
@@ -589,7 +588,7 @@ describe('instrumentation', () => {
       const { runProbeSweep } = await import('@/instrumentation-node');
       await runProbeSweep();
 
-      expect(probeJobStatus).toHaveBeenCalledTimes(6);
+      expect(probeJobStatus).toHaveBeenCalledTimes(5);
     });
 
     it('skips already-finished jobs', async () => {
@@ -605,7 +604,7 @@ describe('instrumentation', () => {
       expect(probeJobStatus).toHaveBeenCalledTimes(1);
     });
 
-    it('also probes pipeline-step kinds (test/commit/push/fix-push)', async () => {
+    it('also probes pipeline-step kinds (test/commit/push)', async () => {
       // A Next.js restart between a pipeline step's exit and the next sweep
       // tick would otherwise strand these rows: probeJobStatus knows how to
       // reap them, but only if the sweep dispatches them.
@@ -613,7 +612,6 @@ describe('instrumentation', () => {
         makeJob('test'),
         makeJob('commit'),
         makeJob('push'),
-        makeJob('fix-push'),
         makeJob('run'),
       ]);
       mockDeps([]);
@@ -621,7 +619,7 @@ describe('instrumentation', () => {
       const { runProbeSweep } = await import('@/instrumentation-node');
       await runProbeSweep();
 
-      expect(probeJobStatus).toHaveBeenCalledTimes(5);
+      expect(probeJobStatus).toHaveBeenCalledTimes(4);
     });
 
     it('swallows individual probe errors and continues probing remaining jobs', async () => {

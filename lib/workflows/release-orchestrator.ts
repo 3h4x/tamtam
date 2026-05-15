@@ -62,7 +62,11 @@ async function decideStep(jobId: string): Promise<NextPhase> {
   const job = getJob(jobId);
   if (!job) return { next: 'unknown', from: 'unknown', reason: `job ${jobId} not found in cache` };
   const verdict = job.kind === 'review' ? getVerdict(job) : null;
-  return decideNextPhase({ kind: job.kind, exitCode: job.exitCode ?? -1, verdict });
+  // Fix completions need the parent's kind to route back to re-verification.
+  // Non-fix kinds ignore parentKind so this is harmless when not relevant.
+  const parent = job.parentJobId ? getJob(job.parentJobId) : null;
+  const parentKind = parent?.kind ?? null;
+  return decideNextPhase({ kind: job.kind, exitCode: job.exitCode ?? -1, verdict, parentKind });
 }
 
 async function dispatchStep(

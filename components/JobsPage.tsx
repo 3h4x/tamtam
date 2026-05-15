@@ -142,7 +142,7 @@ export function JobsPage() {
   const loadedCounts = useMemo(() => {
     const c = {
       all: entries.length, running: 0, done: 0, failed: 0,
-      run: 0, release: 0, review: 0, test: 0, fix: 0, 'fix-ci': 0, 'fix-push': 0,
+      run: 0, release: 0, review: 0, test: 0, fix: 0, 'fix-ci': 0,
       commit: 0, push: 0, 'mark-dod': 0, 'pr-wait': 0, agent: 0, other: 0,
     } as Record<string, number>
     for (const e of entries) {
@@ -291,7 +291,7 @@ export function JobsPage() {
           )
         })}
         <span className="shrink-0 h-5 w-px bg-border mx-1" aria-hidden />
-        {(['run', 'release', 'review', 'test', 'fix', 'fix-ci', 'fix-push', 'commit', 'push', 'mark-dod', 'pr-wait', 'agent', 'other'] as const).map((b) => {
+        {(['run', 'release', 'review', 'test', 'fix', 'fix-ci', 'commit', 'push', 'mark-dod', 'pr-wait', 'agent', 'other'] as const).map((b) => {
           const count = loadedCounts[b] ?? 0
           const active = filter.kind === 'bucket' && filter.bucket === b
           if (count === 0 && !active) return null

@@ -699,10 +699,9 @@ describe('markDone – ghIssuesCache invalidation', () => {
     vi.doMock('@/lib/pipeline/start-fix', () => ({
       startFixFromJob: vi.fn().mockResolvedValue({ ok: false }),
     }));
-    vi.doMock('@/lib/pipeline/start-fix-push', () => ({
+    vi.doMock('@/lib/pipeline/push-rejection', () => ({
       isHookRejection: vi.fn().mockReturnValue(false),
       isTestFailureRejection: vi.fn().mockReturnValue(false),
-      startFixPush: vi.fn().mockResolvedValue({ ok: false }),
     }));
     vi.doMock('@/lib/pipeline/start-release', () => ({
       startRelease: vi.fn().mockResolvedValue({ ok: false }),
@@ -728,7 +727,7 @@ describe('markDone – ghIssuesCache invalidation', () => {
     vi.doUnmock('@/lib/pipeline/start-review');
     vi.doUnmock('@/lib/pipeline/start-push');
     vi.doUnmock('@/lib/pipeline/start-fix');
-    vi.doUnmock('@/lib/pipeline/start-fix-push');
+    vi.doUnmock('@/lib/pipeline/push-rejection');
     vi.doUnmock('@/lib/pipeline/start-release');
     vi.resetModules();
   });
@@ -825,10 +824,9 @@ describe('markDone – metadata extraction skipped for release kind', () => {
     vi.doMock('@/lib/pipeline/start-push', () => ({
       startProjectPush: vi.fn().mockResolvedValue({ ok: false }),
     }));
-    vi.doMock('@/lib/pipeline/start-fix-push', () => ({
+    vi.doMock('@/lib/pipeline/push-rejection', () => ({
       isHookRejection: vi.fn().mockReturnValue(false),
       isTestFailureRejection: vi.fn().mockReturnValue(false),
-      startFixPush: vi.fn().mockResolvedValue({ ok: false }),
     }));
 
     const mod = await import('@/lib/jobs/job-storage');
@@ -852,7 +850,7 @@ describe('markDone – metadata extraction skipped for release kind', () => {
     vi.doUnmock('@/lib/git/git-utils');
     vi.doUnmock('@/lib/pipeline/start-review');
     vi.doUnmock('@/lib/pipeline/start-push');
-    vi.doUnmock('@/lib/pipeline/start-fix-push');
+    vi.doUnmock('@/lib/pipeline/push-rejection');
     vi.resetModules();
   });
 
@@ -998,10 +996,9 @@ describe('markDone – DB-level idempotency guard', () => {
     vi.doMock('@/lib/pipeline/start-fix', () => ({
       startFixFromJob: vi.fn().mockResolvedValue({ ok: false, detail: 'guard' }),
     }));
-    vi.doMock('@/lib/pipeline/start-fix-push', () => ({
+    vi.doMock('@/lib/pipeline/push-rejection', () => ({
       isHookRejection: vi.fn().mockReturnValue(false),
       isTestFailureRejection: vi.fn().mockReturnValue(false),
-      startFixPush: vi.fn().mockResolvedValue({ ok: false, detail: 'guard' }),
     }));
 
     const mod = await import('@/lib/jobs/job-storage');
@@ -1029,7 +1026,7 @@ describe('markDone – DB-level idempotency guard', () => {
     vi.doUnmock('@/lib/pipeline/start-push');
     vi.doUnmock('@/lib/pipeline/start-commit');
     vi.doUnmock('@/lib/pipeline/start-fix');
-    vi.doUnmock('@/lib/pipeline/start-fix-push');
+    vi.doUnmock('@/lib/pipeline/push-rejection');
     vi.resetModules();
   });
 

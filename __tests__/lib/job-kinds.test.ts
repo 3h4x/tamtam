@@ -19,7 +19,6 @@ describe('job kinds', () => {
     expect(isClaudeBackedJobKind('review')).toBe(true);
     expect(isClaudeBackedJobKind('fix')).toBe(true);
     expect(isClaudeBackedJobKind('fix-ci')).toBe(true);
-    expect(isClaudeBackedJobKind('fix-push')).toBe(true);
     expect(isClaudeBackedJobKind('agent:security-review')).toBe(true);
     expect(isClaudeBackedJobKind('release')).toBe(false);
     expect(isClaudeBackedJobKind(undefined)).toBe(false);

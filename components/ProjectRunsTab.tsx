@@ -43,7 +43,7 @@ function filterKey(f: Filter): string {
 
 // Render a chained-child node (e.g. a release nested under an agent run).
 // For release nodes the pipeline steps are flattened so test/review/commit/push
-// all appear at the same depth; fix/fix-push are one level deeper.
+// all appear at the same depth; fix is one level deeper.
 function renderChain(
   node: Entry,
   depth: number,
@@ -228,7 +228,7 @@ export function ProjectRunsTab({ projectName, jobsPaused = false }: ProjectRunsT
   const counts = useMemo(() => {
     const c = {
       all: entries.length, running: 0, failed: 0,
-      run: 0, release: 0, review: 0, test: 0, fix: 0, 'fix-ci': 0, 'fix-push': 0,
+      run: 0, release: 0, review: 0, test: 0, fix: 0, 'fix-ci': 0,
       commit: 0, push: 0, 'mark-dod': 0, 'pr-wait': 0, agent: 0, other: 0,
     } as Record<string, number>
     for (const e of entries) {
@@ -536,7 +536,7 @@ export function ProjectRunsTab({ projectName, jobsPaused = false }: ProjectRunsT
           )
         })}
         <span className="shrink-0 h-5 w-px bg-border mx-1" aria-hidden />
-        {(['run', 'release', 'review', 'test', 'fix', 'fix-ci', 'fix-push', 'commit', 'push', 'mark-dod', 'pr-wait', 'agent', 'other'] as const).map((b) => {
+        {(['run', 'release', 'review', 'test', 'fix', 'fix-ci', 'commit', 'push', 'mark-dod', 'pr-wait', 'agent', 'other'] as const).map((b) => {
           const count = counts[b] ?? 0
           const active = filter.kind === 'bucket' && filter.bucket === b
           if (count === 0 && !active) return null
@@ -668,7 +668,7 @@ export function ProjectRunsTab({ projectName, jobsPaused = false }: ProjectRunsT
                       {isExpandable && isExpanded && (
                         <div className="bg-bg-primary/40">
                           {/* For release/vgroup rows: flatten the chain so test/review/commit/push
-                              all appear at depth 1 and fix/fix-push appear at depth 2.
+                              all appear at depth 1 and fix appears at depth 2.
                               For agent/run rows that own a nested release: use renderChain
                               so the release itself shows at depth 1 with its steps below it. */}
                           {isReleaseParent

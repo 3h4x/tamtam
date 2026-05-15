@@ -278,7 +278,7 @@ const ORPHAN_RELEASE_HANDOFF_GRACE_SEC = 5;
 
 export async function reapOrphanReleases(): Promise<void> {
   try {
-    const { listJobs, markDone, reconcileStaleRelease, getJob } = await import('./lib/jobs/job-storage');
+    const { listJobs, markDone } = await import('./lib/jobs/job-storage');
     const { db, schema } = await import('./lib/db');
     const { eq } = await import('drizzle-orm');
 
@@ -290,10 +290,10 @@ export async function reapOrphanReleases(): Promise<void> {
       const runningChild = releaseChildren.find((candidate) => candidate.finishedAt === null);
       if (runningChild) continue;
 
-      // Reap/reconcile only when the project lock is absent, still owned by
-      // this release, or stuck on the `${project}-release-pending`
-      // placeholder. Any other owner means a different release legitimately
-      // owns the project now.
+      // Reap only when the project lock is absent, still owned by this
+      // release, or stuck on the `${project}-release-pending` placeholder.
+      // Any other owner means a different release legitimately owns the
+      // project now.
       const lockRows = await db.select().from(schema.pipelineLocks).where(eq(schema.pipelineLocks.project, job.project)).limit(1);
       const lockRow = lockRows[0] ?? null;
       const placeholderId = `${job.project}-release-pending`;
@@ -302,31 +302,16 @@ export async function reapOrphanReleases(): Promise<void> {
       const ownsOrPlaceholder = !lockRow || lockedByThisRelease || lockedByPlaceholder;
       if (!ownsOrPlaceholder) continue;
 
-      // If at least one child step finished before the restart, prefer
-      // release reconciliation over force-reaping. That preserves the normal
-      // "release exit code mirrors the completed chain" behavior while still
-      // healing rows stranded after the last child's markDone path died.
+      // Only reap once the last child has been quiet for a grace window.
+      // Workflow-driven releases that complete cleanly finalize themselves
+      // via the orchestrator's terminal-decision step; anything stranded
+      // past this point really did get orphaned by a server restart.
       const latestFinishedChild = releaseChildren.find((candidate) => candidate.finishedAt !== null) ?? null;
       const newestChildEdge = latestFinishedChild
         ? Math.max(latestFinishedChild.finishedAt || 0, latestFinishedChild.startedAt || 0)
         : 0;
       const quietLongEnough = newestChildEdge === 0 || Date.now() / 1000 - newestChildEdge >= ORPHAN_RELEASE_HANDOFF_GRACE_SEC;
-      if (latestFinishedChild && quietLongEnough) {
-        try {
-          await reconcileStaleRelease(latestFinishedChild);
-        } catch (err) {
-          console.error(`[boot] reconcileStaleRelease failed for orphan release ${job.id}:`, err);
-        }
-        if (getJob(job.id)?.finishedAt != null) {
-          console.log(`[boot] reconciled stranded release ${job.id} from child ${latestFinishedChild.id}`);
-          continue;
-        }
-      }
-
       if (latestFinishedChild && !quietLongEnough) continue;
-
-      // (Per-release PM2 entries were retired with the bash release monitor —
-      // there's no PM2 process to stop/delete here anymore.)
 
       // Release the lock if this orphan owns it (or it's stuck on the
       // unfinished placeholder).

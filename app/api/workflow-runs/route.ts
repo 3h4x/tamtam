@@ -92,24 +92,17 @@ export async function GET(request: Request): Promise<NextResponse> {
   }
 }
 
-// "workflow//./lib/workflows/release//releaseObservationWorkflow" → "releaseObservationWorkflow"
-// Surfaces the workflow env-flag state so the /workflow-runs UI can show
-// whether the orchestrator is actually driving releases or just observing.
-// All three signals here come from process.env so they reflect the boot-time
-// config — toggling `.env.local` and restarting is the canonical way to
-// change them.
+// Surfaces the workflow runtime state for the /workflow-runs UI. Drive mode
+// is the only release path now; the observation-only fallback and the
+// `TAMTAM_RELEASE_WORKFLOW_DRIVE` env gate were retired with the legacy
+// reconciler. Response shape preserved for existing UI consumers.
 function buildMeta() {
   const workflowEnabled = process.env.WORKFLOW_TARGET_WORLD != null && process.env.WORKFLOW_TARGET_WORLD.length > 0;
-  const releaseWorkflowDrive = process.env.TAMTAM_RELEASE_WORKFLOW_DRIVE !== '0';
-  // releaseWorkflow is always true now — kept on the response shape so
-  // existing UI consumers keep rendering, but it's no longer toggleable.
-  const releaseWorkflow = true;
-  const mode: 'observation_only' | 'drive' = releaseWorkflowDrive ? 'drive' : 'observation_only';
   return {
     workflowEnabled,
-    releaseWorkflow,
-    releaseWorkflowDrive,
-    mode,
+    releaseWorkflow: true,
+    releaseWorkflowDrive: true,
+    mode: 'drive' as const,
   };
 }
 
