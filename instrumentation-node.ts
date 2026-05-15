@@ -459,6 +459,102 @@ export async function registerNode(): Promise<void> {
   runCleanup();
   setInterval(runCleanup, 24 * 60 * 60 * 1000);
 
+  // Phase 4 cron (graphile-worker): opt-in via TAMTAM_GRAPHILE_CRON=1 so we
+  // can validate the new cron path against the in-memory scheduler before
+  // cutting over. When enabled it runs IN PARALLEL with internal-scheduler.ts.
+  // Once test-tt + a real scheduled-agent project run cleanly under the new
+  // cron, the next PR removes the in-memory scheduler and makes this default.
+  if (process.env.TAMTAM_GRAPHILE_CRON === '1' && process.env.WORKFLOW_TARGET_WORLD) {
+    void (async () => {
+      try {
+        const [
+          { seedAgentCrons },
+          { seedSystemCron },
+          { startCronWorker },
+          { SYSTEM_CRON_JOB_KEY },
+        ] = await Promise.all([
+          import('./lib/workflows/cron/seed-agent-crons'),
+          import('./lib/workflows/cron/seed-system-cron'),
+          import('./lib/workflows/cron/start-cron-worker'),
+          import('./lib/workflows/cron/system-cron-task'),
+        ]);
+        const { quickAddJob } = await import('graphile-worker');
+        const { listEnabledScheduledAgents } = await import('./lib/scheduling/internal-scheduler-helpers');
+
+        const connectionString = process.env.WORKFLOW_POSTGRES_URL ?? process.env.DATABASE_URL;
+        if (!connectionString) {
+          console.warn('[cron] no postgres URL — graphile cron disabled');
+          return;
+        }
+
+        // Seed enqueues
+        const agentSeed = await seedAgentCrons({
+          connectionString,
+          loadEnabledAgents: listEnabledScheduledAgents,
+        });
+        const systemSeed = await seedSystemCron({ connectionString });
+        console.log(`[cron] seeded ${agentSeed.enqueued} agent crons; system-cron: ${systemSeed.enqueued ? 'ok' : systemSeed.reason}`);
+
+        // Start the worker pool with both agent-cron + system-cron handlers
+        await startCronWorker({
+          connectionString,
+          agentCronDeps: {
+            loadAgent: async (agentId) => {
+              const all = await listEnabledScheduledAgents();
+              return all.find((a) => a.id === agentId) ?? null;
+            },
+            // For now defer prereq decisions to the existing internal-scheduler
+            // implementation (still runs in parallel). When we cut over, this
+            // gets the full pause/archive/branch-lock check.
+            prereqSkipReason: async () => null,
+            startAgentRun: async (agent) => {
+              // Mirror the in-memory scheduler's invocation path so the cron
+              // path goes through the same prompt-build / skills compose /
+              // workflow-runtime entry as a manual UI Run click. The route
+              // handler ultimately calls `start(runAgentIntakeWorkflow,...)`
+              // with a fully-built AgentIntakeParams.
+              const baseUrl = process.env.TAMTAM_BASE_URL ?? 'http://localhost:1337';
+              const res = await fetch(`${baseUrl}/api/agents/${encodeURIComponent(agent.id)}/run`, {
+                method: 'POST',
+                headers: { 'content-type': 'application/json' },
+                body: JSON.stringify({}),
+              });
+              if (!res.ok) {
+                console.warn(`[cron] agent ${agent.id} run POST returned ${res.status}`);
+                return null;
+              }
+              const data = await res.json().catch(() => ({}));
+              return (data?.runId ?? data?.jobId ?? null) as string | null;
+            },
+            enqueueNextFire: async (agentId, runAt) => {
+              await quickAddJob(
+                { connectionString },
+                'agent-cron',
+                { agentId },
+                { jobKey: `agent-cron-${agentId}`, jobKeyMode: 'replace', runAt, maxAttempts: 5 },
+              );
+            },
+          },
+          systemCronDeps: {
+            runRetentionCleanup: runCleanup,
+            enqueueNextFire: async (runAt) => {
+              await quickAddJob(
+                { connectionString },
+                'system-cron',
+                {},
+                { jobKey: SYSTEM_CRON_JOB_KEY, jobKeyMode: 'preserve_run_at', runAt, maxAttempts: 5 },
+              );
+            },
+          },
+        });
+
+        console.log('[cron] graphile-worker cron pool started (agent-cron + system-cron)');
+      } catch (err) {
+        console.error('[cron] boot failed:', err);
+      }
+    })();
+  }
+
   const probeIntervalMs = parseInt(process.env.TAMTAM_PROBE_INTERVAL_MS ?? '', 10) || 30_000;
   setInterval(runProbeSweep, probeIntervalMs);
 
