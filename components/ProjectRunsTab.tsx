@@ -628,8 +628,8 @@ export function ProjectRunsTab({ projectName, jobsPaused = false }: ProjectRunsT
                 <span className="text-[11px] text-text-tertiary font-mono">· {g.items.length}</span>
                 <div className="flex-1 h-px bg-border/60" />
               </div>
-              <div className="border border-border rounded-lg overflow-hidden bg-bg-primary">
-                <div className={`hidden border-b border-border bg-bg-secondary pl-4 pr-3 py-1.5 text-[10px] font-medium uppercase tracking-wider text-text-tertiary lg:grid ${RUN_ROW_GRID_CLASS} lg:gap-3`}>
+              <div className={`border border-border rounded-lg overflow-hidden bg-bg-primary lg:grid ${RUN_ROW_GRID_CLASS} lg:gap-x-3`}>
+                <div className="hidden border-b border-border bg-bg-secondary pl-4 pr-3 py-1.5 text-[10px] font-medium uppercase tracking-wider text-text-tertiary lg:col-span-full lg:grid lg:grid-cols-subgrid lg:gap-x-3">
                   <span>wanted</span>
                   <span>done / progress</span>
                   <span className="text-right">duration</span>
