@@ -49,8 +49,19 @@ export function TabNav({ projectName, activeTab, totalChanges, issueCount, runni
       <button className={tabClass('overview')} onClick={() => onSetTab('overview')}>
         Overview
       </button>
-      <button className={tabClass('terminal')} onClick={handleTerminalClick}>
+      <button
+        className={tabClass('terminal')}
+        onClick={handleTerminalClick}
+        aria-label={runningCount > 0 ? `Terminal, ${runningCount} running` : 'Terminal'}
+      >
         Terminal
+        {runningCount > 0 && (
+          <span
+            className="ml-1.5 inline-block w-1.5 h-1.5 rounded-full bg-status-warning animate-pulse align-middle"
+            title={`${runningCount} running`}
+            aria-hidden="true"
+          />
+        )}
       </button>
       <button
         className={tabClass('changes')}
@@ -69,9 +80,6 @@ export function TabNav({ projectName, activeTab, totalChanges, issueCount, runni
       </button>
       <button className={tabClass('history')} onClick={() => onSetTab('history')}>
         History
-        {runningCount > 0 && (
-          <span className="ml-1.5 inline-block w-1.5 h-1.5 rounded-full bg-status-warning animate-pulse align-middle" title={`${runningCount} running`} />
-        )}
       </button>
       <button className={tabClass('agents')} onClick={() => onSetTab('agents')}>
         Agents

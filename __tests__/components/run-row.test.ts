@@ -188,12 +188,15 @@ describe('RunRow', () => {
     unmount()
   })
 
-  it('renders release progress labels above pipeline summaries', () => {
+  it('renders active release progress without completed phase noise', () => {
     const entry = makeEntry({
       kind: 'release',
       bucket: 'release',
       title: 'Release pipeline',
       subtitle: null,
+      status: 'running',
+      finishedAt: null,
+      exitCode: null,
       inputTokens: 0,
       outputTokens: 0,
       costUsd: 0,
@@ -208,13 +211,13 @@ describe('RunRow', () => {
       summary: 'test ✓ · review …',
     })
 
-    expect(container.textContent).toContain('step: now: review')
-    expect(container.textContent).toContain('test ✓')
-    expect(container.textContent).toContain('review …')
+    expect(container.textContent).toContain('now: review')
+    expect(container.textContent).not.toContain('test ✓')
+    expect(container.textContent).not.toContain('review …')
     unmount()
   })
 
-  it('renders repeated pipeline summary chips without collapsing duplicates', () => {
+  it('hides successful pipeline summary chips', () => {
     const entry = makeEntry({
       kind: 'release',
       bucket: 'release',
@@ -233,17 +236,19 @@ describe('RunRow', () => {
       summary: 'test ✓ · fix ✓ · review LGTM · fix ✓',
     })
 
-    const fixChips = Array.from(container.querySelectorAll('span')).filter((node) => node.textContent === 'fix ✓')
-    expect(fixChips).toHaveLength(2)
+    expect(container.textContent).not.toContain('test ✓')
+    expect(container.textContent).not.toContain('review LGTM')
+    expect(container.textContent).not.toContain('fix ✓')
     unmount()
   })
 
-  it('renders failed pipeline summary chips with the error tone', () => {
+  it('renders only the latest failed pipeline summary chip', () => {
     const entry = makeEntry({
       kind: 'release',
       bucket: 'release',
       title: 'Release pipeline',
       subtitle: null,
+      exitCode: 1,
       inputTokens: 0,
       outputTokens: 0,
       costUsd: 0,
@@ -259,7 +264,7 @@ describe('RunRow', () => {
 
     const successChip = Array.from(container.querySelectorAll('span')).find((node) => node.textContent === 'test ✓')
     const failedChip = Array.from(container.querySelectorAll('span')).find((node) => node.textContent === 'push ✗1')
-    expect(successChip?.className).toContain('text-status-success')
+    expect(successChip).toBeUndefined()
     expect(failedChip?.className).toContain('text-status-error')
     unmount()
   })

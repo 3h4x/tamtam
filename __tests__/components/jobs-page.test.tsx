@@ -281,7 +281,7 @@ describe('JobsPage', () => {
     unmount()
   })
 
-  it('shows the final resumed review step on release rows', async () => {
+  it('hides completed phase labels on successful release rows', async () => {
     fetchJobsMock.mockResolvedValue({
       jobs: [
         {
@@ -366,7 +366,9 @@ describe('JobsPage', () => {
 
     await vi.waitFor(() => {
       expect(fetchJobsMock).toHaveBeenCalledWith(undefined, { limit: 200 })
-      expect(container.textContent).toContain('completed through review')
+      expect(container.textContent).toContain('Release pipeline')
+      expect(container.textContent).toContain('done')
+      expect(container.textContent).not.toContain('completed through review')
     })
 
     unmount()

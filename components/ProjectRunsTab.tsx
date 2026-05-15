@@ -3,7 +3,7 @@
 import { Fragment, useState, useEffect, useMemo, useRef } from 'react'
 import Link from 'next/link'
 import { useRouter } from 'next/navigation'
-import { fetchJobs, releaseProject, pushProject, syncJobBoard } from '@/lib/client-api'
+import { fetchJobs, releaseProject, pushProject } from '@/lib/client-api'
 import type { JobInfo } from '@/lib/client-api'
 import { Button } from '@/components/ui/Button'
 import {
@@ -24,7 +24,7 @@ import {
   parseJobCountsResponse,
 } from '@/components/project-runs/utils'
 import type { Entry, JobCountsResponse, KindBucket } from '@/components/project-runs/utils'
-import { RunRow } from '@/components/project-runs/RunRow'
+import { RUN_ROW_GRID_CLASS, RunRow } from '@/components/project-runs/RunRow'
 
 interface ProjectRunsTabProps {
   projectName: string
@@ -105,7 +105,6 @@ export function ProjectRunsTab({ projectName, jobsPaused = false }: ProjectRunsT
   const [expanded, setExpanded] = useState<Set<string>>(new Set())
   const [releaseActionState, setReleaseActionState] = useState<{ jobId: string; label: string } | null>(null)
   const [stepRetryState, setStepRetryState] = useState<{ jobId: string; label: string } | null>(null)
-  const [boardActionState, setBoardActionState] = useState<{ jobId: string; label: string } | null>(null)
   const [stopState, setStopState] = useState<{ jobId: string; label: string } | null>(null)
 
   const stopTargetFor = (e: Entry): { jobId: string; mode: 'job' | 'release' } | null => {
@@ -404,32 +403,6 @@ export function ProjectRunsTab({ projectName, jobsPaused = false }: ProjectRunsT
         )
       })()
     ) : null
-    const boardActive = boardActionState?.jobId === e.navJobId
-    const canManualSyncBoard = e.status !== 'running' && !entryIsRunning(e)
-    const boardButton = canManualSyncBoard ? (
-      <Button
-        type="button"
-        variant="secondary"
-        size="sm"
-        className="h-7 px-2 text-[11px]"
-        disabled={boardActive}
-        onClick={async () => {
-          setBoardActionState({ jobId: e.navJobId, label: 'syncing' })
-          try {
-            await syncJobBoard(e.navJobId)
-            setBoardActionState({ jobId: e.navJobId, label: 'synced' })
-            setTimeout(() => setBoardActionState(null), 1500)
-          } catch (error) {
-            console.error('[history] board sync failed', error)
-            setBoardActionState({ jobId: e.navJobId, label: 'failed' })
-            setTimeout(() => setBoardActionState(null), 2500)
-          }
-        }}
-        title="Recreate or refresh this run on the GitHub board"
-      >
-        {boardActive ? boardActionState?.label : 'Sync board'}
-      </Button>
-    ) : null
     // Ordinary running jobs are cancelled through the job endpoint. Running
     // releases use the pipeline abort route so the active step is stopped and
     // the pipeline lock is finalized. Agent/run rows may look running only
@@ -451,7 +424,7 @@ export function ProjectRunsTab({ projectName, jobsPaused = false }: ProjectRunsT
         {stopActive ? stopState?.label : 'Stop'}
       </Button>
     ) : null
-    const buttons = [stopButton, stepRetryButton, releaseButton, boardButton].filter(Boolean)
+    const buttons = [stopButton, stepRetryButton, releaseButton].filter(Boolean)
     if (buttons.length === 0) return null
     if (buttons.length === 1) return buttons[0]
     return <div className="flex flex-wrap items-center justify-end gap-1.5">{buttons}</div>
@@ -656,9 +629,9 @@ export function ProjectRunsTab({ projectName, jobsPaused = false }: ProjectRunsT
                 <div className="flex-1 h-px bg-border/60" />
               </div>
               <div className="border border-border rounded-lg overflow-hidden bg-bg-primary">
-                <div className="hidden border-b border-border bg-bg-secondary px-3 py-1.5 text-[10px] font-medium uppercase tracking-wider text-text-tertiary lg:grid lg:grid-cols-[minmax(320px,1.35fr)_minmax(220px,1fr)_120px_110px_auto] lg:gap-3">
-                  <span>run</span>
-                  <span>state</span>
+                <div className={`hidden border-b border-border bg-bg-secondary pl-4 pr-3 py-1.5 text-[10px] font-medium uppercase tracking-wider text-text-tertiary lg:grid ${RUN_ROW_GRID_CLASS} lg:gap-3`}>
+                  <span>wanted</span>
+                  <span>done / progress</span>
                   <span className="text-right">duration</span>
                   <span className="text-right">usage</span>
                   <span className="text-right">actions</span>
@@ -668,8 +641,9 @@ export function ProjectRunsTab({ projectName, jobsPaused = false }: ProjectRunsT
                   //   - releases with their pipeline children
                   //   - agent/run rows that own a release (release nests under agent)
                   const hasChainedKids = (e.chainedChildren?.length ?? 0) > 0
+                  const hasTurnBreakdown = (e.turnEntries?.length ?? 0) > 1
                   const isReleaseParent = e.kind === 'release' && (e.children?.length ?? 0) > 0
-                  const isExpandable = isReleaseParent || hasChainedKids
+                  const isExpandable = isReleaseParent || hasChainedKids || hasTurnBreakdown
                   const isExpanded = expanded.has(e.key)
                   // For an agent/run row that owns a nested release, surface that
                   // release's pipeline summary so it's visible while collapsed.
@@ -708,7 +682,18 @@ export function ProjectRunsTab({ projectName, jobsPaused = false }: ProjectRunsT
                             ? flattenReleaseChildren(e.children ?? [], 1).map(({ entry, depth: d }) => (
                                 <RunRow key={entry.key} entry={entry} onClick={() => navigate(entry)} depth={d} />
                               ))
-                            : (e.chainedChildren ?? []).map((root) => renderChain(root, 1, navigate, releaseActionsFor))
+                            : (
+                              <>
+                                {(e.chainedChildren ?? []).map((root) => renderChain(root, 1, navigate, releaseActionsFor))}
+                                {/* Per-turn cost breakdown for multi-turn chat/agent rows.
+                                    Sorted newest-first to match parent ordering. */}
+                                {hasTurnBreakdown && [...e.turnEntries!]
+                                  .sort((a, b) => b.lastActivityAt - a.lastActivityAt)
+                                  .map((turn) => (
+                                    <RunRow key={turn.key} entry={turn} onClick={() => navigate(turn)} depth={1} />
+                                  ))}
+                              </>
+                            )
                           }
                         </div>
                       )}

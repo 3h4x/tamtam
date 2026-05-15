@@ -433,7 +433,7 @@ describe('pending continue-issue resume provider', () => {
       const history = terminalStore.get('proj').history
       expect(history.some((entry) => entry.text === 'partial assistant output')).toBe(true)
       expect(history.some((entry) => entry.text === 'cancelled')).toBe(true)
-      expect(history.some((entry) => entry.text === 'claude run failed')).toBe(false)
+      expect(history.some((entry) => entry.text === 'provider run failed')).toBe(false)
       expect(history.some((entry) => entry.text === 'exit -2')).toBe(false)
     })
 
@@ -483,7 +483,7 @@ describe('pending continue-issue resume provider', () => {
     await vi.waitFor(() => {
       expect(terminalStore.get('proj').history).toEqual([
         { role: 'user', text: 'review this' },
-        { role: 'error', text: 'claude run failed' },
+        { role: 'error', text: 'provider run failed' },
         { role: 'error', text: 'fatal: auth expired' },
       ])
     })
@@ -859,7 +859,7 @@ describe('pending continue-issue resume provider', () => {
       const history = terminalStore.get('proj').history
       expect(history.some((entry) => entry.text === 'review log before cancellation')).toBe(true)
       expect(history.some((entry) => entry.text === 'cancelled')).toBe(true)
-      expect(history.some((entry) => entry.text === 'claude run failed')).toBe(false)
+      expect(history.some((entry) => entry.text === 'provider run failed')).toBe(false)
       expect(history.some((entry) => entry.text === 'exit -3')).toBe(false)
     })
 

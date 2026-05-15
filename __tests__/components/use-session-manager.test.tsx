@@ -570,7 +570,7 @@ describe('useSessionManager', () => {
     const state = terminalStore.get('proj')
     expect(state.history).toEqual<TermEntry[]>([
       { role: 'user', text: 'show failure' },
-      { role: 'error', text: 'claude run failed' },
+      { role: 'error', text: 'provider run failed' },
       { role: 'error', text: 'fatal: auth expired' },
     ])
 
