@@ -547,36 +547,31 @@ The `configSnapshot` section reflects the same shared recovery-budget helper use
 
 ## Vercel Workflow orchestrator
 
-Every release routes through a Vercel Workflow (`@workflow/world-postgres`) state machine. There is no direct-call bypass — the runtime is always on. One env flag remains:
+Every release routes through a Vercel Workflow (`@workflow/world-postgres`) state machine. There is no direct-call bypass and no opt-out flag — the runtime is always on for release pipelines.
 
-| Flag | Effect |
-|------|--------|
-| `TAMTAM_RELEASE_WORKFLOW_DRIVE=0` | Falls back to **observation-only**: every release still gets a `workflow_runs` row, but `releaseObservationWorkflow` only watches sibling jobs the completion-hook chain spawns. The release meta-job is **not** stamped with `workflowDriven`, so hooks own dispatch again. Use as a temporary rollback if drive mode shows a regression. |
-
-Default (flag unset): drive mode — the orchestrator workflow chains the next phase by dispatching the matching `release*PhaseWorkflow` child, and completion hooks short-circuit on the `workflowDriven` flag.
-
-### Drive-mode dataflow
+### Dataflow
 
 ```
 HTTP POST /api/projects/by-project/<name>/release
   ↓
 releaseWorkflow         (lib/workflows/release.ts)
   ├── kickoffReleaseStep            — calls startRelease, gets first sub-step jobId
-  ├── readDriveModeStep             — reads TAMTAM_RELEASE_WORKFLOW_DRIVE (inside a step for replay determinism)
-  ├── dispatchOrchestratorStep      — stamps release.workflowDriven, dispatches:
+  ├── dispatchOrchestratorStep      — dispatches:
   │     ↓
   │   releaseOrchestratorWorkflow(firstStepJobId, { projectName, parentJobId })
   │     ├── waitStep                — waitForJobCompletion(jobId)
-  │     ├── decideStep              — decideNextPhase({ kind, exitCode, verdict })
+  │     ├── decideStep              — decideNextPhase + applyReleaseGuards
   │     └── dispatchStep            — dispatchPhase(decision, { ...ctx, prevJobId })
   │           ↓
-  │         release<Phase>PhaseWorkflow(...)  ←─ one of the 8 phase workflows
-  │           ├── spawn<Phase>Step  — calls startProject<Phase> helper
-  │           └── await<Phase>Step  — waitForJobCompletion(spawned jobId)
+  │         release<Phase>PhaseWorkflow(...)  ←─ one of the 7 phase workflows
+  │           ├── spawn<Phase>Step  — wraps startProject<Phase> in runWithParent(releaseJobId,…)
+  │           ├── await<Phase>Step  — waitForJobCompletion(spawned jobId)
+  │           └── re-dispatchOrchestratorTick — start(orchestrator, [thisJobId, ctx])
   │           ↓ (when sub-step finishes, completion hook fires markDone, which sees
-  │           ↓  workflowDriven=true and short-circuits — but the orchestrator already
-  │           ↓  observed the same finishedAt via waitForJobCompletion)
-  │         [phase workflow returns; orchestrator returns]
+  │           ↓  releaseId set and short-circuits the legacy chain — the orchestrator
+  │           ↓  already observed the same finishedAt via waitForJobCompletion)
+  │         [phase workflow returns; orchestrator decides next; dispatch repeats]
+  │         [terminal decision → finalizeReleaseStep stamps release.exit_code + stop_reason]
   ↓
 HTTP response with release.jobId
 ```
@@ -646,13 +641,9 @@ Every release-linked pipeline step is owned by the orchestrator. Standalone (no-
 
 The previous `workflowDriven` contextMeta flag (and the `lib/workflows/workflow-driven-flag.ts` module that managed it) was removed when this gate moved to `releaseId`-based: a stale flag stamp could let the chain fire alongside the orchestrator if the spawn site lost release linkage (cascade #3 was the canonical regression). Gating on linkage directly is robust by construction.
 
-### Observation-only mode (TAMTAM_RELEASE_WORKFLOW_DRIVE=0)
-
-The legacy scaffold path. `releaseObservationWorkflow` waits for a sub-step, decides what phase WOULD be next, then polls `findNextSubStepJob` for the actual sibling that completion hooks spawned. Recursively dispatches itself for the next jobId. Useful as a rollback target if a drive-mode regression shows up — keeps the workflow-runs trace alive while letting completion hooks own dispatch again.
-
 ### Determinism note
 
-Any `Date.now()`, `Math.random()`, settings read, env read, or branch-state read MUST live inside a `'use step'` body, not in the workflow body itself. The workflow body is replayed across restarts to short-circuit completed steps; non-deterministic reads outside steps corrupt replay. Example: `releaseWorkflow` reads `process.env.TAMTAM_RELEASE_WORKFLOW_DRIVE` inside `readDriveModeStep`, not in the workflow body.
+Any `Date.now()`, `Math.random()`, settings read, env read, or branch-state read MUST live inside a `'use step'` body, not in the workflow body itself. The workflow body is replayed across restarts to short-circuit completed steps; non-deterministic reads outside steps corrupt replay.
 
 ### Visibility
 

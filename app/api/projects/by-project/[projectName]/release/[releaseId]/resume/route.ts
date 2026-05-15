@@ -5,8 +5,8 @@ import { resumeStuckRelease } from '@/lib/pipeline/resume-stuck-release';
 // Manually resume a release whose chain stopped at a non-terminal step
 // (test/fix/review/commit) but was already marked finished. The workflow
 // runtime owns continuation, so a stuck release is rare; this endpoint is
-// the operator-facing handle for the cases that slip through (e.g. when
-// running under TAMTAM_RELEASE_WORKFLOW_DRIVE=0 observation fallback).
+// the operator-facing handle for the cases that slip through (e.g. when a
+// crash before `finalizeReleaseStep` lands strands the meta-job).
 export async function POST(
   _request: Request,
   { params }: { params: Promise<{ projectName: string; releaseId: string }> },

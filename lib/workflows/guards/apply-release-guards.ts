@@ -19,9 +19,8 @@
 //
 // The guards lift the equivalent logic out of `lib/jobs/lifecycle.ts`'s
 // completion-hook chain. The legacy hook still runs for standalone (no-
-// releaseId) jobs and for the `TAMTAM_RELEASE_WORKFLOW_DRIVE=0` opt-out
-// fallback, so its copy of the guards stays alive until the chain blocks
-// are deleted entirely.
+// releaseId) jobs, so its copy of the guards stays alive until the
+// release-linked chain blocks are deleted entirely.
 
 import type { JobData } from '@/lib/jobs/types';
 import type { NextPhase } from '@/lib/workflows/decide-next-phase';

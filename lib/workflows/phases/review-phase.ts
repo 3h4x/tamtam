@@ -73,9 +73,9 @@ async function spawnReviewStep(
   // Wrap in parentContext so the spawned review job inherits release linkage.
   // Without this, createJob() reads currentParent() as null inside the workflow
   // runtime (AsyncLocalStorage doesn't carry across step boundaries) and the
-  // review row ends up with parent_job_id=NULL, release_id=NULL — which then
-  // causes isWorkflowDriven() to return false and the legacy lifecycle hook
-  // double-dispatches the next step.
+  // review row ends up with parent_job_id=NULL, release_id=NULL — the
+  // lifecycle short-circuit gates on releaseId, so a missing linkage lets
+  // the legacy chain double-dispatch alongside the orchestrator.
   if (!releaseJobId) return startProjectReview(projectName);
   const { runWithParent } = await import('@/lib/jobs/parent-context');
   return runWithParent(releaseJobId, () => startProjectReview(projectName));

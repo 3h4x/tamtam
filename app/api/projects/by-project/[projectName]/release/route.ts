@@ -14,9 +14,8 @@ export async function POST(
     sourceJobId: typeof body.source_job_id === 'string' ? body.source_job_id : undefined,
   };
   // Every release routes through the Vercel Workflow scaffold. The workflow
-  // body delegates to startRelease for pre-flight + first-step kickoff, then
-  // dispatches the orchestrator (or, with TAMTAM_RELEASE_WORKFLOW_DRIVE=0,
-  // the observation-only child) to chain the rest. Awaiting the run's
+  // body delegates to startRelease for pre-flight + first-step kickoff,
+  // then dispatches the orchestrator to chain the rest. Awaiting the run's
   // returnValue lets the route surface 4xx/5xx from pre-flight checks the
   // same way a direct call would.
   let r;

@@ -14,9 +14,8 @@
 //      branch (next: review on success, next: fix on failure) without
 //      replicating decision logic.
 //
-// Dispatched by releaseOrchestratorWorkflow when drive mode is active
-// (default; opt out via TAMTAM_RELEASE_WORKFLOW_DRIVE=0). The orchestrator
-// invokes one phase workflow per chain tick; this one wraps start-test.
+// Dispatched by releaseOrchestratorWorkflow. The orchestrator invokes one
+// phase workflow per chain tick; this one wraps start-test.
 
 import type { StartTestResult } from '@/lib/pipeline/start-test';
 import type { WaitForJobResult } from '@/lib/workflows/wait-for-job';

@@ -14,8 +14,9 @@
 // replay-safe.
 //
 // `launchPrWait` / `resumePrWait` in `lib/pipeline/start-pr-wait.ts` are
-// kept for the hook-driven legacy path (TAMTAM_RELEASE_WORKFLOW_DRIVE=0)
-// where the chain still spawns inline pr-wait jobs.
+// kept for the standalone (no-`releaseId`) path — manual "Wait for PR
+// merge" triggers that aren't part of a release pipeline still need an
+// inline pr-wait job. Release-linked pr-wait runs through this workflow.
 
 import { sleep } from 'workflow';
 

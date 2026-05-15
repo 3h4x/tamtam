@@ -8,14 +8,11 @@
 // sibling job that completion hooks spawned, it DRIVES the next phase
 // directly.
 //
-// Active by default via `releaseWorkflow`. The release meta-job is stamped
-// with `contextMeta.workflowDriven = true`, and the completion-hook chain
-// in lib/jobs/lifecycle.ts short-circuits on that flag so the orchestrator
-// owns dispatch alone (no double-dispatch).
-//
-// Set TAMTAM_RELEASE_WORKFLOW_DRIVE=0 to fall back to the polling
-// observation chain (releaseObservationWorkflow); the workflow runtime
-// itself is always on (no direct-call bypass).
+// Always active for releases. The completion-hook chain in
+// lib/jobs/lifecycle.ts short-circuits on `releaseId` for any release-
+// linked pipeline step, so the orchestrator owns dispatch alone (no
+// double-dispatch). The `workflowDriven` contextMeta flag this used to
+// rely on was retired — gating on linkage is robust by construction.
 
 import type { WaitForJobResult } from '@/lib/workflows/wait-for-job';
 import type { NextPhase } from '@/lib/workflows/decide-next-phase';
