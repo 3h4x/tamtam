@@ -357,6 +357,19 @@ async function startAgentStep(
   const job = getJob(jobId);
   if (!job) throw new Error(`[intake-workflow] job ${jobId} not found`);
 
+  // Replay guard: a server restart mid-spawn lets the Workflow runtime
+  // retry this step from the event log (attempt > 1). If the jobs row
+  // has since been finalized — usually by `reapAbandonedInlineJobs` at
+  // boot, which marks the orphaned PID's row exit=-1 — re-spawning the
+  // CLI would just double-bill the agent and run against a stale row.
+  // Skip cleanly so the workflow records the retry as completed and the
+  // operator can inspect / re-trigger from the UI. Pre-restart, this
+  // branch is never taken (the row finishedAt stays null until exit).
+  if (job.finishedAt !== null) {
+    console.log(`[intake-workflow] startAgentStep ${jobId} short-circuit: jobs row already finalized (exit ${job.exitCode}); workflow retry will not re-spawn`);
+    return;
+  }
+
   // Write prereq artifact to disk.
   if (prereqArtifact) {
     try {
@@ -366,7 +379,21 @@ async function startAgentStep(
     }
   }
 
-  job.contextMeta = contextMeta;
+  // Preserve any keys the route added between `start()` returning and the
+  // first step running (notably `workflowRunId`, written so the jobs DELETE
+  // route can call `getRun(id).cancel()`). The compose step builds a fresh
+  // context_meta from scratch; without this merge, the route's late write
+  // would be silently clobbered here.
+  try {
+    const incoming = JSON.parse(contextMeta || '{}');
+    const existing = JSON.parse(job.contextMeta || '{}');
+    if (existing.workflowRunId && !incoming.workflowRunId) {
+      incoming.workflowRunId = existing.workflowRunId;
+    }
+    job.contextMeta = JSON.stringify(incoming);
+  } catch {
+    job.contextMeta = contextMeta;
+  }
   updateJob(job);
 
   try {

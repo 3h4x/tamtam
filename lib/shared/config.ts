@@ -54,6 +54,7 @@ export interface TamTamConfig {
   log_retention_count: number;
   log_retention_days: number;
   job_row_retention_days: number;
+  workflow_run_retention_days: number;
   backup_retention_count: number;
   backup_retention_weekly_count: number;
   notification_webhook_url: string;
@@ -132,6 +133,7 @@ const DEFAULTS: TamTamConfig = {
   log_retention_count: 200,
   log_retention_days: 30,
   job_row_retention_days: 180,
+  workflow_run_retention_days: 30,
   backup_retention_count: 14,
   backup_retention_weekly_count: 8,
   notification_webhook_url: '',
@@ -320,6 +322,7 @@ export function buildConfigFromSettingsMap(map: Record<string, string>): TamTamC
     log_retention_count: parseIntOr(map.log_retention_count, DEFAULTS.log_retention_count),
     log_retention_days: parseIntOr(map.log_retention_days, DEFAULTS.log_retention_days),
     job_row_retention_days: parseIntOr(map.job_row_retention_days, DEFAULTS.job_row_retention_days),
+    workflow_run_retention_days: parseIntOr(map.workflow_run_retention_days, DEFAULTS.workflow_run_retention_days),
     backup_retention_count: parseIntOr(map.backup_retention_count, DEFAULTS.backup_retention_count),
     backup_retention_weekly_count: parseIntOr(map.backup_retention_weekly_count, DEFAULTS.backup_retention_weekly_count),
     notification_webhook_url: map.notification_webhook_url ?? DEFAULTS.notification_webhook_url,

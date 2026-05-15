@@ -357,7 +357,7 @@ async function runAgentStart(
   // remains unchanged.
   try {
     const { start } = await import('workflow/api');
-    await start(runAgentIntakeWorkflow, [{
+    const run = await start(runAgentIntakeWorkflow, [{
       jobId: job.id,
       agentId: agent.id,
       agentName: agent.name,
@@ -375,6 +375,18 @@ async function runAgentStart(
       prereqCmd: prereqCmd ?? null,
       readOnly,
     }]);
+    // Record the workflow run id in context_meta so the jobs DELETE route
+    // can propagate user-initiated aborts to the runtime via
+    // `getRun(runId).cancel()` — without this, the workflow_runs row
+    // stays "completed" even when the CLI child was killed.
+    try {
+      const meta = JSON.parse(job.contextMeta || initialContextMeta || '{}');
+      meta.workflowRunId = run.runId;
+      job.contextMeta = JSON.stringify(meta);
+      updateJob(job);
+    } catch (e) {
+      console.warn('[agents/run] failed to persist workflowRunId on job:', errMsg(e));
+    }
   } catch (e: unknown) {
     appendRedactedFileSync(/*turbopackIgnore: true*/ logPath, `\n# workflow: failed to enqueue: ${errMsg(e)}\n`);
     job.finishedAt = Date.now() / 1000;
