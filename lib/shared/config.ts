@@ -13,6 +13,20 @@ import { isCliProvider, parseEnabledProviders, type CliProvider } from '@/lib/us
  * All settings are stored in the DB settings table.
  */
 
+export type ReviewDoNotShipAction = 'pass' | 'fix' | 'abort';
+
+export const REVIEW_DO_NOT_SHIP_ACTIONS: readonly ReviewDoNotShipAction[] = ['pass', 'fix', 'abort'];
+
+function parseReviewDoNotShipAction(
+  raw: string | undefined,
+  fallback: ReviewDoNotShipAction,
+): ReviewDoNotShipAction {
+  if (raw && (REVIEW_DO_NOT_SHIP_ACTIONS as readonly string[]).includes(raw)) {
+    return raw as ReviewDoNotShipAction;
+  }
+  return fallback;
+}
+
 export interface TamTamConfig {
   workspace_path: string;
   github_owner: string;
@@ -50,6 +64,7 @@ export interface TamTamConfig {
   review_verdict_rules: string;
   jobs_paused: boolean;
   review_fix_max_iterations: number;
+  review_do_not_ship_action: ReviewDoNotShipAction;
   release_wall_clock_timeout_minutes: number;
   log_retention_count: number;
   log_retention_days: number;
@@ -129,6 +144,7 @@ const DEFAULTS: TamTamConfig = {
 - Keep LGTM responses short: one sentence confirmation is enough.`,
   jobs_paused: false,
   review_fix_max_iterations: 3,
+  review_do_not_ship_action: 'pass',
   release_wall_clock_timeout_minutes: 60,
   log_retention_count: 200,
   log_retention_days: 30,
@@ -158,7 +174,7 @@ const DEFAULTS: TamTamConfig = {
   budget_block_at_pct: 95,
   budget_warn_at_pct: 80,
   notification_on_budget_blocked: false,
-  dirty_worktree_block_threshold: 20,
+  dirty_worktree_block_threshold: 1,
   incremental_review_enabled: true,
   retrieval_enabled: true,
   retrieval_ollama_url: 'http://localhost:11434',
@@ -315,6 +331,10 @@ export function buildConfigFromSettingsMap(map: Record<string, string>): TamTamC
     review_verdict_rules: map.review_verdict_rules ?? DEFAULTS.review_verdict_rules,
     jobs_paused: map.jobs_paused === 'true',
     review_fix_max_iterations: parsePositiveIntOr(map.review_fix_max_iterations, DEFAULTS.review_fix_max_iterations),
+    review_do_not_ship_action: parseReviewDoNotShipAction(
+      map.review_do_not_ship_action,
+      DEFAULTS.review_do_not_ship_action,
+    ),
     release_wall_clock_timeout_minutes: parsePositiveIntOr(
       map.release_wall_clock_timeout_minutes,
       DEFAULTS.release_wall_clock_timeout_minutes

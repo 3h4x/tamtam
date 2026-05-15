@@ -1,6 +1,6 @@
 # Streaming — How It Works
 
-TamTam's streamed runs share the same infrastructure: PM2 spawns the process, writes output to a log file, and an SSE endpoint tails that file to the browser. For provider-backed runs, TamTam uses a Claude-compatible `stream-json` contract: the native Claude CLI emits that NDJSON directly, while Gemini, Codex, LM Studio, and compatible custom backends are normalized to the same shape by the bundled shims.
+TamTam's streamed runs share the same infrastructure: the Next.js server spawns the provider CLI as a detached child process, the child writes output to a log file, and an SSE endpoint tails that file to the browser. For provider-backed runs, TamTam uses a Claude-compatible `stream-json` contract: the native Claude CLI emits that NDJSON directly, while Gemini, Codex, LM Studio, and compatible custom backends are normalized to the same shape by the bundled shims.
 
 ## When to read this
 
@@ -19,7 +19,10 @@ TamTam's streamed runs share the same infrastructure: PM2 spawns the process, wr
 ```
 API route (any kind)
   → createJob(project, kind, ...)       — insert into jobs table, status='running'
-  → PM2 spawns process                  — writes NDJSON to ./data/logs/<jobId>.log (or custom logPath)
+  → startJobInProcess (lib/jobs/spawn-claude-detached.ts)
+      → spawn(bin, args, { stdio: ['pipe', logFd, logFd], detached: true })
+      → child.unref()                   — detach from parent's event loop
+      → child writes NDJSON to ./data/logs/<jobId>.log (or custom logPath)
   → returns { job_id }
 
 Client
@@ -29,12 +32,19 @@ Client
       → parseStreamLines() → SSE events to browser
       → on 'done' event → mark job seen, update UI
 
-PM2 exit handler
+child.on('exit') in parent
   → markDone(jobId, exitCode)           — writes finishedAt, exitCode to DB
   → completion hook runs (pipeline chain, notifications, etc.)
 ```
 
-**Why PM2?** It survives Next.js restarts. The log file is a durable buffer, so the browser can recover from a Next.js rebuild by reconstructing the current turn from the job log even if the live SSE transport drops mid-run.
+**Surviving Next.js restarts.** PM2 only supervises the `tamtam` Next.js server itself — there is no per-job PM2 entry. Jobs survive a `pnpm run rebuild` / PM2 restart of tamtam because:
+
+1. `detached: true` + `child.unref()` puts the child in its own process group, so SIGTERM to the parent does not propagate.
+2. `stdio: ['pipe', logFd, logFd]` redirects child stdout/stderr **directly to the log file's fd**. If the child's stdout were piped back through Node (the historical bug), the pipe would break when the parent dies and the next CLI write would get `SIGPIPE` — killing the child despite the detached process group. Writing to the kernel-held fd means the child's own dup'd handle survives the parent disappearing.
+3. The prompt is fed via stdin pipe and stdin closes within a few ms; by the time a PM2 restart could fire, stdin is long done, so remaining pipe breakage is harmless.
+4. When the parent does die mid-run, the in-process `child.on('exit')` handler is lost — so `markDone` doesn't fire from this path. On next boot, `probeJobStatus` recovers state: `process.kill(pid, 0)` checks liveness, and once the child exits, `getClaudeResultExitCode` parses the trailing `"type":"result"` line in the log to derive tokens / cost / exit code without ever needing the in-parent exit handler.
+
+The log file is a durable buffer for the browser too: the terminal can reconstruct the current turn from `./data/logs/<jobId>.log` even if SSE drops mid-stream.
 
 ---
 
@@ -96,7 +106,11 @@ The terminal tab is the interactive case: user types, the selected provider resp
 User types → handleSubmit()
   → POST /api/projects/by-project/[name]/run
       → createJob(project, 'run', ..., contextMeta)
-      → PM2 spawns: {selected-provider-shim} --print --output-format stream-json --include-partial-messages --verbose --model {model}
+      → if resumeSessionId: pre-seed job.sessionId so the row links back to
+        the session even if the run is killed before the CLI emits its
+        `result` event (recovery aid; CLI's emitted id overrides on success).
+      → startJobInProcess (lib/jobs/spawn-claude-detached.ts) spawns:
+        {selected-provider-shim} --print --output-format stream-json --include-partial-messages --verbose --model {model} [--resume <sessionId>]
       → returns { job_id }
   → startStreaming(job_id)
       → EventSource /api/streaming/[jobId]
@@ -142,7 +156,7 @@ The terminal does not treat a transient SSE disconnect as a failed provider run.
 - while the job is still running, the terminal polls job state instead of reopening SSE from byte 0 (which would duplicate already-rendered output)
 - once the job finishes, the client finalizes the transcript from the recovered job payload
 
-This is specifically to survive `pnpm run rebuild` / PM2 restarts without injecting `Connection error` or provider-failure lines into an otherwise healthy terminal session.
+This is specifically to survive `pnpm run rebuild` / PM2 restarts of the tamtam server without injecting `Connection error` or provider-failure lines into an otherwise healthy terminal session. The CLI subprocess itself continues running across the restart (see "Surviving Next.js restarts" above); the client just has to re-attach to its log on reconnect.
 
 ### Model selection
 

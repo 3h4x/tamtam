@@ -198,6 +198,16 @@ export function RunRow({ entry: e, onClick, expandable, expanded, onToggleExpand
       ? 'review needs attention'
       : null)
   const totalTokens = e.inputTokens + e.outputTokens
+  // Prompt-bloat indicator. Every cache-read of an oversized prefix is billed,
+  // so a fat prompt is real recurring cost. Show the chip from 20 KB and turn
+  // it red at 50 KB — these are heuristic, picked from the typical
+  // CLAUDE.md (~30 KB) + skills + diff envelope observed on tamtam runs.
+  const PROMPT_BYTES_WARN = 20_000
+  const PROMPT_BYTES_ALERT = 50_000
+  const promptBytes = e.promptBytes ?? 0
+  const showPromptChip = promptBytes >= PROMPT_BYTES_WARN
+  const promptIsAlert = promptBytes >= PROMPT_BYTES_ALERT
+  const promptKbLabel = promptBytes >= 1024 ? `${Math.round(promptBytes / 1024)}KB` : `${promptBytes}B`
   const fileCount = modifiedFileCount(e.modifiedFiles)
   const durationLabel = formatDuration(e.startedAt, e.finishedAt)
   const startedLabel = formatAgo(e.startedAt)
@@ -296,6 +306,18 @@ export function RunRow({ entry: e, onClick, expandable, expanded, onToggleExpand
                 {progressLabel && (
                   <span className="inline-flex items-center rounded-full border border-accent/25 bg-accent/10 px-1.5 py-0.5 text-[10px] font-medium font-mono text-accent">
                     step: {progressLabel}
+                  </span>
+                )}
+                {showPromptChip && (
+                  <span
+                    className={`inline-flex items-center rounded-full px-1.5 py-0.5 text-[10px] font-mono font-medium border ${
+                      promptIsAlert
+                        ? 'bg-status-error/15 text-status-error border-status-error/30'
+                        : 'bg-status-warning/15 text-status-warning border-status-warning/30'
+                    }`}
+                    title={`Prompt piped to provider: ${promptBytes.toLocaleString()} bytes (~${Math.round(promptBytes / 4).toLocaleString()} tokens). Every cache-read of this prefix is billed.`}
+                  >
+                    prompt {promptKbLabel}
                   </span>
                 )}
                 {e.logPruned && (

@@ -74,6 +74,24 @@ TamTam redacts common credential shapes before job output is persisted to log fi
 
 This is a defensive last-mile filter, not a complete secret-management system. It cannot guarantee redaction for every proprietary token format, binary output, or a secret split across unusual stream chunk boundaries. Do not intentionally print secrets from custom actions, prerequisite commands, provider shims, or project test commands; prefer passing credentials through the environment and keeping command output credential-free.
 
+## Dependency & Supply-Chain Hygiene
+
+- **Lock file**: always commit `pnpm-lock.yaml`. Never bypass `--frozen-lockfile` or use `--no-lockfile`. Use `pnpm` for all manifest/lockfile changes — `npm install`, `yarn add`, or any other PM that can desync `pnpm-lock.yaml` are forbidden.
+- **Install scripts**: inspect `postinstall`, `prepare`, `preinstall`, `install` scripts before adding or updating any dependency. Treat them as arbitrary code execution.
+- **Allowed build scripts**: `package.json` pins `pnpm.onlyBuiltDependencies` to `[esbuild, sharp, unrs-resolver]`. Do not add without explicit user approval.
+- **No silent additions**: every new dependency requires user approval and a justification in the commit message. Prefer packages with > 1M weekly downloads and > 1 year history. Inspect the npm registry entry for maintainer continuity — sudden ownership flips, very-recent first publishes, or thin version history are blockers unless the user explicitly accepts the risk.
+- **Audit after changes**: run `pnpm audit` after any `pnpm add`/`pnpm remove`/`pnpm up`/`pnpm update`/`pnpm dedupe` or manual lockfile refresh. Fix or document high-severity findings before committing.
+- **Never bypass git hooks**: do not pass `--no-verify` to `git commit`. If a pre-push hook fails, fix the root cause.
+- **No secrets in code**: env vars only; never commit `.env` or hardcoded tokens.
+
+## Destructive Operations
+
+- **Destructive git**: do not run `git reset --hard`, `git clean`, force pushes, branch deletion, or history rewrites without explicit request.
+- **Dirty worktrees are normal**: before editing, check whether the target file has local changes. Preserve unrelated edits; never revert someone else's in-progress work to get a clean diff.
+- **Production data**: do not drop tables, run destructive SQL against the live `DATABASE_URL` Postgres, or remove project log directories without explicit approval. Migrations must be additive or carefully backfilled.
+- **External side effects**: `git push`, GitHub issue/PR actions, webhook sends, and PM2 process changes are real side effects. Run only when required by the task and the target is clear.
+- **Never SIGKILL low PIDs**: `lib/jobs/lifecycle.ts` uses `pgrep -P <job.pid>` + `process.kill(child, 'SIGKILL')` to clean up hung Claude CLI trees. PIDs ≤ `SAFE_PID_FLOOR` (100) are refused — PID 1 on macOS is `launchd`, parent of Finder, Dock, the terminal, and every user GUI app. A bad `job.pid` without this guard would SIGKILL every user-owned process. Any future code that takes a pid from job/DB state and calls `process.kill` MUST gate on `pid > SAFE_PID_FLOOR` and bail with `console.warn` otherwise. In tests, always use a high synthetic PID like `99999` — never a real or low PID.
+
 ### Implementation Files
 
 - `lib/git-branch.ts` — synchronous git helpers (`getBranchContext`, `gitShowSync`, `gitLsTreeSync`)

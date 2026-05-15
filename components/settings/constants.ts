@@ -240,7 +240,7 @@ export const FIELDS: Record<SettingsFieldKey, FieldDef> = {
   },
   dirty_worktree_block_threshold: {
     label: 'Dirty Worktree Block Threshold',
-    help: 'Block agent runs when the project has at least this many uncommitted files (incl. untracked). Set to 0 to disable.',
+    help: 'Block agent runs when the project has at least this many uncommitted files (incl. untracked). Default 1 blocks on any dirty worktree; set higher to allow small WIP, 0 to disable.',
     group: 'pipeline',
     span: 1,
   },
@@ -295,7 +295,7 @@ export const DEFAULTS: Record<SettingsFieldKey, string> = {
   pipeline_model_fix: '',
   pipeline_model_dod: '',
   pipeline_model_commit: '',
-  dirty_worktree_block_threshold: '20',
+  dirty_worktree_block_threshold: '1',
   incremental_review_enabled: 'true',
 }
 

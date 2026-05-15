@@ -1,4 +1,4 @@
-import { existsSync, readFileSync } from 'fs';
+import { closeSync, existsSync, openSync, readFileSync, readSync } from 'fs';
 import { parseStreamLines } from './claude-stream-parser';
 import type { JobData } from './types';
 
@@ -14,6 +14,23 @@ export function readLog(job: JobData, tailBytes = 100_000): string {
     return content;
   } catch {
     return '';
+  }
+}
+
+export function readLogHead(job: JobData, headBytes = 4096): string {
+  if (!job.logPath) return '';
+  let fd: number | null = null;
+  try {
+    fd = openSync(/*turbopackIgnore: true*/ job.logPath, 'r');
+    const buffer = Buffer.alloc(headBytes);
+    const bytesRead = readSync(fd, buffer, 0, headBytes, 0);
+    return buffer.subarray(0, bytesRead).toString('utf8');
+  } catch {
+    return '';
+  } finally {
+    if (fd !== null) {
+      try { closeSync(fd); } catch { /* noop */ }
+    }
   }
 }
 

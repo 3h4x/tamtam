@@ -16,6 +16,7 @@ const mocks = vi.hoisted(() => ({
   jobToListDict: vi.fn(),
   readDisplayLog: vi.fn(),
   readLog: vi.fn(),
+  readLogHead: vi.fn(),
   markSeen: vi.fn(),
   unseenFinished: vi.fn(),
   updateJob: vi.fn(),
@@ -35,6 +36,7 @@ vi.mock('@/lib/jobs/job-storage', () => ({
   jobToListDict: mocks.jobToListDict,
   readDisplayLog: mocks.readDisplayLog,
   readLog: mocks.readLog,
+  readLogHead: mocks.readLogHead,
   markSeen: mocks.markSeen,
   unseenFinished: mocks.unseenFinished,
   updateJob: mocks.updateJob,
@@ -106,6 +108,7 @@ function resetDefaults() {
   }));
   mocks.readDisplayLog.mockReset().mockReturnValue('display log content');
   mocks.readLog.mockReset().mockReturnValue('raw log content');
+  mocks.readLogHead.mockReset().mockReturnValue('raw log head content');
   mocks.markSeen.mockReset().mockReturnValue(true);
   mocks.unseenFinished.mockReset().mockReturnValue([]);
   mocks.updateJob.mockReset();
@@ -443,6 +446,27 @@ describe('GET /api/jobs/[jobId]', () => {
     const req = new NextRequest('http://localhost/api/jobs/job-abc');
     await jobGET(req, { params: Promise.resolve({ jobId: 'job-abc' }) });
     expect(mocks.probeJobStatus).toHaveBeenCalledWith(job);
+  });
+
+  it('recovers a resumed session id from the log head', async () => {
+    const sessionId = '12345678-1234-4234-8234-123456789abc';
+    const job = makeJob({ id: 'job-resume', logPath: '/tmp/job-resume.log', sessionId: null });
+    mocks.getJob.mockReturnValue(job);
+    mocks.readLogHead.mockReturnValue(`[tamtam] launching: claude --resume ${sessionId}\n${'x'.repeat(5000)}`);
+    mocks.jobToDict.mockImplementation((j: JobData) => ({
+      id: j.id,
+      project: j.project,
+      kind: j.kind,
+      session_id: j.sessionId,
+    }));
+
+    const req = new NextRequest('http://localhost/api/jobs/job-resume');
+    const res = await jobGET(req, { params: Promise.resolve({ jobId: 'job-resume' }) });
+    expect(res.status).toBe(200);
+    const data = await res.json();
+    expect(data.session_id).toBe(sessionId);
+    expect(mocks.readLogHead).toHaveBeenCalledWith(job, 4096);
+    expect(mocks.updateJob).toHaveBeenCalledWith(expect.objectContaining({ sessionId }));
   });
 });
 

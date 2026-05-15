@@ -242,6 +242,11 @@ export interface Entry {
   logPruned: boolean
   workSummary: string | null
   modifiedFiles: string | null
+  // Bytes of the prompt actually piped to the provider CLI for this job (or
+  // the max across merged turns / clustered children). Used to flag bloated
+  // prompts in the runs list — every cache-read of an oversized prefix is
+  // billed.
+  promptBytes?: number | null
   // Flat list of every pipeline child that ran inside this release's time
   // window — used by `buildReleaseSummary` for the one-line "test ✓ · review
   // LGTM · …" recap on the collapsed parent row.
@@ -458,6 +463,7 @@ export function buildEntries(jobs: JobInfo[]): Entry[] {
         existing.inputTokens += j.input_tokens ?? 0
         existing.outputTokens += j.output_tokens ?? 0
         existing.cacheReadTokens += j.cache_read_tokens ?? 0
+        existing.promptBytes = Math.max(existing.promptBytes ?? 0, j.prompt_bytes ?? 0) || existing.promptBytes
         existing.costUsd += jobCost(j)
         existing.navJobId = j.id
         existing.workSummary = j.work_summary ?? existing.workSummary
@@ -501,6 +507,7 @@ export function buildEntries(jobs: JobInfo[]): Entry[] {
       logPruned: !!j.log_pruned,
       workSummary: j.work_summary ?? null,
       modifiedFiles: j.modified_files ?? null,
+      promptBytes: j.prompt_bytes ?? null,
       parentJobId: j.parent_job_id ?? null,
       parentLabel: j.parent_job_id ? parentLabelFor(byId.get(j.parent_job_id)) : null,
       _jobIds: [j.id],
@@ -725,6 +732,7 @@ export function groupReleaseChildren(entries: Entry[]): Entry[] {
           inputTokens: cluster.reduce((s, e) => s + e.inputTokens, 0),
           outputTokens: cluster.reduce((s, e) => s + e.outputTokens, 0),
           cacheReadTokens: cluster.reduce((s, e) => s + e.cacheReadTokens, 0),
+          promptBytes: cluster.reduce((m, e) => Math.max(m, e.promptBytes ?? 0), 0) || null,
           costUsd: cluster.reduce((s, e) => s + e.costUsd, 0),
           turns: 1,
           model: null,

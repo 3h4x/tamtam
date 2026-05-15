@@ -30,8 +30,18 @@ import {
   type ReleaseConvergenceDeps,
 } from '@/lib/workflows/guards/review-convergence';
 import { checkIterationCap, type IterationCapDeps } from '@/lib/workflows/guards/iteration-caps';
+import type { ReviewDoNotShipAction } from '@/lib/shared/config';
 
-export type ApplyReleaseGuardsDeps = ReleaseConvergenceDeps & IterationCapDeps;
+export interface ReviewDoNotShipPolicyDeps {
+  /** getReviewDoNotShipAction() from `lib/pipeline/recovery-budget`. Controls
+   *  whether a DO NOT SHIP verdict aborts the release, files a follow-up
+   *  issue and continues to commit, or routes through the fix loop. */
+  reviewDoNotShipAction: () => ReviewDoNotShipAction;
+}
+
+export type ApplyReleaseGuardsDeps = ReleaseConvergenceDeps &
+  IterationCapDeps &
+  ReviewDoNotShipPolicyDeps;
 
 export interface ApplyReleaseGuardsInput {
   /** The just-finished sub-step that triggered this orchestrator tick. */
@@ -52,10 +62,35 @@ export interface ApplyReleaseGuardsInput {
 export function applyReleaseGuards(input: ApplyReleaseGuardsInput): NextPhase {
   const { job, decision, deps } = input;
 
+  // 0. DO NOT SHIP policy — applied first because decideNextPhase routes
+  // DO NOT SHIP straight to abort, and the user-configurable policy may want
+  // to (a) ship anyway with a follow-up issue (`pass`, default) or
+  // (b) try the fix loop (`fix`) before deciding. `abort` (legacy) falls
+  // through unchanged.
+  if (
+    decision.next === 'abort' &&
+    decision.from === 'review' &&
+    decision.verdict === 'DO NOT SHIP' &&
+    job.kind === 'review'
+  ) {
+    const policy = deps.reviewDoNotShipAction();
+    if (policy === 'pass') {
+      return {
+        next: 'commit',
+        from: 'review',
+        fileIssueForReviewId: job.id,
+      };
+    }
+    if (policy === 'fix') {
+      return { next: 'fix', from: 'review', verdict: 'DO NOT SHIP' };
+    }
+    // 'abort' → keep as-is, fall through.
+  }
+
   // 1. Convergence guards — only relevant when the next step is a fix
-  // triggered by a NEEDS ATTENTION review. DO NOT SHIP already aborts in
-  // decideNextPhase. Other "fix from X" decisions don't have a convergence
-  // proxy yet (tests/commits/pushes can't easily detect "same failure").
+  // triggered by a non-LGTM review verdict. Other "fix from X" decisions
+  // don't have a convergence proxy yet (tests/commits/pushes can't easily
+  // detect "same failure").
   if (decision.next === 'fix' && decision.from === 'review' && job.kind === 'review') {
     const contradiction = fixContradictsReview(job, deps);
     if (contradiction.stuck) {
