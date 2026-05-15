@@ -354,7 +354,7 @@ describe('TerminalStore – startStream EventSource integration', () => {
     const s = terminalStore.get(p);
     const errorEntries = s.history.filter((e) => e.role === 'error');
     expect(errorEntries.length).toBe(2);
-    expect(errorEntries[0].text).toBe('claude run failed');
+    expect(errorEntries[0].text).toBe('provider run failed');
     expect(errorEntries[1].text).toBe('API Error: Stream idle timeout - partial response received');
     // stats still captured
     expect(s.lastStats?.duration).toBe(9636496);
@@ -369,7 +369,7 @@ describe('TerminalStore – startStream EventSource integration', () => {
     const s = terminalStore.get(p);
     const errorEntries = s.history.filter((e) => e.role === 'error');
     expect(errorEntries.length).toBe(1);
-    expect(errorEntries[0].text).toBe('claude run failed');
+    expect(errorEntries[0].text).toBe('provider run failed');
   });
 
   it('done event with error=false does not trigger the error path', () => {

@@ -706,7 +706,8 @@ class TerminalStore {
         // "API Error: Stream idle timeout…"). Server-synthesized done events
         // carry `exitCode` and `detail` instead. Show whichever is present.
         if (metadata.error) {
-          newEntries.push({ role: 'error', text: 'claude run failed' })
+          const providerLabel = metadata.provider ? `${metadata.provider} run failed` : 'provider run failed'
+          newEntries.push({ role: 'error', text: providerLabel })
           if (metadata.errorText) {
             newEntries.push({ role: 'error', text: metadata.errorText })
           }

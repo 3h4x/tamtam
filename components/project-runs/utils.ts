@@ -258,6 +258,10 @@ export interface Entry {
   // present in `children`, but each non-root carries its direct parent's
   // edge instead of being a flat sibling.
   chainedChildren?: Entry[]
+  // Individual conversational turns that were collapsed into this entry.
+  // Only set on multi-turn chat/agent rows so the expanded view can break
+  // out cost-per-turn instead of just showing the aggregate.
+  turnEntries?: Entry[]
   parentJobId: string | null
   parentLabel: string | null
   // Every original job id that collapsed into this entry (session-grouped
@@ -469,6 +473,14 @@ export function buildEntries(jobs: JobInfo[]): Entry[] {
         existing.workSummary = j.work_summary ?? existing.workSummary
         existing.modifiedFiles = j.modified_files ?? existing.modifiedFiles
         existing._jobIds!.push(j.id)
+        // Track this turn as a leaf entry so the expanded view can show
+        // per-turn cost. Conversational turns only — pipeline-step merges
+        // (review/fix sharing a Claude session via --resume) don't need it
+        // because those already render as distinct step rows.
+        if (isConversational) {
+          const turnEntry = makeTurnEntry(j, bucket, byId)
+          existing.turnEntries = [...(existing.turnEntries ?? []), turnEntry]
+        }
         continue
       }
     }
@@ -512,12 +524,62 @@ export function buildEntries(jobs: JobInfo[]): Entry[] {
       parentLabel: j.parent_job_id ? parentLabelFor(byId.get(j.parent_job_id)) : null,
       _jobIds: [j.id],
     }
-    if (canSessionMerge) sessionGroup.set(sessionKey, entry)
+    if (canSessionMerge) {
+      sessionGroup.set(sessionKey, entry)
+      // Seed the first turn so a session that ends up with only one turn
+      // still has it available — multi-turn rows then accumulate from here.
+      if (isConversational) entry.turnEntries = [makeTurnEntry(j, bucket, byId)]
+    }
     entries.push(entry)
+  }
+
+  // Drop single-turn `turnEntries` arrays: there's no rollup to show, and
+  // exposing a single child would duplicate the parent row.
+  for (const e of entries) {
+    if (e.turnEntries && e.turnEntries.length <= 1) e.turnEntries = undefined
   }
 
   entries.sort((a, b) => b.lastActivityAt - a.lastActivityAt)
   return entries
+}
+
+// Build a leaf entry representing one conversational turn so the chat
+// row can expose per-turn cost when expanded. The shape mirrors a regular
+// Entry but is never re-grouped — it's a display-only artifact.
+function makeTurnEntry(j: JobInfo, bucket: KindBucket, byId: Map<string, JobInfo>): Entry {
+  return {
+    key: `turn:${j.id}`,
+    project: j.project,
+    kind: j.kind,
+    bucket,
+    title: titleForJob(j, bucket),
+    subtitle: subtitleForJob(j, bucket),
+    startedAt: j.started_at,
+    lastActivityAt: j.started_at,
+    finishedAt: j.finished_at,
+    status: j.status,
+    exitCode: j.exit_code,
+    durationMs: j.duration_ms ?? null,
+    inputTokens: j.input_tokens ?? 0,
+    outputTokens: j.output_tokens ?? 0,
+    cacheReadTokens: j.cache_read_tokens ?? 0,
+    costUsd: jobCost(j),
+    turns: 1,
+    model: j.model ?? modelFromContext(j.context_meta),
+    navJobId: j.id,
+    navSessionId: j.session_id ?? null,
+    releaseId: j.release_id ?? null,
+    verdict: j.verdict,
+    failureLabel: null,
+    releaseOutcome: null,
+    logPruned: !!j.log_pruned,
+    workSummary: j.work_summary ?? null,
+    modifiedFiles: j.modified_files ?? null,
+    promptBytes: j.prompt_bytes ?? null,
+    parentJobId: j.parent_job_id ?? null,
+    parentLabel: j.parent_job_id ? parentLabelFor(byId.get(j.parent_job_id)) : null,
+    _jobIds: [j.id],
+  }
 }
 
 // Build the parent → child tree for a release's pipeline steps using
@@ -620,7 +682,28 @@ export function groupReleaseChildren(entries: Entry[]): Entry[] {
       : r.status === 'done' && r.exitCode !== null && r.exitCode !== 0
       ? kids.length === 0 ? 'release blocked' : 'release failed'
       : r.failureLabel
-    releasesByKey.set(r.key, { ...r, children: kids, chainedChildren: buildChain(r, kids), failureLabel })
+    // Roll up child usage onto the release row so the parent shows the total
+    // of its review/fix/commit/push work — release meta-jobs themselves carry
+    // zero direct cost. Children continue to show their individual values, so
+    // expanding the row makes the breakdown visible without overwhelming the
+    // collapsed view.
+    const rolledCostUsd = kids.reduce((s, k) => s + (k.costUsd ?? 0), r.costUsd ?? 0)
+    const rolledInput = kids.reduce((s, k) => s + (k.inputTokens ?? 0), r.inputTokens ?? 0)
+    const rolledOutput = kids.reduce((s, k) => s + (k.outputTokens ?? 0), r.outputTokens ?? 0)
+    const rolledCacheRead = kids.reduce(
+      (s, k) => s + (k.cacheReadTokens ?? 0),
+      r.cacheReadTokens ?? 0,
+    )
+    releasesByKey.set(r.key, {
+      ...r,
+      children: kids,
+      chainedChildren: buildChain(r, kids),
+      failureLabel,
+      costUsd: rolledCostUsd,
+      inputTokens: rolledInput,
+      outputTokens: rolledOutput,
+      cacheReadTokens: rolledCacheRead,
+    })
   }
 
   // Cluster orphaned pipeline steps (no parent release) that are close in time
@@ -645,6 +728,14 @@ export function groupReleaseChildren(entries: Entry[]): Entry[] {
     if (!parentEntry) continue
     parentEntry.chainedChildren = [...(parentEntry.chainedChildren ?? []), rel]
     parentEntry.releaseOutcome = releaseOutcomeFor(rel)
+    // Same rollup as releases-by-key above: when an agent/chat row nests a
+    // release as a chained child, add the release's already-rolled-up cost
+    // (which itself sums its review/fix/commit/push kids) onto the parent so
+    // the collapsed row totals match what users see when they expand.
+    parentEntry.costUsd = (parentEntry.costUsd ?? 0) + (rel.costUsd ?? 0)
+    parentEntry.inputTokens = (parentEntry.inputTokens ?? 0) + (rel.inputTokens ?? 0)
+    parentEntry.outputTokens = (parentEntry.outputTokens ?? 0) + (rel.outputTokens ?? 0)
+    parentEntry.cacheReadTokens = (parentEntry.cacheReadTokens ?? 0) + (rel.cacheReadTokens ?? 0)
     // A terminal/agent row that auto-triggered a release is an aggregate from
     // the operator's point of view, but it still has two separate outcomes:
     // the agent/run itself and the release it triggered. Keep the parent

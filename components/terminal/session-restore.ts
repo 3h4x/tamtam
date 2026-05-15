@@ -27,6 +27,7 @@ interface JobLogDetail {
   exit_code?: number | null
   prompt?: string | null
   user_prompt?: string | null
+  provider?: string | null
 }
 
 export function isRestorableSessionKind(kind: string): boolean {
@@ -139,7 +140,8 @@ export async function buildEntriesForCompletedJobs(jobs: RestorableJob[]): Promi
         }))
         entries.push(exitEntry)
       } else if (exitCode !== null && exitCode !== undefined && exitCode !== 0) {
-        entries.push({ role: 'error', text: 'claude run failed' })
+        const providerLabel = detail.provider ? `${detail.provider} run failed` : 'provider run failed'
+        entries.push({ role: 'error', text: providerLabel })
         entries.push(...buildTerminalEntriesFromJobLog(detail.log, {
           passthrough: hasPrerequisiteContext(job.context_meta),
           fallbackRole: 'error',

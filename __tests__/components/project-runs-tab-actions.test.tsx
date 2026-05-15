@@ -7,12 +7,11 @@ import { flushSync } from 'react-dom'
 import { ProjectRunsTab } from '@/components/ProjectRunsTab'
 import type { JobInfo } from '@/lib/client-api'
 
-const { pushMock, fetchJobsMock, releaseProjectMock, pushProjectMock, syncJobBoardMock } = vi.hoisted(() => ({
+const { pushMock, fetchJobsMock, releaseProjectMock, pushProjectMock } = vi.hoisted(() => ({
   pushMock: vi.fn(),
   fetchJobsMock: vi.fn(),
   releaseProjectMock: vi.fn(),
   pushProjectMock: vi.fn(),
-  syncJobBoardMock: vi.fn(),
 }))
 
 vi.mock('next/navigation', () => ({
@@ -29,7 +28,6 @@ vi.mock('@/lib/client-api', () => ({
   fetchJobs: fetchJobsMock,
   releaseProject: releaseProjectMock,
   pushProject: pushProjectMock,
-  syncJobBoard: syncJobBoardMock,
 }))
 
 function makeJob({
@@ -118,7 +116,6 @@ describe('ProjectRunsTab release actions', () => {
       message: 'started',
     })
     pushProjectMock.mockResolvedValue({ status: 'started', job_id: 'commit-retry' })
-    syncJobBoardMock.mockResolvedValue({ status: 'ok' })
   })
 
   afterEach(() => {
@@ -126,7 +123,6 @@ describe('ProjectRunsTab release actions', () => {
     fetchJobsMock.mockReset()
     releaseProjectMock.mockReset()
     pushProjectMock.mockReset()
-    syncJobBoardMock.mockReset()
     vi.unstubAllGlobals()
     document.body.innerHTML = ''
   })
@@ -237,25 +233,6 @@ describe('ProjectRunsTab release actions', () => {
     unmount()
   })
 
-  it('keeps Sync board available even if an unrelated global fetch fails', async () => {
-    vi.stubGlobal('fetch', vi.fn().mockRejectedValue(new Error('settings offline')))
-    const { container, unmount } = renderTab()
-
-    await waitFor(() => {
-      expect(fetchJobsMock).toHaveBeenCalledWith('alpha', expect.objectContaining({ limit: expect.any(Number) }))
-      expect(buttonByText(container, 'Sync board')).toBeInstanceOf(HTMLButtonElement)
-    })
-
-    buttonByText(container, 'Sync board').dispatchEvent(new MouseEvent('click', { bubbles: true }))
-
-    await waitFor(() => {
-      expect(syncJobBoardMock).toHaveBeenCalledWith('new-push')
-    })
-
-    vi.unstubAllGlobals()
-    unmount()
-  })
-
   it('shows cancelled release progress after completed steps', async () => {
     fetchJobsMock.mockResolvedValue({
       jobs: [
@@ -338,32 +315,6 @@ describe('ProjectRunsTab release actions', () => {
     })
     expect(releaseProjectMock).not.toHaveBeenCalled()
 
-    unmount()
-  })
-
-  it('keeps Sync board available for aborted finished rows', async () => {
-    vi.stubGlobal('fetch', vi.fn().mockRejectedValue(new Error('settings offline')))
-    fetchJobsMock.mockResolvedValue({
-      jobs: [
-        makeJob({ id: 'aborted-release', kind: 'release', started_at: 100, finished_at: 120, status: 'aborted', exit_code: -3 }),
-      ],
-      pendingReleaseProjects: [],
-    })
-
-    const { container, unmount } = renderTab()
-
-    await waitFor(() => {
-      expect(fetchJobsMock).toHaveBeenCalledWith('alpha', expect.objectContaining({ limit: expect.any(Number) }))
-      expect(buttonByText(container, 'Sync board')).toBeInstanceOf(HTMLButtonElement)
-    })
-
-    buttonByText(container, 'Sync board').dispatchEvent(new MouseEvent('click', { bubbles: true }))
-
-    await waitFor(() => {
-      expect(syncJobBoardMock).toHaveBeenCalledWith('aborted-release')
-    })
-
-    vi.unstubAllGlobals()
     unmount()
   })
 

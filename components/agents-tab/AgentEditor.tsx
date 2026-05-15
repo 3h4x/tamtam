@@ -133,7 +133,9 @@ export function AgentEditor({
     setSaving(true)
     try {
       await onSave({ name, prompt: agentPrompt, skillIds: selectedSkills, docPaths: selectedDocPaths, model, schedule: schedule || null, runner, enabled, provider, prerequisiteCommand: prerequisiteCommand.trim() || null })
-    } catch {}
+    } catch (err) {
+      toast(err instanceof Error ? err.message : 'Failed to save agent', 'error')
+    }
     setSaving(false)
   }
 

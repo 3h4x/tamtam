@@ -176,7 +176,8 @@ export function useSessionManager(projectName: string) {
           }))
           entries.push(exitEntry)
         } else if (exitCode !== null && exitCode !== undefined && exitCode !== 0) {
-          entries.push({ role: 'error', text: 'claude run failed' })
+          const providerLabel = data.provider ? `${data.provider} run failed` : 'provider run failed'
+          entries.push({ role: 'error', text: providerLabel })
           entries.push(...buildTerminalEntriesFromJobLog(data.log, {
             passthrough: hasPrerequisiteContext(data.context_meta),
             fallbackRole: 'error',

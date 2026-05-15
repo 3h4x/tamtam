@@ -4,6 +4,8 @@ import { formatAgo } from '@/lib/shared/format'
 import { formatDuration, formatTokens, formatCost, KIND_LABEL, KIND_COLOR, entryIsRunning, entryNeedsAttention } from '@/components/project-runs/utils'
 import type { Entry } from '@/components/project-runs/utils'
 
+export const RUN_ROW_GRID_CLASS = 'lg:grid-cols-[minmax(360px,1.2fr)_minmax(360px,1fr)_96px_120px_minmax(84px,auto)]'
+
 function modifiedFileCount(raw: string | null): number {
   if (!raw) return 0
   try {
@@ -20,6 +22,17 @@ function splitSummary(summary: string | null | undefined): string[] {
     .split('·')
     .map((part) => part.trim())
     .filter(Boolean)
+}
+
+function lastFailedSummaryPart(parts: string[]): string | null {
+  for (let i = parts.length - 1; i >= 0; i -= 1) {
+    const part = parts[i]
+    const lower = part.toLowerCase()
+    if (part.includes('✗') || lower.includes('fail') || lower.includes('attention') || lower.includes('blocked') || lower.includes('pending')) {
+      return part
+    }
+  }
+  return null
 }
 
 function StatusIcon({
@@ -121,6 +134,20 @@ function formatRunSummaryText(value: string | null | undefined): string | null {
     .replace(/\n{3,}/g, '\n\n')
 
   return text || null
+}
+
+function latestFailureSummary(entry: Entry): string | null {
+  const children = [...(entry.children ?? []), ...(entry.chainedChildren ?? [])]
+  const seen = new Set<string>()
+  const uniqueChildren = children.filter((child) => {
+    if (seen.has(child.key)) return false
+    seen.add(child.key)
+    return true
+  })
+  const latestFailure = uniqueChildren
+    .filter((child) => entryNeedsAttention(child))
+    .sort((a, b) => b.lastActivityAt - a.lastActivityAt)[0]
+  return latestFailure?.workSummary ?? latestFailure?.subtitle ?? null
 }
 
 export interface RunRowProps {
@@ -263,11 +290,15 @@ export function RunRow({ entry: e, onClick, expandable, expanded, onToggleExpand
   const fileCount = modifiedFileCount(e.modifiedFiles)
   const durationLabel = formatDuration(e.startedAt, e.finishedAt)
   const startedLabel = formatAgo(e.startedAt)
-  const runSummary = effectiveRunning ? null : formatRunSummaryText(e.workSummary)
+  const childFailureSummary = effectiveNeedsAttention ? formatRunSummaryText(latestFailureSummary(e)) : null
+  const runSummary = effectiveRunning ? null : formatRunSummaryText(e.workSummary) ?? childFailureSummary
   const liveDetail = effectiveRunning
     ? (e.workSummary ? formatRunSummaryText(e.workSummary) : e.subtitle?.trim() || null)
     : null
   const summaryParts = splitSummary(summary)
+  const failedStepLabel = effectiveNeedsAttention
+    ? progressLabel ?? lastFailedSummaryPart(summaryParts)
+    : null
   const verdictBadge = (
     <VerdictBadge
       verdict={e.verdict}
@@ -286,7 +317,7 @@ export function RunRow({ entry: e, onClick, expandable, expanded, onToggleExpand
       isRunning={effectiveRunning}
       isFailed={effectiveNeedsAttention}
       exitCode={e.exitCode}
-      failureLabel={statusFailureLabel}
+      failureLabel={failedStepLabel ?? statusFailureLabel}
     />
   )
   const paddingLeft = DEPTH_PADDING[Math.min(depth, 6)] ?? 'pl-52'
@@ -300,6 +331,10 @@ export function RunRow({ entry: e, onClick, expandable, expanded, onToggleExpand
     : progressLabel?.includes('failed') || progressLabel?.includes('stopped') || progressLabel?.includes('cancelled') || progressLabel?.includes('blocked')
       ? 'border-status-error/30 bg-status-error/10 text-status-error'
       : 'border-accent/25 bg-accent/10 text-accent'
+  const showProgressBadge = !!progressLabel && effectiveRunning
+  const visibleSummaryParts = effectiveNeedsAttention && !failedStepLabel
+    ? summaryParts.slice(-1)
+    : []
 
   // Tree connector lines. Ancestor levels get a full-height vertical rail;
   // the current depth gets a half-height vertical + horizontal stub (└─ shape).
@@ -324,7 +359,7 @@ export function RunRow({ entry: e, onClick, expandable, expanded, onToggleExpand
         onKeyDown={(ev) => { if (ev.key === 'Enter' || ev.key === ' ') { ev.preventDefault(); onClick() } }}
         className={`w-full text-left hover:bg-bg-tertiary cursor-pointer ${paddingLeft} pr-3 py-2 group ${rowTone} transition-colors`}
       >
-        <div className="grid gap-3 lg:grid-cols-[minmax(320px,1.35fr)_minmax(220px,1fr)_120px_110px_auto] lg:items-center">
+        <div className={`grid gap-3 ${RUN_ROW_GRID_CLASS} lg:items-center`}>
           <div className="flex min-w-0 items-start gap-2">
             {expandable ? (
               <button
@@ -369,9 +404,9 @@ export function RunRow({ entry: e, onClick, expandable, expanded, onToggleExpand
               {statusBadge}
               {verdictBadge}
               {releaseBadge}
-              {progressLabel && (
+              {showProgressBadge && (
                 <span className={`inline-flex h-5 items-center rounded border px-1.5 text-[10px] font-medium font-mono ${progressTone}`}>
-                  step: {progressLabel}
+                  {progressLabel}
                 </span>
               )}
               {showPromptChip && (
@@ -393,17 +428,20 @@ export function RunRow({ entry: e, onClick, expandable, expanded, onToggleExpand
               )}
             </div>
 
-            {summaryParts.length > 0 && (
+            {visibleSummaryParts.length > 0 && (
               <div className="mt-1.5 flex flex-wrap gap-1">
-                {summaryParts.map((part, index) => (
+                {visibleSummaryParts.map((part, index) => (
                   <StepChip key={`${index}:${part}`} value={part} />
                 ))}
               </div>
             )}
 
             {(runSummary || liveDetail) && (
-              <div className="mt-1.5 min-w-0 truncate text-xs leading-5 text-text-secondary" title={(runSummary ?? liveDetail) ?? undefined}>
-                {runSummary ?? liveDetail}
+              <div className="mt-1.5 flex min-w-0 items-baseline gap-1.5 text-xs leading-5 text-text-secondary" title={(runSummary ?? liveDetail) ?? undefined}>
+                <span className="shrink-0 font-mono text-[10px] uppercase tracking-wider text-text-tertiary">
+                  {effectiveNeedsAttention ? 'reason' : runSummary ? 'done' : 'current'}
+                </span>
+                <span className="min-w-0 truncate">{runSummary ?? liveDetail}</span>
               </div>
             )}
           </div>
@@ -417,7 +455,7 @@ export function RunRow({ entry: e, onClick, expandable, expanded, onToggleExpand
             {(totalTokens > 0 || e.costUsd > 0 || fileCount > 0 || e.model) ? (
               <div className="flex min-w-0 flex-wrap items-center gap-x-2 gap-y-1 lg:justify-end">
                 {e.model && <span className="max-w-[140px] truncate font-mono text-accent" title={e.model}>{e.model}</span>}
-                {fileCount > 0 && e.bucket === 'agent' && (
+                {fileCount > 0 && (
                   <span className="font-mono">{fileCount} file{fileCount === 1 ? '' : 's'}</span>
                 )}
                 {totalTokens > 0 && (
