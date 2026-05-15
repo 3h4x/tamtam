@@ -1,7 +1,12 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { eq } from 'drizzle-orm';
 import { db, schema } from '@/lib/db';
-import { buildConfigFromSettingsMap, normalizePermissionMode, reloadConfig } from '@/lib/shared/config';
+import {
+  buildConfigFromSettingsMap,
+  normalizePermissionMode,
+  reloadConfig,
+  REVIEW_DO_NOT_SHIP_ACTIONS,
+} from '@/lib/shared/config';
 import { syncJobsPauseState } from '@/lib/shared/job-control';
 import {
   encodeBudgetSubscriptionProviders,
@@ -86,6 +91,19 @@ function parseUnitFloatSetting(
   return { value: String(parsed), error: null };
 }
 
+function parseReviewDoNotShipActionSetting(
+  value: unknown,
+): { value: string | null; error: string | null } {
+  const raw = String(value).trim();
+  if ((REVIEW_DO_NOT_SHIP_ACTIONS as readonly string[]).includes(raw)) {
+    return { value: raw, error: null };
+  }
+  return {
+    value: null,
+    error: `review_do_not_ship_action must be one of: ${REVIEW_DO_NOT_SHIP_ACTIONS.join(', ')}.`,
+  };
+}
+
 async function buildSettingsResponse(): Promise<Record<string, string>> {
   const rows = await db.select().from(schema.settings);
   const rowMap = Object.fromEntries(rows.map((row) => [row.key, row.value]));
@@ -99,6 +117,7 @@ async function buildSettingsResponse(): Promise<Record<string, string>> {
   settings.claude_provider = serializeSettingValue('claude_provider', effective.claude_provider);
   settings.cli_enabled_providers = serializeSettingValue('cli_enabled_providers', effective.cli_enabled_providers);
   settings.review_fix_max_iterations = serializeSettingValue('review_fix_max_iterations', effective.review_fix_max_iterations);
+  settings.review_do_not_ship_action = serializeSettingValue('review_do_not_ship_action', effective.review_do_not_ship_action);
   settings.release_wall_clock_timeout_minutes = serializeSettingValue('release_wall_clock_timeout_minutes', effective.release_wall_clock_timeout_minutes);
   if (effective.cli_bin_claude) {
     settings.cli_bin_claude = serializeSettingValue('cli_bin_claude', effective.cli_bin_claude);
@@ -143,6 +162,7 @@ const SETTING_KEYS = [
   'review_verdict_rules',
   'jobs_paused',
   'review_fix_max_iterations',
+  'review_do_not_ship_action',
   'release_wall_clock_timeout_minutes',
   'agent_templates',
   'log_retention_count',
@@ -214,6 +234,10 @@ function serializeSettingValue(key: string, value: unknown): string {
   if (key === 'permission_mode') {
     return normalizePermissionMode(String(value));
   }
+  if (key === 'review_do_not_ship_action') {
+    const parsed = parseReviewDoNotShipActionSetting(value);
+    return parsed.value ?? 'pass';
+  }
   if (
     key === 'pipeline_model_review' ||
     key === 'pipeline_model_fix' ||
@@ -277,6 +301,10 @@ function validateAndSerializeSettingValue(
 
   if (key === 'review_fix_max_iterations' || key === 'release_wall_clock_timeout_minutes') {
     return parsePositiveIntegerSetting(value, key);
+  }
+
+  if (key === 'review_do_not_ship_action') {
+    return parseReviewDoNotShipActionSetting(value);
   }
 
   if (key === 'retrieval_context_limit') {

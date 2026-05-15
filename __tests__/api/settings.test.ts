@@ -88,6 +88,7 @@ describe('settings API', () => {
         claude_provider: 'claude',
         cli_enabled_providers: 'claude',
         review_fix_max_iterations: '3',
+        review_do_not_ship_action: 'pass',
         release_wall_clock_timeout_minutes: '60',
       });
     });
@@ -204,6 +205,15 @@ describe('settings API', () => {
       const data = await response.json();
 
       expect(data.settings.review_fix_max_iterations).toBe('3');
+    });
+
+    it('returns the effective review_do_not_ship_action when the stored row is invalid', async () => {
+      await sharedHandle.db.insert(schema.settings).values({ key: 'review_do_not_ship_action', value: 'ship-it' });
+
+      const response = await GET();
+      const data = await response.json();
+
+      expect(data.settings.review_do_not_ship_action).toBe('pass');
     });
 
     it('canonicalizes CLI provider and per-provider model settings in the API response', async () => {
@@ -481,6 +491,7 @@ describe('settings API', () => {
         'review_verdict_rules',
         'jobs_paused',
         'review_fix_max_iterations',
+        'review_do_not_ship_action',
         'release_wall_clock_timeout_minutes',
         'agent_templates',
         'notification_webhook_url',
@@ -499,6 +510,7 @@ describe('settings API', () => {
           : k === 'permission_mode' ? 'acceptEdits'
           : k.startsWith('pipeline_model_') ? 'normal'
           : k === 'review_fix_max_iterations' ? '5'
+          : k === 'review_do_not_ship_action' ? 'fix'
           : k === 'release_wall_clock_timeout_minutes' ? '30'
           : k === 'agent_templates'
             ? JSON.stringify([{ name: 'template', description: 'desc', model: 'smart', schedule: '', runner: 'pm2', prompt: '' }])
@@ -721,6 +733,25 @@ describe('settings API', () => {
       expect(row?.value).toBe('3');
     });
 
+    it('saves review_do_not_ship_action setting', async () => {
+      const request = new NextRequest('http://localhost/api/settings', {
+        method: 'PATCH',
+        body: JSON.stringify({ review_do_not_ship_action: 'abort' }),
+      });
+      const response = await PATCH(request);
+
+      expect(response.status).toBe(200);
+      const rows = await sharedHandle.db.select().from(schema.settings);
+      const row = rows.find(r => r.key === 'review_do_not_ship_action');
+      expect(row?.value).toBe('abort');
+      await expect(response.json()).resolves.toMatchObject({
+        status: 'ok',
+        settings: expect.objectContaining({
+          review_do_not_ship_action: 'abort',
+        }),
+      });
+    });
+
     it('accepts zero-valued backup retention settings and returns them canonically', async () => {
       const request = new NextRequest('http://localhost/api/settings', {
         method: 'PATCH',
@@ -801,6 +832,20 @@ describe('settings API', () => {
       expect(response.status).toBe(400);
       await expect(response.json()).resolves.toMatchObject({
         detail: expect.stringContaining('review_fix_max_iterations must be a positive integer'),
+      });
+      expect(await sharedHandle.db.select().from(schema.settings)).toEqual([]);
+    });
+
+    it('rejects invalid review_do_not_ship_action values', async () => {
+      const request = new NextRequest('http://localhost/api/settings', {
+        method: 'PATCH',
+        body: JSON.stringify({ review_do_not_ship_action: 'ship-it' }),
+      });
+      const response = await PATCH(request);
+
+      expect(response.status).toBe(400);
+      await expect(response.json()).resolves.toMatchObject({
+        detail: expect.stringContaining('review_do_not_ship_action must be one of: pass, fix, abort'),
       });
       expect(await sharedHandle.db.select().from(schema.settings)).toEqual([]);
     });

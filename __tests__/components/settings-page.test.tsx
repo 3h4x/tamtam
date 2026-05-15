@@ -66,6 +66,21 @@ function findInputByLabel(container: HTMLElement, labelText: string): HTMLInputE
   return input
 }
 
+function findSelectByLabel(container: HTMLElement, labelText: string): HTMLSelectElement {
+  const label = Array.from(container.querySelectorAll('label')).find(
+    (node) => node.textContent?.trim() === labelText,
+  )
+  if (!(label instanceof HTMLLabelElement)) {
+    throw new Error(`Label not found: ${labelText}`)
+  }
+  const wrapper = label.parentElement
+  const select = wrapper?.querySelector('select')
+  if (!(select instanceof HTMLSelectElement)) {
+    throw new Error(`Select not found for label: ${labelText}`)
+  }
+  return select
+}
+
 function getSaveButton(container: HTMLElement): HTMLButtonElement {
   const button = Array.from(container.querySelectorAll('button')).find(
     (node) => node.textContent?.includes('Save Settings') || node.textContent?.includes('Saved!'),
@@ -120,6 +135,12 @@ function setInputValue(input: HTMLInputElement, value: string) {
   const descriptor = Object.getOwnPropertyDescriptor(window.HTMLInputElement.prototype, 'value')
   descriptor?.set?.call(input, value)
   input.dispatchEvent(new Event('input', { bubbles: true }))
+}
+
+function setSelectValue(select: HTMLSelectElement, value: string) {
+  const descriptor = Object.getOwnPropertyDescriptor(window.HTMLSelectElement.prototype, 'value')
+  descriptor?.set?.call(select, value)
+  select.dispatchEvent(new Event('change', { bubbles: true }))
 }
 
 describe('SettingsPage', () => {
@@ -196,6 +217,65 @@ describe('SettingsPage', () => {
     )
     expect(patchCall).toBeTruthy()
     expect((patchCall?.[1] as RequestInit).body).toContain('"review_fix_max_iterations":"03"')
+
+    unmount()
+  })
+
+  it('saves the DO NOT SHIP policy setting from the pipeline tab', async () => {
+    const fetchMock = vi.fn(async (input: string, init?: RequestInit) => {
+      if (input === '/api/settings' && !init) {
+        return makeResponse({
+          settings: {
+            claude_provider: 'claude',
+            cli_enabled_providers: 'claude',
+            review_do_not_ship_action: 'pass',
+          },
+        })
+      }
+      if (input === '/api/settings' && init?.method === 'PATCH') {
+        return makeResponse({
+          status: 'ok',
+          settings: {
+            claude_provider: 'claude',
+            cli_enabled_providers: 'claude',
+            review_do_not_ship_action: 'abort',
+          },
+        })
+      }
+      if (input === '/api/config/projects') {
+        return makeResponse({ projects: [] })
+      }
+      throw new Error(`Unexpected fetch: ${input}`)
+    })
+    vi.stubGlobal('fetch', fetchMock)
+
+    const { container, unmount } = renderSettingsPage()
+
+    await vi.waitFor(() => {
+      expect(findSelectByLabel(container, 'Do Not Ship Action').value).toBe('pass')
+      expect(getSaveButton(container).disabled).toBe(true)
+    })
+
+    flushSync(() => {
+      setSelectValue(findSelectByLabel(container, 'Do Not Ship Action'), 'abort')
+    })
+
+    await vi.waitFor(() => {
+      expect(getSaveButton(container).disabled).toBe(false)
+    })
+
+    getSaveButton(container).click()
+
+    await vi.waitFor(() => {
+      expect(findSelectByLabel(container, 'Do Not Ship Action').value).toBe('abort')
+      expect(getSaveButton(container).disabled).toBe(true)
+    })
+
+    const patchCall = fetchMock.mock.calls.find(
+      ([input, init]) => input === '/api/settings' && (init as RequestInit | undefined)?.method === 'PATCH',
+    )
+    expect(patchCall).toBeTruthy()
+    expect((patchCall?.[1] as RequestInit).body).toContain('"review_do_not_ship_action":"abort"')
 
     unmount()
   })

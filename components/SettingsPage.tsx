@@ -49,6 +49,7 @@ interface SettingsMap {
   review_verdict_rules: string
   jobs_paused: string
   review_fix_max_iterations: string
+  review_do_not_ship_action: string
   release_wall_clock_timeout_minutes: string
   agent_templates: string
   log_retention_count: string

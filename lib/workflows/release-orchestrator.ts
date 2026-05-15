@@ -44,22 +44,24 @@ export async function releaseOrchestratorWorkflow(
     );
   }
   const dispatch = await dispatchStep(decision, { ...ctx, prevJobId: waited.job.id });
-  // When the chain reaches a terminal decision (done / abort / unknown),
-  // finalize the release meta-job so its row in /runs reflects the actual
-  // outcome instead of staying open until the legacy reconciler reaps it.
-  if (
-    dispatch.dispatched === false &&
-    dispatch.reason === 'terminal' &&
-    ctx.parentJobId
-  ) {
+  // Finalize the release meta-job whenever this tick did not start a child
+  // workflow — otherwise the release sits in `running` until the wall-clock
+  // sweep reaps it. Three cases:
+  //   - `terminal`           — decideStep / guards routed to done/abort/unknown.
+  //   - `dispatch_failed`    — `start(child)` threw (workflow runtime gap,
+  //                            transient queue error, etc.). The chain is
+  //                            broken; fail loudly with the underlying error.
+  //   - `missing_context`    — the dispatch needed a value (e.g. prevJobId)
+  //                            that the caller didn't pass. Programmer error;
+  //                            finalize and surface so it doesn't silently
+  //                            hang the release.
+  if (dispatch.dispatched === false && ctx.parentJobId) {
     // Stash the guard's stop reason on the release before finalizing so the
     // UI / pipeline trace surfaces the abort cause. When the abort came
     // from a review-side guard with a NEEDS ATTENTION verdict (not DO NOT
     // SHIP), file the exhaustion-fallback GitHub issue with the persistent
     // findings so the user has a follow-up artifact.
-    const stopReason = decision.next === 'abort' && 'stopReason' in decision
-      ? decision.stopReason
-      : undefined;
+    const stopReason = computeStopReason(dispatch, decision);
     const fileExhaustionIssueForReviewId =
       decision.next === 'abort' &&
       decision.from === 'review' &&
@@ -67,15 +69,49 @@ export async function releaseOrchestratorWorkflow(
       waited.job.kind === 'review'
         ? waited.job.id
         : undefined;
+    // For terminal decisions, the release outcome mirrors the last step's
+    // exit code. For dispatch failures, we have no successful chain to point
+    // at — propagate exit 1 so the release row goes red rather than
+    // inheriting an exit-0 from a successful prior step.
+    const lastExitCode =
+      dispatch.reason === 'terminal'
+        ? waited.job.exitCode ?? 0
+        : 1;
+    // `dispatch.phase` is the next phase that would have run for
+    // dispatch_failed/missing_context, not a real terminal phase. Coerce to
+    // 'abort' so finalizeReleaseStep takes the aborted-release path.
+    const terminalPhase: 'done' | 'abort' | 'unknown' =
+      dispatch.reason === 'terminal'
+        ? dispatch.phase
+        : 'abort';
     await finalizeReleaseStep(
       ctx.parentJobId,
-      dispatch.phase,
-      waited.job.exitCode ?? 0,
+      terminalPhase,
+      lastExitCode,
       stopReason,
       fileExhaustionIssueForReviewId,
     );
   }
   return { waited, decision, dispatch };
+}
+
+function computeStopReason(
+  dispatch: DispatchPhaseOutcome,
+  decision: NextPhase,
+): string | undefined {
+  if (dispatch.dispatched !== false) return undefined;
+  if (dispatch.reason === 'terminal') {
+    return decision.next === 'abort' && 'stopReason' in decision
+      ? decision.stopReason
+      : undefined;
+  }
+  if (dispatch.reason === 'dispatch_failed') {
+    return `failed to dispatch ${dispatch.phase} phase: ${dispatch.error}`;
+  }
+  if (dispatch.reason === 'missing_context') {
+    return `missing context for ${dispatch.phase} dispatch: ${dispatch.missing.join(', ')}`;
+  }
+  return undefined;
 }
 
 async function waitStep(jobId: string): Promise<WaitForJobResult> {

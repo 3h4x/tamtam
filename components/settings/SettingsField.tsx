@@ -65,6 +65,12 @@ export function SettingsField({
           <option value="">{(fieldKey === 'pipeline_model_dod' || fieldKey === 'pipeline_model_commit') ? 'Default (Fast)' : 'Default (workspace)'}</option>
           {MODEL_TIERS.map((model) => <option key={model} value={model}>{MODEL_LABELS[model]}</option>)}
         </select>
+      ) : fieldKey === 'review_do_not_ship_action' ? (
+        <select value={value || 'pass'} onChange={(e) => onChange(fieldKey, e.target.value)} className={SELECT_CLASS}>
+          <option value="pass">Pass with follow-up issue</option>
+          <option value="fix">Try fix loop</option>
+          <option value="abort">Abort release</option>
+        </select>
       ) : fieldKey === 'permission_mode' ? (
         <>
           <select value={value} onChange={(e) => onChange(fieldKey, e.target.value)} className={SELECT_CLASS}>
