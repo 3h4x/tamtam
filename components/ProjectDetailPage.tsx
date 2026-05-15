@@ -649,6 +649,34 @@ export function ProjectDetailPage({
           >
             {config?.paused ? '⏸ Paused' : 'Pause'}
           </button>
+          <button
+            type="button"
+            onClick={async () => {
+              const next = !config?.release_after_run
+              try {
+                const res = await fetch(`/api/projects/by-project/${encodeURIComponent(name)}/config`, {
+                  method: 'PATCH',
+                  headers: { 'Content-Type': 'application/json' },
+                  body: JSON.stringify({ release_after_run: next }),
+                })
+                if (!res.ok) throw new Error(`HTTP ${res.status}`)
+                applyConfigData(await fetchProjectConfig(name))
+                toast(next ? `Auto release enabled for ${name}` : `Auto release disabled for ${name}`, 'success')
+              } catch (err) {
+                toast(err instanceof Error ? err.message : 'Failed to toggle auto release', 'error')
+              }
+            }}
+            className={
+              config?.release_after_run
+                ? 'inline-flex items-center gap-1 rounded-full border border-accent/40 bg-accent/10 px-2 py-0.5 text-xs text-accent hover:bg-accent/20 transition-colors'
+                : 'inline-flex items-center gap-1 rounded-full border border-border bg-bg-secondary px-2 py-0.5 text-xs text-text-secondary hover:text-accent hover:border-accent/40 transition-colors'
+            }
+            title={config?.release_after_run
+              ? 'Auto release is ON — release pipeline triggers after each terminal or agent run finishes. Click to disable.'
+              : 'Auto release is OFF — click to auto-trigger the release pipeline after each terminal or agent run.'}
+          >
+            {config?.release_after_run ? '🚀 Auto release' : 'Auto release'}
+          </button>
         </div>
         <div className="flex items-center gap-2 flex-wrap justify-end">
           <ProjectActions
