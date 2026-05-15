@@ -1,4 +1,8 @@
-import * as internalScheduler from '@/lib/scheduling/internal-scheduler';
+// internal-scheduler.ts was retired with the in-memory cron path. Pause
+// state is now read by the agent-cron task handler's `prereqSkipReason`
+// callback (see lib/workflows/cron/agent-cron-task.ts) — no scheduler-
+// side toggle needed because graphile-worker fires per-job and the
+// handler can decide to skip in flight.
 import { getActiveCliProvider, getSettings } from '@/lib/shared/config';
 import {
   getQuotaSnapshots,
@@ -129,14 +133,13 @@ function fireBudgetBlockedNotification(
 export function syncJobsPauseState(paused: boolean): void {
   const wasPaused = runtimeJobsPaused;
   runtimeJobsPaused = paused;
-  if (paused) {
-    internalScheduler.pauseInternalScheduler?.();
-  } else {
-    internalScheduler.resumeInternalScheduler?.();
+  if (!paused && wasPaused) {
     // Resume edge: drain any release/agent work queued while we were paused,
     // preserving per-project "pending release before queued agent" ordering.
-    if (wasPaused) void drainAllRecoveryWorkAsync();
-    if (wasPaused) void drainAllQueuedAgentsAsync();
+    // The agent-cron handler reads `runtimeJobsPaused` on each fire, so the
+    // pause state itself doesn't need a scheduler-side toggle anymore.
+    void drainAllRecoveryWorkAsync();
+    void drainAllQueuedAgentsAsync();
   }
 }
 

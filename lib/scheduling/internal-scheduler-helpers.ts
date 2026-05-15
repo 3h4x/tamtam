@@ -9,7 +9,7 @@
 
 import { db, schema } from '@/lib/db';
 import { listEnabledProjects } from '@/lib/shared/enabled-projects';
-import type { AgentInput } from '@/lib/scheduling/internal-scheduler';
+import type { AgentInput } from '@/lib/scheduling/agent-types';
 
 export async function listEnabledScheduledAgents(): Promise<AgentInput[]> {
   const allAgents = await db.select().from(schema.agents);

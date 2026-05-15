@@ -1,9 +1,11 @@
 import { describe, it, expect, beforeEach, afterAll, vi } from 'vitest';
+import { existsSync, readFileSync, mkdtempSync, rmSync } from 'fs';
+import { join } from 'path';
+import { tmpdir } from 'os';
 
-// Single shared tempDir for the entire suite. agent-scheduler.ts captures
-// `LAUNCH_AGENTS_DIR = join(homedir(), 'Library', 'LaunchAgents')` at module
-// load, so homedir() must be stable across tests. Created inside the hoisted
-// block so it exists before vi.mock factories run on first SUT import.
+// Shared tempDir captured at hoist time — homedir() is captured by
+// agent-scheduler.ts's `getLogDir()` fallback path when no DB-backed
+// log-dir setting is available (the case under unit tests).
 const mocks = vi.hoisted(() => {
   const fsMod = require('fs') as typeof import('fs');
   const pathMod = require('path') as typeof import('path');
@@ -11,29 +13,26 @@ const mocks = vi.hoisted(() => {
   const tempDir = fsMod.mkdtempSync(pathMod.join(osMod.tmpdir(), 'tamtam-scheduler-test-'));
   return {
     tempDir,
-    execMock: vi.fn(),
-    upsertAgentScheduleMock: vi.fn(),
-    removeAgentScheduleMock: vi.fn(),
-    dumpInternalSchedulerMock: vi.fn<() => { entries: Array<{ agentId: string; project: string; name: string; schedule: string; nextFireMs: number; lastFireMs: number }>; nowMs: number }>(() => ({ entries: [], nowMs: Date.now() })),
+    quickAddJobMock: vi.fn(async () => undefined),
   };
 });
-const tempDir = mocks.tempDir;
 
 vi.mock('os', async () => {
   const actual = await vi.importActual<typeof import('os')>('os');
   return { ...actual, homedir: () => mocks.tempDir };
 });
 
-vi.mock('@/lib/shared/shell', () => ({ exec: mocks.execMock }));
-
-vi.mock('@/lib/shared/config', () => ({
-  getSettings: vi.fn().mockReturnValue({}),
+vi.mock('graphile-worker', () => ({
+  quickAddJob: mocks.quickAddJobMock,
 }));
 
-vi.mock('@/lib/scheduling/internal-scheduler', () => ({
-  upsertAgentSchedule: mocks.upsertAgentScheduleMock,
-  removeAgentSchedule: mocks.removeAgentScheduleMock,
-  dumpInternalScheduler: mocks.dumpInternalSchedulerMock,
+// getImproveConfig reads DB-backed settings; in unit tests with no DB it
+// throws — agent-scheduler.ts already catches that and falls back to
+// `homedir()/logs`. The mock keeps the throw path deterministic.
+vi.mock('@/lib/scheduling/scheduling', () => ({
+  getImproveConfig: vi.fn(() => {
+    throw new Error('no db in unit tests — fall back to homedir');
+  }),
 }));
 
 import {
@@ -42,98 +41,93 @@ import {
   isAgentScheduleLoaded,
 } from '@/lib/scheduling/agent-scheduler';
 
-describe('agent-scheduler', () => {
-  const execMock = mocks.execMock;
-  const upsertAgentScheduleMock = mocks.upsertAgentScheduleMock;
-  const removeAgentScheduleMock = mocks.removeAgentScheduleMock;
-  const dumpInternalSchedulerMock = mocks.dumpInternalSchedulerMock;
+describe('agent-scheduler (graphile-worker backed)', () => {
+  const tempDir = mocks.tempDir;
+  const quickAddJobMock = mocks.quickAddJobMock;
+  const scriptsDir = join(tempDir, 'logs', 'agent-scripts');
 
   beforeEach(() => {
-    execMock.mockReset();
-    execMock.mockResolvedValue({ exitCode: 0, stdout: '', stderr: '' });
-    upsertAgentScheduleMock.mockReset();
-    removeAgentScheduleMock.mockReset();
-    dumpInternalSchedulerMock.mockReset().mockReturnValue({ entries: [], nowMs: Date.now() });
+    quickAddJobMock.mockReset();
+    quickAddJobMock.mockResolvedValue(undefined);
+    process.env.DATABASE_URL = 'postgres://test/test';
   });
 
   afterAll(() => {
-    (require('fs') as typeof import('fs')).rmSync(tempDir, { recursive: true, force: true });
+    rmSync(tempDir, { recursive: true, force: true });
   });
 
-  describe('installAgentSchedule (pm2 runner → internal scheduler)', () => {
-    it('registers the agent with the internal scheduler', async () => {
+  describe('installAgentSchedule', () => {
+    it('persists the prompt to disk and enqueues an agent-cron job', async () => {
       await installAgentSchedule('agent-abc', '30m', 'run tests', 'pm2', 'projA', 'My Agent');
-      expect(upsertAgentScheduleMock).toHaveBeenCalledOnce();
-      expect(upsertAgentScheduleMock).toHaveBeenCalledWith({
-        id: 'agent-abc',
-        project: 'projA',
-        name: 'My Agent',
-        schedule: '30m',
-        prompt: 'run tests',
-        enabled: true,
+
+      // Prompt file is written so out-of-band reruns can recover the prompt.
+      const promptPath = join(scriptsDir, 'agent-abc.prompt.json');
+      expect(existsSync(promptPath)).toBe(true);
+      expect(JSON.parse(readFileSync(promptPath, 'utf8'))).toEqual({ prompt: 'run tests' });
+
+      expect(quickAddJobMock).toHaveBeenCalledOnce();
+      const call = quickAddJobMock.mock.calls[0] as unknown as [
+        { connectionString: string },
+        string,
+        { agentId: string },
+        { jobKey: string; jobKeyMode: string; runAt: Date; maxAttempts: number },
+      ];
+      expect(call[0]).toEqual({ connectionString: 'postgres://test/test' });
+      expect(call[1]).toBe('agent-cron');
+      expect(call[2]).toEqual({ agentId: 'agent-abc' });
+      expect(call[3]).toMatchObject({
+        jobKey: 'agent-cron-agent-abc',
+        jobKeyMode: 'replace',
+        maxAttempts: 5,
       });
+      expect(call[3].runAt).toBeInstanceOf(Date);
     });
 
-    // Legacy PM2-cleanup-on-install path was retired with the rest of the
-    // per-job PM2 infrastructure. installAgentSchedule no longer issues any
-    // pm2 commands — the internal scheduler is the only target.
-
-    it('does NOT register a PM2 cron entry (the broken legacy path)', async () => {
-      await installAgentSchedule('agent-abc', '1h', 'p', 'pm2');
-      const pm2Start = execMock.mock.calls.find(
-        ([cmd, args]: any) => cmd === 'pm2' && args[0] === 'start'
-      );
-      expect(pm2Start).toBeFalsy();
-    });
-
-    it('falls back to agent-id for name when project/agentName missing', async () => {
-      await installAgentSchedule('agent-xyz', '1h', 'p', 'pm2');
-      expect(upsertAgentScheduleMock).toHaveBeenCalledWith(
-        expect.objectContaining({ id: 'agent-xyz', name: 'agent-xyz', project: '' })
-      );
+    it('throws when no postgres URL is configured', async () => {
+      delete process.env.DATABASE_URL;
+      delete process.env.WORKFLOW_POSTGRES_URL;
+      await expect(installAgentSchedule('agent-no-pg', '1h', 'p', 'pm2')).rejects.toThrow(/no postgres URL/);
     });
   });
 
-  describe('uninstallAgentSchedule (pm2 runner → internal scheduler)', () => {
-    it('removes the agent from the internal scheduler', async () => {
-      await uninstallAgentSchedule('agent-to-remove', 'pm2', 'projA', 'My Agent');
-      expect(removeAgentScheduleMock).toHaveBeenCalledOnce();
-      expect(removeAgentScheduleMock).toHaveBeenCalledWith('agent-to-remove');
+  describe('uninstallAgentSchedule', () => {
+    it('replaces the agent-cron job with a one-year-out runAt and removes the prompt file', async () => {
+      // First install to create the prompt file...
+      await installAgentSchedule('agent-to-remove', '1h', 'p', 'pm2', 'proj', 'agt');
+      const promptPath = join(scriptsDir, 'agent-to-remove.prompt.json');
+      expect(existsSync(promptPath)).toBe(true);
+      quickAddJobMock.mockClear();
+
+      await uninstallAgentSchedule('agent-to-remove', 'pm2', 'proj', 'agt');
+
+      expect(quickAddJobMock).toHaveBeenCalledOnce();
+      const call = quickAddJobMock.mock.calls[0] as unknown as [
+        { connectionString: string },
+        string,
+        { agentId: string },
+        { runAt: Date },
+      ];
+      expect(call[2]).toEqual({ agentId: 'agent-to-remove' });
+      // Far-future runAt (≥ ~1 year) so the chain naturally winds down once
+      // the cron task handler notices the agent row is disabled / gone.
+      expect(call[3].runAt.getTime() - Date.now()).toBeGreaterThan(360 * 24 * 60 * 60 * 1000);
+      // Prompt file is cleaned up.
+      expect(existsSync(promptPath)).toBe(false);
     });
 
-    // Legacy PM2 cleanup on uninstall was retired — no pm2 commands issued.
-
-    it('does not throw when nothing was previously installed', async () => {
+    it('does not throw when uninstalling an agent that was never installed', async () => {
       await expect(uninstallAgentSchedule('nonexistent-agent', 'pm2')).resolves.not.toThrow();
     });
   });
 
-  describe('isAgentScheduleLoaded (via internal scheduler dump)', () => {
-    it('returns true when the agent id is present in the internal scheduler', async () => {
-      dumpInternalSchedulerMock.mockReturnValue({
-        entries: [{ agentId: 'agent-running', project: 'p', name: 'n', schedule: '1h', nextFireMs: 0, lastFireMs: 0 }],
-        nowMs: Date.now(),
-      });
-      const loaded = await isAgentScheduleLoaded('agent-running', 'pm2');
-      expect(loaded).toBe(true);
+  describe('isAgentScheduleLoaded', () => {
+    it('returns true when the per-agent prompt file exists', async () => {
+      await installAgentSchedule('agent-loaded', '1h', 'p', 'pm2');
+      expect(await isAgentScheduleLoaded('agent-loaded', 'pm2')).toBe(true);
     });
 
-    it('returns false when the agent id is missing from the internal scheduler', async () => {
-      dumpInternalSchedulerMock.mockReturnValue({ entries: [], nowMs: Date.now() });
-      const loaded = await isAgentScheduleLoaded('agent-missing', 'pm2');
-      expect(loaded).toBe(false);
-    });
-  });
-
-  describe('defaults to pm2 runner', () => {
-    it('installAgentSchedule defaults to pm2 (internal scheduler)', async () => {
-      await installAgentSchedule('agent-default', '1h', 'prompt');
-      expect(upsertAgentScheduleMock).toHaveBeenCalledOnce();
-    });
-
-    it('uninstallAgentSchedule defaults to pm2 (internal scheduler)', async () => {
-      await uninstallAgentSchedule('agent-default');
-      expect(removeAgentScheduleMock).toHaveBeenCalledOnce();
+    it('returns false when no prompt file exists for the agent', async () => {
+      expect(await isAgentScheduleLoaded('agent-missing-' + Date.now(), 'pm2')).toBe(false);
     });
   });
 });

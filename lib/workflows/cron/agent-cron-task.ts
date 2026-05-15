@@ -17,7 +17,7 @@
 // initial enqueue per enabled agent on Next.js startup.
 
 import type { Helpers, JobHelpers } from 'graphile-worker';
-import type { AgentInput } from '@/lib/scheduling/internal-scheduler';
+import type { AgentInput } from '@/lib/scheduling/agent-types';
 import { computeNextFire } from '@/lib/workflows/cron/parse-schedule';
 
 export interface AgentCronPayload {

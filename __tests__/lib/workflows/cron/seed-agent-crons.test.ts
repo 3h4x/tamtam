@@ -10,7 +10,7 @@ vi.mock('graphile-worker', () => ({
 }));
 
 import { seedAgentCrons } from '@/lib/workflows/cron/seed-agent-crons';
-import type { AgentInput } from '@/lib/scheduling/internal-scheduler';
+import type { AgentInput } from '@/lib/scheduling/agent-types';
 
 function makeAgent(overrides: Partial<AgentInput> = {}): AgentInput {
   return {

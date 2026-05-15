@@ -1,24 +1,19 @@
-// Thin facade over the in-process scheduler in `./internal-scheduler.ts`.
+// Public scheduler API used by `/api/agents` routes and the recommendations
+// applier. Backed by graphile-worker since the in-memory scheduler was
+// retired (see `lib/workflows/cron/seed-agent-crons.ts` + `agent-cron-task.ts`
+// for the actual cron-tick handler).
 //
-// All scheduling lives in `internal-scheduler` now — setTimeout fan-out per
-// enabled scheduled agent. This file exists for two reasons:
-//
-//   - Public API surface (installAgentSchedule / uninstallAgentSchedule /
-//     getSchedulerHealth) used by `/api/agents` routes and the recommendations
-//     applier, kept stable while the underlying implementation evolves.
-//   - One file-system side-effect: each agent's prompt is persisted to
-//     `<logDir>/agent-scripts/<agentId>.prompt.json` so out-of-band reruns
-//     can recover it after a server restart.
-//
-// The legacy PM2-cron scheduling path was retired with the rest of the
-// per-job PM2 infrastructure. Functions and types stay close to their
-// pre-retirement shape so callers don't have to change.
+// The same prompt-file persistence pattern from the in-memory era is kept
+// here: each agent's prompt is written to `<logDir>/agent-scripts/<agentId>.prompt.json`
+// so out-of-band reruns can recover it after a server restart.
 
 import { writeFileSync, unlinkSync, existsSync, mkdirSync } from 'fs';
 import { join } from 'path';
 import { homedir } from 'os';
+import { quickAddJob } from 'graphile-worker';
 import { getImproveConfig } from './scheduling';
 import { normalizeAgentScheduleOrThrow } from './agent-schedule';
+import { computeNextFire } from '@/lib/workflows/cron/parse-schedule';
 
 function getLogDir(): string {
   try { return getImproveConfig().logDir; } catch { return join(/*turbopackIgnore: true*/ homedir(), 'logs'); }
@@ -28,20 +23,28 @@ function getScriptsDir(): string {
 }
 
 function agentPromptPath(agentId: string): string {
-  return join(getScriptsDir(), `${agentId}.prompt.json`);
+  return join(/*turbopackIgnore: true*/ getScriptsDir(), `${agentId}.prompt.json`);
 }
 
 function cleanupFiles(agentId: string): void {
-  // Older builds wrote a per-agent shell script next to the prompt; clean up
-  // either artifact if present so nothing lingers after an agent is removed.
-  for (const ext of ['sh', 'prompt.json']) {
-    const p = join(getScriptsDir(), `${agentId}.${ext}`);
+  try {
+    const p = agentPromptPath(agentId);
     if (existsSync(/*turbopackIgnore: true*/ p)) unlinkSync(/*turbopackIgnore: true*/ p);
+  } catch {
+    /* best-effort */
   }
 }
 
 function ensureDirs(): void {
   mkdirSync(/*turbopackIgnore: true*/ getScriptsDir(), { recursive: true });
+}
+
+function jobKey(agentId: string): string {
+  return `agent-cron-${agentId}`;
+}
+
+function resolveConnectionString(): string | null {
+  return process.env.WORKFLOW_POSTGRES_URL ?? process.env.DATABASE_URL ?? null;
 }
 
 // --- Public API ---
@@ -58,15 +61,26 @@ export async function installAgentSchedule(
   ensureDirs();
   writeFileSync(/*turbopackIgnore: true*/ agentPromptPath(agentId), JSON.stringify({ prompt }));
 
-  const { upsertAgentSchedule } = await import('./internal-scheduler');
-  upsertAgentSchedule({
-    id: agentId,
-    project: project ?? '',
-    name: agentName ?? agentId,
-    schedule: normalizedSchedule,
-    prompt,
-    enabled: true,
-  });
+  const connectionString = resolveConnectionString();
+  if (!connectionString) {
+    throw new Error('cannot install agent schedule: no postgres URL (WORKFLOW_POSTGRES_URL or DATABASE_URL)');
+  }
+  const runAt = new Date(computeNextFire(normalizedSchedule, agentId, Date.now()));
+  await quickAddJob(
+    { connectionString },
+    'agent-cron',
+    { agentId },
+    {
+      jobKey: jobKey(agentId),
+      jobKeyMode: 'replace',
+      runAt,
+      maxAttempts: 5,
+    },
+  );
+  // project + agentName are accepted for API compatibility; the cron task
+  // handler resolves them on each fire via listEnabledScheduledAgents().
+  void project;
+  void agentName;
 }
 
 export async function uninstallAgentSchedule(
@@ -75,8 +89,25 @@ export async function uninstallAgentSchedule(
   _project?: string,
   _agentName?: string,
 ): Promise<void> {
-  const { removeAgentSchedule } = await import('./internal-scheduler');
-  removeAgentSchedule(agentId);
+  const connectionString = resolveConnectionString();
+  if (connectionString) {
+    // Mark the next fire as one year out — the cron task handler will then
+    // load the agent fresh, see it's disabled (the caller already cleared
+    // `enabled` in the DB), and naturally terminate the chain without
+    // re-enqueuing. This is graphile-worker's idiomatic "cancel" since
+    // there's no removeJob primitive in the public API.
+    const farFuture = new Date(Date.now() + 365 * 24 * 60 * 60 * 1000);
+    try {
+      await quickAddJob(
+        { connectionString },
+        'agent-cron',
+        { agentId },
+        { jobKey: jobKey(agentId), jobKeyMode: 'replace', runAt: farFuture, maxAttempts: 5 },
+      );
+    } catch (err) {
+      console.warn(`[agent-scheduler] uninstall ${agentId} addJob failed:`, err);
+    }
+  }
   cleanupFiles(agentId);
 }
 
@@ -86,8 +117,12 @@ export async function isAgentScheduleLoaded(
   _project?: string,
   _agentName?: string,
 ): Promise<boolean> {
-  const { dumpInternalScheduler } = await import('./internal-scheduler');
-  return dumpInternalScheduler().entries.some((e) => e.agentId === agentId);
+  const connectionString = resolveConnectionString();
+  if (!connectionString) return false;
+  // Cheap check: prompt file exists. The actual queue state lives in
+  // graphile_worker.jobs but reading that is a heavier query; the prompt
+  // file is the canonical client-visible "agent installed?" marker.
+  return existsSync(/*turbopackIgnore: true*/ agentPromptPath(agentId));
 }
 
 // --- Health / verification ---
@@ -128,38 +163,53 @@ export async function getSchedulerHealth(
     });
   }
 
+  // The graphile-worker cron pool is its own runtime — health here only
+  // reports whether the prompt file exists per agent, since the queue
+  // state lookup would require an extra DB round-trip and the legacy
+  // PM2-based actual list is no longer meaningful. `actual.pm2` keeps
+  // the response shape but always returns the empty list now.
   const errors: string[] = [];
-
-  const { dumpInternalScheduler } = await import('./internal-scheduler');
-  const internal = dumpInternalScheduler();
-  const internalIds = new Set(internal.entries.map((e) => e.agentId));
-
   const missing: SchedulerExpected[] = [];
   for (const e of expected) {
-    if (!internalIds.has(e.id)) missing.push(e);
+    if (!existsSync(/*turbopackIgnore: true*/ agentPromptPath(e.id))) {
+      missing.push(e);
+    }
   }
 
-  const expectedInternalIds = new Set(expected.map((e) => e.id));
-  const internalOrphans = internal.entries
-    .filter((e) => !expectedInternalIds.has(e.agentId))
-    .map((e) => `${e.project}/${e.name}`);
-
-  const orphans = { pm2: internalOrphans };
-  const internalNames = internal.entries.map((e) => `${e.project}/${e.name}`);
-
-  const ok = errors.length === 0 && missing.length === 0 && orphans.pm2.length === 0;
+  const ok = errors.length === 0 && missing.length === 0;
   return {
     ok,
     expected,
-    actual: { pm2: internalNames },
+    actual: { pm2: [] },
     missing,
-    orphans,
+    orphans: { pm2: [] },
     errors,
   };
 }
 
-/** Surface internal scheduler state (next-fire times, last-fire counts) for the monitoring panel. */
-export async function getInternalSchedulerDump() {
-  const { dumpInternalScheduler } = await import('./internal-scheduler');
-  return dumpInternalScheduler();
+/** Legacy export kept for the monitoring panel; returns an empty dump now
+ *  that the in-memory scheduler is gone. The /monitoring page can switch
+ *  to the graphile-worker queue API in a follow-up. */
+export interface SchedulerEntryDump {
+  agentId: string;
+  project: string;
+  name: string;
+  schedule: string;
+  nextFireMs: number;
+  fireCount: number;
+  lastFireMs: number | null;
+  lastJobMs?: number | null;
+  skippedCount: number;
+  lastSkippedReason: string | null;
+  enabled: boolean;
+}
+
+export interface InternalSchedulerDump {
+  started: boolean;
+  paused: boolean;
+  entries: SchedulerEntryDump[];
+}
+
+export async function getInternalSchedulerDump(): Promise<InternalSchedulerDump> {
+  return { started: false, paused: false, entries: [] };
 }

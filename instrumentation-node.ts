@@ -1,64 +1,10 @@
-// Loads enabled scheduled agents from the DB and arms the internal scheduler.
-// In-process timers fire on cadence and POST to /api/agents/{id}/run — no
-// PM2 cron involvement (that path silently no-op'd; see lib/internal-scheduler.ts).
-export async function reinstallAgents(): Promise<void> {
-  const { db, schema } = await import('./lib/db');
-  const { startInternalScheduler } = await import('./lib/scheduling/internal-scheduler');
-  const { syncJobsPauseState } = await import('./lib/shared/job-control');
-  const { getSettings } = await import('./lib/shared/config');
-  const { listEnabledProjects } = await import('./lib/shared/enabled-projects');
-  type AgentInput = Parameters<typeof startInternalScheduler>[0][number];
+// `reinstallAgents()` and the in-memory scheduler it armed were retired
+// when graphile-cron took over (see `seedAgentCrons` + `startCronWorker`
+// at the bottom of this file). Scheduled agents are now durable across
+// restarts via graphile-worker's persistent job queue.
 
-  const allAgents = await db.select().from(schema.agents);
-  const dbEnabled: AgentInput[] = allAgents
-    .filter(a => a.enabled && a.schedule)
-    .map(a => ({
-      id: a.id,
-      project: a.project,
-      name: a.name,
-      schedule: a.schedule,
-      prompt: a.prompt ?? '',
-      enabled: !!a.enabled,
-    }));
-
-  // Also scan each enabled project for file-based agents (.tamtam/agents/*.md).
-  // File agents take a back seat to DB agents with the same name (DB precedence
-  // matches the rest of the system — see app/api/agents/route.ts GET).
-  const dbAgentKeys = new Set(dbEnabled.map(a => `${a.project}:${a.name}`));
-  const fileEnabled: AgentInput[] = [];
-  try {
-    const { scanFileAgents } = await import('./lib/agents/tamtam-file-agents');
-    for (const p of listEnabledProjects()) {
-      try {
-        const fileAgents = scanFileAgents(p.path, p.name);
-        for (const fa of fileAgents) {
-          if (!fa.enabled || !fa.schedule) continue;
-          if (dbAgentKeys.has(`${fa.project}:${fa.name}`)) continue;
-          fileEnabled.push({
-            id: fa.id,
-            project: fa.project,
-            name: fa.name,
-            schedule: fa.schedule,
-            prompt: fa.prompt,
-            enabled: fa.enabled,
-          });
-        }
-      } catch (err) {
-        console.error(`[scheduler] file-agent scan failed for ${p.name}:`, err);
-      }
-    }
-  } catch { /* projects table may not exist (test env) */ }
-
-  try {
-    syncJobsPauseState(getSettings().jobs_paused);
-  } catch {
-    // Settings table may be unavailable or partially mocked in tests.
-  }
-  startInternalScheduler([...dbEnabled, ...fileEnabled]);
-}
-
-// Periodic probe sweep. Two responsibilities, both orthogonal to whether
-// the release pipeline is workflow-driven or hook-driven:
+// Periodic probe sweep. Two responsibilities, both orthogonal to the
+// release pipeline orchestration:
 //
 //   1. Claude CLI sometimes hangs after emitting its final result event.
 //      `probeJobStatus` can detect this via the log's terminal result line,
@@ -406,7 +352,9 @@ export async function registerNode(): Promise<void> {
   void reapAbandonedInlineJobs();
   void reapOrphanReleases();
   void drainBootRecoveryWork();
-  void reinstallAgents();
+  // reinstallAgents() retired with the in-memory scheduler — graphile-cron
+  // (`seedAgentCrons` below) replaces it. Scheduled agents are durable
+  // across restarts via graphile-worker's persistent job queue now.
 
   // One-shot probe at boot so we don't wait up to 30s for the first
   // interval tick to detect a Claude CLI process that hung before the
@@ -446,7 +394,10 @@ export async function registerNode(): Promise<void> {
   }
 
   // Nightly DB cleanup: delete job rows older than job_row_retention_days.
-  // Run once at startup (catches drift from long downtimes) then every 24 h.
+  // Once at boot (catches drift from long downtimes); subsequent fires
+  // come from the `system-cron` graphile-worker task (see system-cron-task.ts
+  // wired below). The bare setInterval(runCleanup, 24h) was retired with
+  // the in-memory scheduler — graphile-worker is durable across restarts.
   const runCleanup = async () => {
     try {
       const { runNightlyCleanup } = await import('./lib/jobs/retention');
@@ -457,14 +408,11 @@ export async function registerNode(): Promise<void> {
     }
   };
   runCleanup();
-  setInterval(runCleanup, 24 * 60 * 60 * 1000);
 
-  // Phase 4 cron (graphile-worker): opt-in via TAMTAM_GRAPHILE_CRON=1 so we
-  // can validate the new cron path against the in-memory scheduler before
-  // cutting over. When enabled it runs IN PARALLEL with internal-scheduler.ts.
-  // Once test-tt + a real scheduled-agent project run cleanly under the new
-  // cron, the next PR removes the in-memory scheduler and makes this default.
-  if (process.env.TAMTAM_GRAPHILE_CRON === '1' && process.env.WORKFLOW_TARGET_WORLD) {
+  // Phase 4 cron (graphile-worker): always-on now. The in-memory
+  // internal-scheduler.ts that ran in parallel during the verification
+  // window has been retired in favor of this graphile-worker pool.
+  if (process.env.WORKFLOW_TARGET_WORLD) {
     void (async () => {
       try {
         const [

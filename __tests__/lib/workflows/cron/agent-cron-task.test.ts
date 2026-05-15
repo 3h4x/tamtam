@@ -1,6 +1,6 @@
 import { describe, it, expect, vi } from 'vitest';
 import { handleAgentCron, type AgentCronDeps } from '@/lib/workflows/cron/agent-cron-task';
-import type { AgentInput } from '@/lib/scheduling/internal-scheduler';
+import type { AgentInput } from '@/lib/scheduling/agent-types';
 
 function makeAgent(overrides: Partial<AgentInput> = {}): AgentInput {
   return {

@@ -13,7 +13,7 @@
 // DB the workflow runtime uses), falling back to `DATABASE_URL`.
 
 import { quickAddJob } from 'graphile-worker';
-import type { AgentInput } from '@/lib/scheduling/internal-scheduler';
+import type { AgentInput } from '@/lib/scheduling/agent-types';
 import { computeNextFire } from '@/lib/workflows/cron/parse-schedule';
 
 export interface SeedDeps {

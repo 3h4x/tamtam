@@ -1,18 +1,5 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 
-function makeAgent(overrides: Record<string, unknown> = {}) {
-  return {
-    id: 'agent-1',
-    name: 'My Agent',
-    project: 'proj1',
-    prompt: 'do stuff',
-    schedule: '1h',
-    runner: 'pm2',
-    enabled: 1,
-    ...overrides,
-  };
-}
-
 function makeChainedDb(agents: unknown[]) {
   const all = vi.fn().mockReturnValue(agents);
   // Drizzle's select chain is thenable — `await db.select().from(table)`
@@ -32,14 +19,10 @@ function makeChainedDb(agents: unknown[]) {
 }
 
 describe('instrumentation', () => {
-  let startInternalSchedulerMock: ReturnType<typeof vi.fn>;
-  let reconcilePm2SchedulesMock: ReturnType<typeof vi.fn>;
   let originalRuntime: string | undefined;
 
   beforeEach(() => {
     vi.resetModules();
-    startInternalSchedulerMock = vi.fn();
-    reconcilePm2SchedulesMock = vi.fn().mockResolvedValue(undefined);
     originalRuntime = process.env.NEXT_RUNTIME;
   });
 
@@ -52,20 +35,10 @@ describe('instrumentation', () => {
   function mockDeps(agents: unknown[], options: { abortActiveRelease?: ReturnType<typeof vi.fn> } = {}) {
     const chainedDb = makeChainedDb(agents);
     const dbMock = { db: { select: chainedDb.select }, schema: { agents: { schedule: 'schedule', enabled: 'enabled' } } };
-    const internalSchedulerMock = {
-      startInternalScheduler: startInternalSchedulerMock,
-      pauseInternalScheduler: vi.fn(),
-      resumeInternalScheduler: vi.fn(),
-    };
     const noopExec = vi.fn().mockResolvedValue({ exitCode: 0, stdout: '', stderr: '' });
     const abortActiveRelease = options.abortActiveRelease ?? vi.fn().mockResolvedValue({ status: 'aborted', httpStatus: 200 });
     vi.doMock('@/lib/db', () => dbMock);
     vi.doMock('./lib/db', () => dbMock);
-    vi.doMock('@/lib/scheduling/internal-scheduler', () => internalSchedulerMock);
-    vi.doMock('./lib/scheduling/internal-scheduler', () => internalSchedulerMock);
-    vi.doMock('@/lib/scheduling/agent-scheduler', () => ({
-      reconcilePm2Schedules: reconcilePm2SchedulesMock,
-    }));
     vi.doMock('@/lib/shared/shell', () => ({ exec: noopExec }));
     vi.doMock('./lib/shared/shell', () => ({ exec: noopExec }));
     vi.doMock('@/lib/pipeline/release-abort', () => ({ abortActiveRelease }));
@@ -73,73 +46,9 @@ describe('instrumentation', () => {
     vi.doMock('drizzle-orm', () => ({ isNotNull: vi.fn(v => v), eq: vi.fn((_a, b) => b), and: vi.fn((...args) => args) }));
   }
 
-  describe('register()', () => {
-    it('does nothing when NEXT_RUNTIME is not "nodejs"', async () => {
-      process.env.NEXT_RUNTIME = 'edge';
-      mockDeps([makeAgent()]);
-
-      const { register } = await import('@/instrumentation');
-      await register();
-      await new Promise((r) => setImmediate(r));
-
-      expect(startInternalSchedulerMock).not.toHaveBeenCalled();
-    });
-
-    it('fires reinstall in the background without blocking', async () => {
-      process.env.NEXT_RUNTIME = 'nodejs';
-      vi.stubEnv('NODE_ENV', 'test');
-      mockDeps([makeAgent({ id: 'agent-1', name: 'A', project: 'proj1', schedule: '2h', prompt: 'a' })]);
-      // Mock heavy modules that registerNode dynamically imports to avoid
-      // pulling their full transitive trees on every cold start.
-      vi.doMock('@/lib/agents/default-agent-skills', () => ({
-        backfillIssueCruncherPrerequisites: vi.fn().mockResolvedValue(undefined),
-      }));
-      vi.doMock('./lib/agents/default-agent-skills', () => ({
-        backfillIssueCruncherPrerequisites: vi.fn().mockResolvedValue(undefined),
-      }));
-      vi.doMock('@/lib/skills/tamtam-file-config', () => ({
-        readLegacyWorkflowFlags: vi.fn().mockReturnValue({}),
-      }));
-      vi.doMock('./lib/skills/tamtam-file-config', () => ({
-        readLegacyWorkflowFlags: vi.fn().mockReturnValue({}),
-      }));
-      vi.doMock('@/lib/pipeline/recovery-drain', () => ({
-        drainAllRecoveryWork: vi.fn().mockResolvedValue(undefined),
-        drainUnlockedQueuedAgentRuns: vi.fn().mockResolvedValue(undefined),
-      }));
-      vi.doMock('./lib/pipeline/recovery-drain', () => ({
-        drainAllRecoveryWork: vi.fn().mockResolvedValue(undefined),
-        drainUnlockedQueuedAgentRuns: vi.fn().mockResolvedValue(undefined),
-      }));
-      vi.doMock('@/lib/jobs/job-storage', () => ({
-        listJobs: () => [],
-        getJob: vi.fn().mockReturnValue(null),
-        markDone: vi.fn().mockResolvedValue(undefined),
-        probeJobStatus: vi.fn(),
-        reconcileStaleRelease: vi.fn(),
-        PIPELINE_STEP_KINDS: new Set(),
-      }));
-      vi.doMock('./lib/jobs/job-storage', () => ({
-        listJobs: () => [],
-        getJob: vi.fn().mockReturnValue(null),
-        markDone: vi.fn().mockResolvedValue(undefined),
-        probeJobStatus: vi.fn(),
-        reconcileStaleRelease: vi.fn(),
-        PIPELINE_STEP_KINDS: new Set(),
-      }));
-
-      const { register } = await import('@/instrumentation');
-      const returned = register();
-      await returned;
-      // reinstallAgents is fire-and-forget (`void reinstallAgents()`) and chains
-      // several dynamic imports — under load (full vitest suite) the 10ms wait
-      // we used to use was too short. Poll until the scheduler is armed.
-      await vi.waitFor(
-        () => expect(startInternalSchedulerMock).toHaveBeenCalledTimes(1),
-        { timeout: 2000, interval: 1 }
-      );
-    });
-  });
+  // register() in instrumentation.ts is now a 4-line passthrough that
+  // delegates to registerNode() when NEXT_RUNTIME==='nodejs'. The behavior
+  // worth verifying is exercised through the registerNode() tests below.
 
   describe('registerNode()', () => {
     it('backfills issue-cruncher prerequisites during boot', async () => {
@@ -367,193 +276,6 @@ describe('instrumentation', () => {
     });
   });
 
-  describe('reinstallAgents()', () => {
-    it('arms the internal scheduler with all enabled scheduled agents', async () => {
-      const agents = [
-        makeAgent({ id: 'agent-1', name: 'A', project: 'proj1', schedule: '2h', runner: 'pm2', prompt: 'a' }),
-        makeAgent({ id: 'agent-2', name: 'B', project: 'proj2', schedule: '30m', runner: 'launchctl', prompt: 'b' }),
-      ];
-      mockDeps(agents);
-
-      const { reinstallAgents } = await import('@/instrumentation-node');
-      await reinstallAgents();
-
-      expect(startInternalSchedulerMock).toHaveBeenCalledTimes(1);
-      const passed = startInternalSchedulerMock.mock.calls[0][0];
-      expect(passed).toHaveLength(2);
-      expect(passed[0]).toMatchObject({ id: 'agent-1', schedule: '2h', enabled: true, prompt: 'a' });
-      expect(passed[1]).toMatchObject({ id: 'agent-2', schedule: '30m', enabled: true, prompt: 'b' });
-    });
-
-    it('filters out agents with no schedule even if returned by db.all()', async () => {
-      mockDeps([makeAgent({ id: 'no-sched', schedule: null })]);
-
-      const { reinstallAgents } = await import('@/instrumentation-node');
-      await reinstallAgents();
-
-      expect(startInternalSchedulerMock).toHaveBeenCalledTimes(1);
-      expect(startInternalSchedulerMock.mock.calls[0][0]).toHaveLength(0);
-    });
-
-    it('filters out disabled agents', async () => {
-      mockDeps([makeAgent({ id: 'agent-off', schedule: '1h', enabled: 0 })]);
-
-      const { reinstallAgents } = await import('@/instrumentation-node');
-      await reinstallAgents();
-
-      expect(startInternalSchedulerMock.mock.calls[0][0]).toHaveLength(0);
-    });
-
-    // Legacy PM2-cron cleanup-on-boot was removed; reinstallAgents no longer
-    // calls reconcilePm2Schedules.
-
-    it('does nothing when no agents exist', async () => {
-      mockDeps([]);
-
-      const { reinstallAgents } = await import('@/instrumentation-node');
-      await reinstallAgents();
-
-      expect(startInternalSchedulerMock).toHaveBeenCalledWith([]);
-    });
-
-    // File-agent path mocks a two-query Drizzle setup:
-    //   1. `await db.select().from(schema.agents)` → DB agents array
-    //   2. `listEnabledProjects()` (mocked directly) → project rows
-    // The agents query must be thenable (Drizzle's PgSelect is) so the
-    // top-level `await` resolves to the row array, not the chain object.
-    function makeFileAgentDb(agents: unknown[]) {
-      const fromFn = vi.fn().mockReturnValue({
-        all: vi.fn().mockReturnValue(agents),
-        then(onFulfilled: (rows: unknown[]) => unknown, onRejected?: (err: unknown) => unknown) {
-          return Promise.resolve(agents).then(onFulfilled, onRejected);
-        },
-      });
-      const selectFn = vi.fn().mockReturnValue({ from: fromFn });
-      return { db: { select: selectFn }, schema: { agents: 'agents_table', projects: { enabled: 1 } } };
-    }
-
-    function mockFileAgentDeps({
-      dbAgents,
-      projects,
-      fileAgents,
-    }: {
-      dbAgents: unknown[];
-      projects: Array<{ name: string; path: string }>;
-      fileAgents: unknown[];
-    }) {
-      const { db, schema } = makeFileAgentDb(dbAgents);
-      const scanFileAgentsMock = vi.fn().mockReturnValue(fileAgents);
-      vi.doMock('@/lib/db', () => ({ db, schema }));
-      vi.doMock('./lib/db', () => ({ db, schema }));
-      const internalSchedulerMock = {
-        startInternalScheduler: startInternalSchedulerMock,
-        pauseInternalScheduler: vi.fn(),
-        resumeInternalScheduler: vi.fn(),
-      };
-      vi.doMock('@/lib/scheduling/internal-scheduler', () => internalSchedulerMock);
-      vi.doMock('./lib/scheduling/internal-scheduler', () => internalSchedulerMock);
-      vi.doMock('@/lib/scheduling/agent-scheduler', () => ({ reconcilePm2Schedules: reconcilePm2SchedulesMock }));
-      vi.doMock('@/lib/agents/tamtam-file-agents', () => ({ scanFileAgents: scanFileAgentsMock }));
-      vi.doMock('./lib/agents/tamtam-file-agents', () => ({ scanFileAgents: scanFileAgentsMock }));
-      // Bypass the cached-projects path entirely so tests don't depend on the
-      // fire-and-forget refresh inside lib/shared/enabled-projects.ts.
-      vi.doMock('@/lib/shared/enabled-projects', () => ({
-        listEnabledProjects: vi.fn().mockReturnValue(projects),
-        refreshProjectsCacheSync: vi.fn().mockResolvedValue(undefined),
-        clearProjectsCache: vi.fn(),
-        isProjectArchived: vi.fn().mockReturnValue(false),
-        isProjectPaused: vi.fn().mockReturnValue(false),
-      }));
-      vi.doMock('./lib/shared/enabled-projects', () => ({
-        listEnabledProjects: vi.fn().mockReturnValue(projects),
-        refreshProjectsCacheSync: vi.fn().mockResolvedValue(undefined),
-        clearProjectsCache: vi.fn(),
-        isProjectArchived: vi.fn().mockReturnValue(false),
-        isProjectPaused: vi.fn().mockReturnValue(false),
-      }));
-      vi.doMock('drizzle-orm', () => ({ eq: vi.fn((_a, b) => b), isNotNull: vi.fn(v => v), and: vi.fn((...args) => args) }));
-      return { scanFileAgentsMock };
-    }
-
-    it('includes enabled scheduled file-based agents from enabled projects', async () => {
-      vi.resetModules();
-      startInternalSchedulerMock = vi.fn();
-      reconcilePm2SchedulesMock = vi.fn().mockResolvedValue(undefined);
-
-      const fileAgent = {
-        id: 'file:proj1:daily-check',
-        project: 'proj1',
-        name: 'daily-check',
-        schedule: '24h',
-        prompt: 'run checks',
-        enabled: true,
-        runner: 'pm2',
-      };
-      mockFileAgentDeps({
-        dbAgents: [],
-        projects: [{ name: 'proj1', path: '/w/proj1' }],
-        fileAgents: [fileAgent],
-      });
-
-      const { reinstallAgents } = await import('@/instrumentation-node');
-      await reinstallAgents();
-
-      expect(startInternalSchedulerMock).toHaveBeenCalledTimes(1);
-      const passed = startInternalSchedulerMock.mock.calls[0][0];
-      expect(passed).toHaveLength(1);
-      expect(passed[0]).toMatchObject({ id: 'file:proj1:daily-check', schedule: '24h', prompt: 'run checks' });
-    });
-
-    it('skips file agents that duplicate a DB agent with the same project+name', async () => {
-      vi.resetModules();
-      startInternalSchedulerMock = vi.fn();
-      reconcilePm2SchedulesMock = vi.fn().mockResolvedValue(undefined);
-
-      const dbAgent = makeAgent({ id: 'agent-db', name: 'shared', project: 'proj1', schedule: '4h', prompt: 'db version' });
-      const fileAgent = {
-        id: 'file:proj1:shared',
-        project: 'proj1',
-        name: 'shared',
-        schedule: '4h',
-        prompt: 'file version',
-        enabled: true,
-        runner: 'pm2',
-      };
-      mockFileAgentDeps({
-        dbAgents: [dbAgent],
-        projects: [{ name: 'proj1', path: '/w/proj1' }],
-        fileAgents: [fileAgent],
-      });
-
-      const { reinstallAgents } = await import('@/instrumentation-node');
-      await reinstallAgents();
-
-      const passed = startInternalSchedulerMock.mock.calls[0][0];
-      // Only the DB agent; file agent is suppressed because project+name collides.
-      expect(passed).toHaveLength(1);
-      expect(passed[0].id).toBe('agent-db');
-    });
-
-    it('skips file agents that have no schedule or are disabled', async () => {
-      vi.resetModules();
-      startInternalSchedulerMock = vi.fn();
-      reconcilePm2SchedulesMock = vi.fn().mockResolvedValue(undefined);
-
-      const noSchedule = { id: 'file:p:a', project: 'p', name: 'a', schedule: null, prompt: '', enabled: true, runner: 'pm2' };
-      const disabled = { id: 'file:p:b', project: 'p', name: 'b', schedule: '1h', prompt: '', enabled: false, runner: 'pm2' };
-      mockFileAgentDeps({
-        dbAgents: [],
-        projects: [{ name: 'p', path: '/w/p' }],
-        fileAgents: [noSchedule, disabled],
-      });
-
-      const { reinstallAgents } = await import('@/instrumentation-node');
-      await reinstallAgents();
-
-      const passed = startInternalSchedulerMock.mock.calls[0][0];
-      expect(passed).toHaveLength(0);
-    });
-  });
 
   describe('runProbeSweep()', () => {
     function mockJobStorage(
@@ -763,78 +485,12 @@ describe('instrumentation', () => {
     });
   });
 
-  describe('boot recovery guards', () => {
-    // Pre-existing failure: the drizzle chain mock here returns a non-thenable
-    // object, so `await db.select().from(schema.agents)` in reinstallAgents
-    // resolves to the chain object instead of the row array, throwing
-    // `allAgents.filter is not a function`. The unhandled rejection is fired
-    // from a `void reinstallAgents()` call so the test then times out waiting
-    // for `startInternalScheduler` (which is never reached). Skipped pending
-    // a proper rewrite of the inline mock to mimic drizzle's PgSelect (the
-    // `makeChainedDb` helper above does this correctly for the other tests).
-    it.skip('skips legacy workflow migration when settings table is unavailable', async () => {
-      process.env.NEXT_RUNTIME = 'nodejs';
-      const allFn = vi.fn()
-        .mockReturnValueOnce([makeAgent()])
-        .mockReturnValueOnce([]);
-      const whereFn = vi.fn().mockReturnValue({ all: allFn });
-      const fromFn = vi.fn().mockReturnValue({ where: whereFn, all: allFn });
-      const selectFn = vi.fn().mockReturnValue({ from: fromFn });
-      vi.doMock('@/lib/db', () => ({
-        db: { select: selectFn },
-        schema: {
-          agents: { schedule: 'schedule', enabled: 'enabled' },
-          projects: { enabled: 1 },
-        },
-      }));
-      vi.doMock('./lib/db', () => ({
-        db: { select: selectFn },
-        schema: {
-          agents: { schedule: 'schedule', enabled: 'enabled' },
-          projects: { enabled: 1 },
-        },
-      }));
-      const internalSchedulerMock = {
-        startInternalScheduler: startInternalSchedulerMock,
-        pauseInternalScheduler: vi.fn(),
-        resumeInternalScheduler: vi.fn(),
-      };
-      vi.doMock('@/lib/scheduling/internal-scheduler', () => internalSchedulerMock);
-      vi.doMock('./lib/scheduling/internal-scheduler', () => internalSchedulerMock);
-      vi.doMock('@/lib/scheduling/agent-scheduler', () => ({
-        reconcilePm2Schedules: reconcilePm2SchedulesMock,
-      }));
-      vi.doMock('drizzle-orm', () => ({ eq: vi.fn((_a, b) => b) }));
-      vi.doMock('@/lib/pipeline/pending-release', () => ({
-        listPendingReleaseProjects: vi.fn().mockReturnValue([]),
-        drainPendingRelease: vi.fn(),
-      }));
-      vi.doMock('@/lib/pipeline/pipeline-lock', () => ({
-        getLock: vi.fn().mockReturnValue(null),
-      }));
-      vi.doMock('@/lib/agents/queued-agent-runs', () => ({
-        drainQueuedAgentRunsForUnlockedProjects: vi.fn(),
-      }));
-      vi.doMock('@/lib/jobs/job-storage', () => ({
-        listJobs: () => [],
-        getJob: vi.fn().mockReturnValue(null),
-        markDone: vi.fn().mockResolvedValue(undefined),
-        probeJobStatus: vi.fn(),
-        reconcileStaleRelease: vi.fn(),
-        PIPELINE_STEP_KINDS: new Set(),
-      }));
-
-      const { register } = await import('@/instrumentation');
-      await expect(register()).resolves.not.toThrow();
-      await vi.waitFor(
-        () => expect(startInternalSchedulerMock).toHaveBeenCalledTimes(1),
-        { timeout: 2000 }
-      );
-    });
-
-    // drainStaleQueuedAgentRuns and drainQueuedWorkAfterBudgetRecovery
-    // were removed when the workflow runtime became the only release
-    // path. Their tests are intentionally gone; the workflow runtime now
-    // owns the queued-agent / budget-recovery drain concerns.
-  });
+  // drainStaleQueuedAgentRuns and drainQueuedWorkAfterBudgetRecovery
+  // were removed when the workflow runtime became the only release
+  // path. Their tests are intentionally gone; the workflow runtime now
+  // owns the queued-agent / budget-recovery drain concerns.
+  //
+  // The legacy `reinstallAgents()` boot pass was removed when graphile-cron
+  // took over scheduled agents (lib/workflows/cron/*). Its tests are owned
+  // by __tests__/lib/workflows/cron/{seed-agent-crons,agent-cron-task}.test.ts.
 });

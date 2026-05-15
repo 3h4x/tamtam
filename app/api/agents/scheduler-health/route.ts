@@ -1,8 +1,7 @@
 import { NextResponse } from 'next/server';
 import { and, desc, eq, isNotNull } from 'drizzle-orm';
 import { db, schema } from '@/lib/db';
-import { getSchedulerHealth, installAgentSchedule } from '@/lib/scheduling/agent-scheduler';
-import { dumpInternalScheduler } from '@/lib/scheduling/internal-scheduler';
+import { getSchedulerHealth, installAgentSchedule, getInternalSchedulerDump } from '@/lib/scheduling/agent-scheduler';
 import { scanFileAgents } from '@/lib/agents/tamtam-file-agents';
 import { listEnabledProjects } from '@/lib/shared/enabled-projects';
 import { errMsg } from '@/lib/shared/types';
@@ -66,7 +65,7 @@ export async function GET() {
   try {
     const agents = await loadAgentsForCheck();
     const health = await getSchedulerHealth(agents);
-    const internal = dumpInternalScheduler();
+    const internal = await getInternalSchedulerDump();
     const lastJobMap = await buildLastJobMap(internal.entries);
     const enrichedEntries = internal.entries.map(e => ({
       ...e,
@@ -97,7 +96,7 @@ export async function POST() {
     }
 
     const after = await getSchedulerHealth(agents);
-    const internal = dumpInternalScheduler();
+    const internal = await getInternalSchedulerDump();
     const lastJobMap = await buildLastJobMap(internal.entries);
     const enrichedEntries = internal.entries.map(e => ({
       ...e,

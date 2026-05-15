@@ -1,11 +1,13 @@
 import { describe, it, expect, beforeAll, beforeEach, afterAll, vi } from 'vitest';
 import { sql } from 'drizzle-orm';
+import { mkdtempSync, mkdirSync, writeFileSync, rmSync } from 'fs';
+import { join } from 'path';
+import { tmpdir } from 'os';
 import * as schema from '@/lib/db/schema';
 import { createTestPgDbEmpty, type TestDbHandle } from '@/__tests__/helpers/test-db';
 
 async function applyDdl(handle: TestDbHandle): Promise<void> {
-  // PGlite rejects multi-statement prepared queries, so issue each DDL
-  // separately.
+  // PGlite rejects multi-statement prepared queries, so issue each DDL separately.
   await handle.db.execute(sql.raw(`
     CREATE TABLE IF NOT EXISTS agents (
       id text PRIMARY KEY,
@@ -96,20 +98,33 @@ describe('GET /api/agents/scheduler-health', () => {
   let sharedHandle: TestDbHandle;
   let GET: any;
   let POST: any;
-  let execMock: ReturnType<typeof vi.fn>;
-  let dumpInternalSchedulerMock: ReturnType<typeof vi.fn>;
-  let upsertAgentScheduleMock: ReturnType<typeof vi.fn>;
+  let logDir: string;
+  let quickAddJobMock: ReturnType<typeof vi.fn>;
   const now = Date.now() / 1000;
+
+  function promptPath(agentId: string): string {
+    return join(logDir, 'agent-scripts', `${agentId}.prompt.json`);
+  }
+  function seedPromptFile(agentId: string): void {
+    mkdirSync(join(logDir, 'agent-scripts'), { recursive: true });
+    writeFileSync(promptPath(agentId), JSON.stringify({ prompt: 'seeded' }));
+  }
 
   beforeAll(async () => {
     sharedHandle = await createTestPgDbEmpty();
     await applyDdl(sharedHandle);
+    logDir = mkdtempSync(join(tmpdir(), 'tamtam-sched-health-'));
   });
 
   afterAll(async () => {
     await new Promise((r) => setTimeout(r, 30));
     try {
       await sharedHandle[Symbol.asyncDispose]();
+    } catch {
+      // ignore
+    }
+    try {
+      rmSync(logDir, { recursive: true, force: true });
     } catch {
       // ignore
     }
@@ -141,28 +156,21 @@ describe('GET /api/agents/scheduler-health', () => {
   beforeEach(async () => {
     vi.resetModules();
     await sharedHandle.db.execute(sql.raw('TRUNCATE agents, projects, jobs'));
+    // Clear any leftover prompt files from previous tests.
+    try { rmSync(join(logDir, 'agent-scripts'), { recursive: true, force: true }); } catch {}
 
-    execMock = vi.fn();
-    dumpInternalSchedulerMock = vi.fn().mockReturnValue({ started: true, entries: [] });
-    upsertAgentScheduleMock = vi.fn();
+    process.env.DATABASE_URL = 'postgres://test/test';
+    quickAddJobMock = vi.fn().mockResolvedValue(undefined);
 
+    vi.doMock('graphile-worker', () => ({ quickAddJob: quickAddJobMock }));
     vi.doMock('@/lib/db', () => ({ db: sharedHandle.db, schema }));
-    vi.doMock('@/lib/shared/shell', () => ({ exec: execMock }));
+    vi.doMock('@/lib/shared/shell', () => ({ exec: vi.fn().mockResolvedValue({ exitCode: 0, stdout: '', stderr: '' }) }));
     vi.doMock('@/lib/shared/config', () => ({
       getSettings: () => ({ launchagent_prefix: 'com.tamtam' }),
     }));
     vi.doMock('@/lib/scheduling/scheduling', () => ({
-      getImproveConfig: () => ({ logDir: '/tmp/tamtam-logs', claudeBin: 'claude' }),
+      getImproveConfig: () => ({ logDir, claudeBin: 'claude' }),
     }));
-    const internalSchedulerStub = {
-      dumpInternalScheduler: dumpInternalSchedulerMock,
-      upsertAgentSchedule: upsertAgentScheduleMock,
-      removeAgentSchedule: vi.fn(),
-    };
-    vi.doMock('@/lib/scheduling/internal-scheduler', () => internalSchedulerStub);
-    // agent-scheduler.ts imports via the relative path './internal-scheduler' —
-    // Vitest treats relative and aliased paths as separate modules.
-    vi.doMock('./internal-scheduler', () => internalSchedulerStub);
     vi.doMock('@/lib/agents/tamtam-file-agents', () => ({ scanFileAgents: vi.fn().mockReturnValue([]) }));
 
     const enabledProjects = await import('@/lib/shared/enabled-projects');
@@ -174,16 +182,9 @@ describe('GET /api/agents/scheduler-health', () => {
     POST = mod.POST;
   });
 
-  it('reports ok when DB schedule matches an internal-scheduler entry', async () => {
+  it('reports ok when each enabled scheduled DB agent has a prompt file on disk', async () => {
     await insertAgent({ id: 'agent-1', project: 'projA', name: 'My Agent', runner: 'pm2', schedule: '1h' });
-    dumpInternalSchedulerMock.mockReturnValue({
-      started: true,
-      entries: [{ agentId: 'agent-1', project: 'projA', name: 'My Agent', schedule: '1h', enabled: true, nextFireMs: Date.now() + 1000, lastFireMs: null, fireCount: 0, errorCount: 0, lastError: null }],
-    });
-    execMock.mockImplementation(async (cmd: string, args: string[]) => {
-      if (cmd === 'launchctl' && args[0] === 'list') return { exitCode: 0, stdout: '', stderr: '' };
-      return { exitCode: 0, stdout: '', stderr: '' };
-    });
+    seedPromptFile('agent-1');
 
     const res = await GET();
     const body = await res.json();
@@ -191,13 +192,10 @@ describe('GET /api/agents/scheduler-health', () => {
     expect(body.expected).toHaveLength(1);
     expect(body.missing).toEqual([]);
     expect(body.orphans.pm2).toEqual([]);
-    expect(body.internal.entries).toHaveLength(1);
   });
 
-  it('flags missing schedule when DB agent is not in the internal scheduler', async () => {
+  it('flags an agent as missing when no prompt file exists for it', async () => {
     await insertAgent({ id: 'agent-1', project: 'projA', name: 'My Agent', runner: 'pm2', schedule: '1h' });
-    dumpInternalSchedulerMock.mockReturnValue({ started: true, entries: [] });
-    execMock.mockImplementation(async () => ({ exitCode: 0, stdout: '', stderr: '' }));
 
     const res = await GET();
     const body = await res.json();
@@ -206,28 +204,9 @@ describe('GET /api/agents/scheduler-health', () => {
     expect(body.missing[0].id).toBe('agent-1');
   });
 
-  it('flags an orphan when the internal scheduler has an agent not in the DB', async () => {
-    await insertAgent({ id: 'agent-1', project: 'projA', name: 'My Agent', runner: 'pm2', schedule: '1h' });
-    dumpInternalSchedulerMock.mockReturnValue({
-      started: true,
-      entries: [
-        { agentId: 'agent-1', project: 'projA', name: 'My Agent', schedule: '1h', enabled: true, nextFireMs: Date.now() + 1000, lastFireMs: null, fireCount: 0, errorCount: 0, lastError: null },
-        { agentId: 'agent-stale', project: 'projA', name: 'Stale Agent', schedule: '1h', enabled: true, nextFireMs: Date.now() + 1000, lastFireMs: null, fireCount: 0, errorCount: 0, lastError: null },
-      ],
-    });
-    execMock.mockImplementation(async () => ({ exitCode: 0, stdout: '', stderr: '' }));
-
-    const res = await GET();
-    const body = await res.json();
-    expect(body.ok).toBe(false);
-    expect(body.orphans.pm2).toEqual(['projA/Stale Agent']);
-  });
-
-  it('skips disabled and unscheduled agents from expected set', async () => {
+  it('skips disabled and unscheduled agents from the expected set', async () => {
     await insertAgent({ id: 'agent-1', project: 'projA', name: 'Disabled', runner: 'pm2', schedule: '1h', enabled: false });
     await insertAgent({ id: 'agent-2', project: 'projA', name: 'Manual', runner: 'pm2', schedule: null });
-    dumpInternalSchedulerMock.mockReturnValue({ started: true, entries: [] });
-    execMock.mockImplementation(async () => ({ exitCode: 0, stdout: '', stderr: '' }));
 
     const res = await GET();
     const body = await res.json();
@@ -237,22 +216,16 @@ describe('GET /api/agents/scheduler-health', () => {
 
   it('POST installs missing schedules and re-runs the check', async () => {
     await insertAgent({ id: 'agent-1', project: 'projA', name: 'My Agent', runner: 'pm2', schedule: '1h' });
-
-    let internalEntries: any[] = [];
-    dumpInternalSchedulerMock.mockImplementation(() => ({ started: true, entries: internalEntries.slice() }));
-    upsertAgentScheduleMock.mockImplementation((agent: any) => {
-      internalEntries.push({
-        agentId: agent.id, project: agent.project, name: agent.name, schedule: agent.schedule,
-        enabled: true, nextFireMs: Date.now() + 1000, lastFireMs: null, fireCount: 0, errorCount: 0, lastError: null,
-      });
-    });
-    execMock.mockImplementation(async () => ({ exitCode: 0, stdout: '', stderr: '' }));
+    // No prompt file → first health check sees missing → POST writes the
+    // prompt file via installAgentSchedule → second health check passes.
 
     const res = await POST();
     const body = await res.json();
     expect(body.before.ok).toBe(false);
     expect(body.installed.length).toBeGreaterThan(0);
     expect(body.after.ok).toBe(true);
+    // Should have enqueued an agent-cron job exactly once for the missing agent.
+    expect(quickAddJobMock).toHaveBeenCalledTimes(1);
   });
 
   it('includes file-based agents from enabled projects in the expected set', async () => {
@@ -266,28 +239,15 @@ describe('GET /api/agents/scheduler-health', () => {
       runner: 'pm2',
     };
 
-    // Reset module registry so the new mocks take effect for the route import.
     vi.resetModules();
     await insertProject('proj1', '/w/proj1', true);
+    seedPromptFile('file:proj1:auto-check');
 
-    execMock = vi.fn().mockResolvedValue({ exitCode: 0, stdout: '', stderr: '' });
-    dumpInternalSchedulerMock = vi.fn().mockReturnValue({
-      started: true,
-      entries: [{ agentId: 'file:proj1:auto-check', project: 'proj1', name: 'auto-check', schedule: '2h', enabled: true, nextFireMs: Date.now() + 1000, lastFireMs: null, fireCount: 0, errorCount: 0, lastError: null }],
-    });
-    upsertAgentScheduleMock = vi.fn();
-    const internalSchedulerStub = {
-      dumpInternalScheduler: dumpInternalSchedulerMock,
-      upsertAgentSchedule: upsertAgentScheduleMock,
-      removeAgentSchedule: vi.fn(),
-    };
-
+    vi.doMock('graphile-worker', () => ({ quickAddJob: quickAddJobMock }));
     vi.doMock('@/lib/db', () => ({ db: sharedHandle.db, schema }));
-    vi.doMock('@/lib/shared/shell', () => ({ exec: execMock }));
+    vi.doMock('@/lib/shared/shell', () => ({ exec: vi.fn().mockResolvedValue({ exitCode: 0, stdout: '', stderr: '' }) }));
     vi.doMock('@/lib/shared/config', () => ({ getSettings: () => ({ launchagent_prefix: 'com.tamtam' }) }));
-    vi.doMock('@/lib/scheduling/scheduling', () => ({ getImproveConfig: () => ({ logDir: '/tmp', claudeBin: 'claude' }) }));
-    vi.doMock('@/lib/scheduling/internal-scheduler', () => internalSchedulerStub);
-    vi.doMock('./internal-scheduler', () => internalSchedulerStub);
+    vi.doMock('@/lib/scheduling/scheduling', () => ({ getImproveConfig: () => ({ logDir, claudeBin: 'claude' }) }));
     vi.doMock('@/lib/agents/tamtam-file-agents', () => ({ scanFileAgents: vi.fn().mockReturnValue([fileAgent]) }));
 
     const enabledProjects = await import('@/lib/shared/enabled-projects');
@@ -298,14 +258,12 @@ describe('GET /api/agents/scheduler-health', () => {
     const res = await GET2();
     const body = await res.json();
 
-    // The file agent counts as an expected scheduled agent.
     expect(body.expected).toHaveLength(1);
     expect(body.expected[0].id).toBe('file:proj1:auto-check');
     expect(body.ok).toBe(true);
   });
 
   it('DB agent takes precedence over file agent with same project+name', async () => {
-    // DB agent "shared" in proj1 — file agent with same name must not be double-counted.
     const fileAgent = {
       id: 'file:proj1:shared',
       project: 'proj1',
@@ -316,7 +274,6 @@ describe('GET /api/agents/scheduler-health', () => {
       runner: 'pm2',
     };
 
-    // Override the scanFileAgents mock for this test.
     vi.resetModules();
     await insertProject('proj1', '/w/proj1', true);
     await sharedHandle.db.insert(schema.agents).values({
@@ -324,25 +281,13 @@ describe('GET /api/agents/scheduler-health', () => {
       prompt: 'db version', schedule: '1h', runner: 'pm2', enabled: true,
       createdAt: now, updatedAt: now,
     });
+    seedPromptFile('agent-db');
 
-    execMock = vi.fn().mockResolvedValue({ exitCode: 0, stdout: '', stderr: '' });
-    dumpInternalSchedulerMock = vi.fn().mockReturnValue({
-      started: true,
-      entries: [{ agentId: 'agent-db', project: 'proj1', name: 'shared', schedule: '1h', enabled: true, nextFireMs: Date.now() + 1000, lastFireMs: null, fireCount: 0, errorCount: 0, lastError: null }],
-    });
-    upsertAgentScheduleMock = vi.fn();
-    const internalSchedulerStub = {
-      dumpInternalScheduler: dumpInternalSchedulerMock,
-      upsertAgentSchedule: upsertAgentScheduleMock,
-      removeAgentSchedule: vi.fn(),
-    };
-
+    vi.doMock('graphile-worker', () => ({ quickAddJob: quickAddJobMock }));
     vi.doMock('@/lib/db', () => ({ db: sharedHandle.db, schema }));
-    vi.doMock('@/lib/shared/shell', () => ({ exec: execMock }));
+    vi.doMock('@/lib/shared/shell', () => ({ exec: vi.fn().mockResolvedValue({ exitCode: 0, stdout: '', stderr: '' }) }));
     vi.doMock('@/lib/shared/config', () => ({ getSettings: () => ({ launchagent_prefix: 'com.tamtam' }) }));
-    vi.doMock('@/lib/scheduling/scheduling', () => ({ getImproveConfig: () => ({ logDir: '/tmp', claudeBin: 'claude' }) }));
-    vi.doMock('@/lib/scheduling/internal-scheduler', () => internalSchedulerStub);
-    vi.doMock('./internal-scheduler', () => internalSchedulerStub);
+    vi.doMock('@/lib/scheduling/scheduling', () => ({ getImproveConfig: () => ({ logDir, claudeBin: 'claude' }) }));
     vi.doMock('@/lib/agents/tamtam-file-agents', () => ({ scanFileAgents: vi.fn().mockReturnValue([fileAgent]) }));
 
     const enabledProjects = await import('@/lib/shared/enabled-projects');
@@ -353,9 +298,12 @@ describe('GET /api/agents/scheduler-health', () => {
     const res = await GET3();
     const body = await res.json();
 
-    // Only the DB agent should appear; no duplicate from the file agent.
     expect(body.expected).toHaveLength(1);
     expect(body.expected[0].id).toBe('agent-db');
     expect(body.ok).toBe(true);
   });
+
+  // The legacy `orphans.pm2` (entries in the in-memory scheduler not in the
+  // DB) was retired with that scheduler — the field is always empty now and
+  // its test along with it.
 });
