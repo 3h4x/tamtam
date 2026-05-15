@@ -350,16 +350,16 @@ export function RunRow({ entry: e, onClick, expandable, expanded, onToggleExpand
   ) : null
 
   return (
-    <div className="border-b border-border last:border-b-0 relative">
+    <div className="border-b border-border last:border-b-0 relative lg:col-span-full lg:grid lg:grid-cols-subgrid">
       {connectors}
       <div
         role="button"
         tabIndex={0}
         onClick={onClick}
         onKeyDown={(ev) => { if (ev.key === 'Enter' || ev.key === ' ') { ev.preventDefault(); onClick() } }}
-        className={`w-full text-left hover:bg-bg-tertiary cursor-pointer ${paddingLeft} pr-3 py-2 group ${rowTone} transition-colors`}
+        className={`w-full text-left hover:bg-bg-tertiary cursor-pointer ${paddingLeft} pr-3 py-2 group ${rowTone} transition-colors lg:col-span-full lg:grid lg:grid-cols-subgrid lg:gap-x-3 lg:items-center`}
       >
-        <div className={`grid gap-3 ${RUN_ROW_GRID_CLASS} lg:items-center`}>
+        <div className={`grid gap-3 lg:contents ${RUN_ROW_GRID_CLASS} lg:items-center`}>
           <div className="flex min-w-0 items-start gap-2">
             {expandable ? (
               <button

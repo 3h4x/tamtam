@@ -403,21 +403,37 @@ export async function pushCurrentBranch(
     if (branch) pushR = await tryPush(['-u', 'origin', branch]);
   }
   if (pushR.exitCode !== 0) {
-    const detail = (pushR.stderr.trim() || pushR.stdout.trim() || `git push exited ${pushR.exitCode}`).slice(0, 2000);
-    // The pre-push hook is the most common blocker for the manual "Create PR"
-    // button — surface that explicitly so the route can offer a force retry.
-    const lower = detail.toLowerCase();
+    // Detect hook failures against the FULL combined output — vitest/jest dump
+    // thousands of passing-test lines before the failure summary, so a head-only
+    // slice misses the signal and we mis-classify the failure as non-retryable.
+    const fullOutput = `${pushR.stderr}\n${pushR.stdout}`;
+    const lowerFull = fullOutput.toLowerCase();
     const looksLikeHook =
-      lower.includes('pre-push') ||
-      lower.includes('failed tests') ||
-      lower.includes('lint') ||
-      lower.includes('eslint') ||
-      lower.includes('typecheck') ||
-      lower.includes('tsc');
-    const isTestFailure = lower.includes('failed tests') || lower.includes('assertionerror') || /\bfail\b.*\.test\./i.test(detail);
+      lowerFull.includes('pre-push') ||
+      lowerFull.includes('failed tests') ||
+      lowerFull.includes('failed |') ||
+      lowerFull.includes('test files') ||
+      lowerFull.includes('lint') ||
+      lowerFull.includes('eslint') ||
+      lowerFull.includes('typecheck') ||
+      lowerFull.includes('tsc') ||
+      / fail /i.test(fullOutput) ||
+      lowerFull.includes('hook declined');
+    const isTestFailure =
+      lowerFull.includes('failed tests') ||
+      lowerFull.includes('assertionerror') ||
+      /\bfail\b.*\.test\./i.test(fullOutput) ||
+      /test files\s+\d+ failed/i.test(fullOutput) ||
+      lowerFull.includes('test files') ||
+      lowerFull.includes('vitest') ||
+      lowerFull.includes('jest');
     const hookFailure: PushHookFailure = looksLikeHook
       ? (isTestFailure ? 'pre-push-tests' : 'pre-push-other')
       : null;
+    // Truncate the detail toward the END of the output — that's where the
+    // failure summary lives. A head-truncated detail is just noise.
+    const rawDetail = pushR.stderr.trim() || pushR.stdout.trim() || `git push exited ${pushR.exitCode}`;
+    const detail = rawDetail.length > 2000 ? `…(truncated)\n${rawDetail.slice(-2000)}` : rawDetail;
     return { ok: false, detail: `Push failed: ${detail}`, hookFailure };
   }
   const shaR = await exec('git', ['-C', projPath, 'rev-parse', '--short', 'HEAD'], { timeout: 5000, signal });

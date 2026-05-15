@@ -232,9 +232,12 @@ export function ProjectDetailPage({
     }
   }
 
-  // Load config when the overview or config tab is active
+  // Load config on every tab — the header pill ("Auto release") and the
+  // action menu (Test / Website buttons) both depend on it, so tying the fetch
+  // to a tab-allowlist made the header silently change shape when switching
+  // tabs. Project config is small enough to fetch once per project mount.
   useEffect(() => {
-    if ((activeTab !== 'config' && activeTab !== 'overview' && activeTab !== 'terminal') || !name || !projectId) return
+    if (!name || !projectId) return
     let active = true
     setConfigLoading(true)
     Promise.all([
@@ -253,7 +256,7 @@ export function ProjectDetailPage({
       .catch(() => { /* ignore */ })
       .finally(() => { if (active) setConfigLoading(false) })
     return () => { active = false }
-  }, [activeTab, name, projectId])
+  }, [name, projectId])
 
   useEffect(() => {
     if (!name || !projectId) return
