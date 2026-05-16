@@ -9,6 +9,7 @@
 // yet.
 
 import type { PushResult } from '@/lib/pipeline/start-push';
+import { safeStartOrchestrator } from '@/lib/workflows/safe-start-orchestrator';
 
 export type PushPhaseResult =
   | {
@@ -83,6 +84,5 @@ async function dispatchOrchestratorTickStep(
   releaseJobId: string,
 ): Promise<void> {
   'use step';
-  const { safeStartOrchestrator } = await import('@/lib/workflows/safe-start-orchestrator');
   await safeStartOrchestrator(jobId, projectName, releaseJobId, 'push-phase');
 }

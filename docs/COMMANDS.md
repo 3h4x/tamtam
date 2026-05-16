@@ -3,7 +3,9 @@
 ## Server lifecycle
 
 - `pnpm start` — start (or idempotently restart) production server via PM2 on port 1337. Self-heals if a previous orphan is squatting on the port. Canonical way to run TamTam.
-- `pnpm run rebuild` / `pnpm restart` — build then restart under PM2. `pnpm run rebuild` expands to `pnpm build && pnpm start`; `pnpm restart` expands to `pnpm build && bash scripts/pm2-start.sh`. **Canonical post-edit command.** Note: bare `pnpm rebuild` triggers pnpm's native-deps rebuild instead — always use `pnpm run rebuild`.
+- `pnpm run rebuild` — graceful build + PM2 restart via `scripts/rebuild-safe.sh`: pause new jobs, wait for active pipeline/agent/run jobs to drain, build, restart, then unpause. On build failure, jobs are unpaused and the existing server is left running; on restart failure, jobs remain paused for manual recovery. **Canonical post-edit command.**
+- `pnpm run rebuild:force` — skip pause/drain and rebuild immediately. Use only when the server is already dead or active work can be interrupted.
+- `pnpm restart` — legacy immediate build then PM2 restart via `pnpm build && bash scripts/pm2-start.sh`; does not perform the graceful drain. Note: bare `pnpm rebuild` triggers pnpm's native-deps rebuild instead — always use `pnpm run rebuild`.
 - `pnpm stop` — stop the PM2 server.
 - `pnpm logs` — view PM2 logs.
 - `pnpm build` — production build.

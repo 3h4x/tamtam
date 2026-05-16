@@ -9,6 +9,7 @@
 // changes from a fix loop. Not wired yet.
 
 import type { CommitResult } from '@/lib/pipeline/start-commit';
+import { safeStartOrchestrator } from '@/lib/workflows/safe-start-orchestrator';
 
 export type CommitPhaseResult =
   | {
@@ -80,6 +81,5 @@ async function dispatchOrchestratorTickStep(
 ): Promise<void> {
   'use step';
   if (!jobId) return;
-  const { safeStartOrchestrator } = await import('@/lib/workflows/safe-start-orchestrator');
   await safeStartOrchestrator(jobId, projectName, releaseJobId, 'commit-phase');
 }

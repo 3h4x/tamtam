@@ -9,6 +9,7 @@
 
 import type { StartReviewResult } from '@/lib/pipeline/start-review';
 import type { WaitForJobResult } from '@/lib/workflows/wait-for-job';
+import { safeStartOrchestrator } from '@/lib/workflows/safe-start-orchestrator';
 
 export type ReviewVerdict = 'LGTM' | 'NEEDS ATTENTION' | 'DO NOT SHIP' | null;
 
@@ -103,6 +104,5 @@ async function dispatchOrchestratorTickStep(
   releaseJobId: string,
 ): Promise<void> {
   'use step';
-  const { safeStartOrchestrator } = await import('@/lib/workflows/safe-start-orchestrator');
   await safeStartOrchestrator(jobId, projectName, releaseJobId, 'review-phase');
 }
