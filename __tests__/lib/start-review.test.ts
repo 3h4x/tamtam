@@ -15,6 +15,7 @@ describe('startProjectReview', () => {
   let isLockOwnedByActiveReleaseMock: ReturnType<typeof vi.fn>;
   let checkCliStartGateMock: ReturnType<typeof vi.fn>;
   let findReleaseScopedIssueContextMock: ReturnType<typeof vi.fn>;
+  let loadFileConfigMock: ReturnType<typeof vi.fn>;
 
   function resp(exitCode: number, stdout = '', stderr = '') {
     return Promise.resolve({ exitCode, stdout, stderr });
@@ -42,6 +43,7 @@ describe('startProjectReview', () => {
     acquireLockMock = vi.fn().mockResolvedValue({ acquired: true });
     isLockOwnedByActiveReleaseMock = vi.fn().mockReturnValue(false);
     checkCliStartGateMock = vi.fn().mockResolvedValue({ ok: true, provider: 'claude' });
+    loadFileConfigMock = vi.fn().mockReturnValue(null);
 
     createJobMock = vi.fn().mockImplementation((project: string, kind: string) => ({
       id: `${project}-${kind}-id`, project, kind, pid: 0, logPath: '',
@@ -93,7 +95,7 @@ describe('startProjectReview', () => {
       appendFileSync: vi.fn(),
     }));
     vi.doMock('@/lib/skills/tamtam-file-config', () => ({
-      loadFileConfig: vi.fn().mockReturnValue(null),
+      loadFileConfig: loadFileConfigMock,
     }));
     vi.doMock('@/lib/skills/auto-attach-docs', () => ({
       resolveAutoAttachedDocs: vi.fn().mockReturnValue([]),
@@ -269,6 +271,46 @@ describe('startProjectReview', () => {
     expect(prompt).toContain('Working-tree files to review');
     expect(prompt).toContain('- lib/foo.ts');
     expect(prompt).toContain('Working-tree tracked-file diff (vs HEAD)');
+  });
+
+  it('runs the project review prerequisite before computing review scope', async () => {
+    loadFileConfigMock.mockReturnValue({ review_prerequisite_command: 'pnpm run supabase-gen-types' });
+    execMock
+      .mockResolvedValueOnce(resp(0, 'types generated'))
+      .mockResolvedValueOnce(resp(0, 'M  src/lib/database.types.ts'))
+      .mockResolvedValueOnce(resp(0, ' src/lib/database.types.ts | 28 ++++++++++++++++++++++++++++\n'))
+      .mockResolvedValueOnce(resp(0, 'diff --git a/src/lib/database.types.ts b/src/lib/database.types.ts\n+web3_nonces\n'));
+
+    const r = await startProjectReview('proj');
+
+    expect(r.ok).toBe(true);
+    expect(execMock.mock.calls[0]).toEqual([
+      'bash',
+      ['-lc', 'pnpm run supabase-gen-types'],
+      expect.objectContaining({
+        cwd: '/path/to/proj',
+        killProcessGroup: true,
+      }),
+    ]);
+    const prompt: string = startJobMock.mock.calls[0][2];
+    expect(prompt).toContain('review prerequisite (`pnpm run supabase-gen-types`) — exit 0');
+    expect(prompt).toContain('types generated');
+    expect(prompt).toContain('web3_nonces');
+  });
+
+  it('blocks review when the project review prerequisite fails', async () => {
+    loadFileConfigMock.mockReturnValue({ review_prerequisite_command: 'pnpm run supabase-gen-types' });
+    execMock.mockResolvedValueOnce(resp(1, '', 'type generation failed'));
+
+    const r = await startProjectReview('proj');
+
+    expect(r.ok).toBe(false);
+    if (!r.ok) {
+      expect(r.status).toBe(500);
+      expect(r.detail).toContain('Review prerequisite failed for proj');
+      expect(r.detail).toContain('type generation failed');
+    }
+    expect(startJobMock).not.toHaveBeenCalled();
   });
 
   it('persists autoAttachedDocs on the review job contextMeta when a doc matches', async () => {
