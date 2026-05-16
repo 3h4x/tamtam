@@ -28,7 +28,7 @@ The agent management dashboard built for Claude-compatible CLIs. Define skills, 
 
 ## Architecture
 
-TamTam is a single Next.js 16 (App Router) application backed by Postgres. The Next.js server is supervised by PM2; agent intake runs through durable workflows so a crash or restart never loses an in-flight job.
+TamTam is a single Next.js 16 (App Router) application backed by Postgres. The Next.js server is supervised by PM2; agent intake runs through the `workflow` package's Postgres-backed world, and scheduled agents run through graphile-worker, so a crash or restart does not lose in-flight work.
 
 ```
        ┌──────────────────────────────────────────────────────────────┐
@@ -52,7 +52,8 @@ TamTam is a single Next.js 16 (App Router) application backed by Postgres. The N
         │ (Drizzle ORM, node-postgres)│   │ embeddings for         │
         │  · jobs, agents, skills,    │   │ pgvector retrieval     │
         │    projects, settings…      │   └────────────────────────┘
-        │  · workflow state (durable) │
+        │  · workflow state (durable, │
+        │    in workflow DB)          │
         │  · pgvector retrieval index │
         └─────────────────────────────┘
 ```
@@ -60,7 +61,7 @@ TamTam is a single Next.js 16 (App Router) application backed by Postgres. The N
 ## Stack
 
 - **Next.js 16** (App Router) — frontend, API routes, and SSE streaming in one process
-- **Postgres 16 + pgvector** via `pg.Pool` + Drizzle ORM — single source of truth: jobs, agents, skills, settings, retrieval embeddings, **and** durable workflow state
+- **Postgres 16 + pgvector** via `pg.Pool` + Drizzle ORM — main source of truth for jobs, agents, skills, settings, and retrieval embeddings; workflow state lives in the workflow world database (`WORKFLOW_POSTGRES_URL`, falling back to `DATABASE_URL`)
 - **`workflow` + `@workflow/world-postgres`** — `"use workflow"` / `"use step"` orchestration for agent intake (`composePrompt` → `startAgent`), so a server restart between steps resumes instead of losing the run
 - **graphile-worker** — durable cron queue for scheduled agents and system maintenance
 - **PM2** — supervises the long-running TamTam server; one-shot CLI jobs are spawned in-process by workflow steps and route handlers

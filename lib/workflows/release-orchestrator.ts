@@ -43,7 +43,13 @@ export async function releaseOrchestratorWorkflow(
       ctx.parentJobId ?? null,
     );
   }
-  const dispatch = await dispatchStep(decision, { ...ctx, prevJobId: waited.job.id });
+  // Propagate PR context to the dispatcher when the decision is to launch
+  // pr-wait. Without this, dispatchPhase's required-context check rejects.
+  const dispatchCtx: DispatchContext = { ...ctx, prevJobId: waited.job.id };
+  if (decision.next === 'pr-wait') {
+    dispatchCtx.pr = decision.pr;
+  }
+  const dispatch = await dispatchStep(decision, dispatchCtx);
   // Finalize the release meta-job whenever this tick did not start a child
   // workflow — otherwise the release sits in `running` until the wall-clock
   // sweep reaps it. Three cases:
@@ -138,7 +144,40 @@ async function decideStep(jobId: string): Promise<NextPhase> {
   // Non-fix kinds ignore parentKind so this is harmless when not relevant.
   const parent = job.parentJobId ? getJob(job.parentJobId) : null;
   const parentKind = parent?.kind ?? null;
-  const decision = decideNextPhase({ kind: job.kind, exitCode: job.exitCode ?? -1, verdict, parentKind });
+  // For mark-dod → pr-wait routing under auto-merge: look up the release's
+  // most recent push job and inspect its contextMeta for PR identity, then
+  // read the project's auto_pr_merge_enabled flag. Cheap (cached) on the
+  // happy path because we only do this when kind === 'mark-dod'.
+  let pushPrContext: { prNumber: number; prRepo: string; prUrl: string } | null = null;
+  let autoPrMergeEnabled = false;
+  if (job.kind === 'mark-dod' && job.releaseId) {
+    const pushJob = listJobs()
+      .filter((j) => j.releaseId === job.releaseId && j.kind === 'push' && j.exitCode === 0)
+      .sort((a, b) => (b.startedAt ?? 0) - (a.startedAt ?? 0))[0];
+    if (pushJob?.contextMeta) {
+      try {
+        const meta = JSON.parse(pushJob.contextMeta) as { prUrl?: string; prNumber?: number; prRepo?: string };
+        if (meta.prUrl && meta.prNumber && meta.prRepo) {
+          pushPrContext = { prUrl: meta.prUrl, prNumber: meta.prNumber, prRepo: meta.prRepo };
+        }
+      } catch {}
+    }
+    if (pushPrContext) {
+      try {
+        const { getProjectTestConfig } = await import('@/lib/scheduling/scheduling');
+        const cfg = await getProjectTestConfig(job.project);
+        autoPrMergeEnabled = !!cfg?.autoPrMergeEnabled;
+      } catch {}
+    }
+  }
+  const decision = decideNextPhase({
+    kind: job.kind,
+    exitCode: job.exitCode ?? -1,
+    verdict,
+    parentKind,
+    pushPrContext,
+    autoPrMergeEnabled,
+  });
   // Pre-dispatch guards: convert `{ next: 'fix' }` into `{ next: 'abort' }`
   // when the fix loop would not converge (reviewIsStuck/fixContradictsReview),
   // or when an iteration cap (review/test/commit/push) is exhausted.

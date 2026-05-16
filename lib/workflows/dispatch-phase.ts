@@ -90,6 +90,16 @@ export async function dispatchPhase(
         run = await start(releaseMarkDodPhaseWorkflow, [ctx.projectName, ctx.dodOverride, ctx.parentJobId]);
         break;
       }
+      case 'pr-wait': {
+        const { releasePrWaitPhaseWorkflow } = await import('@/lib/workflows/phases/pr-wait-phase');
+        run = await start(releasePrWaitPhaseWorkflow, [
+          ctx.projectName,
+          ctx.pr!.prNumber,
+          ctx.pr!.prRepo,
+          ctx.pr!.prUrl,
+        ]);
+        break;
+      }
     }
     if (!run) {
       // Type-narrowing should make this unreachable, but be defensive.
@@ -110,7 +120,11 @@ function requiredContextMissing(phase: NextPhase['next'], ctx: DispatchContext):
   const missing: string[] = [];
   if (!ctx.projectName) missing.push('projectName');
   if (phase === 'fix' && !ctx.prevJobId) missing.push('prevJobId');
+  if (phase === 'pr-wait') {
+    if (!ctx.pr?.prNumber) missing.push('pr.prNumber');
+    if (!ctx.pr?.prRepo) missing.push('pr.prRepo');
+    if (!ctx.pr?.prUrl) missing.push('pr.prUrl');
+  }
   // test, review, commit, push, mark-dod only need projectName.
-  // 'pr-wait' is invoked directly by push-phase, not via NextPhase.
   return missing;
 }
