@@ -90,6 +90,7 @@ describe('settings API', () => {
         review_fix_max_iterations: '3',
         review_do_not_ship_action: 'pass',
         release_wall_clock_timeout_minutes: '60',
+        plain_test_phase_enabled: 'false',
       });
     });
 
@@ -370,6 +371,43 @@ describe('settings API', () => {
       expect(getData.settings.legacy_completion_hook_auto_resume_enabled).toBe('false');
       expect(getData.settings.legacy_pipeline_lock_inline_drain_enabled).toBe('false');
       expect(getData.settings.legacy_completion_hook_agent_drain_enabled).toBe('false');
+    });
+
+    it('updates plain test phase flag and exposes it through GET and config reads', async () => {
+      const request = new NextRequest('http://localhost/api/settings', {
+        method: 'PATCH',
+        body: JSON.stringify({ plain_test_phase_enabled: true }),
+      });
+      const response = await PATCH(request);
+      expect(response.status).toBe(200);
+
+      const rows = await sharedHandle.db.select().from(schema.settings);
+      const map = Object.fromEntries(rows.map((r) => [r.key, r.value]));
+      expect(map.plain_test_phase_enabled).toBe('true');
+
+      const patchData = await response.json();
+      expect(patchData.settings.plain_test_phase_enabled).toBe('true');
+
+      const getResponse = await GET();
+      const getData = await getResponse.json();
+      expect(getData.settings.plain_test_phase_enabled).toBe('true');
+
+      const { initSettings, getSettings } = await import('@/lib/shared/config');
+      await initSettings();
+      expect(getSettings().plain_test_phase_enabled).toBe(true);
+    });
+
+    it('rejects invalid plain test phase flag values', async () => {
+      const response = await PATCH(new NextRequest('http://localhost/api/settings', {
+        method: 'PATCH',
+        body: JSON.stringify({ plain_test_phase_enabled: 'sometimes' }),
+      }));
+
+      expect(response.status).toBe(400);
+      await expect(response.json()).resolves.toEqual({
+        detail: 'plain_test_phase_enabled must be true or false.',
+      });
+      expect(await sharedHandle.db.select().from(schema.settings)).toEqual([]);
     });
 
     it('rejects invalid retrieval settings', async () => {

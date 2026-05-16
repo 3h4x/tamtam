@@ -10,9 +10,11 @@
 //      owner of the long-running CLI run, instead of fire-and-forget into
 //      PM2.
 //
-// PID convention: job.pid is set to process.pid so probeJobStatus can detect
-// "owned by this Next.js process — trust step self-finalization, don't ask
-// PM2." See probeJobStatus's startsWith('agent:') branch.
+// PID convention: job.pid starts as process.pid while the workflow step is
+// preparing the child, then switches to the real subprocess pid as soon as
+// spawn succeeds. The initial server pid lets probeJobStatus trust step
+// self-finalization during the short pre-spawn window; the real child pid
+// lets liveness checks and resource sampling target the job process.
 
 import { writeFileSync } from 'fs';
 import { join } from 'path';
@@ -81,6 +83,11 @@ export async function startInProcessAgentJob(
       env: options?.env,
       cwd,
       abortSignal,
+      onSpawn: (pid) => {
+        if (!job || pid <= 0) return;
+        job.pid = pid;
+        saveToDb(job);
+      },
     });
   } finally {
     finishJobCancellation(jobId);
@@ -93,5 +100,5 @@ export async function startInProcessAgentJob(
     await markDone(job, result.exitCode);
   }
 
-  return process.pid;
+  return result.pid > 0 ? result.pid : process.pid;
 }

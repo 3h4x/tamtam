@@ -84,6 +84,7 @@ function makeSettings(overrides: Partial<TamTamConfig> = {}): TamTamConfig {
     legacy_completion_hook_auto_resume_enabled: true,
     legacy_pipeline_lock_inline_drain_enabled: true,
     legacy_completion_hook_agent_drain_enabled: true,
+    plain_test_phase_enabled: false,
     ...overrides,
   };
 }

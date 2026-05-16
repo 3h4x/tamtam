@@ -230,6 +230,17 @@ export async function runNightlyCleanup(cfg?: RetentionConfig): Promise<NightlyR
       .where(and(isNotNull(schema.jobs.finishedAt), lt(schema.jobs.startedAt, cutoffTs)))
       .execute();
     summary.rowsDeleted = result.rowCount ?? oldFinishedRows.length;
+    // Prune resource samples for the same horizon. Samples for jobs whose
+    // rows just got deleted are orphans anyway; samples for older runs
+    // we kept (still-running past cutoff) are pruned by sampledAt < cutoff
+    // independently so the time series doesn't grow unbounded.
+    try {
+      await db.delete(schema.jobResourceSamples)
+        .where(lt(schema.jobResourceSamples.sampledAt, cutoffTs))
+        .execute();
+    } catch (e) {
+      console.error('[retention] resource-samples prune failed:', e);
+    }
   } catch (e) {
     summary.status = 'failed';
     summary.errorCount += 1;

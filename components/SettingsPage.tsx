@@ -56,6 +56,7 @@ interface SettingsMap {
   legacy_completion_hook_auto_resume_enabled: string
   legacy_pipeline_lock_inline_drain_enabled: string
   legacy_completion_hook_agent_drain_enabled: string
+  plain_test_phase_enabled: string
   agent_templates: string
   log_retention_count: string
   log_retention_days: string

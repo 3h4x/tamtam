@@ -115,6 +115,7 @@ Manual sync behavior:
 | `legacy_completion_hook_auto_resume_enabled` | boolean | `true` | Runtime kill switch for the legacy job-completion auto-resume hook while interrupted run recovery migrates to the workflow event router. Set to `false` to stop the completion hook without redeploying |
 | `legacy_pipeline_lock_inline_drain_enabled` | boolean | `true` | Runtime kill switch for the inline pending-release and queued-agent drain that fires when a pipeline lock is released or self-healed. Set to `false` to route lock-release recovery through durable `pipeline_lock_events` consumption instead |
 | `legacy_completion_hook_agent_drain_enabled` | boolean | `true` | Runtime kill switch for the legacy job-completion hook that drains queued agent runs after an agent finishes. Set to `false` to route agent queue draining through durable `job_completion_events` consumption instead |
+| `plain_test_phase_enabled` | boolean | `false` | Runtime feature flag for the release test phase. When `true`, workflow-driven releases run the detected project test command directly through `pnpm-test-phase.ts` instead of launching the Claude-driven `test-phase.ts`; failed tests still route to the same fix and re-test loop |
 
 ### Notifications
 
@@ -340,6 +341,7 @@ legacy_completion_hook_release_after_fix_ci_enabled,
 legacy_completion_hook_auto_resume_enabled,
 legacy_pipeline_lock_inline_drain_enabled,
 legacy_completion_hook_agent_drain_enabled,
+plain_test_phase_enabled,
 agent_templates, log_retention_count, log_retention_days,
 job_row_retention_days, workflow_run_retention_days,
 backup_retention_count, backup_retention_weekly_count,

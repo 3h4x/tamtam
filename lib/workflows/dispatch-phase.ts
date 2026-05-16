@@ -70,8 +70,17 @@ export async function dispatchPhase(
       let run;
     switch (decision.next) {
       case 'test': {
-        const { releaseTestPhaseWorkflow } = await import('@/lib/workflows/phases/test-phase');
-        run = await start(releaseTestPhaseWorkflow, [ctx.projectName, ctx.parentJobId]);
+        // Plain-test phase: runs `pnpm test` directly (no Claude), much
+        // cheaper for the happy path. Gated on the
+        // `plain_test_phase_enabled` flag while the new path bakes.
+        const { getSettings } = await import('@/lib/shared/config');
+        if (getSettings().plain_test_phase_enabled) {
+          const { pnpmTestPhaseWorkflow } = await import('@/lib/workflows/phases/pnpm-test-phase');
+          run = await start(pnpmTestPhaseWorkflow, [ctx.projectName, ctx.parentJobId]);
+        } else {
+          const { releaseTestPhaseWorkflow } = await import('@/lib/workflows/phases/test-phase');
+          run = await start(releaseTestPhaseWorkflow, [ctx.projectName, ctx.parentJobId]);
+        }
         break;
       }
       case 'review': {

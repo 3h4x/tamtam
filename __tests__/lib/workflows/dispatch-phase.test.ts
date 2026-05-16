@@ -1,6 +1,7 @@
 import { describe, it, expect, beforeEach, vi } from 'vitest';
 
 const startMock = vi.fn();
+const settingsState = vi.hoisted(() => ({ plainTestPhaseEnabled: false }));
 
 vi.mock('workflow/api', () => ({
   start: (...args: unknown[]) => startMock(...args),
@@ -10,6 +11,7 @@ vi.mock('workflow/api', () => ({
 // called with (the function reference is the workflow identifier).
 const phaseFns = {
   test: vi.fn(),
+  pnpmTest: vi.fn(),
   review: vi.fn(),
   fix: vi.fn(),
   push: vi.fn(),
@@ -17,11 +19,15 @@ const phaseFns = {
   prWait: vi.fn(),
 };
 vi.mock('@/lib/workflows/phases/test-phase', () => ({ releaseTestPhaseWorkflow: phaseFns.test }));
+vi.mock('@/lib/workflows/phases/pnpm-test-phase', () => ({ pnpmTestPhaseWorkflow: phaseFns.pnpmTest }));
 vi.mock('@/lib/workflows/phases/review-phase', () => ({ releaseReviewPhaseWorkflow: phaseFns.review }));
 vi.mock('@/lib/workflows/phases/fix-phase', () => ({ releaseFixPhaseWorkflow: phaseFns.fix }));
 vi.mock('@/lib/workflows/phases/push-phase', () => ({ releasePushPhaseWorkflow: phaseFns.push }));
 vi.mock('@/lib/workflows/phases/mark-dod-phase', () => ({ releaseMarkDodPhaseWorkflow: phaseFns.markDod }));
 vi.mock('@/lib/workflows/phases/pr-wait-phase', () => ({ releasePrWaitPhaseWorkflow: phaseFns.prWait }));
+vi.mock('@/lib/shared/config', () => ({
+  getSettings: () => ({ plain_test_phase_enabled: settingsState.plainTestPhaseEnabled }),
+}));
 
 import { dispatchPhase } from '@/lib/workflows/dispatch-phase';
 import type { NextPhase } from '@/lib/workflows/decide-next-phase';
@@ -29,6 +35,7 @@ import type { NextPhase } from '@/lib/workflows/decide-next-phase';
 describe('dispatchPhase', () => {
   beforeEach(() => {
     startMock.mockReset().mockResolvedValue({ runId: 'wrun_child_1' });
+    settingsState.plainTestPhaseEnabled = false;
   });
 
   it('returns terminal for next=done without dispatching', async () => {
@@ -110,6 +117,14 @@ describe('dispatchPhase', () => {
     const r = await dispatchPhase(decision, { projectName: 'test-tt', parentJobId: 'release-1' });
     expect(startMock).toHaveBeenCalledWith(phaseFns.test, ['test-tt', 'release-1']);
     expect(r.dispatched).toBe(true);
+  });
+
+  it('dispatches pnpmTestPhaseWorkflow for next=test when plain test phase is enabled', async () => {
+    settingsState.plainTestPhaseEnabled = true;
+    const decision: NextPhase = { next: 'test', from: 'fix' };
+    const r = await dispatchPhase(decision, { projectName: 'test-tt', parentJobId: 'release-1' });
+    expect(startMock).toHaveBeenCalledWith(phaseFns.pnpmTest, ['test-tt', 'release-1']);
+    expect(r).toEqual({ dispatched: true, phase: 'test', childRunId: 'wrun_child_1' });
   });
 
   it('dispatches releaseCommitPhaseWorkflow for next=commit (re-attempt after fix-from-commit)', async () => {
