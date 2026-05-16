@@ -561,7 +561,13 @@ export async function registerNode(): Promise<void> {
               await runProjectSweep();
             },
             isEnabled: async () => {
-              const { getSettings } = await import('@/lib/shared/config');
+              // Force a fresh DB read — the cron fires every 5min, which is
+              // way past the settings cache's 5s TTL. A bare `getSettings()`
+              // returns DEFAULTS (with project_sweep_enabled=false) while
+              // its background refresh kicks off; the task would then see
+              // "disabled" even though the row says true.
+              const { getSettings, initSettings } = await import('@/lib/shared/config');
+              await initSettings();
               return !!getSettings().project_sweep_enabled;
             },
             enqueueNextFire: async (runAt) => {
