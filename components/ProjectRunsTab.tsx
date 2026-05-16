@@ -673,7 +673,7 @@ export function ProjectRunsTab({ projectName, jobsPaused = false }: ProjectRunsT
                       actions={releaseActionsFor(e)}
                     >
                       {isExpandable && isExpanded && (
-                        <div className="bg-bg-primary/40">
+                        <div className="bg-bg-primary/40 lg:col-span-full lg:grid lg:grid-cols-subgrid lg:gap-x-3">
                           {/* For release/vgroup rows: flatten the chain so test/review/commit/push
                               all appear at depth 1 and fix appears at depth 2.
                               For agent/run rows that own a nested release: use renderChain
