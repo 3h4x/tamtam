@@ -102,13 +102,13 @@ export const FIELDS: Record<SettingsFieldKey, FieldDef> = {
   },
   review_fix_max_iterations: {
     label: 'Review Fix Loop Iterations',
-    help: 'How many NEEDS ATTENTION review→fix verification rounds to attempt per release before filing a follow-up issue with the unresolved findings and shipping the partial work. This setting only governs review-side exhaustion; test/commit/push safety caps still use the shared advanced env guard. DO NOT SHIP reviews follow the policy below. Default 3.',
+    help: 'How many review→fix verification rounds to attempt per release. Infinity loops review→fix→commit→review until LGTM (release wall-clock still applies). 1–10 caps the loop, then files a follow-up issue with the unresolved findings and ships the partial work. Default 3.',
     group: 'pipeline',
     span: 1,
   },
   review_do_not_ship_action: {
     label: 'Do Not Ship Action',
-    help: 'Policy for DO NOT SHIP review verdicts. pass files a follow-up issue and continues to commit; fix tries the review fix loop; abort stops before commit.',
+    help: 'Policy for DO NOT SHIP review verdicts. fix (default) routes back through the review fix loop so the pipeline keeps trying; pass files a follow-up issue and continues to commit; abort stops the release.',
     group: 'pipeline',
     span: 1,
   },
@@ -321,7 +321,7 @@ export const DEFAULTS: Record<SettingsFieldKey, string> = {
 - DO NOT SHIP when there is a real risk of breakage, data loss, security regression, or a test that hides behavior.
 - If LGTM, just confirm the changes look good and add nothing else.`,
   review_fix_max_iterations: '3',
-  review_do_not_ship_action: 'pass',
+  review_do_not_ship_action: 'fix',
   release_wall_clock_timeout_minutes: '60',
   legacy_completion_hook_release_after_run_enabled: 'true',
   legacy_completion_hook_release_after_fix_ci_enabled: 'true',

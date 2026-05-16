@@ -153,7 +153,7 @@ const DEFAULTS: TamTamConfig = {
 - Keep LGTM responses short: one sentence confirmation is enough.`,
   jobs_paused: false,
   review_fix_max_iterations: 3,
-  review_do_not_ship_action: 'pass',
+  review_do_not_ship_action: 'fix',
   release_wall_clock_timeout_minutes: 60,
   log_retention_count: 200,
   log_retention_days: 30,
@@ -348,7 +348,7 @@ export function buildConfigFromSettingsMap(map: Record<string, string>): TamTamC
     commit_style: map.commit_style ?? DEFAULTS.commit_style,
     review_verdict_rules: map.review_verdict_rules ?? DEFAULTS.review_verdict_rules,
     jobs_paused: map.jobs_paused === 'true',
-    review_fix_max_iterations: parsePositiveIntOr(map.review_fix_max_iterations, DEFAULTS.review_fix_max_iterations),
+    review_fix_max_iterations: parseNonNegativeIntOr(map.review_fix_max_iterations, DEFAULTS.review_fix_max_iterations),
     review_do_not_ship_action: parseReviewDoNotShipAction(
       map.review_do_not_ship_action,
       DEFAULTS.review_do_not_ship_action,
@@ -451,6 +451,13 @@ function parsePositiveIntOr(v: string | undefined, fallback: number): number {
   if (v === undefined || v === '') return fallback;
   const n = parseInt(v, 10);
   return Number.isFinite(n) && n > 0 ? n : fallback;
+}
+
+// Allows 0 — used by review_fix_max_iterations where 0 means "no cap".
+function parseNonNegativeIntOr(v: string | undefined, fallback: number): number {
+  if (v === undefined || v === '') return fallback;
+  const n = parseInt(v, 10);
+  return Number.isFinite(n) && n >= 0 ? n : fallback;
 }
 
 function parseJsonObject(v: string | undefined): Record<string, string> {

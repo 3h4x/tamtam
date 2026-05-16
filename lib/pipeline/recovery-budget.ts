@@ -24,6 +24,10 @@ export function getReviewFixMaxIterations(): number {
   );
   try {
     const value = getSettings().review_fix_max_iterations;
+    // 0 means "no cap" — the review→fix loop runs until LGTM (or the
+    // release wall-clock kills it). Useful when iterating against a
+    // stubborn review that converges given enough passes.
+    if (value === 0) return Number.POSITIVE_INFINITY;
     return Number.isFinite(value) && value > 0 ? value : envValue;
   } catch {
     return envValue;
