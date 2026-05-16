@@ -36,14 +36,26 @@ async function gatherView(name: string): Promise<ProjectSweepView | null> {
   const uncommittedCount = status ? status.split('\n').filter((l) => l.trim().length > 0).length : 0;
 
   let hasUnpushedCommits = false;
-  // Prefer @{u}..HEAD; fall back to defaultBranch..HEAD (mirrors
-  // hasLocalCommitsAhead in release-state.ts).
+  // Prefer @{u}..HEAD. When there's no upstream configured (typical for a
+  // local issue branch that was created but never `push -u`'d), check the
+  // remote-tracking ref `origin/<currentBranch>` instead: if it exists, the
+  // local commits are already pushed (just lacking local upstream config)
+  // and a sweep release would loop forever pushing the same SHAs. Only when
+  // there's no remote-tracking ref at all do we fall back to the default-
+  // branch comparison.
   const upstreamAhead = await gitOk(path, ['rev-list', '--count', '@{u}..HEAD']);
   if (upstreamAhead !== null) {
     hasUnpushedCommits = parseInt(upstreamAhead, 10) > 0;
   } else if (defaultBranch && currentBranch && currentBranch !== defaultBranch) {
-    const branchAhead = await gitOk(path, ['rev-list', '--count', `${defaultBranch}..HEAD`]);
-    hasUnpushedCommits = branchAhead !== null && parseInt(branchAhead, 10) > 0;
+    const originRef = `refs/remotes/origin/${currentBranch}`;
+    const hasRemoteRef = (await gitOk(path, ['rev-parse', '--verify', '--quiet', originRef])) !== null;
+    if (hasRemoteRef) {
+      const remoteAhead = await gitOk(path, ['rev-list', '--count', `${originRef}..HEAD`]);
+      hasUnpushedCommits = remoteAhead !== null && parseInt(remoteAhead, 10) > 0;
+    } else {
+      const branchAhead = await gitOk(path, ['rev-list', '--count', `${defaultBranch}..HEAD`]);
+      hasUnpushedCommits = branchAhead !== null && parseInt(branchAhead, 10) > 0;
+    }
   }
 
   const blocking = await findBlockingRunningJob(name);
