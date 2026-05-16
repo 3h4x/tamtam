@@ -64,6 +64,17 @@ export interface SessionState {
   selectedItems: SkillItem[]
   selectedDocs: DocItem[]
   pendingAutoSubmit: string | null
+  // error surface: populated on `done` when is_error=true. Drives the
+  // banner-with-resume above the input. `kind: 'internal-cli'` triggers
+  // a one-shot auto-retry (e.g. ede_diagnostic races) before the user
+  // sees the banner; subsequent errors during that same auto-retry stop
+  // retrying so we don't mask real problems.
+  lastError: {
+    text: string
+    kind: 'internal-cli' | 'other'
+    autoRetryUsed: boolean
+    sessionId: string | null
+  } | null
   // hydration
   restoredFor: string | null // sessionId this state was loaded for
 }
@@ -87,6 +98,7 @@ const emptyState = (): SessionState => ({
   selectedItems: [],
   selectedDocs: [],
   pendingAutoSubmit: null,
+  lastError: null,
   restoredFor: null,
 })
 
@@ -683,6 +695,7 @@ class TerminalStore {
         detail?: string;
         error?: boolean;
         errorText?: string;
+        errorKind?: 'internal-cli' | 'other';
         duration?: number;
         inputTokens?: number;
         outputTokens?: number;
@@ -705,11 +718,38 @@ class TerminalStore {
         // optionally `errorText` (the result string Claude returned, e.g.
         // "API Error: Stream idle timeout…"). Server-synthesized done events
         // carry `exitCode` and `detail` instead. Show whichever is present.
+        //
+        // Errors also populate `lastError` (drives the resume banner) and,
+        // for the retryable `internal-cli` kind, trigger a one-shot auto-
+        // resume by re-queuing the most recent user prompt.
+        let nextLastError = s.lastError
+        let autoResumeText: string | null = null
         if (metadata.error) {
           const providerLabel = metadata.provider ? `${metadata.provider} run failed` : 'provider run failed'
           newEntries.push({ role: 'error', text: providerLabel })
           if (metadata.errorText) {
             newEntries.push({ role: 'error', text: metadata.errorText })
+          }
+          const errorKind = metadata.errorKind ?? 'other'
+          const lastUserText = [...s.history].reverse().find((e) => e.role === 'user')?.text ?? null
+          const priorAutoRetry = s.lastError?.autoRetryUsed ?? false
+          const canAutoRetry =
+            errorKind === 'internal-cli' &&
+            !priorAutoRetry &&
+            !!lastUserText &&
+            !!(metadata.sessionId || s.claudeSessionId)
+          nextLastError = {
+            text: metadata.errorText || `${providerLabel} (no diagnostic emitted)`,
+            kind: errorKind,
+            autoRetryUsed: priorAutoRetry || canAutoRetry,
+            sessionId: metadata.sessionId || s.claudeSessionId || null,
+          }
+          if (canAutoRetry && lastUserText) {
+            autoResumeText = lastUserText
+            newEntries.push({
+              role: 'status',
+              text: 'Internal CLI error · auto-resuming the same prompt once',
+            })
           }
         } else if (metadata.exitCode !== undefined && metadata.exitCode !== null) {
           const ok = metadata.exitCode === 0
@@ -717,6 +757,11 @@ class TerminalStore {
           if (!ok && typeof metadata.detail === 'string' && metadata.detail) {
             newEntries.push({ role: 'error', text: metadata.detail })
           }
+          if (ok) nextLastError = null
+        } else {
+          // No metadata.error and no exitCode — treat as clean end; clear
+          // any stale error from a prior turn on the same session.
+          nextLastError = null
         }
         const sid = metadata.sessionId || s.claudeSessionId || null
         const stats: RunStats | null =
@@ -736,10 +781,14 @@ class TerminalStore {
             window.history.replaceState(null, '', target)
           }
         }
-        // Dequeue next message if any
+        // Dequeue next message if any. Auto-resume after an internal-CLI
+        // error takes precedence over the user's queued messages — the
+        // failed turn must finish before we move on.
         let pendingAutoSubmit = s.pendingAutoSubmit
         let messageQueue = s.messageQueue
-        if (s.messageQueue.length > 0) {
+        if (autoResumeText) {
+          pendingAutoSubmit = autoResumeText
+        } else if (s.messageQueue.length > 0) {
           const [next, ...rest] = s.messageQueue
           pendingAutoSubmit = next
           messageQueue = rest
@@ -758,6 +807,7 @@ class TerminalStore {
           sessionKey: sid ?? 'new',
           sessionProvider: metadata.provider ?? s.sessionProvider,
           lastStats: stats,
+          lastError: nextLastError,
           pendingAutoSubmit,
           messageQueue,
         }

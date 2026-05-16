@@ -583,7 +583,7 @@ export function ProjectRunsTab({ projectName, jobsPaused = false }: ProjectRunsT
           {entries.length === 0 ? (
             <>
               <span className="text-3xl opacity-30">▷</span>
-              <span>No runs yet — use the Terminal tab or click 🚀 Release in the header</span>
+              <span>No runs yet — use the Terminal tab or click Release in the header</span>
             </>
           ) : search.trim() ? (
             <>

@@ -54,6 +54,14 @@ interface TerminalMessagesProps {
   onClearQueueItem: (idx: number) => void
   onCancel: () => void
   termRef: React.RefObject<HTMLDivElement | null>
+  lastError: {
+    text: string
+    kind: 'internal-cli' | 'other'
+    autoRetryUsed: boolean
+    sessionId: string | null
+  } | null
+  onResume: () => void
+  onDismissError: () => void
 }
 
 const spinnerChars = ['⠋', '⠙', '⠹', '⠸', '⠼', '⠴', '⠦', '⠧', '⠇', '⠏']
@@ -268,6 +276,9 @@ export function TerminalMessages({
   onClearQueueItem,
   onCancel,
   termRef,
+  lastError,
+  onResume,
+  onDismissError,
 }: TerminalMessagesProps) {
   const [copiedIdx, setCopiedIdx] = useState<number | null>(null)
 
@@ -548,6 +559,43 @@ export function TerminalMessages({
         )}
 
       </div>{/* end scrollable terminal body */}
+
+      {/* Error banner — surfaces internal CLI errors with a one-click resume.
+          The store has already attempted one auto-resume by the time the user
+          sees this (when kind=internal-cli); for everything else it's the
+          only path back. */}
+      {lastError && !streaming && (
+        <div className="border-t border-status-error/40 bg-status-error/[0.06] px-4 py-2.5 flex items-start gap-3">
+          <div className="flex-1 min-w-0">
+            <div className="text-[11px] uppercase tracking-wider text-status-error font-medium">
+              {lastError.kind === 'internal-cli'
+                ? lastError.autoRetryUsed
+                  ? 'Session ended with internal CLI error · auto-resume already attempted'
+                  : 'Session ended with internal CLI error'
+                : 'Session ended with an error'}
+            </div>
+            <div className="mt-1 text-xs font-mono text-text-secondary whitespace-pre-wrap break-words max-h-24 overflow-y-auto">
+              {lastError.text}
+            </div>
+          </div>
+          <div className="flex items-center gap-1.5 shrink-0">
+            <button
+              onClick={onResume}
+              className="px-2.5 py-1 text-xs rounded-md border border-accent/40 bg-accent/10 text-accent hover:bg-accent/20 cursor-pointer transition-colors"
+              title="Re-submit the last user prompt against this session"
+            >
+              Resume
+            </button>
+            <button
+              onClick={onDismissError}
+              className="px-2 py-1 text-xs rounded-md border border-border bg-bg-secondary text-text-secondary hover:text-text-primary cursor-pointer transition-colors"
+              title="Dismiss"
+            >
+              Dismiss
+            </button>
+          </div>
+        </div>
+      )}
     </>
   )
 }

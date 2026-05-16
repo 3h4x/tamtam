@@ -1328,7 +1328,22 @@ async function runCompletionHooksInner(job: JobData): Promise<void> {
   }
 
   // Release-after-run: when a terminal/agent run finishes successfully, auto-trigger the release pipeline.
-  if ((getJobKind(job.kind) === 'run' || isAgentJobKind(job.kind)) && job.exitCode === 0) {
+  //
+  // Issue-cruncher (and any chat run linked to a GitHub issue) deliberately
+  // works on a feature branch — `fix/issue-<N>-...`. Auto-releasing that
+  // branch would either (a) ship half-done issue work straight to main, or
+  // (b) run the release pipeline against the wrong branch. Issue work ships
+  // via the PR path (Create PR → review → merge), not auto-release. Gate
+  // the hook on both the job kind and `ghIssueNumber` so a vanilla chat run
+  // unrelated to an issue still auto-releases as before.
+  const isIssueWork =
+    job.kind === 'agent:issue-cruncher' ||
+    (getJobKind(job.kind) === 'run' && job.ghIssueNumber != null) ||
+    (isAgentJobKind(job.kind) && job.ghIssueNumber != null);
+  if (isIssueWork && job.exitCode === 0) {
+    console.log(`[release-after-run] skipped for ${job.project}: ${job.kind} is issue work (issue #${job.ghIssueNumber ?? '?'}) — use Create PR to ship`);
+  }
+  if ((getJobKind(job.kind) === 'run' || isAgentJobKind(job.kind)) && job.exitCode === 0 && !isIssueWork) {
     try {
       const { releaseAfterRun } = await getProjectPipelineConfig(job.project);
       if (releaseAfterRun) {

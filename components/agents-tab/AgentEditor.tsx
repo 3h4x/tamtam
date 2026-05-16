@@ -275,7 +275,7 @@ export function AgentEditor({
           >
             {improving
               ? <span className="inline-block w-3 h-3 rounded-full border-2 border-accent border-t-transparent animate-spin" />
-              : <span aria-hidden>✨</span>}
+              : null}
             <span>{improving ? 'Improving…' : 'Improve'}</span>
           </button>
         </div>
