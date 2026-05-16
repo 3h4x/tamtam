@@ -201,6 +201,24 @@ export const jobCompletionEvents = pgTable('job_completion_events', {
   unconsumedIdx: index('job_completion_events_unconsumed').on(t.consumedBy, t.emittedAt),
 }));
 
+// Durable pipeline-lock-released log. Written from releaseLock /
+// selfHealStaleLock when a project's lock is dropped. A consumer
+// (probe-sweep / workflow) reads unconsumed rows and drains
+// pending-release + queued-agent-runs for that project, replacing the
+// fire-and-forget `void drainPendingReleaseAsync(...)` call that loses
+// the drain on a crash mid-release.
+export const pipelineLockEvents = pgTable('pipeline_lock_events', {
+  id: serial('id').primaryKey(),
+  project: text('project').notNull(),
+  releasedByJobId: text('released_by_job_id'),
+  reason: text('reason').notNull(),
+  emittedAt: doublePrecision('emitted_at').notNull(),
+  consumedBy: text('consumed_by'),
+  consumedAt: doublePrecision('consumed_at'),
+}, (t) => ({
+  unconsumedIdx: index('pipeline_lock_events_unconsumed').on(t.consumedBy, t.emittedAt),
+}));
+
 export const notificationThrottle = pgTable('notification_throttle', {
   key: text('key').primaryKey(),
   lastSentAt: bigint('last_sent_at', { mode: 'number' }).notNull(),

@@ -77,6 +77,12 @@ export async function runProbeSweep(): Promise<void> {
   } catch (err) {
     console.error('[probe-sweep] job-completion-router error:', err);
   }
+  try {
+    const { consumePipelineLockEvents } = await import('./lib/workflows/triggers/pipeline-lock-router');
+    await consumePipelineLockEvents();
+  } catch (err) {
+    console.error('[probe-sweep] pipeline-lock-router error:', err);
+  }
 }
 
 /**

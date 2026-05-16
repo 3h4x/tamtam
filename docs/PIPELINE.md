@@ -278,6 +278,11 @@ That queued release is retried from four places:
 4. the periodic recovery reconcile ticker, which drains pending releases before
    replaying queued agent work for the same project
 
+Lock release also writes a durable `pipeline_lock_events` row. The probe sweep
+consumes unhandled rows and runs the same ordered recovery drain when
+`legacy_pipeline_lock_inline_drain_enabled` is set to `false`, giving operators
+a restart-safe path for replacing the inline fire-and-forget drain.
+
 Retry semantics matter: a drain attempt only consumes the queue when the
 release actually starts or reaches a terminal no-op such as "nothing to
 release". Temporary blocks such as the global pause, a fresh budget/credits
@@ -306,6 +311,10 @@ That queued agent is retried from these paths:
    `budget_block_at_pct`
 4. server boot
 5. the periodic queued-agent recovery ticker
+
+The durable `pipeline_lock_events` consumer uses the same release-before-agent
+ordering as the inline `releaseLock()` drain, so disabling the legacy inline
+drain does not allow queued agents to overtake a pending release.
 
 Retry semantics are conservative: successful starts and handoff to the
 in-memory same-project agent queue consume the DB row; transient blocks such as

@@ -1,6 +1,7 @@
 import { db, schema } from '@/lib/db';
 import { eq } from 'drizzle-orm';
 import { getJob } from '@/lib/jobs/storage';
+import { getSettings } from '@/lib/shared/config';
 
 /**
  * True when the project's pipeline lock is held by an active (unfinished)
@@ -45,14 +46,16 @@ async function selfHealStaleLock(projectName: string): Promise<PipelineLock | nu
     const holder = getJob(existing.lockedByJobId);
     if (holder && holder.finishedAt !== null) {
       releaseLockAsync(projectName);
-      void drainPendingReleaseAsync(projectName);
+      emitLockEvent(projectName, existing.lockedByJobId, 'heal:holder_finished');
+      maybeDrainPendingReleaseInline(projectName);
       return null;
     }
     if (!holder) {
       const ageSec = Date.now() / 1000 - existing.acquiredAt;
       if (ageSec > MISSING_HOLDER_GRACE_SECONDS) {
         releaseLockAsync(projectName);
-        void drainPendingReleaseAsync(projectName);
+        emitLockEvent(projectName, existing.lockedByJobId, 'heal:holder_missing');
+        maybeDrainPendingReleaseInline(projectName);
         return null;
       }
     }
@@ -107,8 +110,26 @@ export async function releaseLock(projectName: string, jobId: string): Promise<v
   const existing = await getLockFromDb(projectName);
   if (existing && existing.lockedByJobId === jobId) {
     releaseLockAsync(projectName);
-    void drainPendingReleaseAsync(projectName);
+    emitLockEvent(projectName, jobId, 'released');
+    maybeDrainPendingReleaseInline(projectName);
   }
+}
+
+/** Insert a pipeline_lock_events row. Best-effort and non-blocking — the
+ *  inline `drainPendingReleaseAsync` still fires immediately; the event is
+ *  the durable safety-net for a crash that interrupts the inline drain. */
+function emitLockEvent(projectName: string, releasedByJobId: string | null, reason: string): void {
+  void db.insert(schema.pipelineLockEvents).values({
+    project: projectName,
+    releasedByJobId: releasedByJobId ?? null,
+    reason,
+    emittedAt: Date.now() / 1000,
+  }).execute().catch((e) => console.error('[pipeline-lock] emit event failed:', e));
+}
+
+function maybeDrainPendingReleaseInline(projectName: string): void {
+  if (!getSettings().legacy_pipeline_lock_inline_drain_enabled) return;
+  void drainPendingReleaseAsync(projectName);
 }
 
 /**

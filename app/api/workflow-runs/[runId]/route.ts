@@ -10,6 +10,14 @@
 import { NextResponse } from 'next/server';
 import { Pool } from 'pg';
 import { decodeWorkflowPayload } from '@/lib/workflows/decode-workflow-payload';
+import {
+  clampJson as clampWorkflowJson,
+  readLocalRunFile,
+  readLocalStepFiles,
+  simplifyWorkflowName,
+  toLocalRunSummary,
+  toLocalStepSummary,
+} from '@/lib/workflows/local-world-runs';
 
 interface RunRow {
   id: string;
@@ -51,15 +59,11 @@ function getWorkflowPool(): Pool | null {
 }
 
 function simplifyName(raw: string): string {
-  const parts = raw.split('//');
-  return parts[parts.length - 1] || raw;
+  return simplifyWorkflowName(raw);
 }
 
 function clampJson(value: unknown, maxBytes = 4_000): unknown {
-  if (value == null) return value;
-  const s = JSON.stringify(value);
-  if (s.length <= maxBytes) return value;
-  return { _truncated: true, preview: s.slice(0, maxBytes), originalBytes: s.length };
+  return clampWorkflowJson(value, maxBytes);
 }
 
 export async function GET(
@@ -69,6 +73,10 @@ export async function GET(
   const { runId } = await params;
   if (!runId) {
     return NextResponse.json({ detail: 'runId required' }, { status: 400 });
+  }
+
+  if (process.env.WORKFLOW_TARGET_WORLD === 'local') {
+    return readLocalWorldRunDetail(runId);
   }
 
   const pool = getWorkflowPool();
@@ -133,6 +141,24 @@ export async function GET(
   } catch (err) {
     return NextResponse.json(
       { detail: 'workflow query failed', error: (err as Error).message },
+      { status: 500 },
+    );
+  }
+}
+
+function readLocalWorldRunDetail(runId: string): NextResponse {
+  try {
+    const run = readLocalRunFile(runId);
+    if (!run) {
+      return NextResponse.json({ detail: 'workflow run not found' }, { status: 404 });
+    }
+    return NextResponse.json({
+      run: toLocalRunSummary(run),
+      steps: readLocalStepFiles(runId).map(toLocalStepSummary),
+    });
+  } catch (err) {
+    return NextResponse.json(
+      { detail: 'failed to read local workflow run', error: (err as Error).message },
       { status: 500 },
     );
   }

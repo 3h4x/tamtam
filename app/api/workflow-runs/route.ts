@@ -11,6 +11,15 @@
 import { NextResponse } from 'next/server';
 import { Pool } from 'pg';
 import { decodeWorkflowPayload } from '@/lib/workflows/decode-workflow-payload';
+import {
+  clampJson,
+  listLocalRunFilesNewestFirst,
+  localWorldRunsDir,
+  readLocalRunFile,
+  simplifyWorkflowName,
+  toLocalRunSummary,
+} from '@/lib/workflows/local-world-runs';
+import { existsSync } from 'fs';
 
 interface WorkflowRunRow {
   id: string;
@@ -41,6 +50,14 @@ export async function GET(request: Request): Promise<NextResponse> {
   const { searchParams } = new URL(request.url);
   const limit = Math.min(parseInt(searchParams.get('limit') ?? '50', 10) || 50, 200);
 
+  // When the workflow runtime is using its file-backed local world, the
+  // Postgres workflow.workflow_runs table is empty by design — runs live
+  // as JSON files under data/workflow-data/runs/. Read those instead so
+  // the /workflow-runs UI shows current state regardless of world choice.
+  if (process.env.WORKFLOW_TARGET_WORLD === 'local') {
+    return readLocalWorldRuns(limit);
+  }
+
   const pool = getWorkflowPool();
   if (!pool) {
     return NextResponse.json({
@@ -64,7 +81,7 @@ export async function GET(request: Request): Promise<NextResponse> {
       runs: rows.map((r) => ({
         id: r.id,
         // Strip the loader's "workflow//./lib/…//fnName" mangling for readability.
-        name: simplifyName(r.name),
+        name: simplifyWorkflowName(r.name),
         rawName: r.name,
         status: r.status,
         createdAt: r.created_at.toISOString(),
@@ -106,14 +123,54 @@ function buildMeta() {
   };
 }
 
-function simplifyName(raw: string): string {
-  const parts = raw.split('//');
-  return parts[parts.length - 1] || raw;
-}
+function readLocalWorldRuns(limit: number): NextResponse {
+  const dir = localWorldRunsDir();
+  if (!existsSync(/*turbopackIgnore: true*/ dir)) {
+    return NextResponse.json({
+      runs: [],
+      reason: `local world runs dir not found: ${dir}`,
+      meta: buildMeta(),
+    });
+  }
+  let slice: Array<{ name: string; mtime: number }>;
+  try {
+    slice = listLocalRunFilesNewestFirst(limit);
+  } catch (err) {
+    return NextResponse.json(
+      { runs: [], reason: 'failed to list local runs', detail: (err as Error).message, meta: buildMeta() },
+      { status: 500 },
+    );
+  }
 
-function clampJson(value: unknown, maxBytes = 2_000): unknown {
-  if (value == null) return value;
-  const s = JSON.stringify(value);
-  if (s.length <= maxBytes) return value;
-  return { _truncated: true, preview: s.slice(0, maxBytes), originalBytes: s.length };
+  const runs = slice.map(({ name }) => {
+    try {
+      const raw = readLocalRunFile(name.replace(/\.json$/, ''));
+      if (!raw) throw new Error('run file disappeared while reading');
+      return toLocalRunSummary(raw);
+    } catch (err) {
+      return {
+        id: name.replace(/\.json$/, ''),
+        name: 'unreadable',
+        rawName: '',
+        status: 'unknown',
+        createdAt: new Date(0).toISOString(),
+        startedAt: null,
+        completedAt: null,
+        durationMs: null,
+        input: null,
+        output: null,
+        error: `read failed: ${(err as Error).message}`,
+      };
+    }
+  });
+
+  // Local-world files don't carry a reliable createdAt ordering across
+  // mtimes if the file was rewritten on completion. Resort by createdAt
+  // (newest first) for the final response — falls back to mtime order.
+  runs.sort((a, b) => (b.createdAt > a.createdAt ? 1 : b.createdAt < a.createdAt ? -1 : 0));
+
+  return NextResponse.json({
+    meta: buildMeta(),
+    runs,
+  });
 }
