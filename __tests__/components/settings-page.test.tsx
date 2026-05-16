@@ -291,6 +291,7 @@ describe('SettingsPage', () => {
             legacy_completion_hook_release_after_fix_ci_enabled: 'true',
             legacy_completion_hook_auto_resume_enabled: 'true',
             legacy_pipeline_lock_inline_drain_enabled: 'true',
+            legacy_completion_hook_agent_drain_enabled: 'true',
           },
         })
       }
@@ -304,6 +305,7 @@ describe('SettingsPage', () => {
             legacy_completion_hook_release_after_fix_ci_enabled: 'false',
             legacy_completion_hook_auto_resume_enabled: 'false',
             legacy_pipeline_lock_inline_drain_enabled: 'false',
+            legacy_completion_hook_agent_drain_enabled: 'false',
           },
         })
       }
@@ -321,6 +323,7 @@ describe('SettingsPage', () => {
       expect(findSelectByLabel(container, 'Legacy Release-After-Fix-CI Hook').value).toBe('true')
       expect(findSelectByLabel(container, 'Legacy Auto-Resume Hook').value).toBe('true')
       expect(findSelectByLabel(container, 'Legacy Pipeline Lock Drain').value).toBe('true')
+      expect(findSelectByLabel(container, 'Legacy Agent Queue Drain Hook').value).toBe('true')
       expect(getSaveButton(container).disabled).toBe(true)
     })
 
@@ -329,6 +332,7 @@ describe('SettingsPage', () => {
       setSelectValue(findSelectByLabel(container, 'Legacy Release-After-Fix-CI Hook'), 'false')
       setSelectValue(findSelectByLabel(container, 'Legacy Auto-Resume Hook'), 'false')
       setSelectValue(findSelectByLabel(container, 'Legacy Pipeline Lock Drain'), 'false')
+      setSelectValue(findSelectByLabel(container, 'Legacy Agent Queue Drain Hook'), 'false')
     })
 
     await vi.waitFor(() => {
@@ -342,6 +346,7 @@ describe('SettingsPage', () => {
       expect(findSelectByLabel(container, 'Legacy Release-After-Fix-CI Hook').value).toBe('false')
       expect(findSelectByLabel(container, 'Legacy Auto-Resume Hook').value).toBe('false')
       expect(findSelectByLabel(container, 'Legacy Pipeline Lock Drain').value).toBe('false')
+      expect(findSelectByLabel(container, 'Legacy Agent Queue Drain Hook').value).toBe('false')
       expect(getSaveButton(container).disabled).toBe(true)
     })
 
@@ -353,6 +358,7 @@ describe('SettingsPage', () => {
     expect((patchCall?.[1] as RequestInit).body).toContain('"legacy_completion_hook_release_after_fix_ci_enabled":"false"')
     expect((patchCall?.[1] as RequestInit).body).toContain('"legacy_completion_hook_auto_resume_enabled":"false"')
     expect((patchCall?.[1] as RequestInit).body).toContain('"legacy_pipeline_lock_inline_drain_enabled":"false"')
+    expect((patchCall?.[1] as RequestInit).body).toContain('"legacy_completion_hook_agent_drain_enabled":"false"')
 
     unmount()
   })

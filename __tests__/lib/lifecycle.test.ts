@@ -82,6 +82,28 @@ async function applyDdl(handle: TestDbHandle): Promise<void> {
       value text NOT NULL
     )
   `));
+  await handle.db.execute(sql.raw(`
+    CREATE TABLE IF NOT EXISTS job_completion_events (
+      id serial PRIMARY KEY,
+      job_id text NOT NULL,
+      kind text NOT NULL,
+      exit_code integer,
+      project text NOT NULL,
+      release_id text,
+      gh_issue_number integer,
+      emitted_at double precision NOT NULL,
+      consumed_by text,
+      consumed_at double precision
+    )
+  `));
+  await handle.db.execute(sql.raw(`
+    CREATE UNIQUE INDEX IF NOT EXISTS job_completion_events_job_id
+    ON job_completion_events (job_id)
+  `));
+  await handle.db.execute(sql.raw(`
+    CREATE INDEX IF NOT EXISTS job_completion_events_unconsumed
+    ON job_completion_events (consumed_by, emitted_at)
+  `));
 }
 
 // ─── Hoisted mock bag ────────────────────────────────────────────────────────
@@ -295,7 +317,7 @@ async function resetTestState(): Promise<void> {
   jobsCache.clear();
   // Single TRUNCATE — fast on small tables, single round-trip to PGlite.
   await sharedHandle.db.execute(
-    sql.raw('TRUNCATE jobs, recommendations, gh_issues_cache, settings'),
+    sql.raw('TRUNCATE jobs, recommendations, gh_issues_cache, settings, job_completion_events'),
   );
   applyDefaultMocks();
 }
