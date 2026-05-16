@@ -108,10 +108,25 @@ export async function releaseOrchestratorWorkflow(
     // exit code. For dispatch failures, we have no successful chain to point
     // at — propagate exit 1 so the release row goes red rather than
     // inheriting an exit-0 from a successful prior step.
-    const lastExitCode =
-      dispatch.reason === 'terminal'
-        ? waited.job.exitCode ?? 0
-        : 1;
+    // Special case: `mark-dod` failure is documented non-fatal in PIPELINE.md
+    // (its job is to tick checkboxes on the issue/PR; a failure doesn't
+    // invalidate the push that already landed). The most common cause of
+    // mark-dod exit != 0 is a PM2 restart killing the inline mark-dod
+    // process with exit -1 — the push had succeeded a step earlier and the
+    // work is on origin. Coerce to exit 0 so the release row reflects the
+    // release's actual outcome instead of cosmetically marking a successful
+    // ship as failed.
+    let lastExitCode: number;
+    if (dispatch.reason === 'terminal') {
+      const rawExit = waited.job.exitCode ?? 0;
+      if (waited.job.kind === 'mark-dod' && rawExit !== 0) {
+        lastExitCode = 0;
+      } else {
+        lastExitCode = rawExit;
+      }
+    } else {
+      lastExitCode = 1;
+    }
     // `dispatch.phase` is the next phase that would have run for
     // dispatch_failed/missing_context, not a real terminal phase. Coerce to
     // 'abort' so finalizeReleaseStep takes the aborted-release path.
