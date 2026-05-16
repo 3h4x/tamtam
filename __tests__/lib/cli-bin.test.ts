@@ -80,6 +80,8 @@ function makeSettings(overrides: Partial<TamTamConfig> = {}): TamTamConfig {
     outcome_classifier_model: 'gemma3:4b',
     project_sweep_enabled: false,
     legacy_completion_hook_release_after_run_enabled: true,
+    legacy_completion_hook_release_after_fix_ci_enabled: true,
+    legacy_completion_hook_auto_resume_enabled: true,
     ...overrides,
   };
 }

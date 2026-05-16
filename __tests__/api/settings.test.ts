@@ -334,10 +334,14 @@ describe('settings API', () => {
       expect(data.settings.project_sweep_enabled).toBe('true');
     });
 
-    it('updates the legacy release-after-run hook kill switch and returns it canonically', async () => {
+    it('updates legacy completion hook kill switches and returns them canonically', async () => {
       const request = new NextRequest('http://localhost/api/settings', {
         method: 'PATCH',
-        body: JSON.stringify({ legacy_completion_hook_release_after_run_enabled: false }),
+        body: JSON.stringify({
+          legacy_completion_hook_release_after_run_enabled: false,
+          legacy_completion_hook_release_after_fix_ci_enabled: false,
+          legacy_completion_hook_auto_resume_enabled: false,
+        }),
       });
       const response = await PATCH(request);
       expect(response.status).toBe(200);
@@ -345,13 +349,19 @@ describe('settings API', () => {
       const rows = await sharedHandle.db.select().from(schema.settings);
       const map = Object.fromEntries(rows.map((r) => [r.key, r.value]));
       expect(map.legacy_completion_hook_release_after_run_enabled).toBe('false');
+      expect(map.legacy_completion_hook_release_after_fix_ci_enabled).toBe('false');
+      expect(map.legacy_completion_hook_auto_resume_enabled).toBe('false');
 
       const patchData = await response.json();
       expect(patchData.settings.legacy_completion_hook_release_after_run_enabled).toBe('false');
+      expect(patchData.settings.legacy_completion_hook_release_after_fix_ci_enabled).toBe('false');
+      expect(patchData.settings.legacy_completion_hook_auto_resume_enabled).toBe('false');
 
       const getResponse = await GET();
       const getData = await getResponse.json();
       expect(getData.settings.legacy_completion_hook_release_after_run_enabled).toBe('false');
+      expect(getData.settings.legacy_completion_hook_release_after_fix_ci_enabled).toBe('false');
+      expect(getData.settings.legacy_completion_hook_auto_resume_enabled).toBe('false');
     });
 
     it('rejects invalid retrieval settings', async () => {

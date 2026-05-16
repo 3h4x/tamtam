@@ -470,8 +470,12 @@ async function runCompletionHooksInner(job: JobData): Promise<void> {
     // event in the log + non-zero exit). The most common trigger is a PM2
     // restart killing the child process group before Claude could finish a
     // long turn. Fire-and-forget; capped at 2 attempts via contextMeta.
+    // Gated on a kill switch so the durable job-completion router can take
+    // over once the legacy inline path is retired.
     void (async () => {
       try {
+        const { getSettings } = await import('@/lib/shared/config');
+        if (!getSettings().legacy_completion_hook_auto_resume_enabled) return;
         const { maybeAutoResume } = await import('@/lib/jobs/auto-resume');
         await maybeAutoResume(job);
       } catch (err) {
@@ -1325,33 +1329,17 @@ async function runCompletionHooksInner(job: JobData): Promise<void> {
     }
   }
 
-  // Release-after-fix-ci: a successful CI fix has uncommitted local changes
-  // (the fix-ci prompt instructs Claude not to commit). Trigger the release
-  // pipeline so test → review → commit → push lands the fix and re-runs CI;
-  // otherwise the user clicks "Fix CI", the change sits dirty, and broken CI
-  // never recovers.
-  if (job.kind === 'fix-ci' && job.exitCode === 0) {
-    try {
-      const { dispatchReleaseWorkflow } = await import('@/lib/workflows/dispatch-release');
-      const r = await dispatchReleaseWorkflow(job.project, { queueIfBlocked: true, sourceJobId: job.id });
-      if (r.ok) {
-        if ('status' in r && r.status === 'queued') {
-          console.log(`[release-after-fix-ci] queued release for ${job.project} after fix-ci ${job.id}`);
-        } else {
-          console.log(`[release-after-fix-ci] triggered release ${r.jobId} for ${job.project} after fix-ci ${job.id}`);
-        }
-      } else {
-        const { shouldKeepPendingRelease, setPendingRelease } = await import('@/lib/pipeline/pending-release');
-        if (shouldKeepPendingRelease(r)) {
-          setPendingRelease(job.project);
-          console.log(`[release-after-fix-ci] queued for ${job.project} (will drain when lock releases): ${r.detail}`);
-        } else {
-          console.log(`[release-after-fix-ci] no release for ${job.project}: ${r.detail}`);
-        }
-      }
-    } catch (e) {
-      console.log(`[release-after-fix-ci] error for ${job.project}:`, e);
+  // Release-after-fix-ci: extracted to lib/workflows/triggers/release-after-fix-ci.ts.
+  // The legacy hook stays gated on a kill switch so we can flip behavior to
+  // the workflow-driven event router without redeploying.
+  try {
+    const { getSettings } = await import('@/lib/shared/config');
+    if (getSettings().legacy_completion_hook_release_after_fix_ci_enabled) {
+      const { dispatchReleaseAfterFixCi } = await import('@/lib/workflows/triggers/release-after-fix-ci');
+      await dispatchReleaseAfterFixCi(job);
     }
+  } catch (e) {
+    console.log(`[release-after-fix-ci] error for ${job.project}:`, e);
   }
 
   // Release-after-run: extracted to lib/workflows/triggers/release-after-run.ts.

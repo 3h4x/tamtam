@@ -1565,6 +1565,40 @@ File-backed prompt.`);
     expect(fullPrompt).not.toContain('nonexistent');
   });
 
+  describe('awaiting_pr_merge gate', () => {
+    it('skips scheduled fires when a pr-wait job is in flight for the project', async () => {
+      mocks.listJobs.mockReset().mockReturnValue([
+        { id: 'proj1-pr-wait-1', project: 'proj1', kind: 'pr-wait', finishedAt: null },
+      ]);
+      await insertAgent({ schedule: '1h' });
+      const req = new NextRequest('http://localhost/api/agents/agent-123/run', {
+        method: 'POST',
+        headers: { 'x-tamtam-trigger': 'schedule' },
+        body: JSON.stringify({ prompt: 'do task' }),
+      });
+      const res = await POST(req, { params: Promise.resolve({ agentId: 'agent-123' }) });
+      expect(res.status).toBe(202);
+      const data = await res.json();
+      expect(data.code).toBe('awaiting_pr_merge');
+      expect(data.detail).toMatch(/pr-wait in flight/);
+      expect(mocks.startJob).not.toHaveBeenCalled();
+    });
+
+    it('still allows manual (non-schedule) runs even when pr-wait is in flight', async () => {
+      mocks.listJobs.mockReset().mockReturnValue([
+        { id: 'proj1-pr-wait-1', project: 'proj1', kind: 'pr-wait', finishedAt: null },
+      ]);
+      await insertAgent();
+      const req = new NextRequest('http://localhost/api/agents/agent-123/run', {
+        method: 'POST',
+        body: JSON.stringify({ prompt: 'do task' /* no triggeredBy => manual */ }),
+      });
+      const res = await POST(req, { params: Promise.resolve({ agentId: 'agent-123' }) });
+      // Manual runs pass this particular gate; downstream gates may still kick in.
+      expect(res.status).not.toBe(202);
+    });
+  });
+
   describe('dirty worktree gate', () => {
     it('rejects with 409 dirty_worktree when count >= threshold', async () => {
       // Replaces the previous `vi.resetModules()` + full mock reinstall with a

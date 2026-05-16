@@ -9,27 +9,48 @@ import * as schema from '@/lib/db/schema';
 async function withTestDbAndStubs(opts: {
   dispatchedFor?: (jobId: string) => boolean;
   legacyFlagEnabled?: boolean;
+  legacyFixCiFlagEnabled?: boolean;
+  legacyAutoResumeFlagEnabled?: boolean;
+  getJobKind?: string;
+  getJobExitCode?: number;
 } = {}) {
   const handle = await createTestPgDb();
   const dispatchReleaseAfterRun = vi.fn().mockImplementation(async (job: { id: string }) => ({
     dispatched: opts.dispatchedFor ? opts.dispatchedFor(job.id) : true,
     reason: 'stub',
   }));
+  const dispatchReleaseAfterFixCi = vi.fn().mockImplementation(async (job: { id: string }) => ({
+    dispatched: opts.dispatchedFor ? opts.dispatchedFor(job.id) : true,
+    reason: 'stub',
+  }));
+  const maybeAutoResume = vi.fn().mockResolvedValue(undefined);
 
   vi.doMock('@/lib/db', () => ({ db: handle.db, schema }));
   vi.doMock('@/lib/jobs/job-storage', () => ({
-    getJob: (id: string) => ({ id, kind: 'run', project: 'proj', exitCode: 0, ghIssueNumber: null }),
+    getJob: (id: string) => ({
+      id,
+      kind: opts.getJobKind ?? 'run',
+      project: 'proj',
+      exitCode: opts.getJobExitCode ?? 0,
+      ghIssueNumber: null,
+    }),
   }));
   vi.doMock('@/lib/jobs/kinds', async () => {
     const actual = await vi.importActual<typeof import('@/lib/jobs/kinds')>('@/lib/jobs/kinds');
     return actual;
   });
   vi.doMock('@/lib/shared/config', () => ({
-    getSettings: () => ({ legacy_completion_hook_release_after_run_enabled: opts.legacyFlagEnabled ?? false }),
+    getSettings: () => ({
+      legacy_completion_hook_release_after_run_enabled: opts.legacyFlagEnabled ?? false,
+      legacy_completion_hook_release_after_fix_ci_enabled: opts.legacyFixCiFlagEnabled ?? false,
+      legacy_completion_hook_auto_resume_enabled: opts.legacyAutoResumeFlagEnabled ?? false,
+    }),
   }));
   vi.doMock('@/lib/workflows/triggers/release-after-run', () => ({ dispatchReleaseAfterRun }));
+  vi.doMock('@/lib/workflows/triggers/release-after-fix-ci', () => ({ dispatchReleaseAfterFixCi }));
+  vi.doMock('@/lib/jobs/auto-resume', () => ({ maybeAutoResume }));
 
-  return { handle, dispatchReleaseAfterRun };
+  return { handle, dispatchReleaseAfterRun, dispatchReleaseAfterFixCi, maybeAutoResume };
 }
 
 async function insertEvent(handle: Awaited<ReturnType<typeof createTestPgDb>>, overrides: Partial<typeof schema.jobCompletionEvents.$inferInsert> = {}) {
@@ -104,6 +125,60 @@ describe('consumeJobCompletionEvents', () => {
     expect(result.skipped).toBe(1);
     const rows = await handle.db.select().from(schema.jobCompletionEvents);
     expect(rows[0].consumedBy).toBe('job-completion-router');
+    await handle[Symbol.asyncDispose]();
+  });
+
+  it('routes failed run/agent events to auto-resume when its kill switch is off', async () => {
+    const { handle, maybeAutoResume, dispatchReleaseAfterRun } = await withTestDbAndStubs({ getJobExitCode: 1 });
+    await insertEvent(handle, { jobId: 'proj-run-fail', exitCode: 1 });
+
+    const { consumeJobCompletionEvents } = await import('@/lib/workflows/triggers/job-completion-router');
+    await consumeJobCompletionEvents();
+
+    expect(maybeAutoResume).toHaveBeenCalledOnce();
+    expect(dispatchReleaseAfterRun).not.toHaveBeenCalled();
+    await handle[Symbol.asyncDispose]();
+  });
+
+  it('skips auto-resume routing while its legacy hook flag is on', async () => {
+    const { handle, maybeAutoResume } = await withTestDbAndStubs({
+      getJobExitCode: 1,
+      legacyAutoResumeFlagEnabled: true,
+    });
+    await insertEvent(handle, { jobId: 'proj-run-fail-legacy', exitCode: 1 });
+
+    const { consumeJobCompletionEvents } = await import('@/lib/workflows/triggers/job-completion-router');
+    await consumeJobCompletionEvents();
+
+    expect(maybeAutoResume).not.toHaveBeenCalled();
+    await handle[Symbol.asyncDispose]();
+  });
+
+  it('routes fix-ci events to dispatchReleaseAfterFixCi when its kill switch is off', async () => {
+    const { handle, dispatchReleaseAfterFixCi, dispatchReleaseAfterRun } = await withTestDbAndStubs({ getJobKind: 'fix-ci' });
+    await insertEvent(handle, { jobId: 'proj-fix-ci-1', kind: 'fix-ci' });
+
+    const { consumeJobCompletionEvents } = await import('@/lib/workflows/triggers/job-completion-router');
+    const result = await consumeJobCompletionEvents();
+
+    expect(result.routed).toBe(1);
+    expect(dispatchReleaseAfterFixCi).toHaveBeenCalledOnce();
+    expect(dispatchReleaseAfterRun).not.toHaveBeenCalled();
+    await handle[Symbol.asyncDispose]();
+  });
+
+  it('skips fix-ci dispatch while its legacy hook flag is on', async () => {
+    const { handle, dispatchReleaseAfterFixCi } = await withTestDbAndStubs({
+      getJobKind: 'fix-ci',
+      legacyFixCiFlagEnabled: true,
+    });
+    await insertEvent(handle, { jobId: 'proj-fix-ci-skip', kind: 'fix-ci' });
+
+    const { consumeJobCompletionEvents } = await import('@/lib/workflows/triggers/job-completion-router');
+    const result = await consumeJobCompletionEvents();
+
+    expect(dispatchReleaseAfterFixCi).not.toHaveBeenCalled();
+    expect(result.routed).toBe(0);
     await handle[Symbol.asyncDispose]();
   });
 
