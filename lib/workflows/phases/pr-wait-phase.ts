@@ -297,4 +297,22 @@ async function finalizePrWaitStep(
   appendLogForJob(jobId, `\n# pr-wait done — ${reason}\n`);
   const job = getJob(jobId);
   if (job) await markDone(job, exitCode);
+
+  // Auto-dispatch fix-ci when remote CI checks fail on an open PR. Without
+  // this the release ends at a broken PR and no further work happens until
+  // a human clicks "Fix CI"; the user's stated goal is "go till merge".
+  // fix-ci's existing release-after-fix-ci hook chains a new release on
+  // success, closing the loop.
+  if (reason === 'checks_failed' && job) {
+    try {
+      const base = process.env.TAMTAM_BASE_URL || 'http://localhost:1337';
+      const url = `${base}/api/projects/by-project/${encodeURIComponent(job.project)}/fix-ci`;
+      const res = await fetch(url, { method: 'POST' });
+      const detail = await res.text().catch(() => '');
+      appendLogForJob(jobId, `\n# auto fix-ci dispatch — ${res.status} ${detail.slice(0, 200)}\n`);
+    } catch (e) {
+      const msg = e instanceof Error ? e.message : String(e);
+      appendLogForJob(jobId, `\n# auto fix-ci dispatch failed: ${msg}\n`);
+    }
+  }
 }

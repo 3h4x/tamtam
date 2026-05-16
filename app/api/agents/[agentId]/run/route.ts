@@ -250,6 +250,39 @@ export async function POST(
       }
     }
 
+    // Scheduled fires must not pile work onto an open PR. While the project
+    // is off the default branch or a release-pipeline `pr-wait` is in
+    // flight, refuse scheduled runs (manual `triggeredBy` still goes
+    // through — the user explicitly asked for it). The cron task
+    // re-enqueues on its own schedule, so the queue keeps ticking; when
+    // the PR merges and HEAD returns to default, the next fire dispatches.
+    if (triggeredBy === 'schedule' && !readOnly) {
+      const prWaitInFlight = listJobs().some(j =>
+        j.project === agent.project && j.kind === 'pr-wait' && j.finishedAt === null);
+      let branchReason: string | null = null;
+      if (!prWaitInFlight) {
+        try {
+          const projPath = resolveProjectPath(agent.project);
+          if (projPath) {
+            const { decidePrContext } = await import('@/lib/pipeline/pr-context');
+            const pr = await decidePrContext(projPath);
+            if (pr.shouldOpenPr) branchReason = `on non-default branch '${pr.currentBranch}'`;
+          }
+        } catch (err) {
+          console.warn(`[agent-run-route] branch state check failed for ${agent.project}:`, err);
+        }
+      }
+      if (prWaitInFlight || branchReason) {
+        const detail = prWaitInFlight
+          ? `Scheduled agent '${agent.name}' skipped — pr-wait in flight for ${agent.project} (awaiting merge)`
+          : `Scheduled agent '${agent.name}' skipped — ${branchReason} for ${agent.project}`;
+        return NextResponse.json(
+          { status: 'skipped', code: 'awaiting_pr_merge', detail, agent: agent.name },
+          { status: 202 },
+        );
+      }
+    }
+
     // Don't start an agent on top of a large pile of uncommitted changes.
     // Agent edits would tangle with WIP and either get committed by mistake
     // (auto-commit pipelines) or trigger noisy review/fix loops over code the

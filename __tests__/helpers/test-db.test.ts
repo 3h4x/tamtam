@@ -29,6 +29,7 @@ describe('test-db helper', () => {
     expect(names).toContain('settings');
     expect(names).toContain('agents');
     expect(names).toContain('retrieval_chunks');
+    expect(names).toContain('job_completion_events');
     const ext = await fullDb.db.execute(
       sql`select extname from pg_extension where extname = 'vector'`,
     );
