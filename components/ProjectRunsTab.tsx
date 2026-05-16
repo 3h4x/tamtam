@@ -3,7 +3,7 @@
 import { Fragment, useState, useEffect, useMemo, useRef } from 'react'
 import Link from 'next/link'
 import { useRouter } from 'next/navigation'
-import { fetchJobs, releaseProject, pushProject } from '@/lib/client-api'
+import { fetchJobs, releaseProject, pushProject, continueJob } from '@/lib/client-api'
 import type { JobInfo } from '@/lib/client-api'
 import { Button } from '@/components/ui/Button'
 import {
@@ -106,6 +106,45 @@ export function ProjectRunsTab({ projectName, jobsPaused = false }: ProjectRunsT
   const [releaseActionState, setReleaseActionState] = useState<{ jobId: string; label: string } | null>(null)
   const [stepRetryState, setStepRetryState] = useState<{ jobId: string; label: string } | null>(null)
   const [stopState, setStopState] = useState<{ jobId: string; label: string } | null>(null)
+  const [continueState, setContinueState] = useState<{ jobId: string; label: string } | null>(null)
+
+  // Window after which a --resume against the source job's session is
+  // unsafe — model context gets compacted and the system/skills/docs that
+  // were only injected on first invocation aren't re-attached. Mirrors
+  // MAX_AGE_MS in app/api/jobs/[jobId]/continue/route.ts.
+  const CONTINUE_MAX_AGE_MS = 30 * 60 * 1000
+
+  const continueTargetFor = (e: Entry): string | null => {
+    if (e.status !== 'done' && e.status !== 'aborted') return null
+    if (!e.navSessionId) return null
+    if (!(e.kind === 'run' || e.kind.startsWith('agent:'))) return null
+    if (e.finishedAt === null) return null
+    if (Date.now() - e.finishedAt * 1000 > CONTINUE_MAX_AGE_MS) return null
+    // Surface Continue on non-zero exits, OR on clean exits when the outcome
+    // classifier flagged the run as unfinished / blocked on a clarifying
+    // question (those stop without an error code but still need a prod).
+    const failed = e.exitCode === null || e.exitCode !== 0
+    const classifierWantsContinue =
+      e.outcomeVerdict === 'needs_continue' || e.outcomeVerdict === 'asked_question'
+    if (!failed && !classifierWantsContinue) return null
+    return e.navJobId
+  }
+
+  const continueRun = async (e: Entry) => {
+    const targetJobId = continueTargetFor(e)
+    if (!targetJobId || jobsPaused) return
+    setContinueState({ jobId: targetJobId, label: 'continuing' })
+    try {
+      await continueJob(targetJobId)
+      await loadJobs()
+    } catch (error) {
+      console.error('[history] continue failed', error)
+      setContinueState({ jobId: targetJobId, label: 'failed' })
+      setTimeout(() => setContinueState((prev) => (prev?.jobId === targetJobId ? null : prev)), 2500)
+      return
+    }
+    setContinueState(null)
+  }
 
   const stopTargetFor = (e: Entry): { jobId: string; mode: 'job' | 'release' } | null => {
     if (e.key.startsWith('vgroup:')) return null
@@ -424,7 +463,28 @@ export function ProjectRunsTab({ projectName, jobsPaused = false }: ProjectRunsT
         {stopActive ? stopState?.label : 'Stop'}
       </Button>
     ) : null
-    const buttons = [stopButton, stepRetryButton, releaseButton].filter(Boolean)
+    const continueTargetJobId = continueTargetFor(e)
+    const continueButton = continueTargetJobId ? (
+      (() => {
+        const active = continueState?.jobId === continueTargetJobId
+        return (
+          <Button
+            type="button"
+            variant="primary"
+            size="sm"
+            className="h-7 px-2 text-[11px]"
+            disabled={jobsPaused || active}
+            onClick={() => continueRun(e)}
+            title={jobsPaused
+              ? 'Jobs are paused globally. Resume jobs to continue this run.'
+              : 'Resume the previous CLI session and prod the agent to keep going'}
+          >
+            {active ? continueState?.label : 'Continue'}
+          </Button>
+        )
+      })()
+    ) : null
+    const buttons = [stopButton, continueButton, stepRetryButton, releaseButton].filter(Boolean)
     if (buttons.length === 0) return null
     if (buttons.length === 1) return buttons[0]
     return <div className="flex flex-wrap items-center justify-end gap-1.5">{buttons}</div>

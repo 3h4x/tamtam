@@ -157,6 +157,8 @@ describe('config', () => {
         retrieval_ollama_url: 'http://localhost:11434',
         retrieval_embedding_model: 'nomic-embed-text',
         retrieval_context_limit: 5,
+        outcome_classifier_enabled: false,
+        outcome_classifier_model: 'gemma3:4b',
         retrieval_score_threshold: 0.8,
         retrieval_manage_ollama: true,
       });

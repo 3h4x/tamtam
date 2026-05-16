@@ -264,6 +264,10 @@ export interface Entry {
   turnEntries?: Entry[]
   parentJobId: string | null
   parentLabel: string | null
+  // Verdict from the local-LLM outcome classifier (see lib/jobs/outcome-classifier.ts).
+  // Populated on finished `run`/`agent:*` jobs when classification is enabled.
+  // Drives Continue button visibility on otherwise-successful runs.
+  outcomeVerdict?: OutcomeVerdict | null
   // Every original job id that collapsed into this entry (session-grouped
   // turns share an entry). Used by `groupReleaseChildren` to resolve
   // `parent_job_id` edges when the parent might itself be a multi-turn
@@ -415,6 +419,18 @@ function modelFromContext(ctx: string | null | undefined): string | null {
   } catch { return null }
 }
 
+export type OutcomeVerdict = 'done' | 'needs_continue' | 'asked_question'
+
+export function outcomeVerdictFromContext(ctx: string | null | undefined): OutcomeVerdict | null {
+  if (!ctx) return null
+  try {
+    const m = JSON.parse(ctx)
+    const v = m?.outcomeClassification?.verdict
+    if (v === 'done' || v === 'needs_continue' || v === 'asked_question') return v
+    return null
+  } catch { return null }
+}
+
 function parentLabelFor(parentJob: JobInfo | undefined): string | null {
   if (!parentJob) return null
   const bucket = bucketOf(parentJob.kind)
@@ -522,6 +538,7 @@ export function buildEntries(jobs: JobInfo[]): Entry[] {
       promptBytes: j.prompt_bytes ?? null,
       parentJobId: j.parent_job_id ?? null,
       parentLabel: j.parent_job_id ? parentLabelFor(byId.get(j.parent_job_id)) : null,
+      outcomeVerdict: outcomeVerdictFromContext(j.context_meta),
       _jobIds: [j.id],
     }
     if (canSessionMerge) {
@@ -578,6 +595,7 @@ function makeTurnEntry(j: JobInfo, bucket: KindBucket, byId: Map<string, JobInfo
     promptBytes: j.prompt_bytes ?? null,
     parentJobId: j.parent_job_id ?? null,
     parentLabel: j.parent_job_id ? parentLabelFor(byId.get(j.parent_job_id)) : null,
+    outcomeVerdict: outcomeVerdictFromContext(j.context_meta),
     _jobIds: [j.id],
   }
 }
