@@ -359,7 +359,12 @@ export async function reapOrphanReleases(): Promise<void> {
         if (attempts < MAX_BOOT_RESUMES) {
           const bump = bumpBootRecoveryAttempts(job.contextMeta);
           try {
-            updateJob({ ...job, contextMeta: bump.serialized });
+            // Mutate the cached job object directly so a later markDone
+            // (which saves the same cached object) doesn't overwrite the
+            // boot-recovery metadata we just persisted. `updateJob` only
+            // saves the passed object — it doesn't refresh the cache.
+            job.contextMeta = bump.serialized;
+            updateJob(job);
           } catch (err) {
             console.error(`[boot] failed to persist bootRecoveryAttempts for ${job.id}:`, err);
           }
@@ -377,12 +382,12 @@ export async function reapOrphanReleases(): Promise<void> {
           }
         } else {
           // Budget exhausted: record stopReason on the release meta-job's
-          // contextMeta before reaping so the trace shows why.
+          // contextMeta before reaping so the trace shows why. Mutate the
+          // cached object so the subsequent markDone(job, -1) preserves
+          // the stopReason.
           try {
-            updateJob({
-              ...job,
-              contextMeta: setStopReason(job.contextMeta, `exceeded boot-recovery attempts (${MAX_BOOT_RESUMES})`),
-            });
+            job.contextMeta = setStopReason(job.contextMeta, `exceeded boot-recovery attempts (${MAX_BOOT_RESUMES})`);
+            updateJob(job);
           } catch (err) {
             console.error(`[boot] failed to persist stopReason for ${job.id}:`, err);
           }
@@ -486,7 +491,12 @@ export async function registerNode(): Promise<void> {
     console.error('[boot] issue-cruncher prerequisite backfill failed:', err);
   }
   void backfillVerdicts();
-  void reapAbandonedInlineJobs();
+  const inlineReapPromise = reapAbandonedInlineJobs();
+  if (process.env.VITEST || process.env.NODE_ENV === 'test') {
+    await inlineReapPromise;
+  } else {
+    void inlineReapPromise;
+  }
   // reapOrphanReleases + drainBootRecoveryWork must NOT run until the
   // workflow world has finished starting and re-enqueued its persisted
   // runs. A fixed setTimeout(8000) was insufficient because
@@ -512,7 +522,12 @@ export async function registerNode(): Promise<void> {
   // One-shot probe at boot so we don't wait up to 30s for the first
   // interval tick to detect a Claude CLI process that hung before the
   // restart, or a release that already crossed its deadline.
-  void runProbeSweep();
+  const probeSweepPromise = runProbeSweep();
+  if (process.env.VITEST || process.env.NODE_ENV === 'test') {
+    await probeSweepPromise;
+  } else {
+    void probeSweepPromise;
+  }
 
   // Start Ollama via PM2 when retrieval is enabled
   try {

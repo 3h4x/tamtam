@@ -1,5 +1,6 @@
 import type { StartTestResult } from '@/lib/pipeline/start-test';
 import type { WaitForJobResult } from '@/lib/workflows/wait-for-job';
+import { safeStartOrchestrator } from '@/lib/workflows/safe-start-orchestrator';
 
 // Plain test phase workflow. It intentionally reuses the direct test runner
 // instead of buffering command output in the workflow process, so test jobs
@@ -71,6 +72,5 @@ async function dispatchOrchestratorTickStep(
   releaseJobId: string,
 ): Promise<void> {
   'use step';
-  const { safeStartOrchestrator } = await import('@/lib/workflows/safe-start-orchestrator');
   await safeStartOrchestrator(jobId, projectName, releaseJobId, 'pnpm-test-phase');
 }

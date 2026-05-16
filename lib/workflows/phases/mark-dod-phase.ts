@@ -24,6 +24,7 @@ import type {
   MarkDodClaudeVerifyResult,
   MarkDodResult,
 } from '@/lib/workflows/phases/mark-dod-impl';
+import { safeStartOrchestrator } from '@/lib/workflows/safe-start-orchestrator';
 
 export type MarkDodPhaseResult =
   | {
@@ -181,7 +182,6 @@ async function dispatchOrchestratorTickStep(
 ): Promise<void> {
   'use step';
   if (!jobId) return;
-  const { safeStartOrchestrator } = await import('@/lib/workflows/safe-start-orchestrator');
   await safeStartOrchestrator(jobId, projectName, releaseJobId, 'mark-dod-phase');
 }
 

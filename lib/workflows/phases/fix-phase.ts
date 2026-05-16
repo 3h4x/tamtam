@@ -9,6 +9,7 @@
 
 import type { StartFixResult } from '@/lib/pipeline/start-fix';
 import type { WaitForJobResult } from '@/lib/workflows/wait-for-job';
+import { safeStartOrchestrator } from '@/lib/workflows/safe-start-orchestrator';
 
 export type FixPhaseResult =
   | {
@@ -88,6 +89,5 @@ async function dispatchOrchestratorTickStep(
   releaseJobId: string,
 ): Promise<void> {
   'use step';
-  const { safeStartOrchestrator } = await import('@/lib/workflows/safe-start-orchestrator');
   await safeStartOrchestrator(jobId, projectName, releaseJobId, 'fix-phase');
 }

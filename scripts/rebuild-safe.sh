@@ -61,13 +61,25 @@ unpause_jobs() {
 
 # Count in-flight jobs whose mid-flight termination would lose work.
 # pr-wait is excluded because the runtime resumes it on boot from
-# contextMeta; killing it mid-poll is recoverable. Also filter on
-# `status='running'` AND `finished_at IS NULL` — `/api/jobs?running=1`
-# currently leaks finished rows whose probe sweep hasn't reconciled
-# the running list yet.
+# contextMeta; killing it mid-poll is recoverable.
+#
+# Filter contract: `/api/jobs?status=running` is the documented filter
+# (route reads `searchParams.get('status')`). The legacy `?running=1`
+# query was a no-op — the route ignored it and returned every job,
+# making the drain check always see "0 blocking" and the rebuild kill
+# active work. We also page the response to keep the payload small.
+#
+# Fail closed: on any curl/python error, return a non-zero sentinel so
+# the drain loop keeps waiting (vs. the old behavior that treated API
+# failure as "0 running" and proceeded to restart immediately).
 count_blocking_jobs() {
-  curl -sf "$BASE_URL/api/jobs?running=1" 2>/dev/null \
-    | python3 -c "
+  local body
+  if ! body=$(curl -sf "$BASE_URL/api/jobs?status=running&limit=200" 2>/dev/null); then
+    # API unreachable / non-200 — treat as still draining.
+    echo 1
+    return
+  fi
+  printf '%s' "$body" | python3 -c "
 import json, sys
 try:
   d = json.load(sys.stdin)
@@ -75,15 +87,16 @@ try:
   blocking_kinds = {'test','review','fix','commit','push','mark-dod','run','fix-ci'}
   n = 0
   for r in rows:
-    if r.get('status') != 'running': continue
     if r.get('finished_at') is not None: continue
     k = r.get('kind', '')
     if k in blocking_kinds or k.startswith('agent:'):
       n += 1
   print(n)
 except Exception:
-  print(0)
-" 2>/dev/null || echo 0
+  # JSON parse / structure error — fail closed: report 1 so the
+  # drain loop keeps polling instead of restarting blind.
+  print(1)
+"
 }
 
 PAUSED=0

@@ -402,13 +402,11 @@ describe('instrumentation', () => {
         }),
       };
 
-      const updateJobMock = vi.fn((updated: Record<string, unknown>) => {
-        const id = updated.id as string;
-        const prev = byId.get(id);
-        if (prev) {
-          Object.assign(prev, updated);
-        }
-      });
+      // Don't merge into the cached object — production `updateJob` only
+      // saves the passed object, it doesn't refresh the cache. The boot
+      // recovery code must mutate the cached object itself; this mock
+      // catches regressions to that contract.
+      const updateJobMock = vi.fn();
       const safeStartOrchestratorMock = vi.fn().mockResolvedValue(true);
 
       const storageMock = {
