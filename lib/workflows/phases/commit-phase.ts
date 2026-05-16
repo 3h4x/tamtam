@@ -80,11 +80,6 @@ async function dispatchOrchestratorTickStep(
 ): Promise<void> {
   'use step';
   if (!jobId) return;
-  try {
-    const { start } = await import('workflow/api');
-    const { releaseOrchestratorWorkflow } = await import('@/lib/workflows/release-orchestrator');
-    await start(releaseOrchestratorWorkflow, [jobId, { projectName, parentJobId: releaseJobId }]);
-  } catch (err) {
-    console.error('[commit-phase] failed to re-dispatch orchestrator:', err);
-  }
+  const { safeStartOrchestrator } = await import('@/lib/workflows/safe-start-orchestrator');
+  await safeStartOrchestrator(jobId, projectName, releaseJobId, 'commit-phase');
 }
