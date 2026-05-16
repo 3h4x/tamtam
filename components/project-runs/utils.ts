@@ -268,6 +268,11 @@ export interface Entry {
   // Populated on finished `run`/`agent:*` jobs when classification is enabled.
   // Drives Continue button visibility on otherwise-successful runs.
   outcomeVerdict?: OutcomeVerdict | null
+  // When a review verdict was DO NOT SHIP / NEEDS-ATTENTION-exhausted and
+  // the orchestrator filed a follow-up GitHub issue, these carry the audit
+  // link so the History row can show "→ filed #N".
+  followupIssueUrl?: string | null
+  followupIssueNumber?: number | null
   // Every original job id that collapsed into this entry (session-grouped
   // turns share an entry). Used by `groupReleaseChildren` to resolve
   // `parent_job_id` edges when the parent might itself be a multi-turn
@@ -431,6 +436,19 @@ export function outcomeVerdictFromContext(ctx: string | null | undefined): Outco
   } catch { return null }
 }
 
+export function followupIssueFromContext(
+  ctx: string | null | undefined,
+): { url: string; number: number | null } | null {
+  if (!ctx) return null
+  try {
+    const m = JSON.parse(ctx)
+    const url = typeof m?.followupIssueUrl === 'string' ? m.followupIssueUrl : null
+    if (!url) return null
+    const number = typeof m?.followupIssueNumber === 'number' ? m.followupIssueNumber : null
+    return { url, number }
+  } catch { return null }
+}
+
 function parentLabelFor(parentJob: JobInfo | undefined): string | null {
   if (!parentJob) return null
   const bucket = bucketOf(parentJob.kind)
@@ -488,6 +506,11 @@ export function buildEntries(jobs: JobInfo[]): Entry[] {
         existing.navJobId = j.id
         existing.workSummary = j.work_summary ?? existing.workSummary
         existing.modifiedFiles = j.modified_files ?? existing.modifiedFiles
+        const followupIssue = followupIssueFromContext(j.context_meta)
+        if (followupIssue) {
+          existing.followupIssueUrl = followupIssue.url
+          existing.followupIssueNumber = followupIssue.number
+        }
         existing._jobIds!.push(j.id)
         // Track this turn as a leaf entry so the expanded view can show
         // per-turn cost. Conversational turns only — pipeline-step merges
@@ -539,6 +562,8 @@ export function buildEntries(jobs: JobInfo[]): Entry[] {
       parentJobId: j.parent_job_id ?? null,
       parentLabel: j.parent_job_id ? parentLabelFor(byId.get(j.parent_job_id)) : null,
       outcomeVerdict: outcomeVerdictFromContext(j.context_meta),
+      followupIssueUrl: followupIssueFromContext(j.context_meta)?.url ?? null,
+      followupIssueNumber: followupIssueFromContext(j.context_meta)?.number ?? null,
       _jobIds: [j.id],
     }
     if (canSessionMerge) {
@@ -596,6 +621,8 @@ function makeTurnEntry(j: JobInfo, bucket: KindBucket, byId: Map<string, JobInfo
     parentJobId: j.parent_job_id ?? null,
     parentLabel: j.parent_job_id ? parentLabelFor(byId.get(j.parent_job_id)) : null,
     outcomeVerdict: outcomeVerdictFromContext(j.context_meta),
+    followupIssueUrl: followupIssueFromContext(j.context_meta)?.url ?? null,
+    followupIssueNumber: followupIssueFromContext(j.context_meta)?.number ?? null,
     _jobIds: [j.id],
   }
 }

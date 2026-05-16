@@ -366,6 +366,8 @@ All stored in the `projects` DB table; editable via the project Config tab.
 When `auto_push_enabled` is **off**: pipeline chaining only happens during an active Release run.
 When `auto_push_enabled` is **on**: the same review→fix→push chaining happens for any standalone review job on that project.
 
+`review_prerequisite_command` is a per-project pre-review command. When `.tamtam/config.yml` contains `pipeline.review_prerequisite_command`, that shared file-backed value wins; otherwise TamTam falls back to the DB value edited from the Config tab. When set, TamTam runs it from the project root before each review scope is detected, then appends up to 4000 characters of stdout/stderr to the review prompt. Non-zero exits fail review startup with the captured output.
+
 ---
 
 ## Hook rejection detection (`isHookRejection`)

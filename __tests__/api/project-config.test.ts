@@ -12,7 +12,11 @@ const state = vi.hoisted(() => ({
   projectRow: undefined as { website?: string | null; qaUrl?: string | null } | undefined,
   testCfg: null as Record<string, unknown> | null,
   pushResult: null as Record<string, unknown> | null,
-  pipelinePrompts: { reviewPromptAddendum: null as string | null, fixPromptAddendum: null as string | null },
+  pipelinePrompts: {
+    reviewPromptAddendum: null as string | null,
+    reviewPrerequisiteCommand: null as string | null,
+    fixPromptAddendum: null as string | null,
+  },
   fileConfig: null as Record<string, unknown> | null,
   branchCtx: { currentBranch: 'main', defaultBranch: 'main', isDefaultBranch: true },
   improveProjects: {} as Record<string, unknown>,
@@ -136,7 +140,11 @@ describe('GET /api/projects/by-project/{projectName}/config', () => {
       releaseAfterRun: false,
     });
     mocks.getProjectPushResult.mockReturnValue(null);
-    mocks.getProjectPipelinePrompts.mockReturnValue({ reviewPromptAddendum: null, fixPromptAddendum: null });
+    mocks.getProjectPipelinePrompts.mockReturnValue({
+      reviewPromptAddendum: null,
+      reviewPrerequisiteCommand: null,
+      fixPromptAddendum: null,
+    });
     mocks.loadFileConfig.mockReturnValue(null);
     mocks.getBranchContext.mockReturnValue({ currentBranch: 'main', defaultBranch: 'main', isDefaultBranch: true });
   });
@@ -221,6 +229,7 @@ describe('GET /api/projects/by-project/{projectName}/config', () => {
     const res = await GET(req, { params: Promise.resolve({ projectName: 'proj1' }) });
     const data = await res.json();
     expect(data.review_prompt_addendum).toBe('');
+    expect(data.review_prerequisite_command).toBe('');
     expect(data.fix_prompt_addendum).toBe('');
     expect(data.website).toBe('');
   });
@@ -228,13 +237,31 @@ describe('GET /api/projects/by-project/{projectName}/config', () => {
   it('surfaces review/fix prompt addenda when set', async () => {
     mocks.getProjectPipelinePrompts.mockReturnValue({
       reviewPromptAddendum: 'Be lenient.',
+      reviewPrerequisiteCommand: 'pnpm db:types',
       fixPromptAddendum: 'Minimal diffs.',
     });
     const req = new NextRequest('http://localhost/api/projects/by-project/proj1/config');
     const res = await GET(req, { params: Promise.resolve({ projectName: 'proj1' }) });
     const data = await res.json();
     expect(data.review_prompt_addendum).toBe('Be lenient.');
+    expect(data.review_prerequisite_command).toBe('pnpm db:types');
     expect(data.fix_prompt_addendum).toBe('Minimal diffs.');
+  });
+
+  it('prefers file-backed review_prerequisite_command over the DB fallback', async () => {
+    mocks.loadFileConfig.mockReturnValue({
+      review_prerequisite_command: 'pnpm run supabase-gen-types',
+    });
+    mocks.getProjectPipelinePrompts.mockReturnValue({
+      reviewPromptAddendum: null,
+      reviewPrerequisiteCommand: 'pnpm db:types',
+      fixPromptAddendum: null,
+    });
+    const req = new NextRequest('http://localhost/api/projects/by-project/proj1/config');
+    const res = await GET(req, { params: Promise.resolve({ projectName: 'proj1' }) });
+    const data = await res.json();
+    expect(data.review_prerequisite_command).toBe('pnpm run supabase-gen-types');
+    expect(data.file_config).toContain('review_prerequisite_command');
   });
 
   it('returns issue_auto_branch=true by default — Work-on branch provision is on unless explicitly disabled', async () => {
@@ -412,7 +439,11 @@ describe('PATCH /api/projects/by-project/{projectName}/config', () => {
     mocks.writeProjectFieldYaml.mockReturnValue(true);
     mocks.getProjectTestConfig.mockReturnValue({ testCommand: null, testCronEnabled: false, testCronSchedule: null });
     mocks.getProjectPushResult.mockReturnValue(null);
-    mocks.getProjectPipelinePrompts.mockReturnValue({ reviewPromptAddendum: null, fixPromptAddendum: null });
+    mocks.getProjectPipelinePrompts.mockReturnValue({
+      reviewPromptAddendum: null,
+      reviewPrerequisiteCommand: null,
+      fixPromptAddendum: null,
+    });
     mocks.loadFileConfig.mockReturnValue(null);
     mocks.getBranchContext.mockReturnValue({ currentBranch: 'main', defaultBranch: 'main', isDefaultBranch: true });
   });
@@ -932,6 +963,47 @@ describe('PATCH /api/projects/by-project/{projectName}/config', () => {
     const res = await PATCH(req, { params: Promise.resolve({ projectName: 'proj1' }) });
     expect(res.status).toBe(200);
     expect(mocks.writeProjectFieldYaml).toHaveBeenCalledWith('proj1', 'review_prompt_addendum', 'Treat console.log as non-blocker.');
+  });
+
+  it('persists review_prerequisite_command text', async () => {
+    const req = new NextRequest('http://localhost/api/projects/by-project/proj1/config', {
+      method: 'PATCH',
+      body: JSON.stringify({ review_prerequisite_command: 'pnpm db:types' }),
+    });
+    const res = await PATCH(req, { params: Promise.resolve({ projectName: 'proj1' }) });
+    expect(res.status).toBe(200);
+    expect(mocks.writeProjectFieldYaml).toHaveBeenCalledWith('proj1', 'review_prerequisite_command', 'pnpm db:types');
+  });
+
+  it('trims review_prerequisite_command before persisting', async () => {
+    const req = new NextRequest('http://localhost/api/projects/by-project/proj1/config', {
+      method: 'PATCH',
+      body: JSON.stringify({ review_prerequisite_command: '  pnpm db:types  ' }),
+    });
+    const res = await PATCH(req, { params: Promise.resolve({ projectName: 'proj1' }) });
+    expect(res.status).toBe(200);
+    expect(mocks.writeProjectFieldYaml).toHaveBeenCalledWith('proj1', 'review_prerequisite_command', 'pnpm db:types');
+  });
+
+  it('clears review_prerequisite_command when whitespace-only', async () => {
+    const req = new NextRequest('http://localhost/api/projects/by-project/proj1/config', {
+      method: 'PATCH',
+      body: JSON.stringify({ review_prerequisite_command: '   \n  ' }),
+    });
+    await PATCH(req, { params: Promise.resolve({ projectName: 'proj1' }) });
+    expect(mocks.writeProjectFieldYaml).toHaveBeenCalledWith('proj1', 'review_prerequisite_command', null);
+  });
+
+  it('rejects non-string review_prerequisite_command payloads', async () => {
+    const req = new NextRequest('http://localhost/api/projects/by-project/proj1/config', {
+      method: 'PATCH',
+      body: JSON.stringify({ review_prerequisite_command: ['bad'] }),
+    });
+    const res = await PATCH(req, { params: Promise.resolve({ projectName: 'proj1' }) });
+    expect(res.status).toBe(400);
+    const data = await res.json();
+    expect(data.detail).toContain('review_prerequisite_command must be a string');
+    expect(mocks.writeProjectFieldYaml).not.toHaveBeenCalled();
   });
 
   it('trims review_prompt_addendum before persisting', async () => {

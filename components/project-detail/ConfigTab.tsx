@@ -54,6 +54,8 @@ export interface ConfigTabProps {
   setReviewDisabledInput: (v: boolean) => void
   reviewPromptAddendumInput: string
   setReviewPromptAddendumInput: (v: string) => void
+  reviewPrerequisiteCommandInput: string
+  setReviewPrerequisiteCommandInput: (v: string) => void
   fixPromptAddendumInput: string
   setFixPromptAddendumInput: (v: string) => void
   commitStyleInput: string
@@ -99,6 +101,8 @@ export function ConfigTab({
   setReviewDisabledInput,
   reviewPromptAddendumInput,
   setReviewPromptAddendumInput,
+  reviewPrerequisiteCommandInput,
+  setReviewPrerequisiteCommandInput,
   fixPromptAddendumInput,
   setFixPromptAddendumInput,
   commitStyleInput,
@@ -417,6 +421,19 @@ export function ConfigTab({
               placeholder="e.g. Treat console.log as a non-blocker for this CLI tool."
             />
             <p className="text-xs text-text-tertiary mt-1">Appended to the standard review prompt. Empty = use defaults.</p>
+          </div>
+          <div>
+            <label className="block font-medium text-xs text-text-secondary mb-1" htmlFor="review-prerequisite-command">
+              Review prerequisite command
+            </label>
+            <input
+              id="review-prerequisite-command"
+              className="w-full px-3 py-1.5 text-sm bg-bg-primary border border-border rounded-md text-text-primary font-mono focus:outline-none focus:ring-2 focus:ring-accent/30 focus:border-accent transition-colors placeholder:text-text-tertiary"
+              value={reviewPrerequisiteCommandInput}
+              onChange={(e) => setReviewPrerequisiteCommandInput(e.target.value)}
+              placeholder="e.g. pnpm db:types"
+            />
+            <p className="text-xs text-text-tertiary mt-1">Runs before each review and adds its output to the review prompt. Empty = no pre-step.</p>
           </div>
           <div>
             <label className="block font-medium text-xs text-text-secondary mb-1" htmlFor="fix-prompt-addendum">

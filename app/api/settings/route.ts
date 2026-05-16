@@ -164,6 +164,7 @@ const SETTING_KEYS = [
   'review_fix_max_iterations',
   'review_do_not_ship_action',
   'release_wall_clock_timeout_minutes',
+  'legacy_completion_hook_release_after_run_enabled',
   'agent_templates',
   'log_retention_count',
   'log_retention_days',
@@ -316,7 +317,12 @@ function validateAndSerializeSettingValue(
     return parseUnitFloatSetting(value, key);
   }
 
-  if (key === 'retrieval_enabled' || key === 'retrieval_manage_ollama' || key === 'project_sweep_enabled') {
+  if (
+    key === 'retrieval_enabled' ||
+    key === 'retrieval_manage_ollama' ||
+    key === 'project_sweep_enabled' ||
+    key === 'legacy_completion_hook_release_after_run_enabled'
+  ) {
     return parseBooleanSetting(value, key);
   }
 

@@ -225,8 +225,10 @@ describe('PipelineStrip', () => {
     })
 
     expect(container.querySelector('[aria-label^="test: done."]')).not.toBeNull()
-    expect(container.querySelector('[aria-label^="review: attention."]')).not.toBeNull()
     expect(container.querySelector('[aria-label^="fix: running."]')).not.toBeNull()
+    expect(container.textContent).toContain('start')
+    expect(container.textContent).toContain('now')
+    expect(container.textContent).toContain('goal')
     expect(container.querySelector('a[title="View unified release trace"]')).toBeNull()
     expect(Array.from(container.querySelectorAll('button')).some(button => button.textContent === 'abort')).toBe(false)
     unmount()
@@ -254,6 +256,23 @@ describe('PipelineStrip', () => {
     fixButton.dispatchEvent(new MouseEvent('click', { bubbles: true }))
     expect(pushMock).toHaveBeenCalledWith('/project/acme/widgets/terminal/fix-session')
 
+    unmount()
+  })
+
+  it('renders connectors only between the three journey chips', () => {
+    const { container, unmount } = renderStrip({
+      projectJobs: [
+        buildJob({ id: 'release-journey-root', kind: 'release', started_at: 90, status: 'running', finished_at: null, exit_code: null }),
+        buildJob({ id: 'test-journey', kind: 'test', started_at: 100, release_id: 'release-journey-root' }),
+        buildJob({ id: 'review-journey', kind: 'review', started_at: 120, verdict: 'LGTM', release_id: 'release-journey-root' }),
+        buildJob({ id: 'commit-journey', kind: 'commit', started_at: 140, release_id: 'release-journey-root' }),
+        buildJob({ id: 'push-journey', kind: 'push', started_at: 160, status: 'running', finished_at: null, exit_code: null, release_id: 'release-journey-root' }),
+      ],
+    })
+
+    const connectors = Array.from(container.querySelectorAll('span'))
+      .filter((span) => typeof span.className === 'string' && span.className.includes('h-0.5') && span.className.includes('w-4'))
+    expect(connectors).toHaveLength(2)
     unmount()
   })
 

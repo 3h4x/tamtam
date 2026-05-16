@@ -1,4 +1,4 @@
-export type SettingsFieldKey = 'workspace_path' | 'github_owner' | 'trusted_github_users' | 'claude_provider' | 'claude_bin' | 'lmstudio_model' | 'log_dir' | 'frequency' | 'daytime' | 'weekends' | 'base_prompt' | 'default_model' | 'permission_mode' | 'commit_style' | 'review_verdict_rules' | 'review_fix_max_iterations' | 'review_do_not_ship_action' | 'release_wall_clock_timeout_minutes' |'agent_templates' | 'log_retention_count' | 'log_retention_days' | 'job_row_retention_days' | 'workflow_run_retention_days' | 'backup_retention_count' | 'backup_retention_weekly_count' | 'notification_webhook_url' | 'notification_webhook_secret' | 'notification_on_release_success' | 'notification_on_release_fail' | 'notification_on_release_aborted' | 'notification_on_fix_loop_exhausted' | 'notification_on_review_do_not_ship' | 'notification_on_agent_run_fail' | 'notification_throttle_window_seconds' | 'notification_throttle_overrides' | 'pipeline_model_review' | 'pipeline_model_fix' | 'pipeline_model_dod' | 'pipeline_model_commit' | 'project_sweep_enabled' | 'dirty_worktree_block_threshold' | 'incremental_review_enabled'
+export type SettingsFieldKey = 'workspace_path' | 'github_owner' | 'trusted_github_users' | 'claude_provider' | 'claude_bin' | 'lmstudio_model' | 'log_dir' | 'frequency' | 'daytime' | 'weekends' | 'base_prompt' | 'default_model' | 'permission_mode' | 'commit_style' | 'review_verdict_rules' | 'review_fix_max_iterations' | 'review_do_not_ship_action' | 'release_wall_clock_timeout_minutes' | 'legacy_completion_hook_release_after_run_enabled' |'agent_templates' | 'log_retention_count' | 'log_retention_days' | 'job_row_retention_days' | 'workflow_run_retention_days' | 'backup_retention_count' | 'backup_retention_weekly_count' | 'notification_webhook_url' | 'notification_webhook_secret' | 'notification_on_release_success' | 'notification_on_release_fail' | 'notification_on_release_aborted' | 'notification_on_fix_loop_exhausted' | 'notification_on_review_do_not_ship' | 'notification_on_agent_run_fail' | 'notification_throttle_window_seconds' | 'notification_throttle_overrides' | 'pipeline_model_review' | 'pipeline_model_fix' | 'pipeline_model_dod' | 'pipeline_model_commit' | 'project_sweep_enabled' | 'dirty_worktree_block_threshold' | 'incremental_review_enabled'
 
 export interface FieldDef {
   label: string
@@ -115,6 +115,12 @@ export const FIELDS: Record<SettingsFieldKey, FieldDef> = {
   release_wall_clock_timeout_minutes: {
     label: 'Release Timeout (minutes)',
     help: 'Overall wall-clock budget for a Release run before the recovery sweep aborts it as timed out. Default 60.',
+    group: 'pipeline',
+    span: 1,
+  },
+  legacy_completion_hook_release_after_run_enabled: {
+    label: 'Legacy Release-After-Run Hook',
+    help: 'Runtime kill switch for the legacy completion hook that starts release-after-run. Disable while routing release triggers through the workflow event path.',
     group: 'pipeline',
     span: 1,
   },
@@ -287,6 +293,7 @@ export const DEFAULTS: Record<SettingsFieldKey, string> = {
   review_fix_max_iterations: '3',
   review_do_not_ship_action: 'pass',
   release_wall_clock_timeout_minutes: '60',
+  legacy_completion_hook_release_after_run_enabled: 'true',
   agent_templates: '',
   log_retention_count: '200',
   log_retention_days: '30',

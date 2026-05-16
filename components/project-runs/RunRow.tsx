@@ -306,6 +306,21 @@ export function RunRow({ entry: e, onClick, expandable, expanded, onToggleExpand
       isFailed={!isRunning && e.exitCode !== null && e.exitCode !== 0}
     />
   )
+  // Audit chip — when a review's DO NOT SHIP / NEEDS-ATTENTION-exhausted
+  // verdict caused the orchestrator to file a follow-up GitHub issue, link
+  // directly to it from the review row so the audit trail is visible.
+  const followupIssueBadge = e.followupIssueUrl ? (
+    <a
+      href={e.followupIssueUrl}
+      target="_blank"
+      rel="noreferrer"
+      title="Follow-up issue filed for this review's findings"
+      onClick={(ev) => ev.stopPropagation()}
+      className="inline-flex h-5 items-center rounded border border-status-warning/40 bg-status-warning/15 px-1.5 text-[10px] font-mono font-medium text-status-warning hover:bg-status-warning/25 transition-colors"
+    >
+      ↗ filed{e.followupIssueNumber != null ? ` #${e.followupIssueNumber}` : ''}
+    </a>
+  ) : null
   // ReleaseOutcomeBadge is only useful when the entry itself isn't a
   // release — i.e. an agent/run that owns a separate release outcome chip.
   // For release/vgroup entries the row's RowStateBadge already conveys the
@@ -403,6 +418,7 @@ export function RunRow({ entry: e, onClick, expandable, expanded, onToggleExpand
             <div className="flex flex-wrap items-center gap-1.5">
               {statusBadge}
               {verdictBadge}
+              {followupIssueBadge}
               {releaseBadge}
               {showProgressBadge && (
                 <span className={`inline-flex h-5 items-center rounded border px-1.5 text-[10px] font-medium font-mono ${progressTone}`}>

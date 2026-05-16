@@ -50,6 +50,12 @@ export const projects = pgTable('projects', {
   lastPushError: text('last_push_error'),
   lastPushAt: doublePrecision('last_push_at'),
   reviewPromptAddendum: text('review_prompt_addendum'),
+  // Bash command to run before each review step. Output is captured and
+  // prepended to the review prompt so the reviewer can see anything that
+  // ought to be regenerated before judging (DB types, codegen, schema
+  // dumps). Optional — when null, review starts directly. Per-project so
+  // codegen-heavy repos can opt in without affecting others.
+  reviewPrerequisiteCommand: text('review_prerequisite_command'),
   fixPromptAddendum: text('fix_prompt_addendum'),
   website: text('website'),
   qaUrl: text('qa_url'),

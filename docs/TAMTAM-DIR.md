@@ -34,9 +34,11 @@ docs:
       doc: docs/PIPELINE.md
 ```
 
-Supported keys: `test_command`, `custom_actions`, `safe_users`, `commit_style`, `auto_attach_docs`.
+Supported keys: `test_command`, `release_timeout_minutes`, `review_prerequisite_command`, `custom_actions`, `safe_users`, `commit_style`, `auto_attach_docs`.
 
 **Workflow flags** (`auto_commit_enabled`, `auto_push_enabled`, `auto_pr_merge_enabled`, `release_after_run`, `test_cron_enabled`, `test_cron_schedule`, `tests_disabled`, `review_disabled`, `issue_auto_branch`) are **DB-only** — each developer opts in individually. Older `.tamtam/config.yml` files may still contain those keys; TamTam migrates them to the DB on startup and ignores them on subsequent reads.
+
+**Local review prompt controls** (`review_prompt_addendum`, `fix_prompt_addendum`) are DB-only. `pipeline.review_prerequisite_command` may be committed when the project has a shared pre-review codegen/schema command; otherwise the Config tab's DB value is used as the local fallback.
 
 Reader: `lib/skills/tamtam-file-config.ts` → `loadFileConfig(projectPath)` / `writeFileConfig(projectPath, updates)`. The Config tab shows a banner listing which keys come from the file; saving writes back.
 

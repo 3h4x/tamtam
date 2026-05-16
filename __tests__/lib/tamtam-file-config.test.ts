@@ -37,9 +37,10 @@ function writeConfig(dir: string, content: string) {
   writeFileSync(join(cfgDir, 'config.yml'), content);
 }
 
-// `.tamtam/config.yml` is the team contract: only test_command, custom_actions
-// and safe_users live here. Workflow flags (auto_push, pr_workflow, gates,
-// cron) are DB-only so each developer can opt in independently.
+// `.tamtam/config.yml` is the team contract: test_command, release timeout,
+// custom_actions, safe_users, commit style, and auto-attach docs live here.
+// Workflow flags and local prompt addenda are DB-only so each developer can
+// opt in independently. Shared review prerequisites may live in file config.
 
 beforeAll(() => {
   rootTmpDir = join(tmpdir(), `tamtam-cfg-test-${Date.now()}-${Math.random().toString(36).slice(2)}`);
@@ -100,11 +101,29 @@ test_command: npm test
     expect(loadFileConfig(tmpDir)?.test_command).toBe('pnpm lint && pnpm test');
   });
 
+  it('parses review_prerequisite_command under pipeline', () => {
+    writeConfig(tmpDir, `pipeline:
+  test_command: pnpm check
+  review_prerequisite_command: pnpm run supabase-gen-types
+`);
+    const cfg = loadFileConfig(tmpDir);
+    expect(cfg?.test_command).toBe('pnpm check');
+    expect(cfg?.review_prerequisite_command).toBe('pnpm run supabase-gen-types');
+  });
+
   it('parses release_timeout_minutes under pipeline', () => {
     writeConfig(tmpDir, `pipeline:
   release_timeout_minutes: 45
 `);
     expect(loadFileConfig(tmpDir)?.release_timeout_minutes).toBe(45);
+  });
+
+  it('parses review_prerequisite_command when it is the only pipeline value', () => {
+    writeConfig(tmpDir, `pipeline:
+  review_prerequisite_command: pnpm db:types
+`);
+    const cfg = loadFileConfig(tmpDir) as Record<string, unknown> | null;
+    expect(cfg?.review_prerequisite_command).toBe('pnpm db:types');
   });
 
   it('ignores legacy workflow flags on read (DB is authoritative)', () => {

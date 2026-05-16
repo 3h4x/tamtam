@@ -85,6 +85,7 @@ export function ProjectDetailPage({
   const [testsDisabledInput, setTestsDisabledInput] = useState(false)
   const [reviewDisabledInput, setReviewDisabledInput] = useState(false)
   const [reviewPromptAddendumInput, setReviewPromptAddendumInput] = useState('')
+  const [reviewPrerequisiteCommandInput, setReviewPrerequisiteCommandInput] = useState('')
   const [fixPromptAddendumInput, setFixPromptAddendumInput] = useState('')
   const [commitStyleInput, setCommitStyleInput] = useState('')
   const [websiteInput, setWebsiteInput] = useState('')
@@ -204,6 +205,7 @@ export function ProjectDetailPage({
     setTestsDisabledInput(!!data.tests_disabled)
     setReviewDisabledInput(!!data.review_disabled)
     setReviewPromptAddendumInput(data.review_prompt_addendum ?? '')
+    setReviewPrerequisiteCommandInput(data.review_prerequisite_command ?? '')
     setFixPromptAddendumInput(data.fix_prompt_addendum ?? '')
     setCommitStyleInput(data.commit_style ?? '')
     setWebsiteInput(data.website ?? '')
@@ -485,6 +487,7 @@ export function ProjectDetailPage({
     tests_disabled: testsDisabledInput,
     review_disabled: reviewDisabledInput,
     review_prompt_addendum: reviewPromptAddendumInput,
+    review_prerequisite_command: reviewPrerequisiteCommandInput,
     fix_prompt_addendum: fixPromptAddendumInput,
     commit_style: commitStyleInput,
     website: websiteInput,
@@ -520,6 +523,7 @@ export function ProjectDetailPage({
     configInputs.tests_disabled !== !!config.tests_disabled ||
     configInputs.review_disabled !== !!config.review_disabled ||
     configInputs.review_prompt_addendum !== (config.review_prompt_addendum ?? '') ||
+    configInputs.review_prerequisite_command !== (config.review_prerequisite_command ?? '') ||
     configInputs.fix_prompt_addendum !== (config.fix_prompt_addendum ?? '') ||
     configInputs.commit_style !== (config.commit_style ?? '') ||
     configInputs.website !== (config.website ?? '') ||
@@ -792,6 +796,8 @@ export function ProjectDetailPage({
             setReviewDisabledInput={setReviewDisabledInput}
             reviewPromptAddendumInput={reviewPromptAddendumInput}
             setReviewPromptAddendumInput={setReviewPromptAddendumInput}
+            reviewPrerequisiteCommandInput={reviewPrerequisiteCommandInput}
+            setReviewPrerequisiteCommandInput={setReviewPrerequisiteCommandInput}
             fixPromptAddendumInput={fixPromptAddendumInput}
             setFixPromptAddendumInput={setFixPromptAddendumInput}
             commitStyleInput={commitStyleInput}

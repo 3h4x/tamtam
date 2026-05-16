@@ -83,6 +83,7 @@ export async function GET(
     tests_disabled: testCfg?.testsDisabled ?? false,
     review_disabled: testCfg?.reviewDisabled ?? false,
     review_prompt_addendum: pipelinePrompts.reviewPromptAddendum ?? '',
+    review_prerequisite_command: fileConfig?.review_prerequisite_command ?? pipelinePrompts.reviewPrerequisiteCommand ?? '',
     fix_prompt_addendum: pipelinePrompts.fixPromptAddendum ?? '',
     website: projectRow?.website ?? '',
     qa_url: projectRow?.qaUrl ?? '',
@@ -210,7 +211,7 @@ export async function PATCH(
 
   // Pipeline prompt addenda — DB-only. Each developer tunes locally; not
   // synced to .tamtam/config.yml.
-  const promptFields = ['review_prompt_addendum', 'fix_prompt_addendum'] as const;
+  const promptFields = ['review_prompt_addendum', 'review_prerequisite_command', 'fix_prompt_addendum'] as const;
   for (const field of promptFields) {
     if (body[field] !== undefined) {
       const value = readOptionalTrimmedString(body, field);

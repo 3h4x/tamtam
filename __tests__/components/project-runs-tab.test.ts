@@ -142,6 +142,27 @@ describe('buildEntries session grouping', () => {
     expect(entries[0].bucket).toBe('review')
   })
 
+  it('carries follow-up issue metadata from the latest merged review turn', () => {
+    const jobs = [
+      job({ id: 'rev-1', kind: 'review', started_at: 100, session_id: 'S2' }),
+      job({
+        id: 'rev-2',
+        kind: 'review',
+        started_at: 200,
+        session_id: 'S2',
+        context_meta: JSON.stringify({
+          followupIssueUrl: 'https://github.com/acme/widgets/issues/42',
+          followupIssueNumber: 42,
+        }),
+      }),
+    ]
+
+    const [entry] = buildEntries(jobs)
+
+    expect(entry.followupIssueUrl).toBe('https://github.com/acme/widgets/issues/42')
+    expect(entry.followupIssueNumber).toBe(42)
+  })
+
   it('refreshes a merged review entry verdict from undefined to LGTM on the latest turn', () => {
     const jobs = [
       job({ id: 'rev-1', kind: 'review', started_at: 100, session_id: 'S2', verdict: undefined }),

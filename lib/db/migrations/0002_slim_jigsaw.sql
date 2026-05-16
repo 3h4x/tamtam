@@ -1,0 +1,1 @@
+ALTER TABLE "projects" ADD COLUMN "review_prerequisite_command" text;

@@ -110,6 +110,7 @@ Manual sync behavior:
 | `base_prompt` | string | Long system prompt | Prepended to every Claude invocation — reviews, fixes, runs, agents |
 | `commit_style` | string | Conventional commits guide | Injected into the push commit-message generation prompt; overridden per project by `.tamtam/config.yml` `commits.commit_style` when present |
 | `review_verdict_rules` | string | Pragmatic rules | Injected into review prompts; drives LGTM / NEEDS ATTENTION / DO NOT SHIP decisions |
+| `legacy_completion_hook_release_after_run_enabled` | boolean | `true` | Runtime kill switch for the legacy job-completion release-after-run hook while release triggering migrates to the workflow event router. Set to `false` to stop the completion hook without redeploying |
 
 ### Notifications
 
@@ -330,6 +331,7 @@ frequency, daytime, weekends, launchagent_prefix, workspace_path,
 base_prompt, default_model, permission_mode, commit_style,
 review_verdict_rules, jobs_paused,
 review_fix_max_iterations, release_wall_clock_timeout_minutes,
+legacy_completion_hook_release_after_run_enabled,
 agent_templates, log_retention_count, log_retention_days,
 job_row_retention_days, workflow_run_retention_days,
 backup_retention_count, backup_retention_weekly_count,

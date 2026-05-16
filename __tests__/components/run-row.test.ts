@@ -359,6 +359,29 @@ describe('RunRow', () => {
     unmount()
   })
 
+  it('renders follow-up issue badges with the documented warning token', () => {
+    const entry = makeEntry({
+      followupIssueUrl: 'https://github.com/acme/widgets/issues/42',
+      followupIssueNumber: 42,
+    })
+
+    const { container, unmount } = renderRow({
+      entry,
+      onClick: vi.fn(),
+    })
+
+    const badge = container.querySelector('a[href="https://github.com/acme/widgets/issues/42"]')
+    const classes = Array.from(badge?.classList ?? [])
+    expect(badge?.textContent).toContain('filed #42')
+    expect(classes).toContain('border-status-warning/40')
+    expect(classes).toContain('bg-status-warning/15')
+    expect(classes).toContain('text-status-warning')
+    expect(classes).not.toContain('border-status-warn/40')
+    expect(classes).not.toContain('bg-status-warn/15')
+    expect(classes).not.toContain('text-status-warn')
+    unmount()
+  })
+
   it('hides parent badges for nested rows and renders release-attention state', () => {
     const nested = makeEntry({
       verdict: 'NEEDS ATTENTION',
