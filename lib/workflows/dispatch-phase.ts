@@ -89,6 +89,14 @@ export async function dispatchPhase(
         break;
       }
       case 'fix': {
+        // Exponential backoff between repeated fix-from-review iterations.
+        // After the third review→fix transition, sleep before each new fix
+        // dispatch so a long, slowly-converging loop doesn't burn tokens
+        // and CI cycles at full speed. Setting `review_fix_backoff_seconds=0`
+        // disables it entirely (default), matching the legacy behavior.
+        if (decision.from === 'review' && ctx.parentJobId) {
+          await sleepIfReviewBackoffStep(ctx.projectName, ctx.parentJobId);
+        }
         const { releaseFixPhaseWorkflow } = await import('@/lib/workflows/phases/fix-phase');
         run = await start(releaseFixPhaseWorkflow, [ctx.prevJobId!, ctx.projectName, ctx.parentJobId]);
         break;
@@ -148,6 +156,47 @@ export async function dispatchPhase(
     phase: decision.next,
     error: lastError instanceof Error ? lastError.message : String(lastError),
   };
+}
+
+/** Backoff threshold + cap. After this many prior review→fix iterations,
+ *  start sleeping `base * 2^(n-threshold)` seconds before the next fix,
+ *  capped at MAX_BACKOFF_SECONDS. Setting `review_fix_backoff_seconds=0`
+ *  disables the gate entirely. */
+const BACKOFF_THRESHOLD = 3;
+const MAX_BACKOFF_SECONDS = 300;
+
+export function computeFixBackoffSeconds(
+  iterationCount: number,
+  baseSeconds: number,
+): number {
+  if (baseSeconds <= 0) return 0;
+  if (iterationCount <= BACKOFF_THRESHOLD) return 0;
+  const exp = iterationCount - BACKOFF_THRESHOLD;
+  // 2^exp grows quickly; clamp so a runaway loop doesn't sleep for hours.
+  const seconds = baseSeconds * Math.pow(2, exp - 1);
+  return Math.min(Math.floor(seconds), MAX_BACKOFF_SECONDS);
+}
+
+async function sleepIfReviewBackoffStep(
+  projectName: string,
+  releaseJobId: string,
+): Promise<void> {
+  'use step';
+  const { getSettings } = await import('@/lib/shared/config');
+  const base = getSettings().review_fix_backoff_seconds;
+  if (base <= 0) return;
+  const { listJobs } = await import('@/lib/jobs/job-storage');
+  // Count completed fix-from-review iterations: every existing `review`
+  // sibling step in this release represents one prior cycle.
+  const iterations = listJobs().filter(j =>
+    j.releaseId === releaseJobId &&
+    j.kind === 'review' &&
+    j.finishedAt !== null,
+  ).length;
+  const sleep = computeFixBackoffSeconds(iterations, base);
+  if (sleep <= 0) return;
+  console.log(`[dispatch-phase] backoff: sleeping ${sleep}s before fix dispatch (iteration ${iterations}, project ${projectName})`);
+  await new Promise<void>((resolve) => setTimeout(resolve, sleep * 1000).unref?.());
 }
 
 function requiredContextMissing(phase: NextPhase['next'], ctx: DispatchContext): string[] {
