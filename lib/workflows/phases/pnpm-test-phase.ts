@@ -1,22 +1,16 @@
-// Plain test phase workflow. Runs the project's detected test command
-// directly via exec (no Claude agent) and writes the output to a job log
-// for the orchestrator + fix phase to consume. Replaces the
-// `releaseTestPhaseWorkflow` Claude-driven test step when
-// `plain_test_phase_enabled` is on.
-//
-// Trade-off vs the Claude-driven phase:
-//   + ~0 token cost, deterministic, fast
-//   - no written summary of failures (the fix phase already reads the
-//     test job's log so it still has the raw output to work from)
-//
-// Failure-analysis polish (spawn a cheap-model analyze agent on non-zero
-// exit) is a planned follow-up; the raw log alone is sufficient for fix.
+import type { StartTestResult } from '@/lib/pipeline/start-test';
+import type { WaitForJobResult } from '@/lib/workflows/wait-for-job';
+
+// Plain test phase workflow. It intentionally reuses the direct test runner
+// instead of buffering command output in the workflow process, so test jobs
+// keep the same durable lifecycle contract as `/test`: real child pid,
+// streamed log writes, exit-code sentinel, and close-handler race guard.
 
 export interface PnpmTestPhaseResult {
   ok: boolean;
   jobId: string | null;
   exitCode: number | null;
-  reason: 'finished' | 'start_failed' | 'no_command';
+  reason: 'finished' | 'timeout' | 'aborted' | 'not_found' | 'start_failed' | 'no_command';
   detail?: string;
 }
 
@@ -25,72 +19,50 @@ export async function pnpmTestPhaseWorkflow(
   releaseJobId?: string,
 ): Promise<PnpmTestPhaseResult> {
   'use workflow';
-  const result = await runPlainTestStep(projectName, releaseJobId);
-  if (result.ok && result.jobId && releaseJobId) {
-    await dispatchOrchestratorTickStep(result.jobId, projectName, releaseJobId);
+  const started = await spawnPlainTestStep(projectName, releaseJobId);
+  if (!started.ok) {
+    const noCommand = started.status === 400 && /detect test command/i.test(started.detail);
+    return {
+      ok: false,
+      jobId: null,
+      exitCode: null,
+      reason: noCommand ? 'no_command' : 'start_failed',
+      detail: started.detail,
+    };
   }
-  return result;
+
+  const waited = await awaitPlainTestCompletionStep(started.jobId);
+  if (waited.finished && releaseJobId) {
+    await dispatchOrchestratorTickStep(started.jobId, projectName, releaseJobId);
+  }
+
+  return {
+    ok: waited.finished,
+    jobId: started.jobId,
+    // exitCode is meaningless until the job actually finishes — return null
+    // on timeout/aborted/not_found rather than leaking a stale 0 from the
+    // job row's default.
+    exitCode: waited.finished ? (waited.job?.exitCode ?? null) : null,
+    reason: waited.reason,
+    ...(waited.reason === 'not_found' ? { detail: `test job '${started.jobId}' not found` } : {}),
+  };
 }
 
-async function runPlainTestStep(
+async function spawnPlainTestStep(
   projectName: string,
   releaseJobId?: string,
-): Promise<PnpmTestPhaseResult> {
+): Promise<StartTestResult> {
   'use step';
-  const { detectTestCommand } = await import('@/lib/pipeline/start-test');
-  const { resolveProjectPath } = await import('@/lib/shared/project-data');
-  const { exec } = await import('@/lib/shared/shell');
-  const { createJob, updateJob, markDone } = await import('@/lib/jobs/job-storage');
-  const { getImproveConfig } = await import('@/lib/scheduling/scheduling');
+  const { startProjectTest } = await import('@/lib/pipeline/start-test');
+  if (!releaseJobId) return startProjectTest(projectName);
   const { runWithParent } = await import('@/lib/jobs/parent-context');
-  const { join } = await import('path');
-  const { writeFileSync, mkdirSync, appendFileSync } = await import('fs');
+  return runWithParent(releaseJobId, () => startProjectTest(projectName));
+}
 
-  const projPath = resolveProjectPath(projectName);
-  if (!projPath) {
-    return { ok: false, jobId: null, exitCode: null, reason: 'start_failed', detail: `project '${projectName}' not found` };
-  }
-  const cmd = await detectTestCommand(projPath, projectName);
-  if (!cmd) {
-    return { ok: false, jobId: null, exitCode: null, reason: 'no_command', detail: 'no test command detected and tests not explicitly disabled' };
-  }
-
-  const { logDir } = getImproveConfig();
-  mkdirSync(/*turbopackIgnore: true*/ logDir, { recursive: true });
-
-  // pid=0 marks this as an in-process inline kind — same convention as
-  // mark-dod / pr-wait / commit. probeJobStatus treats pid=0 as "owned by
-  // the server" and won't reap it as a dead subprocess.
-  const job = releaseJobId
-    ? await Promise.resolve(runWithParent(releaseJobId, () => createJob(projectName, 'test', 0, '', cmd, undefined, cmd)))
-    : createJob(projectName, 'test', 0, '', cmd, undefined, cmd);
-  job.logPath = join(/*turbopackIgnore: true*/ logDir, `${job.id}.log`);
-  updateJob(job);
-
-  try {
-    writeFileSync(/*turbopackIgnore: true*/ job.logPath, `# plain-test phase — ${new Date().toISOString()}\n# $ ${cmd}\n\n`);
-  } catch {}
-
-  // Split into argv. The test command is operator-controlled (project
-  // config), but `sh -c` lets multi-token forms ("pnpm test --filter foo")
-  // work the same way they do in the legacy Claude-driven phase.
-  let exitCode = -1;
-  try {
-    const r = await exec('sh', ['-c', cmd], { cwd: projPath, timeout: 30 * 60 * 1000 });
-    exitCode = r.exitCode ?? -1;
-    try {
-      appendFileSync(/*turbopackIgnore: true*/ job.logPath, r.stdout || '');
-      if (r.stderr) appendFileSync(/*turbopackIgnore: true*/ job.logPath, `\n--- stderr ---\n${r.stderr}`);
-      appendFileSync(/*turbopackIgnore: true*/ job.logPath, `\n# exit ${exitCode}\n`);
-    } catch {}
-  } catch (err) {
-    try {
-      appendFileSync(/*turbopackIgnore: true*/ job.logPath, `\n# exec threw: ${(err as Error).message}\n`);
-    } catch {}
-  }
-
-  await markDone(job, exitCode);
-  return { ok: true, jobId: job.id, exitCode, reason: 'finished' };
+async function awaitPlainTestCompletionStep(jobId: string): Promise<WaitForJobResult> {
+  'use step';
+  const { waitForJobCompletion } = await import('@/lib/workflows/wait-for-job');
+  return waitForJobCompletion(jobId);
 }
 
 async function dispatchOrchestratorTickStep(
