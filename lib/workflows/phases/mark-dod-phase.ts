@@ -66,7 +66,7 @@ export async function releaseMarkDodPhaseWorkflow(
 ): Promise<MarkDodPhaseResult> {
   'use workflow';
 
-  const prep = await prepareAndFetchStep(projectName, override);
+  const prep = await prepareAndFetchStep(projectName, override, releaseJobId);
   if (prep.stage === 'terminal') {
     // mark-dod is the terminal phase. If we bailed early (no context, no
     // criteria, etc.) and have no sub-step jobId for the orchestrator to
@@ -118,11 +118,23 @@ function toPhaseResult(r: MarkDodResult): MarkDodPhaseResult {
 async function prepareAndFetchStep(
   projectName: string,
   override: MarkDodOverride | undefined,
+  releaseJobId?: string,
 ): Promise<PrepareAndFetchResult> {
   'use step';
   const impl = await import('@/lib/workflows/phases/mark-dod-impl');
 
-  const prep = await impl.prepareMarkDod(projectName, override);
+  // Wrap the createJob call in runWithParent so the spawned mark-dod row
+  // inherits release_id when the phase is part of a release chain. Without
+  // this, the orchestrator's mark-dod → pr-wait routing can't fire (it
+  // gates on job.releaseId), and pipeline trace/grouping is broken.
+  const prepFn = () => impl.prepareMarkDod(projectName, override);
+  let prep;
+  if (releaseJobId) {
+    const { runWithParent } = await import('@/lib/jobs/parent-context');
+    prep = await runWithParent(releaseJobId, prepFn);
+  } else {
+    prep = await prepFn();
+  }
   if ('ok' in prep) {
     return { stage: 'terminal', result: prep };
   }
