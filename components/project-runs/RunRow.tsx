@@ -306,6 +306,29 @@ export function RunRow({ entry: e, onClick, expandable, expanded, onToggleExpand
       isFailed={!isRunning && e.exitCode !== null && e.exitCode !== 0}
     />
   )
+  // Gemma outcome chip — local-LLM classification of how an agent/run
+  // turn ended. Only useful on completed run/agent rows; review/test/
+  // commit/etc. have their own verdict signals (VerdictBadge above).
+  const gemmaVerdictBadge = (() => {
+    const v = e.outcomeVerdict
+    if (!v) return null
+    if (e.bucket !== 'run' && e.bucket !== 'agent') return null
+    if (isRunning) return null
+    const label = v === 'done' ? '✓ done' : v === 'asked_question' ? '? asked' : '↻ unfinished'
+    const tone = v === 'done'
+      ? 'border-status-success/30 bg-status-success/10 text-status-success'
+      : v === 'asked_question'
+      ? 'border-status-info/30 bg-status-info/10 text-status-info'
+      : 'border-status-warning/30 bg-status-warning/10 text-status-warning'
+    return (
+      <span
+        className={`inline-flex h-5 items-center rounded border px-1.5 text-[10px] font-mono ${tone}`}
+        title={`Local-LLM outcome verdict: ${v.replace('_', ' ')}`}
+      >
+        {label}
+      </span>
+    )
+  })()
   // Audit chip — when a review's DO NOT SHIP / NEEDS-ATTENTION-exhausted
   // verdict caused the orchestrator to file a follow-up GitHub issue, link
   // directly to it from the review row so the audit trail is visible.
@@ -418,6 +441,7 @@ export function RunRow({ entry: e, onClick, expandable, expanded, onToggleExpand
             <div className="flex flex-wrap items-center gap-1.5">
               {statusBadge}
               {verdictBadge}
+              {gemmaVerdictBadge}
               {followupIssueBadge}
               {releaseBadge}
               {showProgressBadge && (

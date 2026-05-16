@@ -506,6 +506,7 @@ export function buildEntries(jobs: JobInfo[]): Entry[] {
         existing.navJobId = j.id
         existing.workSummary = j.work_summary ?? existing.workSummary
         existing.modifiedFiles = j.modified_files ?? existing.modifiedFiles
+        existing.outcomeVerdict = outcomeVerdictFromContext(j.context_meta)
         const followupIssue = followupIssueFromContext(j.context_meta)
         if (followupIssue) {
           existing.followupIssueUrl = followupIssue.url
