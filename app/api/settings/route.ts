@@ -163,6 +163,7 @@ const SETTING_KEYS = [
   'review_verdict_rules',
   'jobs_paused',
   'review_fix_max_iterations',
+  'review_fix_backoff_seconds',
   'review_do_not_ship_action',
   'release_wall_clock_timeout_minutes',
   'legacy_completion_hook_release_after_run_enabled',
@@ -310,6 +311,11 @@ function validateAndSerializeSettingValue(
   if (key === 'review_fix_max_iterations') {
     // Default is capped at 3, but an explicit 0 means unlimited review
     // verification rounds until LGTM or the release wall clock aborts.
+    return parseNonNegativeIntegerSetting(value, key);
+  }
+  if (key === 'review_fix_backoff_seconds') {
+    // 0 disables the exponential backoff. Otherwise this is the base
+    // delay; the dispatcher doubles it past the 3rd iteration.
     return parseNonNegativeIntegerSetting(value, key);
   }
   if (key === 'release_wall_clock_timeout_minutes') {

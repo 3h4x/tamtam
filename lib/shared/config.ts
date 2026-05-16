@@ -64,6 +64,7 @@ export interface TamTamConfig {
   review_verdict_rules: string;
   jobs_paused: boolean;
   review_fix_max_iterations: number;
+  review_fix_backoff_seconds: number;
   review_do_not_ship_action: ReviewDoNotShipAction;
   release_wall_clock_timeout_minutes: number;
   log_retention_count: number;
@@ -153,6 +154,7 @@ const DEFAULTS: TamTamConfig = {
 - Keep LGTM responses short: one sentence confirmation is enough.`,
   jobs_paused: false,
   review_fix_max_iterations: 3,
+  review_fix_backoff_seconds: 0,
   review_do_not_ship_action: 'pass',
   release_wall_clock_timeout_minutes: 60,
   log_retention_count: 200,
@@ -349,6 +351,7 @@ export function buildConfigFromSettingsMap(map: Record<string, string>): TamTamC
     review_verdict_rules: map.review_verdict_rules ?? DEFAULTS.review_verdict_rules,
     jobs_paused: map.jobs_paused === 'true',
     review_fix_max_iterations: parseNonNegativeIntOr(map.review_fix_max_iterations, DEFAULTS.review_fix_max_iterations),
+    review_fix_backoff_seconds: parseNonNegativeIntOr(map.review_fix_backoff_seconds, DEFAULTS.review_fix_backoff_seconds),
     review_do_not_ship_action: parseReviewDoNotShipAction(
       map.review_do_not_ship_action,
       DEFAULTS.review_do_not_ship_action,
