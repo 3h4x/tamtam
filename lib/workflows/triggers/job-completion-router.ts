@@ -66,22 +66,38 @@ export async function consumeJobCompletionEvents(opts: { limit?: number } = {}):
 }
 
 async function routeEvent(row: CompletionEventRow): Promise<boolean> {
-  // Decide which trigger to call based on kind. Today: release-after-run for
-  // run/agent kinds. release-after-fix-ci and auto-resume migrate in
-  // Phase 1 wave 3.
+  // Decide which trigger to call based on kind. Each migrated trigger is
+  // gated on its own legacy kill switch so this consumer stays a no-op
+  // until the operator flips the switch off — preventing double-dispatch
+  // with the inline hook.
   const { isAgentJobKind, getJobKind } = await import('@/lib/jobs/kinds');
   const k = getJobKind(row.kind);
   if (k === 'run' || isAgentJobKind(row.kind)) {
-    // Avoid double-dispatch while the legacy inline hook is still the
-    // primary path. When the kill switch is flipped off, this consumer
-    // owns the dispatch.
     const { getSettings } = await import('@/lib/shared/config');
-    if (getSettings().legacy_completion_hook_release_after_run_enabled) return false;
     const { getJob } = await import('@/lib/jobs/job-storage');
     const job = getJob(row.jobId);
     if (!job) return false;
+    // Failed run/agent jobs go to auto-resume; successful ones to
+    // release-after-run. Both are gated on their own kill switch so the
+    // legacy inline path remains the primary handler until each is flipped.
+    if (job.exitCode !== null && job.exitCode !== 0) {
+      if (getSettings().legacy_completion_hook_auto_resume_enabled) return false;
+      const { maybeAutoResume } = await import('@/lib/jobs/auto-resume');
+      try { await maybeAutoResume(job); return true; } catch { return false; }
+    }
+    if (getSettings().legacy_completion_hook_release_after_run_enabled) return false;
     const { dispatchReleaseAfterRun } = await import('@/lib/workflows/triggers/release-after-run');
     const out = await dispatchReleaseAfterRun(job);
+    return out.dispatched;
+  }
+  if (row.kind === 'fix-ci') {
+    const { getSettings } = await import('@/lib/shared/config');
+    if (getSettings().legacy_completion_hook_release_after_fix_ci_enabled) return false;
+    const { getJob } = await import('@/lib/jobs/job-storage');
+    const job = getJob(row.jobId);
+    if (!job) return false;
+    const { dispatchReleaseAfterFixCi } = await import('@/lib/workflows/triggers/release-after-fix-ci');
+    const out = await dispatchReleaseAfterFixCi(job);
     return out.dispatched;
   }
   return false;

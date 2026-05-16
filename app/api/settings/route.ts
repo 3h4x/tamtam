@@ -165,6 +165,8 @@ const SETTING_KEYS = [
   'review_do_not_ship_action',
   'release_wall_clock_timeout_minutes',
   'legacy_completion_hook_release_after_run_enabled',
+  'legacy_completion_hook_release_after_fix_ci_enabled',
+  'legacy_completion_hook_auto_resume_enabled',
   'agent_templates',
   'log_retention_count',
   'log_retention_days',
@@ -321,7 +323,9 @@ function validateAndSerializeSettingValue(
     key === 'retrieval_enabled' ||
     key === 'retrieval_manage_ollama' ||
     key === 'project_sweep_enabled' ||
-    key === 'legacy_completion_hook_release_after_run_enabled'
+    key === 'legacy_completion_hook_release_after_run_enabled' ||
+    key === 'legacy_completion_hook_release_after_fix_ci_enabled' ||
+    key === 'legacy_completion_hook_auto_resume_enabled'
   ) {
     return parseBooleanSetting(value, key);
   }

@@ -280,7 +280,7 @@ describe('SettingsPage', () => {
     unmount()
   })
 
-  it('renders and saves the legacy release-after-run hook kill switch', async () => {
+  it('renders and saves legacy completion hook kill switches', async () => {
     const fetchMock = vi.fn(async (input: string, init?: RequestInit) => {
       if (input === '/api/settings' && !init) {
         return makeResponse({
@@ -288,6 +288,8 @@ describe('SettingsPage', () => {
             claude_provider: 'claude',
             cli_enabled_providers: 'claude',
             legacy_completion_hook_release_after_run_enabled: 'true',
+            legacy_completion_hook_release_after_fix_ci_enabled: 'true',
+            legacy_completion_hook_auto_resume_enabled: 'true',
           },
         })
       }
@@ -298,6 +300,8 @@ describe('SettingsPage', () => {
             claude_provider: 'claude',
             cli_enabled_providers: 'claude',
             legacy_completion_hook_release_after_run_enabled: 'false',
+            legacy_completion_hook_release_after_fix_ci_enabled: 'false',
+            legacy_completion_hook_auto_resume_enabled: 'false',
           },
         })
       }
@@ -312,11 +316,15 @@ describe('SettingsPage', () => {
 
     await vi.waitFor(() => {
       expect(findSelectByLabel(container, 'Legacy Release-After-Run Hook').value).toBe('true')
+      expect(findSelectByLabel(container, 'Legacy Release-After-Fix-CI Hook').value).toBe('true')
+      expect(findSelectByLabel(container, 'Legacy Auto-Resume Hook').value).toBe('true')
       expect(getSaveButton(container).disabled).toBe(true)
     })
 
     flushSync(() => {
       setSelectValue(findSelectByLabel(container, 'Legacy Release-After-Run Hook'), 'false')
+      setSelectValue(findSelectByLabel(container, 'Legacy Release-After-Fix-CI Hook'), 'false')
+      setSelectValue(findSelectByLabel(container, 'Legacy Auto-Resume Hook'), 'false')
     })
 
     await vi.waitFor(() => {
@@ -327,6 +335,8 @@ describe('SettingsPage', () => {
 
     await vi.waitFor(() => {
       expect(findSelectByLabel(container, 'Legacy Release-After-Run Hook').value).toBe('false')
+      expect(findSelectByLabel(container, 'Legacy Release-After-Fix-CI Hook').value).toBe('false')
+      expect(findSelectByLabel(container, 'Legacy Auto-Resume Hook').value).toBe('false')
       expect(getSaveButton(container).disabled).toBe(true)
     })
 
@@ -335,6 +345,8 @@ describe('SettingsPage', () => {
     )
     expect(patchCall).toBeTruthy()
     expect((patchCall?.[1] as RequestInit).body).toContain('"legacy_completion_hook_release_after_run_enabled":"false"')
+    expect((patchCall?.[1] as RequestInit).body).toContain('"legacy_completion_hook_release_after_fix_ci_enabled":"false"')
+    expect((patchCall?.[1] as RequestInit).body).toContain('"legacy_completion_hook_auto_resume_enabled":"false"')
 
     unmount()
   })

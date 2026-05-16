@@ -220,7 +220,7 @@ Agent names are trimmed before persistence, must be non-empty, and may not conta
 Issue-branch behavior is now split by trigger type:
 
 - manual agent runs are allowed on `fix/issue-*` branches
-- scheduled agent fires are still skipped on `fix/issue-*` branches by the internal scheduler so background automation does not land unrelated edits on an in-progress issue branch
+- scheduled mutable agent fires are skipped while the project is on any non-default branch, or while a release `pr-wait` job is awaiting merge, so background automation does not land unrelated edits on an in-progress PR branch
 
 ### Scheduled Runs
 

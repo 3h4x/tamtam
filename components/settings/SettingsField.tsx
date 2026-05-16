@@ -6,6 +6,14 @@ import { MODEL_TIERS, MODEL_LABELS, getProviderModelHint } from '@/lib/agents/mo
 
 export type { SettingsFieldKey }
 
+const BOOLEAN_SELECT_FIELD_KEYS = new Set<SettingsFieldKey>([
+  'project_sweep_enabled',
+  'incremental_review_enabled',
+  'legacy_completion_hook_release_after_run_enabled',
+  'legacy_completion_hook_release_after_fix_ci_enabled',
+  'legacy_completion_hook_auto_resume_enabled',
+])
+
 export function SettingsField({
   fieldKey,
   value,
@@ -71,7 +79,7 @@ export function SettingsField({
           <option value="fix">Try fix loop</option>
           <option value="abort">Abort release</option>
         </select>
-      ) : fieldKey === 'project_sweep_enabled' || fieldKey === 'incremental_review_enabled' || fieldKey === 'legacy_completion_hook_release_after_run_enabled' ? (
+      ) : BOOLEAN_SELECT_FIELD_KEYS.has(fieldKey) ? (
         <select value={value || 'false'} onChange={(e) => onChange(fieldKey, e.target.value)} className={SELECT_CLASS}>
           <option value="true">Enabled</option>
           <option value="false">Disabled</option>

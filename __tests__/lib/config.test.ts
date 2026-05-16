@@ -153,6 +153,8 @@ describe('config', () => {
         project_sweep_enabled: false,
         review_retry_on_parse_failure: true,
         legacy_completion_hook_release_after_run_enabled: true,
+        legacy_completion_hook_release_after_fix_ci_enabled: true,
+        legacy_completion_hook_auto_resume_enabled: true,
         dirty_worktree_block_threshold: 1,
         incremental_review_enabled: true,
         retrieval_enabled: false,

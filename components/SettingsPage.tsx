@@ -52,6 +52,8 @@ interface SettingsMap {
   review_do_not_ship_action: string
   release_wall_clock_timeout_minutes: string
   legacy_completion_hook_release_after_run_enabled: string
+  legacy_completion_hook_release_after_fix_ci_enabled: string
+  legacy_completion_hook_auto_resume_enabled: string
   agent_templates: string
   log_retention_count: string
   log_retention_days: string
