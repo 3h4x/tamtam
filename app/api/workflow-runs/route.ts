@@ -103,7 +103,12 @@ export async function GET(request: Request): Promise<NextResponse> {
     });
   } catch (err) {
     return NextResponse.json(
-      { runs: [], reason: 'workflow query failed', detail: (err as Error).message },
+      {
+        runs: [],
+        reason: 'workflow query failed',
+        detail: (err as Error).message,
+        meta: buildMeta(),
+      },
       { status: 500 },
     );
   }
@@ -137,7 +142,12 @@ function readLocalWorldRuns(limit: number): NextResponse {
     slice = listLocalRunFilesNewestFirst(limit);
   } catch (err) {
     return NextResponse.json(
-      { runs: [], reason: 'failed to list local runs', detail: (err as Error).message, meta: buildMeta() },
+      {
+        runs: [],
+        reason: 'failed to list local runs',
+        detail: (err as Error).message,
+        meta: buildMeta(),
+      },
       { status: 500 },
     );
   }
