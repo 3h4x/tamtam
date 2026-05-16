@@ -67,6 +67,16 @@ export async function runProbeSweep(): Promise<void> {
   } catch (err) {
     console.error('[probe-sweep] release reconcile sweep error:', err);
   }
+  // Drain unconsumed job_completion_events. The inline completion-hook
+  // chain (in lib/jobs/lifecycle.ts) handles the happy path; this drain is
+  // the safety net for crashes/restarts between markDone's event insert
+  // and the hook return.
+  try {
+    const { consumeJobCompletionEvents } = await import('./lib/workflows/triggers/job-completion-router');
+    await consumeJobCompletionEvents();
+  } catch (err) {
+    console.error('[probe-sweep] job-completion-router error:', err);
+  }
 }
 
 /**
@@ -603,6 +613,27 @@ export async function registerNode(): Promise<void> {
               const { isProjectArchived, isProjectPaused } = await import('@/lib/shared/enabled-projects');
               if (isProjectArchived(agent.project)) return 'project archived';
               if (isProjectPaused(agent.project)) return 'project paused';
+              // Don't pile scheduled work onto an open PR. When the project's
+              // HEAD is off the default branch, or a release-pipeline pr-wait
+              // is in flight for it, every additional run accumulates on the
+              // PR without ever being mergeable in a clean window. Skip until
+              // the branch returns to default (PR merged + auto-switched
+              // back) — the cron self-reenqueue keeps the schedule ticking.
+              try {
+                const { listJobs } = await import('@/lib/jobs/job-storage');
+                const prWaitInFlight = listJobs().some(j =>
+                  j.project === agent.project && j.kind === 'pr-wait' && j.finishedAt === null);
+                if (prWaitInFlight) return 'pr-wait in flight (awaiting merge)';
+                const { resolveProjectPath } = await import('@/lib/shared/project-data');
+                const projPath = resolveProjectPath(agent.project);
+                if (projPath) {
+                  const { decidePrContext } = await import('@/lib/pipeline/pr-context');
+                  const pr = await decidePrContext(projPath);
+                  if (pr.shouldOpenPr) return `on non-default branch '${pr.currentBranch}'`;
+                }
+              } catch (err) {
+                console.warn(`[cron] branch-state prereq check failed for ${agent.id}:`, err);
+              }
               return null;
             },
             startAgentRun: async (agent) => {

@@ -177,6 +177,30 @@ export const queuedAgentRuns = pgTable('queued_agent_runs', {
   projectAgentUniq: uniqueIndex('queued_agent_runs_project_agent').on(t.project, t.agentId),
 }));
 
+// Durable job-completion event log. Written from markDone() before the
+// completion-hook chain so any orchestration decision (release-after-run,
+// release-after-fix-ci, auto-resume, …) can be re-driven by a workflow
+// consumer reading unconsumed rows after a crash/restart, instead of
+// being lost in the inline hook.
+// `consumed_by` is set by the consumer to the workflow run id once the
+// downstream decision dispatched, making consumption idempotent across
+// restarts.
+export const jobCompletionEvents = pgTable('job_completion_events', {
+  id: serial('id').primaryKey(),
+  jobId: text('job_id').notNull(),
+  kind: text('kind').notNull(),
+  exitCode: integer('exit_code'),
+  project: text('project').notNull(),
+  releaseId: text('release_id'),
+  ghIssueNumber: integer('gh_issue_number'),
+  emittedAt: doublePrecision('emitted_at').notNull(),
+  consumedBy: text('consumed_by'),
+  consumedAt: doublePrecision('consumed_at'),
+}, (t) => ({
+  jobIdUniq: uniqueIndex('job_completion_events_job_id').on(t.jobId),
+  unconsumedIdx: index('job_completion_events_unconsumed').on(t.consumedBy, t.emittedAt),
+}));
+
 export const notificationThrottle = pgTable('notification_throttle', {
   key: text('key').primaryKey(),
   lastSentAt: bigint('last_sent_at', { mode: 'number' }).notNull(),

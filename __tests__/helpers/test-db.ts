@@ -2,6 +2,7 @@ import { PGlite } from '@electric-sql/pglite';
 import { vector } from '@electric-sql/pglite/vector';
 import { drizzle, type PgliteDatabase } from 'drizzle-orm/pglite';
 import { migrate } from 'drizzle-orm/pglite/migrator';
+import { sql } from 'drizzle-orm';
 import { createHash } from 'crypto';
 import {
   existsSync,
@@ -10,6 +11,7 @@ import {
   readFileSync,
   renameSync,
   statSync,
+  unlinkSync,
   writeFileSync,
 } from 'fs';
 import { tmpdir } from 'os';
@@ -39,6 +41,8 @@ const MIGRATIONS_DIR = join(process.cwd(), 'lib/db/migrations');
 const CACHE_DIR = join(tmpdir(), 'tamtam-pglite-cache-v1');
 
 let cachedMigrationsHash: string | null = null;
+let cachedRequiredPublicTables: string[] | null = null;
+
 function getMigrationsHash(): string {
   if (cachedMigrationsHash !== null) return cachedMigrationsHash;
   const hash = createHash('sha256');
@@ -59,6 +63,22 @@ function getMigrationsHash(): string {
   walk(MIGRATIONS_DIR);
   cachedMigrationsHash = hash.digest('hex').slice(0, 16);
   return cachedMigrationsHash;
+}
+
+function getRequiredPublicTables(): string[] {
+  if (cachedRequiredPublicTables !== null) return cachedRequiredPublicTables;
+  const names = new Set<string>();
+  if (!existsSync(MIGRATIONS_DIR)) return [];
+  const entries = readdirSync(MIGRATIONS_DIR).sort();
+  for (const name of entries) {
+    if (!name.endsWith('.sql')) continue;
+    const text = readFileSync(join(MIGRATIONS_DIR, name), 'utf8');
+    for (const match of text.matchAll(/CREATE TABLE\s+(?:IF NOT EXISTS\s+)?"([^"]+)"/gi)) {
+      names.add(match[1]);
+    }
+  }
+  cachedRequiredPublicTables = [...names].sort();
+  return cachedRequiredPublicTables;
 }
 
 function cachePath(kind: 'empty' | 'migrated'): string {
@@ -149,6 +169,30 @@ async function bootPGliteFromSnapshot(snapshot: Blob): Promise<TestDbHandle> {
   return makeHandle(raw);
 }
 
+async function isMigratedSnapshotCurrent(handle: TestDbHandle): Promise<boolean> {
+  const requiredTables = getRequiredPublicTables();
+  if (requiredTables.length === 0) return true;
+
+  try {
+    const tables = await handle.db.execute(
+      sql`select table_name from information_schema.tables where table_schema = 'public'`,
+    );
+    const existing = new Set((tables.rows as Array<{ table_name: string }>).map((row) => row.table_name));
+    return requiredTables.every((name) => existing.has(name));
+  } catch {
+    return false;
+  }
+}
+
+async function removeSnapshot(file: string): Promise<void> {
+  try {
+    unlinkSync(file);
+  } catch {
+    // Cache cleanup is best-effort. A failed unlink just means the next
+    // caller may also reject the same invalid snapshot and rebuild locally.
+  }
+}
+
 /**
  * Boot a PGlite instance and apply the full production migration set.
  * Use for tests that touch many tables or rely on real defaults/FKs.
@@ -161,7 +205,12 @@ async function bootPGliteFromSnapshot(snapshot: Blob): Promise<TestDbHandle> {
 export async function createTestPgDb(): Promise<TestDbHandle> {
   const file = cachePath('migrated');
   const cached = readSnapshot(file);
-  if (cached) return bootPGliteFromSnapshot(cached);
+  if (cached) {
+    const handle = await bootPGliteFromSnapshot(cached);
+    if (await isMigratedSnapshotCurrent(handle)) return handle;
+    await handle[Symbol.asyncDispose]();
+    await removeSnapshot(file);
+  }
 
   const handle = await bootPGlite();
   await migrate(handle.db, { migrationsFolder: MIGRATIONS_DIR });

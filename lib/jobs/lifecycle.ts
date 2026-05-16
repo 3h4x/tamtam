@@ -1489,6 +1489,23 @@ export async function markDone(job: JobData, exitCode: number): Promise<void> {
   if (shouldAutoMarkSeen(job)) job.seen = true;
   saveToDb(job);
   void db.delete(schema.ghIssuesCache).where(eq(schema.ghIssuesCache.project, job.project)).execute().catch(() => {});
+  // Durable completion event: write a row before the inline hook chain so
+  // a workflow consumer can re-drive downstream decisions (release-after-run,
+  // release-after-fix-ci, auto-resume) on a crash/restart that interrupts the
+  // hook chain. Unique on jobId — duplicate markDone is silently skipped.
+  try {
+    await db.insert(schema.jobCompletionEvents).values({
+      jobId: job.id,
+      kind: job.kind,
+      exitCode: job.exitCode,
+      project: job.project,
+      releaseId: job.releaseId ?? null,
+      ghIssueNumber: job.ghIssueNumber ?? null,
+      emittedAt: Date.now() / 1000,
+    }).onConflictDoNothing({ target: schema.jobCompletionEvents.jobId }).execute();
+  } catch (eventErr) {
+    console.error(`[markDone] failed to emit job_completion_event for ${job.id}:`, eventErr);
+  }
   // Wrap completion hooks so a thrown handler can't strand the release
   // meta-job in `running`. The orchestrator workflow finalizes the meta-job
   // when its dispatch result is terminal; we just log here.
