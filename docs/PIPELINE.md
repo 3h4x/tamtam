@@ -34,15 +34,16 @@ Rules that hold for every recovery loop:
   needs-attention, re-commit after commit-fail, re-push after push-fail).
 - **Review and non-review loops use different caps.**
   `review_fix_max_iterations` governs only the review→fix verification
-  budget. Test/commit/push verification rounds use the shared
-  `TAMTAM_MAX_STEP_ITERATIONS` env guard; the push-fix retry (when a
-  pre-push hook rejects with lint/type nits) has its own hard cap
-  (`getPushFixAttemptCap()=2`, counted as `fix` jobs whose parent is a
-  `push` in the same release). When the cap trips on review-side
+  budget. It defaults to `3`; set it to `0` only when the review loop
+  should run until LGTM or the release wall-clock timeout. Test/commit/push
+  verification rounds use the shared `TAMTAM_MAX_STEP_ITERATIONS` env guard;
+  the push-fix retry (when a pre-push hook rejects with lint/type nits) has
+  its own hard cap (`getPushFixAttemptCap()=2`, counted as `fix` jobs whose
+  parent is a `push` in the same release). When the cap trips on review-side
   exhaustion, the orchestrator's `finalizeReleaseStep` files a follow-up
-  GitHub issue with the unresolved findings via
-  `fileReviewExhaustionIssue` and aborts the release. Test/commit/push
-  caps abort without filing an issue.
+  GitHub issue with the unresolved findings via `fileReviewExhaustionIssue`
+  and continues to commit + push so partial work ships. Test/commit/push caps
+  abort without filing an issue.
 
 Implementation lives in two places: workflow-driven release-linked
 flows go through `lib/workflows/release-orchestrator.ts` (`decideStep` →
@@ -125,7 +126,7 @@ TEST
 REVIEW
   ├─ exit 0  → completion hook → extract verdict
   │   ├─ LGTM              → start PUSH
-  │   ├─ NEEDS ATTENTION   → start FIX → re-run REVIEW (capped at 3 reviews per release)
+  │   ├─ NEEDS ATTENTION   → start FIX → re-run REVIEW (default cap: 3 reviews per release; 0 = unlimited)
   │   ├─ DO NOT SHIP       → policy from `review_do_not_ship_action`:
   │   │                       `pass` (default) → file follow-up issue → start COMMIT
   │   │                       `fix`            → start FIX → re-run REVIEW (cap-bounded)
@@ -365,7 +366,7 @@ Accepts markdown wrapping (`**LGTM**`, `` `LGTM` ``) and optional colon/dash del
 
 | Cap | Limit | Window | Setting |
 |-----|-------|--------|---------|
-| Review→Fix loop | unbounded fixes; configurable review verification rounds | per release; 30 min fallback for standalone chaining | `review_fix_max_iterations` (DB setting, default 3) governs the **review-side** verification budget only. Cap counts completed `review` runs, not fixes. On **NEEDS ATTENTION** review-side exhaustion (cap, stuck, fix-contradicts-review) TamTam files a follow-up issue and chains to commit+push (see step 13 above) instead of aborting. **DO NOT SHIP** verdicts follow `review_do_not_ship_action`: `pass` files a follow-up issue and commits, `fix` consumes the same review verification budget, and `abort` stops before commit/push. |
+| Review→Fix loop | unbounded fixes; configurable review verification rounds | per release; 30 min fallback for standalone chaining | `review_fix_max_iterations` (DB setting, default 3; explicit 0 = unlimited until LGTM or release timeout) governs the **review-side** verification budget only. Cap counts completed `review` runs, not fixes. On **NEEDS ATTENTION** review-side exhaustion (cap, stuck, fix-contradicts-review) TamTam files a follow-up issue and chains to commit+push (see step 13 above) instead of aborting. **DO NOT SHIP** verdicts follow `review_do_not_ship_action`: `pass` files a follow-up issue and commits, `fix` consumes the same review verification budget, and `abort` stops before commit/push. |
 | Test / Commit / Push safety cap | configurable via env | per release; 30 min fallback for standalone chaining | `TAMTAM_MAX_STEP_ITERATIONS` (legacy alias `TAMTAM_MAX_FIX_ITERATIONS`, default 3) still guards `test`, `commit`, and `push` verification loops. `TAMTAM_STEP_WINDOW_SECONDS=1800` (alias `TAMTAM_FIX_WINDOW_SECONDS`) controls the standalone fallback window. These caps still abort when exhausted. |
 | Push-fix attempts | 2 attempts | per release | hardcoded `getPushFixAttemptCap()=2`. Counts `fix` jobs whose `parentJobId` is a `push` job in the same release. |
 | Fix-CI auto-retry | 2 attempts | 120 s | hardcoded constants in `lib/jobs/lifecycle.ts` (boot-crash recovery only — non-user-tunable since 2026-05) |

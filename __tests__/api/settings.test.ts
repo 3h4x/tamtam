@@ -181,7 +181,7 @@ describe('settings API', () => {
       expect(data.settings.permission_mode).toBe('acceptEdits');
     });
 
-    it('returns the effective review_fix_max_iterations when the stored row is invalid', async () => {
+    it('falls back to the default review_fix_max_iterations when the stored row is invalid', async () => {
       await sharedHandle.db.insert(schema.settings).values({ key: 'review_fix_max_iterations', value: 'abc' });
 
       const response = await GET();
@@ -190,16 +190,16 @@ describe('settings API', () => {
       expect(data.settings.review_fix_max_iterations).toBe('3');
     });
 
-    it('returns the effective review_fix_max_iterations when the stored row is zero', async () => {
+    it('accepts zero (unlimited) as a valid review_fix_max_iterations', async () => {
       await sharedHandle.db.insert(schema.settings).values({ key: 'review_fix_max_iterations', value: '0' });
 
       const response = await GET();
       const data = await response.json();
 
-      expect(data.settings.review_fix_max_iterations).toBe('3');
+      expect(data.settings.review_fix_max_iterations).toBe('0');
     });
 
-    it('returns the effective review_fix_max_iterations when the stored row is negative', async () => {
+    it('falls back to the default when stored review_fix_max_iterations is negative', async () => {
       await sharedHandle.db.insert(schema.settings).values({ key: 'review_fix_max_iterations', value: '-1' });
 
       const response = await GET();
@@ -909,21 +909,41 @@ describe('settings API', () => {
 
       expect(response.status).toBe(400);
       await expect(response.json()).resolves.toMatchObject({
-        detail: expect.stringContaining('review_fix_max_iterations must be a positive integer'),
+        detail: expect.stringContaining('review_fix_max_iterations must be a non-negative integer'),
       });
       expect(await sharedHandle.db.select().from(schema.settings)).toEqual([]);
     });
 
-    it('rejects non-positive review_fix_max_iterations values', async () => {
+    it('accepts zero review_fix_max_iterations as unlimited', async () => {
       const request = new NextRequest('http://localhost/api/settings', {
         method: 'PATCH',
         body: JSON.stringify({ review_fix_max_iterations: '0' }),
       });
       const response = await PATCH(request);
 
+      expect(response.status).toBe(200);
+      await expect(response.json()).resolves.toMatchObject({
+        settings: {
+          review_fix_max_iterations: '0',
+        },
+      });
+      const rows = await sharedHandle.db.select().from(schema.settings);
+      expect(rows).toContainEqual(expect.objectContaining({
+        key: 'review_fix_max_iterations',
+        value: '0',
+      }));
+    });
+
+    it('rejects negative review_fix_max_iterations values', async () => {
+      const request = new NextRequest('http://localhost/api/settings', {
+        method: 'PATCH',
+        body: JSON.stringify({ review_fix_max_iterations: '-1' }),
+      });
+      const response = await PATCH(request);
+
       expect(response.status).toBe(400);
       await expect(response.json()).resolves.toMatchObject({
-        detail: expect.stringContaining('review_fix_max_iterations must be a positive integer'),
+        detail: expect.stringContaining('review_fix_max_iterations must be a non-negative integer'),
       });
       expect(await sharedHandle.db.select().from(schema.settings)).toEqual([]);
     });

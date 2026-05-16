@@ -94,6 +94,23 @@ describe('checkIterationCap', () => {
     expect((r.rewritten as { stopReason: string }).stopReason).toContain('3/3');
   });
 
+  it('does not abort review reruns when reviewFixMaxIterations is zero', () => {
+    const fixJob = makeJob({ id: 'f1', kind: 'fix', releaseId: 'r1', exitCode: 0 });
+    const jobs = [
+      makeJob({ id: 'rev1', kind: 'review', releaseId: 'r1' }),
+      makeJob({ id: 'rev2', kind: 'review', releaseId: 'r1' }),
+      makeJob({ id: 'rev3', kind: 'review', releaseId: 'r1' }),
+      fixJob,
+    ];
+    const decision: NextPhase = { next: 'review', from: 'fix' };
+    const deps = {
+      ...baseDeps(jobs),
+      reviewFixMaxIterations: () => 0,
+    };
+
+    expect(checkIterationCap(fixJob, decision, deps).rewritten).toBeUndefined();
+  });
+
   it('aborts when maxStepIterations is reached on from=fix → test', () => {
     const fixJob = makeJob({ id: 'f1', kind: 'fix', releaseId: 'r1', exitCode: 0 });
     const jobs = [
