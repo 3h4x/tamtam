@@ -314,7 +314,7 @@ export function ConfigTab({
       <div className="bg-bg-secondary rounded-md border border-border">
         <div className="px-4 py-2 border-b border-border flex items-baseline justify-between gap-3 flex-wrap">
           <h3 className="text-sm font-semibold text-text-primary">Release Pipeline</h3>
-          <p className="text-xs text-text-tertiary">Click a step to toggle. Fix is gated by review. `dod` runs for issue-linked releases and for PR-backed branch releases when auto-merge is off.</p>
+          <p className="text-xs text-text-tertiary">Click a step to toggle. `fix` runs automatically as part of review. On non-default branches, push opens a PR, then `dod` and `merge` complete the release automatically.</p>
         </div>
 
         {/* Clickable pipeline flow strip */}
