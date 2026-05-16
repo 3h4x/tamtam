@@ -51,6 +51,9 @@ function renderTerminalMessagesMarkup({
     onClearQueueItem: noop,
     onCancel: noop,
     termRef: { current: null },
+    lastError: null,
+    onResume: noop,
+    onDismissError: noop,
   }))
 }
 

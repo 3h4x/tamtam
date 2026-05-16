@@ -95,8 +95,25 @@ describe('claude-stream-parser', () => {
     const events = parseStreamLines(line);
     expect(events).toEqual([{
       type: 'done',
-      result: { duration: 100, sessionId: 'abc', error: true, inputTokens: 0, outputTokens: 0, cacheReadTokens: 0, cacheCreateTokens: 0, model: null },
+      result: { duration: 100, sessionId: 'abc', error: true, errorKind: 'other', inputTokens: 0, outputTokens: 0, cacheReadTokens: 0, cacheCreateTokens: 0, model: null },
     }]);
+  });
+
+  it('classifies error_during_execution as internal-cli and joins errors[] into errorText', () => {
+    const line = '{"type":"result","subtype":"error_during_execution","is_error":true,"duration_ms":49475,"session_id":"sess-x","terminal_reason":"aborted_streaming","errors":["[ede_diagnostic] result_type=user last_content_type=n/a stop_reason=tool_use"]}';
+    const events = parseStreamLines(line);
+    if (events[0]?.type !== 'done') throw new Error('expected done');
+    expect(events[0].result.error).toBe(true);
+    expect(events[0].result.errorKind).toBe('internal-cli');
+    expect(events[0].result.errorText).toContain('ede_diagnostic');
+  });
+
+  it('classifies aborted_streaming as internal-cli even without errors[]', () => {
+    const line = '{"type":"result","subtype":"success","is_error":true,"duration_ms":100,"session_id":"s","terminal_reason":"aborted_streaming"}';
+    const events = parseStreamLines(line);
+    if (events[0]?.type !== 'done') throw new Error('expected done');
+    expect(events[0].result.errorKind).toBe('internal-cli');
+    expect(events[0].result.errorText).toContain('aborted_streaming');
   });
 
   it('attaches errorText when is_error=true and result is a non-empty string', () => {

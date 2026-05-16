@@ -22,9 +22,16 @@ async function waitForState(
   const deadline = Date.now() + 2000;
   while (Date.now() < deadline) {
     if (existsSync(statePath)) {
-      const state = JSON.parse(readFileSync(statePath, 'utf-8'));
-      if (predicate(state[name])) {
-        return state[name];
+      const raw = readFileSync(statePath, 'utf-8');
+      if (raw.length > 0) {
+        try {
+          const state = JSON.parse(raw);
+          if (predicate(state[name])) {
+            return state[name];
+          }
+        } catch {
+          // state file is mid-write; retry
+        }
       }
     }
     await new Promise((resolveWait) => setTimeout(resolveWait, 5));

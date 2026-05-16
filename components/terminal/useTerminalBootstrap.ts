@@ -56,12 +56,47 @@ export function useTerminalBootstrap({
   const router = useRouter()
   const [currentReleaseId, setCurrentReleaseId] = useState<string | null>(null)
   const attachedExternalJobRef = useRef<string | null>(null)
+  // One-shot redirect to the currently-running session on initial mount.
+  // If you bookmark / open a stale session URL while another session is
+  // live, you almost always want the live one. We only do this once per
+  // mount so subsequent navigation (Sessions panel → old session) sticks.
+  const runningRedirectChecked = useRef(false)
 
   // Preload sessions on fresh terminal landing (no session/job param)
   useEffect(() => {
     if (initialSessionId || jobParam) return
     onLoadSessions()
   }, [])
+
+  // Mount-time: if the project has a running claude session that's not the
+  // one in the URL, swap to it. Skips when ?job= is in play (notification
+  // deep-links) — those want the specific job, not the latest running one.
+  useEffect(() => {
+    if (runningRedirectChecked.current) return
+    if (jobParam) return
+    runningRedirectChecked.current = true
+    let cancelled = false
+    void (async () => {
+      try {
+        const res = await fetch(`/api/jobs?project=${encodeURIComponent(projectName)}&status=running&limit=20`)
+        if (!res.ok || cancelled) return
+        const data = await res.json()
+        const jobs: JobDict[] = data.jobs ?? []
+        // Restorable session kinds only — release meta-jobs and other
+        // non-claude rows don't have a tail-able session id we can land on.
+        const live = jobs
+          .filter((j) => j.session_id && isClaudeJobKind(j.kind) && j.finished_at === null)
+          .sort((a, b) => b.started_at - a.started_at)[0]
+        if (!live || !live.session_id) return
+        if (initialSessionId && live.session_id === initialSessionId) return
+        router.replace(`/project/${projectName}/terminal/${live.session_id}`)
+      } catch {}
+    })()
+    return () => { cancelled = true }
+  // Mount-only by design — depend only on projectName so a project switch
+  // re-arms the check; subsequent in-page navigation stays put.
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [projectName])
 
   // Auto-submit prompt from ?prompt= query param (e.g. opened from Issues tab).
   useEffect(() => {

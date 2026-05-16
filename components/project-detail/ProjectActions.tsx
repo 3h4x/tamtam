@@ -126,7 +126,7 @@ export function ProjectActions({
   const noCommitsToPr = isOnFeatureBranch && branchCommitsAhead === 0
   const createPrDisabled = creatingPr || noCommitsToPr
   const createPrTitle = noCommitsToPr
-    ? `Branch ${currentBranch} has no commits ahead of origin/${defaultBranch}. Commit your changes (use 🚀 Release) or move them to ${defaultBranch} first.`
+    ? `Branch ${currentBranch} has no commits ahead of origin/${defaultBranch}. Commit your changes (use Release) or move them to ${defaultBranch} first.`
     : `Create pull request for branch ${currentBranch}`
 
   const pullPrimaryDisabled = pulling || totalChanges > 0 || behindCount === 0
@@ -171,7 +171,7 @@ export function ProjectActions({
                 : `Release: ${steps.join(' → ')}${chainSuffix}`
         }
       >
-        {busy ? 'Releasing…' : freshLgtm ? '🚢 Ship (LGTM)' : '🚀 Release'}
+        {busy ? 'Releasing…' : freshLgtm ? 'Ship (LGTM)' : 'Release'}
       </Button>
       {showCreatePr && (
         <Button
@@ -234,7 +234,7 @@ export function ProjectActions({
           jobsPaused
             ? 'Jobs are paused globally. Resume jobs to start a push.'
             : totalChanges > 0
-              ? `Commit your ${totalChanges} local change${totalChanges !== 1 ? 's' : ''} first (use 🚀 Release)`
+              ? `Commit your ${totalChanges} local change${totalChanges !== 1 ? 's' : ''} first (use Release)`
               : (unpushed ?? 0) === 0
                 ? 'Nothing to push'
                 : `Push ${unpushed} commit${unpushed !== 1 ? 's' : ''} to origin`

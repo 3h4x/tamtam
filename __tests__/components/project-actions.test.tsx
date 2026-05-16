@@ -123,11 +123,11 @@ describe('ProjectActions', () => {
     }))
 
     expect(buttonByText(container, 'Fix CI').disabled).toBe(true)
-    expect(buttonByText(container, '🚀 Release').disabled).toBe(true)
+    expect(buttonByText(container, 'Release').disabled).toBe(true)
     expect(buttonByText(container, 'Push to PR #77').disabled).toBe(true)
     expect(buttonByText(container, 'Test').disabled).toBe(true)
     expect(buttonByText(container, 'Fix CI').title).toContain('Jobs are paused globally')
-    expect(buttonByText(container, '🚀 Release').title).toContain('Jobs are paused globally')
+    expect(buttonByText(container, 'Release').title).toContain('Jobs are paused globally')
     expect(buttonByText(container, 'Push to PR #77').title).toContain('Jobs are paused globally')
     expect(buttonByText(container, 'Test').title).toContain('Jobs are paused globally')
 
@@ -138,7 +138,7 @@ describe('ProjectActions', () => {
     }))
 
     expect(buttonByText(container, 'Fix CI').disabled).toBe(false)
-    expect(buttonByText(container, '🚀 Release').disabled).toBe(false)
+    expect(buttonByText(container, 'Release').disabled).toBe(false)
     expect(buttonByText(container, 'Push to PR #77').disabled).toBe(false)
     expect(buttonByText(container, 'Test').disabled).toBe(false)
 
@@ -228,7 +228,7 @@ describe('ProjectActions', () => {
     unmount()
   })
 
-  it('shows 🚢 Ship (LGTM) button on fresh LGTM and fires onRelease', () => {
+  it('shows Ship (LGTM) button on fresh LGTM and fires onRelease', () => {
     const onRelease = vi.fn()
     const { container, unmount } = renderProjectActions(buildProps({
       verdict: 'LGTM',
@@ -237,7 +237,7 @@ describe('ProjectActions', () => {
       onRelease,
     }))
 
-    const shipBtn = buttonByText(container, '🚢 Ship (LGTM)')
+    const shipBtn = buttonByText(container, 'Ship (LGTM)')
     expect(shipBtn.disabled).toBe(false)
     expect(shipBtn.title).toContain('review already LGTM')
     shipBtn.click()
@@ -255,7 +255,7 @@ describe('ProjectActions', () => {
       openPrByBranch: {},
     }))
 
-    const releaseBtn = buttonByText(container, '🚀 Release')
+    const releaseBtn = buttonByText(container, 'Release')
     expect(releaseBtn.disabled).toBe(true)
     expect(releaseBtn.title).toContain('Nothing to release')
 

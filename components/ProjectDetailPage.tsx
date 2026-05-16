@@ -553,21 +553,23 @@ export function ProjectDetailPage({
           <h2 className="text-xl font-semibold text-text-primary" data-private>{project.project}</h2>
           {currentBranch && (() => {
             const isDefault = !!defaultBranch && currentBranch === defaultBranch
+            // On the default branch the pill is noise — hide entirely.
+            // On a feature branch, show just the git-branch icon (+ ahead/behind
+            // counts) and put the full branch name in the tooltip. The branch
+            // name itself is usually long and redundant with the issue chip
+            // that renders next to this.
+            if (isDefault) return null
             const ahead = branchCommitsAhead ?? 0
             const behind = behindCount
-            const tone = isDefault
-              ? 'border-border bg-bg-secondary text-text-secondary'
-              : 'border-accent/30 bg-accent-light text-accent'
             return (
               <span
-                className={`inline-flex items-center gap-1.5 rounded-full border px-2 py-0.5 text-xs font-mono ${tone}`}
-                title={isDefault ? `On default branch (${currentBranch})` : `On feature branch — default is ${defaultBranch ?? 'unknown'}`}
+                className="inline-flex items-center gap-1.5 rounded-full border border-accent/30 bg-accent-light px-2 py-0.5 text-xs font-mono text-accent"
+                title={`On feature branch ${currentBranch} — default is ${defaultBranch ?? 'unknown'}`}
                 data-private
               >
                 <svg viewBox="0 0 16 16" width="12" height="12" fill="currentColor" aria-hidden="true" className="shrink-0">
                   <path d="M11.75 2.5a.75.75 0 100 1.5.75.75 0 000-1.5zm-2.25.75a2.25 2.25 0 113 2.122V6A2.5 2.5 0 0110 8.5H6a1 1 0 00-1 1v1.128a2.251 2.251 0 11-1.5 0V5.372a2.25 2.25 0 111.5 0v1.836A2.492 2.492 0 016 7h4a1 1 0 001-1v-.628A2.25 2.25 0 019.5 3.25zM4.25 12a.75.75 0 100 1.5.75.75 0 000-1.5zM3.5 3.25a.75.75 0 111.5 0 .75.75 0 01-1.5 0z" />
                 </svg>
-                <span className="truncate max-w-[16rem]">{currentBranch}</span>
                 {ahead > 0 && (
                   <span className="text-status-warning tabular-nums" title={`${ahead} commit${ahead !== 1 ? 's' : ''} ahead of origin/${defaultBranch ?? 'default'}`}>
                     ↑{ahead}
@@ -650,7 +652,7 @@ export function ProjectDetailPage({
               ? 'Project is paused — scheduled agents, agent API runs, and releases are blocked. Manual terminal sessions still work. Click to resume.'
               : 'Pause this project: blocks scheduled agents, agent API runs, and releases without affecting other projects.'}
           >
-            {config?.paused ? '⏸ Paused' : 'Pause'}
+            {config?.paused ? 'Paused' : 'Pause'}
           </button>
           <button
             type="button"
@@ -678,7 +680,7 @@ export function ProjectDetailPage({
               ? 'Auto release is ON — release pipeline triggers after each terminal or agent run finishes. Click to disable.'
               : 'Auto release is OFF — click to auto-trigger the release pipeline after each terminal or agent run.'}
           >
-            {config?.release_after_run ? '🚀 Auto release' : 'Auto release'}
+            {config?.release_after_run ? 'Auto release ON' : 'Auto release'}
           </button>
         </div>
         <div className="flex items-center gap-2 flex-wrap justify-end">

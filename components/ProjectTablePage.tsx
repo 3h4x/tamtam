@@ -623,11 +623,11 @@ const isReviewRunning = (projectName: string) => !!runtime[projectName]?.hasRunn
                         title={schedulerPaused ? 'Internal scheduler paused (Resume jobs in header)' : 'Scheduled agents paused by weekly budget'}
                         className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded text-xs font-medium bg-status-warning/10 text-status-warning border border-status-warning/30"
                       >
-                        ⏸ scheduled paused
+                        scheduled paused
                       </span>
                     ) : projectPaused && (
                       <span title="Project schedule paused" className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded text-xs font-medium bg-status-warning/10 text-status-warning border border-status-warning/30">
-                        ⏸ scheduled paused
+                        scheduled paused
                       </span>
                     )}
                     {outOfSync && (

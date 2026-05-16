@@ -31,6 +31,8 @@ type ParsedLine = {
   result?: unknown;
   duration_ms?: number;
   session_id?: string;
+  errors?: unknown;
+  terminal_reason?: string;
 };
 
 export type ParsedEvent =
@@ -39,7 +41,7 @@ export type ParsedEvent =
   | { type: 'tool_use'; name: string; input: string }
   | { type: 'tool_result'; content: string }
   | { type: 'compacting' }
-  | { type: 'done'; result: { duration: number; sessionId: string; error: boolean; errorText?: string; inputTokens: number; outputTokens: number; cacheReadTokens: number; cacheCreateTokens: number; model: string | null } };
+  | { type: 'done'; result: { duration: number; sessionId: string; error: boolean; errorText?: string; errorKind?: 'internal-cli' | 'other'; inputTokens: number; outputTokens: number; cacheReadTokens: number; cacheCreateTokens: number; model: string | null } };
 
 // Tool results arrive as either a string or an array of content blocks
 // ([{type:"text",text:"..."}, {type:"image",...}]). Dumping the array with
@@ -331,7 +333,35 @@ export function parseStreamLines(content: string, options: ParseOptions = {}): P
           cacheCreateTokens += usage.cacheCreationInputTokens ?? 0;
         }
       }
-      const errorText = parsed.is_error && typeof parsed.result === 'string' ? parsed.result : undefined;
+      // Compose a human-readable error string. Claude CLI emits errors in
+      // three different shapes depending on the failure mode:
+      //   1. result: "<string>"           — API errors, quota, model 404
+      //   2. errors: ["[ede_diagnostic]"] — internal CLI race (no result string)
+      //   3. neither, just is_error=true  — silent failure
+      // Internal-CLI errors are retryable: re-running with --resume picks up
+      // where the stream died. Mark them so the terminal can offer auto-retry.
+      let errorText: string | undefined;
+      let errorKind: 'internal-cli' | 'other' | undefined;
+      if (parsed.is_error) {
+        const parts: string[] = [];
+        if (typeof parsed.result === 'string' && parsed.result.trim()) {
+          parts.push(parsed.result.trim());
+        }
+        if (Array.isArray(parsed.errors)) {
+          for (const e of parsed.errors) {
+            if (typeof e === 'string' && e.trim()) parts.push(e.trim());
+          }
+        }
+        const cliSubtype = parsed.subtype === 'error_during_execution' ? parsed.subtype : null;
+        const cliReason = parsed.terminal_reason === 'aborted_streaming' ? parsed.terminal_reason : null;
+        if (cliSubtype || cliReason) {
+          errorKind = 'internal-cli';
+          if (parts.length === 0) parts.push(`CLI ${cliSubtype ?? cliReason}`);
+        } else {
+          errorKind = 'other';
+        }
+        errorText = parts.join(' · ') || undefined;
+      }
       push({
         type: 'done',
         result: {
@@ -339,6 +369,7 @@ export function parseStreamLines(content: string, options: ParseOptions = {}): P
           sessionId: parsed.session_id ?? '',
           error: parsed.is_error ?? false,
           ...(errorText ? { errorText } : {}),
+          ...(errorKind ? { errorKind } : {}),
           inputTokens,
           outputTokens,
           cacheReadTokens,

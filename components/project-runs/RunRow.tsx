@@ -52,13 +52,13 @@ function StatusIcon({
   }
   if (needsAttention) {
     return (
-      <span className="flex h-5 w-5 items-center justify-center rounded-full border border-status-error/35 bg-status-error/10 text-[11px] font-semibold text-status-error" aria-label="needs attention">
+      <span className="flex h-5 w-5 shrink-0 items-center justify-center rounded-full border border-status-error/35 bg-status-error/10 text-[11px] font-semibold text-status-error" aria-label="needs attention">
         !
       </span>
     )
   }
   return (
-    <span className="flex h-5 w-5 items-center justify-center rounded-full border border-status-success/35 bg-status-success/10 text-[11px] font-semibold text-status-success" aria-label="done">
+    <span className="flex h-5 w-5 shrink-0 items-center justify-center rounded-full border border-status-success/35 bg-status-success/10 text-[11px] font-semibold text-status-success" aria-label="done">
       ✓
     </span>
   )

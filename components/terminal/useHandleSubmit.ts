@@ -62,6 +62,11 @@ export function useHandleSubmit(deps: SubmitDeps) {
     terminalStore.update(projectName, (s) => ({
       history: [...s.history, { role: 'user', text, imageUrls: imageUrls.length > 0 ? imageUrls : undefined }],
       lastStats: null,
+      // A fresh user submit clears any prior error banner and re-arms the
+      // one-shot auto-retry budget. (Auto-resumes from the error path do
+      // come through here too, but they reuse the existing `autoRetryUsed`
+      // bit on `lastError` — see the done handler for that flag.)
+      lastError: null,
     }))
 
     try {

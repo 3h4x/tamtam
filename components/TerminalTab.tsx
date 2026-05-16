@@ -103,6 +103,7 @@ export function TerminalTab({ projectName, initialSessionId }: TerminalTabProps)
     selectedItems,
     selectedDocs,
     pendingAutoSubmit,
+    lastError,
   } = state
 
   const setSelectedItems = (v: SkillItem[] | ((prev: SkillItem[]) => SkillItem[])) =>
@@ -431,6 +432,21 @@ export function TerminalTab({ projectName, initialSessionId }: TerminalTabProps)
     setTimeout(() => inputRef.current?.focus(), 50)
   }
 
+  // Resume the most recent user prompt against the existing session. Used by
+  // the error banner; safe to call regardless of `lastError.kind` (manual
+  // resume is the user's explicit decision, so it bypasses the auto-retry
+  // budget tracked on `lastError.autoRetryUsed`).
+  const handleResume = useCallback(() => {
+    const lastUserText = [...history].reverse().find((e) => e.role === 'user')?.text ?? ''
+    if (!lastUserText) return
+    terminalStore.update(projectName, () => ({ lastError: null }))
+    handleSubmit(lastUserText)
+  }, [history, projectName, handleSubmit])
+
+  const handleDismissError = useCallback(() => {
+    terminalStore.update(projectName, () => ({ lastError: null }))
+  }, [projectName])
+
   const [showCloseStale, setShowCloseStale] = useState(false)
   const [closeStaleFindings, setCloseStaleFindings] = useState('')
   const [closeStaleReason, setCloseStaleReason] = useState<'stale' | 'duplicate' | 'wontfix' | 'fixed'>('stale')
@@ -602,6 +618,9 @@ export function TerminalTab({ projectName, initialSessionId }: TerminalTabProps)
           onClearQueueItem={(idx) => setMessageQueue(prev => prev.filter((_, j) => j !== idx))}
           onCancel={handleCancel}
           termRef={termRef}
+          lastError={lastError}
+          onResume={handleResume}
+          onDismissError={handleDismissError}
         />
 
         <TerminalInput
