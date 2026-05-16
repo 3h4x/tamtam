@@ -190,6 +190,7 @@ const SETTING_KEYS = [
   'pipeline_model_fix',
   'pipeline_model_dod',
   'pipeline_model_commit',
+  'project_sweep_enabled',
   'dirty_worktree_block_threshold',
   'incremental_review_enabled',
   'retrieval_enabled',
@@ -315,7 +316,7 @@ function validateAndSerializeSettingValue(
     return parseUnitFloatSetting(value, key);
   }
 
-  if (key === 'retrieval_enabled' || key === 'retrieval_manage_ollama') {
+  if (key === 'retrieval_enabled' || key === 'retrieval_manage_ollama' || key === 'project_sweep_enabled') {
     return parseBooleanSetting(value, key);
   }
 

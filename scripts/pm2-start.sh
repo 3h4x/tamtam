@@ -23,6 +23,18 @@ HOST="${HOST:-127.0.0.1}"
 NAME="tamtam"
 NEXT_BIN="$PWD/node_modules/next/dist/bin/next"
 
+# Pin workflow runtime data dir BEFORE PM2 starts the process. `next.config.ts`
+# sets these too, but that only takes effect inside the Node process — PM2's
+# saved env snapshot is the one the workflow runtime sees on its first read,
+# and a stale `.next/workflow-data` value from a legacy launch was orphaning
+# every release that ran across a rebuild (the build wipes `.next/`).
+# Setting them here makes PM2 record the durable value in its snapshot so
+# `--update-env` refreshes do the right thing too.
+export WORKFLOW_TARGET_WORLD="${WORKFLOW_TARGET_WORLD:-local}"
+if [ "$WORKFLOW_TARGET_WORLD" = "local" ]; then
+  export WORKFLOW_LOCAL_DATA_DIR="${WORKFLOW_LOCAL_DATA_DIR:-data/workflow-data}"
+fi
+
 if [ ! -x "$NEXT_BIN" ] && [ ! -f "$NEXT_BIN" ]; then
   echo "[pm2-start] next binary not found at $NEXT_BIN — run pnpm install first" >&2
   exit 1

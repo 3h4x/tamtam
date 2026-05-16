@@ -150,6 +150,7 @@ describe('config', () => {
         pipeline_model_fix: '',
         pipeline_model_dod: '',
         pipeline_model_commit: '',
+        project_sweep_enabled: false,
         review_retry_on_parse_failure: true,
         dirty_worktree_block_threshold: 1,
         incremental_review_enabled: true,
@@ -723,6 +724,15 @@ describe('config', () => {
         release_aborted: 0,
         fix_loop_exhausted: 30,
       });
+    });
+  });
+
+  describe('project sweep settings', () => {
+    it('parses project_sweep_enabled from DB as a boolean', async () => {
+      await setSetting('project_sweep_enabled', 'true');
+      await refresh();
+
+      expect(getSettings().project_sweep_enabled).toBe(true);
     });
   });
 

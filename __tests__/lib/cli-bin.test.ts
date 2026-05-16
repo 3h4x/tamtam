@@ -78,6 +78,7 @@ function makeSettings(overrides: Partial<TamTamConfig> = {}): TamTamConfig {
     retrieval_manage_ollama: true,
     outcome_classifier_enabled: true,
     outcome_classifier_model: 'gemma3:4b',
+    project_sweep_enabled: false,
     ...overrides,
   };
 }

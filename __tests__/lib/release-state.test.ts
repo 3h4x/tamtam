@@ -7,6 +7,7 @@ describe('release-state', () => {
   let listJobsMock: ReturnType<typeof vi.fn>
   let getVerdictMock: ReturnType<typeof vi.fn>
   let isReviewedMock: ReturnType<typeof vi.fn>
+  let getDefaultBranchSyncMock: ReturnType<typeof vi.fn>
 
   beforeEach(async () => {
     vi.resetModules()
@@ -14,6 +15,7 @@ describe('release-state', () => {
     listJobsMock = vi.fn().mockReturnValue([])
     getVerdictMock = vi.fn().mockReturnValue(null)
     isReviewedMock = vi.fn().mockResolvedValue(false)
+    getDefaultBranchSyncMock = vi.fn().mockReturnValue('main')
 
     vi.doMock('@/lib/shared/shell', () => ({ exec: execMock }))
     vi.doMock('@/lib/jobs/job-storage', () => ({
@@ -22,6 +24,9 @@ describe('release-state', () => {
     }))
     vi.doMock('@/lib/git/git-utils', () => ({
       isReviewed: isReviewedMock,
+    }))
+    vi.doMock('@/lib/git/git-branch', () => ({
+      getDefaultBranchSync: getDefaultBranchSyncMock,
     }))
 
     ;({ hasFreshLgtm, hasLocalCommitsAhead } = await import('@/lib/pipeline/release-state'))
@@ -99,16 +104,44 @@ describe('release-state', () => {
     )
   })
 
-  it('returns false for zero, invalid output, non-zero exit, and shell failures', async () => {
+  it('returns false for zero or invalid stdout from the upstream check', async () => {
     execMock
       .mockResolvedValueOnce({ exitCode: 0, stdout: '0\n', stderr: '' })
       .mockResolvedValueOnce({ exitCode: 0, stdout: 'not-a-number\n', stderr: '' })
-      .mockResolvedValueOnce({ exitCode: 1, stdout: '7\n', stderr: 'fatal' })
-      .mockRejectedValueOnce(new Error('spawn failed'))
 
     await expect(hasLocalCommitsAhead('/repo/proj')).resolves.toBe(false)
     await expect(hasLocalCommitsAhead('/repo/proj')).resolves.toBe(false)
+  })
+
+  it('falls back to <defaultBranch>..HEAD when the working branch has no upstream', async () => {
+    // First call: @{u}..HEAD fails (no upstream configured)
+    // Second call: main..HEAD reports 3 commits ahead
+    execMock
+      .mockResolvedValueOnce({ exitCode: 128, stdout: '', stderr: "fatal: no upstream configured for branch 'fix/foo'" })
+      .mockResolvedValueOnce({ exitCode: 0, stdout: '3\n', stderr: '' })
+
+    await expect(hasLocalCommitsAhead('/repo/proj')).resolves.toBe(true)
+    expect(execMock).toHaveBeenNthCalledWith(2,
+      'git',
+      ['-C', '/repo/proj', 'rev-list', '--count', 'main..HEAD'],
+      { timeout: 5000 },
+    )
+    expect(getDefaultBranchSyncMock).toHaveBeenCalledWith('/repo/proj')
+  })
+
+  it('returns false when both upstream and default-branch checks fail', async () => {
+    execMock
+      .mockRejectedValueOnce(new Error('spawn failed'))
+      .mockResolvedValueOnce({ exitCode: 128, stdout: '', stderr: 'fatal' })
+
     await expect(hasLocalCommitsAhead('/repo/proj')).resolves.toBe(false)
+  })
+
+  it('returns false when default-branch fallback reports 0 commits ahead', async () => {
+    execMock
+      .mockResolvedValueOnce({ exitCode: 128, stdout: '', stderr: 'no upstream' })
+      .mockResolvedValueOnce({ exitCode: 0, stdout: '0\n', stderr: '' })
+
     await expect(hasLocalCommitsAhead('/repo/proj')).resolves.toBe(false)
   })
 })

@@ -77,6 +77,7 @@ interface SettingsMap {
   pipeline_model_fix: string
   pipeline_model_dod: string
   pipeline_model_commit: string
+  project_sweep_enabled: string
   dirty_worktree_block_threshold: string
   incremental_review_enabled: string
   retrieval_enabled: string

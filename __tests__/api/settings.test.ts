@@ -318,6 +318,22 @@ describe('settings API', () => {
       });
     });
 
+    it('updates project sweep settings and returns their canonical values', async () => {
+      const request = new NextRequest('http://localhost/api/settings', {
+        method: 'PATCH',
+        body: JSON.stringify({ project_sweep_enabled: true }),
+      });
+      const response = await PATCH(request);
+      expect(response.status).toBe(200);
+
+      const rows = await sharedHandle.db.select().from(schema.settings);
+      const map = Object.fromEntries(rows.map((r) => [r.key, r.value]));
+      expect(map.project_sweep_enabled).toBe('true');
+
+      const data = await response.json();
+      expect(data.settings.project_sweep_enabled).toBe('true');
+    });
+
     it('rejects invalid retrieval settings', async () => {
       const response = await PATCH(new NextRequest('http://localhost/api/settings', {
         method: 'PATCH',
