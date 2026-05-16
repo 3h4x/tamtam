@@ -32,7 +32,12 @@ async function gatherView(name: string): Promise<ProjectSweepView | null> {
   const currentBranch = getCurrentBranchSync(path) || '';
   const defaultBranch = getDefaultBranchSync(path) || 'main';
 
-  const status = await gitOk(path, ['status', '--porcelain']);
+  // `--ignore-submodules` to match `startProjectReview`'s scope — a modified
+  // submodule pointer is not reviewable. Without this flag, the sweep counts
+  // submodule changes as work and dispatches a release, but every review
+  // preflight reports "No uncommitted changes or unpushed commits to review"
+  // and the release orphans. Loop forever.
+  const status = await gitOk(path, ['status', '--porcelain', '--ignore-submodules']);
   const uncommittedCount = status ? status.split('\n').filter((l) => l.trim().length > 0).length : 0;
 
   let hasUnpushedCommits = false;
