@@ -125,6 +125,45 @@ Persisted dedupe state for outbound webhook throttling.
 
 ---
 
+### `job_completion_events`
+
+Durable event log for job-completion trigger migration. Rows are written when a job reaches a terminal state; the probe sweep consumes unhandled rows and dispatches release-after-run, release-after-fix-CI, or auto-resume routing when the matching legacy inline hook is disabled.
+
+| Column | Type | Default | Notes |
+|--------|------|---------|-------|
+| `id` | SERIAL | — | PRIMARY KEY |
+| `jobId` | TEXT | — | unique job id that emitted the event |
+| `kind` | TEXT | — | job kind at completion time |
+| `exitCode` | INTEGER | — | nullable terminal exit code |
+| `project` | TEXT | — | owning project |
+| `releaseId` | TEXT | — | nullable release meta-job id |
+| `ghIssueNumber` | INTEGER | — | nullable linked GitHub issue number |
+| `emittedAt` | REAL | — | Unix timestamp (seconds) |
+| `consumedBy` | TEXT | — | nullable consumer tag once handled |
+| `consumedAt` | REAL | — | nullable Unix timestamp (seconds) when consumed |
+
+Indexes: unique `job_completion_events_job_id` on `jobId`; `job_completion_events_unconsumed` on `(consumedBy, emittedAt)`.
+
+---
+
+### `pipeline_lock_events`
+
+Durable event log for pipeline-lock release recovery. `releaseLock` and stale-lock self-healing write rows when a project lock is dropped. The probe sweep consumes unhandled rows and drains pending releases before queued agent runs for the project when `legacy_pipeline_lock_inline_drain_enabled` is disabled.
+
+| Column | Type | Default | Notes |
+|--------|------|---------|-------|
+| `id` | SERIAL | — | PRIMARY KEY |
+| `project` | TEXT | — | project whose lock was released |
+| `releasedByJobId` | TEXT | — | nullable job id that previously held the lock |
+| `reason` | TEXT | — | release reason, such as `released`, `heal:holder_finished`, or `heal:holder_missing` |
+| `emittedAt` | REAL | — | Unix timestamp (seconds) |
+| `consumedBy` | TEXT | — | nullable consumer tag once handled |
+| `consumedAt` | REAL | — | nullable Unix timestamp (seconds) when consumed |
+
+Index: `pipeline_lock_events_unconsumed` on `(consumedBy, emittedAt)`.
+
+---
+
 ### `maintenance_status`
 
 Persisted latest-status records for server maintenance tasks. Values are JSON payloads so narrowly scoped maintenance subsystems can evolve their summary shape without a schema change.

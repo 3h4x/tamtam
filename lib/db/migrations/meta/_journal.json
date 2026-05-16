@@ -29,6 +29,13 @@
       "when": 1778961112669,
       "tag": "0003_stale_bulldozer",
       "breakpoints": true
+    },
+    {
+      "idx": 4,
+      "version": "7",
+      "when": 1778966126776,
+      "tag": "0004_lonely_earthquake",
+      "breakpoints": true
     }
   ]
 }

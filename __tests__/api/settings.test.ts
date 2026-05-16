@@ -341,6 +341,7 @@ describe('settings API', () => {
           legacy_completion_hook_release_after_run_enabled: false,
           legacy_completion_hook_release_after_fix_ci_enabled: false,
           legacy_completion_hook_auto_resume_enabled: false,
+          legacy_pipeline_lock_inline_drain_enabled: false,
         }),
       });
       const response = await PATCH(request);
@@ -351,17 +352,20 @@ describe('settings API', () => {
       expect(map.legacy_completion_hook_release_after_run_enabled).toBe('false');
       expect(map.legacy_completion_hook_release_after_fix_ci_enabled).toBe('false');
       expect(map.legacy_completion_hook_auto_resume_enabled).toBe('false');
+      expect(map.legacy_pipeline_lock_inline_drain_enabled).toBe('false');
 
       const patchData = await response.json();
       expect(patchData.settings.legacy_completion_hook_release_after_run_enabled).toBe('false');
       expect(patchData.settings.legacy_completion_hook_release_after_fix_ci_enabled).toBe('false');
       expect(patchData.settings.legacy_completion_hook_auto_resume_enabled).toBe('false');
+      expect(patchData.settings.legacy_pipeline_lock_inline_drain_enabled).toBe('false');
 
       const getResponse = await GET();
       const getData = await getResponse.json();
       expect(getData.settings.legacy_completion_hook_release_after_run_enabled).toBe('false');
       expect(getData.settings.legacy_completion_hook_release_after_fix_ci_enabled).toBe('false');
       expect(getData.settings.legacy_completion_hook_auto_resume_enabled).toBe('false');
+      expect(getData.settings.legacy_pipeline_lock_inline_drain_enabled).toBe('false');
     });
 
     it('rejects invalid retrieval settings', async () => {

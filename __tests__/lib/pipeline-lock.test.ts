@@ -11,6 +11,7 @@ const mocks = vi.hoisted(() => {
     dbRef: { current: null as unknown as TestDbHandle['db'] },
     drainProjectRecoveryWork: vi.fn().mockResolvedValue(undefined),
     drainNextAgentRun: vi.fn().mockResolvedValue(undefined),
+    legacyInlineDrainEnabled: true,
   };
 });
 
@@ -28,6 +29,17 @@ vi.mock('@/lib/pipeline/recovery-drain', () => ({
 vi.mock('@/lib/agents/pending-agent-run', () => ({
   drainNextAgentRun: mocks.drainNextAgentRun,
 }));
+
+vi.mock('@/lib/shared/config', async () => {
+  const actual = await vi.importActual<typeof import('@/lib/shared/config')>('@/lib/shared/config');
+  return {
+    ...actual,
+    getSettings: () => ({
+      ...actual.buildConfigFromSettingsMap({}),
+      legacy_pipeline_lock_inline_drain_enabled: mocks.legacyInlineDrainEnabled,
+    }),
+  };
+});
 
 // Import the subject and the modules it touches once at top-scope. They will
 // all see the mocked `@/lib/db` (and friends).
@@ -49,6 +61,17 @@ async function applyDdl(handle: TestDbHandle): Promise<void> {
       project text PRIMARY KEY,
       locked_by_job_id text NOT NULL,
       acquired_at double precision NOT NULL
+    )
+  `));
+  await handle.db.execute(sql.raw(`
+    CREATE TABLE IF NOT EXISTS pipeline_lock_events (
+      id serial PRIMARY KEY,
+      project text NOT NULL,
+      released_by_job_id text,
+      reason text NOT NULL,
+      emitted_at double precision NOT NULL,
+      consumed_by text,
+      consumed_at double precision
     )
   `));
   await handle.db.execute(sql.raw(`
@@ -128,9 +151,11 @@ describe('pipeline-lock', () => {
     await handle.db.execute(sql.raw(
       'TRUNCATE pipeline_locks, jobs, settings, projects',
     ));
+    await handle.db.execute(sql.raw('TRUNCATE pipeline_lock_events RESTART IDENTITY'));
     jobsCache.clear();
     mocks.drainProjectRecoveryWork.mockReset().mockResolvedValue(undefined);
     mocks.drainNextAgentRun.mockReset().mockResolvedValue(undefined);
+    mocks.legacyInlineDrainEnabled = true;
   });
 
   async function insertJob(
@@ -189,6 +214,25 @@ describe('pipeline-lock', () => {
       await insertLock('proj', 'old-release', Date.now() / 1000 - 5);
       await insertJob('old-release', 'proj', 'release', Date.now() / 1000 - 200, Date.now() / 1000 - 10);
       expect(await getLock('proj')).toBeNull();
+    });
+
+    it('self-heal emits an event but skips inline drain when the legacy flag is disabled', async () => {
+      mocks.legacyInlineDrainEnabled = false;
+      await insertLock('proj', 'old-release', Date.now() / 1000 - 5);
+      await insertJob('old-release', 'proj', 'release', Date.now() / 1000 - 200, Date.now() / 1000 - 10);
+
+      expect(await getLock('proj')).toBeNull();
+      await vi.waitFor(async () => {
+        const rows = await handle.db.select().from(schema.pipelineLockEvents);
+        expect(rows).toHaveLength(1);
+        expect(rows[0]).toMatchObject({
+          project: 'proj',
+          releasedByJobId: 'old-release',
+          reason: 'heal:holder_finished',
+        });
+      }, { interval: 1 });
+      await new Promise<void>((r) => setImmediate(r));
+      expect(mocks.drainProjectRecoveryWork).not.toHaveBeenCalled();
     });
 
     it('self-heal keeps a pending release queued when the drain is pause-blocked', async () => {
@@ -346,6 +390,24 @@ describe('pipeline-lock', () => {
         () => expect(mocks.drainProjectRecoveryWork).toHaveBeenCalledWith('proj', '[pipeline-lock]'),
         { interval: 1 },
       );
+    });
+
+    it('emits an event but skips inline drain when the legacy flag is disabled', async () => {
+      mocks.legacyInlineDrainEnabled = false;
+      await acquireLock('proj', 'job-drain');
+      await releaseLock('proj', 'job-drain');
+
+      await vi.waitFor(async () => {
+        const rows = await handle.db.select().from(schema.pipelineLockEvents);
+        expect(rows).toHaveLength(1);
+        expect(rows[0]).toMatchObject({
+          project: 'proj',
+          releasedByJobId: 'job-drain',
+          reason: 'released',
+        });
+      }, { interval: 1 });
+      await new Promise<void>((r) => setImmediate(r));
+      expect(mocks.drainProjectRecoveryWork).not.toHaveBeenCalled();
     });
 
     it('does not call the recovery drain when the wrong job tries to release', async () => {

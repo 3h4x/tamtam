@@ -113,6 +113,7 @@ Manual sync behavior:
 | `legacy_completion_hook_release_after_run_enabled` | boolean | `true` | Runtime kill switch for the legacy job-completion release-after-run hook while release triggering migrates to the workflow event router. Set to `false` to stop the completion hook without redeploying |
 | `legacy_completion_hook_release_after_fix_ci_enabled` | boolean | `true` | Runtime kill switch for the legacy job-completion release-after-fix-CI hook while fix-CI release chaining migrates to the workflow event router. Set to `false` to stop the completion hook without redeploying |
 | `legacy_completion_hook_auto_resume_enabled` | boolean | `true` | Runtime kill switch for the legacy job-completion auto-resume hook while interrupted run recovery migrates to the workflow event router. Set to `false` to stop the completion hook without redeploying |
+| `legacy_pipeline_lock_inline_drain_enabled` | boolean | `true` | Runtime kill switch for the inline pending-release and queued-agent drain that fires when a pipeline lock is released or self-healed. Set to `false` to route lock-release recovery through durable `pipeline_lock_events` consumption instead |
 
 ### Notifications
 
@@ -336,6 +337,7 @@ review_fix_max_iterations, release_wall_clock_timeout_minutes,
 legacy_completion_hook_release_after_run_enabled,
 legacy_completion_hook_release_after_fix_ci_enabled,
 legacy_completion_hook_auto_resume_enabled,
+legacy_pipeline_lock_inline_drain_enabled,
 agent_templates, log_retention_count, log_retention_days,
 job_row_retention_days, workflow_run_retention_days,
 backup_retention_count, backup_retention_weekly_count,
