@@ -158,6 +158,25 @@ describe('consumeJobCompletionEvents', () => {
     await handle[Symbol.asyncDispose]();
   });
 
+  it('dispatches release-after-run BEFORE draining the agent queue on agent successes', async () => {
+    // Regression for "durable agent drain overtakes release": the legacy
+    // lifecycle hook ran release-after-run first so startRelease could
+    // acquire the project lock before the next queued agent fired. The
+    // router must preserve that ordering.
+    const { handle, dispatchReleaseAfterRun, drainNextAgentRun } = await withTestDbAndStubs({ getJobKind: 'agent:foo' });
+    await insertEvent(handle, { jobId: 'proj-agent:foo-ok', kind: 'agent:foo' });
+
+    const callOrder: string[] = [];
+    dispatchReleaseAfterRun.mockImplementation(async () => { callOrder.push('release-after-run'); return { dispatched: true, reason: 'stub' }; });
+    drainNextAgentRun.mockImplementation(async () => { callOrder.push('agent-drain'); });
+
+    const { consumeJobCompletionEvents } = await import('@/lib/workflows/triggers/job-completion-router');
+    await consumeJobCompletionEvents();
+
+    expect(callOrder).toEqual(['release-after-run', 'agent-drain']);
+    await handle[Symbol.asyncDispose]();
+  });
+
   it('drains the per-project agent queue on agent kinds when its kill switch is off', async () => {
     const { handle, drainNextAgentRun } = await withTestDbAndStubs({ getJobKind: 'agent:foo' });
     await insertEvent(handle, { jobId: 'proj-agent:foo-1', kind: 'agent:foo' });

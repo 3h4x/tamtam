@@ -152,6 +152,15 @@ describe('probeJobStatus', () => {
       expect(markDoneMock).toHaveBeenCalledWith(job, -1);
     });
 
+    it('pid=0, age >= 30s, test with recently written log → still running', async () => {
+      const logPath = join(tempDir, 'long-running-test.log');
+      writeFileSync(logPath, 'streamed output\n');
+      const job = makeJob({ kind: 'test', pid: 0, logPath, startedAt: Date.now() / 1000 - 60 });
+      const result = await probeJobStatus(job);
+      expect(result).toBe('running');
+      expect(markDoneMock).not.toHaveBeenCalled();
+    });
+
     it('pid=0, age >= 30s, action → marks done -1', async () => {
       const job = makeJob({ kind: 'action', pid: 0, startedAt: Date.now() / 1000 - 60 });
       const result = await probeJobStatus(job);
