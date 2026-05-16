@@ -202,13 +202,28 @@ describe('decideNextPhase', () => {
       })).toEqual({ next: 'done', from: 'mark-dod' });
     });
 
-    it('mark-dod exit nonzero → done (mark-dod failure is non-fatal)', () => {
+    it('mark-dod exit nonzero + auto-merge + PR → still pr-wait', () => {
+      // Regression for "mark-dod-coercion-skips-auto-merge": mark-dod's
+      // exit code is non-fatal (its job is to tick checkboxes; the push
+      // already landed). Auto-merge releases must still poll the PR
+      // regardless of mark-dod's exit, otherwise a PM2 restart that
+      // exits mark-dod with -1 strands the PR open forever.
       expect(decideNextPhase({
         kind: 'mark-dod',
         exitCode: 1,
         verdict: null,
         pushPrContext: pr,
         autoPrMergeEnabled: true,
+      })).toEqual({ next: 'pr-wait', from: 'mark-dod', pr });
+    });
+
+    it('mark-dod exit nonzero without auto-merge → done', () => {
+      expect(decideNextPhase({
+        kind: 'mark-dod',
+        exitCode: 1,
+        verdict: null,
+        pushPrContext: pr,
+        autoPrMergeEnabled: false,
       })).toEqual({ next: 'done', from: 'mark-dod' });
     });
   });

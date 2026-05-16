@@ -56,6 +56,9 @@ export async function POST(
 
   const r = launchPrWait(projectName, prNumber, prRepo, prUrl);
   if ('error' in r) {
+    if (r.error === 'jobs paused') {
+      return NextResponse.json({ error: r.error }, { status: 409 });
+    }
     return NextResponse.json({ error: r.error }, { status: 500 });
   }
   return NextResponse.json({ status: 'started', jobId: r.jobId, prNumber, prRepo, prUrl });

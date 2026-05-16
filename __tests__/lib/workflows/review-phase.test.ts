@@ -6,6 +6,9 @@ const startProjectReviewMock = vi.fn();
 const waitForJobCompletionMock = vi.fn();
 const getJobMock = vi.fn();
 const getVerdictMock = vi.fn();
+const updateJobMock = vi.fn();
+const markDoneMock = vi.fn();
+const appendRedactedFileSyncMock = vi.fn();
 
 vi.mock('@/lib/pipeline/start-review', () => ({
   startProjectReview: (...args: unknown[]) => startProjectReviewMock(...args),
@@ -18,6 +21,12 @@ vi.mock('@/lib/workflows/wait-for-job', () => ({
 vi.mock('@/lib/jobs/job-storage', () => ({
   getJob: (...args: unknown[]) => getJobMock(...args),
   getVerdict: (...args: unknown[]) => getVerdictMock(...args),
+  updateJob: (...args: unknown[]) => updateJobMock(...args),
+  markDone: (...args: unknown[]) => markDoneMock(...args),
+}));
+
+vi.mock('@/lib/jobs/redacted-log-writer', () => ({
+  appendRedactedFileSync: (...args: unknown[]) => appendRedactedFileSyncMock(...args),
 }));
 
 import { releaseReviewPhaseWorkflow } from '@/lib/workflows/phases/review-phase';
@@ -28,6 +37,9 @@ describe('releaseReviewPhaseWorkflow', () => {
     waitForJobCompletionMock.mockReset();
     getJobMock.mockReset();
     getVerdictMock.mockReset();
+    updateJobMock.mockReset();
+    markDoneMock.mockReset().mockResolvedValue(undefined);
+    appendRedactedFileSyncMock.mockReset();
   });
 
   function startOk() {
@@ -131,6 +143,45 @@ describe('releaseReviewPhaseWorkflow', () => {
       detail: 'Review already running for test-tt',
       blockingJobId: 'existing-1',
     });
+  });
+
+  it('finalizes the release when start_failed and releaseJobId is set (prereq strand fix)', async () => {
+    // Regression for #171: a failed review prereq returned ok:false without
+    // any in-flight child job, leaving the release running until the wall-
+    // clock timeout 90 min later. The phase must drive the release to a
+    // terminal state immediately.
+    startProjectReviewMock.mockResolvedValue({
+      ok: false,
+      status: 500,
+      detail: 'review_prerequisite_command exited 2',
+    });
+    getJobMock.mockReturnValue({
+      id: 'release-1', kind: 'release', finishedAt: null,
+      contextMeta: null, logPath: '/tmp/release.log', project: 'p',
+    });
+
+    const r = await releaseReviewPhaseWorkflow('test-tt', 'release-1');
+    expect(r.ok).toBe(false);
+    expect(markDoneMock).toHaveBeenCalledWith(
+      expect.objectContaining({ id: 'release-1' }),
+      1,
+    );
+    // Stop reason persisted onto the release row.
+    expect(updateJobMock).toHaveBeenCalledWith(expect.objectContaining({
+      id: 'release-1',
+      contextMeta: expect.stringContaining('releaseStopReason'),
+    }));
+  });
+
+  it('does not call markDone when start_failed but no releaseJobId', async () => {
+    startProjectReviewMock.mockResolvedValue({
+      ok: false,
+      status: 400,
+      detail: 'no changes to review',
+    });
+    const r = await releaseReviewPhaseWorkflow('test-tt');
+    expect(r.ok).toBe(false);
+    expect(markDoneMock).not.toHaveBeenCalled();
   });
 
   it('omits blockingJobId when start_failed has none (e.g. no changes)', async () => {

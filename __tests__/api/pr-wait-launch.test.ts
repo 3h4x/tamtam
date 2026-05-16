@@ -89,4 +89,17 @@ describe('POST /api/projects/by-project/{projectName}/pr-wait', () => {
     );
     expect(res.status).toBe(500);
   });
+
+  it('returns 409 when jobs are paused', async () => {
+    launchPrWaitMock.mockReturnValue({ error: 'jobs paused' });
+    const res = await POST(
+      new NextRequest('http://localhost/api/projects/by-project/p/pr-wait', {
+        method: 'POST',
+        body: JSON.stringify({ prNumber: 42, prRepo: 'owner/repo', prUrl: 'https://x/pull/42' }),
+      }),
+      { params: Promise.resolve({ projectName: 'p' }) },
+    );
+    expect(res.status).toBe(409);
+    await expect(res.json()).resolves.toEqual({ error: 'jobs paused' });
+  });
 });

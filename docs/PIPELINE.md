@@ -188,10 +188,13 @@ FIX-PUSH
 ```
 
 MARK-DOD
-  ├─ exit 0  → completion hook
-  │   ├─ auto_pr_merge_enabled → start PR-MERGE-WAIT
-  │   └─ otherwise             → finalize release (exit 0)
-  └─ exit ≠0 → finalize release (exit 0)  ← non-fatal, pipeline still succeeds
+  ├─ auto_pr_merge_enabled + PR context → start PR-MERGE-WAIT
+  └─ otherwise                          → finalize release (exit 0)
+
+`mark-dod` is non-fatal: its exit code is ignored for phase routing because
+its job is to tick acceptance-criteria checkboxes after the push has already
+landed. If auto-merge is enabled and the push produced or reused a PR, TamTam
+still continues into `pr-wait` even when `mark-dod` exits nonzero.
 
 PR-MERGE-WAIT
   ├─ CI passes → merge PR → switch to default branch → finalize release (exit 0)
@@ -262,6 +265,15 @@ Called by `markDone()` after every job finishes. Hooks run in order:
 11. **Fix-CI auto-retry**: If `fix-ci` exits ≠0 within ~5 s of starting (boot crash): schedule retry after 500–3000 ms backoff. Capped at 2 retries within a 120-s window. These are hardcoded constants — not user-tunable.
 12. **Fix-CI release chaining**: If `fix-ci` exits 0, TamTam immediately tries `startRelease(project, { queueIfBlocked: true, sourceJobId: fixCiJob.id })` so the uncommitted CI fix goes through the normal quality gate (`test → review → commit → push`). If release start is temporarily blocked by the same conditions as release-after-run (active pipeline lock, pause gate, budget block, retryable pre-start failure), the hook preserves that intent by setting the pending-release flag for the project.
 13. **Review-exhaustion fallback**: If a **NEEDS ATTENTION** review→fix loop hits `review_fix_max_iterations`, repeats the same findings (`reviewIsStuck`), or the fixer claims a Finding ID was fixed but the reviewer still flags it (`fixContradictsReview`): file a follow-up issue titled `chore(review): <headline-finding-id> (+N more)` using the highest-severity structured `Finding ID` as the headline (or `chore(review): <headline-finding-id>` when exactly one finding exists, or `chore(review): unresolved review` when no structured findings were extracted). The issue body contains the structured unresolved findings or a quoted prose excerpt. The issue title/body intentionally omit release handles, job IDs, exhaustion reasons, shim launch lines, stream-json telemetry, and permission-mode flags. TamTam tries to apply the canonical labels `tamtam` `review-followup` `priority-medium`, skips any of those labels that do not exist in the repo, then chains to commit + push so the partial work ships. Falls back to the legacy abort if `gh issue create` fails. These follow-up issues intentionally keep the findings under `## Problem`, then emit `## Acceptance criteria` as unchecked `- [ ]` checkboxes so `mark-dod` can parse and tick them on later work; unlike the CTO issue-planning flow, they omit `## Proposed approach` because the reviewer findings are the source of truth. **DO NOT SHIP** reviews are routed by `review_do_not_ship_action` (default `pass`): the workflow-driven orchestrator files the same follow-up issue and chains to commit; `fix` instead drives the fix loop within the same review iteration cap; `abort` retains the legacy stop-before-commit behavior.
+
+### Project sweep
+
+When `project_sweep_enabled` is on, the graphile-worker project sweep runs
+every 5 minutes. It starts release work only for non-default branches with
+local changes or unpushed commits; work on the default branch is skipped until
+a human or another explicit trigger starts a Release. For clean non-default
+branches with a ready-to-merge PR, the sweep can start `pr-wait`. The sweep
+does not dispatch release or `pr-wait` jobs while `jobs_paused` is enabled.
 
 ### Pending-release recovery
 

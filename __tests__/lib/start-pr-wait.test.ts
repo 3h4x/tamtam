@@ -29,9 +29,11 @@ const mocks = vi.hoisted(() => {
   const getJobMock = vi.fn();
   const startMarkDodMock = vi.fn();
   const resolveProjectPathMock = vi.fn();
+  const isJobsPausedMock = vi.fn().mockReturnValue(false);
   return {
     execMock, createJobMock, markDoneMock, updateJobMock,
     getJobMock, startMarkDodMock, resolveProjectPathMock,
+    isJobsPausedMock,
   };
 });
 
@@ -56,6 +58,11 @@ vi.mock('@/lib/pipeline/start-mark-dod', () => ({
 // today, but mocking it pre-empts surprises if a future dep pulls it in.
 vi.mock('@/lib/skills/tamtam-file-config', () => ({
   loadFileConfig: () => null,
+}));
+// Job-control gate — defaults to "not paused" so existing tests aren't
+// affected. The awaiting_pr_merge tests below override this.
+vi.mock('@/lib/shared/job-control', () => ({
+  isJobsPaused: mocks.isJobsPausedMock,
 }));
 
 // Import once at module scope; mocks above are hoisted before this resolves.
@@ -90,6 +97,7 @@ describe('launchPrWait', () => {
     getJobMock.mockReset();
     startMarkDodMock.mockReset();
     resolveProjectPathMock.mockReset();
+    mocks.isJobsPausedMock.mockReset().mockReturnValue(false);
 
     resolveProjectPathMock.mockReturnValue('/path/to/proj');
     createJobMock.mockImplementation(defaultCreateJob);
@@ -116,6 +124,21 @@ describe('launchPrWait', () => {
       .mockResolvedValueOnce(resp(0, '')) // pull --ff-only
       .mockResolvedValueOnce(resp(0, '')); // branch -D fix/issue-5
   }
+
+  it('refuses to start when jobs are paused (sweep-triggered call)', async () => {
+    mocks.isJobsPausedMock.mockReturnValueOnce(true);
+    const { launchPrWait } = await import('@/lib/pipeline/start-pr-wait');
+    const r = launchPrWait('proj', 123, 'owner/repo', 'https://github.com/owner/repo/pull/123');
+    expect('error' in r && r.error).toBe('jobs paused');
+    expect(mocks.createJobMock).not.toHaveBeenCalled();
+  });
+
+  it('bypasses the pause gate when allowWhilePaused (in-release continuation)', async () => {
+    mocks.isJobsPausedMock.mockReturnValueOnce(true);
+    const { launchPrWait } = await import('@/lib/pipeline/start-pr-wait');
+    const r = launchPrWait('proj', 123, 'owner/repo', 'https://github.com/owner/repo/pull/123', { allowWhilePaused: true });
+    expect('jobId' in r).toBe(true);
+  });
 
   it('returns error when project not found', async () => {
     resolveProjectPathMock.mockReturnValue(null);
@@ -885,6 +908,7 @@ describe('resumePrWait', () => {
     getJobMock.mockReset();
     startMarkDodMock.mockReset();
     resolveProjectPathMock.mockReset();
+    mocks.isJobsPausedMock.mockReset().mockReturnValue(false);
 
     resolveProjectPathMock.mockReturnValue('/path/to/proj');
     execMock.mockResolvedValue({ exitCode: 0, stdout: JSON.stringify({ state: 'MERGED', mergeable: 'MERGEABLE', statusCheckRollup: [] }), stderr: '' });

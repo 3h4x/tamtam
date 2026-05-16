@@ -1,3 +1,10 @@
+# Minimum age (in minutes) before a newly published package version is
+# installable. Defends against supply-chain attacks where a malicious
+# version gets published and consumed within minutes. Override per-package
+# with `minimumReleaseAgeExclude` if you need a same-day security patch.
+minimumReleaseAge: 10080  # minutes (7 × 24 × 60)
+minimumReleaseAgeExclude: []
+
 allowBuilds:
   '@nestjs/core': false
   '@swc/core': false
