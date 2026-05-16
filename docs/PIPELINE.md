@@ -665,7 +665,7 @@ Any `Date.now()`, `Math.random()`, settings read, env read, or branch-state read
 
 ### Visibility
 
-- **API**: `GET /api/workflow-runs` (list, supports `?limit=`) and `GET /api/workflow-runs/[runId]` (run + steps). Both decode the runtime's CBOR + devalue payload format via `lib/workflows/decode-workflow-payload.ts`.
+- **API**: `GET /api/workflow-runs` (list, supports `?limit=`) and `GET /api/workflow-runs/[runId]` (run + steps). Postgres-world rows decode the runtime's CBOR + devalue payload format via `lib/workflows/decode-workflow-payload.ts`. Local-world runs (`WORKFLOW_TARGET_WORLD=local`) are read from `WORKFLOW_LOCAL_DATA_DIR` / `data/workflow-data`, including `runs/*.json` and matching `steps/<runId>-*.json`, and decode the raw base64 `devl` payloads via `lib/workflows/local-world-runs.ts`.
 - **UI**: `/workflow-runs` lists recent runs with name/args/status/duration/completed/runId columns + name + status filters; row click → `/workflow-runs/[runId]` shows the run with all its steps, including input/output JSON.
 - **Nav**: "Workflows" link in `components/Header.tsx`.
 
