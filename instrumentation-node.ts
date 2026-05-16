@@ -348,6 +348,16 @@ export async function registerNode(): Promise<void> {
   } catch (err) {
     console.error('[boot] jobs cache load failed:', err);
   }
+  // Warm the projects cache before any worker / cron / pipeline step
+  // tries to resolve a project path. Cold cache returns null which
+  // surfaces as "project 'X' not found" from start-test / start-review,
+  // failing the workflow run and orphaning the release.
+  try {
+    const { refreshProjectsCacheSync } = await import('./lib/shared/enabled-projects');
+    await refreshProjectsCacheSync();
+  } catch (err) {
+    console.error('[boot] projects cache warm failed:', err);
+  }
   try {
     const { backfillIssueCruncherPrerequisites } = await import('./lib/agents/default-agent-skills');
     await backfillIssueCruncherPrerequisites();

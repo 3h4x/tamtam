@@ -67,7 +67,12 @@ export type StartTestResult =
   | { ok: false; status: number; detail: string; blockingJobId?: string };
 
 export async function startProjectTest(projectName: string): Promise<StartTestResult> {
-  const projPath = resolveProjectPath(projectName);
+  let projPath = resolveProjectPath(projectName);
+  if (!projPath) {
+    const { refreshProjectsCacheSync } = await import('@/lib/shared/enabled-projects');
+    await refreshProjectsCacheSync();
+    projPath = resolveProjectPath(projectName);
+  }
   if (!projPath) return { ok: false, status: 404, detail: 'project not found' };
   const gate = await checkCliStartGate('start tests', { parentJobId: currentParent() });
   if (!gate.ok) return gate;

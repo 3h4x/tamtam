@@ -275,7 +275,16 @@ export async function startProjectReview(
 
   const { logDir } = getImproveConfig();
   const reviewModel = normalizeModelInput(getPipelineModel('review'), 'normal');
-  const projPath = resolveProjectPath(projectName);
+  let projPath = resolveProjectPath(projectName);
+  if (!projPath) {
+    // Cold cache after a fresh worker boot — force a sync refresh and
+    // retry. Without this, a workflow step that runs before any HTTP
+    // handler has warmed the projects cache returns "project not found"
+    // and the release orphans.
+    const { refreshProjectsCacheSync } = await import('@/lib/shared/enabled-projects');
+    await refreshProjectsCacheSync();
+    projPath = resolveProjectPath(projectName);
+  }
   if (!projPath) {
     return { ok: false, status: 404, detail: `project '${projectName}' not found` };
   }
