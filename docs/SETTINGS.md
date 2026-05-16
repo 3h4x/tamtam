@@ -205,6 +205,15 @@ Semantic retrieval layer — embeds agent run reports plus project-scoped knowle
 | `retrieval_score_threshold` | float | `0.8` | Min similarity score to include a result |
 | `retrieval_manage_ollama` | bool | `true` | Whether TamTam starts Ollama via PM2 if not running |
 
+### Outcome Classifier
+
+After a `run` or `agent:*` job finishes, TamTam optionally classifies the final assistant message via a small local LLM (default `gemma3:4b`) on the same Ollama instance configured under Retrieval (`retrieval_ollama_url`). The verdict (`done` / `needs_continue` / `asked_question`) is stashed on the job's `contextMeta.outcomeClassification` and surfaced by the run history UI to highlight when Continue should be offered even on a clean exit.
+
+| Key | Type | Default | Description |
+|---|---|---|---|
+| `outcome_classifier_enabled` | bool | `false` | When on, classify finished `run`/`agent:*` outcomes. Requires Ollama reachable at `retrieval_ollama_url`. Off by default to avoid per-job warnings when Ollama isn't running. |
+| `outcome_classifier_model` | string | `gemma3:4b` | Ollama model used for classification. Must already be pulled on the configured Ollama. |
+
 When enabled, TamTam starts Ollama via PM2 (`ollama-serve`) on boot if not already reachable, pulls `nomic-embed-text` if not installed, and indexes completed agent run reports automatically. Use `POST /api/projects/[schedId]/retrieval/reindex` to refresh the project corpus on demand; that route reports whether sources were missing or stale before the refresh. Freshness behavior is source-specific: completed agent runs are indexed when they finish, while project docs, DB-backed skills, and synthesized project config are refreshed on explicit reindex against the current file/DB snapshot. At prompt time, TamTam records retrieval diagnostics on the run (`results`, `empty_corpus`, `no_results`, `below_threshold`, or `embed_failed`) so ineffective retrieval can be distinguished from a healthy hit.
 
 ### Durable Agent Workflows
@@ -335,7 +344,8 @@ budget_block_at_pct, budget_warn_at_pct, pipeline_model_review,
 pipeline_model_fix, pipeline_model_dod, pipeline_model_commit,
 dirty_worktree_block_threshold, incremental_review_enabled,
 retrieval_enabled, retrieval_ollama_url, retrieval_embedding_model,
-retrieval_context_limit, retrieval_score_threshold, retrieval_manage_ollama
+retrieval_context_limit, retrieval_score_threshold, retrieval_manage_ollama,
+outcome_classifier_enabled, outcome_classifier_model
 ```
 
 **POST `/api/settings/test-notification`** — sends a test notification to verify webhook connectivity. Request body: `{ webhook_url: string, webhook_secret?: string }`. Response: `{ ok: boolean, error?: string }`.

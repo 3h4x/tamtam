@@ -82,6 +82,7 @@ export {
   markJobSeen,
   markNotificationsSeen,
   syncJobBoard,
+  continueJob,
 } from './client/jobs'
 
 export {

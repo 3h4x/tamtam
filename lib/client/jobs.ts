@@ -60,6 +60,19 @@ export async function markNotificationsSeen(): Promise<{ status: string }> {
   return response.json()
 }
 
+export async function continueJob(
+  jobId: string,
+): Promise<{ status: string; job_id: string; resumed_session_id: string; resumed_from: string }> {
+  const response = await fetch(`${JOBS_BASE}/${jobId}/continue`, {
+    method: 'POST',
+  })
+  if (!response.ok) {
+    const data = await response.json().catch(() => ({}))
+    throw new Error(data.detail || `Failed to continue: ${response.statusText}`)
+  }
+  return response.json()
+}
+
 export async function syncJobBoard(jobId: string): Promise<{ status: string }> {
   const response = await fetch(`${JOBS_BASE}/${jobId}/board-sync`, {
     method: 'POST',

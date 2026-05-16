@@ -100,6 +100,8 @@ export interface TamTamConfig {
   retrieval_context_limit: number;
   retrieval_score_threshold: number;
   retrieval_manage_ollama: boolean;
+  outcome_classifier_enabled: boolean;
+  outcome_classifier_model: string;
 }
 
 const DEFAULTS: TamTamConfig = {
@@ -182,6 +184,8 @@ const DEFAULTS: TamTamConfig = {
   retrieval_context_limit: 5,
   retrieval_score_threshold: 0.8,
   retrieval_manage_ollama: true,
+  outcome_classifier_enabled: false,
+  outcome_classifier_model: 'gemma3:4b',
 };
 
 let _cache: { config: TamTamConfig; time: number } | null = null;
@@ -388,6 +392,8 @@ export function buildConfigFromSettingsMap(map: Record<string, string>): TamTamC
       return Number.isFinite(v) ? v : DEFAULTS.retrieval_score_threshold;
     })(),
     retrieval_manage_ollama: map.retrieval_manage_ollama !== 'false',
+    outcome_classifier_enabled: map.outcome_classifier_enabled === 'true',
+    outcome_classifier_model: map.outcome_classifier_model ?? DEFAULTS.outcome_classifier_model,
   };
   return config;
 }

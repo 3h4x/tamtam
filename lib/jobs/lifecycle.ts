@@ -453,6 +453,20 @@ async function runCompletionHooksInner(job: JobData): Promise<void> {
     if (release) appendToReleaseLog(release, job.kind, job);
   }
 
+  // Classify the final outcome of agent/run jobs so the UI can highlight the
+  // Continue button when the model stopped mid-task or asked a question.
+  // Fire-and-forget; never blocks completion-hook chaining.
+  if (job.kind === 'run' || job.kind.startsWith('agent:')) {
+    void (async () => {
+      try {
+        const { classifyAndStashOutcome } = await import('@/lib/jobs/outcome-classifier');
+        await classifyAndStashOutcome(job);
+      } catch (err) {
+        console.warn(`[outcome-classifier] background classification failed for ${job.id}:`, err);
+      }
+    })();
+  }
+
   // If the release was aborted while this step was running, do not chain to
   // the next step. The abort handler sets finishedAt on the release job, so
   // findActiveReleaseJob (which filters finishedAt === null) won't find it.
