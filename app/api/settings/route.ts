@@ -119,6 +119,7 @@ async function buildSettingsResponse(): Promise<Record<string, string>> {
   settings.review_fix_max_iterations = serializeSettingValue('review_fix_max_iterations', effective.review_fix_max_iterations);
   settings.review_do_not_ship_action = serializeSettingValue('review_do_not_ship_action', effective.review_do_not_ship_action);
   settings.release_wall_clock_timeout_minutes = serializeSettingValue('release_wall_clock_timeout_minutes', effective.release_wall_clock_timeout_minutes);
+  settings.plain_test_phase_enabled = serializeSettingValue('plain_test_phase_enabled', effective.plain_test_phase_enabled);
   if (effective.cli_bin_claude) {
     settings.cli_bin_claude = serializeSettingValue('cli_bin_claude', effective.cli_bin_claude);
   }
@@ -169,6 +170,7 @@ const SETTING_KEYS = [
   'legacy_completion_hook_auto_resume_enabled',
   'legacy_pipeline_lock_inline_drain_enabled',
   'legacy_completion_hook_agent_drain_enabled',
+  'plain_test_phase_enabled',
   'agent_templates',
   'log_retention_count',
   'log_retention_days',
@@ -329,7 +331,8 @@ function validateAndSerializeSettingValue(
     key === 'legacy_completion_hook_release_after_fix_ci_enabled' ||
     key === 'legacy_completion_hook_auto_resume_enabled' ||
     key === 'legacy_pipeline_lock_inline_drain_enabled' ||
-    key === 'legacy_completion_hook_agent_drain_enabled'
+    key === 'legacy_completion_hook_agent_drain_enabled' ||
+    key === 'plain_test_phase_enabled'
   ) {
     return parseBooleanSetting(value, key);
   }

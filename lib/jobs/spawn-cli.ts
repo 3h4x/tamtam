@@ -20,6 +20,7 @@ export interface RunSubprocessParams {
   env?: Record<string, string>;
   cwd?: string;
   abortSignal?: AbortSignal;
+  onSpawn?: (pid: number) => void;
 }
 
 export interface RunSubprocessResult {
@@ -33,7 +34,7 @@ function quoteArg(a: string): string {
 }
 
 export async function runSubprocess(params: RunSubprocessParams): Promise<RunSubprocessResult> {
-  const { jobId: _jobId, cmd, cmdArgs, promptPath, logPath, env, cwd, abortSignal } = params;
+  const { jobId: _jobId, cmd, cmdArgs, promptPath, logPath, env, cwd, abortSignal, onSpawn } = params;
 
   const logFd = openSync(/*turbopackIgnore: true*/ logPath, 'a');
   const writeLog = (chunk: Buffer | string) => {
@@ -75,6 +76,7 @@ export async function runSubprocess(params: RunSubprocessParams): Promise<RunSub
     }
 
     const pid = child.pid ?? 0;
+    if (pid > 0) onSpawn?.(pid);
 
     child.stdout?.on('data', writeLog);
     child.stderr?.on('data', writeLog);

@@ -157,6 +157,7 @@ describe('config', () => {
         legacy_completion_hook_auto_resume_enabled: true,
         legacy_pipeline_lock_inline_drain_enabled: true,
         legacy_completion_hook_agent_drain_enabled: true,
+        plain_test_phase_enabled: false,
         dirty_worktree_block_threshold: 1,
         incremental_review_enabled: true,
         retrieval_enabled: false,

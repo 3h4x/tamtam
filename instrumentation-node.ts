@@ -83,6 +83,12 @@ export async function runProbeSweep(): Promise<void> {
   } catch (err) {
     console.error('[probe-sweep] pipeline-lock-router error:', err);
   }
+  try {
+    const { sampleRunningJobResources } = await import('./lib/jobs/resource-sampler');
+    await sampleRunningJobResources();
+  } catch (err) {
+    console.error('[probe-sweep] resource-sampler error:', err);
+  }
 }
 
 /**

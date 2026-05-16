@@ -146,6 +146,22 @@ Indexes: unique `job_completion_events_job_id` on `jobId`; `job_completion_event
 
 ---
 
+### `job_resource_samples`
+
+Append-only per-job process resource telemetry written by the probe sweep. Each running job with a usable child PID is sampled with `ps -o %cpu=,rss= -p <pid>` so job detail views can draw CPU and resident-memory time series without an external observability backend. Nightly retention prunes samples older than `job_row_retention_days`.
+
+| Column | Type | Default | Notes |
+|--------|------|---------|-------|
+| `id` | SERIAL | — | PRIMARY KEY |
+| `jobId` | TEXT | — | job id sampled by the probe sweep |
+| `sampledAt` | REAL | — | Unix timestamp (seconds) |
+| `cpuPct` | REAL | — | nullable process CPU percent from `ps` |
+| `rssKb` | INTEGER | — | nullable resident set size in KB from `ps` |
+
+Index: `job_resource_samples_job_sampled` on `(jobId, sampledAt)`.
+
+---
+
 ### `pipeline_lock_events`
 
 Durable event log for pipeline-lock release recovery. `releaseLock` and stale-lock self-healing write rows when a project lock is dropped. The probe sweep consumes unhandled rows and drains pending releases before queued agent runs for the project when `legacy_pipeline_lock_inline_drain_enabled` is disabled.

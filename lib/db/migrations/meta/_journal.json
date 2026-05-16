@@ -36,6 +36,13 @@
       "when": 1778966126776,
       "tag": "0004_lonely_earthquake",
       "breakpoints": true
+    },
+    {
+      "idx": 5,
+      "version": "7",
+      "when": 1778968772514,
+      "tag": "0005_shiny_tyger_tiger",
+      "breakpoints": true
     }
   ]
 }

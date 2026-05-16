@@ -201,6 +201,21 @@ export const jobCompletionEvents = pgTable('job_completion_events', {
   unconsumedIdx: index('job_completion_events_unconsumed').on(t.consumedBy, t.emittedAt),
 }));
 
+// Per-job resource samples (CPU %, RSS in KB) taken from the probe sweep.
+// Each running job's PID is sampled via `ps -o %cpu,rss -p <pid>` every
+// sweep tick (~30s) so per-job and per-project resource charts are
+// possible without external observability. Append-only; prune in nightly
+// cleanup. Indexed by (jobId, sampledAt) for cheap time-series reads.
+export const jobResourceSamples = pgTable('job_resource_samples', {
+  id: serial('id').primaryKey(),
+  jobId: text('job_id').notNull(),
+  sampledAt: doublePrecision('sampled_at').notNull(),
+  cpuPct: doublePrecision('cpu_pct'),
+  rssKb: integer('rss_kb'),
+}, (t) => ({
+  jobIdSampledAtIdx: index('job_resource_samples_job_sampled').on(t.jobId, t.sampledAt),
+}));
+
 // Durable pipeline-lock-released log. Written from releaseLock /
 // selfHealStaleLock when a project's lock is dropped. A consumer
 // (probe-sweep / workflow) reads unconsumed rows and drains

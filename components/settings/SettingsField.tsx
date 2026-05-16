@@ -14,6 +14,7 @@ const BOOLEAN_SELECT_FIELD_KEYS = new Set<SettingsFieldKey>([
   'legacy_completion_hook_auto_resume_enabled',
   'legacy_pipeline_lock_inline_drain_enabled',
   'legacy_completion_hook_agent_drain_enabled',
+  'plain_test_phase_enabled',
 ])
 
 export function SettingsField({

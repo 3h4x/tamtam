@@ -597,6 +597,7 @@ Each follows the same kickoff/await/return shape (with minor variations: push/co
 | Phase | File | Result shape |
 |-------|------|--------------|
 | `test` | `test-phase.ts` | `TestPhaseResult` — `{ jobId, finished, reason, exitCode, testCmd }` |
+| `test` with `plain_test_phase_enabled=true` | `pnpm-test-phase.ts` | `PnpmTestPhaseResult` — `{ jobId, exitCode, reason }`; runs the detected test command directly without a Claude test agent |
 | `review` | `review-phase.ts` | `ReviewPhaseResult` — `{ jobId, finished, reason, exitCode, verdict }` |
 | `fix` | `fix-phase.ts` | `FixPhaseResult` — `{ jobId, sourceJobId, finished, reason, exitCode }` |
 | `push` | `push-phase.ts` | `PushPhaseResult` — `{ commitSha, message, prUrl?, prNumber?, prRepo? }` |
@@ -605,6 +606,8 @@ Each follows the same kickoff/await/return shape (with minor variations: push/co
 | `pr-wait` | `pr-wait-phase.ts` | `PrWaitPhaseResult` — `{ jobId, finished, merged, reason, exitCode }` |
 
 All seven return discriminated unions with `ok: true | false` and a `reason` for the failure branch (`start_failed` / `launch_failed` / `mark_dod_failed`). Each has a focused unit test file with directive-source guards. The push-hook fix path no longer has its own phase — hook rejections spawn the generic `fix` phase with `parentJobId` pointing at the failed push.
+
+The `plain_test_phase_enabled` setting swaps only the workflow implementation for `test`: dispatch uses `pnpm-test-phase.ts`, which detects the same project test command and records a normal `test` job/log row. The state-machine contract is unchanged: exit 0 routes to review, non-zero routes to fix, and a successful fix re-dispatches another test verification.
 
 Each spawn step wraps its `startProject*` call in `runWithParent(releaseJobId, ...)` (from `lib/jobs/parent-context.ts`) so the spawned `test`/`review`/`commit`/`push`/`fix` row inherits `release_id` correctly via `parentContext` AsyncLocalStorage. This is load-bearing for the lifecycle hook's release-linked short-circuit: a missed `release_id` causes the legacy chain to double-dispatch alongside the orchestrator.
 
