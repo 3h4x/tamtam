@@ -28,13 +28,13 @@ export async function safeStartOrchestrator(
   projectName: string,
   releaseJobId: string,
   callerTag: string,
-): Promise<void> {
+): Promise<boolean> {
   for (let attempt = 1; attempt <= 2; attempt++) {
     try {
       const { start } = await import('workflow/api');
       const { releaseOrchestratorWorkflow } = await import('@/lib/workflows/release-orchestrator');
       await start(releaseOrchestratorWorkflow, [jobId, { projectName, parentJobId: releaseJobId }]);
-      return;
+      return true;
     } catch (err) {
       if (isChunkLoadError(err) && attempt === 1) {
         const msg = err instanceof Error ? err.message : String(err);
@@ -43,7 +43,8 @@ export async function safeStartOrchestrator(
         continue;
       }
       console.error(`[${callerTag}] failed to re-dispatch orchestrator:`, err);
-      return;
+      return false;
     }
   }
+  return false;
 }

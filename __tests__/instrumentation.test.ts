@@ -199,10 +199,20 @@ describe('instrumentation', () => {
         }),
       };
 
+      const updateJobMock = vi.fn((updated: Record<string, unknown>) => {
+        const id = updated.id as string;
+        const prev = byId.get(id);
+        if (prev) {
+          Object.assign(prev, updated);
+        }
+      });
+      const safeStartOrchestratorMock = vi.fn().mockResolvedValue(true);
+
       const storageMock = {
         listJobs: vi.fn(() => jobs),
         getJob: vi.fn((id: string) => byId.get(id) ?? null),
         markDone: markDoneMock,
+        updateJob: updateJobMock,
         reconcileStaleRelease: reconcileStaleReleaseMock,
       };
 
@@ -215,31 +225,109 @@ describe('instrumentation', () => {
       vi.doMock('./lib/db', () => ({ db: dbMock, schema: { pipelineLocks: { project: 'project' } } }));
       vi.doMock('@/lib/shared/shell', () => ({ exec: execMock }));
       vi.doMock('./lib/shared/shell', () => ({ exec: execMock }));
+      vi.doMock('@/lib/workflows/safe-start-orchestrator', () => ({
+        safeStartOrchestrator: safeStartOrchestratorMock,
+      }));
+      vi.doMock('./lib/workflows/safe-start-orchestrator', () => ({
+        safeStartOrchestrator: safeStartOrchestratorMock,
+      }));
       vi.doMock('drizzle-orm', () => ({ eq: vi.fn((_a, b) => b) }));
 
-      return { execMock, markDoneMock, reconcileStaleReleaseMock, deleteRun };
+      return { execMock, markDoneMock, updateJobMock, reconcileStaleReleaseMock, safeStartOrchestratorMock, deleteRun };
     }
 
-    it('finalizes a stranded release directly via markDone after the handoff grace', async () => {
-      // After the chain-loop closure landed, reapOrphanReleases no longer
-      // delegates to reconcileStaleRelease — it calls markDone(release, -1)
-      // directly because workflow-driven releases finalize themselves and
-      // anything stranded past the grace window really did get orphaned.
+    it('resumes a stranded release via safeStartOrchestrator after the handoff grace', async () => {
+      // Phase-0 orphan-resume: instead of calling markDone(-1) on a release
+      // whose last child finished but whose orchestrator died, we dispatch
+      // a fresh orchestrator tick from the latestFinishedChild so the chain
+      // continues across the restart.
       vi.useFakeTimers();
       try {
         vi.setSystemTime(new Date('2026-05-10T12:00:00Z'));
-        const release: { id: string; project: string; kind: string; finishedAt: number | null; startedAt: number } = {
-          id: 'release-1', project: 'proj', kind: 'release', finishedAt: null, startedAt: 100,
+        const release: { id: string; project: string; kind: string; finishedAt: number | null; startedAt: number; contextMeta: string | null } = {
+          id: 'release-1', project: 'proj', kind: 'release', finishedAt: null, startedAt: 100, contextMeta: null,
         };
         const push = { id: 'push-1', project: 'proj', kind: 'push', releaseId: 'release-1', finishedAt: 150, startedAt: 140 };
-        const { markDoneMock } = mockOrphanReleaseDeps({
+        const { markDoneMock, safeStartOrchestratorMock, updateJobMock } = mockOrphanReleaseDeps({
           jobs: [release, push],
         });
 
         const { reapOrphanReleases } = await import('@/instrumentation-node');
         await reapOrphanReleases();
 
+        expect(safeStartOrchestratorMock).toHaveBeenCalledWith('push-1', 'proj', 'release-1', 'orphan-resume');
+        expect(markDoneMock).not.toHaveBeenCalled();
+        // bootRecoveryAttempts persisted via updateJob
+        const updateCall = updateJobMock.mock.calls.find((c) => (c[0] as { id: string }).id === 'release-1');
+        expect(updateCall).toBeTruthy();
+        expect(JSON.parse((updateCall![0] as { contextMeta: string }).contextMeta)).toMatchObject({ bootRecoveryAttempts: 1 });
+      } finally {
+        vi.useRealTimers();
+      }
+    });
+
+    it('reaps after MAX_BOOT_RESUMES attempts exhausted', async () => {
+      vi.useFakeTimers();
+      try {
+        vi.setSystemTime(new Date('2026-05-10T12:00:00Z'));
+        const release = {
+          id: 'release-99', project: 'proj', kind: 'release', finishedAt: null, startedAt: 100,
+          contextMeta: JSON.stringify({ bootRecoveryAttempts: 3 }),
+        } as Record<string, unknown>;
+        const push = { id: 'push-99', project: 'proj', kind: 'push', releaseId: 'release-99', finishedAt: 150, startedAt: 140 };
+        const { markDoneMock, safeStartOrchestratorMock, updateJobMock } = mockOrphanReleaseDeps({
+          jobs: [release, push],
+        });
+
+        const { reapOrphanReleases } = await import('@/instrumentation-node');
+        await reapOrphanReleases();
+
+        expect(safeStartOrchestratorMock).not.toHaveBeenCalled();
         expect(markDoneMock).toHaveBeenCalledWith(release, -1);
+        // stopReason is recorded on contextMeta before the reap
+        const updateCall = updateJobMock.mock.calls.find((c) => (c[0] as { id: string }).id === 'release-99');
+        expect(updateCall).toBeTruthy();
+        expect(JSON.parse((updateCall![0] as { contextMeta: string }).contextMeta)).toMatchObject({
+          stopReason: expect.stringContaining('exceeded boot-recovery attempts'),
+        });
+      } finally {
+        vi.useRealTimers();
+      }
+    });
+
+    it('reaps when orphan resume dispatch fails', async () => {
+      vi.useFakeTimers();
+      try {
+        vi.setSystemTime(new Date('2026-05-10T12:00:00Z'));
+        const release = {
+          id: 'release-dispatch-failed', project: 'proj', kind: 'release', finishedAt: null, startedAt: 100, contextMeta: null,
+        };
+        const push = {
+          id: 'push-dispatch-failed',
+          project: 'proj',
+          kind: 'push',
+          releaseId: 'release-dispatch-failed',
+          finishedAt: 150,
+          startedAt: 140,
+        };
+        const { markDoneMock, safeStartOrchestratorMock, updateJobMock } = mockOrphanReleaseDeps({
+          jobs: [release, push],
+        });
+        safeStartOrchestratorMock.mockResolvedValueOnce(false);
+
+        const { reapOrphanReleases } = await import('@/instrumentation-node');
+        await reapOrphanReleases();
+
+        expect(safeStartOrchestratorMock).toHaveBeenCalledWith(
+          'push-dispatch-failed',
+          'proj',
+          'release-dispatch-failed',
+          'orphan-resume',
+        );
+        expect(markDoneMock).toHaveBeenCalledWith(release, -1);
+        const updateCall = updateJobMock.mock.calls.find((c) => (c[0] as { id: string }).id === 'release-dispatch-failed');
+        expect(updateCall).toBeTruthy();
+        expect(JSON.parse((updateCall![0] as { contextMeta: string }).contextMeta)).toMatchObject({ bootRecoveryAttempts: 1 });
       } finally {
         vi.useRealTimers();
       }
