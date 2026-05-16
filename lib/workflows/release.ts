@@ -47,11 +47,6 @@ async function dispatchOrchestratorStep(
   // of any flag — gating on linkage is more robust than a stamped marker
   // (cascade #3 in the migration session was the canonical proof: stale
   // flag stamps caused double-dispatch when the spawn site lost releaseId).
-  try {
-    const { start } = await import('workflow/api');
-    const { releaseOrchestratorWorkflow } = await import('@/lib/workflows/release-orchestrator');
-    await start(releaseOrchestratorWorkflow, [firstStepJobId, { projectName, parentJobId: releaseJobId }]);
-  } catch (err) {
-    console.error('[release-workflow] failed to dispatch orchestrator child:', err);
-  }
+  const { safeStartOrchestrator } = await import('@/lib/workflows/safe-start-orchestrator');
+  await safeStartOrchestrator(firstStepJobId, projectName, releaseJobId, 'release-workflow');
 }
