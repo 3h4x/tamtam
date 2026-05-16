@@ -96,6 +96,15 @@ export function saveToDb(job: JobData): void {
   });
 }
 
+/** Block until any in-flight save for this job id has flushed. Lets
+ *  callers that need their write to be observable downstream (e.g.
+ *  `markDone` before emitting a job_completion_events row) wait without
+ *  changing the saveToDb fire-and-forget call convention. */
+export async function awaitInFlightSave(jobId: string): Promise<void> {
+  const p = inFlightSaves.get(jobId);
+  if (p) await p;
+}
+
 function doSaveToDb(job: JobData): Promise<void> {
   return db.insert(schema.jobs)
       .values({
