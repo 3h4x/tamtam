@@ -76,10 +76,19 @@ export function SettingsField({
           <option value="">{(fieldKey === 'pipeline_model_dod' || fieldKey === 'pipeline_model_commit') ? 'Default (Fast)' : 'Default (workspace)'}</option>
           {MODEL_TIERS.map((model) => <option key={model} value={model}>{MODEL_LABELS[model]}</option>)}
         </select>
+      ) : fieldKey === 'review_fix_max_iterations' ? (
+        <select value={value || '3'} onChange={(e) => onChange(fieldKey, e.target.value)} className={SELECT_CLASS}>
+          <option value="0">Infinity (no cap)</option>
+          <option value="1">1</option>
+          <option value="2">2</option>
+          <option value="3">3 (default)</option>
+          <option value="5">5</option>
+          <option value="10">10</option>
+        </select>
       ) : fieldKey === 'review_do_not_ship_action' ? (
-        <select value={value || 'pass'} onChange={(e) => onChange(fieldKey, e.target.value)} className={SELECT_CLASS}>
+        <select value={value || 'fix'} onChange={(e) => onChange(fieldKey, e.target.value)} className={SELECT_CLASS}>
+          <option value="fix">Try fix loop (default)</option>
           <option value="pass">Pass with follow-up issue</option>
-          <option value="fix">Try fix loop</option>
           <option value="abort">Abort release</option>
         </select>
       ) : BOOLEAN_SELECT_FIELD_KEYS.has(fieldKey) ? (
