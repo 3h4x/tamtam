@@ -282,6 +282,33 @@ function setStopReason(contextMeta: string | null | undefined, reason: string): 
   return JSON.stringify(parsed);
 }
 
+// Workflow-ready signal. Resolved only when getWorld().start() returns,
+// startup definitively fails, tests bypass the world, or no world is
+// configured. Boot reap + recovery drain await this so they never fire
+// before the workflow runtime has re-enqueued its persisted runs.
+const WORKFLOW_READY_WATCHDOG_MS = 60_000;
+let workflowReadyResolve: (() => void) | null = null;
+const workflowReadyPromise: Promise<void> = new Promise((resolve) => {
+  workflowReadyResolve = resolve;
+});
+function signalWorkflowReady(): void {
+  if (workflowReadyResolve) {
+    const r = workflowReadyResolve;
+    workflowReadyResolve = null;
+    r();
+  }
+}
+function armWorkflowReadyWatchdog(): void {
+  setTimeout(() => {
+    if (workflowReadyResolve) {
+      console.warn(`[boot] workflow world has not reported ready after ${WORKFLOW_READY_WATCHDOG_MS}ms; holding destructive boot recovery until startup returns or fails`);
+    }
+  }, WORKFLOW_READY_WATCHDOG_MS).unref?.();
+}
+export async function waitForWorkflowReady(): Promise<void> {
+  await workflowReadyPromise;
+}
+
 export async function reapOrphanReleases(): Promise<void> {
   try {
     const { listJobs, markDone, updateJob } = await import('./lib/jobs/job-storage');
@@ -460,16 +487,24 @@ export async function registerNode(): Promise<void> {
   }
   void backfillVerdicts();
   void reapAbandonedInlineJobs();
-  // reapOrphanReleases + drainBootRecoveryWork are intentionally delayed.
-  // The workflow runtime's world.start() re-enqueues in-flight runs (see
-  // the WORKFLOW_TARGET_WORLD block below) — if reap fires first it
-  // marks healthy mid-flight releases as orphan exit=-1 a beat before
-  // the orchestrator would have picked them back up. Deferring 8s gives
-  // the workflow runtime room to re-enqueue without racing.
-  setTimeout(() => {
+  // reapOrphanReleases + drainBootRecoveryWork must NOT run until the
+  // workflow world has finished starting and re-enqueued its persisted
+  // runs. A fixed setTimeout(8000) was insufficient because
+  // workflow-postgres-setup can take longer than 8s on cold boot — the
+  // reaper would then mark healthy mid-flight releases as orphan exit=-1
+  // a beat before the orchestrator would have picked them back up. Gate
+  // on the explicit workflow-ready signal. A watchdog logs slow starts, but
+  // it does not unblock destructive recovery: if the world is configured and
+  // still starting, reaping is more dangerous than waiting.
+  void (async () => {
+    try {
+      await waitForWorkflowReady();
+    } catch (err) {
+      console.warn('[boot] workflow-ready wait failed; running reap anyway:', err);
+    }
     void reapOrphanReleases();
     void drainBootRecoveryWork();
-  }, 8000);
+  })();
   // reinstallAgents() retired with the in-memory scheduler — graphile-cron
   // (`seedAgentCrons` below) replaces it. Scheduled agents are durable
   // across restarts via graphile-worker's persistent job queue now.
@@ -495,7 +530,22 @@ export async function registerNode(): Promise<void> {
     console.warn('[retrieval] boot check failed:', err);
   }
 
-  if (process.env.VITEST || process.env.NODE_ENV === 'test') return;
+  // Arm the watchdog before workflow startup awaits that might block. The
+  // watchdog is intentionally log-only; startup success/failure is the only
+  // signal that can release destructive boot recovery.
+  armWorkflowReadyWatchdog();
+
+  if (process.env.VITEST || process.env.NODE_ENV === 'test') {
+    // Tests don't start the world; let waiters proceed immediately.
+    signalWorkflowReady();
+    return;
+  }
+
+  // No world configured — boot reap can proceed immediately without
+  // waiting for a world that's never going to start.
+  if (!process.env.WORKFLOW_TARGET_WORLD) {
+    signalWorkflowReady();
+  }
 
   // Start workflow world (Postgres-backed durable orchestration). The world
   // is required for the only agent intake path; if WORKFLOW_TARGET_WORLD is
@@ -538,6 +588,11 @@ export async function registerNode(): Promise<void> {
       console.log('[workflow] Postgres world started');
     } catch (err) {
       console.warn('[workflow] world failed to start:', err);
+    } finally {
+      // Whether the world started cleanly or threw, unblock the boot reap.
+      // A throwing world can't recover persisted runs anyway, so the
+      // reaper claiming orphans is the correct fallback.
+      signalWorkflowReady();
     }
   }
 
