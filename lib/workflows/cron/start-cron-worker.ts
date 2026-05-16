@@ -16,6 +16,7 @@ import { run } from 'graphile-worker';
 import type { Runner, Task } from 'graphile-worker';
 import { createAgentCronTask, type AgentCronDeps, type AgentCronPayload } from '@/lib/workflows/cron/agent-cron-task';
 import { createSystemCronTask, type SystemCronDeps } from '@/lib/workflows/cron/system-cron-task';
+import { createProjectSweepTask, type ProjectSweepDeps } from '@/lib/workflows/cron/project-sweep-task';
 
 export interface StartCronWorkerOptions {
   connectionString: string;
@@ -23,6 +24,8 @@ export interface StartCronWorkerOptions {
   /** Optional — when present, registers `system-cron` in the same worker
    *  pool. If omitted, only `agent-cron` is handled. */
   systemCronDeps?: SystemCronDeps;
+  /** Optional — when present, registers `project-sweep` in the same pool. */
+  projectSweepDeps?: ProjectSweepDeps;
   /** Lower than the workflow runtime's default (10) so cron tasks can't
    *  starve the queue if many fire concurrently. */
   concurrency?: number;
@@ -65,6 +68,9 @@ export async function startCronWorker(opts: StartCronWorkerOptions): Promise<Run
   };
   if (opts.systemCronDeps) {
     taskList['system-cron'] = createSystemCronTask(opts.systemCronDeps);
+  }
+  if (opts.projectSweepDeps) {
+    taskList['project-sweep'] = createProjectSweepTask(opts.projectSweepDeps);
   }
 
   slot.startPromise = run({

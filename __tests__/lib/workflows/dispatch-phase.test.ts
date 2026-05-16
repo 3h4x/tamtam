@@ -142,8 +142,8 @@ describe('dispatchPhase', () => {
   it('dispatches releasePrWaitPhaseWorkflow with PR context', async () => {
     const pr = { prNumber: 113, prRepo: 'owner/repo', prUrl: 'https://github.com/owner/repo/pull/113' };
     const decision: NextPhase = { next: 'pr-wait', from: 'mark-dod', pr };
-    const r = await dispatchPhase(decision, { projectName: 'test-tt', pr });
-    expect(startMock).toHaveBeenCalledWith(phaseFns.prWait, ['test-tt', 113, 'owner/repo', 'https://github.com/owner/repo/pull/113']);
+    const r = await dispatchPhase(decision, { projectName: 'test-tt', pr, parentJobId: 'release-meta-1' });
+    expect(startMock).toHaveBeenCalledWith(phaseFns.prWait, ['test-tt', 113, 'owner/repo', 'https://github.com/owner/repo/pull/113', 'release-meta-1']);
     expect(r).toEqual({ dispatched: true, phase: 'pr-wait', childRunId: 'wrun_child_1' });
   });
 
@@ -165,6 +165,28 @@ describe('dispatchPhase', () => {
     expect(startMock).not.toHaveBeenCalled();
     if (!r.dispatched && r.reason === 'missing_context') {
       expect(r.missing).toContain('projectName');
+    }
+  });
+
+  it('retries once on Next.js chunk-load error then succeeds', async () => {
+    startMock
+      .mockRejectedValueOnce(new Error('Failed to load chunk server/chunks/lib_workflows_xyz._.js from module 71065'))
+      .mockResolvedValueOnce({ runId: 'wrun_after_retry' });
+    const decision: NextPhase = { next: 'review', from: 'test' };
+    const r = await dispatchPhase(decision, { projectName: 'test-tt' });
+    expect(startMock).toHaveBeenCalledTimes(2);
+    expect(r).toEqual({ dispatched: true, phase: 'review', childRunId: 'wrun_after_retry' });
+  });
+
+  it('does not retry non-chunk-load errors', async () => {
+    startMock.mockRejectedValue(new Error('something else broke'));
+    const decision: NextPhase = { next: 'review', from: 'test' };
+    const r = await dispatchPhase(decision, { projectName: 'test-tt' });
+    expect(startMock).toHaveBeenCalledOnce();
+    if (!r.dispatched && r.reason === 'dispatch_failed') {
+      expect(r.error).toBe('something else broke');
+    } else {
+      throw new Error('expected dispatch_failed');
     }
   });
 

@@ -40,7 +40,29 @@ export async function POST(
       { status: 400 },
     );
   }
-  if (!sourceJob.sessionId) {
+  let sessionId: string | null = sourceJob.sessionId ?? null;
+  if (!sessionId && sourceJob.logPath) {
+    // Job died before the stream parser flushed session_id to the DB
+    // (PM2 restart mid-stream is the common case). Fall back to reading
+    // the tail of the log file.
+    try {
+      const { existsSync, openSync, fstatSync, readSync, closeSync } = await import('fs');
+      if (existsSync(/*turbopackIgnore: true*/ sourceJob.logPath)) {
+        const fd = openSync(/*turbopackIgnore: true*/ sourceJob.logPath, 'r');
+        try {
+          const size = fstatSync(fd).size;
+          const len = Math.min(size, 8192);
+          const buf = Buffer.allocUnsafe(len);
+          readSync(fd, buf, 0, len, size - len);
+          const { findSessionIdInLog } = await import('@/lib/jobs/auto-resume');
+          sessionId = findSessionIdInLog(buf.toString('utf-8'));
+        } finally {
+          closeSync(fd);
+        }
+      }
+    } catch {}
+  }
+  if (!sessionId) {
     return NextResponse.json(
       { detail: 'source job has no sessionId — nothing to --resume' },
       { status: 400 },
@@ -99,13 +121,13 @@ export async function POST(
 
   const job = createJob(projectName, sourceJob.kind, 0, '', undefined, undefined, undefined, undefined, undefined, undefined, sourceJob.id);
   job.provider = provider;
-  job.sessionId = sourceJob.sessionId;
+  job.sessionId = sessionId;
   job.logPath = join(logDir, `${job.id}.log`);
 
   try {
     const pid = await startJobInProcess(
       job.id,
-      `${claudeBin} --print --output-format stream-json --include-partial-messages --verbose --model ${model} ${getPermissionModeFlag()} --resume ${sourceJob.sessionId}`,
+      `${claudeBin} --print --output-format stream-json --include-partial-messages --verbose --model ${model} ${getPermissionModeFlag()} --resume ${sessionId}`,
       prompt,
       projPath,
       { env: cliEnv },
@@ -126,7 +148,7 @@ export async function POST(
     status: 'started',
     job_id: job.id,
     pid: job.pid,
-    resumed_session_id: sourceJob.sessionId,
+    resumed_session_id: sessionId,
     resumed_from: sourceJob.id,
   });
 }

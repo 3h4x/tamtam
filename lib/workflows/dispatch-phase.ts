@@ -56,9 +56,18 @@ export async function dispatchPhase(
     return { dispatched: false, reason: 'missing_context', phase: decision.next, missing };
   }
 
-  try {
-    const { start } = await import('workflow/api');
-    let run;
+  // Retry once on transient chunk-load errors. Next.js sometimes throws
+  // `Failed to load chunk …` immediately after `pnpm rebuild` swaps the
+  // `.next/` artifacts while an orchestrator tick is mid-dispatch — the
+  // dynamic import resolves to a chunk path that was rewritten by the
+  // new build. A short sleep + re-import picks up the new chunk and
+  // succeeds; without this the release is silently aborted in the
+  // middle of a healthy chain.
+  let lastError: unknown = null;
+  for (let attempt = 1; attempt <= 2; attempt++) {
+    try {
+      const { start } = await import('workflow/api');
+      let run;
     switch (decision.next) {
       case 'test': {
         const { releaseTestPhaseWorkflow } = await import('@/lib/workflows/phases/test-phase');
@@ -97,23 +106,39 @@ export async function dispatchPhase(
           ctx.pr!.prNumber,
           ctx.pr!.prRepo,
           ctx.pr!.prUrl,
+          ctx.parentJobId,
         ]);
         break;
       }
     }
-    if (!run) {
-      // Type-narrowing should make this unreachable, but be defensive.
-      return { dispatched: false, reason: 'dispatch_failed', phase: decision.next, error: 'no run handle' };
+      if (!run) {
+        // Type-narrowing should make this unreachable, but be defensive.
+        return { dispatched: false, reason: 'dispatch_failed', phase: decision.next, error: 'no run handle' };
+      }
+      return { dispatched: true, phase: decision.next, childRunId: run.runId };
+    } catch (err) {
+      lastError = err;
+      const msg = err instanceof Error ? err.message : String(err);
+      const isChunkLoadError = /Failed to load chunk|Cannot find module|MODULE_NOT_FOUND/i.test(msg);
+      if (isChunkLoadError && attempt === 1) {
+        console.warn(`[dispatch-phase] chunk-load error on attempt ${attempt} for ${decision.next} (likely mid-rebuild): ${msg.slice(0, 200)} — retrying once`);
+        await new Promise((r) => setTimeout(r, 2000));
+        continue;
+      }
+      return {
+        dispatched: false,
+        reason: 'dispatch_failed',
+        phase: decision.next,
+        error: msg,
+      };
     }
-    return { dispatched: true, phase: decision.next, childRunId: run.runId };
-  } catch (err) {
-    return {
-      dispatched: false,
-      reason: 'dispatch_failed',
-      phase: decision.next,
-      error: err instanceof Error ? err.message : String(err),
-    };
   }
+  return {
+    dispatched: false,
+    reason: 'dispatch_failed',
+    phase: decision.next,
+    error: lastError instanceof Error ? lastError.message : String(lastError),
+  };
 }
 
 function requiredContextMissing(phase: NextPhase['next'], ctx: DispatchContext): string[] {

@@ -1,4 +1,4 @@
-export type SettingsFieldKey = 'workspace_path' | 'github_owner' | 'trusted_github_users' | 'claude_provider' | 'claude_bin' | 'lmstudio_model' | 'log_dir' | 'frequency' | 'daytime' | 'weekends' | 'base_prompt' | 'default_model' | 'permission_mode' | 'commit_style' | 'review_verdict_rules' | 'review_fix_max_iterations' | 'review_do_not_ship_action' | 'release_wall_clock_timeout_minutes' |'agent_templates' | 'log_retention_count' | 'log_retention_days' | 'job_row_retention_days' | 'workflow_run_retention_days' | 'backup_retention_count' | 'backup_retention_weekly_count' | 'notification_webhook_url' | 'notification_webhook_secret' | 'notification_on_release_success' | 'notification_on_release_fail' | 'notification_on_release_aborted' | 'notification_on_fix_loop_exhausted' | 'notification_on_review_do_not_ship' | 'notification_on_agent_run_fail' | 'notification_throttle_window_seconds' | 'notification_throttle_overrides' | 'pipeline_model_review' | 'pipeline_model_fix' | 'pipeline_model_dod' | 'pipeline_model_commit' | 'dirty_worktree_block_threshold' | 'incremental_review_enabled'
+export type SettingsFieldKey = 'workspace_path' | 'github_owner' | 'trusted_github_users' | 'claude_provider' | 'claude_bin' | 'lmstudio_model' | 'log_dir' | 'frequency' | 'daytime' | 'weekends' | 'base_prompt' | 'default_model' | 'permission_mode' | 'commit_style' | 'review_verdict_rules' | 'review_fix_max_iterations' | 'review_do_not_ship_action' | 'release_wall_clock_timeout_minutes' |'agent_templates' | 'log_retention_count' | 'log_retention_days' | 'job_row_retention_days' | 'workflow_run_retention_days' | 'backup_retention_count' | 'backup_retention_weekly_count' | 'notification_webhook_url' | 'notification_webhook_secret' | 'notification_on_release_success' | 'notification_on_release_fail' | 'notification_on_release_aborted' | 'notification_on_fix_loop_exhausted' | 'notification_on_review_do_not_ship' | 'notification_on_agent_run_fail' | 'notification_throttle_window_seconds' | 'notification_throttle_overrides' | 'pipeline_model_review' | 'pipeline_model_fix' | 'pipeline_model_dod' | 'pipeline_model_commit' | 'project_sweep_enabled' | 'dirty_worktree_block_threshold' | 'incremental_review_enabled'
 
 export interface FieldDef {
   label: string
@@ -244,6 +244,12 @@ export const FIELDS: Record<SettingsFieldKey, FieldDef> = {
     group: 'pipeline',
     span: 1,
   },
+  project_sweep_enabled: {
+    label: 'Project Sweep',
+    help: 'Run the background project sweep worker when TamTam starts.',
+    group: 'pipeline',
+    span: 1,
+  },
   dirty_worktree_block_threshold: {
     label: 'Dirty Worktree Block Threshold',
     help: 'Block agent runs when the project has at least this many uncommitted files (incl. untracked). Default 1 blocks on any dirty worktree; set higher to allow small WIP, 0 to disable.',
@@ -302,6 +308,7 @@ export const DEFAULTS: Record<SettingsFieldKey, string> = {
   pipeline_model_fix: '',
   pipeline_model_dod: '',
   pipeline_model_commit: '',
+  project_sweep_enabled: 'false',
   dirty_worktree_block_threshold: '1',
   incremental_review_enabled: 'true',
 }

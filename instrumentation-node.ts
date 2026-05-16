@@ -555,9 +555,35 @@ export async function registerNode(): Promise<void> {
               );
             },
           },
+          projectSweepDeps: {
+            runSweep: async () => {
+              const { runProjectSweep } = await import('@/lib/jobs/project-sweep-runner');
+              await runProjectSweep();
+            },
+            isEnabled: async () => {
+              const { getSettings } = await import('@/lib/shared/config');
+              return !!getSettings().project_sweep_enabled;
+            },
+            enqueueNextFire: async (runAt) => {
+              const { PROJECT_SWEEP_JOB_KEY } = await import('@/lib/workflows/cron/project-sweep-task');
+              await quickAddJob(
+                { connectionString },
+                'project-sweep',
+                {},
+                { jobKey: PROJECT_SWEEP_JOB_KEY, jobKeyMode: 'preserve_run_at', runAt, maxAttempts: 5 },
+              );
+            },
+          },
         });
 
-        console.log('[cron] graphile-worker cron pool started (agent-cron + system-cron)');
+        try {
+          const { seedProjectSweep } = await import('@/lib/workflows/cron/seed-project-sweep');
+          await seedProjectSweep({ connectionString });
+        } catch (err) {
+          console.warn('[cron] seedProjectSweep failed:', err);
+        }
+
+        console.log('[cron] graphile-worker cron pool started (agent-cron + system-cron + project-sweep)');
       } catch (err) {
         console.error('[cron] boot failed:', err);
       }

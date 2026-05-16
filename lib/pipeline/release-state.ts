@@ -34,10 +34,36 @@ export async function hasFreshLgtm(projectName: string, projPath: string): Promi
 }
 
 export async function hasLocalCommitsAhead(projPath: string): Promise<boolean> {
+  // Primary: compare against the configured upstream tracking branch.
   try {
     const aheadR = await exec('git', ['-C', projPath, 'rev-list', '--count', '@{u}..HEAD'], { timeout: 5000 });
+    if (aheadR.exitCode === 0) {
+      const ahead = parseInt(aheadR.stdout.trim(), 10);
+      return Number.isFinite(ahead) && ahead > 0;
+    }
+    // Non-zero exit usually means "no upstream configured for branch X".
+    // Fall through to the default-branch comparison so an issue branch
+    // that hasn't been pushed yet still counts as having work to ship.
+  } catch {
+    // ignore — try the default-branch fallback
+  }
+  // Fallback: when the working branch has no upstream (typical for a
+  // freshly created `fix/issue-N-...` branch), compare against the repo's
+  // default branch. `start-push` will run `--set-upstream` on the actual
+  // push, so the release should proceed instead of returning a misleading
+  // "Nothing to release".
+  try {
+    const { getDefaultBranchSync } = await import('@/lib/git/git-branch');
+    const defaultBranch = getDefaultBranchSync(projPath);
+    if (!defaultBranch) return false;
+    const aheadR = await exec(
+      'git',
+      ['-C', projPath, 'rev-list', '--count', `${defaultBranch}..HEAD`],
+      { timeout: 5000 },
+    );
+    if (aheadR.exitCode !== 0) return false;
     const ahead = parseInt(aheadR.stdout.trim(), 10);
-    return aheadR.exitCode === 0 && Number.isFinite(ahead) && ahead > 0;
+    return Number.isFinite(ahead) && ahead > 0;
   } catch {
     return false;
   }

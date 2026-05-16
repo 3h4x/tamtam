@@ -102,6 +102,7 @@ export interface TamTamConfig {
   retrieval_manage_ollama: boolean;
   outcome_classifier_enabled: boolean;
   outcome_classifier_model: string;
+  project_sweep_enabled: boolean;
 }
 
 const DEFAULTS: TamTamConfig = {
@@ -186,6 +187,7 @@ const DEFAULTS: TamTamConfig = {
   retrieval_manage_ollama: true,
   outcome_classifier_enabled: false,
   outcome_classifier_model: 'gemma3:4b',
+  project_sweep_enabled: false,
 };
 
 let _cache: { config: TamTamConfig; time: number } | null = null;
@@ -394,6 +396,7 @@ export function buildConfigFromSettingsMap(map: Record<string, string>): TamTamC
     retrieval_manage_ollama: map.retrieval_manage_ollama !== 'false',
     outcome_classifier_enabled: map.outcome_classifier_enabled === 'true',
     outcome_classifier_model: map.outcome_classifier_model ?? DEFAULTS.outcome_classifier_model,
+    project_sweep_enabled: map.project_sweep_enabled === 'true',
   };
   return config;
 }

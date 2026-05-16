@@ -71,6 +71,11 @@ export function SettingsField({
           <option value="fix">Try fix loop</option>
           <option value="abort">Abort release</option>
         </select>
+      ) : fieldKey === 'project_sweep_enabled' || fieldKey === 'incremental_review_enabled' ? (
+        <select value={value || 'false'} onChange={(e) => onChange(fieldKey, e.target.value)} className={SELECT_CLASS}>
+          <option value="true">Enabled</option>
+          <option value="false">Disabled</option>
+        </select>
       ) : fieldKey === 'permission_mode' ? (
         <>
           <select value={value} onChange={(e) => onChange(fieldKey, e.target.value)} className={SELECT_CLASS}>

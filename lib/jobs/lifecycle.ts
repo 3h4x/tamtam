@@ -465,6 +465,19 @@ async function runCompletionHooksInner(job: JobData): Promise<void> {
         console.warn(`[outcome-classifier] background classification failed for ${job.id}:`, err);
       }
     })();
+
+    // Auto-resume agent/run jobs that died mid-stream (no final `result`
+    // event in the log + non-zero exit). The most common trigger is a PM2
+    // restart killing the child process group before Claude could finish a
+    // long turn. Fire-and-forget; capped at 2 attempts via contextMeta.
+    void (async () => {
+      try {
+        const { maybeAutoResume } = await import('@/lib/jobs/auto-resume');
+        await maybeAutoResume(job);
+      } catch (err) {
+        console.warn(`[auto-resume] background relaunch failed for ${job.id}:`, err);
+      }
+    })();
   }
 
   // If the release was aborted while this step was running, do not chain to

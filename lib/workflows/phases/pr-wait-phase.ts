@@ -70,10 +70,11 @@ export async function releasePrWaitPhaseWorkflow(
   prNumber: number,
   prRepo: string,
   prUrl: string,
+  releaseJobId?: string,
 ): Promise<PrWaitPhaseResult> {
   'use workflow';
 
-  const prep = await preparePrWaitStep(projectName, prNumber, prRepo, prUrl);
+  const prep = await preparePrWaitStep(projectName, prNumber, prRepo, prUrl, releaseJobId);
   if (!prep.ok) {
     return { ok: false, reason: 'launch_failed', error: prep.error };
   }
@@ -149,6 +150,7 @@ async function preparePrWaitStep(
   prNumber: number,
   prRepo: string,
   prUrl: string,
+  releaseJobId?: string,
 ): Promise<PreparePrWaitResult> {
   'use step';
   const { mkdirSync } = await import('fs');
@@ -165,7 +167,20 @@ async function preparePrWaitStep(
   mkdirSync(/*turbopackIgnore: true*/ logDir, { recursive: true });
 
   const meta = JSON.stringify({ prNumber, prRepo, prUrl });
-  const job = createJob(projectName, 'pr-wait', 0, '', undefined, meta);
+  // Wrap createJob in runWithParent so the pr-wait row inherits release_id
+  // and the orchestrator's waitForJobCompletion can find it on the next tick.
+  // Without this, release-reconcile sees "release running, no in-flight
+  // children" 90s after mark-dod finishes and re-dispatches pr-wait,
+  // producing duplicates.
+  let job;
+  if (releaseJobId) {
+    const { runWithParent } = await import('@/lib/jobs/parent-context');
+    job = await runWithParent(releaseJobId, () =>
+      createJob(projectName, 'pr-wait', 0, '', undefined, meta),
+    );
+  } else {
+    job = createJob(projectName, 'pr-wait', 0, '', undefined, meta);
+  }
   const logPath = join(/*turbopackIgnore: true*/ logDir, `${job.id}.log`);
   job.logPath = logPath;
   updateJob(job);
