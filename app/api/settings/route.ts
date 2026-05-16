@@ -307,7 +307,12 @@ function validateAndSerializeSettingValue(
     return { value: parsed.model, error: null };
   }
 
-  if (key === 'review_fix_max_iterations' || key === 'release_wall_clock_timeout_minutes') {
+  if (key === 'review_fix_max_iterations') {
+    // Default is capped at 3, but an explicit 0 means unlimited review
+    // verification rounds until LGTM or the release wall clock aborts.
+    return parseNonNegativeIntegerSetting(value, key);
+  }
+  if (key === 'release_wall_clock_timeout_minutes') {
     return parsePositiveIntegerSetting(value, key);
   }
 

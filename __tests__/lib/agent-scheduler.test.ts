@@ -50,6 +50,7 @@ describe('agent-scheduler (graphile-worker backed)', () => {
     quickAddJobMock.mockReset();
     quickAddJobMock.mockResolvedValue(undefined);
     process.env.DATABASE_URL = 'postgres://test/test';
+    delete process.env.WORKFLOW_POSTGRES_URL;
   });
 
   afterAll(() => {
@@ -88,6 +89,22 @@ describe('agent-scheduler (graphile-worker backed)', () => {
       delete process.env.WORKFLOW_POSTGRES_URL;
       await expect(installAgentSchedule('agent-no-pg', '1h', 'p', 'pm2')).rejects.toThrow(/no postgres URL/);
     });
+
+    it('enqueues into WORKFLOW_POSTGRES_URL when workflow and app databases differ', async () => {
+      process.env.WORKFLOW_POSTGRES_URL = 'postgres://workflow/test';
+
+      await installAgentSchedule('agent-workflow-db', '30m', 'run tests', 'pm2', 'projA', 'My Agent');
+
+      expect(quickAddJobMock).toHaveBeenCalledOnce();
+      const call = quickAddJobMock.mock.calls[0] as unknown as [
+        { connectionString: string },
+        string,
+        { agentId: string },
+      ];
+      expect(call[0]).toEqual({ connectionString: 'postgres://workflow/test' });
+      expect(call[1]).toBe('agent-cron');
+      expect(call[2]).toEqual({ agentId: 'agent-workflow-db' });
+    });
   });
 
   describe('uninstallAgentSchedule', () => {
@@ -117,6 +134,22 @@ describe('agent-scheduler (graphile-worker backed)', () => {
 
     it('does not throw when uninstalling an agent that was never installed', async () => {
       await expect(uninstallAgentSchedule('nonexistent-agent', 'pm2')).resolves.not.toThrow();
+    });
+
+    it('cancels in WORKFLOW_POSTGRES_URL when workflow and app databases differ', async () => {
+      process.env.WORKFLOW_POSTGRES_URL = 'postgres://workflow/test';
+
+      await uninstallAgentSchedule('agent-workflow-db', 'pm2', 'proj', 'agt');
+
+      expect(quickAddJobMock).toHaveBeenCalledOnce();
+      const call = quickAddJobMock.mock.calls[0] as unknown as [
+        { connectionString: string },
+        string,
+        { agentId: string },
+      ];
+      expect(call[0]).toEqual({ connectionString: 'postgres://workflow/test' });
+      expect(call[1]).toBe('agent-cron');
+      expect(call[2]).toEqual({ agentId: 'agent-workflow-db' });
     });
   });
 

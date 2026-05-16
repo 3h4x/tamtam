@@ -622,10 +622,10 @@ describe('config', () => {
       expect(getSettings().review_fix_max_iterations).toBe(3);
     });
 
-    it('falls back to default when value is zero', async () => {
+    it('preserves explicit zero as unlimited', async () => {
       await setSetting('review_fix_max_iterations', '0');
       await refresh();
-      expect(getSettings().review_fix_max_iterations).toBe(3);
+      expect(getSettings().review_fix_max_iterations).toBe(0);
     });
 
     it('falls back to default when value is negative', async () => {

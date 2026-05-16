@@ -153,7 +153,7 @@ const DEFAULTS: TamTamConfig = {
 - Keep LGTM responses short: one sentence confirmation is enough.`,
   jobs_paused: false,
   review_fix_max_iterations: 3,
-  review_do_not_ship_action: 'fix',
+  review_do_not_ship_action: 'pass',
   release_wall_clock_timeout_minutes: 60,
   log_retention_count: 200,
   log_retention_days: 30,
@@ -453,7 +453,8 @@ function parsePositiveIntOr(v: string | undefined, fallback: number): number {
   return Number.isFinite(n) && n > 0 ? n : fallback;
 }
 
-// Allows 0 — used by review_fix_max_iterations where 0 means "no cap".
+/** Accept 0 as a valid value (used as an "unlimited" sentinel by callers
+ *  like the review fix-loop cap). Falls back when value is missing/invalid. */
 function parseNonNegativeIntOr(v: string | undefined, fallback: number): number {
   if (v === undefined || v === '') return fallback;
   const n = parseInt(v, 10);

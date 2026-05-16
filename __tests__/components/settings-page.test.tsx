@@ -482,7 +482,7 @@ describe('SettingsPage', () => {
           settings: {
             claude_provider: 'claude',
             cli_enabled_providers: 'claude',
-            review_fix_max_iterations: '3',
+            review_fix_max_iterations: '0',
           },
         })
       }
@@ -507,7 +507,7 @@ describe('SettingsPage', () => {
     const { container, unmount } = renderSettingsPage()
 
     await vi.waitFor(() => {
-      expect(findInputByLabel(container, 'Review Fix Loop Iterations').value).toBe('3')
+      expect(findInputByLabel(container, 'Review Fix Loop Iterations').value).toBe('0')
     })
 
     flushSync(() => {
@@ -628,7 +628,7 @@ describe('SettingsPage', () => {
           settings: {
             claude_provider: 'claude',
             cli_enabled_providers: 'claude',
-            review_fix_max_iterations: '3',
+            review_fix_max_iterations: '0',
           },
         })
       }
@@ -646,7 +646,7 @@ describe('SettingsPage', () => {
     const { container, unmount } = renderSettingsPage()
 
     await vi.waitFor(() => {
-      expect(findInputByLabel(container, 'Review Fix Loop Iterations').value).toBe('3')
+      expect(findInputByLabel(container, 'Review Fix Loop Iterations').value).toBe('0')
     })
 
     flushSync(() => {

@@ -95,7 +95,10 @@ export function checkIterationCap(
   if (decision.next === 'review' && decision.from === 'fix') {
     const count = countSiblingSteps(job.project, 'review', job.releaseId, deps);
     const cap = deps.reviewFixMaxIterations();
-    if (count >= cap) {
+    // cap === 0 → unlimited iterations (opt-in cap). The fix loop keeps
+    // running until the reviewer returns LGTM or the wall-clock timeout
+    // aborts the release.
+    if (cap > 0 && count >= cap) {
       return {
         rewritten: {
           next: 'abort',

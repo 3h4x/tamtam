@@ -856,8 +856,9 @@ async function runCompletionHooksInner(job: JobData): Promise<void> {
           // and `fixContradictsReview` only catch identical-finding repeats.
           // Count completed reviews; bail before starting review #(MAX+1).
           const reviewCount = recentStepCount(job.project, 'review', job);
-          if (reviewCount >= reviewFixMaxIterations()) {
-            const legacyStop = `review cap reached for ${job.project} (${reviewCount}/${reviewFixMaxIterations()}) — review keeps surfacing new findings, stopping`;
+          const reviewCap = reviewFixMaxIterations();
+          if (reviewCap > 0 && reviewCount >= reviewCap) {
+            const legacyStop = `review cap reached for ${job.project} (${reviewCount}/${reviewCap}) — review keeps surfacing new findings, stopping`;
             const reviewToCite = findLatestReviewForRelease(job) ?? job;
             if (isDoNotShipReview(reviewToCite)) {
               notificationEvent = 'review_do_not_ship';
