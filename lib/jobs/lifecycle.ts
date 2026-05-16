@@ -1365,8 +1365,11 @@ async function runCompletionHooksInner(job: JobData): Promise<void> {
   // releases.
   if (isAgentJobKind(job.kind)) {
     try {
-      const { drainNextAgentRun } = await import('@/lib/agents/pending-agent-run');
-      await drainNextAgentRun(job.project);
+      const { getSettings } = await import('@/lib/shared/config');
+      if (getSettings().legacy_completion_hook_agent_drain_enabled !== false) {
+        const { drainNextAgentRun } = await import('@/lib/agents/pending-agent-run');
+        await drainNextAgentRun(job.project);
+      }
     } catch (e) {
       console.error(`[pending-agent-run] drain hook error for ${job.project}:`, e);
     }

@@ -127,7 +127,7 @@ Persisted dedupe state for outbound webhook throttling.
 
 ### `job_completion_events`
 
-Durable event log for job-completion trigger migration. Rows are written when a job reaches a terminal state; the probe sweep consumes unhandled rows and dispatches release-after-run, release-after-fix-CI, or auto-resume routing when the matching legacy inline hook is disabled.
+Durable event log for job-completion trigger migration. Rows are written when a job reaches a terminal state; the probe sweep consumes unhandled rows and dispatches release-after-run, release-after-fix-CI, auto-resume, or queued-agent drain routing when the matching legacy inline hook is disabled.
 
 | Column | Type | Default | Notes |
 |--------|------|---------|-------|

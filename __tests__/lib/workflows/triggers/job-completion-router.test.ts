@@ -11,6 +11,7 @@ async function withTestDbAndStubs(opts: {
   legacyFlagEnabled?: boolean;
   legacyFixCiFlagEnabled?: boolean;
   legacyAutoResumeFlagEnabled?: boolean;
+  legacyAgentDrainFlagEnabled?: boolean;
   getJobKind?: string;
   getJobExitCode?: number;
 } = {}) {
@@ -39,18 +40,21 @@ async function withTestDbAndStubs(opts: {
     const actual = await vi.importActual<typeof import('@/lib/jobs/kinds')>('@/lib/jobs/kinds');
     return actual;
   });
+  const drainNextAgentRun = vi.fn().mockResolvedValue(undefined);
   vi.doMock('@/lib/shared/config', () => ({
     getSettings: () => ({
       legacy_completion_hook_release_after_run_enabled: opts.legacyFlagEnabled ?? false,
       legacy_completion_hook_release_after_fix_ci_enabled: opts.legacyFixCiFlagEnabled ?? false,
       legacy_completion_hook_auto_resume_enabled: opts.legacyAutoResumeFlagEnabled ?? false,
+      legacy_completion_hook_agent_drain_enabled: opts.legacyAgentDrainFlagEnabled ?? false,
     }),
   }));
   vi.doMock('@/lib/workflows/triggers/release-after-run', () => ({ dispatchReleaseAfterRun }));
   vi.doMock('@/lib/workflows/triggers/release-after-fix-ci', () => ({ dispatchReleaseAfterFixCi }));
   vi.doMock('@/lib/jobs/auto-resume', () => ({ maybeAutoResume }));
+  vi.doMock('@/lib/agents/pending-agent-run', () => ({ drainNextAgentRun }));
 
-  return { handle, dispatchReleaseAfterRun, dispatchReleaseAfterFixCi, maybeAutoResume };
+  return { handle, dispatchReleaseAfterRun, dispatchReleaseAfterFixCi, maybeAutoResume, drainNextAgentRun };
 }
 
 async function insertEvent(handle: Awaited<ReturnType<typeof createTestPgDb>>, overrides: Partial<typeof schema.jobCompletionEvents.$inferInsert> = {}) {
@@ -151,6 +155,31 @@ describe('consumeJobCompletionEvents', () => {
     await consumeJobCompletionEvents();
 
     expect(maybeAutoResume).not.toHaveBeenCalled();
+    await handle[Symbol.asyncDispose]();
+  });
+
+  it('drains the per-project agent queue on agent kinds when its kill switch is off', async () => {
+    const { handle, drainNextAgentRun } = await withTestDbAndStubs({ getJobKind: 'agent:foo' });
+    await insertEvent(handle, { jobId: 'proj-agent:foo-1', kind: 'agent:foo' });
+
+    const { consumeJobCompletionEvents } = await import('@/lib/workflows/triggers/job-completion-router');
+    await consumeJobCompletionEvents();
+
+    expect(drainNextAgentRun).toHaveBeenCalledWith('proj');
+    await handle[Symbol.asyncDispose]();
+  });
+
+  it('skips agent drain while its legacy hook flag is on', async () => {
+    const { handle, drainNextAgentRun } = await withTestDbAndStubs({
+      getJobKind: 'agent:foo',
+      legacyAgentDrainFlagEnabled: true,
+    });
+    await insertEvent(handle, { jobId: 'proj-agent:foo-skip', kind: 'agent:foo' });
+
+    const { consumeJobCompletionEvents } = await import('@/lib/workflows/triggers/job-completion-router');
+    await consumeJobCompletionEvents();
+
+    expect(drainNextAgentRun).not.toHaveBeenCalled();
     await handle[Symbol.asyncDispose]();
   });
 

@@ -77,18 +77,31 @@ async function routeEvent(row: CompletionEventRow): Promise<boolean> {
     const { getJob } = await import('@/lib/jobs/job-storage');
     const job = getJob(row.jobId);
     if (!job) return false;
+    let didSomething = false;
+    // Agent-kind: drain the per-project pending-agent queue. Independent
+    // of release-after-run / auto-resume — runs even on failure so a
+    // queued agent isn't stuck behind a failed one.
+    if (isAgentJobKind(row.kind) && getSettings().legacy_completion_hook_agent_drain_enabled === false) {
+      try {
+        const { drainNextAgentRun } = await import('@/lib/agents/pending-agent-run');
+        await drainNextAgentRun(job.project);
+        didSomething = true;
+      } catch (err) {
+        console.error('[job-completion-router] agent drain failed:', err);
+      }
+    }
     // Failed run/agent jobs go to auto-resume; successful ones to
     // release-after-run. Both are gated on their own kill switch so the
     // legacy inline path remains the primary handler until each is flipped.
     if (job.exitCode !== null && job.exitCode !== 0) {
-      if (getSettings().legacy_completion_hook_auto_resume_enabled) return false;
+      if (getSettings().legacy_completion_hook_auto_resume_enabled) return didSomething;
       const { maybeAutoResume } = await import('@/lib/jobs/auto-resume');
-      try { await maybeAutoResume(job); return true; } catch { return false; }
+      try { await maybeAutoResume(job); return true; } catch { return didSomething; }
     }
-    if (getSettings().legacy_completion_hook_release_after_run_enabled) return false;
+    if (getSettings().legacy_completion_hook_release_after_run_enabled) return didSomething;
     const { dispatchReleaseAfterRun } = await import('@/lib/workflows/triggers/release-after-run');
     const out = await dispatchReleaseAfterRun(job);
-    return out.dispatched;
+    return out.dispatched || didSomething;
   }
   if (row.kind === 'fix-ci') {
     const { getSettings } = await import('@/lib/shared/config');

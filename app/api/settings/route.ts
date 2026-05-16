@@ -168,6 +168,7 @@ const SETTING_KEYS = [
   'legacy_completion_hook_release_after_fix_ci_enabled',
   'legacy_completion_hook_auto_resume_enabled',
   'legacy_pipeline_lock_inline_drain_enabled',
+  'legacy_completion_hook_agent_drain_enabled',
   'agent_templates',
   'log_retention_count',
   'log_retention_days',
@@ -327,7 +328,8 @@ function validateAndSerializeSettingValue(
     key === 'legacy_completion_hook_release_after_run_enabled' ||
     key === 'legacy_completion_hook_release_after_fix_ci_enabled' ||
     key === 'legacy_completion_hook_auto_resume_enabled' ||
-    key === 'legacy_pipeline_lock_inline_drain_enabled'
+    key === 'legacy_pipeline_lock_inline_drain_enabled' ||
+    key === 'legacy_completion_hook_agent_drain_enabled'
   ) {
     return parseBooleanSetting(value, key);
   }
