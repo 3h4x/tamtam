@@ -49,6 +49,7 @@ interface SettingsMap {
   review_verdict_rules: string
   jobs_paused: string
   review_fix_max_iterations: string
+  review_fix_backoff_seconds: string
   review_do_not_ship_action: string
   release_wall_clock_timeout_minutes: string
   legacy_completion_hook_release_after_run_enabled: string

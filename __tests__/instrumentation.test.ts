@@ -293,8 +293,17 @@ describe('instrumentation', () => {
         reconcileStaleRelease: vi.fn(),
         PIPELINE_STEP_KINDS: new Set(),
       }));
+      vi.doMock('./lib/jobs/job-storage', () => ({
+        listJobs: listJobsMock,
+        markDone: markDoneMock,
+        updateJob: vi.fn(),
+        probeJobStatus: vi.fn(),
+        reconcileStaleRelease: vi.fn(),
+        PIPELINE_STEP_KINDS: new Set(),
+      }));
       vi.doMock('@/lib/pipeline/start-pr-wait', () => ({ resumePrWait: resumePrWaitMock }));
       vi.doMock('../lib/pipeline/start-pr-wait', () => ({ resumePrWait: resumePrWaitMock }));
+      vi.doMock('./lib/pipeline/start-pr-wait', () => ({ resumePrWait: resumePrWaitMock }));
       vi.doMock('@/lib/pipeline/recovery-drain', () => ({
         drainAllRecoveryWork: vi.fn().mockResolvedValue(undefined),
       }));

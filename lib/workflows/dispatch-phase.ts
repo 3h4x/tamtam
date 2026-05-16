@@ -56,6 +56,22 @@ export async function dispatchPhase(
     return { dispatched: false, reason: 'missing_context', phase: decision.next, missing };
   }
 
+  // Idempotency: after a PM2 restart, the workflow runtime resumes the
+  // orchestrator from its checkpoint AND the completion-event router (or
+  // any other resume path) can fire concurrently. Both then call
+  // `start(release*PhaseWorkflow, ...)` and we end up with TWO push or
+  // TWO fix jobs running side-by-side for the same release. If a child
+  // step of the target kind is already in-flight for this release, skip
+  // the dispatch — the existing run will progress the chain.
+  if (ctx.parentJobId && await releaseHasInFlightChildOfKind(ctx.parentJobId, decision.next)) {
+    return {
+      dispatched: false,
+      reason: 'dispatch_failed',
+      phase: decision.next,
+      error: `duplicate dispatch suppressed: in-flight ${decision.next} child already exists for release ${ctx.parentJobId}`,
+    };
+  }
+
   // Retry once on transient chunk-load errors. Next.js sometimes throws
   // `Failed to load chunk …` immediately after `pnpm rebuild` swaps the
   // `.next/` artifacts while an orchestrator tick is mid-dispatch — the
@@ -197,6 +213,41 @@ async function sleepIfReviewBackoffStep(
   if (sleep <= 0) return;
   console.log(`[dispatch-phase] backoff: sleeping ${sleep}s before fix dispatch (iteration ${iterations}, project ${projectName})`);
   await new Promise<void>((resolve) => setTimeout(resolve, sleep * 1000).unref?.());
+}
+
+/** Map the next-phase decision kind to the job-row kind that a previous
+ *  dispatch would have created. Used by the idempotency check below. */
+function jobKindForNextPhase(phase: NextPhase['next']): string | null {
+  switch (phase) {
+    case 'test': return 'test';
+    case 'review': return 'review';
+    case 'fix': return 'fix';
+    case 'commit': return 'commit';
+    case 'push': return 'push';
+    case 'mark-dod': return 'mark-dod';
+    case 'pr-wait': return 'pr-wait';
+    default: return null;
+  }
+}
+
+async function releaseHasInFlightChildOfKind(
+  releaseJobId: string,
+  phase: NextPhase['next'],
+): Promise<boolean> {
+  const kind = jobKindForNextPhase(phase);
+  if (!kind) return false;
+  try {
+    const { listJobs } = await import('@/lib/jobs/job-storage');
+    return listJobs().some(j =>
+      j.releaseId === releaseJobId &&
+      j.kind === kind &&
+      j.finishedAt === null,
+    );
+  } catch {
+    // listJobs unavailable in unusual contexts — fail open (allow
+    // dispatch). The duplicate is preferable to a stranded release.
+    return false;
+  }
 }
 
 function requiredContextMissing(phase: NextPhase['next'], ctx: DispatchContext): string[] {
