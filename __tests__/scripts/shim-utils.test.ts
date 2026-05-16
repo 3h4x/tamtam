@@ -18,13 +18,16 @@ const asChild = (c: FakeChild) => c as unknown as ChildProcess;
 
 describe('installInactivityWatchdog', () => {
   let originalEnv: string | undefined;
+  let stderrWriteSpy: ReturnType<typeof vi.spyOn>;
 
   beforeEach(() => {
     originalEnv = process.env.SHIM_INACTIVITY_TIMEOUT_MS;
+    stderrWriteSpy = vi.spyOn(process.stderr, 'write').mockImplementation(() => true);
     vi.useFakeTimers();
   });
   afterEach(() => {
     vi.useRealTimers();
+    stderrWriteSpy.mockRestore();
     if (originalEnv === undefined) delete process.env.SHIM_INACTIVITY_TIMEOUT_MS;
     else process.env.SHIM_INACTIVITY_TIMEOUT_MS = originalEnv;
   });
@@ -100,8 +103,16 @@ describe('installInactivityWatchdog', () => {
 });
 
 describe('installFetchInactivityWatchdog', () => {
-  beforeEach(() => vi.useFakeTimers());
-  afterEach(() => vi.useRealTimers());
+  let stderrWriteSpy: ReturnType<typeof vi.spyOn>;
+
+  beforeEach(() => {
+    stderrWriteSpy = vi.spyOn(process.stderr, 'write').mockImplementation(() => true);
+    vi.useFakeTimers();
+  });
+  afterEach(() => {
+    vi.useRealTimers();
+    stderrWriteSpy.mockRestore();
+  });
 
   it('waits through the default startup grace before aborting a silent fetch', async () => {
     const { installFetchInactivityWatchdog } = await import('@/scripts/shim-utils');

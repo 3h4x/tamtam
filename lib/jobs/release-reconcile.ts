@@ -28,7 +28,13 @@ const RECONCILE_QUIET_PERIOD_MS = 90 * 1000;
 // doesn't get hammered every probe cycle. Re-kicks are tracked in-process;
 // resets on server restart (intentional — boot recovery runs its own
 // cross-restart sweep).
-const MAX_RECONCILE_ATTEMPTS = 3;
+// Each attempt fires on a probe cycle (30s). 3 attempts = 90s, which is
+// often not enough when the workflow runtime needs a few restarts to
+// stabilize (sweep + concurrent releases stress the runtime). 12 attempts
+// = ~6 min of retries before giving up — long enough to ride out a
+// rebuild + reseat cycle, short enough that a genuinely broken release
+// doesn't hammer the queue forever.
+export const MAX_RECONCILE_ATTEMPTS = 12;
 const reconcileAttempts = new Map<string, number>();
 
 export interface StalledRelease {
