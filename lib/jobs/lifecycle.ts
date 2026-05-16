@@ -1120,7 +1120,9 @@ async function runCompletionHooksInner(job: JobData): Promise<void> {
         const meta = JSON.parse(job.contextMeta) as { prUrl?: string; prNumber?: number; prRepo?: string };
         if (meta.prUrl && meta.prNumber && meta.prRepo) {
           const { launchPrWait } = await import('@/lib/pipeline/start-pr-wait');
-          const r = launchPrWait(job.project, meta.prNumber, meta.prRepo, meta.prUrl);
+          // In-release continuation — bypass the global pause gate so a
+          // mid-pipeline pause flip doesn't strand the active release.
+          const r = launchPrWait(job.project, meta.prNumber, meta.prRepo, meta.prUrl, { allowWhilePaused: true });
           if ('jobId' in r) {
             console.log(`[push→pr-wait] started pr-wait ${r.jobId} for PR #${meta.prNumber}`);
             chainedNext = true;

@@ -5,6 +5,7 @@ import { getImproveConfig } from '@/lib/scheduling/scheduling';
 import { exec } from '@/lib/shared/shell';
 import { createJob, getJob, markDone, updateJob } from '@/lib/jobs/job-storage';
 import { appendRedactedFileSync } from '@/lib/jobs/redacted-log-writer';
+import { isJobsPaused } from '@/lib/shared/job-control';
 import type { JobData } from '@/lib/jobs/types';
 
 export type PrWaitResult =
@@ -375,7 +376,17 @@ export function launchPrWait(
   prNumber: number,
   prRepo: string,
   prUrl: string,
+  options: { allowWhilePaused?: boolean } = {},
 ): { jobId: string } | { error: string } {
+  // Honor the global pause gate. Sweep-triggered + manual pr-wait routes
+  // would otherwise start new background work while operators have
+  // explicitly paused everything. In-release continuation (the release
+  // orchestrator dispatching pr-wait after mark-dod) sets
+  // `allowWhilePaused: true` so the in-flight release doesn't stall on a
+  // pause flipped mid-pipeline — it still has to ship.
+  if (!options.allowWhilePaused && isJobsPaused()) {
+    return { error: 'jobs paused' };
+  }
   const projPath = resolveProjectPath(projectName);
   if (!projPath) return { error: 'project not found' };
 

@@ -108,8 +108,15 @@ export function decideNextPhase(inputs: DecisionInputs): NextPhase {
   if (kind === 'mark-dod') {
     // After DoD verification on an auto-merge-enabled, PR-backed push,
     // continue into pr-wait so CI is polled and the PR is merged
-    // automatically. Otherwise the chain terminates here.
-    if (exitCode === 0 && autoPrMergeEnabled && pushPrContext) {
+    // automatically.
+    //
+    // Mark-dod exit code is intentionally ignored here. Mark-dod's job is
+    // to tick acceptance-criteria checkboxes in the issue/PR body — it
+    // does NOT block the release; the push already landed. A non-zero
+    // exit (most often a PM2 restart killing the inline mark-dod process)
+    // must not skip pr-wait, otherwise the auto-merge release stops with
+    // a stranded open PR and no one polls it to completion.
+    if (autoPrMergeEnabled && pushPrContext) {
       return { next: 'pr-wait', from: 'mark-dod', pr: pushPrContext };
     }
     return { next: 'done', from: 'mark-dod' };

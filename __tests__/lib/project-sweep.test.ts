@@ -24,18 +24,14 @@ describe('decideSweepAction', () => {
   it('skips projects with an active job', () => {
     expect(decideSweepAction(view({ hasActiveJob: true, uncommittedCount: 3 })).kind).toBe('skip');
   });
-  it('triggers release for changes on default', () => {
+  it('skips changes on default branch (auto-release disabled there)', () => {
     const a = decideSweepAction(view({ uncommittedCount: 5 }));
-    expect(a.kind).toBe('release');
-  });
-  it('triggers release for unpushed commits on default', () => {
-    const a = decideSweepAction(view({ hasUnpushedCommits: true }));
-    expect(a.kind).toBe('release');
-  });
-  it('skips release when default-branch CI is failing', () => {
-    const a = decideSweepAction(view({ uncommittedCount: 1, defaultBranchCi: 'failure' }));
     expect(a.kind).toBe('skip');
-    expect(a.reason).toMatch(/CI failing/);
+    expect(a.reason).toMatch(/default branch/);
+  });
+  it('skips unpushed commits on default branch (auto-release disabled there)', () => {
+    const a = decideSweepAction(view({ hasUnpushedCommits: true }));
+    expect(a.kind).toBe('skip');
   });
   it('triggers release on non-default branch with changes (regardless of CI)', () => {
     const a = decideSweepAction(view({ currentBranch: 'fix/issue-1', uncommittedCount: 4, defaultBranchCi: 'failure' }));
@@ -87,7 +83,7 @@ describe('decideSweepAction', () => {
 describe('runSweep', () => {
   it('walks all projects and aggregates by action', async () => {
     const views: Record<string, ProjectSweepView> = {
-      a: view({ name: 'a', uncommittedCount: 3 }),
+      a: view({ name: 'a', currentBranch: 'fix/x', uncommittedCount: 3 }),
       b: view({ name: 'b', currentBranch: 'fix/x', prOnBranch: { number: 1, repo: 'o/r', url: 'u', mergeable: 'MERGEABLE', ciConclusion: 'success' } }),
       c: view({ name: 'c' }), // clean
     };

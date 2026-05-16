@@ -2036,7 +2036,7 @@ describe('push → dod target selection', () => {
 
     await markDone(job, 0);
 
-    expect(mocks.launchPrWait).toHaveBeenCalledWith('proj', 42, 'owner/repo', 'https://github.com/owner/repo/pull/42');
+    expect(mocks.launchPrWait).toHaveBeenCalledWith('proj', 42, 'owner/repo', 'https://github.com/owner/repo/pull/42', { allowWhilePaused: true });
     expect(mocks.startMarkDod).not.toHaveBeenCalled();
   });
 });

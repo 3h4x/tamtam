@@ -576,6 +576,14 @@ export async function registerNode(): Promise<void> {
       const { spawn } = await import('node:child_process');
       const connectionString = process.env.WORKFLOW_POSTGRES_URL || process.env.DATABASE_URL;
       if (connectionString) {
+        // `@workflow/world-postgres`'s zero-arg `createWorld()` reads
+        // `process.env.WORKFLOW_POSTGRES_URL` directly — if it's unset,
+        // the world falls back to its built-in default
+        // (`postgres://world:world@localhost:5432/world`), which silently
+        // points the workflow runtime at the wrong database. Propagating
+        // the migration connection string into our own process env
+        // guarantees the runtime hits the same DB the schema lives in.
+        process.env.WORKFLOW_POSTGRES_URL = connectionString;
         await new Promise<void>((resolve) => {
           const child = spawn('pnpm', ['exec', 'workflow-postgres-setup'], {
             cwd: process.cwd(),

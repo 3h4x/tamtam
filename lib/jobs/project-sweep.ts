@@ -57,12 +57,12 @@ export function decideSweepAction(view: ProjectSweepView): SweepAction {
   const onDefault = view.currentBranch === view.defaultBranch;
   const hasWork = view.uncommittedCount > 0 || view.hasUnpushedCommits;
 
-  // Default branch + work pending. Just release if CI is healthy.
+  // Default branch + work pending. Sweep does not auto-release on the
+  // default branch — direct-push-to-default is a high-blast-radius action
+  // and should only run when a human or an explicit trigger (agent
+  // completion, manual release button) asks for it.
   if (onDefault && hasWork) {
-    if (view.defaultBranchCi === 'failure') {
-      return { kind: 'skip', reason: 'default-branch CI failing; needs human fix' };
-    }
-    return { kind: 'release', reason: 'changes on default branch' };
+    return { kind: 'skip', reason: 'changes on default branch — auto-release disabled, needs explicit trigger' };
   }
 
   // Non-default branch with local work — release will commit + push +
@@ -134,6 +134,20 @@ export interface SweepReport {
 
 export async function runSweep(deps: SweepDispatchDeps): Promise<SweepReport> {
   const startedAt = Date.now();
+  // Respect the global pause: sweep shouldn't start new releases or
+  // pr-wait jobs while operators have paused everything.
+  try {
+    const { isJobsPaused } = await import('@/lib/shared/job-control');
+    if (isJobsPaused()) {
+      return {
+        startedAt,
+        finishedAt: Date.now(),
+        total: 0,
+        byAction: { release: 0, 'pr-wait': 0, skip: 0 },
+        results: [],
+      };
+    }
+  } catch { /* job-control not available — fall through */ }
   const names = await deps.listProjects();
   const report: SweepReport = {
     startedAt,

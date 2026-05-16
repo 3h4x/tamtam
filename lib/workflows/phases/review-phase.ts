@@ -37,6 +37,15 @@ export async function releaseReviewPhaseWorkflow(
   'use workflow';
   const started = await spawnReviewStep(projectName, releaseJobId);
   if (!started.ok) {
+    // Prereq-command failure (or any other startProjectReview failure)
+    // returns before a review job row exists. Without finalizing the
+    // release here, the meta-job stays in `running` with no in-flight
+    // child until the wall-clock timeout 90 min later. Drive the release
+    // to a terminal state immediately so the trace explains the failure.
+    if (releaseJobId) {
+      const detail = `review startup failed: ${started.detail}`;
+      await finalizeReleaseOnReviewStartFailureStep(releaseJobId, detail);
+    }
     return {
       ok: false,
       reason: 'start_failed',
@@ -105,4 +114,30 @@ async function dispatchOrchestratorTickStep(
 ): Promise<void> {
   'use step';
   await safeStartOrchestrator(jobId, projectName, releaseJobId, 'review-phase');
+}
+
+async function finalizeReleaseOnReviewStartFailureStep(
+  releaseJobId: string,
+  detail: string,
+): Promise<void> {
+  'use step';
+  const { getJob, updateJob, markDone } = await import('@/lib/jobs/job-storage');
+  const { appendRedactedFileSync } = await import('@/lib/jobs/redacted-log-writer');
+  const release = getJob(releaseJobId);
+  if (!release || release.kind !== 'release' || release.finishedAt !== null) return;
+  // Persist the stop reason on the release row so the trace UI shows
+  // why the orchestrator gave up before commit/push.
+  try {
+    const meta = release.contextMeta ? JSON.parse(release.contextMeta) : {};
+    const merged = (meta && typeof meta === 'object' && !Array.isArray(meta)) ? meta as Record<string, unknown> : {};
+    merged.releaseStopReason = detail;
+    release.contextMeta = JSON.stringify(merged);
+    updateJob(release);
+  } catch { /* best-effort — markDone still finalizes */ }
+  if (release.logPath) {
+    try { appendRedactedFileSync(release.logPath, `\n# release aborted before review: ${detail}\n`); } catch {}
+  }
+  try { await markDone(release, 1); } catch (err) {
+    console.error(`[review-phase] failed to finalize release ${releaseJobId} after review startup failure:`, err);
+  }
 }

@@ -1,9 +1,10 @@
 // graphile-worker task: project-sweep
 //
-// Fires every 5 minutes. Walks every enabled project; releases the ones
-// with pending work, dispatches pr-wait on the ones that are clean on a
-// non-default branch with a ready-to-merge PR. Mirrors the system-cron
-// self-reenqueue pattern so the chain survives Next.js restarts.
+// Fires every 5 minutes. Walks every enabled project; releases non-default
+// branches with pending work, and dispatches pr-wait on clean non-default
+// branches with a ready-to-merge PR. Default-branch work needs an explicit
+// trigger. Mirrors the system-cron self-reenqueue pattern so the chain
+// survives Next.js restarts.
 
 import type { JobHelpers, Task } from 'graphile-worker';
 
