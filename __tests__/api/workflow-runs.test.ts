@@ -1,4 +1,8 @@
 import { describe, it, expect, beforeEach, vi } from 'vitest';
+import { mkdtempSync, mkdirSync, rmSync, writeFileSync } from 'fs';
+import { tmpdir } from 'os';
+import { join } from 'path';
+import { stringify as devalueStringify } from 'devalue';
 
 const mocks = vi.hoisted(() => ({
   poolQueryMock: vi.fn(),
@@ -24,7 +28,16 @@ function makeRequest(url = 'http://test/api/workflow-runs'): Request {
 describe('GET /api/workflow-runs', () => {
   beforeEach(() => {
     poolQueryMock.mockReset();
+    delete process.env.WORKFLOW_TARGET_WORLD;
+    delete process.env.WORKFLOW_LOCAL_DATA_DIR;
   });
+
+  function localPayload(value: unknown) {
+    return {
+      __type: 'Uint8Array',
+      data: Buffer.from(`devl${devalueStringify(value)}`).toString('base64'),
+    };
+  }
 
   it('returns runs from workflow.workflow_runs', async () => {
     process.env.WORKFLOW_POSTGRES_URL = 'postgres://test/tamtam_workflow';
@@ -57,6 +70,41 @@ describe('GET /api/workflow-runs', () => {
       input: ['test-tt', { queueIfBlocked: true }],
       output: { ok: true, step: 'test' },
     });
+  });
+
+  it('returns and decodes local-world run files', async () => {
+    const dir = mkdtempSync(join(tmpdir(), 'tamtam-workflow-runs-'));
+    try {
+      mkdirSync(join(dir, 'runs'));
+      mkdirSync(join(dir, 'steps'));
+      writeFileSync(join(dir, 'runs', 'wrun_local.json'), JSON.stringify({
+        runId: 'wrun_local',
+        workflowName: 'workflow//./lib/workflows/release-orchestrator//releaseOrchestratorWorkflow',
+        status: 'completed',
+        createdAt: '2026-05-16T11:07:42.279Z',
+        startedAt: '2026-05-16T11:07:42.281Z',
+        completedAt: '2026-05-16T11:07:42.571Z',
+        input: localPayload(['proj', { parentJobId: 'release-1' }]),
+        output: localPayload({ decision: { next: 'review' } }),
+      }));
+      process.env.WORKFLOW_TARGET_WORLD = 'local';
+      process.env.WORKFLOW_LOCAL_DATA_DIR = dir;
+
+      const { GET } = await importRoute();
+      const res = await GET(makeRequest());
+      expect(res.status).toBe(200);
+      const body = await res.json();
+      expect(body.runs).toHaveLength(1);
+      expect(body.runs[0]).toMatchObject({
+        id: 'wrun_local',
+        name: 'releaseOrchestratorWorkflow',
+        input: ['proj', { parentJobId: 'release-1' }],
+        output: { decision: { next: 'review' } },
+      });
+      expect(poolQueryMock).not.toHaveBeenCalled();
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
   });
 
   it('returns empty runs when WORKFLOW_POSTGRES_URL is unset', async () => {

@@ -1,4 +1,8 @@
 import { describe, it, expect, beforeEach, vi } from 'vitest';
+import { mkdtempSync, mkdirSync, rmSync, writeFileSync } from 'fs';
+import { tmpdir } from 'os';
+import { join } from 'path';
+import { stringify as devalueStringify } from 'devalue';
 
 const mocks = vi.hoisted(() => ({
   poolQueryMock: vi.fn(),
@@ -51,7 +55,16 @@ const STEP_ROW = {
 describe('GET /api/workflow-runs/[runId]', () => {
   beforeEach(() => {
     poolQueryMock.mockReset();
+    delete process.env.WORKFLOW_TARGET_WORLD;
+    delete process.env.WORKFLOW_LOCAL_DATA_DIR;
   });
+
+  function localPayload(value: unknown) {
+    return {
+      __type: 'Uint8Array',
+      data: Buffer.from(`devl${devalueStringify(value)}`).toString('base64'),
+    };
+  }
 
   it('returns run + steps when found', async () => {
     process.env.WORKFLOW_POSTGRES_URL = 'postgres://test/wf';
@@ -78,6 +91,71 @@ describe('GET /api/workflow-runs/[runId]', () => {
       input: { jobId: 'test-job-1' },
       output: { next: 'review', from: 'test' },
     });
+  });
+
+  it('returns local-world run details and steps', async () => {
+    const dir = mkdtempSync(join(tmpdir(), 'tamtam-workflow-detail-'));
+    try {
+      mkdirSync(join(dir, 'runs'));
+      mkdirSync(join(dir, 'steps'));
+      writeFileSync(join(dir, 'runs', 'wrun_local.json'), JSON.stringify({
+        runId: 'wrun_local',
+        workflowName: 'workflow//./lib/workflows/release-orchestrator//releaseOrchestratorWorkflow',
+        status: 'completed',
+        createdAt: '2026-05-16T11:07:42.279Z',
+        startedAt: '2026-05-16T11:07:42.281Z',
+        completedAt: '2026-05-16T11:07:42.571Z',
+        input: localPayload(['proj', { parentJobId: 'release-1' }]),
+        output: localPayload({ dispatch: { phase: 'review' } }),
+      }));
+      writeFileSync(join(dir, 'steps', 'wrun_local-step_2.json'), JSON.stringify({
+        runId: 'wrun_local',
+        stepId: 'step_2',
+        stepName: 'step//./lib/workflows/phases/review-phase//readReviewVerdictStep',
+        status: 'completed',
+        attempt: 2,
+        createdAt: '2026-05-16T11:07:43.000Z',
+        startedAt: '2026-05-16T11:07:43.001Z',
+        completedAt: '2026-05-16T11:07:44.001Z',
+        input: localPayload({ jobId: 'review-1' }),
+        output: localPayload('LGTM'),
+      }));
+      writeFileSync(join(dir, 'steps', 'wrun_local-step_1.json'), JSON.stringify({
+        runId: 'wrun_local',
+        stepId: 'step_1',
+        stepName: 'step//./lib/workflows/release-orchestrator//waitForJobStep',
+        status: 'completed',
+        attempt: 1,
+        createdAt: '2026-05-16T11:07:42.500Z',
+        startedAt: '2026-05-16T11:07:42.501Z',
+        completedAt: '2026-05-16T11:07:42.601Z',
+        input: localPayload({ jobId: 'test-1' }),
+        output: localPayload({ finished: true }),
+      }));
+      process.env.WORKFLOW_TARGET_WORLD = 'local';
+      process.env.WORKFLOW_LOCAL_DATA_DIR = dir;
+
+      const { GET } = await importRoute();
+      const res = await GET(makeRequest(), makeParams('wrun_local'));
+      expect(res.status).toBe(200);
+      const body = await res.json();
+      expect(body.run).toMatchObject({
+        id: 'wrun_local',
+        name: 'releaseOrchestratorWorkflow',
+        input: ['proj', { parentJobId: 'release-1' }],
+        output: { dispatch: { phase: 'review' } },
+      });
+      expect(body.steps.map((s: { stepId: string }) => s.stepId)).toEqual(['step_1', 'step_2']);
+      expect(body.steps[1]).toMatchObject({
+        name: 'readReviewVerdictStep',
+        attempt: 2,
+        input: { jobId: 'review-1' },
+        output: 'LGTM',
+      });
+      expect(poolQueryMock).not.toHaveBeenCalled();
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
   });
 
   it('returns 404 when run not found', async () => {
