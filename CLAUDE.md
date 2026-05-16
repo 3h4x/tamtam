@@ -24,7 +24,7 @@ Next.js 16 (App Router), React 19, TypeScript 6 strict, Tailwind v4, Drizzle + n
 
 Canonical post-edit command: **`pnpm run rebuild`** (build + idempotent PM2 restart). `pnpm dev` is foreground-only and never the long-lived server. Full reference: `docs/COMMANDS.md`.
 
-**⚠️ `pnpm rebuild` kills running jobs.** The PM2 restart drops in-process spawned children (pipeline phases, terminal sessions, agent runs). Before rebuilding while work is in flight: enable global pause (`jobs_paused`), wait for active jobs to drain (`/monitoring` or `pm2 list`), rebuild, then unpause. Fire-and-forget rebuilds are only safe when nothing is running.
+**`pnpm rebuild` is now graceful by default** (`scripts/rebuild-safe.sh`): it pauses jobs via `PATCH /api/settings {jobs_paused:true}`, polls `/api/jobs?running=1` until pipeline-step/agent/run jobs drain (default 10 min, override via `TAMTAM_REBUILD_DRAIN_TIMEOUT`), then builds + restarts via `pm2-start.sh` and unpauses. `pr-wait` is excluded from the drain set because its on-boot resume handles mid-poll interruption. If the build fails the pause is reverted; if the restart fails the pause is *kept* on so the half-restarted server doesn't pick up new work — clear it manually via `/settings`. For the legacy "kill everything immediately" behavior, use `pnpm rebuild:force` (equivalent to the old `pnpm build && pnpm start`).
 
 ## Architecture
 
