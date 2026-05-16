@@ -227,12 +227,45 @@ async function reapAbandonedInlineJobs(): Promise<void> {
 // and bounce with "Release pipeline already running for X" until the monitor
 // times out 4h later. Reap them at boot.
 const ORPHAN_RELEASE_HANDOFF_GRACE_SEC = 5;
+const MAX_BOOT_RESUMES = 3;
+
+function readBootRecoveryAttempts(contextMeta: string | null | undefined): number {
+  if (!contextMeta) return 0;
+  try {
+    const parsed = JSON.parse(contextMeta);
+    const n = Number(parsed?.bootRecoveryAttempts);
+    return Number.isFinite(n) && n >= 0 ? Math.floor(n) : 0;
+  } catch {
+    return 0;
+  }
+}
+
+function bumpBootRecoveryAttempts(contextMeta: string | null | undefined): { next: number; serialized: string } {
+  let parsed: Record<string, unknown> = {};
+  if (contextMeta) {
+    try { parsed = JSON.parse(contextMeta) || {}; } catch { parsed = {}; }
+  }
+  const current = readBootRecoveryAttempts(contextMeta);
+  const next = current + 1;
+  parsed.bootRecoveryAttempts = next;
+  return { next, serialized: JSON.stringify(parsed) };
+}
+
+function setStopReason(contextMeta: string | null | undefined, reason: string): string {
+  let parsed: Record<string, unknown> = {};
+  if (contextMeta) {
+    try { parsed = JSON.parse(contextMeta) || {}; } catch { parsed = {}; }
+  }
+  parsed.stopReason = reason;
+  return JSON.stringify(parsed);
+}
 
 export async function reapOrphanReleases(): Promise<void> {
   try {
-    const { listJobs, markDone } = await import('./lib/jobs/job-storage');
+    const { listJobs, markDone, updateJob } = await import('./lib/jobs/job-storage');
     const { db, schema } = await import('./lib/db');
     const { eq } = await import('drizzle-orm');
+    const { safeStartOrchestrator } = await import('./lib/workflows/safe-start-orchestrator');
 
     const candidates = listJobs().filter(j => j.kind === 'release' && j.finishedAt === null);
     for (const job of candidates) {
@@ -254,16 +287,58 @@ export async function reapOrphanReleases(): Promise<void> {
       const ownsOrPlaceholder = !lockRow || lockedByThisRelease || lockedByPlaceholder;
       if (!ownsOrPlaceholder) continue;
 
-      // Only reap once the last child has been quiet for a grace window.
-      // Workflow-driven releases that complete cleanly finalize themselves
-      // via the orchestrator's terminal-decision step; anything stranded
-      // past this point really did get orphaned by a server restart.
+      // Only reap/resume once the last child has been quiet for a grace
+      // window. Workflow-driven releases that complete cleanly finalize
+      // themselves via the orchestrator's terminal-decision step; anything
+      // stranded past this point really did get orphaned by a server
+      // restart.
       const latestFinishedChild = releaseChildren.find((candidate) => candidate.finishedAt !== null) ?? null;
       const newestChildEdge = latestFinishedChild
         ? Math.max(latestFinishedChild.finishedAt || 0, latestFinishedChild.startedAt || 0)
         : 0;
       const quietLongEnough = newestChildEdge === 0 || Date.now() / 1000 - newestChildEdge >= ORPHAN_RELEASE_HANDOFF_GRACE_SEC;
       if (latestFinishedChild && !quietLongEnough) continue;
+      let reapReason = latestFinishedChild
+        ? `child ${latestFinishedChild.id} finished and resume budget exhausted (${MAX_BOOT_RESUMES})`
+        : 'orchestrator died before the first child step';
+
+      // Try to resume the chain when there is a finished child to hand off
+      // from. Budget the attempts so a permanently broken release doesn't
+      // ping-pong on every boot.
+      if (latestFinishedChild) {
+        const attempts = readBootRecoveryAttempts(job.contextMeta);
+        if (attempts < MAX_BOOT_RESUMES) {
+          const bump = bumpBootRecoveryAttempts(job.contextMeta);
+          try {
+            updateJob({ ...job, contextMeta: bump.serialized });
+          } catch (err) {
+            console.error(`[boot] failed to persist bootRecoveryAttempts for ${job.id}:`, err);
+          }
+          try {
+            const resumed = await safeStartOrchestrator(latestFinishedChild.id, job.project, job.id, 'orphan-resume');
+            if (resumed) {
+              console.log(`[boot] resumed orphan release ${job.id} from child ${latestFinishedChild.id} (attempt ${bump.next}/${MAX_BOOT_RESUMES})`);
+              continue;
+            }
+            console.error(`[boot] orphan resume failed for ${job.id}; falling through to reap`);
+            reapReason = `child ${latestFinishedChild.id} finished but orphan resume dispatch failed`;
+          } catch (err) {
+            console.error(`[boot] orphan resume failed for ${job.id}; falling through to reap:`, err);
+            reapReason = `child ${latestFinishedChild.id} finished but orphan resume dispatch threw`;
+          }
+        } else {
+          // Budget exhausted: record stopReason on the release meta-job's
+          // contextMeta before reaping so the trace shows why.
+          try {
+            updateJob({
+              ...job,
+              contextMeta: setStopReason(job.contextMeta, `exceeded boot-recovery attempts (${MAX_BOOT_RESUMES})`),
+            });
+          } catch (err) {
+            console.error(`[boot] failed to persist stopReason for ${job.id}:`, err);
+          }
+        }
+      }
 
       // Release the lock if this orphan owns it (or it's stuck on the
       // unfinished placeholder).
@@ -273,10 +348,7 @@ export async function reapOrphanReleases(): Promise<void> {
 
       try {
         await markDone(job, -1);
-        const reason = latestFinishedChild
-          ? `child ${latestFinishedChild.id} finished but no continuation survived restart`
-          : 'orchestrator died before the first child step';
-        console.log(`[boot] reaped orphan release ${job.id} (${reason})`);
+        console.log(`[boot] reaped orphan release ${job.id} (${reapReason})`);
       } catch (err) {
         console.error(`[boot] failed to reap orphan release ${job.id}:`, err);
       }
