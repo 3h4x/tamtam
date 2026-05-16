@@ -95,6 +95,31 @@ describe('buildEntries session grouping', () => {
     expect(entry.modifiedFiles).toContain('src/a.ts')
   })
 
+  it('carries the latest outcome verdict through conversational session grouping', () => {
+    const jobs = [
+      job({
+        id: 'agent1',
+        kind: 'agent:tests',
+        started_at: 100,
+        session_id: 'S1',
+        context_meta: JSON.stringify({ outcomeClassification: { verdict: 'done', reason: 'finished' } }),
+      }),
+      job({
+        id: 'chat1',
+        kind: 'run',
+        started_at: 200,
+        session_id: 'S1',
+        user_prompt: 'follow-up',
+        context_meta: JSON.stringify({ outcomeClassification: { verdict: 'needs_continue', reason: 'still working' } }),
+      }),
+    ]
+
+    const [entry] = buildEntries(jobs)
+
+    expect(entry.navJobId).toBe('chat1')
+    expect(entry.outcomeVerdict).toBe('needs_continue')
+  })
+
   it('reflects the latest job status on the merged entry', () => {
     const jobs = [
       job({ id: 'a', kind: 'run', started_at: 100, session_id: 'S1', status: 'done', finished_at: 150, exit_code: 0 }),
