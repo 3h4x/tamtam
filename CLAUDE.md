@@ -11,7 +11,7 @@ See `docs/PIPELINE.md` for the full state machine.
 ## Concepts
 
 - **Skills** — reusable prompt blocks (DB-backed + file-based from `skills/docs/skills/` and `data/skills/`).
-- **Agents** — skills + project docs + model + prompt + optional schedule + optional `prerequisiteCommand`. Intake runs as a Vercel Workflow (`lib/agents/intake-workflow.ts`); see `docs/AGENT.md`.
+- **Agents** — skills + project docs + model + prompt + optional schedule + optional `prerequisiteCommand`. Intake runs through the `workflow` package's Postgres-backed world (`lib/agents/intake-workflow.ts`) and hands off to `lib/jobs/inline-agent.ts`; see `docs/AGENT.md`.
 - **Runs** — individual executions; legacy `/jobs` redirects to `/runs`.
 - **Custom Actions** — per-project bash commands with configurable button color.
 - **Retrieval** — optional pgvector-backed context from committed docs, DB skills, and completed agent reports. Toggled via `retrieval_enabled`.
@@ -77,10 +77,10 @@ Canonical post-edit command: **`pnpm run rebuild`** (build + idempotent PM2 rest
 - **CLI calls go through `lib/shared/shell.ts`.** Direct `child_process` is the exception, allowed only in runner/shim/streaming paths that already need it.
 - **Client-side fetches** live under `lib/client/` and are surfaced through `lib/client-api.ts`. Extend existing helpers instead of duplicating request/response handling in components.
 - **Terminal streaming** uses the provider's `stream-json` output piped to a log file + fs.watch + NDJSON parser, then SSE at `/api/streaming/[jobId]`. See `docs/STREAMING.md`.
-- **One-shot job processes** are spawned **in-process** from Next.js (no PM2 per-job entries). Agent intake uses Vercel Workflow → `lib/jobs/inline-agent.ts`. Pipeline + terminal jobs use `lib/jobs/spawn-claude-detached.ts startJobInProcess` (detached + unref'd, stdio to log fd) so they survive a PM2 restart of TamTam. `probeJobStatus` recovers state on next boot. PM2 only supervises the TamTam server itself.
+- **One-shot job processes** are spawned **in-process** from Next.js (no PM2 per-job entries). Agent intake uses `lib/agents/intake-workflow.ts` → `lib/jobs/inline-agent.ts`. Pipeline + terminal jobs use `lib/jobs/spawn-claude-detached.ts startJobInProcess` (detached + unref'd, stdio to log fd) so they survive a PM2 restart of TamTam. `probeJobStatus` recovers state on next boot. PM2 only supervises the TamTam server itself.
 - **Pipeline orchestrator** in `lib/workflows/release-orchestrator.ts` drives every release via 7 phase workflows. Each phase wraps `startProject*` in `runWithParent(releaseJobId, ...)` so spawned children inherit `release_id`. Legacy completion-hook chain short-circuits on `releaseId`. Full reference: `docs/PIPELINE.md`.
 - **Pipeline guardrails** (`lib/workflows/guards/`): `reviewIsStuck`, `fixContradictsReview`, `checkIterationCap`. Abort decisions persist `stopReason` on the release meta-job's `contextMeta` for trace visibility.
-- **Scheduled agent intervals** are handled in-process by `lib/scheduling/internal-scheduler.ts`, **not PM2 cron** (PM2 `cron_restart` + `--no-autostart` silently no-ops). State pinned on `globalThis.__tamtamScheduler` so route handlers and instrumentation share the singleton across Next.js's separate module realms.
+- **Scheduled agent intervals** are handled by graphile-worker (`lib/workflows/cron/seed-agent-crons.ts`, `lib/workflows/cron/agent-cron-task.ts`, and `lib/workflows/cron/start-cron-worker.ts`), **not PM2 cron** (PM2 `cron_restart` + `--no-autostart` silently no-ops). The worker pool is pinned on `globalThis.__tamtamCronWorker` so Next.js's separate module realms share the same runner.
 - **Per-project agent serialization** (`lib/agents/pending-agent-run.ts`): only one agent runs at a time per project; concurrent calls return HTTP 202 `queued`. Same-agent duplicates return 409.
 - **Background probe sweep** runs every 30s in `instrumentation-node.ts`, resolving hung Claude-CLI jobs and aborting releases past their deadline. `drainBootRecoveryWork` fires once at boot for cross-restart cleanup.
 - **Global pause + budget gates** (`lib/shared/job-control.ts`): when `jobs_paused`, pipeline routes return 409 and the scheduler pauses. When `budget_block_runs_enabled` and active quota > `budget_block_at_pct`, job starts return 429.
@@ -89,7 +89,7 @@ Canonical post-edit command: **`pnpm run rebuild`** (build + idempotent PM2 rest
 - **QA targets** are DB-backed: `website` is production; `qa_url` is the explicit QA override. Always prefer `qa_url` when both exist. If neither exists, QA flows should stop, not invent a target.
 - **Outbound webhooks** (`lib/shared/notifications.ts`): Slack / Discord / ntfy / generic JSON POST; HMAC-SHA256 signed when `notification_webhook_secret` is set. Events: `release_success`, `release_fail`, `release_aborted`, `fix_loop_exhausted`, `review_do_not_ship`, `agent_run_fail`, `budget_blocked`.
 - **Retention** (`lib/jobs/retention.ts`): per-run log prune (`log_retention_count` / `log_retention_days`, defaults 200/30); nightly cleanup deletes finished `jobs` rows older than `job_row_retention_days` (default 180).
-- **Singletons on `globalThis`** are intentional in a few places (`__tamtamScheduler`, pause gates, agent queues). Only add another when cross-route coordination truly requires it; pin to `globalThis` because Next.js duplicates modules; document in the relevant `docs/*.md`.
+- **Singletons on `globalThis`** are intentional in a few places (`__tamtamCronWorker`, `__tamtamJobCancellation`, `__tamtamStartingAgents`, `__tamtamSpawnedClosePending`). Only add another when cross-route coordination truly requires it; pin to `globalThis` because Next.js duplicates modules; document in the relevant `docs/*.md`.
 
 ## Coding Conventions
 

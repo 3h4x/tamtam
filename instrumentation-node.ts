@@ -396,26 +396,26 @@ export async function registerNode(): Promise<void> {
     // their first await (silent — only visible as 'relation workflow.workflow_runs
     // does not exist' in retention logs and 'Step not found' on resume).
     try {
-      const { drizzle } = await import('drizzle-orm/node-postgres');
-      const { migrate } = await import('drizzle-orm/node-postgres/migrator');
-      const { Pool } = await import('pg');
-      const { dirname, join } = await import('node:path');
-      const { fileURLToPath } = await import('node:url');
+      const { spawn } = await import('node:child_process');
       const connectionString = process.env.WORKFLOW_POSTGRES_URL || process.env.DATABASE_URL;
       if (connectionString) {
-        const pool = new Pool({ connectionString, max: 1 });
-        try {
-          const pkgUrl = await import.meta.resolve!('@workflow/world-postgres/package.json');
-          const pkgDir = dirname(fileURLToPath(pkgUrl));
-          const migrationsFolder = join(pkgDir, 'src', 'drizzle', 'migrations');
-          await migrate(drizzle(pool), {
-            migrationsFolder,
-            migrationsTable: 'workflow_migrations',
-            migrationsSchema: 'workflow_drizzle',
+        await new Promise<void>((resolve) => {
+          const child = spawn('pnpm', ['exec', 'workflow-postgres-setup'], {
+            cwd: process.cwd(),
+            env: { ...process.env, WORKFLOW_POSTGRES_URL: connectionString },
+            stdio: ['ignore', 'pipe', 'pipe'],
           });
-        } finally {
-          await pool.end().catch(() => {});
-        }
+          let stderr = '';
+          child.stderr?.on('data', (chunk) => { stderr += chunk.toString(); });
+          child.on('exit', (code) => {
+            if (code !== 0) console.warn(`[workflow] schema migration failed (exit ${code}): ${stderr.slice(-500)}`);
+            resolve();
+          });
+          child.on('error', (err) => {
+            console.warn('[workflow] schema migration spawn failed:', err);
+            resolve();
+          });
+        });
       }
     } catch (err) {
       console.warn('[workflow] schema migration failed:', err);

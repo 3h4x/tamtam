@@ -33,6 +33,7 @@ export type NextPhase =
   | { next: 'push'; from: 'commit' | 'fix' }
   | { next: 'abort'; from: 'review'; verdict: 'DO NOT SHIP' | 'NEEDS ATTENTION'; stopReason?: string }
   | { next: 'mark-dod'; from: 'push' }
+  | { next: 'pr-wait'; from: 'mark-dod' | 'push'; pr: { prNumber: number; prRepo: string; prUrl: string } }
   | { next: 'done'; from: 'mark-dod' | 'pr-wait' | 'commit' | 'fix' | 'push' }
   | { next: 'unknown'; from: string; reason: string };
 
@@ -48,10 +49,17 @@ export interface DecisionInputs {
    *  to the parent step kind for re-verification (e.g. fix-from-push → push).
    *  Null/undefined parent → fix terminates as 'done'. */
   parentKind?: string | null;
+  /** PR context from the release's `push` job, when the push opened or
+   *  reused a PR. Used to route mark-dod → pr-wait under auto-merge. */
+  pushPrContext?: { prNumber: number; prRepo: string; prUrl: string } | null;
+  /** Project's `auto_pr_merge_enabled` flag. When true and the push
+   *  produced a PR, the orchestrator continues into pr-wait after mark-dod
+   *  (or after push when mark-dod is skipped). */
+  autoPrMergeEnabled?: boolean;
 }
 
 export function decideNextPhase(inputs: DecisionInputs): NextPhase {
-  const { kind, exitCode, verdict, parentKind } = inputs;
+  const { kind, exitCode, verdict, parentKind, pushPrContext, autoPrMergeEnabled } = inputs;
 
   if (kind === 'test') {
     return exitCode === 0
@@ -97,8 +105,17 @@ export function decideNextPhase(inputs: DecisionInputs): NextPhase {
     if (parentKind === 'push')   return { next: 'push',   from: 'fix' };
     return { next: 'done', from: 'fix' };
   }
-  if (kind === 'mark-dod' || kind === 'pr-wait') {
-    return { next: 'done', from: kind };
+  if (kind === 'mark-dod') {
+    // After DoD verification on an auto-merge-enabled, PR-backed push,
+    // continue into pr-wait so CI is polled and the PR is merged
+    // automatically. Otherwise the chain terminates here.
+    if (exitCode === 0 && autoPrMergeEnabled && pushPrContext) {
+      return { next: 'pr-wait', from: 'mark-dod', pr: pushPrContext };
+    }
+    return { next: 'done', from: 'mark-dod' };
+  }
+  if (kind === 'pr-wait') {
+    return { next: 'done', from: 'pr-wait' };
   }
   return { next: 'unknown', from: kind, reason: `no decision rule for kind=${kind}` };
 }

@@ -139,6 +139,26 @@ describe('dispatchPhase', () => {
     expect(r.dispatched).toBe(true);
   });
 
+  it('dispatches releasePrWaitPhaseWorkflow with PR context', async () => {
+    const pr = { prNumber: 113, prRepo: 'owner/repo', prUrl: 'https://github.com/owner/repo/pull/113' };
+    const decision: NextPhase = { next: 'pr-wait', from: 'mark-dod', pr };
+    const r = await dispatchPhase(decision, { projectName: 'test-tt', pr });
+    expect(startMock).toHaveBeenCalledWith(phaseFns.prWait, ['test-tt', 113, 'owner/repo', 'https://github.com/owner/repo/pull/113']);
+    expect(r).toEqual({ dispatched: true, phase: 'pr-wait', childRunId: 'wrun_child_1' });
+  });
+
+  it('reports missing_context for pr-wait without PR identity', async () => {
+    const pr = { prNumber: 113, prRepo: 'owner/repo', prUrl: 'https://github.com/owner/repo/pull/113' };
+    const decision: NextPhase = { next: 'pr-wait', from: 'mark-dod', pr };
+    const r = await dispatchPhase(decision, { projectName: 'test-tt' });
+    expect(startMock).not.toHaveBeenCalled();
+    if (!r.dispatched && r.reason === 'missing_context') {
+      expect(r.missing).toEqual(expect.arrayContaining(['pr.prNumber', 'pr.prRepo', 'pr.prUrl']));
+    } else {
+      throw new Error(`expected missing_context, got ${JSON.stringify(r)}`);
+    }
+  });
+
   it('reports missing_context when projectName is empty', async () => {
     const decision: NextPhase = { next: 'review', from: 'test' };
     const r = await dispatchPhase(decision, { projectName: '' });

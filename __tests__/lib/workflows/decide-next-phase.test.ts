@@ -169,6 +169,50 @@ describe('decideNextPhase', () => {
     );
   });
 
+  describe('mark-dod → pr-wait under auto-merge', () => {
+    const pr = { prNumber: 113, prRepo: 'owner/repo', prUrl: 'https://github.com/owner/repo/pull/113' };
+
+    it('mark-dod exit 0 + auto-merge + PR → pr-wait', () => {
+      expect(decideNextPhase({
+        kind: 'mark-dod',
+        exitCode: 0,
+        verdict: null,
+        pushPrContext: pr,
+        autoPrMergeEnabled: true,
+      })).toEqual({ next: 'pr-wait', from: 'mark-dod', pr });
+    });
+
+    it('mark-dod exit 0 + auto-merge but no PR → done', () => {
+      expect(decideNextPhase({
+        kind: 'mark-dod',
+        exitCode: 0,
+        verdict: null,
+        pushPrContext: null,
+        autoPrMergeEnabled: true,
+      })).toEqual({ next: 'done', from: 'mark-dod' });
+    });
+
+    it('mark-dod exit 0 + PR but auto-merge off → done', () => {
+      expect(decideNextPhase({
+        kind: 'mark-dod',
+        exitCode: 0,
+        verdict: null,
+        pushPrContext: pr,
+        autoPrMergeEnabled: false,
+      })).toEqual({ next: 'done', from: 'mark-dod' });
+    });
+
+    it('mark-dod exit nonzero → done (mark-dod failure is non-fatal)', () => {
+      expect(decideNextPhase({
+        kind: 'mark-dod',
+        exitCode: 1,
+        verdict: null,
+        pushPrContext: pr,
+        autoPrMergeEnabled: true,
+      })).toEqual({ next: 'done', from: 'mark-dod' });
+    });
+  });
+
   describe('unknown kinds', () => {
     it('release meta-job → unknown', () => {
       const r = decideNextPhase({ kind: 'release', exitCode: 0, verdict: null });
