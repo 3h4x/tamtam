@@ -18,6 +18,7 @@ vi.mock('@/lib/jobs/job-storage', () => ({
 }));
 
 import {
+  MAX_RECONCILE_ATTEMPTS,
   findStalledReleases,
   reconcileStalledRelease,
   runReleaseReconcileSweep,
@@ -150,13 +151,14 @@ describe('reconcileStalledRelease', () => {
       }),
     );
     const [stalled] = findStalledReleases(NOW);
-    await reconcileStalledRelease(stalled);
-    await reconcileStalledRelease(stalled);
-    await reconcileStalledRelease(stalled);
-    const fourth = await reconcileStalledRelease(stalled);
-    expect(fourth.status).toBe('attempt_cap');
-    expect(startMock).toHaveBeenCalledTimes(3);
-    expect(_getReconcileAttemptForTest('rel')).toBe(3);
+    for (let i = 0; i < MAX_RECONCILE_ATTEMPTS; i += 1) {
+      await reconcileStalledRelease(stalled);
+    }
+    const capped = await reconcileStalledRelease(stalled);
+    expect(capped.status).toBe('attempt_cap');
+    expect(capped.attempt).toBe(MAX_RECONCILE_ATTEMPTS + 1);
+    expect(startMock).toHaveBeenCalledTimes(MAX_RECONCILE_ATTEMPTS);
+    expect(_getReconcileAttemptForTest('rel')).toBe(MAX_RECONCILE_ATTEMPTS);
   });
 
   it('reports dispatch_failed when start() throws', async () => {
