@@ -95,7 +95,6 @@ export function useTerminalBootstrap({
     return () => { cancelled = true }
   // Mount-only by design — depend only on projectName so a project switch
   // re-arms the check; subsequent in-page navigation stays put.
-  // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [projectName])
 
   // Auto-submit prompt from ?prompt= query param (e.g. opened from Issues tab).
@@ -341,7 +340,6 @@ export function useTerminalBootstrap({
       } catch {}
     }
 
-    poll()
     const id = setInterval(() => {
       if (!cancelled) void poll()
     }, 1000)

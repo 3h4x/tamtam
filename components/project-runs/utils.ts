@@ -939,7 +939,15 @@ export function buildReleaseProgressLabel(children: Entry[], release?: Entry): s
   if (last.exitCode !== null && last.exitCode !== 0) return `failed at ${lastLabel}`
   if (release?.status === 'running') return `waiting after ${lastLabel}`
   if (release?.status === 'done' && release.exitCode === 0) return `completed through ${lastLabel}`
-  if (release && entryNeedsAttention(release)) return `stopped at ${lastLabel}`
+  // The release stopped, but the last child step finished cleanly. Saying
+  // "stopped at test" implies test is the failure — confusing when test is
+  // a green ✓. "stopped after test" reads as "test passed, then the chain
+  // didn't continue", which matches the situation: the orchestrator
+  // failed to spawn the next phase (or a guard aborted) after the step.
+  if (release && entryNeedsAttention(release)) {
+    const stepPassed = last.status === 'done' && (last.exitCode === 0 || last.exitCode === null)
+    return stepPassed ? `stopped after ${lastLabel}` : `stopped at ${lastLabel}`
+  }
   return `last step: ${lastLabel}`
 }
 
