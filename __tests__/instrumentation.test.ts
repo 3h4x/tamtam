@@ -51,6 +51,116 @@ describe('instrumentation', () => {
   // worth verifying is exercised through the registerNode() tests below.
 
   describe('registerNode()', () => {
+    function mockRegisterNodeBootDeps(options: {
+      jobs?: Array<Record<string, unknown>>;
+      drainAllRecoveryWork?: ReturnType<typeof vi.fn>;
+      markDone?: ReturnType<typeof vi.fn>;
+      getWorldStart?: ReturnType<typeof vi.fn>;
+    } = {}) {
+      const jobs = options.jobs ?? [];
+      const drainAllRecoveryWork = options.drainAllRecoveryWork ?? vi.fn().mockResolvedValue(undefined);
+      const markDone = options.markDone ?? vi.fn().mockResolvedValue(undefined);
+      const getWorldStart = options.getWorldStart ?? vi.fn().mockResolvedValue(undefined);
+      const dbMock = {
+        select: vi.fn().mockReturnValue({
+          from: vi.fn().mockReturnValue({
+            where: vi.fn().mockReturnValue({
+              limit: vi.fn().mockReturnValue({
+                then(onFulfilled: (rows: unknown[]) => unknown, onRejected?: (err: unknown) => unknown) {
+                  return Promise.resolve([]).then(onFulfilled, onRejected);
+                },
+              }),
+            }),
+            then(onFulfilled: (rows: unknown[]) => unknown, onRejected?: (err: unknown) => unknown) {
+              return Promise.resolve([]).then(onFulfilled, onRejected);
+            },
+          }),
+        }),
+        delete: vi.fn().mockReturnValue({
+          where: vi.fn().mockReturnValue({ execute: vi.fn().mockResolvedValue(undefined) }),
+        }),
+      };
+      const schemaMock = {
+        agents: { schedule: 'schedule', enabled: 'enabled' },
+        pipelineLocks: { project: 'project' },
+      };
+      const jobStorageMock = {
+        loadFromDb: vi.fn().mockResolvedValue(undefined),
+        listJobs: vi.fn(() => jobs),
+        markDone,
+        updateJob: vi.fn(),
+        probeJobStatus: vi.fn().mockResolvedValue(undefined),
+        PIPELINE_STEP_KINDS: new Set(['test', 'review', 'fix', 'commit', 'push', 'mark-dod', 'pr-wait']),
+      };
+
+      vi.doMock('@/lib/db', () => ({ db: dbMock, schema: schemaMock }));
+      vi.doMock('./lib/db', () => ({ db: dbMock, schema: schemaMock }));
+      vi.doMock('@/lib/jobs/job-storage', () => jobStorageMock);
+      vi.doMock('./lib/jobs/job-storage', () => jobStorageMock);
+      vi.doMock('@/lib/jobs/storage', () => jobStorageMock);
+      vi.doMock('./lib/jobs/storage', () => jobStorageMock);
+      vi.doMock('@/lib/shared/enabled-projects', () => ({ refreshProjectsCacheSync: vi.fn().mockResolvedValue(undefined) }));
+      vi.doMock('./lib/shared/enabled-projects', () => ({ refreshProjectsCacheSync: vi.fn().mockResolvedValue(undefined) }));
+      vi.doMock('@/lib/agents/default-agent-skills', () => ({ backfillIssueCruncherPrerequisites: vi.fn().mockResolvedValue(undefined) }));
+      vi.doMock('./lib/agents/default-agent-skills', () => ({ backfillIssueCruncherPrerequisites: vi.fn().mockResolvedValue(undefined) }));
+      vi.doMock('@/lib/jobs/verdict', () => ({ getVerdict: vi.fn(() => null) }));
+      vi.doMock('./lib/jobs/verdict', () => ({ getVerdict: vi.fn(() => null) }));
+      vi.doMock('@/lib/pipeline/release-abort', () => ({ abortActiveRelease: vi.fn().mockResolvedValue(undefined) }));
+      vi.doMock('./lib/pipeline/release-abort', () => ({ abortActiveRelease: vi.fn().mockResolvedValue(undefined) }));
+      vi.doMock('@/lib/jobs/release-reconcile', () => ({ runReleaseReconcileSweep: vi.fn().mockResolvedValue([]) }));
+      vi.doMock('./lib/jobs/release-reconcile', () => ({ runReleaseReconcileSweep: vi.fn().mockResolvedValue([]) }));
+      vi.doMock('@/lib/workflows/triggers/job-completion-router', () => ({ consumeJobCompletionEvents: vi.fn().mockResolvedValue(undefined) }));
+      vi.doMock('./lib/workflows/triggers/job-completion-router', () => ({ consumeJobCompletionEvents: vi.fn().mockResolvedValue(undefined) }));
+      vi.doMock('@/lib/workflows/triggers/pipeline-lock-router', () => ({ consumePipelineLockEvents: vi.fn().mockResolvedValue(undefined) }));
+      vi.doMock('./lib/workflows/triggers/pipeline-lock-router', () => ({ consumePipelineLockEvents: vi.fn().mockResolvedValue(undefined) }));
+      vi.doMock('@/lib/jobs/resource-sampler', () => ({ sampleRunningJobResources: vi.fn().mockResolvedValue(undefined) }));
+      vi.doMock('./lib/jobs/resource-sampler', () => ({ sampleRunningJobResources: vi.fn().mockResolvedValue(undefined) }));
+      vi.doMock('@/lib/shared/config', () => ({
+        getSettings: vi.fn(() => ({
+          retrieval_enabled: false,
+          workflow_run_retention_days: 30,
+        })),
+      }));
+      vi.doMock('./lib/shared/config', () => ({
+        getSettings: vi.fn(() => ({
+          retrieval_enabled: false,
+          workflow_run_retention_days: 30,
+        })),
+      }));
+      vi.doMock('@/lib/jobs/retention', () => ({ runNightlyCleanup: vi.fn().mockResolvedValue(undefined) }));
+      vi.doMock('./lib/jobs/retention', () => ({ runNightlyCleanup: vi.fn().mockResolvedValue(undefined) }));
+      vi.doMock('@/lib/workflows/cron/workflow-retention', () => ({
+        pruneOldWorkflowRuns: vi.fn().mockResolvedValue({
+          runsDeleted: 0,
+          eventsDeleted: 0,
+          stepsDeleted: 0,
+          status: 'ok',
+          errorCount: 0,
+        }),
+      }));
+      vi.doMock('./lib/workflows/cron/workflow-retention', () => ({
+        pruneOldWorkflowRuns: vi.fn().mockResolvedValue({
+          runsDeleted: 0,
+          eventsDeleted: 0,
+          stepsDeleted: 0,
+          status: 'ok',
+          errorCount: 0,
+        }),
+      }));
+      vi.doMock('@/lib/pipeline/recovery-drain', () => ({ drainAllRecoveryWork }));
+      vi.doMock('./lib/pipeline/recovery-drain', () => ({ drainAllRecoveryWork }));
+      vi.doMock('@/lib/workflows/safe-start-orchestrator', () => ({
+        safeStartOrchestrator: vi.fn().mockResolvedValue(false),
+      }));
+      vi.doMock('./lib/workflows/safe-start-orchestrator', () => ({
+        safeStartOrchestrator: vi.fn().mockResolvedValue(false),
+      }));
+      vi.doMock('workflow/runtime', () => ({ getWorld: () => ({ start: getWorldStart }) }));
+      vi.doMock('drizzle-orm', () => ({ isNotNull: vi.fn(v => v), eq: vi.fn((_a, b) => b), and: vi.fn((...args) => args) }));
+
+      return { drainAllRecoveryWork, markDone, getWorldStart };
+    }
+
     it('backfills issue-cruncher prerequisites during boot', async () => {
       vi.stubEnv('NODE_ENV', 'test');
       mockDeps([]);
@@ -67,6 +177,95 @@ describe('instrumentation', () => {
       await registerNode();
 
       expect(backfillIssueCruncherPrerequisitesMock).toHaveBeenCalledTimes(1);
+    });
+
+    it('waitForWorkflowReady resolves immediately in test mode', async () => {
+      // Regression: prior to the fix, reapOrphanReleases was armed via
+      // setTimeout(8s) BEFORE world.start ran. Boot now gates reap on the
+      // workflow-ready signal; in test mode the signal fires synchronously
+      // so the test environment doesn't hang for 60s on the fallback.
+      vi.stubEnv('NODE_ENV', 'test');
+      mockDeps([]);
+      const { registerNode, waitForWorkflowReady } = await import('@/instrumentation-node');
+      await registerNode();
+      // Should resolve in well under the 60s fallback.
+      await Promise.race([
+        waitForWorkflowReady(),
+        new Promise((_, reject) => setTimeout(() => reject(new Error('waitForWorkflowReady did not resolve')), 1000).unref?.()),
+      ]);
+    });
+
+    it('does not run destructive boot recovery when configured workflow startup is still pending after the watchdog', async () => {
+      vi.useFakeTimers();
+      try {
+        vi.stubEnv('NODE_ENV', 'production');
+        vi.stubEnv('VITEST', '');
+        vi.stubEnv('WORKFLOW_TARGET_WORLD', '@workflow/world-postgres');
+        vi.stubEnv('DATABASE_URL', '');
+        vi.stubEnv('WORKFLOW_POSTGRES_URL', '');
+        const pendingStart = vi.fn(() => new Promise<void>(() => {}));
+        const { drainAllRecoveryWork, markDone, getWorldStart } = mockRegisterNodeBootDeps({
+          jobs: [{ id: 'release-pending-world', project: 'proj', kind: 'release', finishedAt: null, startedAt: 100 }],
+          getWorldStart: pendingStart,
+        });
+
+        const { registerNode } = await import('@/instrumentation-node');
+        void registerNode();
+
+        await vi.waitFor(() => {
+          expect(getWorldStart).toHaveBeenCalledTimes(1);
+        }, { timeout: 1000, interval: 1 });
+
+        await vi.advanceTimersByTimeAsync(60_000);
+        await Promise.resolve();
+
+        expect(markDone).not.toHaveBeenCalled();
+        expect(drainAllRecoveryWork).not.toHaveBeenCalled();
+      } finally {
+        vi.useRealTimers();
+      }
+    });
+
+    it('runs destructive boot recovery when configured workflow startup definitively fails', async () => {
+      vi.stubEnv('NODE_ENV', 'production');
+      vi.stubEnv('VITEST', '');
+      vi.stubEnv('WORKFLOW_TARGET_WORLD', '@workflow/world-postgres');
+      vi.stubEnv('DATABASE_URL', '');
+      vi.stubEnv('WORKFLOW_POSTGRES_URL', '');
+      const release = { id: 'release-failed-world', project: 'proj', kind: 'release', finishedAt: null, startedAt: 100 };
+      const { drainAllRecoveryWork, markDone } = mockRegisterNodeBootDeps({
+        jobs: [release],
+        getWorldStart: vi.fn().mockRejectedValue(new Error('world failed')),
+      });
+
+      const { registerNode } = await import('@/instrumentation-node');
+      await registerNode();
+
+      await vi.waitFor(() => {
+        expect(markDone).toHaveBeenCalledWith(release, -1);
+        expect(drainAllRecoveryWork).toHaveBeenCalledTimes(1);
+      }, { timeout: 2000, interval: 1 });
+    });
+
+    it('runs destructive boot recovery immediately when no workflow world is configured', async () => {
+      vi.stubEnv('NODE_ENV', 'production');
+      vi.stubEnv('VITEST', '');
+      vi.stubEnv('WORKFLOW_TARGET_WORLD', '');
+      vi.stubEnv('DATABASE_URL', '');
+      vi.stubEnv('WORKFLOW_POSTGRES_URL', '');
+      const release = { id: 'release-no-world', project: 'proj', kind: 'release', finishedAt: null, startedAt: 100 };
+      const { drainAllRecoveryWork, markDone, getWorldStart } = mockRegisterNodeBootDeps({
+        jobs: [release],
+      });
+
+      const { registerNode } = await import('@/instrumentation-node');
+      await registerNode();
+
+      await vi.waitFor(() => {
+        expect(markDone).toHaveBeenCalledWith(release, -1);
+        expect(drainAllRecoveryWork).toHaveBeenCalledTimes(1);
+      }, { timeout: 2000, interval: 1 });
+      expect(getWorldStart).not.toHaveBeenCalled();
     });
 
     it('resumes abandoned pr-wait inline jobs during boot instead of reaping them', async () => {
@@ -377,7 +576,9 @@ describe('instrumentation', () => {
       const probeJobStatus = options.probeJobStatus ?? vi.fn().mockResolvedValue(undefined);
       const reconcileStaleRelease = options.reconcileStaleRelease ?? vi.fn().mockResolvedValue(undefined);
       const pipelineStepKinds = options.pipelineStepKinds ?? new Set(['test', 'review', 'fix', 'commit', 'push', 'pr-wait', 'mark-dod']);
-      vi.doMock('@/lib/jobs/job-storage', () => ({ listJobs: () => jobs, probeJobStatus, reconcileStaleRelease, PIPELINE_STEP_KINDS: pipelineStepKinds }));
+      const storageMock = { listJobs: () => jobs, probeJobStatus, reconcileStaleRelease, PIPELINE_STEP_KINDS: pipelineStepKinds };
+      vi.doMock('@/lib/jobs/job-storage', () => storageMock);
+      vi.doMock('./lib/jobs/job-storage', () => storageMock);
       return { probeJobStatus, reconcileStaleRelease };
     }
 
