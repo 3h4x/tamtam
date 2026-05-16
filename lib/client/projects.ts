@@ -453,6 +453,7 @@ export async function updateProjectConfig(
     tests_disabled?: boolean
     review_disabled?: boolean
     review_prompt_addendum?: string
+    review_prerequisite_command?: string
     fix_prompt_addendum?: string
     commit_style?: string
     website?: string

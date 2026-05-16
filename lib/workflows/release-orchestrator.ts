@@ -62,19 +62,48 @@ export async function releaseOrchestratorWorkflow(
   //                            finalize and surface so it doesn't silently
   //                            hang the release.
   if (dispatch.dispatched === false && ctx.parentJobId) {
+    // Transient chunk-load dispatch failures (Next.js rewrote .next during
+    // a rebuild while this orchestrator tick was importing the next phase
+    // workflow) are NOT terminal — the release-reconcile probe sweep will
+    // re-dispatch the orchestrator a moment later when the new chunks have
+    // landed. Finalizing here would kill a perfectly healthy release.
+    // Return early without touching the release row.
+    if (
+      dispatch.dispatched === false &&
+      dispatch.reason === 'dispatch_failed' &&
+      /Failed to load chunk|Cannot find module|MODULE_NOT_FOUND/i.test(dispatch.error)
+    ) {
+      console.warn(
+        `[release-orchestrator] chunk-load dispatch failure for ${ctx.parentJobId}: ${dispatch.error.slice(0, 200)} — leaving release running for reconcile`,
+      );
+      return { waited, decision, dispatch };
+    }
     // Stash the guard's stop reason on the release before finalizing so the
     // UI / pipeline trace surfaces the abort cause. When the abort came
     // from a review-side guard with a NEEDS ATTENTION verdict (not DO NOT
     // SHIP), file the exhaustion-fallback GitHub issue with the persistent
     // findings so the user has a follow-up artifact.
     const stopReason = computeStopReason(dispatch, decision);
-    const fileExhaustionIssueForReviewId =
+    // When a NEEDS-ATTENTION review cap aborts the chain, file a follow-up
+    // GitHub issue against the LATEST review job in the release. Earlier the
+    // check required `waited.job.kind === 'review'`, but the cap fires when
+    // we're about to dispatch the next review AFTER a fix — at that moment
+    // waited.job is the fix, not the review, so the check missed and the
+    // exhaustion issue silently never got filed. The actual lookup runs in
+    // `findLatestReviewIdStep` so Node module access stays in a `'use step'`
+    // body (the workflow body must remain pure / non-Node).
+    let fileExhaustionIssueForReviewId: string | undefined;
+    if (
       decision.next === 'abort' &&
       decision.from === 'review' &&
-      decision.verdict === 'NEEDS ATTENTION' &&
-      waited.job.kind === 'review'
-        ? waited.job.id
-        : undefined;
+      decision.verdict === 'NEEDS ATTENTION'
+    ) {
+      if (waited.job.kind === 'review') {
+        fileExhaustionIssueForReviewId = waited.job.id;
+      } else if (ctx.parentJobId) {
+        fileExhaustionIssueForReviewId = (await findLatestReviewIdStep(ctx.parentJobId)) ?? undefined;
+      }
+    }
     // For terminal decisions, the release outcome mirrors the last step's
     // exit code. For dispatch failures, we have no successful chain to point
     // at — propagate exit 1 so the release row goes red rather than
@@ -204,13 +233,26 @@ async function dispatchStep(
   return dispatchPhase(decision, ctx);
 }
 
+async function findLatestReviewIdStep(releaseJobId: string): Promise<string | null> {
+  'use step';
+  try {
+    const { listJobs } = await import('@/lib/jobs/job-storage');
+    const latest = listJobs()
+      .filter((j) => j.releaseId === releaseJobId && j.kind === 'review' && j.finishedAt !== null)
+      .sort((a, b) => (b.startedAt ?? 0) - (a.startedAt ?? 0))[0];
+    return latest?.id ?? null;
+  } catch {
+    return null;
+  }
+}
+
 async function fileReviewExhaustionIssueStep(
   reviewJobId: string,
   releaseJobId: string | null,
 ): Promise<void> {
   'use step';
   try {
-    const { getJob } = await import('@/lib/jobs/job-storage');
+    const { getJob, updateJob } = await import('@/lib/jobs/job-storage');
     const { appendRedactedFileSync } = await import('@/lib/jobs/redacted-log-writer');
     const { fileReviewExhaustionIssue } = await import('@/lib/pipeline/review-exhaustion-fallback');
     const reviewJob = getJob(reviewJobId);
@@ -219,6 +261,17 @@ async function fileReviewExhaustionIssueStep(
     const release = releaseJobId ? getJob(releaseJobId) : null;
     if (r.ok) {
       console.log(`[release] DO NOT SHIP → follow-up issue filed: ${r.issueUrl}; continuing to commit`);
+      // Stamp the filed-issue URL on the review job's contextMeta so the
+      // UI can surface it on the review row ("→ filed #N"). Without this
+      // the audit trail is buried in PM2 logs.
+      try {
+        const meta = reviewJob.contextMeta ? JSON.parse(reviewJob.contextMeta) : {};
+        const merged = (meta && typeof meta === 'object' && !Array.isArray(meta)) ? meta as Record<string, unknown> : {};
+        merged.followupIssueUrl = r.issueUrl;
+        if (r.issueNumber) merged.followupIssueNumber = r.issueNumber;
+        reviewJob.contextMeta = JSON.stringify(merged);
+        updateJob(reviewJob);
+      } catch {}
       if (release?.logPath) {
         try {
           appendRedactedFileSync(release.logPath, `# review do-not-ship → follow-up issue: ${r.issueUrl}\n`);
@@ -281,6 +334,14 @@ async function finalizeReleaseStep(
         const r = await fileReviewExhaustionIssue(reviewJob);
         if (r.ok) {
           console.log(`[release] exhaustion issue filed: ${r.issueUrl}`);
+          try {
+            const m = reviewJob.contextMeta ? JSON.parse(reviewJob.contextMeta) : {};
+            const merged = (m && typeof m === 'object' && !Array.isArray(m)) ? m as Record<string, unknown> : {};
+            merged.followupIssueUrl = r.issueUrl;
+            if (r.issueNumber) merged.followupIssueNumber = r.issueNumber;
+            reviewJob.contextMeta = JSON.stringify(merged);
+            updateJob(reviewJob);
+          } catch {}
           if (release.logPath) {
             try { appendRedactedFileSync(release.logPath, `# exhaustion issue: ${r.issueUrl}\n`); } catch {}
           }

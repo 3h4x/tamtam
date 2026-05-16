@@ -1354,52 +1354,17 @@ async function runCompletionHooksInner(job: JobData): Promise<void> {
     }
   }
 
-  // Release-after-run: when a terminal/agent run finishes successfully, auto-trigger the release pipeline.
-  //
-  // Issue-cruncher (and any chat run linked to a GitHub issue) deliberately
-  // works on a feature branch — `fix/issue-<N>-...`. Auto-releasing that
-  // branch would either (a) ship half-done issue work straight to main, or
-  // (b) run the release pipeline against the wrong branch. Issue work ships
-  // via the PR path (Create PR → review → merge), not auto-release. Gate
-  // the hook on both the job kind and `ghIssueNumber` so a vanilla chat run
-  // unrelated to an issue still auto-releases as before.
-  const isIssueWork =
-    job.kind === 'agent:issue-cruncher' ||
-    (getJobKind(job.kind) === 'run' && job.ghIssueNumber != null) ||
-    (isAgentJobKind(job.kind) && job.ghIssueNumber != null);
-  if (isIssueWork && job.exitCode === 0) {
-    console.log(`[release-after-run] skipped for ${job.project}: ${job.kind} is issue work (issue #${job.ghIssueNumber ?? '?'}) — use Create PR to ship`);
-  }
-  if ((getJobKind(job.kind) === 'run' || isAgentJobKind(job.kind)) && job.exitCode === 0 && !isIssueWork) {
-    try {
-      const { releaseAfterRun } = await getProjectPipelineConfig(job.project);
-      if (releaseAfterRun) {
-        const { dispatchReleaseWorkflow } = await import('@/lib/workflows/dispatch-release');
-        const r = await dispatchReleaseWorkflow(job.project, { queueIfBlocked: true, sourceJobId: job.id });
-        if (r.ok) {
-          if ('status' in r && r.status === 'queued') {
-            console.log(`[release-after-run] queued release for ${job.project} after run ${job.id}`);
-          } else {
-            console.log(`[release-after-run] triggered release ${r.jobId} for ${job.project} after run ${job.id}`);
-          }
-        } else {
-          // Only queue a pending-release flag for failures that actually need
-          // to wait for something (lock conflict, jobs paused, budget block,
-          // explicit retryable). Non-retryable failures like "Nothing to
-          // release" or "project not found" must not stamp the flag — there
-          // is no future event that will drain them, so the banner sticks.
-          const { shouldKeepPendingRelease, setPendingRelease } = await import('@/lib/pipeline/pending-release');
-          if (shouldKeepPendingRelease(r)) {
-            setPendingRelease(job.project);
-            console.log(`[release-after-run] queued for ${job.project} (will drain when pipeline lock releases): ${r.detail}`);
-          } else {
-            console.log(`[release-after-run] no release for ${job.project}: ${r.detail}`);
-          }
-        }
-      }
-    } catch (e) {
-      console.log(`[release-after-run] error for ${job.project}:`, e);
+  // Release-after-run: extracted to lib/workflows/triggers/release-after-run.ts.
+  // The legacy hook stays gated on a kill switch so we can flip behavior to
+  // the workflow-driven event router (Phase 1 follow-up) without redeploying.
+  try {
+    const { getSettings } = await import('@/lib/shared/config');
+    if (getSettings().legacy_completion_hook_release_after_run_enabled) {
+      const { dispatchReleaseAfterRun } = await import('@/lib/workflows/triggers/release-after-run');
+      await dispatchReleaseAfterRun(job);
     }
+  } catch (e) {
+    console.log(`[release-after-run] error for ${job.project}:`, e);
   }
 
   // Drain the pending-agent-run queue AFTER release-after-run so a release

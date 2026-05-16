@@ -319,6 +319,35 @@ export async function startProjectReview(
     }
   }
 
+  // Per-project review pre-step (e.g. regenerating DB types so the
+  // reviewer sees freshly-generated DB types). Runs before scope detection
+  // because the command may write files that show up in `git status` and
+  // therefore in the review's diff. File config is the shared project contract;
+  // the DB field remains as a UI/admin fallback for existing projects.
+  let reviewPrerequisiteCommand: string | null = loadFileConfig(projPath)?.review_prerequisite_command ?? null;
+  try {
+    reviewPrerequisiteCommand ||= (await getProjectPipelinePrompts(projectName)).reviewPrerequisiteCommand;
+  } catch { /* test env without DB */ }
+  let prereqBlock = '';
+  if (reviewPrerequisiteCommand?.trim()) {
+    const command = reviewPrerequisiteCommand.trim();
+    const r = await exec('bash', ['-lc', command], {
+      cwd: projPath,
+      timeout: 20 * 60 * 1000,
+      killProcessGroup: true,
+    });
+    if (r.exitCode !== 0) {
+      const output = [r.stderr.trim(), r.stdout.trim()].filter(Boolean).join('\n').trim();
+      const detail = output
+        ? `Review prerequisite failed for ${projectName}: ${command}\n${output}`
+        : `Review prerequisite failed for ${projectName}: ${command}`;
+      return { ok: false, status: 500, detail };
+    }
+    const head = `# review prerequisite (\`${command}\`) — exit ${r.exitCode}`;
+    const out = `${r.stdout}\n${r.stderr ? `\n--- stderr ---\n${r.stderr}` : ''}`.trim();
+    prereqBlock = `\n\n${head}\n${out ? out.slice(0, 4000) : '(no output)'}`;
+  }
+
   const scope = await determineReviewScope(projPath);
   if (!scope.ok) {
     return { ok: false, status: 400, detail: scope.detail };
@@ -327,7 +356,7 @@ export async function startProjectReview(
   const renderedReviewPrompt = (await loadReviewPrompt(projectName))
     .replace('{project}', projectName)
     .replace('{path}', projPath)
-    .replace('{review_scope}', scope.prompt)
+    .replace('{review_scope}', scope.prompt + prereqBlock)
     .replace('{release_context}', releaseContextForReview(projectName));
 
   // Auto-attach docs based on keywords in the review scope (file paths, diff

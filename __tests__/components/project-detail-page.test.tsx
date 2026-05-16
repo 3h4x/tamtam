@@ -187,6 +187,7 @@ function buildConfig(overrides: Partial<ProjectConfig> = {}): ProjectConfig {
     issue_auto_branch: true,
     tests_disabled: false,
     review_disabled: false,
+    review_prerequisite_command: '',
     last_push_error: null,
     last_push_at: null,
     ...overrides,

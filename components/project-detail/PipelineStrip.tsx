@@ -19,6 +19,11 @@ interface PipelineStep {
   jobId: string | null
 }
 
+interface PipelineJourneyStep extends PipelineStep {
+  role: 'start' | 'now' | 'goal'
+  meta: string
+}
+
 export interface PipelineStripProps {
   projectName: string
   projectJobs: JobInfo[]
@@ -127,6 +132,16 @@ function connectorClass(prev: StepState): string {
   if (prev === 'running') return 'bg-accent/50'
   if (prev === 'skipped') return 'bg-border/60'
   return 'bg-border/50'
+}
+
+function jobKindLabel(kind: string): string {
+  if (kind === 'mark-dod') return 'dod'
+  if (kind === 'pr-wait') return 'merge'
+  return kind.replace(/-/g, ':')
+}
+
+function toJourneyStep(step: PipelineStep, role: PipelineJourneyStep['role'], meta: string): PipelineJourneyStep {
+  return { ...step, role, meta }
 }
 
 export function PipelineStrip({
@@ -576,6 +591,71 @@ export function PipelineStrip({
   const stripVisible = !!activeReleaseJob || runningStepKinds.size > 0
   const canAbortRelease = !!activeReleaseJob
   const summaryHint = summaryHintText(activeStep?.hint ?? attentionStep?.hint ?? 'Pipeline running')
+  const firstWindowJob = windowJobs[0]
+  const firstStep = steps[0] ?? (firstWindowJob
+    ? {
+        label: jobKindLabel(firstWindowJob.kind),
+        state: stateOf(firstWindowJob),
+        hint: `${jobKindLabel(firstWindowJob.kind)} started the visible pipeline`,
+        action: openJob(firstWindowJob),
+        jobId: firstWindowJob.id,
+      }
+    : {
+        label: jobKindLabel(displayReleaseJob.kind),
+        state: stateOf(displayReleaseJob),
+        hint: `${jobKindLabel(displayReleaseJob.kind)} started the release`,
+        action: openJob(displayReleaseJob),
+        jobId: displayReleaseJob.id,
+      })
+  const nextPendingStep = steps.find(s => s.state === 'pending')
+  const currentStep = activeStep ?? attentionStep ?? nextPendingStep ?? steps[steps.length - 1] ?? firstStep
+  const expectedGoal: PipelineStep = (() => {
+    const existingGoal = prWaitJob
+      ? { label: 'merge', state: prWaitState, hint: prWaitHint, action: prWaitAction, jobId: prWaitJob.id }
+      : pushJob && pushState === 'failed'
+          ? { label: 'push', state: pushState, hint: pushHint, action: pushAction, retryAction: pushRetryAction, jobId: pushJob.id }
+        : showPrChip
+          ? { label: 'pr', state: prState, hint: prHint, action: prAction, jobId: pushJob?.id ?? null }
+        : dodJob
+          ? { label: 'dod', state: dodState, hint: dodHint, action: dodAction, jobId: dodJob.id }
+        : pushJob
+            ? { label: 'push', state: pushState, hint: pushHint, action: pushAction, retryAction: pushRetryAction, jobId: pushJob.id }
+            : commitJob
+              ? { label: 'commit', state: commitState, hint: commitHint, action: commitAction, jobId: commitJob.id }
+              : null
+    if (existingGoal) return existingGoal
+    if (!onDefaultBranch && autoPush) {
+      return {
+        label: 'merge',
+        state: 'pending',
+        hint: 'target: open or reuse a PR, wait for CI, then merge',
+        action: null,
+        jobId: null,
+      }
+    }
+    if (autoPush || unpushedBool || hasChanges) {
+      return {
+        label: 'push',
+        state: 'pending',
+        hint: onDefaultBranch ? 'target: push directly to the default branch' : 'target: publish the reviewed changes',
+        action: null,
+        jobId: null,
+      }
+    }
+    return {
+      label: currentStep.label,
+      state: currentStep.state,
+      hint: currentStep.hint,
+      action: currentStep.action,
+      retryAction: currentStep.retryAction,
+      jobId: currentStep.jobId,
+    }
+  })()
+  const journeySteps: PipelineJourneyStep[] = [
+    toJourneyStep(firstStep, 'start', 'initial run'),
+    toJourneyStep(currentStep, 'now', currentStep.state === 'pending' ? 'pending step' : `${stateLabel(currentStep.state)} step`),
+    toJourneyStep(expectedGoal, 'goal', 'target'),
+  ]
 
   if (!stripVisible) return null
 
@@ -606,29 +686,30 @@ export function PipelineStrip({
           {doneCount}/{totalSteps}
         </span>
       </div>
-      {steps.map((s, i) => {
+      {journeySteps.map((s, i) => {
         const clickable = !!s.action
-        const isCurrent = i === runningStepIdx
+        const isCurrent = s.role === 'now' && s.state === 'running'
         const label = visibleStateLabel(s.state)
-        const chipClass = `inline-flex min-h-[36px] items-center gap-2 rounded-md border px-2.5 py-1.5 text-[11px] transition-colors ${stepChipClass(s.state, isCurrent)} ${isCurrent ? 'font-semibold' : ''}`
+        const chipClass = `inline-flex min-h-[44px] min-w-[112px] items-center gap-2 rounded-md border px-2.5 py-1.5 text-[11px] transition-colors ${stepChipClass(s.state, isCurrent)} ${s.role === 'now' ? 'font-semibold' : ''}`
         const chip = (
           <>
             <span className="inline-flex items-center justify-center w-3.5 h-3.5 shrink-0">
               {stepIcon(s.state)}
             </span>
             <div className="flex min-w-0 flex-col items-start leading-none">
-              <div className="flex items-center gap-1.5">
-                <span className="font-sans text-[11px] font-medium text-text-primary">{s.label}</span>
-                <span className="font-mono text-[9px] text-text-tertiary">{String(i + 1).padStart(2, '0')}</span>
+              <div className="flex w-full min-w-0 items-center justify-between gap-2">
+                <span className="font-mono text-[9px] uppercase tracking-[0.12em] text-text-tertiary">{s.role}</span>
+                <span className={`rounded-sm border px-1 py-0.5 font-sans text-[8px] font-medium uppercase tracking-[0.10em] ${stateBadgeClass(s.state)}`}>
+                  {label}
+                </span>
               </div>
-              <span className={`mt-1 inline-flex items-center rounded-sm border px-1.5 py-0.5 font-sans text-[9px] font-medium uppercase tracking-[0.12em] ${stateBadgeClass(s.state)}`}>
-                {label}
-              </span>
+              <span className="mt-1 truncate font-sans text-[12px] font-medium text-text-primary">{s.label}</span>
+              <span className="mt-1 truncate font-sans text-[10px] text-text-tertiary">{s.meta}</span>
             </div>
           </>
         )
         return (
-          <div key={`${s.label}:${s.jobId ?? 'synthetic'}`} className="flex items-center gap-1">
+          <div key={`${s.role}:${s.label}:${s.jobId ?? 'synthetic'}`} className="flex items-center gap-1">
             {clickable ? (
               <button
                 type="button"
@@ -660,7 +741,7 @@ export function PipelineStrip({
                   : '↻'}
               </button>
             )}
-            {i < steps.length - 1 && (
+            {i < journeySteps.length - 1 && (
               <span className={`h-0.5 w-4 rounded-full ${connectorClass(s.state)} transition-colors`} aria-hidden />
             )}
           </div>

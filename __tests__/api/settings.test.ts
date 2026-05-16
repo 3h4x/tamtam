@@ -334,6 +334,26 @@ describe('settings API', () => {
       expect(data.settings.project_sweep_enabled).toBe('true');
     });
 
+    it('updates the legacy release-after-run hook kill switch and returns it canonically', async () => {
+      const request = new NextRequest('http://localhost/api/settings', {
+        method: 'PATCH',
+        body: JSON.stringify({ legacy_completion_hook_release_after_run_enabled: false }),
+      });
+      const response = await PATCH(request);
+      expect(response.status).toBe(200);
+
+      const rows = await sharedHandle.db.select().from(schema.settings);
+      const map = Object.fromEntries(rows.map((r) => [r.key, r.value]));
+      expect(map.legacy_completion_hook_release_after_run_enabled).toBe('false');
+
+      const patchData = await response.json();
+      expect(patchData.settings.legacy_completion_hook_release_after_run_enabled).toBe('false');
+
+      const getResponse = await GET();
+      const getData = await getResponse.json();
+      expect(getData.settings.legacy_completion_hook_release_after_run_enabled).toBe('false');
+    });
+
     it('rejects invalid retrieval settings', async () => {
       const response = await PATCH(new NextRequest('http://localhost/api/settings', {
         method: 'PATCH',

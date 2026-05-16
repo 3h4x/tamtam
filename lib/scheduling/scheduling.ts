@@ -183,6 +183,8 @@ export async function writeProjectFieldYaml(
     run(db.update(schema.projects).set({ reviewPromptAddendum: value }).where(w).execute());
   } else if (fieldName === 'fix_prompt_addendum') {
     run(db.update(schema.projects).set({ fixPromptAddendum: value }).where(w).execute());
+  } else if (fieldName === 'review_prerequisite_command') {
+    run(db.update(schema.projects).set({ reviewPrerequisiteCommand: value }).where(w).execute());
   } else if (fieldName === 'website') {
     run(db.update(schema.projects).set({ website: value }).where(w).execute());
   } else if (fieldName === 'qa_url') {
@@ -194,6 +196,7 @@ export async function writeProjectFieldYaml(
 export async function getProjectPipelinePrompts(projName: string): Promise<{
   reviewPromptAddendum: string | null;
   fixPromptAddendum: string | null;
+  reviewPrerequisiteCommand: string | null;
 }> {
   const rows = await db
     .select()
@@ -201,10 +204,11 @@ export async function getProjectPipelinePrompts(projName: string): Promise<{
     .where(eq(schema.projects.name, projName))
     .limit(1);
   const row = rows[0] ?? null;
-  if (!row) return { reviewPromptAddendum: null, fixPromptAddendum: null };
+  if (!row) return { reviewPromptAddendum: null, fixPromptAddendum: null, reviewPrerequisiteCommand: null };
   return {
     reviewPromptAddendum: row.reviewPromptAddendum ?? null,
     fixPromptAddendum: row.fixPromptAddendum ?? null,
+    reviewPrerequisiteCommand: row.reviewPrerequisiteCommand ?? null,
   };
 }
 

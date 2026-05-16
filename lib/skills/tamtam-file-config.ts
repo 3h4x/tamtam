@@ -89,6 +89,7 @@ export interface FileCustomAction {
  *   • release_timeout_minutes — per-project wall-clock budget for releases
  *   • custom_actions — buttons that should exist on the project page
  *   • safe_users     — GitHub logins whose PR comments are not wrapped as untrusted
+ *   • review_prerequisite_command — shared pre-review codegen/schema command
  *
  * Workflow flags (auto-push, auto-commit, PR mode, gates, test cron) intentionally
  * live in the DB only — each developer can opt in to automation without
@@ -110,6 +111,10 @@ export interface FileProjectConfig {
   // loaded into the prompt. Subsequent turns in the same session inherit it
   // via --resume, so the doc is only attached once per session.
   auto_attach_docs?: AutoAttachDocRule[];
+  // Bash command run before each review step. Output is captured and prepended
+  // to the review prompt so the reviewer sees fresh codegen artifacts
+  // (DB types, schema dumps). DB-only mirror in `projects.review_prerequisite_command`.
+  review_prerequisite_command?: string;
 }
 
 export interface AutoAttachDocRule {
@@ -118,7 +123,7 @@ export interface AutoAttachDocRule {
 }
 
 const GROUPS: { label: string; keys: (keyof FileProjectConfig)[] }[] = [
-  { label: 'pipeline', keys: ['test_command', 'release_timeout_minutes'] },
+  { label: 'pipeline', keys: ['test_command', 'release_timeout_minutes', 'review_prerequisite_command'] },
   { label: 'actions', keys: ['custom_actions'] },
   { label: 'security', keys: ['safe_users'] },
   { label: 'commits', keys: ['commit_style'] },
@@ -177,6 +182,9 @@ function parseConfigYaml(raw: string): FileProjectConfig | null {
     const config: FileProjectConfig = {};
 
     if (typeof flat.test_command === 'string') config.test_command = flat.test_command;
+    if (typeof flat.review_prerequisite_command === 'string') {
+      config.review_prerequisite_command = flat.review_prerequisite_command;
+    }
     if (typeof flat.release_timeout_minutes === 'number' && Number.isFinite(flat.release_timeout_minutes) && flat.release_timeout_minutes > 0) {
       config.release_timeout_minutes = Math.floor(flat.release_timeout_minutes);
     }

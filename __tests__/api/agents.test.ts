@@ -108,6 +108,7 @@ async function applyDdl(handle: TestDbHandle): Promise<void> {
       last_push_error text,
       last_push_at double precision,
       review_prompt_addendum text,
+      review_prerequisite_command text,
       fix_prompt_addendum text,
       website text,
       qa_url text,

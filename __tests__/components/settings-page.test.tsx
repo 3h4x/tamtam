@@ -280,6 +280,65 @@ describe('SettingsPage', () => {
     unmount()
   })
 
+  it('renders and saves the legacy release-after-run hook kill switch', async () => {
+    const fetchMock = vi.fn(async (input: string, init?: RequestInit) => {
+      if (input === '/api/settings' && !init) {
+        return makeResponse({
+          settings: {
+            claude_provider: 'claude',
+            cli_enabled_providers: 'claude',
+            legacy_completion_hook_release_after_run_enabled: 'true',
+          },
+        })
+      }
+      if (input === '/api/settings' && init?.method === 'PATCH') {
+        return makeResponse({
+          status: 'ok',
+          settings: {
+            claude_provider: 'claude',
+            cli_enabled_providers: 'claude',
+            legacy_completion_hook_release_after_run_enabled: 'false',
+          },
+        })
+      }
+      if (input === '/api/config/projects') {
+        return makeResponse({ projects: [] })
+      }
+      throw new Error(`Unexpected fetch: ${input}`)
+    })
+    vi.stubGlobal('fetch', fetchMock)
+
+    const { container, unmount } = renderSettingsPage()
+
+    await vi.waitFor(() => {
+      expect(findSelectByLabel(container, 'Legacy Release-After-Run Hook').value).toBe('true')
+      expect(getSaveButton(container).disabled).toBe(true)
+    })
+
+    flushSync(() => {
+      setSelectValue(findSelectByLabel(container, 'Legacy Release-After-Run Hook'), 'false')
+    })
+
+    await vi.waitFor(() => {
+      expect(getSaveButton(container).disabled).toBe(false)
+    })
+
+    getSaveButton(container).click()
+
+    await vi.waitFor(() => {
+      expect(findSelectByLabel(container, 'Legacy Release-After-Run Hook').value).toBe('false')
+      expect(getSaveButton(container).disabled).toBe(true)
+    })
+
+    const patchCall = fetchMock.mock.calls.find(
+      ([input, init]) => input === '/api/settings' && (init as RequestInit | undefined)?.method === 'PATCH',
+    )
+    expect(patchCall).toBeTruthy()
+    expect((patchCall?.[1] as RequestInit).body).toContain('"legacy_completion_hook_release_after_run_enabled":"false"')
+
+    unmount()
+  })
+
   it('does not render the removed durable workflow setting', async () => {
     const fetchMock = vi.fn(async (input: string, init?: RequestInit) => {
       if (input === '/api/settings' && !init) {

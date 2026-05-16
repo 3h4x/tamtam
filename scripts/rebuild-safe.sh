@@ -25,11 +25,27 @@ set -euo pipefail
 
 BASE_URL="${TAMTAM_BASE_URL:-http://localhost:1337}"
 DRAIN_TIMEOUT_S="${TAMTAM_REBUILD_DRAIN_TIMEOUT:-600}"
+WALL_CLOCK_TIMEOUT_S="${TAMTAM_REBUILD_WALL_CLOCK_TIMEOUT:-1800}"
 FORCE="${TAMTAM_REBUILD_FORCE:-0}"
 POLL_INTERVAL_S=5
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 
 log() { printf '[rebuild-safe] %s\n' "$*"; }
+
+# Hard wall-clock kill switch — if anything in this script hangs (drain
+# polling against a crash-looping server, pnpm build that never returns,
+# pm2-start blocked on a port), self-SIGTERM after 30min. The EXIT trap
+# below still runs, which unpauses jobs. A hung rebuild that leaves jobs
+# paused indefinitely (the iter #46 incident) is worse than just bailing.
+WALL_CLOCK_PID=$$
+( sleep "$WALL_CLOCK_TIMEOUT_S" && kill -TERM "$WALL_CLOCK_PID" 2>/dev/null ) &
+WALL_CLOCK_WATCHDOG=$!
+disown "$WALL_CLOCK_WATCHDOG" 2>/dev/null || true
+cleanup_watchdog() {
+  if [ -n "${WALL_CLOCK_WATCHDOG:-}" ]; then
+    kill "$WALL_CLOCK_WATCHDOG" 2>/dev/null || true
+  fi
+}
 
 pause_jobs() {
   curl -sf -X PATCH "$BASE_URL/api/settings" \
@@ -71,7 +87,17 @@ except Exception:
 }
 
 PAUSED=0
-trap 'if [ "$PAUSED" = 1 ] && [ "${KEEP_PAUSED:-0}" != 1 ]; then unpause_jobs >/dev/null 2>&1 || true; fi' EXIT
+trap '
+  cleanup_watchdog
+  if [ "$PAUSED" = 1 ] && [ "${KEEP_PAUSED:-0}" != 1 ]; then
+    unpause_jobs >/dev/null 2>&1 || true
+    printf "[rebuild-safe] unpaused jobs in exit trap\n"
+  fi
+' EXIT
+# Also unpause on SIGTERM (wall-clock watchdog kill). The EXIT trap fires
+# on SIGTERM by default, but make it explicit so the unpause path is
+# obvious.
+trap 'printf "[rebuild-safe] WALL CLOCK timeout (%ss) — bailing\n" "$WALL_CLOCK_TIMEOUT_S"; exit 124' TERM
 
 if [ "$FORCE" = 1 ]; then
   log "force mode: skipping pause/drain"

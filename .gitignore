@@ -50,6 +50,7 @@ playwright-report/
 .profiles/
 *.cpuprofile
 .next/dev/trace-turbopack
+.swc/
 
 # Claude Code sub-agent worktrees (transient — created by Agent tool with
 # isolation:worktree, sometimes orphaned by server restarts mid-run)

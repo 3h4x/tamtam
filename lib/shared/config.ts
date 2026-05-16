@@ -87,6 +87,7 @@ export interface TamTamConfig {
   pipeline_model_dod: string;
   pipeline_model_commit: string;
   review_retry_on_parse_failure: boolean;
+  legacy_completion_hook_release_after_run_enabled: boolean;
   budget_block_runs_enabled: boolean;
   budget_subscription_providers: BudgetSubscriptionProvider[];
   budget_block_at_pct: number;
@@ -172,6 +173,7 @@ const DEFAULTS: TamTamConfig = {
   pipeline_model_dod: '',
   pipeline_model_commit: '',
   review_retry_on_parse_failure: true,
+  legacy_completion_hook_release_after_run_enabled: true,
   budget_block_runs_enabled: false,
   budget_subscription_providers: ['claude', 'codex'],
   budget_block_at_pct: 95,
@@ -375,6 +377,10 @@ export function buildConfigFromSettingsMap(map: Record<string, string>): TamTamC
       map.review_retry_on_parse_failure === undefined
         ? DEFAULTS.review_retry_on_parse_failure
         : map.review_retry_on_parse_failure === 'true',
+    legacy_completion_hook_release_after_run_enabled:
+      map.legacy_completion_hook_release_after_run_enabled === undefined
+        ? DEFAULTS.legacy_completion_hook_release_after_run_enabled
+        : map.legacy_completion_hook_release_after_run_enabled === 'true',
     budget_block_runs_enabled: map.budget_block_runs_enabled === 'true',
     budget_subscription_providers: normalizeBudgetSubscriptionProviders(map.budget_subscription_providers),
     budget_block_at_pct: parseIntOr(map.budget_block_at_pct, DEFAULTS.budget_block_at_pct),
