@@ -356,8 +356,16 @@ export async function registerNode(): Promise<void> {
   }
   void backfillVerdicts();
   void reapAbandonedInlineJobs();
-  void reapOrphanReleases();
-  void drainBootRecoveryWork();
+  // reapOrphanReleases + drainBootRecoveryWork are intentionally delayed.
+  // The workflow runtime's world.start() re-enqueues in-flight runs (see
+  // the WORKFLOW_TARGET_WORLD block below) — if reap fires first it
+  // marks healthy mid-flight releases as orphan exit=-1 a beat before
+  // the orchestrator would have picked them back up. Deferring 8s gives
+  // the workflow runtime room to re-enqueue without racing.
+  setTimeout(() => {
+    void reapOrphanReleases();
+    void drainBootRecoveryWork();
+  }, 8000);
   // reinstallAgents() retired with the in-memory scheduler — graphile-cron
   // (`seedAgentCrons` below) replaces it. Scheduled agents are durable
   // across restarts via graphile-worker's persistent job queue now.
