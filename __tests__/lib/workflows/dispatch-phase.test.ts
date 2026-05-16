@@ -26,7 +26,15 @@ vi.mock('@/lib/workflows/phases/push-phase', () => ({ releasePushPhaseWorkflow: 
 vi.mock('@/lib/workflows/phases/mark-dod-phase', () => ({ releaseMarkDodPhaseWorkflow: phaseFns.markDod }));
 vi.mock('@/lib/workflows/phases/pr-wait-phase', () => ({ releasePrWaitPhaseWorkflow: phaseFns.prWait }));
 vi.mock('@/lib/shared/config', () => ({
-  getSettings: () => ({ plain_test_phase_enabled: settingsState.plainTestPhaseEnabled }),
+  getSettings: () => ({
+    plain_test_phase_enabled: settingsState.plainTestPhaseEnabled,
+    review_fix_backoff_seconds: 0,
+  }),
+}));
+
+const listJobsMock = vi.fn(() => [] as Array<Record<string, unknown>>);
+vi.mock('@/lib/jobs/job-storage', () => ({
+  listJobs: () => listJobsMock(),
 }));
 
 import { dispatchPhase } from '@/lib/workflows/dispatch-phase';
@@ -36,6 +44,7 @@ describe('dispatchPhase', () => {
   beforeEach(() => {
     startMock.mockReset().mockResolvedValue({ runId: 'wrun_child_1' });
     settingsState.plainTestPhaseEnabled = false;
+    listJobsMock.mockReset().mockReturnValue([]);
   });
 
   it('returns terminal for next=done without dispatching', async () => {
@@ -226,5 +235,34 @@ describe('dispatchPhase', () => {
       reason: 'dispatch_failed',
       phase: 'review',
     });
+  });
+
+  it('suppresses duplicate dispatch when an in-flight child of the same kind already exists', async () => {
+    // Regression: after a PM2 restart, both the workflow runtime AND the
+    // completion-event router called start(...) for the next phase,
+    // producing twin push/fix jobs.
+    listJobsMock.mockReturnValue([
+      { releaseId: 'release-1', kind: 'push', finishedAt: null },
+    ]);
+    const decision: NextPhase = { next: 'push', from: 'commit' };
+    const r = await dispatchPhase(decision, { projectName: 'p', parentJobId: 'release-1' });
+    expect(r).toMatchObject({
+      dispatched: false,
+      reason: 'dispatch_failed',
+      phase: 'push',
+      error: expect.stringContaining('duplicate dispatch suppressed'),
+    });
+    expect(startMock).not.toHaveBeenCalled();
+  });
+
+  it('dispatches normally when no in-flight child of that kind exists', async () => {
+    listJobsMock.mockReturnValue([
+      { releaseId: 'release-1', kind: 'review', finishedAt: 1 },  // finished, doesn't count
+      { releaseId: 'release-2', kind: 'push', finishedAt: null }, // different release
+    ]);
+    const decision: NextPhase = { next: 'push', from: 'commit' };
+    const r = await dispatchPhase(decision, { projectName: 'p', parentJobId: 'release-1' });
+    expect(r).toMatchObject({ dispatched: true, phase: 'push' });
+    expect(startMock).toHaveBeenCalledOnce();
   });
 });
