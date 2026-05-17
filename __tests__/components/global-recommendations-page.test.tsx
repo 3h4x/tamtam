@@ -66,6 +66,9 @@ function renderPage() {
   }
 }
 
+const fastWaitFor = (callback: Parameters<typeof vi.waitFor>[0]) =>
+  vi.waitFor(callback, { timeout: 500, interval: 1 })
+
 describe('GlobalRecommendationsPage', () => {
   beforeEach(() => {
     fetchAllOpenRecommendationsMock.mockReset()
@@ -88,7 +91,7 @@ describe('GlobalRecommendationsPage', () => {
 
     const { container, unmount } = renderPage()
 
-    await vi.waitFor(() => {
+    await fastWaitFor(() => {
       expect(fetchAllOpenRecommendationsMock).toHaveBeenCalledTimes(1)
       expect(container.textContent).toContain('3 open')
       expect(container.textContent).toContain('Beta 1')
@@ -118,7 +121,7 @@ describe('GlobalRecommendationsPage', () => {
 
     const { container, unmount } = renderPage()
 
-    await vi.waitFor(() => {
+    await fastWaitFor(() => {
       expect(container.textContent).toContain('Alpha')
       expect(container.textContent).toContain('Beta')
     })
@@ -126,7 +129,7 @@ describe('GlobalRecommendationsPage', () => {
     const acceptButton = Array.from(container.querySelectorAll('button')).find((node) => node.textContent === 'Accept')
     acceptButton?.dispatchEvent(new MouseEvent('click', { bubbles: true }))
 
-    await vi.waitFor(() => {
+    await fastWaitFor(() => {
       expect(applyRecommendationMock).toHaveBeenCalledWith('alpha', expect.objectContaining({ id: 'alpha-1' }))
       expect(fetchAllOpenRecommendationsMock).toHaveBeenCalledTimes(2)
       expect(container.textContent).not.toContain('Alpha')
@@ -135,7 +138,7 @@ describe('GlobalRecommendationsPage', () => {
     const dismissButton = Array.from(container.querySelectorAll('button')).find((node) => node.textContent === 'dismiss')
     dismissButton?.dispatchEvent(new MouseEvent('click', { bubbles: true }))
 
-    await vi.waitFor(() => {
+    await fastWaitFor(() => {
       expect(updateRecommendationMock).toHaveBeenCalledWith('beta', 'beta-1', 'dismissed')
       expect(fetchAllOpenRecommendationsMock).toHaveBeenCalledTimes(2)
       expect(container.textContent).toContain('cannot dismiss beta')
@@ -150,7 +153,7 @@ describe('GlobalRecommendationsPage', () => {
 
     const { container, unmount } = renderPage()
 
-    await vi.waitFor(() => {
+    await fastWaitFor(() => {
       expect(container.textContent).toContain('Failed to load recommendations.')
       expect(container.textContent).toContain('summary endpoint down')
     })
@@ -170,14 +173,14 @@ describe('GlobalRecommendationsPage', () => {
 
     const { container, unmount } = renderPage()
 
-    await vi.waitFor(() => {
+    await fastWaitFor(() => {
       expect(container.textContent).toContain('Alpha')
     })
 
     const acceptButton = Array.from(container.querySelectorAll('button')).find((node) => node.textContent === 'Accept')
     acceptButton?.dispatchEvent(new MouseEvent('click', { bubbles: true }))
 
-    await vi.waitFor(() => {
+    await fastWaitFor(() => {
       expect(applyRecommendationMock).toHaveBeenCalledWith('alpha', expect.objectContaining({ id: 'alpha-1' }))
       expect(fetchAllOpenRecommendationsMock).toHaveBeenCalledTimes(2)
       expect(container.textContent).toContain('Failed to load recommendations.')
@@ -200,14 +203,14 @@ describe('GlobalRecommendationsPage', () => {
 
     const { container, unmount } = renderPage()
 
-    await vi.waitFor(() => {
+    await fastWaitFor(() => {
       expect(container.textContent).toContain('Beta')
     })
 
     const dismissButton = Array.from(container.querySelectorAll('button')).find((node) => node.textContent === 'dismiss')
     dismissButton?.dispatchEvent(new MouseEvent('click', { bubbles: true }))
 
-    await vi.waitFor(() => {
+    await fastWaitFor(() => {
       expect(updateRecommendationMock).toHaveBeenCalledWith('beta', 'beta-1', 'dismissed')
       expect(fetchAllOpenRecommendationsMock).toHaveBeenCalledTimes(2)
       expect(container.textContent).toContain('refresh failed after dismiss')
