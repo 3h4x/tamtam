@@ -49,6 +49,7 @@ vi.mock('@/lib/shared/shell', () => ({ exec: mocks.execMock }));
 vi.mock('@/lib/shared/config', () => ({
   getSettings: () => ({ commit_style: '' }),
   getPipelineModel: () => 'haiku',
+  getPermissionModeFlag: () => '',
 }));
 vi.mock('@/lib/scheduling/scheduling', () => ({
   getImproveConfig: () => ({ claudeBin: 'claude', projects: {}, logDir: '/tmp' }),
@@ -916,7 +917,11 @@ describe('generateCommitMessage', () => {
     vi.doUnmock('@/lib/pipeline/start-commit');
     execMock = vi.fn();
     vi.doMock('@/lib/shared/shell', () => ({ exec: execMock }));
-    vi.doMock('@/lib/shared/config', () => ({ getSettings: () => ({ commit_style: '' }), getPipelineModel: () => 'haiku' }));
+    vi.doMock('@/lib/shared/config', () => ({
+      getSettings: () => ({ commit_style: '' }),
+      getPipelineModel: () => 'haiku',
+      getPermissionModeFlag: () => '',
+    }));
     vi.doMock('@/lib/scheduling/scheduling', () => ({
       getImproveConfig: () => ({ claudeBin: 'claude', projects: {}, logDir: '/tmp' }),
       getProjectTestConfig: vi.fn().mockReturnValue(null),
@@ -1092,6 +1097,7 @@ describe('generateCommitMessage', () => {
     vi.doMock('@/lib/shared/config', () => ({
       getSettings: () => ({ commit_style: 'Always include a ticket number like PROJ-123.' }),
       getPipelineModel: () => 'haiku',
+      getPermissionModeFlag: () => '',
     }));
     vi.doMock('@/lib/scheduling/scheduling', () => ({
       getImproveConfig: () => ({ claudeBin: 'claude', projects: {}, logDir: '/tmp' }),

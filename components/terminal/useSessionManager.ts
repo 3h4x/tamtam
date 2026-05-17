@@ -15,6 +15,7 @@ import {
   contextItemsFromMeta,
   fetchSessionJobs,
   isRestorableSessionKind,
+  retrievedContextEntryFromMeta,
   restoredPrompt,
 } from './session-restore'
 
@@ -101,6 +102,8 @@ export function useSessionManager(projectName: string) {
           const entries = await buildEntriesForCompletedJobs(completedMatches)
           router.replace(`/project/${projectName}/terminal/${session.sessionId}`)
           if (lastIsRunning) {
+            const retrievedContextEntry = retrievedContextEntryFromMeta(lastMatch.context_meta)
+            if (retrievedContextEntry) entries.push(retrievedContextEntry)
             const prompt = restoredPrompt(lastMatch)
             if (prompt) entries.push({ role: 'user', text: prompt })
             terminalStore.update(projectName, () => ({
@@ -164,6 +167,8 @@ export function useSessionManager(projectName: string) {
       const data = await res.json() as JobDetail & { exit_code?: number | null; log?: string | null; log_pruned?: boolean }
       const entries: TermEntry[] = []
       const prompt = data.user_prompt || data.prompt || session.prompt
+      const retrievedContextEntry = retrievedContextEntryFromMeta(data.context_meta)
+      if (retrievedContextEntry) entries.push(retrievedContextEntry)
       if (prompt) entries.push({ role: 'user', text: prompt })
       const exitCode = typeof data.exit_code === 'number' ? data.exit_code : session.exitCode
       const exitEntry = exitCode !== null && exitCode !== undefined
