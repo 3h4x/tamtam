@@ -132,6 +132,8 @@ describe('config', () => {
         workflow_run_retention_days: 30,
         backup_retention_count: 14,
         backup_retention_weekly_count: 8,
+        db_backup_enabled: true,
+        db_backup_interval_minutes: 15,
         notification_webhook_url: '',
         notification_webhook_secret: '',
         notification_on_release_success: false,

@@ -17,6 +17,7 @@ import type { Runner, Task } from 'graphile-worker';
 import { createAgentCronTask, type AgentCronDeps, type AgentCronPayload } from '@/lib/workflows/cron/agent-cron-task';
 import { createSystemCronTask, type SystemCronDeps } from '@/lib/workflows/cron/system-cron-task';
 import { createProjectSweepTask, type ProjectSweepDeps } from '@/lib/workflows/cron/project-sweep-task';
+import { createDbBackupTask, type DbBackupDeps } from '@/lib/workflows/cron/db-backup-task';
 
 export interface StartCronWorkerOptions {
   connectionString: string;
@@ -26,6 +27,8 @@ export interface StartCronWorkerOptions {
   systemCronDeps?: SystemCronDeps;
   /** Optional — when present, registers `project-sweep` in the same pool. */
   projectSweepDeps?: ProjectSweepDeps;
+  /** Optional — when present, registers `db-backup` in the same pool. */
+  dbBackupDeps?: DbBackupDeps;
   /** Lower than the workflow runtime's default (10) so cron tasks can't
    *  starve the queue if many fire concurrently. */
   concurrency?: number;
@@ -71,6 +74,9 @@ export async function startCronWorker(opts: StartCronWorkerOptions): Promise<Run
   }
   if (opts.projectSweepDeps) {
     taskList['project-sweep'] = createProjectSweepTask(opts.projectSweepDeps);
+  }
+  if (opts.dbBackupDeps) {
+    taskList['db-backup'] = createDbBackupTask(opts.dbBackupDeps);
   }
 
   slot.startPromise = run({

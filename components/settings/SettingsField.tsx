@@ -78,10 +78,10 @@ export function SettingsField({
         </select>
       ) : fieldKey === 'review_fix_max_iterations' ? (
         <input
-          type="text"
-          inputMode="numeric"
-          pattern="[0-9]+"
-          value={value || DEFAULTS[fieldKey]}
+          type="number"
+          min={0}
+          step={1}
+          value={value}
           onChange={(e) => onChange(fieldKey, e.target.value)}
           placeholder={DEFAULTS[fieldKey]}
           className={INPUT_CLASS}

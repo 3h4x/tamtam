@@ -73,6 +73,8 @@ export interface TamTamConfig {
   workflow_run_retention_days: number;
   backup_retention_count: number;
   backup_retention_weekly_count: number;
+  db_backup_enabled: boolean;
+  db_backup_interval_minutes: number;
   notification_webhook_url: string;
   notification_webhook_secret: string;
   notification_on_release_success: boolean;
@@ -163,6 +165,8 @@ const DEFAULTS: TamTamConfig = {
   workflow_run_retention_days: 30,
   backup_retention_count: 14,
   backup_retention_weekly_count: 8,
+  db_backup_enabled: true,
+  db_backup_interval_minutes: 15,
   notification_webhook_url: '',
   notification_webhook_secret: '',
   notification_on_release_success: false,
@@ -366,6 +370,10 @@ export function buildConfigFromSettingsMap(map: Record<string, string>): TamTamC
     workflow_run_retention_days: parseIntOr(map.workflow_run_retention_days, DEFAULTS.workflow_run_retention_days),
     backup_retention_count: parseIntOr(map.backup_retention_count, DEFAULTS.backup_retention_count),
     backup_retention_weekly_count: parseIntOr(map.backup_retention_weekly_count, DEFAULTS.backup_retention_weekly_count),
+    db_backup_enabled: map.db_backup_enabled === undefined
+      ? DEFAULTS.db_backup_enabled
+      : map.db_backup_enabled === 'true',
+    db_backup_interval_minutes: parsePositiveIntOr(map.db_backup_interval_minutes, DEFAULTS.db_backup_interval_minutes),
     notification_webhook_url: map.notification_webhook_url ?? DEFAULTS.notification_webhook_url,
     notification_webhook_secret: map.notification_webhook_secret ?? DEFAULTS.notification_webhook_secret,
     notification_on_release_success: map.notification_on_release_success === 'true',

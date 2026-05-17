@@ -59,6 +59,72 @@ function pickString(obj: Record<string, unknown>, keys: string[]): string | null
   return null;
 }
 
+/** "Why did this run?" — extracted from input args. For release/phase
+ *  workflows the first arg is usually projectName; subsequent args carry
+ *  sourceJobId / parentJobId / agentName. */
+function summarizeTrigger(input: unknown): string {
+  if (!Array.isArray(input)) return '—';
+  // Most workflows take (projectName, ...rest). Skip the project name (it
+  // gets its own column) and surface the *why* — agent, parent job, etc.
+  for (let i = 1; i < input.length; i++) {
+    const v = input[i];
+    if (v == null) continue;
+    if (typeof v === 'string') return v;
+    if (typeof v === 'object') {
+      const o = v as Record<string, unknown>;
+      const reason = pickString(o, ['triggeredBy', 'reason', 'sourceJobId', 'parentJobId', 'agentName']);
+      if (reason) return reason;
+      const queue = o.queueIfBlocked === true ? 'queue-if-blocked' : null;
+      if (queue) return queue;
+    }
+  }
+  return '—';
+}
+
+/** "What's the end status?" — combines status with the most useful detail
+ *  the workflow output carries: review verdict, exit code, error tail. */
+function summarizeOutcome(run: WorkflowRunSummary): { label: string; tone: 'ok' | 'warn' | 'err' | 'info' } {
+  if (run.status === 'running' || run.status === 'pending') {
+    return { label: run.status, tone: 'info' };
+  }
+  if (run.status === 'cancelled') return { label: 'cancelled', tone: 'err' };
+  if (run.status === 'failed') {
+    const tail = run.error ? run.error.split('\n')[0].slice(0, 60) : 'failed';
+    return { label: tail, tone: 'err' };
+  }
+  // Completed: dig into output for verdict / exit code.
+  const out = run.output;
+  if (out && typeof out === 'object' && !Array.isArray(out)) {
+    const o = out as Record<string, unknown>;
+    const verdict = pickString(o, ['verdict']);
+    if (verdict) {
+      const tone = verdict === 'LGTM' ? 'ok' : verdict === 'DO NOT SHIP' ? 'err' : 'warn';
+      return { label: verdict, tone };
+    }
+    if (typeof o.exitCode === 'number') {
+      return o.exitCode === 0
+        ? { label: 'exit 0', tone: 'ok' }
+        : { label: `exit ${o.exitCode}`, tone: 'err' };
+    }
+    if (typeof o.dispatched === 'boolean') {
+      return { label: o.dispatched ? 'dispatched' : 'skipped', tone: o.dispatched ? 'ok' : 'info' };
+    }
+    if (typeof o.ok === 'boolean') {
+      return o.ok ? { label: 'ok', tone: 'ok' } : { label: 'not ok', tone: 'warn' };
+    }
+  }
+  return { label: 'completed', tone: 'ok' };
+}
+
+function outcomeBadge(tone: 'ok' | 'warn' | 'err' | 'info'): string {
+  switch (tone) {
+    case 'ok':   return 'bg-status-success/15 text-status-success border-status-success/30';
+    case 'warn': return 'bg-status-warning/15 text-status-warning border-status-warning/30';
+    case 'err':  return 'bg-status-error/15 text-status-error border-status-error/30';
+    case 'info': return 'bg-accent/15 text-accent border-accent/30';
+  }
+}
+
 interface RunsMeta {
   workflowEnabled: boolean;
   releaseWorkflow: boolean;
@@ -110,20 +176,6 @@ function formatTime(iso: string | null): string {
   }
 }
 
-function statusBadge(status: string): string {
-  switch (status) {
-    case 'completed':
-      return 'bg-status-success/15 text-status-success border-status-success/30';
-    case 'failed':
-    case 'cancelled':
-      return 'bg-status-error/15 text-status-error border-status-error/30';
-    case 'running':
-    case 'pending':
-      return 'bg-accent/15 text-accent border-accent/30';
-    default:
-      return 'bg-bg-tertiary text-text-tertiary border-border';
-  }
-}
 
 const STATUS_FILTERS = ['all', 'completed', 'running', 'pending', 'failed', 'cancelled'] as const;
 type StatusFilter = (typeof STATUS_FILTERS)[number];
@@ -229,47 +281,53 @@ export function WorkflowRunsPage() {
           <thead className="bg-bg-secondary text-text-secondary text-xs uppercase tracking-wide">
             <tr>
               <th className="text-left px-3 py-2 font-medium">Workflow</th>
-              <th className="text-left px-3 py-2 font-medium">Args</th>
-              <th className="text-left px-3 py-2 font-medium">Status</th>
+              <th className="text-left px-3 py-2 font-medium">Project / Args</th>
+              <th className="text-left px-3 py-2 font-medium" title="Why this run was dispatched — parent job, source job, or trigger source.">Trigger</th>
+              <th className="text-left px-3 py-2 font-medium" title="End status with workflow-specific detail: verdict for review, exit code for test/push/commit/fix, error tail for failed.">Outcome</th>
               <th className="text-right px-3 py-2 font-medium">Duration</th>
-              <th className="text-left px-3 py-2 font-medium">Completed</th>
-              <th className="text-left px-3 py-2 font-medium">Run ID</th>
+              <th className="text-left px-3 py-2 font-medium">Started</th>
             </tr>
           </thead>
           <tbody>
-            {filtered.map((r) => (
-              <tr
-                key={r.id}
-                className="border-t border-border hover:bg-bg-tertiary/40 cursor-pointer"
-                onClick={() => { window.location.href = `/workflow-runs/${encodeURIComponent(r.id)}`; }}
-              >
-                <td className="px-3 py-2 font-mono text-xs text-text-primary truncate max-w-[280px]" title={r.rawName}>
-                  <Link href={`/workflow-runs/${encodeURIComponent(r.id)}`} className="hover:underline">
-                    {r.name}
-                  </Link>
-                </td>
-                <td
-                  className="px-3 py-2 font-mono text-xs text-text-secondary truncate max-w-[220px]"
-                  title={typeof r.input === 'object' ? JSON.stringify(r.input) : String(r.input ?? '')}
+            {filtered.map((r) => {
+              const outcome = summarizeOutcome(r);
+              return (
+                <tr
+                  key={r.id}
+                  className="border-t border-border hover:bg-bg-tertiary/40 cursor-pointer"
+                  onClick={() => { window.location.href = `/workflow-runs/${encodeURIComponent(r.id)}`; }}
                 >
-                  {summarizeInput(r.input)}
-                </td>
-                <td className="px-3 py-2">
-                  <span className={`inline-block px-2 py-0.5 rounded border text-xs ${statusBadge(r.status)}`}>
-                    {r.status}
-                  </span>
-                </td>
-                <td className="px-3 py-2 text-right font-mono text-xs text-text-secondary">
-                  {formatDuration(r.durationMs)}
-                </td>
-                <td className="px-3 py-2 text-xs text-text-secondary whitespace-nowrap">
-                  {formatTime(r.completedAt)}
-                </td>
-                <td className="px-3 py-2 font-mono text-xs text-text-tertiary truncate max-w-[200px]" title={r.id}>
-                  {r.id}
-                </td>
-              </tr>
-            ))}
+                  <td className="px-3 py-2 font-mono text-xs text-text-primary truncate max-w-[260px]" title={r.rawName}>
+                    <Link href={`/workflow-runs/${encodeURIComponent(r.id)}`} className="hover:underline">
+                      {r.name}
+                    </Link>
+                  </td>
+                  <td
+                    className="px-3 py-2 font-mono text-xs text-text-secondary truncate max-w-[220px]"
+                    title={typeof r.input === 'object' ? JSON.stringify(r.input) : String(r.input ?? '')}
+                  >
+                    {summarizeInput(r.input)}
+                  </td>
+                  <td
+                    className="px-3 py-2 font-mono text-xs text-text-tertiary truncate max-w-[240px]"
+                    title={typeof r.input === 'object' ? JSON.stringify(r.input) : String(r.input ?? '')}
+                  >
+                    {summarizeTrigger(r.input)}
+                  </td>
+                  <td className="px-3 py-2">
+                    <span className={`inline-block px-2 py-0.5 rounded border text-xs ${outcomeBadge(outcome.tone)}`} title={r.error ?? ''}>
+                      {outcome.label}
+                    </span>
+                  </td>
+                  <td className="px-3 py-2 text-right font-mono text-xs text-text-secondary">
+                    {formatDuration(r.durationMs)}
+                  </td>
+                  <td className="px-3 py-2 text-xs text-text-secondary whitespace-nowrap">
+                    {formatTime(r.startedAt ?? r.createdAt)}
+                  </td>
+                </tr>
+              );
+            })}
             {filtered.length === 0 && (
               <tr>
                 <td colSpan={6} className="px-3 py-6 text-center text-text-tertiary">
