@@ -42,7 +42,7 @@ export async function POST(
   const { agentId } = await params;
 
   // Resolve agent — either a DB row or a file-based agent
-  let agent: { id: string; name: string; project: string; skillIds: string; docPaths: string; model: string; prompt: string; schedule: string | null; runner: string; enabled: boolean; provider?: string | null; prerequisiteCommand?: string | null } | null = null;
+  let agent: { id: string; name: string; project: string; skillIds: string; docPaths: string; model: string; prompt: string; schedule: string | null; runner: string; enabled: boolean; provider?: string | null; fallbackEnabled?: boolean; prerequisiteCommand?: string | null } | null = null;
 
   const parsedFileId = parseFileAgentId(agentId);
   if (parsedFileId) {
@@ -289,15 +289,33 @@ export async function POST(
     // user is mid-refactor. Threshold of 0 disables the gate.
     const settings = getSettings();
     const dirtyThreshold = settings.dirty_worktree_block_threshold;
-    if (!readOnly && dirtyThreshold > 0) {
+    if (!readOnly) {
       const projPath = resolveProjectPath(agent.project);
       if (projPath) {
-        const dirtyCount = await getDirtyFileCount(projPath);
-        if (dirtyCount >= dirtyThreshold) {
+        if (dirtyThreshold > 0) {
+          const dirtyCount = await getDirtyFileCount(projPath);
+          if (dirtyCount >= dirtyThreshold) {
+            return NextResponse.json(
+              {
+                code: 'dirty_worktree',
+                detail: `Agent '${agent.name}' skipped — ${dirtyCount} uncommitted files exceed threshold (${dirtyThreshold}). Commit, stash, or discard changes first.`,
+              },
+              { status: 409 },
+            );
+          }
+        }
+        // Branch must be rebased on the latest `origin/<default>` before any
+        // agent runs — otherwise the agent's commits land on a stale base and
+        // produce conflicts at PR/merge time. The reconciler in
+        // `lib/jobs/stranded-branch-reconcile.ts` handles dirty/behind state;
+        // this gate just refuses to launch new agent work while it's stale.
+        const { checkBranchFresh } = await import('@/lib/git/branch-freshness');
+        const freshness = await checkBranchFresh(projPath);
+        if (!freshness.fresh) {
           return NextResponse.json(
             {
-              code: 'dirty_worktree',
-              detail: `Agent '${agent.name}' skipped — ${dirtyCount} uncommitted files exceed threshold (${dirtyThreshold}). Commit, stash, or discard changes first.`,
+              code: 'branch_stale',
+              detail: `Agent '${agent.name}' skipped — ${freshness.reason}`,
             },
             { status: 409 },
           );
@@ -321,7 +339,7 @@ export async function POST(
 }
 
 async function runAgentStart(
-  agent: { id: string; name: string; project: string; skillIds: string; docPaths: string; model: string; prompt: string; schedule: string | null; runner: string; enabled: boolean; provider?: string | null; prerequisiteCommand?: string | null },
+  agent: { id: string; name: string; project: string; skillIds: string; docPaths: string; model: string; prompt: string; schedule: string | null; runner: string; enabled: boolean; provider?: string | null; fallbackEnabled?: boolean; prerequisiteCommand?: string | null },
   taskPrompt: string,
   triggeredBy: string,
   readOnly: boolean,
@@ -402,6 +420,7 @@ async function runAgentStart(
       taskPrompt,
       triggeredBy,
       provider,
+      fallbackEnabled: agent.fallbackEnabled === true,
       logPath,
       logDir,
       baseContextMeta: initialContextMeta,

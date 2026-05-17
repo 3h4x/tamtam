@@ -37,6 +37,7 @@ interface SettingsMap {
   cli_default_model_codex: string
   cli_default_model_gemini: string
   cli_default_model_lmstudio: string
+  provider_fallback_chain: string
   lmstudio_model: string
   log_dir: string
   frequency: string
@@ -115,6 +116,7 @@ const SETTINGS_DEFAULTS: SettingsMap = {
   cli_default_model_codex: 'normal',
   cli_default_model_gemini: 'normal',
   cli_default_model_lmstudio: 'normal',
+  provider_fallback_chain: '',
   jobs_paused: 'false',
   notification_on_budget_blocked: 'false',
   notification_throttle_window_seconds: '900',

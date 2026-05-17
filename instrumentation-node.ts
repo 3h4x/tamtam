@@ -89,6 +89,12 @@ export async function runProbeSweep(): Promise<void> {
   } catch (err) {
     console.error('[probe-sweep] resource-sampler error:', err);
   }
+  try {
+    const { reconcileStrandedBranches } = await import('@/lib/jobs/stranded-branch-reconcile');
+    await reconcileStrandedBranches();
+  } catch (err) {
+    console.error('[probe-sweep] stranded-branch reconcile error:', err);
+  }
 }
 
 /**
@@ -724,6 +730,15 @@ export async function registerNode(): Promise<void> {
                   const { decidePrContext } = await import('@/lib/pipeline/pr-context');
                   const pr = await decidePrContext(projPath);
                   if (pr.shouldOpenPr) return `on non-default branch '${pr.currentBranch}'`;
+                  // Branch-freshness gate: refuse the scheduled fire when the
+                  // working branch is behind origin/<default>. The
+                  // stranded-branch reconciler is responsible for rebasing /
+                  // pushing; the cron just waits it out. Skips the POST so we
+                  // don't waste a route call on something the route would 409
+                  // on anyway.
+                  const { checkBranchFresh } = await import('@/lib/git/branch-freshness');
+                  const freshness = await checkBranchFresh(projPath);
+                  if (!freshness.fresh) return freshness.reason;
                 }
               } catch (err) {
                 console.warn(`[cron] branch-state prereq check failed for ${agent.id}:`, err);
@@ -736,11 +751,17 @@ export async function registerNode(): Promise<void> {
               // and rejects with 400 otherwise. The agent's own prompt is
               // the natural choice; fall back to a synthesized line when an
               // agent has neither prompt nor skills configured.
+              //
+              // The `x-tamtam-trigger: schedule` header lets the route apply
+              // schedule-only guards (skip on non-default branch, refuse
+              // disabled/no-schedule agents). Cron also runs prereqSkipReason
+              // before this call, so most of those skips fire there first;
+              // the header is the safety net.
               const baseUrl = process.env.TAMTAM_BASE_URL ?? 'http://localhost:1337';
               const prompt = agent.prompt?.trim() || `Run agent ${agent.name}`;
               const res = await fetch(`${baseUrl}/api/agents/${encodeURIComponent(agent.id)}/run`, {
                 method: 'POST',
-                headers: { 'content-type': 'application/json' },
+                headers: { 'content-type': 'application/json', 'x-tamtam-trigger': 'schedule' },
                 body: JSON.stringify({ prompt }),
               });
               if (!res.ok) {
@@ -748,7 +769,18 @@ export async function registerNode(): Promise<void> {
                 return null;
               }
               const data = await res.json().catch(() => ({}));
-              return (data?.runId ?? data?.jobId ?? null) as string | null;
+              const jobId = (data?.runId ?? data?.jobId ?? null) as string | null;
+              if (res.status === 202) {
+                // 202 means the route queued the fire (pipeline_lock,
+                // already-running same project, branch state). The fire is
+                // not lost — queued_agent_runs / pending-agent-run drain it
+                // when the blocker clears — but it didn't actually dispatch
+                // a job, so distinguish in telemetry.
+                const code = (data?.code ?? data?.status ?? 'queued') as string;
+                console.log(`[cron] agent ${agent.id} queued at /run (code=${code})`);
+                return null;
+              }
+              return jobId;
             },
             enqueueNextFire: async (agentId, runAt) => {
               await quickAddJob(

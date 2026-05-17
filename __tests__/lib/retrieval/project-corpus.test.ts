@@ -32,9 +32,11 @@ async function applyDdl(handle: TestDbHandle): Promise<void> {
       model text NOT NULL DEFAULT 'normal',
       prompt text NOT NULL DEFAULT '',
       schedule text,
+      runner text NOT NULL DEFAULT 'pm2',
       enabled boolean NOT NULL DEFAULT true,
       doc_paths text NOT NULL DEFAULT '[]',
       provider text,
+      fallback_enabled boolean NOT NULL DEFAULT false,
       prerequisite_command text,
       created_at double precision NOT NULL,
       updated_at double precision NOT NULL

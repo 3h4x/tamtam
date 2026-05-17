@@ -112,6 +112,7 @@ describe('config', () => {
         cli_default_model_codex: 'normal',
         cli_default_model_gemini: 'normal',
         cli_default_model_lmstudio: 'normal',
+        provider_fallback_chain: [],
         log_dir: './data/logs',
         frequency: '1h',
         daytime: false,

@@ -22,6 +22,7 @@ export interface AgentEditorSavePayload {
   schedule: string | null
   enabled: boolean
   provider: CliProvider | null
+  fallbackEnabled?: boolean
   prerequisiteCommand: string | null
 }
 
@@ -60,6 +61,7 @@ export function AgentEditor({
   const [contextTab, setContextTab] = useState<'skills' | 'docs'>('skills')
   const [model, setModel] = useState(normalizeModelInput(agent?.model || template?.model, 'normal'))
   const [provider, setProvider] = useState<CliProvider | null>((agent?.provider as CliProvider | null | undefined) ?? null)
+  const [fallbackEnabled, setFallbackEnabled] = useState<boolean>(agent?.fallbackEnabled ?? template?.fallbackEnabled ?? false)
   const [schedule, setSchedule] = useState(agent?.schedule || template?.schedule || '')
   const [enabled, setEnabled] = useState<boolean>(agent ? agent.enabled : true)
   const [prerequisiteCommand, setPrerequisiteCommand] = useState<string>(initialPrerequisite)
@@ -97,6 +99,7 @@ export function AgentEditor({
     setSelectedDocPaths((agent?.docPaths) || [])
     setModel(normalizeModelInput(src.model, 'normal'))
     setProvider((agent?.provider as CliProvider | null | undefined) ?? null)
+    setFallbackEnabled(agent?.fallbackEnabled ?? template?.fallbackEnabled ?? false)
     setSchedule(src.schedule || '')
     if (agent) setEnabled(agent.enabled)
     setPrerequisiteCommand(agent
@@ -128,7 +131,7 @@ export function AgentEditor({
     if (!name.trim() || saving) return
     setSaving(true)
     try {
-      await onSave({ name, prompt: agentPrompt, skillIds: selectedSkills, docPaths: selectedDocPaths, model, schedule: schedule || null, enabled, provider, prerequisiteCommand: prerequisiteCommand.trim() || null })
+      await onSave({ name, prompt: agentPrompt, skillIds: selectedSkills, docPaths: selectedDocPaths, model, schedule: schedule || null, enabled, provider, fallbackEnabled, prerequisiteCommand: prerequisiteCommand.trim() || null })
     } catch (err) {
       toast(err instanceof Error ? err.message : 'Failed to save agent', 'error')
     }

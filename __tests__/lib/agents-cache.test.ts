@@ -19,6 +19,7 @@ async function applyDdl(h: TestDbHandle): Promise<void> {
       runner text NOT NULL DEFAULT 'pm2',
       enabled boolean NOT NULL DEFAULT true,
       provider text,
+      fallback_enabled boolean NOT NULL DEFAULT false,
       prerequisite_command text,
       created_at double precision NOT NULL,
       updated_at double precision NOT NULL
@@ -52,6 +53,7 @@ function makeAgentRow(overrides: Partial<typeof schema.agents.$inferSelect> = {}
     schedule: null,
     enabled: true,
     provider: null,
+    fallbackEnabled: false,
     prerequisiteCommand: null,
     createdAt: 1000,
     updatedAt: 1000,

@@ -53,6 +53,7 @@ export interface TamTamConfig {
   cli_default_model_codex: string;
   cli_default_model_gemini: string;
   cli_default_model_lmstudio: string;
+  provider_fallback_chain: CliProvider[];
   log_dir: string;
   frequency: string;
   daytime: boolean;
@@ -141,6 +142,7 @@ const DEFAULTS: TamTamConfig = {
   cli_default_model_codex: 'normal',
   cli_default_model_gemini: 'normal',
   cli_default_model_lmstudio: 'normal',
+  provider_fallback_chain: [],
   log_dir: './data/logs',
   frequency: '1h',
   daytime: false,
@@ -346,6 +348,7 @@ export function buildConfigFromSettingsMap(map: Record<string, string>): TamTamC
     cli_default_model_codex: normalizeModelInput(map.cli_default_model_codex, 'normal'),
     cli_default_model_gemini: normalizeModelInput(map.cli_default_model_gemini, 'normal'),
     cli_default_model_lmstudio: normalizeModelInput(map.cli_default_model_lmstudio, 'normal'),
+    provider_fallback_chain: parseEnabledProviders(map.provider_fallback_chain),
     log_dir: map.log_dir ?? DEFAULTS.log_dir,
     frequency: map.frequency ?? DEFAULTS.frequency,
     daytime: map.daytime === 'true',

@@ -78,8 +78,10 @@ async function applyDdl(handle: TestDbHandle): Promise<void> {
       model text NOT NULL DEFAULT 'sonnet',
       prompt text NOT NULL DEFAULT '',
       schedule text,
+      runner text NOT NULL DEFAULT 'pm2',
       enabled boolean NOT NULL DEFAULT true,
       provider text,
+      fallback_enabled boolean NOT NULL DEFAULT false,
       prerequisite_command text,
       created_at double precision NOT NULL,
       updated_at double precision NOT NULL
@@ -2363,6 +2365,7 @@ describe('agents API', () => {
 
         enabled: true,
         provider: undefined,
+        runner: undefined,
         prerequisiteCommand: undefined,
       });
       expect(installAgentScheduleMock).toHaveBeenCalledWith(
@@ -2409,6 +2412,7 @@ describe('agents API', () => {
 
         enabled: true,
         provider: 'codex',
+        runner: 'pm2',
         prerequisiteCommand: null,
       });
     });

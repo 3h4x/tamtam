@@ -11,6 +11,7 @@ export interface AgentTemplateRecord {
   runner?: string
   prompt: string
   skillIds?: string[]
+  fallbackEnabled?: boolean
 }
 
 const TEMPLATE_MODELS = [...MODEL_TIERS]
