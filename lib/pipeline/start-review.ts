@@ -16,6 +16,7 @@ import { loadFileConfig } from '@/lib/skills/tamtam-file-config';
 import { resolveAutoAttachedDocs, formatAutoAttachedDocsBlock } from '@/lib/skills/auto-attach-docs';
 import { getLock, acquireLock, isLockOwnedByActiveRelease } from './pipeline-lock';
 import { extractFindingIds, REVIEW_OUTPUT_CONTRACT, stripFinalVerdict } from './review-contract';
+import { detectReviewFrameworks, filterReviewFrameworkSections, formatReviewFrameworksBlock } from './review-frameworks';
 import type { JobData } from '@/lib/jobs/types';
 
 export type StartReviewResult =
@@ -35,7 +36,7 @@ async function resolveQaTargetBlock(projectName: string): Promise<string> {
   return `QA TARGET: ${url} (source: ${source}; qa_url overrides website when both are set). Follow the Visual Verification section of the reviewer skill for diffs that affect user-facing UI.`;
 }
 
-async function loadReviewPrompt(projectName: string): Promise<string> {
+async function loadReviewPrompt(projectName: string, projPath: string): Promise<string> {
   let content = '';
   if (existsSync(CODE_REVIEWER_SKILL)) {
     content = readFileSync(CODE_REVIEWER_SKILL, 'utf-8');
@@ -44,6 +45,8 @@ async function loadReviewPrompt(projectName: string): Promise<string> {
       if (end > 0) content = content.slice(end + 3).trimStart();
     }
   }
+  const frameworks = detectReviewFrameworks(projPath);
+  content = filterReviewFrameworkSections(content, frameworks);
   const { review_verdict_rules } = getSettings();
   let reviewPromptAddendum: string | null = null;
   try {
@@ -53,12 +56,14 @@ async function loadReviewPrompt(projectName: string): Promise<string> {
     ? '\n\n## Project-specific review guidance\n' + reviewPromptAddendum.trim()
     : '';
   const qaBlock = await resolveQaTargetBlock(projectName);
+  const frameworkBlock = formatReviewFrameworksBlock(frameworks);
   return content +
     '\n\n---\n\n' +
     'Project: {project}\n' +
     'Path: {path}\n\n' +
     '{review_scope}\n\n' +
     '{release_context}\n\n' +
+    frameworkBlock + '\n\n' +
     qaBlock + '\n\n' +
     REVIEW_OUTPUT_CONTRACT + '\n\n' +
     review_verdict_rules +
@@ -342,7 +347,7 @@ export async function startProjectReview(
     return { ok: false, status: 400, detail: scope.detail };
   }
 
-  const renderedReviewPrompt = (await loadReviewPrompt(projectName))
+  const renderedReviewPrompt = (await loadReviewPrompt(projectName, projPath))
     .replace('{project}', projectName)
     .replace('{path}', projPath)
     .replace('{review_scope}', scope.prompt + prereqBlock)

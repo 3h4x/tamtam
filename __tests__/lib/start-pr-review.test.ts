@@ -309,7 +309,7 @@ describe('loadReviewPrompt — skill file handling', () => {
     return Promise.resolve({ exitCode, stdout, stderr });
   }
 
-  function setupSkill(fileContent: string | null, options: { useDefaultSkillPath?: boolean } = {}) {
+  function setupSkill(fileContent: string | null, options: { useDefaultSkillPath?: boolean; packageJson?: string } = {}) {
     for (const m of Object.values(mocks)) {
       if (typeof (m as { mockReset?: () => void }).mockReset === 'function') {
         (m as { mockReset: () => void }).mockReset();
@@ -332,13 +332,21 @@ describe('loadReviewPrompt — skill file handling', () => {
       // module, so resolve it lazily via require of the actual file path.
       // Easier: hardcode the expected suffix and let existsSync match on it.
       mocks.codeReviewerSkillRef.value = '/abs/path/skills/docs/skills/engineering/code-reviewer.md';
-      mocks.existsSyncMock.mockImplementation((p: string) =>
-        fileContent !== null && p.endsWith('/skills/docs/skills/engineering/code-reviewer.md'));
+      mocks.existsSyncMock.mockImplementation((p: string) => {
+        if (options.packageJson && p === '/proj/package.json') return true;
+        return fileContent !== null && p.endsWith('/skills/docs/skills/engineering/code-reviewer.md');
+      });
     } else {
       mocks.codeReviewerSkillRef.value = '/skill/code-reviewer.md';
-      mocks.existsSyncMock.mockReturnValue(fileContent !== null);
+      mocks.existsSyncMock.mockImplementation((p: string) => {
+        if (options.packageJson && p === '/proj/package.json') return true;
+        return fileContent !== null && p === '/skill/code-reviewer.md';
+      });
     }
-    mocks.readFileSyncMock.mockReturnValue(fileContent ?? '');
+    mocks.readFileSyncMock.mockImplementation((p: string) => {
+      if (options.packageJson && p === '/proj/package.json') return options.packageJson;
+      return fileContent ?? '';
+    });
   }
 
   afterEach(() => {
@@ -374,6 +382,41 @@ describe('loadReviewPrompt — skill file handling', () => {
     await startPrReview('proj', 1, 'Title', 'feat/1', 'main');
     const prompt: string = mocks.startJobMock.mock.calls[0][2];
     expect(prompt).toContain('---\ntitle: Incomplete frontmatter\nno closing fence');
+  });
+
+  it('injects detected frameworks and filters PR review framework checklists', async () => {
+    setupSkill(
+      [
+        'Before checks.',
+        '',
+        '## Framework-specific checks',
+        '',
+        'The pipeline pre-filters this section to the project detected stack.',
+        '',
+        '### Next.js (App Router) — apply when the pipeline-injected `FRAMEWORK:` line includes `nextjs`',
+        '',
+        '- Next-only rule.',
+        '',
+        '### Python — apply when the pipeline-injected `FRAMEWORK:` line includes `python`',
+        '',
+        '- Python-only rule.',
+        '',
+        '## Output format',
+        '',
+        'End correctly.',
+      ].join('\n'),
+      { packageJson: JSON.stringify({ dependencies: { next: '^16.2.4' } }) },
+    );
+
+    await startPrReview('proj', 1, 'Title', 'feat/1', 'main');
+
+    const prompt: string = mocks.startJobMock.mock.calls[0][2];
+    expect(prompt).toContain('FRAMEWORK: nextjs@16.2.4.');
+    expect(prompt).toContain('### Next.js (App Router)');
+    expect(prompt).toContain('- Next-only rule.');
+    expect(prompt).not.toContain('### Python');
+    expect(prompt).not.toContain('- Python-only rule.');
+    expect(prompt).toContain('## Output format');
   });
 
   it('produces no skill content in prompt when file does not exist', async () => {
