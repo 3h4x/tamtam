@@ -7,11 +7,12 @@ import { flushSync } from 'react-dom'
 import { ProjectRunsTab } from '@/components/ProjectRunsTab'
 import type { JobInfo } from '@/lib/client-api'
 
-const { pushMock, fetchJobsMock, releaseProjectMock, pushProjectMock } = vi.hoisted(() => ({
+const { pushMock, fetchJobsMock, releaseProjectMock, pushProjectMock, fetchAutomationQueueMock } = vi.hoisted(() => ({
   pushMock: vi.fn(),
   fetchJobsMock: vi.fn(),
   releaseProjectMock: vi.fn(),
   pushProjectMock: vi.fn(),
+  fetchAutomationQueueMock: vi.fn(),
 }))
 
 vi.mock('next/navigation', () => ({
@@ -28,6 +29,7 @@ vi.mock('@/lib/client-api', () => ({
   fetchJobs: fetchJobsMock,
   releaseProject: releaseProjectMock,
   pushProject: pushProjectMock,
+  fetchAutomationQueue: fetchAutomationQueueMock,
 }))
 
 function makeJob({
@@ -116,6 +118,7 @@ describe('ProjectRunsTab release actions', () => {
       message: 'started',
     })
     pushProjectMock.mockResolvedValue({ status: 'started', job_id: 'commit-retry' })
+    fetchAutomationQueueMock.mockResolvedValue({ items: [] })
   })
 
   afterEach(() => {

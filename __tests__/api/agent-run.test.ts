@@ -37,6 +37,7 @@ const mocks = vi.hoisted(() => {
     isLockOwnedByActiveRelease: vi.fn(),
     getPendingRelease: vi.fn(),
     drainPendingRelease: vi.fn(),
+    drainProjectRecoveryWork: vi.fn(),
     isProjectPaused: vi.fn(),
     retrieveAgentContextDetailed: vi.fn(),
     getDirtyFileCount: vi.fn(),
@@ -87,6 +88,10 @@ vi.mock('@/lib/pipeline/pipeline-lock', () => ({
 vi.mock('@/lib/pipeline/pending-release', () => ({
   getPendingRelease: (...a: unknown[]) => mocks.getPendingRelease(...a),
   drainPendingRelease: (...a: unknown[]) => mocks.drainPendingRelease(...a),
+}));
+
+vi.mock('@/lib/pipeline/recovery-drain', () => ({
+  drainProjectRecoveryWork: (...a: unknown[]) => mocks.drainProjectRecoveryWork(...a),
 }));
 
 vi.mock('@/lib/shared/project-data', () => ({
@@ -212,6 +217,7 @@ async function applyDdl(handle: TestDbHandle): Promise<void> {
       model text NOT NULL DEFAULT 'normal',
       prompt text NOT NULL DEFAULT '',
       schedule text,
+      runner text NOT NULL DEFAULT 'pm2',
       enabled boolean NOT NULL DEFAULT true,
       provider text,
       prerequisite_command text,
@@ -373,6 +379,7 @@ describe('POST /api/agents/{agentId}/run', () => {
     mocks.isLockOwnedByActiveRelease.mockReset().mockReturnValue(false);
     mocks.getPendingRelease.mockReset().mockReturnValue(false);
     mocks.drainPendingRelease.mockReset().mockResolvedValue(undefined);
+    mocks.drainProjectRecoveryWork.mockReset().mockResolvedValue(undefined);
     mocks.isProjectPaused.mockReset().mockReturnValue(false);
     mocks.getDirtyFileCount.mockReset().mockResolvedValue(0);
     mocks.retrieveAgentContextDetailed.mockReset().mockResolvedValue({
@@ -845,7 +852,8 @@ describe('POST /api/agents/{agentId}/run', () => {
     const res = await POST(req, { params: Promise.resolve({ agentId: 'agent-123' }) });
 
     expect(res.status).toBe(200);
-    expect(mocks.drainPendingRelease).toHaveBeenCalledWith('proj1');
+    expect(mocks.drainProjectRecoveryWork).toHaveBeenCalledWith('proj1', '[agent-run-route]');
+    expect(mocks.drainPendingRelease).not.toHaveBeenCalled();
     expect(mocks.startJob).toHaveBeenCalledTimes(1);
     expect(mocks.enqueueQueuedAgentRun).not.toHaveBeenCalled();
   });
@@ -865,8 +873,47 @@ describe('POST /api/agents/{agentId}/run', () => {
     expect(res.status).toBe(202);
     expect(data.status).toBe('queued');
     expect(data.code).toBe('pending_release');
-    expect(mocks.drainPendingRelease).toHaveBeenCalledWith('proj1');
+    expect(mocks.drainProjectRecoveryWork).toHaveBeenCalledWith('proj1', '[agent-run-route]');
+    expect(mocks.drainPendingRelease).not.toHaveBeenCalled();
     expect(mocks.enqueueQueuedAgentRun).toHaveBeenCalledTimes(1);
+    expect(mocks.startJob).not.toHaveBeenCalled();
+  });
+
+  it('waits on the shared recovery drain before queueing behind a pending release', async () => {
+    await insertAgent({ schedule: '1h' });
+    const pendingDrain = deferred<void>();
+    let releaseActive = false;
+    mocks.getPendingRelease.mockReturnValue(true);
+    mocks.drainProjectRecoveryWork.mockImplementationOnce(() => pendingDrain.promise);
+    mocks.isLockOwnedByActiveRelease.mockImplementation(() => releaseActive);
+    mocks.getLock.mockImplementation(() => (
+      releaseActive ? { project: 'proj1', lockedByJobId: 'release-1' } : null
+    ));
+    const req = new NextRequest('http://localhost/api/agents/agent-123/run', {
+      method: 'POST',
+      headers: { 'x-tamtam-trigger': 'schedule' },
+      body: JSON.stringify({ prompt: 'do something' }),
+    });
+
+    const resPromise = POST(req, { params: Promise.resolve({ agentId: 'agent-123' }) });
+    await vi.waitFor(() => {
+      expect(mocks.drainProjectRecoveryWork).toHaveBeenCalledWith('proj1', '[agent-run-route]');
+    });
+
+    expect(mocks.enqueueQueuedAgentRun).not.toHaveBeenCalled();
+    expect(mocks.startJob).not.toHaveBeenCalled();
+
+    releaseActive = true;
+    pendingDrain.resolve();
+    const res = await resPromise;
+    const data = await res.json();
+
+    expect(res.status).toBe(202);
+    expect(data.status).toBe('queued');
+    expect(data.code).toBe('pipeline_lock');
+    expect(data.blockingJobId).toBe('release-1');
+    expect(mocks.enqueueQueuedAgentRun).toHaveBeenCalledTimes(1);
+    expect(mocks.drainPendingRelease).not.toHaveBeenCalled();
     expect(mocks.startJob).not.toHaveBeenCalled();
   });
 
@@ -1782,6 +1829,7 @@ describe('POST /api/agents/{agentId}/run weekly quota gating', () => {
     mocks.isLockOwnedByActiveRelease.mockReset().mockReturnValue(false);
     mocks.getPendingRelease.mockReset().mockReturnValue(false);
     mocks.drainPendingRelease.mockReset().mockResolvedValue(undefined);
+    mocks.drainProjectRecoveryWork.mockReset().mockResolvedValue(undefined);
     mocks.isProjectPaused.mockReset().mockReturnValue(false);
     mocks.getDirtyFileCount.mockReset().mockResolvedValue(0);
     mocks.shellRun.mockReset().mockImplementation(async () => ({ stdout: '', stderr: '', exitCode: 0 }));

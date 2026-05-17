@@ -6,7 +6,8 @@ import { db, schema } from '@/lib/db';
 import { resolveProjectPath } from '@/lib/shared/project-data';
 import { getImproveConfig } from '@/lib/scheduling/scheduling';
 import { isLockOwnedByActiveRelease, getLock } from '@/lib/pipeline/pipeline-lock';
-import { getPendingRelease, drainPendingRelease } from '@/lib/pipeline/pending-release';
+import { getPendingRelease } from '@/lib/pipeline/pending-release';
+import { drainProjectRecoveryWork } from '@/lib/pipeline/recovery-drain';
 import { enqueueQueuedAgentRun } from '@/lib/agents/queued-agent-runs';
 import { createJob, updateJob, listJobs, probeJobStatus, markDone } from '@/lib/jobs/job-storage';
 import { getJobKind, isAgentJobKind } from '@/lib/jobs/kinds';
@@ -249,7 +250,7 @@ export async function POST(
     // before any newer agent work starts on the same project. Check only once
     // we know no other agent on the project is running or starting.
     if (!readOnly && await getPendingRelease(agent.project)) {
-      await drainPendingRelease(agent.project);
+      await drainProjectRecoveryWork(agent.project, '[agent-run-route]');
       const lock = await getLock(agent.project);
       if (await isLockOwnedByActiveRelease(agent.project) || await getPendingRelease(agent.project)) {
         try {
