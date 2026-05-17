@@ -61,7 +61,7 @@ TamTam is a single Next.js 16 (App Router) application backed by Postgres. The N
 ## Stack
 
 - **Next.js 16** (App Router) — frontend, API routes, and SSE streaming in one process
-- **Postgres 16 + pgvector** via `pg.Pool` + Drizzle ORM — main source of truth for jobs, agents, skills, settings, and retrieval embeddings; workflow state lives in the workflow world database (`WORKFLOW_POSTGRES_URL`, falling back to `DATABASE_URL`)
+- **Postgres 16 + pgvector** via `pg.Pool` + Drizzle ORM — main source of truth for jobs, agents, skills, settings, and retrieval embeddings; workflow state lives in the workflow world database by default (`WORKFLOW_POSTGRES_URL`, falling back to `DATABASE_URL`)
 - **`workflow` + `@workflow/world-postgres`** — `"use workflow"` / `"use step"` orchestration for agent intake (`composePrompt` → `startAgent`), so a server restart between steps resumes instead of losing the run
 - **graphile-worker** — durable cron queue for scheduled agents and system maintenance
 - **PM2** — supervises the long-running TamTam server; one-shot CLI jobs are spawned in-process by workflow steps and route handlers

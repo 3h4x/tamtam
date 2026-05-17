@@ -31,7 +31,7 @@ Canonical post-edit command: **`pnpm run rebuild`** (build + idempotent PM2 rest
 - `app/` — pages and API route handlers.
 - `components/` — React client components; large pages have a co-located subfolder (`components/monitoring/`, `components/settings/`, …).
 - `hooks/` — custom React hooks.
-- `lib/` — business logic in domain folders: `pipeline/`, `scheduling/`, `git/`, `jobs/`, `terminal/`, `agents/`, `skills/`, `recommendations/`, `shared/`, `usage/`, `db/`, `github/`, `client/`. `lib/client-api.ts` is the only top-level barrel.
+- `lib/` — business logic in domain folders: `workflows/`, `pipeline/`, `scheduling/`, `git/`, `jobs/`, `terminal/`, `agents/`, `skills/`, `recommendations/`, `shared/`, `usage/`, `db/`, `github/`, `client/`. `lib/client-api.ts` is the only top-level barrel.
 - `scripts/` — server startup + CLI shims.
 - `skills/` — vendored file-based skill library (curated, not a submodule).
 - `data/` — runtime artifacts (logs, `pg_dump` backups; gitignored). Live DB is Postgres via `DATABASE_URL`.
@@ -55,7 +55,7 @@ Canonical post-edit command: **`pnpm run rebuild`** (build + idempotent PM2 rest
 
 ## Pages
 
-`/` projects, `/runs` (legacy `/jobs` redirects), `/agents`, `/monitoring`, `/pipeline`, `/recommendations`, `/stats`, `/workflow-runs`, `/logs`, `/skills`, `/settings/[tab]`. Per-project: `/project/[name]/[tab]` where tab ∈ `{overview, config, history, terminal, changes, issues, docs, agents}`, plus `/project/[name]/terminal/[sessionId]`, `/project/[name]/release/[releaseId]`, `/project/[name]/task/[task]`.
+`/` projects, `/runs` (legacy `/jobs` redirects), `/agents`, `/monitoring`, `/pipeline`, `/recommendations`, `/stats`, `/workflow-runs`, `/workflow-runs/[runId]`, `/logs`, `/skills`, `/settings` → `/settings/general`, `/settings/[tab]`. Per-project: `/project/[name]`, `/project/[name]/[tab]` where tab ∈ `{overview, config, history, terminal, changes, issues, docs, agents}`, plus `/project/[name]/terminal/[sessionId]`, `/project/[name]/release/[releaseId]`, `/project/[name]/task/[task]`.
 
 ## Testing
 
