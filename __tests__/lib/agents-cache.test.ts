@@ -16,6 +16,7 @@ async function applyDdl(h: TestDbHandle): Promise<void> {
       model text NOT NULL DEFAULT 'sonnet',
       prompt text NOT NULL DEFAULT '',
       schedule text,
+      runner text NOT NULL DEFAULT 'pm2',
       enabled boolean NOT NULL DEFAULT true,
       provider text,
       prerequisite_command text,
@@ -55,6 +56,7 @@ function makeAgentRow(overrides: Partial<typeof schema.agents.$inferSelect> = {}
     createdAt: 1000,
     updatedAt: 1000,
     ...overrides,
+    runner: overrides.runner ?? 'pm2',
   };
 }
 

@@ -50,6 +50,7 @@ function ctoAgent(overrides: Partial<Agent> = {}): Agent {
     model: 'smart',
     prompt: '',
     schedule: '24h',
+    runner: 'pm2',
 
     enabled: true,
     createdAt: 1,
