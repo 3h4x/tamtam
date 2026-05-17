@@ -96,7 +96,8 @@ export async function seedAgentCrons(deps: SeedDeps): Promise<SeedResult> {
       const existingJob = existing.get(jobKey);
       const existingRunAt = existingJob?.runAt.getTime();
       if (
-        existingRunAt
+        existingJob
+        && existingRunAt
         && existingJob.attempts === 0
         && existingJob.isAvailable
         && !existingJob.lockedAt
