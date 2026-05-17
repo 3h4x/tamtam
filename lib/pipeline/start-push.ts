@@ -500,7 +500,31 @@ async function runPush(
   const ahead = parseInt(aheadR.stdout.trim(), 10);
   const hasUpstream = aheadR.exitCode === 0;
   if (hasUpstream && (!aheadR.stdout.trim() || isNaN(ahead) || ahead === 0)) {
-    return { ok: true, commitSha: '', message: 'No changes to push' };
+    // Nothing to push, but we may still owe a PR. A prior push attempt can
+    // have shipped the branch (or the user pushed manually) and left the
+    // pipeline mid-state; without this fallback, the issue branch stays
+    // unmerged forever because mark-dod runs without a linked PR.
+    const shaR = await execStep('git', ['-C', projPath, 'rev-parse', '--short', 'HEAD'], { timeout: 5000 });
+    const commitSha = shaR.exitCode === 0 ? shaR.stdout.trim() : '';
+    if (issueCtx) {
+      log('\n# no commits to push but issue branch detected — ensuring PR exists\n');
+      const prUrl = await createIssuePR(projPath, log, issueCtx, signal, job?.id ?? null);
+      if (prUrl) {
+        const prNumber = parseInt(prUrl.split('/').pop() ?? '0', 10) || undefined;
+        return { ok: true, commitSha, message: `PR created: ${prUrl}`, prUrl, prNumber, prRepo: issueCtx.repo };
+      }
+      return { ok: true, commitSha, message: 'No changes to push (PR creation skipped or failed — see log)' };
+    }
+    const prDecision = await decidePrContext(projPath, signal);
+    if (prDecision.shouldOpenPr) {
+      log(`\n# no commits to push but non-default branch — ensuring PR exists: ${prDecision.reason}\n`);
+      const prResult = await createGenericPR(projPath, log, signal);
+      if (prResult) {
+        const prNumber = parseInt(prResult.prUrl.split('/').pop() ?? '0', 10) || undefined;
+        return { ok: true, commitSha, message: `PR created: ${prResult.prUrl}`, prUrl: prResult.prUrl, prNumber, prRepo: prResult.prRepo };
+      }
+    }
+    return { ok: true, commitSha, message: 'No changes to push' };
   }
   if (!hasUpstream) {
     // Guard against an empty HEAD (brand-new repo with no commits yet).

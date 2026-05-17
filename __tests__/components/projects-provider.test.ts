@@ -113,6 +113,10 @@ function renderProvider() {
   }
 }
 
+async function waitForUi(assertion: () => void | Promise<void>) {
+  await vi.waitFor(assertion, { interval: 10 });
+}
+
 describe('ProjectsProvider', () => {
   beforeEach(() => {
     fetchProjects.mockReset()
@@ -136,13 +140,13 @@ describe('ProjectsProvider', () => {
 
     const { container, unmount } = renderProvider()
 
-    await vi.waitFor(() => {
+    await waitForUi(() => {
       expect(container.querySelector('[data-testid="state"]')?.textContent).toBe('loading')
     })
 
     initialLoad.resolve(buildProjectsResponse())
 
-    await vi.waitFor(() => {
+    await waitForUi(() => {
       expect(container.querySelector('[data-testid="state"]')?.textContent).toBe('idle')
       expect(container.querySelector('[data-testid="projects"]')?.textContent).toContain('acme/widgets')
     })
@@ -150,7 +154,7 @@ describe('ProjectsProvider', () => {
     const pauseButton = container.querySelector('[data-testid="pause"]')
     pauseButton?.dispatchEvent(new MouseEvent('click', { bubbles: true }))
 
-    await vi.waitFor(() => {
+    await waitForUi(() => {
       expect(pauseProject).toHaveBeenCalledWith('task-1')
       expect(fetchProjects).toHaveBeenCalledTimes(2)
       expect(container.querySelector('[data-testid="state"]')?.textContent).toBe('refreshing')
@@ -159,7 +163,7 @@ describe('ProjectsProvider', () => {
 
     refreshLoad.resolve(buildProjectsResponse('acme/renamed'))
 
-    await vi.waitFor(() => {
+    await waitForUi(() => {
       expect(container.querySelector('[data-testid="state"]')?.textContent).toBe('idle')
       expect(container.querySelector('[data-testid="projects"]')?.textContent).toContain('acme/renamed')
     })
@@ -175,13 +179,13 @@ describe('ProjectsProvider', () => {
 
     const { container, unmount } = renderProvider()
 
-    await vi.waitFor(() => {
+    await waitForUi(() => {
       expect(container.querySelector('[data-testid="projects"]')?.textContent).toContain('acme/widgets')
     })
 
     await vi.advanceTimersByTimeAsync(30_000)
 
-    await vi.waitFor(() => {
+    await waitForUi(() => {
       expect(fetchProjects).toHaveBeenCalledTimes(2)
       expect(container.querySelector('[data-testid="projects"]')?.textContent).toContain('acme/widgets')
     })
@@ -196,14 +200,14 @@ describe('ProjectsProvider', () => {
 
     const { container, unmount } = renderProvider()
 
-    await vi.waitFor(() => {
+    await waitForUi(() => {
       expect(container.querySelector('[data-testid="projects"]')?.textContent).toContain('acme/widgets')
     })
 
     const reloadButton = container.querySelector('[data-testid="reload"]')
     reloadButton?.dispatchEvent(new MouseEvent('click', { bubbles: true }))
 
-    await vi.waitFor(() => {
+    await waitForUi(() => {
       expect(fetchProjects).toHaveBeenCalledTimes(2)
       expect(container.querySelector('[data-testid="state"]')?.textContent).toBe('idle')
       expect(container.querySelector('[data-testid="projects"]')?.textContent).toBe('')
@@ -219,13 +223,13 @@ describe('ProjectsProvider', () => {
 
     const { container, unmount } = renderProvider()
 
-    await vi.waitFor(() => {
+    await waitForUi(() => {
       expect(container.querySelector('[data-testid="projects"]')?.textContent).toContain('acme/widgets')
     })
 
     dispatchSettingsChanged({ project_config_changed_at: '1' })
 
-    await vi.waitFor(() => {
+    await waitForUi(() => {
       expect(fetchProjects).toHaveBeenCalledTimes(2)
       expect(container.querySelector('[data-testid="state"]')?.textContent).toBe('idle')
       expect(container.querySelector('[data-testid="projects"]')?.textContent).toBe('')
@@ -244,26 +248,26 @@ describe('ProjectsProvider', () => {
 
     const { container, unmount } = renderProvider()
 
-    await vi.waitFor(() => {
+    await waitForUi(() => {
       expect(container.querySelector('[data-testid="projects"]')?.textContent).toContain('acme/widgets')
     })
 
     await vi.advanceTimersByTimeAsync(30_000)
 
-    await vi.waitFor(() => {
+    await waitForUi(() => {
       expect(fetchProjects).toHaveBeenCalledTimes(2)
     })
 
     dispatchSettingsChanged({ project_config_changed_at: '1' })
 
-    await vi.waitFor(() => {
+    await waitForUi(() => {
       expect(fetchProjects).toHaveBeenCalledTimes(3)
       expect(container.querySelector('[data-testid="projects"]')?.textContent).toBe('')
     })
 
     stalePoll.resolve(buildProjectsResponse('acme/stale'))
 
-    await vi.waitFor(() => {
+    await waitForUi(() => {
       expect(container.querySelector('[data-testid="projects"]')?.textContent).toBe('')
     })
 

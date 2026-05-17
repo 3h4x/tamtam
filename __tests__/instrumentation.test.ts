@@ -236,9 +236,13 @@ describe('instrumentation', () => {
       const { registerNode, waitForWorkflowReady } = await import('@/instrumentation-node');
       await registerNode();
       // Should resolve in well under the 60s fallback.
+      const timeout = new Promise<void>((_, reject) => {
+        const timer = setTimeout(() => reject(new Error('waitForWorkflowReady did not resolve')), 1000);
+        timer.unref?.();
+      });
       await Promise.race([
         waitForWorkflowReady(),
-        new Promise((_, reject) => setTimeout(() => reject(new Error('waitForWorkflowReady did not resolve')), 1000).unref?.()),
+        timeout,
       ]);
     });
 

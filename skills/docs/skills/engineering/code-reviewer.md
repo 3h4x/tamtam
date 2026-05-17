@@ -54,7 +54,7 @@ The pipeline owns these — flagging them wastes a fix iteration:
 
 - **Test execution.** The pipeline's test step is the source of truth for whether tests pass. Don't run tests, don't audit which package's test command is included, don't report "tests were not run". Only mention tests when the diff itself creates a *new* coverage gap, and describe the missing behavior, not the suite.
 - **`.tamtam/` changes.** These are TamTam's scheduler/config metadata, not product code. Ignore them unless the review task is explicitly about TamTam configuration.
-- **Style and personal taste.** Variable naming, function length, "I would have factored this differently" — only flag if the change actively harms readability of a public surface.
+- **Style and personal taste.** Variable naming, function length, "I would have factored this differently". Stay out of style debates entirely; if the linter doesn't catch it, leave it.
 - **Adjacent unchanged code.** If the surrounding file has pre-existing smells the diff didn't touch, leave them. Stay scoped to the change.
 - **Hypothetical future maintenance** ("what if someone later…"). Review the diff in front of you.
 - **Lint-level issues** the project's linter would catch.
@@ -68,6 +68,10 @@ This rule does **not** cover code, tests, configuration behavior, migrations, se
 ## Visual Verification
 
 When the pipeline-injected `QA TARGET` line names a live URL **and** the diff touches user-facing UI (files under `app/`, `pages/`, `components/`, `src/`, route handlers that render HTML, styles, or user-facing copy), drive a real browser before issuing your verdict.
+
+**Availability check first.** The Playwright MCP server may still be initializing when this short-lived review run starts. Before calling any `browser_*` tool, confirm the tool is registered. If the first call returns "tool not found" or the tools aren't in your available set, skip Visual Verification, add a one-line note in your rationale ("Skipped visual verification: Playwright MCP not available in this review run."), and base the verdict on the static diff. Do not block on tool availability and do not retry.
+
+If the configured QA TARGET URL is unreachable (connection refused, DNS failure, 5xx on the root), do the same: note in the rationale ("Skipped visual verification: QA target <url> unreachable.") and proceed with a diff-only review. An unreachable QA target is not by itself a finding — it usually means the local dev server isn't running.
 
 Tools (Playwright MCP):
 
@@ -90,20 +94,20 @@ Procedure:
 
 ## Framework-specific checks
 
-Detect the stack from the files in the diff and apply the matching checklist. Skip a checklist entirely if the diff doesn't touch that stack.
+The pipeline pre-filters this section to the project's detected stack (see the `FRAMEWORK:` line). Apply every checklist below — they're already scoped.
 
-### Next.js (App Router) — apply when the project has `next.config.*` or `next` in `package.json`
+### Next.js (App Router) — apply when the pipeline-injected `FRAMEWORK:` line includes `nextjs`
 
 - **`'use client'` boundary.** Components in `components/` that render React must start with `'use client'` on the first line. Files in `app/` are Server Components by default; flag accidental `'use client'` on pages/layouts that don't need it, and flag missing `'use client'` when a component uses hooks, state, refs, or event handlers.
 - **Browser-only APIs.** `window`, `document`, `localStorage`, `navigator`, `IntersectionObserver`, etc. must not appear in server-rendered code paths. In `app/` page/layout files this is a hard rule.
 - **Hydration.** Flag non-deterministic render inputs in server-rendered components: `Date.now()`, `Math.random()`, locale-dependent formatting that differs between server and client, `new Date()` rendered without a stable seed.
-- **Async params.** Route handlers (`app/api/**/route.ts`) and dynamic page/layout components in Next 15+/16 receive `params`/`searchParams` as `Promise`s. Flag synchronous access without `await`.
+- **Async params.** In Next 15+ (check the version suffix on the `FRAMEWORK:` line, e.g. `nextjs@16.2.4`), route handlers (`app/api/**/route.ts`) and dynamic page/layout components receive `params`/`searchParams` as `Promise`s. Flag synchronous access without `await` *only* when the detected major version is 15 or higher; on Next 13–14 the same access is correct.
 - **Caching/revalidation.** When the diff introduces a route, check whether `dynamic`, `revalidate`, or `fetch` cache options are appropriate. Flag unintended static caching of authenticated/user-scoped pages and unintended dynamic rendering of cacheable ones.
 - **Turbopack NFT comments.** When a route's dep tree calls `path.join(dynamicVar, …)` or any `fs` call (`existsSync`, `readFileSync`, `readFile`, `openSync`, `statSync`, `watch`, `readdirSync`) with a *runtime-dynamic* path, the call site must carry an inline `/*turbopackIgnore: true*/` on the dynamic argument. Statically-scoped joins like `join(process.cwd(), 'data', name)` are fine. Flag missing annotations on new dynamic-path fs calls.
 - **Server Actions.** Flag missing `'use server'` directives, accidental client-side imports of server-only modules, and Server Actions that mutate persisted state without `revalidatePath`/`revalidateTag` when the diff implies cached data should refresh.
 - **Suspense boundaries.** When the diff adds `loading.tsx`, `error.tsx`, or `<Suspense>`, check the boundary is at the right segment level (not too high — masks real loading states; not too low — defeats the purpose).
 
-### Solidity / on-chain — apply when the diff touches `.sol`, `foundry.toml`, or `hardhat.config.*`
+### Solidity / on-chain — apply when the pipeline-injected `FRAMEWORK:` line includes `solidity`
 
 - Reentrancy on any new external call before state writes.
 - `tx.origin` used for authorization (should be `msg.sender`).
@@ -114,7 +118,7 @@ Detect the stack from the files in the diff and apply the matching checklist. Sk
 - Constructor logic in an upgradeable contract (must be `initialize()`).
 - Hardcoded addresses that should be constructor/initializer args.
 
-### Database migrations — apply when the diff includes `drizzle/`, `migrations/`, `prisma/`, or raw SQL files
+### Database migrations — apply when the pipeline-injected `FRAMEWORK:` line includes `db-migrations`
 
 - Destructive schema changes (`DROP COLUMN`, `DROP TABLE`, type narrowing) without a rollout that lets the old code keep running during deploy.
 - `NOT NULL` added to an existing column without a backfill default.
@@ -122,12 +126,32 @@ Detect the stack from the files in the diff and apply the matching checklist. Sk
 - Long-running `ALTER` on a large table without `CONCURRENTLY` (Postgres) or an equivalent online-DDL strategy.
 - Migrations that depend on application code shipping first (or vice versa) without a sequencing note.
 
-### Shell / CI — apply when the diff touches `.github/workflows/`, `scripts/`, or `*.sh`
+### Shell / CI — apply when the pipeline-injected `FRAMEWORK:` line includes `github-actions`
 
 - Untrusted GitHub Actions input expanded into a `run:` block (`${{ github.event.pull_request.title }}` etc.) — command-injection vector.
 - New secret referenced without checking it exists in repo settings.
 - `set -e` missing in a script that chains commands and assumes earlier ones succeeded.
 - `rm -rf` with a path that interpolates a variable that could be empty.
+
+### Python — apply when the pipeline-injected `FRAMEWORK:` line includes `python`
+
+- Mutable default arguments (`def f(x=[])`).
+- `except:` or `except Exception:` that swallows everything; flag missing narrow exception types.
+- Subprocess calls built with `shell=True` and string interpolation from external input.
+- SQL built via f-strings/`%`-formatting instead of parameterized queries.
+- New `pickle.loads` on data sourced from outside the trust boundary.
+- New `requests`/`httpx` call without an explicit `timeout=`.
+- Files opened without a `with` block or without `encoding=`.
+- Newly-added type hints that lie (return `Optional[X]` but the body has paths that don't return).
+
+### Swift — apply when the pipeline-injected `FRAMEWORK:` line includes `swift`
+
+- Force unwraps (`!`) and force casts (`as!`) introduced on values the diff makes optional.
+- `try!` on a call that can realistically throw.
+- `@MainActor` / actor isolation violations in new async code.
+- Strong reference cycles in new closures (missing `[weak self]`).
+- New `URLSession` task without timeout configuration or cancellation handling.
+- Newly-public API without `@available` annotation when it depends on an OS version above the project's deployment target.
 
 ## Output format
 

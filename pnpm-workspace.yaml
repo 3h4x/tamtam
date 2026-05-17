@@ -2,8 +2,9 @@
 # installable. Defends against supply-chain attacks where a malicious
 # version gets published and consumed within minutes. Override per-package
 # with `minimumReleaseAgeExclude` if you need a same-day security patch.
-minimumReleaseAge: 10080  # minutes (7 × 24 × 60)
-minimumReleaseAgeExclude: []
+minimumReleaseAge: 10080 # minutes (7 × 24 × 60)
+minimumReleaseAgeExclude:
+  - devalue
 
 allowBuilds:
   '@nestjs/core': false
@@ -11,5 +12,6 @@ allowBuilds:
   better-sqlite3: false
   cbor-extract: false
   esbuild: true
+  puppeteer: false
   sharp: true
   unrs-resolver: true
