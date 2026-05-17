@@ -814,35 +814,6 @@ describe('startProjectReview', () => {
     expect(prompt).toContain('Do not require docs for trivial refactors');
   });
 
-  it('tells reviewers the pipeline test step already validated the suite', async () => {
-    execMock.mockResolvedValueOnce(resp(0, ' M lib/foo.ts'));
-    await startProjectReview('proj');
-    const prompt: string = startJobMock.mock.calls[0][2];
-    expect(prompt).toContain('PIPELINE TEST CONTEXT');
-    expect(prompt).toContain('The pipeline owns test execution');
-    expect(prompt).toContain('Do not run tests, inspect test runner coverage, audit which package test commands are included');
-    expect(prompt).toContain('Do not cite passing, failing, skipped, partial, or unexercised test suites as review findings');
-    expect(prompt).toContain('Only mention tests when the code diff itself creates a concrete missing-coverage risk');
-  });
-
-  it('tells reviewers to ignore TamTam internal config changes', async () => {
-    execMock.mockResolvedValueOnce(resp(0, ' M lib/foo.ts'));
-    await startProjectReview('proj');
-    const prompt: string = startJobMock.mock.calls[0][2];
-    expect(prompt).toContain('TAMTAM INTERNAL CONFIG CONTEXT');
-    expect(prompt).toContain('Ignore `.tamtam/` changes during review');
-    expect(prompt).toContain('`.tamtam/agents/*.md`, `.tamtam/config.yml`, or other `.tamtam/` files');
-  });
-
-  it('tells reviewers to fix obvious documentation-only issues and return LGTM', async () => {
-    execMock.mockResolvedValueOnce(resp(0, ' M lib/foo.ts'));
-    await startProjectReview('proj');
-    const prompt: string = startJobMock.mock.calls[0][2];
-    expect(prompt).toContain('DOCUMENTATION-ONLY FIX CONTEXT');
-    expect(prompt).toContain('apply the documentation edit yourself during this review');
-    expect(prompt).toContain('end with Verdict: LGTM');
-  });
-
   it('includes prior release review and fix context in follow-up reviews', async () => {
     listJobsMock.mockReturnValue([
       makeJob({ id: 'release-1', kind: 'release', finishedAt: null, startedAt: 10 }),

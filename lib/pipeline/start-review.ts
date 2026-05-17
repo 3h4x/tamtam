@@ -22,6 +22,19 @@ export type StartReviewResult =
   | { ok: true; jobId: string; pid: number; logPath: string }
   | { ok: false; status: number; detail: string; blockingJobId?: string };
 
+async function resolveQaTargetBlock(projectName: string): Promise<string> {
+  let target: { qaUrl: string | null; website: string | null } | null = null;
+  try {
+    target = await getProjectQaTarget(projectName);
+  } catch { /* test env without DB */ }
+  const url = target?.qaUrl || target?.website || null;
+  if (!url) {
+    return 'QA TARGET: none configured (no qa_url or website). Skip visual checks and review the diff statically.';
+  }
+  const source = target?.qaUrl ? 'qa_url (explicit QA override)' : 'website (production fallback)';
+  return `QA TARGET: ${url} (source: ${source}; qa_url overrides website when both are set). Follow the Visual Verification section of the reviewer skill for diffs that affect user-facing UI.`;
+}
+
 async function loadReviewPrompt(projectName: string): Promise<string> {
   let content = '';
   if (existsSync(CODE_REVIEWER_SKILL)) {
@@ -39,39 +52,15 @@ async function loadReviewPrompt(projectName: string): Promise<string> {
   const addendum = reviewPromptAddendum?.trim()
     ? '\n\n## Project-specific review guidance\n' + reviewPromptAddendum.trim()
     : '';
+  const qaBlock = await resolveQaTargetBlock(projectName);
   return content +
     '\n\n---\n\n' +
     'Project: {project}\n' +
     'Path: {path}\n\n' +
     '{review_scope}\n\n' +
     '{release_context}\n\n' +
-    'PIPELINE TEST CONTEXT:\n' +
-    '- The pipeline owns test execution. Treat the pipeline test step as the source of truth for whether tests pass.\n' +
-    '- Do not run tests, inspect test runner coverage, audit which package test commands are included, or report that a test command was not run.\n' +
-    '- Do not cite passing, failing, skipped, partial, or unexercised test suites as review findings.\n' +
-    '- Only mention tests when the code diff itself creates a concrete missing-coverage risk, and describe the behavior that lacks coverage instead of validating the suite.\n\n' +
-    'TAMTAM INTERNAL CONFIG CONTEXT:\n' +
-    '- Ignore `.tamtam/` changes during review. They are TamTam scheduler/config metadata, not product code for this project.\n' +
-    '- Do not raise findings about `.tamtam/agents/*.md`, `.tamtam/config.yml`, or other `.tamtam/` files unless the review task is explicitly about TamTam configuration.\n\n' +
-    'DOCUMENTATION-ONLY FIX CONTEXT:\n' +
-    '- If the only remaining issue is a documentation update and the exact docs change is obvious, apply the documentation edit yourself during this review.\n' +
-    '- After applying that docs-only fix, do not emit a NEEDS ATTENTION finding for it; summarize the docs edit and end with Verdict: LGTM.\n' +
-    '- Do not use this rule for code, tests, configuration behavior, migrations, security issues, or ambiguous documentation work; those still require normal findings.\n\n' +
+    qaBlock + '\n\n' +
     REVIEW_OUTPUT_CONTRACT + '\n\n' +
-    'OUTPUT FORMAT — strict. Your final non-empty line must be exactly one of:\n\n' +
-    '    Verdict: LGTM\n' +
-    '    Verdict: NEEDS ATTENTION\n' +
-    '    Verdict: DO NOT SHIP\n\n' +
-    'Rules:\n' +
-    '- The verdict line MUST be the very last non-empty line of your response.\n' +
-    '- No markdown decoration (no `**`, no `#`, no backticks, no bullet, no quote).\n' +
-    '- No trailing punctuation, no rationale on the same line, no extra words.\n' +
-    '- Put rationale BEFORE the verdict line, not after.\n\n' +
-    'Example ending:\n\n' +
-    '    The diff updates two helpers and adds matching tests. Tests pass.\n' +
-    '\n    Verdict: LGTM\n\n' +
-    'If you omit the verdict line, the release pipeline treats the review as ' +
-    'NEEDS ATTENTION and runs a fix loop — wasted spend. Always emit one.\n\n' +
     review_verdict_rules +
     addendum;
 }
