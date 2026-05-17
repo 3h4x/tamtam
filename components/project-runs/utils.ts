@@ -683,21 +683,27 @@ function buildChain(_release: Entry, kids: Entry[]): Entry[] {
 }
 
 // Collapse pipeline children (test/review/fix/commit/push/…) under their
-// parent release entry using the release's [startedAt, finishedAt ?? ∞] window.
-// Releases are project-scoped and protected by `pipeline_locks` so at most one
-// release is active per project at a time — a child job's timestamp
-// unambiguously identifies its parent.
+// parent release entry. Current rows use the durable `release_id` link; the
+// timestamp window remains only as a fallback for legacy rows written before
+// that lineage was persisted.
 //
 // Exported for unit testing.
 export function groupReleaseChildren(entries: Entry[]): Entry[] {
   const releases = entries.filter((e) => e.kind === 'release')
+  const releasesByProjectAndId = new Map<string, Entry>()
+  for (const release of releases) {
+    releasesByProjectAndId.set(`${release.project}:${release.navJobId}`, release)
+  }
 
   // Latest-starting containing release wins (in the pathological case two
   // release windows overlap). Sorted asc so the last assignment wins.
   const sortedReleases = [...releases].sort((a, b) => a.startedAt - b.startedAt)
 
-  const findContainingRelease = (child: Entry): Entry | null => {
+  const findParentRelease = (child: Entry): Entry | null => {
     if (!PIPELINE_CHILD_KINDS.has(child.kind)) return null
+    if (child.releaseId) {
+      return releasesByProjectAndId.get(`${child.project}:${child.releaseId}`) ?? null
+    }
     let best: Entry | null = null
     for (const r of sortedReleases) {
       const end = r.finishedAt ?? Number.POSITIVE_INFINITY
@@ -710,7 +716,7 @@ export function groupReleaseChildren(entries: Entry[]): Entry[] {
   const topLevel: Entry[] = []
   for (const e of entries) {
     if (e.kind === 'release') continue
-    const parent = findContainingRelease(e)
+    const parent = findParentRelease(e)
     if (parent) {
       const arr = childrenByParent.get(parent.key) ?? []
       arr.push(e)

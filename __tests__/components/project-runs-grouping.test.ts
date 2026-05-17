@@ -1,8 +1,7 @@
 // Unit tests for the release-grouping helper and buildEntries in ProjectRunsTab.
 //
-// Time-window grouping: each `release` entry collects any pipeline-kind
-// entry (test/review/fix/commit/push/mark-dod/pr-wait) whose
-// startedAt falls inside the release's [startedAt, finishedAt ?? ∞] window.
+// Release grouping: current rows use release_id; legacy rows without release_id
+// fall back to the release's [startedAt, finishedAt ?? ∞] window.
 //
 // The component rendering is React — we only import the pure helpers so
 // Node-only vitest can run this.
@@ -23,6 +22,7 @@ function makeEntry(partial: {
   status?: 'running' | 'done';
   exitCode?: number | null;
   project?: string;
+  releaseId?: string | null;
 }): AnyEntry {
   return {
     key: `job:${partial.id}`,
@@ -44,6 +44,7 @@ function makeEntry(partial: {
     model: null,
     navJobId: partial.id,
     navSessionId: null,
+    releaseId: partial.releaseId ?? null,
     logPruned: false,
   };
 }
@@ -112,6 +113,22 @@ describe('groupReleaseChildren', () => {
     const oldRel = out.find((e) => e.navJobId === 'oldRel')!;
     expect(newRel.children!.map((c) => c.navJobId)).toContain('c');
     expect(oldRel.children!.map((c) => c.navJobId)).not.toContain('c');
+  });
+
+  it('uses releaseId before timestamp windows when release windows overlap', () => {
+    const entries = [
+      makeEntry({ id: 'rel-a', kind: 'release', startedAt: 100, finishedAt: 500 }),
+      makeEntry({ id: 'rel-b', kind: 'release', startedAt: 200, finishedAt: 400 }),
+      makeEntry({ id: 'test-a', kind: 'test', startedAt: 250, finishedAt: 260, releaseId: 'rel-a' }),
+      makeEntry({ id: 'review-b', kind: 'review', startedAt: 260, finishedAt: 270, releaseId: 'rel-b' }),
+    ];
+
+    const out = groupReleaseChildren(entries);
+
+    const relA = out.find((e) => e.navJobId === 'rel-a')!;
+    const relB = out.find((e) => e.navJobId === 'rel-b')!;
+    expect(relA.children!.map((c) => c.navJobId)).toEqual(['test-a']);
+    expect(relB.children!.map((c) => c.navJobId)).toEqual(['review-b']);
   });
 
   it('does not fold pipeline jobs into a release from another project', () => {
