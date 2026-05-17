@@ -38,7 +38,7 @@ log() { printf '[rebuild-safe] %s\n' "$*"; }
 # below still runs, which unpauses jobs. A hung rebuild that leaves jobs
 # paused indefinitely (the iter #46 incident) is worse than just bailing.
 WALL_CLOCK_PID=$$
-( sleep "$WALL_CLOCK_TIMEOUT_S" && kill -TERM "$WALL_CLOCK_PID" 2>/dev/null ) &
+( sleep "$WALL_CLOCK_TIMEOUT_S" && kill -TERM "$WALL_CLOCK_PID" 2>/dev/null ) >/dev/null 2>&1 &
 WALL_CLOCK_WATCHDOG=$!
 disown "$WALL_CLOCK_WATCHDOG" 2>/dev/null || true
 cleanup_watchdog() {
@@ -73,17 +73,22 @@ unpause_jobs() {
 # the drain loop keeps waiting (vs. the old behavior that treated API
 # failure as "0 running" and proceeded to restart immediately).
 count_blocking_jobs() {
-  local body
-  if ! body=$(curl -sf "$BASE_URL/api/jobs?status=running&limit=200" 2>/dev/null); then
-    # API unreachable / non-200 — treat as still draining.
-    echo 1
-    return
-  fi
-  printf '%s' "$body" | python3 -c "
+  local offset=0
+  local total=0
+  while :; do
+    local body
+    if ! body=$(curl -sf "$BASE_URL/api/jobs?status=running&limit=200&offset=$offset" 2>/dev/null); then
+      # API unreachable / non-200 — treat as still draining.
+      echo 1
+      return
+    fi
+    local parsed
+    parsed=$(printf '%s' "$body" | python3 -c "
 import json, sys
 try:
   d = json.load(sys.stdin)
-  rows = d if isinstance(d, list) else d.get('jobs', d.get('rows', []))
+  is_list = isinstance(d, list)
+  rows = d if is_list else d.get('jobs', d.get('rows', []))
   blocking_kinds = {'test','review','fix','commit','push','mark-dod','run','fix-ci'}
   n = 0
   for r in rows:
@@ -91,12 +96,26 @@ try:
     k = r.get('kind', '')
     if k in blocking_kinds or k.startswith('agent:'):
       n += 1
-  print(n)
+  next_offset = None if is_list else d.get('nextOffset')
+  print(f'{n}\\t{next_offset if next_offset is not None else \"\"}')
 except Exception:
   # JSON parse / structure error — fail closed: report 1 so the
   # drain loop keeps polling instead of restarting blind.
-  print(1)
-"
+  print('1')
+")
+    if [ "$parsed" = "1" ]; then
+      echo 1
+      return
+    fi
+    local page_count="${parsed%%	*}"
+    local next_offset="${parsed#*	}"
+    total=$((total + page_count))
+    if [ -z "$next_offset" ] || [ "$next_offset" = "$parsed" ]; then
+      echo "$total"
+      return
+    fi
+    offset="$next_offset"
+  done
 }
 
 PAUSED=0
