@@ -84,6 +84,7 @@
     "husky": "^9.1.7",
     "jsdom": "^29.0.2",
     "postcss": "^8.5.9",
+    "semantic-release": "24.2.9",
     "tailwindcss": "^4.2.2",
     "tsx": "^4.22.1",
     "typescript": "^6.0.2",
