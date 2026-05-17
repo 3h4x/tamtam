@@ -25,7 +25,9 @@ export interface DbBackupResult {
 
 export interface DbBackupDeps {
   createBackup: () => Promise<string>;
-  pruneOld: () => Promise<string[]>;
+  /** Receives the path of the dump that was just created so it can be
+   *  protected from immediate pruning when retention counts are 0. */
+  pruneOld: (justCreatedPath: string) => Promise<string[]>;
   enqueueNextFire: (runAt: Date) => Promise<void>;
   /** Returns the current backup config. cron re-reads on every fire so
    *  the operator can toggle the cadence / disable without a restart. */
@@ -55,7 +57,7 @@ export async function handleDbBackup(deps: DbBackupDeps): Promise<DbBackupResult
       backupPath = await deps.createBackup();
       ran = true;
       try {
-        pruned = await deps.pruneOld();
+        pruned = await deps.pruneOld(backupPath);
       } catch (pruneErr) {
         // Pruning is best-effort — a failed prune shouldn't break the backup.
         error = `prune failed: ${pruneErr instanceof Error ? pruneErr.message : String(pruneErr)}`;
