@@ -683,7 +683,10 @@ export async function registerNode(): Promise<void> {
           loadEnabledAgents: listEnabledScheduledAgents,
         });
         const systemSeed = await seedSystemCron({ connectionString });
-        console.log(`[cron] seeded ${agentSeed.enqueued} agent crons; system-cron: ${systemSeed.enqueued ? 'ok' : systemSeed.reason}`);
+        console.log(
+          `[cron] seeded ${agentSeed.enqueued} agent crons (${agentSeed.preserved} preserved); ` +
+            `system-cron: ${systemSeed.enqueued ? 'ok' : systemSeed.reason}`,
+        );
 
         // Start the worker pool with both agent-cron + system-cron handlers
         await startCronWorker({

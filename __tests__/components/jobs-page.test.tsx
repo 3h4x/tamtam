@@ -6,6 +6,8 @@ import { createRoot } from 'react-dom/client'
 import { flushSync } from 'react-dom'
 import { JobsPage } from '@/components/JobsPage'
 
+const WAIT_FOR_UI = { timeout: 500, interval: 1 } as const
+
 const { fetchJobsMock, fetchProjectsMock, pushMock } = vi.hoisted(() => ({
   fetchJobsMock: vi.fn(),
   fetchProjectsMock: vi.fn(),
@@ -92,7 +94,7 @@ describe('JobsPage', () => {
     await vi.waitFor(() => {
       expect(fetchJobsMock).toHaveBeenCalledWith(undefined, { limit: 200 })
       expect(container.textContent).toContain('startedago:100')
-    })
+    }, WAIT_FOR_UI)
 
     expect(container.textContent).not.toContain('live')
     expect(container.textContent).not.toContain('last')
@@ -107,7 +109,7 @@ describe('JobsPage', () => {
     await vi.waitFor(() => {
       expect(fetchJobsMock).toHaveBeenCalledWith(undefined, { limit: 200 })
       expect(container.textContent).toContain('running 1')
-    })
+    }, WAIT_FOR_UI)
 
     const runningButton = Array.from(container.querySelectorAll('button')).find((button) => button.textContent?.includes('running 1'))
     if (!(runningButton instanceof HTMLButtonElement)) throw new Error('running filter button not found')
@@ -149,7 +151,7 @@ describe('JobsPage', () => {
       expect(fetchJobsMock).toHaveBeenCalledWith(undefined, { limit: 200 })
       expect(container.textContent).toContain('500 total runs')
       expect(container.textContent).toContain('1 loaded')
-    })
+    }, WAIT_FOR_UI)
 
     unmount()
   })
@@ -194,7 +196,7 @@ describe('JobsPage', () => {
       expect(fetchJobsMock).toHaveBeenCalledWith(undefined, { limit: 200 })
       expect(container.textContent).toContain('done 1')
       expect(container.textContent).toContain('failed 1')
-    })
+    }, WAIT_FOR_UI)
 
     const failedButton = Array.from(container.querySelectorAll('button')).find((button) => button.textContent?.includes('failed 1'))
     if (!(failedButton instanceof HTMLButtonElement)) throw new Error('failed filter button not found')
@@ -203,7 +205,7 @@ describe('JobsPage', () => {
     await vi.waitFor(() => {
       expect(container.textContent).toContain('cancelled')
       expect(container.textContent).not.toContain('run tests')
-    })
+    }, WAIT_FOR_UI)
 
     unmount()
   })
@@ -252,7 +254,7 @@ describe('JobsPage', () => {
       expect(container.textContent).toContain('3 total runs')
       expect(container.textContent).toContain('done 1')
       expect(container.textContent).not.toContain('failed 2')
-    })
+    }, WAIT_FOR_UI)
     const failedButton = Array.from(container.querySelectorAll('button')).find((button) => button.textContent?.includes('failed'))
     expect(failedButton).toBeUndefined()
 
@@ -275,7 +277,7 @@ describe('JobsPage', () => {
 
     await vi.waitFor(() => {
       expect(fetchJobsMock).toHaveBeenCalledWith(undefined, { limit: 200 })
-    })
+    }, WAIT_FOR_UI)
 
     expect(container.textContent).not.toContain('Board')
     unmount()
@@ -369,7 +371,7 @@ describe('JobsPage', () => {
       expect(container.textContent).toContain('Release pipeline')
       expect(container.textContent).toContain('done')
       expect(container.textContent).not.toContain('completed through review')
-    })
+    }, WAIT_FOR_UI)
 
     unmount()
   })
@@ -460,7 +462,7 @@ describe('JobsPage', () => {
     await vi.waitFor(() => {
       expect(fetchJobsMock).toHaveBeenCalledWith(undefined, { limit: 200 })
       expect(container.textContent).toContain('Release pipeline')
-    })
+    }, WAIT_FOR_UI)
 
     const expandButton = Array.from(container.querySelectorAll('button')).find((node) => node.getAttribute('title') === 'Expand steps')
     if (!(expandButton instanceof HTMLButtonElement)) throw new Error('expand button not found')
@@ -474,7 +476,7 @@ describe('JobsPage', () => {
       expect(testIndex).toBeGreaterThanOrEqual(0)
       expect(fixIndex).toBeGreaterThan(testIndex)
       expect(reviewIndex).toBeGreaterThan(fixIndex)
-    })
+    }, WAIT_FOR_UI)
 
     unmount()
   })

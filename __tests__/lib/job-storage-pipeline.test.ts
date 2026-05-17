@@ -1,5 +1,5 @@
 import { describe, it, expect, beforeAll, beforeEach, afterAll, afterEach, vi } from 'vitest';
-import { sql } from 'drizzle-orm';
+import { sql, type InferInsertModel } from 'drizzle-orm';
 import * as schema from '@/lib/db/schema';
 import { createTestPgDbEmpty, type TestDbHandle } from '@/__tests__/helpers/test-db';
 import { JobData } from '@/lib/jobs/job-storage';
@@ -73,6 +73,24 @@ async function applyDdl(handle: TestDbHandle): Promise<void> {
       fetched_at double precision NOT NULL
     )
   `));
+  await handle.db.execute(sql.raw(`
+    CREATE TABLE IF NOT EXISTS job_completion_events (
+      id serial PRIMARY KEY,
+      job_id text NOT NULL,
+      kind text NOT NULL,
+      exit_code integer,
+      project text NOT NULL,
+      release_id text,
+      gh_issue_number integer,
+      emitted_at double precision NOT NULL,
+      consumed_by text,
+      consumed_at double precision
+    )
+  `));
+  await handle.db.execute(sql.raw(`
+    CREATE UNIQUE INDEX IF NOT EXISTS job_completion_events_job_id
+    ON job_completion_events (job_id)
+  `));
 }
 
 let sharedHandle: TestDbHandle;
@@ -113,6 +131,8 @@ async function flushDbQueue(): Promise<void> {
   await sharedHandle.db.execute(sql.raw('SELECT 1'));
 }
 
+type JobInsert = InferInsertModel<typeof schema.jobs>;
+
 // Getter shim so existing `testDb.db.*` test code keeps working while the
 // underlying connection is the shared PGlite handle.
 const testDb = {
@@ -120,6 +140,52 @@ const testDb = {
     return sharedHandle.db;
   },
 } as { db: TestDbHandle['db'] };
+
+function toCachedJob(row: JobInsert): JobData {
+  return {
+    id: row.id,
+    project: row.project,
+    kind: row.kind,
+    prompt: row.prompt ?? null,
+    pid: row.pid,
+    logPath: row.logPath ?? null,
+    startedAt: row.startedAt,
+    finishedAt: row.finishedAt ?? null,
+    exitCode: row.exitCode ?? null,
+    seen: row.seen ?? false,
+    durationMs: row.durationMs ?? null,
+    inputTokens: row.inputTokens ?? null,
+    outputTokens: row.outputTokens ?? null,
+    cacheReadTokens: row.cacheReadTokens ?? null,
+    cacheCreateTokens: row.cacheCreateTokens ?? null,
+    sessionId: row.sessionId ?? null,
+    contextMeta: row.contextMeta ?? null,
+    userPrompt: row.userPrompt ?? null,
+    parentJobId: row.parentJobId ?? null,
+    ghIssueNumber: row.ghIssueNumber ?? null,
+    ghIssueRepo: row.ghIssueRepo ?? null,
+    ghIssueTitle: row.ghIssueTitle ?? null,
+    logPruned: row.logPruned ?? false,
+    verdict: row.verdict ?? null,
+    costUsd: row.costUsd ?? null,
+    model: row.model ?? null,
+    releaseId: row.releaseId ?? null,
+    abortedAt: row.abortedAt ?? null,
+    promptBytes: row.promptBytes ?? null,
+    workSummary: row.workSummary ?? null,
+    modifiedFiles: row.modifiedFiles ?? null,
+    provider: row.provider ?? null,
+  };
+}
+
+async function insertJobsAndSync(rows: JobInsert | JobInsert[]): Promise<void> {
+  const batch = Array.isArray(rows) ? rows : [rows];
+  await sharedHandle.db.insert(schema.jobs).values(batch);
+  const { jobsCache } = await import('@/lib/jobs/storage');
+  for (const row of batch) {
+    jobsCache.set(row.id, toCachedJob(row));
+  }
+}
 
 // `getJob`/`listJobs` are cache-only since commit 1cc1db25 — tests that seed
 // rows via direct DB inserts must populate the in-memory cache too, or
@@ -422,14 +488,13 @@ describe.skip('runCompletionHooks – auto-push pipeline', () => {
 
   it('finalizes active release job with exit 0 when push succeeds', async () => {
     const now = Date.now() / 1000;
-    await testDb.db.insert(schema.jobs).values({
+    await insertJobsAndSync({
       id: 'release-job-push', project: 'my-proj', kind: 'release',
       prompt: null, pid: 1, logPath: null,
       startedAt: now - 10, finishedAt: null, exitCode: null,
       seen: false, durationMs: null, inputTokens: null, outputTokens: null,
       cacheReadTokens: null, cacheCreateTokens: null, sessionId: null,
-    } as any);
-    await syncCacheFromDb();
+    } as JobInsert);
 
     const job = makeJob('push', null, { releaseId: 'release-job-push' });
     await markDoneFn(job, 0);
@@ -441,14 +506,13 @@ describe.skip('runCompletionHooks – auto-push pipeline', () => {
 
   it('finalizes active release job with exit 1 when push fails', async () => {
     const now = Date.now() / 1000;
-    await testDb.db.insert(schema.jobs).values({
+    await insertJobsAndSync({
       id: 'release-job-push-fail', project: 'my-proj', kind: 'release',
       prompt: null, pid: 1, logPath: null,
       startedAt: now - 10, finishedAt: null, exitCode: null,
       seen: false, durationMs: null, inputTokens: null, outputTokens: null,
       cacheReadTokens: null, cacheCreateTokens: null, sessionId: null,
-    } as any);
-    await syncCacheFromDb();
+    } as JobInsert);
 
     const job = makeJob('push', null, { releaseId: 'release-job-push-fail' });
     await markDoneFn(job, 1);
@@ -640,14 +704,13 @@ describe.skip('runCompletionHooks – auto-push pipeline', () => {
     // Neither auto flag is set, but there's an active release job — should still fix.
     getProjectTestConfigMock.mockReturnValue({ testCommand: null, testCronEnabled: false, testCronSchedule: null, autoPushEnabled: false, autoCommitEnabled: false });
     const now = Date.now() / 1000;
-    await testDb.db.insert(schema.jobs).values({
+    await insertJobsAndSync({
       id: 'active-release-for-testfail', project: 'my-proj', kind: 'release',
       prompt: null, pid: 1, logPath: null,
       startedAt: now - 10, finishedAt: null, exitCode: null,
       seen: false, durationMs: null, inputTokens: null, outputTokens: null,
       cacheReadTokens: null, cacheCreateTokens: null, sessionId: null,
-    } as any);
-    await syncCacheFromDb();
+    } as JobInsert);
     const job = makeJob('test', null, { releaseId: 'active-release-for-testfail' });
 
     await markDoneFn(job, 1);
@@ -696,7 +759,7 @@ describe.skip('runCompletionHooks – auto-push pipeline', () => {
 
   it('pushes directly when tests pass, worktree is clean, and a fresh LGTM already exists', async () => {
     const now = Date.now() / 1000;
-    await testDb.db.insert(schema.jobs).values({
+    await insertJobsAndSync({
       id: 'fresh-lgtm-review',
       project: 'my-proj',
       kind: 'review',
@@ -713,8 +776,7 @@ describe.skip('runCompletionHooks – auto-push pipeline', () => {
       cacheReadTokens: null,
       cacheCreateTokens: null,
       sessionId: null,
-    } as any);
-    await syncCacheFromDb();
+    } as JobInsert);
     writeFileSync(join(tempDir, 'fresh-lgtm-review.log'), 'Verdict: LGTM\n');
     isReviewedMock.mockResolvedValue(true);
     execMock
@@ -1099,16 +1161,13 @@ describe.skip('runCompletionHooks – auto-push pipeline', () => {
     it('does not retry when the max retry count has been exceeded', async () => {
       // Insert 3 prior fix-ci jobs so the count gate trips.
       const now = Date.now() / 1000;
-      for (let i = 0; i < 3; i++) {
-        await testDb.db.insert(schema.jobs).values({
+      await insertJobsAndSync(Array.from({ length: 3 }, (_, i) => ({
           id: `prior-fixci-${i}`, project: 'my-proj', kind: 'fix-ci',
           prompt: null, pid: 200 + i, logPath: null,
           startedAt: now - i, finishedAt: now - i + 1, exitCode: -1,
           seen: true, durationMs: null, inputTokens: null, outputTokens: null,
           cacheReadTokens: null, cacheCreateTokens: null, sessionId: null,
-        } as any);
-      }
-      await syncCacheFromDb();
+        } as JobInsert)));
 
       const fetchMock = vi.fn().mockResolvedValue({ ok: true, json: async () => ({}) });
       vi.stubGlobal('fetch', fetchMock);
@@ -2038,7 +2097,7 @@ describe('runCompletionHooks – linked release scoping', () => {
     const now = Date.now() / 1000;
     const releaseLog = join(tempDir, 'linked-release.log');
     writeFileSync(releaseLog, '# release start\n');
-    await testDb.db.insert(schema.jobs).values({
+    await insertJobsAndSync({
       id: 'release-linked',
       project: 'my-proj',
       kind: 'release',
@@ -2056,8 +2115,7 @@ describe('runCompletionHooks – linked release scoping', () => {
       cacheCreateTokens: null,
       sessionId: null,
       releaseId: 'release-linked',
-    } as any);
-    await syncCacheFromDb();
+    } as JobInsert);
 
     const childLog = join(tempDir, 'linked-pr-wait.log');
     writeFileSync(childLog, 'merge poll output\n');
@@ -2297,15 +2355,14 @@ describe('runCompletionHooks – abort short-circuit', () => {
   it('does not chain to next step when active release has abortedAt set', async () => {
     const now = Date.now() / 1000;
     // Insert an aborted release job — finishedAt is set (as the abort handler does)
-    await testDb.db.insert(schema.jobs).values({
+    await insertJobsAndSync({
       id: 'release-aborted', project: 'abort-proj', kind: 'release',
       prompt: null, pid: 0, logPath: null,
       startedAt: now - 30, finishedAt: now - 1, exitCode: -3,
       seen: false, durationMs: null, inputTokens: null, outputTokens: null,
       cacheReadTokens: null, cacheCreateTokens: null, sessionId: null,
       abortedAt: now - 1,
-    } as any);
-    await syncCacheFromDb();
+    } as JobInsert);
 
     // Step job must carry releaseId so the abort check can find the release
     const reviewJob = makeJob('review', 'review-after-abort', { releaseId: 'release-aborted' });
@@ -2318,15 +2375,14 @@ describe('runCompletionHooks – abort short-circuit', () => {
 
   it('does not chain fix→review when active release is aborted', async () => {
     const now = Date.now() / 1000;
-    await testDb.db.insert(schema.jobs).values({
+    await insertJobsAndSync({
       id: 'release-aborted-2', project: 'abort-proj', kind: 'release',
       prompt: null, pid: 0, logPath: null,
       startedAt: now - 30, finishedAt: now - 1, exitCode: -3,
       seen: false, durationMs: null, inputTokens: null, outputTokens: null,
       cacheReadTokens: null, cacheCreateTokens: null, sessionId: null,
       abortedAt: now - 1,
-    } as any);
-    await syncCacheFromDb();
+    } as JobInsert);
 
     const fixJob = makeJob('fix', 'fix-after-abort', { releaseId: 'release-aborted-2' });
     await markDoneFn(fixJob, 0);
