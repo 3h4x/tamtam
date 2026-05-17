@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { chmodSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'fs';
+import { mkdtempSync, readFileSync, rmSync, writeFileSync } from 'fs';
 import { tmpdir } from 'os';
 import { join } from 'path';
 import { spawnSync } from 'child_process';
@@ -9,15 +9,14 @@ describe('scripts/rebuild-safe.sh', () => {
     const dir = mkdtempSync(join(tmpdir(), 'tamtam-rebuild-safe-'));
     try {
       const callsPath = join(dir, 'curl-calls.log');
-      const curlPath = join(dir, 'curl');
-      const pnpmPath = join(dir, 'pnpm');
+      const bashEnvPath = join(dir, 'bash-env.sh');
 
-      writeFileSync(curlPath, `#!/usr/bin/env bash
+      writeFileSync(bashEnvPath, `curl() {
 set -euo pipefail
 url="\${@: -1}"
 if [[ "$url" == *"/api/settings"* ]]; then
   printf '{"status":"ok"}'
-  exit 0
+  return 0
 fi
 printf '%s\\n' "$url" >> "${callsPath}"
 if [[ "$url" == *"offset=200"* ]]; then
@@ -25,18 +24,17 @@ if [[ "$url" == *"offset=200"* ]]; then
 else
   printf '{"jobs":[{"id":"recoverable","kind":"pr-wait","finished_at":null}],"total":201,"offset":0,"limit":200,"nextOffset":200}'
 fi
+}
+pnpm() {
+  return 1
+}
 `);
-      writeFileSync(pnpmPath, `#!/usr/bin/env bash
-exit 1
-`);
-      chmodSync(curlPath, 0o755);
-      chmodSync(pnpmPath, 0o755);
 
       const result = spawnSync('bash', ['scripts/rebuild-safe.sh'], {
         cwd: process.cwd(),
         env: {
           ...process.env,
-          PATH: `${dir}:${process.env.PATH ?? ''}`,
+          BASH_ENV: bashEnvPath,
           TAMTAM_BASE_URL: 'http://localhost:1337',
           TAMTAM_REBUILD_DRAIN_TIMEOUT: '0',
           TAMTAM_REBUILD_FORCE: '0',
