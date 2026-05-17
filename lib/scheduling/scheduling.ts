@@ -212,6 +212,20 @@ export async function getProjectPipelinePrompts(projName: string): Promise<{
   };
 }
 
+export async function getProjectQaTarget(projName: string): Promise<{ qaUrl: string | null; website: string | null } | null> {
+  const rows = await db
+    .select({ qaUrl: schema.projects.qaUrl, website: schema.projects.website })
+    .from(schema.projects)
+    .where(eq(schema.projects.name, projName))
+    .limit(1);
+  const row = rows[0] ?? null;
+  if (!row) return null;
+  return {
+    qaUrl: row.qaUrl?.trim() || null,
+    website: row.website?.trim() || null,
+  };
+}
+
 export function setProjectPushResult(projName: string, error: string | null): void {
   void db
     .update(schema.projects)

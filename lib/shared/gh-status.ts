@@ -262,12 +262,24 @@ async function fetchOneGhStatus(
   }
 
   try {
-    const shaResult = await exec(
-      'gh',
-      ['api', `repos/${repo}/commits/HEAD`, '--jq', '.sha'],
-      { timeout: 10000 }
-    );
-    const headSha = shaResult.exitCode === 0 ? shaResult.stdout.trim() : null;
+    // Prefer the SHA of the project's *current local branch*, not the
+    // default branch on origin. When the user is on a feature branch with
+    // a failing PR, the failing CI run is associated with that branch's
+    // HEAD commit — not with master's HEAD. Looking up the default branch
+    // would surface a stale or absent CI status. Falls back to remote
+    // default HEAD when path is unavailable.
+    let headSha: string | null = null;
+    if (path) {
+      headSha = await localHead(path);
+    }
+    if (!headSha) {
+      const shaResult = await exec(
+        'gh',
+        ['api', `repos/${repo}/commits/HEAD`, '--jq', '.sha'],
+        { timeout: 10000 }
+      );
+      headSha = shaResult.exitCode === 0 ? shaResult.stdout.trim() : null;
+    }
 
     if (headSha) {
       let [ci, failedUrl] = await ciForSha(repo, headSha);

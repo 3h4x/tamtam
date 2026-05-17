@@ -88,7 +88,7 @@ describe('settings API', () => {
         claude_provider: 'claude',
         cli_enabled_providers: 'claude',
         review_fix_max_iterations: '3',
-        review_do_not_ship_action: 'pass',
+        review_do_not_ship_action: 'fix',
         release_wall_clock_timeout_minutes: '60',
         plain_test_phase_enabled: 'false',
       });
@@ -214,7 +214,7 @@ describe('settings API', () => {
       const response = await GET();
       const data = await response.json();
 
-      expect(data.settings.review_do_not_ship_action).toBe('pass');
+      expect(data.settings.review_do_not_ship_action).toBe('fix');
     });
 
     it('canonicalizes CLI provider and per-provider model settings in the API response', async () => {
