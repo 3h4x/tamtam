@@ -66,7 +66,7 @@ Implications:
 - If `budget_block_runs_enabled` is off, the chooser still selects a provider but does not block on quota.
 - If exactly one CLI is enabled and it is over `budget_block_at_pct`, the start is rejected with HTTP 429.
 - If multiple CLIs are enabled, TamTam skips blocked providers and proceeds with the enabled provider that has the most remaining headroom.
-- The shared start gate scores provider headroom using hard limit windows exposed by the CLI: 5-hour usage, 7-day usage, model-specific weekly windows where available, and provider credits. Scheduled agents also have a separate burn-rate throttle inside the internal scheduler.
+- The shared start gate blocks on 5-hour usage and provider credits. When `budget_block_on_weekly_pace_enabled` is true, it also blocks on actual 7-day utilization; 7-day and model-specific weekly windows still influence provider headroom scoring. Scheduled agents also have a separate burn-rate throttle inside the internal scheduler.
 - Release/test/push entrypoints no longer rely on the legacy active-provider snapshot, so a full Claude window does not block a release when another enabled CLI is healthy.
 - Once a release starts, the chosen provider is stamped onto the release/test/push jobs so downstream review/fix/commit steps inherit the same provider instead of repicking mid-pipeline.
 

@@ -237,18 +237,19 @@ Live subscription quota (5-hour rolling + 7-day weekly window) is surfaced on `/
 | Key | Type | Default | Effect |
 |-----|------|---------|--------|
 | `budget_block_runs_enabled` | boolean | `false` | When true, TamTam resolves a provider through the enabled CLI set before starting any run/release path. If every enabled provider is at or above `budget_block_at_pct`, pipeline routes (`run`, `review`, `fix`, `push`, `release`, `rerun`, `fix-ci`, `agent run`) return HTTP 429 |
+| `budget_block_on_weekly_pace_enabled` | boolean | `true` | When true, the hard budget gate also treats 7-day utilization at or above `budget_block_at_pct` as blocked. Set to false to gate only the immediate 5-hour window and provider credits |
 | `budget_subscription_providers` | string | `'claude,codex'` | Comma-separated provider list shown in Settings → Budget and `/stats` so TamTam tracks pace for each selected subscription |
-| `budget_block_at_pct` | number | `95` | Block threshold in percent (0–100). Applies to the hard 5-hour window; scheduled agents separately consult the 7-day burn-rate throttle in the internal scheduler |
+| `budget_block_at_pct` | number | `95` | Block threshold in percent (0–100). Applies to the hard 5-hour window, provider credits, and 7-day utilization when `budget_block_on_weekly_pace_enabled` is true. Scheduled agents separately consult the 7-day burn-rate throttle in the internal scheduler |
 | `budget_warn_at_pct` | number | `80` | Cosmetic warn threshold; quota bars turn yellow at this percentage |
 
 Budget gate semantics:
 
 - The provider chooser is the single source of truth for budget blocking.
-- A single enabled provider is still blocked once its own 5-hour/credits quota crosses `budget_block_at_pct`.
+- A single enabled provider is still blocked once its own 5-hour/credits quota crosses `budget_block_at_pct`; when `budget_block_on_weekly_pace_enabled` is true, the same threshold also applies to 7-day utilization.
 - With multiple enabled providers, TamTam skips blocked providers and uses the enabled provider with the most remaining headroom.
 - Agent/file-agent `provider` preferences are soft: TamTam uses them when they are enabled and healthy, otherwise it falls back to the normal chooser.
 - Release/test/push entrypoints use the same chooser up front, so a full legacy `claude_provider` snapshot does not block work when another enabled provider is still healthy.
-- The weekly burn-rate throttle is enforced only for scheduled agent fires via `scheduledBurnRateBlocked()` in the internal scheduler; manual buttons and root pipeline starts do not 429 on projected 7-day pace alone.
+- The weekly burn-rate throttle is enforced only for scheduled agent fires via `scheduledBurnRateBlocked()` in the internal scheduler; manual buttons and root pipeline starts do not 429 on projected 7-day pace alone. The separate `budget_block_on_weekly_pace_enabled` setting controls whether actual 7-day utilization is part of the hard start gate.
 - Agent runs that were queued behind an active release lock or an older `pending_release` stay persisted in `queued_agent_runs` if replay hits a temporary 429 budget block; they are retried when the budget recovers, when jobs resume from pause, on boot, and by the periodic queued-agent recovery sweep.
 - `jobs_paused` blocks scheduled agent runs, pipeline steps, reruns, and CI-fix starts. It does **not** block manual terminal runs (`POST /api/projects/by-project/[name]/run`) or manually-triggered agent runs (`POST /api/agents/[id]/run` without `x-tamtam-trigger: schedule`); those two entry-points bypass the gate so operators can always run things interactively even while the pipeline is paused.
 

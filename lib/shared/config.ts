@@ -97,6 +97,7 @@ export interface TamTamConfig {
   legacy_completion_hook_agent_drain_enabled: boolean;
   plain_test_phase_enabled: boolean;
   budget_block_runs_enabled: boolean;
+  budget_block_on_weekly_pace_enabled: boolean;
   budget_subscription_providers: BudgetSubscriptionProvider[];
   budget_block_at_pct: number;
   budget_warn_at_pct: number;
@@ -191,6 +192,7 @@ const DEFAULTS: TamTamConfig = {
   legacy_completion_hook_agent_drain_enabled: true,
   plain_test_phase_enabled: false,
   budget_block_runs_enabled: false,
+  budget_block_on_weekly_pace_enabled: true,
   budget_subscription_providers: ['claude', 'codex'],
   budget_block_at_pct: 95,
   budget_warn_at_pct: 80,
@@ -423,6 +425,10 @@ export function buildConfigFromSettingsMap(map: Record<string, string>): TamTamC
         ? DEFAULTS.plain_test_phase_enabled
         : map.plain_test_phase_enabled === 'true',
     budget_block_runs_enabled: map.budget_block_runs_enabled === 'true',
+    budget_block_on_weekly_pace_enabled:
+      map.budget_block_on_weekly_pace_enabled === undefined
+        ? DEFAULTS.budget_block_on_weekly_pace_enabled
+        : map.budget_block_on_weekly_pace_enabled === 'true',
     budget_subscription_providers: normalizeBudgetSubscriptionProviders(map.budget_subscription_providers),
     budget_block_at_pct: parseIntOr(map.budget_block_at_pct, DEFAULTS.budget_block_at_pct),
     budget_warn_at_pct: parseIntOr(map.budget_warn_at_pct, DEFAULTS.budget_warn_at_pct),

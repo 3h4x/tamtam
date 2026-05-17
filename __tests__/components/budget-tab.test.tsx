@@ -45,6 +45,7 @@ function renderBudgetTab(settings: BudgetSettings, onChange = vi.fn()) {
 function baseSettings(overrides: Partial<BudgetSettings> = {}): BudgetSettings {
   return {
     budget_block_runs_enabled: 'true',
+    budget_block_on_weekly_pace_enabled: 'true',
     budget_subscription_providers: 'claude,codex',
     budget_block_at_pct: '95',
     budget_warn_at_pct: '80',

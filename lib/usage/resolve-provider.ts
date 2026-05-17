@@ -85,8 +85,9 @@ export async function resolveProviderForRun(
   }
 
   const snapshots = await getQuotaSnapshots(enabled);
+  const includeWeekly = !!settings.budget_block_on_weekly_pace_enabled;
   if (preferred) {
-    const preferredUtilization = hardGateUtilizationFor(snapshots.get(preferred) ?? null);
+    const preferredUtilization = hardGateUtilizationFor(snapshots.get(preferred) ?? null, { includeWeekly });
     if (preferredUtilization < (settings.budget_block_at_pct ?? 95)) {
       return { provider: preferred, utilization: preferredUtilization };
     }
@@ -96,6 +97,7 @@ export async function resolveProviderForRun(
     snapshots,
     budgetBlockAtPct: settings.budget_block_at_pct ?? 95,
     blockEnabled: !!settings.budget_block_runs_enabled,
+    blockOnWeeklyPace: includeWeekly,
     requestedModel: opts.requestedModel ?? null,
   });
 }
@@ -123,7 +125,9 @@ export async function checkCliStartGate(
     }
     if (settings.budget_block_runs_enabled) {
       const snapshots = await getQuotaSnapshots([preferred]);
-      const utilization = hardGateUtilizationFor(snapshots.get(preferred) ?? null);
+      const utilization = hardGateUtilizationFor(snapshots.get(preferred) ?? null, {
+        includeWeekly: !!settings.budget_block_on_weekly_pace_enabled,
+      });
       if (utilization >= (settings.budget_block_at_pct ?? 95)) {
         return {
           ok: false,

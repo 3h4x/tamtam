@@ -192,6 +192,30 @@ describe('pickCliProvider', () => {
     expect(result.provider).toBe('claude');
   });
 
+  it('picks the provider with usable pace+burst when only one is over the weekly cap', () => {
+    const snapshots = new Map<CliProvider, QuotaSnapshot | null>([
+      ['claude', {
+        provider: 'claude',
+        fiveHour: { utilization: 24, resetsAt: null, msUntilReset: null },
+        sevenDay: { utilization: 99, resetsAt: null, msUntilReset: null },
+        fetchedAt: 0, stale: false,
+      }],
+      ['codex', {
+        provider: 'codex',
+        fiveHour: { utilization: 10, resetsAt: null, msUntilReset: null },
+        sevenDay: { utilization: 10, resetsAt: null, msUntilReset: null },
+        fetchedAt: 0, stale: false,
+      }],
+    ]);
+    const result = pickCliProvider({
+      enabled: ['claude', 'codex'],
+      snapshots,
+      budgetBlockAtPct: 95,
+      blockEnabled: true,
+    });
+    expect(result.provider).toBe('codex');
+  });
+
   it('uses 7d burn for fallback selection even when hard blocking is off', () => {
     const threeDaysMs = 3 * 24 * 60 * 60 * 1000;
     const claudeSnap: QuotaSnapshot = {

@@ -69,6 +69,7 @@ function makeSettings(overrides: Partial<TamTamConfig> = {}): TamTamConfig {
     incremental_review_enabled: true,
     review_retry_on_parse_failure: true,
     budget_block_runs_enabled: false,
+    budget_block_on_weekly_pace_enabled: true,
     budget_subscription_providers: ['claude', 'codex'],
     budget_block_at_pct: 95,
     budget_warn_at_pct: 80,

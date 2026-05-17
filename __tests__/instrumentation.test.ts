@@ -22,6 +22,7 @@ describe('instrumentation', () => {
   let originalRuntime: string | undefined;
 
   beforeEach(() => {
+    vi.clearAllMocks();
     vi.resetModules();
     originalRuntime = process.env.NEXT_RUNTIME;
   });
@@ -29,6 +30,7 @@ describe('instrumentation', () => {
   afterEach(() => {
     process.env.NEXT_RUNTIME = originalRuntime;
     vi.unstubAllEnvs();
+    vi.clearAllMocks();
     vi.resetModules();
   });
 
@@ -146,6 +148,51 @@ describe('instrumentation', () => {
           status: 'ok',
           errorCount: 0,
         }),
+      }));
+      vi.doMock('@/lib/workflows/cron/seed-agent-crons', () => ({
+        seedAgentCrons: vi.fn().mockResolvedValue({ enqueued: 0 }),
+      }));
+      vi.doMock('./lib/workflows/cron/seed-agent-crons', () => ({
+        seedAgentCrons: vi.fn().mockResolvedValue({ enqueued: 0 }),
+      }));
+      vi.doMock('@/lib/workflows/cron/seed-system-cron', () => ({
+        seedSystemCron: vi.fn().mockResolvedValue({ enqueued: false, reason: 'test' }),
+      }));
+      vi.doMock('./lib/workflows/cron/seed-system-cron', () => ({
+        seedSystemCron: vi.fn().mockResolvedValue({ enqueued: false, reason: 'test' }),
+      }));
+      vi.doMock('@/lib/workflows/cron/start-cron-worker', () => ({
+        startCronWorker: vi.fn().mockResolvedValue(undefined),
+      }));
+      vi.doMock('./lib/workflows/cron/start-cron-worker', () => ({
+        startCronWorker: vi.fn().mockResolvedValue(undefined),
+      }));
+      vi.doMock('@/lib/workflows/cron/system-cron-task', () => ({
+        SYSTEM_CRON_JOB_KEY: 'system-cron',
+      }));
+      vi.doMock('./lib/workflows/cron/system-cron-task', () => ({
+        SYSTEM_CRON_JOB_KEY: 'system-cron',
+      }));
+      vi.doMock('@/lib/workflows/cron/project-sweep-task', () => ({
+        PROJECT_SWEEP_JOB_KEY: 'project-sweep',
+      }));
+      vi.doMock('./lib/workflows/cron/project-sweep-task', () => ({
+        PROJECT_SWEEP_JOB_KEY: 'project-sweep',
+      }));
+      vi.doMock('@/lib/workflows/cron/db-backup-task', () => ({
+        DB_BACKUP_JOB_KEY: 'db-backup',
+      }));
+      vi.doMock('./lib/workflows/cron/db-backup-task', () => ({
+        DB_BACKUP_JOB_KEY: 'db-backup',
+      }));
+      vi.doMock('graphile-worker', () => ({
+        quickAddJob: vi.fn().mockResolvedValue(undefined),
+      }));
+      vi.doMock('@/lib/scheduling/internal-scheduler-helpers', () => ({
+        listEnabledScheduledAgents: vi.fn().mockResolvedValue([]),
+      }));
+      vi.doMock('./lib/scheduling/internal-scheduler-helpers', () => ({
+        listEnabledScheduledAgents: vi.fn().mockResolvedValue([]),
       }));
       vi.doMock('@/lib/pipeline/recovery-drain', () => ({ drainAllRecoveryWork }));
       vi.doMock('./lib/pipeline/recovery-drain', () => ({ drainAllRecoveryWork }));
