@@ -2408,6 +2408,7 @@ describe('agents API', () => {
         schedule: null,
         skillIds: [],
         runner: 'pm2',
+
         enabled: true,
         provider: 'codex',
         prerequisiteCommand: null,

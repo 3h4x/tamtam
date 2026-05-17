@@ -174,10 +174,10 @@ describe('GET /api/agents/scheduler-health', () => {
     vi.doMock('pg', () => ({
       Pool: vi.fn().mockImplementation(function () {
         return {
-        query: vi.fn(async () => ({
-          rows: [...queuedJobKeys].map((key) => ({ key })),
-        })),
-        end: vi.fn(async () => undefined),
+          query: vi.fn(async () => ({
+            rows: [...queuedJobKeys].map((key) => ({ key })),
+          })),
+          end: vi.fn(async () => undefined),
         };
       }),
     }));
@@ -283,10 +283,10 @@ describe('GET /api/agents/scheduler-health', () => {
     vi.doMock('pg', () => ({
       Pool: vi.fn().mockImplementation(function () {
         return {
-        query: vi.fn(async () => ({
-          rows: [...queuedJobKeys].map((key) => ({ key })),
-        })),
-        end: vi.fn(async () => undefined),
+          query: vi.fn(async () => ({
+            rows: [...queuedJobKeys].map((key) => ({ key })),
+          })),
+          end: vi.fn(async () => undefined),
         };
       }),
     }));
@@ -334,10 +334,10 @@ describe('GET /api/agents/scheduler-health', () => {
     vi.doMock('pg', () => ({
       Pool: vi.fn().mockImplementation(function () {
         return {
-        query: vi.fn(async () => ({
-          rows: [...queuedJobKeys].map((key) => ({ key })),
-        })),
-        end: vi.fn(async () => undefined),
+          query: vi.fn(async () => ({
+            rows: [...queuedJobKeys].map((key) => ({ key })),
+          })),
+          end: vi.fn(async () => undefined),
         };
       }),
     }));
