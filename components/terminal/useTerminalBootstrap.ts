@@ -13,6 +13,7 @@ import {
   countSessionJobs,
   fetchSessionJobs,
   isRestorableSessionKind,
+  retrievedContextEntryFromMeta,
   restoredPrompt,
 } from './session-restore'
 
@@ -195,6 +196,8 @@ export function useTerminalBootstrap({
 
         const sessionProvider = matches.find(m => m.provider)?.provider ?? null
         if (lastIsRunning) {
+          const retrievedContextEntry = retrievedContextEntryFromMeta(lastMatch.context_meta)
+          if (retrievedContextEntry) entries.push(retrievedContextEntry)
           const prompt = restoredPrompt(lastMatch)
           if (prompt) entries.push({ role: 'user', text: prompt })
           terminalStore.update(projectName, () => ({
@@ -265,6 +268,9 @@ export function useTerminalBootstrap({
         entries.push({ role: 'status', text: startedLabel ? `${kind} · ${startedLabel}` : kind })
 
         const jobPrompt = data.user_prompt || data.prompt
+        const retrievedContextEntry = retrievedContextEntryFromMeta(data.context_meta)
+        if (retrievedContextEntry) entries.push(retrievedContextEntry)
+
         if (jobPrompt) {
           entries.push({ role: 'user', text: jobPrompt })
         }

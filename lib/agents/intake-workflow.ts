@@ -327,7 +327,9 @@ At the end of your run, include a short final section exactly named "TamTam Run 
         embeddingModel: settings.retrieval_embedding_model,
       });
       retrievedContext = retrieval.block;
-      contextMetaObj.retrieval = retrieval.diagnostics;
+      if ((retrieval.diagnostics.sources?.length ?? 0) > 0) {
+        contextMetaObj.retrieval = retrieval.diagnostics;
+      }
     } catch (e) {
       console.warn('[intake-workflow] retrieval failed, skipping:', errMsg(e));
     }

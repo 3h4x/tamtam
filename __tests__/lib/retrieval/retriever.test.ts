@@ -91,6 +91,39 @@ describe('retrieveAgentContext', () => {
     expect(result).toContain('Auth reviewed OK');
   });
 
+  it('records bounded accepted source metadata in diagnostics', async () => {
+    mockSearch.mockReturnValue([
+      {
+        text: `Auth reviewed OK ${'x'.repeat(240)}`,
+        sourceKind: 'project_doc',
+        sourceId: 'docs/AUTH.md',
+        score: 0.91,
+        metadata: { filePath: 'docs/AUTH.md' },
+      },
+    ]);
+
+    const result = await retrieveAgentContextDetailed({
+      backend: mockBackend,
+      project: 'myproject',
+      taskPrompt: 'review auth',
+      limit: 5,
+      scoreThreshold: 0.8,
+      ollamaUrl: 'http://localhost:11434',
+      embeddingModel: 'nomic-embed-text',
+    });
+
+    expect(result.diagnostics.sources).toEqual([
+      expect.objectContaining({
+        sourceKind: 'project_doc',
+        sourceId: 'docs/AUTH.md',
+        project: 'myproject',
+        score: 0.91,
+        rank: 1,
+      }),
+    ]);
+    expect(result.diagnostics.sources?.[0]?.preview.length).toBeLessThanOrEqual(180);
+  });
+
   it('returns null when embedText throws (Ollama unreachable)', async () => {
     mockEmbed.mockRejectedValueOnce(new Error('ECONNREFUSED'));
     const result = await retrieveAgentContext({
@@ -141,5 +174,6 @@ describe('retrieveAgentContext', () => {
     expect(result.block).toBeNull();
     expect(result.diagnostics.reason).toBe('below_threshold');
     expect(result.diagnostics.topScore).toBe(0.4);
+    expect(result.diagnostics.sources).toBeUndefined();
   });
 });

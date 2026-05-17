@@ -1,6 +1,14 @@
 import { embedText } from './ollama-embedder';
 import type { RetrievalBackend, RetrievalResult } from './backend';
 
+const PREVIEW_MAX_CHARS = 180;
+
+function previewText(text: string): string {
+  const normalized = text.replace(/\s+/g, ' ').trim();
+  if (normalized.length <= PREVIEW_MAX_CHARS) return normalized;
+  return `${normalized.slice(0, PREVIEW_MAX_CHARS - 3).trimEnd()}...`;
+}
+
 export function buildRetrievedContextBlock(results: RetrievalResult[]): string | null {
   if (results.length === 0) return null;
 
@@ -43,6 +51,16 @@ export interface RetrievalDiagnostics {
   acceptedCount: number;
   topScore: number | null;
   scoreThreshold: number;
+  sources?: RetrievedContextSource[];
+}
+
+export interface RetrievedContextSource {
+  sourceKind: RetrievalResult['sourceKind'];
+  sourceId: string;
+  project: string;
+  score: number;
+  rank: number;
+  preview: string;
 }
 
 export async function retrieveAgentContextDetailed(
@@ -72,6 +90,14 @@ export async function retrieveAgentContextDetailed(
     const results = await opts.backend.search({ embedding, project: opts.project, limit: opts.limit });
     const above = results.filter((r) => r.score >= opts.scoreThreshold);
     const topScore = results[0]?.score ?? null;
+    const sources: RetrievedContextSource[] = above.map((result, index) => ({
+      sourceKind: result.sourceKind,
+      sourceId: result.sourceId,
+      project: opts.project,
+      score: result.score,
+      rank: index + 1,
+      preview: previewText(result.text),
+    }));
     return {
       block: buildRetrievedContextBlock(above),
       diagnostics: {
@@ -82,6 +108,7 @@ export async function retrieveAgentContextDetailed(
         acceptedCount: above.length,
         topScore,
         scoreThreshold: opts.scoreThreshold,
+        ...(sources.length > 0 ? { sources } : {}),
       },
     };
   } catch (err) {
