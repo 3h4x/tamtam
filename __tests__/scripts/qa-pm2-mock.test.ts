@@ -1,4 +1,4 @@
-import { describe, it, expect } from 'vitest';
+import { describe, it, expect, vi } from 'vitest';
 import { spawnSync } from 'child_process';
 import { chmodSync, existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'fs';
 import { tmpdir } from 'os';
@@ -14,29 +14,34 @@ function runPm2(args: string[], statePath: string, cwd?: string) {
   });
 }
 
+function readStateEntry(statePath: string, name: string) {
+  if (!existsSync(statePath)) {
+    return undefined;
+  }
+  const raw = readFileSync(statePath, 'utf-8');
+  if (raw.length === 0) {
+    return undefined;
+  }
+  try {
+    const state = JSON.parse(raw) as Record<string, { status?: string; exit_code?: number | null }>;
+    return state[name];
+  } catch {
+    // state file is mid-write; retry
+    return undefined;
+  }
+}
+
 async function waitForState(
   statePath: string,
   name: string,
   predicate: (entry: { status?: string; exit_code?: number | null } | undefined) => boolean,
-) {
-  const deadline = Date.now() + 2000;
-  while (Date.now() < deadline) {
-    if (existsSync(statePath)) {
-      const raw = readFileSync(statePath, 'utf-8');
-      if (raw.length > 0) {
-        try {
-          const state = JSON.parse(raw);
-          if (predicate(state[name])) {
-            return state[name];
-          }
-        } catch {
-          // state file is mid-write; retry
-        }
-      }
-    }
-    await new Promise((resolveWait) => setTimeout(resolveWait, 5));
-  }
-  throw new Error(`Timed out waiting for ${name} in ${statePath}`);
+): Promise<{ status?: string; exit_code?: number | null }> {
+  let entry: { status?: string; exit_code?: number | null } | undefined;
+  await vi.waitFor(() => {
+    entry = readStateEntry(statePath, name);
+    expect(predicate(entry)).toBe(true);
+  }, { timeout: 500, interval: 1 });
+  return entry!;
 }
 
 function makeDir() {
@@ -117,7 +122,7 @@ describe.concurrent('scripts/qa-mocks/pm2', () => {
         writeFileSync(statePath, JSON.stringify({
           'late-job': { status: 'stopped', exit_code: 0 },
         }));
-      }, 20);
+      }, 1);
 
       await expect(waiter).resolves.toMatchObject({ status: 'stopped', exit_code: 0 });
     } finally {
