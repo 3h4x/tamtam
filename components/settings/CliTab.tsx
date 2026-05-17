@@ -17,6 +17,7 @@ const PROVIDER_LABELS: Record<CliProvider, string> = {
   codex: 'Codex',
   gemini: 'Gemini',
   lmstudio: 'LM Studio',
+  deepagents: 'Deep Agents',
 }
 
 const PROVIDER_NOTES: Record<CliProvider, string> = {
@@ -24,6 +25,7 @@ const PROVIDER_NOTES: Record<CliProvider, string> = {
   codex: 'ChatGPT Codex · quota tracked',
   gemini: 'Google Gemini · no quota tracking',
   lmstudio: 'Local model runner · free, always available',
+  deepagents: 'Agentic local loop · LM Studio or Ollama',
 }
 
 const MODEL_TIERS = ['fast', 'normal', 'smart'] as const
@@ -42,10 +44,14 @@ export interface CliTabSettings {
   cli_bin_codex: string
   cli_bin_gemini: string
   cli_bin_lmstudio: string
+  cli_bin_deepagents: string
+  cli_deepagents_backend: string
+  cli_deepagents_base_url: string
   cli_default_model_claude: string
   cli_default_model_codex: string
   cli_default_model_gemini: string
   cli_default_model_lmstudio: string
+  cli_default_model_deepagents: string
   lmstudio_model: string
   default_model: string
   permission_mode: string
@@ -71,6 +77,7 @@ function utilColor(pct: number, warn: number, block: number): string {
 
 function providerBinLabel(provider: CliProvider): string {
   if (provider === 'lmstudio') return 'LM Studio base URL override'
+  if (provider === 'deepagents') return 'Deep Agents Code executable override'
   return provider === 'claude' ? 'Underlying Claude executable' : `${PROVIDER_LABELS[provider]} executable override`
 }
 
@@ -173,7 +180,7 @@ export function CliTab({
                       )}
                     </div>
                   )}
-                  {!summary && (provider === 'gemini' || provider === 'lmstudio') && isEnabled && (
+                  {!summary && (provider === 'gemini' || provider === 'lmstudio' || provider === 'deepagents') && isEnabled && (
                     <span className="text-xs text-text-tertiary shrink-0">always selectable</span>
                   )}
                 </label>
@@ -214,6 +221,31 @@ export function CliTab({
                         />
                       </div>
                     )}
+                    {provider === 'deepagents' && (
+                      <div className="md:col-span-2 grid gap-4 md:grid-cols-2">
+                        <div>
+                          <label className="block text-xs text-text-tertiary mb-1">Local backend</label>
+                          <select
+                            value={settings.cli_deepagents_backend || 'lmstudio'}
+                            onChange={(e) => onChange('cli_deepagents_backend', e.target.value)}
+                            className={SELECT_CLASS}
+                          >
+                            <option value="lmstudio">LM Studio</option>
+                            <option value="ollama">Ollama</option>
+                          </select>
+                        </div>
+                        <div>
+                          <label className="block text-xs text-text-tertiary mb-1">Backend base URL</label>
+                          <input
+                            type="text"
+                            value={settings.cli_deepagents_base_url ?? ''}
+                            placeholder={settings.cli_deepagents_backend === 'ollama' ? 'http://127.0.0.1:11434' : 'http://127.0.0.1:1234'}
+                            onChange={(e) => onChange('cli_deepagents_base_url', e.target.value)}
+                            className={INPUT_CLASS}
+                          />
+                        </div>
+                      </div>
+                    )}
                   </div>
                 )}
                 {isEnabled && provider === 'claude' && (
@@ -234,6 +266,11 @@ export function CliTab({
                 {isEnabled && provider === 'lmstudio' && (
                   <div className="mt-2 ml-7 text-[11px] text-text-tertiary">
                     TamTam still launches the bundled LM Studio shim; this field overrides `LMSTUDIO_BASE_URL` when you point it at a remote server URL.
+                  </div>
+                )}
+                {isEnabled && provider === 'deepagents' && (
+                  <div className="mt-2 ml-7 text-[11px] text-text-tertiary">
+                    TamTam launches the bundled Deep Agents shim; this provider runs the Deep Agents Code CLI against the selected local backend.
                   </div>
                 )}
               </div>

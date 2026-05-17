@@ -11,6 +11,7 @@ import { writeFileSync, unlinkSync, existsSync, mkdirSync } from 'fs';
 import { join } from 'path';
 import { homedir } from 'os';
 import { quickAddJob } from 'graphile-worker';
+import { Pool } from 'pg';
 import { getImproveConfig } from './scheduling';
 import { normalizeAgentScheduleOrThrow } from './agent-schedule';
 import { computeNextFire } from '@/lib/workflows/cron/parse-schedule';
@@ -53,7 +54,6 @@ export async function installAgentSchedule(
   agentId: string,
   schedule: string,
   prompt: string,
-  _runner: string = 'pm2',
   project?: string,
   agentName?: string,
 ): Promise<void> {
@@ -85,7 +85,6 @@ export async function installAgentSchedule(
 
 export async function uninstallAgentSchedule(
   agentId: string,
-  _runner: string = 'pm2',
   _project?: string,
   _agentName?: string,
 ): Promise<void> {
@@ -113,7 +112,6 @@ export async function uninstallAgentSchedule(
 
 export async function isAgentScheduleLoaded(
   agentId: string,
-  _runner: string = 'pm2',
   _project?: string,
   _agentName?: string,
 ): Promise<boolean> {
@@ -131,22 +129,49 @@ export type SchedulerExpected = {
   id: string;
   project: string;
   name: string;
-  runner: string;
   schedule: string;
   expectedName: string;
+  queueKey: string;
+  promptFileLoaded?: boolean;
+  queueLoaded?: boolean;
 };
 
 export type SchedulerHealth = {
   ok: boolean;
   expected: SchedulerExpected[];
-  actual: { pm2: string[] };
+  actual: { graphile: string[] };
   missing: SchedulerExpected[];
-  orphans: { pm2: string[] };
+  orphans: { graphile: string[] };
   errors: string[];
 };
 
+async function loadAgentCronQueueKeys(agentIds: string[], connectionString: string): Promise<Set<string>> {
+  if (agentIds.length === 0) return new Set();
+  const keys = agentIds.map(jobKey);
+  const pool = new Pool({ connectionString, max: 1 });
+  try {
+    const { rows } = await pool.query<{ key: string }>(
+      `
+        SELECT key
+        FROM graphile_worker._private_jobs
+        WHERE key = ANY($1::text[])
+          AND task_id = (
+            SELECT id
+            FROM graphile_worker._private_tasks
+            WHERE identifier = 'agent-cron'
+            LIMIT 1
+          )
+      `,
+      [keys],
+    );
+    return new Set(rows.map((row) => row.key).filter(Boolean));
+  } finally {
+    await pool.end();
+  }
+}
+
 export async function getSchedulerHealth(
-  agents: Array<{ id: string; project: string; name: string; runner: string; schedule: string | null; enabled: boolean }>,
+  agents: Array<{ id: string; project: string; name: string; schedule: string | null; enabled: boolean }>,
 ): Promise<SchedulerHealth> {
   const expected: SchedulerExpected[] = [];
   for (const a of agents) {
@@ -155,24 +180,33 @@ export async function getSchedulerHealth(
       id: a.id,
       project: a.project,
       name: a.name,
-      runner: a.runner,
       schedule: a.schedule,
       // expectedName retained for response-shape compatibility; uses the
       // legacy `tamtam-<project>-agent-<name>` format readers may expect.
       expectedName: a.project && a.name ? `tamtam-${a.project}-agent-${a.name}` : `tamtam-agent-${a.id}`,
+      queueKey: jobKey(a.id),
     });
   }
 
-  // The graphile-worker cron pool is its own runtime — health here only
-  // reports whether the prompt file exists per agent, since the queue
-  // state lookup would require an extra DB round-trip and the legacy
-  // PM2-based actual list is no longer meaningful. `actual.pm2` keeps
-  // the response shape but always returns the empty list now.
   const errors: string[] = [];
+  let queuedKeys = new Set<string>();
+  const connectionString = resolveConnectionString();
+  if (!connectionString && expected.length > 0) {
+    errors.push('no postgres URL configured for graphile-worker scheduler');
+  } else if (connectionString) {
+    try {
+      queuedKeys = await loadAgentCronQueueKeys(expected.map((e) => e.id), connectionString);
+    } catch (err) {
+      errors.push(`graphile queue check failed: ${err instanceof Error ? err.message : String(err)}`);
+    }
+  }
+
   const missing: SchedulerExpected[] = [];
   for (const e of expected) {
-    if (!existsSync(/*turbopackIgnore: true*/ agentPromptPath(e.id))) {
-      missing.push(e);
+    const promptFileLoaded = existsSync(/*turbopackIgnore: true*/ agentPromptPath(e.id));
+    const queueLoaded = queuedKeys.has(e.queueKey);
+    if (!promptFileLoaded || !queueLoaded) {
+      missing.push({ ...e, promptFileLoaded, queueLoaded });
     }
   }
 
@@ -180,9 +214,9 @@ export async function getSchedulerHealth(
   return {
     ok,
     expected,
-    actual: { pm2: [] },
+    actual: { graphile: [...queuedKeys].sort() },
     missing,
-    orphans: { pm2: [] },
+    orphans: { graphile: [] },
     errors,
   };
 }

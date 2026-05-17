@@ -43,6 +43,13 @@
       "when": 1778968772514,
       "tag": "0005_shiny_tyger_tiger",
       "breakpoints": true
+    },
+    {
+      "idx": 6,
+      "version": "7",
+      "when": 1779038646491,
+      "tag": "0006_loud_scream",
+      "breakpoints": true
     }
   ]
 }

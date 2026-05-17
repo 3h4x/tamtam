@@ -9,17 +9,19 @@ interface SchedulerExpected {
   id: string
   project: string
   name: string
-  runner: string
   schedule: string
   expectedName: string
+  queueKey: string
+  promptFileLoaded?: boolean
+  queueLoaded?: boolean
 }
 
 interface SchedulerHealth {
   ok: boolean
   expected: SchedulerExpected[]
-  actual: { pm2: string[] }
+  actual: { graphile: string[] }
   missing: SchedulerExpected[]
-  orphans: { pm2: string[] }
+  orphans: { graphile: string[] }
   errors: string[]
   internal?: { started: boolean; entries: SchedulerInternalEntry[] }
 }
@@ -88,11 +90,8 @@ export function SchedulerHealthPanel() {
         <div className="space-y-3 text-sm">
           <div className="flex flex-wrap gap-x-6 gap-y-1 text-text-tertiary">
             <span>Expected: <span className="text-text-primary font-medium">{health.expected.length}</span></span>
-            <span>Internal armed: <span className="text-text-primary font-medium">{health.actual.pm2.length}</span></span>
+            <span>Queued: <span className="text-text-primary font-medium">{health.actual.graphile.length}</span></span>
             {health.missing.length > 0 && <span className="text-status-error">Missing: {health.missing.length}</span>}
-            {health.orphans.pm2.length > 0 && (
-              <span className="text-status-warning">Orphans: {health.orphans.pm2.length}</span>
-            )}
           </div>
 
           {health.errors.length > 0 && (
@@ -105,12 +104,16 @@ export function SchedulerHealthPanel() {
 
           {health.missing.length > 0 && (
             <div>
-              <h3 className="text-xs font-medium text-status-error mb-1">Missing (in DB but not loaded)</h3>
+              <h3 className="text-xs font-medium text-status-error mb-1">Missing (prompt file or queue job not loaded)</h3>
               <div className="rounded-md border border-status-error/30 overflow-hidden">
                 {health.missing.map(m => (
                   <div key={m.id} className="flex items-center gap-3 px-3 py-1.5 text-xs font-mono border-t border-status-error/20 first:border-t-0">
-                    <span className="text-text-tertiary uppercase tracking-wide w-16 shrink-0">{m.runner}</span>
                     <span className="text-text-primary truncate" data-private>{m.expectedName}</span>
+                    <span className="text-text-tertiary shrink-0">
+                      {!m.promptFileLoaded ? 'prompt' : ''}
+                      {!m.promptFileLoaded && !m.queueLoaded ? '+' : ''}
+                      {!m.queueLoaded ? 'queue' : ''}
+                    </span>
                     <span className="text-text-tertiary ml-auto shrink-0">{m.schedule}</span>
                   </div>
                 ))}
@@ -118,22 +121,8 @@ export function SchedulerHealthPanel() {
             </div>
           )}
 
-          {health.orphans.pm2.length > 0 && (
-            <div>
-              <h3 className="text-xs font-medium text-status-warning mb-1">Orphans (loaded but not in DB)</h3>
-              <div className="rounded-md border border-status-warning/30 overflow-hidden">
-                {health.orphans.pm2.map(n => (
-                  <div key={`pm2:${n}`} className="flex items-center gap-3 px-3 py-1.5 text-xs font-mono border-t border-status-warning/20 first:border-t-0">
-                    <span className="text-text-tertiary uppercase tracking-wide w-16 shrink-0">pm2</span>
-                    <span className="text-text-primary truncate" data-private>{n}</span>
-                  </div>
-                ))}
-              </div>
-            </div>
-          )}
-
           {health.ok && (
-            <p className="text-xs text-status-success">All scheduled agents are armed in the internal scheduler.</p>
+            <p className="text-xs text-status-success">All scheduled agents have prompt files and Graphile queue jobs ready.</p>
           )}
 
           {health.internal && health.internal.entries.length > 0 && (

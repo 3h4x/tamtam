@@ -205,7 +205,7 @@ Configuration for scheduled automated agents.
 | `model` | TEXT | `'normal'` | Semantic tier stored by new writes: `fast` / `normal` / `smart`. Legacy rows may still contain `haiku` / `sonnet` / `opus` aliases and are normalized on read. |
 | `prompt` | TEXT | `''` | Task prompt for scheduled runs |
 | `schedule` | TEXT | — | nullable; e.g. "1h", "30m"; null = manual only |
-| `runner` | TEXT | `'pm2'` | `pm2` or `launchctl` |
+| `runner` | TEXT | `'pm2'` | Compatibility field retained for existing rows; new schedules are graphile-worker backed regardless of value |
 | `enabled` | INTEGER | `true` | Boolean |
 | `createdAt` | REAL | — | NOT NULL |
 | `updatedAt` | REAL | — | NOT NULL |

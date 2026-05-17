@@ -89,7 +89,6 @@ describe('POST /api/agents/{agentId}/run runtime DB bootstrap', () => {
       model: 'normal',
       prompt: 'Run docs',
       schedule: null,
-      runner: 'pm2',
       enabled: true,
       docPaths: '[]',
       provider: null,

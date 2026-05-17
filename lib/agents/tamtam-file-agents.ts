@@ -106,10 +106,10 @@ function buildFileAgent(
 ): FileAgent {
   const { meta, body } = parseFrontmatter(content);
   // The `.md` file owns prompt + identity. Operational config (enabled,
-  // schedule, model, runner, skillIds) is stored in the DB so the UI can
-  // toggle them without dirtying a committed file. Frontmatter values are
-  // used as a starting baseline; the DB override (if any) wins on every
-  // field it explicitly sets.
+  // schedule, model, runner, skillIds) is stored in the DB so the UI can toggle
+  // them without dirtying a committed file. Frontmatter values are used
+  // as a starting baseline; the DB override (if any) wins on every field
+  // it explicitly sets.
   const override = getFileAgentOverrideSync(projectName, name);
   const fileSkillIds = meta.skillIds ? parseSkillIds(meta.skillIds) : [];
   return {

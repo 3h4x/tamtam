@@ -217,7 +217,7 @@ describe('agents API', () => {
           model: 'sonnet',
           prompt: '',
           schedule: null,
-          runner: 'pm2',
+
           createdAt: now,
           updatedAt: now,
         });
@@ -230,7 +230,7 @@ describe('agents API', () => {
           model: 'opus',
           prompt: 'Do something',
           schedule: '1h',
-          runner: 'launchctl',
+
           createdAt: now,
           updatedAt: now,
         });
@@ -248,8 +248,8 @@ describe('agents API', () => {
     it('filters agents by name', async () => {
       const db = testDb.db;
       const now = Date.now() / 1000;
-      await db.insert(schema.agents).values({ id: 'agent-1', name: 'Alpha', project: 'proj1', skillIds: '[]', model: 'sonnet', prompt: '', schedule: null, runner: 'pm2', createdAt: now, updatedAt: now });
-      await db.insert(schema.agents).values({ id: 'agent-2', name: 'Beta', project: 'proj1', skillIds: '[]', model: 'sonnet', prompt: '', schedule: null, runner: 'pm2', createdAt: now, updatedAt: now });
+      await db.insert(schema.agents).values({ id: 'agent-1', name: 'Alpha', project: 'proj1', skillIds: '[]', model: 'sonnet', prompt: '', schedule: null, createdAt: now, updatedAt: now });
+      await db.insert(schema.agents).values({ id: 'agent-2', name: 'Beta', project: 'proj1', skillIds: '[]', model: 'sonnet', prompt: '', schedule: null, createdAt: now, updatedAt: now });
       await warmAgentsCache();
 
       const request = new NextRequest('http://localhost/api/agents?name=Alpha');
@@ -263,8 +263,8 @@ describe('agents API', () => {
     it('filters agents by project and name', async () => {
       const db = testDb.db;
       const now = Date.now() / 1000;
-      await db.insert(schema.agents).values({ id: 'agent-1', name: 'Alpha', project: 'proj1', skillIds: '[]', model: 'sonnet', prompt: '', schedule: null, runner: 'pm2', createdAt: now, updatedAt: now });
-      await db.insert(schema.agents).values({ id: 'agent-2', name: 'Alpha', project: 'proj2', skillIds: '[]', model: 'sonnet', prompt: '', schedule: null, runner: 'pm2', createdAt: now, updatedAt: now });
+      await db.insert(schema.agents).values({ id: 'agent-1', name: 'Alpha', project: 'proj1', skillIds: '[]', model: 'sonnet', prompt: '', schedule: null, createdAt: now, updatedAt: now });
+      await db.insert(schema.agents).values({ id: 'agent-2', name: 'Alpha', project: 'proj2', skillIds: '[]', model: 'sonnet', prompt: '', schedule: null, createdAt: now, updatedAt: now });
       await warmAgentsCache();
 
       const request = new NextRequest('http://localhost/api/agents?project=proj1&name=Alpha');
@@ -287,7 +287,7 @@ describe('agents API', () => {
           model: 'sonnet',
           prompt: '',
           schedule: null,
-          runner: 'pm2',
+
           createdAt: now,
           updatedAt: now,
         });
@@ -300,7 +300,7 @@ describe('agents API', () => {
           model: 'sonnet',
           prompt: '',
           schedule: null,
-          runner: 'pm2',
+
           createdAt: now,
           updatedAt: now,
         });
@@ -325,7 +325,7 @@ describe('agents API', () => {
           return [{
             id: 'file:proj1:fa1', name: 'fa1', project: 'proj1',
             skillIds: [], docPaths: [], model: 'sonnet', prompt: '', schedule: null,
-            runner: 'pm2', enabled: true, createdAt: 0, updatedAt: 0,
+ enabled: true, createdAt: 0, updatedAt: 0,
             source: 'file', filePath: `${path}/.tamtam/agents/fa1.md`,
           }];
         }
@@ -333,7 +333,7 @@ describe('agents API', () => {
           return [{
             id: 'file:proj2:fa2', name: 'fa2', project: 'proj2',
             skillIds: [], docPaths: [], model: 'sonnet', prompt: '', schedule: null,
-            runner: 'pm2', enabled: true, createdAt: 0, updatedAt: 0,
+ enabled: true, createdAt: 0, updatedAt: 0,
             source: 'file', filePath: `${path}/.tamtam/agents/fa2.md`,
           }];
         }
@@ -357,14 +357,14 @@ describe('agents API', () => {
       await db.insert(schema.projects).values({ name: 'proj1', path: '/p1', enabled: true });
       await db.insert(schema.agents).values({
         id: 'db-1', name: 'shared', project: 'proj1', skillIds: '[]',
-        model: 'sonnet', prompt: 'db version', schedule: null, runner: 'pm2',
+        model: 'sonnet', prompt: 'db version', schedule: null,
         createdAt: now, updatedAt: now,
       });
 
       scanFileAgentsMock.mockReturnValue([{
         id: 'file:proj1:shared', name: 'shared', project: 'proj1',
         skillIds: [], docPaths: [], model: 'sonnet', prompt: 'file version', schedule: null,
-        runner: 'pm2', enabled: true, createdAt: 0, updatedAt: 0,
+ enabled: true, createdAt: 0, updatedAt: 0,
         source: 'file', filePath: '/p1/.tamtam/agents/shared.md',
       }]);
       await warmAgentsCache();
@@ -392,7 +392,6 @@ describe('agents API', () => {
       expect(data.agent.name).toBe('New Agent');
       expect(data.agent.project).toBe('proj1');
       expect(data.agent.model).toBe('normal');
-      expect(data.agent.runner).toBe('pm2');
     });
 
     it('validates required fields', async () => {
@@ -444,7 +443,7 @@ describe('agents API', () => {
         model: 'normal',
         prompt: '',
         schedule: null,
-        runner: 'pm2',
+
         createdAt: now,
         updatedAt: now,
       });
@@ -472,7 +471,7 @@ describe('agents API', () => {
         model: 'normal',
         prompt: '',
         schedule: null,
-        runner: 'pm2',
+
         createdAt: now,
         updatedAt: now,
       });
@@ -501,7 +500,7 @@ describe('agents API', () => {
         model: 'normal',
         prompt: '',
         schedule: null,
-        runner: 'pm2',
+
         enabled: true,
         provider: null,
         prerequisiteCommand: null,
@@ -535,7 +534,7 @@ describe('agents API', () => {
         model: 'normal',
         prompt: '',
         schedule: null,
-        runner: 'pm2',
+
         enabled: true,
         provider: null,
         prerequisiteCommand: null,
@@ -558,7 +557,7 @@ describe('agents API', () => {
       });
     });
 
-    it('uses default model and runner if not provided', async () => {
+    it('uses default model if not provided', async () => {
       const request = new NextRequest('http://localhost/api/agents', {
         method: 'POST',
         body: JSON.stringify({ name: 'Agent', project: 'proj1' }),
@@ -568,7 +567,6 @@ describe('agents API', () => {
       const data = await response.json();
 
       expect(data.agent.model).toBe('normal');
-      expect(data.agent.runner).toBe('pm2');
     });
 
     it('accepts optional fields', async () => {
@@ -581,7 +579,7 @@ describe('agents API', () => {
           model: 'opus',
           prompt: 'Do something',
           schedule: '30m',
-          runner: 'launchctl',
+
         }),
       });
 
@@ -591,7 +589,6 @@ describe('agents API', () => {
       expect(data.agent.model).toBe('smart');
       expect(data.agent.prompt).toBe('Do something');
       expect(data.agent.schedule).toBe('30m');
-      expect(data.agent.runner).toBe('launchctl');
       expect(data.agent.skillIds).toEqual(['skill1', 'skill2']);
     });
 
@@ -638,7 +635,6 @@ describe('agents API', () => {
         data.agent.id,
         '15m',
         'Do something',
-        'pm2',
         'proj1',
         'Agent'
       );
@@ -745,7 +741,7 @@ describe('agents API', () => {
           model: 'sonnet',
           prompt: 'Do stuff',
           schedule: '1h',
-          runner: 'pm2',
+
           createdAt: now,
           updatedAt: now,
         });
@@ -772,7 +768,7 @@ describe('agents API', () => {
         model: 'normal',
         prompt: '',
         schedule: null,
-        runner: 'pm2',
+
         prerequisiteCommand: null,
         createdAt: now,
         updatedAt: now,
@@ -800,7 +796,7 @@ describe('agents API', () => {
         model: 'normal',
         prompt: '',
         schedule: null,
-        runner: 'pm2',
+
         prerequisiteCommand: '',
         createdAt: now,
         updatedAt: now,
@@ -845,7 +841,7 @@ describe('agents API', () => {
           model: 'sonnet',
           prompt: '',
           schedule: null,
-          runner: 'pm2',
+
           createdAt: now,
           updatedAt: now,
         });
@@ -876,7 +872,7 @@ describe('agents API', () => {
           model: 'sonnet',
           prompt: '',
           schedule: null,
-          runner: 'pm2',
+
           createdAt: now,
           updatedAt: now,
         });
@@ -906,7 +902,7 @@ describe('agents API', () => {
           model: 'sonnet',
           prompt: '',
           schedule: null,
-          runner: 'pm2',
+
           createdAt: now,
           updatedAt: now,
         });
@@ -919,7 +915,7 @@ describe('agents API', () => {
           model: 'sonnet',
           prompt: '',
           schedule: null,
-          runner: 'pm2',
+
           createdAt: now,
           updatedAt: now,
         });
@@ -949,7 +945,7 @@ describe('agents API', () => {
           model: 'sonnet',
           prompt: '',
           schedule: null,
-          runner: 'pm2',
+
           createdAt: now,
           updatedAt: now,
         });
@@ -962,7 +958,7 @@ describe('agents API', () => {
           model: 'sonnet',
           prompt: '',
           schedule: null,
-          runner: 'pm2',
+
           createdAt: now,
           updatedAt: now,
         });
@@ -992,7 +988,7 @@ describe('agents API', () => {
           model: 'sonnet',
           prompt: '',
           schedule: null,
-          runner: 'pm2',
+
           createdAt: now,
           updatedAt: now,
         });
@@ -1006,7 +1002,7 @@ describe('agents API', () => {
         model: 'normal',
         prompt: '',
         schedule: null,
-        runner: 'pm2',
+
         enabled: true,
         provider: null,
         prerequisiteCommand: null,
@@ -1041,7 +1037,7 @@ describe('agents API', () => {
           model: 'sonnet',
           prompt: '',
           schedule: null,
-          runner: 'pm2',
+
           createdAt: now,
           updatedAt: now,
         });
@@ -1055,7 +1051,7 @@ describe('agents API', () => {
         model: 'normal',
         prompt: '',
         schedule: null,
-        runner: 'pm2',
+
         enabled: true,
         provider: null,
         prerequisiteCommand: null,
@@ -1090,7 +1086,7 @@ describe('agents API', () => {
           model: 'sonnet',
           prompt: 'old prompt',
           schedule: null,
-          runner: 'pm2',
+
           createdAt: now,
           updatedAt: now,
         });
@@ -1121,7 +1117,7 @@ describe('agents API', () => {
           model: 'normal',
           prompt: '',
           schedule: null,
-          runner: 'pm2',
+
           prerequisiteCommand: 'echo old',
           createdAt: now,
           updatedAt: now,
@@ -1158,7 +1154,7 @@ describe('agents API', () => {
           model: 'sonnet',
           prompt: 'old prompt',
           schedule: null,
-          runner: 'pm2',
+
           createdAt: now,
           updatedAt: now,
         });
@@ -1190,7 +1186,7 @@ describe('agents API', () => {
           model: 'sonnet',
           prompt: 'old prompt',
           schedule: '1h',
-          runner: 'pm2',
+
           createdAt: now,
           updatedAt: now,
         });
@@ -1224,7 +1220,7 @@ describe('agents API', () => {
           model: 'sonnet',
           prompt: '',
           schedule: null,
-          runner: 'pm2',
+
           createdAt: now,
           updatedAt: now,
         });
@@ -1254,7 +1250,7 @@ describe('agents API', () => {
           model: 'sonnet',
           prompt: 'do things',
           schedule: '1h',
-          runner: 'pm2',
+
           createdAt: now,
           updatedAt: now,
         });
@@ -1284,7 +1280,7 @@ describe('agents API', () => {
           model: 'sonnet',
           prompt: '',
           schedule: null,
-          runner: 'pm2',
+
           createdAt: oldTime,
           updatedAt: oldTime,
         });
@@ -1331,7 +1327,7 @@ describe('agents API', () => {
       const fakeAgent = {
         id: 'file:myproj:my-agent', name: 'my-agent', project: 'myproj',
         skillIds: [] as string[], model: 'sonnet', prompt: 'new prompt', schedule: null,
-        runner: 'pm2', enabled: true, provider: 'codex', createdAt: 0, updatedAt: 0,
+ enabled: true, provider: 'codex', createdAt: 0, updatedAt: 0,
         source: 'file' as const, filePath: '/path/to/.tamtam/agents/my-agent.md',
       };
       parseFileAgentIdMock.mockReturnValueOnce({ project: 'myproj', name: 'my-agent' });
@@ -1359,7 +1355,7 @@ describe('agents API', () => {
       const fakeAgent = {
         id: 'file:myproj:my-agent', name: 'my-agent', project: 'myproj',
         skillIds: [] as string[], model: 'sonnet', prompt: 'existing prompt', schedule: null,
-        runner: 'pm2', enabled: true, provider: 'codex', createdAt: 0, updatedAt: 0,
+ enabled: true, provider: 'codex', createdAt: 0, updatedAt: 0,
         source: 'file' as const, filePath: '/path/to/.tamtam/agents/my-agent.md',
       };
       parseFileAgentIdMock.mockReturnValueOnce({ project: 'myproj', name: 'my-agent' });
@@ -1384,7 +1380,7 @@ describe('agents API', () => {
       const existingAgent = {
         id: 'file:myproj:my-agent', name: 'my-agent', project: 'myproj',
         skillIds: ['agent-issue-cruncher'] as string[], model: 'sonnet', prompt: 'existing prompt', schedule: null,
-        runner: 'pm2', enabled: true, provider: null, prerequisiteCommand: 'echo old', createdAt: 0, updatedAt: 0,
+ enabled: true, provider: null, prerequisiteCommand: 'echo old', createdAt: 0, updatedAt: 0,
         source: 'file' as const, filePath: '/path/to/.tamtam/agents/my-agent.md',
       };
       const updatedAgent = { ...existingAgent, prerequisiteCommand: '' };
@@ -1413,7 +1409,7 @@ describe('agents API', () => {
       const fakeAgent = {
         id: 'file:myproj:my-agent', name: 'my-agent', project: 'myproj',
         skillIds: [] as string[], model: 'sonnet', prompt: 'existing prompt', schedule: null,
-        runner: 'pm2', enabled: true, provider: null, createdAt: 0, updatedAt: 0,
+ enabled: true, provider: null, createdAt: 0, updatedAt: 0,
         source: 'file' as const, filePath: '/path/to/.tamtam/agents/my-agent.md',
       };
       parseFileAgentIdMock.mockReturnValueOnce({ project: 'myproj', name: 'my-agent' });
@@ -1438,7 +1434,7 @@ describe('agents API', () => {
       const fakeAgent = {
         id: 'file:myproj:my-agent', name: 'my-agent', project: 'myproj',
         skillIds: [] as string[], model: 'sonnet', prompt: 'new prompt', schedule: null,
-        runner: 'pm2', enabled: true, createdAt: 0, updatedAt: 0,
+ enabled: true, createdAt: 0, updatedAt: 0,
         source: 'file' as const, filePath: '/path/to/.tamtam/agents/my-agent.md',
       };
       parseFileAgentIdMock.mockReturnValueOnce({ project: 'myproj', name: 'my-agent' });
@@ -1462,7 +1458,7 @@ describe('agents API', () => {
       const fakeAgent = {
         id: 'file:myproj:my-agent', name: 'my-agent', project: 'myproj',
         skillIds: [] as string[], model: 'sonnet', prompt: 'new prompt', schedule: '1h',
-        runner: 'pm2', enabled: true, createdAt: 0, updatedAt: 0,
+ enabled: true, createdAt: 0, updatedAt: 0,
         source: 'file' as const, filePath: '/path/to/.tamtam/agents/my-agent.md',
       };
       parseFileAgentIdMock.mockReturnValueOnce({ project: 'myproj', name: 'my-agent' });
@@ -1488,7 +1484,7 @@ describe('agents API', () => {
       const existingAgent = {
         id: 'file:myproj:my-agent', name: 'my-agent', project: 'myproj',
         skillIds: [] as string[], model: 'sonnet', prompt: 'do work', schedule: '4h',
-        runner: 'pm2', enabled: true, createdAt: 0, updatedAt: 0,
+ enabled: true, createdAt: 0, updatedAt: 0,
         source: 'file' as const, filePath: '/path/to/.tamtam/agents/my-agent.md',
       };
       const updatedAgent = { ...existingAgent, model: 'smart' };
@@ -1508,7 +1504,7 @@ describe('agents API', () => {
         schedule: undefined,
       }));
       expect(installAgentScheduleMock).toHaveBeenCalledWith(
-        'file:myproj:my-agent', '4h', 'do work', 'pm2', 'myproj', 'my-agent'
+        'file:myproj:my-agent', '4h', 'do work', 'myproj', 'my-agent'
       );
       expect(uninstallAgentScheduleMock).not.toHaveBeenCalled();
     });
@@ -1517,7 +1513,7 @@ describe('agents API', () => {
       const fakeAgent = {
         id: 'file:myproj:my-agent', name: 'my-agent', project: 'myproj',
         skillIds: [] as string[], model: 'sonnet', prompt: 'do work', schedule: '4h',
-        runner: 'pm2', enabled: true, createdAt: 0, updatedAt: 0,
+ enabled: true, createdAt: 0, updatedAt: 0,
         source: 'file' as const, filePath: '/path/to/.tamtam/agents/my-agent.md',
       };
       parseFileAgentIdMock.mockReturnValueOnce({ project: 'myproj', name: 'my-agent' });
@@ -1532,7 +1528,7 @@ describe('agents API', () => {
       await PATCH(request, { params: Promise.resolve({ agentId: 'file:myproj:my-agent' }) });
       expect(installAgentScheduleMock).toHaveBeenCalledOnce();
       expect(installAgentScheduleMock).toHaveBeenCalledWith(
-        'file:myproj:my-agent', '4h', 'do work', 'pm2', 'myproj', 'my-agent'
+        'file:myproj:my-agent', '4h', 'do work', 'myproj', 'my-agent'
       );
     });
 
@@ -1540,7 +1536,7 @@ describe('agents API', () => {
       const fakeAgent = {
         id: 'file:myproj:my-agent', name: 'my-agent', project: 'myproj',
         skillIds: [] as string[], model: 'sonnet', prompt: 'do work', schedule: null,
-        runner: 'pm2', enabled: true, createdAt: 0, updatedAt: 0,
+ enabled: true, createdAt: 0, updatedAt: 0,
         source: 'file' as const, filePath: '/path/to/.tamtam/agents/my-agent.md',
       };
       parseFileAgentIdMock.mockReturnValueOnce({ project: 'myproj', name: 'my-agent' });
@@ -1570,7 +1566,7 @@ describe('agents API', () => {
           model: 'sonnet',
           prompt: '',
           schedule: null,
-          runner: 'pm2',
+
           createdAt: now,
           updatedAt: now,
         });
@@ -1614,7 +1610,7 @@ describe('agents API', () => {
           model: 'sonnet',
           prompt: '',
           schedule: null,
-          runner: 'pm2',
+
           createdAt: now,
           updatedAt: now,
         });
@@ -1643,7 +1639,7 @@ describe('agents API', () => {
           model: 'sonnet',
           prompt: 'do work',
           schedule: '1h',
-          runner: 'pm2',
+
           createdAt: now,
           updatedAt: now,
         });
@@ -1654,7 +1650,7 @@ describe('agents API', () => {
       await DELETE(request, { params: Promise.resolve({ agentId: 'agent-123' }) });
 
       expect(uninstallAgentScheduleMock).toHaveBeenCalledOnce();
-      expect(uninstallAgentScheduleMock).toHaveBeenCalledWith('agent-123', 'pm2', 'proj1', 'Agent');
+      expect(uninstallAgentScheduleMock).toHaveBeenCalledWith('agent-123', 'proj1', 'Agent');
     });
   });
 
@@ -1679,7 +1675,6 @@ describe('agents API', () => {
         data.agent.id,
         '1h',
         'Do some work',
-        'pm2',
         'proj1',
         'Scheduled Agent'
       );
@@ -1743,7 +1738,7 @@ describe('agents API', () => {
           model: 'sonnet',
           prompt: 'existing prompt',
           schedule: null,
-          runner: 'pm2',
+
           createdAt: now,
           updatedAt: now,
         });
@@ -1760,7 +1755,6 @@ describe('agents API', () => {
         'agent-123',
         '2h',
         'existing prompt',
-        'pm2',
         'proj1',
         'Agent'
       );
@@ -1778,7 +1772,7 @@ describe('agents API', () => {
           model: 'sonnet',
           prompt: 'do work',
           schedule: '1h',
-          runner: 'pm2',
+
           createdAt: now,
           updatedAt: now,
         });
@@ -1791,7 +1785,7 @@ describe('agents API', () => {
       await PATCH(request, { params: Promise.resolve({ agentId: 'agent-123' }) });
 
       expect(uninstallAgentScheduleMock).toHaveBeenCalledOnce();
-      expect(uninstallAgentScheduleMock).toHaveBeenCalledWith('agent-123', 'pm2', 'proj1', 'Agent');
+      expect(uninstallAgentScheduleMock).toHaveBeenCalledWith('agent-123', 'proj1', 'Agent');
     });
 
     it('calls uninstallAgentSchedule when patching enabled to false', async () => {
@@ -1806,7 +1800,7 @@ describe('agents API', () => {
           model: 'sonnet',
           prompt: 'do work',
           schedule: '1h',
-          runner: 'pm2',
+
           createdAt: now,
           updatedAt: now,
         });
@@ -1832,7 +1826,7 @@ describe('agents API', () => {
         model: 'sonnet',
         prompt: 'original prompt',
         schedule: null,
-        runner: 'pm2',
+
         createdAt: now,
         updatedAt: now,
         ...overrides,
@@ -1915,7 +1909,7 @@ describe('agents API', () => {
         model: 'normal',
         prompt: 'original prompt',
         schedule: null,
-        runner: 'pm2',
+
         enabled: true,
         provider: null,
         prerequisiteCommand: null,
@@ -1933,7 +1927,7 @@ describe('agents API', () => {
         model: 'normal',
         prompt: 'renamed prompt',
         schedule: null,
-        runner: 'pm2',
+
         enabled: true,
         provider: null,
         prerequisiteCommand: null,
@@ -1965,7 +1959,7 @@ describe('agents API', () => {
         model: 'normal',
         prompt: 'original prompt',
         schedule: null,
-        runner: 'pm2',
+
         enabled: true,
         provider: null,
         prerequisiteCommand: null,
@@ -1983,7 +1977,7 @@ describe('agents API', () => {
         model: 'normal',
         prompt: 'renamed prompt',
         schedule: null,
-        runner: 'pm2',
+
         enabled: true,
         provider: null,
         prerequisiteCommand: null,
@@ -2146,7 +2140,6 @@ describe('agents API', () => {
         'agent-bn',
         '2h',
         'do work',
-        'pm2',
         'myproj',
         'Self'
       );
@@ -2155,7 +2148,7 @@ describe('agents API', () => {
     it('does not affect an agent with the same name in a different project', async () => {
       const now = Date.now() / 1000;
       await seedAgent(testDb.db);
-      await testDb.db.insert(schema.agents).values({ id: 'agent-other', name: 'Self', project: 'other', skillIds: '[]', model: 'haiku', prompt: 'other prompt', schedule: null, runner: 'pm2', createdAt: now, updatedAt: now });
+      await testDb.db.insert(schema.agents).values({ id: 'agent-other', name: 'Self', project: 'other', skillIds: '[]', model: 'haiku', prompt: 'other prompt', schedule: null, createdAt: now, updatedAt: now });
 
       await PATCH_BY_NAME(new NextRequest('http://localhost/api/agents/by-name', {
         method: 'PATCH',
@@ -2217,7 +2210,7 @@ describe('agents API', () => {
       const fakeAgent = {
         id: 'file:myproj:my-agent', name: 'my-agent', project: 'myproj',
         skillIds: [] as string[], model: 'sonnet', prompt: 'updated', schedule: null,
-        runner: 'pm2', enabled: true, createdAt: 0, updatedAt: 0,
+ enabled: true, createdAt: 0, updatedAt: 0,
         source: 'file' as const, filePath: '/path/to/.tamtam/agents/my-agent.md',
       };
       resolveProjectPathMock.mockReturnValueOnce('/path/to/myproj');
@@ -2238,7 +2231,7 @@ describe('agents API', () => {
       const existingAgent = {
         id: 'file:myproj:my-agent', name: 'my-agent', project: 'myproj',
         skillIds: [] as string[], model: 'sonnet', prompt: 'updated', schedule: null,
-        runner: 'pm2', enabled: true, createdAt: 0, updatedAt: 0,
+ enabled: true, createdAt: 0, updatedAt: 0,
         prerequisiteCommand: 'echo old',
         source: 'file' as const, filePath: '/path/to/.tamtam/agents/my-agent.md',
       };
@@ -2264,7 +2257,7 @@ describe('agents API', () => {
         model: 'sonnet',
         schedule: null,
         skillIds: [],
-        runner: 'pm2',
+
         enabled: true,
         provider: undefined,
         prerequisiteCommand: 'echo fresh',
@@ -2275,7 +2268,7 @@ describe('agents API', () => {
       const existingAgent = {
         id: 'file:myproj:my-agent', name: 'my-agent', project: 'myproj',
         skillIds: [] as string[], model: 'sonnet', prompt: 'updated', schedule: null,
-        runner: 'pm2', enabled: true, createdAt: 0, updatedAt: 0,
+ enabled: true, createdAt: 0, updatedAt: 0,
         prerequisiteCommand: 'echo old',
         source: 'file' as const, filePath: '/path/to/.tamtam/agents/my-agent.md',
       };
@@ -2301,7 +2294,7 @@ describe('agents API', () => {
         model: 'sonnet',
         schedule: null,
         skillIds: [],
-        runner: 'pm2',
+
         enabled: true,
         provider: undefined,
         prerequisiteCommand: '',
@@ -2312,7 +2305,7 @@ describe('agents API', () => {
       const existingAgent = {
         id: 'file:myproj:my-agent', name: 'my-agent', project: 'myproj',
         skillIds: ['agent-issue-cruncher'] as string[], model: 'sonnet', prompt: 'updated', schedule: null,
-        runner: 'pm2', enabled: true, createdAt: 0, updatedAt: 0,
+ enabled: true, createdAt: 0, updatedAt: 0,
         prerequisiteCommand: 'echo old',
         source: 'file' as const, filePath: '/path/to/.tamtam/agents/my-agent.md',
       };
@@ -2338,7 +2331,7 @@ describe('agents API', () => {
         model: 'sonnet',
         schedule: null,
         skillIds: ['agent-issue-cruncher'],
-        runner: 'pm2',
+
         enabled: true,
         provider: undefined,
         prerequisiteCommand: '',
@@ -2349,7 +2342,7 @@ describe('agents API', () => {
       const existingAgent = {
         id: 'file:myproj:my-agent', name: 'my-agent', project: 'myproj',
         skillIds: [] as string[], model: 'sonnet', prompt: 'do work', schedule: '2h',
-        runner: 'pm2', enabled: true, createdAt: 0, updatedAt: 0,
+ enabled: true, createdAt: 0, updatedAt: 0,
         source: 'file' as const, filePath: '/path/to/.tamtam/agents/my-agent.md',
       };
       const updatedAgent = { ...existingAgent, prompt: 'updated' };
@@ -2368,13 +2361,13 @@ describe('agents API', () => {
         model: 'sonnet',
         schedule: '2h',
         skillIds: [],
-        runner: 'pm2',
+
         enabled: true,
         provider: undefined,
         prerequisiteCommand: undefined,
       });
       expect(installAgentScheduleMock).toHaveBeenCalledWith(
-        'file:myproj:my-agent', '2h', 'updated', 'pm2', 'myproj', 'my-agent'
+        'file:myproj:my-agent', '2h', 'updated', 'myproj', 'my-agent'
       );
       expect(uninstallAgentScheduleMock).not.toHaveBeenCalled();
     });
@@ -2391,7 +2384,7 @@ describe('agents API', () => {
           model: 'sonnet',
           prompt: 'updated prompt',
           schedule: null,
-          runner: 'pm2',
+
           enabled: true,
           provider: 'codex',
           createdAt: now,
@@ -2415,6 +2408,7 @@ describe('agents API', () => {
         schedule: null,
         skillIds: [],
         runner: 'pm2',
+
         enabled: true,
         provider: 'codex',
         prerequisiteCommand: null,
@@ -2425,7 +2419,7 @@ describe('agents API', () => {
       const fakeAgent = {
         id: 'file:myproj:my-agent', name: 'my-agent', project: 'myproj',
         skillIds: [] as string[], model: 'sonnet', prompt: 'updated', schedule: null,
-        runner: 'pm2', enabled: true, createdAt: 0, updatedAt: 0,
+ enabled: true, createdAt: 0, updatedAt: 0,
         source: 'file' as const, filePath: '/path/to/.tamtam/agents/my-agent.md',
       };
       resolveProjectPathMock.mockReturnValueOnce('/path/to/myproj');
@@ -2457,7 +2451,7 @@ describe('agents API', () => {
       const fakeAgent = {
         id: 'file:myproj:my-agent', name: 'my-agent', project: 'myproj',
         skillIds: [] as string[], model: 'sonnet', prompt: 'do work', schedule: '2h',
-        runner: 'pm2', enabled: true, createdAt: 0, updatedAt: 0,
+ enabled: true, createdAt: 0, updatedAt: 0,
         source: 'file' as const, filePath: '/path/to/.tamtam/agents/my-agent.md',
       };
       resolveProjectPathMock.mockReturnValueOnce('/path/to/myproj');
@@ -2471,7 +2465,7 @@ describe('agents API', () => {
       expect(res.status).toBe(200);
       expect(installAgentScheduleMock).toHaveBeenCalledOnce();
       expect(installAgentScheduleMock).toHaveBeenCalledWith(
-        'file:myproj:my-agent', '2h', 'do work', 'pm2', 'myproj', 'my-agent'
+        'file:myproj:my-agent', '2h', 'do work', 'myproj', 'my-agent'
       );
     });
   });
@@ -2488,7 +2482,7 @@ describe('agents API', () => {
           model: 'sonnet',
           prompt: 'do work',
           schedule: '1h',
-          runner: 'pm2',
+
           enabled: false,
           createdAt: now,
           updatedAt: now,
@@ -2506,7 +2500,6 @@ describe('agents API', () => {
         'agent-123',
         '1h',
         'do work',
-        'pm2',
         'proj1',
         'Agent'
       );
@@ -2524,7 +2517,7 @@ describe('agents API', () => {
           model: 'sonnet',
           prompt: '',
           schedule: null,
-          runner: 'pm2',
+
           createdAt: now,
           updatedAt: now,
         });

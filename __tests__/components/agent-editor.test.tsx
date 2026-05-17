@@ -41,7 +41,7 @@ function renderEditor(overrides: Partial<React.ComponentProps<typeof AgentEditor
       description: 'Template',
       model: 'sonnet',
       schedule: '4h',
-      runner: 'pm2',
+
       prompt: 'Inspect the repo',
       skillIds: ['skill-1'],
     },
@@ -123,7 +123,7 @@ describe('AgentEditor', () => {
         docPaths: ['docs/runbook.md'],
         model: 'normal',
         schedule: null,
-        runner: 'pm2',
+
         enabled: true,
         provider: null,
         prerequisiteCommand: null,
@@ -153,7 +153,7 @@ describe('AgentEditor', () => {
         description: 'Template',
         model: 'normal',
         schedule: '',
-        runner: 'pm2',
+
         prompt: '',
         skillIds: ['agent-issue-cruncher'],
       },
@@ -184,6 +184,7 @@ describe('AgentEditor', () => {
         prompt: '',
         schedule: null,
         runner: 'pm2',
+
         enabled: true,
         prerequisiteCommand: null,
         createdAt: 0,

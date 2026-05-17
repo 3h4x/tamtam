@@ -12,7 +12,7 @@ describe('RECOMMENDED_AGENTS', () => {
     expect(agent).toMatchObject({
       model: 'normal',
       schedule: '',
-      runner: 'pm2',
+
       featured: true,
       skillIds: ['agent-issue-cruncher'],
     })
@@ -31,7 +31,7 @@ describe('RECOMMENDED_AGENTS', () => {
     expect(agent).toMatchObject({
       model: 'normal',
       schedule: '24h',
-      runner: 'pm2',
+
       featured: true,
       skillIds: ['agent-qa'],
     })

@@ -100,9 +100,9 @@ export async function PATCH(
       if (!updated) return NextResponse.json({ detail: 'not found after write' }, { status: 500 });
       try {
         if (updated.schedule && updated.enabled && (updated.prompt || updated.skillIds.length > 0)) {
-          await installAgentSchedule(updated.id, updated.schedule, updated.prompt, updated.runner, updated.project, updated.name);
+          await installAgentSchedule(updated.id, updated.schedule, updated.prompt, updated.project, updated.name);
         } else {
-          await uninstallAgentSchedule(updated.id, updated.runner, updated.project, updated.name);
+          await uninstallAgentSchedule(updated.id, updated.project, updated.name);
         }
       } catch (e: unknown) {
         console.error(`Failed to update schedule for file agent ${updated.id}:`, errMsg(e));
@@ -117,9 +117,8 @@ export async function PATCH(
   const existing = existingRows[0] ?? null;
   if (!existing) return NextResponse.json({ detail: 'not found' }, { status: 404 });
 
-  // Capture identity before update so we can clean up the old PM2 entry if
-  // name, project, or runner changes — these produce a different PM2 process
-  // name and the old entry would otherwise be orphaned.
+  // Capture identity before update so we can clean up any compatibility
+  // scheduler state if name, project, or runner changes.
   const oldName = existing.name;
   const oldProject = existing.project;
   const oldRunner = existing.runner;
@@ -182,22 +181,20 @@ export async function PATCH(
     }
   }
 
-  // Update schedule (PM2-tracked, fired by the in-process scheduler)
+  // Update schedule (fired by graphile-worker cron pool)
   if (agent) {
     try {
-      // If name, project, or runner changed, the old PM2 entry has a different
-      // name and won't be touched by install/uninstall below — delete it first.
       const identityChanged =
         agent.name !== oldName || agent.project !== oldProject || agent.runner !== oldRunner;
       if (identityChanged) {
-        await uninstallAgentSchedule(agentId, oldRunner, oldProject, oldName);
+        await uninstallAgentSchedule(agentId, oldProject, oldName);
       }
 
       const skillIds: string[] = JSON.parse(agent.skillIds || '[]');
       if (agent.schedule && agent.enabled && (agent.prompt || skillIds.length > 0)) {
-        await installAgentSchedule(agentId, agent.schedule, agent.prompt, agent.runner, agent.project, agent.name);
+        await installAgentSchedule(agentId, agent.schedule, agent.prompt, agent.project, agent.name);
       } else {
-        await uninstallAgentSchedule(agentId, agent.runner, agent.project, agent.name);
+        await uninstallAgentSchedule(agentId, agent.project, agent.name);
       }
     } catch (e: unknown) {
       console.error(`Failed to update schedule for agent ${agentId}:`, errMsg(e));
@@ -228,7 +225,7 @@ export async function DELETE(
   const deleteRows = await db.select().from(schema.agents).where(eq(schema.agents.id, agentId)).limit(1);
   const agent = deleteRows[0] ?? null;
   try {
-    await uninstallAgentSchedule(agentId, agent?.runner || 'pm2', agent?.project, agent?.name);
+    await uninstallAgentSchedule(agentId, agent?.project, agent?.name);
   } catch (e: unknown) {
     console.error(`Failed to uninstall schedule for agent ${agentId}:`, errMsg(e));
   }

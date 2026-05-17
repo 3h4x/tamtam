@@ -43,12 +43,15 @@ describe('seedAgentCrons', () => {
   // Default: no preserved rows. Tests that care about preservation pass
   // their own stub.
   const noExisting = async () => new Map<string, ExistingAgentCronJob>();
+  // Default: no-op sweep. Real sweep targets pg; stubs avoid the pool.
+  const noSweep = async () => undefined;
 
   it('enqueues one agent-cron job per enabled agent with stable jobKey', async () => {
     const r = await seedAgentCrons({
       connectionString: 'postgres://stub',
       loadEnabledAgents: async () => [makeAgent({ id: 'a1' }), makeAgent({ id: 'a2' })],
       loadExistingRunAts: noExisting,
+        sweepDeadOrphans: noSweep,
     });
     expect(r.enqueued).toBe(2);
     expect(r.skipped).toEqual([]);
@@ -73,6 +76,7 @@ describe('seedAgentCrons', () => {
         makeAgent({ id: 'dead', enabled: false }),
       ],
       loadExistingRunAts: noExisting,
+        sweepDeadOrphans: noSweep,
     });
     expect(r.enqueued).toBe(1);
     expect(r.skipped).toEqual([{ agentId: 'dead', reason: 'disabled' }]);
@@ -83,6 +87,7 @@ describe('seedAgentCrons', () => {
       connectionString: 'postgres://stub',
       loadEnabledAgents: async () => [makeAgent({ id: 'no-sched', schedule: null })],
       loadExistingRunAts: noExisting,
+        sweepDeadOrphans: noSweep,
     });
     expect(r.enqueued).toBe(0);
     expect(r.skipped).toEqual([{ agentId: 'no-sched', reason: 'no schedule' }]);
@@ -94,6 +99,7 @@ describe('seedAgentCrons', () => {
       connectionString: 'postgres://stub',
       loadEnabledAgents: async () => [makeAgent()],
       loadExistingRunAts: noExisting,
+        sweepDeadOrphans: noSweep,
     });
     expect(r.enqueued).toBe(0);
     expect(r.skipped[0].reason).toMatch(/enqueue failed: pg connection refused/);
@@ -126,6 +132,7 @@ describe('seedAgentCrons', () => {
         connectionString: 'postgres://stub',
         loadEnabledAgents: async () => [makeAgent({ id: 'a1', schedule: '30m' })],
         loadExistingRunAts: async () => existing,
+        sweepDeadOrphans: noSweep,
         now: () => T0 + 5 * 60_000,
       });
       expect(r.enqueued).toBe(0);
@@ -142,6 +149,7 @@ describe('seedAgentCrons', () => {
         connectionString: 'postgres://stub',
         loadEnabledAgents: async () => [makeAgent({ id: 'a1', schedule: '30m' })],
         loadExistingRunAts: async () => existing,
+        sweepDeadOrphans: noSweep,
         now: () => T0,
       });
       expect(r.enqueued).toBe(1);
@@ -156,6 +164,7 @@ describe('seedAgentCrons', () => {
         connectionString: 'postgres://stub',
         loadEnabledAgents: async () => [makeAgent({ id: 'a1', schedule: '30m' })],
         loadExistingRunAts: async () => new Map(),
+        sweepDeadOrphans: noSweep,
         now: () => T0,
       });
       expect(r.enqueued).toBe(1);
@@ -170,6 +179,7 @@ describe('seedAgentCrons', () => {
         connectionString: 'postgres://stub',
         loadEnabledAgents: async () => [makeAgent({ id: 'a1', schedule: '30m' })],
         loadExistingRunAts: async () => existing,
+        sweepDeadOrphans: noSweep,
         now: () => T0,
       });
       expect(r.enqueued).toBe(1);
@@ -186,6 +196,7 @@ describe('seedAgentCrons', () => {
         connectionString: 'postgres://stub',
         loadEnabledAgents: async () => [makeAgent({ id: 'a1', schedule: '30m' })],
         loadExistingRunAts: async () => existing,
+        sweepDeadOrphans: noSweep,
         now: () => T0 + 5 * 60_000,
       });
       expect(r.enqueued).toBe(1);
@@ -210,6 +221,7 @@ describe('seedAgentCrons', () => {
         connectionString: 'postgres://stub',
         loadEnabledAgents: async () => [makeAgent({ id: 'a1', schedule: '30m' })],
         loadExistingRunAts: async () => existing,
+        sweepDeadOrphans: noSweep,
         now: () => T0 + 5 * 60_000,
       });
       expect(r.enqueued).toBe(1);
@@ -233,6 +245,7 @@ describe('seedAgentCrons', () => {
         connectionString: 'postgres://stub',
         loadEnabledAgents: async () => agents,
         loadExistingRunAts: async () => (queued ? new Map([['agent-cron-a1', existingJob(queued)]]) : new Map()),
+        sweepDeadOrphans: noSweep,
         now: () => T0,
       });
       const firstRunAt = queued!.getTime();
@@ -243,6 +256,7 @@ describe('seedAgentCrons', () => {
         connectionString: 'postgres://stub',
         loadEnabledAgents: async () => agents,
         loadExistingRunAts: async () => new Map([['agent-cron-a1', existingJob(queued!)]]),
+        sweepDeadOrphans: noSweep,
         now: () => T0 + 5 * 60_000,
       });
       expect(queued!.getTime()).toBe(firstRunAt);
@@ -252,9 +266,37 @@ describe('seedAgentCrons', () => {
         connectionString: 'postgres://stub',
         loadEnabledAgents: async () => agents,
         loadExistingRunAts: async () => new Map([['agent-cron-a1', existingJob(queued!)]]),
+        sweepDeadOrphans: noSweep,
         now: () => T0 + 25 * 60_000,
       });
       expect(queued!.getTime()).toBe(firstRunAt);
+    });
+  });
+
+  describe('dead-orphan sweep', () => {
+    it('invokes the sweep on each boot', async () => {
+      const sweep = vi.fn(async () => undefined);
+      await seedAgentCrons({
+        connectionString: 'postgres://stub',
+        loadEnabledAgents: async () => [makeAgent()],
+        loadExistingRunAts: noExisting,
+        sweepDeadOrphans: sweep,
+      });
+      expect(sweep).toHaveBeenCalledOnce();
+      expect(sweep).toHaveBeenCalledWith('postgres://stub');
+    });
+
+    it('continues seeding when the sweep fails', async () => {
+      const sweep = vi.fn(async () => { throw new Error('pg unreachable'); });
+      const r = await seedAgentCrons({
+        connectionString: 'postgres://stub',
+        loadEnabledAgents: async () => [makeAgent()],
+        loadExistingRunAts: noExisting,
+        sweepDeadOrphans: sweep,
+      });
+      // Sweep is best-effort; a failure must not block the seed pass.
+      expect(r.enqueued).toBe(1);
+      expect(sweep).toHaveBeenCalledOnce();
     });
   });
 });

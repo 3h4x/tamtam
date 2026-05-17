@@ -88,7 +88,7 @@ describe('AgentTemplatesTab', () => {
         description: 'Looks at open changes',
         model: 'opus',
         schedule: '4h',
-        runner: 'pm2',
+
         prompt: 'Review the repo',
       },
     ]))
@@ -126,6 +126,7 @@ describe('AgentTemplatesTab', () => {
         model: 'normal',
         schedule: '4h',
         runner: 'pm2',
+
         prompt: 'Review recent changes',
       },
     ]))
@@ -142,6 +143,7 @@ describe('AgentTemplatesTab', () => {
         model: 'smart',
         schedule: '4h',
         runner: 'pm2',
+
         prompt: 'Review recent changes',
       },
     ]))

@@ -175,7 +175,6 @@ describe('collectProjectRetrievalSources', () => {
       model: 'normal',
       prompt: '',
       schedule: null,
-      runner: 'pm2',
       enabled: true,
       docPaths: JSON.stringify([]),
       provider: null,
