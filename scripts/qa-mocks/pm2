@@ -40,14 +40,10 @@ const cmd = args[0];
 let state = readState();
 
 if (cmd === '__qa_pm2_supervise') {
-  const [, passedStatePath, name, cwd, launchCmd, launchArgsJson] = args;
+  const [, passedStatePath, name, cwd, launchCmd, launchArgsJson, releasePath] = args;
   process.env.TAMTAM_QA_PM2_STATE = passedStatePath;
   const launchArgs = JSON.parse(launchArgsJson || '[]');
-  const child = spawn(launchCmd, launchArgs, {
-    cwd,
-    env: process.env,
-    stdio: 'ignore',
-  });
+  let child = null;
 
   function mark(status, exitCode = null) {
     const latest = readState();
@@ -59,21 +55,40 @@ if (cmd === '__qa_pm2_supervise') {
   }
 
   function forward(sig) {
-    try { child.kill(sig); } catch {}
+    try { child?.kill(sig); } catch {}
   }
 
   process.on('SIGTERM', () => forward('SIGTERM'));
   process.on('SIGINT', () => forward('SIGINT'));
   process.on('SIGHUP', () => forward('SIGHUP'));
 
-  child.on('exit', (code, signal) => {
-    mark('stopped', code ?? (signal ? 1 : 0));
-    process.exit(0);
-  });
-  child.on('error', () => {
-    mark('errored', 1);
-    process.exit(1);
-  });
+  const startedWaitingAt = Date.now();
+  const waitForRelease = setInterval(() => {
+    if (!fs.existsSync(releasePath)) {
+      if (Date.now() - startedWaitingAt > 5000) {
+        mark('errored', 1);
+        process.exit(1);
+      }
+      return;
+    }
+
+    clearInterval(waitForRelease);
+    try { fs.unlinkSync(releasePath); } catch {}
+
+    child = spawn(launchCmd, launchArgs, {
+      cwd,
+      env: process.env,
+      stdio: 'ignore',
+    });
+    child.on('exit', (code, signal) => {
+      mark('stopped', code ?? (signal ? 1 : 0));
+      process.exit(0);
+    });
+    child.on('error', () => {
+      mark('errored', 1);
+      process.exit(1);
+    });
+  }, 1);
   return;
 }
 
@@ -112,6 +127,8 @@ if (cmd === 'start') {
     launchArgs = [script, ...childArgs];
   }
 
+  const releasePath = `${statePath}.${process.pid}.${encodeURIComponent(name)}.release`;
+
   const supervisor = spawn(process.execPath, [
     __filename,
     '__qa_pm2_supervise',
@@ -120,6 +137,7 @@ if (cmd === 'start') {
     cwd,
     launchCmd,
     JSON.stringify(launchArgs),
+    releasePath,
   ], {
     detached: true,
     env: process.env,
@@ -134,6 +152,7 @@ if (cmd === 'start') {
     started_at: Date.now(),
   };
   writeState(state);
+  fs.writeFileSync(releasePath, 'go');
   process.stdout.write(`[qa-pm2] started ${name}\n`);
   supervisor.unref();
   process.exit(0);

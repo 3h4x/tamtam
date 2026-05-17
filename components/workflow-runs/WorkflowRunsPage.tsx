@@ -3,6 +3,7 @@
 import { useEffect, useState } from 'react';
 import Link from 'next/link';
 import { WorkflowGraph } from '@/components/workflow-runs/WorkflowGraph';
+import { StandardTabs } from '@/components/ui/StandardTabs';
 
 interface WorkflowRunSummary {
   id: string;
@@ -253,21 +254,16 @@ export function WorkflowRunsPage() {
             ? `${data.runs.length} recent · refresh every 5s`
             : `${filtered.length} of ${data.runs.length} recent · refresh every 5s`}
         </span>
-        <div className="ml-auto flex rounded-md border border-border overflow-hidden">
-          {(['runs', 'graph'] as const).map((v) => (
-            <button
-              key={v}
-              onClick={() => setView(v)}
-              className={`px-3 py-1 text-xs transition-colors ${
-                view === v
-                  ? 'bg-accent/15 text-accent'
-                  : 'bg-bg-secondary text-text-secondary hover:text-text-primary'
-              }`}
-            >
-              {v === 'runs' ? 'Runs' : 'Graph'}
-            </button>
-          ))}
-        </div>
+        <StandardTabs
+          items={[
+            { id: 'runs', label: 'Runs' },
+            { id: 'graph', label: 'Graph' },
+          ]}
+          activeTab={view}
+          ariaLabel="Workflow run views"
+          className="ml-auto mb-0"
+          onChange={setView}
+        />
       </div>
       {view === 'graph' && <WorkflowGraph />}
       {view === 'runs' && (
