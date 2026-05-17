@@ -40,18 +40,22 @@ const cmd = args[0];
 let state = readState();
 
 if (cmd === '__qa_pm2_supervise') {
-  const [, passedStatePath, name, cwd, launchCmd, launchArgsJson, releasePath] = args;
+  const [, passedStatePath, name, cwd, launchCmd, launchArgsJson] = args;
   process.env.TAMTAM_QA_PM2_STATE = passedStatePath;
   const launchArgs = JSON.parse(launchArgsJson || '[]');
   let child = null;
 
   function mark(status, exitCode = null) {
     const latest = readState();
-    if (latest[name]) {
-      latest[name].status = status;
-      latest[name].exit_code = exitCode;
-      writeState(latest);
+    if (!latest[name]) {
+      return;
     }
+    latest[name] = {
+      ...latest[name],
+      status,
+      exit_code: exitCode,
+    };
+    writeState(latest);
   }
 
   function forward(sig) {
@@ -62,19 +66,7 @@ if (cmd === '__qa_pm2_supervise') {
   process.on('SIGINT', () => forward('SIGINT'));
   process.on('SIGHUP', () => forward('SIGHUP'));
 
-  const startedWaitingAt = Date.now();
-  const waitForRelease = setInterval(() => {
-    if (!fs.existsSync(releasePath)) {
-      if (Date.now() - startedWaitingAt > 5000) {
-        mark('errored', 1);
-        process.exit(1);
-      }
-      return;
-    }
-
-    clearInterval(waitForRelease);
-    try { fs.unlinkSync(releasePath); } catch {}
-
+  try {
     child = spawn(launchCmd, launchArgs, {
       cwd,
       env: process.env,
@@ -88,7 +80,10 @@ if (cmd === '__qa_pm2_supervise') {
       mark('errored', 1);
       process.exit(1);
     });
-  }, 1);
+  } catch {
+    mark('errored', 1);
+    process.exit(1);
+  }
   return;
 }
 
@@ -127,7 +122,15 @@ if (cmd === 'start') {
     launchArgs = [script, ...childArgs];
   }
 
-  const releasePath = `${statePath}.${process.pid}.${encodeURIComponent(name)}.release`;
+  state[name] = {
+    name,
+    pid: 0,
+    script,
+    status: 'online',
+    exit_code: null,
+    started_at: Date.now(),
+  };
+  writeState(state);
 
   const supervisor = spawn(process.execPath, [
     __filename,
@@ -137,22 +140,16 @@ if (cmd === 'start') {
     cwd,
     launchCmd,
     JSON.stringify(launchArgs),
-    releasePath,
   ], {
     detached: true,
     env: process.env,
     stdio: 'ignore',
   });
-  state[name] = {
-    name,
-    pid: supervisor.pid,
-    script,
-    status: 'online',
-    exit_code: null,
-    started_at: Date.now(),
-  };
-  writeState(state);
-  fs.writeFileSync(releasePath, 'go');
+  state = readState();
+  if (state[name]) {
+    state[name] = { ...state[name], pid: supervisor.pid };
+    writeState(state);
+  }
   process.stdout.write(`[qa-pm2] started ${name}\n`);
   supervisor.unref();
   process.exit(0);
