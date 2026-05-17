@@ -191,6 +191,8 @@ returns `409` with `code: "project_busy"` plus the blocking job id:
 
 The agent starts immediately as a PM2 process. Output is streamed to a log file and can be watched via SSE at `/api/streaming/{job_id}`.
 
+When retrieval is enabled and prompt-time search returns snippets above the configured score threshold, the intake workflow prepends a `## Retrieved Context` block to the prompt and records a bounded audit trail on the job's `context_meta.retrieval.sources`. Each source entry includes `sourceKind`, `sourceId`, `project`, `rank`, `score`, and a short preview only; full retrieved bodies are not duplicated into metadata. Restoring the run in the terminal session view renders a compact `Retrieved Context` section before the user prompt so operators can inspect what was injected. Runs with retrieval disabled, an empty corpus, failed embedding, or no accepted snippets do not get retrieval metadata.
+
 When an agent finishes, TamTam asks it to include a short `TamTam Run Report` in the final response. The lifecycle parser stores a concise `work_summary` and `modified_files` JSON array on the job row. If a scheduled agent repeatedly finds no actionable work and changes no files, TamTam creates an open project recommendation instead of silently changing the schedule. That `agent_schedule_backoff` recommendation now carries a structured rationale payload copied from the run report summary (`summary`, `actionableWork`, `filesChangedCount`, cadence, confidence, and `sourceJobId` when present), and the recommendations UI renders that metadata in a compact "Why" panel so operators can see why the slower cadence was suggested.
 
 ### Read-only Agent Runs

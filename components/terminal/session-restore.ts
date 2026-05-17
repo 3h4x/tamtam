@@ -21,6 +21,15 @@ export interface RestorableJob {
   provider?: string | null
 }
 
+export interface RetrievedContextSource {
+  sourceKind: string
+  sourceId: string
+  project: string
+  score?: number
+  rank?: number
+  preview?: string
+}
+
 interface JobLogDetail {
   log?: string | null
   log_pruned?: boolean
@@ -84,6 +93,46 @@ export function contextItemsFromMeta(contextMeta: string | null | undefined): {
   }
 }
 
+export function retrievedContextSourcesFromMeta(contextMeta: string | null | undefined): RetrievedContextSource[] {
+  if (!contextMeta) return []
+  try {
+    const meta = JSON.parse(contextMeta)
+    const sources = meta?.retrieval?.sources
+    if (!Array.isArray(sources)) return []
+    return sources
+      .filter((source): source is RetrievedContextSource =>
+        typeof source?.sourceKind === 'string' &&
+        typeof source?.sourceId === 'string' &&
+        typeof source?.project === 'string'
+      )
+      .map((source, index) => ({
+        sourceKind: source.sourceKind,
+        sourceId: source.sourceId,
+        project: source.project,
+        score: typeof source.score === 'number' ? source.score : undefined,
+        rank: typeof source.rank === 'number' ? source.rank : index + 1,
+        preview: typeof source.preview === 'string' ? source.preview : undefined,
+      }))
+  } catch {
+    return []
+  }
+}
+
+export function retrievedContextEntryFromMeta(contextMeta: string | null | undefined): TermEntry | null {
+  const sources = retrievedContextSourcesFromMeta(contextMeta)
+  if (sources.length === 0) return null
+  const lines = sources.map((source, index) => {
+    const rank = source.rank ?? index + 1
+    const score = typeof source.score === 'number' ? ` score ${source.score.toFixed(2)}` : ''
+    const preview = source.preview ? ` - ${source.preview}` : ''
+    return `${rank}. ${source.sourceKind} ${source.sourceId} (${source.project}${score})${preview}`
+  })
+  return {
+    role: 'status',
+    text: ['Retrieved Context', ...lines].join('\n'),
+  }
+}
+
 async function fetchJobs(url: string): Promise<RestorableJob[]> {
   const res = await fetch(url)
   const data = await res.json()
@@ -124,6 +173,9 @@ export async function buildEntriesForCompletedJobs(jobs: RestorableJob[]): Promi
   const entries: TermEntry[] = []
   jobs.forEach((job, index) => {
     const jobWithDetail = mergePromptDetail(job, logData[index])
+    const retrievedContextEntry = retrievedContextEntryFromMeta(job.context_meta)
+    if (retrievedContextEntry) entries.push(retrievedContextEntry)
+
     const prompt = restoredPrompt(jobWithDetail)
     if (prompt) entries.push({ role: 'user', text: prompt })
 
