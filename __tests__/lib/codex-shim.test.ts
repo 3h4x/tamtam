@@ -3,7 +3,7 @@ import { mkdtemp, writeFile, chmod, rm, readFile } from 'fs/promises';
 import { tmpdir } from 'os';
 import { join } from 'path';
 import { spawn } from 'child_process';
-import { describe, it, expect, beforeAll, afterAll } from 'vitest';
+import { describe, it, expect, beforeAll, afterAll, vi } from 'vitest';
 
 const _require = createRequire(import.meta.url);
 const shim = _require(join(process.cwd(), 'scripts/codex-shim.js')) as {
@@ -71,15 +71,11 @@ function runNode(args: string[], env: NodeJS.ProcessEnv): Promise<{ code: number
 }
 
 async function waitForFile(path: string, timeoutMs = 1000): Promise<string> {
-  const startedAt = Date.now();
-  while (Date.now() - startedAt < timeoutMs) {
-    try {
-      return await readFile(path, 'utf8');
-    } catch {
-      await new Promise((resolve) => setTimeout(resolve, 25));
-    }
-  }
-  throw new Error(`timed out waiting for ${path}`);
+  let content = '';
+  await vi.waitFor(async () => {
+    content = await readFile(path, 'utf8');
+  }, { timeout: timeoutMs, interval: 1 });
+  return content;
 }
 
 describe.concurrent('codex-shim', () => {
