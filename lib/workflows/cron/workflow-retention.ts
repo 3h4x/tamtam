@@ -79,12 +79,12 @@ export async function pruneOldWorkflowRuns(opts: PruneOptions): Promise<Workflow
     try {
       await client.query('BEGIN');
 
-      // Pick terminal runs older than cutoff. We exclude `running` and
-      // `pending` so an in-progress release isn't truncated.
+      // The workflow runtime table exposes `completed_at`; using that is
+      // enough to identify terminal rows and avoids relying on a status
+      // column that is not part of this schema.
       const { rows: oldRuns } = await client.query<{ id: string }>(
         `SELECT id FROM workflow.workflow_runs
-         WHERE status IN ('completed','failed','cancelled')
-           AND completed_at IS NOT NULL
+         WHERE completed_at IS NOT NULL
            AND completed_at < $1`,
         [summary.cutoffIso],
       );
