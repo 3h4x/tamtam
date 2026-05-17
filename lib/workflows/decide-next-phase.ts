@@ -1,7 +1,7 @@
 // Pure decision logic for "after a sub-step finishes, what should happen next?"
 //
 // Decision rules:
-//   test pass  → review
+//   test pass  → review (or commit/push when review is disabled)
 //   test fail  → fix
 //   review LGTM           → push
 //   review NEEDS ATTENTION → fix
@@ -25,12 +25,12 @@
 export type NextPhase =
   | { next: 'test'; from: 'fix' }
   | { next: 'review'; from: 'test' | 'fix' }
-  | { next: 'commit'; from: 'review' | 'fix'; fileIssueForReviewId?: string }
+  | { next: 'commit'; from: 'test' | 'review' | 'fix'; fileIssueForReviewId?: string }
   | { next: 'fix'; from: 'test'; testExitCode: number }
   | { next: 'fix'; from: 'review'; verdict: 'NEEDS ATTENTION' | 'DO NOT SHIP' }
   | { next: 'fix'; from: 'commit' }
   | { next: 'fix'; from: 'push' }
-  | { next: 'push'; from: 'commit' | 'fix' }
+  | { next: 'push'; from: 'test' | 'commit' | 'fix' }
   | { next: 'abort'; from: 'review'; verdict: 'DO NOT SHIP' | 'NEEDS ATTENTION'; stopReason?: string }
   | { next: 'mark-dod'; from: 'push' }
   | { next: 'pr-wait'; from: 'mark-dod' | 'push'; pr: { prNumber: number; prRepo: string; prUrl: string } }
@@ -56,15 +56,38 @@ export interface DecisionInputs {
    *  produced a PR, the orchestrator continues into pr-wait after mark-dod
    *  (or after push when mark-dod is skipped). */
   autoPrMergeEnabled?: boolean;
+  /** Project-level review off-switch. When true, a passing test should
+   *  skip the review phase and keep release side effects moving. */
+  reviewDisabled?: boolean;
+  /** Whether the project worktree has uncommitted changes after test. */
+  hasUncommittedChanges?: boolean;
+  /** Whether the current branch has local commits not pushed upstream. */
+  hasUnpushedCommits?: boolean;
 }
 
 export function decideNextPhase(inputs: DecisionInputs): NextPhase {
-  const { kind, exitCode, verdict, parentKind, pushPrContext, autoPrMergeEnabled } = inputs;
+  const {
+    kind,
+    exitCode,
+    verdict,
+    parentKind,
+    pushPrContext,
+    autoPrMergeEnabled,
+    reviewDisabled,
+    hasUncommittedChanges,
+    hasUnpushedCommits,
+  } = inputs;
 
   if (kind === 'test') {
-    return exitCode === 0
-      ? { next: 'review', from: 'test' }
-      : { next: 'fix', from: 'test', testExitCode: exitCode };
+    if (exitCode !== 0) {
+      return { next: 'fix', from: 'test', testExitCode: exitCode };
+    }
+    if (reviewDisabled) {
+      if (hasUncommittedChanges) return { next: 'commit', from: 'test' };
+      if (hasUnpushedCommits) return { next: 'push', from: 'test' };
+      return { next: 'push', from: 'test' };
+    }
+    return { next: 'review', from: 'test' };
   }
   if (kind === 'review') {
     if (verdict === 'LGTM') {
