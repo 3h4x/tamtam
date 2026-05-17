@@ -1109,4 +1109,119 @@ describe('startProjectReview — default skill path', () => {
     const prompt: string = startJobMock.mock.calls[0][2];
     expect(prompt).toContain('Vendored reviewer skill body.');
   });
+
+  it('injects detected frameworks and filters working-tree review framework checklists', async () => {
+    vi.resetModules();
+    const startJobMock = vi.fn().mockResolvedValue(9999);
+    const skillPath = '/abs/path/skills/docs/skills/engineering/code-reviewer.md';
+    const skillBody = [
+      'Before checks.',
+      '',
+      '## Framework-specific checks',
+      '',
+      'The pipeline pre-filters this section to the project detected stack.',
+      '',
+      '### Next.js (App Router) — apply when the pipeline-injected `FRAMEWORK:` line includes `nextjs`',
+      '',
+      '- Next-only rule.',
+      '',
+      '### Python — apply when the pipeline-injected `FRAMEWORK:` line includes `python`',
+      '',
+      '- Python-only rule.',
+      '',
+      '## Output format',
+      '',
+      'End correctly.',
+    ].join('\n');
+    const existsSyncMock = vi.fn((path: string) =>
+      path === skillPath || path === '/path/to/proj/package.json'
+    );
+    const readFileSyncMock = vi.fn((path: string) => {
+      if (path === '/path/to/proj/package.json') return JSON.stringify({ dependencies: { next: '^16.2.4' } });
+      return skillBody;
+    });
+
+    vi.doMock('@/lib/shared/shell', () => ({
+      exec: vi.fn()
+        .mockResolvedValueOnce({ exitCode: 0, stdout: ' M lib/foo.ts', stderr: '' })
+        .mockResolvedValueOnce({ exitCode: 0, stdout: '1 file changed', stderr: '' })
+        .mockResolvedValueOnce({ exitCode: 0, stdout: 'diff --git a/lib/foo.ts\n+change\n', stderr: '' }),
+    }));
+    vi.doMock('@/lib/shared/project-data', () => ({
+      resolveProjectPath: vi.fn().mockReturnValue('/path/to/proj'),
+    }));
+    vi.doMock('@/lib/scheduling/scheduling', () => ({
+      getImproveConfig: () => ({ claudeBin: 'claude', projects: {}, logDir: '/tmp' }),
+      getProjectTestConfig: () => ({}),
+      getProjectPipelinePrompts: () => ({
+        reviewPromptAddendum: null,
+        reviewPrerequisiteCommand: null,
+        fixPromptAddendum: null,
+      }),
+    }));
+    vi.doMock('@/lib/jobs/job-storage', () => ({
+      createJob: vi.fn().mockImplementation((project: string, kind: string) => ({
+        id: `${project}-${kind}-id`,
+        project,
+        kind,
+        pid: 0,
+        logPath: '',
+        prompt: null,
+        startedAt: 0,
+        finishedAt: null,
+        exitCode: null,
+        seen: false,
+      })),
+      updateJob: vi.fn(),
+      listJobs: vi.fn().mockReturnValue([]),
+      readLog: vi.fn().mockReturnValue(''),
+      readParsedLog: vi.fn().mockReturnValue(''),
+      probeJobStatus: vi.fn().mockResolvedValue('done'),
+    }));
+    vi.doMock('@/lib/jobs/pm2-jobs', () => ({ splitCommand: (line: string) => line.split(/\s+/).filter(Boolean) }));
+    vi.doMock('@/lib/jobs/spawn-claude-detached', () => ({ startJobInProcess: startJobMock }));
+    vi.doMock('@/lib/shared/config', () => ({
+      getSettings: () => ({ review_verdict_rules: '' }),
+      withBasePrompt: (s: string) => s,
+      getPermissionModeFlag: () => '--dangerously-skip-permissions',
+      getPipelineModel: () => 'sonnet',
+    }));
+    vi.doMock('@/lib/pipeline/pipeline-lock', () => ({
+      getLock: vi.fn().mockReturnValue(null),
+      acquireLock: vi.fn().mockResolvedValue({ acquired: true }),
+      isLockOwnedByActiveRelease: vi.fn().mockReturnValue(false),
+    }));
+    vi.doMock('@/lib/skills/skills', () => ({
+      CODE_REVIEWER_SKILL: skillPath,
+    }));
+    vi.doMock('@/lib/usage/resolve-provider', () => ({
+      checkCliStartGate: vi.fn().mockResolvedValue({ ok: true, provider: 'claude' }),
+    }));
+    vi.doMock('fs', () => ({
+      existsSync: existsSyncMock,
+      lstatSync: vi.fn(),
+      readFileSync: readFileSyncMock,
+      mkdirSync: vi.fn(),
+      appendFileSync: vi.fn(),
+    }));
+    vi.doMock('@/lib/skills/tamtam-file-config', () => ({
+      loadFileConfig: vi.fn().mockReturnValue(null),
+    }));
+    vi.doMock('@/lib/skills/auto-attach-docs', () => ({
+      resolveAutoAttachedDocs: vi.fn().mockReturnValue([]),
+      formatAutoAttachedDocsBlock: vi.fn().mockReturnValue(null),
+    }));
+
+    const { startProjectReview } = await import('@/lib/pipeline/start-review');
+    const result = await startProjectReview('proj');
+
+    expect(result.ok).toBe(true);
+    const prompt: string = startJobMock.mock.calls[0][2];
+    expect(prompt).toContain('FRAMEWORK: nextjs@16.2.4.');
+    expect(prompt).toContain('### Next.js (App Router)');
+    expect(prompt).toContain('- Next-only rule.');
+    expect(prompt).not.toContain('### Python');
+    expect(prompt).not.toContain('- Python-only rule.');
+    expect(prompt).toContain('## Output format');
+  });
 });

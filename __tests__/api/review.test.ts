@@ -1,95 +1,16 @@
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
 import { NextRequest } from 'next/server';
-import type { JobData } from '@/lib/jobs/job-storage';
-
-function makeJob(overrides: Partial<JobData> = {}): JobData {
-  return {
-    id: 'review-job-id',
-    project: 'proj1',
-    kind: 'review',
-    prompt: null,
-    pid: 0,
-    logPath: null,
-    startedAt: Date.now() / 1000,
-    finishedAt: null,
-    exitCode: null,
-    seen: false,
-    ...overrides,
-  };
-}
 
 describe('POST /api/projects/by-project/{projectName}/review', () => {
-  let POST: any;
-  let resolveProjectPathMock: ReturnType<typeof vi.fn>;
-  let listJobsMock: ReturnType<typeof vi.fn>;
-  let probeJobStatusMock: ReturnType<typeof vi.fn>;
-  let createJobMock: ReturnType<typeof vi.fn>;
-  let updateJobMock: ReturnType<typeof vi.fn>;
-  let startJobMock: ReturnType<typeof vi.fn>;
-  let execMock: ReturnType<typeof vi.fn>;
+  let POST: typeof import('@/app/api/projects/by-project/[projectName]/review/route').POST;
+  let startProjectReviewMock: ReturnType<typeof vi.fn>;
 
   beforeEach(async () => {
     vi.resetModules();
-
-    resolveProjectPathMock = vi.fn().mockReturnValue('/path/to/project');
-    listJobsMock = vi.fn().mockReturnValue([]);
-    probeJobStatusMock = vi.fn().mockResolvedValue('done');
-    createJobMock = vi.fn().mockImplementation(() => makeJob());
-    updateJobMock = vi.fn();
-    startJobMock = vi.fn().mockResolvedValue(12345);
-    execMock = vi.fn().mockResolvedValue({ exitCode: 0, stdout: 'M file.ts\n', stderr: '' });
-
-    vi.doMock('@/lib/shared/project-data', () => ({
-      resolveProjectPath: resolveProjectPathMock,
+    startProjectReviewMock = vi.fn();
+    vi.doMock('@/lib/pipeline/start-review', () => ({
+      startProjectReview: startProjectReviewMock,
     }));
-
-    vi.doMock('@/lib/scheduling/scheduling', () => ({
-      getImproveConfig: vi.fn().mockReturnValue({
-        claudeBin: 'claude',
-        logDir: '/tmp/tamtam-logs',
-        projects: {},
-      }),
-    }));
-
-    vi.doMock('@/lib/jobs/job-storage', () => ({
-      createJob: createJobMock,
-      updateJob: updateJobMock,
-      listJobs: listJobsMock,
-      probeJobStatus: probeJobStatusMock,
-    }));
-
-    vi.doMock('@/lib/jobs/pm2-jobs', () => ({
-      startJob: startJobMock,
-      splitCommand: (line: string) => line.split(/\s+/).filter(Boolean),
-    }));
-
-    // start-review now spawns in-process via lib/jobs/spawn-claude-detached.
-    // Same call shape as startJob — route assertions read mocks.startJobMock.
-    vi.doMock('@/lib/jobs/spawn-claude-detached', () => ({
-      startJobInProcess: startJobMock,
-    }));
-
-    vi.doMock('@/lib/shared/shell', () => ({
-      exec: execMock,
-    }));
-
-    vi.doMock('@/lib/skills/skills', () => ({
-      CODE_REVIEWER_SKILL: '/nonexistent/skill.md',
-    }));
-
-    vi.doMock('@/lib/pipeline/pipeline-lock', () => ({
-      getLock: vi.fn().mockReturnValue(null),
-      acquireLock: vi.fn().mockResolvedValue({ acquired: true, lock: { project: 'proj1', lockedByJobId: 'test', acquiredAt: Date.now() / 1000 } }),
-      isLockOwnedByActiveRelease: vi.fn().mockReturnValue(false),
-    }));
-
-    vi.doMock('@/lib/shared/job-control', () => ({
-      runGates: () => null,
-      jobsPausedResult: () => null,
-      runAutoChainGates: () => null,
-      isJobsPaused: () => false,
-    }));
-
     const mod = await import('@/app/api/projects/by-project/[projectName]/review/route');
     POST = mod.POST;
   });
@@ -98,117 +19,101 @@ describe('POST /api/projects/by-project/{projectName}/review', () => {
     vi.resetModules();
   });
 
-  it('returns 404 when project not found', async () => {
-    resolveProjectPathMock.mockReturnValue(null);
-    const req = new NextRequest('http://localhost/api/projects/by-project/unknown/review', {
+  function req(name = 'proj1', headers?: HeadersInit) {
+    return new NextRequest(`http://localhost/api/projects/by-project/${name}/review`, {
       method: 'POST',
+      headers,
     });
-    const res = await POST(req, { params: Promise.resolve({ projectName: 'unknown' }) });
+  }
+
+  it('returns 404 when project not found', async () => {
+    startProjectReviewMock.mockResolvedValue({ ok: false, status: 404, detail: 'project not found' });
+
+    const res = await POST(req('unknown'), { params: Promise.resolve({ projectName: 'unknown' }) });
+
     expect(res.status).toBe(404);
-    const data = await res.json();
-    expect(data.detail).toContain('not found');
+    await expect(res.json()).resolves.toEqual({ detail: 'project not found' });
   });
 
   it('returns 400 when no uncommitted changes', async () => {
-    execMock.mockResolvedValue({ exitCode: 0, stdout: '', stderr: '' });
-    const req = new NextRequest('http://localhost/api/projects/by-project/proj1/review', {
-      method: 'POST',
-    });
-    const res = await POST(req, { params: Promise.resolve({ projectName: 'proj1' }) });
+    startProjectReviewMock.mockResolvedValue({ ok: false, status: 400, detail: 'No uncommitted changes to review' });
+
+    const res = await POST(req(), { params: Promise.resolve({ projectName: 'proj1' }) });
+
     expect(res.status).toBe(400);
-    const data = await res.json();
-    expect(data.detail).toContain('No uncommitted changes');
+    await expect(res.json()).resolves.toEqual({ detail: 'No uncommitted changes to review' });
   });
 
   it('returns 409 when review already in progress', async () => {
-    const runningJob = makeJob({ finishedAt: null });
-    listJobsMock.mockReturnValue([runningJob]);
-    probeJobStatusMock.mockResolvedValue('running');
+    startProjectReviewMock.mockResolvedValue({ ok: false, status: 409, detail: 'Review already in progress for proj1' });
 
-    const req = new NextRequest('http://localhost/api/projects/by-project/proj1/review', {
-      method: 'POST',
-    });
-    const res = await POST(req, { params: Promise.resolve({ projectName: 'proj1' }) });
+    const res = await POST(req(), { params: Promise.resolve({ projectName: 'proj1' }) });
+
     expect(res.status).toBe(409);
-    const data = await res.json();
-    expect(data.detail).toContain('already in progress');
+    await expect(res.json()).resolves.toEqual({ detail: 'Review already in progress for proj1' });
   });
 
   it('starts a review job and returns job info', async () => {
-    const req = new NextRequest('http://localhost/api/projects/by-project/proj1/review', {
-      method: 'POST',
+    startProjectReviewMock.mockResolvedValue({
+      ok: true,
+      jobId: 'review-job-id',
+      pid: 12345,
+      logPath: '/tmp/tamtam-logs/review-job-id.log',
     });
-    const res = await POST(req, { params: Promise.resolve({ projectName: 'proj1' }) });
+
+    const res = await POST(req(), { params: Promise.resolve({ projectName: 'proj1' }) });
+
     expect(res.status).toBe(200);
-    const data = await res.json();
-    expect(data.status).toBe('started');
-    expect(data.job_id).toBeTruthy();
-    expect(data.log_path).toBeTruthy();
+    await expect(res.json()).resolves.toEqual({
+      status: 'started',
+      job_id: 'review-job-id',
+      pid: 12345,
+      log_path: '/tmp/tamtam-logs/review-job-id.log',
+    });
   });
 
-  it('calls startJob once', async () => {
-    const req = new NextRequest('http://localhost/api/projects/by-project/proj1/review', {
-      method: 'POST',
-    });
-    await POST(req, { params: Promise.resolve({ projectName: 'proj1' }) });
-    expect(startJobMock).toHaveBeenCalledOnce();
+  it('passes projectName through to startProjectReview', async () => {
+    startProjectReviewMock.mockResolvedValue({ ok: true, jobId: 'review-job-id', pid: 12345, logPath: '/tmp/review.log' });
+
+    await POST(req('my-proj'), { params: Promise.resolve({ projectName: 'my-proj' }) });
+
+    expect(startProjectReviewMock).toHaveBeenCalledWith('my-proj', { preferredProvider: null });
   });
 
-  it('returns 500 when startJob throws', async () => {
-    startJobMock.mockRejectedValue(new Error('pm2 start failed'));
-    const req = new NextRequest('http://localhost/api/projects/by-project/proj1/review', {
-      method: 'POST',
+  it('passes a valid preferred provider header through', async () => {
+    startProjectReviewMock.mockResolvedValue({ ok: true, jobId: 'review-job-id', pid: 12345, logPath: '/tmp/review.log' });
+
+    await POST(req('proj1', { 'x-tamtam-provider-preferred': 'codex' }), {
+      params: Promise.resolve({ projectName: 'proj1' }),
     });
-    const res = await POST(req, { params: Promise.resolve({ projectName: 'proj1' }) });
-    expect(res.status).toBe(500);
-    const data = await res.json();
-    expect(data.detail).toContain('pm2 start failed');
+
+    expect(startProjectReviewMock).toHaveBeenCalledWith('proj1', { preferredProvider: 'codex' });
   });
 
-  it('skips finished jobs when checking for running reviews', async () => {
-    const finishedJob = makeJob({ finishedAt: Date.now() / 1000, exitCode: 0 });
-    listJobsMock.mockReturnValue([finishedJob]);
+  it('drops an invalid preferred provider header', async () => {
+    startProjectReviewMock.mockResolvedValue({ ok: true, jobId: 'review-job-id', pid: 12345, logPath: '/tmp/review.log' });
 
-    const req = new NextRequest('http://localhost/api/projects/by-project/proj1/review', {
-      method: 'POST',
+    await POST(req('proj1', { 'x-tamtam-provider-preferred': 'not-a-provider' }), {
+      params: Promise.resolve({ projectName: 'proj1' }),
     });
-    const res = await POST(req, { params: Promise.resolve({ projectName: 'proj1' }) });
-    // Finished jobs should not block a new review
-    expect(res.status).toBe(200);
+
+    expect(startProjectReviewMock).toHaveBeenCalledWith('proj1', { preferredProvider: null });
   });
 
   it('returns 409 with blocking_job_id when pipeline is locked', async () => {
-    vi.resetModules();
-    vi.doMock('@/lib/shared/project-data', () => ({
-      resolveProjectPath: vi.fn().mockReturnValue('/path/to/project'),
-    }));
-    vi.doMock('@/lib/scheduling/scheduling', () => ({
-      getImproveConfig: vi.fn().mockReturnValue({ claudeBin: 'claude', logDir: '/tmp/tamtam-logs', projects: {} }),
-    }));
-    vi.doMock('@/lib/jobs/job-storage', () => ({
-      createJob: vi.fn().mockImplementation(() => makeJob()),
-      updateJob: vi.fn(),
-      listJobs: vi.fn().mockReturnValue([]),
-      probeJobStatus: vi.fn().mockResolvedValue('done'),
-    }));
-    vi.doMock('@/lib/jobs/pm2-jobs', () => ({ startJob: vi.fn().mockResolvedValue(12345) }));
-    vi.doMock('@/lib/shared/shell', () => ({
-      exec: vi.fn().mockResolvedValue({ exitCode: 0, stdout: 'M file.ts\n', stderr: '' }),
-    }));
-    vi.doMock('@/lib/skills/skills', () => ({ CODE_REVIEWER_SKILL: '/nonexistent/skill.md' }));
-    vi.doMock('@/lib/pipeline/pipeline-lock', () => ({
-      getLock: vi.fn().mockReturnValue({ project: 'proj1', lockedByJobId: 'blocker-job-99', acquiredAt: Date.now() / 1000 }),
-      acquireLock: vi.fn().mockResolvedValue({ acquired: false, lock: {}, blockingJobId: 'blocker-job-99' }),
-      isLockOwnedByActiveRelease: vi.fn().mockReturnValue(false),
-    }));
+    startProjectReviewMock.mockResolvedValue({
+      ok: false,
+      status: 409,
+      detail: 'Pipeline already running for proj1',
+      blockingJobId: 'blocker-job-99',
+    });
 
-    const mod = await import('@/app/api/projects/by-project/[projectName]/review/route');
-    const lockedPOST = mod.POST;
+    const res = await POST(req(), { params: Promise.resolve({ projectName: 'proj1' }) });
 
-    const req = new NextRequest('http://localhost/api/projects/by-project/proj1/review', { method: 'POST' });
-    const res = await lockedPOST(req, { params: Promise.resolve({ projectName: 'proj1' }) });
     expect(res.status).toBe(409);
-    const data = await res.json();
-    expect(data.blocking_job_id).toBe('blocker-job-99');
+    await expect(res.json()).resolves.toEqual({
+      detail: 'Pipeline already running for proj1',
+      blocking_job_id: 'blocker-job-99',
+    });
   });
 });

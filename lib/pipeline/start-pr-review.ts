@@ -11,12 +11,13 @@ import { exec } from '@/lib/shared/shell';
 import { CODE_REVIEWER_SKILL } from '@/lib/skills/skills';
 import { withBasePrompt, getPermissionModeFlag, getSettings } from '@/lib/shared/config';
 import { wrapUntrusted, withUntrustedPreamble } from '@/lib/shared/untrusted';
+import { detectReviewFrameworks, filterReviewFrameworkSections, formatReviewFrameworksBlock } from './review-frameworks';
 
 export type StartPrReviewResult =
   | { ok: true; jobId: string; pid: number; logPath: string }
   | { ok: false; status: number; detail: string };
 
-function loadReviewPrompt(): string {
+function loadReviewPrompt(projPath: string): string {
   let content = '';
   if (existsSync(CODE_REVIEWER_SKILL)) {
     content = readFileSync(CODE_REVIEWER_SKILL, 'utf-8');
@@ -25,7 +26,10 @@ function loadReviewPrompt(): string {
       if (end > 0) content = content.slice(end + 3).trimStart();
     }
   }
+  const frameworks = detectReviewFrameworks(projPath);
+  content = filterReviewFrameworkSections(content, frameworks);
   const { review_verdict_rules } = getSettings();
+  const frameworkBlock = formatReviewFrameworksBlock(frameworks);
   return content +
     '\n\n---\n\n' +
     'Project: {project}\n' +
@@ -37,6 +41,7 @@ function loadReviewPrompt(): string {
     'TAMTAM INTERNAL CONFIG CONTEXT:\n' +
     '- Ignore `.tamtam/` changes during review. They are TamTam scheduler/config metadata, not product code for this project.\n' +
     '- Do not raise findings about `.tamtam/agents/*.md`, `.tamtam/config.yml`, or other `.tamtam/` files unless the review task is explicitly about TamTam configuration.\n\n' +
+    frameworkBlock + '\n\n' +
     'End with a verdict: LGTM / NEEDS ATTENTION / DO NOT SHIP\n\n' +
     review_verdict_rules;
 }
@@ -86,7 +91,7 @@ export async function startPrReview(
     '{baseRef}': wrapUntrusted(baseRef, 'github_pr_ref'),
     '{diff}': wrapUntrusted(diffR.stdout, 'github_pr_diff'),
   };
-  let rendered = loadReviewPrompt();
+  let rendered = loadReviewPrompt(projPath);
   for (const [key, value] of Object.entries(substitutions)) {
     rendered = rendered.split(key).join(value);
   }

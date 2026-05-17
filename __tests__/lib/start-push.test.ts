@@ -339,7 +339,10 @@ describe('startProjectPush — push result tracking', () => {
 
   it('returns ok with "No changes to push" when not ahead of remote', async () => {
     execMock
-      .mockImplementationOnce(() => resp(0, '0'));  // git rev-list --count (not ahead)
+      .mockImplementationOnce(() => resp(0, '0'))                          // git rev-list --count (not ahead)
+      .mockImplementationOnce(() => resp(0, 'abc1234\n'))                  // git rev-parse --short HEAD
+      .mockImplementationOnce(() => resp(0, 'master\n'))                   // git branch --show-current (decidePrContext)
+      .mockImplementationOnce(() => resp(0, 'refs/remotes/origin/master\n')); // git symbolic-ref (detectMainBranch)
 
     const r = await startProjectPush('proj');
     expect(r.ok).toBe(true);
@@ -433,7 +436,10 @@ describe('startProjectPush — push result tracking', () => {
   it('does not throw when setProjectPushResult throws', async () => {
     setProjectPushResultMock.mockImplementation(() => { throw new Error('DB locked'); });
     execMock
-      .mockImplementationOnce(() => resp(0, '0'));  // git rev-list --count (not ahead)
+      .mockImplementationOnce(() => resp(0, '0'))                          // git rev-list --count (not ahead)
+      .mockImplementationOnce(() => resp(0, 'abc1234\n'))                  // git rev-parse --short HEAD
+      .mockImplementationOnce(() => resp(0, 'master\n'))                   // git branch --show-current (decidePrContext)
+      .mockImplementationOnce(() => resp(0, 'refs/remotes/origin/master\n')); // git symbolic-ref (detectMainBranch)
 
     await expect(startProjectPush('proj')).resolves.not.toThrow();
   });
@@ -542,7 +548,10 @@ describe('startProjectPush — push result tracking', () => {
     isLockOwnedByActiveReleaseMock.mockReturnValue(true);
 
     execMock
-      .mockImplementationOnce(() => resp(0, '0'));  // git rev-list --count (not ahead)
+      .mockImplementationOnce(() => resp(0, '0'))                          // git rev-list --count (not ahead)
+      .mockImplementationOnce(() => resp(0, 'abc1234\n'))                  // git rev-parse --short HEAD
+      .mockImplementationOnce(() => resp(0, 'master\n'))                   // git branch --show-current (decidePrContext)
+      .mockImplementationOnce(() => resp(0, 'refs/remotes/origin/master\n')); // git symbolic-ref (detectMainBranch)
 
     const r = await startProjectPush('proj');
     expect(r.ok).toBe(true);

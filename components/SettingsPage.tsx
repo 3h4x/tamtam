@@ -1,6 +1,6 @@
 'use client'
 
-import { useState, useEffect, useCallback } from 'react'
+import { useState, useEffect, useCallback, useRef } from 'react'
 import { useRouter } from 'next/navigation'
 import { errMsg } from '@/lib/shared/types'
 import { FIELDS, DEFAULTS, GRID_COLS } from '@/components/settings/constants'
@@ -254,16 +254,19 @@ export function SettingsPage({ initialTab }: { initialTab?: TabId } = {}) {
     }
   }, [saving, settings, loadProjects, trustedGithubUsersError])
 
+  const canSaveRef = useRef(canSave)
+  canSaveRef.current = canSave
+
   useEffect(() => {
     const handler = (e: KeyboardEvent) => {
       if ((e.metaKey || e.ctrlKey) && e.key === 's') {
         e.preventDefault()
-        if (canSave) handleSave()
+        if (canSaveRef.current) handleSave()
       }
     }
     window.addEventListener('keydown', handler)
     return () => window.removeEventListener('keydown', handler)
-  }, [canSave, handleSave])
+  }, [handleSave])
 
   const handleChange = (key: keyof SettingsMap, value: string) => {
     setSettings((prev) => {

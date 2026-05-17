@@ -78,7 +78,7 @@ This is a defensive last-mile filter, not a complete secret-management system. I
 
 - **Lock file**: always commit `pnpm-lock.yaml`. Never bypass `--frozen-lockfile` or use `--no-lockfile`. Use `pnpm` for all manifest/lockfile changes — `npm install`, `yarn add`, or any other PM that can desync `pnpm-lock.yaml` are forbidden.
 - **Install scripts**: inspect `postinstall`, `prepare`, `preinstall`, `install` scripts before adding or updating any dependency. Treat them as arbitrary code execution.
-- **Allowed build scripts**: `package.json` pins `pnpm.onlyBuiltDependencies` to `[esbuild, sharp, unrs-resolver]`. Do not add without explicit user approval.
+- **Allowed build scripts**: `package.json` pins `pnpm.onlyBuiltDependencies` to `[esbuild, sharp, unrs-resolver]`, and `pnpm-workspace.yaml` pins the explicit build allow/deny list. Puppeteer's install script is denied, so tools that need Chrome/Chromium must use an existing system browser or a committed fallback artifact. Do not add allowed build scripts without explicit user approval.
 - **No silent additions**: every new dependency requires user approval and a justification in the commit message. Prefer packages with > 1M weekly downloads and > 1 year history. Inspect the npm registry entry for maintainer continuity — sudden ownership flips, very-recent first publishes, or thin version history are blockers unless the user explicitly accepts the risk.
 - **Audit after changes**: run `pnpm audit` after any `pnpm add`/`pnpm remove`/`pnpm up`/`pnpm update`/`pnpm dedupe` or manual lockfile refresh. Fix or document high-severity findings before committing.
 - **Never bypass git hooks**: do not pass `--no-verify` to `git commit`. If a pre-push hook fails, fix the root cause.
