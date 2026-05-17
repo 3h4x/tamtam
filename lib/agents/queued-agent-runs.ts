@@ -89,10 +89,14 @@ export async function listQueuedAgentRunProjects(): Promise<string[]> {
   }
 }
 
-export function removeQueuedAgentRun(id: number): void {
-  void db.delete(schema.queuedAgentRuns)
+export async function deleteQueuedAgentRun(id: number): Promise<void> {
+  await db.delete(schema.queuedAgentRuns)
     .where(eq(schema.queuedAgentRuns.id, id))
-    .execute()
+    .execute();
+}
+
+export function removeQueuedAgentRun(id: number): void {
+  void deleteQueuedAgentRun(id)
     .catch((e) => console.error('[queued-agent-runs] remove failed:', e));
 }
 
@@ -209,7 +213,7 @@ export async function drainQueuedAgentRunsForProject(project: string): Promise<v
           }
           // 200: started. 202: another agent is running — handed off to
           // in-memory queue which will drain when that agent finishes.
-          removeQueuedAgentRun(entry.id);
+          await deleteQueuedAgentRun(entry.id);
           console.log(`[queued-agent-runs] drained ${entry.agentName} for ${project} (${r.status})`);
           continue;
         }
@@ -222,14 +226,14 @@ export async function drainQueuedAgentRunsForProject(project: string): Promise<v
             );
             continue;
           }
-          removeQueuedAgentRun(entry.id);
+          await deleteQueuedAgentRun(entry.id);
           console.warn(
             `[queued-agent-runs] dropping ${entry.agentName} for ${project}: ${r.status} ${(parsed?.code ?? 'terminal_409')} ${(parsed?.detail ?? raw).slice(0, 200)}`,
           );
           continue;
         }
         if (r.status === 400 || r.status === 404) {
-          removeQueuedAgentRun(entry.id);
+          await deleteQueuedAgentRun(entry.id);
           const body = await r.text().catch(() => '');
           console.warn(`[queued-agent-runs] dropping ${entry.agentName} for ${project}: ${r.status} ${body.slice(0, 200)}`);
           continue;

@@ -49,10 +49,14 @@ export interface TamTamConfig {
   cli_bin_codex: string;
   cli_bin_gemini: string;
   cli_bin_lmstudio: string;
+  cli_bin_deepagents: string;
+  cli_deepagents_backend: string;
+  cli_deepagents_base_url: string;
   cli_default_model_claude: string;
   cli_default_model_codex: string;
   cli_default_model_gemini: string;
   cli_default_model_lmstudio: string;
+  cli_default_model_deepagents: string;
   provider_fallback_chain: CliProvider[];
   log_dir: string;
   frequency: string;
@@ -138,10 +142,14 @@ const DEFAULTS: TamTamConfig = {
   cli_bin_codex: '',
   cli_bin_gemini: '',
   cli_bin_lmstudio: '',
+  cli_bin_deepagents: '',
+  cli_deepagents_backend: 'lmstudio',
+  cli_deepagents_base_url: '',
   cli_default_model_claude: 'normal',
   cli_default_model_codex: 'normal',
   cli_default_model_gemini: 'normal',
   cli_default_model_lmstudio: 'normal',
+  cli_default_model_deepagents: 'normal',
   provider_fallback_chain: [],
   log_dir: './data/logs',
   frequency: '1h',
@@ -221,8 +229,8 @@ export async function initSettings(): Promise<void> {
   await _doSettingsRefresh();
 }
 
-const VALID_CLAUDE_PROVIDERS = new Set(['claude', 'gemini', 'lmstudio', 'codex', 'custom']);
-const PROJECT_MEMORY_PROVIDERS = new Set(['gemini', 'lmstudio', 'codex']);
+const VALID_CLAUDE_PROVIDERS = new Set(['claude', 'gemini', 'lmstudio', 'codex', 'deepagents', 'custom']);
+const PROJECT_MEMORY_PROVIDERS = new Set(['gemini', 'lmstudio', 'codex', 'deepagents']);
 
 function shimPath(name: string): string {
   return join(process.env.TAMTAM_ROOT || process.cwd(), 'scripts', name);
@@ -230,7 +238,7 @@ function shimPath(name: string): string {
 
 function isShimPath(bin: string | undefined): boolean {
   if (!bin) return false;
-  return /scripts\/(claude|gemini|lmstudio|codex)-shim\.js$/.test(bin);
+  return /scripts\/(claude|gemini|lmstudio|codex|deepagents)-shim\.js$/.test(bin);
 }
 
 function inferClaudeProvider(claudeBin: string | undefined): string {
@@ -238,6 +246,7 @@ function inferClaudeProvider(claudeBin: string | undefined): string {
   if (claudeBin.endsWith('/scripts/gemini-shim.js') || claudeBin.endsWith('scripts/gemini-shim.js')) return 'gemini';
   if (claudeBin.endsWith('/scripts/lmstudio-shim.js') || claudeBin.endsWith('scripts/lmstudio-shim.js')) return 'lmstudio';
   if (claudeBin.endsWith('/scripts/codex-shim.js') || claudeBin.endsWith('scripts/codex-shim.js')) return 'codex';
+  if (claudeBin.endsWith('/scripts/deepagents-shim.js') || claudeBin.endsWith('scripts/deepagents-shim.js')) return 'deepagents';
   if (claudeBin.endsWith('/scripts/claude-shim.js') || claudeBin.endsWith('scripts/claude-shim.js')) return 'claude';
   if (claudeBin === DEFAULTS.claude_bin || claudeBin.endsWith('/claude') || claudeBin === 'claude') return 'claude';
   return 'custom';
@@ -250,7 +259,7 @@ function resolveEnabledProviders(raw: string | undefined, legacyProvider: string
   // one-element enabled set so existing installs keep working until the user
   // saves the CLI tab for the first time. `custom` is mapped to `claude` since
   // we don't track it as a routable provider in the new model.
-  if (legacyProvider === 'codex' || legacyProvider === 'gemini' || legacyProvider === 'lmstudio') {
+  if (legacyProvider === 'codex' || legacyProvider === 'gemini' || legacyProvider === 'lmstudio' || legacyProvider === 'deepagents') {
     return [legacyProvider];
   }
   return ['claude'];
@@ -267,6 +276,7 @@ function resolveClaudeBin(provider: string, storedBin: string | undefined): stri
   if (provider === 'gemini') return shimPath('gemini-shim.js');
   if (provider === 'lmstudio') return shimPath('lmstudio-shim.js');
   if (provider === 'codex') return shimPath('codex-shim.js');
+  if (provider === 'deepagents') return shimPath('deepagents-shim.js');
   // The Claude CLI doesn't accept TamTam's tier names (`fast`/`normal`/`smart`)
   // for `--model`. Route through scripts/claude-shim.js, which translates the
   // tier name to a Claude alias and execs the real binary (default
@@ -344,10 +354,14 @@ export function buildConfigFromSettingsMap(map: Record<string, string>): TamTamC
     cli_bin_codex: map.cli_bin_codex ?? DEFAULTS.cli_bin_codex,
     cli_bin_gemini: map.cli_bin_gemini ?? DEFAULTS.cli_bin_gemini,
     cli_bin_lmstudio: map.cli_bin_lmstudio ?? DEFAULTS.cli_bin_lmstudio,
+    cli_bin_deepagents: map.cli_bin_deepagents ?? DEFAULTS.cli_bin_deepagents,
+    cli_deepagents_backend: map.cli_deepagents_backend === 'ollama' ? 'ollama' : DEFAULTS.cli_deepagents_backend,
+    cli_deepagents_base_url: map.cli_deepagents_base_url ?? DEFAULTS.cli_deepagents_base_url,
     cli_default_model_claude: normalizeModelInput(map.cli_default_model_claude, 'normal'),
     cli_default_model_codex: normalizeModelInput(map.cli_default_model_codex, 'normal'),
     cli_default_model_gemini: normalizeModelInput(map.cli_default_model_gemini, 'normal'),
     cli_default_model_lmstudio: normalizeModelInput(map.cli_default_model_lmstudio, 'normal'),
+    cli_default_model_deepagents: normalizeModelInput(map.cli_default_model_deepagents, 'normal'),
     provider_fallback_chain: parseEnabledProviders(map.provider_fallback_chain),
     log_dir: map.log_dir ?? DEFAULTS.log_dir,
     frequency: map.frequency ?? DEFAULTS.frequency,

@@ -19,11 +19,12 @@ const DEFAULT_SHIM: Record<CliProvider, string> = {
   codex: 'codex-shim.js',
   gemini: 'gemini-shim.js',
   lmstudio: 'lmstudio-shim.js',
+  deepagents: 'deepagents-shim.js',
 };
 
 function isShimPath(bin: string | undefined): boolean {
   if (!bin) return false;
-  return /scripts\/(claude|gemini|lmstudio|codex)-shim\.js$/.test(bin);
+  return /scripts\/(claude|gemini|lmstudio|codex|deepagents)-shim\.js$/.test(bin);
 }
 
 /**
@@ -43,6 +44,16 @@ export function resolveCliBin(provider: CliProvider, _settings: TamTamConfig): s
  * Claude executable paths are forwarded via `CLAUDE_BIN`.
  */
 export function resolveCliEnv(provider: CliProvider, settings: TamTamConfig): Record<string, string> {
+  if (provider === 'deepagents') {
+    const env: Record<string, string> = {};
+    const override = settings.cli_bin_deepagents.trim();
+    if (override && !isShimPath(override)) env.DEEPAGENTS_BIN = expandHome(override);
+    env.DEEPAGENTS_BACKEND = settings.cli_deepagents_backend === 'ollama' ? 'ollama' : 'lmstudio';
+    const baseUrl = settings.cli_deepagents_base_url.trim();
+    if (baseUrl) env.DEEPAGENTS_BASE_URL = baseUrl;
+    return env;
+  }
+
   const overrideKey = `cli_bin_${provider}` as keyof TamTamConfig;
   const override = settings[overrideKey];
   if (typeof override === 'string' && override.trim().length > 0 && !isShimPath(override)) {

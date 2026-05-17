@@ -25,10 +25,14 @@ function makeSettings(overrides: Partial<TamTamConfig> = {}): TamTamConfig {
     cli_bin_codex: '',
     cli_bin_gemini: '',
     cli_bin_lmstudio: '',
+    cli_bin_deepagents: '',
+    cli_deepagents_backend: 'lmstudio',
+    cli_deepagents_base_url: '',
     cli_default_model_claude: 'normal',
     cli_default_model_codex: 'normal',
     cli_default_model_gemini: 'normal',
     cli_default_model_lmstudio: 'normal',
+    cli_default_model_deepagents: 'normal',
     provider_fallback_chain: [],
     log_dir: './data/logs',
     frequency: '1h',
@@ -111,6 +115,7 @@ describe('resolveCliBin', () => {
     expect(resolveCliBin('codex', settings)).toBe('/tmp/tamtam-root/scripts/codex-shim.js');
     expect(resolveCliBin('gemini', settings)).toBe('/tmp/tamtam-root/scripts/gemini-shim.js');
     expect(resolveCliBin('lmstudio', settings)).toBe('/tmp/tamtam-root/scripts/lmstudio-shim.js');
+    expect(resolveCliBin('deepagents', settings)).toBe('/tmp/tamtam-root/scripts/deepagents-shim.js');
   });
 
   it('keeps non-Claude providers on the bundled shim even when an override is set', () => {
@@ -172,6 +177,20 @@ describe('resolveCliBin', () => {
       .toEqual({ CLAUDE_BIN: '/abs/claude' });
     expect(resolveCliEnv('lmstudio', makeSettings({ cli_bin_lmstudio: 'http://lmstudio.internal:1234' })))
       .toEqual({ LMSTUDIO_BASE_URL: 'http://lmstudio.internal:1234' });
+  });
+
+  it('forwards Deep Agents executable and backend settings through env', () => {
+    const settings = makeSettings({
+      cli_bin_deepagents: '/opt/bin/deepagents',
+      cli_deepagents_backend: 'ollama',
+      cli_deepagents_base_url: 'http://ollama.internal:11434',
+    });
+    expect(resolveCliBin('deepagents', settings)).toBe('/tmp/tamtam-root/scripts/deepagents-shim.js');
+    expect(resolveCliEnv('deepagents', settings)).toEqual({
+      DEEPAGENTS_BIN: '/opt/bin/deepagents',
+      DEEPAGENTS_BACKEND: 'ollama',
+      DEEPAGENTS_BASE_URL: 'http://ollama.internal:11434',
+    });
   });
 });
 

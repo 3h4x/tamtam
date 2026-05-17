@@ -148,10 +148,14 @@ const SETTING_KEYS = [
   'cli_bin_codex',
   'cli_bin_gemini',
   'cli_bin_lmstudio',
+  'cli_bin_deepagents',
+  'cli_deepagents_backend',
+  'cli_deepagents_base_url',
   'cli_default_model_claude',
   'cli_default_model_codex',
   'cli_default_model_gemini',
   'cli_default_model_lmstudio',
+  'cli_default_model_deepagents',
   'provider_fallback_chain',
   'log_dir',
   'frequency',
@@ -244,7 +248,8 @@ function serializeSettingValue(key: string, value: unknown): string {
     key === 'cli_default_model_claude' ||
     key === 'cli_default_model_codex' ||
     key === 'cli_default_model_gemini' ||
-    key === 'cli_default_model_lmstudio'
+    key === 'cli_default_model_lmstudio' ||
+    key === 'cli_default_model_deepagents'
   ) {
     return normalizeModelInput(String(value), 'normal');
   }
@@ -254,6 +259,7 @@ function serializeSettingValue(key: string, value: unknown): string {
   if (key === 'permission_mode') {
     return normalizePermissionMode(String(value));
   }
+
   if (key === 'review_do_not_ship_action') {
     const parsed = parseReviewDoNotShipActionSetting(value);
     return parsed.value ?? 'pass';
@@ -335,6 +341,12 @@ function validateAndSerializeSettingValue(
 
   if (key === 'review_do_not_ship_action') {
     return parseReviewDoNotShipActionSetting(value);
+  }
+
+  if (key === 'cli_deepagents_backend') {
+    const raw = String(value).trim();
+    if (raw === 'lmstudio' || raw === 'ollama') return { value: raw, error: null };
+    return { value: null, error: 'cli_deepagents_backend must be one of: lmstudio, ollama.' };
   }
 
   if (key === 'retrieval_context_limit') {

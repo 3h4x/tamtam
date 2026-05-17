@@ -34,7 +34,7 @@ Agents are reusable automation units that combine skills, optional attached proj
 | `schedule` | string | `null` | Run interval for scheduling: `"30m"`, `"1h"`, `"8h"`, etc. or `null` for manual only |
 | `runner` | string | `pm2` | Compatibility metadata retained for existing rows; current recurring schedules are graphile-worker backed regardless of value |
 | `enabled` | boolean | `true` | Enable/disable without deletion |
-| `provider` | string \| null | `null` | Optional required CLI provider (`claude`, `codex`, `gemini`, `lmstudio`). `null` means "any enabled provider". When set, the run fails closed if that provider is disabled or over budget. |
+| `provider` | string \| null | `null` | Optional required CLI provider (`claude`, `codex`, `gemini`, `lmstudio`, `deepagents`). `null` means "any enabled provider". When set, the run fails closed if that provider is disabled or over budget. |
 | `fallbackEnabled` | boolean | `false` | Opts the agent into one transient provider fallback retry using `provider_fallback_chain`. Built-in recommended agents are created with this enabled. |
 | `prerequisiteCommand` | string \| null | `null` | Optional `bash -c` command run in the project directory before the agent CLI starts. Output is captured to a prerequisite artifact and prepended to the agent prompt. |
 | `createdAt` | number | — | Unix timestamp (seconds) |

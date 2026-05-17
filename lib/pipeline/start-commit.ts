@@ -5,6 +5,7 @@ import { exec } from '@/lib/shared/shell';
 import { getSettings, getPipelineModel, getPermissionModeFlag } from '@/lib/shared/config';
 import { getImproveConfig, setProjectPushResult } from '@/lib/scheduling/scheduling';
 import { resolveCliBin, resolveCliEnv } from '@/lib/shared/cli-bin';
+import { isCliProvider } from '@/lib/usage/cli-providers';
 import { checkCliStartGate } from '@/lib/usage/resolve-provider';
 import { currentParent } from '@/lib/jobs/parent-context';
 import { buildDiffContext } from '@/lib/git/diff-context';
@@ -74,11 +75,12 @@ Return ONLY the title — nothing else.${extra}`;
   // generateCommitMessage is also called inline (not via job spawn), so it
   // accepts an explicit provider for inheritance; if absent, falls back to
   // the legacy claude_bin path so older direct callers keep working.
-  const claudeBin = providerOverride && providerOverride.length > 0
-    ? resolveCliBin(providerOverride as 'claude' | 'codex' | 'gemini' | 'lmstudio', settings)
+  const provider = isCliProvider(providerOverride) ? providerOverride : null;
+  const claudeBin = provider
+    ? resolveCliBin(provider, settings)
     : getImproveConfig().claudeBin;
-  const cliEnv = providerOverride && providerOverride.length > 0
-    ? resolveCliEnv(providerOverride as 'claude' | 'codex' | 'gemini' | 'lmstudio', settings)
+  const cliEnv = provider
+    ? resolveCliEnv(provider, settings)
     : {};
 
   // --system-prompt replaces the injected CLAUDE.md/git-history system prompt so the

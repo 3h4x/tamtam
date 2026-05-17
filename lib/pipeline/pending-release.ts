@@ -23,10 +23,17 @@ function keyFor(project: string): string {
   return `${PREFIX}${project}`;
 }
 
+function parseQueuedAt(value: string): number | null {
+  const n = Number(value);
+  if (!Number.isFinite(n) || n <= 1) return null;
+  return n * 1000;
+}
+
 export function setPendingRelease(project: string): void {
+  const queuedAt = String(Date.now() / 1000);
   void db.insert(schema.settings)
-    .values({ key: keyFor(project), value: '1' })
-    .onConflictDoUpdate({ target: schema.settings.key, set: { value: '1' } })
+    .values({ key: keyFor(project), value: queuedAt })
+    .onConflictDoUpdate({ target: schema.settings.key, set: { value: queuedAt } })
     .execute()
     .catch((e) => {
       console.error('[pending-release] failed to set flag for', project, e);
@@ -40,25 +47,36 @@ export async function getPendingRelease(project: string): Promise<boolean> {
       .from(schema.settings)
       .where(eq(schema.settings.key, keyFor(project)))
       .limit(1);
-    return rows[0]?.value === '1';
+    return !!rows[0]?.value;
   } catch {
     return false;
   }
 }
 
 export function clearPendingRelease(project: string): void {
-  void db.delete(schema.settings).where(eq(schema.settings.key, keyFor(project))).execute().catch(() => { /* non-fatal */ });
+  void deletePendingRelease(project).catch(() => { /* non-fatal */ });
+}
+
+export async function deletePendingRelease(project: string): Promise<void> {
+  await db.delete(schema.settings).where(eq(schema.settings.key, keyFor(project))).execute();
 }
 
 export async function listPendingReleaseProjects(): Promise<string[]> {
+  return (await listPendingReleases()).map((entry) => entry.project);
+}
+
+export async function listPendingReleases(): Promise<Array<{ project: string; queuedAt: number | null }>> {
   try {
     const rows = await db
       .select()
       .from(schema.settings)
       .where(like(schema.settings.key, `${PREFIX}%`));
     return rows
-      .filter((r) => r.value === '1')
-      .map((r) => r.key.slice(PREFIX.length));
+      .filter((r) => !!r.value)
+      .map((r) => ({
+        project: r.key.slice(PREFIX.length),
+        queuedAt: parseQueuedAt(r.value),
+      }));
   } catch {
     return [];
   }
@@ -85,8 +103,8 @@ export function shouldKeepPendingRelease(result: { ok: boolean; status?: number;
 // re-queues the release so the next recovery path can retry it.
 export async function drainPendingRelease(project: string): Promise<void> {
   if (!(await getPendingRelease(project))) return;
-  clearPendingRelease(project);
   try {
+    await deletePendingRelease(project);
     const { dispatchReleaseWorkflow } = await import('@/lib/workflows/dispatch-release');
     const r = await dispatchReleaseWorkflow(project);
     if (r.ok) {
