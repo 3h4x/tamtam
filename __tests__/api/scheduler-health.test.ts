@@ -172,12 +172,14 @@ describe('GET /api/agents/scheduler-health', () => {
 
     vi.doMock('graphile-worker', () => ({ quickAddJob: quickAddJobMock }));
     vi.doMock('pg', () => ({
-      Pool: vi.fn().mockImplementation(() => ({
-        query: vi.fn(async () => ({
-          rows: [...queuedJobKeys].map((key) => ({ key })),
-        })),
-        end: vi.fn(async () => undefined),
-      })),
+      Pool: vi.fn().mockImplementation(function () {
+        return {
+          query: vi.fn(async () => ({
+            rows: [...queuedJobKeys].map((key) => ({ key })),
+          })),
+          end: vi.fn(async () => undefined),
+        };
+      }),
     }));
     vi.doMock('@/lib/db', () => ({ db: sharedHandle.db, schema }));
     vi.doMock('@/lib/shared/shell', () => ({ exec: vi.fn().mockResolvedValue({ exitCode: 0, stdout: '', stderr: '' }) }));
@@ -279,12 +281,14 @@ describe('GET /api/agents/scheduler-health', () => {
 
     vi.doMock('graphile-worker', () => ({ quickAddJob: quickAddJobMock }));
     vi.doMock('pg', () => ({
-      Pool: vi.fn().mockImplementation(() => ({
-        query: vi.fn(async () => ({
-          rows: [...queuedJobKeys].map((key) => ({ key })),
-        })),
-        end: vi.fn(async () => undefined),
-      })),
+      Pool: vi.fn().mockImplementation(function () {
+        return {
+          query: vi.fn(async () => ({
+            rows: [...queuedJobKeys].map((key) => ({ key })),
+          })),
+          end: vi.fn(async () => undefined),
+        };
+      }),
     }));
     vi.doMock('@/lib/db', () => ({ db: sharedHandle.db, schema }));
     vi.doMock('@/lib/shared/shell', () => ({ exec: vi.fn().mockResolvedValue({ exitCode: 0, stdout: '', stderr: '' }) }));
@@ -328,12 +332,14 @@ describe('GET /api/agents/scheduler-health', () => {
 
     vi.doMock('graphile-worker', () => ({ quickAddJob: quickAddJobMock }));
     vi.doMock('pg', () => ({
-      Pool: vi.fn().mockImplementation(() => ({
-        query: vi.fn(async () => ({
-          rows: [...queuedJobKeys].map((key) => ({ key })),
-        })),
-        end: vi.fn(async () => undefined),
-      })),
+      Pool: vi.fn().mockImplementation(function () {
+        return {
+          query: vi.fn(async () => ({
+            rows: [...queuedJobKeys].map((key) => ({ key })),
+          })),
+          end: vi.fn(async () => undefined),
+        };
+      }),
     }));
     vi.doMock('@/lib/db', () => ({ db: sharedHandle.db, schema }));
     vi.doMock('@/lib/shared/shell', () => ({ exec: vi.fn().mockResolvedValue({ exitCode: 0, stdout: '', stderr: '' }) }));

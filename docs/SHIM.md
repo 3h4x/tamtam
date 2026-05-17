@@ -80,9 +80,10 @@ Settings → Workspace → **Agent CLI Provider** controls which binary TamTam i
 - `gemini` — TamTam resolves the binary to `<TamTam>/scripts/gemini-shim.js` automatically; the Claude CLI Path field is read-only
 - `lmstudio` — TamTam resolves the binary to `<TamTam>/scripts/lmstudio-shim.js` automatically
 - `codex` — TamTam resolves the binary to `<TamTam>/scripts/codex-shim.js` automatically
+- `deepagents` — TamTam resolves the binary to `<TamTam>/scripts/deepagents-shim.js` automatically and forwards the configured Deep Agents Code executable/backend through env
 - `custom` — uses the path in **Claude CLI Path** verbatim (for forks of the Claude CLI or wrapper scripts)
 
-Switching the provider away from `gemini`/`lmstudio`/`codex` clears any leftover shim path from the Claude CLI Path field so a stale `…/scripts/gemini-shim.js` doesn't keep getting executed under the `claude` provider. `lib/config.ts` enforces the same rule on the server side: a shim path stored under `claude` or `custom` is treated as unset and falls back to the default.
+Switching the provider away from `gemini`/`lmstudio`/`codex`/`deepagents` clears any leftover shim path from the Claude CLI Path field so a stale `…/scripts/gemini-shim.js` doesn't keep getting executed under the `claude` provider. `lib/config.ts` enforces the same rule on the server side: a shim path stored under `claude` or `custom` is treated as unset and falls back to the default.
 
 ## Codex CLI Shim
 
@@ -184,4 +185,46 @@ For plain `--print` calls without `--output-format stream-json`, the shim writes
 LMSTUDIO_MODEL=qwen3-coder node scripts/lmstudio-shim.js --print --model fast -p "Write one sentence."
 LMSTUDIO_MODEL=qwen3-coder node scripts/lmstudio-shim.js --print --output-format stream-json --model normal < prompt.txt
 LMSTUDIO_MODEL=qwen3-coder node scripts/lmstudio-shim.js --print --output-format stream-json --model normal --resume resp_abc123 < followup.txt
+```
+
+## Deep Agents Shim
+
+The `scripts/deepagents-shim.js` script launches the Deep Agents Code CLI (`dcode`) in non-interactive mode and translates its stdout into Claude-style `stream-json` events. It is intended for local model setups that need an agentic loop on top of LM Studio or Ollama instead of TamTam's direct one-shot LM Studio chat call.
+
+Install Deep Agents Code:
+
+```bash
+uv tool install deepagents-code
+```
+
+Settings → CLI exposes Deep Agents as its own provider. Configure:
+
+- executable override: optional path forwarded as `DEEPAGENTS_BIN`; defaults to `dcode`
+- backend: `lmstudio` or `ollama`, forwarded as `DEEPAGENTS_BACKEND`
+- backend base URL: forwarded as `DEEPAGENTS_BASE_URL`
+- default model tier: `fast`, `normal`, or `smart`; per-tier model names come from environment variables
+
+Environment variables:
+
+```bash
+DEEPAGENTS_BACKEND=lmstudio
+DEEPAGENTS_BASE_URL=http://127.0.0.1:1234
+DEEPAGENTS_MODEL=your-local-model
+
+# Optional per-tier aliases:
+DEEPAGENTS_FAST_MODEL=your-fast-model
+DEEPAGENTS_NORMAL_MODEL=your-default-model
+DEEPAGENTS_SMART_MODEL=your-largest-model
+
+# Optional command policy for non-interactive shell use:
+DEEPAGENTS_SHELL_ALLOW_LIST=recommended
+```
+
+For LM Studio, the shim uses Deep Agents' OpenAI-compatible provider with a normalized `/v1` base URL and a placeholder local API key when no `OPENAI_API_KEY` is already set. For Ollama, it uses `ollama:<model>` and forwards the base URL as `OLLAMA_HOST`. `acceptEdits` launches Deep Agents with `--auto-approve -S recommended`; `bypassPermissions` uses `-S all`; `plan` omits shell approval flags.
+
+Manual usage:
+
+```bash
+DEEPAGENTS_MODEL=qwen3-coder node scripts/deepagents-shim.js --print --model fast -p "Write one sentence."
+DEEPAGENTS_BACKEND=ollama DEEPAGENTS_MODEL=qwen3:8b node scripts/deepagents-shim.js --print --output-format stream-json --model normal < prompt.txt
 ```

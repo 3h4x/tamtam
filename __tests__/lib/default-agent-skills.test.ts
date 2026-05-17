@@ -43,6 +43,7 @@ async function applyDdl(h: TestDbHandle): Promise<void> {
       model text NOT NULL DEFAULT 'sonnet',
       prompt text NOT NULL DEFAULT '',
       schedule text,
+      runner text NOT NULL DEFAULT 'pm2',
       enabled boolean NOT NULL DEFAULT true,
       provider text,
       prerequisite_command text,

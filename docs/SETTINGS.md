@@ -83,15 +83,19 @@ Manual sync behavior:
 |-----|------|---------|--------|
 | `claude_provider` | string | `claude` | Legacy compatibility field. When the CLI tab saves `cli_enabled_providers`, TamTam syncs this to the first enabled provider so older “active provider” code paths keep matching the new routing model |
 | `claude_bin` | string | `~/.local/bin/claude` | Legacy Claude executable path; when this is the only Claude-specific setting TamTam still routes through `scripts/claude-shim.js` and forwards the stored path via `CLAUDE_BIN` |
-| `cli_enabled_providers` | string | `'claude'` | Comma-separated enabled provider set for routing top-level runs. Valid values: `claude`, `codex`, `gemini`, `lmstudio` |
+| `cli_enabled_providers` | string | `'claude'` | Comma-separated enabled provider set for routing top-level runs. Valid values: `claude`, `codex`, `gemini`, `lmstudio`, `deepagents` |
 | `cli_bin_claude` | string | `''` | Optional underlying Claude executable path. TamTam still launches the bundled `scripts/claude-shim.js` so shared `fast` / `normal` / `smart` tiers keep working |
 | `cli_bin_codex` | string | `''` | Optional underlying Codex executable path. TamTam still launches the bundled `scripts/codex-shim.js` and forwards this path via `CODEX_BIN` |
 | `cli_bin_gemini` | string | `''` | Optional underlying Gemini executable path. TamTam still launches the bundled `scripts/gemini-shim.js` and forwards this path via `GEMINI_BIN` |
 | `cli_bin_lmstudio` | string | `''` | Optional LM Studio server URL override. TamTam still launches the bundled `scripts/lmstudio-shim.js`; when this value looks like `http://...` or `https://...` it is forwarded via `LMSTUDIO_BASE_URL` |
+| `cli_bin_deepagents` | string | `''` | Optional Deep Agents Code executable path. TamTam still launches the bundled `scripts/deepagents-shim.js` and forwards this path via `DEEPAGENTS_BIN`; when unset, the shim runs `dcode` |
+| `cli_deepagents_backend` | string | `lmstudio` | Local backend used by the Deep Agents shim. Valid values: `lmstudio`, `ollama` |
+| `cli_deepagents_base_url` | string | `''` | Optional local backend URL forwarded to the Deep Agents shim as `DEEPAGENTS_BASE_URL` |
 | `cli_default_model_claude` | string | `normal` | Per-provider default tier, normalized to `fast` / `normal` / `smart`; used by launch paths that do not receive an explicit model override |
 | `cli_default_model_codex` | string | `normal` | Per-provider default tier, normalized to `fast` / `normal` / `smart`; used by launch paths that do not receive an explicit model override |
 | `cli_default_model_gemini` | string | `normal` | Per-provider default tier, normalized to `fast` / `normal` / `smart`; used by launch paths that do not receive an explicit model override |
 | `cli_default_model_lmstudio` | string | `normal` | Per-provider default tier, normalized to `fast` / `normal` / `smart`; used by launch paths that do not receive an explicit model override |
+| `cli_default_model_deepagents` | string | `normal` | Per-provider default tier, normalized to `fast` / `normal` / `smart`; used by launch paths that do not receive an explicit model override |
 | `permission_mode` | string | `acceptEdits` | Passed as `--permission-mode` for headless CLI runs. Allowed: `acceptEdits`, `auto`, `bypassPermissions`, `default`, `dontAsk`, `plan`. Invalid values are rejected on write and normalized to `acceptEdits` on read. `acceptEdits` is the safe unattended default across the bundled Claude, Gemini, and Codex shims; `auto` preserves provider-native behavior and may still block unattended runs on CLIs that prompt for write approval |
 | `default_model` | string | `fast` | Pre-selected semantic tier in the terminal UI. Primary options: `fast`, `normal`, `smart`. Legacy `haiku`, `sonnet`, `opus` values are still accepted and normalized. |
 
@@ -331,8 +335,10 @@ github_board_status_option_ids, github_board_custom_field_ids,
 trusted_github_users,
 claude_provider, claude_bin, lmstudio_model, cli_enabled_providers,
 cli_bin_claude, cli_bin_codex, cli_bin_gemini, cli_bin_lmstudio,
+cli_bin_deepagents, cli_deepagents_backend, cli_deepagents_base_url,
 cli_default_model_claude, cli_default_model_codex,
-cli_default_model_gemini, cli_default_model_lmstudio, log_dir,
+cli_default_model_gemini, cli_default_model_lmstudio,
+cli_default_model_deepagents, log_dir,
 frequency, daytime, weekends, launchagent_prefix, workspace_path,
 base_prompt, default_model, permission_mode, commit_style,
 review_verdict_rules, jobs_paused,
