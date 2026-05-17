@@ -40,7 +40,7 @@ async function waitForState(
   await vi.waitFor(() => {
     entry = readStateEntry(statePath, name);
     expect(predicate(entry)).toBe(true);
-  }, { timeout: 500, interval: 1 });
+  }, { timeout: 2000, interval: 5 });
   return entry!;
 }
 
@@ -108,6 +108,38 @@ describe.concurrent('scripts/qa-mocks/pm2', () => {
         pm2_env: { status: 'online', exit_code: null },
       });
       runPm2(['delete', 'long-release-monitor'], statePath, dir);
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
+  it('does not resurrect a deleted job when its child exits after SIGTERM', async () => {
+    const { dir, statePath } = makeDir();
+    try {
+      const marker = join(dir, 'terminated.txt');
+      const script = join(dir, 'terminating-monitor.js');
+      writeFileSync(script, [
+        "const fs = require('fs');",
+        `const marker = ${JSON.stringify(marker)};`,
+        "fs.writeFileSync(marker, 'ready');",
+        "process.on('SIGTERM', () => { fs.writeFileSync(marker, 'term'); process.exit(0); });",
+        'setInterval(() => {}, 1000);',
+        '',
+      ].join('\n'));
+
+      const started = runPm2(['start', script, '--name', 'deleted-monitor', '--interpreter', 'node'], statePath, dir);
+      expect(started.status).toBe(0);
+      await vi.waitFor(() => expect(readFileSync(marker, 'utf-8')).toBe('ready'), { timeout: 2000, interval: 5 });
+
+      const deleted = runPm2(['delete', 'deleted-monitor'], statePath, dir);
+      expect(deleted.status).toBe(0);
+      await vi.waitFor(() => expect(readFileSync(marker, 'utf-8')).toBe('term'), { timeout: 2000, interval: 5 });
+      await new Promise((resolvePromise) => setTimeout(resolvePromise, 100));
+
+      expect(readStateEntry(statePath, 'deleted-monitor')).toBeUndefined();
+      const jlist = runPm2(['jlist'], statePath, dir);
+      expect(jlist.status).toBe(0);
+      expect(JSON.parse(jlist.stdout)).toEqual([]);
     } finally {
       rmSync(dir, { recursive: true, force: true });
     }

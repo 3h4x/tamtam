@@ -12,9 +12,6 @@ jobs:
       contents: write
       issues: write
       pull-requests: write
-    outputs:
-      new_release_published: ${{ steps.release.outputs.new_release_published }}
-      new_release_version: ${{ steps.release.outputs.new_release_version }}
 
     steps:
       - name: Checkout repository
@@ -27,8 +24,16 @@ jobs:
         with:
           node-version-file: ".nvmrc"
 
+      - name: Enable pnpm
+        run: corepack enable
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+
       - name: Semantic Release
         id: release
-        uses: cycjimmy/semantic-release-action@v6
+        run: |
+          echo "Release Node runtime: $(node --version)"
+          pnpm exec semantic-release
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
