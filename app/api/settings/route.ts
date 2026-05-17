@@ -116,6 +116,7 @@ async function buildSettingsResponse(): Promise<Record<string, string>> {
   const effective = buildConfigFromSettingsMap(rowMap);
   settings.claude_provider = serializeSettingValue('claude_provider', effective.claude_provider);
   settings.cli_enabled_providers = serializeSettingValue('cli_enabled_providers', effective.cli_enabled_providers);
+  settings.provider_fallback_chain = serializeSettingValue('provider_fallback_chain', effective.provider_fallback_chain);
   settings.review_fix_max_iterations = serializeSettingValue('review_fix_max_iterations', effective.review_fix_max_iterations);
   settings.review_do_not_ship_action = serializeSettingValue('review_do_not_ship_action', effective.review_do_not_ship_action);
   settings.release_wall_clock_timeout_minutes = serializeSettingValue('release_wall_clock_timeout_minutes', effective.release_wall_clock_timeout_minutes);
@@ -155,6 +156,7 @@ const SETTING_KEYS = [
   'cli_default_model_gemini',
   'cli_default_model_lmstudio',
   'cli_default_model_deepagents',
+  'provider_fallback_chain',
   'log_dir',
   'frequency',
   'daytime',
@@ -231,6 +233,12 @@ function serializeSettingValue(key: string, value: unknown): string {
     return encodeBudgetSubscriptionProviders(normalizeBudgetSubscriptionProviders(String(value)));
   }
   if (key === 'cli_enabled_providers') {
+    if (Array.isArray(value)) {
+      return encodeEnabledProviders(value.filter(isCliProvider));
+    }
+    return encodeEnabledProviders(parseEnabledProviders(String(value)));
+  }
+  if (key === 'provider_fallback_chain') {
     if (Array.isArray(value)) {
       return encodeEnabledProviders(value.filter(isCliProvider));
     }

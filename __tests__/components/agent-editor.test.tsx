@@ -126,6 +126,7 @@ describe('AgentEditor', () => {
 
         enabled: true,
         provider: null,
+        fallbackEnabled: false,
         prerequisiteCommand: null,
       })
     })

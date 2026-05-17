@@ -136,6 +136,7 @@ export const agents = pgTable('agents', {
   enabled: boolean('enabled').notNull().default(true),
   docPaths: text('doc_paths').notNull().default('[]'),
   provider: text('provider'),
+  fallbackEnabled: boolean('fallback_enabled').notNull().default(false),
   prerequisiteCommand: text('prerequisite_command'),
   createdAt: doublePrecision('created_at').notNull(),
   updatedAt: doublePrecision('updated_at').notNull(),

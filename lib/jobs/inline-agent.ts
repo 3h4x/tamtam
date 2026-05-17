@@ -23,6 +23,7 @@ import { getImproveConfig } from '@/lib/scheduling/scheduling';
 import { splitCommand } from '@/lib/shared/split-command';
 import { runSubprocess } from './spawn-cli';
 import { measurePrompt, checkPromptSize } from './prompt-size';
+import type { CliProvider } from '@/lib/usage/cli-providers';
 
 function resolveLogDir(): string {
   try {
@@ -37,7 +38,14 @@ export async function startInProcessAgentJob(
   command: string,
   prompt: string,
   cwd: string,
-  options?: { env?: Record<string, string> },
+  options?: {
+    env?: Record<string, string>;
+    fallback?: {
+      provider: CliProvider;
+      command: string;
+      env?: Record<string, string>;
+    };
+  },
 ): Promise<number> {
   const LOG_DIR = resolveLogDir();
   const { mkdirSync } = await import('fs');
@@ -89,6 +97,38 @@ export async function startInProcessAgentJob(
         saveToDb(job);
       },
     });
+
+    const fallback = options?.fallback;
+    if (fallback && result.exitCode !== 0 && isTransientProviderFailure(result.outputTail ?? '')) {
+      const fallbackArgv = splitCommand(fallback.command);
+      if (fallbackArgv.length > 0) {
+        const { appendRedactedFileSync } = await import('@/lib/jobs/redacted-log-writer');
+        appendRedactedFileSync(
+          /*turbopackIgnore: true*/ logPath,
+          `\n[tamtam] transient provider failure detected; retrying once with ${fallback.provider}\n`,
+        );
+        if (job) {
+          job.provider = fallback.provider;
+          saveToDb(job);
+        }
+        const [fallbackBin, ...fallbackArgs] = fallbackArgv;
+        result = await runSubprocess({
+          jobId,
+          cmd: fallbackBin,
+          cmdArgs: fallbackArgs,
+          promptPath,
+          logPath,
+          env: fallback.env,
+          cwd,
+          abortSignal,
+          onSpawn: (pid) => {
+            if (!job || pid <= 0) return;
+            job.pid = pid;
+            saveToDb(job);
+          },
+        });
+      }
+    }
   } finally {
     finishJobCancellation(jobId);
   }
@@ -101,4 +141,34 @@ export async function startInProcessAgentJob(
   }
 
   return result.pid > 0 ? result.pid : process.pid;
+}
+
+function isTransientProviderFailure(output: string): boolean {
+  const text = output.toLowerCase();
+  return [
+    'http 500',
+    'http 502',
+    'http 503',
+    'http 504',
+    'status 500',
+    'status 502',
+    'status 503',
+    'status 504',
+    '5xx',
+    'econnrefused',
+    'connection refused',
+    'connection reset',
+    'etimedout',
+    'timeout',
+    'timed out',
+    'rate limit',
+    'rate_limit',
+    'rate-limited',
+    'quota exceeded',
+    'overloaded',
+    'temporarily unavailable',
+    'service unavailable',
+    'aborted_streaming',
+    'error_during_execution',
+  ].some((needle) => text.includes(needle));
 }

@@ -269,6 +269,7 @@ export interface Agent {
   runner: string
   enabled: boolean
   provider?: string | null
+  fallbackEnabled?: boolean
   prerequisiteCommand?: string | null
   createdAt: number
   updatedAt: number

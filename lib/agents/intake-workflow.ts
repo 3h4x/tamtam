@@ -10,7 +10,7 @@ import {
 import { exec } from '@/lib/shared/shell';
 import { normalizeModelInput } from '@/lib/agents/model-aliases';
 import { resolveCliBin, resolveCliEnv } from '@/lib/shared/cli-bin';
-import { isCliProvider } from '@/lib/usage/cli-providers';
+import { isCliProvider, type CliProvider } from '@/lib/usage/cli-providers';
 import { updateJob } from '@/lib/jobs/job-storage';
 import { startInProcessAgentJob } from '@/lib/jobs/inline-agent';
 import { errMsg } from '@/lib/shared/types';
@@ -40,6 +40,7 @@ export interface AgentIntakeParams {
   taskPrompt: string;
   triggeredBy: string;
   provider: string;
+  fallbackEnabled: boolean;
   logPath: string;
   logDir: string;
   baseContextMeta: string;
@@ -61,6 +62,12 @@ interface ComposeResult {
   fullPrompt: string;
   cmd: string;
   cliEnv: Record<string, string>;
+  provider: CliProvider;
+  fallback: {
+    provider: CliProvider;
+    cmd: string;
+    cliEnv: Record<string, string>;
+  } | null;
   contextMeta: string;
   prereqArtifact: { path: string; body: string } | null;
 }
@@ -163,6 +170,7 @@ async function composePromptStep(
     taskPrompt,
     triggeredBy,
     provider,
+    fallbackEnabled,
     logPath,
     logDir,
     baseContextMeta,
@@ -191,7 +199,7 @@ async function composePromptStep(
         console.error('[intake-workflow] failed to persist post-prereq release-lock queue entry:', err);
         const j = getJob(jobId);
         if (j) { j.exitCode = 1; await markDone(j, 1); }
-        return { skipped: true, fullPrompt: '', cmd: '', cliEnv: {}, contextMeta: baseContextMeta, prereqArtifact: null };
+        return { skipped: true, fullPrompt: '', cmd: '', cliEnv: {}, provider: 'claude', fallback: null, contextMeta: baseContextMeta, prereqArtifact: null };
       }
       appendRedactedFileSync(
         /*turbopackIgnore: true*/ logPath,
@@ -199,7 +207,7 @@ async function composePromptStep(
       );
       const j = getJob(jobId);
       if (j) { j.finishedAt = Date.now() / 1000; j.exitCode = 0; updateJob(j); await markDone(j, 0); }
-      return { skipped: true, fullPrompt: '', cmd: '', cliEnv: {}, contextMeta: baseContextMeta, prereqArtifact: null };
+      return { skipped: true, fullPrompt: '', cmd: '', cliEnv: {}, provider: 'claude', fallback: null, contextMeta: baseContextMeta, prereqArtifact: null };
     }
 
     // Post-prereq worktree blocker for non-readOnly runs.
@@ -215,7 +223,7 @@ async function composePromptStep(
         );
         const j = getJob(jobId);
         if (j) { j.finishedAt = Date.now() / 1000; j.exitCode = 1; updateJob(j); await markDone(j, 1); }
-        return { skipped: true, fullPrompt: '', cmd: '', cliEnv: {}, contextMeta: baseContextMeta, prereqArtifact: null };
+        return { skipped: true, fullPrompt: '', cmd: '', cliEnv: {}, provider: 'claude', fallback: null, contextMeta: baseContextMeta, prereqArtifact: null };
       }
     }
   }
@@ -345,6 +353,28 @@ At the end of your run, include a short final section exactly named "TamTam Run 
   const cliEnv = resolveCliEnv(safeProvider, settings);
   const modelFlag = requestedModel ? `--model ${requestedModel}` : '';
   const cmd = `${claudeBin} --print --output-format stream-json --include-partial-messages --verbose ${getPermissionModeFlag()} ${modelFlag}`;
+  const fallbackProvider = await resolveFallbackProvider({
+    enabled: fallbackEnabled,
+    currentProvider: safeProvider,
+    requestedModel,
+    respectJobsPaused: triggeredBy === 'schedule',
+    settings,
+  });
+  const fallback = fallbackProvider
+    ? {
+        provider: fallbackProvider,
+        cmd: `${resolveCliBin(fallbackProvider, settings)} --print --output-format stream-json --include-partial-messages --verbose ${getPermissionModeFlag()} ${modelFlag}`,
+        cliEnv: resolveCliEnv(fallbackProvider, settings),
+      }
+    : null;
+  if (fallback) {
+    contextMetaObj.providerFallback = {
+      enabled: true,
+      from: safeProvider,
+      to: fallback.provider,
+      maxRetries: 1,
+    };
+  }
 
   const fullPrompt = withBasePrompt(`${promptWithRetrieval}\n\n---\n\n${memoryBlock}`, {
     projectPath: projPath,
@@ -356,9 +386,40 @@ At the end of your run, include a short final section exactly named "TamTam Run 
     fullPrompt,
     cmd,
     cliEnv,
+    provider: safeProvider,
+    fallback,
     contextMeta: JSON.stringify(contextMetaObj),
     prereqArtifact,
   };
+}
+
+async function resolveFallbackProvider({
+  enabled,
+  currentProvider,
+  requestedModel,
+  respectJobsPaused,
+  settings,
+}: {
+  enabled: boolean;
+  currentProvider: CliProvider;
+  requestedModel: ReturnType<typeof normalizeModelInput> | null;
+  respectJobsPaused: boolean;
+  settings: ReturnType<typeof getSettings>;
+}): Promise<CliProvider | null> {
+  if (!enabled) return null;
+  const chain = settings.provider_fallback_chain;
+  const currentIndex = chain.indexOf(currentProvider);
+  if (currentIndex < 0) return null;
+  const nextProvider = chain[currentIndex + 1] ?? null;
+  if (!nextProvider || nextProvider === currentProvider) return null;
+  const { checkCliStartGate } = await import('@/lib/usage/resolve-provider');
+  const gate = await checkCliStartGate('retry an agent run with a fallback provider', {
+    preferred: nextProvider,
+    strictPreferred: true,
+    requestedModel,
+    respectJobsPaused,
+  });
+  return gate.ok ? gate.provider : null;
 }
 
 async function startAgentStep(
@@ -368,7 +429,7 @@ async function startAgentStep(
 ): Promise<void> {
   'use step';
 
-  const { fullPrompt, cmd, cliEnv, contextMeta, prereqArtifact } = composed;
+  const { fullPrompt, cmd, cliEnv, contextMeta, prereqArtifact, fallback } = composed;
 
   const { getJob, markDone } = await import('@/lib/jobs/job-storage');
   const job = getJob(jobId);
@@ -414,7 +475,16 @@ async function startAgentStep(
   updateJob(job);
 
   try {
-    const pid = await startInProcessAgentJob(jobId, cmd, fullPrompt, projPath, { env: cliEnv });
+    const pid = await startInProcessAgentJob(jobId, cmd, fullPrompt, projPath, {
+      env: cliEnv,
+      fallback: fallback
+        ? {
+            provider: fallback.provider,
+            command: fallback.cmd,
+            env: fallback.cliEnv,
+          }
+        : undefined,
+    });
     job.pid = pid;
     updateJob(job);
   } catch (e: unknown) {

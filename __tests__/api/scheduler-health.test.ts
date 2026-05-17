@@ -21,6 +21,7 @@ async function applyDdl(handle: TestDbHandle): Promise<void> {
       runner text NOT NULL DEFAULT 'pm2',
       enabled boolean NOT NULL DEFAULT true,
       provider text,
+      fallback_enabled boolean NOT NULL DEFAULT false,
       prerequisite_command text,
       created_at double precision NOT NULL,
       updated_at double precision NOT NULL
@@ -172,7 +173,7 @@ describe('GET /api/agents/scheduler-health', () => {
 
     vi.doMock('graphile-worker', () => ({ quickAddJob: quickAddJobMock }));
     vi.doMock('pg', () => ({
-      Pool: vi.fn().mockImplementation(function () {
+      Pool: vi.fn(function PoolMock() {
         return {
           query: vi.fn(async () => ({
             rows: [...queuedJobKeys].map((key) => ({ key })),
@@ -281,7 +282,7 @@ describe('GET /api/agents/scheduler-health', () => {
 
     vi.doMock('graphile-worker', () => ({ quickAddJob: quickAddJobMock }));
     vi.doMock('pg', () => ({
-      Pool: vi.fn().mockImplementation(function () {
+      Pool: vi.fn(function PoolMock() {
         return {
           query: vi.fn(async () => ({
             rows: [...queuedJobKeys].map((key) => ({ key })),
@@ -332,7 +333,7 @@ describe('GET /api/agents/scheduler-health', () => {
 
     vi.doMock('graphile-worker', () => ({ quickAddJob: quickAddJobMock }));
     vi.doMock('pg', () => ({
-      Pool: vi.fn().mockImplementation(function () {
+      Pool: vi.fn(function PoolMock() {
         return {
           query: vi.fn(async () => ({
             rows: [...queuedJobKeys].map((key) => ({ key })),

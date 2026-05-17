@@ -33,6 +33,7 @@ function makeSettings(overrides: Partial<TamTamConfig> = {}): TamTamConfig {
     cli_default_model_gemini: 'normal',
     cli_default_model_lmstudio: 'normal',
     cli_default_model_deepagents: 'normal',
+    provider_fallback_chain: [],
     log_dir: './data/logs',
     frequency: '1h',
     daytime: false,
