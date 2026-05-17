@@ -350,14 +350,14 @@ User/scheduler triggers
   → Client polls /api/streaming/{job_id} to watch output
 ```
 
-For scheduled runs with `runner: "pm2"`, the trigger path is:
+For scheduled runs, the trigger path is:
 
 ```
 TamTam server boots
-  → instrumentation-node.ts calls reinstallAgents()
-      → lib/scheduling/internal-scheduler.ts arms setTimeout entries
-          → timer fires
-              → POST /api/agents/{agentId}/run (in-process fetch)
+  → instrumentation-node.ts starts graphile-worker
+      → seedAgentCrons() upserts agent-cron-<agentId> rows
+          → graphile-worker fires agent-cron-task.ts
+              → start the durable agent intake workflow
                   → normal agent-run flow above
 ```
 
@@ -410,7 +410,7 @@ Only provided fields are updated. If you change `schedule`, `prompt`, or `enable
 curl -X DELETE http://localhost:1337/api/agents/agent-1705276800000
 ```
 
-This also removes any active internal-scheduler entry or legacy LaunchAgent.
+This also removes the prompt recovery file and pushes the graphile-worker schedule row into the far future so the chain winds down.
 
 ## Scheduled Execution Details
 
@@ -442,33 +442,13 @@ Older TamTam versions tried to register scheduled agents with PM2 cron. PM2's `c
 ### Legacy Runner Metadata
 
 Rows and file-agent overrides may still contain `runner: "launchctl"` from older installs. TamTam keeps this value in API responses and storage so upgrades do not lose data, but current schedule install/uninstall paths are graphile-worker backed regardless of `runner`. New UI surfaces do not expose runner selection.
-<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
-<plist version="1.0">
-<dict>
-  <key>Label</key>
-  <string>com.tamtam.agent.{agentId}</string>
-  <key>ProgramArguments</key>
-  <array>
-    <string>/Users/...logs/agent-scripts/{agentId}.sh</string>
-  </array>
-  <key>StartInterval</key>
-  <integer>{intervalInSeconds}</integer>
-  <key>StandardOutPath</key>
-  <string>./data/logs/agent-scheduler-{agentId}.log</string>
-  <key>StandardErrorPath</key>
-  <string>./data/logs/agent-scheduler-{agentId}.log</string>
-  <key>RunAtLoad</key>
-  <true/>
-</dict>
-</plist>
-```
 
 Schedule string format:
 - `"30m"` → every 30 minutes
 - `"1h"` → every hour
 - `"8h"` → every 8 hours
 
-The agent loads on startup and runs at the configured interval. TamTam logs a `[agent-scheduler] launchctl runner is deprecated` warning on install, uninstall, and health checks for these rows.
+The cron worker loads on startup and runs each scheduled agent at the configured interval.
 
 ## Preventing Duplicate Runs
 
@@ -657,11 +637,6 @@ The dynamic import target is only referenced under the Node branch, so Turbopack
 
 ### Runner selection
 
-| Runner | Requires | Persists across reboots | Use when |
-|--------|----------|------------------------|----------|
-| `pm2` | TamTam server running under PM2 or another long-lived supervisor | Yes, if the TamTam server itself is restarted on boot | Default for all new agents |
-| `launchctl` | macOS | Yes (LaunchAgent) | Legacy compatibility only; migrate existing rows to `pm2` |
-
 ### Prompt composition order
 
 ```
@@ -673,11 +648,8 @@ The dynamic import target is only referenced under the Node branch, so Turbopack
 ### Verify a scheduled agent
 
 ```bash
-# Inspect the live internal scheduler
+# Inspect prompt-file and graphile-worker queue health
 curl http://localhost:1337/api/agents/scheduler-health
-
-# Check legacy launchctl agents (macOS only)
-launchctl list | grep tamtam
 
 # Manually trigger
 curl -X POST http://localhost:1337/api/agents/{agentId}/run \
@@ -695,11 +667,10 @@ curl -N http://localhost:1337/api/streaming/{job_id}
 | Symptom | Likely Cause | Fix |
 |---------|-------------|-----|
 | Agent returns 409 on run | Another instance already running | Wait for the current run to finish; duplicate prevention is intentional |
-| Schedule not firing | `prompt` or `schedule` is empty, the internal scheduler is paused, or the fire was intentionally skipped | Check `/api/agents/scheduler-health` for `missing`, `errorCount`, `skippedCount`, `lastError`, and `lastSkippedReason` |
+| Schedule not firing | `prompt`/skills or `schedule` is empty, the graphile-worker queue row is missing, or the fire was intentionally skipped by runtime gates | Check `/api/agents/scheduler-health` for `missing`, `promptFileLoaded`, and `queueLoaded`; POST the endpoint to reinstall missing schedules |
 | Scheduled fires being skipped with `lastSkippedReason: 'project paused'` | The project has its per-project pause toggle enabled. Fires are silently skipped until the project is resumed. | Toggle off the pause via the project page or `PATCH /api/projects/by-project/[name]` with `{ paused: false }`. Queued entries are retained and resume firing after unpause. |
 | Scheduled fires being skipped with `dirty worktree: N files` | The project has at least as many uncommitted/untracked files as `dirty_worktree_block_threshold` (default 1). Agents won't run on top of a dirty worktree by default. | Commit, stash, or discard pending changes — or raise the threshold to allow small WIP (or set to 0 to disable) in Settings → Pipeline. |
 | Skills not in Claude's context | `skillIds` references deleted skills | Re-check skill IDs; missing skills are silently skipped |
-| Scheduler says the agent is missing | Boot-time reinstall did not register the entry or the row was changed while the server was down | POST `/api/agents/scheduler-health` to reinstall missing schedules, then re-check the GET response |
-| LaunchAgent not surviving reboot | plist not loaded | Legacy only: run `launchctl load ~/Library/LaunchAgents/com.tamtam.agent.{id}.plist`, then migrate the agent to `runner: "pm2"` |
+| Scheduler says the agent is missing | The prompt recovery file or graphile-worker queue row is missing | POST `/api/agents/scheduler-health` to reinstall missing schedules, then re-check the GET response |
 | Agent runs but no output in UI | Job started but SSE not connected | Navigate to `/project/[name]/history`, open the run log |
-| `schedule` change didn't take effect | Internal scheduler entry was not refreshed yet | PATCH the agent again or POST `/api/agents/scheduler-health` to reinstall missing schedules, then confirm the new `nextFireMs` |
+| `schedule` change didn't take effect | The graphile-worker queue row was not refreshed yet | PATCH the agent again or POST `/api/agents/scheduler-health` to reinstall missing schedules, then confirm the agent is no longer listed in `missing` |
