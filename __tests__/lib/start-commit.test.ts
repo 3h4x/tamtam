@@ -168,6 +168,7 @@ describe('startProjectCommit', () => {
     vi.doMock('@/lib/shared/config', () => ({
       getSettings: () => ({ commit_style: '' }),
       getPipelineModel: () => 'normal',
+      getPermissionModeFlag: () => '--permission-mode acceptEdits',
     }));
     vi.doMock('@/lib/shared/cli-bin', () => ({
       resolveCliBin: vi.fn().mockReturnValue('codex'),
@@ -237,6 +238,10 @@ describe('startProjectCommit', () => {
     const commitCall = execMock.mock.calls.find(
       ([cmd, args]) => cmd === 'git' && Array.isArray(args) && args[0] === '-C' && args[2] === 'commit',
     );
+    const generatorCall = execMock.mock.calls.find(
+      ([cmd, args]) => cmd === 'codex' && Array.isArray(args) && args.includes('--print'),
+    );
+    expect(generatorCall?.[1]).toEqual(expect.arrayContaining(['--permission-mode', 'acceptEdits']));
     expect(commitCall?.[2]).toMatchObject({
       timeout: 30000,
       abortProcessTree: true,

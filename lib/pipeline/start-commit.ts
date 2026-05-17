@@ -2,7 +2,7 @@ import { mkdirSync } from 'fs';
 import { join } from 'path';
 import { resolveProjectPath, clearProjectDataCache } from '@/lib/shared/project-data';
 import { exec } from '@/lib/shared/shell';
-import { getSettings, getPipelineModel } from '@/lib/shared/config';
+import { getSettings, getPipelineModel, getPermissionModeFlag } from '@/lib/shared/config';
 import { getImproveConfig, setProjectPushResult } from '@/lib/scheduling/scheduling';
 import { resolveCliBin, resolveCliEnv } from '@/lib/shared/cli-bin';
 import { checkCliStartGate } from '@/lib/usage/resolve-provider';
@@ -85,8 +85,9 @@ Return ONLY the title — nothing else.${extra}`;
   // model cannot pattern-match on recent "chore: automated update" commits.
   // --tools "" prevents the model from running git commands itself instead of using
   // the diff context we embed in the user prompt.
+  const permissionArgs = getPermissionModeFlag().split(/\s+/).filter(Boolean);
   const claudeArgs = (prompt: string) => [
-    '--print', '--tools', '', '--system-prompt',
+    '--print', ...permissionArgs, '--tools', '', '--system-prompt',
     'You are a commit message generator. Output only what is requested. Do not add prose or explanation.',
     '--model', getPipelineModel('commit'), '-p', prompt,
   ];
