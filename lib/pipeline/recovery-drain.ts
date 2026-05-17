@@ -5,6 +5,15 @@
 // queued agent is replayed. Otherwise an older queued release can be overtaken
 // by newer agent work and ship a different tree than intended.
 
+declare global {
+  var __tamtamProjectRecoveryDrains: Map<string, Promise<void>> | undefined;
+}
+
+const activeProjectRecoveryDrains =
+  globalThis.__tamtamProjectRecoveryDrains ?? new Map<string, Promise<void>>();
+
+globalThis.__tamtamProjectRecoveryDrains = activeProjectRecoveryDrains;
+
 function uniqueProjects(projects: string[]): string[] {
   return [...new Set(projects.filter((project) => typeof project === 'string' && project.length > 0))];
 }
@@ -26,7 +35,7 @@ export async function drainQueuedAgentsForProjectIfClear(
   await drainQueuedAgentRunsForProject(project);
 }
 
-export async function drainProjectRecoveryWork(
+async function runProjectRecoveryWork(
   project: string,
   logPrefix = '[recovery]',
 ): Promise<void> {
@@ -37,6 +46,27 @@ export async function drainProjectRecoveryWork(
     return;
   }
   await drainQueuedAgentsForProjectIfClear(project, logPrefix);
+}
+
+export async function drainProjectRecoveryWork(
+  project: string,
+  logPrefix = '[recovery]',
+): Promise<void> {
+  const active = activeProjectRecoveryDrains.get(project);
+  if (active) {
+    await active;
+    return;
+  }
+
+  const drain = runProjectRecoveryWork(project, logPrefix);
+  activeProjectRecoveryDrains.set(project, drain);
+  try {
+    await drain;
+  } finally {
+    if (activeProjectRecoveryDrains.get(project) === drain) {
+      activeProjectRecoveryDrains.delete(project);
+    }
+  }
 }
 
 export async function drainAllRecoveryWork(logPrefix = '[recovery]'): Promise<void> {

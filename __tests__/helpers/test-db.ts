@@ -38,7 +38,7 @@ const pendingDumps = new WeakMap<PGlite, Promise<void>>();
 // written in the background after the handle is returned, so the first
 // call in a session is no slower than the original cold-boot path.
 const MIGRATIONS_DIR = join(process.cwd(), 'lib/db/migrations');
-const CACHE_DIR = join(tmpdir(), 'tamtam-pglite-cache-v1');
+const CACHE_DIR = join(tmpdir(), 'tamtam-pglite-cache-v2');
 
 let cachedMigrationsHash: string | null = null;
 let cachedRequiredPublicTables: string[] | null = null;
@@ -184,6 +184,17 @@ async function isMigratedSnapshotCurrent(handle: TestDbHandle): Promise<boolean>
   }
 }
 
+async function isEmptySnapshotCurrent(handle: TestDbHandle): Promise<boolean> {
+  try {
+    const tables = await handle.db.execute(
+      sql`select table_name from information_schema.tables where table_schema = 'public'`,
+    );
+    return tables.rows.length === 0;
+  } catch {
+    return false;
+  }
+}
+
 async function removeSnapshot(file: string): Promise<void> {
   try {
     unlinkSync(file);
@@ -233,7 +244,12 @@ export async function createTestPgDb(): Promise<TestDbHandle> {
 export async function createTestPgDbEmpty(): Promise<TestDbHandle> {
   const file = cachePath('empty');
   const cached = readSnapshot(file);
-  if (cached) return bootPGliteFromSnapshot(cached);
+  if (cached) {
+    const handle = await bootPGliteFromSnapshot(cached);
+    if (await isEmptySnapshotCurrent(handle)) return handle;
+    await handle[Symbol.asyncDispose]();
+    await removeSnapshot(file);
+  }
 
   const handle = await bootPGlite();
   persistSnapshotInBackground(file, handle.raw);

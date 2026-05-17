@@ -3,8 +3,16 @@
 import { Fragment, useState, useEffect, useMemo, useRef } from 'react'
 import Link from 'next/link'
 import { useRouter } from 'next/navigation'
-import { fetchJobs, releaseProject, pushProject, continueJob } from '@/lib/client-api'
-import type { JobInfo } from '@/lib/client-api'
+import {
+  fetchJobs,
+  releaseProject,
+  pushProject,
+  continueJob,
+  fetchAutomationQueue,
+  retryAutomationQueue,
+  cancelAutomationQueueItem,
+} from '@/lib/client-api'
+import type { AutomationQueueItem, JobInfo } from '@/lib/client-api'
 import { Button } from '@/components/ui/Button'
 import {
   formatTokens,
@@ -96,6 +104,7 @@ export function ProjectRunsTab({ projectName, jobsPaused = false }: ProjectRunsT
   const router = useRouter()
   const [jobs, setJobs] = useState<JobInfo[]>([])
   const [pendingReleaseQueued, setPendingReleaseQueued] = useState(false)
+  const [queueItems, setQueueItems] = useState<AutomationQueueItem[]>([])
   const [loading, setLoading] = useState(true)
   const [totalJobs, setTotalJobs] = useState(0)
   const [loadingMore, setLoadingMore] = useState(false)
@@ -108,6 +117,7 @@ export function ProjectRunsTab({ projectName, jobsPaused = false }: ProjectRunsT
   const [stopState, setStopState] = useState<{ jobId: string; label: string } | null>(null)
   const [continueState, setContinueState] = useState<{ jobId: string; label: string } | null>(null)
   const [rerunState, setRerunState] = useState<{ jobId: string; label: string } | null>(null)
+  const [queueActionState, setQueueActionState] = useState<{ itemId: string; label: string } | null>(null)
 
   // Window after which a --resume against the source job's session is
   // unsafe — model context gets compacted and the system/skills/docs that
@@ -244,6 +254,19 @@ export function ProjectRunsTab({ projectName, jobsPaused = false }: ProjectRunsT
 
   useEffect(() => {
     let active = true
+    const poll = async () => {
+      try {
+        const data = await fetchAutomationQueue(projectName)
+        if (active) setQueueItems(data.items)
+      } catch {}
+    }
+    poll()
+    const interval = setInterval(poll, 10000)
+    return () => { active = false; clearInterval(interval) }
+  }, [projectName])
+
+  useEffect(() => {
+    let active = true
     const loadCounts = async () => {
       try {
         const res = await fetch(`/api/jobs/counts?project=${encodeURIComponent(projectName)}`)
@@ -283,8 +306,44 @@ export function ProjectRunsTab({ projectName, jobsPaused = false }: ProjectRunsT
     setJobs((prev) => mergeJobs(data.jobs, prev, windowSize))
     setTotalJobs(data.total ?? data.jobs.length)
     setPendingReleaseQueued(!!data.pendingReleaseProjects?.includes(projectName))
+    await loadQueue()
     setLoading(false)
     return data
+  }
+
+  const loadQueue = async () => {
+    const data = await fetchAutomationQueue(projectName)
+    setQueueItems(data.items)
+    return data
+  }
+
+  const retryQueuedWork = async (item: AutomationQueueItem) => {
+    if (!item.retryAllowed) return
+    setQueueActionState({ itemId: item.id, label: 'retrying' })
+    try {
+      const result = await retryAutomationQueue(item.project)
+      setQueueItems(result.items)
+      await loadJobs()
+      setQueueActionState(null)
+    } catch (error) {
+      console.error('[history] queue retry failed', error)
+      setQueueActionState({ itemId: item.id, label: 'failed' })
+      setTimeout(() => setQueueActionState((prev) => (prev?.itemId === item.id ? null : prev)), 2500)
+    }
+  }
+
+  const cancelQueuedWork = async (item: AutomationQueueItem) => {
+    if (!item.cancelAllowed) return
+    setQueueActionState({ itemId: item.id, label: 'cancelling' })
+    try {
+      await cancelAutomationQueueItem(item)
+      await loadQueue()
+      setQueueActionState(null)
+    } catch (error) {
+      console.error('[history] queue cancel failed', error)
+      setQueueActionState({ itemId: item.id, label: 'failed' })
+      setTimeout(() => setQueueActionState((prev) => (prev?.itemId === item.id ? null : prev)), 2500)
+    }
   }
 
   // Counts reflect the flat entry list (pre-grouping) so the chip numbers
@@ -547,6 +606,68 @@ export function ProjectRunsTab({ projectName, jobsPaused = false }: ProjectRunsT
           <span className="font-mono">↦</span>
           <span>Release queued — will fire automatically when the running pipeline finishes (or jobs resume).</span>
         </Link>
+      )}
+      {queueItems.length > 0 && (
+        <div className="mb-3 rounded-lg border border-status-warning/30 bg-status-warning/5">
+          <div className="flex items-center justify-between gap-3 border-b border-status-warning/20 px-3 py-2">
+            <div>
+              <div className="text-xs font-medium text-text-primary">Queued automation</div>
+              <div className="text-[11px] text-text-tertiary">Retry or cancel deferred releases and agent runs for this project.</div>
+            </div>
+            <Link
+              href={`/pipeline?project=${encodeURIComponent(projectName)}`}
+              className="text-[11px] text-accent hover:text-accent-hover"
+            >
+              Pipeline
+            </Link>
+          </div>
+          <div className="divide-y divide-status-warning/20">
+            {queueItems.map((item) => {
+              const active = queueActionState?.itemId === item.id
+              const queuedAt = item.queuedAt
+                ? new Date(item.queuedAt).toLocaleString([], { dateStyle: 'short', timeStyle: 'short' })
+                : 'unknown time'
+              return (
+                <div key={item.id} className="grid gap-2 px-3 py-2 md:grid-cols-[1fr_auto] md:items-center">
+                  <div className="min-w-0">
+                    <div className="flex flex-wrap items-center gap-2 text-xs">
+                      <span className="font-medium text-text-primary">{item.label}</span>
+                      <span className="font-mono text-[10px] text-text-tertiary">{item.code}</span>
+                      {item.blockingJobId && (
+                        <span className="font-mono text-[10px] text-status-warning">blocked by {item.blockingJobId.slice(-12)}</span>
+                      )}
+                    </div>
+                    <div className="mt-0.5 text-[11px] text-text-tertiary">
+                      {item.reason} · queued {queuedAt}
+                    </div>
+                  </div>
+                  <div className="flex items-center gap-1.5 md:justify-end">
+                    <Button
+                      variant="secondary"
+                      size="sm"
+                      className="h-7 px-2 text-[11px]"
+                      disabled={active || !item.retryAllowed}
+                      onClick={() => retryQueuedWork(item)}
+                      title={item.retryAllowed ? 'Run the recovery drain now' : 'Retry is not available for this queue item'}
+                    >
+                      {active ? queueActionState?.label : 'Retry'}
+                    </Button>
+                    <Button
+                      variant="secondary"
+                      size="sm"
+                      className="h-7 px-2 text-[11px]"
+                      disabled={active || !item.cancelAllowed}
+                      onClick={() => cancelQueuedWork(item)}
+                      title={item.cancelAllowed ? 'Remove this queued item without stopping active jobs' : 'Cancel is not available for this queue item'}
+                    >
+                      Cancel
+                    </Button>
+                  </div>
+                </div>
+              )
+            })}
+          </div>
+        </div>
       )}
       {/* Search + summary */}
       <div className="mb-3 rounded-lg border border-border bg-bg-secondary">

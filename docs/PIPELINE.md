@@ -288,10 +288,12 @@ does not dispatch release or `pr-wait` jobs while `jobs_paused` is enabled.
 ### Pending-release recovery
 
 When a release trigger arrives while the project pipeline lock is held or jobs
-are paused globally, TamTam stores `pending_release:<project>=1` in the
-`settings` table instead of dropping the request.
+are paused globally, TamTam stores `pending_release:<project>=<queued epoch>`
+in the `settings` table instead of dropping the request. Older queued flags
+that still have the legacy value are treated as pending with an unknown queue
+time.
 
-That queued release is retried from four places:
+That queued release is retried from five places:
 
 1. `releaseLock()` after the active pipeline finishes
 2. `syncJobsPauseState(false)` when the user resumes jobs
@@ -299,6 +301,7 @@ That queued release is retried from four places:
    active pipeline lock
 4. the periodic recovery reconcile ticker, which drains pending releases before
    replaying queued agent work for the same project
+5. manual retry from the automation queue surface
 
 Lock release also writes a durable `pipeline_lock_events` row. The probe sweep
 consumes unhandled rows and runs the same ordered recovery drain when
@@ -333,6 +336,7 @@ That queued agent is retried from these paths:
    `budget_block_at_pct`
 4. server boot
 5. the periodic queued-agent recovery ticker
+6. manual retry from the automation queue surface
 
 The durable `pipeline_lock_events` consumer uses the same release-before-agent
 ordering as the inline `releaseLock()` drain, so disabling the legacy inline
