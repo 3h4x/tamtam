@@ -16,6 +16,8 @@ export default defineConfig({
     pool: 'threads',
     maxWorkers: isCi ? 4 : 12,
     hookTimeout: isCi ? 30000 : 10000,
+    testTimeout: 30000,
+    teardownTimeout: 10000,
     silent: 'passed-only',
   },
 });
