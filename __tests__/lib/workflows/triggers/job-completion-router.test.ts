@@ -1,12 +1,40 @@
-import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
-import { createTestPgDb } from '@/__tests__/helpers/test-db';
+import { describe, it, expect, vi, beforeAll, beforeEach, afterAll, afterEach } from 'vitest';
+import { sql } from 'drizzle-orm';
+import { createTestPgDbEmpty, type TestDbHandle } from '@/__tests__/helpers/test-db';
 import * as schema from '@/lib/db/schema';
 
 // The consumer module imports '@/lib/db' for db+schema and dispatchReleaseAfterRun
 // dynamically for the dispatch step. We swap db with the test PGlite handle
 // and stub dispatchReleaseAfterRun so we can observe routing without
 // actually starting a release workflow.
-async function withTestDbAndStubs(opts: {
+let sharedHandle: TestDbHandle;
+
+async function applyDdl(handle: TestDbHandle): Promise<void> {
+  await handle.db.execute(sql.raw(`
+    CREATE TABLE IF NOT EXISTS job_completion_events (
+      id serial PRIMARY KEY,
+      job_id text NOT NULL,
+      kind text NOT NULL,
+      exit_code integer,
+      project text NOT NULL,
+      release_id text,
+      gh_issue_number integer,
+      emitted_at double precision NOT NULL,
+      consumed_by text,
+      consumed_at double precision
+    )
+  `));
+  await handle.db.execute(sql.raw(`
+    CREATE UNIQUE INDEX IF NOT EXISTS job_completion_events_job_id
+      ON job_completion_events (job_id)
+  `));
+  await handle.db.execute(sql.raw(`
+    CREATE INDEX IF NOT EXISTS job_completion_events_unconsumed
+      ON job_completion_events (consumed_by, emitted_at)
+  `));
+}
+
+function withTestDbAndStubs(opts: {
   dispatchedFor?: (jobId: string) => boolean;
   legacyFlagEnabled?: boolean;
   legacyFixCiFlagEnabled?: boolean;
@@ -15,7 +43,6 @@ async function withTestDbAndStubs(opts: {
   getJobKind?: string;
   getJobExitCode?: number;
 } = {}) {
-  const handle = await createTestPgDb();
   const dispatchReleaseAfterRun = vi.fn().mockImplementation(async (job: { id: string }) => ({
     dispatched: opts.dispatchedFor ? opts.dispatchedFor(job.id) : true,
     reason: 'stub',
@@ -26,7 +53,7 @@ async function withTestDbAndStubs(opts: {
   }));
   const maybeAutoResume = vi.fn().mockResolvedValue(undefined);
 
-  vi.doMock('@/lib/db', () => ({ db: handle.db, schema }));
+  vi.doMock('@/lib/db', () => ({ db: sharedHandle.db, schema }));
   vi.doMock('@/lib/jobs/job-storage', () => ({
     getJob: (id: string) => ({
       id,
@@ -54,11 +81,11 @@ async function withTestDbAndStubs(opts: {
   vi.doMock('@/lib/jobs/auto-resume', () => ({ maybeAutoResume }));
   vi.doMock('@/lib/agents/pending-agent-run', () => ({ drainNextAgentRun }));
 
-  return { handle, dispatchReleaseAfterRun, dispatchReleaseAfterFixCi, maybeAutoResume, drainNextAgentRun };
+  return { dispatchReleaseAfterRun, dispatchReleaseAfterFixCi, maybeAutoResume, drainNextAgentRun };
 }
 
-async function insertEvent(handle: Awaited<ReturnType<typeof createTestPgDb>>, overrides: Partial<typeof schema.jobCompletionEvents.$inferInsert> = {}) {
-  await handle.db.insert(schema.jobCompletionEvents).values({
+async function insertEvent(overrides: Partial<typeof schema.jobCompletionEvents.$inferInsert> = {}) {
+  await sharedHandle.db.insert(schema.jobCompletionEvents).values({
     jobId: overrides.jobId ?? 'proj-run-1',
     kind: overrides.kind ?? 'run',
     exitCode: overrides.exitCode ?? 0,
@@ -71,12 +98,28 @@ async function insertEvent(handle: Awaited<ReturnType<typeof createTestPgDb>>, o
 }
 
 describe('consumeJobCompletionEvents', () => {
+  beforeAll(async () => {
+    sharedHandle = await createTestPgDbEmpty();
+    await applyDdl(sharedHandle);
+  });
+
+  afterAll(async () => {
+    try {
+      await sharedHandle[Symbol.asyncDispose]();
+    } catch {
+      // ignore
+    }
+  });
+
   beforeEach(() => vi.resetModules());
+  beforeEach(async () => {
+    await sharedHandle.db.execute(sql.raw('TRUNCATE job_completion_events RESTART IDENTITY'));
+  });
   afterEach(() => { vi.resetModules(); vi.restoreAllMocks(); });
 
   it('routes unconsumed run events to dispatchReleaseAfterRun and marks them consumed', async () => {
-    const { handle, dispatchReleaseAfterRun } = await withTestDbAndStubs();
-    await insertEvent(handle, { jobId: 'proj-run-A' });
+    const { dispatchReleaseAfterRun } = withTestDbAndStubs();
+    await insertEvent({ jobId: 'proj-run-A' });
 
     const { consumeJobCompletionEvents } = await import('@/lib/workflows/triggers/job-completion-router');
     const result = await consumeJobCompletionEvents();
@@ -85,41 +128,37 @@ describe('consumeJobCompletionEvents', () => {
     expect(result.routed).toBe(1);
     expect(dispatchReleaseAfterRun).toHaveBeenCalledOnce();
 
-    const rows = await handle.db.select().from(schema.jobCompletionEvents);
+    const rows = await sharedHandle.db.select().from(schema.jobCompletionEvents);
     expect(rows[0].consumedBy).toBe('job-completion-router');
     expect(rows[0].consumedAt).not.toBeNull();
-
-    await handle[Symbol.asyncDispose]();
   });
 
   it('skips already-consumed rows', async () => {
-    const { handle, dispatchReleaseAfterRun } = await withTestDbAndStubs();
-    await insertEvent(handle, { jobId: 'proj-run-B', consumedBy: 'job-completion-router' });
+    const { dispatchReleaseAfterRun } = withTestDbAndStubs();
+    await insertEvent({ jobId: 'proj-run-B', consumedBy: 'job-completion-router' });
 
     const { consumeJobCompletionEvents } = await import('@/lib/workflows/triggers/job-completion-router');
     const result = await consumeJobCompletionEvents();
 
     expect(result.processed).toBe(0);
     expect(dispatchReleaseAfterRun).not.toHaveBeenCalled();
-    await handle[Symbol.asyncDispose]();
   });
 
   it('processes oldest first', async () => {
-    const { handle, dispatchReleaseAfterRun } = await withTestDbAndStubs();
-    await insertEvent(handle, { jobId: 'newer', emittedAt: 200 });
-    await insertEvent(handle, { jobId: 'older', emittedAt: 100 });
+    const { dispatchReleaseAfterRun } = withTestDbAndStubs();
+    await insertEvent({ jobId: 'newer', emittedAt: 200 });
+    await insertEvent({ jobId: 'older', emittedAt: 100 });
 
     const { consumeJobCompletionEvents } = await import('@/lib/workflows/triggers/job-completion-router');
     await consumeJobCompletionEvents();
 
     const callOrder = dispatchReleaseAfterRun.mock.calls.map((c) => (c[0] as { id: string }).id);
     expect(callOrder).toEqual(['older', 'newer']);
-    await handle[Symbol.asyncDispose]();
   });
 
   it('does not dispatch while the legacy hook flag is on, but still marks consumed', async () => {
-    const { handle, dispatchReleaseAfterRun } = await withTestDbAndStubs({ legacyFlagEnabled: true });
-    await insertEvent(handle, { jobId: 'proj-run-legacy' });
+    const { dispatchReleaseAfterRun } = withTestDbAndStubs({ legacyFlagEnabled: true });
+    await insertEvent({ jobId: 'proj-run-legacy' });
 
     const { consumeJobCompletionEvents } = await import('@/lib/workflows/triggers/job-completion-router');
     const result = await consumeJobCompletionEvents();
@@ -127,35 +166,32 @@ describe('consumeJobCompletionEvents', () => {
     expect(dispatchReleaseAfterRun).not.toHaveBeenCalled();
     expect(result.routed).toBe(0);
     expect(result.skipped).toBe(1);
-    const rows = await handle.db.select().from(schema.jobCompletionEvents);
+    const rows = await sharedHandle.db.select().from(schema.jobCompletionEvents);
     expect(rows[0].consumedBy).toBe('job-completion-router');
-    await handle[Symbol.asyncDispose]();
   });
 
   it('routes failed run/agent events to auto-resume when its kill switch is off', async () => {
-    const { handle, maybeAutoResume, dispatchReleaseAfterRun } = await withTestDbAndStubs({ getJobExitCode: 1 });
-    await insertEvent(handle, { jobId: 'proj-run-fail', exitCode: 1 });
+    const { maybeAutoResume, dispatchReleaseAfterRun } = withTestDbAndStubs({ getJobExitCode: 1 });
+    await insertEvent({ jobId: 'proj-run-fail', exitCode: 1 });
 
     const { consumeJobCompletionEvents } = await import('@/lib/workflows/triggers/job-completion-router');
     await consumeJobCompletionEvents();
 
     expect(maybeAutoResume).toHaveBeenCalledOnce();
     expect(dispatchReleaseAfterRun).not.toHaveBeenCalled();
-    await handle[Symbol.asyncDispose]();
   });
 
   it('skips auto-resume routing while its legacy hook flag is on', async () => {
-    const { handle, maybeAutoResume } = await withTestDbAndStubs({
+    const { maybeAutoResume } = withTestDbAndStubs({
       getJobExitCode: 1,
       legacyAutoResumeFlagEnabled: true,
     });
-    await insertEvent(handle, { jobId: 'proj-run-fail-legacy', exitCode: 1 });
+    await insertEvent({ jobId: 'proj-run-fail-legacy', exitCode: 1 });
 
     const { consumeJobCompletionEvents } = await import('@/lib/workflows/triggers/job-completion-router');
     await consumeJobCompletionEvents();
 
     expect(maybeAutoResume).not.toHaveBeenCalled();
-    await handle[Symbol.asyncDispose]();
   });
 
   it('dispatches release-after-run BEFORE draining the agent queue on agent successes', async () => {
@@ -163,8 +199,8 @@ describe('consumeJobCompletionEvents', () => {
     // lifecycle hook ran release-after-run first so startRelease could
     // acquire the project lock before the next queued agent fired. The
     // router must preserve that ordering.
-    const { handle, dispatchReleaseAfterRun, drainNextAgentRun } = await withTestDbAndStubs({ getJobKind: 'agent:foo' });
-    await insertEvent(handle, { jobId: 'proj-agent:foo-ok', kind: 'agent:foo' });
+    const { dispatchReleaseAfterRun, drainNextAgentRun } = withTestDbAndStubs({ getJobKind: 'agent:foo' });
+    await insertEvent({ jobId: 'proj-agent:foo-ok', kind: 'agent:foo' });
 
     const callOrder: string[] = [];
     dispatchReleaseAfterRun.mockImplementation(async () => { callOrder.push('release-after-run'); return { dispatched: true, reason: 'stub' }; });
@@ -174,37 +210,34 @@ describe('consumeJobCompletionEvents', () => {
     await consumeJobCompletionEvents();
 
     expect(callOrder).toEqual(['release-after-run', 'agent-drain']);
-    await handle[Symbol.asyncDispose]();
   });
 
   it('drains the per-project agent queue on agent kinds when its kill switch is off', async () => {
-    const { handle, drainNextAgentRun } = await withTestDbAndStubs({ getJobKind: 'agent:foo' });
-    await insertEvent(handle, { jobId: 'proj-agent:foo-1', kind: 'agent:foo' });
+    const { drainNextAgentRun } = withTestDbAndStubs({ getJobKind: 'agent:foo' });
+    await insertEvent({ jobId: 'proj-agent:foo-1', kind: 'agent:foo' });
 
     const { consumeJobCompletionEvents } = await import('@/lib/workflows/triggers/job-completion-router');
     await consumeJobCompletionEvents();
 
     expect(drainNextAgentRun).toHaveBeenCalledWith('proj');
-    await handle[Symbol.asyncDispose]();
   });
 
   it('skips agent drain while its legacy hook flag is on', async () => {
-    const { handle, drainNextAgentRun } = await withTestDbAndStubs({
+    const { drainNextAgentRun } = withTestDbAndStubs({
       getJobKind: 'agent:foo',
       legacyAgentDrainFlagEnabled: true,
     });
-    await insertEvent(handle, { jobId: 'proj-agent:foo-skip', kind: 'agent:foo' });
+    await insertEvent({ jobId: 'proj-agent:foo-skip', kind: 'agent:foo' });
 
     const { consumeJobCompletionEvents } = await import('@/lib/workflows/triggers/job-completion-router');
     await consumeJobCompletionEvents();
 
     expect(drainNextAgentRun).not.toHaveBeenCalled();
-    await handle[Symbol.asyncDispose]();
   });
 
   it('routes fix-ci events to dispatchReleaseAfterFixCi when its kill switch is off', async () => {
-    const { handle, dispatchReleaseAfterFixCi, dispatchReleaseAfterRun } = await withTestDbAndStubs({ getJobKind: 'fix-ci' });
-    await insertEvent(handle, { jobId: 'proj-fix-ci-1', kind: 'fix-ci' });
+    const { dispatchReleaseAfterFixCi, dispatchReleaseAfterRun } = withTestDbAndStubs({ getJobKind: 'fix-ci' });
+    await insertEvent({ jobId: 'proj-fix-ci-1', kind: 'fix-ci' });
 
     const { consumeJobCompletionEvents } = await import('@/lib/workflows/triggers/job-completion-router');
     const result = await consumeJobCompletionEvents();
@@ -212,27 +245,25 @@ describe('consumeJobCompletionEvents', () => {
     expect(result.routed).toBe(1);
     expect(dispatchReleaseAfterFixCi).toHaveBeenCalledOnce();
     expect(dispatchReleaseAfterRun).not.toHaveBeenCalled();
-    await handle[Symbol.asyncDispose]();
   });
 
   it('skips fix-ci dispatch while its legacy hook flag is on', async () => {
-    const { handle, dispatchReleaseAfterFixCi } = await withTestDbAndStubs({
+    const { dispatchReleaseAfterFixCi } = withTestDbAndStubs({
       getJobKind: 'fix-ci',
       legacyFixCiFlagEnabled: true,
     });
-    await insertEvent(handle, { jobId: 'proj-fix-ci-skip', kind: 'fix-ci' });
+    await insertEvent({ jobId: 'proj-fix-ci-skip', kind: 'fix-ci' });
 
     const { consumeJobCompletionEvents } = await import('@/lib/workflows/triggers/job-completion-router');
     const result = await consumeJobCompletionEvents();
 
     expect(dispatchReleaseAfterFixCi).not.toHaveBeenCalled();
     expect(result.routed).toBe(0);
-    await handle[Symbol.asyncDispose]();
   });
 
   it('still marks event consumed when dispatch declines to dispatch', async () => {
-    const { handle } = await withTestDbAndStubs({ dispatchedFor: () => false });
-    await insertEvent(handle, { jobId: 'proj-run-C' });
+    withTestDbAndStubs({ dispatchedFor: () => false });
+    await insertEvent({ jobId: 'proj-run-C' });
 
     const { consumeJobCompletionEvents } = await import('@/lib/workflows/triggers/job-completion-router');
     const result = await consumeJobCompletionEvents();
@@ -241,8 +272,7 @@ describe('consumeJobCompletionEvents', () => {
     expect(result.routed).toBe(0);
     expect(result.skipped).toBe(1);
 
-    const rows = await handle.db.select().from(schema.jobCompletionEvents);
+    const rows = await sharedHandle.db.select().from(schema.jobCompletionEvents);
     expect(rows[0].consumedBy).toBe('job-completion-router');
-    await handle[Symbol.asyncDispose]();
   });
 });

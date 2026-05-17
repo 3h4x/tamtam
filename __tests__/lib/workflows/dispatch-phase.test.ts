@@ -42,6 +42,7 @@ import type { NextPhase } from '@/lib/workflows/decide-next-phase';
 
 describe('dispatchPhase', () => {
   beforeEach(() => {
+    vi.useRealTimers();
     startMock.mockReset().mockResolvedValue({ runId: 'wrun_child_1' });
     settingsState.plainTestPhaseEnabled = false;
     listJobsMock.mockReset().mockReturnValue([]);
@@ -193,11 +194,14 @@ describe('dispatchPhase', () => {
   });
 
   it('retries once on Next.js chunk-load error then succeeds', async () => {
+    vi.useFakeTimers();
     startMock
       .mockRejectedValueOnce(new Error('Failed to load chunk server/chunks/lib_workflows_xyz._.js from module 71065'))
       .mockResolvedValueOnce({ runId: 'wrun_after_retry' });
     const decision: NextPhase = { next: 'review', from: 'test' };
-    const r = await dispatchPhase(decision, { projectName: 'test-tt' });
+    const dispatchPromise = dispatchPhase(decision, { projectName: 'test-tt' });
+    await vi.advanceTimersByTimeAsync(2000);
+    const r = await dispatchPromise;
     expect(startMock).toHaveBeenCalledTimes(2);
     expect(r).toEqual({ dispatched: true, phase: 'review', childRunId: 'wrun_after_retry' });
   });
