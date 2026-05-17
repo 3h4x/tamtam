@@ -2409,7 +2409,6 @@ describe('agents API', () => {
         model: 'sonnet',
         schedule: null,
         skillIds: [],
-
         enabled: true,
         provider: 'codex',
         runner: 'pm2',
