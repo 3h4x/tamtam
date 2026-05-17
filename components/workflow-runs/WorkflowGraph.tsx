@@ -8,7 +8,7 @@ export function WorkflowGraph() {
       <div className="mb-3 flex items-baseline gap-3">
         <h3 className="text-sm font-semibold text-text-primary">Release pipeline state machine</h3>
         <span className="text-xs text-text-tertiary">
-          Source of truth: <code className="font-mono">lib/workflows/decide-next-phase.ts</code>
+          Source of truth: <code className="font-mono">lib/workflows/</code>
         </span>
       </div>
       <div className="overflow-x-auto">
