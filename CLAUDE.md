@@ -63,6 +63,18 @@ Canonical post-edit command: **`pnpm run rebuild`** (build + idempotent PM2 rest
 - **Do not mock the database** — use `createTestPgDbEmpty()` or `createTestPgDb()` from `__tests__/helpers/test-db.ts`.
 - Run `pnpm test` after every non-trivial change.
 
+## Dependency Security
+
+- Prefer existing dependencies and platform APIs over adding new packages.
+- Before adding or upgrading a package, read `docs/SECURITY.md` and verify the dependency is necessary for TamTam's self-hosted threat model.
+- Keep dependency changes minimal and documented in the relevant subsystem doc when they change runtime or trust boundaries.
+
+## Scope and Safety
+
+- Make the smallest change that fully solves the task; do not rewrite settled guidance or unrelated code paths.
+- Preserve runtime safety rails: job pause gates, budget gates, release locks, and default-branch pinning stay intact unless the task explicitly requires changing them.
+- Stop and surface conflicts when a requested change would weaken shared-infra safety assumptions or silently broaden trust.
+
 ## Definition of Done for UI/Frontend Changes
 
 - Server running (`pnpm run rebuild` if a build is needed) before testing. For deterministic flows that shouldn't depend on the live app, use `pnpm dev:qa` on port 1338.
@@ -113,22 +125,28 @@ Canonical post-edit command: **`pnpm run rebuild`** (build + idempotent PM2 rest
 
 Read the relevant file before touching the subsystem it covers.
 
-| File | Topic |
-|------|-------|
-| `docs/COMMANDS.md` | Full command reference (server lifecycle, tests, db, profiling) |
-| `docs/API.md` | API route reference |
-| `docs/STREAMING.md` | Job lifecycle + SSE streaming |
-| `docs/PIPELINE.md` | Release pipeline state machine |
-| `docs/DATABASE.md` | Drizzle schema — tables, columns, indices |
-| `docs/BACKUP.md` | Postgres backup / restore runbook |
-| `docs/SETTINGS.md` | All `settings` keys, types, defaults |
-| `docs/AGENT.md` | Agents: skills composition, scheduling, intake workflow |
-| `docs/TAMTAM-DIR.md` | `.tamtam/config.yml` and `.tamtam/agents/*.md` reference |
-| `docs/TESTING.md` | Test patterns, PGlite helpers, pre-push hook |
-| `docs/CACHING.md` | TTL cache strategy |
-| `docs/PROFILING.md` | Server/client/Turbopack profiling |
-| `docs/SECURITY.md` | File-agent trust, untrusted input handling, dependency hygiene |
-| `docs/SHIM.md` | CLI shim compatibility layer |
-| `docs/UI.md` | Design tokens, components, voice (canonical previews in `docs/ui-preview/*.html`) |
-| `docs/PROMPT-SIZE.md` | Prompt size & cache-read cost analysis |
-| `docs/E2E.md` | Playwright pipeline e2e harness |
+| File | Topic | Load when |
+|------|-------|-----------|
+| `docs/AGENT.md` | Agents: composition, scheduling, intake workflow, concurrency rules | Creating, debugging, or changing agent behavior, attached docs, schedules, or intake orchestration |
+| `docs/API.md` | HTTP API route reference | Adding, changing, or testing any `app/api/*` route or response contract |
+| `docs/BACKUP.md` | Postgres backup and restore runbook | Touching backup/restore flows, DB maintenance scripts, or retention behavior for dumps |
+| `docs/CACHING.md` | In-memory and DB-backed cache strategy | Adding polling endpoints, debugging stale reads, or changing cache invalidation/TTL behavior |
+| `docs/COMMANDS.md` | Server lifecycle, tests, DB, and profiling commands | Running TamTam, choosing the right rebuild/dev/test command, or updating command guidance |
+| `docs/DATABASE.md` | Drizzle/Postgres schema reference | Editing schema, writing queries, or reasoning about persisted runtime state |
+| `docs/E2E.md` | Playwright pipeline e2e harness | Deciding between unit vs pipeline e2e coverage or extending `e2e/pipeline/` |
+| `docs/PIPELINE.md` | Release pipeline state machine and fix-loop rules | Changing release orchestration, phase transitions, retry caps, or guard behavior |
+| `docs/PROFILING.md` | Server, client, and Turbopack profiling workflow | Investigating CPU, HMR, or browser performance problems before making perf changes |
+| `docs/PROMPT-SIZE.md` | Prompt composition and cache-read cost analysis | Changing prompt assembly, retrieval/context injection, or diagnosing token/cost growth |
+| `docs/SECURITY.md` | File-agent trust model and untrusted input handling | Changing `.tamtam/` reads, trust boundaries, safe-user logic, or dependency-sensitive behavior |
+| `docs/SETTINGS.md` | Settings keys, defaults, and effects | Adding/changing config keys or wiring UI/API behavior to settings |
+| `docs/SHIM.md` | Claude-compatible CLI shim behavior | Updating provider shims, argument mapping, or stream-json compatibility |
+| `docs/STREAMING.md` | Job lifecycle, logs, and SSE streaming | Debugging blank/stalled streams or implementing real-time output for a job kind |
+| `docs/superpowers/plans/2026-04-16-docs-picker.md` | Historical implementation plan for docs picker | Tracing why the docs picker exists or comparing current behavior to the original plan |
+| `docs/superpowers/plans/2026-05-13-agent-retrieval.md` | Historical agent retrieval implementation plan | Reviewing the original retrieval rollout plan before changing retrieval ingestion or prompt-time lookup |
+| `docs/superpowers/plans/2026-05-13-durable-agent-orchestration.md` | Historical evaluation of durable agent orchestration | Understanding the earlier workflow adoption tradeoff analysis and why it was superseded |
+| `docs/superpowers/specs/2026-04-16-docs-picker-design.md` | Approved design for docs picker | Changing docs picker API/UI behavior and needing the approved contract |
+| `docs/superpowers/specs/2026-05-13-agent-retrieval-design.md` | Approved semantic retrieval design | Changing retrieval architecture, ranking, or storage assumptions |
+| `docs/superpowers/specs/2026-05-14-postgres-workflow-cutover-design.md` | Approved Postgres/workflow cutover design | Touching Postgres-only assumptions, workflow-always-on intake, or cleanup of older SQLite-era patterns |
+| `docs/TAMTAM-DIR.md` | `.tamtam/config.yml` and file-agent contract | Changing committed per-project config, agent files, or auto-attached docs behavior |
+| `docs/TESTING.md` | Vitest/PGlite patterns and mock rules | Adding tests, especially API tests, or debugging test harness setup |
+| `docs/UI.md` | Design tokens, component patterns, and visual rules | Changing UI styling, layout patterns, or deciding whether a visual choice fits TamTam |
