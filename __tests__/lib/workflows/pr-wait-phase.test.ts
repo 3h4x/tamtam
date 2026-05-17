@@ -20,6 +20,11 @@ const doMergeMock = vi.fn();
 const switchToDefaultMock = vi.fn();
 const startMarkDodMock = vi.fn();
 const mkdirSyncMock = vi.fn();
+const execMock = vi.fn();
+const dbInsertMock = vi.fn();
+const dbValuesMock = vi.fn();
+const dbOnConflictDoUpdateMock = vi.fn();
+const dbExecuteMock = vi.fn();
 
 vi.mock('@/lib/shared/project-data', () => ({
   resolveProjectPath: (...args: unknown[]) => resolveProjectPathMock(...args),
@@ -45,6 +50,19 @@ vi.mock('@/lib/pipeline/start-pr-wait', () => ({
 vi.mock('@/lib/pipeline/start-mark-dod', () => ({
   startMarkDod: (...args: unknown[]) => startMarkDodMock(...args),
 }));
+vi.mock('@/lib/shared/shell', () => ({
+  exec: (...args: unknown[]) => execMock(...args),
+}));
+vi.mock('@/lib/db', () => ({
+  db: {
+    insert: (...args: unknown[]) => dbInsertMock(...args),
+  },
+  schema: {
+    ghStatus: {
+      project: 'project',
+    },
+  },
+}));
 vi.mock('fs', async () => {
   const actual = await vi.importActual<typeof import('fs')>('fs');
   return { ...actual, mkdirSync: (...args: unknown[]) => mkdirSyncMock(...args) };
@@ -55,7 +73,7 @@ import { releasePrWaitPhaseWorkflow } from '@/lib/workflows/phases/pr-wait-phase
 const PR = { number: 42, repo: '3h4x/test-tt', url: 'https://example.com/pr/42' };
 
 function setupJob(jobId = 'prw-1') {
-  const job = { id: jobId, kind: 'pr-wait', logPath: `/tmp/${jobId}.log`, finishedAt: null, parentJobId: null };
+  const job = { id: jobId, project: 'proj', kind: 'pr-wait', logPath: `/tmp/${jobId}.log`, finishedAt: null, parentJobId: null };
   createJobMock.mockReturnValue(job);
   getJobMock.mockImplementation((id: string) => (id === jobId ? job : null));
   return job;
@@ -76,6 +94,12 @@ describe('releasePrWaitPhaseWorkflow', () => {
     switchToDefaultMock.mockReset();
     startMarkDodMock.mockReset();
     mkdirSyncMock.mockReset();
+    execMock.mockReset();
+    dbInsertMock.mockReset().mockReturnValue({ values: dbValuesMock });
+    dbValuesMock.mockReset().mockReturnValue({ onConflictDoUpdate: dbOnConflictDoUpdateMock });
+    dbOnConflictDoUpdateMock.mockReset().mockReturnValue({ execute: dbExecuteMock });
+    dbExecuteMock.mockReset().mockResolvedValue(undefined);
+    vi.stubGlobal('fetch', vi.fn(async () => ({ status: 202, text: async () => 'queued' })));
   });
 
   it('returns launch_failed when project does not resolve', async () => {
@@ -130,10 +154,66 @@ describe('releasePrWaitPhaseWorkflow', () => {
     setupJob('prw-failed');
     getPrStatusMock.mockResolvedValueOnce({ state: 'OPEN', mergeable: 'MERGEABLE', checks: [{ status: 'COMPLETED', conclusion: 'FAILURE' }] });
     checksConclusionMock.mockReturnValue('fail');
+    execMock.mockResolvedValueOnce({
+      exitCode: 0,
+      stdout: JSON.stringify({
+        statusCheckRollup: [
+          { status: 'COMPLETED', conclusion: 'FAILURE', detailsUrl: 'https://github.com/3h4x/test-tt/actions/runs/123' },
+        ],
+      }),
+      stderr: '',
+    });
 
     const r = await releasePrWaitPhaseWorkflow('proj', PR.number, PR.repo, PR.url);
 
     expect(r).toMatchObject({ ok: true, merged: false, reason: 'checks_failed' });
+    expect(execMock).toHaveBeenCalledWith(
+      'gh',
+      ['pr', 'view', String(PR.number), '--repo', PR.repo, '--json', 'statusCheckRollup'],
+      { cwd: '/tmp/proj', timeout: 15000 },
+    );
+    expect(dbValuesMock).toHaveBeenCalledWith(expect.objectContaining({
+      project: 'proj',
+      ciFailedUrl: 'https://github.com/3h4x/test-tt/actions/runs/123',
+    }));
+    expect(fetch).toHaveBeenCalledWith(
+      'http://localhost:1337/api/projects/by-project/proj/fix-ci',
+      { method: 'POST' },
+    );
+  });
+
+  it('seeds failed StatusContext URLs before dispatching fix-ci', async () => {
+    setupJob('prw-status-context-failed');
+    getPrStatusMock.mockResolvedValueOnce({
+      state: 'OPEN',
+      mergeable: 'MERGEABLE',
+      checks: [{ __typename: 'StatusContext', state: 'ERROR', targetUrl: 'https://github.com/3h4x/test-tt/actions/runs/456' }],
+    });
+    checksConclusionMock.mockReturnValue('fail');
+    execMock.mockResolvedValueOnce({
+      exitCode: 0,
+      stdout: JSON.stringify({
+        statusCheckRollup: [
+          { __typename: 'StatusContext', state: 'ERROR', targetUrl: 'https://github.com/3h4x/test-tt/actions/runs/456' },
+        ],
+      }),
+      stderr: '',
+    });
+    dbExecuteMock.mockImplementationOnce(async () => {
+      expect(fetch).not.toHaveBeenCalled();
+    });
+
+    const r = await releasePrWaitPhaseWorkflow('proj', PR.number, PR.repo, PR.url);
+
+    expect(r).toMatchObject({ ok: true, merged: false, reason: 'checks_failed' });
+    expect(dbValuesMock).toHaveBeenCalledWith(expect.objectContaining({
+      project: 'proj',
+      ciFailedUrl: 'https://github.com/3h4x/test-tt/actions/runs/456',
+    }));
+    expect(fetch).toHaveBeenCalledWith(
+      'http://localhost:1337/api/projects/by-project/proj/fix-ci',
+      { method: 'POST' },
+    );
   });
 
   it('reports conflict when mergeable=CONFLICTING', async () => {

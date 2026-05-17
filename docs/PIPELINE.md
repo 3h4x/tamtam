@@ -200,7 +200,7 @@ still continues into `pr-wait` even when `mark-dod` exits nonzero.
 
 PR-MERGE-WAIT
   ├─ CI passes → merge PR → switch to default branch → finalize release (exit 0)
-  └─ CI fails  → finalize release (exit 1)
+  └─ CI fails  → seed failed CI URL → dispatch fix-ci → finalize release (exit 1)
 
 `pr-wait` polls the PR immediately, then every 30 seconds by default. When
 GitHub reports an empty `statusCheckRollup`, TamTam does not treat that as "no
@@ -214,6 +214,14 @@ still flip that state to `CONFLICTING` on a later poll.
 rows are resumed against the existing job/log instead of being reaped like
 other abandoned inline jobs. `mark-dod` remains non-resumable and is still
 marked failed if a restart interrupts it.
+
+When `pr-wait` observes failed PR checks, it stores the failed check URL in
+`gh_status.ci_failed_url` and dispatches `fix-ci` for the project before
+finalizing the `pr-wait` step. The `fix-ci` job then uses its normal completion
+hook to start a fresh release after a successful CI fix, so the pipeline can
+continue toward merge. If no failed check URL can be resolved from GitHub's
+`statusCheckRollup`, the `fix-ci` endpoint reports the missing URL and the
+release remains failed for manual follow-up.
 
 Boot recovery also heals stranded `release` rows. If the server dies before
 the first child step starts, TamTam reaps the orphaned release directly. If a
@@ -265,7 +273,7 @@ Called by `markDone()` after every job finishes. Hooks run in order:
 9. **PR merge wait**: If a push produced a PR and `auto_pr_merge_enabled`: start PR-MERGE-WAIT; issue-linked DoD is deferred to post-merge on that path.
 10. **Release finalization**: If a pipeline job ran but no chaining happened, write `# release finished — exit {code}` to meta-log and mark the release job done.
 11. **Fix-CI auto-retry**: If `fix-ci` exits ≠0 within ~5 s of starting (boot crash): schedule retry after 500–3000 ms backoff. Capped at 2 retries within a 120-s window. These are hardcoded constants — not user-tunable.
-12. **Fix-CI release chaining**: If `fix-ci` exits 0, TamTam immediately tries `startRelease(project, { queueIfBlocked: true, sourceJobId: fixCiJob.id })` so the uncommitted CI fix goes through the normal quality gate (`test → review → commit → push`). If release start is temporarily blocked by the same conditions as release-after-run (active pipeline lock, pause gate, budget block, retryable pre-start failure), the hook preserves that intent by setting the pending-release flag for the project.
+12. **Fix-CI release chaining**: If `fix-ci` exits 0, TamTam immediately tries `startRelease(project, { queueIfBlocked: true, sourceJobId: fixCiJob.id })` so the uncommitted CI fix goes through the normal quality gate (`test → review → commit → push`). This includes `fix-ci` jobs auto-dispatched by `pr-wait` after failed PR checks. If release start is temporarily blocked by the same conditions as release-after-run (active pipeline lock, pause gate, budget block, retryable pre-start failure), the hook preserves that intent by setting the pending-release flag for the project.
 13. **Review-exhaustion fallback**: If a **NEEDS ATTENTION** review→fix loop hits `review_fix_max_iterations`, repeats the same findings (`reviewIsStuck`), or the fixer claims a Finding ID was fixed but the reviewer still flags it (`fixContradictsReview`): file a follow-up issue titled `chore(review): <headline-finding-id> (+N more)` using the highest-severity structured `Finding ID` as the headline (or `chore(review): <headline-finding-id>` when exactly one finding exists, or `chore(review): unresolved review` when no structured findings were extracted). The issue body contains the structured unresolved findings or a quoted prose excerpt. The issue title/body intentionally omit release handles, job IDs, exhaustion reasons, shim launch lines, stream-json telemetry, and permission-mode flags. TamTam tries to apply the canonical labels `tamtam` `review-followup` `priority-medium`, skips any of those labels that do not exist in the repo, then chains to commit + push so the partial work ships. Falls back to the legacy abort if `gh issue create` fails. These follow-up issues intentionally keep the findings under `## Problem`, then emit `## Acceptance criteria` as unchecked `- [ ]` checkboxes so `mark-dod` can parse and tick them on later work; unlike the CTO issue-planning flow, they omit `## Proposed approach` because the reviewer findings are the source of truth. **DO NOT SHIP** reviews are routed by `review_do_not_ship_action` (default `pass`): the workflow-driven orchestrator files the same follow-up issue and chains to commit; `fix` instead drives the fix loop within the same review iteration cap; `abort` retains the legacy stop-before-commit behavior.
 
 ### Project sweep

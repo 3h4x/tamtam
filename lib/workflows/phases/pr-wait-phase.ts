@@ -127,19 +127,19 @@ export async function releasePrWaitPhaseWorkflow(
   }
 
   if (!merged) {
-    await finalizePrWaitStep(jobId, 1, terminalReason);
+    await finalizePrWaitStep(jobId, 1, terminalReason, prNumber, prRepo);
     return { ok: true, jobId, finished: true, merged: false, reason: terminalReason, exitCode: 1 };
   }
 
   const switched = await switchToDefaultStep(jobId, prep.projPath);
   if (!switched.ok) {
-    await finalizePrWaitStep(jobId, 1, 'switch_failed');
+    await finalizePrWaitStep(jobId, 1, 'switch_failed', prNumber, prRepo);
     return { ok: true, jobId, finished: true, merged: true, reason: 'switch_failed', exitCode: 1 };
   }
 
   await runPostMergeMarkDodStep(jobId, projectName, prNumber, prRepo);
 
-  await finalizePrWaitStep(jobId, 0, 'merged');
+  await finalizePrWaitStep(jobId, 0, 'merged', prNumber, prRepo);
   return { ok: true, jobId, finished: true, merged: true, reason: 'merged', exitCode: 0 };
 }
 
@@ -290,6 +290,8 @@ async function finalizePrWaitStep(
   jobId: string,
   exitCode: number,
   reason: string,
+  prNumber: number,
+  prRepo: string,
 ): Promise<void> {
   'use step';
   const { getJob, markDone } = await import('@/lib/jobs/job-storage');
@@ -305,6 +307,10 @@ async function finalizePrWaitStep(
   // success, closing the loop.
   if (reason === 'checks_failed' && job) {
     try {
+      // fix-ci reads ci_failed_url from gh_status; populate it first using
+      // the first failing check URL from gh pr view. Without this the API
+      // returns "No failed CI URL found" and the release stalls.
+      await populateGhStatusFromPrChecks(job.project, prNumber, prRepo);
       const base = process.env.TAMTAM_BASE_URL || 'http://localhost:1337';
       const url = `${base}/api/projects/by-project/${encodeURIComponent(job.project)}/fix-ci`;
       const res = await fetch(url, { method: 'POST' });
@@ -315,4 +321,72 @@ async function finalizePrWaitStep(
       appendLogForJob(jobId, `\n# auto fix-ci dispatch failed: ${msg}\n`);
     }
   }
+}
+
+/** Best-effort: read the first failing check URL from `gh pr view` and
+ *  upsert it into `gh_status.ci_failed_url` so the existing fix-ci route
+ *  can consume it. Silently swallows errors — fix-ci itself will surface
+ *  the "No failed CI URL found" 400 if this fails. */
+async function populateGhStatusFromPrChecks(projectName: string, prNumber: number, prRepo: string): Promise<void> {
+  'use step';
+  const { resolveProjectPath } = await import('@/lib/shared/project-data');
+  const { exec } = await import('@/lib/shared/shell');
+  const { db, schema } = await import('@/lib/db');
+  const projPath = resolveProjectPath(projectName);
+  if (!projPath) return;
+  let parsed: { statusCheckRollup?: Array<PrCheckRollupItem> } = {};
+  try {
+    const r = await exec(
+      'gh',
+      ['pr', 'view', String(prNumber), '--repo', prRepo, '--json', 'statusCheckRollup'],
+      { cwd: projPath, timeout: 15000 },
+    );
+    if (r.exitCode !== 0 || !r.stdout) return;
+    parsed = JSON.parse(r.stdout);
+  } catch { return; }
+  const failedUrl = findFailedPrCheckUrl(parsed.statusCheckRollup ?? []);
+  if (!failedUrl) return;
+  try {
+    const fetchedAt = new Date().toISOString();
+    await db.insert(schema.ghStatus)
+      .values({ project: projectName, ciFailedUrl: failedUrl, fetchedAt })
+      .onConflictDoUpdate({ target: schema.ghStatus.project, set: { ciFailedUrl: failedUrl, fetchedAt } })
+      .execute();
+  } catch { /* table absent in some test envs */ }
+}
+
+type PrCheckRollupItem = {
+  __typename?: string;
+  conclusion?: string | null;
+  detailsUrl?: string | null;
+  state?: string | null;
+  status?: string | null;
+  targetUrl?: string | null;
+  url?: string | null;
+};
+
+function findFailedPrCheckUrl(checks: PrCheckRollupItem[]): string | null {
+  for (const check of checks) {
+    const url = firstNonEmptyString(check.detailsUrl, check.targetUrl, check.url);
+    if (!url) continue;
+
+    if (check.__typename === 'StatusContext' || (check.state !== undefined && check.status === undefined)) {
+      const state = (check.state ?? '').toUpperCase();
+      if (state !== 'PENDING' && state !== 'EXPECTED' && state !== 'SUCCESS' && state !== '') {
+        return url;
+      }
+      continue;
+    }
+
+    if ((check.status ?? '').toUpperCase() !== 'COMPLETED') continue;
+    const conclusion = (check.conclusion ?? '').toUpperCase();
+    if (conclusion !== 'SUCCESS' && conclusion !== 'NEUTRAL' && conclusion !== 'SKIPPED') {
+      return url;
+    }
+  }
+  return null;
+}
+
+function firstNonEmptyString(...values: Array<string | null | undefined>): string | null {
+  return values.find((value): value is string => typeof value === 'string' && value.length > 0) ?? null;
 }

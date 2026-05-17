@@ -51,6 +51,10 @@ function renderSettingsPage(initialTab: 'general' | 'pipeline' = 'pipeline') {
   )
 }
 
+function waitForUi(assertion: () => void | Promise<void>) {
+  return vi.waitFor(assertion, { interval: 10 })
+}
+
 function findInputByLabel(container: HTMLElement, labelText: string): HTMLInputElement {
   const label = Array.from(container.querySelectorAll('label')).find(
     (node) => node.textContent?.trim() === labelText,
@@ -185,7 +189,7 @@ describe('SettingsPage', () => {
 
     const { container, unmount } = renderSettingsPage()
 
-    await vi.waitFor(() => {
+    await waitForUi(() => {
       expect(findInputByLabel(container, 'Review Fix Loop Iterations').value).toBe('3')
       expect(getSaveButton(container).disabled).toBe(true)
     })
@@ -195,19 +199,19 @@ describe('SettingsPage', () => {
       setInputValue(input, '03')
     })
 
-    await vi.waitFor(() => {
+    await waitForUi(() => {
       expect(getSaveButton(container).disabled).toBe(false)
     })
 
     getSaveButton(container).click()
 
-    await vi.waitFor(() => {
+    await waitForUi(() => {
       expect(fetchMock).toHaveBeenCalledWith('/api/settings', expect.objectContaining({
         method: 'PATCH',
       }))
     })
 
-    await vi.waitFor(() => {
+    await waitForUi(() => {
       expect(findInputByLabel(container, 'Review Fix Loop Iterations').value).toBe('3')
       expect(getSaveButton(container).disabled).toBe(true)
     })
@@ -251,7 +255,7 @@ describe('SettingsPage', () => {
 
     const { container, unmount } = renderSettingsPage()
 
-    await vi.waitFor(() => {
+    await waitForUi(() => {
       expect(findSelectByLabel(container, 'Do Not Ship Action').value).toBe('pass')
       expect(getSaveButton(container).disabled).toBe(true)
     })
@@ -260,13 +264,13 @@ describe('SettingsPage', () => {
       setSelectValue(findSelectByLabel(container, 'Do Not Ship Action'), 'abort')
     })
 
-    await vi.waitFor(() => {
+    await waitForUi(() => {
       expect(getSaveButton(container).disabled).toBe(false)
     })
 
     getSaveButton(container).click()
 
-    await vi.waitFor(() => {
+    await waitForUi(() => {
       expect(findSelectByLabel(container, 'Do Not Ship Action').value).toBe('abort')
       expect(getSaveButton(container).disabled).toBe(true)
     })
@@ -318,7 +322,7 @@ describe('SettingsPage', () => {
 
     const { container, unmount } = renderSettingsPage()
 
-    await vi.waitFor(() => {
+    await waitForUi(() => {
       expect(findSelectByLabel(container, 'Legacy Release-After-Run Hook').value).toBe('true')
       expect(findSelectByLabel(container, 'Legacy Release-After-Fix-CI Hook').value).toBe('true')
       expect(findSelectByLabel(container, 'Legacy Auto-Resume Hook').value).toBe('true')
@@ -335,13 +339,13 @@ describe('SettingsPage', () => {
       setSelectValue(findSelectByLabel(container, 'Legacy Agent Queue Drain Hook'), 'false')
     })
 
-    await vi.waitFor(() => {
+    await waitForUi(() => {
       expect(getSaveButton(container).disabled).toBe(false)
     })
 
     getSaveButton(container).click()
 
-    await vi.waitFor(() => {
+    await waitForUi(() => {
       expect(findSelectByLabel(container, 'Legacy Release-After-Run Hook').value).toBe('false')
       expect(findSelectByLabel(container, 'Legacy Release-After-Fix-CI Hook').value).toBe('false')
       expect(findSelectByLabel(container, 'Legacy Auto-Resume Hook').value).toBe('false')
@@ -383,7 +387,7 @@ describe('SettingsPage', () => {
 
     const { container, unmount } = renderSettingsPage('general')
 
-    await vi.waitFor(() => {
+    await waitForUi(() => {
       expect(container.textContent).toContain('Retrieval (Embeddings)')
     })
 
@@ -432,7 +436,7 @@ describe('SettingsPage', () => {
 
     const { container, unmount } = renderSettingsPage('general')
 
-    await vi.waitFor(() => {
+    await waitForUi(() => {
       expect(findInputByLabel(container, 'Ollama URL').value).toBe('http://ollama.local:11434')
       expect(findInputByLabel(container, 'Embedding Model').value).toBe('custom-embed')
       expect(findInputByLabel(container, 'Context Limit').value).toBe('8')
@@ -445,13 +449,13 @@ describe('SettingsPage', () => {
       setInputValue(findInputByLabel(container, 'Ollama URL'), 'http://ollama.internal:11434')
     })
 
-    await vi.waitFor(() => {
+    await waitForUi(() => {
       expect(getSaveButton(container).disabled).toBe(false)
     })
 
     getSaveButton(container).click()
 
-    await vi.waitFor(() => {
+    await waitForUi(() => {
       expect(savedBody).toMatchObject({
         retrieval_enabled: 'false',
         retrieval_ollama_url: 'http://ollama.internal:11434',
@@ -462,7 +466,7 @@ describe('SettingsPage', () => {
       })
     })
 
-    await vi.waitFor(() => {
+    await waitForUi(() => {
       expect(findInputByLabel(container, 'Ollama URL').value).toBe('http://ollama.internal:11434')
       expect(findInputByLabel(container, 'Embedding Model').value).toBe('custom-embed')
       expect(findInputByLabel(container, 'Context Limit').value).toBe('8')
@@ -506,7 +510,7 @@ describe('SettingsPage', () => {
 
     const { container, unmount } = renderSettingsPage()
 
-    await vi.waitFor(() => {
+    await waitForUi(() => {
       expect(findInputByLabel(container, 'Review Fix Loop Iterations').value).toBe('0')
     })
 
@@ -514,7 +518,7 @@ describe('SettingsPage', () => {
       setInputValue(findInputByLabel(container, 'Review Fix Loop Iterations'), '5')
     })
 
-    await vi.waitFor(() => {
+    await waitForUi(() => {
       expect(getSaveButton(container).disabled).toBe(false)
     })
 
@@ -565,7 +569,7 @@ describe('SettingsPage', () => {
 
     const { container, unmount } = renderSettingsPage('general')
 
-    await vi.waitFor(() => {
+    await waitForUi(() => {
       expect(findInputByValue(container, 'octocat')).toBeTruthy()
       expect(getSaveButton(container).disabled).toBe(true)
     })
@@ -574,7 +578,7 @@ describe('SettingsPage', () => {
       findButton(container, '+ Add user').click()
     })
 
-    await vi.waitFor(() => {
+    await waitForUi(() => {
       expect(findTrustedGithubUserInputs(container)).toHaveLength(2)
       expect(findTrustedGithubUserInputs(container).some((node) => node.value === '')).toBe(true)
       expect(container.textContent).toContain('Trusted GitHub users cannot be empty.')
@@ -591,7 +595,7 @@ describe('SettingsPage', () => {
       setInputValue(emptyInput, 'hubot')
     })
 
-    await vi.waitFor(() => {
+    await waitForUi(() => {
       expect(findTrustedGithubUserInputs(container).every((node) => node.value.trim().length > 0)).toBe(true)
       expect(container.textContent).not.toContain('Trusted GitHub users cannot be empty.')
       expect(getSaveButton(container).disabled).toBe(false)
@@ -599,7 +603,7 @@ describe('SettingsPage', () => {
 
     getSaveButton(container).click()
 
-    await vi.waitFor(() => {
+    await waitForUi(() => {
       expect(fetchMock).toHaveBeenCalledWith('/api/settings', expect.objectContaining({
         method: 'PATCH',
       }))
@@ -611,7 +615,7 @@ describe('SettingsPage', () => {
     expect(patchCall).toBeTruthy()
     expect((patchCall?.[1] as RequestInit).body).toContain('"trusted_github_users":"octocat, hubot"')
 
-    await vi.waitFor(() => {
+    await waitForUi(() => {
       expect(findInputByValue(container, 'octocat')).toBeTruthy()
       expect(findInputByValue(container, 'hubot')).toBeTruthy()
       expect(getSaveButton(container).disabled).toBe(true)
@@ -645,7 +649,7 @@ describe('SettingsPage', () => {
 
     const { container, unmount } = renderSettingsPage()
 
-    await vi.waitFor(() => {
+    await waitForUi(() => {
       expect(findInputByLabel(container, 'Review Fix Loop Iterations').value).toBe('0')
     })
 
@@ -661,7 +665,7 @@ describe('SettingsPage', () => {
       .filter((event): event is CustomEvent => event instanceof CustomEvent && event.type === SETTINGS_CHANGED_EVENT)
 
     expect(settingsEvents).toHaveLength(0)
-    await vi.waitFor(() => {
+    await waitForUi(() => {
       expect(container.textContent).toContain('Failed to save: write failed')
     })
 
@@ -688,7 +692,7 @@ describe('SettingsPage', () => {
 
     const { container, unmount } = renderSettingsPage('general')
 
-    await vi.waitFor(() => {
+    await waitForUi(() => {
       expect(findInputByValue(container, 'octocat')).toBeTruthy()
       expect(findInputByValue(container, 'hubot')).toBeTruthy()
     })
@@ -699,7 +703,7 @@ describe('SettingsPage', () => {
       setInputValue(secondInput, 'OctoCat')
     })
 
-    await vi.waitFor(() => {
+    await waitForUi(() => {
       expect(container.textContent).toContain('Duplicate GitHub login: OctoCat')
       expect(getSaveButton(container).disabled).toBe(true)
     })
@@ -722,7 +726,7 @@ describe('SettingsPage', () => {
       />,
     )
 
-    await vi.waitFor(() => {
+    await waitForUi(() => {
       expect(container.textContent).toContain('No trusted GitHub logins configured.')
     })
 
@@ -737,7 +741,7 @@ describe('SettingsPage', () => {
       />,
     )
 
-    await vi.waitFor(() => {
+    await waitForUi(() => {
       expect(findInputByValue(container, 'octocat')).toBeTruthy()
     })
     expect(onChange).not.toHaveBeenCalled()
@@ -750,7 +754,7 @@ describe('SettingsPage', () => {
       />,
     )
 
-    await vi.waitFor(() => {
+    await waitForUi(() => {
       expect(findInputByValue(container, 'hubot')).toBeTruthy()
     })
     expect(onChange).not.toHaveBeenCalled()
