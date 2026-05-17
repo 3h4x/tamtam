@@ -65,87 +65,14 @@ export interface DecisionInputs {
   hasUnpushedCommits?: boolean;
 }
 
-export function decideNextPhase(inputs: DecisionInputs): NextPhase {
-  const {
-    kind,
-    exitCode,
-    verdict,
-    parentKind,
-    pushPrContext,
-    autoPrMergeEnabled,
-    reviewDisabled,
-    hasUncommittedChanges,
-    hasUnpushedCommits,
-  } = inputs;
+import { TRANSITIONS, matchesPattern, buildNextPhase } from './pipeline-spec';
 
-  if (kind === 'test') {
-    if (exitCode !== 0) {
-      return { next: 'fix', from: 'test', testExitCode: exitCode };
-    }
-    if (reviewDisabled) {
-      if (hasUncommittedChanges) return { next: 'commit', from: 'test' };
-      if (hasUnpushedCommits) return { next: 'push', from: 'test' };
-      return { next: 'push', from: 'test' };
-    }
-    return { next: 'review', from: 'test' };
+export function decideNextPhase(inputs: DecisionInputs): NextPhase {
+  for (const t of TRANSITIONS) {
+    if (t.external) continue;
+    if (t.from !== inputs.kind) continue;
+    if (!matchesPattern(inputs, t.when)) continue;
+    return buildNextPhase(t, inputs);
   }
-  if (kind === 'review') {
-    if (verdict === 'LGTM') {
-      // Route through commit so any agent-produced uncommitted edits land
-      // in a real commit before the push step. Without this, start-push
-      // returns "No changes to push" when the working tree has untracked
-      // files (the agent generated files but didn't commit them — by
-      // design; the pipeline owns commit+push).
-      return { next: 'commit', from: 'review' };
-    }
-    if (verdict === 'DO NOT SHIP') {
-      return {
-        next: 'abort',
-        from: 'review',
-        verdict: 'DO NOT SHIP',
-        stopReason: 'review verdict: DO NOT SHIP — release blocked',
-      };
-    }
-    return { next: 'fix', from: 'review', verdict: 'NEEDS ATTENTION' };
-  }
-  if (kind === 'commit') {
-    return exitCode === 0
-      ? { next: 'push', from: 'commit' }
-      : { next: 'fix', from: 'commit' };
-  }
-  if (kind === 'push') {
-    return exitCode === 0
-      ? { next: 'mark-dod', from: 'push' }
-      : { next: 'fix', from: 'push' };
-  }
-  if (kind === 'fix') {
-    // Re-verify the step that triggered the fix. A successful fix doesn't
-    // mean the underlying problem is solved — it means the model claims
-    // it solved it. The parent step is the source of truth.
-    if (parentKind === 'test')   return { next: 'test',   from: 'fix' };
-    if (parentKind === 'review') return { next: 'review', from: 'fix' };
-    if (parentKind === 'commit') return { next: 'commit', from: 'fix' };
-    if (parentKind === 'push')   return { next: 'push',   from: 'fix' };
-    return { next: 'done', from: 'fix' };
-  }
-  if (kind === 'mark-dod') {
-    // After DoD verification on an auto-merge-enabled, PR-backed push,
-    // continue into pr-wait so CI is polled and the PR is merged
-    // automatically.
-    //
-    // Mark-dod exit code is intentionally ignored here. Mark-dod's job is
-    // to tick acceptance-criteria checkboxes in the issue/PR body — it
-    // does NOT block the release; the push already landed. A non-zero
-    // exit (most often a PM2 restart killing the inline mark-dod process)
-    // must not skip pr-wait, otherwise the auto-merge release stops with
-    // a stranded open PR and no one polls it to completion.
-    if (autoPrMergeEnabled && pushPrContext) {
-      return { next: 'pr-wait', from: 'mark-dod', pr: pushPrContext };
-    }
-    return { next: 'done', from: 'mark-dod' };
-  }
-  if (kind === 'pr-wait') {
-    return { next: 'done', from: 'pr-wait' };
-  }
-  return { next: 'unknown', from: kind, reason: `no decision rule for kind=${kind}` };
+  return { next: 'unknown', from: inputs.kind, reason: `no decision rule for kind=${inputs.kind}` };
 }
