@@ -251,8 +251,11 @@ function makeJob(overrides: Record<string, unknown> = {}) {
 describe('POST /api/agents/{agentId}/run', () => {
   let sharedHandle: TestDbHandle;
   let tempSkillsDir: string;
+  let tempCaseRoot: string;
+  let tempCaseCounter = 0;
   let logDirMock: string;
   let settingsMock: Record<string, unknown>;
+  let requestJobCancellationFn: typeof import('@/lib/jobs/cancellation').requestJobCancellation;
 
   const now = Date.now() / 1000;
 
@@ -284,6 +287,14 @@ describe('POST /api/agents/{agentId}/run', () => {
     return { promise, resolve, reject };
   }
 
+  function makeTempCaseDir(label: string): string {
+    tempCaseCounter += 1;
+    const dir = join(tempCaseRoot, `${String(tempCaseCounter).padStart(3, '0')}-${label}`);
+    rmSync(dir, { recursive: true, force: true });
+    mkdirSync(dir, { recursive: true });
+    return dir;
+  }
+
   beforeAll(async () => {
     sharedHandle = await createTestPgDbEmpty();
     await applyDdl(sharedHandle);
@@ -292,10 +303,12 @@ describe('POST /api/agents/{agentId}/run', () => {
     // Tests that write into it explicitly clean up the inner `docs/` subtree so
     // file-skill content does not leak between cases.
     tempSkillsDir = mkdtempSync(join(tmpdir(), 'tamtam-agent-run-test-'));
+    tempCaseRoot = mkdtempSync(join(tmpdir(), 'tamtam-agent-run-cases-'));
     mocks.skillsDir = tempSkillsDir;
     mocks.dataSkillsDir = join(tempSkillsDir, 'data-skills');
     const mod = await import('@/app/api/agents/[agentId]/run/route');
     POST = mod.POST;
+    ({ requestJobCancellation: requestJobCancellationFn } = await import('@/lib/jobs/cancellation'));
   });
 
   afterAll(async () => {
@@ -305,9 +318,11 @@ describe('POST /api/agents/{agentId}/run', () => {
       // ignore
     }
     rmSync(tempSkillsDir, { recursive: true, force: true });
+    rmSync(tempCaseRoot, { recursive: true, force: true });
   });
 
   beforeEach(async () => {
+    tempCaseCounter = 0;
     mocks.useRealResolveProvider = false;
     mocks.db = sharedHandle.db;
     await Promise.all([
@@ -1106,7 +1121,7 @@ describe('POST /api/agents/{agentId}/run', () => {
   });
 
   it('redacts prerequisite command secrets in the prompt, artifact, and context metadata', async () => {
-    const tempRoot = mkdtempSync(join(tmpdir(), 'tamtam-agent-prereq-redaction-'));
+    const tempRoot = makeTempCaseDir('prereq-redaction');
     logDirMock = join(tempRoot, 'logs');
     mocks.resolveProjectPath.mockReturnValue('/tmp');
     mocks.shellRun.mockImplementation(async (cmd: string, args: string[]) => {
@@ -1122,32 +1137,28 @@ describe('POST /api/agents/{agentId}/run', () => {
       return { stdout: '', stderr: '', exitCode: 0 };
     });
 
-    try {
-      await insertAgent({ prerequisiteCommand: 'SERVICE_TOKEN=runtime-secret-value curl https://user:supersecret@example.com/path' });
-      const req = new NextRequest('http://localhost/api/agents/agent-123/run', {
-        method: 'POST',
-        body: JSON.stringify({ prompt: 'inspect prereq' }),
-      });
-      await POST(req, { params: Promise.resolve({ agentId: 'agent-123' }) });
+    await insertAgent({ prerequisiteCommand: 'SERVICE_TOKEN=runtime-secret-value curl https://user:supersecret@example.com/path' });
+    const req = new NextRequest('http://localhost/api/agents/agent-123/run', {
+      method: 'POST',
+      body: JSON.stringify({ prompt: 'inspect prereq' }),
+    });
+    await POST(req, { params: Promise.resolve({ agentId: 'agent-123' }) });
 
-      const [, , fullPrompt] = mocks.startJob.mock.calls[0];
-      expect(fullPrompt).toContain('SERVICE_TOKEN=[REDACTED] curl https://user:[REDACTED]@example.com/path');
-      expect(fullPrompt).not.toContain('runtime-secret-value');
-      expect(fullPrompt).not.toContain('supersecret');
+    const [, , fullPrompt] = mocks.startJob.mock.calls[0];
+    expect(fullPrompt).toContain('SERVICE_TOKEN=[REDACTED] curl https://user:[REDACTED]@example.com/path');
+    expect(fullPrompt).not.toContain('runtime-secret-value');
+    expect(fullPrompt).not.toContain('supersecret');
 
-      const artifactPath = join(logDirMock, 'test-job-id.prereq.txt');
-      const artifact = readFileSync(artifactPath, 'utf-8');
-      expect(artifact).toContain('command: SERVICE_TOKEN=[REDACTED] curl https://user:[REDACTED]@example.com/path');
-      expect(artifact).not.toContain('runtime-secret-value');
-      expect(artifact).not.toContain('supersecret');
+    const artifactPath = join(logDirMock, 'test-job-id.prereq.txt');
+    const artifact = readFileSync(artifactPath, 'utf-8');
+    expect(artifact).toContain('command: SERVICE_TOKEN=[REDACTED] curl https://user:[REDACTED]@example.com/path');
+    expect(artifact).not.toContain('runtime-secret-value');
+    expect(artifact).not.toContain('supersecret');
 
-      const updatedJob = mocks.updateJob.mock.calls.at(-1)?.[0];
-      expect(updatedJob?.contextMeta).toBeTruthy();
-      const contextMeta = JSON.parse(updatedJob.contextMeta);
-      expect(contextMeta.prerequisite.command).toBe('SERVICE_TOKEN=[REDACTED] curl https://user:[REDACTED]@example.com/path');
-    } finally {
-      rmSync(tempRoot, { recursive: true, force: true });
-    }
+    const updatedJob = mocks.updateJob.mock.calls.at(-1)?.[0];
+    expect(updatedJob?.contextMeta).toBeTruthy();
+    const contextMeta = JSON.parse(updatedJob.contextMeta);
+    expect(contextMeta.prerequisite.command).toBe('SERVICE_TOKEN=[REDACTED] curl https://user:[REDACTED]@example.com/path');
   });
 
   it('injects the trusted-only issue prerequisite for issue-cruncher agents without an explicit prerequisiteCommand', async () => {
@@ -1194,23 +1205,19 @@ describe('POST /api/agents/{agentId}/run', () => {
   });
 
   it('creates the log directory before writing the prerequisite artifact', async () => {
-    const tempRoot = mkdtempSync(join(tmpdir(), 'tamtam-agent-prereq-logdir-'));
+    const tempRoot = makeTempCaseDir('prereq-logdir');
     logDirMock = join(tempRoot, 'missing-logs');
-    try {
-      await insertAgent({ prerequisiteCommand: 'echo TAMTAM_PREREQ_MARKER' });
-      const req = new NextRequest('http://localhost/api/agents/agent-123/run', {
-        method: 'POST',
-        body: JSON.stringify({ prompt: 'inspect artifact' }),
-      });
-      const res = await POST(req, { params: Promise.resolve({ agentId: 'agent-123' }) });
+    await insertAgent({ prerequisiteCommand: 'echo TAMTAM_PREREQ_MARKER' });
+    const req = new NextRequest('http://localhost/api/agents/agent-123/run', {
+      method: 'POST',
+      body: JSON.stringify({ prompt: 'inspect artifact' }),
+    });
+    const res = await POST(req, { params: Promise.resolve({ agentId: 'agent-123' }) });
 
-      expect(res.status).toBe(200);
-      const artifactPath = join(logDirMock, 'test-job-id.prereq.txt');
-      expect(existsSync(artifactPath)).toBe(true);
-      expect(readFileSync(artifactPath, 'utf-8')).toContain('TAMTAM_PREREQ_MARKER');
-    } finally {
-      rmSync(tempRoot, { recursive: true, force: true });
-    }
+    expect(res.status).toBe(200);
+    const artifactPath = join(logDirMock, 'test-job-id.prereq.txt');
+    expect(existsSync(artifactPath)).toBe(true);
+    expect(readFileSync(artifactPath, 'utf-8')).toContain('TAMTAM_PREREQ_MARKER');
   });
 
   it('still spawns the agent when the prerequisite exits non-zero', async () => {
@@ -1290,8 +1297,7 @@ describe('POST /api/agents/{agentId}/run', () => {
       expect(mocks.shellRun).toHaveBeenCalledWith('bash', ['-c', 'sleep 40'], expect.objectContaining({ cwd: '/path/to/proj' }));
     }, { interval: 2, timeout: 1000 });
 
-    const { requestJobCancellation } = await import('@/lib/jobs/cancellation');
-    const cancellation = requestJobCancellation(sharedJob.id, 1_000);
+    const cancellation = requestJobCancellationFn(sharedJob.id, 1_000);
     prereq.resolve({ stdout: '', stderr: '', exitCode: 130 });
 
     await expect(cancellation).resolves.toBe(true);
@@ -1386,73 +1392,65 @@ describe('POST /api/agents/{agentId}/run', () => {
   });
 
   it('creates the job row before the prerequisite runs (file agent variant)', async () => {
-    const projDir = mkdtempSync(join(tmpdir(), 'tamtam-file-agent-prereq-'));
+    const projDir = makeTempCaseDir('file-agent-prereq');
     const prereq = deferred<{ stdout: string; stderr: string; exitCode: number }>();
-    try {
-      mkdirSync(join(projDir, '.tamtam', 'agents'), { recursive: true });
-      writeFileSync(join(projDir, '.tamtam', 'agents', 'file-agent.md'), `---
+    mkdirSync(join(projDir, '.tamtam', 'agents'), { recursive: true });
+    writeFileSync(join(projDir, '.tamtam', 'agents', 'file-agent.md'), `---
 prerequisiteCommand: "sleep 45"
 ---
 File-backed prompt.`);
-      mocks.resolveProjectPath.mockReturnValue(projDir);
-      mocks.shellRun.mockImplementation(async (cmd: string, args: string[]) => {
-        if (cmd === 'git' && args.includes('rev-parse')) return { stdout: 'abc123\n', stderr: '', exitCode: 0 };
-        if (cmd === 'git' && args.includes('status')) return { stdout: '', stderr: '', exitCode: 0 };
-        if (cmd === 'bash' && args[1] === 'sleep 45') return prereq.promise;
-        return { stdout: '', stderr: '', exitCode: 0 };
-      });
+    mocks.resolveProjectPath.mockReturnValue(projDir);
+    mocks.shellRun.mockImplementation(async (cmd: string, args: string[]) => {
+      if (cmd === 'git' && args.includes('rev-parse')) return { stdout: 'abc123\n', stderr: '', exitCode: 0 };
+      if (cmd === 'git' && args.includes('status')) return { stdout: '', stderr: '', exitCode: 0 };
+      if (cmd === 'bash' && args[1] === 'sleep 45') return prereq.promise;
+      return { stdout: '', stderr: '', exitCode: 0 };
+    });
 
-      const req = new NextRequest('http://localhost/api/agents/file%3Aproj1%3Afile-agent/run', {
-        method: 'POST',
-        body: JSON.stringify({ prompt: 'inspect file agent later' }),
-      });
+    const req = new NextRequest('http://localhost/api/agents/file%3Aproj1%3Afile-agent/run', {
+      method: 'POST',
+      body: JSON.stringify({ prompt: 'inspect file agent later' }),
+    });
 
-      const pending = POST(req, { params: Promise.resolve({ agentId: 'file:proj1:file-agent' }) });
+    const pending = POST(req, { params: Promise.resolve({ agentId: 'file:proj1:file-agent' }) });
 
-      await vi.waitFor(() => {
-        expect(mocks.createJob).toHaveBeenCalledOnce();
-        expect(mocks.shellRun).toHaveBeenCalledWith('bash', ['-c', 'sleep 45'], expect.objectContaining({ cwd: projDir }));
-      }, { interval: 2, timeout: 1000 });
-      expect(mocks.startJob).not.toHaveBeenCalled();
-
-      prereq.resolve({ stdout: 'file done\n', stderr: '', exitCode: 0 });
-      const res = await pending;
-      expect(res.status).toBe(200);
+    await vi.waitFor(() => {
       expect(mocks.createJob).toHaveBeenCalledOnce();
-      expect(mocks.startJob).toHaveBeenCalledOnce();
-      expect(mocks.drainNextAgentRun).toHaveBeenCalledWith('proj1');
-    } finally {
-      rmSync(projDir, { recursive: true, force: true });
-    }
+      expect(mocks.shellRun).toHaveBeenCalledWith('bash', ['-c', 'sleep 45'], expect.objectContaining({ cwd: projDir }));
+    }, { interval: 2, timeout: 1000 });
+    expect(mocks.startJob).not.toHaveBeenCalled();
+
+    prereq.resolve({ stdout: 'file done\n', stderr: '', exitCode: 0 });
+    const res = await pending;
+    expect(res.status).toBe(200);
+    expect(mocks.createJob).toHaveBeenCalledOnce();
+    expect(mocks.startJob).toHaveBeenCalledOnce();
+    expect(mocks.drainNextAgentRun).toHaveBeenCalledWith('proj1');
   });
 
   it('does not let file-agent metadata bypass a non-agent project blocker', async () => {
-    const projDir = mkdtempSync(join(tmpdir(), 'tamtam-file-agent-concurrency-'));
-    try {
-      mkdirSync(join(projDir, '.tamtam', 'agents'), { recursive: true });
-      writeFileSync(join(projDir, '.tamtam', 'agents', 'manage-agents.md'), `---
+    const projDir = makeTempCaseDir('file-agent-concurrency');
+    mkdirSync(join(projDir, '.tamtam', 'agents'), { recursive: true });
+    writeFileSync(join(projDir, '.tamtam', 'agents', 'manage-agents.md'), `---
 skillIds: ["agent-manage-agents"]
 ---
 File-backed prompt.`);
-      mocks.resolveProjectPath.mockReturnValue(projDir);
-      mocks.findBlockingRunningJob.mockResolvedValue(makeJob({ id: 'run-123', kind: 'run' }));
+    mocks.resolveProjectPath.mockReturnValue(projDir);
+    mocks.findBlockingRunningJob.mockResolvedValue(makeJob({ id: 'run-123', kind: 'run' }));
 
-      const req = new NextRequest('http://localhost/api/agents/file%3Aproj1%3Amanage-agents/run', {
-        method: 'POST',
-        body: JSON.stringify({ prompt: 'audit the file-backed fleet' }),
-      });
+    const req = new NextRequest('http://localhost/api/agents/file%3Aproj1%3Amanage-agents/run', {
+      method: 'POST',
+      body: JSON.stringify({ prompt: 'audit the file-backed fleet' }),
+    });
 
-      const res = await POST(req, { params: Promise.resolve({ agentId: 'file:proj1:manage-agents' }) });
-      const data = await res.json();
+    const res = await POST(req, { params: Promise.resolve({ agentId: 'file:proj1:manage-agents' }) });
+    const data = await res.json();
 
-      expect(res.status).toBe(409);
-      expect(data.code).toBe('project_busy');
-      expect(data.blockingJobId).toBe('run-123');
-      expect(mocks.startJob).not.toHaveBeenCalled();
-      expect(mocks.enqueueAgentRun).not.toHaveBeenCalled();
-    } finally {
-      rmSync(projDir, { recursive: true, force: true });
-    }
+    expect(res.status).toBe(409);
+    expect(data.code).toBe('project_busy');
+    expect(data.blockingJobId).toBe('run-123');
+    expect(mocks.startJob).not.toHaveBeenCalled();
+    expect(mocks.enqueueAgentRun).not.toHaveBeenCalled();
   });
 
   it('cancels a file-backed prerequisite run before the agent spawn begins', async () => {
@@ -1461,47 +1459,42 @@ File-backed prompt.`);
     // assert the cancellation's side-effects on the shared job instead.
     const sharedJob = makeJob();
     mocks.createJob.mockReturnValue(sharedJob);
-    const projDir = mkdtempSync(join(tmpdir(), 'tamtam-file-agent-prereq-cancel-'));
+    const projDir = makeTempCaseDir('file-agent-prereq-cancel');
     const prereq = deferred<{ stdout: string; stderr: string; exitCode: number }>();
-    try {
-      mkdirSync(join(projDir, '.tamtam', 'agents'), { recursive: true });
-      writeFileSync(join(projDir, '.tamtam', 'agents', 'file-agent.md'), `---
+    mkdirSync(join(projDir, '.tamtam', 'agents'), { recursive: true });
+    writeFileSync(join(projDir, '.tamtam', 'agents', 'file-agent.md'), `---
 prerequisiteCommand: "sleep 45"
 ---
 File-backed prompt.`);
-      mocks.resolveProjectPath.mockReturnValue(projDir);
-      mocks.shellRun.mockImplementation(async (cmd: string, args: string[]) => {
-        if (cmd === 'git' && args.includes('rev-parse')) return { stdout: 'abc123\n', stderr: '', exitCode: 0 };
-        if (cmd === 'git' && args.includes('status')) return { stdout: '', stderr: '', exitCode: 0 };
-        if (cmd === 'bash' && args[1] === 'sleep 45') return prereq.promise;
-        return { stdout: '', stderr: '', exitCode: 0 };
-      });
+    mocks.resolveProjectPath.mockReturnValue(projDir);
+    mocks.shellRun.mockImplementation(async (cmd: string, args: string[]) => {
+      if (cmd === 'git' && args.includes('rev-parse')) return { stdout: 'abc123\n', stderr: '', exitCode: 0 };
+      if (cmd === 'git' && args.includes('status')) return { stdout: '', stderr: '', exitCode: 0 };
+      if (cmd === 'bash' && args[1] === 'sleep 45') return prereq.promise;
+      return { stdout: '', stderr: '', exitCode: 0 };
+    });
 
-      const req = new NextRequest('http://localhost/api/agents/file%3Aproj1%3Afile-agent/run', {
-        method: 'POST',
-        body: JSON.stringify({ prompt: 'cancel file agent later' }),
-      });
+    const req = new NextRequest('http://localhost/api/agents/file%3Aproj1%3Afile-agent/run', {
+      method: 'POST',
+      body: JSON.stringify({ prompt: 'cancel file agent later' }),
+    });
 
-      const pending = POST(req, { params: Promise.resolve({ agentId: 'file:proj1:file-agent' }) });
+    const pending = POST(req, { params: Promise.resolve({ agentId: 'file:proj1:file-agent' }) });
 
-      await vi.waitFor(() => {
-        expect(mocks.createJob).toHaveBeenCalledOnce();
-        expect(mocks.shellRun).toHaveBeenCalledWith('bash', ['-c', 'sleep 45'], expect.objectContaining({ cwd: projDir }));
-      }, { interval: 2, timeout: 1000 });
+    await vi.waitFor(() => {
+      expect(mocks.createJob).toHaveBeenCalledOnce();
+      expect(mocks.shellRun).toHaveBeenCalledWith('bash', ['-c', 'sleep 45'], expect.objectContaining({ cwd: projDir }));
+    }, { interval: 2, timeout: 1000 });
 
-      const { requestJobCancellation } = await import('@/lib/jobs/cancellation');
-      const cancellation = requestJobCancellation(sharedJob.id, 1_000);
-      prereq.resolve({ stdout: '', stderr: '', exitCode: 130 });
+    const cancellation = requestJobCancellationFn(sharedJob.id, 1_000);
+    prereq.resolve({ stdout: '', stderr: '', exitCode: 130 });
 
-      await expect(cancellation).resolves.toBe(true);
-      const res = await pending;
-      expect(res.status).toBe(200);
-      expect(mocks.startJob).not.toHaveBeenCalled();
-      expect(sharedJob.finishedAt).not.toBeNull();
-      expect(sharedJob.exitCode).toBe(130);
-    } finally {
-      rmSync(projDir, { recursive: true, force: true });
-    }
+    await expect(cancellation).resolves.toBe(true);
+    const res = await pending;
+    expect(res.status).toBe(200);
+    expect(mocks.startJob).not.toHaveBeenCalled();
+    expect(sharedJob.finishedAt).not.toBeNull();
+    expect(sharedJob.exitCode).toBe(130);
   });
 
   it('records resolved skills in contextMeta so the terminal toolbar can show chips', async () => {
@@ -1633,26 +1626,22 @@ File-backed prompt.`);
 
   describe('doc_paths', () => {
     it('prepends doc file content before skills in the prompt', async () => {
-      const projDir = mkdtempSync(join(tmpdir(), 'tamtam-docpath-'));
-      try {
-        writeFileSync(join(projDir, 'NOTES.md'), 'PROJECT NOTES CONTENT');
-        mocks.resolveProjectPath.mockReturnValue(projDir);
-        await insertAgent({ docPaths: '["NOTES.md"]' });
+      const projDir = makeTempCaseDir('docpath');
+      writeFileSync(join(projDir, 'NOTES.md'), 'PROJECT NOTES CONTENT');
+      mocks.resolveProjectPath.mockReturnValue(projDir);
+      await insertAgent({ docPaths: '["NOTES.md"]' });
 
-        const req = new NextRequest('http://localhost/api/agents/agent-123/run', {
-          method: 'POST',
-          body: JSON.stringify({ prompt: 'do task' }),
-        });
-        await POST(req, { params: Promise.resolve({ agentId: 'agent-123' }) });
+      const req = new NextRequest('http://localhost/api/agents/agent-123/run', {
+        method: 'POST',
+        body: JSON.stringify({ prompt: 'do task' }),
+      });
+      await POST(req, { params: Promise.resolve({ agentId: 'agent-123' }) });
 
-        const [, , fullPrompt] = mocks.startJob.mock.calls[0];
-        expect(fullPrompt).toContain('PROJECT NOTES CONTENT');
-        expect(fullPrompt).toContain('## NOTES.md');
-        // doc content must appear before the task prompt
-        expect(fullPrompt.indexOf('PROJECT NOTES CONTENT')).toBeLessThan(fullPrompt.indexOf('do task'));
-      } finally {
-        rmSync(projDir, { recursive: true, force: true });
-      }
+      const [, , fullPrompt] = mocks.startJob.mock.calls[0];
+      expect(fullPrompt).toContain('PROJECT NOTES CONTENT');
+      expect(fullPrompt).toContain('## NOTES.md');
+      // doc content must appear before the task prompt
+      expect(fullPrompt.indexOf('PROJECT NOTES CONTENT')).toBeLessThan(fullPrompt.indexOf('do task'));
     });
 
     it('silently skips doc paths whose file does not exist', async () => {
@@ -1671,50 +1660,42 @@ File-backed prompt.`);
     });
 
     it('blocks path traversal outside the project root', async () => {
-      const projDir = mkdtempSync(join(tmpdir(), 'tamtam-docpath-'));
-      try {
-        mocks.resolveProjectPath.mockReturnValue(projDir);
-        await insertAgent({ docPaths: '["../../../etc/passwd"]' });
+      const projDir = makeTempCaseDir('docpath-traversal');
+      mocks.resolveProjectPath.mockReturnValue(projDir);
+      await insertAgent({ docPaths: '["../../../etc/passwd"]' });
 
-        const req = new NextRequest('http://localhost/api/agents/agent-123/run', {
-          method: 'POST',
-          body: JSON.stringify({ prompt: 'do task' }),
-        });
-        const res = await POST(req, { params: Promise.resolve({ agentId: 'agent-123' }) });
-        expect(res.status).toBe(200);
+      const req = new NextRequest('http://localhost/api/agents/agent-123/run', {
+        method: 'POST',
+        body: JSON.stringify({ prompt: 'do task' }),
+      });
+      const res = await POST(req, { params: Promise.resolve({ agentId: 'agent-123' }) });
+      expect(res.status).toBe(200);
 
-        const [, , fullPrompt] = mocks.startJob.mock.calls[0];
-        // traversal path is blocked — no /etc/passwd content should appear
-        expect(fullPrompt).not.toContain('root:');
-        expect(fullPrompt).not.toContain('etc/passwd');
-      } finally {
-        rmSync(projDir, { recursive: true, force: true });
-      }
+      const [, , fullPrompt] = mocks.startJob.mock.calls[0];
+      // traversal path is blocked — no /etc/passwd content should appear
+      expect(fullPrompt).not.toContain('root:');
+      expect(fullPrompt).not.toContain('etc/passwd');
     });
 
     it('records resolved docs in contextMeta', async () => {
       // Workflow refactor: docs are resolved inside the compose step and
       // assigned to `job.contextMeta`; assert against the final job state.
-      const projDir = mkdtempSync(join(tmpdir(), 'tamtam-docpath-'));
-      try {
-        writeFileSync(join(projDir, 'GUIDE.md'), 'guide content');
-        mocks.resolveProjectPath.mockReturnValue(projDir);
-        await insertAgent({ docPaths: '["GUIDE.md"]' });
+      const projDir = makeTempCaseDir('docpath-context');
+      writeFileSync(join(projDir, 'GUIDE.md'), 'guide content');
+      mocks.resolveProjectPath.mockReturnValue(projDir);
+      await insertAgent({ docPaths: '["GUIDE.md"]' });
 
-        const req = new NextRequest('http://localhost/api/agents/agent-123/run', {
-          method: 'POST',
-          body: JSON.stringify({ prompt: 'task' }),
-        });
-        await POST(req, { params: Promise.resolve({ agentId: 'agent-123' }) });
+      const req = new NextRequest('http://localhost/api/agents/agent-123/run', {
+        method: 'POST',
+        body: JSON.stringify({ prompt: 'task' }),
+      });
+      await POST(req, { params: Promise.resolve({ agentId: 'agent-123' }) });
 
-        const createdJob = mocks.createJob.mock.results[0].value;
-        const contextMeta = JSON.parse(createdJob.contextMeta);
-        expect(contextMeta.docs).toHaveLength(1);
-        expect(contextMeta.docs[0].name).toBe('GUIDE.md');
-        expect(contextMeta.docs[0].path).toBe('GUIDE.md');
-      } finally {
-        rmSync(projDir, { recursive: true, force: true });
-      }
+      const createdJob = mocks.createJob.mock.results[0].value;
+      const contextMeta = JSON.parse(createdJob.contextMeta);
+      expect(contextMeta.docs).toHaveLength(1);
+      expect(contextMeta.docs[0].name).toBe('GUIDE.md');
+      expect(contextMeta.docs[0].path).toBe('GUIDE.md');
     });
   });
 });

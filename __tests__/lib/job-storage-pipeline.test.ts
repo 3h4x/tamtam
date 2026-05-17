@@ -2123,7 +2123,9 @@ describe('runCompletionHooks – linked release scoping', () => {
 
     await markDoneFn(job, 0);
 
-    expect(readFileSync(releaseLog, 'utf8')).toContain('merge poll output');
+    await vi.waitFor(() => {
+      expect(readFileSync(releaseLog, 'utf8')).toContain('merge poll output');
+    }, { timeout: 200, interval: 1 });
   });
 });
 describe('runCompletionHooks – push→DoD (PR Workflow without auto-merge)', () => {
