@@ -27,21 +27,6 @@ describe('file-agent-overrides', () => {
   beforeAll(async () => {
     sharedHandle = await createTestPgDbEmpty();
     await applyDdl(sharedHandle);
-  });
-
-  afterAll(async () => {
-    // Let any straggling fire-and-forget queries settle before closing.
-    await new Promise((r) => setTimeout(r, 30));
-    try {
-      await sharedHandle[Symbol.asyncDispose]();
-    } catch {
-      // ignore
-    }
-  });
-
-  beforeEach(async () => {
-    vi.resetModules();
-    await sharedHandle.db.execute(sql.raw('TRUNCATE settings'));
     vi.doMock('@/lib/db', () => ({ db: sharedHandle.db, schema }));
 
     const mod = await import('@/lib/agents/file-agent-overrides');
@@ -50,11 +35,15 @@ describe('file-agent-overrides', () => {
     deleteFileAgentOverride = mod.deleteFileAgentOverride;
   });
 
-  afterEach(async () => {
-    // Short settle: lets fire-and-forget DELETEs land before the next test
-    // truncates and inserts.
-    await new Promise((r) => setTimeout(r, 10));
-    vi.resetModules();
+  afterAll(async () => {
+    await sharedHandle[Symbol.asyncDispose]();
+  });
+
+  beforeEach(async () => {
+    await sharedHandle.db.execute(sql.raw('TRUNCATE settings'));
+  });
+
+  afterEach(() => {
     vi.clearAllMocks();
   });
 
@@ -162,9 +151,9 @@ describe('file-agent-overrides', () => {
       await setFileAgentOverride('proj', 'agent', { enabled: false });
       expect(await getFileAgentOverride('proj', 'agent')).not.toBeNull();
       deleteFileAgentOverride('proj', 'agent');
-      // fire-and-forget delete; let it settle
-      await new Promise(r => setTimeout(r, 20));
-      expect(await getFileAgentOverride('proj', 'agent')).toBeNull();
+      await vi.waitFor(async () => {
+        expect(await getFileAgentOverride('proj', 'agent')).toBeNull();
+      }, { interval: 1 });
     });
 
     it('is a no-op when override does not exist', () => {
@@ -175,8 +164,9 @@ describe('file-agent-overrides', () => {
       await setFileAgentOverride('proj', 'a1', { enabled: false });
       await setFileAgentOverride('proj', 'a2', { enabled: true });
       deleteFileAgentOverride('proj', 'a1');
-      await new Promise(r => setTimeout(r, 20));
-      expect(await getFileAgentOverride('proj', 'a1')).toBeNull();
+      await vi.waitFor(async () => {
+        expect(await getFileAgentOverride('proj', 'a1')).toBeNull();
+      }, { interval: 1 });
       expect(await getFileAgentOverride('proj', 'a2')).toEqual({ enabled: true });
     });
   });

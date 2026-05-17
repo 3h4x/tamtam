@@ -47,20 +47,6 @@ describe('skills API', () => {
   beforeAll(async () => {
     sharedHandle = await createTestPgDbEmpty();
     await applyDdl(sharedHandle);
-  });
-
-  afterAll(async () => {
-    await new Promise((r) => setTimeout(r, 30));
-    try {
-      await sharedHandle[Symbol.asyncDispose]();
-    } catch {
-      // ignore
-    }
-  });
-
-  beforeEach(async () => {
-    vi.resetModules();
-    await sharedHandle.db.execute(sql.raw('TRUNCATE skills, agents'));
 
     vi.doMock('@/lib/db', () => ({
       db: sharedHandle.db,
@@ -77,10 +63,16 @@ describe('skills API', () => {
     skillDetailDELETE = skillDetailRoute.DELETE;
   });
 
+  afterAll(async () => {
+    await sharedHandle[Symbol.asyncDispose]();
+  });
+
+  beforeEach(async () => {
+    await sharedHandle.db.execute(sql.raw('TRUNCATE skills, agents'));
+  });
+
   afterEach(async () => {
-    await new Promise((r) => setTimeout(r, 10));
     vi.restoreAllMocks();
-    vi.resetModules();
   });
 
   describe('GET /skills', () => {
