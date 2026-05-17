@@ -30,6 +30,7 @@ describe('POST /api/jobs/[jobId]/fix', () => {
   let readParsedLogMock: ReturnType<typeof vi.fn>;
   let createJobMock: ReturnType<typeof vi.fn>;
   let updateJobMock: ReturnType<typeof vi.fn>;
+  let listJobsMock: ReturnType<typeof vi.fn>;
   let startJobMock: ReturnType<typeof vi.fn>;
   let resolveProjectPathMock: ReturnType<typeof vi.fn>;
   let checkCliStartGateMock: ReturnType<typeof vi.fn>;
@@ -47,6 +48,7 @@ describe('POST /api/jobs/[jobId]/fix', () => {
       makeJob({ id: 'fix-job-1', kind: 'fix', pid: 0, logPath: null, finishedAt: null, exitCode: null })
     );
     updateJobMock = vi.fn();
+    listJobsMock = vi.fn().mockReturnValue([]);
     startJobMock = vi.fn().mockResolvedValue(99999);
     resolveProjectPathMock = vi.fn().mockReturnValue('/path/to/proj');
     checkCliStartGateMock = vi.fn().mockResolvedValue({ ok: true, provider: 'claude' });
@@ -64,6 +66,7 @@ describe('POST /api/jobs/[jobId]/fix', () => {
       readParsedLog: readParsedLogMock,
       createJob: createJobMock,
       updateJob: updateJobMock,
+      listJobs: listJobsMock,
       markDone: vi.fn(),
     }));
 
@@ -233,6 +236,7 @@ describe('POST /api/jobs/[jobId]/fix weekly quota gating', () => {
         makeJob({ id: 'fix-job-1', kind: 'fix', pid: 0, logPath: null, finishedAt: null, exitCode: null })
       ),
       updateJob: vi.fn(),
+      listJobs: vi.fn().mockReturnValue([]),
       markDone: vi.fn(),
     }));
     vi.doMock('@/lib/jobs/storage', () => ({

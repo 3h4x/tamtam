@@ -4,7 +4,7 @@ import { getSettings, getPermissionModeFlag, getPipelineModel } from '@/lib/shar
 import { resolveCliBin, resolveCliEnv } from '@/lib/shared/cli-bin';
 import { checkCliStartGate } from '@/lib/usage/resolve-provider';
 import { resolveProjectPath } from '@/lib/shared/project-data';
-import { getJob, createJob, readParsedLog, probeJobStatus, updateJob } from '@/lib/jobs/job-storage';
+import { getJob, createJob, readParsedLog, probeJobStatus, updateJob, listJobs } from '@/lib/jobs/job-storage';
 import { startJobInProcess } from '@/lib/jobs/spawn-claude-detached';
 import { acquireLock, isLockOwnedByActiveRelease } from './pipeline-lock';
 import { FIX_OUTPUT_CONTRACT, stripFinalVerdict } from './review-contract';
@@ -21,6 +21,31 @@ export async function startFixFromJob(sourceJobId: string): Promise<StartFixResu
   }
 
   const projectName = sourceJob.project;
+
+  // Dedup guard: when a release is reconciled twice in quick succession
+  // (release-reconcile + boot-orphan-resume after a PM2 restart, or
+  // two reconcile attempts firing 30s apart), both ticks evaluate
+  // "parent step failed → start fix" and spawn duplicate fix jobs that
+  // race on the same worktree. Refuse to start another fix while one
+  // from the same source is still in flight.
+  const dupFix = listJobs().find(
+    (j) =>
+      j.project === projectName &&
+      j.kind === 'fix' &&
+      j.parentJobId === sourceJobId &&
+      j.finishedAt === null,
+  );
+  if (dupFix) {
+    if ((await probeJobStatus(dupFix)) === 'running') {
+      return {
+        ok: false,
+        status: 409,
+        detail: `fix '${dupFix.id}' already running for source '${sourceJobId}'`,
+        blockingJobId: dupFix.id,
+      };
+    }
+  }
+
   const { logDir } = getImproveConfig();
   const projPath = resolveProjectPath(projectName);
   if (!projPath) return { ok: false, status: 404, detail: 'project not found' };

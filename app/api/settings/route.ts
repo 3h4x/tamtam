@@ -179,6 +179,8 @@ const SETTING_KEYS = [
   'workflow_run_retention_days',
   'backup_retention_count',
   'backup_retention_weekly_count',
+  'db_backup_enabled',
+  'db_backup_interval_minutes',
   'notification_webhook_url',
   'notification_webhook_secret',
   'notification_on_release_success',
@@ -358,6 +360,13 @@ function validateAndSerializeSettingValue(
     key === 'backup_retention_weekly_count'
   ) {
     return parseNonNegativeIntegerSetting(value, key);
+  }
+
+  if (key === 'db_backup_interval_minutes') {
+    return parsePositiveIntegerSetting(value, key);
+  }
+  if (key === 'db_backup_enabled') {
+    return parseBooleanSetting(value, key);
   }
 
   if (key === 'notification_throttle_overrides') {

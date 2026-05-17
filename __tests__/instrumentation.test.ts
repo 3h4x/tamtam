@@ -345,12 +345,24 @@ describe('instrumentation', () => {
         reconcileStaleRelease: vi.fn(),
         PIPELINE_STEP_KINDS: new Set(),
       }));
+      vi.doMock('./lib/jobs/job-storage', () => ({
+        listJobs: listJobsMock,
+        markDone: markDoneMock,
+        updateJob: vi.fn(),
+        probeJobStatus: vi.fn(),
+        reconcileStaleRelease: vi.fn(),
+        PIPELINE_STEP_KINDS: new Set(),
+      }));
       vi.doMock('@/lib/pipeline/start-pr-wait', () => ({ resumePrWait: resumePrWaitMock }));
       vi.doMock('../lib/pipeline/start-pr-wait', () => ({ resumePrWait: resumePrWaitMock }));
+      vi.doMock('./lib/pipeline/start-pr-wait', () => ({ resumePrWait: resumePrWaitMock }));
       vi.doMock('@/lib/pipeline/recovery-drain', () => ({
         drainAllRecoveryWork: vi.fn().mockResolvedValue(undefined),
       }));
       vi.doMock('../lib/pipeline/recovery-drain', () => ({
+        drainAllRecoveryWork: vi.fn().mockResolvedValue(undefined),
+      }));
+      vi.doMock('./lib/pipeline/recovery-drain', () => ({
         drainAllRecoveryWork: vi.fn().mockResolvedValue(undefined),
       }));
 
@@ -428,17 +440,24 @@ describe('instrumentation', () => {
 
       vi.doMock('@/lib/jobs/job-storage', () => storageMock);
       vi.doMock('./lib/jobs/job-storage', () => storageMock);
+      vi.doMock('../lib/jobs/job-storage', () => storageMock);
       // Also mock the non-barrel path so the barrel bypass doesn't fall through to real storage.ts
       vi.doMock('@/lib/jobs/storage', () => storageMock);
       vi.doMock('./lib/jobs/storage', () => storageMock);
+      vi.doMock('../lib/jobs/storage', () => storageMock);
       vi.doMock('@/lib/db', () => ({ db: dbMock, schema: { pipelineLocks: { project: 'project' } } }));
       vi.doMock('./lib/db', () => ({ db: dbMock, schema: { pipelineLocks: { project: 'project' } } }));
+      vi.doMock('../lib/db', () => ({ db: dbMock, schema: { pipelineLocks: { project: 'project' } } }));
       vi.doMock('@/lib/shared/shell', () => ({ exec: execMock }));
       vi.doMock('./lib/shared/shell', () => ({ exec: execMock }));
+      vi.doMock('../lib/shared/shell', () => ({ exec: execMock }));
       vi.doMock('@/lib/workflows/safe-start-orchestrator', () => ({
         safeStartOrchestrator: safeStartOrchestratorMock,
       }));
       vi.doMock('./lib/workflows/safe-start-orchestrator', () => ({
+        safeStartOrchestrator: safeStartOrchestratorMock,
+      }));
+      vi.doMock('../lib/workflows/safe-start-orchestrator', () => ({
         safeStartOrchestrator: safeStartOrchestratorMock,
       }));
       vi.doMock('drizzle-orm', () => ({ eq: vi.fn((_a, b) => b) }));

@@ -47,6 +47,7 @@ describe('startFixFromJob', () => {
       readParsedLog: readParsedLogMock,
       probeJobStatus: probeJobStatusMock,
       updateJob: updateJobMock,
+      listJobs: vi.fn().mockReturnValue([]),
     }));
     vi.doMock('@/lib/jobs/pm2-jobs', () => ({
       startJob: startJobMock,
@@ -254,6 +255,7 @@ describe('startFixFromJob', () => {
       readParsedLog: vi.fn().mockReturnValue('Error: something broke\n'),
       probeJobStatus: vi.fn().mockResolvedValue('done'),
       updateJob: vi.fn(),
+      listJobs: vi.fn().mockReturnValue([]),
     }));
     vi.doMock('@/lib/jobs/pm2-jobs', () => ({ startJob: startJobMock, splitCommand: (line: string) => line.split(/\s+/).filter(Boolean) }));
     vi.doMock('@/lib/jobs/spawn-claude-detached', () => ({ startJobInProcess: startJobMock }));

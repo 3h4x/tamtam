@@ -65,6 +65,8 @@ interface SettingsMap {
   workflow_run_retention_days: string
   backup_retention_count: string
   backup_retention_weekly_count: string
+  db_backup_enabled: string
+  db_backup_interval_minutes: string
   notification_webhook_url: string
   notification_webhook_secret: string
   notification_on_release_success: string
@@ -116,6 +118,8 @@ const SETTINGS_DEFAULTS: SettingsMap = {
   notification_on_budget_blocked: 'false',
   notification_throttle_window_seconds: '900',
   notification_throttle_overrides: '{"release_fail":0,"release_aborted":0}',
+  db_backup_enabled: 'true',
+  db_backup_interval_minutes: '15',
   budget_block_runs_enabled: 'false',
   budget_subscription_providers: 'claude,codex',
   budget_block_at_pct: '95',
@@ -819,9 +823,59 @@ export function SettingsPage({ initialTab }: { initialTab?: TabId } = {}) {
           <section className="bg-bg-secondary rounded-lg border border-border">
             <div className="px-5 py-3 border-b border-border flex items-baseline gap-3">
               <h3 className="text-sm font-semibold text-text-primary">Database Backup</h3>
-              <p className="text-xs text-text-tertiary">Create a manual backup of the Postgres database</p>
+              <p className="text-xs text-text-tertiary">Automatic Postgres backups + manual snapshot trigger</p>
             </div>
-            <div className="px-5 py-4 flex items-center gap-3">
+            <div className="px-5 py-4 grid grid-cols-2 gap-4">
+              <div>
+                <label className="block font-medium text-sm text-text-primary mb-1.5">Auto-backup</label>
+                <select
+                  value={settings.db_backup_enabled || 'true'}
+                  onChange={(e) => handleChange('db_backup_enabled', e.target.value)}
+                  className="w-full px-3 py-2 bg-bg-primary text-text-primary border border-border rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-accent/30 focus:border-accent"
+                >
+                  <option value="true">Enabled</option>
+                  <option value="false">Disabled</option>
+                </select>
+                <p className="text-xs text-text-tertiary mt-1.5">Runs in the background on the cron interval below.</p>
+              </div>
+              <div>
+                <label className="block font-medium text-sm text-text-primary mb-1.5">Backup Interval (minutes)</label>
+                <input
+                  type="number"
+                  min={1}
+                  step={1}
+                  value={settings.db_backup_interval_minutes || '15'}
+                  onChange={(e) => handleChange('db_backup_interval_minutes', e.target.value)}
+                  className="w-full px-3 py-2 bg-bg-primary text-text-primary border border-border rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-accent/30 focus:border-accent"
+                />
+                <p className="text-xs text-text-tertiary mt-1.5">How often the auto-backup fires. Default 15.</p>
+              </div>
+              <div>
+                <label className="block font-medium text-sm text-text-primary mb-1.5">Recent backups to keep</label>
+                <input
+                  type="number"
+                  min={0}
+                  step={1}
+                  value={settings.backup_retention_count || '14'}
+                  onChange={(e) => handleChange('backup_retention_count', e.target.value)}
+                  className="w-full px-3 py-2 bg-bg-primary text-text-primary border border-border rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-accent/30 focus:border-accent"
+                />
+                <p className="text-xs text-text-tertiary mt-1.5">Newest N pgdump files retained after each backup.</p>
+              </div>
+              <div>
+                <label className="block font-medium text-sm text-text-primary mb-1.5">Weekly backups to keep</label>
+                <input
+                  type="number"
+                  min={0}
+                  step={1}
+                  value={settings.backup_retention_weekly_count || '8'}
+                  onChange={(e) => handleChange('backup_retention_weekly_count', e.target.value)}
+                  className="w-full px-3 py-2 bg-bg-primary text-text-primary border border-border rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-accent/30 focus:border-accent"
+                />
+                <p className="text-xs text-text-tertiary mt-1.5">One older backup per week kept beyond the recent N.</p>
+              </div>
+            </div>
+            <div className="px-5 py-4 border-t border-border flex items-center gap-3">
               <button
                 onClick={handleBackup}
                 disabled={backingUp}
@@ -829,7 +883,7 @@ export function SettingsPage({ initialTab }: { initialTab?: TabId } = {}) {
                   backupResult ? 'bg-status-success' : 'bg-accent hover:bg-accent-hover'
                 } ${backingUp ? 'opacity-50 cursor-wait' : ''}`}
               >
-                {backingUp ? 'Backing up…' : backupResult ? 'Done!' : 'Create Backup'}
+                {backingUp ? 'Backing up…' : backupResult ? 'Done!' : 'Manual Backup Now'}
               </button>
               {backupResult && (
                 <span className="font-mono text-xs text-text-secondary">{backupResult.filename}</span>

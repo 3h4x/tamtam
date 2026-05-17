@@ -17,8 +17,8 @@
 // became the only release path — its durability owns those concerns now.
 export async function runProbeSweep(): Promise<void> {
   try {
-    const jobStorage = await import('./lib/jobs/job-storage');
-    const { isClaudeBackedJobKind, getJobKind } = await import('./lib/jobs/kinds');
+    const jobStorage = await import('@/lib/jobs/job-storage');
+    const { isClaudeBackedJobKind, getJobKind } = await import('@/lib/jobs/kinds');
     const pipelineStepKinds = 'PIPELINE_STEP_KINDS' in jobStorage && jobStorage.PIPELINE_STEP_KINDS instanceof Set
       ? jobStorage.PIPELINE_STEP_KINDS
       : new Set<string>();
@@ -38,8 +38,8 @@ export async function runProbeSweep(): Promise<void> {
     console.error('[probe-sweep] error:', err);
   }
   try {
-    const jobStorage = await import('./lib/jobs/job-storage');
-    const { abortActiveRelease } = await import('./lib/pipeline/release-abort');
+    const jobStorage = await import('@/lib/jobs/job-storage');
+    const { abortActiveRelease } = await import('@/lib/pipeline/release-abort');
     const now = Date.now();
     const expiredReleases = jobStorage.listJobs().filter(j =>
       j.kind === 'release'
@@ -62,7 +62,7 @@ export async function runProbeSweep(): Promise<void> {
     console.error('[probe-sweep] release timeout sweep error:', err);
   }
   try {
-    const { runReleaseReconcileSweep } = await import('./lib/jobs/release-reconcile');
+    const { runReleaseReconcileSweep } = await import('@/lib/jobs/release-reconcile');
     await runReleaseReconcileSweep();
   } catch (err) {
     console.error('[probe-sweep] release reconcile sweep error:', err);
@@ -72,19 +72,19 @@ export async function runProbeSweep(): Promise<void> {
   // the safety net for crashes/restarts between markDone's event insert
   // and the hook return.
   try {
-    const { consumeJobCompletionEvents } = await import('./lib/workflows/triggers/job-completion-router');
+    const { consumeJobCompletionEvents } = await import('@/lib/workflows/triggers/job-completion-router');
     await consumeJobCompletionEvents();
   } catch (err) {
     console.error('[probe-sweep] job-completion-router error:', err);
   }
   try {
-    const { consumePipelineLockEvents } = await import('./lib/workflows/triggers/pipeline-lock-router');
+    const { consumePipelineLockEvents } = await import('@/lib/workflows/triggers/pipeline-lock-router');
     await consumePipelineLockEvents();
   } catch (err) {
     console.error('[probe-sweep] pipeline-lock-router error:', err);
   }
   try {
-    const { sampleRunningJobResources } = await import('./lib/jobs/resource-sampler');
+    const { sampleRunningJobResources } = await import('@/lib/jobs/resource-sampler');
     await sampleRunningJobResources();
   } catch (err) {
     console.error('[probe-sweep] resource-sampler error:', err);
@@ -106,9 +106,9 @@ export async function runProbeSweep(): Promise<void> {
  */
 async function migrateLegacyFileWorkflowFlags(): Promise<void> {
   try {
-    const { db, schema } = await import('./lib/db');
+    const { db, schema } = await import('@/lib/db');
     const { eq } = await import('drizzle-orm');
-    const { readLegacyWorkflowFlags } = await import('./lib/skills/tamtam-file-config');
+    const { readLegacyWorkflowFlags } = await import('@/lib/skills/tamtam-file-config');
 
     if (!schema.projects || !schema.settings?.key) return;
 
@@ -202,7 +202,7 @@ async function migrateLegacyFileWorkflowFlags(): Promise<void> {
 // Catch them here too: if contextMeta is intact, resume; otherwise reap.
 async function reapAbandonedInlineJobs(): Promise<void> {
   try {
-    const { listJobs, markDone } = await import('./lib/jobs/job-storage');
+    const { listJobs, markDone } = await import('@/lib/jobs/job-storage');
     const orphaned = listJobs().filter(j =>
       j.finishedAt === null
       && (j.kind === 'mark-dod' || j.kind === 'pr-wait')
@@ -213,7 +213,7 @@ async function reapAbandonedInlineJobs(): Promise<void> {
     for (const job of orphaned) {
       if (job.kind === 'pr-wait' && job.contextMeta) {
         try {
-          const { resumePrWait } = await import('./lib/pipeline/start-pr-wait');
+          const { resumePrWait } = await import('@/lib/pipeline/start-pr-wait');
           const r = resumePrWait(job.id);
           if (r.ok) {
             resumed += 1;
@@ -311,10 +311,10 @@ export async function waitForWorkflowReady(): Promise<void> {
 
 export async function reapOrphanReleases(): Promise<void> {
   try {
-    const { listJobs, markDone, updateJob } = await import('./lib/jobs/job-storage');
-    const { db, schema } = await import('./lib/db');
+    const { listJobs, markDone, updateJob } = await import('@/lib/jobs/job-storage');
+    const { db, schema } = await import('@/lib/db');
     const { eq } = await import('drizzle-orm');
-    const { safeStartOrchestrator } = await import('./lib/workflows/safe-start-orchestrator');
+    const { safeStartOrchestrator } = await import('@/lib/workflows/safe-start-orchestrator');
 
     const candidates = listJobs().filter(j => j.kind === 'release' && j.finishedAt === null);
     for (const job of candidates) {
@@ -425,9 +425,9 @@ export async function reapOrphanReleases(): Promise<void> {
 async function backfillVerdicts(): Promise<void> {
   if (process.env.VITEST || process.env.NODE_ENV === 'test') return;
   try {
-    const { listJobs } = await import('./lib/jobs/job-storage');
-    const { getVerdict } = await import('./lib/jobs/verdict');
-    const { persistVerdict } = await import('./lib/jobs/storage');
+    const { listJobs } = await import('@/lib/jobs/job-storage');
+    const { getVerdict } = await import('@/lib/jobs/verdict');
+    const { persistVerdict } = await import('@/lib/jobs/storage');
 
     const reviewJobs = listJobs().filter(j => j.kind === 'review' && j.finishedAt !== null && j.exitCode === 0 && !j.verdict && !j.logPruned);
     let count = 0;
@@ -469,7 +469,7 @@ async function drainBootRecoveryWork(): Promise<void> {
 export async function registerNode(): Promise<void> {
   await migrateLegacyFileWorkflowFlags();
   try {
-    const { loadFromDb } = await import('./lib/jobs/storage');
+    const { loadFromDb } = await import('@/lib/jobs/storage');
     await loadFromDb();
   } catch (err) {
     console.error('[boot] jobs cache load failed:', err);
@@ -479,13 +479,13 @@ export async function registerNode(): Promise<void> {
   // surfaces as "project 'X' not found" from start-test / start-review,
   // failing the workflow run and orphaning the release.
   try {
-    const { refreshProjectsCacheSync } = await import('./lib/shared/enabled-projects');
+    const { refreshProjectsCacheSync } = await import('@/lib/shared/enabled-projects');
     await refreshProjectsCacheSync();
   } catch (err) {
     console.error('[boot] projects cache warm failed:', err);
   }
   try {
-    const { backfillIssueCruncherPrerequisites } = await import('./lib/agents/default-agent-skills');
+    const { backfillIssueCruncherPrerequisites } = await import('@/lib/agents/default-agent-skills');
     await backfillIssueCruncherPrerequisites();
   } catch (err) {
     console.error('[boot] issue-cruncher prerequisite backfill failed:', err);
@@ -506,15 +506,18 @@ export async function registerNode(): Promise<void> {
   // on the explicit workflow-ready signal. A watchdog logs slow starts, but
   // it does not unblock destructive recovery: if the world is configured and
   // still starting, reaping is more dangerous than waiting.
-  void (async () => {
+  const bootRecoveryPromise = (async () => {
     try {
       await waitForWorkflowReady();
     } catch (err) {
       console.warn('[boot] workflow-ready wait failed; running reap anyway:', err);
     }
-    void reapOrphanReleases();
-    void drainBootRecoveryWork();
+    await reapOrphanReleases();
+    await drainBootRecoveryWork();
   })();
+  if (!(process.env.VITEST || process.env.NODE_ENV === 'test')) {
+    void bootRecoveryPromise;
+  }
   // reinstallAgents() retired with the in-memory scheduler — graphile-cron
   // (`seedAgentCrons` below) replaces it. Scheduled agents are durable
   // across restarts via graphile-worker's persistent job queue now.
@@ -553,6 +556,7 @@ export async function registerNode(): Promise<void> {
   if (process.env.VITEST || process.env.NODE_ENV === 'test') {
     // Tests don't start the world; let waiters proceed immediately.
     signalWorkflowReady();
+    await bootRecoveryPromise;
     return;
   }
 
@@ -567,23 +571,18 @@ export async function registerNode(): Promise<void> {
   // unset or the world fails to start, agent runs will fail when the route
   // tries to enqueue them.
   if (process.env.WORKFLOW_TARGET_WORLD) {
-    // Ensure the workflow.* schema exists before starting the world. The world
-    // runtime itself does not run migrations; without these tables it appears
-    // to start, but every step/run write fails and release chains stall after
-    // their first await (silent — only visible as 'relation workflow.workflow_runs
-    // does not exist' in retention logs and 'Step not found' on resume).
-    try {
-      const { spawn } = await import('node:child_process');
-      const connectionString = process.env.WORKFLOW_POSTGRES_URL || process.env.DATABASE_URL;
-      if (connectionString) {
-        // `@workflow/world-postgres`'s zero-arg `createWorld()` reads
-        // `process.env.WORKFLOW_POSTGRES_URL` directly — if it's unset,
-        // the world falls back to its built-in default
-        // (`postgres://world:world@localhost:5432/world`), which silently
-        // points the workflow runtime at the wrong database. Propagating
-        // the migration connection string into our own process env
-        // guarantees the runtime hits the same DB the schema lives in.
-        process.env.WORKFLOW_POSTGRES_URL = connectionString;
+    // Schema migration + Postgres-world bootstrap only run when the
+    // operator has *explicitly* set WORKFLOW_POSTGRES_URL — never against
+    // DATABASE_URL. Sharing the live app DB with the workflow runtime
+    // commingles two unrelated schemas and (worse) lets
+    // `workflow-postgres-setup` touch tables it doesn't own. The
+    // `WORKFLOW_TARGET_WORLD=local` path doesn't need Postgres at all;
+    // skip both the spawn and the env propagation.
+    const isPostgresWorld = process.env.WORKFLOW_TARGET_WORLD === 'postgres';
+    if (isPostgresWorld && process.env.WORKFLOW_POSTGRES_URL) {
+      try {
+        const { spawn } = await import('node:child_process');
+        const connectionString = process.env.WORKFLOW_POSTGRES_URL;
         await new Promise<void>((resolve) => {
           const child = spawn('pnpm', ['exec', 'workflow-postgres-setup'], {
             cwd: process.cwd(),
@@ -601,9 +600,11 @@ export async function registerNode(): Promise<void> {
             resolve();
           });
         });
+      } catch (err) {
+        console.warn('[workflow] schema migration failed:', err);
       }
-    } catch (err) {
-      console.warn('[workflow] schema migration failed:', err);
+    } else if (isPostgresWorld && !process.env.WORKFLOW_POSTGRES_URL) {
+      console.warn('[workflow] WORKFLOW_TARGET_WORLD=postgres but WORKFLOW_POSTGRES_URL is not set; workflow runtime will use its built-in default and is unlikely to work — set WORKFLOW_POSTGRES_URL explicitly.');
     }
     try {
       const { getWorld } = await import('workflow/runtime');
@@ -626,7 +627,7 @@ export async function registerNode(): Promise<void> {
   // the in-memory scheduler — graphile-worker is durable across restarts.
   const runCleanup = async () => {
     try {
-      const { runNightlyCleanup } = await import('./lib/jobs/retention');
+      const { runNightlyCleanup } = await import('@/lib/jobs/retention');
       runNightlyCleanup();
       console.log('[retention] nightly cleanup completed');
     } catch (err) {
@@ -636,8 +637,8 @@ export async function registerNode(): Promise<void> {
     // workflow_events, workflow_steps, …) — the runtime never prunes
     // its own rows, so they grow unbounded without this sweep.
     try {
-      const { pruneOldWorkflowRuns } = await import('./lib/workflows/cron/workflow-retention');
-      const { getSettings } = await import('./lib/shared/config');
+      const { pruneOldWorkflowRuns } = await import('@/lib/workflows/cron/workflow-retention');
+      const { getSettings } = await import('@/lib/shared/config');
       const summary = await pruneOldWorkflowRuns({
         retentionDays: getSettings().workflow_run_retention_days,
       });
@@ -662,13 +663,13 @@ export async function registerNode(): Promise<void> {
           { startCronWorker },
           { SYSTEM_CRON_JOB_KEY },
         ] = await Promise.all([
-          import('./lib/workflows/cron/seed-agent-crons'),
-          import('./lib/workflows/cron/seed-system-cron'),
-          import('./lib/workflows/cron/start-cron-worker'),
-          import('./lib/workflows/cron/system-cron-task'),
+          import('@/lib/workflows/cron/seed-agent-crons'),
+          import('@/lib/workflows/cron/seed-system-cron'),
+          import('@/lib/workflows/cron/start-cron-worker'),
+          import('@/lib/workflows/cron/system-cron-task'),
         ]);
         const { quickAddJob } = await import('graphile-worker');
-        const { listEnabledScheduledAgents } = await import('./lib/scheduling/internal-scheduler-helpers');
+        const { listEnabledScheduledAgents } = await import('@/lib/scheduling/internal-scheduler-helpers');
 
         const connectionString = process.env.WORKFLOW_POSTGRES_URL ?? process.env.DATABASE_URL;
         if (!connectionString) {
@@ -791,7 +792,69 @@ export async function registerNode(): Promise<void> {
               );
             },
           },
+          dbBackupDeps: {
+            createBackup: async () => {
+              const {
+                createDatabaseBackup,
+                getBackupDirectory,
+                createBackupFilename,
+              } = await import('@/lib/db/backup');
+              const { join } = await import('path');
+              const dir = getBackupDirectory();
+              const dest = join(/*turbopackIgnore: true*/ dir, createBackupFilename());
+              await createDatabaseBackup(dest);
+              return dest;
+            },
+            pruneOld: async () => {
+              const { pruneBackupFiles, getBackupDirectory } = await import('@/lib/db/backup');
+              const { getSettings } = await import('@/lib/shared/config');
+              const s = getSettings();
+              return pruneBackupFiles(getBackupDirectory(), {
+                keepRecent: s.backup_retention_count,
+                keepWeekly: s.backup_retention_weekly_count,
+              });
+            },
+            readConfig: async () => {
+              // Refresh so toggling the interval/enabled in the UI is
+              // honored on the very next fire without a server restart.
+              const { getSettings, initSettings } = await import('@/lib/shared/config');
+              await initSettings();
+              const s = getSettings();
+              return {
+                enabled: !!s.db_backup_enabled,
+                intervalMs: Math.max(1, s.db_backup_interval_minutes) * 60 * 1000,
+              };
+            },
+            enqueueNextFire: async (runAt) => {
+              const { DB_BACKUP_JOB_KEY } = await import('@/lib/workflows/cron/db-backup-task');
+              await quickAddJob(
+                { connectionString },
+                'db-backup',
+                {},
+                { jobKey: DB_BACKUP_JOB_KEY, jobKeyMode: 'preserve_run_at', runAt, maxAttempts: 5 },
+              );
+            },
+          },
         });
+
+        // Seed the initial db-backup job so the chain starts after boot
+        // even on a fresh install. Idempotent (jobKey replaces any
+        // already-queued one).
+        try {
+          await quickAddJob(
+            { connectionString },
+            'db-backup',
+            {},
+            {
+              jobKey: 'db-backup',
+              jobKeyMode: 'preserve_run_at',
+              runAt: new Date(Date.now() + 15 * 60 * 1000),
+              maxAttempts: 5,
+            },
+          );
+        } catch (err) {
+          console.warn('[db-backup] seed failed:', err);
+        }
 
         try {
           const { seedProjectSweep } = await import('@/lib/workflows/cron/seed-project-sweep');
