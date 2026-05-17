@@ -107,6 +107,7 @@ export function ProjectRunsTab({ projectName, jobsPaused = false }: ProjectRunsT
   const [stepRetryState, setStepRetryState] = useState<{ jobId: string; label: string } | null>(null)
   const [stopState, setStopState] = useState<{ jobId: string; label: string } | null>(null)
   const [continueState, setContinueState] = useState<{ jobId: string; label: string } | null>(null)
+  const [rerunState, setRerunState] = useState<{ jobId: string; label: string } | null>(null)
 
   // Window after which a --resume against the source job's session is
   // unsafe — model context gets compacted and the system/skills/docs that
@@ -144,6 +145,30 @@ export function ProjectRunsTab({ projectName, jobsPaused = false }: ProjectRunsT
       return
     }
     setContinueState(null)
+  }
+
+  const rerunTargetFor = (e: Entry): string | null => {
+    if (jobsPaused || e.status === 'running' || e.key.startsWith('vgroup:')) return null
+    if (!(e.bucket === 'run' || e.bucket === 'agent' || e.bucket === 'other')) return null
+    return e.navJobId || null
+  }
+
+  const rerunRun = async (e: Entry) => {
+    const targetJobId = rerunTargetFor(e)
+    if (!targetJobId) return
+    setRerunState({ jobId: targetJobId, label: 'rerunning' })
+    try {
+      const res = await fetch(`/api/jobs/${encodeURIComponent(targetJobId)}/rerun`, { method: 'POST' })
+      const body = await res.json().catch(() => ({})) as { detail?: string }
+      if (!res.ok) throw new Error(body.detail || `HTTP ${res.status}`)
+      await loadJobs()
+    } catch (error) {
+      console.error('[history] rerun failed', error)
+      setRerunState({ jobId: targetJobId, label: 'failed' })
+      setTimeout(() => setRerunState((prev) => (prev?.jobId === targetJobId ? null : prev)), 2500)
+      return
+    }
+    setRerunState(null)
   }
 
   const stopTargetFor = (e: Entry): { jobId: string; mode: 'job' | 'release' } | null => {
@@ -484,7 +509,26 @@ export function ProjectRunsTab({ projectName, jobsPaused = false }: ProjectRunsT
         )
       })()
     ) : null
-    const buttons = [stopButton, continueButton, stepRetryButton, releaseButton].filter(Boolean)
+    const rerunTargetJobId = rerunTargetFor(e)
+    const rerunButton = rerunTargetJobId ? (
+      (() => {
+        const active = rerunState?.jobId === rerunTargetJobId
+        return (
+          <Button
+            type="button"
+            variant="secondary"
+            size="sm"
+            className="h-7 px-2 text-[11px]"
+            disabled={active}
+            onClick={() => rerunRun(e)}
+            title={jobsPaused ? 'Jobs are paused globally. Resume jobs to rerun this entry.' : 'Start a new run from this entry’s saved prompt'}
+          >
+            {active ? rerunState?.label : 'Rerun'}
+          </Button>
+        )
+      })()
+    ) : null
+    const buttons = [stopButton, continueButton, rerunButton, stepRetryButton, releaseButton].filter(Boolean)
     if (buttons.length === 0) return null
     if (buttons.length === 1) return buttons[0]
     return <div className="flex flex-wrap items-center justify-end gap-1.5">{buttons}</div>
