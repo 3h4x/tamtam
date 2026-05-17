@@ -114,7 +114,7 @@ export const FIELDS: Record<SettingsFieldKey, FieldDef> = {
   },
   review_do_not_ship_action: {
     label: 'Do Not Ship Action',
-    help: 'Policy for DO NOT SHIP review verdicts. pass (default) files a follow-up issue and continues to commit; fix routes back through the review fix loop; abort stops the release.',
+    help: 'Policy for DO NOT SHIP review verdicts. fix (default) routes back through the review fix loop; pass files a follow-up issue and continues to commit; abort stops the release.',
     group: 'pipeline',
     span: 1,
   },
@@ -328,7 +328,7 @@ export const DEFAULTS: Record<SettingsFieldKey, string> = {
 - If LGTM, just confirm the changes look good and add nothing else.`,
   review_fix_max_iterations: '3',
   review_fix_backoff_seconds: '0',
-  review_do_not_ship_action: 'pass',
+  review_do_not_ship_action: 'fix',
   release_wall_clock_timeout_minutes: '60',
   legacy_completion_hook_release_after_run_enabled: 'true',
   legacy_completion_hook_release_after_fix_ci_enabled: 'true',

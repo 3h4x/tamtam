@@ -124,7 +124,7 @@ describe('config', () => {
         jobs_paused: false,
         review_fix_max_iterations: 3,
         review_fix_backoff_seconds: 0,
-        review_do_not_ship_action: 'pass',
+        review_do_not_ship_action: 'fix',
         release_wall_clock_timeout_minutes: 60,
         log_retention_count: 200,
         log_retention_days: 30,

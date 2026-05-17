@@ -466,9 +466,15 @@ export function TerminalMessages({
               }
             } catch { /* ignore */ }
           }
+          // When streamBuffer is non-empty, the live agent block above already
+          // renders that text — repeating its last line here would be a visible
+          // duplicate. Fall back to a generic state label instead.
+          const hasVisibleStream = !!streamBuffer && !streamIsRaw
           const label = pendingTool
             ? `${pendingTool.name}${pendingToolContext}…`
-            : (lastStreamLine || 'thinking…')
+            : hasVisibleStream
+              ? (idleSec >= 5 ? 'waiting for next event…' : 'streaming…')
+              : (lastStreamLine || 'thinking…')
           const isIdle = idleSec >= 5
           const isVeryIdle = idleSec >= 10
           const idleLabel = isIdle ? ` · idle ${idleSec}s` : ''

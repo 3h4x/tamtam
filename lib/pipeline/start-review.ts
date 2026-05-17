@@ -1,6 +1,6 @@
 import { existsSync, lstatSync, readFileSync } from 'fs';
 import { join, resolve } from 'path';
-import { getImproveConfig, getProjectTestConfig, getProjectPipelinePrompts } from '@/lib/scheduling/scheduling';
+import { getImproveConfig, getProjectTestConfig, getProjectPipelinePrompts, getProjectQaTarget } from '@/lib/scheduling/scheduling';
 import { resolveCliBin, resolveCliEnv } from '@/lib/shared/cli-bin';
 import { checkCliStartGate } from '@/lib/usage/resolve-provider';
 import { currentParent } from '@/lib/jobs/parent-context';

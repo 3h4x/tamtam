@@ -2,6 +2,7 @@
 
 import { useEffect, useState } from 'react';
 import Link from 'next/link';
+import { WorkflowGraph } from '@/components/workflow-runs/WorkflowGraph';
 
 interface WorkflowRunSummary {
   id: string;
@@ -185,6 +186,7 @@ export function WorkflowRunsPage() {
   const [error, setError] = useState<string | null>(null);
   const [nameFilter, setNameFilter] = useState('');
   const [statusFilter, setStatusFilter] = useState<StatusFilter>('all');
+  const [view, setView] = useState<'runs' | 'graph'>('runs');
 
   useEffect(() => {
     let cancelled = false;
@@ -251,7 +253,25 @@ export function WorkflowRunsPage() {
             ? `${data.runs.length} recent · refresh every 5s`
             : `${filtered.length} of ${data.runs.length} recent · refresh every 5s`}
         </span>
+        <div className="ml-auto flex rounded-md border border-border overflow-hidden">
+          {(['runs', 'graph'] as const).map((v) => (
+            <button
+              key={v}
+              onClick={() => setView(v)}
+              className={`px-3 py-1 text-xs transition-colors ${
+                view === v
+                  ? 'bg-accent/15 text-accent'
+                  : 'bg-bg-secondary text-text-secondary hover:text-text-primary'
+              }`}
+            >
+              {v === 'runs' ? 'Runs' : 'Graph'}
+            </button>
+          ))}
+        </div>
       </div>
+      {view === 'graph' && <WorkflowGraph />}
+      {view === 'runs' && (
+      <>
       <div className="mb-3 flex flex-wrap items-center gap-2">
         <input
           type="text"
@@ -338,6 +358,8 @@ export function WorkflowRunsPage() {
           </tbody>
         </table>
       </div>
+      </>
+      )}
     </div>
   );
 }
