@@ -8,7 +8,7 @@ Agents are reusable automation units that combine skills, optional attached proj
 - Debugging why a scheduled agent isn't firing
 - Understanding how skills and attached project docs are composed into the system prompt
 - Preventing duplicate/concurrent agent runs
-- Understanding the internal scheduler and legacy launchctl compatibility
+- Understanding graphile-worker backed scheduling and legacy runner metadata compatibility
 - Understanding the durable intake workflow (Postgres-backed two-step path for read-only runs)
 
 ---
@@ -16,7 +16,7 @@ Agents are reusable automation units that combine skills, optional attached proj
 ## Concepts
 
 - **Agent** — A configuration combining skills, optional attached project docs, model, and prompt template
-- **Scheduled run** — Automatic execution on an interval (e.g., "1h", "30m"), driven by the in-process scheduler for `runner: "pm2"` or by legacy `launchctl` rows
+- **Scheduled run** — Automatic execution on an interval (e.g., "1h", "30m"), driven by the graphile-worker cron pool
 - **On-demand run** — Manual execution triggered via API or UI
 - **Agent context composition** — Skills and attached docs are prepended as context before the task prompt
 
@@ -32,7 +32,7 @@ Agents are reusable automation units that combine skills, optional attached proj
 | `model` | string | `normal` | Semantic model tier: `fast`, `normal`, or `smart`. Legacy `haiku`, `sonnet`, and `opus` aliases are still accepted. |
 | `prompt` | string | `''` | Default task prompt for scheduled runs |
 | `schedule` | string | `null` | Run interval for scheduling: `"30m"`, `"1h"`, `"8h"`, etc. or `null` for manual only |
-| `runner` | string | `pm2` | Scheduler mode: `"pm2"` for the internal scheduler, or legacy `"launchctl"` on macOS |
+| `runner` | string | `pm2` | Compatibility metadata retained for existing rows; current recurring schedules are graphile-worker backed regardless of value |
 | `enabled` | boolean | `true` | Enable/disable without deletion |
 | `provider` | string \| null | `null` | Optional required CLI provider (`claude`, `codex`, `gemini`, `lmstudio`). `null` means "any enabled provider". When set, the run fails closed if that provider is disabled or over budget. |
 | `prerequisiteCommand` | string \| null | `null` | Optional `bash -c` command run in the project directory before the agent CLI starts. Output is captured to a prerequisite artifact and prepended to the agent prompt. |
@@ -87,7 +87,7 @@ curl -X POST http://localhost:1337/api/agents \
 ```
 
 **Required fields:** `name`, `project`  
-**Optional fields:** `skillIds` (default `[]`), `docPaths` (default `[]`), `model`, `prompt`, `schedule`, `runner`, `enabled`, `provider`, `prerequisiteCommand`
+**Optional fields:** `skillIds` (default `[]`), `docPaths` (default `[]`), `model`, `prompt`, `schedule`, `runner` (compatibility, defaults to `pm2`), `enabled`, `provider`, `prerequisiteCommand`
 
 If you provide both `schedule` and `prompt`, the agent's schedule is automatically installed.
 
@@ -226,10 +226,7 @@ Issue-branch behavior is now split by trigger type:
 
 ### Scheduled Runs
 
-If an agent has both `schedule` and `prompt`, the schedule is installed automatically on creation/update:
-
-- **runner: "pm2"** — Registers the agent with TamTam's in-process scheduler. The long-lived TamTam server must be running for scheduled fires to happen.
-- **runner: "launchctl"** — Legacy macOS LaunchAgent support retained for backward compatibility. New agents should use `runner: "pm2"`; launchctl emits a deprecation warning.
+If an agent has `schedule` and either a prompt or skills, the schedule is installed automatically on creation/update. TamTam writes a prompt recovery file under `<logDir>/agent-scripts/` and upserts a graphile-worker job with `jobKey = agent-cron-<agentId>`. The persisted `runner` value is retained for backward-compatible reads but no longer selects a scheduler implementation.
 
 On each scheduled trigger, the agent runs with its stored `prompt`.
 
@@ -417,19 +414,18 @@ This also removes any active internal-scheduler entry or legacy LaunchAgent.
 
 ## Scheduled Execution Details
 
-### Internal Scheduler (`runner: "pm2"`)
+### Scheduled Agent Cron
 
-When `runner: "pm2"`, TamTam does not create a PM2 cron job. Instead it stores the schedule in memory inside the long-lived Next.js server process and computes the next fire time with `computeNextFire()` in `lib/scheduling/internal-scheduler.ts`.
+TamTam does not create PM2 cron jobs or LaunchAgents for current scheduled agents. Instead, each enabled scheduled agent has one graphile-worker `agent-cron` row keyed as `agent-cron-<agentId>`. The row stores the next fire time computed with `computeNextFire()` in `lib/workflows/cron/parse-schedule.ts`.
 
 Current behavior:
 
-- `instrumentation-node.ts` calls `reinstallAgents()` on boot to load enabled scheduled agents from the DB and file-agent layer.
-- `lib/scheduling/internal-scheduler.ts` arms one `setTimeout` per agent using the supported `Nm` / `Nh` / `Nd` interval grammar plus a stable per-agent phase offset.
-- When the timer fires, the scheduler POSTs to `/api/agents/{id}/run` with the stored prompt and `X-Tamtam-Trigger: schedule`.
-- Agent CRUD routes call `installAgentSchedule()` / `uninstallAgentSchedule()`, which delegate to `upsertAgentSchedule()` / `removeAgentSchedule()` so schedule changes apply immediately without restarting the server.
-- Actual agent work still runs as one-shot PM2-managed job processes after `/api/agents/{id}/run` accepts the request. PM2 is used for job execution, not for recurring schedule timers.
+- `instrumentation-node.ts` starts the cron worker and calls `seedAgentCrons()` on boot to upsert enabled scheduled agents from the DB and file-agent layer.
+- `lib/workflows/cron/agent-cron-task.ts` handles each fire, checks pause/budget/branch/release gates, starts the agent intake workflow, and re-enqueues the next fire.
+- Agent CRUD routes call `installAgentSchedule()` / `uninstallAgentSchedule()` so schedule changes apply immediately without restarting the server.
+- Actual agent work still runs as one-shot in-process jobs after the agent intake workflow accepts the request. PM2 supervises TamTam itself, not recurring schedule timers.
 
-Skip conditions tracked by the internal scheduler:
+Skip conditions tracked by the cron task:
 
 - global job pause
 - budget gate or 7-day burn-rate throttle
@@ -437,22 +433,15 @@ Skip conditions tracked by the internal scheduler:
 - issue-branch lock for the same project
 - duplicate in-flight or in-progress-start agent run
 
-The scheduler tracks `nextFireMs`, `lastFireMs`, `fireCount`, `errorCount`, `skippedCount`, and the most recent error/skip reason. `/api/agents/scheduler-health` exposes both the expected agent set and the live internal scheduler state.
+`/api/agents/scheduler-health` exposes the expected agent set, graphile-worker queue keys, and any missing prompt files or queue jobs. It can reconcile missing rows by reinstalling schedules.
 
 #### Why PM2 cron is not used
 
-Older TamTam versions tried to register scheduled agents with PM2 cron. PM2's `cron_restart` combined with `--no-autostart` silently no-op'd: the cron tick updated PM2 metadata but never started the stopped process. That left legacy PM2 schedule rows behind that looked installed but never fired. The current implementation uses the in-process scheduler instead and no longer attempts to clean up legacy PM2 cron rows on boot — any leftovers from old installs are inert and can be removed manually with `pm2 delete <name>` if desired.
+Older TamTam versions tried to register scheduled agents with PM2 cron. PM2's `cron_restart` combined with `--no-autostart` silently no-op'd: the cron tick updated PM2 metadata but never started the stopped process. Any leftovers from old installs are inert and can be removed manually with `pm2 delete <name>` if desired.
 
-### LaunchAgent (macOS)
+### Legacy Runner Metadata
 
-`runner: "launchctl"` is legacy-only. The code path remains for backward compatibility with pre-existing DB rows and file-agent overrides, but new agents should not use it.
-
-Launchctl uses the same validated interval grammar as the internal scheduler: `Nm`, `Nh`, and `Nd` are all accepted and are converted to `StartInterval` seconds in the generated plist.
-
-When `runner: "launchctl"` is still present on an existing agent, a `.plist` file is created in `~/Library/LaunchAgents/`:
-
-```xml
-<?xml version="1.0" encoding="UTF-8"?>
+Rows and file-agent overrides may still contain `runner: "launchctl"` from older installs. TamTam keeps this value in API responses and storage so upgrades do not lose data, but current schedule install/uninstall paths are graphile-worker backed regardless of `runner`. New UI surfaces do not expose runner selection.
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
 <plist version="1.0">
 <dict>

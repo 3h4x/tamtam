@@ -60,18 +60,18 @@ function requireBackoffTarget(rec: RecommendationRow): { agentId: string; recomm
 
 async function syncFileAgentSchedule(agent: FileAgent): Promise<void> {
   if (agent.schedule && agent.enabled && (agent.prompt || agent.skillIds.length > 0)) {
-    await installAgentSchedule(agent.id, agent.schedule, agent.prompt, agent.runner, agent.project, agent.name)
+    await installAgentSchedule(agent.id, agent.schedule, agent.prompt, agent.project, agent.name)
   } else {
-    await uninstallAgentSchedule(agent.id, agent.runner, agent.project, agent.name)
+    await uninstallAgentSchedule(agent.id, agent.project, agent.name)
   }
 }
 
 async function syncDbAgentSchedule(agentId: string, agent: AgentRow): Promise<void> {
   const skillIds: string[] = JSON.parse(agent.skillIds || '[]')
   if (agent.schedule && agent.enabled && (agent.prompt || skillIds.length > 0)) {
-    await installAgentSchedule(agentId, agent.schedule, agent.prompt, agent.runner, agent.project, agent.name)
+    await installAgentSchedule(agentId, agent.schedule, agent.prompt, agent.project, agent.name)
   } else {
-    await uninstallAgentSchedule(agentId, agent.runner, agent.project, agent.name)
+    await uninstallAgentSchedule(agentId, agent.project, agent.name)
   }
 }
 

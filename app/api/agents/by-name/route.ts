@@ -122,9 +122,9 @@ export async function PATCH(request: NextRequest) {
       try {
         const hasSkills = JSON.parse(agent.skillIds || '[]').length > 0;
         if (agent.schedule && agent.enabled && (agent.prompt || hasSkills)) {
-          await installAgentSchedule(agent.id, agent.schedule, agent.prompt, agent.runner, agent.project, agent.name);
+          await installAgentSchedule(agent.id, agent.schedule, agent.prompt, agent.project, agent.name);
         } else {
-          await uninstallAgentSchedule(agent.id, agent.runner, agent.project, agent.name);
+          await uninstallAgentSchedule(agent.id, agent.project, agent.name);
         }
       } catch (e: unknown) {
         console.error(`Failed to update schedule for agent ${agent.id}:`, errMsg(e));
@@ -173,9 +173,9 @@ export async function PATCH(request: NextRequest) {
         }
         try {
           if (updated.schedule && updated.enabled && (updated.prompt || updated.skillIds.length > 0)) {
-            await installAgentSchedule(updated.id, updated.schedule, updated.prompt, updated.runner, updated.project, updated.name);
+            await installAgentSchedule(updated.id, updated.schedule, updated.prompt, updated.project, updated.name);
           } else {
-            await uninstallAgentSchedule(updated.id, updated.runner, updated.project, updated.name);
+            await uninstallAgentSchedule(updated.id, updated.project, updated.name);
           }
         } catch (e: unknown) {
           console.error(`Failed to update schedule for file agent ${updated.id}:`, errMsg(e));

@@ -61,14 +61,14 @@ provider: codex        # optional: claude | codex | gemini | lmstudio
 model: normal          # fast | normal | smart (legacy haiku | sonnet | opus still read)
 schedule: 4h           # optional: 15m 30m 1h 2h 4h 8h 12h 24h
 skillIds: ["agent-tests"]   # JSON array or space-separated skill IDs
-runner: pm2            # pm2 | launchctl (launchctl deprecated)
+runner: pm2            # compatibility metadata; graphile-worker handles schedules
 enabled: true
 ---
 
 Prompt content here. Sent verbatim as the agent's task instructions.
 ```
 
-File agents appear in the Agents tab with a `file` badge. Prompt edits are written back to `.tamtam/agents/<name>.md`; committed frontmatter such as `provider` is preserved on write. Operational settings (`enabled`, `schedule`, `model`, `runner`, `skillIds`) are stored as DB overrides under `agent_override:<project>:<name>` so UI toggles do not dirty tracked files.
+File agents appear in the Agents tab with a `file` badge. Prompt edits are written back to `.tamtam/agents/<name>.md`; committed frontmatter such as `provider` is preserved on write. Operational settings (`enabled`, `schedule`, `model`, `runner`, `skillIds`) are stored as DB overrides under `agent_override:<project>:<name>` so UI toggles do not dirty tracked files. `runner` is retained for compatibility with older metadata; current recurring schedules use graphile-worker.
 
 A DB agent with the same project+name takes precedence over the file agent.
 

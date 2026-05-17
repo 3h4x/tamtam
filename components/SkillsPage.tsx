@@ -225,7 +225,6 @@ export function SkillsPage() {
           model: 'normal',
           prompt: item.description || '',
           schedule: item.source === 'db' ? SUGGESTED_SCHEDULES[item.skill.id] || null : null,
-          runner: 'pm2',
         })
         created++
       } catch {

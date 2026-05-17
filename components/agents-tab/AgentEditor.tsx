@@ -11,7 +11,6 @@ import { resolveAgentPrerequisiteCommand } from '@/lib/agents/issue-cruncher'
 import { CLI_PROVIDERS, type CliProvider } from '@/lib/usage/cli-providers'
 
 const MODELS = [...MODEL_TIERS]
-const RUNNERS = ['pm2']
 const SCHEDULES = ['', '15m', '30m', '1h', '2h', '4h', '8h', '12h', '24h', '3d', '7d', '30d']
 
 export interface AgentEditorSavePayload {
@@ -21,7 +20,6 @@ export interface AgentEditorSavePayload {
   docPaths: string[]
   model: string
   schedule: string | null
-  runner: string
   enabled: boolean
   provider: CliProvider | null
   prerequisiteCommand: string | null
@@ -63,7 +61,6 @@ export function AgentEditor({
   const [model, setModel] = useState(normalizeModelInput(agent?.model || template?.model, 'normal'))
   const [provider, setProvider] = useState<CliProvider | null>((agent?.provider as CliProvider | null | undefined) ?? null)
   const [schedule, setSchedule] = useState(agent?.schedule || template?.schedule || '')
-  const [runner, setRunner] = useState(agent?.runner || template?.runner || 'pm2')
   const [enabled, setEnabled] = useState<boolean>(agent ? agent.enabled : true)
   const [prerequisiteCommand, setPrerequisiteCommand] = useState<string>(initialPrerequisite)
   const [saving, setSaving] = useState(false)
@@ -101,7 +98,6 @@ export function AgentEditor({
     setModel(normalizeModelInput(src.model, 'normal'))
     setProvider((agent?.provider as CliProvider | null | undefined) ?? null)
     setSchedule(src.schedule || '')
-    setRunner(src.runner || 'pm2')
     if (agent) setEnabled(agent.enabled)
     setPrerequisiteCommand(agent
       ? (agent.prerequisiteCommand ?? '')
@@ -132,7 +128,7 @@ export function AgentEditor({
     if (!name.trim() || saving) return
     setSaving(true)
     try {
-      await onSave({ name, prompt: agentPrompt, skillIds: selectedSkills, docPaths: selectedDocPaths, model, schedule: schedule || null, runner, enabled, provider, prerequisiteCommand: prerequisiteCommand.trim() || null })
+      await onSave({ name, prompt: agentPrompt, skillIds: selectedSkills, docPaths: selectedDocPaths, model, schedule: schedule || null, enabled, provider, prerequisiteCommand: prerequisiteCommand.trim() || null })
     } catch (err) {
       toast(err instanceof Error ? err.message : 'Failed to save agent', 'error')
     }
@@ -449,7 +445,7 @@ export function AgentEditor({
         )}
       </div>
 
-      {/* Settings strip: Schedule / Runner / Enabled */}
+      {/* Settings strip: Schedule / Enabled */}
       <div className="flex items-center gap-4 px-3 py-2.5 rounded-lg bg-bg-secondary border border-border flex-wrap">
         <div className="flex items-center gap-2 flex-1 min-w-[160px]">
           <span className="text-xs text-text-tertiary whitespace-nowrap font-medium">Schedule</span>
@@ -461,18 +457,6 @@ export function AgentEditor({
           >
             <option value="">Manual</option>
             {SCHEDULES.filter(Boolean).map(s => <option key={s} value={s}>every {s}</option>)}
-          </select>
-        </div>
-        <div className="w-px h-4 bg-border shrink-0" />
-        <div className="flex items-center gap-2 flex-1 min-w-[160px]">
-          <span className="text-xs text-text-tertiary whitespace-nowrap font-medium">Runner</span>
-          <select
-            id="agent-runner"
-            className="flex-1 min-w-0 px-2 py-1.5 text-xs bg-bg-primary border border-border rounded-md text-text-primary focus:outline-none focus:ring-1 focus:ring-accent/40 focus:border-accent transition-colors cursor-pointer"
-            value={runner}
-            onChange={(e) => setRunner(e.target.value)}
-          >
-            {RUNNERS.map(r => <option key={r} value={r}>{r}</option>)}
           </select>
         </div>
         <div className="w-px h-4 bg-border shrink-0" />

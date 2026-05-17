@@ -90,7 +90,6 @@ describe('scanFileAgents', () => {
     expect(agents[0].project).toBe('myproject');
     expect(agents[0].prompt).toBe('Run tests and report failures.');
     expect(agents[0].model).toBe('normal');
-    expect(agents[0].runner).toBe('pm2');
     expect(agents[0].enabled).toBe(true);
     expect(agents[0].source).toBe('file');
     expect(agents[0].schedule).toBeNull();
@@ -102,7 +101,6 @@ describe('scanFileAgents', () => {
 provider: codex
 model: opus
 schedule: 4h
-runner: launchctl
 enabled: true
 skillIds: ["persona:engineering-team/senior-fullstack"]
 ---
@@ -113,7 +111,6 @@ Improve the UI of tamtam.`);
     expect(a.provider).toBe('codex');
     expect(a.model).toBe('smart');
     expect(a.schedule).toBe('4h');
-    expect(a.runner).toBe('launchctl');
     expect(a.enabled).toBe(true);
     expect(a.skillIds).toEqual(['persona:engineering-team/senior-fullstack']);
     expect(a.prompt).toBe('Improve the UI of tamtam.');
@@ -280,14 +277,10 @@ Original prompt.`);
     expect(existsSync(join(tmpDir, '.tamtam', 'agents', 'agent.md'))).toBe(false);
   });
 
-  it('writes runner only when not pm2', () => {
-    writeFileAgent(tmpDir, 'proj', 'agent', { runner: 'launchctl' });
+  it('does not write a runner frontmatter line', () => {
+    writeFileAgent(tmpDir, 'proj', 'agent', { prompt: 'do' });
     const content = readFileSync(join(tmpDir, '.tamtam', 'agents', 'agent.md'), 'utf-8');
-    expect(content).toContain('runner: launchctl');
-
-    writeFileAgent(tmpDir, 'proj', 'agent2', { runner: 'pm2' });
-    const content2 = readFileSync(join(tmpDir, '.tamtam', 'agents', 'agent2.md'), 'utf-8');
-    expect(content2).not.toContain('runner:');
+    expect(content).not.toContain('runner:');
   });
 
   it('round-trips prerequisiteCommand through write + load', () => {
@@ -354,14 +347,13 @@ Original prompt.`);
     const skillIds = ['persona:engineering-team/senior-fullstack', 'agent-tests'];
     writeFileAgent(tmpDir, 'proj', 'agent', {
       provider: 'lmstudio',
-      model: 'smart', schedule: '8h', skillIds, runner: 'launchctl', prompt: 'Run stuff.',
+      model: 'smart', schedule: '8h', skillIds, prompt: 'Run stuff.',
     });
     const a = loadFileAgent(tmpDir, 'proj', 'agent')!;
     expect(a.provider).toBe('lmstudio');
     expect(a.model).toBe('smart');
     expect(a.schedule).toBe('8h');
     expect(a.skillIds).toEqual(skillIds);
-    expect(a.runner).toBe('launchctl');
     expect(a.prompt).toBe('Run stuff.');
   });
 

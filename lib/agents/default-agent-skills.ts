@@ -171,11 +171,11 @@ Only patch \`prompt\`. Shorter is better. Don't restate the skill. Don't run \`g
     content: `TamTam API at http://localhost:1337 (local-only).
 
 Gather: CLAUDE.md, project name from the current repo directory name (the folder containing \`.git\`), and current activity by skimming the codebase. Use \`package.json\` / \`pyproject.toml\` / CLAUDE.md only as sanity checks; if they disagree with the repo directory name, stop instead of guessing.
-Fetch: \`curl -s "http://localhost:1337/api/agents?project=<name>"\` — fields: id, name, prompt, skillIds, model, schedule, runner, enabled.
+Fetch: \`curl -s "http://localhost:1337/api/agents?project=<name>"\` — fields: id, name, prompt, skillIds, model, schedule, enabled.
 
 Decide changes: missing test agent? stale agents referencing dead paths? duplicate purpose? missing schedule? Don't create for hypothetical needs.
 
-Create: \`POST /api/agents\` with \`{project, name, prompt, skillIds: [], model, schedule, runner: "pm2", enabled: true}\`. Prefer semantic tiers: fast for cheap tasks, normal for the default, smart only for hard reasoning. Legacy haiku/sonnet/opus aliases still resolve.
+Create: \`POST /api/agents\` with \`{project, name, prompt, skillIds: [], model, schedule, enabled: true}\`. Prefer semantic tiers: fast for cheap tasks, normal for the default, smart only for hard reasoning. Legacy haiku/sonnet/opus aliases still resolve.
 Update: \`PATCH /api/agents/by-name\` (\`prompt\` only unless asked).
 Delete: \`DELETE /api/agents/<id>\` only when stale/broken.
 

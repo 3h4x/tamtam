@@ -59,7 +59,7 @@ describe('agent-scheduler (graphile-worker backed)', () => {
 
   describe('installAgentSchedule', () => {
     it('persists the prompt to disk and enqueues an agent-cron job', async () => {
-      await installAgentSchedule('agent-abc', '30m', 'run tests', 'pm2', 'projA', 'My Agent');
+      await installAgentSchedule('agent-abc', '30m', 'run tests', 'projA', 'My Agent');
 
       // Prompt file is written so out-of-band reruns can recover the prompt.
       const promptPath = join(scriptsDir, 'agent-abc.prompt.json');
@@ -87,13 +87,13 @@ describe('agent-scheduler (graphile-worker backed)', () => {
     it('throws when no postgres URL is configured', async () => {
       delete process.env.DATABASE_URL;
       delete process.env.WORKFLOW_POSTGRES_URL;
-      await expect(installAgentSchedule('agent-no-pg', '1h', 'p', 'pm2')).rejects.toThrow(/no postgres URL/);
+      await expect(installAgentSchedule('agent-no-pg', '1h', 'p')).rejects.toThrow(/no postgres URL/);
     });
 
     it('enqueues into WORKFLOW_POSTGRES_URL when workflow and app databases differ', async () => {
       process.env.WORKFLOW_POSTGRES_URL = 'postgres://workflow/test';
 
-      await installAgentSchedule('agent-workflow-db', '30m', 'run tests', 'pm2', 'projA', 'My Agent');
+      await installAgentSchedule('agent-workflow-db', '30m', 'run tests', 'projA', 'My Agent');
 
       expect(quickAddJobMock).toHaveBeenCalledOnce();
       const call = quickAddJobMock.mock.calls[0] as unknown as [
@@ -110,12 +110,12 @@ describe('agent-scheduler (graphile-worker backed)', () => {
   describe('uninstallAgentSchedule', () => {
     it('replaces the agent-cron job with a one-year-out runAt and removes the prompt file', async () => {
       // First install to create the prompt file...
-      await installAgentSchedule('agent-to-remove', '1h', 'p', 'pm2', 'proj', 'agt');
+      await installAgentSchedule('agent-to-remove', '1h', 'p', 'proj', 'agt');
       const promptPath = join(scriptsDir, 'agent-to-remove.prompt.json');
       expect(existsSync(promptPath)).toBe(true);
       quickAddJobMock.mockClear();
 
-      await uninstallAgentSchedule('agent-to-remove', 'pm2', 'proj', 'agt');
+      await uninstallAgentSchedule('agent-to-remove', 'proj', 'agt');
 
       expect(quickAddJobMock).toHaveBeenCalledOnce();
       const call = quickAddJobMock.mock.calls[0] as unknown as [
@@ -133,13 +133,13 @@ describe('agent-scheduler (graphile-worker backed)', () => {
     });
 
     it('does not throw when uninstalling an agent that was never installed', async () => {
-      await expect(uninstallAgentSchedule('nonexistent-agent', 'pm2')).resolves.not.toThrow();
+      await expect(uninstallAgentSchedule('nonexistent-agent')).resolves.not.toThrow();
     });
 
     it('cancels in WORKFLOW_POSTGRES_URL when workflow and app databases differ', async () => {
       process.env.WORKFLOW_POSTGRES_URL = 'postgres://workflow/test';
 
-      await uninstallAgentSchedule('agent-workflow-db', 'pm2', 'proj', 'agt');
+      await uninstallAgentSchedule('agent-workflow-db', 'proj', 'agt');
 
       expect(quickAddJobMock).toHaveBeenCalledOnce();
       const call = quickAddJobMock.mock.calls[0] as unknown as [
@@ -155,7 +155,7 @@ describe('agent-scheduler (graphile-worker backed)', () => {
 
   describe('isAgentScheduleLoaded', () => {
     it('returns true when the per-agent prompt file exists', async () => {
-      await installAgentSchedule('agent-loaded', '1h', 'p', 'pm2');
+      await installAgentSchedule('agent-loaded', '1h', 'p');
       expect(await isAgentScheduleLoaded('agent-loaded', 'pm2')).toBe(true);
     });
 
