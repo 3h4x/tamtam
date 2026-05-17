@@ -4,7 +4,7 @@ import { handleDbBackup } from '@/lib/workflows/cron/db-backup-task';
 describe('handleDbBackup', () => {
   const readConfig = () => ({ enabled: true, intervalMs: 15 * 60 * 1000 });
 
-  it('creates a backup then prunes; reports both', async () => {
+  it('creates a backup then prunes; passes the new path so prune can protect it', async () => {
     const createBackup = vi.fn().mockResolvedValue('/data/db/tamtam-now.pgdump');
     const pruneOld = vi.fn().mockResolvedValue(['tamtam-old.pgdump']);
     const enqueueNextFire = vi.fn().mockResolvedValue(undefined);
@@ -16,6 +16,9 @@ describe('handleDbBackup', () => {
     expect(r.backupPath).toBe('/data/db/tamtam-now.pgdump');
     expect(r.pruned).toEqual(['tamtam-old.pgdump']);
     expect(r.error).toBeUndefined();
+    // Regression #182: prune must receive the new dump path so callers can
+    // protect it via `protectedNames` (otherwise keepRecent=0 prunes it).
+    expect(pruneOld).toHaveBeenCalledWith('/data/db/tamtam-now.pgdump');
     // 15-minute reenqueue
     expect(r.nextFireAt.getTime()).toBe(1_000_000_000_000 + 15 * 60 * 1000);
     expect(enqueueNextFire).toHaveBeenCalledWith(r.nextFireAt);

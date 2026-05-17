@@ -85,6 +85,10 @@ function renderView(props: React.ComponentProps<typeof ReleaseTraceView>) {
   }
 }
 
+// The mocked fetches resolve immediately; the default 50ms poll interval
+// dominates the runtime for these assertions.
+const waitFor = <T,>(cb: () => T | Promise<T>) => vi.waitFor(cb, { interval: 1, timeout: 1000 })
+
 describe('ReleaseTraceView', () => {
   beforeEach(() => {
     vi.useFakeTimers()
@@ -119,7 +123,7 @@ describe('ReleaseTraceView', () => {
       releaseId: 'rel-123456789abc',
     })
 
-    await vi.waitFor(() => {
+    await waitFor(() => {
       expect(container.textContent).toContain('running')
       expect(container.textContent).toContain('Board')
     })
@@ -130,7 +134,7 @@ describe('ReleaseTraceView', () => {
     )
 
     await vi.advanceTimersByTimeAsync(4000)
-    await vi.waitFor(() => {
+    await waitFor(() => {
       expect(container.textContent).toContain('success')
     })
 
@@ -190,7 +194,7 @@ describe('ReleaseTraceView', () => {
       releaseId: 'rel-123456789abc',
     })
 
-    await vi.waitFor(() => {
+    await waitFor(() => {
       expect(container.textContent).toContain('review')
       expect(container.textContent).toContain('push')
     })
@@ -199,7 +203,7 @@ describe('ReleaseTraceView', () => {
     if (!(reviewButton instanceof HTMLButtonElement)) throw new Error('review button not found')
     reviewButton.dispatchEvent(new MouseEvent('click', { bubbles: true }))
 
-    await vi.waitFor(() => {
+    await waitFor(() => {
       expect(container.textContent).toContain('review passed cleanly')
     })
 
@@ -207,7 +211,7 @@ describe('ReleaseTraceView', () => {
     if (!(pushButton instanceof HTMLButtonElement)) throw new Error('push button not found')
     pushButton.dispatchEvent(new MouseEvent('click', { bubbles: true }))
 
-    await vi.waitFor(() => {
+    await waitFor(() => {
       expect(container.textContent).toContain('no log excerpt available')
     })
 
@@ -228,7 +232,7 @@ describe('ReleaseTraceView', () => {
       releaseId: 'missing-release',
     })
 
-    await vi.waitFor(() => {
+    await waitFor(() => {
       expect(container.textContent).toContain('Release not found')
       expect(container.textContent).toContain('Release id missing-release')
     })

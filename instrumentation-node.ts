@@ -805,13 +805,20 @@ export async function registerNode(): Promise<void> {
               await createDatabaseBackup(dest);
               return dest;
             },
-            pruneOld: async () => {
+            pruneOld: async (justCreatedPath: string) => {
               const { pruneBackupFiles, getBackupDirectory } = await import('@/lib/db/backup');
               const { getSettings } = await import('@/lib/shared/config');
+              const { basename } = await import('path');
               const s = getSettings();
+              // Protect the dump we *just* created from this same prune
+              // sweep. Otherwise `keepRecent=0` + `keepWeekly=0` would
+              // delete the new file immediately, violating the retention
+              // contract (the manual `/api/settings/backup` route already
+              // does this).
               return pruneBackupFiles(getBackupDirectory(), {
                 keepRecent: s.backup_retention_count,
                 keepWeekly: s.backup_retention_weekly_count,
+                protectedNames: [basename(justCreatedPath)],
               });
             },
             readConfig: async () => {

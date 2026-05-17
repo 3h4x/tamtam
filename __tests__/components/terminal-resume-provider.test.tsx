@@ -47,6 +47,10 @@ async function flushMicrotasks() {
   await Promise.resolve()
 }
 
+// These tests mostly wait on synchronous mocked promise chains; Vitest's
+// default 50ms poll interval adds most of the wall-clock time.
+const waitFor = <T,>(cb: () => T | Promise<T>) => vi.waitFor(cb, { interval: 1, timeout: 1000 })
+
 function BootstrapHarness() {
   useTerminalBootstrap({
     projectName: 'proj',
@@ -168,7 +172,7 @@ describe('pending continue-issue resume provider', () => {
   it('hydrates sessionProvider from the pending resume payload', async () => {
     const { unmount } = renderElement(<BootstrapHarness />)
 
-    await vi.waitFor(() => {
+    await waitFor(() => {
       const state = terminalStore.get('proj')
       expect(state.claudeSessionId).toBe('sess-codex-1')
       expect(state.sessionProvider).toBe('codex')
@@ -188,7 +192,7 @@ describe('pending continue-issue resume provider', () => {
     let submit: ((text?: string) => Promise<void>) | undefined
     const { unmount } = renderElement(<SubmitHarness onReady={(handler) => { submit = handler }} />)
 
-    await vi.waitFor(() => {
+    await waitFor(() => {
       expect(submit).toBeTypeOf('function')
     })
     const submitFn = submit
@@ -210,7 +214,7 @@ describe('pending continue-issue resume provider', () => {
     let submit: ((text?: string) => Promise<void>) | undefined
     const { unmount } = renderElement(<SubmitHarness onReady={(handler) => { submit = handler }} />)
 
-    await vi.waitFor(() => {
+    await waitFor(() => {
       expect(submit).toBeTypeOf('function')
     })
     const submitFn = submit
@@ -281,7 +285,7 @@ describe('pending continue-issue resume provider', () => {
     let restoreSession: ReturnType<typeof useSessionManager>['restoreSession'] | undefined
     const manager = renderElement(<SessionManagerHarness onReady={(handler) => { restoreSession = handler }} />)
 
-    await vi.waitFor(() => {
+    await waitFor(() => {
       expect(restoreSession).toBeTypeOf('function')
     })
     const restore = restoreSession
@@ -295,7 +299,7 @@ describe('pending continue-issue resume provider', () => {
       exitCode: 0,
     })
 
-    await vi.waitFor(() => {
+    await waitFor(() => {
       expect(terminalStore.get('proj').sessionProvider).toBe('codex')
       expect(terminalStore.get('proj').claudeSessionId).toBe('sess-review-codex')
     })
@@ -304,7 +308,7 @@ describe('pending continue-issue resume provider', () => {
     let submit: ((text?: string) => Promise<void>) | undefined
     const submitHarness = renderElement(<SubmitHarness onReady={(handler) => { submit = handler }} />)
 
-    await vi.waitFor(() => {
+    await waitFor(() => {
       expect(submit).toBeTypeOf('function')
     })
     const submitFn = submit
@@ -344,7 +348,7 @@ describe('pending continue-issue resume provider', () => {
 
     const { unmount } = renderElement(<IssueBranchBootstrapHarness />)
 
-    await vi.waitFor(() => {
+    await waitFor(() => {
       expect(replaceMock).toHaveBeenCalledWith('/project/proj/terminal')
       expect(terminalStore.get('proj').history.at(-1)?.text).toContain('Could not check out the issue branch: dirty worktree')
     })
@@ -379,7 +383,7 @@ describe('pending continue-issue resume provider', () => {
 
     const { unmount } = renderElement(<JobBootstrapHarness jobParam="release-1" />)
 
-    await vi.waitFor(() => {
+    await waitFor(() => {
       const history = terminalStore.get('proj').history
       expect(history.some((entry) => entry.text === 'Log file deleted by retention policy')).toBe(true)
       expect(history.some((entry) => entry.text === 'cancelled')).toBe(true)
@@ -429,7 +433,7 @@ describe('pending continue-issue resume provider', () => {
 
     const { unmount } = renderElement(<SessionBootstrapHarness sessionId="sess-cancelled" />)
 
-    await vi.waitFor(() => {
+    await waitFor(() => {
       const history = terminalStore.get('proj').history
       expect(history.some((entry) => entry.text === 'partial assistant output')).toBe(true)
       expect(history.some((entry) => entry.text === 'cancelled')).toBe(true)
@@ -480,7 +484,7 @@ describe('pending continue-issue resume provider', () => {
 
     const { unmount } = renderElement(<SessionBootstrapHarness sessionId="sess-failed" />)
 
-    await vi.waitFor(() => {
+    await waitFor(() => {
       expect(terminalStore.get('proj').history).toEqual([
         { role: 'user', text: 'review this' },
         { role: 'error', text: 'provider run failed' },
@@ -541,7 +545,7 @@ describe('pending continue-issue resume provider', () => {
 
     const { unmount } = renderElement(<SessionBootstrapHarness sessionId="sess-bad-meta" />)
 
-    await vi.waitFor(() => {
+    await waitFor(() => {
       expect(startStreamMock).toHaveBeenCalledWith('proj', 'run-live', false, false)
       expect(terminalStore.get('proj').history).toEqual([
         { role: 'user', text: 'first prompt' },
@@ -614,7 +618,7 @@ describe('pending continue-issue resume provider', () => {
 
     const { unmount } = renderElement(<SessionBootstrapHarness sessionId="sess-prereq" />)
 
-    await vi.waitFor(() => {
+    await waitFor(() => {
       expect(startStreamMock).toHaveBeenCalledWith('proj', 'run-live', false, true)
       expect(terminalStore.get('proj').selectedItems).toEqual([
         { id: 'skill-1', name: 'Checklist', description: 'desc', source: 'db' },
@@ -658,7 +662,7 @@ describe('pending continue-issue resume provider', () => {
 
     const { unmount } = renderElement(<JobBootstrapHarness jobParam="review-live" />)
 
-    await vi.waitFor(() => {
+    await waitFor(() => {
       expect(startStreamMock).toHaveBeenCalledWith('proj', 'review-live', false, true)
       expect(terminalStore.get('proj').history).toEqual([
         { role: 'status', text: expect.stringContaining('review') },
@@ -695,7 +699,7 @@ describe('pending continue-issue resume provider', () => {
 
     const { unmount } = renderElement(<JobBootstrapHarness jobParam="release-live" />)
 
-    await vi.waitFor(() => {
+    await waitFor(() => {
       expect(startStreamMock).toHaveBeenCalledWith('proj', 'release-live', false, true)
       expect(terminalStore.get('proj').history).toEqual([
         { role: 'status', text: expect.stringContaining('release') },
@@ -759,7 +763,7 @@ describe('pending continue-issue resume provider', () => {
 
     await vi.advanceTimersByTimeAsync(1000)
 
-    await vi.waitFor(() => {
+    await waitFor(() => {
       expect(replaceMock).toHaveBeenCalledWith('/project/proj/terminal?job=release-2')
     })
 
@@ -810,7 +814,7 @@ describe('pending continue-issue resume provider', () => {
 
     const redirected = renderElement(<JobBootstrapHarness jobParam="review-redirect" />)
 
-    await vi.waitFor(() => {
+    await waitFor(() => {
       expect(replaceMock).toHaveBeenCalledWith('/project/proj/terminal/sess-redirect')
     })
 
@@ -855,7 +859,7 @@ describe('pending continue-issue resume provider', () => {
 
     const restored = renderElement(<SessionBootstrapHarness sessionId="sess-redirect" />)
 
-    await vi.waitFor(() => {
+    await waitFor(() => {
       const history = terminalStore.get('proj').history
       expect(history.some((entry) => entry.text === 'review log before cancellation')).toBe(true)
       expect(history.some((entry) => entry.text === 'cancelled')).toBe(true)
