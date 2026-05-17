@@ -91,6 +91,7 @@ describe('settings API', () => {
         review_do_not_ship_action: 'fix',
         release_wall_clock_timeout_minutes: '60',
         plain_test_phase_enabled: 'false',
+        provider_fallback_chain: '',
       });
     });
 

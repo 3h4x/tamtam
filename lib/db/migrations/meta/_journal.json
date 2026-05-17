@@ -50,6 +50,13 @@
       "when": 1779038646491,
       "tag": "0006_loud_scream",
       "breakpoints": true
+    },
+    {
+      "idx": 7,
+      "version": "7",
+      "when": 1779056348112,
+      "tag": "0007_slimy_captain_stacy",
+      "breakpoints": true
     }
   ]
 }

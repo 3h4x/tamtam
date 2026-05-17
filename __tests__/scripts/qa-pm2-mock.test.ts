@@ -134,9 +134,8 @@ describe.concurrent('scripts/qa-mocks/pm2', () => {
       const deleted = runPm2(['delete', 'deleted-monitor'], statePath, dir);
       expect(deleted.status).toBe(0);
       await vi.waitFor(() => expect(readFileSync(marker, 'utf-8')).toBe('term'), { timeout: 2000, interval: 5 });
-      await new Promise((resolvePromise) => setTimeout(resolvePromise, 100));
+      await vi.waitFor(() => expect(readStateEntry(statePath, 'deleted-monitor')).toBeUndefined(), { timeout: 2000, interval: 5 });
 
-      expect(readStateEntry(statePath, 'deleted-monitor')).toBeUndefined();
       const jlist = runPm2(['jlist'], statePath, dir);
       expect(jlist.status).toBe(0);
       expect(JSON.parse(jlist.stdout)).toEqual([]);

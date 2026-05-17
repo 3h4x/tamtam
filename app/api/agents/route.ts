@@ -12,6 +12,7 @@ import { parseOptionalKnownModelInput } from '@/lib/agents/model-aliases';
 import { parseOptionalAgentScheduleInput } from '@/lib/scheduling/agent-schedule';
 import { isCliProvider } from '@/lib/usage/cli-providers';
 import { parsePrerequisiteCommandInput, resolveAgentPrerequisiteCommand } from '@/lib/agents/issue-cruncher';
+import { isBuiltInRecommendedAgent } from '@/lib/agents/recommended-agents';
 
 const ALL_FILE_AGENTS_TTL_MS = 10_000;
 let _allFileAgentsCache: { agents: FileAgent[]; time: number } | null = null;
@@ -66,7 +67,7 @@ export async function GET(request: NextRequest) {
     if (projPath) {
       for (const fa of scanFileAgents(projPath, project)) {
         if (name && fa.name !== name) continue;
-        if (!dbKeys.has(`${fa.project}:${canonicalAgentNameKey(fa.name)}`)) normalized.push(withEffectivePrerequisite(fa));
+        if (!dbKeys.has(`${fa.project}:${canonicalAgentNameKey(fa.name)}`)) normalized.push({ ...withEffectivePrerequisite(fa), fallbackEnabled: false });
       }
     }
   } else {
@@ -75,7 +76,7 @@ export async function GET(request: NextRequest) {
     // for 10 s to avoid filesystem hits on every request.
     for (const fa of getAllFileAgentsCached()) {
       if (name && fa.name !== name) continue;
-      if (!dbKeys.has(`${fa.project}:${canonicalAgentNameKey(fa.name)}`)) normalized.push(withEffectivePrerequisite(fa));
+      if (!dbKeys.has(`${fa.project}:${canonicalAgentNameKey(fa.name)}`)) normalized.push({ ...withEffectivePrerequisite(fa), fallbackEnabled: false });
     }
   }
 
@@ -135,6 +136,9 @@ export async function POST(request: NextRequest) {
 
   const now = Date.now() / 1000;
   const id = `agent-${Date.now()}`;
+  const fallbackEnabled = typeof body.fallbackEnabled === 'boolean'
+    ? body.fallbackEnabled
+    : isBuiltInRecommendedAgent(agentName);
   const agent = {
     id,
     name: agentName,
@@ -147,6 +151,7 @@ export async function POST(request: NextRequest) {
     runner: runner || 'pm2',
     enabled: enabled !== false,
     provider,
+    fallbackEnabled,
     prerequisiteCommand,
     createdAt: now,
     updatedAt: now,

@@ -149,6 +149,7 @@ export async function PATCH(
   if (body.runner !== undefined) updates.runner = body.runner;
   if (body.enabled !== undefined) updates.enabled = body.enabled;
   if (provider !== undefined) updates.provider = provider;
+  if (body.fallbackEnabled !== undefined) updates.fallbackEnabled = body.fallbackEnabled === true;
   if (body.prerequisiteCommand !== undefined) {
     updates.prerequisiteCommand = parsePrerequisiteCommandInput(body.prerequisiteCommand) ?? '';
   }

@@ -10,6 +10,11 @@ export interface RecommendedAgentTemplate {
   skillIds: string[]
   essential?: boolean
   featured?: boolean
+  fallbackEnabled?: boolean
+}
+
+export function isBuiltInRecommendedAgent(name: string): boolean {
+  return RECOMMENDED_AGENTS.some((agent) => agent.name.toLowerCase() === name.trim().toLowerCase());
 }
 
 // Built-in recommended agents are a product surface, not page-local UI data.
@@ -25,6 +30,7 @@ export const RECOMMENDED_AGENTS: RecommendedAgentTemplate[] = [
     prompt: '',
     skillIds: [ISSUE_CRUNCHER_SKILL_ID],
     featured: true,
+    fallbackEnabled: true,
   },
   {
     name: 'security-review',
@@ -34,6 +40,7 @@ export const RECOMMENDED_AGENTS: RecommendedAgentTemplate[] = [
     runner: 'pm2',
     prompt: '',
     skillIds: ['agent-security-review'],
+    fallbackEnabled: true,
   },
   {
     name: 'dependency-check',
@@ -43,6 +50,7 @@ export const RECOMMENDED_AGENTS: RecommendedAgentTemplate[] = [
     runner: 'pm2',
     prompt: '',
     skillIds: ['agent-dependency-check'],
+    fallbackEnabled: true,
   },
   {
     name: 'ci-monitor',
@@ -52,6 +60,7 @@ export const RECOMMENDED_AGENTS: RecommendedAgentTemplate[] = [
     runner: 'pm2',
     prompt: '',
     skillIds: ['agent-ci-monitor'],
+    fallbackEnabled: true,
   },
   {
     name: 'release-ready',
@@ -61,6 +70,7 @@ export const RECOMMENDED_AGENTS: RecommendedAgentTemplate[] = [
     runner: 'pm2',
     prompt: '',
     skillIds: ['agent-release-ready'],
+    fallbackEnabled: true,
   },
   {
     name: 'tests',
@@ -70,6 +80,7 @@ export const RECOMMENDED_AGENTS: RecommendedAgentTemplate[] = [
     runner: 'pm2',
     prompt: '',
     skillIds: ['agent-tests'],
+    fallbackEnabled: true,
   },
   {
     name: 'cto',
@@ -79,6 +90,7 @@ export const RECOMMENDED_AGENTS: RecommendedAgentTemplate[] = [
     runner: 'pm2',
     prompt: '',
     skillIds: ['agent-cto'],
+    fallbackEnabled: true,
   },
   {
     name: 'gha-audit',
@@ -88,6 +100,7 @@ export const RECOMMENDED_AGENTS: RecommendedAgentTemplate[] = [
     runner: 'pm2',
     prompt: '',
     skillIds: ['agent-gha-audit'],
+    fallbackEnabled: true,
   },
   {
     name: 'readme-sync',
@@ -97,6 +110,7 @@ export const RECOMMENDED_AGENTS: RecommendedAgentTemplate[] = [
     runner: 'pm2',
     prompt: '',
     skillIds: ['agent-readme-sync'],
+    fallbackEnabled: true,
   },
   {
     name: 'docs-claude',
@@ -107,6 +121,7 @@ export const RECOMMENDED_AGENTS: RecommendedAgentTemplate[] = [
     prompt: '',
     skillIds: ['agent-docs-claude'],
     essential: true,
+    fallbackEnabled: true,
   },
   {
     name: 'qa',
@@ -117,6 +132,7 @@ export const RECOMMENDED_AGENTS: RecommendedAgentTemplate[] = [
     prompt: '',
     skillIds: ['agent-qa'],
     featured: true,
+    fallbackEnabled: true,
   },
   {
     name: 'manage-agents',
@@ -127,5 +143,6 @@ export const RECOMMENDED_AGENTS: RecommendedAgentTemplate[] = [
     prompt: '',
     skillIds: ['agent-manage-agents'],
     featured: true,
+    fallbackEnabled: true,
   },
 ]

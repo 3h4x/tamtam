@@ -49,11 +49,14 @@ async function applyDdl(handle: TestDbHandle): Promise<void> {
       enabled boolean DEFAULT false,
       runner text,
       skill_ids text,
+      doc_paths text NOT NULL DEFAULT '[]',
       provider text,
+      fallback_enabled boolean NOT NULL DEFAULT false,
       prerequisite_command text,
       timeout_seconds integer,
       template_id text,
-      created_at double precision
+      created_at double precision,
+      updated_at double precision
     )
   `));
   await handle.db.execute(sql.raw(`

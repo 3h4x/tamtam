@@ -159,9 +159,33 @@ async function determineReviewScope(projPath: string): Promise<ReviewScope> {
     return { ok: false, detail: 'No non-.tamtam changes to review' };
   }
 
+  // Branches created locally by issue-cruncher have no upstream yet, so
+  // `@{u}..HEAD` exits non-zero and we'd misreport "nothing to review".
+  // Mirror the fallback in `release-state.hasLocalCommitsAhead`: when the
+  // upstream-relative count is unresolvable, compare against the repo's
+  // default branch instead. `start-push` will run `--set-upstream` on the
+  // actual push, so a branch with commits on top of default but no
+  // upstream is still legitimately reviewable.
   const aheadR = await exec('git', ['-C', projPath, 'rev-list', '--count', '@{u}..HEAD'], { timeout: 5000 });
-  const ahead = parseInt(aheadR?.stdout?.trim() ?? '', 10);
-  if (aheadR?.exitCode === 0 && Number.isFinite(ahead) && ahead > 0) {
+  let ahead = parseInt(aheadR?.stdout?.trim() ?? '', 10);
+  let aheadOk = aheadR?.exitCode === 0 && Number.isFinite(ahead);
+  if (!aheadOk) {
+    try {
+      const { getDefaultBranchSync } = await import('@/lib/git/git-branch');
+      const defBranch = getDefaultBranchSync(projPath);
+      if (defBranch) {
+        const fallbackR = await exec('git', ['-C', projPath, 'rev-list', '--count', `${defBranch}..HEAD`], { timeout: 5000 });
+        const fallbackAhead = parseInt(fallbackR?.stdout?.trim() ?? '', 10);
+        if (fallbackR?.exitCode === 0 && Number.isFinite(fallbackAhead)) {
+          ahead = fallbackAhead;
+          aheadOk = true;
+        }
+      }
+    } catch {
+      /* fall through — treat as not-ahead */
+    }
+  }
+  if (aheadOk && ahead > 0) {
     // Incremental review: narrow scope to commits since last LGTM if the
     // refs/tamtam/reviewed/<branch> ref still points at an ancestor of HEAD.
     // Falls back to @{u}..HEAD if the ref is missing, stale, or disabled.

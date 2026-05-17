@@ -207,6 +207,9 @@ Configuration for scheduled automated agents.
 | `schedule` | TEXT | — | nullable; e.g. "1h", "30m"; null = manual only |
 | `runner` | TEXT | `'pm2'` | Compatibility field retained for existing rows; new schedules are graphile-worker backed regardless of value |
 | `enabled` | INTEGER | `true` | Boolean |
+| `provider` | TEXT | — | nullable; optional required provider for the first attempt |
+| `fallbackEnabled` | BOOLEAN | `false` | Enables one transient provider fallback retry for this agent when `provider_fallback_chain` has a next provider |
+| `prerequisiteCommand` | TEXT | — | nullable; optional shell command run before prompt composition |
 | `createdAt` | REAL | — | NOT NULL |
 | `updatedAt` | REAL | — | NOT NULL |
 

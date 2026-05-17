@@ -72,4 +72,48 @@ describe('startInProcessAgentJob', () => {
     expect(savedPids).toContain(2468);
     expect(markDone).toHaveBeenCalledWith(expect.objectContaining({ id: 'job-1', pid: 2468 }), 0);
   });
+
+  it('retries once with the fallback provider after a transient failure', async () => {
+    runSubprocess
+      .mockImplementationOnce(async (params: { onSpawn?: (pid: number) => void }) => {
+        params.onSpawn?.(1111);
+        return { pid: 1111, exitCode: 1, signal: null, outputTail: 'HTTP 503 service unavailable' };
+      })
+      .mockImplementationOnce(async (params: { onSpawn?: (pid: number) => void }) => {
+        params.onSpawn?.(2222);
+        return { pid: 2222, exitCode: 0, signal: null, outputTail: 'ok' };
+      });
+    const { startInProcessAgentJob } = await import('@/lib/jobs/inline-agent');
+
+    const pid = await startInProcessAgentJob('job-1', 'codex-cli --flag', 'prompt', tempDir, {
+      fallback: {
+        provider: 'claude',
+        command: 'claude-cli --flag',
+      },
+    });
+
+    expect(pid).toBe(2222);
+    expect(runSubprocess).toHaveBeenCalledTimes(2);
+    expect(runSubprocess.mock.calls[0][0]).toMatchObject({ cmd: 'codex-cli' });
+    expect(runSubprocess.mock.calls[1][0]).toMatchObject({ cmd: 'claude-cli' });
+    expect(jobsCache.get('job-1')?.provider).toBe('claude');
+    expect(markDone).toHaveBeenCalledWith(expect.objectContaining({ id: 'job-1' }), 0);
+  });
+
+  it('does not retry more than once when the fallback also fails', async () => {
+    runSubprocess
+      .mockResolvedValueOnce({ pid: 1111, exitCode: 1, signal: null, outputTail: 'rate limit exceeded' })
+      .mockResolvedValueOnce({ pid: 2222, exitCode: 1, signal: null, outputTail: 'HTTP 503 service unavailable' });
+    const { startInProcessAgentJob } = await import('@/lib/jobs/inline-agent');
+
+    await startInProcessAgentJob('job-1', 'codex-cli --flag', 'prompt', tempDir, {
+      fallback: {
+        provider: 'claude',
+        command: 'claude-cli --flag',
+      },
+    });
+
+    expect(runSubprocess).toHaveBeenCalledTimes(2);
+    expect(markDone).toHaveBeenCalledWith(expect.objectContaining({ id: 'job-1' }), 1);
+  });
 });

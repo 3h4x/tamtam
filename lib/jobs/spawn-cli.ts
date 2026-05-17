@@ -27,6 +27,7 @@ export interface RunSubprocessResult {
   pid: number;
   exitCode: number;
   signal: NodeJS.Signals | null;
+  outputTail?: string;
 }
 
 function quoteArg(a: string): string {
@@ -37,9 +38,12 @@ export async function runSubprocess(params: RunSubprocessParams): Promise<RunSub
   const { jobId: _jobId, cmd, cmdArgs, promptPath, logPath, env, cwd, abortSignal, onSpawn } = params;
 
   const logFd = openSync(/*turbopackIgnore: true*/ logPath, 'a');
+  let outputTail = '';
   const writeLog = (chunk: Buffer | string) => {
     try {
-      writeSync(logFd, redactSecrets(Buffer.isBuffer(chunk) ? chunk.toString('utf8') : String(chunk)));
+      const redacted = redactSecrets(Buffer.isBuffer(chunk) ? chunk.toString('utf8') : String(chunk));
+      outputTail = (outputTail + redacted).slice(-64 * 1024);
+      writeSync(logFd, redacted);
     } catch { /* noop */ }
   };
   const logLine = (s: string) => writeLog(s.endsWith('\n') ? s : `${s}\n`);
@@ -71,7 +75,7 @@ export async function runSubprocess(params: RunSubprocessParams): Promise<RunSub
       });
     } catch (err) {
       logLine(`[tamtam] spawn failed: ${(err as Error).message}`);
-      finish({ pid: 0, exitCode: 127, signal: null });
+      finish({ pid: 0, exitCode: 127, signal: null, outputTail });
       return;
     }
 
@@ -125,7 +129,7 @@ export async function runSubprocess(params: RunSubprocessParams): Promise<RunSub
       }
       logLine(`[tamtam] exited with code ${rc}${signal ? ` (signal ${signal})` : ''}`);
       if (abortSignal) abortSignal.removeEventListener('abort', onAbort);
-      finish({ pid, exitCode: rc, signal });
+      finish({ pid, exitCode: rc, signal, outputTail });
     });
   });
 }

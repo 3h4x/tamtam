@@ -90,6 +90,7 @@ export async function PATCH(request: NextRequest) {
     if (fields.runner !== undefined) updates.runner = fields.runner;
     if (fields.enabled !== undefined) updates.enabled = fields.enabled;
     if (provider !== undefined) updates.provider = provider;
+    if (fields.fallbackEnabled !== undefined) updates.fallbackEnabled = fields.fallbackEnabled === true;
     if (fields.prerequisiteCommand !== undefined) updates.prerequisiteCommand = prerequisiteCommand ?? '';
 
     await db.update(schema.agents).set(updates).where(eq(schema.agents.id, existing.id)).execute();
