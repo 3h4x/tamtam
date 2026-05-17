@@ -1,6 +1,6 @@
 'use client'
 
-import { useEffect, useId, useState } from 'react'
+import { useEffect, useId, useRef, useState } from 'react'
 import { INPUT_CLASS } from '@/components/settings/constants'
 import {
   parseTrustedGithubUsers,
@@ -18,6 +18,7 @@ export function TrustedGithubUsersField({
   onValidityChange: (error: string | null) => void
 }) {
   const fieldId = useId()
+  const hasMountedRef = useRef(false)
   const [users, setUsers] = useState<string[]>(() => parseTrustedGithubUsers(value))
   const validationError = validateTrustedGithubUsersEntries(users)
 
@@ -29,6 +30,11 @@ export function TrustedGithubUsersField({
   }
 
   useEffect(() => {
+    if (!hasMountedRef.current) {
+      hasMountedRef.current = true
+      return
+    }
+
     setUsers((prev) => {
       // Only reseed local rows from `value` when the parent's canonical
       // representation actually diverged from what we already have. Otherwise
