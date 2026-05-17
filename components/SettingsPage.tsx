@@ -79,6 +79,7 @@ interface SettingsMap {
   notification_throttle_window_seconds: string
   notification_throttle_overrides: string
   budget_block_runs_enabled: string
+  budget_block_on_weekly_pace_enabled: string
   budget_subscription_providers: string
   budget_block_at_pct: string
   budget_warn_at_pct: string
@@ -121,6 +122,7 @@ const SETTINGS_DEFAULTS: SettingsMap = {
   db_backup_enabled: 'true',
   db_backup_interval_minutes: '15',
   budget_block_runs_enabled: 'false',
+  budget_block_on_weekly_pace_enabled: 'true',
   budget_subscription_providers: 'claude,codex',
   budget_block_at_pct: '95',
   budget_warn_at_pct: '80',

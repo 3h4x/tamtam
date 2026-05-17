@@ -7,6 +7,12 @@ export interface PickCliOptions {
   snapshots: Map<CliProvider, QuotaSnapshot | null>;
   budgetBlockAtPct: number;
   blockEnabled: boolean;
+  /** When true, the hard gate includes 7-day pace utilization too — so a
+   *  provider at 99% weekly pace is treated as blocked even if its 5h
+   *  burst is fine. Defaults to false to preserve historical "manual
+   *  starts always go through" behavior; opt in via the
+   *  `budget_block_on_weekly_pace_enabled` setting. */
+  blockOnWeeklyPace?: boolean;
   requestedModel?: ModelTier | null;
 }
 
@@ -28,13 +34,24 @@ function hasQuotaFetcher(provider: CliProvider): boolean {
 /**
  * Compute the hard-gate utilization (%) for a single provider snapshot.
  * This is the only signal that can 429 a manual/root start:
- *   - 5h rolling window utilization
+ *   - 5h rolling window utilization (immediate burst quota)
  *   - credits/extra utilization, when the provider exposes a credits pool
+ *
+ * The 7d window is deliberately not a hard gate for manual/root starts. It is
+ * used for provider preference and scheduled-work throttling, where pacing the
+ * weekly quota is useful without blocking explicit user actions for days.
  */
-export function hardGateUtilizationFor(snapshot: QuotaSnapshot | null): number {
+export function hardGateUtilizationFor(
+  snapshot: QuotaSnapshot | null,
+  options: { includeWeekly?: boolean } = {},
+): number {
   if (!snapshot) return 0;
   const fiveHour = finiteOrZero(snapshot.fiveHour?.utilization);
   const credits = finiteOrZero(snapshot.extra?.utilization);
+  if (options.includeWeekly) {
+    const sevenDay = finiteOrZero(snapshot.sevenDay?.utilization);
+    return Math.max(fiveHour, sevenDay, credits);
+  }
   return Math.max(fiveHour, credits);
 }
 
@@ -79,7 +96,7 @@ export function effectiveUtilizationFor(
  * multi-provider budget verdicts after warm/fetch attempts.
  */
 export function pickCliProvider(opts: PickCliOptions): PickCliResult {
-  const { enabled, snapshots, budgetBlockAtPct, blockEnabled, requestedModel } = opts;
+  const { enabled, snapshots, budgetBlockAtPct, blockEnabled, blockOnWeeklyPace, requestedModel } = opts;
   if (enabled.length === 0) {
     return { provider: null, reason: 'no_enabled_providers' };
   }
@@ -94,7 +111,7 @@ export function pickCliProvider(opts: PickCliOptions): PickCliResult {
     const missingKnownQuotaAware =
       !snapshot && hasKnownQuotaAwareProvider && hasQuotaFetcher(provider);
     if (blockEnabled && missingKnownQuotaAware) continue;
-    const hardGateUtilization = hardGateUtilizationFor(snapshot);
+    const hardGateUtilization = hardGateUtilizationFor(snapshot, { includeWeekly: blockOnWeeklyPace });
     if (blockEnabled && hardGateUtilization >= budgetBlockAtPct) continue;
     const utilization = missingKnownQuotaAware
       ? 100

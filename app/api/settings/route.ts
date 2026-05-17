@@ -193,6 +193,7 @@ const SETTING_KEYS = [
   'notification_throttle_window_seconds',
   'notification_throttle_overrides',
   'budget_block_runs_enabled',
+  'budget_block_on_weekly_pace_enabled',
   'budget_subscription_providers',
   'budget_block_at_pct',
   'budget_warn_at_pct',
@@ -340,6 +341,8 @@ function validateAndSerializeSettingValue(
     key === 'retrieval_enabled' ||
     key === 'retrieval_manage_ollama' ||
     key === 'project_sweep_enabled' ||
+    key === 'budget_block_runs_enabled' ||
+    key === 'budget_block_on_weekly_pace_enabled' ||
     key === 'legacy_completion_hook_release_after_run_enabled' ||
     key === 'legacy_completion_hook_release_after_fix_ci_enabled' ||
     key === 'legacy_completion_hook_auto_resume_enabled' ||

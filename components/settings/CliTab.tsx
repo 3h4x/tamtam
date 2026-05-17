@@ -51,6 +51,7 @@ export interface CliTabSettings {
   permission_mode: string
   base_prompt: string
   budget_block_runs_enabled: string
+  budget_block_on_weekly_pace_enabled: string
   budget_block_at_pct: string
   budget_warn_at_pct: string
   [key: string]: string
@@ -86,6 +87,7 @@ export function CliTab({
   const enabled: CliProvider[] = parsedEnabled.length > 0 ? parsedEnabled : ['claude']
   const enabledSet = new Set<CliProvider>(enabled)
   const blockEnabled = settings.budget_block_runs_enabled === 'true'
+  const weeklyPaceEnabled = settings.budget_block_on_weekly_pace_enabled !== 'false'
   const warnAt = parseInt(settings.budget_warn_at_pct || '80', 10) || 80
   const blockAt = parseInt(settings.budget_block_at_pct || '95', 10) || 95
 
@@ -310,6 +312,19 @@ export function CliTab({
             <div className="flex-1 min-w-0 flex items-baseline gap-1.5 flex-wrap">
               <span className="font-medium text-sm text-text-primary shrink-0">Skip CLIs over budget</span>
               <span className="text-xs text-text-tertiary">If every enabled CLI is over budget the run is rejected with a 429.</span>
+            </div>
+          </label>
+          <label className="flex items-center gap-2.5 cursor-pointer">
+            <input
+              type="checkbox"
+              checked={weeklyPaceEnabled}
+              onChange={(e) => onChange('budget_block_on_weekly_pace_enabled', e.target.checked ? 'true' : 'false')}
+              className="w-4 h-4 accent-accent rounded shrink-0 cursor-pointer"
+              disabled={!blockEnabled}
+            />
+            <div className="flex-1 min-w-0 flex items-baseline gap-1.5 flex-wrap">
+              <span className="font-medium text-sm text-text-primary shrink-0">Include weekly pace</span>
+              <span className="text-xs text-text-tertiary">Treat the 7-day pace window as part of the hard gate.</span>
             </div>
           </label>
           <div className="grid grid-cols-2 gap-4">

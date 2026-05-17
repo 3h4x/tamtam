@@ -10,6 +10,7 @@ import {
 
 export interface BudgetSettings {
   budget_block_runs_enabled: string
+  budget_block_on_weekly_pace_enabled: string
   budget_subscription_providers: string
   budget_block_at_pct: string
   budget_warn_at_pct: string
@@ -33,6 +34,7 @@ export function BudgetTab({
   onChange: (key: string, value: string) => void
 }) {
   const enabled = settings.budget_block_runs_enabled === 'true'
+  const weeklyPaceEnabled = settings.budget_block_on_weekly_pace_enabled !== 'false'
   const providers = normalizeBudgetSubscriptionProviders(settings.budget_subscription_providers)
   const warnAt = parseInt(settings.budget_warn_at_pct || '80', 10) || 80
   const blockAt = parseInt(settings.budget_block_at_pct || '95', 10) || 95
@@ -97,6 +99,22 @@ export function BudgetTab({
               <span className="font-medium text-sm text-text-primary shrink-0">Block runs over budget</span>
               <span className="text-xs text-text-tertiary">
                 Refuse agent runs, terminal runs, and pipeline once the 5-hour window crosses the block threshold.
+              </span>
+            </div>
+          </label>
+
+          <label className="flex items-center gap-2.5 py-2 px-1 -mx-1 rounded hover:bg-bg-tertiary/40 cursor-pointer transition-colors">
+            <input
+              type="checkbox"
+              checked={weeklyPaceEnabled}
+              onChange={(e) => onChange('budget_block_on_weekly_pace_enabled', e.target.checked ? 'true' : 'false')}
+              className="w-4 h-4 accent-accent rounded shrink-0 cursor-pointer"
+              disabled={!enabled}
+            />
+            <div className="flex-1 min-w-0 flex items-baseline gap-1.5 flex-wrap">
+              <span className="font-medium text-sm text-text-primary shrink-0">Include weekly pace</span>
+              <span className="text-xs text-text-tertiary">
+                Also refuse runs when 7-day utilization crosses the block threshold.
               </span>
             </div>
           </label>
