@@ -86,6 +86,13 @@ export {
 } from './client/jobs'
 
 export {
+  fetchAutomationQueue,
+  retryAutomationQueue,
+  cancelAutomationQueueItem,
+} from './client/automation-queue'
+export type { AutomationQueueItem, RetryAutomationQueueResult } from './client/automation-queue'
+
+export {
   fetchAgents,
   createAgent,
   updateAgent,

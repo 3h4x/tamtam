@@ -3,6 +3,9 @@ import { beforeEach, describe, expect, it, vi } from 'vitest';
 describe('recovery-drain', () => {
   beforeEach(() => {
     vi.resetModules();
+    (globalThis as typeof globalThis & {
+      __tamtamProjectRecoveryDrains?: Map<string, Promise<void>>;
+    }).__tamtamProjectRecoveryDrains?.clear();
   });
 
   it('does not replay queued agents while a release is still pending', async () => {
@@ -66,6 +69,70 @@ describe('recovery-drain', () => {
 
     expect(order).toEqual(['pending', 'lock', 'agent']);
     expect(drainQueuedAgentRunsForProject).toHaveBeenCalledWith('proj');
+  });
+
+  it('shares active project drains through globalThis across module reloads', async () => {
+    let pending = true;
+    let resolvePending!: () => void;
+    const order: string[] = [];
+    const drainPendingRelease = vi.fn().mockImplementation(async () => {
+      order.push('pending:start');
+      await new Promise<void>((resolve) => {
+        resolvePending = resolve;
+      });
+      pending = false;
+      order.push('pending:end');
+    });
+    const getPendingRelease = vi.fn().mockImplementation(() => pending);
+    const getLock = vi.fn().mockImplementation(() => {
+      order.push('lock');
+      return null;
+    });
+    const drainQueuedAgentRunsForProject = vi.fn().mockImplementation(async () => {
+      order.push('agent');
+    });
+
+    const registerMocks = () => {
+      vi.doMock('@/lib/pipeline/pending-release', () => ({
+        drainPendingRelease,
+        getPendingRelease,
+        listPendingReleaseProjects: vi.fn().mockReturnValue([]),
+      }));
+      vi.doMock('@/lib/pipeline/pipeline-lock', () => ({
+        getLock,
+      }));
+      vi.doMock('@/lib/agents/queued-agent-runs', () => ({
+        drainQueuedAgentRunsForProject,
+        listQueuedAgentRunProjects: vi.fn().mockReturnValue([]),
+      }));
+    };
+
+    registerMocks();
+    const firstMod = await import('@/lib/pipeline/recovery-drain');
+    const first = firstMod.drainProjectRecoveryWork('proj');
+
+    await vi.waitFor(() => {
+      expect(drainPendingRelease).toHaveBeenCalledTimes(1);
+    });
+
+    vi.resetModules();
+    registerMocks();
+    const secondMod = await import('@/lib/pipeline/recovery-drain');
+    const secondSettled = vi.fn();
+    const second = secondMod.drainProjectRecoveryWork('proj').then(secondSettled);
+
+    await new Promise((resolve) => setTimeout(resolve, 10));
+    expect(secondSettled).not.toHaveBeenCalled();
+    expect(drainPendingRelease).toHaveBeenCalledTimes(1);
+    expect(drainQueuedAgentRunsForProject).not.toHaveBeenCalled();
+
+    resolvePending();
+    await Promise.all([first, second]);
+
+    expect(secondSettled).toHaveBeenCalledTimes(1);
+    expect(drainPendingRelease).toHaveBeenCalledTimes(1);
+    expect(drainQueuedAgentRunsForProject).toHaveBeenCalledTimes(1);
+    expect(order).toEqual(['pending:start', 'pending:end', 'lock', 'agent']);
   });
 
   it('does not replay queued agents while the pipeline lock is held', async () => {
