@@ -9,7 +9,7 @@ vi.mock('graphile-worker', () => ({
   quickAddJob: quickAddJobMock,
 }));
 
-import { seedAgentCrons } from '@/lib/workflows/cron/seed-agent-crons';
+import { seedAgentCrons, type ExistingAgentCronJob } from '@/lib/workflows/cron/seed-agent-crons';
 import type { AgentInput } from '@/lib/scheduling/agent-types';
 
 function makeAgent(overrides: Partial<AgentInput> = {}): AgentInput {
@@ -24,15 +24,31 @@ function makeAgent(overrides: Partial<AgentInput> = {}): AgentInput {
   } as AgentInput;
 }
 
+function existingJob(runAt: number | Date, overrides: Partial<ExistingAgentCronJob> = {}): ExistingAgentCronJob {
+  return {
+    runAt: runAt instanceof Date ? runAt : new Date(runAt),
+    attempts: 0,
+    maxAttempts: 5,
+    lockedAt: null,
+    isAvailable: true,
+    ...overrides,
+  };
+}
+
 describe('seedAgentCrons', () => {
   beforeEach(() => {
     quickAddJobMock.mockClear().mockResolvedValue(undefined);
   });
 
+  // Default: no preserved rows. Tests that care about preservation pass
+  // their own stub.
+  const noExisting = async () => new Map<string, ExistingAgentCronJob>();
+
   it('enqueues one agent-cron job per enabled agent with stable jobKey', async () => {
     const r = await seedAgentCrons({
       connectionString: 'postgres://stub',
       loadEnabledAgents: async () => [makeAgent({ id: 'a1' }), makeAgent({ id: 'a2' })],
+      loadExistingRunAts: noExisting,
     });
     expect(r.enqueued).toBe(2);
     expect(r.skipped).toEqual([]);
@@ -56,6 +72,7 @@ describe('seedAgentCrons', () => {
         makeAgent({ id: 'live' }),
         makeAgent({ id: 'dead', enabled: false }),
       ],
+      loadExistingRunAts: noExisting,
     });
     expect(r.enqueued).toBe(1);
     expect(r.skipped).toEqual([{ agentId: 'dead', reason: 'disabled' }]);
@@ -65,6 +82,7 @@ describe('seedAgentCrons', () => {
     const r = await seedAgentCrons({
       connectionString: 'postgres://stub',
       loadEnabledAgents: async () => [makeAgent({ id: 'no-sched', schedule: null })],
+      loadExistingRunAts: noExisting,
     });
     expect(r.enqueued).toBe(0);
     expect(r.skipped).toEqual([{ agentId: 'no-sched', reason: 'no schedule' }]);
@@ -75,6 +93,7 @@ describe('seedAgentCrons', () => {
     const r = await seedAgentCrons({
       connectionString: 'postgres://stub',
       loadEnabledAgents: async () => [makeAgent()],
+      loadExistingRunAts: noExisting,
     });
     expect(r.enqueued).toBe(0);
     expect(r.skipped[0].reason).toMatch(/enqueue failed: pg connection refused/);
@@ -95,5 +114,147 @@ describe('seedAgentCrons', () => {
       if (prevDb) process.env.DATABASE_URL = prevDb;
       if (prevWf) process.env.WORKFLOW_POSTGRES_URL = prevWf;
     }
+  });
+
+  describe('run_at preservation across restarts', () => {
+    it('preserves an existing future run_at that is not later than the freshly-computed one', async () => {
+      const T0 = 1_700_000_000_000;
+      // existing row already enqueued at T0 + 20min, schedule "30m" so
+      // fresh computation at T0 + 5min would be T0 + 35min.
+      const existing = new Map([['agent-cron-a1', existingJob(T0 + 20 * 60_000)]]);
+      const r = await seedAgentCrons({
+        connectionString: 'postgres://stub',
+        loadEnabledAgents: async () => [makeAgent({ id: 'a1', schedule: '30m' })],
+        loadExistingRunAts: async () => existing,
+        now: () => T0 + 5 * 60_000,
+      });
+      expect(r.enqueued).toBe(0);
+      expect(r.preserved).toBe(1);
+      expect(quickAddJobMock).not.toHaveBeenCalled();
+    });
+
+    it('overwrites an existing past run_at', async () => {
+      const T0 = 1_700_000_000_000;
+      // existing row's run_at already in the past — fire was missed
+      // (e.g. server was down). Replace it with a fresh future fire.
+      const existing = new Map([['agent-cron-a1', existingJob(T0 - 60_000)]]);
+      const r = await seedAgentCrons({
+        connectionString: 'postgres://stub',
+        loadEnabledAgents: async () => [makeAgent({ id: 'a1', schedule: '30m' })],
+        loadExistingRunAts: async () => existing,
+        now: () => T0,
+      });
+      expect(r.enqueued).toBe(1);
+      expect(r.preserved).toBe(0);
+      const call = quickAddJobMock.mock.calls[0] as unknown as [unknown, string, unknown, { runAt: Date }];
+      expect(call[3].runAt.getTime()).toBe(T0 + 30 * 60_000);
+    });
+
+    it('enqueues fresh when no existing row exists', async () => {
+      const T0 = 1_700_000_000_000;
+      const r = await seedAgentCrons({
+        connectionString: 'postgres://stub',
+        loadEnabledAgents: async () => [makeAgent({ id: 'a1', schedule: '30m' })],
+        loadExistingRunAts: async () => new Map(),
+        now: () => T0,
+      });
+      expect(r.enqueued).toBe(1);
+      expect(r.preserved).toBe(0);
+    });
+
+    it('overwrites an existing run_at that is much further out than the fresh one (e.g. orphan from old buggy compute)', async () => {
+      const T0 = 1_700_000_000_000;
+      // existing row a year in the future — newer compute is closer.
+      const existing = new Map([['agent-cron-a1', existingJob(T0 + 365 * 86_400_000)]]);
+      const r = await seedAgentCrons({
+        connectionString: 'postgres://stub',
+        loadEnabledAgents: async () => [makeAgent({ id: 'a1', schedule: '30m' })],
+        loadExistingRunAts: async () => existing,
+        now: () => T0,
+      });
+      expect(r.enqueued).toBe(1);
+      expect(r.preserved).toBe(0);
+    });
+
+    it('overwrites an existing future run_at when the queued row has retry state', async () => {
+      const T0 = 1_700_000_000_000;
+      const existing = new Map([[
+        'agent-cron-a1',
+        existingJob(T0 + 20 * 60_000, { attempts: 1 }),
+      ]]);
+      const r = await seedAgentCrons({
+        connectionString: 'postgres://stub',
+        loadEnabledAgents: async () => [makeAgent({ id: 'a1', schedule: '30m' })],
+        loadExistingRunAts: async () => existing,
+        now: () => T0 + 5 * 60_000,
+      });
+      expect(r.enqueued).toBe(1);
+      expect(r.preserved).toBe(0);
+      expect(quickAddJobMock).toHaveBeenCalledTimes(1);
+      const call = quickAddJobMock.mock.calls[0] as unknown as [unknown, string, unknown, { runAt: Date; jobKeyMode: string }];
+      expect(call[3].jobKeyMode).toBe('replace');
+      expect(call[3].runAt.getTime()).toBe(T0 + 35 * 60_000);
+    });
+
+    it('overwrites an existing future run_at when the queued row is exhausted', async () => {
+      const T0 = 1_700_000_000_000;
+      const existing = new Map([[
+        'agent-cron-a1',
+        existingJob(T0 + 20 * 60_000, {
+          attempts: 5,
+          maxAttempts: 5,
+          isAvailable: false,
+        }),
+      ]]);
+      const r = await seedAgentCrons({
+        connectionString: 'postgres://stub',
+        loadEnabledAgents: async () => [makeAgent({ id: 'a1', schedule: '30m' })],
+        loadExistingRunAts: async () => existing,
+        now: () => T0 + 5 * 60_000,
+      });
+      expect(r.enqueued).toBe(1);
+      expect(r.preserved).toBe(0);
+      expect(quickAddJobMock).toHaveBeenCalledTimes(1);
+    });
+
+    it('does not push the run_at forward across simulated restarts', async () => {
+      // Reproduces the original symptom: rapid boot loop with 30m
+      // schedule. The first seed sets run_at; subsequent seeds within
+      // the 30m window must preserve it instead of overwriting.
+      const T0 = 1_700_000_000_000;
+      let queued: Date | null = null;
+      quickAddJobMock.mockImplementation(async (_c, _t, _p, opts: { runAt: Date }) => {
+        queued = opts.runAt;
+      });
+      const agents = [makeAgent({ id: 'a1', schedule: '30m' })];
+
+      // Boot #1 at T0 — fresh seed.
+      await seedAgentCrons({
+        connectionString: 'postgres://stub',
+        loadEnabledAgents: async () => agents,
+        loadExistingRunAts: async () => (queued ? new Map([['agent-cron-a1', existingJob(queued)]]) : new Map()),
+        now: () => T0,
+      });
+      const firstRunAt = queued!.getTime();
+      expect(firstRunAt).toBe(T0 + 30 * 60_000);
+
+      // Boot #2 at T0 + 5min — must preserve.
+      await seedAgentCrons({
+        connectionString: 'postgres://stub',
+        loadEnabledAgents: async () => agents,
+        loadExistingRunAts: async () => new Map([['agent-cron-a1', existingJob(queued!)]]),
+        now: () => T0 + 5 * 60_000,
+      });
+      expect(queued!.getTime()).toBe(firstRunAt);
+
+      // Boot #3 at T0 + 25min — still preserve.
+      await seedAgentCrons({
+        connectionString: 'postgres://stub',
+        loadEnabledAgents: async () => agents,
+        loadExistingRunAts: async () => new Map([['agent-cron-a1', existingJob(queued!)]]),
+        now: () => T0 + 25 * 60_000,
+      });
+      expect(queued!.getTime()).toBe(firstRunAt);
+    });
   });
 });
