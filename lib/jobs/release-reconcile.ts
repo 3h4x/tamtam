@@ -107,10 +107,23 @@ export async function reconcileStalledRelease(
   }
 }
 
-/** Sweep entry point — finds stalled releases and re-kicks each one. */
+/** Sweep entry point — finds stalled releases and re-kicks each one.
+ *
+ * Skips when jobs are globally paused. Without this, every paused-state
+ * sweep re-dispatches the orchestrator, the phase fails with
+ * "Jobs are paused globally", the attempt counter ticks, and a 10-minute
+ * pause exhausts MAX_RECONCILE_ATTEMPTS for every in-flight release —
+ * abandoning legitimate releases AND flooding the workflow_runs table
+ * with dozens of identical 409 failures. */
 export async function runReleaseReconcileSweep(
   now: number = Date.now(),
 ): Promise<ReconcileOutcome[]> {
+  try {
+    const { isJobsPaused } = await import('@/lib/shared/job-control');
+    if (isJobsPaused()) return [];
+  } catch {
+    /* job-control unavailable — proceed with reconcile */
+  }
   const stalled = findStalledReleases(now);
   const outcomes: ReconcileOutcome[] = [];
   for (const s of stalled) {

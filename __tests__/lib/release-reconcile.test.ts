@@ -5,6 +5,11 @@ vi.mock('workflow/api', () => ({
   start: (...args: unknown[]) => startMock(...args),
 }));
 
+const jobsPausedMock = vi.fn(() => false);
+vi.mock('@/lib/shared/job-control', () => ({
+  isJobsPaused: () => jobsPausedMock(),
+}));
+
 const orchestratorFn = vi.fn();
 vi.mock('@/lib/workflows/release-orchestrator', () => ({
   releaseOrchestratorWorkflow: orchestratorFn,
@@ -216,5 +221,24 @@ describe('runReleaseReconcileSweep', () => {
   it('returns empty when no releases are stalled', async () => {
     const out = await runReleaseReconcileSweep(NOW);
     expect(out).toEqual([]);
+  });
+
+  it('skips re-dispatch (and does not burn attempts) when jobs are paused', async () => {
+    jobs.push(
+      makeJob({ id: 'rel-a', project: 'a', kind: 'release', releaseId: 'rel-a', finishedAt: null }),
+      makeJob({
+        id: 'a-fix',
+        project: 'a',
+        kind: 'fix',
+        releaseId: 'rel-a',
+        finishedAt: (NOW - QUIET) / 1000,
+        exitCode: -1,
+      }),
+    );
+    jobsPausedMock.mockReturnValueOnce(true);
+    const out = await runReleaseReconcileSweep(NOW);
+    expect(out).toEqual([]);
+    expect(startMock).not.toHaveBeenCalled();
+    expect(_getReconcileAttemptForTest('rel-a')).toBe(0);
   });
 });

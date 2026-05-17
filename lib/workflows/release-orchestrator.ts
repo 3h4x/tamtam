@@ -194,6 +194,30 @@ async function decideStep(jobId: string): Promise<NextPhase> {
   // happy path because we only do this when kind === 'mark-dod'.
   let pushPrContext: { prNumber: number; prRepo: string; prUrl: string } | null = null;
   let autoPrMergeEnabled = false;
+  let reviewDisabled = false;
+  let hasUncommittedChanges = false;
+  let hasUnpushedCommits = false;
+  if (job.kind === 'test' && (job.exitCode ?? -1) === 0) {
+    try {
+      const { getProjectTestConfig } = await import('@/lib/scheduling/scheduling');
+      reviewDisabled = !!(await getProjectTestConfig(job.project))?.reviewDisabled;
+    } catch {}
+    if (reviewDisabled) {
+      try {
+        const { resolveProjectPath } = await import('@/lib/shared/project-data');
+        const projPath = resolveProjectPath(job.project);
+        if (projPath) {
+          const { exec } = await import('@/lib/shared/shell');
+          const changes = await exec('git', ['-C', projPath, 'status', '--porcelain'], { timeout: 5000 });
+          hasUncommittedChanges = changes.exitCode === 0 && changes.stdout.trim().length > 0;
+          if (!hasUncommittedChanges) {
+            const { hasLocalCommitsAhead } = await import('@/lib/pipeline/release-state');
+            hasUnpushedCommits = await hasLocalCommitsAhead(projPath);
+          }
+        }
+      } catch {}
+    }
+  }
   if (job.kind === 'mark-dod' && job.releaseId) {
     const pushJob = listJobs()
       .filter((j) => j.releaseId === job.releaseId && j.kind === 'push' && j.exitCode === 0)
@@ -221,6 +245,9 @@ async function decideStep(jobId: string): Promise<NextPhase> {
     parentKind,
     pushPrContext,
     autoPrMergeEnabled,
+    reviewDisabled,
+    hasUncommittedChanges,
+    hasUnpushedCommits,
   });
   // Pre-dispatch guards: convert `{ next: 'fix' }` into `{ next: 'abort' }`
   // when the fix loop would not converge (reviewIsStuck/fixContradictsReview),

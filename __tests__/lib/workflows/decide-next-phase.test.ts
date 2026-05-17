@@ -10,6 +10,34 @@ describe('decideNextPhase', () => {
       });
     });
 
+    it('exit 0 + review disabled + uncommitted changes → commit', () => {
+      expect(decideNextPhase({
+        kind: 'test',
+        exitCode: 0,
+        verdict: null,
+        reviewDisabled: true,
+        hasUncommittedChanges: true,
+        hasUnpushedCommits: false,
+      })).toEqual({
+        next: 'commit',
+        from: 'test',
+      });
+    });
+
+    it('exit 0 + review disabled + clean with unpushed commits → push', () => {
+      expect(decideNextPhase({
+        kind: 'test',
+        exitCode: 0,
+        verdict: null,
+        reviewDisabled: true,
+        hasUncommittedChanges: false,
+        hasUnpushedCommits: true,
+      })).toEqual({
+        next: 'push',
+        from: 'test',
+      });
+    });
+
     it('exit 1 → fix with testExitCode', () => {
       expect(decideNextPhase({ kind: 'test', exitCode: 1, verdict: null })).toEqual({
         next: 'fix',
