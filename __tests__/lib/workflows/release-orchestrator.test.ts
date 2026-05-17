@@ -6,6 +6,10 @@ const waitForJobCompletionMock = vi.fn();
 const getJobMock = vi.fn();
 const getVerdictMock = vi.fn();
 const dispatchPhaseMock = vi.fn();
+const getProjectTestConfigMock = vi.fn();
+const resolveProjectPathMock = vi.fn();
+const execMock = vi.fn();
+const hasLocalCommitsAheadMock = vi.fn();
 
 vi.mock('@/lib/workflows/wait-for-job', () => ({
   waitForJobCompletion: waitForJobCompletionMock,
@@ -39,6 +43,22 @@ vi.mock('@/lib/workflows/dispatch-phase', () => ({
   dispatchPhase: dispatchPhaseMock,
 }));
 
+vi.mock('@/lib/scheduling/scheduling', () => ({
+  getProjectTestConfig: getProjectTestConfigMock,
+}));
+
+vi.mock('@/lib/shared/project-data', () => ({
+  resolveProjectPath: resolveProjectPathMock,
+}));
+
+vi.mock('@/lib/shared/shell', () => ({
+  exec: execMock,
+}));
+
+vi.mock('@/lib/pipeline/release-state', () => ({
+  hasLocalCommitsAhead: hasLocalCommitsAheadMock,
+}));
+
 import { releaseOrchestratorWorkflow } from '@/lib/workflows/release-orchestrator';
 
 describe('releaseOrchestratorWorkflow', () => {
@@ -47,6 +67,10 @@ describe('releaseOrchestratorWorkflow', () => {
     getJobMock.mockReset();
     getVerdictMock.mockReset();
     dispatchPhaseMock.mockReset();
+    getProjectTestConfigMock.mockReset().mockResolvedValue({ reviewDisabled: false });
+    resolveProjectPathMock.mockReset().mockReturnValue('/repo/project');
+    execMock.mockReset().mockResolvedValue({ exitCode: 0, stdout: '' });
+    hasLocalCommitsAheadMock.mockReset().mockResolvedValue(false);
     listJobsMock.mockReset().mockReturnValue([]);
     readParsedLogMock.mockReset().mockReturnValue('');
     finalizeReleaseJobMock.mockReset();
@@ -232,6 +256,82 @@ Verdict: NEEDS ATTENTION
       decision: { next: 'review', from: 'test' },
       dispatch: { dispatched: true, phase: 'review', childRunId: 'wrun_child_1' },
     });
+  });
+
+  it('skips review and dispatches commit after a successful test when review is disabled with uncommitted changes', async () => {
+    const testJob = {
+      id: 'test-1',
+      kind: 'test',
+      exitCode: 0,
+      finishedAt: 100,
+      project: 'test-tt',
+    };
+    waitForJobCompletionMock.mockResolvedValue({
+      job: testJob,
+      finished: true,
+      reason: 'finished',
+    });
+    getJobMock.mockReturnValue(testJob);
+    getProjectTestConfigMock.mockResolvedValue({ reviewDisabled: true });
+    execMock.mockResolvedValue({ exitCode: 0, stdout: ' M file.ts\n' });
+    dispatchPhaseMock.mockResolvedValue({
+      dispatched: true,
+      phase: 'commit',
+      childRunId: 'wrun_commit',
+    });
+
+    const r = await releaseOrchestratorWorkflow('test-1', {
+      projectName: 'test-tt',
+      parentJobId: 'release-1',
+    });
+
+    expect(execMock).toHaveBeenCalledWith(
+      'git',
+      ['-C', '/repo/project', 'status', '--porcelain'],
+      { timeout: 5000 },
+    );
+    expect(hasLocalCommitsAheadMock).not.toHaveBeenCalled();
+    expect(dispatchPhaseMock).toHaveBeenCalledWith(
+      { next: 'commit', from: 'test' },
+      expect.objectContaining({ projectName: 'test-tt', parentJobId: 'release-1', prevJobId: 'test-1' }),
+    );
+    expect(r.decision).toEqual({ next: 'commit', from: 'test' });
+  });
+
+  it('skips review and dispatches push after a successful test when review is disabled and only unpushed commits remain', async () => {
+    const testJob = {
+      id: 'test-1',
+      kind: 'test',
+      exitCode: 0,
+      finishedAt: 100,
+      project: 'test-tt',
+    };
+    waitForJobCompletionMock.mockResolvedValue({
+      job: testJob,
+      finished: true,
+      reason: 'finished',
+    });
+    getJobMock.mockReturnValue(testJob);
+    getProjectTestConfigMock.mockResolvedValue({ reviewDisabled: true });
+    execMock.mockResolvedValue({ exitCode: 0, stdout: '' });
+    hasLocalCommitsAheadMock.mockResolvedValue(true);
+    dispatchPhaseMock.mockResolvedValue({
+      dispatched: true,
+      phase: 'push',
+      childRunId: 'wrun_push',
+    });
+
+    const r = await releaseOrchestratorWorkflow('test-1', {
+      projectName: 'test-tt',
+      parentJobId: 'release-1',
+    });
+
+    expect(hasLocalCommitsAheadMock).toHaveBeenCalledWith('/repo/project');
+    expect(dispatchPhaseMock).toHaveBeenCalledWith(
+      { next: 'push', from: 'test' },
+      expect.objectContaining({ projectName: 'test-tt', parentJobId: 'release-1', prevJobId: 'test-1' }),
+    );
+    expect(r.decision).toEqual({ next: 'push', from: 'test' });
   });
 
   it('returns null decision + null dispatch when wait times out', async () => {

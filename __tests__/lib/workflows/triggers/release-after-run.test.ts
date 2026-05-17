@@ -64,21 +64,24 @@ describe('dispatchReleaseAfterRun', () => {
   beforeEach(() => vi.resetModules());
   afterEach(() => { vi.resetModules(); vi.restoreAllMocks(); });
 
-  it('skips issue work (agent:issue-cruncher)', async () => {
+  it('dispatches release for issue-cruncher so the pipeline opens a PR', async () => {
+    // Previously issue work was skipped, leaving the fix branch with
+    // local commits but no upstream and no PR. The release pipeline
+    // detects the non-default branch and opens a PR itself, so dispatch
+    // is safe and is what "TamTam handles the rest" should mean.
     const { dispatchReleaseWorkflow } = mockDeps({ releaseAfterRun: true });
     const { dispatchReleaseAfterRun } = await import('@/lib/workflows/triggers/release-after-run');
     const out = await dispatchReleaseAfterRun(baseJob({ kind: 'agent:issue-cruncher', ghIssueNumber: 42 }));
-    expect(out.dispatched).toBe(false);
-    expect(out.reason).toMatch(/issue-work/);
-    expect(dispatchReleaseWorkflow).not.toHaveBeenCalled();
+    expect(out.dispatched).toBe(true);
+    expect(dispatchReleaseWorkflow).toHaveBeenCalled();
   });
 
-  it('skips run jobs linked to a GitHub issue', async () => {
+  it('dispatches release for run jobs linked to a GitHub issue', async () => {
     const { dispatchReleaseWorkflow } = mockDeps({ releaseAfterRun: true });
     const { dispatchReleaseAfterRun } = await import('@/lib/workflows/triggers/release-after-run');
     const out = await dispatchReleaseAfterRun(baseJob({ kind: 'run', ghIssueNumber: 7 }));
-    expect(out.dispatched).toBe(false);
-    expect(dispatchReleaseWorkflow).not.toHaveBeenCalled();
+    expect(out.dispatched).toBe(true);
+    expect(dispatchReleaseWorkflow).toHaveBeenCalled();
   });
 
   it('skips when releaseAfterRun project flag is false', async () => {

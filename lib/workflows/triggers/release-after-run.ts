@@ -2,7 +2,7 @@
 // release pipeline?". Extracted from the inline block in lib/jobs/lifecycle.ts
 // so the orchestration choice lives outside the markDone hook chain and can
 // be re-driven from a workflow trigger / replay path without duplicating
-// the policy (issue-work skip, releaseAfterRun gate, pending-release queue).
+// the policy (releaseAfterRun gate, pending-release queue, issue-work PR handoff).
 //
 // The current caller is still the completion hook; future iterations will
 // also call this from a workflow that consumes durable
@@ -23,17 +23,13 @@ export interface DispatchReleaseAfterRunOutcome {
 }
 
 export async function dispatchReleaseAfterRun(job: JobData): Promise<DispatchReleaseAfterRunOutcome> {
-  // Issue-cruncher (and any chat run linked to a GitHub issue) deliberately
-  // works on a feature branch. Auto-releasing that branch would either ship
-  // half-done issue work straight to main or run the pipeline against the
-  // wrong branch. Issue work ships via the PR path, not auto-release.
-  const isIssueWork =
-    job.kind === 'agent:issue-cruncher' ||
-    (getJobKind(job.kind) === 'run' && job.ghIssueNumber != null) ||
-    (isAgentJobKind(job.kind) && job.ghIssueNumber != null);
-  if (isIssueWork) {
-    return { dispatched: false, reason: `issue-work skip (issue #${job.ghIssueNumber ?? '?'})` };
-  }
+  // Issue work is dispatched the same as regular runs. The release pipeline
+  // detects the non-default branch via `decidePrContext` and opens (or
+  // reuses) a PR instead of pushing direct to main — so there's no risk of
+  // shipping half-done issue work to the default branch. Skipping the
+  // dispatch (the historical behavior) left issue-cruncher branches with
+  // local commits but no upstream and no PR, requiring manual intervention.
+  // The release pipeline now owns the "create PR" step the skill defers to.
 
   const isRunOrAgent = getJobKind(job.kind) === 'run' || isAgentJobKind(job.kind);
   if (!isRunOrAgent) return { dispatched: false, reason: `kind ${job.kind} not eligible` };
