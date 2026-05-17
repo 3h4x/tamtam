@@ -101,6 +101,7 @@ describe('GET /api/agents/scheduler-health', () => {
   let POST: any;
   let logDir: string;
   let quickAddJobMock: ReturnType<typeof vi.fn>;
+  let queuedJobKeys: Set<string>;
   const now = Date.now() / 1000;
 
   function promptPath(agentId: string): string {
@@ -109,6 +110,9 @@ describe('GET /api/agents/scheduler-health', () => {
   function seedPromptFile(agentId: string): void {
     mkdirSync(join(logDir, 'agent-scripts'), { recursive: true });
     writeFileSync(promptPath(agentId), JSON.stringify({ prompt: 'seeded' }));
+  }
+  function seedQueueJob(agentId: string): void {
+    queuedJobKeys.add(`agent-cron-${agentId}`);
   }
 
   beforeAll(async () => {
@@ -161,9 +165,22 @@ describe('GET /api/agents/scheduler-health', () => {
     try { rmSync(join(logDir, 'agent-scripts'), { recursive: true, force: true }); } catch {}
 
     process.env.DATABASE_URL = 'postgres://test/test';
-    quickAddJobMock = vi.fn().mockResolvedValue(undefined);
+    queuedJobKeys = new Set();
+    quickAddJobMock = vi.fn().mockImplementation(async (_options, _task, _payload, spec) => {
+      if (spec?.jobKey) queuedJobKeys.add(spec.jobKey);
+    });
 
     vi.doMock('graphile-worker', () => ({ quickAddJob: quickAddJobMock }));
+    vi.doMock('pg', () => ({
+      Pool: vi.fn().mockImplementation(function () {
+        return {
+          query: vi.fn(async () => ({
+            rows: [...queuedJobKeys].map((key) => ({ key })),
+          })),
+          end: vi.fn(async () => undefined),
+        };
+      }),
+    }));
     vi.doMock('@/lib/db', () => ({ db: sharedHandle.db, schema }));
     vi.doMock('@/lib/shared/shell', () => ({ exec: vi.fn().mockResolvedValue({ exitCode: 0, stdout: '', stderr: '' }) }));
     vi.doMock('@/lib/shared/config', () => ({
@@ -183,31 +200,48 @@ describe('GET /api/agents/scheduler-health', () => {
     POST = mod.POST;
   });
 
-  it('reports ok when each enabled scheduled DB agent has a prompt file on disk', async () => {
-    await insertAgent({ id: 'agent-1', project: 'projA', name: 'My Agent', runner: 'pm2', schedule: '1h' });
+  it('reports ok when each enabled scheduled DB agent has a prompt file and Graphile job', async () => {
+    await insertAgent({ id: 'agent-1', project: 'projA', name: 'My Agent', schedule: '1h' });
     seedPromptFile('agent-1');
+    seedQueueJob('agent-1');
 
     const res = await GET();
     const body = await res.json();
     expect(body.ok).toBe(true);
     expect(body.expected).toHaveLength(1);
+    expect(body.actual.graphile).toEqual(['agent-cron-agent-1']);
     expect(body.missing).toEqual([]);
-    expect(body.orphans.pm2).toEqual([]);
   });
 
   it('flags an agent as missing when no prompt file exists for it', async () => {
-    await insertAgent({ id: 'agent-1', project: 'projA', name: 'My Agent', runner: 'pm2', schedule: '1h' });
+    await insertAgent({ id: 'agent-1', project: 'projA', name: 'My Agent', schedule: '1h' });
+    seedQueueJob('agent-1');
 
     const res = await GET();
     const body = await res.json();
     expect(body.ok).toBe(false);
     expect(body.missing).toHaveLength(1);
     expect(body.missing[0].id).toBe('agent-1');
+    expect(body.missing[0].promptFileLoaded).toBe(false);
+    expect(body.missing[0].queueLoaded).toBe(true);
+  });
+
+  it('flags an agent as missing when the prompt file exists but the Graphile job is absent', async () => {
+    await insertAgent({ id: 'agent-1', project: 'projA', name: 'My Agent', schedule: '1h' });
+    seedPromptFile('agent-1');
+
+    const res = await GET();
+    const body = await res.json();
+    expect(body.ok).toBe(false);
+    expect(body.missing).toHaveLength(1);
+    expect(body.missing[0].id).toBe('agent-1');
+    expect(body.missing[0].promptFileLoaded).toBe(true);
+    expect(body.missing[0].queueLoaded).toBe(false);
   });
 
   it('skips disabled and unscheduled agents from the expected set', async () => {
-    await insertAgent({ id: 'agent-1', project: 'projA', name: 'Disabled', runner: 'pm2', schedule: '1h', enabled: false });
-    await insertAgent({ id: 'agent-2', project: 'projA', name: 'Manual', runner: 'pm2', schedule: null });
+    await insertAgent({ id: 'agent-1', project: 'projA', name: 'Disabled', schedule: '1h', enabled: false });
+    await insertAgent({ id: 'agent-2', project: 'projA', name: 'Manual', schedule: null });
 
     const res = await GET();
     const body = await res.json();
@@ -216,7 +250,7 @@ describe('GET /api/agents/scheduler-health', () => {
   });
 
   it('POST installs missing schedules and re-runs the check', async () => {
-    await insertAgent({ id: 'agent-1', project: 'projA', name: 'My Agent', runner: 'pm2', schedule: '1h' });
+    await insertAgent({ id: 'agent-1', project: 'projA', name: 'My Agent', schedule: '1h' });
     // No prompt file → first health check sees missing → POST writes the
     // prompt file via installAgentSchedule → second health check passes.
 
@@ -237,14 +271,25 @@ describe('GET /api/agents/scheduler-health', () => {
       schedule: '2h',
       prompt: 'run checks',
       enabled: true,
-      runner: 'pm2',
+
     };
 
     vi.resetModules();
     await insertProject('proj1', '/w/proj1', true);
     seedPromptFile('file:proj1:auto-check');
+    seedQueueJob('file:proj1:auto-check');
 
     vi.doMock('graphile-worker', () => ({ quickAddJob: quickAddJobMock }));
+    vi.doMock('pg', () => ({
+      Pool: vi.fn().mockImplementation(function () {
+        return {
+          query: vi.fn(async () => ({
+            rows: [...queuedJobKeys].map((key) => ({ key })),
+          })),
+          end: vi.fn(async () => undefined),
+        };
+      }),
+    }));
     vi.doMock('@/lib/db', () => ({ db: sharedHandle.db, schema }));
     vi.doMock('@/lib/shared/shell', () => ({ exec: vi.fn().mockResolvedValue({ exitCode: 0, stdout: '', stderr: '' }) }));
     vi.doMock('@/lib/shared/config', () => ({ getSettings: () => ({ launchagent_prefix: 'com.tamtam' }) }));
@@ -272,7 +317,7 @@ describe('GET /api/agents/scheduler-health', () => {
       schedule: '1h',
       prompt: 'file version',
       enabled: true,
-      runner: 'pm2',
+
     };
 
     vi.resetModules();
@@ -283,8 +328,19 @@ describe('GET /api/agents/scheduler-health', () => {
       createdAt: now, updatedAt: now,
     });
     seedPromptFile('agent-db');
+    seedQueueJob('agent-db');
 
     vi.doMock('graphile-worker', () => ({ quickAddJob: quickAddJobMock }));
+    vi.doMock('pg', () => ({
+      Pool: vi.fn().mockImplementation(function () {
+        return {
+          query: vi.fn(async () => ({
+            rows: [...queuedJobKeys].map((key) => ({ key })),
+          })),
+          end: vi.fn(async () => undefined),
+        };
+      }),
+    }));
     vi.doMock('@/lib/db', () => ({ db: sharedHandle.db, schema }));
     vi.doMock('@/lib/shared/shell', () => ({ exec: vi.fn().mockResolvedValue({ exitCode: 0, stdout: '', stderr: '' }) }));
     vi.doMock('@/lib/shared/config', () => ({ getSettings: () => ({ launchagent_prefix: 'com.tamtam' }) }));
@@ -304,7 +360,16 @@ describe('GET /api/agents/scheduler-health', () => {
     expect(body.ok).toBe(true);
   });
 
-  // The legacy `orphans.pm2` (entries in the in-memory scheduler not in the
-  // DB) was retired with that scheduler — the field is always empty now and
-  // its test along with it.
+  it('POST reinstalls a schedule when only the Graphile queue job is missing', async () => {
+    await insertAgent({ id: 'agent-1', project: 'projA', name: 'My Agent', schedule: '1h' });
+    seedPromptFile('agent-1');
+
+    const res = await POST();
+    const body = await res.json();
+    expect(body.before.ok).toBe(false);
+    expect(body.before.missing[0].queueLoaded).toBe(false);
+    expect(body.installed).toEqual(['tamtam-projA-agent-My Agent']);
+    expect(body.after.ok).toBe(true);
+    expect(quickAddJobMock).toHaveBeenCalledTimes(1);
+  });
 });

@@ -82,7 +82,6 @@ describe('findAgentNameConflict', () => {
       docPaths: '[]',
       model: 'sonnet',
       prompt: '',
-      runner: 'pm2',
       enabled: true,
       createdAt: now,
       updatedAt: now,

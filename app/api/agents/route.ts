@@ -172,12 +172,12 @@ export async function POST(request: NextRequest) {
     } catch { /* non-fatal */ }
   }
 
-  // Install schedule if configured (PM2-tracked, fired by the in-process scheduler).
+  // Install schedule if configured (fired by graphile-worker cron pool).
   // Runs only need either a prompt or skills to produce meaningful output.
   const hasSkills = (skillIds || []).length > 0;
   if (agent.schedule && agent.enabled && (agent.prompt || hasSkills)) {
     try {
-      await installAgentSchedule(id, agent.schedule, agent.prompt, agent.runner, agent.project, agent.name);
+      await installAgentSchedule(id, agent.schedule, agent.prompt, agent.project, agent.name);
     } catch (e: unknown) {
       console.error(`Failed to install schedule for agent ${id}:`, errMsg(e));
     }

@@ -605,7 +605,7 @@ describe('settings API', () => {
           : k === 'review_do_not_ship_action' ? 'fix'
           : k === 'release_wall_clock_timeout_minutes' ? '30'
           : k === 'agent_templates'
-            ? JSON.stringify([{ name: 'template', description: 'desc', model: 'smart', schedule: '', runner: 'pm2', prompt: '' }])
+            ? JSON.stringify([{ name: 'template', description: 'desc', model: 'smart', schedule: '', prompt: '' }])
             : 'test-value',
       ]));
       const request = new NextRequest('http://localhost/api/settings', {
@@ -976,7 +976,7 @@ describe('settings API', () => {
 
     it('saves agent_templates as a JSON string', async () => {
       const templates = [
-        { name: 'security-review', description: 'Scans for OWASP issues', model: 'sonnet', schedule: '24h', runner: 'pm2', prompt: 'Review the diff for security issues.' },
+        { name: 'security-review', description: 'Scans for OWASP issues', model: 'sonnet', schedule: '24h', prompt: 'Review the diff for security issues.' },
       ];
       const canonicalTemplates = [
         { ...templates[0], model: 'normal' },
@@ -995,7 +995,7 @@ describe('settings API', () => {
 
     it('rejects agent_templates with invalid model values', async () => {
       const templates = [
-        { name: 'security-review', description: 'Scans for OWASP issues', model: 'smart --resume injected', schedule: '24h', runner: 'pm2', prompt: 'Review the diff for security issues.' },
+        { name: 'security-review', description: 'Scans for OWASP issues', model: 'smart --resume injected', schedule: '24h', prompt: 'Review the diff for security issues.' },
       ];
       const request = new NextRequest('http://localhost/api/settings', {
         method: 'PATCH',

@@ -33,10 +33,14 @@ interface SettingsMap {
   cli_bin_codex: string
   cli_bin_gemini: string
   cli_bin_lmstudio: string
+  cli_bin_deepagents: string
+  cli_deepagents_backend: string
+  cli_deepagents_base_url: string
   cli_default_model_claude: string
   cli_default_model_codex: string
   cli_default_model_gemini: string
   cli_default_model_lmstudio: string
+  cli_default_model_deepagents: string
   lmstudio_model: string
   log_dir: string
   frequency: string
@@ -111,10 +115,14 @@ const SETTINGS_DEFAULTS: SettingsMap = {
   cli_bin_codex: '',
   cli_bin_gemini: '',
   cli_bin_lmstudio: '',
+  cli_bin_deepagents: '',
+  cli_deepagents_backend: 'lmstudio',
+  cli_deepagents_base_url: '',
   cli_default_model_claude: 'normal',
   cli_default_model_codex: 'normal',
   cli_default_model_gemini: 'normal',
   cli_default_model_lmstudio: 'normal',
+  cli_default_model_deepagents: 'normal',
   jobs_paused: 'false',
   notification_on_budget_blocked: 'false',
   notification_throttle_window_seconds: '900',
@@ -277,7 +285,7 @@ export function SettingsPage({ initialTab }: { initialTab?: TabId } = {}) {
       if (key === 'claude_provider' && (value === 'claude' || value === 'custom')) {
         // Drop stale shim paths left over from a prior shim selection
         // so the Claude CLI Path field shows the real default instead.
-        if (/scripts\/(gemini|lmstudio|codex)-shim\.js$/.test(prev.claude_bin)) {
+        if (/scripts\/(gemini|lmstudio|codex|deepagents)-shim\.js$/.test(prev.claude_bin)) {
           next.claude_bin = value === 'claude' ? SETTINGS_DEFAULTS.claude_bin : ''
         }
       }

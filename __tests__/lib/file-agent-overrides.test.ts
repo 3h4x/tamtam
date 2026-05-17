@@ -132,17 +132,16 @@ describe('file-agent-overrides', () => {
     });
 
     it('does not overwrite a field not included in the patch', async () => {
-      await setFileAgentOverride('proj', 'agent', { runner: 'pm2', enabled: true });
+      await setFileAgentOverride('proj', 'agent', { enabled: true });
       const result = await setFileAgentOverride('proj', 'agent', { model: 'haiku' });
-      expect(result.runner).toBe('pm2');
       expect(result.enabled).toBe(true);
       expect(result.model).toBe('fast');
     });
 
     it('returns the merged value (not just the patch)', async () => {
       await setFileAgentOverride('proj', 'agent', { enabled: true });
-      const result = await setFileAgentOverride('proj', 'agent', { runner: 'pm2' });
-      expect(result).toMatchObject({ enabled: true, runner: 'pm2' });
+      const result = await setFileAgentOverride('proj', 'agent', { schedule: '8h' });
+      expect(result).toMatchObject({ enabled: true, schedule: '8h' });
     });
   });
 

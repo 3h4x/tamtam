@@ -93,7 +93,6 @@ describe('POST /api/agents/{agentId}/run readOnly', () => {
       model: 'smart',
       prompt: '',
       schedule: '24h',
-      runner: 'pm2',
       enabled: true,
       createdAt: now,
       updatedAt: now,

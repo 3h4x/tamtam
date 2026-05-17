@@ -12,7 +12,6 @@ async function loadAgentsForCheck() {
     id: a.id,
     project: a.project,
     name: a.name,
-    runner: a.runner ?? 'pm2',
     schedule: a.schedule,
     enabled: !!a.enabled,
     prompt: a.prompt ?? '',
@@ -27,7 +26,6 @@ async function loadAgentsForCheck() {
           id: fa.id,
           project: fa.project,
           name: fa.name,
-          runner: fa.runner ?? 'pm2',
           schedule: fa.schedule,
           enabled: fa.enabled,
           prompt: fa.prompt,
@@ -88,7 +86,7 @@ export async function POST() {
       const agent = agents.find(a => a.id === m.id);
       if (!agent || !agent.schedule) continue;
       try {
-        await installAgentSchedule(agent.id, agent.schedule, agent.prompt, agent.runner, agent.project, agent.name);
+        await installAgentSchedule(agent.id, agent.schedule, agent.prompt, agent.project, agent.name);
         installed.push(m.expectedName);
       } catch (err) {
         installFailures.push({ id: m.id, error: errMsg(err) });

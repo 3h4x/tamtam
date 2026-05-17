@@ -29,6 +29,10 @@ export interface SeedDeps {
    *  preserve healthy queued fires across restarts. Defaults to a direct
    *  query against `graphile_worker._private_jobs`. */
   loadExistingRunAts?: (jobKeys: string[], connectionString: string) => Promise<Map<string, ExistingAgentCronJob>>;
+  /** Drop agent-cron orphan rows that hit max_attempts (graphile-worker
+   *  never GCs these). Defaults to a direct DELETE on
+   *  `graphile_worker._private_jobs`. */
+  sweepDeadOrphans?: (connectionString: string) => Promise<void>;
 }
 
 export interface SeedResult {
@@ -75,6 +79,21 @@ export async function seedAgentCrons(deps: SeedDeps): Promise<SeedResult> {
       // strictly better than failing the whole boot pass.
       console.error('[seed-agent-crons] preserve lookup failed:', err);
     }
+  }
+
+  // Sweep failed-and-stuck orphan rows. graphile-worker keeps a copy of every
+  // row that hit max_attempts forever (no built-in GC). After a schema-changing
+  // migration that breaks the agent-cron loader query, the worker burns through
+  // retries and parks a dead row per agent — these never fire, but they
+  // accumulate forever and confuse health queries. Boot is a safe place to
+  // drop them: their max-attempts state means graphile-worker has already
+  // given up on them, and the keyed `agent-cron-<id>` row carries the live
+  // schedule.
+  try {
+    const sweeper = deps.sweepDeadOrphans ?? sweepDeadOrphansFromPg;
+    await sweeper(connectionString);
+  } catch (err) {
+    console.error('[seed-agent-crons] dead-orphan sweep failed:', err);
   }
 
   let enqueued = 0;
@@ -167,6 +186,27 @@ async function loadExistingRunAtsFromPg(
       }
     }
     return map;
+  } finally {
+    await pool.end();
+  }
+}
+
+async function sweepDeadOrphansFromPg(connectionString: string): Promise<void> {
+  const pool = new Pool({ connectionString, max: 1 });
+  try {
+    // Only rows that graphile-worker has already given up on (max_attempts
+    // reached, not currently locked). The keyed agent-cron-<id> row is
+    // separate and carries the live schedule; this only targets the
+    // unkeyed retry copies.
+    await pool.query(`
+      DELETE FROM graphile_worker._private_jobs j
+      USING graphile_worker._private_tasks t
+      WHERE j.task_id = t.id
+        AND t.identifier = 'agent-cron'
+        AND j.attempts >= j.max_attempts
+        AND j.locked_at IS NULL
+        AND j.key IS NULL
+    `);
   } finally {
     await pool.end();
   }

@@ -1,0 +1,3 @@
+-- Preserve agents.runner for backward-compatible reads and existing launchctl rows.
+-- The product now uses graphile-worker for recurring schedules, but this field
+-- remains part of the persisted API contract during the compatibility window.

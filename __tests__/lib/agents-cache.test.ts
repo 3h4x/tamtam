@@ -50,13 +50,13 @@ function makeAgentRow(overrides: Partial<typeof schema.agents.$inferSelect> = {}
     model: 'sonnet',
     prompt: 'do things',
     schedule: null,
-    runner: 'pm2',
     enabled: true,
     provider: null,
     prerequisiteCommand: null,
     createdAt: 1000,
     updatedAt: 1000,
     ...overrides,
+    runner: overrides.runner ?? 'pm2',
   };
 }
 

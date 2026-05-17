@@ -66,7 +66,7 @@ for (const project of projects) {
   );
   writeFileSync(
     join(root, '.tamtam', 'agents', 'release-check.md'),
-    `---\nprovider: claude\nmodel: fast\nschedule: 1h\nskillIds: ["qa-release"]\nrunner: pm2\nenabled: true\n---\nRun a deterministic QA release readiness check for ${project.name}.\n`,
+    `---\nprovider: claude\nmodel: fast\nschedule: 1h\nskillIds: ["qa-release"]\nenabled: true\n---\nRun a deterministic QA release readiness check for ${project.name}.\n`,
   );
   writeFileSync(join(root, '.qa-state.json'), JSON.stringify(project, null, 2));
 }
@@ -164,9 +164,9 @@ try {
   for (const project of projects) {
     await pool.query(
       `INSERT INTO agents (
-         id, name, project, skill_ids, model, prompt, schedule, runner, enabled,
+         id, name, project, skill_ids, model, prompt, schedule, enabled,
          doc_paths, provider, prerequisite_command, created_at, updated_at
-       ) VALUES ($1, $2, $3, $4, $5, $6, $7, 'pm2', true, $8, 'claude', $9, $10, $10)
+       ) VALUES ($1, $2, $3, $4, $5, $6, $7, true, $8, 'claude', $9, $10, $10)
        ON CONFLICT (id) DO UPDATE SET
          name = EXCLUDED.name,
          project = EXCLUDED.project,

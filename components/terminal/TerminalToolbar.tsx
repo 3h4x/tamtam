@@ -13,6 +13,7 @@ const PROVIDER_LABELS: Record<CliProvider, string> = {
   codex: 'Codex',
   gemini: 'Gemini',
   lmstudio: 'LM Studio',
+  deepagents: 'Deep Agents',
 }
 
 const PROVIDER_DESCRIPTIONS: Record<CliProvider, string> = {
@@ -20,6 +21,7 @@ const PROVIDER_DESCRIPTIONS: Record<CliProvider, string> = {
   codex: 'OpenAI Codex CLI',
   gemini: 'Google Gemini CLI',
   lmstudio: 'Local LM Studio',
+  deepagents: 'Deep Agents local loop',
 }
 
 function CountBadge({ count }: { count: number }) {

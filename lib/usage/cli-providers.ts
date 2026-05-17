@@ -1,10 +1,10 @@
 /**
- * Identifiers for the four CLI backends TamTam can route work through.
+ * Identifiers for the CLI backends TamTam can route work through.
  * `claude` and `codex` have subscription-quota fetchers; `gemini` and
- * `lmstudio` do not (LM Studio is local/free; Gemini lacks an OAuth quota
- * endpoint at the moment).
+ * the local providers do not (LM Studio/deepagents are local/free; Gemini
+ * lacks an OAuth quota endpoint at the moment).
  */
-export const CLI_PROVIDERS = ['claude', 'codex', 'gemini', 'lmstudio'] as const;
+export const CLI_PROVIDERS = ['claude', 'codex', 'gemini', 'lmstudio', 'deepagents'] as const;
 export type CliProvider = (typeof CLI_PROVIDERS)[number];
 
 export const CLI_PROVIDERS_WITH_QUOTA: CliProvider[] = ['claude', 'codex'];

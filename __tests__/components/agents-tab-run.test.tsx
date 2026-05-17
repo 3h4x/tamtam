@@ -86,7 +86,7 @@ describe('AgentsTab queued runs', () => {
         model: 'normal',
         prompt: 'Run docs',
         schedule: null,
-        runner: 'pm2',
+
         enabled: true,
       }],
     })
