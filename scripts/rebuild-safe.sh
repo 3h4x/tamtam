@@ -180,6 +180,48 @@ for _ in $(seq 1 30); do
   sleep 1
 done
 
+# Smoke-probe critical pages. A pnpm build that raced with a fix-step
+# writing into `app/` produces a `.next/` with missing client-reference
+# manifests; the API stays healthy but server-rendered pages 500 with
+# "Invariant: The client reference manifest for route ... does not exist".
+# Auto-recover with a clean rebuild instead of leaving the user staring at
+# `Internal Server Error`.
+SMOKE_PAGES=("/" "/runs" "/agents" "/settings/general")
+smoke_test() {
+  local failures=0
+  for path in "${SMOKE_PAGES[@]}"; do
+    local code
+    code=$(curl -sS -o /dev/null -w "%{http_code}" "$BASE_URL$path" 2>/dev/null || echo "000")
+    if [ "$code" != "200" ] && [ "$code" != "307" ] && [ "$code" != "308" ]; then
+      log "smoke: $path → $code"
+      failures=$((failures + 1))
+    fi
+  done
+  return $failures
+}
+
+if ! smoke_test; then
+  log "WARN: smoke test failed after restart — likely a manifest race from in-flight writes"
+  log "auto-recovering with a clean .next/ rebuild..."
+  rm -rf "$PWD/.next"
+  if pnpm build && bash "$SCRIPT_DIR/pm2-start.sh"; then
+    for _ in $(seq 1 30); do
+      if curl -sf "$BASE_URL/api/settings" >/dev/null 2>&1; then break; fi
+      sleep 1
+    done
+    if ! smoke_test; then
+      log "ERROR: smoke still failing after clean rebuild — leaving jobs PAUSED for investigation"
+      KEEP_PAUSED=1
+      exit 3
+    fi
+    log "auto-recovery succeeded"
+  else
+    log "ERROR: clean rebuild failed — leaving jobs PAUSED for investigation"
+    KEEP_PAUSED=1
+    exit 3
+  fi
+fi
+
 if [ "$PAUSED" = 1 ]; then
   log "unpausing jobs..."
   if ! unpause_jobs; then
