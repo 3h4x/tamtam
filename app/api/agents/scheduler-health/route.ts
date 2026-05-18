@@ -1,7 +1,7 @@
 import { NextResponse } from 'next/server';
 import { and, desc, eq, isNotNull } from 'drizzle-orm';
 import { db, schema } from '@/lib/db';
-import { getSchedulerHealth, installAgentSchedule, getInternalSchedulerDump } from '@/lib/scheduling/agent-scheduler';
+import { getSchedulerHealth, installAgentSchedule, type InternalSchedulerDump, type SchedulerEntryDump } from '@/lib/scheduling/agent-scheduler';
 import { scanFileAgents } from '@/lib/agents/tamtam-file-agents';
 import { listEnabledProjects } from '@/lib/shared/enabled-projects';
 import { errMsg } from '@/lib/shared/types';
@@ -59,11 +59,48 @@ async function buildLastJobMap(entries: { agentId: string; project: string; name
   return map;
 }
 
+async function buildInternalSchedulerDump(
+  agents: Array<{ id: string; project: string; name: string; schedule: string | null; enabled: boolean }>,
+): Promise<InternalSchedulerDump> {
+  const { loadAgentCronStates, getAllAgentLastAttempts } = await import('@/lib/scheduling/agent-cron-state');
+  const [cronStates, lastAttempts] = await Promise.all([
+    loadAgentCronStates(),
+    Promise.resolve(getAllAgentLastAttempts()),
+  ]);
+  const entries: SchedulerEntryDump[] = agents
+    .filter((agent) => agent.schedule)
+    .flatMap((agent) => {
+      const cron = cronStates.get(agent.id);
+      if (!cron) return [];
+
+      const lastAttempt = lastAttempts.get(agent.id);
+      const skipped = lastAttempt?.status === 'skipped';
+      return [{
+        agentId: agent.id,
+        project: agent.project,
+        name: agent.name,
+        schedule: agent.schedule!,
+        nextFireMs: cron.nextFireMs,
+        fireCount: 0,
+        lastFireMs: null,
+        skippedCount: skipped ? 1 : 0,
+        lastSkippedReason: skipped ? lastAttempt.reason : null,
+        lastError: cron.lastError,
+        enabled: agent.enabled,
+      }];
+    });
+  return {
+    started: cronStates.size > 0,
+    paused: false,
+    entries,
+  };
+}
+
 export async function GET() {
   try {
     const agents = await loadAgentsForCheck();
     const health = await getSchedulerHealth(agents);
-    const internal = await getInternalSchedulerDump();
+    const internal = await buildInternalSchedulerDump(agents);
     const lastJobMap = await buildLastJobMap(internal.entries);
     const enrichedEntries = internal.entries.map(e => ({
       ...e,
@@ -94,7 +131,7 @@ export async function POST() {
     }
 
     const after = await getSchedulerHealth(agents);
-    const internal = await getInternalSchedulerDump();
+    const internal = await buildInternalSchedulerDump(agents);
     const lastJobMap = await buildLastJobMap(internal.entries);
     const enrichedEntries = internal.entries.map(e => ({
       ...e,

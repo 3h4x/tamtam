@@ -451,6 +451,9 @@ const isReviewRunning = (projectName: string) => !!runtime[projectName]?.hasRunn
         break
       }
     }
+    if (cmp === 0 && sortKey !== 'project') {
+      cmp = a.project.localeCompare(b.project)
+    }
     return sortDir === 'asc' ? cmp : -cmp
   })
 
