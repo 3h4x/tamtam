@@ -235,6 +235,7 @@ export interface SchedulerEntryDump {
   lastJobMs?: number | null;
   skippedCount: number;
   lastSkippedReason: string | null;
+  lastError: string | null;
   enabled: boolean;
 }
 

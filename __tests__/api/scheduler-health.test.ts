@@ -117,6 +117,16 @@ describe('GET /api/agents/scheduler-health', () => {
   function seedQueueJob(agentId: string): void {
     queuedJobKeys.add(`agent-cron-${agentId}`);
   }
+  function queueRows() {
+    return [...queuedJobKeys].map((key) => ({
+      key,
+      run_at: new Date(Date.now() + 60_000),
+      attempts: 0,
+      is_available: true,
+      locked_at: null,
+      last_error: null,
+    }));
+  }
 
   beforeAll(async () => {
     sharedHandle = await createTestPgDbEmpty();
@@ -178,7 +188,7 @@ describe('GET /api/agents/scheduler-health', () => {
       Pool: vi.fn(function PoolMock() {
         return {
           query: vi.fn(async () => ({
-            rows: [...queuedJobKeys].map((key) => ({ key })),
+            rows: queueRows(),
           })),
           end: vi.fn(async () => undefined),
         };
@@ -216,6 +226,26 @@ describe('GET /api/agents/scheduler-health', () => {
     expect(body.missing).toEqual([]);
   });
 
+  it('populates internal entries from Graphile cron state for Next Run UI', async () => {
+    await insertAgent({ id: 'agent-1', project: 'projA', name: 'My Agent', schedule: '1h' });
+    seedPromptFile('agent-1');
+    seedQueueJob('agent-1');
+
+    const res = await GET();
+    const body = await res.json();
+
+    expect(body.internal.entries).toHaveLength(1);
+    expect(body.internal.entries[0]).toMatchObject({
+      agentId: 'agent-1',
+      project: 'projA',
+      name: 'My Agent',
+      schedule: '1h',
+      enabled: true,
+      lastError: null,
+    });
+    expect(body.internal.entries[0].nextFireMs).toBeGreaterThan(Date.now());
+  });
+
   it('flags an agent as missing when no prompt file exists for it', async () => {
     await insertAgent({ id: 'agent-1', project: 'projA', name: 'My Agent', schedule: '1h' });
     seedQueueJob('agent-1');
@@ -240,6 +270,7 @@ describe('GET /api/agents/scheduler-health', () => {
     expect(body.missing[0].id).toBe('agent-1');
     expect(body.missing[0].promptFileLoaded).toBe(true);
     expect(body.missing[0].queueLoaded).toBe(false);
+    expect(body.internal.entries).toEqual([]);
   });
 
   it('skips disabled and unscheduled agents from the expected set', async () => {
@@ -287,7 +318,7 @@ describe('GET /api/agents/scheduler-health', () => {
       Pool: vi.fn(function PoolMock() {
         return {
           query: vi.fn(async () => ({
-            rows: [...queuedJobKeys].map((key) => ({ key })),
+            rows: queueRows(),
           })),
           end: vi.fn(async () => undefined),
         };
@@ -338,7 +369,7 @@ describe('GET /api/agents/scheduler-health', () => {
       Pool: vi.fn(function PoolMock() {
         return {
           query: vi.fn(async () => ({
-            rows: [...queuedJobKeys].map((key) => ({ key })),
+            rows: queueRows(),
           })),
           end: vi.fn(async () => undefined),
         };
