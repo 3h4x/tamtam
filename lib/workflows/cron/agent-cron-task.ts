@@ -39,6 +39,31 @@ export interface AgentCronDeps {
   enqueueNextFire: (agentId: string, runAt: Date) => Promise<void>;
 }
 
+// Re-check window when a fire is skipped due to a transient blocker.
+// Pushing the next fire by the full schedule interval after a transient
+// skip means a 30-min agent that was momentarily blocked (jobs paused
+// during a rebuild, branch not-default for ~1 min while a PR merges)
+// has to wait another 30 min — and the operator sees "due now" in the
+// UI while nothing is queued. Short retry window catches the blocker
+// clearing without piling on real work.
+const TRANSIENT_RETRY_MS = 60_000;
+
+// Reasons that resolve on their own within seconds-to-minutes.
+// `prereqSkipReason` returns free-form strings; substring matching here
+// is intentionally loose so a small wording change doesn't break the
+// fast-retry path.
+function isTransientSkip(reason: string): boolean {
+  const r = reason.toLowerCase();
+  return (
+    r.includes('jobs paused')
+    || r.includes('pr-wait in flight')
+    || r.includes('non-default branch')
+    || r.includes('pipeline_lock')
+    || r.includes('release pipeline is running')
+    || r.includes('behind origin/')
+  );
+}
+
 /** Pure handler — no graphile-worker / db imports here so it stays
  *  vitest-friendly. The thin wrapper at the bottom of this file binds it
  *  to the real helpers + db. */
@@ -59,7 +84,12 @@ export async function handleAgentCron(
     // Agent was just disabled (schedule cleared) — terminate the chain.
     return { status: 'disabled', reason: 'no schedule' };
   }
-  const nextFireMs = computeNextFire(agent.schedule, agent.id, now());
+  // Transient skip → retry in ~60s so the system catches up the moment
+  // the blocker clears. Anything else (including a successful dispatch
+  // or an unknown skip reason) advances to the next scheduled tick.
+  const nextFireMs = skipReason && isTransientSkip(skipReason)
+    ? now() + TRANSIENT_RETRY_MS
+    : computeNextFire(agent.schedule, agent.id, now());
   await deps.enqueueNextFire(agent.id, new Date(nextFireMs));
   if (skipReason) {
     return { status: 'skipped', reason: skipReason };

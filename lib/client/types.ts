@@ -274,6 +274,24 @@ export interface Agent {
   createdAt: number
   updatedAt: number
   source?: 'db' | 'file'
+  // Live cron queue state — `nextFireMs` is the actual `run_at` from the
+  // graphile-worker `agent-cron-<id>` row, not a UI estimate. Absent when
+  // the agent has no queued cron row (disabled, or seed hasn't run yet).
+  cron?: {
+    nextFireMs: number
+    attempts: number
+    isAvailable: boolean
+    lockedAt: number | null
+    lastError: string | null
+  } | null
+  // Most recent cron fire outcome — populated by the in-process cron task
+  // every time it dispatches/skips/queues this agent. Lets the UI render
+  // "Skipped 14m ago (jobs paused)" instead of stale "due now".
+  lastAttempt?: {
+    at: number
+    reason: string
+    status: 'skipped' | 'dispatched' | 'queued' | string
+  } | null
 }
 
 export interface ProjectDoc {

@@ -150,7 +150,12 @@ export async function findStrandedBranches(nowMs: number = Date.now()): Promise<
       const aheadOrigin = await gitOutput(path, ['rev-list', '--count', `origin/${state.def}..HEAD`]);
       const localAhead = parseInt(aheadDefault ?? '0', 10) || 0;
       const remoteAhead = parseInt(aheadOrigin ?? '0', 10) || 0;
-      if (localAhead === 0 && remoteAhead === 0) {
+      // Dirty worktree means there's unshipped work even when no commits
+      // sit on top of default yet — startRelease will commit it. Empty +
+      // clean is the only state where "checkout default" is safe.
+      const status = await gitOutput(path, ['status', '--porcelain']);
+      const isDirty = !!(status && status.trim().length > 0);
+      if (localAhead === 0 && remoteAhead === 0 && !isDirty) {
         out.push({
           project: p.name,
           path,
@@ -171,7 +176,9 @@ export async function findStrandedBranches(nowMs: number = Date.now()): Promise<
         kind: 'fix-branch',
         ahead: localAhead || remoteAhead,
         behind: 0,
-        reason: `stranded on ${state.current}, default ${state.def}, ${localAhead || remoteAhead} commit(s) ahead`,
+        reason: isDirty && localAhead === 0 && remoteAhead === 0
+          ? `stranded on ${state.current} with dirty worktree, default ${state.def}`
+          : `stranded on ${state.current}, default ${state.def}, ${localAhead || remoteAhead} commit(s) ahead`,
       });
       continue;
     }

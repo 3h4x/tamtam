@@ -422,8 +422,9 @@ TamTam does not create PM2 cron jobs or LaunchAgents for current scheduled agent
 Current behavior:
 
 - `instrumentation-node.ts` starts the cron worker and calls `seedAgentCrons()` on boot to upsert enabled scheduled agents from the DB and file-agent layer.
-- `lib/workflows/cron/agent-cron-task.ts` handles each fire, checks pause/budget/branch/release gates, starts the agent intake workflow, and re-enqueues the next fire.
+- `lib/workflows/cron/agent-cron-task.ts` handles each fire, checks pause/budget/branch/release gates, records the latest skipped/queued/dispatched attempt for the Agents UI, starts the agent intake workflow, and re-enqueues the next fire. Transient blockers such as global pause, an in-flight PR wait, non-default branch state, release locks, or stale origin state retry in about one minute; other outcomes advance to the next scheduled tick.
 - Agent CRUD routes call `installAgentSchedule()` / `uninstallAgentSchedule()` so schedule changes apply immediately without restarting the server.
+- `/api/agents` reads the graphile-worker `agent-cron-<agentId>` row to expose the actual queued `run_at` as `agent.cron.nextFireMs`, so schedule displays use queue state rather than estimating from the previous run.
 - Actual agent work still runs as one-shot in-process jobs after the agent intake workflow accepts the request. PM2 supervises TamTam itself, not recurring schedule timers.
 
 Skip conditions tracked by the cron task:

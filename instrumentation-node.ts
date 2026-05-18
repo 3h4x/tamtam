@@ -708,11 +708,16 @@ export async function registerNode(): Promise<void> {
             // is cheap enough to run inline; the cache primed by
             // `listEnabledScheduledAgents` keeps the project lookup free.
             prereqSkipReason: async (agent) => {
+              const { recordAgentAttempt } = await import('@/lib/scheduling/agent-cron-state');
+              const skip = (reason: string): string => {
+                recordAgentAttempt(agent.id, 'skipped', reason);
+                return reason;
+              };
               const { isJobsPaused } = await import('@/lib/shared/job-control');
-              if (isJobsPaused()) return 'jobs paused';
+              if (isJobsPaused()) return skip('jobs paused');
               const { isProjectArchived, isProjectPaused } = await import('@/lib/shared/enabled-projects');
-              if (isProjectArchived(agent.project)) return 'project archived';
-              if (isProjectPaused(agent.project)) return 'project paused';
+              if (isProjectArchived(agent.project)) return skip('project archived');
+              if (isProjectPaused(agent.project)) return skip('project paused');
               // Don't pile scheduled work onto an open PR. When the project's
               // HEAD is off the default branch, or a release-pipeline pr-wait
               // is in flight for it, every additional run accumulates on the
@@ -723,13 +728,13 @@ export async function registerNode(): Promise<void> {
                 const { listJobs } = await import('@/lib/jobs/job-storage');
                 const prWaitInFlight = listJobs().some(j =>
                   j.project === agent.project && j.kind === 'pr-wait' && j.finishedAt === null);
-                if (prWaitInFlight) return 'pr-wait in flight (awaiting merge)';
+                if (prWaitInFlight) return skip('pr-wait in flight (awaiting merge)');
                 const { resolveProjectPath } = await import('@/lib/shared/project-data');
                 const projPath = resolveProjectPath(agent.project);
                 if (projPath) {
                   const { decidePrContext } = await import('@/lib/pipeline/pr-context');
                   const pr = await decidePrContext(projPath);
-                  if (pr.shouldOpenPr) return `on non-default branch '${pr.currentBranch}'`;
+                  if (pr.shouldOpenPr) return skip(`on non-default branch '${pr.currentBranch}'`);
                   // Branch-freshness gate: refuse the scheduled fire when the
                   // working branch is behind origin/<default>. The
                   // stranded-branch reconciler is responsible for rebasing /
@@ -738,7 +743,7 @@ export async function registerNode(): Promise<void> {
                   // on anyway.
                   const { checkBranchFresh } = await import('@/lib/git/branch-freshness');
                   const freshness = await checkBranchFresh(projPath);
-                  if (!freshness.fresh) return freshness.reason;
+                  if (!freshness.fresh) return skip(freshness.reason);
                 }
               } catch (err) {
                 console.warn(`[cron] branch-state prereq check failed for ${agent.id}:`, err);
@@ -778,8 +783,16 @@ export async function registerNode(): Promise<void> {
                 // a job, so distinguish in telemetry.
                 const code = (data?.code ?? data?.status ?? 'queued') as string;
                 console.log(`[cron] agent ${agent.id} queued at /run (code=${code})`);
+                try {
+                  const { recordAgentAttempt } = await import('@/lib/scheduling/agent-cron-state');
+                  recordAgentAttempt(agent.id, 'queued', `queued at /run (${code})`);
+                } catch { /* telemetry-only */ }
                 return null;
               }
+              try {
+                const { recordAgentAttempt } = await import('@/lib/scheduling/agent-cron-state');
+                recordAgentAttempt(agent.id, 'dispatched', jobId ?? 'started');
+              } catch { /* telemetry-only */ }
               return jobId;
             },
             enqueueNextFire: async (agentId, runAt) => {

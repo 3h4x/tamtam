@@ -11,7 +11,6 @@ import { AgentEditor, type AgentEditorSavePayload } from '@/components/agents-ta
 import { RecommendedAgents } from '@/components/agents-tab/RecommendedAgents'
 import { RECOMMENDED_AGENTS } from '@/lib/agents/recommended-agents'
 import { normalizeModelInput } from '@/lib/agents/model-aliases'
-import { nextFireDisplay } from '@/lib/scheduling/fire-times'
 import { useSchedulerHealth, type SchedulerEntry } from '@/hooks/useSchedulerHealth'
 import { Table, type Column } from '@/components/ui/Table'
 
@@ -48,6 +47,14 @@ function formatNextFire(nextFireMs: number): string {
   if (h < 24) return m ? `in ${h}h ${m}m` : `in ${h}h`
   const d = Math.floor(h / 24)
   return `in ${d}d ${h % 24}h`
+}
+
+function formatAgoCompact(epochMs: number): string {
+  const d = Math.max(0, (Date.now() - epochMs) / 1000)
+  if (d < 60) return `${Math.floor(d)}s ago`
+  if (d < 3600) return `${Math.floor(d / 60)}m ago`
+  if (d < 86400) return `${Math.floor(d / 3600)}h ago`
+  return `${Math.floor(d / 86400)}d ago`
 }
 
 export function AgentsTab({ projectName, projectJobs = [] }: AgentsTabProps) {
@@ -237,20 +244,31 @@ export function AgentsTab({ projectName, projectJobs = [] }: AgentsTabProps) {
       key: 'nextRun',
       label: 'Next Run',
       sortable: true,
-      sortValue: r => r.schedulerEntry?.nextFireMs ?? Number.MAX_SAFE_INTEGER,
+      // Sort by actual cron run_at when available; fall back to the legacy
+      // scheduler entry and finally to the schedule-relative estimate.
+      sortValue: r => r.agent.cron?.nextFireMs ?? r.schedulerEntry?.nextFireMs ?? Number.MAX_SAFE_INTEGER,
       render: r => {
         if (!r.agent.schedule || !r.agent.enabled) return <span className="text-text-tertiary text-xs">—</span>
-        const nextMs = r.schedulerEntry?.nextFireMs
-        if (nextMs) return <span className="text-xs text-text-secondary font-mono">{formatNextFire(nextMs)}</span>
-        const display = nextFireDisplay(r.agent.schedule, r.agent.id)
-        if (display) return <span className="text-xs text-text-secondary font-mono">{display.replace(/^next\s+/, '')}</span>
-        if (r.lastRun) {
-          const mins = scheduleToMinutes(r.agent.schedule)
-          if (mins < Number.MAX_SAFE_INTEGER) {
-            return <span className="text-xs text-text-secondary font-mono">{formatNextFire(r.lastRun.ts * 1000 + mins * 60000)}</span>
-          }
-        }
-        return <span className="text-text-tertiary text-xs">—</span>
+        // Prefer the live graphile queue's run_at. That's the only value
+        // that reflects skipped fires being re-enqueued to a later time
+        // (jobs paused, branch on fix/*, pipeline lock held, branch
+        // behind origin). The legacy estimates blindly assume
+        // `lastRun + interval` so they show "due now" while nothing is
+        // actually queued.
+        const nextMs = r.agent.cron?.nextFireMs ?? r.schedulerEntry?.nextFireMs
+        const skip = r.agent.lastAttempt && r.agent.lastAttempt.status === 'skipped'
+          ? r.agent.lastAttempt
+          : null
+        return (
+          <span className="text-xs font-mono text-text-secondary" title={skip ? `Last fire skipped ${formatAgoCompact(skip.at)}: ${skip.reason}` : undefined}>
+            {nextMs ? formatNextFire(nextMs) : '—'}
+            {skip && (
+              <span className="ml-2 text-status-warning/80">
+                ({skip.reason.length > 40 ? skip.reason.slice(0, 38) + '…' : skip.reason})
+              </span>
+            )}
+          </span>
+        )
       },
     },
     {
