@@ -1,4 +1,4 @@
-import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import { afterAll, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
 import { NextRequest } from 'next/server';
 import { sql } from 'drizzle-orm';
 import * as schema from '@/lib/db/schema';
@@ -22,13 +22,13 @@ vi.mock('@/lib/workflows/dispatch-release', () => ({
 
 async function applyDdl(handle: TestDbHandle): Promise<void> {
   await handle.db.execute(sql.raw(`
-    CREATE TABLE settings (
+    CREATE TABLE IF NOT EXISTS settings (
       key text PRIMARY KEY,
       value text NOT NULL
     )
   `));
   await handle.db.execute(sql.raw(`
-    CREATE TABLE queued_agent_runs (
+    CREATE TABLE IF NOT EXISTS queued_agent_runs (
       id serial PRIMARY KEY,
       project text NOT NULL,
       agent_id text NOT NULL,
@@ -39,11 +39,11 @@ async function applyDdl(handle: TestDbHandle): Promise<void> {
     )
   `));
   await handle.db.execute(sql.raw(`
-    CREATE UNIQUE INDEX queued_agent_runs_project_agent
+    CREATE UNIQUE INDEX IF NOT EXISTS queued_agent_runs_project_agent
       ON queued_agent_runs (project, agent_id)
   `));
   await handle.db.execute(sql.raw(`
-    CREATE TABLE pipeline_locks (
+    CREATE TABLE IF NOT EXISTS pipeline_locks (
       project text PRIMARY KEY,
       locked_by_job_id text NOT NULL,
       acquired_at double precision NOT NULL
@@ -52,15 +52,27 @@ async function applyDdl(handle: TestDbHandle): Promise<void> {
 }
 
 describe('/api/automation-queue', () => {
-  beforeEach(async () => {
-    vi.resetModules();
+  let GET: typeof import('@/app/api/automation-queue/route').GET;
+  let retryPost: typeof import('@/app/api/automation-queue/retry/route').POST;
+  let cancelPost: typeof import('@/app/api/automation-queue/cancel/route').POST;
+
+  beforeAll(async () => {
     mocks.handle = await createTestPgDbEmpty();
     await applyDdl(mocks.handle);
+
+    ({ GET } = await import('@/app/api/automation-queue/route'));
+    ({ POST: retryPost } = await import('@/app/api/automation-queue/retry/route'));
+    ({ POST: cancelPost } = await import('@/app/api/automation-queue/cancel/route'));
+  });
+
+  beforeEach(async () => {
+    await mocks.handle!.db.execute(sql.raw('TRUNCATE settings, queued_agent_runs, pipeline_locks RESTART IDENTITY'));
+    globalThis.__tamtamProjectRecoveryDrains?.clear();
     mocks.dispatchReleaseWorkflow.mockReset();
     mocks.dispatchReleaseWorkflow.mockResolvedValue({ ok: true, jobId: 'release-1' });
   });
 
-  afterEach(async () => {
+  afterAll(async () => {
     vi.unstubAllGlobals();
     await mocks.handle?.[Symbol.asyncDispose]();
     mocks.handle = null;
@@ -79,7 +91,6 @@ describe('/api/automation-queue', () => {
       VALUES ('proj', 'release-lock-1', 9999999999)
     `));
 
-    const { GET } = await import('@/app/api/automation-queue/route');
     const res = await GET(new NextRequest('http://localhost/api/automation-queue?project=proj'));
 
     expect(res.status).toBe(200);
@@ -116,8 +127,7 @@ describe('/api/automation-queue', () => {
       VALUES ('proj', 'agent-1', 'Review Agent', 'release-lock', 'go', 1710000010)
     `));
 
-    const { POST } = await import('@/app/api/automation-queue/cancel/route');
-    const res = await POST(new NextRequest('http://localhost/api/automation-queue/cancel', {
+    const res = await cancelPost(new NextRequest('http://localhost/api/automation-queue/cancel', {
       method: 'POST',
       body: JSON.stringify({ kind: 'pending_release', project: 'proj', id: 'pending_release:proj' }),
     }));
@@ -137,8 +147,7 @@ describe('/api/automation-queue', () => {
       throw new Error('delete failed');
     });
 
-    const { POST } = await import('@/app/api/automation-queue/cancel/route');
-    const res = await POST(new NextRequest('http://localhost/api/automation-queue/cancel', {
+    const res = await cancelPost(new NextRequest('http://localhost/api/automation-queue/cancel', {
       method: 'POST',
       body: JSON.stringify({ kind: 'pending_release', project: 'proj', id: 'pending_release:proj' }),
     }));
@@ -157,8 +166,7 @@ describe('/api/automation-queue', () => {
       VALUES ('proj', 'agent-1', 'Review Agent', 'release-lock', 'go', 1710000010)
     `));
 
-    const { POST } = await import('@/app/api/automation-queue/cancel/route');
-    const res = await POST(new NextRequest('http://localhost/api/automation-queue/cancel', {
+    const res = await cancelPost(new NextRequest('http://localhost/api/automation-queue/cancel', {
       method: 'POST',
       body: JSON.stringify({ kind: 'queued_agent_run', project: 'proj', id: '1' }),
     }));
@@ -175,8 +183,7 @@ describe('/api/automation-queue', () => {
       INSERT INTO settings (key, value) VALUES ('pending_release:proj', '1710000000')
     `));
 
-    const { POST } = await import('@/app/api/automation-queue/retry/route');
-    const res = await POST(new NextRequest('http://localhost/api/automation-queue/retry', {
+    const res = await retryPost(new NextRequest('http://localhost/api/automation-queue/retry', {
       method: 'POST',
       body: JSON.stringify({ project: 'proj' }),
     }));
@@ -204,8 +211,7 @@ describe('/api/automation-queue', () => {
     const fetchMock = vi.fn(async () => new Response(JSON.stringify({ status: 'started' }), { status: 200 }));
     vi.stubGlobal('fetch', fetchMock);
 
-    const { POST } = await import('@/app/api/automation-queue/retry/route');
-    const first = POST(new NextRequest('http://localhost/api/automation-queue/retry', {
+    const first = retryPost(new NextRequest('http://localhost/api/automation-queue/retry', {
       method: 'POST',
       body: JSON.stringify({ project: 'proj' }),
     }));
@@ -214,7 +220,7 @@ describe('/api/automation-queue', () => {
       expect(mocks.dispatchReleaseWorkflow).toHaveBeenCalledWith('proj');
     });
 
-    const second = POST(new NextRequest('http://localhost/api/automation-queue/retry', {
+    const second = retryPost(new NextRequest('http://localhost/api/automation-queue/retry', {
       method: 'POST',
       body: JSON.stringify({ project: 'proj' }),
     }));
@@ -246,12 +252,11 @@ describe('/api/automation-queue', () => {
     const fetchMock = vi.fn(async () => new Response(JSON.stringify({ status: 'started' }), { status: 200 }));
     vi.stubGlobal('fetch', fetchMock);
 
-    const { POST } = await import('@/app/api/automation-queue/retry/route');
-    const first = await POST(new NextRequest('http://localhost/api/automation-queue/retry', {
+    const first = await retryPost(new NextRequest('http://localhost/api/automation-queue/retry', {
       method: 'POST',
       body: JSON.stringify({ project: 'proj' }),
     }));
-    const second = await POST(new NextRequest('http://localhost/api/automation-queue/retry', {
+    const second = await retryPost(new NextRequest('http://localhost/api/automation-queue/retry', {
       method: 'POST',
       body: JSON.stringify({ project: 'proj' }),
     }));
@@ -276,12 +281,11 @@ describe('/api/automation-queue', () => {
     }), { status: 202 }));
     vi.stubGlobal('fetch', fetchMock);
 
-    const { POST } = await import('@/app/api/automation-queue/retry/route');
-    const first = await POST(new NextRequest('http://localhost/api/automation-queue/retry', {
+    const first = await retryPost(new NextRequest('http://localhost/api/automation-queue/retry', {
       method: 'POST',
       body: JSON.stringify({ project: 'proj' }),
     }));
-    const second = await POST(new NextRequest('http://localhost/api/automation-queue/retry', {
+    const second = await retryPost(new NextRequest('http://localhost/api/automation-queue/retry', {
       method: 'POST',
       body: JSON.stringify({ project: 'proj' }),
     }));
@@ -306,8 +310,7 @@ describe('/api/automation-queue', () => {
       detail: 'release still running',
     }), { status: 202 })));
 
-    const { POST } = await import('@/app/api/automation-queue/retry/route');
-    const res = await POST(new NextRequest('http://localhost/api/automation-queue/retry', {
+    const res = await retryPost(new NextRequest('http://localhost/api/automation-queue/retry', {
       method: 'POST',
       body: JSON.stringify({ project: 'proj' }),
     }));

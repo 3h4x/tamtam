@@ -14,6 +14,10 @@ async function applyDdl(handle: TestDbHandle): Promise<void> {
   `));
 }
 
+async function flushDbQueue(handle: TestDbHandle): Promise<void> {
+  await handle.db.execute(sql.raw('SELECT 1'));
+}
+
 describe('file-agent-overrides', () => {
   let sharedHandle: TestDbHandle;
   // Backward-compat shim so existing test bodies referencing `handle.db` still
@@ -40,7 +44,7 @@ describe('file-agent-overrides', () => {
   });
 
   beforeEach(async () => {
-    await sharedHandle.db.execute(sql.raw('TRUNCATE settings'));
+    await sharedHandle.db.execute(sql.raw('DELETE FROM settings'));
   });
 
   afterEach(() => {
@@ -150,9 +154,8 @@ describe('file-agent-overrides', () => {
       await setFileAgentOverride('proj', 'agent', { enabled: false });
       expect(await getFileAgentOverride('proj', 'agent')).not.toBeNull();
       deleteFileAgentOverride('proj', 'agent');
-      await vi.waitFor(async () => {
-        expect(await getFileAgentOverride('proj', 'agent')).toBeNull();
-      }, { interval: 1 });
+      await flushDbQueue(sharedHandle);
+      expect(await getFileAgentOverride('proj', 'agent')).toBeNull();
     });
 
     it('is a no-op when override does not exist', () => {
@@ -163,9 +166,8 @@ describe('file-agent-overrides', () => {
       await setFileAgentOverride('proj', 'a1', { enabled: false });
       await setFileAgentOverride('proj', 'a2', { enabled: true });
       deleteFileAgentOverride('proj', 'a1');
-      await vi.waitFor(async () => {
-        expect(await getFileAgentOverride('proj', 'a1')).toBeNull();
-      }, { interval: 1 });
+      await flushDbQueue(sharedHandle);
+      expect(await getFileAgentOverride('proj', 'a1')).toBeNull();
       expect(await getFileAgentOverride('proj', 'a2')).toEqual({ enabled: true });
     });
   });

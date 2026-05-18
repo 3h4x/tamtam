@@ -121,7 +121,7 @@ async function truncateAll(): Promise<void> {
   // no extension reload). Single execute() with multi-statement is rejected by
   // PGlite, so issue them via a single CTE-style query.
   await sharedHandle.db.execute(sql.raw(
-    'WITH a AS (DELETE FROM jobs RETURNING 1), b AS (DELETE FROM recommendations RETURNING 1) DELETE FROM gh_issues_cache'
+    'WITH a AS (DELETE FROM jobs RETURNING 1), b AS (DELETE FROM recommendations RETURNING 1), c AS (DELETE FROM job_completion_events RETURNING 1) DELETE FROM gh_issues_cache'
   ));
 }
 
