@@ -267,6 +267,24 @@ Cache of GitHub PRs and issues per project.
 
 ---
 
+### `ghIssueDetailCache`
+
+Cache of the filtered detail payload used by `GET /api/projects/by-project/[name]/issues?pick_top=1`.
+
+| Column | Type | Default | Notes |
+|--------|------|---------|-------|
+| `id` | INTEGER | — | PRIMARY KEY |
+| `project` | TEXT | — | NOT NULL |
+| `number` | INTEGER | — | NOT NULL; GitHub issue number |
+| `payload` | TEXT | — | NOT NULL; JSON issue detail after untrusted comments were dropped |
+| `fetchedAt` | REAL | — | NOT NULL; Unix timestamp |
+
+Index: unique `gh_issue_detail_cache_project_number` on `(project, number)`.
+
+The payload is not returned blindly: every cache hit revalidates the issue author and cached comment authors against the current `trusted_github_users` plus project `safe_users` allowlist before responding.
+
+---
+
 ### `ollama_usage`
 
 Per-embedding telemetry for local Ollama `/api/embed` calls. Populated best-effort from the retrieval embedder and queried by `/api/stats/ollama`.
@@ -320,6 +338,7 @@ db.select().from(schema.jobs).where(eq(schema.jobs.project, name)).all()
 | Scheduled automation configs | `agents` | `id` |
 | GitHub CI status + release tag cache | `ghStatus` | `project` |
 | GitHub PRs + issues cache (5 min TTL) | `ghIssuesCache` | `project` |
+| Filtered issue-cruncher detail cache (5 min TTL) | `ghIssueDetailCache` | `project`, `number` |
 | Local Ollama embedding telemetry | `ollama_usage` | `id` |
 
 ### Backup and inspect
@@ -344,6 +363,7 @@ psql "$DATABASE_URL" -c "SELECT project, kind, exit_code FROM jobs ORDER BY star
 
 # Check cache freshness
 psql "$DATABASE_URL" -c "SELECT project, to_timestamp(fetched_at) FROM gh_issues_cache;"
+psql "$DATABASE_URL" -c "SELECT project, number, to_timestamp(fetched_at) FROM gh_issue_detail_cache;"
 ```
 
 ### Schema files
@@ -374,5 +394,6 @@ TamTam stores concise agent and issue-run summaries in `jobs.work_summary`. If o
 | Job shows as running after server restart | Memory cache lost on restart; `finishedAt` never written | Job process died mid-run; `markDone` was never called — mark it manually via DB or rerun |
 | `getJob(id)` returns null for a recent job | Job not yet persisted (`saveToDb` runs async) | Add a short delay or check again after 1s |
 | Issues/PRs show stale data | `ghIssuesCache` TTL not expired (5 min) | Force refresh via the Refresh button or `POST /api/projects/by-project/[name]/issues?refresh=1` |
+| Issue-cruncher body/comments stale | `ghIssueDetailCache` TTL not expired (5 min) | Call `GET /api/projects/by-project/[name]/issues?pick_top=1&refresh=1`; trust allowlist changes are still applied on every cache hit |
 | Projects list empty after adding a repo | `projects` table not updated | Use Settings → workspace scan or `GET /api/config/projects` |
 | Deleted project still appears in job history | No FK cascade — jobs retain the project name string | Expected behavior; filter by project name in the Runs page |

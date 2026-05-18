@@ -64,6 +64,13 @@
       "when": 1779082920000,
       "tag": "0008_recover_agents_runner",
       "breakpoints": true
+    },
+    {
+      "idx": 9,
+      "version": "7",
+      "when": 1779085485570,
+      "tag": "0009_small_vindicator",
+      "breakpoints": true
     }
   ]
 }

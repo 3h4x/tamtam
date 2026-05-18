@@ -194,10 +194,9 @@ async function loadExistingRunAtsFromPg(
 async function sweepDeadOrphansFromPg(connectionString: string): Promise<void> {
   const pool = new Pool({ connectionString, max: 1 });
   try {
-    // Only rows that graphile-worker has already given up on (max_attempts
-    // reached, not currently locked). The keyed agent-cron-<id> row is
-    // separate and carries the live schedule; this only targets the
-    // unkeyed retry copies.
+    // (1) Unkeyed retry copies that graphile-worker has already given up on
+    // (max_attempts reached, not currently locked). These never re-fire on
+    // their own and would accumulate indefinitely without GC.
     await pool.query(`
       DELETE FROM graphile_worker._private_jobs j
       USING graphile_worker._private_tasks t
@@ -206,6 +205,47 @@ async function sweepDeadOrphansFromPg(connectionString: string): Promise<void> {
         AND j.attempts >= j.max_attempts
         AND j.locked_at IS NULL
         AND j.key IS NULL
+    `);
+    // (2) Keyed `agent-cron-agent-<id>` rows whose agent has been deleted
+    // or disabled in the `agents` table. The keyed agent-cron-task handler
+    // already terminates the chain when `loadAgent` returns null/disabled
+    // (no re-enqueue), but the existing row sits in the queue table until
+    // graphile-worker prunes it on its own schedule (typically days). The
+    // seed pass then sees the future-dated row, decides preservation
+    // doesn't apply, and SHOULD overwrite — but if `enabled=false` causes
+    // the agent to be excluded from `loadEnabledAgents`, the row is never
+    // touched and effectively becomes immortal. Sweep them here so the
+    // queue accurately reflects live agents only. File-based agents
+    // (`agent-cron-file:proj:name`) are intentionally left alone — they
+    // have their own lifecycle outside the `agents` DB table.
+    await pool.query(`
+      DELETE FROM graphile_worker._private_jobs j
+      USING graphile_worker._private_tasks t
+      WHERE j.task_id = t.id
+        AND t.identifier = 'agent-cron'
+        AND j.locked_at IS NULL
+        AND j.key LIKE 'agent-cron-agent-%'
+        AND replace(j.key, 'agent-cron-', '') NOT IN (
+          SELECT id FROM agents WHERE enabled AND schedule IS NOT NULL AND schedule != ''
+        )
+    `);
+    // (3) Keyed rows scheduled absurdly far in the future (more than 60
+    // days out). The cron task should never produce such a value — every
+    // supported schedule unit caps at 30 days. A row with `run_at > now()
+    // + 60d` is a corruption marker (e.g. `computeNextFire` once received
+    // a malformed schedule, or the agent was disabled when the row was
+    // last touched so the seed pass couldn't overwrite it). This sweep
+    // runs inside the seed pass — the enqueue loop that follows will
+    // re-create rows for any live agent, with proper run_at, via
+    // `quickAddJob` (the deleted row's key is now free).
+    await pool.query(`
+      DELETE FROM graphile_worker._private_jobs j
+      USING graphile_worker._private_tasks t
+      WHERE j.task_id = t.id
+        AND t.identifier = 'agent-cron'
+        AND j.locked_at IS NULL
+        AND j.key IS NOT NULL
+        AND j.run_at > NOW() + INTERVAL '60 days'
     `);
   } finally {
     await pool.end();

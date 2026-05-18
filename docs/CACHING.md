@@ -36,6 +36,7 @@ Persist across restarts. Stale data is served until TTL expires or a force-refre
 | Table | TTL | Covers | Force-refresh |
 |-------|-----|--------|---------------|
 | `gh_issues_cache` | 5 min | `GET /api/projects/by-project/[name]/issues` | `?refresh=1` query param |
+| `gh_issue_detail_cache` | 5 min | `GET /api/projects/by-project/[name]/issues?pick_top=1` detail payloads | `?refresh=1` query param; cache hits still revalidate trusted authors before returning |
 | `gh_status` | Refreshed by scheduler | GitHub CI status + release tag per project | Scheduler tick or manual scan |
 
 ---
@@ -65,6 +66,7 @@ mutation → DB write → clearXxxCache() → next GET rebuilds cache
 | Settings updated | `reloadConfig()` in `lib/config.ts` |
 | Agent created/updated/deleted | `clearAgentsCache()` in `app/api/agents/route.ts` |
 | Issues refreshed | Row upserted in `gh_issues_cache`; `?refresh=1` bypasses TTL check |
+| Issue detail refreshed | Row upserted in `gh_issue_detail_cache`; `?refresh=1` bypasses TTL check; current trust allowlists are applied again on every cache hit |
 
 ---
 
@@ -77,6 +79,7 @@ mutation → DB write → clearXxxCache() → next GET rebuilds cache
 | Just-added project not in list | `project-data` cache warm | Wait up to 10s, or call `clearProjectDataCache()` |
 | Agent change not reflected in table | Agents cache warm | Wait up to 10s, or create/update any agent to trigger invalidation |
 | Issues count stale on main page | `gh_issues_cache` TTL | Wait up to 5 min, or hit `?refresh=1` on the issues endpoint |
+| Issue-cruncher body/comments stale | `gh_issue_detail_cache` TTL | Wait up to 5 min, or hit `?pick_top=1&refresh=1`; removed trusted users are dropped immediately on cache hits |
 | All data stale after server restart | In-memory caches lost | First request rebuilds all caches from DB |
 
 ### Verify cache is working
@@ -89,6 +92,10 @@ time curl -s http://localhost:1337/api/projects > /dev/null
 # Check gh_issues_cache freshness
 psql "$DATABASE_URL" -c \
   "SELECT project, to_timestamp(fetched_at) AS cached_at FROM gh_issues_cache ORDER BY fetched_at DESC;"
+
+# Check gh_issue_detail_cache freshness
+psql "$DATABASE_URL" -c \
+  "SELECT project, number, to_timestamp(fetched_at) AS cached_at FROM gh_issue_detail_cache ORDER BY fetched_at DESC;"
 
 # Check agents cache TTL by watching DB query logs (dev mode)
 # Or run the cache-check agent from the Agents page
@@ -104,5 +111,5 @@ psql "$DATABASE_URL" -c \
 | `lib/config.ts` | 5s TTL cache for all settings |
 | `app/api/agents/route.ts` | 10s TTL cache for agents list + `clearAgentsCache()` |
 | `lib/job-storage.ts` | In-memory jobs Map + DB persistence |
-| `app/api/projects/by-project/[name]/issues/route.ts` | 5-min DB cache via `gh_issues_cache` |
+| `app/api/projects/by-project/[name]/issues/route.ts` | 5-min DB caches via `gh_issues_cache` and `gh_issue_detail_cache` |
 | `app/api/jobs/notifications/route.ts` | Serves running jobs from in-memory Map (no extra DB query) |
