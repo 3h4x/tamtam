@@ -31,6 +31,12 @@ interface JobDict {
   provider: string | null
 }
 
+function shouldRedirectJobParamToSession(data: Partial<JobDict>): data is Partial<JobDict> & { session_id: string } {
+  if (!data.session_id || !isRestorableSessionKind(data.kind ?? '')) return false
+  if (data.kind === 'run') return true
+  return data.status !== 'running' || data.finished_at !== null || data.exit_code !== null
+}
+
 interface BootstrapParams {
   projectName: string
   initialSessionId: string | undefined
@@ -249,7 +255,7 @@ export function useTerminalBootstrap({
         const res = await fetch(`/api/jobs/${encodeURIComponent(jobParam)}`)
         if (!res.ok) return
         const data = await res.json()
-        if (data.session_id && data.kind !== 'release') {
+        if (shouldRedirectJobParamToSession(data)) {
           router.replace(`/project/${projectName}/terminal/${data.session_id}`)
           return
         }
