@@ -13,6 +13,7 @@ const mocks = vi.hoisted(() => ({
   loadFileConfig: vi.fn(),
   getSettings: vi.fn(),
   getDb: vi.fn(),
+  ensureIssueBranch: vi.fn(),
 }));
 
 vi.mock('@/lib/shared/project-data', () => ({
@@ -31,6 +32,9 @@ vi.mock('@/lib/skills/tamtam-file-config', () => ({
 }));
 vi.mock('@/lib/shared/config', () => ({
   getSettings: mocks.getSettings,
+}));
+vi.mock('@/lib/github/issue-branch', () => ({
+  ensureIssueBranch: mocks.ensureIssueBranch,
 }));
 
 import { GET } from '@/app/api/projects/by-project/[projectName]/issues/route';
@@ -105,6 +109,11 @@ describe('GET /api/projects/by-project/[projectName]/issues?pick_top=1', () => {
     mocks.loadFileConfig.mockReset().mockReturnValue(null);
     mocks.getSettings.mockReset().mockReturnValue({ trusted_github_users: [], github_owner: '' });
     mocks.getDb.mockReturnValue(sharedHandle.db);
+    // Default: branch creation succeeds. Individual tests override.
+    mocks.ensureIssueBranch.mockReset().mockImplementation(async ({ issueNumber, issueTitle }) => {
+      const slug = String(issueTitle).toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-+|-+$/g, '').slice(0, 40).replace(/-+$/, '');
+      return { status: 'created', branch: `fix/issue-${issueNumber}${slug ? `-${slug}` : ''}` };
+    });
   });
 
   it('returns 404 when project not found', async () => {
@@ -332,6 +341,81 @@ describe('GET /api/projects/by-project/[projectName]/issues?pick_top=1', () => {
     const data = await res.json();
     expect(data.chosenIssue).toBeNull();
     expect(data.reason).toMatch(/list_fetch_failed.*authentication required/);
+  });
+
+  it('returns branch info from ensureIssueBranch on success', async () => {
+    setupTrustedUsers(['trusted-user']);
+    mockListFetch([
+      { number: 12, title: 'Add Foo', author: { login: 'trusted-user' }, labels: [], assignees: [], updatedAt: '2026-05-18T00:00:00Z' },
+    ]);
+    mockIssueView({
+      number: 12, title: 'Add Foo', body: '', author: { login: 'trusted-user' },
+      labels: [], state: 'OPEN', url: '', comments: [],
+    });
+
+    const res = await GET(makeReq(), { params: Promise.resolve({ projectName: 'myproj' }) });
+    const data = await res.json();
+    expect(data.chosenIssue).toBe(12);
+    expect(data.branch).toEqual({ name: 'fix/issue-12-add-foo', status: 'created' });
+    expect(mocks.ensureIssueBranch).toHaveBeenCalledWith(expect.objectContaining({
+      projectName: 'myproj',
+      issueNumber: 12,
+      issueTitle: 'Add Foo',
+    }));
+  });
+
+  it('fails closed with branch_pipeline_running reason when a pipeline holds the lock', async () => {
+    setupTrustedUsers(['trusted-user']);
+    mocks.ensureIssueBranch.mockResolvedValueOnce({ status: 'pipeline-running', blockingJobId: 'myproj-release-123' });
+    mockListFetch([
+      { number: 13, title: 'Busy', author: { login: 'trusted-user' }, labels: [], assignees: [], updatedAt: '2026-05-18T00:00:00Z' },
+    ]);
+    mockIssueView({
+      number: 13, title: 'Busy', body: '', author: { login: 'trusted-user' },
+      labels: [], state: 'OPEN', url: '', comments: [],
+    });
+
+    const res = await GET(makeReq(), { params: Promise.resolve({ projectName: 'myproj' }) });
+    const data = await res.json();
+    expect(data.chosenIssue).toBeNull();
+    expect(data.issue).toBeNull();
+    expect(data.branch).toBeNull();
+    expect(data.reason).toBe('branch_pipeline_running: myproj-release-123');
+  });
+
+  it('fails closed with branch_creation_failed reason when checkout errors', async () => {
+    setupTrustedUsers(['trusted-user']);
+    mocks.ensureIssueBranch.mockResolvedValueOnce({ status: 'error', detail: 'fatal: index lock' });
+    mockListFetch([
+      { number: 14, title: 'Locked', author: { login: 'trusted-user' }, labels: [], assignees: [], updatedAt: '2026-05-18T00:00:00Z' },
+    ]);
+    mockIssueView({
+      number: 14, title: 'Locked', body: '', author: { login: 'trusted-user' },
+      labels: [], state: 'OPEN', url: '', comments: [],
+    });
+
+    const res = await GET(makeReq(), { params: Promise.resolve({ projectName: 'myproj' }) });
+    const data = await res.json();
+    expect(data.chosenIssue).toBeNull();
+    expect(data.reason).toMatch(/branch_creation_failed.*fatal: index lock/);
+  });
+
+  it('returns chosen issue with branch=null when issueAutoBranch is disabled (skipped)', async () => {
+    setupTrustedUsers(['trusted-user']);
+    mocks.ensureIssueBranch.mockResolvedValueOnce({ status: 'skipped', reason: 'issue_auto_branch is disabled for this project' });
+    mockListFetch([
+      { number: 15, title: 'Opt out', author: { login: 'trusted-user' }, labels: [], assignees: [], updatedAt: '2026-05-18T00:00:00Z' },
+    ]);
+    mockIssueView({
+      number: 15, title: 'Opt out', body: '', author: { login: 'trusted-user' },
+      labels: [], state: 'OPEN', url: '', comments: [],
+    });
+
+    const res = await GET(makeReq(), { params: Promise.resolve({ projectName: 'myproj' }) });
+    const data = await res.json();
+    expect(data.chosenIssue).toBe(15);
+    expect(data.branch).toBeNull();
+    expect(data.reason).toBeNull();
   });
 
   it('keeps comments from project safe_users when global allowlist is empty', async () => {
