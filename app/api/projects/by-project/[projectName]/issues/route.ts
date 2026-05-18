@@ -77,7 +77,7 @@ function isMissingRelationError(error: unknown, relationName: string): boolean {
 // empty `fix/issue-N-*` branch the reconciler had to clean up).
 const BLOCKER_LABELS = new Set([
   'blocked', 'needs-info', 'needs-design', 'needs-refinement',
-  'discussion', 'question', 'wontfix', 'duplicate',
+  'discussion', 'question', 'wontfix', 'duplicate', 'human-needed',
 ]);
 
 const PRIORITY_TIERS: Array<{ score: number; labels: ReadonlySet<string> }> = [

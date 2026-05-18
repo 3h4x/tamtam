@@ -175,7 +175,10 @@ describe('seedDefaultSkills seeded defaults snapshot', () => {
     expect(skill).toBeDefined();
     expect(skill!.name).toBe('agent:cto');
     expect(skill!.content).toContain('You are the CTO');
+    expect(skill!.content).toContain('docs/*.md');
+    expect(skill!.content).toContain('already implemented');
     expect(skill!.content).toContain('gh issue create');
+    expect(skill!.content).toContain('human-needed');
     expect(skill!.content).toContain('## Problem');
     expect(skill!.content).toContain('## Proposed approach');
     expect(skill!.content).toContain('## Acceptance criteria');
@@ -683,8 +686,9 @@ Be opinionated. Prioritize ruthlessly.
     await waitForFast(async () => {
       const skill = await findSkill('agent-cto');
       expect(skill!.content).not.toBe(previousDefault);
-      // Current default is much shorter; the whole point of the upgrade.
-      expect(skill!.content.length).toBeLessThan(previousDefault.length);
+      expect(skill!.content).toContain('current project evidence');
+      expect(skill!.content).toContain('docs/*.md');
+      expect(skill!.content).toContain('human-needed');
     });
   });
 
@@ -713,6 +717,8 @@ Pick 2–3 highest-leverage gaps and file them with \`gh issue create\` — titl
       const skill = await findSkill('agent-cto');
       expect(skill!.content).not.toBe(previousDefault);
       expect(skill!.content).toContain('exact template below');
+      expect(skill!.content).toContain('current project evidence');
+      expect(skill!.content).toContain('human-needed');
       expect(skill!.content).toContain('## Acceptance criteria');
       expect(skill!.content).toContain('- [ ] <verifiable outcome 1>');
     });

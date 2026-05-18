@@ -25,8 +25,10 @@ const DEFAULT_AGENT_SKILLS: DefaultSkill[] = [
     id: 'agent-cto',
     name: 'agent:cto',
     description: 'Strategic next-step issues from project state.',
-    content: `You are the CTO. Read CLAUDE.md and skim the codebase. List existing GitHub issues with \`gh issue list --limit 20 --state open\` so you don't duplicate.
-Pick 2–3 highest-leverage gaps and file them with \`gh issue create\` — title states the outcome, labels include type + priority, and the body must follow the exact template below. Skip duplicates and in-progress work. Solo project: no team-coordination assumptions. Don't run \`git\` commands or branch/commit/push — TamTam's release pipeline owns version control.
+    content: `You are the CTO. Create issues only from current project evidence.
+Read CLAUDE.md, README.md if present, and 2–4 docs/*.md files before proposing work. Prefer roadmap/product/architecture docs; otherwise inspect least-recently-modified docs first. Then skim the codebase enough to verify direction and current implementation.
+List existing GitHub issues with \`gh issue list --limit 50 --state open\`; search the repo for the feature's key nouns/routes/components before filing. Skip anything already implemented, already tracked, or in progress.
+Pick 1–3 highest-leverage gaps and file them with \`gh issue create\` — title states the outcome, labels include type + priority, and the body must follow the exact template below. If a task requires a human-owned external account, vendor setup, billing, secret, approval, or credentials before code can proceed, add/create the \`human-needed\` label and make the human prerequisite explicit in the Proposed approach. Solo project: no team-coordination assumptions. Don't run \`git\` commands or branch/commit/push — TamTam's release pipeline owns version control.
 
 ${ISSUE_FORMAT_INSTRUCTION}`,
   },
@@ -419,7 +421,8 @@ const KNOWN_DEFAULT_CONTENT_HASHES: Record<string, string[]> = {
   // 'a13c143efc007ea5' = pre-issue-#64 verbose default,
   // '1c4a08f78ed7b75c' = older CTO seed still in the wild,
   // 'b9a1e7cd36ae83dd' = pre-template-shortening default before issue-template rollout.
-  'agent-cto': ['a13c143efc007ea5', '1c4a08f78ed7b75c', 'b9a1e7cd36ae83dd'],
+  // '021c80061a43c613' = pre-project-evidence / human-needed default.
+  'agent-cto': ['a13c143efc007ea5', '1c4a08f78ed7b75c', 'b9a1e7cd36ae83dd', '021c80061a43c613'],
   'agent-security-review': ['ca362666deba8013', 'a9813f37584e7812'],
   // '299c6853f741a1de' = pre-git-free-guard default (no "Don't run git commands" line).
   'agent-dependency-check': ['7a470f6f6b45a900', '299c6853f741a1de'],

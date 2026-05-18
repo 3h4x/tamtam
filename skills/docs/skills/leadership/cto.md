@@ -81,6 +81,23 @@ Incident response, security breaches, major outages, data loss.
 
 ## Workflows
 
+### Project-Context Issue Planning
+
+Use this when asked to propose or file engineering issues.
+
+**Step 1 — Establish current direction**
+- Read `CLAUDE.md` and `README.md` when present.
+- Read relevant `docs/*.md` files before proposing new work. Prefer roadmap, product, architecture, and integration docs; otherwise sample the least-recently-modified docs first so neglected context gets refreshed.
+- Skim the implementation for the feature area before assuming a gap exists.
+
+**Step 2 — De-duplicate against reality**
+- List open issues and search the repository for the idea's key nouns, routes, components, and provider names.
+- Do not file issues for features that already exist, are already tracked, or are visibly in progress.
+
+**Step 3 — Mark human prerequisites**
+- If delivery requires an external account, vendor setup, billing, secrets, approvals, or credentials, label the issue `human-needed`.
+- Make the human prerequisite explicit in the proposed approach so automation does not treat the issue as immediately code-ready.
+
 ### Tech Debt Assessment Workflow
 
 **Step 1 — Run the analyzer**
