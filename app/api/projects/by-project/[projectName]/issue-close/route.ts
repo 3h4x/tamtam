@@ -1,11 +1,8 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { eq, and } from 'drizzle-orm';
 import { resolveProjectPath } from '@/lib/shared/project-data';
-import { exec } from '@/lib/shared/shell';
-import { resolveGhRepo } from '@/lib/github/repo';
-import { db, schema } from '@/lib/db';
+import { closeIssue, type CloseIssueReason } from '@/lib/github/close-issue';
 
-const VALID_REASONS = new Set(['completed', 'not planned']);
+const VALID_REASONS = new Set<CloseIssueReason>(['completed', 'not planned']);
 
 export async function POST(
   req: NextRequest,
@@ -23,35 +20,21 @@ export async function POST(
   if (!Number.isInteger(issueNumber) || issueNumber <= 0) {
     return NextResponse.json({ detail: 'number required' }, { status: 400 });
   }
-  const reason = typeof body.reason === 'string' ? body.reason.trim() : '';
-  if (!VALID_REASONS.has(reason)) {
+  const reasonRaw = typeof body.reason === 'string' ? body.reason.trim() : '';
+  if (!VALID_REASONS.has(reasonRaw as CloseIssueReason)) {
     return NextResponse.json({ detail: `reason must be one of: ${Array.from(VALID_REASONS).join(', ')}` }, { status: 400 });
   }
-  const comment = typeof body.comment === 'string' ? body.comment.trim() : '';
+  const comment = typeof body.comment === 'string' ? body.comment : undefined;
 
-  const repo = await resolveGhRepo(projectName, projPath);
-  if (!repo) return NextResponse.json({ detail: 'could not determine GitHub repo' }, { status: 422 });
-
-  const args = ['issue', 'close', String(issueNumber), '--repo', repo, '--reason', reason];
-  if (comment) args.push('--comment', comment);
-
-  const r = await exec('gh', args, { timeout: 15000 });
-  if (r.exitCode !== 0) {
-    return NextResponse.json({ detail: r.stderr.trim() || 'gh issue close failed' }, { status: 422 });
+  const result = await closeIssue({
+    project: projectName,
+    projPath,
+    number: issueNumber,
+    reason: reasonRaw as CloseIssueReason,
+    comment,
+  });
+  if (!result.ok) {
+    return NextResponse.json({ detail: result.detail }, { status: result.status });
   }
-
-  // Invalidate both detail (for this number) and list (closing changes the open set).
-  await Promise.all([
-    db.delete(schema.ghIssueDetailCache)
-      .where(and(
-        eq(schema.ghIssueDetailCache.project, projectName),
-        eq(schema.ghIssueDetailCache.number, issueNumber),
-      ))
-      .execute(),
-    db.delete(schema.ghIssuesCache)
-      .where(eq(schema.ghIssuesCache.project, projectName))
-      .execute(),
-  ]);
-
-  return NextResponse.json({ status: 'closed', number: issueNumber, reason, repo });
+  return NextResponse.json({ status: 'closed', number: result.number, reason: result.reason, repo: result.repo });
 }

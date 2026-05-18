@@ -152,9 +152,9 @@ export const BUILT_IN_STEPS: PipelineStep[] = [
     isActive: ({ config }) => (config.post_merge_watch_minutes ?? 0) > 0,
     description: ({ config }) => {
       const m = config.post_merge_watch_minutes ?? 0;
-      if (m <= 0) return 'After merge, TamTam stops. Set Post-merge watch (minutes) in the Soak section to enable a CI watch window.';
+      if (m <= 0) return 'After merge, TamTam stops. Enable the Soak toggle to wait for default-branch CI.';
       const auto = config.auto_revert_enabled ? '; auto-merges the revert PR' : '; opens a revert PR for manual review';
-      return `Watch default-branch CI on the merge commit for ${m} min${auto}.`;
+      return `Wait for default-branch CI on the merge commit until it passes or fails${auto}.`;
     },
   },
 ];
