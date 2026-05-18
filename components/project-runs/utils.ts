@@ -116,6 +116,7 @@ export type KindBucket =
   | 'push'
   | 'mark-dod'
   | 'pr-wait'
+  | 'soak'
   | 'agent'
   | 'other'
 
@@ -130,6 +131,7 @@ export const ACTIVE_WORK_BUCKET_ORDER: KindBucket[] = [
   'push',
   'mark-dod',
   'pr-wait',
+  'soak',
   'agent',
   'other',
 ]
@@ -145,6 +147,7 @@ export function bucketOf(kind: string): KindBucket {
   if (kind === 'push') return 'push'
   if (kind === 'mark-dod') return 'mark-dod'
   if (kind === 'pr-wait') return 'pr-wait'
+  if (kind === 'soak') return 'soak'
   if (kind.startsWith('agent:')) return 'agent'
   return 'other'
 }
@@ -160,6 +163,7 @@ export const KIND_LABEL: Record<KindBucket, string> = {
   push: 'push',
   'mark-dod': 'dod',
   'pr-wait': 'pr-wait',
+  soak: 'soak',
   agent: 'agent',
   other: 'action',
 }
@@ -175,6 +179,7 @@ export const KIND_COLOR: Record<KindBucket, string> = {
   push: 'bg-status-success/15 text-status-success',
   'mark-dod': 'bg-status-info/15 text-status-info',
   'pr-wait': 'bg-status-info/15 text-status-info',
+  soak: 'bg-status-info/15 text-status-info',
   agent: 'bg-bg-tertiary text-text-secondary border border-border',
   other: 'bg-text-tertiary/15 text-text-secondary',
 }
@@ -187,7 +192,7 @@ export function activeWorkBadgeLabel(kindOrBucket: string): string {
 export function activeWorkAccentClass(kind: string): string {
   const bucket = bucketOf(kind)
   if (bucket === 'run' || bucket === 'release') return 'border-l-accent'
-  if (bucket === 'review' || bucket === 'mark-dod' || bucket === 'pr-wait') return 'border-l-status-info'
+  if (bucket === 'review' || bucket === 'mark-dod' || bucket === 'pr-wait' || bucket === 'soak') return 'border-l-status-info'
   if (bucket === 'test' || bucket === 'commit' || bucket === 'push') return 'border-l-status-success'
   if (bucket === 'fix' || bucket === 'fix-ci') return 'border-l-status-warning'
   return 'border-l-border'
@@ -206,7 +211,7 @@ export function activeWorkTitle(job: JobInfo): string {
 // step, so the UI shows it as a top-level row rather than nesting it under a
 // release card. It IS included in PIPELINE_LIKE in the notifications route so
 // that a terminal release success can supersede an older fix-ci failure.
-export const PIPELINE_CHILD_KINDS = new Set(['test', 'review', 'fix', 'commit', 'push', 'mark-dod', 'pr-wait'])
+export const PIPELINE_CHILD_KINDS = new Set(['test', 'review', 'fix', 'commit', 'push', 'mark-dod', 'pr-wait', 'soak'])
 
 // An entry represents a single row in the history. For `run` jobs with a
 // session_id we collapse every turn of the conversation into one entry so the
@@ -939,6 +944,7 @@ export function buildReleaseSummary(children: Entry[], release?: Entry): string 
 function pipelineStepLabel(kind: string): string {
   if (kind === 'mark-dod') return 'dod'
   if (kind === 'pr-wait') return 'pr wait'
+  if (kind === 'soak') return 'soak'
   return kind
 }
 

@@ -45,6 +45,12 @@ export const projects = pgTable('projects', {
   autoCommitEnabled: boolean('auto_commit_enabled').default(false),
   autoPushEnabled: boolean('auto_push_enabled').default(false),
   autoPrMergeEnabled: boolean('auto_pr_merge_enabled').default(false),
+  // Number of minutes after a PR merge during which TamTam watches the
+  // default branch's CI on the merge commit. 0 disables the watcher.
+  // When CI fails inside the window, a revert PR is opened (and
+  // auto-merged when `auto_revert_enabled` is also on).
+  postMergeWatchMinutes: integer('post_merge_watch_minutes').default(0),
+  autoRevertEnabled: boolean('auto_revert_enabled').default(false),
   releaseAfterRun: boolean('release_after_run').default(false),
   issueAutoBranch: boolean('issue_auto_branch').default(true),
   lastPushError: text('last_push_error'),

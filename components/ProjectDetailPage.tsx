@@ -80,6 +80,8 @@ export function ProjectDetailPage({
   const [autoCommitEnabledInput, setAutoCommitEnabledInput] = useState(false)
   const [autoPushEnabledInput, setAutoPushEnabledInput] = useState(false)
   const [autoPrMergeEnabledInput, setAutoPrMergeEnabledInput] = useState(false)
+  const [postMergeWatchMinutesInput, setPostMergeWatchMinutesInput] = useState('')
+  const [autoRevertEnabledInput, setAutoRevertEnabledInput] = useState(false)
   const [releaseAfterRunInput, setReleaseAfterRunInput] = useState(false)
   const [issueAutoBranchInput, setIssueAutoBranchInput] = useState(true)
   const [testsDisabledInput, setTestsDisabledInput] = useState(false)
@@ -200,6 +202,10 @@ export function ProjectDetailPage({
     setAutoCommitEnabledInput(!!data.auto_commit_enabled)
     setAutoPushEnabledInput(!!data.auto_push_enabled)
     setAutoPrMergeEnabledInput(!!data.auto_pr_merge_enabled)
+    setPostMergeWatchMinutesInput(
+      data.post_merge_watch_minutes != null ? String(data.post_merge_watch_minutes) : '0',
+    )
+    setAutoRevertEnabledInput(!!data.auto_revert_enabled)
     setReleaseAfterRunInput(!!data.release_after_run)
     setIssueAutoBranchInput(data.issue_auto_branch ?? true)
     setTestsDisabledInput(!!data.tests_disabled)
@@ -306,7 +312,7 @@ export function ProjectDetailPage({
     .filter(j => j.kind === 'test' && j.status === 'done')
     .sort((a, b) => (b.finished_at || 0) - (a.finished_at || 0))[0]
 
-  const RELEASE_CHILD_KINDS = new Set(['test', 'review', 'fix', 'commit', 'push', 'mark-dod', 'pr-wait'])
+  const RELEASE_CHILD_KINDS = new Set(['test', 'review', 'fix', 'commit', 'push', 'mark-dod', 'pr-wait', 'soak'])
   const running = projectJobs.filter(j => j.status === 'running')
   const releaseRunning = running.some(j => j.kind === 'release')
   const runningJobs = (releaseRunning ? running.filter(j => !RELEASE_CHILD_KINDS.has(j.kind)) : running)
@@ -482,6 +488,8 @@ export function ProjectDetailPage({
     auto_commit_enabled: autoCommitEnabledInput,
     auto_push_enabled: autoPushEnabledInput,
     auto_pr_merge_enabled: autoPrMergeEnabledInput,
+    post_merge_watch_minutes: postMergeWatchMinutesInput,
+    auto_revert_enabled: autoRevertEnabledInput,
     release_after_run: releaseAfterRunInput,
     issue_auto_branch: issueAutoBranchInput,
     tests_disabled: testsDisabledInput,
@@ -518,6 +526,8 @@ export function ProjectDetailPage({
     configInputs.auto_commit_enabled !== !!config.auto_commit_enabled ||
     configInputs.auto_push_enabled !== !!config.auto_push_enabled ||
     configInputs.auto_pr_merge_enabled !== !!config.auto_pr_merge_enabled ||
+    configInputs.post_merge_watch_minutes !== String(config.post_merge_watch_minutes ?? 0) ||
+    configInputs.auto_revert_enabled !== !!config.auto_revert_enabled ||
     configInputs.release_after_run !== !!config.release_after_run ||
     configInputs.issue_auto_branch !== (config.issue_auto_branch ?? true) ||
     configInputs.tests_disabled !== !!config.tests_disabled ||
@@ -786,6 +796,10 @@ export function ProjectDetailPage({
             setAutoPushEnabledInput={setAutoPushEnabledInput}
             autoPrMergeEnabledInput={autoPrMergeEnabledInput}
             setAutoPrMergeEnabledInput={setAutoPrMergeEnabledInput}
+            postMergeWatchMinutesInput={postMergeWatchMinutesInput}
+            setPostMergeWatchMinutesInput={setPostMergeWatchMinutesInput}
+            autoRevertEnabledInput={autoRevertEnabledInput}
+            setAutoRevertEnabledInput={setAutoRevertEnabledInput}
             releaseAfterRunInput={releaseAfterRunInput}
             setReleaseAfterRunInput={setReleaseAfterRunInput}
             issueAutoBranchInput={issueAutoBranchInput}

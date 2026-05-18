@@ -23,7 +23,7 @@ export type PushResult =
   | { ok: true; jobId?: string; commitSha: string; message: string; prUrl?: string; prNumber?: number; prRepo?: string }
   | { ok: false; jobId?: string; status: number; detail: string; blockingJobId?: string };
 
-const RETRIABLE_RELEASE_STEP_KINDS = new Set(['test', 'review', 'fix', 'commit', 'push', 'mark-dod', 'pr-wait']);
+const RETRIABLE_RELEASE_STEP_KINDS = new Set(['test', 'review', 'fix', 'commit', 'push', 'mark-dod', 'pr-wait', 'soak']);
 
 export type ReleaseRetryValidation =
   | { ok: true; parentJobId: string | null; releaseLinkedRetry: boolean }

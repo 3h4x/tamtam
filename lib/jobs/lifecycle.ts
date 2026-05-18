@@ -405,7 +405,7 @@ function findLinkedActiveReleaseJob(job: JobData): JobData | null {
 // runs cheaply on every markDone call and only acts when the release has
 // no running children and its most recent child finished long enough ago
 // that we're confident nothing else is about to chain.
-export const PIPELINE_STEP_KINDS = new Set(['test', 'review', 'fix', 'commit', 'push', 'pr-wait', 'mark-dod']);
+export const PIPELINE_STEP_KINDS = new Set(['test', 'review', 'fix', 'commit', 'push', 'pr-wait', 'mark-dod', 'soak']);
 
 // `reconcileStaleRelease` was retired when chain-loop closure landed: phase
 // workflows now re-dispatch the orchestrator with their sub-step jobId, and

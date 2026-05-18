@@ -34,7 +34,8 @@ export type NextPhase =
   | { next: 'abort'; from: 'review'; verdict: 'DO NOT SHIP' | 'NEEDS ATTENTION'; stopReason?: string }
   | { next: 'mark-dod'; from: 'push' }
   | { next: 'pr-wait'; from: 'mark-dod' | 'push'; pr: { prNumber: number; prRepo: string; prUrl: string } }
-  | { next: 'done'; from: 'mark-dod' | 'pr-wait' | 'commit' | 'fix' | 'push' }
+  | { next: 'soak'; from: 'pr-wait'; soak: { mergeSha: string; prNumber: number; prRepo: string; prUrl: string; defaultBranch: string; watchMinutes: number; autoRevert: boolean } }
+  | { next: 'done'; from: 'mark-dod' | 'pr-wait' | 'soak' | 'commit' | 'fix' | 'push' }
   | { next: 'unknown'; from: string; reason: string };
 
 export interface DecisionInputs {
@@ -63,6 +64,10 @@ export interface DecisionInputs {
   hasUncommittedChanges?: boolean;
   /** Whether the current branch has local commits not pushed upstream. */
   hasUnpushedCommits?: boolean;
+  /** Soak context. Provided after a successful pr-wait when the project
+   *  has a positive `post_merge_watch_minutes`. When set, pr-wait routes
+   *  to the new `soak` phase before the chain terminates. */
+  soakContext?: { mergeSha: string; prNumber: number; prRepo: string; prUrl: string; defaultBranch: string; watchMinutes: number; autoRevert: boolean } | null;
 }
 
 import { TRANSITIONS, matchesPattern, buildNextPhase } from './pipeline-spec';

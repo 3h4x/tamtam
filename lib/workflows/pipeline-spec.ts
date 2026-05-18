@@ -26,7 +26,7 @@ export const TRIGGERS = [
 // ─── Phase names ───────────────────────────────────────────────────────────
 
 export type PhaseName =
-  | 'test' | 'review' | 'fix' | 'commit' | 'push' | 'mark-dod' | 'pr-wait';
+  | 'test' | 'review' | 'fix' | 'commit' | 'push' | 'mark-dod' | 'pr-wait' | 'soak';
 export type TerminalName = 'done' | 'abort' | 'unknown';
 export type ExternalPhaseName = 'fix-ci';
 export type TransitionTarget = PhaseName | TerminalName | ExternalPhaseName;
@@ -45,6 +45,9 @@ export type WhenClause = {
   /** Presence check on optional input fields. Truthy = field is set and
    *  truthy; falsy = field is unset or falsy. */
   hasPushPrContext?: boolean;
+  /** Presence check on the soak context — true means a positive
+   *  `post_merge_watch_minutes` was resolved before this transition. */
+  hasSoakContext?: boolean;
   /** Sentinel marking transitions fired OUTSIDE decideNextPhase — included
    *  for diagram completeness only. Spec-driven matcher ignores them. */
   external?: 'checks_failed' | 'exit 0';
@@ -63,7 +66,7 @@ export interface Transition {
   label: string;
   /** Metadata field names the dispatcher must propagate from inputs to the
    *  NextPhase output (e.g. 'testExitCode', 'pushPrContext'). */
-  carries?: ReadonlyArray<'testExitCode' | 'verdict' | 'pushPrContext' | 'stopReason'>;
+  carries?: ReadonlyArray<'testExitCode' | 'verdict' | 'pushPrContext' | 'stopReason' | 'soakContext'>;
   /** Constant projection fields the matcher should set on the NextPhase. */
   set?: Record<string, string>;
   /** Guards that may rewrite this decision before dispatch. Diagram annotates
@@ -130,15 +133,21 @@ export const TRANSITIONS: ReadonlyArray<Transition> = [
   { from: 'mark-dod', when: {},
     to: 'done',    label: 'otherwise' },
 
-  // pr-wait → done is the normal path. checks_failed → fix-ci is dispatched
+  // pr-wait → soak when the project opted in to a post-merge watch window;
+  // otherwise pr-wait → done as before. checks_failed → fix-ci is dispatched
   // by the pr-wait phase itself, not by decideNextPhase; declared here so
   // the diagram shows the loop.
+  { from: 'pr-wait', when: { exitCode: 0, hasSoakContext: true },
+    to: 'soak', label: 'soak enabled', carries: ['soakContext'] },
   { from: 'pr-wait', when: {},
     to: 'done', label: 'merged' },
   { from: 'pr-wait', when: { external: 'checks_failed' },
     to: 'fix-ci', label: 'checks_failed', external: true },
   { from: 'fix-ci' as PhaseName, when: { external: 'exit 0' },
     to: 'test', label: 'exit 0', external: true },
+
+  // soak terminates the chain — outcome is reflected by its own exit code.
+  { from: 'soak', when: {}, to: 'done', label: 'soak complete' },
 ];
 
 // ─── Matcher ───────────────────────────────────────────────────────────────
@@ -167,6 +176,12 @@ export function matchesPattern(inputs: DecisionInputs, when: WhenClause): boolea
       if (expected === false && present) return false;
       continue;
     }
+    if (key === 'hasSoakContext') {
+      const present = inputs.soakContext != null;
+      if (expected === true && !present) return false;
+      if (expected === false && present) return false;
+      continue;
+    }
     const actual = (inputs as unknown as Record<string, unknown>)[key];
     if (!matchValue(actual, expected)) return false;
   }
@@ -190,6 +205,8 @@ export function buildNextPhase(
     for (const field of t.carries) {
       if (field === 'pushPrContext') {
         if (inputs.pushPrContext) base.pr = inputs.pushPrContext;
+      } else if (field === 'soakContext') {
+        if (inputs.soakContext) base.soak = inputs.soakContext;
       } else if (field === 'testExitCode') {
         base.testExitCode = inputs.exitCode;
       } else if (field === 'verdict') {

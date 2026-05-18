@@ -139,6 +139,8 @@ export interface ProjectConfig {
   auto_commit_enabled?: boolean
   auto_push_enabled?: boolean
   auto_pr_merge_enabled?: boolean
+  post_merge_watch_minutes?: number
+  auto_revert_enabled?: boolean
   release_after_run?: boolean
   issue_auto_branch?: boolean
   tests_disabled?: boolean

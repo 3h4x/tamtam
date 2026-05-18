@@ -189,6 +189,12 @@ export async function writeProjectFieldYaml(
     run(db.update(schema.projects).set({ website: value }).where(w).execute());
   } else if (fieldName === 'qa_url') {
     run(db.update(schema.projects).set({ qaUrl: value }).where(w).execute());
+  } else if (fieldName === 'post_merge_watch_minutes') {
+    const parsed = value === null ? 0 : Number.parseInt(value, 10);
+    const minutes = Number.isFinite(parsed) && parsed >= 0 ? parsed : 0;
+    run(db.update(schema.projects).set({ postMergeWatchMinutes: minutes }).where(w).execute());
+  } else if (fieldName === 'auto_revert_enabled') {
+    run(db.update(schema.projects).set({ autoRevertEnabled: value === '1' || value === 'true' }).where(w).execute());
   }
   return true;
 }
@@ -246,6 +252,26 @@ export async function getProjectPushResult(projName: string): Promise<{ lastPush
   return { lastPushError: row.lastPushError ?? null, lastPushAt: row.lastPushAt ?? null };
 }
 
+export async function getProjectSoakConfig(projName: string): Promise<{
+  postMergeWatchMinutes: number;
+  autoRevertEnabled: boolean;
+} | null> {
+  const rows = await db
+    .select({
+      postMergeWatchMinutes: schema.projects.postMergeWatchMinutes,
+      autoRevertEnabled: schema.projects.autoRevertEnabled,
+    })
+    .from(schema.projects)
+    .where(eq(schema.projects.name, projName))
+    .limit(1);
+  const row = rows[0] ?? null;
+  if (!row) return null;
+  return {
+    postMergeWatchMinutes: row.postMergeWatchMinutes ?? 0,
+    autoRevertEnabled: !!row.autoRevertEnabled,
+  };
+}
+
 export async function getProjectTestConfig(projName: string): Promise<{
   testCommand: string | null;
   testCronEnabled: boolean;
@@ -257,6 +283,8 @@ export async function getProjectTestConfig(projName: string): Promise<{
   issueAutoBranch: boolean;
   testsDisabled: boolean;
   reviewDisabled: boolean;
+  postMergeWatchMinutes: number;
+  autoRevertEnabled: boolean;
 } | null> {
   const rows = await db
     .select()
@@ -276,6 +304,8 @@ export async function getProjectTestConfig(projName: string): Promise<{
     issueAutoBranch: row.issueAutoBranch ?? true,
     testsDisabled: !!row.testsDisabled,
     reviewDisabled: !!row.reviewDisabled,
+    postMergeWatchMinutes: row.postMergeWatchMinutes ?? 0,
+    autoRevertEnabled: !!row.autoRevertEnabled,
   };
 }
 
