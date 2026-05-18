@@ -195,6 +195,52 @@ describe('decideNextPhase', () => {
         });
       },
     );
+
+    it('soak → done regardless of exit code', () => {
+      expect(decideNextPhase({ kind: 'soak', exitCode: 0, verdict: null }))
+        .toEqual({ next: 'done', from: 'soak' });
+      expect(decideNextPhase({ kind: 'soak', exitCode: 1, verdict: null }))
+        .toEqual({ next: 'done', from: 'soak' });
+    });
+  });
+
+  describe('pr-wait → soak', () => {
+    const soak = {
+      mergeSha: 'deadbeef1234',
+      prNumber: 7,
+      prRepo: 'owner/repo',
+      prUrl: 'https://github.com/owner/repo/pull/7',
+      defaultBranch: 'main',
+      watchMinutes: 15,
+      autoRevert: false,
+    };
+
+    it('pr-wait exit 0 + soakContext present → soak', () => {
+      expect(decideNextPhase({
+        kind: 'pr-wait',
+        exitCode: 0,
+        verdict: null,
+        soakContext: soak,
+      })).toEqual({ next: 'soak', from: 'pr-wait', soak });
+    });
+
+    it('pr-wait exit 0 + soakContext absent → done', () => {
+      expect(decideNextPhase({
+        kind: 'pr-wait',
+        exitCode: 0,
+        verdict: null,
+        soakContext: null,
+      })).toEqual({ next: 'done', from: 'pr-wait' });
+    });
+
+    it('pr-wait exit nonzero + soakContext present → done (no soak after failed merge)', () => {
+      expect(decideNextPhase({
+        kind: 'pr-wait',
+        exitCode: 1,
+        verdict: null,
+        soakContext: soak,
+      })).toEqual({ next: 'done', from: 'pr-wait' });
+    });
   });
 
   describe('mark-dod → pr-wait under auto-merge', () => {

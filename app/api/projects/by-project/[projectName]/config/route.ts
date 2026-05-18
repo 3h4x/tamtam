@@ -78,6 +78,8 @@ export async function GET(
     auto_commit_enabled: testCfg?.autoCommitEnabled ?? false,
     auto_push_enabled: testCfg?.autoPushEnabled ?? false,
     auto_pr_merge_enabled: testCfg?.autoPrMergeEnabled ?? false,
+    post_merge_watch_minutes: testCfg?.postMergeWatchMinutes ?? 0,
+    auto_revert_enabled: testCfg?.autoRevertEnabled ?? false,
     release_after_run: testCfg?.releaseAfterRun ?? false,
     issue_auto_branch: testCfg?.issueAutoBranch ?? true,
     tests_disabled: testCfg?.testsDisabled ?? false,
@@ -170,7 +172,7 @@ export async function PATCH(
   // `.tamtam/config.yml` doesn't change underneath them.
   const booleanFields = [
     'test_cron_enabled', 'auto_commit_enabled', 'auto_push_enabled',
-    'auto_pr_merge_enabled', 'release_after_run',
+    'auto_pr_merge_enabled', 'auto_revert_enabled', 'release_after_run',
     'tests_disabled', 'review_disabled', 'issue_auto_branch',
   ] as const;
 
@@ -182,6 +184,23 @@ export async function PATCH(
       touched = true;
       dbUpdates.push({ field, value: body[field] ? '1' : '0' });
     }
+  }
+
+  // Soak window minutes — 0 disables the watcher, positive integers enable.
+  if (body.post_merge_watch_minutes !== undefined) {
+    const raw = body.post_merge_watch_minutes;
+    let parsed: number | null = null;
+    if (typeof raw === 'number' && Number.isFinite(raw)) parsed = Math.trunc(raw);
+    else if (typeof raw === 'string') {
+      const trimmed = raw.trim();
+      if (trimmed === '') parsed = 0;
+      else if (/^\d+$/.test(trimmed)) parsed = Number.parseInt(trimmed, 10);
+    }
+    if (parsed === null || parsed < 0) {
+      return badRequest('post_merge_watch_minutes must be a non-negative integer');
+    }
+    touched = true;
+    dbUpdates.push({ field: 'post_merge_watch_minutes', value: String(parsed) });
   }
 
   // Per-project website URL the QA agent browses. DB-only metadata.

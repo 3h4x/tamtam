@@ -11,7 +11,7 @@ import { decideNextPhase, type DecisionInputs } from '@/lib/workflows/decide-nex
 // fail at runtime — catch it here at test time instead.
 
 const DISPATCHABLE_PHASES = new Set([
-  'test', 'review', 'fix', 'commit', 'push', 'mark-dod', 'pr-wait',
+  'test', 'review', 'fix', 'commit', 'push', 'mark-dod', 'pr-wait', 'soak',
 ]);
 const TERMINAL_NAMES = new Set(['done', 'abort', 'unknown']);
 const EXTERNAL_PHASES = new Set(['fix-ci']);

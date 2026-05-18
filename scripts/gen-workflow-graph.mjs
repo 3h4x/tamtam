@@ -80,7 +80,7 @@ function buildMermaid({ TRIGGERS, TRANSITIONS }) {
     if (!byFrom.has(t.from)) byFrom.set(t.from, []);
     byFrom.get(t.from).push(t);
   }
-  const phaseOrder = ['test', 'review', 'fix', 'commit', 'push', 'mark-dod', 'pr-wait', 'fix-ci'];
+  const phaseOrder = ['test', 'review', 'fix', 'commit', 'push', 'mark-dod', 'pr-wait', 'soak', 'fix-ci'];
   for (const from of phaseOrder) {
     const rows = byFrom.get(from);
     if (!rows) continue;

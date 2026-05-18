@@ -21,6 +21,8 @@ export interface StepConfigView {
   auto_commit_enabled?: boolean;
   auto_push_enabled?: boolean;
   auto_pr_merge_enabled?: boolean;
+  post_merge_watch_minutes?: number;
+  auto_revert_enabled?: boolean;
 }
 
 export interface StepSetters {
@@ -143,11 +145,23 @@ export const BUILT_IN_STEPS: PipelineStep[] = [
       ? 'Poll CI and auto-merge the PR once checks pass. Click to disable (PR stays open for manual merge).'
       : 'Poll CI and auto-merge the PR once checks pass. Click to enable (also enables commit + push).',
   },
+  {
+    id: 'soak',
+    label: 'soak',
+    mandatory: false,
+    isActive: ({ config }) => (config.post_merge_watch_minutes ?? 0) > 0,
+    description: ({ config }) => {
+      const m = config.post_merge_watch_minutes ?? 0;
+      if (m <= 0) return 'After merge, TamTam stops. Set Post-merge watch (minutes) in the Soak section to enable a CI watch window.';
+      const auto = config.auto_revert_enabled ? '; auto-merges the revert PR' : '; opens a revert PR for manual review';
+      return `Watch default-branch CI on the merge commit for ${m} min${auto}.`;
+    },
+  },
 ];
 
 // Built-in ordering — used to sort any plugin-registered steps that happen to
 // reuse a built-in id (extras with unknown ids sort after the last built-in).
-const BUILT_IN_ORDER = ['test', 'review', 'fix', 'commit', 'push', 'dod', 'merge'];
+const BUILT_IN_ORDER = ['test', 'review', 'fix', 'commit', 'push', 'dod', 'merge', 'soak'];
 
 const EXTRA_STEPS: PipelineStep[] = [];
 

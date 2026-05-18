@@ -79,6 +79,7 @@ export function OverviewTab({
       push: 0,
       'mark-dod': 0,
       'pr-wait': 0,
+      soak: 0,
       agent: 0,
       other: 0,
     } satisfies Record<KindBucket, number>,

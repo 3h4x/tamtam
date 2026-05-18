@@ -99,6 +99,8 @@ async function applyDdl(handle: TestDbHandle): Promise<void> {
       auto_commit_enabled boolean DEFAULT false,
       auto_push_enabled boolean DEFAULT false,
       auto_pr_merge_enabled boolean DEFAULT false,
+      post_merge_watch_minutes integer DEFAULT 0,
+      auto_revert_enabled boolean DEFAULT false,
       pr_workflow_enabled boolean DEFAULT false,
       release_after_run boolean DEFAULT false,
       issue_auto_branch boolean DEFAULT true,

@@ -10,7 +10,8 @@ export type NotificationEvent =
   | 'fix_loop_exhausted'
   | 'review_do_not_ship'
   | 'agent_run_fail'
-  | 'budget_blocked';
+  | 'budget_blocked'
+  | 'post_merge_revert';
 
 export interface NotificationPayload {
   event: NotificationEvent;
@@ -65,6 +66,9 @@ function getNotificationConfig(event: NotificationEvent): NotificationConfig {
     case 'budget_blocked':
       enabled = settings.notification_on_budget_blocked || false;
       break;
+    case 'post_merge_revert':
+      enabled = settings.notification_on_post_merge_revert || false;
+      break;
   }
 
   return { webhook_url: webhookUrl, webhook_secret: webhookSecret, enabled };
@@ -87,6 +91,7 @@ function throttleSubject(payload: NotificationPayload): string {
     case 'review_do_not_ship': return 'review';
     case 'fix_loop_exhausted': return 'fix';
     case 'budget_blocked': return 'budget';
+    case 'post_merge_revert': return 'soak';
     default: return 'release';
   }
 }

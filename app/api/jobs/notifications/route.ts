@@ -46,7 +46,7 @@ export async function GET() {
   // and PIPELINE_STEP_KINDS: it is not a standard release-chain step that the
   // orchestrator schedules, and the UI groups it as a top-level entry rather
   // than nesting it under a release card.
-  const PIPELINE_LIKE = new Set(['release', 'test', 'review', 'fix', 'fix-ci', 'commit', 'push', 'pr-wait', 'mark-dod']);
+  const PIPELINE_LIKE = new Set(['release', 'test', 'review', 'fix', 'fix-ci', 'commit', 'push', 'pr-wait', 'mark-dod', 'soak']);
   // mark-dod is advisory and can be followed by commit/push, so it must not
   // clear older failures on its own. Neither should intermediate green steps
   // like a passing test or LGTM review: those are step-local successes, not a

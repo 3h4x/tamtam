@@ -1,6 +1,8 @@
 # Release Pipeline — How It Works
 
-The pipeline is a quality-gated sequence driven by the selected provider. The registry is unified per project: `test → review → fix → commit → push → dod → merge`.
+The pipeline is a quality-gated sequence driven by the selected provider. The registry is unified per project: `test → review → fix → commit → push → dod → merge → soak`.
+
+`soak` is opt-in: when the project's `post_merge_watch_minutes` is `0` (the default), the chain still ends at `merge` and the release is finalised. When it is positive, TamTam keeps watching the default branch's CI on the merge commit for that window. A default-branch CI failure inside the window opens a revert PR (and auto-merges it when `auto_revert_enabled` is on).
 
 ## Auto-fix policy (requirements)
 
@@ -199,8 +201,19 @@ landed. If auto-merge is enabled and the push produced or reused a PR, TamTam
 still continues into `pr-wait` even when `mark-dod` exits nonzero.
 
 PR-MERGE-WAIT
-  ├─ CI passes → merge PR → switch to default branch → finalize release (exit 0)
+  ├─ CI passes → merge PR → switch to default branch
+  │              ├─ project has post_merge_watch_minutes > 0 → start SOAK
+  │              └─ otherwise                                 → finalize release (exit 0)
   └─ CI fails  → seed failed CI URL → dispatch fix-ci → finalize release (exit 1)
+
+SOAK
+  ├─ default-branch CI on merge sha passes within window → finalize release (exit 0)
+  ├─ default-branch CI on merge sha fails within window  → open revert PR
+  │     ├─ auto_revert_enabled → enable squash auto-merge on the revert PR
+  │     └─ otherwise           → leave revert PR open for review
+  │     emit `post_merge_revert` notification (success | failure)
+  │     finalize release (exit 1)
+  └─ window elapsed with no failures → finalize release (exit 0)
 
 `pr-wait` polls the PR immediately, then every 30 seconds by default. When
 GitHub reports an empty `statusCheckRollup`, TamTam does not treat that as "no
@@ -398,6 +411,8 @@ All stored in the `projects` DB table; editable via the project Config tab.
 | `auto_pr_merge_enabled` | off | After DoD, poll CI and auto-merge the PR when the push path produced a PR |
 | `release_after_run` | off | Trigger the full pipeline automatically after each successful agent/terminal run |
 | `review_disabled` | off | Skip the review phase; after tests pass, uncommitted changes go to commit and unpushed commits go to push |
+| `post_merge_watch_minutes` | 0 | After merge, watch default-branch CI on the merge commit for this many minutes. 0 disables. A failure inside the window opens a revert PR via `git revert <sha>` + `gh pr create` |
+| `auto_revert_enabled` | off | When the soak watcher opens a revert PR, also enable squash auto-merge so it lands without human review |
 
 When `auto_push_enabled` is **off**: pipeline chaining only happens during an active Release run.
 When `auto_push_enabled` is **on**: the same review→fix→push chaining happens for any standalone review job on that project.
@@ -425,6 +440,7 @@ Checks the push job log for strings from husky, lint-staged, eslint, pre-commit 
 | `lib/start-push.ts` | `startProjectPush(project)` | git add → commit message → push |
 | `lib/pipeline/push-rejection.ts` | `isHookRejection`, `isTestFailureRejection` | Classifies push failure kind |
 | `lib/start-mark-dod.ts` | `startMarkDod(project)` | DoD verification against the linked issue or PR, with checkbox updates when issue criteria exist |
+| `lib/pipeline/start-soak.ts` | `launchSoak`, `classifyDefaultBranchCi`, `openRevertPr`, `notifyPostMergeRevert` | Post-merge CI watcher + revert-PR opener. Pure helpers are unit-tested; the side-effectful loop is driven by `lib/workflows/phases/soak-phase.ts` |
 | `lib/job-storage.ts` | `markDone(jobId, exitCode)` | Called by PM2 exit handler; triggers all completion hooks |
 
 ---
@@ -617,7 +633,7 @@ releaseWorkflow         (lib/workflows/release.ts)
 HTTP response with release.jobId
 ```
 
-### The 8 phase workflows
+### The 9 phase workflows
 
 Each follows the same kickoff/await/return shape (with minor variations: push/commit are inline so they have no await step; review has an extra verdict-read step; pr-wait has a 60-min wait ceiling). All under `lib/workflows/phases/`:
 
@@ -631,6 +647,7 @@ Each follows the same kickoff/await/return shape (with minor variations: push/co
 | `commit` | `commit-phase.ts` | `CommitPhaseResult` — `{ commitSha, message, jobId? }` |
 | `mark-dod` | `mark-dod-phase.ts` | `MarkDodPhaseResult` — `{ jobId, issueNumber, verified, total, changed }` |
 | `pr-wait` | `pr-wait-phase.ts` | `PrWaitPhaseResult` — `{ jobId, finished, merged, reason, exitCode }` |
+| `soak` | `soak-phase.ts` | `SoakPhaseResult` — `{ jobId, verdict, revertPrUrl, autoMerged }` (or `{ skipped: true, reason }`) |
 
 All seven return discriminated unions with `ok: true | false` and a `reason` for the failure branch (`start_failed` / `launch_failed` / `mark_dod_failed`). Each has a focused unit test file with directive-source guards. The push-hook fix path no longer has its own phase — hook rejections spawn the generic `fix` phase with `parentJobId` pointing at the failed push.
 
@@ -710,5 +727,6 @@ Any `Date.now()`, `Math.random()`, settings read, env read, or branch-state read
 | `lib/workflows/dispatch-phase.ts` | NextPhase → start(matching phase workflow) |
 | `lib/workflows/find-next-substep.ts` | Sibling-job matcher for observation-only mode |
 | `lib/workflows/decode-workflow-payload.ts` | CBOR + devalue payload decoder for the API |
-| `lib/workflows/phases/*.ts` | 8 per-phase driver workflows |
+| `lib/workflows/phases/*.ts` | 9 per-phase driver workflows |
+| `lib/pipeline/start-soak.ts` | Soak-phase pure helpers (`classifyDefaultBranchCi`, `revertBranchName`, `buildRevertPrBody`) plus side-effectful `queryDefaultBranchCi`, `openRevertPr`, `autoMergeRevertPr`, `notifyPostMergeRevert`, `launchSoak` |
 | `__tests__/lib/workflows/*.test.ts` | ~140 unit tests with directive guards |

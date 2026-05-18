@@ -36,7 +36,7 @@ export interface PipelineStripProps {
   onRefresh: () => Promise<void>
 }
 
-const PIPELINE_KINDS = new Set(['test', 'review', 'fix', 'commit', 'push', 'mark-dod', 'pr-wait'])
+const PIPELINE_KINDS = new Set(['test', 'review', 'fix', 'commit', 'push', 'mark-dod', 'pr-wait', 'soak'])
 
 interface PipelineChainContext {
   releaseId: string | null
@@ -137,6 +137,7 @@ function connectorClass(prev: StepState): string {
 function jobKindLabel(kind: string): string {
   if (kind === 'mark-dod') return 'dod'
   if (kind === 'pr-wait') return 'merge'
+  if (kind === 'soak') return 'soak'
   return kind.replace(/-/g, ':')
 }
 
@@ -281,6 +282,7 @@ export function PipelineStrip({
   const pushJob = latestOfKind('push')
   const dodJob = latestOfKind('mark-dod')
   const prWaitJob = latestOfKind('pr-wait')
+  const soakJob = latestOfKind('soak')
   const latestProjectReview = projectJobs
     .filter((job) => job.kind === 'review' && job.status === 'done' && !!job.verdict)
     .sort((a, b) => (b.finished_at || 0) - (a.finished_at || 0))[0]
@@ -569,6 +571,15 @@ export function PipelineStrip({
   }
   if (prWaitJob) {
     steps.push({ label: 'merge', state: prWaitState, hint: prWaitHint, action: prWaitAction, jobId: prWaitJob.id })
+  }
+  if (soakJob) {
+    const soakState = stateOf(soakJob)
+    const soakHint = soakJob.status === 'running'
+      ? 'watching default-branch CI on the merge commit — click to open terminal'
+      : soakJob.exit_code === 0
+        ? 'soak completed — no failures observed'
+        : 'soak detected post-merge failures and opened a revert PR — click to view log'
+    steps.push({ label: 'soak', state: soakState, hint: soakHint, action: openJob(soakJob), jobId: soakJob.id })
   }
 
   const runningStepIdx = steps.findIndex(s => s.state === 'running')
