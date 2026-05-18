@@ -2,6 +2,7 @@
 
 import { useEffect, useState } from 'react';
 import Link from 'next/link';
+import { WorkflowRunDetailLoadingState, WorkflowRunsEmptyState } from '@/components/workflow-runs/WorkflowRunsStates';
 
 interface Step {
   stepId: string;
@@ -96,9 +97,14 @@ export function WorkflowRunDetail({ runId }: { runId: string }) {
 
   if (notFound) {
     return (
-      <div className="p-6">
+      <div className="space-y-4 p-4 sm:p-6">
         <Link href="/workflow-runs" className="text-accent text-sm hover:underline">← Back to workflow runs</Link>
-        <div className="mt-4 text-text-tertiary">Workflow run not found.</div>
+        <WorkflowRunsEmptyState
+          title="Workflow run not found"
+          description="The run may have been pruned, or the URL no longer points to an existing workflow record."
+          actionLabel="Back to workflow runs"
+          actionHref="/workflow-runs"
+        />
       </div>
     );
   }
@@ -110,7 +116,7 @@ export function WorkflowRunDetail({ runId }: { runId: string }) {
       </div>
     );
   }
-  if (!data) return <div className="p-6 text-text-tertiary">Loading…</div>;
+  if (!data) return <WorkflowRunDetailLoadingState />;
 
   return (
     <div className="p-4 sm:p-6 space-y-6">
@@ -211,7 +217,12 @@ export function WorkflowRunDetail({ runId }: { runId: string }) {
               ))}
               {data.steps.length === 0 && (
                 <tr>
-                  <td colSpan={5} className="px-3 py-4 text-center text-text-tertiary">No steps recorded</td>
+                  <td colSpan={5} className="px-3 py-5">
+                    <WorkflowRunsEmptyState
+                      title="No steps recorded"
+                      description="This workflow completed without persisting step detail, or step tracing has not been emitted yet."
+                    />
+                  </td>
                 </tr>
               )}
             </tbody>

@@ -33,6 +33,7 @@ import {
 } from '@/components/project-runs/utils'
 import type { Entry, JobCountsResponse, KindBucket } from '@/components/project-runs/utils'
 import { RUN_ROW_GRID_CLASS, RunRow } from '@/components/project-runs/RunRow'
+import { ProjectRunsEmptyState, ProjectRunsLoadingState } from '@/components/project-runs/RunStates'
 
 interface ProjectRunsTabProps {
   projectName: string
@@ -421,6 +422,16 @@ export function ProjectRunsTab({ projectName, jobsPaused = false }: ProjectRunsT
     return entries.reduce((sum, e) => sum + (e.startedAt >= monthStart ? e.costUsd : 0), 0)
   }, [entries])
   const thisMonthCost = summary?.cost.monthToDate ?? loadedMonthCost
+  const activeFilterLabel = filter.kind === 'bucket' ? KIND_LABEL[filter.bucket] : filter.kind
+  const emptyStateMode = entries.length === 0
+    ? 'empty'
+    : search.trim()
+    ? 'search'
+    : filter.kind === 'running'
+    ? 'running'
+    : filter.kind === 'failed'
+    ? 'failed'
+    : 'filtered'
 
   const navigate = (e: Entry) => {
     if (e.bucket === 'run' && e.navSessionId && e.kind !== 'release') {
@@ -779,71 +790,18 @@ export function ProjectRunsTab({ projectName, jobsPaused = false }: ProjectRunsT
       </div>
 
       {loading ? (
-        <div className="border border-border rounded-lg overflow-hidden bg-bg-secondary">
-          {Array.from({ length: 5 }).map((_, i) => (
-            <div key={i} className="flex items-center gap-3 px-4 py-3 border-b border-border last:border-0" style={{ opacity: 1 - i * 0.15 }}>
-              <div className="skeleton h-4 w-1 rounded-none shrink-0" />
-              <div className="skeleton h-5 w-12 rounded shrink-0" />
-              <div className="flex-1 min-w-0 flex flex-col gap-1.5">
-                <div className="skeleton h-3.5 w-2/5" />
-                <div className="flex items-center gap-2">
-                  <div className="skeleton h-3 w-16" />
-                  <div className="skeleton h-3 w-12" />
-                </div>
-              </div>
-              <div className="flex flex-col items-end gap-1.5 shrink-0">
-                <div className="flex items-center gap-2">
-                  <div className="skeleton h-3 w-14" />
-                  <div className="skeleton h-3 w-10" />
-                </div>
-                <div className="flex items-center gap-2">
-                  <div className="skeleton h-4 w-16 rounded-full" />
-                </div>
-              </div>
-            </div>
-          ))}
-        </div>
+        <ProjectRunsLoadingState />
       ) : filtered.length === 0 ? (
-        <div className="text-text-secondary text-sm p-8 text-center border border-border rounded-lg bg-bg-secondary flex flex-col items-center gap-2">
-          {entries.length === 0 ? (
-            <>
-              <span className="text-3xl opacity-30">▷</span>
-              <span>No runs yet — use the Terminal tab or click Release in the header</span>
-            </>
-          ) : search.trim() ? (
-            <>
-              <span className="text-3xl opacity-30">⌕</span>
-              <span>No runs match &ldquo;{search.trim()}&rdquo;</span>
-            </>
-          ) : filter.kind === 'running' ? (
-            <>
-              <span className="text-3xl opacity-30">◎</span>
-              <span>No runs currently running</span>
-            </>
-          ) : filter.kind === 'failed' ? (
-            <>
-              <span className="text-3xl opacity-30">✗</span>
-              <span>No failed runs — looking good</span>
-            </>
-          ) : (
-            <>
-              <span className="text-3xl opacity-30">▤</span>
-              <span>No runs match the current filter</span>
-            </>
-          )}
-          {(search.trim() || filter.kind !== 'all') && (
-            <div className="mt-2">
-              <Button
-                type="button"
-                size="sm"
-                variant="secondary"
-                onClick={() => { setSearch(''); setFilter({ kind: 'all' }) }}
-              >
-                Clear filters
-              </Button>
-            </div>
-          )}
-        </div>
+        <ProjectRunsEmptyState
+          projectName={projectName}
+          mode={emptyStateMode}
+          search={search}
+          activeFilterLabel={activeFilterLabel}
+          totalEntries={summary?.total ?? entries.length}
+          runningCount={summary?.byStatus.running ?? loadedTotals.running}
+          failedCount={counts.failed}
+          onClearFilters={() => { setSearch(''); setFilter({ kind: 'all' }) }}
+        />
       ) : (
         <div className="flex flex-col gap-4">
           {groups.map((g) => (

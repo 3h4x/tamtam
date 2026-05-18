@@ -282,4 +282,4 @@ Ask the user after MVP: "Core is working. Want me to add auth/polish/deploy next
 - Related: `product-team/saas-scaffolder` — SaaS-specific scaffolding (Next.js + Stripe + Auth)
 - Related: `engineering/spec-driven-workflow` — spec-first development methodology
 - Related: `engineering/database-designer` — database schema design patterns
-- Related: `engineering-team/senior-fullstack` — full-stack implementation patterns
+- Related: `engineering/fullstack` — full-stack implementation patterns

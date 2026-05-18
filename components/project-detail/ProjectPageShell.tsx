@@ -2,12 +2,12 @@
 
 import { useProjects } from '@/components/ProjectsProvider'
 import { ProjectDetailPage } from '@/components/ProjectDetailPage'
-import { LoadingState } from '@/components/LoadingState'
+import { ProjectPageLoadingState } from '@/components/project-detail/ProjectPageLoadingState'
 
 export function ProjectPageShell() {
   const { tasks, loading, fleet, loadProjects } = useProjects()
 
-  if (loading && tasks.length === 0) return <LoadingState />
+  if (loading && tasks.length === 0) return <ProjectPageLoadingState />
 
   return (
     <ProjectDetailPage

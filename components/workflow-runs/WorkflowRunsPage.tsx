@@ -3,6 +3,7 @@
 import { useEffect, useState } from 'react';
 import Link from 'next/link';
 import { WorkflowGraph } from '@/components/workflow-runs/WorkflowGraph';
+import { WorkflowRunsEmptyState, WorkflowRunsLoadingState } from '@/components/workflow-runs/WorkflowRunsStates';
 import { StandardTabs } from '@/components/ui/StandardTabs';
 
 interface WorkflowRunSummary {
@@ -216,17 +217,21 @@ export function WorkflowRunsPage() {
     );
   }
   if (!data) {
-    return <div className="p-6 text-text-tertiary">Loading workflow runs…</div>;
+    return <WorkflowRunsLoadingState />;
   }
   if (data.reason) {
     return (
-      <div className="p-6">
-        <div className="text-text-tertiary">{data.reason}</div>
+      <div className="p-4 sm:p-6">
+        <WorkflowRunsEmptyState
+          title="Workflow runs unavailable"
+          description={data.reason}
+        />
       </div>
     );
   }
 
   const nameNeedle = nameFilter.trim().toLowerCase();
+  const hasActiveFilters = nameNeedle.length > 0 || statusFilter !== 'all';
   const filtered = data.runs.filter((r) => {
     if (statusFilter !== 'all' && r.status !== statusFilter) return false;
     if (nameNeedle && !r.name.toLowerCase().includes(nameNeedle) && !r.rawName.toLowerCase().includes(nameNeedle)) {
@@ -274,7 +279,7 @@ export function WorkflowRunsPage() {
           placeholder="Filter by workflow name…"
           value={nameFilter}
           onChange={(e) => setNameFilter(e.target.value)}
-          className="px-3 py-1.5 rounded-md border border-border bg-bg-secondary text-sm text-text-primary placeholder:text-text-tertiary focus:outline-none focus:border-accent w-full sm:w-72"
+          className="focus-ring w-full rounded-md border border-border bg-bg-secondary px-3 py-1.5 text-sm text-text-primary placeholder:text-text-tertiary focus:border-accent focus:outline-none sm:w-72"
         />
         <div className="flex flex-wrap gap-1" role="group" aria-label="Status filter">
           {STATUS_FILTERS.map((s) => (
@@ -292,68 +297,82 @@ export function WorkflowRunsPage() {
           ))}
         </div>
       </div>
-      <div className="border border-border rounded-md overflow-hidden">
-        <table className="w-full text-sm">
-          <thead className="bg-bg-secondary text-text-secondary text-xs uppercase tracking-wide">
-            <tr>
-              <th className="text-left px-3 py-2 font-medium">Workflow</th>
-              <th className="text-left px-3 py-2 font-medium">Project / Args</th>
-              <th className="text-left px-3 py-2 font-medium" title="Why this run was dispatched — parent job, source job, or trigger source.">Trigger</th>
-              <th className="text-left px-3 py-2 font-medium" title="End status with workflow-specific detail: verdict for review, exit code for test/push/commit/fix, error tail for failed.">Outcome</th>
-              <th className="text-right px-3 py-2 font-medium">Duration</th>
-              <th className="text-left px-3 py-2 font-medium">Started</th>
-            </tr>
-          </thead>
-          <tbody>
-            {filtered.map((r) => {
-              const outcome = summarizeOutcome(r);
-              return (
-                <tr
-                  key={r.id}
-                  className="border-t border-border hover:bg-bg-tertiary/40 cursor-pointer"
-                  onClick={() => { window.location.href = `/workflow-runs/${encodeURIComponent(r.id)}`; }}
-                >
-                  <td className="px-3 py-2 font-mono text-xs text-text-primary truncate max-w-[260px]" title={r.rawName}>
-                    <Link href={`/workflow-runs/${encodeURIComponent(r.id)}`} className="hover:underline">
-                      {r.name}
-                    </Link>
-                  </td>
-                  <td
-                    className="px-3 py-2 font-mono text-xs text-text-secondary truncate max-w-[220px]"
-                    title={typeof r.input === 'object' ? JSON.stringify(r.input) : String(r.input ?? '')}
-                  >
-                    {summarizeInput(r.input)}
-                  </td>
-                  <td
-                    className="px-3 py-2 font-mono text-xs text-text-tertiary truncate max-w-[240px]"
-                    title={typeof r.input === 'object' ? JSON.stringify(r.input) : String(r.input ?? '')}
-                  >
-                    {summarizeTrigger(r.input)}
-                  </td>
-                  <td className="px-3 py-2">
-                    <span className={`inline-block px-2 py-0.5 rounded border text-xs ${outcomeBadge(outcome.tone)}`} title={r.error ?? ''}>
-                      {outcome.label}
-                    </span>
-                  </td>
-                  <td className="px-3 py-2 text-right font-mono text-xs text-text-secondary">
-                    {formatDuration(r.durationMs)}
-                  </td>
-                  <td className="px-3 py-2 text-xs text-text-secondary whitespace-nowrap">
-                    {formatTime(r.startedAt ?? r.createdAt)}
-                  </td>
-                </tr>
-              );
-            })}
-            {filtered.length === 0 && (
+      {filtered.length === 0 ? (
+        <WorkflowRunsEmptyState
+          title={data.runs.length === 0 ? 'No workflow runs yet' : 'No runs match current filters'}
+          description={
+            data.runs.length === 0
+              ? 'Runs appear here after a workflow starts from a release, scheduler, or another background trigger.'
+              : 'Adjust the name or status filter to bring workflow activity back into view.'
+          }
+          meta={
+            data.runs.length === 0
+              ? 'refreshes every 5s'
+              : `status=${statusFilter} · name=${nameFilter.trim() || '—'}`
+          }
+          actionLabel={hasActiveFilters ? 'Clear filters' : undefined}
+          onAction={hasActiveFilters ? () => {
+            setNameFilter('');
+            setStatusFilter('all');
+          } : undefined}
+        />
+      ) : (
+        <div className="overflow-hidden rounded-md border border-border">
+          <table className="w-full text-sm">
+            <thead className="bg-bg-secondary text-xs uppercase tracking-wide text-text-secondary">
               <tr>
-                <td colSpan={6} className="px-3 py-6 text-center text-text-tertiary">
-                  {data.runs.length === 0 ? 'No workflow runs yet' : 'No runs match current filters'}
-                </td>
+                <th className="px-3 py-2 text-left font-medium">Workflow</th>
+                <th className="px-3 py-2 text-left font-medium">Project / Args</th>
+                <th className="px-3 py-2 text-left font-medium" title="Why this run was dispatched — parent job, source job, or trigger source.">Trigger</th>
+                <th className="px-3 py-2 text-left font-medium" title="End status with workflow-specific detail: verdict for review, exit code for test/push/commit/fix, error tail for failed.">Outcome</th>
+                <th className="px-3 py-2 text-right font-medium">Duration</th>
+                <th className="px-3 py-2 text-left font-medium">Started</th>
               </tr>
-            )}
-          </tbody>
-        </table>
-      </div>
+            </thead>
+            <tbody>
+              {filtered.map((r) => {
+                const outcome = summarizeOutcome(r);
+                return (
+                  <tr
+                    key={r.id}
+                    className="cursor-pointer border-t border-border hover:bg-bg-tertiary/40"
+                    onClick={() => { window.location.href = `/workflow-runs/${encodeURIComponent(r.id)}`; }}
+                  >
+                    <td className="max-w-[260px] truncate px-3 py-2 font-mono text-xs text-text-primary" title={r.rawName}>
+                      <Link href={`/workflow-runs/${encodeURIComponent(r.id)}`} className="hover:underline">
+                        {r.name}
+                      </Link>
+                    </td>
+                    <td
+                      className="max-w-[220px] truncate px-3 py-2 font-mono text-xs text-text-secondary"
+                      title={typeof r.input === 'object' ? JSON.stringify(r.input) : String(r.input ?? '')}
+                    >
+                      {summarizeInput(r.input)}
+                    </td>
+                    <td
+                      className="max-w-[240px] truncate px-3 py-2 font-mono text-xs text-text-tertiary"
+                      title={typeof r.input === 'object' ? JSON.stringify(r.input) : String(r.input ?? '')}
+                    >
+                      {summarizeTrigger(r.input)}
+                    </td>
+                    <td className="px-3 py-2">
+                      <span className={`inline-block rounded border px-2 py-0.5 text-xs ${outcomeBadge(outcome.tone)}`} title={r.error ?? ''}>
+                        {outcome.label}
+                      </span>
+                    </td>
+                    <td className="px-3 py-2 text-right font-mono text-xs text-text-secondary">
+                      {formatDuration(r.durationMs)}
+                    </td>
+                    <td className="whitespace-nowrap px-3 py-2 text-xs text-text-secondary">
+                      {formatTime(r.startedAt ?? r.createdAt)}
+                    </td>
+                  </tr>
+                );
+              })}
+            </tbody>
+          </table>
+        </div>
+      )}
       </>
       )}
     </div>

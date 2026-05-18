@@ -22,6 +22,7 @@ import {
 } from '@/components/project-runs/utils'
 import type { Entry, JobCountsResponse, KindBucket } from '@/components/project-runs/utils'
 import { RunRow } from '@/components/project-runs/RunRow'
+import { RunsPageEmptyState, RunsPageLoadingState } from '@/components/project-runs/RunsPageStates'
 
 const RUNS_PAGE_LIMIT = 200
 
@@ -205,6 +206,18 @@ export function JobsPage() {
     : `${filtered.length} grouped entr${filtered.length === 1 ? 'y' : 'ies'}`
   const headerTotal = summary?.total ?? totalRuns
   const headerRunning = summary?.byStatus.running ?? totals.running
+  const activeFilterLabel = filter.kind === 'bucket' ? KIND_LABEL[filter.bucket] : filter.kind
+  const emptyStateMode = entries.length === 0
+    ? 'empty'
+    : search.trim()
+    ? 'search'
+    : filter.kind === 'running'
+    ? 'running'
+    : filter.kind === 'failed'
+    ? 'failed'
+    : filter.kind === 'done'
+    ? 'done'
+    : 'filtered'
 
   const navigate = (e: Entry) => {
     if (e.bucket === 'run' && e.navSessionId && e.kind !== 'release') {
@@ -216,6 +229,11 @@ export function JobsPage() {
 
   const setProjectFilter = (project: string) => {
     router.push(project ? `/runs?project=${encodeURIComponent(project)}` : '/runs')
+  }
+
+  const clearView = () => {
+    setSearch('')
+    setFilter({ kind: 'all' })
   }
 
   return (
@@ -312,44 +330,19 @@ export function JobsPage() {
       </div>
 
       {loading ? (
-        <div className="border border-border rounded-lg overflow-hidden bg-bg-secondary">
-          {Array.from({ length: 8 }).map((_, i) => (
-            <div key={i} className="flex items-center gap-3 px-4 py-3 border-b border-border last:border-0" style={{ opacity: 1 - i * 0.08 }}>
-              <div className="skeleton h-4 w-1 rounded-none shrink-0" />
-              <div className="skeleton h-5 w-12 rounded shrink-0" />
-              <div className="flex-1 min-w-0 flex flex-col gap-1.5">
-                <div className="skeleton h-3.5 w-2/5" />
-                <div className="flex items-center gap-2">
-                  <div className="skeleton h-3 w-16" />
-                  <div className="skeleton h-3 w-12" />
-                </div>
-              </div>
-              <div className="flex flex-col items-end gap-1.5 shrink-0">
-                <div className="skeleton h-3 w-14" />
-                <div className="skeleton h-4 w-16 rounded-full" />
-              </div>
-            </div>
-          ))}
-        </div>
+        <RunsPageLoadingState />
       ) : filtered.length === 0 ? (
-        <div className="text-text-secondary text-sm p-8 text-center border border-border rounded-lg bg-bg-secondary flex flex-col items-center gap-2">
-          <span className="text-3xl opacity-30">{search.trim() ? '⌕' : '▤'}</span>
-          <span>
-            {entries.length === 0
-              ? 'No runs yet'
-              : search.trim()
-                ? `No runs match "${search.trim()}"`
-                : 'No runs match the current filter'}
-          </span>
-          {(search.trim() || filter.kind !== 'all') && (
-            <button
-              className="mt-2 px-3 py-1 text-xs border border-border rounded-md hover:bg-bg-tertiary cursor-pointer"
-              onClick={() => { setSearch(''); setFilter({ kind: 'all' }) }}
-            >
-              Clear filters
-            </button>
-          )}
-        </div>
+        <RunsPageEmptyState
+          mode={emptyStateMode}
+          search={search}
+          activeFilterLabel={activeFilterLabel}
+          totalEntries={entries.length}
+          runningCount={loadedCounts.running}
+          failedCount={loadedCounts.failed}
+          projectScopeLabel={projectFilter || 'all projects'}
+          onClearView={clearView}
+          onResetScope={projectFilter ? () => setProjectFilter('') : undefined}
+        />
       ) : (
         <div className="flex flex-col gap-4">
           {groups.map((g) => (
