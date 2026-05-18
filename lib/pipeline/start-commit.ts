@@ -376,10 +376,33 @@ async function runCommit(
 
   // Stage all changes including new (untracked) files. .gitignore is expected
   // to exclude secrets — auto-push trusts it.
+  //
+  // `git add -A` can transiently fail when another git process holds
+  // `.git/index.lock` (a prior step's pre-push hook, a concurrent
+  // worktree status check, an IDE indexing pass). When that happens the
+  // command exits non-zero and stages nothing — but the original code
+  // ignored the exit and fell through to "Nothing to commit", pushing an
+  // empty branch and surfacing "No commits between main and fix/*" at PR
+  // creation. Retry on lock contention; fail-fast on any other non-zero
+  // exit so the orchestrator records a real commit failure instead of
+  // silently shipping nothing.
   log(`\n$ git add -A\n`);
-  const addR = await execStep('git', ['-C', projPath, 'add', '-A'], { timeout: 10000 });
+  let addR = await execStep('git', ['-C', projPath, 'add', '-A'], { timeout: 10000 });
   if (addR.stdout) log(addR.stdout);
   if (addR.stderr) log(addR.stderr);
+  if (addR.exitCode !== 0 && /index\.lock|unable to create.*lock/i.test(addR.stderr)) {
+    for (let attempt = 1; attempt <= 6 && addR.exitCode !== 0; attempt++) {
+      log(`\n# index.lock held by another git process — retry ${attempt}/6 in ${attempt}s\n`);
+      await new Promise(r => setTimeout(r, attempt * 1000));
+      addR = await execStep('git', ['-C', projPath, 'add', '-A'], { timeout: 10000 });
+      if (addR.stdout) log(addR.stdout);
+      if (addR.stderr) log(addR.stderr);
+    }
+  }
+  if (addR.exitCode !== 0) {
+    const detail = (addR.stderr.trim() || addR.stdout.trim() || `git add exited ${addR.exitCode}`).slice(0, 2000);
+    return { ok: false, status: 500, detail: `Stage failed: ${detail}` };
+  }
   const statusR = await execStep('git', ['-C', projPath, 'diff', '--cached', '--name-status'], { timeout: 10000 });
   log(`\n$ git diff --cached --name-status\n${statusR.stdout}`);
   const hasStaged = !!statusR.stdout.trim();

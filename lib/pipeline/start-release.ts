@@ -144,7 +144,20 @@ async function queueRelease(projectName: string, blockingJobId?: string): Promis
 }
 
 export async function startRelease(projectName: string, options: StartReleaseOptions = {}): Promise<ReleaseResult> {
-  const projPath = resolveProjectPath(projectName);
+  let projPath = resolveProjectPath(projectName);
+  // First-lookup miss can happen when startRelease runs inside the workflow
+  // runtime's module realm right after a Postgres world re-init — the
+  // realm's `_projectsCache` hasn't been populated yet even though the DB
+  // row exists. Refresh the cache once and retry before declaring the
+  // project gone. Drops the silent-failure mode where pending-release
+  // drains lost releases to a "project not found" race.
+  if (!projPath) {
+    try {
+      const { refreshProjectsCacheSync } = await import('@/lib/shared/enabled-projects');
+      await refreshProjectsCacheSync();
+      projPath = resolveProjectPath(projectName);
+    } catch { /* fall through to 404 */ }
+  }
   if (!projPath) return { ok: false, status: 404, detail: 'project not found' };
   if (isProjectArchived(projectName)) {
     return { ok: false, status: 409, detail: 'project archived' };

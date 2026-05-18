@@ -187,52 +187,6 @@ async function insertJobsAndSync(rows: JobInsert | JobInsert[]): Promise<void> {
   }
 }
 
-// `getJob`/`listJobs` are cache-only since commit 1cc1db25 — tests that seed
-// rows via direct DB inserts must populate the in-memory cache too, or
-// lifecycle hooks (which call `getJob`/`findActiveReleaseJob`/`listJobs`)
-// won't see those rows. Call this after raw inserts and before invoking
-// `markDoneFn`/lifecycle code so the cache mirrors the DB.
-async function syncCacheFromDb(): Promise<void> {
-  const { jobsCache } = await import('@/lib/jobs/storage');
-  jobsCache.clear();
-  const rows = await sharedHandle.db.select().from(schema.jobs);
-  for (const row of rows) {
-    jobsCache.set(row.id, {
-      id: row.id,
-      project: row.project,
-      kind: row.kind,
-      prompt: row.prompt ?? null,
-      pid: row.pid,
-      logPath: row.logPath,
-      startedAt: row.startedAt,
-      finishedAt: row.finishedAt ?? null,
-      exitCode: row.exitCode ?? null,
-      seen: row.seen ?? false,
-      durationMs: row.durationMs ?? null,
-      inputTokens: row.inputTokens ?? null,
-      outputTokens: row.outputTokens ?? null,
-      cacheReadTokens: row.cacheReadTokens ?? null,
-      cacheCreateTokens: row.cacheCreateTokens ?? null,
-      sessionId: row.sessionId ?? null,
-      contextMeta: row.contextMeta ?? null,
-      userPrompt: row.userPrompt ?? null,
-      parentJobId: row.parentJobId ?? null,
-      ghIssueNumber: row.ghIssueNumber ?? null,
-      ghIssueRepo: row.ghIssueRepo ?? null,
-      ghIssueTitle: row.ghIssueTitle ?? null,
-      logPruned: row.logPruned ?? false,
-      verdict: row.verdict ?? null,
-      costUsd: row.costUsd ?? null,
-      model: row.model ?? null,
-      releaseId: row.releaseId ?? null,
-      abortedAt: row.abortedAt ?? null,
-      promptBytes: row.promptBytes ?? null,
-      workSummary: row.workSummary ?? null,
-      modifiedFiles: row.modifiedFiles ?? null,
-      provider: row.provider ?? null,
-    });
-  }
-}
 // Skipped: the release-linked legacy chain that drove fix→review fires
 // only for non-workflow-driven jobs now. The orchestrator + applyReleaseGuards
 // own this for release-linked jobs. See:
@@ -1199,6 +1153,7 @@ describe('markDone – isClaudeKind exit-code override for new kinds', () => {
   let storageCache: Map<string, JobData>;
   let resetVerdictCache: () => void;
   let tempDir: string;
+  let jobSeq = 0;
   const startReleaseMock = vi.fn();
   const setPendingReleaseMock = vi.fn();
   const shouldKeepPendingReleaseMock = vi.fn();
@@ -1206,7 +1161,7 @@ describe('markDone – isClaudeKind exit-code override for new kinds', () => {
 
   function makeJob(kind: string, logPath: string | null): JobData {
     return {
-      id: `${kind.replace(':', '-')}-override-test`,
+      id: `${kind.replace(':', '-')}-override-test-${++jobSeq}`,
       project: 'proj',
       kind,
       prompt: null,
@@ -1280,7 +1235,6 @@ describe('markDone – isClaudeKind exit-code override for new kinds', () => {
   beforeEach(async () => {
     storageCache.clear();
     resetVerdictCache();
-    await truncateAll();
     startReleaseMock.mockReset().mockResolvedValue({ ok: true, jobId: 'release-1', releaseJobId: 'release-1', step: 'test', message: 'running' });
     setPendingReleaseMock.mockReset();
     shouldKeepPendingReleaseMock.mockReset().mockReturnValue(false);
@@ -1437,7 +1391,7 @@ describe.skip('runCompletionHooks – push-fix auto-recovery (unified fix)', () 
 
   async function insertActiveRelease() {
     const now = Date.now() / 1000;
-    await testDb.db.insert(schema.jobs).values({
+    await insertJobsAndSync({
       id: 'active-release-job',
       project: 'my-proj',
       kind: 'release',
@@ -1454,10 +1408,7 @@ describe.skip('runCompletionHooks – push-fix auto-recovery (unified fix)', () 
       cacheReadTokens: null,
       cacheCreateTokens: null,
       sessionId: null,
-    } as any);
-    // Lifecycle hooks call getJob/findActiveReleaseJob which only read the
-    // in-memory cache; mirror the DB row so the active release is visible.
-    await syncCacheFromDb();
+    } as JobInsert);
   }
 
   beforeAll(async () => {
@@ -1573,8 +1524,9 @@ describe.skip('runCompletionHooks – push-fix auto-recovery (unified fix)', () 
     isHookRejectionMock.mockReturnValue(true);
     const now = Date.now() / 1000;
     // Two prior failed pushes, each with a fix-from-push child.
+    const priorRows: JobInsert[] = [];
     for (let i = 0; i < 2; i++) {
-      await testDb.db.insert(schema.jobs).values({
+      priorRows.push({
         id: `prior-push-${i}`,
         project: 'my-proj',
         kind: 'push',
@@ -1585,8 +1537,8 @@ describe.skip('runCompletionHooks – push-fix auto-recovery (unified fix)', () 
         finishedAt: now - i * 20 - 8,
         exitCode: 1,
         seen: true,
-      } as any);
-      await testDb.db.insert(schema.jobs).values({
+      } as JobInsert);
+      priorRows.push({
         id: `prior-fix-${i}`,
         project: 'my-proj',
         kind: 'fix',
@@ -1598,9 +1550,9 @@ describe.skip('runCompletionHooks – push-fix auto-recovery (unified fix)', () 
         finishedAt: now - i * 10 + 5,
         exitCode: 0,
         seen: true,
-      } as any);
+      } as JobInsert);
     }
-    await syncCacheFromDb();
+    await insertJobsAndSync(priorRows);
     const logFile = join(tempDir, 'push-hook-capped.log');
     writeFileSync(logFile, 'pre-commit failed');
     const job = makeJob('push', logFile);
@@ -1613,7 +1565,7 @@ describe.skip('runCompletionHooks – push-fix auto-recovery (unified fix)', () 
   it('still spawns fix when only 1 prior attempt exists (cap is 2)', async () => {
     isHookRejectionMock.mockReturnValue(true);
     const now = Date.now() / 1000;
-    await testDb.db.insert(schema.jobs).values({
+    await insertJobsAndSync({
       id: 'prior-push-0',
       project: 'my-proj',
       kind: 'push',
@@ -1624,8 +1576,8 @@ describe.skip('runCompletionHooks – push-fix auto-recovery (unified fix)', () 
       finishedAt: now - 28,
       exitCode: 1,
       seen: true,
-    } as any);
-    await testDb.db.insert(schema.jobs).values({
+    } as JobInsert);
+    await insertJobsAndSync({
       id: 'prior-fix-0',
       project: 'my-proj',
       kind: 'fix',
@@ -1637,8 +1589,7 @@ describe.skip('runCompletionHooks – push-fix auto-recovery (unified fix)', () 
       finishedAt: now - 5,
       exitCode: 0,
       seen: true,
-    } as any);
-    await syncCacheFromDb();
+    } as JobInsert);
     const logFile = join(tempDir, 'push-hook-one-prior.log');
     writeFileSync(logFile, 'pre-commit failed');
     const job = makeJob('push', logFile);
@@ -1706,6 +1657,7 @@ describe('runCompletionHooks – release-after-run', () => {
   let markDoneFn: typeof import('@/lib/jobs/job-storage').markDone;
   let storageCache: Map<string, JobData>;
   let resetVerdictCache: () => void;
+  let jobSeq = 0;
   // Outlier tests that call `loadMarkDone(...)` swap in a non-default module
   // factory (e.g. scheduling throws on import). Subsequent default tests must
   // reload to get back to a clean import graph; we cheap-track that here.
@@ -1713,7 +1665,7 @@ describe('runCompletionHooks – release-after-run', () => {
 
   function makeJob(kind: string, overrides: Partial<JobData> = {}): JobData {
     return {
-      id: `${kind.replace(':', '-')}-rar-test`,
+      id: `${kind.replace(':', '-')}-rar-test-${++jobSeq}`,
       project: 'my-proj',
       kind,
       prompt: null,
@@ -1759,7 +1711,6 @@ describe('runCompletionHooks – release-after-run', () => {
     // just mockReset()-ing.
     dirty = releaseAfterRun !== true || schedulingModuleThrows;
     vi.resetModules();
-    await truncateAll();
     resetMocksToDefaults(releaseAfterRun);
 
     vi.doMock('@/lib/db', () => ({ db: sharedHandle.db, schema }));
@@ -1833,7 +1784,6 @@ describe('runCompletionHooks – release-after-run', () => {
     }
     storageCache.clear();
     resetVerdictCache();
-    await truncateAll();
     resetMocksToDefaults();
   });
 
@@ -1858,7 +1808,7 @@ describe('runCompletionHooks – release-after-run', () => {
     await markDoneFn(job, 0);
     expect(startReleaseMock).toHaveBeenCalledWith('my-proj', {
       queueIfBlocked: true,
-      sourceJobId: 'run-rar-test',
+      sourceJobId: job.id,
     });
   });
 
@@ -1867,7 +1817,7 @@ describe('runCompletionHooks – release-after-run', () => {
     await markDoneFn(job, 0);
     expect(startReleaseMock).toHaveBeenCalledWith('my-proj', {
       queueIfBlocked: true,
-      sourceJobId: 'agent-my-agent-rar-test',
+      sourceJobId: job.id,
     });
   });
 
@@ -2134,10 +2084,11 @@ describe('runCompletionHooks – push→DoD (PR Workflow without auto-merge)', (
   let getProjectTestConfigMock: ReturnType<typeof vi.fn>;
   let markDoneFn: typeof import('@/lib/jobs/job-storage').markDone;
   let tempDir: string;
+  let jobSeq = 0;
 
   function makeJob(kind: string, overrides: Partial<JobData> = {}): JobData {
     return {
-      id: `${kind}-job`,
+      id: `${kind}-job-${++jobSeq}`,
       project: 'my-proj',
       kind,
       prompt: null,
@@ -2189,7 +2140,6 @@ describe('runCompletionHooks – push→DoD (PR Workflow without auto-merge)', (
 
   beforeEach(async () => {
     storageCache.clear();
-    await truncateAll();
     startMarkDodMock.mockReset().mockResolvedValue({ ok: true, verified: 2, total: 2, changed: true, issueNumber: 55 });
     getProjectTestConfigMock.mockReset().mockReturnValue({
       prWorkflowEnabled: true,
