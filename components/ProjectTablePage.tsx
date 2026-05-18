@@ -33,6 +33,7 @@ import { LoadingState } from '@/components/LoadingState'
 import { ProjectLogo } from '@/components/ProjectLogo'
 import { useToast } from '@/components/Toast'
 import { subscribeToSettingsChanged } from '@/lib/shared/settings-events'
+import { loadQuotaSnapshot } from '@/lib/client/quota'
 
 type SortKey = 'project' | 'status' | 'changes' | 'last_run' | 'next_run' | 'ci'
 type SortDir = 'asc' | 'desc'
@@ -77,23 +78,6 @@ interface SchedulerEntry {
   enabled: boolean
   nextFireMs: number
   lastFireMs: number | null
-}
-
-interface QuotaWindow {
-  utilization: number
-  resetsAt: string | null
-  msUntilReset: number | null
-}
-
-interface QuotaSnapshot {
-  sevenDay: QuotaWindow
-  gateEnabled?: boolean
-  schedulerThrottle?: {
-    reason: string
-    projectedPct: number
-    worstProvider: string
-    resumesAtMs: number | null
-  } | null
 }
 
 function formatNextFire(ms: number): { text: string; tone: 'overdue' | 'imminent' | 'normal' | 'far' } {
@@ -338,15 +322,11 @@ export function ProjectTablePage({ fleet, issueCounts = {}, loading = false }: P
       }
     }
     const load = async () => {
-      try {
-        const r = await fetch('/api/usage/quota')
-        if (!r.ok) return
-        const data = (await r.json()) as QuotaSnapshot
-        if (!active) return
-        setScheduledThrottlePaused(budgetGateEnabled && !!data.gateEnabled && data.schedulerThrottle != null)
-      } catch {
-        if (active) setScheduledThrottlePaused(false)
-      }
+      const data = await loadQuotaSnapshot('active')
+      if (!active) return
+      const gateEnabled = data.available ? data.snapshot.gateEnabled : data.gateEnabled
+      const schedulerThrottle = data.available ? data.snapshot.schedulerThrottle : data.schedulerThrottle
+      setScheduledThrottlePaused(budgetGateEnabled && gateEnabled === true && schedulerThrottle != null)
     }
     void load()
     interval = setInterval(load, 300000)

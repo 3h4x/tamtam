@@ -46,6 +46,12 @@ export function peekQuotaCache(): QuotaSnapshot | null {
   return isCodexProvider() ? peekCodexQuotaCache() : peekClaudeQuotaCache();
 }
 
+export function peekQuotaCacheForProvider(provider: QuotaProvider = 'active'): QuotaSnapshot | null {
+  if (provider === 'codex') return peekCodexQuotaCache();
+  if (provider === 'claude') return peekClaudeQuotaCache();
+  return peekQuotaCache();
+}
+
 /**
  * Synchronous peek over a list of providers — returns the cached snapshot for
  * each (or null if no fetcher / cache cold). Used by the scheduler's

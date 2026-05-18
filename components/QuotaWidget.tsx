@@ -6,6 +6,7 @@ import {
   BUDGET_SUBSCRIPTION_PROVIDERS,
   type BudgetSubscriptionProvider,
 } from '@/lib/usage/subscription-providers'
+import { loadQuotaSnapshot } from '@/lib/client/quota'
 
 interface QuotaWindow {
   utilization: number
@@ -277,26 +278,11 @@ export function QuotaWidget({
     let cancelled = false
     const selectedProviders = Array.from(new Set(providers))
 
-    async function fetchSnapshot(provider: 'active' | BudgetSubscriptionProvider) {
-      try {
-        const query = provider === 'active' ? '' : `?provider=${provider}`
-        const res = await fetch(`/api/usage/quota${query}`)
-        const body = await res.json().catch(() => ({})) as Record<string, unknown>
-        if (!res.ok || body?.configured === false) throw new Error(String(body?.error ?? `HTTP ${res.status}`))
-        return { snapshot: body as unknown as QuotaSnapshot, error: null }
-      } catch (e: unknown) {
-        return {
-          snapshot: null,
-          error: e instanceof Error ? e.message : String(e),
-        }
-      }
-    }
-
     async function load() {
       try {
         const [activeResult, providerResults] = await Promise.all([
-          fetchSnapshot('active'),
-          Promise.all(selectedProviders.map((provider) => fetchSnapshot(provider))),
+          loadQuotaSnapshot('active'),
+          Promise.all(selectedProviders.map((provider) => loadQuotaSnapshot(provider))),
         ])
         const activeProvider = activeResult.snapshot?.provider
         const mergedCards = selectedProviders.map((provider, index) => {

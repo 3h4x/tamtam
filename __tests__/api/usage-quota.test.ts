@@ -3,6 +3,7 @@ import { NextRequest } from 'next/server';
 
 const getQuotaForProviderMock = vi.fn();
 const clearQuotaCacheMock = vi.fn();
+const peekQuotaCacheForProviderMock = vi.fn().mockReturnValue(null);
 const scheduledBurnRateBlockedAcrossProvidersMock = vi.fn().mockReturnValue(null);
 const warmEnabledProviderSnapshotsMock = vi.fn().mockResolvedValue(undefined);
 const getSettingsMock = vi.fn().mockReturnValue(null);
@@ -10,6 +11,7 @@ const getSettingsMock = vi.fn().mockReturnValue(null);
 vi.mock('@/lib/usage/quota', () => ({
   getQuotaForProvider: getQuotaForProviderMock,
   clearQuotaCache: clearQuotaCacheMock,
+  peekQuotaCacheForProvider: peekQuotaCacheForProviderMock,
 }));
 
 vi.mock('@/lib/shared/job-control', () => ({
@@ -26,6 +28,8 @@ describe('GET /api/usage/quota', () => {
     vi.resetModules();
     getQuotaForProviderMock.mockReset();
     clearQuotaCacheMock.mockReset();
+    peekQuotaCacheForProviderMock.mockReset();
+    peekQuotaCacheForProviderMock.mockReturnValue(null);
     scheduledBurnRateBlockedAcrossProvidersMock.mockReset();
     scheduledBurnRateBlockedAcrossProvidersMock.mockReturnValue(null);
     warmEnabledProviderSnapshotsMock.mockReset();
@@ -52,16 +56,18 @@ describe('GET /api/usage/quota', () => {
     const res = await GET(new NextRequest('http://localhost/api/usage/quota'));
     expect(res.status).toBe(200);
     const body = await res.json();
-    expect(body).toEqual({ ...snapshot, schedulerThrottle: null });
+    expect(body).toEqual({ ...snapshot, available: true, schedulerThrottle: null });
   });
 
-  it('returns 502 when underlying fetcher throws', async () => {
+  it('returns typed unavailable when underlying fetcher throws and no cache exists', async () => {
     getQuotaForProviderMock.mockRejectedValue(new Error('No token'));
 
     const { GET } = await import('@/app/api/usage/quota/route');
     const res = await GET(new NextRequest('http://localhost/api/usage/quota'));
-    expect(res.status).toBe(502);
+    expect(res.status).toBe(200);
     const body = await res.json();
+    expect(body.available).toBe(false);
+    expect(body.reason).toBe('unavailable');
     expect(body.error).toMatch(/No token/);
   });
 
@@ -70,8 +76,10 @@ describe('GET /api/usage/quota', () => {
 
     const { GET } = await import('@/app/api/usage/quota/route');
     const res = await GET(new NextRequest('http://localhost/api/usage/quota?provider=claude'));
-    expect(res.status).toBe(502);
+    expect(res.status).toBe(200);
     const body = await res.json();
+    expect(body.available).toBe(false);
+    expect(body.reason).toBe('rate_limited');
     expect(body.error).toContain('Claude quota temporarily unavailable');
     expect(body.error).not.toContain('no cached value to return');
   });
@@ -84,8 +92,10 @@ describe('GET /api/usage/quota', () => {
 
     const { GET } = await import('@/app/api/usage/quota/route');
     const res = await GET(new NextRequest('http://localhost/api/usage/quota?provider=claude'));
-    expect(res.status).toBe(502);
+    expect(res.status).toBe(200);
     const body = await res.json();
+    expect(body.available).toBe(false);
+    expect(body.reason).toBe('rate_limited');
     expect(body.error).toContain('Claude quota temporarily unavailable');
     expect(body.error).not.toContain(isoTimestamp);
     expect(body.error).not.toContain('backing off');
@@ -108,7 +118,7 @@ describe('GET /api/usage/quota', () => {
     expect(getQuotaForProviderMock).toHaveBeenCalledWith('active', { force: true });
     expect(warmEnabledProviderSnapshotsMock).toHaveBeenCalledWith({ force: true });
     const body = await res.json();
-    expect(body).toEqual({ ...snapshot, schedulerThrottle: null });
+    expect(body).toEqual({ ...snapshot, available: true, schedulerThrottle: null });
   });
 
   it('exposes schedulerThrottle: null when no provider is over the weekly burn cap', async () => {
@@ -123,6 +133,7 @@ describe('GET /api/usage/quota', () => {
     const res = await GET(new NextRequest('http://localhost/api/usage/quota'));
     const body = await res.json();
     expect(body.schedulerThrottle).toBeNull();
+    expect(body.available).toBe(true);
   });
 
   it('exposes schedulerThrottle payload when every enabled provider is over the cap', async () => {
@@ -183,6 +194,8 @@ describe('GET /api/usage/quota', () => {
     expect(res.status).toBe(200);
     const body = await res.json();
     expect(body.configured).toBe(false);
+    expect(body.available).toBe(false);
+    expect(body.reason).toBe('not_configured');
     expect(body.error).toMatch(/No Codex rate-limit snapshot/);
   });
 
@@ -197,6 +210,8 @@ describe('GET /api/usage/quota', () => {
     expect(res.status).toBe(200);
     const body = await res.json();
     expect(body.configured).toBe(false);
+    expect(body.available).toBe(false);
+    expect(body.reason).toBe('not_configured');
     expect(body.error).toMatch(/No Claude OAuth token/);
   });
 
@@ -216,5 +231,25 @@ describe('GET /api/usage/quota', () => {
     expect(res.status).toBe(200);
     expect(getQuotaForProviderMock).toHaveBeenCalledWith('codex');
     expect(warmEnabledProviderSnapshotsMock).toHaveBeenCalledWith();
+  });
+
+  it('returns a stale cached snapshot when a refresh fails after a prior success', async () => {
+    const cached = {
+      provider: 'claude',
+      fiveHour: { utilization: 22, resetsAt: null, msUntilReset: null },
+      sevenDay: { utilization: 11, resetsAt: null, msUntilReset: null },
+      fetchedAt: 4,
+      stale: false,
+    };
+    getQuotaForProviderMock.mockRejectedValue(new Error('Anthropic usage API returned HTTP 503'));
+    peekQuotaCacheForProviderMock.mockReturnValue(cached);
+
+    const { GET } = await import('@/app/api/usage/quota/route');
+    const res = await GET(new NextRequest('http://localhost/api/usage/quota?provider=claude'));
+    expect(res.status).toBe(200);
+    const body = await res.json();
+    expect(body.available).toBe(true);
+    expect(body.stale).toBe(true);
+    expect(body.fiveHour.utilization).toBe(22);
   });
 });

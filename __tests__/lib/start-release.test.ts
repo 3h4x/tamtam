@@ -43,6 +43,7 @@ const mocks = vi.hoisted(() => {
     findActiveReleaseJobMock: vi.fn(),
     getProjectTestConfigMock: vi.fn(),
     finalizeReleaseJobMock: vi.fn(),
+    getReleaseReadinessFailureMock: vi.fn(),
   };
 });
 
@@ -101,6 +102,9 @@ vi.mock('@/lib/pipeline/pipeline-lock', () => ({
 vi.mock('@/lib/usage/resolve-provider', () => ({
   checkCliStartGate: mocks.checkCliStartGateMock,
 }));
+vi.mock('@/lib/shared/readiness', () => ({
+  getReleaseReadinessFailure: mocks.getReleaseReadinessFailureMock,
+}));
 vi.mock('@/lib/pipeline/pending-release', () => ({
   setPendingRelease: mocks.setPendingReleaseMock,
 }));
@@ -155,6 +159,7 @@ function resetSharedMocks() {
   mocks.createJobMock.mockImplementation(defaultCreateJob);
   mocks.getJobMock.mockReturnValue(null);
   mocks.checkCliStartGateMock.mockResolvedValue({ ok: true, provider: 'claude' });
+  mocks.getReleaseReadinessFailureMock.mockResolvedValue(null);
   mocks.isReviewedMock.mockResolvedValue(false);
   mocks.isIssueContextCompatibleWithCurrentBranchMock.mockResolvedValue(true);
   mocks.findIssueContextMock.mockResolvedValue(null);
@@ -180,6 +185,7 @@ describe('startRelease — release pipeline entry decision tree', () => {
     isIssueContextCompatibleWithCurrentBranchMock, findIssueContextMock,
     detectMainBranchMock, getProjectTestConfigMock,
     isProjectArchivedMock, isProjectPausedMock, acquireLockMock,
+    getReleaseReadinessFailureMock,
   } = mocks;
 
   beforeEach(() => {
@@ -455,6 +461,26 @@ describe('startRelease — release pipeline entry decision tree', () => {
     if (!r.ok) expect(r.status).toBe(409);
     expect(setPendingReleaseMock).not.toHaveBeenCalled();
     expect(createJobMock).not.toHaveBeenCalled();
+  });
+
+  it('fails fast with 503 when a required readiness check fails', async () => {
+    getReleaseReadinessFailureMock.mockResolvedValue({
+      name: 'provider:claude',
+      ok: false,
+      severity: 'error',
+      message: 'Configured claude binary is not executable: /missing/claude',
+    });
+
+    const r = await startRelease('proj');
+
+    expect(r.ok).toBe(false);
+    if (!r.ok) {
+      expect(r.status).toBe(503);
+      expect(r.detail).toContain('provider:claude');
+      expect(r.detail).toContain('/missing/claude');
+    }
+    expect(createJobMock).not.toHaveBeenCalled();
+    expect(execMock).not.toHaveBeenCalled();
   });
 
   it('returns 409 when a pipeline job is already running for the project', async () => {
