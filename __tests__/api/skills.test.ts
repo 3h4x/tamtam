@@ -69,7 +69,9 @@ describe('skills API', () => {
   });
 
   beforeEach(async () => {
-    await sharedHandle.db.execute(sql.raw('TRUNCATE skills, agents'));
+    await sharedHandle.db.execute(sql.raw(
+      'WITH a AS (DELETE FROM skills RETURNING 1) DELETE FROM agents'
+    ));
   });
 
   afterEach(async () => {

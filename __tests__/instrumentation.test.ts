@@ -22,8 +22,6 @@ describe('instrumentation', () => {
   let originalRuntime: string | undefined;
 
   beforeEach(() => {
-    vi.clearAllMocks();
-    vi.resetModules();
     originalRuntime = process.env.NEXT_RUNTIME;
   });
 
@@ -40,11 +38,8 @@ describe('instrumentation', () => {
     const noopExec = vi.fn().mockResolvedValue({ exitCode: 0, stdout: '', stderr: '' });
     const abortActiveRelease = options.abortActiveRelease ?? vi.fn().mockResolvedValue({ status: 'aborted', httpStatus: 200 });
     vi.doMock('@/lib/db', () => dbMock);
-    vi.doMock('./lib/db', () => dbMock);
     vi.doMock('@/lib/shared/shell', () => ({ exec: noopExec }));
-    vi.doMock('./lib/shared/shell', () => ({ exec: noopExec }));
     vi.doMock('@/lib/pipeline/release-abort', () => ({ abortActiveRelease }));
-    vi.doMock('./lib/pipeline/release-abort', () => ({ abortActiveRelease }));
     vi.doMock('drizzle-orm', () => ({ isNotNull: vi.fn(v => v), eq: vi.fn((_a, b) => b), and: vi.fn((...args) => args) }));
   }
 
@@ -96,51 +91,24 @@ describe('instrumentation', () => {
       };
 
       vi.doMock('@/lib/db', () => ({ db: dbMock, schema: schemaMock }));
-      vi.doMock('./lib/db', () => ({ db: dbMock, schema: schemaMock }));
       vi.doMock('@/lib/jobs/job-storage', () => jobStorageMock);
-      vi.doMock('./lib/jobs/job-storage', () => jobStorageMock);
       vi.doMock('@/lib/jobs/storage', () => jobStorageMock);
-      vi.doMock('./lib/jobs/storage', () => jobStorageMock);
       vi.doMock('@/lib/shared/enabled-projects', () => ({ refreshProjectsCacheSync: vi.fn().mockResolvedValue(undefined) }));
-      vi.doMock('./lib/shared/enabled-projects', () => ({ refreshProjectsCacheSync: vi.fn().mockResolvedValue(undefined) }));
       vi.doMock('@/lib/agents/default-agent-skills', () => ({ backfillIssueCruncherPrerequisites: vi.fn().mockResolvedValue(undefined) }));
-      vi.doMock('./lib/agents/default-agent-skills', () => ({ backfillIssueCruncherPrerequisites: vi.fn().mockResolvedValue(undefined) }));
       vi.doMock('@/lib/jobs/verdict', () => ({ getVerdict: vi.fn(() => null) }));
-      vi.doMock('./lib/jobs/verdict', () => ({ getVerdict: vi.fn(() => null) }));
       vi.doMock('@/lib/pipeline/release-abort', () => ({ abortActiveRelease: vi.fn().mockResolvedValue(undefined) }));
-      vi.doMock('./lib/pipeline/release-abort', () => ({ abortActiveRelease: vi.fn().mockResolvedValue(undefined) }));
       vi.doMock('@/lib/jobs/release-reconcile', () => ({ runReleaseReconcileSweep: vi.fn().mockResolvedValue([]) }));
-      vi.doMock('./lib/jobs/release-reconcile', () => ({ runReleaseReconcileSweep: vi.fn().mockResolvedValue([]) }));
       vi.doMock('@/lib/workflows/triggers/job-completion-router', () => ({ consumeJobCompletionEvents: vi.fn().mockResolvedValue(undefined) }));
-      vi.doMock('./lib/workflows/triggers/job-completion-router', () => ({ consumeJobCompletionEvents: vi.fn().mockResolvedValue(undefined) }));
       vi.doMock('@/lib/workflows/triggers/pipeline-lock-router', () => ({ consumePipelineLockEvents: vi.fn().mockResolvedValue(undefined) }));
-      vi.doMock('./lib/workflows/triggers/pipeline-lock-router', () => ({ consumePipelineLockEvents: vi.fn().mockResolvedValue(undefined) }));
       vi.doMock('@/lib/jobs/resource-sampler', () => ({ sampleRunningJobResources: vi.fn().mockResolvedValue(undefined) }));
-      vi.doMock('./lib/jobs/resource-sampler', () => ({ sampleRunningJobResources: vi.fn().mockResolvedValue(undefined) }));
       vi.doMock('@/lib/shared/config', () => ({
         getSettings: vi.fn(() => ({
           retrieval_enabled: false,
           workflow_run_retention_days: 30,
         })),
       }));
-      vi.doMock('./lib/shared/config', () => ({
-        getSettings: vi.fn(() => ({
-          retrieval_enabled: false,
-          workflow_run_retention_days: 30,
-        })),
-      }));
       vi.doMock('@/lib/jobs/retention', () => ({ runNightlyCleanup: vi.fn().mockResolvedValue(undefined) }));
-      vi.doMock('./lib/jobs/retention', () => ({ runNightlyCleanup: vi.fn().mockResolvedValue(undefined) }));
       vi.doMock('@/lib/workflows/cron/workflow-retention', () => ({
-        pruneOldWorkflowRuns: vi.fn().mockResolvedValue({
-          runsDeleted: 0,
-          eventsDeleted: 0,
-          stepsDeleted: 0,
-          status: 'ok',
-          errorCount: 0,
-        }),
-      }));
-      vi.doMock('./lib/workflows/cron/workflow-retention', () => ({
         pruneOldWorkflowRuns: vi.fn().mockResolvedValue({
           runsDeleted: 0,
           eventsDeleted: 0,
@@ -152,37 +120,19 @@ describe('instrumentation', () => {
       vi.doMock('@/lib/workflows/cron/seed-agent-crons', () => ({
         seedAgentCrons: vi.fn().mockResolvedValue({ enqueued: 0 }),
       }));
-      vi.doMock('./lib/workflows/cron/seed-agent-crons', () => ({
-        seedAgentCrons: vi.fn().mockResolvedValue({ enqueued: 0 }),
-      }));
       vi.doMock('@/lib/workflows/cron/seed-system-cron', () => ({
-        seedSystemCron: vi.fn().mockResolvedValue({ enqueued: false, reason: 'test' }),
-      }));
-      vi.doMock('./lib/workflows/cron/seed-system-cron', () => ({
         seedSystemCron: vi.fn().mockResolvedValue({ enqueued: false, reason: 'test' }),
       }));
       vi.doMock('@/lib/workflows/cron/start-cron-worker', () => ({
         startCronWorker: vi.fn().mockResolvedValue(undefined),
       }));
-      vi.doMock('./lib/workflows/cron/start-cron-worker', () => ({
-        startCronWorker: vi.fn().mockResolvedValue(undefined),
-      }));
       vi.doMock('@/lib/workflows/cron/system-cron-task', () => ({
-        SYSTEM_CRON_JOB_KEY: 'system-cron',
-      }));
-      vi.doMock('./lib/workflows/cron/system-cron-task', () => ({
         SYSTEM_CRON_JOB_KEY: 'system-cron',
       }));
       vi.doMock('@/lib/workflows/cron/project-sweep-task', () => ({
         PROJECT_SWEEP_JOB_KEY: 'project-sweep',
       }));
-      vi.doMock('./lib/workflows/cron/project-sweep-task', () => ({
-        PROJECT_SWEEP_JOB_KEY: 'project-sweep',
-      }));
       vi.doMock('@/lib/workflows/cron/db-backup-task', () => ({
-        DB_BACKUP_JOB_KEY: 'db-backup',
-      }));
-      vi.doMock('./lib/workflows/cron/db-backup-task', () => ({
         DB_BACKUP_JOB_KEY: 'db-backup',
       }));
       vi.doMock('graphile-worker', () => ({
@@ -191,15 +141,8 @@ describe('instrumentation', () => {
       vi.doMock('@/lib/scheduling/internal-scheduler-helpers', () => ({
         listEnabledScheduledAgents: vi.fn().mockResolvedValue([]),
       }));
-      vi.doMock('./lib/scheduling/internal-scheduler-helpers', () => ({
-        listEnabledScheduledAgents: vi.fn().mockResolvedValue([]),
-      }));
       vi.doMock('@/lib/pipeline/recovery-drain', () => ({ drainAllRecoveryWork }));
-      vi.doMock('./lib/pipeline/recovery-drain', () => ({ drainAllRecoveryWork }));
       vi.doMock('@/lib/workflows/safe-start-orchestrator', () => ({
-        safeStartOrchestrator: vi.fn().mockResolvedValue(false),
-      }));
-      vi.doMock('./lib/workflows/safe-start-orchestrator', () => ({
         safeStartOrchestrator: vi.fn().mockResolvedValue(false),
       }));
       vi.doMock('workflow/runtime', () => ({ getWorld: () => ({ start: getWorldStart }) }));
@@ -214,9 +157,6 @@ describe('instrumentation', () => {
       const backfillIssueCruncherPrerequisitesMock = vi.fn();
 
       vi.doMock('@/lib/agents/default-agent-skills', () => ({
-        backfillIssueCruncherPrerequisites: backfillIssueCruncherPrerequisitesMock,
-      }));
-      vi.doMock('./lib/agents/default-agent-skills', () => ({
         backfillIssueCruncherPrerequisites: backfillIssueCruncherPrerequisitesMock,
       }));
 
@@ -336,29 +276,8 @@ describe('instrumentation', () => {
         reconcileStaleRelease: vi.fn(),
         PIPELINE_STEP_KINDS: new Set(),
       }));
-      vi.doMock('../lib/jobs/job-storage', () => ({
-        listJobs: listJobsMock,
-        markDone: markDoneMock,
-        updateJob: vi.fn(),
-        probeJobStatus: vi.fn(),
-        reconcileStaleRelease: vi.fn(),
-        PIPELINE_STEP_KINDS: new Set(),
-      }));
-      vi.doMock('./lib/jobs/job-storage', () => ({
-        listJobs: listJobsMock,
-        markDone: markDoneMock,
-        updateJob: vi.fn(),
-        probeJobStatus: vi.fn(),
-        reconcileStaleRelease: vi.fn(),
-        PIPELINE_STEP_KINDS: new Set(),
-      }));
       vi.doMock('@/lib/pipeline/start-pr-wait', () => ({ resumePrWait: resumePrWaitMock }));
-      vi.doMock('../lib/pipeline/start-pr-wait', () => ({ resumePrWait: resumePrWaitMock }));
-      vi.doMock('./lib/pipeline/start-pr-wait', () => ({ resumePrWait: resumePrWaitMock }));
       vi.doMock('@/lib/pipeline/recovery-drain', () => ({
-        drainAllRecoveryWork: vi.fn().mockResolvedValue(undefined),
-      }));
-      vi.doMock('../lib/pipeline/recovery-drain', () => ({
         drainAllRecoveryWork: vi.fn().mockResolvedValue(undefined),
       }));
 
@@ -388,32 +307,8 @@ describe('instrumentation', () => {
         reconcileStaleRelease: vi.fn(),
         PIPELINE_STEP_KINDS: new Set(),
       }));
-      vi.doMock('../lib/jobs/job-storage', () => ({
-        listJobs: listJobsMock,
-        markDone: markDoneMock,
-        updateJob: vi.fn(),
-        probeJobStatus: vi.fn(),
-        reconcileStaleRelease: vi.fn(),
-        PIPELINE_STEP_KINDS: new Set(),
-      }));
-      vi.doMock('./lib/jobs/job-storage', () => ({
-        listJobs: listJobsMock,
-        markDone: markDoneMock,
-        updateJob: vi.fn(),
-        probeJobStatus: vi.fn(),
-        reconcileStaleRelease: vi.fn(),
-        PIPELINE_STEP_KINDS: new Set(),
-      }));
       vi.doMock('@/lib/pipeline/start-pr-wait', () => ({ resumePrWait: resumePrWaitMock }));
-      vi.doMock('../lib/pipeline/start-pr-wait', () => ({ resumePrWait: resumePrWaitMock }));
-      vi.doMock('./lib/pipeline/start-pr-wait', () => ({ resumePrWait: resumePrWaitMock }));
       vi.doMock('@/lib/pipeline/recovery-drain', () => ({
-        drainAllRecoveryWork: vi.fn().mockResolvedValue(undefined),
-      }));
-      vi.doMock('../lib/pipeline/recovery-drain', () => ({
-        drainAllRecoveryWork: vi.fn().mockResolvedValue(undefined),
-      }));
-      vi.doMock('./lib/pipeline/recovery-drain', () => ({
         drainAllRecoveryWork: vi.fn().mockResolvedValue(undefined),
       }));
 
@@ -490,25 +385,11 @@ describe('instrumentation', () => {
       };
 
       vi.doMock('@/lib/jobs/job-storage', () => storageMock);
-      vi.doMock('./lib/jobs/job-storage', () => storageMock);
-      vi.doMock('../lib/jobs/job-storage', () => storageMock);
       // Also mock the non-barrel path so the barrel bypass doesn't fall through to real storage.ts
       vi.doMock('@/lib/jobs/storage', () => storageMock);
-      vi.doMock('./lib/jobs/storage', () => storageMock);
-      vi.doMock('../lib/jobs/storage', () => storageMock);
       vi.doMock('@/lib/db', () => ({ db: dbMock, schema: { pipelineLocks: { project: 'project' } } }));
-      vi.doMock('./lib/db', () => ({ db: dbMock, schema: { pipelineLocks: { project: 'project' } } }));
-      vi.doMock('../lib/db', () => ({ db: dbMock, schema: { pipelineLocks: { project: 'project' } } }));
       vi.doMock('@/lib/shared/shell', () => ({ exec: execMock }));
-      vi.doMock('./lib/shared/shell', () => ({ exec: execMock }));
-      vi.doMock('../lib/shared/shell', () => ({ exec: execMock }));
       vi.doMock('@/lib/workflows/safe-start-orchestrator', () => ({
-        safeStartOrchestrator: safeStartOrchestratorMock,
-      }));
-      vi.doMock('./lib/workflows/safe-start-orchestrator', () => ({
-        safeStartOrchestrator: safeStartOrchestratorMock,
-      }));
-      vi.doMock('../lib/workflows/safe-start-orchestrator', () => ({
         safeStartOrchestrator: safeStartOrchestratorMock,
       }));
       vi.doMock('drizzle-orm', () => ({ eq: vi.fn((_a, b) => b) }));
@@ -659,7 +540,6 @@ describe('instrumentation', () => {
       const pipelineStepKinds = options.pipelineStepKinds ?? new Set(['test', 'review', 'fix', 'commit', 'push', 'pr-wait', 'mark-dod']);
       const storageMock = { listJobs: () => jobs, probeJobStatus, reconcileStaleRelease, PIPELINE_STEP_KINDS: pipelineStepKinds };
       vi.doMock('@/lib/jobs/job-storage', () => storageMock);
-      vi.doMock('./lib/jobs/job-storage', () => storageMock);
       return { probeJobStatus, reconcileStaleRelease };
     }
 
