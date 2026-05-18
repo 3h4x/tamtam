@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { getQuotaForProvider, clearQuotaCache } from '@/lib/usage/quota';
+import { getQuotaForProvider, clearQuotaCache, peekQuotaCacheForProvider, type QuotaProvider } from '@/lib/usage/quota';
 import { ProviderNotConfiguredError } from '@/lib/usage/quota-types';
 import { getSettings } from '@/lib/shared/config';
 import {
@@ -11,7 +11,7 @@ function gateEnabled(): boolean {
   try { return getSettings()?.budget_block_runs_enabled === true; } catch { return false; }
 }
 
-function providerFromRequest(request: NextRequest): 'active' | 'claude' | 'codex' {
+function providerFromRequest(request: NextRequest): QuotaProvider {
   const provider = request.nextUrl.searchParams.get('provider');
   return provider === 'claude' || provider === 'codex' ? provider : 'active';
 }
@@ -24,38 +24,53 @@ function quotaErrorMessage(e: unknown): string {
   return msg;
 }
 
+function unavailableReason(e: unknown): 'not_configured' | 'rate_limited' | 'unavailable' {
+  if (e instanceof ProviderNotConfiguredError) return 'not_configured';
+  const msg = e instanceof Error ? e.message : String(e);
+  if (msg.includes('rate-limited') || msg.includes('backing off')) return 'rate_limited';
+  return 'unavailable';
+}
+
+function quotaPayload(snapshot: object) {
+  const throttle = scheduledBurnRateBlockedAcrossProviders();
+  return { ...snapshot, available: true, gateEnabled: gateEnabled(), schedulerThrottle: throttle };
+}
+
+function unavailablePayload(provider: QuotaProvider, e: unknown) {
+  const cached = peekQuotaCacheForProvider(provider);
+  if (cached) {
+    return quotaPayload({ ...cached, stale: true });
+  }
+  return {
+    available: false,
+    configured: !(e instanceof ProviderNotConfiguredError),
+    provider: provider === 'active' ? undefined : provider,
+    reason: unavailableReason(e),
+    error: quotaErrorMessage(e),
+    gateEnabled: gateEnabled(),
+    schedulerThrottle: scheduledBurnRateBlockedAcrossProviders(),
+  };
+}
 
 export async function GET(request: NextRequest) {
+  const provider = providerFromRequest(request);
   try {
-    const snapshot = await getQuotaForProvider(providerFromRequest(request));
+    const snapshot = await getQuotaForProvider(provider);
     await warmEnabledProviderSnapshots();
-    const throttle = scheduledBurnRateBlockedAcrossProviders();
-    return NextResponse.json({ ...snapshot, gateEnabled: gateEnabled(), schedulerThrottle: throttle });
+    return NextResponse.json(quotaPayload(snapshot));
   } catch (e) {
-    if (e instanceof ProviderNotConfiguredError) {
-      return NextResponse.json({ configured: false, error: quotaErrorMessage(e) });
-    }
-    return NextResponse.json(
-      { error: quotaErrorMessage(e) },
-      { status: 502 }
-    );
+    return NextResponse.json(unavailablePayload(provider, e));
   }
 }
 
 export async function POST(request: NextRequest) {
+  const provider = providerFromRequest(request);
   clearQuotaCache();
   try {
-    const snapshot = await getQuotaForProvider(providerFromRequest(request), { force: true });
+    const snapshot = await getQuotaForProvider(provider, { force: true });
     await warmEnabledProviderSnapshots({ force: true });
-    const throttle = scheduledBurnRateBlockedAcrossProviders();
-    return NextResponse.json({ ...snapshot, gateEnabled: gateEnabled(), schedulerThrottle: throttle });
+    return NextResponse.json(quotaPayload(snapshot));
   } catch (e) {
-    if (e instanceof ProviderNotConfiguredError) {
-      return NextResponse.json({ configured: false, error: quotaErrorMessage(e) });
-    }
-    return NextResponse.json(
-      { error: quotaErrorMessage(e) },
-      { status: 502 }
-    );
+    return NextResponse.json(unavailablePayload(provider, e));
   }
 }

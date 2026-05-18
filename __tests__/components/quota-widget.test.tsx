@@ -166,4 +166,45 @@ describe('QuotaWidget', () => {
 
     unmount()
   })
+
+  it('renders typed unavailable quota responses without throwing away successful providers', async () => {
+    const fetchMock = vi.fn(async (input: string) => {
+      if (input === '/api/usage/quota') {
+        return makeResponse({
+          available: false,
+          reason: 'rate_limited',
+          error: 'Claude quota temporarily unavailable',
+        })
+      }
+      if (input === '/api/usage/quota?provider=claude') {
+        return makeResponse({
+          available: false,
+          reason: 'not_configured',
+          error: 'No Claude OAuth token found',
+        })
+      }
+      if (input === '/api/usage/quota?provider=codex') {
+        return makeResponse(makeSnapshot({ provider: 'codex', sevenDayPct: 30 }))
+      }
+      throw new Error(`Unexpected fetch: ${input}`)
+    })
+    vi.stubGlobal('fetch', fetchMock)
+
+    const { container, unmount } = renderQuotaWidget({
+      providers: ['claude', 'codex'],
+      refreshSeconds: 999,
+    })
+
+    await vi.waitFor(() => {
+      expect(container.textContent).toContain('Codex subscription quota')
+    })
+
+    const codexCard = findCard(container, 'Codex subscription quota')
+    const claudeCard = findCard(container, 'Claude subscription quota')
+
+    expect(codexCard.textContent).toContain('7-day weekly')
+    expect(claudeCard.textContent).toContain('No Claude OAuth token found')
+
+    unmount()
+  })
 })

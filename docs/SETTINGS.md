@@ -239,6 +239,8 @@ The Postgres world worker starts automatically on TamTam boot when `WORKFLOW_TAR
 
 Live subscription quota (5-hour rolling + 7-day weekly window) is surfaced on `/stats` and Settings → Budget. For the `claude` provider, TamTam fetches `https://api.anthropic.com/api/oauth/usage` using the OAuth token from the macOS Keychain (`security find-generic-password -s "Claude Code-credentials" -w`) or `~/.claude/.credentials.json` and caches the snapshot for 600 s. The background budget-recovery ticker refreshes that cache every 300 s before checking whether queued work can resume. For the `codex` provider, TamTam reads the latest local Codex `token_count.rate_limits` event from `~/.codex/sessions/**/*.jsonl`, matching the windows shown by Codex `/status`.
 
+Quota visibility is best-effort. Missing OAuth credentials, cold local Codex session data, Anthropic rate-limit backoff, or other first-fetch failures are reported to the UI as a typed unavailable state; dashboards keep rendering and show unobtrusive "quota unavailable" copy. Once a provider has produced a successful snapshot, later refresh failures reuse that snapshot with `stale: true` until a fresh read succeeds.
+
 | Key | Type | Default | Effect |
 |-----|------|---------|--------|
 | `budget_block_runs_enabled` | boolean | `false` | When true, TamTam resolves a provider through the enabled CLI set before starting any run/release path. If every enabled provider is at or above `budget_block_at_pct`, pipeline routes (`run`, `review`, `fix`, `push`, `release`, `rerun`, `fix-ci`, `agent run`) return HTTP 429 |
