@@ -102,7 +102,7 @@ provider: codex
 model: opus
 schedule: 4h
 enabled: true
-skillIds: ["persona:engineering-team/senior-fullstack"]
+skillIds: ["persona:engineering/fullstack"]
 ---
 Improve the UI of tamtam.`);
     const agents = scanFileAgents(tmpDir, 'testproject');
@@ -112,7 +112,7 @@ Improve the UI of tamtam.`);
     expect(a.model).toBe('smart');
     expect(a.schedule).toBe('4h');
     expect(a.enabled).toBe(true);
-    expect(a.skillIds).toEqual(['persona:engineering-team/senior-fullstack']);
+    expect(a.skillIds).toEqual(['persona:engineering/fullstack']);
     expect(a.prompt).toBe('Improve the UI of tamtam.');
   });
 
@@ -344,7 +344,7 @@ Original prompt.`);
   });
 
   it('round-trips through load', () => {
-    const skillIds = ['persona:engineering-team/senior-fullstack', 'agent-tests'];
+    const skillIds = ['persona:engineering/fullstack', 'agent-tests'];
     writeFileAgent(tmpDir, 'proj', 'agent', {
       provider: 'lmstudio',
       model: 'smart', schedule: '8h', skillIds, prompt: 'Run stuff.',

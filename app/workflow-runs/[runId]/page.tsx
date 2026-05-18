@@ -1,5 +1,6 @@
 import { Suspense } from 'react';
 import { WorkflowRunDetail } from '@/components/workflow-runs/WorkflowRunDetail';
+import { WorkflowRunDetailLoadingState } from '@/components/workflow-runs/WorkflowRunsStates';
 
 export default async function WorkflowRunDetailPage({
   params,
@@ -8,7 +9,7 @@ export default async function WorkflowRunDetailPage({
 }) {
   const { runId } = await params;
   return (
-    <Suspense fallback={<div className="p-6 text-text-tertiary">Loading…</div>}>
+    <Suspense fallback={<WorkflowRunDetailLoadingState />}>
       <WorkflowRunDetail runId={runId} />
     </Suspense>
   );

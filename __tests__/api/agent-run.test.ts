@@ -1101,11 +1101,11 @@ describe('POST /api/agents/{agentId}/run', () => {
   });
 
   it('prepends file-based persona content when skillIds contains persona:<path>', async () => {
-    const docsDir = join(tempSkillsDir, 'docs', 'skills', 'engineering-team');
+    const docsDir = join(tempSkillsDir, 'docs', 'skills', 'engineering');
     mkdirSync(docsDir, { recursive: true });
-    writeFileSync(join(docsDir, 'senior-fullstack.md'), 'FULLSTACK-PERSONA-BODY');
+    writeFileSync(join(docsDir, 'fullstack.md'), 'FULLSTACK-PERSONA-BODY');
 
-    await insertAgent({ skillIds: '["persona:engineering-team/senior-fullstack"]' });
+    await insertAgent({ skillIds: '["persona:engineering/fullstack"]' });
 
     const req = new NextRequest('http://localhost/api/agents/agent-123/run', {
       method: 'POST',
@@ -1574,14 +1574,14 @@ File-backed prompt.`);
     // compose step and written to `job.contextMeta` (which the workflow's
     // start step then persists via `updateJob`). The initial createJob value
     // only carries the agent meta. Assert against the final job state.
-    const docsDir = join(tempSkillsDir, 'docs', 'skills', 'engineering-team');
+    const docsDir = join(tempSkillsDir, 'docs', 'skills', 'engineering');
     mkdirSync(docsDir, { recursive: true });
-    writeFileSync(join(docsDir, 'senior-fullstack.md'), '---\nname: Senior Fullstack\n---\nbody');
+    writeFileSync(join(docsDir, 'fullstack.md'), '---\nname: Fullstack\n---\nbody');
 
     await sharedHandle.db
       .insert(schema.skills)
       .values({ id: 'skill-db', name: 'DB One', description: 'desc', content: 'x', createdAt: now, updatedAt: now });
-    await insertAgent({ skillIds: '["skill-db","persona:engineering-team/senior-fullstack"]' });
+    await insertAgent({ skillIds: '["skill-db","persona:engineering/fullstack"]' });
 
     const req = new NextRequest('http://localhost/api/agents/agent-123/run', {
       method: 'POST',
@@ -1596,8 +1596,8 @@ File-backed prompt.`);
     const dbChip = meta.skills.find((s: any) => s.source === 'db');
     const fileChip = meta.skills.find((s: any) => s.source === 'file');
     expect(dbChip?.name).toBe('DB One');
-    expect(fileChip?.id).toBe('persona:engineering-team/senior-fullstack');
-    expect(fileChip?.name).toBe('Senior Fullstack');
+    expect(fileChip?.id).toBe('persona:engineering/fullstack');
+    expect(fileChip?.name).toBe('Fullstack');
   });
 
   it('records the trigger source in contextMeta for the report finalizer', async () => {
