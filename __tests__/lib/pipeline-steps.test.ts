@@ -26,7 +26,7 @@ describe('getPipelineSteps', () => {
   beforeEach(() => { _resetExtraSteps(); });
 
   it('returns the unified built-in step registry in order', () => {
-    expect(getPipelineSteps().map(s => s.id)).toEqual(['test', 'review', 'fix', 'commit', 'push', 'dod', 'merge']);
+    expect(getPipelineSteps().map(s => s.id)).toEqual(['test', 'review', 'fix', 'commit', 'push', 'dod', 'merge', 'soak']);
   });
 
   it('marks fix and dod as mandatory', () => {

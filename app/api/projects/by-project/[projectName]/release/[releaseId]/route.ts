@@ -3,7 +3,7 @@ import { listJobs, getVerdict, readLog } from '@/lib/jobs/job-storage';
 import { exec } from '@/lib/shared/shell';
 import { resolveProjectPath } from '@/lib/shared/project-data';
 
-const PIPELINE_STEP_KINDS = ['test', 'review', 'fix', 'commit', 'push', 'pr-wait', 'mark-dod'];
+const PIPELINE_STEP_KINDS = ['test', 'review', 'fix', 'commit', 'push', 'pr-wait', 'mark-dod', 'soak'];
 
 function jobStatus(job: { abortedAt?: number | null; finishedAt: number | null }): 'running' | 'done' | 'aborted' {
   if (job.abortedAt != null) return 'aborted';

@@ -28,6 +28,9 @@ export interface DispatchContext {
   prevJobId?: string;
   /** PR identity. pr-wait needs all three. */
   pr?: { prNumber: number; prRepo: string; prUrl: string };
+  /** Soak context. Only the soak phase consumes this; resolved from the
+   *  release's pr-wait + project soak settings just before dispatch. */
+  soak?: { mergeSha: string; prNumber: number; prRepo: string; prUrl: string; defaultBranch: string; watchMinutes: number; autoRevert: boolean };
   /** Targeting override for mark-dod (issueNumber / prNumber / repo). */
   dodOverride?: MarkDodOverride;
   /** Forwarded to push/commit phases for chain tracking. */
@@ -143,6 +146,15 @@ export async function dispatchPhase(
         ]);
         break;
       }
+      case 'soak': {
+        const { releaseSoakPhaseWorkflow } = await import('@/lib/workflows/phases/soak-phase');
+        run = await start(releaseSoakPhaseWorkflow, [
+          ctx.projectName,
+          ctx.soak!,
+          ctx.parentJobId,
+        ]);
+        break;
+      }
     }
       if (!run) {
         // Type-narrowing should make this unreachable, but be defensive.
@@ -226,6 +238,7 @@ function jobKindForNextPhase(phase: NextPhase['next']): string | null {
     case 'push': return 'push';
     case 'mark-dod': return 'mark-dod';
     case 'pr-wait': return 'pr-wait';
+    case 'soak': return 'soak';
     default: return null;
   }
 }
@@ -258,6 +271,14 @@ function requiredContextMissing(phase: NextPhase['next'], ctx: DispatchContext):
     if (!ctx.pr?.prNumber) missing.push('pr.prNumber');
     if (!ctx.pr?.prRepo) missing.push('pr.prRepo');
     if (!ctx.pr?.prUrl) missing.push('pr.prUrl');
+  }
+  if (phase === 'soak') {
+    if (!ctx.soak?.prNumber) missing.push('soak.prNumber');
+    if (!ctx.soak?.prRepo) missing.push('soak.prRepo');
+    if (!ctx.soak?.prUrl) missing.push('soak.prUrl');
+    if (!ctx.soak?.mergeSha) missing.push('soak.mergeSha');
+    if (!ctx.soak?.defaultBranch) missing.push('soak.defaultBranch');
+    if (!ctx.soak?.watchMinutes || ctx.soak.watchMinutes <= 0) missing.push('soak.watchMinutes');
   }
   // test, review, commit, push, mark-dod only need projectName.
   return missing;

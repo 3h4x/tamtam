@@ -49,6 +49,9 @@ export async function releaseOrchestratorWorkflow(
   if (decision.next === 'pr-wait') {
     dispatchCtx.pr = decision.pr;
   }
+  if (decision.next === 'soak') {
+    dispatchCtx.soak = decision.soak;
+  }
   const dispatch = await dispatchStep(decision, dispatchCtx);
   // Finalize the release meta-job whenever this tick did not start a child
   // workflow — otherwise the release sits in `running` until the wall-clock
@@ -238,6 +241,59 @@ async function decideStep(jobId: string): Promise<NextPhase> {
       } catch {}
     }
   }
+  // After a successful pr-wait merge, decide whether to enter the soak
+  // watch window. Soak is opt-in per project — disabled (0 minutes) means
+  // the release ends here just as it did before. We resolve everything the
+  // soak phase needs (merge sha + PR identity + default branch) here so
+  // the decideNextPhase function stays pure data-in / data-out.
+  let soakContext: { mergeSha: string; prNumber: number; prRepo: string; prUrl: string; defaultBranch: string; watchMinutes: number; autoRevert: boolean } | null = null;
+  if (job.kind === 'pr-wait' && job.releaseId && (job.exitCode ?? -1) === 0) {
+    try {
+      const { getProjectSoakConfig } = await import('@/lib/scheduling/scheduling');
+      const soakCfg = await getProjectSoakConfig(job.project);
+      if (soakCfg && soakCfg.postMergeWatchMinutes > 0) {
+        const prMeta = job.contextMeta ? JSON.parse(job.contextMeta) as { prNumber?: number; prRepo?: string; prUrl?: string } : {};
+        if (prMeta.prNumber && prMeta.prRepo && prMeta.prUrl) {
+          const { resolveProjectPath } = await import('@/lib/shared/project-data');
+          const projPath = resolveProjectPath(job.project);
+          if (projPath) {
+            const { detectMainBranch } = await import('@/lib/pipeline/start-commit');
+            const defaultBranch = await detectMainBranch(projPath);
+            // Prefer the PR's recorded merge commit (canonical for squash
+            // and rebase merges) and fall back to the local default-branch
+            // tip if gh is unavailable. Without the fallback we'd silently
+            // skip soak in offline environments.
+            const { exec } = await import('@/lib/shared/shell');
+            let mergeSha = '';
+            const ghMerge = await exec(
+              'gh',
+              ['pr', 'view', String(prMeta.prNumber), '--repo', prMeta.prRepo, '--json', 'mergeCommit', '--jq', '.mergeCommit.oid'],
+              { cwd: projPath, timeout: 15_000 },
+            );
+            if (ghMerge.exitCode === 0) mergeSha = ghMerge.stdout.trim();
+            if (!mergeSha) {
+              await exec('git', ['-C', projPath, 'fetch', 'origin', defaultBranch], { timeout: 30_000 });
+              const shaR = await exec('git', ['-C', projPath, 'rev-parse', `origin/${defaultBranch}`], { timeout: 10_000 });
+              if (shaR.exitCode === 0) mergeSha = shaR.stdout.trim();
+            }
+            if (mergeSha) {
+              soakContext = {
+                mergeSha,
+                prNumber: prMeta.prNumber,
+                prRepo: prMeta.prRepo,
+                prUrl: prMeta.prUrl,
+                defaultBranch,
+                watchMinutes: soakCfg.postMergeWatchMinutes,
+                autoRevert: soakCfg.autoRevertEnabled,
+              };
+            }
+          }
+        }
+      }
+    } catch (err) {
+      console.warn('[release-orchestrator] soak context resolution failed:', err);
+    }
+  }
   const decision = decideNextPhase({
     kind: job.kind,
     exitCode: job.exitCode ?? -1,
@@ -248,6 +304,7 @@ async function decideStep(jobId: string): Promise<NextPhase> {
     reviewDisabled,
     hasUncommittedChanges,
     hasUnpushedCommits,
+    soakContext,
   });
   // Pre-dispatch guards: convert `{ next: 'fix' }` into `{ next: 'abort' }`
   // when the fix loop would not converge (reviewIsStuck/fixContradictsReview),

@@ -44,6 +44,10 @@ export interface ConfigTabProps {
   setAutoPushEnabledInput: (v: boolean) => void
   autoPrMergeEnabledInput: boolean
   setAutoPrMergeEnabledInput: (v: boolean) => void
+  postMergeWatchMinutesInput: string
+  setPostMergeWatchMinutesInput: (v: string) => void
+  autoRevertEnabledInput: boolean
+  setAutoRevertEnabledInput: (v: boolean) => void
   releaseAfterRunInput: boolean
   setReleaseAfterRunInput: (v: boolean) => void
   issueAutoBranchInput: boolean
@@ -91,6 +95,10 @@ export function ConfigTab({
   setAutoPushEnabledInput,
   autoPrMergeEnabledInput,
   setAutoPrMergeEnabledInput,
+  postMergeWatchMinutesInput,
+  setPostMergeWatchMinutesInput,
+  autoRevertEnabledInput,
+  setAutoRevertEnabledInput,
   releaseAfterRunInput,
   setReleaseAfterRunInput,
   issueAutoBranchInput,
@@ -332,6 +340,8 @@ export function ConfigTab({
                 auto_commit_enabled: autoCommitEnabledInput,
                 auto_push_enabled: autoPushEnabledInput,
                 auto_pr_merge_enabled: autoPrMergeEnabledInput,
+                post_merge_watch_minutes: Number.parseInt(postMergeWatchMinutesInput, 10) || 0,
+                auto_revert_enabled: autoRevertEnabledInput,
               },
               setters: {
                 setAutoCommit: setAutoCommitEnabledInput,
@@ -464,6 +474,40 @@ export function ConfigTab({
             />
             <p className="text-xs text-text-tertiary mt-1">Project-specific style guide for auto-generated commit messages. Committed to <span className="font-mono">.tamtam/config.yml</span>; falls back to the global setting when empty.</p>
           </div>
+        </div>
+
+        {/* Post-merge soak window */}
+        <div className="px-4 py-3 border-t border-border space-y-3">
+          <div>
+            <label className="block font-medium text-xs text-text-secondary mb-1" htmlFor="post-merge-watch-minutes">
+              Post-merge watch (minutes)
+            </label>
+            <input
+              id="post-merge-watch-minutes"
+              type="text"
+              inputMode="numeric"
+              className="w-full px-3 py-1.5 text-sm bg-bg-primary border border-border rounded-md text-text-primary font-mono focus:outline-none focus:ring-2 focus:ring-accent/30 focus:border-accent transition-colors placeholder:text-text-tertiary"
+              value={postMergeWatchMinutesInput}
+              onChange={(e) => setPostMergeWatchMinutesInput(e.target.value)}
+              placeholder="0"
+            />
+            <p className="text-xs text-text-tertiary mt-1">
+              After PR merge, watch default-branch CI on the merge commit for this many minutes. Failures inside the window open a revert PR. <code className="font-mono">0</code> disables the watcher.
+            </p>
+          </div>
+          <label className="flex items-start gap-2 cursor-pointer select-none">
+            <input
+              id="auto-revert-enabled"
+              type="checkbox"
+              className="w-4 h-4 accent-accent mt-0.5 shrink-0 cursor-pointer"
+              checked={autoRevertEnabledInput}
+              onChange={(e) => setAutoRevertEnabledInput(e.target.checked)}
+            />
+            <div className="flex-1 min-w-0">
+              <div className="font-medium text-sm text-text-primary">Auto-merge revert PR</div>
+              <div className="text-xs text-text-tertiary">When the watcher opens a revert PR, also enable squash auto-merge. Off = the revert PR stays open for human review.</div>
+            </div>
+          </label>
         </div>
 
         {/* Trigger cadence */}

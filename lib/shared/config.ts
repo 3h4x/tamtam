@@ -88,6 +88,7 @@ export interface TamTamConfig {
   notification_on_fix_loop_exhausted: boolean;
   notification_on_review_do_not_ship: boolean;
   notification_on_agent_run_fail: boolean;
+  notification_on_post_merge_revert: boolean;
   notification_throttle_window_seconds: number;
   notification_throttle_overrides: Record<string, number>;
   pipeline_model_review: string;
@@ -186,6 +187,7 @@ const DEFAULTS: TamTamConfig = {
   notification_on_fix_loop_exhausted: false,
   notification_on_review_do_not_ship: false,
   notification_on_agent_run_fail: false,
+  notification_on_post_merge_revert: false,
   notification_throttle_window_seconds: 900,
   notification_throttle_overrides: { release_fail: 0, release_aborted: 0 },
   // Empty string = use the per-step sensible default (review/fix → workspace
@@ -401,6 +403,7 @@ export function buildConfigFromSettingsMap(map: Record<string, string>): TamTamC
     notification_on_fix_loop_exhausted: map.notification_on_fix_loop_exhausted === 'true',
     notification_on_review_do_not_ship: map.notification_on_review_do_not_ship === 'true',
     notification_on_agent_run_fail: map.notification_on_agent_run_fail === 'true',
+    notification_on_post_merge_revert: map.notification_on_post_merge_revert === 'true',
     notification_throttle_window_seconds: parseIntOr(
       map.notification_throttle_window_seconds,
       DEFAULTS.notification_throttle_window_seconds
