@@ -183,23 +183,12 @@ describe('CliTab', () => {
     unmount()
   })
 
-  it('defaults the permission-mode picker to acceptEdits when the stored value is empty', () => {
+  it('defaults the permission-mode picker to auto when the stored value is empty', () => {
     const { container, unmount } = renderCliTab(makeSettings({
       permission_mode: '',
     }))
 
-    expect(getSelectByLabel(container, 'Permission mode').value).toBe('acceptEdits')
-
-    unmount()
-  })
-
-  it('shows the provider-neutral auto warning copy', () => {
-    const { container, unmount } = renderCliTab(makeSettings({
-      permission_mode: 'auto',
-    }))
-
-    expect(container.textContent).toContain('auto preserves provider-native approval behavior')
-    expect(container.textContent).toContain('Prefer acceptEdits for background runs')
+    expect(getSelectByLabel(container, 'Permission mode').value).toBe('auto')
 
     unmount()
   })

@@ -179,7 +179,7 @@ describe('settings API', () => {
       const response = await GET();
       const data = await response.json();
 
-      expect(data.settings.permission_mode).toBe('acceptEdits');
+      expect(data.settings.permission_mode).toBe('auto');
     });
 
     it('falls back to the default review_fix_max_iterations when the stored row is invalid', async () => {

@@ -123,7 +123,7 @@ describe('config', () => {
         weekends: false,
         base_prompt: 'Never ask clarifying questions. Make decisions yourself based on what you see in the codebase. If multiple approaches work, pick the simplest one and go.',
         default_model: 'fast',
-        permission_mode: 'acceptEdits',
+        permission_mode: 'auto',
         commit_style: 'Use conventional commits. One line only, present tense, ≤50 chars, no trailing period. Types: feat|fix|docs|style|refactor|test|chore|ci|build|perf|revert.',
         review_verdict_rules: expect.stringContaining('Pragmatic verdict rules'),
         jobs_paused: false,
@@ -592,8 +592,8 @@ describe('config', () => {
   });
 
   describe('getPermissionModeFlag', () => {
-    it('returns default acceptEdits flag when no setting in DB', () => {
-      expect(getPermissionModeFlag()).toBe('--permission-mode acceptEdits');
+    it('returns default auto flag when no setting in DB', () => {
+      expect(getPermissionModeFlag()).toBe('--permission-mode auto');
     });
 
     it('returns flag for a valid mode stored in DB', async () => {
@@ -602,10 +602,10 @@ describe('config', () => {
       expect(getPermissionModeFlag()).toBe('--permission-mode acceptEdits');
     });
 
-    it('falls back to acceptEdits for an unrecognised mode', async () => {
+    it('falls back to auto for an unrecognised mode', async () => {
       await setSetting('permission_mode', 'dangerousMode');
       await refresh();
-      expect(getPermissionModeFlag()).toBe('--permission-mode acceptEdits');
+      expect(getPermissionModeFlag()).toBe('--permission-mode auto');
     });
 
     it.each(['acceptEdits', 'auto', 'bypassPermissions', 'default', 'dontAsk', 'plan'])(
