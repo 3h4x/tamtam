@@ -237,8 +237,10 @@ describe('seedDefaultSkills seeded defaults snapshot', () => {
     expect(skill!.content).toContain('current repo directory name');
     expect(skill!.content).toContain('If either disagrees with the repo directory name');
     expect(skill!.content).toContain('ISSUE_PROJECT_UNKNOWN');
-    expect(skill!.content).toContain('/api/projects/by-project/<project>/checkout-default');
-    expect(skill!.content).toContain('/api/projects/by-project/<project>/changes');
+    expect(skill!.content).toContain('tamtam-actions');
+    expect(skill!.content).toContain('{type: "checkout-default"}');
+    expect(skill!.content).toContain('{type: "issue-comment", number: <n>');
+    expect(skill!.content).toContain('Do NOT `curl http://localhost:1337/...` for issue write operations');
     // §4 used to instruct the agent to POST /issue-branch; auto-checkout-on-pick
     // removed that step. The skill must now NOT mention /issue-branch.
     expect(skill!.content).not.toContain('/api/projects/by-project/<project>/issue-branch');
