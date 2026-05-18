@@ -1,9 +1,9 @@
-import { describe, it, expect, beforeAll, beforeEach, afterAll, afterEach, vi } from 'vitest';
+import { describe, it, expect, beforeAll, beforeEach, afterAll, vi } from 'vitest';
 import { sql } from 'drizzle-orm';
 import * as schema from '@/lib/db/schema';
 import { createTestPgDbEmpty, type TestDbHandle } from '@/__tests__/helpers/test-db';
 import { JobData } from '@/lib/jobs/job-storage';
-import { writeFileSync, readFileSync, mkdtempSync, rmSync } from 'fs';
+import { writeFileSync, mkdtempSync, rmSync } from 'fs';
 import { join } from 'path';
 import { tmpdir } from 'os';
 
@@ -121,52 +121,6 @@ function makeMissingProcessError(): NodeJS.ErrnoException {
   return error;
 }
 
-// `getJob`/`listJobs` are cache-only since commit 1cc1db25 — tests that seed
-// rows via direct DB inserts must populate the in-memory cache too, or
-// lifecycle hooks (which call `getJob`/`findActiveReleaseJob`/`listJobs`)
-// won't see those rows. Call this after raw inserts and before invoking
-// `markDoneFn`/lifecycle code so the cache mirrors the DB.
-async function syncCacheFromDb(): Promise<void> {
-  const { jobsCache } = await import('@/lib/jobs/storage');
-  jobsCache.clear();
-  const rows = await sharedHandle.db.select().from(schema.jobs);
-  for (const row of rows) {
-    jobsCache.set(row.id, {
-      id: row.id,
-      project: row.project,
-      kind: row.kind,
-      prompt: row.prompt ?? null,
-      pid: row.pid,
-      logPath: row.logPath,
-      startedAt: row.startedAt,
-      finishedAt: row.finishedAt ?? null,
-      exitCode: row.exitCode ?? null,
-      seen: row.seen ?? false,
-      durationMs: row.durationMs ?? null,
-      inputTokens: row.inputTokens ?? null,
-      outputTokens: row.outputTokens ?? null,
-      cacheReadTokens: row.cacheReadTokens ?? null,
-      cacheCreateTokens: row.cacheCreateTokens ?? null,
-      sessionId: row.sessionId ?? null,
-      contextMeta: row.contextMeta ?? null,
-      userPrompt: row.userPrompt ?? null,
-      parentJobId: row.parentJobId ?? null,
-      ghIssueNumber: row.ghIssueNumber ?? null,
-      ghIssueRepo: row.ghIssueRepo ?? null,
-      ghIssueTitle: row.ghIssueTitle ?? null,
-      logPruned: row.logPruned ?? false,
-      verdict: row.verdict ?? null,
-      costUsd: row.costUsd ?? null,
-      model: row.model ?? null,
-      releaseId: row.releaseId ?? null,
-      abortedAt: row.abortedAt ?? null,
-      promptBytes: row.promptBytes ?? null,
-      workSummary: row.workSummary ?? null,
-      modifiedFiles: row.modifiedFiles ?? null,
-      provider: row.provider ?? null,
-    });
-  }
-}
 describe('probeJobStatus with pm2', () => {
   let probeJobStatusFn: typeof import('@/lib/jobs/job-storage').probeJobStatus;
   // Stable mock references captured by the hoisted `vi.doMock` factories.
@@ -178,6 +132,18 @@ describe('probeJobStatus with pm2', () => {
   const deleteJobMock = vi.fn();
   const resolveProjectPathMock = vi.fn();
   let storageCache: Map<string, JobData>;
+  let tempDir: string;
+  let jobSeq = 0;
+
+  function nextJobId(label: string): string {
+    return `${label}-${++jobSeq}`;
+  }
+
+  function writeProbeLog(name: string, contents: string): string {
+    const logFile = join(tempDir, `${name}-${++jobSeq}.log`);
+    writeFileSync(logFile, contents);
+    return logFile;
+  }
 
   beforeAll(async () => {
     vi.resetModules();
@@ -192,11 +158,11 @@ describe('probeJobStatus with pm2', () => {
     const mod = await import('@/lib/jobs/job-storage');
     probeJobStatusFn = mod.probeJobStatus;
     storageCache = (await import('@/lib/jobs/storage')).jobsCache;
+    tempDir = mkdtempSync(join(tmpdir(), 'tamtam-probe-status-'));
   });
 
   beforeEach(async () => {
     storageCache.clear();
-    await truncateAll();
     getJobStatusMock.mockReset();
     getJobPidMock.mockReset().mockResolvedValue(null);
     deleteJobMock.mockReset();
@@ -204,6 +170,7 @@ describe('probeJobStatus with pm2', () => {
   });
 
   afterAll(() => {
+    if (tempDir) rmSync(tempDir, { recursive: true, force: true });
     vi.doUnmock('@/lib/db');
     vi.doUnmock('@/lib/jobs/pm2-jobs');
     vi.doUnmock('@/lib/shared/project-data');
@@ -212,7 +179,7 @@ describe('probeJobStatus with pm2', () => {
 
   it('returns running for pid>0 jobs whose process is still alive', async () => {
     const job: JobData = {
-      id: 'job-alive',
+      id: nextJobId('job-alive'),
       project: 'proj',
       kind: 'run',
       prompt: null,
@@ -231,7 +198,7 @@ describe('probeJobStatus with pm2', () => {
 
   it('marks done for pid>0 jobs whose process is gone', async () => {
     const job: JobData = {
-      id: 'job-dead',
+      id: nextJobId('job-dead'),
       project: 'proj',
       kind: 'run',
       prompt: null,
@@ -256,7 +223,7 @@ describe('probeJobStatus with pm2', () => {
     });
 
     const job: JobData = {
-      id: 'job-dead-pid',
+      id: nextJobId('job-dead-pid'),
       project: 'proj',
       kind: 'run',
       prompt: null,
@@ -279,12 +246,11 @@ describe('probeJobStatus with pm2', () => {
   it('overrides exit code to 0 when log has a clean result (is_error:false) and pm2 reports non-zero', async () => {
     getJobStatusMock.mockResolvedValue({ status: 'done', exitCode: -1 });
 
-    const logFile = join(tmpdir(), `tamtam-exitcode-override-${Date.now()}.log`);
     const resultLine = '{"type":"result","subtype":"success","is_error":false,"duration_ms":500,"total_cost_usd":0,"session_id":"s1","result":"ok"}';
-    writeFileSync(logFile, resultLine + '\n');
+    const logFile = writeProbeLog('exitcode-override', resultLine + '\n');
 
     const job: JobData = {
-      id: 'job-override',
+      id: nextJobId('job-override'),
       project: 'proj',
       kind: 'run',
       prompt: null,
@@ -296,25 +262,20 @@ describe('probeJobStatus with pm2', () => {
       seen: false,
     };
 
-    try {
-      // getClaudeResultExitCode fires first: log has "type":"result" with is_error:false → markDone(0)
-      const status = await probeJobStatusFn(job);
-      expect(status).toBe('done');
-      expect(job.exitCode).toBe(0);
-    } finally {
-      try { rmSync(logFile); } catch {}
-    }
+    // getClaudeResultExitCode fires first: log has "type":"result" with is_error:false → markDone(0)
+    const status = await probeJobStatusFn(job);
+    expect(status).toBe('done');
+    expect(job.exitCode).toBe(0);
   });
 
   it('uses exit code 1 when log result has is_error:true (e.g. API timeout)', async () => {
     getJobStatusMock.mockResolvedValue({ status: 'done', exitCode: 0 });
 
-    const logFile = join(tmpdir(), `tamtam-is-error-${Date.now()}.log`);
     const resultLine = '{"type":"result","subtype":"error_max_turns","is_error":true,"duration_ms":1000,"total_cost_usd":0,"session_id":"s2","result":"Stream idle timeout"}';
-    writeFileSync(logFile, resultLine + '\n');
+    const logFile = writeProbeLog('is-error', resultLine + '\n');
 
     const job: JobData = {
-      id: 'job-is-error',
+      id: nextJobId('job-is-error'),
       project: 'proj',
       kind: 'run',
       prompt: null,
@@ -326,25 +287,20 @@ describe('probeJobStatus with pm2', () => {
       seen: false,
     };
 
-    try {
-      // getClaudeResultExitCode fires first: log has "type":"result" with is_error:true → markDone(1)
-      const status = await probeJobStatusFn(job);
-      expect(status).toBe('done');
-      expect(job.exitCode).toBe(1);
-    } finally {
-      try { rmSync(logFile); } catch {}
-    }
+    // getClaudeResultExitCode fires first: log has "type":"result" with is_error:true → markDone(1)
+    const status = await probeJobStatusFn(job);
+    expect(status).toBe('done');
+    expect(job.exitCode).toBe(1);
   });
 
   it('uses exit code 1 for is_error:true on agent: kind too', async () => {
     getJobStatusMock.mockResolvedValue({ status: 'done', exitCode: 0 });
 
-    const logFile = join(tmpdir(), `tamtam-agent-is-error-${Date.now()}.log`);
     const resultLine = '{"type":"result","subtype":"error_api","is_error":true,"duration_ms":500,"total_cost_usd":0,"session_id":"s3","result":"Rate limited"}';
-    writeFileSync(logFile, resultLine + '\n');
+    const logFile = writeProbeLog('agent-is-error', resultLine + '\n');
 
     const job: JobData = {
-      id: 'job-agent-is-error',
+      id: nextJobId('job-agent-is-error'),
       project: 'proj',
       kind: 'agent:my-agent',
       prompt: null,
@@ -356,24 +312,19 @@ describe('probeJobStatus with pm2', () => {
       seen: false,
     };
 
-    try {
-      const status = await probeJobStatusFn(job);
-      expect(status).toBe('done');
-      expect(job.exitCode).toBe(1);
-    } finally {
-      try { rmSync(logFile); } catch {}
-    }
+    const status = await probeJobStatusFn(job);
+    expect(status).toBe('done');
+    expect(job.exitCode).toBe(1);
   });
 
   it('does NOT override exit code for test kind even with a result in the log', async () => {
     getJobStatusMock.mockResolvedValue({ status: 'done', exitCode: -1 });
 
-    const logFile = join(tmpdir(), `tamtam-test-kind-${Date.now()}.log`);
     const resultLine = '{"type":"result","subtype":"success","is_error":false,"duration_ms":200,"total_cost_usd":0,"session_id":"s3","result":"ok"}';
-    writeFileSync(logFile, resultLine + '\n');
+    const logFile = writeProbeLog('test-kind', resultLine + '\n');
 
     const job: JobData = {
-      id: 'job-test-kind',
+      id: nextJobId('job-test-kind'),
       project: 'proj',
       kind: 'test',
       prompt: null,
@@ -385,15 +336,11 @@ describe('probeJobStatus with pm2', () => {
       seen: false,
     };
 
-    try {
-      // logHasClaudeResult check is only for run/review → skipped for test kind
-      const status = await probeJobStatusFn(job);
-      // pm2 reports done with exitCode=-1, no override for test kind
-      expect(status).toBe('done');
-      expect(job.exitCode).toBe(-1);
-    } finally {
-      try { rmSync(logFile); } catch {}
-    }
+    // logHasClaudeResult check is only for run/review → skipped for test kind
+    const status = await probeJobStatusFn(job);
+    // pm2 reports done with exitCode=-1, no override for test kind
+    expect(status).toBe('done');
+    expect(job.exitCode).toBe(-1);
   });
 
   // Regression: an `agent:*` job created via createJob(project, kind, 0, '')
@@ -404,7 +351,7 @@ describe('probeJobStatus with pm2', () => {
   // symptom: phantom "exit -1 @ 0s" row next to the successful run.
   it("returns 'running' for a freshly-created pid=0 job (spawn grace)", async () => {
     const job: JobData = {
-      id: 'job-spawn-grace',
+      id: nextJobId('job-spawn-grace'),
       project: 'proj',
       kind: 'agent:docs',
       prompt: null,
@@ -429,7 +376,7 @@ describe('probeJobStatus with pm2', () => {
     getJobStatusMock.mockResolvedValue({ status: 'unknown', exitCode: null });
 
     const job: JobData = {
-      id: 'job-spawn-grace-expired',
+      id: nextJobId('job-spawn-grace-expired'),
       project: 'proj',
       kind: 'agent:docs',
       prompt: null,
@@ -452,7 +399,7 @@ describe('probeJobStatus with pm2', () => {
     // pid can be -1 when createJob writes a placeholder before pm2 start completes.
     // The grace window applies to all pid<=0, not just pid===0.
     const job: JobData = {
-      id: 'job-spawn-grace-neg',
+      id: nextJobId('job-spawn-grace-neg'),
       project: 'proj',
       kind: 'agent:docs',
       prompt: null,
@@ -474,7 +421,7 @@ describe('probeJobStatus with pm2', () => {
     getJobStatusMock.mockResolvedValue({ status: 'unknown', exitCode: null });
 
     const job: JobData = {
-      id: 'job-spawn-grace-neg-expired',
+      id: nextJobId('job-spawn-grace-neg-expired'),
       project: 'proj',
       kind: 'agent:docs',
       prompt: null,
@@ -501,7 +448,7 @@ describe('probeJobStatus with pm2', () => {
     getJobStatusMock.mockResolvedValue({ status: 'running', exitCode: null });
 
     const job: JobData = {
-      id: 'release-long-running',
+      id: nextJobId('release-long-running'),
       project: 'proj',
       kind: 'release',
       prompt: null,
@@ -521,7 +468,7 @@ describe('probeJobStatus with pm2', () => {
 
   it('release kind always reports running — workflow runtime owns finalization', async () => {
     const job: JobData = {
-      id: 'release-running',
+      id: nextJobId('release-running'),
       project: 'proj',
       kind: 'release',
       prompt: null,
@@ -541,6 +488,7 @@ describe('probeJobStatus with pm2', () => {
 describe('probeJobStatus – test/action kind liveness via process.kill', () => {
   let probeJobStatusFn: typeof import('@/lib/jobs/job-storage').probeJobStatus;
   let storageCache: Map<string, JobData>;
+  let jobSeq = 0;
 
   beforeAll(async () => {
     vi.resetModules();
@@ -555,7 +503,6 @@ describe('probeJobStatus – test/action kind liveness via process.kill', () => 
 
   beforeEach(async () => {
     storageCache.clear();
-    await truncateAll();
   });
 
   afterAll(() => {
@@ -568,7 +515,7 @@ describe('probeJobStatus – test/action kind liveness via process.kill', () => 
   it('test kind with live pid returns running', async () => {
     const killSpy = vi.spyOn(process, 'kill').mockReturnValue(true as ReturnType<typeof process.kill>);
     const job: JobData = {
-      id: 'job-test-live',
+      id: `job-test-live-${++jobSeq}`,
       project: 'proj',
       kind: 'test',
       prompt: null,
@@ -591,7 +538,7 @@ describe('probeJobStatus – test/action kind liveness via process.kill', () => 
   it('action kind with live pid returns running', async () => {
     const killSpy = vi.spyOn(process, 'kill').mockReturnValue(true as ReturnType<typeof process.kill>);
     const job: JobData = {
-      id: 'job-action-live',
+      id: `job-action-live-${++jobSeq}`,
       project: 'proj',
       kind: 'action',
       prompt: null,
@@ -616,7 +563,7 @@ describe('probeJobStatus – test/action kind liveness via process.kill', () => 
       throw makeMissingProcessError();
     });
     const job: JobData = {
-      id: 'job-test-dead',
+      id: `job-test-dead-${++jobSeq}`,
       project: 'proj',
       kind: 'test',
       prompt: null,
@@ -773,12 +720,13 @@ describe('markDone – ghIssuesCache invalidation', () => {
 describe('markDone – metadata extraction skipped for release kind', () => {
   let markDoneFn: typeof import('@/lib/jobs/job-storage').markDone;
   let tempDir: string;
+  let jobSeq = 0;
 
   const resultLine = '{"type":"result","subtype":"success","is_error":false,"duration_ms":1234,"session_id":"ses-abc","result":"ok","modelUsage":{"claude-sonnet":{"inputTokens":100,"outputTokens":50,"cacheReadInputTokens":10,"cacheCreationInputTokens":5}}}';
 
   function makeJob(kind: string, logPath: string | null): JobData {
     return {
-      id: `${kind.replace(':', '-')}-meta-test`,
+      id: `${kind.replace(':', '-')}-meta-test-${++jobSeq}`,
       project: 'meta-proj',
       kind,
       prompt: null,
@@ -837,7 +785,6 @@ describe('markDone – metadata extraction skipped for release kind', () => {
 
   beforeEach(async () => {
     storageCache.clear();
-    await truncateAll();
   });
 
   afterAll(() => {
@@ -941,7 +888,6 @@ describe('markDone – DB-level idempotency guard', () => {
   let markDoneFn: typeof import('@/lib/jobs/job-storage').markDone;
   const startProjectReviewMock = vi.fn();
   const startProjectPushMock = vi.fn();
-  let tempDir: string;
   let storageCache: Map<string, JobData>;
 
   function makeJob(id: string, kind = 'push'): JobData {
@@ -1004,7 +950,6 @@ describe('markDone – DB-level idempotency guard', () => {
     const mod = await import('@/lib/jobs/job-storage');
     markDoneFn = mod.markDone;
     storageCache = (await import('@/lib/jobs/storage')).jobsCache;
-    tempDir = mkdtempSync(join(tmpdir(), 'tamtam-db-guard-'));
   });
 
   beforeEach(async () => {
@@ -1015,7 +960,6 @@ describe('markDone – DB-level idempotency guard', () => {
   });
 
   afterAll(() => {
-    if (tempDir) rmSync(tempDir, { recursive: true, force: true });
     vi.doUnmock('@/lib/db');
     vi.doUnmock('@/lib/jobs/pm2-jobs');
     vi.doUnmock('@/lib/shared/shell');

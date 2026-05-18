@@ -160,6 +160,16 @@ export const ghIssuesCache = pgTable('gh_issues_cache', {
   fetchedAt: doublePrecision('fetched_at').notNull(),
 });
 
+export const ghIssueDetailCache = pgTable('gh_issue_detail_cache', {
+  id: serial('id').primaryKey(),
+  project: text('project').notNull(),
+  number: integer('number').notNull(),
+  payload: text('payload').notNull(),
+  fetchedAt: doublePrecision('fetched_at').notNull(),
+}, (t) => ({
+  projectNumberUniq: uniqueIndex('gh_issue_detail_cache_project_number').on(t.project, t.number),
+}));
+
 export const pipelineLocks = pgTable('pipeline_locks', {
   project: text('project').primaryKey(),
   lockedByJobId: text('locked_by_job_id').notNull(),
