@@ -238,6 +238,14 @@ async function applyDdl(handle: TestDbHandle): Promise<void> {
   `));
 }
 
+async function resetAgentRunTables(handle: TestDbHandle): Promise<void> {
+  // PGlite rejects multi-statement prepared queries; a single CTE keeps the
+  // per-test cleanup to one round-trip.
+  await handle.db.execute(sql.raw(
+    'WITH deleted_agents AS (DELETE FROM agents RETURNING 1) DELETE FROM skills'
+  ));
+}
+
 function makeJob(overrides: Record<string, unknown> = {}) {
   return {
     id: 'test-job-id',
@@ -330,10 +338,7 @@ describe('POST /api/agents/{agentId}/run', () => {
     tempCaseCounter = 0;
     mocks.useRealResolveProvider = false;
     mocks.db = sharedHandle.db;
-    await Promise.all([
-      sharedHandle.db.execute(sql.raw('DELETE FROM agents')),
-      sharedHandle.db.execute(sql.raw('DELETE FROM skills')),
-    ]);
+    await resetAgentRunTables(sharedHandle);
     logDirMock = '/tmp/logs';
 
     // Reset every shared mock and reinstall defaults.
@@ -1221,10 +1226,28 @@ describe('POST /api/agents/{agentId}/run', () => {
       ['-c', 'curl -fsS "http://localhost:1337/api/projects/by-project/proj1/issues?pick_top=1"'],
       expect.objectContaining({ cwd: '/path/to/proj' }),
     );
-    const [, , fullPrompt] = mocks.startJob.mock.calls[0];
+    const [, cmd, fullPrompt] = mocks.startJob.mock.calls[0];
     expect(fullPrompt).toContain('## Prerequisite Output');
     expect(fullPrompt).toContain('pick_top=1');
     expect(fullPrompt).toContain('Trusted issue');
+    // Defense-in-depth: every gh issue surface (reads + writes via CLI + REST API)
+    // must be blocked at the Claude permission layer for issue-cruncher agents.
+    expect(cmd).toContain('--disallowed-tools');
+    expect(cmd).toContain('Bash(gh issue:*)');
+    expect(cmd).toContain('Bash(gh api repos/*/issues:*)');
+    expect(cmd).toContain('Bash(gh api repos/*/issues/*:*)');
+  });
+
+  it('does not pass --disallowed-tools when the agent has no issue-cruncher skill', async () => {
+    await insertAgent({ skillIds: '[]' });
+    const req = new NextRequest('http://localhost/api/agents/agent-123/run', {
+      method: 'POST',
+      body: JSON.stringify({ prompt: 'something else' }),
+    });
+    await POST(req, { params: Promise.resolve({ agentId: 'agent-123' }) });
+    const [, cmd] = mocks.startJob.mock.calls[0];
+    expect(cmd).not.toContain('--disallowed-tools');
+    expect(cmd).not.toContain('gh issue');
   });
 
   it('does not re-inject the issue-cruncher prerequisite after an explicit clear', async () => {
@@ -1758,6 +1781,7 @@ describe('POST /api/agents/{agentId}/run weekly quota gating', () => {
   beforeAll(async () => {
     sharedHandle = await createTestPgDbEmpty();
     await applyDdl(sharedHandle);
+    tempSkillsDir = mkdtempSync(join(tmpdir(), 'tamtam-agent-run-weekly-test-'));
   });
 
   afterAll(async () => {
@@ -1766,16 +1790,13 @@ describe('POST /api/agents/{agentId}/run weekly quota gating', () => {
     } catch {
       // ignore
     }
+    rmSync(tempSkillsDir, { recursive: true, force: true });
   });
 
   beforeEach(async () => {
     mocks.useRealResolveProvider = true;
     mocks.db = sharedHandle.db;
-    await Promise.all([
-      sharedHandle.db.execute(sql.raw('DELETE FROM agents')),
-      sharedHandle.db.execute(sql.raw('DELETE FROM skills')),
-    ]);
-    tempSkillsDir = mkdtempSync(join(tmpdir(), 'tamtam-agent-run-weekly-test-'));
+    await resetAgentRunTables(sharedHandle);
     mocks.skillsDir = tempSkillsDir;
     mocks.dataSkillsDir = join(tempSkillsDir, 'data-skills');
 
@@ -1861,7 +1882,7 @@ describe('POST /api/agents/{agentId}/run weekly quota gating', () => {
   });
 
   afterEach(() => {
-    rmSync(tempSkillsDir, { recursive: true, force: true });
+    rmSync(join(tempSkillsDir, 'docs'), { recursive: true, force: true });
   });
 
   it('does not 429 a manual agent run when only weekly quota is hot', async () => {

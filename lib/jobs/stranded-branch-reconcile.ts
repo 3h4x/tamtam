@@ -155,6 +155,22 @@ export async function findStrandedBranches(nowMs: number = Date.now()): Promise<
       // clean is the only state where "checkout default" is safe.
       const status = await gitOutput(path, ['status', '--porcelain']);
       const isDirty = !!(status && status.trim().length > 0);
+      // PR-open-awaiting-merge state: branch has commits ahead of default
+      // but everything is already pushed (`@{u}..HEAD == 0`) and worktree
+      // is clean. The PR exists and is waiting for merge — pipeline's
+      // `pr-wait` step owns this state. Triggering another release here
+      // is futile: `startRelease` correctly rejects with "Nothing to
+      // release" (no dirty, no @{u}..HEAD ahead), and the reconciler
+      // would log "rejected" on every sweep. Skip until the PR merges
+      // and the branch returns to default.
+      if (!isDirty && localAhead > 0) {
+        const aheadUpstream = await gitOutput(path, ['rev-list', '--count', '@{u}..HEAD']);
+        const upstreamAhead = parseInt(aheadUpstream ?? '0', 10) || 0;
+        if (aheadUpstream != null && upstreamAhead === 0) {
+          // Fully pushed; PR is open. Reconciler stays out of pr-wait's lane.
+          continue;
+        }
+      }
       if (localAhead === 0 && remoteAhead === 0 && !isDirty) {
         out.push({
           project: p.name,

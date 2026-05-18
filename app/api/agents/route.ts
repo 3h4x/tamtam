@@ -105,6 +105,11 @@ export async function GET(request: NextRequest) {
     };
   };
 
+  // `cron.nextFireMs` and `lastAttempt.at` are live state — caching this
+  // response in the browser would re-introduce the "due now / 31m ago"
+  // stale display we just fixed. Force fresh fetches on every poll.
+  const noStoreHeaders = { 'Cache-Control': 'no-store, max-age=0' };
+
   if (summaryOnly) {
     const summaryAgents = normalized.map(a => annotate({
       id: a.id,
@@ -117,10 +122,10 @@ export async function GET(request: NextRequest) {
       provider: a.provider ?? null,
       source: 'source' in a ? a.source : 'db',
     }));
-    return NextResponse.json({ agents: summaryAgents });
+    return NextResponse.json({ agents: summaryAgents }, { headers: noStoreHeaders });
   }
 
-  return NextResponse.json({ agents: normalized.map(annotate) });
+  return NextResponse.json({ agents: normalized.map(annotate) }, { headers: noStoreHeaders });
 }
 
 export async function POST(request: NextRequest) {

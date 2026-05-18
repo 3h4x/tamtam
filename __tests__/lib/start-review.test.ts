@@ -1,141 +1,180 @@
-import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
+import { describe, it, expect, beforeEach, vi } from 'vitest';
+
+const mocks = vi.hoisted(() => ({
+  exec: vi.fn(),
+  startJob: vi.fn(),
+  createJob: vi.fn(),
+  updateJob: vi.fn(),
+  listJobs: vi.fn(),
+  readLog: vi.fn(),
+  readParsedLog: vi.fn(),
+  probeJobStatus: vi.fn(),
+  getLock: vi.fn(),
+  acquireLock: vi.fn(),
+  isLockOwnedByActiveRelease: vi.fn(),
+  checkCliStartGate: vi.fn(),
+  findReleaseScopedIssueContext: vi.fn(),
+  loadFileConfig: vi.fn(),
+  resolveProjectPath: vi.fn(),
+  getProjectTestConfig: vi.fn(),
+  getProjectPipelinePrompts: vi.fn(),
+  getProjectQaTarget: vi.fn(),
+  getSettings: vi.fn(),
+  existsSync: vi.fn(),
+  lstatSync: vi.fn(),
+  readFileSync: vi.fn(),
+  resolveAutoAttachedDocs: vi.fn(),
+  formatAutoAttachedDocsBlock: vi.fn(),
+  codeReviewerSkillPath: '/nonexistent/code-reviewer.md',
+}));
+
+vi.mock('@/lib/shared/shell', () => ({
+  exec: (...args: unknown[]) => mocks.exec(...args),
+}));
+
+vi.mock('@/lib/shared/project-data', () => ({
+  resolveProjectPath: (...args: unknown[]) => mocks.resolveProjectPath(...args),
+}));
+
+vi.mock('@/lib/scheduling/scheduling', () => ({
+  getImproveConfig: () => ({ claudeBin: 'claude', projects: {}, logDir: '/tmp' }),
+  getProjectTestConfig: (...args: unknown[]) => mocks.getProjectTestConfig(...args),
+  getProjectPipelinePrompts: (...args: unknown[]) => mocks.getProjectPipelinePrompts(...args),
+  getProjectQaTarget: (...args: unknown[]) => mocks.getProjectQaTarget(...args),
+}));
+
+vi.mock('@/lib/jobs/job-storage', () => ({
+  createJob: (...args: unknown[]) => mocks.createJob(...args),
+  updateJob: (...args: unknown[]) => mocks.updateJob(...args),
+  listJobs: (...args: unknown[]) => mocks.listJobs(...args),
+  readLog: (...args: unknown[]) => mocks.readLog(...args),
+  readParsedLog: (...args: unknown[]) => mocks.readParsedLog(...args),
+  probeJobStatus: (...args: unknown[]) => mocks.probeJobStatus(...args),
+}));
+
+vi.mock('@/lib/jobs/pm2-jobs', () => ({
+  splitCommand: (line: string) => line.split(/\s+/).filter(Boolean),
+}));
+
+vi.mock('@/lib/jobs/spawn-claude-detached', () => ({
+  startJobInProcess: (...args: unknown[]) => mocks.startJob(...args),
+}));
+
+vi.mock('@/lib/shared/config', () => ({
+  getSettings: (...args: unknown[]) => mocks.getSettings(...args),
+  withBasePrompt: (s: string) => s,
+  getPermissionModeFlag: () => '--dangerously-skip-permissions',
+  getPipelineModel: () => 'sonnet',
+}));
+
+vi.mock('@/lib/pipeline/pipeline-lock', () => ({
+  getLock: (...args: unknown[]) => mocks.getLock(...args),
+  acquireLock: (...args: unknown[]) => mocks.acquireLock(...args),
+  isLockOwnedByActiveRelease: (...args: unknown[]) => mocks.isLockOwnedByActiveRelease(...args),
+}));
+
+vi.mock('@/lib/skills/skills', () => ({
+  get CODE_REVIEWER_SKILL() {
+    return mocks.codeReviewerSkillPath;
+  },
+}));
+
+vi.mock('@/lib/usage/resolve-provider', () => ({
+  checkCliStartGate: (...args: unknown[]) => mocks.checkCliStartGate(...args),
+}));
+
+vi.mock('@/lib/pipeline/release-context', () => ({
+  findReleaseScopedIssueContext: (...args: unknown[]) => mocks.findReleaseScopedIssueContext(...args),
+}));
+
+vi.mock('fs', () => ({
+  existsSync: (...args: unknown[]) => mocks.existsSync(...args),
+  lstatSync: (...args: unknown[]) => mocks.lstatSync(...args),
+  readFileSync: (...args: unknown[]) => mocks.readFileSync(...args),
+  mkdirSync: vi.fn(),
+  appendFileSync: vi.fn(),
+}));
+
+vi.mock('@/lib/skills/tamtam-file-config', () => ({
+  loadFileConfig: (...args: unknown[]) => mocks.loadFileConfig(...args),
+}));
+
+vi.mock('@/lib/skills/auto-attach-docs', () => ({
+  resolveAutoAttachedDocs: (...args: unknown[]) => mocks.resolveAutoAttachedDocs(...args),
+  formatAutoAttachedDocsBlock: (...args: unknown[]) => mocks.formatAutoAttachedDocsBlock(...args),
+}));
+
+import { startProjectReview } from '@/lib/pipeline/start-review';
+
+function resp(exitCode: number, stdout = '', stderr = '') {
+  return Promise.resolve({ exitCode, stdout, stderr });
+}
+
+function makeJob(overrides: Record<string, unknown> = {}) {
+  return {
+    id: 'review-job-1',
+    project: 'proj',
+    kind: 'review',
+    pid: 0,
+    logPath: null,
+    prompt: null,
+    startedAt: Date.now() / 1000,
+    finishedAt: null,
+    exitCode: null,
+    seen: false,
+    ...overrides,
+  };
+}
+
+beforeEach(() => {
+  mocks.exec.mockReset().mockResolvedValue({ exitCode: 0, stdout: '', stderr: '' });
+  mocks.findReleaseScopedIssueContext.mockReset().mockReturnValue(null);
+  mocks.startJob.mockReset().mockResolvedValue(9999);
+  mocks.updateJob.mockReset();
+  mocks.listJobs.mockReset().mockReturnValue([]);
+  mocks.readLog.mockReset().mockReturnValue('');
+  mocks.readParsedLog.mockReset().mockReturnValue('');
+  mocks.probeJobStatus.mockReset().mockResolvedValue('done');
+  mocks.getLock.mockReset().mockReturnValue(null);
+  mocks.acquireLock.mockReset().mockResolvedValue({ acquired: true });
+  mocks.isLockOwnedByActiveRelease.mockReset().mockReturnValue(false);
+  mocks.checkCliStartGate.mockReset().mockResolvedValue({ ok: true, provider: 'claude' });
+  mocks.loadFileConfig.mockReset().mockReturnValue(null);
+  mocks.resolveProjectPath.mockReset().mockReturnValue('/path/to/proj');
+  mocks.getProjectTestConfig.mockReset().mockReturnValue({});
+  mocks.getProjectPipelinePrompts.mockReset().mockResolvedValue({
+    reviewPromptAddendum: null,
+    reviewPrerequisiteCommand: null,
+    fixPromptAddendum: null,
+  });
+  mocks.getProjectQaTarget.mockReset().mockResolvedValue(null);
+  mocks.getSettings.mockReset().mockReturnValue({
+    review_verdict_rules: 'Use LGTM / NEEDS ATTENTION / DO NOT SHIP.',
+  });
+  mocks.existsSync.mockReset().mockReturnValue(false);
+  mocks.lstatSync.mockReset();
+  mocks.readFileSync.mockReset();
+  mocks.resolveAutoAttachedDocs.mockReset().mockReturnValue([]);
+  mocks.formatAutoAttachedDocsBlock.mockReset().mockReturnValue(null);
+  mocks.codeReviewerSkillPath = '/nonexistent/code-reviewer.md';
+
+  mocks.createJob.mockReset().mockImplementation((project: string, kind: string) => ({
+    id: `${project}-${kind}-id`,
+    project,
+    kind,
+    pid: 0,
+    logPath: '',
+    prompt: null,
+    startedAt: 0,
+    finishedAt: null,
+    exitCode: null,
+    seen: false,
+  }));
+});
 
 describe('startProjectReview', () => {
-  let startProjectReview: typeof import('@/lib/pipeline/start-review').startProjectReview;
-  let execMock: ReturnType<typeof vi.fn>;
-  let startJobMock: ReturnType<typeof vi.fn>;
-  let createJobMock: ReturnType<typeof vi.fn>;
-  let updateJobMock: ReturnType<typeof vi.fn>;
-  let listJobsMock: ReturnType<typeof vi.fn>;
-  let readLogMock: ReturnType<typeof vi.fn>;
-  let readParsedLogMock: ReturnType<typeof vi.fn>;
-  let probeJobStatusMock: ReturnType<typeof vi.fn>;
-  let getLockMock: ReturnType<typeof vi.fn>;
-  let acquireLockMock: ReturnType<typeof vi.fn>;
-  let isLockOwnedByActiveReleaseMock: ReturnType<typeof vi.fn>;
-  let checkCliStartGateMock: ReturnType<typeof vi.fn>;
-  let findReleaseScopedIssueContextMock: ReturnType<typeof vi.fn>;
-  let loadFileConfigMock: ReturnType<typeof vi.fn>;
-  let resolveProjectPathMock: ReturnType<typeof vi.fn>;
-  let getProjectTestConfigMock: ReturnType<typeof vi.fn>;
-  let getProjectPipelinePromptsMock: ReturnType<typeof vi.fn>;
-  let getProjectQaTargetMock: ReturnType<typeof vi.fn>;
-  let getSettingsMock: ReturnType<typeof vi.fn>;
-  let existsSyncMock: ReturnType<typeof vi.fn>;
-  let lstatSyncMock: ReturnType<typeof vi.fn>;
-  let readFileSyncMock: ReturnType<typeof vi.fn>;
-  let resolveAutoAttachedDocsMock: ReturnType<typeof vi.fn>;
-  let formatAutoAttachedDocsBlockMock: ReturnType<typeof vi.fn>;
-  let codeReviewerSkillPath: string;
-
-  function resp(exitCode: number, stdout = '', stderr = '') {
-    return Promise.resolve({ exitCode, stdout, stderr });
-  }
-
-  function makeJob(overrides: Record<string, unknown> = {}) {
-    return {
-      id: 'review-job-1', project: 'proj', kind: 'review', pid: 0, logPath: null,
-      prompt: null, startedAt: Date.now() / 1000, finishedAt: null, exitCode: null, seen: false,
-      ...overrides,
-    };
-  }
-
-  beforeEach(async () => {
-    vi.resetModules();
-    execMock = vi.fn().mockResolvedValue({ exitCode: 0, stdout: '', stderr: '' });
-    findReleaseScopedIssueContextMock = vi.fn().mockReturnValue(null);
-    startJobMock = vi.fn().mockResolvedValue(9999);
-    updateJobMock = vi.fn();
-    listJobsMock = vi.fn().mockReturnValue([]);
-    readLogMock = vi.fn().mockReturnValue('');
-    readParsedLogMock = vi.fn().mockReturnValue('');
-    probeJobStatusMock = vi.fn().mockResolvedValue('done');
-    getLockMock = vi.fn().mockReturnValue(null);
-    acquireLockMock = vi.fn().mockResolvedValue({ acquired: true });
-    isLockOwnedByActiveReleaseMock = vi.fn().mockReturnValue(false);
-    checkCliStartGateMock = vi.fn().mockResolvedValue({ ok: true, provider: 'claude' });
-    loadFileConfigMock = vi.fn().mockReturnValue(null);
-    resolveProjectPathMock = vi.fn().mockReturnValue('/path/to/proj');
-    getProjectTestConfigMock = vi.fn().mockReturnValue({});
-    getProjectPipelinePromptsMock = vi.fn().mockResolvedValue({ reviewPromptAddendum: null, reviewPrerequisiteCommand: null, fixPromptAddendum: null });
-    getProjectQaTargetMock = vi.fn().mockResolvedValue(null);
-    getSettingsMock = vi.fn().mockReturnValue({ review_verdict_rules: 'Use LGTM / NEEDS ATTENTION / DO NOT SHIP.' });
-    existsSyncMock = vi.fn().mockReturnValue(false);
-    lstatSyncMock = vi.fn();
-    readFileSyncMock = vi.fn();
-    resolveAutoAttachedDocsMock = vi.fn().mockReturnValue([]);
-    formatAutoAttachedDocsBlockMock = vi.fn().mockReturnValue(null);
-    codeReviewerSkillPath = '/nonexistent/code-reviewer.md';
-
-    createJobMock = vi.fn().mockImplementation((project: string, kind: string) => ({
-      id: `${project}-${kind}-id`, project, kind, pid: 0, logPath: '',
-      prompt: null, startedAt: 0, finishedAt: null, exitCode: null, seen: false,
-    }));
-
-    vi.doMock('@/lib/shared/shell', () => ({ exec: execMock }));
-    vi.doMock('@/lib/shared/project-data', () => ({
-      resolveProjectPath: resolveProjectPathMock,
-    }));
-    vi.doMock('@/lib/scheduling/scheduling', () => ({
-      getImproveConfig: () => ({ claudeBin: 'claude', projects: {}, logDir: '/tmp' }),
-      getProjectTestConfig: getProjectTestConfigMock,
-      getProjectPipelinePrompts: getProjectPipelinePromptsMock,
-      getProjectQaTarget: getProjectQaTargetMock,
-    }));
-    vi.doMock('@/lib/jobs/job-storage', () => ({
-      createJob: createJobMock,
-      updateJob: updateJobMock,
-      listJobs: listJobsMock,
-      readLog: readLogMock,
-      readParsedLog: readParsedLogMock,
-      probeJobStatus: probeJobStatusMock,
-    }));
-    vi.doMock('@/lib/jobs/pm2-jobs', () => ({ splitCommand: (line: string) => line.split(/\s+/).filter(Boolean) }));
-    vi.doMock('@/lib/jobs/spawn-claude-detached', () => ({ startJobInProcess: startJobMock }));
-    vi.doMock('@/lib/shared/config', () => ({
-      getSettings: getSettingsMock,
-      withBasePrompt: (s: string) => s,
-      getPermissionModeFlag: () => '--dangerously-skip-permissions',
-      getPipelineModel: () => 'sonnet',
-    }));
-    vi.doMock('@/lib/pipeline/pipeline-lock', () => ({
-      getLock: getLockMock,
-      acquireLock: acquireLockMock,
-      isLockOwnedByActiveRelease: isLockOwnedByActiveReleaseMock,
-    }));
-    vi.doMock('@/lib/skills/skills', () => ({
-      get CODE_REVIEWER_SKILL() {
-        return codeReviewerSkillPath;
-      },
-    }));
-    vi.doMock('@/lib/usage/resolve-provider', () => ({
-      checkCliStartGate: checkCliStartGateMock,
-    }));
-    vi.doMock('@/lib/pipeline/release-context', () => ({
-      findReleaseScopedIssueContext: findReleaseScopedIssueContextMock,
-    }));
-    vi.doMock('fs', () => ({
-      existsSync: existsSyncMock,
-      lstatSync: lstatSyncMock,
-      readFileSync: readFileSyncMock,
-      mkdirSync: vi.fn(),
-      appendFileSync: vi.fn(),
-    }));
-    vi.doMock('@/lib/skills/tamtam-file-config', () => ({
-      loadFileConfig: loadFileConfigMock,
-    }));
-    vi.doMock('@/lib/skills/auto-attach-docs', () => ({
-      resolveAutoAttachedDocs: resolveAutoAttachedDocsMock,
-      formatAutoAttachedDocsBlock: formatAutoAttachedDocsBlockMock,
-    }));
-
-    ({ startProjectReview } = await import('@/lib/pipeline/start-review'));
-  });
-
-  afterEach(() => vi.resetModules());
-
   it('returns 400 when review_disabled is set for the project', async () => {
-    getProjectTestConfigMock.mockReturnValue({ reviewDisabled: true });
+    mocks.getProjectTestConfig.mockReturnValue({ reviewDisabled: true });
 
     const r = await startProjectReview('proj');
     expect(r.ok).toBe(false);
@@ -146,7 +185,7 @@ describe('startProjectReview', () => {
   });
 
   it('returns 404 when project path cannot be resolved', async () => {
-    resolveProjectPathMock.mockReturnValue(null);
+    mocks.resolveProjectPath.mockReturnValue(null);
 
     const r = await startProjectReview('missing');
     expect(r.ok).toBe(false);
@@ -157,7 +196,7 @@ describe('startProjectReview', () => {
   });
 
   it('returns 429 when every enabled provider is over budget', async () => {
-    checkCliStartGateMock.mockResolvedValue({
+    mocks.checkCliStartGate.mockResolvedValue({
       ok: false,
       status: 429,
       detail: 'All enabled CLI providers are over budget. Adjust block threshold or wait for the window to reset.',
@@ -165,15 +204,15 @@ describe('startProjectReview', () => {
     const r = await startProjectReview('proj');
     expect(r.ok).toBe(false);
     if (!r.ok) expect(r.status).toBe(429);
-    expect(startJobMock).not.toHaveBeenCalled();
+    expect(mocks.startJob).not.toHaveBeenCalled();
   });
 
   it('passes through a preferred provider override when supplied', async () => {
-    execMock.mockResolvedValueOnce(resp(0, ' M file.ts\n'));
+    mocks.exec.mockResolvedValueOnce(resp(0, ' M file.ts\n'));
 
     await startProjectReview('proj', { preferredProvider: 'codex' });
 
-    expect(checkCliStartGateMock).toHaveBeenCalledWith('start a review', {
+    expect(mocks.checkCliStartGate).toHaveBeenCalledWith('start a review', {
       parentJobId: null,
       preferred: 'codex',
       requestedModel: 'normal',
@@ -181,31 +220,28 @@ describe('startProjectReview', () => {
   });
 
   it('returns 409 when pipeline lock is held by another job', async () => {
-    getLockMock.mockReturnValue({ lockedByJobId: 'other-job' });
+    mocks.getLock.mockReturnValue({ lockedByJobId: 'other-job' });
     const r = await startProjectReview('proj');
     expect(r.ok).toBe(false);
     if (!r.ok) {
       expect(r.status).toBe(409);
       expect(r.blockingJobId).toBe('other-job');
     }
-    expect(createJobMock).not.toHaveBeenCalled();
+    expect(mocks.createJob).not.toHaveBeenCalled();
   });
 
   it('bypasses lock check when under an active release', async () => {
-    getLockMock.mockReturnValue({ lockedByJobId: 'release-job' });
-    isLockOwnedByActiveReleaseMock.mockReturnValue(true);
-    // no uncommitted changes
-    execMock.mockResolvedValueOnce(resp(0, ''));
+    mocks.getLock.mockReturnValue({ lockedByJobId: 'release-job' });
+    mocks.isLockOwnedByActiveRelease.mockReturnValue(true);
+    mocks.exec.mockResolvedValueOnce(resp(0, ''));
     const r = await startProjectReview('proj');
     expect(r.ok).toBe(false);
-    if (!r.ok) expect(r.status).toBe(400); // no changes, not a 409
+    if (!r.ok) expect(r.status).toBe(400);
   });
 
   it('returns 409 when a review is already running for the project', async () => {
-    listJobsMock.mockReturnValue([
-      makeJob({ kind: 'review', finishedAt: null }),
-    ]);
-    probeJobStatusMock.mockResolvedValue('running');
+    mocks.listJobs.mockReturnValue([makeJob({ kind: 'review', finishedAt: null })]);
+    mocks.probeJobStatus.mockResolvedValue('running');
     const r = await startProjectReview('proj');
     expect(r.ok).toBe(false);
     if (!r.ok) {
@@ -215,18 +251,16 @@ describe('startProjectReview', () => {
   });
 
   it('does not return 409 when the "running" review job has actually exited', async () => {
-    listJobsMock.mockReturnValue([
-      makeJob({ kind: 'review', finishedAt: null }),
-    ]);
-    probeJobStatusMock.mockResolvedValue('done');
-    execMock.mockResolvedValueOnce(resp(0, '')); // git status → no changes
+    mocks.listJobs.mockReturnValue([makeJob({ kind: 'review', finishedAt: null })]);
+    mocks.probeJobStatus.mockResolvedValue('done');
+    mocks.exec.mockResolvedValueOnce(resp(0, ''));
     const r = await startProjectReview('proj');
     expect(r.ok).toBe(false);
-    if (!r.ok) expect(r.status).toBe(400); // proceeds past running check, hits no-changes
+    if (!r.ok) expect(r.status).toBe(400);
   });
 
   it('returns 400 when there are no uncommitted changes', async () => {
-    execMock.mockResolvedValueOnce(resp(0, '')); // git status --porcelain → empty
+    mocks.exec.mockResolvedValueOnce(resp(0, ''));
     const r = await startProjectReview('proj');
     expect(r.ok).toBe(false);
     if (!r.ok) {
@@ -236,21 +270,21 @@ describe('startProjectReview', () => {
   });
 
   it('reviews staged changes in the working tree', async () => {
-    execMock
+    mocks.exec
       .mockResolvedValueOnce(resp(0, 'M  lib/foo.ts'))
       .mockResolvedValueOnce(resp(0, ' lib/foo.ts | 2 +-\n'))
       .mockResolvedValueOnce(resp(0, 'diff --git a/lib/foo.ts b/lib/foo.ts\n+staged change\n'));
     const r = await startProjectReview('proj');
     expect(r.ok).toBe(true);
-    const prompt: string = startJobMock.mock.calls[0][2];
+    const prompt: string = mocks.startJob.mock.calls[0][2];
     expect(prompt).toContain('Working-tree files to review');
     expect(prompt).toContain('- lib/foo.ts');
     expect(prompt).toContain('Working-tree tracked-file diff (vs HEAD)');
   });
 
   it('runs the project review prerequisite before computing review scope', async () => {
-    loadFileConfigMock.mockReturnValue({ review_prerequisite_command: 'pnpm run supabase-gen-types' });
-    execMock
+    mocks.loadFileConfig.mockReturnValue({ review_prerequisite_command: 'pnpm run supabase-gen-types' });
+    mocks.exec
       .mockResolvedValueOnce(resp(0, 'types generated'))
       .mockResolvedValueOnce(resp(0, 'M  src/lib/database.types.ts'))
       .mockResolvedValueOnce(resp(0, ' src/lib/database.types.ts | 28 ++++++++++++++++++++++++++++\n'))
@@ -259,7 +293,7 @@ describe('startProjectReview', () => {
     const r = await startProjectReview('proj');
 
     expect(r.ok).toBe(true);
-    expect(execMock.mock.calls[0]).toEqual([
+    expect(mocks.exec.mock.calls[0]).toEqual([
       'bash',
       ['-lc', 'pnpm run supabase-gen-types'],
       expect.objectContaining({
@@ -267,15 +301,15 @@ describe('startProjectReview', () => {
         killProcessGroup: true,
       }),
     ]);
-    const prompt: string = startJobMock.mock.calls[0][2];
+    const prompt: string = mocks.startJob.mock.calls[0][2];
     expect(prompt).toContain('review prerequisite (`pnpm run supabase-gen-types`) — exit 0');
     expect(prompt).toContain('types generated');
     expect(prompt).toContain('web3_nonces');
   });
 
   it('blocks review when the project review prerequisite fails', async () => {
-    loadFileConfigMock.mockReturnValue({ review_prerequisite_command: 'pnpm run supabase-gen-types' });
-    execMock.mockResolvedValueOnce(resp(1, '', 'type generation failed'));
+    mocks.loadFileConfig.mockReturnValue({ review_prerequisite_command: 'pnpm run supabase-gen-types' });
+    mocks.exec.mockResolvedValueOnce(resp(1, '', 'type generation failed'));
 
     const r = await startProjectReview('proj');
 
@@ -285,16 +319,16 @@ describe('startProjectReview', () => {
       expect(r.detail).toContain('Review prerequisite failed for proj');
       expect(r.detail).toContain('type generation failed');
     }
-    expect(startJobMock).not.toHaveBeenCalled();
+    expect(mocks.startJob).not.toHaveBeenCalled();
   });
 
   it('persists autoAttachedDocs on the review job contextMeta when a doc matches', async () => {
-    execMock.mockReset()
+    mocks.exec
       .mockResolvedValueOnce(resp(0, 'M  lib/foo.ts'))
       .mockResolvedValueOnce(resp(0, ' lib/foo.ts | 2 +-\n'))
       .mockResolvedValueOnce(resp(0, 'diff --git a/lib/foo.ts b/lib/foo.ts\n+x\n'));
-    loadFileConfigMock.mockReturnValue({});
-    resolveAutoAttachedDocsMock.mockReturnValue([
+    mocks.loadFileConfig.mockReturnValue({});
+    mocks.resolveAutoAttachedDocs.mockReturnValue([
       {
         rulePath: 'docs/TEST.md',
         absolutePath: '/path/to/proj/docs/TEST.md',
@@ -303,60 +337,60 @@ describe('startProjectReview', () => {
         matchedKeyword: 'test',
       },
     ]);
-    formatAutoAttachedDocsBlockMock.mockReturnValue('## Auto-attached docs\n\n## TEST.md\nTEST-DOC');
+    mocks.formatAutoAttachedDocsBlock.mockReturnValue('## Auto-attached docs\n\n## TEST.md\nTEST-DOC');
 
     const r = await startProjectReview('proj');
     expect(r.ok).toBe(true);
-    const contextMeta = createJobMock.mock.calls[0][5];
+    const contextMeta = mocks.createJob.mock.calls[0][5];
     expect(contextMeta).toBeTruthy();
     expect(JSON.parse(contextMeta as string).autoAttachedDocs).toEqual(['docs/TEST.md']);
   });
 
   it('does not set contextMeta when no auto-attach rules match', async () => {
-    execMock
+    mocks.exec
       .mockResolvedValueOnce(resp(0, 'M  lib/foo.ts'))
       .mockResolvedValueOnce(resp(0, ' lib/foo.ts | 2 +-\n'))
       .mockResolvedValueOnce(resp(0, 'diff --git a/lib/foo.ts b/lib/foo.ts\n+x\n'));
     const r = await startProjectReview('proj');
     expect(r.ok).toBe(true);
-    const contextMeta = createJobMock.mock.calls[0][5];
+    const contextMeta = mocks.createJob.mock.calls[0][5];
     expect(contextMeta).toBeUndefined();
   });
 
   it('omits untracked symlink contents from the review prompt', async () => {
-    execMock.mockReset()
+    mocks.exec
       .mockResolvedValueOnce(resp(0, '?? secrets-link'))
       .mockResolvedValueOnce(resp(0, ''))
       .mockResolvedValueOnce(resp(0, ''));
-    existsSyncMock.mockImplementation((path: string) => path === '/path/to/proj/secrets-link');
-    lstatSyncMock.mockReturnValue({ isFile: () => false });
+    mocks.existsSync.mockImplementation((path: string) => path === '/path/to/proj/secrets-link');
+    mocks.lstatSync.mockReturnValue({ isFile: () => false });
 
     const r = await startProjectReview('proj');
 
     expect(r.ok).toBe(true);
-    const prompt: string = startJobMock.mock.calls[0][2];
+    const prompt: string = mocks.startJob.mock.calls[0][2];
     expect(prompt).toContain('[untracked file omitted: binary, missing, or unreadable]');
-    expect(readFileSyncMock).not.toHaveBeenCalledWith('/path/to/proj/secrets-link', 'utf-8');
+    expect(mocks.readFileSync).not.toHaveBeenCalledWith('/path/to/proj/secrets-link', 'utf-8');
   });
 
   it('omits non-regular untracked files from the review prompt', async () => {
-    execMock.mockReset()
+    mocks.exec
       .mockResolvedValueOnce(resp(0, '?? review.sock'))
       .mockResolvedValueOnce(resp(0, ''))
       .mockResolvedValueOnce(resp(0, ''));
-    existsSyncMock.mockImplementation((path: string) => path === '/path/to/proj/review.sock');
-    lstatSyncMock.mockReturnValue({ isFile: () => false });
+    mocks.existsSync.mockImplementation((path: string) => path === '/path/to/proj/review.sock');
+    mocks.lstatSync.mockReturnValue({ isFile: () => false });
 
     const r = await startProjectReview('proj');
 
     expect(r.ok).toBe(true);
-    const prompt: string = startJobMock.mock.calls[0][2];
+    const prompt: string = mocks.startJob.mock.calls[0][2];
     expect(prompt).toContain('[untracked file omitted: binary, missing, or unreadable]');
-    expect(readFileSyncMock).not.toHaveBeenCalledWith('/path/to/proj/review.sock', 'utf-8');
+    expect(mocks.readFileSync).not.toHaveBeenCalledWith('/path/to/proj/review.sock', 'utf-8');
   });
 
   it('returns 400 when only .tamtam changes remain', async () => {
-    execMock
+    mocks.exec
       .mockResolvedValueOnce(resp(0, ' M .tamtam/agents/improve.md'))
       .mockResolvedValueOnce(resp(0, '0'));
     const r = await startProjectReview('proj');
@@ -365,11 +399,11 @@ describe('startProjectReview', () => {
       expect(r.status).toBe(400);
       expect(r.detail).toContain('No uncommitted changes or unpushed commits');
     }
-    expect(startJobMock).not.toHaveBeenCalled();
+    expect(mocks.startJob).not.toHaveBeenCalled();
   });
 
   it('returns 400 when the worktree is clean and there are no unpushed commits', async () => {
-    execMock
+    mocks.exec
       .mockResolvedValueOnce(resp(0, ''))
       .mockResolvedValueOnce(resp(0, '0\n'));
 
@@ -383,28 +417,28 @@ describe('startProjectReview', () => {
   });
 
   it('reviews unpushed local commits when the worktree is clean', async () => {
-    execMock
-      .mockResolvedValueOnce(resp(0, ''))      // git status → clean
-      .mockResolvedValueOnce(resp(0, '2\n'));  // git rev-list @{u}..HEAD → ahead
+    mocks.exec
+      .mockResolvedValueOnce(resp(0, ''))
+      .mockResolvedValueOnce(resp(0, '2\n'));
 
     const r = await startProjectReview('proj');
 
     expect(r.ok).toBe(true);
-    expect(startJobMock).toHaveBeenCalled();
-    const prompt: string = startJobMock.mock.calls[0][2];
+    expect(mocks.startJob).toHaveBeenCalled();
+    const prompt: string = mocks.startJob.mock.calls[0][2];
     expect(prompt).toContain('working tree is clean');
     expect(prompt).toContain('2 local commits not yet pushed');
     expect(prompt).toContain('git diff @{u}..HEAD');
   });
 
   it('does not narrow local-commit review scope based on a prior PR review job', async () => {
-    execMock.mockReset()
-      .mockResolvedValueOnce(resp(0, ''))      // git status → clean
-      .mockResolvedValueOnce(resp(0, '2\n'))   // git rev-list @{u}..HEAD → ahead
-      .mockResolvedValueOnce(resp(0, 'main\n')) // git branch --show-current
-      .mockResolvedValueOnce(resp(1, '', '')); // git rev-parse reviewed ref → missing
-    getSettingsMock.mockReturnValue({ review_verdict_rules: '', incremental_review_enabled: true });
-    listJobsMock.mockReturnValue([
+    mocks.exec
+      .mockResolvedValueOnce(resp(0, ''))
+      .mockResolvedValueOnce(resp(0, '2\n'))
+      .mockResolvedValueOnce(resp(0, 'main\n'))
+      .mockResolvedValueOnce(resp(1, '', ''));
+    mocks.getSettings.mockReturnValue({ review_verdict_rules: '', incremental_review_enabled: true });
+    mocks.listJobs.mockReturnValue([
       makeJob({
         id: 'review-pr',
         finishedAt: Date.now() / 1000,
@@ -416,7 +450,7 @@ describe('startProjectReview', () => {
     const r = await startProjectReview('proj');
 
     expect(r.ok).toBe(true);
-    const prompt: string = startJobMock.mock.calls[0][2];
+    const prompt: string = mocks.startJob.mock.calls[0][2];
     expect(prompt).toContain('2 local commits not yet pushed');
     expect(prompt).toContain('git diff @{u}..HEAD');
     expect(prompt).not.toContain('already approved');
@@ -424,14 +458,14 @@ describe('startProjectReview', () => {
 
   it('returns 400 when HEAD is exactly the reviewed ref (narrowCount=0) — no new commits to review', async () => {
     const sha = 'abc1234abc1234abc1234abc1234abc1234abc1234';
-    execMock.mockReset()
-      .mockResolvedValueOnce(resp(0, ''))          // git status → clean
-      .mockResolvedValueOnce(resp(0, '2\n'))        // git rev-list @{u}..HEAD → ahead=2
-      .mockResolvedValueOnce(resp(0, 'main\n'))     // git branch --show-current
-      .mockResolvedValueOnce(resp(0, sha + '\n'))   // git rev-parse refs/tamtam/reviewed/main
-      .mockResolvedValueOnce(resp(0, ''))            // git merge-base --is-ancestor → exit 0
-      .mockResolvedValueOnce(resp(0, '0\n'));        // git rev-list --count <sha>..HEAD → 0
-    getSettingsMock.mockReturnValue({ review_verdict_rules: '', incremental_review_enabled: true });
+    mocks.exec
+      .mockResolvedValueOnce(resp(0, ''))
+      .mockResolvedValueOnce(resp(0, '2\n'))
+      .mockResolvedValueOnce(resp(0, 'main\n'))
+      .mockResolvedValueOnce(resp(0, sha + '\n'))
+      .mockResolvedValueOnce(resp(0, ''))
+      .mockResolvedValueOnce(resp(0, '0\n'));
+    mocks.getSettings.mockReturnValue({ review_verdict_rules: '', incremental_review_enabled: true });
 
     const r = await startProjectReview('proj');
     expect(r.ok).toBe(false);
@@ -439,23 +473,23 @@ describe('startProjectReview', () => {
       expect(r.status).toBe(400);
       expect(r.detail).toContain('already approved');
     }
-    expect(startJobMock).not.toHaveBeenCalled();
+    expect(mocks.startJob).not.toHaveBeenCalled();
   });
 
   it('narrows review scope to commits since last LGTM when incremental review is enabled', async () => {
     const sha = 'deadbeefdeadbeefdeadbeefdeadbeefdeadbeef';
-    execMock.mockReset()
-      .mockResolvedValueOnce(resp(0, ''))          // git status → clean
-      .mockResolvedValueOnce(resp(0, '3\n'))        // git rev-list @{u}..HEAD → ahead=3
-      .mockResolvedValueOnce(resp(0, 'main\n'))     // git branch --show-current
-      .mockResolvedValueOnce(resp(0, sha + '\n'))   // git rev-parse refs/tamtam/reviewed/main
-      .mockResolvedValueOnce(resp(0, ''))            // git merge-base --is-ancestor → exit 0
-      .mockResolvedValueOnce(resp(0, '1\n'));        // git rev-list --count <sha>..HEAD → 1 new
-    getSettingsMock.mockReturnValue({ review_verdict_rules: '', incremental_review_enabled: true });
+    mocks.exec
+      .mockResolvedValueOnce(resp(0, ''))
+      .mockResolvedValueOnce(resp(0, '3\n'))
+      .mockResolvedValueOnce(resp(0, 'main\n'))
+      .mockResolvedValueOnce(resp(0, sha + '\n'))
+      .mockResolvedValueOnce(resp(0, ''))
+      .mockResolvedValueOnce(resp(0, '1\n'));
+    mocks.getSettings.mockReturnValue({ review_verdict_rules: '', incremental_review_enabled: true });
 
     const r = await startProjectReview('proj');
     expect(r.ok).toBe(true);
-    const prompt: string = startJobMock.mock.calls[0][2];
+    const prompt: string = mocks.startJob.mock.calls[0][2];
     expect(prompt).toContain('already approved');
     expect(prompt).toContain('1 new commit');
     expect(prompt).toContain(sha.slice(0, 7));
@@ -463,8 +497,8 @@ describe('startProjectReview', () => {
   });
 
   it('returns ok with jobId and pid when review starts successfully', async () => {
-    execMock
-      .mockResolvedValueOnce(resp(0, ' M lib/foo.ts')) // git status → has unstaged changes
+    mocks.exec
+      .mockResolvedValueOnce(resp(0, ' M lib/foo.ts'))
       .mockResolvedValueOnce(resp(0, ' lib/foo.ts | 2 +-\n'))
       .mockResolvedValueOnce(resp(0, 'diff --git a/lib/foo.ts b/lib/foo.ts\n'));
     const r = await startProjectReview('proj');
@@ -474,12 +508,12 @@ describe('startProjectReview', () => {
       expect(r.pid).toBe(9999);
       expect(r.logPath).toMatch(/\.log$/);
     }
-    expect(createJobMock).toHaveBeenCalledWith('proj', 'review', 0, '', undefined, undefined);
-    expect(startJobMock).toHaveBeenCalled();
+    expect(mocks.createJob).toHaveBeenCalledWith('proj', 'review', 0, '', undefined, undefined);
+    expect(mocks.startJob).toHaveBeenCalled();
   });
 
   it('passes the full non-.tamtam working-tree scope into the review prompt', async () => {
-    execMock
+    mocks.exec
       .mockResolvedValueOnce(resp(0, 'M  lib/already-reviewed.ts\n M lib/new-fix.ts\n M .tamtam/config.yml'))
       .mockResolvedValueOnce(resp(0, ' lib/already-reviewed.ts | 1 +\n lib/new-fix.ts | 3 ++-\n'))
       .mockResolvedValueOnce(resp(0, 'diff --git a/lib/already-reviewed.ts b/lib/already-reviewed.ts\ndiff --git a/lib/new-fix.ts b/lib/new-fix.ts\n+fixed\n'));
@@ -487,7 +521,7 @@ describe('startProjectReview', () => {
     const r = await startProjectReview('proj');
 
     expect(r.ok).toBe(true);
-    const prompt: string = startJobMock.mock.calls[0][2];
+    const prompt: string = mocks.startJob.mock.calls[0][2];
     expect(prompt).toContain('Review ONLY the non-.tamtam working-tree changes');
     expect(prompt).toContain('- lib/already-reviewed.ts');
     expect(prompt).toContain('- lib/new-fix.ts');
@@ -497,54 +531,52 @@ describe('startProjectReview', () => {
   });
 
   it('persists job failure when startJob throws', async () => {
-    startJobMock.mockRejectedValueOnce(new Error('spawn failed'));
-    execMock.mockResolvedValueOnce(resp(0, ' M lib/foo.ts'));
+    mocks.startJob.mockRejectedValueOnce(new Error('spawn failed'));
+    mocks.exec.mockResolvedValueOnce(resp(0, ' M lib/foo.ts'));
     const r = await startProjectReview('proj');
     expect(r.ok).toBe(false);
     if (!r.ok) {
       expect(r.status).toBe(500);
       expect(r.detail).toContain('Failed to start review');
     }
-    // Job must be persisted as failed so it doesn't stay "running" in the DB
-    expect(updateJobMock).toHaveBeenCalledOnce();
-    const savedJob = updateJobMock.mock.calls[0][0];
+    expect(mocks.updateJob).toHaveBeenCalledOnce();
+    const savedJob = mocks.updateJob.mock.calls[0][0];
     expect(savedJob.exitCode).toBe(-1);
     expect(savedJob.finishedAt).not.toBeNull();
   });
 
   it('acquires pipeline lock after successful job start when not under release', async () => {
-    execMock.mockResolvedValueOnce(resp(0, ' M lib/foo.ts'));
+    mocks.exec.mockResolvedValueOnce(resp(0, ' M lib/foo.ts'));
     await startProjectReview('proj');
-    expect(acquireLockMock).toHaveBeenCalledWith('proj', 'proj-review-id');
+    expect(mocks.acquireLock).toHaveBeenCalledWith('proj', 'proj-review-id');
   });
 
   it('does not acquire pipeline lock when running under active release', async () => {
-    isLockOwnedByActiveReleaseMock.mockReturnValue(true);
-    execMock.mockResolvedValueOnce(resp(0, ' M lib/foo.ts'));
+    mocks.isLockOwnedByActiveRelease.mockReturnValue(true);
+    mocks.exec.mockResolvedValueOnce(resp(0, ' M lib/foo.ts'));
     await startProjectReview('proj');
-    expect(acquireLockMock).not.toHaveBeenCalled();
+    expect(mocks.acquireLock).not.toHaveBeenCalled();
   });
 
   it('passes project name and path into the prompt', async () => {
-    execMock.mockResolvedValueOnce(resp(0, ' M lib/foo.ts'));
+    mocks.exec.mockResolvedValueOnce(resp(0, ' M lib/foo.ts'));
     await startProjectReview('proj');
-    // startJob(jobId, command, prompt, cwd) → prompt is at index 2
-    const prompt: string = startJobMock.mock.calls[0][2];
+    const prompt: string = mocks.startJob.mock.calls[0][2];
     expect(prompt).toContain('proj');
     expect(prompt).toContain('/path/to/proj');
   });
 
   it('injects review_verdict_rules into the prompt', async () => {
-    execMock.mockResolvedValueOnce(resp(0, ' M lib/foo.ts'));
+    mocks.exec.mockResolvedValueOnce(resp(0, ' M lib/foo.ts'));
     await startProjectReview('proj');
-    const prompt: string = startJobMock.mock.calls[0][2];
+    const prompt: string = mocks.startJob.mock.calls[0][2];
     expect(prompt).toContain('Use LGTM / NEEDS ATTENTION / DO NOT SHIP.');
   });
 
   it('requires structured findings with blast-radius review context', async () => {
-    execMock.mockResolvedValueOnce(resp(0, ' M lib/foo.ts'));
+    mocks.exec.mockResolvedValueOnce(resp(0, ' M lib/foo.ts'));
     await startProjectReview('proj');
-    const prompt: string = startJobMock.mock.calls[0][2];
+    const prompt: string = mocks.startJob.mock.calls[0][2];
     expect(prompt).toContain('Finding ID: stable-kebab-case-id');
     expect(prompt).toContain('Root cause:');
     expect(prompt).toContain('Affected paths:');
@@ -557,12 +589,12 @@ describe('startProjectReview', () => {
   });
 
   it('includes prior release review and fix context in follow-up reviews', async () => {
-    listJobsMock.mockReturnValue([
+    mocks.listJobs.mockReturnValue([
       makeJob({ id: 'release-1', kind: 'release', finishedAt: null, startedAt: 10 }),
       makeJob({ id: 'prev-review', kind: 'review', releaseId: 'release-1', finishedAt: 20, startedAt: 20, exitCode: 0 }),
       makeJob({ id: 'prev-fix', kind: 'fix', releaseId: 'release-1', finishedAt: 30, startedAt: 30, exitCode: 0 }),
     ]);
-    readLogMock.mockImplementation((job: { id: string }) => {
+    mocks.readLog.mockImplementation((job: { id: string }) => {
       if (job.id === 'prev-review') {
         return '{"type":"stream_event","event":{"type":"content_block_delta","delta":{"type":"text_delta","text":"Findings:\\n- Finding ID: shared-server-validation\\n  Root cause: server route bypass\\nVerdict: DO NOT SHIP"}}}';
       }
@@ -571,67 +603,66 @@ describe('startProjectReview', () => {
       }
       return '';
     });
-    readParsedLogMock.mockImplementation((job: { id: string }) => {
+    mocks.readParsedLog.mockImplementation((job: { id: string }) => {
       if (job.id === 'prev-review') {
         return 'Findings:\n- Finding ID: shared-server-validation\n  Root cause: server route bypass\nVerdict: DO NOT SHIP\n';
       }
       return 'Fix checklist:\n- Finding ID: shared-server-validation\n  Status: fixed\n';
     });
-    execMock.mockResolvedValueOnce(resp(0, ' M lib/foo.ts'));
+    mocks.exec.mockResolvedValueOnce(resp(0, ' M lib/foo.ts'));
 
     await startProjectReview('proj');
 
-    const prompt: string = startJobMock.mock.calls[0][2];
+    const prompt: string = mocks.startJob.mock.calls[0][2];
     expect(prompt).toContain('PREVIOUS RELEASE REVIEW/FIX CONTEXT');
     expect(prompt).toContain('prev-review');
     expect(prompt).toContain('shared-server-validation');
     expect(prompt).toContain('First verify whether earlier findings were actually fixed');
     expect(prompt).not.toContain('"type":"stream_event"');
-    expect(readParsedLogMock).toHaveBeenCalledWith(expect.objectContaining({ id: 'prev-review' }));
-    expect(readParsedLogMock).toHaveBeenCalledWith(expect.objectContaining({ id: 'prev-fix' }));
+    expect(mocks.readParsedLog).toHaveBeenCalledWith(expect.objectContaining({ id: 'prev-review' }));
+    expect(mocks.readParsedLog).toHaveBeenCalledWith(expect.objectContaining({ id: 'prev-fix' }));
   });
 
   it('does not surface incidental id lines as findings in prior release context', async () => {
-    listJobsMock.mockReturnValue([
+    mocks.listJobs.mockReturnValue([
       makeJob({ id: 'release-2', kind: 'release', finishedAt: null, startedAt: 10 }),
       makeJob({ id: 'prev-review-2', kind: 'review', releaseId: 'release-2', finishedAt: 20, startedAt: 20, exitCode: 0 }),
       makeJob({ id: 'prev-fix-2', kind: 'fix', releaseId: 'release-2', finishedAt: 30, startedAt: 30, exitCode: 0 }),
     ]);
-    readParsedLogMock.mockImplementation((job: { id: string }) => {
+    mocks.readParsedLog.mockImplementation((job: { id: string }) => {
       if (job.id === 'prev-review-2') {
         return 'Findings:\n- Finding ID: shared-server-validation\n  Root cause: server route bypass\nVerdict: DO NOT SHIP\n';
       }
       return 'Fix checklist:\n- Root cause: updated cache flush path\n  id: shared-placeholder\n';
     });
-    execMock.mockResolvedValueOnce(resp(0, ' M lib/foo.ts'));
+    mocks.exec.mockResolvedValueOnce(resp(0, ' M lib/foo.ts'));
 
     await startProjectReview('proj');
 
-    const prompt: string = startJobMock.mock.calls[0][2];
+    const prompt: string = mocks.startJob.mock.calls[0][2];
     expect(prompt).toContain('prev-review-2');
     expect(prompt).toContain('shared-server-validation');
     expect(prompt).not.toContain(', findings shared-placeholder');
   });
 
   it('only checks running jobs of kind "review" (ignores other kinds)', async () => {
-    listJobsMock.mockReturnValue([
+    mocks.listJobs.mockReturnValue([
       makeJob({ kind: 'fix', finishedAt: null }),
       makeJob({ kind: 'test', finishedAt: null }),
     ]);
-    probeJobStatusMock.mockResolvedValue('running');
-    execMock.mockResolvedValueOnce(resp(0, '')); // no changes
+    mocks.probeJobStatus.mockResolvedValue('running');
+    mocks.exec.mockResolvedValueOnce(resp(0, ''));
     const r = await startProjectReview('proj');
-    // Should not hit the 409 — only review jobs are checked
     expect(r.ok).toBe(false);
     if (!r.ok) expect(r.status).toBe(400);
   });
 
   it('appends reviewPromptAddendum to the review prompt when configured', async () => {
-    execMock.mockReset()
+    mocks.exec
       .mockResolvedValueOnce(resp(0, 'M lib/foo.ts'))
       .mockResolvedValueOnce(resp(0, ' lib/foo.ts | 2 +-\n'))
       .mockResolvedValueOnce(resp(0, 'diff --git a/lib/foo.ts\n+change\n'));
-    getProjectPipelinePromptsMock.mockResolvedValue({
+    mocks.getProjectPipelinePrompts.mockResolvedValue({
       reviewPromptAddendum: 'Focus on security issues.',
       reviewPrerequisiteCommand: null,
       fixPromptAddendum: null,
@@ -640,18 +671,18 @@ describe('startProjectReview', () => {
     const r = await startProjectReview('proj');
 
     expect(r.ok).toBe(true);
-    const prompt: string = startJobMock.mock.calls[0][2];
+    const prompt: string = mocks.startJob.mock.calls[0][2];
     expect(prompt).toContain('Project-specific review guidance');
     expect(prompt).toContain('Focus on security issues.');
   });
 
   it('runs reviewPrerequisiteCommand before detecting review scope and includes output in the prompt', async () => {
-    execMock.mockReset()
+    mocks.exec
       .mockResolvedValueOnce(resp(0, 'generated types\n'))
       .mockResolvedValueOnce(resp(0, 'M lib/foo.ts'))
       .mockResolvedValueOnce(resp(0, ' lib/foo.ts | 2 +-\n'))
       .mockResolvedValueOnce(resp(0, 'diff --git a/lib/foo.ts\n+change\n'));
-    getProjectPipelinePromptsMock.mockResolvedValue({
+    mocks.getProjectPipelinePrompts.mockResolvedValue({
       reviewPromptAddendum: null,
       reviewPrerequisiteCommand: 'pnpm db:types',
       fixPromptAddendum: null,
@@ -660,117 +691,52 @@ describe('startProjectReview', () => {
     const r = await startProjectReview('proj');
 
     expect(r.ok).toBe(true);
-    expect(execMock.mock.calls[0]).toEqual([
+    expect(mocks.exec.mock.calls[0]).toEqual([
       'bash',
       ['-lc', 'pnpm db:types'],
       { cwd: '/path/to/proj', timeout: 20 * 60 * 1000, killProcessGroup: true },
     ]);
-    expect(execMock.mock.calls[1][1]).toEqual(['-C', '/path/to/proj', 'status', '--porcelain', '--ignore-submodules']);
-    const prompt: string = startJobMock.mock.calls[0][2];
+    expect(mocks.exec.mock.calls[1][1]).toEqual(['-C', '/path/to/proj', 'status', '--porcelain', '--ignore-submodules']);
+    const prompt: string = mocks.startJob.mock.calls[0][2];
     expect(prompt).toContain('# review prerequisite (`pnpm db:types`)');
     expect(prompt).toContain('generated types');
   });
 
   it('does not inject acceptance criteria into the review prompt — DoD verification is mark-dod\'s job', async () => {
-    execMock.mockResolvedValueOnce(resp(0, ' M lib/foo.ts'))
+    mocks.exec
+      .mockResolvedValueOnce(resp(0, ' M lib/foo.ts'))
       .mockResolvedValueOnce(resp(0, '1 file changed'))
       .mockResolvedValueOnce(resp(0, 'diff --git a/lib/foo.ts\n+change\n'));
 
     await startProjectReview('proj');
 
-    const prompt: string = startJobMock.mock.calls[0][2];
+    const prompt: string = mocks.startJob.mock.calls[0][2];
     expect(prompt).not.toContain('ACCEPTANCE CRITERIA:');
     expect(prompt).not.toContain('Verified criteria');
   });
 });
 
 describe('startProjectReview — default skill path', () => {
-  afterEach(() => vi.resetModules());
-
   it('loads the vendored code reviewer skill from the default path', async () => {
-    vi.resetModules();
-    const startJobMock = vi.fn().mockResolvedValue(9999);
-    const existsSyncMock = vi.fn((path: string) =>
+    mocks.codeReviewerSkillPath = '/abs/path/skills/docs/skills/engineering/code-reviewer.md';
+    mocks.exec
+      .mockResolvedValueOnce({ exitCode: 0, stdout: ' M lib/foo.ts', stderr: '' })
+      .mockResolvedValueOnce({ exitCode: 0, stdout: '1 file changed', stderr: '' })
+      .mockResolvedValueOnce({ exitCode: 0, stdout: 'diff --git a/lib/foo.ts\n+change\n', stderr: '' });
+    mocks.existsSync.mockImplementation((path: string) =>
       path.endsWith('/skills/docs/skills/engineering/code-reviewer.md')
     );
-    const readFileSyncMock = vi.fn().mockReturnValue('Vendored reviewer skill body.');
+    mocks.readFileSync.mockReturnValue('Vendored reviewer skill body.');
 
-    vi.doMock('@/lib/shared/shell', () => ({
-      exec: vi.fn()
-        .mockResolvedValueOnce({ exitCode: 0, stdout: ' M lib/foo.ts', stderr: '' })
-        .mockResolvedValueOnce({ exitCode: 0, stdout: '1 file changed', stderr: '' })
-        .mockResolvedValueOnce({ exitCode: 0, stdout: 'diff --git a/lib/foo.ts\n+change\n', stderr: '' }),
-    }));
-    vi.doMock('@/lib/shared/project-data', () => ({
-      resolveProjectPath: vi.fn().mockReturnValue('/path/to/proj'),
-    }));
-    vi.doMock('@/lib/scheduling/scheduling', () => ({
-      getImproveConfig: () => ({ claudeBin: 'claude', projects: {}, logDir: '/tmp' }),
-      getProjectTestConfig: () => ({}),
-      getProjectPipelinePrompts: () => ({
-        reviewPromptAddendum: null,
-        reviewPrerequisiteCommand: null,
-        fixPromptAddendum: null,
-      }),
-    }));
-    vi.doMock('@/lib/jobs/job-storage', () => ({
-      createJob: vi.fn().mockImplementation((project: string, kind: string) => ({
-        id: `${project}-${kind}-id`,
-        project,
-        kind,
-        pid: 0,
-        logPath: '',
-        prompt: null,
-        startedAt: 0,
-        finishedAt: null,
-        exitCode: null,
-        seen: false,
-      })),
-      updateJob: vi.fn(),
-      listJobs: vi.fn().mockReturnValue([]),
-      readLog: vi.fn().mockReturnValue(''),
-      readParsedLog: vi.fn().mockReturnValue(''),
-      probeJobStatus: vi.fn().mockResolvedValue('done'),
-    }));
-    vi.doMock('@/lib/jobs/pm2-jobs', () => ({ splitCommand: (line: string) => line.split(/\s+/).filter(Boolean) }));
-    vi.doMock('@/lib/jobs/spawn-claude-detached', () => ({ startJobInProcess: startJobMock }));
-    vi.doMock('@/lib/shared/config', () => ({
-      getSettings: () => ({ review_verdict_rules: '' }),
-      withBasePrompt: (s: string) => s,
-      getPermissionModeFlag: () => '--dangerously-skip-permissions',
-      getPipelineModel: () => 'sonnet',
-    }));
-    vi.doMock('@/lib/pipeline/pipeline-lock', () => ({
-      getLock: vi.fn().mockReturnValue(null),
-      acquireLock: vi.fn().mockResolvedValue({ acquired: true }),
-      isLockOwnedByActiveRelease: vi.fn().mockReturnValue(false),
-    }));
-    vi.doMock('@/lib/skills/skills', async () => (
-      await vi.importActual<typeof import('@/lib/skills/skills')>('@/lib/skills/skills')
-    ));
-    vi.doMock('@/lib/usage/resolve-provider', () => ({
-      checkCliStartGate: vi.fn().mockResolvedValue({ ok: true, provider: 'claude' }),
-    }));
-    vi.doMock('fs', () => ({
-      existsSync: existsSyncMock,
-      lstatSync: vi.fn(),
-      readFileSync: readFileSyncMock,
-      mkdirSync: vi.fn(),
-      appendFileSync: vi.fn(),
-    }));
-
-    const { startProjectReview } = await import('@/lib/pipeline/start-review');
     const result = await startProjectReview('proj');
 
     expect(result.ok).toBe(true);
-    expect(existsSyncMock).toHaveBeenCalledWith(expect.stringMatching(/skills\/docs\/skills\/engineering\/code-reviewer\.md$/));
-    const prompt: string = startJobMock.mock.calls[0][2];
+    expect(mocks.existsSync).toHaveBeenCalledWith(expect.stringMatching(/skills\/docs\/skills\/engineering\/code-reviewer\.md$/));
+    const prompt: string = mocks.startJob.mock.calls[0][2];
     expect(prompt).toContain('Vendored reviewer skill body.');
   });
 
   it('injects detected frameworks and filters working-tree review framework checklists', async () => {
-    vi.resetModules();
-    const startJobMock = vi.fn().mockResolvedValue(9999);
     const skillPath = '/abs/path/skills/docs/skills/engineering/code-reviewer.md';
     const skillBody = [
       'Before checks.',
@@ -791,90 +757,26 @@ describe('startProjectReview — default skill path', () => {
       '',
       'End correctly.',
     ].join('\n');
-    const existsSyncMock = vi.fn((path: string) =>
+    mocks.codeReviewerSkillPath = skillPath;
+    mocks.exec
+      .mockResolvedValueOnce({ exitCode: 0, stdout: ' M lib/foo.ts', stderr: '' })
+      .mockResolvedValueOnce({ exitCode: 0, stdout: '1 file changed', stderr: '' })
+      .mockResolvedValueOnce({ exitCode: 0, stdout: 'diff --git a/lib/foo.ts\n+change\n', stderr: '' });
+    mocks.existsSync.mockImplementation((path: string) =>
       path === skillPath || path === '/path/to/proj/package.json'
     );
-    const readFileSyncMock = vi.fn((path: string) => {
+    mocks.readFileSync.mockImplementation((path: string) => {
       if (path === '/path/to/proj/package.json') return JSON.stringify({ dependencies: { next: '^16.2.4' } });
       return skillBody;
     });
+    mocks.loadFileConfig.mockReturnValue(null);
+    mocks.resolveAutoAttachedDocs.mockReturnValue([]);
+    mocks.formatAutoAttachedDocsBlock.mockReturnValue(null);
 
-    vi.doMock('@/lib/shared/shell', () => ({
-      exec: vi.fn()
-        .mockResolvedValueOnce({ exitCode: 0, stdout: ' M lib/foo.ts', stderr: '' })
-        .mockResolvedValueOnce({ exitCode: 0, stdout: '1 file changed', stderr: '' })
-        .mockResolvedValueOnce({ exitCode: 0, stdout: 'diff --git a/lib/foo.ts\n+change\n', stderr: '' }),
-    }));
-    vi.doMock('@/lib/shared/project-data', () => ({
-      resolveProjectPath: vi.fn().mockReturnValue('/path/to/proj'),
-    }));
-    vi.doMock('@/lib/scheduling/scheduling', () => ({
-      getImproveConfig: () => ({ claudeBin: 'claude', projects: {}, logDir: '/tmp' }),
-      getProjectTestConfig: () => ({}),
-      getProjectPipelinePrompts: () => ({
-        reviewPromptAddendum: null,
-        reviewPrerequisiteCommand: null,
-        fixPromptAddendum: null,
-      }),
-    }));
-    vi.doMock('@/lib/jobs/job-storage', () => ({
-      createJob: vi.fn().mockImplementation((project: string, kind: string) => ({
-        id: `${project}-${kind}-id`,
-        project,
-        kind,
-        pid: 0,
-        logPath: '',
-        prompt: null,
-        startedAt: 0,
-        finishedAt: null,
-        exitCode: null,
-        seen: false,
-      })),
-      updateJob: vi.fn(),
-      listJobs: vi.fn().mockReturnValue([]),
-      readLog: vi.fn().mockReturnValue(''),
-      readParsedLog: vi.fn().mockReturnValue(''),
-      probeJobStatus: vi.fn().mockResolvedValue('done'),
-    }));
-    vi.doMock('@/lib/jobs/pm2-jobs', () => ({ splitCommand: (line: string) => line.split(/\s+/).filter(Boolean) }));
-    vi.doMock('@/lib/jobs/spawn-claude-detached', () => ({ startJobInProcess: startJobMock }));
-    vi.doMock('@/lib/shared/config', () => ({
-      getSettings: () => ({ review_verdict_rules: '' }),
-      withBasePrompt: (s: string) => s,
-      getPermissionModeFlag: () => '--dangerously-skip-permissions',
-      getPipelineModel: () => 'sonnet',
-    }));
-    vi.doMock('@/lib/pipeline/pipeline-lock', () => ({
-      getLock: vi.fn().mockReturnValue(null),
-      acquireLock: vi.fn().mockResolvedValue({ acquired: true }),
-      isLockOwnedByActiveRelease: vi.fn().mockReturnValue(false),
-    }));
-    vi.doMock('@/lib/skills/skills', () => ({
-      CODE_REVIEWER_SKILL: skillPath,
-    }));
-    vi.doMock('@/lib/usage/resolve-provider', () => ({
-      checkCliStartGate: vi.fn().mockResolvedValue({ ok: true, provider: 'claude' }),
-    }));
-    vi.doMock('fs', () => ({
-      existsSync: existsSyncMock,
-      lstatSync: vi.fn(),
-      readFileSync: readFileSyncMock,
-      mkdirSync: vi.fn(),
-      appendFileSync: vi.fn(),
-    }));
-    vi.doMock('@/lib/skills/tamtam-file-config', () => ({
-      loadFileConfig: vi.fn().mockReturnValue(null),
-    }));
-    vi.doMock('@/lib/skills/auto-attach-docs', () => ({
-      resolveAutoAttachedDocs: vi.fn().mockReturnValue([]),
-      formatAutoAttachedDocsBlock: vi.fn().mockReturnValue(null),
-    }));
-
-    const { startProjectReview } = await import('@/lib/pipeline/start-review');
     const result = await startProjectReview('proj');
 
     expect(result.ok).toBe(true);
-    const prompt: string = startJobMock.mock.calls[0][2];
+    const prompt: string = mocks.startJob.mock.calls[0][2];
     expect(prompt).toContain('FRAMEWORK: nextjs@16.2.4.');
     expect(prompt).toContain('### Next.js (App Router)');
     expect(prompt).toContain('- Next-only rule.');
