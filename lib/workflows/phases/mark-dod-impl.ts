@@ -10,15 +10,15 @@
 // composes these same helpers in sequence, so its observable behavior is
 // unchanged.
 
-import { existsSync, mkdirSync, readFileSync, writeFileSync, unlinkSync } from 'fs';
+import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'fs';
 import { join } from 'path';
-import { tmpdir } from 'os';
 import { resolveProjectPath } from '@/lib/shared/project-data';
 import { getImproveConfig } from '@/lib/scheduling/scheduling';
 import { resolveCliBin, resolveCliEnv } from '@/lib/shared/cli-bin';
 import { checkCliStartGate } from '@/lib/usage/resolve-provider';
 import { currentParent } from '@/lib/jobs/parent-context';
 import { exec as shellExec } from '@/lib/shared/shell';
+import { readIssueBody, writeIssueBody } from '@/lib/github/edit-issue-body';
 import { getPermissionModeFlag, getPipelineModel, getSettings } from '@/lib/shared/config';
 import {
   createJob,
@@ -194,12 +194,14 @@ export async function fetchAndExtractMarkDodCriteria(
   const { jobId, projPath, ctx, isPr } = bundle;
   const ctxLabel = isPr ? 'PR' : 'issue';
 
-  const viewArgs = isPr
-    ? ['pr', 'view', String(ctx.number), '--repo', ctx.repo, '--json', 'body,title,author']
-    : ['issue', 'view', String(ctx.number), '--repo', ctx.repo, '--json', 'body,title,author'];
-  const viewR = await shellExec('gh', viewArgs, { cwd: projPath, timeout: 15000 });
-  if (viewR.exitCode !== 0) {
-    appendLog(job, `# gh ${ctxLabel} view failed: ${viewR.stderr}\n`);
+  const viewR = await readIssueBody({
+    projPath,
+    repo: ctx.repo,
+    number: ctx.number,
+    kind: isPr ? 'pr' : 'issue',
+  });
+  if (!viewR.ok) {
+    appendLog(job, `# gh ${ctxLabel} view failed: ${viewR.detail}\n`);
     if (job) await markDone(job, 1);
     return {
       body: '',
@@ -210,20 +212,14 @@ export async function fetchAndExtractMarkDodCriteria(
     };
   }
 
-  let parsed: { body?: string; title?: string; author?: { login?: string } } = {};
-  try {
-    parsed = JSON.parse(viewR.stdout);
-  } catch {
-    /* keep parsed empty */
-  }
-  const body = parsed.body ?? '';
-  const title = parsed.title ?? '';
+  const body = viewR.body;
+  const title = viewR.title;
   if (job) {
     job.ghIssueTitle = title || null;
     job.contextMeta = buildMarkDodContextMeta({ ...ctx, title }, isPr);
     updateJob(job);
   }
-  const authorLogin = parsed.author?.login;
+  const authorLogin = viewR.authorLogin;
   const criteria = extractCriteria(body);
 
   if (criteria.length === 0) {
@@ -502,37 +498,17 @@ export async function applyAndFinalizeMarkDod(
       };
     }
 
-    const tmpFile = join(tmpdir(), `tamtam-${ctxLabel}-${ctx.number}-${Date.now()}.md`);
-    writeFileSync(tmpFile, updated);
-    try {
-      const editArgs = isPr
-        ? ['pr', 'edit', String(ctx.number), '--repo', ctx.repo, '--body-file', tmpFile]
-        : ['issue', 'edit', String(ctx.number), '--repo', ctx.repo, '--body-file', tmpFile];
-      const editR = await shellExec('gh', editArgs, { cwd: projPath, timeout: 15000 });
-      if (editR.stdout) appendLog(job, editR.stdout);
-      if (editR.stderr) appendLog(job, editR.stderr);
-      if (editR.exitCode !== 0) {
-        appendLog(job, `# gh ${ctxLabel} edit failed\n`);
-        if (job) {
-          job.contextMeta = buildMarkDodContextMeta(
-            { ...ctx, title: fetched.title },
-            isPr,
-            verify.verifiedTexts.length,
-            fetched.criteria.length,
-          );
-          updateJob(job);
-          await markDone(job, 1);
-        }
-        return {
-          ok: true,
-          jobId,
-          issueNumber: ctx.number,
-          verified: verify.verifiedTexts.length,
-          total: fetched.criteria.length,
-          changed: false,
-        };
-      }
-      appendLog(job, `# DoD updated on ${ctx.repo}#${ctx.number}: ticked ${ticked} of ${fetched.criteria.length}\n`);
+    const editR = await writeIssueBody({
+      projPath,
+      repo: ctx.repo,
+      number: ctx.number,
+      kind: isPr ? 'pr' : 'issue',
+      body: updated,
+    });
+    if (editR.stdout) appendLog(job, editR.stdout);
+    if (editR.stderr) appendLog(job, editR.stderr);
+    if (!editR.ok) {
+      appendLog(job, `# gh ${ctxLabel} edit failed\n`);
       if (job) {
         job.contextMeta = buildMarkDodContextMeta(
           { ...ctx, title: fetched.title },
@@ -541,7 +517,7 @@ export async function applyAndFinalizeMarkDod(
           fetched.criteria.length,
         );
         updateJob(job);
-        await markDone(job, 0);
+        await markDone(job, 1);
       }
       return {
         ok: true,
@@ -549,15 +525,28 @@ export async function applyAndFinalizeMarkDod(
         issueNumber: ctx.number,
         verified: verify.verifiedTexts.length,
         total: fetched.criteria.length,
-        changed: true,
+        changed: false,
       };
-    } finally {
-      try {
-        unlinkSync(tmpFile);
-      } catch {
-        /* swallow */
-      }
     }
+    appendLog(job, `# DoD updated on ${ctx.repo}#${ctx.number}: ticked ${ticked} of ${fetched.criteria.length}\n`);
+    if (job) {
+      job.contextMeta = buildMarkDodContextMeta(
+        { ...ctx, title: fetched.title },
+        isPr,
+        verify.verifiedTexts.length,
+        fetched.criteria.length,
+      );
+      updateJob(job);
+      await markDone(job, 0);
+    }
+    return {
+      ok: true,
+      jobId,
+      issueNumber: ctx.number,
+      verified: verify.verifiedTexts.length,
+      total: fetched.criteria.length,
+      changed: true,
+    };
   } catch (e) {
     appendLog(job, `# mark-dod error: ${e instanceof Error ? e.message : String(e)}\n`);
     if (job) await markDone(job, 1);

@@ -476,25 +476,23 @@ export function ConfigTab({
           </div>
         </div>
 
-        {/* Post-merge soak window */}
+        {/* Post-merge soak (wait for default-branch CI on the merge commit). */}
         <div className="px-4 py-3 border-t border-border space-y-3">
-          <div>
-            <label className="block font-medium text-xs text-text-secondary mb-1" htmlFor="post-merge-watch-minutes">
-              Post-merge watch (minutes)
-            </label>
+          <label className="flex items-start gap-2 cursor-pointer select-none">
             <input
-              id="post-merge-watch-minutes"
-              type="text"
-              inputMode="numeric"
-              className="w-full px-3 py-1.5 text-sm bg-bg-primary border border-border rounded-md text-text-primary font-mono focus:outline-none focus:ring-2 focus:ring-accent/30 focus:border-accent transition-colors placeholder:text-text-tertiary"
-              value={postMergeWatchMinutesInput}
-              onChange={(e) => setPostMergeWatchMinutesInput(e.target.value)}
-              placeholder="0"
+              id="post-merge-watch-enabled"
+              type="checkbox"
+              className="w-4 h-4 accent-accent mt-0.5 shrink-0 cursor-pointer"
+              checked={(Number.parseInt(postMergeWatchMinutesInput, 10) || 0) > 0}
+              onChange={(e) => setPostMergeWatchMinutesInput(e.target.checked ? '1' : '0')}
             />
-            <p className="text-xs text-text-tertiary mt-1">
-              After PR merge, watch default-branch CI on the merge commit for this many minutes. Failures inside the window open a revert PR. <code className="font-mono">0</code> disables the watcher.
-            </p>
-          </div>
+            <div className="flex-1 min-w-0">
+              <div className="font-medium text-sm text-text-primary">Wait for CI on default branch after merge</div>
+              <div className="text-xs text-text-tertiary">
+                After PR merge, poll the default branch&apos;s CI on the merge commit until it terminates. On all pass: release unlocks the project. On any fail: TamTam <strong>pauses the project</strong> (no new agent runs accepted until you resume from Settings) and opens a revert PR.
+              </div>
+            </div>
+          </label>
           <label className="flex items-start gap-2 cursor-pointer select-none">
             <input
               id="auto-revert-enabled"

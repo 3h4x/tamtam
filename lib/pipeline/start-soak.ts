@@ -372,3 +372,32 @@ export async function finalizeSoakJob(jobId: string, exitCode: number): Promise<
   await markDone(job, exitCode);
   return job;
 }
+
+/**
+ * Flip `projects.paused = true` so admission gates (`isProjectPaused()`) stop
+ * accepting new agent runs or releases on this project until a human resumes
+ * it from Settings.
+ *
+ * Mirrors the side effects of the PATCH /api/projects/by-project/<name> route
+ * without crossing the HTTP boundary — usable from inside workflow steps.
+ *
+ * Returns true on success, false on any failure (already logged).
+ */
+export async function pauseProjectForSoakFailure(projectName: string): Promise<boolean> {
+  const { db } = await import('@/lib/db');
+  const schema = await import('@/lib/db/schema');
+  const { eq } = await import('drizzle-orm');
+  const { clearProjectDataCache } = await import('@/lib/shared/project-data');
+  const { refreshProjectsCacheSync } = await import('@/lib/shared/enabled-projects');
+  try {
+    await db.update(schema.projects)
+      .set({ paused: true })
+      .where(eq(schema.projects.name, projectName));
+    clearProjectDataCache();
+    await refreshProjectsCacheSync();
+    return true;
+  } catch (err) {
+    console.error(`[soak] pauseProjectForSoakFailure(${projectName}) failed:`, err);
+    return false;
+  }
+}

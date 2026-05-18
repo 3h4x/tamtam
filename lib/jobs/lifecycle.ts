@@ -466,6 +466,63 @@ async function runCompletionHooksInner(job: JobData): Promise<void> {
       }
     })();
 
+    // Read the agent's emitted `tamtam-actions` block (if any) and execute
+    // each action server-side. Awaited (NOT fire-and-forget) so the
+    // completion-hook chain that runs below sees the post-action state
+    // (issue closed, branch back on default, etc.) — without this, the
+    // stranded-branch reconciler races and recreates an empty fix/issue-N
+    // branch before the agent's close lands.
+    //
+    // The agent runs inside Codex's `workspace-write` sandbox which blocks
+    // localhost, so the agent CANNOT POST to /api/.../issue-close itself.
+    // This is the server-side bridge that turns its declared intent into a
+    // real `gh issue close` / etc. invocation.
+    try {
+      if (job.logPath) {
+        const { resolveProjectPath } = await import('@/lib/shared/project-data');
+        const projPath = resolveProjectPath(job.project);
+        if (projPath) {
+          const { extractAssistantTextFromRawLog } = await import('@/lib/agents/work-summary-extractor.mjs');
+          const { parseAgentActions } = await import('@/lib/agents/action-block-parser');
+          const text = await extractAssistantTextFromRawLog(job.logPath);
+          const parsed = parseAgentActions(text);
+          if (parsed.ok && parsed.actions.length > 0) {
+            const { canExecuteAgentActions } = await import('@/lib/agents/action-eligibility');
+            const eligibility = canExecuteAgentActions(job, parsed.actions);
+            if (eligibility.ok) {
+              const { runAgentActions } = await import('@/lib/agents/action-orchestrator');
+              const result = await runAgentActions({
+                project: job.project,
+                projPath,
+                jobId: job.id,
+                actions: parsed.actions,
+              });
+              // Surface counts on contextMeta so the UI can show "closed
+              // issue #N" alongside the verdict without re-parsing the log.
+              try {
+                const meta = JSON.parse(job.contextMeta || '{}');
+                meta.agentActions = {
+                  executed: result.executed,
+                  errors: result.errors,
+                };
+                job.contextMeta = JSON.stringify(meta);
+                updateJob(job);
+              } catch {
+                /* non-fatal — contextMeta unchanged on parse error */
+              }
+              console.log(`[agent-actions] ${job.id}: executed=${result.executed} errors=${result.errors.length}`);
+            } else {
+              console.warn(`[agent-actions] ${job.id} skipped (${eligibility.reason}): ${eligibility.detail ?? ''}`);
+            }
+          } else if (!parsed.ok && parsed.reason !== 'missing') {
+            console.warn(`[agent-actions] ${job.id} parse failed (${parsed.reason}): ${parsed.detail ?? ''}`);
+          }
+        }
+      }
+    } catch (err) {
+      console.error(`[agent-actions] ${job.id} orchestrator threw:`, err);
+    }
+
     // Auto-resume agent/run jobs that died mid-stream (no final `result`
     // event in the log + non-zero exit). The most common trigger is a PM2
     // restart killing the child process group before Claude could finish a

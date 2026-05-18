@@ -14,6 +14,14 @@ import { sleep } from 'workflow';
 import { safeStartOrchestrator } from '@/lib/workflows/safe-start-orchestrator';
 import type { CiRun, SoakContextMeta } from '@/lib/pipeline/start-soak';
 
+/**
+ * 90s grace period for the "no CI runs ever appeared" case. Past this point we
+ * treat absence as "project doesn't have default-branch CI configured" and pass
+ * the soak. Distinct from the `pending` case, which polls forever — see
+ * https://github.com/3h4x/tamtam/issues/26#refined-design.
+ */
+export const SOAK_NO_CHECKS_GRACE_MS = 90_000;
+
 export type SoakPhaseResult =
   | {
       ok: true;
@@ -23,9 +31,12 @@ export type SoakPhaseResult =
   | {
       ok: true;
       jobId: string;
-      verdict: 'pass' | 'fail' | 'timeout';
+      verdict: 'pass' | 'fail';
+      passReason?: 'ci_passed' | 'no_ci_configured';
+      failReason?: 'ci_failed';
       revertPrUrl: string | null;
       autoMerged: boolean;
+      projectPaused: boolean;
     }
   | {
       ok: false;
@@ -53,7 +64,10 @@ interface SoakPrepResult {
   jobId?: string;
   projPath?: string;
   meta?: SoakContextMeta;
-  deadlineAt?: number;
+  /** Wall-clock start of the soak loop. Used only to time the 90s grace for
+   *  the "no CI runs ever appeared" case. There is no upper time bound on
+   *  pending — soak polls until CI terminates one way or the other. */
+  startedAt?: number;
 }
 
 export async function releaseSoakPhaseWorkflow(
@@ -77,17 +91,22 @@ export async function releaseSoakPhaseWorkflow(
     return { ok: false, reason: 'launch_failed', error: prepared.error ?? 'unknown' };
   }
 
-  const { jobId, meta, projPath, deadlineAt } = prepared;
-  if (!jobId || !meta || !projPath || !deadlineAt) {
+  const { jobId, meta, projPath, startedAt } = prepared;
+  if (!jobId || !meta || !projPath || !startedAt) {
     return { ok: false, reason: 'launch_failed', error: 'missing prep fields' };
   }
 
-  let verdict: 'pass' | 'fail' | 'timeout' = 'timeout';
+  // Verdict-driven loop. No upper time cap — soak polls until CI terminates.
+  //   - pass         → release unlocks normally
+  //   - fail         → project paused, revert PR opened
+  //   - pending      → keep polling (no timeout)
+  //   - none         → keep polling for 90s, then treat as "no CI configured"
+  let verdict: 'pass' | 'fail' = 'pass';
+  let passReason: 'ci_passed' | 'no_ci_configured' = 'ci_passed';
   let failedRuns: CiRun[] = [];
 
   while (true) {
-    const poll = await pollDefaultBranchCiStep(jobId, projPath, meta, deadlineAt);
-    if (poll.expired) { verdict = 'timeout'; break; }
+    const poll = await pollDefaultBranchCiStep(jobId, projPath, meta);
     if (poll.classification === 'fail') {
       verdict = 'fail';
       failedRuns = poll.failed;
@@ -95,15 +114,27 @@ export async function releaseSoakPhaseWorkflow(
     }
     if (poll.classification === 'pass') {
       verdict = 'pass';
+      passReason = 'ci_passed';
       break;
     }
-    // `pending` / `none` — keep polling until the deadline.
+    if (poll.classification === 'none' && Date.now() - startedAt > SOAK_NO_CHECKS_GRACE_MS) {
+      // No CI runs ever appeared on the merge commit. Assume the project has
+      // no default-branch CI configured to gate against, and pass.
+      verdict = 'pass';
+      passReason = 'no_ci_configured';
+      break;
+    }
+    // `pending` (CI in flight) OR `none` within grace — keep polling.
     await sleep(poll.intervalMs);
   }
 
   let revertPrUrl: string | null = null;
   let autoMerged = false;
+  let projectPaused = false;
   if (verdict === 'fail') {
+    // Pause project BEFORE opening the revert PR so the gate is already in
+    // effect by the time the notification fires.
+    projectPaused = await pauseProjectStep(jobId, projectName);
     const revert = await openRevertPrStep(jobId, projPath, meta, failedRuns);
     revertPrUrl = revert.prUrl ?? null;
     if (revert.ok && revert.prUrl && meta.autoRevert) {
@@ -113,7 +144,8 @@ export async function releaseSoakPhaseWorkflow(
   }
 
   const exitCode = verdict === 'fail' ? 1 : 0;
-  await finalizeSoakStep(jobId, exitCode, verdict);
+  const verdictLabel = verdict === 'fail' ? 'fail (ci_failed)' : `pass (${passReason})`;
+  await finalizeSoakStep(jobId, exitCode, verdictLabel);
 
   // soak is a terminal phase — re-dispatch the orchestrator so it sees
   // decideNextPhase=done and finalises the release meta-job.
@@ -121,7 +153,15 @@ export async function releaseSoakPhaseWorkflow(
     await dispatchOrchestratorTickStep(jobId, projectName, releaseJobId);
   }
 
-  return { ok: true, jobId, verdict, revertPrUrl, autoMerged };
+  return {
+    ok: true,
+    jobId,
+    verdict,
+    ...(verdict === 'pass' ? { passReason } : { failReason: 'ci_failed' as const }),
+    revertPrUrl,
+    autoMerged,
+    projectPaused,
+  };
 }
 
 // ── Steps ────────────────────────────────────────────────────────────────────
@@ -175,12 +215,11 @@ async function prepareSoakStep(input: PrepareSoakStepInput): Promise<SoakPrepRes
     jobId: launched.jobId,
     projPath,
     meta,
-    deadlineAt: Date.now() + meta.watchMinutes * 60_000,
+    startedAt: Date.now(),
   };
 }
 
 interface PollDefaultBranchResult {
-  expired: boolean;
   classification: 'pass' | 'fail' | 'pending' | 'none';
   failed: CiRun[];
   intervalMs: number;
@@ -190,7 +229,6 @@ async function pollDefaultBranchCiStep(
   jobId: string,
   projPath: string,
   meta: SoakContextMeta,
-  deadlineAt: number,
 ): Promise<PollDefaultBranchResult> {
   'use step';
   const {
@@ -201,10 +239,6 @@ async function pollDefaultBranchCiStep(
   } = await import('@/lib/pipeline/start-soak');
   const intervalMs = SOAK_DEFAULT_POLL_INTERVAL_MS;
 
-  if (Date.now() >= deadlineAt) {
-    appendSoakLog(jobId, `\n# soak window elapsed — no failures observed\n`);
-    return { expired: true, classification: 'none', failed: [], intervalMs };
-  }
   const runs = await queryDefaultBranchCi({
     projPath,
     repo: meta.prRepo,
@@ -217,12 +251,26 @@ async function pollDefaultBranchCiStep(
     `\n# soak poll: ${runs.length} run(s), verdict=${verdict.kind}\n`,
   );
   if (verdict.kind === 'fail') {
-    return { expired: false, classification: 'fail', failed: verdict.failed, intervalMs };
+    return { classification: 'fail', failed: verdict.failed, intervalMs };
   }
   if (verdict.kind === 'pass') {
-    return { expired: false, classification: 'pass', failed: [], intervalMs };
+    return { classification: 'pass', failed: [], intervalMs };
   }
-  return { expired: false, classification: verdict.kind === 'pending' ? 'pending' : 'none', failed: [], intervalMs };
+  return { classification: verdict.kind === 'pending' ? 'pending' : 'none', failed: [], intervalMs };
+}
+
+/**
+ * Workflow step wrapper around `pauseProjectForSoakFailure` so the step result
+ * is replay-safe (cached by the workflow runtime).
+ */
+async function pauseProjectStep(jobId: string, projectName: string): Promise<boolean> {
+  'use step';
+  const { appendSoakLog, pauseProjectForSoakFailure } = await import('@/lib/pipeline/start-soak');
+  const ok = await pauseProjectForSoakFailure(projectName);
+  appendSoakLog(jobId, ok
+    ? `\n# soak: paused project ${projectName} — manual resume required from Settings\n`
+    : `\n# soak: failed to pause project ${projectName} (see server logs)\n`);
+  return ok;
 }
 
 async function openRevertPrStep(

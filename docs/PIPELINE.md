@@ -2,7 +2,12 @@
 
 The pipeline is a quality-gated sequence driven by the selected provider. The registry is unified per project: `test → review → fix → commit → push → dod → merge → soak`.
 
-`soak` is opt-in: when the project's `post_merge_watch_minutes` is `0` (the default), the chain still ends at `merge` and the release is finalised. When it is positive, TamTam keeps watching the default branch's CI on the merge commit for that window. A default-branch CI failure inside the window opens a revert PR (and auto-merges it when `auto_revert_enabled` is on).
+`soak` is opt-in: when the project's `post_merge_watch_minutes` is `0` (the default), the chain still ends at `merge` and the release is finalised. When it is positive (any value enables soak — the integer is no longer a duration cap), TamTam polls the default branch's CI on the merge commit until it terminates:
+
+- **All checks pass** → soak exits 0, release finalises, project unlocks normally.
+- **Any check fails** → soak pauses the project (`projects.paused = true` — admission gates reject new agent runs until a human resumes from Settings) and opens a revert PR. `auto_revert_enabled` controls whether the revert PR is auto-merged or left open for review.
+- **No CI runs ever appear on the merge commit** → after a 90s grace period, soak treats this as "no default-branch CI configured" and passes.
+- **CI stays pending forever** → soak keeps polling. There is no upper time cap. If a workflow is genuinely stuck, operators can cancel the soak job via `DELETE /api/jobs/<soak-job-id>` and resume the project manually.
 
 ## Auto-fix policy (requirements)
 
@@ -411,7 +416,7 @@ All stored in the `projects` DB table; editable via the project Config tab.
 | `auto_pr_merge_enabled` | off | After DoD, poll CI and auto-merge the PR when the push path produced a PR |
 | `release_after_run` | off | Trigger the full pipeline automatically after each successful agent/terminal run |
 | `review_disabled` | off | Skip the review phase; after tests pass, uncommitted changes go to commit and unpushed commits go to push |
-| `post_merge_watch_minutes` | 0 | After merge, watch default-branch CI on the merge commit for this many minutes. 0 disables. A failure inside the window opens a revert PR via `git revert <sha>` + `gh pr create` |
+| `post_merge_watch_minutes` | 0 | **Boolean toggle (legacy integer column)**. `0` disables soak. Any positive value enables it; the watcher polls default-branch CI on the merge commit until terminal (no time cap). On any failed check the project is paused and a revert PR is opened |
 | `auto_revert_enabled` | off | When the soak watcher opens a revert PR, also enable squash auto-merge so it lands without human review |
 
 When `auto_push_enabled` is **off**: pipeline chaining only happens during an active Release run.

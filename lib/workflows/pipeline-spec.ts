@@ -146,8 +146,13 @@ export const TRANSITIONS: ReadonlyArray<Transition> = [
   { from: 'fix-ci' as PhaseName, when: { external: 'exit 0' },
     to: 'test', label: 'exit 0', external: true },
 
-  // soak terminates the chain — outcome is reflected by its own exit code.
-  { from: 'soak', when: {}, to: 'done', label: 'soak complete' },
+  // soak terminates the chain. Loop is verdict-driven (polls default-branch CI
+  // on the merge commit until pass/fail; no time cap). On exit 0 the release
+  // unlocks normally; on non-zero the soak step has already flipped
+  // `projects.paused = true` and opened a revert PR, so the project stays
+  // locked from new agent runs until a human resumes it from Settings.
+  { from: 'soak', when: { exitCode: 0 }, to: 'done', label: 'ci passed — unlock' },
+  { from: 'soak', when: {}, to: 'done', label: 'ci failed — project paused' },
 ];
 
 // ─── Matcher ───────────────────────────────────────────────────────────────

@@ -171,14 +171,82 @@ describe('start-soak — soak verdict flow', () => {
     expect(body).toContain('abc1234');
   });
 
-  it('classifies the timeout path: pending runs leave the watcher waiting until the deadline', async () => {
-    // The timeout itself is enforced by the workflow phase (deadlineAt). Here we
-    // just verify the classifier reports `pending` so the workflow loop keeps
-    // polling instead of treating partial CI as a green/red verdict.
+  it('reports `pending` so the soak loop keeps polling — there is no upper time cap', async () => {
+    // soak now polls until verdict !== 'pending' (and treats `none` as
+    // "no CI configured" only after the 90s grace window). `pending` keeps
+    // the watcher waiting indefinitely.
     const { classifyDefaultBranchCi } = await import('@/lib/pipeline/start-soak');
     const v = classifyDefaultBranchCi([
       { status: 'queued', conclusion: null },
     ]);
     expect(v.kind).toBe('pending');
+  });
+});
+
+describe('start-soak — pauseProjectForSoakFailure', () => {
+  beforeEach(() => {
+    mocks.execMock.mockReset();
+    vi.resetModules();
+  });
+
+  it('flips projects.paused = true via Drizzle update and refreshes the admission-gate cache', async () => {
+    const whereMock = vi.fn().mockResolvedValue(undefined);
+    const setMock = vi.fn().mockReturnValue({ where: whereMock });
+    const updateMock = vi.fn().mockReturnValue({ set: setMock });
+    const refreshMock = vi.fn().mockResolvedValue(undefined);
+    const clearMock = vi.fn();
+
+    vi.doMock('@/lib/db', () => ({ db: { update: updateMock } }));
+    vi.doMock('@/lib/db/schema', () => ({ projects: { name: 'name_col' } }));
+    vi.doMock('@/lib/shared/project-data', () => ({ clearProjectDataCache: clearMock }));
+    vi.doMock('@/lib/shared/enabled-projects', () => ({ refreshProjectsCacheSync: refreshMock }));
+
+    const { pauseProjectForSoakFailure } = await import('@/lib/pipeline/start-soak');
+    const ok = await pauseProjectForSoakFailure('tamtam');
+
+    expect(ok).toBe(true);
+    expect(updateMock).toHaveBeenCalledTimes(1);
+    expect(setMock).toHaveBeenCalledWith({ paused: true });
+    // Cache invalidation must happen so the in-process `isProjectPaused()`
+    // gate sees the new state on the next admission check.
+    expect(clearMock).toHaveBeenCalledTimes(1);
+    expect(refreshMock).toHaveBeenCalledTimes(1);
+
+    vi.doUnmock('@/lib/db');
+    vi.doUnmock('@/lib/db/schema');
+    vi.doUnmock('@/lib/shared/project-data');
+    vi.doUnmock('@/lib/shared/enabled-projects');
+  });
+
+  it('returns false (and does not throw) when the DB update fails', async () => {
+    const whereMock = vi.fn().mockRejectedValue(new Error('connection lost'));
+    const setMock = vi.fn().mockReturnValue({ where: whereMock });
+    const updateMock = vi.fn().mockReturnValue({ set: setMock });
+
+    vi.doMock('@/lib/db', () => ({ db: { update: updateMock } }));
+    vi.doMock('@/lib/db/schema', () => ({ projects: { name: 'name_col' } }));
+    vi.doMock('@/lib/shared/project-data', () => ({ clearProjectDataCache: vi.fn() }));
+    vi.doMock('@/lib/shared/enabled-projects', () => ({ refreshProjectsCacheSync: vi.fn() }));
+
+    const { pauseProjectForSoakFailure } = await import('@/lib/pipeline/start-soak');
+
+    // Silence the expected error log during the test.
+    const errSpy = vi.spyOn(console, 'error').mockImplementation(() => {});
+    const ok = await pauseProjectForSoakFailure('tamtam');
+    errSpy.mockRestore();
+
+    expect(ok).toBe(false);
+
+    vi.doUnmock('@/lib/db');
+    vi.doUnmock('@/lib/db/schema');
+    vi.doUnmock('@/lib/shared/project-data');
+    vi.doUnmock('@/lib/shared/enabled-projects');
+  });
+});
+
+describe('start-soak — verdict-driven loop semantics (workflow-phase regression guards)', () => {
+  it('exposes the 90s grace constant for the no-CI-configured case', async () => {
+    const { SOAK_NO_CHECKS_GRACE_MS } = await import('@/lib/workflows/phases/soak-phase');
+    expect(SOAK_NO_CHECKS_GRACE_MS).toBe(90_000);
   });
 });
