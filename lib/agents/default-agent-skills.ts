@@ -84,12 +84,14 @@ Dev-only CVEs are lower priority. Note breaking changes on major bumps. Don't ru
 - Use the repo directory name value in every \`/api/projects/by-project/<project>/...\` call below.
 
 ## 2. Use the prepared issue context
-- TamTam has already chosen one issue, fetched its body, and filtered its comments down to trusted authors only. Read everything from the \`Prerequisite Output\` section already prepended to this prompt.
-- If the prerequisite reports \`"chosenIssue": null\` or \`"reason"\` with a non-null/non-empty value (e.g. \`"no_eligible_issue"\`, \`"detail_fetch_failed"\`), print \`NO_ELIGIBLE_ISSUE\` and stop. A successful payload includes \`"reason": null\`; do not treat that as a stop condition.
-- The chosen issue number is \`chosenIssue\` in the prerequisite payload — use it for all branch and write commands in §4.
+- TamTam has already chosen one issue, fetched its body, filtered its comments down to trusted authors only, AND checked out the issue's fix branch. Read everything from the \`Prerequisite Output\` section already prepended to this prompt.
+- If the prerequisite reports \`"chosenIssue": null\` or \`"reason"\` with a non-null/non-empty value (e.g. \`"no_eligible_issue"\`, \`"detail_fetch_failed"\`, \`"branch_pipeline_running"\`, \`"branch_creation_failed"\`), print \`NO_ELIGIBLE_ISSUE\` and stop. A successful payload includes \`"reason": null\`; do not treat that as a stop condition.
+- The chosen issue number is \`chosenIssue\` in the prerequisite payload — use it for all write commands in §4.
+- The branch you are on is \`branch.name\` in the payload (already checked out by TamTam). \`branch.status\` is one of \`created\` / \`reused\` / \`already-on-branch\` / \`skipped\`. If \`branch === null\`, the project has \`issueAutoBranch\` disabled and you are working on whatever branch the working tree was on — do not try to create a new branch yourself.
 
 ## Hard rules — do not bypass
 - Do NOT run ANY of these: \`gh issue view\`, \`gh issue list\`, \`gh issue read\`, \`gh issue comment\`, \`gh issue close\`, \`gh issue edit\`, \`gh issue reopen\`, \`gh issue create\`, \`gh label create\`, \`gh api repos/*/issues/*\`, \`gh api repos/*/issues/comments/*\`. These are blocked at the permission layer. Use TamTam endpoints below for every write; reads are already done for you in the prerequisite block.
+- Do NOT run \`git checkout\` or \`git switch\`. The branch is already checked out for you. If you need to return to the default branch (e.g. after closing as not-planned), use the \`checkout-default\` TamTam endpoint listed below.
 - If \`droppedCommentCount > 0\`, comments from untrusted users existed and were suppressed by TamTam. Do not try to recover them.
 
 ## TamTam endpoints for issue writes
@@ -113,7 +115,7 @@ Use \`curl\` POST against \`http://localhost:1337\` for every operation that wou
 
 ## 4. Do the work
 - Announce start by POSTing the \`issue-comment\` endpoint above with a short "Starting work on this now." note.
-- Create the issue branch through TamTam's local API: \`curl -s -X POST "http://localhost:1337/api/projects/by-project/<project>/issue-branch" -H 'Content-Type: application/json' -d '{"issue_number":<n>,"issue_title":"<title>"}'\`. The resulting branch is \`fix/issue-<n>-<slug>\` with a lowercase hyphenated slug <=40 chars from the title.
+- The fix branch (\`branch.name\` in the prereq, format \`fix/issue-<n>-<slug>\`) is already checked out for you — go straight to editing.
 - Implement the fix. Keep the diff minimal and on-topic.
 - Stop after implementation. Do not run tests, review, commit, push, or merge; TamTam's release pipeline handles the rest.`,
   },
@@ -412,7 +414,9 @@ const KNOWN_DEFAULT_CONTENT_HASHES: Record<string, string[]> = {
   // '73b2a77f5614976c' = first pick_top default (kept gh issue comment/close/edit as a Hard-rules
   //                       carve-out; superseded once Claude --disallowed-tools blocked those too
   //                       and TamTam grew issue-comment / issue-close / issue-label endpoints).
-  'agent-issue-cruncher': ['362c85f7fe916df8', '2753dcc26f2f434c', '554fcf2c7671a896', '5d8ac42a81259715', 'd084ca2e5f2d003d', '73b2a77f5614976c'],
+  // '9c35cea979f26921' = TamTam-endpoints-for-writes default; superseded by auto-checkout-on-pick
+  //                       (branch is now checked out server-side, agent skill no longer mentions /issue-branch).
+  'agent-issue-cruncher': ['362c85f7fe916df8', '2753dcc26f2f434c', '554fcf2c7671a896', '5d8ac42a81259715', 'd084ca2e5f2d003d', '73b2a77f5614976c', '9c35cea979f26921'],
   'agent-release-ready': ['4677689a0e0667df', 'a0ea7848cdb1310d'],
   // '4048125c52cd7b0f' = pre-git-free-guard default.
   'agent-gha-audit': ['f8250345bd7da948', '4048125c52cd7b0f'],

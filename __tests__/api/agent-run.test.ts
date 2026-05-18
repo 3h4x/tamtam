@@ -1231,11 +1231,14 @@ describe('POST /api/agents/{agentId}/run', () => {
     expect(fullPrompt).toContain('pick_top=1');
     expect(fullPrompt).toContain('Trusted issue');
     // Defense-in-depth: every gh issue surface (reads + writes via CLI + REST API)
-    // must be blocked at the Claude permission layer for issue-cruncher agents.
+    // plus the git branch-switch primitives must be blocked at the Claude
+    // permission layer for issue-cruncher agents.
     expect(cmd).toContain('--disallowed-tools');
     expect(cmd).toContain('Bash(gh issue:*)');
     expect(cmd).toContain('Bash(gh api repos/*/issues:*)');
     expect(cmd).toContain('Bash(gh api repos/*/issues/*:*)');
+    expect(cmd).toContain('Bash(git checkout:*)');
+    expect(cmd).toContain('Bash(git switch:*)');
   });
 
   it('does not pass --disallowed-tools when the agent has no issue-cruncher skill', async () => {

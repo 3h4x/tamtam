@@ -354,12 +354,14 @@ At the end of your run, include a short final section exactly named "TamTam Run 
   const cliEnv = resolveCliEnv(safeProvider, settings);
   const modelFlag = requestedModel ? `--model ${requestedModel}` : '';
   // Defense-in-depth for the issue-cruncher: the skill prompt forbids the
-  // agent from running `gh issue …` because TamTam already gathers all
-  // authorized issue content server-side. Wire the same ban into Claude's
-  // tool-permission layer so even a prompt-injected agent cannot bypass it.
-  // Covers gh CLI surface + REST API equivalents (`gh api repos/*/issues*`).
+  // agent from running `gh issue …` (TamTam gathers all authorized issue
+  // content server-side) and from running `git checkout` (TamTam auto-checks
+  // out the issue branch as part of `pick_top=1`). Wire the same bans into
+  // Claude's tool-permission layer so even a prompt-injected agent cannot
+  // bypass them. Covers gh CLI + REST API + the git switch primitives that
+  // would otherwise let the agent move work to a different branch.
   const issueCruncherDenyFlag = hasIssueCruncherSkill(skillIds)
-    ? ` --disallowed-tools "Bash(gh issue:*),Bash(gh api repos/*/issues:*),Bash(gh api repos/*/issues/*:*)"`
+    ? ` --disallowed-tools "Bash(gh issue:*),Bash(gh api repos/*/issues:*),Bash(gh api repos/*/issues/*:*),Bash(git checkout:*),Bash(git switch:*)"`
     : '';
   const cmd = `${claudeBin} --print --output-format stream-json --include-partial-messages --verbose ${getPermissionModeFlag()} ${modelFlag}${issueCruncherDenyFlag}`;
   const fallbackProvider = await resolveFallbackProvider({

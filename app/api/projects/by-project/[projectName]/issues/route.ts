@@ -6,6 +6,7 @@ import { getSettings } from '@/lib/shared/config';
 import { db, schema } from '@/lib/db';
 import { homedir } from 'os';
 import { isUserTrusted } from '@/lib/shared/untrusted';
+import { ensureIssueBranch } from '@/lib/github/issue-branch';
 
 const CACHE_TTL_S = 300; // 5 minutes
 
@@ -273,10 +274,37 @@ type PickTopResponse = {
     comments: Array<{ author: string | null; createdAt: string; body: string }>;
     droppedCommentCount: number;
   } | null;
+  branch: { name: string; status: 'created' | 'reused' | 'already-on-branch' | 'skipped' } | null;
   reason: string | null;
   cached: boolean;
   cachedAt: number;
 };
+
+async function checkoutForPickTop(
+  projectName: string,
+  projPath: string,
+  chosenNumber: number,
+  title: string,
+): Promise<{ ok: true; branch: PickTopResponse['branch'] } | { ok: false; reason: string }> {
+  const branchResult = await ensureIssueBranch({
+    projectName,
+    projPath,
+    issueNumber: chosenNumber,
+    issueTitle: title,
+  });
+  if (branchResult.status === 'pipeline-running') {
+    return { ok: false, reason: `branch_pipeline_running: ${branchResult.blockingJobId}` };
+  }
+  if (branchResult.status === 'error') {
+    return { ok: false, reason: `branch_creation_failed: ${branchResult.detail}` };
+  }
+  if (branchResult.status === 'skipped') {
+    // Legitimate opt-out (issueAutoBranch=false) or zombie-merged branch.
+    // The agent stays on whatever branch the working tree was on.
+    return { ok: true, branch: branchResult.branch ? { name: branchResult.branch, status: 'skipped' } : null };
+  }
+  return { ok: true, branch: { name: branchResult.branch, status: branchResult.status } };
+}
 
 async function handlePickTop(
   projectName: string,
@@ -291,6 +319,7 @@ async function handlePickTop(
     return NextResponse.json({
       chosenIssue: null,
       issue: null,
+      branch: null,
       reason: `list_fetch_failed: ${listed.ghError}`,
       cached: false,
       cachedAt: listed.fetchedAt,
@@ -302,6 +331,7 @@ async function handlePickTop(
     return NextResponse.json({
       chosenIssue: null,
       issue: null,
+      branch: null,
       reason: 'no_eligible_issue',
       cached: false,
       cachedAt: listed.fetchedAt,
@@ -313,6 +343,7 @@ async function handlePickTop(
     return NextResponse.json({
       chosenIssue: null,
       issue: null,
+      branch: null,
       reason: 'invalid_issue_number',
       cached: false,
       cachedAt: listed.fetchedAt,
@@ -338,7 +369,19 @@ async function handlePickTop(
           return NextResponse.json({
             chosenIssue: null,
             issue: null,
+            branch: null,
             reason: 'no_eligible_issue',
+            cached: true,
+            cachedAt: cached.fetchedAt,
+          } satisfies PickTopResponse, { status: 200 });
+        }
+        const co = await checkoutForPickTop(projectName, projPath, chosenNumber, revalidatedPayload.title);
+        if (!co.ok) {
+          return NextResponse.json({
+            chosenIssue: null,
+            issue: null,
+            branch: null,
+            reason: co.reason,
             cached: true,
             cachedAt: cached.fetchedAt,
           } satisfies PickTopResponse, { status: 200 });
@@ -346,6 +389,7 @@ async function handlePickTop(
         return NextResponse.json({
           chosenIssue: chosenNumber,
           issue: revalidatedPayload,
+          branch: co.branch,
           reason: null,
           cached: true,
           cachedAt: cached.fetchedAt,
@@ -368,6 +412,7 @@ async function handlePickTop(
     return NextResponse.json({
       chosenIssue: null,
       issue: null,
+      branch: null,
       reason: `detail_fetch_failed: ${detailResult.stderr.trim() || 'gh issue view failed'}`,
       cached: false,
       cachedAt: Date.now() / 1000,
@@ -379,6 +424,7 @@ async function handlePickTop(
     return NextResponse.json({
       chosenIssue: null,
       issue: null,
+      branch: null,
       reason: 'detail_parse_failed',
       cached: false,
       cachedAt: Date.now() / 1000,
@@ -391,6 +437,7 @@ async function handlePickTop(
     return NextResponse.json({
       chosenIssue: null,
       issue: null,
+      branch: null,
       reason: 'no_eligible_issue',
       cached: false,
       cachedAt: Date.now() / 1000,
@@ -423,9 +470,22 @@ async function handlePickTop(
     }
   }
 
+  const co = await checkoutForPickTop(projectName, projPath, chosenNumber, issuePayload.title);
+  if (!co.ok) {
+    return NextResponse.json({
+      chosenIssue: null,
+      issue: null,
+      branch: null,
+      reason: co.reason,
+      cached: false,
+      cachedAt: fetchedAt,
+    } satisfies PickTopResponse, { status: 200 });
+  }
+
   return NextResponse.json({
     chosenIssue: chosenNumber,
     issue: issuePayload,
+    branch: co.branch,
     reason: null,
     cached: false,
     cachedAt: fetchedAt,

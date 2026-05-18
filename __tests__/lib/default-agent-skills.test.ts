@@ -239,9 +239,17 @@ describe('seedDefaultSkills seeded defaults snapshot', () => {
     expect(skill!.content).toContain('ISSUE_PROJECT_UNKNOWN');
     expect(skill!.content).toContain('/api/projects/by-project/<project>/checkout-default');
     expect(skill!.content).toContain('/api/projects/by-project/<project>/changes');
-    expect(skill!.content).toContain('/api/projects/by-project/<project>/issue-branch');
-    expect(skill!.content).not.toContain('git checkout');
+    // §4 used to instruct the agent to POST /issue-branch; auto-checkout-on-pick
+    // removed that step. The skill must now NOT mention /issue-branch.
+    expect(skill!.content).not.toContain('/api/projects/by-project/<project>/issue-branch');
+    // Skill must not tell the agent to run git directly. `git checkout` / `git switch`
+    // DO appear in the Hard-rules deny list (see assertion below), so we only forbid
+    // git-write verbs the skill should never mention in any context.
     expect(skill!.content).not.toContain('git commit');
+    expect(skill!.content).not.toContain('git push');
+    // Auto-checkout makes branch.name / branch.status part of the contract.
+    expect(skill!.content).toContain('branch.name');
+    expect(skill!.content).toContain('Do NOT run `git checkout` or `git switch`');
   });
 
   it('inserts agent-release-ready with correct fields', () => {
@@ -335,6 +343,10 @@ describe('seedDefaultSkills seeded defaults snapshot', () => {
     const violators: string[] = [];
     for (const skill of seededSkills.values()) {
       if (!skill.id.startsWith('agent-')) continue;
+      // issue-cruncher explicitly enumerates `git checkout` / `git switch` in
+      // its Hard-rules deny list — that's a "do NOT run" instruction, not a
+      // "run this" instruction. Exclude it from the heuristic.
+      if (skill.id === 'agent-issue-cruncher') continue;
       const c = skill.content || '';
       if (/\bgit (log|diff|checkout|commit|push|pull|status|branch|stash|rebase|merge|reset|tag)\b/.test(c)) {
         violators.push(`${skill.id}: ${c.match(/\bgit \w+\b/)?.[0]}`);
@@ -539,6 +551,10 @@ describe('seedDefaultSkills isolated cases', () => {
     for (const skill of skills) {
       // Skip user-added rows from earlier tests — only enforce on default skills.
       if (!skill.id.startsWith('agent-')) continue;
+      // issue-cruncher explicitly enumerates `git checkout` / `git switch` in
+      // its Hard-rules deny list — that's a "do NOT run" instruction, not a
+      // "run this" instruction. Exclude it from the heuristic.
+      if (skill.id === 'agent-issue-cruncher') continue;
       const c = skill.content || '';
       if (/\bgit (log|diff|checkout|commit|push|pull|status|branch|stash|rebase|merge|reset|tag)\b/.test(c)) {
         violators.push(`${skill.id}: ${c.match(/\bgit \w+\b/)?.[0]}`);
