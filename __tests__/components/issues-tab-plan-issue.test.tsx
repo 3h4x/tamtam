@@ -139,8 +139,11 @@ describe('IssuesTab issue planning panel', () => {
       )
     })
     const prompt = runAgent.mock.calls[0][1] as string
-    expect(prompt).toContain('gh issue list --limit 30 --state open')
+    expect(prompt).toContain('docs/*.md')
+    expect(prompt).toContain('gh issue list --limit 50 --state open')
+    expect(prompt).toContain('already implemented')
     expect(prompt).toContain('gh issue create')
+    expect(prompt).toContain('human-needed')
     expect(prompt).toContain('Do not run `git`')
     expect(prompt).toContain(ISSUE_FORMAT_INSTRUCTION)
     expect(prompt).toContain('## Problem')

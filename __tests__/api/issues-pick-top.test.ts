@@ -175,6 +175,7 @@ describe('GET /api/projects/by-project/[projectName]/issues?pick_top=1', () => {
     mockListFetch([
       { number: 1, title: 'Blocked', author: { login: 'trusted-user' }, labels: [{ name: 'blocked' }], assignees: [], updatedAt: '2026-05-18T00:00:00Z' },
       { number: 2, title: 'NeedsInfo', author: { login: 'trusted-user' }, labels: [{ name: 'needs-info' }], assignees: [], updatedAt: '2026-05-18T00:00:00Z' },
+      { number: 3, title: 'External account', author: { login: 'trusted-user' }, labels: [{ name: 'human-needed' }], assignees: [], updatedAt: '2026-05-18T00:00:00Z' },
     ]);
 
     const res = await GET(makeReq(), { params: Promise.resolve({ projectName: 'myproj' }) });

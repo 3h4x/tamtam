@@ -111,7 +111,7 @@ export function IssuesTab({ projectName, onCountChange, jobsPaused = false }: Is
     }
     if (!ctoAgent || idea.length < 10) return
 
-    const wrappedPrompt = `Plan a single GitHub issue for the user's idea below. Read CLAUDE.md and skim the codebase enough to make the issue project-correct. Run \`gh issue list --limit 30 --state open\` first to make sure this isn't a duplicate. Then file ONE issue with \`gh issue create\` - title states the outcome, labels include type + priority. Do not run \`git\`. Do not modify any files.
+    const wrappedPrompt = `Plan a single GitHub issue for the user's idea below. Read CLAUDE.md, README.md if present, and relevant docs/*.md files so the issue matches current project direction. Run \`gh issue list --limit 50 --state open\` and search the repo for the idea's key nouns/routes/components before filing; if it is already implemented, already tracked, or in progress, report that and do not create an issue. Then file ONE issue with \`gh issue create\` - title states the outcome, labels include type + priority. If this needs a human-owned external account, vendor setup, billing, secret, approval, or credentials before code can proceed, add/create the \`human-needed\` label and make that prerequisite explicit in the Proposed approach. Do not run \`git\`. Do not modify any files.
 
 ${ISSUE_FORMAT_INSTRUCTION}
 
