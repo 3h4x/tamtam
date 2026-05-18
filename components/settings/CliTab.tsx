@@ -7,6 +7,7 @@ import {
   parseEnabledProviders,
   type CliProvider,
 } from '@/lib/usage/cli-providers'
+import { loadQuotaSnapshot } from '@/lib/client/quota'
 
 const INPUT_CLASS =
   'w-full h-10 px-3 py-2 bg-bg-primary text-text-primary border border-border rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-accent/30 focus:border-accent transition-colors font-mono'
@@ -104,18 +105,14 @@ export function CliTab({
   useEffect(() => {
     let cancelled = false
     async function load() {
-      const enabledQuotaProviders = QUOTA_PROVIDERS.filter((p) => enabledSet.has(p))
+      const enabledQuotaProviders = QUOTA_PROVIDERS.filter((p): p is 'claude' | 'codex' => enabledSet.has(p))
       const out: Partial<Record<CliProvider, QuotaSummary>> = {}
       await Promise.all(enabledQuotaProviders.map(async (p) => {
-        try {
-          const r = await fetch(`/api/usage/quota?provider=${p}`)
-          if (!r.ok) return
-          const data = await r.json()
-          if (cancelled) return
-          const fiveHour = Number(data?.fiveHour?.utilization ?? 0)
-          const sevenDay = data?.sevenDay?.utilization != null ? Number(data.sevenDay.utilization) : null
-          out[p] = { fiveHour, sevenDay, blockedNow: blockEnabled && fiveHour >= blockAt }
-        } catch {}
+        const result = await loadQuotaSnapshot(p)
+        if (!result.available || cancelled) return
+        const fiveHour = Number(result.snapshot.fiveHour.utilization ?? 0)
+        const sevenDay = result.snapshot.sevenDay?.utilization != null ? Number(result.snapshot.sevenDay.utilization) : null
+        out[p] = { fiveHour, sevenDay, blockedNow: blockEnabled && fiveHour >= blockAt }
       }))
       if (!cancelled) setQuota(out)
     }

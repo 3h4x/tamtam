@@ -1,15 +1,21 @@
 import { describe, it, expect, beforeAll, beforeEach, afterAll, vi } from 'vitest';
+import { NextRequest } from 'next/server';
 import { sql } from 'drizzle-orm';
 import * as schema from '@/lib/db/schema';
 import { createTestPgDbEmpty, type TestDbHandle } from '@/__tests__/helpers/test-db';
 
 const mocks = vi.hoisted(() => ({
   fetchProjectData: vi.fn(),
+  getReadinessReport: vi.fn(),
   dbRef: { current: null as unknown },
 }));
 
 vi.mock('@/lib/shared/project-data', () => ({
   fetchProjectData: mocks.fetchProjectData,
+}));
+
+vi.mock('@/lib/shared/readiness', () => ({
+  getReadinessReport: mocks.getReadinessReport,
 }));
 
 vi.mock('@/lib/db', () => ({
@@ -23,11 +29,28 @@ const { GET: HealthGET } = await import('@/app/api/health/route');
 const { GET: ProjectsGET } = await import('@/app/api/projects/route');
 
 describe('GET /api/health', () => {
+  beforeEach(() => {
+    mocks.getReadinessReport.mockReset();
+    mocks.getReadinessReport.mockResolvedValue({ ok: true, checks: [] });
+  });
+
   it('returns status ok', async () => {
     const res = await HealthGET();
     expect(res.status).toBe(200);
     const data = await res.json();
     expect(data.status).toBe('ok');
+  });
+
+  it('returns deep readiness checks when requested', async () => {
+    mocks.getReadinessReport.mockResolvedValue({
+      ok: false,
+      checks: [{ name: 'provider:claude', ok: false, severity: 'error', message: 'missing' }],
+    });
+    const res = await HealthGET(new NextRequest('http://localhost/api/health?deep=1'));
+    expect(res.status).toBe(503);
+    const data = await res.json();
+    expect(data.status).toBe('degraded');
+    expect(data.checks[0]).toMatchObject({ name: 'provider:claude', ok: false, severity: 'error' });
   });
 });
 

@@ -12,6 +12,7 @@ import { getImproveConfig, getProjectTestConfig } from '@/lib/scheduling/schedul
 import { acquireLock, releaseLock, reassignLock } from './pipeline-lock';
 import { findIssueContext, isIssueContextCompatibleWithCurrentBranch } from './start-commit';
 import { checkCliStartGate } from '@/lib/usage/resolve-provider';
+import { getReleaseReadinessFailure } from '@/lib/shared/readiness';
 import { hasFreshLgtm, hasLocalCommitsAhead } from './release-state';
 import { findBlockingRunningJob } from '@/lib/jobs/project-active-job';
 import type { IssueContext } from './release-context';
@@ -177,6 +178,14 @@ export async function startRelease(projectName: string, options: StartReleaseOpt
     }
     if (options.queueIfBlocked) return queueRelease(projectName);
     return gate;
+  }
+  const readinessFailure = await getReleaseReadinessFailure(projectName, gate.provider);
+  if (readinessFailure) {
+    return {
+      ok: false,
+      status: 503,
+      detail: `Release readiness check failed (${readinessFailure.name}): ${readinessFailure.message}`,
+    };
   }
 
   const blockingJob = await findBlockingRunningJob(

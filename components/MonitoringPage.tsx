@@ -9,6 +9,19 @@ import { SchedulerHealthPanel } from '@/components/monitoring/SchedulerHealthPan
 import { OverviewTab } from '@/components/monitoring/OverviewTab'
 import { InfraTab } from '@/components/monitoring/InfraTab'
 
+interface ReadinessCheck {
+  name: string
+  ok: boolean
+  severity: 'info' | 'warn' | 'error'
+  message: string
+}
+
+interface ReadinessData {
+  status: string
+  ok: boolean
+  checks: ReadinessCheck[]
+}
+
 function StatusDot({ ok }: { ok: boolean }) {
   return (
     <span className={`inline-block w-2 h-2 rounded-full shrink-0 ${ok ? 'bg-status-success' : 'bg-status-error'}`} />
@@ -26,9 +39,51 @@ function TabBadge({ count, variant }: { count: number; variant: 'error' | 'warn'
   )
 }
 
+function ReadinessPanel({ readiness }: { readiness: ReadinessData | null }) {
+  if (!readiness) return null
+  const tone = readiness.ok
+    ? 'border-status-success/40 bg-status-success/5'
+    : 'border-status-warning/40 bg-status-warning/5'
+  const badge = (item: ReadinessCheck) => {
+    if (item.ok) return 'bg-status-success/15 text-status-success'
+    return item.severity === 'error'
+      ? 'bg-status-error/15 text-status-error'
+      : 'bg-status-warning/15 text-status-warning'
+  }
+  return (
+    <div className={`rounded-lg border ${tone} p-4`}>
+      <div className="flex items-center justify-between gap-3">
+        <div>
+          <div className="text-sm font-medium text-text-primary">Readiness checks</div>
+          <div className="text-xs text-text-tertiary mt-0.5">
+            {readiness.ok ? 'Required local dependencies are available' : 'One or more checks need attention'}
+          </div>
+        </div>
+        <span className={`text-xs px-2 py-1 rounded-full ${readiness.ok ? 'bg-status-success/15 text-status-success' : 'bg-status-warning/15 text-status-warning'}`}>
+          {readiness.status}
+        </span>
+      </div>
+      <div className="grid grid-cols-1 md:grid-cols-2 gap-2 mt-3">
+        {readiness.checks.map((item) => (
+          <div key={item.name} className="rounded-md border border-border bg-bg-primary px-3 py-2">
+            <div className="flex items-center justify-between gap-2">
+              <span className="text-sm font-medium text-text-primary">{item.name}</span>
+              <span className={`text-[10px] px-1.5 py-0.5 rounded-full ${badge(item)}`}>
+                {item.ok ? 'pass' : item.severity}
+              </span>
+            </div>
+            <div className="text-xs text-text-tertiary mt-1">{item.message}</div>
+          </div>
+        ))}
+      </div>
+    </div>
+  )
+}
+
 export function MonitoringPage() {
   const [data, setData] = useState<MonitoringData | null>(null)
   const [pm2Logs, setPm2Logs] = useState<Pm2LogData | null>(null)
+  const [readiness, setReadiness] = useState<ReadinessData | null>(null)
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
   const [window_, setWindow] = useState<TimeWindow>('15m')
@@ -58,12 +113,27 @@ export function MonitoringPage() {
     }
   }, [])
 
+  const fetchReadiness = useCallback(async () => {
+    try {
+      const res = await fetch('/api/health?deep=1')
+      const body = await res.json().catch(() => null) as ReadinessData | null
+      if (body?.checks) setReadiness(body)
+    } catch {
+      setReadiness(null)
+    }
+  }, [])
+
   useEffect(() => {
     setLoading(true)
     fetch_(window_)
+    fetchReadiness()
     const id = setInterval(() => fetch_(window_), 30_000)
-    return () => clearInterval(id)
-  }, [fetch_, window_])
+    const readinessId = setInterval(fetchReadiness, 60_000)
+    return () => {
+      clearInterval(id)
+      clearInterval(readinessId)
+    }
+  }, [fetch_, fetchReadiness, window_])
 
   const handleWindowChange = (w: TimeWindow) => {
     setWindow(w)
@@ -199,7 +269,10 @@ export function MonitoringPage() {
       {/* Tab panels */}
       <div>
         {activeTab === 'overview' && (
-          <OverviewTab data={data} pm2Logs={pm2Logs} window_={window_} />
+          <div className="space-y-4">
+            <ReadinessPanel readiness={readiness} />
+            <OverviewTab data={data} pm2Logs={pm2Logs} window_={window_} />
+          </div>
         )}
         {activeTab === 'agents' && (
           <SchedulerHealthPanel />
