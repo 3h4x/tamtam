@@ -361,7 +361,7 @@ describe('POST /api/agents/{agentId}/run', () => {
       if (cmd === 'bash' && args[1] === 'echo TAMTAM_PREREQ_MARKER') {
         return { stdout: 'TAMTAM_PREREQ_MARKER\n', stderr: '', exitCode: 0 };
       }
-      if (cmd === 'bash' && args[1] === 'curl -fsS "http://localhost:1337/api/projects/by-project/proj1/issues?trusted_only=1"') {
+      if (cmd === 'bash' && args[1] === 'curl -fsS "http://localhost:1337/api/projects/by-project/proj1/issues?pick_top=1"') {
         return { stdout: '{"issues":[{"number":1,"title":"Trusted issue"}]}\n', stderr: '', exitCode: 0 };
       }
       if (cmd === 'bash' && args[1] === 'exit 7') {
@@ -1218,12 +1218,12 @@ describe('POST /api/agents/{agentId}/run', () => {
 
     expect(mocks.shellRun).toHaveBeenCalledWith(
       'bash',
-      ['-c', 'curl -fsS "http://localhost:1337/api/projects/by-project/proj1/issues?trusted_only=1"'],
+      ['-c', 'curl -fsS "http://localhost:1337/api/projects/by-project/proj1/issues?pick_top=1"'],
       expect.objectContaining({ cwd: '/path/to/proj' }),
     );
     const [, , fullPrompt] = mocks.startJob.mock.calls[0];
     expect(fullPrompt).toContain('## Prerequisite Output');
-    expect(fullPrompt).toContain('trusted_only=1');
+    expect(fullPrompt).toContain('pick_top=1');
     expect(fullPrompt).toContain('Trusted issue');
   });
 
@@ -1242,12 +1242,12 @@ describe('POST /api/agents/{agentId}/run', () => {
 
     expect(mocks.shellRun).not.toHaveBeenCalledWith(
       'bash',
-      ['-c', 'curl -fsS "http://localhost:1337/api/projects/by-project/proj1/issues?trusted_only=1"'],
+      ['-c', 'curl -fsS "http://localhost:1337/api/projects/by-project/proj1/issues?pick_top=1"'],
       expect.anything(),
     );
     const [, , fullPrompt] = mocks.startJob.mock.calls[0];
     expect(fullPrompt).not.toContain('## Prerequisite Output');
-    expect(fullPrompt).not.toContain('trusted_only=1');
+    expect(fullPrompt).not.toContain('pick_top=1');
   });
 
   it('creates the log directory before writing the prerequisite artifact', async () => {

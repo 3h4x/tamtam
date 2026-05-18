@@ -671,12 +671,12 @@ describe('agents API', () => {
 
       expect(response.status).toBe(201);
       expect(data.agent.prerequisiteCommand).toBe(
-        'curl -fsS "http://localhost:1337/api/projects/by-project/proj1/issues?trusted_only=1"'
+        'curl -fsS "http://localhost:1337/api/projects/by-project/proj1/issues?pick_top=1"'
       );
 
       const row = (await testDb.db.select().from(schema.agents)).find((agent) => agent.id === data.agent.id);
       expect(row?.prerequisiteCommand).toBe(
-        'curl -fsS "http://localhost:1337/api/projects/by-project/proj1/issues?trusted_only=1"'
+        'curl -fsS "http://localhost:1337/api/projects/by-project/proj1/issues?pick_top=1"'
       );
     });
 
@@ -783,7 +783,7 @@ describe('agents API', () => {
 
       expect(response.status).toBe(200);
       expect(data.agent.prerequisiteCommand).toBe(
-        'curl -fsS "http://localhost:1337/api/projects/by-project/proj1/issues?trusted_only=1"'
+        'curl -fsS "http://localhost:1337/api/projects/by-project/proj1/issues?pick_top=1"'
       );
     });
 

@@ -66,7 +66,14 @@ The following fields are automatically protected by default-branch pinning:
 
 These layers are independent and complementary. Pinning stops the _registration_ of malicious agents; sandboxing limits what registered agents can do; untrusted wrapping stops prompt injection from issue/PR bodies.
 
-For issue-driven automation, TamTam now also gates issue selection before the LLM sees issue bodies: `GET /api/projects/by-project/[project]/issues?trusted_only=1` filters server-side to authors trusted by the union of global `trusted_github_users` and per-project `.tamtam/config.yml` `security.safe_users`. The default issue-cruncher agent consumes that trusted-only prerequisite output and must not call `gh issue list` directly.
+For issue-driven automation, TamTam gates the full issue context server-side before the LLM sees anything. The default issue-cruncher prerequisite calls `GET /api/projects/by-project/[project]/issues?pick_top=1`, which:
+
+1. Filters open issues to authors trusted by the union of global `trusted_github_users` and per-project `.tamtam/config.yml` `security.safe_users`.
+2. Drops issues with blocker labels (`blocked`, `needs-info`, `needs-design`, `discussion`, `question`, `wontfix`, `duplicate`) or already-assigned issues.
+3. Ranks by priority labels (`critical`/`urgent`/`p0` > `high`/`p1` > `bug` > `enhancement`/`feature`/`p2` > everything else; `good first issue` gets a small bonus) and breaks ties by `updatedAt` desc.
+4. Fetches the top pick's body and comments via `gh issue view`, then **drops every comment whose author is not in the trust allowlist** — untrusted comments never enter the response, the cache, or the agent prompt. Dropped comments are counted (`droppedCommentCount`) as an audit signal but their bodies are not surfaced.
+
+The issue-cruncher skill prompt forbids the agent from calling `gh issue view`, `gh issue list`, `gh issue read`, or `gh api repos/*/issues/*` directly — those are the read paths that bring raw external text into context. Write paths (`gh issue comment/close/edit/label`) are still allowed. This is "drop > wrap": when filtering at the source is feasible, untrusted content never reaches the LLM, which is strictly stronger than wrapping it in `<untrusted>` and relying on the model to honor the system preamble (the wrap pattern stays in use for PR-review flows where the diff itself is the work). Drop-at-source is implemented in `app/api/projects/by-project/[projectName]/issues/route.ts` (`handlePickTop` + `filterTrustedComments`).
 
 ## Log Redaction
 

@@ -91,7 +91,14 @@ export function shouldKeepPendingRelease(result: { ok: boolean; status?: number;
   return detail.includes('Jobs are paused globally')
     || detail.includes('project paused')
     || detail.includes('Pipeline already running')
-    || detail.includes('Release pipeline already running');
+    || detail.includes('Release pipeline already running')
+    // `findBlockingRunningJob` produces "Job '<kind>' is already running for
+    // <project> (job <id>)" for non-release blockers (fix-ci, agent runs,
+    // standalone pushes). These are *transient* — the blocking job will
+    // finish on its own — so the pending release must survive until the
+    // next drain cycle. Without this, a pending release set during e.g. a
+    // fix-ci run silently disappears the moment the drain checks.
+    || detail.includes('is already running for');
 }
 
 // Clear the flag and try to start the queued release. Async fire-and-forget

@@ -373,7 +373,7 @@ describe('seedDefaultSkills isolated cases', () => {
 
     await waitForFast(async () => {
       const agent = await findAgent('agent-1');
-      expect(agent?.prerequisiteCommand).toBe('curl -fsS "http://localhost:1337/api/projects/by-project/proj1/issues?trusted_only=1"');
+      expect(agent?.prerequisiteCommand).toBe('curl -fsS "http://localhost:1337/api/projects/by-project/proj1/issues?pick_top=1"');
     });
   });
 
@@ -422,7 +422,7 @@ describe('seedDefaultSkills isolated cases', () => {
     // (incorrect) update against agent-2 would also have landed.
     await waitForFast(async () => {
       const sentinel = await findAgent('agent-2-sentinel');
-      expect(sentinel?.prerequisiteCommand).toBe('curl -fsS "http://localhost:1337/api/projects/by-project/proj1/issues?trusted_only=1"');
+      expect(sentinel?.prerequisiteCommand).toBe('curl -fsS "http://localhost:1337/api/projects/by-project/proj1/issues?pick_top=1"');
     });
 
     const agent = await findAgent('agent-2');
@@ -866,7 +866,11 @@ Pick 2–3 highest-leverage gaps and file them with \`gh issue create\` — titl
       const skill = await findSkill('agent-issue-cruncher');
       expect(skill!.content).not.toBe(previousDefault);
       expect(skill!.content).toContain('Prerequisite Output');
-      expect(skill!.content).toContain("Do not run `gh issue list` directly");
+      expect(skill!.content).toContain('`"reason"` with a non-null/non-empty value');
+      expect(skill!.content).toContain('A successful payload includes `"reason": null`');
+      expect(skill!.content).not.toContain('or any `"reason"` field');
+      expect(skill!.content).toContain('Do NOT run any of:');
+      expect(skill!.content).toContain('`gh issue list`');
     });
   });
 
