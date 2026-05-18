@@ -103,6 +103,16 @@ export function shouldKeepPendingRelease(result: { ok: boolean; status?: number;
 // re-queues the release so the next recovery path can retry it.
 export async function drainPendingRelease(project: string): Promise<void> {
   if (!(await getPendingRelease(project))) return;
+  // Warm the projects cache before dispatching. A drain that fires
+  // immediately after a server restart hits a cold _projectsCache, which
+  // returns [] synchronously while a background refresh runs. startRelease
+  // then resolves a null path and bails with "project not found" — and
+  // because we already deleted the pending flag, the queued release is
+  // lost permanently. Refreshing here makes the lookup deterministic.
+  try {
+    const { refreshProjectsCacheSync } = await import('@/lib/shared/enabled-projects');
+    await refreshProjectsCacheSync();
+  } catch { /* fall through — best-effort */ }
   try {
     await deletePendingRelease(project);
     const { dispatchReleaseWorkflow } = await import('@/lib/workflows/dispatch-release');
@@ -112,6 +122,12 @@ export async function drainPendingRelease(project: string): Promise<void> {
     } else if (shouldKeepPendingRelease(r)) {
       setPendingRelease(project);
       console.log(`[pending-release] drain for ${project} deferred: ${r.detail}`);
+    } else if (r.detail?.includes('project not found')) {
+      // Cache still cold or project genuinely missing — re-queue so the next
+      // sweep (project cache warmer, reconciler) gets another shot instead
+      // of silently dropping the release.
+      setPendingRelease(project);
+      console.warn(`[pending-release] drain for ${project} re-queued: ${r.detail}`);
     } else {
       // 'Nothing to release' is the common no-op case — earlier in-flight
       // release already swept up the agent's changes. That's fine.

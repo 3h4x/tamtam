@@ -80,8 +80,33 @@ export async function GET(request: NextRequest) {
     }
   }
 
+  // Per-agent cron telemetry: actual next-fire run_at from the graphile
+  // queue + the most recent skip/dispatch reason. The UI uses these to
+  // render "Skipped 14m ago (jobs paused) — next fire in 1m" instead of
+  // a stale "due now" derived from lastRunAt + interval.
+  const { loadAgentCronStates, getAllAgentLastAttempts } = await import('@/lib/scheduling/agent-cron-state');
+  const [cronStates, lastAttempts] = await Promise.all([
+    loadAgentCronStates(),
+    Promise.resolve(getAllAgentLastAttempts()),
+  ]);
+  const annotate = <T extends { id: string }>(a: T) => {
+    const cs = cronStates.get(a.id);
+    const la = lastAttempts.get(a.id);
+    return {
+      ...a,
+      cron: cs ? {
+        nextFireMs: cs.nextFireMs,
+        attempts: cs.attempts,
+        isAvailable: cs.isAvailable,
+        lockedAt: cs.lockedAt,
+        lastError: cs.lastError,
+      } : null,
+      lastAttempt: la ? { at: la.at, reason: la.reason, status: la.status } : null,
+    };
+  };
+
   if (summaryOnly) {
-    const summaryAgents = normalized.map(a => ({
+    const summaryAgents = normalized.map(a => annotate({
       id: a.id,
       name: a.name,
       project: a.project,
@@ -95,7 +120,7 @@ export async function GET(request: NextRequest) {
     return NextResponse.json({ agents: summaryAgents });
   }
 
-  return NextResponse.json({ agents: normalized });
+  return NextResponse.json({ agents: normalized.map(annotate) });
 }
 
 export async function POST(request: NextRequest) {
