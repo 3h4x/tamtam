@@ -869,8 +869,12 @@ Pick 2–3 highest-leverage gaps and file them with \`gh issue create\` — titl
       expect(skill!.content).toContain('`"reason"` with a non-null/non-empty value');
       expect(skill!.content).toContain('A successful payload includes `"reason": null`');
       expect(skill!.content).not.toContain('or any `"reason"` field');
-      expect(skill!.content).toContain('Do NOT run any of:');
+      expect(skill!.content).toContain('Do NOT run ANY of these');
       expect(skill!.content).toContain('`gh issue list`');
+      expect(skill!.content).toContain('`gh issue comment`');
+      expect(skill!.content).toContain('issue-comment');
+      expect(skill!.content).toContain('issue-close');
+      expect(skill!.content).toContain('issue-label');
     });
   });
 

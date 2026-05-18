@@ -11,6 +11,7 @@ import { exec } from '@/lib/shared/shell';
 import { normalizeModelInput } from '@/lib/agents/model-aliases';
 import { resolveCliBin, resolveCliEnv } from '@/lib/shared/cli-bin';
 import { isCliProvider, type CliProvider } from '@/lib/usage/cli-providers';
+import { hasIssueCruncherSkill } from '@/lib/agents/issue-cruncher';
 import { updateJob } from '@/lib/jobs/job-storage';
 import { startInProcessAgentJob } from '@/lib/jobs/inline-agent';
 import { errMsg } from '@/lib/shared/types';
@@ -352,7 +353,15 @@ At the end of your run, include a short final section exactly named "TamTam Run 
   const claudeBin = resolveCliBin(safeProvider, settings);
   const cliEnv = resolveCliEnv(safeProvider, settings);
   const modelFlag = requestedModel ? `--model ${requestedModel}` : '';
-  const cmd = `${claudeBin} --print --output-format stream-json --include-partial-messages --verbose ${getPermissionModeFlag()} ${modelFlag}`;
+  // Defense-in-depth for the issue-cruncher: the skill prompt forbids the
+  // agent from running `gh issue …` because TamTam already gathers all
+  // authorized issue content server-side. Wire the same ban into Claude's
+  // tool-permission layer so even a prompt-injected agent cannot bypass it.
+  // Covers gh CLI surface + REST API equivalents (`gh api repos/*/issues*`).
+  const issueCruncherDenyFlag = hasIssueCruncherSkill(skillIds)
+    ? ` --disallowed-tools "Bash(gh issue:*),Bash(gh api repos/*/issues:*),Bash(gh api repos/*/issues/*:*)"`
+    : '';
+  const cmd = `${claudeBin} --print --output-format stream-json --include-partial-messages --verbose ${getPermissionModeFlag()} ${modelFlag}${issueCruncherDenyFlag}`;
   const fallbackProvider = await resolveFallbackProvider({
     enabled: fallbackEnabled,
     currentProvider: safeProvider,
@@ -363,7 +372,7 @@ At the end of your run, include a short final section exactly named "TamTam Run 
   const fallback = fallbackProvider
     ? {
         provider: fallbackProvider,
-        cmd: `${resolveCliBin(fallbackProvider, settings)} --print --output-format stream-json --include-partial-messages --verbose ${getPermissionModeFlag()} ${modelFlag}`,
+        cmd: `${resolveCliBin(fallbackProvider, settings)} --print --output-format stream-json --include-partial-messages --verbose ${getPermissionModeFlag()} ${modelFlag}${issueCruncherDenyFlag}`,
         cliEnv: resolveCliEnv(fallbackProvider, settings),
       }
     : null;

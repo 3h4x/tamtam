@@ -89,9 +89,14 @@ Dev-only CVEs are lower priority. Note breaking changes on major bumps. Don't ru
 - The chosen issue number is \`chosenIssue\` in the prerequisite payload — use it for all branch and write commands in §4.
 
 ## Hard rules — do not bypass
-- Do NOT run any of: \`gh issue view\`, \`gh issue list\`, \`gh issue read\`, \`gh api repos/*/issues/*\`, \`gh api repos/*/issues/comments/*\`, or any other tool that fetches issue or comment bodies from GitHub. The data above is the only issue/comment data you may use.
+- Do NOT run ANY of these: \`gh issue view\`, \`gh issue list\`, \`gh issue read\`, \`gh issue comment\`, \`gh issue close\`, \`gh issue edit\`, \`gh issue reopen\`, \`gh issue create\`, \`gh label create\`, \`gh api repos/*/issues/*\`, \`gh api repos/*/issues/comments/*\`. These are blocked at the permission layer. Use TamTam endpoints below for every write; reads are already done for you in the prerequisite block.
 - If \`droppedCommentCount > 0\`, comments from untrusted users existed and were suppressed by TamTam. Do not try to recover them.
-- You MAY still use \`gh\` for WRITING: \`gh issue comment <n>\`, \`gh issue close <n>\`, \`gh issue edit <n> --add-label …\`, \`gh label create …\`. The ban is only on READS of issue/comment bodies.
+
+## TamTam endpoints for issue writes
+Use \`curl\` POST against \`http://localhost:1337\` for every operation that would otherwise call \`gh issue …\`:
+- **Comment**: \`curl -s -X POST "http://localhost:1337/api/projects/by-project/<project>/issue-comment" -H 'Content-Type: application/json' -d '{"number":<n>,"body":"<text>"}'\`
+- **Close**: \`curl -s -X POST "http://localhost:1337/api/projects/by-project/<project>/issue-close" -H 'Content-Type: application/json' -d '{"number":<n>,"reason":"not planned","comment":"<text>"}'\` (reason is one of \`completed\` or \`not planned\`; \`comment\` is optional)
+- **Add/remove labels (creates labels as needed)**: \`curl -s -X POST "http://localhost:1337/api/projects/by-project/<project>/issue-label" -H 'Content-Type: application/json' -d '{"number":<n>,"addLabels":["needs-info"]}'\`
 
 ## 3. Validate before branching
 - Skim every file path, function, and symbol the issue references. If anything named in the issue does not exist in the repo, or the reproduction cannot be followed, the issue is not ready.
@@ -102,12 +107,12 @@ Dev-only CVEs are lower priority. Note breaking changes on major bumps. Don't ru
   - The issue references a branch, PR, or commit that no longer exists or has already landed.
   - The issue is older than 30 days with no author activity and the described symptom is unverifiable today.
   - The acceptance criteria are too vague to ever finish ("make it better", "improve UX") with no concrete deliverable.
-  Command: \`gh issue close <n> --reason "not planned" --comment "<one-paragraph explanation: what you verified, why this is no longer actionable, and an explicit invitation to reopen with a fresh repro on current \`HEAD\` if the problem still exists>"\`. Then switch back to the default branch via \`curl -s -X POST "http://localhost:1337/api/projects/by-project/<project>/checkout-default" -H 'Content-Type: application/json' -d '{}'\`, fast-forward it via \`curl -s -X POST "http://localhost:1337/api/projects/by-project/<project>/changes" -H 'Content-Type: application/json' -d '{"strategy":"ff-only"}'\`, print \`ISSUE_CLOSED <n>\`, and stop.
-- **Only use \`needs-info\` (keep open)** when the issue is plausibly real and the author has commented within the last 7 days, but a specific missing detail (a stack trace line, a reproduction step, a chosen option from two viable approaches) would unblock you. Comment with the exact question, add the label via \`gh issue edit <n> --add-label needs-info\` (create it first with \`gh label create needs-info --color FBCA04\` if needed), return to the default branch as above, print \`ISSUE_NEEDS_INFO <n>\`, and stop. Do not use this path as a polite stall — if you'd just be hoping for a response, close instead.
+  Steps: POST the \`issue-close\` endpoint above with \`reason: "not planned"\` and a one-paragraph \`comment\` (what you verified, why this is no longer actionable, an explicit invitation to reopen with a fresh repro on current \`HEAD\`). Then switch back to the default branch via \`curl -s -X POST "http://localhost:1337/api/projects/by-project/<project>/checkout-default" -H 'Content-Type: application/json' -d '{}'\`, fast-forward it via \`curl -s -X POST "http://localhost:1337/api/projects/by-project/<project>/changes" -H 'Content-Type: application/json' -d '{"strategy":"ff-only"}'\`, print \`ISSUE_CLOSED <n>\`, and stop.
+- **Only use \`needs-info\` (keep open)** when the issue is plausibly real and the author has commented within the last 7 days, but a specific missing detail (a stack trace line, a reproduction step, a chosen option from two viable approaches) would unblock you. POST the \`issue-comment\` endpoint with the exact question, then POST the \`issue-label\` endpoint with \`{"addLabels":["needs-info"]}\` (TamTam creates the label if missing). Return to the default branch as above, print \`ISSUE_NEEDS_INFO <n>\`, and stop. Do not use this path as a polite stall — if you'd just be hoping for a response, close instead.
 - Never create a fix branch for an issue that fails validation.
 
 ## 4. Do the work
-- Comment on the issue announcing start.
+- Announce start by POSTing the \`issue-comment\` endpoint above with a short "Starting work on this now." note.
 - Create the issue branch through TamTam's local API: \`curl -s -X POST "http://localhost:1337/api/projects/by-project/<project>/issue-branch" -H 'Content-Type: application/json' -d '{"issue_number":<n>,"issue_title":"<title>"}'\`. The resulting branch is \`fix/issue-<n>-<slug>\` with a lowercase hyphenated slug <=40 chars from the title.
 - Implement the fix. Keep the diff minimal and on-topic.
 - Stop after implementation. Do not run tests, review, commit, push, or merge; TamTam's release pipeline handles the rest.`,
@@ -404,7 +409,10 @@ const KNOWN_DEFAULT_CONTENT_HASHES: Record<string, string[]> = {
   // added needs-info; current revision close-as-not-planned by default.
   // 'd084ca2e5f2d003d' = short-lived pick_top default whose stop condition
   // matched successful `"reason": null` payloads.
-  'agent-issue-cruncher': ['362c85f7fe916df8', '2753dcc26f2f434c', '554fcf2c7671a896', '5d8ac42a81259715', 'd084ca2e5f2d003d'],
+  // '73b2a77f5614976c' = first pick_top default (kept gh issue comment/close/edit as a Hard-rules
+  //                       carve-out; superseded once Claude --disallowed-tools blocked those too
+  //                       and TamTam grew issue-comment / issue-close / issue-label endpoints).
+  'agent-issue-cruncher': ['362c85f7fe916df8', '2753dcc26f2f434c', '554fcf2c7671a896', '5d8ac42a81259715', 'd084ca2e5f2d003d', '73b2a77f5614976c'],
   'agent-release-ready': ['4677689a0e0667df', 'a0ea7848cdb1310d'],
   // '4048125c52cd7b0f' = pre-git-free-guard default.
   'agent-gha-audit': ['f8250345bd7da948', '4048125c52cd7b0f'],
