@@ -1,6 +1,7 @@
 ---
 model: normal
-schedule: 2h
+schedule: 30m
+enabled: false
 prerequisiteCommand: ""
 ---
 

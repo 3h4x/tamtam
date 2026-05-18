@@ -197,12 +197,15 @@ describe('probeJobStatus with pm2', () => {
   });
 
   it('marks done for pid>0 jobs whose process is gone', async () => {
+    const killSpy = vi.spyOn(process, 'kill').mockImplementation(() => {
+      throw makeMissingProcessError();
+    });
     const job: JobData = {
       id: nextJobId('job-dead'),
       project: 'proj',
       kind: 'run',
       prompt: null,
-      pid: 9_999_999, // unlikely to be a live process
+      pid: 99999,
       logPath: null,
       startedAt: Date.now() / 1000,
       finishedAt: null,
@@ -210,10 +213,14 @@ describe('probeJobStatus with pm2', () => {
       seen: false,
     };
 
-    const status = await probeJobStatusFn(job);
-    expect(status).toBe('done');
-    expect(job.finishedAt).not.toBeNull();
-    expect(job.exitCode).toBe(-1);
+    try {
+      const status = await probeJobStatusFn(job);
+      expect(status).toBe('done');
+      expect(job.finishedAt).not.toBeNull();
+      expect(job.exitCode).toBe(-1);
+    } finally {
+      killSpy.mockRestore();
+    }
   });
 
   it('marks done via process.kill when pid no longer exists', async () => {
