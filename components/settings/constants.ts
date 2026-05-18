@@ -71,7 +71,7 @@ export const FIELDS: Record<SettingsFieldKey, FieldDef> = {
   },
   permission_mode: {
     label: 'Permission Mode',
-    help: 'Permission flag passed to TamTam-spawned headless runs. acceptEdits (recommended) keeps write-enabled runs non-interactive across the bundled Claude, Gemini, and Codex shims. bypassPermissions skips all approval checks. auto preserves provider-native behavior and can still block unattended runs on some CLIs. plan is read-only.',
+    help: 'Permission flag passed to TamTam-spawned headless runs. auto (recommended) preserves provider-native non-interactive behavior across the bundled Claude, Gemini, and Codex shims. acceptEdits auto-accepts file edits. bypassPermissions skips all approval checks. plan is read-only.',
     group: 'agent',
     span: 1,
   },
@@ -319,7 +319,7 @@ export const DEFAULTS: Record<SettingsFieldKey, string> = {
   weekends: 'off',
   base_prompt: 'Never ask clarifying questions. Make decisions yourself based on what you see in the codebase. If multiple approaches work, pick the simplest one and go.',
   default_model: 'fast',
-  permission_mode: 'acceptEdits',
+  permission_mode: 'auto',
   commit_style: 'Use conventional commits. One line only, present tense, ≤50 chars, no trailing period. Types: feat|fix|docs|style|refactor|test|chore|ci|build|perf|revert.',
   review_verdict_rules: `STRICT verdict rules — the user cares about code quality, not speed:
 - LGTM ONLY when there are zero findings at any severity. Not "LGTM with minor notes", not "LGTM aside from a nit". If you list any "minor" / "non-blocking" / "cosmetic" / "consider..." / "nice-to-have" issue, that is NEEDS ATTENTION, not LGTM.

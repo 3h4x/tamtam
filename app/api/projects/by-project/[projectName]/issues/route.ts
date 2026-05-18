@@ -70,8 +70,14 @@ function isMissingRelationError(error: unknown, relationName: string): boolean {
   return false;
 }
 
+// Labels that signal the issue is not ready for an autonomous code change.
+// The picker excludes these so issue-cruncher doesn't keep choosing the same
+// non-actionable issue every cron cycle (umbrella planning briefs marked
+// `needs-refinement` triggered the borged loop where every fire created an
+// empty `fix/issue-N-*` branch the reconciler had to clean up).
 const BLOCKER_LABELS = new Set([
-  'blocked', 'needs-info', 'needs-design', 'discussion', 'question', 'wontfix', 'duplicate',
+  'blocked', 'needs-info', 'needs-design', 'needs-refinement',
+  'discussion', 'question', 'wontfix', 'duplicate',
 ]);
 
 const PRIORITY_TIERS: Array<{ score: number; labels: ReadonlySet<string> }> = [

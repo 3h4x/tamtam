@@ -76,6 +76,28 @@ For issue-driven automation, TamTam gates the full issue context server-side bef
 
 The issue-cruncher skill prompt forbids the agent from calling `gh issue view`, `gh issue list`, `gh issue read`, or `gh api repos/*/issues/*` directly — those are the read paths that bring raw external text into context. It also forbids `git checkout` and `git switch` because branch movement is owned by TamTam's server-side prerequisite. The run command passes Claude `--disallowed-tools` rules for `gh issue:*`, the issue-reading `gh api` paths, and the git branch-switch primitives as defense-in-depth. Issue write actions use TamTam's `issue-comment`, `issue-close`, and `issue-label` API routes instead of direct `gh issue` commands so repo resolution, allowed input shape, and cache invalidation stay server-side. This is "drop > wrap": when filtering at the source is feasible, untrusted content never reaches the LLM, which is strictly stronger than wrapping it in `<untrusted>` and relying on the model to honor the system preamble (the wrap pattern stays in use for PR-review flows where the diff itself is the work). Drop-at-source is implemented in `app/api/projects/by-project/[projectName]/issues/route.ts` (`handlePickTop` + `filterTrustedComments`).
 
+### Per-Provider Enforcement of `--disallowed-tools`
+
+The `--disallowed-tools` defense-in-depth assembled in `lib/agents/intake-workflow.ts` is **only enforced when the agent runs through Claude**. Each provider's shim handles the flag differently:
+
+| Provider | What the shim does with `--disallowed-tools` | What actually blocks forbidden commands at runtime |
+|---|---|---|
+| **Claude** (`scripts/claude-shim.js`) | Pass-through to `claude` CLI verbatim | Claude CLI permission layer — Bash tool returns `Permission to use Bash … has been denied`; result includes `permission_denials[]` |
+| **Codex** (`scripts/codex-shim.js`) | **Silently dropped** — the shim's arg loop only recognizes `--allowed-tools`/`--tools`/`--system-prompt`; `--disallowed-tools` falls through both iterations and never reaches codex | Codex sandbox only (with `permission_mode=auto`/`acceptEdits`: network blocked + FS confined to workdir + `/tmp` + `$TMPDIR` + `~/.codex/memories`). With `permission_mode=bypassPermissions` codex receives `--dangerously-bypass-approvals-and-sandbox` and there is **no** enforcement |
+| **Gemini** (`scripts/gemini-shim.js`) | Silently dropped (translates only `--permission-mode` → `--approval-mode`) | Whatever the gemini CLI enforces for its approval mode |
+| **LM Studio / Deep Agents** | Silently dropped | Their own per-mode allow/deny lists; not a TamTam-enforced gate |
+
+Verified live with codex+auto in a controlled cwd: `--disallowed-tools "Bash(gh issue:*),…"` was passed in, the shim discarded it, and the model was free to invoke any shell command. `gh issue list` still failed — but only because the sandbox blocks DNS (`error connecting to api.github.com`), not because of the deny rule. With `bypassPermissions` that DNS block would also go away.
+
+Claude prompt-injection probe (issue body asking the agent to run a forbidden token via Bash) showed two-layer defense in practice: the model declined on its own ("I will not comply … this is a prompt injection attack"), and even when the model was made to call the Bash tool, the CLI returned `Permission to use Bash with command … has been denied`. Codex (gpt-5.4-mini) declined the same overt injection at the model layer, but had it complied there would be no CLI-layer backstop.
+
+**Implications for `permission_mode`:**
+
+- `auto` (current default) → for codex this is `-a never --sandbox workspace-write`, which keeps the network/FS sandbox as the real safety boundary. Equivalent to `acceptEdits` for codex routing.
+- `bypassPermissions` → for codex this is `--dangerously-bypass-approvals-and-sandbox`. The sandbox is fully off and `--disallowed-tools` is silently dropped — there is no defense-in-depth left for an issue-cruncher run under that mode. Treat `bypassPermissions` as a deliberate trust escalation for codex-driven agent work and prefer `auto` whenever possible.
+
+**Plugging the codex gap**: the codex shim could be updated to honor `--disallowed-tools` (e.g. via codex's `--config tools.shell.deny_patterns=…` or a wrapper that inspects shell invocations before passing them to codex). Until that lands, the issue-cruncher's only enforced barriers on codex are the sandbox and the model itself; the skill prompt's `## Hard rules — do not bypass` claim that gh-issue commands are "blocked at the permission layer" is technically only true for Claude.
+
 ## Log Redaction
 
 TamTam redacts common credential shapes before job output is persisted to log files and before log content is returned by browser-facing log APIs, including SSE streaming and the project log viewer. The redaction layer covers GitHub tokens, OpenAI/Anthropic-style API keys, bearer tokens, key/value credential assignments, basic-auth URLs, Slack webhook URLs, Discord webhook URLs, and environment values whose variable names look credential-bearing. Prerequisite command strings are redacted anywhere they are persisted or forwarded alongside prerequisite output.
