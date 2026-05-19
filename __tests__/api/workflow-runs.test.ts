@@ -72,6 +72,59 @@ describe('GET /api/workflow-runs', () => {
     });
   });
 
+  it('normalizes structured workflow errors (jsonb {message, stack}) to a string', async () => {
+    // Workflow runtime stores failures in workflow_runs.error as jsonb, so
+    // node-pg parses them into JS objects. The route used to ship that
+    // straight through, breaking the client's `error.split('\n')` call and
+    // crashing the page. The API now flattens both shapes — object with
+    // `.message` and legacy plain string — into a string before serving.
+    process.env.WORKFLOW_POSTGRES_URL = 'postgres://test/tamtam_workflow';
+    poolQueryMock.mockResolvedValueOnce({
+      rows: [
+        {
+          id: 'wrun_obj',
+          name: 'workflow//./lib/workflows/release//releaseWorkflow',
+          status: 'failed',
+          created_at: new Date('2026-05-19T08:00:00Z'),
+          started_at: new Date('2026-05-19T08:00:01Z'),
+          completed_at: new Date('2026-05-19T08:00:05Z'),
+          input: [],
+          output: null,
+          error: { message: 'Step "commitStep" failed after 3 retries', stack: 'ChunkLoadError: …' },
+        },
+        {
+          id: 'wrun_str',
+          name: 'workflow//./lib/workflows/release//releaseWorkflow',
+          status: 'failed',
+          created_at: new Date('2026-05-19T08:01:00Z'),
+          started_at: new Date('2026-05-19T08:01:01Z'),
+          completed_at: new Date('2026-05-19T08:01:05Z'),
+          input: [],
+          output: null,
+          error: 'plain string error from legacy row',
+        },
+        {
+          id: 'wrun_ok',
+          name: 'workflow//./lib/workflows/release//releaseWorkflow',
+          status: 'completed',
+          created_at: new Date('2026-05-19T08:02:00Z'),
+          started_at: new Date('2026-05-19T08:02:01Z'),
+          completed_at: new Date('2026-05-19T08:02:02Z'),
+          input: [],
+          output: { ok: true },
+          error: null,
+        },
+      ],
+    });
+    const { GET } = await importRoute();
+    const res = await GET(makeRequest());
+    const body = await res.json();
+    const byId = Object.fromEntries(body.runs.map((r: { id: string }) => [r.id, r]));
+    expect(byId.wrun_obj.error).toBe('Step "commitStep" failed after 3 retries');
+    expect(byId.wrun_str.error).toBe('plain string error from legacy row');
+    expect(byId.wrun_ok.error).toBeNull();
+  });
+
   it('returns and decodes local-world run files', async () => {
     const dir = mkdtempSync(join(tmpdir(), 'tamtam-workflow-runs-'));
     try {

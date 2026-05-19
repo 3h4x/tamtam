@@ -40,6 +40,11 @@ export interface OverviewTabProps {
   aggregateCi: string | null
   config: ProjectConfig | null
   runningJobs: JobInfo[]
+  // Lookup: running-release-id → originating agent job. When present, the
+  // active-work card for a running release renders with the agent's title
+  // and meta instead of the generic "Release pipeline" wrapper — keeping
+  // the workflow visually unified.
+  runningParentLookup?: Map<string, JobInfo>
   jobsLoaded: boolean
   onOpenChanges: () => void
 }
@@ -59,6 +64,7 @@ export function OverviewTab({
   releaseTag,
   config,
   runningJobs,
+  runningParentLookup,
   jobsLoaded,
   onOpenChanges,
 }: OverviewTabProps) {
@@ -116,34 +122,49 @@ export function OverviewTab({
             </div>
           </div>
           <div className="grid gap-2 p-3 md:grid-cols-2">
-            {visibleRunningJobs.map((j) => (
+            {visibleRunningJobs.map((j) => {
+              // If the running job is a release with a known originating
+              // agent in the project's job list, render the card around the
+              // agent (title, meta, badge) so the workflow reads as one
+              // unit. Click target stays on the release — that's where
+              // active work is happening and where progress is visible.
+              const anchor = runningParentLookup?.get(j.id) ?? null
+              const display = anchor ?? j
+              const displayKind = anchor ? anchor.kind : j.kind
+              return (
               <button
                 key={j.id}
                 type="button"
                 onClick={() => router.push(`/project/${projectName}/terminal?job=${encodeURIComponent(j.id)}`)}
-                className={`min-w-0 rounded-md border border-border border-l-2 ${activeWorkAccentClass(j.kind)} bg-bg-primary px-3 py-2 text-left transition-colors hover:bg-bg-tertiary cursor-pointer`}
+                className={`min-w-0 rounded-md border border-border border-l-2 ${activeWorkAccentClass(displayKind)} bg-bg-primary px-3 py-2 text-left transition-colors hover:bg-bg-tertiary cursor-pointer`}
                 title={`Open ${j.kind} started ${formatAgo(j.started_at)}`}
               >
                 <div className="flex items-start justify-between gap-3">
                   <div className="min-w-0">
                     <div className="flex items-center gap-2">
                       <span className="spinner-sm shrink-0 !h-3 !w-3 !border-[1.5px]" aria-hidden />
-                      <span className="truncate text-sm font-medium text-text-primary">{activeWorkTitle(j)}</span>
+                      <span className="truncate text-sm font-medium text-text-primary">{activeWorkTitle(display)}</span>
                     </div>
                     <div className="mt-1 flex flex-wrap items-center gap-x-2 gap-y-1 text-xs text-text-secondary">
-                      {runMeta(j).map((item) => (
+                      {runMeta(display).map((item) => (
                         <span key={item} className="font-mono tabular-nums">
                           {item}
                         </span>
                       ))}
+                      {anchor && (
+                        <span className="font-mono tabular-nums text-text-tertiary">
+                          · release in progress
+                        </span>
+                      )}
                     </div>
                   </div>
                   <span className="shrink-0 rounded-full border border-border bg-bg-secondary px-1.5 py-0.5 text-[10px] uppercase tracking-wider text-text-tertiary">
-                    {activeWorkBadgeLabel(j.kind)}
+                    {activeWorkBadgeLabel(displayKind)}
                   </span>
                 </div>
               </button>
-            ))}
+              )
+            })}
           </div>
           {runningJobs.length > visibleRunningJobs.length && (
             <div className="border-t border-border px-3 py-2 text-xs text-text-secondary tabular-nums">

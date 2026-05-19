@@ -89,6 +89,9 @@ export async function GET(
     fix_prompt_addendum: pipelinePrompts.fixPromptAddendum ?? '',
     website: projectRow?.website ?? '',
     qa_url: projectRow?.qaUrl ?? '',
+    dev_server_start_command: projectRow?.devServerStartCommand ?? '',
+    dev_server_stop_command: projectRow?.devServerStopCommand ?? '',
+    dev_server_ready_url: projectRow?.devServerReadyUrl ?? '',
     paused: !!projectRow?.paused,
     // Per-project commit style. File-only (team contract); empty string means
     // fall back to the global `commit_style` setting at commit-generation time.
@@ -238,6 +241,37 @@ export async function PATCH(
       touched = true;
       dbUpdates.push({ field, value });
     }
+  }
+
+  // Dev server lifecycle commands — DB-only. Each developer can pick a
+  // different dev port / runner without affecting teammates.
+  // dev_server_ready_url is validated as a URL when non-empty.
+  const devServerCmdFields = ['dev_server_start_command', 'dev_server_stop_command'] as const;
+  for (const field of devServerCmdFields) {
+    if (body[field] !== undefined) {
+      const value = readOptionalTrimmedString(body, field);
+      if (value instanceof Response) return value;
+      touched = true;
+      dbUpdates.push({ field, value });
+    }
+  }
+  if (body.dev_server_ready_url !== undefined) {
+    if (typeof body.dev_server_ready_url !== 'string') {
+      return badRequest('dev_server_ready_url must be a string URL');
+    }
+    const raw = body.dev_server_ready_url.trim();
+    if (raw) {
+      try {
+        const u = new URL(raw);
+        if (u.protocol !== 'http:' && u.protocol !== 'https:') {
+          return badRequest('dev_server_ready_url must be http(s)');
+        }
+      } catch {
+        return badRequest('dev_server_ready_url must be a valid URL');
+      }
+    }
+    touched = true;
+    dbUpdates.push({ field: 'dev_server_ready_url', value: raw || null });
   }
 
   // Write file-backed fields before DB-backed fields so a .tamtam/config.yml

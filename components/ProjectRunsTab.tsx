@@ -83,7 +83,16 @@ function renderChain(
         ? pipelineFlat.map(({ entry, depth: d }) => (
             <RunRow key={entry.key} entry={entry} onClick={() => navigate(entry)} depth={d} />
           ))
-        : node.chainedChildren?.map((c) => renderChain(c, depth + 1, navigate, actionsFor))
+        : node.chainedChildren?.map((c) =>
+            c.kind === 'release'
+              // Skip the release wrapper row even when nested deeper than the
+              // top-level expansion site — its phases attach directly to its
+              // owner so the workflow reads as one continuous chain.
+              ? flattenReleaseChildren(c.children ?? [], depth + 1).map(({ entry, depth: d }) => (
+                  <RunRow key={entry.key} entry={entry} onClick={() => navigate(entry)} depth={d} />
+                ))
+              : renderChain(c, depth + 1, navigate, actionsFor)
+          )
       }
     </Fragment>
   )
@@ -485,16 +494,25 @@ export function ProjectRunsTab({ projectName, jobsPaused = false }: ProjectRunsT
   }
 
   const releaseActionsFor = (e: Entry): React.ReactNode => {
+    // The "release" is no longer a separate row: an agent that triggered a
+    // release carries that release's actions on its own row. `releaseTarget`
+    // is the entry whose navJobId / failed-step we attribute buttons to —
+    // the release itself when `e` is a release row, otherwise the agent's
+    // owned release (so the agent row gets Retry/Continue release).
+    const ownedRelease = e.kind !== 'release'
+      ? e.chainedChildren?.find((c) => c.kind === 'release') ?? null
+      : null
+    const releaseTarget: Entry = e.kind === 'release' ? e : (ownedRelease ?? e)
     const outcomeStatus = e.releaseOutcome?.status
-      ?? (e.kind === 'release' && (e.status === 'done' || e.status === 'aborted') && e.exitCode !== null && e.exitCode !== 0
-        ? (e.children?.length ?? 0) === 0 ? 'blocked' : 'failed'
+      ?? (releaseTarget.kind === 'release' && (releaseTarget.status === 'done' || releaseTarget.status === 'aborted') && releaseTarget.exitCode !== null && releaseTarget.exitCode !== 0
+        ? (releaseTarget.children?.length ?? 0) === 0 ? 'blocked' : 'failed'
         : null)
     // Only the latest release for the project should offer continue/retry —
     // older failed releases reflect a past project state, and retrying them
     // would silently rerun on whatever's currently checked out.
-    const isLatestRelease = e.kind === 'release' && e.key === latestTopLevelReleaseKey
-    const isRealRelease = e.kind === 'release' && !e.key.startsWith('vgroup:')
-    const retryableStep = isLatestRelease && isRealRelease ? failedRetryableStep(e) : null
+    const isLatestRelease = releaseTarget.kind === 'release' && releaseTarget.key === latestTopLevelReleaseKey
+    const isRealRelease = releaseTarget.kind === 'release' && !releaseTarget.key.startsWith('vgroup:')
+    const retryableStep = isLatestRelease && isRealRelease ? failedRetryableStep(releaseTarget) : null
     const stepRetryButton = retryableStep ? (
       (() => {
         const active = stepRetryState?.jobId === retryableStep.navJobId
@@ -505,7 +523,7 @@ export function ProjectRunsTab({ projectName, jobsPaused = false }: ProjectRunsT
             size="sm"
             className="h-7 px-2 text-[11px]"
             disabled={jobsPaused || active}
-            onClick={() => retryPipelineStep(e, retryableStep)}
+            onClick={() => retryPipelineStep(releaseTarget, retryableStep)}
             title={jobsPaused
               ? 'Jobs are paused globally. Resume jobs to retry this step.'
               : 'Retry the failed commit step for this release'}
@@ -517,7 +535,7 @@ export function ProjectRunsTab({ projectName, jobsPaused = false }: ProjectRunsT
     ) : null
     const releaseButton = isLatestRelease && (outcomeStatus === 'blocked' || outcomeStatus === 'failed') ? (
       (() => {
-        const active = releaseActionState?.jobId === e.navJobId
+        const active = releaseActionState?.jobId === releaseTarget.navJobId
         const label = active ? releaseActionState.label : outcomeStatus === 'blocked' ? 'Retry release' : 'Continue release'
         const releaseBlocked = jobsPaused || active
         return (
@@ -527,7 +545,7 @@ export function ProjectRunsTab({ projectName, jobsPaused = false }: ProjectRunsT
             size="sm"
             className="h-7 px-2 text-[11px]"
             disabled={releaseBlocked}
-            onClick={() => retryRelease(e)}
+            onClick={() => retryRelease(releaseTarget)}
             title={jobsPaused
               ? 'Jobs are paused globally. Resume jobs to start a release.'
               : 'Start a new release attempt from the current project state'}
@@ -859,15 +877,23 @@ export function ProjectRunsTab({ projectName, jobsPaused = false }: ProjectRunsT
                         <div className="bg-bg-primary/40 lg:col-span-full lg:grid lg:grid-cols-subgrid lg:gap-x-3">
                           {/* For release/vgroup rows: flatten the chain so test/review/commit/push
                               all appear at depth 1 and fix appears at depth 2.
-                              For agent/run rows that own a nested release: use renderChain
-                              so the release itself shows at depth 1 with its steps below it. */}
+                              For agent/run rows that own a nested release: fold the release's
+                              pipeline phases directly under the agent — the release is a
+                              wrapper concept, not a user-visible step, so its row would be
+                              redundant noise. Non-release chained children still use renderChain. */}
                           {isReleaseParent
                             ? flattenReleaseChildren(e.children ?? [], 1).map(({ entry, depth: d }) => (
                                 <RunRow key={entry.key} entry={entry} onClick={() => navigate(entry)} depth={d} />
                               ))
                             : (
                               <>
-                                {(e.chainedChildren ?? []).map((root) => renderChain(root, 1, navigate, releaseActionsFor))}
+                                {(e.chainedChildren ?? []).map((root) =>
+                                  root.kind === 'release'
+                                    ? flattenReleaseChildren(root.children ?? [], 1).map(({ entry, depth: d }) => (
+                                        <RunRow key={entry.key} entry={entry} onClick={() => navigate(entry)} depth={d} />
+                                      ))
+                                    : renderChain(root, 1, navigate, releaseActionsFor)
+                                )}
                                 {/* Per-turn cost breakdown for multi-turn chat/agent rows.
                                     Sorted newest-first to match parent ordering. */}
                                 {hasTurnBreakdown && [...e.turnEntries!]

@@ -317,6 +317,17 @@ export function ProjectDetailPage({
   const releaseRunning = running.some(j => j.kind === 'release')
   const runningJobs = (releaseRunning ? running.filter(j => !RELEASE_CHILD_KINDS.has(j.kind)) : running)
     .sort((a, b) => (b.started_at || 0) - (a.started_at || 0))
+  // Parent-job lookup for the active-work tile so a running release whose
+  // parent agent triggered it renders as the AGENT's card (its prompt as the
+  // title) rather than the generic "Release pipeline" wrapper — keeping the
+  // workflow visually unified instead of splitting "agent run" from
+  // "release pipeline meta-step".
+  const runningParentLookup = new Map<string, JobInfo>()
+  for (const j of runningJobs) {
+    if (j.kind !== 'release' || !j.parent_job_id) continue
+    const parent = projectJobs.find(p => p.id === j.parent_job_id)
+    if (parent) runningParentLookup.set(j.id, parent)
+  }
 
   const handlePull = async (strategy: 'ff-only' | 'merge' | 'rebase' = 'ff-only') => {
     if (!name || pulling) return
@@ -771,6 +782,7 @@ export function ProjectDetailPage({
           aggregateCi={aggregateCi}
           config={config}
           runningJobs={runningJobs}
+          runningParentLookup={runningParentLookup}
           jobsLoaded={jobsLoaded}
           onOpenChanges={() => setActiveTab('changes')}
         />

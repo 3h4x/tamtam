@@ -78,7 +78,7 @@ function buildConfig(overrides: Partial<ProjectConfig> = {}): ProjectConfig {
   }
 }
 
-function renderOverview(runningJobs: JobInfo[]) {
+function renderOverview(runningJobs: JobInfo[], runningParentLookup?: Map<string, JobInfo>) {
   const container = document.createElement('div')
   document.body.appendChild(container)
   const root = createRoot(container)
@@ -101,6 +101,7 @@ function renderOverview(runningJobs: JobInfo[]) {
         aggregateCi: null,
         config: buildConfig(),
         runningJobs,
+        runningParentLookup,
         jobsLoaded: true,
         onOpenChanges: vi.fn(),
       }),
@@ -164,6 +165,54 @@ describe('OverviewTab active work', () => {
     expect(container.textContent).toContain('action 1')
     expect(container.textContent).toContain('custom-action')
     expect(container.textContent).not.toContain('other 1')
+
+    unmount()
+  })
+
+  it('renders a running release as its originating agent when parent is known', () => {
+    // Mirrors the screenshot: a release is running, but instead of showing
+    // "Release pipeline" as a separate step, the active-work card surfaces
+    // the agent that kicked it off — keeping run + pipeline visually merged.
+    const agent = buildJob({
+      id: 'agent-improve',
+      kind: 'agent:improve',
+      started_at: 800,
+      prompt: 'Improve dashboard UX',
+      user_prompt: 'Improve dashboard UX',
+      status: 'done',
+      finished_at: 850,
+    })
+    const release = buildJob({
+      id: 'release-1',
+      kind: 'release',
+      started_at: 900,
+      parent_job_id: agent.id,
+    })
+    const lookup = new Map<string, JobInfo>([[release.id, agent]])
+
+    const { container, unmount } = renderOverview([release], lookup)
+
+    // Card shows the agent's identity, not the generic "Release pipeline".
+    expect(container.textContent).toContain('improve')
+    expect(container.textContent).not.toContain('Release pipeline')
+    expect(container.textContent).toContain('release in progress')
+
+    unmount()
+  })
+
+  it('falls back to "Release pipeline" when no parent agent is reachable', () => {
+    const release = buildJob({
+      id: 'manual-release',
+      kind: 'release',
+      started_at: 900,
+      parent_job_id: null,
+    })
+
+    const { container, unmount } = renderOverview([release])
+
+    // No parent in the lookup → original behavior preserved.
+    expect(container.textContent).toContain('Release pipeline')
+    expect(container.textContent).not.toContain('release in progress')
 
     unmount()
   })

@@ -9,7 +9,12 @@ const MAX_RUNNING_JOBS = 50;
 // at, exit_code, verdict, session_id. Everything else (prompt, context_meta,
 // log_path, modified_files, work_summary, tokens, cost…) is dead weight on a
 // 5-second poll. Ship only what's read.
-function notificationJob(job: JobData) {
+//
+// `parent_kind` is the exception: when a running release was triggered by an
+// agent, surface the agent's kind so the bell can render the workflow as one
+// unit ("agent:improve" badge) instead of the generic "release" wrapper. Same
+// merge story as the active-work tile on the Overview page.
+function notificationJob(job: JobData, parentKind?: string | null) {
   return {
     id: job.id,
     kind: job.kind,
@@ -23,6 +28,8 @@ function notificationJob(job: JobData) {
     prompt: null,
     user_prompt: null,
     context_meta: null,
+    parent_kind: parentKind ?? null,
+    parent_job_id: job.parentJobId ?? null,
   };
 }
 
@@ -87,10 +94,21 @@ export async function GET() {
     .filter(j => j.finishedAt === null)
     .sort((a, b) => b.startedAt - a.startedAt);
 
+  // Build a parent-kind lookup for the running slice. Only releases need
+  // this — they're the wrapper kind that benefits from showing its agent.
+  const parentKindByRunningId: Record<string, string | null> = {};
+  const runningSlice = running.slice(0, MAX_RUNNING_JOBS);
+  const allJobs = listJobs();
+  for (const r of runningSlice) {
+    if (r.kind !== 'release' || !r.parentJobId) continue;
+    const parent = allJobs.find(j => j.id === r.parentJobId);
+    parentKindByRunningId[r.id] = parent?.kind ?? null;
+  }
+
   return NextResponse.json({
     count: jobs.length,
-    jobs: jobs.slice(0, MAX_NOTIFICATION_JOBS).map(notificationJob),
+    jobs: jobs.slice(0, MAX_NOTIFICATION_JOBS).map(j => notificationJob(j)),
     runningCount: running.length,
-    runningJobs: running.slice(0, MAX_RUNNING_JOBS).map(notificationJob),
+    runningJobs: runningSlice.map(j => notificationJob(j, parentKindByRunningId[j.id])),
   });
 }

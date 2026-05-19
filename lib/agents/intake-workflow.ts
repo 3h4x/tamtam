@@ -451,12 +451,41 @@ async function startAgentStep(
   // has since been finalized — usually by `reapAbandonedInlineJobs` at
   // boot, which marks the orphaned PID's row exit=-1 — re-spawning the
   // CLI would just double-bill the agent and run against a stale row.
-  // Skip cleanly so the workflow records the retry as completed and the
-  // operator can inspect / re-trigger from the UI. Pre-restart, this
-  // branch is never taken (the row finishedAt stays null until exit).
+  // Skip cleanly before starting any per-run infrastructure so a replayed
+  // finalized job cannot leave behind an unused dev server.
   if (job.finishedAt !== null) {
     console.log(`[intake-workflow] startAgentStep ${jobId} short-circuit: jobs row already finalized (exit ${job.exitCode}); workflow retry will not re-spawn`);
     return;
+  }
+
+  // Ensure the project's dev server is running for the duration of this
+  // agent run (and any downstream release it triggers). Best-effort — log
+  // and continue on failure so a flaky dev server start never blocks the
+  // agent. The lifecycle module is idempotent; if a server is already up
+  // (TamTam-owned or external), this is a no-op.
+  try {
+    const { db, schema } = await import('@/lib/db');
+    const { eq } = await import('drizzle-orm');
+    const rows = await db.select().from(schema.projects).where(eq(schema.projects.name, job.project));
+    const row = rows[0];
+    if (row?.devServerStartCommand) {
+      const { ensureDevServerRunning } = await import('@/lib/dev-server/lifecycle');
+      const r = await ensureDevServerRunning(
+        job.project,
+        {
+          startCommand: row.devServerStartCommand,
+          stopCommand: row.devServerStopCommand ?? null,
+          readyUrl: row.devServerReadyUrl ?? null,
+          cwd: projPath,
+        },
+        { startedByJobId: jobId },
+      );
+      if (r.status === 'spawn_failed' || r.status === 'ready_timeout') {
+        console.warn(`[dev-server] start for ${job.project} returned ${r.status}; continuing without it`);
+      }
+    }
+  } catch (e) {
+    console.warn(`[dev-server] ensureDevServerRunning threw for ${job.project}:`, e);
   }
 
   // Write prereq artifact to disk.

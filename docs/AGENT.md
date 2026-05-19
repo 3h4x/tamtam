@@ -513,6 +513,18 @@ All agent runs go through `runAgentIntakeWorkflow()` in `lib/agents/intake-workf
 
 Everything after PM2 spawn — lifecycle hooks, SSE streaming, log tailing, completion detection, recommendation side effects — is unchanged.
 
+### Per-Project Dev Server Lifecycle
+
+Projects may store local, DB-only dev-server lifecycle fields on the `projects` row:
+
+- `dev_server_start_command` — optional `bash -c` command run from the project root at agent kickoff.
+- `dev_server_stop_command` — optional command run from the project root during cleanup before TamTam falls back to terminating the owned process group.
+- `dev_server_ready_url` — optional HTTP(S) URL polled after startup until it returns a non-5xx response.
+
+`startAgentStep` calls `ensureDevServerRunning()` before spawning the agent CLI when `dev_server_start_command` is set, after first checking that the agent job has not already been finalized by replay/boot recovery. The lifecycle is idempotent: a TamTam pidfile is reused only when the live PID still matches the recorded OS process-start identity (or the same TamTam process still has the child handle it spawned), and if `dev_server_ready_url` is already responding without a trusted pidfile, TamTam treats the server as externally owned and does not stop it later.
+
+TamTam-owned state lives in `data/dev-servers/<project>.pid` with a sibling log file. Legacy, dead, or process-identity-mismatched pidfiles are removed without signaling their PID, so PID reuse cannot make TamTam kill an unrelated process group. Agent completion stops the server only when no release or other active agent-like work remains for that project. Release completion uses the shared release finalization hook, so normal completion, user aborts, first-step startup failures, direct phase finalizers, and direct `markDone(release, …)` paths all run the same cleanup. On boot, `sweepOrphanDevServers()` removes stale pidfiles and stops owned servers whose project has no active agent/release work.
+
 ### Response
 
 The `/api/agents/{agentId}/run` success response always includes `via: "workflow"`:

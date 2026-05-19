@@ -49,6 +49,25 @@ async function getProjectPipelineConfig(projectName: string): Promise<{ autoComm
   }
 }
 
+async function stopProjectDevServerIfIdle(projectName: string): Promise<void> {
+  try {
+    const { hasActiveWorkForProject } = await import('@/lib/dev-server/active-work');
+    if (await hasActiveWorkForProject(projectName)) return;
+
+    const rows = await db.select().from(schema.projects).where(eq(schema.projects.name, projectName)).limit(1);
+    const row = rows[0];
+    if (!row?.devServerStartCommand) return;
+
+    const { stopDevServer } = await import('@/lib/dev-server/lifecycle');
+    await stopDevServer(projectName, {
+      stopCommand: row.devServerStopCommand ?? null,
+      cwd: row.path,
+    });
+  } catch (e) {
+    console.warn(`[dev-server] release-end stop failed for ${projectName}:`, e);
+  }
+}
+
 // Wrap plain text as a stream_event NDJSON line so it is picked up by
 // readParsedLog() and visible to the fix agent reading the review log.
 function toStreamTextLine(text: string): string {
@@ -484,7 +503,19 @@ async function runCompletionHooksInner(job: JobData): Promise<void> {
         if (projPath) {
           const { extractAssistantTextFromRawLog } = await import('@/lib/agents/work-summary-extractor.mjs');
           const { parseAgentActions } = await import('@/lib/agents/action-block-parser');
-          const text = await extractAssistantTextFromRawLog(job.logPath);
+          // extractAssistantTextFromRawLog takes the log CONTENT, not a path.
+          // Previously this passed `job.logPath` directly which silently
+          // resolved to "" inside the extractor (the path split by '\n'
+          // produced a single non-JSON line that was discarded), so every
+          // agent's action block was lost. Read the file here.
+          const { readFile } = await import('node:fs/promises');
+          let rawLog = '';
+          try {
+            rawLog = await readFile(/*turbopackIgnore: true*/ job.logPath, 'utf8');
+          } catch (readErr) {
+            console.warn(`[agent-actions] ${job.id} could not read log:`, readErr);
+          }
+          const text = extractAssistantTextFromRawLog(rawLog);
           const parsed = parseAgentActions(text);
           if (parsed.ok && parsed.actions.length > 0) {
             const { canExecuteAgentActions } = await import('@/lib/agents/action-eligibility');
@@ -1325,6 +1356,7 @@ async function runCompletionHooksInner(job: JobData): Promise<void> {
       const { releaseLock } = await import('@/lib/pipeline/pipeline-lock');
       await releaseLock(job.project, job.id);
     } catch {}
+    await stopProjectDevServerIfIdle(job.project);
   }
 
   // Send notification if an event was triggered
@@ -1452,6 +1484,32 @@ async function runCompletionHooksInner(job: JobData): Promise<void> {
   } catch (e) {
     console.error(`[github-board] failed to sync finished job ${job.id}:`, e);
   }
+
+  // Dev server lifecycle: stop the project's dev server when this agent run
+  // was the outermost scope of the work. If `dispatchReleaseAfterRun` (above)
+  // triggered a release, that release job is now in the DB and
+  // `hasActiveWorkForProject` returns true — we leave the server up and
+  // `finalizeReleaseStep` will own the stop. Best-effort.
+  if (isAgentJobKind(job.kind)) {
+    try {
+      const { hasActiveWorkForProject } = await import('@/lib/dev-server/active-work');
+      if (!(await hasActiveWorkForProject(job.project))) {
+        const { db, schema } = await import('@/lib/db');
+        const { eq } = await import('drizzle-orm');
+        const rows = await db.select().from(schema.projects).where(eq(schema.projects.name, job.project));
+        const row = rows[0];
+        if (row?.devServerStartCommand) {
+          const { stopDevServer } = await import('@/lib/dev-server/lifecycle');
+          await stopDevServer(job.project, {
+            stopCommand: row.devServerStopCommand ?? null,
+            cwd: row.path,
+          });
+        }
+      }
+    } catch (e) {
+      console.warn(`[dev-server] agent-end stop failed for ${job.project}:`, e);
+    }
+  }
 }
 
 async function retryFixCi(projectName: string): Promise<void> {
@@ -1577,11 +1635,15 @@ export async function markDone(job: JobData, exitCode: number): Promise<void> {
   // there is no PM2 entry to delete here anymore.)
   // Fallback: explicitly SIGKILL the bash wrapper and any children in case
   // the spawned subprocess hung after Claude CLI's final result event.
-  // Skip for inline kinds (push, commit) whose job.pid IS the server's own
-  // process.pid — killing it would crash TamTam and cascade -1 exits onto
-  // every other in-flight job. mark-dod and pr-wait already avoid this by
-  // using pid=0; push/commit use process.pid for restart detection instead.
-  const isInlineServerKind = job.kind === 'push' || job.kind === 'commit';
+  // Skip when job.pid is the server's own process.pid — killing it would
+  // SIGKILL TamTam itself and cascade -1 exits onto every other in-flight
+  // job. Multiple kinds use this convention (push, commit, release,
+  // inline-agent before/around Claude child capture), so detect by PID
+  // equality rather than enumerating kinds — the enumeration drifted out of
+  // sync and was the cause of TamTam self-killing on inline-agent /
+  // release-meta job completion. mark-dod and pr-wait already use pid=0
+  // and never reach this branch.
+  const isInlineServerKind = job.pid === process.pid;
   // Refuse to operate on system PIDs. macOS reserves 1–99 for daemons; PID 1 is
   // launchd, whose children include every user GUI app. A bad job.pid value
   // from a corrupt DB row or a misbehaving spawner would otherwise SIGKILL

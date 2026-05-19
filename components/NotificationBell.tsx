@@ -252,7 +252,15 @@ export function NotificationBell() {
                       Running · {runningJobs.length} {runningJobs.length === 1 ? 'project' : 'projects'}
                     </span>
                   </div>
-                  {runningJobs.map(job => (
+                  {runningJobs.map(job => {
+                    // When a running release was triggered by an agent, render
+                    // the agent's kind on the badge so the bell shows the
+                    // workflow's identity rather than the "release" wrapper.
+                    // Same merge story as the Overview tab's active-work tile.
+                    const displayKind = job.kind === 'release' && job.parent_kind
+                      ? job.parent_kind
+                      : job.kind
+                    return (
                     <button
                       key={job.id}
                       onClick={() => handleJobClick(job)}
@@ -262,12 +270,16 @@ export function NotificationBell() {
                       <div className="flex-1 min-w-0">
                         <div className="flex items-center gap-2">
                           <span className="text-sm font-medium text-text-primary truncate">{job.project}</span>
-                          <KindBadge kind={job.kind} />
+                          <KindBadge kind={displayKind} />
                         </div>
-                        <p className="text-xs text-text-tertiary mt-0.5">{elapsed(job.started_at)}</p>
+                        <p className="text-xs text-text-tertiary mt-0.5">
+                          {elapsed(job.started_at)}
+                          {displayKind !== job.kind && <span className="ml-1.5 text-text-tertiary/70">· release in progress</span>}
+                        </p>
                       </div>
                     </button>
-                  ))}
+                    )
+                  })}
                 </div>
               )}
 

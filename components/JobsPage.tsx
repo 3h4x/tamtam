@@ -54,7 +54,16 @@ function renderChain(node: Entry, depth: number, navigate: (e: Entry) => void): 
         ? pipelineFlat.map(({ entry, depth: d }) => (
             <RunRow key={entry.key} entry={entry} onClick={() => navigate(entry)} depth={d} />
           ))
-        : node.chainedChildren?.map((c) => renderChain(c, depth + 1, navigate))
+        : node.chainedChildren?.map((c) =>
+            c.kind === 'release'
+              // Skip the release wrapper row when it appears as a chained
+              // child of something else — fold its phases inline so the
+              // workflow reads as one continuous chain.
+              ? flattenReleaseChildren(c.children ?? [], depth + 1).map(({ entry, depth: d }) => (
+                  <RunRow key={entry.key} entry={entry} onClick={() => navigate(entry)} depth={d} />
+                ))
+              : renderChain(c, depth + 1, navigate)
+          )
       }
     </Fragment>
   )
@@ -391,11 +400,20 @@ export function JobsPage() {
                     >
                       {isExpandable && isExpanded && (
                         <div className="bg-bg-primary/40">
+                          {/* When an agent owns a release in chainedChildren, fold the release's
+                              phases directly under the agent — the release row is a wrapper
+                              concept the user doesn't need to see as a separate step. */}
                           {isReleaseParent
                             ? flattenReleaseChildren(e.children ?? [], 1).map(({ entry, depth: d }) => (
                                 <RunRow key={entry.key} entry={entry} onClick={() => navigate(entry)} depth={d} />
                               ))
-                            : e.chainedChildren?.map((c) => renderChain(c, 1, navigate))
+                            : e.chainedChildren?.map((c) =>
+                                c.kind === 'release'
+                                  ? flattenReleaseChildren(c.children ?? [], 1).map(({ entry, depth: d }) => (
+                                      <RunRow key={entry.key} entry={entry} onClick={() => navigate(entry)} depth={d} />
+                                    ))
+                                  : renderChain(c, 1, navigate)
+                              )
                           }
                         </div>
                       )}

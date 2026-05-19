@@ -146,4 +146,43 @@ describe('parseAgentActions', () => {
     expect(r.ok).toBe(false);
     if (!r.ok) expect(r.reason).toBe('invalid-schema');
   });
+
+  it('tolerates a stray non-JSON line interleaved inside the fence (e.g. INFO from a stream forwarder)', () => {
+    // Mirrors the issue-cruncher failure case the user reported: a structurally
+    // valid action block with one rogue token in the middle. The sanitizer
+    // strips the offending line and retries; the result is the same actions a
+    // clean emit would produce.
+    const text = [
+      '```tamtam-actions',
+      '{',
+      '  "actions": [',
+      '    {',
+      '      "type": "issue-close",',
+      '      "number": 321,',
+      '      "reason": "not planned",',
+      'INFO',                                                   // ← noise line
+      '      "comment": "stale issue, closing."',
+      '    },',
+      '    {',
+      '      "type": "checkout-default"',
+      '    }',
+      '  ]',
+      '}',
+      '```',
+    ].join('\n');
+    const r = parseAgentActions(text);
+    expect(r.ok).toBe(true);
+    if (!r.ok) return;
+    expect(r.actions).toHaveLength(2);
+    expect(r.actions[0]).toMatchObject({ type: 'issue-close', number: 321, reason: 'not planned' });
+    expect(r.actions[1]).toMatchObject({ type: 'checkout-default' });
+  });
+
+  it('still rejects genuinely malformed JSON (no JSON-shaped recovery possible)', () => {
+    const text = '```tamtam-actions\n{ this is not json at all }\n```';
+    const r = parseAgentActions(text);
+    expect(r.ok).toBe(false);
+    if (r.ok) return;
+    expect(r.reason).toBe('invalid-json');
+  });
 });

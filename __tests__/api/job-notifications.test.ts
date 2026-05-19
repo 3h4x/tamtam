@@ -307,6 +307,41 @@ describe('GET /api/jobs/notifications', () => {
     expect(data.jobs[0].id).toBe('commit-fail');
   });
 
+  it('attaches the originating agent kind to a running release so the bell can render the workflow as one unit', async () => {
+    const agent = makeJob({ id: 'agent-improve', kind: 'agent:improve', finishedAt: 800, exitCode: 0, project: 'borged' });
+    const release = makeJob({ id: 'rel-1', kind: 'release', finishedAt: null, exitCode: null, project: 'borged', parentJobId: 'agent-improve' });
+    listJobsMock.mockReturnValue([agent, release]);
+
+    const res = await GET();
+    const data = await res.json();
+    const runningRelease = data.runningJobs.find((j: any) => j.id === 'rel-1');
+    expect(runningRelease).toBeTruthy();
+    expect(runningRelease.parent_kind).toBe('agent:improve');
+    expect(runningRelease.parent_job_id).toBe('agent-improve');
+  });
+
+  it('omits parent_kind when a running release has no parent agent (manual release)', async () => {
+    const release = makeJob({ id: 'rel-manual', kind: 'release', finishedAt: null, exitCode: null, project: 'borged', parentJobId: null });
+    listJobsMock.mockReturnValue([release]);
+
+    const res = await GET();
+    const data = await res.json();
+    const runningRelease = data.runningJobs.find((j: any) => j.id === 'rel-manual');
+    expect(runningRelease.parent_kind).toBeNull();
+  });
+
+  it('does not attach parent_kind to non-release running jobs', async () => {
+    // Even if an agent has a parent_job_id (rare but valid for chained agents),
+    // the parent-kind lookup is release-only — we don't want to noise up other
+    // kinds' notification payloads.
+    const agent = makeJob({ id: 'agent-1', kind: 'agent:improve', finishedAt: null, exitCode: null, project: 'borged', parentJobId: 'something' });
+    listJobsMock.mockReturnValue([agent]);
+
+    const res = await GET();
+    const data = await res.json();
+    expect(data.runningJobs[0].parent_kind).toBeNull();
+  });
+
   it('omits bulky prompt fields from notification jobs', async () => {
     const unseen = makeJob({ id: 'u1', prompt: 'large prompt', userPrompt: 'large user prompt', contextMeta: '{"large":true}' });
     unseenFinishedMock.mockReturnValue([unseen]);

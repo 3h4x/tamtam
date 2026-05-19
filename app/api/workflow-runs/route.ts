@@ -15,6 +15,7 @@ import {
   clampJson,
   listLocalRunFilesNewestFirst,
   localWorldRunsDir,
+  normalizeWorkflowError,
   readLocalRunFile,
   simplifyWorkflowName,
   toLocalRunSummary,
@@ -32,8 +33,14 @@ interface WorkflowRunRow {
   input_cbor: Buffer | null;
   output: unknown;
   output_cbor: Buffer | null;
-  error: string | null;
+  // The Workflow Postgres `error` column is `jsonb`, so node-pg auto-parses
+  // it into a JS value — a string for legacy rows, but typically an object
+  // like `{message, stack}` for structured failures. Both shapes appear in
+  // the wild; the API normalizes to a string before serving so the client
+  // can render it directly without per-row type-guarding.
+  error: unknown;
 }
+
 
 let cachedPool: Pool | null = null;
 
@@ -98,7 +105,7 @@ export async function GET(request: Request): Promise<NextResponse> {
         // Keep output small in the API response — full payload via a per-run
         // detail endpoint if/when needed.
         output: clampJson(decodeWorkflowPayload(r.output, r.output_cbor)),
-        error: r.error,
+        error: normalizeWorkflowError(r.error),
       })),
     });
   } catch (err) {
