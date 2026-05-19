@@ -76,10 +76,6 @@ describe('POST /api/jobs/{jobId}/rerun', () => {
       resolveProjectPath: resolveProjectPathMock,
     }));
 
-    vi.doMock('@/lib/jobs/pm2-jobs', () => ({
-      startJob: startJobMock,
-      splitCommand: (line: string) => line.split(/\s+/).filter(Boolean),
-    }));
     vi.doMock('@/lib/jobs/spawn-claude-detached', () => ({
       startJobInProcess: startJobMock,
     }));
@@ -360,10 +356,6 @@ describe('POST /api/jobs/{jobId}/rerun weekly quota gating', () => {
     }));
     vi.doMock('@/lib/shared/project-data', () => ({
       resolveProjectPath: vi.fn().mockReturnValue('/path/to/proj'),
-    }));
-    vi.doMock('@/lib/jobs/pm2-jobs', () => ({
-      startJob: startJobMock,
-      splitCommand: (line: string) => line.split(/\s+/).filter(Boolean),
     }));
     vi.doMock('@/lib/jobs/spawn-claude-detached', () => ({
       startJobInProcess: startJobMock,

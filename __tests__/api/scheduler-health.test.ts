@@ -18,7 +18,6 @@ async function applyDdl(handle: TestDbHandle): Promise<void> {
       model text NOT NULL DEFAULT 'sonnet',
       prompt text NOT NULL DEFAULT '',
       schedule text,
-      runner text NOT NULL DEFAULT 'pm2',
       enabled boolean NOT NULL DEFAULT true,
       provider text,
       fallback_enabled boolean NOT NULL DEFAULT false,
@@ -160,7 +159,6 @@ describe('GET /api/agents/scheduler-health', () => {
       model: 'sonnet',
       prompt: 'do stuff',
       schedule: '1h',
-      runner: 'pm2',
       enabled: true,
       createdAt: now,
       updatedAt: now,
@@ -361,7 +359,7 @@ describe('GET /api/agents/scheduler-health', () => {
     await insertProject('proj1', '/w/proj1', true);
     await sharedHandle.db.insert(schema.agents).values({
       id: 'agent-db', name: 'shared', project: 'proj1', skillIds: '[]', model: 'sonnet',
-      prompt: 'db version', schedule: '1h', runner: 'pm2', enabled: true,
+      prompt: 'db version', schedule: '1h', enabled: true,
       createdAt: now, updatedAt: now,
     });
     seedPromptFile('agent-db');

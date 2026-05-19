@@ -121,10 +121,6 @@ vi.mock('@/lib/jobs/project-active-job', () => ({
   findBlockingRunningJob: (...a: unknown[]) => mocks.findBlockingRunningJob(...a),
 }));
 
-vi.mock('@/lib/jobs/pm2-jobs', () => ({
-  startJob: (...a: unknown[]) => mocks.startJob(...a),
-  splitCommand: (line: string) => line.split(/\s+/).filter(Boolean),
-}));
 
 // startAgentStep inside lib/agents/intake-workflow now spawns the CLI in
 // process via startInProcessAgentJob. Same call shape as startJob — route
@@ -222,7 +218,6 @@ async function applyDdl(handle: TestDbHandle): Promise<void> {
       model text NOT NULL DEFAULT 'normal',
       prompt text NOT NULL DEFAULT '',
       schedule text,
-      runner text NOT NULL DEFAULT 'pm2',
       enabled boolean NOT NULL DEFAULT true,
       provider text,
       fallback_enabled boolean NOT NULL DEFAULT false,
@@ -764,7 +759,7 @@ describe('POST /api/agents/{agentId}/run', () => {
       .mockReturnValueOnce({ ok: false, runningAgent: 'Test Agent' });
     mocks.startJob.mockImplementationOnce(async () => {
       await pendingStart.promise;
-      throw new Error('pm2 boot failed');
+      throw new Error('spawn failed');
     });
 
     const reqA = new NextRequest('http://localhost/api/agents/agent-123/run', {
@@ -798,7 +793,7 @@ describe('POST /api/agents/{agentId}/run', () => {
     mocks.tryClaimAgentStartSlot.mockReturnValueOnce({ ok: true });
     mocks.startJob.mockImplementationOnce(async () => {
       await pendingStart.promise;
-      throw new Error('pm2 boot failed');
+      throw new Error('spawn failed');
     });
 
     const req = new NextRequest('http://localhost/api/agents/agent-123/run', {
@@ -1155,7 +1150,7 @@ describe('POST /api/agents/{agentId}/run', () => {
 
   it('returns 500 if startJob throws', async () => {
     await insertAgent();
-    mocks.startJob.mockRejectedValue(new Error('pm2 not available'));
+    mocks.startJob.mockRejectedValue(new Error('spawn not available'));
     const req = new NextRequest('http://localhost/api/agents/agent-123/run', {
       method: 'POST',
       body: JSON.stringify({ prompt: 'do something' }),
@@ -1163,7 +1158,7 @@ describe('POST /api/agents/{agentId}/run', () => {
     const res = await POST(req, { params: Promise.resolve({ agentId: 'agent-123' }) });
     expect(res.status).toBe(500);
     const data = await res.json();
-    expect(data.detail).toContain('pm2 not available');
+    expect(data.detail).toContain('spawn not available');
     // Job must be persisted as failed so it doesn't stay "running" in the DB
     expect(mocks.updateJob).toHaveBeenCalled();
     const savedJob = mocks.updateJob.mock.calls[mocks.updateJob.mock.calls.length - 1][0];

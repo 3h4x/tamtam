@@ -79,12 +79,12 @@ export async function probeJobStatus(job: JobData): Promise<'running' | 'done'> 
   // call finalizeReleaseJob; probe stays out of the way.
   if (job.kind === 'release') return 'running';
   // Jobs are created with pid=0 and the real pid is persisted asynchronously
-  // after `pm2 start` returns (can take up to pm2's 15 s timeout). During that
-  // window, treat the job as still spawning rather than dead — otherwise a
-  // concurrent probe (e.g. the duplicate-check in /api/agents/[id]/run) would
-  // markDone(-1) mid-spawn AND pm2-delete the nascent Claude process, leaving
-  // a phantom `exit -1 @ 0s` row. Grace is intentionally generous because
-  // `pm2 start` worst-case is ~15 s plus slack for the server's main loop.
+  // after spawn returns. During that window, treat the job as still spawning
+  // rather than dead — otherwise a concurrent probe (e.g. the duplicate-check
+  // in /api/agents/[id]/run) would markDone(-1) mid-spawn and tear down the
+  // nascent Claude process, leaving a phantom `exit -1 @ 0s` row. Grace is
+  // intentionally generous to cover slow spawns plus slack for the server's
+  // main loop.
   const PID_SPAWN_GRACE_SEC = 30;
   if (job.pid <= 0) {
     const ageSec = Date.now() / 1000 - job.startedAt;
@@ -131,14 +131,14 @@ export async function probeJobStatus(job: JobData): Promise<'running' | 'done'> 
   // Claude CLI sometimes hangs after emitting its final result event (stop_reason
   // = end_turn, is_error = false, but the process never exits — most often seen on
   // long agent runs). If the log already contains a terminal result line, treat
-  // the job as done regardless of PM2 status. Applies to every claude-backed kind.
+  // the job as done. Applies to every claude-backed kind.
   const claudeKind = isClaudeBackedJobKind(job.kind);
   const resultExitCode = getClaudeResultExitCode(job);
   if (claudeKind && resultExitCode !== null) {
     await markDone(job, resultExitCode);
     return 'done';
   }
-  // Test/action jobs spawn directly (no PM2) — check liveness via pid only.
+  // Test/action jobs check liveness via pid only.
   if (job.kind === 'test' || job.kind === 'action') {
     // The spawned child's `proc.on('close', …)` handler runs in this process
     // and races against this probe. If we declare the job dead here while the
@@ -161,8 +161,7 @@ export async function probeJobStatus(job: JobData): Promise<'running' | 'done'> 
       return 'done';
     }
   }
-  // Generic pid>0 liveness check. With per-job PM2 entries gone, the only
-  // way to tell whether a spawned subprocess is still alive is process.kill.
+  // Generic pid>0 liveness check via process.kill.
   try {
     process.kill(job.pid, 0);
     return 'running';

@@ -184,7 +184,6 @@ describe('AgentEditor', () => {
         model: 'normal',
         prompt: '',
         schedule: null,
-        runner: 'pm2',
 
         enabled: true,
         prerequisiteCommand: null,

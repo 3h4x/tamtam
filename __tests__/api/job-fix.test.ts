@@ -81,10 +81,6 @@ describe('POST /api/jobs/[jobId]/fix', () => {
       resolveProjectPath: resolveProjectPathMock,
     }));
 
-    vi.doMock('@/lib/jobs/pm2-jobs', () => ({
-      startJob: startJobMock,
-      splitCommand: (line: string) => line.split(/\s+/).filter(Boolean),
-    }));
     vi.doMock('@/lib/jobs/spawn-claude-detached', () => ({
       startJobInProcess: startJobMock,
     }));
@@ -179,7 +175,7 @@ describe('POST /api/jobs/[jobId]/fix', () => {
     expect(updateJobMock).toHaveBeenCalledOnce();
   });
 
-  it('starts the fix via the PM2 runner after provider gating', async () => {
+  it('starts the fix via the job runner after provider gating', async () => {
     getJobMock.mockReturnValue(makeJob({ provider: 'claude' }));
 
     const req = new NextRequest('http://localhost/api/jobs/job-source/fix', { method: 'POST' });
@@ -251,10 +247,6 @@ describe('POST /api/jobs/[jobId]/fix weekly quota gating', () => {
     }));
     vi.doMock('@/lib/shared/project-data', () => ({
       resolveProjectPath: vi.fn().mockReturnValue('/path/to/proj'),
-    }));
-    vi.doMock('@/lib/jobs/pm2-jobs', () => ({
-      startJob: startJobMock,
-      splitCommand: (line: string) => line.split(/\s+/).filter(Boolean),
     }));
     vi.doMock('@/lib/jobs/spawn-claude-detached', () => ({
       startJobInProcess: startJobMock,

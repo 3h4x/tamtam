@@ -519,8 +519,6 @@ describe('instrumentation', () => {
       await reapOrphanReleases();
 
       expect(reconcileStaleReleaseMock).not.toHaveBeenCalled();
-      // PM2 stop/delete used to be invoked here; per-release PM2 entries
-      // were retired with the bash release monitor, so no shell calls now.
       expect(markDoneMock).toHaveBeenCalledWith(release, -1);
     });
   });

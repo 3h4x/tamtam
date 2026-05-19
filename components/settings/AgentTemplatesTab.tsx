@@ -8,7 +8,6 @@ export interface AgentTemplateRecord {
   description: string
   model: string
   schedule: string
-  runner?: string
   prompt: string
   skillIds?: string[]
   fallbackEnabled?: boolean
@@ -17,7 +16,7 @@ export interface AgentTemplateRecord {
 const TEMPLATE_MODELS = [...MODEL_TIERS]
 const TEMPLATE_SCHEDULES = ['', '15m', '30m', '1h', '2h', '4h', '8h', '12h', '24h', '3d', '7d', '30d']
 
-const EMPTY_TEMPLATE: AgentTemplateRecord = { name: '', description: '', model: 'normal', schedule: '24h', runner: 'pm2', prompt: '' }
+const EMPTY_TEMPLATE: AgentTemplateRecord = { name: '', description: '', model: 'normal', schedule: '24h', prompt: '' }
 
 function TemplateForm({
   form, setField, onSave, onCancel, isEdit,
@@ -107,7 +106,7 @@ export function AgentTemplatesTab({ value, onChange }: { value: string; onChange
     try {
       const parsed = JSON.parse(v)
       return Array.isArray(parsed)
-        ? parsed.map((template) => ({ ...template, model: normalizeModelInput(template?.model, 'normal'), runner: template?.runner || 'pm2' }))
+        ? parsed.map((template) => ({ ...template, model: normalizeModelInput(template?.model, 'normal') }))
         : []
     } catch {
       return []

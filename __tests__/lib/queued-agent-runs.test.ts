@@ -441,7 +441,7 @@ describe('queued-agent-runs', () => {
         ok: false,
         status: 500,
         text: vi.fn().mockResolvedValue(JSON.stringify({
-          detail: 'Failed to start: pm2 start failed',
+          detail: 'Failed to start: spawn failed',
         })),
       })
       .mockResolvedValueOnce({

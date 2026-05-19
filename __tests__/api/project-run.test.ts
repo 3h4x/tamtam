@@ -63,10 +63,6 @@ vi.mock('@/lib/jobs/job-storage', () => ({
 vi.mock('@/lib/jobs/project-active-job', () => ({
   findBlockingRunningJob: (...args: unknown[]) => state.fns.findBlockingRunningJob(...args),
 }));
-vi.mock('@/lib/jobs/pm2-jobs', () => ({
-  startJob: (...args: unknown[]) => state.fns.startJob(...args),
-  splitCommand: (line: string) => line.split(/\s+/).filter(Boolean),
-}));
 vi.mock('@/lib/jobs/spawn-claude-detached', () => ({
   startJobInProcess: (...args: unknown[]) => state.fns.startJob(...args),
 }));

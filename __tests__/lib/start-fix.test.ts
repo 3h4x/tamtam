@@ -49,10 +49,6 @@ describe('startFixFromJob', () => {
       updateJob: updateJobMock,
       listJobs: vi.fn().mockReturnValue([]),
     }));
-    vi.doMock('@/lib/jobs/pm2-jobs', () => ({
-      startJob: startJobMock,
-      splitCommand: (line: string) => line.split(/\s+/).filter(Boolean),
-    }));
     vi.doMock('@/lib/jobs/spawn-claude-detached', () => ({
       startJobInProcess: startJobMock,
     }));
@@ -141,7 +137,7 @@ describe('startFixFromJob', () => {
     }
   });
 
-  it('starts fix jobs through the PM2 runner', async () => {
+  it('starts fix jobs through the job runner', async () => {
     await startFixFromJob('src-job-1');
     expect(startJobMock).toHaveBeenCalledOnce();
     const [jobId, command] = startJobMock.mock.calls[0];
@@ -216,7 +212,7 @@ describe('startFixFromJob', () => {
   });
 
   it('marks the job failed when PM2 startup throws', async () => {
-    startJobMock.mockRejectedValue(new Error('pm2 start failed'));
+    startJobMock.mockRejectedValue(new Error('spawn failed'));
 
     const r = await startFixFromJob('src-job-1');
 
@@ -257,7 +253,6 @@ describe('startFixFromJob', () => {
       updateJob: vi.fn(),
       listJobs: vi.fn().mockReturnValue([]),
     }));
-    vi.doMock('@/lib/jobs/pm2-jobs', () => ({ startJob: startJobMock, splitCommand: (line: string) => line.split(/\s+/).filter(Boolean) }));
     vi.doMock('@/lib/jobs/spawn-claude-detached', () => ({ startJobInProcess: startJobMock }));
     vi.doMock('@/lib/shared/project-data', () => ({ resolveProjectPath: vi.fn().mockReturnValue('/path') }));
     vi.doMock('@/lib/scheduling/scheduling', () => ({

@@ -87,7 +87,6 @@ export async function PATCH(request: NextRequest) {
     if (fields.model !== undefined) updates.model = parsedModel ?? 'normal';
     if (fields.prompt !== undefined) updates.prompt = fields.prompt;
     if (fields.schedule !== undefined) updates.schedule = parsedSchedule.schedule;
-    if (fields.runner !== undefined) updates.runner = fields.runner;
     if (fields.enabled !== undefined) updates.enabled = fields.enabled;
     if (provider !== undefined) updates.provider = provider;
     if (fields.fallbackEnabled !== undefined) updates.fallbackEnabled = fields.fallbackEnabled === true;
@@ -113,7 +112,6 @@ export async function PATCH(request: NextRequest) {
             model: agent.model,
             schedule: agent.schedule,
             skillIds,
-            runner: agent.runner,
             enabled: agent.enabled,
             provider: agent.provider,
             prerequisiteCommand: agent.prerequisiteCommand,
@@ -158,7 +156,6 @@ export async function PATCH(request: NextRequest) {
           model: fields.model !== undefined ? (parsedModel ?? undefined) : fileAgent.model,
           schedule: fields.schedule !== undefined ? parsedSchedule.schedule : fileAgent.schedule,
           skillIds: fields.skillIds !== undefined ? fields.skillIds : fileAgent.skillIds,
-          runner: fields.runner !== undefined ? fields.runner : fileAgent.runner,
           enabled: fields.enabled !== undefined ? fields.enabled : fileAgent.enabled,
           provider: provider !== undefined ? provider : fileAgent.provider,
           prerequisiteCommand: fields.prerequisiteCommand !== undefined ? prerequisiteCommand : fileAgent.prerequisiteCommand,

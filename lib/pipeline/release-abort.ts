@@ -86,10 +86,8 @@ export async function abortActiveRelease(
   }
 
   if (runningStep) {
-    // (PM2 stop/delete used to fire here, but per-job PM2 entries were
-    // retired when CLI spawning moved in-process. Job termination is
-    // handled by requestJobCancellation for push/commit kinds and by
-    // process.kill on the child PID for everything else.)
+    // Job termination is handled by requestJobCancellation for push/commit
+    // kinds and by process.kill on the child PID for everything else.
 
     if (runningStep.kind === 'push' || runningStep.kind === 'commit') {
       runningStep.cancelRequestedExitCode = -3;

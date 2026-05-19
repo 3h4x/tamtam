@@ -232,10 +232,6 @@ describe.skip('runCompletionHooks – fix→review auto-trigger', () => {
   beforeAll(async () => {
     vi.resetModules();
     vi.doMock('@/lib/db', () => ({ db: sharedHandle.db, schema }));
-    vi.doMock('@/lib/jobs/pm2-jobs', () => ({
-      getJobStatus: getJobStatusMock,
-      deleteJob: deleteJobMock,
-    }));
     vi.doMock('@/lib/shared/shell', () => ({ exec: execMock }));
     vi.doMock('@/lib/git/git-utils', () => ({ markReviewed: markReviewedMock }));
     vi.doMock('@/lib/shared/project-data', () => ({ resolveProjectPath: resolveProjectPathMock }));
@@ -266,7 +262,6 @@ describe.skip('runCompletionHooks – fix→review auto-trigger', () => {
 
   afterAll(() => {
     vi.doUnmock('@/lib/db');
-    vi.doUnmock('@/lib/jobs/pm2-jobs');
     vi.doUnmock('@/lib/shared/shell');
     vi.doUnmock('@/lib/git/git-utils');
     vi.doUnmock('@/lib/shared/project-data');
@@ -371,10 +366,6 @@ describe.skip('runCompletionHooks – auto-push pipeline', () => {
   beforeAll(async () => {
     vi.resetModules();
     vi.doMock('@/lib/db', () => ({ db: sharedHandle.db, schema }));
-    vi.doMock('@/lib/jobs/pm2-jobs', () => ({
-      getJobStatus: vi.fn(),
-      deleteJob: vi.fn().mockResolvedValue(undefined),
-    }));
     vi.doMock('@/lib/shared/shell', () => ({ exec: execMock }));
     vi.doMock('@/lib/git/git-utils', () => ({
       markReviewed: vi.fn().mockResolvedValue(undefined),
@@ -425,7 +416,6 @@ describe.skip('runCompletionHooks – auto-push pipeline', () => {
   afterAll(() => {
     if (tempDir) rmSync(tempDir, { recursive: true, force: true });
     vi.doUnmock('@/lib/db');
-    vi.doUnmock('@/lib/jobs/pm2-jobs');
     vi.doUnmock('@/lib/shared/shell');
     vi.doUnmock('@/lib/git/git-utils');
     vi.doUnmock('@/lib/shared/project-data');
@@ -1185,10 +1175,6 @@ describe('markDone – isClaudeKind exit-code override for new kinds', () => {
   beforeAll(async () => {
     vi.resetModules();
     vi.doMock('@/lib/db', () => ({ db: sharedHandle.db, schema }));
-    vi.doMock('@/lib/jobs/pm2-jobs', () => ({
-      getJobStatus: vi.fn(),
-      deleteJob: vi.fn().mockResolvedValue(undefined),
-    }));
     vi.doMock('@/lib/shared/shell', () => ({
       exec: vi.fn().mockResolvedValue({ exitCode: 0, stdout: '', stderr: '' }),
     }));
@@ -1244,7 +1230,6 @@ describe('markDone – isClaudeKind exit-code override for new kinds', () => {
   afterAll(() => {
     if (tempDir) rmSync(tempDir, { recursive: true, force: true });
     vi.doUnmock('@/lib/db');
-    vi.doUnmock('@/lib/jobs/pm2-jobs');
     vi.doUnmock('@/lib/shared/shell');
     vi.doUnmock('@/lib/shared/project-data');
     vi.doUnmock('@/lib/scheduling/scheduling');
@@ -1414,10 +1399,6 @@ describe.skip('runCompletionHooks – push-fix auto-recovery (unified fix)', () 
   beforeAll(async () => {
     vi.resetModules();
     vi.doMock('@/lib/db', () => ({ db: sharedHandle.db, schema }));
-    vi.doMock('@/lib/jobs/pm2-jobs', () => ({
-      getJobStatus: vi.fn(),
-      deleteJob: vi.fn().mockResolvedValue(undefined),
-    }));
     vi.doMock('@/lib/shared/shell', () => ({ exec: execMock }));
     vi.doMock('@/lib/shared/project-data', () => ({ resolveProjectPath: resolveProjectPathMock }));
     vi.doMock('@/lib/scheduling/scheduling', () => ({ getProjectTestConfig: getProjectTestConfigMock }));
@@ -1459,7 +1440,6 @@ describe.skip('runCompletionHooks – push-fix auto-recovery (unified fix)', () 
   afterAll(() => {
     if (tempDir) rmSync(tempDir, { recursive: true, force: true });
     vi.doUnmock('@/lib/db');
-    vi.doUnmock('@/lib/jobs/pm2-jobs');
     vi.doUnmock('@/lib/shared/shell');
     vi.doUnmock('@/lib/shared/project-data');
     vi.doUnmock('@/lib/scheduling/scheduling');
@@ -1714,10 +1694,6 @@ describe('runCompletionHooks – release-after-run', () => {
     resetMocksToDefaults(releaseAfterRun);
 
     vi.doMock('@/lib/db', () => ({ db: sharedHandle.db, schema }));
-    vi.doMock('@/lib/jobs/pm2-jobs', () => ({
-      getJobStatus: vi.fn(),
-      deleteJob: vi.fn().mockResolvedValue(undefined),
-    }));
     vi.doMock('@/lib/shared/shell', () => ({
       exec: vi.fn().mockResolvedValue({ exitCode: 0, stdout: '', stderr: '' }),
     }));
@@ -1789,7 +1765,6 @@ describe('runCompletionHooks – release-after-run', () => {
 
   afterAll(() => {
     vi.doUnmock('@/lib/db');
-    vi.doUnmock('@/lib/jobs/pm2-jobs');
     vi.doUnmock('@/lib/shared/shell');
     vi.doUnmock('@/lib/git/git-utils');
     vi.doUnmock('@/lib/shared/project-data');
@@ -1941,10 +1916,6 @@ describe('runCompletionHooks – linked release scoping', () => {
   beforeAll(async () => {
     vi.resetModules();
     vi.doMock('@/lib/db', () => ({ db: sharedHandle.db, schema }));
-    vi.doMock('@/lib/jobs/pm2-jobs', () => ({
-      getJobStatus: vi.fn(),
-      deleteJob: vi.fn().mockResolvedValue(undefined),
-    }));
     vi.doMock('@/lib/shared/shell', () => ({
       exec: vi.fn().mockResolvedValue({ exitCode: 0, stdout: '', stderr: '' }),
     }));
@@ -1990,7 +1961,6 @@ describe('runCompletionHooks – linked release scoping', () => {
   afterAll(() => {
     if (tempDir) rmSync(tempDir, { recursive: true, force: true });
     vi.doUnmock('@/lib/db');
-    vi.doUnmock('@/lib/jobs/pm2-jobs');
     vi.doUnmock('@/lib/shared/shell');
     vi.doUnmock('@/lib/git/git-utils');
     vi.doUnmock('@/lib/shared/project-data');
@@ -2116,10 +2086,6 @@ describe('runCompletionHooks – push→DoD (PR Workflow without auto-merge)', (
     getProjectTestConfigMock = vi.fn();
     launchPrWaitMock = vi.fn();
     vi.doMock('@/lib/db', () => ({ db: sharedHandle.db, schema }));
-    vi.doMock('@/lib/jobs/pm2-jobs', () => ({
-      getJobStatus: vi.fn(),
-      deleteJob: vi.fn().mockResolvedValue(undefined),
-    }));
     vi.doMock('@/lib/shared/shell', () => ({ exec: vi.fn().mockResolvedValue({ exitCode: 0, stdout: '', stderr: '' }) }));
     vi.doMock('@/lib/git/git-utils', () => ({ markReviewed: vi.fn().mockResolvedValue(undefined) }));
     vi.doMock('@/lib/shared/project-data', () => ({ resolveProjectPath: vi.fn().mockReturnValue('/proj') }));
@@ -2152,7 +2118,6 @@ describe('runCompletionHooks – push→DoD (PR Workflow without auto-merge)', (
   afterAll(() => {
     if (tempDir) rmSync(tempDir, { recursive: true, force: true });
     vi.doUnmock('@/lib/db');
-    vi.doUnmock('@/lib/jobs/pm2-jobs');
     vi.doUnmock('@/lib/shared/shell');
     vi.doUnmock('@/lib/git/git-utils');
     vi.doUnmock('@/lib/shared/project-data');
@@ -2254,10 +2219,6 @@ describe('runCompletionHooks – abort short-circuit', () => {
   beforeAll(async () => {
     vi.resetModules();
     vi.doMock('@/lib/db', () => ({ db: sharedHandle.db, schema }));
-    vi.doMock('@/lib/jobs/pm2-jobs', () => ({
-      getJobStatus: vi.fn(),
-      deleteJob: vi.fn().mockResolvedValue(undefined),
-    }));
     vi.doMock('@/lib/shared/shell', () => ({
       exec: vi.fn().mockResolvedValue({ exitCode: 0, stdout: '', stderr: '' }),
     }));
@@ -2292,7 +2253,6 @@ describe('runCompletionHooks – abort short-circuit', () => {
 
   afterAll(() => {
     vi.doUnmock('@/lib/db');
-    vi.doUnmock('@/lib/jobs/pm2-jobs');
     vi.doUnmock('@/lib/shared/shell');
     vi.doUnmock('@/lib/git/git-utils');
     vi.doUnmock('@/lib/shared/project-data');

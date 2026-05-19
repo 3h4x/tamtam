@@ -353,9 +353,8 @@ export async function GET(
 
       // Poll every STREAM_POLL_MS as a safety net — fs.watch can miss the finishedAt
       // transition if the last log write happens before the job's exit handler runs.
-      // Probe PM2/process status less often (every ~5s of wall time, i.e. every
-      // ceil(5000 / STREAM_POLL_MS) ticks) — probeJobStatus shells out `pm2 jlist`
-      // for claude-backed jobs, which is expensive to run per-second per open SSE client.
+      // Probe process status less often (every ~5s of wall time, i.e. every
+      // ceil(5000 / STREAM_POLL_MS) ticks).
       const PROBE_EVERY_TICKS = Math.max(1, Math.ceil(5000 / STREAM_POLL_MS));
       let tick = 0;
       pollTimer = setInterval(() => {

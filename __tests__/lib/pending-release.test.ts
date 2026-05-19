@@ -170,7 +170,7 @@ describe('pending-release queue', () => {
   });
 
   it('keeps the queue when drain throws before release start is confirmed', async () => {
-    mocks.startReleaseMock.mockRejectedValueOnce(new Error('pm2 start failed'));
+    mocks.startReleaseMock.mockRejectedValueOnce(new Error('spawn failed'));
     setPendingRelease('proj');
     await waitForPending('proj', true);
     await expect(drainPendingRelease('proj')).resolves.toBeUndefined();
@@ -188,7 +188,7 @@ describe('pending-release queue', () => {
       expect(shouldKeepPendingRelease({ ok: false, status: 429, detail: 'budget' })).toBe(true);
     });
     it('keeps the flag for retryable startup failures', () => {
-      expect(shouldKeepPendingRelease({ ok: false, status: 500, retryable: true, detail: 'pm2 down' })).toBe(true);
+      expect(shouldKeepPendingRelease({ ok: false, status: 500, retryable: true, detail: 'spawn unavailable' })).toBe(true);
     });
     it('keeps the flag for "Pipeline already running" (409)', () => {
       expect(shouldKeepPendingRelease({ ok: false, status: 409, detail: 'Pipeline already running for proj' })).toBe(true);

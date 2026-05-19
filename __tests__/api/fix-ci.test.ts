@@ -70,7 +70,6 @@ describe('POST /api/projects/by-project/[projectName]/fix-ci', () => {
       listJobs: listJobsMock,
       probeJobStatus: probeJobStatusMock,
     }));
-    vi.doMock('@/lib/jobs/pm2-jobs', () => ({ startJob: startJobMock, splitCommand: (line: string) => line.split(/\s+/).filter(Boolean) }));
     vi.doMock('@/lib/jobs/spawn-claude-detached', () => ({ startJobInProcess: startJobMock }));
     vi.doMock('@/lib/shared/shell', () => ({ exec: execMock }));
     vi.doMock('@/lib/shared/config', () => ({ getPermissionModeFlag: vi.fn().mockReturnValue(''), getSettings: vi.fn().mockReturnValue({ default_model: 'sonnet' }) }));
@@ -219,12 +218,12 @@ describe('POST /api/projects/by-project/[projectName]/fix-ci', () => {
   });
 
   it('persists job failure when startJob throws', async () => {
-    startJobMock.mockRejectedValue(new Error('pm2 unavailable'));
+    startJobMock.mockRejectedValue(new Error('spawn unavailable'));
     const req = new NextRequest('http://localhost/api/projects/by-project/proj1/fix-ci', { method: 'POST' });
     const res = await POST(req, { params: Promise.resolve({ projectName: 'proj1' }) });
     expect(res.status).toBe(500);
     const data = await res.json();
-    expect(data.detail).toContain('pm2 unavailable');
+    expect(data.detail).toContain('spawn unavailable');
     // Job must be persisted as failed so it doesn't stay "running" in the DB
     expect(updateJobMock).toHaveBeenCalledOnce();
     const savedJob = updateJobMock.mock.calls[0][0];
@@ -278,7 +277,6 @@ describe('POST /api/projects/by-project/[projectName]/fix-ci weekly model scorin
       listJobs: vi.fn().mockReturnValue([]),
       probeJobStatus: vi.fn().mockResolvedValue('done'),
     }));
-    vi.doMock('@/lib/jobs/pm2-jobs', () => ({ startJob: startJobMock, splitCommand: (line: string) => line.split(/\s+/).filter(Boolean) }));
     vi.doMock('@/lib/jobs/spawn-claude-detached', () => ({ startJobInProcess: startJobMock }));
     vi.doMock('@/lib/shared/shell', () => ({
       exec: vi.fn().mockResolvedValue({ exitCode: 0, stdout: 'Build failed\nError: test suite failed', stderr: '' }),

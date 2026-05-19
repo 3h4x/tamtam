@@ -7,7 +7,7 @@ export type RunAgentResult =
 export interface FetchAgentsOptions {
   /**
    * `summary` returns only the fields a list view renders (id, name, project,
-   * schedule, enabled, model, runner, provider, source). Drops prompt /
+   * schedule, enabled, model, provider, source). Drops prompt /
    * prerequisiteCommand / skillIds / docPaths so polling stays cheap.
    */
   fields?: 'summary'
@@ -28,7 +28,7 @@ export async function fetchAgents(
   return { agents: data.agents }
 }
 
-export async function createAgent(agent: { name: string; project: string; skillIds: string[]; docPaths?: string[]; model: string; prompt?: string; schedule?: string | null; runner?: string; enabled?: boolean; provider?: string | null; prerequisiteCommand?: string | null }): Promise<{ agent: Agent }> {
+export async function createAgent(agent: { name: string; project: string; skillIds: string[]; docPaths?: string[]; model: string; prompt?: string; schedule?: string | null; enabled?: boolean; provider?: string | null; prerequisiteCommand?: string | null }): Promise<{ agent: Agent }> {
   const response = await fetch('/api/agents', {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
@@ -41,7 +41,7 @@ export async function createAgent(agent: { name: string; project: string; skillI
   return response.json()
 }
 
-export async function updateAgent(agentId: string, updates: Partial<{ name: string; skillIds: string[]; docPaths: string[]; model: string; prompt: string; schedule: string | null; runner: string; enabled: boolean; provider: string | null; prerequisiteCommand: string | null }>): Promise<{ agent: Agent }> {
+export async function updateAgent(agentId: string, updates: Partial<{ name: string; skillIds: string[]; docPaths: string[]; model: string; prompt: string; schedule: string | null; enabled: boolean; provider: string | null; prerequisiteCommand: string | null }>): Promise<{ agent: Agent }> {
   const response = await fetch(`/api/agents/${agentId}`, {
     method: 'PATCH',
     headers: { 'Content-Type': 'application/json' },

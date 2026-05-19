@@ -5,7 +5,7 @@ import { normalizeModelInput } from '@/lib/agents/model-aliases';
 // Per-file-agent runtime overrides. The .md file in `.tamtam/agents/<name>.md`
 // owns the agent's existence and its prompt body — anything that's part of
 // the agent's *definition* and worth committing to git. Everything operational
-// (enabled flag, cron schedule, model, runner, skill picks) belongs to the
+// (enabled flag, cron schedule, model, skill picks) belongs to the
 // running environment and lives here in the DB instead, so a UI toggle
 // doesn't dirty a tracked file.
 //
@@ -16,7 +16,6 @@ export interface FileAgentOverride {
   enabled?: boolean;
   schedule?: string | null;
   model?: string;
-  runner?: string;
   skillIds?: string[];
 }
 
@@ -118,7 +117,6 @@ export async function setFileAgentOverride(project: string, name: string, patch:
   if (patch.enabled !== undefined) next.enabled = patch.enabled;
   if (patch.schedule !== undefined) next.schedule = patch.schedule;
   if (patch.model !== undefined) next.model = normalizeModelInput(patch.model, 'normal');
-  if (patch.runner !== undefined) next.runner = patch.runner;
   if (patch.skillIds !== undefined) next.skillIds = patch.skillIds;
   const value = JSON.stringify(next);
   await db.insert(schema.settings)

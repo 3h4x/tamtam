@@ -141,7 +141,6 @@ async function updateDbAgentSchedule(expectedProject: string, agentId: string, s
           model: reverted.model,
           schedule: reverted.schedule,
           skillIds: JSON.parse(reverted.skillIds || '[]'),
-          runner: reverted.runner,
           enabled: reverted.enabled,
           provider: reverted.provider,
         })
@@ -171,7 +170,6 @@ async function updateDbAgentSchedule(expectedProject: string, agentId: string, s
         model: updated.model,
         schedule: updated.schedule,
         skillIds: JSON.parse(updated.skillIds || '[]'),
-        runner: updated.runner,
         enabled: updated.enabled,
         provider: updated.provider,
       })

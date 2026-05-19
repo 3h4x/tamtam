@@ -141,7 +141,6 @@ test.describe('Real idle-page job start detection', () => {
         project: TERMINAL_AGENT_PROJECT,
         prompt: 'Summarize the current state.',
         skillIds: [],
-        runner: 'pm2',
         enabled: true,
       },
     });

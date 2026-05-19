@@ -150,9 +150,6 @@ async function applyDdl(handle: TestDbHandle): Promise<void> {
 // the same instance the module-scope `vi.mock(...)` factories close over.
 const mocks = vi.hoisted(() => ({
   db: { current: null as unknown as TestDbHandle['db'] },
-  // pm2-jobs
-  deleteJob: vi.fn(),
-  getJobStatus: vi.fn(),
   // shared/shell
   exec: vi.fn(),
   // git/git-utils
@@ -211,10 +208,6 @@ vi.mock('@/lib/db', () => ({
     return mocks.db.current;
   },
   schema,
-}));
-vi.mock('@/lib/jobs/pm2-jobs', () => ({
-  deleteJob: mocks.deleteJob,
-  getJobStatus: mocks.getJobStatus,
 }));
 vi.mock('@/lib/shared/shell', () => ({
   exec: mocks.exec,
@@ -326,7 +319,6 @@ afterAll(async () => {
 // we reapply the few defaults that production code actually relies on.
 function applyDefaultMocks(): void {
   vi.resetAllMocks();
-  mocks.deleteJob.mockResolvedValue(undefined);
   mocks.exec.mockResolvedValue({ exitCode: 0, stdout: '', stderr: '' });
   mocks.markReviewed.mockResolvedValue(undefined);
   mocks.setReviewedRef.mockResolvedValue(undefined);
