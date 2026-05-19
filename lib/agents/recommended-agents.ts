@@ -2,6 +2,7 @@ import { ISSUE_CRUNCHER_SKILL_ID } from '@/lib/agents/issue-cruncher';
 
 export interface RecommendedAgentTemplate {
   name: string
+  aliases?: string[]
   description: string
   model: string
   schedule: string
@@ -12,8 +13,23 @@ export interface RecommendedAgentTemplate {
   fallbackEnabled?: boolean
 }
 
+export function recommendedAgentNameKey(name: string): string {
+  return name.trim().toLowerCase();
+}
+
+export function recommendedAgentNameKeys(agent: Pick<RecommendedAgentTemplate, 'name' | 'aliases'>): string[] {
+  return [agent.name, ...(agent.aliases ?? [])]
+    .map(recommendedAgentNameKey)
+    .filter(Boolean);
+}
+
+export function recommendedAgentMatchesName(agent: Pick<RecommendedAgentTemplate, 'name' | 'aliases'>, name: string): boolean {
+  const key = recommendedAgentNameKey(name);
+  return key !== '' && recommendedAgentNameKeys(agent).includes(key);
+}
+
 export function isBuiltInRecommendedAgent(name: string): boolean {
-  return RECOMMENDED_AGENTS.some((agent) => agent.name.toLowerCase() === name.trim().toLowerCase());
+  return RECOMMENDED_AGENTS.some((agent) => recommendedAgentMatchesName(agent, name));
 }
 
 // Built-in recommended agents are a product surface, not page-local UI data.
@@ -67,7 +83,8 @@ export const RECOMMENDED_AGENTS: RecommendedAgentTemplate[] = [
     fallbackEnabled: true,
   },
   {
-    name: 'tests',
+    name: 'test-add',
+    aliases: ['tests'],
     description: 'Adds missing tests for recently changed code and fills gaps in coverage.',
     model: 'normal',
     schedule: '24h',

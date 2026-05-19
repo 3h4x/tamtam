@@ -10,7 +10,7 @@ import type { AgentTemplateRecord } from '@/components/SettingsPage'
 import { useToast } from '@/components/Toast'
 import { AgentEditor, type AgentEditorSavePayload } from '@/components/agents-tab/AgentEditor'
 import { RecommendedAgents } from '@/components/agents-tab/RecommendedAgents'
-import { RECOMMENDED_AGENTS } from '@/lib/agents/recommended-agents'
+import { RECOMMENDED_AGENTS, recommendedAgentMatchesName } from '@/lib/agents/recommended-agents'
 import { normalizeModelInput } from '@/lib/agents/model-aliases'
 import { useSchedulerHealth, type SchedulerEntry } from '@/hooks/useSchedulerHealth'
 import { Table, type Column } from '@/components/ui/Table'
@@ -113,7 +113,10 @@ export function AgentsTab({ projectName, projectJobs = [] }: AgentsTabProps) {
 
   useEffect(() => {
     if (!creating || !templateParam || recommendedTemplate) return
-    const template = [...customTemplates, ...RECOMMENDED_AGENTS].find(t => t.name.toLowerCase() === templateParam.toLowerCase())
+    const template = [
+      ...customTemplates.filter(t => t.name.trim().toLowerCase() === templateParam.trim().toLowerCase()),
+      ...RECOMMENDED_AGENTS.filter(t => recommendedAgentMatchesName(t, templateParam)),
+    ][0]
     if (template) setRecommendedTemplate(template)
   }, [creating, customTemplates, recommendedTemplate, templateParam])
 

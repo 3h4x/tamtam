@@ -1,10 +1,20 @@
 import { describe, expect, it } from 'vitest'
-import { RECOMMENDED_AGENTS } from '@/lib/agents/recommended-agents'
+import { isBuiltInRecommendedAgent, RECOMMENDED_AGENTS } from '@/lib/agents/recommended-agents'
 
 describe('RECOMMENDED_AGENTS', () => {
   it('uses unique names case-insensitively', () => {
     const names = RECOMMENDED_AGENTS.map(agent => agent.name.toLowerCase())
     expect(new Set(names).size).toBe(names.length)
+  })
+
+  it('keeps the renamed test agent addressable by its legacy name', () => {
+    const agent = RECOMMENDED_AGENTS.find(entry => entry.name === 'test-add')
+    expect(agent).toMatchObject({
+      aliases: ['tests'],
+      skillIds: ['agent-tests'],
+    })
+    expect(isBuiltInRecommendedAgent('test-add')).toBe(true)
+    expect(isBuiltInRecommendedAgent('tests')).toBe(true)
   })
 
   it('keeps issue-cruncher as a featured manual-only template', () => {

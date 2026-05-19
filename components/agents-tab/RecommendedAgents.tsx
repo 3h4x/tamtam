@@ -1,8 +1,10 @@
 'use client'
 
 import type { AgentTemplateRecord } from '@/components/SettingsPage'
+import { recommendedAgentNameKey, recommendedAgentNameKeys } from '@/lib/agents/recommended-agents'
 
 interface RecommendedAgent extends AgentTemplateRecord {
+  aliases?: string[]
   skillIds: string[]
   essential?: boolean
   featured?: boolean
@@ -16,13 +18,13 @@ interface RecommendedAgentsProps {
 }
 
 export function RecommendedAgents({ agents, customTemplates, recommendedAgents, onAddAgent }: RecommendedAgentsProps) {
-  const existingNames = new Set(agents.map(a => a.name.toLowerCase()))
-  const customNames = new Set(customTemplates.map(t => t.name.toLowerCase()))
+  const existingNames = new Set(agents.map(a => recommendedAgentNameKey(a.name)))
+  const customNames = new Set(customTemplates.map(t => recommendedAgentNameKey(t.name)))
   const merged = [
     ...customTemplates,
-    ...recommendedAgents.filter(r => !customNames.has(r.name.toLowerCase())),
+    ...recommendedAgents.filter(r => !recommendedAgentNameKeys(r).some(name => customNames.has(name))),
   ]
-  const suggestions = merged.filter(r => !existingNames.has(r.name.toLowerCase()))
+  const suggestions = merged.filter(r => !recommendedAgentNameKeys(r as RecommendedAgent).some(name => existingNames.has(name)))
   if (suggestions.length === 0) return null
 
   const essential = suggestions.filter(r => (r as RecommendedAgent).essential)
@@ -83,7 +85,7 @@ export function RecommendedAgents({ agents, customTemplates, recommendedAgents, 
         <>
           <h3 className="text-xs font-semibold text-text-tertiary uppercase tracking-wider mt-1">Recommended</h3>
           {regular.map(rec => {
-            const isCustom = customNames.has(rec.name.toLowerCase())
+            const isCustom = customNames.has(recommendedAgentNameKey(rec.name))
             return (
               <div
                 key={rec.name}

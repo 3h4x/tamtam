@@ -99,7 +99,7 @@ Behavior:
 - They are templates only. Clicking `Add` creates a normal project agent row; TamTam does not treat the resulting agent as special after creation.
 - `schedule: ''` means manual-only. The template appears in recommendations, but the created agent is unscheduled until the user sets a schedule.
 - Built-in templates are merged with custom templates from Settings → Templates.
-- Custom templates override built-ins by case-insensitive `name`, so teams can replace the shipped default content for a given recommended agent without patching code.
+- Custom templates override built-ins by case-insensitive `name` or a built-in legacy alias, so teams can replace the shipped default content for a given recommended agent without patching code.
 - Override scope is content only. Settings templates do not carry the built-in `essential` / `featured` flags, so a same-name override suppresses the shipped entry and appears in the regular recommended bucket.
 
 Current notable entries:
