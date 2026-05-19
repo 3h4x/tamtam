@@ -24,6 +24,11 @@ const LEVEL_COLORS = {
   info:  { text: 'text-text-secondary', bg: '', border: 'border-l-border', badge: 'bg-bg-secondary text-text-tertiary' },
 }
 
+const SOURCE_BADGES = {
+  error: 'bg-status-error/15 text-status-error',
+  out: 'bg-bg-secondary text-text-tertiary',
+} as const
+
 function CopyButton({ getText, label, className = '' }: { getText: () => string; label?: string; className?: string }) {
   const [copied, setCopied] = useState(false)
   return (
@@ -62,6 +67,9 @@ function Pm2LogRow({ entry }: { entry: Pm2LogEntry }) {
             ? new Date(entry.ts).toLocaleString(undefined, { month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit', second: '2-digit' })
             : '—'}
         </span>
+        <span className={`shrink-0 rounded px-1 py-0.5 text-[10px] font-semibold uppercase ${SOURCE_BADGES[entry.source]}`}>
+          {entry.source === 'error' ? 'stderr' : 'stdout'}
+        </span>
         <span className={`${colors.text} shrink-0 font-semibold uppercase w-9`}>{entry.level}</span>
         <span className="text-text-primary break-all whitespace-pre-wrap min-w-0 flex-1" data-private>
           {display}
@@ -93,11 +101,11 @@ export function Pm2LogPanel({ pm2Logs, onRefresh }: { pm2Logs: Pm2LogData | null
     [pm2Logs, hideStdout]
   )
 
-  const counts = useMemo(() => ({
-    error: allEntries.filter(e => e.level === 'error').length,
-    warn:  allEntries.filter(e => e.level === 'warn').length,
-    info:  allEntries.filter(e => e.level === 'info').length,
-  }), [allEntries])
+  const counts = useMemo(() => {
+    const next = { error: 0, warn: 0, info: 0 }
+    for (const entry of allEntries) next[entry.level] += 1
+    return next
+  }, [allEntries])
 
   const filtered = useMemo(() => {
     if (levelFilter === 'all') return allEntries
@@ -110,8 +118,12 @@ export function Pm2LogPanel({ pm2Logs, onRefresh }: { pm2Logs: Pm2LogData | null
     : counts.error > 0 ? 'issue'
     : 'ok'
 
+  const fileErrors = pm2Logs?.files.filter(file => file.error) ?? []
+  const availableFiles = pm2Logs?.files.filter(file => !file.error) ?? []
+  const missingAllFiles = Boolean(pm2Logs) && availableFiles.length === 0
+
   const filterButtons: Array<{ key: LogLevelFilter; label: string; count?: number }> = [
-    { key: 'warn+', label: '> Info', count: counts.error + counts.warn },
+    { key: 'warn+', label: 'warn+', count: counts.error + counts.warn },
     { key: 'all', label: 'All', count: allEntries.length },
     { key: 'error', label: 'Error', count: counts.error },
     { key: 'warn', label: 'Warn', count: counts.warn },
@@ -174,14 +186,25 @@ export function Pm2LogPanel({ pm2Logs, onRefresh }: { pm2Logs: Pm2LogData | null
         </div>
       </div>
 
-      {!pm2Logs || pm2Logs.files.every(f => f.error) ? (
-        <p className="text-sm text-text-tertiary">
-          PM2 log file not found at <span data-private>{pm2Logs?.files[0]?.path ?? '~/.pm2/logs/tamtam-error.log'}</span>
-        </p>
+      {!pm2Logs ? (
+        <div className="rounded-lg border border-border bg-bg-secondary px-4 py-3 text-sm text-text-tertiary">
+          PM2 logs are unavailable right now. Refresh to retry after the monitoring API responds.
+        </div>
+      ) : missingAllFiles ? (
+        <div className="rounded-lg border border-border bg-bg-secondary px-4 py-3 space-y-2">
+          <p className="text-sm text-text-primary">PM2 log files were not found on this host.</p>
+          <div className="space-y-1 text-xs text-text-tertiary">
+            {fileErrors.map((file) => (
+              <div key={file.path} className="font-mono" data-private>
+                {file.path}
+              </div>
+            ))}
+          </div>
+        </div>
       ) : (
         <div className="space-y-2">
           <div className="flex items-center gap-4 text-xs text-text-tertiary flex-wrap">
-            {pm2Logs.files.map((f, i) => (
+            {availableFiles.map((f, i) => (
               <span key={i} data-private className="flex items-center gap-1">
                 <span className="font-mono">{f.path.split('/').pop()}</span>
                 {f.size != null
@@ -190,15 +213,24 @@ export function Pm2LogPanel({ pm2Logs, onRefresh }: { pm2Logs: Pm2LogData | null
                 {f.mtime && <span className="opacity-50">· {new Date(f.mtime).toLocaleString(undefined, { month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' })}</span>}
               </span>
             ))}
+            {fileErrors.length > 0 && (
+              <span className="text-status-warning">
+                {fileErrors.length} missing source{fileErrors.length === 1 ? '' : 's'}
+              </span>
+            )}
             {filtered.length !== allEntries.length && (
               <span className="opacity-60">showing {filtered.length} of {allEntries.length}</span>
             )}
           </div>
 
           {filtered.length === 0 ? (
-            <p className="text-sm text-text-tertiary">
-              {allEntries.length === 0 ? 'No recent log lines' : levelFilter === 'warn+' ? 'No warnings or errors' : `No ${levelFilter} entries`}
-            </p>
+            <div className="rounded-lg border border-border bg-bg-secondary px-4 py-3 text-sm text-text-tertiary">
+              {allEntries.length === 0
+                ? 'No recent PM2 log lines in the available files.'
+                : levelFilter === 'warn+'
+                ? 'No warnings or errors in the current source selection.'
+                : `No ${levelFilter} entries in the current source selection.`}
+            </div>
           ) : (
             <div className="rounded-md border border-border overflow-hidden overflow-y-auto" style={{ maxHeight: '500px' }}>
               {filtered.map((e, i) => <Pm2LogRow key={i} entry={e} />)}
