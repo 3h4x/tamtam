@@ -495,8 +495,15 @@ describe('ProjectRunsTab release actions', () => {
       expect(container.textContent).toContain('ship')
     })
 
-    expect(Array.from(container.querySelectorAll('button')).some((node) => node.textContent?.trim() === 'Retry release')).toBe(false)
-    expect(Array.from(container.querySelectorAll('button')).some((node) => node.textContent?.trim() === 'Continue release')).toBe(false)
+    // Post-merge: the agent row that owns the latest release carries its
+    // actions directly — the release row no longer appears as a separate
+    // node. So Continue release shows up on the collapsed agent row,
+    // and clicking expand surfaces the pipeline phases (not a duplicate
+    // release row), keeping the button count at exactly 1.
+    const collapsedContinue = Array.from(container.querySelectorAll('button')).filter((node) => node.textContent?.trim() === 'Continue release')
+    const collapsedRetry = Array.from(container.querySelectorAll('button')).filter((node) => node.textContent?.trim() === 'Retry release')
+    expect(collapsedContinue).toHaveLength(1)
+    expect(collapsedRetry).toHaveLength(0)
 
     const expandButton = Array.from(container.querySelectorAll('button')).find((node) => node.getAttribute('title') === 'Expand steps')
     if (!(expandButton instanceof HTMLButtonElement)) throw new Error('expand button not found')

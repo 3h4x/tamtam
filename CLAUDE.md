@@ -26,6 +26,8 @@ Canonical post-edit command: **`pnpm run rebuild`** (build + idempotent PM2 rest
 
 **`pnpm rebuild` is now graceful by default** (`scripts/rebuild-safe.sh`): it pauses jobs via `PATCH /api/settings {jobs_paused:true}`, polls `/api/jobs?running=1` until pipeline-step/agent/run jobs drain (default 10 min, override via `TAMTAM_REBUILD_DRAIN_TIMEOUT`), then builds + restarts via `pm2-start.sh` and unpauses. `pr-wait` is excluded from the drain set because its on-boot resume handles mid-poll interruption. If the build fails the pause is reverted; if the restart fails the pause is *kept* on so the half-restarted server doesn't pick up new work — clear it manually via `/settings`. For the legacy "kill everything immediately" behavior, use `pnpm rebuild:force` (equivalent to the old `pnpm build && pnpm start`).
 
+**Codex sandbox exception**: do not run `pnpm build`, `pnpm restart`, or `pnpm run rebuild` from Codex sandboxed sessions. The `prebuild` workflow graph render uses Mermaid CLI → Puppeteer/Chrome, and browser process launch is unavailable in the sandbox. Use `pnpm type-check`, `pnpm lint`, and targeted tests for verification, and clearly state that production build was not run.
+
 ## Architecture
 
 - `app/` — pages and API route handlers.
@@ -77,8 +79,8 @@ Canonical post-edit command: **`pnpm run rebuild`** (build + idempotent PM2 rest
 
 ## Definition of Done for UI/Frontend Changes
 
-- Server running (`pnpm run rebuild` if a build is needed) before testing. For deterministic flows that shouldn't depend on the live app, use `pnpm dev:qa` on port 1338.
-- Use Playwright MCP (`mcp__plugin_playwright_playwright__*`) to navigate and screenshot. Chrome DevTools MCP is unreliable — prefer Playwright.
+- Server running (`pnpm run rebuild` if a build is needed) before testing. In Codex sandboxed sessions, do not rebuild; use the existing reachable app if available, otherwise do static verification plus `pnpm type-check`.
+- Use Playwright only via MCP (`mcp__playwright__*` / Playwright MCP tools) to navigate and screenshot. Do not launch Playwright, Puppeteer, Chrome, or Chromium from shell in Codex sandboxed sessions; browser process launch is blocked there. Chrome DevTools MCP is unreliable — prefer Playwright MCP.
 - Test golden path + key edge cases visually; check adjacent features for regressions.
 - Do **NOT** claim frontend work complete without the Playwright screenshot step.
 

@@ -47,6 +47,11 @@ Project metadata and per-project pipeline config.
 | `reviewPromptAddendum` | TEXT | — | nullable; appended to the standard review prompt under "Project-specific review guidance" |
 | `reviewPrerequisiteCommand` | TEXT | — | nullable; bash command run before each review, with output appended to the review prompt |
 | `fixPromptAddendum` | TEXT | — | nullable; appended to the standard fix prompt under "Project-specific fix guidance" |
+| `website` | TEXT | — | nullable; public URL for QA agents |
+| `qaUrl` | TEXT | — | nullable; explicit QA target URL, preferred over `website` |
+| `devServerStartCommand` | TEXT | — | nullable; DB-only `bash -c` command TamTam runs from the project root at agent kickoff |
+| `devServerStopCommand` | TEXT | — | nullable; DB-only command run before TamTam falls back to terminating the owned dev-server process group |
+| `devServerReadyUrl` | TEXT | — | nullable; DB-only HTTP(S) readiness URL polled after starting the dev server |
 
 ---
 

@@ -11,7 +11,9 @@ export interface LocalRunFile {
   completedAt?: string;
   input?: LocalPayload | unknown;
   output?: LocalPayload | unknown;
-  error?: string;
+  // Workflow runtime writes structured errors as { message, stack } objects;
+  // legacy rows may be plain strings. normalizeWorkflowError() flattens both.
+  error?: unknown;
 }
 
 export interface LocalStepFile {
@@ -25,7 +27,8 @@ export interface LocalStepFile {
   completedAt?: string;
   input?: LocalPayload | unknown;
   output?: LocalPayload | unknown;
-  error?: string;
+  // See LocalRunFile.error.
+  error?: unknown;
 }
 
 interface LocalPayload {
@@ -78,6 +81,26 @@ export function localWorldStepsDir(): string {
 export function simplifyWorkflowName(raw: string): string {
   const parts = raw.split('//');
   return parts[parts.length - 1] || raw;
+}
+
+// Normalize the workflow `error` column to a stable string. node-pg parses
+// jsonb into a JS value, so the column comes back as a string for legacy
+// rows but typically `{message, stack}` for structured failures from the
+// Workflow runtime. Both shapes appear in the wild; flatten before serving
+// so the client can render it directly without per-row type-guarding.
+export function normalizeWorkflowError(err: unknown): string | null {
+  if (err == null) return null;
+  if (typeof err === 'string') return err;
+  if (typeof err === 'object') {
+    const o = err as Record<string, unknown>;
+    if (typeof o.message === 'string') return o.message;
+    try {
+      return JSON.stringify(err);
+    } catch {
+      return String(err);
+    }
+  }
+  return String(err);
 }
 
 export function clampJson(value: unknown, maxBytes = 2_000): unknown {
@@ -133,7 +156,7 @@ export function toLocalRunSummary(raw: LocalRunFile): LocalWorkflowRunSummary {
     durationMs: started && completed ? completed.getTime() - started.getTime() : null,
     input: clampJson(decodeLocalPayload(raw.input)),
     output: clampJson(decodeLocalPayload(raw.output)),
-    error: raw.error ?? null,
+    error: normalizeWorkflowError(raw.error),
   };
 }
 
@@ -153,7 +176,7 @@ export function toLocalStepSummary(raw: LocalStepFile): LocalWorkflowStepSummary
     durationMs: started && completed ? completed.getTime() - started.getTime() : null,
     input: clampJson(decodeLocalPayload(raw.input), 4_000),
     output: clampJson(decodeLocalPayload(raw.output), 4_000),
-    error: raw.error ?? null,
+    error: normalizeWorkflowError(raw.error),
   };
 }
 

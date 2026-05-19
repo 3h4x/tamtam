@@ -9,7 +9,13 @@ import { tmpdir } from 'os';
 // re-import on every test. The route module is imported exactly once.
 const state = vi.hoisted(() => ({
   projectPath: '' as string | null,
-  projectRow: undefined as { website?: string | null; qaUrl?: string | null } | undefined,
+  projectRow: undefined as {
+    website?: string | null;
+    qaUrl?: string | null;
+    devServerStartCommand?: string | null;
+    devServerStopCommand?: string | null;
+    devServerReadyUrl?: string | null;
+  } | undefined,
   testCfg: null as Record<string, unknown> | null,
   pushResult: null as Record<string, unknown> | null,
   pipelinePrompts: {
@@ -349,6 +355,20 @@ describe('GET /api/projects/by-project/{projectName}/config', () => {
     expect(data.website).toBe('https://example.com/app');
   });
 
+  it('surfaces stored dev server lifecycle commands when present', async () => {
+    state.projectRow = {
+      devServerStartCommand: 'pnpm dev',
+      devServerStopCommand: 'pnpm dev:stop',
+      devServerReadyUrl: 'http://localhost:3000/health',
+    };
+    const req = new NextRequest('http://localhost/api/projects/by-project/proj1/config');
+    const res = await GET(req, { params: Promise.resolve({ projectName: 'proj1' }) });
+    const data = await res.json();
+    expect(data.dev_server_start_command).toBe('pnpm dev');
+    expect(data.dev_server_stop_command).toBe('pnpm dev:stop');
+    expect(data.dev_server_ready_url).toBe('http://localhost:3000/health');
+  });
+
   it('detects pnpm test when package.json has test script and pnpm-lock.yaml exists', async () => {
     writeFileSync(join(tempDir, 'package.json'), JSON.stringify({ scripts: { test: 'vitest run' } }));
     writeFileSync(join(tempDir, 'pnpm-lock.yaml'), '');
@@ -618,6 +638,38 @@ describe('PATCH /api/projects/by-project/{projectName}/config', () => {
     expect(mocks.writeProjectFieldYaml).toHaveBeenCalledWith('proj1', 'website', null);
   });
 
+  it('persists trimmed dev server lifecycle fields to DB-only project config', async () => {
+    const req = new NextRequest('http://localhost/api/projects/by-project/proj1/config', {
+      method: 'PATCH',
+      body: JSON.stringify({
+        dev_server_start_command: '  pnpm dev  ',
+        dev_server_stop_command: '  pnpm dev:stop  ',
+        dev_server_ready_url: '  http://localhost:3000/ready  ',
+      }),
+    });
+    const res = await PATCH(req, { params: Promise.resolve({ projectName: 'proj1' }) });
+    expect(res.status).toBe(200);
+    expect(mocks.writeProjectFieldYaml).toHaveBeenCalledWith('proj1', 'dev_server_start_command', 'pnpm dev');
+    expect(mocks.writeProjectFieldYaml).toHaveBeenCalledWith('proj1', 'dev_server_stop_command', 'pnpm dev:stop');
+    expect(mocks.writeProjectFieldYaml).toHaveBeenCalledWith('proj1', 'dev_server_ready_url', 'http://localhost:3000/ready');
+  });
+
+  it('clears dev server lifecycle fields when whitespace-only', async () => {
+    const req = new NextRequest('http://localhost/api/projects/by-project/proj1/config', {
+      method: 'PATCH',
+      body: JSON.stringify({
+        dev_server_start_command: '   ',
+        dev_server_stop_command: '   ',
+        dev_server_ready_url: '   ',
+      }),
+    });
+    const res = await PATCH(req, { params: Promise.resolve({ projectName: 'proj1' }) });
+    expect(res.status).toBe(200);
+    expect(mocks.writeProjectFieldYaml).toHaveBeenCalledWith('proj1', 'dev_server_start_command', null);
+    expect(mocks.writeProjectFieldYaml).toHaveBeenCalledWith('proj1', 'dev_server_stop_command', null);
+    expect(mocks.writeProjectFieldYaml).toHaveBeenCalledWith('proj1', 'dev_server_ready_url', null);
+  });
+
   it('rejects invalid website URLs', async () => {
     const req = new NextRequest('http://localhost/api/projects/by-project/proj1/config', {
       method: 'PATCH',
@@ -640,6 +692,30 @@ describe('PATCH /api/projects/by-project/{projectName}/config', () => {
     const data = await res.json();
     expect(data.detail).toContain('http(s)');
     expect(mocks.writeProjectFieldYaml).not.toHaveBeenCalledWith('proj1', 'website', expect.anything());
+  });
+
+  it('rejects invalid dev server ready URLs', async () => {
+    const req = new NextRequest('http://localhost/api/projects/by-project/proj1/config', {
+      method: 'PATCH',
+      body: JSON.stringify({ dev_server_ready_url: 'not a url' }),
+    });
+    const res = await PATCH(req, { params: Promise.resolve({ projectName: 'proj1' }) });
+    expect(res.status).toBe(400);
+    const data = await res.json();
+    expect(data.detail).toContain('valid URL');
+    expect(mocks.writeProjectFieldYaml).not.toHaveBeenCalledWith('proj1', 'dev_server_ready_url', expect.anything());
+  });
+
+  it('rejects non-http dev server ready URLs', async () => {
+    const req = new NextRequest('http://localhost/api/projects/by-project/proj1/config', {
+      method: 'PATCH',
+      body: JSON.stringify({ dev_server_ready_url: 'ftp://localhost/ready' }),
+    });
+    const res = await PATCH(req, { params: Promise.resolve({ projectName: 'proj1' }) });
+    expect(res.status).toBe(400);
+    const data = await res.json();
+    expect(data.detail).toContain('http(s)');
+    expect(mocks.writeProjectFieldYaml).not.toHaveBeenCalledWith('proj1', 'dev_server_ready_url', expect.anything());
   });
 
   it('rejects boolean website payloads instead of clearing the stored value', async () => {

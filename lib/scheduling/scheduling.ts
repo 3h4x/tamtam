@@ -195,6 +195,12 @@ export async function writeProjectFieldYaml(
     run(db.update(schema.projects).set({ postMergeWatchMinutes: minutes }).where(w).execute());
   } else if (fieldName === 'auto_revert_enabled') {
     run(db.update(schema.projects).set({ autoRevertEnabled: value === '1' || value === 'true' }).where(w).execute());
+  } else if (fieldName === 'dev_server_start_command') {
+    run(db.update(schema.projects).set({ devServerStartCommand: value }).where(w).execute());
+  } else if (fieldName === 'dev_server_stop_command') {
+    run(db.update(schema.projects).set({ devServerStopCommand: value }).where(w).execute());
+  } else if (fieldName === 'dev_server_ready_url') {
+    run(db.update(schema.projects).set({ devServerReadyUrl: value }).where(w).execute());
   }
   return true;
 }

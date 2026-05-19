@@ -470,6 +470,18 @@ async function drainBootRecoveryWork(): Promise<void> {
   } catch (err) {
     console.error('[boot] drainBootRecoveryWork failed:', err);
   }
+  // Sweep orphaned dev servers: any pidfile whose project has no active
+  // agent/release. Runs AFTER recovery drain so re-enqueued work has been
+  // marked active in DB and we don't kill a server about to be reused.
+  try {
+    const { sweepOrphanDevServers } = await import('@/lib/dev-server/lifecycle');
+    const { stopped, kept } = await sweepOrphanDevServers();
+    if (stopped.length || kept.length) {
+      console.log(`[boot] dev-server sweep: stopped=[${stopped.join(',')}] kept=[${kept.join(',')}]`);
+    }
+  } catch (err) {
+    console.error('[boot] dev-server sweep failed:', err);
+  }
 }
 
 export async function registerNode(): Promise<void> {

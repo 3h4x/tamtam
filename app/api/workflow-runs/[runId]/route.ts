@@ -12,6 +12,7 @@ import { Pool } from 'pg';
 import { decodeWorkflowPayload } from '@/lib/workflows/decode-workflow-payload';
 import {
   clampJson as clampWorkflowJson,
+  normalizeWorkflowError,
   readLocalRunFile,
   readLocalStepFiles,
   simplifyWorkflowName,
@@ -30,7 +31,8 @@ interface RunRow {
   input_cbor: Buffer | null;
   output: unknown;
   output_cbor: Buffer | null;
-  error: string | null;
+  // jsonb column — see normalizeWorkflowError() in local-world-runs.ts.
+  error: unknown;
 }
 
 interface StepRow {
@@ -45,7 +47,8 @@ interface StepRow {
   input_cbor: Buffer | null;
   output: unknown;
   output_cbor: Buffer | null;
-  error: string | null;
+  // jsonb column — see normalizeWorkflowError() in local-world-runs.ts.
+  error: unknown;
 }
 
 
@@ -118,7 +121,7 @@ export async function GET(
             : null,
         input: clampJson(decodeWorkflowPayload(run.input, run.input_cbor)),
         output: clampJson(decodeWorkflowPayload(run.output, run.output_cbor)),
-        error: run.error,
+        error: normalizeWorkflowError(run.error),
       },
       steps: stepsResult.rows.map((s) => ({
         stepId: s.step_id,
@@ -135,7 +138,7 @@ export async function GET(
             : null,
         input: clampJson(decodeWorkflowPayload(s.input, s.input_cbor)),
         output: clampJson(decodeWorkflowPayload(s.output, s.output_cbor)),
-        error: s.error,
+        error: normalizeWorkflowError(s.error),
       })),
     });
   } catch (err) {

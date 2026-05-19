@@ -61,9 +61,17 @@ function buildMermaid({ TRIGGERS, TRANSITIONS }) {
   }
   // Release-after-run gate (the trigger files own its real logic; we render
   // it here so the diagram shows the entry path the user sees).
+  // Agent runs ALSO produce a server-side action block (`tamtam-actions`)
+  // that runs in completion hooks — issue-close, checkout-default, etc.
+  // The action orchestrator runs BEFORE the release gate; issue-cruncher
+  // and other ghIssue-scoped runs short-circuit on `noRelease` after their
+  // actions execute (see project_issue_work_no_auto_release memory).
   lines.push('');
-  lines.push(`  ${agentRunId} --> raR{successful run/agent<br/>+ release_after_run?}`);
+  lines.push(`  ${agentRunId} --> actions{emits<br/>tamtam-actions?}`);
   lines.push(`  ${scheduledId} --> ${agentRunId}`);
+  lines.push('  actions -->|yes| actionsExec[run actions<br/>issue-close · label · comment · checkout-default]');
+  lines.push('  actions -->|no| raR{successful run/agent<br/>+ release_after_run?}');
+  lines.push('  actionsExec --> raR');
   lines.push('  raR -->|"yes<br/>issue work ok"| release');
   lines.push('  raR -->|retryable blocker| pending([pending release<br/>drain later])');
   lines.push('  raR -->|no / non-retryable| noRelease([no release])');

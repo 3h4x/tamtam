@@ -40,6 +40,7 @@ const mocks = vi.hoisted(() => {
     drainProjectRecoveryWork: vi.fn(),
     isProjectPaused: vi.fn(),
     retrieveAgentContextDetailed: vi.fn(),
+    ensureDevServerRunning: vi.fn(),
     getDirtyFileCount: vi.fn(),
     getQuotaSnapshots: vi.fn(),
     getSettings: vi.fn(),
@@ -130,6 +131,10 @@ vi.mock('@/lib/jobs/pm2-jobs', () => ({
 // tests still observe via mocks.startJob.
 vi.mock('@/lib/jobs/inline-agent', () => ({
   startInProcessAgentJob: (...a: unknown[]) => mocks.startJob(...a),
+}));
+
+vi.mock('@/lib/dev-server/lifecycle', () => ({
+  ensureDevServerRunning: (...a: unknown[]) => mocks.ensureDevServerRunning(...a),
 }));
 
 vi.mock('@/lib/skills/skills', () => ({
@@ -227,6 +232,40 @@ async function applyDdl(handle: TestDbHandle): Promise<void> {
     )
   `));
   await handle.db.execute(sql.raw(`
+    CREATE TABLE IF NOT EXISTS projects (
+      name text PRIMARY KEY,
+      path text NOT NULL,
+      enabled boolean DEFAULT false,
+      github text,
+      priority text,
+      custom_actions text,
+      test_command text,
+      tests_disabled boolean DEFAULT false,
+      review_disabled boolean DEFAULT false,
+      test_cron_enabled boolean DEFAULT false,
+      test_cron_schedule text,
+      auto_commit_enabled boolean DEFAULT false,
+      auto_push_enabled boolean DEFAULT false,
+      auto_pr_merge_enabled boolean DEFAULT false,
+      post_merge_watch_minutes integer DEFAULT 0,
+      auto_revert_enabled boolean DEFAULT false,
+      release_after_run boolean DEFAULT false,
+      issue_auto_branch boolean DEFAULT true,
+      last_push_error text,
+      last_push_at double precision,
+      review_prompt_addendum text,
+      review_prerequisite_command text,
+      fix_prompt_addendum text,
+      website text,
+      qa_url text,
+      dev_server_start_command text,
+      dev_server_stop_command text,
+      dev_server_ready_url text,
+      archived boolean NOT NULL DEFAULT false,
+      paused boolean NOT NULL DEFAULT false
+    )
+  `));
+  await handle.db.execute(sql.raw(`
     CREATE TABLE IF NOT EXISTS skills (
       id text PRIMARY KEY,
       name text NOT NULL,
@@ -242,7 +281,7 @@ async function resetAgentRunTables(handle: TestDbHandle): Promise<void> {
   // PGlite rejects multi-statement prepared queries; a single CTE keeps the
   // per-test cleanup to one round-trip.
   await handle.db.execute(sql.raw(
-    'WITH deleted_agents AS (DELETE FROM agents RETURNING 1) DELETE FROM skills'
+    'TRUNCATE agents, skills, projects'
   ));
 }
 
@@ -286,6 +325,19 @@ describe('POST /api/agents/{agentId}/run', () => {
         schedule: null,
         createdAt: now,
         updatedAt: now,
+        ...overrides,
+      });
+  }
+
+  async function insertProject(overrides: Record<string, unknown> = {}) {
+    await sharedHandle.db
+      .insert(schema.projects)
+      .values({
+        name: 'proj1',
+        path: '/path/to/proj',
+        devServerStartCommand: null,
+        devServerStopCommand: null,
+        devServerReadyUrl: null,
         ...overrides,
       });
   }
@@ -387,6 +439,7 @@ describe('POST /api/agents/{agentId}/run', () => {
     mocks.drainPendingRelease.mockReset().mockResolvedValue(undefined);
     mocks.drainProjectRecoveryWork.mockReset().mockResolvedValue(undefined);
     mocks.isProjectPaused.mockReset().mockReturnValue(false);
+    mocks.ensureDevServerRunning.mockReset().mockResolvedValue({ status: 'started', pidfile: {} });
     mocks.getDirtyFileCount.mockReset().mockResolvedValue(0);
     mocks.retrieveAgentContextDetailed.mockReset().mockResolvedValue({
       block: '## Retrieved Context\ncached context',
@@ -503,6 +556,24 @@ describe('POST /api/agents/{agentId}/run', () => {
     expect(data.job_id).toBeTruthy();
     expect(data.agent).toBe('Test Agent');
     expect(mocks.drainNextAgentRun).toHaveBeenCalledWith('proj1');
+  });
+
+  it('does not start a dev server when the workflow replay sees an already-finalized job', async () => {
+    await insertAgent();
+    await insertProject({ devServerStartCommand: 'pnpm dev' });
+    const finalizedJob = makeJob({ finishedAt: Date.now() / 1000, exitCode: -1 });
+    mocks.createJob.mockReturnValue(finalizedJob);
+    mocks.getJob.mockReturnValue(finalizedJob);
+
+    const req = new NextRequest('http://localhost/api/agents/agent-123/run', {
+      method: 'POST',
+      body: JSON.stringify({ prompt: 'do something' }),
+    });
+    const res = await POST(req, { params: Promise.resolve({ agentId: 'agent-123' }) });
+
+    expect(res.status).toBe(200);
+    expect(mocks.ensureDevServerRunning).not.toHaveBeenCalled();
+    expect(mocks.startJob).not.toHaveBeenCalled();
   });
 
   it('keeps the Codex shim on the command line and forwards CODEX_BIN via env', async () => {

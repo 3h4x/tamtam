@@ -8,6 +8,7 @@
 - `pnpm restart` — legacy immediate build then PM2 restart via `pnpm build && bash scripts/pm2-start.sh`; does not perform the graceful drain. Note: bare `pnpm rebuild` triggers pnpm's native-deps rebuild instead — always use `pnpm run rebuild`.
 - `pnpm stop` — stop the PM2 server.
 - `pnpm logs` — view PM2 logs.
+- `ecosystem.config.js` — PM2 compatibility config for operators that use ecosystem files. It mirrors the production `next start` target; `pnpm start` / `scripts/pm2-start.sh` remains the canonical lifecycle because it also handles orphaned port cleanup and legacy PM2 entries.
 - `pnpm build` — production build. Runs `prebuild` first, which regenerates `public/workflow-graph.svg` from `lib/workflows/pipeline-spec.ts` when Chrome/Chromium is available. If no browser is available but the committed SVG already exists, the generator keeps the existing SVG and lets the build continue.
 - `pnpm gen:workflow-graph` — manually regenerate the release pipeline SVG after editing `lib/workflows/pipeline-spec.ts`. Set `PUPPETEER_EXECUTABLE_PATH` to a Chrome/Chromium binary when the system browser is not in a standard location.
 - `pnpm dev` — `next dev` foreground on port 1337 (HMR enabled, no PM2). Local debugging only. Never use as the long-lived server (HMR watchers can restart mid-operation, orphaning in-flight jobs).

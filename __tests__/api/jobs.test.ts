@@ -262,6 +262,81 @@ describe('GET /api/jobs', () => {
     expect(data.nextOffset).toBe(4);
     expect(mocks.probeJobStatus).toHaveBeenCalledTimes(2);
   });
+
+  it('hydrates the parent agent for a release whose parent was paginated out', async () => {
+    // Agent ran 9h ago, succeeded, triggered a release that's still pending
+    // attention. The agent has scrolled off the first page; the release is
+    // alone on the page. The route should attach the parent so the client
+    // can render them as one merged row.
+    const agent = makeJob({
+      id: 'borged-agent:frontend-old',
+      kind: 'agent:frontend',
+      startedAt: 100, // old
+      finishedAt: 110,
+      exitCode: 0,
+    });
+    const filler = Array.from({ length: 3 }, (_, i) =>
+      makeJob({ id: `unrelated-${i}`, kind: 'run', startedAt: 500 + i })
+    );
+    const release = makeJob({
+      id: 'borged-release-recent',
+      kind: 'release',
+      startedAt: 900,
+      parentJobId: agent.id,
+    });
+    mocks.listJobs.mockReturnValue([agent, ...filler, release]);
+
+    const req = new NextRequest('http://localhost/api/jobs?limit=3');
+    const res = await jobsGET(req);
+    const data = await res.json();
+    const ids = data.jobs.map((j: any) => j.id);
+    // Page itself is the 3 newest (release + 2 filler); parent is attached.
+    expect(ids).toContain('borged-release-recent');
+    expect(ids).toContain('borged-agent:frontend-old');
+    // total/limit stay paginated; attachment is extra.
+    expect(data.total).toBe(5);
+    expect(data.limit).toBe(3);
+  });
+
+  it('does not double-hydrate when the parent is already on the page', async () => {
+    const agent = makeJob({
+      id: 'agent-on-page',
+      kind: 'agent:frontend',
+      startedAt: 800,
+      finishedAt: 850,
+      exitCode: 0,
+    });
+    const release = makeJob({
+      id: 'rel-on-page',
+      kind: 'release',
+      startedAt: 900,
+      parentJobId: agent.id,
+    });
+    mocks.listJobs.mockReturnValue([agent, release]);
+
+    const req = new NextRequest('http://localhost/api/jobs?limit=5');
+    const res = await jobsGET(req);
+    const data = await res.json();
+    const ids = data.jobs.map((j: any) => j.id);
+    // Each appears exactly once — no duplicate attachment.
+    expect(ids.filter((id: string) => id === 'agent-on-page')).toHaveLength(1);
+    expect(ids.filter((id: string) => id === 'rel-on-page')).toHaveLength(1);
+  });
+
+  it('skips hydration when a release has no parent_job_id (manual release)', async () => {
+    const release = makeJob({
+      id: 'manual-release',
+      kind: 'release',
+      startedAt: 900,
+      parentJobId: null,
+    });
+    mocks.listJobs.mockReturnValue([release]);
+
+    const req = new NextRequest('http://localhost/api/jobs?limit=5');
+    const res = await jobsGET(req);
+    const data = await res.json();
+    expect(data.jobs.map((j: any) => j.id)).toEqual(['manual-release']);
+  });
 });
 
 describe('GET /api/jobs/counts', () => {

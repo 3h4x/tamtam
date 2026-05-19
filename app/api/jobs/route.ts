@@ -48,10 +48,32 @@ export async function GET(request: NextRequest) {
   const toProbe = page.filter((j) => j.finishedAt === null && j.abortedAt == null);
   await Promise.all(toProbe.map((j) => probeJobStatus(j)));
 
+  // Merge agent run + downstream release into one visual workflow: if a
+  // release in the page points at a parent agent that's been paginated out,
+  // hydrate the parent and ship it alongside the page. Without this, the
+  // run-list nesting logic in components/project-runs/utils.ts can't link
+  // them and the release renders as a standalone "WANTED" card — which the
+  // user sees as the release pipeline being a "separate step" from the
+  // agent run that triggered it. Synthetic attachments don't count toward
+  // pagination math; clients dedupe by id.
+  const pageIds = new Set(page.map((j) => j.id));
+  const attachments: typeof page = [];
+  const seenAttachmentIds = new Set<string>();
+  for (const j of page) {
+    if (j.kind !== 'release') continue;
+    const parentId = j.parentJobId;
+    if (!parentId || pageIds.has(parentId) || seenAttachmentIds.has(parentId)) continue;
+    const parent = jobs.find((p) => p.id === parentId);
+    if (parent) {
+      attachments.push(parent);
+      seenAttachmentIds.add(parent.id);
+    }
+  }
+
   const pendingProjects = await listPendingReleaseProjects();
 
   return NextResponse.json({
-    jobs: page.map(jobToListDict),
+    jobs: [...page, ...attachments].map(jobToListDict),
     total,
     offset,
     limit,

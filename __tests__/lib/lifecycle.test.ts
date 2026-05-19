@@ -83,6 +83,40 @@ async function applyDdl(handle: TestDbHandle): Promise<void> {
     )
   `));
   await handle.db.execute(sql.raw(`
+    CREATE TABLE IF NOT EXISTS projects (
+      name text PRIMARY KEY,
+      path text NOT NULL,
+      enabled boolean DEFAULT false,
+      github text,
+      priority text,
+      custom_actions text,
+      test_command text,
+      tests_disabled boolean DEFAULT false,
+      review_disabled boolean DEFAULT false,
+      test_cron_enabled boolean DEFAULT false,
+      test_cron_schedule text,
+      auto_commit_enabled boolean DEFAULT false,
+      auto_push_enabled boolean DEFAULT false,
+      auto_pr_merge_enabled boolean DEFAULT false,
+      post_merge_watch_minutes integer DEFAULT 0,
+      auto_revert_enabled boolean DEFAULT false,
+      release_after_run boolean DEFAULT false,
+      issue_auto_branch boolean DEFAULT true,
+      last_push_error text,
+      last_push_at double precision,
+      review_prompt_addendum text,
+      review_prerequisite_command text,
+      fix_prompt_addendum text,
+      website text,
+      qa_url text,
+      dev_server_start_command text,
+      dev_server_stop_command text,
+      dev_server_ready_url text,
+      archived boolean NOT NULL DEFAULT false,
+      paused boolean NOT NULL DEFAULT false
+    )
+  `));
+  await handle.db.execute(sql.raw(`
     CREATE TABLE IF NOT EXISTS job_completion_events (
       id serial PRIMARY KEY,
       job_id text NOT NULL,
@@ -164,6 +198,9 @@ const mocks = vi.hoisted(() => ({
   finalizeAgentRunReport: vi.fn(),
   // agents/pending-agent-run
   drainNextAgentRun: vi.fn(),
+  // dev-server lifecycle
+  hasActiveWorkForProject: vi.fn(),
+  stopDevServer: vi.fn(),
 }));
 
 // Module-level mocks; the factories late-bind to the hoisted bag, so the
@@ -244,6 +281,12 @@ vi.mock('@/lib/agents/agent-run-report', () => ({
 vi.mock('@/lib/agents/pending-agent-run', () => ({
   drainNextAgentRun: mocks.drainNextAgentRun,
 }));
+vi.mock('@/lib/dev-server/active-work', () => ({
+  hasActiveWorkForProject: mocks.hasActiveWorkForProject,
+}));
+vi.mock('@/lib/dev-server/lifecycle', () => ({
+  stopDevServer: mocks.stopDevServer,
+}));
 
 // Late-bound module bindings. Imported once in `beforeAll` AFTER the test DB
 // is initialized so `vi.mock('@/lib/db')`'s factory returns a real Drizzle
@@ -251,6 +294,8 @@ vi.mock('@/lib/agents/pending-agent-run', () => ({
 // previous implementation), saving ~50-100ms per test.
 let markDone: typeof import('@/lib/jobs/job-storage').markDone;
 let runCompletionHooks: typeof import('@/lib/jobs/job-storage').runCompletionHooks;
+let finalizeReleaseJob: typeof import('@/lib/jobs/lifecycle').finalizeReleaseJob;
+let finalizeAbortedRelease: typeof import('@/lib/jobs/lifecycle').finalizeAbortedRelease;
 let jobsCache: Map<string, JobData>;
 
 beforeAll(async () => {
@@ -260,6 +305,9 @@ beforeAll(async () => {
   const mod = await import('@/lib/jobs/job-storage');
   markDone = mod.markDone;
   runCompletionHooks = mod.runCompletionHooks;
+  const lifecycle = await import('@/lib/jobs/lifecycle');
+  finalizeReleaseJob = lifecycle.finalizeReleaseJob;
+  finalizeAbortedRelease = lifecycle.finalizeAbortedRelease;
   jobsCache = (await import('@/lib/jobs/storage')).jobsCache;
 });
 
@@ -311,13 +359,15 @@ function applyDefaultMocks(): void {
   mocks.retryVerdictWithClaude.mockResolvedValue(null);
   mocks.finalizeAgentRunReport.mockResolvedValue(undefined);
   mocks.drainNextAgentRun.mockResolvedValue(undefined);
+  mocks.hasActiveWorkForProject.mockResolvedValue(false);
+  mocks.stopDevServer.mockResolvedValue({ status: 'stopped', pid: 1234 });
 }
 
 async function resetTestState(): Promise<void> {
   jobsCache.clear();
   // Single TRUNCATE — fast on small tables, single round-trip to PGlite.
   await sharedHandle.db.execute(
-    sql.raw('TRUNCATE jobs, recommendations, gh_issues_cache, settings, job_completion_events'),
+    sql.raw('TRUNCATE jobs, recommendations, gh_issues_cache, settings, projects, job_completion_events'),
   );
   applyDefaultMocks();
 }
@@ -421,8 +471,112 @@ function getTestDb(): TestDbHandle['db'] {
   return sharedHandle.db;
 }
 
+async function insertProjectWithDevServer(project = 'proj'): Promise<void> {
+  await getTestDb().insert(schema.projects).values({
+    name: project,
+    path: `/workspace/${project}`,
+    devServerStartCommand: 'pnpm dev',
+    devServerStopCommand: 'pnpm dev:stop',
+    devServerReadyUrl: 'http://localhost:3000',
+  });
+}
+
 // ─── reconcileStaleRelease ────────────────────────────────────────────────────
 // ─── reconcileStaleRelease tests removed: function retired with chain-loop closure
+
+describe('release dev-server cleanup', () => {
+  beforeEach(async () => {
+    await resetTestState();
+  });
+
+  it('stops a configured dev server when finalizeReleaseJob completes a release', async () => {
+    const now = Date.now() / 1000;
+    await insertProjectWithDevServer('proj');
+    await insertJobsAndCache(getTestDb(), [
+      makeJobRow({
+        id: 'release-normal',
+        project: 'proj',
+        kind: 'release',
+        startedAt: now - 30,
+      }),
+    ]);
+
+    const release = jobsCache.get('release-normal');
+    if (!release) throw new Error('release not cached');
+    await finalizeReleaseJob(release, 0);
+
+    expect(mocks.hasActiveWorkForProject).toHaveBeenCalledWith('proj');
+    expect(mocks.stopDevServer).toHaveBeenCalledWith('proj', {
+      stopCommand: 'pnpm dev:stop',
+      cwd: '/workspace/proj',
+    });
+  });
+
+  it('stops a configured dev server when finalizeAbortedRelease completes a release', async () => {
+    const now = Date.now() / 1000;
+    await insertProjectWithDevServer('proj');
+    await insertJobsAndCache(getTestDb(), [
+      makeJobRow({
+        id: 'release-aborted',
+        project: 'proj',
+        kind: 'release',
+        startedAt: now - 30,
+      }),
+    ]);
+
+    const release = jobsCache.get('release-aborted');
+    if (!release) throw new Error('release not cached');
+    await finalizeAbortedRelease(release);
+
+    expect(mocks.stopDevServer).toHaveBeenCalledWith('proj', {
+      stopCommand: 'pnpm dev:stop',
+      cwd: '/workspace/proj',
+    });
+  });
+
+  it('stops a configured dev server when a release is marked done directly', async () => {
+    const now = Date.now() / 1000;
+    await insertProjectWithDevServer('proj');
+    await insertJobsAndCache(getTestDb(), [
+      makeJobRow({
+        id: 'release-direct',
+        project: 'proj',
+        kind: 'release',
+        startedAt: now - 30,
+      }),
+    ]);
+
+    const release = jobsCache.get('release-direct');
+    if (!release) throw new Error('release not cached');
+    await markDone(release, 1);
+
+    expect(mocks.stopDevServer).toHaveBeenCalledWith('proj', {
+      stopCommand: 'pnpm dev:stop',
+      cwd: '/workspace/proj',
+    });
+  });
+
+  it('keeps the dev server running when another active release or agent still owns the project', async () => {
+    const now = Date.now() / 1000;
+    mocks.hasActiveWorkForProject.mockResolvedValue(true);
+    await insertProjectWithDevServer('proj');
+    await insertJobsAndCache(getTestDb(), [
+      makeJobRow({
+        id: 'release-normal',
+        project: 'proj',
+        kind: 'release',
+        startedAt: now - 30,
+      }),
+    ]);
+
+    const release = jobsCache.get('release-normal');
+    if (!release) throw new Error('release not cached');
+    await finalizeReleaseJob(release, 0);
+
+    expect(mocks.hasActiveWorkForProject).toHaveBeenCalledWith('proj');
+    expect(mocks.stopDevServer).not.toHaveBeenCalled();
+  });
+});
 
 describe('runCompletionHooks abort cleanup', () => {
   function makeJob(kind: string, overrides: Partial<JobData> = {}): JobData {

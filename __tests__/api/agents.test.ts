@@ -115,6 +115,9 @@ async function applyDdl(handle: TestDbHandle): Promise<void> {
       fix_prompt_addendum text,
       website text,
       qa_url text,
+      dev_server_start_command text,
+      dev_server_stop_command text,
+      dev_server_ready_url text,
       archived boolean NOT NULL DEFAULT false,
       paused boolean NOT NULL DEFAULT false
     )

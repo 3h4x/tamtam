@@ -65,6 +65,16 @@ export const projects = pgTable('projects', {
   fixPromptAddendum: text('fix_prompt_addendum'),
   website: text('website'),
   qaUrl: text('qa_url'),
+  // Per-project dev server lifecycle. When `devServerStartCommand` is set,
+  // TamTam starts it at agent run kickoff and stops it when the outermost
+  // scope (agent run, or downstream release if release_after_run fired)
+  // finishes. `devServerStopCommand` is optional — when null we send SIGTERM
+  // to the spawned process group. `devServerReadyUrl` gates "ready" on a
+  // 2xx/3xx HTTP probe; when null the spawn returns after a short grace
+  // period. See lib/dev-server/lifecycle.ts.
+  devServerStartCommand: text('dev_server_start_command'),
+  devServerStopCommand: text('dev_server_stop_command'),
+  devServerReadyUrl: text('dev_server_ready_url'),
   archived: boolean('archived').notNull().default(false),
   paused: boolean('paused').notNull().default(false),
 });
