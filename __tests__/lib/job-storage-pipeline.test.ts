@@ -1203,6 +1203,7 @@ describe('markDone – isClaudeKind exit-code override for new kinds', () => {
     vi.doMock('@/lib/pipeline/push-rejection', () => ({
       isHookRejection: vi.fn().mockReturnValue(false),
       isTestFailureRejection: vi.fn().mockReturnValue(false),
+      isRemoteRaceRejection: vi.fn().mockReturnValue(false),
     }));
     vi.doMock('@/lib/pipeline/start-fix', () => ({
       startFixFromJob: vi.fn().mockResolvedValue({ ok: false, status: 503, detail: 'test' }),
@@ -1344,6 +1345,7 @@ describe.skip('runCompletionHooks – push-fix auto-recovery (unified fix)', () 
   const startProjectReviewMock = vi.fn();
   const isHookRejectionMock = vi.fn();
   const isTestFailureRejectionMock = vi.fn();
+  const isRemoteRaceRejectionMock = vi.fn();
   const getProjectTestConfigMock = vi.fn();
   const execMock = vi.fn();
   const resolveProjectPathMock = vi.fn();
@@ -1412,6 +1414,7 @@ describe.skip('runCompletionHooks – push-fix auto-recovery (unified fix)', () 
     vi.doMock('@/lib/pipeline/push-rejection', () => ({
       isHookRejection: isHookRejectionMock,
       isTestFailureRejection: isTestFailureRejectionMock,
+      isRemoteRaceRejection: isRemoteRaceRejectionMock,
     }));
 
     const mod = await import('@/lib/jobs/job-storage');
@@ -1432,6 +1435,7 @@ describe.skip('runCompletionHooks – push-fix auto-recovery (unified fix)', () 
     startProjectReviewMock.mockReset().mockResolvedValue({ ok: true, jobId: 'rev-1', pid: 888, logPath: '/tmp/rev.log' });
     isHookRejectionMock.mockReset().mockReturnValue(false);
     isTestFailureRejectionMock.mockReset().mockReturnValue(false);
+    isRemoteRaceRejectionMock.mockReset().mockReturnValue(false);
     getProjectTestConfigMock.mockReset().mockReturnValue({ autoPushEnabled: false });
     execMock.mockReset().mockResolvedValue({ exitCode: 0, stdout: '', stderr: '' });
     resolveProjectPathMock.mockReset().mockReturnValue('/proj');
@@ -1736,6 +1740,7 @@ describe('runCompletionHooks – release-after-run', () => {
     vi.doMock('@/lib/pipeline/push-rejection', () => ({
       isHookRejection: vi.fn().mockReturnValue(false),
       isTestFailureRejection: vi.fn().mockReturnValue(false),
+      isRemoteRaceRejection: vi.fn().mockReturnValue(false),
     }));
     vi.doMock('@/lib/pipeline/start-fix', () => ({
       startFixFromJob: vi.fn().mockResolvedValue({ ok: false, status: 503, detail: 'not needed' }),

@@ -412,6 +412,54 @@ describe('startProjectPush — push result tracking', () => {
     expect(setProjectPushResultMock).toHaveBeenCalledWith('proj', expect.stringContaining('Push failed'));
   });
 
+  it('does not rebase a generic remote rejection from the set-upstream retry', async () => {
+    execMock
+      .mockImplementationOnce(() => resp(1, '', 'fatal: no upstream configured'))          // git rev-list @{u}..HEAD → no upstream
+      .mockImplementationOnce(() => resp(0, '3\n'))                                       // git rev-list --count HEAD
+      .mockImplementationOnce(() => resp(0, '# branch.head feature-x\n'))                 // behind check
+      .mockImplementationOnce(() => resp(1, '', 'error: no upstream branch'))             // git push (no upstream)
+      .mockImplementationOnce(() => resp(0, 'feature-x'))                                // git branch --show-current
+      .mockImplementationOnce(() => resp(1, '', '! [remote rejected] feature-x -> feature-x (protected branch hook declined)')) // git push -u (server rejection)
+      .mockImplementationOnce(() => resp(0, ''));                                        // git status --porcelain (no hook changes)
+
+    const r = await startProjectPush('proj');
+    expect(r.ok).toBe(false);
+    if (!r.ok) {
+      expect(r.status).toBe(502);
+      expect(r.detail).toContain('Push failed');
+      expect(r.detail).toContain('protected branch hook declined');
+    }
+    const rebaseCalls = execMock.mock.calls.filter(
+      ([cmd, args]: any) => cmd === 'git' && args.includes('pull') && args.includes('--rebase'),
+    );
+    expect(rebaseCalls).toHaveLength(0);
+  });
+
+  it('rebases with an explicit origin branch when the set-upstream retry hits a ref race', async () => {
+    execMock
+      .mockImplementationOnce(() => resp(1, '', 'fatal: no upstream configured'))          // git rev-list @{u}..HEAD → no upstream
+      .mockImplementationOnce(() => resp(0, '3\n'))                                       // git rev-list --count HEAD
+      .mockImplementationOnce(() => resp(0, '# branch.head feature-x\n'))                 // behind check
+      .mockImplementationOnce(() => resp(1, '', 'error: no upstream branch'))             // git push (no upstream)
+      .mockImplementationOnce(() => resp(0, 'feature-x'))                                // git branch --show-current
+      .mockImplementationOnce(() => resp(1, '', "remote: error: cannot lock ref 'refs/heads/feature-x': is at aaa but expected bbb\n! [remote rejected] feature-x -> feature-x (failed to update ref)")) // git push -u (ref race)
+      .mockImplementationOnce(() => resp(0))                                             // git pull --rebase origin feature-x
+      .mockImplementationOnce(() => resp(0))                                             // git push -u origin feature-x
+      .mockImplementationOnce(() => resp(0, 'abc1234'));                                 // git rev-parse
+
+    const r = await startProjectPush('proj');
+    expect(r.ok).toBe(true);
+    const rebaseCall = execMock.mock.calls.find(
+      ([cmd, args]: any) => cmd === 'git' && args.includes('pull') && args.includes('--rebase'),
+    );
+    expect(rebaseCall?.[1]).toEqual(['-C', '/path/to/proj', 'pull', '--rebase', 'origin', 'feature-x']);
+    const upstreamPushes = execMock.mock.calls.filter(
+      ([cmd, args]: any) => cmd === 'git' && args.includes('push') && args.includes('-u') && args.includes('feature-x'),
+    );
+    expect(upstreamPushes).toHaveLength(2);
+    expect(setProjectPushResultMock).toHaveBeenCalledWith('proj', null);
+  });
+
   it('stages and commits hook-left changes then retries push when pre-push hook leaves new files', async () => {
     generateCommitMessageMock.mockResolvedValue('chore: apply lint fixes');
 

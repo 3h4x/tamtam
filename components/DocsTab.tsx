@@ -9,6 +9,10 @@ interface DocsTabProps {
   projectName: string
 }
 
+function countLines(content: string) {
+  return content.split('\n').length
+}
+
 export function DocsTab({ projectName }: DocsTabProps) {
   const [docs, setDocs] = useState<ProjectDoc[]>([])
   const [active, setActive] = useState<string | null>(null)
@@ -21,7 +25,11 @@ export function DocsTab({ projectName }: DocsTabProps) {
     fetchProjectDocs(projectName)
       .then((res) => {
         setDocs(res.docs)
-        setActive(res.docs[0]?.name ?? null)
+        setActive((currentActive) => (
+          currentActive && res.docs.some((doc) => doc.name === currentActive)
+            ? currentActive
+            : (res.docs[0]?.name ?? null)
+        ))
       })
       .catch((err) => setError(err instanceof Error ? err.message : 'Failed to load docs'))
       .finally(() => setLoading(false))
@@ -31,13 +39,25 @@ export function DocsTab({ projectName }: DocsTabProps) {
 
   if (loading) return (
     <div className="mt-2 flex gap-3">
-      <div className="w-44 shrink-0 flex flex-col gap-1">
-        {Array.from({ length: 4 }).map((_, i) => (
-          <div key={i} className="skeleton h-7 rounded-md" style={{ opacity: 1 - i * 0.2 }} />
-        ))}
+      <div className="w-52 shrink-0 rounded-lg border border-border bg-bg-secondary p-2">
+        <div className="mb-2 flex items-center justify-between border-b border-border px-1 pb-2">
+          <div className="skeleton h-3 w-20 rounded" />
+          <div className="skeleton h-3 w-12 rounded" />
+        </div>
+        <div className="flex flex-col gap-1">
+          {Array.from({ length: 4 }).map((_, i) => (
+            <div key={i} className="skeleton h-10 rounded-md" style={{ opacity: 1 - i * 0.2 }} />
+          ))}
+        </div>
       </div>
-      <div className="flex-1 border border-border rounded-lg p-4 flex flex-col gap-2">
-        <div className="skeleton h-4 w-1/3 mb-2" />
+      <div className="flex-1 rounded-lg border border-border bg-bg-secondary p-4">
+        <div className="mb-4 flex items-center justify-between gap-3 border-b border-border pb-3">
+          <div className="min-w-0 flex-1">
+            <div className="skeleton mb-2 h-4 w-32 rounded" />
+            <div className="skeleton h-3 w-2/3 rounded" />
+          </div>
+          <div className="skeleton h-3 w-12 rounded" />
+        </div>
         {Array.from({ length: 6 }).map((_, i) => (
           <div key={i} className="skeleton h-3" style={{ opacity: 1 - i * 0.12, width: `${85 - i * 8}%` }} />
         ))}
@@ -51,40 +71,56 @@ export function DocsTab({ projectName }: DocsTabProps) {
     />
   )
   if (docs.length === 0) return (
-    <div className="p-6 text-center text-text-secondary text-sm">
-      No docs found. Add a <code className="font-mono text-xs">README.md</code> or <code className="font-mono text-xs">docs/*.md</code> files.
+    <div className="mt-2 rounded-lg border border-dashed border-border bg-bg-secondary p-6">
+      <p className="text-sm font-medium text-text-primary">No docs found</p>
+      <p className="mt-2 text-sm text-text-secondary">
+        Add a committed <code className="rounded bg-bg-tertiary px-1 py-0.5 font-mono text-xs">README.md</code> or
+        <code className="ml-1 rounded bg-bg-tertiary px-1 py-0.5 font-mono text-xs">docs/*.md</code> file to attach project context here.
+      </p>
     </div>
   )
 
   const current = docs.find((d) => d.name === active) ?? docs[0]
+  const currentLineCount = countLines(current.content)
 
   return (
     <div className="mt-2 flex gap-3 min-h-0">
       {docs.length > 1 && (
-        <div className="w-44 shrink-0 flex flex-col gap-0.5">
-          {docs.map((doc) => (
-            <button
-              key={doc.name}
-              onClick={() => setActive(doc.name)}
-              className={`text-left px-2.5 py-1.5 rounded-md text-xs font-mono truncate cursor-pointer transition-colors ${
-                doc.name === current.name
-                  ? 'bg-accent/15 text-accent font-semibold'
-                  : 'text-text-secondary hover:text-text-primary hover:bg-bg-tertiary'
-              }`}
-              title={doc.path}
-            >
-              {doc.name}
-            </button>
-          ))}
+        <div className="w-52 shrink-0 overflow-hidden rounded-lg border border-border bg-bg-secondary">
+          <div className="flex items-center justify-between border-b border-border px-3 py-2">
+            <span className="text-xs uppercase tracking-wider text-text-tertiary">Project docs</span>
+            <span className="text-xs tabular-nums text-text-secondary">{docs.length} files</span>
+          </div>
+          <div className="flex flex-col gap-1 p-2">
+            {docs.map((doc) => (
+              <button
+                key={doc.name}
+                onClick={() => setActive(doc.name)}
+                className={`flex w-full items-center justify-between gap-3 rounded-md px-2.5 py-2 text-left text-xs transition-colors ${
+                  doc.name === current.name
+                    ? 'bg-accent/15 text-accent'
+                    : 'text-text-secondary hover:bg-bg-tertiary hover:text-text-primary'
+                }`}
+                title={doc.path}
+              >
+                <span className="min-w-0 truncate font-mono">{doc.name}</span>
+                <span className={`shrink-0 tabular-nums ${doc.name === current.name ? 'text-accent' : 'text-text-tertiary'}`}>
+                  {countLines(doc.content)}
+                </span>
+              </button>
+            ))}
+          </div>
         </div>
       )}
-      <div className="flex-1 min-w-0">
-        <div className="flex items-center gap-2 mb-2">
-          <span className="text-xs font-mono text-text-tertiary">{current.path}</span>
-          <span className="text-xs text-text-tertiary">·</span>
-          <span className="text-xs text-text-tertiary">{current.content.split('\n').length} lines</span>
+      <div className="min-w-0 flex-1 overflow-hidden rounded-lg border border-border bg-bg-secondary">
+        <div className="flex items-start justify-between gap-3 border-b border-border px-4 py-3">
+          <div className="min-w-0">
+            <p className="text-sm font-medium text-text-primary">{current.name}</p>
+            <p className="mt-1 truncate font-mono text-xs text-text-tertiary">{current.path}</p>
+          </div>
+          <span className="shrink-0 text-xs tabular-nums text-text-secondary">{currentLineCount} lines</span>
         </div>
-        <pre className="bg-bg-secondary border border-border rounded-lg p-4 text-xs text-text-primary font-mono whitespace-pre-wrap overflow-y-auto max-h-[70vh] leading-relaxed">
+        <pre className="max-h-[70vh] overflow-y-auto p-4 font-mono text-xs leading-relaxed whitespace-pre-wrap text-text-primary">
           {current.content}
         </pre>
       </div>

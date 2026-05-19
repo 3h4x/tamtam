@@ -177,6 +177,7 @@ const mocks = vi.hoisted(() => ({
   // pipeline/push-rejection
   isHookRejection: vi.fn(),
   isTestFailureRejection: vi.fn(),
+  isRemoteRaceRejection: vi.fn(),
   // pipeline/review-exhaustion-fallback
   fileReviewExhaustionIssue: vi.fn(),
   // pipeline/start-commit
@@ -246,6 +247,7 @@ vi.mock('@/lib/pipeline/start-fix', () => ({
 vi.mock('@/lib/pipeline/push-rejection', () => ({
   isHookRejection: mocks.isHookRejection,
   isTestFailureRejection: mocks.isTestFailureRejection,
+  isRemoteRaceRejection: mocks.isRemoteRaceRejection,
 }));
 vi.mock('@/lib/pipeline/review-exhaustion-fallback', () => ({
   fileReviewExhaustionIssue: mocks.fileReviewExhaustionIssue,
@@ -342,6 +344,7 @@ function applyDefaultMocks(): void {
   mocks.startFixFromJob.mockResolvedValue({ ok: true, jobId: 'fix-auto' });
   mocks.isHookRejection.mockReturnValue(false);
   mocks.isTestFailureRejection.mockReturnValue(false);
+  mocks.isRemoteRaceRejection.mockReturnValue(false);
   mocks.fileReviewExhaustionIssue.mockResolvedValue({ ok: true, issueNumber: 7, issueUrl: 'https://github.com/owner/repo/issues/7' });
   mocks.startProjectCommit.mockResolvedValue({ ok: true, commitSha: 'abc123', message: 'commit ok', jobId: 'commit-auto' });
   mocks.startProjectReview.mockResolvedValue({ ok: true, jobId: 'review-next' });
@@ -1777,6 +1780,23 @@ describe('auto-mark seen on completion', () => {
   it('does NOT auto-mark a failed pipeline child seen', async () => {
     const seen = await runMarkDone(makeInMemoryJob('test-fail', 'test'), 1);
     expect(seen).toBe(false);
+  });
+
+  it('does not spawn a push-fix job for remote race failures', async () => {
+    const tempDir = mkdtempSync(join(tmpdir(), 'tamtam-remote-race-'));
+    try {
+      const logPath = join(tempDir, 'push.log');
+      writeFileSync(logPath, "remote: error: cannot lock ref 'refs/heads/main': is at aaa but expected bbb\n");
+      mocks.isRemoteRaceRejection.mockReturnValue(true);
+
+      const seen = await runMarkDone(makeInMemoryJob('push-remote-race', 'push', { logPath }), 1);
+
+      expect(seen).toBe(false);
+      expect(mocks.isRemoteRaceRejection).toHaveBeenCalled();
+      expect(mocks.startFixFromJob).not.toHaveBeenCalled();
+    } finally {
+      rmSync(tempDir, { recursive: true, force: true });
+    }
   });
 
   it('does NOT auto-mark a release meta-job seen even on success', async () => {
