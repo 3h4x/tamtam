@@ -11,6 +11,49 @@ function StatusDot({ ok }: { ok: boolean }) {
   )
 }
 
+function SummaryCard({
+  label,
+  value,
+  detail,
+  tone = 'neutral',
+}: {
+  label: string
+  value: number | string
+  detail: string
+  tone?: 'neutral' | 'success' | 'warning' | 'error'
+}) {
+  const toneClasses = {
+    neutral: 'border-border bg-bg-secondary',
+    success: 'border-status-success/30 bg-status-success/5',
+    warning: 'border-status-warning/30 bg-status-warning/5',
+    error: 'border-status-error/30 bg-status-error/5',
+  }
+
+  return (
+    <div className={`rounded-lg border px-3 py-2 ${toneClasses[tone]}`}>
+      <p className="text-xs text-text-tertiary">{label}</p>
+      <p className="mt-1 font-mono text-lg font-semibold tabular-nums text-text-primary">{value}</p>
+      <p className="mt-1 text-xs text-text-secondary">{detail}</p>
+    </div>
+  )
+}
+
+function EmptyPanel({ message }: { message: string }) {
+  return (
+    <div className="rounded-lg border border-border bg-bg-secondary px-3 py-4 text-sm text-text-tertiary">
+      {message}
+    </div>
+  )
+}
+
+function UnavailablePanel({ endpoint }: { endpoint: string }) {
+  return (
+    <div className="rounded-lg border border-border bg-bg-secondary px-3 py-4 text-sm text-text-tertiary">
+      Not reachable at <span className="font-mono text-text-secondary" data-private>{endpoint}</span>
+    </div>
+  )
+}
+
 function tsToDate(ts: string): string {
   const ms = Math.floor(Number(ts) / 1_000_000)
   return new Date(ms).toLocaleTimeString()
@@ -67,6 +110,10 @@ function LogRow({ entry, color }: { entry: { ts: string; stream: Record<string, 
 export function InfraTab({ data, window_ }: { data: MonitoringData; window_: TimeWindow }) {
   const downServices = data.prometheus.services.filter(s => s.value?.[1] === '0')
   const upServices = data.prometheus.services.filter(s => s.value?.[1] !== '0')
+  const alertCount = data.prometheus.alerts.length
+  const errorCount = data.loki.errors.length
+  const warningCount = data.loki.warnings.length
+  const windowLabel = WINDOW_LABELS[window_]
 
   const promStatus =
     data.prometheus.status === 'unavailable' ? 'unavailable'
@@ -84,13 +131,34 @@ export function InfraTab({ data, window_ }: { data: MonitoringData; window_: Tim
       <section>
         <SectionHeader title="Prometheus" status={promStatus} />
         {data.prometheus.status === 'unavailable' ? (
-          <p className="text-sm text-text-tertiary">Not reachable at <span data-private>{data.config.prometheusUrl}</span></p>
+          <UnavailablePanel endpoint={data.config.prometheusUrl} />
         ) : (
           <div className="space-y-4">
-            {data.prometheus.alerts.length > 0 && (
+            <div className="grid gap-2 sm:grid-cols-3">
+              <SummaryCard
+                label="firing alerts"
+                value={alertCount}
+                detail={alertCount > 0 ? 'needs attention now' : 'none'}
+                tone={alertCount > 0 ? 'error' : 'success'}
+              />
+              <SummaryCard
+                label="services down"
+                value={downServices.length}
+                detail={downServices.length > 0 ? 'check failing targets below' : 'all reachable'}
+                tone={downServices.length > 0 ? 'error' : 'success'}
+              />
+              <SummaryCard
+                label="services up"
+                value={upServices.length}
+                detail={data.prometheus.services.length > 0 ? 'reporting healthy targets' : 'no targets reported'}
+                tone={upServices.length > 0 ? 'success' : 'neutral'}
+              />
+            </div>
+
+            {alertCount > 0 && (
               <div>
-                <h3 className="text-sm font-medium text-text-secondary mb-2">
-                  Firing alerts ({data.prometheus.alerts.length})
+                <h3 className="mb-2 text-sm font-medium text-text-secondary">
+                  Active alerts ({alertCount})
                 </h3>
                 <div className="space-y-1">
                   {data.prometheus.alerts.map((a, i) => (
@@ -111,28 +179,29 @@ export function InfraTab({ data, window_ }: { data: MonitoringData; window_: Tim
             )}
 
             <div>
-              <h3 className="text-sm font-medium text-text-secondary mb-2">
-                Services ({upServices.length} up{downServices.length > 0 ? `, ${downServices.length} down` : ''})
+              <h3 className="mb-2 text-sm font-medium text-text-secondary">
+                Service status
               </h3>
-              <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-1.5">
-                {[...downServices, ...upServices].map((s, i) => {
-                  const up = s.value?.[1] !== '0'
-                  return (
-                    <div key={i} className={`flex items-center gap-2 px-3 py-2 rounded-md border text-sm ${
-                      up ? 'bg-bg-secondary border-border' : 'bg-status-error/5 border-status-error/30'
-                    }`}>
-                      <StatusDot ok={up} />
-                      <span className="font-medium text-text-primary truncate" data-private>{s.metric.job ?? s.metric.instance ?? 'unknown'}</span>
-                      {s.metric.instance && s.metric.job && (
-                        <span className="text-text-tertiary text-xs ml-auto truncate" data-private>{s.metric.instance}</span>
-                      )}
-                    </div>
-                  )
-                })}
-                {data.prometheus.services.length === 0 && (
-                  <p className="text-sm text-text-tertiary col-span-3">No services found</p>
-                )}
-              </div>
+              {data.prometheus.services.length === 0 ? (
+                <EmptyPanel message="No Prometheus service targets were returned." />
+              ) : (
+                <div className="grid grid-cols-1 gap-1.5 sm:grid-cols-2 lg:grid-cols-3">
+                  {[...downServices, ...upServices].map((s, i) => {
+                    const up = s.value?.[1] !== '0'
+                    return (
+                      <div key={i} className={`flex items-center gap-2 rounded-md border px-3 py-2 text-sm ${
+                        up ? 'border-border bg-bg-secondary' : 'border-status-error/30 bg-status-error/5'
+                      }`}>
+                        <StatusDot ok={up} />
+                        <span className="truncate font-medium text-text-primary" data-private>{s.metric.job ?? s.metric.instance ?? 'unknown'}</span>
+                        {s.metric.instance && s.metric.job && (
+                          <span className="ml-auto truncate text-xs text-text-tertiary" data-private>{s.metric.instance}</span>
+                        )}
+                      </div>
+                    )
+                  })}
+                </div>
+              )}
             </div>
           </div>
         )}
@@ -140,17 +209,37 @@ export function InfraTab({ data, window_ }: { data: MonitoringData; window_: Tim
 
       {/* Loki */}
       <section>
-        <SectionHeader title={`Loki — last ${WINDOW_LABELS[window_]}`} status={lokiStatus} />
+        <SectionHeader title={`Loki — last ${windowLabel}`} status={lokiStatus} />
         {data.loki.status === 'unavailable' ? (
-          <p className="text-sm text-text-tertiary">Not reachable at <span data-private>{data.config.lokiUrl}</span></p>
+          <UnavailablePanel endpoint={data.config.lokiUrl} />
         ) : (
           <div className="space-y-4">
+            <div className="grid gap-2 sm:grid-cols-3">
+              <SummaryCard
+                label="errors"
+                value={errorCount}
+                detail={errorCount > 0 ? `seen in the last ${windowLabel}` : `clear for the last ${windowLabel}`}
+                tone={errorCount > 0 ? 'error' : 'success'}
+              />
+              <SummaryCard
+                label="warnings"
+                value={warningCount}
+                detail={warningCount > 0 ? 'review if the count is climbing' : 'none reported'}
+                tone={warningCount > 0 ? 'warning' : 'success'}
+              />
+              <SummaryCard
+                label="window"
+                value={windowLabel}
+                detail="current log scan range"
+              />
+            </div>
+
             <div>
-              <h3 className="text-sm font-medium text-text-secondary mb-2">
-                Errors {data.loki.errors.length > 0 ? `(${data.loki.errors.length})` : '(none)'}
+              <h3 className="mb-2 text-sm font-medium text-text-secondary">
+                Error log lines
               </h3>
-              {data.loki.errors.length === 0 ? (
-                <p className="text-sm text-text-tertiary">No errors in the last {WINDOW_LABELS[window_]}</p>
+              {errorCount === 0 ? (
+                <EmptyPanel message={`No error log lines in the last ${windowLabel}.`} />
               ) : (
                 <div className="rounded-md border border-status-error/30 overflow-hidden overflow-y-auto" style={{ maxHeight: '320px' }}>
                   {data.loki.errors.map((l, i) => (
@@ -160,10 +249,10 @@ export function InfraTab({ data, window_ }: { data: MonitoringData; window_: Tim
               )}
             </div>
 
-            {data.loki.warnings.length > 0 && (
+            {warningCount > 0 && (
               <div>
-                <h3 className="text-sm font-medium text-text-secondary mb-2">
-                  Warnings ({data.loki.warnings.length})
+                <h3 className="mb-2 text-sm font-medium text-text-secondary">
+                  Warning log lines ({warningCount})
                 </h3>
                 <div className="rounded-md border border-status-warning/30 overflow-hidden overflow-y-auto" style={{ maxHeight: '320px' }}>
                   {data.loki.warnings.map((l, i) => (
