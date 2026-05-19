@@ -5,6 +5,7 @@ import { useRouter, useSearchParams, usePathname } from 'next/navigation'
 import { fetchAgents, createAgent, updateAgent, deleteAgent, runAgent, fetchSkills, fetchPersonas } from '@/lib/client-api'
 import type { Agent, Skill, Persona, JobInfo } from '@/lib/client-api'
 import { formatAgo } from '@/lib/shared/format'
+import { AgentsEmptyState, AgentsLoadingState } from '@/components/agents/AgentStates'
 import type { AgentTemplateRecord } from '@/components/SettingsPage'
 import { useToast } from '@/components/Toast'
 import { AgentEditor, type AgentEditorSavePayload } from '@/components/agents-tab/AgentEditor'
@@ -183,6 +184,7 @@ export function AgentsTab({ projectName, projectJobs = [] }: AgentsTabProps) {
   }
 
   const schedulerByAgentId = new Map(schedulerEntries.map(e => [e.agentId, e]))
+  const recentAgentRuns = projectJobs.filter(job => job.kind.startsWith('agent:')).length
 
   const rows: EnrichedAgent[] = agents.map(agent => ({
     agent,
@@ -374,39 +376,26 @@ export function AgentsTab({ projectName, projectJobs = [] }: AgentsTabProps) {
   }
 
   if (loading) return (
-    <div className="mt-4 flex flex-col gap-4">
-      <div className="flex items-center justify-between">
-        <div className="skeleton h-4 w-20 rounded" />
-        <div className="skeleton h-8 w-28 rounded-md" />
-      </div>
-      <div className="rounded-lg border border-border overflow-hidden">
-        <div className="bg-bg-secondary border-b border-border px-3 py-2 flex gap-8">
-          {['w-12', 'w-16', 'w-14', 'w-16', 'w-10', 'w-12'].map((w, i) => (
-            <div key={i} className={`skeleton h-3 ${w} rounded`} />
-          ))}
-        </div>
-        {Array.from({ length: 4 }).map((_, i) => (
-          <div key={i} className="px-3 py-3 border-b border-border last:border-0 flex items-center gap-8">
-            <div className="skeleton h-4 w-28 rounded" />
-            <div className="skeleton h-4 w-16 rounded-full" />
-            <div className="skeleton h-4 w-20 rounded" />
-            <div className="skeleton h-4 w-16 rounded" />
-            <div className="skeleton h-4 w-24 rounded-full" />
-            <div className="skeleton h-4 w-16 rounded" />
-          </div>
-        ))}
-      </div>
+    <div className="mt-4">
+      <AgentsLoadingState rows={4} />
     </div>
   )
 
   const emptyState = (
-    <div className="flex flex-col items-center gap-2 py-10 text-center">
-      <svg className="w-8 h-8 text-text-tertiary" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth="1.2">
-        <path strokeLinecap="round" strokeLinejoin="round" d="M9.75 3.104v5.714a2.25 2.25 0 01-.659 1.591L5 14.5M9.75 3.104c-.251.023-.501.05-.75.082m.75-.082a24.301 24.301 0 014.5 0m0 0v5.714a2.25 2.25 0 001.357 2.059l.177.073a2.25 2.25 0 012.148 0l.177-.073a2.25 2.25 0 001.357-2.059V3.104m-7.5 0A24.26 24.26 0 0112 3c.83 0 1.643.038 2.438.104" />
-      </svg>
-      <p className="text-sm text-text-secondary font-medium">No agents yet</p>
-      <p className="text-xs text-text-tertiary max-w-xs">Create an agent to automate tasks for this project — compose skills, pick a model, and set a schedule.</p>
-    </div>
+    <AgentsEmptyState
+      title="No agents yet"
+      description="Create an agent to automate work for this project. Compose skills, pick a model, and add a schedule only when it needs to recur."
+      meta="Schedules, project docs, and provider requirements can all be added later from the editor."
+      stats={[
+        { label: 'project', value: <span data-private>{projectName}</span> },
+        { label: 'skills available', value: String(skills.length), mono: true, tone: 'accent' },
+        { label: 'agent templates', value: String(customTemplates.length + RECOMMENDED_AGENTS.length), mono: true },
+        { label: 'recent runs', value: String(recentAgentRuns), mono: true, tone: recentAgentRuns > 0 ? 'warning' : 'muted' },
+      ]}
+      primaryAction={{ label: 'New agent', onClick: () => { setRecommendedTemplate(null); setEditorParam('new') }, variant: 'primary' }}
+      secondaryAction={{ label: 'Browse skills', href: '/skills' }}
+      framed={false}
+    />
   )
 
   return (
