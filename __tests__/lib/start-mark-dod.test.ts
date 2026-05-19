@@ -167,9 +167,6 @@ vi.mock('@/lib/jobs/storage', () => ({
 vi.mock('@/lib/pipeline/mark-dod-branch', () => ({
   ensureBranchForCtx: mocks.ensureBranchForCtxMock,
 }));
-vi.mock('@/lib/jobs/pm2-jobs', () => ({
-  splitCommand: (line: string) => line.split(/\s+/).filter(Boolean),
-}));
 // start-mark-dod now spawns Claude via runSubprocess (awaiting variant).
 // The mock simulates "exited with code N + log file already on disk" and
 // preserves the old startJob call shape (jobId, command, prompt, cwd) so

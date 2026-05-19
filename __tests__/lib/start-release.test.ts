@@ -131,14 +131,7 @@ function defaultCreateJob(project: string, kind: string) {
   };
 }
 
-function defaultExec(cmd: string, args: string[]) {
-  if (cmd === 'pm2' && args[0] === 'start') {
-    return Promise.resolve({ exitCode: 0, stdout: '', stderr: '' });
-  }
-  if (cmd === 'pm2' && args[0] === 'jlist') {
-    // Return a valid process so the pid-retry loop breaks on first attempt (avoids 5×200ms wait)
-    return Promise.resolve({ exitCode: 0, stdout: JSON.stringify([{ name: 'proj-release-rel-id', pid: 1234 }]), stderr: '' });
-  }
+function defaultExec(_cmd: string, _args: string[]) {
   return Promise.resolve({ exitCode: 0, stdout: '', stderr: '' });
 }
 
@@ -146,7 +139,7 @@ function resetSharedMocks() {
   for (const m of Object.values(mocks)) {
     m.mockReset();
   }
-  // Default exec mock: PM2 calls succeed; git calls must be set per-test via
+  // Default exec mock: every call succeeds; git calls must be set per-test via
   // mockImplementationOnce (they take priority over this default).
   mocks.execMock.mockImplementation(defaultExec);
   mocks.isProjectArchivedMock.mockReturnValue(false);
@@ -993,12 +986,6 @@ describe('startRelease — legacy review stamp compatibility', () => {
       if (cmd === 'git' && args[0] === '-C' && args[2] === 'rev-parse' && args[3] === '@{u}') {
         return Promise.resolve({ exitCode: 0, stdout: 'upstream-a\n', stderr: '' });
       }
-      if (cmd === 'pm2' && args[0] === 'start') {
-        return Promise.resolve({ exitCode: 0, stdout: '', stderr: '' });
-      }
-      if (cmd === 'pm2' && args[0] === 'jlist') {
-        return Promise.resolve({ exitCode: 0, stdout: JSON.stringify([{ name: 'proj-release-rel-id', pid: 1234 }]), stderr: '' });
-      }
       return Promise.resolve({ exitCode: 0, stdout: '', stderr: '' });
     });
 
@@ -1124,12 +1111,6 @@ describe('startRelease weekly quota gating', () => {
       }
       if (cmd === 'git' && args[0] === '-C' && args[2] === 'rev-list') {
         return Promise.resolve({ exitCode: 0, stdout: '0', stderr: '' });
-      }
-      if (cmd === 'pm2' && args[0] === 'start') {
-        return Promise.resolve({ exitCode: 0, stdout: '', stderr: '' });
-      }
-      if (cmd === 'pm2' && args[0] === 'jlist') {
-        return Promise.resolve({ exitCode: 0, stdout: JSON.stringify([{ name: 'proj-release-rel-id', pid: 1234 }]), stderr: '' });
       }
       return Promise.resolve({ exitCode: 0, stdout: '', stderr: '' });
     });

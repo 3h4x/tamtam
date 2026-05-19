@@ -61,7 +61,7 @@ function sanitizeFencedJson(raw: string): string {
       continue;
     }
     // Allow if the first non-whitespace char looks like JSON syntax.
-    if (/^[\s]*[\{\}\[\],:"0-9\-+.]/.test(line)) {
+    if (/^\s*(?:[{},:"0-9+.-]|\[|\])/.test(line)) {
       kept.push(line);
       continue;
     }

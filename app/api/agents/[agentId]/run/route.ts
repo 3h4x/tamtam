@@ -43,7 +43,7 @@ export async function POST(
   const { agentId } = await params;
 
   // Resolve agent — either a DB row or a file-based agent
-  let agent: { id: string; name: string; project: string; skillIds: string; docPaths: string; model: string; prompt: string; schedule: string | null; runner: string; enabled: boolean; provider?: string | null; fallbackEnabled?: boolean; prerequisiteCommand?: string | null } | null = null;
+  let agent: { id: string; name: string; project: string; skillIds: string; docPaths: string; model: string; prompt: string; schedule: string | null; enabled: boolean; provider?: string | null; fallbackEnabled?: boolean; prerequisiteCommand?: string | null } | null = null;
 
   const parsedFileId = parseFileAgentId(agentId);
   if (parsedFileId) {
@@ -340,7 +340,7 @@ export async function POST(
 }
 
 async function runAgentStart(
-  agent: { id: string; name: string; project: string; skillIds: string; docPaths: string; model: string; prompt: string; schedule: string | null; runner: string; enabled: boolean; provider?: string | null; fallbackEnabled?: boolean; prerequisiteCommand?: string | null },
+  agent: { id: string; name: string; project: string; skillIds: string; docPaths: string; model: string; prompt: string; schedule: string | null; enabled: boolean; provider?: string | null; fallbackEnabled?: boolean; prerequisiteCommand?: string | null },
   taskPrompt: string,
   triggeredBy: string,
   readOnly: boolean,

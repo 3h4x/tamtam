@@ -229,7 +229,7 @@ When enabled, TamTam starts Ollama via PM2 (`ollama-serve`) on boot if not alrea
 
 ### Durable Agent Workflows
 
-All agent runs go through the workflow intake (`runPrerequisiteStep` → `composePromptStep` → `startAgentStep`). There is no setting and no alternate path; the workflow owns prompt composition, retrieval/memory injection, and the PM2 handoff. See `docs/AGENT.md` → "Durable Agent Intake" for the step-level breakdown.
+All agent runs go through the workflow intake (`runPrerequisiteStep` → `composePromptStep` → `startAgentStep`). There is no setting and no alternate path; the workflow owns prompt composition, retrieval/memory injection, and the spawn handoff. See `docs/AGENT.md` → "Durable Agent Intake" for the step-level breakdown.
 
 Requires: Postgres accessible to the TamTam process via `DATABASE_URL`, plus `WORKFLOW_TARGET_WORLD=@workflow/world-postgres` set in `.env.local`. Run `workflow-postgres-setup` (from `@workflow/world-postgres`) once against the same database to create the workflow schema.
 
@@ -316,7 +316,6 @@ const isValid = timingSafeEqual(Buffer.from(expected), Buffer.from(req.headers['
   description: string
   model: string        // 'fast' | 'normal' | 'smart' (legacy 'haiku' | 'sonnet' | 'opus' still accepted)
   schedule: string     // '' (manual) | '15m' | '30m' | '1h' | '2h' | '4h' | '8h' | '12h' | '24h' | '3d' | '7d' | '30d'
-  runner?: string      // compatibility field; defaults to 'pm2'
   prompt: string
   skillIds?: string[]
 }

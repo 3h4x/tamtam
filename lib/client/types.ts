@@ -272,7 +272,6 @@ export interface Agent {
   model: string
   prompt: string
   schedule: string | null
-  runner: string
   enabled: boolean
   provider?: string | null
   fallbackEnabled?: boolean

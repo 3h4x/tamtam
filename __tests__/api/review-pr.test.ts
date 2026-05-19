@@ -62,10 +62,6 @@ describe('POST /api/projects/by-project/{projectName}/review-pr', () => {
       probeJobStatus: probeJobStatusMock,
     }));
 
-    vi.doMock('@/lib/jobs/pm2-jobs', () => ({
-      startJob: startJobMock,
-      splitCommand: (line: string) => line.split(/\s+/).filter(Boolean),
-    }));
     vi.doMock('@/lib/jobs/spawn-claude-detached', () => ({
       startJobInProcess: startJobMock,
     }));
@@ -154,12 +150,12 @@ describe('POST /api/projects/by-project/{projectName}/review-pr', () => {
   });
 
   it('returns 500 when startJob throws', async () => {
-    startJobMock.mockRejectedValue(new Error('pm2 start failed'));
+    startJobMock.mockRejectedValue(new Error('spawn failed'));
     const req = makeReq('proj1');
     const res = await POST(req, { params: Promise.resolve({ projectName: 'proj1' }) });
     expect(res.status).toBe(500);
     const data = await res.json();
-    expect(data.detail).toContain('pm2 start failed');
+    expect(data.detail).toContain('spawn failed');
   });
 
   it('skips finished jobs when checking for running reviews', async () => {

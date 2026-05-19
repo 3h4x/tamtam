@@ -331,7 +331,7 @@ Retry semantics matter: a drain attempt only consumes the queue when the
 release actually starts or reaches a terminal no-op such as "nothing to
 release". Temporary blocks such as the global pause, a fresh budget/credits
 429, another active pipeline, or an indeterminate pre-start failure (for
-example PM2/boot-time startup errors before the release job is created) keep
+example spawn/boot-time startup errors before the release job is created) keep
 the pending flag in place so a later drain can retry safely. Once a release
 job exists and the pipeline has actually started, later step failures consume
 the queue normally because that release attempt is no longer pending.
@@ -440,14 +440,14 @@ Checks the push job log for strings from husky, lint-staged, eslint, pre-commit 
 | File | Function | Purpose |
 |------|----------|---------|
 | `lib/start-release.ts` | `startRelease(project)` | Pipeline entry point; creates meta-job, picks first step |
-| `lib/start-review.ts` | `startProjectReview(project)` | Spawns review Claude job via PM2 |
+| `lib/start-review.ts` | `startProjectReview(project)` | Spawns review Claude job as a detached child |
 | `lib/start-fix.ts` | `startFixFromJob(reviewJob)` | Resumes review session for fix, or starts fresh |
 | `lib/start-test.ts` | `startProjectTest(project)` | Detects and runs test command |
 | `lib/start-push.ts` | `startProjectPush(project)` | git add → commit message → push |
 | `lib/pipeline/push-rejection.ts` | `isHookRejection`, `isTestFailureRejection` | Classifies push failure kind |
 | `lib/start-mark-dod.ts` | `startMarkDod(project)` | DoD verification against the linked issue or PR, with checkbox updates when issue criteria exist |
 | `lib/pipeline/start-soak.ts` | `launchSoak`, `classifyDefaultBranchCi`, `openRevertPr`, `notifyPostMergeRevert` | Post-merge CI watcher + revert-PR opener. Pure helpers are unit-tested; the side-effectful loop is driven by `lib/workflows/phases/soak-phase.ts` |
-| `lib/job-storage.ts` | `markDone(jobId, exitCode)` | Called by PM2 exit handler; triggers all completion hooks |
+| `lib/job-storage.ts` | `markDone(jobId, exitCode)` | Called by the child-process exit handler; triggers all completion hooks |
 
 ---
 

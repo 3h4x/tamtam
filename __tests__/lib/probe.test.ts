@@ -41,8 +41,6 @@ describe('probeJobStatus', () => {
   let tempDir: string;
   let markDoneMock: ReturnType<typeof vi.fn>;
   let reconcileMock: ReturnType<typeof vi.fn>;
-  let getJobStatusMock: ReturnType<typeof vi.fn>;
-  let getJobPidMock: ReturnType<typeof vi.fn>;
   let saveToDbMock: ReturnType<typeof vi.fn>;
   let getJobCancellationSignalMock: ReturnType<typeof vi.fn>;
   let probeJobStatus: typeof import('@/lib/jobs/probe').probeJobStatus;
@@ -53,8 +51,6 @@ describe('probeJobStatus', () => {
 
     markDoneMock = vi.fn().mockResolvedValue(undefined);
     reconcileMock = vi.fn().mockResolvedValue(undefined);
-    getJobStatusMock = vi.fn().mockResolvedValue({ status: 'running', exitCode: null });
-    getJobPidMock = vi.fn().mockResolvedValue(null);
     saveToDbMock = vi.fn();
     getJobCancellationSignalMock = vi.fn().mockReturnValue(null);
 
@@ -64,10 +60,6 @@ describe('probeJobStatus', () => {
     vi.doMock('@/lib/jobs/lifecycle', () => ({
       markDone: markDoneMock,
       reconcileStaleRelease: reconcileMock,
-    }));
-    vi.doMock('@/lib/jobs/pm2-jobs', () => ({
-      getJobStatus: getJobStatusMock,
-      getJobPid: getJobPidMock,
     }));
     vi.doMock('@/lib/jobs/storage', () => ({
       saveToDb: saveToDbMock,
@@ -168,22 +160,14 @@ describe('probeJobStatus', () => {
       expect(markDoneMock).toHaveBeenCalledWith(job, -1);
     });
 
-    // Per-job PM2 entries were retired; the PM2-status backfill paths these
-    // tests covered (pm2 jlist → pid backfill, pm2 reports done with exit
-    // code) no longer exist. The replacement behavior — pid=0 past grace +
-    // no inline cancellation signal → markDone(-1) — is asserted below in
-    // "pid=0, age >= 30s, PM2 unknown → marks done -1".
-
-    it('pid=0, age >= 30s, PM2 unknown → marks done -1', async () => {
-      getJobStatusMock.mockResolvedValue({ status: 'unknown', exitCode: null });
+    it('pid=0, age >= 30s → marks done -1', async () => {
       const job = makeJob({ kind: 'run', pid: 0, startedAt: Date.now() / 1000 - 60 });
       const result = await probeJobStatus(job);
       expect(result).toBe('done');
       expect(markDoneMock).toHaveBeenCalledWith(job, -1);
     });
 
-    it('pid=0, age >= 30s, PM2 unknown but route holds inline cancellation signal → still running', async () => {
-      getJobStatusMock.mockResolvedValue({ status: 'unknown', exitCode: null });
+    it('pid=0 past grace but route holds inline cancellation signal → still running', async () => {
       getJobCancellationSignalMock.mockReturnValue({ aborted: false } as AbortSignal);
       const job = makeJob({ kind: 'agent:my-agent', pid: 0, startedAt: Date.now() / 1000 - 60 });
       const result = await probeJobStatus(job);
@@ -191,8 +175,7 @@ describe('probeJobStatus', () => {
       expect(markDoneMock).not.toHaveBeenCalled();
     });
 
-    it('pid=0, age >= 30s, PM2 unknown and inline signal already aborted → marks done -1', async () => {
-      getJobStatusMock.mockResolvedValue({ status: 'unknown', exitCode: null });
+    it('pid=0 past grace and inline signal already aborted → marks done -1', async () => {
       getJobCancellationSignalMock.mockReturnValue({ aborted: true } as AbortSignal);
       const job = makeJob({ kind: 'agent:my-agent', pid: 0, startedAt: Date.now() / 1000 - 60 });
       const result = await probeJobStatus(job);
@@ -317,34 +300,7 @@ describe('probeJobStatus', () => {
       killSpy.mockRestore();
     });
 
-    // Legacy PM2 status-check test removed (path no longer exists).
-    it.skip('PM2 done with exit 0 → marks done 0', async () => {
-      getJobStatusMock.mockResolvedValue({ status: 'done', exitCode: 0 });
-      const job = makeJob({ kind: 'review', pid: 1234, logPath: null });
-      const result = await probeJobStatus(job);
-      expect(result).toBe('done');
-      expect(markDoneMock).toHaveBeenCalledWith(job, 0);
-    });
-
-    it('PM2 done with null exit → uses -1 fallback', async () => {
-      getJobStatusMock.mockResolvedValue({ status: 'done', exitCode: null });
-      const job = makeJob({ kind: 'fix', pid: 1234, logPath: null });
-      const result = await probeJobStatus(job);
-      expect(result).toBe('done');
-      expect(markDoneMock).toHaveBeenCalledWith(job, -1);
-    });
-
-    it('PM2 unknown, process alive → running', async () => {
-      getJobStatusMock.mockResolvedValue({ status: 'unknown', exitCode: null });
-      const killSpy = vi.spyOn(process, 'kill').mockReturnValue(true as unknown as ReturnType<typeof process.kill>);
-      const job = makeJob({ kind: 'review', pid: 1234, logPath: null });
-      const result = await probeJobStatus(job);
-      expect(result).toBe('running');
-      killSpy.mockRestore();
-    });
-
-    it('PM2 unknown, process dead → marks done -1', async () => {
-      getJobStatusMock.mockResolvedValue({ status: 'unknown', exitCode: null });
+    it('process dead → marks done -1', async () => {
       const err = Object.assign(new Error('no such process'), { code: 'ESRCH' });
       const killSpy = vi.spyOn(process, 'kill').mockImplementation(() => { throw err; });
       const job = makeJob({ kind: 'review', pid: 1234, logPath: null });
@@ -354,8 +310,7 @@ describe('probeJobStatus', () => {
       killSpy.mockRestore();
     });
 
-    it('PM2 unknown, EPERM → running', async () => {
-      getJobStatusMock.mockResolvedValue({ status: 'unknown', exitCode: null });
+    it('EPERM → running', async () => {
       const err = Object.assign(new Error('operation not permitted'), { code: 'EPERM' });
       const killSpy = vi.spyOn(process, 'kill').mockImplementation(() => { throw err; });
       const job = makeJob({ kind: 'run', pid: 1234, logPath: null });

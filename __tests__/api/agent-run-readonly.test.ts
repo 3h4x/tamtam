@@ -15,7 +15,6 @@ async function applyDdl(handle: TestDbHandle): Promise<void> {
       model text NOT NULL DEFAULT 'normal',
       prompt text NOT NULL DEFAULT '',
       schedule text,
-      runner text NOT NULL DEFAULT 'pm2',
       enabled boolean NOT NULL DEFAULT true,
       provider text,
       fallback_enabled boolean NOT NULL DEFAULT false,
@@ -162,7 +161,6 @@ describe('POST /api/agents/{agentId}/run readOnly', () => {
       probeJobStatus: probeJobStatusMock,
       markDone: vi.fn().mockResolvedValue(undefined),
     }));
-    vi.doMock('@/lib/jobs/pm2-jobs', () => ({ splitCommand: (line: string) => line.split(/\s+/).filter(Boolean) }));
     vi.doMock('@/lib/jobs/inline-agent', () => ({ startInProcessAgentJob: startJobMock }));
     vi.doMock('@/lib/shared/shell', () => ({
       exec: vi.fn().mockResolvedValue({ stdout: '', stderr: '', exitCode: 0 }),

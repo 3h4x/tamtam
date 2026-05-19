@@ -192,14 +192,6 @@ describe('job-storage', () => {
       db: sharedHandle.db,
       schema,
     }));
-    // Mock pm2-jobs so probeJobStatus does not shell out to a real `pm2
-    // jlist` (200+ms on macOS). Default to `unknown` status, which mirrors
-    // what real pm2 returns for jobs it does not know about.
-    vi.doMock('@/lib/jobs/pm2-jobs', () => ({
-      getJobStatus: vi.fn().mockResolvedValue({ status: 'unknown', exitCode: null }),
-      getJobPid: vi.fn().mockResolvedValue(null),
-      deleteJob: vi.fn().mockResolvedValue(undefined),
-    }));
     const jobStorage = await import('@/lib/jobs/job-storage');
     createJob = jobStorage.createJob;
     getJob = jobStorage.getJob;
@@ -232,7 +224,6 @@ describe('job-storage', () => {
 
   afterAll(() => {
     vi.doUnmock('@/lib/db');
-    vi.doUnmock('@/lib/jobs/pm2-jobs');
     vi.resetModules();
   });
 
@@ -1231,7 +1222,7 @@ describe('job-storage', () => {
         logPath: null,
         // Past the spawn-grace window so pid<=0 is treated as dead, not
         // still-spawning. A freshly-created pid=0 job (ageSec < 30) is
-        // covered by the spawn-grace tests in `probeJobStatus with pm2`.
+        // covered by the spawn-grace tests in `probeJobStatus`.
         startedAt: Date.now() / 1000 - 60,
         finishedAt: null,
         exitCode: null,
@@ -1262,7 +1253,6 @@ describe('readParsedLog', () => {
   beforeAll(async () => {
     vi.resetModules();
     vi.doMock('@/lib/db', () => ({ db: sharedHandle.db, schema }));
-    vi.doMock('@/lib/jobs/pm2-jobs', () => ({ getJobStatus: vi.fn(), deleteJob: vi.fn() }));
     vi.doMock('@/lib/shared/project-data', () => ({ resolveProjectPath: vi.fn().mockReturnValue(null) }));
 
     const mod = await import('@/lib/jobs/job-storage');
@@ -1279,7 +1269,6 @@ describe('readParsedLog', () => {
 
   afterAll(() => {
     vi.doUnmock('@/lib/db');
-    vi.doUnmock('@/lib/jobs/pm2-jobs');
     vi.doUnmock('@/lib/shared/project-data');
     vi.resetModules();
   });

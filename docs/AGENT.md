@@ -8,7 +8,7 @@ Agents are reusable automation units that combine skills, optional attached proj
 - Debugging why a scheduled agent isn't firing
 - Understanding how skills and attached project docs are composed into the system prompt
 - Preventing duplicate/concurrent agent runs
-- Understanding graphile-worker backed scheduling and legacy runner metadata compatibility
+- Understanding graphile-worker backed scheduling
 - Understanding the durable intake workflow (Postgres-backed two-step path for read-only runs)
 
 ---
@@ -32,7 +32,6 @@ Agents are reusable automation units that combine skills, optional attached proj
 | `model` | string | `normal` | Semantic model tier: `fast`, `normal`, or `smart`. Legacy `haiku`, `sonnet`, and `opus` aliases are still accepted. |
 | `prompt` | string | `''` | Default task prompt for scheduled runs |
 | `schedule` | string | `null` | Run interval for scheduling: `"30m"`, `"1h"`, `"8h"`, etc. or `null` for manual only |
-| `runner` | string | `pm2` | Compatibility metadata retained for existing rows; current recurring schedules are graphile-worker backed regardless of value |
 | `enabled` | boolean | `true` | Enable/disable without deletion |
 | `provider` | string \| null | `null` | Optional required CLI provider (`claude`, `codex`, `gemini`, `lmstudio`, `deepagents`). `null` means "any enabled provider". When set, the run fails closed if that provider is disabled or over budget. |
 | `fallbackEnabled` | boolean | `false` | Opts the agent into one transient provider fallback retry using `provider_fallback_chain`. Built-in recommended agents are created with this enabled. |
@@ -63,7 +62,6 @@ curl -X POST http://localhost:1337/api/agents \
     "model": "normal",
     "prompt": "Review uncommitted changes in the project and suggest improvements",
     "schedule": "24h",
-    "runner": "pm2",
     "enabled": true
   }'
 ```
@@ -79,7 +77,6 @@ curl -X POST http://localhost:1337/api/agents \
     "model": "normal",
     "prompt": "Review uncommitted changes...",
     "schedule": "24h",
-    "runner": "pm2",
     "enabled": true,
     "createdAt": 1705276800.5,
     "updatedAt": 1705276800.5
@@ -88,7 +85,7 @@ curl -X POST http://localhost:1337/api/agents \
 ```
 
 **Required fields:** `name`, `project`  
-**Optional fields:** `skillIds` (default `[]`), `docPaths` (default `[]`), `model`, `prompt`, `schedule`, `runner` (compatibility, defaults to `pm2`), `enabled`, `provider`, `prerequisiteCommand`
+**Optional fields:** `skillIds` (default `[]`), `docPaths` (default `[]`), `model`, `prompt`, `schedule`, `enabled`, `provider`, `prerequisiteCommand`
 
 If you provide both `schedule` and `prompt`, the agent's schedule is automatically installed.
 
@@ -160,7 +157,7 @@ Possible responses:
 }
 ```
 
-When the route is between duplicate-check and `pm2 start`, the response may
+When the route is between duplicate-check and spawn, the response may
 still be `202 queued`, but without a `blockingJobId`. In that case the
 blocking agent is only "starting" and has not landed its job row yet.
 
@@ -191,7 +188,7 @@ returns `409` with `code: "project_busy"` plus the blocking job id:
 }
 ```
 
-The agent starts immediately as a PM2 process. Output is streamed to a log file and can be watched via SSE at `/api/streaming/{job_id}`.
+The agent starts immediately as a detached child process. Output is streamed to a log file and can be watched via SSE at `/api/streaming/{job_id}`.
 
 When retrieval is enabled and prompt-time search returns snippets above the configured score threshold, the intake workflow prepends a `## Retrieved Context` block to the prompt and records a bounded audit trail on the job's `context_meta.retrieval.sources`. Each source entry includes `sourceKind`, `sourceId`, `project`, `rank`, `score`, and a short preview only; full retrieved bodies are not duplicated into metadata. Restoring the run in the terminal session view renders a compact `Retrieved Context` section before the user prompt so operators can inspect what was injected. Runs with retrieval disabled, an empty corpus, failed embedding, or no accepted snippets do not get retrieval metadata.
 
@@ -228,7 +225,7 @@ Issue-branch behavior is now split by trigger type:
 
 ### Scheduled Runs
 
-If an agent has `schedule` and either a prompt or skills, the schedule is installed automatically on creation/update. TamTam writes a prompt recovery file under `<logDir>/agent-scripts/` and upserts a graphile-worker job with `jobKey = agent-cron-<agentId>`. The persisted `runner` value is retained for backward-compatible reads but no longer selects a scheduler implementation.
+If an agent has `schedule` and either a prompt or skills, the schedule is installed automatically on creation/update. TamTam writes a prompt recovery file under `<logDir>/agent-scripts/` and upserts a graphile-worker job with `jobKey = agent-cron-<agentId>`.
 
 On each scheduled trigger, the agent runs with its stored `prompt`.
 
@@ -287,7 +284,7 @@ Behaviour:
 - The agent is spawned regardless of the prerequisite's exit code. Failures are surfaced through the prompt block (`Exit code: <n>`) so the agent can analyse them.
 - Timeout is 10 minutes (hardcoded for now).
 - The command runs with `bash -c <cmd>` in the project's working directory.
-- The job row is created with `pid: 0` **before** the prerequisite runs, so the run is immediately visible in the UI and the log file streams in real time. The per-project agent start slot remains held while the prerequisite runs, so another agent for the same project queues instead of starting concurrently, and project-wide starters such as terminal runs, tests, CI fixes, reruns, and releases see the project as busy. Because the job exists early, mid-prerequisite cancellation via the cancel-job endpoint works: the endpoint aborts the prereq process tree, and the route reaps the placeholder cleanly (exitCode 130). The `pid: 0` placeholder is invisible to the probe sweep's PM2 liveness checks, so probes never falsely finalize a running prereq.
+- The job row is created with `pid: 0` **before** the prerequisite runs, so the run is immediately visible in the UI and the log file streams in real time. The per-project agent start slot remains held while the prerequisite runs, so another agent for the same project queues instead of starting concurrently, and project-wide starters such as terminal runs, tests, CI fixes, reruns, and releases see the project as busy. Because the job exists early, mid-prerequisite cancellation via the cancel-job endpoint works: the endpoint aborts the prereq process tree, and the route reaps the placeholder cleanly (exitCode 130). The `pid: 0` placeholder sits inside the probe sweep's spawn-grace window, so probes never falsely finalize a running prereq.
 - For file-backed agents, the field is committed frontmatter (`prerequisiteCommand: "pnpm test"`); for DB agents it's stored on the `agents` row.
 
 ## Per-agent statistics
@@ -316,7 +313,7 @@ The Agents tab's editor includes a **✨ Improve** button next to the Prompt tex
 Behaviour:
 - One-shot, non-streaming. UI shows a spinner; on success the textarea is replaced with the result. Native Cmd+Z restores the original draft.
 - Honours the budget gate (`checkCliStartGate`). A blocked provider surfaces a toast and the textarea is left unchanged.
-- 120s timeout. No job row, no PM2 entry, no log file.
+- 120s timeout. No job row, no spawned subprocess record, no log file.
 
 This allows agents to be reusable — the same agent can run with different task prompts while keeping the skill composition consistent.
 
@@ -343,9 +340,9 @@ User/scheduler triggers
       → Write prerequisite artifact, if applicable
       → Build command:
           {selected-provider-shim} --print --output-format stream-json --include-partial-messages --verbose --dangerously-skip-permissions --model {agent.model}
-      → Start via PM2 with composed prompt as stdin
+      → Spawn detached child process with composed prompt as stdin
       → Return job ID and PID
-      → If startup fails before PM2 takes over, release the per-project start slot and drain the next queued fire immediately
+      → If startup fails before the child detaches, release the per-project start slot and drain the next queued fire immediately
   → Process runs → writes NDJSON log
   → Lifecycle stores agent run summary and changed-file metadata
   → No-op scheduled runs may create project recommendations
@@ -418,7 +415,7 @@ This also removes the prompt recovery file and pushes the graphile-worker schedu
 
 ### Scheduled Agent Cron
 
-TamTam does not create PM2 cron jobs or LaunchAgents for current scheduled agents. Instead, each enabled scheduled agent has one graphile-worker `agent-cron` row keyed as `agent-cron-<agentId>`. The row stores the next fire time computed with `computeNextFire()` in `lib/workflows/cron/parse-schedule.ts`.
+Each enabled scheduled agent has one graphile-worker `agent-cron` row keyed as `agent-cron-<agentId>`. The row stores the next fire time computed with `computeNextFire()` in `lib/workflows/cron/parse-schedule.ts`.
 
 Current behavior:
 
@@ -426,7 +423,7 @@ Current behavior:
 - `lib/workflows/cron/agent-cron-task.ts` handles each fire, checks pause/budget/branch/release gates, records the latest skipped/queued/dispatched attempt for the Agents UI, starts the agent intake workflow, and re-enqueues the next fire. Transient blockers such as global pause, an in-flight PR wait, non-default branch state, release locks, or stale origin state retry in about one minute; other outcomes advance to the next scheduled tick.
 - Agent CRUD routes call `installAgentSchedule()` / `uninstallAgentSchedule()` so schedule changes apply immediately without restarting the server.
 - `/api/agents` reads the graphile-worker `agent-cron-<agentId>` row to expose the actual queued `run_at` as `agent.cron.nextFireMs`, so schedule displays use queue state rather than estimating from the previous run.
-- Actual agent work still runs as one-shot in-process jobs after the agent intake workflow accepts the request. PM2 supervises TamTam itself, not recurring schedule timers.
+- Actual agent work still runs as one-shot in-process jobs after the agent intake workflow accepts the request.
 
 Skip conditions tracked by the cron task:
 
@@ -437,14 +434,6 @@ Skip conditions tracked by the cron task:
 - duplicate in-flight or in-progress-start agent run
 
 `/api/agents/scheduler-health` exposes the expected agent set, graphile-worker queue keys, and any missing prompt files or queue jobs. It can reconcile missing rows by reinstalling schedules.
-
-#### Why PM2 cron is not used
-
-Older TamTam versions tried to register scheduled agents with PM2 cron. PM2's `cron_restart` combined with `--no-autostart` silently no-op'd: the cron tick updated PM2 metadata but never started the stopped process. Any leftovers from old installs are inert and can be removed manually with `pm2 delete <name>` if desired.
-
-### Legacy Runner Metadata
-
-Rows and file-agent overrides may still contain `runner: "launchctl"` from older installs. TamTam keeps this value in API responses and storage so upgrades do not lose data, but current schedule install/uninstall paths are graphile-worker backed regardless of `runner`. New UI surfaces do not expose runner selection.
 
 Schedule string format:
 - `"30m"` → every 30 minutes
@@ -460,7 +449,7 @@ endpoint applies two guards:
 
 1. An existing-job check for already-running agent jobs on the same project.
 2. A synchronous per-project "starting" slot covering the gap between that
-   check and `pm2 start`, so concurrent requests cannot both observe an empty
+   check and spawn, so concurrent requests cannot both observe an empty
    running set and start together.
 
 Same-agent duplicates are rejected with `409`. Different agents on the same
@@ -486,11 +475,11 @@ after the running-job check but before the first request has created its job row
 
 ### Spawn-grace in `probeJobStatus`
 
-Job rows are inserted with `pid=0` and the real pid is persisted asynchronously after `pm2 start` returns (hundreds of ms, up to pm2's 15 s timeout). `probeJobStatus` treats `pid<=0` as **still spawning** for the first 30 seconds after `startedAt` — otherwise a concurrent duplicate-check would `markDone(-1)` the sibling mid-spawn **and** `pm2 delete` its Claude process, producing a phantom `exit -1 @ 0s` row next to the real run. After the grace window, `pid<=0` is treated as dead as before. See `lib/job-storage.ts:probeJobStatus`.
+Job rows are inserted with `pid=0` and the real pid is persisted asynchronously after spawn returns. `probeJobStatus` treats `pid<=0` as **still spawning** for the first 30 seconds after `startedAt` — otherwise a concurrent duplicate-check would `markDone(-1)` the sibling mid-spawn and tear down its Claude process, producing a phantom `exit -1 @ 0s` row next to the real run. After the grace window, `pid<=0` is treated as dead as before. See `lib/job-storage.ts:probeJobStatus`.
 
 ### Drain circuit breaker
 
-`drainNextAgentRun` in `lib/agents/pending-agent-run.ts` has a per-project circuit breaker to prevent a fast-failing route (e.g. PM2 spawn `EBADF` after file-descriptor exhaustion) from churning the queue at ~50 runs/sec.
+`drainNextAgentRun` in `lib/agents/pending-agent-run.ts` has a per-project circuit breaker to prevent a fast-failing route (e.g. spawn `EBADF` after file-descriptor exhaustion) from churning the queue at ~50 runs/sec.
 
 Behavior:
 - Each 5xx response or fetch-level error increments a per-project, per-entry `consecutiveFailures` counter.
@@ -501,7 +490,7 @@ Behavior:
 
 ## Durable Agent Intake
 
-All agent runs go through `runAgentIntakeWorkflow()` in `lib/agents/intake-workflow.ts`. There is no flag and no alternate path; the workflow owns prompt composition, optional prerequisite execution, retrieval/memory injection, and the PM2 handoff. The function is declared with `'use workflow'` / `'use step'` directives and runs under the `workflow` package's Postgres-backed execution world, which persists step state so transient crashes or server restarts retry from the last completed step rather than restart the run.
+All agent runs go through `runAgentIntakeWorkflow()` in `lib/agents/intake-workflow.ts`. There is no flag and no alternate path; the workflow owns prompt composition, optional prerequisite execution, retrieval/memory injection, and the spawn handoff. The function is declared with `'use workflow'` / `'use step'` directives and runs under the `workflow` package's Postgres-backed execution world, which persists step state so transient crashes or server restarts retry from the last completed step rather than restart the run.
 
 ### Steps
 
@@ -509,9 +498,9 @@ All agent runs go through `runAgentIntakeWorkflow()` in `lib/agents/intake-workf
 
 **Step 2 — `composePromptStep`**: re-checks the release lock and (for non-readOnly runs) the project-busy gate after the prereq, composes skills + docs, captures a `git rev-parse HEAD` + `git status` baseline, loads agent memory, queries pgvector retrieval when `retrieval_enabled` is on, resolves the CLI binary + env, and builds the full prompt.
 
-**Step 3 — `startAgentStep`**: writes the prereq artifact to disk, updates the job row with the composed `contextMeta` (which includes `workflow: true`), and calls `startJob()` to hand off to PM2. On failure it writes an error breadcrumb to the log file, marks the job done with `exitCode -1`, and rethrows so the workflow runtime can retry.
+**Step 3 — `startAgentStep`**: writes the prereq artifact to disk, updates the job row with the composed `contextMeta` (which includes `workflow: true`), and calls `startJob()` to hand off to the spawned child. On failure it writes an error breadcrumb to the log file, marks the job done with `exitCode -1`, and rethrows so the workflow runtime can retry.
 
-Everything after PM2 spawn — lifecycle hooks, SSE streaming, log tailing, completion detection, recommendation side effects — is unchanged.
+Everything after spawn — lifecycle hooks, SSE streaming, log tailing, completion detection, recommendation side effects — is unchanged.
 
 ### Per-Project Dev Server Lifecycle
 
@@ -539,7 +528,7 @@ The `/api/agents/{agentId}/run` success response always includes `via: "workflow
 }
 ```
 
-`pid` is `0` because the route returns before the workflow step has spawned the PM2 process; query `/api/jobs/<job_id>` later to get the actual PID.
+`pid` is `0` because the route returns before the workflow step has spawned the child process; query `/api/jobs/<job_id>` later to get the actual PID.
 
 ### Setup
 
@@ -569,7 +558,6 @@ The workflow requires `WORKFLOW_TARGET_WORLD` to point at the `@workflow/world-p
        "model": "normal",
        "prompt": "Review all uncommitted changes and provide feedback",
        "schedule": "24h",
-       "runner": "pm2",
        "enabled": true
      }'
    ```
@@ -602,7 +590,6 @@ The workflow requires `WORKFLOW_TARGET_WORLD` to point at the `@workflow/world-p
 | `app/api/agents/scheduler-health/route.ts` | Scheduler reconciliation + health view |
 | `lib/scheduling/agent-scheduler.ts` | Schedule install/uninstall (thin facade over the internal scheduler) |
 | `lib/scheduling/internal-scheduler.ts` | In-process schedule timers, skip reasons, live state |
-| `lib/jobs/pm2-jobs.ts` | PM2 process lifecycle for actual agent runs |
 | `components/AgentsTab.tsx` | UI for agent management |
 | `instrumentation-node.ts` | Boot-time scheduler install + other Node-only startup work |
 

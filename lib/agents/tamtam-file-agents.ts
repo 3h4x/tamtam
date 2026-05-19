@@ -17,7 +17,6 @@ export interface FileAgent {
   model: string;
   prompt: string;
   schedule: string | null;
-  runner: string;
   enabled: boolean;
   provider: string | null;
   prerequisiteCommand: string | null;
@@ -32,14 +31,13 @@ export interface FileAgentUpdates {
   model?: string;
   schedule?: string | null;
   skillIds?: string[];
-  runner?: string;
   enabled?: boolean;
   provider?: string | null;
   prerequisiteCommand?: string | null;
 }
 
 // Canonical frontmatter key order for serialization
-const FM_KEY_ORDER = ['provider', 'model', 'schedule', 'skillIds', 'runner', 'enabled', 'prerequisiteCommand'] as const;
+const FM_KEY_ORDER = ['provider', 'model', 'schedule', 'skillIds', 'enabled', 'prerequisiteCommand'] as const;
 
 function normalizeFileAgentProvider(value: string | null | undefined): string | null {
   if (typeof value !== 'string') return null;
@@ -106,7 +104,7 @@ function buildFileAgent(
 ): FileAgent {
   const { meta, body } = parseFrontmatter(content);
   // The `.md` file owns prompt + identity. Operational config (enabled,
-  // schedule, model, runner, skillIds) is stored in the DB so the UI can toggle
+  // schedule, model, skillIds) is stored in the DB so the UI can toggle
   // them without dirtying a committed file. Frontmatter values are used
   // as a starting baseline; the DB override (if any) wins on every field
   // it explicitly sets.
@@ -124,7 +122,6 @@ function buildFileAgent(
       override?.schedule !== undefined
         ? override.schedule
         : (meta.schedule?.trim() || null),
-    runner: override?.runner ?? meta.runner ?? 'pm2',
     enabled:
       override?.enabled !== undefined
         ? override.enabled
@@ -143,7 +140,6 @@ function serializeAgent(
   model: string,
   schedule: string | null,
   skillIds: string[],
-  runner: string,
   enabled: boolean,
   prompt: string,
   prerequisiteCommand: string | null
@@ -159,8 +155,6 @@ function serializeAgent(
       fmLines.push(`schedule: ${schedule}`);
     } else if (key === 'skillIds' && skillIds.length > 0) {
       fmLines.push(`skillIds: ${JSON.stringify(skillIds)}`);
-    } else if (key === 'runner' && runner !== 'pm2') {
-      fmLines.push(`runner: ${runner}`);
     } else if (key === 'enabled' && !enabled) {
       fmLines.push(`enabled: false`);
     } else if (key === 'prerequisiteCommand' && prerequisiteCommand !== null) {
@@ -285,7 +279,6 @@ export function writeFileAgent(
   const { schedule, error: scheduleError } = parseOptionalAgentScheduleInput(rawSchedule);
   if (scheduleError) throw new Error(scheduleError);
   const skillIds = updates.skillIds ?? current?.skillIds ?? [];
-  const runner = updates.runner ?? current?.runner ?? 'pm2';
   const enabled = updates.enabled !== undefined ? updates.enabled : (current?.enabled ?? true);
   const provider = updates.provider !== undefined
     ? normalizeFileAgentProvider(updates.provider)
@@ -295,7 +288,7 @@ export function writeFileAgent(
     ? (normalizeStoredPrerequisiteCommand(updates.prerequisiteCommand) ?? null)
     : (current?.prerequisiteCommand ?? null);
 
-  const content = serializeAgent(provider, model, schedule, skillIds, runner, enabled, prompt, prerequisiteCommand);
+  const content = serializeAgent(provider, model, schedule, skillIds, enabled, prompt, prerequisiteCommand);
   writeFileSync(filePath, content);
 
   return buildFileAgent(filePath, canonicalAgentName, projectName, content, Date.now() / 1000);

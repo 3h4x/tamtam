@@ -118,7 +118,6 @@ export async function GET(request: NextRequest) {
       schedule: a.schedule ?? null,
       enabled: a.enabled,
       model: a.model,
-      runner: a.runner,
       provider: a.provider ?? null,
       source: 'source' in a ? a.source : 'db',
     }));
@@ -130,7 +129,7 @@ export async function GET(request: NextRequest) {
 
 export async function POST(request: NextRequest) {
   const body = await request.json();
-  const { name, project, skillIds, docPaths, model, prompt, schedule, runner, enabled } = body;
+  const { name, project, skillIds, docPaths, model, prompt, schedule, enabled } = body;
   const provider = isCliProvider(body.provider) ? body.provider : null;
 
   if (!project?.trim()) {
@@ -178,7 +177,6 @@ export async function POST(request: NextRequest) {
     model: parsedModel ?? 'normal',
     prompt: prompt || '',
     schedule: parsedSchedule,
-    runner: runner || 'pm2',
     enabled: enabled !== false,
     provider,
     fallbackEnabled,
@@ -199,7 +197,6 @@ export async function POST(request: NextRequest) {
           model: agent.model,
           schedule: agent.schedule,
           skillIds: skillIdsList,
-          runner: agent.runner,
           enabled: agent.enabled,
           provider: agent.provider,
           prerequisiteCommand: agent.prerequisiteCommand,

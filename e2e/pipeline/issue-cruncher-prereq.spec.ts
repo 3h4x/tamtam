@@ -61,7 +61,6 @@ test.describe('issue-cruncher prerequisite forwarding', () => {
         project: PROJECT,
         prompt: 'Default prompt is unused here.',
         skillIds: ['agent-issue-cruncher'],
-        runner: 'pm2',
         enabled: true,
         // Override the auto-generated curl prereq so we don't depend on
         // the issues route or live GitHub calls.

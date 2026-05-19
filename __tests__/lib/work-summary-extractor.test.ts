@@ -25,7 +25,7 @@ function log(text: string) {
 }
 
 describe('work-summary-extractor', () => {
-  it('extracts assistant text from NDJSON logs with pm2 timestamps', () => {
+  it('extracts assistant text from NDJSON logs with ISO timestamp prefixes', () => {
     const raw = [
       `2026-05-10T10:00:00.000Z: ${JSON.stringify({
         type: 'stream_event',

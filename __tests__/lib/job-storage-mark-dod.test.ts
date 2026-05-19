@@ -32,10 +32,6 @@ beforeAll(async () => {
 
   vi.resetModules();
   vi.doMock('@/lib/db', () => ({ db: sharedHandle.db, schema }));
-  vi.doMock('@/lib/jobs/pm2-jobs', () => ({
-    getJobStatus: vi.fn(),
-    deleteJob: vi.fn().mockResolvedValue(undefined),
-  }));
   vi.doMock('@/lib/shared/shell', () => ({
     exec: vi.fn().mockResolvedValue({ exitCode: 0, stdout: '', stderr: '' }),
   }));
@@ -84,7 +80,6 @@ afterAll(async () => {
     // ignore
   }
   vi.doUnmock('@/lib/db');
-  vi.doUnmock('@/lib/jobs/pm2-jobs');
   vi.resetModules();
 });
 

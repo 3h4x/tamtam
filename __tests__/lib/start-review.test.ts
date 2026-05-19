@@ -52,9 +52,6 @@ vi.mock('@/lib/jobs/job-storage', () => ({
   probeJobStatus: (...args: unknown[]) => mocks.probeJobStatus(...args),
 }));
 
-vi.mock('@/lib/jobs/pm2-jobs', () => ({
-  splitCommand: (line: string) => line.split(/\s+/).filter(Boolean),
-}));
 
 vi.mock('@/lib/jobs/spawn-claude-detached', () => ({
   startJobInProcess: (...args: unknown[]) => mocks.startJob(...args),

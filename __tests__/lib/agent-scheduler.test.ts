@@ -156,11 +156,11 @@ describe('agent-scheduler (graphile-worker backed)', () => {
   describe('isAgentScheduleLoaded', () => {
     it('returns true when the per-agent prompt file exists', async () => {
       await installAgentSchedule('agent-loaded', '1h', 'p');
-      expect(await isAgentScheduleLoaded('agent-loaded', 'pm2')).toBe(true);
+      expect(await isAgentScheduleLoaded('agent-loaded')).toBe(true);
     });
 
     it('returns false when no prompt file exists for the agent', async () => {
-      expect(await isAgentScheduleLoaded('agent-missing-' + Date.now(), 'pm2')).toBe(false);
+      expect(await isAgentScheduleLoaded('agent-missing-' + Date.now())).toBe(false);
     });
   });
 });

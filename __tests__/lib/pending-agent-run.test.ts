@@ -325,7 +325,7 @@ describe('drainNextAgentRun', () => {
       .mockResolvedValueOnce(
         jsonResponse(
           {
-            detail: 'Failed to start: pm2 start failed',
+            detail: 'Failed to start: spawn failed',
           },
           500,
         )

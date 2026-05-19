@@ -1631,8 +1631,6 @@ export async function markDone(job: JobData, exitCode: number): Promise<void> {
   } catch (hookErr) {
     console.error(`[markDone] completion hooks threw for ${job.id}:`, hookErr);
   }
-  // (Per-job PM2 entries were retired when CLI spawning moved in-process;
-  // there is no PM2 entry to delete here anymore.)
   // Fallback: explicitly SIGKILL the bash wrapper and any children in case
   // the spawned subprocess hung after Claude CLI's final result event.
   // Skip when job.pid is the server's own process.pid — killing it would

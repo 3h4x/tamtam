@@ -91,9 +91,6 @@ describe('GitHub board sync failures are non-fatal', () => {
     vi.doMock('@/lib/github/project-board', () => ({
       queueJobBoardSync: vi.fn().mockRejectedValue(new Error('boom')),
     }));
-    vi.doMock('@/lib/jobs/pm2-jobs', () => ({
-      deleteJob: vi.fn().mockResolvedValue(undefined),
-    }));
     vi.doMock('@/lib/jobs/retention', () => ({
       pruneProjectLogs: vi.fn(),
     }));

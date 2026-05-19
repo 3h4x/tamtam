@@ -148,7 +148,6 @@ export const agents = pgTable('agents', {
   model: text('model').notNull().default('normal'),
   prompt: text('prompt').notNull().default(''),
   schedule: text('schedule'),
-  runner: text('runner').notNull().default('pm2'),
   enabled: boolean('enabled').notNull().default(true),
   docPaths: text('doc_paths').notNull().default('[]'),
   provider: text('provider'),

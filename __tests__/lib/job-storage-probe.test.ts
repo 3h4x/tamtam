@@ -121,15 +121,8 @@ function makeMissingProcessError(): NodeJS.ErrnoException {
   return error;
 }
 
-describe('probeJobStatus with pm2', () => {
+describe('probeJobStatus', () => {
   let probeJobStatusFn: typeof import('@/lib/jobs/job-storage').probeJobStatus;
-  // Stable mock references captured by the hoisted `vi.doMock` factories.
-  // `beforeEach` calls `mockReset()` on each so per-test `mockResolvedValue`
-  // (or `mockResolvedValueOnce`) calls work the same as in the original
-  // per-test mock setup.
-  const getJobStatusMock = vi.fn();
-  const getJobPidMock = vi.fn();
-  const deleteJobMock = vi.fn();
   const resolveProjectPathMock = vi.fn();
   let storageCache: Map<string, JobData>;
   let tempDir: string;
@@ -148,11 +141,6 @@ describe('probeJobStatus with pm2', () => {
   beforeAll(async () => {
     vi.resetModules();
     vi.doMock('@/lib/db', () => ({ db: sharedHandle.db, schema }));
-    vi.doMock('@/lib/jobs/pm2-jobs', () => ({
-      getJobStatus: getJobStatusMock,
-      getJobPid: getJobPidMock,
-      deleteJob: deleteJobMock,
-    }));
     vi.doMock('@/lib/shared/project-data', () => ({ resolveProjectPath: resolveProjectPathMock }));
 
     const mod = await import('@/lib/jobs/job-storage');
@@ -163,16 +151,12 @@ describe('probeJobStatus with pm2', () => {
 
   beforeEach(async () => {
     storageCache.clear();
-    getJobStatusMock.mockReset();
-    getJobPidMock.mockReset().mockResolvedValue(null);
-    deleteJobMock.mockReset();
     resolveProjectPathMock.mockReset().mockReturnValue(null);
   });
 
   afterAll(() => {
     if (tempDir) rmSync(tempDir, { recursive: true, force: true });
     vi.doUnmock('@/lib/db');
-    vi.doUnmock('@/lib/jobs/pm2-jobs');
     vi.doUnmock('@/lib/shared/project-data');
     vi.resetModules();
   });
@@ -224,7 +208,6 @@ describe('probeJobStatus with pm2', () => {
   });
 
   it('marks done via process.kill when pid no longer exists', async () => {
-    getJobStatusMock.mockResolvedValue({ status: 'unknown', exitCode: null });
     const killSpy = vi.spyOn(process, 'kill').mockImplementation(() => {
       throw makeMissingProcessError();
     });
@@ -250,9 +233,7 @@ describe('probeJobStatus with pm2', () => {
     }
   });
 
-  it('overrides exit code to 0 when log has a clean result (is_error:false) and pm2 reports non-zero', async () => {
-    getJobStatusMock.mockResolvedValue({ status: 'done', exitCode: -1 });
-
+  it('marks done with exit 0 when log has a clean claude result line (is_error:false)', async () => {
     const resultLine = '{"type":"result","subtype":"success","is_error":false,"duration_ms":500,"total_cost_usd":0,"session_id":"s1","result":"ok"}';
     const logFile = writeProbeLog('exitcode-override', resultLine + '\n');
 
@@ -276,8 +257,6 @@ describe('probeJobStatus with pm2', () => {
   });
 
   it('uses exit code 1 when log result has is_error:true (e.g. API timeout)', async () => {
-    getJobStatusMock.mockResolvedValue({ status: 'done', exitCode: 0 });
-
     const resultLine = '{"type":"result","subtype":"error_max_turns","is_error":true,"duration_ms":1000,"total_cost_usd":0,"session_id":"s2","result":"Stream idle timeout"}';
     const logFile = writeProbeLog('is-error', resultLine + '\n');
 
@@ -301,8 +280,6 @@ describe('probeJobStatus with pm2', () => {
   });
 
   it('uses exit code 1 for is_error:true on agent: kind too', async () => {
-    getJobStatusMock.mockResolvedValue({ status: 'done', exitCode: 0 });
-
     const resultLine = '{"type":"result","subtype":"error_api","is_error":true,"duration_ms":500,"total_cost_usd":0,"session_id":"s3","result":"Rate limited"}';
     const logFile = writeProbeLog('agent-is-error', resultLine + '\n');
 
@@ -324,8 +301,10 @@ describe('probeJobStatus with pm2', () => {
     expect(job.exitCode).toBe(1);
   });
 
-  it('does NOT override exit code for test kind even with a result in the log', async () => {
-    getJobStatusMock.mockResolvedValue({ status: 'done', exitCode: -1 });
+  it('does NOT apply claude result-line override for test kind', async () => {
+    const killSpy = vi.spyOn(process, 'kill').mockImplementation(() => {
+      throw makeMissingProcessError();
+    });
 
     const resultLine = '{"type":"result","subtype":"success","is_error":false,"duration_ms":200,"total_cost_usd":0,"session_id":"s3","result":"ok"}';
     const logFile = writeProbeLog('test-kind', resultLine + '\n');
@@ -343,19 +322,24 @@ describe('probeJobStatus with pm2', () => {
       seen: false,
     };
 
-    // logHasClaudeResult check is only for run/review → skipped for test kind
-    const status = await probeJobStatusFn(job);
-    // pm2 reports done with exitCode=-1, no override for test kind
-    expect(status).toBe('done');
-    expect(job.exitCode).toBe(-1);
+    try {
+      // The claude result-line override only fires for claude-backed kinds.
+      // Test kind falls through to process.kill liveness; dead pid + no
+      // sentinel file → markDone(-1).
+      const status = await probeJobStatusFn(job);
+      expect(status).toBe('done');
+      expect(job.exitCode).toBe(-1);
+    } finally {
+      killSpy.mockRestore();
+    }
   });
 
   // Regression: an `agent:*` job created via createJob(project, kind, 0, '')
-  // would spend hundreds of ms awaiting `pm2 start` before updateJob persisted
-  // the real pid. A concurrent duplicate-check (/api/agents/[id]/run) would
-  // call probeJobStatus on the in-flight sibling, hit the pid<=0 fast-path,
-  // and markDone(-1) — which also pm2-deletes the nascent process. User
-  // symptom: phantom "exit -1 @ 0s" row next to the successful run.
+  // spends hundreds of ms before updateJob persists the real pid. A concurrent
+  // duplicate-check (/api/agents/[id]/run) would call probeJobStatus on the
+  // in-flight sibling, hit the pid<=0 fast-path, and markDone(-1) — which
+  // also tears down the nascent process. User symptom: phantom
+  // "exit -1 @ 0s" row next to the successful run.
   it("returns 'running' for a freshly-created pid=0 job (spawn grace)", async () => {
     const job: JobData = {
       id: nextJobId('job-spawn-grace'),
@@ -374,14 +358,9 @@ describe('probeJobStatus with pm2', () => {
     expect(status).toBe('running');
     expect(job.finishedAt).toBeNull();
     expect(job.exitCode).toBeNull();
-    // pm2 getJobStatus must not be consulted — the job hasn't been registered yet.
-    expect(getJobStatusMock).not.toHaveBeenCalled();
   });
 
-  it("returns 'done' and marks exit -1 once a pid=0 job exceeds the spawn grace and pm2 forgot it", async () => {
-    // pm2 has no record of this job → truly dead.
-    getJobStatusMock.mockResolvedValue({ status: 'unknown', exitCode: null });
-
+  it("returns 'done' and marks exit -1 once a pid=0 job exceeds the spawn grace", async () => {
     const job: JobData = {
       id: nextJobId('job-spawn-grace-expired'),
       project: 'proj',
@@ -403,8 +382,8 @@ describe('probeJobStatus with pm2', () => {
   });
 
   it("returns 'running' for a freshly-created pid=-1 job (negative pid within grace)", async () => {
-    // pid can be -1 when createJob writes a placeholder before pm2 start completes.
-    // The grace window applies to all pid<=0, not just pid===0.
+    // pid can be -1 when createJob writes a placeholder before the spawn
+    // returns. The grace window applies to all pid<=0, not just pid===0.
     const job: JobData = {
       id: nextJobId('job-spawn-grace-neg'),
       project: 'proj',
@@ -421,12 +400,9 @@ describe('probeJobStatus with pm2', () => {
     const status = await probeJobStatusFn(job);
     expect(status).toBe('running');
     expect(job.finishedAt).toBeNull();
-    expect(getJobStatusMock).not.toHaveBeenCalled();
   });
 
-  it("returns 'done' for a pid=-1 job that exceeds the spawn grace when pm2 forgot it", async () => {
-    getJobStatusMock.mockResolvedValue({ status: 'unknown', exitCode: null });
-
+  it("returns 'done' for a pid=-1 job that exceeds the spawn grace", async () => {
     const job: JobData = {
       id: nextJobId('job-spawn-grace-neg-expired'),
       project: 'proj',
@@ -444,33 +420,6 @@ describe('probeJobStatus with pm2', () => {
     expect(status).toBe('done');
     expect(job.exitCode).toBe(-1);
     expect(job.finishedAt).not.toBeNull();
-  });
-
-  // Regression: long-running release meta-job. pm2 `start` raced pm2 `jlist`
-  // and job.pid stayed 0. After the 30 s spawn grace, the old probe path
-  // unconditionally markDone'd the release with exit -1 — which then surfaced
-  // in the Terminal as red-text "# release finished — exit 0" followed by
-  // "exit -1" plus a wall of raw NDJSON from extractLogDetail.
-  it("pid=0 past grace but pm2 still reports online → stays running (no spurious markDone -1)", async () => {
-    getJobStatusMock.mockResolvedValue({ status: 'running', exitCode: null });
-
-    const job: JobData = {
-      id: nextJobId('release-long-running'),
-      project: 'proj',
-      kind: 'release',
-      prompt: null,
-      pid: 0,
-      logPath: null,
-      startedAt: Date.now() / 1000 - 120,
-      finishedAt: null,
-      exitCode: null,
-      seen: false,
-    };
-
-    const status = await probeJobStatusFn(job);
-    expect(status).toBe('running');
-    expect(job.finishedAt).toBeNull();
-    expect(job.exitCode).toBeNull();
   });
 
   it('release kind always reports running — workflow runtime owns finalization', async () => {
@@ -500,7 +449,6 @@ describe('probeJobStatus – test/action kind liveness via process.kill', () => 
   beforeAll(async () => {
     vi.resetModules();
     vi.doMock('@/lib/db', () => ({ db: sharedHandle.db, schema }));
-    vi.doMock('@/lib/jobs/pm2-jobs', () => ({ getJobStatus: vi.fn(), deleteJob: vi.fn() }));
     vi.doMock('@/lib/shared/project-data', () => ({ resolveProjectPath: vi.fn().mockReturnValue(null) }));
 
     const mod = await import('@/lib/jobs/job-storage');
@@ -514,7 +462,6 @@ describe('probeJobStatus – test/action kind liveness via process.kill', () => 
 
   afterAll(() => {
     vi.doUnmock('@/lib/db');
-    vi.doUnmock('@/lib/jobs/pm2-jobs');
     vi.doUnmock('@/lib/shared/project-data');
     vi.resetModules();
   });
@@ -628,10 +575,6 @@ describe('markDone – ghIssuesCache invalidation', () => {
   beforeAll(async () => {
     vi.resetModules();
     vi.doMock('@/lib/db', () => ({ db: sharedHandle.db, schema }));
-    vi.doMock('@/lib/jobs/pm2-jobs', () => ({
-      getJobStatus: vi.fn(),
-      deleteJob: vi.fn().mockResolvedValue(undefined),
-    }));
     vi.doMock('@/lib/shared/shell', () => ({
       exec: vi.fn().mockResolvedValue({ exitCode: 0, stdout: '', stderr: '' }),
     }));
@@ -673,7 +616,6 @@ describe('markDone – ghIssuesCache invalidation', () => {
 
   afterAll(() => {
     vi.doUnmock('@/lib/db');
-    vi.doUnmock('@/lib/jobs/pm2-jobs');
     vi.doUnmock('@/lib/shared/shell');
     vi.doUnmock('@/lib/git/git-utils');
     vi.doUnmock('@/lib/shared/project-data');
@@ -757,10 +699,6 @@ describe('markDone – metadata extraction skipped for release kind', () => {
   beforeAll(async () => {
     vi.resetModules();
     vi.doMock('@/lib/db', () => ({ db: sharedHandle.db, schema }));
-    vi.doMock('@/lib/jobs/pm2-jobs', () => ({
-      getJobStatus: vi.fn(),
-      deleteJob: vi.fn().mockResolvedValue(undefined),
-    }));
     vi.doMock('@/lib/shared/shell', () => ({
       exec: vi.fn().mockResolvedValue({ exitCode: 0, stdout: '', stderr: '' }),
     }));
@@ -797,7 +735,6 @@ describe('markDone – metadata extraction skipped for release kind', () => {
   afterAll(() => {
     if (tempDir) rmSync(tempDir, { recursive: true, force: true });
     vi.doUnmock('@/lib/db');
-    vi.doUnmock('@/lib/jobs/pm2-jobs');
     vi.doUnmock('@/lib/shared/shell');
     vi.doUnmock('@/lib/shared/project-data');
     vi.doUnmock('@/lib/scheduling/scheduling');
@@ -921,10 +858,6 @@ describe('markDone – DB-level idempotency guard', () => {
   beforeAll(async () => {
     vi.resetModules();
     vi.doMock('@/lib/db', () => ({ db: sharedHandle.db, schema }));
-    vi.doMock('@/lib/jobs/pm2-jobs', () => ({
-      getJobStatus: vi.fn(),
-      deleteJob: vi.fn().mockResolvedValue(undefined),
-    }));
     vi.doMock('@/lib/shared/shell', () => ({
       exec: vi.fn().mockResolvedValue({ exitCode: 0, stdout: '', stderr: '' }),
     }));
@@ -968,7 +901,6 @@ describe('markDone – DB-level idempotency guard', () => {
 
   afterAll(() => {
     vi.doUnmock('@/lib/db');
-    vi.doUnmock('@/lib/jobs/pm2-jobs');
     vi.doUnmock('@/lib/shared/shell');
     vi.doUnmock('@/lib/git/git-utils');
     vi.doUnmock('@/lib/shared/project-data');

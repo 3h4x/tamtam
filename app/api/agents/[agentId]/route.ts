@@ -78,14 +78,12 @@ export async function PATCH(
         body.enabled !== undefined ||
         body.schedule !== undefined ||
         body.model !== undefined ||
-        body.runner !== undefined ||
         body.skillIds !== undefined
       ) {
         await setFileAgentOverride(parsedFile.project, parsedFile.name, {
           enabled: body.enabled,
           schedule: body.schedule !== undefined ? parsedSchedule.schedule : undefined,
           model: parsedModel ?? undefined,
-          runner: body.runner,
           skillIds: body.skillIds,
         });
       }
@@ -118,10 +116,9 @@ export async function PATCH(
   if (!existing) return NextResponse.json({ detail: 'not found' }, { status: 404 });
 
   // Capture identity before update so we can clean up any compatibility
-  // scheduler state if name, project, or runner changes.
+  // scheduler state if name or project changes.
   const oldName = existing.name;
   const oldProject = existing.project;
-  const oldRunner = existing.runner;
   let nextName = existing.name;
 
   if (body.name !== undefined) {
@@ -146,7 +143,6 @@ export async function PATCH(
   if (body.model !== undefined) updates.model = parsedModel ?? 'normal';
   if (body.prompt !== undefined) updates.prompt = body.prompt;
   if (body.schedule !== undefined) updates.schedule = parsedSchedule.schedule;
-  if (body.runner !== undefined) updates.runner = body.runner;
   if (body.enabled !== undefined) updates.enabled = body.enabled;
   if (provider !== undefined) updates.provider = provider;
   if (body.fallbackEnabled !== undefined) updates.fallbackEnabled = body.fallbackEnabled === true;
@@ -173,7 +169,6 @@ export async function PATCH(
           model: agent.model,
           schedule: agent.schedule,
           skillIds,
-          runner: agent.runner,
           enabled: agent.enabled,
           provider: agent.provider,
           prerequisiteCommand: agent.prerequisiteCommand,
@@ -186,7 +181,7 @@ export async function PATCH(
   if (agent) {
     try {
       const identityChanged =
-        agent.name !== oldName || agent.project !== oldProject || agent.runner !== oldRunner;
+        agent.name !== oldName || agent.project !== oldProject;
       if (identityChanged) {
         await uninstallAgentSchedule(agentId, oldProject, oldName);
       }

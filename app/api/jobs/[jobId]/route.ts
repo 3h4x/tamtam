@@ -57,9 +57,8 @@ export async function DELETE(
     return NextResponse.json({ detail: 'job already finished' }, { status: 409 });
   }
 
-  // (Per-job PM2 entries were retired — no `pm2 stop` / `pm2 delete` is
-  // needed before cancellation. Cooperative cancellation + process.kill
-  // cover every spawn pathway TamTam still uses.)
+  // Cooperative cancellation + process.kill cover every spawn pathway
+  // TamTam uses.
 
   const hasCooperativeCancellation = job.kind === 'push'
     || job.kind === 'commit'

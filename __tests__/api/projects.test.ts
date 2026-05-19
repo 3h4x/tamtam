@@ -52,7 +52,6 @@ async function applyDdl(handle: TestDbHandle): Promise<void> {
       prompt text,
       schedule text,
       enabled boolean DEFAULT false,
-      runner text,
       skill_ids text,
       doc_paths text NOT NULL DEFAULT '[]',
       provider text,

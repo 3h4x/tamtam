@@ -247,7 +247,7 @@ describe('pipeline-lock', () => {
     });
 
     it('self-heal keeps a pending release queued when the drain throws', async () => {
-      mocks.drainProjectRecoveryWork.mockRejectedValue(new Error('pm2 start failed'));
+      mocks.drainProjectRecoveryWork.mockRejectedValue(new Error('spawn failed'));
 
       await insertLock('proj', 'old-release', Date.now() / 1000 - 5);
       await insertJob('old-release', 'proj', 'release', Date.now() / 1000 - 200, Date.now() / 1000 - 10);

@@ -1,7 +1,7 @@
 import { test, expect, Route } from '@playwright/test';
 
 // E2E coverage for the full release flow — everything mocked at the HTTP
-// layer so no real git/pm2/claude invocations happen. These tests drive the
+// layer so no real git/spawn/claude invocations happen. These tests drive the
 // UI through each state the release pipeline can land in:
 //
 //   test → review → commit → push   (with verdict/commit/push outcomes)
