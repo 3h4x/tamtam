@@ -131,4 +131,34 @@ describe('AgentsTab queued runs', () => {
 
     unmount()
   })
+
+  it('renders the richer empty state and opens the new-agent editor action', async () => {
+    fetchAgentsMock.mockResolvedValueOnce({ agents: [] })
+    fetchSkillsMock.mockResolvedValueOnce({
+      skills: [
+        { id: 'skill-1', name: 'Docs', description: '', content: '', createdAt: 1, updatedAt: 1 },
+        { id: 'skill-2', name: 'Review', description: '', content: '', createdAt: 1, updatedAt: 1 },
+      ],
+    })
+    vi.stubGlobal('fetch', vi.fn().mockResolvedValue({
+      json: async () => ({ settings: { agent_templates: JSON.stringify([{ name: 'Nightly' }]) } }),
+    }))
+
+    const { container, unmount } = renderTab()
+
+    await vi.waitFor(() => {
+      expect(container.textContent).toContain('No agents yet')
+      expect(container.textContent).toContain('skills available')
+      expect(container.textContent).toContain('agent templates')
+      expect(buttonByText(container, 'New agent')).toBeInstanceOf(HTMLButtonElement)
+    })
+
+    buttonByText(container, 'New agent').dispatchEvent(new MouseEvent('click', { bubbles: true }))
+
+    await vi.waitFor(() => {
+      expect(pushMock).toHaveBeenCalledWith('/project/alpha/agents?agent=new')
+    })
+
+    unmount()
+  })
 })
