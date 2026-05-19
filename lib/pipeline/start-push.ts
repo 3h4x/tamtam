@@ -567,24 +567,36 @@ async function runPush(
   }
 
   let pushR = await tryPush();
+  let setUpstreamBranch: string | null = null;
 
   // If no upstream branch is set, detect current branch and set it.
   if (pushR.exitCode !== 0 && (pushR.stderr.includes('no upstream') || pushR.stderr.includes('set-upstream'))) {
     const branchR = await execStep('git', ['-C', projPath, 'branch', '--show-current'], { timeout: 5000 });
     const branch = branchR.stdout.trim();
-    if (branch) pushR = await tryPush(['-u', 'origin', branch]);
+    if (branch) {
+      setUpstreamBranch = branch;
+      pushR = await tryPush(['-u', 'origin', branch]);
+    }
   }
 
   // Push rejected because the remote has commits the local clone doesn't know about
   // (stale tracking info — the pre-push behind-check missed it). Pull --rebase and retry.
-  if (pushR.exitCode !== 0 && (pushR.stderr.includes('fetch first') || pushR.stderr.includes('Updates were rejected'))) {
+  // Covers the standard "fetch first" / "Updates were rejected" messages plus
+  // GitHub's ref-lock race ("cannot lock ref … is at X but expected Y"). Avoid
+  // matching generic "[remote rejected]" output; Git uses that for protected
+  // branches, permissions, and other server-side denials that a rebase cannot fix.
+  const refRaceSignals = ['fetch first', 'Updates were rejected', 'cannot lock ref', 'non-fast-forward'];
+  if (pushR.exitCode !== 0 && refRaceSignals.some(s => pushR.stderr.includes(s) || pushR.stdout.includes(s))) {
     log(`\n# remote has new commits (stale tracking) — rebasing before retry\n`);
-    const rebaseR = await execStep('git', ['-C', projPath, 'pull', '--rebase'], { timeout: PUSH_TIMEOUT, killProcessGroup: true });
+    const rebaseArgs = setUpstreamBranch
+      ? ['-C', projPath, 'pull', '--rebase', 'origin', setUpstreamBranch]
+      : ['-C', projPath, 'pull', '--rebase'];
+    const rebaseR = await execStep('git', rebaseArgs, { timeout: PUSH_TIMEOUT, killProcessGroup: true });
     if (rebaseR.stdout) log(rebaseR.stdout);
     if (rebaseR.stderr) log(rebaseR.stderr);
     if (rebaseR.exitCode === 0) {
       log(`\n# rebase succeeded — retrying push\n`);
-      pushR = await tryPush();
+      pushR = await tryPush(setUpstreamBranch ? ['-u', 'origin', setUpstreamBranch] : []);
     } else {
       const detail = (rebaseR.stderr.trim() || rebaseR.stdout.trim() || 'rebase failed').slice(0, 2000);
       return { ok: false, status: 409, detail: `Rebase failed before push: ${detail}` };

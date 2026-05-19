@@ -599,6 +599,7 @@ describe('markDone – ghIssuesCache invalidation', () => {
     vi.doMock('@/lib/pipeline/push-rejection', () => ({
       isHookRejection: vi.fn().mockReturnValue(false),
       isTestFailureRejection: vi.fn().mockReturnValue(false),
+      isRemoteRaceRejection: vi.fn().mockReturnValue(false),
     }));
     vi.doMock('@/lib/pipeline/start-release', () => ({
       startRelease: vi.fn().mockResolvedValue({ ok: false }),
@@ -720,6 +721,7 @@ describe('markDone – metadata extraction skipped for release kind', () => {
     vi.doMock('@/lib/pipeline/push-rejection', () => ({
       isHookRejection: vi.fn().mockReturnValue(false),
       isTestFailureRejection: vi.fn().mockReturnValue(false),
+      isRemoteRaceRejection: vi.fn().mockReturnValue(false),
     }));
 
     const mod = await import('@/lib/jobs/job-storage');
@@ -885,6 +887,7 @@ describe('markDone – DB-level idempotency guard', () => {
     vi.doMock('@/lib/pipeline/push-rejection', () => ({
       isHookRejection: vi.fn().mockReturnValue(false),
       isTestFailureRejection: vi.fn().mockReturnValue(false),
+      isRemoteRaceRejection: vi.fn().mockReturnValue(false),
     }));
 
     const mod = await import('@/lib/jobs/job-storage');

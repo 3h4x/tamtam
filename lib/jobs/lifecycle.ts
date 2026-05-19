@@ -1261,8 +1261,22 @@ async function runCompletionHooksInner(job: JobData): Promise<void> {
   if (job.kind === 'push' && job.exitCode !== 0) {
     try {
       const rawLog = readLog(job, 100_000);
-      const { isHookRejection, isTestFailureRejection } = await import('@/lib/pipeline/push-rejection');
-      if (isTestFailureRejection(rawLog)) {
+      const { isHookRejection, isTestFailureRejection, isRemoteRaceRejection } = await import('@/lib/pipeline/push-rejection');
+      // Remote race / branch-protection cases first: an LLM fix can't repair
+      // a non-fast-forward conflict or a missing PR. start-push already
+      // auto-rebases on the common variants; if the failure still surfaces
+      // here it means rebase couldn't recover or branch protection blocks
+      // the direct push. Stop the pipeline cleanly with a clear reason
+      // instead of churning a doomed fix job.
+      if (isRemoteRaceRejection(rawLog)) {
+        const protectionHint = /Changes must be made through a pull request|required status check|protected branch/i.test(rawLog)
+          ? 'branch protection requires a PR'
+          : 'remote moved during push';
+        releaseStopReason = `push blocked: ${protectionHint} for ${job.project} — re-run release`;
+        noteReleaseStop(releaseStopReason);
+        forcedReleaseExitCode = 1;
+        console.log(`[push] ${protectionHint} for ${job.project} — not spawning fix job`);
+      } else if (isTestFailureRejection(rawLog)) {
         // Pre-push hook ran tests and they failed. The fix loop is tuned for
         // lint/typecheck nits, not for diagnosing test failures (especially
         // flakes). Stop the pipeline and surface the failure so a human can

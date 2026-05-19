@@ -20,7 +20,7 @@ before declaring the release dead. This is the contract:
 | `test` exit ≠ 0  | `fix` (sees test log) | re-run `test` | `TAMTAM_MAX_STEP_ITERATIONS` (default 3) |
 | `review` not LGTM | `fix` (sees review findings) | re-run `review` | `review_fix_max_iterations` |
 | `commit` exit ≠ 0 | `fix` (sees commit log) | re-run `commit` | `TAMTAM_MAX_STEP_ITERATIONS` |
-| `push` exit ≠ 0  | `fix` (reads hook log; bails if pre-push tests failed) | re-run `push` | `getPushFixAttemptCap()=2` for hook-rejection fix; `TAMTAM_MAX_STEP_ITERATIONS` for review-driven push recovery |
+| `push` exit ≠ 0  | `fix` (reads hook log; bails if pre-push tests failed, branch protection blocks the direct push, or the remote moved and the push step could not recover) | re-run `push` | `getPushFixAttemptCap()=2` for hook-rejection fix; `TAMTAM_MAX_STEP_ITERATIONS` for review-driven push recovery |
 
 Rules that hold for every recovery loop:
 
@@ -51,6 +51,12 @@ Rules that hold for every recovery loop:
   GitHub issue with the unresolved findings via `fileReviewExhaustionIssue`
   and continues to commit + push so partial work ships. Test/commit/push caps
   abort without filing an issue.
+- **Remote push failures do not enter the code-edit fix loop.** `start-push`
+  auto-rebases and retries concrete stale-remote cases such as
+  non-fast-forward, fetch-first, and ref-lock races. If a push still fails
+  because the remote moved, or because branch protection requires a PR or
+  status check, the release stops with a clear push-blocked reason instead of
+  spawning a fix job.
 
 Implementation lives in two places: workflow-driven release-linked
 flows go through `lib/workflows/release-orchestrator.ts` (`decideStep` →
@@ -429,9 +435,11 @@ When `auto_push_enabled` is **on**: the same review→fix→push chaining happen
 
 ## Hook rejection detection (`isHookRejection`)
 
-Checks the push job log for strings from husky, lint-staged, eslint, pre-commit hooks, and pre-push hooks. If matched, the push failure triggers a generic `fix` job (with `parentJobId` pointing at the failed push) instead of a hard release failure. The fix prompt reads the hook error from the push log and edits the relevant files. When that fix exits 0, the orchestrator re-dispatches the push.
+Checks the push job log for explicit local hook-failure markers from husky, lint-staged, and the pre-commit framework, while ignoring logs that reached the remote (`remote:` output). If matched, the push failure triggers a generic `fix` job (with `parentJobId` pointing at the failed push) instead of a hard release failure. The fix prompt reads the hook error from the push log and edits the relevant files. When that fix exits 0, the orchestrator re-dispatches the push.
 
 `isTestFailureRejection` (sibling helper in `lib/pipeline/push-rejection.ts`) detects when the pre-push hook failed because tests broke. In that case TamTam stops the pipeline for human triage — fix loops aren't tuned for diagnosing test failures (especially flakes).
+
+`isRemoteRaceRejection` detects stale-remote failures and branch-protection denials that cannot be fixed by editing code. `start-push` first tries to recover concrete stale-head cases with `git pull --rebase` and a push retry; if the residual failure still reaches lifecycle handling, TamTam stops the release with a push-blocked reason rather than launching a fix job.
 
 ---
 
