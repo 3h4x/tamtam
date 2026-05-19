@@ -1,6 +1,6 @@
 ---
 model: sonnet
-skillIds: ["persona:product-team/ux-researcher-designer"]
+skillIds: ["persona:product/ux-researcher"]
 ---
 
 # TamTam Frontend Improvement

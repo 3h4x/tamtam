@@ -343,7 +343,11 @@ describe('seedDefaultSkills seeded defaults snapshot', () => {
     expect(skill!.content).toContain("Don't run `git` commands");
   });
 
-  it('no default skill content tells the model to run git', () => {
+  it('no default skill content tells the model to run state-mutating git', () => {
+    // Read-only git (log, diff, status, show, ls-files, blame, rev-parse) is
+    // allowed because some agents legitimately need recent history or
+    // working-tree scope. Write-class verbs belong only to the release
+    // pipeline.
     const violators: string[] = [];
     for (const skill of seededSkills.values()) {
       if (!skill.id.startsWith('agent-')) continue;
@@ -352,7 +356,7 @@ describe('seedDefaultSkills seeded defaults snapshot', () => {
       // "run this" instruction. Exclude it from the heuristic.
       if (skill.id === 'agent-issue-cruncher') continue;
       const c = skill.content || '';
-      if (/\bgit (log|diff|checkout|commit|push|pull|status|branch|stash|rebase|merge|reset|tag)\b/.test(c)) {
+      if (/\bgit (checkout|switch|commit|push|pull|fetch|branch|stash|rebase|merge|reset|tag|add)\b/.test(c)) {
         violators.push(`${skill.id}: ${c.match(/\bgit \w+\b/)?.[0]}`);
       }
     }
@@ -547,7 +551,11 @@ describe('seedDefaultSkills isolated cases', () => {
     expect(skill!.content).toContain("Don't run `git` commands");
   });
 
-  it('no default skill content tells the model to run git', async () => {
+  it('no default skill content tells the model to run state-mutating git', async () => {
+    // Read-only git (log, diff, status, show, ls-files, blame, rev-parse) is
+    // allowed because some agents legitimately need recent history or
+    // working-tree scope. Write-class verbs belong only to the release
+    // pipeline.
     seedFn();
     await waitForSeedToSettle();
     const skills = await selectAllSkills();
@@ -560,7 +568,7 @@ describe('seedDefaultSkills isolated cases', () => {
       // "run this" instruction. Exclude it from the heuristic.
       if (skill.id === 'agent-issue-cruncher') continue;
       const c = skill.content || '';
-      if (/\bgit (log|diff|checkout|commit|push|pull|status|branch|stash|rebase|merge|reset|tag)\b/.test(c)) {
+      if (/\bgit (checkout|switch|commit|push|pull|fetch|branch|stash|rebase|merge|reset|tag|add)\b/.test(c)) {
         violators.push(`${skill.id}: ${c.match(/\bgit \w+\b/)?.[0]}`);
       }
     }
