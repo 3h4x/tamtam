@@ -151,4 +151,61 @@ describe('WorkflowRunsPage', () => {
 
     unmount()
   })
+
+  it('uses lifecycle marks and matching active tones in status filters', async () => {
+    vi.stubGlobal('fetch', vi.fn().mockResolvedValue({
+      json: async () => ({
+        runs: [
+          {
+            id: 'run-done',
+            name: 'test',
+            rawName: 'test',
+            status: 'completed',
+            createdAt: '2026-05-20T11:49:00Z',
+            startedAt: '2026-05-20T11:50:00Z',
+            completedAt: '2026-05-20T11:50:30Z',
+            durationMs: 30_000,
+            input: ['acme'],
+            output: { ok: true },
+            error: null,
+          },
+          {
+            id: 'run-failed',
+            name: 'review',
+            rawName: 'review',
+            status: 'failed',
+            createdAt: '2026-05-20T11:49:00Z',
+            startedAt: '2026-05-20T11:50:00Z',
+            completedAt: '2026-05-20T11:50:30Z',
+            durationMs: 30_000,
+            input: ['acme'],
+            output: null,
+            error: 'failed',
+          },
+        ],
+        meta: { workflowEnabled: true, releaseWorkflow: true, releaseWorkflowDrive: true, mode: 'drive' },
+      }),
+    }))
+
+    const { container, unmount } = renderWorkflowRunsPage()
+
+    await vi.waitFor(() => {
+      const filters = container.querySelector('[role="group"][aria-label="Status filter"]')
+      expect(filters?.textContent).toContain('✓')
+      expect(filters?.textContent).toContain('✗')
+    })
+
+    const failedButton = Array.from(container.querySelectorAll<HTMLButtonElement>('button'))
+      .find((button) => button.textContent?.includes('failed'))
+    expect(failedButton).toBeDefined()
+
+    flushSync(() => {
+      failedButton?.dispatchEvent(new MouseEvent('click', { bubbles: true }))
+    })
+
+    expect(failedButton?.getAttribute('aria-pressed')).toBe('true')
+    expect(failedButton?.className).toContain('text-status-error')
+
+    unmount()
+  })
 })

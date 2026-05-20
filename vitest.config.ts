@@ -3,6 +3,45 @@ import path from 'path';
 
 const isCi = process.env.CI === 'true';
 
+// The 29 test files below each take >=500ms wall-clock (DB boots, heavy mocks,
+// or large prompt assembly). Routing them into their own thread pool keeps a
+// few slow files from blocking the long tail of small fast files, and lets
+// each project right-size its `maxWorkers` for its own contention profile.
+// Result: full suite ~16s vs ~21s with a single 12-thread pool. Re-measure
+// periodically with `npx vitest run --reporter=json --outputFile=/tmp/v.json`
+// and sort by `endTime - startTime` to keep this list accurate.
+const SLOW_FILES = [
+  '__tests__/instrumentation.test.ts',
+  '__tests__/api/agent-run.test.ts',
+  '__tests__/api/config-projects.test.ts',
+  '__tests__/api/health-and-projects.test.ts',
+  '__tests__/api/job-fix.test.ts',
+  '__tests__/api/job-rerun.test.ts',
+  '__tests__/api/job-resources.test.ts',
+  '__tests__/api/project-run.test.ts',
+  '__tests__/api/project-test.test.ts',
+  '__tests__/api/review-pr.test.ts',
+  '__tests__/components/issues-tab.test.ts',
+  '__tests__/components/project-runs-tab-actions.test.tsx',
+  '__tests__/components/settings-page.test.tsx',
+  '__tests__/scripts/gen-workflow-graph.test.ts',
+  '__tests__/lib/codex-shim.test.ts',
+  '__tests__/lib/deepagents-shim.test.ts',
+  '__tests__/lib/default-agent-skills.test.ts',
+  '__tests__/lib/dev-server-lifecycle.test.ts',
+  '__tests__/lib/job-storage-pipeline.test.ts',
+  '__tests__/lib/pipeline-lock.test.ts',
+  '__tests__/lib/project-sweep.test.ts',
+  '__tests__/lib/queued-agent-runs.test.ts',
+  '__tests__/lib/retention.test.ts',
+  '__tests__/lib/shell.test.ts',
+  '__tests__/lib/start-push.test.ts',
+  '__tests__/lib/start-review.test.ts',
+  '__tests__/lib/start-soak.test.ts',
+  '__tests__/lib/workflows/release-orchestrator.test.ts',
+  '__tests__/lib/agents/retrieval/pgvector-backend.test.ts',
+];
+
 export default defineConfig({
   resolve: {
     alias: {
@@ -10,14 +49,36 @@ export default defineConfig({
     },
   },
   test: {
-    environment: 'node',
-    include: ['__tests__/**/*.test.ts', '__tests__/**/*.test.tsx'],
-    globalSetup: ['./__tests__/global-setup.ts'],
-    pool: 'threads',
-    maxWorkers: isCi ? 4 : 12,
-    hookTimeout: isCi ? 30000 : 10000,
-    testTimeout: 30000,
-    teardownTimeout: 10000,
+    projects: [
+      {
+        extends: true,
+        test: {
+          name: 'fast',
+          include: ['__tests__/**/*.test.ts', '__tests__/**/*.test.tsx'],
+          exclude: SLOW_FILES,
+          environment: 'node',
+          globalSetup: ['./__tests__/global-setup.ts'],
+          pool: 'threads',
+          maxWorkers: isCi ? 4 : 14,
+          sequence: { groupOrder: 0 },
+        },
+      },
+      {
+        extends: true,
+        test: {
+          name: 'slow',
+          include: SLOW_FILES,
+          environment: 'node',
+          globalSetup: ['./__tests__/global-setup.ts'],
+          pool: 'threads',
+          maxWorkers: isCi ? 4 : 8,
+          sequence: { groupOrder: 1 },
+        },
+      },
+    ],
     silent: 'passed-only',
+    testTimeout: 30000,
+    hookTimeout: isCi ? 30000 : 10000,
+    teardownTimeout: 10000,
   },
 });
