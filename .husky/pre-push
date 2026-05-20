@@ -1,14 +1,17 @@
-#!/usr/bin/env bash
+#!/usr/bin/env sh
 # Pre-push gate: lint + type-check + tests must pass before a push is allowed.
 # This mirrors CI's "Lint and Test" job — if anything fails here, CI will too,
 # so failing fast saves a wasted CI run and a red merge queue.
 #
 # To skip in a real emergency: `git push --no-verify`. Use sparingly: bypassing
 # this hook is how lint/type/test regressions reach master.
-set -euo pipefail
+#
+# Husky executes hooks with `sh`, so this file must stay POSIX-compatible.
+set -eu
 
 run_step() {
-    local label="$1"; shift
+    label="$1"
+    shift
     printf "\033[1;34m→ %s\033[0m\n" "$label"
     if ! "$@"; then
         printf "\n\033[1;31m✗ %s failed.\033[0m\n" "$label"
