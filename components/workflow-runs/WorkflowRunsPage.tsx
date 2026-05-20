@@ -128,6 +128,39 @@ function outcomeBadge(tone: 'ok' | 'warn' | 'err' | 'info'): string {
   }
 }
 
+function runStatusMark(status: string): { glyph: string; className: string; spin?: boolean } {
+  switch (status) {
+    case 'completed':
+      return { glyph: '✓', className: 'bg-status-success/15 text-status-success border-status-success/30' };
+    case 'failed':
+      return { glyph: '✗', className: 'bg-status-error/15 text-status-error border-status-error/30' };
+    case 'cancelled':
+      return { glyph: '!', className: 'bg-status-error/15 text-status-error border-status-error/30' };
+    case 'running':
+      return { glyph: '⟳', className: 'bg-accent/15 text-accent border-accent/30', spin: true };
+    case 'pending':
+      return { glyph: '○', className: 'bg-accent/15 text-accent border-accent/30' };
+    default:
+      return { glyph: '○', className: 'bg-bg-tertiary text-text-tertiary border-border' };
+  }
+}
+
+function RunStatusMark({ status }: { status: string }) {
+  const mark = runStatusMark(status);
+  return (
+    <span
+      className={`inline-flex shrink-0 items-center gap-1 whitespace-nowrap rounded border px-1.5 py-0.5 text-xs ${mark.className}`}
+      title={`status: ${status}`}
+      aria-label={`status ${status}`}
+    >
+      <span className={`leading-none ${mark.spin ? 'animate-spin' : ''}`} aria-hidden="true">
+        {mark.glyph}
+      </span>
+      <span>{status}</span>
+    </span>
+  );
+}
+
 interface RunsMeta {
   workflowEnabled: boolean;
   releaseWorkflow: boolean;
@@ -398,8 +431,11 @@ export function WorkflowRunsPage() {
                     <div className="truncate font-mono text-xs text-text-primary" title={r.rawName}>
                       {r.name}
                     </div>
-                    <div className="mt-1 truncate font-mono text-xs text-text-secondary" title={formatTitle(r.input)}>
-                      {inputSummary}
+                    <div className="mt-1 flex min-w-0 items-center gap-2">
+                      <RunStatusMark status={r.status} />
+                      <div className="min-w-0 truncate font-mono text-xs text-text-secondary" title={formatTitle(r.input)}>
+                        {inputSummary}
+                      </div>
                     </div>
                   </div>
                   <span className={`shrink-0 max-w-[45%] truncate rounded border px-2 py-0.5 text-xs ${outcomeBadge(outcome.tone)}`} title={r.error ?? ''}>
@@ -449,10 +485,13 @@ export function WorkflowRunsPage() {
                     className="cursor-pointer border-t border-border hover:bg-bg-tertiary/40"
                     onClick={() => { window.location.href = `/workflow-runs/${encodeURIComponent(r.id)}`; }}
                   >
-                    <td className="max-w-[260px] truncate px-3 py-2 font-mono text-xs text-text-primary" title={r.rawName}>
-                      <Link href={`/workflow-runs/${encodeURIComponent(r.id)}`} className="hover:underline">
-                        {r.name}
-                      </Link>
+                    <td className="max-w-[260px] px-3 py-2 font-mono text-xs text-text-primary" title={r.rawName}>
+                      <div className="flex min-w-0 items-center gap-2">
+                        <RunStatusMark status={r.status} />
+                        <Link href={`/workflow-runs/${encodeURIComponent(r.id)}`} className="min-w-0 truncate hover:underline">
+                          {r.name}
+                        </Link>
+                      </div>
                     </td>
                     <td
                       className="max-w-[220px] truncate px-3 py-2 font-mono text-xs text-text-secondary"
