@@ -216,6 +216,21 @@ Semantic retrieval layer — embeds agent run reports plus project-scoped knowle
 | `retrieval_score_threshold` | float | `0.8` | Min similarity score to include a result |
 | `retrieval_manage_ollama` | bool | `true` | Whether TamTam starts Ollama via PM2 if not running |
 
+When enabled, TamTam starts Ollama via PM2 (`ollama-serve`) on boot if not already reachable, pulls `nomic-embed-text` if not installed, and indexes completed agent run reports automatically. Use `POST /api/projects/[schedId]/retrieval/reindex` to refresh the project corpus on demand; that route reports whether sources were missing or stale before the refresh. Freshness behavior is source-specific: completed agent runs are indexed when they finish, while project docs, DB-backed skills, and synthesized project config are refreshed on explicit reindex against the current file/DB snapshot. At prompt time, TamTam records retrieval diagnostics on the run (`results`, `empty_corpus`, `no_results`, `below_threshold`, or `embed_failed`) so ineffective retrieval can be distinguished from a healthy hit.
+
+#### Drift and refresh
+
+The vector store is **stale-by-design** for everything except agent run reports. There is no scheduler, no git hook, and no file watcher that calls reindex automatically — project docs, skills, and `project_config` chunks only update when an operator (or an external trigger) hits `POST /api/projects/[schedId]/retrieval/reindex`, either via the project's Config tab → "Reindex now" or programmatically. If a tracked repo's `docs/*.md`, `CLAUDE.md`, `README.md`, or a referenced DB skill changes, retrieval will keep serving the previous content until the next reindex.
+
+Reindex is cheap on the happy path: ingestion (`lib/agents/retrieval/ingestion.ts`) computes a SHA256 over each source's text and compares against `retrieval_records.content_hash`; unchanged sources are skipped without re-embedding. Removed sources are pruned on reindex. So the operational cost is roughly proportional to *what actually changed*, not corpus size.
+
+Known foot-guns and the operator's responsibility to handle them:
+
+- **No model-version invalidation.** Changing `retrieval_embedding_model` does not invalidate the existing `retrieval_chunks.embedding` column — old vectors stay and silently mix with new queries. After changing the model, manually reindex every project (or wipe `retrieval_chunks` + `retrieval_records`) before trusting results.
+- **No periodic refresh.** Long-lived deployments should reindex tracked projects after any non-trivial doc/skill edit. The natural integration points are: a git post-commit hook on the tracked repo, a `cron`/systemd timer hitting the reindex endpoint, or a graphile-worker task in TamTam itself (not yet implemented).
+- **Agent runs do not refresh project docs.** Completing an agent indexes its own report, but it does not touch the doc/skill corpus even if the run modified files. A doc edit committed during an agent run is not visible to the *next* run's retrieval until reindex.
+- **Visibility is thin.** `GET /api/projects/[schedId]/retrieval/stats` returns total record and chunk counts only. Per-source missing/stale status is computed inside the reindex route's `diagnostics` payload, so the cheapest way to inspect drift today is to POST a reindex — unchanged sources are skipped, and the response lists `missingSourcesBeforeReindex` / `staleSourcesBeforeReindex`.
+
 ### Outcome Classifier
 
 After a `run` or `agent:*` job finishes, TamTam optionally classifies the final assistant message via a small local LLM (default `gemma3:4b`) on the same Ollama instance configured under Retrieval (`retrieval_ollama_url`). The verdict (`done` / `needs_continue` / `asked_question`) is stashed on the job's `contextMeta.outcomeClassification` and surfaced by the run history UI to highlight when Continue should be offered even on a clean exit.
@@ -224,8 +239,6 @@ After a `run` or `agent:*` job finishes, TamTam optionally classifies the final 
 |---|---|---|---|
 | `outcome_classifier_enabled` | bool | `false` | When on, classify finished `run`/`agent:*` outcomes. Requires Ollama reachable at `retrieval_ollama_url`. Off by default to avoid per-job warnings when Ollama isn't running. |
 | `outcome_classifier_model` | string | `gemma3:4b` | Ollama model used for classification. Must already be pulled on the configured Ollama. |
-
-When enabled, TamTam starts Ollama via PM2 (`ollama-serve`) on boot if not already reachable, pulls `nomic-embed-text` if not installed, and indexes completed agent run reports automatically. Use `POST /api/projects/[schedId]/retrieval/reindex` to refresh the project corpus on demand; that route reports whether sources were missing or stale before the refresh. Freshness behavior is source-specific: completed agent runs are indexed when they finish, while project docs, DB-backed skills, and synthesized project config are refreshed on explicit reindex against the current file/DB snapshot. At prompt time, TamTam records retrieval diagnostics on the run (`results`, `empty_corpus`, `no_results`, `below_threshold`, or `embed_failed`) so ineffective retrieval can be distinguished from a healthy hit.
 
 ### Durable Agent Workflows
 
