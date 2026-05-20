@@ -204,6 +204,16 @@ function formatTime(iso: string | null): string {
   }
 }
 
+function formatTitle(value: unknown): string {
+  if (value == null) return '';
+  if (typeof value === 'string') return value;
+  try {
+    return JSON.stringify(value);
+  } catch {
+    return String(value);
+  }
+}
+
 
 const STATUS_FILTERS = ['all', 'completed', 'running', 'pending', 'failed', 'cancelled'] as const;
 type StatusFilter = (typeof STATUS_FILTERS)[number];
@@ -371,7 +381,54 @@ export function WorkflowRunsPage() {
           } : undefined}
         />
       ) : (
-        <div className="overflow-hidden rounded-md border border-border">
+        <>
+        <div className="overflow-hidden rounded-md border border-border sm:hidden">
+          {filtered.map((r) => {
+            const outcome = summarizeOutcome(r);
+            const inputSummary = summarizeInput(r.input);
+            const triggerSummary = summarizeTrigger(r.input);
+            return (
+              <Link
+                key={r.id}
+                href={`/workflow-runs/${encodeURIComponent(r.id)}`}
+                className="block border-b border-border bg-bg-primary px-3 py-3 transition-colors last:border-b-0 hover:bg-bg-tertiary/40"
+              >
+                <div className="flex items-start justify-between gap-3">
+                  <div className="min-w-0">
+                    <div className="truncate font-mono text-xs text-text-primary" title={r.rawName}>
+                      {r.name}
+                    </div>
+                    <div className="mt-1 truncate font-mono text-xs text-text-secondary" title={formatTitle(r.input)}>
+                      {inputSummary}
+                    </div>
+                  </div>
+                  <span className={`shrink-0 max-w-[45%] truncate rounded border px-2 py-0.5 text-xs ${outcomeBadge(outcome.tone)}`} title={r.error ?? ''}>
+                    {outcome.label}
+                  </span>
+                </div>
+                <div className="mt-2 grid grid-cols-3 gap-2 text-xs">
+                  <div className="min-w-0">
+                    <div className="uppercase tracking-wide text-text-tertiary">Trigger</div>
+                    <div className="truncate font-mono text-text-secondary" title={formatTitle(r.input)}>
+                      {triggerSummary}
+                    </div>
+                  </div>
+                  <div>
+                    <div className="uppercase tracking-wide text-text-tertiary">Duration</div>
+                    <div className="font-mono text-text-secondary tabular-nums">{formatDurationCell(r, now)}</div>
+                  </div>
+                  <div>
+                    <div className="uppercase tracking-wide text-text-tertiary">Started</div>
+                    <div className="text-text-secondary" title={formatTime(r.startedAt ?? r.createdAt)}>
+                      {formatRelativeTime(r.startedAt ?? r.createdAt, now)}
+                    </div>
+                  </div>
+                </div>
+              </Link>
+            );
+          })}
+        </div>
+        <div className="hidden overflow-hidden rounded-md border border-border sm:block">
           <table className="w-full text-sm">
             <thead className="bg-bg-secondary text-xs uppercase tracking-wide text-text-secondary">
               <tr>
@@ -399,13 +456,13 @@ export function WorkflowRunsPage() {
                     </td>
                     <td
                       className="max-w-[220px] truncate px-3 py-2 font-mono text-xs text-text-secondary"
-                      title={typeof r.input === 'object' ? JSON.stringify(r.input) : String(r.input ?? '')}
+                      title={formatTitle(r.input)}
                     >
                       {summarizeInput(r.input)}
                     </td>
                     <td
                       className="max-w-[240px] truncate px-3 py-2 font-mono text-xs text-text-tertiary"
-                      title={typeof r.input === 'object' ? JSON.stringify(r.input) : String(r.input ?? '')}
+                      title={formatTitle(r.input)}
                     >
                       {summarizeTrigger(r.input)}
                     </td>
@@ -429,6 +486,7 @@ export function WorkflowRunsPage() {
             </tbody>
           </table>
         </div>
+        </>
       )}
       </>
       )}
