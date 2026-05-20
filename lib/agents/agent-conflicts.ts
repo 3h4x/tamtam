@@ -13,7 +13,11 @@ export interface AgentNameConflict {
 export async function findAgentNameConflict(
   project: string,
   name: string,
-  options: { excludeDbAgentId?: string; excludeFileAgentName?: string } = {},
+  options: {
+    excludeDbAgentId?: string;
+    excludeFileAgentName?: string;
+    projectPath?: string | null;
+  } = {},
 ): Promise<AgentNameConflict | null> {
   const targetKey = canonicalAgentNameKey(name);
 
@@ -25,7 +29,7 @@ export async function findAgentNameConflict(
     }
   }
 
-  const projectPath = resolveProjectPath(project);
+  const projectPath = options.projectPath ?? resolveProjectPath(project);
   if (!projectPath) return null;
 
   for (const agent of scanFileAgents(projectPath, project)) {
