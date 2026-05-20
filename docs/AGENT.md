@@ -496,7 +496,7 @@ All agent runs go through `runAgentIntakeWorkflow()` in `lib/agents/intake-workf
 
 **Step 1 — `runPrerequisiteStep`** (only when the agent has `prerequisiteCommand`): runs `bash -c <cmd>` in the project directory with cancellation support, captures stdout/stderr, and returns a `PrereqResult`. Cancelled prereqs short-circuit the workflow and mark the job done with exit 130.
 
-**Step 2 — `composePromptStep`**: re-checks the release lock and (for non-readOnly runs) the project-busy gate after the prereq, composes skills + docs, captures a `git rev-parse HEAD` + `git status` baseline, loads agent memory, queries pgvector retrieval when `retrieval_enabled` is on, resolves the CLI binary + env, and builds the full prompt.
+**Step 2 — `composePromptStep`**: re-checks the release lock and (for non-readOnly runs) the project-busy gate after the prereq, composes skills + docs, captures a `git rev-parse HEAD` + `git status` baseline, loads agent memory for mutable runs, queries pgvector retrieval when `retrieval_enabled` is on, resolves the CLI binary + env, and builds the full prompt.
 
 **Step 3 — `startAgentStep`**: writes the prereq artifact to disk, updates the job row with the composed `contextMeta` (which includes `workflow: true`), and calls `startJob()` to hand off to the spawned child. On failure it writes an error breadcrumb to the log file, marks the job done with `exitCode -1`, and rethrows so the workflow runtime can retry.
 

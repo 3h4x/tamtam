@@ -1,96 +1,126 @@
 import { describe, it, expect, beforeEach, afterEach } from 'vitest';
-import { existsSync, mkdirSync, writeFileSync, rmSync } from 'fs';
+import { existsSync, mkdirSync, readFileSync, writeFileSync, rmSync } from 'fs';
 import { join } from 'path';
 import { tmpdir } from 'os';
 import {
+  getAgentMemoryDir,
   getAgentMemoryPath,
   readAgentMemory,
   ensureAgentMemoryDir,
   buildMemoryBlock,
 } from '@/lib/agents/agent-memory';
 
-function makeTmpDir(): string {
-  const dir = join(tmpdir(), `tamtam-memory-test-${Date.now()}`);
+function makeTmpProject(): string {
+  const dir = join(tmpdir(), `tamtam-memory-test-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`);
   mkdirSync(dir, { recursive: true });
+  // Real projects always have `.tamtam/` (config.yml / agents/ live there).
+  // Memory hangs off that directory, so the test fixture mirrors that.
+  mkdirSync(join(dir, '.tamtam'), { recursive: true });
   return dir;
 }
 
 describe('getAgentMemoryPath', () => {
-  it('returns expected path structure', () => {
-    const path = getAgentMemoryPath('/data', 'myproject', 'security-review');
-    expect(path).toBe('/data/agent-memory/myproject/security-review.md');
+  it('returns a path inside <projPath>/.tamtam/cache/agent-memory/', () => {
+    const path = getAgentMemoryPath('/repo/myproject', 'security-review');
+    expect(path).toBe('/repo/myproject/.tamtam/cache/agent-memory/security-review.md');
   });
 
-  it('sanitizes agent names with special chars via join passthrough', () => {
-    const path = getAgentMemoryPath('/data', 'proj', 'my-agent');
+  it('keeps the agent name as-is when it has no traversal markers', () => {
+    const path = getAgentMemoryPath('/repo/proj', 'my-agent');
     expect(path).toContain('my-agent.md');
   });
 
   it('prevents path traversal in agent name', () => {
-    const path = getAgentMemoryPath('/data', 'proj', '../../../../etc/evil');
+    const path = getAgentMemoryPath('/repo/proj', '../../../../etc/evil');
+    // basename() strips the traversal segments, leaving just the final name.
     expect(path).not.toContain('..');
-    expect(path).toContain('/data/agent-memory/');
+    expect(path).toContain('/repo/proj/.tamtam/cache/agent-memory/');
     expect(path).toContain('evil.md');
   });
+});
 
-  it('prevents path traversal in project name', () => {
-    const path = getAgentMemoryPath('/data', '../../../../etc', 'agent');
-    expect(path).not.toContain('..');
-    expect(path).toContain('/data/agent-memory/');
+describe('getAgentMemoryDir', () => {
+  it('returns the agent-memory cache directory for the project', () => {
+    expect(getAgentMemoryDir('/repo/proj')).toBe('/repo/proj/.tamtam/cache/agent-memory');
   });
 });
 
 describe('readAgentMemory', () => {
-  let tmpDir: string;
-
-  beforeEach(() => { tmpDir = makeTmpDir(); });
-  afterEach(() => { rmSync(tmpDir, { recursive: true, force: true }); });
+  let projDir: string;
+  beforeEach(() => { projDir = makeTmpProject(); });
+  afterEach(() => { rmSync(projDir, { recursive: true, force: true }); });
 
   it('returns null when memory file does not exist', () => {
-    expect(readAgentMemory(tmpDir, 'proj', 'agent')).toBeNull();
+    expect(readAgentMemory(projDir, 'agent')).toBeNull();
   });
 
   it('returns file contents when memory file exists', () => {
-    const memDir = join(tmpDir, 'agent-memory', 'proj');
-    mkdirSync(memDir, { recursive: true });
-    writeFileSync(join(memDir, 'agent.md'), '## Completed\n- Did thing A\n\n## Pending\n- Do thing B');
-    const result = readAgentMemory(tmpDir, 'proj', 'agent');
+    ensureAgentMemoryDir(projDir);
+    writeFileSync(getAgentMemoryPath(projDir, 'agent'), '## Completed\n- Did thing A\n\n## Pending\n- Do thing B');
+    const result = readAgentMemory(projDir, 'agent');
     expect(result).toContain('Did thing A');
     expect(result).toContain('Do thing B');
   });
 
   it('truncates memory file contents to 2000 chars', () => {
-    const memDir = join(tmpDir, 'agent-memory', 'proj');
-    mkdirSync(memDir, { recursive: true });
-    const longContent = 'x'.repeat(5000);
-    writeFileSync(join(memDir, 'agent.md'), longContent);
-    const result = readAgentMemory(tmpDir, 'proj', 'agent');
+    ensureAgentMemoryDir(projDir);
+    writeFileSync(getAgentMemoryPath(projDir, 'agent'), 'x'.repeat(5000));
+    const result = readAgentMemory(projDir, 'agent');
     expect(result).not.toBeNull();
     expect(result!.length).toBe(2000);
   });
 });
 
 describe('ensureAgentMemoryDir', () => {
-  let tmpDir: string;
+  let projDir: string;
+  beforeEach(() => { projDir = makeTmpProject(); });
+  afterEach(() => { rmSync(projDir, { recursive: true, force: true }); });
 
-  beforeEach(() => { tmpDir = makeTmpDir(); });
-  afterEach(() => { rmSync(tmpDir, { recursive: true, force: true }); });
-
-  it('creates the agent-memory/project directory', () => {
-    ensureAgentMemoryDir(tmpDir, 'myproject');
-    expect(existsSync(join(tmpDir, 'agent-memory', 'myproject'))).toBe(true);
+  it('creates the .tamtam/cache/agent-memory directory inside the project', () => {
+    ensureAgentMemoryDir(projDir);
+    expect(existsSync(join(projDir, '.tamtam', 'cache', 'agent-memory'))).toBe(true);
   });
 
-  it('is idempotent — does not throw if dir already exists', () => {
-    ensureAgentMemoryDir(tmpDir, 'myproject');
-    expect(() => ensureAgentMemoryDir(tmpDir, 'myproject')).not.toThrow();
+  it('is idempotent — does not throw if the dir already exists', () => {
+    ensureAgentMemoryDir(projDir);
+    expect(() => ensureAgentMemoryDir(projDir)).not.toThrow();
+  });
+
+  it('writes `cache/` to .tamtam/.gitignore so the memory dir is not committed', () => {
+    ensureAgentMemoryDir(projDir);
+    const gitignore = readFileSync(join(projDir, '.tamtam', '.gitignore'), 'utf-8');
+    expect(gitignore.split('\n')).toContain('cache/');
+  });
+
+  it('does not duplicate the `cache/` entry on repeated calls', () => {
+    ensureAgentMemoryDir(projDir);
+    ensureAgentMemoryDir(projDir);
+    const gitignore = readFileSync(join(projDir, '.tamtam', '.gitignore'), 'utf-8');
+    const occurrences = gitignore.split('\n').filter((line) => line.trim() === 'cache/').length;
+    expect(occurrences).toBe(1);
+  });
+
+  it('preserves existing .tamtam/.gitignore lines when appending `cache/`', () => {
+    const gitignorePath = join(projDir, '.tamtam', '.gitignore');
+    writeFileSync(gitignorePath, 'local-notes/\n');
+    ensureAgentMemoryDir(projDir);
+    const gitignore = readFileSync(gitignorePath, 'utf-8');
+    expect(gitignore).toContain('local-notes/');
+    expect(gitignore).toContain('cache/');
+  });
+
+  it('does not rewrite .tamtam/.gitignore when `cache/` is already present', () => {
+    const gitignorePath = join(projDir, '.tamtam', '.gitignore');
+    writeFileSync(gitignorePath, '# kept comment\ncache/\nother/\n');
+    ensureAgentMemoryDir(projDir);
+    expect(readFileSync(gitignorePath, 'utf-8')).toBe('# kept comment\ncache/\nother/\n');
   });
 });
 
 describe('buildMemoryBlock', () => {
   it('includes memory path', () => {
-    const block = buildMemoryBlock('/data/agent-memory/proj/agent.md', null);
-    expect(block).toContain('/data/agent-memory/proj/agent.md');
+    const block = buildMemoryBlock('/repo/proj/.tamtam/cache/agent-memory/agent.md', null);
+    expect(block).toContain('/repo/proj/.tamtam/cache/agent-memory/agent.md');
   });
 
   it('shows empty state message when no prior memory', () => {

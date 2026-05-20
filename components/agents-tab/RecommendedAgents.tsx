@@ -51,7 +51,7 @@ const RECOMMENDED_VISIBLE_LIMIT = 4
 const COLLAPSED_NAME_PREVIEW_LIMIT = 3
 
 function formatScheduleLabel(schedule: string | undefined): string | null {
-  return schedule ? `every ${schedule}` : 'on demand'
+  return schedule ? `every ${schedule}` : null
 }
 
 function formatTemplateCount(count: number): string {

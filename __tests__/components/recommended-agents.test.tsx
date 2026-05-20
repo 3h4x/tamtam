@@ -133,14 +133,14 @@ describe('RecommendedAgents', () => {
     unmount()
   })
 
-  it('shows on-demand metadata for unscheduled templates', () => {
+  it('omits on-demand metadata for unscheduled templates', () => {
     const { container, unmount } = renderRecommendedAgents({
       recommendedAgents: [issueCruncherTemplate],
     })
 
     const badgeTexts = Array.from(container.querySelectorAll('span')).map(node => node.textContent)
 
-    expect(badgeTexts).toContain('on demand')
+    expect(badgeTexts).not.toContain('on demand')
 
     unmount()
   })
