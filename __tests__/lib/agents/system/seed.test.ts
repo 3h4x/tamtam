@@ -3,6 +3,8 @@ import { sql } from 'drizzle-orm';
 import { createTestPgDbEmpty, type TestDbHandle } from '@/__tests__/helpers/test-db';
 import * as schema from '@/lib/db/schema';
 
+const scanFileAgentsMock = vi.fn();
+
 async function applyDdl(handle: TestDbHandle): Promise<void> {
   await handle.db.execute(sql.raw(`
     CREATE TABLE IF NOT EXISTS projects (
@@ -80,8 +82,10 @@ describe('system-agent seed', () => {
   beforeEach(async () => {
     await sharedHandle.db.execute(sql.raw('TRUNCATE agents, projects, settings RESTART IDENTITY CASCADE'));
     vi.resetModules();
+    scanFileAgentsMock.mockReset();
+    scanFileAgentsMock.mockReturnValue([]);
     vi.doMock('@/lib/agents/tamtam-file-agents', () => ({
-      scanFileAgents: vi.fn(() => []),
+      scanFileAgents: scanFileAgentsMock,
     }));
   });
 
@@ -187,8 +191,8 @@ describe('system-agent seed', () => {
       ],
       refreshProjectsCacheSync: async () => undefined,
     }));
-    vi.doMock('@/lib/agents/tamtam-file-agents', () => ({
-      scanFileAgents: vi.fn(() => [{
+    scanFileAgentsMock.mockReturnValue([
+      {
         id: 'file:proj-a:Retrieval-Maintenance',
         name: 'Retrieval-Maintenance',
         project: 'proj-a',
@@ -203,8 +207,8 @@ describe('system-agent seed', () => {
         updatedAt: 0,
         source: 'file',
         filePath: '/tmp/a/.tamtam/agents/Retrieval-Maintenance.md',
-      }]),
-    }));
+      },
+    ]);
 
     const { seedSystemAgents } = await import('@/lib/agents/system/seed');
     const result = await seedSystemAgents();

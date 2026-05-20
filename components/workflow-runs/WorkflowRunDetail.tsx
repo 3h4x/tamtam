@@ -42,9 +42,40 @@ function formatDuration(ms: number | null): string {
   return `${(ms / 60_000).toFixed(1)} m`;
 }
 
-function formatTime(iso: string | null): string {
+function formatDurationCell(
+  status: string,
+  durationMs: number | null,
+  startedAt: string | null,
+  now: number,
+): string {
+  if (durationMs != null) return formatDuration(durationMs);
+  if ((status === 'running' || status === 'pending') && startedAt) {
+    const startedAtMs = Date.parse(startedAt);
+    if (Number.isFinite(startedAtMs)) {
+      return formatDuration(Math.max(0, now - startedAtMs));
+    }
+  }
+  return '—';
+}
+
+function formatAbsoluteTime(iso: string | null): string {
   if (!iso) return '—';
   try { return new Date(iso).toLocaleString(); } catch { return iso; }
+}
+
+function formatRelativeTime(iso: string | null, now: number): string {
+  if (!iso) return '—';
+  const timestamp = Date.parse(iso);
+  if (!Number.isFinite(timestamp)) return '—';
+  const diffMs = Math.max(0, now - timestamp);
+  if (diffMs < 60_000) return 'just now';
+  const diffMinutes = Math.floor(diffMs / 60_000);
+  if (diffMinutes < 60) return `${diffMinutes}m ago`;
+  const diffHours = Math.floor(diffMinutes / 60);
+  if (diffHours < 24) return `${diffHours}h ago`;
+  const diffDays = Math.floor(diffHours / 24);
+  if (diffDays < 7) return `${diffDays}d ago`;
+  return formatAbsoluteTime(iso);
 }
 
 function statusBadge(status: string): string {
@@ -139,7 +170,9 @@ export function WorkflowRunDetail({ runId }: { runId: string }) {
   }
   if (!data) return <WorkflowRunDetailLoadingState />;
 
+  const now = Date.now();
   const stepStatusCounts = countStepStatuses(data.steps);
+  const runDuration = formatDurationCell(data.run.status, data.run.durationMs, data.run.startedAt, now);
 
   return (
     <div className="p-4 sm:p-6 space-y-6">
@@ -160,19 +193,25 @@ export function WorkflowRunDetail({ runId }: { runId: string }) {
         <div className="grid grid-cols-2 sm:grid-cols-4 gap-3 text-xs">
           <div>
             <div className="text-text-tertiary uppercase tracking-wide">Created</div>
-            <div className="text-text-primary mt-0.5">{formatTime(data.run.createdAt)}</div>
+            <div className="mt-0.5 text-text-primary" title={formatAbsoluteTime(data.run.createdAt)}>
+              {formatRelativeTime(data.run.createdAt, now)}
+            </div>
           </div>
           <div>
             <div className="text-text-tertiary uppercase tracking-wide">Started</div>
-            <div className="text-text-primary mt-0.5">{formatTime(data.run.startedAt)}</div>
+            <div className="mt-0.5 text-text-primary" title={formatAbsoluteTime(data.run.startedAt)}>
+              {formatRelativeTime(data.run.startedAt, now)}
+            </div>
           </div>
           <div>
             <div className="text-text-tertiary uppercase tracking-wide">Completed</div>
-            <div className="text-text-primary mt-0.5">{formatTime(data.run.completedAt)}</div>
+            <div className="mt-0.5 text-text-primary" title={formatAbsoluteTime(data.run.completedAt)}>
+              {formatRelativeTime(data.run.completedAt, now)}
+            </div>
           </div>
           <div>
             <div className="text-text-tertiary uppercase tracking-wide">Duration</div>
-            <div className="text-text-primary mt-0.5 font-mono">{formatDuration(data.run.durationMs)}</div>
+            <div className="mt-0.5 font-mono text-text-primary">{runDuration}</div>
           </div>
         </div>
         {data.run.error != null && (
@@ -225,7 +264,7 @@ export function WorkflowRunDetail({ runId }: { runId: string }) {
                         {s.name}
                       </div>
                       <div className="mt-1 font-mono text-xs tabular-nums text-text-secondary">
-                        attempt {s.attempt} · {formatDuration(s.durationMs)}
+                        attempt {s.attempt} · {formatDurationCell(s.status, s.durationMs, s.startedAt, now)}
                       </div>
                     </div>
                     <span className={`shrink-0 rounded border px-2 py-0.5 text-xs ${statusBadge(s.status)}`}>
@@ -235,14 +274,14 @@ export function WorkflowRunDetail({ runId }: { runId: string }) {
                   <div className="mt-3 grid grid-cols-2 gap-2 text-xs">
                     <div className="min-w-0">
                       <div className="uppercase tracking-wide text-text-tertiary">Started</div>
-                      <div className="truncate text-text-secondary" title={formatTime(s.startedAt)}>
-                        {formatTime(s.startedAt)}
+                      <div className="truncate text-text-secondary" title={formatAbsoluteTime(s.startedAt)}>
+                        {formatRelativeTime(s.startedAt, now)}
                       </div>
                     </div>
                     <div className="min-w-0">
                       <div className="uppercase tracking-wide text-text-tertiary">Completed</div>
-                      <div className="truncate text-text-secondary" title={formatTime(s.completedAt)}>
-                        {formatTime(s.completedAt)}
+                      <div className="truncate text-text-secondary" title={formatAbsoluteTime(s.completedAt)}>
+                        {formatRelativeTime(s.completedAt, now)}
                       </div>
                     </div>
                   </div>
@@ -299,10 +338,13 @@ export function WorkflowRunDetail({ runId }: { runId: string }) {
                       </td>
                       <td className="px-3 py-2 text-right font-mono text-xs text-text-secondary">{s.attempt}</td>
                       <td className="px-3 py-2 text-right font-mono text-xs text-text-secondary">
-                        {formatDuration(s.durationMs)}
+                        {formatDurationCell(s.status, s.durationMs, s.startedAt, now)}
                       </td>
-                      <td className="px-3 py-2 text-xs text-text-secondary whitespace-nowrap">
-                        {formatTime(s.completedAt)}
+                      <td
+                        className="whitespace-nowrap px-3 py-2 text-xs text-text-secondary"
+                        title={formatAbsoluteTime(s.completedAt)}
+                      >
+                        {formatRelativeTime(s.completedAt, now)}
                       </td>
                     </tr>
                   ))}
