@@ -30,10 +30,6 @@ interface SuggestionStyle {
   buttonVariant: ButtonVariant
 }
 
-interface MetaBadge {
-  label: string
-}
-
 type SuggestionLayout = 'full' | 'compact'
 
 const metadataBadgeClassName =
@@ -74,18 +70,18 @@ function formatAliasesLabel(aliases: string[] | undefined): string | null {
   return `legacy: ${aliases.join(', ')}`
 }
 
-function buildMetaBadges(rec: RecommendedAgent): MetaBadge[] {
+function buildMetadataLabels(rec: RecommendedAgent): string[] {
   const modelLabel = formatModelBadgeLabel(rec.model)
   const scheduleLabel = formatScheduleLabel(rec.schedule)
   const skillCountLabel = formatSkillCount(rec.skillIds)
   const aliasesLabel = formatAliasesLabel(rec.aliases)
 
   return [
-    modelLabel ? { label: modelLabel } : null,
-    skillCountLabel ? { label: skillCountLabel } : null,
-    scheduleLabel ? { label: scheduleLabel } : null,
-    aliasesLabel ? { label: aliasesLabel } : null,
-  ].filter((badge): badge is MetaBadge => Boolean(badge))
+    modelLabel,
+    skillCountLabel,
+    scheduleLabel,
+    aliasesLabel,
+  ].filter((label): label is string => Boolean(label))
 }
 
 function getSuggestionTone(rec: RecommendedAgent): SuggestionTone {
@@ -173,7 +169,8 @@ export function RecommendedAgents({ agents, customTemplates, recommendedAgents, 
 
   const renderSuggestion = (rec: RecommendedAgent, layout: SuggestionLayout) => {
     const isCustom = customNames.has(recommendedAgentNameKey(rec.name))
-    const metaBadges = buildMetaBadges(rec)
+    const metadataLabels = buildMetadataLabels(rec)
+    const compactMetadataSummary = metadataLabels.join(' • ')
     const style = getSuggestionStyle(getSuggestionTone(rec))
 
     if (layout === 'compact') {
@@ -194,17 +191,10 @@ export function RecommendedAgents({ agents, customTemplates, recommendedAgents, 
                 {rec.description}
               </p>
             )}
-            {metaBadges.length > 0 && (
-              <div className="mt-1.5 flex flex-wrap items-center gap-1.5">
-                {metaBadges.map(badge => (
-                  <span
-                    key={badge.label}
-                    className={metadataBadgeClassName}
-                  >
-                    {badge.label}
-                  </span>
-                ))}
-              </div>
+            {compactMetadataSummary && (
+              <p className="mt-1.5 font-mono text-[10px] text-text-tertiary">
+                {compactMetadataSummary}
+              </p>
             )}
           </div>
           <Button
@@ -242,14 +232,14 @@ export function RecommendedAgents({ agents, customTemplates, recommendedAgents, 
               {rec.description}
             </p>
           )}
-          {metaBadges.length > 0 && (
+          {metadataLabels.length > 0 && (
             <div className="mt-2 flex flex-wrap gap-1.5">
-              {metaBadges.map(badge => (
+              {metadataLabels.map(label => (
                 <span
-                  key={badge.label}
+                  key={label}
                   className={metadataBadgeClassName}
                 >
-                  {badge.label}
+                  {label}
                 </span>
               ))}
             </div>
