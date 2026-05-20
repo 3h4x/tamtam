@@ -36,6 +36,11 @@ interface MetaBadge {
 
 type SuggestionLayout = 'full' | 'compact'
 
+const metadataBadgeClassName =
+  'rounded-full border border-border bg-bg-tertiary px-2 py-0.5 font-mono text-[10px] tabular-nums text-text-secondary'
+const customBadgeClassName =
+  'rounded-full border border-accent/25 bg-accent/10 px-1.5 py-0.5 text-[10px] font-mono uppercase tracking-wide text-accent'
+
 const suggestionPriority: Record<SuggestionTone, number> = {
   essential: 0,
   featured: 1,
@@ -43,6 +48,7 @@ const suggestionPriority: Record<SuggestionTone, number> = {
 }
 
 const RECOMMENDED_VISIBLE_LIMIT = 4
+const COLLAPSED_NAME_PREVIEW_LIMIT = 3
 
 function formatScheduleLabel(schedule: string | undefined): string | null {
   return schedule ? `every ${schedule}` : null
@@ -106,7 +112,7 @@ function getSuggestionStyle(tone: SuggestionTone): SuggestionStyle {
 }
 
 export function RecommendedAgents({ agents, customTemplates, recommendedAgents, onAddAgent }: RecommendedAgentsProps) {
-  const [showAllRecommended, setShowAllRecommended] = useState(false)
+  const [showExpandedRecommended, setShowExpandedRecommended] = useState(false)
   const existingNames = new Set(agents.map(a => recommendedAgentNameKey(a.name)))
   const customNames = new Set(customTemplates.map(t => recommendedAgentNameKey(t.name)))
   const merged: RecommendedAgent[] = [
@@ -128,17 +134,26 @@ export function RecommendedAgents({ agents, customTemplates, recommendedAgents, 
 
   const prioritySuggestions = suggestions.filter(rec => getSuggestionTone(rec) !== 'recommended')
   const recommendedSuggestions = suggestions.filter(rec => getSuggestionTone(rec) === 'recommended')
-  const visibleRecommendedSuggestions = showAllRecommended
+  const collapseRecommendedByDefault = prioritySuggestions.length > 0
+  const recommendedPreviewLimit = collapseRecommendedByDefault ? 0 : RECOMMENDED_VISIBLE_LIMIT
+  const visibleRecommendedSuggestions = showExpandedRecommended
     ? recommendedSuggestions
-    : recommendedSuggestions.slice(0, RECOMMENDED_VISIBLE_LIMIT)
+    : recommendedSuggestions.slice(0, recommendedPreviewLimit)
   const hiddenRecommendedCount = Math.max(0, recommendedSuggestions.length - visibleRecommendedSuggestions.length)
+  const collapsedRecommendedPreview = recommendedSuggestions.slice(0, COLLAPSED_NAME_PREVIEW_LIMIT)
+  const collapsedRecommendedRemainder = Math.max(0, recommendedSuggestions.length - collapsedRecommendedPreview.length)
+  const collapsedRecommendedSummary = recommendedSuggestions.length === 1
+    ? '1 additional template is available if this project needs broader coverage.'
+    : `${recommendedSuggestions.length} additional templates are available if this project needs broader coverage.`
+  const collapsedRecommendedButtonLabel = recommendedSuggestions.length === 1
+    ? 'Show 1 template'
+    : `Show ${recommendedSuggestions.length} templates`
 
   const renderSuggestion = (rec: RecommendedAgent, layout: SuggestionLayout) => {
     const isCustom = customNames.has(recommendedAgentNameKey(rec.name))
     const metaBadges = buildMetaBadges(rec)
     const aliasesLabel = formatAliasesLabel(rec.aliases)
     const style = getSuggestionStyle(getSuggestionTone(rec))
-    const supportingText = [rec.description, aliasesLabel].filter(Boolean).join(' ')
 
     if (layout === 'compact') {
       return (
@@ -150,27 +165,30 @@ export function RecommendedAgents({ agents, customTemplates, recommendedAgents, 
             <div className="flex min-w-0 flex-wrap items-center gap-1.5">
               <span className="text-sm font-medium text-text-primary">{rec.name}</span>
               {isCustom && (
-                <span className="rounded-full border border-accent/25 bg-accent/10 px-1.5 py-0.5 text-[10px] font-mono uppercase tracking-wide text-accent">
-                  custom
-                </span>
+                <span className={customBadgeClassName}>custom</span>
               )}
             </div>
-            {supportingText && (
+            {rec.description && (
               <p className="mt-0.5 text-[11px] leading-5 text-text-tertiary">
-                {supportingText}
+                {rec.description}
               </p>
             )}
             {metaBadges.length > 0 && (
-              <div className="mt-1 flex flex-wrap gap-1.5">
+              <div className="mt-1.5 flex flex-wrap gap-1.5">
                 {metaBadges.map(badge => (
                   <span
                     key={badge.label}
-                    className="rounded-full border border-border bg-bg-secondary px-2 py-0.5 font-mono text-[10px] tabular-nums text-text-secondary"
+                    className={metadataBadgeClassName}
                   >
                     {badge.label}
                   </span>
                 ))}
               </div>
+            )}
+            {aliasesLabel && (
+              <p className="mt-1 text-[11px] leading-5 text-text-tertiary">
+                {aliasesLabel}
+              </p>
             )}
           </div>
           <Button
@@ -200,9 +218,7 @@ export function RecommendedAgents({ agents, customTemplates, recommendedAgents, 
               {style.badgeLabel}
             </span>
             {isCustom && (
-              <span className="rounded-full border border-accent/25 bg-accent/10 px-1.5 py-0.5 text-[10px] font-mono uppercase tracking-wide text-accent">
-                custom
-              </span>
+              <span className={customBadgeClassName}>custom</span>
             )}
           </div>
           {rec.description && (
@@ -220,7 +236,7 @@ export function RecommendedAgents({ agents, customTemplates, recommendedAgents, 
               {metaBadges.map(badge => (
                 <span
                   key={badge.label}
-                  className="rounded-full border border-border bg-bg-tertiary px-2 py-0.5 font-mono text-[10px] tabular-nums text-text-secondary"
+                  className={metadataBadgeClassName}
                 >
                   {badge.label}
                 </span>
@@ -279,11 +295,11 @@ export function RecommendedAgents({ agents, customTemplates, recommendedAgents, 
           <div className="grid gap-2 xl:grid-cols-2">
             {visibleRecommendedSuggestions.map(rec => renderSuggestion(rec, 'compact'))}
           </div>
-          {(hiddenRecommendedCount > 0 || recommendedSuggestions.length > RECOMMENDED_VISIBLE_LIMIT) && (
+          {(hiddenRecommendedCount > 0 || showExpandedRecommended) && (
             <div className="flex justify-start">
               <Button
-                aria-expanded={showAllRecommended}
-                onClick={() => setShowAllRecommended(prev => !prev)}
+                aria-expanded={showExpandedRecommended}
+                onClick={() => setShowExpandedRecommended(prev => !prev)}
                 size="sm"
                 variant="ghost"
               >
@@ -291,6 +307,41 @@ export function RecommendedAgents({ agents, customTemplates, recommendedAgents, 
               </Button>
             </div>
           )}
+        </div>
+      )}
+
+      {visibleRecommendedSuggestions.length === 0 && recommendedSuggestions.length > 0 && (
+        <div className="flex items-center justify-between gap-3 border-t border-border/70 pt-3">
+          <div className="space-y-1">
+            <p className="text-[10px] font-mono uppercase tracking-wide text-text-tertiary">More templates</p>
+            <div className="flex flex-wrap items-center gap-1.5">
+              {collapsedRecommendedPreview.map(rec => (
+                <span
+                  key={rec.name}
+                  className="rounded-full border border-border bg-bg-tertiary/60 px-2 py-0.5 text-[10px] font-mono text-text-secondary"
+                >
+                  {rec.name}
+                </span>
+              ))}
+              {collapsedRecommendedRemainder > 0 && (
+                <span className="text-[11px] text-text-tertiary">
+                  +{collapsedRecommendedRemainder} more
+                </span>
+              )}
+            </div>
+            <p className="text-xs text-text-tertiary">
+              {collapsedRecommendedSummary}
+            </p>
+          </div>
+          <Button
+            aria-expanded={showExpandedRecommended}
+            className="shrink-0"
+            onClick={() => setShowExpandedRecommended(true)}
+            size="sm"
+            variant="ghost"
+          >
+            {collapsedRecommendedButtonLabel}
+          </Button>
         </div>
       )}
     </div>

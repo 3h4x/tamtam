@@ -16,6 +16,35 @@ const testAddTemplate = {
   skillIds: ['agent-tests'],
 }
 
+const releaseGateTemplate = {
+  name: 'release-gate',
+  description: 'Checks release readiness.',
+  model: 'normal',
+  schedule: '12h',
+  prompt: '',
+  skillIds: ['release-review'],
+  essential: true,
+}
+
+const syncTemplate = {
+  name: 'sync-watch',
+  description: 'Tracks cross-project drift.',
+  model: 'normal',
+  schedule: '48h',
+  prompt: '',
+}
+
+function recommendedOnlyTemplate(index: number) {
+  return {
+    name: `coverage-${index}`,
+    description: `Coverage recommendation ${index}.`,
+    model: 'normal',
+    schedule: '24h',
+    prompt: '',
+    skillIds: ['agent-tests'],
+  }
+}
+
 function renderRecommendedAgents(
   props: Partial<React.ComponentProps<typeof RecommendedAgents>> = {},
 ) {
@@ -82,6 +111,80 @@ describe('RecommendedAgents', () => {
 
     expect(container.textContent).toContain('legacy name tests')
     expect(container.textContent).toContain('Use template')
+
+    unmount()
+  })
+
+  it('renders compact recommendation metadata as separate badges', () => {
+    const { container, unmount } = renderRecommendedAgents()
+    const badgeTexts = Array.from(container.querySelectorAll('span')).map(node => node.textContent)
+
+    expect(badgeTexts).toContain('Normal')
+    expect(badgeTexts).toContain('1 skill')
+    expect(badgeTexts).toContain('every 24h')
+
+    unmount()
+  })
+
+  it('collapses non-priority recommendations until expanded when priority templates exist', () => {
+    const { container, unmount } = renderRecommendedAgents({
+      recommendedAgents: [releaseGateTemplate, testAddTemplate, syncTemplate],
+    })
+
+    expect(container.textContent).toContain('release-gate')
+    expect(container.textContent).toContain('test-add')
+    expect(container.textContent).toContain('sync-watch')
+    expect(container.textContent).toContain('Show 2 templates')
+    expect(container.textContent).not.toContain('Adds missing tests.')
+    expect(container.textContent).not.toContain('legacy name tests')
+
+    unmount()
+  })
+
+  it('uses singular copy when one non-priority recommendation is collapsed', () => {
+    const { container, unmount } = renderRecommendedAgents({
+      recommendedAgents: [releaseGateTemplate, testAddTemplate],
+    })
+
+    expect(container.textContent).toContain('Show 1 template')
+    expect(container.textContent).toContain('1 additional template is available')
+    expect(container.textContent).not.toContain('Show 1 templates')
+    expect(container.textContent).not.toContain('1 additional templates')
+
+    unmount()
+  })
+
+  it('keeps the collapse control after expanding a recommended-only list', () => {
+    const { container, unmount } = renderRecommendedAgents({
+      recommendedAgents: Array.from({ length: 5 }, (_, index) => recommendedOnlyTemplate(index + 1)),
+    })
+
+    expect(container.textContent).toContain('Show 1 more')
+    expect(container.textContent).toContain('coverage-1')
+    expect(container.textContent).toContain('coverage-4')
+    expect(container.textContent).not.toContain('coverage-5')
+
+    const showMore = Array.from(container.querySelectorAll('button'))
+      .find(button => button.textContent === 'Show 1 more')
+    expect(showMore).toBeTruthy()
+
+    flushSync(() => {
+      showMore?.click()
+    })
+
+    expect(container.textContent).toContain('coverage-5')
+    expect(container.textContent).toContain('Show fewer')
+
+    const showFewer = Array.from(container.querySelectorAll('button'))
+      .find(button => button.textContent === 'Show fewer')
+    expect(showFewer).toBeTruthy()
+
+    flushSync(() => {
+      showFewer?.click()
+    })
+
+    expect(container.textContent).not.toContain('coverage-5')
+    expect(container.textContent).toContain('Show 1 more')
 
     unmount()
   })
