@@ -36,6 +36,8 @@ const metadataBadgeClassName =
   'rounded-full border border-border bg-bg-tertiary px-2 py-0.5 font-mono text-[10px] tabular-nums text-text-secondary'
 const customBadgeClassName =
   'rounded-full border border-accent/25 bg-accent/10 px-1.5 py-0.5 text-[10px] font-mono uppercase tracking-wide text-accent'
+const sectionCountClassName =
+  'rounded-full bg-bg-tertiary px-2 py-0.5 text-[10px] font-mono tabular-nums text-text-tertiary'
 
 const suggestionPriority: Record<SuggestionTone, number> = {
   essential: 0,
@@ -58,6 +60,13 @@ function formatModelBadgeLabel(model: string | null | undefined): string | null 
 
 function formatTemplateCount(count: number): string {
   return count === 1 ? '1 template' : `${count} templates`
+}
+
+function formatVisibleTemplateSummary(visibleCount: number, totalCount: number): string {
+  const hiddenCount = Math.max(0, totalCount - visibleCount)
+  if (hiddenCount === 0) return `${totalCount} shown`
+  if (visibleCount === 0) return `${hiddenCount} hidden`
+  return `${visibleCount} shown • ${hiddenCount} hidden`
 }
 
 function formatSkillCount(skillIds: string[] | undefined): string | null {
@@ -118,6 +127,32 @@ function getSuggestionStyle(tone: SuggestionTone): SuggestionStyle {
     nameClassName: 'text-text-secondary',
     buttonVariant: 'secondary',
   }
+}
+
+function RecommendationNamePreview({
+  items,
+  remainder,
+}: {
+  items: RecommendedAgent[]
+  remainder: number
+}) {
+  return (
+    <div className="flex flex-wrap items-center gap-1.5">
+      {items.map(rec => (
+        <span
+          key={rec.name}
+          className="rounded-full border border-border bg-bg-tertiary/60 px-2 py-0.5 text-[10px] font-mono text-text-secondary"
+        >
+          {rec.name}
+        </span>
+      ))}
+      {remainder > 0 && (
+        <span className="text-[11px] text-text-tertiary">
+          +{remainder} more
+        </span>
+      )}
+    </div>
+  )
 }
 
 export function RecommendedAgents({ agents, customTemplates, recommendedAgents, onAddAgent }: RecommendedAgentsProps) {
@@ -271,7 +306,7 @@ export function RecommendedAgents({ agents, customTemplates, recommendedAgents, 
               : 'Suggested templates stay compact by default. Expand the list only if this project needs broader coverage.'}
           </p>
         </div>
-        <span className="shrink-0 rounded-full bg-bg-tertiary px-2 py-0.5 text-[10px] font-mono text-text-tertiary">
+        <span className={`shrink-0 ${sectionCountClassName}`}>
           {suggestions.length} suggested
         </span>
       </div>
@@ -293,9 +328,12 @@ export function RecommendedAgents({ agents, customTemplates, recommendedAgents, 
             <p className="text-[10px] font-mono uppercase tracking-wide text-text-tertiary">
               {prioritySuggestions.length > 0 ? 'Optional templates' : 'Suggested templates'}
             </p>
-            <p className="text-[10px] font-mono text-text-tertiary">
-              {prioritySuggestions.length > 0 ? `${recommendedSuggestions.length} optional` : `${recommendedSuggestions.length} recommended`}
-            </p>
+            <span className={sectionCountClassName}>
+              {formatVisibleTemplateSummary(
+                visibleRecommendedSuggestions.length,
+                recommendedSuggestions.length,
+              )}
+            </span>
           </div>
           <div className="grid gap-2 xl:grid-cols-2">
             {visibleRecommendedSuggestions.map(rec => renderSuggestion(rec, 'compact'))}
@@ -305,21 +343,10 @@ export function RecommendedAgents({ agents, customTemplates, recommendedAgents, 
               {showHiddenRecommendedPreview && (
                 <div className="min-w-0 space-y-1">
                   <p className="text-[10px] font-mono uppercase tracking-wide text-text-tertiary">Still hidden</p>
-                  <div className="flex flex-wrap items-center gap-1.5">
-                    {collapsedRecommendedPreview.map(rec => (
-                      <span
-                        key={rec.name}
-                        className="rounded-full border border-border bg-bg-tertiary/60 px-2 py-0.5 text-[10px] font-mono text-text-secondary"
-                      >
-                        {rec.name}
-                      </span>
-                    ))}
-                    {collapsedRecommendedRemainder > 0 && (
-                      <span className="text-[11px] text-text-tertiary">
-                        +{collapsedRecommendedRemainder} more
-                      </span>
-                    )}
-                  </div>
+                  <RecommendationNamePreview
+                    items={collapsedRecommendedPreview}
+                    remainder={collapsedRecommendedRemainder}
+                  />
                 </div>
               )}
               <Button
@@ -339,22 +366,16 @@ export function RecommendedAgents({ agents, customTemplates, recommendedAgents, 
       {visibleRecommendedSuggestions.length === 0 && recommendedSuggestions.length > 0 && (
         <div className="flex items-center justify-between gap-3 border-t border-border/70 pt-3">
           <div className="space-y-1">
-            <p className="text-[10px] font-mono uppercase tracking-wide text-text-tertiary">Optional templates</p>
-            <div className="flex flex-wrap items-center gap-1.5">
-              {collapsedRecommendedPreview.map(rec => (
-                <span
-                  key={rec.name}
-                  className="rounded-full border border-border bg-bg-tertiary/60 px-2 py-0.5 text-[10px] font-mono text-text-secondary"
-                >
-                  {rec.name}
-                </span>
-              ))}
-              {collapsedRecommendedRemainder > 0 && (
-                <span className="text-[11px] text-text-tertiary">
-                  +{collapsedRecommendedRemainder} more
-                </span>
-              )}
+            <div className="flex flex-wrap items-center gap-2">
+              <p className="text-[10px] font-mono uppercase tracking-wide text-text-tertiary">Optional templates</p>
+              <span className={sectionCountClassName}>
+                {formatVisibleTemplateSummary(0, recommendedSuggestions.length)}
+              </span>
             </div>
+            <RecommendationNamePreview
+              items={collapsedRecommendedPreview}
+              remainder={collapsedRecommendedRemainder}
+            />
             <p className="text-xs text-text-tertiary">
               {collapsedRecommendedSummary}
             </p>
