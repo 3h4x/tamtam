@@ -26,6 +26,11 @@ const mocks = vi.hoisted(() => ({
   deleteFileAgentOverride: vi.fn(),
 }));
 
+const cronStateMocks = vi.hoisted(() => ({
+  loadAgentCronStates: vi.fn().mockResolvedValue(new Map()),
+  getAllAgentLastAttempts: vi.fn().mockReturnValue(new Map()),
+}));
+
 vi.mock('@/lib/db', () => ({
   get db() { return dbHolder.db!; },
   schema,
@@ -55,6 +60,11 @@ vi.mock('@/lib/agents/file-agent-overrides', () => ({
   getFileAgentOverride: mocks.getFileAgentOverride,
   setFileAgentOverride: mocks.setFileAgentOverride,
   deleteFileAgentOverride: mocks.deleteFileAgentOverride,
+}));
+
+vi.mock('@/lib/scheduling/agent-cron-state', () => ({
+  loadAgentCronStates: cronStateMocks.loadAgentCronStates,
+  getAllAgentLastAttempts: cronStateMocks.getAllAgentLastAttempts,
 }));
 
 // Import route handlers once at top scope. They resolve their mocked deps via
@@ -136,6 +146,8 @@ describe('agents API', () => {
   const deleteFileAgentMock = mocks.deleteFileAgent;
   const setFileAgentOverrideMock = mocks.setFileAgentOverride;
   const resolveProjectPathMock = mocks.resolveProjectPath;
+  const loadAgentCronStatesMock = cronStateMocks.loadAgentCronStates;
+  const getAllAgentLastAttemptsMock = cronStateMocks.getAllAgentLastAttempts;
 
   beforeAll(async () => {
     sharedHandle = await createTestPgDbEmpty();
@@ -177,6 +189,8 @@ describe('agents API', () => {
     mocks.writeFileAgent.mockReturnValue(null);
     mocks.getFileAgentOverride.mockReturnValue(null);
     mocks.setFileAgentOverride.mockImplementation((_p: string, _n: string, patch) => patch);
+    cronStateMocks.loadAgentCronStates.mockResolvedValue(new Map());
+    cronStateMocks.getAllAgentLastAttempts.mockReturnValue(new Map());
 
     // Module-level caches must be cleared between tests since the route module
     // is imported once and persists state across runs.
@@ -381,6 +395,105 @@ describe('agents API', () => {
       expect(data.agents[0].id).toBe('db-1');
       expect(data.agents[0].prompt).toBe('db version');
     });
+
+    it('returns summary-only fields with live cron telemetry for fields=summary', async () => {
+      const db = testDb.db;
+      const now = Date.now() / 1000;
+      await db.insert(schema.agents).values({
+        id: 'agent-summary',
+        name: 'Summary Agent',
+        project: 'proj1',
+        skillIds: '["skill1"]',
+        docPaths: '["docs/spec.md"]',
+        model: 'sonnet',
+        prompt: 'full prompt should stay out of summary responses',
+        schedule: '15m',
+        enabled: true,
+        provider: 'codex',
+        prerequisiteCommand: 'echo ready',
+        createdAt: now,
+        updatedAt: now,
+      });
+      loadAgentCronStatesMock.mockResolvedValueOnce(new Map([
+        ['agent-summary', {
+          agentId: 'agent-summary',
+          nextFireMs: 123_000,
+          attempts: 2,
+          isAvailable: true,
+          lockedAt: null,
+          lastError: null,
+        }],
+      ]));
+      getAllAgentLastAttemptsMock.mockReturnValueOnce(new Map([
+        ['agent-summary', { at: 456_000, reason: 'jobs paused', status: 'skipped' }],
+      ]));
+      await warmAgentsCache();
+
+      const response = await GET(new NextRequest('http://localhost/api/agents?fields=summary'));
+      const data = await response.json();
+
+      expect(response.headers.get('Cache-Control')).toBe('no-store, max-age=0');
+      expect(data.agents).toEqual([{
+        id: 'agent-summary',
+        name: 'Summary Agent',
+        project: 'proj1',
+        schedule: '15m',
+        enabled: true,
+        model: 'normal',
+        provider: 'codex',
+        source: 'db',
+        cron: {
+          nextFireMs: 123_000,
+          attempts: 2,
+          isAvailable: true,
+          lockedAt: null,
+          lastError: null,
+        },
+        lastAttempt: {
+          at: 456_000,
+          reason: 'jobs paused',
+          status: 'skipped',
+        },
+      }]);
+      expect(data.agents[0]).not.toHaveProperty('prompt');
+      expect(data.agents[0]).not.toHaveProperty('skillIds');
+      expect(data.agents[0]).not.toHaveProperty('docPaths');
+      expect(data.agents[0]).not.toHaveProperty('prerequisiteCommand');
+    });
+
+    it('ignores fields=summary when a specific agent name requests full detail', async () => {
+      const db = testDb.db;
+      const now = Date.now() / 1000;
+      await db.insert(schema.agents).values({
+        id: 'agent-detail',
+        name: 'Detail Agent',
+        project: 'proj1',
+        skillIds: '["skill1"]',
+        docPaths: '["docs/spec.md"]',
+        model: 'sonnet',
+        prompt: 'full prompt',
+        schedule: '15m',
+        enabled: true,
+        provider: 'codex',
+        prerequisiteCommand: 'echo ready',
+        createdAt: now,
+        updatedAt: now,
+      });
+      await warmAgentsCache();
+
+      const response = await GET(new NextRequest('http://localhost/api/agents?fields=summary&name=Detail%20Agent'));
+      const data = await response.json();
+
+      expect(data.agents).toHaveLength(1);
+      expect(data.agents[0]).toMatchObject({
+        id: 'agent-detail',
+        name: 'Detail Agent',
+        prompt: 'full prompt',
+        skillIds: ['skill1'],
+        docPaths: ['docs/spec.md'],
+        prerequisiteCommand: 'echo ready',
+      });
+    });
   });
 
   describe('POST /agents', () => {
@@ -572,6 +685,56 @@ describe('agents API', () => {
       const data = await response.json();
 
       expect(data.agent.model).toBe('normal');
+    });
+
+    it('defaults fallbackEnabled on for built-in recommended agents', async () => {
+      const request = new NextRequest('http://localhost/api/agents', {
+        method: 'POST',
+        body: JSON.stringify({ name: 'test-add', project: 'proj1' }),
+      });
+
+      const response = await POST(request);
+      const data = await response.json();
+
+      expect(response.status).toBe(201);
+      expect(data.agent.fallbackEnabled).toBe(true);
+
+      const row = (await testDb.db.select().from(schema.agents)).find((agent) => agent.id === data.agent.id);
+      expect(row?.fallbackEnabled).toBe(true);
+    });
+
+    it('treats legacy built-in aliases as fallback-enabled after trimming and case normalization', async () => {
+      const request = new NextRequest('http://localhost/api/agents', {
+        method: 'POST',
+        body: JSON.stringify({ name: '  TESTS  ', project: 'proj1' }),
+      });
+
+      const response = await POST(request);
+      const data = await response.json();
+
+      expect(response.status).toBe(201);
+      expect(data.agent.name).toBe('TESTS');
+      expect(data.agent.fallbackEnabled).toBe(true);
+
+      const row = (await testDb.db.select().from(schema.agents)).find((agent) => agent.id === data.agent.id);
+      expect(row?.name).toBe('TESTS');
+      expect(row?.fallbackEnabled).toBe(true);
+    });
+
+    it('respects an explicit fallbackEnabled override for built-in recommended agents', async () => {
+      const request = new NextRequest('http://localhost/api/agents', {
+        method: 'POST',
+        body: JSON.stringify({ name: 'test-add', project: 'proj1', fallbackEnabled: false }),
+      });
+
+      const response = await POST(request);
+      const data = await response.json();
+
+      expect(response.status).toBe(201);
+      expect(data.agent.fallbackEnabled).toBe(false);
+
+      const row = (await testDb.db.select().from(schema.agents)).find((agent) => agent.id === data.agent.id);
+      expect(row?.fallbackEnabled).toBe(false);
     });
 
     it('accepts optional fields', async () => {

@@ -33,7 +33,6 @@ import { spawn, spawnSync } from 'node:child_process';
 import { existsSync, mkdirSync, readFileSync, unlinkSync, writeFileSync, openSync, closeSync } from 'node:fs';
 import { join } from 'node:path';
 
-const DEV_SERVERS_DIR = join(process.cwd(), 'data', 'dev-servers');
 const DEFAULT_READY_TIMEOUT_MS = 60_000;
 const READY_PROBE_INTERVAL_MS = 500;
 const POST_SPAWN_GRACE_MS = 1_500;
@@ -71,21 +70,26 @@ export type StopResult =
   | { status: 'not_running' }
   | { status: 'error'; error: string };
 
+function devServersDir(): string {
+  return process.env.TAMTAM_DEV_SERVERS_DIR || join(process.cwd(), 'data', 'dev-servers');
+}
+
 function pidfilePathFor(project: string): string {
   // Project names are constrained slugs in the projects table; still sanitize
   // defensively so a malicious name can't traverse out of the data dir.
   const safe = project.replace(/[^a-zA-Z0-9._-]/g, '_');
-  return join(DEV_SERVERS_DIR, `${safe}.pid`);
+  return join(devServersDir(), `${safe}.pid`);
 }
 
 function logFilePathFor(project: string): string {
   const safe = project.replace(/[^a-zA-Z0-9._-]/g, '_');
-  return join(DEV_SERVERS_DIR, `${safe}.log`);
+  return join(devServersDir(), `${safe}.log`);
 }
 
 function ensureDir(): void {
-  if (!existsSync(/*turbopackIgnore: true*/ DEV_SERVERS_DIR)) {
-    mkdirSync(/*turbopackIgnore: true*/ DEV_SERVERS_DIR, { recursive: true });
+  const dir = devServersDir();
+  if (!existsSync(/*turbopackIgnore: true*/ dir)) {
+    mkdirSync(/*turbopackIgnore: true*/ dir, { recursive: true });
   }
 }
 
@@ -128,12 +132,27 @@ function isProcessAlive(pid: number): boolean {
   try {
     // signal 0 doesn't deliver — just checks for permission/existence.
     process.kill(pid, 0);
+    if (readProcessState(pid)?.startsWith('Z')) return false;
     return true;
   } catch (e) {
     const err = e as NodeJS.ErrnoException;
     // EPERM means the process exists but we can't signal it; treat as alive
     // (someone else's pid; we shouldn't claim it).
     return err.code === 'EPERM';
+  }
+}
+
+function readProcessState(pid: number): string | null {
+  if (pid <= 0) return null;
+  try {
+    const result = spawnSync('ps', ['-o', 'stat=', '-p', String(pid)], {
+      encoding: 'utf8',
+      timeout: 1_000,
+    });
+    if (result.status !== 0) return null;
+    return result.stdout.trim() || null;
+  } catch {
+    return null;
   }
 }
 
@@ -162,28 +181,50 @@ function ownsLivePidfile(pidfile: DevServerPidFile): boolean {
   return readProcessStart(pidfile.pid) === pidfile.processStart;
 }
 
-async function probeReady(url: string, timeoutMs: number): Promise<boolean> {
+async function fetchReadyOnce(url: string, timeoutMs: number): Promise<boolean> {
+  const ac = new AbortController();
+  const t = setTimeout(() => ac.abort(), timeoutMs);
+  try {
+    const resp = await fetch(url, { signal: ac.signal, redirect: 'manual' });
+    // Any response (including 3xx/4xx) means the server bound the port and
+    // is responsive enough to refuse — that's "ready enough" for our
+    // purposes. Only 5xx and network errors keep us waiting.
+    return resp.status < 500;
+  } catch {
+    return false;
+  } finally {
+    clearTimeout(t);
+  }
+}
+
+async function probeReady(
+  url: string,
+  timeoutMs: number,
+  shouldStop: () => boolean = () => false,
+): Promise<'ready' | 'timeout' | 'stopped'> {
   const deadline = Date.now() + timeoutMs;
   while (Date.now() < deadline) {
-    try {
-      const ac = new AbortController();
-      const t = setTimeout(() => ac.abort(), 2_000);
-      const resp = await fetch(url, { signal: ac.signal, redirect: 'manual' });
-      clearTimeout(t);
-      // Any response (including 3xx/4xx) means the server bound the port and
-      // is responsive enough to refuse — that's "ready enough" for our
-      // purposes. Only 5xx and network errors keep us waiting.
-      if (resp.status < 500) return true;
-    } catch {
-      // network error / not listening yet — keep waiting
-    }
-    await new Promise((r) => setTimeout(r, READY_PROBE_INTERVAL_MS));
+    if (shouldStop()) return 'stopped';
+    if (await fetchReadyOnce(url, 2_000)) return 'ready';
+    if (shouldStop()) return 'stopped';
+    const remainingMs = deadline - Date.now();
+    if (remainingMs <= 0) break;
+    await new Promise((r) => setTimeout(r, Math.min(READY_PROBE_INTERVAL_MS, remainingMs)));
   }
-  return false;
+  return shouldStop() ? 'stopped' : 'timeout';
 }
 
 async function gracePeriod(ms: number): Promise<void> {
   await new Promise((r) => setTimeout(r, ms));
+}
+
+async function yieldToIoEvents(): Promise<void> {
+  await new Promise((r) => setImmediate(r));
+}
+
+function childHasStopped(child: ReturnType<typeof spawn>): boolean {
+  if (!child.pid) return true;
+  return child.exitCode !== null || child.signalCode !== null || !isProcessAlive(child.pid);
 }
 
 export interface EnsureOptions {
@@ -216,33 +257,25 @@ export async function ensureDevServerRunning(
   }
   // User-started dev server (no pidfile, readiness URL responds)
   if (config.readyUrl) {
-    try {
-      const ac = new AbortController();
-      const t = setTimeout(() => ac.abort(), 1_500);
-      const r = await fetch(config.readyUrl, { signal: ac.signal, redirect: 'manual' });
-      clearTimeout(t);
-      if (r.status < 500) {
-        // Someone else owns this; we don't write a pidfile, so we won't stop it.
-        // Return a synthetic "already_running" marker so the caller knows
-        // there's a server up to talk to.
-        return {
-          status: 'already_running',
-          pidfile: {
-            project,
-            pid: -1,
-            pgid: -1,
-            processStart: null,
-            startedAt: Date.now(),
-            startedByJobId: null,
-            command: '(external)',
-            readyUrl: config.readyUrl,
-            cwd: config.cwd,
-            logPath: '',
-          },
-        };
-      }
-    } catch {
-      // not up — proceed to spawn
+    if (await fetchReadyOnce(config.readyUrl, 1_500)) {
+      // Someone else owns this; we don't write a pidfile, so we won't stop it.
+      // Return a synthetic "already_running" marker so the caller knows
+      // there's a server up to talk to.
+      return {
+        status: 'already_running',
+        pidfile: {
+          project,
+          pid: -1,
+          pgid: -1,
+          processStart: null,
+          startedAt: Date.now(),
+          startedByJobId: null,
+          command: '(external)',
+          readyUrl: config.readyUrl,
+          cwd: config.cwd,
+          logPath: '',
+        },
+      };
     }
   }
 
@@ -281,8 +314,13 @@ export async function ensureDevServerRunning(
 
   const processStart = readProcessStart(child.pid);
   spawnedThisProcess.set(child.pid, { pgid: child.pid, child });
-  child.once('exit', () => {
-    spawnedThisProcess.delete(child.pid!);
+  let exited = false;
+  const exitPromise = new Promise<void>((resolve) => {
+    child.once('exit', () => {
+      exited = true;
+      spawnedThisProcess.delete(child.pid!);
+      resolve();
+    });
   });
 
   const pidfile: DevServerPidFile = {
@@ -301,13 +339,23 @@ export async function ensureDevServerRunning(
 
   // 3. Wait for readiness.
   if (config.readyUrl) {
-    const ok = await probeReady(config.readyUrl, options.readyTimeoutMs ?? DEFAULT_READY_TIMEOUT_MS);
-    if (!ok) return { status: 'ready_timeout', pidfile };
+    const readiness = await probeReady(
+      config.readyUrl,
+      options.readyTimeoutMs ?? DEFAULT_READY_TIMEOUT_MS,
+      () => exited || childHasStopped(child),
+    );
+    if (readiness === 'stopped') {
+      removePidfile(project);
+      spawnedThisProcess.delete(pidfile.pid);
+      return { status: 'spawn_failed', error: 'process exited immediately; see log' };
+    }
+    if (readiness === 'timeout') return { status: 'ready_timeout', pidfile };
   } else {
-    await gracePeriod(POST_SPAWN_GRACE_MS);
+    await Promise.race([gracePeriod(POST_SPAWN_GRACE_MS), exitPromise]);
+    await yieldToIoEvents();
     // Also verify the process didn't immediately exit (bad command, missing
     // binary, etc.). Without a readiness URL this is the only signal we have.
-    if (!isProcessAlive(pidfile.pid)) {
+    if (exited || childHasStopped(child)) {
       removePidfile(project);
       spawnedThisProcess.delete(pidfile.pid);
       return { status: 'spawn_failed', error: 'process exited immediately; see log' };
@@ -390,14 +438,15 @@ export async function sweepOrphanDevServers(): Promise<{ stopped: string[]; kept
   const stopped: string[] = [];
   const kept: string[] = [];
 
-  if (!existsSync(/*turbopackIgnore: true*/ DEV_SERVERS_DIR)) {
+  const dir = devServersDir();
+  if (!existsSync(/*turbopackIgnore: true*/ dir)) {
     return { stopped, kept };
   }
 
   const { readdirSync } = await import('node:fs');
   let entries: string[];
   try {
-    entries = readdirSync(/*turbopackIgnore: true*/ DEV_SERVERS_DIR).filter((n) => n.endsWith('.pid'));
+    entries = readdirSync(/*turbopackIgnore: true*/ dir).filter((n) => n.endsWith('.pid'));
   } catch {
     return { stopped, kept };
   }
@@ -405,7 +454,7 @@ export async function sweepOrphanDevServers(): Promise<{ stopped: string[]; kept
   const { hasActiveWorkForProject } = await import('@/lib/dev-server/active-work');
 
   for (const file of entries) {
-    const pidPath = join(DEV_SERVERS_DIR, file);
+    const pidPath = join(dir, file);
     const legacyProject = file.replace(/\.pid$/, '');
     const pidfile = readPidfileAtPath(pidPath);
     if (!pidfile) continue;

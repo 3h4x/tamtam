@@ -13,6 +13,8 @@ const {
   fetchSkillsMock,
   fetchPersonasMock,
   runAgentMock,
+  searchParamsMock,
+  editorPropsMock,
 } = vi.hoisted(() => ({
   pushMock: vi.fn(),
   toastMock: vi.fn(),
@@ -20,12 +22,14 @@ const {
   fetchSkillsMock: vi.fn(),
   fetchPersonasMock: vi.fn(),
   runAgentMock: vi.fn(),
+  searchParamsMock: vi.fn(() => new URLSearchParams()),
+  editorPropsMock: vi.fn(),
 }))
 
 vi.mock('next/navigation', () => ({
   useRouter: () => ({ push: pushMock }),
   usePathname: () => '/project/alpha/agents',
-  useSearchParams: () => new URLSearchParams(),
+  useSearchParams: () => searchParamsMock(),
 }))
 
 vi.mock('@/components/Toast', () => ({
@@ -47,7 +51,10 @@ vi.mock('@/components/agents-tab/RecommendedAgents', () => ({
 }))
 
 vi.mock('@/components/agents-tab/AgentEditor', () => ({
-  AgentEditor: () => null,
+  AgentEditor: (props: unknown) => {
+    editorPropsMock(props)
+    return null
+  },
 }))
 
 function renderTab() {
@@ -76,6 +83,9 @@ function buttonByText(container: HTMLElement, text: string): HTMLButtonElement {
 
 describe('AgentsTab queued runs', () => {
   beforeEach(() => {
+    searchParamsMock.mockReset()
+    searchParamsMock.mockReturnValue(new URLSearchParams())
+    editorPropsMock.mockReset()
     fetchAgentsMock.mockResolvedValue({
       agents: [{
         id: 'agent-1',
@@ -157,6 +167,22 @@ describe('AgentsTab queued runs', () => {
 
     await vi.waitFor(() => {
       expect(pushMock).toHaveBeenCalledWith('/project/alpha/agents?agent=new')
+    })
+
+    unmount()
+  })
+
+  it('resolves the legacy tests template alias to the test-add recommendation', async () => {
+    searchParamsMock.mockReturnValue(new URLSearchParams('agent=new&template=tests'))
+
+    const { unmount } = renderTab()
+
+    await vi.waitFor(() => {
+      const latestProps = editorPropsMock.mock.calls.at(-1)?.[0] as { template?: { name: string; skillIds: string[] } } | undefined
+      expect(latestProps?.template).toMatchObject({
+        name: 'test-add',
+        skillIds: ['agent-tests'],
+      })
     })
 
     unmount()
