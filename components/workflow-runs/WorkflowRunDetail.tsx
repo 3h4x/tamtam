@@ -62,6 +62,27 @@ function statusBadge(status: string): string {
   }
 }
 
+const STEP_STATUS_ORDER = ['failed', 'cancelled', 'running', 'pending', 'completed'] as const;
+
+function countStepStatuses(steps: Step[]): Array<{ status: string; count: number }> {
+  const counts = new Map<string, number>();
+  for (const step of steps) {
+    counts.set(step.status, (counts.get(step.status) ?? 0) + 1);
+  }
+
+  const ordered = STEP_STATUS_ORDER
+    .filter((status) => counts.has(status))
+    .map((status) => ({ status, count: counts.get(status) ?? 0 }));
+
+  const knownStatuses = new Set<string>(STEP_STATUS_ORDER);
+  const remaining = Array.from(counts.entries())
+    .filter(([status]) => !knownStatuses.has(status))
+    .sort(([a], [b]) => a.localeCompare(b))
+    .map(([status, count]) => ({ status, count }));
+
+  return [...ordered, ...remaining];
+}
+
 export function WorkflowRunDetail({ runId }: { runId: string }) {
   const [data, setData] = useState<RunDetail | null>(null);
   const [error, setError] = useState<string | null>(null);
@@ -118,6 +139,8 @@ export function WorkflowRunDetail({ runId }: { runId: string }) {
   }
   if (!data) return <WorkflowRunDetailLoadingState />;
 
+  const stepStatusCounts = countStepStatuses(data.steps);
+
   return (
     <div className="p-4 sm:p-6 space-y-6">
       <div>
@@ -168,66 +191,126 @@ export function WorkflowRunDetail({ runId }: { runId: string }) {
       </div>
 
       <div>
-        <h3 className="text-sm font-medium text-text-secondary mb-2 uppercase tracking-wide">
-          Steps ({data.steps.length})
-        </h3>
-        <div className="border border-border rounded-md overflow-hidden">
-          <table className="w-full text-sm">
-            <thead className="bg-bg-secondary text-text-secondary text-xs uppercase tracking-wide">
-              <tr>
-                <th className="text-left px-3 py-2 font-medium">Step</th>
-                <th className="text-left px-3 py-2 font-medium">Status</th>
-                <th className="text-right px-3 py-2 font-medium">Attempt</th>
-                <th className="text-right px-3 py-2 font-medium">Duration</th>
-                <th className="text-left px-3 py-2 font-medium">Completed</th>
-              </tr>
-            </thead>
-            <tbody>
+        <div className="mb-2 flex flex-wrap items-center gap-2">
+          <h3 className="text-sm font-medium uppercase tracking-wide text-text-secondary">
+            Steps <span className="font-mono tabular-nums">({data.steps.length})</span>
+          </h3>
+          {stepStatusCounts.length > 0 ? (
+            <div className="flex flex-wrap gap-1">
+              {stepStatusCounts.map(({ status, count }) => (
+                <span
+                  key={status}
+                  className={`inline-flex items-center gap-1 rounded border px-2 py-0.5 text-xs ${statusBadge(status)}`}
+                >
+                  <span>{status}</span>
+                  <span className="font-mono tabular-nums">{count}</span>
+                </span>
+              ))}
+            </div>
+          ) : null}
+        </div>
+        {data.steps.length === 0 ? (
+          <WorkflowRunsEmptyState
+            title="No steps recorded"
+            description="This workflow completed without persisting step detail, or step tracing has not been emitted yet."
+          />
+        ) : (
+          <>
+            <div className="space-y-2 sm:hidden">
               {data.steps.map((s) => (
-                <tr key={s.stepId} className="border-t border-border align-top">
-                  <td className="px-3 py-2 font-mono text-xs text-text-primary" title={s.rawName}>
-                    {s.name}
-                    {s.error && (
-                      <div className="mt-1 p-2 rounded border border-status-error/30 bg-status-error/10 text-status-error text-xs whitespace-pre-wrap">
-                        {s.error}
+                <div key={s.stepId} className="rounded-md border border-border bg-bg-primary p-3">
+                  <div className="flex items-start justify-between gap-3">
+                    <div className="min-w-0">
+                      <div className="truncate font-mono text-xs text-text-primary" title={s.rawName}>
+                        {s.name}
                       </div>
-                    )}
-                    {s.output != null && (
-                      <details className="mt-1">
-                        <summary className="cursor-pointer text-text-tertiary">Output</summary>
-                        <pre className="mt-1 p-2 rounded bg-bg-tertiary border border-border overflow-x-auto text-text-primary">
-                          {JSON.stringify(s.output, null, 2)}
-                        </pre>
-                      </details>
-                    )}
-                  </td>
-                  <td className="px-3 py-2">
-                    <span className={`inline-block px-2 py-0.5 rounded border text-xs ${statusBadge(s.status)}`}>
+                      <div className="mt-1 font-mono text-xs tabular-nums text-text-secondary">
+                        attempt {s.attempt} · {formatDuration(s.durationMs)}
+                      </div>
+                    </div>
+                    <span className={`shrink-0 rounded border px-2 py-0.5 text-xs ${statusBadge(s.status)}`}>
                       {s.status}
                     </span>
-                  </td>
-                  <td className="px-3 py-2 text-right font-mono text-xs text-text-secondary">{s.attempt}</td>
-                  <td className="px-3 py-2 text-right font-mono text-xs text-text-secondary">
-                    {formatDuration(s.durationMs)}
-                  </td>
-                  <td className="px-3 py-2 text-xs text-text-secondary whitespace-nowrap">
-                    {formatTime(s.completedAt)}
-                  </td>
-                </tr>
+                  </div>
+                  <div className="mt-3 grid grid-cols-2 gap-2 text-xs">
+                    <div className="min-w-0">
+                      <div className="uppercase tracking-wide text-text-tertiary">Started</div>
+                      <div className="truncate text-text-secondary" title={formatTime(s.startedAt)}>
+                        {formatTime(s.startedAt)}
+                      </div>
+                    </div>
+                    <div className="min-w-0">
+                      <div className="uppercase tracking-wide text-text-tertiary">Completed</div>
+                      <div className="truncate text-text-secondary" title={formatTime(s.completedAt)}>
+                        {formatTime(s.completedAt)}
+                      </div>
+                    </div>
+                  </div>
+                  {s.error && (
+                    <div className="mt-3 rounded border border-status-error/30 bg-status-error/10 p-2 text-xs whitespace-pre-wrap text-status-error">
+                      {s.error}
+                    </div>
+                  )}
+                  {s.output != null && (
+                    <details className="mt-3 text-xs">
+                      <summary className="cursor-pointer text-text-tertiary">Output</summary>
+                      <pre className="mt-1 overflow-x-auto rounded border border-border bg-bg-tertiary p-2 text-text-primary">
+                        {JSON.stringify(s.output, null, 2)}
+                      </pre>
+                    </details>
+                  )}
+                </div>
               ))}
-              {data.steps.length === 0 && (
-                <tr>
-                  <td colSpan={5} className="px-3 py-5">
-                    <WorkflowRunsEmptyState
-                      title="No steps recorded"
-                      description="This workflow completed without persisting step detail, or step tracing has not been emitted yet."
-                    />
-                  </td>
-                </tr>
-              )}
-            </tbody>
-          </table>
-        </div>
+            </div>
+            <div className="hidden overflow-hidden rounded-md border border-border sm:block">
+              <table className="w-full text-sm">
+                <thead className="bg-bg-secondary text-text-secondary text-xs uppercase tracking-wide">
+                  <tr>
+                    <th className="text-left px-3 py-2 font-medium">Step</th>
+                    <th className="text-left px-3 py-2 font-medium">Status</th>
+                    <th className="text-right px-3 py-2 font-medium">Attempt</th>
+                    <th className="text-right px-3 py-2 font-medium">Duration</th>
+                    <th className="text-left px-3 py-2 font-medium">Completed</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {data.steps.map((s) => (
+                    <tr key={s.stepId} className="border-t border-border align-top">
+                      <td className="px-3 py-2 font-mono text-xs text-text-primary" title={s.rawName}>
+                        {s.name}
+                        {s.error && (
+                          <div className="mt-1 p-2 rounded border border-status-error/30 bg-status-error/10 text-status-error text-xs whitespace-pre-wrap">
+                            {s.error}
+                          </div>
+                        )}
+                        {s.output != null && (
+                          <details className="mt-1">
+                            <summary className="cursor-pointer text-text-tertiary">Output</summary>
+                            <pre className="mt-1 p-2 rounded bg-bg-tertiary border border-border overflow-x-auto text-text-primary">
+                              {JSON.stringify(s.output, null, 2)}
+                            </pre>
+                          </details>
+                        )}
+                      </td>
+                      <td className="px-3 py-2">
+                        <span className={`inline-block px-2 py-0.5 rounded border text-xs ${statusBadge(s.status)}`}>
+                          {s.status}
+                        </span>
+                      </td>
+                      <td className="px-3 py-2 text-right font-mono text-xs text-text-secondary">{s.attempt}</td>
+                      <td className="px-3 py-2 text-right font-mono text-xs text-text-secondary">
+                        {formatDuration(s.durationMs)}
+                      </td>
+                      <td className="px-3 py-2 text-xs text-text-secondary whitespace-nowrap">
+                        {formatTime(s.completedAt)}
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          </>
+        )}
       </div>
     </div>
   );
