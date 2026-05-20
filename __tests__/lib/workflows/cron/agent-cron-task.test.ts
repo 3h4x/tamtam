@@ -1,5 +1,5 @@
 import { describe, it, expect, vi } from 'vitest';
-import { handleAgentCron, type AgentCronDeps } from '@/lib/workflows/cron/agent-cron-task';
+import { createAgentCronTask, handleAgentCron, type AgentCronDeps } from '@/lib/workflows/cron/agent-cron-task';
 import type { AgentInput } from '@/lib/scheduling/agent-types';
 
 function makeAgent(overrides: Partial<AgentInput> = {}): AgentInput {
@@ -95,5 +95,61 @@ describe('handleAgentCron', () => {
     expect(r).toMatchObject({ status: 'skipped', reason: 'no system handler bound' });
     expect(deps.startAgentRun).not.toHaveBeenCalled();
     expect(deps.enqueueNextFire).toHaveBeenCalledTimes(1);
+  });
+
+  it('re-enqueues transient skips after the short retry window', async () => {
+    const deps = makeDeps({
+      prereqSkipReason: vi.fn(async () => 'jobs paused during rebuild'),
+    });
+
+    const r = await handleAgentCron({ agentId: 'a1' }, deps, () => NOW);
+
+    expect(r).toMatchObject({ status: 'skipped', reason: 'jobs paused during rebuild' });
+    const callArgs = (deps.enqueueNextFire as ReturnType<typeof vi.fn>).mock.calls[0];
+    const runAt = callArgs[1] as Date;
+    expect(runAt.getTime()).toBe(NOW + 60_000);
+  });
+
+  it('terminates the cron chain when the schedule has been cleared', async () => {
+    const deps = makeDeps({
+      loadAgent: vi.fn(async () => makeAgent({ schedule: null })),
+    });
+
+    const r = await handleAgentCron({ agentId: 'a1' }, deps, () => NOW);
+
+    expect(r).toMatchObject({ status: 'disabled', reason: 'no schedule' });
+    expect(deps.startAgentRun).not.toHaveBeenCalled();
+    expect(deps.enqueueNextFire).not.toHaveBeenCalled();
+  });
+});
+
+describe('createAgentCronTask', () => {
+  it('logs successful task outcomes', async () => {
+    const logger = {
+      info: vi.fn(),
+      error: vi.fn(),
+    };
+    const task = createAgentCronTask(makeDeps());
+
+    await task({ agentId: 'a1' }, { logger } as never);
+
+    expect(logger.info).toHaveBeenCalledWith('agent-cron a1 → dispatched');
+    expect(logger.error).not.toHaveBeenCalled();
+  });
+
+  it('logs failures and rethrows so graphile can retry', async () => {
+    const logger = {
+      info: vi.fn(),
+      error: vi.fn(),
+    };
+    const task = createAgentCronTask(makeDeps({
+      startAgentRun: vi.fn(async () => {
+        throw new Error('boom');
+      }),
+    }));
+
+    await expect(task({ agentId: 'a1' }, { logger } as never)).rejects.toThrow('boom');
+    expect(logger.error).toHaveBeenCalledWith('agent-cron a1 failed: boom');
+    expect(logger.info).not.toHaveBeenCalled();
   });
 });
