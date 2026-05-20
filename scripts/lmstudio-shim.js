@@ -120,16 +120,16 @@ function readStdin() {
   });
 }
 
-function resolveModel(model) {
+function resolveModel(model, env = process.env) {
   const byAlias = {
-    fast: process.env.LMSTUDIO_FAST_MODEL || process.env.LMSTUDIO_HAIKU_MODEL,
-    normal: process.env.LMSTUDIO_NORMAL_MODEL || process.env.LMSTUDIO_SONNET_MODEL,
-    smart: process.env.LMSTUDIO_SMART_MODEL || process.env.LMSTUDIO_OPUS_MODEL,
-    haiku: process.env.LMSTUDIO_FAST_MODEL || process.env.LMSTUDIO_HAIKU_MODEL,
-    sonnet: process.env.LMSTUDIO_NORMAL_MODEL || process.env.LMSTUDIO_SONNET_MODEL,
-    opus: process.env.LMSTUDIO_SMART_MODEL || process.env.LMSTUDIO_OPUS_MODEL,
+    fast: env.LMSTUDIO_FAST_MODEL || env.LMSTUDIO_HAIKU_MODEL,
+    normal: env.LMSTUDIO_NORMAL_MODEL || env.LMSTUDIO_SONNET_MODEL,
+    smart: env.LMSTUDIO_SMART_MODEL || env.LMSTUDIO_OPUS_MODEL,
+    haiku: env.LMSTUDIO_FAST_MODEL || env.LMSTUDIO_HAIKU_MODEL,
+    sonnet: env.LMSTUDIO_NORMAL_MODEL || env.LMSTUDIO_SONNET_MODEL,
+    opus: env.LMSTUDIO_SMART_MODEL || env.LMSTUDIO_OPUS_MODEL,
   };
-  return byAlias[model] || process.env.LMSTUDIO_MODEL || model;
+  return byAlias[model] || env.LMSTUDIO_MODEL || model;
 }
 
 function normalizeBaseUrl(value) {
@@ -246,8 +246,8 @@ function outputTextFromNativeResult(result) {
     .join('');
 }
 
-async function callLmStudio({ prompt, model, streamJson }) {
-  const baseUrl = normalizeBaseUrl(process.env.LMSTUDIO_BASE_URL);
+async function callLmStudio({ prompt, model, streamJson, env = process.env, fetchImpl = fetch }) {
+  const baseUrl = normalizeBaseUrl(env.LMSTUDIO_BASE_URL);
 
   const body = {
     model,
@@ -260,18 +260,18 @@ async function callLmStudio({ prompt, model, streamJson }) {
   if (resumeSessionId && resumeSessionId.startsWith('resp_')) {
     body.previous_response_id = resumeSessionId;
   }
-  if (process.env.LMSTUDIO_TEMPERATURE) {
-    const temperature = Number(process.env.LMSTUDIO_TEMPERATURE);
+  if (env.LMSTUDIO_TEMPERATURE) {
+    const temperature = Number(env.LMSTUDIO_TEMPERATURE);
     if (Number.isFinite(temperature)) body.temperature = temperature;
   }
-  if (process.env.LMSTUDIO_CONTEXT_LENGTH) {
-    const contextLength = Number(process.env.LMSTUDIO_CONTEXT_LENGTH);
+  if (env.LMSTUDIO_CONTEXT_LENGTH) {
+    const contextLength = Number(env.LMSTUDIO_CONTEXT_LENGTH);
     if (Number.isInteger(contextLength) && contextLength > 0) body.context_length = contextLength;
   }
 
   const headers = { 'content-type': 'application/json' };
-  if (process.env.LMSTUDIO_API_KEY) {
-    headers.authorization = `Bearer ${process.env.LMSTUDIO_API_KEY}`;
+  if (env.LMSTUDIO_API_KEY) {
+    headers.authorization = `Bearer ${env.LMSTUDIO_API_KEY}`;
   }
 
   const controller = new AbortController();
@@ -280,6 +280,11 @@ async function callLmStudio({ prompt, model, streamJson }) {
   process.once('SIGINT', abort);
 
   const watchdog = installFetchInactivityWatchdog(abort, { shimName: 'lmstudio-shim' });
+  const cleanup = () => {
+    process.off('SIGTERM', abort);
+    process.off('SIGINT', abort);
+    watchdog.dispose();
+  };
 
   const startedAt = Date.now();
   const emitter = makeTextEmitter(streamJson);
@@ -289,93 +294,94 @@ async function callLmStudio({ prompt, model, streamJson }) {
 
   let response;
   try {
-    response = await fetch(endpoint(baseUrl), {
-      method: 'POST',
-      headers,
-      body: JSON.stringify(body),
-      signal: controller.signal,
-    });
-  } catch (err) {
-    watchdog.dispose();
-    throw new Error(`LM Studio request failed at ${endpoint(baseUrl)}: ${err.message}`);
-  }
-  watchdog.markActivity();
+    try {
+      response = await fetchImpl(endpoint(baseUrl), {
+        method: 'POST',
+        headers,
+        body: JSON.stringify(body),
+        signal: controller.signal,
+      });
+    } catch (err) {
+      throw new Error(`LM Studio request failed at ${endpoint(baseUrl)}: ${err.message}`);
+    }
+    watchdog.markActivity();
 
-  if (!response.ok) {
-    const detail = await response.text().catch(() => '');
-    throw new Error(`LM Studio HTTP ${response.status}${detail ? `: ${detail.slice(0, 1000)}` : ''}`);
-  }
+    if (!response.ok) {
+      const detail = await response.text().catch(() => '');
+      throw new Error(`LM Studio HTTP ${response.status}${detail ? `: ${detail.slice(0, 1000)}` : ''}`);
+    }
 
-  const contentType = response.headers.get('content-type') || '';
-  if (!response.body || !contentType.includes('text/event-stream')) {
-    const json = await response.json();
-    watchdog.dispose();
-    const text = outputTextFromNativeResult(json);
-    stats = json?.stats || null;
-    responseId = json?.response_id || '';
-    emitter.write(text);
-    fullText += text;
-    emitter.close();
-    return { fullText, stats, responseId, durationMs: Date.now() - startedAt };
-  }
+    const contentType = response.headers.get('content-type') || '';
+    if (!response.body || !contentType.includes('text/event-stream')) {
+      const json = await response.json();
+      const text = outputTextFromNativeResult(json);
+      stats = json?.stats || null;
+      responseId = json?.response_id || '';
+      emitter.write(text);
+      fullText += text;
+      emitter.close();
+      return { fullText, stats, responseId, durationMs: Date.now() - startedAt };
+    }
 
-  const decoder = new TextDecoder();
-  const reader = response.body.getReader();
-  const sseState = { pending: '' };
+    const decoder = new TextDecoder();
+    const reader = response.body.getReader();
+    const sseState = { pending: '' };
 
-  const onEvent = (eventName, data) => {
-    const type = eventName || data?.type || '';
-    if (type === 'message.delta') {
-      const text = data?.content || '';
-      if (text) {
-        fullText += text;
-        emitter.write(text);
-      }
-    } else if (type === 'reasoning.delta' && streamJson) {
-      const thinking = data?.content || '';
-      if (thinking) {
-        emitJson({
-          type: 'stream_event',
-          event: {
-            type: 'content_block_delta',
-            delta: { type: 'thinking_delta', thinking },
-          },
-        });
-      }
-    } else if (type === 'error') {
-      throw new Error(data?.error?.message || 'LM Studio stream error');
-    } else if (type === 'chat.end') {
-      const result = data?.result || {};
-      stats = result.stats || stats;
-      responseId = result.response_id || responseId;
-      if (!fullText) {
-        const text = outputTextFromNativeResult(result);
+    const onEvent = (eventName, data) => {
+      const type = eventName || data?.type || '';
+      if (type === 'message.delta') {
+        const text = data?.content || '';
         if (text) {
           fullText += text;
           emitter.write(text);
         }
+      } else if (type === 'reasoning.delta' && streamJson) {
+        const thinking = data?.content || '';
+        if (thinking) {
+          emitJson({
+            type: 'stream_event',
+            event: {
+              type: 'content_block_delta',
+              delta: { type: 'thinking_delta', thinking },
+            },
+          });
+        }
+      } else if (type === 'error') {
+        throw new Error(data?.error?.message || 'LM Studio stream error');
+      } else if (type === 'chat.end') {
+        const result = data?.result || {};
+        stats = result.stats || stats;
+        responseId = result.response_id || responseId;
+        if (!fullText) {
+          const text = outputTextFromNativeResult(result);
+          if (text) {
+            fullText += text;
+            emitter.write(text);
+          }
+        }
       }
+    };
+
+    while (true) {
+      const { value, done } = await reader.read();
+      if (done) break;
+      watchdog.markActivity();
+      parseSseEvents(decoder.decode(value, { stream: true }), sseState, onEvent);
     }
-  };
+    parseSseEvents(`${decoder.decode()}\n\n`, sseState, onEvent);
+    if (watchdog.timedOut()) {
+      throw new Error('LM Studio request killed by inactivity watchdog');
+    }
 
-  while (true) {
-    const { value, done } = await reader.read();
-    if (done) break;
-    watchdog.markActivity();
-    parseSseEvents(decoder.decode(value, { stream: true }), sseState, onEvent);
-  }
-  parseSseEvents(`${decoder.decode()}\n\n`, sseState, onEvent);
-  watchdog.dispose();
-  if (watchdog.timedOut()) {
-    throw new Error('LM Studio request killed by inactivity watchdog');
-  }
+    if (resumeSessionId && !resumeSessionId.startsWith('resp_') && !responseId) {
+      throw new Error(`cannot resume LM Studio session ${resumeSessionId}; expected an LM Studio response_id starting with "resp_"`);
+    }
 
-  if (resumeSessionId && !resumeSessionId.startsWith('resp_') && !responseId) {
-    throw new Error(`cannot resume LM Studio session ${resumeSessionId}; expected an LM Studio response_id starting with "resp_"`);
+    emitter.close();
+    return { fullText, stats, responseId: responseId || resumeSessionId, durationMs: Date.now() - startedAt };
+  } finally {
+    cleanup();
   }
-
-  emitter.close();
-  return { fullText, stats, responseId: responseId || resumeSessionId, durationMs: Date.now() - startedAt };
 }
 
 function fail(message, streamJson = outputFormat === 'stream-json') {
@@ -393,7 +399,7 @@ function fail(message, streamJson = outputFormat === 'stream-json') {
   process.exit(1);
 }
 
-(async () => {
+if (require.main === module) (async () => {
   const stdinPrompt = await readStdin();
   const prompt = promptArg || stdinPrompt;
   const streamJson = outputFormat === 'stream-json';
@@ -420,3 +426,10 @@ function fail(message, streamJson = outputFormat === 'stream-json') {
     fail(err instanceof Error ? err.message : String(err), streamJson);
   }
 })();
+
+module.exports = {
+  callLmStudio,
+  normalizeBaseUrl,
+  parseSseEvents,
+  resolveModel,
+};

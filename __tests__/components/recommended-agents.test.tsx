@@ -76,4 +76,12 @@ describe('RecommendedAgents', () => {
 
     unmount()
   })
+
+  it('shows legacy alias names on the built-in recommendation card', () => {
+    const { container, unmount } = renderRecommendedAgents()
+
+    expect(container.textContent).toContain('also matches tests')
+
+    unmount()
+  })
 })

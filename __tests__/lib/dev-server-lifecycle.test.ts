@@ -1,6 +1,7 @@
-import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
+import { describe, it, expect, beforeEach, afterEach, afterAll, vi } from 'vitest';
 import { spawn, type ChildProcess } from 'node:child_process';
-import { existsSync, writeFileSync, unlinkSync, mkdirSync } from 'node:fs';
+import { existsSync, writeFileSync, unlinkSync, mkdirSync, mkdtempSync, rmSync } from 'node:fs';
+import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import {
   ensureDevServerRunning,
@@ -12,13 +13,21 @@ import {
 } from '@/lib/dev-server/lifecycle';
 
 const activeWorkMock = vi.hoisted(() => vi.fn());
+const shellExecMock = vi.hoisted(() => vi.fn());
+const DEV_DIR = mkdtempSync(join(tmpdir(), 'tamtam-dev-servers-'));
+const realSetImmediate = setImmediate;
+
+process.env.TAMTAM_DEV_SERVERS_DIR = DEV_DIR;
 
 vi.mock('@/lib/dev-server/active-work', () => ({
   hasActiveWorkForProject: (project: string) => activeWorkMock(project),
 }));
 
+vi.mock('@/lib/shared/shell', () => ({
+  exec: shellExecMock,
+}));
+
 const PROJECT = 'lifecycle-test-project';
-const DEV_DIR = join(process.cwd(), 'data', 'dev-servers');
 const PIDFILE = join(DEV_DIR, `${PROJECT}.pid`);
 
 const baseConfig: DevServerConfig = {
@@ -30,10 +39,78 @@ const baseConfig: DevServerConfig = {
   cwd: process.cwd(),
 };
 
+async function ensureWithGrace(
+  project: string,
+  config: DevServerConfig,
+  options?: Parameters<typeof ensureDevServerRunning>[2],
+) {
+  vi.useFakeTimers();
+  try {
+    const promise = ensureDevServerRunning(project, config, options);
+    await vi.advanceTimersByTimeAsync(1_600);
+    return await promise;
+  } finally {
+    vi.useRealTimers();
+  }
+}
+
+async function ensureWithGraceAndIoTurns(
+  project: string,
+  config: DevServerConfig,
+  options?: Parameters<typeof ensureDevServerRunning>[2],
+) {
+  vi.useFakeTimers();
+  try {
+    let settled = false;
+    let result: Awaited<ReturnType<typeof ensureDevServerRunning>> | undefined;
+    let failure: unknown;
+    const promise = ensureDevServerRunning(project, config, options).then(
+      (value) => {
+        settled = true;
+        result = value;
+      },
+      (error) => {
+        settled = true;
+        failure = error;
+      },
+    );
+
+    for (let i = 0; i < 40 && !settled; i += 1) {
+      await vi.advanceTimersByTimeAsync(100);
+      await new Promise<void>((resolve) => realSetImmediate(resolve));
+    }
+
+    if (!settled) {
+      await vi.runAllTimersAsync();
+      await new Promise<void>((resolve) => realSetImmediate(resolve));
+    }
+
+    await promise;
+    if (failure) throw failure;
+    return result!;
+  } finally {
+    vi.useRealTimers();
+  }
+}
+
 async function fullStop(): Promise<void> {
   await stopDevServer(PROJECT, { stopCommand: null, cwd: process.cwd() });
   if (existsSync(PIDFILE)) {
     try { unlinkSync(PIDFILE); } catch {}
+  }
+}
+
+async function stopWithIoTurns(
+  project: string,
+  config: Parameters<typeof stopDevServer>[1],
+) {
+  vi.useFakeTimers();
+  try {
+    const promise = stopDevServer(project, config);
+    await vi.advanceTimersByTimeAsync(6_000);
+    return await promise;
+  } finally {
+    vi.useRealTimers();
   }
 }
 
@@ -89,11 +166,19 @@ function writeUntrustedLivePidfile(project: string, child: ChildProcess): string
 describe('dev-server lifecycle', () => {
   beforeEach(async () => {
     activeWorkMock.mockReset().mockResolvedValue(false);
+    shellExecMock.mockReset().mockResolvedValue({ exitCode: 0, stdout: '', stderr: '' });
     await fullStop();
   });
 
   afterEach(async () => {
+    vi.useRealTimers();
+    vi.unstubAllGlobals();
     await fullStop();
+  });
+
+  afterAll(() => {
+    delete process.env.TAMTAM_DEV_SERVERS_DIR;
+    rmSync(DEV_DIR, { recursive: true, force: true });
   });
 
   it('returns no_config when startCommand is null', async () => {
@@ -114,7 +199,7 @@ describe('dev-server lifecycle', () => {
   });
 
   it('spawns the process, writes a pidfile, reports started', async () => {
-    const result = await ensureDevServerRunning(PROJECT, baseConfig, {
+    const result = await ensureWithGrace(PROJECT, baseConfig, {
       startedByJobId: 'job-abc',
     });
     expect(result.status).toBe('started');
@@ -130,7 +215,7 @@ describe('dev-server lifecycle', () => {
   });
 
   it('is idempotent: second ensure returns already_running with same pid', async () => {
-    const first = await ensureDevServerRunning(PROJECT, baseConfig);
+    const first = await ensureWithGrace(PROJECT, baseConfig);
     expect(first.status).toBe('started');
     const firstPid = first.status === 'started' ? first.pidfile.pid : -1;
 
@@ -141,7 +226,7 @@ describe('dev-server lifecycle', () => {
   });
 
   it('stopDevServer kills the process and removes the pidfile', async () => {
-    const ensured = await ensureDevServerRunning(PROJECT, baseConfig);
+    const ensured = await ensureWithGrace(PROJECT, baseConfig);
     expect(ensured.status).toBe('started');
     const pid = ensured.status === 'started' ? ensured.pidfile.pid : -1;
 
@@ -150,8 +235,6 @@ describe('dev-server lifecycle', () => {
     expect(existsSync(PIDFILE)).toBe(false);
     expect(isDevServerRunning(PROJECT)).toBe(false);
 
-    // Process really gone — give the kill a beat to settle.
-    await new Promise((r) => setTimeout(r, 100));
     let alive = false;
     try { process.kill(pid, 0); alive = true; } catch { alive = false; }
     expect(alive).toBe(false);
@@ -160,6 +243,29 @@ describe('dev-server lifecycle', () => {
   it('stopDevServer reports not_running when no pidfile exists', async () => {
     const result = await stopDevServer(PROJECT, { stopCommand: null, cwd: process.cwd() });
     expect(result.status).toBe('not_running');
+  });
+
+  it('falls back to process-group termination when the configured stop command fails', async () => {
+    shellExecMock.mockRejectedValueOnce(new Error('boom'));
+    const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => {});
+    const ensured = await ensureWithGrace(PROJECT, baseConfig);
+    expect(ensured.status).toBe('started');
+    const pid = ensured.status === 'started' ? ensured.pidfile.pid : -1;
+
+    try {
+      const result = await stopWithIoTurns(PROJECT, { stopCommand: 'pnpm dev:stop', cwd: process.cwd() });
+      expect(result).toEqual({ status: 'stopped', pid });
+      expect(shellExecMock).toHaveBeenCalledWith('bash', ['-c', 'pnpm dev:stop'], {
+        cwd: process.cwd(),
+        timeout: 15_000,
+        killProcessGroup: true,
+      });
+      expect(existsSync(PIDFILE)).toBe(false);
+      expect(isAlive(pid)).toBe(false);
+      expect(warnSpy).toHaveBeenCalledWith(`[dev-server] stop command failed for ${PROJECT}: boom`);
+    } finally {
+      warnSpy.mockRestore();
+    }
   });
 
   it('cleans up a stale pidfile (dead pid) and respawns fresh', async () => {
@@ -180,7 +286,7 @@ describe('dev-server lifecycle', () => {
       logPath: '',
     }));
 
-    const result = await ensureDevServerRunning(PROJECT, baseConfig);
+    const result = await ensureWithGrace(PROJECT, baseConfig);
     expect(result.status).toBe('started');
     const pid = result.status === 'started' ? result.pidfile.pid : -1;
     expect(pid).not.toBe(deadPid);
@@ -192,7 +298,7 @@ describe('dev-server lifecycle', () => {
     try {
       writeUntrustedLivePidfile(PROJECT, foreign);
 
-      const result = await ensureDevServerRunning(PROJECT, baseConfig);
+      const result = await ensureWithGrace(PROJECT, baseConfig);
       expect(result.status).toBe('started');
       expect(isAlive(foreign.pid!)).toBe(true);
       const pidfile = readPidfile(PROJECT);
@@ -242,7 +348,7 @@ describe('dev-server lifecycle', () => {
     const path = pidfilePath(project);
     activeWorkMock.mockImplementation((name: string) => Promise.resolve(name === project));
     try {
-      const result = await ensureDevServerRunning(project, baseConfig);
+      const result = await ensureWithGrace(project, baseConfig);
       expect(result.status).toBe('started');
 
       const sweep = await sweepOrphanDevServers();
@@ -259,12 +365,74 @@ describe('dev-server lifecycle', () => {
     }
   });
 
+  it('treats a readyUrl that already responds as an externally owned dev server', async () => {
+    const fetchMock = vi.fn().mockResolvedValue({ status: 204 });
+    vi.stubGlobal('fetch', fetchMock);
+
+    const result = await ensureDevServerRunning(PROJECT, {
+      ...baseConfig,
+      readyUrl: 'http://example.test/ready',
+    });
+
+    expect(result).toMatchObject({
+      status: 'already_running',
+      pidfile: {
+        pid: -1,
+        pgid: -1,
+        command: '(external)',
+        readyUrl: 'http://example.test/ready',
+      },
+    });
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+    expect(existsSync(PIDFILE)).toBe(false);
+  });
+
+  it('returns ready_timeout when the spawned server never reaches readiness', async () => {
+    vi.useFakeTimers();
+    const fetchMock = vi.fn().mockRejectedValue(new Error('not ready'));
+    vi.stubGlobal('fetch', fetchMock);
+
+    const promise = ensureDevServerRunning(PROJECT, {
+      ...baseConfig,
+      readyUrl: 'http://example.test/ready',
+    }, {
+      readyTimeoutMs: 1_000,
+    });
+
+    await vi.advanceTimersByTimeAsync(1_500);
+    const result = await promise;
+
+    expect(result.status).toBe('ready_timeout');
+    expect(fetchMock).toHaveBeenCalled();
+    expect(existsSync(PIDFILE)).toBe(true);
+
+    vi.useRealTimers();
+    await fullStop();
+  });
+
   it('returns spawn_failed when the command exits immediately', async () => {
     const result = await ensureDevServerRunning(PROJECT, {
       ...baseConfig,
       startCommand: 'true', // exits 0 immediately
     });
     expect(result.status).toBe('spawn_failed');
+    expect(existsSync(PIDFILE)).toBe(false);
+  });
+
+  it('returns spawn_failed when a command with readyUrl exits before readiness', async () => {
+    const fetchMock = vi.fn().mockRejectedValue(new Error('not ready'));
+    vi.stubGlobal('fetch', fetchMock);
+
+    const result = await ensureWithGraceAndIoTurns(PROJECT, {
+      ...baseConfig,
+      startCommand: 'true',
+      readyUrl: 'http://example.test/ready',
+    }, {
+      readyTimeoutMs: 5_000,
+    });
+
+    expect(result.status).toBe('spawn_failed');
+    expect(fetchMock).toHaveBeenCalled();
     expect(existsSync(PIDFILE)).toBe(false);
   });
 
