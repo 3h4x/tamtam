@@ -111,4 +111,44 @@ describe('WorkflowRunsPage', () => {
 
     unmount()
   })
+
+  it('constrains long failed outcomes in the mobile card layout', async () => {
+    const error = 'failed because the workflow command produced a very long first line that should not overflow'
+    const expectedLabel = error.slice(0, 60)
+
+    vi.stubGlobal('fetch', vi.fn().mockResolvedValue({
+      json: async () => ({
+        runs: [
+          {
+            id: 'run-failed',
+            name: 'review',
+            rawName: 'workflow.review',
+            status: 'failed',
+            createdAt: '2026-05-20T11:49:00Z',
+            startedAt: '2026-05-20T11:50:00Z',
+            completedAt: '2026-05-20T11:50:30Z',
+            durationMs: 30_000,
+            input: ['acme'],
+            output: null,
+            error,
+          },
+        ],
+        meta: { workflowEnabled: true, releaseWorkflow: true, releaseWorkflowDrive: true, mode: 'drive' },
+      }),
+    }))
+
+    const { container, unmount } = renderWorkflowRunsPage()
+
+    await vi.waitFor(() => {
+      expect(container.textContent).toContain(expectedLabel)
+    })
+
+    const mobileCard = container.querySelector<HTMLAnchorElement>('a.block[href="/workflow-runs/run-failed"]')
+    const outcome = Array.from(mobileCard?.querySelectorAll('span') ?? []).find((span) => span.textContent === expectedLabel)
+    expect(outcome?.className).toContain('max-w-[45%]')
+    expect(outcome?.className).toContain('truncate')
+    expect(outcome?.getAttribute('title')).toBe(error)
+
+    unmount()
+  })
 })
