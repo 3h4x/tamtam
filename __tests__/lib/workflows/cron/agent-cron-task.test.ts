@@ -72,4 +72,28 @@ describe('handleAgentCron', () => {
     // 1h schedule → next fire in the future.
     expect(runAt.getTime()).toBeGreaterThan(NOW);
   });
+
+  it('dispatches kind=system agents to the system handler, not the user CLI path', async () => {
+    const systemHandler = vi.fn(async () => undefined);
+    const deps = makeDeps({
+      loadAgent: vi.fn(async () => makeAgent({ kind: 'system' })),
+      runSystemAgent: systemHandler,
+    });
+    const r = await handleAgentCron({ agentId: 'a1' }, deps, () => NOW);
+    expect(r).toMatchObject({ status: 'dispatched', reason: 'system' });
+    expect(systemHandler).toHaveBeenCalledTimes(1);
+    expect(deps.startAgentRun).not.toHaveBeenCalled();
+    expect(deps.enqueueNextFire).toHaveBeenCalledTimes(1);
+  });
+
+  it('skips a system agent fire (without breaking the chain) when no handler is bound', async () => {
+    const deps = makeDeps({
+      loadAgent: vi.fn(async () => makeAgent({ kind: 'system' })),
+      runSystemAgent: undefined,
+    });
+    const r = await handleAgentCron({ agentId: 'a1' }, deps, () => NOW);
+    expect(r).toMatchObject({ status: 'skipped', reason: 'no system handler bound' });
+    expect(deps.startAgentRun).not.toHaveBeenCalled();
+    expect(deps.enqueueNextFire).toHaveBeenCalledTimes(1);
+  });
 });

@@ -32,6 +32,7 @@ export async function listEnabledScheduledAgents(): Promise<AgentInput[]> {
       schedule: a.schedule,
       prompt: a.prompt ?? '',
       enabled: !!a.enabled,
+      kind: (a.kind === 'system' ? 'system' : 'user') as 'user' | 'system',
     }));
 
   // File agents (`.tamtam/agents/*.md`) — DB agents with the same project+name
@@ -53,6 +54,7 @@ export async function listEnabledScheduledAgents(): Promise<AgentInput[]> {
             schedule: fa.schedule,
             prompt: fa.prompt,
             enabled: fa.enabled,
+            kind: 'user',
           });
         }
       } catch (err) {

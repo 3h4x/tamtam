@@ -78,6 +78,7 @@ function buttonByText(container: HTMLElement, text: string): HTMLButtonElement {
 describe('AgentEditor', () => {
   beforeEach(() => {
     fetchProjectDocsMock.mockReset()
+    improveAgentPromptMock.mockReset()
     onSaveMock.mockReset()
     onBackMock.mockReset()
     fetchProjectDocsMock.mockResolvedValue({
@@ -99,7 +100,9 @@ describe('AgentEditor', () => {
       expect(container.textContent).toContain('Create agent')
     })
 
-    buttonByText(container, 'Docs').dispatchEvent(new MouseEvent('click', { bubbles: true }))
+    const docsTab = Array.from(container.querySelectorAll('button')).find((button) => button.textContent?.includes('Docs'))
+    if (!(docsTab instanceof HTMLButtonElement)) throw new Error('docs tab not found')
+    docsTab.dispatchEvent(new MouseEvent('click', { bubbles: true }))
 
     await vi.waitFor(() => {
       expect(container.textContent).toContain('Runbook')
@@ -138,7 +141,9 @@ describe('AgentEditor', () => {
     fetchProjectDocsMock.mockResolvedValueOnce({ docs: [] })
     const { container, unmount } = renderEditor()
 
-    buttonByText(container, 'Docs').dispatchEvent(new MouseEvent('click', { bubbles: true }))
+    const docsTab = Array.from(container.querySelectorAll('button')).find((button) => button.textContent?.includes('Docs'))
+    if (!(docsTab instanceof HTMLButtonElement)) throw new Error('docs tab not found')
+    docsTab.dispatchEvent(new MouseEvent('click', { bubbles: true }))
 
     await vi.waitFor(() => {
       expect(container.textContent).toContain('No docs found for this project')
@@ -231,6 +236,75 @@ describe('AgentEditor', () => {
       skillIds: ['skill-1'],
       docPaths: [],
     })
+    unmount()
+  })
+
+  it('locks non-operational fields for system agents', async () => {
+    const { container, unmount } = renderEditor({
+      agent: {
+        id: 'system:alpha:retrieval-maintenance',
+        name: 'retrieval-maintenance',
+        project: 'alpha',
+        skillIds: ['skill-1'],
+        docPaths: ['docs/runbook.md'],
+        model: 'normal',
+        prompt: 'Managed prompt',
+        schedule: '1h',
+        enabled: true,
+        provider: 'codex',
+        fallbackEnabled: false,
+        prerequisiteCommand: null,
+        kind: 'system',
+        createdAt: 0,
+        updatedAt: 0,
+      },
+      template: undefined,
+    })
+
+    await vi.waitFor(() => {
+      expect(container.textContent).toContain('Built-in system agent')
+    })
+
+    const smartButton = buttonByText(container, 'Smart')
+    const codexButton = buttonByText(container, 'codex')
+    const improveButton = Array.from(container.querySelectorAll('button')).find((b) => b.textContent?.includes('Improve'))
+    expect(smartButton.disabled).toBe(true)
+    expect(codexButton.disabled).toBe(true)
+    expect(improveButton).toBeInstanceOf(HTMLButtonElement)
+    expect((improveButton as HTMLButtonElement).disabled).toBe(true)
+    expect(container.querySelectorAll('button').length).toBeGreaterThan(0)
+    expect(Array.from(container.querySelectorAll('button')).some((button) => button.textContent?.trim() === '×')).toBe(false)
+
+    const systemDocsTab = Array.from(container.querySelectorAll('button')).find((button) => button.textContent?.includes('Docs'))
+    if (!(systemDocsTab instanceof HTMLButtonElement)) throw new Error('docs tab not found')
+    systemDocsTab.dispatchEvent(new MouseEvent('click', { bubbles: true }))
+    await vi.waitFor(() => {
+      expect(container.textContent).toContain('Runbook')
+    })
+    const runbookButton = Array.from(container.querySelectorAll('button')).find((node) => node.textContent?.includes('Runbook'))
+    expect(runbookButton).toBeInstanceOf(HTMLButtonElement)
+    expect((runbookButton as HTMLButtonElement).disabled).toBe(true)
+
+    const schedule = container.querySelector('#agent-schedule')
+    if (!(schedule instanceof HTMLSelectElement)) throw new Error('schedule select not found')
+    setInputValue(schedule, '2h')
+    buttonByText(container, 'Save changes').dispatchEvent(new MouseEvent('click', { bubbles: true }))
+
+    await vi.waitFor(() => {
+      expect(onSaveMock).toHaveBeenCalledWith({
+        name: 'retrieval-maintenance',
+        prompt: 'Managed prompt',
+        skillIds: ['skill-1'],
+        docPaths: ['docs/runbook.md'],
+        model: 'normal',
+        schedule: '2h',
+        enabled: true,
+        provider: 'codex',
+        fallbackEnabled: false,
+        prerequisiteCommand: null,
+      })
+    })
+
     unmount()
   })
 

@@ -53,6 +53,7 @@ interface SettingsMap {
   commit_style: string
   review_verdict_rules: string
   jobs_paused: string
+  rebuild_in_progress: string
   review_fix_max_iterations: string
   review_fix_backoff_seconds: string
   review_do_not_ship_action: string
@@ -126,6 +127,7 @@ const SETTINGS_DEFAULTS: SettingsMap = {
   cli_default_model_deepagents: 'normal',
   provider_fallback_chain: '',
   jobs_paused: 'false',
+  rebuild_in_progress: 'false',
   notification_on_budget_blocked: 'false',
   notification_throttle_window_seconds: '900',
   notification_throttle_overrides: '{"release_fail":0,"release_aborted":0}',

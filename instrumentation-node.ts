@@ -695,6 +695,19 @@ export async function registerNode(): Promise<void> {
           return;
         }
 
+        // Ensure built-in system agents (retrieval-maintenance, …) exist for
+        // every enabled project BEFORE the agent-cron seed pass — otherwise
+        // they wouldn't be in the list `listEnabledScheduledAgents()`
+        // returns, and their cron rows wouldn't be enqueued until the next
+        // boot.
+        try {
+          const { seedSystemAgents } = await import('@/lib/agents/system/seed');
+          const r = await seedSystemAgents();
+          console.log(`[system-agents] seeded ${r.seeded} new, ${r.skipped} existing, ${r.dismissed} dismissed`);
+        } catch (err) {
+          console.error('[system-agents] seed failed:', err);
+        }
+
         // Seed enqueues
         const agentSeed = await seedAgentCrons({
           connectionString,
@@ -814,6 +827,25 @@ export async function registerNode(): Promise<void> {
                 { agentId },
                 { jobKey: `agent-cron-${agentId}`, jobKeyMode: 'replace', runAt, maxAttempts: 5 },
               );
+            },
+            runSystemAgent: async (agent) => {
+              const { listJobs, probeJobStatus } = await import('@/lib/jobs/job-storage');
+              const { getJobKind } = await import('@/lib/jobs/kinds');
+              const kindKey = `agent:${agent.name}`;
+              for (const job of listJobs()) {
+                if (job.project !== agent.project || getJobKind(job.kind) !== kindKey || job.finishedAt !== null) continue;
+                if ((await probeJobStatus(job)) === 'running') {
+                  console.warn(`[cron] system agent ${agent.project}/${agent.name} already running as ${job.id} — skipping`);
+                  return;
+                }
+              }
+              const { getSystemAgentHandler } = await import('@/lib/agents/system');
+              const handler = getSystemAgentHandler(agent.name);
+              if (!handler) {
+                console.warn(`[cron] system agent ${agent.project}/${agent.name} has no handler — skipping`);
+                return;
+              }
+              await handler.run(agent);
             },
           },
           systemCronDeps: {

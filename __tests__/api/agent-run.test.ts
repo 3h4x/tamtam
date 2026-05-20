@@ -40,6 +40,7 @@ const mocks = vi.hoisted(() => {
     drainProjectRecoveryWork: vi.fn(),
     isProjectPaused: vi.fn(),
     retrieveAgentContextDetailed: vi.fn(),
+    runSystemAgent: vi.fn(),
     ensureDevServerRunning: vi.fn(),
     getDirtyFileCount: vi.fn(),
     getQuotaSnapshots: vi.fn(),
@@ -174,6 +175,12 @@ vi.mock('@/lib/agents/retrieval/retriever', () => ({
   retrieveAgentContextDetailed: (...a: unknown[]) => mocks.retrieveAgentContextDetailed(...a),
 }));
 
+vi.mock('@/lib/agents/system', () => ({
+  getSystemAgentHandler: (name: string) => name === 'retrieval-maintenance'
+    ? { seed: { name, prompt: '', defaultSchedule: '1h', model: 'normal' }, run: (...a: unknown[]) => mocks.runSystemAgent(...a) }
+    : null,
+}));
+
 vi.mock('@/lib/git/dirty-worktree', () => ({
   getDirtyFileCount: (...a: unknown[]) => mocks.getDirtyFileCount(...a),
 }));
@@ -222,6 +229,7 @@ async function applyDdl(handle: TestDbHandle): Promise<void> {
       provider text,
       fallback_enabled boolean NOT NULL DEFAULT false,
       prerequisite_command text,
+      kind text NOT NULL DEFAULT 'user',
       created_at double precision NOT NULL,
       updated_at double precision NOT NULL
     )
@@ -448,6 +456,7 @@ describe('POST /api/agents/{agentId}/run', () => {
         scoreThreshold: 0.8,
       },
     });
+    mocks.runSystemAgent.mockReset().mockResolvedValue({ jobId: 'system-job-1' });
     settingsMock = {
       workspace_path: '',
       github_owner: '',
@@ -551,6 +560,67 @@ describe('POST /api/agents/{agentId}/run', () => {
     expect(data.job_id).toBeTruthy();
     expect(data.agent).toBe('Test Agent');
     expect(mocks.drainNextAgentRun).toHaveBeenCalledWith('proj1');
+  });
+
+  it('dispatches system agents through their internal handler instead of LLM intake', async () => {
+    await insertAgent({
+      id: 'system:proj1:retrieval-maintenance',
+      name: 'retrieval-maintenance',
+      prompt: 'system prompt',
+      schedule: '1h',
+      kind: 'system',
+    });
+
+    const req = new NextRequest('http://localhost/api/agents/system%3Aproj1%3Aretrieval-maintenance/run', {
+      method: 'POST',
+      body: JSON.stringify({}),
+    });
+    const res = await POST(req, { params: Promise.resolve({ agentId: 'system:proj1:retrieval-maintenance' }) });
+
+    expect(res.status).toBe(200);
+    await expect(res.json()).resolves.toMatchObject({
+      status: 'started',
+      job_id: 'system-job-1',
+      agent: 'retrieval-maintenance',
+      via: 'system',
+    });
+    expect(mocks.runSystemAgent).toHaveBeenCalledWith(expect.objectContaining({
+      id: 'system:proj1:retrieval-maintenance',
+      project: 'proj1',
+      name: 'retrieval-maintenance',
+      kind: 'system',
+    }));
+    expect(mocks.createJob).not.toHaveBeenCalled();
+    expect(mocks.startJob).not.toHaveBeenCalled();
+  });
+
+  it('rejects duplicate system-agent manual runs', async () => {
+    await insertAgent({
+      id: 'system:proj1:retrieval-maintenance',
+      name: 'retrieval-maintenance',
+      prompt: 'system prompt',
+      schedule: '1h',
+      kind: 'system',
+    });
+    mocks.listJobs.mockReturnValue([
+      makeJob({
+        id: 'running-system-job',
+        project: 'proj1',
+        kind: 'agent:retrieval-maintenance',
+        finishedAt: null,
+      }),
+    ]);
+    mocks.probeJobStatus.mockResolvedValue('running');
+
+    const req = new NextRequest('http://localhost/api/agents/system%3Aproj1%3Aretrieval-maintenance/run', {
+      method: 'POST',
+      body: JSON.stringify({}),
+    });
+    const res = await POST(req, { params: Promise.resolve({ agentId: 'system:proj1:retrieval-maintenance' }) });
+
+    expect(res.status).toBe(409);
+    await expect(res.json()).resolves.toMatchObject({ code: 'already_running' });
+    expect(mocks.runSystemAgent).not.toHaveBeenCalled();
   });
 
   it('does not start a dev server when the workflow replay sees an already-finalized job', async () => {

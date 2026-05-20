@@ -220,6 +220,12 @@ export function AgentsPage() {
                       {agent.source === 'file' && (
                         <span className="ml-1.5 text-[10px] px-1 py-0.5 rounded bg-bg-tertiary text-text-tertiary border border-border">file</span>
                       )}
+                      {agent.kind === 'system' && (
+                        <span
+                          className="ml-1.5 text-[10px] px-1 py-0.5 rounded bg-accent/10 text-accent border border-accent/30"
+                          title="Built-in system agent — auto-managed by TamTam"
+                        >system</span>
+                      )}
                     </td>
                     <td className="px-4 py-2 text-text-tertiary text-xs font-mono">{agent.model}</td>
                     <td className="px-4 py-2 text-text-secondary font-mono text-xs tabular-nums">

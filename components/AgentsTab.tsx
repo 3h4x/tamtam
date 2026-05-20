@@ -234,6 +234,12 @@ export function AgentsTab({ projectName, projectJobs = [] }: AgentsTabProps) {
               file
             </span>
           )}
+          {r.agent.kind === 'system' && (
+            <span
+              className="text-[10px] px-1.5 py-0.5 rounded-full bg-accent/10 text-accent border border-accent/30"
+              title="Built-in system agent — auto-managed by TamTam"
+            >system</span>
+          )}
           {!r.agent.enabled && r.agent.schedule && (
             <span className="text-[10px] px-1.5 py-0.5 rounded-full bg-bg-tertiary text-text-tertiary">off</span>
           )}
@@ -370,20 +376,22 @@ export function AgentsTab({ projectName, projectJobs = [] }: AgentsTabProps) {
               className="px-2.5 py-1 text-xs bg-accent text-white hover:bg-accent-hover cursor-pointer disabled:cursor-not-allowed disabled:opacity-50"
               onClick={() => handleRun(r.agent)}
               disabled={runSubmitting === r.agent.id || agentRunsBlocked}
-              title={agentRunsBlocked ? blockedReason : undefined}
+              title={agentRunsBlocked ? blockedReason : r.agent.kind === 'system' ? 'Run the built-in system handler now' : undefined}
             >
               {runSubmitting === r.agent.id ? 'Starting…' : 'Run'}
             </button>
-            <button
-              className="px-1.5 py-1 text-xs bg-accent text-white hover:bg-accent-hover cursor-pointer disabled:cursor-not-allowed disabled:opacity-50 border-l border-white/20"
-              onClick={() => toggleCustomRun(r.agent.id)}
-              disabled={runSubmitting === r.agent.id || agentRunsBlocked}
-              aria-label="Run with additional context"
-              aria-expanded={customRunOpenId === r.agent.id}
-              title="Run with additional context"
-            >
-              <span className={`inline-block transition-transform ${customRunOpenId === r.agent.id ? 'rotate-180' : ''}`}>▾</span>
-            </button>
+            {r.agent.kind !== 'system' && (
+              <button
+                className="px-1.5 py-1 text-xs bg-accent text-white hover:bg-accent-hover cursor-pointer disabled:cursor-not-allowed disabled:opacity-50 border-l border-white/20"
+                onClick={() => toggleCustomRun(r.agent.id)}
+                disabled={runSubmitting === r.agent.id || agentRunsBlocked}
+                aria-label="Run with additional context"
+                aria-expanded={customRunOpenId === r.agent.id}
+                title="Run with additional context"
+              >
+                <span className={`inline-block transition-transform ${customRunOpenId === r.agent.id ? 'rotate-180' : ''}`}>▾</span>
+              </button>
+            )}
           </div>
         </div>
       ),
@@ -391,6 +399,7 @@ export function AgentsTab({ projectName, projectJobs = [] }: AgentsTabProps) {
   ]
 
   const renderExpanded = (r: EnrichedAgent) => {
+    if (r.agent.kind === 'system') return null
     if (customRunOpenId !== r.agent.id) return null
     const value = customRunInput[r.agent.id] ?? ''
     const submitting = runSubmitting === r.agent.id

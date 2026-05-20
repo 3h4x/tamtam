@@ -168,6 +168,7 @@ const SETTING_KEYS = [
   'commit_style',
   'review_verdict_rules',
   'jobs_paused',
+  'rebuild_in_progress',
   'review_fix_max_iterations',
   'review_fix_backoff_seconds',
   'review_do_not_ship_action',
@@ -533,6 +534,13 @@ export async function PATCH(request: NextRequest) {
   }
   const effectiveAfterSave = buildConfigFromSettingsMap(finalDesired);
 
+  // Snapshot the previous embedding-model BEFORE the upserts so we can
+  // detect a change and kick the per-project retrieval-maintenance system
+  // agent. The agent itself handles the wipe (it detects the mismatch via
+  // retrieval_records.embedding_model), but we want the rebuild to start
+  // immediately rather than waiting up to one schedule interval.
+  const previousEmbeddingModel = currentMap['retrieval_embedding_model'];
+
   for (const { key, value } of serializedEntries) {
     if (value === null) {
       await db.delete(schema.settings).where(eq(schema.settings.key, key));
@@ -548,5 +556,43 @@ export async function PATCH(request: NextRequest) {
 
   reloadConfig();
   syncJobsPauseState(effectiveAfterSave.jobs_paused);
+
+  // Embedding-model change → immediate retrieval-maintenance kick.
+  const newEmbeddingModel = finalDesired['retrieval_embedding_model'];
+  if (
+    previousEmbeddingModel &&
+    newEmbeddingModel &&
+    previousEmbeddingModel !== newEmbeddingModel
+  ) {
+    void (async () => {
+      try {
+        const connectionString = process.env.WORKFLOW_POSTGRES_URL ?? process.env.DATABASE_URL;
+        if (!connectionString) return;
+        const { quickAddJob } = await import('graphile-worker');
+        const rows = await db
+          .select({ id: schema.agents.id, project: schema.agents.project })
+          .from(schema.agents)
+          .where(eq(schema.agents.kind, 'system'));
+        const targets = rows.filter((r) => r.id.includes(':retrieval-maintenance'));
+        await Promise.all(
+          targets.map((agent) =>
+            quickAddJob(
+              { connectionString },
+              'agent-cron',
+              { agentId: agent.id },
+              { jobKey: `agent-cron-${agent.id}`, jobKeyMode: 'replace', runAt: new Date(), maxAttempts: 5 },
+            )
+          )
+        );
+        console.warn(
+          `[settings] retrieval_embedding_model changed (${previousEmbeddingModel} → ${newEmbeddingModel}) — ` +
+            `kicked ${targets.length} retrieval-maintenance agent(s)`,
+        );
+      } catch (err) {
+        console.error('[settings] failed to kick retrieval-maintenance after model change:', err);
+      }
+    })();
+  }
+
   return NextResponse.json({ status: 'ok', settings: await buildSettingsResponse() });
 }

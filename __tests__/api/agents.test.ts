@@ -92,6 +92,7 @@ async function applyDdl(handle: TestDbHandle): Promise<void> {
       provider text,
       fallback_enabled boolean NOT NULL DEFAULT false,
       prerequisite_command text,
+      kind text NOT NULL DEFAULT 'user',
       created_at double precision NOT NULL,
       updated_at double precision NOT NULL
     )
@@ -441,6 +442,7 @@ describe('agents API', () => {
         enabled: true,
         model: 'normal',
         provider: 'codex',
+        kind: 'user',
         source: 'db',
         cron: {
           nextFireMs: 123_000,

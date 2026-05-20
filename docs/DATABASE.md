@@ -207,16 +207,19 @@ Configuration for scheduled automated agents.
 | `name` | TEXT | — | NOT NULL |
 | `project` | TEXT | — | NOT NULL; project name |
 | `skillIds` | TEXT | `'[]'` | JSON array of skill IDs |
+| `docPaths` | TEXT | `'[]'` | JSON array of project-relative docs attached to prompt context |
 | `model` | TEXT | `'normal'` | Semantic tier stored by new writes: `fast` / `normal` / `smart`. Legacy rows may still contain `haiku` / `sonnet` / `opus` aliases and are normalized on read. |
 | `prompt` | TEXT | `''` | Task prompt for scheduled runs |
 | `schedule` | TEXT | — | nullable; e.g. "1h", "30m"; null = manual only |
-| `runner` | TEXT | `'pm2'` | Compatibility field retained for existing rows; new schedules are graphile-worker backed regardless of value |
 | `enabled` | INTEGER | `true` | Boolean |
 | `provider` | TEXT | — | nullable; optional required provider for the first attempt |
 | `fallbackEnabled` | BOOLEAN | `false` | Enables one transient provider fallback retry for this agent when `provider_fallback_chain` has a next provider |
 | `prerequisiteCommand` | TEXT | — | nullable; optional shell command run before prompt composition |
+| `kind` | TEXT | `'user'` | `user` rows run through the normal CLI intake workflow; `system` rows are TamTam-owned built-ins dispatched to internal handlers |
 | `createdAt` | REAL | — | NOT NULL |
 | `updatedAt` | REAL | — | NOT NULL |
+
+System-agent rows are seeded by TamTam for enabled projects and are DB-only. They are not mirrored to `.tamtam/agents/*.md`; deletion writes a `settings` dismissal marker keyed as `system_agent_dismissed:<project>:<agentName>`. Seeding checks project-local agent-name conflicts with the same case-insensitive DB/file-agent rule used by the public create route.
 
 ---
 

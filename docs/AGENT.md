@@ -1,6 +1,6 @@
 # Agents — How They Work
 
-Agents are reusable automation units that combine skills, optional attached project docs, a model, a prompt template, and optional scheduling. Each agent runs the selected provider through TamTam's Claude-compatible CLI shim layer with a composed system prompt (skills + selected docs) and a task prompt, either on-demand or on a recurring schedule.
+Agents are reusable automation units that combine skills, optional attached project docs, a model, a prompt template, and optional scheduling. User agents run the selected provider through TamTam's Claude-compatible CLI shim layer with a composed system prompt (skills + selected docs) and a task prompt, either on-demand or on a recurring schedule. System agents are built-in DB rows that use the same schedule surface but dispatch to internal TamTam handlers instead of the CLI workflow.
 
 ## When to read this
 
@@ -16,6 +16,7 @@ Agents are reusable automation units that combine skills, optional attached proj
 ## Concepts
 
 - **Agent** — A configuration combining skills, optional attached project docs, model, and prompt template
+- **System agent** — A built-in, auto-seeded agent with `kind: "system"` whose identity and behavior are owned by TamTam
 - **Scheduled run** — Automatic execution on an interval (e.g., "1h", "30m"), driven by the graphile-worker cron pool
 - **On-demand run** — Manual execution triggered via API or UI
 - **Agent context composition** — Skills and attached docs are prepended as context before the task prompt
@@ -36,6 +37,7 @@ Agents are reusable automation units that combine skills, optional attached proj
 | `provider` | string \| null | `null` | Optional required CLI provider (`claude`, `codex`, `gemini`, `lmstudio`, `deepagents`). `null` means "any enabled provider". When set, the run fails closed if that provider is disabled or over budget. |
 | `fallbackEnabled` | boolean | `false` | Opts the agent into one transient provider fallback retry using `provider_fallback_chain`. Built-in recommended agents are created with this enabled. |
 | `prerequisiteCommand` | string \| null | `null` | Optional `bash -c` command run in the project directory before the agent CLI starts. Output is captured to a prerequisite artifact and prepended to the agent prompt. |
+| `kind` | `"user"` \| `"system"` | `"user"` | `user` agents run through the normal CLI intake workflow. `system` agents are auto-seeded, DB-only built-ins that dispatch to internal handlers. |
 | `createdAt` | number | — | Unix timestamp (seconds) |
 | `updatedAt` | number | — | Unix timestamp (seconds) |
 
@@ -87,6 +89,8 @@ curl -X POST http://localhost:1337/api/agents \
 **Required fields:** `name`, `project`  
 **Optional fields:** `skillIds` (default `[]`), `docPaths` (default `[]`), `model`, `prompt`, `schedule`, `enabled`, `provider`, `prerequisiteCommand`
 
+`POST /api/agents` always creates user agents. `kind: "system"` is reserved for TamTam's system-agent seeder and is rejected by the public create route.
+
 If you provide both `schedule` and `prompt`, the agent's schedule is automatically installed.
 
 ## Built-in Recommended Agents
@@ -117,6 +121,31 @@ When changing this catalog:
 - Treat description, model tier, schedule default, and badges as product decisions, not page-local copy.
 - Add or update a unit test if the contract or classification changes.
 
+## Built-in System Agents
+
+The `agents` table has a `kind` column with two values: `'user'` (default — everything created via UI/API/file) and `'system'` (built-in, auto-seeded per project, dispatched to an internal handler instead of the LLM-CLI intake workflow). System agents share the agents table, the scheduled-agent cron pipeline, and the `/runs` UI; they differ only at the cron-task dispatch point in `lib/workflows/cron/agent-cron-task.ts`, which routes `kind='system'` to `runSystemAgent()` (registered in `lib/agents/system/index.ts`) instead of `startAgentRun()`.
+
+Lifecycle:
+
+- **Seeded** at TamTam boot via `seedSystemAgents()` (`lib/agents/system/seed.ts`) for every enabled project, before `seedAgentCrons()` runs. The seeder is also called per-project after a PATCH on `/api/config/projects` flips a project to `enabled: true`. Idempotent: a project that already has a row, or that has a `system_agent_dismissed:<project>:<name>` settings marker, is skipped. Name conflicts with existing DB or file agents (case-insensitive) are also skipped — user-owned names take precedence.
+- **Locked at the API:** POST `/api/agents` rejects `kind=system` (400). PATCH `/api/agents/[agentId]` strips mutating fields for `kind=system` rows — only `schedule` and `enabled` are honored. DELETE writes a dismissal marker so the seeder does not recreate the row on next boot. System agents are also excluded from `.tamtam/agents/*.md` file sync (DB-only).
+- **Dispatched** by the cron task with no CLI spawn. The handler writes its own job row (`createJob`), performs the work in-process, fills in `workSummary` + `contextMeta.retrievalHealth`, and persists via `updateJob` — bypassing `markDone` because the post-processing chain (stream-json parsing, outcome-classifier hooks, release chain) assumes a CLI session that system agents don't produce.
+
+Current entries:
+
+- **`retrieval-maintenance`** (`lib/agents/system/retrieval-maintenance.ts`) — keeps the pgvector retrieval index in sync. On each fire: detects embedding-model drift via `retrieval_records.embedding_model` and wipes that project's chunks if the configured model has changed; calls `reindexProject()` (`lib/agents/retrieval/reindex-project.ts`) — the same code path the manual reindex API uses; finally issues a sample retrieval query and asks the cheap LLM (`outcome_classifier_model`, default `gemma3:4b`) whether the snippets look like real on-topic content for the project. The verdict (`ok` | `problem` | `null`) plus reindex stats land on `contextMeta.retrievalHealth`. See `docs/SETTINGS.md` → "Built-in retrieval-maintenance agent" for the operator-facing description.
+
+Settings hooks that interact with system agents:
+
+- Changing `retrieval_embedding_model` in `/settings/general` fires every `retrieval-maintenance` agent immediately (`quickAddJob('agent-cron', …, { runAt: new Date() })`) so the wipe+reindex starts at once instead of waiting up to one schedule interval.
+
+When adding a new system agent:
+
+1. Implement the handler under `lib/agents/system/<name>.ts` with signature `(agent: AgentInput) => Promise<{ jobId: string }>`. Use `createJob` + `updateJob`; do not route through `markDone` or `runAgentIntakeWorkflow`.
+2. Register it in `lib/agents/system/index.ts` (`SYSTEM_AGENTS` map). The registry is the single source of truth for which system agents exist and what their default seed config is.
+3. Add a vitest covering the handler's deterministic steps + the verifier path under `__tests__/lib/agents/system/`.
+4. Update this section and `docs/SETTINGS.md` if the agent introduces operator-visible behavior.
+
 ## Running an Agent
 
 Schedule values are validated on write. Supported formats are positive minute/hour/day intervals such as `15m`, `30m`, `1h`, `4h`, `24h`, `3d`, `7d`, or `30d`.
@@ -134,6 +163,8 @@ curl -X POST http://localhost:1337/api/agents/agent-1705276800000/run \
 ```
 
 The `prompt` field is required for each run — it overrides the agent's default prompt.
+
+For system agents, this route runs the registered internal handler immediately and ignores the prompt body. It returns the created system job id with `via: "system"` and never starts the CLI intake workflow.
 
 Possible responses:
 

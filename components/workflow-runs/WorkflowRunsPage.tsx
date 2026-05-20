@@ -163,11 +163,36 @@ function modeBadge(mode: RunsMeta['mode'] | undefined): { label: string; classNa
   }
 }
 
-function formatDuration(ms: number | null): string {
-  if (ms == null) return '—';
+function formatDuration(ms: number): string {
   if (ms < 1000) return `${ms} ms`;
   if (ms < 60_000) return `${(ms / 1000).toFixed(1)} s`;
   return `${(ms / 60_000).toFixed(1)} m`;
+}
+
+function formatDurationCell(run: WorkflowRunSummary, now: number): string {
+  if (run.durationMs != null) return formatDuration(run.durationMs);
+  if ((run.status === 'running' || run.status === 'pending') && run.startedAt) {
+    const startedAt = Date.parse(run.startedAt);
+    if (Number.isFinite(startedAt)) {
+      return formatDuration(Math.max(0, now - startedAt));
+    }
+  }
+  return '—';
+}
+
+function formatRelativeTime(iso: string | null, now: number): string {
+  if (!iso) return '—';
+  const timestamp = Date.parse(iso);
+  if (!Number.isFinite(timestamp)) return '—';
+  const diffMs = Math.max(0, now - timestamp);
+  if (diffMs < 60_000) return 'just now';
+  const diffMinutes = Math.floor(diffMs / 60_000);
+  if (diffMinutes < 60) return `${diffMinutes}m ago`;
+  const diffHours = Math.floor(diffMinutes / 60);
+  if (diffHours < 24) return `${diffHours}h ago`;
+  const diffDays = Math.floor(diffHours / 24);
+  if (diffDays < 7) return `${diffDays}d ago`;
+  return formatTime(iso);
 }
 
 function formatTime(iso: string | null): string {
@@ -232,6 +257,7 @@ export function WorkflowRunsPage() {
 
   const nameNeedle = nameFilter.trim().toLowerCase();
   const hasActiveFilters = nameNeedle.length > 0 || statusFilter !== 'all';
+  const now = Date.now();
   const statusCounts = data.runs.reduce<Record<StatusFilter, number>>(
     (counts, run) => {
       counts.all += 1;
@@ -389,10 +415,13 @@ export function WorkflowRunsPage() {
                       </span>
                     </td>
                     <td className="px-3 py-2 text-right font-mono text-xs text-text-secondary">
-                      {formatDuration(r.durationMs)}
+                      {formatDurationCell(r, now)}
                     </td>
-                    <td className="whitespace-nowrap px-3 py-2 text-xs text-text-secondary">
-                      {formatTime(r.startedAt ?? r.createdAt)}
+                    <td
+                      className="whitespace-nowrap px-3 py-2 text-xs text-text-secondary"
+                      title={formatTime(r.startedAt ?? r.createdAt)}
+                    >
+                      {formatRelativeTime(r.startedAt ?? r.createdAt, now)}
                     </td>
                   </tr>
                 );

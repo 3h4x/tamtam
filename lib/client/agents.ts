@@ -1,13 +1,13 @@
 import type { Agent } from './types'
 
 export type RunAgentResult =
-  | { status: 'started'; job_id: string; pid: number; agent?: string }
+  | { status: 'started'; job_id: string; pid: number; agent?: string; via?: 'workflow' | 'system' }
   | { status: 'queued'; detail?: string; agent?: string; blockingJobId?: string; code?: string }
 
 export interface FetchAgentsOptions {
   /**
    * `summary` returns only the fields a list view renders (id, name, project,
-   * schedule, enabled, model, provider, source). Drops prompt /
+   * schedule, enabled, model, provider, source, kind). Drops prompt /
    * prerequisiteCommand / skillIds / docPaths so polling stays cheap.
    */
   fields?: 'summary'

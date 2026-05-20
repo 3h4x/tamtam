@@ -43,7 +43,7 @@ export async function POST(
   const { agentId } = await params;
 
   // Resolve agent — either a DB row or a file-based agent
-  let agent: { id: string; name: string; project: string; skillIds: string; docPaths: string; model: string; prompt: string; schedule: string | null; enabled: boolean; provider?: string | null; fallbackEnabled?: boolean; prerequisiteCommand?: string | null } | null = null;
+  let agent: { id: string; name: string; project: string; skillIds: string; docPaths: string; model: string; prompt: string; schedule: string | null; enabled: boolean; provider?: string | null; fallbackEnabled?: boolean; prerequisiteCommand?: string | null; kind?: string } | null = null;
 
   const parsedFileId = parseFileAgentId(agentId);
   if (parsedFileId) {
@@ -84,6 +84,10 @@ export async function POST(
   const body = await request.json();
   const taskPrompt = body.prompt?.trim() ?? '';
   const readOnly = body.readOnly === true;
+  if (agent.kind === 'system') {
+    const result = await runSystemAgentStart(agent);
+    return result.response;
+  }
   const agentSkillIds: string[] = JSON.parse(agent.skillIds || '[]');
   const hasSkills = agentSkillIds.length > 0;
   if (!taskPrompt && !hasSkills) {
@@ -337,6 +341,54 @@ export async function POST(
       await drainNextAgentRun(agent.project);
     }
   }
+}
+
+async function runSystemAgentStart(
+  agent: { id: string; name: string; project: string; schedule: string | null; prompt: string | null; enabled: boolean },
+): Promise<{ response: NextResponse; startedJob: boolean }> {
+  const kindKey = `agent:${agent.name}`;
+  for (const job of listJobs()) {
+    if (job.project !== agent.project || getJobKind(job.kind) !== kindKey || job.finishedAt !== null) continue;
+    if ((await probeJobStatus(job)) !== 'running') continue;
+    return {
+      response: NextResponse.json(
+        { code: 'already_running', detail: `Agent '${agent.name}' is already running (job ${job.id})` },
+        { status: 409 },
+      ),
+      startedJob: false,
+    };
+  }
+
+  const { getSystemAgentHandler } = await import('@/lib/agents/system');
+  const handler = getSystemAgentHandler(agent.name);
+  if (!handler) {
+    return {
+      response: NextResponse.json(
+        { code: 'system_agent_handler_missing', detail: `System agent '${agent.name}' has no registered handler` },
+        { status: 409 },
+      ),
+      startedJob: false,
+    };
+  }
+  const result = await handler.run({
+    id: agent.id,
+    project: agent.project,
+    name: agent.name,
+    schedule: agent.schedule,
+    prompt: agent.prompt ?? '',
+    enabled: agent.enabled,
+    kind: 'system',
+  });
+  return {
+    response: NextResponse.json({
+      status: 'started',
+      job_id: result.jobId,
+      pid: 0,
+      agent: agent.name,
+      via: 'system',
+    }),
+    startedJob: true,
+  };
 }
 
 async function runAgentStart(
