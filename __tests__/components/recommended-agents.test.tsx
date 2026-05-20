@@ -153,25 +153,21 @@ describe('RecommendedAgents', () => {
     unmount()
   })
 
-  it('hides the default normal model badge from compact recommendations', () => {
+  it('shows compact recommendation metadata as a single summary without the default model label', () => {
     const { container, unmount } = renderRecommendedAgents()
-    const badgeTexts = Array.from(container.querySelectorAll('span')).map(node => node.textContent)
 
-    expect(badgeTexts).not.toContain('Normal')
-    expect(badgeTexts).toContain('1 skill')
-    expect(badgeTexts).toContain('every 24h')
+    expect(container.textContent).not.toContain('Normal')
+    expect(container.textContent).toContain('1 skill • every 24h • legacy: tests')
 
     unmount()
   })
 
-  it('keeps non-default model badges visible', () => {
+  it('keeps non-default model labels visible in compact recommendation metadata', () => {
     const { container, unmount } = renderRecommendedAgents({
       recommendedAgents: [ctoTemplate],
     })
-    const badgeTexts = Array.from(container.querySelectorAll('span')).map(node => node.textContent)
 
-    expect(badgeTexts).toContain('Smart')
-    expect(badgeTexts).toContain('every 24h')
+    expect(container.textContent).toContain('Smart • every 24h')
 
     unmount()
   })
