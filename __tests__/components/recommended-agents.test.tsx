@@ -44,6 +44,14 @@ const issueCruncherTemplate = {
   featured: true,
 }
 
+const ctoTemplate = {
+  name: 'cto',
+  description: 'Looks for strategic improvements.',
+  model: 'smart',
+  schedule: '24h',
+  prompt: '',
+}
+
 const customCoverageTemplate = {
   name: 'project-coverage',
   description: 'Runs project-specific checks.',
@@ -145,12 +153,24 @@ describe('RecommendedAgents', () => {
     unmount()
   })
 
-  it('renders compact recommendation metadata as separate badges', () => {
+  it('hides the default normal model badge from compact recommendations', () => {
     const { container, unmount } = renderRecommendedAgents()
     const badgeTexts = Array.from(container.querySelectorAll('span')).map(node => node.textContent)
 
-    expect(badgeTexts).toContain('Normal')
+    expect(badgeTexts).not.toContain('Normal')
     expect(badgeTexts).toContain('1 skill')
+    expect(badgeTexts).toContain('every 24h')
+
+    unmount()
+  })
+
+  it('keeps non-default model badges visible', () => {
+    const { container, unmount } = renderRecommendedAgents({
+      recommendedAgents: [ctoTemplate],
+    })
+    const badgeTexts = Array.from(container.querySelectorAll('span')).map(node => node.textContent)
+
+    expect(badgeTexts).toContain('Smart')
     expect(badgeTexts).toContain('every 24h')
 
     unmount()
