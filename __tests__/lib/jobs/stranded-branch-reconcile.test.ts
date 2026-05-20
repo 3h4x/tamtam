@@ -138,4 +138,20 @@ describe('findStrandedBranches', () => {
     expect(candidates[0].kind).toBe('fix-branch');
     expect(candidates[0].ahead).toBe(3);
   });
+
+  it('skips fully pushed clean fix branches that are already waiting on PR merge', async () => {
+    withCommonStubs({
+      'branch --show-current': { exitCode: 0, stdout: 'fix/issue-42-awaiting-merge' },
+      'symbolic-ref refs/remotes/origin/HEAD': { exitCode: 0, stdout: 'refs/remotes/origin/main' },
+      'rev-list --count main..HEAD': { exitCode: 0, stdout: '2' },
+      'rev-list --count origin/main..HEAD': { exitCode: 0, stdout: '2' },
+      'status --porcelain': { exitCode: 0, stdout: '' },
+      'rev-list --count @{u}..HEAD': { exitCode: 0, stdout: '0' },
+    });
+
+    const { findStrandedBranches } = await import('@/lib/jobs/stranded-branch-reconcile');
+    const candidates = await findStrandedBranches(Date.now());
+
+    expect(candidates).toEqual([]);
+  });
 });
