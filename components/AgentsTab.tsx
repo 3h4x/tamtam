@@ -71,6 +71,8 @@ export function AgentsTab({ projectName, projectJobs = [] }: AgentsTabProps) {
   const [loading, setLoading] = useState(true)
   const [recommendedTemplate, setRecommendedTemplate] = useState<AgentTemplateRecord | null>(null)
   const [runSubmitting, setRunSubmitting] = useState<string | null>(null)
+  const [customRunOpenId, setCustomRunOpenId] = useState<string | null>(null)
+  const [customRunInput, setCustomRunInput] = useState<Record<string, string>>({})
 
   const { entries: schedulerEntries } = useSchedulerHealth(projectName)
 
@@ -138,10 +140,14 @@ export function AgentsTab({ projectName, projectJobs = [] }: AgentsTabProps) {
     }
   }
 
-  const handleRun = async (agent: Agent) => {
+  const handleRun = async (agent: Agent, extraContext?: string) => {
     if (runSubmitting) return
     if (agentRunsBlocked) { toast(blockedReason, 'error'); return }
-    const prompt = agent.prompt || `Run agent ${agent.name}`
+    const basePrompt = agent.prompt || `Run agent ${agent.name}`
+    const trimmedExtra = extraContext?.trim() ?? ''
+    const prompt = trimmedExtra
+      ? (agent.prompt ? `${agent.prompt}\n\n---\n\n${trimmedExtra}` : trimmedExtra)
+      : basePrompt
     setRunSubmitting(agent.id)
     try {
       const result = await runAgent(agent.id, prompt)
@@ -150,12 +156,22 @@ export function AgentsTab({ projectName, projectJobs = [] }: AgentsTabProps) {
         return
       }
       toast(`Agent ${agent.name} started`, 'success')
+      setCustomRunOpenId(null)
+      setCustomRunInput(prev => {
+        const next = { ...prev }
+        delete next[agent.id]
+        return next
+      })
       router.push(`/project/${projectName}/terminal?job=${encodeURIComponent(result.job_id)}`)
     } catch (err) {
       toast(err instanceof Error ? err.message : 'Failed to run agent', 'error')
     } finally {
       setRunSubmitting(null)
     }
+  }
+
+  const toggleCustomRun = (agentId: string) => {
+    setCustomRunOpenId(prev => (prev === agentId ? null : agentId))
   }
 
   const closeEditor = () => { setRecommendedTemplate(null); setEditorParam(null) }
@@ -349,18 +365,69 @@ export function AgentsTab({ projectName, projectJobs = [] }: AgentsTabProps) {
           >
             Edit
           </button>
-          <button
-            className="px-2.5 py-1 text-xs bg-accent text-white rounded-md hover:bg-accent-hover cursor-pointer disabled:cursor-not-allowed disabled:opacity-50"
-            onClick={() => handleRun(r.agent)}
-            disabled={runSubmitting === r.agent.id || agentRunsBlocked}
-            title={agentRunsBlocked ? blockedReason : undefined}
-          >
-            {runSubmitting === r.agent.id ? 'Starting…' : 'Run'}
-          </button>
+          <div className="inline-flex rounded-md overflow-hidden">
+            <button
+              className="px-2.5 py-1 text-xs bg-accent text-white hover:bg-accent-hover cursor-pointer disabled:cursor-not-allowed disabled:opacity-50"
+              onClick={() => handleRun(r.agent)}
+              disabled={runSubmitting === r.agent.id || agentRunsBlocked}
+              title={agentRunsBlocked ? blockedReason : undefined}
+            >
+              {runSubmitting === r.agent.id ? 'Starting…' : 'Run'}
+            </button>
+            <button
+              className="px-1.5 py-1 text-xs bg-accent text-white hover:bg-accent-hover cursor-pointer disabled:cursor-not-allowed disabled:opacity-50 border-l border-white/20"
+              onClick={() => toggleCustomRun(r.agent.id)}
+              disabled={runSubmitting === r.agent.id || agentRunsBlocked}
+              aria-label="Run with additional context"
+              aria-expanded={customRunOpenId === r.agent.id}
+              title="Run with additional context"
+            >
+              <span className={`inline-block transition-transform ${customRunOpenId === r.agent.id ? 'rotate-180' : ''}`}>▾</span>
+            </button>
+          </div>
         </div>
       ),
     },
   ]
+
+  const renderExpanded = (r: EnrichedAgent) => {
+    if (customRunOpenId !== r.agent.id) return null
+    const value = customRunInput[r.agent.id] ?? ''
+    const submitting = runSubmitting === r.agent.id
+    return (
+      <div className="flex flex-col gap-2">
+        <label className="text-xs text-text-secondary">
+          Additional context for <span className="font-medium text-text-primary">{r.agent.name}</span>
+          <span className="ml-1 text-text-tertiary">(appended to the agent's prompt)</span>
+        </label>
+        <textarea
+          className="w-full min-h-[80px] px-3 py-2 text-sm bg-bg-primary border border-border rounded-md font-mono text-text-primary focus:outline-none focus:ring-1 focus:ring-accent"
+          placeholder="e.g. focus on the auth module, ignore generated files…"
+          value={value}
+          onChange={e => setCustomRunInput(prev => ({ ...prev, [r.agent.id]: e.target.value }))}
+          disabled={submitting}
+          autoFocus
+        />
+        <div className="flex items-center gap-2 justify-end">
+          <button
+            className="px-2.5 py-1 text-xs border border-border rounded-md bg-bg-secondary text-text-secondary hover:bg-bg-tertiary cursor-pointer"
+            onClick={() => setCustomRunOpenId(null)}
+            disabled={submitting}
+          >
+            Cancel
+          </button>
+          <button
+            className="px-2.5 py-1 text-xs bg-accent text-white rounded-md hover:bg-accent-hover cursor-pointer disabled:cursor-not-allowed disabled:opacity-50"
+            onClick={() => handleRun(r.agent, value)}
+            disabled={submitting || agentRunsBlocked}
+            title={agentRunsBlocked ? blockedReason : undefined}
+          >
+            {submitting ? 'Starting…' : value.trim() ? 'Run with context' : 'Run'}
+          </button>
+        </div>
+      </div>
+    )
+  }
 
   if (!loading && (creating || editing)) {
     return (
@@ -429,6 +496,7 @@ export function AgentsTab({ projectName, projectJobs = [] }: AgentsTabProps) {
         defaultSortKey="schedule"
         defaultSortDir="asc"
         emptyState={emptyState}
+        expandedRender={renderExpanded}
       />
 
       <RecommendedAgents

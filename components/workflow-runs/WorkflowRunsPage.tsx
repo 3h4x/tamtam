@@ -232,9 +232,34 @@ export function WorkflowRunsPage() {
 
   const nameNeedle = nameFilter.trim().toLowerCase();
   const hasActiveFilters = nameNeedle.length > 0 || statusFilter !== 'all';
+  const statusCounts = data.runs.reduce<Record<StatusFilter, number>>(
+    (counts, run) => {
+      counts.all += 1;
+      const status = STATUS_FILTERS.find((s) => s !== 'all' && s === run.status);
+      if (status) counts[status] += 1;
+      return counts;
+    },
+    {
+      all: 0,
+      completed: 0,
+      running: 0,
+      pending: 0,
+      failed: 0,
+      cancelled: 0,
+    },
+  );
   const filtered = data.runs.filter((r) => {
     if (statusFilter !== 'all' && r.status !== statusFilter) return false;
-    if (nameNeedle && !r.name.toLowerCase().includes(nameNeedle) && !r.rawName.toLowerCase().includes(nameNeedle)) {
+    const outcome = summarizeOutcome(r);
+    const searchableText = [
+      r.name,
+      r.rawName,
+      r.status,
+      summarizeInput(r.input),
+      summarizeTrigger(r.input),
+      outcome.label,
+    ].join(' ').toLowerCase();
+    if (nameNeedle && !searchableText.includes(nameNeedle)) {
       return false;
     }
     return true;
@@ -276,7 +301,7 @@ export function WorkflowRunsPage() {
       <div className="mb-3 flex flex-wrap items-center gap-2">
         <input
           type="text"
-          placeholder="Filter by workflow name…"
+          placeholder="Filter workflow, project, trigger, outcome…"
           value={nameFilter}
           onChange={(e) => setNameFilter(e.target.value)}
           className="focus-ring w-full rounded-md border border-border bg-bg-secondary px-3 py-1.5 text-sm text-text-primary placeholder:text-text-tertiary focus:border-accent focus:outline-none sm:w-72"
@@ -285,14 +310,17 @@ export function WorkflowRunsPage() {
           {STATUS_FILTERS.map((s) => (
             <button
               key={s}
+              type="button"
               onClick={() => setStatusFilter(s)}
-              className={`px-2.5 py-1 rounded-md text-xs border transition-colors ${
+              aria-pressed={statusFilter === s}
+              className={`inline-flex items-center gap-1.5 rounded-md border px-2.5 py-1 text-xs transition-colors ${
                 statusFilter === s
                   ? 'border-accent bg-accent/10 text-accent'
                   : 'border-border bg-bg-secondary text-text-secondary hover:text-text-primary'
               }`}
             >
-              {s}
+              <span>{s}</span>
+              <span className="font-mono tabular-nums text-text-tertiary">{statusCounts[s]}</span>
             </button>
           ))}
         </div>
@@ -308,7 +336,7 @@ export function WorkflowRunsPage() {
           meta={
             data.runs.length === 0
               ? 'refreshes every 5s'
-              : `status=${statusFilter} · name=${nameFilter.trim() || '—'}`
+              : `status=${statusFilter} · query=${nameFilter.trim() || '—'}`
           }
           actionLabel={hasActiveFilters ? 'Clear filters' : undefined}
           onAction={hasActiveFilters ? () => {

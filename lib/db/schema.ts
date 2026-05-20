@@ -153,6 +153,12 @@ export const agents = pgTable('agents', {
   provider: text('provider'),
   fallbackEnabled: boolean('fallback_enabled').notNull().default(false),
   prerequisiteCommand: text('prerequisite_command'),
+  // 'user' for normal user-defined agents (default), 'system' for built-in
+  // agents auto-seeded per project that dispatch to internal handlers
+  // instead of spawning a CLI. System agents share the table and the
+  // scheduled-agent cron pipeline but do not go through the intake
+  // workflow.
+  kind: text('kind').notNull().default('user'),
   createdAt: doublePrecision('created_at').notNull(),
   updatedAt: doublePrecision('updated_at').notNull(),
 });
@@ -280,6 +286,12 @@ export const retrievalRecords = pgTable('retrieval_records', {
   chunkCount: integer('chunk_count').notNull(),
   contentHash: text('content_hash').notNull(),
   indexedAt: doublePrecision('indexed_at').notNull(),
+  // Embedding model name that produced this record's chunks. Used by the
+  // retrieval-maintenance system agent to detect when the configured
+  // model has drifted from what's already in the index, triggering a
+  // wipe-and-reindex (old-dim vectors cannot be safely searched against
+  // new-model queries).
+  embeddingModel: text('embedding_model'),
 });
 
 export const retrievalChunks = pgTable('retrieval_chunks', {
