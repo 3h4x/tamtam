@@ -11,7 +11,7 @@ See `docs/PIPELINE.md` for the full state machine.
 ## Concepts
 
 - **Skills** — reusable prompt blocks (DB-backed + file-based from `skills/docs/skills/` and `data/skills/`).
-- **Agents** — skills + project docs + model + prompt + optional schedule + optional `prerequisiteCommand`. Intake runs through the workflow runtime (`lib/agents/intake-workflow.ts`) and hands off to `lib/jobs/inline-agent.ts`; this repo pins the local workflow world by default (`WORKFLOW_TARGET_WORLD=local`, `WORKFLOW_LOCAL_DATA_DIR=data/workflow-data`). See `docs/AGENT.md`.
+- **Agents** — skills + project docs + model + prompt + optional schedule + optional `prerequisiteCommand`. Intake runs through `runAgentIntakeWorkflow()` in `lib/agents/intake-workflow.ts` and hands off to `startInProcessAgentJob` in `lib/jobs/inline-agent.ts`; this repo pins the local workflow world by default (`WORKFLOW_TARGET_WORLD=local`, `WORKFLOW_LOCAL_DATA_DIR=data/workflow-data`). See `docs/AGENT.md`.
 - **Per-project dev servers** — optional `dev_server_start_command`, `dev_server_stop_command`, and `dev_server_ready_url` fields let TamTam start and stop a project's local app around agent runs. See `lib/dev-server/lifecycle.ts`.
 - **Runs** — individual executions; legacy `/jobs` redirects to `/runs`.
 - **Custom Actions** — per-project bash commands with configurable button color.
@@ -19,7 +19,7 @@ See `docs/PIPELINE.md` for the full state machine.
 
 ## Tech Stack
 
-Next.js 16 (App Router), React 19, TypeScript 6 strict, Tailwind v4, Drizzle + node-postgres (Postgres 16 with `vector` extension; `DATABASE_URL` required), vitest + Playwright, pnpm 11.1.2. Providers: Claude / Gemini / LM Studio / Codex / custom via CLI shims.
+Next.js 16 (App Router), React 19, TypeScript 6 strict, Tailwind v4, Drizzle ORM + `pg` (Postgres 16 with `vector` extension; `DATABASE_URL` required), vitest + Playwright, pnpm 11.1.2. Providers: Claude / Gemini / LM Studio / Codex / custom via CLI shims.
 
 ## Commands
 
@@ -92,7 +92,7 @@ Canonical post-edit command: **`pnpm run rebuild`** (build + idempotent PM2 rest
 - **CLI calls go through `lib/shared/shell.ts`.** Direct `child_process` is the exception, allowed only in runner/shim/streaming paths that already need it.
 - **Client-side fetches** live under `lib/client/` and are surfaced through `lib/client-api.ts`. Extend existing helpers instead of duplicating request/response handling in components.
 - **Terminal streaming** uses the provider's `stream-json` output piped to a log file + fs.watch + NDJSON parser, then SSE at `/api/streaming/[jobId]`. See `docs/STREAMING.md`.
-- **One-shot job processes** are spawned **in-process** from Next.js (no PM2 per-job entries). Agent intake uses `lib/agents/intake-workflow.ts` → `lib/jobs/inline-agent.ts`. Pipeline + terminal jobs use `lib/jobs/spawn-claude-detached.ts startJobInProcess` (detached + unref'd, stdio to log fd) so they survive a PM2 restart of TamTam. `probeJobStatus` recovers state on next boot. PM2 only supervises the TamTam server itself.
+- **One-shot job processes** are spawned **in-process** from Next.js (no PM2 per-job entries). Agent intake uses `runAgentIntakeWorkflow()` in `lib/agents/intake-workflow.ts` → `startInProcessAgentJob` in `lib/jobs/inline-agent.ts`. Pipeline + terminal jobs use `lib/jobs/spawn-claude-detached.ts startJobInProcess` (detached + unref'd, stdio to log fd) so they survive a PM2 restart of TamTam. `probeJobStatus` recovers state on next boot. PM2 only supervises the TamTam server itself.
 - **Pipeline orchestrator** in `lib/workflows/release-orchestrator.ts` drives every release via the phase workflows (`test`, `review`, `fix`, `commit`, `push`, `mark-dod`, `pr-wait`, `soak`). Each phase wraps `startProject*` in `runWithParent(releaseJobId, ...)` so spawned children inherit `release_id`. Legacy completion-hook chain short-circuits on `releaseId`. Full reference: `docs/PIPELINE.md`.
 - **Pipeline guardrails** (`lib/workflows/guards/`): `reviewIsStuck`, `fixContradictsReview`, `checkIterationCap`. Abort decisions persist `stopReason` on the release meta-job's `contextMeta` for trace visibility.
 - **Scheduled agent intervals** are handled by graphile-worker (`lib/workflows/cron/seed-agent-crons.ts`, `lib/workflows/cron/agent-cron-task.ts`, and `lib/workflows/cron/start-cron-worker.ts`), **not PM2 cron** (PM2 `cron_restart` + `--no-autostart` silently no-ops). The worker pool is pinned on `globalThis.__tamtamCronWorker` so Next.js's separate module realms share the same runner.
