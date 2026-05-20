@@ -3,7 +3,7 @@
 import { useState } from 'react'
 import type { AgentTemplateRecord } from '@/components/SettingsPage'
 import { Button, type ButtonVariant } from '@/components/ui/Button'
-import { getModelLabel } from '@/lib/agents/model-aliases'
+import { getModelLabel, MODEL_LABELS } from '@/lib/agents/model-aliases'
 import { recommendedAgentNameKey, recommendedAgentNameKeys } from '@/lib/agents/recommended-agents'
 
 interface RecommendedAgent extends AgentTemplateRecord {
@@ -54,6 +54,12 @@ function formatScheduleLabel(schedule: string | undefined): string | null {
   return schedule ? `every ${schedule}` : null
 }
 
+function formatModelBadgeLabel(model: string | null | undefined): string | null {
+  const label = getModelLabel(model)
+  if (!label || label === MODEL_LABELS.normal) return null
+  return label
+}
+
 function formatTemplateCount(count: number): string {
   return count === 1 ? '1 template' : `${count} templates`
 }
@@ -69,12 +75,13 @@ function formatAliasesLabel(aliases: string[] | undefined): string | null {
 }
 
 function buildMetaBadges(rec: RecommendedAgent): MetaBadge[] {
+  const modelLabel = formatModelBadgeLabel(rec.model)
   const scheduleLabel = formatScheduleLabel(rec.schedule)
   const skillCountLabel = formatSkillCount(rec.skillIds)
   const aliasesLabel = formatAliasesLabel(rec.aliases)
 
   return [
-    { label: getModelLabel(rec.model) },
+    modelLabel ? { label: modelLabel } : null,
     skillCountLabel ? { label: skillCountLabel } : null,
     scheduleLabel ? { label: scheduleLabel } : null,
     aliasesLabel ? { label: aliasesLabel } : null,
