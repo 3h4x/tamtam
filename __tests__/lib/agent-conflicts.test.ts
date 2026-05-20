@@ -33,7 +33,15 @@ async function applyDdl(handle: TestDbHandle): Promise<void> {
 describe('findAgentNameConflict', () => {
   let sharedHandle: TestDbHandle;
   const handle = { get db() { return sharedHandle.db; } } as { db: TestDbHandle['db'] };
-  let findAgentNameConflict: (project: string, name: string, options?: { excludeDbAgentId?: string; excludeFileAgentName?: string }) => Promise<import('@/lib/agents/agent-conflicts').AgentNameConflict | null>;
+  let findAgentNameConflict: (
+    project: string,
+    name: string,
+    options?: {
+      excludeDbAgentId?: string;
+      excludeFileAgentName?: string;
+      projectPath?: string | null;
+    },
+  ) => Promise<import('@/lib/agents/agent-conflicts').AgentNameConflict | null>;
 
   beforeAll(async () => {
     sharedHandle = await createTestPgDbEmpty();
@@ -142,6 +150,20 @@ describe('findAgentNameConflict', () => {
 
     const conflict = await findAgentNameConflict('myproject', 'docs');
     expect(conflict).toEqual({ kind: 'file', name: 'docs', agentId: 'file:myproject:docs' });
+  });
+
+  it('uses an explicit projectPath override before consulting resolveProjectPath', async () => {
+    scanFileAgentsMock.mockReturnValue([
+      { id: 'file:myproject:docs', name: 'docs', project: 'myproject' },
+    ]);
+
+    const conflict = await findAgentNameConflict('myproject', 'docs', {
+      projectPath: '/projects/myproject',
+    });
+
+    expect(conflict).toEqual({ kind: 'file', name: 'docs', agentId: 'file:myproject:docs' });
+    expect(resolveProjectPathMock).not.toHaveBeenCalled();
+    expect(scanFileAgentsMock).toHaveBeenCalledWith('/projects/myproject', 'myproject');
   });
 
   it('skips file agent when excludeFileAgentName matches canonically', async () => {

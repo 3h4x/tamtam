@@ -36,9 +36,10 @@ async function isDismissed(project: string, name: string): Promise<boolean> {
 async function seedOneAgentForOneProject(
   project: string,
   seed: SystemAgentSeedConfig,
+  options: { projectPath?: string | null } = {},
 ): Promise<'seeded' | 'skipped' | 'dismissed'> {
   if (await isDismissed(project, seed.name)) return 'dismissed';
-  if (await findAgentNameConflict(project, seed.name)) return 'skipped';
+  if (await findAgentNameConflict(project, seed.name, { projectPath: options.projectPath })) return 'skipped';
   const now = Date.now() / 1000;
   try {
     await db.insert(schema.agents).values({
@@ -80,7 +81,9 @@ export async function seedSystemAgents(): Promise<SeedSystemAgentsResult> {
   for (const project of projects) {
     for (const seed of seeds) {
       try {
-        const outcome = await seedOneAgentForOneProject(project.name, seed);
+        const outcome = await seedOneAgentForOneProject(project.name, seed, {
+          projectPath: project.path,
+        });
         if (outcome === 'seeded') seeded += 1;
         else if (outcome === 'dismissed') dismissed += 1;
         else skipped += 1;
