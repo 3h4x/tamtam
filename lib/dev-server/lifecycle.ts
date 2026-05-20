@@ -6,8 +6,8 @@
 //   dev_server_stop_command   — optional bash to stop it cleanly. When null we
 //                               send SIGTERM to the spawned process group.
 //   dev_server_ready_url      — optional URL. When set, `ensureDevServerRunning`
-//                               polls it until 2xx/3xx (or timeout). When null
-//                               we wait a short grace period and return.
+//                               polls it until a non-5xx response (or timeout).
+//                               When null we wait a short grace period and return.
 //
 // The lifecycle ties to the **outermost scope of an agent run**: agent kickoff
 // calls `ensureDevServerRunning`; the caller is responsible for stopping at
@@ -227,6 +227,19 @@ function childHasStopped(child: ReturnType<typeof spawn>): boolean {
   return child.exitCode !== null || child.signalCode !== null || !isProcessAlive(child.pid);
 }
 
+async function waitForTrackedChildExit(pid: number, timeoutMs: number): Promise<void> {
+  const tracked = spawnedThisProcess.get(pid);
+  if (!tracked) return;
+  const { child } = tracked;
+  if (child.exitCode !== null || child.signalCode !== null) return;
+
+  await Promise.race([
+    new Promise<void>((resolve) => child.once('exit', () => resolve())),
+    new Promise<void>((resolve) => setTimeout(resolve, timeoutMs)),
+  ]);
+  await yieldToIoEvents();
+}
+
 export interface EnsureOptions {
   readyTimeoutMs?: number;
   startedByJobId?: string | null;
@@ -402,18 +415,27 @@ export async function stopDevServer(
   }
 
   // Whether or not the stop command ran, verify the process is gone.
-  // SIGTERM the group; wait briefly; SIGKILL if still alive.
+  // SIGTERM the group; wait briefly; SIGKILL if still alive. For children
+  // spawned by this process, wait for Node to observe the exit so callers do
+  // not see a just-killed child as still present.
   try {
     if (isProcessAlive(pidfile.pid)) {
       try { process.kill(-pidfile.pgid, 'SIGTERM'); } catch {}
-      const killDeadline = Date.now() + 5_000;
-      while (Date.now() < killDeadline) {
-        if (!isProcessAlive(pidfile.pid)) break;
-        await new Promise((r) => setTimeout(r, 200));
+      if (spawnedThisProcess.has(pidfile.pid)) {
+        await waitForTrackedChildExit(pidfile.pid, 5_000);
+      } else {
+        const killDeadline = Date.now() + 5_000;
+        while (Date.now() < killDeadline) {
+          if (!isProcessAlive(pidfile.pid)) break;
+          await new Promise((r) => setTimeout(r, 200));
+        }
       }
       if (isProcessAlive(pidfile.pid)) {
         try { process.kill(-pidfile.pgid, 'SIGKILL'); } catch {}
+        await waitForTrackedChildExit(pidfile.pid, 1_000);
       }
+    } else {
+      await waitForTrackedChildExit(pidfile.pid, 1_000);
     }
   } catch (e) {
     removePidfile(project);

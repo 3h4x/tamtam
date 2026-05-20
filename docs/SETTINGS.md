@@ -173,7 +173,7 @@ All three are read live on each job (not cached), so changing them takes effect 
 | `log_retention_count` | number | `200` | Keep log files for the last N finished runs per project. On each run completion, the oldest log files beyond this count are deleted and the DB row is flagged `log_pruned`. Set to `0` to disable count-based pruning. |
 | `log_retention_days` | number | `30` | Delete log files older than this many days (per project, evaluated on each run completion). Set to `0` to disable age-based pruning. |
 | `job_row_retention_days` | number | `180` | Nightly cleanup: delete finished `jobs` DB rows older than this many days. Set to `0` to disable. Run rows older than this threshold are permanently removed. |
-| `workflow_run_retention_days` | number | `30` | Nightly cleanup: delete completed workflow runtime trace rows older than this many days from the `workflow.workflow_*` tables. Set to `0` to disable. |
+| `workflow_run_retention_days` | number | `30` | Nightly cleanup: delete completed workflow runtime traces older than this many days. With `WORKFLOW_TARGET_WORLD=local` (the default), this prunes files under `WORKFLOW_LOCAL_DATA_DIR` / `data/workflow-data`; with a Postgres workflow world, this prunes the workflow runtime tables. Set to `0` to disable. |
 | `backup_retention_count` | number | `14` | Keep this many newest Postgres `tamtam-*.pgdump` backup files after each successful backup. Set to `0` to prune all older backups after each run while still keeping the newly created backup. |
 | `backup_retention_weekly_count` | number | `8` | Keep one additional older Postgres backup per week for this many weeks after the newest backups. The just-created backup is preserved separately and does not consume one of these weekly slots. Set to `0` to disable weekly retention. |
 
@@ -231,9 +231,9 @@ When enabled, TamTam starts Ollama via PM2 (`ollama-serve`) on boot if not alrea
 
 All agent runs go through the workflow intake (`runPrerequisiteStep` → `composePromptStep` → `startAgentStep`). There is no setting and no alternate path; the workflow owns prompt composition, retrieval/memory injection, and the spawn handoff. See `docs/AGENT.md` → "Durable Agent Intake" for the step-level breakdown.
 
-Requires: Postgres accessible to the TamTam process via `DATABASE_URL`, plus `WORKFLOW_TARGET_WORLD=@workflow/world-postgres` set in `.env.local`. Run `workflow-postgres-setup` (from `@workflow/world-postgres`) once against the same database to create the workflow schema.
+Default: TamTam uses the workflow runtime's local world (`WORKFLOW_TARGET_WORLD=local`) and stores runtime traces under `WORKFLOW_LOCAL_DATA_DIR` or `data/workflow-data`. `scripts/pm2-start.sh`, `ecosystem.config.js`, and `next.config.ts` set this default when the environment does not provide a workflow target.
 
-The Postgres world worker starts automatically on TamTam boot when `WORKFLOW_TARGET_WORLD` is set. If it fails to start, agent runs return `500 { detail: "Workflow failed to enqueue: …" }`.
+Override: operators who intentionally run a Postgres-backed workflow world must set the workflow runtime target and provide that world's Postgres setup/connection environment. The main TamTam application database still uses `DATABASE_URL`. The workflow world starts automatically on TamTam boot when `WORKFLOW_TARGET_WORLD` is set; if it fails to start or enqueue a run, agent runs return `500 { detail: "Workflow failed to enqueue: …" }`.
 
 ### Subscription Budget
 

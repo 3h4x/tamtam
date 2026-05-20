@@ -365,6 +365,53 @@ describe('dev-server lifecycle', () => {
     }
   });
 
+  it('sweepOrphanDevServers stops an orphan using the persisted project config', async () => {
+    const project = 'lifecycle-sweep-orphan';
+    const dbPath = '/tmp/dev-server-from-db';
+    const dbWhereMock = vi.fn().mockResolvedValue([{
+      devServerStartCommand: 'pnpm dev',
+      devServerStopCommand: 'pnpm dev:stop',
+      devServerReadyUrl: 'http://example.test/ready',
+      path: dbPath,
+    }]);
+    const dbFromMock = vi.fn(() => ({ where: dbWhereMock }));
+    const selectMock = vi.fn(() => ({ from: dbFromMock }));
+    const eqMock = vi.fn(() => 'predicate');
+
+    vi.doMock('@/lib/db', () => ({
+      db: { select: selectMock },
+      schema: { projects: { name: 'projects.name' } },
+    }));
+    vi.doMock('drizzle-orm', () => ({ eq: eqMock }));
+
+    try {
+      const result = await ensureWithGrace(project, baseConfig);
+      expect(result.status).toBe('started');
+
+      const sweep = await sweepOrphanDevServers();
+
+      expect(sweep.stopped).toContain(project);
+      expect(sweep.kept).not.toContain(project);
+      expect(shellExecMock).toHaveBeenCalledWith('bash', ['-c', 'pnpm dev:stop'], {
+        cwd: dbPath,
+        timeout: 15_000,
+        killProcessGroup: true,
+      });
+      expect(eqMock).toHaveBeenCalledWith('projects.name', project);
+      expect(dbWhereMock).toHaveBeenCalledWith('predicate');
+      expect(existsSync(pidfilePath(project))).toBe(false);
+      expect(isDevServerRunning(project)).toBe(false);
+    } finally {
+      vi.doUnmock('@/lib/db');
+      vi.doUnmock('drizzle-orm');
+      await stopDevServer(project, { stopCommand: null, cwd: dbPath });
+      const path = pidfilePath(project);
+      if (existsSync(path)) {
+        try { unlinkSync(path); } catch {}
+      }
+    }
+  });
+
   it('treats a readyUrl that already responds as an externally owned dev server', async () => {
     const fetchMock = vi.fn().mockResolvedValue({ status: 204 });
     vi.stubGlobal('fetch', fetchMock);
@@ -385,6 +432,51 @@ describe('dev-server lifecycle', () => {
     });
     expect(fetchMock).toHaveBeenCalledTimes(1);
     expect(existsSync(PIDFILE)).toBe(false);
+  });
+
+  it('treats non-5xx readiness responses as externally owned dev servers', async () => {
+    const fetchMock = vi.fn().mockResolvedValue({ status: 404 });
+    vi.stubGlobal('fetch', fetchMock);
+
+    const result = await ensureDevServerRunning(PROJECT, {
+      ...baseConfig,
+      readyUrl: 'http://example.test/ready',
+    });
+
+    expect(result).toMatchObject({
+      status: 'already_running',
+      pidfile: {
+        pid: -1,
+        pgid: -1,
+        command: '(external)',
+        readyUrl: 'http://example.test/ready',
+      },
+    });
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+    expect(existsSync(PIDFILE)).toBe(false);
+  });
+
+  it('does not treat 5xx readiness responses as externally owned dev servers', async () => {
+    vi.useFakeTimers();
+    const fetchMock = vi.fn().mockResolvedValue({ status: 503 });
+    vi.stubGlobal('fetch', fetchMock);
+
+    const promise = ensureDevServerRunning(PROJECT, {
+      ...baseConfig,
+      readyUrl: 'http://example.test/ready',
+    }, {
+      readyTimeoutMs: 1_000,
+    });
+
+    await vi.advanceTimersByTimeAsync(1_500);
+    const result = await promise;
+
+    expect(result.status).toBe('ready_timeout');
+    expect(fetchMock.mock.calls.length).toBeGreaterThan(1);
+    expect(existsSync(PIDFILE)).toBe(true);
+
+    vi.useRealTimers();
+    await fullStop();
   });
 
   it('returns ready_timeout when the spawned server never reaches readiness', async () => {
@@ -408,6 +500,27 @@ describe('dev-server lifecycle', () => {
 
     vi.useRealTimers();
     await fullStop();
+  });
+
+  it('cleans up synthetic external pidfiles without reporting the server as running', async () => {
+    writeFileSync(PIDFILE, JSON.stringify({
+      project: PROJECT,
+      pid: -1,
+      pgid: -1,
+      processStart: null,
+      startedAt: Date.now() - 10_000,
+      startedByJobId: null,
+      command: '(external)',
+      readyUrl: 'http://example.test/ready',
+      cwd: process.cwd(),
+      logPath: '',
+    }));
+
+    expect(isDevServerRunning(PROJECT)).toBe(false);
+
+    const result = await stopDevServer(PROJECT, { stopCommand: null, cwd: process.cwd() });
+    expect(result.status).toBe('not_running');
+    expect(existsSync(PIDFILE)).toBe(false);
   });
 
   it('returns spawn_failed when the command exits immediately', async () => {

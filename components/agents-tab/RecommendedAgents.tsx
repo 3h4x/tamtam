@@ -1,5 +1,6 @@
 'use client'
 
+import { useState } from 'react'
 import type { AgentTemplateRecord } from '@/components/SettingsPage'
 import { Button, type ButtonVariant } from '@/components/ui/Button'
 import { getModelLabel } from '@/lib/agents/model-aliases'
@@ -19,18 +20,32 @@ interface RecommendedAgentsProps {
   onAddAgent: (rec: AgentTemplateRecord) => void
 }
 
-interface SectionConfig {
-  key: 'essential' | 'featured' | 'recommended'
-  title: string
-  items: RecommendedAgent[]
-  titleClassName: string
+type SuggestionTone = 'essential' | 'featured' | 'recommended'
+
+interface SuggestionStyle {
+  badgeLabel: string
+  badgeClassName: string
   cardClassName: string
   nameClassName: string
   buttonVariant: ButtonVariant
 }
 
-function formatScheduleLabel(schedule: string | undefined): string {
-  return schedule ? `every ${schedule}` : 'manual'
+interface MetaBadge {
+  label: string
+}
+
+type SuggestionLayout = 'full' | 'compact'
+
+const suggestionPriority: Record<SuggestionTone, number> = {
+  essential: 0,
+  featured: 1,
+  recommended: 2,
+}
+
+const RECOMMENDED_VISIBLE_LIMIT = 4
+
+function formatScheduleLabel(schedule: string | undefined): string | null {
+  return schedule ? `every ${schedule}` : null
 }
 
 function formatSkillCount(skillIds: string[] | undefined): string | null {
@@ -40,132 +55,244 @@ function formatSkillCount(skillIds: string[] | undefined): string | null {
 
 function formatAliasesLabel(aliases: string[] | undefined): string | null {
   if (!aliases?.length) return null
-  return aliases.join(', ')
+  return aliases.length === 1 ? `legacy name ${aliases[0]}` : `legacy names ${aliases.join(', ')}`
+}
+
+function buildMetaBadges(rec: RecommendedAgent): MetaBadge[] {
+  const scheduleLabel = formatScheduleLabel(rec.schedule)
+  const skillCountLabel = formatSkillCount(rec.skillIds)
+
+  return [
+    { label: getModelLabel(rec.model) },
+    skillCountLabel ? { label: skillCountLabel } : null,
+    scheduleLabel ? { label: scheduleLabel } : null,
+  ].filter((badge): badge is MetaBadge => Boolean(badge))
+}
+
+function getSuggestionTone(rec: RecommendedAgent): SuggestionTone {
+  if (rec.essential) return 'essential'
+  if (rec.featured) return 'featured'
+  return 'recommended'
+}
+
+function getSuggestionStyle(tone: SuggestionTone): SuggestionStyle {
+  if (tone === 'essential') {
+    return {
+      badgeLabel: 'essential',
+      badgeClassName: 'border-status-warning/30 bg-status-warning/10 text-status-warning',
+      cardClassName: 'border-status-warning/35 bg-status-warning/5',
+      nameClassName: 'text-status-warning',
+      buttonVariant: 'warning',
+    }
+  }
+
+  if (tone === 'featured') {
+    return {
+      badgeLabel: 'featured',
+      badgeClassName: 'border-accent/25 bg-accent/10 text-accent',
+      cardClassName: 'border-accent/30 bg-accent/5',
+      nameClassName: 'text-accent',
+      buttonVariant: 'primary',
+    }
+  }
+
+  return {
+    badgeLabel: 'recommended',
+    badgeClassName: 'border-border bg-bg-tertiary text-text-tertiary',
+    cardClassName: 'border-border border-dashed bg-bg-secondary/50',
+    nameClassName: 'text-text-secondary',
+    buttonVariant: 'secondary',
+  }
 }
 
 export function RecommendedAgents({ agents, customTemplates, recommendedAgents, onAddAgent }: RecommendedAgentsProps) {
+  const [showAllRecommended, setShowAllRecommended] = useState(false)
   const existingNames = new Set(agents.map(a => recommendedAgentNameKey(a.name)))
   const customNames = new Set(customTemplates.map(t => recommendedAgentNameKey(t.name)))
   const merged: RecommendedAgent[] = [
     ...customTemplates,
     ...recommendedAgents.filter(r => !recommendedAgentNameKeys(r).some(name => customNames.has(name))),
   ]
-  const suggestions = merged.filter(r => !recommendedAgentNameKeys(r).some(name => existingNames.has(name)))
+  const suggestions = merged
+    .filter(r => !recommendedAgentNameKeys(r).some(name => existingNames.has(name)))
+    .sort((a, b) => {
+      const toneDiff = suggestionPriority[getSuggestionTone(a)] - suggestionPriority[getSuggestionTone(b)]
+      if (toneDiff !== 0) return toneDiff
+
+      const customDiff = Number(customNames.has(recommendedAgentNameKey(b.name))) - Number(customNames.has(recommendedAgentNameKey(a.name)))
+      if (customDiff !== 0) return customDiff
+
+      return a.name.localeCompare(b.name)
+    })
   if (suggestions.length === 0) return null
 
-  const sections: SectionConfig[] = [
-    {
-      key: 'essential',
-      title: 'Essential',
-      items: suggestions.filter(r => r.essential),
-      titleClassName: 'text-status-warning/80',
-      cardClassName: 'border-status-warning/40 bg-status-warning/5',
-      nameClassName: 'text-status-warning',
-      buttonVariant: 'warning',
-    },
-    {
-      key: 'featured',
-      title: 'Featured',
-      items: suggestions.filter(r => r.featured),
-      titleClassName: 'text-accent/80',
-      cardClassName: 'border-accent/40 bg-accent/5',
-      nameClassName: 'text-accent',
-      buttonVariant: 'primary',
-    },
-    {
-      key: 'recommended',
-      title: 'Recommended',
-      items: suggestions.filter(r => !r.essential && !r.featured),
-      titleClassName: 'text-text-tertiary',
-      cardClassName: 'border-border border-dashed bg-bg-secondary/50',
-      nameClassName: 'text-text-secondary',
-      buttonVariant: 'secondary',
-    },
-  ]
+  const prioritySuggestions = suggestions.filter(rec => getSuggestionTone(rec) !== 'recommended')
+  const recommendedSuggestions = suggestions.filter(rec => getSuggestionTone(rec) === 'recommended')
+  const visibleRecommendedSuggestions = showAllRecommended
+    ? recommendedSuggestions
+    : recommendedSuggestions.slice(0, RECOMMENDED_VISIBLE_LIMIT)
+  const hiddenRecommendedCount = Math.max(0, recommendedSuggestions.length - visibleRecommendedSuggestions.length)
+
+  const renderSuggestion = (rec: RecommendedAgent, layout: SuggestionLayout) => {
+    const isCustom = customNames.has(recommendedAgentNameKey(rec.name))
+    const metaBadges = buildMetaBadges(rec)
+    const aliasesLabel = formatAliasesLabel(rec.aliases)
+    const style = getSuggestionStyle(getSuggestionTone(rec))
+    const supportingText = [rec.description, aliasesLabel].filter(Boolean).join(' ')
+
+    if (layout === 'compact') {
+      return (
+        <div
+          key={rec.name}
+          className="flex flex-col gap-2 rounded-lg border border-border bg-bg-tertiary/35 px-3 py-2 sm:flex-row sm:items-center sm:justify-between"
+        >
+          <div className="min-w-0 flex-1">
+            <div className="flex min-w-0 flex-wrap items-center gap-1.5">
+              <span className="text-sm font-medium text-text-primary">{rec.name}</span>
+              {isCustom && (
+                <span className="rounded-full border border-accent/25 bg-accent/10 px-1.5 py-0.5 text-[10px] font-mono uppercase tracking-wide text-accent">
+                  custom
+                </span>
+              )}
+            </div>
+            {supportingText && (
+              <p className="mt-0.5 text-[11px] leading-5 text-text-tertiary">
+                {supportingText}
+              </p>
+            )}
+            {metaBadges.length > 0 && (
+              <div className="mt-1 flex flex-wrap gap-1.5">
+                {metaBadges.map(badge => (
+                  <span
+                    key={badge.label}
+                    className="rounded-full border border-border bg-bg-secondary px-2 py-0.5 font-mono text-[10px] tabular-nums text-text-secondary"
+                  >
+                    {badge.label}
+                  </span>
+                ))}
+              </div>
+            )}
+          </div>
+          <Button
+            aria-label={`Use ${rec.name} template`}
+            className="w-full shrink-0 sm:w-auto"
+            onClick={() => onAddAgent(rec)}
+            size="sm"
+            variant={style.buttonVariant}
+          >
+            Use template
+          </Button>
+        </div>
+      )
+    }
+
+    return (
+      <div
+        key={rec.name}
+        className={`flex flex-col gap-3 rounded-lg border p-3 sm:flex-row sm:items-start sm:justify-between ${style.cardClassName}`}
+      >
+        <div className="min-w-0 flex-1">
+          <div className="flex min-w-0 flex-wrap items-center gap-1.5">
+            <span className={`text-sm font-medium ${style.nameClassName}`}>{rec.name}</span>
+            <span
+              className={`rounded-full border px-1.5 py-0.5 text-[10px] font-mono uppercase tracking-wide ${style.badgeClassName}`}
+            >
+              {style.badgeLabel}
+            </span>
+            {isCustom && (
+              <span className="rounded-full border border-accent/25 bg-accent/10 px-1.5 py-0.5 text-[10px] font-mono uppercase tracking-wide text-accent">
+                custom
+              </span>
+            )}
+          </div>
+          {rec.description && (
+            <p className="mt-1 text-xs leading-5 text-text-tertiary">
+              {rec.description}
+            </p>
+          )}
+          {aliasesLabel && (
+            <p className="mt-1 text-[11px] leading-5 text-text-tertiary">
+              {aliasesLabel}
+            </p>
+          )}
+          {metaBadges.length > 0 && (
+            <div className="mt-2 flex flex-wrap gap-1.5">
+              {metaBadges.map(badge => (
+                <span
+                  key={badge.label}
+                  className="rounded-full border border-border bg-bg-tertiary px-2 py-0.5 font-mono text-[10px] tabular-nums text-text-secondary"
+                >
+                  {badge.label}
+                </span>
+              ))}
+            </div>
+          )}
+        </div>
+        <Button
+          aria-label={`Use ${rec.name} template`}
+          className="w-full shrink-0 sm:w-auto sm:self-start"
+          onClick={() => onAddAgent(rec)}
+          size="sm"
+          variant={style.buttonVariant}
+        >
+          Use template
+        </Button>
+      </div>
+    )
+  }
 
   return (
     <div className="mt-2 flex flex-col gap-3 rounded-lg border border-border bg-bg-secondary/40 p-3">
-      <div className="flex items-baseline justify-between gap-3">
-        <p className="text-xs text-text-tertiary">
-          Missing templates for this project. Start from a default, then adjust it in the editor.
-        </p>
+      <div className="flex flex-wrap items-start justify-between gap-3">
+        <div className="space-y-1">
+          <h3 className="text-xs font-semibold uppercase tracking-wider text-text-secondary">Suggested templates</h3>
+          <p className="text-xs text-text-tertiary">
+            {prioritySuggestions.length > 0
+              ? 'Start with the priority templates below. Expand the rest only if this project needs broader coverage.'
+              : 'Missing templates for this project. The list stays compact until you ask for more coverage.'}
+          </p>
+        </div>
         <span className="shrink-0 rounded-full bg-bg-tertiary px-2 py-0.5 text-[10px] font-mono text-text-tertiary">
-          {suggestions.length} available
+          {suggestions.length} missing
         </span>
       </div>
-      {sections.map(section => {
-        if (section.items.length === 0) return null
+      {prioritySuggestions.length > 0 && (
+        <div className="space-y-2">
+          <div className="flex items-center justify-between gap-3">
+            <p className="text-[10px] font-mono uppercase tracking-wide text-text-tertiary">Start here</p>
+            <p className="text-[10px] font-mono text-text-tertiary">{prioritySuggestions.length} priority</p>
+          </div>
+          <div className="grid gap-2 xl:grid-cols-2">
+            {prioritySuggestions.map(rec => renderSuggestion(rec, 'full'))}
+          </div>
+        </div>
+      )}
 
-        return (
-          <section key={section.key} className="flex flex-col gap-2">
-            <div className="flex items-center gap-2">
-              <h3 className={`text-xs font-semibold uppercase tracking-wider ${section.titleClassName}`}>
-                {section.title}
-              </h3>
-              <span className="rounded-full bg-bg-tertiary px-1.5 py-0.5 text-[10px] font-mono text-text-tertiary">
-                {section.items.length}
-              </span>
+      {visibleRecommendedSuggestions.length > 0 && (
+        <div className={`space-y-2 ${prioritySuggestions.length > 0 ? 'border-t border-border/70 pt-3' : ''}`}>
+          <div className="flex items-center justify-between gap-3">
+            <p className="text-[10px] font-mono uppercase tracking-wide text-text-tertiary">
+              {prioritySuggestions.length > 0 ? 'More templates' : 'Suggested templates'}
+            </p>
+            <p className="text-[10px] font-mono text-text-tertiary">{recommendedSuggestions.length} recommended</p>
+          </div>
+          <div className="grid gap-2 xl:grid-cols-2">
+            {visibleRecommendedSuggestions.map(rec => renderSuggestion(rec, 'compact'))}
+          </div>
+          {(hiddenRecommendedCount > 0 || recommendedSuggestions.length > RECOMMENDED_VISIBLE_LIMIT) && (
+            <div className="flex justify-start">
+              <Button
+                aria-expanded={showAllRecommended}
+                onClick={() => setShowAllRecommended(prev => !prev)}
+                size="sm"
+                variant="ghost"
+              >
+                {hiddenRecommendedCount > 0 ? `Show ${hiddenRecommendedCount} more` : 'Show fewer'}
+              </Button>
             </div>
-            <div className="grid gap-2 xl:grid-cols-2">
-              {section.items.map(rec => {
-                const isCustom = customNames.has(recommendedAgentNameKey(rec.name))
-                const skillCountLabel = formatSkillCount(rec.skillIds)
-                const aliasesLabel = formatAliasesLabel(rec.aliases)
-
-                return (
-                  <div
-                    key={rec.name}
-                    className={`flex items-start justify-between gap-3 rounded-lg border p-3 ${section.cardClassName}`}
-                  >
-                    <div className="min-w-0 flex-1">
-                      <div className="flex min-w-0 flex-wrap items-center gap-2">
-                        <span className={`text-sm font-medium ${section.nameClassName}`}>{rec.name}</span>
-                        {isCustom && (
-                          <span className="rounded-full bg-accent/10 px-2 py-0.5 text-[10px] text-accent">
-                            custom
-                          </span>
-                        )}
-                      </div>
-                      {rec.description && (
-                        <p className="mt-1 text-xs leading-5 text-text-tertiary">
-                          {rec.description}
-                        </p>
-                      )}
-                      {aliasesLabel && (
-                        <p className="mt-1 text-[11px] text-text-tertiary">
-                          also matches <span className="font-mono text-text-secondary">{aliasesLabel}</span>
-                        </p>
-                      )}
-                      <div className="mt-2 flex flex-wrap gap-1.5">
-                        <span className="rounded-full bg-bg-tertiary px-2 py-0.5 text-[10px] text-text-secondary">
-                          {getModelLabel(rec.model)}
-                        </span>
-                        <span className="rounded-full bg-bg-tertiary px-2 py-0.5 text-[10px] text-text-secondary">
-                          {formatScheduleLabel(rec.schedule)}
-                        </span>
-                        {skillCountLabel && (
-                          <span className="rounded-full bg-bg-tertiary px-2 py-0.5 text-[10px] text-text-secondary">
-                            {skillCountLabel}
-                          </span>
-                        )}
-                      </div>
-                    </div>
-                    <Button
-                      aria-label={`Add ${rec.name} agent`}
-                      className="shrink-0 self-start"
-                      onClick={() => onAddAgent(rec)}
-                      size="sm"
-                      variant={section.buttonVariant}
-                    >
-                      Add
-                    </Button>
-                  </div>
-                )
-              })}
-            </div>
-          </section>
-        )
-      })}
+          )}
+        </div>
+      )}
     </div>
   )
 }

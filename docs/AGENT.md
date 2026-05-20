@@ -9,7 +9,7 @@ Agents are reusable automation units that combine skills, optional attached proj
 - Understanding how skills and attached project docs are composed into the system prompt
 - Preventing duplicate/concurrent agent runs
 - Understanding graphile-worker backed scheduling
-- Understanding the durable intake workflow (Postgres-backed two-step path for read-only runs)
+- Understanding the durable intake workflow (local-world by default, with Postgres world as an override)
 
 ---
 
@@ -490,7 +490,7 @@ Behavior:
 
 ## Durable Agent Intake
 
-All agent runs go through `runAgentIntakeWorkflow()` in `lib/agents/intake-workflow.ts`. There is no flag and no alternate path; the workflow owns prompt composition, optional prerequisite execution, retrieval/memory injection, and the spawn handoff. The function is declared with `'use workflow'` / `'use step'` directives and runs under the `workflow` package's Postgres-backed execution world, which persists step state so transient crashes or server restarts retry from the last completed step rather than restart the run.
+All agent runs go through `runAgentIntakeWorkflow()` in `lib/agents/intake-workflow.ts`. There is no flag and no alternate path; the workflow owns prompt composition, optional prerequisite execution, retrieval/memory injection, and the spawn handoff. The function is declared with `'use workflow'` / `'use step'` directives and runs under the `workflow` runtime. TamTam pins the local workflow world by default (`WORKFLOW_TARGET_WORLD=local`, `WORKFLOW_LOCAL_DATA_DIR=data/workflow-data`), so persisted step state lives under `data/workflow-data` unless the process is explicitly configured for another workflow world. Completed steps are reused across transient crashes or server restarts instead of restarting the run from the beginning.
 
 ### Steps
 
@@ -532,7 +532,9 @@ The `/api/agents/{agentId}/run` success response always includes `via: "workflow
 
 ### Setup
 
-The workflow requires `WORKFLOW_TARGET_WORLD` to point at the `@workflow/world-postgres` world and `DATABASE_URL` to reach the same Postgres database the rest of TamTam uses. The world is started by `instrumentation-node.ts` at boot; if it fails to start, agent runs return `500 { detail: "Workflow failed to enqueue: …" }`.
+TamTam sets `WORKFLOW_TARGET_WORLD=local` when the variable is unset, and for the local world stores workflow runtime files in `WORKFLOW_LOCAL_DATA_DIR` or `data/workflow-data`. `scripts/pm2-start.sh`, `ecosystem.config.js`, and `next.config.ts` all preserve that default so PM2 restarts and production builds see the same runtime target. If operators intentionally switch to a Postgres-backed workflow world, they must provide the workflow runtime's Postgres setup and connection environment for that world; TamTam's main application data still uses `DATABASE_URL`.
+
+The workflow world is started by `instrumentation-node.ts` at boot. If it fails to start or enqueue a run, agent runs return `500 { detail: "Workflow failed to enqueue: …" }`.
 
 ## Example: Set Up a Weekly Review Agent
 
