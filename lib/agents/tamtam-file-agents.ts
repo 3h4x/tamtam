@@ -20,6 +20,7 @@ export interface FileAgent {
   enabled: boolean;
   provider: string | null;
   prerequisiteCommand: string | null;
+  kind: string;
   createdAt: number;
   updatedAt: number;
   source: 'file';
@@ -128,6 +129,7 @@ function buildFileAgent(
         : meta.enabled !== 'false',
     provider: normalizeFileAgentProvider(meta.provider),
     prerequisiteCommand: parsePrerequisiteCommand(meta.prerequisiteCommand),
+    kind: 'user',
     createdAt: now,
     updatedAt: now,
     source: 'file',

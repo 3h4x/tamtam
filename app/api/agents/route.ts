@@ -181,6 +181,7 @@ export async function POST(request: NextRequest) {
     provider,
     fallbackEnabled,
     prerequisiteCommand,
+    kind: 'user',
     createdAt: now,
     updatedAt: now,
   };
