@@ -8,6 +8,8 @@ import { join } from 'path';
 import { tmpdir } from 'os';
 
 let sharedHandle: TestDbHandle;
+const refreshProjectsCacheSyncMock = vi.fn();
+const seedSystemAgentsForProjectMock = vi.fn();
 
 async function applyDdl(handle: TestDbHandle): Promise<void> {
   await handle.db.execute(sql.raw(`
@@ -80,8 +82,16 @@ describe('GET /api/config/projects', () => {
     vi.resetModules();
     tempDir = mkdtempSync(join(tmpdir(), 'tamtam-config-projects-'));
     await sharedHandle.db.execute(sql.raw('TRUNCATE settings, projects'));
+    refreshProjectsCacheSyncMock.mockReset().mockResolvedValue(undefined);
+    seedSystemAgentsForProjectMock.mockReset().mockResolvedValue({ seeded: 1, skipped: 0, dismissed: 0 });
 
     vi.doMock('@/lib/db', () => ({ db: sharedHandle.db, schema }));
+    vi.doMock('@/lib/shared/enabled-projects', () => ({
+      refreshProjectsCacheSync: refreshProjectsCacheSyncMock,
+    }));
+    vi.doMock('@/lib/agents/system/seed', () => ({
+      seedSystemAgentsForProject: seedSystemAgentsForProjectMock,
+    }));
 
     const mod = await import('@/app/api/config/projects/route');
     GET = mod.GET;
@@ -291,8 +301,16 @@ describe('PATCH /api/config/projects', () => {
   beforeEach(async () => {
     vi.resetModules();
     await sharedHandle.db.execute(sql.raw('TRUNCATE settings, projects'));
+    refreshProjectsCacheSyncMock.mockReset().mockResolvedValue(undefined);
+    seedSystemAgentsForProjectMock.mockReset().mockResolvedValue({ seeded: 1, skipped: 0, dismissed: 0 });
 
     vi.doMock('@/lib/db', () => ({ db: sharedHandle.db, schema }));
+    vi.doMock('@/lib/shared/enabled-projects', () => ({
+      refreshProjectsCacheSync: refreshProjectsCacheSyncMock,
+    }));
+    vi.doMock('@/lib/agents/system/seed', () => ({
+      seedSystemAgentsForProject: seedSystemAgentsForProjectMock,
+    }));
 
     const mod = await import('@/app/api/config/projects/route');
     PATCH = mod.PATCH;
@@ -410,4 +428,82 @@ describe('PATCH /api/config/projects', () => {
     expect(saved[0].github).toBeNull();
   });
 
+  it('seeds system agents only for projects that newly transition to enabled', async () => {
+    await sharedHandle.db.insert(schema.projects)
+      .values([
+        { name: 'already-enabled', path: '/old/enabled', enabled: true },
+        { name: 'now-enabled', path: '/old/disabled', enabled: false },
+      ]);
+
+    const req = new NextRequest('http://localhost/api/config/projects', {
+      method: 'PATCH',
+      body: JSON.stringify({
+        projects: [
+          { name: 'already-enabled', path: '/new/enabled', enabled: true },
+          { name: 'now-enabled', path: '/new/disabled', enabled: true },
+          { name: 'brand-new', path: '/brand-new', enabled: true },
+          { name: 'still-disabled', path: '/still-disabled', enabled: false },
+        ],
+      }),
+    });
+
+    const res = await PATCH(req);
+
+    expect(res.status).toBe(200);
+    expect(refreshProjectsCacheSyncMock).toHaveBeenCalledTimes(1);
+    expect(seedSystemAgentsForProjectMock).toHaveBeenCalledTimes(2);
+    expect(seedSystemAgentsForProjectMock.mock.calls.map(([projectName]) => projectName).sort()).toEqual([
+      'brand-new',
+      'now-enabled',
+    ]);
+  });
+
+  it('skips post-enable seeding when no project became newly enabled', async () => {
+    await sharedHandle.db.insert(schema.projects)
+      .values({ name: 'existing', path: '/existing', enabled: true });
+
+    const req = new NextRequest('http://localhost/api/config/projects', {
+      method: 'PATCH',
+      body: JSON.stringify({
+        projects: [
+          { name: 'existing', path: '/existing-updated', enabled: true },
+          { name: 'disabled', path: '/disabled', enabled: false },
+        ],
+      }),
+    });
+
+    const res = await PATCH(req);
+
+    expect(res.status).toBe(200);
+    expect(refreshProjectsCacheSyncMock).not.toHaveBeenCalled();
+    expect(seedSystemAgentsForProjectMock).not.toHaveBeenCalled();
+  });
+
+  it('keeps PATCH successful when post-enable system-agent seeding fails', async () => {
+    seedSystemAgentsForProjectMock.mockRejectedValueOnce(new Error('seed failed'));
+    const errorSpy = vi.spyOn(console, 'error').mockImplementation(() => {});
+
+    try {
+      const req = new NextRequest('http://localhost/api/config/projects', {
+        method: 'PATCH',
+        body: JSON.stringify({
+          projects: [{ name: 'proj', path: '/path', enabled: true }],
+        }),
+      });
+
+      const res = await PATCH(req);
+
+      expect(res.status).toBe(200);
+      expect(refreshProjectsCacheSyncMock).toHaveBeenCalledTimes(1);
+      expect(seedSystemAgentsForProjectMock).toHaveBeenCalledWith('proj');
+
+      const saved = await sharedHandle.db.select().from(schema.projects);
+      expect(saved).toHaveLength(1);
+      expect(saved[0].name).toBe('proj');
+      expect(saved[0].enabled).toBe(true);
+      expect(errorSpy).toHaveBeenCalledWith('[system-agents] post-enable seed failed:', expect.any(Error));
+    } finally {
+      errorSpy.mockRestore();
+    }
+  });
 });
