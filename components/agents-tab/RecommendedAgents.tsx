@@ -62,11 +62,45 @@ function formatTemplateCount(count: number): string {
   return count === 1 ? '1 template' : `${count} templates`
 }
 
+function formatCountLabel(count: number, singular: string, plural = `${singular}s`): string {
+  return count === 1 ? `1 ${singular}` : `${count} ${plural}`
+}
+
 function formatVisibleTemplateSummary(visibleCount: number, totalCount: number): string {
   const hiddenCount = Math.max(0, totalCount - visibleCount)
   if (hiddenCount === 0) return `${totalCount} shown`
   if (visibleCount === 0) return `${hiddenCount} hidden`
   return `${visibleCount} shown • ${hiddenCount} hidden`
+}
+
+function buildPanelSummary(
+  priorityCount: number,
+  visibleRecommendedCount: number,
+  totalRecommendedCount: number,
+): string {
+  const hiddenRecommendedCount = Math.max(0, totalRecommendedCount - visibleRecommendedCount)
+
+  if (priorityCount > 0) {
+    const optionalSummary: string[] = []
+
+    if (visibleRecommendedCount > 0) {
+      optionalSummary.push(`${formatCountLabel(visibleRecommendedCount, 'optional template')} visible`)
+    }
+
+    if (hiddenRecommendedCount > 0) {
+      optionalSummary.push(`${formatCountLabel(hiddenRecommendedCount, 'optional template')} hidden until expanded`)
+    }
+
+    return optionalSummary.length > 0
+      ? `Priority first. ${optionalSummary.join(', ')}.`
+      : 'Priority first.'
+  }
+
+  if (visibleRecommendedCount >= totalRecommendedCount) {
+    return `Showing all ${formatCountLabel(totalRecommendedCount, 'suggested template')}.`
+  }
+
+  return `Showing ${visibleRecommendedCount} of ${formatCountLabel(totalRecommendedCount, 'suggested template')}.`
 }
 
 function formatSkillCount(skillIds: string[] | undefined): string | null {
@@ -201,6 +235,11 @@ export function RecommendedAgents({ agents, customTemplates, recommendedAgents, 
     ? '1 template stays hidden until this project needs broader coverage.'
     : `${formatTemplateCount(recommendedSuggestions.length)} stay hidden until this project needs broader coverage.`
   const collapsedRecommendedButtonLabel = `Show ${formatTemplateCount(recommendedSuggestions.length)}`
+  const panelSummary = buildPanelSummary(
+    prioritySuggestions.length,
+    visibleRecommendedSuggestions.length,
+    recommendedSuggestions.length,
+  )
 
   const renderSuggestion = (rec: RecommendedAgent, layout: SuggestionLayout) => {
     const isCustom = customNames.has(recommendedAgentNameKey(rec.name))
@@ -299,11 +338,7 @@ export function RecommendedAgents({ agents, customTemplates, recommendedAgents, 
         <div className="space-y-1">
           <h3 className="text-xs font-semibold uppercase tracking-wider text-text-secondary">Suggested templates</h3>
           <p className="text-xs text-text-tertiary">
-            {prioritySuggestions.length > 0
-              ? customRecommendedSuggestions.length > 0
-                ? 'Start with the priority templates below. Custom templates stay visible; built-in options stay collapsed until you ask for broader coverage.'
-                : 'Start with the priority templates below. Optional templates stay collapsed until you ask for broader coverage.'
-              : 'Suggested templates stay compact by default. Expand the list only if this project needs broader coverage.'}
+            {panelSummary}
           </p>
         </div>
         <span className={`shrink-0 ${sectionCountClassName}`}>
@@ -326,7 +361,7 @@ export function RecommendedAgents({ agents, customTemplates, recommendedAgents, 
         <div className={`space-y-2 ${prioritySuggestions.length > 0 ? 'border-t border-border/70 pt-3' : ''}`}>
           <div className="flex items-center justify-between gap-3">
             <p className="text-[10px] font-mono uppercase tracking-wide text-text-tertiary">
-              {prioritySuggestions.length > 0 ? 'Optional templates' : 'Suggested templates'}
+              {prioritySuggestions.length > 0 ? 'Optional templates' : 'Available now'}
             </p>
             <span className={sectionCountClassName}>
               {formatVisibleTemplateSummary(

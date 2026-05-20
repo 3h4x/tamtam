@@ -180,6 +180,7 @@ describe('RecommendedAgents', () => {
     expect(container.textContent).toContain('release-gate')
     expect(container.textContent).toContain('test-add')
     expect(container.textContent).toContain('sync-watch')
+    expect(container.textContent).toContain('Priority first. 2 optional templates hidden until expanded.')
     expect(container.textContent).toContain('Optional templates')
     expect(container.textContent).toContain('2 hidden')
     expect(container.textContent).toContain('Show 2 templates')
@@ -210,7 +211,7 @@ describe('RecommendedAgents', () => {
 
     expect(container.textContent).toContain('project-coverage')
     expect(container.textContent).toContain('Runs project-specific checks.')
-    expect(container.textContent).toContain('Custom templates stay visible; built-in options stay collapsed until you ask for broader coverage.')
+    expect(container.textContent).toContain('Priority first. 1 optional template visible, 2 optional templates hidden until expanded.')
     expect(container.textContent).toContain('1 shown • 2 hidden')
     expect(container.textContent).toContain('Still hidden')
     expect(container.textContent).toContain('test-add')
@@ -227,6 +228,8 @@ describe('RecommendedAgents', () => {
       recommendedAgents: Array.from({ length: 5 }, (_, index) => recommendedOnlyTemplate(index + 1)),
     })
 
+    expect(container.textContent).toContain('Showing 4 of 5 suggested templates.')
+    expect(container.textContent).toContain('Available now')
     expect(container.textContent).toContain('4 shown • 1 hidden')
     expect(container.textContent).toContain('Show 1 more')
     expect(container.textContent).toContain('coverage-1')
