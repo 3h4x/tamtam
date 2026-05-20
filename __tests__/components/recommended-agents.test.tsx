@@ -231,10 +231,12 @@ describe('RecommendedAgents', () => {
     expect(container.textContent).toContain('Showing 4 of 5 suggested templates.')
     expect(container.textContent).toContain('Available now')
     expect(container.textContent).toContain('4 shown • 1 hidden')
+    expect(container.textContent).toContain('Also suggested')
     expect(container.textContent).toContain('Show 1 more')
     expect(container.textContent).toContain('coverage-1')
     expect(container.textContent).toContain('coverage-4')
-    expect(container.textContent).not.toContain('coverage-5')
+    expect(container.textContent).toContain('coverage-5')
+    expect(container.textContent).not.toContain('Coverage recommendation 5.')
 
     const showMore = Array.from(container.querySelectorAll('button'))
       .find(button => button.textContent === 'Show 1 more')
@@ -256,7 +258,8 @@ describe('RecommendedAgents', () => {
       showFewer?.click()
     })
 
-    expect(container.textContent).not.toContain('coverage-5')
+    expect(container.textContent).toContain('coverage-5')
+    expect(container.textContent).not.toContain('Coverage recommendation 5.')
     expect(container.textContent).toContain('Show 1 more')
 
     unmount()

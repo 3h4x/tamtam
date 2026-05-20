@@ -228,13 +228,14 @@ export function RecommendedAgents({ agents, customTemplates, recommendedAgents, 
     rec => !visibleRecommendedNameKeys.has(recommendedAgentNameKey(rec.name)),
   )
   const hiddenRecommendedCount = Math.max(0, recommendedSuggestions.length - visibleRecommendedSuggestions.length)
-  const showHiddenRecommendedPreview = collapseRecommendedByDefault && hiddenRecommendedCount > 0
+  const showHiddenRecommendedPreview = hiddenRecommendedCount > 0
   const collapsedRecommendedPreview = hiddenRecommendedSuggestions.slice(0, COLLAPSED_NAME_PREVIEW_LIMIT)
   const collapsedRecommendedRemainder = Math.max(0, hiddenRecommendedSuggestions.length - collapsedRecommendedPreview.length)
   const collapsedRecommendedSummary = recommendedSuggestions.length === 1
     ? '1 template stays hidden until this project needs broader coverage.'
     : `${formatTemplateCount(recommendedSuggestions.length)} stay hidden until this project needs broader coverage.`
   const collapsedRecommendedButtonLabel = `Show ${formatTemplateCount(recommendedSuggestions.length)}`
+  const hiddenRecommendedPreviewLabel = prioritySuggestions.length > 0 ? 'Still hidden' : 'Also suggested'
   const panelSummary = buildPanelSummary(
     prioritySuggestions.length,
     visibleRecommendedSuggestions.length,
@@ -377,7 +378,9 @@ export function RecommendedAgents({ agents, customTemplates, recommendedAgents, 
             <div className={showHiddenRecommendedPreview ? 'flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between' : 'flex justify-start'}>
               {showHiddenRecommendedPreview && (
                 <div className="min-w-0 space-y-1">
-                  <p className="text-[10px] font-mono uppercase tracking-wide text-text-tertiary">Still hidden</p>
+                  <p className="text-[10px] font-mono uppercase tracking-wide text-text-tertiary">
+                    {hiddenRecommendedPreviewLabel}
+                  </p>
                   <RecommendationNamePreview
                     items={collapsedRecommendedPreview}
                     remainder={collapsedRecommendedRemainder}
