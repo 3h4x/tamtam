@@ -48,15 +48,27 @@ cleanup_watchdog() {
 }
 
 pause_jobs() {
+  # Sets rebuild_in_progress alongside jobs_paused so the UI top-menu chip
+  # shows "rebuilding…" instead of the ambiguous "jobs paused" while a
+  # rebuild is in flight. Cleared by unpause_jobs and by the EXIT trap.
   curl -sf -X PATCH "$BASE_URL/api/settings" \
     -H 'content-type: application/json' \
-    -d '{"jobs_paused":true}' >/dev/null
+    -d '{"jobs_paused":true,"rebuild_in_progress":true}' >/dev/null
 }
 
 unpause_jobs() {
   curl -sf -X PATCH "$BASE_URL/api/settings" \
     -H 'content-type: application/json' \
-    -d '{"jobs_paused":false}' >/dev/null
+    -d '{"jobs_paused":false,"rebuild_in_progress":false}' >/dev/null
+}
+
+# Best-effort: clear just the rebuild flag without touching jobs_paused.
+# Used on KEEP_PAUSED exits so the chip stops claiming "rebuilding" once
+# the script gives up, but the manual pause state stays intact.
+clear_rebuild_flag() {
+  curl -sf -X PATCH "$BASE_URL/api/settings" \
+    -H 'content-type: application/json' \
+    -d '{"rebuild_in_progress":false}' >/dev/null 2>&1 || true
 }
 
 # Count in-flight jobs whose mid-flight termination would lose work.
@@ -124,6 +136,11 @@ trap '
   if [ "$PAUSED" = 1 ] && [ "${KEEP_PAUSED:-0}" != 1 ]; then
     unpause_jobs >/dev/null 2>&1 || true
     printf "[rebuild-safe] unpaused jobs in exit trap\n"
+  elif [ "$PAUSED" = 1 ]; then
+    # KEEP_PAUSED path: leave jobs_paused on, but stop claiming a rebuild
+    # is still in progress now that the script is bailing out.
+    clear_rebuild_flag
+    printf "[rebuild-safe] cleared rebuild flag (jobs left paused)\n"
   fi
 ' EXIT
 # Also unpause on SIGTERM (wall-clock watchdog kill). The EXIT trap fires

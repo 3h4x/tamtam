@@ -137,16 +137,20 @@ export async function PATCH(
   }
 
   const updates: Record<string, unknown> = { updatedAt: Date.now() / 1000 };
-  if (body.name !== undefined) updates.name = nextName;
-  if (body.skillIds !== undefined) updates.skillIds = JSON.stringify(body.skillIds);
-  if (body.docPaths !== undefined) updates.docPaths = JSON.stringify(body.docPaths);
-  if (body.model !== undefined) updates.model = parsedModel ?? 'normal';
-  if (body.prompt !== undefined) updates.prompt = body.prompt;
+  const isSystemAgent = existing.kind === 'system';
+  // System agents are auto-managed. Only the operational toggles
+  // (`schedule`, `enabled`) are user-tunable — identity and behavior
+  // fields are owned by TamTam and must not be mutated via this route.
+  if (!isSystemAgent && body.name !== undefined) updates.name = nextName;
+  if (!isSystemAgent && body.skillIds !== undefined) updates.skillIds = JSON.stringify(body.skillIds);
+  if (!isSystemAgent && body.docPaths !== undefined) updates.docPaths = JSON.stringify(body.docPaths);
+  if (!isSystemAgent && body.model !== undefined) updates.model = parsedModel ?? 'normal';
+  if (!isSystemAgent && body.prompt !== undefined) updates.prompt = body.prompt;
   if (body.schedule !== undefined) updates.schedule = parsedSchedule.schedule;
   if (body.enabled !== undefined) updates.enabled = body.enabled;
-  if (provider !== undefined) updates.provider = provider;
-  if (body.fallbackEnabled !== undefined) updates.fallbackEnabled = body.fallbackEnabled === true;
-  if (body.prerequisiteCommand !== undefined) {
+  if (!isSystemAgent && provider !== undefined) updates.provider = provider;
+  if (!isSystemAgent && body.fallbackEnabled !== undefined) updates.fallbackEnabled = body.fallbackEnabled === true;
+  if (!isSystemAgent && body.prerequisiteCommand !== undefined) {
     updates.prerequisiteCommand = parsePrerequisiteCommandInput(body.prerequisiteCommand) ?? '';
   }
 
@@ -155,8 +159,9 @@ export async function PATCH(
   const updatedRows = await db.select().from(schema.agents).where(eq(schema.agents.id, agentId)).limit(1);
   const agent = updatedRows[0] ?? null;
 
-  // Sync to .tamtam/agents/<name>.md for version control
-  if (agent) {
+  // Sync to .tamtam/agents/<name>.md for version control. System agents
+  // are DB-only — never persisted to .tamtam/.
+  if (agent && agent.kind !== 'system') {
     const projPath = resolveProjectPath(agent.project);
     if (projPath) {
       try {
@@ -226,8 +231,19 @@ export async function DELETE(
     console.error(`Failed to uninstall schedule for agent ${agentId}:`, errMsg(e));
   }
 
-  // Also remove .tamtam/agents/<name>.md
-  if (agent) {
+  // For system (built-in) agents, record a dismissal marker so the auto
+  // seeder doesn't recreate the row on next boot or on project changes.
+  // We do NOT touch .tamtam/agents/<name>.md for system agents — they
+  // live only in the DB.
+  if (agent && agent.kind === 'system') {
+    try {
+      const { markSystemAgentDismissed } = await import('@/lib/agents/system/seed');
+      await markSystemAgentDismissed(agent.project, agent.name);
+    } catch (e: unknown) {
+      console.error(`Failed to mark system agent dismissed for ${agentId}:`, errMsg(e));
+    }
+  } else if (agent) {
+    // Also remove .tamtam/agents/<name>.md for user agents
     const projPath = resolveProjectPath(agent.project);
     if (projPath) deleteFileAgent(projPath, agent.name);
   }

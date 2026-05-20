@@ -71,6 +71,10 @@ export function AgentEditor({
   const [skillSearch, setSkillSearch] = useState('')
   const nameRef = useRef<HTMLInputElement>(null)
   const { toast } = useToast()
+  // System agents are auto-managed: their identity (name, prompt, skills,
+  // docs, model, provider) is owned by TamTam. Only the schedule and
+  // enabled toggles are user-tunable.
+  const isSystemAgent = agent?.kind === 'system'
 
   const allItems = [
     ...skills.map(s => ({ id: s.id, name: s.name, description: s.description, source: 'db' as const })),
@@ -116,12 +120,14 @@ export function AgentEditor({
   }, [])
 
   const toggleSkill = (skillId: string) => {
+    if (isSystemAgent) return
     setSelectedSkills(prev =>
       prev.includes(skillId) ? prev.filter(id => id !== skillId) : [...prev, skillId]
     )
   }
 
   const toggleDoc = (path: string) => {
+    if (isSystemAgent) return
     setSelectedDocPaths(prev =>
       prev.includes(path) ? prev.filter(p => p !== path) : [...prev, path]
     )
@@ -140,7 +146,7 @@ export function AgentEditor({
 
   const handleImprove = async () => {
     const draft = agentPrompt.trim()
-    if (improving || draft.length < 3) return
+    if (isSystemAgent || improving || draft.length < 3) return
     setImproving(true)
     try {
       const result = await improveAgentPrompt({
@@ -179,6 +185,15 @@ export function AgentEditor({
         </div>
       </div>
 
+      {isSystemAgent && (
+        <div className="px-3 py-2 text-xs rounded-md border border-accent/30 bg-accent/10 text-text-secondary">
+          <span className="font-semibold text-accent">Built-in system agent.</span>{' '}
+          Identity and behavior are managed by TamTam. You can change the
+          schedule or disable it; other fields are locked. Deleting removes
+          it for this project until you re-enable in Settings.
+        </div>
+      )}
+
       {/* Row 1: Name + Model + Provider */}
       <div className="flex gap-4 items-end flex-wrap">
         <div className="flex-1 min-w-[200px]">
@@ -187,11 +202,13 @@ export function AgentEditor({
             ref={nameRef}
             id="agent-name"
             type="text"
-            className="w-full px-3 py-2 text-sm bg-bg-secondary border border-border rounded-lg text-text-primary placeholder:text-text-tertiary focus:outline-none focus:ring-2 focus:ring-accent/40 focus:border-accent transition-colors"
+            className="w-full px-3 py-2 text-sm bg-bg-secondary border border-border rounded-lg text-text-primary placeholder:text-text-tertiary focus:outline-none focus:ring-2 focus:ring-accent/40 focus:border-accent transition-colors disabled:opacity-60 disabled:cursor-not-allowed"
             value={name}
             onChange={(e) => setName(e.target.value)}
             onKeyDown={(e) => { if (e.key === 'Enter' && name.trim()) handleSave() }}
             placeholder="e.g. security-guard"
+            disabled={isSystemAgent}
+            title={isSystemAgent ? 'Built-in agent name is fixed' : undefined}
           />
         </div>
         <div className="shrink-0">
@@ -206,12 +223,13 @@ export function AgentEditor({
                   key={m}
                   type="button"
                   title={desc}
-                  className={`px-3 py-1.5 rounded-md text-xs font-medium cursor-pointer transition-all whitespace-nowrap ${
+                  className={`px-3 py-1.5 rounded-md text-xs font-medium cursor-pointer transition-all whitespace-nowrap disabled:opacity-60 disabled:cursor-not-allowed ${
                     sel
                       ? 'bg-accent text-white shadow-sm'
                       : 'text-text-secondary hover:text-text-primary hover:bg-bg-tertiary'
                   }`}
                   onClick={() => setModel(m)}
+                  disabled={isSystemAgent}
                 >
                   {label}
                 </button>
@@ -224,13 +242,14 @@ export function AgentEditor({
           <div className="flex gap-px p-0.5 rounded-lg bg-bg-secondary border border-border">
             <button
               type="button"
-              className={`px-3 py-1.5 rounded-md text-xs font-medium cursor-pointer transition-all whitespace-nowrap ${
+              className={`px-3 py-1.5 rounded-md text-xs font-medium cursor-pointer transition-all whitespace-nowrap disabled:opacity-60 disabled:cursor-not-allowed ${
                 provider === null
                   ? 'bg-accent text-white shadow-sm'
                   : 'text-text-secondary hover:text-text-primary hover:bg-bg-tertiary'
               }`}
               onClick={() => setProvider(null)}
-              title="Let TamTam choose any healthy enabled provider at run time"
+              disabled={isSystemAgent}
+              title={isSystemAgent ? 'Built-in agent provider is fixed' : 'Let TamTam choose any healthy enabled provider at run time'}
             >
               any
             </button>
@@ -240,13 +259,14 @@ export function AgentEditor({
                 <button
                   key={cliProvider}
                   type="button"
-                  className={`px-3 py-1.5 rounded-md text-xs font-medium cursor-pointer transition-all whitespace-nowrap ${
+                  className={`px-3 py-1.5 rounded-md text-xs font-medium cursor-pointer transition-all whitespace-nowrap disabled:opacity-60 disabled:cursor-not-allowed ${
                     selected
                       ? 'bg-accent text-white shadow-sm'
                       : 'text-text-secondary hover:text-text-primary hover:bg-bg-tertiary'
                   }`}
                   onClick={() => setProvider(cliProvider)}
-                  title={`Require ${cliProvider} for this agent. If it is unavailable or over budget, the run will not start.`}
+                  disabled={isSystemAgent}
+                  title={isSystemAgent ? 'Built-in agent provider is fixed' : `Require ${cliProvider} for this agent. If it is unavailable or over budget, the run will not start.`}
                 >
                   {cliProvider}
                 </button>
@@ -268,8 +288,8 @@ export function AgentEditor({
           <button
             type="button"
             onClick={handleImprove}
-            disabled={improving || agentPrompt.trim().length < 3}
-            title="Rewrite this prompt using project context (CLAUDE.md + selected skills/docs)"
+            disabled={isSystemAgent || improving || agentPrompt.trim().length < 3}
+            title={isSystemAgent ? 'Built-in agent prompt is fixed' : 'Rewrite this prompt using project context (CLAUDE.md + selected skills/docs)'}
             className="inline-flex items-center gap-1.5 px-2 py-1 text-xs rounded-md border border-border bg-bg-secondary text-text-secondary hover:text-accent hover:border-accent/40 disabled:opacity-50 disabled:cursor-not-allowed cursor-pointer transition-colors"
           >
             {improving
@@ -280,13 +300,15 @@ export function AgentEditor({
         </div>
         <textarea
           id="agent-prompt"
-          className="w-full px-3 py-2 text-sm bg-bg-secondary border border-border rounded-lg text-text-primary placeholder:text-text-tertiary focus:outline-none focus:ring-2 focus:ring-accent/40 focus:border-accent transition-colors font-mono resize-y"
+          className="w-full px-3 py-2 text-sm bg-bg-secondary border border-border rounded-lg text-text-primary placeholder:text-text-tertiary focus:outline-none focus:ring-2 focus:ring-accent/40 focus:border-accent transition-colors font-mono resize-y disabled:opacity-60 disabled:cursor-not-allowed"
           rows={10}
           value={agentPrompt}
           onChange={(e) => setAgentPrompt(e.target.value)}
           placeholder={selectedSkills.length > 0
             ? 'Optional: repo-specific hints to append to the skill (e.g. "focus on lib/auth").'
             : 'What should this agent do when it runs?'}
+          disabled={isSystemAgent}
+          title={isSystemAgent ? 'Built-in agent prompt is fixed' : undefined}
         />
       </div>
 
@@ -299,10 +321,12 @@ export function AgentEditor({
         <input
           id="agent-prerequisite"
           type="text"
-          className="w-full px-3 py-2 text-sm bg-bg-secondary border border-border rounded-lg text-text-primary placeholder:text-text-tertiary focus:outline-none focus:ring-2 focus:ring-accent/40 focus:border-accent transition-colors font-mono"
+          className="w-full px-3 py-2 text-sm bg-bg-secondary border border-border rounded-lg text-text-primary placeholder:text-text-tertiary focus:outline-none focus:ring-2 focus:ring-accent/40 focus:border-accent transition-colors font-mono disabled:opacity-60 disabled:cursor-not-allowed"
           value={prerequisiteCommand}
           onChange={(e) => setPrerequisiteCommand(e.target.value)}
           placeholder="e.g. pnpm test"
+          disabled={isSystemAgent}
+          title={isSystemAgent ? 'Built-in agent prerequisite is fixed' : undefined}
         />
       </div>
 
@@ -343,7 +367,9 @@ export function AgentEditor({
               return (
                 <span key={id} className="inline-flex items-center gap-1 pl-2 pr-1 py-0.5 text-xs rounded-full bg-accent/15 text-accent border border-accent/25 font-medium">
                   {item?.name || id}
-                  <button type="button" className="w-4 h-4 flex items-center justify-center rounded-full hover:bg-accent/20 cursor-pointer opacity-60 hover:opacity-100 transition-opacity" onClick={() => toggleSkill(id)}>×</button>
+                  {!isSystemAgent && (
+                    <button type="button" className="w-4 h-4 flex items-center justify-center rounded-full hover:bg-accent/20 cursor-pointer opacity-60 hover:opacity-100 transition-opacity" onClick={() => toggleSkill(id)}>×</button>
+                  )}
                 </span>
               )
             })}
@@ -352,7 +378,9 @@ export function AgentEditor({
               return (
                 <span key={path} className="inline-flex items-center gap-1 pl-2 pr-1 py-0.5 text-xs rounded-full border border-status-success/30 bg-status-success/10 text-status-success font-medium">
                   {doc?.name || path}
-                  <button type="button" className="w-4 h-4 flex items-center justify-center rounded-full hover:bg-status-success/20 cursor-pointer opacity-60 hover:opacity-100 transition-opacity" onClick={() => toggleDoc(path)}>×</button>
+                  {!isSystemAgent && (
+                    <button type="button" className="w-4 h-4 flex items-center justify-center rounded-full hover:bg-status-success/20 cursor-pointer opacity-60 hover:opacity-100 transition-opacity" onClick={() => toggleDoc(path)}>×</button>
+                  )}
                 </span>
               )
             })}
@@ -363,10 +391,11 @@ export function AgentEditor({
           <div className="flex flex-col gap-1.5">
             <input
               type="text"
-              className="w-full px-3 py-2 text-sm bg-bg-secondary border border-border rounded-lg text-text-primary placeholder:text-text-tertiary focus:outline-none focus:ring-2 focus:ring-accent/40 focus:border-accent transition-colors"
+              className="w-full px-3 py-2 text-sm bg-bg-secondary border border-border rounded-lg text-text-primary placeholder:text-text-tertiary focus:outline-none focus:ring-2 focus:ring-accent/40 focus:border-accent transition-colors disabled:opacity-60 disabled:cursor-not-allowed"
               value={skillSearch}
               onChange={(e) => setSkillSearch(e.target.value)}
               placeholder="Search skills and personas..."
+              disabled={isSystemAgent}
             />
             <div className="max-h-72 overflow-y-auto rounded-lg border border-border divide-y divide-border">
               {filteredItems.length === 0 ? (
@@ -378,10 +407,11 @@ export function AgentEditor({
                     <button
                       key={item.id}
                       type="button"
-                      className={`w-full px-3 py-2 text-left border-none cursor-pointer transition-colors flex items-center gap-3 ${
+                      className={`w-full px-3 py-2 text-left border-none cursor-pointer transition-colors flex items-center gap-3 disabled:cursor-not-allowed disabled:opacity-70 ${
                         isSelected ? 'bg-accent/8 text-text-primary' : 'bg-transparent text-text-primary hover:bg-bg-secondary'
                       }`}
                       onClick={() => toggleSkill(item.id)}
+                      disabled={isSystemAgent}
                     >
                       <div className={`w-4 h-4 rounded border shrink-0 flex items-center justify-center transition-colors ${
                         isSelected ? 'bg-accent border-accent' : 'border-border'
@@ -422,10 +452,11 @@ export function AgentEditor({
                   <button
                     key={doc.path}
                     type="button"
-                    className={`w-full px-3 py-2 text-left border-none cursor-pointer transition-colors flex items-center gap-3 ${
+                    className={`w-full px-3 py-2 text-left border-none cursor-pointer transition-colors flex items-center gap-3 disabled:cursor-not-allowed disabled:opacity-70 ${
                       isSelected ? 'bg-status-success/8 text-text-primary' : 'bg-transparent text-text-primary hover:bg-bg-secondary'
                     }`}
                     onClick={() => toggleDoc(doc.path)}
+                    disabled={isSystemAgent}
                   >
                     <div className={`w-4 h-4 rounded border shrink-0 flex items-center justify-center transition-colors ${
                       isSelected ? 'bg-status-success border-status-success' : 'border-border'

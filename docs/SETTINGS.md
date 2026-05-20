@@ -218,18 +218,29 @@ Semantic retrieval layer — embeds agent run reports plus project-scoped knowle
 
 When enabled, TamTam starts Ollama via PM2 (`ollama-serve`) on boot if not already reachable, pulls `nomic-embed-text` if not installed, and indexes completed agent run reports automatically. Use `POST /api/projects/[schedId]/retrieval/reindex` to refresh the project corpus on demand; that route reports whether sources were missing or stale before the refresh. Freshness behavior is source-specific: completed agent runs are indexed when they finish, while project docs, DB-backed skills, and synthesized project config are refreshed on explicit reindex against the current file/DB snapshot. At prompt time, TamTam records retrieval diagnostics on the run (`results`, `empty_corpus`, `no_results`, `below_threshold`, or `embed_failed`) so ineffective retrieval can be distinguished from a healthy hit.
 
-#### Drift and refresh
+#### Built-in retrieval-maintenance agent
 
-The vector store is **stale-by-design** for everything except agent run reports. There is no scheduler, no git hook, and no file watcher that calls reindex automatically — project docs, skills, and `project_config` chunks only update when an operator (or an external trigger) hits `POST /api/projects/[schedId]/retrieval/reindex`, either via the project's Config tab → "Reindex now" or programmatically. If a tracked repo's `docs/*.md`, `CLAUDE.md`, `README.md`, or a referenced DB skill changes, retrieval will keep serving the previous content until the next reindex.
+A `kind='system'` agent named `retrieval-maintenance` is auto-seeded for every enabled project. It is a built-in TamTam agent — visible in `/agents` and the project's agents tab with a `system` badge, scheduled by the same graphile-worker cron pipeline as user agents (default `1h`), and surfaced in `/runs` like any other run. It does **not** spawn a CLI; the scheduled tick dispatches to an internal handler in `lib/agents/system/retrieval-maintenance.ts`.
 
-Reindex is cheap on the happy path: ingestion (`lib/agents/retrieval/ingestion.ts`) computes a SHA256 over each source's text and compares against `retrieval_records.content_hash`; unchanged sources are skipped without re-embedding. Removed sources are pruned on reindex. So the operational cost is roughly proportional to *what actually changed*, not corpus size.
+Each fire does three things deterministically and finishes with a cheap-LLM quality check:
 
-Known foot-guns and the operator's responsibility to handle them:
+1. **Detects embedding-model drift.** Compares each `retrieval_records.embedding_model` for the project against the current `retrieval_embedding_model` setting. If any record was indexed with a different model, the entire project's chunks + records are wiped before the reindex (old-dim vectors can't be safely searched against new-model queries).
+2. **Reindexes the project corpus** via `reindexProject()` (`lib/agents/retrieval/reindex-project.ts`) — the same code path the manual `POST /api/projects/[schedId]/retrieval/reindex` route uses. Content-hash dedup (`retrieval_records.content_hash`) skips unchanged sources without re-embedding, so the happy-path cost is roughly proportional to what actually changed.
+3. **Verifies retrieval quality** by issuing a sample query (the first H1 from `CLAUDE.md` / `README.md`, falling back to `<project> overview`), pulling the top-5 results, and asking a small local LLM (`outcome_classifier_model`, default `gemma3:4b` on the existing retrieval Ollama) whether the snippets look like real on-topic project content. The verdict (`ok` | `problem` | `null` when the verifier is unreachable) lands on the run's `contextMeta.retrievalHealth` along with reindex stats. Verifier failure does **not** fail the run.
 
-- **No model-version invalidation.** Changing `retrieval_embedding_model` does not invalidate the existing `retrieval_chunks.embedding` column — old vectors stay and silently mix with new queries. After changing the model, manually reindex every project (or wipe `retrieval_chunks` + `retrieval_records`) before trusting results.
-- **No periodic refresh.** Long-lived deployments should reindex tracked projects after any non-trivial doc/skill edit. The natural integration points are: a git post-commit hook on the tracked repo, a `cron`/systemd timer hitting the reindex endpoint, or a graphile-worker task in TamTam itself (not yet implemented).
-- **Agent runs do not refresh project docs.** Completing an agent indexes its own report, but it does not touch the doc/skill corpus even if the run modified files. A doc edit committed during an agent run is not visible to the *next* run's retrieval until reindex.
-- **Visibility is thin.** `GET /api/projects/[schedId]/retrieval/stats` returns total record and chunk counts only. Per-source missing/stale status is computed inside the reindex route's `diagnostics` payload, so the cheapest way to inspect drift today is to POST a reindex — unchanged sources are skipped, and the response lists `missingSourcesBeforeReindex` / `staleSourcesBeforeReindex`.
+Settings hook: editing `retrieval_embedding_model` in `/settings/general` enqueues an immediate `retrieval-maintenance` run for every project so the rebuild starts at once instead of waiting up to one schedule interval. The handler detects the mismatch and wipes via the same code path.
+
+Operator controls:
+
+- **Schedule + enabled** are editable from the standard agents UI per project. Other fields (name, prompt, skills, prereq, model, provider) are locked — the agent is auto-managed.
+- **Disable** removes scheduled runs but keeps the row.
+- **Delete** writes a `system_agent_dismissed:<project>:retrieval-maintenance` settings marker so the seeder does not recreate it on next boot. To re-enable, delete that settings key.
+- **Manual reindex** via the existing project Config tab → "Reindex now" continues to work and uses the same `reindexProject()` function.
+
+Known caveats:
+
+- A run that completes before this system agent fires still indexes its own agent_run chunk (existing behavior), but the doc/skill/config corpus only refreshes on the agent's schedule. To force a refresh sooner: change `schedule` to `1m` momentarily, or hit the manual reindex endpoint.
+- `GET /api/projects/[schedId]/retrieval/stats` still returns counts only; per-source missing/stale status comes from each maintenance run's `contextMeta.retrievalHealth` or from a fresh manual reindex.
 
 ### Outcome Classifier
 
@@ -272,6 +283,7 @@ Budget gate semantics:
 - The weekly burn-rate throttle is enforced only for scheduled agent fires via `scheduledBurnRateBlocked()` in the internal scheduler; manual buttons and root pipeline starts do not 429 on projected 7-day pace alone. The separate `budget_block_on_weekly_pace_enabled` setting controls whether actual 7-day utilization is part of the hard start gate.
 - Agent runs that were queued behind an active release lock or an older `pending_release` stay persisted in `queued_agent_runs` if replay hits a temporary 429 budget block; they are retried when the budget recovers, when jobs resume from pause, on boot, and by the periodic queued-agent recovery sweep.
 - `jobs_paused` blocks scheduled agent runs, pipeline steps, reruns, and CI-fix starts. It does **not** block manual terminal runs (`POST /api/projects/by-project/[name]/run`) or manually-triggered agent runs (`POST /api/agents/[id]/run` without `x-tamtam-trigger: schedule`); those two entry-points bypass the gate so operators can always run things interactively even while the pipeline is paused.
+- `rebuild_in_progress` is a UI-only sentinel set by `scripts/rebuild-safe.sh` alongside `jobs_paused=true` and cleared on unpause. The top-menu chip renders "rebuilding…" with a spinner instead of the ambiguous "jobs paused" while the flag is on, and the click handler is disabled so an operator cannot accidentally unpause mid-rebuild. Cleared by the script's EXIT trap on any failure path so the chip never lies about an active rebuild after the script has bailed.
 
 **Payload shape** (generic JSON POST):
 

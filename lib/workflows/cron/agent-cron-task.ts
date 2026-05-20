@@ -34,6 +34,10 @@ export interface AgentCronDeps {
   prereqSkipReason: (agent: AgentInput) => Promise<string | null>;
   /** Dispatch the agent-run workflow. Returns the run id (telemetry only). */
   startAgentRun: (agent: AgentInput) => Promise<string | null>;
+  /** Dispatch a system (kind='system') agent through its internal handler
+   *  instead of the LLM-CLI workflow. Returns null when no handler is
+   *  registered for the given name — caller will fall back to skipping. */
+  runSystemAgent?: (agent: AgentInput) => Promise<void>;
   /** Re-enqueue this same task with the per-agent jobKey at the next
    *  fire time (idempotent — replaces any already-queued one). */
   enqueueNextFire: (agentId: string, runAt: Date) => Promise<void>;
@@ -93,6 +97,13 @@ export async function handleAgentCron(
   await deps.enqueueNextFire(agent.id, new Date(nextFireMs));
   if (skipReason) {
     return { status: 'skipped', reason: skipReason };
+  }
+  if (agent.kind === 'system') {
+    if (!deps.runSystemAgent) {
+      return { status: 'skipped', reason: 'no system handler bound' };
+    }
+    await deps.runSystemAgent(agent);
+    return { status: 'dispatched', runId: null, reason: 'system' };
   }
   const runId = await deps.startAgentRun(agent);
   return { status: 'dispatched', runId };

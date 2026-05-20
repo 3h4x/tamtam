@@ -50,8 +50,9 @@ export async function GET(request: NextRequest) {
   const name = request.nextUrl.searchParams.get('name');
   // `?fields=summary` strips the heaviest fields (prompt, prerequisiteCommand,
   // docPaths, skillIds JSON) so list-view callers don't pull KBs of edit-only
-  // data on every poll. Detail views (AgentsTab, edit modals) ask without it
-  // to receive the full agent shape. Fetching a specific name implies edit.
+  // data on every poll. It keeps lightweight list metadata such as source and
+  // kind. Detail views (AgentsTab, edit modals) ask without it to receive the
+  // full agent shape. Fetching a specific name implies edit.
   const summaryOnly = request.nextUrl.searchParams.get('fields') === 'summary' && !name;
   const agents = getAllAgentsCached();
   let result = project ? agents.filter(a => a.project === project) : agents;
@@ -119,6 +120,7 @@ export async function GET(request: NextRequest) {
       enabled: a.enabled,
       model: a.model,
       provider: a.provider ?? null,
+      kind: 'kind' in a ? (a.kind as 'user' | 'system') : 'user',
       source: 'source' in a ? a.source : 'db',
     }));
     return NextResponse.json({ agents: summaryAgents }, { headers: noStoreHeaders });
@@ -134,6 +136,9 @@ export async function POST(request: NextRequest) {
 
   if (!project?.trim()) {
     return NextResponse.json({ detail: 'project is required' }, { status: 400 });
+  }
+  if (body.kind && body.kind !== 'user') {
+    return NextResponse.json({ detail: 'kind=system agents are auto-seeded by TamTam and cannot be created via API' }, { status: 400 });
   }
   const parsedName = normalizeAgentNameInput(name);
   if (parsedName.error) {

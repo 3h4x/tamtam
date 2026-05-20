@@ -21,6 +21,7 @@ async function applyDdl(handle: TestDbHandle): Promise<void> {
       provider text,
       fallback_enabled boolean NOT NULL DEFAULT false,
       prerequisite_command text,
+      kind text NOT NULL DEFAULT 'user',
       created_at double precision NOT NULL,
       updated_at double precision NOT NULL
     )

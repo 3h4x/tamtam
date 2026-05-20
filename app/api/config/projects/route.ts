@@ -4,6 +4,7 @@ import { readdirSync, existsSync } from 'fs';
 import { join } from 'path';
 import { homedir } from 'os';
 import { db, schema } from '@/lib/db';
+import { refreshProjectsCacheSync } from '@/lib/shared/enabled-projects';
 function expandHome(p: string): string {
   if (p.startsWith('~/') || p === '~') return join(homedir(), p.slice(2));
   return p;
@@ -78,8 +79,14 @@ export async function PATCH(request: NextRequest) {
     return NextResponse.json({ detail: 'projects must be an array' }, { status: 400 });
   }
 
+  const newlyEnabledProjects: string[] = [];
   for (const proj of projects) {
     const actionsJson = proj.custom_actions ? JSON.stringify(proj.custom_actions) : null;
+    const beforeRows = await db.select({ enabled: schema.projects.enabled })
+      .from(schema.projects)
+      .where(eq(schema.projects.name, proj.name))
+      .limit(1);
+    const wasEnabled = beforeRows[0]?.enabled === true;
     await db.insert(schema.projects)
       .values({
         name: proj.name,
@@ -99,6 +106,22 @@ export async function PATCH(request: NextRequest) {
           customActions: actionsJson,
         },
       });
+    if (proj.enabled && !wasEnabled) newlyEnabledProjects.push(proj.name);
+  }
+
+  // Auto-seed built-in system agents (retrieval-maintenance, …) for any
+  // project that was newly enabled in this PATCH. Idempotent — already-
+  // seeded projects are skipped.
+  if (newlyEnabledProjects.length > 0) {
+    try {
+      await refreshProjectsCacheSync();
+      const { seedSystemAgentsForProject } = await import('@/lib/agents/system/seed');
+      for (const projectName of newlyEnabledProjects) {
+        await seedSystemAgentsForProject(projectName);
+      }
+    } catch (err) {
+      console.error('[system-agents] post-enable seed failed:', err);
+    }
   }
 
   return NextResponse.json({ status: 'ok' });

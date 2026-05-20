@@ -22,6 +22,7 @@ interface QuotaSnapshot {
 
 export function JobsPauseToggle() {
   const [jobsPaused, setJobsPaused] = useState(false)
+  const [rebuildInProgress, setRebuildInProgress] = useState(false)
   const [budgetGateEnabled, setBudgetGateEnabled] = useState(false)
   const [loading, setLoading] = useState(true)
   const [saving, setSaving] = useState(false)
@@ -36,6 +37,9 @@ export function JobsPauseToggle() {
     ) => {
       if (!merge || 'jobs_paused' in settings) {
         setJobsPaused(settings.jobs_paused === 'true')
+      }
+      if (!merge || 'rebuild_in_progress' in settings) {
+        setRebuildInProgress(settings.rebuild_in_progress === 'true')
       }
       if (!merge || 'budget_block_runs_enabled' in settings) {
         const enabled = settings.budget_block_runs_enabled === 'true'
@@ -56,6 +60,25 @@ export function JobsPauseToggle() {
       }
     }
     void load()
+    // Poll /api/settings so the chip reflects out-of-band changes — the
+    // rebuild-safe.sh script PATCHes rebuild_in_progress server-side via
+    // curl, which never fires the in-browser settings-changed event. 5s
+    // is short enough that "rebuilding…" appears almost immediately when
+    // the script flips the flag, and disappears just as fast on unpause.
+    const poll = async () => {
+      try {
+        const res = await fetch('/api/settings')
+        if (!res.ok) return
+        const data = await res.json()
+        if (!live) return
+        applySettings(data.settings ?? {}, { merge: false })
+      } catch {
+        // Silent: during restart the server is briefly unreachable; we
+        // intentionally keep the last-known state on screen so the chip
+        // doesn't flicker back to "jobs running" mid-rebuild.
+      }
+    }
+    const pollId = setInterval(poll, 5_000)
     const unsubscribe = subscribeToSettingsChanged((settings) => {
       if (!live) return
       applySettings(settings, { merge: true })
@@ -63,6 +86,7 @@ export function JobsPauseToggle() {
     })
     return () => {
       live = false
+      clearInterval(pollId)
       unsubscribe()
     }
   }, [])
@@ -125,39 +149,52 @@ export function JobsPauseToggle() {
     }
   }, [budgetGateEnabled, jobsPaused, saving])
 
-  // Three visible states:
-  //   1. jobs_paused=true (manual pause) → "jobs paused"
-  //   2. autoThrottle (burn-rate gate active) → "scheduled paused"; manual buttons still work
-  //   3. neither → "jobs running"
-  const showThrottle = !jobsPaused && autoThrottle != null
-  const label = jobsPaused
-    ? 'jobs paused'
-    : showThrottle
-      ? 'scheduled paused'
-      : 'jobs running'
-  const title = jobsPaused
-    ? 'Jobs paused — click to resume'
-    : showThrottle
-      ? `Scheduled agents paused — every enabled provider over weekly budget (worst: ${autoThrottle!.worstProvider} at ${autoThrottle!.projectedPct.toFixed(0)}%${autoThrottle!.resumesAtMs ? `, resume ${fmtAbsolute(autoThrottle!.resumesAtMs)}` : ''}). Click to also pause manual runs.`
-      : 'Pause jobs'
+  // Four visible states (rebuild takes precedence over manual pause —
+  // when the rebuild script has set both flags, the user needs to know
+  // it's a transient rebuild, not a manual pause they should resume):
+  //   1. rebuild_in_progress=true → "rebuilding…" with spinner glyph; click disabled
+  //   2. jobs_paused=true (manual pause) → "jobs paused"
+  //   3. autoThrottle (burn-rate gate active) → "scheduled paused"; manual buttons still work
+  //   4. neither → "jobs running"
+  const showRebuild = rebuildInProgress
+  const showThrottle = !jobsPaused && !showRebuild && autoThrottle != null
+  const label = showRebuild
+    ? 'rebuilding…'
+    : jobsPaused
+      ? 'jobs paused'
+      : showThrottle
+        ? 'scheduled paused'
+        : 'jobs running'
+  const title = showRebuild
+    ? 'Rebuild in progress — jobs are paused by scripts/rebuild-safe.sh and will resume automatically when the build + restart finishes.'
+    : jobsPaused
+      ? 'Jobs paused — click to resume'
+      : showThrottle
+        ? `Scheduled agents paused — every enabled provider over weekly budget (worst: ${autoThrottle!.worstProvider} at ${autoThrottle!.projectedPct.toFixed(0)}%${autoThrottle!.resumesAtMs ? `, resume ${fmtAbsolute(autoThrottle!.resumesAtMs)}` : ''}). Click to also pause manual runs.`
+        : 'Pause jobs'
 
   return (
     <button
       type="button"
       role="switch"
       aria-checked={jobsPaused}
-      onClick={toggle}
+      onClick={showRebuild ? undefined : toggle}
       title={title}
       aria-label={title}
-      disabled={loading || saving}
-      className={`h-9 px-3 flex items-center justify-center rounded-lg border transition-colors cursor-pointer text-xs font-medium whitespace-nowrap ${
-        jobsPaused
-          ? 'border-status-error/60 bg-status-error/10 text-status-error hover:bg-status-error/20'
-          : showThrottle
-            ? 'border-status-warning/60 bg-status-warning/10 text-status-warning hover:bg-status-warning/20'
-            : 'border-border bg-bg-secondary text-text-secondary hover:bg-bg-tertiary hover:text-text-primary'
-      } ${loading || saving ? 'opacity-70 cursor-wait' : ''}`}
+      disabled={loading || saving || showRebuild}
+      className={`h-9 px-3 flex items-center justify-center gap-1.5 rounded-lg border transition-colors text-xs font-medium whitespace-nowrap ${
+        showRebuild
+          ? 'border-accent/60 bg-accent/10 text-accent cursor-wait'
+          : jobsPaused
+            ? 'border-status-error/60 bg-status-error/10 text-status-error hover:bg-status-error/20 cursor-pointer'
+            : showThrottle
+              ? 'border-status-warning/60 bg-status-warning/10 text-status-warning hover:bg-status-warning/20 cursor-pointer'
+              : 'border-border bg-bg-secondary text-text-secondary hover:bg-bg-tertiary hover:text-text-primary cursor-pointer'
+      } ${(loading || saving) && !showRebuild ? 'opacity-70 cursor-wait' : ''}`}
     >
+      {showRebuild && (
+        <span className="animate-spin leading-none" aria-hidden="true">{'⟳'}</span>
+      )}
       {label}
     </button>
   )

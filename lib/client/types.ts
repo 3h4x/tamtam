@@ -279,6 +279,10 @@ export interface Agent {
   createdAt: number
   updatedAt: number
   source?: 'db' | 'file'
+  // 'user' for normal user-defined agents, 'system' for built-in
+  // auto-seeded agents that dispatch to internal handlers. File agents
+  // omit this field — treat undefined as 'user' at the consumer.
+  kind?: 'user' | 'system'
   // Live cron queue state — `nextFireMs` is the actual `run_at` from the
   // graphile-worker `agent-cron-<id>` row, not a UI estimate. Absent when
   // the agent has no queued cron row (disabled, or seed hasn't run yet).
