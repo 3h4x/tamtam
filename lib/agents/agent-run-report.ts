@@ -194,10 +194,16 @@ export async function finalizeAgentRunReport(job: JobData, rawLog: string): Prom
             chunkCount: 1,
             contentHash,
             indexedAt: Date.now() / 1000,
+            embeddingModel: cfg.retrieval_embedding_model,
           })
           .onConflictDoUpdate({
             target: schema.retrievalRecords.id,
-            set: { contentHash, indexedAt: Date.now() / 1000, chunkCount: 1 },
+            set: {
+              contentHash,
+              indexedAt: Date.now() / 1000,
+              chunkCount: 1,
+              embeddingModel: cfg.retrieval_embedding_model,
+            },
           })
           .execute()
           .catch((e) => console.warn('[retrieval] failed to upsert retrieval record:', e));

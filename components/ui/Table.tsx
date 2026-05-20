@@ -1,6 +1,6 @@
 'use client'
 
-import { useState } from 'react'
+import React, { useState } from 'react'
 import type { ReactNode } from 'react'
 
 export interface Column<T> {
@@ -21,6 +21,7 @@ interface TableProps<T> {
   defaultSortDir?: 'asc' | 'desc'
   emptyState?: ReactNode
   className?: string
+  expandedRender?: (row: T) => ReactNode
 }
 
 export function Table<T>({
@@ -31,6 +32,7 @@ export function Table<T>({
   defaultSortDir = 'asc',
   emptyState,
   className,
+  expandedRender,
 }: TableProps<T>) {
   const [sortKey, setSortKey] = useState(defaultSortKey)
   const [sortDir, setSortDir] = useState<'asc' | 'desc'>(defaultSortDir)
@@ -97,18 +99,27 @@ export function Table<T>({
               </tr>
             ) : null
           ) : (
-            sorted.map(row => (
-              <tr
-                key={getRowKey(row)}
-                className="border-b border-border last:border-0 transition-colors hover:bg-bg-secondary/40"
-              >
-                {columns.map(col => (
-                  <td key={col.key} className={`px-3 py-2.5 ${col.cellClass ?? ''}`}>
-                    {col.render(row)}
-                  </td>
-                ))}
-              </tr>
-            ))
+            sorted.map(row => {
+              const expanded = expandedRender ? expandedRender(row) : null
+              return (
+                <React.Fragment key={getRowKey(row)}>
+                  <tr className="border-b border-border last:border-0 transition-colors hover:bg-bg-secondary/40">
+                    {columns.map(col => (
+                      <td key={col.key} className={`px-3 py-2.5 ${col.cellClass ?? ''}`}>
+                        {col.render(row)}
+                      </td>
+                    ))}
+                  </tr>
+                  {expanded && (
+                    <tr className="border-b border-border last:border-0 bg-bg-secondary/30">
+                      <td colSpan={columns.length} className="px-3 py-3">
+                        {expanded}
+                      </td>
+                    </tr>
+                  )}
+                </React.Fragment>
+              )
+            })
           )}
         </tbody>
       </table>
