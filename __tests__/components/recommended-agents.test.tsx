@@ -34,6 +34,16 @@ const syncTemplate = {
   prompt: '',
 }
 
+const issueCruncherTemplate = {
+  name: 'issue-cruncher',
+  description: 'Picks a ready-to-go issue.',
+  model: 'normal',
+  schedule: '',
+  prompt: '',
+  skillIds: ['agent-issue-cruncher'],
+  featured: true,
+}
+
 const customCoverageTemplate = {
   name: 'project-coverage',
   description: 'Runs project-specific checks.',
@@ -117,8 +127,20 @@ describe('RecommendedAgents', () => {
   it('shows legacy alias names on the built-in recommendation card', () => {
     const { container, unmount } = renderRecommendedAgents()
 
-    expect(container.textContent).toContain('legacy name tests')
+    expect(container.textContent).toContain('legacy: tests')
     expect(container.textContent).toContain('Use template')
+
+    unmount()
+  })
+
+  it('shows on-demand metadata for unscheduled templates', () => {
+    const { container, unmount } = renderRecommendedAgents({
+      recommendedAgents: [issueCruncherTemplate],
+    })
+
+    const badgeTexts = Array.from(container.querySelectorAll('span')).map(node => node.textContent)
+
+    expect(badgeTexts).toContain('on demand')
 
     unmount()
   })
@@ -146,7 +168,7 @@ describe('RecommendedAgents', () => {
     expect(container.textContent).toContain('Show 2 templates')
     expect(container.textContent).toContain('2 templates stay hidden until this project needs broader coverage.')
     expect(container.textContent).not.toContain('Adds missing tests.')
-    expect(container.textContent).not.toContain('legacy name tests')
+    expect(container.textContent).not.toContain('legacy: tests')
 
     unmount()
   })

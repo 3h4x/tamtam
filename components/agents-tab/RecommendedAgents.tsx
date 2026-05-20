@@ -51,7 +51,7 @@ const RECOMMENDED_VISIBLE_LIMIT = 4
 const COLLAPSED_NAME_PREVIEW_LIMIT = 3
 
 function formatScheduleLabel(schedule: string | undefined): string | null {
-  return schedule ? `every ${schedule}` : null
+  return schedule ? `every ${schedule}` : 'on demand'
 }
 
 function formatTemplateCount(count: number): string {
@@ -65,17 +65,19 @@ function formatSkillCount(skillIds: string[] | undefined): string | null {
 
 function formatAliasesLabel(aliases: string[] | undefined): string | null {
   if (!aliases?.length) return null
-  return aliases.length === 1 ? `legacy name ${aliases[0]}` : `legacy names ${aliases.join(', ')}`
+  return `legacy: ${aliases.join(', ')}`
 }
 
 function buildMetaBadges(rec: RecommendedAgent): MetaBadge[] {
   const scheduleLabel = formatScheduleLabel(rec.schedule)
   const skillCountLabel = formatSkillCount(rec.skillIds)
+  const aliasesLabel = formatAliasesLabel(rec.aliases)
 
   return [
     { label: getModelLabel(rec.model) },
     skillCountLabel ? { label: skillCountLabel } : null,
     scheduleLabel ? { label: scheduleLabel } : null,
+    aliasesLabel ? { label: aliasesLabel } : null,
   ].filter((badge): badge is MetaBadge => Boolean(badge))
 }
 
@@ -158,7 +160,6 @@ export function RecommendedAgents({ agents, customTemplates, recommendedAgents, 
   const renderSuggestion = (rec: RecommendedAgent, layout: SuggestionLayout) => {
     const isCustom = customNames.has(recommendedAgentNameKey(rec.name))
     const metaBadges = buildMetaBadges(rec)
-    const aliasesLabel = formatAliasesLabel(rec.aliases)
     const style = getSuggestionStyle(getSuggestionTone(rec))
 
     if (layout === 'compact') {
@@ -179,7 +180,7 @@ export function RecommendedAgents({ agents, customTemplates, recommendedAgents, 
                 {rec.description}
               </p>
             )}
-            {(metaBadges.length > 0 || aliasesLabel) && (
+            {metaBadges.length > 0 && (
               <div className="mt-1.5 flex flex-wrap items-center gap-1.5">
                 {metaBadges.map(badge => (
                   <span
@@ -189,11 +190,6 @@ export function RecommendedAgents({ agents, customTemplates, recommendedAgents, 
                     {badge.label}
                   </span>
                 ))}
-                {aliasesLabel && (
-                  <span className="text-[11px] leading-5 text-text-tertiary">
-                    {aliasesLabel}
-                  </span>
-                )}
               </div>
             )}
           </div>
@@ -230,11 +226,6 @@ export function RecommendedAgents({ agents, customTemplates, recommendedAgents, 
           {rec.description && (
             <p className="mt-1 text-xs leading-5 text-text-tertiary">
               {rec.description}
-            </p>
-          )}
-          {aliasesLabel && (
-            <p className="mt-1 text-[11px] leading-5 text-text-tertiary">
-              {aliasesLabel}
             </p>
           )}
           {metaBadges.length > 0 && (
