@@ -10,6 +10,7 @@
 import { spawn } from 'child_process';
 import { closeSync, createReadStream, openSync, writeSync } from 'fs';
 import { redactSecrets } from '@/lib/shared/log-redaction';
+import { buildChildEnv } from '@/lib/shared/child-env';
 
 export interface RunSubprocessParams {
   jobId: string;
@@ -51,11 +52,7 @@ export async function runSubprocess(params: RunSubprocessParams): Promise<RunSub
   const launchedSummary = [cmd, ...cmdArgs].map(quoteArg).join(' ');
   logLine(`[tamtam] launching: ${launchedSummary}`);
 
-  const childEnv: NodeJS.ProcessEnv = { ...process.env, ...(env ?? {}) };
-  // Avoid the spawned process inheriting Next.js's bind config and trying to
-  // re-bind 1337.
-  delete childEnv.PORT;
-  delete childEnv.HOSTNAME;
+  const childEnv = buildChildEnv(env);
 
   return new Promise<RunSubprocessResult>((resolve) => {
     let settled = false;

@@ -46,6 +46,9 @@ describe('POST /api/projects/by-project/{projectName}/test', () => {
   let spawnMock: ReturnType<typeof vi.fn>;
   let tempDir: string;
   let projDir: string;
+  let previousCodexSandboxNetworkDisabled: string | undefined;
+  let previousProjectTestEnv: string | undefined;
+  let previousPort: string | undefined;
   let improveConfig: {
     claudeBin: string;
     logDir: string;
@@ -54,6 +57,9 @@ describe('POST /api/projects/by-project/{projectName}/test', () => {
 
   beforeEach(async () => {
     vi.resetModules();
+    previousCodexSandboxNetworkDisabled = process.env.CODEX_SANDBOX_NETWORK_DISABLED;
+    previousProjectTestEnv = process.env.TAMTAM_PROJECT_TEST_ENV;
+    previousPort = process.env.PORT;
     tempDir = mkdtempSync(join(tmpdir(), 'tamtam-test-route-'));
     projDir = mkdtempSync(join(tmpdir(), 'tamtam-proj-'));
 
@@ -124,6 +130,12 @@ describe('POST /api/projects/by-project/{projectName}/test', () => {
     vi.resetModules();
     rmSync(tempDir, { recursive: true, force: true });
     rmSync(projDir, { recursive: true, force: true });
+    if (previousCodexSandboxNetworkDisabled === undefined) delete process.env.CODEX_SANDBOX_NETWORK_DISABLED;
+    else process.env.CODEX_SANDBOX_NETWORK_DISABLED = previousCodexSandboxNetworkDisabled;
+    if (previousProjectTestEnv === undefined) delete process.env.TAMTAM_PROJECT_TEST_ENV;
+    else process.env.TAMTAM_PROJECT_TEST_ENV = previousProjectTestEnv;
+    if (previousPort === undefined) delete process.env.PORT;
+    else process.env.PORT = previousPort;
   });
 
   it('returns 404 when project not found', async () => {
@@ -205,6 +217,25 @@ describe('POST /api/projects/by-project/{projectName}/test', () => {
     expect(spawnArgs[1][1]).toContain('node ');
     expect(spawnArgs[2]).toEqual(expect.objectContaining({ detached: true, stdio: 'ignore' }));
     expect(existsSync(join(improveConfig.logDir, 'test-job-id.sh'))).toBe(false);
+  });
+
+  it('strips sandbox env from the spawned test job while preserving normal env', async () => {
+    process.env.CODEX_SANDBOX_NETWORK_DISABLED = '1';
+    process.env.TAMTAM_PROJECT_TEST_ENV = 'kept';
+    process.env.PORT = '7777';
+
+    const req = new NextRequest('http://localhost/api/projects/by-project/proj1/test', {
+      method: 'POST',
+    });
+    const res = await POST(req, { params: Promise.resolve({ projectName: 'proj1' }) });
+
+    expect(res.status).toBe(200);
+    const spawnOptions = spawnMock.mock.calls[0][2] as { env: NodeJS.ProcessEnv };
+    expect(spawnOptions.env.CODEX_SANDBOX_NETWORK_DISABLED).toBeUndefined();
+    expect(spawnOptions.env.PORT).toBeUndefined();
+    expect(spawnOptions.env.TAMTAM_PROJECT_TEST_ENV).toBe('kept');
+    expect(spawnOptions.env.HOME).toBeTruthy();
+    expect(spawnOptions.env.PATH).toContain('/usr/local/bin');
   });
 
   it('does not persist a wrapper script when the test command contains inline secrets', async () => {

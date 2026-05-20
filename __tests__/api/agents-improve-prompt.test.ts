@@ -90,6 +90,7 @@ describe('POST /api/agents/improve-prompt', () => {
     vi.resetModules();
     rmSync(projDir, { recursive: true, force: true });
     delete process.env.TAMTAM_IMPROVE_PROMPT_TEST;
+    delete process.env.CODEX_SANDBOX_NETWORK_DISABLED;
   });
 
   it('returns 400 when project is missing', async () => {
@@ -165,7 +166,11 @@ describe('POST /api/agents/improve-prompt', () => {
 
   it('preserves the process environment while adding provider-specific CLI env', async () => {
     process.env.TAMTAM_IMPROVE_PROMPT_TEST = 'keep-me';
-    resolveCliEnvMock.mockReturnValueOnce({ CLAUDE_BIN: '/custom/claude' });
+    process.env.CODEX_SANDBOX_NETWORK_DISABLED = '1';
+    resolveCliEnvMock.mockReturnValueOnce({
+      CLAUDE_BIN: '/custom/claude',
+      CODEX_SANDBOX_OVERRIDE: '1',
+    });
 
     const req = new NextRequest('http://localhost/api/agents/improve-prompt', {
       method: 'POST',
@@ -177,6 +182,8 @@ describe('POST /api/agents/improve-prompt', () => {
     const options = spawnMock.mock.calls[0][2] as { env: NodeJS.ProcessEnv };
     expect(options.env.TAMTAM_IMPROVE_PROMPT_TEST).toBe('keep-me');
     expect(options.env.CLAUDE_BIN).toBe('/custom/claude');
+    expect(options.env.CODEX_SANDBOX_NETWORK_DISABLED).toBeUndefined();
+    expect(options.env.CODEX_SANDBOX_OVERRIDE).toBeUndefined();
     expect(options.env.HOME).toBeTruthy();
     expect(options.env.PATH).toContain('/usr/local/bin');
 

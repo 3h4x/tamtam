@@ -1,10 +1,10 @@
 import { existsSync, readFileSync, writeFileSync, mkdirSync } from 'fs';
 import { join, resolve } from 'path';
-import { homedir } from 'os';
 import { spawn, execSync } from 'child_process';
 import { getImproveConfig, getProjectTestConfig } from '@/lib/scheduling/scheduling';
 import { currentParent } from '@/lib/jobs/parent-context';
 import { resolveProjectPath } from '@/lib/shared/project-data';
+import { buildChildEnv } from '@/lib/shared/child-env';
 import { shellQuote } from '@/lib/shared/shell';
 import { createJob, listJobs, probeJobStatus, updateJob, markDone } from '@/lib/jobs/job-storage';
 import { getLock, acquireLock, isLockOwnedByActiveRelease } from './pipeline-lock';
@@ -137,10 +137,11 @@ export async function startProjectTest(projectName: string): Promise<StartTestRe
   // firing doesn't lose the real exit code (otherwise the probe's ESRCH path
   // wins and the job gets recorded as exit=-1 despite tests passing).
   const exitCodePath = `${logPath}.exitcode`;
+  const childEnv = buildChildEnv();
   const bashCommand = [
     'set -o pipefail',
-    `export PATH=${shellQuote(process.env.PATH || '')}`,
-    `export HOME=${shellQuote(homedir())}`,
+    `export PATH=${shellQuote(childEnv.PATH || '')}`,
+    `export HOME=${shellQuote(childEnv.HOME || '')}`,
     `cd ${shellQuote(projPath)}`,
     '{',
     `  printf '%s\\n' ${shellQuote(`Running: ${testCmd}`)}`,
@@ -157,6 +158,7 @@ export async function startProjectTest(projectName: string): Promise<StartTestRe
     cwd: projPath,
     stdio: 'ignore',
     detached: true,
+    env: childEnv,
   });
 
   job.pid = proc.pid ?? 0;

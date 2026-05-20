@@ -132,3 +132,54 @@ describe('exec — abortProcessTree mode', () => {
     }
   }, 15_000);
 });
+
+describe('exec — env cleansing', () => {
+  it('strips CODEX_SANDBOX_* from the child env so a stale codex sandbox tag does not propagate', async () => {
+    // Tamtam's own process can carry CODEX_SANDBOX_NETWORK_DISABLED=1 when it
+    // was once launched from a codex shell (PM2 captures it into its snapshot).
+    // Child processes spawned by tamtam are unrelated user-privilege
+    // processes that can hit the network — leaking the flag into them
+    // silently breaks tools like log tails, gh, npm registry pulls etc.
+    const prev = process.env.CODEX_SANDBOX_NETWORK_DISABLED;
+    process.env.CODEX_SANDBOX_NETWORK_DISABLED = '1';
+    try {
+      const r = await exec('sh', ['-c', 'echo "v=${CODEX_SANDBOX_NETWORK_DISABLED:-unset}"']);
+      expect(r.exitCode).toBe(0);
+      expect(r.stdout.trim()).toBe('v=unset');
+    } finally {
+      if (prev === undefined) delete process.env.CODEX_SANDBOX_NETWORK_DISABLED;
+      else process.env.CODEX_SANDBOX_NETWORK_DISABLED = prev;
+    }
+  });
+
+  it('strips blocked keys after caller env overrides are merged', async () => {
+    const r = await exec('sh', ['-c', [
+      'echo "sandbox=${CODEX_SANDBOX_NETWORK_DISABLED:-unset}"',
+      'echo "port=${PORT:-unset}"',
+      'echo "keep=${SOME_TAMTAM_TEST_VAR:-unset}"',
+    ].join('; ')], {
+      env: {
+        CODEX_SANDBOX_NETWORK_DISABLED: '1',
+        PORT: '9999',
+        SOME_TAMTAM_TEST_VAR: 'kept',
+      },
+    });
+
+    expect(r.exitCode).toBe(0);
+    expect(r.stdout).toContain('sandbox=unset');
+    expect(r.stdout).toContain('port=unset');
+    expect(r.stdout).toContain('keep=kept');
+  });
+
+  it('passes through non-stripped env vars unchanged', async () => {
+    const prev = process.env.SOME_TAMTAM_TEST_VAR;
+    process.env.SOME_TAMTAM_TEST_VAR = 'kept';
+    try {
+      const r = await exec('sh', ['-c', 'echo "$SOME_TAMTAM_TEST_VAR"']);
+      expect(r.stdout.trim()).toBe('kept');
+    } finally {
+      if (prev === undefined) delete process.env.SOME_TAMTAM_TEST_VAR;
+      else process.env.SOME_TAMTAM_TEST_VAR = prev;
+    }
+  });
+});

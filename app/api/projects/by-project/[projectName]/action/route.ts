@@ -6,6 +6,7 @@ import { homedir } from 'os';
 import { eq } from 'drizzle-orm';
 import { db, schema } from '@/lib/db';
 import { resolveProjectPath } from '@/lib/shared/project-data';
+import { buildChildEnv } from '@/lib/shared/child-env';
 import { shellQuote } from '@/lib/shared/shell';
 import { createJob, updateJob } from '@/lib/jobs/job-storage';
 import { getSettings } from '@/lib/shared/config';
@@ -142,14 +143,7 @@ export async function POST(
   const proc = spawn('bash', ['-lc', bashCommand], {
     cwd: projPath,
     stdio: 'ignore' as SpawnOptions['stdio'],
-    env: {
-      ...Object.fromEntries(
-        Object.entries(process.env).filter(
-          ([k, v]) => v !== undefined && !k.startsWith('npm_') && !k.startsWith('PNPM_') && k !== 'NODE_PATH'
-        )
-      ),
-      HOME: homedir(),
-    } as unknown as NodeJS.ProcessEnv,
+    env: buildChildEnv(),
     detached: true,
   });
 

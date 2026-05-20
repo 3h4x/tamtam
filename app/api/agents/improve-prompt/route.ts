@@ -1,7 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { spawn } from 'child_process';
 import { existsSync, readFileSync } from 'fs';
-import { homedir } from 'os';
 import { join } from 'path';
 import { resolveProjectPath } from '@/lib/shared/project-data';
 import { resolveCliBin, resolveCliEnv } from '@/lib/shared/cli-bin';
@@ -10,29 +9,11 @@ import { checkCliStartGate } from '@/lib/usage/resolve-provider';
 import { composeAgentSkills } from '@/lib/agents/compose-skills';
 import { WAND_PRIMER } from '@/lib/agents/wand-primer';
 import { errMsg } from '@/lib/shared/types';
+import { buildChildEnv } from '@/lib/shared/child-env';
 
 const IMPROVE_TIMEOUT_MS = 120_000;
 const IMPROVE_KILL_GRACE_MS = 5_000;
 const MAX_DRAFT_BYTES = 32 * 1024;
-
-function enrichPath(): string {
-  const additions = [
-    join(homedir(), '.local', 'bin'),
-    '/opt/homebrew/bin',
-    '/usr/local/bin',
-  ];
-  const current = process.env.PATH || '';
-  return [...additions.filter((p) => !current.includes(p)), current].filter(Boolean).join(':');
-}
-
-function buildCliEnv(cliEnv: Record<string, string>): NodeJS.ProcessEnv {
-  return {
-    ...process.env,
-    PATH: enrichPath(),
-    HOME: homedir(),
-    ...cliEnv,
-  };
-}
 
 function readClaudeMd(projPath: string): string | null {
   const p = join(projPath, 'CLAUDE.md');
@@ -68,7 +49,7 @@ async function runClaudePrint(
     const args = ['--print', '--model', modelTier];
     args.push(...splitPermissionArgs(permissionFlag));
     const child = spawn(binary, args, {
-      env: buildCliEnv(env),
+      env: buildChildEnv(env),
       stdio: ['pipe', 'pipe', 'pipe'],
     });
     let stdout = '';

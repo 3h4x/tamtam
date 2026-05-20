@@ -32,6 +32,7 @@
 import { spawn, spawnSync } from 'node:child_process';
 import { existsSync, mkdirSync, readFileSync, unlinkSync, writeFileSync, openSync, closeSync } from 'node:fs';
 import { join } from 'node:path';
+import { buildChildEnv } from '@/lib/shared/child-env';
 
 const DEFAULT_READY_TIMEOUT_MS = 60_000;
 const READY_PROBE_INTERVAL_MS = 500;
@@ -308,7 +309,7 @@ export async function ensureDevServerRunning(
       cwd: config.cwd,
       detached: true,
       stdio: ['ignore', logFd, logFd],
-      env: { ...process.env },
+      env: buildChildEnv(),
     });
   } catch (e) {
     try { closeSync(logFd); } catch {}

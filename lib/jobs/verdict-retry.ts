@@ -5,29 +5,15 @@
 // iteration). Gated by the `review_retry_on_parse_failure` setting.
 
 import { spawn } from 'child_process';
-import { homedir } from 'os';
-import { join } from 'path';
 import { readParsedLog } from './verdict';
 import { getSettings, getPermissionModeFlag } from '@/lib/shared/config';
 import { resolveCliBin, resolveCliEnv } from '@/lib/shared/cli-bin';
+import { buildChildEnv } from '@/lib/shared/child-env';
 import type { JobData } from './types';
 import { isCliProvider, type CliProvider } from '@/lib/usage/cli-providers';
 
 const TIMEOUT_MS = 30_000;
 const MAX_TAIL_CHARS = 4000;
-
-function enrichEnv(): NodeJS.ProcessEnv {
-  const additions = [
-    join(homedir(), '.local', 'bin'),
-    '/opt/homebrew/bin',
-    '/usr/local/bin',
-  ];
-  const current = process.env.PATH || '';
-  return {
-    ...process.env,
-    PATH: [...additions.filter((p) => !current.includes(p)), current].join(':'),
-  };
-}
 
 function classify(text: string): string | null {
   const t = text.trim().toUpperCase().replace(/[^A-Z ]/g, '').replace(/\s+/g, ' ').trim();
@@ -89,7 +75,7 @@ export async function retryVerdictWithClaude(job: JobData): Promise<string | nul
     try {
       const [permFlag, permValue] = getPermissionModeFlag().split(' ');
       child = spawn(cliBin, ['--print', '--model', 'fast', permFlag, permValue], {
-        env: { ...enrichEnv(), ...cliEnv },
+        env: buildChildEnv(cliEnv),
         stdio: ['pipe', 'pipe', 'pipe'],
       });
     } catch (e) {
