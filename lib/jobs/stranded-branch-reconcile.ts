@@ -66,31 +66,6 @@ export interface ReconcileSummary {
   skipped: { project: string; reason: string }[];
 }
 
-// `.tamtam/` paths are excluded from the review pipeline by design (see
-// `lib/pipeline/start-review.ts` — `isTamtamPath` / `reviewablePathsFromStatus`).
-// The reconciler must agree, otherwise a project with only `.tamtam/` dirt
-// looks "stranded with dirty worktree" here but "nothing to review" to the
-// release pipeline, so each reconciler tick fires a release that
-// immediately halts at the review startup step.
-function statusLinePath(line: string): string {
-  const raw = line.slice(3).trim();
-  const renamed = raw.split(' -> ');
-  return renamed[renamed.length - 1] || raw;
-}
-
-function isTamtamStatusPath(path: string): boolean {
-  return path === '.tamtam' || path.startsWith('.tamtam/');
-}
-
-function statusHasNonTamtamPath(status: string | null): boolean {
-  if (!status) return false;
-  return status.split('\n').some((line) => {
-    if (!line.trim()) return false;
-    const p = statusLinePath(line);
-    return !!p && !isTamtamStatusPath(p);
-  });
-}
-
 // `git status --porcelain` output has format `XY␣path` per line where the
 // XY pair encodes index/worktree state and each char can be a space. Reading
 // it through the trimming `gitOutput` would eat the leading space when X is
@@ -194,45 +169,27 @@ export async function findStrandedBranches(nowMs: number = Date.now()): Promise<
       // sit on top of default yet — startRelease will commit it. Empty +
       // clean is the only state where "checkout default" is safe.
       //
-      // Two flavors of "dirty":
-      //   - `hasNonTamtamDirty` — committable code/test/doc changes the
-      //     release pipeline will actually ship. This is what should gate
-      //     "trigger a release" and "skip pr-wait detection".
-      //   - `isDirty` — raw worktree dirt including `.tamtam/` config files
-      //     (per-project agent config). `.tamtam/` paths are filtered out of
-      //     review scope (see `lib/pipeline/start-review.ts`), so a release
-      //     triggered with only `.tamtam/` dirt halts at the review startup
-      //     step ("No uncommitted changes or unpushed commits to review")
-      //     and the reconciler retries forever. We still use `isDirty` for
-      //     the safety check before `checkout default-branch` so we don't
-      //     stomp on uncommitted `.tamtam/` edits.
+      // Dirty worktree includes `.tamtam/` config files. The release router
+      // knows how to commit `.tamtam/`-only dirt by bypassing review, so any
+      // dirty worktree is recoverable work here. Fully clean empty branches
+      // are the only state where "checkout default" is safe.
       const status = await gitStatusPorcelain(path);
       const isDirty = !!(status && status.trim().length > 0);
-      const hasNonTamtamDirty = statusHasNonTamtamPath(status);
       // PR-open-awaiting-merge state: branch has commits ahead of default
       // but everything is already pushed (`@{u}..HEAD == 0`) and worktree
-      // has no shippable dirt. The PR exists and is waiting for merge —
-      // pipeline's `pr-wait` step owns this state. Triggering another
-      // release here is futile: `startRelease` correctly rejects with
-      // "Nothing to release" (no dirty, no @{u}..HEAD ahead), and the
-      // reconciler would log "rejected" on every sweep. Skip until the PR
-      // merges and the branch returns to default.
-      if (!hasNonTamtamDirty && localAhead > 0) {
+      // is clean. The PR exists and is waiting for merge — pipeline's
+      // `pr-wait` step owns this state. Triggering another release here is
+      // futile: `startRelease` correctly rejects with "Nothing to release"
+      // (no dirty, no @{u}..HEAD ahead), and the reconciler would log
+      // "rejected" on every sweep. Skip until the PR merges and the branch
+      // returns to default.
+      if (!isDirty && localAhead > 0) {
         const aheadUpstream = await gitOutput(path, ['rev-list', '--count', '@{u}..HEAD']);
         const upstreamAhead = parseInt(aheadUpstream ?? '0', 10) || 0;
         if (aheadUpstream != null && upstreamAhead === 0) {
           // Fully pushed; PR is open. Reconciler stays out of pr-wait's lane.
           continue;
         }
-      }
-      // `.tamtam/`-only dirt with no commits ahead is config drift the
-      // release pipeline cannot ship (review filters `.tamtam/` out, so
-      // every release would die at "Nothing to review"). Skip silently
-      // rather than classifying as empty-fix-branch (which would try to
-      // checkout default and get blocked by the dirty-check anyway, just
-      // noisier).
-      if (localAhead === 0 && remoteAhead === 0 && !hasNonTamtamDirty && isDirty) {
-        continue;
       }
       if (localAhead === 0 && remoteAhead === 0 && !isDirty) {
         out.push({

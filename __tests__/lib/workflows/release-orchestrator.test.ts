@@ -334,6 +334,160 @@ Verdict: NEEDS ATTENTION
     expect(r.decision).toEqual({ next: 'push', from: 'test' });
   });
 
+  it('keeps review_disabled routing when project path lookup fails during status inspection', async () => {
+    const testJob = {
+      id: 'test-1',
+      kind: 'test',
+      exitCode: 0,
+      finishedAt: 100,
+      project: 'test-tt',
+    };
+    waitForJobCompletionMock.mockResolvedValue({
+      job: testJob,
+      finished: true,
+      reason: 'finished',
+    });
+    getJobMock.mockReturnValue(testJob);
+    getProjectTestConfigMock.mockResolvedValue({ reviewDisabled: true });
+    resolveProjectPathMock.mockReturnValue(null);
+    dispatchPhaseMock.mockResolvedValue({
+      dispatched: true,
+      phase: 'push',
+      childRunId: 'wrun_push',
+    });
+
+    const r = await releaseOrchestratorWorkflow('test-1', {
+      projectName: 'test-tt',
+      parentJobId: 'release-1',
+    });
+
+    expect(execMock).not.toHaveBeenCalled();
+    expect(dispatchPhaseMock).toHaveBeenCalledWith(
+      { next: 'push', from: 'test' },
+      expect.objectContaining({ projectName: 'test-tt', parentJobId: 'release-1', prevJobId: 'test-1' }),
+    );
+    expect(r.decision).toEqual({ next: 'push', from: 'test' });
+  });
+
+  it('keeps review_disabled routing when git status inspection throws', async () => {
+    const testJob = {
+      id: 'test-1',
+      kind: 'test',
+      exitCode: 0,
+      finishedAt: 100,
+      project: 'test-tt',
+    };
+    waitForJobCompletionMock.mockResolvedValue({
+      job: testJob,
+      finished: true,
+      reason: 'finished',
+    });
+    getJobMock.mockReturnValue(testJob);
+    getProjectTestConfigMock.mockResolvedValue({ reviewDisabled: true });
+    execMock.mockRejectedValue(new Error('status failed'));
+    dispatchPhaseMock.mockResolvedValue({
+      dispatched: true,
+      phase: 'push',
+      childRunId: 'wrun_push',
+    });
+
+    const r = await releaseOrchestratorWorkflow('test-1', {
+      projectName: 'test-tt',
+      parentJobId: 'release-1',
+    });
+
+    expect(dispatchPhaseMock).toHaveBeenCalledWith(
+      { next: 'push', from: 'test' },
+      expect.objectContaining({ projectName: 'test-tt', parentJobId: 'release-1', prevJobId: 'test-1' }),
+    );
+    expect(r.decision).toEqual({ next: 'push', from: 'test' });
+  });
+
+  it('routes test → commit when only `.tamtam/` paths are dirty (review would have nothing to review)', async () => {
+    // Review filter excludes `.tamtam/` (start-review.ts), so a release
+    // with only `.tamtam/` dirt would halt at "No uncommitted changes or
+    // unpushed commits to review" even though commit/push still have work.
+    // Orchestrator should treat this as functionally review-disabled and
+    // route to commit so the chain advances through commit → push →
+    // mark-dod → pr-wait.
+    const testJob = { id: 'test-1', kind: 'test', exitCode: 0, finishedAt: 100, project: 'test-tt' };
+    waitForJobCompletionMock.mockResolvedValue({ job: testJob, finished: true, reason: 'finished' });
+    getJobMock.mockReturnValue(testJob);
+    getProjectTestConfigMock.mockResolvedValue({ reviewDisabled: false });
+    execMock.mockResolvedValue({
+      exitCode: 0,
+      stdout: ' D .tamtam/agents/improve.md\n?? .tamtam/agents/improve-app.md\n',
+    });
+    hasLocalCommitsAheadMock.mockResolvedValue(false);
+    dispatchPhaseMock.mockResolvedValue({ dispatched: true, phase: 'commit', childRunId: 'wrun_commit' });
+
+    const r = await releaseOrchestratorWorkflow('test-1', { projectName: 'test-tt', parentJobId: 'release-1' });
+
+    expect(dispatchPhaseMock).toHaveBeenCalledWith(
+      { next: 'commit', from: 'test' },
+      expect.objectContaining({ projectName: 'test-tt' }),
+    );
+    expect(r.decision).toEqual({ next: 'commit', from: 'test' });
+  });
+
+  it('routes test → review when only `.tamtam/` paths are dirty but unpushed commits exist', async () => {
+    const testJob = { id: 'test-1', kind: 'test', exitCode: 0, finishedAt: 100, project: 'test-tt' };
+    waitForJobCompletionMock.mockResolvedValue({ job: testJob, finished: true, reason: 'finished' });
+    getJobMock.mockReturnValue(testJob);
+    getProjectTestConfigMock.mockResolvedValue({ reviewDisabled: false });
+    execMock.mockResolvedValue({
+      exitCode: 0,
+      stdout: ' D .tamtam/agents/improve.md\n?? .tamtam/agents/improve-app.md\n',
+    });
+    hasLocalCommitsAheadMock.mockResolvedValue(true);
+    dispatchPhaseMock.mockResolvedValue({ dispatched: true, phase: 'review', childRunId: 'wrun_review' });
+
+    const r = await releaseOrchestratorWorkflow('test-1', { projectName: 'test-tt', parentJobId: 'release-1' });
+
+    expect(hasLocalCommitsAheadMock).toHaveBeenCalledWith('/repo/project');
+    expect(dispatchPhaseMock).toHaveBeenCalledWith(
+      { next: 'review', from: 'test' },
+      expect.objectContaining({ projectName: 'test-tt' }),
+    );
+    expect(r.decision).toEqual({ next: 'review', from: 'test' });
+  });
+
+  it('routes test → review when the working tree mixes `.tamtam/` paths with non-tamtam dirt', async () => {
+    // Non-tamtam dirt exists → reviewer has something to look at →
+    // route stays unchanged (review). Guards against over-triggering the
+    // .tamtam-only shortcut.
+    const testJob = { id: 'test-1', kind: 'test', exitCode: 0, finishedAt: 100, project: 'test-tt' };
+    waitForJobCompletionMock.mockResolvedValue({ job: testJob, finished: true, reason: 'finished' });
+    getJobMock.mockReturnValue(testJob);
+    getProjectTestConfigMock.mockResolvedValue({ reviewDisabled: false });
+    execMock.mockResolvedValue({
+      exitCode: 0,
+      stdout: ' M src/index.ts\n?? .tamtam/agents/improve.md\n',
+    });
+    dispatchPhaseMock.mockResolvedValue({ dispatched: true, phase: 'review', childRunId: 'wrun_review' });
+
+    const r = await releaseOrchestratorWorkflow('test-1', { projectName: 'test-tt', parentJobId: 'release-1' });
+
+    expect(r.decision).toEqual({ next: 'review', from: 'test' });
+  });
+
+  it('still routes test → review when the working tree is fully clean and no commits are unpushed (regression guard)', async () => {
+    // Defensive: with nothing to ship, do not synthesize reviewDisabled —
+    // let the existing decision rule pick `review` so the legacy
+    // "Nothing to release" rejection still surfaces in the trace.
+    const testJob = { id: 'test-1', kind: 'test', exitCode: 0, finishedAt: 100, project: 'test-tt' };
+    waitForJobCompletionMock.mockResolvedValue({ job: testJob, finished: true, reason: 'finished' });
+    getJobMock.mockReturnValue(testJob);
+    getProjectTestConfigMock.mockResolvedValue({ reviewDisabled: false });
+    execMock.mockResolvedValue({ exitCode: 0, stdout: '' });
+    hasLocalCommitsAheadMock.mockResolvedValue(false);
+    dispatchPhaseMock.mockResolvedValue({ dispatched: true, phase: 'review', childRunId: 'wrun_review' });
+
+    const r = await releaseOrchestratorWorkflow('test-1', { projectName: 'test-tt', parentJobId: 'release-1' });
+
+    expect(r.decision).toEqual({ next: 'review', from: 'test' });
+  });
+
   it('returns null decision + null dispatch when wait times out', async () => {
     waitForJobCompletionMock.mockResolvedValue({
       job: null,

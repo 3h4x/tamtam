@@ -14,6 +14,7 @@ import { findIssueContext, isIssueContextCompatibleWithCurrentBranch } from './s
 import { checkCliStartGate } from '@/lib/usage/resolve-provider';
 import { getReleaseReadinessFailure } from '@/lib/shared/readiness';
 import { hasFreshLgtm, hasLocalCommitsAhead } from './release-state';
+import { statusHasAnyPath, statusHasNonTamtamPath } from '@/lib/pipeline/review-scope';
 import { findBlockingRunningJob } from '@/lib/jobs/project-active-job';
 import type { IssueContext } from './release-context';
 import { appendRedactedFileSync } from '@/lib/jobs/redacted-log-writer';
@@ -114,10 +115,10 @@ async function createReleaseJob(
   }
 }
 
-async function hasChanges(projPath: string): Promise<boolean> {
+async function readWorkingTreeStatus(projPath: string): Promise<string> {
   const r = await exec('git', ['-C', projPath, 'status', '--porcelain'], { timeout: 5000 });
-  if (r.exitCode !== 0) return false;
-  return r.stdout.split('\n').some((l) => l.trim());
+  if (r.exitCode !== 0) return '';
+  return r.stdout;
 }
 
 /**
@@ -131,7 +132,8 @@ async function hasChanges(projPath: string): Promise<boolean> {
  * Decision order:
  *  1. If no changes and no unpushed commits → nothing to release
  *  2. If a test command is configured/detected → start tests
- *  3. If there are changes or unpushed commits → start review
+ *  3. If there are changes or unpushed commits → start review, unless
+ *     review is disabled or dirty paths are only `.tamtam/`
  */
 async function queueRelease(projectName: string, blockingJobId?: string): Promise<ReleaseResult> {
   const { setPendingRelease } = await import('./pending-release');
@@ -209,8 +211,10 @@ export async function startRelease(projectName: string, options: StartReleaseOpt
 
   const issueContext = await resolveReleaseIssueContext(projectName, projPath, sourceJob);
 
-  const changes = await hasChanges(projPath);
+  const status = await readWorkingTreeStatus(projPath);
+  const changes = statusHasAnyPath(status);
   const unpushed = await hasLocalCommitsAhead(projPath);
+  const hasOnlyTamtamChanges = changes && !statusHasNonTamtamPath(status) && !unpushed;
   if (!changes && !unpushed) {
     return { ok: false, status: 400, detail: 'Nothing to release — no changes and no unpushed commits' };
   }
@@ -307,11 +311,13 @@ export async function startRelease(projectName: string, options: StartReleaseOpt
     }
 
     // If review is disabled per-project, short-circuit to commit — treat the
-    // agent's own prompt as the review step. No autoCommit gating needed: we're
-    // already inside an explicit release, which implies commit intent (same reason
-    // job-storage.ts's completion hook lets `inRelease` bypass autoCommitEnabled).
+    // agent's own prompt as the review step. `.tamtam/`-only working-tree dirt
+    // also skips review because start-review excludes those paths from scope.
+    // No autoCommit gating needed: we're already inside an explicit release,
+    // which implies commit intent (same reason job-storage.ts's completion hook
+    // lets `inRelease` bypass autoCommitEnabled).
     const reviewDisabled = !!(await getProjectTestConfig(projectName))?.reviewDisabled;
-    if (reviewDisabled) {
+    if (reviewDisabled || hasOnlyTamtamChanges) {
       const r = await startProjectCommit(projectName);
       if (!r.ok) return { ok: false, status: r.status, detail: r.detail };
       return { ok: true, step: 'commit' as const, releaseJobId, message: r.message };

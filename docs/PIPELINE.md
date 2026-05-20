@@ -127,12 +127,13 @@ startRelease()
   └─ Otherwise:
       ├─ testCommand configured → start TEST
       └─ No testCommand:
-          ├─ Has uncommitted changes → start REVIEW, or COMMIT when review_disabled is on
+          ├─ Has uncommitted changes → start REVIEW, or COMMIT when review_disabled is on / only `.tamtam/` paths changed and no unpushed commits exist
           └─ Only unpushed commits → start REVIEW against @{u}..HEAD, or PUSH when review_disabled is on
 
 TEST
   ├─ exit 0  → completion hook → start REVIEW when uncommitted changes or unpushed commits exist
   │                              → when review_disabled is on: COMMIT for uncommitted changes, PUSH for unpushed commits
+  │                              → when only dirty working-tree paths are under `.tamtam/` and no unpushed commits exist: COMMIT (review has no scope)
   │                              → otherwise start PUSH/no-op
   └─ exit ≠0 → completion hook → start FIX → re-run TEST (capped at 3 tests per release)
                                  → otherwise finalize release (exit 1)
@@ -291,7 +292,7 @@ Called by `markDone()` after every job finishes. Hooks run in order:
 2. **Review mark**: If a working-tree `review` exits 0, call `markReviewed(project, path)` to store a commit-aware review fingerprint (`git status` + `HEAD` + upstream) used by the fresh-LGTM skip. PR-diff reviews (`sourceType: 'pr_review'`) do not update that local fingerprint or the incremental reviewed ref. On `LGTM` verdict from a working-tree review, also pin `refs/tamtam/reviewed/<branch>` to `HEAD` — the next pipeline review narrows its scope from `@{u}..HEAD` to `<ref>..HEAD` so already-approved commits aren't re-reviewed (gated by `incremental_review_enabled`, default on; falls back to full scope when the ref isn't an ancestor of HEAD, e.g. after a rebase).
 3. **Review chaining**: If `review` exits 0 AND (in-release OR `auto_push_enabled`): LGTM → start PUSH; NEEDS ATTENTION → start FIX (within iteration cap); DO NOT SHIP follows `review_do_not_ship_action` in the workflow-driven release orchestrator (`fix` (default) starts FIX, `pass` files a follow-up issue and continues to commit, `abort` stops). Non-converging review loops still stop when the new review repeats the previous findings or contradicts the most recent fix's `Status: fixed` claims for the same `Finding ID`s.
 4. **Fix chaining**: If `fix` exits 0 AND (in-release OR `auto_push_enabled`): start REVIEW.
-5. **Test chaining**: If `test` exits 0 AND (in-release OR `auto_push_enabled`): start REVIEW, except when `review_disabled` is on. With review disabled, uncommitted changes go to COMMIT and existing unpushed commits go to PUSH.
+5. **Test chaining**: If `test` exits 0 AND (in-release OR `auto_push_enabled`): start REVIEW, except when `review_disabled` is on or the only dirty working-tree paths are under `.tamtam/` with no unpushed commits (the reviewer excludes `.tamtam/` from working-tree scope). With review disabled, uncommitted changes go to COMMIT and existing unpushed commits go to PUSH. With `.tamtam/`-only dirty paths and no unpushed commits, the workflow-driven release routes to COMMIT because review has no non-`.tamtam` scope.
 6. **Push hook fix**: If `push` exits ≠0 and log matches hook rejection patterns: start a generic `fix` job whose `parentJobId` points at the failed push (within `getPushFixAttemptCap()=2`). The fix prompt reads the hook error from the parent push's log.
 7. **Fix→push re-push**: When that `fix` (parent.kind === `push`) exits 0: re-run PUSH.
 8. **DoD**: If `push` exits 0 and the release is issue-linked, or the push produced a PR without issue context: start MARK-DOD unless auto-merge defers it to post-merge.

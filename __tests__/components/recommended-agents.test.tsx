@@ -134,7 +134,9 @@ describe('RecommendedAgents', () => {
     expect(container.textContent).toContain('release-gate')
     expect(container.textContent).toContain('test-add')
     expect(container.textContent).toContain('sync-watch')
+    expect(container.textContent).toContain('Optional templates')
     expect(container.textContent).toContain('Show 2 templates')
+    expect(container.textContent).toContain('2 templates stay hidden until this project needs broader coverage.')
     expect(container.textContent).not.toContain('Adds missing tests.')
     expect(container.textContent).not.toContain('legacy name tests')
 
@@ -147,9 +149,8 @@ describe('RecommendedAgents', () => {
     })
 
     expect(container.textContent).toContain('Show 1 template')
-    expect(container.textContent).toContain('1 additional template is available')
+    expect(container.textContent).toContain('1 template stays hidden until this project needs broader coverage.')
     expect(container.textContent).not.toContain('Show 1 templates')
-    expect(container.textContent).not.toContain('1 additional templates')
 
     unmount()
   })

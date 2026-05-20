@@ -54,6 +54,10 @@ function formatScheduleLabel(schedule: string | undefined): string | null {
   return schedule ? `every ${schedule}` : null
 }
 
+function formatTemplateCount(count: number): string {
+  return count === 1 ? '1 template' : `${count} templates`
+}
+
 function formatSkillCount(skillIds: string[] | undefined): string | null {
   if (!skillIds?.length) return null
   return skillIds.length === 1 ? '1 skill' : `${skillIds.length} skills`
@@ -143,11 +147,9 @@ export function RecommendedAgents({ agents, customTemplates, recommendedAgents, 
   const collapsedRecommendedPreview = recommendedSuggestions.slice(0, COLLAPSED_NAME_PREVIEW_LIMIT)
   const collapsedRecommendedRemainder = Math.max(0, recommendedSuggestions.length - collapsedRecommendedPreview.length)
   const collapsedRecommendedSummary = recommendedSuggestions.length === 1
-    ? '1 additional template is available if this project needs broader coverage.'
-    : `${recommendedSuggestions.length} additional templates are available if this project needs broader coverage.`
-  const collapsedRecommendedButtonLabel = recommendedSuggestions.length === 1
-    ? 'Show 1 template'
-    : `Show ${recommendedSuggestions.length} templates`
+    ? '1 template stays hidden until this project needs broader coverage.'
+    : `${formatTemplateCount(recommendedSuggestions.length)} stay hidden until this project needs broader coverage.`
+  const collapsedRecommendedButtonLabel = `Show ${formatTemplateCount(recommendedSuggestions.length)}`
 
   const renderSuggestion = (rec: RecommendedAgent, layout: SuggestionLayout) => {
     const isCustom = customNames.has(recommendedAgentNameKey(rec.name))
@@ -173,8 +175,8 @@ export function RecommendedAgents({ agents, customTemplates, recommendedAgents, 
                 {rec.description}
               </p>
             )}
-            {metaBadges.length > 0 && (
-              <div className="mt-1.5 flex flex-wrap gap-1.5">
+            {(metaBadges.length > 0 || aliasesLabel) && (
+              <div className="mt-1.5 flex flex-wrap items-center gap-1.5">
                 {metaBadges.map(badge => (
                   <span
                     key={badge.label}
@@ -183,12 +185,12 @@ export function RecommendedAgents({ agents, customTemplates, recommendedAgents, 
                     {badge.label}
                   </span>
                 ))}
+                {aliasesLabel && (
+                  <span className="text-[11px] leading-5 text-text-tertiary">
+                    {aliasesLabel}
+                  </span>
+                )}
               </div>
-            )}
-            {aliasesLabel && (
-              <p className="mt-1 text-[11px] leading-5 text-text-tertiary">
-                {aliasesLabel}
-              </p>
             )}
           </div>
           <Button
@@ -264,12 +266,12 @@ export function RecommendedAgents({ agents, customTemplates, recommendedAgents, 
           <h3 className="text-xs font-semibold uppercase tracking-wider text-text-secondary">Suggested templates</h3>
           <p className="text-xs text-text-tertiary">
             {prioritySuggestions.length > 0
-              ? 'Start with the priority templates below. Expand the rest only if this project needs broader coverage.'
-              : 'Missing templates for this project. The list stays compact until you ask for more coverage.'}
+              ? 'Start with the priority templates below. Optional templates stay collapsed until you ask for broader coverage.'
+              : 'Suggested templates stay compact by default. Expand the list only if this project needs broader coverage.'}
           </p>
         </div>
         <span className="shrink-0 rounded-full bg-bg-tertiary px-2 py-0.5 text-[10px] font-mono text-text-tertiary">
-          {suggestions.length} missing
+          {suggestions.length} suggested
         </span>
       </div>
       {prioritySuggestions.length > 0 && (
@@ -288,9 +290,11 @@ export function RecommendedAgents({ agents, customTemplates, recommendedAgents, 
         <div className={`space-y-2 ${prioritySuggestions.length > 0 ? 'border-t border-border/70 pt-3' : ''}`}>
           <div className="flex items-center justify-between gap-3">
             <p className="text-[10px] font-mono uppercase tracking-wide text-text-tertiary">
-              {prioritySuggestions.length > 0 ? 'More templates' : 'Suggested templates'}
+              {prioritySuggestions.length > 0 ? 'Optional templates' : 'Suggested templates'}
             </p>
-            <p className="text-[10px] font-mono text-text-tertiary">{recommendedSuggestions.length} recommended</p>
+            <p className="text-[10px] font-mono text-text-tertiary">
+              {prioritySuggestions.length > 0 ? `${recommendedSuggestions.length} optional` : `${recommendedSuggestions.length} recommended`}
+            </p>
           </div>
           <div className="grid gap-2 xl:grid-cols-2">
             {visibleRecommendedSuggestions.map(rec => renderSuggestion(rec, 'compact'))}
@@ -313,7 +317,7 @@ export function RecommendedAgents({ agents, customTemplates, recommendedAgents, 
       {visibleRecommendedSuggestions.length === 0 && recommendedSuggestions.length > 0 && (
         <div className="flex items-center justify-between gap-3 border-t border-border/70 pt-3">
           <div className="space-y-1">
-            <p className="text-[10px] font-mono uppercase tracking-wide text-text-tertiary">More templates</p>
+            <p className="text-[10px] font-mono uppercase tracking-wide text-text-tertiary">Optional templates</p>
             <div className="flex flex-wrap items-center gap-1.5">
               {collapsedRecommendedPreview.map(rec => (
                 <span

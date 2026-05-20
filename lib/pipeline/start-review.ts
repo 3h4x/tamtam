@@ -17,6 +17,7 @@ import { resolveAutoAttachedDocs, formatAutoAttachedDocsBlock } from '@/lib/skil
 import { getLock, acquireLock, isLockOwnedByActiveRelease } from './pipeline-lock';
 import { extractFindingIds, REVIEW_OUTPUT_CONTRACT, stripFinalVerdict } from './review-contract';
 import { detectReviewFrameworks, filterReviewFrameworkSections, formatReviewFrameworksBlock } from './review-frameworks';
+import { reviewablePathsFromStatus, statusHasNonTamtamPath, statusPath } from '@/lib/pipeline/review-scope';
 import type { JobData } from '@/lib/jobs/types';
 
 export type StartReviewResult =
@@ -82,34 +83,6 @@ function trimForPrompt(value: string, maxChars: number): string {
   return value.slice(0, maxChars) + `\n\n[truncated at ${maxChars} chars]\n`;
 }
 
-function statusPath(line: string): string {
-  const raw = line.slice(3).trim();
-  const renamed = raw.split(' -> ');
-  return renamed[renamed.length - 1] || raw;
-}
-
-function isTamtamPath(path: string): boolean {
-  return path === '.tamtam' || path.startsWith('.tamtam/');
-}
-
-function reviewablePathsFromStatus(status: string): string[] {
-  const paths: string[] = [];
-  for (const line of status.split('\n')) {
-    if (!line.trim()) continue;
-    const path = statusPath(line);
-    if (!path || isTamtamPath(path)) continue;
-    paths.push(path);
-  }
-  return [...new Set(paths)];
-}
-
-function hasNonTamtamStatus(status: string): boolean {
-  return status.split('\n').some((line) => {
-    if (!line.trim()) return false;
-    return !isTamtamPath(statusPath(line));
-  });
-}
-
 function readUntrackedFileForPrompt(projPath: string, relPath: string): string | null {
   const rootPath = resolve(projPath);
   const fullPath = resolve(rootPath, relPath);
@@ -155,7 +128,7 @@ async function determineReviewScope(projPath: string): Promise<ReviewScope> {
         (untrackedBlocks ? `\nUntracked file contents:\n${untrackedBlocks}` : ''),
     };
   }
-  if (statusR.exitCode === 0 && hasNonTamtamStatus(status)) {
+  if (statusR.exitCode === 0 && statusHasNonTamtamPath(status)) {
     return { ok: false, detail: 'No non-.tamtam changes to review' };
   }
 

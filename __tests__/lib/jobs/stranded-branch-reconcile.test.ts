@@ -47,14 +47,11 @@ describe('findStrandedBranches', () => {
   beforeEach(() => vi.resetModules());
   afterEach(() => { vi.resetModules(); vi.restoreAllMocks(); });
 
-  it('skips fix-branch when only `.tamtam/` paths are dirty and all commits are pushed (PR-wait state)', async () => {
-    // Simulates the reported repro: fix/issue-27 branch ahead of main by
-    // 15 commits, all pushed, only working-tree changes are .tamtam/ config
-    // edits. Without the .tamtam-aware dirty check, the reconciler would
-    // classify this as fix-branch and trigger a release every sweep — the
-    // release would die at "review startup failed: No uncommitted changes
-    // or unpushed commits to review" because `.tamtam/` is excluded from
-    // review scope by design.
+  it('classifies as fix-branch when only `.tamtam/` paths are dirty and all commits are pushed', async () => {
+    // `startRelease` now commits `.tamtam/`-only work directly because review
+    // intentionally excludes those paths. The reconciler should therefore
+    // treat `.tamtam/` dirt as recoverable work instead of mistaking this for
+    // a clean PR-wait branch.
     withCommonStubs({
       'branch --show-current': { exitCode: 0, stdout: 'fix/issue-27-add-smoke-tests' },
       'symbolic-ref refs/remotes/origin/HEAD': { exitCode: 0, stdout: 'refs/remotes/origin/main' },
@@ -69,7 +66,9 @@ describe('findStrandedBranches', () => {
     });
     const { findStrandedBranches } = await import('@/lib/jobs/stranded-branch-reconcile');
     const candidates = await findStrandedBranches(Date.now());
-    expect(candidates).toEqual([]);
+    expect(candidates).toHaveLength(1);
+    expect(candidates[0].kind).toBe('fix-branch');
+    expect(candidates[0].ahead).toBe(15);
   });
 
   it('classifies as fix-branch when working tree has non-`.tamtam/` dirt', async () => {
@@ -89,11 +88,9 @@ describe('findStrandedBranches', () => {
     expect(candidates[0].kind).toBe('fix-branch');
   });
 
-  it('skips silently when only `.tamtam/` paths are dirty and branch has no commits ahead', async () => {
-    // Config drift with no shippable work. Previously classified as
-    // empty-fix-branch, which would attempt `git checkout default` and be
-    // blocked by the dirty-check — noisy log on every sweep with no
-    // progress. Skip outright instead.
+  it('classifies as fix-branch when only `.tamtam/` paths are dirty and branch has no commits ahead', async () => {
+    // `.tamtam/`-only config drift is shippable by the release router now.
+    // Do not classify it as empty or skip it; startRelease can commit it.
     withCommonStubs({
       'branch --show-current': { exitCode: 0, stdout: 'fix/issue-5-old-branch' },
       'symbolic-ref refs/remotes/origin/HEAD': { exitCode: 0, stdout: 'refs/remotes/origin/main' },
@@ -106,7 +103,9 @@ describe('findStrandedBranches', () => {
     });
     const { findStrandedBranches } = await import('@/lib/jobs/stranded-branch-reconcile');
     const candidates = await findStrandedBranches(Date.now());
-    expect(candidates).toEqual([]);
+    expect(candidates).toHaveLength(1);
+    expect(candidates[0].kind).toBe('fix-branch');
+    expect(candidates[0].ahead).toBe(0);
   });
 
   it('still classifies fully clean stranded branch with no commits as empty-fix-branch', async () => {
