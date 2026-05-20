@@ -149,9 +149,16 @@ export function RecommendedAgents({ agents, customTemplates, recommendedAgents, 
   const visibleRecommendedSuggestions = showExpandedRecommended
     ? recommendedSuggestions
     : defaultVisibleRecommendedSuggestions
+  const visibleRecommendedNameKeys = new Set(
+    visibleRecommendedSuggestions.map(rec => recommendedAgentNameKey(rec.name)),
+  )
+  const hiddenRecommendedSuggestions = recommendedSuggestions.filter(
+    rec => !visibleRecommendedNameKeys.has(recommendedAgentNameKey(rec.name)),
+  )
   const hiddenRecommendedCount = Math.max(0, recommendedSuggestions.length - visibleRecommendedSuggestions.length)
-  const collapsedRecommendedPreview = recommendedSuggestions.slice(0, COLLAPSED_NAME_PREVIEW_LIMIT)
-  const collapsedRecommendedRemainder = Math.max(0, recommendedSuggestions.length - collapsedRecommendedPreview.length)
+  const showHiddenRecommendedPreview = collapseRecommendedByDefault && hiddenRecommendedCount > 0
+  const collapsedRecommendedPreview = hiddenRecommendedSuggestions.slice(0, COLLAPSED_NAME_PREVIEW_LIMIT)
+  const collapsedRecommendedRemainder = Math.max(0, hiddenRecommendedSuggestions.length - collapsedRecommendedPreview.length)
   const collapsedRecommendedSummary = recommendedSuggestions.length === 1
     ? '1 template stays hidden until this project needs broader coverage.'
     : `${formatTemplateCount(recommendedSuggestions.length)} stay hidden until this project needs broader coverage.`
@@ -297,9 +304,30 @@ export function RecommendedAgents({ agents, customTemplates, recommendedAgents, 
             {visibleRecommendedSuggestions.map(rec => renderSuggestion(rec, 'compact'))}
           </div>
           {(hiddenRecommendedCount > 0 || showExpandedRecommended) && (
-            <div className="flex justify-start">
+            <div className={showHiddenRecommendedPreview ? 'flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between' : 'flex justify-start'}>
+              {showHiddenRecommendedPreview && (
+                <div className="min-w-0 space-y-1">
+                  <p className="text-[10px] font-mono uppercase tracking-wide text-text-tertiary">Still hidden</p>
+                  <div className="flex flex-wrap items-center gap-1.5">
+                    {collapsedRecommendedPreview.map(rec => (
+                      <span
+                        key={rec.name}
+                        className="rounded-full border border-border bg-bg-tertiary/60 px-2 py-0.5 text-[10px] font-mono text-text-secondary"
+                      >
+                        {rec.name}
+                      </span>
+                    ))}
+                    {collapsedRecommendedRemainder > 0 && (
+                      <span className="text-[11px] text-text-tertiary">
+                        +{collapsedRecommendedRemainder} more
+                      </span>
+                    )}
+                  </div>
+                </div>
+              )}
               <Button
                 aria-expanded={showExpandedRecommended}
+                className={showHiddenRecommendedPreview ? 'shrink-0 self-start' : undefined}
                 onClick={() => setShowExpandedRecommended(prev => !prev)}
                 size="sm"
                 variant="ghost"
