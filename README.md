@@ -108,6 +108,7 @@ pnpm mcp:http <tool> [json_args]  # call local TamTam HTTP endpoints via .tamtam
 ## Configuration
 
 Runtime config, including notification throttle state, lives in the Postgres database referenced by `DATABASE_URL`. Shared per-project settings can also be committed in `.tamtam/config.yml`, and file-agent prompts can live in `.tamtam/agents/*.md`.
+Per-project dev-server lifecycle fields (`dev_server_start_command`, `dev_server_stop_command`, `dev_server_ready_url`) live in `/project/[name]/config` as DB-only project metadata and let TamTam start, gate, and tear down a project's own app during agent runs.
 
 The Settings area is split across `/settings/general`, `/settings/cli`, `/settings/pipeline`, `/settings/notifications`, `/settings/projects`, `/settings/templates`, and `/settings/database`.
 Bare `/settings` redirects to `/settings/general`, and legacy `/jobs` redirects to `/runs`.
@@ -122,6 +123,7 @@ Bare `/settings` redirects to `/settings/general`, and legacy `/jobs` redirects 
 | Project enablement | `/settings/projects` |
 | Agent templates | `/settings/templates` |
 | Per-project test commands | `/project/[name]/config` (Config tab) |
+| Per-project dev-server lifecycle | `/project/[name]/config` (Config tab, DB-only) |
 | Custom actions | `/project/[name]/config` (Config tab) |
 | Notifications | `/settings/notifications` |
 | Database backup | `/settings/database` |

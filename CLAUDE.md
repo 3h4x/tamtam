@@ -12,6 +12,7 @@ See `docs/PIPELINE.md` for the full state machine.
 
 - **Skills** — reusable prompt blocks (DB-backed + file-based from `skills/docs/skills/` and `data/skills/`).
 - **Agents** — skills + project docs + model + prompt + optional schedule + optional `prerequisiteCommand`. Intake runs through the workflow runtime (`lib/agents/intake-workflow.ts`) and hands off to `lib/jobs/inline-agent.ts`; this repo pins the local workflow world by default (`WORKFLOW_TARGET_WORLD=local`, `WORKFLOW_LOCAL_DATA_DIR=data/workflow-data`). See `docs/AGENT.md`.
+- **Per-project dev servers** — optional `dev_server_start_command`, `dev_server_stop_command`, and `dev_server_ready_url` fields let TamTam start and stop a project's local app around agent runs. See `lib/dev-server/lifecycle.ts`.
 - **Runs** — individual executions; legacy `/jobs` redirects to `/runs`.
 - **Custom Actions** — per-project bash commands with configurable button color.
 - **Retrieval** — optional pgvector-backed context from committed docs, DB skills, and completed agent reports. Toggled via `retrieval_enabled`.
@@ -33,7 +34,7 @@ Canonical post-edit command: **`pnpm run rebuild`** (build + idempotent PM2 rest
 - `app/` — pages and API route handlers.
 - `components/` — React client components; large pages have a co-located subfolder (`components/monitoring/`, `components/settings/`, …).
 - `hooks/` — custom React hooks.
-- `lib/` — business logic in domain folders: `workflows/`, `pipeline/`, `scheduling/`, `git/`, `jobs/`, `terminal/`, `agents/`, `skills/`, `recommendations/`, `shared/`, `usage/`, `db/`, `github/`, `client/`. `lib/client-api.ts` is the only top-level barrel.
+- `lib/` — business logic in domain folders: `workflows/`, `pipeline/`, `scheduling/`, `git/`, `jobs/`, `terminal/`, `agents/`, `skills/`, `recommendations/`, `shared/`, `usage/`, `db/`, `github/`, `client/`, `dev-server/`. `lib/client-api.ts` is the only top-level barrel.
 - `scripts/` — server startup + CLI shims.
 - `skills/` — vendored file-based skill library (curated, not a submodule).
 - `data/` — runtime artifacts (logs, `pg_dump` backups; gitignored). Live DB is Postgres via `DATABASE_URL`.
