@@ -87,7 +87,7 @@ Canonical post-edit command: **`pnpm run rebuild`** (build + idempotent PM2 rest
 ## Key Patterns
 
 - **Runtime state lives in DB.** Shared per-project config and file-agent prompts also live in committed `.tamtam/` files (see `docs/TAMTAM-DIR.md`).
-- **DB access** imports `db` / `schema` from `@/lib/db`. Don't open ad-hoc `pg.Pool`/`pg.Client` in `app/`, `components/`, or `lib/`; reserve direct pg for explicit maintenance scripts.
+- **DB access** imports `db` / `schema` from `@/lib/db` for TamTam-owned tables. Direct `pg.Pool`/`pg.Client` is reserved for explicit special cases such as workflow-world inspection or graphile-worker helpers; don't add ad-hoc pools for ordinary app data in `app/`, `components/`, or general `lib/` code.
 - **CLI calls go through `lib/shared/shell.ts`.** Direct `child_process` is the exception, allowed only in runner/shim/streaming paths that already need it.
 - **Client-side fetches** live under `lib/client/` and are surfaced through `lib/client-api.ts`. Extend existing helpers instead of duplicating request/response handling in components.
 - **Terminal streaming** uses the provider's `stream-json` output piped to a log file + fs.watch + NDJSON parser, then SSE at `/api/streaming/[jobId]`. See `docs/STREAMING.md`.
