@@ -390,7 +390,10 @@ export async function pushCurrentBranch(
   const baseArgs = options.noVerify ? ['--no-verify'] : [];
   const tryPush = async (extraArgs: string[] = []) => {
     const args = ['-C', projPath, 'push', ...baseArgs, ...extraArgs];
-    log(`\n$ git push${args.slice(2).length ? ' ' + args.slice(2).join(' ') : ''}\n`);
+    // Log just the args that follow `push` (skip the `-C <path> push` prefix
+    // we always prepend), otherwise the line reads `$ git push push …`.
+    const displayArgs = [...baseArgs, ...extraArgs];
+    log(`\n$ git push${displayArgs.length ? ' ' + displayArgs.join(' ') : ''}\n`);
     const r = await exec('git', args, { timeout: PUSH_TIMEOUT, killProcessGroup: true, signal });
     if (r.stdout) log(r.stdout);
     if (r.stderr) log(r.stderr);

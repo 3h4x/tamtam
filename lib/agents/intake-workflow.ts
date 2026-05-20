@@ -3,7 +3,6 @@ import { withBasePrompt, getPermissionModeFlag, getSettings } from '@/lib/shared
 import {
   buildMemoryBlock,
   readAgentMemory,
-  getAgentMemoryDir,
   getAgentMemoryPath,
   ensureAgentMemoryDir,
 } from '@/lib/agents/agent-memory';
@@ -313,11 +312,14 @@ At the end of your run, include a short final section exactly named "TamTam Run 
       ? `${systemPrompt}\n\n---\n\n${taskPrompt}`
       : systemPrompt || taskPrompt;
 
-  const memDir = getAgentMemoryDir();
-  ensureAgentMemoryDir(memDir, project);
-  const memoryPath = getAgentMemoryPath(memDir, project, agentName);
-  const currentMemory = readAgentMemory(memDir, project, agentName);
-  const memoryBlock = buildMemoryBlock(memoryPath, currentMemory);
+  const memoryBlock = readOnly
+    ? null
+    : (() => {
+        ensureAgentMemoryDir(projPath);
+        const memoryPath = getAgentMemoryPath(projPath, agentName);
+        const currentMemory = readAgentMemory(projPath, agentName);
+        return buildMemoryBlock(memoryPath, currentMemory);
+      })();
 
   // Retrieval context (pgvector, if enabled).
   let retrievedContext: string | null = null;
@@ -387,7 +389,11 @@ At the end of your run, include a short final section exactly named "TamTam Run 
     };
   }
 
-  const fullPrompt = withBasePrompt(`${promptWithRetrieval}\n\n---\n\n${memoryBlock}`, {
+  const promptWithMemory = memoryBlock
+    ? `${promptWithRetrieval}\n\n---\n\n${memoryBlock}`
+    : promptWithRetrieval;
+
+  const fullPrompt = withBasePrompt(promptWithMemory, {
     projectPath: projPath,
     provider: safeProvider,
   });

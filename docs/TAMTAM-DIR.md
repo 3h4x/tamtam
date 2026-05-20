@@ -73,3 +73,9 @@ File agents appear in the Agents tab with a `file` badge. Prompt edits are writt
 A DB agent with the same project+name takes precedence over the file agent.
 
 Reader: `lib/agents/tamtam-file-agents.ts` → `scanFileAgents(projectPath, projectName)` / `loadFileAgent(...)`. File agent IDs use the format `file:<project>:<name>` and are handled transparently in all agent API routes.
+
+## `.tamtam/cache/` (per-project, **not** committed)
+
+Local-only scratch space inside the project worktree. The only writer today is the agent memory system (`lib/agents/agent-memory.ts`), which stores the "remember this for next run" file at `.tamtam/cache/agent-memory/<agentName>.md`. The directory lives inside the worktree (rather than a global `~/.cache/tamtam/...` path) so codex-sandboxed agents — whose writable roots are limited to the workspace — can rewrite their own memory file at the end of a run.
+
+`ensureAgentMemoryDir(projPath)` also writes `.tamtam/.gitignore` with `cache/` on first use. That ignore file is committed (it's the only sensible way to give every project the rule without editing each repo's root `.gitignore`); the cache contents themselves stay local.
