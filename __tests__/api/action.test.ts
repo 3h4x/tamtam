@@ -468,6 +468,30 @@ describe('action API — file mirroring (.tamtam/config.yml)', () => {
     expect((await response.json()).actions).toEqual([]);
   });
 
+  it('PUT still returns ok and keeps the DB state when mirroring to .tamtam/config.yml fails', async () => {
+    state.writeFileConfigImpl = () => {
+      throw new Error('disk full');
+    };
+
+    const actions = [{ name: 'deploy', command: './deploy.sh' }];
+    const response = await PUT(
+      new NextRequest('http://localhost/api/projects/by-project/proj1/action', {
+        method: 'PUT',
+        body: JSON.stringify({ actions }),
+      }),
+      { params: Promise.resolve({ projectName: 'proj1' }) }
+    );
+
+    expect(response.status).toBe(200);
+    expect(await response.json()).toEqual({ status: 'ok', actions });
+
+    const getResponse = await GET(
+      new NextRequest('http://localhost/api/projects/by-project/proj1/action'),
+      { params: Promise.resolve({ projectName: 'proj1' }) }
+    );
+    expect((await getResponse.json()).actions).toEqual(actions);
+  });
+
   it('GET returns [] when file declares an explicitly empty custom_actions (file is authoritative, not DB)', async () => {
     // DB still has actions ...
     await sharedHandleRef.handle.db.execute(sql.raw(
@@ -552,6 +576,49 @@ describe('action API POST pause gate', () => {
       detail: 'Jobs are paused globally. Turn the switch back on in Settings to run custom action "Deploy".',
     });
     expect(state.jobsPausedResultMock).toHaveBeenCalledWith('run custom action "Deploy"');
+    expect(state.createJobMock).not.toHaveBeenCalled();
+    expect(state.spawnMock).not.toHaveBeenCalled();
+  });
+
+  it('returns 400 before pause or spawn work when action name is missing', async () => {
+    const response = await POST(
+      new NextRequest('http://localhost/api/projects/by-project/proj1/action', {
+        method: 'POST',
+        body: JSON.stringify({}),
+      }),
+      { params: Promise.resolve({ projectName: 'proj1' }) }
+    );
+
+    expect(response.status).toBe(400);
+    expect(await response.json()).toEqual({ detail: 'action name is required' });
+    expect(state.jobsPausedResultMock).not.toHaveBeenCalled();
+    expect(state.createJobMock).not.toHaveBeenCalled();
+    expect(state.spawnMock).not.toHaveBeenCalled();
+  });
+
+  it('returns 404 when the requested action is not present in the authoritative file actions', async () => {
+    state.jobsPausedResultMock.mockReturnValue(null);
+    customActions = [];
+    state.dbRef.current = sharedHandleRef.handle.db as unknown as typeof state.dbRef.current;
+    await sharedHandleRef.handle.db.execute(sql.raw('TRUNCATE projects, jobs, settings'));
+    await sharedHandleRef.handle.db
+      .insert(schema.projects)
+      .values({
+        name: 'proj1',
+        path: tmpDir,
+        customActions: JSON.stringify([{ name: 'Deploy', command: 'echo stale-db' }]),
+      });
+
+    const response = await POST(
+      new NextRequest('http://localhost/api/projects/by-project/proj1/action', {
+        method: 'POST',
+        body: JSON.stringify({ action: 'Deploy' }),
+      }),
+      { params: Promise.resolve({ projectName: 'proj1' }) }
+    );
+
+    expect(response.status).toBe(404);
+    expect(await response.json()).toEqual({ detail: "action 'Deploy' not found" });
     expect(state.createJobMock).not.toHaveBeenCalled();
     expect(state.spawnMock).not.toHaveBeenCalled();
   });
