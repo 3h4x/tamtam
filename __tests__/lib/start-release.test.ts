@@ -559,6 +559,57 @@ describe('startRelease — release pipeline entry decision tree', () => {
     expect(startProjectTestMock).not.toHaveBeenCalled();
   });
 
+  it('commits directly when only `.tamtam/` paths are dirty and no test command is detected', async () => {
+    detectTestCommandMock.mockReturnValue(null);
+    getProjectTestConfigMock.mockReturnValue({ reviewDisabled: false });
+    execMock
+      .mockImplementationOnce(() => gitStatus(' D .tamtam/agents/improve.md\n?? .tamtam/agents/improve-app.md\n'))
+      .mockImplementationOnce(() => gitAhead('0'))
+      .mockImplementation(defaultExec);
+
+    const r = await startRelease('proj');
+
+    expect(r.ok).toBe(true);
+    if (r.ok) expect(r.step).toBe('commit');
+    expect(startProjectCommitMock).toHaveBeenCalledWith('proj');
+    expect(startProjectReviewMock).not.toHaveBeenCalled();
+    expect(startProjectTestMock).not.toHaveBeenCalled();
+  });
+
+  it('starts review when only `.tamtam/` paths are dirty but unpushed commits exist', async () => {
+    detectTestCommandMock.mockReturnValue(null);
+    getProjectTestConfigMock.mockReturnValue({ reviewDisabled: false });
+    execMock
+      .mockImplementationOnce(() => gitStatus(' D .tamtam/agents/improve.md\n?? .tamtam/agents/improve-app.md\n'))
+      .mockImplementationOnce(() => gitAhead('2'))
+      .mockImplementation(defaultExec);
+    startProjectReviewMock.mockResolvedValue({ ok: true, jobId: 'r1' });
+
+    const r = await startRelease('proj');
+
+    expect(r.ok).toBe(true);
+    if (r.ok) expect(r.step).toBe('review');
+    expect(startProjectReviewMock).toHaveBeenCalledWith('proj');
+    expect(startProjectCommitMock).not.toHaveBeenCalled();
+  });
+
+  it('starts review when dirty paths mix `.tamtam/` and non-tamtam files with no test command', async () => {
+    detectTestCommandMock.mockReturnValue(null);
+    getProjectTestConfigMock.mockReturnValue({ reviewDisabled: false });
+    execMock
+      .mockImplementationOnce(() => gitStatus(' M src/index.ts\n?? .tamtam/agents/improve.md\n'))
+      .mockImplementationOnce(() => gitAhead('0'))
+      .mockImplementation(defaultExec);
+    startProjectReviewMock.mockResolvedValue({ ok: true, jobId: 'r1' });
+
+    const r = await startRelease('proj');
+
+    expect(r.ok).toBe(true);
+    if (r.ok) expect(r.step).toBe('review');
+    expect(startProjectReviewMock).toHaveBeenCalledWith('proj');
+    expect(startProjectCommitMock).not.toHaveBeenCalled();
+  });
+
   it('skips review and commits directly when review_disabled is set for the project', async () => {
     detectTestCommandMock.mockReturnValue(null);
     getProjectTestConfigMock.mockReturnValue({ reviewDisabled: true });

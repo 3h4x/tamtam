@@ -17,6 +17,7 @@
 import type { WaitForJobResult } from '@/lib/workflows/wait-for-job';
 import type { NextPhase } from '@/lib/workflows/decide-next-phase';
 import type { DispatchContext, DispatchPhaseOutcome } from '@/lib/workflows/dispatch-phase';
+import { statusHasNonTamtamPath } from '@/lib/pipeline/review-scope';
 
 export interface OrchestratorTickResult {
   waited: WaitForJobResult;
@@ -201,25 +202,40 @@ async function decideStep(jobId: string): Promise<NextPhase> {
   let hasUncommittedChanges = false;
   let hasUnpushedCommits = false;
   if (job.kind === 'test' && (job.exitCode ?? -1) === 0) {
+    let configReviewDisabled = false;
     try {
       const { getProjectTestConfig } = await import('@/lib/scheduling/scheduling');
-      reviewDisabled = !!(await getProjectTestConfig(job.project))?.reviewDisabled;
+      configReviewDisabled = !!(await getProjectTestConfig(job.project))?.reviewDisabled;
+      reviewDisabled = configReviewDisabled;
     } catch {}
-    if (reviewDisabled) {
-      try {
-        const { resolveProjectPath } = await import('@/lib/shared/project-data');
-        const projPath = resolveProjectPath(job.project);
-        if (projPath) {
-          const { exec } = await import('@/lib/shared/shell');
-          const changes = await exec('git', ['-C', projPath, 'status', '--porcelain'], { timeout: 5000 });
-          hasUncommittedChanges = changes.exitCode === 0 && changes.stdout.trim().length > 0;
-          if (!hasUncommittedChanges) {
-            const { hasLocalCommitsAhead } = await import('@/lib/pipeline/release-state');
-            hasUnpushedCommits = await hasLocalCommitsAhead(projPath);
-          }
+    try {
+      const { resolveProjectPath } = await import('@/lib/shared/project-data');
+      const projPath = resolveProjectPath(job.project);
+      if (projPath) {
+        const { exec } = await import('@/lib/shared/shell');
+        const changes = await exec('git', ['-C', projPath, 'status', '--porcelain'], { timeout: 5000 });
+        hasUncommittedChanges = changes.exitCode === 0 && changes.stdout.trim().length > 0;
+        const hasReviewablePath = changes.exitCode === 0 && statusHasNonTamtamPath(changes.stdout);
+        if (!hasUncommittedChanges || !hasReviewablePath) {
+          const { hasLocalCommitsAhead } = await import('@/lib/pipeline/release-state');
+          hasUnpushedCommits = await hasLocalCommitsAhead(projPath);
         }
-      } catch {}
-    }
+        // Route past `review` when the reviewer would have nothing to look
+        // at. `start-review.ts` filters `.tamtam/` paths out of review scope
+        // by design (per-project agent config isn't reviewable work) and
+        // aborts the release with "No uncommitted changes or unpushed
+        // commits to review" if filtering leaves the scope empty — that
+        // halts the chain at `test` even though `commit`/`push`/`pr-wait`
+        // still have work to do (e.g. shipping a `.tamtam/` rename, or
+        // pushing onto a branch whose PR is blocked on a merge conflict).
+        // Treat that as functionally equivalent to `reviewDisabled` for
+        // routing purposes — the project hasn't opted out of review, the
+        // reviewer simply has nothing to evaluate this round.
+        const nothingForReviewerToSee = !hasReviewablePath && !hasUnpushedCommits;
+        const hasShippableState = hasUncommittedChanges || hasUnpushedCommits;
+        reviewDisabled = reviewDisabled || (nothingForReviewerToSee && hasShippableState);
+      }
+    } catch {}
   }
   if (job.kind === 'mark-dod' && job.releaseId) {
     const pushJob = listJobs()
