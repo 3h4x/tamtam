@@ -251,6 +251,46 @@ function formatTitle(value: unknown): string {
 const STATUS_FILTERS = ['all', 'completed', 'running', 'pending', 'failed', 'cancelled'] as const;
 type StatusFilter = (typeof STATUS_FILTERS)[number];
 
+function statusFilterPresentation(status: StatusFilter): {
+  glyph: string | null;
+  activeClassName: string;
+  glyphClassName: string;
+} {
+  switch (status) {
+    case 'completed':
+      return {
+        glyph: '✓',
+        activeClassName: 'border-status-success/30 bg-status-success/15 text-status-success',
+        glyphClassName: 'text-status-success',
+      };
+    case 'failed':
+    case 'cancelled':
+      return {
+        glyph: status === 'failed' ? '✗' : '!',
+        activeClassName: 'border-status-error/30 bg-status-error/15 text-status-error',
+        glyphClassName: 'text-status-error',
+      };
+    case 'running':
+      return {
+        glyph: '⟳',
+        activeClassName: 'border-accent/30 bg-accent/15 text-accent',
+        glyphClassName: 'text-accent',
+      };
+    case 'pending':
+      return {
+        glyph: '○',
+        activeClassName: 'border-accent/30 bg-accent/15 text-accent',
+        glyphClassName: 'text-accent',
+      };
+    case 'all':
+      return {
+        glyph: null,
+        activeClassName: 'border-accent bg-accent/10 text-accent',
+        glyphClassName: 'text-text-tertiary',
+      };
+  }
+}
+
 export function WorkflowRunsPage() {
   const [data, setData] = useState<RunsResponse | null>(null);
   const [error, setError] = useState<string | null>(null);
@@ -376,22 +416,31 @@ export function WorkflowRunsPage() {
           className="focus-ring w-full rounded-md border border-border bg-bg-secondary px-3 py-1.5 text-sm text-text-primary placeholder:text-text-tertiary focus:border-accent focus:outline-none sm:w-72"
         />
         <div className="flex flex-wrap gap-1" role="group" aria-label="Status filter">
-          {STATUS_FILTERS.map((s) => (
-            <button
-              key={s}
-              type="button"
-              onClick={() => setStatusFilter(s)}
-              aria-pressed={statusFilter === s}
-              className={`inline-flex items-center gap-1.5 rounded-md border px-2.5 py-1 text-xs transition-colors ${
-                statusFilter === s
-                  ? 'border-accent bg-accent/10 text-accent'
-                  : 'border-border bg-bg-secondary text-text-secondary hover:text-text-primary'
-              }`}
-            >
-              <span>{s}</span>
-              <span className="font-mono tabular-nums text-text-tertiary">{statusCounts[s]}</span>
-            </button>
-          ))}
+          {STATUS_FILTERS.map((s) => {
+            const presentation = statusFilterPresentation(s);
+            const selected = statusFilter === s;
+            return (
+              <button
+                key={s}
+                type="button"
+                onClick={() => setStatusFilter(s)}
+                aria-pressed={selected}
+                className={`inline-flex items-center gap-1.5 rounded-md border px-2.5 py-1 text-xs transition-colors ${
+                  selected
+                    ? presentation.activeClassName
+                    : 'border-border bg-bg-secondary text-text-secondary hover:bg-bg-tertiary/40 hover:text-text-primary'
+                }`}
+              >
+                {presentation.glyph ? (
+                  <span className={`leading-none ${selected ? '' : presentation.glyphClassName}`} aria-hidden="true">
+                    {presentation.glyph}
+                  </span>
+                ) : null}
+                <span>{s}</span>
+                <span className="font-mono tabular-nums text-text-tertiary">{statusCounts[s]}</span>
+              </button>
+            );
+          })}
         </div>
       </div>
       {filtered.length === 0 ? (
