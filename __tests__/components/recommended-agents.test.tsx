@@ -181,6 +181,7 @@ describe('RecommendedAgents', () => {
     expect(container.textContent).toContain('test-add')
     expect(container.textContent).toContain('sync-watch')
     expect(container.textContent).toContain('Optional templates')
+    expect(container.textContent).toContain('2 hidden')
     expect(container.textContent).toContain('Show 2 templates')
     expect(container.textContent).toContain('2 templates stay hidden until this project needs broader coverage.')
     expect(container.textContent).not.toContain('Adds missing tests.')
@@ -210,6 +211,7 @@ describe('RecommendedAgents', () => {
     expect(container.textContent).toContain('project-coverage')
     expect(container.textContent).toContain('Runs project-specific checks.')
     expect(container.textContent).toContain('Custom templates stay visible; built-in options stay collapsed until you ask for broader coverage.')
+    expect(container.textContent).toContain('1 shown • 2 hidden')
     expect(container.textContent).toContain('Still hidden')
     expect(container.textContent).toContain('test-add')
     expect(container.textContent).toContain('sync-watch')
@@ -225,6 +227,7 @@ describe('RecommendedAgents', () => {
       recommendedAgents: Array.from({ length: 5 }, (_, index) => recommendedOnlyTemplate(index + 1)),
     })
 
+    expect(container.textContent).toContain('4 shown • 1 hidden')
     expect(container.textContent).toContain('Show 1 more')
     expect(container.textContent).toContain('coverage-1')
     expect(container.textContent).toContain('coverage-4')
@@ -238,6 +241,7 @@ describe('RecommendedAgents', () => {
       showMore?.click()
     })
 
+    expect(container.textContent).toContain('5 shown')
     expect(container.textContent).toContain('coverage-5')
     expect(container.textContent).toContain('Show fewer')
 
