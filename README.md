@@ -88,8 +88,8 @@ pnpm run rebuild   # build + PM2-managed start/restart on :1337 (canonical after
 Open `http://localhost:1337`, go to Settings, set your workspace path. TamTam scans for git repos and populates the projects list automatically.
 
 ```bash
-pnpm build && pnpm start  # same end result as rebuild, but split into separate commands
-pnpm restart      # build + restart via scripts/pm2-start.sh under PM2
+pnpm start        # start or idempotently restart the PM2-managed production server
+pnpm restart      # legacy immediate build + PM2 restart via scripts/pm2-start.sh
 pnpm stop       # stop the PM2 server
 pnpm logs       # PM2 log tail
 pnpm dev        # foreground next dev with HMR (local debugging only — stop PM2 first)
@@ -130,7 +130,7 @@ Optional env vars:
 
 ```bash
 DATABASE_URL=...       # Required. Postgres connection string (e.g. postgres://tamtam:tamtam@localhost:5432/tamtam)
-GITHUB_OWNER=...       # GitHub org/user fallback for CI lookups
+GITHUB_OWNER=...       # GitHub org/user fallback for repository lookups when a project has no explicit GitHub setting
 TAMTAM_BASE_URL=...    # Base URL for outbound webhook log links (default: http://localhost:1337)
 PROMETHEUS_URL=...     # Prometheus base URL for monitoring dashboard (default: http://localhost:9090)
 LOKI_URL=...           # Loki base URL for log monitoring (default: http://localhost:3100)
@@ -174,7 +174,7 @@ API routes are covered by vitest tests in `__tests__/api/`, often with combined 
 
 ## Architecture notes
 
-- Most CLI calls (git, gh, pm2, launchctl) go through `lib/shared/shell.ts`; a few specialized helpers use direct `child_process` spawning when they need tighter process control.
+- Most CLI calls (git, gh, pm2) go through `lib/shared/shell.ts`; a few specialized helpers use direct `child_process` spawning when they need tighter process control.
 - `lib/shared/project-data.ts` assembles project state with a 10s TTL cache
 - `instrumentation-node.ts` handles boot-time recovery, the 30s probe sweep, graphile-worker cron seeding/worker startup, and nightly retention cleanup after startup
 - Project detail tabs live at `/project/[name]` and `/project/[name]/[tab]` (`overview`, `config`, `history`, `terminal`, `changes`, `issues`, `docs`, `agents`)
