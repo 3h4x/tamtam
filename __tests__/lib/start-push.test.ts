@@ -1201,6 +1201,7 @@ describe('launchProjectPush — fire-and-forget', () => {
     execMock, createJobMock, updateJobMock, markDoneMock,
     mkdirSyncMock, appendFileSyncMock,
     getLockMock, acquireLockMock, resolveProjectPathMock,
+    setProjectPushResultMock, checkCliStartGateMock,
   } = mocks;
 
   function resp(exitCode: number, stdout = '', stderr = '') {
@@ -1241,6 +1242,26 @@ describe('launchProjectPush — fire-and-forget', () => {
     await flush();
     await flush();
     expect(acquireLockMock).toHaveBeenCalled();
+  });
+
+  it('marks the background job blocked when the CLI start gate rejects the push', async () => {
+    checkCliStartGateMock.mockResolvedValue({
+      ok: false,
+      status: 429,
+      detail: 'budget blocked',
+    });
+
+    const result = await launchProjectPush('proj');
+
+    expect(result).toEqual({ jobId: 'proj-push-launch-id' });
+    await flush();
+    await flush();
+
+    expect(acquireLockMock).not.toHaveBeenCalled();
+    expect(execMock).not.toHaveBeenCalled();
+    expect(setProjectPushResultMock).toHaveBeenCalledWith('proj', 'budget blocked');
+    const lastMarkDone = markDoneMock.mock.calls[markDoneMock.mock.calls.length - 1];
+    expect(lastMarkDone[1]).toBe(1);
   });
 
   it('aborts the push when async acquireLock loses the race', async () => {

@@ -19,7 +19,7 @@ The agent management dashboard built for Claude-compatible CLIs. Define skills, 
 | **Smart push** | AI-generated commit messages, diff preview, one-click push |
 | **CI repair** | Failed CI run? One click sends the selected provider to fix it |
 | **Scheduling** | Built-in interval scheduler — daily reviews, nightly audits, whatever you need, running unattended |
-| **Release pipeline** | Quality-gated, branch-context-driven flow: test → review → fix loop → commit → push → DoD → merge. Default-branch releases push directly; non-default branches open or reuse a PR |
+| **Release pipeline** | Quality-gated, branch-context-driven flow: test → review → fix loop → commit → push → DoD (`mark-dod`) → pr-wait → soak → merge. Default-branch releases push directly; non-default branches open or reuse a PR |
 | **Cross-project recommendations** | Open agent and scheduler suggestions across every project in `/recommendations` |
 | **Semantic retrieval** | Optional local context injection from project docs, DB-backed skills, and completed agent run reports via `pgvector` + Ollama |
 | **Pipeline health** | Live release pipeline metrics in `/pipeline` |
@@ -28,7 +28,7 @@ The agent management dashboard built for Claude-compatible CLIs. Define skills, 
 
 ## Architecture
 
-TamTam is a single Next.js 16 (App Router) application backed by Postgres. The Next.js server is supervised by PM2; agent intake runs through the `workflow` package's Postgres-backed world, and scheduled agents run through graphile-worker, so a crash or restart does not lose in-flight work.
+TamTam is a single Next.js 16 (App Router) application backed by Postgres. The Next.js server is supervised by PM2; agent intake runs through the workflow runtime, which TamTam pins to the local world by default (`WORKFLOW_TARGET_WORLD=local`, `WORKFLOW_LOCAL_DATA_DIR=data/workflow-data`), and scheduled agents run through graphile-worker, so a crash or restart does not lose in-flight work.
 
 ```
        ┌──────────────────────────────────────────────────────────────┐
@@ -53,7 +53,9 @@ TamTam is a single Next.js 16 (App Router) application backed by Postgres. The N
         │  · jobs, agents, skills,    │   │ pgvector retrieval     │
         │    projects, settings…      │   └────────────────────────┘
         │  · workflow state (durable, │
-        │    in workflow DB)          │
+        │    local-world files in     │
+        │    `data/workflow-data`     │
+        │    by default)              │
         │  · pgvector retrieval index │
         └─────────────────────────────┘
 ```
@@ -61,8 +63,8 @@ TamTam is a single Next.js 16 (App Router) application backed by Postgres. The N
 ## Stack
 
 - **Next.js 16** (App Router) — frontend, API routes, and SSE streaming in one process
-- **Postgres 16 + pgvector** via `pg.Pool` + Drizzle ORM — main source of truth for jobs, agents, skills, settings, and retrieval embeddings; workflow state lives in the workflow world database by default (`WORKFLOW_POSTGRES_URL`, falling back to `DATABASE_URL`)
-- **`workflow` + `@workflow/world-postgres`** — `"use workflow"` / `"use step"` orchestration for agent intake (`composePrompt` → `startAgent`), so a server restart between steps resumes instead of losing the run
+- **Postgres 16 + pgvector** via `pg.Pool` + Drizzle ORM — main source of truth for jobs, agents, skills, settings, and retrieval embeddings
+- **`workflow` runtime** — `"use workflow"` / `"use step"` orchestration for agent intake (`composePrompt` → `startAgent`); TamTam pins the local world by default (`WORKFLOW_TARGET_WORLD=local`, `WORKFLOW_LOCAL_DATA_DIR=data/workflow-data`) and keeps workflow data under `data/workflow-data`. A Postgres-backed workflow world is an explicit operator override, not the default.
 - **graphile-worker** — durable cron queue for scheduled agents and system maintenance
 - **PM2** — supervises the long-running TamTam server; one-shot CLI jobs are spawned in-process by workflow steps and route handlers
 - **SSE** — token-by-token log streaming straight from job log files via `fs.watch` + NDJSON parser

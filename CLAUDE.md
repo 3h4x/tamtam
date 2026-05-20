@@ -4,14 +4,14 @@ Next.js monolith (App Router) for managing Claude-compatible CLI agents across m
 
 ## Vision
 
-A **quality-gated release pipeline** for each tracked repo: `test → review → (fix loop) → commit → push → dod → merge`. The **Release** button triggers it; with `auto_push_enabled`, the chain continues automatically. PR-vs-direct is decided at runtime from branch context (default branch → push direct; non-default → open or reuse a PR). Verdicts (`LGTM` / `NEEDS ATTENTION` / `DO NOT SHIP`) drive fix loops, capped at 3 verification iterations per release.
+A **quality-gated release pipeline** for each tracked repo: `test → review → (fix loop) → commit → push → DoD (mark-dod) → pr-wait → soak → merge`. The **Release** button triggers it; with `auto_push_enabled`, the chain continues automatically. PR-vs-direct is decided at runtime from branch context (default branch → push direct; non-default → open or reuse a PR). Verdicts (`LGTM` / `NEEDS ATTENTION` / `DO NOT SHIP`) drive fix loops, capped at 3 verification iterations per release.
 
 See `docs/PIPELINE.md` for the full state machine.
 
 ## Concepts
 
 - **Skills** — reusable prompt blocks (DB-backed + file-based from `skills/docs/skills/` and `data/skills/`).
-- **Agents** — skills + project docs + model + prompt + optional schedule + optional `prerequisiteCommand`. Intake runs through the `workflow` package's Postgres-backed world (`lib/agents/intake-workflow.ts`) and hands off to `lib/jobs/inline-agent.ts`; see `docs/AGENT.md`.
+- **Agents** — skills + project docs + model + prompt + optional schedule + optional `prerequisiteCommand`. Intake runs through the workflow runtime (`lib/agents/intake-workflow.ts`) and hands off to `lib/jobs/inline-agent.ts`; this repo pins the local workflow world by default (`WORKFLOW_TARGET_WORLD=local`, `WORKFLOW_LOCAL_DATA_DIR=data/workflow-data`). See `docs/AGENT.md`.
 - **Runs** — individual executions; legacy `/jobs` redirects to `/runs`.
 - **Custom Actions** — per-project bash commands with configurable button color.
 - **Retrieval** — optional pgvector-backed context from committed docs, DB skills, and completed agent reports. Toggled via `retrieval_enabled`.
@@ -24,7 +24,7 @@ Next.js 16 (App Router), React 19, TypeScript 6 strict, Tailwind v4, Drizzle + n
 
 Canonical post-edit command: **`pnpm run rebuild`** (build + idempotent PM2 restart). `pnpm dev` is foreground-only and never the long-lived server. Full reference: `docs/COMMANDS.md`.
 
-**`pnpm rebuild` is now graceful by default** (`scripts/rebuild-safe.sh`): it pauses jobs via `PATCH /api/settings {jobs_paused:true}`, polls `/api/jobs?running=1` until pipeline-step/agent/run jobs drain (default 10 min, override via `TAMTAM_REBUILD_DRAIN_TIMEOUT`), then builds + restarts via `pm2-start.sh` and unpauses. `pr-wait` is excluded from the drain set because its on-boot resume handles mid-poll interruption. If the build fails the pause is reverted; if the restart fails the pause is *kept* on so the half-restarted server doesn't pick up new work — clear it manually via `/settings`. For the legacy "kill everything immediately" behavior, use `pnpm rebuild:force` (equivalent to the old `pnpm build && pnpm start`).
+**`pnpm rebuild` is now graceful by default** (`scripts/rebuild-safe.sh`): it pauses jobs via `PATCH /api/settings {jobs_paused:true}`, polls `/api/jobs?status=running&limit=200&offset=...` until blocking pipeline-step/agent/run jobs drain (default 10 min, override via `TAMTAM_REBUILD_DRAIN_TIMEOUT`), then builds, restarts via `pm2-start.sh`, smoke-probes `/`, `/runs`, `/agents`, and `/settings/general`, and unpauses. If the smoke probe fails after restart, it does a clean `.next/` rebuild/restart before unpausing. `pr-wait` is excluded from the drain set because its on-boot resume handles mid-poll interruption. If the build fails the pause is reverted; if the restart fails the pause is *kept* on so the half-restarted server doesn't pick up new work — clear it manually via `/settings`. For the legacy "kill everything immediately" behavior, use `pnpm rebuild:force` (equivalent to the old `pnpm build && pnpm start`).
 
 **Codex sandbox exception**: do not run `pnpm build`, `pnpm restart`, or `pnpm run rebuild` from Codex sandboxed sessions. The `prebuild` workflow graph render uses Mermaid CLI → Puppeteer/Chrome, and browser process launch is unavailable in the sandbox. Use `pnpm type-check`, `pnpm lint`, and targeted tests for verification, and clearly state that production build was not run.
 
@@ -92,7 +92,7 @@ Canonical post-edit command: **`pnpm run rebuild`** (build + idempotent PM2 rest
 - **Client-side fetches** live under `lib/client/` and are surfaced through `lib/client-api.ts`. Extend existing helpers instead of duplicating request/response handling in components.
 - **Terminal streaming** uses the provider's `stream-json` output piped to a log file + fs.watch + NDJSON parser, then SSE at `/api/streaming/[jobId]`. See `docs/STREAMING.md`.
 - **One-shot job processes** are spawned **in-process** from Next.js (no PM2 per-job entries). Agent intake uses `lib/agents/intake-workflow.ts` → `lib/jobs/inline-agent.ts`. Pipeline + terminal jobs use `lib/jobs/spawn-claude-detached.ts startJobInProcess` (detached + unref'd, stdio to log fd) so they survive a PM2 restart of TamTam. `probeJobStatus` recovers state on next boot. PM2 only supervises the TamTam server itself.
-- **Pipeline orchestrator** in `lib/workflows/release-orchestrator.ts` drives every release via 7 phase workflows. Each phase wraps `startProject*` in `runWithParent(releaseJobId, ...)` so spawned children inherit `release_id`. Legacy completion-hook chain short-circuits on `releaseId`. Full reference: `docs/PIPELINE.md`.
+- **Pipeline orchestrator** in `lib/workflows/release-orchestrator.ts` drives every release via the phase workflows (`test`, `review`, `fix`, `commit`, `push`, `mark-dod`, `pr-wait`, `soak`). Each phase wraps `startProject*` in `runWithParent(releaseJobId, ...)` so spawned children inherit `release_id`. Legacy completion-hook chain short-circuits on `releaseId`. Full reference: `docs/PIPELINE.md`.
 - **Pipeline guardrails** (`lib/workflows/guards/`): `reviewIsStuck`, `fixContradictsReview`, `checkIterationCap`. Abort decisions persist `stopReason` on the release meta-job's `contextMeta` for trace visibility.
 - **Scheduled agent intervals** are handled by graphile-worker (`lib/workflows/cron/seed-agent-crons.ts`, `lib/workflows/cron/agent-cron-task.ts`, and `lib/workflows/cron/start-cron-worker.ts`), **not PM2 cron** (PM2 `cron_restart` + `--no-autostart` silently no-ops). The worker pool is pinned on `globalThis.__tamtamCronWorker` so Next.js's separate module realms share the same runner.
 - **Per-project agent serialization** (`lib/agents/pending-agent-run.ts`): only one agent runs at a time per project; concurrent calls return HTTP 202 `queued`. Same-agent duplicates return 409.

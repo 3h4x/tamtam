@@ -80,7 +80,8 @@ describe('RecommendedAgents', () => {
   it('shows legacy alias names on the built-in recommendation card', () => {
     const { container, unmount } = renderRecommendedAgents()
 
-    expect(container.textContent).toContain('also matches tests')
+    expect(container.textContent).toContain('legacy name tests')
+    expect(container.textContent).toContain('Use template')
 
     unmount()
   })
