@@ -30,6 +30,7 @@ import { getImproveConfig } from '@/lib/scheduling/scheduling';
 import { splitCommand } from '@/lib/shared/split-command';
 import { measurePrompt, checkPromptSize } from './prompt-size';
 import { redactSecrets } from '@/lib/shared/log-redaction';
+import { buildChildEnv } from '@/lib/shared/child-env';
 
 function resolveLogDir(): string {
   try {
@@ -69,10 +70,7 @@ export async function startJobInProcess(
   }
   const [bin, ...args] = cmdArgv;
 
-  // Avoid the spawned process binding to Next.js's port.
-  const childEnv: NodeJS.ProcessEnv = { ...process.env, ...(options?.env ?? {}) };
-  delete childEnv.PORT;
-  delete childEnv.HOSTNAME;
+  const childEnv = buildChildEnv(options?.env);
 
   const logFd = openSync(/*turbopackIgnore: true*/ logPath, 'a');
   const writeLog = (chunk: Buffer | string) => {

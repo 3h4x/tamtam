@@ -34,6 +34,14 @@ const syncTemplate = {
   prompt: '',
 }
 
+const customCoverageTemplate = {
+  name: 'project-coverage',
+  description: 'Runs project-specific checks.',
+  model: 'normal',
+  schedule: '24h',
+  prompt: '',
+}
+
 function recommendedOnlyTemplate(index: number) {
   return {
     name: `coverage-${index}`,
@@ -151,6 +159,22 @@ describe('RecommendedAgents', () => {
     expect(container.textContent).toContain('Show 1 template')
     expect(container.textContent).toContain('1 template stays hidden until this project needs broader coverage.')
     expect(container.textContent).not.toContain('Show 1 templates')
+
+    unmount()
+  })
+
+  it('keeps custom recommended templates visible when priority templates exist', () => {
+    const { container, unmount } = renderRecommendedAgents({
+      customTemplates: [customCoverageTemplate],
+      recommendedAgents: [releaseGateTemplate, testAddTemplate, syncTemplate],
+    })
+
+    expect(container.textContent).toContain('project-coverage')
+    expect(container.textContent).toContain('Runs project-specific checks.')
+    expect(container.textContent).toContain('Custom templates stay visible; built-in options stay collapsed until you ask for broader coverage.')
+    expect(container.textContent).toContain('Show 2 more')
+    expect(container.textContent).not.toContain('Adds missing tests.')
+    expect(container.textContent).not.toContain('Tracks cross-project drift.')
 
     unmount()
   })

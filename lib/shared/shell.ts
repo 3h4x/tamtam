@@ -1,6 +1,5 @@
 import { execFile, spawn, ExecFileOptions } from 'child_process';
-import { homedir } from 'os';
-import { join } from 'path';
+import { buildChildEnv } from '@/lib/shared/child-env';
 
 export interface ShellResult {
   stdout: string;
@@ -8,38 +7,8 @@ export interface ShellResult {
   exitCode: number;
 }
 
-const extraPaths = [
-  join(homedir(), '.local', 'bin'),
-  join(homedir(), 'Library', 'pnpm'),
-  join(homedir(), '.nvm', 'versions', 'node'),
-  '/opt/homebrew/bin',
-  '/usr/local/bin',
-];
-
 export function shellQuote(value: string): string {
   return `'${value.replace(/'/g, `'\\''`)}'`;
-}
-
-function enrichPath(): string {
-  const current = process.env.PATH || '';
-  const additions = extraPaths.filter((p) => !current.includes(p));
-  return [...additions, current].join(':');
-}
-
-function cleanEnv(): Record<string, string> {
-  const env: Record<string, string> = {};
-  for (const [key, value] of Object.entries(process.env)) {
-    if (value === undefined) continue;
-    // Strip pnpm/npm env vars that pollute child processes
-    if (key.startsWith('npm_') || key.startsWith('PNPM_') || key === 'NODE_PATH') continue;
-    // Strip PORT/HOSTNAME — Next sets these in its own process from --port/--hostname
-    // flags, so without this, every child process tamtam spawns inherits PORT=1337
-    // and any Next dev server we launch from a custom action would try to bind
-    // there instead of its own default.
-    if (key === 'PORT' || key === 'HOSTNAME') continue;
-    env[key] = value;
-  }
-  return env;
 }
 
 export function exec(
@@ -54,12 +23,7 @@ export function exec(
     abortProcessTree?: boolean;
   }
 ): Promise<ShellResult> {
-  const mergedEnv = {
-    ...cleanEnv(),
-    ...options?.env,
-    PATH: enrichPath(),
-    HOME: homedir(),
-  } as unknown as NodeJS.ProcessEnv;
+  const mergedEnv = buildChildEnv(options?.env);
 
   // killProcessGroup=true: spawn detached so we can kill(-pid) the entire tree
   // (git → hook → check.ts → vitest workers) on timeout or parent exit.

@@ -138,11 +138,15 @@ export function RecommendedAgents({ agents, customTemplates, recommendedAgents, 
 
   const prioritySuggestions = suggestions.filter(rec => getSuggestionTone(rec) !== 'recommended')
   const recommendedSuggestions = suggestions.filter(rec => getSuggestionTone(rec) === 'recommended')
+  const customRecommendedSuggestions = recommendedSuggestions.filter(rec => customNames.has(recommendedAgentNameKey(rec.name)))
   const collapseRecommendedByDefault = prioritySuggestions.length > 0
   const recommendedPreviewLimit = collapseRecommendedByDefault ? 0 : RECOMMENDED_VISIBLE_LIMIT
+  const defaultVisibleRecommendedSuggestions = collapseRecommendedByDefault
+    ? customRecommendedSuggestions
+    : recommendedSuggestions.slice(0, recommendedPreviewLimit)
   const visibleRecommendedSuggestions = showExpandedRecommended
     ? recommendedSuggestions
-    : recommendedSuggestions.slice(0, recommendedPreviewLimit)
+    : defaultVisibleRecommendedSuggestions
   const hiddenRecommendedCount = Math.max(0, recommendedSuggestions.length - visibleRecommendedSuggestions.length)
   const collapsedRecommendedPreview = recommendedSuggestions.slice(0, COLLAPSED_NAME_PREVIEW_LIMIT)
   const collapsedRecommendedRemainder = Math.max(0, recommendedSuggestions.length - collapsedRecommendedPreview.length)
@@ -266,7 +270,9 @@ export function RecommendedAgents({ agents, customTemplates, recommendedAgents, 
           <h3 className="text-xs font-semibold uppercase tracking-wider text-text-secondary">Suggested templates</h3>
           <p className="text-xs text-text-tertiary">
             {prioritySuggestions.length > 0
-              ? 'Start with the priority templates below. Optional templates stay collapsed until you ask for broader coverage.'
+              ? customRecommendedSuggestions.length > 0
+                ? 'Start with the priority templates below. Custom templates stay visible; built-in options stay collapsed until you ask for broader coverage.'
+                : 'Start with the priority templates below. Optional templates stay collapsed until you ask for broader coverage.'
               : 'Suggested templates stay compact by default. Expand the list only if this project needs broader coverage.'}
           </p>
         </div>
