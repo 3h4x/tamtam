@@ -74,4 +74,59 @@ describe('ToolBlock', () => {
 
     unmount()
   })
+
+  it('omits the summary row when no usable input field is present', () => {
+    // No file_path / command / pattern / query / url / path / description
+    // → summary === ''. The summary <span> must not render (empty/falsy).
+    const { container, unmount } = renderToolBlock({
+      tool: {
+        name: 'Bash',
+        input: JSON.stringify({ irrelevant: 'foo' }),
+        result: 'output',
+      },
+    })
+
+    // Tool name still renders.
+    expect(container.textContent).toContain('Bash')
+    // The summary span has classes `text-text-tertiary` + `truncate`. If
+    // missing, there's no truncate span in the row.
+    const truncateSpans = container.querySelectorAll('span.truncate')
+    expect(truncateSpans.length).toBe(0)
+
+    unmount()
+  })
+
+  it('formats large result lengths in kilobytes (>1024 chars)', () => {
+    const result = 'x'.repeat(2500)
+    const { container, unmount } = renderToolBlock({
+      tool: {
+        name: 'Bash',
+        input: JSON.stringify({ command: 'ls' }),
+        result,
+      },
+    })
+
+    // 2500 / 1024 = 2.44…
+    expect(container.textContent).toContain('2.4k')
+    expect(container.textContent).not.toContain('2500')
+
+    unmount()
+  })
+
+  it('renders an unknown tool name with the default color class (no crash on missing map entry)', () => {
+    const { container, unmount } = renderToolBlock({
+      tool: {
+        name: 'mcp__playwright__browser_click',
+        input: JSON.stringify({ description: 'click button' }),
+        result: 'ok',
+      },
+    })
+
+    // Default color is `text-[#9cc7ff]` — applied to the tool-name span.
+    const nameSpan = container.querySelector('.text-\\[\\#9cc7ff\\]')
+    expect(nameSpan).not.toBeNull()
+    expect(nameSpan?.textContent).toBe('mcp__playwright__browser_click')
+
+    unmount()
+  })
 })

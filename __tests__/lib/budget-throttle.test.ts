@@ -47,4 +47,41 @@ describe('budget-throttle', () => {
       msUntilReset: null,
     }, now)).toBeNull();
   });
+
+  it('caps resumesAtMs at the next reset (regression: previously overshot when utilization > 100%)', () => {
+    // Already at 120% utilization, 6h into the window. Without the cap,
+    // `requiredElapsedMs` = 120% * 7d / 100% = 8.4d, so msUntilResume
+    // would be ~8.15d — past the actual 6.75d msUntilReset. The cap
+    // pulls it back so the UI reports the reset time, not a fictional
+    // post-reset extrapolation.
+    const msUntilReset = SEVEN_DAY_WINDOW_MS - 6 * 60 * 60 * 1000;
+    const burn = computeWeeklyBurnThrottle({
+      utilization: 120,
+      resetsAt: '2026-05-09T02:00:00.000Z',
+      msUntilReset,
+    }, now);
+    expect(burn).not.toBeNull();
+    // Resume at or before the reset boundary.
+    const resumeOffsetMs = burn!.resumesAtMs - now;
+    expect(resumeOffsetMs).toBeLessThanOrEqual(msUntilReset);
+    // Specifically, since utilization > 100, the cap kicks in and
+    // resumesAtMs lands exactly at the reset.
+    expect(resumeOffsetMs).toBe(msUntilReset);
+  });
+
+  it('resume time is never later than the reset for any utilization value', () => {
+    // Property-style check: for a range of plausible utilizations the
+    // capped resumesAtMs must not exceed msUntilReset.
+    const msUntilReset = SEVEN_DAY_WINDOW_MS - 6 * 60 * 60 * 1000;
+    for (const utilization of [21, 50, 99, 100, 101, 200, 1000]) {
+      const burn = computeWeeklyBurnThrottle({
+        utilization,
+        resetsAt: '2026-05-09T02:00:00.000Z',
+        msUntilReset,
+      }, now);
+      if (burn) {
+        expect(burn.resumesAtMs - now).toBeLessThanOrEqual(msUntilReset);
+      }
+    }
+  });
 });

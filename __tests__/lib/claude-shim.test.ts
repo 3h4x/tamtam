@@ -81,11 +81,11 @@ describe('claude-shim signal forwarding', () => {
       `#!/usr/bin/env node
 const fs = require('fs');
 fs.writeFileSync(${JSON.stringify(pidFile)}, String(process.pid));
-fs.writeFileSync(${JSON.stringify(readyFile)}, 'ready');
 process.on('SIGTERM', () => {
   fs.writeFileSync(${JSON.stringify(signalFile)}, 'SIGTERM');
   process.exit(143);
 });
+fs.writeFileSync(${JSON.stringify(readyFile)}, 'ready');
 setInterval(() => {}, 1000);
 `,
     );

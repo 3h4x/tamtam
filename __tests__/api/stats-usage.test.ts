@@ -24,7 +24,7 @@ function makeJob(overrides: Partial<JobData> = {}): JobData {
 }
 
 describe('GET /api/stats/usage', () => {
-  let GET: any;
+  let GET: typeof import('@/app/api/stats/usage/route').GET;
   let listJobsMock: ReturnType<typeof vi.fn>;
 
   beforeEach(async () => {
@@ -198,7 +198,7 @@ describe('GET /api/stats/usage', () => {
 });
 
 describe('GET /api/stats/usage — response caching', () => {
-  let GET: any;
+  let GET: typeof import('@/app/api/stats/usage/route').GET;
   let listJobsMock: ReturnType<typeof vi.fn>;
 
   beforeEach(async () => {

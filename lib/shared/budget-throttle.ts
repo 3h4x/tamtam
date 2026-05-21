@@ -32,7 +32,17 @@ export function computeWeeklyBurnThrottle(
   if (!stableEnough) return null;
 
   const requiredElapsedMs = win.utilization * SEVEN_DAY_WINDOW_MS / 100;
-  const msUntilResume = Math.max(0, requiredElapsedMs - elapsedMs);
+  // Cap the wait at the next reset boundary. Without the cap, a window
+  // where utilization is already over 100% pushes `requiredElapsedMs`
+  // past `SEVEN_DAY_WINDOW_MS`, so `msUntilResume` could exceed
+  // `msUntilReset` — telling the operator "resume in 8 days" when the
+  // budget refills 6.75 days from now and the throttle releases
+  // automatically at the reset. The cap aligns the reported resume time
+  // with the soonest moment scheduling will actually resume.
+  const msUntilResume = Math.min(
+    Math.max(0, requiredElapsedMs - elapsedMs),
+    win.msUntilReset,
+  );
 
   return {
     projectedPct,

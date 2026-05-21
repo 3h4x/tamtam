@@ -111,7 +111,14 @@ describe('WorkflowRunsPage', () => {
       expect(container.textContent).toContain('2m ago')
       expect(container.textContent).toContain('2.0 m')
       expect(container.textContent).toContain('30.0 s')
+      expect(container.textContent).toContain('active now')
+      expect(container.textContent).toContain('1 run')
     })
+
+    const activePanel = container.querySelector('section[aria-label="Active workflow runs"]')
+    expect(activePanel?.textContent).toContain('release')
+    expect(activePanel?.textContent).toContain('acme')
+    expect(activePanel?.querySelector('a')?.getAttribute('href')).toBe('/workflow-runs/run-live')
 
     const startedCell = Array.from(container.querySelectorAll('td')).find((cell) => cell.textContent === '2m ago')
     expect(startedCell?.getAttribute('title')).toBe(new Date('2026-05-20T11:58:00Z').toLocaleString())
