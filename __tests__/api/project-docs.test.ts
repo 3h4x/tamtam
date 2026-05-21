@@ -108,4 +108,39 @@ describe('GET /api/projects/by-project/{projectName}/docs', () => {
     expect(data.docs[0].path).toBe('README.md');
     expect(data.docs[0].content).toBe('# Just a readme');
   });
+
+  it('finds a lowercase readme via the case-insensitive candidate loop', async () => {
+    // The route iterates through README.md / readme.md / Readme.md
+    // candidates. On case-insensitive filesystems (macOS, Windows by
+    // default) any of those will match a file regardless of its on-disk
+    // casing; on case-sensitive filesystems (Linux) the loop's later
+    // candidates handle the lowercase / mixed-case variants. Verify the
+    // content surfaces with the canonical display name either way.
+    writeFileSync(join(tempDir, 'readme.md'), '# lowercase readme');
+    mkdirSync(join(tempDir, 'docs'));
+    writeFileSync(join(tempDir, 'docs', 'ZED.md'), '# Zed');
+    const req = new NextRequest('http://localhost/api/projects/by-project/proj1/docs');
+    const res = await GET(req, { params: Promise.resolve({ projectName: 'proj1' }) });
+    const data = await res.json();
+    expect(data.docs[0].name).toBe('README.md'); // canonical display name
+    expect(data.docs[0].content).toBe('# lowercase readme');
+    // README still sorts to position 0 ahead of docs/ entries.
+    expect(data.docs[1].name).toBe('ZED.md');
+  });
+
+  it('skips an unreadable README without surfacing it but still scans docs/', async () => {
+    // Edge case: the candidate loop pushes to docs[] AND sets hasRootReadme
+    // inside the try-catch. If the read throws, neither happens, and the
+    // sort logic must treat the result as "no README found".
+    mkdirSync(join(tempDir, 'docs'));
+    writeFileSync(join(tempDir, 'docs', 'GUIDE.md'), '# Guide');
+    // No README.md on disk. The for-of loop simply doesn't find any
+    // candidate; existsSync stays false; hasRootReadme stays false.
+    // This effectively exercises the "no README" branch of the sort.
+    const req = new NextRequest('http://localhost/api/projects/by-project/proj1/docs');
+    const res = await GET(req, { params: Promise.resolve({ projectName: 'proj1' }) });
+    const data = await res.json();
+    expect(data.docs).toHaveLength(1);
+    expect(data.docs[0].name).toBe('GUIDE.md');
+  });
 });

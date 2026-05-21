@@ -1,28 +1,16 @@
 import type { JobInfo } from '@/lib/client-api'
 
+// Client-side job-status helpers. Only `jobIsFinished` has a caller today
+// (NotificationBell uses it to gate `markJobSeen`); earlier siblings
+// (`jobIsRunning`, `jobIsAborted`, `jobNeedsAttention`, `jobSucceeded`)
+// were removed when grep confirmed they were unused. The server-side
+// equivalent of needs-attention lives at `lib/jobs/status.ts` — it
+// operates on the raw `JobData` shape and has additional review-verdict
+// logic, so don't try to share an implementation across the boundary.
 export type JobStatus = JobInfo['status'] | 'completed' | 'failed'
 
 type JobStatusLike = { status: JobStatus }
-type JobStatusWithExitCode = JobStatusLike & { exit_code: JobInfo['exit_code'] }
-
-export function jobIsRunning(job: JobStatusLike): boolean {
-  return job.status === 'running'
-}
-
-export function jobIsAborted(job: JobStatusLike): boolean {
-  return job.status === 'aborted'
-}
 
 export function jobIsFinished(job: JobStatusLike): boolean {
   return job.status !== 'running'
-}
-
-export function jobNeedsAttention(job: JobStatusWithExitCode): boolean {
-  if (job.status === 'aborted' || job.status === 'failed') return true
-  return job.status !== 'running' && job.exit_code !== null && job.exit_code !== 0
-}
-
-export function jobSucceeded(job: JobStatusWithExitCode): boolean {
-  if (job.status === 'running' || job.status === 'aborted' || job.status === 'failed') return false
-  return job.exit_code === 0 || job.exit_code === null
 }

@@ -286,7 +286,7 @@ describe('RunRow', () => {
     expect(container.textContent).toContain('startedago:123')
     expect(container.textContent).not.toContain('live')
     expect(container.textContent).not.toContain('last')
-    // started label must appear exactly once (MetaChip only, no duplicate span)
+    // "started" must appear exactly once (no duplicate label).
     expect(container.textContent!.split('started').length).toBe(2)
     unmount()
   })

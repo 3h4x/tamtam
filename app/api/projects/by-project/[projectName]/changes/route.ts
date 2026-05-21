@@ -213,13 +213,27 @@ export async function GET(
   });
 }
 
+const PULL_STRATEGIES = ['ff-only', 'merge', 'rebase'] as const;
+type PullStrategy = (typeof PULL_STRATEGIES)[number];
+
 export async function POST(
   request: NextRequest,
   { params }: { params: Promise<{ projectName: string }> }
 ) {
   const { projectName } = await params;
   const body = await request.json().catch(() => ({}));
-  const strategy: 'ff-only' | 'merge' | 'rebase' = body.strategy || 'ff-only';
+  // Strict allow-list: a bogus `strategy` value used to silently fall
+  // through to ff-only because the if-else chain below only matches the
+  // three literal strings. Returning 400 makes the contract explicit and
+  // surfaces typos in the client.
+  const rawStrategy = body.strategy ?? 'ff-only';
+  if (!(PULL_STRATEGIES as readonly string[]).includes(rawStrategy)) {
+    return NextResponse.json(
+      { detail: `strategy must be one of: ${PULL_STRATEGIES.join(', ')}` },
+      { status: 400 },
+    );
+  }
+  const strategy: PullStrategy = rawStrategy;
 
   const projPath = resolveProjectPath(projectName);
   if (!projPath) return NextResponse.json({ detail: 'project not found' }, { status: 404 });
