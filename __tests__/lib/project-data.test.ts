@@ -183,8 +183,8 @@ describe('fetchProjectData — unpushed field', () => {
     vi.doMock('@/lib/shared/gh-status', () => ({
       ghStatusLookup: vi.fn().mockResolvedValue({}),
     }));
-    vi.doMock('@/lib/jobs/run-history', () => ({
-      lastRunLookup: vi.fn().mockReturnValue({}),
+    vi.doMock('@/lib/jobs/storage', () => ({
+      listJobs: vi.fn().mockReturnValue([]),
     }));
     vi.doMock('@/lib/scheduling/scheduling', () => ({
       getImproveConfig: vi.fn().mockReturnValue({ logDir: '/tmp/logs', claudeBin: 'claude', projects: {}, freqMin: 60 }),
@@ -348,8 +348,8 @@ describe('fetchProjectData — project selection and metadata', () => {
     vi.doMock('@/lib/shared/gh-status', () => ({
       ghStatusLookup: vi.fn().mockResolvedValue({}),
     }));
-    vi.doMock('@/lib/jobs/run-history', () => ({
-      lastRunLookup: vi.fn().mockReturnValue({}),
+    vi.doMock('@/lib/jobs/storage', () => ({
+      listJobs: vi.fn().mockReturnValue([]),
     }));
     vi.doMock('@/lib/scheduling/scheduling', () => ({
       getImproveConfig: vi.fn().mockReturnValue({ logDir: '/tmp/logs', claudeBin: 'claude', projects: {}, freqMin: 60 }),

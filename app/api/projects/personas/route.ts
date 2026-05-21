@@ -12,7 +12,12 @@ interface Persona {
   emoji: string;
 }
 
+// `time === 0` is the "never scanned" sentinel. We MUST distinguish that
+// from "scanned and the result was zero personas" — otherwise a workspace
+// with no skills/personas re-scans the filesystem on every request because
+// `data.length > 0` never gates the freshness check.
 let _personaCache: { data: Persona[]; time: number } = { data: [], time: 0 };
+const PERSONA_CACHE_TTL_S = 300;
 
 function scanDir(base: string, personas: Persona[]) {
   if (!existsSync(base)) return;
@@ -51,7 +56,9 @@ function scanDir(base: string, personas: Persona[]) {
 
 function listPersonas(): Persona[] {
   const now = Date.now() / 1000;
-  if (_personaCache.data.length > 0 && now - _personaCache.time < 300) return _personaCache.data;
+  if (_personaCache.time > 0 && now - _personaCache.time < PERSONA_CACHE_TTL_S) {
+    return _personaCache.data;
+  }
 
   const personas: Persona[] = [];
   scanDir(join(SKILLS_DIR, 'docs', 'skills'), personas);

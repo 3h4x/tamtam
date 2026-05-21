@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { resolveProjectPath } from '@/lib/shared/project-data';
+import { realPathStaysInsideProject, resolveProjectRelativePath } from '@/lib/shared/path-containment';
 import { exec } from '@/lib/shared/shell';
 
 export async function GET(
@@ -14,24 +15,40 @@ export async function GET(
   const projPath = resolveProjectPath(projectName);
   if (!projPath) return NextResponse.json({ detail: 'project not found' }, { status: 404 });
 
+  // Path-traversal guard. Without this, the untracked branch below would
+  // run `git diff --no-index -- /dev/null <file>` against any
+  // filesystem path the request supplied (`?file=/etc/passwd` or
+  // `?file=../../etc/passwd`), turning this read-only diff endpoint into
+  // an arbitrary file disclosure. Normalize the request relative to the
+  // project root and reject anything that escapes.
+  const requested = resolveProjectRelativePath(projPath, file);
+  if (!requested) {
+    return NextResponse.json({ detail: 'file outside project' }, { status: 400 });
+  }
+  const { absolutePath, relativePath } = requested;
+
   const tracked = await exec(
     'git',
-    ['-C', projPath, 'ls-files', '--error-unmatch', '--', file],
+    ['-C', projPath, 'ls-files', '--error-unmatch', '--', relativePath],
     { timeout: 5000 }
   );
 
   if (tracked.exitCode === 0) {
     const diff = await exec(
       'git',
-      ['-C', projPath, 'diff', 'HEAD', '--', file],
+      ['-C', projPath, 'diff', 'HEAD', '--', relativePath],
       { timeout: 15000 }
     );
     return NextResponse.json({ diff: diff.stdout, untracked: false });
   }
 
+  if (!realPathStaysInsideProject(projPath, absolutePath)) {
+    return NextResponse.json({ detail: 'file outside project' }, { status: 400 });
+  }
+
   const diff = await exec(
     'git',
-    ['-C', projPath, 'diff', '--no-index', '--', '/dev/null', file],
+    ['-C', projPath, 'diff', '--no-index', '--', '/dev/null', relativePath],
     { timeout: 15000 }
   );
   return NextResponse.json({ diff: diff.stdout, untracked: true });

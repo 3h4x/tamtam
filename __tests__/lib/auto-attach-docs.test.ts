@@ -1,5 +1,5 @@
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
-import { mkdtempSync, mkdirSync, writeFileSync, rmSync } from 'fs';
+import { mkdtempSync, mkdirSync, writeFileSync, rmSync, symlinkSync } from 'fs';
 import { tmpdir } from 'os';
 import { join } from 'path';
 
@@ -155,6 +155,35 @@ describe('resolveAutoAttachedDocs', () => {
       cfg([{ keywords: ['test'], doc: '../../etc/passwd' }]),
     );
     expect(result).toEqual([]);
+  });
+
+  it('accepts in-project doc filenames that start with two dots', () => {
+    writeFileSync(join(projectPath, 'docs', '..TEST.md'), '# Dotfile-like doc\n');
+    const result = resolveAutoAttachedDocs(
+      projectPath,
+      'fix the test',
+      cfg([{ keywords: ['test'], doc: 'docs/..TEST.md' }]),
+    );
+    expect(result).toHaveLength(1);
+    expect(result[0].name).toBe('..TEST.md');
+    expect(result[0].content).toContain('Dotfile-like doc');
+  });
+
+  it('rejects default-branch docs that resolve outside via an in-project symlink directory', () => {
+    const outsideDir = mkdtempSync(join(tmpdir(), 'auto-attach-docs-outside-'));
+    writeFileSync(join(outsideDir, 'SECRET.md'), '# Secret\nDo not attach.\n');
+    symlinkSync(outsideDir, join(projectPath, 'docs', 'external'), 'dir');
+
+    try {
+      const result = resolveAutoAttachedDocs(
+        projectPath,
+        'fix the test',
+        cfg([{ keywords: ['test'], doc: 'docs/external/SECRET.md' }]),
+      );
+      expect(result).toEqual([]);
+    } finally {
+      rmSync(outsideDir, { recursive: true, force: true });
+    }
   });
 
   describe('non-default branch trust boundary', () => {

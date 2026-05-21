@@ -246,6 +246,91 @@ describe('WorkflowRunDetail', () => {
     unmount()
   })
 
+  it('surfaces problem steps with jump links and highlighted rows', async () => {
+    vi.stubGlobal('fetch', vi.fn().mockResolvedValue({
+      ok: true,
+      status: 200,
+      json: async () => ({
+        run: {
+          id: 'run-failed',
+          name: 'release',
+          rawName: 'workflow.release',
+          status: 'failed',
+          createdAt: '2026-05-21T11:30:00Z',
+          startedAt: '2026-05-21T11:31:00Z',
+          completedAt: '2026-05-21T11:35:00Z',
+          durationMs: 240_000,
+          output: null,
+          error: null,
+        },
+        steps: [
+          {
+            stepId: 'step-test',
+            name: 'test',
+            rawName: 'workflow.test',
+            status: 'completed',
+            attempt: 1,
+            createdAt: '2026-05-21T11:31:00Z',
+            startedAt: '2026-05-21T11:31:00Z',
+            completedAt: '2026-05-21T11:32:00Z',
+            durationMs: 60_000,
+            input: null,
+            output: null,
+            error: null,
+          },
+          {
+            stepId: 'step-review',
+            name: 'review',
+            rawName: 'workflow.review',
+            status: 'failed',
+            attempt: 2,
+            createdAt: '2026-05-21T11:33:00Z',
+            startedAt: '2026-05-21T11:33:00Z',
+            completedAt: '2026-05-21T11:34:00Z',
+            durationMs: 60_000,
+            input: null,
+            output: null,
+            error: 'review found a blocking issue\nwith details',
+          },
+          {
+            stepId: 'step-soak',
+            name: 'soak',
+            rawName: 'workflow.soak',
+            status: 'cancelled',
+            attempt: 1,
+            createdAt: '2026-05-21T11:34:00Z',
+            startedAt: '2026-05-21T11:34:00Z',
+            completedAt: null,
+            durationMs: null,
+            input: null,
+            output: null,
+            error: null,
+          },
+        ],
+      }),
+    }))
+
+    const { container, unmount } = renderWorkflowRunDetail('run-failed')
+
+    await vi.waitFor(() => {
+      expect(container.textContent).toContain('needs attention')
+      expect(container.textContent).toContain('2 steps')
+      expect(container.textContent).toContain('review found a blocking issue')
+      expect(container.textContent).toContain('cancelled before completion')
+    })
+
+    const reviewJump = container.querySelector<HTMLAnchorElement>('a[href="#workflow-step-desktop-step-review"]')
+    expect(reviewJump?.textContent).toContain('review')
+
+    const reviewMobileCard = container.querySelector<HTMLElement>('#workflow-step-mobile-step-review')
+    expect(reviewMobileCard?.className).toContain('bg-status-error/10')
+
+    const reviewDesktopRow = container.querySelector<HTMLElement>('#workflow-step-desktop-step-review')
+    expect(reviewDesktopRow?.className).toContain('bg-status-error/10')
+
+    unmount()
+  })
+
   it('shows an ordered compact trace for step scanability', async () => {
     vi.stubGlobal('fetch', vi.fn().mockResolvedValue({
       ok: true,

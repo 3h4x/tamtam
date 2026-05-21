@@ -55,4 +55,24 @@ describe('runWithParent', () => {
     const result = runWithParent('sync-job', () => currentParent());
     expect(result).toBe('sync-job');
   });
+
+  it('propagates context across an explicit await boundary', async () => {
+    // Tightens the async coverage: not just that the callback sees the
+    // context, but that the binding survives a yield to the microtask
+    // queue (the realistic shape inside an async pipeline step).
+    let captured: string | null = null;
+    await runWithParent('await-job', async () => {
+      await Promise.resolve();
+      captured = currentParent();
+    });
+    expect(captured).toBe('await-job');
+    expect(currentParent()).toBeNull();
+  });
+
+  it('returns the promise produced by an async callback', async () => {
+    // Ensures `runWithParent` forwards the callback's resolved value
+    // rather than swallowing it — callers rely on this in start-* paths.
+    const result = await runWithParent('value-job', async () => 99);
+    expect(result).toBe(99);
+  });
 });

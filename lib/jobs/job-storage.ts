@@ -16,6 +16,7 @@ export {
   listJobs,
   unseenFinished,
   markSeen,
+  markAllUnseenFinished,
   updateJob,
   jobToDict,
   jobToListDict,

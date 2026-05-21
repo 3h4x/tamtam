@@ -3,6 +3,11 @@
 import { useEffect, useState } from 'react';
 import Link from 'next/link';
 import { WorkflowRunDetailLoadingState, WorkflowRunsEmptyState } from '@/components/workflow-runs/WorkflowRunsStates';
+import {
+  WorkflowStepAttentionPanel,
+  workflowStepAnchorId,
+  workflowStepNeedsAttention,
+} from '@/components/workflow-runs/WorkflowStepAttentionPanel';
 import { WorkflowStatusBadge, workflowStatusPresentation } from '@/components/workflow-runs/workflow-run-status';
 
 interface Step {
@@ -239,6 +244,18 @@ export function WorkflowRunDetail({ runId }: { runId: string }) {
   const now = Date.now();
   const stepStatusCounts = countStepStatuses(data.steps);
   const runDuration = formatDurationCell(data.run.status, data.run.durationMs, data.run.startedAt, now);
+  const attentionSteps = data.steps
+    .filter(workflowStepNeedsAttention)
+    .map((step) => ({
+      stepId: step.stepId,
+      name: step.name,
+      rawName: step.rawName,
+      status: step.status,
+      attempt: step.attempt,
+      durationLabel: formatDurationCell(step.status, step.durationMs, step.startedAt, now),
+      completedLabel: formatRelativeTime(step.completedAt ?? step.startedAt, now),
+      error: step.error,
+    }));
 
   return (
     <div className="p-4 sm:p-6 space-y-6">
@@ -293,6 +310,8 @@ export function WorkflowRunDetail({ runId }: { runId: string }) {
         )}
       </div>
 
+      <WorkflowStepAttentionPanel steps={attentionSteps} />
+
       <div>
         <div className="mb-2 flex flex-wrap items-center gap-2">
           <h3 className="text-sm font-medium uppercase tracking-wide text-text-secondary">
@@ -322,7 +341,15 @@ export function WorkflowRunDetail({ runId }: { runId: string }) {
             </div>
             <div className="space-y-2 sm:hidden">
               {data.steps.map((s) => (
-                <div key={s.stepId} className="rounded-md border border-border bg-bg-primary p-3">
+                <div
+                  key={s.stepId}
+                  id={workflowStepAnchorId(s.stepId, 'mobile')}
+                  className={`scroll-mt-4 rounded-md border p-3 ${
+                    workflowStepNeedsAttention(s)
+                      ? 'border-status-error/30 bg-status-error/10'
+                      : 'border-border bg-bg-primary'
+                  }`}
+                >
                   <div className="flex items-start justify-between gap-3">
                     <div className="min-w-0">
                       <div className="truncate font-mono text-xs text-text-primary" title={s.rawName}>
@@ -365,7 +392,15 @@ export function WorkflowRunDetail({ runId }: { runId: string }) {
                 </thead>
                 <tbody>
                   {data.steps.map((s) => (
-                    <tr key={s.stepId} className="border-t border-border align-top">
+                    <tr
+                      key={s.stepId}
+                      id={workflowStepAnchorId(s.stepId, 'desktop')}
+                      className={`scroll-mt-4 border-t align-top ${
+                        workflowStepNeedsAttention(s)
+                          ? 'border-status-error/30 bg-status-error/10'
+                          : 'border-border'
+                      }`}
+                    >
                       <td className="px-3 py-2 font-mono text-xs text-text-primary" title={s.rawName}>
                         <div>{s.name}</div>
                         <StepDiagnostics error={s.error} output={s.output} className="mt-1" />

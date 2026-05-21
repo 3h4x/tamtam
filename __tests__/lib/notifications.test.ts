@@ -583,7 +583,12 @@ describe('lib/notifications', () => {
     });
   });
 
-  describe('retry and backoff (via sendTestNotification)', () => {
+  // Test-button semantics: sendTestNotification is the "did I configure this
+  // correctly?" entry point, not the real notification path. It deliberately
+  // uses a single attempt with a short timeout so the UI doesn't hang for
+  // ~30s on failures (3 retries × 10s = the old behavior). The retry+backoff
+  // logic in `postWebhook` still applies to the production `notify()` path.
+  describe('sendTestNotification — single-attempt semantics', () => {
     it('returns { ok: true } on first successful fetch', async () => {
       mockFetch.mockResolvedValue({ ok: true });
       const result = await sendTestNotification(GENERIC_URL, '');
@@ -598,39 +603,34 @@ describe('lib/notifications', () => {
       expect(mockFetch).not.toHaveBeenCalled();
     });
 
-    it('retries up to maxRetries (3) times on fetch failure and returns { ok: false }', async () => {
-      vi.useFakeTimers();
+    it('does NOT retry on fetch failure (single attempt for fast UI feedback)', async () => {
       mockFetch.mockRejectedValue(new Error('network error'));
-
-      const promise = sendTestNotification(GENERIC_URL, '');
-      await vi.runAllTimersAsync();
-      const result = await promise;
-
-      expect(result.ok).toBe(false);
-      expect(mockFetch).toHaveBeenCalledTimes(3);
-      vi.useRealTimers();
-    });
-
-    it('retries on HTTP error status and succeeds on retry', async () => {
-      vi.useFakeTimers();
-      mockFetch
-        .mockResolvedValueOnce({ ok: false, status: 503 })
-        .mockResolvedValueOnce({ ok: true });
-
-      const promise = sendTestNotification(GENERIC_URL, '');
-      await vi.runAllTimersAsync();
-      const result = await promise;
-
-      expect(result.ok).toBe(true);
-      expect(mockFetch).toHaveBeenCalledTimes(2);
-      vi.useRealTimers();
-    });
-
-    it('succeeds immediately without retrying on 200', async () => {
-      mockFetch.mockResolvedValue({ ok: true });
       const result = await sendTestNotification(GENERIC_URL, '');
-      expect(result.ok).toBe(true);
+      expect(result.ok).toBe(false);
       expect(mockFetch).toHaveBeenCalledTimes(1);
+    });
+
+    it('does NOT retry on HTTP error status (single attempt for fast UI feedback)', async () => {
+      mockFetch.mockResolvedValue({ ok: false, status: 503, statusText: 'Service Unavailable' });
+      const result = await sendTestNotification(GENERIC_URL, '');
+      expect(result.ok).toBe(false);
+      expect(mockFetch).toHaveBeenCalledTimes(1);
+    });
+
+    it('surfaces the underlying error message to the caller', async () => {
+      mockFetch.mockResolvedValue({ ok: false, status: 401, statusText: 'Unauthorized' });
+      const result = await sendTestNotification(GENERIC_URL, '');
+      expect(result.ok).toBe(false);
+      // Error should include the HTTP status — operators need this to debug
+      // misconfigured webhook URLs (e.g. wrong secret rejected as 401).
+      expect(result.error).toContain('401');
+    });
+
+    it('surfaces network-error message to the caller', async () => {
+      mockFetch.mockRejectedValue(new Error('ECONNREFUSED 127.0.0.1:9999'));
+      const result = await sendTestNotification(GENERIC_URL, '');
+      expect(result.ok).toBe(false);
+      expect(result.error).toContain('ECONNREFUSED');
     });
   });
 
