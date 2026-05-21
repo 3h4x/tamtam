@@ -186,4 +186,18 @@ describe('nextFireDisplay', () => {
     expect(a).toMatch(/^next in /);
     expect(b).toMatch(/^next in /);
   });
+
+  it('returns "next in Nd" for day-suffix schedules (no redundant 0h)', () => {
+    vi.setSystemTime(new Date(2026, 0, 15, 10, 0, 0));
+    expect(nextFireDisplay('1d', 'agent-x')).toBe('next in 1d');
+    expect(nextFireDisplay('3d', 'agent-x')).toBe('next in 3d');
+    expect(nextFireDisplay('7d', 'agent-x')).toBe('next in 7d');
+    expect(nextFireDisplay('30d', 'agent-x')).toBe('next in 30d');
+  });
+
+  it('returns empty string for invalid day schedules', () => {
+    vi.setSystemTime(new Date(2026, 0, 15, 10, 0, 0));
+    expect(nextFireDisplay('0d', 'agent-x')).toBe('');
+    expect(nextFireDisplay('xd', 'agent-x')).toBe('');
+  });
 });

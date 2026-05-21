@@ -11,11 +11,11 @@ export function nextFireDisplay(schedule: string, agentId: string): string {
     const days = parseInt(s);
     if (!days || days < 1) return '';
     // Periods >= 1 day: just say "next in Nd" — we don't compute a stable
-    // hour-of-day phase for multi-day intervals.
-    const candidateMs = Date.now() + days * 86400000;
-    const diffMin = Math.round((candidateMs - Date.now()) / 60000);
-    const diffHours = Math.floor(diffMin / 60);
-    return `next in ${Math.floor(diffHours / 24)}d ${diffHours % 24}h`;
+    // hour-of-day phase for multi-day intervals, so the hour/minute
+    // remainder is always zero. (Previously this rendered `next in Nd 0h`
+    // because the formula subtracts now from `now + N*86400000`. The `0h`
+    // suffix was always redundant.)
+    return `next in ${days}d`;
   } else if (s.endsWith('h')) {
     periodHours = parseInt(s);
   } else if (s.endsWith('m')) {

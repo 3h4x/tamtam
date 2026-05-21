@@ -11,7 +11,7 @@ function makeExecResult(overrides: { exitCode?: number; stdout?: string; stderr?
 }
 
 describe('GET /api/projects/by-project/[projectName]/changes', () => {
-  let GET: any;
+  let GET: typeof import('@/app/api/projects/by-project/[projectName]/changes/route').GET;
   let resolveProjectPathMock: ReturnType<typeof vi.fn>;
   let execMock: ReturnType<typeof vi.fn>;
   let statSyncMock: ReturnType<typeof vi.fn>;
@@ -133,7 +133,7 @@ describe('GET /api/projects/by-project/[projectName]/changes', () => {
 });
 
 describe('GET /api/projects/by-project/[projectName]/changes — defaultBranch and branchMerged', () => {
-  let GET: any;
+  let GET: typeof import('@/app/api/projects/by-project/[projectName]/changes/route').GET;
   let resolveProjectPathMock: ReturnType<typeof vi.fn>;
   let execMock: ReturnType<typeof vi.fn>;
   let statSyncMock: ReturnType<typeof vi.fn>;
@@ -332,7 +332,7 @@ describe('GET /api/projects/by-project/[projectName]/changes — defaultBranch a
 });
 
 describe('POST /api/projects/by-project/[projectName]/changes', () => {
-  let POST: any;
+  let POST: typeof import('@/app/api/projects/by-project/[projectName]/changes/route').POST;
   let resolveProjectPathMock: ReturnType<typeof vi.fn>;
   let execMock: ReturnType<typeof vi.fn>;
 
@@ -393,6 +393,19 @@ describe('POST /api/projects/by-project/[projectName]/changes', () => {
     const res = await POST(req, { params: Promise.resolve({ projectName: 'myproj' }) });
     expect(res.status).toBe(200);
     expect(execMock).toHaveBeenCalledWith('git', ['-C', '/path/to/proj', 'pull', '--rebase'], { timeout: 30000 });
+  });
+
+  it('rejects unknown pull strategies with 400 (regression: silently fell through to ff-only)', async () => {
+    const req = new NextRequest('http://localhost/api/projects/by-project/myproj/changes', {
+      method: 'POST',
+      body: JSON.stringify({ strategy: 'force-overwrite' }),
+    });
+    const res = await POST(req, { params: Promise.resolve({ projectName: 'myproj' }) });
+    expect(res.status).toBe(400);
+    const data = await res.json();
+    expect(data.detail).toMatch(/strategy must be one of/i);
+    // Crucially: no git invocations should have fired before the 400.
+    expect(execMock).not.toHaveBeenCalled();
   });
 
   it('returns 409 with diverged flag when branches cannot fast-forward', async () => {
@@ -467,7 +480,7 @@ describe('POST /api/projects/by-project/[projectName]/changes', () => {
 });
 
 describe('GET /api/projects/by-project/[projectName]/changes/diff', () => {
-  let GET: any;
+  let GET: typeof import('@/app/api/projects/by-project/[projectName]/changes/diff/route').GET;
   let resolveProjectPathMock: ReturnType<typeof vi.fn>;
   let execMock: ReturnType<typeof vi.fn>;
 
