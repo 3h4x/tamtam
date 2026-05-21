@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { closeSync, openSync, readSync, statSync } from 'fs';
+import { closeSync, fstatSync, openSync, readSync } from 'fs';
 import { listJobs, getVerdict } from '@/lib/jobs/job-storage';
 import type { JobData } from '@/lib/jobs/job-storage';
 import { getSettings } from '@/lib/shared/config';
@@ -119,24 +119,32 @@ function recoveryChildrenOf(release: JobData, recoveryJobs: JobData[]): JobData[
 
 function readReleaseLogTail(release: JobData, tailBytes = 50_000): string {
   if (!release.logPath) return '';
+  // Open first, then fstatSync the fd. Previously we statSync'd the path
+  // and openSync'd it separately — if PM2 rotated the log between the
+  // two syscalls, the open fd pointed at the new file but `start` was
+  // computed from the old file's size. Now the size + read both operate
+  // on the same open fd (same race-fix as iter 65 / iter 86).
+  let fd: number;
   try {
-    const size = statSync(/*turbopackIgnore: true*/ release.logPath).size;
+    fd = openSync(/*turbopackIgnore: true*/ release.logPath, 'r');
+  } catch {
+    return '';
+  }
+  try {
+    const size = fstatSync(fd).size;
     if (size <= 0) return '';
     const start = Math.max(0, size - tailBytes);
     const length = size - start;
-    const fd = openSync(/*turbopackIgnore: true*/ release.logPath, 'r');
-    try {
-      const buffer = Buffer.alloc(length);
-      const bytesRead = readSync(fd, buffer, 0, length, start);
-      const tail = buffer.toString('utf8', 0, bytesRead);
-      if (start === 0) return tail;
-      const newlineIdx = tail.indexOf('\n');
-      return newlineIdx >= 0 ? tail.slice(newlineIdx + 1) : tail;
-    } finally {
-      closeSync(fd);
-    }
+    const buffer = Buffer.alloc(length);
+    const bytesRead = readSync(fd, buffer, 0, length, start);
+    const tail = buffer.toString('utf8', 0, bytesRead);
+    if (start === 0) return tail;
+    const newlineIdx = tail.indexOf('\n');
+    return newlineIdx >= 0 ? tail.slice(newlineIdx + 1) : tail;
   } catch {
     return '';
+  } finally {
+    closeSync(fd);
   }
 }
 

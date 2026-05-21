@@ -48,10 +48,23 @@ export function OverviewTab({
   pm2Logs: Pm2LogData | null
   window_: TimeWindow
 }) {
-  const downServices = data.prometheus.services.filter(s => s.value?.[1] === '0')
-  const upServices = data.prometheus.services.filter(s => s.value?.[1] !== '0')
-  const pm2ErrorCount = pm2Logs?.entries.filter(e => e.level === 'error').length ?? 0
-  const pm2WarnCount  = pm2Logs?.entries.filter(e => e.level === 'warn').length ?? 0
+  // Partition in one pass each — previously we filtered the same array
+  // twice (up/down for services, error/warn for pm2 logs), allocating two
+  // intermediate arrays per render. The monitoring page polls on a fixed
+  // cadence, so cutting the per-render work helps even though N is small.
+  const downServices: typeof data.prometheus.services = []
+  const upServices: typeof data.prometheus.services = []
+  for (const s of data.prometheus.services) {
+    (s.value?.[1] === '0' ? downServices : upServices).push(s)
+  }
+  let pm2ErrorCount = 0
+  let pm2WarnCount = 0
+  if (pm2Logs) {
+    for (const e of pm2Logs.entries) {
+      if (e.level === 'error') pm2ErrorCount++
+      else if (e.level === 'warn') pm2WarnCount++
+    }
+  }
   const throttle = data.notificationThrottle
   const retention = data.retention
   const nightlyCleanup = retention.lastNightlyCleanup

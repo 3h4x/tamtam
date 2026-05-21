@@ -22,19 +22,27 @@ export function normalizeAgent(row: AgentRow): NormalizedAgent {
 
 const AGENTS_CACHE_TTL = 10; // seconds
 let _agentsCache: { agents: AgentRow[]; time: number } | null = null;
-let _agentsRefreshing = false;
+// Track the in-flight refresh as a Promise (not a boolean) so concurrent
+// callers can await the same fetch instead of returning immediately and
+// reading still-stale (or empty-on-cold-start) cache state. Boolean-guard
+// versions deduplicate the DB call but leak the freshness signal — async
+// callers would receive whatever was cached at the moment they called,
+// not the post-refresh value.
+let _agentsRefreshPromise: Promise<void> | null = null;
 
-async function _doAgentsRefresh(): Promise<void> {
-  if (_agentsRefreshing) return;
-  _agentsRefreshing = true;
-  try {
-    const agents = await db.select().from(schema.agents);
-    _agentsCache = { agents, time: Date.now() / 1000 };
-  } catch (e) {
-    console.error('[agents-cache] refresh failed:', e);
-  } finally {
-    _agentsRefreshing = false;
-  }
+function _doAgentsRefresh(): Promise<void> {
+  if (_agentsRefreshPromise) return _agentsRefreshPromise;
+  _agentsRefreshPromise = (async () => {
+    try {
+      const agents = await db.select().from(schema.agents);
+      _agentsCache = { agents, time: Date.now() / 1000 };
+    } catch (e) {
+      console.error('[agents-cache] refresh failed:', e);
+    } finally {
+      _agentsRefreshPromise = null;
+    }
+  })();
+  return _agentsRefreshPromise;
 }
 
 export function getAllAgentsCached(): AgentRow[] {

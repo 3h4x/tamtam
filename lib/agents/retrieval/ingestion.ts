@@ -111,7 +111,13 @@ export async function ingestAgentRun(
     },
     ollamaUrl: opts.ollamaUrl,
     embeddingModel: opts.embeddingModel,
-    existingHash: null,
+    // Forward the original existingHash so `ingestSourceText` knows this is
+    // a re-ingestion and runs its stale-chunk delete before upserting. The
+    // early-return-on-match check above already guarantees existingHash !=
+    // newHash when we reach this call, so the only thing forwarding gains
+    // is the delete-stale step. Without it, a run that shrank from N to M
+    // chunks (M < N) leaves chunks M..N-1 orphaned in pgvector.
+    existingHash: opts.existingHash,
   });
   return { contentHash, skipped: result.skipped, stored: result.stored };
 }

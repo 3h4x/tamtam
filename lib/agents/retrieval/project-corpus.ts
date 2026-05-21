@@ -1,4 +1,5 @@
 import { existsSync, readFileSync, statSync } from 'fs';
+import { relative } from 'path';
 import { inArray, eq } from 'drizzle-orm';
 import { db, schema } from '@/lib/db';
 import { canonicalAgentNameKey } from '@/lib/agents/agent-name';
@@ -112,7 +113,13 @@ export async function collectProjectRetrievalSources(project: string, projectPat
     if (!existsSync(/*turbopackIgnore: true*/ filePath)) continue;
     const text = readFileSync(/*turbopackIgnore: true*/ filePath, 'utf-8');
     if (!text.trim()) continue;
-    const sourceId = filePath.replace(projectPath + '/', '');
+    // Use `path.relative` instead of a string-replace with a hardcoded
+    // '/' separator. `listProjectDocuments` returns paths joined with
+    // `path.sep`, so the previous string-replace would be a no-op on any
+    // platform where `path.sep !== '/'` (sourceId would end up being the
+    // full absolute path). TamTam targets Linux/macOS today, but the
+    // idiomatic API is the right one to use.
+    const sourceId = relative(projectPath, filePath);
     sources.push({
       recordId: `${project}:project_doc:${sourceId}`,
       sourceKind: 'project_doc',

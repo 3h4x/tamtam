@@ -369,13 +369,19 @@ async function drainAllQueuedAgentsAsync(): Promise<void> {
   try {
     const { listQueuedProjects, drainNextAgentRun } = await import('@/lib/agents/pending-agent-run');
     const projects = listQueuedProjects();
-    for (const project of projects) {
-      try {
-        await drainNextAgentRun(project);
-      } catch (e) {
-        console.error('[resume] agent drain failed for', project, e);
-      }
-    }
+    // Drain in parallel — each project has its own queue and its own
+    // in-flight guard inside `drainNextAgentRun`, so cross-project
+    // parallelism is safe. Sequential awaits would have made resume
+    // latency scale with project count.
+    await Promise.allSettled(
+      projects.map(async (project) => {
+        try {
+          await drainNextAgentRun(project);
+        } catch (e) {
+          console.error('[resume] agent drain failed for', project, e);
+        }
+      }),
+    );
   } catch (e) {
     console.error('[resume] failed to enumerate queued agents:', e);
   }

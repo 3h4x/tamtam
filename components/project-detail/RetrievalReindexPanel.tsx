@@ -20,7 +20,7 @@ export function RetrievalReindexPanel({ projectName }: { projectName: string }) 
     try {
       const [settingsRes, statsRes] = await Promise.all([
         fetch('/api/settings').then((r) => r.json()),
-        fetch(`/api/projects/${projectName}/retrieval/stats`).then((r) => (r.ok ? r.json() : null)).catch(() => null),
+        fetch(`/api/projects/${encodeURIComponent(projectName)}/retrieval/stats`).then((r) => (r.ok ? r.json() : null)).catch(() => null),
       ])
       setEnabled(settingsRes.retrieval_enabled === true || settingsRes.retrieval_enabled === 'true')
       if (statsRes && typeof statsRes === 'object') {
@@ -40,7 +40,7 @@ export function RetrievalReindexPanel({ projectName }: { projectName: string }) 
     setRunning(true)
     setResult(null)
     try {
-      const res = await fetch(`/api/projects/${projectName}/retrieval/reindex`, { method: 'POST' })
+      const res = await fetch(`/api/projects/${encodeURIComponent(projectName)}/retrieval/reindex`, { method: 'POST' })
       const body = await res.json().catch(() => ({}))
       setResult({ ok: res.ok, ...body })
       if (res.ok) await refreshStatus()

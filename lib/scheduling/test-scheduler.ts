@@ -95,12 +95,36 @@ export async function installTestSchedule(projectName: string, schedule: string)
   // Stagger the first fire by a stable per-project offset so multiple test
   // crons registered around boot don't stampede the test queue together.
   const initialDelay = Math.min(intervalMs, 30_000 + stableHash(`test-cron:${projectName}`, 60_000));
-  const timer = setTimeout(() => {
+  // eslint-disable-next-line prefer-const
+  let timer: NodeJS.Timeout;
+  timer = setTimeout(() => {
+    // The initial setTimeout has fired. If the entry was uninstalled (or
+    // reinstalled, which uninstalls first) during the initial delay, our
+    // `timer` is no longer the registered one — bail without firing or
+    // promoting to an interval. Otherwise an old install's interval would
+    // continue firing as an orphan after the entry has been replaced.
+    const current = state.entries.get(projectName);
+    if (!current || current.timer !== timer) return;
     void fire(projectName);
-    const interval = setInterval(() => { void fire(projectName); }, intervalMs);
+    const interval = setInterval(() => {
+      // Same check applies on every tick: if we've been uninstalled the
+      // interval needs to self-clear, otherwise it leaks.
+      const e = state.entries.get(projectName);
+      if (!e || e.timer !== interval) {
+        clearInterval(interval);
+        return;
+      }
+      void fire(projectName);
+    }, intervalMs);
     interval.unref?.();
-    const existing = state.entries.get(projectName);
-    if (existing) existing.timer = interval;
+    // Re-read after starting the interval — uninstall could have raced
+    // between the `current.timer !== timer` check and now.
+    const stillUs = state.entries.get(projectName);
+    if (stillUs && stillUs.timer === timer) {
+      stillUs.timer = interval;
+    } else {
+      clearInterval(interval);
+    }
   }, initialDelay);
   timer.unref?.();
   state.entries.set(projectName, { projectName, intervalMs, timer });

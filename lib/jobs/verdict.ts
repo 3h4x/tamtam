@@ -1,19 +1,35 @@
-import { closeSync, existsSync, openSync, readFileSync, readSync } from 'fs';
+import { closeSync, existsSync, fstatSync, openSync, readSync } from 'fs';
 import { parseStreamLines } from './claude-stream-parser';
 import type { JobData } from './types';
 
 export function readLog(job: JobData, tailBytes = 100_000): string {
-  if (!job.logPath || !existsSync(job.logPath)) return '';
+  if (!job.logPath || !existsSync(/*turbopackIgnore: true*/ job.logPath)) return '';
+  // Tail-read via fd instead of `readFileSync(path)` + `slice(-tailBytes)` —
+  // the old form allocated the entire file (multi-MB review logs are common)
+  // just to throw away everything before the tail. Mirrors `readLogHead` and
+  // the iter 86 / iter 106 fd-bound tail pattern.
+  let fd: number | null = null;
   try {
-    const content = readFileSync(job.logPath, 'utf-8');
-    if (content.length > tailBytes) {
-      const tail = content.slice(-tailBytes);
-      const newlineIdx = tail.indexOf('\n');
-      return newlineIdx >= 0 ? tail.slice(newlineIdx + 1) : tail;
+    fd = openSync(/*turbopackIgnore: true*/ job.logPath, 'r');
+    const size = fstatSync(fd).size;
+    if (size <= 0) return '';
+    if (size <= tailBytes) {
+      const buf = Buffer.alloc(size);
+      readSync(fd, buf, 0, size, 0);
+      return buf.toString('utf8');
     }
-    return content;
+    const start = size - tailBytes;
+    const buf = Buffer.alloc(tailBytes);
+    const bytesRead = readSync(fd, buf, 0, tailBytes, start);
+    const tail = buf.toString('utf8', 0, bytesRead);
+    const newlineIdx = tail.indexOf('\n');
+    return newlineIdx >= 0 ? tail.slice(newlineIdx + 1) : tail;
   } catch {
     return '';
+  } finally {
+    if (fd !== null) {
+      try { closeSync(fd); } catch { /* noop */ }
+    }
   }
 }
 

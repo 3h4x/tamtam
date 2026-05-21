@@ -74,6 +74,7 @@ describe('GET /api/stats/pipeline', () => {
   let readSyncMock: ReturnType<typeof vi.fn>;
   let closeSyncMock: ReturnType<typeof vi.fn>;
   let statSyncMock: ReturnType<typeof vi.fn>;
+  let fstatSyncMock: ReturnType<typeof vi.fn>;
   let readFileSyncMock: ReturnType<typeof vi.fn>;
   let tempDir: string;
 
@@ -98,6 +99,7 @@ describe('GET /api/stats/pipeline', () => {
       readSyncMock = vi.fn(actual.readSync);
       closeSyncMock = vi.fn(actual.closeSync);
       statSyncMock = vi.fn(actual.statSync);
+      fstatSyncMock = vi.fn(actual.fstatSync);
       readFileSyncMock = vi.fn(actual.readFileSync);
       return {
         ...actual,
@@ -105,6 +107,7 @@ describe('GET /api/stats/pipeline', () => {
         readSync: readSyncMock,
         closeSync: closeSyncMock,
         statSync: statSyncMock,
+        fstatSync: fstatSyncMock,
         readFileSync: readFileSyncMock,
       };
     });
@@ -233,7 +236,8 @@ describe('GET /api/stats/pipeline', () => {
 
     expect(data.fixLoop.hitCap).toBe(1);
     expect(readFileSyncMock).not.toHaveBeenCalled();
-    expect(statSyncMock).toHaveBeenCalledTimes(1);
+    // Size lookup now binds to the open fd via fstatSync — see route comment.
+    expect(fstatSyncMock).toHaveBeenCalledTimes(1);
     expect(openSyncMock).toHaveBeenCalledTimes(1);
     expect(readSyncMock).toHaveBeenCalledTimes(1);
     expect(closeSyncMock).toHaveBeenCalledTimes(1);

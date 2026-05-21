@@ -1,4 +1,4 @@
-import { and, desc, eq } from 'drizzle-orm';
+import { and, desc, eq, sql } from 'drizzle-orm';
 import { db, schema } from '@/lib/db';
 
 export type RecommendationStatus = 'open' | 'dismissed' | 'applied';
@@ -129,15 +129,27 @@ export async function getRecommendation(project: string, id: string): Promise<Re
  * `byProject` map (descending count) so the heaviest projects surface first.
  */
 export async function summarizeOpenRecommendations(): Promise<{ openCount: number; byProject: Record<string, number> }> {
+  // GROUP BY pushes counting to the DB instead of fetching every column of
+  // every open recommendation just to count them in JS. With a large
+  // backlog the prior `SELECT * + count-in-loop` form transferred
+  // ~hundreds of bytes per row across the wire on every poll of the
+  // global header chip; this form returns one row per project.
   const rows = await db
-    .select()
+    .select({
+      project: schema.recommendations.project,
+      count: sql<number>`count(*)`,
+    })
     .from(schema.recommendations)
-    .where(eq(schema.recommendations.status, 'open'));
+    .where(eq(schema.recommendations.status, 'open'))
+    .groupBy(schema.recommendations.project);
   const byProject: Record<string, number> = {};
+  let openCount = 0;
   for (const row of rows) {
-    byProject[row.project] = (byProject[row.project] ?? 0) + 1;
+    const c = Number(row.count);
+    byProject[row.project] = c;
+    openCount += c;
   }
-  return { openCount: rows.length, byProject };
+  return { openCount, byProject };
 }
 
 /**

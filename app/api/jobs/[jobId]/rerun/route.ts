@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { existsSync, readFileSync } from 'fs';
+import { existsSync, mkdirSync, readFileSync } from 'fs';
 import { join } from 'path';
 import { getImproveConfig } from '@/lib/scheduling/scheduling';
 import { resolveProjectPath } from '@/lib/shared/project-data';
@@ -66,18 +66,17 @@ export async function POST(
   const cliEnv = resolveCliEnv(provider, settings);
   const defaultModel = resolveCliDefaultModel(provider, settings);
 
-  const { mkdirSync } = await import('fs');
-  mkdirSync(logDir, { recursive: true });
+  mkdirSync(/*turbopackIgnore: true*/ logDir, { recursive: true });
 
   // Read original prompt if available
-  const promptPath = join(logDir, `${sourceJob.id}.prompt`);
-  const prompt = existsSync(promptPath)
-    ? readFileSync(promptPath, 'utf-8')
+  const promptPath = join(/*turbopackIgnore: true*/ logDir, `${sourceJob.id}.prompt`);
+  const prompt = existsSync(/*turbopackIgnore: true*/ promptPath)
+    ? readFileSync(/*turbopackIgnore: true*/ promptPath, 'utf-8')
     : `Rerun of ${sourceJob.kind} for ${projectName}`;
 
   const job = createJob(projectName, jobKind, 0, '');
   job.provider = provider;
-  const logPath = join(logDir, `${job.id}.log`);
+  const logPath = join(/*turbopackIgnore: true*/ logDir, `${job.id}.log`);
   job.logPath = logPath;
 
   try {
