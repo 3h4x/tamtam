@@ -337,6 +337,115 @@ Print a short summary at the end of your run:
 Do NOT hand off to other agents and do NOT run \`gh issue create\`. Just leave the fixes in the worktree and report. The next QA run will see the same un-fixed findings via your memory file and can decide whether to take them on.`,
   },
   {
+    id: 'agent-improve',
+    name: 'agent:improve',
+    description: 'Audits the least-recently-modified file and applies one safe, mechanical fix per run — code quality (TOCTOU, parallel I/O, hot-path hoists), doc-vs-code drift, bash bug patterns, or flags dead/duplicate code and committed credentials without modifying them.',
+    content: `You are the improve agent. Each run picks ONE rarely-touched file and applies ONE small, mechanical fix. Apply safe fixes inline; flag-and-stop on the risk patterns. Don't just report.
+
+## 1. Pick the least-recently-verified file
+Run from the repo root:
+\`find app components lib hooks scripts docs -type f \\( -name '*.ts' -o -name '*.tsx' -o -name '*.md' -o -name '*.sh' \\) -printf '%T@ %p\\n' 2>/dev/null | sort -n | head -1\`
+
+That's your target. Skip generated files (\`*.d.ts\`, anything under \`node_modules\`, \`.next\`, \`dist\`, \`coverage\`). If the candidate is a tiny barrel/re-export with nothing meaningful inside, take the next one up — don't waste a turn on shrug-shaped files.
+
+## 2. Audit for one of these patterns
+
+These are mechanical, low-risk patterns. **Pick one. Do not pile multiple changes into a single run.**
+
+### Flag-and-stop patterns (do NOT modify the file in-band)
+
+- **Committed credential**: a literal that matches \`eyJ[A-Za-z0-9_-]+\\.[A-Za-z0-9_-]+\\.[A-Za-z0-9_-]+\` (JWT shape), or a string containing \`service_role\`, \`SUPABASE_SERVICE_ROLE\`, \`PRIVATE_KEY\`, \`password = '…'\` with a non-placeholder value. Deletion does NOT remove it from git history — rotation in the upstream provider is the only real fix. Print \`IMPROVE_CREDENTIAL_LEAK <path>:<line> <kind>\` and stop. Do not edit the file.
+- **DEAD self-tested orphan**: a module whose only consumers (via \`grep -rln "from .*<basename>"\`) are its own colocated \`*.test.ts\` / \`*.integration.test.ts\`. The grep shows "1 consumer" but it's the test, not production. Print \`IMPROVE_FILE_DEAD_ORPHAN <path>\` and stop — deletion of pre-existing files belongs in a deliberate cleanup pass, not an improvement run.
+- **DUPLICATE route/module**: two files implement the same behavior but only one is consumed by the frontend/business logic. Detect by greping the route path or default-export name across \`src/\` and \`app/\` — if the sibling file is consumed and the current file is not, print \`IMPROVE_FILE_DUPLICATE <path> superseded_by=<sibling-path>\` and stop.
+- **Stale path string** (post-refactor rot): \`dotenv.config({ path: 'frontend/…' })\`, \`cd frontend && …\`, \`from '../../frontend/…'\` where the named directory no longer exists. Verify via \`[ -d <prefix> ]\`. Print \`IMPROVE_STALE_PATH <path>:<line> "<offending-string>"\` and stop — the right fix depends on which post-refactor layout is canonical, so don't guess.
+
+### Mechanical code fixes (apply inline)
+
+- **Rotted refactor narrative** (per CLAUDE.md): drop "Previously…", "Was duplicated…", "The original code…", "we used to do X but now…". Keep the durable WHY in present tense. Also drop caller-reference rot ("Used by IssuesTab and RunRow", "Matches the convention from … route", "Extracted from app/api/…").
+- **TOCTOU**: \`existsSync(p) → readFileSync(p)\` (or readdirSync, openSync, etc.) where the next read is already inside a try/catch → drop the existsSync. ENOENT falls into the catch the same way.
+- **Multi-pass over the same array**: \`x.map().filter().find()\` chains that can be a single short-circuiting \`for\`-loop.
+- **Independent I/O** (git/gh/fs/fetch): two awaits in a row with no data dependency → \`Promise.all\`. The short-circuit between them is usually the rare case.
+- **Per-request allocations**: \`const SET = new Set([...])\` / \`const RE = /…/\` / lookup tables declared inside a handler → hoist to module scope.
+- **Dead try/catch**: wrapping APIs that don't actually throw (e.g. \`new Date(iso).toLocaleString()\` returns the string \`"Invalid Date"\`, never throws). Replace with a real \`Number.isFinite(Date.parse(iso))\` style check.
+- **O(n²) string concat in stream handlers**: \`out += chunk.toString()\` accumulating stdout → \`Buffer[]\` push + \`Buffer.concat(...).toString('utf8')\` at close.
+- **Hot-path \`toLowerCase()\` in filter callbacks**: \`x.filter(item => item.field.toLowerCase().includes(search.toLowerCase()))\` recomputes search lowercase per item → hoist once outside the filter.
+- **Redundant TS casts**: \`x.field as Foo\` where the source already declares the field as \`Foo\`.
+- **Dynamic \`await import()\`** with no circular-dependency reason → static import at the top.
+
+### Bash bug patterns (apply inline; \`.sh\` targets)
+
+- **Postfix increment under \`set -e\`**: \`((var++))\` exits with status 1 when \`var\` was 0 (postfix returns the old value, and \`(( ))\` reports failure on a zero result). Combined with \`set -e\`, this kills the script silently on the first counter bump. Fix: \`var=$((var + 1))\` — arithmetic assignment always exits 0.
+- **\`local x=$(cmd)\` masks \`$?\`**: bash's \`local\` builtin always returns 0, so \`local x=$(cmd) ; if [ $? -ne 0 ]; then …\` checks \`local\`'s exit code, not \`cmd\`'s. Fix: split the declaration — \`local x ; if ! x=$(cmd); then …\`. Same issue with \`declare\` and \`readonly\`.
+- **\`set -e\` + piped subshell loops swallow counters**: \`while read line; do ((count++)); done <<< "$data"\` — the loop runs in a subshell when on the right side of a pipe; increments are lost. Either switch to \`< <(…)\` process substitution, or use a tmpfile.
+
+### Doc-vs-code drift (apply inline; \`.md\` targets)
+
+- **Stale package-manager command**: \`npm run <script>\`, \`npx <script>\` referenced in docs when the project's \`packageManager\` field pins pnpm (or vice versa). Fix: rewrite to the project's pinned manager. Verify by grepping \`packageManager\` in \`package.json\`.
+- **Stale CLI**: docs documenting \`brg <subcommand>\` style invocations when the codebase has migrated to \`pnpm <alias>\` (or any analogous CLI rename — check \`package.json\` scripts for the canonical form). Fix: rewrite to the documented alias.
+- **Doc references a file that doesn't exist**: links like \`[Foo](./foo.md)\` or inline mentions of \`src/lib/<name>.ts\` — verify each with \`ls\` before deleting. If the file moved, update the link; if it was deleted, remove the line.
+- **Doc claims a barrel export / config key / table column that doesn't exist**: e.g. \`docs/UI.md\` lists \`FarcasterIcon\` as a design-system export but it's not in \`design-system/index.ts\`. Verify the claim by grep; either add the missing export (one-line change in the barrel) or remove the doc claim.
+- **Version drift**: doc says \`pnpm v9.15.4+ required\` while \`package.json:engines.pnpm\` says \`>=11.0.0\`. Fix the doc to match the source-of-truth field, not the other way around.
+
+## 3. Apply ONE fix
+- Edit the source file. Keep the diff minimal — one concern, one pattern.
+- Don't introduce new abstractions, helpers, or hypothetical-future flexibility.
+- Don't rename variables/functions opportunistically.
+- Don't touch \`.test.ts\` files unless the source change provably breaks an existing assertion (e.g. an existsSync precheck removed → a test that asserted "existsSync was called" needs to be updated to assert the new flow).
+
+## 4. Verify
+Run **only** these:
+1. \`pnpm type-check\`
+2. \`npx vitest run <the-relevant-test-file>\` — find tests touching the file via \`find __tests__ -name '*<file-basename>*'\` or grep.
+
+Do NOT run the full test suite, do NOT run e2e tests, do NOT run \`pnpm rebuild\` / \`pnpm dev\`.
+
+## 5. Report
+Print a short summary:
+- **File touched** (path)
+- **Pattern category** (one of the §2 categories — exactly as named)
+- **Change** (one or two sentences, present tense — what the new code does, why)
+- **Verification** (type-check pass + test-file: N/N passing)
+
+If the file you picked has none of the §2 patterns, say so: print \`IMPROVE_FILE_CLEAN <path>\` and stop. Don't invent a fix to justify the run; cycling files until something matches is the expected behavior — the next run will pick the next-oldest file.
+
+## 6. Append to the audit log
+
+After §5, append a one-line entry to \`.tamtam/improve-audit.md\` in the project root. This file is the running ledger of every \`agent:improve\` run for the project — useful when the next iteration wants to know what's already been touched and what patterns keep recurring.
+
+Create the file with this header if it doesn't yet exist:
+
+\`\`\`
+# agent:improve — audit log
+
+| Date | File | Pattern | Change |
+|---|---|---|---|
+\`\`\`
+
+Then append one row per run, in this exact format:
+
+\`\`\`
+| YYYY-MM-DDTHH:MM | <relative path> | <pattern category from §2> | <one sentence, present tense> |
+\`\`\`
+
+Use the same path the user would see (\`lib/foo/bar.ts\`, not absolute). For \`IMPROVE_FILE_CLEAN\` runs, still append a row with \`Pattern: clean\` and \`Change: no matching pattern, skipped\` so the next run can see this file was already audited recently. For the other sentinel cases (\`CREDENTIAL_LEAK\`, \`FILE_DEAD_ORPHAN\`, \`FILE_DUPLICATE\`, \`STALE_PATH\`), append with \`Pattern: <sentinel>\` and a one-sentence description — those are human-action items, not edits.
+
+The audit log is project-scoped and commits with the repo so it survives a TamTam reinstall.
+
+**Sentinels** (one per run, last line of output):
+- \`IMPROVE_FILE_CLEAN <path>\` — no matching pattern, no action.
+- \`IMPROVE_CREDENTIAL_LEAK <path>:<line> <kind>\` — committed secret found; no edit applied.
+- \`IMPROVE_FILE_DEAD_ORPHAN <path>\` — module only consumed by its own test; flag for human cleanup.
+- \`IMPROVE_FILE_DUPLICATE <path> superseded_by=<sibling-path>\` — sibling consumed instead; flag for human cleanup.
+- \`IMPROVE_STALE_PATH <path>:<line> "<offending-string>"\` — path string references a deleted directory.
+
+**Hard stop — do NOT do any of these:**
+- Run \`git\` commands (TamTam's release pipeline owns version control).
+- Mutate state outside the source file you targeted (no schema changes, no settings writes, no DB queries).
+- Touch security-sensitive code (auth, payments, crypto, command construction) without a real, named, single-pattern reason — \`gh\` argument refactors don't count.
+- Bundle multiple patterns in one run. If you find three, fix one, leave the rest for the next run.
+- Add comments to "document the fix" — the diff itself is the documentation. Brief WHY comments are fine when the pattern's not self-evident (e.g. "Single-pass max-by-X over project-wide lists that can reach thousands of entries"); past-tense "Was previously …" comments are not.`,
+  },
+  {
     id: 'agent-improve-speed',
     name: 'agent:improve-speed',
     description: 'Measure the live app over Playwright, find the slowest/heaviest API call, and apply one targeted fix (pagination, summary endpoints, strict required fields, kill redundant probes).',

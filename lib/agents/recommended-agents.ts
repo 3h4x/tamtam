@@ -150,6 +150,15 @@ export const RECOMMENDED_AGENTS: RecommendedAgentTemplate[] = [
     fallbackEnabled: true,
   },
   {
+    name: 'improve',
+    description: 'Audits the least-recently-modified source file and applies one safe, mechanical code-quality fix per run (TOCTOU collapse, parallel I/O, rotted-comment cleanup, dead try/catch, hot-path hoists). Verifies with type-check + the relevant vitest file.',
+    model: 'normal',
+    schedule: '12h',
+    prompt: '',
+    skillIds: ['agent-improve'],
+    fallbackEnabled: true,
+  },
+  {
     name: 'manage-agents',
     description: 'Audits TamTam agents for this project and creates, updates, or removes them to match current project needs.',
     model: 'normal',

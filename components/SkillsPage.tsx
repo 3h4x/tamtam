@@ -28,6 +28,7 @@ const SUGGESTED_SCHEDULES: Record<string, string> = {
   'agent-tests': '24h',
   'agent-self-improve': '',
   'agent-senior-fullstack': '',
+  'agent-improve': '12h',
 }
 
 function SkillIcon({ id, className = 'w-4 h-4' }: { id: string; className?: string }) {
@@ -53,6 +54,8 @@ function SkillIcon({ id, className = 'w-4 h-4' }: { id: string; className?: stri
       return <svg {...props}><path d="M5.5 2h5v3L13 8.5V13a1 1 0 0 1-1 1H4a1 1 0 0 1-1-1V8.5L5.5 5z"/><path d="M6.5 9.5l1.2 1.2L10 8.3"/></svg>
     case 'agent-self-improve':
       return <svg {...props}><path d="M8 1.5L9.5 5h3.5l-2.8 2 1 3.5L8 8.5 4.8 10.5l1-3.5L3 5h3.5z"/></svg>
+    case 'agent-improve':
+      return <svg {...props}><path d="M2 13L6 9l2 2 6-6"/><path d="M10 5h4v4"/></svg>
     case 'agent-docs-claude':
       return <svg {...props}><path d="M3 3h10v10H3z"/><path d="M5.5 6h5M5.5 8.5h5M5.5 11h3"/><path d="M11 1.5v3h3"/><path d="M11 1.5L14 4.5"/></svg>
     case 'agent-senior-fullstack':

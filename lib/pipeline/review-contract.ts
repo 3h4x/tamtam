@@ -85,6 +85,8 @@ const findingFieldKeys = [
   'verification',
 ] as const;
 
+const FINDING_SEVERITIES = ['low', 'medium', 'high', 'critical'] as const;
+
 // Walk a parsed (text-only) review log and pull out structured Finding blocks
 // matching the REVIEW_OUTPUT_CONTRACT shape. Returns the de-duplicated list in
 // the order they first appear; later restatements of the same Finding ID
@@ -147,7 +149,7 @@ export function parseFindings(text: string): ParsedFinding[] {
     const severity = (fields['severity'] || '').toLowerCase();
     const finding: ParsedFinding = {
       id,
-      severity: (['low', 'medium', 'high', 'critical'] as const).includes(severity as FindingSeverity)
+      severity: (FINDING_SEVERITIES as readonly string[]).includes(severity)
         ? (severity as FindingSeverity)
         : null,
       rootCause: fields['root cause'] || null,

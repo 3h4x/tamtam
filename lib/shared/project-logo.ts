@@ -1,4 +1,4 @@
-import { existsSync, lstatSync } from 'fs';
+import { lstatSync } from 'fs';
 import { join, extname } from 'path';
 
 const PROJECT_LOGO_CANDIDATES = [
@@ -42,7 +42,6 @@ const PROJECT_LOGO_CANDIDATES = [
 export function detectProjectLogoPath(projectPath: string): string | null {
   for (const candidate of PROJECT_LOGO_CANDIDATES) {
     const absolutePath = join(/*turbopackIgnore: true*/ projectPath, candidate);
-    if (!existsSync(/*turbopackIgnore: true*/ absolutePath)) continue;
     try {
       // `lstatSync` does NOT follow symlinks. Restricting to real files
       // means an accidental or malicious symlink at one of the candidate
@@ -53,7 +52,7 @@ export function detectProjectLogoPath(projectPath: string): string | null {
       const stat = lstatSync(/*turbopackIgnore: true*/ absolutePath);
       if (stat.isFile()) return absolutePath;
     } catch {
-      // Ignore unreadable candidates and continue scanning.
+      // Missing or unreadable candidate — continue scanning.
     }
   }
 
