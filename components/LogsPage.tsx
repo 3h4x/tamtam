@@ -136,6 +136,19 @@ export function LogsPage() {
             <div key={i} className="skeleton h-10 rounded-lg" />
           ))}
         </div>
+      ) : logsError ? (
+        <div className="flex flex-col items-center justify-center py-12 gap-3 text-center">
+          <svg className="w-8 h-8 text-status-error" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth="1.4">
+            <path strokeLinecap="round" strokeLinejoin="round" d="M12 9v3.75m0 3.75h.008v.008H12v-.008zM21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
+          </svg>
+          <p className="text-sm text-text-secondary">{logsError}</p>
+          <button
+            className="px-3 py-1.5 text-xs border border-border rounded-md text-text-primary hover:bg-bg-tertiary cursor-pointer"
+            onClick={() => selectedProject && loadLogs(selectedProject)}
+          >
+            Retry
+          </button>
+        </div>
       ) : (
         <>
           {logs.length > 1 && (

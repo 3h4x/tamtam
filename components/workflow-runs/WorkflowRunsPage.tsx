@@ -2,6 +2,7 @@
 
 import { useEffect, useState } from 'react';
 import Link from 'next/link';
+import { WorkflowRunsActivePanel } from '@/components/workflow-runs/WorkflowRunsActivePanel';
 import {
   STATUS_FILTERS,
   type StatusFilter,
@@ -349,6 +350,20 @@ export function WorkflowRunsPage() {
     filtered.length === data.runs.length
       ? `showing ${data.runs.length} recent runs`
       : `showing ${filtered.length} of ${data.runs.length} recent runs`;
+  const activeRuns = filtered
+    .filter((run) => run.status === 'running' || run.status === 'pending')
+    .map((run) => ({
+      id: run.id,
+      name: run.name,
+      rawName: run.rawName,
+      status: run.status,
+      inputLabel: summarizeInput(run.input),
+      inputTitle: formatTitle(run.input),
+      triggerLabel: summarizeTrigger(run.input),
+      durationLabel: formatDurationCell(run, now),
+      startedLabel: formatRelativeTime(run.startedAt ?? run.createdAt, now),
+      startedTitle: formatTime(run.startedAt ?? run.createdAt),
+    }));
 
   return (
     <div className="p-4 sm:p-6">
@@ -403,34 +418,35 @@ export function WorkflowRunsPage() {
       ) : null}
       {view === 'graph' && <WorkflowGraph />}
       {view === 'runs' && (
-      <>
-      <WorkflowRunsFilterPanel
-        nameFilter={nameFilter}
-        statusFilter={statusFilter}
-        statusCounts={statusCounts}
-        resultsSummary={resultsSummary}
-        onNameFilterChange={setNameFilter}
-        onStatusFilterChange={setStatusFilter}
-        onClearFilters={clearFilters}
-      />
-      {filtered.length === 0 ? (
-        <WorkflowRunsEmptyState
-          title={data.runs.length === 0 ? 'No workflow runs yet' : 'No runs match current filters'}
-          description={
-            data.runs.length === 0
-              ? 'Runs appear here after a workflow starts from a release, scheduler, or another background trigger.'
-              : 'Adjust the name or status filter to bring workflow activity back into view.'
-          }
-          meta={
-            data.runs.length === 0
-              ? 'refreshes every 5s'
-              : `status=${statusFilter} · query=${nameFilter.trim() || '—'}`
-          }
-          actionLabel={hasActiveFilters ? 'Clear filters' : undefined}
-          onAction={hasActiveFilters ? clearFilters : undefined}
-        />
-      ) : (
         <>
+          <WorkflowRunsActivePanel items={activeRuns} />
+          <WorkflowRunsFilterPanel
+            nameFilter={nameFilter}
+            statusFilter={statusFilter}
+            statusCounts={statusCounts}
+            resultsSummary={resultsSummary}
+            onNameFilterChange={setNameFilter}
+            onStatusFilterChange={setStatusFilter}
+            onClearFilters={clearFilters}
+          />
+          {filtered.length === 0 ? (
+            <WorkflowRunsEmptyState
+              title={data.runs.length === 0 ? 'No workflow runs yet' : 'No runs match current filters'}
+              description={
+                data.runs.length === 0
+                  ? 'Runs appear here after a workflow starts from a release, scheduler, or another background trigger.'
+                  : 'Adjust the name or status filter to bring workflow activity back into view.'
+              }
+              meta={
+                data.runs.length === 0
+                  ? 'refreshes every 5s'
+                  : `status=${statusFilter} · query=${nameFilter.trim() || '—'}`
+              }
+              actionLabel={hasActiveFilters ? 'Clear filters' : undefined}
+              onAction={hasActiveFilters ? clearFilters : undefined}
+            />
+          ) : (
+            <>
         <div className="overflow-hidden rounded-md border border-border sm:hidden">
           {filtered.map((r) => {
             const outcome = summarizeOutcome(r);
