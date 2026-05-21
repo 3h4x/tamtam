@@ -2,9 +2,14 @@
 
 import { useEffect, useState } from 'react';
 import Link from 'next/link';
+import {
+  STATUS_FILTERS,
+  type StatusFilter,
+  WorkflowRunsFilterPanel,
+} from '@/components/workflow-runs/WorkflowRunsFilterPanel';
 import { WorkflowGraph } from '@/components/workflow-runs/WorkflowGraph';
 import { WorkflowRunsEmptyState, WorkflowRunsLoadingState } from '@/components/workflow-runs/WorkflowRunsStates';
-import { WorkflowStatusBadge, workflowStatusPresentation } from '@/components/workflow-runs/workflow-run-status';
+import { WorkflowStatusBadge } from '@/components/workflow-runs/workflow-run-status';
 import { StandardTabs } from '@/components/ui/StandardTabs';
 
 interface WorkflowRunSummary {
@@ -228,49 +233,6 @@ function formatTitle(value: unknown): string {
   }
 }
 
-
-const STATUS_FILTERS = ['all', 'completed', 'running', 'pending', 'failed', 'cancelled'] as const;
-type StatusFilter = (typeof STATUS_FILTERS)[number];
-
-function statusFilterPresentation(status: StatusFilter): {
-  glyph: string | null;
-  activeClassName: string;
-  glyphClassName: string;
-} {
-  switch (status) {
-    case 'completed':
-      return workflowFilterPresentation(status);
-    case 'failed':
-    case 'cancelled':
-      return workflowFilterPresentation(status);
-    case 'running':
-    case 'pending':
-      return workflowFilterPresentation(status);
-    case 'all':
-      return {
-        glyph: null,
-        activeClassName: 'border-accent bg-accent/10 text-accent',
-        glyphClassName: 'text-text-tertiary',
-      };
-  }
-}
-
-function workflowFilterPresentation(status: Exclude<StatusFilter, 'all'>) {
-  const presentation = workflowStatusPresentation(status);
-  const glyphClassName = presentation.className.includes('text-status-success')
-    ? 'text-status-success'
-    : presentation.className.includes('text-status-error')
-      ? 'text-status-error'
-      : presentation.className.includes('text-accent')
-        ? 'text-accent'
-        : 'text-text-tertiary';
-  return {
-    glyph: presentation.glyph,
-    activeClassName: presentation.className,
-    glyphClassName,
-  };
-}
-
 export function WorkflowRunsPage() {
   const [data, setData] = useState<RunsResponse | null>(null);
   const [error, setError] = useState<string | null>(null);
@@ -387,7 +349,6 @@ export function WorkflowRunsPage() {
     filtered.length === data.runs.length
       ? `showing ${data.runs.length} recent runs`
       : `showing ${filtered.length} of ${data.runs.length} recent runs`;
-  const activeStatusPresentation = statusFilter !== 'all' ? statusFilterPresentation(statusFilter) : null;
 
   return (
     <div className="p-4 sm:p-6">
@@ -443,100 +404,15 @@ export function WorkflowRunsPage() {
       {view === 'graph' && <WorkflowGraph />}
       {view === 'runs' && (
       <>
-      <div className="mb-3 rounded-lg border border-border bg-bg-secondary">
-        <div className="border-b border-border p-3">
-          <div className="flex flex-col gap-3 lg:flex-row lg:items-start lg:justify-between">
-            <div className="min-w-0 flex-1">
-              <div className="relative max-w-md">
-                <input
-                  type="text"
-                  placeholder="Filter workflow, project, trigger, outcome…"
-                  value={nameFilter}
-                  onChange={(e) => setNameFilter(e.target.value)}
-                  className="focus-ring w-full rounded-md border border-border bg-bg-primary px-3 py-1.5 pr-8 text-sm text-text-primary placeholder:text-text-tertiary focus:border-accent focus:outline-none"
-                />
-                {nameFilter ? (
-                  <button
-                    type="button"
-                    onClick={() => setNameFilter('')}
-                    className="absolute right-2 top-1/2 -translate-y-1/2 text-sm text-text-tertiary transition-colors hover:text-text-primary"
-                    aria-label="Clear search"
-                    title="Clear search"
-                  >
-                    ×
-                  </button>
-                ) : null}
-              </div>
-              <div className="mt-2 flex flex-wrap items-center gap-x-3 gap-y-1 text-[11px] text-text-tertiary">
-                <span className="font-mono">{resultsSummary}</span>
-                {statusCounts.running > 0 ? (
-                  <span className="font-mono text-accent">{statusCounts.running} running</span>
-                ) : null}
-                {hasActiveFilters ? (
-                  <button
-                    type="button"
-                    className="font-mono text-accent transition-colors hover:text-accent-hover"
-                    onClick={clearFilters}
-                  >
-                    clear filters
-                  </button>
-                ) : null}
-              </div>
-            </div>
-            {hasActiveFilters ? (
-              <div className="flex flex-wrap gap-1.5 lg:max-w-[45%] lg:justify-end">
-                {nameNeedle ? (
-                  <span
-                    className="inline-flex max-w-full items-center gap-1.5 rounded-md border border-border bg-bg-primary px-2 py-1 text-xs text-text-secondary"
-                    title={nameFilter.trim()}
-                  >
-                    <span className="text-text-tertiary">query</span>
-                    <span className="max-w-[20rem] truncate font-mono text-text-primary">{nameFilter.trim()}</span>
-                  </span>
-                ) : null}
-                {activeStatusPresentation ? (
-                  <span className={`inline-flex items-center gap-1.5 rounded-md border px-2 py-1 text-xs ${activeStatusPresentation.activeClassName}`}>
-                    {activeStatusPresentation.glyph ? (
-                      <span className="leading-none" aria-hidden="true">
-                        {activeStatusPresentation.glyph}
-                      </span>
-                    ) : null}
-                    <span>status</span>
-                    <span className="font-mono">{statusFilter}</span>
-                  </span>
-                ) : null}
-              </div>
-            ) : null}
-          </div>
-        </div>
-        <div className="flex flex-wrap gap-1 p-1.5" role="group" aria-label="Status filter">
-          {STATUS_FILTERS.map((s) => {
-            const presentation = statusFilterPresentation(s);
-            const selected = statusFilter === s;
-            return (
-              <button
-                key={s}
-                type="button"
-                onClick={() => setStatusFilter(s)}
-                aria-pressed={selected}
-                className={`inline-flex items-center gap-1.5 rounded-md border px-2.5 py-1 text-xs transition-colors ${
-                  selected
-                    ? presentation.activeClassName
-                    : 'border-transparent bg-transparent text-text-secondary hover:border-border hover:bg-bg-primary hover:text-text-primary'
-                }`}
-              >
-                {presentation.glyph ? (
-                  <span className={`leading-none ${selected ? '' : presentation.glyphClassName}`} aria-hidden="true">
-                    {presentation.glyph}
-                  </span>
-                ) : null}
-                <span>{s}</span>
-                <span className="font-mono tabular-nums text-text-tertiary">{statusCounts[s]}</span>
-              </button>
-            );
-          })}
-        </div>
-      </div>
+      <WorkflowRunsFilterPanel
+        nameFilter={nameFilter}
+        statusFilter={statusFilter}
+        statusCounts={statusCounts}
+        resultsSummary={resultsSummary}
+        onNameFilterChange={setNameFilter}
+        onStatusFilterChange={setStatusFilter}
+        onClearFilters={clearFilters}
+      />
       {filtered.length === 0 ? (
         <WorkflowRunsEmptyState
           title={data.runs.length === 0 ? 'No workflow runs yet' : 'No runs match current filters'}
