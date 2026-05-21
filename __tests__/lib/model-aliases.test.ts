@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import {
   getModelLabel,
+  getProviderModelHint,
   isCanonicalModelTier,
   isKnownModelAlias,
   normalizeModelInput,
@@ -52,6 +53,39 @@ describe('model-aliases', () => {
     expect(parseOptionalKnownModelInput('smart --resume injected')).toEqual({
       model: null,
       error: 'Invalid model. Allowed values: fast, normal, smart, haiku, sonnet, opus.',
+    });
+  });
+
+  describe('getProviderModelHint', () => {
+    it('returns gemini model hints for fast/normal/smart', () => {
+      expect(getProviderModelHint('gemini', 'fast')).toBe('flash');
+      expect(getProviderModelHint('gemini', 'normal')).toBe('pro');
+      expect(getProviderModelHint('gemini', 'smart')).toBe('pro');
+    });
+
+    it('returns codex model hints for fast/normal/smart', () => {
+      expect(getProviderModelHint('codex', 'fast')).toBe('gpt-5.4-mini');
+      expect(getProviderModelHint('codex', 'normal')).toBe('gpt-5.4');
+      expect(getProviderModelHint('codex', 'smart')).toBe('gpt-5.5');
+    });
+
+    it('resolves legacy aliases through to provider hints', () => {
+      expect(getProviderModelHint('gemini', 'haiku')).toBe('flash');
+      expect(getProviderModelHint('codex', 'opus')).toBe('gpt-5.5');
+    });
+
+    it('returns empty for providers without a per-tier mapping', () => {
+      expect(getProviderModelHint('claude', 'fast')).toBe('');
+      expect(getProviderModelHint('lmstudio', 'normal')).toBe('');
+      expect(getProviderModelHint('deepagents', 'smart')).toBe('');
+      expect(getProviderModelHint('custom', 'fast')).toBe('');
+    });
+
+    it('returns empty for unrecognized model inputs', () => {
+      expect(getProviderModelHint('gemini', 'gpt-5.5')).toBe('');
+      expect(getProviderModelHint('codex', '')).toBe('');
+      expect(getProviderModelHint('gemini', null)).toBe('');
+      expect(getProviderModelHint(null, 'fast')).toBe('');
     });
   });
 });

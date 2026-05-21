@@ -4,7 +4,7 @@ export const LEGACY_MODEL_ALIASES = ['haiku', 'sonnet', 'opus'] as const;
 export type ModelTier = (typeof MODEL_TIERS)[number];
 export type LegacyModelAlias = (typeof LEGACY_MODEL_ALIASES)[number];
 export type KnownModelAlias = ModelTier | LegacyModelAlias;
-export const INVALID_MODEL_INPUT_DETAIL = 'Invalid model. Allowed values: fast, normal, smart, haiku, sonnet, opus.';
+const INVALID_MODEL_INPUT_DETAIL = 'Invalid model. Allowed values: fast, normal, smart, haiku, sonnet, opus.';
 
 const MODEL_ALIAS_MAP: Record<KnownModelAlias, ModelTier> = {
   fast: 'fast',
