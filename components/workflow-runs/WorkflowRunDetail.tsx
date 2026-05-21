@@ -144,6 +144,42 @@ function WorkflowStepTrace({ steps, now }: { steps: Step[]; now: number }) {
   );
 }
 
+function StepDiagnostics({
+  error,
+  output,
+  className = 'mt-3',
+}: {
+  error: string | null;
+  output: unknown;
+  className?: string;
+}) {
+  if (error == null && output == null) {
+    return null;
+  }
+
+  return (
+    <details className={`${className} text-xs`}>
+      <summary className="cursor-pointer text-text-tertiary">
+        details
+        {error != null ? ' · error' : ''}
+        {output != null ? ' · output' : ''}
+      </summary>
+      <div className="mt-2 space-y-2">
+        {error != null ? (
+          <div className="rounded border border-status-error/30 bg-status-error/10 p-2 whitespace-pre-wrap text-status-error">
+            {error}
+          </div>
+        ) : null}
+        {output != null ? (
+          <pre className="overflow-x-auto rounded border border-border bg-bg-tertiary p-2 text-text-primary">
+            {JSON.stringify(output, null, 2)}
+          </pre>
+        ) : null}
+      </div>
+    </details>
+  );
+}
+
 export function WorkflowRunDetail({ runId }: { runId: string }) {
   const [data, setData] = useState<RunDetail | null>(null);
   const [error, setError] = useState<string | null>(null);
@@ -281,7 +317,9 @@ export function WorkflowRunDetail({ runId }: { runId: string }) {
           />
         ) : (
           <>
-            <WorkflowStepTrace steps={data.steps} now={now} />
+            <div className="hidden sm:block">
+              <WorkflowStepTrace steps={data.steps} now={now} />
+            </div>
             <div className="space-y-2 sm:hidden">
               {data.steps.map((s) => (
                 <div key={s.stepId} className="rounded-md border border-border bg-bg-primary p-3">
@@ -310,19 +348,7 @@ export function WorkflowRunDetail({ runId }: { runId: string }) {
                       </div>
                     </div>
                   </div>
-                  {s.error && (
-                    <div className="mt-3 rounded border border-status-error/30 bg-status-error/10 p-2 text-xs whitespace-pre-wrap text-status-error">
-                      {s.error}
-                    </div>
-                  )}
-                  {s.output != null && (
-                    <details className="mt-3 text-xs">
-                      <summary className="cursor-pointer text-text-tertiary">Output</summary>
-                      <pre className="mt-1 overflow-x-auto rounded border border-border bg-bg-tertiary p-2 text-text-primary">
-                        {JSON.stringify(s.output, null, 2)}
-                      </pre>
-                    </details>
-                  )}
+                  <StepDiagnostics error={s.error} output={s.output} />
                 </div>
               ))}
             </div>
@@ -341,20 +367,8 @@ export function WorkflowRunDetail({ runId }: { runId: string }) {
                   {data.steps.map((s) => (
                     <tr key={s.stepId} className="border-t border-border align-top">
                       <td className="px-3 py-2 font-mono text-xs text-text-primary" title={s.rawName}>
-                        {s.name}
-                        {s.error && (
-                          <div className="mt-1 p-2 rounded border border-status-error/30 bg-status-error/10 text-status-error text-xs whitespace-pre-wrap">
-                            {s.error}
-                          </div>
-                        )}
-                        {s.output != null && (
-                          <details className="mt-1">
-                            <summary className="cursor-pointer text-text-tertiary">Output</summary>
-                            <pre className="mt-1 p-2 rounded bg-bg-tertiary border border-border overflow-x-auto text-text-primary">
-                              {JSON.stringify(s.output, null, 2)}
-                            </pre>
-                          </details>
-                        )}
+                        <div>{s.name}</div>
+                        <StepDiagnostics error={s.error} output={s.output} className="mt-1" />
                       </td>
                       <td className="px-3 py-2">
                         <WorkflowStatusBadge status={s.status} />
