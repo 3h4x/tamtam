@@ -14,8 +14,8 @@ function makeJob(overrides: Partial<JobData> & Pick<JobData, 'id' | 'kind'>): Jo
     pid: 0,
     logPath: null,
     startedAt: 1000,
-    finishedAt: null,
-    exitCode: null,
+    finishedAt: 1010,
+    exitCode: 0,
     seen: false,
     ...overrides,
   } as JobData;
@@ -42,6 +42,14 @@ describe('countSiblingSteps', () => {
   it('returns 0 when no matching jobs', () => {
     expect(countSiblingSteps('p', 'test', 'r1', baseDeps([]))).toBe(0);
   });
+
+  it('ignores unfinished jobs', () => {
+    const jobs = [
+      makeJob({ id: 't1', kind: 'test', releaseId: 'r1' }),
+      makeJob({ id: 't2', kind: 'test', releaseId: 'r1', finishedAt: null, exitCode: null }),
+    ];
+    expect(countSiblingSteps('p', 'test', 'r1', baseDeps(jobs))).toBe(1);
+  });
 });
 
 describe('countFixFromPushSiblings', () => {
@@ -62,6 +70,15 @@ describe('countFixFromPushSiblings', () => {
       makeJob({ id: 'f1', kind: 'fix', releaseId: 'r2', parentJobId: 'p1' }),
     ];
     expect(countFixFromPushSiblings('p', 'r1', baseDeps(jobs))).toBe(0);
+  });
+
+  it('ignores unfinished fixes even when their parent is a push', () => {
+    const jobs = [
+      makeJob({ id: 'p1', kind: 'push', releaseId: 'r1' }),
+      makeJob({ id: 'f1', kind: 'fix', releaseId: 'r1', parentJobId: 'p1' }),
+      makeJob({ id: 'f2', kind: 'fix', releaseId: 'r1', parentJobId: 'p1', finishedAt: null, exitCode: null }),
+    ];
+    expect(countFixFromPushSiblings('p', 'r1', baseDeps(jobs))).toBe(1);
   });
 });
 
@@ -169,6 +186,18 @@ describe('checkIterationCap', () => {
     const fixJob = makeJob({ id: 'f1', kind: 'fix', releaseId: 'r1', exitCode: 0 });
     const jobs = [
       makeJob({ id: 'rev1', kind: 'review', releaseId: 'r1' }),
+      fixJob,
+    ];
+    const decision: NextPhase = { next: 'review', from: 'fix' };
+    expect(checkIterationCap(fixJob, decision, baseDeps(jobs)).rewritten).toBeUndefined();
+  });
+
+  it('does not trip the review cap on unfinished sibling reviews', () => {
+    const fixJob = makeJob({ id: 'f1', kind: 'fix', releaseId: 'r1', exitCode: 0 });
+    const jobs = [
+      makeJob({ id: 'rev1', kind: 'review', releaseId: 'r1' }),
+      makeJob({ id: 'rev2', kind: 'review', releaseId: 'r1' }),
+      makeJob({ id: 'rev3', kind: 'review', releaseId: 'r1', finishedAt: null, exitCode: null }),
       fixJob,
     ];
     const decision: NextPhase = { next: 'review', from: 'fix' };

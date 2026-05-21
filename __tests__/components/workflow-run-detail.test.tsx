@@ -110,6 +110,22 @@ describe('WorkflowRunDetail', () => {
     )
     expect(stepStarted?.textContent).toBe('1m ago')
 
+    const stepRow = container.querySelector('#workflow-step-desktop-step-review')
+    const stepLastEventCell = stepRow?.querySelector('td:last-child')
+    expect(container.textContent).toContain('Last event')
+    expect(stepLastEventCell?.textContent).toBe('1m ago')
+    expect(stepLastEventCell?.getAttribute('title')).toBe(new Date('2026-05-21T11:59:00Z').toLocaleString())
+
+    const mobileStepCard = container.querySelector('#workflow-step-mobile-step-review')
+    const mobileLastEventCell = Array.from(mobileStepCard?.querySelectorAll('.min-w-0') ?? []).find((element) =>
+      element.textContent?.includes('Last event'),
+    )
+    const mobileLastEventValue = mobileLastEventCell?.querySelector('[title]')
+    expect(mobileStepCard?.textContent).toContain('Last event')
+    expect(mobileStepCard?.textContent).not.toContain('Completed')
+    expect(mobileLastEventValue?.textContent).toBe('1m ago')
+    expect(mobileLastEventValue?.getAttribute('title')).toBe(new Date('2026-05-21T11:59:00Z').toLocaleString())
+
     unmount()
   })
 
