@@ -3,7 +3,7 @@
 import { useEffect, useState } from 'react';
 import Link from 'next/link';
 import { WorkflowRunDetailLoadingState, WorkflowRunsEmptyState } from '@/components/workflow-runs/WorkflowRunsStates';
-import { WorkflowStatusBadge } from '@/components/workflow-runs/workflow-run-status';
+import { WorkflowStatusBadge, workflowStatusPresentation } from '@/components/workflow-runs/workflow-run-status';
 
 interface Step {
   stepId: string;
@@ -98,6 +98,50 @@ function countStepStatuses(steps: Step[]): Array<{ status: string; count: number
     .map(([status, count]) => ({ status, count }));
 
   return [...ordered, ...remaining];
+}
+
+function WorkflowStepTrace({ steps, now }: { steps: Step[]; now: number }) {
+  return (
+    <div className="mb-3 overflow-x-auto rounded-md border border-border bg-bg-secondary">
+      <ol className="flex min-w-max items-stretch divide-x divide-border">
+        {steps.map((step, index) => {
+          const presentation = workflowStatusPresentation(step.status);
+          const timing = formatDurationCell(step.status, step.durationMs, step.startedAt, now);
+          const completedLabel = formatRelativeTime(step.completedAt ?? step.startedAt, now);
+
+          return (
+            <li key={step.stepId} className="w-44 px-3 py-2">
+              <div className="flex items-center gap-2">
+                <span
+                  className={`flex h-6 w-6 shrink-0 items-center justify-center rounded-full border text-xs ${presentation.className}`}
+                  aria-label={`step ${index + 1} status ${step.status}`}
+                  title={`status: ${step.status}`}
+                >
+                  <span className={`leading-none ${presentation.spin ? 'animate-spin' : ''}`} aria-hidden="true">
+                    {presentation.glyph}
+                  </span>
+                </span>
+                <div className="min-w-0">
+                  <div className="truncate font-mono text-xs text-text-primary" title={step.rawName}>
+                    {index + 1}. {step.name}
+                  </div>
+                  <div className="truncate font-mono text-[11px] tabular-nums text-text-tertiary">
+                    attempt {step.attempt} · {timing}
+                  </div>
+                </div>
+              </div>
+              <div
+                className="mt-2 truncate text-[11px] text-text-secondary"
+                title={formatAbsoluteTime(step.completedAt ?? step.startedAt)}
+              >
+                {completedLabel}
+              </div>
+            </li>
+          );
+        })}
+      </ol>
+    </div>
+  );
 }
 
 export function WorkflowRunDetail({ runId }: { runId: string }) {
@@ -237,6 +281,7 @@ export function WorkflowRunDetail({ runId }: { runId: string }) {
           />
         ) : (
           <>
+            <WorkflowStepTrace steps={data.steps} now={now} />
             <div className="space-y-2 sm:hidden">
               {data.steps.map((s) => (
                 <div key={s.stepId} className="rounded-md border border-border bg-bg-primary p-3">

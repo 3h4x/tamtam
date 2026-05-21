@@ -78,7 +78,7 @@ export default defineConfig({
     ],
     silent: 'passed-only',
     testTimeout: 30000,
-    hookTimeout: isCi ? 30000 : 10000,
+    hookTimeout: 30000,
     teardownTimeout: 10000,
   },
 });

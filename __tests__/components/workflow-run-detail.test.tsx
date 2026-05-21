@@ -245,4 +245,74 @@ describe('WorkflowRunDetail', () => {
 
     unmount()
   })
+
+  it('shows an ordered compact trace for step scanability', async () => {
+    vi.stubGlobal('fetch', vi.fn().mockResolvedValue({
+      ok: true,
+      status: 200,
+      json: async () => ({
+        run: {
+          id: 'run-trace',
+          name: 'release',
+          rawName: 'workflow.release',
+          status: 'running',
+          createdAt: '2026-05-21T11:50:00Z',
+          startedAt: '2026-05-21T11:51:00Z',
+          completedAt: null,
+          durationMs: null,
+          output: null,
+          error: null,
+        },
+        steps: [
+          {
+            stepId: 'step-test',
+            name: 'test',
+            rawName: 'workflow.test',
+            status: 'completed',
+            attempt: 1,
+            createdAt: '2026-05-21T11:51:00Z',
+            startedAt: '2026-05-21T11:51:00Z',
+            completedAt: '2026-05-21T11:52:30Z',
+            durationMs: 90_000,
+            input: null,
+            output: null,
+            error: null,
+          },
+          {
+            stepId: 'step-review',
+            name: 'review',
+            rawName: 'workflow.review',
+            status: 'running',
+            attempt: 2,
+            createdAt: '2026-05-21T11:53:00Z',
+            startedAt: '2026-05-21T11:54:00Z',
+            completedAt: null,
+            durationMs: null,
+            input: null,
+            output: null,
+            error: null,
+          },
+        ],
+      }),
+    }))
+
+    const { container, unmount } = renderWorkflowRunDetail('run-trace')
+
+    await vi.waitFor(() => {
+      expect(container.textContent).toContain('1. test')
+      expect(container.textContent).toContain('2. review')
+      expect(container.textContent).toContain('attempt 1 · 1.5 m')
+      expect(container.textContent).toContain('attempt 2 · 6.0 m')
+    })
+
+    const traceStatuses = Array.from(container.querySelectorAll('[aria-label^="step "]'))
+      .map((element) => element.getAttribute('aria-label'))
+
+    expect(traceStatuses).toEqual([
+      'step 1 status completed',
+      'step 2 status running',
+    ])
+
+    unmount()
+  })
 })
