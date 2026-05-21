@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { existsSync, readdirSync, readFileSync } from 'fs';
+import { readdirSync, readFileSync, type Dirent } from 'fs';
 import { join } from 'path';
 import { resolveProjectPath } from '@/lib/shared/project-data';
 
@@ -16,28 +16,33 @@ export async function GET(
   const docs: { name: string; path: string; content: string }[] = [];
   let hasRootReadme = false;
 
-  // README at project root
+  // README at project root — try each case variant; first success wins.
   for (const candidate of ['README.md', 'readme.md', 'Readme.md']) {
     const p = join(/*turbopackIgnore: true*/ projPath, candidate);
-    if (existsSync(/*turbopackIgnore: true*/ p)) {
-      try {
-        docs.push({ name: 'README.md', path: candidate, content: readFileSync(/*turbopackIgnore: true*/ p, 'utf-8') });
-        hasRootReadme = true;
-      } catch {}
+    try {
+      const content = readFileSync(/*turbopackIgnore: true*/ p, 'utf-8');
+      docs.push({ name: 'README.md', path: candidate, content });
+      hasRootReadme = true;
       break;
+    } catch {
+      // try next candidate
     }
   }
 
   // docs/ directory
   const docsDir = join(/*turbopackIgnore: true*/ projPath, 'docs');
-  if (existsSync(/*turbopackIgnore: true*/ docsDir)) {
-    for (const entry of readdirSync(/*turbopackIgnore: true*/ docsDir, { withFileTypes: true })) {
-      if (!entry.isFile() || !entry.name.endsWith('.md')) continue;
-      try {
-        const content = readFileSync(join(/*turbopackIgnore: true*/ docsDir, entry.name), 'utf-8');
-        docs.push({ name: entry.name, path: `docs/${entry.name}`, content });
-      } catch {}
-    }
+  let docsEntries: Dirent[] = [];
+  try {
+    docsEntries = readdirSync(/*turbopackIgnore: true*/ docsDir, { withFileTypes: true });
+  } catch {
+    // no docs/ directory — fall through with empty list
+  }
+  for (const entry of docsEntries) {
+    if (!entry.isFile() || !entry.name.endsWith('.md')) continue;
+    try {
+      const content = readFileSync(join(/*turbopackIgnore: true*/ docsDir, entry.name), 'utf-8');
+      docs.push({ name: entry.name, path: `docs/${entry.name}`, content });
+    } catch {}
   }
 
   if (hasRootReadme) {

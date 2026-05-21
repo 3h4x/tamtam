@@ -23,11 +23,10 @@ export function withUntrustedPreamble(prompt: string): string {
   return `${UNTRUSTED_SYSTEM_INSTRUCTION}\n\n---\n\n${prompt}`;
 }
 
-// Per-project TTL cache for the derived trusted-users set. Without this,
-// each `isUserTrusted` call invoked `loadFileConfig(projectPath)` which
+// Per-project TTL cache for the derived trusted-users set. `loadFileConfig`
 // spawns a `git` subprocess (for branch detection) and reads the project's
-// `.tamtam/config.yml`. Loop callers (e.g. trust-filtering every comment
-// in a 50-comment PR) were paying that cost N times per request.
+// `.tamtam/config.yml`, so loop callers (e.g. trust-filtering every comment
+// in a 50-comment PR) would otherwise pay that cost N times per request.
 // 15s TTL is short enough that operator updates to `safe_users` propagate
 // quickly while still coalescing the per-request batch of lookups.
 const TRUSTED_USERS_TTL_MS = 15_000;

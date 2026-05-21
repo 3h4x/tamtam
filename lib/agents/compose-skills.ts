@@ -4,6 +4,8 @@ import { inArray } from 'drizzle-orm'
 import { db, schema } from '@/lib/db'
 import { SKILLS_DIR, DATA_SKILLS_DIR } from '@/lib/skills/skills'
 
+const DOCS_BASE = join(SKILLS_DIR, 'docs', 'skills')
+
 export interface ComposedSkillMeta {
   id: string
   name: string
@@ -49,13 +51,11 @@ export async function composeAgentSkills(
   for (const docPath of docPaths) {
     const fullPath = join(projPath, docPath)
     if (!fullPath.startsWith(projPath + '/')) continue
-    if (existsSync(/*turbopackIgnore: true*/ fullPath)) {
-      try {
-        const content = readFileSync(/*turbopackIgnore: true*/ fullPath, 'utf-8')
-        docParts.push(`## ${basename(docPath)}\n${content}`)
-        metaDocs.push({ name: basename(docPath), path: docPath })
-      } catch {}
-    }
+    try {
+      const content = readFileSync(/*turbopackIgnore: true*/ fullPath, 'utf-8')
+      docParts.push(`## ${basename(docPath)}\n${content}`)
+      metaDocs.push({ name: basename(docPath), path: docPath })
+    } catch {}
   }
 
   const parts: string[] = []
@@ -68,7 +68,6 @@ export async function composeAgentSkills(
     }
   }
 
-  const docsBase = join(SKILLS_DIR, 'docs', 'skills')
   for (const p of personaPaths) {
     // Defense-in-depth: persona paths shipped from the UI are always of the
     // form `<category>/<slug>` (see app/api/projects/personas/route.ts), but
@@ -87,12 +86,12 @@ export async function composeAgentSkills(
       continue
     }
     const fallbackName = p.split('/').pop() ?? p
-    const docsFile = join(docsBase, `${p}.md`)
+    const docsFile = join(DOCS_BASE, `${p}.md`)
     const dataFile = join(DATA_SKILLS_DIR, `${p}.md`)
     // Belt-and-braces: also verify the resolved path stays inside one of
     // the skill roots. Catches any traversal payload that slipped past
     // the segment-level check (e.g. on weird filesystems / encodings).
-    const inDocs = docsFile.startsWith(docsBase + '/')
+    const inDocs = docsFile.startsWith(DOCS_BASE + '/')
     const inData = dataFile.startsWith(DATA_SKILLS_DIR + '/')
     if (!inDocs && !inData) {
       metaSkills.push({ id: `persona:${p}`, name: fallbackName, description: p, source: 'file' })

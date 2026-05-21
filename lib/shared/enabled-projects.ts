@@ -13,12 +13,8 @@ export type EnabledProject = {
 };
 
 const PROJECTS_CACHE_TTL = 10; // seconds
-// `rows` keeps insertion order for the list path; `byName` is a parallel
-// index for the per-project lookups (`isProjectArchived`, `isProjectPaused`).
-// Without the index, both helpers ran an O(N) `Array.find` per call — and
-// the cron task hits them once per agent fire, so a workspace with N
-// projects and K scheduled agents was paying O(N×K) per polling window
-// for what's structurally a Map lookup.
+// `rows` keeps insertion order for the list path; `byName` is the parallel
+// index for O(1) per-project lookups (`isProjectArchived`, `isProjectPaused`).
 let _projectsCache: { rows: ProjectRow[]; byName: Map<string, ProjectRow>; time: number } | null = null;
 let _projectsRefreshPromise: Promise<void> | null = null;
 

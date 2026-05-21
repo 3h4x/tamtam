@@ -22,8 +22,9 @@ export async function POST(_request: NextRequest, context: { params: Promise<{ j
     //   - config-state messages (board disabled / not fully configured / missing status options)
     //     all start with the "GitHub board sync " prefix → 409 conflict
     //   - everything else (gh CLI failure, network) → 502 upstream
-    // Previously the rate-limit case was also matched by the prefix and
-    // collapsed into 409, hiding the back-off signal from callers.
+    // Order matters: the rate-limit predicate must run before the prefix
+    // check, otherwise rate-limit errors (which also start with the prefix)
+    // would collapse into 409 and hide the back-off signal.
     let status: number;
     if (isBoardSyncRateLimitError(error)) status = 429;
     else if (detail.startsWith('GitHub board sync ')) status = 409;

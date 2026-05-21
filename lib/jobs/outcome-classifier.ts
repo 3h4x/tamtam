@@ -16,6 +16,9 @@
 // - Fire-and-forget: caller awaits but the result is written to the job
 //   row's contextMeta, never blocks chaining.
 
+import { openSync, fstatSync, readSync, closeSync } from 'fs';
+import { getSettings } from '@/lib/shared/config';
+import { updateJob } from '@/lib/jobs/job-storage';
 import type { JobData } from '@/lib/jobs/job-storage';
 
 export type OutcomeVerdict = 'done' | 'needs_continue' | 'asked_question';
@@ -147,13 +150,11 @@ export async function classifyAndStashOutcome(job: JobData): Promise<OutcomeClas
   // Gate on the enabled setting BEFORE touching the filesystem. With the
   // feature default-off, every finished run/agent job hits this path; we
   // must not pay a log read or string allocation for the disabled case.
-  const { getSettings } = await import('@/lib/shared/config');
   const settings = getSettings();
   if (!settings.outcome_classifier_enabled) return null;
+  if (!job.logPath) return null;
   let logTail = '';
   try {
-    const { existsSync, openSync, fstatSync, readSync, closeSync } = await import('fs');
-    if (!job.logPath || !existsSync(/*turbopackIgnore: true*/ job.logPath)) return null;
     // Seek to the end and read only the trailing TAIL_BYTES instead of
     // slurping the whole file — agent logs can be tens of MB.
     const fd = openSync(/*turbopackIgnore: true*/ job.logPath, 'r');
@@ -178,7 +179,6 @@ export async function classifyAndStashOutcome(job: JobData): Promise<OutcomeClas
   });
   if (!result) return null;
   try {
-    const { updateJob } = await import('@/lib/jobs/job-storage');
     let meta: Record<string, unknown> = {};
     if (job.contextMeta) {
       try {

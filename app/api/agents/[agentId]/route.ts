@@ -138,15 +138,16 @@ export async function PATCH(
 
   const updates: Record<string, unknown> = { updatedAt: Date.now() / 1000 };
   const isSystemAgent = existing.kind === 'system';
-  // System agents are auto-managed. Only the operational toggles
-  // (`schedule`, `enabled`) are user-tunable — identity and behavior
-  // fields are owned by TamTam and must not be mutated via this route.
+  // System agents are auto-managed. Only `enabled` is user-tunable from
+  // this route — identity, behavior, AND schedule are owned by TamTam.
+  // The schedule for `documentation-reindex-vectors` is set via
+  // `retrieval_reindex_interval_hours` in /settings.
   if (!isSystemAgent && body.name !== undefined) updates.name = nextName;
   if (!isSystemAgent && body.skillIds !== undefined) updates.skillIds = JSON.stringify(body.skillIds);
   if (!isSystemAgent && body.docPaths !== undefined) updates.docPaths = JSON.stringify(body.docPaths);
   if (!isSystemAgent && body.model !== undefined) updates.model = parsedModel ?? 'normal';
   if (!isSystemAgent && body.prompt !== undefined) updates.prompt = body.prompt;
-  if (body.schedule !== undefined) updates.schedule = parsedSchedule.schedule;
+  if (!isSystemAgent && body.schedule !== undefined) updates.schedule = parsedSchedule.schedule;
   if (body.enabled !== undefined) updates.enabled = body.enabled;
   if (!isSystemAgent && provider !== undefined) updates.provider = provider;
   if (!isSystemAgent && body.fallbackEnabled !== undefined) updates.fallbackEnabled = body.fallbackEnabled === true;

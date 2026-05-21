@@ -4,6 +4,9 @@ import { exec } from '@/lib/shared/shell';
 import { detectMainBranch } from '@/lib/pipeline/start-commit';
 import { pushCurrentBranch } from '@/lib/pipeline/start-push';
 
+const CC_PRIORITY = ['feat', 'fix', 'perf', 'refactor', 'style', 'docs', 'test', 'build', 'ci', 'chore'];
+const CC_PREFIX_RE = /^(feat|fix|perf|refactor|style|docs|test|build|ci|chore)(?:\([^)]*\))?!?:\s*/i;
+
 export async function POST(
   request: NextRequest,
   { params }: { params: Promise<{ projectName: string }> }
@@ -28,12 +31,14 @@ export async function POST(
 
   // Refuse to create a PR from the default branch — gh would reject it, but
   // fail fast with a clean error rather than pushing first.
-  const branchR = await exec('git', ['-C', projPath, 'branch', '--show-current'], { timeout: 5000 });
+  const [branchR, defaultBranch] = await Promise.all([
+    exec('git', ['-C', projPath, 'branch', '--show-current'], { timeout: 5000 }),
+    detectMainBranch(projPath),
+  ]);
   const currentBranch = branchR.stdout.trim();
   if (!currentBranch) {
     return NextResponse.json({ detail: 'Not on a branch (detached HEAD)' }, { status: 400 });
   }
-  const defaultBranch = await detectMainBranch(projPath);
   if (currentBranch === defaultBranch) {
     return NextResponse.json({ detail: `On default branch (${defaultBranch}) — switch to a feature branch first` }, { status: 400 });
   }
@@ -71,9 +76,6 @@ export async function POST(
   //   5. Fall back to gh's `--fill` only if we can't even determine a summary.
   // GitHub auto-closes linked issues from the PR *body*, not the title —
   // keep the Closes line in the body only.
-  const CC_PRIORITY = ['feat', 'fix', 'perf', 'refactor', 'style', 'docs', 'test', 'build', 'ci', 'chore'];
-  const CC_PREFIX_RE = /^(feat|fix|perf|refactor|style|docs|test|build|ci|chore)(?:\([^)]*\))?!?:\s*/i;
-
   const branchLogR = await exec(
     'git', ['-C', projPath, 'log', `${defaultBranch}..HEAD`, '--pretty=%s'],
     { timeout: 5000 },

@@ -10,11 +10,6 @@ function fmtTokens(n: number): string {
 
 const MAX_TEXTAREA_HEIGHT_PX = 200
 
-// Auto-grow the textarea to fit content, capped at MAX_TEXTAREA_HEIGHT_PX.
-// Was duplicated inline at three call sites (onChange, ArrowUp history,
-// ArrowDown history) plus a partial reset in onSubmit. Centralising avoids
-// drift between the call sites (e.g. one of them updating the cap and the
-// others lagging behind) and makes the intent obvious.
 function resizeToContent(el: HTMLTextAreaElement | null): void {
   if (!el) return
   el.style.height = 'auto'

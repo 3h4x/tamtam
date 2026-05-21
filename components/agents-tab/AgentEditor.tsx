@@ -196,9 +196,10 @@ export function AgentEditor({
       {isSystemAgent && (
         <div className="px-3 py-2 text-xs rounded-md border border-accent/30 bg-accent/10 text-text-secondary">
           <span className="font-semibold text-accent">Built-in system agent.</span>{' '}
-          Identity and behavior are managed by TamTam. You can change the
-          schedule or disable it; other fields are locked. Deleting removes
-          it for this project until you re-enable in Settings.
+          Identity, behavior, and schedule are managed by TamTam. You can
+          disable it here; the schedule is set globally from Settings →
+          Retrieval. Deleting removes it for this project until you re-enable
+          in Settings.
         </div>
       )}
 
@@ -493,9 +494,11 @@ export function AgentEditor({
           <span className="text-xs text-text-tertiary whitespace-nowrap font-medium">Schedule</span>
           <select
             id="agent-schedule"
-            className="flex-1 min-w-0 px-2 py-1.5 text-xs bg-bg-primary border border-border rounded-md text-text-primary focus:outline-none focus:ring-1 focus:ring-accent/40 focus:border-accent transition-colors cursor-pointer"
+            className="flex-1 min-w-0 px-2 py-1.5 text-xs bg-bg-primary border border-border rounded-md text-text-primary focus:outline-none focus:ring-1 focus:ring-accent/40 focus:border-accent transition-colors cursor-pointer disabled:opacity-60 disabled:cursor-not-allowed"
             value={schedule}
             onChange={(e) => setSchedule(e.target.value)}
+            disabled={isSystemAgent}
+            title={isSystemAgent ? 'Set in Settings → Retrieval' : undefined}
           >
             <option value="">Manual</option>
             {SCHEDULES.map(s => <option key={s} value={s}>every {s}</option>)}

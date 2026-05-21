@@ -102,6 +102,7 @@ interface SettingsMap {
   retrieval_context_limit: string
   retrieval_score_threshold: string
   retrieval_manage_ollama: string
+  retrieval_reindex_interval_hours: string
 }
 
 const SETTINGS_DEFAULTS: SettingsMap = {
@@ -144,6 +145,7 @@ const SETTINGS_DEFAULTS: SettingsMap = {
   retrieval_context_limit: '5',
   retrieval_score_threshold: '0.8',
   retrieval_manage_ollama: 'true',
+  retrieval_reindex_interval_hours: '16',
 }
 
 type TabId = 'general' | 'cli' | 'pipeline' | 'projects' | 'database' | 'templates' | 'notifications'
@@ -540,6 +542,21 @@ export function SettingsPage({ initialTab }: { initialTab?: TabId } = {}) {
                           />
                           <p className="mt-1 text-xs text-text-tertiary">0–1 cosine similarity cutoff.</p>
                         </div>
+                      </div>
+                      <div className="mt-4">
+                        <label className="mb-1 block text-xs font-medium text-text-secondary">Reindex Interval (hours)</label>
+                        <input
+                          type="number"
+                          min={1}
+                          max={168}
+                          step={1}
+                          value={settings.retrieval_reindex_interval_hours}
+                          onChange={(e) => handleChange('retrieval_reindex_interval_hours', e.target.value)}
+                          className="w-32 h-10 px-3 py-2 bg-bg-primary text-text-primary border border-border rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-accent/30 focus:border-accent transition-colors font-mono"
+                        />
+                        <p className="mt-1 text-xs text-text-tertiary">
+                          How often the built-in <code className="font-mono">documentation-reindex-vectors</code> system agent runs on every enabled project. 1–168 (1 hour to 7 days).
+                        </p>
                       </div>
                       <label className="mt-4 inline-flex items-center gap-2 text-sm text-text-primary">
                         <input

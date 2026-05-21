@@ -36,11 +36,9 @@ function walkParentChain(job: JobData | null, byId: Map<string, JobData>): JobDa
 }
 
 function latestJob<T extends JobData>(jobs: T[]): T | null {
-  // Linear scan picks the max-by-startedAt in one pass; the previous
-  // `[...jobs].sort(...)[0]` form allocated a full copy and ran an
-  // O(N log N) sort just to read the first element. This function is
-  // called from `findLatestIssueRunContext` over project-wide job lists,
-  // which can reach thousands of entries in mature workspaces.
+  // Single-pass max-by-startedAt — called over project-wide job lists that
+  // can reach thousands of entries in mature workspaces, so avoid the
+  // allocate-copy-sort-take-first idiom.
   let best: T | null = null;
   for (const j of jobs) {
     if (!best || j.startedAt > best.startedAt) best = j;

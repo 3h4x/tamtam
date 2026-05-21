@@ -95,9 +95,7 @@ export async function installTestSchedule(projectName: string, schedule: string)
   // Stagger the first fire by a stable per-project offset so multiple test
   // crons registered around boot don't stampede the test queue together.
   const initialDelay = Math.min(intervalMs, 30_000 + stableHash(`test-cron:${projectName}`, 60_000));
-  // eslint-disable-next-line prefer-const
-  let timer: NodeJS.Timeout;
-  timer = setTimeout(() => {
+  const timer = setTimeout(() => {
     // The initial setTimeout has fired. If the entry was uninstalled (or
     // reinstalled, which uninstalls first) during the initial delay, our
     // `timer` is no longer the registered one — bail without firing or

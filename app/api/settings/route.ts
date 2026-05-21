@@ -540,6 +540,9 @@ export async function PATCH(request: NextRequest) {
   // retrieval_records.embedding_model), but we want the rebuild to start
   // immediately rather than waiting up to one schedule interval.
   const previousEmbeddingModel = currentMap['retrieval_embedding_model'];
+  // Snapshot the previous reindex interval so we can detect a change after
+  // the upsert and push the new schedule onto every system-agent row.
+  const previousReindexHours = currentMap['retrieval_reindex_interval_hours'];
 
   // Per-setting upsert/delete is independent across keys — was N sequential
   // round-trips, now fans out via Promise.all.
@@ -594,6 +597,63 @@ export async function PATCH(request: NextRequest) {
         );
       } catch (err) {
         console.error('[settings] failed to kick documentation-reindex-vectors after model change:', err);
+      }
+    })();
+  }
+
+  // Reindex-interval change → push the new schedule onto every
+  // documentation-reindex-vectors system agent row and reinstall its cron.
+  // System agents are managed exclusively from /settings, so this is the
+  // single sync point for their schedule.
+  const newReindexHours = finalDesired['retrieval_reindex_interval_hours'];
+  if (
+    newReindexHours !== undefined &&
+    String(previousReindexHours ?? '') !== String(newReindexHours)
+  ) {
+    void (async () => {
+      try {
+        const [
+          { DOCUMENTATION_REINDEX_VECTORS_AGENT_NAME },
+          { installAgentSchedule, uninstallAgentSchedule },
+        ] = await Promise.all([
+          import('@/lib/agents/system/retrieval-maintenance'),
+          import('@/lib/scheduling/agent-scheduler'),
+        ]);
+        const newSchedule = `${effectiveAfterSave.retrieval_reindex_interval_hours}h`;
+        const rows = await db
+          .select({
+            id: schema.agents.id,
+            name: schema.agents.name,
+            project: schema.agents.project,
+            prompt: schema.agents.prompt,
+            enabled: schema.agents.enabled,
+          })
+          .from(schema.agents)
+          .where(eq(schema.agents.kind, 'system'));
+        const targets = rows.filter((r) => r.name === DOCUMENTATION_REINDEX_VECTORS_AGENT_NAME);
+        if (targets.length === 0) return;
+        await Promise.all(
+          targets.map((agent) =>
+            db.update(schema.agents)
+              .set({ schedule: newSchedule, updatedAt: Date.now() / 1000 })
+              .where(eq(schema.agents.id, agent.id))
+              .execute()
+          )
+        );
+        await Promise.all(
+          targets.map((agent) => {
+            if (agent.enabled) {
+              return installAgentSchedule(agent.id, newSchedule, agent.prompt ?? '', agent.project, agent.name);
+            }
+            return uninstallAgentSchedule(agent.id, agent.project, agent.name);
+          })
+        );
+        console.warn(
+          `[settings] retrieval_reindex_interval_hours changed (${previousReindexHours ?? '(default)'} → ${newReindexHours}) — ` +
+            `updated ${targets.length} documentation-reindex-vectors schedule(s) to ${newSchedule}`,
+        );
+      } catch (err) {
+        console.error('[settings] failed to propagate retrieval_reindex_interval_hours change:', err);
       }
     })();
   }

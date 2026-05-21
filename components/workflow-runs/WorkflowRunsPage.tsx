@@ -218,11 +218,9 @@ function formatRelativeTime(iso: string | null, now: number): string {
 
 function formatTime(iso: string | null): string {
   if (!iso) return '—';
-  try {
-    return new Date(iso).toLocaleString();
-  } catch {
-    return iso;
-  }
+  const t = Date.parse(iso);
+  if (!Number.isFinite(t)) return iso;
+  return new Date(t).toLocaleString();
 }
 
 function workflowEventTime(run: WorkflowRunSummary): string | null {
@@ -339,6 +337,9 @@ export function WorkflowRunsPage() {
   );
   const filtered = data.runs.filter((r) => {
     if (statusFilter !== 'all' && r.status !== statusFilter) return false;
+    if (!nameNeedle) return true;
+    // Three summarize* calls below are non-trivial; only build the haystack
+    // when there's actually a search needle to match against.
     const outcome = summarizeOutcome(r);
     const searchableText = [
       r.name,
@@ -348,10 +349,7 @@ export function WorkflowRunsPage() {
       summarizeTrigger(r.input),
       outcome.label,
     ].join(' ').toLowerCase();
-    if (nameNeedle && !searchableText.includes(nameNeedle)) {
-      return false;
-    }
-    return true;
+    return searchableText.includes(nameNeedle);
   });
   const resultsSummary =
     filtered.length === data.runs.length

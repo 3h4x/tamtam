@@ -18,12 +18,9 @@ export async function findBlockingRunningJob(
   );
 
   // Probe in parallel and then pick the first chronologically-still-running
-  // entry. Sequential probing returned on the first `'running'`, but in the
-  // post-restart case where multiple stale `finishedAt === null` rows are
-  // queued up, that was N sequential fs/process checks back-to-back. With
-  // parallel probing, wall-time collapses to the slowest probe, and stale
-  // siblings get marked done in the same pass instead of lingering until the
-  // 30s background sweep.
+  // entry. Wall-time collapses to the slowest probe, and stale siblings
+  // (e.g. post-restart `finishedAt === null` rows) get marked done in the
+  // same pass instead of lingering until the 30s background sweep.
   if (running.length === 0) return null;
   const states = await Promise.all(running.map((job) => probeJobStatus(job)));
   for (let i = 0; i < running.length; i++) {

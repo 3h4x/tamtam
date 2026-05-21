@@ -116,6 +116,7 @@ export interface TamTamConfig {
   retrieval_context_limit: number;
   retrieval_score_threshold: number;
   retrieval_manage_ollama: boolean;
+  retrieval_reindex_interval_hours: number;
   outcome_classifier_enabled: boolean;
   outcome_classifier_model: string;
   project_sweep_enabled: boolean;
@@ -217,6 +218,7 @@ const DEFAULTS: TamTamConfig = {
   retrieval_context_limit: 5,
   retrieval_score_threshold: 0.8,
   retrieval_manage_ollama: true,
+  retrieval_reindex_interval_hours: 16,
   outcome_classifier_enabled: false,
   outcome_classifier_model: 'gemma3:4b',
   project_sweep_enabled: false,
@@ -467,6 +469,10 @@ export function buildConfigFromSettingsMap(map: Record<string, string>): TamTamC
       return Number.isFinite(v) ? v : DEFAULTS.retrieval_score_threshold;
     })(),
     retrieval_manage_ollama: map.retrieval_manage_ollama !== 'false',
+    retrieval_reindex_interval_hours: (() => {
+      const v = parseIntOr(map.retrieval_reindex_interval_hours, DEFAULTS.retrieval_reindex_interval_hours);
+      return v >= 1 && v <= 168 ? v : DEFAULTS.retrieval_reindex_interval_hours;
+    })(),
     outcome_classifier_enabled: map.outcome_classifier_enabled === 'true',
     outcome_classifier_model: map.outcome_classifier_model ?? DEFAULTS.outcome_classifier_model,
     project_sweep_enabled: map.project_sweep_enabled === 'true',

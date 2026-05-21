@@ -43,24 +43,20 @@ export async function ensureOllamaRunning(opts: {
 }): Promise<void> {
   if (!opts.manageOllama) return;
 
-  if (await ollamaReachable(opts.ollamaUrl)) {
-    await ensureModelPulled(opts.ollamaUrl, opts.embeddingModel);
-    return;
-  }
+  if (!(await ollamaReachable(opts.ollamaUrl))) {
+    console.log('[retrieval] Ollama not running — starting via PM2');
+    const pm2Describe = await shellExec('pm2', ['describe', 'ollama-serve'], { timeout: 5000 });
 
-  console.log('[retrieval] Ollama not running — starting via PM2');
-  const pm2Describe = await shellExec('pm2', ['describe', 'ollama-serve'], { timeout: 5000 });
+    if (pm2Describe.exitCode !== 0) {
+      await shellExec('pm2', ['start', 'ollama', '--name', 'ollama-serve', '--', 'serve'], { timeout: 10_000 });
+    } else {
+      await shellExec('pm2', ['restart', 'ollama-serve'], { timeout: 10_000 });
+    }
 
-  if (pm2Describe.exitCode !== 0) {
-    await shellExec('pm2', ['start', 'ollama', '--name', 'ollama-serve', '--', 'serve'], { timeout: 10_000 });
-  } else {
-    await shellExec('pm2', ['restart', 'ollama-serve'], { timeout: 10_000 });
-  }
-
-  const up = await waitForOllama(opts.ollamaUrl);
-  if (!up) {
-    console.warn('[retrieval] Ollama did not start within 5s — retrieval unavailable this session');
-    return;
+    if (!(await waitForOllama(opts.ollamaUrl))) {
+      console.warn('[retrieval] Ollama did not start within 5s — retrieval unavailable this session');
+      return;
+    }
   }
 
   await ensureModelPulled(opts.ollamaUrl, opts.embeddingModel);
