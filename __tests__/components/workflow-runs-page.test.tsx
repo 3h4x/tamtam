@@ -412,4 +412,78 @@ describe('WorkflowRunsPage', () => {
 
     unmount()
   })
+
+  it('surfaces failed and cancelled runs as attention shortcuts', async () => {
+    vi.stubGlobal('fetch', vi.fn().mockResolvedValue({
+      ok: true,
+      json: async () => ({
+        runs: [
+          {
+            id: 'run-review',
+            name: 'review',
+            rawName: 'workflow.review',
+            status: 'failed',
+            createdAt: '2026-05-20T11:49:00Z',
+            startedAt: '2026-05-20T11:50:00Z',
+            completedAt: '2026-05-20T11:50:30Z',
+            durationMs: 30_000,
+            input: ['acme'],
+            output: null,
+            error: 'failed',
+          },
+          {
+            id: 'run-soak',
+            name: 'soak',
+            rawName: 'workflow.soak',
+            status: 'cancelled',
+            createdAt: '2026-05-20T11:45:00Z',
+            startedAt: '2026-05-20T11:46:00Z',
+            completedAt: '2026-05-20T11:46:30Z',
+            durationMs: 30_000,
+            input: ['acme'],
+            output: null,
+            error: null,
+          },
+          {
+            id: 'run-test',
+            name: 'test',
+            rawName: 'workflow.test',
+            status: 'completed',
+            createdAt: '2026-05-20T11:40:00Z',
+            startedAt: '2026-05-20T11:41:00Z',
+            completedAt: '2026-05-20T11:41:30Z',
+            durationMs: 30_000,
+            input: ['beta'],
+            output: { ok: true },
+            error: null,
+          },
+        ],
+        meta: { workflowEnabled: true, releaseWorkflow: true, releaseWorkflowDrive: true, mode: 'drive' },
+      }),
+    }))
+
+    const { container, unmount } = renderWorkflowRunsPage()
+
+    await vi.waitFor(() => {
+      expect(container.textContent).toContain('needs attention')
+      expect(container.textContent).toContain('2 recent')
+    })
+
+    const cancelledShortcut = container.querySelector<HTMLButtonElement>('button[aria-label="Show cancelled workflow runs"]')
+    expect(cancelledShortcut?.textContent).toContain('cancelled')
+    expect(cancelledShortcut?.textContent).toContain('1')
+
+    flushSync(() => {
+      cancelledShortcut?.dispatchEvent(new MouseEvent('click', { bubbles: true }))
+    })
+
+    await vi.waitFor(() => {
+      expect(container.textContent).toContain('1 of 3 recent')
+      expect(container.textContent).toContain('soak')
+      expect(container.textContent).not.toContain('review')
+      expect(container.textContent).not.toContain('test')
+    })
+
+    unmount()
+  })
 })
