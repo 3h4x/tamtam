@@ -2,7 +2,7 @@ import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
 import { NextRequest } from 'next/server';
 
 describe('POST /api/projects/by-project/{projectName}/release', () => {
-  let POST: any;
+  let POST: typeof import('@/app/api/projects/by-project/[projectName]/release/route').POST;
   let startReleaseMock: ReturnType<typeof vi.fn>;
 
   // These tests assert the route's response-shaping on top of startRelease.

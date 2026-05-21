@@ -6,14 +6,45 @@ export async function POST(
   { params }: { params: Promise<{ projectName: string }> }
 ) {
   const { projectName } = await params;
-  const body = await request.json();
-  const { prNumber, prTitle, headRef, baseRef } = body;
 
-  if (!prNumber) {
-    return NextResponse.json({ detail: 'prNumber is required' }, { status: 400 });
+  // Defensive parse: a malformed body used to bubble up as a 500 here.
+  // Better to surface a 400 with a clear reason — the client can then
+  // show a useful error instead of an opaque server failure.
+  let body: unknown;
+  try {
+    body = await request.json();
+  } catch {
+    return NextResponse.json({ detail: 'invalid JSON body' }, { status: 400 });
+  }
+  if (!body || typeof body !== 'object') {
+    return NextResponse.json({ detail: 'body must be an object' }, { status: 400 });
   }
 
-  const result = await startPrReview(projectName, prNumber, prTitle ?? '', headRef ?? '', baseRef ?? '');
+  const { prNumber, prTitle, headRef, baseRef } = body as {
+    prNumber?: unknown;
+    prTitle?: unknown;
+    headRef?: unknown;
+    baseRef?: unknown;
+  };
+
+  // prNumber MUST be a positive integer — `startPrReview` types it as
+  // `number` and passes it into a `gh pr view <N>` argv. A non-numeric
+  // value would either break the gh call or, if coerced, point at the
+  // wrong PR. Reject at the boundary.
+  if (typeof prNumber !== 'number' || !Number.isInteger(prNumber) || prNumber <= 0) {
+    return NextResponse.json(
+      { detail: 'prNumber is required and must be a positive integer' },
+      { status: 400 },
+    );
+  }
+
+  const result = await startPrReview(
+    projectName,
+    prNumber,
+    typeof prTitle === 'string' ? prTitle : '',
+    typeof headRef === 'string' ? headRef : '',
+    typeof baseRef === 'string' ? baseRef : '',
+  );
   if (!result.ok) {
     return NextResponse.json({ detail: result.detail }, { status: result.status });
   }

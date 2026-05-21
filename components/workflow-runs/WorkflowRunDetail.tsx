@@ -1,6 +1,6 @@
 'use client';
 
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import Link from 'next/link';
 import { WorkflowRunDetailLoadingState, WorkflowRunsEmptyState } from '@/components/workflow-runs/WorkflowRunsStates';
 import {
@@ -39,6 +39,10 @@ interface RunDetail {
     error: string | null;
   };
   steps: Step[];
+}
+
+function isTerminalWorkflowStatus(status: string): boolean {
+  return status === 'completed' || status === 'failed' || status === 'cancelled';
 }
 
 function formatDuration(ms: number | null): string {
@@ -189,33 +193,76 @@ export function WorkflowRunDetail({ runId }: { runId: string }) {
   const [data, setData] = useState<RunDetail | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [notFound, setNotFound] = useState(false);
+  const [lastLoadedAt, setLastLoadedAt] = useState<number | null>(null);
+  const latestRunStatusRef = useRef<string | null>(null);
 
   useEffect(() => {
     let cancelled = false;
+    let refreshTimeout: ReturnType<typeof setTimeout> | null = null;
+
+    setData(null);
+    setError(null);
+    setNotFound(false);
+    setLastLoadedAt(null);
+    latestRunStatusRef.current = null;
+
+    function scheduleRefresh() {
+      refreshTimeout = setTimeout(load, 5000);
+    }
+
+    function shouldRetryAfterFailure() {
+      return latestRunStatusRef.current == null || !isTerminalWorkflowStatus(latestRunStatusRef.current);
+    }
+
     async function load() {
       try {
         const res = await fetch(`/api/workflow-runs/${encodeURIComponent(runId)}`);
         if (res.status === 404) {
-          if (!cancelled) setNotFound(true);
+          if (!cancelled) {
+            setNotFound(true);
+            setData(null);
+            setError(null);
+          }
           return;
         }
         if (!res.ok) {
           const body = await res.json().catch(() => ({}));
-          if (!cancelled) setError(body.error ?? body.detail ?? `HTTP ${res.status}`);
+          if (!cancelled) {
+            setNotFound(false);
+            setError(body.error ?? body.detail ?? `HTTP ${res.status}`);
+            if (shouldRetryAfterFailure()) {
+              scheduleRefresh();
+            }
+          }
           return;
         }
         const body = (await res.json()) as RunDetail;
         if (!cancelled) {
+          setNotFound(false);
           setData(body);
           setError(null);
+          setLastLoadedAt(Date.now());
+          latestRunStatusRef.current = body.run.status;
+          if (!isTerminalWorkflowStatus(body.run.status)) {
+            scheduleRefresh();
+          }
         }
       } catch (e) {
-        if (!cancelled) setError((e as Error).message);
+        if (!cancelled) {
+          setError((e as Error).message);
+          if (shouldRetryAfterFailure()) {
+            scheduleRefresh();
+          }
+        }
       }
     }
     load();
-    const interval = setInterval(load, 5000);
-    return () => { cancelled = true; clearInterval(interval); };
+    return () => {
+      cancelled = true;
+      if (refreshTimeout != null) {
+        clearTimeout(refreshTimeout);
+      }
+    };
   }, [runId]);
 
   if (notFound) {
@@ -231,17 +278,20 @@ export function WorkflowRunDetail({ runId }: { runId: string }) {
       </div>
     );
   }
-  if (error) {
+  if (error && !data) {
     return (
       <div className="p-6">
         <Link href="/workflow-runs" className="text-accent text-sm hover:underline">← Back to workflow runs</Link>
-        <div className="mt-4 text-status-error">Failed to load: {error}</div>
+        <div className="mt-4 rounded-md border border-status-error/30 bg-status-error/10 px-3 py-2 text-sm text-status-error">
+          Failed to load workflow run: {error}
+        </div>
       </div>
     );
   }
   if (!data) return <WorkflowRunDetailLoadingState />;
 
   const now = Date.now();
+  const isLiveRun = !isTerminalWorkflowStatus(data.run.status);
   const stepStatusCounts = countStepStatuses(data.steps);
   const runDuration = formatDurationCell(data.run.status, data.run.durationMs, data.run.startedAt, now);
   const attentionSteps = data.steps
@@ -270,6 +320,14 @@ export function WorkflowRunDetail({ runId }: { runId: string }) {
           </h2>
           <WorkflowStatusBadge status={data.run.status} />
           <span className="text-xs text-text-tertiary font-mono">{data.run.id}</span>
+          <span className="rounded border border-border bg-bg-tertiary px-1.5 py-0.5 font-mono text-[11px] text-text-secondary">
+            {isLiveRun ? 'live · refreshes every 5s' : 'final snapshot'}
+          </span>
+          {lastLoadedAt != null ? (
+            <span className="text-[11px] text-text-tertiary" title={new Date(lastLoadedAt).toLocaleString()}>
+              refreshed {new Date(lastLoadedAt).toLocaleTimeString()}
+            </span>
+          ) : null}
         </div>
         <div className="grid grid-cols-2 sm:grid-cols-4 gap-3 text-xs">
           <div>
@@ -309,6 +367,12 @@ export function WorkflowRunDetail({ runId }: { runId: string }) {
           </details>
         )}
       </div>
+
+      {error ? (
+        <div className="rounded-md border border-status-warning/30 bg-status-warning/10 px-3 py-2 text-xs text-status-warning">
+          Failed to refresh: {error}
+        </div>
+      ) : null}
 
       <WorkflowStepAttentionPanel steps={attentionSteps} />
 

@@ -1,7 +1,7 @@
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
 
 describe('POST /api/projects/by-project/{projectName}/mark-dod', () => {
-  let POST: any;
+  let POST: typeof import('@/app/api/projects/by-project/[projectName]/mark-dod/route').POST;
   let startMarkDodMock: ReturnType<typeof vi.fn>;
 
   beforeEach(async () => {
