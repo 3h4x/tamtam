@@ -92,6 +92,13 @@ describe('GET /api/config/projects', () => {
     vi.doMock('@/lib/agents/system/seed', () => ({
       seedSystemAgentsForProject: seedSystemAgentsForProjectMock,
     }));
+    vi.doMock('os', async (importOriginal) => {
+      const real = await importOriginal<typeof import('os')>();
+      return {
+        ...real,
+        homedir: () => tmpdir(),
+      };
+    });
 
     const mod = await import('@/app/api/config/projects/route');
     GET = mod.GET;
@@ -119,6 +126,24 @@ describe('GET /api/config/projects', () => {
     const data = await res.json();
     expect(data.workspace_path).toBe('/nonexistent/workspace');
     expect(data.projects).toEqual([]);
+  });
+
+  it('expands a tilde-prefixed workspace_path before scanning for repos', async () => {
+    makeGitRepo(tempDir, 'tilde-repo');
+
+    const homeRelativePath = join('~', tempDir.slice(tmpdir().length + 1));
+    await sharedHandle.db.insert(schema.settings)
+      .values({ key: 'workspace_path', value: homeRelativePath });
+
+    const res = await GET();
+    const data = await res.json();
+
+    expect(data.workspace_path).toBe(homeRelativePath);
+    expect(data.projects).toHaveLength(1);
+    expect(data.projects[0]).toMatchObject({
+      name: 'tilde-repo',
+      path: join(tempDir, 'tilde-repo'),
+    });
   });
 
   it('discovers git repos in workspace', async () => {
@@ -224,6 +249,30 @@ describe('GET /api/config/projects', () => {
     expect(proj.priority).toBe('high');
   });
 
+  it('includes archived state from the saved project row', async () => {
+    makeGitRepo(tempDir, 'archived-repo');
+
+    await sharedHandle.db.insert(schema.settings)
+      .values({ key: 'workspace_path', value: tempDir });
+    await sharedHandle.db.insert(schema.projects)
+      .values({
+        name: 'archived-repo',
+        path: join(tempDir, 'archived-repo'),
+        enabled: true,
+        archived: true,
+      });
+
+    const res = await GET();
+    const data = await res.json();
+
+    expect(data.projects).toHaveLength(1);
+    expect(data.projects[0]).toMatchObject({
+      name: 'archived-repo',
+      archived: true,
+      enabled: true,
+    });
+  });
+
   it('returns enabled=false for repos without saved state', async () => {
     makeGitRepo(tempDir, 'new-repo');
 
@@ -311,6 +360,13 @@ describe('PATCH /api/config/projects', () => {
     vi.doMock('@/lib/agents/system/seed', () => ({
       seedSystemAgentsForProject: seedSystemAgentsForProjectMock,
     }));
+    vi.doMock('os', async (importOriginal) => {
+      const real = await importOriginal<typeof import('os')>();
+      return {
+        ...real,
+        homedir: () => tmpdir(),
+      };
+    });
 
     const mod = await import('@/app/api/config/projects/route');
     PATCH = mod.PATCH;

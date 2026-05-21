@@ -1,5 +1,8 @@
 import { afterAll, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
 import { sql } from 'drizzle-orm';
+import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'fs';
+import { tmpdir } from 'os';
+import { join } from 'path';
 import { createTestPgDbEmpty, type TestDbHandle } from '@/__tests__/helpers/test-db';
 import * as schema from '@/lib/db/schema';
 
@@ -112,5 +115,49 @@ describe('documentation-reindex-vectors helpers', () => {
     });
     expect(text).toContain('verify: skipped');
     expect(text).not.toContain('wiped');
+  });
+
+  it('deriveSampleQuery prefers the first H1 from CLAUDE.md before README.md', async () => {
+    const projectDir = mkdtempSync(join(tmpdir(), 'tamtam-retrieval-maintenance-'));
+    try {
+      writeFileSync(join(projectDir, 'CLAUDE.md'), '# Claude Heading\n\nDetails\n', 'utf-8');
+      writeFileSync(join(projectDir, 'README.md'), '# Readme Heading\n\nDetails\n', 'utf-8');
+
+      vi.doMock('@/lib/db', () => ({ db: sharedHandle.db, schema }));
+      const mod = await import('@/lib/agents/system/retrieval-maintenance');
+
+      expect(mod.__testing.deriveSampleQuery(projectDir, 'proj-a')).toBe('Claude Heading');
+    } finally {
+      rmSync(projectDir, { recursive: true, force: true });
+    }
+  });
+
+  it('deriveSampleQuery falls back to the first project doc heading when root docs are missing', async () => {
+    const projectDir = mkdtempSync(join(tmpdir(), 'tamtam-retrieval-maintenance-'));
+    try {
+      mkdirSync(join(projectDir, 'docs'), { recursive: true });
+      writeFileSync(join(projectDir, 'docs', 'overview.md'), '# Project Overview\n\nDetails\n', 'utf-8');
+
+      vi.doMock('@/lib/db', () => ({ db: sharedHandle.db, schema }));
+      const mod = await import('@/lib/agents/system/retrieval-maintenance');
+
+      expect(mod.__testing.deriveSampleQuery(projectDir, 'proj-a')).toBe('Project Overview');
+    } finally {
+      rmSync(projectDir, { recursive: true, force: true });
+    }
+  });
+
+  it('deriveSampleQuery falls back to the generic project overview text when no headings exist', async () => {
+    const projectDir = mkdtempSync(join(tmpdir(), 'tamtam-retrieval-maintenance-'));
+    try {
+      writeFileSync(join(projectDir, 'README.md'), 'No markdown heading here.\n', 'utf-8');
+
+      vi.doMock('@/lib/db', () => ({ db: sharedHandle.db, schema }));
+      const mod = await import('@/lib/agents/system/retrieval-maintenance');
+
+      expect(mod.__testing.deriveSampleQuery(projectDir, 'proj-a')).toBe('proj-a overview');
+    } finally {
+      rmSync(projectDir, { recursive: true, force: true });
+    }
   });
 });
