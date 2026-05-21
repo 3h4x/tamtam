@@ -1,4 +1,4 @@
-import { readdirSync, statSync } from 'fs';
+import { readdirSync, lstatSync } from 'fs';
 import { join, relative, sep } from 'path';
 
 const MARKDOWN_EXT = '.md';
@@ -45,7 +45,14 @@ export function listProjectDocuments(
   for (const fileName of ROOT_DOCS) {
     const fullPath = join(/*turbopackIgnore: true*/ projectPath, fileName);
     try {
-      if (statSync(/*turbopackIgnore: true*/ fullPath).isFile()) {
+      // `lstatSync` does NOT follow symlinks. The docs walk further down
+      // already uses `Dirent.isFile()` (returns false for symlinks), so
+      // checking ROOT_DOCS the same way keeps the two entry-points
+      // consistent and prevents an accidental symlink at one of the
+      // well-known root-doc paths from feeding the symlink target into
+      // retrieval indexing / docs picker. Same pattern as iter 80
+      // (project-logo).
+      if (lstatSync(/*turbopackIgnore: true*/ fullPath).isFile()) {
         files.add(fullPath);
       }
     } catch {}

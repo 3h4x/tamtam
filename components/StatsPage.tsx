@@ -103,23 +103,30 @@ export function StatsPage() {
   )
 
   const load = useCallback(async (w: Window) => {
-    try {
-      const res = await fetch(`/api/stats/usage?window=${w}`)
-      if (!res.ok) throw new Error('fetch failed')
-      setData(await res.json())
-      setError(null)
-    } catch {
-      setError('Failed to load usage stats')
-    } finally {
-      setLoading(false)
+    // Fetch in parallel — the two endpoints are independent and the
+    // sequential `await` chain was forcing each 60s refresh to pay
+    // usage_latency + ollama_latency instead of max(usage, ollama).
+    // Ollama panel is supplementary, so its failure must never block
+    // the primary usage panel from rendering.
+    const [usageResult, ollamaResult] = await Promise.allSettled([
+      fetch(`/api/stats/usage?window=${w}`).then((res) => {
+        if (!res.ok) throw new Error('fetch failed');
+        return res.json() as Promise<UsageResponse>;
+      }),
+      fetch(`/api/stats/ollama?window=${w}`).then((res) =>
+        res.ok ? (res.json() as Promise<OllamaStatsResponse>) : null,
+      ),
+    ]);
+
+    if (usageResult.status === 'fulfilled') {
+      setData(usageResult.value);
+      setError(null);
+    } else {
+      setError('Failed to load usage stats');
     }
-    // Ollama panel is supplementary — its failure should never blank the page.
-    try {
-      const res = await fetch(`/api/stats/ollama?window=${w}`)
-      setOllama(res.ok ? await res.json() : null)
-    } catch {
-      setOllama(null)
-    }
+    setLoading(false);
+
+    setOllama(ollamaResult.status === 'fulfilled' ? ollamaResult.value : null);
   }, [])
 
   useEffect(() => {

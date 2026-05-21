@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { and, eq, isNotNull, like } from 'drizzle-orm';
+import { and, eq, inArray, like } from 'drizzle-orm';
 import { db, schema } from '@/lib/db';
 import { errMsg } from '@/lib/shared/types';
 
@@ -63,12 +63,21 @@ export async function GET(request: NextRequest) {
     }
     const fixesByRelease = new Map<string, number>();
     if (reviewReleaseIds.size > 0) {
+      // Push the release-id filter into the DB instead of fetching all of
+      // the project's `fix` rows and discarding the ones that don't match.
+      // On projects with many fix jobs but only a handful of review-linked
+      // releases, this collapses the row transfer to just the rows we
+      // actually need to count.
       const fixJobs = await db
         .select({ releaseId: schema.jobs.releaseId })
         .from(schema.jobs)
-        .where(and(eq(schema.jobs.project, project), eq(schema.jobs.kind, 'fix'), isNotNull(schema.jobs.releaseId)));
+        .where(and(
+          eq(schema.jobs.project, project),
+          eq(schema.jobs.kind, 'fix'),
+          inArray(schema.jobs.releaseId, Array.from(reviewReleaseIds)),
+        ));
       for (const f of fixJobs) {
-        if (!f.releaseId || !reviewReleaseIds.has(f.releaseId)) continue;
+        if (!f.releaseId) continue;
         fixesByRelease.set(f.releaseId, (fixesByRelease.get(f.releaseId) ?? 0) + 1);
       }
     }

@@ -28,13 +28,19 @@ export function SkillEditor({
   useEffect(() => { onDirtyChangeRef.current = onDirtyChange }, [onDirtyChange])
 
   useEffect(() => {
+    // Reset only when the editor switches to a different skill (identity
+    // change). Including `skill.name/description/content` in deps would
+    // overwrite a user's unsaved edits whenever the parent re-fetches the
+    // skill list — the same logical skill comes back with the saved-on-
+    // server values, the effect fires, and the buffer the user was typing
+    // in vanishes.
     baselineRef.current = { name: skill?.name || '', description: skill?.description || '', content: skill?.content || '' }
     setName(baselineRef.current.name)
     setDescription(baselineRef.current.description)
     setContent(baselineRef.current.content)
     setSaved(false)
     onDirtyChangeRef.current?.(false)
-  }, [skill?.id, skill?.name, skill?.description, skill?.content])
+  }, [skill?.id])
 
   useEffect(() => {
     const b = baselineRef.current
@@ -51,6 +57,13 @@ export function SkillEditor({
     setSaving(true)
     try {
       await onSave({ name, description, content })
+      // Refresh the baseline to match the just-saved values. Without this,
+      // the dep-tightened reset effect (id-only) never runs after save,
+      // so a subsequent edit-and-revert-to-saved-value still compares
+      // against the pre-save baseline and spuriously reports dirty=true,
+      // producing a false "Discard unsaved changes?" confirm on close.
+      baselineRef.current = { name, description, content }
+      onDirtyChangeRef.current?.(false)
       setSaved(true)
       setTimeout(() => setSaved(false), 2000)
     } catch {}

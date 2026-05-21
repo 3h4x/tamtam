@@ -88,7 +88,7 @@ export function PRRow({
   const openInTerminal = async () => {
     setSwitchingBranch(true)
     try {
-      await fetch(`/api/projects/by-project/${projectName}/pr-branch`, {
+      await fetch(`/api/projects/by-project/${encodeURIComponent(projectName)}/pr-branch`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ branch: pr.headRefName }),
@@ -99,7 +99,7 @@ export function PRRow({
     const prompt = `Review pull request #${pr.number}: "${pr.title}" (${pr.url})\n\nBranch: ${pr.headRefName} → ${pr.baseRefName}`
     const key = `tamtam-pending-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 8)}`
     try { sessionStorage.setItem(key, JSON.stringify({ prompt })) } catch {}
-    router.push(`/project/${projectName}/terminal?pending=${key}`)
+    router.push(`/project/${encodeURIComponent(projectName)}/terminal?pending=${key}`)
   }
 
   const runDod = async () => {
@@ -115,7 +115,7 @@ export function PRRow({
         ? { issue_number: gates.issueNumber, repo }
         : { pr_number: pr.number, repo }
       const result = await runMarkDod(projectName, ctx)
-      router.push(`/project/${projectName}/terminal?job=${encodeURIComponent(result.jobId)}`)
+      router.push(`/project/${encodeURIComponent(projectName)}/terminal?job=${encodeURIComponent(result.jobId)}`)
     } catch (err) {
       setDodError(err instanceof Error ? err.message : 'DoD verification failed')
     } finally {
@@ -127,7 +127,7 @@ export function PRRow({
     setReviewing(true)
     try {
       const res = await reviewPR(projectName, pr.number, pr.title, pr.headRefName, pr.baseRefName)
-      router.push(`/project/${projectName}/terminal?job=${encodeURIComponent(res.job_id)}`)
+      router.push(`/project/${encodeURIComponent(projectName)}/terminal?job=${encodeURIComponent(res.job_id)}`)
     } catch (err) {
       setMergeError(err instanceof Error ? err.message : 'Review failed')
     } finally {

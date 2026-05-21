@@ -11,9 +11,28 @@ import { RecommendationCard } from '@/components/recommendations/RecommendationC
 export function GlobalRecommendationsPage() {
   const [items, setItems] = useState<Recommendation[]>([])
   const [loading, setLoading] = useState(true)
-  const [updating, setUpdating] = useState<string | null>(null)
+  // Tracks every recommendation currently being applied/dismissed. A single
+  // string slot would have meant: clicking Accept on card B while card A is
+  // still in flight overwrites A's busy state (UI lie), and whichever of
+  // the two settles first clears the busy state for *both* via the shared
+  // setUpdating(null) in finally. A Set scopes busy state per id.
+  const [updating, setUpdating] = useState<ReadonlySet<string>>(() => new Set())
   const [errors, setErrors] = useState<Record<string, string>>({})
   const [loadError, setLoadError] = useState<string | null>(null)
+
+  const startUpdating = (id: string) =>
+    setUpdating((prev) => {
+      const next = new Set(prev)
+      next.add(id)
+      return next
+    })
+  const finishUpdating = (id: string) =>
+    setUpdating((prev) => {
+      if (!prev.has(id)) return prev
+      const next = new Set(prev)
+      next.delete(id)
+      return next
+    })
 
   const loadErrorMessage = (err: unknown) => err instanceof Error ? err.message : 'Failed to load recommendations'
 
@@ -50,7 +69,7 @@ export function GlobalRecommendationsPage() {
   }, [items])
 
   const dismiss = async (item: Recommendation) => {
-    setUpdating(item.id)
+    startUpdating(item.id)
     setErrors((prev) => { const { [item.id]: _, ...rest } = prev; void _; return rest })
     try {
       await updateRecommendation(item.project, item.id, 'dismissed')
@@ -64,12 +83,12 @@ export function GlobalRecommendationsPage() {
     } catch (err) {
       setErrors((prev) => ({ ...prev, [item.id]: err instanceof Error ? err.message : 'Failed to dismiss' }))
     } finally {
-      setUpdating(null)
+      finishUpdating(item.id)
     }
   }
 
   const accept = async (item: Recommendation) => {
-    setUpdating(item.id)
+    startUpdating(item.id)
     setErrors((prev) => { const { [item.id]: _, ...rest } = prev; void _; return rest })
     try {
       await applyRecommendation(item.project, item)
@@ -83,7 +102,7 @@ export function GlobalRecommendationsPage() {
     } catch (err) {
       setErrors((prev) => ({ ...prev, [item.id]: err instanceof Error ? err.message : 'Failed to apply recommendation' }))
     } finally {
-      setUpdating(null)
+      finishUpdating(item.id)
     }
   }
 
@@ -145,7 +164,7 @@ export function GlobalRecommendationsPage() {
                 <RecommendationCard
                   key={item.id}
                   item={item}
-                  busy={updating === item.id}
+                  busy={updating.has(item.id)}
                   errorMessage={errors[item.id] ?? null}
                   onAccept={() => accept(item)}
                   onDismiss={() => dismiss(item)}

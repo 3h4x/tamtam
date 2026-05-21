@@ -10,9 +10,9 @@ export async function GET(
 ) {
   const { projectName } = await params;
   const { logDir } = getImproveConfig();
-  if (!existsSync(logDir)) return NextResponse.json({ logs: [] });
+  if (!existsSync(/*turbopackIgnore: true*/ logDir)) return NextResponse.json({ logs: [] });
 
-  const files = readdirSync(logDir)
+  const files = readdirSync(/*turbopackIgnore: true*/ logDir)
     .filter((f) => f.includes(projectName) && f.endsWith('.log'))
     .sort()
     .reverse()
@@ -20,9 +20,9 @@ export async function GET(
 
   const logs = [];
   for (const f of files) {
-    const filepath = join(logDir, f);
+    const filepath = join(/*turbopackIgnore: true*/ logDir, f);
     try {
-      const size = statSync(filepath).size;
+      const size = statSync(/*turbopackIgnore: true*/ filepath).size;
       let content: string;
       if (size > 50_000) {
         content = readRedactedTailSync(filepath, 50_000);

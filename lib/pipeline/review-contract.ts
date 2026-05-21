@@ -108,7 +108,8 @@ export function parseFindings(text: string): ParsedFinding[] {
     // verdict line. Continuation lines (indented further than the field
     // marker) append to the previous field — matches the contract's
     // multi-line "Root cause" / "Required fix" usage.
-    for (let j = i + 1; j < lines.length; j++) {
+    let j = i + 1;
+    for (; j < lines.length; j++) {
       if (idRe.test(lines[j])) break;
       if (/^\s*Verdict\s*:/i.test(lines[j])) break;
       if (/^\s*Findings\s*:/i.test(lines[j])) break;
@@ -135,6 +136,13 @@ export function parseFindings(text: string): ParsedFinding[] {
       }
       if (lastKey) fields[lastKey] = `${fields[lastKey]} ${trimmed}`.trim();
     }
+    // Advance the outer loop past the lines we just gathered. Without this,
+    // the next outer iteration would re-scan every field line of this
+    // finding to (uselessly) re-check whether it's another Finding ID
+    // marker — O(N × M) on pathologically long review logs. After the
+    // outer `i++` runs we'll resume at `j` (the break line), which is
+    // exactly where the next finding-or-terminator lives.
+    i = j - 1;
 
     const severity = (fields['severity'] || '').toLowerCase();
     const finding: ParsedFinding = {

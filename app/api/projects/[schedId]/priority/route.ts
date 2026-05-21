@@ -6,9 +6,14 @@ export async function PATCH(
   { params }: { params: Promise<{ schedId: string }> }
 ) {
   const { schedId } = await params;
-  const body = await request.json();
+  let body: { priority?: unknown };
+  try {
+    body = await request.json();
+  } catch {
+    return NextResponse.json({ detail: 'invalid JSON body' }, { status: 400 });
+  }
   const priority = body.priority;
-  if (!PRIORITY_ORDER.includes(priority)) {
+  if (typeof priority !== 'string' || !(PRIORITY_ORDER as readonly string[]).includes(priority)) {
     return NextResponse.json(
       { detail: `priority must be one of ${PRIORITY_ORDER.join(', ')}` },
       { status: 422 }

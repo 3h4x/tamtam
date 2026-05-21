@@ -78,6 +78,24 @@ export async function GET(request: Request) {
     warnings: LogLine[]
   } = { status: 'unavailable', errors: [], warnings: [] }
 
+  type ThrottleRow = typeof schema.notificationThrottle.$inferSelect;
+  type ProjLogSummary = Awaited<ReturnType<typeof getLatestProjectLogRetentionSummary>>;
+  type NightlySummary = Awaited<ReturnType<typeof getLatestNightlyRetentionSummary>>;
+  let throttledNotifications: ThrottleRow[] = [];
+  // Explicit null-cast on init so TS's flow analysis doesn't narrow these
+  // to the `null` literal type — the closure assignments below happen
+  // outside the synchronous scope TS tracks, so without the cast the
+  // post-await reads on `?.status` would error with "Property does not
+  // exist on type 'never'".
+  let lastProjectLogCleanup: ProjLogSummary = null as ProjLogSummary;
+  let lastNightlyCleanup: NightlySummary = null as NightlySummary;
+
+  // Run all four independent fan-outs (prometheus, loki, throttled-notifications
+  // DB query, retention summaries) in a single Promise.allSettled. Previously
+  // the throttled-notifications DB query and the retention helpers were
+  // sequential `await`s AFTER the prom/loki block resolved, so the route's wall
+  // time was `max(prom, loki) + db_throttled + retention_helpers` instead of
+  // `max(...all four...)`. Closure-captured state matches the existing pattern.
   await Promise.allSettled([
     (async () => {
       const [alerts, services] = await Promise.all([
@@ -98,12 +116,19 @@ export async function GET(request: Request) {
       ])
       loki = { status: 'ok', errors: errors.slice(0, 30), warnings: warnings.slice(0, 20) }
     })(),
+    (async () => {
+      throttledNotifications = await db.select().from(schema.notificationThrottle);
+    })(),
+    (async () => {
+      [lastProjectLogCleanup, lastNightlyCleanup] = await Promise.all([
+        getLatestProjectLogRetentionSummary(),
+        getLatestNightlyRetentionSummary(),
+      ]);
+    })(),
   ])
 
   const downServices = prometheus.services.filter(s => s.value?.[1] === '0')
   const settings = getSettings()
-  const throttledNotifications = await db.select()
-    .from(schema.notificationThrottle)
   const suppressedTotal = throttledNotifications.reduce((sum, row) => sum + row.suppressedCount, 0)
   const topThrottledNotifications = throttledNotifications
     .filter((row) => row.suppressedCount > 0)
@@ -115,10 +140,6 @@ export async function GET(request: Request) {
     suppressedTotal,
     entries: topThrottledNotifications,
   }
-  const [lastProjectLogCleanup, lastNightlyCleanup] = await Promise.all([
-    getLatestProjectLogRetentionSummary(),
-    getLatestNightlyRetentionSummary(),
-  ]);
   const retention = {
     policy: {
       logRetentionCount: settings.log_retention_count,
