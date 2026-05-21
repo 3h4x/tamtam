@@ -2,7 +2,7 @@ import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
 import { NextRequest } from 'next/server';
 
 describe('POST /api/jobs/[jobId]/seen', () => {
-  let POST: any;
+  let POST: typeof import('@/app/api/jobs/[jobId]/seen/route').POST;
   let markSeenMock: ReturnType<typeof vi.fn>;
 
   beforeEach(async () => {

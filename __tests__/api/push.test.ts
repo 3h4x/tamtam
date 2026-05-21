@@ -2,7 +2,7 @@ import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
 import { NextRequest } from 'next/server';
 
 describe('POST /api/projects/by-project/[projectName]/push', () => {
-  let POST: any;
+  let POST: typeof import('@/app/api/projects/by-project/[projectName]/push/route').POST;
   let launchProjectPushMock: ReturnType<typeof vi.fn>;
   let validateReleaseLinkedRetryMock: ReturnType<typeof vi.fn>;
   let validateReleaseLinkedCommitRetryMock: ReturnType<typeof vi.fn>;

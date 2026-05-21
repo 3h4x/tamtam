@@ -5,7 +5,7 @@ import { join } from 'path';
 import { tmpdir } from 'os';
 
 describe('GET /api/projects/by-project/{projectName}/docs', () => {
-  let GET: any;
+  let GET: typeof import('@/app/api/projects/by-project/[projectName]/docs/route').GET;
   let resolveProjectPathMock: ReturnType<typeof vi.fn>;
   let tempDir: string;
 

@@ -19,7 +19,7 @@ function makeJob(overrides: Partial<JobData> = {}): JobData {
 }
 
 describe('POST /api/projects/by-project/{projectName}/review-pr', () => {
-  let POST: any;
+  let POST: typeof import('@/app/api/projects/by-project/[projectName]/review-pr/route').POST;
   let resolveProjectPathMock: ReturnType<typeof vi.fn>;
   let listJobsMock: ReturnType<typeof vi.fn>;
   let probeJobStatusMock: ReturnType<typeof vi.fn>;
@@ -106,6 +106,51 @@ describe('POST /api/projects/by-project/{projectName}/review-pr', () => {
     expect(res.status).toBe(400);
     const data = await res.json();
     expect(data.detail).toContain('prNumber');
+  });
+
+  it('returns 400 when prNumber is a non-numeric string', async () => {
+    const req = makeReq('proj1', { prNumber: 'abc', prTitle: 'x', headRef: 'a', baseRef: 'b' });
+    const res = await POST(req, { params: Promise.resolve({ projectName: 'proj1' }) });
+    expect(res.status).toBe(400);
+    const data = await res.json();
+    expect(data.detail).toMatch(/positive integer/i);
+  });
+
+  it('returns 400 when prNumber is negative', async () => {
+    const req = makeReq('proj1', { prNumber: -5 });
+    const res = await POST(req, { params: Promise.resolve({ projectName: 'proj1' }) });
+    expect(res.status).toBe(400);
+    const data = await res.json();
+    expect(data.detail).toMatch(/positive integer/i);
+  });
+
+  it('returns 400 when prNumber is a float', async () => {
+    const req = makeReq('proj1', { prNumber: 3.14 });
+    const res = await POST(req, { params: Promise.resolve({ projectName: 'proj1' }) });
+    expect(res.status).toBe(400);
+    const data = await res.json();
+    expect(data.detail).toMatch(/positive integer/i);
+  });
+
+  it('returns 400 on malformed JSON body', async () => {
+    const req = new NextRequest('http://localhost/api/projects/by-project/proj1/review-pr', {
+      method: 'POST',
+      body: 'not json at all',
+      headers: { 'Content-Type': 'application/json' },
+    });
+    const res = await POST(req, { params: Promise.resolve({ projectName: 'proj1' }) });
+    expect(res.status).toBe(400);
+    const data = await res.json();
+    expect(data.detail).toMatch(/invalid JSON/i);
+  });
+
+  it('coerces non-string prTitle/headRef/baseRef to empty strings (defensive)', async () => {
+    const req = makeReq('proj1', { prNumber: 42, prTitle: 99, headRef: null, baseRef: undefined });
+    const res = await POST(req, { params: Promise.resolve({ projectName: 'proj1' }) });
+    expect(res.status).toBe(200);
+    // No explicit assertion on startPrReview args here — the existing
+    // happy-path test (below) already verifies the call shape; this case
+    // just confirms invalid optional fields don't trip the route.
   });
 
   it('returns 404 when project not found', async () => {

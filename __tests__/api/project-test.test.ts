@@ -37,7 +37,7 @@ function makeMockProcess() {
 }
 
 describe('POST /api/projects/by-project/{projectName}/test', () => {
-  let POST: any;
+  let POST: typeof import('@/app/api/projects/by-project/[projectName]/test/route').POST;
   let resolveProjectPathMock: ReturnType<typeof vi.fn>;
   let listJobsMock: ReturnType<typeof vi.fn>;
   let probeJobStatusMock: ReturnType<typeof vi.fn>;

@@ -133,6 +133,48 @@ describe('WorkflowRunDetail', () => {
     unmount()
   })
 
+  it('retries after an initial transient load failure and recovers', async () => {
+    const fetchMock = vi.fn()
+      .mockRejectedValueOnce(new Error('network down'))
+      .mockResolvedValueOnce({
+        ok: true,
+        status: 200,
+        json: async () => ({
+          run: {
+            id: 'run-live',
+            name: 'release',
+            rawName: 'workflow.release',
+            status: 'running',
+            createdAt: '2026-05-21T11:57:00Z',
+            startedAt: '2026-05-21T11:58:00Z',
+            completedAt: null,
+            durationMs: null,
+            output: null,
+            error: null,
+          },
+          steps: [],
+        }),
+      })
+    vi.stubGlobal('fetch', fetchMock)
+
+    const { container, unmount } = renderWorkflowRunDetail('run-live')
+
+    await vi.waitFor(() => {
+      expect(container.textContent).toContain('Failed to load workflow run: network down')
+    })
+    expect(fetchMock).toHaveBeenCalledTimes(1)
+
+    await vi.advanceTimersByTimeAsync(5000)
+
+    await vi.waitFor(() => {
+      expect(container.textContent).toContain('release')
+      expect(container.textContent).toContain('live · refreshes every 5s')
+    })
+    expect(fetchMock).toHaveBeenCalledTimes(2)
+
+    unmount()
+  })
+
   it('orders step status rollups by severity then alphabetical unknown statuses', async () => {
     vi.stubGlobal('fetch', vi.fn().mockResolvedValue({
       ok: true,
