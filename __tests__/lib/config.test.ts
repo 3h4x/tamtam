@@ -178,6 +178,7 @@ describe('config', () => {
         outcome_classifier_model: 'gemma3:4b',
         retrieval_score_threshold: 0.8,
         retrieval_manage_ollama: true,
+        retrieval_reindex_interval_hours: 16,
       });
     });
 

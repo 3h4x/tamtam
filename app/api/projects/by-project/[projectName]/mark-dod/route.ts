@@ -18,9 +18,9 @@ export async function POST(
       if (text) {
         const body = JSON.parse(text) as { issue_number?: unknown; pr_number?: unknown; repo?: unknown };
         // Strict type checks: numbers must be finite positive integers,
-        // repo must be a non-empty string. Truthy-only was permissive
-        // enough that a typo'd `issue_number: "5"` would flow through as
-        // `"5"` and crash deep inside startMarkDod's gh invocation.
+        // repo must be a non-empty string. A stringified number like
+        // `"5"` would otherwise flow through and crash deep inside
+        // startMarkDod's gh invocation.
         const repo = typeof body.repo === 'string' && body.repo.trim().length > 0 ? body.repo.trim() : null;
         const issueNumber = typeof body.issue_number === 'number' && Number.isInteger(body.issue_number) && body.issue_number > 0
           ? body.issue_number
