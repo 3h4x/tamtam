@@ -1,4 +1,3 @@
-// tamtam
 import { NextRequest, NextResponse } from 'next/server';
 import { markSeen } from '@/lib/jobs/job-storage';
 

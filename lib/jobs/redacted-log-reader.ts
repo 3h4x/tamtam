@@ -10,7 +10,14 @@ export function readRedactedTailSync(path: string, maxBytes: number): string {
   try {
     const stats = fstatSync(fd);
     if (stats.size <= maxBytes) {
-      return redactSecrets(readFileSync(/*turbopackIgnore: true*/ path, 'utf-8'));
+      // Use the fd we already opened instead of `readFileSync(path)`,
+      // which would re-open + re-read the file via a fresh path lookup
+      // (two opens, two reads, two closes for one tail call). Also makes
+      // the small-file path race-free against rotation between the fstat
+      // and the actual read.
+      const buf = Buffer.alloc(stats.size);
+      readSync(fd, buf, 0, stats.size, 0);
+      return redactSecrets(buf.toString('utf-8'));
     }
 
     const buf = Buffer.alloc(maxBytes);

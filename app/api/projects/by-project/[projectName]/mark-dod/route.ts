@@ -16,12 +16,23 @@ export async function POST(
     try {
       const text = await req.text();
       if (text) {
-        const body = JSON.parse(text) as { issue_number?: number; pr_number?: number; repo?: string };
-        if (body.repo && (body.issue_number || body.pr_number)) {
+        const body = JSON.parse(text) as { issue_number?: unknown; pr_number?: unknown; repo?: unknown };
+        // Strict type checks: numbers must be finite positive integers,
+        // repo must be a non-empty string. Truthy-only was permissive
+        // enough that a typo'd `issue_number: "5"` would flow through as
+        // `"5"` and crash deep inside startMarkDod's gh invocation.
+        const repo = typeof body.repo === 'string' && body.repo.trim().length > 0 ? body.repo.trim() : null;
+        const issueNumber = typeof body.issue_number === 'number' && Number.isInteger(body.issue_number) && body.issue_number > 0
+          ? body.issue_number
+          : null;
+        const prNumber = typeof body.pr_number === 'number' && Number.isInteger(body.pr_number) && body.pr_number > 0
+          ? body.pr_number
+          : null;
+        if (repo && (issueNumber || prNumber)) {
           override = {
-            issueNumber: body.issue_number,
-            prNumber: body.pr_number,
-            repo: body.repo,
+            issueNumber: issueNumber ?? undefined,
+            prNumber: prNumber ?? undefined,
+            repo,
           };
         }
       }

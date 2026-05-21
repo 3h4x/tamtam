@@ -1,4 +1,4 @@
-import { existsSync, statSync } from 'fs';
+import { existsSync, lstatSync } from 'fs';
 import { join, extname } from 'path';
 
 const PROJECT_LOGO_CANDIDATES = [
@@ -44,7 +44,14 @@ export function detectProjectLogoPath(projectPath: string): string | null {
     const absolutePath = join(/*turbopackIgnore: true*/ projectPath, candidate);
     if (!existsSync(/*turbopackIgnore: true*/ absolutePath)) continue;
     try {
-      if (statSync(/*turbopackIgnore: true*/ absolutePath).isFile()) return absolutePath;
+      // `lstatSync` does NOT follow symlinks. Restricting to real files
+      // means an accidental or malicious symlink at one of the candidate
+      // paths (e.g. `.tamtam/logo.svg` → `/etc/passwd`) doesn't end up
+      // served by /api/.../logo with an image/* content-type derived from
+      // the symlink's name. The logo route is a public-ish endpoint;
+      // refusing symlinks here is the cheapest defense.
+      const stat = lstatSync(/*turbopackIgnore: true*/ absolutePath);
+      if (stat.isFile()) return absolutePath;
     } catch {
       // Ignore unreadable candidates and continue scanning.
     }

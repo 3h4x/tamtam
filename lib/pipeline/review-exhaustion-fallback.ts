@@ -167,7 +167,13 @@ export async function fileReviewExhaustionIssue(
   const title = buildIssueTitle(findings);
   const body = buildIssueBody({ findings, proseFallback });
 
-  const labels = repoLabels ? ISSUE_LABELS.filter((label) => repoLabels.has(label)) : ISSUE_LABELS;
+  // When the label-detection probe failed (null), fall back to NO labels
+  // rather than the full ISSUE_LABELS list — `gh issue create --label X`
+  // errors when `X` doesn't exist on the repo, so an unverified label set
+  // would turn a single transient probe failure into a hard "could not
+  // file follow-up issue" outcome. Filing the issue label-less still gets
+  // the regression captured; operators can add labels manually.
+  const labels = repoLabels ? ISSUE_LABELS.filter((label) => repoLabels.has(label)) : [];
   const labelArgs: string[] = [];
   for (const l of labels) {
     labelArgs.push('--label', l);

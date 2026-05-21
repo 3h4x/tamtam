@@ -3,6 +3,7 @@ import { NextRequest } from 'next/server';
 import { sql } from 'drizzle-orm';
 import * as schema from '@/lib/db/schema';
 import { createTestPgDbEmpty, type TestDbHandle } from '@/__tests__/helpers/test-db';
+import { clearTrustedUsersCache } from '@/lib/shared/untrusted';
 
 let sharedHandle: TestDbHandle;
 
@@ -109,6 +110,7 @@ describe('GET /api/projects/by-project/[projectName]/issues?pick_top=1', () => {
     mocks.loadFileConfig.mockReset().mockReturnValue(null);
     mocks.getSettings.mockReset().mockReturnValue({ trusted_github_users: [], github_owner: '' });
     mocks.getDb.mockReturnValue(sharedHandle.db);
+    clearTrustedUsersCache();
     // Default: branch creation succeeds. Individual tests override.
     mocks.ensureIssueBranch.mockReset().mockImplementation(async ({ issueNumber, issueTitle }) => {
       const slug = String(issueTitle).toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-+|-+$/g, '').slice(0, 40).replace(/-+$/, '');

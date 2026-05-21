@@ -156,17 +156,19 @@ function newestRateLimitsFromContent(content: string): CodexRateLimits | null {
 async function readLatestRateLimits(): Promise<CodexRateLimits | null> {
   const sessionsDir = join(process.env.CODEX_HOME || join(homedir(), '.codex'), 'sessions');
   const files = await listSessionFiles(sessionsDir);
-  const samples: CodexRateLimits[] = [];
+  // Files are sorted newest-first by mtime; `selectEffectiveRateLimits`
+  // already takes samples[0]. So as soon as we find rate_limits in the
+  // newest matching file, we're done — no need to read up to 19 more
+  // files just to throw their contents away.
   for (const file of files) {
     try {
       const rateLimits = newestRateLimitsFromContent(await readFile(file, 'utf8'));
-      if (!rateLimits) continue;
-      samples.push(rateLimits);
+      if (rateLimits) return selectEffectiveRateLimits([rateLimits]);
     } catch {
       /* try the next recent session */
     }
   }
-  return selectEffectiveRateLimits(samples);
+  return null;
 }
 
 function buildSnapshot(rateLimits: CodexRateLimits, now: number, stale: boolean): QuotaSnapshot {

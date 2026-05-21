@@ -21,21 +21,31 @@ function parseLinkedIssue(body: string | null | undefined): number | null {
   return m ? parseInt(m[1], 10) : null;
 }
 
+import type { JobData } from '@/lib/jobs/types';
+
 // Latest finished job of `kind` linked to this GitHub issue — looks at the
 // `gh_issue_number` metadata that issue-driven runs stamp on their jobs.
-function latestForIssue(project: string, issueNumber: number, kind: string) {
-  return listJobs()
-    .filter(j => j.project === project && j.kind === kind && j.ghIssueNumber === issueNumber && j.finishedAt != null)
-    .sort((a, b) => (b.finishedAt ?? 0) - (a.finishedAt ?? 0))[0];
+// Operates on a pre-filtered project-job slice so the caller can avoid
+// running 4 fresh `listJobs()` scans across the full ~25k cache per request.
+function latestForIssue(projectJobs: JobData[], issueNumber: number, kind: string) {
+  let best: JobData | undefined;
+  for (const j of projectJobs) {
+    if (j.kind !== kind || j.ghIssueNumber !== issueNumber || j.finishedAt == null) continue;
+    if (!best || (j.finishedAt ?? 0) > (best.finishedAt ?? 0)) best = j;
+  }
+  return best;
 }
 
 // Fall back to any recent completion of `kind` for the project — used when
 // the job wasn't tagged with the issue number (e.g. release pipeline steps
 // that chain from a review).
-function latestAny(project: string, kind: string) {
-  return listJobs()
-    .filter(j => j.project === project && j.kind === kind && j.finishedAt != null)
-    .sort((a, b) => (b.finishedAt ?? 0) - (a.finishedAt ?? 0))[0];
+function latestAny(projectJobs: JobData[], kind: string) {
+  let best: JobData | undefined;
+  for (const j of projectJobs) {
+    if (j.kind !== kind || j.finishedAt == null) continue;
+    if (!best || (j.finishedAt ?? 0) > (best.finishedAt ?? 0)) best = j;
+  }
+  return best;
 }
 
 async function fetchIssueDod(projPath: string, repo: string, issueNumber: number): Promise<{ state: GateState; summary: string | null }> {
@@ -74,10 +84,17 @@ export async function GET(
   let dodSummary: string | null = null;
 
   if (issueNumber != null && !Number.isNaN(issueNumber)) {
-    const testJob = latestForIssue(projectName, issueNumber, 'test') ?? latestAny(projectName, 'test');
+    // Hoist the project-scoped job slice once: previously, 4 separate
+    // `listJobs()` calls each rescanned the full ~25k-entry cache to derive
+    // the same per-project filter. One pre-filter + 4 linear scans of the
+    // (~1k-entry) slice is significantly cheaper, and the linear scans
+    // replace the prior `.filter().sort()[0]` pattern (O(K log K)) with an
+    // O(K) max-by-finishedAt pick.
+    const projectJobs = listJobs().filter((j) => j.project === projectName);
+    const testJob = latestForIssue(projectJobs, issueNumber, 'test') ?? latestAny(projectJobs, 'test');
     if (testJob) tests = testJob.exitCode === 0 ? 'pass' : 'fail';
 
-    const reviewJob = latestForIssue(projectName, issueNumber, 'review') ?? latestAny(projectName, 'review');
+    const reviewJob = latestForIssue(projectJobs, issueNumber, 'review') ?? latestAny(projectJobs, 'review');
     if (reviewJob) {
       if (reviewJob.exitCode !== 0) review = 'fail';
       else {

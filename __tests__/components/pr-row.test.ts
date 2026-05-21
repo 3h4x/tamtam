@@ -130,7 +130,7 @@ describe('PRRow', () => {
     await vi.waitFor(() =>
       expect(runMarkDod).toHaveBeenCalledWith('acme/widgets', { issue_number: 77, repo: 'acme/widgets' }),
     )
-    expect(push).toHaveBeenCalledWith('/project/acme/widgets/terminal?job=job-123')
+    expect(push).toHaveBeenCalledWith('/project/acme%2Fwidgets/terminal?job=job-123')
     unmount()
   })
 
@@ -196,13 +196,13 @@ describe('PRRow', () => {
     terminalButton?.dispatchEvent(new MouseEvent('click', { bubbles: true }))
 
     await vi.waitFor(() =>
-      expect(fetchMock).toHaveBeenCalledWith('/api/projects/by-project/acme/widgets/pr-branch', expect.objectContaining({
+      expect(fetchMock).toHaveBeenCalledWith('/api/projects/by-project/acme%2Fwidgets/pr-branch', expect.objectContaining({
         method: 'POST',
       })),
     )
     await vi.waitFor(() => expect(push).toHaveBeenCalledTimes(1))
     const pendingUrl = push.mock.calls[0][0] as string
-    expect(pendingUrl).toMatch(/^\/project\/acme\/widgets\/terminal\?pending=/)
+    expect(pendingUrl).toMatch(/^\/project\/acme%2Fwidgets\/terminal\?pending=/)
     const payload = JSON.parse(sessionStorage.getItem(pendingUrl.split('pending=')[1]) ?? '{}')
     expect(payload.prompt).toContain('Review pull request #77')
     expect(payload.prompt).toContain('fix/issue-77-gates → master')

@@ -33,10 +33,38 @@ function redactKnownPatterns(input: string): string {
 
 type EnvLike = Partial<NodeJS.ProcessEnv>;
 
-function redactEnvValues(input: string, env: EnvLike = process.env): string {
-  let output = input;
+// Memo the filtered secret values per env reference. For `process.env`
+// (one singleton reference for the process lifetime), the env-key walk
+// runs once and every subsequent redaction reuses the cached value list.
+// Per-frame redaction in streaming CLI output was previously iterating
+// every env entry (hundreds) just to discover the same ~5-20 secret
+// values. Keyed on identity so callers that pass a custom env object
+// (tests) still re-derive.
+let _envCacheKey: EnvLike | null = null;
+let _envCacheValues: string[] | null = null;
+
+function getSecretEnvValues(env: EnvLike): string[] {
+  if (env === _envCacheKey && _envCacheValues) return _envCacheValues;
+  const values: string[] = [];
   for (const [key, rawValue] of Object.entries(env)) {
     if (!rawValue || rawValue.length < MIN_ENV_SECRET_LENGTH || !SECRET_ENV_KEY_RE.test(key)) continue;
+    values.push(rawValue);
+  }
+  _envCacheKey = env;
+  _envCacheValues = values;
+  return values;
+}
+
+/** Invalidate the env-secret cache. Tests / hot reloads that mutate
+ *  `process.env` after first use call this to force re-derivation. */
+export function clearSecretEnvCache(): void {
+  _envCacheKey = null;
+  _envCacheValues = null;
+}
+
+function redactEnvValues(input: string, env: EnvLike = process.env): string {
+  let output = input;
+  for (const rawValue of getSecretEnvValues(env)) {
     output = output.split(rawValue).join(REDACTION);
   }
   return output;

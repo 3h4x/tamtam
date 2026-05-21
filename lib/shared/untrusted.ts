@@ -23,15 +23,43 @@ export function withUntrustedPreamble(prompt: string): string {
   return `${UNTRUSTED_SYSTEM_INSTRUCTION}\n\n---\n\n${prompt}`;
 }
 
+// Per-project TTL cache for the derived trusted-users set. Without this,
+// each `isUserTrusted` call invoked `loadFileConfig(projectPath)` which
+// spawns a `git` subprocess (for branch detection) and reads the project's
+// `.tamtam/config.yml`. Loop callers (e.g. trust-filtering every comment
+// in a 50-comment PR) were paying that cost N times per request.
+// 15s TTL is short enough that operator updates to `safe_users` propagate
+// quickly while still coalescing the per-request batch of lookups.
+const TRUSTED_USERS_TTL_MS = 15_000;
+const trustedUsersCache = new Map<string, { users: Set<string>; expiresAt: number }>();
+
+function computeProjectTrustedSet(projectPath: string): Set<string> {
+  const config = loadFileConfig(projectPath);
+  const fileUsers = config?.safe_users ?? [];
+  return new Set(fileUsers.map((u) => u.toLowerCase()));
+}
+
+function getProjectTrustedSet(projectPath: string): Set<string> {
+  const cached = trustedUsersCache.get(projectPath);
+  if (cached && cached.expiresAt > Date.now()) return cached.users;
+  const users = computeProjectTrustedSet(projectPath);
+  trustedUsersCache.set(projectPath, { users, expiresAt: Date.now() + TRUSTED_USERS_TTL_MS });
+  return users;
+}
+
+/** Clear the trusted-users cache. Tests / config-write hooks use this. */
+export function clearTrustedUsersCache(projectPath?: string): void {
+  if (projectPath) trustedUsersCache.delete(projectPath);
+  else trustedUsersCache.clear();
+}
+
 /** Returns true when the GitHub login is listed in the project's safe_users config. */
 export function isUserTrusted(githubLogin: string, projectPath: string): boolean {
   const normalizedLogin = githubLogin.toLowerCase();
   const globalTrustedUsers = getSettings().trusted_github_users ?? [];
   if (globalTrustedUsers.some(user => user.toLowerCase() === normalizedLogin)) return true;
 
-  const config = loadFileConfig(projectPath);
-  if (!config?.safe_users?.length) return false;
-  return config.safe_users.some(user => user.toLowerCase() === normalizedLogin);
+  return getProjectTrustedSet(projectPath).has(normalizedLogin);
 }
 
 /**

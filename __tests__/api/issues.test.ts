@@ -3,6 +3,7 @@ import { NextRequest } from 'next/server';
 import { sql, eq } from 'drizzle-orm';
 import * as schema from '@/lib/db/schema';
 import { createTestPgDbEmpty, type TestDbHandle } from '@/__tests__/helpers/test-db';
+import { clearTrustedUsersCache } from '@/lib/shared/untrusted';
 
 let sharedHandle: TestDbHandle;
 
@@ -75,6 +76,7 @@ describe('GET /api/projects/by-project/[projectName]/issues', () => {
     mocks.loadFileConfig.mockReset().mockReturnValue(null);
     mocks.getSettings.mockReset().mockReturnValue({ trusted_github_users: [], github_owner: '' });
     mocks.getDb.mockReturnValue(sharedHandle.db);
+    clearTrustedUsersCache();
   });
 
   it('returns 404 when project not found', async () => {
@@ -448,6 +450,7 @@ describe('POST /api/projects/by-project/[projectName]/issues', () => {
     mocks.loadFileConfig.mockReset().mockReturnValue(null);
     mocks.getSettings.mockReset().mockReturnValue({ trusted_github_users: [], github_owner: '' });
     mocks.getDb.mockReturnValue(sharedHandle.db);
+    clearTrustedUsersCache();
   });
 
   function makeReq(body: object) {
