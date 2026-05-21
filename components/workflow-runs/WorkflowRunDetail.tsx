@@ -3,6 +3,7 @@
 import { useEffect, useState } from 'react';
 import Link from 'next/link';
 import { WorkflowRunDetailLoadingState, WorkflowRunsEmptyState } from '@/components/workflow-runs/WorkflowRunsStates';
+import { WorkflowStatusBadge } from '@/components/workflow-runs/workflow-run-status';
 
 interface Step {
   stepId: string;
@@ -76,21 +77,6 @@ function formatRelativeTime(iso: string | null, now: number): string {
   const diffDays = Math.floor(diffHours / 24);
   if (diffDays < 7) return `${diffDays}d ago`;
   return formatAbsoluteTime(iso);
-}
-
-function statusBadge(status: string): string {
-  switch (status) {
-    case 'completed':
-      return 'bg-status-success/15 text-status-success border-status-success/30';
-    case 'failed':
-    case 'cancelled':
-      return 'bg-status-error/15 text-status-error border-status-error/30';
-    case 'running':
-    case 'pending':
-      return 'bg-accent/15 text-accent border-accent/30';
-    default:
-      return 'bg-bg-tertiary text-text-tertiary border-border';
-  }
 }
 
 const STEP_STATUS_ORDER = ['failed', 'cancelled', 'running', 'pending', 'completed'] as const;
@@ -185,9 +171,7 @@ export function WorkflowRunDetail({ runId }: { runId: string }) {
           <h2 className="text-lg font-semibold text-text-primary font-mono" title={data.run.rawName}>
             {data.run.name}
           </h2>
-          <span className={`inline-block px-2 py-0.5 rounded border text-xs ${statusBadge(data.run.status)}`}>
-            {data.run.status}
-          </span>
+          <WorkflowStatusBadge status={data.run.status} />
           <span className="text-xs text-text-tertiary font-mono">{data.run.id}</span>
         </div>
         <div className="grid grid-cols-2 sm:grid-cols-4 gap-3 text-xs">
@@ -237,13 +221,11 @@ export function WorkflowRunDetail({ runId }: { runId: string }) {
           {stepStatusCounts.length > 0 ? (
             <div className="flex flex-wrap gap-1">
               {stepStatusCounts.map(({ status, count }) => (
-                <span
+                <WorkflowStatusBadge
                   key={status}
-                  className={`inline-flex items-center gap-1 rounded border px-2 py-0.5 text-xs ${statusBadge(status)}`}
-                >
-                  <span>{status}</span>
-                  <span className="font-mono tabular-nums">{count}</span>
-                </span>
+                  status={status}
+                  suffix={<span className="font-mono tabular-nums">{count}</span>}
+                />
               ))}
             </div>
           ) : null}
@@ -267,9 +249,7 @@ export function WorkflowRunDetail({ runId }: { runId: string }) {
                         attempt {s.attempt} · {formatDurationCell(s.status, s.durationMs, s.startedAt, now)}
                       </div>
                     </div>
-                    <span className={`shrink-0 rounded border px-2 py-0.5 text-xs ${statusBadge(s.status)}`}>
-                      {s.status}
-                    </span>
+                    <WorkflowStatusBadge status={s.status} />
                   </div>
                   <div className="mt-3 grid grid-cols-2 gap-2 text-xs">
                     <div className="min-w-0">
@@ -332,9 +312,7 @@ export function WorkflowRunDetail({ runId }: { runId: string }) {
                         )}
                       </td>
                       <td className="px-3 py-2">
-                        <span className={`inline-block px-2 py-0.5 rounded border text-xs ${statusBadge(s.status)}`}>
-                          {s.status}
-                        </span>
+                        <WorkflowStatusBadge status={s.status} />
                       </td>
                       <td className="px-3 py-2 text-right font-mono text-xs text-text-secondary">{s.attempt}</td>
                       <td className="px-3 py-2 text-right font-mono text-xs text-text-secondary">
