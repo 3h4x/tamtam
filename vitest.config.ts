@@ -4,10 +4,16 @@ import path from 'path';
 const isCi = process.env.CI === 'true';
 
 // The 29 test files below each take >=500ms wall-clock (DB boots, heavy mocks,
-// or large prompt assembly). Routing them into their own thread pool keeps a
+// or large prompt assembly). Routing them into their own worker pool keeps a
 // few slow files from blocking the long tail of small fast files, and lets
 // each project right-size its `maxWorkers` for its own contention profile.
-// Result: full suite ~16s vs ~21s with a single 12-thread pool. Re-measure
+//
+// Use process forks instead of worker threads: many suites boot PGlite's WASM
+// runtime, and Node 24 can crash natively while tearing down WASM code inside
+// Vitest worker threads. Forks keep each worker's V8/WASM state process-local.
+//
+// Result before switching away from threads: full suite ~16s vs ~21s with a
+// single 12-worker pool. Re-measure
 // periodically with `npx vitest run --reporter=json --outputFile=/tmp/v.json`
 // and sort by `endTime - startTime` to keep this list accurate.
 const SLOW_FILES = [
@@ -58,7 +64,7 @@ export default defineConfig({
           exclude: SLOW_FILES,
           environment: 'node',
           globalSetup: ['./__tests__/global-setup.ts'],
-          pool: 'threads',
+          pool: 'forks',
           maxWorkers: isCi ? 4 : 14,
           sequence: { groupOrder: 0 },
         },
@@ -70,7 +76,7 @@ export default defineConfig({
           include: SLOW_FILES,
           environment: 'node',
           globalSetup: ['./__tests__/global-setup.ts'],
-          pool: 'threads',
+          pool: 'forks',
           maxWorkers: isCi ? 4 : 8,
           sequence: { groupOrder: 1 },
         },

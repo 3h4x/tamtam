@@ -435,9 +435,9 @@ export function WorkflowRunDetail({ runId }: { runId: string }) {
                       </div>
                     </div>
                     <div className="min-w-0">
-                      <div className="uppercase tracking-wide text-text-tertiary">Completed</div>
-                      <div className="truncate text-text-secondary" title={formatAbsoluteTime(s.completedAt)}>
-                        {formatRelativeTime(s.completedAt, now)}
+                      <div className="uppercase tracking-wide text-text-tertiary">Last event</div>
+                      <div className="truncate text-text-secondary" title={formatAbsoluteTime(s.completedAt ?? s.startedAt)}>
+                        {formatRelativeTime(s.completedAt ?? s.startedAt, now)}
                       </div>
                     </div>
                   </div>
@@ -453,7 +453,7 @@ export function WorkflowRunDetail({ runId }: { runId: string }) {
                     <th className="text-left px-3 py-2 font-medium">Status</th>
                     <th className="text-right px-3 py-2 font-medium">Attempt</th>
                     <th className="text-right px-3 py-2 font-medium">Duration</th>
-                    <th className="text-left px-3 py-2 font-medium">Completed</th>
+                    <th className="text-left px-3 py-2 font-medium">Last event</th>
                   </tr>
                 </thead>
                 <tbody>
@@ -480,9 +480,9 @@ export function WorkflowRunDetail({ runId }: { runId: string }) {
                       </td>
                       <td
                         className="whitespace-nowrap px-3 py-2 text-xs text-text-secondary"
-                        title={formatAbsoluteTime(s.completedAt)}
+                        title={formatAbsoluteTime(s.completedAt ?? s.startedAt)}
                       >
-                        {formatRelativeTime(s.completedAt, now)}
+                        {formatRelativeTime(s.completedAt ?? s.startedAt, now)}
                       </td>
                     </tr>
                   ))}

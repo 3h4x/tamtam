@@ -47,7 +47,13 @@ export function countSiblingSteps(
 ): number {
   return deps
     .listJobs()
-    .filter((j) => j.project === projectName && j.kind === kind && j.releaseId === releaseId)
+    .filter(
+      (j) =>
+        j.project === projectName &&
+        j.kind === kind &&
+        j.releaseId === releaseId &&
+        j.finishedAt !== null,
+    )
     .length;
 }
 
@@ -63,7 +69,14 @@ export function countFixFromPushSiblings(
   const jobs = deps.listJobs();
   const byId = new Map(jobs.map((j) => [j.id, j]));
   return jobs.filter((j) => {
-    if (j.project !== projectName || j.kind !== 'fix' || j.releaseId !== releaseId) return false;
+    if (
+      j.project !== projectName ||
+      j.kind !== 'fix' ||
+      j.releaseId !== releaseId ||
+      j.finishedAt === null
+    ) {
+      return false;
+    }
     if (!j.parentJobId) return false;
     const parent = byId.get(j.parentJobId);
     return parent?.kind === 'push';

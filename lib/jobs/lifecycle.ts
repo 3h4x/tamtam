@@ -164,6 +164,7 @@ function recentFixFromPushCount(projectName: string): number {
   return listJobs().filter((j) => {
     if (j.project !== projectName || j.kind !== 'fix') return false;
     if (j.startedAt < cutoff) return false;
+    if (j.finishedAt === null) return false;
     if (!j.parentJobId) return false;
     const parent = getJob(j.parentJobId);
     return parent?.kind === 'push';
@@ -180,7 +181,7 @@ function recentFixFromPushCount(projectName: string): number {
 // 30-min window for ad-hoc steps outside any release.
 function recentStepCount(projectName: string, kind: string, currentJob?: JobData): number {
   const all = listJobs().filter(
-    (j) => j.project === projectName && j.kind === kind
+    (j) => j.project === projectName && j.kind === kind && j.finishedAt !== null
   );
   if (currentJob?.releaseId) {
     return all.filter((j) => j.releaseId === currentJob.releaseId).length;

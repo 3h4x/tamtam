@@ -1108,6 +1108,24 @@ describe.skip('fix→review review-count cap', () => {
     expect(mocks.startProjectReview).toHaveBeenCalledWith('proj');
   });
 
+  it('ignores unfinished sibling reviews when checking the release review cap', async () => {
+    const now = Date.now() / 1000;
+    const releaseId = 'release-under-cap-with-running-review';
+    await insertJobsAndCache(getTestDb(), [
+      makeJobRow({ id: releaseId, project: 'proj', kind: 'release', startedAt: now - 200 }),
+      makeJobRow({ id: 'r1', project: 'proj', kind: 'review', releaseId, startedAt: now - 180, finishedAt: now - 160, exitCode: 0 }),
+      makeJobRow({ id: 'r2-running', project: 'proj', kind: 'review', releaseId, startedAt: now - 30, finishedAt: null, exitCode: null }),
+    ]);
+
+    const f1 = makeFixJob('f1-running-sibling', { releaseId, parentJobId: 'r1', startedAt: now - 20 });
+    await markDone(f1, 0);
+
+    expect(mocks.startProjectReview).toHaveBeenCalledOnce();
+    expect(mocks.fileReviewExhaustionIssue).not.toHaveBeenCalled();
+    const notifyEvents = mocks.notify.mock.calls.map((c: unknown[]) => (c[0] as { event?: string })?.event);
+    expect(notifyEvents).not.toContain('fix_loop_exhausted');
+  });
+
   it('stops before exhaustion fallback when the capped review is DO NOT SHIP', async () => {
     const now = Date.now() / 1000;
     const releaseId = 'release-cap-do-not-ship';
