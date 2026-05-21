@@ -111,7 +111,7 @@ export async function POST(
   const model = sourceJob.model || resolveCliDefaultModel(provider, settings);
 
   const { logDir } = getImproveConfig();
-  mkdirSync(logDir, { recursive: true });
+  mkdirSync(/*turbopackIgnore: true*/ logDir, { recursive: true });
 
   // Continuation prompt is short on purpose — the model already has the
   // working context in the resumed session. withBasePrompt prepends the
@@ -122,7 +122,7 @@ export async function POST(
   const job = createJob(projectName, sourceJob.kind, 0, '', undefined, undefined, undefined, undefined, undefined, undefined, sourceJob.id);
   job.provider = provider;
   job.sessionId = sessionId;
-  job.logPath = join(logDir, `${job.id}.log`);
+  job.logPath = join(/*turbopackIgnore: true*/ logDir, `${job.id}.log`);
 
   try {
     const pid = await startJobInProcess(

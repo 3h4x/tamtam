@@ -96,58 +96,71 @@ export async function seedAgentCrons(deps: SeedDeps): Promise<SeedResult> {
     console.error('[seed-agent-crons] dead-orphan sweep failed:', err);
   }
 
+  // Fan out the per-agent enqueue. Each `quickAddJob` writes a distinct
+  // row keyed by `agent-cron-${agent.id}`, so they don't contend on the
+  // same Postgres row lock. At boot with N agents the sequential `await`
+  // chain was N serial round-trips; `Promise.allSettled` collapses that
+  // to ~max(per-row).
+  type AgentOutcome =
+    | { kind: 'enqueued' }
+    | { kind: 'preserved' }
+    | { kind: 'skipped'; reason: string };
+  const nowMs = now();
+  const outcomes = await Promise.all(
+    agents.map(async (agent): Promise<{ agentId: string; outcome: AgentOutcome }> => {
+      if (!agent.enabled) {
+        return { agentId: agent.id, outcome: { kind: 'skipped', reason: 'disabled' } };
+      }
+      if (!agent.schedule) {
+        return { agentId: agent.id, outcome: { kind: 'skipped', reason: 'no schedule' } };
+      }
+      try {
+        const jobKey = `agent-cron-${agent.id}`;
+        const nextFromNow = computeNextFire(agent.schedule, agent.id, nowMs);
+        const existingJob = existing.get(jobKey);
+        const existingRunAt = existingJob?.runAt.getTime();
+        if (
+          existingJob
+          && existingRunAt
+          && existingJob.attempts === 0
+          && existingJob.isAvailable
+          && !existingJob.lockedAt
+          && existingRunAt > nowMs
+          && existingRunAt <= nextFromNow
+        ) {
+          // Already-queued fire in the future, no retry/error state to
+          // clear — leave alone. Failed rows are replaced so Graphile
+          // resets attempts/last_error on the keyed upsert.
+          return { agentId: agent.id, outcome: { kind: 'preserved' } };
+        }
+        await quickAddJob(
+          { connectionString },
+          'agent-cron',
+          { agentId: agent.id },
+          {
+            jobKey,
+            jobKeyMode: 'replace',
+            runAt: new Date(nextFromNow),
+            maxAttempts: 5,
+          },
+        );
+        return { agentId: agent.id, outcome: { kind: 'enqueued' } };
+      } catch (err) {
+        return {
+          agentId: agent.id,
+          outcome: { kind: 'skipped', reason: `enqueue failed: ${err instanceof Error ? err.message : String(err)}` },
+        };
+      }
+    }),
+  );
+
   let enqueued = 0;
   let preserved = 0;
   const skipped: SeedResult['skipped'] = [];
-  const nowMs = now();
-  for (const agent of agents) {
-    if (!agent.enabled) {
-      skipped.push({ agentId: agent.id, reason: 'disabled' });
-      continue;
-    }
-    if (!agent.schedule) {
-      skipped.push({ agentId: agent.id, reason: 'no schedule' });
-      continue;
-    }
-    try {
-      const jobKey = `agent-cron-${agent.id}`;
-      const nextFromNow = computeNextFire(agent.schedule, agent.id, nowMs);
-      const existingJob = existing.get(jobKey);
-      const existingRunAt = existingJob?.runAt.getTime();
-      if (
-        existingJob
-        && existingRunAt
-        && existingJob.attempts === 0
-        && existingJob.isAvailable
-        && !existingJob.lockedAt
-        && existingRunAt > nowMs
-        && existingRunAt <= nextFromNow
-      ) {
-        // The already-queued fire is in the future and no later than the
-        // freshly-computed one, and it has no retry/error state to clear —
-        // leave it alone. Failed rows are replaced so Graphile resets
-        // attempts/last_error on the keyed upsert.
-        preserved += 1;
-        continue;
-      }
-      await quickAddJob(
-        { connectionString },
-        'agent-cron',
-        { agentId: agent.id },
-        {
-          jobKey,
-          jobKeyMode: 'replace',
-          runAt: new Date(nextFromNow),
-          maxAttempts: 5,
-        },
-      );
-      enqueued += 1;
-    } catch (err) {
-      skipped.push({
-        agentId: agent.id,
-        reason: `enqueue failed: ${err instanceof Error ? err.message : String(err)}`,
-      });
-    }
+  for (const { agentId, outcome } of outcomes) {
+    if (outcome.kind === 'enqueued') enqueued += 1;
+    else if (outcome.kind === 'preserved') preserved += 1;
+    else skipped.push({ agentId, reason: outcome.reason });
   }
   return { enqueued, skipped, preserved };
 }

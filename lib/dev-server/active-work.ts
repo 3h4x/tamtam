@@ -10,40 +10,27 @@
 //   - Boot sweep: orphan pidfiles whose project has no active work get
 //     stopped on boot.
 
-import { and, eq, isNull, inArray } from 'drizzle-orm';
+import { and, eq, isNull, inArray, or, like } from 'drizzle-orm';
 import { db, schema } from '@/lib/db';
 
 const AGENT_LIKE_KINDS = ['release', 'test', 'review', 'fix', 'commit', 'push', 'pr-wait', 'mark-dod', 'soak'];
 
 export async function hasActiveWorkForProject(project: string): Promise<boolean> {
   // Any unfinished job with kind in (release | pipeline phases | agent:*).
-  // Agent kinds are prefixed `agent:` — we LIKE-match those with a separate
-  // query because Drizzle's `like` is fine here.
-  const released = await db
+  // Single query with OR — pipeline-kind match + `agent:%` LIKE match.
+  const rows = await db
     .select({ id: schema.jobs.id })
     .from(schema.jobs)
     .where(
       and(
         eq(schema.jobs.project, project),
         isNull(schema.jobs.finishedAt),
-        inArray(schema.jobs.kind, AGENT_LIKE_KINDS),
+        or(
+          inArray(schema.jobs.kind, AGENT_LIKE_KINDS),
+          like(schema.jobs.kind, 'agent:%'),
+        ),
       ),
     )
     .limit(1);
-  if (released.length > 0) return true;
-
-  // Agent runs (kind starts with `agent:`).
-  const { sql } = await import('drizzle-orm');
-  const agents = await db
-    .select({ id: schema.jobs.id })
-    .from(schema.jobs)
-    .where(
-      and(
-        eq(schema.jobs.project, project),
-        isNull(schema.jobs.finishedAt),
-        sql`${schema.jobs.kind} LIKE 'agent:%'`,
-      ),
-    )
-    .limit(1);
-  return agents.length > 0;
+  return rows.length > 0;
 }

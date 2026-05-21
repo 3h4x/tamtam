@@ -467,7 +467,7 @@ class TerminalStore {
             }
           : s.lastStats
       if (sid && typeof window !== 'undefined') {
-        const target = `/project/${projectName}/terminal/${sid}`
+        const target = `/project/${encodeURIComponent(projectName)}/terminal/${encodeURIComponent(sid)}`
         if (window.location.pathname !== target) {
           window.history.replaceState(null, '', target)
         }
@@ -582,9 +582,10 @@ class TerminalStore {
       lastStats: null,
     }))
 
-    const url = raw ? `/api/streaming/${jobId}?raw=1`
-      : passthrough ? `/api/streaming/${jobId}?passthrough=1`
-      : `/api/streaming/${jobId}`
+    const encodedJobId = encodeURIComponent(jobId)
+    const url = raw ? `/api/streaming/${encodedJobId}?raw=1`
+      : passthrough ? `/api/streaming/${encodedJobId}?passthrough=1`
+      : `/api/streaming/${encodedJobId}`
     const es = new EventSource(url)
     this.esMap.set(projectName, es)
 
@@ -776,7 +777,7 @@ class TerminalStore {
             : s.lastStats
         // Sync URL to the latest session ID (Claude may rotate between turns)
         if (sid && typeof window !== 'undefined') {
-          const target = `/project/${projectName}/terminal/${sid}`
+          const target = `/project/${encodeURIComponent(projectName)}/terminal/${encodeURIComponent(sid)}`
           if (window.location.pathname !== target) {
             window.history.replaceState(null, '', target)
           }

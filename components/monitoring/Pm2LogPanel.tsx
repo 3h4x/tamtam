@@ -118,8 +118,13 @@ export function Pm2LogPanel({ pm2Logs, onRefresh }: { pm2Logs: Pm2LogData | null
     : counts.error > 0 ? 'issue'
     : 'ok'
 
-  const fileErrors = pm2Logs?.files.filter(file => file.error) ?? []
-  const availableFiles = pm2Logs?.files.filter(file => !file.error) ?? []
+  // Single-pass partition over pm2Logs.files — previously filtered the same
+  // array twice with opposite predicates.
+  const fileErrors: NonNullable<typeof pm2Logs>['files'] = []
+  const availableFiles: NonNullable<typeof pm2Logs>['files'] = []
+  for (const file of pm2Logs?.files ?? []) {
+    (file.error ? fileErrors : availableFiles).push(file)
+  }
   const missingAllFiles = Boolean(pm2Logs) && availableFiles.length === 0
 
   const filterButtons: Array<{ key: LogLevelFilter; label: string; count?: number }> = [
@@ -204,8 +209,8 @@ export function Pm2LogPanel({ pm2Logs, onRefresh }: { pm2Logs: Pm2LogData | null
       ) : (
         <div className="space-y-2">
           <div className="flex items-center gap-4 text-xs text-text-tertiary flex-wrap">
-            {availableFiles.map((f, i) => (
-              <span key={i} data-private className="flex items-center gap-1">
+            {availableFiles.map((f) => (
+              <span key={f.path} data-private className="flex items-center gap-1">
                 <span className="font-mono">{f.path.split('/').pop()}</span>
                 {f.size != null
                   ? <span className="opacity-70">· {(f.size / 1024 / 1024).toFixed(1)} MB</span>

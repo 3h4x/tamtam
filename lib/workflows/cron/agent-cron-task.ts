@@ -55,17 +55,13 @@ const TRANSIENT_RETRY_MS = 60_000;
 // Reasons that resolve on their own within seconds-to-minutes.
 // `prereqSkipReason` returns free-form strings; substring matching here
 // is intentionally loose so a small wording change doesn't break the
-// fast-retry path.
+// fast-retry path. One combined regex (case-insensitive) replaces the
+// previous OR chain of six toLowerCase()+includes() calls.
+const TRANSIENT_SKIP_RE =
+  /jobs paused|pr-wait in flight|non-default branch|pipeline_lock|release pipeline is running|behind origin\//i;
+
 function isTransientSkip(reason: string): boolean {
-  const r = reason.toLowerCase();
-  return (
-    r.includes('jobs paused')
-    || r.includes('pr-wait in flight')
-    || r.includes('non-default branch')
-    || r.includes('pipeline_lock')
-    || r.includes('release pipeline is running')
-    || r.includes('behind origin/')
-  );
+  return TRANSIENT_SKIP_RE.test(reason);
 }
 
 /** Pure handler — no graphile-worker / db imports here so it stays

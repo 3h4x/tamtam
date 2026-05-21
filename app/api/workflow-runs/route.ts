@@ -4,9 +4,10 @@
 //
 // The Workflow DB is typically a separate Postgres database from the
 // main TamTam DB (WORKFLOW_POSTGRES_URL vs DATABASE_URL), so this route
-// opens its own short-lived pg.Pool. When the env var is unset, returns
-// an empty list rather than failing — the app boots fine without
-// Workflow enabled.
+// opens its own pg.Pool cached on globalThis (Next.js duplicates modules
+// across realms — globalThis prevents one pool per realm). When the env
+// var is unset, returns an empty list rather than failing — the app
+// boots fine without Workflow enabled.
 
 import { NextResponse } from 'next/server';
 import { Pool } from 'pg';
@@ -42,15 +43,18 @@ interface WorkflowRunRow {
 }
 
 
-let cachedPool: Pool | null = null;
+declare global {
+  // eslint-disable-next-line no-var
+  var __tamtamWorkflowRunsPool: Pool | undefined;
+}
 
 function getWorkflowPool(): Pool | null {
   const url = process.env.WORKFLOW_POSTGRES_URL ?? process.env.DATABASE_URL;
   if (!url) return null;
-  if (!cachedPool) {
-    cachedPool = new Pool({ connectionString: url, max: 2 });
+  if (!globalThis.__tamtamWorkflowRunsPool) {
+    globalThis.__tamtamWorkflowRunsPool = new Pool({ connectionString: url, max: 2 });
   }
-  return cachedPool;
+  return globalThis.__tamtamWorkflowRunsPool;
 }
 
 export async function GET(request: Request): Promise<NextResponse> {

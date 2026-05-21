@@ -24,11 +24,6 @@ export function issueBranchName(issueNumber: number, issueTitle: string): string
  * Create-or-checkout `fix/issue-<n>-<slug>` for the given project, honouring
  * pipeline locks, project-level `issueAutoBranch` opt-out, and zombie-branch
  * detection. Working tree changes are carried across (no stash).
- *
- * Used by both the legacy POST `/api/projects/.../issue-branch` route and the
- * `pick_top=1` flow on the issues route — the latter so issue-cruncher agents
- * never need to run `git checkout` themselves (it's denied at the Claude
- * permission layer for that skill).
  */
 export async function ensureIssueBranch(opts: {
   projectName: string;
@@ -53,7 +48,13 @@ export async function ensureIssueBranch(opts: {
 
   const branch = issueBranchName(issueNumber, issueTitle);
 
-  const currentR = await exec('git', ['-C', projPath, 'branch', '--show-current'], { timeout: 5000 });
+  // Independent reads — parallelize. The early-return on "already on branch"
+  // is the rare case, so doing both in parallel saves ~10-30 ms in the common
+  // create/reuse path.
+  const [currentR, defaultR] = await Promise.all([
+    exec('git', ['-C', projPath, 'branch', '--show-current'], { timeout: 5000 }),
+    exec('git', ['-C', projPath, 'symbolic-ref', '--short', 'refs/remotes/origin/HEAD'], { timeout: 5000 }),
+  ]);
   if (currentR.stdout.trim() === branch) {
     return { status: 'already-on-branch', branch };
   }
@@ -61,11 +62,6 @@ export async function ensureIssueBranch(opts: {
   // Zombie-branch guard: if the issue branch already exists locally and is
   // fully merged into the default branch, re-checking it out would resurrect
   // dead work. Skip with a clear reason so the caller can surface it.
-  const defaultR = await exec(
-    'git',
-    ['-C', projPath, 'symbolic-ref', '--short', 'refs/remotes/origin/HEAD'],
-    { timeout: 5000 },
-  );
   const defaultBranch = (defaultR.stdout.trim().split('/').pop() || 'master').trim();
   const mergedR = await exec(
     'git',

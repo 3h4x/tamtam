@@ -246,7 +246,7 @@ describe('PipelineStrip', () => {
     const reviewButton = container.querySelector('[aria-label^="review: attention."]')
     if (!(reviewButton instanceof HTMLButtonElement)) throw new Error('review button not found')
     reviewButton.dispatchEvent(new MouseEvent('click', { bubbles: true }))
-    expect(pushMock).toHaveBeenCalledWith('/project/acme/widgets/terminal/review-session')
+    expect(pushMock).toHaveBeenCalledWith('/project/acme%2Fwidgets/terminal/review-session')
 
     pushMock.mockReset()
 
@@ -254,7 +254,7 @@ describe('PipelineStrip', () => {
     const fixButton = container.querySelector('[aria-label^="fix: running."]')
     if (!(fixButton instanceof HTMLButtonElement)) throw new Error('fix button not found')
     fixButton.dispatchEvent(new MouseEvent('click', { bubbles: true }))
-    expect(pushMock).toHaveBeenCalledWith('/project/acme/widgets/terminal/fix-session')
+    expect(pushMock).toHaveBeenCalledWith('/project/acme%2Fwidgets/terminal/fix-session')
 
     unmount()
   })
@@ -343,7 +343,7 @@ describe('PipelineStrip', () => {
 
     await vi.waitFor(() => {
       expect(pushProjectMock).toHaveBeenCalledWith('acme/widgets', { releaseId: 'rel-4' })
-      expect(pushMock).toHaveBeenCalledWith('/project/acme/widgets/terminal?job=push-2')
+      expect(pushMock).toHaveBeenCalledWith('/project/acme%2Fwidgets/terminal?job=push-2')
     })
 
     unmount()

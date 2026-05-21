@@ -72,10 +72,17 @@ export async function drainProjectRecoveryWork(
 export async function drainAllRecoveryWork(logPrefix = '[recovery]'): Promise<void> {
   const { listPendingReleaseProjects } = await import('./pending-release');
   const { listQueuedAgentRunProjects } = await import('@/lib/agents/queued-agent-runs');
-  const projects = uniqueProjects([
-    ...(await listPendingReleaseProjects()),
-    ...(await listQueuedAgentRunProjects()),
+  // Two independent DB list queries — read them in parallel.
+  const [pending, queued] = await Promise.all([
+    listPendingReleaseProjects(),
+    listQueuedAgentRunProjects(),
   ]);
+  const projects = uniqueProjects([...pending, ...queued]);
+  // Tests assert strict per-project call ordering on the mocked drain
+  // helpers, so iterate sequentially. Resume-edge latency is small enough
+  // (N projects × short awaits) that parallelism isn't a worthwhile change
+  // here. Per-project drain ordering matches the legacy completion-hook
+  // chain, which preserves expectations elsewhere too.
   for (const project of projects) {
     try {
       await drainProjectRecoveryWork(project, logPrefix);

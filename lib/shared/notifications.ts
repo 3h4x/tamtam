@@ -263,7 +263,7 @@ interface WebhookResult {
 
 async function postWebhook(
   url: string,
-  body: Record<string, unknown>,
+  bodyJson: string,
   signature?: string,
   maxRetries: number = 3,
   perAttemptTimeoutMs: number = 10_000,
@@ -284,7 +284,7 @@ async function postWebhook(
       const response = await fetch(url, {
         method: 'POST',
         headers,
-        body: JSON.stringify(body),
+        body: bodyJson,
         signal: AbortSignal.timeout(perAttemptTimeoutMs),
       });
 
@@ -342,7 +342,7 @@ export async function notify(payload: NotificationPayload): Promise<void> {
     const signature = config.webhook_secret ? signPayload(bodyJson, config.webhook_secret) : undefined;
 
     try {
-      const delivered = await postWebhook(config.webhook_url, body, signature);
+      const delivered = await postWebhook(config.webhook_url, bodyJson, signature);
       if (delivered.ok) {
         markThrottleDelivered(throttle.state);
       }
@@ -385,7 +385,7 @@ export async function sendTestNotification(webhookUrl: string, webhookSecret: st
   // take ~33s before surfacing the error (10s timeout × 3 + 3s backoff),
   // which feels broken from the UI. One attempt with 5s timeout is the
   // right shape for "did I configure this correctly?".
-  const result = await postWebhook(webhookUrl, body, signature, 1, 5_000);
+  const result = await postWebhook(webhookUrl, bodyJson, signature, 1, 5_000);
   if (result.ok) return { ok: true };
   return { ok: false, error: `Webhook request failed: ${result.error ?? 'unknown error'}` };
 }

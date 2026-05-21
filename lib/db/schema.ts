@@ -21,7 +21,8 @@ const vector = customType<{ data: number[]; driverData: string }>({
   },
   fromDriver(value: string): number[] {
     if (Array.isArray(value)) return value as number[];
-    return JSON.parse(value.replace(/^\[/, '[').replace(/\]$/, ']'));
+    // pgvector returns `'[0.1,0.2,...]'` — JSON-shaped, parses directly.
+    return JSON.parse(value);
   },
 });
 

@@ -49,6 +49,20 @@ function agentState(agent: Agent, schedEntry: SchedulerEntry | undefined): Agent
   return 'unscheduled'
 }
 
+const STATE_STYLE: Record<AgentState, string> = {
+  active: 'bg-status-success/15 text-status-success',
+  'on-demand': 'bg-accent/10 text-accent',
+  disabled: 'bg-bg-tertiary text-text-tertiary',
+  unscheduled: 'bg-status-warning/15 text-status-warning',
+}
+
+const STATE_LABEL: Record<AgentState, string> = {
+  active: 'active',
+  'on-demand': 'on-demand',
+  disabled: 'disabled',
+  unscheduled: 'unscheduled',
+}
+
 export function AgentsPage() {
   const router = useRouter()
   const [agents, setAgents] = useState<Agent[]>([])
@@ -82,30 +96,23 @@ export function AgentsPage() {
     return () => { active = false; clearInterval(interval) }
   }, [])
 
-  const getState = (a: Agent) => agentState(a, schedulerMap.get(a.id))
-
-  const filtered = agents.filter((a) => {
-    if (filter === 'all') return true
-    return getState(a) === filter
-  })
-
-  const activeCount = agents.filter(a => getState(a) === 'active').length
-  const onDemandCount = agents.filter(a => getState(a) === 'on-demand').length
-  const disabledCount = agents.filter(a => getState(a) === 'disabled').length
-  const unscheduledCount = agents.filter(a => getState(a) === 'unscheduled').length
-
-  const stateStyle: Record<AgentState, string> = {
-    active: 'bg-status-success/15 text-status-success',
-    'on-demand': 'bg-accent/10 text-accent',
-    disabled: 'bg-bg-tertiary text-text-tertiary',
-    unscheduled: 'bg-status-warning/15 text-status-warning',
-  }
-
-  const stateLabel: Record<AgentState, string> = {
-    active: 'active',
-    'on-demand': 'on-demand',
-    disabled: 'disabled',
-    unscheduled: 'unscheduled',
+  // Single pass: was 5 separate .filter() loops (one for `filtered`, four
+  // for counts), each calling getState(a) → schedulerMap.get(a.id). With N
+  // agents that's 5N getState calls; now N.
+  const filtered: Agent[] = []
+  const stateByAgentId = new Map<string, AgentState>()
+  let activeCount = 0
+  let onDemandCount = 0
+  let disabledCount = 0
+  let unscheduledCount = 0
+  for (const a of agents) {
+    const state = agentState(a, schedulerMap.get(a.id))
+    stateByAgentId.set(a.id, state)
+    if (state === 'active') activeCount++
+    else if (state === 'on-demand') onDemandCount++
+    else if (state === 'disabled') disabledCount++
+    else unscheduledCount++
+    if (filter === 'all' || state === filter) filtered.push(a)
   }
 
   return (
@@ -194,7 +201,7 @@ export function AgentsPage() {
             <tbody>
               {filtered.map((agent) => {
                 const schedEntry = schedulerMap.get(agent.id)
-                const state = getState(agent)
+                const state = stateByAgentId.get(agent.id) ?? agentState(agent, schedEntry)
                 const accentBorder =
                   state === 'active' ? 'border-l-status-success/40' :
                   state === 'unscheduled' ? 'border-l-status-warning/60' :
@@ -208,10 +215,10 @@ export function AgentsPage() {
                   >
                     <td className="px-4 py-2">
                       <span
-                        className={`px-2 py-0.5 text-xs rounded-full font-medium ${stateStyle[state]}`}
+                        className={`px-2 py-0.5 text-xs rounded-full font-medium ${STATE_STYLE[state]}`}
                         title={state === 'unscheduled' ? 'Scheduled but not registered in internal scheduler' : undefined}
                       >
-                        {stateLabel[state]}
+                        {STATE_LABEL[state]}
                       </span>
                     </td>
                     <td className="px-4 py-2 font-medium text-text-primary" data-private>{agent.project}</td>

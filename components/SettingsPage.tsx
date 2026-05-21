@@ -1,6 +1,6 @@
 'use client'
 
-import { useState, useEffect, useCallback, useRef } from 'react'
+import { useState, useEffect, useCallback, useMemo, useRef } from 'react'
 import { useRouter } from 'next/navigation'
 import { errMsg } from '@/lib/shared/types'
 import { FIELDS, DEFAULTS, GRID_COLS } from '@/components/settings/constants'
@@ -203,7 +203,14 @@ export function SettingsPage({ initialTab }: { initialTab?: TabId } = {}) {
   const [boardResyncing, setBoardResyncing]   = useState(false)
   const [boardResyncMsg, setBoardResyncMsg]   = useState<string | null>(null)
 
-  const isDirty = JSON.stringify(settings) !== JSON.stringify(savedSettings)
+  // Key-walk + short-circuit avoids serializing the whole ~80-key settings
+  // map twice on every re-render (e.g. saving/saved/error toggles).
+  const isDirty = useMemo(() => {
+    for (const k of Object.keys(settings) as (keyof SettingsMap)[]) {
+      if (settings[k] !== savedSettings[k]) return true
+    }
+    return false
+  }, [settings, savedSettings])
   const canSave = isDirty && !saving && !trustedGithubUsersError
 
   useEffect(() => {

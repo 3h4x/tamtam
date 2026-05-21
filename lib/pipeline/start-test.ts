@@ -118,11 +118,11 @@ export async function startProjectTest(projectName: string): Promise<StartTestRe
     return { ok: false, status: 400, detail: `Could not detect test command for ${projectName}` };
   }
 
-  mkdirSync(logDir, { recursive: true });
+  mkdirSync(/*turbopackIgnore: true*/ logDir, { recursive: true });
 
   const job = createJob(projectName, 'test', 0, '');
   job.provider = gate.provider;
-  const logPath = join(logDir, `${job.id}.log`);
+  const logPath = join(/*turbopackIgnore: true*/ logDir, `${job.id}.log`);
   job.logPath = logPath;
   // Persist logPath up-front so probeJobStatus can find the sentinel file
   // even if a worker / Next.js restart kills us before the final updateJob.
@@ -153,7 +153,7 @@ export async function startProjectTest(projectName: string): Promise<StartTestRe
     'exit $rc',
   ].join('\n');
 
-  writeFileSync(logPath, '');
+  writeFileSync(/*turbopackIgnore: true*/ logPath, '');
   const proc = spawn('bash', ['-lc', bashCommand], {
     cwd: projPath,
     stdio: 'ignore',
@@ -184,12 +184,12 @@ export async function startProjectTest(projectName: string): Promise<StartTestRe
     // pipeline's real status even if the OS reaped the process via signal.
     let finalCode = code ?? -1;
     if (code == null) {
+      // No existsSync precheck — readFileSync throws ENOENT and the catch
+      // leaves finalCode at -1, matching the original fallback semantics.
       try {
-        if (existsSync(exitCodePath)) {
-          const raw = readFileSync(exitCodePath, 'utf-8').trim();
-          const n = Number.parseInt(raw, 10);
-          if (Number.isFinite(n)) finalCode = n;
-        }
+        const raw = readFileSync(/*turbopackIgnore: true*/ exitCodePath, 'utf-8').trim();
+        const n = Number.parseInt(raw, 10);
+        if (Number.isFinite(n)) finalCode = n;
       } catch { /* fall back to -1 */ }
     }
     markDone(job, finalCode).catch((e) => {

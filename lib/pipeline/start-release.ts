@@ -259,7 +259,11 @@ export async function startRelease(projectName: string, options: StartReleaseOpt
   const skipToPush = await hasFreshLgtm(projectName, projPath);
 
   const testCmd = await detectTestCommand(projPath, projectName);
-  const testsDisabled = !!(await getProjectTestConfig(projectName))?.testsDisabled;
+  // One DB read for both `testsDisabled` and `reviewDisabled` instead of
+  // three separate `getProjectTestConfig` round-trips below.
+  const releaseConfig = await getProjectTestConfig(projectName);
+  const testsDisabled = !!releaseConfig?.testsDisabled;
+  const reviewDisabled = !!releaseConfig?.reviewDisabled;
 
   // First step's parent is the release meta job, not whatever triggered the
   // release (agent run, manual click). Switching the AsyncLocalStorage parent
@@ -279,13 +283,13 @@ export async function startRelease(projectName: string, options: StartReleaseOpt
         if (!r.ok) return { ok: false, status: r.status, detail: r.detail };
         return { ok: true, step: 'test' as const, jobId: r.jobId, releaseJobId, message: `Running tests (${r.testCmd})` };
       }
-      const freshLgtm = await hasFreshLgtm(projectName, projPath);
-      if (freshLgtm) {
+      // skipToPush already captured hasFreshLgtm above — same project state,
+      // same answer; one fewer DB round-trip per release.
+      if (skipToPush) {
         const r = await startProjectPush(projectName);
         if (!r.ok) return { ok: false, status: r.status, detail: r.detail };
         return { ok: true, step: 'push' as const, releaseJobId, message: r.message };
       }
-      const reviewDisabled = !!(await getProjectTestConfig(projectName))?.reviewDisabled;
       if (reviewDisabled) {
         const r = await startProjectPush(projectName);
         if (!r.ok) return { ok: false, status: r.status, detail: r.detail };
@@ -315,8 +319,8 @@ export async function startRelease(projectName: string, options: StartReleaseOpt
     // also skips review because start-review excludes those paths from scope.
     // No autoCommit gating needed: we're already inside an explicit release,
     // which implies commit intent (same reason job-storage.ts's completion hook
-    // lets `inRelease` bypass autoCommitEnabled).
-    const reviewDisabled = !!(await getProjectTestConfig(projectName))?.reviewDisabled;
+    // lets `inRelease` bypass autoCommitEnabled). reviewDisabled was read once
+    // above from the shared releaseConfig snapshot.
     if (reviewDisabled || hasOnlyTamtamChanges) {
       const r = await startProjectCommit(projectName);
       if (!r.ok) return { ok: false, status: r.status, detail: r.detail };

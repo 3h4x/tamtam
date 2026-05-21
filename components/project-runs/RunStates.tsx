@@ -144,6 +144,8 @@ export function ProjectRunsEmptyState({
   failedCount,
   onClearFilters,
 }: ProjectRunsEmptyStateProps) {
+  const queryValue = search.trim()
+
   const title = (() => {
     switch (mode) {
       case 'empty':
@@ -164,7 +166,7 @@ export function ProjectRunsEmptyState({
       case 'empty':
         return 'Start work from Terminal or trigger a release. New runs, verdicts, and durations will show up here.'
       case 'search':
-        return `Nothing in ${activeFilterLabel.toLowerCase()} matches “${search.trim()}”.`
+        return `Nothing in ${activeFilterLabel.toLowerCase()} matches “${queryValue}”.`
       case 'running':
         return 'This project has no active terminal, agent, or pipeline work at the moment.'
       case 'failed':
@@ -173,8 +175,6 @@ export function ProjectRunsEmptyState({
         return 'This filter is empty for the current history window.'
     }
   })()
-
-  const queryValue = search.trim()
 
   return (
     <div className="rounded-lg border border-border bg-bg-secondary">

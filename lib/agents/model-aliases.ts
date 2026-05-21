@@ -40,6 +40,10 @@ export function normalizeModelInput(model: string | null | undefined, fallback: 
 
 export function parseOptionalKnownModelInput(
   input: unknown,
+  // `fallback` is kept in the signature for caller back-compat. It is
+  // never used in practice: once `isKnownModelAlias` accepts `trimmed`,
+  // the direct MODEL_ALIAS_MAP lookup below always returns a tier.
+  // eslint-disable-next-line @typescript-eslint/no-unused-vars
   fallback: ModelTier = 'normal'
 ): { model: ModelTier | null; error: string | null } {
   if (input === undefined || input === null) return { model: null, error: null };
@@ -47,7 +51,7 @@ export function parseOptionalKnownModelInput(
   const trimmed = input.trim();
   if (!trimmed) return { model: null, error: null };
   if (!isKnownModelAlias(trimmed)) return { model: null, error: INVALID_MODEL_INPUT_DETAIL };
-  return { model: normalizeModelInput(trimmed, fallback), error: null };
+  return { model: MODEL_ALIAS_MAP[trimmed], error: null };
 }
 
 export function isKnownModelAlias(model: string | null | undefined): model is KnownModelAlias {

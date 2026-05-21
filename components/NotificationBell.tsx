@@ -7,6 +7,15 @@ import { fetchNotifications, markNotificationsSeen, markJobSeen } from '@/lib/cl
 import type { JobInfo } from '@/lib/client-api'
 import { jobIsFinished } from '@/lib/client/job-status'
 
+// Sky view: one running entry per project (highest-priority kind wins)
+const KIND_PRIORITY: Record<string, number> = {
+  release: 100, 'mark-dod': 90, 'pr-wait': 85,
+  fix: 80, review: 75, test: 70, push: 65, commit: 60,
+  run: 40, action: 35,
+}
+const kindPriority = (k: string): number =>
+  k.startsWith('agent:') ? 50 : (KIND_PRIORITY[k] ?? 30)
+
 function timeAgo(date: Date): string {
   const s = Math.floor((Date.now() - date.getTime()) / 1000)
   if (s < 60) return 'just now'
@@ -118,13 +127,9 @@ export function NotificationBell() {
         const notifs = await fetchNotifications()
         setUnseenCount(notifs.count)
 
-        // Sky view: one running entry per project (highest-priority kind wins)
-        const KIND_PRIORITY: Record<string, number> = {
-          release: 100, 'mark-dod': 90, 'pr-wait': 85,
-          fix: 80, review: 75, test: 70, push: 65, commit: 60,
-          run: 40, action: 35,
-        }
-        const kindPriority = (k: string) => k.startsWith('agent:') ? 50 : (KIND_PRIORITY[k] ?? 30)
+        // Sky view: one running entry per project (highest-priority kind wins).
+        // KIND_PRIORITY + kindPriority hoisted to module level — they don't
+        // change between polls.
         const runningByProject = new Map<string, JobInfo>()
         for (const j of (notifs.runningJobs ?? [])) {
           const existing = runningByProject.get(j.project)
@@ -162,9 +167,9 @@ export function NotificationBell() {
     setOpen(false)
     if (jobIsFinished(job)) markJobSeen(job.id).catch(() => {})
     if (job.kind === 'run' && job.session_id) {
-      router.push(`/project/${job.project}/terminal/${job.session_id}`)
+      router.push(`/project/${encodeURIComponent(job.project)}/terminal/${encodeURIComponent(job.session_id)}`)
     } else {
-      router.push(`/project/${job.project}/terminal?job=${encodeURIComponent(job.id)}`)
+      router.push(`/project/${encodeURIComponent(job.project)}/terminal?job=${encodeURIComponent(job.id)}`)
     }
   }
 

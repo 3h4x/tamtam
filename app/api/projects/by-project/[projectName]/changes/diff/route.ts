@@ -27,6 +27,13 @@ export async function GET(
   }
   const { absolutePath, relativePath } = requested;
 
+  // Symlink check must run BEFORE any git invocation — a tracked symlink
+  // resolving outside the project would otherwise let `git diff HEAD --
+  // <symlink>` disclose the target's content (depends on `core.symlinks`).
+  if (!realPathStaysInsideProject(projPath, absolutePath)) {
+    return NextResponse.json({ detail: 'file outside project' }, { status: 400 });
+  }
+
   const tracked = await exec(
     'git',
     ['-C', projPath, 'ls-files', '--error-unmatch', '--', relativePath],
@@ -40,10 +47,6 @@ export async function GET(
       { timeout: 15000 }
     );
     return NextResponse.json({ diff: diff.stdout, untracked: false });
-  }
-
-  if (!realPathStaysInsideProject(projPath, absolutePath)) {
-    return NextResponse.json({ detail: 'file outside project' }, { status: 400 });
   }
 
   const diff = await exec(

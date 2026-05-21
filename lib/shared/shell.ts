@@ -32,8 +32,12 @@ export function exec(
   // Abort-aware commands also use spawn so an in-flight step can be cancelled.
   if (options?.killProcessGroup || options?.signal || options?.abortProcessTree) {
     return new Promise((resolve) => {
-      let stdout = '';
-      let stderr = '';
+      // Buffer the chunks instead of doing `stdout += d.toString()` per chunk —
+      // for high-volume children (pnpm test, pnpm dev) the per-chunk string
+      // concatenation is O(n²) in V8 worst cases. Buffer.concat once at settle
+      // time runs in one shot.
+      const stdoutChunks: Buffer[] = [];
+      const stderrChunks: Buffer[] = [];
       let settled = false;
       const timeoutMs = options?.timeout ?? 15000;
       let killTimer: ReturnType<typeof setTimeout> | null = null;
@@ -64,7 +68,11 @@ export function exec(
         if (options?.signal && abortListener) {
           options.signal.removeEventListener('abort', abortListener);
         }
-        resolve({ stdout, stderr, exitCode });
+        resolve({
+          stdout: Buffer.concat(stdoutChunks).toString('utf8'),
+          stderr: Buffer.concat(stderrChunks).toString('utf8'),
+          exitCode,
+        });
       };
 
       const abortChild = () => {
@@ -88,7 +96,7 @@ export function exec(
           stdio: ['ignore', 'pipe', 'pipe'],
         });
       } catch (error) {
-        stderr = error instanceof Error ? error.message : String(error);
+        stderrChunks.push(Buffer.from(error instanceof Error ? error.message : String(error)));
         settle(1);
         return;
       }
@@ -106,8 +114,8 @@ export function exec(
         }
       }
 
-      child.stdout?.on('data', (d: Buffer) => { stdout += d.toString(); });
-      child.stderr?.on('data', (d: Buffer) => { stderr += d.toString(); });
+      child.stdout?.on('data', (d: Buffer) => { stdoutChunks.push(d); });
+      child.stderr?.on('data', (d: Buffer) => { stderrChunks.push(d); });
       child.on('close', (code, signal) => {
         if (aborted || signal) {
           settle(130);
@@ -116,7 +124,9 @@ export function exec(
         settle(code ?? 1);
       });
       child.on('error', (error) => {
-        stderr = stderr || (error instanceof Error ? error.message : String(error));
+        if (stderrChunks.length === 0) {
+          stderrChunks.push(Buffer.from(error instanceof Error ? error.message : String(error)));
+        }
         settle(1);
       });
 

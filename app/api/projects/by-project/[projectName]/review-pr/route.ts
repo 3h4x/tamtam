@@ -7,9 +7,6 @@ export async function POST(
 ) {
   const { projectName } = await params;
 
-  // Defensive parse: a malformed body used to bubble up as a 500 here.
-  // Better to surface a 400 with a clear reason — the client can then
-  // show a useful error instead of an opaque server failure.
   let body: unknown;
   try {
     body = await request.json();

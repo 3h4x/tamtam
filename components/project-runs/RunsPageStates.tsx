@@ -150,6 +150,8 @@ export function RunsPageEmptyState({
   onClearView,
   onResetScope,
 }: RunsPageEmptyStateProps) {
+  const queryValue = search.trim()
+
   const title = (() => {
     switch (mode) {
       case 'empty':
@@ -174,7 +176,7 @@ export function RunsPageEmptyState({
           ? 'Runs appear here after terminal work, agent runs, or release pipeline activity starts.'
           : `The current scope is ${projectScopeLabel}. Switch back to all projects to compare other activity.`
       case 'search':
-        return `Nothing in ${activeFilterLabel.toLowerCase()} matches “${search.trim()}”.`
+        return `Nothing in ${activeFilterLabel.toLowerCase()} matches “${queryValue}”.`
       case 'running':
         return `There is no active run in ${projectScopeLabel} right now.`
       case 'failed':
@@ -185,8 +187,6 @@ export function RunsPageEmptyState({
         return 'This filter is empty for the current history window.'
     }
   })()
-
-  const queryValue = search.trim()
 
   return (
     <div className="rounded-lg border border-border bg-bg-secondary">
@@ -222,7 +222,7 @@ export function RunsPageEmptyState({
       </div>
 
       <div className="flex flex-wrap items-center gap-2 border-t border-border px-4 py-3">
-        {(mode !== 'empty' || search.trim() || activeFilterLabel !== 'all') && (
+        {(mode !== 'empty' || queryValue || activeFilterLabel !== 'all') && (
           <Button type="button" size="sm" variant="secondary" onClick={onClearView}>
             Clear filters
           </Button>

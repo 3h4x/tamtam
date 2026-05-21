@@ -126,6 +126,7 @@ export function ConfigTab({
   allSaved,
   onSaveAll,
 }: ConfigTabProps) {
+  const postMergeWatchMinutes = Number.parseInt(postMergeWatchMinutesInput, 10) || 0
   if (configLoading) {
     return (
       <div className="space-y-3">
@@ -159,7 +160,7 @@ export function ConfigTab({
             <span className="font-mono text-accent shrink-0">.tamtam/config.yml</span>
             <span className="text-text-tertiary">overrides: {config.file_config.join(', ')}</span>
             {config.file_config_is_default_branch === false && config.current_branch && (
-              <span className="text-amber-400 truncate">
+              <span className="text-status-warning truncate">
                 · showing <span className="font-mono">{config.file_config_branch}</span>{' '}
                 (on <span className="font-mono">{config.current_branch}</span>) — effective after merge
               </span>
@@ -340,7 +341,7 @@ export function ConfigTab({
                 auto_commit_enabled: autoCommitEnabledInput,
                 auto_push_enabled: autoPushEnabledInput,
                 auto_pr_merge_enabled: autoPrMergeEnabledInput,
-                post_merge_watch_minutes: Number.parseInt(postMergeWatchMinutesInput, 10) || 0,
+                post_merge_watch_minutes: postMergeWatchMinutes,
                 auto_revert_enabled: autoRevertEnabledInput,
               },
               setters: {
@@ -483,7 +484,7 @@ export function ConfigTab({
               id="post-merge-watch-enabled"
               type="checkbox"
               className="w-4 h-4 accent-accent mt-0.5 shrink-0 cursor-pointer"
-              checked={(Number.parseInt(postMergeWatchMinutesInput, 10) || 0) > 0}
+              checked={postMergeWatchMinutes > 0}
               onChange={(e) => setPostMergeWatchMinutesInput(e.target.checked ? '1' : '0')}
             />
             <div className="flex-1 min-w-0">

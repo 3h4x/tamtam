@@ -46,19 +46,23 @@ export function Table<T>({
     }
   }
 
-  const sorted = [...rows].sort((a, b) => {
-    if (!sortKey) return 0
-    const col = columns.find(c => c.key === sortKey)
-    if (!col?.sortValue) return 0
-    const av = col.sortValue(a)
-    const bv = col.sortValue(b)
-    if (av === bv) return 0
-    const cmp =
-      typeof av === 'number' && typeof bv === 'number'
-        ? av - bv
-        : String(av).localeCompare(String(bv))
-    return sortDir === 'asc' ? cmp : -cmp
-  })
+  // Resolve the sort column ONCE — previously the comparator did a
+  // columns.find() on every pair (O(N log N × M) where M is columns.length).
+  // Also short-circuit the array copy when there's nothing to sort.
+  const sortCol = sortKey ? columns.find(c => c.key === sortKey) : undefined
+  const sortValueFn = sortCol?.sortValue ?? null
+  const sorted = sortValueFn === null
+    ? rows
+    : [...rows].sort((a, b) => {
+        const av = sortValueFn(a)
+        const bv = sortValueFn(b)
+        if (av === bv) return 0
+        const cmp =
+          typeof av === 'number' && typeof bv === 'number'
+            ? av - bv
+            : String(av).localeCompare(String(bv))
+        return sortDir === 'asc' ? cmp : -cmp
+      })
 
   return (
     <div className={`overflow-x-auto rounded-lg border border-border ${className ?? ''}`}>

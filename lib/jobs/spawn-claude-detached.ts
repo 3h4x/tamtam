@@ -25,12 +25,16 @@
 import { spawn } from 'child_process';
 import { openSync, closeSync, createReadStream, writeFileSync, mkdirSync, writeSync } from 'fs';
 import { join } from 'path';
-import { homedir } from 'os';
+import { constants as osConstants, homedir } from 'os';
 import { getImproveConfig } from '@/lib/scheduling/scheduling';
 import { splitCommand } from '@/lib/shared/split-command';
 import { measurePrompt, checkPromptSize } from './prompt-size';
 import { redactSecrets } from '@/lib/shared/log-redaction';
 import { buildChildEnv } from '@/lib/shared/child-env';
+
+// Canonical signal-name → signum table. Hoisted from the per-exit
+// `require('os').constants.signals` lookup in the child.on('exit') handler.
+const OS_SIGNAL_NUMS = osConstants.signals as Record<string, number>;
 
 function resolveLogDir(): string {
   try {
@@ -127,8 +131,7 @@ export async function startJobInProcess(
     if (code != null) {
       rc = code;
     } else if (signal) {
-      const sigs = require('os').constants.signals as Record<string, number>;
-      rc = 128 + (sigs[signal] ?? 0);
+      rc = 128 + (OS_SIGNAL_NUMS[signal] ?? 0);
     } else {
       rc = 1;
     }

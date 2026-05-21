@@ -1,6 +1,6 @@
 'use client'
 
-import { useState, useEffect } from 'react'
+import { useState, useEffect, useMemo } from 'react'
 import { fetchProjectDocs } from '@/lib/client-api'
 import type { ProjectDoc } from '@/lib/client-api'
 import { ErrorState } from './ErrorState'
@@ -81,7 +81,14 @@ export function DocsTab({ projectName }: DocsTabProps) {
   )
 
   const current = docs.find((d) => d.name === active) ?? docs[0]
-  const currentLineCount = countLines(current.content)
+  // Pre-compute line counts once per docs change instead of scanning every
+  // doc's content on every render (sidebar + header).
+  const lineCounts = useMemo(() => {
+    const m = new Map<string, number>()
+    for (const d of docs) m.set(d.name, countLines(d.content))
+    return m
+  }, [docs])
+  const currentLineCount = lineCounts.get(current.name) ?? 0
 
   return (
     <div className="mt-2 flex gap-3 min-h-0">
@@ -105,7 +112,7 @@ export function DocsTab({ projectName }: DocsTabProps) {
               >
                 <span className="min-w-0 truncate font-mono">{doc.name}</span>
                 <span className={`shrink-0 tabular-nums ${doc.name === current.name ? 'text-accent' : 'text-text-tertiary'}`}>
-                  {countLines(doc.content)}
+                  {lineCounts.get(doc.name) ?? 0}
                 </span>
               </button>
             ))}

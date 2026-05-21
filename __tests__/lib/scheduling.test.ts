@@ -296,9 +296,9 @@ describe('writeProjectFieldYaml', () => {
     }, { interval: 1, timeout: 1000 });
   });
 
-  it('returns true for unknown field (no-op)', async () => {
+  it('returns false for unknown field name', async () => {
     await sharedHandle.db.insert(schema.projects).values({ name: 'proj1', path: '/p', enabled: true });
-    expect(await writeProjectFieldYaml('proj1', 'unknown_field', 'value')).toBe(true);
+    expect(await writeProjectFieldYaml('proj1', 'unknown_field', 'value')).toBe(false);
   });
 
   it('sets tests_disabled=true when value is "1"', async () => {

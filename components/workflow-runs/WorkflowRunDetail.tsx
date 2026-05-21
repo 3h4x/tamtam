@@ -70,7 +70,9 @@ function formatDurationCell(
 
 function formatAbsoluteTime(iso: string | null): string {
   if (!iso) return '—';
-  try { return new Date(iso).toLocaleString(); } catch { return iso; }
+  const t = Date.parse(iso);
+  if (!Number.isFinite(t)) return iso;
+  return new Date(t).toLocaleString();
 }
 
 function formatRelativeTime(iso: string | null, now: number): string {

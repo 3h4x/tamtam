@@ -538,6 +538,7 @@ const isReviewRunning = (projectName: string) => !!runtime[projectName]?.hasRunn
             // show warning in STATUS only for non-unreviewed reasons (paused, out-of-sync, stale)
             const showWarning = project.status === 'warning' && !hasUnreviewed
 
+            const counts = issueCounts[project.project]
             const scheduledCount = (schedulerByProject[project.project] ?? []).filter(e => e.enabled).length
             const projectPaused = project.tasks.some(th => th.task.paused)
             const outOfSync = project.tasks.some(th => th.task.sync === false)
@@ -548,34 +549,34 @@ const isReviewRunning = (projectName: string) => !!runtime[projectName]?.hasRunn
               <tr
                 key={project.project}
                 className="border-b border-border/50 hover:bg-bg-secondary/40 cursor-pointer transition-colors"
-                onClick={() => router.push(`/project/${project.project}`)}
+                onClick={() => router.push(`/project/${encodeURIComponent(project.project)}`)}
               >
                 {/* Project */}
                 <td className="px-4 py-2">
                   <span className="flex items-center gap-2">
                     <ProjectLogo projectName={project.project} size={20} />
                     <span className="font-medium text-text-primary" data-private>{project.project}</span>
-                    {issueCounts[project.project]?.prs > 0 && (
+                    {counts && counts.prs > 0 && (
                       <span
-                        title={`${issueCounts[project.project].prs} open PR${issueCounts[project.project].prs !== 1 ? 's' : ''}`}
+                        title={`${counts.prs} open PR${counts.prs !== 1 ? 's' : ''}`}
                         className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded text-xs font-medium bg-accent/15 text-accent border border-accent/30"
                       >
                         <svg className="w-3 h-3 shrink-0" viewBox="0 0 16 16" fill="currentColor">
                           <path d="M7.177 3.073L9.573.677A.25.25 0 0110 .854v4.792a.25.25 0 01-.427.177L7.177 3.427a.25.25 0 010-.354zM3.75 2.5a.75.75 0 100 1.5.75.75 0 000-1.5zm-2.25.75a2.25 2.25 0 113 2.122v5.256a2.251 2.251 0 11-1.5 0V5.372A2.25 2.25 0 011.5 3.25zM11 2.5h-1V4h1a1 1 0 011 1v5.628a2.251 2.251 0 101.5 0V5A2.5 2.5 0 0011 2.5zm1 10.25a.75.75 0 111.5 0 .75.75 0 01-1.5 0zM3.75 12a.75.75 0 100 1.5.75.75 0 000-1.5z" />
                         </svg>
-                        {issueCounts[project.project].prs}
+                        {counts.prs}
                       </span>
                     )}
-                    {issueCounts[project.project]?.issues > 0 && (
+                    {counts && counts.issues > 0 && (
                       <span
-                        title={`${issueCounts[project.project].issues} open issue${issueCounts[project.project].issues !== 1 ? 's' : ''}`}
+                        title={`${counts.issues} open issue${counts.issues !== 1 ? 's' : ''}`}
                         className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded text-xs font-medium bg-bg-tertiary text-text-secondary border border-border"
                       >
                         <svg className="w-3 h-3 shrink-0" viewBox="0 0 16 16" fill="currentColor">
                           <path d="M8 9.5a1.5 1.5 0 100-3 1.5 1.5 0 000 3z" />
                           <path fillRule="evenodd" d="M8 0a8 8 0 100 16A8 8 0 008 0zM1.5 8a6.5 6.5 0 1113 0 6.5 6.5 0 01-13 0z" />
                         </svg>
-                        {issueCounts[project.project].issues}
+                        {counts.issues}
                       </span>
                     )}
                   </span>

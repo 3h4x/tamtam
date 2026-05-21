@@ -161,7 +161,8 @@ export const BUILT_IN_STEPS: PipelineStep[] = [
 
 // Built-in ordering — used to sort any plugin-registered steps that happen to
 // reuse a built-in id (extras with unknown ids sort after the last built-in).
-const BUILT_IN_ORDER = ['test', 'review', 'fix', 'commit', 'push', 'dod', 'merge', 'soak'];
+// Derived from BUILT_IN_STEPS order so the two never drift.
+const BUILT_IN_ORDER = BUILT_IN_STEPS.map((s) => s.id);
 
 const EXTRA_STEPS: PipelineStep[] = [];
 

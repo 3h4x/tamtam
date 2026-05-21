@@ -159,6 +159,13 @@ export async function PATCH(
   const updatedRows = await db.select().from(schema.agents).where(eq(schema.agents.id, agentId)).limit(1);
   const agent = updatedRows[0] ?? null;
 
+  // Parse skillIds once — both the file-sync write and the schedule decision
+  // below consume it. Defaults to [] on missing/malformed JSON.
+  let skillIds: string[] = [];
+  if (agent) {
+    try { skillIds = JSON.parse(agent.skillIds || '[]'); } catch { /* keep [] */ }
+  }
+
   // Sync to .tamtam/agents/<name>.md for version control. System agents
   // are DB-only — never persisted to .tamtam/.
   if (agent && agent.kind !== 'system') {
@@ -168,7 +175,6 @@ export async function PATCH(
         if (oldName !== agent.name) {
           deleteFileAgent(projPath, oldName);
         }
-        const skillIds: string[] = JSON.parse(agent.skillIds || '[]');
         writeFileAgent(projPath, agent.project, agent.name, {
           prompt: agent.prompt,
           model: agent.model,
@@ -191,7 +197,6 @@ export async function PATCH(
         await uninstallAgentSchedule(agentId, oldProject, oldName);
       }
 
-      const skillIds: string[] = JSON.parse(agent.skillIds || '[]');
       if (agent.schedule && agent.enabled && (agent.prompt || skillIds.length > 0)) {
         await installAgentSchedule(agentId, agent.schedule, agent.prompt, agent.project, agent.name);
       } else {

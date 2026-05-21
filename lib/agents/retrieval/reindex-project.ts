@@ -165,16 +165,19 @@ export async function reindexProject(schedId: string): Promise<ReindexResult> {
       });
     }
 
-    for (const record of existingRecords) {
-      if (currentIds.has(record.id)) continue;
+    // Stale-record cleanup: each pair (backend.deleteSource + db.delete) is
+    // independent across records — parallelize so reindex doesn't pay N
+    // round-trips when many sources were removed.
+    const staleRecords = existingRecords.filter((record) => !currentIds.has(record.id));
+    await Promise.all(staleRecords.map(async (record) => {
       await backend.deleteSource(
         schedId,
         record.sourceKind as 'project_doc' | 'skill' | 'project_config',
-        record.sourceId
+        record.sourceId,
       );
       await db.delete(schema.retrievalRecords).where(eq(schema.retrievalRecords.id, record.id)).execute();
-      staleCount += 1;
-    }
+    }));
+    staleCount += staleRecords.length;
 
     return {
       ok: true,

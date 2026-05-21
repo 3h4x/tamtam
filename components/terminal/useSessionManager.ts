@@ -100,7 +100,7 @@ export function useSessionManager(projectName: string) {
           const lastIsRunning = lastMatch.status !== 'done' && lastMatch.finished_at === null
           const completedMatches = lastIsRunning ? matches.slice(0, -1) : matches
           const entries = await buildEntriesForCompletedJobs(completedMatches)
-          router.replace(`/project/${projectName}/terminal/${session.sessionId}`)
+          router.replace(`/project/${encodeURIComponent(projectName)}/terminal/${encodeURIComponent(session.sessionId)}`)
           if (lastIsRunning) {
             const retrievedContextEntry = retrievedContextEntryFromMeta(lastMatch.context_meta)
             if (retrievedContextEntry) entries.push(retrievedContextEntry)

@@ -311,20 +311,40 @@ export async function ghStatusLookup(
     cache[proj] = entry;
   }
 
-  // Deduplicate: one entry per project name
-  const unique: Record<string, { repo: string; path: string }> = {};
-  for (const [, cfg] of Object.entries(projects)) {
-    const projName = cfg.project;
-    if (!(projName in unique)) {
-      unique[projName] = {
-        repo: await resolveGithubRepo(projName, cfg),
-        path: cfg.path ?? '',
-      };
+  // Deduplicate: one entry per project name. The repo lookup may shell out
+  // to `git remote get-url`; do them in parallel so this scales with project
+  // count instead of summing the git latencies.
+  const projectCfgs = Object.values(projects);
+  const seen = new Set<string>();
+  const dedupCfgs: { project: string; github?: string | null; path?: string }[] = [];
+  for (const cfg of projectCfgs) {
+    if (!seen.has(cfg.project)) {
+      seen.add(cfg.project);
+      dedupCfgs.push(cfg);
     }
+  }
+  const repos = await Promise.all(
+    dedupCfgs.map((cfg) => resolveGithubRepo(cfg.project, cfg)),
+  );
+  const unique: Record<string, { repo: string; path: string }> = {};
+  for (let i = 0; i < dedupCfgs.length; i++) {
+    unique[dedupCfgs[i].project] = { repo: repos[i], path: dedupCfgs[i].path ?? '' };
+  }
+
+  // Probe every project's local HEAD in parallel before the staleness loop —
+  // the prior `for (await localHead(path))` walked one git rev-parse per
+  // project sequentially, multiplying per-project subprocess latency by N.
+  const uniqueEntries = Object.entries(unique);
+  const localShaList = await Promise.all(
+    uniqueEntries.map(async ([, { path }]) => (path ? await localHead(path) : null)),
+  );
+  const localShas = new Map<string, string | null>();
+  for (let i = 0; i < uniqueEntries.length; i++) {
+    localShas.set(uniqueEntries[i][0], localShaList[i]);
   }
 
   const stale: [string, string][] = [];
-  for (const [projName, { repo, path }] of Object.entries(unique)) {
+  for (const [projName, { repo }] of uniqueEntries) {
     const entry = cache[projName];
     if (!entry) {
       stale.push([projName, repo]);
@@ -332,7 +352,7 @@ export async function ghStatusLookup(
     }
 
     const lastLocalSha = entry.localHeadSha;
-    const localSha = await localHead(path);
+    const localSha = localShas.get(projName) ?? null;
 
     if (lastLocalSha && localSha && !localSha.startsWith(lastLocalSha.slice(0, 12))) {
       cache[projName] = {

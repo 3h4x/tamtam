@@ -127,7 +127,7 @@ ${idea}`
       }
       toast(`Agent ${ctoAgent.name} started`, 'success')
       setIssueDraft('')
-      router.push(`/project/${projectName}/terminal?job=${encodeURIComponent(result.job_id)}`)
+      router.push(`/project/${encodeURIComponent(projectName)}/terminal?job=${encodeURIComponent(result.job_id)}`)
     } catch (err) {
       toast(err instanceof Error ? err.message : 'Failed to plan issue', 'error')
     } finally {
@@ -209,7 +209,13 @@ ${idea}`
                 </span>
               )}
               {ghError && (
-                <span className="text-status-warning">⚠ {ghError}</span>
+                <span className="inline-flex items-center gap-1 text-status-warning">
+                  <svg width="11" height="11" viewBox="0 0 14 14" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true" className="shrink-0">
+                    <path d="M7 1.5L12.5 12H1.5L7 1.5z" />
+                    <path d="M7 5.5v3M7 10v.5" />
+                  </svg>
+                  {ghError}
+                </span>
               )}
             </div>
           </div>

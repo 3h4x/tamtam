@@ -47,20 +47,39 @@ export interface StalledRelease {
  *  exposed for unit tests + diagnostics. */
 export function findStalledReleases(now: number = Date.now()): StalledRelease[] {
   const jobs = listJobs();
-  const releases = jobs.filter(
-    (j) => j.kind === 'release' && j.finishedAt === null,
-  );
+  // Single-pass index: collect in-flight releases and bucket pipeline-step
+  // children by releaseId. The previous form did `jobs.filter(...)` ONCE
+  // PER RELEASE, so on a workspace with many in-flight releases the per-
+  // release O(N) scans compounded into O(R × N) per probe sweep. One pass
+  // yields O(N), then each release just reads its bucket.
+  const releases: JobData[] = [];
+  const childrenByRelease = new Map<string, JobData[]>();
+  for (const j of jobs) {
+    if (j.kind === 'release' && j.finishedAt === null) {
+      releases.push(j);
+      continue;
+    }
+    if (j.releaseId && PIPELINE_STEP_KINDS.has(j.kind)) {
+      const arr = childrenByRelease.get(j.releaseId);
+      if (arr) arr.push(j);
+      else childrenByRelease.set(j.releaseId, [j]);
+    }
+  }
   const stalled: StalledRelease[] = [];
   for (const release of releases) {
-    const children = jobs.filter(
-      (j) => j.releaseId === release.id && PIPELINE_STEP_KINDS.has(j.kind),
-    );
-    if (children.length === 0) continue;
-    const liveChild = children.find((c) => c.finishedAt === null);
-    if (liveChild) continue;
-    const latest = children
-      .filter((c) => typeof c.finishedAt === 'number' && c.finishedAt! > 0)
-      .sort((a, b) => (b.finishedAt ?? 0) - (a.finishedAt ?? 0))[0];
+    const children = childrenByRelease.get(release.id);
+    if (!children || children.length === 0) continue;
+    // Linear scan for liveChild + latest terminal child, instead of two
+    // .filter() + .sort() passes.
+    let hasLive = false;
+    let latest: JobData | null = null;
+    for (const c of children) {
+      if (c.finishedAt === null) { hasLive = true; break; }
+      if (typeof c.finishedAt === 'number' && c.finishedAt > 0) {
+        if (!latest || c.finishedAt > (latest.finishedAt ?? 0)) latest = c;
+      }
+    }
+    if (hasLive) continue;
     if (!latest || typeof latest.finishedAt !== 'number') continue;
     const idleMs = now - latest.finishedAt * 1000;
     if (idleMs < RECONCILE_QUIET_PERIOD_MS) continue;

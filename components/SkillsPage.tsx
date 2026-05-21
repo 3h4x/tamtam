@@ -213,23 +213,28 @@ export function SkillsPage() {
     }
     const { toCreate, toSkip } = partitionSkillItemsForBulkCreate(selectedItems, existingNames)
     const skipped = toSkip.length
-    let created = 0
-    let failed = 0
-    for (const item of toCreate) {
-      const agentName = toAgentName(item)
-      try {
-        await createAgent({
-          name: agentName,
+    // Fan out the agent creation POSTs in parallel — each createAgent is an
+    // independent HTTP round-trip with no inter-item ordering requirements.
+    // The sequential `for await` loop forced the user to wait
+    // `N × per-request` even for a clean run; on a self-hosted single-
+    // operator workspace there's no rate-limit to throttle against.
+    const results = await Promise.allSettled(
+      toCreate.map((item) =>
+        createAgent({
+          name: toAgentName(item),
           project: selectedProject,
           skillIds: [item.id],
           model: 'normal',
           prompt: item.description || '',
           schedule: item.source === 'db' ? SUGGESTED_SCHEDULES[item.skill.id] || null : null,
-        })
-        created++
-      } catch {
-        failed++
-      }
+        }),
+      ),
+    )
+    let created = 0
+    let failed = 0
+    for (const r of results) {
+      if (r.status === 'fulfilled') created++
+      else failed++
     }
     setBulkCreating(false)
     const parts: string[] = []

@@ -216,11 +216,10 @@ async function sleepIfReviewBackoffStep(
   const { listJobs } = await import('@/lib/jobs/job-storage');
   // Count completed fix-from-review iterations: every existing `review`
   // sibling step in this release represents one prior cycle.
-  const iterations = listJobs().filter(j =>
-    j.releaseId === releaseJobId &&
-    j.kind === 'review' &&
-    j.finishedAt !== null,
-  ).length;
+  let iterations = 0;
+  for (const j of listJobs()) {
+    if (j.releaseId === releaseJobId && j.kind === 'review' && j.finishedAt !== null) iterations++;
+  }
   const sleep = computeFixBackoffSeconds(iterations, base);
   if (sleep <= 0) return;
   console.log(`[dispatch-phase] backoff: sleeping ${sleep}s before fix dispatch (iteration ${iterations}, project ${projectName})`);

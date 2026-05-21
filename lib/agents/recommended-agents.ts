@@ -28,8 +28,18 @@ export function recommendedAgentMatchesName(agent: Pick<RecommendedAgentTemplate
   return key !== '' && recommendedAgentNameKeys(agent).includes(key);
 }
 
+// Precomputed union of every built-in name + alias key, populated after
+// RECOMMENDED_AGENTS is declared below. The Set turns isBuiltInRecommendedAgent
+// into O(1) instead of an O(N × K) scan over every template's keys per call.
+let _builtInNameKeySet: ReadonlySet<string> | null = null;
+
 export function isBuiltInRecommendedAgent(name: string): boolean {
-  return RECOMMENDED_AGENTS.some((agent) => recommendedAgentMatchesName(agent, name));
+  const key = recommendedAgentNameKey(name);
+  if (!key) return false;
+  if (!_builtInNameKeySet) {
+    _builtInNameKeySet = new Set(RECOMMENDED_AGENTS.flatMap(recommendedAgentNameKeys));
+  }
+  return _builtInNameKeySet.has(key);
 }
 
 // Built-in recommended agents are a product surface, not page-local UI data.

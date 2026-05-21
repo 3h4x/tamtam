@@ -30,7 +30,7 @@
 // the "go through shared shell" convention.
 
 import { spawn, spawnSync } from 'node:child_process';
-import { existsSync, mkdirSync, readFileSync, unlinkSync, writeFileSync, openSync, closeSync } from 'node:fs';
+import { mkdirSync, readFileSync, readdirSync, unlinkSync, writeFileSync, openSync, closeSync } from 'node:fs';
 import { join } from 'node:path';
 import { buildChildEnv } from '@/lib/shared/child-env';
 
@@ -88,10 +88,9 @@ function logFilePathFor(project: string): string {
 }
 
 function ensureDir(): void {
-  const dir = devServersDir();
-  if (!existsSync(/*turbopackIgnore: true*/ dir)) {
-    mkdirSync(/*turbopackIgnore: true*/ dir, { recursive: true });
-  }
+  // mkdirSync with `recursive: true` is idempotent when the dir already
+  // exists — no need for an existsSync precheck.
+  mkdirSync(/*turbopackIgnore: true*/ devServersDir(), { recursive: true });
 }
 
 export function readPidfile(project: string): DevServerPidFile | null {
@@ -99,7 +98,8 @@ export function readPidfile(project: string): DevServerPidFile | null {
 }
 
 function readPidfileAtPath(path: string): DevServerPidFile | null {
-  if (!existsSync(/*turbopackIgnore: true*/ path)) return null;
+  // Skip the existsSync precheck — readFileSync throws ENOENT and the catch
+  // handles it the same way. One fewer syscall, no TOCTOU.
   try {
     const raw = readFileSync(/*turbopackIgnore: true*/ path, 'utf8');
     const parsed = JSON.parse(raw) as DevServerPidFile;
@@ -121,11 +121,9 @@ function removePidfile(project: string): void {
 
 function removePidfileAtPath(path: string): void {
   try {
-    if (existsSync(/*turbopackIgnore: true*/ path)) {
-      unlinkSync(/*turbopackIgnore: true*/ path);
-    }
+    unlinkSync(/*turbopackIgnore: true*/ path);
   } catch {
-    // best-effort
+    // best-effort — ENOENT is already what we wanted (file gone).
   }
 }
 
@@ -462,13 +460,10 @@ export async function sweepOrphanDevServers(): Promise<{ stopped: string[]; kept
   const kept: string[] = [];
 
   const dir = devServersDir();
-  if (!existsSync(/*turbopackIgnore: true*/ dir)) {
-    return { stopped, kept };
-  }
-
-  const { readdirSync } = await import('node:fs');
   let entries: string[];
   try {
+    // No existsSync precheck — readdirSync throws ENOENT and the catch
+    // returns the same empty result.
     entries = readdirSync(/*turbopackIgnore: true*/ dir).filter((n) => n.endsWith('.pid'));
   } catch {
     return { stopped, kept };

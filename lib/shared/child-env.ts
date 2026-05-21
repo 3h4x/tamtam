@@ -16,22 +16,30 @@ function shouldStripChildEnvKey(key: string): boolean {
 }
 
 function enrichPath(basePath: string): string {
-  const additions = extraPaths.filter((p) => !basePath.includes(p));
+  // Exact-entry membership instead of substring includes — `/opt/homebrew/bin`
+  // shouldn't be considered "already in PATH" just because a longer path
+  // happens to contain it as a substring (e.g. `/foo/opt/homebrew/bin/bar`).
+  const existing = new Set(basePath.split(':').filter(Boolean));
+  const additions = extraPaths.filter((p) => !existing.has(p));
   return [...additions, basePath].filter(Boolean).join(':');
 }
 
 export function buildChildEnv(overrides?: Record<string, string | undefined>): NodeJS.ProcessEnv {
+  // Single pass: skip undefined values AND stripped keys during the merge
+  // instead of building the full env, layering overrides, and then deleting
+  // stripped keys in a third walk.
   const env: Record<string, string> = {};
-
   for (const [key, value] of Object.entries(process.env)) {
-    if (value !== undefined) env[key] = value;
+    if (value === undefined) continue;
+    if (shouldStripChildEnvKey(key)) continue;
+    env[key] = value;
   }
-  for (const [key, value] of Object.entries(overrides ?? {})) {
-    if (value !== undefined) env[key] = value;
-  }
-
-  for (const key of Object.keys(env)) {
-    if (shouldStripChildEnvKey(key)) delete env[key];
+  if (overrides) {
+    for (const [key, value] of Object.entries(overrides)) {
+      if (value === undefined) continue;
+      if (shouldStripChildEnvKey(key)) continue;
+      env[key] = value;
+    }
   }
 
   env.PATH = enrichPath(env.PATH || '');

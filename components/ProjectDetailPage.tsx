@@ -26,6 +26,8 @@ import { resolveGithubBoardUrl } from '@/lib/client/resolve-github-board-url'
 import { ProjectLogo } from '@/components/ProjectLogo'
 
 type Tab = 'overview' | 'config' | 'history' | 'terminal' | 'changes' | 'issues' | 'docs' | 'agents'
+const VALID_TABS: readonly Tab[] = ['overview', 'config', 'history', 'terminal', 'changes', 'issues', 'docs', 'agents']
+const RELEASE_CHILD_KINDS = new Set(['test', 'review', 'fix', 'commit', 'push', 'mark-dod', 'pr-wait', 'soak'])
 
 type Verdict = 'LGTM' | 'NEEDS ATTENTION' | 'DO NOT SHIP'
 interface ProjectDetailPageProps {
@@ -41,7 +43,6 @@ export function ProjectDetailPage({
   const name = params.name
   const router = useRouter()
   const { toast } = useToast()
-  const VALID_TABS: Tab[] = ['overview', 'config', 'history', 'terminal', 'changes', 'issues', 'docs', 'agents']
   const activeTab: Tab = params.sessionId
     ? 'terminal'
     : VALID_TABS.includes(params.tab as Tab) ? (params.tab as Tab) : 'overview'
@@ -312,7 +313,6 @@ export function ProjectDetailPage({
     .filter(j => j.kind === 'test' && j.status === 'done')
     .sort((a, b) => (b.finished_at || 0) - (a.finished_at || 0))[0]
 
-  const RELEASE_CHILD_KINDS = new Set(['test', 'review', 'fix', 'commit', 'push', 'mark-dod', 'pr-wait', 'soak'])
   const running = projectJobs.filter(j => j.status === 'running')
   const releaseRunning = running.some(j => j.kind === 'release')
   const runningJobs = (releaseRunning ? running.filter(j => !RELEASE_CHILD_KINDS.has(j.kind)) : running)

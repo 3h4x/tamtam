@@ -31,8 +31,10 @@ import { createJob, getJob, markDone, updateJob } from '@/lib/jobs/job-storage';
 import { appendRedactedFileSync } from '@/lib/jobs/redacted-log-writer';
 import type { JobData } from '@/lib/jobs/types';
 
-export const SOAK_DEFAULT_POLL_INTERVAL_MS =
-  parseInt(process.env.TAMTAM_SOAK_POLL_MS ?? '', 10) || 60_000;
+export const SOAK_DEFAULT_POLL_INTERVAL_MS = (() => {
+  const raw = Number.parseInt(process.env.TAMTAM_SOAK_POLL_MS ?? '', 10);
+  return Number.isFinite(raw) && raw > 0 ? raw : 60_000;
+})();
 
 export interface SoakContextMeta {
   mergeSha: string;
@@ -261,6 +263,10 @@ export async function openRevertPr(args: OpenRevertPrArgs): Promise<OpenRevertPr
     return { ok: false, branch, error: 'pr create failed' };
   }
   const prUrl = prR.stdout.trim().split(/\s+/).pop() ?? '';
+  if (!prUrl) {
+    log(`# soak revert: gh pr create exited 0 but returned no URL\n`);
+    return { ok: false, branch, error: 'pr create returned empty url' };
+  }
   return { ok: true, prUrl, branch };
 }
 

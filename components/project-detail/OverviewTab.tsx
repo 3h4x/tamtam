@@ -135,7 +135,7 @@ export function OverviewTab({
               <button
                 key={j.id}
                 type="button"
-                onClick={() => router.push(`/project/${projectName}/terminal?job=${encodeURIComponent(j.id)}`)}
+                onClick={() => router.push(`/project/${encodeURIComponent(projectName)}/terminal?job=${encodeURIComponent(j.id)}`)}
                 className={`min-w-0 rounded-md border border-border border-l-2 ${activeWorkAccentClass(displayKind)} bg-bg-primary px-3 py-2 text-left transition-colors hover:bg-bg-tertiary cursor-pointer`}
                 title={`Open ${j.kind} started ${formatAgo(j.started_at)}`}
               >
@@ -190,7 +190,7 @@ export function OverviewTab({
         releaseTag={releaseTag}
         isLoading={!jobsLoaded}
         onOpenChanges={onOpenChanges}
-        onOpenJob={(jobId) => router.push(`/project/${projectName}/terminal?job=${encodeURIComponent(jobId)}`)}
+        onOpenJob={(jobId) => router.push(`/project/${encodeURIComponent(projectName)}/terminal?job=${encodeURIComponent(jobId)}`)}
       />
 
       <PipelineStatsPanel projectName={projectName} />

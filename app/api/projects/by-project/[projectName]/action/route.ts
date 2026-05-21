@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { join, resolve } from 'path';
-import { writeFileSync } from 'fs';
+import { mkdirSync, writeFileSync } from 'fs';
 import { spawn, type SpawnOptions } from 'child_process';
 import { homedir } from 'os';
 import { eq } from 'drizzle-orm';
@@ -124,11 +124,10 @@ export async function POST(
   const { log_dir } = getSettings();
   const logDir = log_dir.startsWith('~') ? join(homedir(), log_dir.slice(2)) : log_dir;
   const redactScriptPath = resolve(process.cwd(), 'scripts', 'redact-log-stream.js');
-  const { mkdirSync } = await import('fs');
-  mkdirSync(logDir, { recursive: true });
+  mkdirSync(/*turbopackIgnore: true*/ logDir, { recursive: true });
 
   const job = createJob(projectName, actionName, 0, '');
-  const logPath = join(logDir, `${job.id}.log`);
+  const logPath = join(/*turbopackIgnore: true*/ logDir, `${job.id}.log`);
   job.logPath = logPath;
   const bashCommand = [
     '#!/bin/bash',
@@ -138,7 +137,7 @@ export async function POST(
     `} 2>&1 | node ${shellQuote(redactScriptPath)} ${shellQuote(logPath)}`,
     'exit ${PIPESTATUS[0]}',
   ].join('\n');
-  writeFileSync(logPath, '');
+  writeFileSync(/*turbopackIgnore: true*/ logPath, '');
 
   const proc = spawn('bash', ['-lc', bashCommand], {
     cwd: projPath,

@@ -140,8 +140,7 @@ export async function GET(
   }
 
   // Detect default branch via origin/HEAD, falling back to main/master.
-  // Inlined here (instead of importing from lib/start-commit) so this route
-  // stays DB-free — the route's unit tests mock fs narrowly.
+  // Inlined to keep this route DB-free so its unit tests can mock fs narrowly.
   let defaultBranch = 'master';
   const symR = await exec('git', ['-C', projPath, 'symbolic-ref', 'refs/remotes/origin/HEAD'], { timeout: 3000 });
   const symMatch = symR.exitCode === 0 ? symR.stdout.trim().match(/refs\/remotes\/origin\/(.+)/) : null;
@@ -222,10 +221,8 @@ export async function POST(
 ) {
   const { projectName } = await params;
   const body = await request.json().catch(() => ({}));
-  // Strict allow-list: a bogus `strategy` value used to silently fall
-  // through to ff-only because the if-else chain below only matches the
-  // three literal strings. Returning 400 makes the contract explicit and
-  // surfaces typos in the client.
+  // Strict allow-list: returning 400 on an unknown `strategy` makes the
+  // contract explicit and surfaces typos in the client.
   const rawStrategy = body.strategy ?? 'ff-only';
   if (!(PULL_STRATEGIES as readonly string[]).includes(rawStrategy)) {
     return NextResponse.json(

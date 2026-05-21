@@ -61,7 +61,9 @@ export async function retryVerdictWithClaude(job: JobData): Promise<string | nul
   const cliEnv = resolveCliEnv(provider, settings);
 
   const result = await new Promise<string | null>((resolve) => {
-    let out = '';
+    // Buffer[] + concat at close avoids O(n²) string concatenation on each
+    // stdout chunk; matches the pattern in lib/shared/shell.ts.
+    const outChunks: Buffer[] = [];
     let settled = false;
     let timer: ReturnType<typeof setTimeout>;
     const finish = (v: string | null) => {
@@ -90,12 +92,12 @@ export async function retryVerdictWithClaude(job: JobData): Promise<string | nul
       finish(null);
     }, TIMEOUT_MS);
 
-    child.stdout?.on('data', (d: Buffer) => { out += d.toString(); });
+    child.stdout?.on('data', (d: Buffer) => { outChunks.push(d); });
     child.on('error', (e) => {
       console.log(`[verdict-retry] error for ${job.id}:`, e.message);
       finish(null);
     });
-    child.on('close', () => finish(classify(out)));
+    child.on('close', () => finish(classify(Buffer.concat(outChunks).toString('utf8'))));
 
     try {
       child.stdin?.write(prompt);

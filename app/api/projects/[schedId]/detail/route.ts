@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { existsSync, readFileSync } from 'fs';
+import { readFileSync } from 'fs';
 import { join } from 'path';
 import { homedir } from 'os';
 import { getImproveConfig } from '@/lib/scheduling/scheduling';
@@ -19,7 +19,7 @@ export async function GET(
   }
 
   let promptContent: string | null = null;
-  if (cfg.prompt && existsSync(/*turbopackIgnore: true*/ cfg.prompt)) {
+  if (cfg.prompt) {
     try { promptContent = readFileSync(/*turbopackIgnore: true*/ cfg.prompt, 'utf-8'); } catch {}
   }
 
@@ -28,17 +28,8 @@ export async function GET(
     : `${cfg.project}.md`;
   const memoryPath = join(/*turbopackIgnore: true*/ homedir(), '.claude', 'memory', memoryFilename);
   let memoryContent: string | null = null;
-  if (existsSync(/*turbopackIgnore: true*/ memoryPath)) {
-    try { memoryContent = readFileSync(/*turbopackIgnore: true*/ memoryPath, 'utf-8'); } catch {}
-  }
+  try { memoryContent = readFileSync(/*turbopackIgnore: true*/ memoryPath, 'utf-8'); } catch {}
 
-  // Source run history from the in-memory jobs cache. The previous
-  // implementation read `~/.cache/tamtam/schedule-runs.jsonl`, but the
-  // companion writer (`recordRunStart`/`recordRunEnd` in
-  // `lib/jobs/run-history.ts`) is no longer called from production code,
-  // so that file is never populated. The `jobs` table absorbed this
-  // responsibility when CLAUDE.md's "Runtime state lives in DB" rule
-  // landed — we just hadn't migrated this consumer yet.
   const runHistory = listJobs()
     .filter((j) => j.project === schedId)
     .sort((a, b) => b.startedAt - a.startedAt)

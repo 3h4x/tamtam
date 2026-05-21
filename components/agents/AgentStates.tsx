@@ -151,9 +151,9 @@ export function AgentsEmptyState({
               <div
                 className={[
                   'mt-1 truncate text-sm font-semibold',
-                  stat.mono ? 'font-mono tabular-nums' : '',
+                  stat.mono ? 'font-mono tabular-nums' : null,
                   toneClass[stat.tone ?? 'default'],
-                ].join(' ')}
+                ].filter(Boolean).join(' ')}
                 title={typeof stat.value === 'string' ? stat.value : undefined}
               >
                 {stat.value}

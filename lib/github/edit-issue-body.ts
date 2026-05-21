@@ -71,8 +71,8 @@ export type WriteIssueBodyResult =
 
 export async function writeIssueBody(input: WriteIssueBodyInput): Promise<WriteIssueBodyResult> {
   const { projPath, repo, number, kind, body } = input;
-  const tmpFile = join(tmpdir(), `tamtam-${kind}-${number}-${Date.now()}.md`);
-  writeFileSync(tmpFile, body);
+  const tmpFile = join(tmpdir(), `tamtam-${kind}-${number}-${Date.now()}-${Math.random().toString(36).slice(2, 8)}.md`);
+  writeFileSync(/*turbopackIgnore: true*/ tmpFile, body, { mode: 0o600 });
   try {
     const args = [
       kind === 'pr' ? 'pr' : 'issue',
@@ -87,6 +87,6 @@ export async function writeIssueBody(input: WriteIssueBodyInput): Promise<WriteI
     }
     return { ok: true, stdout: r.stdout, stderr: r.stderr };
   } finally {
-    try { unlinkSync(tmpFile); } catch { /* best-effort cleanup */ }
+    try { unlinkSync(/*turbopackIgnore: true*/ tmpFile); } catch { /* best-effort cleanup */ }
   }
 }

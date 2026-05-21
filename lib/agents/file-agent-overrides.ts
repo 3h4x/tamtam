@@ -1,5 +1,5 @@
 import { db, schema } from '@/lib/db';
-import { eq } from 'drizzle-orm';
+import { eq, like } from 'drizzle-orm';
 import { normalizeModelInput } from '@/lib/agents/model-aliases';
 
 // Per-file-agent runtime overrides. The .md file in `.tamtam/agents/<name>.md`
@@ -29,9 +29,26 @@ function keyFor(project: string, name: string): string {
 // The cache entry holds the last resolved value. On each sync read we kick off
 // an async background refresh so the next read is fresh. Writes invalidate the
 // entry immediately so reads after a write see the new value promptly.
+//
+// Pinned to globalThis — Next.js duplicates modules across realms, so a
+// module-level Map would mean each route bundle keeps its own copy and the
+// warm-cache + sync-read consistency story breaks. Same singleton pattern as
+// __tamtamCronWorker / __tamtamJobCancellation.
 // ---------------------------------------------------------------------------
-const _overrideCache = new Map<string, FileAgentOverride | null>();
-const _overridePending = new Set<string>();
+declare global {
+  // eslint-disable-next-line no-var
+  var __tamtamFileAgentOverrideCache: Map<string, FileAgentOverride | null> | undefined;
+  // eslint-disable-next-line no-var
+  var __tamtamFileAgentOverridePending: Set<string> | undefined;
+}
+
+const _overrideCache: Map<string, FileAgentOverride | null> =
+  globalThis.__tamtamFileAgentOverrideCache ?? new Map();
+globalThis.__tamtamFileAgentOverrideCache = _overrideCache;
+
+const _overridePending: Set<string> =
+  globalThis.__tamtamFileAgentOverridePending ?? new Set();
+globalThis.__tamtamFileAgentOverridePending = _overridePending;
 
 function refreshOverrideCache(key: string, project: string, name: string): void {
   if (_overridePending.has(key)) return;
@@ -66,12 +83,17 @@ function invalidateOverrideCache(project: string, name: string): void {
  */
 export async function warmFileAgentOverrideCache(): Promise<void> {
   try {
-    const rows = await db.select().from(schema.settings);
+    const rows = await db
+      .select()
+      .from(schema.settings)
+      .where(like(schema.settings.key, 'agent_override:%'));
     for (const row of rows) {
-      if (!row.key?.startsWith('agent_override:') || !row.value) continue;
+      if (!row.value) continue;
+      // Validate the full `agent_override:<project>:<name>` shape — the LIKE
+      // prefix only checks the first colon; rows lacking the second one are
+      // malformed and we skip them silently.
       const rest = row.key.slice('agent_override:'.length);
-      const sep = rest.indexOf(':');
-      if (sep === -1) continue;
+      if (!rest.includes(':')) continue;
       try {
         const parsed = JSON.parse(row.value) as FileAgentOverride;
         if (parsed && typeof parsed === 'object') {

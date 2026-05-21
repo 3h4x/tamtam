@@ -23,9 +23,13 @@ export async function listEnabledScheduledAgents(): Promise<AgentInput[]> {
   // synchronously here so file-agent scanning always sees current state.
   await Promise.all([refreshProjectsCacheSync(), warmFileAgentOverrideCache()]);
   const allAgents = await db.select().from(schema.agents);
-  const dbEnabled: AgentInput[] = allAgents
-    .filter((a) => a.enabled && a.schedule)
-    .map((a) => ({
+  // Single-pass filter+map+key-set build instead of three iterations over the
+  // same rows (filter, map, then map again into a Set for the dedup key set).
+  const dbEnabled: AgentInput[] = [];
+  const dbAgentKeys = new Set<string>();
+  for (const a of allAgents) {
+    if (!a.enabled || !a.schedule) continue;
+    dbEnabled.push({
       id: a.id,
       project: a.project,
       name: a.name,
@@ -33,11 +37,12 @@ export async function listEnabledScheduledAgents(): Promise<AgentInput[]> {
       prompt: a.prompt ?? '',
       enabled: !!a.enabled,
       kind: (a.kind === 'system' ? 'system' : 'user') as 'user' | 'system',
-    }));
+    });
+    dbAgentKeys.add(`${a.project}:${a.name}`);
+  }
 
   // File agents (`.tamtam/agents/*.md`) — DB agents with the same project+name
   // take precedence (matches `app/api/agents/route.ts` GET semantics).
-  const dbAgentKeys = new Set(dbEnabled.map((a) => `${a.project}:${a.name}`));
   const fileEnabled: AgentInput[] = [];
   try {
     const { scanFileAgents } = await import('@/lib/agents/tamtam-file-agents');

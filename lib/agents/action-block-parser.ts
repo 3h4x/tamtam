@@ -24,17 +24,17 @@ export function extractActionBlock(assistantText: string): ExtractResult {
   if (typeof assistantText !== 'string' || !assistantText.length) {
     return { ok: false, reason: 'missing' };
   }
-  const matches: string[] = [];
-  let m: RegExpExecArray | null;
-  // Reset before iteration: the regex is module-scope with the /g flag.
-  FENCE_RE.lastIndex = 0;
-  while ((m = FENCE_RE.exec(assistantText)) !== null) {
-    matches.push(m[1]);
-    if (matches.length > 1) break;
+  // `matchAll` iterates with its own internal lastIndex (no shared state on
+  // the module-scope regex) and short-circuits as soon as we see a second
+  // match — avoids the manual `lastIndex = 0` reset and any concurrent-call
+  // fragility a /g regex with mutable state would otherwise carry.
+  let first: string | null = null;
+  for (const m of assistantText.matchAll(FENCE_RE)) {
+    if (first !== null) return { ok: false, reason: 'multiple' };
+    first = m[1];
   }
-  if (matches.length === 0) return { ok: false, reason: 'missing' };
-  if (matches.length > 1) return { ok: false, reason: 'multiple' };
-  return { ok: true, raw: matches[0] };
+  if (first === null) return { ok: false, reason: 'missing' };
+  return { ok: true, raw: first };
 }
 
 export type ParseResult =

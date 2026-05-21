@@ -1,8 +1,3 @@
-// Comment on a GitHub issue via the `gh` CLI.
-//
-// Extracted from `app/api/projects/by-project/[projectName]/issue-comment/route.ts`
-// for shared use by the agent-action orchestrator.
-
 import { eq, and } from 'drizzle-orm';
 import { exec } from '@/lib/shared/shell';
 import { resolveGhRepo } from '@/lib/github/repo';

@@ -148,18 +148,29 @@ export function reassignLock(projectName: string, newJobId: string): void {
 }
 
 async function drainPendingReleaseAsync(projectName: string): Promise<void> {
-  try {
-    const { drainProjectRecoveryWork } = await import('./recovery-drain');
-    await drainProjectRecoveryWork(projectName, '[pipeline-lock]');
-  } catch (e) {
-    console.error('[pipeline-lock] recovery drain failed for', projectName, e);
-  }
-  try {
-    const { drainNextAgentRun } = await import('@/lib/agents/pending-agent-run');
-    await drainNextAgentRun(projectName);
-  } catch (e) {
-    console.error('[pipeline-lock] in-memory agent drain failed for', projectName, e);
-  }
+  // Recovery drain (DB-backed pending releases) and agent drain (in-memory
+  // queue) operate on independent stores, so run them concurrently. Lock
+  // release latency drops from `recovery + agent` to `max(recovery, agent)`.
+  // Errors stay isolated per drain branch — one failing doesn't stop the
+  // other from making progress. Same iter 109 pattern.
+  await Promise.allSettled([
+    (async () => {
+      try {
+        const { drainProjectRecoveryWork } = await import('./recovery-drain');
+        await drainProjectRecoveryWork(projectName, '[pipeline-lock]');
+      } catch (e) {
+        console.error('[pipeline-lock] recovery drain failed for', projectName, e);
+      }
+    })(),
+    (async () => {
+      try {
+        const { drainNextAgentRun } = await import('@/lib/agents/pending-agent-run');
+        await drainNextAgentRun(projectName);
+      } catch (e) {
+        console.error('[pipeline-lock] in-memory agent drain failed for', projectName, e);
+      }
+    })(),
+  ]);
 }
 
 /**

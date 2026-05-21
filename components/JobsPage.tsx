@@ -230,9 +230,9 @@ export function JobsPage() {
 
   const navigate = (e: Entry) => {
     if (e.bucket === 'run' && e.navSessionId && e.kind !== 'release') {
-      router.push(`/project/${e.project}/terminal/${e.navSessionId}`)
+      router.push(`/project/${encodeURIComponent(e.project)}/terminal/${encodeURIComponent(e.navSessionId)}`)
     } else {
-      router.push(`/project/${e.project}/terminal?job=${encodeURIComponent(e.navJobId)}`)
+      router.push(`/project/${encodeURIComponent(e.project)}/terminal?job=${encodeURIComponent(e.navJobId)}`)
     }
   }
 

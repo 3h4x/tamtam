@@ -29,24 +29,21 @@ export function canExecuteAgentActions(
     return { ok: false, reason: 'unsupported-job-kind' };
   }
 
-  const issueNumbers = actions
-    .map(actionIssueNumber)
-    .filter((n): n is number => n != null);
-  if (issueNumbers.length === 0) {
-    return { ok: true };
-  }
-
-  if (job.ghIssueNumber == null) {
-    return { ok: false, reason: 'missing-issue-context' };
-  }
-
-  const mismatched = issueNumbers.find((n) => n !== job.ghIssueNumber);
-  if (mismatched != null) {
-    return {
-      ok: false,
-      reason: 'issue-mismatch',
-      detail: `action issue #${mismatched} does not match job issue #${job.ghIssueNumber}`,
-    };
+  // Single pass: short-circuit on first missing-context or mismatch; no
+  // intermediate array. Was `.map().filter()` then `.find()` over actions.
+  for (const action of actions) {
+    const n = actionIssueNumber(action);
+    if (n == null) continue;
+    if (job.ghIssueNumber == null) {
+      return { ok: false, reason: 'missing-issue-context' };
+    }
+    if (n !== job.ghIssueNumber) {
+      return {
+        ok: false,
+        reason: 'issue-mismatch',
+        detail: `action issue #${n} does not match job issue #${job.ghIssueNumber}`,
+      };
+    }
   }
 
   return { ok: true };

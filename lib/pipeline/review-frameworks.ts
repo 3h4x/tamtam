@@ -6,10 +6,11 @@ export function detectReviewFrameworks(projPath: string): string[] {
   const has = (rel: string) => existsSync(/*turbopackIgnore: true*/ join(projPath, rel));
   let pkg: { dependencies?: Record<string, string>; devDependencies?: Record<string, string> } = {};
   try {
-    if (has('package.json')) {
-      pkg = JSON.parse(readFileSync(/*turbopackIgnore: true*/ join(projPath, 'package.json'), 'utf-8'));
-    }
-  } catch { /* ignore */ }
+    // The catch handles ENOENT, so a separate existsSync probe is just an
+    // extra syscall for the typical case. readFileSync throws → we fall
+    // back to the empty default.
+    pkg = JSON.parse(readFileSync(/*turbopackIgnore: true*/ join(projPath, 'package.json'), 'utf-8'));
+  } catch { /* missing or unparseable package.json — no framework hints from it */ }
   const dep = (name: string) => pkg.dependencies?.[name] || pkg.devDependencies?.[name];
   const nextVer = dep('next');
   if (nextVer || has('next.config.ts') || has('next.config.js') || has('next.config.mjs') || has('next.config.cjs')) {

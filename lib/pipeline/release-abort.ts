@@ -26,9 +26,7 @@ async function resolveTargetRelease(
   const lockJobId = lock?.lockedByJobId ?? null;
 
   if (targetReleaseId) {
-    const targeted = getJob(targetReleaseId)
-      ?? listJobs().find((job) => job.id === targetReleaseId)
-      ?? null;
+    const targeted = getJob(targetReleaseId);
     if (targeted?.project === projectName && targeted.kind === 'release' && targeted.finishedAt === null) {
       return { releaseJob: targeted, lockJobId };
     }

@@ -3,15 +3,16 @@
 // observation chains (e.g. why did this release's observer choose 'fix'
 // instead of 'review'?).
 //
-// Same pg.Pool strategy as the list endpoint: short-lived module-cached
-// pool against WORKFLOW_POSTGRES_URL (falls back to DATABASE_URL). When
-// the env var is unset, returns 503.
+// Same pg.Pool strategy as the list endpoint: a long-lived pool pinned to
+// `globalThis.__tamtamWorkflowRunsPool` so both workflow-runs routes share
+// one connection pool. Falls back to DATABASE_URL when WORKFLOW_POSTGRES_URL
+// is unset. When neither env var is set, returns 503.
 
 import { NextResponse } from 'next/server';
 import { Pool } from 'pg';
 import { decodeWorkflowPayload } from '@/lib/workflows/decode-workflow-payload';
 import {
-  clampJson as clampWorkflowJson,
+  clampJson,
   normalizeWorkflowError,
   readLocalRunFile,
   readLocalStepFiles,
@@ -52,21 +53,18 @@ interface StepRow {
 }
 
 
-let cachedPool: Pool | null = null;
+declare global {
+  // eslint-disable-next-line no-var
+  var __tamtamWorkflowRunsPool: Pool | undefined;
+}
 
 function getWorkflowPool(): Pool | null {
   const url = process.env.WORKFLOW_POSTGRES_URL ?? process.env.DATABASE_URL;
   if (!url) return null;
-  if (!cachedPool) cachedPool = new Pool({ connectionString: url, max: 2 });
-  return cachedPool;
-}
-
-function simplifyName(raw: string): string {
-  return simplifyWorkflowName(raw);
-}
-
-function clampJson(value: unknown, maxBytes = 4_000): unknown {
-  return clampWorkflowJson(value, maxBytes);
+  if (!globalThis.__tamtamWorkflowRunsPool) {
+    globalThis.__tamtamWorkflowRunsPool = new Pool({ connectionString: url, max: 2 });
+  }
+  return globalThis.__tamtamWorkflowRunsPool;
 }
 
 export async function GET(
@@ -109,7 +107,7 @@ export async function GET(
     return NextResponse.json({
       run: {
         id: run.id,
-        name: simplifyName(run.name),
+        name: simplifyWorkflowName(run.name),
         rawName: run.name,
         status: run.status,
         createdAt: run.created_at.toISOString(),
@@ -125,7 +123,7 @@ export async function GET(
       },
       steps: stepsResult.rows.map((s) => ({
         stepId: s.step_id,
-        name: simplifyName(s.step_name),
+        name: simplifyWorkflowName(s.step_name),
         rawName: s.step_name,
         status: s.status,
         attempt: s.attempt,

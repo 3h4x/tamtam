@@ -1,4 +1,4 @@
-import { existsSync, readFileSync, statSync } from 'fs';
+import { readFileSync, statSync } from 'fs';
 import type { JobData } from './types';
 import { isClaudeBackedJobKind } from './kinds';
 import { getJobCancellationSignal } from './cancellation';
@@ -10,12 +10,12 @@ import { hasCloseHandlerPending } from './spawned-close-pending';
 function readTestExitCodeSentinel(logPath: string | null | undefined): number | null {
   if (!logPath) return null;
   const sentinel = `${logPath}.exitcode`;
-  if (!existsSync(sentinel)) return null;
   try {
-    const raw = readFileSync(sentinel, 'utf-8').trim();
+    const raw = readFileSync(/*turbopackIgnore: true*/ sentinel, 'utf-8').trim();
     const n = Number.parseInt(raw, 10);
     return Number.isFinite(n) ? n : null;
   } catch {
+    // ENOENT or unreadable — caller falls back to -1.
     return null;
   }
 }
@@ -25,11 +25,12 @@ function readTestExitCodeSentinel(logPath: string | null | undefined): number | 
  *  persisted to the DB — if the log is still being written, the spawned
  *  process is still active even though we can't see its pid. */
 function logRecentlyWritten(logPath: string | null | undefined, windowMs: number): boolean {
-  if (!logPath || !existsSync(logPath)) return false;
+  if (!logPath) return false;
   try {
-    const stat = statSync(logPath);
+    const stat = statSync(/*turbopackIgnore: true*/ logPath);
     return Date.now() - stat.mtimeMs < windowMs;
   } catch {
+    // ENOENT or unreadable — treat as not-recently-written.
     return false;
   }
 }
@@ -39,9 +40,15 @@ function logRecentlyWritten(logPath: string | null | undefined, windowMs: number
 //   1  if is_error: true
 //   null if no result line exists yet
 function getClaudeResultExitCode(job: JobData): number | null {
-  if (!job.logPath || !existsSync(job.logPath)) return null;
+  if (!job.logPath) return null;
+  let content: string;
   try {
-    const content = readFileSync(job.logPath, 'utf-8');
+    content = readFileSync(/*turbopackIgnore: true*/ job.logPath, 'utf-8');
+  } catch {
+    // ENOENT or unreadable — no result line to derive an exit code from.
+    return null;
+  }
+  try {
     const marker = '"type":"result"';
     const lastIdx = content.lastIndexOf(marker);
     if (lastIdx === -1) return null;

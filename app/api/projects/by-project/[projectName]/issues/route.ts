@@ -525,33 +525,6 @@ export async function GET(
     return NextResponse.json({ detail: listed.detail }, { status: listed.status });
   }
   const { repo, prs, issues, fetchedAt, cached, ghError } = listed;
-
-  if (cached) {
-    const filteredIssues = trustedOnly ? filterTrustedIssues(issues, projPath) : issues;
-    if (summary) {
-      return NextResponse.json({
-        repo,
-        prCount: prs.length,
-        issueCount: filteredIssues.length,
-        openPrBranches: prs.map((pr: unknown) => {
-          const p = pr as Record<string, unknown>;
-          return { branch: p.headRefName ?? '', number: p.number ?? 0 };
-        }),
-        error: null,
-        cached: true,
-        cachedAt: fetchedAt,
-      });
-    }
-    return NextResponse.json({
-      repo,
-      prs: slim ? prs.map(slimPR) : prs,
-      issues: slim ? filteredIssues.map(slimIssue) : filteredIssues,
-      error: null,
-      cached: true,
-      cachedAt: fetchedAt,
-    });
-  }
-
   const filteredIssues = trustedOnly ? filterTrustedIssues(issues, projPath) : issues;
   if (summary) {
     return NextResponse.json({
@@ -563,7 +536,7 @@ export async function GET(
         return { branch: p.headRefName ?? '', number: p.number ?? 0 };
       }),
       error: ghError,
-      cached: false,
+      cached,
       cachedAt: fetchedAt,
     });
   }
@@ -572,7 +545,7 @@ export async function GET(
     prs: slim ? prs.map(slimPR) : prs,
     issues: slim ? filteredIssues.map(slimIssue) : filteredIssues,
     error: ghError,
-    cached: false,
+    cached,
     cachedAt: fetchedAt,
   });
 }
