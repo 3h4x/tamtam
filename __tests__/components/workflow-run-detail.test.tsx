@@ -95,6 +95,11 @@ describe('WorkflowRunDetail', () => {
       expect(container.textContent).toContain('1.0 m')
     })
 
+    const runningBadges = Array.from(container.querySelectorAll('[aria-label="status running"]'))
+    expect(runningBadges.length).toBeGreaterThan(0)
+    expect(runningBadges[0]?.textContent).toContain('⟳')
+    expect(runningBadges[0]?.className).toContain('bg-accent/15')
+
     const runStarted = Array.from(container.querySelectorAll('[title]')).find(
       (element) => element.getAttribute('title') === new Date('2026-05-21T11:58:00Z').toLocaleString(),
     )

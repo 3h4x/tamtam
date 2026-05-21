@@ -65,6 +65,7 @@ describe('WorkflowRunsPage', () => {
 
   it('shows relative start age and live elapsed duration for active runs', async () => {
     vi.stubGlobal('fetch', vi.fn().mockResolvedValue({
+      ok: true,
       json: async () => ({
         runs: [
           {
@@ -112,11 +113,120 @@ describe('WorkflowRunsPage', () => {
     unmount()
   })
 
+  it('keeps the last successful runs visible when a refresh fails', async () => {
+    vi.stubGlobal('fetch', vi.fn()
+      .mockResolvedValueOnce({
+        ok: true,
+        json: async () => ({
+          runs: [
+            {
+              id: 'run-live',
+              name: 'release',
+              rawName: 'release',
+              status: 'running',
+              createdAt: '2026-05-20T11:57:30Z',
+              startedAt: '2026-05-20T11:58:00Z',
+              completedAt: null,
+              durationMs: null,
+              input: ['acme'],
+              output: null,
+              error: null,
+            },
+          ],
+          meta: { workflowEnabled: true, releaseWorkflow: true, releaseWorkflowDrive: true, mode: 'drive' },
+        }),
+      })
+      .mockRejectedValueOnce(new Error('network down')))
+
+    const { container, unmount } = renderWorkflowRunsPage()
+
+    await vi.waitFor(() => {
+      expect(container.textContent).toContain('release')
+    })
+
+    await vi.advanceTimersByTimeAsync(5000)
+
+    await vi.waitFor(() => {
+      expect(container.textContent).toContain('Refresh failed. Showing last successful results.')
+      expect(container.textContent).toContain('network down')
+      expect(container.textContent).toContain('release')
+    })
+
+    unmount()
+  })
+
+  it('shows the initial load error when a successful response has invalid JSON', async () => {
+    vi.stubGlobal('fetch', vi.fn().mockResolvedValue({
+      ok: true,
+      json: async () => {
+        throw new Error('Unexpected end of JSON input')
+      },
+    }))
+
+    const { container, unmount } = renderWorkflowRunsPage()
+
+    await vi.waitFor(() => {
+      expect(container.textContent).toContain('Failed to load workflow runs')
+      expect(container.textContent).toContain('Unexpected end of JSON input')
+      expect(container.textContent).toContain('Retry')
+    })
+
+    unmount()
+  })
+
+  it('keeps the last successful runs visible when a successful refresh has invalid JSON', async () => {
+    vi.stubGlobal('fetch', vi.fn()
+      .mockResolvedValueOnce({
+        ok: true,
+        json: async () => ({
+          runs: [
+            {
+              id: 'run-live',
+              name: 'release',
+              rawName: 'release',
+              status: 'running',
+              createdAt: '2026-05-20T11:57:30Z',
+              startedAt: '2026-05-20T11:58:00Z',
+              completedAt: null,
+              durationMs: null,
+              input: ['acme'],
+              output: null,
+              error: null,
+            },
+          ],
+          meta: { workflowEnabled: true, releaseWorkflow: true, releaseWorkflowDrive: true, mode: 'drive' },
+        }),
+      })
+      .mockResolvedValueOnce({
+        ok: true,
+        json: async () => {
+          throw new Error('Unexpected end of JSON input')
+        },
+      }))
+
+    const { container, unmount } = renderWorkflowRunsPage()
+
+    await vi.waitFor(() => {
+      expect(container.textContent).toContain('release')
+    })
+
+    await vi.advanceTimersByTimeAsync(5000)
+
+    await vi.waitFor(() => {
+      expect(container.textContent).toContain('Refresh failed. Showing last successful results.')
+      expect(container.textContent).toContain('Unexpected end of JSON input')
+      expect(container.textContent).toContain('release')
+    })
+
+    unmount()
+  })
+
   it('constrains long failed outcomes in the mobile card layout', async () => {
     const error = 'failed because the workflow command produced a very long first line that should not overflow'
     const expectedLabel = error.slice(0, 60)
 
     vi.stubGlobal('fetch', vi.fn().mockResolvedValue({
+      ok: true,
       json: async () => ({
         runs: [
           {
@@ -154,6 +264,7 @@ describe('WorkflowRunsPage', () => {
 
   it('uses lifecycle marks and matching active tones in status filters', async () => {
     vi.stubGlobal('fetch', vi.fn().mockResolvedValue({
+      ok: true,
       json: async () => ({
         runs: [
           {

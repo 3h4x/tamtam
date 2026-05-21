@@ -4,6 +4,7 @@ import { useEffect, useState } from 'react';
 import Link from 'next/link';
 import { WorkflowGraph } from '@/components/workflow-runs/WorkflowGraph';
 import { WorkflowRunsEmptyState, WorkflowRunsLoadingState } from '@/components/workflow-runs/WorkflowRunsStates';
+import { WorkflowStatusBadge, workflowStatusPresentation } from '@/components/workflow-runs/workflow-run-status';
 import { StandardTabs } from '@/components/ui/StandardTabs';
 
 interface WorkflowRunSummary {
@@ -128,39 +129,6 @@ function outcomeBadge(tone: 'ok' | 'warn' | 'err' | 'info'): string {
   }
 }
 
-function runStatusMark(status: string): { glyph: string; className: string; spin?: boolean } {
-  switch (status) {
-    case 'completed':
-      return { glyph: '✓', className: 'bg-status-success/15 text-status-success border-status-success/30' };
-    case 'failed':
-      return { glyph: '✗', className: 'bg-status-error/15 text-status-error border-status-error/30' };
-    case 'cancelled':
-      return { glyph: '!', className: 'bg-status-error/15 text-status-error border-status-error/30' };
-    case 'running':
-      return { glyph: '⟳', className: 'bg-accent/15 text-accent border-accent/30', spin: true };
-    case 'pending':
-      return { glyph: '○', className: 'bg-accent/15 text-accent border-accent/30' };
-    default:
-      return { glyph: '○', className: 'bg-bg-tertiary text-text-tertiary border-border' };
-  }
-}
-
-function RunStatusMark({ status }: { status: string }) {
-  const mark = runStatusMark(status);
-  return (
-    <span
-      className={`inline-flex shrink-0 items-center gap-1 whitespace-nowrap rounded border px-1.5 py-0.5 text-xs ${mark.className}`}
-      title={`status: ${status}`}
-      aria-label={`status ${status}`}
-    >
-      <span className={`leading-none ${mark.spin ? 'animate-spin' : ''}`} aria-hidden="true">
-        {mark.glyph}
-      </span>
-      <span>{status}</span>
-    </span>
-  );
-}
-
 interface RunsMeta {
   workflowEnabled: boolean;
   releaseWorkflow: boolean;
@@ -172,6 +140,19 @@ interface RunsResponse {
   runs: WorkflowRunSummary[];
   reason?: string;
   meta?: RunsMeta;
+}
+
+function isRunsResponse(value: unknown): value is RunsResponse {
+  if (value == null || typeof value !== 'object') return false;
+  return Array.isArray((value as { runs?: unknown }).runs);
+}
+
+function workflowRunsErrorDetail(value: unknown): string | null {
+  if (value == null || typeof value !== 'object') return null;
+  const body = value as Record<string, unknown>;
+  if (typeof body.error === 'string' && body.error.length > 0) return body.error;
+  if (typeof body.detail === 'string' && body.detail.length > 0) return body.detail;
+  return null;
 }
 
 function modeBadge(mode: RunsMeta['mode'] | undefined): { label: string; className: string } {
@@ -258,30 +239,13 @@ function statusFilterPresentation(status: StatusFilter): {
 } {
   switch (status) {
     case 'completed':
-      return {
-        glyph: '✓',
-        activeClassName: 'border-status-success/30 bg-status-success/15 text-status-success',
-        glyphClassName: 'text-status-success',
-      };
+      return workflowFilterPresentation(status);
     case 'failed':
     case 'cancelled':
-      return {
-        glyph: status === 'failed' ? '✗' : '!',
-        activeClassName: 'border-status-error/30 bg-status-error/15 text-status-error',
-        glyphClassName: 'text-status-error',
-      };
+      return workflowFilterPresentation(status);
     case 'running':
-      return {
-        glyph: '⟳',
-        activeClassName: 'border-accent/30 bg-accent/15 text-accent',
-        glyphClassName: 'text-accent',
-      };
     case 'pending':
-      return {
-        glyph: '○',
-        activeClassName: 'border-accent/30 bg-accent/15 text-accent',
-        glyphClassName: 'text-accent',
-      };
+      return workflowFilterPresentation(status);
     case 'all':
       return {
         glyph: null,
@@ -291,20 +255,51 @@ function statusFilterPresentation(status: StatusFilter): {
   }
 }
 
+function workflowFilterPresentation(status: Exclude<StatusFilter, 'all'>) {
+  const presentation = workflowStatusPresentation(status);
+  const glyphClassName = presentation.className.includes('text-status-success')
+    ? 'text-status-success'
+    : presentation.className.includes('text-status-error')
+      ? 'text-status-error'
+      : presentation.className.includes('text-accent')
+        ? 'text-accent'
+        : 'text-text-tertiary';
+  return {
+    glyph: presentation.glyph,
+    activeClassName: presentation.className,
+    glyphClassName,
+  };
+}
+
 export function WorkflowRunsPage() {
   const [data, setData] = useState<RunsResponse | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [nameFilter, setNameFilter] = useState('');
   const [statusFilter, setStatusFilter] = useState<StatusFilter>('all');
   const [view, setView] = useState<'runs' | 'graph'>('runs');
+  const [reloadNonce, setReloadNonce] = useState(0);
 
   useEffect(() => {
     let cancelled = false;
     async function load() {
       try {
         const res = await fetch('/api/workflow-runs?limit=100');
-        const body = (await res.json()) as RunsResponse;
-        if (!cancelled) setData(body);
+        const body = (await res.json().catch((err: unknown) => {
+          if (res.ok) throw err;
+          return null;
+        })) as unknown;
+        if (!res.ok) {
+          const detail = workflowRunsErrorDetail(body);
+          const message = detail ?? `HTTP ${res.status}`;
+          throw new Error(message);
+        }
+        if (!isRunsResponse(body)) {
+          throw new Error('Invalid workflow runs response');
+        }
+        if (!cancelled) {
+          setData(body);
+          setError(null);
+        }
       } catch (e) {
         if (!cancelled) setError((e as Error).message);
       }
@@ -315,12 +310,22 @@ export function WorkflowRunsPage() {
       cancelled = true;
       clearInterval(interval);
     };
-  }, []);
+  }, [reloadNonce]);
 
-  if (error) {
+  function retryLoad() {
+    setReloadNonce((current) => current + 1);
+  }
+
+  if (error && !data) {
     return (
-      <div className="p-6">
-        <div className="text-status-error">Failed to load workflow runs: {error}</div>
+      <div className="p-4 sm:p-6">
+        <WorkflowRunsEmptyState
+          title="Failed to load workflow runs"
+          description={error}
+          meta="TamTam could not refresh workflow state from /api/workflow-runs."
+          actionLabel="Retry"
+          onAction={retryLoad}
+        />
       </div>
     );
   }
@@ -404,6 +409,27 @@ export function WorkflowRunsPage() {
           onChange={setView}
         />
       </div>
+      {error ? (
+        <div
+          className="mb-3 flex flex-wrap items-start justify-between gap-3 rounded-md border border-status-warning/30 bg-status-warning/10 px-3 py-2 text-sm text-text-primary"
+          role="status"
+          aria-live="polite"
+        >
+          <div className="min-w-0">
+            <p className="font-medium text-status-warning">Refresh failed. Showing last successful results.</p>
+            <p className="truncate font-mono text-xs text-text-secondary" title={error}>
+              {error}
+            </p>
+          </div>
+          <button
+            type="button"
+            onClick={retryLoad}
+            className="rounded-md border border-status-warning/30 px-2.5 py-1 text-xs font-medium text-status-warning transition-colors hover:bg-status-warning/10"
+          >
+            Retry now
+          </button>
+        </div>
+      ) : null}
       {view === 'graph' && <WorkflowGraph />}
       {view === 'runs' && (
       <>
@@ -481,7 +507,7 @@ export function WorkflowRunsPage() {
                       {r.name}
                     </div>
                     <div className="mt-1 flex min-w-0 items-center gap-2">
-                      <RunStatusMark status={r.status} />
+                      <WorkflowStatusBadge status={r.status} />
                       <div className="min-w-0 truncate font-mono text-xs text-text-secondary" title={formatTitle(r.input)}>
                         {inputSummary}
                       </div>
@@ -536,7 +562,7 @@ export function WorkflowRunsPage() {
                   >
                     <td className="max-w-[260px] px-3 py-2 font-mono text-xs text-text-primary" title={r.rawName}>
                       <div className="flex min-w-0 items-center gap-2">
-                        <RunStatusMark status={r.status} />
+                        <WorkflowStatusBadge status={r.status} />
                         <Link href={`/workflow-runs/${encodeURIComponent(r.id)}`} className="min-w-0 truncate hover:underline">
                           {r.name}
                         </Link>
