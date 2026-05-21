@@ -151,13 +151,15 @@ describe('POST /api/projects/by-project/[projectName]/fix-ci', () => {
     expect(res.status).toBe(400);
   });
 
-  it('returns 500 when gh run view fails to fetch logs', async () => {
+  it('returns 502 when gh run view fails to fetch logs', async () => {
+    // gh failure (rate-limit, auth, run gone) is an upstream failure — the
+    // route returns 502 instead of asking Claude to "fix" gh's stderr text.
     execMock.mockResolvedValue({ exitCode: 1, stdout: '', stderr: '' });
     const req = new NextRequest('http://localhost/api/projects/by-project/proj1/fix-ci', { method: 'POST' });
     const res = await POST(req, { params: Promise.resolve({ projectName: 'proj1' }) });
-    expect(res.status).toBe(500);
+    expect(res.status).toBe(502);
     const data = await res.json();
-    expect(data.detail).toContain('Could not fetch CI failure logs');
+    expect(data.detail).toContain('gh run view failed');
   });
 
   it('returns the global pause conflict when jobs are paused', async () => {

@@ -68,7 +68,7 @@ export function Header({ loading, lastRefresh: _lastRefresh }: HeaderProps) {
         {NAV_ITEMS.map((item) => {
           const isActive = item.to === '/'
             ? pathname === '/'
-            : pathname.startsWith(item.to)
+            : pathname === item.to || pathname.startsWith(item.to + '/')
           const count = item.countKey ? counts[item.countKey] ?? 0 : 0
           return (
             <Link

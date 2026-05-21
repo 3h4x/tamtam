@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { join } from 'path';
+import { eq } from 'drizzle-orm';
 import { getImproveConfig } from '@/lib/scheduling/scheduling';
 import { resolveProjectPath } from '@/lib/shared/project-data';
 import { createJob, listJobs, probeJobStatus, updateJob } from '@/lib/jobs/job-storage';
@@ -12,6 +13,7 @@ import { checkCliStartGate } from '@/lib/usage/resolve-provider';
 import { isCliProvider } from '@/lib/usage/cli-providers';
 import { findBlockingRunningJob } from '@/lib/jobs/project-active-job';
 import { extractGithubRepoFromUrl, resolveGithubRepo } from '@/lib/shared/gh-status';
+import { db, schema } from '@/lib/db';
 
 export async function POST(
   request: NextRequest,
@@ -58,8 +60,6 @@ export async function POST(
   const defaultModel = resolveCliDefaultModel(provider, settings);
 
   // Get CI failure URL from DB
-  const { db, schema } = await import('@/lib/db');
-  const { eq } = await import('drizzle-orm');
   const ciEntry = (await db.select().from(schema.ghStatus).where(eq(schema.ghStatus.project, projectName)).limit(1))[0] ?? null;
   const ciFailedUrl = ciEntry?.ciFailedUrl;
   if (!ciFailedUrl) {
@@ -75,7 +75,17 @@ export async function POST(
   let ciLogs = '';
   if (runId) {
     const r = await exec('gh', ['run', 'view', runId, '--repo', repo, '--log-failed'], { timeout: 30000 });
-    ciLogs = r.exitCode === 0 ? r.stdout.trim() : r.stderr.trim();
+    if (r.exitCode !== 0) {
+      // Don't fall back to stderr here — `gh` errors (rate limit, auth, run
+      // gone) bear no resemblance to the CI logs Claude needs to fix the
+      // failure. Surface the gh error so the operator knows what broke
+      // instead of asking Claude to "fix" garbage prose.
+      return NextResponse.json(
+        { detail: `gh run view failed (exit ${r.exitCode}): ${r.stderr.trim() || r.stdout.trim() || 'no detail'}` },
+        { status: 502 },
+      );
+    }
+    ciLogs = r.stdout.trim();
   }
   if (!ciLogs) {
     return NextResponse.json({ detail: 'Could not fetch CI failure logs' }, { status: 500 });
@@ -99,7 +109,7 @@ Do not commit — just make the code changes.
 
   const job = createJob(projectName, 'fix-ci', 0, '');
   job.provider = provider;
-  const logPath = join(logDir, `${job.id}.log`);
+  const logPath = join(/*turbopackIgnore: true*/ logDir, `${job.id}.log`);
   job.logPath = logPath;
 
   try {
