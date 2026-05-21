@@ -113,11 +113,13 @@ export async function POST(
 
   const createArgs = ['pr', 'create', '--base', defaultBranch];
   if (prTitle) {
-    const bodyLogR = await exec(
-      'git', ['-C', projPath, 'log', `${defaultBranch}..HEAD`, '--pretty=- %s'],
-      { timeout: 5000 },
-    );
-    const commitBullets = bodyLogR.stdout.trim() || '(no commits)';
+    // Reuse branchSubjects (already fetched above) to build the PR body
+    // bullets — they're the same `${defaultBranch}..HEAD` commit set git
+    // would have returned a second time with `--pretty=- %s`. One git
+    // spawn instead of two.
+    const commitBullets = branchSubjects.length > 0
+      ? branchSubjects.map(s => `- ${s}`).join('\n')
+      : '(no commits)';
     createArgs.push('--title', prTitle, '--body', `${prBodyExtra}${commitBullets}`);
   } else {
     createArgs.push('--fill');

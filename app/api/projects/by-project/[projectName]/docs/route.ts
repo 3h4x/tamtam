@@ -30,7 +30,7 @@ export async function GET(
 
   // docs/ directory
   const docsDir = join(/*turbopackIgnore: true*/ projPath, 'docs');
-  if (existsSync(docsDir)) {
+  if (existsSync(/*turbopackIgnore: true*/ docsDir)) {
     for (const entry of readdirSync(/*turbopackIgnore: true*/ docsDir, { withFileTypes: true })) {
       if (!entry.isFile() || !entry.name.endsWith('.md')) continue;
       try {

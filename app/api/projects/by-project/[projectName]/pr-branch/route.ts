@@ -29,7 +29,12 @@ export async function POST(
   }
 
   // Fetch the branch from origin first so local checkout can track it.
-  await exec('git', ['-C', projPath, 'fetch', 'origin', branch], { timeout: 15000 });
+  // Capture the result instead of discarding it: when both checkout
+  // attempts below fail, the fetch stderr is often the most actionable
+  // error (e.g. "couldn't find remote ref ..." when the branch is gone
+  // upstream, or a network failure), and silently dropping it forced
+  // operators to re-run the command in a terminal to learn why.
+  const fetchR = await exec('git', ['-C', projPath, 'fetch', 'origin', branch], { timeout: 15000 });
 
   // Try local checkout first (branch may already exist), then track from origin.
   const checkoutR = await exec('git', ['-C', projPath, 'checkout', branch], { timeout: 10000 });
@@ -47,8 +52,9 @@ export async function POST(
     return NextResponse.json({ status: 'created', branch });
   }
 
+  const reason = (trackR.stderr || checkoutR.stderr || fetchR.stderr || '').trim();
   return NextResponse.json(
-    { detail: `Failed to checkout ${branch}: ${checkoutR.stderr || trackR.stderr}` },
+    { detail: `Failed to checkout ${branch}: ${reason || 'unknown git error'}` },
     { status: 500 },
   );
 }

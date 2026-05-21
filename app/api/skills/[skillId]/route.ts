@@ -23,15 +23,41 @@ export async function PATCH(
     return NextResponse.json({ detail: 'default skills are read-only' }, { status: 403 });
   }
 
+  // Defensive parse: a malformed body used to bubble up as a 500. A 400
+  // with a clear reason is friendlier and matches the convention applied
+  // by the review-pr / changes / create-pr routes.
+  let body: unknown;
+  try {
+    body = await request.json();
+  } catch {
+    return NextResponse.json({ detail: 'invalid JSON body' }, { status: 400 });
+  }
+  if (!body || typeof body !== 'object') {
+    return NextResponse.json({ detail: 'body must be an object' }, { status: 400 });
+  }
+
   const existingRows = await db.select().from(schema.skills).where(eq(schema.skills.id, skillId)).limit(1);
   const existing = existingRows[0] ?? null;
   if (!existing) return NextResponse.json({ detail: 'not found' }, { status: 404 });
 
-  const body = await request.json();
+  // Type-narrow each optional field before mutating. The original code
+  // called `.trim()` directly on `body.name` / `body.description` without
+  // a type check, which would TypeError on a non-string value (number,
+  // object, null) and bubble up as a 500.
+  const { name, description, content } = body as { name?: unknown; description?: unknown; content?: unknown };
   const updates: Record<string, unknown> = { updatedAt: Date.now() / 1000 };
-  if (body.name !== undefined) updates.name = body.name.trim();
-  if (body.description !== undefined) updates.description = body.description.trim();
-  if (body.content !== undefined) updates.content = body.content;
+  if (name !== undefined) {
+    if (typeof name !== 'string') return NextResponse.json({ detail: 'name must be a string' }, { status: 400 });
+    updates.name = name.trim();
+  }
+  if (description !== undefined) {
+    if (typeof description !== 'string') return NextResponse.json({ detail: 'description must be a string' }, { status: 400 });
+    updates.description = description.trim();
+  }
+  if (content !== undefined) {
+    if (typeof content !== 'string') return NextResponse.json({ detail: 'content must be a string' }, { status: 400 });
+    updates.content = content;
+  }
 
   await db.update(schema.skills).set(updates).where(eq(schema.skills.id, skillId));
   const skillRows = await db.select().from(schema.skills).where(eq(schema.skills.id, skillId)).limit(1);

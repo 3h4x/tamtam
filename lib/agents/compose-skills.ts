@@ -70,10 +70,35 @@ export async function composeAgentSkills(
 
   const docsBase = join(SKILLS_DIR, 'docs', 'skills')
   for (const p of personaPaths) {
+    // Defense-in-depth: persona paths shipped from the UI are always of the
+    // form `<category>/<slug>` (see app/api/projects/personas/route.ts), but
+    // skillIds end up persisted in the agents table and could be tampered
+    // with via DB writes or an unvetted PATCH. Without this guard,
+    // `persona:../../etc/passwd` would compose `${SKILLS_DIR}/docs/skills/
+    // ../../etc/passwd.md` — which `path.join` normalises into a path
+    // outside the skills directories and `readFileSync` would happily read.
+    // Reject any `..` segment, empty segment (double slash, leading slash),
+    // or absolute path. Single-dot segments and leading-dot filenames stay
+    // allowed — they don't traverse and persona filesystems may legitimately
+    // ship `.hidden.md`-style entries.
+    const segments = p.split('/')
+    if (p.startsWith('/') || segments.some((s) => s === '..' || s === '')) {
+      metaSkills.push({ id: `persona:${p}`, name: p, description: p, source: 'file' })
+      continue
+    }
     const fallbackName = p.split('/').pop() ?? p
     const docsFile = join(docsBase, `${p}.md`)
     const dataFile = join(DATA_SKILLS_DIR, `${p}.md`)
-    const file = existsSync(/*turbopackIgnore: true*/ docsFile)
+    // Belt-and-braces: also verify the resolved path stays inside one of
+    // the skill roots. Catches any traversal payload that slipped past
+    // the segment-level check (e.g. on weird filesystems / encodings).
+    const inDocs = docsFile.startsWith(docsBase + '/')
+    const inData = dataFile.startsWith(DATA_SKILLS_DIR + '/')
+    if (!inDocs && !inData) {
+      metaSkills.push({ id: `persona:${p}`, name: fallbackName, description: p, source: 'file' })
+      continue
+    }
+    const file = inDocs && existsSync(/*turbopackIgnore: true*/ docsFile)
       ? docsFile
       : dataFile
     if (existsSync(/*turbopackIgnore: true*/ file)) {

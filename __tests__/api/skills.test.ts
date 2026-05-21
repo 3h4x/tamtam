@@ -41,9 +41,9 @@ async function applyDdl(handle: TestDbHandle): Promise<void> {
 describe('skills API', () => {
   let skillsGET: any;
   let skillsPOST: any;
-  let skillDetailGET: any;
-  let skillDetailPATCH: any;
-  let skillDetailDELETE: any;
+  let skillDetailGET: typeof import('@/app/api/skills/[skillId]/route').GET;
+  let skillDetailPATCH: typeof import('@/app/api/skills/[skillId]/route').PATCH;
+  let skillDetailDELETE: typeof import('@/app/api/skills/[skillId]/route').DELETE;
 
   beforeAll(async () => {
     sharedHandle = await createTestPgDbEmpty();
@@ -399,6 +399,70 @@ describe('skills API', () => {
 
       const data = await response.json();
       expect(data.skill.updatedAt).toBeGreaterThanOrEqual(before);
+    });
+
+    it('returns 400 on malformed JSON body (regression: previously 500)', async () => {
+      const request = new NextRequest('http://localhost/api/skills/skill-x', {
+        method: 'PATCH',
+        body: 'this is not json',
+      });
+      const response = await skillDetailPATCH(request, {
+        params: Promise.resolve({ skillId: 'skill-x' }),
+      });
+      expect(response.status).toBe(400);
+      const data = await response.json();
+      expect(data.detail).toMatch(/invalid JSON/i);
+    });
+
+    it('returns 400 when name is not a string (regression: would TypeError on .trim())', async () => {
+      const now = Date.now() / 1000;
+      await sharedHandle.db.insert(schema.skills).values({
+        id: 'skill-typed', name: 'N', description: 'D', content: 'C', createdAt: now, updatedAt: now,
+      });
+      const request = new NextRequest('http://localhost/api/skills/skill-typed', {
+        method: 'PATCH',
+        body: JSON.stringify({ name: 42 }),
+      });
+      const response = await skillDetailPATCH(request, {
+        params: Promise.resolve({ skillId: 'skill-typed' }),
+      });
+      expect(response.status).toBe(400);
+      const data = await response.json();
+      expect(data.detail).toMatch(/name must be a string/i);
+    });
+
+    it('returns 400 when description is not a string', async () => {
+      const now = Date.now() / 1000;
+      await sharedHandle.db.insert(schema.skills).values({
+        id: 'skill-typed2', name: 'N', description: 'D', content: 'C', createdAt: now, updatedAt: now,
+      });
+      const request = new NextRequest('http://localhost/api/skills/skill-typed2', {
+        method: 'PATCH',
+        body: JSON.stringify({ description: { nested: 'object' } }),
+      });
+      const response = await skillDetailPATCH(request, {
+        params: Promise.resolve({ skillId: 'skill-typed2' }),
+      });
+      expect(response.status).toBe(400);
+      const data = await response.json();
+      expect(data.detail).toMatch(/description must be a string/i);
+    });
+
+    it('returns 400 when content is not a string', async () => {
+      const now = Date.now() / 1000;
+      await sharedHandle.db.insert(schema.skills).values({
+        id: 'skill-typed3', name: 'N', description: 'D', content: 'C', createdAt: now, updatedAt: now,
+      });
+      const request = new NextRequest('http://localhost/api/skills/skill-typed3', {
+        method: 'PATCH',
+        body: JSON.stringify({ content: null }),
+      });
+      const response = await skillDetailPATCH(request, {
+        params: Promise.resolve({ skillId: 'skill-typed3' }),
+      });
+      expect(response.status).toBe(400);
+      const data = await response.json();
+      expect(data.detail).toMatch(/content must be a string/i);
     });
   });
 

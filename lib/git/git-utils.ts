@@ -1,13 +1,21 @@
 import { createHash } from 'crypto';
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'fs';
-import { join } from 'path';
+import { join, resolve, relative, sep } from 'path';
 import { homedir } from 'os';
 import { exec } from '@/lib/shared/shell';
 
 const REVIEW_DIR = join(homedir(), '.cache', 'tamtam', 'schedule-reviews');
 
-function reviewStatePath(project: string): string {
-  return join(REVIEW_DIR, `${project}.hash`);
+// Project names are admin-entered and not separately validated, so anchor
+// the cache-file path to REVIEW_DIR and refuse anything that resolves
+// outside it (matches the path-traversal pattern used by the diff and
+// logs routes). Returns null when the resolved path escapes; callers
+// treat that as "no cache available".
+function reviewStatePath(project: string): string | null {
+  const candidate = resolve(REVIEW_DIR, `${project}.hash`);
+  const rel = relative(REVIEW_DIR, candidate);
+  if (rel === '..' || rel.startsWith(`..${sep}`) || rel.startsWith('..')) return null;
+  return candidate;
 }
 
 type ReviewStamp = {
@@ -81,14 +89,17 @@ function migrateLegacyReviewStamp(path: string, stamp: ReviewStamp): void {
 }
 
 export async function markReviewed(project: string, path: string): Promise<void> {
+  const target = reviewStatePath(project);
+  if (!target) return;
   const stamp = await readReviewStamp(path);
   if (!stamp) return;
   mkdirSync(REVIEW_DIR, { recursive: true });
-  writeFileSync(reviewStatePath(project), JSON.stringify(stamp));
+  writeFileSync(target, JSON.stringify(stamp));
 }
 
 export async function isReviewed(project: string, path: string): Promise<boolean> {
   const p = reviewStatePath(project);
+  if (!p) return false;
   if (!existsSync(p)) return false;
   const current = await readReviewStamp(path);
   if (!current) return false;

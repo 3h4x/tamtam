@@ -52,11 +52,14 @@ export async function PATCH(
   if (hasArchived && body.archived) {
     // Drop any scheduled agent timers belonging to this project so the
     // archive takes effect without waiting for the next scheduler reload.
+    // Each uninstall is an independent graphile-worker mutation — running
+    // them in parallel cuts the PATCH latency on projects with many
+    // scheduled agents from O(N × per-call) to roughly per-call.
     const agents = await db
       .select({ id: schema.agents.id })
       .from(schema.agents)
       .where(eq(schema.agents.project, projectName));
-    for (const a of agents) await uninstallAgentSchedule(a.id);
+    await Promise.all(agents.map((a) => uninstallAgentSchedule(a.id)));
   }
 
   return NextResponse.json({

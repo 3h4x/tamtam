@@ -14,7 +14,14 @@ export async function PATCH(
   { params }: { params: Promise<{ projectName: string }> },
 ) {
   const { projectName } = await params;
-  const body = await request.json();
+  // Defensive parse: a malformed body used to bubble up as a 500. Matches
+  // the convention from review-pr / changes / create-pr / skills routes.
+  let body: { id?: unknown; status?: unknown };
+  try {
+    body = await request.json();
+  } catch {
+    return NextResponse.json({ detail: 'invalid JSON body' }, { status: 400 });
+  }
   const id = typeof body.id === 'string' ? body.id : '';
   const status = typeof body.status === 'string' ? body.status : '';
   if (!id || !['open', 'dismissed'].includes(status)) {

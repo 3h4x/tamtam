@@ -126,6 +126,42 @@ describe('WorkflowRunsPage', () => {
     unmount()
   })
 
+  it('shows completed time as the last event for finished runs', async () => {
+    vi.stubGlobal('fetch', vi.fn().mockResolvedValue({
+      ok: true,
+      json: async () => ({
+        runs: [
+          {
+            id: 'run-done',
+            name: 'test',
+            rawName: 'test',
+            status: 'completed',
+            createdAt: '2026-05-20T11:40:00Z',
+            startedAt: '2026-05-20T11:45:00Z',
+            completedAt: '2026-05-20T11:50:30Z',
+            durationMs: 330_000,
+            input: ['acme'],
+            output: { ok: true },
+            error: null,
+          },
+        ],
+        meta: { workflowEnabled: true, releaseWorkflow: true, releaseWorkflowDrive: true, mode: 'drive' },
+      }),
+    }))
+
+    const { container, unmount } = renderWorkflowRunsPage()
+
+    await vi.waitFor(() => {
+      expect(container.textContent).toContain('Last event')
+    })
+
+    const lastEventCell = Array.from(container.querySelectorAll('td'))
+      .find((cell) => cell.textContent === '9m ago')
+    expect(lastEventCell?.getAttribute('title')).toBe(new Date('2026-05-20T11:50:30Z').toLocaleString())
+
+    unmount()
+  })
+
   it('keeps the last successful runs visible when a refresh fails', async () => {
     vi.stubGlobal('fetch', vi.fn()
       .mockResolvedValueOnce({

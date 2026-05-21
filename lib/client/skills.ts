@@ -20,7 +20,7 @@ export async function createSkill(skill: { name: string; description: string; co
 }
 
 export async function updateSkill(skillId: string, updates: Partial<{ name: string; description: string; content: string }>): Promise<{ skill: Skill }> {
-  const response = await fetch(`/api/skills/${skillId}`, {
+  const response = await fetch(`/api/skills/${encodeURIComponent(skillId)}`, {
     method: 'PATCH',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify(updates),
@@ -33,6 +33,9 @@ export async function updateSkill(skillId: string, updates: Partial<{ name: stri
 }
 
 export async function deleteSkill(skillId: string): Promise<void> {
-  const response = await fetch(`/api/skills/${skillId}`, { method: 'DELETE' })
-  if (!response.ok) throw new Error('Failed to delete skill')
+  const response = await fetch(`/api/skills/${encodeURIComponent(skillId)}`, { method: 'DELETE' })
+  if (!response.ok) {
+    const data = await response.json().catch(() => ({}))
+    throw new Error(data.detail || 'Failed to delete skill')
+  }
 }

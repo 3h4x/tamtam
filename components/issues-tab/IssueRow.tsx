@@ -1,6 +1,6 @@
 'use client'
 
-import { useState, useEffect } from 'react'
+import { useState, useEffect, useMemo } from 'react'
 import { useRouter } from 'next/navigation'
 import type { GhIssue, ProjectConfig } from '@/lib/client-api'
 import { formatAgo } from '@/lib/shared/format'
@@ -52,10 +52,18 @@ export function IssueRow({ issue, projectName, projectCfg }: { issue: GhIssue; p
     router.push(`/project/${projectName}/terminal?pending=${key}`)
   }
 
+  // Parsed once per issue URL — used by both `openInTerminal` and
+  // `continueWork`. Title-attribute string for the Work-on button is
+  // also memoized so we don't rebuild the multi-line tooltip on every
+  // parent re-render across every row.
+  const repo = useMemo(() => {
+    const m = issue.url.match(/github\.com\/([^/]+\/[^/]+)\/issues\//)
+    return m?.[1] ?? ''
+  }, [issue.url])
+  const workOnTitle = useMemo(() => workOnChainSummary(projectCfg), [projectCfg])
+
   const openInTerminal = () => {
     const prompt = `Work on GitHub issue #${issue.number}: "${issue.title}" (${issue.url})\n\n${issue.body || ''}`
-    const repoMatch = issue.url.match(/github\.com\/([^/]+\/[^/]+)\/issues\//)
-    const repo = repoMatch?.[1] ?? ''
     stashAndOpen({
       prompt,
       issue_number: String(issue.number),
@@ -76,8 +84,6 @@ export function IssueRow({ issue, projectName, projectCfg }: { issue: GhIssue; p
       const res = await fetch(`/api/projects/by-project/${encodeURIComponent(projectName)}/continue-issue?issue_number=${issue.number}`)
       if (!res.ok) throw new Error('continue-issue lookup failed')
       const data = await res.json() as { sessionId: string | null; provider: string | null; prompt: string; unverifiedCount: number }
-      const repoMatch = issue.url.match(/github\.com\/([^/]+\/[^/]+)\/issues\//)
-      const repo = repoMatch?.[1] ?? ''
       stashAndOpen({
         prompt: data.prompt,
         issue_number: String(issue.number),
@@ -153,7 +159,7 @@ export function IssueRow({ issue, projectName, projectCfg }: { issue: GhIssue; p
             <button
               className="rounded-md border border-border bg-bg-secondary px-2 py-1 text-[10px] text-text-primary hover:bg-bg-tertiary cursor-pointer"
               onClick={openInTerminal}
-              title={workOnChainSummary(projectCfg)}
+              title={workOnTitle}
             >
               Work on
             </button>

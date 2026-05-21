@@ -1,5 +1,5 @@
 import { NextResponse } from 'next/server';
-import { statSync, openSync, readSync, closeSync } from 'fs';
+import { statSync, openSync, readSync, closeSync, fstatSync } from 'fs';
 import { homedir } from 'os';
 import { join } from 'path';
 
@@ -19,7 +19,11 @@ const DEFAULT_TAIL_BYTES = 64 * 1024;
 function tailBytes(path: string, bytes: number): { raw: string; truncated: boolean } {
   const fd = openSync(/*turbopackIgnore: true*/ path, 'r');
   try {
-    const size = statSync(/*turbopackIgnore: true*/ path).size;
+    // fstatSync(fd) instead of statSync(path) so the size lookup is bound to
+    // the open file descriptor. Otherwise PM2's log rotation (rename + new
+    // file) between openSync and statSync would have us reading the old
+    // inode's data using the new file's size.
+    const size = fstatSync(fd).size;
     const readLen = Math.min(bytes, size);
     const offset = size - readLen;
     const buf = Buffer.alloc(readLen);

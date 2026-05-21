@@ -1,6 +1,6 @@
 'use client'
 
-import { useState } from 'react'
+import { useMemo, useState } from 'react'
 import type { ToolEntry } from '@/lib/terminal/terminal-session-store'
 
 const TOOL_COLORS: Record<string, string> = {
@@ -18,28 +18,33 @@ const TOOL_COLORS: Record<string, string> = {
 export function ToolBlock({ tool, executing }: { tool: ToolEntry; executing?: boolean }) {
   const [collapsed, setCollapsed] = useState(true)
 
-  let summary = ''
-  try {
-    const input = JSON.parse(tool.input || '{}')
-    summary =
-      input.file_path ||
-      input.command ||
-      input.pattern ||
-      input.query ||
-      input.url ||
-      input.path ||
-      input.description ||
-      ''
-    // Collapse multi-line commands to single line for compactness
-    if (summary) summary = summary.replace(/\s*\n\s*/g, ' ').trim()
-  } catch {
-    summary = tool.input?.slice(0, 60) || ''
-  }
+  // Memoize the parse + summary pick. Terminal sessions can mount hundreds
+  // of ToolBlocks at once, and the parent re-renders on every streaming
+  // chunk; without this, every chunk causes N JSON.parse calls for tool
+  // inputs whose content hasn't changed since first mount.
+  const summary = useMemo(() => {
+    try {
+      const input = JSON.parse(tool.input || '{}') as Record<string, unknown>
+      const picked =
+        (input.file_path as string | undefined) ||
+        (input.command as string | undefined) ||
+        (input.pattern as string | undefined) ||
+        (input.query as string | undefined) ||
+        (input.url as string | undefined) ||
+        (input.path as string | undefined) ||
+        (input.description as string | undefined) ||
+        ''
+      return picked ? picked.replace(/\s*\n\s*/g, ' ').trim() : ''
+    } catch {
+      return tool.input?.slice(0, 60) || ''
+    }
+  }, [tool.input])
 
   const hasResult = !!tool.result
-  const resultPreview = tool.result
-    ? tool.result.length > 600 ? tool.result.slice(0, 600) + '...' : tool.result
-    : null
+  const resultPreview = useMemo(() => {
+    if (!tool.result) return null
+    return tool.result.length > 600 ? tool.result.slice(0, 600) + '...' : tool.result
+  }, [tool.result])
 
   const nameColor = TOOL_COLORS[tool.name] ?? 'text-[#9cc7ff]'
   const clickable = hasResult

@@ -1,6 +1,6 @@
 'use client'
 
-import { useState, useEffect, useCallback, useRef } from 'react'
+import { useState, useEffect, useCallback, useRef, memo } from 'react'
 import { useRouter } from 'next/navigation'
 import { fetchChanges, fetchChangeDiff, pullProject, pushProject, PullDivergedError, checkoutDefaultBranch } from '@/lib/client-api'
 import type { ChangeFile, ChangeStatus, ChangesResponse } from '@/lib/client-api'
@@ -39,7 +39,11 @@ interface DiffEntry {
   error?: string
 }
 
-function DiffView({ diff }: { diff: string }) {
+// Memoized so the parent's frequent re-renders (push/pull/switch/refresh
+// state changes) don't force a fresh diff split + JSX rebuild for every
+// expanded entry. The `diff` string is immutable once loaded so the
+// default shallow-equal of React.memo is exactly the right check.
+const DiffView = memo(function DiffView({ diff }: { diff: string }) {
   if (!diff.trim()) return <div className="p-3 text-xs text-text-secondary italic">No diff content.</div>
   const lines = diff.split('\n')
   return (
@@ -59,7 +63,7 @@ function DiffView({ diff }: { diff: string }) {
       })}
     </pre>
   )
-}
+})
 
 function StatBar({ additions, deletions }: { additions: number; deletions: number }) {
   const total = additions + deletions

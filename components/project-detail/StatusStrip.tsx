@@ -224,7 +224,7 @@ export function StatusStrip({
         primary="passing"
         detail={releaseTag ? `release ${releaseTag}` : 'latest commit'}
         tone="success"
-        onClick={ciFailedUrl ? () => window.open(ciFailedUrl, '_blank') : undefined}
+        onClick={ciFailedUrl ? () => window.open(ciFailedUrl, '_blank', 'noopener,noreferrer') : undefined}
       />
     )
   } else if (ciStatus === 'failure') {
@@ -234,7 +234,7 @@ export function StatusStrip({
         primary="failing"
         detail={ciFailedUrl ? 'open on GitHub' : 'no run url'}
         tone="error"
-        onClick={ciFailedUrl ? () => window.open(ciFailedUrl, '_blank') : undefined}
+        onClick={ciFailedUrl ? () => window.open(ciFailedUrl, '_blank', 'noopener,noreferrer') : undefined}
       />
     )
   } else if (ciStatus === 'in_progress') {
@@ -245,7 +245,7 @@ export function StatusStrip({
         detail={ciFailedUrl ? 'open on GitHub' : undefined}
         tone="warning"
         running
-        onClick={ciFailedUrl ? () => window.open(ciFailedUrl, '_blank') : undefined}
+        onClick={ciFailedUrl ? () => window.open(ciFailedUrl, '_blank', 'noopener,noreferrer') : undefined}
       />
     )
   } else {
