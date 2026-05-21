@@ -22,7 +22,6 @@ import { readIssueBody, writeIssueBody } from '@/lib/github/edit-issue-body';
 import { getPermissionModeFlag, getPipelineModel, getSettings } from '@/lib/shared/config';
 import {
   createJob,
-  findActiveReleaseJob,
   markDone,
   updateJob,
 } from '@/lib/jobs/job-storage';
@@ -39,6 +38,7 @@ import {
   findReleaseScopedIssueContext,
   findReleaseScopedPrContext,
 } from '@/lib/pipeline/release-context';
+import { listJobs } from '@/lib/jobs/storage';
 import { extractCriteria, tickCriteria } from '@/lib/pipeline/mark-dod-criteria';
 
 export type ParsedCriterion = ReturnType<typeof extractCriteria>[number];
@@ -108,22 +108,30 @@ function appendLog(job: JobData | null, line: string): void {
   }
 }
 
-function findIssueContext(projectName: string): { number: number; repo: string } | null {
-  const activeReleaseIssue = findReleaseScopedIssueContext(projectName);
+interface ContextLookupBundle {
+  projectName: string;
+  projectJobs: JobData[];
+  activeRelease: JobData | null;
+}
+
+function findIssueContext(bundle: ContextLookupBundle): { number: number; repo: string } | null {
+  const { projectName, projectJobs, activeRelease } = bundle;
+  const activeReleaseIssue = findReleaseScopedIssueContext(projectName, activeRelease, projectJobs);
   if (activeReleaseIssue) {
     return { number: activeReleaseIssue.number, repo: activeReleaseIssue.repo };
   }
-  if (findActiveReleaseJob(projectName)) return null;
-  const issue = findLatestIssueRunContext(projectName);
+  if (activeRelease) return null;
+  const issue = findLatestIssueRunContext(projectName, projectJobs);
   if (!issue) return null;
   return { number: issue.number, repo: issue.repo };
 }
 
-function findPrContext(projectName: string): { number: number; repo: string } | null {
-  const activeReleasePr = findReleaseScopedPrContext(projectName);
+function findPrContext(bundle: ContextLookupBundle): { number: number; repo: string } | null {
+  const { projectName, projectJobs, activeRelease } = bundle;
+  const activeReleasePr = findReleaseScopedPrContext(projectName, activeRelease, projectJobs);
   if (activeReleasePr) return { number: activeReleasePr.number, repo: activeReleasePr.repo };
-  if (findActiveReleaseJob(projectName)) return null;
-  const pr = findLatestPrContext(projectName);
+  if (activeRelease) return null;
+  const pr = findLatestPrContext(projectName, projectJobs);
   if (!pr) return null;
   return { number: pr.number, repo: pr.repo };
 }
@@ -141,9 +149,24 @@ export function resolveMarkDodContext(
       return { ctx: { number: override.prNumber, repo: override.repo }, isPr: true };
     }
   }
-  const issueCtx = findIssueContext(projectName);
+  // Cost note: each lookup function (find*IssueContext / find*PrContext)
+  // defaults to `listJobs()` and rebuilds its own byId map. Without this
+  // hoist, mark-dod paid 4× O(N) scans of the global job cache on every
+  // invocation. Fetching once and pre-filtering to per-project rows turns
+  // the remaining work O(M) where M is per-project job count (typically
+  // 100-1000× smaller than N).
+  const allJobs = listJobs();
+  const projectJobs = allJobs.filter((j) => j.project === projectName);
+  // Mirror `findActiveReleaseJob` semantics: most-recent unfinished release.
+  // Multiple shouldn't coexist, but if they do, picking the newest matches
+  // every other caller in the codebase.
+  const activeRelease = projectJobs
+    .filter((j) => j.kind === 'release' && j.finishedAt === null)
+    .sort((a, b) => (b.startedAt || 0) - (a.startedAt || 0))[0] ?? null;
+  const bundle: ContextLookupBundle = { projectName, projectJobs, activeRelease };
+  const issueCtx = findIssueContext(bundle);
   if (issueCtx) return { ctx: issueCtx, isPr: false };
-  const prCtx = findPrContext(projectName);
+  const prCtx = findPrContext(bundle);
   if (prCtx) return { ctx: prCtx, isPr: true };
   return null;
 }

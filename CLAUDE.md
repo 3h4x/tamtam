@@ -15,7 +15,7 @@ See `docs/PIPELINE.md` for the full state machine.
 - **Per-project dev servers** — optional `dev_server_start_command`, `dev_server_stop_command`, and `dev_server_ready_url` fields let TamTam start and stop a project's local app around agent runs. See `lib/dev-server/lifecycle.ts`.
 - **Runs** — individual executions; legacy `/jobs` redirects to `/runs`.
 - **Custom Actions** — per-project bash commands with configurable button color.
-- **Retrieval** — optional pgvector-backed context from committed docs, DB skills, and completed agent reports. Toggled via `retrieval_enabled`.
+- **Retrieval** — optional pgvector-backed context from committed project docs, DB skills, synthesized project config guidance, and completed agent reports. Toggled via `retrieval_enabled`.
 
 ## Tech Stack
 
@@ -102,7 +102,7 @@ Canonical post-edit command: **`pnpm run rebuild`** (build + idempotent PM2 rest
 - **Auto-attach docs** (`lib/skills/auto-attach-docs.ts`): keyword → project doc, injected on first invocation per session. Wired into terminal run, pipeline review, and agent intake — see `docs/TAMTAM-DIR.md`.
 - **Permission mode** for headless jobs defaults to `auto` — the bundled Claude, Gemini, and Codex shims translate `auto` to provider-native non-interactive flags so writes don't hang. `acceptEdits` and `bypassPermissions` remain available; `plan` is read-only.
 - **QA targets** are DB-backed: `website` is production; `qa_url` is the explicit QA override. Always prefer `qa_url` when both exist. If neither exists, QA flows should stop, not invent a target.
-- **Outbound webhooks** (`lib/shared/notifications.ts`): Slack / Discord / ntfy / generic JSON POST; HMAC-SHA256 signed when `notification_webhook_secret` is set. Events: `release_success`, `release_fail`, `release_aborted`, `fix_loop_exhausted`, `review_do_not_ship`, `agent_run_fail`, `budget_blocked`.
+- **Outbound webhooks** (`lib/shared/notifications.ts`): Slack / Discord / ntfy / generic JSON POST; HMAC-SHA256 signed when `notification_webhook_secret` is set. Events: `release_success`, `release_fail`, `release_aborted`, `fix_loop_exhausted`, `review_do_not_ship`, `agent_run_fail`, `budget_blocked`, `post_merge_revert`.
 - **Retention** (`lib/jobs/retention.ts`): per-run log prune (`log_retention_count` / `log_retention_days`, defaults 200/30); nightly cleanup deletes finished `jobs` rows older than `job_row_retention_days` (default 180).
 - **Singletons on `globalThis`** are intentional in a few places (`__tamtamCronWorker`, `__tamtamJobCancellation`, `__tamtamStartingAgents`, `__tamtamSpawnedClosePending`). Only add another when cross-route coordination truly requires it; pin to `globalThis` because Next.js duplicates modules; document in the relevant `docs/*.md`.
 
