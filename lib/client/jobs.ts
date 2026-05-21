@@ -41,7 +41,7 @@ export async function fetchNotifications(): Promise<{ count: number; jobs: JobIn
 }
 
 export async function markJobSeen(jobId: string): Promise<{ status: string }> {
-  const response = await fetch(`${JOBS_BASE}/${jobId}/seen`, {
+  const response = await fetch(`${JOBS_BASE}/${encodeURIComponent(jobId)}/seen`, {
     method: 'POST',
   })
   if (!response.ok) {
@@ -63,7 +63,7 @@ export async function markNotificationsSeen(): Promise<{ status: string }> {
 export async function continueJob(
   jobId: string,
 ): Promise<{ status: string; job_id: string; resumed_session_id: string; resumed_from: string }> {
-  const response = await fetch(`${JOBS_BASE}/${jobId}/continue`, {
+  const response = await fetch(`${JOBS_BASE}/${encodeURIComponent(jobId)}/continue`, {
     method: 'POST',
   })
   if (!response.ok) {
@@ -74,7 +74,7 @@ export async function continueJob(
 }
 
 export async function syncJobBoard(jobId: string): Promise<{ status: string }> {
-  const response = await fetch(`${JOBS_BASE}/${jobId}/board-sync`, {
+  const response = await fetch(`${JOBS_BASE}/${encodeURIComponent(jobId)}/board-sync`, {
     method: 'POST',
   })
   if (!response.ok) {

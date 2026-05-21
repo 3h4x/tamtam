@@ -32,11 +32,15 @@ export async function findAgentNameConflict(
   const projectPath = options.projectPath ?? resolveProjectPath(project);
   if (!projectPath) return null;
 
+  // Normalize the exclude name once instead of per-iteration; compute each
+  // agent's canonical key once per iteration instead of twice.
+  const excludeFileKey = options.excludeFileAgentName
+    ? canonicalAgentNameKey(options.excludeFileAgentName)
+    : null;
   for (const agent of scanFileAgents(projectPath, project)) {
-    if (options.excludeFileAgentName && canonicalAgentNameKey(agent.name) === canonicalAgentNameKey(options.excludeFileAgentName)) {
-      continue;
-    }
-    if (canonicalAgentNameKey(agent.name) === targetKey) {
+    const key = canonicalAgentNameKey(agent.name);
+    if (excludeFileKey !== null && key === excludeFileKey) continue;
+    if (key === targetKey) {
       return { kind: 'file', name: agent.name, agentId: agent.id };
     }
   }

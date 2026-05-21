@@ -99,6 +99,10 @@ export async function PATCH(request: NextRequest) {
     const agent = agentRows[0] ?? null;
 
     if (agent) {
+      // Parse once — both the file-sync write and the schedule decision need it.
+      let skillIds: string[] = [];
+      try { skillIds = JSON.parse(agent.skillIds || '[]'); } catch { /* keep empty */ }
+
       // Sync to .tamtam/agents/<name>.md for version control
       const projPath = resolveProjectPath(agent.project);
       if (projPath) {
@@ -106,7 +110,6 @@ export async function PATCH(request: NextRequest) {
           if (existing.name !== agent.name) {
             deleteFileAgent(projPath, existing.name);
           }
-          const skillIds: string[] = JSON.parse(agent.skillIds || '[]');
           writeFileAgent(projPath, agent.project, agent.name, {
             prompt: agent.prompt,
             model: agent.model,
@@ -119,7 +122,7 @@ export async function PATCH(request: NextRequest) {
         } catch { /* non-fatal */ }
       }
       try {
-        const hasSkills = JSON.parse(agent.skillIds || '[]').length > 0;
+        const hasSkills = skillIds.length > 0;
         if (agent.schedule && agent.enabled && (agent.prompt || hasSkills)) {
           await installAgentSchedule(agent.id, agent.schedule, agent.prompt, agent.project, agent.name);
         } else {

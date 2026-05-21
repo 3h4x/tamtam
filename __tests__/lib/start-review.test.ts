@@ -720,15 +720,15 @@ describe('startProjectReview — default skill path', () => {
       .mockResolvedValueOnce({ exitCode: 0, stdout: ' M lib/foo.ts', stderr: '' })
       .mockResolvedValueOnce({ exitCode: 0, stdout: '1 file changed', stderr: '' })
       .mockResolvedValueOnce({ exitCode: 0, stdout: 'diff --git a/lib/foo.ts\n+change\n', stderr: '' });
-    mocks.existsSync.mockImplementation((path: string) =>
-      path.endsWith('/skills/docs/skills/engineering/code-reviewer.md')
-    );
     mocks.readFileSync.mockReturnValue('Vendored reviewer skill body.');
 
     const result = await startProjectReview('proj');
 
     expect(result.ok).toBe(true);
-    expect(mocks.existsSync).toHaveBeenCalledWith(expect.stringMatching(/skills\/docs\/skills\/engineering\/code-reviewer\.md$/));
+    expect(mocks.readFileSync).toHaveBeenCalledWith(
+      expect.stringMatching(/skills\/docs\/skills\/engineering\/code-reviewer\.md$/),
+      'utf-8',
+    );
     const prompt: string = mocks.startJob.mock.calls[0][2];
     expect(prompt).toContain('Vendored reviewer skill body.');
   });

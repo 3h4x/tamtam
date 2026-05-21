@@ -210,7 +210,7 @@ describe('GET /api/projects/by-project/[projectName]/changes/diff', () => {
       );
     });
 
-    it('rejects untracked paths that resolve outside via an in-project symlink directory', async () => {
+    it('rejects paths that resolve outside via an in-project symlink directory before any git call', async () => {
       const root = mkdtempSync(join(tmpdir(), 'changes-diff-symlink-'));
       const projectDir = join(root, 'project');
       const outsideDir = join(root, 'outside');
@@ -219,7 +219,6 @@ describe('GET /api/projects/by-project/[projectName]/changes/diff', () => {
       writeFileSync(join(outsideDir, 'secret.txt'), 'secret');
       symlinkSync(outsideDir, join(projectDir, 'linkdir'), 'dir');
       resolveProjectPathMock.mockReturnValue(projectDir);
-      execMock.mockResolvedValueOnce(makeExecResult({ exitCode: 1 }));
 
       try {
         const req = makeReq('myproj', 'linkdir/secret.txt');
@@ -227,13 +226,9 @@ describe('GET /api/projects/by-project/[projectName]/changes/diff', () => {
         expect(res.status).toBe(400);
         const data = await res.json();
         expect(data.detail).toMatch(/outside project/i);
-        expect(execMock).toHaveBeenCalledTimes(1);
-        expect(execMock).toHaveBeenNthCalledWith(
-          1,
-          'git',
-          ['-C', projectDir, 'ls-files', '--error-unmatch', '--', 'linkdir/secret.txt'],
-          { timeout: 5000 }
-        );
+        // Symlink-out paths must be rejected before ls-files runs so a
+        // tracked-symlink-to-outside cannot disclose target content via diff.
+        expect(execMock).toHaveBeenCalledTimes(0);
       } finally {
         rmSync(root, { recursive: true, force: true });
       }

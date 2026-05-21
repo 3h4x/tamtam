@@ -66,12 +66,12 @@ async function syncFileAgentSchedule(agent: FileAgent): Promise<void> {
   }
 }
 
-async function syncDbAgentSchedule(agentId: string, agent: AgentRow): Promise<void> {
+async function syncDbAgentSchedule(agent: AgentRow): Promise<void> {
   const skillIds: string[] = JSON.parse(agent.skillIds || '[]')
   if (agent.schedule && agent.enabled && (agent.prompt || skillIds.length > 0)) {
-    await installAgentSchedule(agentId, agent.schedule, agent.prompt, agent.project, agent.name)
+    await installAgentSchedule(agent.id, agent.schedule, agent.prompt, agent.project, agent.name)
   } else {
-    await uninstallAgentSchedule(agentId, agent.project, agent.name)
+    await uninstallAgentSchedule(agent.id, agent.project, agent.name)
   }
 }
 
@@ -148,7 +148,7 @@ async function updateDbAgentSchedule(expectedProject: string, agentId: string, s
         // Keep parity with the PATCH route: file sync is best-effort.
       }
     }
-    await syncDbAgentSchedule(agentId, reverted)
+    await syncDbAgentSchedule(reverted)
   }
   const nextUpdatedAt = Date.now() / 1000
   await db.update(schema.agents)
@@ -178,7 +178,7 @@ async function updateDbAgentSchedule(expectedProject: string, agentId: string, s
     }
   }
   try {
-    await syncDbAgentSchedule(agentId, updated)
+    await syncDbAgentSchedule(updated)
   } catch (e: unknown) {
     await rollbackFailedApply(rollback, e)
   }

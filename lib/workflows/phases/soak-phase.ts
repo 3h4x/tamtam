@@ -56,19 +56,19 @@ interface SoakPrepInput {
   prUrl: string;
 }
 
-interface SoakPrepResult {
-  ok: boolean;
-  skipped?: true;
-  reason?: 'disabled' | 'no_merge_sha' | 'launch_failed';
-  error?: string;
-  jobId?: string;
-  projPath?: string;
-  meta?: SoakContextMeta;
-  /** Wall-clock start of the soak loop. Used only to time the 90s grace for
-   *  the "no CI runs ever appeared" case. There is no upper time bound on
-   *  pending — soak polls until CI terminates one way or the other. */
-  startedAt?: number;
-}
+type SoakPrepResult =
+  | {
+      ok: true;
+      jobId: string;
+      projPath: string;
+      meta: SoakContextMeta;
+      /** Wall-clock start of the soak loop. Used only to time the 90s grace for
+       *  the "no CI runs ever appeared" case. There is no upper time bound on
+       *  pending — soak polls until CI terminates one way or the other. */
+      startedAt: number;
+    }
+  | { ok: false; skipped: true; reason: 'disabled' | 'no_merge_sha' }
+  | { ok: false; skipped?: false; reason: 'launch_failed'; error: string };
 
 export async function releaseSoakPhaseWorkflow(
   projectName: string,
@@ -85,16 +85,12 @@ export async function releaseSoakPhaseWorkflow(
       if (releaseJobId) {
         await finalizeReleaseDirectlyStep(releaseJobId, 0);
       }
-      const reason = prepared.reason === 'no_merge_sha' ? 'no_merge_sha' : 'disabled';
-      return { ok: true, skipped: true, reason };
+      return { ok: true, skipped: true, reason: prepared.reason };
     }
-    return { ok: false, reason: 'launch_failed', error: prepared.error ?? 'unknown' };
+    return { ok: false, reason: 'launch_failed', error: prepared.error };
   }
 
   const { jobId, meta, projPath, startedAt } = prepared;
-  if (!jobId || !meta || !projPath || !startedAt) {
-    return { ok: false, reason: 'launch_failed', error: 'missing prep fields' };
-  }
 
   // Verdict-driven loop. No upper time cap — soak polls until CI terminates.
   //   - pass         → release unlocks normally

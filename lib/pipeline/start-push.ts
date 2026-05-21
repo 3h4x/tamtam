@@ -184,7 +184,7 @@ export async function startProjectPush(
   // Track every push attempt as a job so it appears in /runs with a log file
   // the user can inspect — same pattern as tests/review.
   const { logDir } = getImproveConfig();
-  mkdirSync(logDir, { recursive: true });
+  mkdirSync(/*turbopackIgnore: true*/ logDir, { recursive: true });
   // Stamp issue context on the push job so downstream hooks can pick it up
   // without re-scanning run jobs (avoids context loss on intervening runs).
   const earlyIssueCtx =
@@ -198,7 +198,7 @@ export async function startProjectPush(
     options.parentJobId,
   );
   job.provider = gate.provider;
-  const logPath = join(logDir, `${job.id}.log`);
+  const logPath = join(/*turbopackIgnore: true*/ logDir, `${job.id}.log`);
   job.logPath = logPath;
   updateJob(job);
   const signal = registerJobCancellation(job.id);
@@ -280,9 +280,9 @@ export async function launchProjectPush(
   }
 
   const { logDir } = getImproveConfig();
-  mkdirSync(logDir, { recursive: true });
+  mkdirSync(/*turbopackIgnore: true*/ logDir, { recursive: true });
   const job = createJob(projectName, 'push', process.pid, '', undefined, undefined, undefined, undefined, undefined, undefined, parentJobId);
-  const logPath = join(logDir, `${job.id}.log`);
+  const logPath = join(/*turbopackIgnore: true*/ logDir, `${job.id}.log`);
   job.logPath = logPath;
   updateJob(job);
   const signal = registerJobCancellation(job.id);

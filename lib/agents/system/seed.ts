@@ -4,7 +4,7 @@
 // (settings key `system_agent_dismissed:<project>:<name>`) lets users
 // hard-delete a system agent without it getting recreated on next boot.
 
-import { eq } from 'drizzle-orm';
+import { eq, like } from 'drizzle-orm';
 import { db, schema } from '@/lib/db';
 import { listEnabledProjects, refreshProjectsCacheSync } from '@/lib/shared/enabled-projects';
 import { findAgentNameConflict } from '@/lib/agents/agent-conflicts';
@@ -33,13 +33,40 @@ async function isDismissed(project: string, name: string): Promise<boolean> {
   return rows.length > 0 && rows[0].value === 'true';
 }
 
+// Bulk-load every `system_agent_dismissed:*` row in one query. Used by the
+// batch seeder (`seedSystemAgents`) to avoid P×S round-trips when checking
+// per-(project, seed) dismissal state.
+async function loadAllDismissedKeys(): Promise<Set<string>> {
+  try {
+    const rows = await db
+      .select({ key: schema.settings.key, value: schema.settings.value })
+      .from(schema.settings)
+      .where(like(schema.settings.key, 'system_agent_dismissed:%'));
+    const out = new Set<string>();
+    for (const r of rows) {
+      if (r.value === 'true') out.add(r.key);
+    }
+    return out;
+  } catch {
+    return new Set();
+  }
+}
+
 async function seedOneAgentForOneProject(
   project: string,
   seed: SystemAgentSeedConfig,
-  options: { projectPath?: string | null } = {},
+  options: { projectPath?: string | null; dismissedSet?: ReadonlySet<string> } = {},
 ): Promise<'seeded' | 'skipped' | 'dismissed'> {
-  if (await isDismissed(project, seed.name)) return 'dismissed';
-  if (await findAgentNameConflict(project, seed.name, { projectPath: options.projectPath })) return 'skipped';
+  // Parallelize the two independent pre-checks (dismissal lookup + conflict
+  // lookup). When the caller bulk-loaded the dismissal set, the dismissal
+  // check is in-memory and only the conflict lookup awaits.
+  const dismissedPromise = options.dismissedSet
+    ? Promise.resolve(options.dismissedSet.has(dismissalKey(project, seed.name)))
+    : isDismissed(project, seed.name);
+  const conflictPromise = findAgentNameConflict(project, seed.name, { projectPath: options.projectPath });
+  const [dismissed, conflict] = await Promise.all([dismissedPromise, conflictPromise]);
+  if (dismissed) return 'dismissed';
+  if (conflict) return 'skipped';
   const now = Date.now() / 1000;
   try {
     await db.insert(schema.agents).values({
@@ -75,6 +102,9 @@ export async function seedSystemAgents(): Promise<SeedSystemAgentsResult> {
   try { await refreshProjectsCacheSync(); } catch { /* table may be missing in tests */ }
   const projects = listEnabledProjects({ includeArchived: false });
   const seeds = listSystemAgentSeedConfigs();
+  // Single bulk query for every `system_agent_dismissed:*` row instead of
+  // P×S point lookups during the nested seed loop.
+  const dismissedSet = await loadAllDismissedKeys();
   let seeded = 0;
   let skipped = 0;
   let dismissed = 0;
@@ -83,6 +113,7 @@ export async function seedSystemAgents(): Promise<SeedSystemAgentsResult> {
       try {
         const outcome = await seedOneAgentForOneProject(project.name, seed, {
           projectPath: project.path,
+          dismissedSet,
         });
         if (outcome === 'seeded') seeded += 1;
         else if (outcome === 'dismissed') dismissed += 1;

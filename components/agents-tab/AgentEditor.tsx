@@ -1,6 +1,6 @@
 'use client'
 
-import { useState, useEffect, useRef } from 'react'
+import { useState, useEffect, useMemo, useRef } from 'react'
 import { fetchProjectDocs, improveAgentPrompt } from '@/lib/client-api'
 import type { Agent, Skill, Persona, ProjectDoc } from '@/lib/client-api'
 import { Button } from '@/components/ui/Button'
@@ -11,7 +11,10 @@ import { resolveAgentPrerequisiteCommand } from '@/lib/agents/issue-cruncher'
 import { CLI_PROVIDERS, type CliProvider } from '@/lib/usage/cli-providers'
 
 const MODELS = [...MODEL_TIERS]
-const SCHEDULES = ['', '15m', '30m', '1h', '2h', '4h', '8h', '12h', '24h', '3d', '7d', '30d']
+// `Manual` is rendered as a hardcoded <option value="">; SCHEDULES below is
+// the non-empty list — dropped the leading '' sentinel + the .filter(Boolean)
+// that used to mask it at render time.
+const SCHEDULES = ['15m', '30m', '1h', '2h', '4h', '8h', '12h', '24h', '3d', '7d', '30d']
 
 export interface AgentEditorSavePayload {
   name: string
@@ -76,10 +79,15 @@ export function AgentEditor({
   // enabled toggles are user-tunable.
   const isSystemAgent = agent?.kind === 'system'
 
-  const allItems = [
+  // Memoize allItems + the id→item lookup since they only change when
+  // skills/personas reload (rare) — the selected-chip render below was
+  // doing O(K × M) .find() per render for K selected and M total items.
+  const allItems = useMemo(() => [
     ...skills.map(s => ({ id: s.id, name: s.name, description: s.description, source: 'db' as const })),
     ...personas.map(p => ({ id: `persona:${p.path}`, name: `${p.emoji ? p.emoji + ' ' : ''}${p.name}`, description: `${p.category}${p.description ? ' — ' + p.description : ''}`, source: 'file' as const })),
-  ]
+  ], [skills, personas])
+  const itemById = useMemo(() => new Map(allItems.map(i => [i.id, i])), [allItems])
+  const docByPath = useMemo(() => new Map(availableDocs.map(d => [d.path, d])), [availableDocs])
 
   const filteredItems = skillSearch
     ? allItems.filter(item => {
@@ -363,7 +371,7 @@ export function AgentEditor({
         {(selectedSkills.length > 0 || selectedDocPaths.length > 0) && (
           <div className="flex flex-wrap gap-1.5 mb-2">
             {selectedSkills.map(id => {
-              const item = allItems.find(i => i.id === id)
+              const item = itemById.get(id)
               return (
                 <span key={id} className="inline-flex items-center gap-1 pl-2 pr-1 py-0.5 text-xs rounded-full bg-accent/15 text-accent border border-accent/25 font-medium">
                   {item?.name || id}
@@ -374,7 +382,7 @@ export function AgentEditor({
               )
             })}
             {selectedDocPaths.map(path => {
-              const doc = availableDocs.find(d => d.path === path)
+              const doc = docByPath.get(path)
               return (
                 <span key={path} className="inline-flex items-center gap-1 pl-2 pr-1 py-0.5 text-xs rounded-full border border-status-success/30 bg-status-success/10 text-status-success font-medium">
                   {doc?.name || path}
@@ -490,7 +498,7 @@ export function AgentEditor({
             onChange={(e) => setSchedule(e.target.value)}
           >
             <option value="">Manual</option>
-            {SCHEDULES.filter(Boolean).map(s => <option key={s} value={s}>every {s}</option>)}
+            {SCHEDULES.map(s => <option key={s} value={s}>every {s}</option>)}
           </select>
         </div>
         <div className="w-px h-4 bg-border shrink-0" />

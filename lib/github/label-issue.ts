@@ -64,10 +64,12 @@ export async function labelIssue(input: LabelIssueInput): Promise<LabelIssueResu
   const repo = await resolveGhRepo(project, projPath);
   if (!repo) return { ok: false, status: 422, detail: 'could not determine GitHub repo' };
 
-  for (const label of addLabels) {
-    try {
-      await ensureLabelExists(repo, label);
-    } catch (e) {
+  const labelResults = await Promise.allSettled(
+    addLabels.map((label) => ensureLabelExists(repo, label)),
+  );
+  for (const r of labelResults) {
+    if (r.status === 'rejected') {
+      const e = r.reason;
       return { ok: false, status: 422, detail: e instanceof Error ? e.message : String(e) };
     }
   }

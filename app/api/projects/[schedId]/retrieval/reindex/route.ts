@@ -16,12 +16,7 @@ export async function POST(
     chunks: result.chunks,
     indexedSources: result.indexedSources,
     skippedSources: result.skippedSources,
-    diagnostics: {
-      status: result.diagnostics.status,
-      reason: result.diagnostics.reason,
-      missingSourcesBeforeReindex: result.diagnostics.missingSourcesBeforeReindex,
-      staleSourcesBeforeReindex: result.diagnostics.staleSourcesBeforeReindex,
-      sourceCounts: result.diagnostics.sourceCounts,
-    },
+    // Pass diagnostics through as-is — was 5 lines of 1:1 field copying.
+    diagnostics: result.diagnostics,
   });
 }

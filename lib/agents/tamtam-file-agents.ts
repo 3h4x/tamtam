@@ -1,4 +1,4 @@
-import { existsSync, mkdirSync, readdirSync, readFileSync, renameSync, unlinkSync, writeFileSync } from 'fs';
+import { Dirent, existsSync, mkdirSync, readdirSync, readFileSync, renameSync, unlinkSync, writeFileSync } from 'fs';
 import { join } from 'path';
 import { getBranchContext, gitLsTreeSync, gitShowSync } from '@/lib/git/git-branch';
 import { getFileAgentOverrideSync } from '@/lib/agents/file-agent-overrides';
@@ -190,16 +190,21 @@ export function scanFileAgents(projectPath: string, projectName: string): FileAg
   }
 
   // On the default branch: read from the working tree as before.
-  if (!existsSync(dir)) return [];
-
+  // Skip existsSync precheck — readdirSync throws ENOENT, caught below.
   const agents: FileAgent[] = [];
+  let entries: Dirent[];
+  try {
+    entries = readdirSync(/*turbopackIgnore: true*/ dir, { withFileTypes: true });
+  } catch {
+    return [];
+  }
 
-  for (const entry of readdirSync(dir, { withFileTypes: true })) {
+  for (const entry of entries) {
     if (!entry.isFile() || !entry.name.endsWith('.md')) continue;
     const name = entry.name.slice(0, -3);
-    const filePath = join(dir, entry.name);
+    const filePath = join(/*turbopackIgnore: true*/ dir, entry.name);
     try {
-      const content = readFileSync(filePath, 'utf-8');
+      const content = readFileSync(/*turbopackIgnore: true*/ filePath, 'utf-8');
       agents.push(buildFileAgent(filePath, name, projectName, content, now));
     } catch {}
   }
@@ -230,10 +235,9 @@ export function loadFileAgent(
     return buildFileAgent(filePath, canonicalAgentName, projectName, content, now);
   }
 
-  if (!existsSync(filePath)) return null;
-
+  // Skip existsSync precheck — readFileSync throws ENOENT, caught below.
   try {
-    const content = readFileSync(filePath, 'utf-8');
+    const content = readFileSync(/*turbopackIgnore: true*/ filePath, 'utf-8');
     return buildFileAgent(filePath, canonicalAgentName, projectName, content, now);
   } catch {
     return null;
@@ -261,16 +265,14 @@ export function writeFileAgent(
   // Load current values from the working-tree file (if it exists) to preserve unset fields.
   // We intentionally read from disk here even on a feature branch, because the user may have
   // edited the agent locally and we want to preserve their changes.
-  const currentFromDisk = existsSync(filePath)
-    ? (() => {
-        try {
-          const content = readFileSync(filePath, 'utf-8');
-          return buildFileAgent(filePath, canonicalAgentName, projectName, content, Date.now() / 1000);
-        } catch {
-          return null;
-        }
-      })()
-    : null;
+  // Skip existsSync precheck — readFileSync throws ENOENT, caught below.
+  let currentFromDisk: FileAgent | null = null;
+  try {
+    const content = readFileSync(/*turbopackIgnore: true*/ filePath, 'utf-8');
+    currentFromDisk = buildFileAgent(filePath, canonicalAgentName, projectName, content, Date.now() / 1000);
+  } catch {
+    currentFromDisk = null;
+  }
   // On feature branches the effective agent may come from origin/<default>
   // even when the working-tree file does not exist yet. Fall back to that
   // view so provider-only metadata edits don't wipe the committed prompt.
@@ -344,8 +346,12 @@ export function renameFileAgent(
 export function deleteFileAgent(projectPath: string, agentName: string): void {
   const canonicalAgentName = canonicalizeAgentName(agentName);
   const filePath = join(projectPath, '.tamtam', 'agents', `${canonicalAgentName}.md`);
-  if (existsSync(filePath)) {
-    try { unlinkSync(filePath); } catch {}
+  // Skip existsSync precheck — unlinkSync throws ENOENT if the file is gone,
+  // which is already the desired end state.
+  try {
+    unlinkSync(/*turbopackIgnore: true*/ filePath);
+  } catch {
+    // best-effort: ENOENT is the no-op success path.
   }
 }
 

@@ -145,23 +145,26 @@ export async function pruneProjectLogs(project: string, cfg?: RetentionConfig): 
     .sort((a, b) => b.startedAt - a.startedAt);
   summary.rowsScanned = rows.length;
 
-  const toPrune: string[] = [];
+  // Collect eligible rows directly instead of collecting IDs and then
+  // re-finding each row via `rows.find(...)` (O(K*N)). The rows array is
+  // already sorted descending by startedAt so the index-based count check
+  // still applies.
+  type EligibleRow = { id: string; logPath: string | null };
+  const toPrune: EligibleRow[] = [];
   for (let i = 0; i < rows.length; i++) {
     const row = rows[i];
     if (row.logPruned) continue;
     const overCount = countEnabled && i >= log_retention_count;
     const overAge = ageEnabled && row.startedAt < cutoffTs;
-    if (overCount || overAge) toPrune.push(row.id);
+    if (overCount || overAge) toPrune.push({ id: row.id, logPath: row.logPath });
   }
   summary.rowsEligible = toPrune.length;
 
-  for (const id of toPrune) {
-    const row = rows.find(r => r.id === id);
-    if (!row) continue;
-    if (row.logPath && existsSync(row.logPath)) {
+  for (const row of toPrune) {
+    if (row.logPath && existsSync(/*turbopackIgnore: true*/ row.logPath)) {
       try {
-        const size = statSync(row.logPath).size;
-        unlinkSync(row.logPath);
+        const size = statSync(/*turbopackIgnore: true*/ row.logPath).size;
+        unlinkSync(/*turbopackIgnore: true*/ row.logPath);
         summary.logFilesDeleted += 1;
         summary.bytesReclaimed += size;
       } catch (e) {
@@ -172,7 +175,7 @@ export async function pruneProjectLogs(project: string, cfg?: RetentionConfig): 
     try {
       await db.update(schema.jobs)
         .set({ logPruned: true })
-        .where(eq(schema.jobs.id, id))
+        .where(eq(schema.jobs.id, row.id))
         .execute();
       summary.rowsUpdated += 1;
     } catch (e) {

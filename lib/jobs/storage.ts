@@ -206,7 +206,7 @@ export function createJob(
   parentJobId?: string | null,
   provider?: string | null,
 ): JobData {
-  let timestamp = Math.floor(Date.now() * 1000);
+  let timestamp = Date.now() * 1000;
   let jobId = `${project}-${kind}-${timestamp}`;
   while (jobsCache.has(jobId)) {
     timestamp += 1;
@@ -366,7 +366,7 @@ export function jobToDict(job: JobData): Record<string, unknown> {
     prompt: job.prompt,
     pid: job.pid,
     log_path: job.logPath,
-    status: job.abortedAt !== null && job.abortedAt !== undefined ? 'aborted' : job.finishedAt !== null ? 'done' : 'running',
+    status: job.abortedAt != null ? 'aborted' : job.finishedAt !== null ? 'done' : 'running',
     aborted_at: job.abortedAt ?? null,
     exit_code: job.exitCode,
     started_at: job.startedAt,

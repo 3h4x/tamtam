@@ -15,30 +15,13 @@ interface WorkflowRunsFilterPanelProps {
   onClearFilters: () => void;
 }
 
-function statusFilterPresentation(status: StatusFilter): {
+interface FilterPresentation {
   glyph: string | null;
   activeClassName: string;
   glyphClassName: string;
-} {
-  switch (status) {
-    case 'completed':
-      return workflowFilterPresentation(status);
-    case 'failed':
-    case 'cancelled':
-      return workflowFilterPresentation(status);
-    case 'running':
-    case 'pending':
-      return workflowFilterPresentation(status);
-    case 'all':
-      return {
-        glyph: null,
-        activeClassName: 'border-accent bg-accent/10 text-accent',
-        glyphClassName: 'text-text-tertiary',
-      };
-  }
 }
 
-function workflowFilterPresentation(status: Exclude<StatusFilter, 'all'>) {
+function workflowFilterPresentation(status: Exclude<StatusFilter, 'all'>): FilterPresentation {
   const presentation = workflowStatusPresentation(status);
   const glyphClassName = presentation.className.includes('text-status-success')
     ? 'text-status-success'
@@ -52,6 +35,26 @@ function workflowFilterPresentation(status: Exclude<StatusFilter, 'all'>) {
     activeClassName: presentation.className,
     glyphClassName,
   };
+}
+
+// Pre-compute all 6 presentations at module load. The prior `switch (status)`
+// had four redundant cases all returning the same `workflowFilterPresentation`
+// call; now the lookup is O(1) and the substring-class scans run once each.
+const STATUS_FILTER_PRESENTATIONS: Record<StatusFilter, FilterPresentation> = {
+  all: {
+    glyph: null,
+    activeClassName: 'border-accent bg-accent/10 text-accent',
+    glyphClassName: 'text-text-tertiary',
+  },
+  completed: workflowFilterPresentation('completed'),
+  running: workflowFilterPresentation('running'),
+  pending: workflowFilterPresentation('pending'),
+  failed: workflowFilterPresentation('failed'),
+  cancelled: workflowFilterPresentation('cancelled'),
+};
+
+function statusFilterPresentation(status: StatusFilter): FilterPresentation {
+  return STATUS_FILTER_PRESENTATIONS[status];
 }
 
 export function WorkflowRunsFilterPanel({

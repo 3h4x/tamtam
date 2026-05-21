@@ -12,14 +12,12 @@ import { fireTimesStr } from '@/lib/scheduling/fire-times';
 import { ghStatusLookup, type GhStatusEntry } from './gh-status';
 import { listJobs } from '@/lib/jobs/storage';
 import { gitChanges, isReviewed } from '@/lib/git/git-utils';
+import { exec } from '@/lib/shared/shell';
+import { formatTimeAgo } from '@/lib/shared/format';
+import type { Task } from '@/lib/shared/types';
 
-// Lightweight "most-recent run" projection used by the projects-list UI to
-// render "last run X minutes ago — exit N" columns. Previously sourced from
-// `~/.cache/tamtam/schedule-runs.jsonl` via lib/jobs/run-history.ts; that
-// file is no longer written by any producer (writers were unwired when the
-// `jobs` table absorbed run state), so we now derive it from the in-memory
-// jobs cache. Same shape so the downstream consumers (assembleProject)
-// don't change.
+// "Most-recent run" projection used by the projects-list UI to render
+// "last run X minutes ago — exit N" columns.
 interface RunEntry {
   project: string;
   started: string;
@@ -47,9 +45,6 @@ function lastRunLookup(): Record<string, RunEntry> {
   }
   return byProject;
 }
-import { exec } from '@/lib/shared/shell';
-import { formatTimeAgo } from '@/lib/shared/format';
-import type { Task } from '@/lib/shared/types';
 
 /**
  * Get enabled projects from the DB projects table.
@@ -73,9 +68,10 @@ function getEnabledProjects(): Record<string, ProjectConfig> {
 }
 
 export function resolveProjectPath(projectName: string): string | null {
-  const projects = getEnabledProjects();
-  for (const cfg of Object.values(projects)) {
-    if (cfg.project === projectName) return cfg.path;
+  // 100+ call sites — skip the intermediate `getEnabledProjects()` Record
+  // allocation and walk `listEnabledProjects()` directly with early exit.
+  for (const p of listEnabledProjects()) {
+    if (p.name === projectName) return p.path;
   }
   return null;
 }

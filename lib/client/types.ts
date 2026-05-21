@@ -191,9 +191,9 @@ export interface JobInfo {
   modified_files?: string | null
   provider?: string | null
   prompt_bytes?: number | null
-  // For running release rows surfaced by /api/jobs/notifications: the kind
-  // of the originating agent (e.g. "agent:improve"). Lets the bell render
-  // the workflow as one unit instead of "release" wrapping the agent's work.
+  // On running release rows, the originating agent's kind (e.g.
+  // "agent:improve"). Lets a UI client render the workflow as one unit
+  // rather than "release" wrapping the agent's work.
   parent_kind?: string | null
 }
 

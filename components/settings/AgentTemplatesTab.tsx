@@ -14,9 +14,20 @@ export interface AgentTemplateRecord {
 }
 
 const TEMPLATE_MODELS = [...MODEL_TIERS]
-const TEMPLATE_SCHEDULES = ['', '15m', '30m', '1h', '2h', '4h', '8h', '12h', '24h', '3d', '7d', '30d']
+const TEMPLATE_SCHEDULES = ['15m', '30m', '1h', '2h', '4h', '8h', '12h', '24h', '3d', '7d', '30d']
 
 const EMPTY_TEMPLATE: AgentTemplateRecord = { name: '', description: '', model: 'normal', schedule: '24h', prompt: '' }
+
+function parseTemplates(v: string): AgentTemplateRecord[] {
+  try {
+    const parsed = JSON.parse(v)
+    return Array.isArray(parsed)
+      ? parsed.map((template) => ({ ...template, model: normalizeModelInput(template?.model, 'normal') }))
+      : []
+  } catch {
+    return []
+  }
+}
 
 function TemplateForm({
   form, setField, onSave, onCancel, isEdit,
@@ -68,7 +79,7 @@ function TemplateForm({
             className="w-full px-3 py-2 text-sm bg-bg-primary border border-border rounded-lg text-text-primary focus:outline-none focus:ring-2 focus:ring-accent/40 focus:border-accent cursor-pointer"
           >
             <option value="">Manual</option>
-            {TEMPLATE_SCHEDULES.filter(Boolean).map(s => <option key={s} value={s}>every {s}</option>)}
+            {TEMPLATE_SCHEDULES.map(s => <option key={s} value={s}>every {s}</option>)}
           </select>
         </div>
       </div>
@@ -102,17 +113,7 @@ function TemplateForm({
 }
 
 export function AgentTemplatesTab({ value, onChange }: { value: string; onChange: (v: string) => void }) {
-  const parse = (v: string): AgentTemplateRecord[] => {
-    try {
-      const parsed = JSON.parse(v)
-      return Array.isArray(parsed)
-        ? parsed.map((template) => ({ ...template, model: normalizeModelInput(template?.model, 'normal') }))
-        : []
-    } catch {
-      return []
-    }
-  }
-  const [templates, setTemplates] = useState<AgentTemplateRecord[]>(() => parse(value))
+  const [templates, setTemplates] = useState<AgentTemplateRecord[]>(() => parseTemplates(value))
   const [editing, setEditing] = useState<number | 'new' | null>(null)
   const [form, setForm] = useState<AgentTemplateRecord>(EMPTY_TEMPLATE)
 

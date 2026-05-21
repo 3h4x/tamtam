@@ -42,7 +42,7 @@ export async function createAgent(agent: { name: string; project: string; skillI
 }
 
 export async function updateAgent(agentId: string, updates: Partial<{ name: string; skillIds: string[]; docPaths: string[]; model: string; prompt: string; schedule: string | null; enabled: boolean; provider: string | null; prerequisiteCommand: string | null }>): Promise<{ agent: Agent }> {
-  const response = await fetch(`/api/agents/${agentId}`, {
+  const response = await fetch(`/api/agents/${encodeURIComponent(agentId)}`, {
     method: 'PATCH',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify(updates),
@@ -55,7 +55,7 @@ export async function updateAgent(agentId: string, updates: Partial<{ name: stri
 }
 
 export async function deleteAgent(agentId: string): Promise<void> {
-  const response = await fetch(`/api/agents/${agentId}`, { method: 'DELETE' })
+  const response = await fetch(`/api/agents/${encodeURIComponent(agentId)}`, { method: 'DELETE' })
   if (!response.ok) throw new Error('Failed to delete agent')
 }
 
@@ -80,7 +80,7 @@ export async function improveAgentPrompt(input: ImprovePromptInput): Promise<{ i
 }
 
 export async function runAgent(agentId: string, prompt: string, opts?: { readOnly?: boolean }): Promise<RunAgentResult> {
-  const response = await fetch(`/api/agents/${agentId}/run`, {
+  const response = await fetch(`/api/agents/${encodeURIComponent(agentId)}/run`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({ prompt, readOnly: opts?.readOnly === true }),

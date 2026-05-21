@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { spawn } from 'child_process';
-import { existsSync, readFileSync } from 'fs';
+import { readFileSync } from 'fs';
 import { join } from 'path';
 import { resolveProjectPath } from '@/lib/shared/project-data';
 import { resolveCliBin, resolveCliEnv } from '@/lib/shared/cli-bin';
@@ -17,7 +17,8 @@ const MAX_DRAFT_BYTES = 32 * 1024;
 
 function readClaudeMd(projPath: string): string | null {
   const p = join(projPath, 'CLAUDE.md');
-  if (!existsSync(/*turbopackIgnore: true*/ p)) return null;
+  // No existsSync precheck — readFileSync throws ENOENT and the catch handles
+  // it identically. One fewer syscall, no TOCTOU between check and read.
   try {
     return readFileSync(/*turbopackIgnore: true*/ p, 'utf-8');
   } catch {

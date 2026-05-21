@@ -1,4 +1,3 @@
-import { createHash } from 'crypto';
 import { ISSUE_FORMAT_INSTRUCTION } from '@/lib/agents/issue-template';
 import {
   ISSUE_CRUNCHER_SKILL_ID,
@@ -422,71 +421,6 @@ Do NOT hand off to other agents, do NOT run \`gh issue create\`, do NOT touch \`
   },
 ];
 
-// SHA-256 (first 16 hex chars) of every previously-shipped default content per
-// skill id. When an existing seeded skill's content hashes to one of these, it
-// is the unmodified default and we can safely overwrite with the current
-// version — this lets us actually shrink prompts on running installs (issue
-// #64), while still preserving any user customisation.
-const KNOWN_DEFAULT_CONTENT_HASHES: Record<string, string[]> = {
-  // 'a13c143efc007ea5' = pre-issue-#64 verbose default,
-  // '1c4a08f78ed7b75c' = older CTO seed still in the wild,
-  // 'b9a1e7cd36ae83dd' = pre-template-shortening default before issue-template rollout.
-  // '021c80061a43c613' = pre-project-evidence / human-needed default.
-  'agent-cto': ['a13c143efc007ea5', '1c4a08f78ed7b75c', 'b9a1e7cd36ae83dd', '021c80061a43c613'],
-  'agent-security-review': ['ca362666deba8013', 'a9813f37584e7812'],
-  // '299c6853f741a1de' = pre-git-free-guard default (no "Don't run git commands" line).
-  'agent-dependency-check': ['7a470f6f6b45a900', '299c6853f741a1de'],
-  'agent-blog': ['b020ce4f0b6c4d7a', '28c8aeb8eccdfd92'],
-  // '169e64a32796f5f6' = pre-git-free-guard default.
-  'agent-ci-monitor': ['4ca89e530c8eaf95', '169e64a32796f5f6'],
-  // '5d8ac42a81259715' = pre-aggressive-close default. "When not ready" only
-  // added needs-info; current revision close-as-not-planned by default.
-  // 'd084ca2e5f2d003d' = short-lived pick_top default whose stop condition
-  // matched successful `"reason": null` payloads.
-  // '73b2a77f5614976c' = first pick_top default (kept gh issue comment/close/edit as a Hard-rules
-  //                       carve-out; superseded once Claude --disallowed-tools blocked those too
-  //                       and TamTam grew issue-comment / issue-close / issue-label endpoints).
-  // '9c35cea979f26921' = TamTam-endpoints-for-writes default; superseded by auto-checkout-on-pick
-  //                       (branch is now checked out server-side, agent skill no longer mentions /issue-branch).
-  'agent-issue-cruncher': ['362c85f7fe916df8', '2753dcc26f2f434c', '554fcf2c7671a896', '5d8ac42a81259715', 'd084ca2e5f2d003d', '73b2a77f5614976c', '9c35cea979f26921'],
-  'agent-release-ready': ['4677689a0e0667df', 'a0ea7848cdb1310d'],
-  // '4048125c52cd7b0f' = pre-git-free-guard default.
-  'agent-gha-audit': ['f8250345bd7da948', '4048125c52cd7b0f'],
-  'agent-readme-sync': ['28e3cb210b152a02', '4494288241d143e8'],
-  // 'bf05d4ff324af45e' = pre "fix it before stopping" copy edit (was "before committing").
-  'agent-tests': ['fb8477be3f13e216', '739215b8306af83a', 'bf05d4ff324af45e'],
-  // '7eb1ec3e78282721' = pre-house-rules default (only banned git).
-  // '79f03c8ba0bd2843' = first house-rules default that absolute-banned all git verbs.
-  'agent-self-improve': ['a5a48f854a97f7b3', 'b4f077bfe18ed1bb', '441fabde58b560b7', '7eb1ec3e78282721', '79f03c8ba0bd2843'],
-  // 'e9e9afe83993889e' = pre-house-rules default (only banned git).
-  // 'a1ff09c0f944a54e' = first house-rules default that absolute-banned all git verbs.
-  'agent-manage-agents': ['6afb7cebf46efee8', '9e7d0fc34508977f', '2f49c23946d7bd2f', 'e9e9afe83993889e', 'a1ff09c0f944a54e'],
-  // 'c2a96b81a863ae7f' = pre-2026-05 default, '53267ca2a0043218' = older still,
-  // 'f1c4d1702a613fdc' = the short-lived "stay on current branch" wording.
-  // All three should refresh to the new git-free version on next boot.
-  'agent-docs-claude': ['53267ca2a0043218', 'c2a96b81a863ae7f', 'f1c4d1702a613fdc'],
-  // 'e7496058060e8bd4' = pre-git-free-guard default.
-  'agent-review-tuner': ['f156455212bb6bfc', 'e7496058060e8bd4'],
-  // '5274a9f8d37e5b19' = first shipped QA draft with unprefixed browser_* tool names.
-  // 'da3105d7820a7360' = pre-qa-url default (website-only resolution).
-  // '3c9e9a5582267ae0' = qa-url-aware default, before "fix 1–2 yourself" rewrite.
-  // '439b9841a389174a' = "fix 1–2 yourself + hand rest to cto" default; cto handoff removed in next rev.
-  //                      Same hash also covered the post-cto-removal "fix 1–2 yourself" default.
-  // '71c3483057adf226' = "walk 3–6 primary routes, ~10 nav cap" default; replaced by deeper-crawl version.
-  // 'f1367d01130a3a68' = short-lived deeper-crawl default with broad artifact cleanup commands.
-  // '7214d5097b7b6f04' = short-lived interactive-flow default that told agents to read working-tree .tamtam/agents files.
-  'agent-qa': ['5274a9f8d37e5b19', 'da3105d7820a7360', '3c9e9a5582267ae0', '439b9841a389174a', '71c3483057adf226', 'f1367d01130a3a68', '7214d5097b7b6f04'],
-  // 'd2b9ebcdd7b0de6c' = pre-git-free-guard default.
-  'agent-senior-fullstack': ['ab7344ee6a0a7a21', 'd2b9ebcdd7b0de6c'],
-};
-
-function isUnmodifiedDefault(id: string, existingContent: string): boolean {
-  const known = KNOWN_DEFAULT_CONTENT_HASHES[id];
-  if (!known) return false;
-  const h = createHash('sha256').update(existingContent).digest('hex').slice(0, 16);
-  return known.includes(h);
-}
-
 // Matches the auto-generated issue-cruncher prerequisite URL from prior versions
 // (currently: `…/issues?trusted_only=1`). Used to migrate stored prereq commands
 // from older builds to the current shape without overwriting user-customised ones.
@@ -562,7 +496,3 @@ const DEFAULT_SKILL_ID_SET: ReadonlySet<string> = new Set(
 export function isDefaultSkillId(id: string): boolean {
   return DEFAULT_SKILL_ID_SET.has(id);
 }
-
-// Kept exported for callers that referenced it historically; currently unused
-// internally now that defaults are always re-applied on boot.
-void isUnmodifiedDefault;

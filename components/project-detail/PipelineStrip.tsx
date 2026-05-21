@@ -203,7 +203,7 @@ export function PipelineStrip({
     try {
       const result = await pushProject(projectName, { releaseId: traceReleaseId })
       if (result.job_id) {
-        router.push(`/project/${projectName}/terminal?job=${encodeURIComponent(result.job_id)}`)
+        router.push(`/project/${encodeURIComponent(projectName)}/terminal?job=${encodeURIComponent(result.job_id)}`)
       } else {
         toast('Push started', 'success')
         onRefresh()
@@ -252,7 +252,7 @@ export function PipelineStrip({
 
   const openJob = (j: JobInfo) => {
     const sid = j.session_id
-    return () => router.push(sid ? `/project/${projectName}/terminal/${sid}` : `/project/${projectName}/terminal?job=${encodeURIComponent(j.id)}`)
+    return () => router.push(sid ? `/project/${encodeURIComponent(projectName)}/terminal/${encodeURIComponent(sid)}` : `/project/${encodeURIComponent(projectName)}/terminal?job=${encodeURIComponent(j.id)}`)
   }
 
   const stateOf = (job: JobInfo | undefined): StepState => {

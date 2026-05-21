@@ -288,9 +288,10 @@ export async function PATCH(
     }
   }
 
-  for (const update of dbUpdates) {
-    if (!(await writeProjectFieldYaml(projectName, update.field, update.value))) return notFound();
-  }
+  const writeResults = await Promise.all(
+    dbUpdates.map((u) => writeProjectFieldYaml(projectName, u.field, u.value)),
+  );
+  if (writeResults.some((ok) => !ok)) return notFound();
 
   // If any cron field changed, reconcile the PM2 cron entry.
   if (body.test_cron_schedule !== undefined || body.test_cron_enabled !== undefined) {

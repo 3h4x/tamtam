@@ -1,4 +1,4 @@
-import { existsSync, lstatSync, readFileSync } from 'fs';
+import { lstatSync, readFileSync } from 'fs';
 import { join, resolve } from 'path';
 import { getImproveConfig, getProjectTestConfig, getProjectPipelinePrompts, getProjectQaTarget } from '@/lib/scheduling/scheduling';
 import { resolveCliBin, resolveCliEnv } from '@/lib/shared/cli-bin';
@@ -39,12 +39,15 @@ async function resolveQaTargetBlock(projectName: string): Promise<string> {
 
 async function loadReviewPrompt(projectName: string, projPath: string): Promise<string> {
   let content = '';
-  if (existsSync(CODE_REVIEWER_SKILL)) {
-    content = readFileSync(CODE_REVIEWER_SKILL, 'utf-8');
+  try {
+    content = readFileSync(/*turbopackIgnore: true*/ CODE_REVIEWER_SKILL, 'utf-8');
     if (content.startsWith('---')) {
       const end = content.indexOf('---', 3);
       if (end > 0) content = content.slice(end + 3).trimStart();
     }
+  } catch {
+    // Missing skill file or unreadable — proceed without the skill prelude.
+    content = '';
   }
   const frameworks = detectReviewFrameworks(projPath);
   content = filterReviewFrameworkSections(content, frameworks);
@@ -86,8 +89,10 @@ function trimForPrompt(value: string, maxChars: number): string {
 function readUntrackedFileForPrompt(projPath: string, relPath: string): string | null {
   const rootPath = resolve(projPath);
   const fullPath = resolve(rootPath, relPath);
-  if (!fullPath.startsWith(rootPath + '/') || !existsSync(fullPath)) return null;
+  if (!fullPath.startsWith(rootPath + '/')) return null;
   try {
+    // Skip the existsSync precheck — lstatSync throws ENOENT and the catch
+    // handles it identically. One fewer syscall, no TOCTOU between check and stat.
     const stat = lstatSync(/*turbopackIgnore: true*/ fullPath);
     if (!stat.isFile()) return null;
     const body = readFileSync(/*turbopackIgnore: true*/ fullPath, 'utf-8');
@@ -106,9 +111,14 @@ async function determineReviewScope(projPath: string): Promise<ReviewScope> {
       exec('git', ['-C', projPath, 'diff', '--stat', 'HEAD', '--', '.', ':(exclude).tamtam/**'], { timeout: 5000 }),
       exec('git', ['-C', projPath, 'diff', '--no-ext-diff', 'HEAD', '--', '.', ':(exclude).tamtam/**'], { timeout: 5000 }),
     ]);
-    const untrackedFiles = reviewablePaths.filter((p) =>
-      status.split('\n').some((line) => line.startsWith('??') && statusPath(line) === p)
-    );
+    // Single pass over status (one split, one walk) instead of N splits +
+    // O(N×M) cross-product. Build the set of untracked paths once, then
+    // filter reviewablePaths against it.
+    const untrackedSet = new Set<string>();
+    for (const line of status.split('\n')) {
+      if (line.startsWith('??')) untrackedSet.add(statusPath(line));
+    }
+    const untrackedFiles = reviewablePaths.filter((p) => untrackedSet.has(p));
     const untrackedBlocks = untrackedFiles
       .map((p) => {
         const body = readUntrackedFileForPrompt(projPath, p);

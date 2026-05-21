@@ -128,7 +128,7 @@ Do not commit — just make the code changes.${fixAddendum}
 
   const job = createJob(projectName, 'fix', 0, '', undefined, undefined, undefined, undefined, undefined, undefined, sourceJob.id);
   job.provider = provider;
-  const logPath = join(logDir, `${job.id}.log`);
+  const logPath = join(/*turbopackIgnore: true*/ logDir, `${job.id}.log`);
   job.logPath = logPath;
   if (resumeSessionId) job.sessionId = resumeSessionId;
   job.promptBytes = Buffer.byteLength(prompt, 'utf8');
@@ -152,7 +152,14 @@ Do not commit — just make the code changes.${fixAddendum}
 
   updateJob(job);
 
-  if (!isLockOwnedByActiveRelease(projectName)) {
+  // `isLockOwnedByActiveRelease` is async — without the await this `if`
+  // condition was always falsy (`!Promise === false`), so the lock branch
+  // never ran. Standalone fix jobs (no active release) never claimed the
+  // pipeline lock, opening a worktree race against concurrent agent runs
+  // / sweep dispatches on the same project. Awaiting restores the
+  // intended "only skip lock acquisition when an active release already
+  // owns it" semantic.
+  if (!(await isLockOwnedByActiveRelease(projectName))) {
     try {
       await acquireLock(projectName, job.id);
     } catch (e) {

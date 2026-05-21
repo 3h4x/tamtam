@@ -44,7 +44,7 @@ export async function runAgentActions(input: OrchestratorInput): Promise<Orchest
   let cachedRepo: string | null | undefined;
   const getRepo = async (): Promise<string | null> => {
     if (cachedRepo !== undefined) return cachedRepo;
-    cachedRepo = (await resolveGhRepo(project, projPath)) ?? null;
+    cachedRepo = await resolveGhRepo(project, projPath);
     return cachedRepo;
   };
 

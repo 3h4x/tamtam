@@ -228,9 +228,11 @@ async function composePromptStep(
     }
   }
 
-  const composed = await composeAgentSkills(projPath, skillIds, docPaths);
-
-  const [headR, statusR] = await Promise.all([
+  // All three are independent — `composeAgentSkills` reads skill files from
+  // disk, the two git execs read from the worktree. Running them in one
+  // Promise.all collapses sequential awaits to a single round-trip.
+  const [composed, headR, statusR] = await Promise.all([
+    composeAgentSkills(projPath, skillIds, docPaths),
     exec('git', ['-C', projPath, 'rev-parse', 'HEAD'], { timeout: 5000 }),
     exec('git', ['-C', projPath, 'status', '--porcelain'], { timeout: 5000 }),
   ]);
@@ -261,7 +263,11 @@ async function composePromptStep(
       `--- stderr ---\n${truncatedStderr}`;
   }
 
-  const baseCtx = JSON.parse(baseContextMeta) as Record<string, unknown>;
+  // Malformed baseContextMeta shouldn't kill the whole intake — fall back to
+  // empty context and let the workflow continue. The route is responsible for
+  // passing valid JSON; this is belt-and-suspenders.
+  let baseCtx: Record<string, unknown> = {};
+  try { baseCtx = JSON.parse(baseContextMeta) as Record<string, unknown>; } catch { /* default empty */ }
   const contextMetaObj: Record<string, unknown> = {
     ...baseCtx,
     skills: composed.metaSkills,

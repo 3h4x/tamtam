@@ -13,9 +13,18 @@ import { parseOptionalAgentScheduleInput } from '@/lib/scheduling/agent-schedule
 import { isCliProvider } from '@/lib/usage/cli-providers';
 import { parsePrerequisiteCommandInput, resolveAgentPrerequisiteCommand } from '@/lib/agents/issue-cruncher';
 import { isBuiltInRecommendedAgent } from '@/lib/agents/recommended-agents';
+import { loadAgentCronStates, getAllAgentLastAttempts } from '@/lib/scheduling/agent-cron-state';
 
 const ALL_FILE_AGENTS_TTL_MS = 10_000;
-let _allFileAgentsCache: { agents: FileAgent[]; time: number } | null = null;
+
+// Pin to globalThis: Next.js can duplicate this module across route bundle
+// realms (per CLAUDE.md singleton pattern), so a module-level TTL cache would
+// fragment into multiple per-realm copies and the 10s coalescing wouldn't
+// hold across HTTP routes that all hit this handler.
+declare global {
+  // eslint-disable-next-line no-var
+  var __tamtamAllFileAgentsCache: { agents: FileAgent[]; time: number } | null | undefined;
+}
 
 function withEffectivePrerequisite<T extends { project: string; skillIds: string[]; prerequisiteCommand?: string | null }>(
   agent: T,
@@ -32,8 +41,9 @@ function withEffectivePrerequisite<T extends { project: string; skillIds: string
 
 function getAllFileAgentsCached(): FileAgent[] {
   const now = Date.now();
-  if (_allFileAgentsCache && now - _allFileAgentsCache.time < ALL_FILE_AGENTS_TTL_MS) {
-    return _allFileAgentsCache.agents;
+  const cached = globalThis.__tamtamAllFileAgentsCache;
+  if (cached && now - cached.time < ALL_FILE_AGENTS_TTL_MS) {
+    return cached.agents;
   }
   const out: FileAgent[] = [];
   for (const p of listEnabledProjects()) {
@@ -41,7 +51,7 @@ function getAllFileAgentsCached(): FileAgent[] {
       for (const fa of scanFileAgents(p.path, p.name)) out.push(fa);
     } catch { /* skip */ }
   }
-  _allFileAgentsCache = { agents: out, time: now };
+  globalThis.__tamtamAllFileAgentsCache = { agents: out, time: now };
   return out;
 }
 
@@ -85,7 +95,6 @@ export async function GET(request: NextRequest) {
   // queue + the most recent skip/dispatch reason. The UI uses these to
   // render "Skipped 14m ago (jobs paused) — next fire in 1m" instead of
   // a stale "due now" derived from lastRunAt + interval.
-  const { loadAgentCronStates, getAllAgentLastAttempts } = await import('@/lib/scheduling/agent-cron-state');
   const [cronStates, lastAttempts] = await Promise.all([
     loadAgentCronStates(),
     Promise.resolve(getAllAgentLastAttempts()),

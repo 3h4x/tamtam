@@ -99,23 +99,27 @@ async function readBranchState(path: string): Promise<{ current: string | null; 
   return { current: current || null, def };
 }
 
-function projectHasRunningAgent(projectName: string): boolean {
-  return listJobs().some(
-    (j) =>
-      j.project === projectName
-      && j.finishedAt === null
-      && isAgentJobKind(j.kind),
-  );
+interface ActivityIndex {
+  runningAgentProjects: ReadonlySet<string>;
+  recentlyActiveProjects: ReadonlySet<string>;
 }
 
-function projectRecentlyActive(projectName: string, nowMs: number): boolean {
+// Build the per-sweep activity index in one pass over `listJobs()` instead of
+// rescanning the whole job cache per project. For N enabled projects, this
+// turns 2N full-list scans into one.
+function buildActivityIndex(nowMs: number): ActivityIndex {
   const cutoffSec = (nowMs - QUIET_PERIOD_MS) / 1000;
-  return listJobs().some(
-    (j) =>
-      j.project === projectName
-      && typeof j.startedAt === 'number'
-      && j.startedAt > cutoffSec,
-  );
+  const runningAgentProjects = new Set<string>();
+  const recentlyActiveProjects = new Set<string>();
+  for (const j of listJobs()) {
+    if (j.finishedAt === null && isAgentJobKind(j.kind)) {
+      runningAgentProjects.add(j.project);
+    }
+    if (typeof j.startedAt === 'number' && j.startedAt > cutoffSec) {
+      recentlyActiveProjects.add(j.project);
+    }
+  }
+  return { runningAgentProjects, recentlyActiveProjects };
 }
 
 async function readAheadBehind(path: string): Promise<{ ahead: number; behind: number } | null> {
@@ -141,6 +145,7 @@ async function readAheadBehind(path: string): Promise<{ ahead: number; behind: n
  */
 export async function findStrandedBranches(nowMs: number = Date.now()): Promise<StrandedCandidate[]> {
   const out: StrandedCandidate[] = [];
+  const { runningAgentProjects, recentlyActiveProjects } = buildActivityIndex(nowMs);
   for (const p of listEnabledProjects()) {
     if (isProjectArchived(p.name) || isProjectPaused(p.name)) continue;
     const path = resolveProjectPath(p.name);
@@ -152,8 +157,8 @@ export async function findStrandedBranches(nowMs: number = Date.now()): Promise<
     // an aborted release doesn't keep blocking forever.
     const lock = await getLock(p.name);
     if (lock && (await isLockOwnedByActiveRelease(p.name))) continue;
-    if (projectHasRunningAgent(p.name)) continue;
-    if (projectRecentlyActive(p.name, nowMs)) continue;
+    if (runningAgentProjects.has(p.name)) continue;
+    if (recentlyActiveProjects.has(p.name)) continue;
 
     if (state.current !== state.def) {
       if (!TAMTAM_BRANCH_PATTERN.test(state.current)) continue;

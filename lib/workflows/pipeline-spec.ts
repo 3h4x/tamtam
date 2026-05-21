@@ -57,7 +57,7 @@ export type GuardName = 'do-not-ship-policy' | 'convergence' | 'iteration-cap';
 
 export interface Transition {
   /** Source phase (kind that just finished). */
-  from: PhaseName;
+  from: PhaseName | ExternalPhaseName;
   /** Pattern over DecisionInputs. First matching row wins (order matters). */
   when: WhenClause;
   /** Destination phase or terminal. */
@@ -143,7 +143,7 @@ export const TRANSITIONS: ReadonlyArray<Transition> = [
     to: 'done', label: 'merged' },
   { from: 'pr-wait', when: { external: 'checks_failed' },
     to: 'fix-ci', label: 'checks_failed', external: true },
-  { from: 'fix-ci' as PhaseName, when: { external: 'exit 0' },
+  { from: 'fix-ci', when: { external: 'exit 0' },
     to: 'test', label: 'exit 0', external: true },
 
   // soak terminates the chain. Loop is verdict-driven (polls default-branch CI

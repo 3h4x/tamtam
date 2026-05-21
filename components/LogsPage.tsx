@@ -63,10 +63,11 @@ export function LogsPage() {
     }
   }
 
+  const searchLower = search.toLowerCase()
   const filteredLogs = search
     ? logs.filter(l =>
-        l.filename.toLowerCase().includes(search.toLowerCase()) ||
-        l.content.toLowerCase().includes(search.toLowerCase())
+        l.filename.toLowerCase().includes(searchLower) ||
+        l.content.toLowerCase().includes(searchLower)
       )
     : logs
 

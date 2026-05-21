@@ -104,6 +104,20 @@ const STRUCTURED_SUMMARY_RE = new RegExp(
 
 const INLINE_SECTION_RE = new RegExp(`\\s+(?=(?:${SUMMARY_SECTION_PATTERN}))`, 'g')
 
+// Compile per-label "label \s*" regexes ONCE at module load. Without this,
+// `formatRunSummaryText` allocated len(SUMMARY_SECTION_LABELS) regex
+// objects on every call, plus one more for the leading-bullet strip — and
+// the function is invoked once per visible run row's summary. For a 50-row
+// list × 8 regexes each, that's 400 RegExp allocations per render cycle.
+const LEADING_BULLET_BEFORE_SECTION_RE = new RegExp(
+  `^\\s*[-*]\\s+(?=(?:${SUMMARY_SECTION_PATTERN}))`,
+  'gm',
+)
+const SECTION_BREAK_RES: ReadonlyArray<{ label: string; re: RegExp }> = SUMMARY_SECTION_LABELS.map((label) => ({
+  label,
+  re: new RegExp(`${label.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}\\s*`, 'g'),
+}))
+
 function formatRunSummaryText(value: string | null | undefined): string | null {
   if (!value) return null
 
@@ -117,13 +131,12 @@ function formatRunSummaryText(value: string | null | undefined): string | null {
     .replace(/\*\*([^*]+)\*\*/g, '$1')
     .replace(/`([^`]+)`/g, '$1')
     .replace(/^#{1,6}\s+/gm, '')
-    .replace(new RegExp(`^\\s*[-*]\\s+(?=(?:${SUMMARY_SECTION_PATTERN}))`, 'gm'), '')
+    .replace(LEADING_BULLET_BEFORE_SECTION_RE, '')
 
   text = text.replace(INLINE_SECTION_RE, '\n')
 
-  for (const label of SUMMARY_SECTION_LABELS) {
-    const escaped = label.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
-    text = text.replace(new RegExp(`${escaped}\\s*`, 'g'), `${label}\n`)
+  for (const { label, re } of SECTION_BREAK_RES) {
+    text = text.replace(re, `${label}\n`)
   }
 
   text = text

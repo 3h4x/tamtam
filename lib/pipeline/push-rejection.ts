@@ -56,9 +56,7 @@ export function isTestFailureRejection(detail: string | null | undefined): boole
     /❌\s*test/.test(s) ||
     /\bvitest\b.*\bfail/.test(s) ||
     /\bjest\b.*\bfail/.test(s) ||
-    /test:integration\s+failed/.test(s) ||
-    /test:unit\s+failed/.test(s) ||
-    /test:e2e\s+failed/.test(s) ||
+    /test:(?:integration|unit|e2e)\s+failed/.test(s) ||
     /\bfailed:\s*test:/.test(s) ||
     /failing tests?:/.test(s)
   );

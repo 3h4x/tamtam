@@ -27,7 +27,7 @@ export async function setPriority(
   taskId: string,
   priority: string
 ): Promise<{ status: string }> {
-  const response = await fetch(`${API_BASE}/${taskId}/priority`, {
+  const response = await fetch(`${API_BASE}/${encodeURIComponent(taskId)}/priority`, {
     method: 'PATCH',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({ priority }),
@@ -59,7 +59,7 @@ export function resumeProject(projectName: string): Promise<{ status: string }> 
 }
 
 export async function fetchTaskDetail(taskId: string): Promise<TaskDetail> {
-  const response = await fetch(`${API_BASE}/${taskId}/detail`)
+  const response = await fetch(`${API_BASE}/${encodeURIComponent(taskId)}/detail`)
   if (!response.ok) {
     throw new Error(`Failed to fetch task detail: ${response.statusText}`)
   }
@@ -82,7 +82,7 @@ export async function fetchProjectPipelineStats(
 }
 
 export async function fixCi(projectName: string): Promise<{ status: string; job_id: string; pid: number; log_path: string; ci_url: string }> {
-  const response = await fetch(`${API_BASE}/by-project/${projectName}/fix-ci`, {
+  const response = await fetch(`${API_BASE}/by-project/${encodeURIComponent(projectName)}/fix-ci`, {
     method: 'POST',
   })
   if (!response.ok) {
@@ -93,7 +93,7 @@ export async function fixCi(projectName: string): Promise<{ status: string; job_
 }
 
 export async function reviewProject(projectName: string): Promise<{ status: string; job_id: string; pid: number; log_path: string }> {
-  const response = await fetch(`${API_BASE}/by-project/${projectName}/review`, {
+  const response = await fetch(`${API_BASE}/by-project/${encodeURIComponent(projectName)}/review`, {
     method: 'POST',
   })
   if (!response.ok) {
@@ -137,7 +137,7 @@ export async function releaseProject(
 }
 
 export async function testProject(projectName: string): Promise<{ status: string; job_id: string; pid: number; log_path: string }> {
-  const response = await fetch(`${API_BASE}/by-project/${projectName}/test`, {
+  const response = await fetch(`${API_BASE}/by-project/${encodeURIComponent(projectName)}/test`, {
     method: 'POST',
   })
   if (!response.ok) {
@@ -148,7 +148,7 @@ export async function testProject(projectName: string): Promise<{ status: string
 }
 
 export async function fetchIssuesAndPRs(projectName: string, forceRefresh = false): Promise<IssuesResponse> {
-  const url = `${API_BASE}/by-project/${projectName}/issues?full=1${forceRefresh ? '&refresh=1' : ''}`
+  const url = `${API_BASE}/by-project/${encodeURIComponent(projectName)}/issues?full=1${forceRefresh ? '&refresh=1' : ''}`
   const response = await fetch(url)
   if (!response.ok) {
     throw new Error(`Failed to fetch issues: ${response.statusText}`)
@@ -167,7 +167,7 @@ export interface IssuesSummaryResponse {
 }
 
 export async function fetchIssuesSummary(projectName: string): Promise<IssuesSummaryResponse> {
-  const url = `${API_BASE}/by-project/${projectName}/issues?summary=1`
+  const url = `${API_BASE}/by-project/${encodeURIComponent(projectName)}/issues?summary=1`
   const response = await fetch(url)
   if (!response.ok) {
     throw new Error(`Failed to fetch issues summary: ${response.statusText}`)
@@ -180,7 +180,7 @@ export async function mergePR(
   prNumber: number,
   mergeMethod: 'merge' | 'squash' | 'rebase' = 'merge'
 ): Promise<{ status: string; pr: number; repo: string }> {
-  const response = await fetch(`${API_BASE}/by-project/${projectName}/issues`, {
+  const response = await fetch(`${API_BASE}/by-project/${encodeURIComponent(projectName)}/issues`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({ prNumber, mergeMethod, action: 'merge' }),
@@ -196,7 +196,7 @@ export async function approvePR(
   projectName: string,
   prNumber: number
 ): Promise<{ status: string; pr: number; repo: string }> {
-  const response = await fetch(`${API_BASE}/by-project/${projectName}/issues`, {
+  const response = await fetch(`${API_BASE}/by-project/${encodeURIComponent(projectName)}/issues`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({ prNumber, action: 'approve' }),
@@ -215,7 +215,7 @@ export async function reviewPR(
   headRef: string,
   baseRef: string,
 ): Promise<{ status: string; job_id: string; pid: number; log_path: string }> {
-  const response = await fetch(`${API_BASE}/by-project/${projectName}/review-pr`, {
+  const response = await fetch(`${API_BASE}/by-project/${encodeURIComponent(projectName)}/review-pr`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({ prNumber, prTitle, headRef, baseRef }),
@@ -256,7 +256,7 @@ export async function runProject(projectName: string, prompt: string, opts: RunP
         formData.append('files', file, file.name)
       }
     }
-    response = await fetch(`${API_BASE}/by-project/${projectName}/run`, {
+    response = await fetch(`${API_BASE}/by-project/${encodeURIComponent(projectName)}/run`, {
       method: 'POST',
       body: formData,
     })
@@ -271,7 +271,7 @@ export async function runProject(projectName: string, prompt: string, opts: RunP
     if (ghIssueRepo) body.ghIssueRepo = ghIssueRepo
     if (ghIssueTitle) body.ghIssueTitle = ghIssueTitle
     if (provider) body.provider = provider
-    response = await fetch(`${API_BASE}/by-project/${projectName}/run`, {
+    response = await fetch(`${API_BASE}/by-project/${encodeURIComponent(projectName)}/run`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify(body),
@@ -285,7 +285,7 @@ export async function runProject(projectName: string, prompt: string, opts: RunP
 }
 
 export async function fetchProjectLogs(projectName: string): Promise<{ logs: LogEntry[] }> {
-  const response = await fetch(`${API_BASE}/by-project/${projectName}/logs`)
+  const response = await fetch(`${API_BASE}/by-project/${encodeURIComponent(projectName)}/logs`)
   if (!response.ok) {
     throw new Error(`Failed to fetch logs: ${response.statusText}`)
   }
@@ -308,7 +308,7 @@ export async function pushProject(
       ...(opts.releaseId ? { release_id: opts.releaseId } : {}),
     })
   }
-  const response = await fetch(`${API_BASE}/by-project/${projectName}/push`, init)
+  const response = await fetch(`${API_BASE}/by-project/${encodeURIComponent(projectName)}/push`, init)
   if (!response.ok) {
     const data = await response.json().catch(() => ({}))
     throw new Error(data.detail || `Failed to push: ${response.statusText}`)
@@ -320,7 +320,7 @@ export async function checkoutDefaultBranch(
   projectName: string,
   opts?: { carryChanges?: boolean },
 ): Promise<{ status: string; branch: string; deletedBranch?: string | null }> {
-  const response = await fetch(`${API_BASE}/by-project/${projectName}/checkout-default`, {
+  const response = await fetch(`${API_BASE}/by-project/${encodeURIComponent(projectName)}/checkout-default`, {
     method: 'POST',
     headers: opts?.carryChanges ? { 'Content-Type': 'application/json' } : undefined,
     body: opts?.carryChanges ? JSON.stringify({ carryChanges: true }) : undefined,
@@ -331,7 +331,7 @@ export async function checkoutDefaultBranch(
 }
 
 export async function fetchChanges(projectName: string, opts?: { signal?: AbortSignal }): Promise<ChangesResponse> {
-  const url = `${API_BASE}/by-project/${projectName}/changes`
+  const url = `${API_BASE}/by-project/${encodeURIComponent(projectName)}/changes`
   const response = await fetch(url, { signal: opts?.signal })
   if (!response.ok) {
     const data = await response.json().catch(() => ({}))
@@ -341,13 +341,13 @@ export async function fetchChanges(projectName: string, opts?: { signal?: AbortS
 }
 
 export async function fetchBehind(projectName: string): Promise<{ behind: number; ahead: number }> {
-  const response = await fetch(`${API_BASE}/by-project/${projectName}/behind`)
+  const response = await fetch(`${API_BASE}/by-project/${encodeURIComponent(projectName)}/behind`)
   if (!response.ok) return { behind: 0, ahead: 0 }
   return response.json()
 }
 
 export async function fetchBranch(projectName: string): Promise<{ branch: string | null; defaultBranch: string; commitsAhead: number | null }> {
-  const response = await fetch(`${API_BASE}/by-project/${projectName}/branch`)
+  const response = await fetch(`${API_BASE}/by-project/${encodeURIComponent(projectName)}/branch`)
   if (!response.ok) throw new Error('Failed to fetch branch')
   return response.json()
 }
@@ -371,7 +371,7 @@ export async function createProjectPR(
     init.headers = { 'Content-Type': 'application/json' }
     init.body = JSON.stringify({ force: true })
   }
-  const response = await fetch(`${API_BASE}/by-project/${projectName}/create-pr`, init)
+  const response = await fetch(`${API_BASE}/by-project/${encodeURIComponent(projectName)}/create-pr`, init)
   const data = await response.json().catch(() => ({}))
   if (!response.ok) {
     if (response.status === 409 && data?.hookFailure) {
@@ -386,7 +386,7 @@ export async function runMarkDod(
   projectName: string,
   ctx: { issue_number?: number; pr_number?: number; repo: string },
 ): Promise<MarkDodResult> {
-  const response = await fetch(`${API_BASE}/by-project/${projectName}/mark-dod`, {
+  const response = await fetch(`${API_BASE}/by-project/${encodeURIComponent(projectName)}/mark-dod`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify(ctx),
@@ -404,7 +404,7 @@ export async function pullProject(
   projectName: string,
   strategy: 'ff-only' | 'merge' | 'rebase' = 'ff-only'
 ): Promise<{ status: string; output: string }> {
-  const response = await fetch(`${API_BASE}/by-project/${projectName}/changes`, {
+  const response = await fetch(`${API_BASE}/by-project/${encodeURIComponent(projectName)}/changes`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({ strategy }),
@@ -421,7 +421,7 @@ export async function pullProject(
 
 export async function fetchChangeDiff(projectName: string, filename: string): Promise<ChangeDiffResponse> {
   const response = await fetch(
-    `${API_BASE}/by-project/${projectName}/changes/diff?file=${encodeURIComponent(filename)}`
+    `${API_BASE}/by-project/${encodeURIComponent(projectName)}/changes/diff?file=${encodeURIComponent(filename)}`
   )
   if (!response.ok) {
     const data = await response.json().catch(() => ({}))

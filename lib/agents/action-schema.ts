@@ -166,7 +166,9 @@ function stringArrayOrEmpty(raw: unknown): string[] {
   if (!Array.isArray(raw)) return [];
   const out: string[] = [];
   for (const item of raw) {
-    if (typeof item === 'string' && item.trim()) out.push(item);
+    if (typeof item !== 'string') continue;
+    const trimmed = item.trim();
+    if (trimmed) out.push(trimmed);
   }
   return out;
 }

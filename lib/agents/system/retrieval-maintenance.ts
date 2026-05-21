@@ -10,7 +10,7 @@
 // processing chain assumes a CLI session with stream-json output that
 // system agents don't produce).
 
-import { mkdirSync, writeFileSync, readFileSync, existsSync } from 'fs';
+import { mkdirSync, writeFileSync, readFileSync } from 'fs';
 import { join } from 'path';
 import { homedir } from 'os';
 import { and, eq, isNotNull, ne } from 'drizzle-orm';
@@ -69,30 +69,34 @@ function writeLog(logPath: string, body: string): void {
   }
 }
 
+// Read a markdown file and return its first H1 (capped at 120 chars), or
+// null if the file is missing, unreadable, or has no H1. Skips the
+// existsSync precheck — readFileSync's ENOENT throw is caught here.
+function readMarkdownFirstH1(path: string): string | null {
+  try {
+    const text = readFileSync(/*turbopackIgnore: true*/ path, 'utf-8');
+    const match = text.match(/^#\s+(.+)$/m);
+    return match && match[1] ? match[1].trim().slice(0, 120) : null;
+  } catch {
+    return null;
+  }
+}
+
 function deriveSampleQuery(projectPath: string, projectName: string): string {
   // Prefer the first H1 from CLAUDE.md so the verifier query feels native to
   // the project. Fall back to README.md, then to a generic project-named
   // probe. The cheap LLM only needs *something* the corpus could plausibly
   // surface — exact wording doesn't matter much for the verification.
   for (const candidate of ['CLAUDE.md', 'README.md']) {
-    const path = join(projectPath, candidate);
-    if (!existsSync(/*turbopackIgnore: true*/ path)) continue;
-    try {
-      const text = readFileSync(/*turbopackIgnore: true*/ path, 'utf-8');
-      const match = text.match(/^#\s+(.+)$/m);
-      if (match && match[1]) {
-        return match[1].trim().slice(0, 120);
-      }
-    } catch { /* ignore */ }
+    const h1 = readMarkdownFirstH1(join(projectPath, candidate));
+    if (h1) return h1;
   }
   // Best-effort topic synthesis from the first project doc.
   try {
     const docs = listProjectDocuments(projectPath, { includeAgentDocs: false });
     for (const doc of docs) {
-      if (!existsSync(/*turbopackIgnore: true*/ doc)) continue;
-      const text = readFileSync(/*turbopackIgnore: true*/ doc, 'utf-8');
-      const match = text.match(/^#\s+(.+)$/m);
-      if (match && match[1]) return match[1].trim().slice(0, 120);
+      const h1 = readMarkdownFirstH1(doc);
+      if (h1) return h1;
     }
   } catch { /* ignore */ }
   return `${projectName} overview`;

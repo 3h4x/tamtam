@@ -182,8 +182,12 @@ export function toLocalStepSummary(raw: LocalStepFile): LocalWorkflowStepSummary
 
 export function readLocalRunFile(runId: string): LocalRunFile | null {
   const file = join(/*turbopackIgnore: true*/ localWorldRunsDir(), `${runId}.json`);
-  if (!existsSync(/*turbopackIgnore: true*/ file)) return null;
-  return JSON.parse(readFileSync(/*turbopackIgnore: true*/ file, 'utf8')) as LocalRunFile;
+  try {
+    return JSON.parse(readFileSync(/*turbopackIgnore: true*/ file, 'utf8')) as LocalRunFile;
+  } catch (err) {
+    if ((err as NodeJS.ErrnoException).code === 'ENOENT') return null;
+    throw err;
+  }
 }
 
 export function readLocalStepFiles(runId: string): LocalStepFile[] {
@@ -193,9 +197,10 @@ export function readLocalStepFiles(runId: string): LocalStepFile[] {
     .filter((name) => name.startsWith(`${runId}-`) && name.endsWith('.json'))
     .map((name) => JSON.parse(readFileSync(/*turbopackIgnore: true*/ join(dir, name), 'utf8')) as LocalStepFile)
     .sort((a, b) => {
-      const ac = dateOrNull(a.createdAt)?.getTime() ?? 0;
-      const bc = dateOrNull(b.createdAt)?.getTime() ?? 0;
-      if (ac !== bc) return ac - bc;
+      // ISO 8601 strings sort lexicographically the same as chronologically
+      // — skip the Date parse on every comparison.
+      if (a.createdAt < b.createdAt) return -1;
+      if (a.createdAt > b.createdAt) return 1;
       return (a.attempt ?? 1) - (b.attempt ?? 1);
     });
 }

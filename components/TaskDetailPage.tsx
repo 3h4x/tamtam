@@ -47,7 +47,7 @@ export function TaskDetailPage({
 
   return (
     <div className="p-6">
-      <button className="text-accent hover:underline text-sm mb-4 inline-block" onClick={() => router.push(`/project/${name}`)}>
+      <button className="text-accent hover:underline text-sm mb-4 inline-block" onClick={() => router.push(`/project/${encodeURIComponent(name)}`)}>
         &larr; Back to {name}
       </button>
 

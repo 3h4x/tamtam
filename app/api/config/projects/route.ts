@@ -1,6 +1,8 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { eq } from 'drizzle-orm';
 import { readdirSync, existsSync } from 'fs';
+// `existsSync` retained for the per-entry .git check below (legitimate
+// presence-only test, not a TOCTOU+read pattern).
 import { join } from 'path';
 import { homedir } from 'os';
 import { db, schema } from '@/lib/db';
@@ -12,11 +14,11 @@ function expandHome(p: string): string {
 
 function scanGitRepos(workspacePath: string): { name: string; path: string }[] {
   const expanded = expandHome(workspacePath);
-  if (!existsSync(/*turbopackIgnore: true*/ expanded)) return [];
-
   const repos: { name: string; path: string }[] = [];
   const skipDirs = new Set(['node_modules', '.next', '.git', 'dist', 'build', '.venv', '__pycache__']);
 
+  // No existsSync precheck on the workspace path — readdirSync throws ENOENT
+  // into the catch, returning the same empty result.
   try {
     const entries = readdirSync(/*turbopackIgnore: true*/ expanded, { withFileTypes: true });
     for (const entry of entries) {
@@ -79,8 +81,10 @@ export async function PATCH(request: NextRequest) {
     return NextResponse.json({ detail: 'projects must be an array' }, { status: 400 });
   }
 
-  const newlyEnabledProjects: string[] = [];
-  for (const proj of projects) {
+  // Per-project (SELECT + INSERT/UPDATE) pairs are independent across
+  // projects — was N sequential round-trip pairs; now they fan out via
+  // Promise.all and only the post-enable seed list waits for the writes.
+  const perProject = await Promise.all(projects.map(async (proj) => {
     const actionsJson = proj.custom_actions ? JSON.stringify(proj.custom_actions) : null;
     const beforeRows = await db.select({ enabled: schema.projects.enabled })
       .from(schema.projects)
@@ -106,19 +110,18 @@ export async function PATCH(request: NextRequest) {
           customActions: actionsJson,
         },
       });
-    if (proj.enabled && !wasEnabled) newlyEnabledProjects.push(proj.name);
-  }
+    return { name: proj.name, newlyEnabled: proj.enabled && !wasEnabled };
+  }));
+  const newlyEnabledProjects = perProject.filter((r) => r.newlyEnabled).map((r) => r.name);
 
   // Auto-seed built-in system agents (documentation-reindex-vectors, …) for any
   // project that was newly enabled in this PATCH. Idempotent — already-
-  // seeded projects are skipped.
+  // seeded projects are skipped. Seeds fan out in parallel.
   if (newlyEnabledProjects.length > 0) {
     try {
       await refreshProjectsCacheSync();
       const { seedSystemAgentsForProject } = await import('@/lib/agents/system/seed');
-      for (const projectName of newlyEnabledProjects) {
-        await seedSystemAgentsForProject(projectName);
-      }
+      await Promise.all(newlyEnabledProjects.map((projectName) => seedSystemAgentsForProject(projectName)));
     } catch (err) {
       console.error('[system-agents] post-enable seed failed:', err);
     }

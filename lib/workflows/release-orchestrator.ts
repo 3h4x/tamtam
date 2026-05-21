@@ -72,8 +72,9 @@ export async function releaseOrchestratorWorkflow(
     // re-dispatch the orchestrator a moment later when the new chunks have
     // landed. Finalizing here would kill a perfectly healthy release.
     // Return early without touching the release row.
+    // `dispatched === false` already narrowed by the outer guard; only need
+    // to re-narrow on `reason` to access `dispatch.error`.
     if (
-      dispatch.dispatched === false &&
       dispatch.reason === 'dispatch_failed' &&
       /Failed to load chunk|Cannot find module|MODULE_NOT_FOUND/i.test(dispatch.error)
     ) {
@@ -238,9 +239,20 @@ async function decideStep(jobId: string): Promise<NextPhase> {
     } catch {}
   }
   if (job.kind === 'mark-dod' && job.releaseId) {
-    const pushJob = listJobs()
-      .filter((j) => j.releaseId === job.releaseId && j.kind === 'push' && j.exitCode === 0)
-      .sort((a, b) => (b.startedAt ?? 0) - (a.startedAt ?? 0))[0];
+    // Single-pass "find most recent successful push for this release" — was
+    // filter().sort()[0]; this avoids allocating the filtered array and the sort.
+    let pushJob: ReturnType<typeof getJob> | null = null;
+    let maxStartedAt = -Infinity;
+    for (const j of listJobs()) {
+      if (j.releaseId !== job.releaseId) continue;
+      if (j.kind !== 'push') continue;
+      if (j.exitCode !== 0) continue;
+      const ts = j.startedAt ?? 0;
+      if (ts > maxStartedAt) {
+        maxStartedAt = ts;
+        pushJob = j;
+      }
+    }
     if (pushJob?.contextMeta) {
       try {
         const meta = JSON.parse(pushJob.contextMeta) as { prUrl?: string; prNumber?: number; prRepo?: string };
@@ -352,10 +364,20 @@ async function findLatestReviewIdStep(releaseJobId: string): Promise<string | nu
   'use step';
   try {
     const { listJobs } = await import('@/lib/jobs/job-storage');
-    const latest = listJobs()
-      .filter((j) => j.releaseId === releaseJobId && j.kind === 'review' && j.finishedAt !== null)
-      .sort((a, b) => (b.startedAt ?? 0) - (a.startedAt ?? 0))[0];
-    return latest?.id ?? null;
+    // Single-pass max by startedAt — was filter().sort()[0].
+    let latestId: string | null = null;
+    let maxStartedAt = -Infinity;
+    for (const j of listJobs()) {
+      if (j.releaseId !== releaseJobId) continue;
+      if (j.kind !== 'review') continue;
+      if (j.finishedAt === null) continue;
+      const ts = j.startedAt ?? 0;
+      if (ts > maxStartedAt) {
+        maxStartedAt = ts;
+        latestId = j.id;
+      }
+    }
+    return latestId;
   } catch {
     return null;
   }

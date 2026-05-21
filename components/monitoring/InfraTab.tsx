@@ -11,6 +11,13 @@ function StatusDot({ ok }: { ok: boolean }) {
   )
 }
 
+const SUMMARY_TONE_CLASSES = {
+  neutral: 'border-border bg-bg-secondary',
+  success: 'border-status-success/30 bg-status-success/5',
+  warning: 'border-status-warning/30 bg-status-warning/5',
+  error: 'border-status-error/30 bg-status-error/5',
+} as const
+
 function SummaryCard({
   label,
   value,
@@ -22,15 +29,8 @@ function SummaryCard({
   detail: string
   tone?: 'neutral' | 'success' | 'warning' | 'error'
 }) {
-  const toneClasses = {
-    neutral: 'border-border bg-bg-secondary',
-    success: 'border-status-success/30 bg-status-success/5',
-    warning: 'border-status-warning/30 bg-status-warning/5',
-    error: 'border-status-error/30 bg-status-error/5',
-  }
-
   return (
-    <div className={`rounded-lg border px-3 py-2 ${toneClasses[tone]}`}>
+    <div className={`rounded-lg border px-3 py-2 ${SUMMARY_TONE_CLASSES[tone]}`}>
       <p className="text-xs text-text-tertiary">{label}</p>
       <p className="mt-1 font-mono text-lg font-semibold tabular-nums text-text-primary">{value}</p>
       <p className="mt-1 text-xs text-text-secondary">{detail}</p>
@@ -108,8 +108,13 @@ function LogRow({ entry, color }: { entry: { ts: string; stream: Record<string, 
 }
 
 export function InfraTab({ data, window_ }: { data: MonitoringData; window_: TimeWindow }) {
-  const downServices = data.prometheus.services.filter(s => s.value?.[1] === '0')
-  const upServices = data.prometheus.services.filter(s => s.value?.[1] !== '0')
+  // Single-pass partition — previously filtered the same array twice with
+  // opposite predicates, allocating two intermediate arrays per render.
+  const downServices: typeof data.prometheus.services = []
+  const upServices: typeof data.prometheus.services = []
+  for (const s of data.prometheus.services) {
+    (s.value?.[1] === '0' ? downServices : upServices).push(s)
+  }
   const alertCount = data.prometheus.alerts.length
   const errorCount = data.loki.errors.length
   const warningCount = data.loki.warnings.length

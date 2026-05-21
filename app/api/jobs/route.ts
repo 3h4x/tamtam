@@ -25,19 +25,16 @@ export async function GET(request: NextRequest) {
   const offset = Math.max(0, parseInt(sp.get('offset') ?? '0', 10) || 0);
   const limit = parseLimit(sp.get('limit'));
 
-  let jobs = listJobs();
-  if (project) jobs = jobs.filter((j) => j.project === project);
-  if (kind) jobs = jobs.filter((j) => j.kind === kind);
-  if (sessionId) jobs = jobs.filter((j) => j.sessionId === sessionId);
-  if (hasSession) jobs = jobs.filter((j) => !!j.sessionId);
-  if (status === 'running') {
-    jobs = jobs.filter((j) => j.finishedAt === null && j.abortedAt == null);
-  } else if (status === 'done') {
-    jobs = jobs.filter((j) => j.finishedAt !== null && j.abortedAt == null);
-  } else if (status === 'aborted') {
-    jobs = jobs.filter((j) => j.abortedAt != null);
-  }
-
+  const jobs = listJobs().filter((j) => {
+    if (project && j.project !== project) return false;
+    if (kind && j.kind !== kind) return false;
+    if (sessionId && j.sessionId !== sessionId) return false;
+    if (hasSession && !j.sessionId) return false;
+    if (status === 'running' && !(j.finishedAt === null && j.abortedAt == null)) return false;
+    if (status === 'done' && !(j.finishedAt !== null && j.abortedAt == null)) return false;
+    if (status === 'aborted' && j.abortedAt == null) return false;
+    return true;
+  });
   jobs.sort((a, b) => b.startedAt - a.startedAt);
   const total = jobs.length;
   const page = jobs.slice(offset, offset + limit);

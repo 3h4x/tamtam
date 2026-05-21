@@ -1,5 +1,5 @@
 import { eq } from 'drizzle-orm';
-import { existsSync, readFileSync } from 'fs';
+import { readFileSync } from 'fs';
 import { db, schema } from '@/lib/db';
 import { markReviewed, setReviewedRef, getCurrentBranch } from '@/lib/git/git-utils';
 import { parseStreamLines } from './claude-stream-parser';
@@ -385,8 +385,10 @@ function appendToReleaseLog(release: JobData, kind: string, job: JobData, extra?
   try {
     const header = `\n\n=== ${kind} (${job.id}) — started ${new Date((job.startedAt || 0) * 1000).toISOString()} — exit ${job.exitCode ?? '?'} ===\n`;
     let body = '';
-    if (job.logPath && existsSync(job.logPath)) {
-      try { body = readFileSync(job.logPath, 'utf-8'); } catch {}
+    if (job.logPath) {
+      // Skip the existsSync precheck — readFileSync throws ENOENT and the
+      // catch swallows it, same outcome with one fewer syscall + no TOCTOU.
+      try { body = readFileSync(/*turbopackIgnore: true*/ job.logPath, 'utf-8'); } catch {}
     }
     appendRedactedFileSync(release.logPath, header + body + (extra ? `\n${extra}\n` : ''));
   } catch {}

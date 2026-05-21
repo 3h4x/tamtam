@@ -95,7 +95,7 @@ export function ProjectPageLoadingState() {
       </div>
 
       <div className="mb-3 flex flex-wrap gap-2 border-b border-border">
-        {['Overview', 'Terminal', 'Changes', 'History', 'Issues', 'Docs', 'Config'].map((tab, index) => (
+        {['Overview', 'Terminal', 'Changes', 'History', 'Agents', 'Issues / PRs', 'Docs', 'Config'].map((tab, index) => (
           <div
             key={tab}
             className={`rounded-t-md border border-b-0 border-border px-3 py-2 ${index === 0 ? 'bg-bg-secondary' : 'bg-bg-primary'}`}

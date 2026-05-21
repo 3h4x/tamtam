@@ -227,9 +227,10 @@ export async function GET(
       }
 
       // Read new bytes from offset using an open fd — avoids re-reading the
-      // whole file on every fs.watch tick (critical for large logs).
+      // whole file on every fs.watch tick (critical for large logs). Skips
+      // the existsSync precheck: openSync throws ENOENT if the file is gone,
+      // and the catch handles it the same way an existence check would.
       function readNewBytes(): string {
-        if (!existsSync(/*turbopackIgnore: true*/ logPath)) return '';
         let fd = -1;
         try {
           fd = openSync(/*turbopackIgnore: true*/ logPath, 'r');
@@ -247,15 +248,14 @@ export async function GET(
         }
       }
 
-      // Replay existing content
-      if (existsSync(/*turbopackIgnore: true*/ logPath)) {
-        try {
-          const content = readFileSync(/*turbopackIgnore: true*/ logPath, 'utf-8');
-          offset = Buffer.byteLength(content);
-          sendContent(content);
-          if (hasResultLine(content)) seenResult = true;
-        } catch {}
-      }
+      // Replay existing content. Skip the existsSync precheck — let
+      // readFileSync throw ENOENT, the catch handles it identically.
+      try {
+        const content = readFileSync(/*turbopackIgnore: true*/ logPath, 'utf-8');
+        offset = Buffer.byteLength(content);
+        sendContent(content);
+        if (hasResultLine(content)) seenResult = true;
+      } catch { /* missing or unreadable — nothing to replay */ }
 
       // If job is already finished, close immediately (non-Claude jobs have no NDJSON done event)
       const jobRecord = getJob(jobId);

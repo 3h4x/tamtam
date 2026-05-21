@@ -23,7 +23,11 @@ export function workflowStepNeedsAttention(step: { status: string; error: string
 
 function summarizeStepIssue(step: WorkflowStepAttentionItem): string {
   if (step.error) {
-    return step.error.split('\n')[0].slice(0, 96);
+    // indexOf + slice avoids allocating an array of every line just to read
+    // the first one (matters for long multi-line stack-trace errors).
+    const nl = step.error.indexOf('\n');
+    const firstLine = nl >= 0 ? step.error.slice(0, nl) : step.error;
+    return firstLine.slice(0, 96);
   }
   if (step.status === 'cancelled') return 'cancelled before completion';
   return `status ${step.status}`;

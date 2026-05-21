@@ -97,7 +97,7 @@ export function useTerminalBootstrap({
           .sort((a, b) => b.started_at - a.started_at)[0]
         if (!live || !live.session_id) return
         if (initialSessionId && live.session_id === initialSessionId) return
-        router.replace(`/project/${projectName}/terminal/${live.session_id}`)
+        router.replace(`/project/${encodeURIComponent(projectName)}/terminal/${encodeURIComponent(live.session_id)}`)
       } catch {}
     })()
     return () => { cancelled = true }
@@ -140,7 +140,7 @@ export function useTerminalBootstrap({
               },
             ],
           }))
-          router.replace(`/project/${projectName}/terminal`)
+          router.replace(`/project/${encodeURIComponent(projectName)}/terminal`)
           return
         }
         terminalStore.reset(projectName)
@@ -152,7 +152,7 @@ export function useTerminalBootstrap({
         }))
       }
       terminalStore.update(projectName, () => ({ pendingAutoSubmit: submit }))
-      router.replace(`/project/${projectName}/terminal`)
+      router.replace(`/project/${encodeURIComponent(projectName)}/terminal`)
     }
     run()
   }, [])
@@ -257,7 +257,7 @@ export function useTerminalBootstrap({
         if (!res.ok) return
         const data = await res.json()
         if (shouldRedirectJobParamToSession(data)) {
-          router.replace(`/project/${projectName}/terminal/${data.session_id}`)
+          router.replace(`/project/${encodeURIComponent(projectName)}/terminal/${encodeURIComponent(data.session_id)}`)
           return
         }
         setCurrentReleaseId(data.release_id ?? null)
@@ -268,11 +268,13 @@ export function useTerminalBootstrap({
         // their output in `work_summary` / contextMeta. Treat them as
         // non-streaming so we render the summary instead of trying to tail
         // a stream-json log that was never produced.
-        let isSystemAgent = false
-        try {
-          const meta = data.context_meta ? JSON.parse(data.context_meta) : null
-          isSystemAgent = !!(meta && meta.system === true)
-        } catch { /* ignore */ }
+        // One parse — both the system-agent check and the skills/docs
+        // extraction below read from the same string.
+        let metaParsed: { system?: unknown; skills?: unknown; docs?: unknown } | null = null
+        if (data.context_meta) {
+          try { metaParsed = JSON.parse(data.context_meta) } catch { /* ignore */ }
+        }
+        const isSystemAgent = !!(metaParsed && metaParsed.system === true)
         const isClaudeJob = isClaudeJobKind(data.kind) && !isSystemAgent
         const startedAtSec = typeof data.started_at === 'number' ? data.started_at : null
         const startedLabel = startedAtSec
@@ -292,16 +294,15 @@ export function useTerminalBootstrap({
           entries.push({ role: 'user', text: jobPrompt })
         }
 
-        if (data.context_meta) {
-          try {
-            const meta = JSON.parse(data.context_meta)
-            if (Array.isArray(meta.skills)) {
-              terminalStore.update(projectName, () => ({ selectedItems: meta.skills }))
-            }
-            if (Array.isArray(meta.docs)) {
-              terminalStore.update(projectName, () => ({ selectedDocs: meta.docs }))
-            }
-          } catch {}
+        if (metaParsed) {
+          const skills = metaParsed.skills
+          if (Array.isArray(skills)) {
+            terminalStore.update(projectName, () => ({ selectedItems: skills }))
+          }
+          const docs = metaParsed.docs
+          if (Array.isArray(docs)) {
+            terminalStore.update(projectName, () => ({ selectedDocs: docs }))
+          }
         }
 
         terminalStore.reset(projectName)
@@ -373,7 +374,7 @@ export function useTerminalBootstrap({
         const target = runningJobs[0]
         if (!target || attachedExternalJobRef.current === target.id) return
         attachedExternalJobRef.current = target.id
-        router.replace(`/project/${projectName}/terminal?job=${encodeURIComponent(target.id)}`)
+        router.replace(`/project/${encodeURIComponent(projectName)}/terminal?job=${encodeURIComponent(target.id)}`)
       } catch {}
     }
 

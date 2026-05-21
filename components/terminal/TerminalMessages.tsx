@@ -283,7 +283,14 @@ export function TerminalMessages({
   const [copiedIdx, setCopiedIdx] = useState<number | null>(null)
 
   const lastStreamLine = (() => {
-    const trimmed = streamBuffer.trimEnd()
+    // Slice the last 4KB BEFORE calling trimEnd/lastIndexOf — those allocate
+    // a copy of their input. streamBuffer can be multi-MB during heavy
+    // streaming, so this used to allocate the whole buffer on every parent
+    // re-render just to display 120 chars at the end. 4KB is enough headroom
+    // to find the last newline + read 120 chars after it even on a single
+    // very long line.
+    const tail = streamBuffer.length > 4096 ? streamBuffer.slice(-4096) : streamBuffer
+    const trimmed = tail.trimEnd()
     const lastNl = trimmed.lastIndexOf('\n')
     const line = lastNl === -1 ? trimmed : trimmed.slice(lastNl + 1)
     return stripAnsi(line).trim().slice(0, 120) || ''

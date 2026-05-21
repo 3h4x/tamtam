@@ -54,15 +54,6 @@ export interface MarkDodPrepBundle {
   isPr: boolean;
 }
 
-/**
- * Acquire a mutable JobData reference for the current step. In production
- * job-storage returns the same in-memory object on every call; mutating it
- * (e.g. `job.ghIssueTitle = …`) is visible to subsequent updateJob writes.
- * In tests, `getJob` is mocked separately from `createJob`, so we keep a
- * per-step lookup escape: callers in the same in-process flow pass the
- * `job` ref directly when they have it.
- */
-
 export interface MarkDodFetchBundle {
   body: string;
   title: string;
@@ -444,6 +435,10 @@ JSON schema:
   }
 
   const verifiedTexts: string[] = [];
+  // Pre-normalize criteria once; fuzzy fallback was re-normalizing every
+  // criterion per unmatched result (O(N*M)).
+  const norm = (s: string) => s.replace(/[`*_]/g, '').replace(/\s+/g, ' ').trim().toLowerCase();
+  let normalizedCriteria: { orig: string; norm: string }[] | null = null;
   for (const r of results) {
     if (r.verified !== true) continue;
     const idx = typeof r.index === 'number' ? r.index - 1 : -1;
@@ -451,10 +446,12 @@ JSON schema:
       verifiedTexts.push(fetched.criteria[idx].text);
       continue;
     }
-    const norm = (s: string) => s.replace(/[`*_]/g, '').replace(/\s+/g, ' ').trim().toLowerCase();
+    if (!normalizedCriteria) {
+      normalizedCriteria = fetched.criteria.map((c) => ({ orig: c.text, norm: norm(c.text) }));
+    }
     const want = norm(r.text ?? '');
-    const hit = fetched.criteria.find((c) => norm(c.text) === want);
-    if (hit) verifiedTexts.push(hit.text);
+    const hit = normalizedCriteria.find((c) => c.norm === want);
+    if (hit) verifiedTexts.push(hit.orig);
   }
   for (const r of results) {
     appendLog(

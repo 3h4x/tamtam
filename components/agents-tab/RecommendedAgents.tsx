@@ -210,8 +210,13 @@ export function RecommendedAgents({ agents, customTemplates, recommendedAgents, 
     })
   if (suggestions.length === 0) return null
 
-  const prioritySuggestions = suggestions.filter(rec => getSuggestionTone(rec) !== 'recommended')
-  const recommendedSuggestions = suggestions.filter(rec => getSuggestionTone(rec) === 'recommended')
+  // Single-pass partition: was two opposite-predicate filters, each computing
+  // getSuggestionTone(rec) again per item. One walk + per-item tone evaluation.
+  const prioritySuggestions: RecommendedAgent[] = []
+  const recommendedSuggestions: RecommendedAgent[] = []
+  for (const rec of suggestions) {
+    (getSuggestionTone(rec) === 'recommended' ? recommendedSuggestions : prioritySuggestions).push(rec)
+  }
   const customRecommendedSuggestions = recommendedSuggestions.filter(rec => customNames.has(recommendedAgentNameKey(rec.name)))
   const collapseRecommendedByDefault = prioritySuggestions.length > 0
   const recommendedPreviewLimit = collapseRecommendedByDefault ? 0 : RECOMMENDED_VISIBLE_LIMIT

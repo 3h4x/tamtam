@@ -145,9 +145,8 @@ export type SchedulerHealth = {
   errors: string[];
 };
 
-async function loadAgentCronQueueKeys(agentIds: string[], connectionString: string): Promise<Set<string>> {
-  if (agentIds.length === 0) return new Set();
-  const keys = agentIds.map(jobKey);
+async function loadAgentCronQueueKeys(keys: string[], connectionString: string): Promise<Set<string>> {
+  if (keys.length === 0) return new Set();
   const pool = new Pool({ connectionString, max: 1 });
   try {
     const { rows } = await pool.query<{ key: string }>(
@@ -164,7 +163,7 @@ async function loadAgentCronQueueKeys(agentIds: string[], connectionString: stri
       `,
       [keys],
     );
-    return new Set(rows.map((row) => row.key).filter(Boolean));
+    return new Set(rows.map((row) => row.key));
   } finally {
     await pool.end();
   }
@@ -195,7 +194,7 @@ export async function getSchedulerHealth(
     errors.push('no postgres URL configured for graphile-worker scheduler');
   } else if (connectionString) {
     try {
-      queuedKeys = await loadAgentCronQueueKeys(expected.map((e) => e.id), connectionString);
+      queuedKeys = await loadAgentCronQueueKeys(expected.map((e) => e.queueKey), connectionString);
     } catch (err) {
       errors.push(`graphile queue check failed: ${err instanceof Error ? err.message : String(err)}`);
     }

@@ -1,13 +1,18 @@
 import type { JobData } from './types';
 
+interface CancellationEntry {
+  controller: AbortController;
+  completion: Promise<void>;
+  resolve: () => void;
+}
+
 declare global {
-  var __tamtamJobCancellation:
-    | Map<string, { controller: AbortController; completion: Promise<void>; resolve: () => void }>
-    | undefined;
+  // eslint-disable-next-line no-var
+  var __tamtamJobCancellation: Map<string, CancellationEntry> | undefined;
 }
 
 const cancellationRegistry =
-  globalThis.__tamtamJobCancellation ?? new Map<string, { controller: AbortController; completion: Promise<void>; resolve: () => void }>();
+  globalThis.__tamtamJobCancellation ?? new Map<string, CancellationEntry>();
 
 globalThis.__tamtamJobCancellation = cancellationRegistry;
 

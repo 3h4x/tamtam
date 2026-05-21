@@ -186,17 +186,40 @@ async function quotaChecks(settings: TamTamConfig): Promise<ReadinessCheck[]> {
 export async function getReadinessReport(options: ReadinessOptions = {}): Promise<ReadinessReport> {
   const settings = getSettings();
   const providers = options.provider ? [options.provider] : settings.cli_enabled_providers;
+  // Fan out every independent check in parallel. The previous sequential
+  // `await dbCheck(); await pm2Check(); ...` chain made every `?deep=1`
+  // probe wall time = sum of all checks (~3-5s when PM2 is slow). Each
+  // check is I/O-bound and independent — DB query, PM2 version probe, gh
+  // auth check, per-provider binary probes, per-provider quota fetches.
+  // Synchronous checks (workspace, project-path) just resolve immediately.
+  const includeQuota = options.includeQuota ?? true;
+  const [
+    dbResult,
+    pm2Result,
+    schedulerResult,
+    providerResults,
+    ghResult,
+    quotaResults,
+  ] = await Promise.all([
+    dbCheck(),
+    pm2Check(),
+    schedulerCheck(),
+    Promise.all(providers.map((provider) => providerBinaryCheck(provider, settings))),
+    ghCheck(),
+    includeQuota ? quotaChecks(settings) : Promise.resolve([]),
+  ]);
+
   const checks: ReadinessCheck[] = [
-    await dbCheck(),
-    await pm2Check(),
+    dbResult,
+    pm2Result,
     workspaceCheck(settings),
-    await schedulerCheck(),
+    schedulerResult,
   ];
   if (options.projectName) checks.push(projectPathCheck(options.projectName));
-  checks.push(...(await Promise.all(providers.map((provider) => providerBinaryCheck(provider, settings)))));
-  const gh = await ghCheck();
-  if (gh) checks.push(gh);
-  if (options.includeQuota ?? true) checks.push(...(await quotaChecks(settings)));
+  checks.push(...providerResults);
+  if (ghResult) checks.push(ghResult);
+  checks.push(...quotaResults);
+
   return {
     ok: checks.every((item) => item.ok || item.severity !== 'error'),
     checks,

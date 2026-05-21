@@ -37,7 +37,8 @@ export async function closeIssue(input: CloseIssueInput): Promise<CloseIssueResu
   if (!repo) return { ok: false, status: 422, detail: 'could not determine GitHub repo' };
 
   const args = ['issue', 'close', String(number), '--repo', repo, '--reason', reason];
-  if (comment && comment.trim()) args.push('--comment', comment.trim());
+  const trimmedComment = comment?.trim();
+  if (trimmedComment) args.push('--comment', trimmedComment);
 
   const r = await exec('gh', args, { timeout: 15000 });
   if (r.exitCode !== 0) {

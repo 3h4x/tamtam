@@ -34,7 +34,8 @@ export function getAgentMemoryPath(projPath: string, agentName: string): string 
 
 export function readAgentMemory(projPath: string, agentName: string): string | null {
   const path = getAgentMemoryPath(projPath, agentName);
-  if (!existsSync(/*turbopackIgnore: true*/ path)) return null;
+  // No existsSync precheck — readFileSync throws ENOENT and the catch handles
+  // it identically. One fewer syscall, no TOCTOU between check and read.
   try {
     return readFileSync(/*turbopackIgnore: true*/ path, 'utf-8').slice(0, MEMORY_MAX_CHARS);
   } catch {
@@ -67,13 +68,12 @@ function ensureTamtamCacheGitignore(projPath: string): void {
   const tamtamDir = join(/*turbopackIgnore: true*/ projPath, TAMTAM_DIR);
   if (!existsSync(/*turbopackIgnore: true*/ tamtamDir)) return;
   const gitignorePath = join(/*turbopackIgnore: true*/ tamtamDir, GITIGNORE_FILENAME);
+  // Skip existsSync precheck — readFileSync throws ENOENT, caught below.
   let existing = '';
-  if (existsSync(/*turbopackIgnore: true*/ gitignorePath)) {
-    try {
-      existing = readFileSync(/*turbopackIgnore: true*/ gitignorePath, 'utf-8');
-    } catch {
-      existing = '';
-    }
+  try {
+    existing = readFileSync(/*turbopackIgnore: true*/ gitignorePath, 'utf-8');
+  } catch {
+    existing = '';
   }
   const hasRule = existing
     .split('\n')

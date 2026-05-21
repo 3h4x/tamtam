@@ -66,69 +66,72 @@ async function gatherView(name: string): Promise<ProjectSweepView | null> {
   const blocking = await findBlockingRunningJob(name);
   const hasActiveJob = blocking !== null;
 
-  // Default-branch CI status — fetched via gh, cheap when origin remote is
-  // set. Treat any failure on the latest run as a hard block on default-
-  // branch releases (a release on top of broken `main` would re-test the
-  // broken state and burn money).
-  let defaultBranchCi: ProjectSweepView['defaultBranchCi'] = null;
-  try {
-    const r = await exec(
+  // Two independent gh queries — fire them in parallel since neither
+  // depends on the other's result. Per-project sweep latency drops from
+  // (ci_query + pr_query) to max(ci_query, pr_query).
+  //
+  //   defaultBranchCi: latest run on the default branch — treat any failure
+  //     as a hard block on default-branch releases (a release on top of
+  //     broken `main` would re-test the broken state and burn money).
+  //   prOnBranch: open PR whose head ref matches currentBranch.
+  const onFeatureBranch = !!(currentBranch && currentBranch !== defaultBranch);
+  const [ciResult, prResult] = await Promise.allSettled([
+    exec(
       'gh',
       ['run', 'list', '--branch', defaultBranch, '--limit', '1', '--json', 'conclusion', '--jq', '.[0].conclusion'],
       { cwd: path, timeout: 8000 },
-    );
-    if (r.exitCode === 0) {
-      const s = r.stdout.trim().toLowerCase();
-      if (s === 'success') defaultBranchCi = 'success';
-      else if (s === 'failure' || s === 'cancelled' || s === 'timed_out') defaultBranchCi = 'failure';
-      else if (s) defaultBranchCi = 'pending';
-    }
-  } catch {
-    // gh not available or not authed — leave null (don't block).
+    ),
+    onFeatureBranch
+      ? exec(
+          'gh',
+          [
+            'pr', 'list',
+            '--head', currentBranch,
+            '--state', 'open',
+            '--json', 'number,url,mergeable,statusCheckRollup,headRepositoryOwner,headRepository',
+            '--limit', '1',
+          ],
+          { cwd: path, timeout: 8000 },
+        )
+      : Promise.resolve(null),
+  ]);
+
+  let defaultBranchCi: ProjectSweepView['defaultBranchCi'] = null;
+  if (ciResult.status === 'fulfilled' && ciResult.value.exitCode === 0) {
+    const s = ciResult.value.stdout.trim().toLowerCase();
+    if (s === 'success') defaultBranchCi = 'success';
+    else if (s === 'failure' || s === 'cancelled' || s === 'timed_out') defaultBranchCi = 'failure';
+    else if (s) defaultBranchCi = 'pending';
   }
 
-  // Open PR whose head ref matches currentBranch.
   let prOnBranch: ProjectSweepView['prOnBranch'] = null;
-  if (currentBranch && currentBranch !== defaultBranch) {
+  if (prResult.status === 'fulfilled' && prResult.value && prResult.value.exitCode === 0) {
     try {
-      const r = await exec(
-        'gh',
-        [
-          'pr', 'list',
-          '--head', currentBranch,
-          '--state', 'open',
-          '--json', 'number,url,mergeable,statusCheckRollup,headRepositoryOwner,headRepository',
-          '--limit', '1',
-        ],
-        { cwd: path, timeout: 8000 },
-      );
-      if (r.exitCode === 0) {
-        const arr = JSON.parse(r.stdout || '[]') as Array<{
-          number: number;
-          url: string;
-          mergeable: 'MERGEABLE' | 'CONFLICTING' | 'UNKNOWN';
-          statusCheckRollup?: Array<{ conclusion?: string }>;
-          headRepositoryOwner?: { login?: string };
-          headRepository?: { name?: string };
-        }>;
-        if (arr.length > 0) {
-          const pr = arr[0];
-          const conclusions = (pr.statusCheckRollup ?? []).map((c) => (c.conclusion ?? '').toUpperCase());
-          let ciConclusion: 'success' | 'failure' | 'pending' | null = null;
-          if (conclusions.length === 0) ciConclusion = null;
-          else if (conclusions.some((c) => c === 'FAILURE' || c === 'CANCELLED' || c === 'TIMED_OUT')) ciConclusion = 'failure';
-          else if (conclusions.every((c) => c === 'SUCCESS' || c === 'SKIPPED' || c === 'NEUTRAL')) ciConclusion = 'success';
-          else ciConclusion = 'pending';
-          const repo = pr.headRepositoryOwner?.login && pr.headRepository?.name
-            ? `${pr.headRepositoryOwner.login}/${pr.headRepository.name}`
-            : '';
-          if (repo) {
-            prOnBranch = { number: pr.number, repo, url: pr.url, mergeable: pr.mergeable, ciConclusion };
-          }
+      const arr = JSON.parse(prResult.value.stdout || '[]') as Array<{
+        number: number;
+        url: string;
+        mergeable: 'MERGEABLE' | 'CONFLICTING' | 'UNKNOWN';
+        statusCheckRollup?: Array<{ conclusion?: string }>;
+        headRepositoryOwner?: { login?: string };
+        headRepository?: { name?: string };
+      }>;
+      if (arr.length > 0) {
+        const pr = arr[0];
+        const conclusions = (pr.statusCheckRollup ?? []).map((c) => (c.conclusion ?? '').toUpperCase());
+        let ciConclusion: 'success' | 'failure' | 'pending' | null = null;
+        if (conclusions.length === 0) ciConclusion = null;
+        else if (conclusions.some((c) => c === 'FAILURE' || c === 'CANCELLED' || c === 'TIMED_OUT')) ciConclusion = 'failure';
+        else if (conclusions.every((c) => c === 'SUCCESS' || c === 'SKIPPED' || c === 'NEUTRAL')) ciConclusion = 'success';
+        else ciConclusion = 'pending';
+        const repo = pr.headRepositoryOwner?.login && pr.headRepository?.name
+          ? `${pr.headRepositoryOwner.login}/${pr.headRepository.name}`
+          : '';
+        if (repo) {
+          prOnBranch = { number: pr.number, repo, url: pr.url, mergeable: pr.mergeable, ciConclusion };
         }
       }
     } catch {
-      // ignore — pr lookup is best-effort
+      // best-effort; leave prOnBranch null on parse failure
     }
   }
 

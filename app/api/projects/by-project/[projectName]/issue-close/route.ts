@@ -3,6 +3,7 @@ import { resolveProjectPath } from '@/lib/shared/project-data';
 import { closeIssue, type CloseIssueReason } from '@/lib/github/close-issue';
 
 const VALID_REASONS = new Set<CloseIssueReason>(['completed', 'not planned']);
+const VALID_REASONS_DETAIL = `reason must be one of: ${Array.from(VALID_REASONS).join(', ')}`;
 
 export async function POST(
   req: NextRequest,
@@ -22,7 +23,7 @@ export async function POST(
   }
   const reasonRaw = typeof body.reason === 'string' ? body.reason.trim() : '';
   if (!VALID_REASONS.has(reasonRaw as CloseIssueReason)) {
-    return NextResponse.json({ detail: `reason must be one of: ${Array.from(VALID_REASONS).join(', ')}` }, { status: 400 });
+    return NextResponse.json({ detail: VALID_REASONS_DETAIL }, { status: 400 });
   }
   const comment = typeof body.comment === 'string' ? body.comment : undefined;
 

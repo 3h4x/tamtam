@@ -2,13 +2,10 @@ import { NextRequest, NextResponse } from 'next/server';
 import { checkoutDefault } from '@/lib/git/checkout-default';
 
 // Switch the working copy back to the project's default branch.
-// Used from the Changes tab when a feature branch has been pushed/merged and
-// the user wants to get back to a clean base without dropping into a terminal.
 //
 // Body (optional): { carryChanges?: boolean }
 //   - carryChanges=true: stash uncommitted changes, switch, then pop the stash
-//     on default so the user's work moves with them. Used by the "merged branch"
-//     rescue button on the Changes tab.
+//     on default so the user's work moves with them.
 //   - default behavior: refuse when there are uncommitted changes.
 export async function POST(
   req: NextRequest,
@@ -29,7 +26,7 @@ export async function POST(
     return NextResponse.json({ detail: result.detail }, { status: result.status });
   }
   // 'switched-stash-kept' returns 207 Multi-Status so the caller can surface
-  // the recovery hint to the user (matches the original route's behavior).
+  // the recovery hint to the user.
   if (result.status === 'switched-stash-kept') {
     return NextResponse.json(
       {

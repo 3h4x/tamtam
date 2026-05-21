@@ -541,18 +541,19 @@ export async function PATCH(request: NextRequest) {
   // immediately rather than waiting up to one schedule interval.
   const previousEmbeddingModel = currentMap['retrieval_embedding_model'];
 
-  for (const { key, value } of serializedEntries) {
+  // Per-setting upsert/delete is independent across keys — was N sequential
+  // round-trips, now fans out via Promise.all.
+  await Promise.all(serializedEntries.map(({ key, value }) => {
     if (value === null) {
-      await db.delete(schema.settings).where(eq(schema.settings.key, key));
-    } else {
-      await db.insert(schema.settings)
-        .values({ key, value })
-        .onConflictDoUpdate({
-          target: schema.settings.key,
-          set: { value },
-        });
+      return db.delete(schema.settings).where(eq(schema.settings.key, key));
     }
-  }
+    return db.insert(schema.settings)
+      .values({ key, value })
+      .onConflictDoUpdate({
+        target: schema.settings.key,
+        set: { value },
+      });
+  }));
 
   reloadConfig();
   syncJobsPauseState(effectiveAfterSave.jobs_paused);

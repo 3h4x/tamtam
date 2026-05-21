@@ -20,12 +20,12 @@ export function statusHasNonTamtamPath(status: string): boolean {
 }
 
 export function reviewablePathsFromStatus(status: string): string[] {
-  const paths: string[] = [];
+  const seen = new Set<string>();
   for (const line of status.split('\n')) {
     if (!line.trim()) continue;
     const path = statusPath(line);
     if (!path || isTamtamPath(path)) continue;
-    paths.push(path);
+    seen.add(path);
   }
-  return [...new Set(paths)];
+  return [...seen];
 }

@@ -1,8 +1,7 @@
 import { NextResponse } from 'next/server';
-import { readdirSync, readFileSync } from 'fs';
+import { readdirSync, readFileSync, type Dirent } from 'fs';
 import { join } from 'path';
 import { SKILLS_DIR, DATA_SKILLS_DIR } from '@/lib/skills/skills';
-import { existsSync } from 'fs';
 
 interface Persona {
   path: string;
@@ -20,8 +19,13 @@ let _personaCache: { data: Persona[]; time: number } = { data: [], time: 0 };
 const PERSONA_CACHE_TTL_S = 300;
 
 function scanDir(base: string, personas: Persona[]) {
-  if (!existsSync(base)) return;
-  for (const catEntry of readdirSync(base, { withFileTypes: true })) {
+  let catEntries: Dirent[];
+  try {
+    catEntries = readdirSync(base, { withFileTypes: true });
+  } catch {
+    return;
+  }
+  for (const catEntry of catEntries) {
     if (!catEntry.isDirectory()) continue;
     const catDir = join(base, catEntry.name);
     const category = catEntry.name;

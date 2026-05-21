@@ -157,12 +157,12 @@ export async function maybeAutoResume(job: JobData): Promise<{ resumed: true; ne
     const model = job.model || resolveCliDefaultModel(provider, settings);
 
     const { logDir } = getImproveConfig();
-    mkdirSync(logDir, { recursive: true });
+    mkdirSync(/*turbopackIgnore: true*/ logDir, { recursive: true });
 
     const newJob = createJob(job.project, job.kind, 0, '', undefined, undefined, undefined, undefined, undefined, undefined, job.id);
     newJob.provider = provider;
     newJob.sessionId = sessionId;
-    newJob.logPath = join(logDir, `${newJob.id}.log`);
+    newJob.logPath = join(/*turbopackIgnore: true*/ logDir, `${newJob.id}.log`);
     const newAttempt = autoResumeCountOf(job) + 1;
     newJob.contextMeta = JSON.stringify({
       autoResumeChain: {

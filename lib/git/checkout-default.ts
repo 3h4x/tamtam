@@ -1,11 +1,6 @@
 // Switch the working copy back to the project's default branch.
 //
-// Extracted from `app/api/projects/by-project/[projectName]/checkout-default/route.ts`.
-// Shared by the route handler (UI "merged branch" rescue button) and the
-// agent-action orchestrator (where the agent finishes its issue work and
-// asks tamtam to return the worktree to default).
-//
-// Behavior contract is preserved exactly so existing route tests pass:
+// Behavior contract:
 //   - carryChanges=false (default): refuse if there are uncommitted changes
 //   - carryChanges=true: stash, switch, delete merged source branch, pop stash
 //   - "already on default" returns ok with status='already-on-branch'
@@ -44,10 +39,13 @@ export async function checkoutDefault(input: CheckoutDefaultInput): Promise<Chec
     };
   }
 
-  const currentR = await exec('git', ['-C', projPath, 'branch', '--show-current'], { timeout: 5000 });
+  // Independent reads; parallelize to halve the wait before the first
+  // state-changing git operation.
+  const [currentR, defaultBranch] = await Promise.all([
+    exec('git', ['-C', projPath, 'branch', '--show-current'], { timeout: 5000 }),
+    detectMainBranch(projPath),
+  ]);
   const currentBranch = currentR.stdout.trim();
-
-  const defaultBranch = await detectMainBranch(projPath);
   if (currentBranch === defaultBranch) {
     return { ok: true, status: 'already-on-branch', branch: defaultBranch, deletedBranch: null };
   }

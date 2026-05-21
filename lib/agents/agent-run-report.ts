@@ -57,14 +57,19 @@ async function modifiedFiles(job: JobData, ctx: AgentContextMeta): Promise<Modif
   const confidence: 'high' | 'low' = ctx.baseline?.dirty ? 'low' : 'high';
   const files = new Map<string, ModifiedFile>();
 
-  if (ctx.baseline?.head) {
-    const diffR = await exec('git', ['-C', projPath, 'diff', '--name-status', `${ctx.baseline.head}..HEAD`], { timeout: 10000 });
-    if (diffR.exitCode === 0) {
-      for (const file of parseNameStatus(diffR.stdout, confidence)) files.set(file.path, file);
-    }
-  }
+  // Both git execs read from the worktree and are independent — run them in
+  // one Promise.all to collapse two sequential awaits into one round-trip.
+  const baselineHead = ctx.baseline?.head;
+  const [diffR, statusR] = await Promise.all([
+    baselineHead
+      ? exec('git', ['-C', projPath, 'diff', '--name-status', `${baselineHead}..HEAD`], { timeout: 10000 })
+      : Promise.resolve(null),
+    exec('git', ['-C', projPath, 'status', '--porcelain'], { timeout: 5000 }),
+  ]);
 
-  const statusR = await exec('git', ['-C', projPath, 'status', '--porcelain'], { timeout: 5000 });
+  if (diffR && diffR.exitCode === 0) {
+    for (const file of parseNameStatus(diffR.stdout, confidence)) files.set(file.path, file);
+  }
   if (statusR.exitCode === 0 && (ctx.baseline?.dirty || statusR.stdout !== (ctx.baseline?.status ?? ''))) {
     for (const file of parsePorcelain(statusR.stdout, confidence)) files.set(file.path, file);
   }

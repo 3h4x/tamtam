@@ -1,4 +1,4 @@
-import { existsSync, readFileSync } from 'fs';
+import { readFileSync } from 'fs';
 import { basename, isAbsolute, join, normalize, sep } from 'path';
 import { getBranchContext, gitShowSync } from '@/lib/git/git-branch';
 import { realPathStaysInsideProject } from '@/lib/shared/path-containment';
@@ -72,7 +72,6 @@ export function resolveAutoAttachedDocs(
 
     if (ctx.isDefaultBranch) {
       resolvedPath = join(projectPath, relPath);
-      if (!existsSync(/*turbopackIgnore: true*/ resolvedPath)) continue;
       if (!realPathStaysInsideProject(projectPath, resolvedPath)) continue;
       try {
         content = readFileSync(/*turbopackIgnore: true*/ resolvedPath, 'utf-8');

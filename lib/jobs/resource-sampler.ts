@@ -65,13 +65,17 @@ export async function sampleRunningJobResources(): Promise<{ sampled: number; sk
   const { listJobs } = await import('@/lib/jobs/job-storage');
   const running = listJobs().filter(hasSampleablePid);
 
+  // Spawn `ps` in parallel — each call is an independent subprocess and
+  // they don't share resources. The probe sweep runs on a 30s cadence,
+  // so on a busy server with a dozen running jobs the sequential `await`
+  // chain was burning ~100ms of wall time per tick just on subprocess
+  // launches. `Promise.all` collapses that to roughly `max(per-ps)`.
+  const now = Date.now() / 1000;
+  const settled = await Promise.all(running.map((job) => sampleOne(job.id, job.pid as number)));
   let sampled = 0;
   let skipped = 0;
-  const now = Date.now() / 1000;
   const rows: { jobId: string; sampledAt: number; cpuPct: number | null; rssKb: number | null }[] = [];
-
-  for (const job of running) {
-    const sample = await sampleOne(job.id, job.pid as number);
+  for (const sample of settled) {
     if (!sample) { skipped += 1; continue; }
     rows.push({ jobId: sample.jobId, sampledAt: now, cpuPct: sample.cpuPct, rssKb: sample.rssKb });
     sampled += 1;

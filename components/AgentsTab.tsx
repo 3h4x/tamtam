@@ -162,7 +162,7 @@ export function AgentsTab({ projectName, projectJobs = [] }: AgentsTabProps) {
         delete next[agent.id]
         return next
       })
-      router.push(`/project/${projectName}/terminal?job=${encodeURIComponent(result.job_id)}`)
+      router.push(`/project/${encodeURIComponent(projectName)}/terminal?job=${encodeURIComponent(result.job_id)}`)
     } catch (err) {
       toast(err instanceof Error ? err.message : 'Failed to run agent', 'error')
     } finally {
@@ -205,9 +205,13 @@ export function AgentsTab({ projectName, projectJobs = [] }: AgentsTabProps) {
   const schedulerByAgentId = new Map(schedulerEntries.map(e => [e.agentId, e]))
   const recentAgentRuns = projectJobs.filter(job => job.kind.startsWith('agent:')).length
 
+  // Build skill lookup once instead of doing `skills.filter(includes)` per
+  // agent (O(N×M×K) → O(N + Σ K) where N is the skills array, M is agents,
+  // K is the per-agent skillIds length).
+  const skillsById = new Map(skills.map(s => [s.id, s]))
   const rows: EnrichedAgent[] = agents.map(agent => ({
     agent,
-    skills: skills.filter(s => agent.skillIds.includes(s.id)),
+    skills: agent.skillIds.map(id => skillsById.get(id)).filter((s): s is Skill => s !== undefined),
     lastRun: lastRunByAgent.get(agent.name),
     schedulerEntry: schedulerByAgentId.get(agent.id),
   }))

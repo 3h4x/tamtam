@@ -9,8 +9,13 @@
 
 import { spawn } from 'child_process';
 import { closeSync, createReadStream, openSync, writeSync } from 'fs';
+import { constants as osConstants } from 'os';
 import { redactSecrets } from '@/lib/shared/log-redaction';
 import { buildChildEnv } from '@/lib/shared/child-env';
+
+// Canonical signal-name → signum table. Hoisted from the per-exit
+// `require('os').constants.signals` lookup inside the exit handler.
+const OS_SIGNAL_NUMS = osConstants.signals as Record<string, number>;
 
 export interface RunSubprocessParams {
   jobId: string;
@@ -118,9 +123,7 @@ export async function runSubprocess(params: RunSubprocessParams): Promise<RunSub
       if (code != null) {
         rc = code;
       } else if (signal) {
-        // os.constants.signals is the canonical signum table.
-        const sigs = require('os').constants.signals as Record<string, number>;
-        rc = 128 + (sigs[signal] ?? 0);
+        rc = 128 + (OS_SIGNAL_NUMS[signal] ?? 0);
       } else {
         rc = 1;
       }

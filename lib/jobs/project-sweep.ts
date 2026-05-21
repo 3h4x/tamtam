@@ -156,23 +156,25 @@ export async function runSweep(deps: SweepDispatchDeps): Promise<SweepReport> {
     byAction: { release: 0, 'pr-wait': 0, skip: 0 },
     results: [],
   };
-  for (const name of names) {
+  // Fan out per-project work. Each project's resolveView → decide → dispatch
+  // chain is independent (per-project lock at the dispatch layer prevents
+  // intra-project races; cross-project actions never share state). Sequential
+  // awaits made sweep wall time scale linearly with project count — for a
+  // fleet of 20 projects with ~4s gh queries each (post iter 118), that was
+  // ~80s per sweep. Parallel fan-out collapses that to ~max(per-project).
+  const perProject = names.map(async (name): Promise<SweepReport['results'][number]> => {
     let view: ProjectSweepView | null = null;
     try {
       view = await deps.resolveView(name);
     } catch (err) {
-      report.results.push({
+      return {
         project: name,
         action: 'skip',
         reason: `view error: ${(err as Error).message}`,
-      });
-      report.byAction.skip += 1;
-      continue;
+      };
     }
     if (!view) {
-      report.results.push({ project: name, action: 'skip', reason: 'no view' });
-      report.byAction.skip += 1;
-      continue;
+      return { project: name, action: 'skip', reason: 'no view' };
     }
     const action = decideSweepAction(view);
     let dispatch: { ok: boolean; detail: string } | undefined;
@@ -187,8 +189,14 @@ export async function runSweep(deps: SweepDispatchDeps): Promise<SweepReport> {
         action.reason,
       );
     }
-    report.results.push({ project: name, action: action.kind, reason: action.reason, dispatch });
-    report.byAction[action.kind] += 1;
+    return { project: name, action: action.kind, reason: action.reason, dispatch };
+  });
+  // `Promise.all` over the array preserves index order (names → results)
+  // so the report stays deterministic for tests and operator readability.
+  const settled = await Promise.all(perProject);
+  for (const result of settled) {
+    report.results.push(result);
+    report.byAction[result.action] += 1;
   }
   report.finishedAt = Date.now();
   return report;

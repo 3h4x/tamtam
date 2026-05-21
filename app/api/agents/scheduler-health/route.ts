@@ -38,23 +38,28 @@ async function loadAgentsForCheck() {
 
 async function buildLastJobMap(entries: { agentId: string; project: string; name: string }[]): Promise<Map<string, number>> {
   const map = new Map<string, number>();
-  for (const e of entries) {
-    try {
-      const rows = await db
-        .select({ finishedAt: schema.jobs.finishedAt })
-        .from(schema.jobs)
-        .where(and(
-          eq(schema.jobs.project, e.project),
-          eq(schema.jobs.kind, `agent:${e.name}`),
-          isNotNull(schema.jobs.finishedAt),
-        ))
-        .orderBy(desc(schema.jobs.finishedAt))
-        .limit(1);
-      const row = rows[0] ?? null;
-      if (row?.finishedAt) map.set(e.agentId, row.finishedAt * 1000);
-    } catch {
-      // jobs table may not exist in test environments
-    }
+  const results = await Promise.all(
+    entries.map(async (e) => {
+      try {
+        const rows = await db
+          .select({ finishedAt: schema.jobs.finishedAt })
+          .from(schema.jobs)
+          .where(and(
+            eq(schema.jobs.project, e.project),
+            eq(schema.jobs.kind, `agent:${e.name}`),
+            isNotNull(schema.jobs.finishedAt),
+          ))
+          .orderBy(desc(schema.jobs.finishedAt))
+          .limit(1);
+        return { agentId: e.agentId, finishedAt: rows[0]?.finishedAt ?? null };
+      } catch {
+        // jobs table may not exist in test environments
+        return null;
+      }
+    }),
+  );
+  for (const r of results) {
+    if (r?.finishedAt) map.set(r.agentId, r.finishedAt * 1000);
   }
   return map;
 }
@@ -99,8 +104,10 @@ async function buildInternalSchedulerDump(
 export async function GET() {
   try {
     const agents = await loadAgentsForCheck();
-    const health = await getSchedulerHealth(agents);
-    const internal = await buildInternalSchedulerDump(agents);
+    const [health, internal] = await Promise.all([
+      getSchedulerHealth(agents),
+      buildInternalSchedulerDump(agents),
+    ]);
     const lastJobMap = await buildLastJobMap(internal.entries);
     const enrichedEntries = internal.entries.map(e => ({
       ...e,
@@ -130,8 +137,10 @@ export async function POST() {
       }
     }
 
-    const after = await getSchedulerHealth(agents);
-    const internal = await buildInternalSchedulerDump(agents);
+    const [after, internal] = await Promise.all([
+      getSchedulerHealth(agents),
+      buildInternalSchedulerDump(agents),
+    ]);
     const lastJobMap = await buildLastJobMap(internal.entries);
     const enrichedEntries = internal.entries.map(e => ({
       ...e,

@@ -146,12 +146,11 @@ export function WorkflowRunsEmptyState({
           <p className="max-w-md text-sm text-text-secondary">{description}</p>
           {meta ? <p className="text-xs font-mono text-text-tertiary">{meta}</p> : null}
         </div>
-        {actionHref ? (
+        {actionLabel && actionHref ? (
           <Link href={actionHref} className={actionClassName}>
             {actionLabel}
           </Link>
-        ) : null}
-        {!actionHref && actionLabel && onAction ? (
+        ) : actionLabel && onAction ? (
           <button type="button" className={actionClassName} onClick={onAction}>
             {actionLabel}
           </button>

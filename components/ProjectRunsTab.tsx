@@ -444,9 +444,9 @@ export function ProjectRunsTab({ projectName, jobsPaused = false }: ProjectRunsT
 
   const navigate = (e: Entry) => {
     if (e.bucket === 'run' && e.navSessionId && e.kind !== 'release') {
-      router.push(`/project/${projectName}/terminal/${e.navSessionId}`)
+      router.push(`/project/${encodeURIComponent(projectName)}/terminal/${encodeURIComponent(e.navSessionId)}`)
     } else {
-      router.push(`/project/${projectName}/terminal?job=${encodeURIComponent(e.navJobId)}`)
+      router.push(`/project/${encodeURIComponent(projectName)}/terminal?job=${encodeURIComponent(e.navJobId)}`)
     }
   }
 

@@ -70,6 +70,7 @@ function inferLegacyMarkDodIssueFromLineage(job: JobData, lookup: ContinueIssueL
 }
 
 const LEGACY_CONTEXT_KINDS = new Set(['run', 'fix']);
+const CLAUDE_RESUME_KINDS = new Set(['run', 'fix']);
 
 function inferLegacyMarkDodIssueByTime(job: JobData, lookup: ContinueIssueLookup): number | null {
   return lookup.projectJobs
@@ -133,10 +134,9 @@ export async function GET(
 
   // Most recent Claude run that ran for this issue. We accept run/fix kinds
   // — both store a session_id and either is a valid resume target.
-  const claudeKindsForResume = new Set(['run', 'fix']);
   const lastClaudeForIssue = projectJobs
     .filter(j =>
-      claudeKindsForResume.has(j.kind)
+      CLAUDE_RESUME_KINDS.has(j.kind)
       && j.ghIssueNumber === issueNumber
       && j.sessionId
     )

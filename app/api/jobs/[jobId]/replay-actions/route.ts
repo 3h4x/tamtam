@@ -1,18 +1,11 @@
 // POST /api/jobs/[jobId]/replay-actions — re-run the agent action orchestrator
-// for a completed agent job. Recovery path for the case where the completion
-// hook silently dropped a valid tamtam-actions block (e.g. the parser-given-a-
-// path bug fixed at the same time as this endpoint shipped, or any future
-// disruption between agent emit and server-side dispatch).
+// for a completed agent job.
 //
 // Idempotent by design: each action helper short-circuits when the target
 // state is already reached (issue already closed, branch already on default,
 // label already applied, ...) so replaying is safe whether or not the
-// original execution happened.
-//
-// The original parser-result-and-eligibility chain is reused verbatim so the
-// behavior matches what *should* have run during the live completion hook.
-// Persists the resulting `agentActions` counts on the job's contextMeta so
-// the UI surfaces the recovered work.
+// original execution happened. Persists the resulting `agentActions` counts
+// on the job's contextMeta so the UI surfaces the recovered work.
 
 import { NextRequest, NextResponse } from 'next/server';
 import { readFile } from 'node:fs/promises';

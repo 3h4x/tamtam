@@ -444,7 +444,7 @@ async function runAgentStart(
   });
   const job = createJob(agent.project, `agent:${agent.name}`, 0, '', taskPrompt, initialContextMeta, taskPrompt);
   job.provider = provider;
-  const logPath = join(logDir, `${job.id}.log`);
+  const logPath = join(/*turbopackIgnore: true*/ logDir, `${job.id}.log`);
   job.logPath = logPath;
   updateJob(job);
   mkdirSync(/*turbopackIgnore: true*/ logDir, { recursive: true });

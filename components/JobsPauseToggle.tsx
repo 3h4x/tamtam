@@ -47,38 +47,30 @@ export function JobsPauseToggle() {
         if (!enabled) setAutoThrottle(null)
       }
     }
-    const load = async () => {
-      try {
-        const res = await fetch('/api/settings')
-        const data = await res.json()
-        if (!live) return
-        applySettings(data.settings ?? {}, { merge: false })
-      } catch {
-        if (live) setJobsPaused(false)
-      } finally {
-        if (live) setLoading(false)
-      }
-    }
-    void load()
     // Poll /api/settings so the chip reflects out-of-band changes — the
     // rebuild-safe.sh script PATCHes rebuild_in_progress server-side via
     // curl, which never fires the in-browser settings-changed event. 5s
     // is short enough that "rebuilding…" appears almost immediately when
     // the script flips the flag, and disappears just as fast on unpause.
-    const poll = async () => {
+    //
+    // `initial=true` handles the loading->false transition + catches map to
+    // a safe "jobs running" default. Recurring polls stay silent on transient
+    // errors so the chip doesn't flicker mid-rebuild.
+    const fetchSettings = async (initial: boolean) => {
       try {
         const res = await fetch('/api/settings')
-        if (!res.ok) return
+        if (!initial && !res.ok) return
         const data = await res.json()
         if (!live) return
         applySettings(data.settings ?? {}, { merge: false })
       } catch {
-        // Silent: during restart the server is briefly unreachable; we
-        // intentionally keep the last-known state on screen so the chip
-        // doesn't flicker back to "jobs running" mid-rebuild.
+        if (initial && live) setJobsPaused(false)
+      } finally {
+        if (initial && live) setLoading(false)
       }
     }
-    const pollId = setInterval(poll, 5_000)
+    void fetchSettings(true)
+    const pollId = setInterval(() => fetchSettings(false), 5_000)
     const unsubscribe = subscribeToSettingsChanged((settings) => {
       if (!live) return
       applySettings(settings, { merge: true })

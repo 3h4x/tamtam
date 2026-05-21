@@ -31,11 +31,11 @@ export type LegacyWorkflowKey = typeof LEGACY_WORKFLOW_KEYS[number];
 export function readLegacyWorkflowFlags(
   projectPath: string
 ): Partial<Record<LegacyWorkflowKey, boolean | string>> {
-  const configPath = join(projectPath, '.tamtam', 'config.yml');
-  if (!existsSync(configPath)) return {};
+  const configPath = join(/*turbopackIgnore: true*/ projectPath, '.tamtam', 'config.yml');
+  if (!existsSync(/*turbopackIgnore: true*/ configPath)) return {};
   let parsed: unknown;
   try {
-    parsed = yamlParse(readFileSync(configPath, 'utf-8'));
+    parsed = yamlParse(readFileSync(/*turbopackIgnore: true*/ configPath, 'utf-8'));
   } catch {
     return {};
   }
@@ -221,11 +221,11 @@ export function loadFileConfig(projectPath: string): FileProjectConfig | null {
   }
 
   // On the default branch: read from the working tree as before.
-  const configPath = join(projectPath, '.tamtam', 'config.yml');
-  if (!existsSync(configPath)) return null;
+  const configPath = join(/*turbopackIgnore: true*/ projectPath, '.tamtam', 'config.yml');
+  if (!existsSync(/*turbopackIgnore: true*/ configPath)) return null;
 
   try {
-    return parseConfigYaml(readFileSync(configPath, 'utf-8'));
+    return parseConfigYaml(readFileSync(/*turbopackIgnore: true*/ configPath, 'utf-8'));
   } catch {
     return null;
   }
@@ -247,17 +247,17 @@ export function writeFileConfig(
   projectPath: string,
   updates: Partial<Record<keyof FileProjectConfig, string | number | string[] | FileCustomAction[] | AutoAttachDocRule[] | null>>
 ): void {
-  const tamtamDir = join(projectPath, '.tamtam');
-  const configPath = join(tamtamDir, 'config.yml');
+  const tamtamDir = join(/*turbopackIgnore: true*/ projectPath, '.tamtam');
+  const configPath = join(/*turbopackIgnore: true*/ tamtamDir, 'config.yml');
 
-  mkdirSync(tamtamDir, { recursive: true });
+  mkdirSync(/*turbopackIgnore: true*/ tamtamDir, { recursive: true });
 
   // Read the raw YAML document to preserve unrecognized keys that TamTam doesn't know about.
   // loadFileConfig only returns recognized keys, so we must source unknown keys from the raw file.
   let rawDoc: Record<string, unknown> = {};
-  if (existsSync(configPath)) {
+  if (existsSync(/*turbopackIgnore: true*/ configPath)) {
     try {
-      const parsed = yamlParse(readFileSync(configPath, 'utf-8')) as unknown;
+      const parsed = yamlParse(readFileSync(/*turbopackIgnore: true*/ configPath, 'utf-8')) as unknown;
       if (parsed && typeof parsed === 'object' && !Array.isArray(parsed)) {
         rawDoc = parsed as Record<string, unknown>;
       }
@@ -272,9 +272,9 @@ export function writeFileConfig(
   } else {
     // For writes on a feature branch, start from the working-tree file (if present) so we don't
     // lose local edits, even though reads come from the default branch.
-    if (existsSync(configPath)) {
+    if (existsSync(/*turbopackIgnore: true*/ configPath)) {
       try {
-        baseConfig = parseConfigYaml(readFileSync(configPath, 'utf-8')) ?? {};
+        baseConfig = parseConfigYaml(readFileSync(/*turbopackIgnore: true*/ configPath, 'utf-8')) ?? {};
       } catch {
         baseConfig = {};
       }
@@ -324,5 +324,5 @@ export function writeFileConfig(
 
   const header = '# TamTam project configuration — committed to version control\n# See .tamtam/agents/ for agent definitions\n';
   const body = Object.keys(docWithUnknown).length > 0 ? yamlStringify(docWithUnknown) : '';
-  writeFileSync(configPath, header + (body ? '\n' + body : '\n'));
+  writeFileSync(/*turbopackIgnore: true*/ configPath, header + (body ? '\n' + body : '\n'));
 }

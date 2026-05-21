@@ -139,69 +139,60 @@ export async function writePriorityYaml(
 }
 
 /**
- * Write a project field to the DB projects table.
+ * Write a project field to the DB projects table. Returns false when the
+ * project doesn't exist OR when the field name is not recognized.
  */
+type ProjectUpdate = Parameters<ReturnType<typeof db.update<typeof schema.projects>>['set']>[0];
+type FieldBuilder = (value: string | null) => ProjectUpdate;
+
+const toBool = (v: string | null): boolean => v === '1' || v === 'true';
+
+const FIELD_BUILDERS: Record<string, FieldBuilder> = {
+  github: (v) => ({ github: v }),
+  priority: (v) => ({ priority: v }),
+  test_command: (v) => ({ testCommand: v }),
+  test_cron_schedule: (v) => ({ testCronSchedule: v }),
+  test_cron_enabled: (v) => ({ testCronEnabled: toBool(v) }),
+  auto_commit_enabled: (v) => ({ autoCommitEnabled: toBool(v) }),
+  auto_push_enabled: (v) => ({ autoPushEnabled: toBool(v) }),
+  auto_pr_merge_enabled: (v) => ({ autoPrMergeEnabled: toBool(v) }),
+  release_after_run: (v) => ({ releaseAfterRun: toBool(v) }),
+  issue_auto_branch: (v) => ({ issueAutoBranch: toBool(v) }),
+  tests_disabled: (v) => ({ testsDisabled: toBool(v) }),
+  review_disabled: (v) => ({ reviewDisabled: toBool(v) }),
+  review_prompt_addendum: (v) => ({ reviewPromptAddendum: v }),
+  fix_prompt_addendum: (v) => ({ fixPromptAddendum: v }),
+  review_prerequisite_command: (v) => ({ reviewPrerequisiteCommand: v }),
+  website: (v) => ({ website: v }),
+  qa_url: (v) => ({ qaUrl: v }),
+  post_merge_watch_minutes: (v) => {
+    const parsed = v === null ? 0 : Number.parseInt(v, 10);
+    return { postMergeWatchMinutes: Number.isFinite(parsed) && parsed >= 0 ? parsed : 0 };
+  },
+  auto_revert_enabled: (v) => ({ autoRevertEnabled: toBool(v) }),
+  dev_server_start_command: (v) => ({ devServerStartCommand: v }),
+  dev_server_stop_command: (v) => ({ devServerStopCommand: v }),
+  dev_server_ready_url: (v) => ({ devServerReadyUrl: v }),
+};
+
 export async function writeProjectFieldYaml(
   projName: string,
   fieldName: string,
   value: string | null
 ): Promise<boolean> {
+  const builder = FIELD_BUILDERS[fieldName];
+  if (!builder) return false;
   const rows = await db
-    .select()
+    .select({ name: schema.projects.name })
     .from(schema.projects)
     .where(eq(schema.projects.name, projName))
     .limit(1);
-  const existing = rows[0] ?? null;
-  if (!existing) return false;
-  const w = eq(schema.projects.name, projName);
-  const run = (upd: Promise<unknown>) => void upd.catch(e => console.error('[scheduling]', e));
-  if (fieldName === 'github') {
-    run(db.update(schema.projects).set({ github: value }).where(w).execute());
-  } else if (fieldName === 'priority') {
-    run(db.update(schema.projects).set({ priority: value }).where(w).execute());
-  } else if (fieldName === 'test_command') {
-    run(db.update(schema.projects).set({ testCommand: value }).where(w).execute());
-  } else if (fieldName === 'test_cron_schedule') {
-    run(db.update(schema.projects).set({ testCronSchedule: value }).where(w).execute());
-  } else if (fieldName === 'test_cron_enabled') {
-    run(db.update(schema.projects).set({ testCronEnabled: value === '1' || value === 'true' }).where(w).execute());
-  } else if (fieldName === 'auto_commit_enabled') {
-    run(db.update(schema.projects).set({ autoCommitEnabled: value === '1' || value === 'true' }).where(w).execute());
-  } else if (fieldName === 'auto_push_enabled') {
-    run(db.update(schema.projects).set({ autoPushEnabled: value === '1' || value === 'true' }).where(w).execute());
-  } else if (fieldName === 'auto_pr_merge_enabled') {
-    run(db.update(schema.projects).set({ autoPrMergeEnabled: value === '1' || value === 'true' }).where(w).execute());
-  } else if (fieldName === 'release_after_run') {
-    run(db.update(schema.projects).set({ releaseAfterRun: value === '1' || value === 'true' }).where(w).execute());
-  } else if (fieldName === 'issue_auto_branch') {
-    run(db.update(schema.projects).set({ issueAutoBranch: value === '1' || value === 'true' }).where(w).execute());
-  } else if (fieldName === 'tests_disabled') {
-    run(db.update(schema.projects).set({ testsDisabled: value === '1' || value === 'true' }).where(w).execute());
-  } else if (fieldName === 'review_disabled') {
-    run(db.update(schema.projects).set({ reviewDisabled: value === '1' || value === 'true' }).where(w).execute());
-  } else if (fieldName === 'review_prompt_addendum') {
-    run(db.update(schema.projects).set({ reviewPromptAddendum: value }).where(w).execute());
-  } else if (fieldName === 'fix_prompt_addendum') {
-    run(db.update(schema.projects).set({ fixPromptAddendum: value }).where(w).execute());
-  } else if (fieldName === 'review_prerequisite_command') {
-    run(db.update(schema.projects).set({ reviewPrerequisiteCommand: value }).where(w).execute());
-  } else if (fieldName === 'website') {
-    run(db.update(schema.projects).set({ website: value }).where(w).execute());
-  } else if (fieldName === 'qa_url') {
-    run(db.update(schema.projects).set({ qaUrl: value }).where(w).execute());
-  } else if (fieldName === 'post_merge_watch_minutes') {
-    const parsed = value === null ? 0 : Number.parseInt(value, 10);
-    const minutes = Number.isFinite(parsed) && parsed >= 0 ? parsed : 0;
-    run(db.update(schema.projects).set({ postMergeWatchMinutes: minutes }).where(w).execute());
-  } else if (fieldName === 'auto_revert_enabled') {
-    run(db.update(schema.projects).set({ autoRevertEnabled: value === '1' || value === 'true' }).where(w).execute());
-  } else if (fieldName === 'dev_server_start_command') {
-    run(db.update(schema.projects).set({ devServerStartCommand: value }).where(w).execute());
-  } else if (fieldName === 'dev_server_stop_command') {
-    run(db.update(schema.projects).set({ devServerStopCommand: value }).where(w).execute());
-  } else if (fieldName === 'dev_server_ready_url') {
-    run(db.update(schema.projects).set({ devServerReadyUrl: value }).where(w).execute());
-  }
+  if (!rows[0]) return false;
+  db.update(schema.projects)
+    .set(builder(value))
+    .where(eq(schema.projects.name, projName))
+    .execute()
+    .catch((e) => console.error('[scheduling]', e));
   return true;
 }
 
