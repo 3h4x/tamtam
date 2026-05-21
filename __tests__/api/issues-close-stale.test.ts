@@ -136,6 +136,33 @@ describe('POST /api/projects/by-project/[projectName]/issues/[number]/close-stal
     expect(data.verdict).toBe('FIXED');
   });
 
+  it('rejects unknown reasons with 400 (regression: previously echoed arbitrary uppercase verdicts into the public comment)', async () => {
+    const res = await POST(makeRequest({ findings: 'x', reason: 'sketchy' }), ctx());
+    expect(res.status).toBe(400);
+    const data = await res.json();
+    expect(data.detail).toMatch(/reason must be one of/i);
+    // No gh CLI invocation should have fired.
+    expect(execMock).not.toHaveBeenCalled();
+  });
+
+  it('rejects non-string reason values', async () => {
+    const res = await POST(makeRequest({ findings: 'x', reason: 42 }), ctx());
+    expect(res.status).toBe(400);
+    expect(execMock).not.toHaveBeenCalled();
+  });
+
+  it('accepts the documented `duplicate` and `wontfix` reasons', async () => {
+    for (const reason of ['duplicate', 'wontfix']) {
+      execMock.mockClear();
+      const res = await POST(makeRequest({ findings: `${reason} verdict`, reason }), ctx());
+      expect(res.status).toBe(200);
+      const data = await res.json();
+      expect(data.verdict).toBe(reason.toUpperCase());
+      // Both map to GitHub's `not_planned` state-reason.
+      expect(data.reason).toBe('not_planned');
+    }
+  });
+
   it('returns 502 when gh comment fails', async () => {
     execMock.mockResolvedValueOnce({ exitCode: 1, stdout: '', stderr: 'auth required' });
     const res = await POST(makeRequest({ findings: 'x' }), ctx());

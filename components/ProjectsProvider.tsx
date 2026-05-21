@@ -1,6 +1,6 @@
 'use client'
 
-import { createContext, useContext, useState, useEffect, useRef, useCallback, type ReactNode } from 'react'
+import { createContext, useContext, useState, useEffect, useRef, useCallback, useMemo, type ReactNode } from 'react'
 import { fetchProjects, setPriority, pauseProject, resumeProject } from '@/lib/client-api'
 import type { Task, ProjectsResponse } from '@/lib/shared/types'
 import { computeFleetHealth, type FleetHealth } from '@/hooks/useProjectHealth'
@@ -140,7 +140,12 @@ export function ProjectsProvider({ children }: { children: ReactNode }) {
     }
   }
 
-  const fleet = computeFleetHealth(tasks)
+  // Memoize the fleet-health compute. It walks every task, builds per-project
+  // aggregates, and runs status reduction — re-running on every render (e.g.
+  // a child component triggers a re-render but `tasks` is unchanged) was
+  // wasted CPU. With many projects this can produce visible jank as the
+  // provider sits high in the tree.
+  const fleet = useMemo(() => computeFleetHealth(tasks), [tasks])
 
   return (
     <ProjectsContext.Provider

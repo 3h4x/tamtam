@@ -34,7 +34,27 @@ export async function POST(
   const findings = (body.findings ?? '').trim();
   if (!findings) return NextResponse.json({ detail: 'findings required' }, { status: 400 });
 
-  const reason = (body.reason ?? 'stale').toLowerCase();
+  // Validate `reason` against the closed set documented in the function
+  // header. Previously the route silently accepted any string and used it
+  // verbatim as the verdict-label in the public GitHub comment — a typo
+  // like "stalee" would post "## TamTam verdict: STALEE" to the issue,
+  // and an attacker-controlled string could splice arbitrary text in
+  // upper-case form. The set below mirrors the JSDoc contract.
+  const ALLOWED_REASONS = ['stale', 'duplicate', 'wontfix', 'fixed'] as const;
+  type AllowedReason = (typeof ALLOWED_REASONS)[number];
+  const rawReason = (body.reason ?? 'stale');
+  if (typeof rawReason !== 'string') {
+    return NextResponse.json({ detail: 'reason must be a string' }, { status: 400 });
+  }
+  const lowered = rawReason.toLowerCase();
+  if (!(ALLOWED_REASONS as readonly string[]).includes(lowered)) {
+    return NextResponse.json(
+      { detail: `reason must be one of: ${ALLOWED_REASONS.join(', ')}` },
+      { status: 400 },
+    );
+  }
+  // Now narrow to the union via the runtime-checked allow-list above.
+  const reason = lowered as AllowedReason;
   // GitHub state-reason: only 'not_planned' and 'completed' are accepted via gh CLI;
   // everything except 'fixed' maps to not_planned.
   const stateReason = reason === 'fixed' ? 'completed' : 'not_planned';

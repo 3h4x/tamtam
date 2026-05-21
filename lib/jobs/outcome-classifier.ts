@@ -73,6 +73,15 @@ export interface ClassifyDeps {
   fetch?: typeof fetch;
 }
 
+// Hard cap on a single classification call. The classifier is gemma3:4b
+// (or another small local model) on the existing retrieval Ollama
+// instance; cold model load can pause for 10-20s, but a warm response on
+// a 2 KB tail completes in well under a second. 30s is generous for the
+// slow path while preventing the markDone hook from hanging forever if
+// Ollama itself is wedged — the whole feature is best-effort and a
+// timed-out fetch must NEVER block job finalization.
+const CLASSIFY_TIMEOUT_MS = 30_000;
+
 export async function classifyOutcome(
   logTail: string,
   options: { ollamaUrl: string; model: string; deps?: ClassifyDeps },
@@ -91,6 +100,7 @@ export async function classifyOutcome(
         format: 'json',
         options: { temperature: 0, num_predict: 128 },
       }),
+      signal: AbortSignal.timeout(CLASSIFY_TIMEOUT_MS),
     });
   } catch (err) {
     console.warn('[outcome-classifier] ollama fetch failed:', err);

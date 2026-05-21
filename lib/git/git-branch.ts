@@ -57,7 +57,12 @@ export function gitShowSync(projectPath: string, ref: string, relPath: string): 
   }
 }
 
-/** List file names (not dirs) at a given tree path on a git ref. Returns [] on failure. */
+/**
+ * List entry names (files AND subdirs) at a given tree path on a git ref.
+ * Returns [] on failure. Callers that need files-only must filter further;
+ * `gitShowSync` returns null for tree entries, so the typical pattern is
+ * "list names, attempt to show each, skip nulls".
+ */
 export function gitLsTreeSync(projectPath: string, ref: string, treePath: string): string[] {
   try {
     const out = execFileSync(

@@ -76,4 +76,33 @@ describe('embedText', () => {
       .rejects.toThrow();
     expect(mockRecord).not.toHaveBeenCalled();
   });
+
+  it('throws when Ollama returns an empty embeddings array', async () => {
+    // Regression: previously returned `undefined` silently when
+    // `data.embeddings` was empty or missing, breaking the
+    // Promise<number[]> contract and surfacing as a confusing
+    // pgvector type error downstream.
+    mockFetch.mockResolvedValue({ ok: true, json: async () => ({ embeddings: [] }) });
+    await expect(embedText('x', 'http://localhost:11434', 'nomic-embed-text'))
+      .rejects.toThrow(/no vector/i);
+    expect(mockRecord).not.toHaveBeenCalled();
+  });
+
+  it('throws when Ollama omits the embeddings field entirely', async () => {
+    mockFetch.mockResolvedValue({ ok: true, json: async () => ({}) });
+    await expect(embedText('x', 'http://localhost:11434', 'nomic-embed-text'))
+      .rejects.toThrow(/no vector/i);
+  });
+
+  it('throws when the first embedding vector is empty', async () => {
+    mockFetch.mockResolvedValue({ ok: true, json: async () => ({ embeddings: [[]] }) });
+    await expect(embedText('x', 'http://localhost:11434', 'nomic-embed-text'))
+      .rejects.toThrow(/no vector/i);
+  });
+
+  it('includes statusText in the error when present (operator debug info)', async () => {
+    mockFetch.mockResolvedValue({ ok: false, status: 401, statusText: 'Unauthorized' });
+    await expect(embedText('x', 'http://localhost:11434', 'nomic-embed-text'))
+      .rejects.toThrow(/401.*Unauthorized/i);
+  });
 });

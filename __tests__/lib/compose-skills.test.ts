@@ -166,4 +166,51 @@ Review recent changes carefully.`,
       },
     ]);
   });
+
+  it('rejects persona paths containing `..` segments (regression: path traversal)', async () => {
+    // Plant a target file outside the persona roots that an attacker
+    // would want to read. Without the traversal guard,
+    // `persona:../../etc/passwd` would resolve to a path outside the
+    // skills directories and readFileSync would happily exfiltrate the
+    // file's contents into the agent's composed prompt.
+    writeFileSync(join(tempDir, 'sensitive.md'), 'SENSITIVE CONTENT');
+
+    const composed = await composeAgentSkills(
+      join(tempDir, 'project'),
+      ['persona:../../sensitive'],
+      [],
+    );
+
+    // No content composed (traversal blocked). Falls back to metadata-only.
+    expect(composed.parts).toEqual([]);
+    expect(composed.metaSkills).toEqual([
+      {
+        id: 'persona:../../sensitive',
+        name: '../../sensitive',
+        description: '../../sensitive',
+        source: 'file',
+      },
+    ]);
+  });
+
+  it('rejects persona paths starting with an absolute slash', async () => {
+    const composed = await composeAgentSkills(
+      join(tempDir, 'project'),
+      ['persona:/etc/passwd'],
+      [],
+    );
+    expect(composed.parts).toEqual([]);
+    // Falls back to a metadata-only entry, no file read attempt.
+    expect(composed.metaSkills).toHaveLength(1);
+    expect(composed.metaSkills[0].source).toBe('file');
+  });
+
+  it('rejects persona paths with empty segments (e.g. consecutive slashes)', async () => {
+    const composed = await composeAgentSkills(
+      join(tempDir, 'project'),
+      ['persona:engineering//../etc/passwd'],
+      [],
+    );
+    expect(composed.parts).toEqual([]);
+  });
 });

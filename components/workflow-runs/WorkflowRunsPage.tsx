@@ -225,6 +225,12 @@ function formatTime(iso: string | null): string {
   }
 }
 
+function workflowEventTime(run: WorkflowRunSummary): string | null {
+  if (run.completedAt) return run.completedAt;
+  if (run.startedAt) return run.startedAt;
+  return run.createdAt;
+}
+
 function formatTitle(value: unknown): string {
   if (value == null) return '';
   if (typeof value === 'string') return value;
@@ -506,9 +512,9 @@ export function WorkflowRunsPage() {
                     <div className="font-mono text-text-secondary tabular-nums">{formatDurationCell(r, now)}</div>
                   </div>
                   <div>
-                    <div className="uppercase tracking-wide text-text-tertiary">Started</div>
-                    <div className="text-text-secondary" title={formatTime(r.startedAt ?? r.createdAt)}>
-                      {formatRelativeTime(r.startedAt ?? r.createdAt, now)}
+                    <div className="uppercase tracking-wide text-text-tertiary">Last event</div>
+                    <div className="text-text-secondary" title={formatTime(workflowEventTime(r))}>
+                      {formatRelativeTime(workflowEventTime(r), now)}
                     </div>
                   </div>
                 </div>
@@ -525,12 +531,13 @@ export function WorkflowRunsPage() {
                 <th className="px-3 py-2 text-left font-medium" title="Why this run was dispatched — parent job, source job, or trigger source.">Trigger</th>
                 <th className="px-3 py-2 text-left font-medium" title="End status with workflow-specific detail: verdict for review, exit code for test/push/commit/fix, error tail for failed.">Outcome</th>
                 <th className="px-3 py-2 text-right font-medium">Duration</th>
-                <th className="px-3 py-2 text-left font-medium">Started</th>
+                <th className="px-3 py-2 text-left font-medium" title="Completed time for finished runs, started time for active runs.">Last event</th>
               </tr>
             </thead>
             <tbody>
               {filtered.map((r) => {
                 const outcome = summarizeOutcome(r);
+                const eventTime = workflowEventTime(r);
                 return (
                   <tr
                     key={r.id}
@@ -567,9 +574,9 @@ export function WorkflowRunsPage() {
                     </td>
                     <td
                       className="whitespace-nowrap px-3 py-2 text-xs text-text-secondary"
-                      title={formatTime(r.startedAt ?? r.createdAt)}
+                      title={formatTime(eventTime)}
                     >
-                      {formatRelativeTime(r.startedAt ?? r.createdAt, now)}
+                      {formatRelativeTime(eventTime, now)}
                     </td>
                   </tr>
                 );

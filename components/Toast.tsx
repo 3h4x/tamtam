@@ -1,6 +1,6 @@
 'use client'
 
-import { createContext, useContext, useState, useCallback, type ReactNode } from 'react'
+import { createContext, useContext, useState, useCallback, useMemo, type ReactNode } from 'react'
 
 interface ToastItem {
   id: number
@@ -33,8 +33,13 @@ export function ToastProvider({ children }: { children: ReactNode }) {
     }, 4000)
   }, [])
 
+  // Stable value reference — without this, every toast add/remove rebuilds
+  // the context object and forces every `useToast()` consumer to re-render
+  // even though the `toast` function itself never changes.
+  const ctxValue = useMemo(() => ({ toast }), [toast])
+
   return (
-    <ToastContext.Provider value={{ toast }}>
+    <ToastContext.Provider value={ctxValue}>
       {children}
       {toasts.length > 0 && (
         <div className="fixed top-4 right-4 z-[100] flex flex-col gap-2">

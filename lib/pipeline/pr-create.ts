@@ -13,6 +13,21 @@ function normalizeExecResult(result: ExecLikeResult) {
   };
 }
 
+// Pick the PR URL out of `gh pr create` stdout. gh can emit preamble lines
+// containing OTHER pull URLs (e.g. a referenced PR in the commit body that
+// gh's templating echoes back); pick the LAST github.com/.../pull/N match
+// anywhere in stdout rather than the first line starting with "https://" —
+// the real created-PR URL is always the last URL gh prints. Matches the
+// strategy already used by `app/api/projects/.../create-pr/route.ts`.
+function extractCreatedPrUrl(stdout: string): string | null {
+  const matches = stdout.match(/https:\/\/github\.com\/[^/\s]+\/[^/\s]+\/pull\/\d+/g);
+  if (matches && matches.length > 0) return matches[matches.length - 1];
+  // Fallback: a line that begins with https:// — covers older gh behavior
+  // and the existing test mocks that don't emit a full /pull/N URL pattern.
+  const fallback = stdout.trim().split('\n').find((l) => l.startsWith('https://'));
+  return fallback ?? null;
+}
+
 function stubIssuePrBody(issue: { number: number; repo: string }): string {
   return `Closes #${issue.number}\n\nImplemented via TamTam from issue [#${issue.number}](https://github.com/${issue.repo}/issues/${issue.number}).`;
 }
@@ -88,7 +103,7 @@ export async function createGenericPR(
     return null;
   }
 
-  const prUrl = prR.stdout.trim().split('\n').find(l => l.startsWith('https://')) ?? prR.stdout.trim();
+  const prUrl = extractCreatedPrUrl(prR.stdout) ?? prR.stdout.trim();
   if (!prUrl) return null;
 
   const repoR = normalizeExecResult(await exec('gh', ['repo', 'view', '--json', 'nameWithOwner', '--jq', '.nameWithOwner'], { cwd: projPath, timeout: 10000, signal }));
@@ -175,7 +190,7 @@ export async function createIssuePR(
     return null;
   }
 
-  const prUrl = prR.stdout.trim().split('\n').find(l => l.startsWith('https://')) ?? prR.stdout.trim();
+  const prUrl = extractCreatedPrUrl(prR.stdout) ?? prR.stdout.trim();
   log(`\n# PR created: ${prUrl}\n`);
   return prUrl || null;
 }

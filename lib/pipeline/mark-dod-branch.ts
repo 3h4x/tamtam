@@ -50,7 +50,10 @@ export async function ensureBranchForCtx(
   const originalBranch = branchR.stdout.trim() || null;
   if (originalBranch === targetBranch) return { switched: false, skipped: `already on ${targetBranch}` };
   const dirtyR = await exec('git', ['-C', projPath, 'status', '--porcelain'], { timeout: 5000 });
-  if (dirtyR.exitCode !== 0 || dirtyR.stdout.trim().length > 0) {
+  if (dirtyR.exitCode !== 0) {
+    return { switched: false, skipped: `could not read working tree state (git status failed) — staying on ${originalBranch ?? 'current branch'}` };
+  }
+  if (dirtyR.stdout.trim().length > 0) {
     return { switched: false, skipped: `uncommitted changes — staying on ${originalBranch ?? 'current branch'}` };
   }
 

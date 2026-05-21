@@ -70,6 +70,12 @@ function parseVerifyResponse(raw: string): { verdict: VerifyVerdict; reason: str
   return { verdict: v, reason: typeof r === 'string' ? r.slice(0, 200) : '' };
 }
 
+// Hard cap on a single verifier call. Matches the timeout used by the
+// outcome classifier (both hit `/api/generate` on the same Ollama
+// instance) — generous for cold-model load but bounded so a wedged
+// Ollama can't stall the reindex-corpus cron task that calls this.
+const VERIFY_TIMEOUT_MS = 30_000;
+
 export async function verifyRetrievalWithCheapModel(
   input: VerifyInput,
   options: { ollamaUrl: string; model: string; deps?: VerifyDeps },
@@ -89,6 +95,7 @@ export async function verifyRetrievalWithCheapModel(
         format: 'json',
         options: { temperature: 0, num_predict: 96 },
       }),
+      signal: AbortSignal.timeout(VERIFY_TIMEOUT_MS),
     });
   } catch (err) {
     console.warn('[retrieval-verify] ollama fetch failed:', err);

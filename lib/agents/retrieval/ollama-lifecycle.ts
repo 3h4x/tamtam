@@ -20,7 +20,11 @@ async function waitForOllama(url: string, maxMs = 5000): Promise<boolean> {
 
 async function ensureModelPulled(ollamaUrl: string, model: string): Promise<void> {
   try {
-    const res = await fetch(`${ollamaUrl}/api/tags`);
+    // Match the 3s budget used by `ollamaReachable` — by the time we get
+    // here we've already confirmed Ollama answered, so this should be
+    // near-instant; the timeout exists so a wedge between the reachable
+    // probe and this call can't stall retrieval bootstrap forever.
+    const res = await fetch(`${ollamaUrl}/api/tags`, { signal: AbortSignal.timeout(3000) });
     const data = await res.json() as { models: { name: string }[] };
     const pulled = data.models.some((m) => m.name.startsWith(model));
     if (!pulled) {

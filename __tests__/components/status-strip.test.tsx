@@ -126,7 +126,7 @@ describe('StatusStrip', () => {
     const ciButton = Array.from(container.querySelectorAll('button')).find((button) => button.textContent?.includes('failing'))
     ciButton?.dispatchEvent(new MouseEvent('click', { bubbles: true }))
 
-    expect(openMock).toHaveBeenCalledWith('https://github.com/acme/widgets/actions/runs/1', '_blank')
+    expect(openMock).toHaveBeenCalledWith('https://github.com/acme/widgets/actions/runs/1', '_blank', 'noopener,noreferrer')
     unmount()
   })
 

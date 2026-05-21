@@ -12,13 +12,15 @@ export async function decidePrContext(
   projectPath: string,
   signal?: AbortSignal,
 ): Promise<PrDecision> {
-  const branchR = await exec(
-    'git',
-    ['-C', projectPath, 'branch', '--show-current'],
-    { timeout: 5000, signal },
-  );
+  // The two probes are independent — fire them in parallel so this call
+  // (used on every release start to decide PR vs direct push) costs one git
+  // round-trip instead of two. Matches the same Promise.all pattern used by
+  // the /branch route.
+  const [branchR, defaultBranch] = await Promise.all([
+    exec('git', ['-C', projectPath, 'branch', '--show-current'], { timeout: 5000, signal }),
+    detectMainBranch(projectPath, signal),
+  ]);
   const currentBranch = typeof branchR?.stdout === 'string' ? branchR.stdout.trim() : '';
-  const defaultBranch = await detectMainBranch(projectPath, signal);
   const shouldOpenPr = !!currentBranch && currentBranch !== defaultBranch;
 
   return {

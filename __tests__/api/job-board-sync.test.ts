@@ -4,17 +4,21 @@ import { NextRequest } from 'next/server';
 describe('POST /api/jobs/[jobId]/board-sync', () => {
   const getJobMock = vi.fn();
   const syncJobToProjectBoardMock = vi.fn();
+  const isBoardSyncRateLimitErrorMock = vi.fn().mockReturnValue(false);
   let POST: typeof import('@/app/api/jobs/[jobId]/board-sync/route').POST;
 
   beforeEach(async () => {
     vi.resetModules();
     getJobMock.mockReset();
     syncJobToProjectBoardMock.mockReset();
+    isBoardSyncRateLimitErrorMock.mockReset();
+    isBoardSyncRateLimitErrorMock.mockReturnValue(false);
     vi.doMock('@/lib/jobs/job-storage', () => ({
       getJob: getJobMock,
     }));
     vi.doMock('@/lib/github/project-board', () => ({
       syncJobToProjectBoard: syncJobToProjectBoardMock,
+      isBoardSyncRateLimitError: isBoardSyncRateLimitErrorMock,
     }));
     POST = (await import('@/app/api/jobs/[jobId]/board-sync/route')).POST;
   });
@@ -74,6 +78,22 @@ describe('POST /api/jobs/[jobId]/board-sync', () => {
 
     expect(response.status).toBe(502);
     await expect(response.json()).resolves.toMatchObject({ detail: 'gh project item-edit failed' });
+  });
+
+  it('returns 429 when the project-board layer signals a rate-limit cooldown', async () => {
+    getJobMock.mockReturnValue({ id: 'job-1', project: 'proj', kind: 'run', finishedAt: 123, exitCode: 0 });
+    // The real error message also starts with "GitHub board sync " which
+    // would otherwise be matched as a 409 config-state error — the route
+    // must consult isBoardSyncRateLimitError() first so the back-off
+    // signal reaches clients.
+    syncJobToProjectBoardMock.mockRejectedValueOnce(new Error('GitHub board sync skipped: rate-limit cooldown active'));
+    isBoardSyncRateLimitErrorMock.mockReturnValueOnce(true);
+
+    const response = await POST(new NextRequest('http://localhost/api/jobs/job-1/board-sync', { method: 'POST' }), {
+      params: Promise.resolve({ jobId: 'job-1' }),
+    });
+
+    expect(response.status).toBe(429);
   });
 });
 
