@@ -51,6 +51,12 @@ function renderWorkflowRunsPage() {
   }
 }
 
+function setInputValue(input: HTMLInputElement, value: string) {
+  const descriptor = Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, 'value')
+  descriptor?.set?.call(input, value)
+  input.dispatchEvent(new Event('input', { bubbles: true }))
+}
+
 describe('WorkflowRunsPage', () => {
   beforeEach(() => {
     vi.useFakeTimers()
@@ -316,6 +322,93 @@ describe('WorkflowRunsPage', () => {
 
     expect(failedButton?.getAttribute('aria-pressed')).toBe('true')
     expect(failedButton?.className).toContain('text-status-error')
+
+    unmount()
+  })
+
+  it('filters runs by trigger and derived outcome text', async () => {
+    vi.stubGlobal('fetch', vi.fn().mockResolvedValue({
+      ok: true,
+      json: async () => ({
+        runs: [
+          {
+            id: 'run-review',
+            name: 'review',
+            rawName: 'workflow.review',
+            status: 'completed',
+            createdAt: '2026-05-20T11:49:00Z',
+            startedAt: '2026-05-20T11:50:00Z',
+            completedAt: '2026-05-20T11:50:30Z',
+            durationMs: 30_000,
+            input: ['acme', { parentJobId: 'release-123' }],
+            output: { verdict: 'LGTM' },
+            error: null,
+          },
+          {
+            id: 'run-push',
+            name: 'push',
+            rawName: 'workflow.push',
+            status: 'completed',
+            createdAt: '2026-05-20T11:45:00Z',
+            startedAt: '2026-05-20T11:46:00Z',
+            completedAt: '2026-05-20T11:46:30Z',
+            durationMs: 30_000,
+            input: ['acme', { reason: 'nightly sync' }],
+            output: { dispatched: false },
+            error: null,
+          },
+          {
+            id: 'run-test',
+            name: 'test',
+            rawName: 'workflow.test',
+            status: 'failed',
+            createdAt: '2026-05-20T11:40:00Z',
+            startedAt: '2026-05-20T11:41:00Z',
+            completedAt: '2026-05-20T11:41:30Z',
+            durationMs: 30_000,
+            input: ['beta'],
+            output: { exitCode: 1 },
+            error: 'exit 1',
+          },
+        ],
+        meta: { workflowEnabled: true, releaseWorkflow: true, releaseWorkflowDrive: true, mode: 'drive' },
+      }),
+    }))
+
+    const { container, unmount } = renderWorkflowRunsPage()
+
+    await vi.waitFor(() => {
+      expect(container.textContent).toContain('review')
+      expect(container.textContent).toContain('push')
+      expect(container.textContent).toContain('test')
+    })
+
+    const filterInput = container.querySelector<HTMLInputElement>('input[placeholder*="Filter workflow"]')
+    expect(filterInput).toBeTruthy()
+
+    flushSync(() => {
+      if (!filterInput) throw new Error('filter input not found')
+      setInputValue(filterInput, 'nightly')
+    })
+
+    await vi.waitFor(() => {
+      expect(container.textContent).toContain('1 of 3 recent')
+      expect(container.textContent).toContain('push')
+      expect(container.textContent).not.toContain('review')
+      expect(container.textContent).not.toContain('test')
+    })
+
+    flushSync(() => {
+      if (!filterInput) throw new Error('filter input not found')
+      setInputValue(filterInput, 'LGTM')
+    })
+
+    await vi.waitFor(() => {
+      expect(container.textContent).toContain('1 of 3 recent')
+      expect(container.textContent).toContain('review')
+      expect(container.textContent).not.toContain('push')
+      expect(container.textContent).not.toContain('test')
+    })
 
     unmount()
   })
