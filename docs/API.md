@@ -82,7 +82,7 @@ Complete reference for TamTam HTTP API routes. All routes live under `app/api/`.
 - `/api/jobs/[jobId]/continue` — Resume a finished `run` or `agent:*` job's CLI session via `--resume <sessionId>` (POST). Rejects non-resumable kinds (`400`), jobs without `sessionId` (`400`), still-running jobs (`409`), and jobs finished more than 30 minutes ago (`410`) since the provider session cache and first-invocation context (skills/docs/retrieval) are no longer reliable past that window. Returns `409 { detail, blocking_job_id }` when another job is already running for the project. The continuation job inherits the source job's `kind`, `sessionId`, and `provider`, sets `parentJobId` to the source job id, and runs with a short `Continue your previous work…` prompt prepended with `base_prompt`.
 - `/api/jobs/[jobId]/seen` — Mark job as seen (POST)
 - `/api/jobs/notifications` — Unseen job notifications (GET)
-- `/api/jobs/notifications/mark-seen` — Mark all notifications seen (POST)
+- `/api/jobs/notifications/mark-seen` — Mark all notifications seen (POST → `{ status: 'ok', marked }`, where `marked` is the number of finished unseen jobs flipped in the in-memory jobs cache)
 - `/api/streaming/[jobId]` — SSE stream of parsed text deltas from NDJSON log (`?raw=1` for raw lines)
 
 ## Cross-project recommendations

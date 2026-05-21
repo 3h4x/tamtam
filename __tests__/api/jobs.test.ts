@@ -19,6 +19,7 @@ const mocks = vi.hoisted(() => ({
   readLogHead: vi.fn(),
   markSeen: vi.fn(),
   unseenFinished: vi.fn(),
+  markAllUnseenFinished: vi.fn(),
   updateJob: vi.fn(),
   exec: vi.fn(),
   getJobCancellationSignal: vi.fn(),
@@ -39,6 +40,7 @@ vi.mock('@/lib/jobs/job-storage', () => ({
   readLogHead: mocks.readLogHead,
   markSeen: mocks.markSeen,
   unseenFinished: mocks.unseenFinished,
+  markAllUnseenFinished: mocks.markAllUnseenFinished,
   updateJob: mocks.updateJob,
 }));
 
@@ -111,6 +113,7 @@ function resetDefaults() {
   mocks.readLogHead.mockReset().mockReturnValue('raw log head content');
   mocks.markSeen.mockReset().mockReturnValue(true);
   mocks.unseenFinished.mockReset().mockReturnValue([]);
+  mocks.markAllUnseenFinished.mockReset().mockReturnValue(0);
   mocks.updateJob.mockReset();
   mocks.exec.mockReset().mockResolvedValue({ stdout: '', stderr: '' });
   mocks.getJobCancellationSignal.mockReset().mockReturnValue(null);
@@ -604,24 +607,20 @@ describe('POST /api/jobs/notifications/mark-seen', () => {
     resetDefaults();
   });
 
-  it('returns ok when no unseen jobs', async () => {
+  it('returns ok with marked=0 when nothing was unseen', async () => {
+    mocks.markAllUnseenFinished.mockReturnValue(0);
     const res = await markSeenPOST();
     const data = await res.json();
-    expect(data.status).toBe('ok');
-    expect(mocks.markSeen).not.toHaveBeenCalled();
+    expect(data).toEqual({ status: 'ok', marked: 0 });
+    expect(mocks.markAllUnseenFinished).toHaveBeenCalledTimes(1);
   });
 
-  it('marks all unseen jobs as seen', async () => {
-    const job1 = makeJob({ id: 'job-1' });
-    const job2 = makeJob({ id: 'job-2' });
-    mocks.unseenFinished.mockReturnValue([job1, job2]);
-
+  it('reports the marked count from the bulk primitive', async () => {
+    mocks.markAllUnseenFinished.mockReturnValue(2);
     const res = await markSeenPOST();
     const data = await res.json();
-    expect(data.status).toBe('ok');
-    expect(mocks.markSeen).toHaveBeenCalledTimes(2);
-    expect(mocks.markSeen).toHaveBeenCalledWith('job-1');
-    expect(mocks.markSeen).toHaveBeenCalledWith('job-2');
+    expect(data).toEqual({ status: 'ok', marked: 2 });
+    expect(mocks.markAllUnseenFinished).toHaveBeenCalledTimes(1);
   });
 });
 

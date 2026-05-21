@@ -8,7 +8,6 @@ const mocks = vi.hoisted(() => ({
   getProjectTestConfig: vi.fn(),
   getLock: vi.fn(),
   listJobs: vi.fn(),
-  clearIssueBranchLockCache: vi.fn(),
 }));
 
 vi.mock('@/lib/shared/project-data', () => ({
@@ -21,9 +20,6 @@ vi.mock('@/lib/scheduling/scheduling', () => ({
 }));
 vi.mock('@/lib/pipeline/pipeline-lock', () => ({ getLock: mocks.getLock }));
 vi.mock('@/lib/jobs/job-storage', () => ({ listJobs: mocks.listJobs }));
-vi.mock('@/lib/shared/project-branch-lock', () => ({
-  clearIssueBranchLockCache: mocks.clearIssueBranchLockCache,
-}));
 
 import { POST } from '@/app/api/projects/by-project/[projectName]/issue-branch/route';
 
@@ -48,7 +44,6 @@ describe('POST /api/projects/by-project/[projectName]/issue-branch', () => {
     mocks.getProjectTestConfig.mockReset().mockReturnValue(null);
     mocks.getLock.mockReset().mockResolvedValue(null);
     mocks.listJobs.mockReset().mockReturnValue([]);
-    mocks.clearIssueBranchLockCache.mockReset();
   });
 
   it('returns 404 when project not found', async () => {

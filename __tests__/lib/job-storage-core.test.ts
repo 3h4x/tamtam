@@ -1,5 +1,5 @@
 import { describe, it, expect, beforeAll, beforeEach, afterAll, afterEach, vi } from 'vitest';
-import { sql } from 'drizzle-orm';
+import { eq, sql } from 'drizzle-orm';
 import * as schema from '@/lib/db/schema';
 import { createTestPgDbEmpty, type TestDbHandle } from '@/__tests__/helpers/test-db';
 import { JobData } from '@/lib/jobs/job-storage';
@@ -171,6 +171,7 @@ describe('job-storage', () => {
   let getJob: typeof import('@/lib/jobs/job-storage').getJob;
   let listJobs: typeof import('@/lib/jobs/job-storage').listJobs;
   let markSeen: typeof import('@/lib/jobs/job-storage').markSeen;
+  let markAllUnseenFinished: typeof import('@/lib/jobs/job-storage').markAllUnseenFinished;
   let unseenFinished: typeof import('@/lib/jobs/job-storage').unseenFinished;
   let updateJob: typeof import('@/lib/jobs/job-storage').updateJob;
   let readLog: typeof import('@/lib/jobs/job-storage').readLog;
@@ -197,6 +198,7 @@ describe('job-storage', () => {
     getJob = jobStorage.getJob;
     listJobs = jobStorage.listJobs;
     markSeen = jobStorage.markSeen;
+    markAllUnseenFinished = jobStorage.markAllUnseenFinished;
     unseenFinished = jobStorage.unseenFinished;
     updateJob = jobStorage.updateJob;
     readLog = jobStorage.readLog;
@@ -443,6 +445,31 @@ describe('job-storage', () => {
     it('returns false for nonexistent job', () => {
       const result = markSeen('nonexistent-id');
       expect(result).toBe(false);
+    });
+  });
+
+  describe('markAllUnseenFinished', () => {
+    it('waits for stale in-flight saves before the bulk seen update', async () => {
+      const job = createJob('proj', 'review', 123, '/log');
+      job.finishedAt = 1234567890;
+      job.exitCode = 1;
+      job.seen = false;
+
+      // Simulate a completion save that captured seen=false before the user
+      // cleared the notification badge. The bulk mark-all path must wait for
+      // this stale write, then make its single UPDATE last.
+      updateJob({ ...job });
+      await yieldToNextTask();
+
+      const marked = await markAllUnseenFinished();
+      expect(marked).toBe(1);
+      expect(getJob(job.id)?.seen).toBe(true);
+
+      const rows = await testDb.db
+        .select({ seen: schema.jobs.seen })
+        .from(schema.jobs)
+        .where(eq(schema.jobs.id, job.id));
+      expect(rows[0]?.seen).toBe(true);
     });
   });
 

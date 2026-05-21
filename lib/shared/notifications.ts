@@ -255,12 +255,19 @@ function formatDiscordMessage(payload: NotificationPayload): Record<string, unkn
   };
 }
 
+interface WebhookResult {
+  ok: boolean;
+  /** Set when `ok === false` — describes the last failure (HTTP status, network error, etc). */
+  error?: string;
+}
+
 async function postWebhook(
   url: string,
   body: Record<string, unknown>,
   signature?: string,
   maxRetries: number = 3,
-): Promise<boolean> {
+  perAttemptTimeoutMs: number = 10_000,
+): Promise<WebhookResult> {
   const headers: Record<string, string> = {
     'Content-Type': 'application/json',
     'User-Agent': 'TamTam/1.0',
@@ -278,14 +285,14 @@ async function postWebhook(
         method: 'POST',
         headers,
         body: JSON.stringify(body),
-        signal: AbortSignal.timeout(10_000),
+        signal: AbortSignal.timeout(perAttemptTimeoutMs),
       });
 
       if (response.ok) {
-        return true;
+        return { ok: true };
       }
 
-      lastError = new Error(`HTTP ${response.status}`);
+      lastError = new Error(`HTTP ${response.status} ${response.statusText || ''}`.trim());
     } catch (e) {
       lastError = e instanceof Error ? e : new Error(String(e));
     }
@@ -296,8 +303,9 @@ async function postWebhook(
     }
   }
 
-  console.error(`[notifications] webhook POST failed after ${maxRetries} attempts:`, lastError?.message);
-  return false;
+  const message = lastError?.message ?? 'unknown error';
+  console.error(`[notifications] webhook POST failed after ${maxRetries} attempts:`, message);
+  return { ok: false, error: message };
 }
 
 export async function notify(payload: NotificationPayload): Promise<void> {
@@ -335,7 +343,7 @@ export async function notify(payload: NotificationPayload): Promise<void> {
 
     try {
       const delivered = await postWebhook(config.webhook_url, body, signature);
-      if (delivered) {
+      if (delivered.ok) {
         markThrottleDelivered(throttle.state);
       }
     } catch (e) {
@@ -372,6 +380,12 @@ export async function sendTestNotification(webhookUrl: string, webhookSecret: st
   const bodyJson = JSON.stringify(body);
   const signature = webhookSecret ? signPayload(bodyJson, webhookSecret) : undefined;
 
-  const success = await postWebhook(webhookUrl, body, signature);
-  return success ? { ok: true } : { ok: false, error: 'Webhook request failed' };
+  // Test invocation: single attempt, shorter timeout. The 3× retry-with-
+  // backoff that real notifications use would make a failing "Test" button
+  // take ~33s before surfacing the error (10s timeout × 3 + 3s backoff),
+  // which feels broken from the UI. One attempt with 5s timeout is the
+  // right shape for "did I configure this correctly?".
+  const result = await postWebhook(webhookUrl, body, signature, 1, 5_000);
+  if (result.ok) return { ok: true };
+  return { ok: false, error: `Webhook request failed: ${result.error ?? 'unknown error'}` };
 }

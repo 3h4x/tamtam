@@ -164,4 +164,118 @@ describe('buildDiffContext', () => {
     expect(result.includedFiles).toEqual(['a.ts', 'b.ts']);
     expect(result.truncated).toBe(false);
   });
+
+  it('omits SKIPPED section when nothing is skipped', () => {
+    // Negative-space assertion: when every diff section makes it through,
+    // the rendered context should NOT include a "SKIPPED" header. Without
+    // this, regressions that always emit the header even with an empty
+    // list would slip past.
+    const diff = makeDiffSection('src/app.ts', '+const x = 1;\n');
+    const result = buildDiffContext('', diff);
+    expect(result.context).not.toContain('SKIPPED');
+  });
+});
+
+// Realistic mixed-content diff covering a feature + bug fix + refactor + lock
+// file + binary + dist output. Lives as an integration-flavored fixture
+// (separate describe block) so the unit-style cases above stay focused on
+// boundary semantics, while these exercise the helper end-to-end with
+// inputs that look like what `git diff` actually emits.
+const REALISTIC_BIG_DIFF = `diff --git a/lib/diff-context.ts b/lib/diff-context.ts
+index 0000000..1234abc 100644
+--- /dev/null
++++ b/lib/diff-context.ts
+@@ -0,0 +1,68 @@
++export function buildDiffContext(stat: string, rawDiff: string): DiffContextResult {
++  return { context: '', includedFiles: [], skippedFiles: [], truncated: false };
++}
++export function shouldSkipFile(filename: string): boolean { return false; }
++export interface DiffContextResult {}
+diff --git a/lib/start-push.ts b/lib/start-push.ts
+index aabbcc..ddeeff 100644
+--- a/lib/start-push.ts
++++ b/lib/start-push.ts
+@@ -1,6 +1,7 @@
++import { buildDiffContext } from './diff-context';
+diff --git a/components/ProjectDetailPage.tsx b/components/ProjectDetailPage.tsx
+index 111222..333444 100644
+--- a/components/ProjectDetailPage.tsx
++++ b/components/ProjectDetailPage.tsx
+@@ -42,7 +42,7 @@ export function ProjectDetailPage({ project }: Props) {
+-  const handlePush = async () => {
++  const handleRelease = async () => {
+diff --git a/pnpm-lock.yaml b/pnpm-lock.yaml
+index aaaaaa..bbbbbb 100644
+--- a/pnpm-lock.yaml
++++ b/pnpm-lock.yaml
+@@ -1,6 +1,6 @@
+-  autoInstallPeers: false
++  autoInstallPeers: true
+diff --git a/public/logo.png b/public/logo.png
+index 0000000..9876543 100644
+Binary files a/public/logo.png and b/public/logo.png differ
+diff --git a/dist/bundle.js b/dist/bundle.js
+index cccccc..dddddd 100644
+--- a/dist/bundle.js
++++ b/dist/bundle.js
+@@ -1,3 +1,3 @@
+-!function(e){var t={};return o.l=!0,o.exports}n.m=e,n.c=t}
++!function(e){var t={};return o.l=!1,o.exports}n.m=e,n.c=t}
+`;
+
+const REALISTIC_STAT = ` lib/diff-context.ts               | 68 +++++++++++++++++++++++++++++++++++++
+ lib/start-push.ts                  |  4 ++-
+ components/ProjectDetailPage.tsx   |  4 +--
+ pnpm-lock.yaml                     | 12 ++++---
+ public/logo.png                    |Bin 0 -> 4321 bytes
+ dist/bundle.js                     |  2 +-
+ 6 files changed, 88 insertions(+), 4 deletions(-)
+`;
+
+describe('buildDiffContext — realistic big diff', () => {
+  it('includes source files and excludes noise (lock/binary/dist)', () => {
+    const { includedFiles, skippedFiles } = buildDiffContext(REALISTIC_STAT, REALISTIC_BIG_DIFF);
+    expect(includedFiles).toContain('lib/diff-context.ts');
+    expect(includedFiles).toContain('lib/start-push.ts');
+    expect(includedFiles).toContain('components/ProjectDetailPage.tsx');
+    expect(skippedFiles).toContain('pnpm-lock.yaml');
+    expect(skippedFiles).toContain('public/logo.png');
+    expect(skippedFiles).toContain('dist/bundle.js');
+  });
+
+  it('preserves key semantic identifiers from the diff', () => {
+    // The downstream consumer (commit-message generation) only writes a
+    // good message if the function/type names and the renamed handler
+    // survive into the context.
+    const { context } = buildDiffContext(REALISTIC_STAT, REALISTIC_BIG_DIFF);
+    expect(context).toContain('buildDiffContext');
+    expect(context).toContain('shouldSkipFile');
+    expect(context).toContain('DiffContextResult');
+    expect(context).toContain('handleRelease');
+    expect(context).toContain('diff-context');
+  });
+
+  it('does not leak lock file or binary content into the context', () => {
+    const { context } = buildDiffContext(REALISTIC_STAT, REALISTIC_BIG_DIFF);
+    // Lock file internals must not appear
+    expect(context).not.toContain('autoInstallPeers');
+    // Binary diff marker must not appear
+    expect(context).not.toContain('Binary files');
+    // Minified bundle content must not appear
+    expect(context).not.toContain('!function(e)');
+  });
+
+  it('stays within the per-file + total char budget', () => {
+    const { context } = buildDiffContext(REALISTIC_STAT, REALISTIC_BIG_DIFF);
+    expect(context.length).toBeLessThanOrEqual(DIFF_MAX_TOTAL_CHARS + REALISTIC_STAT.length + 200);
+  });
+
+  it('reports skipped files only in the SKIPPED line, not as diff hunks', () => {
+    const { context } = buildDiffContext(REALISTIC_STAT, REALISTIC_BIG_DIFF);
+    expect(context).toContain('pnpm-lock.yaml');
+    expect(context).toContain('public/logo.png');
+    expect(context).toContain('dist/bundle.js');
+    // Hunks for those files must NOT appear elsewhere
+    expect(context).not.toContain('autoInstallPeers');
+  });
 });

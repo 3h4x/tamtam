@@ -361,17 +361,14 @@ describe('GET /api/jobs/notifications', () => {
 });
 
 describe('POST /api/jobs/notifications/mark-seen', () => {
-  let POST: any;
-  let unseenFinishedMock: ReturnType<typeof vi.fn>;
-  let markSeenMock: ReturnType<typeof vi.fn>;
+  let POST: typeof import('@/app/api/jobs/notifications/mark-seen/route').POST;
+  let markAllUnseenFinishedMock: ReturnType<typeof vi.fn>;
 
   beforeEach(async () => {
     vi.resetModules();
-    unseenFinishedMock = vi.fn().mockReturnValue([]);
-    markSeenMock = vi.fn().mockReturnValue(true);
+    markAllUnseenFinishedMock = vi.fn().mockReturnValue(0);
     vi.doMock('@/lib/jobs/job-storage', () => ({
-      unseenFinished: unseenFinishedMock,
-      markSeen: markSeenMock,
+      markAllUnseenFinished: markAllUnseenFinishedMock,
     }));
     const mod = await import('@/app/api/jobs/notifications/mark-seen/route');
     POST = mod.POST;
@@ -381,25 +378,24 @@ describe('POST /api/jobs/notifications/mark-seen', () => {
     vi.resetModules();
   });
 
-  it('returns ok', async () => {
+  it('returns ok with the marked count', async () => {
+    markAllUnseenFinishedMock.mockReturnValue(2);
     const res = await POST();
     expect(res.status).toBe(200);
     const data = await res.json();
-    expect(data.status).toBe('ok');
+    expect(data).toEqual({ status: 'ok', marked: 2 });
   });
 
-  it('calls markSeen for each unseen job', async () => {
-    const jobs = [makeJob({ id: 'j1' }), makeJob({ id: 'j2' })];
-    unseenFinishedMock.mockReturnValue(jobs);
+  it('invokes the bulk primitive exactly once (no per-row loop)', async () => {
+    markAllUnseenFinishedMock.mockReturnValue(5);
     await POST();
-    expect(markSeenMock).toHaveBeenCalledTimes(2);
-    expect(markSeenMock).toHaveBeenCalledWith('j1');
-    expect(markSeenMock).toHaveBeenCalledWith('j2');
+    expect(markAllUnseenFinishedMock).toHaveBeenCalledTimes(1);
   });
 
-  it('does not call markSeen when no unseen jobs', async () => {
-    unseenFinishedMock.mockReturnValue([]);
-    await POST();
-    expect(markSeenMock).not.toHaveBeenCalled();
+  it('returns marked=0 when nothing was unseen', async () => {
+    markAllUnseenFinishedMock.mockReturnValue(0);
+    const res = await POST();
+    const data = await res.json();
+    expect(data.marked).toBe(0);
   });
 });

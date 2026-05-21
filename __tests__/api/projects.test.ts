@@ -223,7 +223,7 @@ describe('PATCH /api/projects/[schedId]/priority', () => {
 describe('GET /api/projects/[schedId]/detail', () => {
   let GET: any;
   let getImproveConfigMock: ReturnType<typeof vi.fn>;
-  let readRunHistoryMock: ReturnType<typeof vi.fn>;
+  let listJobsMock: ReturnType<typeof vi.fn>;
 
   beforeEach(async () => {
     vi.resetModules();
@@ -240,14 +240,14 @@ describe('GET /api/projects/[schedId]/detail', () => {
         },
       },
     });
-    readRunHistoryMock = vi.fn().mockReturnValue([]);
+    listJobsMock = vi.fn().mockReturnValue([]);
 
     vi.doMock('@/lib/scheduling/scheduling', () => ({
       getImproveConfig: getImproveConfigMock,
     }));
 
-    vi.doMock('@/lib/jobs/run-history', () => ({
-      readRunHistory: readRunHistoryMock,
+    vi.doMock('@/lib/jobs/storage', () => ({
+      listJobs: listJobsMock,
     }));
 
     vi.doMock('os', async () => {
@@ -282,19 +282,35 @@ describe('GET /api/projects/[schedId]/detail', () => {
     expect(data.run_history).toEqual([]);
   });
 
-  it('returns run history entries', async () => {
-    readRunHistoryMock.mockReturnValue([
-      { started: 1000, ended: 2000, durationS: 1000, exitCode: 0 },
-      { started: 3000, ended: 4000, durationS: 1000, exitCode: 1 },
+  it('returns run history entries sorted newest first', async () => {
+    // Feed in arbitrary order to verify the route sorts by startedAt desc.
+    listJobsMock.mockReturnValue([
+      { project: 'sched-1', startedAt: 1000, finishedAt: 2000, exitCode: 0 },
+      { project: 'other', startedAt: 1500, finishedAt: 2500, exitCode: 7 },
+      { project: 'sched-1', startedAt: 3000, finishedAt: 4000, exitCode: 1 },
     ]);
 
     const req = new NextRequest('http://localhost/api/projects/sched-1/detail');
     const res = await GET(req, { params: Promise.resolve({ schedId: 'sched-1' }) });
     const data = await res.json();
 
+    // Filtered to sched-1 (other project dropped), sorted newest first.
     expect(data.run_history).toHaveLength(2);
-    expect(data.run_history[0].exit_code).toBe(0);
-    expect(data.run_history[1].exit_code).toBe(1);
+    expect(data.run_history[0].exit_code).toBe(1);
+    expect(data.run_history[0].duration_s).toBe(1000);
+    expect(data.run_history[1].exit_code).toBe(0);
+  });
+
+  it('returns ended=null and duration_s=null for an unfinished job', async () => {
+    listJobsMock.mockReturnValue([
+      { project: 'sched-1', startedAt: 5000, finishedAt: null, exitCode: null },
+    ]);
+    const req = new NextRequest('http://localhost/api/projects/sched-1/detail');
+    const res = await GET(req, { params: Promise.resolve({ schedId: 'sched-1' }) });
+    const data = await res.json();
+    expect(data.run_history[0].ended).toBeNull();
+    expect(data.run_history[0].duration_s).toBeNull();
+    expect(data.run_history[0].exit_code).toBeNull();
   });
 
   it('includes null prompt content when no prompt path', async () => {

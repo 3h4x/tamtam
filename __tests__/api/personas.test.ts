@@ -124,4 +124,24 @@ describe('GET /api/projects/personas', () => {
     const data = await res.json();
     expect(data.personas[0].name).toBe('My Cool Tool');
   });
+
+  it('caches the empty-personas result so back-to-back hits do not re-scan', async () => {
+    // Regression guard: the cache check used to be gated on
+    // `data.length > 0`, which meant a workspace with zero personas
+    // re-walked the filesystem on every request. The freshness gate is
+    // now `time > 0`, so the empty result is cached for the TTL window.
+    //
+    // Observed via the side-effect: add a persona file AFTER the first
+    // empty scan. A working cache returns the empty result. A broken
+    // cache (re-scan) sees the new file.
+    const first = await GET();
+    expect((await first.json()).personas).toEqual([]);
+
+    const cat = join(skillsDir, 'docs', 'skills', 'engineering');
+    mkdirSync(cat, { recursive: true });
+    writeFileSync(join(cat, 'late.md'), '# Late persona');
+
+    const second = await GET();
+    expect((await second.json()).personas).toEqual([]);
+  });
 });

@@ -2,7 +2,7 @@ import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
 import { NextRequest } from 'next/server';
 
 describe('GET /api/projects/by-project/[projectName]/behind', () => {
-  let GET: any;
+  let GET: typeof import('@/app/api/projects/by-project/[projectName]/behind/route').GET;
   let resolveProjectPathMock: ReturnType<typeof vi.fn>;
   let execMock: ReturnType<typeof vi.fn>;
 
@@ -14,7 +14,7 @@ describe('GET /api/projects/by-project/[projectName]/behind', () => {
     vi.resetModules();
 
     resolveProjectPathMock = vi.fn().mockReturnValue('/path/to/project');
-    execMock = vi.fn().mockResolvedValue(makeExecResult());
+    execMock = vi.fn();
 
     vi.doMock('@/lib/shared/project-data', () => ({
       resolveProjectPath: resolveProjectPathMock,
@@ -38,57 +38,86 @@ describe('GET /api/projects/by-project/[projectName]/behind', () => {
     expect(data.detail).toBe('project not found');
   });
 
-  it('returns behind=0 ahead=0 when no branch.ab line', async () => {
-    execMock.mockResolvedValue(makeExecResult({ stdout: '# branch.head master\n' }));
+  it('returns behind=0 ahead=0 when upstream rev-parse fails (no tracking branch)', async () => {
+    execMock.mockResolvedValueOnce(makeExecResult({ exitCode: 128, stderr: 'no upstream' }));
     const req = new NextRequest('http://localhost/api/projects/by-project/myproj/behind');
     const res = await GET(req, { params: Promise.resolve({ projectName: 'myproj' }) });
     expect(res.status).toBe(200);
     const data = await res.json();
-    expect(data.behind).toBe(0);
-    expect(data.ahead).toBe(0);
+    expect(data).toEqual({ behind: 0, ahead: 0 });
+    // Should NOT have attempted fetch / rev-list once upstream resolution failed.
+    expect(execMock).toHaveBeenCalledTimes(1);
   });
 
-  it('returns behind=0 ahead=0 when git exits non-zero', async () => {
-    execMock.mockResolvedValue(makeExecResult({ exitCode: 128, stdout: '', stderr: 'not a git repo' }));
+  it('returns behind=0 ahead=0 when upstream is blank', async () => {
+    execMock.mockResolvedValueOnce(makeExecResult({ stdout: '\n' }));
+    const req = new NextRequest('http://localhost/api/projects/by-project/myproj/behind');
+    const res = await GET(req, { params: Promise.resolve({ projectName: 'myproj' }) });
+    const data = await res.json();
+    expect(data).toEqual({ behind: 0, ahead: 0 });
+    expect(execMock).toHaveBeenCalledTimes(1);
+  });
+
+  it('returns behind=0 ahead=0 when rev-list exits non-zero', async () => {
+    execMock
+      .mockResolvedValueOnce(makeExecResult({ stdout: 'origin/main\n' })) // rev-parse @{u}
+      .mockResolvedValueOnce(makeExecResult()) // fetch
+      .mockResolvedValueOnce(makeExecResult({ exitCode: 128, stderr: 'not a git repo' })); // rev-list
     const req = new NextRequest('http://localhost/api/projects/by-project/myproj/behind');
     const res = await GET(req, { params: Promise.resolve({ projectName: 'myproj' }) });
     expect(res.status).toBe(200);
     const data = await res.json();
-    expect(data.behind).toBe(0);
-    expect(data.ahead).toBe(0);
+    expect(data).toEqual({ behind: 0, ahead: 0 });
   });
 
-  it('parses ahead and behind correctly', async () => {
-    execMock.mockResolvedValue(makeExecResult({
-      stdout: '# branch.head master\n# branch.ab +3 -5\n',
-    }));
+  it('parses ahead and behind from rev-list --count --left-right output', async () => {
+    execMock
+      .mockResolvedValueOnce(makeExecResult({ stdout: 'origin/main\n' }))
+      .mockResolvedValueOnce(makeExecResult()) // fetch
+      .mockResolvedValueOnce(makeExecResult({ stdout: '3\t5\n' }));
     const req = new NextRequest('http://localhost/api/projects/by-project/myproj/behind');
     const res = await GET(req, { params: Promise.resolve({ projectName: 'myproj' }) });
     expect(res.status).toBe(200);
     const data = await res.json();
-    expect(data.ahead).toBe(3);
-    expect(data.behind).toBe(5);
+    expect(data).toEqual({ ahead: 3, behind: 5 });
   });
 
-  it('returns behind=0 ahead=0 when branch.ab has zeros', async () => {
-    execMock.mockResolvedValue(makeExecResult({
-      stdout: '# branch.head main\n# branch.ab +0 -0\n',
-    }));
+  it('returns zeros when rev-list reports clean divergence', async () => {
+    execMock
+      .mockResolvedValueOnce(makeExecResult({ stdout: 'origin/main\n' }))
+      .mockResolvedValueOnce(makeExecResult())
+      .mockResolvedValueOnce(makeExecResult({ stdout: '0\t0\n' }));
     const req = new NextRequest('http://localhost/api/projects/by-project/myproj/behind');
     const res = await GET(req, { params: Promise.resolve({ projectName: 'myproj' }) });
     const data = await res.json();
-    expect(data.ahead).toBe(0);
-    expect(data.behind).toBe(0);
+    expect(data).toEqual({ ahead: 0, behind: 0 });
   });
 
-  it('calls git with correct args', async () => {
-    execMock.mockResolvedValue(makeExecResult({ stdout: '# branch.ab +1 -2\n' }));
+  it('targets the upstream branch for fetch even with nested ref names', async () => {
+    execMock
+      .mockResolvedValueOnce(makeExecResult({ stdout: 'upstream/feature/sub-branch\n' }))
+      .mockResolvedValueOnce(makeExecResult())
+      .mockResolvedValueOnce(makeExecResult({ stdout: '1\t2\n' }));
     const req = new NextRequest('http://localhost/api/projects/by-project/myproj/behind');
     await GET(req, { params: Promise.resolve({ projectName: 'myproj' }) });
-    expect(execMock).toHaveBeenCalledWith(
+    // First call resolves upstream, second fetches it, third counts divergence.
+    expect(execMock).toHaveBeenNthCalledWith(
+      1,
       'git',
-      ['-C', '/path/to/project', 'status', '--porcelain=v2', '--branch'],
-      expect.objectContaining({ timeout: 5000 })
+      ['-C', '/path/to/project', 'rev-parse', '--abbrev-ref', '@{u}'],
+      expect.objectContaining({ timeout: 5000 }),
+    );
+    expect(execMock).toHaveBeenNthCalledWith(
+      2,
+      'git',
+      ['-C', '/path/to/project', 'fetch', '--quiet', 'upstream', 'feature/sub-branch'],
+      expect.objectContaining({ timeout: 10000 }),
+    );
+    expect(execMock).toHaveBeenNthCalledWith(
+      3,
+      'git',
+      ['-C', '/path/to/project', 'rev-list', '--count', '--left-right', 'HEAD...@{u}'],
+      expect.objectContaining({ timeout: 5000 }),
     );
   });
 });

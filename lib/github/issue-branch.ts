@@ -3,7 +3,6 @@ import { getProjectTestConfig } from '@/lib/scheduling/scheduling';
 import { getLock } from '@/lib/pipeline/pipeline-lock';
 import { listJobs } from '@/lib/jobs/job-storage';
 import { clearProjectDataCache } from '@/lib/shared/project-data';
-import { clearIssueBranchLockCache } from '@/lib/shared/project-branch-lock';
 
 export type EnsureIssueBranchResult =
   | { status: 'created' | 'reused' | 'already-on-branch'; branch: string }
@@ -88,13 +87,11 @@ export async function ensureIssueBranch(opts: {
   const createR = await exec('git', ['-C', projPath, 'checkout', '-b', branch], { timeout: 10000 });
   if (createR.exitCode === 0) {
     clearProjectDataCache();
-    clearIssueBranchLockCache(projectName);
     return { status: 'created', branch };
   }
   const existingR = await exec('git', ['-C', projPath, 'checkout', branch], { timeout: 10000 });
   if (existingR.exitCode === 0) {
     clearProjectDataCache();
-    clearIssueBranchLockCache(projectName);
     return { status: 'reused', branch };
   }
   return {

@@ -10,9 +10,45 @@ import {
 } from '@/lib/scheduling/scheduling';
 import { fireTimesStr } from '@/lib/scheduling/fire-times';
 import { ghStatusLookup, type GhStatusEntry } from './gh-status';
-import { lastRunLookup, type RunEntry } from '@/lib/jobs/run-history';
+import { listJobs } from '@/lib/jobs/storage';
 import { gitChanges, isReviewed } from '@/lib/git/git-utils';
+
+// Lightweight "most-recent run" projection used by the projects-list UI to
+// render "last run X minutes ago — exit N" columns. Previously sourced from
+// `~/.cache/tamtam/schedule-runs.jsonl` via lib/jobs/run-history.ts; that
+// file is no longer written by any producer (writers were unwired when the
+// `jobs` table absorbed run state), so we now derive it from the in-memory
+// jobs cache. Same shape so the downstream consumers (assembleProject)
+// don't change.
+interface RunEntry {
+  project: string;
+  started: string;
+  ended: string | null;
+  durationS: number | null;
+  exitCode: number | null;
+}
+
+function lastRunLookup(): Record<string, RunEntry> {
+  const byProject: Record<string, RunEntry> = {};
+  // listJobs() is unordered; track the latest startedAt per project.
+  const latestStart: Record<string, number> = {};
+  for (const j of listJobs()) {
+    const start = j.startedAt;
+    if (!start) continue;
+    if (latestStart[j.project] !== undefined && latestStart[j.project] >= start) continue;
+    latestStart[j.project] = start;
+    byProject[j.project] = {
+      project: j.project,
+      started: new Date(start * 1000).toISOString(),
+      ended: j.finishedAt != null ? new Date(j.finishedAt * 1000).toISOString() : null,
+      durationS: j.finishedAt != null ? Math.max(0, Math.floor(j.finishedAt - start)) : null,
+      exitCode: j.exitCode,
+    };
+  }
+  return byProject;
+}
 import { exec } from '@/lib/shared/shell';
+import { formatTimeAgo } from '@/lib/shared/format';
 import type { Task } from '@/lib/shared/types';
 
 /**
@@ -44,13 +80,6 @@ export function resolveProjectPath(projectName: string): string | null {
   return null;
 }
 
-function formatTimeAgo(isoDate: string): string {
-  const d = (Date.now() - new Date(isoDate).getTime()) / 1000;
-  if (d < 60) return '<1m';
-  if (d < 3600) return `${Math.floor(d / 60)}m`;
-  if (d < 86400) return `${Math.floor(d / 3600)}h`;
-  return `${Math.floor(d / 86400)}d`;
-}
 
 async function assembleProject(
   schedId: string,

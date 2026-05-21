@@ -14,7 +14,6 @@
 
 import { exec } from '@/lib/shared/shell';
 import { resolveProjectPath, clearProjectDataCache } from '@/lib/shared/project-data';
-import { clearIssueBranchLockCache } from '@/lib/shared/project-branch-lock';
 import { detectMainBranch } from '@/lib/pipeline/start-commit';
 
 export interface CheckoutDefaultInput {
@@ -115,6 +114,5 @@ export async function checkoutDefault(input: CheckoutDefaultInput): Promise<Chec
   }
 
   clearProjectDataCache();
-  clearIssueBranchLockCache(project);
   return { ok: true, status: 'switched', branch: defaultBranch, deletedBranch };
 }

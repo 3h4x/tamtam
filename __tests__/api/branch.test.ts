@@ -11,7 +11,7 @@ function makeExecResult(overrides: { exitCode?: number; stdout?: string; stderr?
 }
 
 describe('GET /api/projects/by-project/[projectName]/branch', () => {
-  let GET: any;
+  let GET: typeof import('@/app/api/projects/by-project/[projectName]/branch/route').GET;
   let resolveProjectPathMock: ReturnType<typeof vi.fn>;
   let execMock: ReturnType<typeof vi.fn>;
   let detectMainBranchMock: ReturnType<typeof vi.fn>;
@@ -108,6 +108,21 @@ describe('GET /api/projects/by-project/[projectName]/branch', () => {
     execMock
       .mockResolvedValueOnce(makeExecResult({ stdout: 'feat/x\n' }))
       .mockResolvedValueOnce(makeExecResult({ exitCode: 128, stderr: 'unknown revision' }));
+    detectMainBranchMock.mockResolvedValue('main');
+    const req = new NextRequest('http://localhost/api/projects/by-project/myproj/branch');
+    const res = await GET(req, { params: Promise.resolve({ projectName: 'myproj' }) });
+    const data = await res.json();
+    expect(data.commitsAhead).toBeNull();
+  });
+
+  it('returns commitsAhead null when rev-list stdout is non-numeric', async () => {
+    // Defensive: a future git change or corrupt repo could emit empty /
+    // garbage stdout with exitCode 0. The route must not coerce that into
+    // NaN/0 and disable the Create PR button incorrectly — null says
+    // "unknown" so the UI can decide whether to render a spinner.
+    execMock
+      .mockResolvedValueOnce(makeExecResult({ stdout: 'feat/x\n' }))
+      .mockResolvedValueOnce(makeExecResult({ stdout: '\n' }));
     detectMainBranchMock.mockResolvedValue('main');
     const req = new NextRequest('http://localhost/api/projects/by-project/myproj/branch');
     const res = await GET(req, { params: Promise.resolve({ projectName: 'myproj' }) });

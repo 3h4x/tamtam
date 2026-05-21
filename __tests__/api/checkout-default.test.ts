@@ -5,7 +5,6 @@ describe('POST /api/projects/by-project/[projectName]/checkout-default', () => {
   let POST: (req: NextRequest, ctx: { params: Promise<{ projectName: string }> }) => Promise<Response>;
   let resolveProjectPathMock: ReturnType<typeof vi.fn>;
   let clearProjectDataCacheMock: ReturnType<typeof vi.fn>;
-  let clearIssueBranchLockCacheMock: ReturnType<typeof vi.fn>;
   let execMock: ReturnType<typeof vi.fn>;
   let detectMainBranchMock: ReturnType<typeof vi.fn>;
 
@@ -24,16 +23,12 @@ describe('POST /api/projects/by-project/[projectName]/checkout-default', () => {
 
     resolveProjectPathMock = vi.fn().mockReturnValue('/path/to/proj');
     clearProjectDataCacheMock = vi.fn();
-    clearIssueBranchLockCacheMock = vi.fn();
     execMock = vi.fn().mockResolvedValue(makeExecResult());
     detectMainBranchMock = vi.fn().mockResolvedValue('main');
 
     vi.doMock('@/lib/shared/project-data', () => ({
       resolveProjectPath: resolveProjectPathMock,
       clearProjectDataCache: clearProjectDataCacheMock,
-    }));
-    vi.doMock('@/lib/shared/project-branch-lock', () => ({
-      clearIssueBranchLockCache: clearIssueBranchLockCacheMock,
     }));
     vi.doMock('@/lib/shared/shell', () => ({ exec: execMock }));
     vi.doMock('@/lib/pipeline/start-commit', () => ({ detectMainBranch: detectMainBranchMock }));
@@ -131,7 +126,6 @@ describe('POST /api/projects/by-project/[projectName]/checkout-default', () => {
 
     await POST(makeRequest(), { params: Promise.resolve({ projectName: 'myproj' }) });
     expect(clearProjectDataCacheMock).toHaveBeenCalledTimes(1);
-    expect(clearIssueBranchLockCacheMock).toHaveBeenCalledWith('myproj');
   });
 
   it('works with master as the default branch', async () => {

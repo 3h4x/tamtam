@@ -1,6 +1,7 @@
 import { existsSync, readFileSync } from 'fs';
-import { basename, isAbsolute, join, normalize } from 'path';
+import { basename, isAbsolute, join, normalize, sep } from 'path';
 import { getBranchContext, gitShowSync } from '@/lib/git/git-branch';
+import { realPathStaysInsideProject } from '@/lib/shared/path-containment';
 import type { FileProjectConfig } from './tamtam-file-config';
 
 export interface AutoAttachRule {
@@ -33,10 +34,9 @@ function findMatchingKeyword(prompt: string, keywords: string[]): string | null 
 function normalizeRelativeDocPath(docPath: string): string | null {
   const trimmed = docPath.trim();
   if (!trimmed) return null;
-  if (trimmed.includes('..')) return null;
   if (isAbsolute(trimmed)) return null;
   const normalized = normalize(trimmed);
-  if (normalized.startsWith('..')) return null;
+  if (normalized === '..' || normalized.startsWith(`..${sep}`)) return null;
   return normalized;
 }
 
@@ -73,6 +73,7 @@ export function resolveAutoAttachedDocs(
     if (ctx.isDefaultBranch) {
       resolvedPath = join(projectPath, relPath);
       if (!existsSync(/*turbopackIgnore: true*/ resolvedPath)) continue;
+      if (!realPathStaysInsideProject(projectPath, resolvedPath)) continue;
       try {
         content = readFileSync(/*turbopackIgnore: true*/ resolvedPath, 'utf-8');
       } catch {

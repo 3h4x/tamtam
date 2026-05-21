@@ -1,4 +1,4 @@
-import { eq } from 'drizzle-orm';
+import { and, eq, isNotNull } from 'drizzle-orm';
 import { db, schema } from '@/lib/db';
 import { getVerdict } from './verdict';
 import { currentParent } from './parent-context';
@@ -300,6 +300,36 @@ export function markSeen(jobId: string): boolean {
   job.seen = true;
   saveToDb(job);
   return true;
+}
+
+/**
+ * Bulk-mark every finished-but-unseen job as seen. Single targeted UPDATE
+ * + in-memory cache mutation, instead of N upserts (one per matching row)
+ * which is what the per-job `markSeen` would cost when called in a loop
+ * from `mark-all-seen`. Returns the number of jobs flipped — useful for
+ * route responses and tests.
+ *
+ * Waits behind any existing per-job save for the affected ids before the
+ * bulk UPDATE. Otherwise an older queued save can commit after the bulk
+ * write with `seen=false` and make cleared notifications reappear after
+ * cache reload.
+ */
+export async function markAllUnseenFinished(): Promise<number> {
+  const ids: string[] = [];
+  for (const job of jobsCache.values()) {
+    if (job.finishedAt !== null && !job.seen) {
+      job.seen = true;
+      ids.push(job.id);
+    }
+  }
+  if (ids.length > 0) {
+    await Promise.all(ids.map((id) => awaitInFlightSave(id)));
+    await db.update(schema.jobs)
+      .set({ seen: true })
+      .where(and(isNotNull(schema.jobs.finishedAt), eq(schema.jobs.seen, false)))
+      .execute();
+  }
+  return ids.length;
 }
 
 export function updateJob(job: JobData): void {
