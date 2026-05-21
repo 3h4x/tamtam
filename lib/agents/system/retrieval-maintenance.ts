@@ -26,8 +26,8 @@ import { retrieveAgentContextDetailed } from '@/lib/agents/retrieval/retriever';
 import { verifyRetrievalWithCheapModel, type VerifyResult } from './verify-with-cheap-model';
 import { listProjectDocuments } from '@/lib/shared/project-documents';
 
-export const RETRIEVAL_MAINTENANCE_AGENT_NAME = 'retrieval-maintenance';
-export const RETRIEVAL_MAINTENANCE_JOB_KIND = 'agent:retrieval-maintenance';
+export const DOCUMENTATION_REINDEX_VECTORS_AGENT_NAME = 'documentation-reindex-vectors';
+export const DOCUMENTATION_REINDEX_VECTORS_JOB_KIND = 'agent:documentation-reindex-vectors';
 
 interface RetrievalHealthMeta {
   agentId: string;
@@ -65,7 +65,7 @@ function writeLog(logPath: string, body: string): void {
     mkdirSync(/*turbopackIgnore: true*/ join(logPath, '..'), { recursive: true });
     writeFileSync(/*turbopackIgnore: true*/ logPath, body, 'utf-8');
   } catch (err) {
-    console.warn('[retrieval-maintenance] failed to write log:', err);
+    console.warn('[documentation-reindex-vectors] failed to write log:', err);
   }
 }
 
@@ -146,10 +146,10 @@ export async function runRetrievalMaintenance(agent: AgentInput): Promise<{ jobI
 
   const job = createJob(
     agent.project,
-    RETRIEVAL_MAINTENANCE_JOB_KIND,
+    DOCUMENTATION_REINDEX_VECTORS_JOB_KIND,
     0,
     logPath,
-    '[system] retrieval-maintenance',
+    '[system] documentation-reindex-vectors',
     initialContextMeta,
     undefined,
     null,
@@ -265,7 +265,7 @@ export async function runRetrievalMaintenance(agent: AgentInput): Promise<{ jobI
 
   // Surface obvious failures via console so PM2 captures them.
   if (exitCode !== 0) {
-    console.warn(`[retrieval-maintenance] ${agent.project}: ${summary}`);
+    console.warn(`[documentation-reindex-vectors] ${agent.project}: ${summary}`);
   }
 
   return { jobId: job.id };

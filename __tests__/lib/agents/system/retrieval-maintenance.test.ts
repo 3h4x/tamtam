@@ -18,7 +18,7 @@ async function applyDdl(handle: TestDbHandle): Promise<void> {
   `));
 }
 
-describe('retrieval-maintenance helpers', () => {
+describe('documentation-reindex-vectors helpers', () => {
   let sharedHandle: TestDbHandle;
 
   beforeAll(async () => {
@@ -81,7 +81,7 @@ describe('retrieval-maintenance helpers', () => {
     const mod = await import('@/lib/agents/system/retrieval-maintenance');
     const text = mod.__testing.summarize({
       agentId: 'a',
-      agentName: 'retrieval-maintenance',
+      agentName: 'documentation-reindex-vectors',
       wiped: true,
       reindexStatus: 'ok',
       chunks: 12,
@@ -101,7 +101,7 @@ describe('retrieval-maintenance helpers', () => {
     const mod = await import('@/lib/agents/system/retrieval-maintenance');
     const text = mod.__testing.summarize({
       agentId: 'a',
-      agentName: 'retrieval-maintenance',
+      agentName: 'documentation-reindex-vectors',
       wiped: false,
       reindexStatus: 'ok',
       chunks: 0,

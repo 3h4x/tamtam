@@ -535,7 +535,7 @@ export async function PATCH(request: NextRequest) {
   const effectiveAfterSave = buildConfigFromSettingsMap(finalDesired);
 
   // Snapshot the previous embedding-model BEFORE the upserts so we can
-  // detect a change and kick the per-project retrieval-maintenance system
+  // detect a change and kick the per-project documentation-reindex-vectors system
   // agent. The agent itself handles the wipe (it detects the mismatch via
   // retrieval_records.embedding_model), but we want the rebuild to start
   // immediately rather than waiting up to one schedule interval.
@@ -557,7 +557,7 @@ export async function PATCH(request: NextRequest) {
   reloadConfig();
   syncJobsPauseState(effectiveAfterSave.jobs_paused);
 
-  // Embedding-model change → immediate retrieval-maintenance kick.
+  // Embedding-model change → immediate documentation-reindex-vectors kick.
   const newEmbeddingModel = finalDesired['retrieval_embedding_model'];
   if (
     previousEmbeddingModel &&
@@ -568,12 +568,15 @@ export async function PATCH(request: NextRequest) {
       try {
         const connectionString = process.env.WORKFLOW_POSTGRES_URL ?? process.env.DATABASE_URL;
         if (!connectionString) return;
-        const { quickAddJob } = await import('graphile-worker');
+        const [{ quickAddJob }, { DOCUMENTATION_REINDEX_VECTORS_AGENT_NAME }] = await Promise.all([
+          import('graphile-worker'),
+          import('@/lib/agents/system/retrieval-maintenance'),
+        ]);
         const rows = await db
-          .select({ id: schema.agents.id, project: schema.agents.project })
+          .select({ id: schema.agents.id, name: schema.agents.name, project: schema.agents.project })
           .from(schema.agents)
           .where(eq(schema.agents.kind, 'system'));
-        const targets = rows.filter((r) => r.id.includes(':retrieval-maintenance'));
+        const targets = rows.filter((r) => r.name === DOCUMENTATION_REINDEX_VECTORS_AGENT_NAME);
         await Promise.all(
           targets.map((agent) =>
             quickAddJob(
@@ -586,10 +589,10 @@ export async function PATCH(request: NextRequest) {
         );
         console.warn(
           `[settings] retrieval_embedding_model changed (${previousEmbeddingModel} → ${newEmbeddingModel}) — ` +
-            `kicked ${targets.length} retrieval-maintenance agent(s)`,
+            `kicked ${targets.length} documentation-reindex-vectors agent(s)`,
         );
       } catch (err) {
-        console.error('[settings] failed to kick retrieval-maintenance after model change:', err);
+        console.error('[settings] failed to kick documentation-reindex-vectors after model change:', err);
       }
     })();
   }

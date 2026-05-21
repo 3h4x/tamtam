@@ -242,8 +242,8 @@ describe('AgentEditor', () => {
   it('locks non-operational fields for system agents', async () => {
     const { container, unmount } = renderEditor({
       agent: {
-        id: 'system:alpha:retrieval-maintenance',
-        name: 'retrieval-maintenance',
+        id: 'system:alpha:documentation-reindex-vectors',
+        name: 'documentation-reindex-vectors',
         project: 'alpha',
         skillIds: ['skill-1'],
         docPaths: ['docs/runbook.md'],
@@ -292,7 +292,7 @@ describe('AgentEditor', () => {
 
     await vi.waitFor(() => {
       expect(onSaveMock).toHaveBeenCalledWith({
-        name: 'retrieval-maintenance',
+        name: 'documentation-reindex-vectors',
         prompt: 'Managed prompt',
         skillIds: ['skill-1'],
         docPaths: ['docs/runbook.md'],

@@ -29,6 +29,7 @@ interface JobDict {
   prompt: string | null
   context_meta: string | null
   provider: string | null
+  work_summary: string | null
 }
 
 function shouldRedirectJobParamToSession(data: Partial<JobDict>): data is Partial<JobDict> & { session_id: string } {
@@ -262,7 +263,17 @@ export function useTerminalBootstrap({
         setCurrentReleaseId(data.release_id ?? null)
         const entries: TermEntry[] = []
         const kind = data.kind || jobParam.split('-').slice(1, -1).join('-')
-        const isClaudeJob = isClaudeJobKind(data.kind)
+        // System agents are billed under `agent:*` job kinds for scheduling
+        // parity but never spawn a CLI — they finish in-process and stash
+        // their output in `work_summary` / contextMeta. Treat them as
+        // non-streaming so we render the summary instead of trying to tail
+        // a stream-json log that was never produced.
+        let isSystemAgent = false
+        try {
+          const meta = data.context_meta ? JSON.parse(data.context_meta) : null
+          isSystemAgent = !!(meta && meta.system === true)
+        } catch { /* ignore */ }
+        const isClaudeJob = isClaudeJobKind(data.kind) && !isSystemAgent
         const startedAtSec = typeof data.started_at === 'number' ? data.started_at : null
         const startedLabel = startedAtSec
           ? new Date(startedAtSec * 1000).toLocaleString(undefined, {
@@ -295,7 +306,21 @@ export function useTerminalBootstrap({
 
         terminalStore.reset(projectName)
 
-        if (isClaudeJob) {
+        if (isSystemAgent) {
+          // System agents run in-process and never produce a stream-json
+          // transcript. Their meaningful output lives in `work_summary`
+          // (e.g. "reindex: 12 indexed, 0 skipped, 234 chunks · verify: …").
+          // Surface it as a status entry so the terminal page doesn't show
+          // an empty exit alongside the bare prompt placeholder.
+          if (data.work_summary) {
+            entries.push({ role: 'status', text: data.work_summary })
+          }
+          const exitCode = data.exit_code
+          if (exitCode !== undefined && exitCode !== null) {
+            entries.push(terminalExitEntry(exitCode))
+          }
+          terminalStore.update(projectName, () => ({ history: entries }))
+        } else if (isClaudeJob) {
           terminalStore.update(projectName, () => ({ history: entries }))
           terminalStore.startStream(
             projectName,

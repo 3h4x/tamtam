@@ -10,7 +10,7 @@
 // up the handler here.
 
 import type { AgentInput } from '@/lib/scheduling/agent-types';
-import { runRetrievalMaintenance, RETRIEVAL_MAINTENANCE_AGENT_NAME } from './retrieval-maintenance';
+import { runRetrievalMaintenance, DOCUMENTATION_REINDEX_VECTORS_AGENT_NAME } from './retrieval-maintenance';
 
 export interface SystemAgentSeedConfig {
   name: string;
@@ -25,15 +25,15 @@ export interface SystemAgentHandler {
 }
 
 export const SYSTEM_AGENTS: Record<string, SystemAgentHandler> = {
-  [RETRIEVAL_MAINTENANCE_AGENT_NAME]: {
+  [DOCUMENTATION_REINDEX_VECTORS_AGENT_NAME]: {
     seed: {
-      name: RETRIEVAL_MAINTENANCE_AGENT_NAME,
+      name: DOCUMENTATION_REINDEX_VECTORS_AGENT_NAME,
       prompt:
         'Auto-managed: refreshes the pgvector retrieval corpus for this project, ' +
         'wipes stale embeddings when the embedding model changes, and verifies ' +
         'result quality with a small local LLM. Edit schedule or disable from ' +
         'the agents UI.',
-      defaultSchedule: '1h',
+      defaultSchedule: '16h',
       model: 'normal',
     },
     run: runRetrievalMaintenance,
