@@ -1,7 +1,8 @@
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
+import { NextRequest } from 'next/server';
 
 describe('GET /api/projects/by-project/{projectName}/continue-issue', () => {
-  let GET: any;
+  let GET: typeof import('@/app/api/projects/by-project/[projectName]/continue-issue/route').GET;
   let listJobsMock: ReturnType<typeof vi.fn>;
   let readLogMock: ReturnType<typeof vi.fn>;
 
@@ -34,7 +35,7 @@ describe('GET /api/projects/by-project/{projectName}/continue-issue', () => {
   }
 
   function req(url: string) {
-    return new Request(url);
+    return new NextRequest(url);
   }
 
   function params(projectName: string) {

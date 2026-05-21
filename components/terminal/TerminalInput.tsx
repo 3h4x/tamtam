@@ -8,6 +8,19 @@ function fmtTokens(n: number): string {
   return `${(n / 1000000).toFixed(1)}M`
 }
 
+const MAX_TEXTAREA_HEIGHT_PX = 200
+
+// Auto-grow the textarea to fit content, capped at MAX_TEXTAREA_HEIGHT_PX.
+// Was duplicated inline at three call sites (onChange, ArrowUp history,
+// ArrowDown history) plus a partial reset in onSubmit. Centralising avoids
+// drift between the call sites (e.g. one of them updating the cap and the
+// others lagging behind) and makes the intent obvious.
+function resizeToContent(el: HTMLTextAreaElement | null): void {
+  if (!el) return
+  el.style.height = 'auto'
+  el.style.height = `${Math.min(el.scrollHeight, MAX_TEXTAREA_HEIGHT_PX)}px`
+}
+
 interface LastStats {
   duration: number
   inputTokens: number
@@ -64,7 +77,7 @@ export function TerminalInput({
             ref={inputRef}
             rows={1}
             className="flex-1 bg-transparent border-none outline-none text-text-primary font-mono text-sm placeholder:text-text-tertiary/40 resize-none overflow-y-auto leading-relaxed"
-            style={{ maxHeight: '200px' }}
+            style={{ maxHeight: `${MAX_TEXTAREA_HEIGHT_PX}px` }}
             value={input}
             onChange={(e) => {
               const v = e.target.value
@@ -72,9 +85,7 @@ export function TerminalInput({
               if (historyIdx !== null && v !== promptHistory[historyIdx]) {
                 onHistoryIdxChange(null)
               }
-              const el = e.currentTarget
-              el.style.height = 'auto'
-              el.style.height = `${Math.min(el.scrollHeight, 200)}px`
+              resizeToContent(e.currentTarget)
             }}
             onKeyDown={(e) => {
               if (e.key === 'Enter' && !e.shiftKey && !e.nativeEvent.isComposing) {
@@ -103,8 +114,7 @@ export function TerminalInput({
                 requestAnimationFrame(() => {
                   const el2 = inputRef.current
                   if (el2) {
-                    el2.style.height = 'auto'
-                    el2.style.height = `${Math.min(el2.scrollHeight, 200)}px`
+                    resizeToContent(el2)
                     el2.setSelectionRange(el2.value.length, el2.value.length)
                   }
                 })
@@ -125,8 +135,7 @@ export function TerminalInput({
                 requestAnimationFrame(() => {
                   const el2 = inputRef.current
                   if (el2) {
-                    el2.style.height = 'auto'
-                    el2.style.height = `${Math.min(el2.scrollHeight, 200)}px`
+                    resizeToContent(el2)
                     el2.setSelectionRange(el2.value.length, el2.value.length)
                   }
                 })

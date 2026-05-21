@@ -129,4 +129,96 @@ describe('StatusStrip', () => {
     expect(openMock).toHaveBeenCalledWith('https://github.com/acme/widgets/actions/runs/1', '_blank')
     unmount()
   })
+
+  it('renders skeleton placeholders in isLoading state', () => {
+    const { container, unmount } = renderStatusStrip({ isLoading: true })
+    // 4 skeleton cards (Changes, Review, Tests, CI), each with two skeleton blocks.
+    expect(container.querySelectorAll('.skeleton').length).toBeGreaterThanOrEqual(8)
+    // No interactive buttons when loading.
+    expect(container.querySelectorAll('button').length).toBe(0)
+    expect(container.textContent).toContain('Changes')
+    expect(container.textContent).toContain('Review')
+    expect(container.textContent).toContain('Tests')
+    expect(container.textContent).toContain('CI')
+    unmount()
+  })
+
+  it('shows "clean" Changes card when totalChanges is 0', () => {
+    const { container, unmount } = renderStatusStrip({ totalChanges: 0 })
+    expect(container.textContent).toContain('clean')
+    expect(container.textContent).toContain('no uncommitted edits')
+    unmount()
+  })
+
+  it('renders NEEDS ATTENTION and DO NOT SHIP verdicts with the right text', () => {
+    // NEEDS ATTENTION variant
+    let result = renderStatusStrip({
+      verdict: 'NEEDS ATTENTION',
+      latestReview: buildJob({ id: 'r2', started_at: 100, finished_at: 120, verdict: 'NEEDS ATTENTION' }),
+    })
+    expect(result.container.textContent).toContain('NEEDS ATTENTION')
+    result.unmount()
+
+    // DO NOT SHIP variant
+    result = renderStatusStrip({
+      verdict: 'DO NOT SHIP',
+      latestReview: buildJob({ id: 'r3', started_at: 100, finished_at: 120, verdict: 'DO NOT SHIP' }),
+    })
+    expect(result.container.textContent).toContain('DO NOT SHIP')
+    result.unmount()
+  })
+
+  it('renders Tests card with pass/fail/not-run-yet states', () => {
+    // Passed
+    let result = renderStatusStrip({
+      latestTest: buildJob({ id: 't1', started_at: 100, finished_at: 130, exit_code: 0, kind: 'test' }),
+    })
+    expect(result.container.textContent).toContain('Passed')
+    result.unmount()
+
+    // Failed with exit code in label
+    result = renderStatusStrip({
+      latestTest: buildJob({ id: 't2', started_at: 100, finished_at: 130, exit_code: 1, kind: 'test' }),
+    })
+    expect(result.container.textContent).toContain('Failed (exit 1)')
+    result.unmount()
+
+    // Not run yet, with a cron schedule annotation
+    result = renderStatusStrip({ testCronSchedule: '15m' })
+    expect(result.container.textContent).toContain('not run yet')
+    expect(result.container.textContent).toContain('scheduled every 15m')
+    result.unmount()
+  })
+
+  it('shows the Push card only when unpushed > 0', () => {
+    // No push card when 0 unpushed.
+    let result = renderStatusStrip({ unpushed: 0 })
+    expect(result.container.textContent).not.toContain('ahead')
+    result.unmount()
+
+    // Push card with singular form.
+    result = renderStatusStrip({ unpushed: 1 })
+    expect(result.container.textContent).toContain('1 commit ahead')
+    result.unmount()
+
+    // Push card with plural form.
+    result = renderStatusStrip({ unpushed: 5 })
+    expect(result.container.textContent).toContain('5 commits ahead')
+    result.unmount()
+  })
+
+  it('shows CI passing / in_progress / no-status branches', () => {
+    let result = renderStatusStrip({ ciStatus: 'success', releaseTag: 'v1.2.3' })
+    expect(result.container.textContent).toContain('passing')
+    expect(result.container.textContent).toContain('release v1.2.3')
+    result.unmount()
+
+    result = renderStatusStrip({ ciStatus: 'in_progress' })
+    expect(result.container.textContent).toContain('running')
+    result.unmount()
+
+    result = renderStatusStrip({ ciStatus: null })
+    expect(result.container.textContent).toContain('no status')
+    result.unmount()
+  })
 })

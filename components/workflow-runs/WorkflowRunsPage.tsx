@@ -3,6 +3,7 @@
 import { useEffect, useState } from 'react';
 import Link from 'next/link';
 import { WorkflowRunsActivePanel } from '@/components/workflow-runs/WorkflowRunsActivePanel';
+import { WorkflowRunsAttentionPanel } from '@/components/workflow-runs/WorkflowRunsAttentionPanel';
 import {
   STATUS_FILTERS,
   type StatusFilter,
@@ -364,6 +365,24 @@ export function WorkflowRunsPage() {
       startedLabel: formatRelativeTime(run.startedAt ?? run.createdAt, now),
       startedTitle: formatTime(run.startedAt ?? run.createdAt),
     }));
+  const attentionRuns = filtered
+    .filter((run) => run.status === 'failed' || run.status === 'cancelled')
+    .map((run) => {
+      const outcome = summarizeOutcome(run);
+      return {
+        id: run.id,
+        name: run.name,
+        rawName: run.rawName,
+        status: run.status,
+        inputLabel: summarizeInput(run.input),
+        inputTitle: formatTitle(run.input),
+        triggerLabel: summarizeTrigger(run.input),
+        outcomeLabel: outcome.label,
+        outcomeTitle: run.error ?? outcome.label,
+        finishedLabel: formatRelativeTime(run.completedAt ?? run.startedAt ?? run.createdAt, now),
+        finishedTitle: formatTime(run.completedAt ?? run.startedAt ?? run.createdAt),
+      };
+    });
 
   return (
     <div className="p-4 sm:p-6">
@@ -420,6 +439,7 @@ export function WorkflowRunsPage() {
       {view === 'runs' && (
         <>
           <WorkflowRunsActivePanel items={activeRuns} />
+          <WorkflowRunsAttentionPanel items={attentionRuns} />
           <WorkflowRunsFilterPanel
             nameFilter={nameFilter}
             statusFilter={statusFilter}
