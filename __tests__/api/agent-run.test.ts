@@ -176,8 +176,8 @@ vi.mock('@/lib/agents/retrieval/retriever', () => ({
 }));
 
 vi.mock('@/lib/agents/system', () => ({
-  getSystemAgentHandler: (name: string) => name === 'retrieval-maintenance'
-    ? { seed: { name, prompt: '', defaultSchedule: '1h', model: 'normal' }, run: (...a: unknown[]) => mocks.runSystemAgent(...a) }
+  getSystemAgentHandler: (name: string) => name === 'documentation-reindex-vectors'
+    ? { seed: { name, prompt: '', defaultSchedule: '16h', model: 'normal' }, run: (...a: unknown[]) => mocks.runSystemAgent(...a) }
     : null,
 }));
 
@@ -564,30 +564,30 @@ describe('POST /api/agents/{agentId}/run', () => {
 
   it('dispatches system agents through their internal handler instead of LLM intake', async () => {
     await insertAgent({
-      id: 'system:proj1:retrieval-maintenance',
-      name: 'retrieval-maintenance',
+      id: 'system:proj1:documentation-reindex-vectors',
+      name: 'documentation-reindex-vectors',
       prompt: 'system prompt',
-      schedule: '1h',
+      schedule: '16h',
       kind: 'system',
     });
 
-    const req = new NextRequest('http://localhost/api/agents/system%3Aproj1%3Aretrieval-maintenance/run', {
+    const req = new NextRequest('http://localhost/api/agents/system%3Aproj1%3Adocumentation-reindex-vectors/run', {
       method: 'POST',
       body: JSON.stringify({}),
     });
-    const res = await POST(req, { params: Promise.resolve({ agentId: 'system:proj1:retrieval-maintenance' }) });
+    const res = await POST(req, { params: Promise.resolve({ agentId: 'system:proj1:documentation-reindex-vectors' }) });
 
     expect(res.status).toBe(200);
     await expect(res.json()).resolves.toMatchObject({
       status: 'started',
       job_id: 'system-job-1',
-      agent: 'retrieval-maintenance',
+      agent: 'documentation-reindex-vectors',
       via: 'system',
     });
     expect(mocks.runSystemAgent).toHaveBeenCalledWith(expect.objectContaining({
-      id: 'system:proj1:retrieval-maintenance',
+      id: 'system:proj1:documentation-reindex-vectors',
       project: 'proj1',
-      name: 'retrieval-maintenance',
+      name: 'documentation-reindex-vectors',
       kind: 'system',
     }));
     expect(mocks.createJob).not.toHaveBeenCalled();
@@ -596,27 +596,27 @@ describe('POST /api/agents/{agentId}/run', () => {
 
   it('rejects duplicate system-agent manual runs', async () => {
     await insertAgent({
-      id: 'system:proj1:retrieval-maintenance',
-      name: 'retrieval-maintenance',
+      id: 'system:proj1:documentation-reindex-vectors',
+      name: 'documentation-reindex-vectors',
       prompt: 'system prompt',
-      schedule: '1h',
+      schedule: '16h',
       kind: 'system',
     });
     mocks.listJobs.mockReturnValue([
       makeJob({
         id: 'running-system-job',
         project: 'proj1',
-        kind: 'agent:retrieval-maintenance',
+        kind: 'agent:documentation-reindex-vectors',
         finishedAt: null,
       }),
     ]);
     mocks.probeJobStatus.mockResolvedValue('running');
 
-    const req = new NextRequest('http://localhost/api/agents/system%3Aproj1%3Aretrieval-maintenance/run', {
+    const req = new NextRequest('http://localhost/api/agents/system%3Aproj1%3Adocumentation-reindex-vectors/run', {
       method: 'POST',
       body: JSON.stringify({}),
     });
-    const res = await POST(req, { params: Promise.resolve({ agentId: 'system:proj1:retrieval-maintenance' }) });
+    const res = await POST(req, { params: Promise.resolve({ agentId: 'system:proj1:documentation-reindex-vectors' }) });
 
     expect(res.status).toBe(409);
     await expect(res.json()).resolves.toMatchObject({ code: 'already_running' });

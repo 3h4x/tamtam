@@ -109,7 +109,7 @@ export async function PATCH(request: NextRequest) {
     if (proj.enabled && !wasEnabled) newlyEnabledProjects.push(proj.name);
   }
 
-  // Auto-seed built-in system agents (retrieval-maintenance, …) for any
+  // Auto-seed built-in system agents (documentation-reindex-vectors, …) for any
   // project that was newly enabled in this PATCH. Idempotent — already-
   // seeded projects are skipped.
   if (newlyEnabledProjects.length > 0) {

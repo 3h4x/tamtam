@@ -4,6 +4,7 @@ import { createTestPgDbEmpty, type TestDbHandle } from '@/__tests__/helpers/test
 import * as schema from '@/lib/db/schema';
 
 const scanFileAgentsMock = vi.fn();
+const SYSTEM_AGENT_NAME = 'documentation-reindex-vectors';
 
 async function applyDdl(handle: TestDbHandle): Promise<void> {
   await handle.db.execute(sql.raw(`
@@ -89,7 +90,7 @@ describe('system-agent seed', () => {
     }));
   });
 
-  it('seeds one retrieval-maintenance row per enabled project', async () => {
+  it('seeds one documentation-reindex-vectors row per enabled project', async () => {
     await sharedHandle.db.insert(schema.projects).values([
       { name: 'proj-a', path: '/tmp/a', enabled: true },
       { name: 'proj-b', path: '/tmp/b', enabled: true },
@@ -114,7 +115,7 @@ describe('system-agent seed', () => {
     const rows = await sharedHandle.db.select().from(schema.agents);
     expect(rows).toHaveLength(2);
     expect(rows.every((r) => r.kind === 'system')).toBe(true);
-    expect(rows.every((r) => r.name === 'retrieval-maintenance')).toBe(true);
+    expect(rows.every((r) => r.name === SYSTEM_AGENT_NAME)).toBe(true);
     expect(new Set(rows.map((r) => r.project))).toEqual(new Set(['proj-a', 'proj-b']));
   });
 
@@ -148,7 +149,7 @@ describe('system-agent seed', () => {
     ]);
     await sharedHandle.db.insert(schema.agents).values({
       id: 'user-agent',
-      name: 'Retrieval-Maintenance',
+      name: 'Documentation-Reindex-Vectors',
       project: 'proj-a',
       skillIds: '[]',
       docPaths: '[]',
@@ -193,8 +194,8 @@ describe('system-agent seed', () => {
     }));
     scanFileAgentsMock.mockReturnValue([
       {
-        id: 'file:proj-a:Retrieval-Maintenance',
-        name: 'Retrieval-Maintenance',
+        id: 'file:proj-a:Documentation-Reindex-Vectors',
+        name: 'Documentation-Reindex-Vectors',
         project: 'proj-a',
         skillIds: [],
         docPaths: [],
@@ -206,7 +207,7 @@ describe('system-agent seed', () => {
         createdAt: 0,
         updatedAt: 0,
         source: 'file',
-        filePath: '/tmp/a/.tamtam/agents/Retrieval-Maintenance.md',
+        filePath: '/tmp/a/.tamtam/agents/Documentation-Reindex-Vectors.md',
       },
     ]);
 
@@ -225,7 +226,7 @@ describe('system-agent seed', () => {
       { name: 'proj-b', path: '/tmp/b', enabled: true },
     ]);
     await sharedHandle.db.insert(schema.settings).values({
-      key: 'system_agent_dismissed:proj-a:retrieval-maintenance',
+      key: `system_agent_dismissed:proj-a:${SYSTEM_AGENT_NAME}`,
       value: 'true',
     });
 
@@ -273,12 +274,12 @@ describe('system-agent seed', () => {
     }));
 
     const { markSystemAgentDismissed } = await import('@/lib/agents/system/seed');
-    await markSystemAgentDismissed('proj-a', 'retrieval-maintenance');
+    await markSystemAgentDismissed('proj-a', SYSTEM_AGENT_NAME);
 
     const rows = await sharedHandle.db
       .select()
       .from(schema.settings)
-      .where(sql`key = 'system_agent_dismissed:proj-a:retrieval-maintenance'`);
+      .where(sql`key = ${`system_agent_dismissed:proj-a:${SYSTEM_AGENT_NAME}`}`);
     expect(rows).toHaveLength(1);
     expect(rows[0].value).toBe('true');
   });

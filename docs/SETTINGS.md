@@ -218,9 +218,9 @@ Semantic retrieval layer — embeds agent run reports plus project-scoped knowle
 
 When enabled, TamTam starts Ollama via PM2 (`ollama-serve`) on boot if not already reachable, pulls `nomic-embed-text` if not installed, and indexes completed agent run reports automatically. Use `POST /api/projects/[schedId]/retrieval/reindex` to refresh the project corpus on demand; that route reports whether sources were missing or stale before the refresh. Freshness behavior is source-specific: completed agent runs are indexed when they finish, while project docs, DB-backed skills, and synthesized project config are refreshed on explicit reindex against the current file/DB snapshot. At prompt time, TamTam records retrieval diagnostics on the run (`results`, `empty_corpus`, `no_results`, `below_threshold`, or `embed_failed`) so ineffective retrieval can be distinguished from a healthy hit.
 
-#### Built-in retrieval-maintenance agent
+#### Built-in documentation-reindex-vectors agent
 
-A `kind='system'` agent named `retrieval-maintenance` is auto-seeded for every enabled project. It is a built-in TamTam agent — visible in `/agents` and the project's agents tab with a `system` badge, scheduled by the same graphile-worker cron pipeline as user agents (default `1h`), and surfaced in `/runs` like any other run. It does **not** spawn a CLI; the scheduled tick dispatches to an internal handler in `lib/agents/system/retrieval-maintenance.ts`.
+A `kind='system'` agent named `documentation-reindex-vectors` is auto-seeded for every enabled project. It is a built-in TamTam agent — visible in `/agents` and the project's agents tab with a `system` badge, scheduled by the same graphile-worker cron pipeline as user agents (default `16h`), and surfaced in `/runs` like any other run. It does **not** spawn a CLI; the scheduled tick dispatches to an internal handler in `lib/agents/system/retrieval-maintenance.ts`.
 
 Each fire does three things deterministically and finishes with a cheap-LLM quality check:
 
@@ -228,13 +228,13 @@ Each fire does three things deterministically and finishes with a cheap-LLM qual
 2. **Reindexes the project corpus** via `reindexProject()` (`lib/agents/retrieval/reindex-project.ts`) — the same code path the manual `POST /api/projects/[schedId]/retrieval/reindex` route uses. Content-hash dedup (`retrieval_records.content_hash`) skips unchanged sources without re-embedding, so the happy-path cost is roughly proportional to what actually changed.
 3. **Verifies retrieval quality** by issuing a sample query (the first H1 from `CLAUDE.md` / `README.md`, falling back to `<project> overview`), pulling the top-5 results, and asking a small local LLM (`outcome_classifier_model`, default `gemma3:4b` on the existing retrieval Ollama) whether the snippets look like real on-topic project content. The verdict (`ok` | `problem` | `null` when the verifier is unreachable) lands on the run's `contextMeta.retrievalHealth` along with reindex stats. Verifier failure does **not** fail the run.
 
-Settings hook: editing `retrieval_embedding_model` in `/settings/general` enqueues an immediate `retrieval-maintenance` run for every project so the rebuild starts at once instead of waiting up to one schedule interval. The handler detects the mismatch and wipes via the same code path.
+Settings hook: editing `retrieval_embedding_model` in `/settings/general` enqueues an immediate `documentation-reindex-vectors` run for every project so the rebuild starts at once instead of waiting up to one schedule interval. The handler detects the mismatch and wipes via the same code path.
 
 Operator controls:
 
 - **Schedule + enabled** are editable from the standard agents UI per project. Other fields (name, prompt, skills, prereq, model, provider) are locked — the agent is auto-managed.
 - **Disable** removes scheduled runs but keeps the row.
-- **Delete** writes a `system_agent_dismissed:<project>:retrieval-maintenance` settings marker so the seeder does not recreate it on next boot. To re-enable, delete that settings key.
+- **Delete** writes a `system_agent_dismissed:<project>:documentation-reindex-vectors` settings marker so the seeder does not recreate it on next boot. To re-enable, delete that settings key.
 - **Manual reindex** via the existing project Config tab → "Reindex now" continues to work and uses the same `reindexProject()` function.
 
 Known caveats:

@@ -316,6 +316,11 @@ export function WorkflowRunsPage() {
     setReloadNonce((current) => current + 1);
   }
 
+  function clearFilters() {
+    setNameFilter('');
+    setStatusFilter('all');
+  }
+
   if (error && !data) {
     return (
       <div className="p-4 sm:p-6">
@@ -378,6 +383,11 @@ export function WorkflowRunsPage() {
     }
     return true;
   });
+  const resultsSummary =
+    filtered.length === data.runs.length
+      ? `showing ${data.runs.length} recent runs`
+      : `showing ${filtered.length} of ${data.runs.length} recent runs`;
+  const activeStatusPresentation = statusFilter !== 'all' ? statusFilterPresentation(statusFilter) : null;
 
   return (
     <div className="p-4 sm:p-6">
@@ -433,15 +443,73 @@ export function WorkflowRunsPage() {
       {view === 'graph' && <WorkflowGraph />}
       {view === 'runs' && (
       <>
-      <div className="mb-3 flex flex-wrap items-center gap-2">
-        <input
-          type="text"
-          placeholder="Filter workflow, project, trigger, outcome…"
-          value={nameFilter}
-          onChange={(e) => setNameFilter(e.target.value)}
-          className="focus-ring w-full rounded-md border border-border bg-bg-secondary px-3 py-1.5 text-sm text-text-primary placeholder:text-text-tertiary focus:border-accent focus:outline-none sm:w-72"
-        />
-        <div className="flex flex-wrap gap-1" role="group" aria-label="Status filter">
+      <div className="mb-3 rounded-lg border border-border bg-bg-secondary">
+        <div className="border-b border-border p-3">
+          <div className="flex flex-col gap-3 lg:flex-row lg:items-start lg:justify-between">
+            <div className="min-w-0 flex-1">
+              <div className="relative max-w-md">
+                <input
+                  type="text"
+                  placeholder="Filter workflow, project, trigger, outcome…"
+                  value={nameFilter}
+                  onChange={(e) => setNameFilter(e.target.value)}
+                  className="focus-ring w-full rounded-md border border-border bg-bg-primary px-3 py-1.5 pr-8 text-sm text-text-primary placeholder:text-text-tertiary focus:border-accent focus:outline-none"
+                />
+                {nameFilter ? (
+                  <button
+                    type="button"
+                    onClick={() => setNameFilter('')}
+                    className="absolute right-2 top-1/2 -translate-y-1/2 text-sm text-text-tertiary transition-colors hover:text-text-primary"
+                    aria-label="Clear search"
+                    title="Clear search"
+                  >
+                    ×
+                  </button>
+                ) : null}
+              </div>
+              <div className="mt-2 flex flex-wrap items-center gap-x-3 gap-y-1 text-[11px] text-text-tertiary">
+                <span className="font-mono">{resultsSummary}</span>
+                {statusCounts.running > 0 ? (
+                  <span className="font-mono text-accent">{statusCounts.running} running</span>
+                ) : null}
+                {hasActiveFilters ? (
+                  <button
+                    type="button"
+                    className="font-mono text-accent transition-colors hover:text-accent-hover"
+                    onClick={clearFilters}
+                  >
+                    clear filters
+                  </button>
+                ) : null}
+              </div>
+            </div>
+            {hasActiveFilters ? (
+              <div className="flex flex-wrap gap-1.5 lg:max-w-[45%] lg:justify-end">
+                {nameNeedle ? (
+                  <span
+                    className="inline-flex max-w-full items-center gap-1.5 rounded-md border border-border bg-bg-primary px-2 py-1 text-xs text-text-secondary"
+                    title={nameFilter.trim()}
+                  >
+                    <span className="text-text-tertiary">query</span>
+                    <span className="max-w-[20rem] truncate font-mono text-text-primary">{nameFilter.trim()}</span>
+                  </span>
+                ) : null}
+                {activeStatusPresentation ? (
+                  <span className={`inline-flex items-center gap-1.5 rounded-md border px-2 py-1 text-xs ${activeStatusPresentation.activeClassName}`}>
+                    {activeStatusPresentation.glyph ? (
+                      <span className="leading-none" aria-hidden="true">
+                        {activeStatusPresentation.glyph}
+                      </span>
+                    ) : null}
+                    <span>status</span>
+                    <span className="font-mono">{statusFilter}</span>
+                  </span>
+                ) : null}
+              </div>
+            ) : null}
+          </div>
+        </div>
+        <div className="flex flex-wrap gap-1 p-1.5" role="group" aria-label="Status filter">
           {STATUS_FILTERS.map((s) => {
             const presentation = statusFilterPresentation(s);
             const selected = statusFilter === s;
@@ -454,7 +522,7 @@ export function WorkflowRunsPage() {
                 className={`inline-flex items-center gap-1.5 rounded-md border px-2.5 py-1 text-xs transition-colors ${
                   selected
                     ? presentation.activeClassName
-                    : 'border-border bg-bg-secondary text-text-secondary hover:bg-bg-tertiary/40 hover:text-text-primary'
+                    : 'border-transparent bg-transparent text-text-secondary hover:border-border hover:bg-bg-primary hover:text-text-primary'
                 }`}
               >
                 {presentation.glyph ? (
@@ -483,10 +551,7 @@ export function WorkflowRunsPage() {
               : `status=${statusFilter} · query=${nameFilter.trim() || '—'}`
           }
           actionLabel={hasActiveFilters ? 'Clear filters' : undefined}
-          onAction={hasActiveFilters ? () => {
-            setNameFilter('');
-            setStatusFilter('all');
-          } : undefined}
+          onAction={hasActiveFilters ? clearFilters : undefined}
         />
       ) : (
         <>

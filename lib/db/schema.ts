@@ -287,7 +287,7 @@ export const retrievalRecords = pgTable('retrieval_records', {
   contentHash: text('content_hash').notNull(),
   indexedAt: doublePrecision('indexed_at').notNull(),
   // Embedding model name that produced this record's chunks. Used by the
-  // retrieval-maintenance system agent to detect when the configured
+  // documentation-reindex-vectors system agent to detect when the configured
   // model has drifted from what's already in the index, triggering a
   // wipe-and-reindex (old-dim vectors cannot be safely searched against
   // new-model queries).
