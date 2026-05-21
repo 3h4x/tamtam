@@ -13,6 +13,7 @@ export function LogsPage() {
   const [loading, setLoading] = useState(false)
   const [search, setSearch] = useState('')
   const [expandedLogs, setExpandedLogs] = useState<Set<string>>(new Set())
+  const [logsError, setLogsError] = useState<string | null>(null)
 
   const toggleLog = (filename: string) => {
     setExpandedLogs(prev => {
@@ -43,11 +44,20 @@ export function LogsPage() {
   const loadLogs = async (project: string) => {
     setSelectedProject(project)
     setLoading(true)
+    // Reset search and prior error when switching projects so a stale
+    // query from the previous project doesn't filter the new one to empty.
+    setSearch('')
+    setLogsError(null)
     try {
       const data = await fetchProjectLogs(project)
       setLogs(data.logs)
-    } catch {
+    } catch (err) {
+      // Don't pretend "no logs" when the load actually failed — the empty-
+      // state and the failure state look identical and the operator can't
+      // tell whether to retry or whether the project really has no logs.
+      console.error(`Failed to load logs for ${project}`, err)
       setLogs([])
+      setLogsError('Failed to load logs.')
     } finally {
       setLoading(false)
     }
