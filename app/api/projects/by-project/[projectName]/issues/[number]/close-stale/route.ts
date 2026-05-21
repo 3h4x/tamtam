@@ -6,6 +6,9 @@ import { resolveGithubRepo } from '@/lib/shared/gh-status';
 import { exec } from '@/lib/shared/shell';
 import { getImproveConfig } from '@/lib/scheduling/scheduling';
 
+const ALLOWED_REASONS = ['stale', 'duplicate', 'wontfix', 'fixed'] as const;
+type AllowedReason = (typeof ALLOWED_REASONS)[number];
+
 // Close an issue with a verdict comment when a TamTam run determines the
 // issue is stale, dead, or otherwise no longer actionable. The findings string
 // is posted as a comment first, then the issue is closed (state-reason: not_planned).
@@ -35,13 +38,9 @@ export async function POST(
   if (!findings) return NextResponse.json({ detail: 'findings required' }, { status: 400 });
 
   // Validate `reason` against the closed set documented in the function
-  // header. Previously the route silently accepted any string and used it
-  // verbatim as the verdict-label in the public GitHub comment — a typo
-  // like "stalee" would post "## TamTam verdict: STALEE" to the issue,
-  // and an attacker-controlled string could splice arbitrary text in
-  // upper-case form. The set below mirrors the JSDoc contract.
-  const ALLOWED_REASONS = ['stale', 'duplicate', 'wontfix', 'fixed'] as const;
-  type AllowedReason = (typeof ALLOWED_REASONS)[number];
+  // header. The value is uppercased and embedded verbatim into the public
+  // GitHub comment ("## TamTam verdict: <X>"), so an unconstrained input
+  // would let a caller splice arbitrary text into the issue body.
   const rawReason = (body.reason ?? 'stale');
   if (typeof rawReason !== 'string') {
     return NextResponse.json({ detail: 'reason must be a string' }, { status: 400 });

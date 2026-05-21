@@ -54,7 +54,6 @@ interface StepRow {
 
 
 declare global {
-  // eslint-disable-next-line no-var
   var __tamtamWorkflowRunsPool: Pool | undefined;
 }
 

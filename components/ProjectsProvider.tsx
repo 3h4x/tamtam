@@ -152,7 +152,7 @@ export function ProjectsProvider({ children }: { children: ReactNode }) {
       value={{
         tasks, priorities, loading, refreshing, error, lastRefresh, fleet, issueCounts,
         setError,
-        loadProjects: () => loadProjects('refresh'),
+        loadProjects,
         handlePriorityChange,
         handlePause,
         handleResume,

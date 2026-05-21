@@ -216,6 +216,7 @@ export function StatusStrip({
   }
 
   // CI card
+  const openCi = ciFailedUrl ? () => window.open(ciFailedUrl, '_blank', 'noopener,noreferrer') : undefined
   let ciCard: React.ReactNode
   if (ciStatus === 'success') {
     ciCard = (
@@ -224,7 +225,7 @@ export function StatusStrip({
         primary="passing"
         detail={releaseTag ? `release ${releaseTag}` : 'latest commit'}
         tone="success"
-        onClick={ciFailedUrl ? () => window.open(ciFailedUrl, '_blank', 'noopener,noreferrer') : undefined}
+        onClick={openCi}
       />
     )
   } else if (ciStatus === 'failure') {
@@ -234,7 +235,7 @@ export function StatusStrip({
         primary="failing"
         detail={ciFailedUrl ? 'open on GitHub' : 'no run url'}
         tone="error"
-        onClick={ciFailedUrl ? () => window.open(ciFailedUrl, '_blank', 'noopener,noreferrer') : undefined}
+        onClick={openCi}
       />
     )
   } else if (ciStatus === 'in_progress') {
@@ -245,7 +246,7 @@ export function StatusStrip({
         detail={ciFailedUrl ? 'open on GitHub' : undefined}
         tone="warning"
         running
-        onClick={ciFailedUrl ? () => window.open(ciFailedUrl, '_blank', 'noopener,noreferrer') : undefined}
+        onClick={openCi}
       />
     )
   } else {

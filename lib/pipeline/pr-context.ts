@@ -14,8 +14,7 @@ export async function decidePrContext(
 ): Promise<PrDecision> {
   // The two probes are independent — fire them in parallel so this call
   // (used on every release start to decide PR vs direct push) costs one git
-  // round-trip instead of two. Matches the same Promise.all pattern used by
-  // the /branch route.
+  // round-trip instead of two.
   const [branchR, defaultBranch] = await Promise.all([
     exec('git', ['-C', projectPath, 'branch', '--show-current'], { timeout: 5000, signal }),
     detectMainBranch(projectPath, signal),

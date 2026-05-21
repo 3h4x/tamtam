@@ -23,9 +23,6 @@ export async function PATCH(
     return NextResponse.json({ detail: 'default skills are read-only' }, { status: 403 });
   }
 
-  // Defensive parse: a malformed body used to bubble up as a 500. A 400
-  // with a clear reason is friendlier and matches the convention applied
-  // by the review-pr / changes / create-pr routes.
   let body: unknown;
   try {
     body = await request.json();
@@ -40,10 +37,6 @@ export async function PATCH(
   const existing = existingRows[0] ?? null;
   if (!existing) return NextResponse.json({ detail: 'not found' }, { status: 404 });
 
-  // Type-narrow each optional field before mutating. The original code
-  // called `.trim()` directly on `body.name` / `body.description` without
-  // a type check, which would TypeError on a non-string value (number,
-  // object, null) and bubble up as a 500.
   const { name, description, content } = body as { name?: unknown; description?: unknown; content?: unknown };
   const updates: Record<string, unknown> = { updatedAt: Date.now() / 1000 };
   if (name !== undefined) {

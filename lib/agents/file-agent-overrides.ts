@@ -36,9 +36,7 @@ function keyFor(project: string, name: string): string {
 // __tamtamCronWorker / __tamtamJobCancellation.
 // ---------------------------------------------------------------------------
 declare global {
-  // eslint-disable-next-line no-var
   var __tamtamFileAgentOverrideCache: Map<string, FileAgentOverride | null> | undefined;
-  // eslint-disable-next-line no-var
   var __tamtamFileAgentOverridePending: Set<string> | undefined;
 }
 

@@ -35,12 +35,10 @@ export class PgvectorBackend implements RetrievalBackend {
     limit: number;
     sourceKinds?: SourceKind[];
   }): Promise<RetrievalResult[]> {
-    // Fetch only what the caller asked for. Previously the SQL fetched
-    // `limit * 10` rows and the JS loop sliced to `limit` — pure wasted
-    // bandwidth, because nothing here re-ranks or applies a score filter
-    // before the slice. The retriever's score-threshold filter runs on
-    // whatever this function returns and wouldn't benefit from extra
-    // candidates beyond `limit`.
+    // Fetch only what the caller asked for: nothing here re-ranks or
+    // applies a score filter before the slice. The retriever's
+    // score-threshold filter runs on whatever this function returns and
+    // wouldn't benefit from extra candidates beyond `limit`.
     const embeddingStr = `[${opts.embedding.join(',')}]`;
 
     // Cosine distance search using pgvector <=> operator

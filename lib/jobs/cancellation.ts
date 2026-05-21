@@ -7,7 +7,6 @@ interface CancellationEntry {
 }
 
 declare global {
-  // eslint-disable-next-line no-var
   var __tamtamJobCancellation: Map<string, CancellationEntry> | undefined;
 }
 

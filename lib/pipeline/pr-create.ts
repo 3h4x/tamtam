@@ -1,7 +1,7 @@
 import { exec } from '@/lib/shared/shell';
 import { getJob } from '@/lib/jobs/job-storage';
 import type { JobData } from '@/lib/jobs/types';
-import { detectMainBranch } from './start-commit';
+import { detectMainBranch, issueBranchName } from './start-commit';
 
 type ExecLikeResult = Partial<{ stdout: string; stderr: string; exitCode: number }> | null | undefined;
 
@@ -17,8 +17,7 @@ function normalizeExecResult(result: ExecLikeResult) {
 // containing OTHER pull URLs (e.g. a referenced PR in the commit body that
 // gh's templating echoes back); pick the LAST github.com/.../pull/N match
 // anywhere in stdout rather than the first line starting with "https://" —
-// the real created-PR URL is always the last URL gh prints. Matches the
-// strategy already used by `app/api/projects/.../create-pr/route.ts`.
+// the real created-PR URL is always the last URL gh prints.
 function extractCreatedPrUrl(stdout: string): string | null {
   const matches = stdout.match(/https:\/\/github\.com\/[^/\s]+\/[^/\s]+\/pull\/\d+/g);
   if (matches && matches.length > 0) return matches[matches.length - 1];
@@ -73,9 +72,12 @@ export async function createGenericPR(
   log: (s: string) => void,
   signal?: AbortSignal,
 ): Promise<{ prUrl: string; prRepo: string } | false | null> {
-  const branchR = normalizeExecResult(await exec('git', ['-C', projPath, 'branch', '--show-current'], { timeout: 5000, signal }));
+  // Independent reads — parallelize.
+  const [branchR, mainBranch] = await Promise.all([
+    (async () => normalizeExecResult(await exec('git', ['-C', projPath, 'branch', '--show-current'], { timeout: 5000, signal })))(),
+    detectMainBranch(projPath, signal),
+  ]);
   const currentBranch = branchR.stdout.trim();
-  const mainBranch = await detectMainBranch(projPath, signal);
 
   if (!currentBranch || currentBranch === mainBranch) {
     log(`\n# on default branch — skipping PR creation\n`);
@@ -124,14 +126,16 @@ export async function createIssuePR(
   // from a different agent run with the same number.
   originJobId?: string | null,
 ): Promise<string | null> {
-  const branchR = normalizeExecResult(await exec('git', ['-C', projPath, 'branch', '--show-current'], { timeout: 5000, signal }));
+  // Independent reads — parallelize.
+  const [branchR, mainBranch] = await Promise.all([
+    (async () => normalizeExecResult(await exec('git', ['-C', projPath, 'branch', '--show-current'], { timeout: 5000, signal })))(),
+    detectMainBranch(projPath, signal),
+  ]);
   const currentBranch = branchR.stdout.trim();
-  const mainBranch = await detectMainBranch(projPath, signal);
 
   let effectiveBranch = currentBranch;
 
   if (!currentBranch || currentBranch === mainBranch) {
-    const { issueBranchName } = await import('./start-commit');
     const featureBranch = issueBranchName(issue);
     effectiveBranch = featureBranch;
 

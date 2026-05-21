@@ -8,7 +8,19 @@ import { eq, like } from 'drizzle-orm';
 import { db, schema } from '@/lib/db';
 import { listEnabledProjects, refreshProjectsCacheSync } from '@/lib/shared/enabled-projects';
 import { findAgentNameConflict } from '@/lib/agents/agent-conflicts';
+import { getSettings } from '@/lib/shared/config';
+import { DOCUMENTATION_REINDEX_VECTORS_AGENT_NAME } from './retrieval-maintenance';
 import { listSystemAgentSeedConfigs, type SystemAgentSeedConfig } from './index';
+
+// System-agent schedules are user-facing settings, not seed-config defaults.
+// `documentation-reindex-vectors` reads its interval from
+// `retrieval_reindex_interval_hours` so it stays user-tunable from /settings.
+function effectiveScheduleFor(seed: SystemAgentSeedConfig): string {
+  if (seed.name === DOCUMENTATION_REINDEX_VECTORS_AGENT_NAME) {
+    return `${getSettings().retrieval_reindex_interval_hours}h`;
+  }
+  return seed.defaultSchedule;
+}
 
 export interface SeedSystemAgentsResult {
   seeded: number;
@@ -76,7 +88,7 @@ async function seedOneAgentForOneProject(
       skillIds: '[]',
       model: seed.model,
       prompt: seed.prompt,
-      schedule: seed.defaultSchedule,
+      schedule: effectiveScheduleFor(seed),
       enabled: true,
       docPaths: '[]',
       provider: null,

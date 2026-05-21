@@ -111,8 +111,8 @@ function normalizeExecResult(result: ExecLikeResult) {
 async function detectRepo(projPath: string): Promise<string | null> {
   // Let `gh` infer the repo from the project's git remote. Running `gh repo
   // view` inside the working tree resolves the upstream owner/repo without
-  // needing a `-R` flag. (`-R .` is malformed: `-R` requires owner/repo, not
-  // a path — that bug silently dropped the fallback to the legacy abort.)
+  // needing a `-R` flag (which would require an owner/repo argument, not a
+  // path).
   const raw = await exec('gh', ['repo', 'view', '--json', 'nameWithOwner', '-q', '.nameWithOwner'], {
     cwd: projPath,
     timeout: 10000,

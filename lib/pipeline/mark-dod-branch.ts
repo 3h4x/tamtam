@@ -46,10 +46,15 @@ export async function ensureBranchForCtx(
   if (!targetBranch) return { switched: false, skipped: 'no linked PR / head branch found' };
 
   // 2. What are we on now? Refuse to switch if working tree is dirty.
-  const branchR = await exec('git', ['-C', projPath, 'branch', '--show-current'], { timeout: 5000 });
+  // The branch read + dirty check are independent; parallelize. The
+  // already-on-target short-circuit is uncommon (mark-dod typically needs
+  // to switch to the PR branch), so the extra status call is rarely wasted.
+  const [branchR, dirtyR] = await Promise.all([
+    exec('git', ['-C', projPath, 'branch', '--show-current'], { timeout: 5000 }),
+    exec('git', ['-C', projPath, 'status', '--porcelain'], { timeout: 5000 }),
+  ]);
   const originalBranch = branchR.stdout.trim() || null;
   if (originalBranch === targetBranch) return { switched: false, skipped: `already on ${targetBranch}` };
-  const dirtyR = await exec('git', ['-C', projPath, 'status', '--porcelain'], { timeout: 5000 });
   if (dirtyR.exitCode !== 0) {
     return { switched: false, skipped: `could not read working tree state (git status failed) — staying on ${originalBranch ?? 'current branch'}` };
   }

@@ -1,5 +1,5 @@
 import { createHash } from 'crypto';
-import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'fs';
+import { mkdirSync, readFileSync, writeFileSync } from 'fs';
 import { join, resolve, relative, sep } from 'path';
 import { homedir } from 'os';
 import { exec } from '@/lib/shared/shell';
@@ -100,7 +100,6 @@ export async function markReviewed(project: string, path: string): Promise<void>
 export async function isReviewed(project: string, path: string): Promise<boolean> {
   const p = reviewStatePath(project);
   if (!p) return false;
-  if (!existsSync(p)) return false;
   const current = await readReviewStamp(path);
   if (!current) return false;
   try {

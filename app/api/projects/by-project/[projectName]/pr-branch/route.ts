@@ -32,8 +32,7 @@ export async function POST(
   // Capture the result instead of discarding it: when both checkout
   // attempts below fail, the fetch stderr is often the most actionable
   // error (e.g. "couldn't find remote ref ..." when the branch is gone
-  // upstream, or a network failure), and silently dropping it forced
-  // operators to re-run the command in a terminal to learn why.
+  // upstream, or a network failure).
   const fetchR = await exec('git', ['-C', projPath, 'fetch', 'origin', branch], { timeout: 15000 });
 
   // Try local checkout first (branch may already exist), then track from origin.

@@ -1,6 +1,9 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { listRecommendations, updateRecommendationStatus } from '@/lib/recommendations/recommendations';
 
+const VALID_STATUSES = ['open', 'dismissed'] as const;
+type RecommendationStatus = (typeof VALID_STATUSES)[number];
+
 export async function GET(
   _request: NextRequest,
   { params }: { params: Promise<{ projectName: string }> },
@@ -14,8 +17,6 @@ export async function PATCH(
   { params }: { params: Promise<{ projectName: string }> },
 ) {
   const { projectName } = await params;
-  // Defensive parse: a malformed body used to bubble up as a 500. Matches
-  // the convention from review-pr / changes / create-pr / skills routes.
   let body: { id?: unknown; status?: unknown };
   try {
     body = await request.json();
@@ -24,10 +25,10 @@ export async function PATCH(
   }
   const id = typeof body.id === 'string' ? body.id : '';
   const status = typeof body.status === 'string' ? body.status : '';
-  if (!id || !['open', 'dismissed'].includes(status)) {
+  if (!id || !(VALID_STATUSES as readonly string[]).includes(status)) {
     return NextResponse.json({ detail: 'id and valid status (open or dismissed) are required' }, { status: 400 });
   }
-  const recommendation = await updateRecommendationStatus(projectName, id, status as 'open' | 'dismissed');
+  const recommendation = await updateRecommendationStatus(projectName, id, status as RecommendationStatus);
   if (!recommendation) {
     return NextResponse.json({ detail: 'recommendation not found' }, { status: 404 });
   }

@@ -475,8 +475,8 @@ export function ChangesTab({ projectName, jobsPaused = false }: ChangesTabProps)
               >
                 <span className="text-text-tertiary text-xs w-3">{isExpanded ? '▾' : '▸'}</span>
                 <span
-                  className={`inline-flex items-center justify-center w-5 h-5 text-[10px] font-bold font-mono rounded shrink-0 ${STATUS_COLOR[file.status as ChangeStatus] || 'text-text-secondary bg-bg-tertiary'}`}
-                  title={STATUS_LABEL[file.status as ChangeStatus] || file.status}
+                  className={`inline-flex items-center justify-center w-5 h-5 text-[10px] font-bold font-mono rounded shrink-0 ${STATUS_COLOR[file.status] || 'text-text-secondary bg-bg-tertiary'}`}
+                  title={STATUS_LABEL[file.status] || file.status}
                 >
                   {file.status}
                 </span>

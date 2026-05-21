@@ -22,7 +22,6 @@ const ALL_FILE_AGENTS_TTL_MS = 10_000;
 // fragment into multiple per-realm copies and the 10s coalescing wouldn't
 // hold across HTTP routes that all hit this handler.
 declare global {
-  // eslint-disable-next-line no-var
   var __tamtamAllFileAgentsCache: { agents: FileAgent[]; time: number } | null | undefined;
 }
 
