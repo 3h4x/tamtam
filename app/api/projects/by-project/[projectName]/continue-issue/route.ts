@@ -34,22 +34,31 @@ function isIssueScopedMarkDod(job: { ghIssueNumber?: number | null; contextMeta?
   return issueScopedMarkDodSourceNumber(job) === issueNumber;
 }
 
-function inferLegacyMarkDodIssueFromLineage(job: JobData, jobs: JobData[]): number | null {
-  const byId = new Map(jobs.map((candidate) => [candidate.id, candidate]));
+// Lookup bundle: hoist the byId map + the per-project subset once at the
+// route entry and pass through to the legacy-inference helpers. Without
+// this, each candidate mark-dod row in the project would rebuild `byId`
+// (O(N) over the global ~25k-job cache) AND re-filter the global cache by
+// project — O(M × N) overall, dominated by the global rebuilds. With the
+// bundle the helpers operate on the per-project subset only.
+interface ContinueIssueLookup {
+  byId: Map<string, JobData>;
+  projectJobs: JobData[];
+}
+
+function inferLegacyMarkDodIssueFromLineage(job: JobData, lookup: ContinueIssueLookup): number | null {
   const seen = new Set<string>();
-  let cursor = job.parentJobId ? byId.get(job.parentJobId) ?? null : null;
+  let cursor = job.parentJobId ? lookup.byId.get(job.parentJobId) ?? null : null;
 
   while (cursor && !seen.has(cursor.id)) {
     seen.add(cursor.id);
     if (issueStamped(cursor)) return cursor.ghIssueNumber;
-    cursor = cursor.parentJobId ? byId.get(cursor.parentJobId) ?? null : null;
+    cursor = cursor.parentJobId ? lookup.byId.get(cursor.parentJobId) ?? null : null;
   }
 
   if (job.releaseId) {
-    const releaseScopedIssue = jobs
+    const releaseScopedIssue = lookup.projectJobs
       .filter(
         (candidate) =>
-          candidate.project === job.project &&
           candidate.releaseId === job.releaseId &&
           issueStamped(candidate),
       )
@@ -60,26 +69,26 @@ function inferLegacyMarkDodIssueFromLineage(job: JobData, jobs: JobData[]): numb
   return null;
 }
 
-function inferLegacyMarkDodIssueByTime(job: JobData, jobs: JobData[]): number | null {
-  const contextKinds = new Set(['run', 'fix']);
-  return jobs
+const LEGACY_CONTEXT_KINDS = new Set(['run', 'fix']);
+
+function inferLegacyMarkDodIssueByTime(job: JobData, lookup: ContinueIssueLookup): number | null {
+  return lookup.projectJobs
     .filter(
       (candidate) =>
-        candidate.project === job.project &&
-        contextKinds.has(candidate.kind) &&
+        LEGACY_CONTEXT_KINDS.has(candidate.kind) &&
         candidate.ghIssueNumber != null &&
         candidate.startedAt <= job.startedAt,
     )
     .sort((a, b) => b.startedAt - a.startedAt)[0]?.ghIssueNumber ?? null;
 }
 
-function matchesIssueMarkDod(job: JobData, issueNumber: number, jobs: JobData[]): boolean {
+function matchesIssueMarkDod(job: JobData, issueNumber: number, lookup: ContinueIssueLookup): boolean {
   if (isIssueScopedMarkDod(job, issueNumber)) return true;
   if (job.ghIssueNumber === issueNumber && !job.contextMeta) return true;
   if (job.ghIssueNumber != null) return false;
   return (
-    inferLegacyMarkDodIssueFromLineage(job, jobs) === issueNumber ||
-    inferLegacyMarkDodIssueByTime(job, jobs) === issueNumber
+    inferLegacyMarkDodIssueFromLineage(job, lookup) === issueNumber ||
+    inferLegacyMarkDodIssueByTime(job, lookup) === issueNumber
   );
 }
 
@@ -113,14 +122,21 @@ export async function GET(
   }
 
   const allJobs = listJobs();
+  // Build lookup once: byId for parent-chain walks (lineage), projectJobs
+  // for per-project filters. Both helpers used by `matchesIssueMarkDod`
+  // read these structures instead of re-scanning the global cache.
+  const projectJobs = allJobs.filter((j) => j.project === projectName);
+  const lookup: ContinueIssueLookup = {
+    byId: new Map(allJobs.map((j) => [j.id, j])),
+    projectJobs,
+  };
 
   // Most recent Claude run that ran for this issue. We accept run/fix kinds
   // — both store a session_id and either is a valid resume target.
   const claudeKindsForResume = new Set(['run', 'fix']);
-  const lastClaudeForIssue = allJobs
+  const lastClaudeForIssue = projectJobs
     .filter(j =>
-      j.project === projectName
-      && claudeKindsForResume.has(j.kind)
+      claudeKindsForResume.has(j.kind)
       && j.ghIssueNumber === issueNumber
       && j.sessionId
     )
@@ -131,8 +147,8 @@ export async function GET(
   // issue in the same project cannot leak its checklist into this prompt.
   // Older rows predate that stamp, so fall back to the latest issue-linked
   // run/fix context that existed before the legacy mark-dod fired.
-  const lastMarkDod = allJobs
-    .filter(j => j.project === projectName && j.kind === 'mark-dod' && matchesIssueMarkDod(j, issueNumber, allJobs))
+  const lastMarkDod = projectJobs
+    .filter(j => j.kind === 'mark-dod' && matchesIssueMarkDod(j, issueNumber, lookup))
     .sort((a, b) => b.startedAt - a.startedAt)[0] ?? null;
 
   // Parse the unverified items from the mark-dod log. Lines look like:

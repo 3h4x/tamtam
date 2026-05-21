@@ -493,4 +493,76 @@ describe('WorkflowRunsPage', () => {
 
     unmount()
   })
+
+  it('shows failed and cancelled runs in a direct attention panel', async () => {
+    vi.stubGlobal('fetch', vi.fn().mockResolvedValue({
+      ok: true,
+      json: async () => ({
+        runs: [
+          {
+            id: 'run-review',
+            name: 'review',
+            rawName: 'workflow.review',
+            status: 'failed',
+            createdAt: '2026-05-20T11:49:00Z',
+            startedAt: '2026-05-20T11:50:00Z',
+            completedAt: '2026-05-20T11:50:30Z',
+            durationMs: 30_000,
+            input: ['acme', { parentJobId: 'release-123' }],
+            output: null,
+            error: 'review found a blocking issue\nwith details',
+          },
+          {
+            id: 'run-soak',
+            name: 'soak',
+            rawName: 'workflow.soak',
+            status: 'cancelled',
+            createdAt: '2026-05-20T11:45:00Z',
+            startedAt: '2026-05-20T11:46:00Z',
+            completedAt: '2026-05-20T11:46:30Z',
+            durationMs: 30_000,
+            input: ['acme'],
+            output: null,
+            error: null,
+          },
+          {
+            id: 'run-test',
+            name: 'test',
+            rawName: 'workflow.test',
+            status: 'completed',
+            createdAt: '2026-05-20T11:40:00Z',
+            startedAt: '2026-05-20T11:41:00Z',
+            completedAt: '2026-05-20T11:41:30Z',
+            durationMs: 30_000,
+            input: ['beta'],
+            output: { ok: true },
+            error: null,
+          },
+        ],
+        meta: { workflowEnabled: true, releaseWorkflow: true, releaseWorkflowDrive: true, mode: 'drive' },
+      }),
+    }))
+
+    const { container, unmount } = renderWorkflowRunsPage()
+
+    await vi.waitFor(() => {
+      expect(container.textContent).toContain('review found a blocking issue')
+    })
+
+    const attentionPanel = container.querySelector('section[aria-label="Workflow runs needing attention"]')
+    expect(attentionPanel?.textContent).toContain('2 runs')
+    expect(attentionPanel?.textContent).toContain('release-123')
+    expect(attentionPanel?.textContent).toContain('cancelled')
+    expect(attentionPanel?.textContent).not.toContain('test')
+
+    const links = Array.from(attentionPanel?.querySelectorAll<HTMLAnchorElement>('a') ?? [])
+      .map((link) => link.getAttribute('href'))
+    expect(links).toEqual(['/workflow-runs/run-review', '/workflow-runs/run-soak'])
+
+    const reviewOutcome = Array.from(attentionPanel?.querySelectorAll<HTMLElement>('[title]') ?? [])
+      .find((element) => element.getAttribute('title') === 'review found a blocking issue\nwith details')
+    expect(reviewOutcome?.textContent).toBe('review found a blocking issue')
+
+    unmount()
+  })
 })
