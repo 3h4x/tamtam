@@ -1,6 +1,6 @@
 import { db, schema } from '@/lib/db';
 import { join } from 'path';
-import { existsSync, readFileSync } from 'fs';
+import { readFileSync } from 'fs';
 import {
   normalizeBudgetSubscriptionProviders,
   type BudgetSubscriptionProvider,
@@ -595,15 +595,13 @@ export function withBasePrompt(
 
   if (options.projectPath && PROJECT_MEMORY_PROVIDERS.has(provider)) {
     const memoryPath = join(options.projectPath, 'CLAUDE.md');
-    if (existsSync(memoryPath)) {
-      try {
-        const memory = readFileSync(memoryPath, 'utf-8').trim();
-        if (memory) {
-          parts.push(`Project instructions from CLAUDE.md:\n\n${memory}`);
-        }
-      } catch {
-        // Missing/unreadable project memory should not block a run.
+    try {
+      const memory = readFileSync(/*turbopackIgnore: true*/ memoryPath, 'utf-8').trim();
+      if (memory) {
+        parts.push(`Project instructions from CLAUDE.md:\n\n${memory}`);
       }
+    } catch {
+      // Missing/unreadable project memory should not block a run.
     }
   }
 
