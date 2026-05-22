@@ -1,4 +1,4 @@
-import { existsSync, readdirSync, readFileSync, statSync } from 'fs';
+import { readdirSync, readFileSync, statSync } from 'fs';
 import { isAbsolute, join } from 'path';
 import { parse as devalueParse } from 'devalue';
 
@@ -192,8 +192,14 @@ export function readLocalRunFile(runId: string): LocalRunFile | null {
 
 export function readLocalStepFiles(runId: string): LocalStepFile[] {
   const dir = localWorldStepsDir();
-  if (!existsSync(/*turbopackIgnore: true*/ dir)) return [];
-  return readdirSync(/*turbopackIgnore: true*/ dir)
+  let names: string[];
+  try {
+    names = readdirSync(/*turbopackIgnore: true*/ dir);
+  } catch (err) {
+    if ((err as NodeJS.ErrnoException).code === 'ENOENT') return [];
+    throw err;
+  }
+  return names
     .filter((name) => name.startsWith(`${runId}-`) && name.endsWith('.json'))
     .map((name) => JSON.parse(readFileSync(/*turbopackIgnore: true*/ join(dir, name), 'utf8')) as LocalStepFile)
     .sort((a, b) => {
