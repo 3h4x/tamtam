@@ -1,5 +1,10 @@
 import { describe, it, expect } from 'vitest';
-import { isHookRejection, isTestFailureRejection, isRemoteRaceRejection } from '@/lib/pipeline/push-rejection';
+import {
+  isHookRejection,
+  isRetryableRemoteRefRejection,
+  isRemoteRaceRejection,
+  isTestFailureRejection,
+} from '@/lib/pipeline/push-rejection';
 
 describe('isHookRejection', () => {
   it('returns false for null/undefined/empty', () => {
@@ -111,6 +116,19 @@ describe('isRemoteRaceRejection', () => {
   it('returns false for hook / lint output', () => {
     expect(isRemoteRaceRejection('husky - pre-push script failed (code 1)')).toBe(false);
     expect(isRemoteRaceRejection('✖ 3 problems (3 errors, 0 warnings)')).toBe(false);
+  });
+});
+
+describe('isRetryableRemoteRefRejection', () => {
+  it('detects retryable ref movement case-insensitively', () => {
+    expect(isRetryableRemoteRefRejection(' ! [rejected] main -> main (Non-Fast-Forward)')).toBe(true);
+    expect(isRetryableRemoteRefRejection('hint: the tip of your current branch is behind')).toBe(true);
+  });
+
+  it('does not classify branch protection as rebase-retryable', () => {
+    expect(isRetryableRemoteRefRejection('remote: - Changes must be made through a pull request.')).toBe(false);
+    expect(isRetryableRemoteRefRejection('remote: error: Required status check "Lint and Test" is expected.')).toBe(false);
+    expect(isRetryableRemoteRefRejection('remote: error: refusing to push to a protected branch')).toBe(false);
   });
 });
 

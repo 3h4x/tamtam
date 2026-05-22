@@ -33,6 +33,7 @@ const NAV_ITEMS: NavItem[] = [
   { to: '/stats', label: 'Stats' },
   { to: '/library', label: 'Library' },
   { to: '/recommendations', label: 'Recommendations', countKey: 'recommendations' },
+  { to: '/agent', label: 'Agent' },
   { to: '/settings', label: 'Settings' },
 ]
 

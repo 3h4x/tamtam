@@ -1,12 +1,16 @@
-import { readFileSync } from 'node:fs';
+import { existsSync, readFileSync, unlinkSync, writeFileSync } from 'node:fs';
 import { resolve } from 'node:path';
 import { spawnSync } from 'node:child_process';
 import { describe, expect, it } from 'vitest';
 
 const svgPath = resolve(__dirname, '../../public/workflow-graph.svg');
+const stampPath = `${svgPath}.input-sha1`;
 
 describe('scripts/gen-workflow-graph.mjs', () => {
   it('keeps build usable with the committed SVG when Chrome is unavailable', () => {
+    const hadStamp = existsSync(stampPath);
+    const priorStamp = hadStamp ? readFileSync(stampPath, 'utf-8') : null;
+    writeFileSync(stampPath, 'sentinel-stale-stamp', 'utf-8');
     const result = spawnSync(
       process.execPath,
       ['scripts/gen-workflow-graph.mjs'],
@@ -20,8 +24,14 @@ describe('scripts/gen-workflow-graph.mjs', () => {
       },
     );
 
-    expect(result.status).toBe(0);
-    expect(result.stdout).toContain('using committed SVG');
+    try {
+      expect(result.status).toBe(0);
+      expect(result.stdout).toContain('using committed SVG');
+      expect(readFileSync(stampPath, 'utf-8')).toBe('sentinel-stale-stamp');
+    } finally {
+      if (priorStamp === null) unlinkSync(stampPath);
+      else writeFileSync(stampPath, priorStamp, 'utf-8');
+    }
   });
 
   it('renders the release-after-run gate, not the legacy issue-work skip text', () => {

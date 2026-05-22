@@ -45,7 +45,7 @@ export async function POST(
 
   // Push current branch via the shared release-pipeline helper so upstream
   // fallback and error formatting behave consistently with the rest of the app.
-  const pushR = await pushCurrentBranch(projPath, undefined, { noVerify: forcePush });
+  const pushR = await pushCurrentBranch(projPath, undefined, { noVerify: forcePush, projectName });
   if (!pushR.ok) {
     // When the pre-push hook blocked the push, surface a structured payload so
     // the client can offer the user a "Force-create (skip pre-push hook)"

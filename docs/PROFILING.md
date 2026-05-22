@@ -107,6 +107,48 @@ What to look for:
 
 Because this profiles the JS layer, it's useful for app-code hotspots (`/api/jobs`, `getVerdict`, `parseStreamLines`). It will **not** show Turbopack's Rust-side work — that's where Turbopack tracing (above) takes over.
 
+### Build wall-clock: per-phase timings
+
+`pnpm build` runs through `scripts/build-with-metrics.mjs`, which now drives all three phases (prebuild → next build → postbuild) inside one process and writes a per-phase breakdown to every `data/build-metrics.jsonl` record. Look at `phase_timings_ms` for any individual build and the `top_spans` summary inside `trace_summary`:
+
+```bash
+pnpm build:history                        # last 10 builds, summary table
+pnpm build:history --raw --limit 3        # raw JSON incl. top_spans
+```
+
+Established baselines (113 routes, 18-core macOS, no cache):
+
+| Variant | Wall | run-turbopack | Δ baseline |
+|---|---|---|---|
+| Baseline (all routes) | 124.8s | 118.6s | — |
+| Without `withWorkflow` wrapper | 116.6s | 111.0s | −8s |
+| 44 API routes (half disabled) | 76.8s | 73.0s | −48s |
+| 0 API routes (only pages + workflow) | 45.0s | 42.5s | −80s |
+
+What that tells us:
+
+- **`run-turbopack` is 95% of the build.** Every other span (`static-check`, `check-page`, `is-page-static`) runs in parallel and lands in <1s wall time.
+- **Each API route adds ~0.9–1.1s.** With 87 API routes that's ~80s of the 125s build. The cost is the per-entry-point bundle/chunk/emit work; module dedup keeps shared imports cheap.
+- **`withWorkflow` adds ~8s.** Useful as a marker but not the lever.
+- **NFT bloat ≠ build wall.** Cutting NFT size with `outputFileTracingExcludes` (skills/docs/, docs/, public/, scripts/, `.disabled` siblings) saves ~14% deploy-bundle size but didn't move the build wall, because NFT tracing already runs in parallel (`parallelServerBuildTraces: true`).
+
+If you want a faster build, the levers in order of leverage are:
+1. Reduce route count (consolidate small CRUD endpoints) — directly subtracts ~1s per route removed.
+2. Reduce per-route transitive imports (split barrel files like `@/lib/jobs/job-storage`, lazy-init `@/lib/db`'s Pool, avoid pulling client components into API route trees).
+3. Avoid module-level work in `@/lib/db` (the Pool construction + drizzle pg-core's 200 column files get traced per entry).
+
+### Deep Turbopack trace (build)
+
+For the most expensive question — "what is `run-turbopack` doing for 118s?" — capture the binary trace:
+
+```bash
+NEXT_TURBOPACK_TRACING=1 pnpm build:raw   # produces ~1.5 GB .next/trace-turbopack
+strings -n 8 .next/trace-turbopack | sort | uniq -c | sort -rn | head -40
+strings -n 8 .next/trace-turbopack | grep -E "^\[project\]/" | sort | uniq -c | sort -rn | head -40
+```
+
+Useful signals from this repo's last capture: 9433 unique modules processed, 24002 resolve operations, 686 references into `drizzle-orm/pg-core` column types, 530 into `lib/pipeline`, 516 into `lib/jobs`. That's how we saw `@/lib/db` was a per-entry tax.
+
 ### Other server-side angles
 
 - **Build-time NFT trace bloat.** `pnpm build` runs `scripts/strip-runtime-data-from-nft.mjs` and then `scripts/check-nft-sizes.mjs` after Next finishes compiling. The strip step removes runtime `data/` entries from the boot-only `instrumentation.js.nft.json`; the guard then scans all `.nft.json` files under `.next/server` and fails when any trace exceeds about 1.5 MB of NFT JSON or 8,000 files. This usually means a server-route dependency has an unbounded dynamic `fs.*` path that Turbopack cannot statically analyze. Fix the call site by adding `/*turbopackIgnore: true*/` next to the runtime-dynamic path argument, or add a narrow `outputFileTracingExcludes` entry in `next.config.ts` for runtime artifact directories that should never ship in route bundles. Do not raise the thresholds unless the top offenders are understood and intentionally bounded.

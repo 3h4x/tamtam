@@ -29,6 +29,7 @@ const mocks = vi.hoisted(() => {
   const mkdirSyncMock = vi.fn();
   const appendFileSyncMock = vi.fn();
   const currentParentMock = vi.fn();
+  const pauseProjectMock = vi.fn();
   return {
     execMock, setProjectPushResultMock, createJobMock, markDoneMock,
     updateJobMock, generateCommitMessageMock, findIssueContextMock,
@@ -36,7 +37,7 @@ const mocks = vi.hoisted(() => {
     checkCliStartGateMock, getProjectTestConfigMock, getLockMock,
     acquireLockMock, isLockOwnedByActiveReleaseMock, getJobMock, listJobsMock,
     resolveProjectPathMock, clearProjectDataCacheMock, invalidateProjectMock,
-    mkdirSyncMock, appendFileSyncMock, currentParentMock,
+    mkdirSyncMock, appendFileSyncMock, currentParentMock, pauseProjectMock,
   };
 });
 
@@ -80,6 +81,9 @@ vi.mock('@/lib/usage/resolve-provider', () => ({
 }));
 vi.mock('@/lib/jobs/parent-context', () => ({
   currentParent: mocks.currentParentMock,
+}));
+vi.mock('@/lib/pipeline/pause-project', () => ({
+  pauseProject: mocks.pauseProjectMock,
 }));
 // Stub out the file-config loader so anything pulling it in does not shell
 // out to `git` (via getBranchContext → execFileSync).
@@ -137,6 +141,7 @@ function resetSharedMocks() {
   mocks.issueBranchNameMock.mockReturnValue('fix/issue-1-test');
   mocks.deriveIssueContextFromBranchMock.mockResolvedValue(null);
   mocks.currentParentMock.mockReturnValue(null);
+  mocks.pauseProjectMock.mockResolvedValue(true);
 }
 
 describe('startProjectPush — push result tracking', () => {
@@ -146,6 +151,7 @@ describe('startProjectPush — push result tracking', () => {
     getLockMock, acquireLockMock, isLockOwnedByActiveReleaseMock,
     getJobMock, listJobsMock, resolveProjectPathMock,
     findIssueContextMock, deriveIssueContextFromBranchMock,
+    pauseProjectMock,
   } = mocks;
 
   beforeEach(() => {
@@ -556,19 +562,70 @@ describe('startProjectPush — push result tracking', () => {
     expect(r.ok).toBe(true);
   });
 
-  it('returns 409 when rebase fails after "fetch first" rejection', async () => {
+  it('pauses the project when the rebase after a "fetch first" rejection hits a merge conflict', async () => {
     execMock
       .mockImplementationOnce(() => resp(0, '1\n'))                           // git rev-list --count
       .mockImplementationOnce(() => resp(0, '# branch.ab +1 -0\n'))          // behind check
       .mockImplementationOnce(() => resp(1, '', 'Updates were rejected because the remote contains work'))  // git push
-      .mockImplementationOnce(() => resp(1, '', 'CONFLICT: merge conflict in foo.ts')); // git pull --rebase fails
+      .mockImplementationOnce(() => resp(1, '', 'CONFLICT: merge conflict in foo.ts')) // git pull --rebase fails
+      .mockImplementationOnce(() => resp(0));                                 // git rebase --abort
 
     const r = await startProjectPush('proj');
     expect(r.ok).toBe(false);
     if (!r.ok) {
       expect(r.status).toBe(409);
-      expect(r.detail).toContain('Rebase failed');
+      expect(r.detail).toContain('Merge conflict');
+      expect(r.detail).toContain('paused');
     }
+    // Aborted the half-finished rebase so the worktree is left clean.
+    const abortCall = execMock.mock.calls.find(
+      ([cmd, args]: any) => cmd === 'git' && args.includes('rebase') && args.includes('--abort'),
+    );
+    expect(abortCall).toBeTruthy();
+    // Paused the project so the scheduler stops retrying a doomed push.
+    expect(pauseProjectMock).toHaveBeenCalledWith('proj');
+  });
+
+  it('pauses the project when the pre-push behind-rebase hits a merge conflict', async () => {
+    execMock
+      .mockImplementationOnce(() => resp(0, '1\n'))                                 // git rev-list --count (ahead)
+      .mockImplementationOnce(() => resp(0, '# branch.head main\n# branch.ab +0 -3\n')) // behind check → 3 behind
+      .mockImplementationOnce(() => resp(1, '', 'CONFLICT (content): Merge conflict in app.ts')) // git pull --rebase fails
+      .mockImplementationOnce(() => resp(0));                                       // git rebase --abort
+
+    const r = await startProjectPush('proj');
+    expect(r.ok).toBe(false);
+    if (!r.ok) {
+      expect(r.status).toBe(409);
+      expect(r.detail).toContain('Merge conflict');
+      expect(r.detail).toContain('paused');
+    }
+    expect(pauseProjectMock).toHaveBeenCalledWith('proj');
+    // No push should be attempted once the pull/rebase conflicts.
+    const pushCall = execMock.mock.calls.find(
+      ([cmd, args]: any) => cmd === 'git' && args.includes('push'),
+    );
+    expect(pushCall).toBeFalsy();
+  });
+
+  it('does NOT pause the project when the rebase fails for a non-conflict reason', async () => {
+    execMock
+      .mockImplementationOnce(() => resp(0, '1\n'))                                 // git rev-list --count
+      .mockImplementationOnce(() => resp(0, '# branch.head main\n# branch.ab +0 -2\n')) // behind check → 2 behind
+      .mockImplementationOnce(() => resp(1, '', 'error: cannot open .git/FETCH_HEAD: Operation not permitted')); // git pull --rebase fails (env, not conflict)
+
+    const r = await startProjectPush('proj');
+    expect(r.ok).toBe(false);
+    if (!r.ok) {
+      expect(r.status).toBe(409);
+      expect(r.detail).toContain('Rebase failed before push');
+    }
+    // Environmental failure must NOT abort+pause — it should retry next cycle.
+    expect(pauseProjectMock).not.toHaveBeenCalled();
+    const abortCall = execMock.mock.calls.find(
+      ([cmd, args]: any) => cmd === 'git' && args.includes('rebase') && args.includes('--abort'),
+    );
+    expect(abortCall).toBeFalsy();
   });
 
   it('does not create a push job when project path cannot be resolved', async () => {
@@ -1509,6 +1566,97 @@ describe('pushCurrentBranch', () => {
       ([cmd, args]) => cmd === 'git' && args.includes('push'),
     );
     expect(pushCall![1]).not.toContain('--no-verify');
+  });
+
+  it('fetches and rebases before retrying when push is rejected as behind the remote', async () => {
+    execMock
+      .mockResolvedValueOnce(resp(1, '', '! [rejected] master -> master (fetch first)'))
+      .mockResolvedValueOnce(resp(0, 'feature-x\n'))
+      .mockResolvedValueOnce(resp(0))
+      .mockResolvedValueOnce(resp(0))
+      .mockResolvedValueOnce(resp(0))
+      .mockResolvedValueOnce(resp(0, 'abc1234\n'));
+
+    const result = await pushCurrentBranch('/repo');
+
+    expect(result.ok).toBe(true);
+    const fetchCall = (execMock.mock.calls as [string, string[]][]).find(
+      ([cmd, args]) => cmd === 'git' && args.includes('fetch'),
+    );
+    const rebaseCall = (execMock.mock.calls as [string, string[]][]).find(
+      ([cmd, args]) => cmd === 'git' && args.includes('rebase') && args.includes('FETCH_HEAD'),
+    );
+    expect(fetchCall).toBeTruthy();
+    expect(rebaseCall).toBeTruthy();
+  });
+
+  it('detects retryable non-fast-forward variants case-insensitively', async () => {
+    execMock
+      .mockResolvedValueOnce(resp(1, '', '! [rejected] main -> main (Non-Fast-Forward)'))
+      .mockResolvedValueOnce(resp(0, 'main\n'))
+      .mockResolvedValueOnce(resp(0))
+      .mockResolvedValueOnce(resp(0))
+      .mockResolvedValueOnce(resp(0))
+      .mockResolvedValueOnce(resp(0, 'abc1234\n'));
+
+    const result = await pushCurrentBranch('/repo');
+
+    expect(result.ok).toBe(true);
+    const rebaseCall = (execMock.mock.calls as [string, string[]][]).find(
+      ([cmd, args]) => cmd === 'git' && args.includes('rebase') && args.includes('FETCH_HEAD'),
+    );
+    expect(rebaseCall).toBeTruthy();
+  });
+
+  it('does not rebase protection-only remote denials', async () => {
+    execMock.mockResolvedValueOnce(resp(1, '', 'remote: - Changes must be made through a pull request.'));
+
+    const result = await pushCurrentBranch('/repo');
+
+    expect(result.ok).toBe(false);
+    const rebaseCalls = (execMock.mock.calls as [string, string[]][]).filter(
+      ([cmd, args]) => cmd === 'git' && args.includes('rebase'),
+    );
+    expect(rebaseCalls).toHaveLength(0);
+  });
+
+  it('reports a clear fetch failure when behind-remote recovery cannot start', async () => {
+    execMock
+      .mockResolvedValueOnce(resp(1, '', 'error: failed to push some refs\nhint: Updates were rejected because the remote contains work that you do not\nhint: have locally.'))
+      .mockResolvedValueOnce(resp(0, 'feature-x\n'))
+      .mockResolvedValueOnce(resp(1, '', 'cannot open .git/FETCH_HEAD: Operation not permitted'));
+
+    const result = await pushCurrentBranch('/repo');
+
+    expect(result.ok).toBe(false);
+    if (!result.ok) {
+      expect(result.detail).toContain('Fetch failed before push');
+      expect(result.hookFailure).toBe(null);
+    }
+  });
+
+  it('aborts and pauses when behind-remote recovery hits a rebase conflict', async () => {
+    execMock
+      .mockResolvedValueOnce(resp(1, '', '! [rejected] main -> main (fetch first)'))
+      .mockResolvedValueOnce(resp(0, 'main\n'))
+      .mockResolvedValueOnce(resp(0))
+      .mockResolvedValueOnce(resp(1, '', 'CONFLICT (content): Merge conflict in app.ts'))
+      .mockResolvedValueOnce(resp(0));
+
+    const result = await pushCurrentBranch('/repo', undefined, { projectName: 'proj' });
+
+    expect(result.ok).toBe(false);
+    if (!result.ok) {
+      expect(result.detail).toContain('Merge conflict');
+      expect(result.detail).toContain('rebase aborted');
+      expect(result.detail).toContain('paused');
+      expect(result.hookFailure).toBe(null);
+    }
+    const abortCall = (execMock.mock.calls as [string, string[]][]).find(
+      ([cmd, args]) => cmd === 'git' && args.includes('rebase') && args.includes('--abort'),
+    );
+    expect(abortCall).toBeTruthy();
+    expect(mocks.pauseProjectMock).toHaveBeenCalledWith('proj');
   });
 
   it('classifies pre-push hook test failures as hookFailure: pre-push-tests', async () => {

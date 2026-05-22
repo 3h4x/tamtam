@@ -18,6 +18,27 @@ import { checkCliStartGate } from '@/lib/usage/resolve-provider';
 import { createGenericPR, createIssuePR } from './pr-create';
 import { decidePrContext } from './pr-context';
 import { appendRedactedFileSync } from '@/lib/jobs/redacted-log-writer';
+import { isRetryableRemoteRefRejection } from './push-rejection';
+import { pauseProject } from './pause-project';
+
+/**
+ * Distinguish a genuine merge conflict during a pull/rebase (which needs a human
+ * to resolve) from other rebase failures (e.g. a read-only `.git` in a
+ * restricted sandbox, or a network error). Only true conflicts should pause the
+ * project; transient/environmental failures surface as a normal error and get
+ * retried on the next push cycle.
+ */
+export function isRebaseConflict(output: string): boolean {
+  const o = output.toLowerCase();
+  return (
+    o.includes('conflict')
+    || o.includes('could not apply')
+    || o.includes('resolve all conflicts')
+    || o.includes('fix conflicts and then run')
+    || o.includes('needs merge')
+    || o.includes('patch failed')
+  );
+}
 
 export type PushResult =
   | { ok: true; jobId?: string; commitSha: string; message: string; prUrl?: string; prNumber?: number; prRepo?: string }
@@ -380,7 +401,7 @@ export type PushHookFailure = 'pre-push-tests' | 'pre-push-other' | null;
 export async function pushCurrentBranch(
   projPath: string,
   log: (s: string) => void = () => {},
-  options: { noVerify?: boolean } = {},
+  options: { noVerify?: boolean; projectName?: string } = {},
   signal?: AbortSignal,
 ): Promise<
   | { ok: true; commitSha: string }
@@ -399,11 +420,88 @@ export async function pushCurrentBranch(
     if (r.stderr) log(r.stderr);
     return r;
   };
+  const fetchAndRebase = async (branch: string, reason: string) => {
+    log(`\n# ${reason} — fetching origin/${branch} before rebasing\n`);
+    const fetchR = await exec('git', ['-C', projPath, 'fetch', '--quiet', 'origin', branch], {
+      timeout: PUSH_TIMEOUT,
+      killProcessGroup: true,
+      signal,
+    });
+    if (fetchR.stdout) log(fetchR.stdout);
+    if (fetchR.stderr) log(fetchR.stderr);
+    if (fetchR.exitCode !== 0) {
+      const detail = (fetchR.stderr.trim() || fetchR.stdout.trim() || 'fetch failed').slice(0, 2000);
+      return { ok: false as const, detail: `Fetch failed before push: ${detail}` };
+    }
+
+    const rebaseR = await exec('git', ['-C', projPath, 'rebase', 'FETCH_HEAD'], {
+      timeout: PUSH_TIMEOUT,
+      killProcessGroup: true,
+      signal,
+    });
+    if (rebaseR.stdout) log(rebaseR.stdout);
+    if (rebaseR.stderr) log(rebaseR.stderr);
+    if (rebaseR.exitCode !== 0) {
+      const detail = (rebaseR.stderr.trim() || rebaseR.stdout.trim() || 'rebase failed').slice(0, 2000);
+      const combined = `${rebaseR.stderr}\n${rebaseR.stdout}`;
+      if (isRebaseConflict(combined)) {
+        log(`\n# merge conflict during ${reason} — aborting rebase${options.projectName ? ` and pausing ${options.projectName}` : ''}\n`);
+        const abortR = await exec('git', ['-C', projPath, 'rebase', '--abort'], {
+          timeout: 30000,
+          killProcessGroup: true,
+          signal,
+        });
+        if (abortR.stdout) log(abortR.stdout);
+        if (abortR.stderr) log(abortR.stderr);
+        let pauseNote = '';
+        if (options.projectName) {
+          const paused = await pauseProject(options.projectName);
+          pauseNote = paused
+            ? ` ${options.projectName} paused for manual resolution.`
+            : ` Failed to pause ${options.projectName}; manual resolution is still required.`;
+          log(paused
+            ? `# ${options.projectName} paused — resolve the conflict locally, then resume from Settings\n`
+            : `# WARNING: failed to pause ${options.projectName} after merge conflict\n`);
+        }
+        return {
+          ok: false as const,
+          detail: `Merge conflict during ${reason}; rebase aborted.${pauseNote} ${detail}`.trim(),
+        };
+      }
+      return { ok: false as const, detail: `Rebase failed before push: ${detail}` };
+    }
+
+    log(`\n# rebase succeeded — retrying push\n`);
+    return { ok: true as const };
+  };
   let pushR = await tryPush();
+  let currentBranch: string | null = null;
+  let setUpstreamBranch: string | null = null;
   if (pushR.exitCode !== 0 && (pushR.stderr.includes('no upstream') || pushR.stderr.includes('set-upstream'))) {
     const branchR = await exec('git', ['-C', projPath, 'branch', '--show-current'], { timeout: 5000, signal });
-    const branch = branchR.stdout.trim();
-    if (branch) pushR = await tryPush(['-u', 'origin', branch]);
+    currentBranch = branchR.stdout.trim() || null;
+    if (currentBranch) {
+      setUpstreamBranch = currentBranch;
+      pushR = await tryPush(['-u', 'origin', currentBranch]);
+    }
+  }
+  if (pushR.exitCode !== 0 && isRetryableRemoteRefRejection(`${pushR.stderr}\n${pushR.stdout}`)) {
+    const branchR = currentBranch
+      ? null
+      : await exec('git', ['-C', projPath, 'branch', '--show-current'], { timeout: 5000, signal });
+    const branch = currentBranch ?? branchR?.stdout.trim() ?? '';
+    if (!branch) {
+      return {
+        ok: false,
+        detail: 'Push failed because the remote moved, but the current branch could not be resolved for recovery',
+        hookFailure: null,
+      };
+    }
+    const rebased = await fetchAndRebase(branch, 'remote has new commits (stale tracking)');
+    if (!rebased.ok) {
+      return { ok: false, detail: rebased.detail, hookFailure: null };
+    }
+    pushR = await tryPush(setUpstreamBranch ? ['-u', 'origin', setUpstreamBranch] : []);
   }
   if (pushR.exitCode !== 0) {
     // Detect hook failures against the FULL combined output — vitest/jest dump
@@ -469,9 +567,38 @@ async function runPush(
     return result;
   };
 
+  // Shared handling for a failed pull/rebase before push. A real merge conflict
+  // can't be auto-resolved, so abort the half-finished rebase to leave the
+  // worktree clean and pause the project — that stops the scheduler from
+  // hammering a push that can never succeed until a human resolves it. Other
+  // (non-conflict) rebase failures surface as a normal error and are retried.
+  const failedRebase = async (
+    rebaseR: { exitCode: number; stdout: string; stderr: string },
+    label: string,
+  ): Promise<PushResult> => {
+    const combined = `${rebaseR.stderr}\n${rebaseR.stdout}`;
+    const detail = (rebaseR.stderr.trim() || rebaseR.stdout.trim() || 'rebase failed').slice(0, 2000);
+    if (isRebaseConflict(combined)) {
+      log(`\n# merge conflict during ${label} — aborting rebase and pausing ${projectName}\n`);
+      const abortR = await execStep('git', ['-C', projPath, 'rebase', '--abort'], { timeout: 30000 });
+      if (abortR.stdout) log(abortR.stdout);
+      if (abortR.stderr) log(abortR.stderr);
+      const paused = await pauseProject(projectName);
+      log(paused
+        ? `# ${projectName} paused — resolve the conflict locally, then resume from Settings\n`
+        : `# WARNING: failed to pause ${projectName} after merge conflict\n`);
+      return {
+        ok: false,
+        status: 409,
+        detail: `Merge conflict during ${label}; ${projectName} paused for manual resolution. ${detail}`,
+      };
+    }
+    return { ok: false, status: 409, detail: `Rebase failed before push: ${detail}` };
+  };
+
   // pushOnly: skip all staging/committing/PR logic — just push existing commits.
   if (pushOnly) {
-    const r = await pushCurrentBranch(projPath, log, {}, signal);
+    const r = await pushCurrentBranch(projPath, log, { projectName }, signal);
     if (!r.ok) return { ok: false, status: 502, detail: r.detail };
     return { ok: true, commitSha: r.commitSha, message: 'pushed' };
   }
@@ -563,8 +690,7 @@ async function runPush(
     if (rebaseR.stdout) log(rebaseR.stdout);
     if (rebaseR.stderr) log(rebaseR.stderr);
     if (rebaseR.exitCode !== 0) {
-      const detail = (rebaseR.stderr.trim() || rebaseR.stdout.trim() || 'rebase failed').slice(0, 2000);
-      return { ok: false, status: 409, detail: `Rebase failed before push: ${detail}` };
+      return await failedRebase(rebaseR, 'pull --rebase before push');
     }
     log(`\n# rebase succeeded\n`);
   }
@@ -588,8 +714,7 @@ async function runPush(
   // GitHub's ref-lock race ("cannot lock ref … is at X but expected Y"). Avoid
   // matching generic "[remote rejected]" output; Git uses that for protected
   // branches, permissions, and other server-side denials that a rebase cannot fix.
-  const refRaceSignals = ['fetch first', 'Updates were rejected', 'cannot lock ref', 'non-fast-forward'];
-  if (pushR.exitCode !== 0 && refRaceSignals.some(s => pushR.stderr.includes(s) || pushR.stdout.includes(s))) {
+  if (pushR.exitCode !== 0 && isRetryableRemoteRefRejection(`${pushR.stderr}\n${pushR.stdout}`)) {
     log(`\n# remote has new commits (stale tracking) — rebasing before retry\n`);
     const rebaseArgs = setUpstreamBranch
       ? ['-C', projPath, 'pull', '--rebase', 'origin', setUpstreamBranch]
@@ -601,8 +726,7 @@ async function runPush(
       log(`\n# rebase succeeded — retrying push\n`);
       pushR = await tryPush(setUpstreamBranch ? ['-u', 'origin', setUpstreamBranch] : []);
     } else {
-      const detail = (rebaseR.stderr.trim() || rebaseR.stdout.trim() || 'rebase failed').slice(0, 2000);
-      return { ok: false, status: 409, detail: `Rebase failed before push: ${detail}` };
+      return await failedRebase(rebaseR, 'rebase after remote rejection');
     }
   }
 

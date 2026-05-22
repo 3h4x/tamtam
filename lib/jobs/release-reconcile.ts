@@ -35,7 +35,23 @@ const RECONCILE_QUIET_PERIOD_MS = 90 * 1000;
 // rebuild + reseat cycle, short enough that a genuinely broken release
 // doesn't hammer the queue forever.
 export const MAX_RECONCILE_ATTEMPTS = 12;
-const reconcileAttempts = new Map<string, number>();
+
+// Re-arm the burst budget after this cooldown. The 12-attempt burst rides out
+// a short disruption, but a LONG one (e.g. a dev-server rebuild storm that
+// keeps making the orchestrator's dynamic import fail, or the workflow runtime
+// flapping for >6 min) can burn the entire burst while the release is actually
+// recoverable — leaving it stranded in `running` until the 60-min wall-clock
+// reaper. Once the last re-dispatch is this old, the next sweep resets the
+// counter and tries again. This bounds pressure on a permanently-broken
+// release to one burst per cooldown window while letting a transiently-stuck
+// release self-heal after the storm passes.
+export const RECONCILE_REARM_COOLDOWN_MS = 5 * 60 * 1000;
+
+interface ReconcileAttemptState {
+  count: number;
+  lastAttemptAt: number;
+}
+const reconcileAttempts = new Map<string, ReconcileAttemptState>();
 
 export interface StalledRelease {
   release: JobData;
@@ -101,13 +117,23 @@ export interface ReconcileOutcome {
  *  `MAX_RECONCILE_ATTEMPTS`. */
 export async function reconcileStalledRelease(
   stalled: StalledRelease,
+  now: number = Date.now(),
 ): Promise<ReconcileOutcome> {
   const { release, latestTerminalChild: child } = stalled;
-  const attempt = (reconcileAttempts.get(release.id) ?? 0) + 1;
+  const prev = reconcileAttempts.get(release.id);
+  // Re-arm the burst budget once the last re-dispatch is older than the
+  // cooldown — a long storm can exhaust the burst on a release that is still
+  // recoverable (see RECONCILE_REARM_COOLDOWN_MS).
+  const reArmed = !!prev && (now - prev.lastAttemptAt) >= RECONCILE_REARM_COOLDOWN_MS;
+  const priorCount = prev && !reArmed ? prev.count : 0;
+  const attempt = priorCount + 1;
   if (attempt > MAX_RECONCILE_ATTEMPTS) {
+    // Capped: leave the map untouched so the cooldown is measured from the
+    // last real dispatch — otherwise every capped sweep would push the
+    // re-arm deadline forward and the release could never recover.
     return { releaseId: release.id, childId: child.id, status: 'attempt_cap', attempt };
   }
-  reconcileAttempts.set(release.id, attempt);
+  reconcileAttempts.set(release.id, { count: attempt, lastAttemptAt: now });
   try {
     const { start } = await import('workflow/api');
     const { releaseOrchestratorWorkflow } = await import('@/lib/workflows/release-orchestrator');
@@ -146,7 +172,7 @@ export async function runReleaseReconcileSweep(
   const stalled = findStalledReleases(now);
   const outcomes: ReconcileOutcome[] = [];
   for (const s of stalled) {
-    outcomes.push(await reconcileStalledRelease(s));
+    outcomes.push(await reconcileStalledRelease(s, now));
   }
   return outcomes;
 }
@@ -160,5 +186,5 @@ export function _resetReconcileAttemptsForTest(): void {
 /** Internal-only — used by tests to look up a release's current attempt count
  *  without exposing the map directly. */
 export function _getReconcileAttemptForTest(releaseId: string): number {
-  return reconcileAttempts.get(releaseId) ?? 0;
+  return reconcileAttempts.get(releaseId)?.count ?? 0;
 }
