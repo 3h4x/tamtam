@@ -44,7 +44,13 @@ async function walk(dir) {
   return out;
 }
 
-const files = await walk(ROOT);
+const allFiles = await walk(ROOT);
+// `instrumentation.js.nft.json` is the server-boot module (loaded once,
+// not per route). It exhibits the same NFT-explosion pathology when an
+// imported boot-time helper touches `data/`, but it doesn't multiply
+// across routes — the multi-GB-per-build cost is the per-route NFT.
+// Track it as a separate concern; the guard targets route bloat.
+const files = allFiles.filter((p) => !p.endsWith('/instrumentation.js.nft.json'));
 if (files.length === 0) {
   console.error(`[check-nft-sizes] no .nft.json files under ${ROOT} — has the build run?`);
   process.exit(2);
