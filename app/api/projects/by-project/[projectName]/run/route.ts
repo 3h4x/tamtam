@@ -151,12 +151,10 @@ export async function POST(
   for (const pPath of personaPaths) {
     const docsFile = join(docsBase, `${pPath}.md`);
     const personaFile = existsSync(/*turbopackIgnore: true*/ docsFile) ? docsFile : join(DATA_SKILLS_DIR, `${pPath}.md`);
-    if (existsSync(/*turbopackIgnore: true*/ personaFile)) {
-      try {
-        const personaContent = readFileSync(/*turbopackIgnore: true*/ personaFile, 'utf-8');
-        prompt = personaContent + '\n\n---\n\n' + prompt;
-      } catch {}
-    }
+    try {
+      const personaContent = readFileSync(/*turbopackIgnore: true*/ personaFile, 'utf-8');
+      prompt = personaContent + '\n\n---\n\n' + prompt;
+    } catch {}
   }
   let autoAttachedDocNames: string[] = [];
   if (!resumeSessionId) {
