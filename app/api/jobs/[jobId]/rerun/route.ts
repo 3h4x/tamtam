@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { existsSync, mkdirSync, readFileSync } from 'fs';
+import { mkdirSync, readFileSync } from 'fs';
 import { join } from 'path';
 import { getImproveConfig } from '@/lib/scheduling/scheduling';
 import { resolveProjectPath } from '@/lib/shared/project-data';
@@ -11,6 +11,13 @@ import { resolveCliBin, resolveCliDefaultModel, resolveCliEnv } from '@/lib/shar
 import { checkCliStartGate } from '@/lib/usage/resolve-provider';
 import { isCliProvider } from '@/lib/usage/cli-providers';
 import { findBlockingRunningJob } from '@/lib/jobs/project-active-job';
+
+function hasErrorCode(error: unknown, code: string): boolean {
+  return typeof error === 'object'
+    && error !== null
+    && 'code' in error
+    && (error as { code?: unknown }).code === code;
+}
 
 export async function POST(
   request: NextRequest,
@@ -68,11 +75,15 @@ export async function POST(
 
   mkdirSync(/*turbopackIgnore: true*/ logDir, { recursive: true });
 
-  // Read original prompt if available
   const promptPath = join(/*turbopackIgnore: true*/ logDir, `${sourceJob.id}.prompt`);
-  const prompt = existsSync(/*turbopackIgnore: true*/ promptPath)
-    ? readFileSync(/*turbopackIgnore: true*/ promptPath, 'utf-8')
-    : `Rerun of ${sourceJob.kind} for ${projectName}`;
+  let prompt = `Rerun of ${sourceJob.kind} for ${projectName}`;
+  try {
+    prompt = readFileSync(/*turbopackIgnore: true*/ promptPath, 'utf-8');
+  } catch (e: unknown) {
+    if (!hasErrorCode(e, 'ENOENT')) {
+      return NextResponse.json({ detail: `Failed to read source prompt: ${errMsg(e)}` }, { status: 500 });
+    }
+  }
 
   const job = createJob(projectName, jobKind, 0, '');
   job.provider = provider;

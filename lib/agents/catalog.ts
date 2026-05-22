@@ -214,6 +214,7 @@ export const AGENT_CATALOG: AgentCatalogEntry[] = [
     defaultModel: 'normal',
     prompt: '',
     skillIds: ['agent-improve'],
+    tier: 'featured',
     fallbackEnabled: true,
   },
   {

@@ -93,6 +93,8 @@ describe('legacy recommended-agents facade', () => {
     expect(docsClaude?.essential).toBe(true);
     const qa = RECOMMENDED_AGENTS.find((a) => a.name === 'qa');
     expect(qa?.featured).toBe(true);
+    const improve = RECOMMENDED_AGENTS.find((a) => a.name === 'improve');
+    expect(improve?.featured).toBe(true);
   });
 });
 
