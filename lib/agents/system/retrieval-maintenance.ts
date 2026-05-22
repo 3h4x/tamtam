@@ -25,9 +25,12 @@ import { PgvectorBackend } from '@/lib/agents/retrieval/pgvector-backend';
 import { retrieveAgentContextDetailed } from '@/lib/agents/retrieval/retriever';
 import { verifyRetrievalWithCheapModel, type VerifyResult } from './verify-with-cheap-model';
 import { listProjectDocuments } from '@/lib/shared/project-documents';
+import { DOCUMENTATION_REINDEX_VECTORS_JOB_KIND } from './constants';
 
-export const DOCUMENTATION_REINDEX_VECTORS_AGENT_NAME = 'documentation-reindex-vectors';
-export const DOCUMENTATION_REINDEX_VECTORS_JOB_KIND = 'agent:documentation-reindex-vectors';
+export {
+  DOCUMENTATION_REINDEX_VECTORS_AGENT_NAME,
+  DOCUMENTATION_REINDEX_VECTORS_JOB_KIND,
+} from './constants';
 
 interface RetrievalHealthMeta {
   agentId: string;

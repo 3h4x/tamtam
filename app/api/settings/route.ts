@@ -574,7 +574,7 @@ export async function PATCH(request: NextRequest) {
         if (!connectionString) return;
         const [{ quickAddJob }, { DOCUMENTATION_REINDEX_VECTORS_AGENT_NAME }] = await Promise.all([
           import('graphile-worker'),
-          import('@/lib/agents/system/retrieval-maintenance'),
+          import('@/lib/agents/system/constants'),
         ]);
         const rows = await db
           .select({ id: schema.agents.id, name: schema.agents.name, project: schema.agents.project })
@@ -616,7 +616,7 @@ export async function PATCH(request: NextRequest) {
           { DOCUMENTATION_REINDEX_VECTORS_AGENT_NAME },
           { installAgentSchedule, uninstallAgentSchedule },
         ] = await Promise.all([
-          import('@/lib/agents/system/retrieval-maintenance'),
+          import('@/lib/agents/system/constants'),
           import('@/lib/scheduling/agent-scheduler'),
         ]);
         const newSchedule = `${effectiveAfterSave.retrieval_reindex_interval_hours}h`;
