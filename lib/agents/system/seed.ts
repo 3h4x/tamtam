@@ -9,7 +9,7 @@ import { db, schema } from '@/lib/db';
 import { listEnabledProjects, refreshProjectsCacheSync } from '@/lib/shared/enabled-projects';
 import { findAgentNameConflict } from '@/lib/agents/agent-conflicts';
 import { getSettings } from '@/lib/shared/config';
-import { DOCUMENTATION_REINDEX_VECTORS_AGENT_NAME } from './retrieval-maintenance';
+import { DOCUMENTATION_REINDEX_VECTORS_AGENT_NAME } from './constants';
 import { listSystemAgentSeedConfigs, type SystemAgentSeedConfig } from './index';
 
 // System-agent schedules are user-facing settings, not seed-config defaults.
