@@ -1,9 +1,9 @@
-import { closeSync, existsSync, fstatSync, openSync, readSync } from 'fs';
+import { closeSync, fstatSync, openSync, readSync } from 'fs';
 import { parseStreamLines } from './claude-stream-parser';
 import type { JobData } from './types';
 
 export function readLog(job: JobData, tailBytes = 100_000): string {
-  if (!job.logPath || !existsSync(/*turbopackIgnore: true*/ job.logPath)) return '';
+  if (!job.logPath) return '';
   // Tail-read via fd instead of `readFileSync(path)` + `slice(-tailBytes)` —
   // the old form allocated the entire file (multi-MB review logs are common)
   // just to throw away everything before the tail. Mirrors `readLogHead` and
