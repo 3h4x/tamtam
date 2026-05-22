@@ -14,7 +14,7 @@ function usage() {
     '',
     'Examples:',
     '  pnpm mcp:http tamtam_health',
-    '  pnpm mcp:http tamtam_project_recommendations \'{"project":"tamtam"}\'',
+    '  pnpm mcp:http tamtam_project_recommendations \'{"project":"<project>"}\'',
     '',
     'Environment:',
     '  MCP_HTTP_TOOLS_DIR=/path/to/mcp-http-tools',

@@ -227,6 +227,51 @@ describe('pruneProjectLogs', () => {
     await expect(pruneProjectLogs('proj', cfg)).resolves.toBeDefined();
   });
 
+  it('treats a log removed during pruning as already pruned', async () => {
+    const now = Date.now() / 1000;
+    const stalePath = join(tempDir, 'stale.ndjson');
+    const keptPath = join(tempDir, 'kept.ndjson');
+    writeFileSync(stalePath, 'data');
+    writeFileSync(keptPath, 'data');
+    await insertJob('proj-stale', 'proj', now - 200, now - 150, stalePath);
+    await insertJob('proj-kept', 'proj', now - 20, now - 10, keptPath);
+
+    vi.resetModules();
+    vi.doMock('@/lib/db', () => ({ db: sharedHandle.db, schema }));
+    vi.doMock('fs', async () => {
+      const actual = await vi.importActual<typeof import('fs')>('fs');
+      return {
+        ...actual,
+        unlinkSync: (path: Parameters<typeof actual.unlinkSync>[0]) => {
+          if (path === stalePath) {
+            const error = new Error('missing') as NodeJS.ErrnoException;
+            error.code = 'ENOENT';
+            throw error;
+          }
+          return actual.unlinkSync(path);
+        },
+      };
+    });
+
+    try {
+      const mod = await import('@/lib/jobs/retention');
+      const summary = await mod.pruneProjectLogs('proj', { ...cfg, log_retention_count: 1 });
+
+      expect(summary).toMatchObject({
+        status: 'completed',
+        rowsEligible: 1,
+        rowsUpdated: 1,
+        logFilesDeleted: 0,
+        bytesReclaimed: 0,
+        errorCount: 0,
+      });
+      const rows = await handle.db.select({ id: schema.jobs.id, logPruned: schema.jobs.logPruned }).from(schema.jobs);
+      expect(rows.find((r) => r.id === 'proj-stale')?.logPruned).toBe(true);
+    } finally {
+      vi.doUnmock('fs');
+    }
+  });
+
   it('treats log_retention_days=0 as disabled (does not prune by age)', async () => {
     const now = Date.now() / 1000;
     const ageOnlyCfg: RetentionConfig = { log_retention_count: 0, log_retention_days: 0, job_row_retention_days: 180 };

@@ -101,6 +101,19 @@ const nextConfig: NextConfig = {
       '**/*.spec.ts',
       '**/coverage/**',
       '**/.next-test/**',
+      // Per-route NFTs pulled the entire skills/docs/ markdown
+      // library (~80 files), docs/, public/favicons, scripts/, and
+      // stray .disabled siblings — none of which the route loads at
+      // runtime. Excluding them at NFT-time is the catch-all when
+      // Turbopack's static analysis can't follow the dynamic readdir
+      // calls even with /*turbopackIgnore: true*/ annotations.
+      // Net effect on the heaviest route: 1022 → 848 traced files.
+      '**/app/**/*.ts.disabled',
+      '**/app/**/*.tsx.disabled',
+      '**/skills/**',
+      '**/docs/**',
+      '**/public/**',
+      '**/scripts/**',
     ],
   },
 };

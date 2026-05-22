@@ -73,13 +73,25 @@ export function isTestFailureRejection(detail: string | null | undefined): boole
 export function isRemoteRaceRejection(detail: string | null | undefined): boolean {
   if (!detail) return false;
   return (
-    /cannot lock ref/i.test(detail) ||
-    /\bfetch first\b/i.test(detail) ||
-    /Updates were rejected/i.test(detail) ||
-    /\bnon-fast-forward\b/i.test(detail) ||
+    isRetryableRemoteRefRejection(detail) ||
     // GitHub branch-protection messages.
     /Changes must be made through a pull request/i.test(detail) ||
     /required status check/i.test(detail) ||
     /protected branch/i.test(detail)
+  );
+}
+
+/** Did `git push` fail because the target ref moved and a fetch/rebase retry
+ * can plausibly resolve it? This is narrower than `isRemoteRaceRejection`:
+ * lifecycle callers also classify branch protection as non-code-fixable, but
+ * push callers must not run a pointless rebase for protection-only denials. */
+export function isRetryableRemoteRefRejection(detail: string | null | undefined): boolean {
+  if (!detail) return false;
+  return (
+    /cannot lock ref/i.test(detail) ||
+    /\bfetch first\b/i.test(detail) ||
+    /Updates were rejected/i.test(detail) ||
+    /\bnon-fast-forward\b/i.test(detail) ||
+    /tip of your current branch is behind/i.test(detail)
   );
 }

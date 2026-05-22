@@ -1,4 +1,4 @@
-import { unlinkSync, existsSync, statSync } from 'fs';
+import { unlinkSync, statSync } from 'fs';
 import { lt, and, isNotNull, eq, isNull } from 'drizzle-orm';
 import { db, schema } from '@/lib/db';
 import { getSettings } from '@/lib/shared/config';
@@ -50,6 +50,10 @@ function nowSeconds(): number {
 
 function errorMessage(error: unknown): string {
   return error instanceof Error ? error.message : String(error);
+}
+
+function isMissingFileError(error: unknown): boolean {
+  return (error as NodeJS.ErrnoException).code === 'ENOENT';
 }
 
 function getRetentionStatusKey(summary: RetentionSummary): string {
@@ -161,15 +165,19 @@ export async function pruneProjectLogs(project: string, cfg?: RetentionConfig): 
   summary.rowsEligible = toPrune.length;
 
   for (const row of toPrune) {
-    if (row.logPath && existsSync(/*turbopackIgnore: true*/ row.logPath)) {
+    if (row.logPath) {
       try {
         const size = statSync(/*turbopackIgnore: true*/ row.logPath).size;
         unlinkSync(/*turbopackIgnore: true*/ row.logPath);
         summary.logFilesDeleted += 1;
         summary.bytesReclaimed += size;
       } catch (e) {
-        summary.errorCount += 1;
-        summary.lastError = errorMessage(e);
+        if (isMissingFileError(e)) {
+          // Missing already equals pruned; keep the row update idempotent.
+        } else {
+          summary.errorCount += 1;
+          summary.lastError = errorMessage(e);
+        }
       }
     }
     try {

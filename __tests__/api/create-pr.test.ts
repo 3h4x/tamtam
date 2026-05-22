@@ -120,14 +120,14 @@ describe('POST /api/projects/by-project/[projectName]/create-pr', () => {
     });
     await POST(req, { params: Promise.resolve({ projectName: 'myproj' }) });
     // Third arg carries the noVerify option.
-    expect(pushCurrentBranchMock).toHaveBeenCalledWith('/path/to/project', undefined, { noVerify: true });
+    expect(pushCurrentBranchMock).toHaveBeenCalledWith('/path/to/project', undefined, { noVerify: true, projectName: 'myproj' });
   });
 
   it('does not pass noVerify when the body is empty (default verify path)', async () => {
     execMock.mockResolvedValueOnce(makeExecResult({ stdout: 'fix/issue-363\n' }));
     pushCurrentBranchMock.mockResolvedValue({ ok: true, commitSha: 'abc123' });
     await POST(makeRequest(), { params: Promise.resolve({ projectName: 'myproj' }) });
-    expect(pushCurrentBranchMock).toHaveBeenCalledWith('/path/to/project', undefined, { noVerify: false });
+    expect(pushCurrentBranchMock).toHaveBeenCalledWith('/path/to/project', undefined, { noVerify: false, projectName: 'myproj' });
   });
 
   // Dispatch mock keyed by command — the route makes many git/gh calls to
@@ -200,7 +200,7 @@ describe('POST /api/projects/by-project/[projectName]/create-pr', () => {
       .mockResolvedValueOnce(makeExecResult({ stdout: 'https://github.com/o/r/pull/1\n' }));
     await POST(makeRequest(), { params: Promise.resolve({ projectName: 'myproj' }) });
 
-    expect(pushCurrentBranchMock).toHaveBeenCalledWith('/custom/repo', undefined, { noVerify: false });
+    expect(pushCurrentBranchMock).toHaveBeenCalledWith('/custom/repo', undefined, { noVerify: false, projectName: 'myproj' });
   });
 });
 

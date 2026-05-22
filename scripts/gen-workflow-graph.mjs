@@ -147,7 +147,7 @@ async function findMmdc() {
 
 async function findChromeExecutable() {
   const explicit = process.env.PUPPETEER_EXECUTABLE_PATH;
-  if (explicit) return explicit;
+  if (explicit) return existsSync(explicit) ? explicit : null;
   const candidates = [
     '/Applications/Google Chrome.app/Contents/MacOS/Google Chrome',
     '/Applications/Chromium.app/Contents/MacOS/Chromium',
@@ -216,16 +216,59 @@ async function render(diagram) {
   return svg;
 }
 
+// Cache file lives next to the SVG; the input-hash short-circuits the Chrome
+// launch when the mermaid source the SVG was built from hasn't changed.
+const cacheStampPath = `${outPath}.input-sha1`;
+
+async function readUtf8(path) {
+  try { return await readFile(path, 'utf-8'); } catch { return null; }
+}
+
+async function writeStamp(hash) {
+  await writeFile(cacheStampPath, hash, 'utf-8').catch(() => {});
+}
+
+async function buildInputHash(diagram) {
+  const { createHash } = await import('node:crypto');
+  const scriptSource = await readFile(fileURLToPath(import.meta.url), 'utf-8');
+  return createHash('sha1')
+    .update(diagram)
+    .update('\0')
+    .update(scriptSource)
+    .digest('hex');
+}
+
+async function useCommittedSvg() {
+  process.stdout.write('[gen-workflow-graph] skipping render; using committed SVG because Chrome/Chromium is unavailable\n');
+}
+
 async function main() {
   const spec = await loadSpec();
   const diagram = buildMermaid(spec);
   const hasExistingSvg = await fileExists(outPath);
+
+  // Hash the mermaid input + this renderer — if either changes we must
+  // re-render. Hashing dodges the previous behaviour of launching Chrome on
+  // every build just to byte-compare the rendered output.
+  const hash = await buildInputHash(diagram);
+  const chromePath = await findChromeExecutable();
+  if (hasExistingSvg && !chromePath) {
+    await useCommittedSvg();
+    return;
+  }
+
+  const stamp = await readUtf8(cacheStampPath);
+  if (hasExistingSvg && stamp === hash) {
+    process.stdout.write('[gen-workflow-graph] up to date (input-sha1 match — Chrome skipped)\n');
+    return;
+  }
+
   let fresh;
   try {
     fresh = await render(diagram);
   } catch (e) {
     if (hasExistingSvg && isBrowserAvailabilityError(e)) {
-      process.stdout.write('[gen-workflow-graph] skipping render; using committed SVG because Chrome/Chromium is unavailable\n');
+      await useCommittedSvg();
       return;
     }
     throw e;
@@ -234,10 +277,12 @@ async function main() {
   let existing = null;
   try { existing = await readFile(outPath, 'utf-8'); } catch { /* not present */ }
   if (existing === fresh) {
+    await writeStamp(hash);
     process.stdout.write('[gen-workflow-graph] up to date\n');
     return;
   }
   await writeFile(outPath, fresh, 'utf-8');
+  await writeStamp(hash);
   process.stdout.write(`[gen-workflow-graph] wrote ${outPath} (${fresh.length} bytes)\n`);
 }
 

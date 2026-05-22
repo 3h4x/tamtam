@@ -24,6 +24,7 @@ vi.mock('@/lib/jobs/job-storage', () => ({
 
 import {
   MAX_RECONCILE_ATTEMPTS,
+  RECONCILE_REARM_COOLDOWN_MS,
   findStalledReleases,
   reconcileStalledRelease,
   runReleaseReconcileSweep,
@@ -164,6 +165,40 @@ describe('reconcileStalledRelease', () => {
     expect(capped.attempt).toBe(MAX_RECONCILE_ATTEMPTS + 1);
     expect(startMock).toHaveBeenCalledTimes(MAX_RECONCILE_ATTEMPTS);
     expect(_getReconcileAttemptForTest('rel')).toBe(MAX_RECONCILE_ATTEMPTS);
+  });
+
+  it('re-arms the burst budget after the cooldown so a long storm does not strand a recoverable release', async () => {
+    jobs.push(
+      makeJob({ id: 'rel', project: 'demo', kind: 'release', releaseId: 'rel', finishedAt: null }),
+      makeJob({
+        id: 'fix-1',
+        project: 'demo',
+        kind: 'fix',
+        releaseId: 'rel',
+        finishedAt: (NOW - QUIET) / 1000,
+        exitCode: -1,
+      }),
+    );
+    const [stalled] = findStalledReleases(NOW);
+    // Burn the whole burst at a fixed `now` (no re-arm because no time passed).
+    for (let i = 0; i < MAX_RECONCILE_ATTEMPTS; i += 1) {
+      await reconcileStalledRelease(stalled, NOW);
+    }
+    const capped = await reconcileStalledRelease(stalled, NOW);
+    expect(capped.status).toBe('attempt_cap');
+    expect(startMock).toHaveBeenCalledTimes(MAX_RECONCILE_ATTEMPTS);
+
+    // A capped sweep before the cooldown elapses must NOT re-arm.
+    const stillCapped = await reconcileStalledRelease(stalled, NOW + RECONCILE_REARM_COOLDOWN_MS - 1);
+    expect(stillCapped.status).toBe('attempt_cap');
+    expect(startMock).toHaveBeenCalledTimes(MAX_RECONCILE_ATTEMPTS);
+
+    // Once the cooldown has elapsed since the last real dispatch, the budget
+    // re-arms and the release gets a fresh attempt.
+    const reArmed = await reconcileStalledRelease(stalled, NOW + RECONCILE_REARM_COOLDOWN_MS);
+    expect(reArmed.status).toBe('redispatched');
+    expect(reArmed.attempt).toBe(1);
+    expect(startMock).toHaveBeenCalledTimes(MAX_RECONCILE_ATTEMPTS + 1);
   });
 
   it('reports dispatch_failed when start() throws', async () => {
