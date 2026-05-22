@@ -49,6 +49,32 @@ export function stripFinalVerdict(text: string): string {
   return trimmed.slice(0, verdictMatch.index).trimEnd();
 }
 
+/** Match shim/runtime error markers emitted by the CLI shim scripts.
+ *  Lines look like `[claude-shim] killed by inactivity watchdog`,
+ *  `[codex-shim] codex exited 1 ...`, `[lmstudio-shim] ...`. These are
+ *  infra errors, not review findings, and must not be forwarded to a fix
+ *  step as if the model had reported them. */
+const SHIM_ERROR_PATTERN = /^\s*\[[a-z][a-z0-9-]*-shim\][^\n]*\n?/gm;
+
+/** Detect when the only remaining content is whitespace, code-fence
+ *  delimiters, or a leading prose word — i.e. the model never produced a
+ *  real review. Tuned to under ~50 chars of meaningful content. */
+const MEANINGFUL_CONTENT_FLOOR = 50;
+
+export function stripShimErrors(text: string): { cleaned: string; hadShimErrors: boolean } {
+  const hadShimErrors = text.search(SHIM_ERROR_PATTERN) !== -1;
+  if (!hadShimErrors) return { cleaned: text, hadShimErrors: false };
+  const cleaned = text.replace(SHIM_ERROR_PATTERN, '').replace(/\n{3,}/g, '\n\n').trim();
+  return { cleaned, hadShimErrors: true };
+}
+
+/** True when a review output is too thin to drive a fix step — empty,
+ *  whitespace-only, or a few stray fragments after shim-error stripping. */
+export function isReviewContentTooThin(text: string): boolean {
+  const meaningful = text.replace(/```[^\n]*\n?|^[\s-*>#]+/gm, '').trim();
+  return meaningful.length < MEANINGFUL_CONTENT_FLOOR;
+}
+
 export function extractFindingIds(text: string): string[] {
   const ids = new Set<string>();
   const pattern = /^\s*[-*]?\s*Finding ID:\s*([a-z0-9][a-z0-9._/-]*)\s*$/gim;

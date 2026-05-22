@@ -185,6 +185,9 @@ If the most recent successful fix explicitly claims `Status: fixed` for a
 `Finding ID` that the follow-up review still flags, the release also stops:
 TamTam treats reviewer/fixer disagreement on the same structured finding as a
 non-converging loop instead of burning another fix iteration.
+If a failed review log contains only provider-shim/runtime error lines and no
+actionable review content, the fix launcher refuses to start a fix; rerun the
+review step instead of asking a fixer to act on infrastructure output.
 
 FIX
   ├─ exit 0  → completion hook → start REVIEW (loop)

@@ -3,9 +3,11 @@ import {
   extractFindingIds,
   extractFixClaims,
   findingsIdentity,
+  isReviewContentTooThin,
   parseFindings,
   parseVerifiedCriteria,
   stripFinalVerdict,
+  stripShimErrors,
 } from '@/lib/pipeline/review-contract'
 
 describe('review-contract helpers', () => {
@@ -185,5 +187,68 @@ describe('review-contract helpers', () => {
         requiredTests: 'parser coverage for full contract findings',
       },
     ])
+  })
+
+  describe('stripShimErrors', () => {
+    it('drops shim error markers and reports they were present', () => {
+      const text = [
+        "I'll review the changed test helper.",
+        'The helper is narrow.',
+        '[codex-shim] killed by inactivity watchdog after 600000ms with no output from child',
+      ].join('\n')
+      const { cleaned, hadShimErrors } = stripShimErrors(text)
+      expect(hadShimErrors).toBe(true)
+      expect(cleaned).not.toContain('codex-shim')
+      expect(cleaned).toContain("I'll review the changed test helper.")
+    })
+
+    it('reports no shim errors when none are present', () => {
+      const text = '- Finding ID: foo\n  Severity: high'
+      const { cleaned, hadShimErrors } = stripShimErrors(text)
+      expect(hadShimErrors).toBe(false)
+      expect(cleaned).toBe(text)
+    })
+
+    it('does not treat ordinary blank-line cleanup as a shim error', () => {
+      const text = [
+        'Short actionable failure.',
+        '',
+        '',
+        'Retry the generated artifact write.',
+      ].join('\n')
+      const { cleaned, hadShimErrors } = stripShimErrors(text)
+      expect(hadShimErrors).toBe(false)
+      expect(cleaned).toBe(text)
+    })
+
+    it('matches every known shim prefix', () => {
+      const text = [
+        '[claude-shim] killed by inactivity watchdog',
+        '[codex-shim] codex exited 1 with no stderr',
+        '[lmstudio-shim] LM Studio request killed by inactivity watchdog',
+        'keep this',
+      ].join('\n')
+      const { cleaned } = stripShimErrors(text)
+      expect(cleaned).toBe('keep this')
+    })
+  })
+
+  describe('isReviewContentTooThin', () => {
+    it('flags empty/whitespace as too thin', () => {
+      expect(isReviewContentTooThin('')).toBe(true)
+      expect(isReviewContentTooThin('   \n\n  ')).toBe(true)
+    })
+
+    it('flags a code fence with no body as too thin', () => {
+      expect(isReviewContentTooThin('```\n\n```')).toBe(true)
+    })
+
+    it('accepts substantial review prose', () => {
+      const text = [
+        'I reviewed the diff carefully and found that the new helper does not validate input boundaries.',
+        '- Finding ID: missing-boundary-check',
+      ].join('\n')
+      expect(isReviewContentTooThin(text)).toBe(false)
+    })
   })
 })

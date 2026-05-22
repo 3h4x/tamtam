@@ -32,15 +32,41 @@ export function getAgentMemoryPath(projPath: string, agentName: string): string 
   return join(/*turbopackIgnore: true*/ getAgentMemoryDir(projPath), `${sanitizeName(agentName)}.md`);
 }
 
-export function readAgentMemory(projPath: string, agentName: string): string | null {
+export interface AgentMemoryRead {
+  /** The memory content the agent will see — truncated to the cap if oversized. */
+  content: string;
+  /** True when the on-disk file exceeded the cap and the returned content is a head-slice. */
+  truncated: boolean;
+  /** Size of the on-disk file in characters (pre-truncation). */
+  rawChars: number;
+}
+
+export function readAgentMemoryDetailed(projPath: string, agentName: string): AgentMemoryRead | null {
   const path = getAgentMemoryPath(projPath, agentName);
   // No existsSync precheck — readFileSync throws ENOENT and the catch handles
   // it identically. One fewer syscall, no TOCTOU between check and read.
+  let raw: string;
   try {
-    return readFileSync(/*turbopackIgnore: true*/ path, 'utf-8').slice(0, MEMORY_MAX_CHARS);
+    raw = readFileSync(/*turbopackIgnore: true*/ path, 'utf-8');
   } catch {
     return null;
   }
+  const truncated = raw.length > MEMORY_MAX_CHARS;
+  if (truncated) {
+    console.warn(
+      `[agent-memory] truncating ${agentName} memory at ${path}: ${raw.length} chars on disk, cap is ${MEMORY_MAX_CHARS}. Older entries past the cap are not visible to the next run; compact this run.`,
+    );
+  }
+  return {
+    content: truncated ? raw.slice(0, MEMORY_MAX_CHARS) : raw,
+    truncated,
+    rawChars: raw.length,
+  };
+}
+
+export function readAgentMemory(projPath: string, agentName: string): string | null {
+  const detail = readAgentMemoryDetailed(projPath, agentName);
+  return detail ? detail.content : null;
 }
 
 export function ensureAgentMemoryDir(projPath: string): void {
@@ -92,20 +118,28 @@ function ensureTamtamCacheGitignore(projPath: string): void {
   }
 }
 
-export function buildMemoryBlock(memoryPath: string, currentMemory: string | null): string {
+export function buildMemoryBlock(
+  memoryPath: string,
+  currentMemory: string | null,
+  options: { truncated?: boolean; rawChars?: number } = {},
+): string {
   const memoryContents = currentMemory
     ? currentMemory.trim()
     : '(empty — this is your first run)';
 
+  const truncationNotice = options.truncated && options.rawChars
+    ? `\n!! MEMORY OVERSIZE — the on-disk file is ${options.rawChars} characters but the cap is ${MEMORY_MAX_CHARS}. You are only seeing the first ${MEMORY_MAX_CHARS} characters. Older entries past the cap are not visible to you. Your first job this run is to compact the memory before doing anything else: collapse completed work into one-line summaries so pending state survives.\n`
+    : '';
+
   return `## Your Persistent Memory
 
 Your memory file is at: ${memoryPath}
-
+${truncationNotice}
 <current_memory>
 ${memoryContents}
 </current_memory>
 
-At the end of your run, rewrite the memory file at the path above (use the Write tool — replace its full contents, do NOT append). Keep it compact — under ${MEMORY_MAX_CHARS} characters; anything past that cap is silently truncated on the next read. Focus on actionable state:
+At the end of your run, rewrite the memory file at the path above (use the Write tool — replace its full contents, do NOT append). Keep it compact — under ${MEMORY_MAX_CHARS} characters; content past that cap is dropped on the next read and a server-side warning is logged. Focus on actionable state:
 - What was completed this run (with dates/identifiers)
 - What is still pending (ordered by priority)
 - Key decisions or constraints to remember

@@ -2,7 +2,7 @@ import { composeAgentSkills } from '@/lib/agents/compose-skills';
 import { withBasePrompt, getPermissionModeFlag, getSettings } from '@/lib/shared/config';
 import {
   buildMemoryBlock,
-  readAgentMemory,
+  readAgentMemoryDetailed,
   getAgentMemoryPath,
   ensureAgentMemoryDir,
 } from '@/lib/agents/agent-memory';
@@ -312,19 +312,34 @@ At the end of your run, include a short final section exactly named "TamTam Run 
   }
 
   const allParts = [...composed.docParts, ...composed.parts];
-  const systemPrompt = [...allParts, autoAttachBlock, prereqBlock, reportContract].filter(Boolean).join('\n\n---\n\n');
+
+  // When skills/personas/docs are attached, prepend a precedence header so
+  // the model resolves conflicts the same way every time: project
+  // instructions (CLAUDE.md, loaded either implicitly by the CLI or via
+  // `withBasePrompt`) win, and skills/personas are treated as role framing
+  // and tactical guidance, not the final word on project conventions. This
+  // closes the ambiguity surfaced when a vendored persona (e.g. Fullstack
+  // Engineer) restates rules that the project's own CLAUDE.md also covers.
+  const precedenceHeader = allParts.length > 0
+    ? 'Conflict resolution: the project\'s `CLAUDE.md` (loaded by the CLI or shown above as "Project instructions from CLAUDE.md") is authoritative for this codebase. The skills, personas, and docs below add role framing, end-to-end checklists, and tactical guidance. When any of them conflicts with `CLAUDE.md`, follow `CLAUDE.md`.'
+    : null;
+  const systemPrompt = [precedenceHeader, ...allParts, autoAttachBlock, prereqBlock, reportContract].filter(Boolean).join('\n\n---\n\n');
   const corePrompt =
     systemPrompt && taskPrompt
       ? `${systemPrompt}\n\n---\n\n${taskPrompt}`
       : systemPrompt || taskPrompt;
 
+  let memoryDetail: ReturnType<typeof readAgentMemoryDetailed> = null;
   const memoryBlock = readOnly
     ? null
     : (() => {
         ensureAgentMemoryDir(projPath);
         const memoryPath = getAgentMemoryPath(projPath, agentName);
-        const currentMemory = readAgentMemory(projPath, agentName);
-        return buildMemoryBlock(memoryPath, currentMemory);
+        memoryDetail = readAgentMemoryDetailed(projPath, agentName);
+        return buildMemoryBlock(memoryPath, memoryDetail?.content ?? null, {
+          truncated: memoryDetail?.truncated ?? false,
+          rawChars: memoryDetail?.rawChars,
+        });
       })();
 
   // Retrieval context (pgvector, if enabled).
@@ -399,10 +414,32 @@ At the end of your run, include a short final section exactly named "TamTam Run 
     ? `${promptWithRetrieval}\n\n---\n\n${memoryBlock}`
     : promptWithRetrieval;
 
-  const fullPrompt = withBasePrompt(promptWithMemory, {
+  const promptWithBase = withBasePrompt(promptWithMemory, {
     projectPath: projPath,
     provider: safeProvider,
   });
+
+  // Composition marker: explicit summary of what's loaded into this
+  // prompt so a human reading the `.prompt` artifact (or the model
+  // itself) can tell composition mode at a glance, without inferring
+  // anything from byte count. Sits at the very top so it's read first.
+  const compositionMarker = buildAgentCompositionMarker({
+    mode: 'fresh',
+    provider: safeProvider,
+    skillNames: composed.metaSkills.map((s) => s.name),
+    docNames: composed.metaDocs.map((d) => d.name),
+    autoAttachedCount: autoAttachedDocPaths.length,
+    hasRetrieval: Boolean(retrievedContext),
+    memoryStatus: readOnly
+      ? 'disabled (readonly run)'
+      : memoryDetail === null
+        ? 'empty (first run)'
+        : memoryDetail.truncated
+          ? `present, TRUNCATED (${memoryDetail.rawChars} chars on disk, cap 2000)`
+          : `present (${memoryDetail.rawChars} chars)`,
+    hasPrereq: Boolean(prereqResult),
+  });
+  const fullPrompt = `${compositionMarker}\n\n---\n\n${promptWithBase}`;
 
   return {
     skipped: false,
@@ -414,6 +451,32 @@ At the end of your run, include a short final section exactly named "TamTam Run 
     contextMeta: JSON.stringify(contextMetaObj),
     prereqArtifact,
   };
+}
+
+interface AgentCompositionMarkerInput {
+  mode: 'fresh' | 'resumed' | 'hydrated';
+  provider: string;
+  skillNames: string[];
+  docNames: string[];
+  autoAttachedCount: number;
+  hasRetrieval: boolean;
+  memoryStatus: string;
+  hasPrereq: boolean;
+}
+
+function buildAgentCompositionMarker(input: AgentCompositionMarkerInput): string {
+  const lines = [
+    '## Composition',
+    `- mode: ${input.mode}`,
+    `- provider: ${input.provider}`,
+    `- skills: ${input.skillNames.length > 0 ? `${input.skillNames.length} (${input.skillNames.join(', ')})` : 'none'}`,
+    `- attached docs: ${input.docNames.length > 0 ? `${input.docNames.length} (${input.docNames.join(', ')})` : 'none'}`,
+    `- auto-attached docs: ${input.autoAttachedCount > 0 ? input.autoAttachedCount : 'none'}`,
+    `- retrieval: ${input.hasRetrieval ? 'included' : 'not used'}`,
+    `- memory: ${input.memoryStatus}`,
+    `- prerequisite output: ${input.hasPrereq ? 'included' : 'not used'}`,
+  ];
+  return lines.join('\n');
 }
 
 async function resolveFallbackProvider({

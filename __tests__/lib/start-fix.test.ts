@@ -128,6 +128,15 @@ describe('startFixFromJob', () => {
     }
   });
 
+  it('does not reject short non-shim output just because it contains extra blank lines', async () => {
+    readParsedLogMock.mockReturnValue('Fix null handling\n\n\nin the parser\n');
+
+    const r = await startFixFromJob('src-job-1');
+
+    expect(r.ok).toBe(true);
+    expect(startJobMock).toHaveBeenCalledOnce();
+  });
+
   it('returns ok with jobId and pid on success', async () => {
     const r = await startFixFromJob('src-job-1');
     expect(r.ok).toBe(true);
