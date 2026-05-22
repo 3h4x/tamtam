@@ -31,7 +31,7 @@ const NAV_ITEMS: NavItem[] = [
   { to: '/workflow-runs', label: 'Workflows' },
   { to: '/pipeline', label: 'Pipeline' },
   { to: '/stats', label: 'Stats' },
-  { to: '/skills', label: 'Skills' },
+  { to: '/library', label: 'Library' },
   { to: '/recommendations', label: 'Recommendations', countKey: 'recommendations' },
   { to: '/settings', label: 'Settings' },
 ]
