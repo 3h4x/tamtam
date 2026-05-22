@@ -27,10 +27,15 @@ export function readJobLogs(jobId: string, baseDir?: string): LogFrame[] {
   const logsDir = getLogsDir(baseDir);
   const logFile = join(/*turbopackIgnore: true*/ logsDir, `${jobId}.log`);
 
-  if (!existsSync(/*turbopackIgnore: true*/ logFile)) return [];
+  let lines: string[];
+  try {
+    lines = readFileSync(/*turbopackIgnore: true*/ logFile, 'utf-8').split('\n');
+  } catch (error) {
+    if (error instanceof Error && 'code' in error && error.code === 'ENOENT') return [];
+    throw error;
+  }
 
   const frames: LogFrame[] = [];
-  const lines = readFileSync(/*turbopackIgnore: true*/ logFile, 'utf-8').split('\n');
   for (const line of lines) {
     if (!line.trim()) continue;
     try {
