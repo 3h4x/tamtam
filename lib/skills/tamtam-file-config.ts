@@ -1,5 +1,6 @@
-import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'fs';
+import { existsSync, mkdirSync, readFileSync, statSync, writeFileSync } from 'fs';
 import { join } from 'path';
+import { createHash } from 'crypto';
 import { parse as yamlParse, stringify as yamlStringify } from 'yaml';
 import { getBranchContext, gitShowSync } from '@/lib/git/git-branch';
 
@@ -122,6 +123,15 @@ export interface AutoAttachDocRule {
   doc: string;
 }
 
+export type FileConfigSource =
+  | { kind: 'working-tree'; path: string; fingerprint: string }
+  | { kind: 'pinned-ref'; ref: string; relPath: string; fingerprint: string };
+
+export interface FileConfigLoadResult {
+  config: FileProjectConfig | null;
+  source: FileConfigSource;
+}
+
 const GROUPS: { label: string; keys: (keyof FileProjectConfig)[] }[] = [
   { label: 'pipeline', keys: ['test_command', 'release_timeout_minutes', 'review_prerequisite_command'] },
   { label: 'actions', keys: ['custom_actions'] },
@@ -209,26 +219,53 @@ function parseConfigYaml(raw: string): FileProjectConfig | null {
   }
 }
 
-export function loadFileConfig(projectPath: string): FileProjectConfig | null {
+function hashConfigContent(content: string | null | undefined): string {
+  if (typeof content !== 'string') return 'missing';
+  return createHash('sha256').update(content).digest('base64url');
+}
+
+export function fingerprintWorkingTreeConfig(configPath: string): string {
+  try {
+    const stats = statSync(/*turbopackIgnore: true*/ configPath, { bigint: true });
+    return `${stats.mtimeNs}:${stats.size}`;
+  } catch {
+    return 'missing';
+  }
+}
+
+export function loadFileConfigWithSource(projectPath: string): FileConfigLoadResult {
   const ctx = getBranchContext(projectPath);
 
   if (!ctx.isDefaultBranch) {
     // On a feature/PR branch: read from origin/<defaultBranch> to prevent privilege escalation
     // from untrusted branches adding malicious .tamtam/ config.
-    const content = gitShowSync(projectPath, `origin/${ctx.defaultBranch}`, '.tamtam/config.yml');
-    if (content === null) return null;
-    return parseConfigYaml(content);
+    const ref = `origin/${ctx.defaultBranch}`;
+    const relPath = '.tamtam/config.yml';
+    const content = gitShowSync(projectPath, ref, relPath);
+    return {
+      config: typeof content === 'string' ? parseConfigYaml(content) : null,
+      source: { kind: 'pinned-ref', ref, relPath, fingerprint: hashConfigContent(content) },
+    };
   }
 
   // On the default branch: read from the working tree as before.
   const configPath = join(/*turbopackIgnore: true*/ projectPath, '.tamtam', 'config.yml');
-  if (!existsSync(/*turbopackIgnore: true*/ configPath)) return null;
+  const source: FileConfigSource = {
+    kind: 'working-tree',
+    path: configPath,
+    fingerprint: fingerprintWorkingTreeConfig(configPath),
+  };
+  if (!existsSync(/*turbopackIgnore: true*/ configPath)) return { config: null, source };
 
   try {
-    return parseConfigYaml(readFileSync(/*turbopackIgnore: true*/ configPath, 'utf-8'));
+    return { config: parseConfigYaml(readFileSync(/*turbopackIgnore: true*/ configPath, 'utf-8')), source };
   } catch {
-    return null;
+    return { config: null, source };
   }
+}
+
+export function loadFileConfig(projectPath: string): FileProjectConfig | null {
+  return loadFileConfigWithSource(projectPath).config;
 }
 
 /**

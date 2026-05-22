@@ -1,5 +1,13 @@
 import type { NextConfig } from 'next';
 import { withWorkflow } from 'workflow/next';
+import { dirname } from 'node:path';
+import { fileURLToPath } from 'node:url';
+
+// Resolve this file's directory in an ESM-safe way so `outputFileTracingRoot`
+// is anchored to the project root regardless of where `next build` is invoked
+// from. Stricter than relying on Next's default (which walks up looking for
+// the nearest package.json and can pick up the monorepo parent).
+const PROJECT_ROOT = dirname(fileURLToPath(import.meta.url));
 
 // Workflow runtime durability. `@workflow/next` defaults the local-world
 // data dir to `.next/workflow-data` when WORKFLOW_TARGET_WORLD is unset,
@@ -23,6 +31,11 @@ if (process.env.WORKFLOW_TARGET_WORLD === 'local') {
 
 const nextConfig: NextConfig = {
   serverExternalPackages: ['pg', 'graphile-worker'],
+  // Pin the NFT root to this project so the tracer never walks above the
+  // repo. Without this, Next probes upward for the nearest workspace root
+  // and can begin tracing into a sibling project under `~/workspace/`,
+  // which is both wrong and slow.
+  outputFileTracingRoot: PROJECT_ROOT,
   // Turbopack's persistent filesystem cache is opt-in for `next build`
   // (Next 16 defaults it on only for dev). Enables incremental rebuilds
   // — full first build still pays the ~115s compile, but a follow-up

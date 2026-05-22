@@ -106,7 +106,7 @@ async function listSessionFiles(root: string): Promise<string[]> {
   async function walk(dir: string): Promise<void> {
     let entries;
     try {
-      entries = await readdir(dir, { withFileTypes: true });
+      entries = await readdir(/*turbopackIgnore: true*/ dir, { withFileTypes: true });
     } catch {
       return;
     }
@@ -117,7 +117,7 @@ async function listSessionFiles(root: string): Promise<string[]> {
         await walk(path);
       } else if (entry.isFile() && entry.name.endsWith('.jsonl')) {
         try {
-          const s = await stat(path);
+          const s = await stat(/*turbopackIgnore: true*/ path);
           out.push({ path, mtimeMs: s.mtimeMs });
         } catch {
           /* ignore files removed during scan */

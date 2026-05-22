@@ -196,6 +196,16 @@ vi.mock('fs', () => ({
 // ~10ms, and the tests call wrapIfUntrusted twice per claude-path test.
 vi.mock('@/lib/skills/tamtam-file-config', () => ({
   loadFileConfig: () => null,
+  loadFileConfigWithSource: () => ({
+    config: null,
+    source: {
+      kind: 'pinned-ref',
+      ref: 'test',
+      relPath: '.tamtam/config.yml',
+      fingerprint: 'null',
+    },
+  }),
+  fingerprintWorkingTreeConfig: () => 'test',
 }));
 
 // Import once at module scope; mocks above are hoisted before this resolves.

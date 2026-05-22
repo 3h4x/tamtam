@@ -259,7 +259,7 @@ export function writeFileAgent(
   const nameError = getAgentNameValidationError(canonicalAgentName);
   if (nameError) throw new Error(nameError);
   const dir = join(projectPath, '.tamtam', 'agents');
-  mkdirSync(dir, { recursive: true });
+  mkdirSync(/*turbopackIgnore: true*/ dir, { recursive: true });
   const filePath = join(dir, `${canonicalAgentName}.md`);
 
   // Load current values from the working-tree file (if it exists) to preserve unset fields.
@@ -293,7 +293,7 @@ export function writeFileAgent(
     : (current?.prerequisiteCommand ?? null);
 
   const content = serializeAgent(provider, model, schedule, skillIds, enabled, prompt, prerequisiteCommand);
-  writeFileSync(filePath, content);
+  writeFileSync(/*turbopackIgnore: true*/ filePath, content);
 
   return buildFileAgent(filePath, canonicalAgentName, projectName, content, Date.now() / 1000);
 }

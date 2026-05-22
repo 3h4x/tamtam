@@ -82,7 +82,7 @@ function parseStoredReviewStamp(raw: string): StoredReviewStamp | null {
 
 function migrateLegacyReviewStamp(path: string, stamp: ReviewStamp): void {
   try {
-    writeFileSync(path, JSON.stringify(stamp));
+    writeFileSync(/*turbopackIgnore: true*/ path, JSON.stringify(stamp));
   } catch {
     // Best effort only. A failed migration should not block the caller.
   }
@@ -93,8 +93,8 @@ export async function markReviewed(project: string, path: string): Promise<void>
   if (!target) return;
   const stamp = await readReviewStamp(path);
   if (!stamp) return;
-  mkdirSync(REVIEW_DIR, { recursive: true });
-  writeFileSync(target, JSON.stringify(stamp));
+  mkdirSync(/*turbopackIgnore: true*/ REVIEW_DIR, { recursive: true });
+  writeFileSync(/*turbopackIgnore: true*/ target, JSON.stringify(stamp));
 }
 
 export async function isReviewed(project: string, path: string): Promise<boolean> {
