@@ -68,7 +68,7 @@ export async function POST(
     if (formProvider) pinnedProvider = formProvider;
 
     const attachDir = join(process.cwd(), 'data', 'attachments');
-    mkdirSync(attachDir, { recursive: true });
+    mkdirSync(/*turbopackIgnore: true*/ attachDir, { recursive: true });
 
     for (const [, value] of form.entries()) {
       if (value instanceof File && value.name) {

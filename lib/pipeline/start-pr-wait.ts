@@ -391,7 +391,7 @@ export function launchPrWait(
   if (!projPath) return { error: 'project not found' };
 
   const { logDir } = getImproveConfig();
-  mkdirSync(logDir, { recursive: true });
+  mkdirSync(/*turbopackIgnore: true*/ logDir, { recursive: true });
 
   const meta: PrWaitContextMeta = { prNumber, prRepo, prUrl };
   const job = createJob(projectName, 'pr-wait', 0, '', undefined, JSON.stringify(meta));
@@ -436,7 +436,7 @@ export function resumePrWait(jobId: string): { ok: true } | { ok: false; error: 
 
   if (!job.logPath) {
     const { logDir } = getImproveConfig();
-    mkdirSync(logDir, { recursive: true });
+    mkdirSync(/*turbopackIgnore: true*/ logDir, { recursive: true });
     job.logPath = join(logDir, `${job.id}.log`);
     updateJob(job);
   }

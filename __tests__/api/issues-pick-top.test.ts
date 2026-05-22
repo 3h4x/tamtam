@@ -30,6 +30,19 @@ vi.mock('@/lib/db', () => ({
 }));
 vi.mock('@/lib/skills/tamtam-file-config', () => ({
   loadFileConfig: mocks.loadFileConfig,
+  loadFileConfigWithSource: (projectPath: string) => {
+    const config = mocks.loadFileConfig(projectPath);
+    return {
+      config,
+      source: {
+        kind: 'pinned-ref',
+        ref: 'test',
+        relPath: '.tamtam/config.yml',
+        fingerprint: JSON.stringify(config),
+      },
+    };
+  },
+  fingerprintWorkingTreeConfig: () => 'test',
 }));
 vi.mock('@/lib/shared/config', () => ({
   getSettings: mocks.getSettings,

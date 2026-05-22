@@ -471,7 +471,7 @@ export async function startProjectCommit(
   }
 
   const { logDir } = getImproveConfig();
-  mkdirSync(logDir, { recursive: true });
+  mkdirSync(/*turbopackIgnore: true*/ logDir, { recursive: true });
   const provider = gate.provider;
   // Stamp issue context on the commit job so downstream hooks can pick it up.
   const earlyIssueCtx = await findIssueContext(projectName, projPath);

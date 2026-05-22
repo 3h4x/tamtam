@@ -3,10 +3,12 @@ import { mkdirSync, rmSync, writeFileSync } from 'fs';
 import { join } from 'path';
 import { tmpdir } from 'os';
 
-const { mockSettings } = vi.hoisted(() => ({
+const { mockSettings, mockBranchContext, mockGitShowSync } = vi.hoisted(() => ({
   mockSettings: {
     trusted_github_users: [] as string[],
   },
+  mockBranchContext: vi.fn(() => ({ currentBranch: 'master', defaultBranch: 'master', isDefaultBranch: true })),
+  mockGitShowSync: vi.fn(() => null as string | null),
 }));
 
 vi.mock('@/lib/shared/config', () => ({
@@ -19,10 +21,10 @@ vi.mock('@/lib/shared/config', () => ({
 // the test file's runtime. The default-branch path means loadFileConfig reads
 // the working tree directly — which is what these tests need.
 vi.mock('@/lib/git/git-branch', () => ({
-  getBranchContext: () => ({ currentBranch: 'master', defaultBranch: 'master', isDefaultBranch: true }),
+  getBranchContext: mockBranchContext,
   getDefaultBranchSync: () => 'master',
   getCurrentBranchSync: () => 'master',
-  gitShowSync: () => null,
+  gitShowSync: mockGitShowSync,
   gitLsTreeSync: () => [],
 }));
 
@@ -32,10 +34,13 @@ import {
   withUntrustedPreamble,
   isUserTrusted,
   wrapIfUntrusted,
+  clearTrustedUsersCache,
 } from '@/lib/shared/untrusted';
 
+let tmpCounter = 0;
+
 function makeTmpDir(): string {
-  const dir = join(tmpdir(), `tamtam-untrusted-test-${Date.now()}`);
+  const dir = join(tmpdir(), `tamtam-untrusted-test-${Date.now()}-${++tmpCounter}`);
   mkdirSync(dir, { recursive: true });
   return dir;
 }
@@ -99,8 +104,17 @@ describe('isUserTrusted', () => {
   beforeEach(() => {
     tmpDir = makeTmpDir();
     mockSettings.trusted_github_users = [];
+    mockBranchContext.mockClear();
+    mockGitShowSync.mockClear();
+    mockBranchContext.mockReturnValue({ currentBranch: 'master', defaultBranch: 'master', isDefaultBranch: true });
+    mockGitShowSync.mockReturnValue(null);
+    clearTrustedUsersCache();
   });
-  afterEach(() => { rmSync(tmpDir, { recursive: true, force: true }); });
+  afterEach(() => {
+    vi.useRealTimers();
+    clearTrustedUsersCache();
+    rmSync(tmpDir, { recursive: true, force: true });
+  });
 
   it('returns false when no config exists', () => {
     expect(isUserTrusted('alice', tmpDir)).toBe(false);
@@ -140,6 +154,12 @@ describe('isUserTrusted', () => {
     expect(isUserTrusted('ALICE', tmpDir)).toBe(true);
   });
 
+  it('trims configured users and queried logins', () => {
+    mockSettings.trusted_github_users = [' Alice '];
+    expect(isUserTrusted('alice', tmpDir)).toBe(true);
+    expect(isUserTrusted(' ALICE ', tmpDir)).toBe(true);
+  });
+
   it('handles bot suffixes like dependabot[bot]', () => {
     // yaml parser handles the bracket in the value correctly
     const cfgDir = join(tmpDir, '.tamtam');
@@ -148,13 +168,82 @@ describe('isUserTrusted', () => {
     expect(isUserTrusted('dependabot[bot]', tmpDir)).toBe(true);
     expect(isUserTrusted('dependabot', tmpDir)).toBe(false);
   });
+
+  it('refreshes the same project path when config.yml is created after a cache miss', () => {
+    expect(isUserTrusted('alice', tmpDir)).toBe(false);
+
+    writeSafeUsers(tmpDir, ['alice']);
+
+    expect(isUserTrusted('alice', tmpDir)).toBe(true);
+  });
+
+  it('refreshes the same project path when safe_users changes inside the cache TTL', () => {
+    writeSafeUsers(tmpDir, ['alice']);
+    expect(isUserTrusted('alice', tmpDir)).toBe(true);
+    expect(isUserTrusted('bob', tmpDir)).toBe(false);
+
+    writeSafeUsers(tmpDir, ['bob']);
+
+    expect(isUserTrusted('alice', tmpDir)).toBe(false);
+    expect(isUserTrusted('bob', tmpDir)).toBe(true);
+  });
+
+  it('coalesces repeated project config lookups while the trusted source is unchanged', () => {
+    writeSafeUsers(tmpDir, ['alice']);
+
+    expect(isUserTrusted('alice', tmpDir)).toBe(true);
+    expect(isUserTrusted('bob', tmpDir)).toBe(false);
+    expect(isUserTrusted(' ALICE ', tmpDir)).toBe(true);
+
+    expect(mockBranchContext).toHaveBeenCalledTimes(1);
+    expect(mockGitShowSync).not.toHaveBeenCalled();
+  });
+
+  it('fingerprints the pinned default-branch config on feature branches', () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date('2026-01-01T00:00:00.000Z'));
+    mockBranchContext.mockReturnValue({
+      currentBranch: 'feat/attacker',
+      defaultBranch: 'main',
+      isDefaultBranch: false,
+    });
+    mockGitShowSync.mockReturnValue('security:\n  safe_users:\n    - owner\n');
+    writeSafeUsers(tmpDir, ['attacker']);
+
+    expect(isUserTrusted('owner', tmpDir)).toBe(true);
+    expect(isUserTrusted('attacker', tmpDir)).toBe(false);
+
+    writeSafeUsers(tmpDir, ['attacker', 'other']);
+    expect(isUserTrusted('attacker', tmpDir)).toBe(false);
+
+    mockGitShowSync.mockReturnValue('security:\n  safe_users:\n    - maintainer\n');
+    expect(isUserTrusted('maintainer', tmpDir)).toBe(false);
+
+    vi.setSystemTime(new Date('2026-01-01T00:00:15.001Z'));
+    expect(isUserTrusted('owner', tmpDir)).toBe(false);
+    expect(isUserTrusted('maintainer', tmpDir)).toBe(true);
+    expect(mockGitShowSync).toHaveBeenCalledTimes(2);
+    expect(mockGitShowSync).toHaveBeenLastCalledWith(tmpDir, 'origin/main', '.tamtam/config.yml');
+  });
 });
 
 describe('wrapIfUntrusted', () => {
   let tmpDir: string;
 
-  beforeEach(() => { tmpDir = makeTmpDir(); });
-  afterEach(() => { rmSync(tmpDir, { recursive: true, force: true }); });
+  beforeEach(() => {
+    tmpDir = makeTmpDir();
+    mockSettings.trusted_github_users = [];
+    mockBranchContext.mockClear();
+    mockGitShowSync.mockClear();
+    mockBranchContext.mockReturnValue({ currentBranch: 'master', defaultBranch: 'master', isDefaultBranch: true });
+    mockGitShowSync.mockReturnValue(null);
+    clearTrustedUsersCache();
+  });
+  afterEach(() => {
+    vi.useRealTimers();
+    clearTrustedUsersCache();
+    rmSync(tmpDir, { recursive: true, force: true });
+  });
 
   it('wraps when authorLogin is undefined', () => {
     const result = wrapIfUntrusted('text', 'source', undefined, tmpDir);
