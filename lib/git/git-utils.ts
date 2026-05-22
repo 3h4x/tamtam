@@ -103,7 +103,7 @@ export async function isReviewed(project: string, path: string): Promise<boolean
   const current = await readReviewStamp(path);
   if (!current) return false;
   try {
-    const storedRaw = readFileSync(p, 'utf-8').trim();
+    const storedRaw = readFileSync(/*turbopackIgnore: true*/ p, 'utf-8').trim();
     const stored = parseStoredReviewStamp(storedRaw);
     if (!stored) return false;
     if (stored.kind === 'legacy') {

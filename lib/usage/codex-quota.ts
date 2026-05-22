@@ -162,7 +162,7 @@ async function readLatestRateLimits(): Promise<CodexRateLimits | null> {
   // files just to throw their contents away.
   for (const file of files) {
     try {
-      const rateLimits = newestRateLimitsFromContent(await readFile(file, 'utf8'));
+      const rateLimits = newestRateLimitsFromContent(await readFile(/*turbopackIgnore: true*/ file, 'utf8'));
       if (rateLimits) return selectEffectiveRateLimits([rateLimits]);
     } catch {
       /* try the next recent session */

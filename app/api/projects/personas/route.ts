@@ -21,7 +21,7 @@ const PERSONA_CACHE_TTL_S = 300;
 function scanDir(base: string, personas: Persona[]) {
   let catEntries: Dirent[];
   try {
-    catEntries = readdirSync(base, { withFileTypes: true });
+    catEntries = readdirSync(/*turbopackIgnore: true*/ base, { withFileTypes: true });
   } catch {
     return;
   }
@@ -29,7 +29,7 @@ function scanDir(base: string, personas: Persona[]) {
     if (!catEntry.isDirectory()) continue;
     const catDir = join(base, catEntry.name);
     const category = catEntry.name;
-    for (const entry of readdirSync(catDir, { withFileTypes: true })) {
+    for (const entry of readdirSync(/*turbopackIgnore: true*/ catDir, { withFileTypes: true })) {
       if (!entry.isFile() || !entry.name.endsWith('.md') || entry.name === 'index.md') continue;
       const fpath = join(catDir, entry.name);
       const slug = entry.name.replace('.md', '');
@@ -37,7 +37,7 @@ function scanDir(base: string, personas: Persona[]) {
       let description = '';
       const emoji = '';
       try {
-        const content = readFileSync(fpath, 'utf-8').slice(0, 2000);
+        const content = readFileSync(/*turbopackIgnore: true*/ fpath, 'utf-8').slice(0, 2000);
         if (content.startsWith('---')) {
           const end = content.indexOf('---', 3);
           if (end > 0) {

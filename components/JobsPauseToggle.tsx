@@ -185,7 +185,7 @@ export function JobsPauseToggle() {
       } ${(loading || saving) && !showRebuild ? 'opacity-70 cursor-wait' : ''}`}
     >
       {showRebuild && (
-        <span className="animate-spin leading-none" aria-hidden="true">{'⟳'}</span>
+        <span className="spinner-sm shrink-0 !h-3 !w-3 !border-[1.5px]" aria-hidden="true" />
       )}
       {label}
     </button>

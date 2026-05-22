@@ -322,21 +322,21 @@ export function renameFileAgent(
   const oldPath = join(dir, `${canonicalOldName}.md`);
   const newPath = join(dir, `${canonicalNewName}.md`);
 
-  if (!existsSync(oldPath)) {
+  if (!existsSync(/*turbopackIgnore: true*/ oldPath)) {
     throw new Error(`agent '${canonicalOldName}' not found`);
   }
   if (canonicalAgentNameKey(canonicalOldName) === canonicalAgentNameKey(canonicalNewName)) {
     const tempPath = join(dir, `.${canonicalOldName}.rename-${process.pid}-${Date.now()}.md`);
-    renameSync(oldPath, tempPath);
-    renameSync(tempPath, newPath);
+    renameSync(/*turbopackIgnore: true*/ oldPath, tempPath);
+    renameSync(/*turbopackIgnore: true*/ tempPath, newPath);
   } else {
-    if (existsSync(newPath)) {
+    if (existsSync(/*turbopackIgnore: true*/ newPath)) {
       throw new Error(`agent '${canonicalNewName}' already exists`);
     }
-    renameSync(oldPath, newPath);
+    renameSync(/*turbopackIgnore: true*/ oldPath, newPath);
   }
 
-  const content = readFileSync(newPath, 'utf-8');
+  const content = readFileSync(/*turbopackIgnore: true*/ newPath, 'utf-8');
   return buildFileAgent(newPath, canonicalNewName, projectName, content, Date.now() / 1000);
 }
 
