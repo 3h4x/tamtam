@@ -30,32 +30,29 @@ if (process.env.WORKFLOW_TARGET_WORLD === 'local') {
 }
 
 const nextConfig: NextConfig = {
-  // Mark big server-only packages as external so Turbopack doesn't walk
-  // and compile their sources for every route bundle. At runtime they're
-  // resolved through standard `require` from node_modules (TamTam is
-  // self-hosted, node_modules is present in the deploy). Without this,
-  // a 148s Turbopack compile re-processes ~1 GB of dep source per build.
-  serverExternalPackages: [
-    'pg',
-    'graphile-worker',
-    'workflow',
-    '@workflow/world-postgres',
-    '@workflow/world-local',
-    '@workflow/core',
-    '@workflow/builders',
-    '@workflow/errors',
-    '@workflow/utils',
-    'drizzle-orm',
-    'cbor-x',
-    'devalue',
-    'yaml',
-    'glob',
-  ],
+  // `pg` and `graphile-worker` rely on native bindings / dynamic
+  // require, so they have to stay external. Tried extending this list
+  // to workflow/drizzle/cbor/etc., but it made `check-page` and
+  // `is-page-static` ~5× slower (sub-second → 4-5s per route) for a
+  // net-slower build. Turbopack already tree-shakes these packages well
+  // enough that bundling them is cheaper than the external indirection.
+  serverExternalPackages: ['pg', 'graphile-worker'],
   // Pin the NFT root to this project so the tracer never walks above the
   // repo. Without this, Next probes upward for the nearest workspace root
   // and can begin tracing into a sibling project under `~/workspace/`,
   // which is both wrong and slow.
   outputFileTracingRoot: PROJECT_ROOT,
+  // Force-enable the build worker + parallel server/edge compile. Next
+  // auto-disables both when `nextConfig.webpack` is set, and
+  // `withWorkflow()` sets a webpack hook for the workflow loader (even
+  // though Turbopack handles the actual bundling). Build trace flagged
+  // `use-build-worker=false`; forcing it on lets server + edge bundles
+  // compile in parallel instead of serial.
+  experimental: {
+    webpackBuildWorker: true,
+    parallelServerCompiles: true,
+    parallelServerBuildTraces: true,
+  },
   // Turbopack's persistent filesystem cache for `next build` is OFF by
   // default. We tried enabling `experimental.turbopackFileSystemCacheForBuild`
   // hoping for fast warm rebuilds, but in practice the cache accumulated
