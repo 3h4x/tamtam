@@ -344,6 +344,7 @@ At the end of your run, include a short final section exactly named "TamTam Run 
 
   // Retrieval context (pgvector, if enabled).
   let retrievedContext: string | null = null;
+  let retrievalStatusLabel = 'disabled';
   const settings = getSettings();
   if (settings.retrieval_enabled && taskPrompt) {
     try {
@@ -359,12 +360,20 @@ At the end of your run, include a short final section exactly named "TamTam Run 
         embeddingModel: settings.retrieval_embedding_model,
       });
       retrievedContext = retrieval.block;
-      if ((retrieval.diagnostics.sources?.length ?? 0) > 0) {
-        contextMetaObj.retrieval = retrieval.diagnostics;
-      }
+      // Persist full diagnostics every run (not just on hit) so the operator can
+      // see why retrieval did or didn't contribute. Previously diagnostics were
+      // only stored when sources existed, hiding empty_corpus / below_threshold
+      // / embed_failed reasons from after-the-fact triage.
+      contextMetaObj.retrieval = retrieval.diagnostics;
+      retrievalStatusLabel = formatRetrievalStatus(retrieval.diagnostics);
     } catch (e) {
       console.warn('[intake-workflow] retrieval failed, skipping:', errMsg(e));
+      retrievalStatusLabel = `errored (${errMsg(e)})`;
     }
+  } else if (!settings.retrieval_enabled) {
+    retrievalStatusLabel = 'disabled (retrieval_enabled=false)';
+  } else {
+    retrievalStatusLabel = 'skipped (no task prompt)';
   }
 
   const promptWithRetrieval = retrievedContext
@@ -429,7 +438,7 @@ At the end of your run, include a short final section exactly named "TamTam Run 
     skillNames: composed.metaSkills.map((s) => s.name),
     docNames: composed.metaDocs.map((d) => d.name),
     autoAttachedCount: autoAttachedDocPaths.length,
-    hasRetrieval: Boolean(retrievedContext),
+    retrievalStatus: retrievalStatusLabel,
     memoryStatus: readOnly
       ? 'disabled (readonly run)'
       : memoryDetail === null
@@ -439,6 +448,23 @@ At the end of your run, include a short final section exactly named "TamTam Run 
           : `present (${memoryDetail.rawChars} chars)`,
     hasPrereq: Boolean(prereqResult),
   });
+  // Persist a structured composition record in contextMeta so the per-project
+  // prompt-insights endpoint can aggregate without re-parsing the marker text
+  // from the `.prompt` artifact. Keep it small — high-cardinality lists go
+  // through the existing skills/docs metadata.
+  contextMetaObj.composition = {
+    mode: 'fresh',
+    provider: safeProvider,
+    skillCount: composed.metaSkills.length,
+    attachedDocCount: composed.metaDocs.length,
+    autoAttachedCount: autoAttachedDocPaths.length,
+    memory: readOnly
+      ? { state: 'disabled', truncated: false, rawChars: 0 }
+      : memoryDetail === null
+        ? { state: 'empty', truncated: false, rawChars: 0 }
+        : { state: 'present', truncated: memoryDetail.truncated, rawChars: memoryDetail.rawChars },
+    hasPrereq: Boolean(prereqResult),
+  };
   const fullPrompt = `${compositionMarker}\n\n---\n\n${promptWithBase}`;
 
   return {
@@ -459,7 +485,7 @@ interface AgentCompositionMarkerInput {
   skillNames: string[];
   docNames: string[];
   autoAttachedCount: number;
-  hasRetrieval: boolean;
+  retrievalStatus: string;
   memoryStatus: string;
   hasPrereq: boolean;
 }
@@ -472,11 +498,34 @@ function buildAgentCompositionMarker(input: AgentCompositionMarkerInput): string
     `- skills: ${input.skillNames.length > 0 ? `${input.skillNames.length} (${input.skillNames.join(', ')})` : 'none'}`,
     `- attached docs: ${input.docNames.length > 0 ? `${input.docNames.length} (${input.docNames.join(', ')})` : 'none'}`,
     `- auto-attached docs: ${input.autoAttachedCount > 0 ? input.autoAttachedCount : 'none'}`,
-    `- retrieval: ${input.hasRetrieval ? 'included' : 'not used'}`,
+    `- retrieval: ${input.retrievalStatus}`,
     `- memory: ${input.memoryStatus}`,
     `- prerequisite output: ${input.hasPrereq ? 'included' : 'not used'}`,
   ];
   return lines.join('\n');
+}
+
+function formatRetrievalStatus(d: {
+  status: string;
+  reason: string;
+  corpusChunkCount: number;
+  retrievedCount: number;
+  acceptedCount: number;
+  topScore: number | null;
+  scoreThreshold: number;
+}): string {
+  if (d.reason === 'empty_corpus') return 'queried, empty corpus (no indexed chunks for this project)';
+  if (d.reason === 'embed_failed') return 'errored (embedding call failed — check Ollama)';
+  if (d.reason === 'no_results') return `queried, no nearest neighbours returned (corpus=${d.corpusChunkCount})`;
+  if (d.reason === 'below_threshold') {
+    const top = d.topScore !== null ? d.topScore.toFixed(3) : '?';
+    return `queried, all ${d.retrievedCount} candidates below threshold (top=${top}, threshold=${d.scoreThreshold})`;
+  }
+  if (d.reason === 'results') {
+    const top = d.topScore !== null ? d.topScore.toFixed(3) : '?';
+    return `included ${d.acceptedCount} chunks (top score=${top}, threshold=${d.scoreThreshold})`;
+  }
+  return `${d.status} (${d.reason})`;
 }
 
 async function resolveFallbackProvider({

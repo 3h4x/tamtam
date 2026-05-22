@@ -219,18 +219,27 @@ export async function runRetrievalMaintenance(agent: AgentInput): Promise<{ jobI
           };
 
           if ((retrieval.diagnostics.sources?.length ?? 0) > 0) {
-            const verifier = await verifyRetrievalWithCheapModel({
-              project: agent.project,
-              query: sampleQuery,
-              snippets: (retrieval.diagnostics.sources ?? []).map((s) => ({
-                sourceKind: s.sourceKind,
-                sourceId: s.sourceId,
-                text: s.preview,
-              })),
-            }, {
-              ollamaUrl: cfg.retrieval_ollama_url,
-              model: cfg.outcome_classifier_model,
-            });
+            // Verify step is opt-in: it needs an `outcome_classifier_model`
+            // that's actually pulled into the local Ollama. When the setting
+            // is empty (default), skip the call entirely instead of hitting
+            // Ollama with `model: undefined` and logging an hourly 404. The
+            // retrieval results themselves are still kept; verifier metadata
+            // just stays empty until a model is configured.
+            const verifyModel = cfg.outcome_classifier_model?.trim();
+            const verifier = verifyModel
+              ? await verifyRetrievalWithCheapModel({
+                  project: agent.project,
+                  query: sampleQuery,
+                  snippets: (retrieval.diagnostics.sources ?? []).map((s) => ({
+                    sourceKind: s.sourceKind,
+                    sourceId: s.sourceId,
+                    text: s.preview,
+                  })),
+                }, {
+                  ollamaUrl: cfg.retrieval_ollama_url,
+                  model: verifyModel,
+                })
+              : null;
             if (verifier) {
               meta.verdict = verifier.verdict;
               meta.reason = verifier.reason;
@@ -238,7 +247,7 @@ export async function runRetrievalMaintenance(agent: AgentInput): Promise<{ jobI
               meta.verifiedAt = verifier.verifiedAt;
             } else {
               meta.verdict = null;
-              meta.reason = 'verifier_unavailable';
+              meta.reason = verifyModel ? 'verifier_unavailable' : 'verifier_not_configured';
             }
           } else {
             meta.verdict = null;

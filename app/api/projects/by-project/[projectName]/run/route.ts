@@ -76,7 +76,7 @@ export async function POST(
         const safeName = `${randomUUID().slice(0, 8)}${ext}`;
         const filePath = join(attachDir, safeName);
         const buffer = Buffer.from(await value.arrayBuffer());
-        writeFileSync(filePath, buffer);
+        writeFileSync(/*turbopackIgnore: true*/ filePath, buffer);
         attachmentPaths.push(filePath);
       }
     }
@@ -150,10 +150,10 @@ export async function POST(
   const docsBase = join(SKILLS_DIR, 'docs', 'skills');
   for (const pPath of personaPaths) {
     const docsFile = join(docsBase, `${pPath}.md`);
-    const personaFile = existsSync(docsFile) ? docsFile : join(DATA_SKILLS_DIR, `${pPath}.md`);
-    if (existsSync(personaFile)) {
+    const personaFile = existsSync(/*turbopackIgnore: true*/ docsFile) ? docsFile : join(DATA_SKILLS_DIR, `${pPath}.md`);
+    if (existsSync(/*turbopackIgnore: true*/ personaFile)) {
       try {
-        const personaContent = readFileSync(personaFile, 'utf-8');
+        const personaContent = readFileSync(/*turbopackIgnore: true*/ personaFile, 'utf-8');
         prompt = personaContent + '\n\n---\n\n' + prompt;
       } catch {}
     }

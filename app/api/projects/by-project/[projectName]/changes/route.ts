@@ -100,7 +100,7 @@ export async function GET(
       let additions = 0;
       let binary = false;
       try {
-        const size = statSync(join(projPath, name)).size;
+        const size = statSync(/*turbopackIgnore: true*/ join(projPath, name)).size;
         if (size > UNTRACKED_SIZE_LIMIT_BYTES) {
           binary = true;
         } else {

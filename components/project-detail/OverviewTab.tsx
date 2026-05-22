@@ -12,6 +12,7 @@ import {
 import { StatusStrip } from '@/components/project-detail/StatusStrip'
 import { AgentsStats } from '@/components/project-detail/AgentsStats'
 import { PipelineStatsPanel } from '@/components/project-detail/PipelineStatsPanel'
+import { PromptInsightsPanel } from '@/components/project-detail/PromptInsightsPanel'
 import { formatAgo } from '@/lib/shared/format'
 import type { JobInfo, ProjectConfig } from '@/lib/client-api'
 
@@ -196,6 +197,8 @@ export function OverviewTab({
       <PipelineStatsPanel projectName={projectName} />
 
       <AgentsStats projectName={projectName} />
+
+      <PromptInsightsPanel projectName={projectName} />
     </>
   )
 }

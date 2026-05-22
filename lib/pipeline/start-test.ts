@@ -29,12 +29,12 @@ export async function detectTestCommand(projPath: string, projectName?: string):
   }
   if (existsSync(join(/*turbopackIgnore: true*/ projPath, 'pyproject.toml')) || existsSync(join(/*turbopackIgnore: true*/ projPath, 'requirements.txt'))) {
     const venvPython = join(/*turbopackIgnore: true*/ projPath, '.venv', 'bin', 'python');
-    return existsSync(venvPython) ? `${venvPython} -m pytest` : 'python3 -m pytest';
+    return existsSync(/*turbopackIgnore: true*/ venvPython) ? `${venvPython} -m pytest` : 'python3 -m pytest';
   }
   const pkgJson = join(/*turbopackIgnore: true*/ projPath, 'package.json');
-  if (existsSync(pkgJson)) {
+  if (existsSync(/*turbopackIgnore: true*/ pkgJson)) {
     try {
-      const pkg = JSON.parse(readFileSync(pkgJson, 'utf-8'));
+      const pkg = JSON.parse(readFileSync(/*turbopackIgnore: true*/ pkgJson, 'utf-8'));
       if (pkg.scripts?.test) {
         return existsSync(join(/*turbopackIgnore: true*/ projPath, 'pnpm-lock.yaml')) ? 'pnpm test' : 'npm test';
       }
