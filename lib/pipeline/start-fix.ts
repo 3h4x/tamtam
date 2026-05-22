@@ -7,7 +7,7 @@ import { resolveProjectPath } from '@/lib/shared/project-data';
 import { getJob, createJob, readParsedLog, probeJobStatus, updateJob, listJobs } from '@/lib/jobs/job-storage';
 import { startJobInProcess } from '@/lib/jobs/spawn-claude-detached';
 import { acquireLock, isLockOwnedByActiveRelease } from './pipeline-lock';
-import { FIX_OUTPUT_CONTRACT, stripFinalVerdict } from './review-contract';
+import { FIX_OUTPUT_CONTRACT, stripFinalVerdict, stripShimErrors, isReviewContentTooThin } from './review-contract';
 
 export type StartFixResult =
   | { ok: true; jobId: string; pid: number }
@@ -59,6 +59,19 @@ export async function startFixFromJob(sourceJobId: string): Promise<StartFixResu
   const resumeSessionId = sourceJob.sessionId ?? null;
   const rawLog = readParsedLog(sourceJob);
   let findingsBlock = stripFinalVerdict(rawLog);
+  const { cleaned: shimStripped, hadShimErrors } = stripShimErrors(findingsBlock);
+  findingsBlock = shimStripped;
+  // Refuse to start fix when the only "finding" was a shim/runtime error
+  // and nothing meaningful remains. Without this guard the fix step ran
+  // against infra error strings (e.g. inactivity watchdog kills) as if
+  // they were code findings, producing nonsense diffs.
+  if (hadShimErrors && isReviewContentTooThin(findingsBlock) && sourceJob.kind !== 'push') {
+    return {
+      ok: false,
+      status: 422,
+      detail: `Source job ${sourceJob.id} produced no actionable findings — only shim/runtime errors. Rerun the source step before starting a fix.`,
+    };
+  }
   if (findingsBlock.length > 12000) {
     findingsBlock = '...(truncated)...\n' + findingsBlock.slice(-12000);
   }

@@ -144,6 +144,7 @@ vi.mock('@/lib/agents/agent-memory', () => ({
   ensureAgentMemoryDir: vi.fn(),
   getAgentMemoryPath: vi.fn().mockReturnValue('/tmp/tamtam-memory/proj1/Test Agent.md'),
   readAgentMemory: vi.fn().mockReturnValue(null),
+  readAgentMemoryDetailed: vi.fn().mockReturnValue(null),
   buildMemoryBlock: vi.fn().mockReturnValue(''),
 }));
 

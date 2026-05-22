@@ -174,6 +174,7 @@ describe('POST /api/agents/{agentId}/run readOnly', () => {
       getAgentMemoryDir: vi.fn().mockReturnValue('/tmp/memory'),
       getAgentMemoryPath: vi.fn().mockReturnValue('/tmp/memory/proj1/cto.md'),
       readAgentMemory: vi.fn().mockReturnValue(null),
+      readAgentMemoryDetailed: vi.fn().mockReturnValue(null),
       ensureAgentMemoryDir: vi.fn(),
       buildMemoryBlock: vi.fn().mockReturnValue(''),
     }));

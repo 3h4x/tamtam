@@ -39,7 +39,7 @@ describe('runAgentIntakeWorkflow memory composition', () => {
     vi.resetModules();
     ensureAgentMemoryDirMock = vi.fn();
     getAgentMemoryPathMock = vi.fn().mockReturnValue('/tmp/proj1/.tamtam/cache/agent-memory/cto.md');
-    readAgentMemoryMock = vi.fn().mockReturnValue('prior memory');
+    readAgentMemoryMock = vi.fn().mockReturnValue({ content: 'prior memory', truncated: false, rawChars: 12 });
     buildMemoryBlockMock = vi.fn().mockReturnValue('## Your Persistent Memory\nprior memory');
     startInProcessAgentJobMock = vi.fn().mockResolvedValue(12345);
     updateJobMock = vi.fn();
@@ -60,7 +60,7 @@ describe('runAgentIntakeWorkflow memory composition', () => {
     vi.doMock('@/lib/agents/agent-memory', () => ({
       ensureAgentMemoryDir: ensureAgentMemoryDirMock,
       getAgentMemoryPath: getAgentMemoryPathMock,
-      readAgentMemory: readAgentMemoryMock,
+      readAgentMemoryDetailed: readAgentMemoryMock,
       buildMemoryBlock: buildMemoryBlockMock,
     }));
     vi.doMock('@/lib/shared/config', () => ({
@@ -140,7 +140,11 @@ describe('runAgentIntakeWorkflow memory composition', () => {
     expect(ensureAgentMemoryDirMock).toHaveBeenCalledWith('/tmp/proj1');
     expect(getAgentMemoryPathMock).toHaveBeenCalledWith('/tmp/proj1', 'cto');
     expect(readAgentMemoryMock).toHaveBeenCalledWith('/tmp/proj1', 'cto');
-    expect(buildMemoryBlockMock).toHaveBeenCalledWith('/tmp/proj1/.tamtam/cache/agent-memory/cto.md', 'prior memory');
+    expect(buildMemoryBlockMock).toHaveBeenCalledWith(
+      '/tmp/proj1/.tamtam/cache/agent-memory/cto.md',
+      'prior memory',
+      { truncated: false, rawChars: 12 },
+    );
     expect(startInProcessAgentJobMock).toHaveBeenCalledOnce();
     const fullPrompt = startInProcessAgentJobMock.mock.calls[0]?.[2] as string;
     expect(fullPrompt).toContain('Your Persistent Memory');

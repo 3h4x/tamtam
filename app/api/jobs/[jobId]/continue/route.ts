@@ -10,14 +10,13 @@ import { errMsg } from '@/lib/shared/types';
 import { resolveCliBin, resolveCliDefaultModel, resolveCliEnv } from '@/lib/shared/cli-bin';
 import { checkCliStartGate } from '@/lib/usage/resolve-provider';
 import { findBlockingRunningJob } from '@/lib/jobs/project-active-job';
+import { buildResumePrompt } from '@/lib/jobs/auto-resume';
 
 // How recently the source job must have finished to allow a --resume.
 // Beyond this window the provider's session cache is unreliable: model
 // memory was likely compacted and skill/doc/retrieval context (which is
 // only injected on first invocation) is gone.
 const MAX_AGE_MS = 30 * 60 * 1000;
-
-const CONTINUE_PROMPT = `Continue your previous work. Finish any unfinished changes from the prior turn, then end with the same final summary contract you used before.`;
 
 const RESUMABLE_KINDS = new Set(['run']);
 function isResumableKind(kind: string): boolean {
@@ -113,11 +112,12 @@ export async function POST(
   const { logDir } = getImproveConfig();
   mkdirSync(/*turbopackIgnore: true*/ logDir, { recursive: true });
 
-  // Continuation prompt is short on purpose — the model already has the
-  // working context in the resumed session. withBasePrompt prepends the
-  // `base_prompt` setting (e.g. "never ask clarifying questions") so the
-  // resumed agent keeps the same operating directives.
-  const prompt = withBasePrompt(CONTINUE_PROMPT, { projectPath: projPath, provider });
+  // Continuation prompt restates the agent identity, original task, and a
+  // lost-context escape hatch. The CLI's --resume reloads the session from
+  // the provider cache, but caches can be evicted or compacted, so the
+  // body has to stand alone if context is lost. withBasePrompt prepends
+  // the `base_prompt` setting so operating directives carry over.
+  const prompt = withBasePrompt(buildResumePrompt(sourceJob), { projectPath: projPath, provider });
 
   const job = createJob(projectName, sourceJob.kind, 0, '', undefined, undefined, undefined, undefined, undefined, undefined, sourceJob.id);
   job.provider = provider;

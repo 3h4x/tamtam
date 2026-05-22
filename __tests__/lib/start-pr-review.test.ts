@@ -344,6 +344,7 @@ describe('loadReviewPrompt — skill file handling', () => {
     }
     mocks.readFileSyncMock.mockImplementation((p: string) => {
       if (options.packageJson && p === '/proj/package.json') return options.packageJson;
+      if (fileContent === null) throw new Error(`ENOENT: ${p}`);
       return fileContent ?? '';
     });
   }
@@ -363,7 +364,10 @@ describe('loadReviewPrompt — skill file handling', () => {
     setupSkill('Vendored reviewer skill body.', { useDefaultSkillPath: true });
     await startPrReview('proj', 1, 'Title', 'feat/1', 'main');
     const prompt: string = mocks.startJobMock.mock.calls[0][2];
-    expect(mocks.existsSyncMock).toHaveBeenCalledWith(expect.stringMatching(/skills\/docs\/skills\/engineering\/code-reviewer\.md$/));
+    expect(mocks.readFileSyncMock).toHaveBeenCalledWith(
+      expect.stringMatching(/skills\/docs\/skills\/engineering\/code-reviewer\.md$/),
+      'utf-8',
+    );
     expect(prompt).toContain('Vendored reviewer skill body.');
   });
 

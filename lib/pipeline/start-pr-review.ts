@@ -1,4 +1,4 @@
-import { existsSync, readFileSync } from 'fs';
+import { readFileSync } from 'fs';
 import { join } from 'path';
 import { getImproveConfig } from '@/lib/scheduling/scheduling';
 import { resolveCliBin, resolveCliDefaultModel, resolveCliEnv } from '@/lib/shared/cli-bin';
@@ -19,12 +19,14 @@ export type StartPrReviewResult =
 
 function loadReviewPrompt(projPath: string): string {
   let content = '';
-  if (existsSync(CODE_REVIEWER_SKILL)) {
-    content = readFileSync(CODE_REVIEWER_SKILL, 'utf-8');
+  try {
+    content = readFileSync(/*turbopackIgnore: true*/ CODE_REVIEWER_SKILL, 'utf-8');
     if (content.startsWith('---')) {
       const end = content.indexOf('---', 3);
       if (end > 0) content = content.slice(end + 3).trimStart();
     }
+  } catch {
+    content = '';
   }
   const frameworks = detectReviewFrameworks(projPath);
   content = filterReviewFrameworkSections(content, frameworks);

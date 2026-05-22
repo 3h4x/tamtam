@@ -42,6 +42,47 @@ export function hasFinalResult(buf: string): boolean {
   return /"type"\s*:\s*"result"/.test(buf);
 }
 
+/** Build the body of a --resume prompt.
+ *
+ *  The CLI's `--resume <sessionId>` flag reloads the prior conversation
+ *  from the provider's cache, so the new prompt only needs to nudge the
+ *  model to finish. But provider caches are not guaranteed: sessions can
+ *  be evicted, compacted, or partially lost. In those cases the model
+ *  starts fresh with only this prompt as context.
+ *
+ *  Include enough to keep the model anchored if context is lost: the
+ *  agent kind being resumed, the original task verbatim if recorded, and
+ *  an escape hatch (`RESUME_LOST_CONTEXT`) so the model can fail loud
+ *  instead of hallucinating work.
+ */
+export function buildResumePrompt(job: JobData): string {
+  const originalTask = (job.userPrompt ?? '').trim();
+  const lines = [
+    '## Composition',
+    `- mode: resumed`,
+    `- provider: ${job.provider ?? 'unknown'}`,
+    `- source job: ${job.id}`,
+    `- session id: ${job.sessionId ?? '(reconstructed from log)'}`,
+    `- note: skills, docs, retrieval, and memory are NOT re-injected — they remain in the CLI's --resume session cache`,
+    '',
+    '---',
+    '',
+    `You are resuming a previous run of \`${job.kind}\` on project \`${job.project}\`.`,
+    `Finish any unfinished changes from the prior turn, then end with the same final summary contract you used before.`,
+  ];
+  if (originalTask) {
+    lines.push('');
+    lines.push('Original task (verbatim, in case the prior session is no longer fully loaded):');
+    lines.push('');
+    lines.push(originalTask);
+  }
+  lines.push('');
+  lines.push(
+    'If you cannot recall the prior turn — no recollection of the working tree state, the files touched, or what was in progress — do not invent work. Emit a single line `RESUME_LOST_CONTEXT` and stop; the operator will rerun this agent fresh.',
+  );
+  return lines.join('\n');
+}
+
 function autoResumeCountOf(job: JobData): number {
   if (!job.contextMeta) return 0;
   try {
@@ -172,10 +213,7 @@ export async function maybeAutoResume(job: JobData): Promise<{ resumed: true; ne
       },
     });
 
-    const prompt = withBasePrompt(
-      `Continue your previous work. The previous turn was interrupted before completion. Finish any unfinished changes, then end with the same final summary contract you used before.`,
-      { projectPath: projPath, provider },
-    );
+    const prompt = withBasePrompt(buildResumePrompt(job), { projectPath: projPath, provider });
 
     const pid = await startJobInProcess(
       newJob.id,
