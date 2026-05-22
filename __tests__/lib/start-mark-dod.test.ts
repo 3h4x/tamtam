@@ -519,6 +519,22 @@ describe('startMarkDod', () => {
     expect(markDoneMock).toHaveBeenCalledWith(expect.anything(), 0);
   });
 
+  it('reads claude output without a separate existence precheck', async () => {
+    execMock
+      .mockResolvedValueOnce(resp(0, ISSUE_JSON))
+      .mockResolvedValueOnce(resp(0, ''));
+    existsSyncMock.mockReturnValue(false);
+
+    const r = await startMarkDod('myproj', undefined);
+
+    expect(r.ok).toBe(true);
+    if (r.ok) {
+      expect(r.changed).toBe(true);
+      expect(r.verified).toBe(1);
+    }
+    expect(readFileSyncMock).toHaveBeenCalledWith('/tmp/tamtam-logs/mark-dod-job-id-verify.log', 'utf-8');
+  });
+
   it('happy path: writes updated body to temp file for gh issue edit', async () => {
     execMock
       .mockResolvedValueOnce(resp(0, ISSUE_JSON))

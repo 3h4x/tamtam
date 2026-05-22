@@ -10,7 +10,7 @@
 // composes these same helpers in sequence, so its observable behavior is
 // unchanged.
 
-import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'fs';
+import { mkdirSync, readFileSync, writeFileSync } from 'fs';
 import { join } from 'path';
 import { resolveProjectPath } from '@/lib/shared/project-data';
 import { getImproveConfig } from '@/lib/scheduling/scheduling';
@@ -359,8 +359,10 @@ JSON schema:
     } finally {
       clearTimeout(timer);
     }
-    if (existsSync(/*turbopackIgnore: true*/ claudeLogPath)) {
+    try {
       rawOutput = readFileSync(/*turbopackIgnore: true*/ claudeLogPath, 'utf-8');
+    } catch (e) {
+      if (!(e instanceof Error && 'code' in e && e.code === 'ENOENT')) throw e;
     }
   } catch (e) {
     appendLog(job, `# failed to start claude verification: ${e instanceof Error ? e.message : String(e)}\n`);
