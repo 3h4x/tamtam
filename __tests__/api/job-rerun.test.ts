@@ -1,5 +1,8 @@
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
 import { NextRequest } from 'next/server';
+import { mkdirSync, mkdtempSync, rmSync } from 'fs';
+import { tmpdir } from 'os';
+import { join } from 'path';
 import type { JobData } from '@/lib/jobs/job-storage';
 import type { CliProvider } from '@/lib/usage/cli-providers';
 import type { QuotaSnapshot } from '@/lib/usage/quota-types';
@@ -31,9 +34,11 @@ describe('POST /api/jobs/{jobId}/rerun', () => {
   let checkCliStartGateMock: ReturnType<typeof vi.fn>;
   let fetchMock: ReturnType<typeof vi.fn>;
   let findBlockingRunningJobMock: ReturnType<typeof vi.fn>;
+  let logDir = '';
 
   beforeEach(async () => {
     vi.resetModules();
+    logDir = mkdtempSync(join(tmpdir(), 'tamtam-rerun-logs-'));
 
     getJobMock = vi.fn().mockReturnValue(null);
     createJobMock = vi.fn().mockImplementation(() =>
@@ -68,7 +73,7 @@ describe('POST /api/jobs/{jobId}/rerun', () => {
     vi.doMock('@/lib/scheduling/scheduling', () => ({
       getImproveConfig: vi.fn().mockReturnValue({
         claudeBin: 'claude',
-        logDir: '/tmp/tamtam-logs',
+        logDir,
       }),
     }));
 
@@ -108,6 +113,7 @@ describe('POST /api/jobs/{jobId}/rerun', () => {
   afterEach(() => {
     vi.unstubAllGlobals();
     vi.resetModules();
+    rmSync(logDir, { recursive: true, force: true });
   });
 
   it('returns 404 when source job does not exist', async () => {
@@ -152,6 +158,33 @@ describe('POST /api/jobs/{jobId}/rerun', () => {
     });
     await POST(req, { params: Promise.resolve({ jobId: 'job-source' }) });
     expect(startJobMock).toHaveBeenCalledOnce();
+  });
+
+  it('uses the fallback prompt only when the source prompt file is missing', async () => {
+    getJobMock.mockReturnValue(makeJob({ kind: 'fix' }));
+    const req = new NextRequest('http://localhost/api/jobs/job-source/rerun', {
+      method: 'POST',
+    });
+    await POST(req, { params: Promise.resolve({ jobId: 'job-source' }) });
+
+    const [, , prompt] = startJobMock.mock.calls[0];
+    expect(prompt).toBe('Rerun of fix for proj1');
+  });
+
+  it('returns 500 when the source prompt exists but cannot be read', async () => {
+    getJobMock.mockReturnValue(makeJob());
+    mkdirSync(join(logDir, 'job-source.prompt'), { recursive: true });
+
+    const req = new NextRequest('http://localhost/api/jobs/job-source/rerun', {
+      method: 'POST',
+    });
+    const res = await POST(req, { params: Promise.resolve({ jobId: 'job-source' }) });
+    const data = await res.json();
+
+    expect(res.status).toBe(500);
+    expect(data.detail).toContain('Failed to read source prompt');
+    expect(startJobMock).not.toHaveBeenCalled();
+    expect(createJobMock).not.toHaveBeenCalled();
   });
 
   it('uses the selected provider default model when rerunning', async () => {

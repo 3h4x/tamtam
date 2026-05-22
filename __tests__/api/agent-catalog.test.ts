@@ -15,8 +15,16 @@ describe('GET /api/agent-catalog', () => {
       expect(Array.isArray(entry.aliases)).toBe(true);
       expect(Array.isArray(entry.skillIds)).toBe(true);
       expect(typeof entry.autoSeed).toBe('boolean');
+      expect(['essential', 'featured', 'recommended', null]).toContain(entry.tier);
       expect(typeof entry.fallbackEnabled).toBe('boolean');
     }
+  });
+
+  it('exposes catalog tiers through the public API', async () => {
+    const res = await GET();
+    const data = await res.json();
+    const improve = data.entries.find((entry: { name: string }) => entry.name === 'improve');
+    expect(improve?.tier).toBe('featured');
   });
 
   it('does not leak the server-only handlerKey field', async () => {
