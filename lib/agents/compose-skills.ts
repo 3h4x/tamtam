@@ -1,4 +1,4 @@
-import { existsSync, readFileSync } from 'fs'
+import { readFileSync } from 'fs'
 import { basename, join } from 'path'
 import { inArray } from 'drizzle-orm'
 import { db, schema } from '@/lib/db'
@@ -26,6 +26,14 @@ export interface ComposedSkills {
   docParts: string[]
   metaSkills: ComposedSkillMeta[]
   metaDocs: ComposedDocMeta[]
+}
+
+function readSkillFile(path: string): string | null {
+  try {
+    return readFileSync(/*turbopackIgnore: true*/ path, 'utf-8')
+  } catch {
+    return null
+  }
 }
 
 /**
@@ -97,25 +105,22 @@ export async function composeAgentSkills(
       metaSkills.push({ id: `persona:${p}`, name: fallbackName, description: p, source: 'file' })
       continue
     }
-    const file = inDocs && existsSync(/*turbopackIgnore: true*/ docsFile)
-      ? docsFile
-      : dataFile
-    if (existsSync(/*turbopackIgnore: true*/ file)) {
-      try {
-        const body = readFileSync(/*turbopackIgnore: true*/ file, 'utf-8')
-        parts.push(body)
-        let display = fallbackName
-        const fm = body.match(/^---[\s\S]*?\nname:\s*(.+?)\s*\n[\s\S]*?---/)
-        if (fm) display = fm[1].trim()
-        else {
-          const h = body.match(/^#\s+(.+)$/m)
-          if (h) display = h[1].trim()
-        }
-        metaSkills.push({ id: `persona:${p}`, name: display, description: p, source: 'file' })
-      } catch {}
-    } else {
+    const body = (inDocs ? readSkillFile(docsFile) : null)
+      ?? (inData ? readSkillFile(dataFile) : null)
+    if (body === null) {
       metaSkills.push({ id: `persona:${p}`, name: fallbackName, description: p, source: 'file' })
+      continue
     }
+
+    parts.push(body)
+    let display = fallbackName
+    const fm = body.match(/^---[\s\S]*?\nname:\s*(.+?)\s*\n[\s\S]*?---/)
+    if (fm) display = fm[1].trim()
+    else {
+      const h = body.match(/^#\s+(.+)$/m)
+      if (h) display = h[1].trim()
+    }
+    metaSkills.push({ id: `persona:${p}`, name: display, description: p, source: 'file' })
   }
 
   return { parts, docParts, metaSkills, metaDocs }
