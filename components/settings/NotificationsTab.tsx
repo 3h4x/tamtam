@@ -2,6 +2,7 @@
 
 import { useState } from 'react'
 import { errMsg } from '@/lib/shared/types'
+import { Button } from '@/components/ui/Button'
 
 export interface NotificationsSettings {
   notification_webhook_url: string
@@ -113,15 +114,16 @@ export function NotificationsTab({
           </div>
 
           <div className="flex items-center gap-3 pt-2">
-            <button
+            <Button
               type="submit"
+              variant={testSuccess ? 'success-solid' : 'solid'}
               disabled={testSending || !settings.notification_webhook_url}
-              className={`px-4 py-1.5 text-white border-none rounded-lg font-semibold text-sm cursor-pointer transition-colors ${
-                testSuccess ? 'bg-status-success' : 'bg-accent hover:bg-accent-hover disabled:opacity-50 disabled:cursor-not-allowed'
-              } ${testSending ? 'opacity-50 cursor-wait' : ''}`}
+              className={`px-4 py-1.5 border-none rounded-lg font-semibold ${
+                testSending ? 'opacity-50 cursor-wait' : ''
+              }`}
             >
               {testSending ? 'Sending…' : testSuccess ? 'Sent!' : 'Send Test'}
-            </button>
+            </Button>
             {testError && (
               <span className="text-sm text-status-error">{testError}</span>
             )}
