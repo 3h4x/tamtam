@@ -21,7 +21,6 @@ import {
   simplifyWorkflowName,
   toLocalRunSummary,
 } from '@/lib/workflows/local-world-runs';
-import { existsSync } from 'fs';
 
 interface WorkflowRunRow {
   id: string;
@@ -140,17 +139,17 @@ function buildMeta() {
 
 function readLocalWorldRuns(limit: number): NextResponse {
   const dir = localWorldRunsDir();
-  if (!existsSync(/*turbopackIgnore: true*/ dir)) {
-    return NextResponse.json({
-      runs: [],
-      reason: `local world runs dir not found: ${dir}`,
-      meta: buildMeta(),
-    });
-  }
   let slice: Array<{ name: string; mtime: number }>;
   try {
     slice = listLocalRunFilesNewestFirst(limit);
   } catch (err) {
+    if ((err as NodeJS.ErrnoException).code === 'ENOENT') {
+      return NextResponse.json({
+        runs: [],
+        reason: `local world runs dir not found: ${dir}`,
+        meta: buildMeta(),
+      });
+    }
     return NextResponse.json(
       {
         runs: [],
