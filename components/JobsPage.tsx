@@ -5,6 +5,7 @@ import { useRouter, useSearchParams } from 'next/navigation'
 import { fetchJobs, fetchProjects } from '@/lib/client-api'
 import type { JobInfo } from '@/lib/client-api'
 import { resolveGithubBoardUrl } from '@/lib/client/resolve-github-board-url'
+import { buttonVariants } from '@/components/ui/Button'
 import {
   buildEntries,
   groupReleaseChildren,
@@ -265,7 +266,10 @@ export function JobsPage() {
               href={boardUrl}
               target="_blank"
               rel="noopener noreferrer"
-              className="inline-flex items-center gap-1 px-2.5 py-1.5 text-xs rounded-md border border-border bg-bg-secondary text-text-secondary hover:text-accent hover:border-accent/40 transition-colors"
+              className={buttonVariants({
+                size: 'sm',
+                className: 'gap-1 rounded-md px-2.5 py-1.5 text-text-secondary hover:!bg-bg-secondary hover:border-accent/40 hover:text-accent',
+              })}
               title="Open the TamTam project board on GitHub"
             >
               Board ↗
