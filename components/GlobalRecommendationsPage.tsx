@@ -3,6 +3,7 @@
 import { useEffect, useMemo, useState } from 'react'
 import { fetchAllOpenRecommendations, updateRecommendation, applyRecommendation } from '@/lib/client-api'
 import type { Recommendation } from '@/lib/client-api'
+import { Button } from '@/components/ui/Button'
 import { RecommendationCard } from '@/components/recommendations/RecommendationCard'
 
 // Cross-project Recommendations page. Lists every open recommendation grouped
@@ -129,9 +130,11 @@ export function GlobalRecommendationsPage() {
         <div className="rounded-lg border border-status-error/30 bg-status-error/10 p-4 text-sm text-status-error">
           <div>Failed to load recommendations.</div>
           <div className="mt-1 text-xs opacity-80">{loadError}</div>
-          <button
+          <Button
             type="button"
-            className="mt-3 rounded border border-status-error/40 px-2 py-1 text-xs font-medium hover:bg-status-error/10"
+            variant="danger"
+            size="sm"
+            className="mt-3"
             onClick={() => {
               setLoading(true)
               void load()
@@ -144,7 +147,7 @@ export function GlobalRecommendationsPage() {
             }}
           >
             Retry
-          </button>
+          </Button>
         </div>
       )}
 
