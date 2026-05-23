@@ -15,16 +15,21 @@ function isPrReviewJob(job: Pick<JobData, 'contextMeta'>): boolean {
 
 export async function hasFreshLgtm(projectName: string, projPath: string): Promise<boolean> {
   try {
-    const latestReview = listJobs()
-      .filter(
-        (j) =>
-          j.project === projectName &&
-          j.kind === 'review' &&
-          j.finishedAt !== null &&
-          j.exitCode === 0 &&
-          !isPrReviewJob(j)
-      )
-      .sort((a, b) => (b.finishedAt ?? 0) - (a.finishedAt ?? 0))[0];
+    let latestReview: JobData | null = null;
+    for (const job of listJobs()) {
+      if (
+        job.project !== projectName ||
+        job.kind !== 'review' ||
+        job.finishedAt === null ||
+        job.exitCode !== 0 ||
+        isPrReviewJob(job)
+      ) {
+        continue;
+      }
+      if (!latestReview || job.finishedAt > (latestReview.finishedAt ?? 0)) {
+        latestReview = job;
+      }
+    }
     if (!latestReview) return false;
     if (getVerdict(latestReview) !== 'LGTM') return false;
     return await isReviewed(projectName, projPath);
