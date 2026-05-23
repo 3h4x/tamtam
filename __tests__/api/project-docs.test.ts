@@ -128,15 +128,11 @@ describe('GET /api/projects/by-project/{projectName}/docs', () => {
     expect(data.docs[1].name).toBe('ZED.md');
   });
 
-  it('skips an unreadable README without surfacing it but still scans docs/', async () => {
-    // Edge case: the candidate loop pushes to docs[] AND sets hasRootReadme
-    // inside the try-catch. If the read throws, neither happens, and the
-    // sort logic must treat the result as "no README found".
+  it('sorts docs entries when README candidates are absent', async () => {
+    // The README candidate loop reads each known casing directly. If every
+    // read misses, the sort logic must treat the result as "no README found".
     mkdirSync(join(tempDir, 'docs'));
     writeFileSync(join(tempDir, 'docs', 'GUIDE.md'), '# Guide');
-    // No README.md on disk. The for-of loop simply doesn't find any
-    // candidate; existsSync stays false; hasRootReadme stays false.
-    // This effectively exercises the "no README" branch of the sort.
     const req = new NextRequest('http://localhost/api/projects/by-project/proj1/docs');
     const res = await GET(req, { params: Promise.resolve({ projectName: 'proj1' }) });
     const data = await res.json();
