@@ -170,6 +170,32 @@ describe('abortActiveRelease', () => {
     expect(finalizeAbortedReleaseMock).not.toHaveBeenCalled();
   });
 
+  it('falls back to the newest active release when no lock is available', async () => {
+    const olderRelease = makeJob({ id: 'release-older', startedAt: 1000 });
+    const newerRelease = makeJob({ id: 'release-newer', startedAt: 2000 });
+    const finishedRelease = makeJob({ id: 'release-finished', startedAt: 3000, finishedAt: 3100 });
+    const otherProjectRelease = makeJob({ id: 'release-other', project: 'proj2', startedAt: 4000 });
+    getLockMock.mockReturnValue(null);
+    listJobsMock.mockReturnValue([
+      olderRelease,
+      newerRelease,
+      finishedRelease,
+      otherProjectRelease,
+    ]);
+
+    const { abortActiveRelease } = await import('@/lib/pipeline/release-abort');
+    const result = await abortActiveRelease('proj1', { reason: 'user' });
+
+    expect(result).toMatchObject({
+      status: 'aborted',
+      release_id: 'release-newer',
+      killed_job_id: null,
+      httpStatus: 200,
+    });
+    expect(finalizeAbortedReleaseMock).toHaveBeenCalledWith(newerRelease);
+    expect(finalizeAbortedReleaseMock).not.toHaveBeenCalledWith(olderRelease);
+  });
+
   it('returns abort_pending when a commit step does not stop after cancellation', async () => {
     const release = makeJob();
     const runningCommit = makeJob({
