@@ -3,6 +3,7 @@
 import { useState, useEffect } from 'react'
 import { useRouter } from 'next/navigation'
 import { AgentsEmptyState, AgentsLoadingState } from '@/components/agents/AgentStates'
+import { StandardTabs, type StandardTabItem } from '@/components/ui/StandardTabs'
 import { fetchAgents } from '@/lib/client-api'
 import type { Agent } from '@/lib/client-api'
 
@@ -41,6 +42,7 @@ function formatAgoMs(ms: number): string {
 }
 
 type AgentState = 'active' | 'on-demand' | 'disabled' | 'unscheduled'
+type AgentFilter = 'all' | 'active' | 'on-demand' | 'disabled'
 
 function agentState(agent: Agent, schedEntry: SchedulerEntry | undefined): AgentState {
   if (!agent.enabled) return 'disabled'
@@ -68,7 +70,7 @@ export function AgentsPage() {
   const [agents, setAgents] = useState<Agent[]>([])
   const [schedulerMap, setSchedulerMap] = useState<Map<string, SchedulerEntry>>(new Map())
   const [loading, setLoading] = useState(true)
-  const [filter, setFilter] = useState<'all' | 'active' | 'on-demand' | 'disabled'>('all')
+  const [filter, setFilter] = useState<AgentFilter>('all')
 
   useEffect(() => {
     let active = true
@@ -115,29 +117,30 @@ export function AgentsPage() {
     if (filter === 'all' || state === filter) filtered.push(a)
   }
 
+  const filterTabs: StandardTabItem<AgentFilter>[] = ([
+    ['all', 'All', agents.length],
+    ['active', 'Active', activeCount],
+    ['on-demand', 'On-demand', onDemandCount],
+    ['disabled', 'Disabled', disabledCount],
+  ] as const).map(([id, label, count]) => ({
+    id,
+    label: (
+      <>
+        {label} <span className="tabular-nums opacity-70">({count})</span>
+      </>
+    ),
+  }))
+
   return (
     <div>
       <div className="flex items-center justify-between gap-4 mb-4 flex-wrap">
         <h2 className="text-xl font-semibold text-text-primary">Agents</h2>
-        <div className="flex gap-0.5 border-b border-border">
-          {(['all', 'active', 'on-demand', 'disabled'] as const).map((f) => {
-            const count =
-              f === 'all' ? agents.length :
-              f === 'active' ? activeCount :
-              f === 'on-demand' ? onDemandCount :
-              disabledCount
-            const label = f === 'on-demand' ? 'On-demand' : f[0].toUpperCase() + f.slice(1)
-            return (
-              <button
-                key={f}
-                className={`px-3 py-1.5 text-sm cursor-pointer transition-colors border-b-2 -mb-px ${filter === f ? 'border-accent text-accent' : 'border-transparent text-text-secondary hover:text-text-primary'}`}
-                onClick={() => setFilter(f)}
-              >
-                {label} <span className="tabular-nums opacity-70">({count})</span>
-              </button>
-            )
-          })}
-        </div>
+        <StandardTabs
+          items={filterTabs}
+          activeTab={filter}
+          ariaLabel="Agent filters"
+          onChange={setFilter}
+        />
       </div>
 
       {loading ? (
