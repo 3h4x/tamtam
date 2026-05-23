@@ -147,3 +147,39 @@ describe('installFetchInactivityWatchdog', () => {
     wd.dispose();
   });
 });
+
+describe('installSignalForwarding', () => {
+  afterEach(() => {
+    vi.restoreAllMocks();
+  });
+
+  it('queues a parent signal until the child handle exists', async () => {
+    const { installSignalForwarding } = await import('@/scripts/shim-utils');
+    let child: FakeChild | null = null;
+    const before = process.listenerCount('SIGTERM');
+
+    const forwarding = installSignalForwarding(() => child as unknown as ChildProcess | null, ['SIGTERM']);
+    expect(process.listenerCount('SIGTERM')).toBe(before + 1);
+
+    process.emit('SIGTERM' as NodeJS.Signals);
+    child = makeFakeChild();
+    forwarding.forwardPending();
+
+    expect(child.kill).toHaveBeenCalledWith('SIGTERM');
+    forwarding.dispose();
+    expect(process.listenerCount('SIGTERM')).toBe(before);
+  });
+
+  it('removes signal listeners on dispose', async () => {
+    const { installSignalForwarding } = await import('@/scripts/shim-utils');
+    const child = makeFakeChild();
+    const before = process.listenerCount('SIGINT');
+
+    const forwarding = installSignalForwarding(() => asChild(child), ['SIGINT']);
+    forwarding.dispose();
+
+    expect(process.listenerCount('SIGINT')).toBe(before);
+    process.emit('SIGINT' as NodeJS.Signals);
+    expect(child.kill).not.toHaveBeenCalled();
+  });
+});

@@ -16,6 +16,12 @@ export function LogsPage() {
   const [expandedLogs, setExpandedLogs] = useState<Set<string>>(new Set())
   const [logsError, setLogsError] = useState<string | null>(null)
 
+  const resetProjectScopedState = () => {
+    setSearch('')
+    setExpandedLogs(new Set())
+    setLogsError(null)
+  }
+
   const toggleLog = (filename: string) => {
     setExpandedLogs(prev => {
       const next = new Set(prev)
@@ -47,8 +53,7 @@ export function LogsPage() {
     setLoading(true)
     // Reset search and prior error when switching projects so a stale
     // query from the previous project doesn't filter the new one to empty.
-    setSearch('')
-    setLogsError(null)
+    resetProjectScopedState()
     try {
       const data = await fetchProjectLogs(project)
       setLogs(data.logs)
@@ -82,7 +87,7 @@ export function LogsPage() {
               {' — '}{selectedProject}
               <button
                 className="text-accent hover:underline text-sm ml-2"
-                onClick={() => { setSelectedProject(null); setLogs([]) }}
+                onClick={() => { setSelectedProject(null); setLogs([]); resetProjectScopedState() }}
               >
                 clear
               </button>

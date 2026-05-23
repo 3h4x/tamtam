@@ -11,7 +11,7 @@
  */
 
 const { spawn } = require('child_process');
-const { installInactivityWatchdog } = require('./shim-utils');
+const { installInactivityWatchdog, installSignalForwarding } = require('./shim-utils');
 
 const args = process.argv.slice(2);
 
@@ -249,11 +249,14 @@ async function runDeepAgents({ prompt, streamJson }) {
   }
 
   const startedAt = Date.now();
-  const child = spawn(process.env.DEEPAGENTS_BIN || 'dcode', buildDeepAgentsArgs(prompt, fullModel), {
+  let child;
+  const signalForwarding = installSignalForwarding(() => child);
+  child = spawn(process.env.DEEPAGENTS_BIN || 'dcode', buildDeepAgentsArgs(prompt, fullModel), {
     cwd: process.cwd(),
     env,
     stdio: ['ignore', 'pipe', 'pipe'],
   });
+  signalForwarding.forwardPending();
   const watchdog = installInactivityWatchdog(child, { shimName: 'deepagents-shim' });
   const emitter = makeTextEmitter(streamJson);
   let stderr = '';
@@ -273,8 +276,9 @@ async function runDeepAgents({ prompt, streamJson }) {
 
   const exit = await new Promise((resolve) => {
     child.on('error', (err) => resolve({ code: 1, signal: null, error: err }));
-    child.on('exit', (code, signal) => resolve({ code, signal, error: null }));
+    child.on('close', (code, signal) => resolve({ code, signal, error: null }));
   });
+  signalForwarding.dispose();
   watchdog.dispose();
 
   const fullText = emitter.close();

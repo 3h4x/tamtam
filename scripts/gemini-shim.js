@@ -8,7 +8,7 @@
  */
 const { spawn } = require('child_process');
 const readline = require('readline');
-const { installInactivityWatchdog } = require('./shim-utils');
+const { installInactivityWatchdog, installSignalForwarding } = require('./shim-utils');
 
 // Mapping Claude permission modes to Gemini approval modes
 const APPROVAL_MAP = {
@@ -164,11 +164,14 @@ if (require.main === module) {
   const { model, geminiArgs, cwd } = parseShimArgs(process.argv.slice(2));
 
   const geminiBin = process.env.GEMINI_BIN || 'gemini';
-  const gemini = spawn(geminiBin, geminiArgs, {
+  let gemini;
+  const signalForwarding = installSignalForwarding(() => gemini);
+  gemini = spawn(geminiBin, geminiArgs, {
     stdio: ['pipe', 'pipe', 'pipe'],
     cwd: cwd || process.cwd(),
     env: { ...process.env, FORCE_COLOR: '0' }
   });
+  signalForwarding.forwardPending();
 
   const watchdog = installInactivityWatchdog(gemini, { shimName: 'gemini-shim' });
   gemini.stdout.on('data', () => watchdog.markActivity());
@@ -188,7 +191,8 @@ if (require.main === module) {
     }
   });
 
-  gemini.on('exit', (code, signal) => {
+  gemini.on('close', (code, signal) => {
+    signalForwarding.dispose();
     watchdog.dispose();
     for (const out of translator.flush()) {
       console.log(out);
@@ -204,6 +208,7 @@ if (require.main === module) {
   });
 
   gemini.on('error', (err) => {
+    signalForwarding.dispose();
     watchdog.dispose();
     for (const out of translator.flush()) {
       console.log(out);

@@ -67,7 +67,11 @@ export function listProjectDocuments(
     }
   }
 
-  return Array.from(files).sort((a, b) =>
-    toPosixPath(relative(projectPath, a)).localeCompare(toPosixPath(relative(projectPath, b)))
-  );
+  return Array.from(files)
+    .map((filePath) => ({
+      filePath,
+      sortKey: toPosixPath(relative(projectPath, filePath)),
+    }))
+    .sort((a, b) => a.sortKey.localeCompare(b.sortKey))
+    .map(({ filePath }) => filePath);
 }

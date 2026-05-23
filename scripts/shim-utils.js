@@ -102,6 +102,53 @@ function installInactivityWatchdog(child, opts) {
 }
 
 /**
+ * Forward parent termination signals to a child process without leaving a
+ * startup race where the parent can receive SIGTERM before signal handlers
+ * are registered. Install this before spawning, then call forwardPending()
+ * after the child handle exists.
+ *
+ * @param {() => import('child_process').ChildProcess | null | undefined} getChild
+ * @param {NodeJS.Signals[]} signals
+ * @returns {{ dispose: () => void, forwardPending: () => void }}
+ */
+function installSignalForwarding(getChild, signals = ['SIGTERM', 'SIGINT', 'SIGHUP']) {
+  let disposed = false;
+  let pendingSignal = null;
+
+  function forward(sig) {
+    if (disposed) return;
+    const child = getChild();
+    if (!child) {
+      pendingSignal = sig;
+      return;
+    }
+    try { child.kill(sig); } catch { /* child may already be gone */ }
+  }
+
+  const handlers = signals.map((sig) => {
+    const handler = () => forward(sig);
+    process.on(sig, handler);
+    return { sig, handler };
+  });
+
+  return {
+    forwardPending() {
+      if (!pendingSignal) return;
+      const sig = pendingSignal;
+      pendingSignal = null;
+      forward(sig);
+    },
+    dispose() {
+      if (disposed) return;
+      disposed = true;
+      for (const { sig, handler } of handlers) {
+        process.off(sig, handler);
+      }
+    },
+  };
+}
+
+/**
  * Variant for shims that don't spawn a child process — e.g. lmstudio-shim
  * talks to a local HTTP server via fetch. Caller passes an abort function
  * (typically `controller.abort`) instead of a child handle. Same lifecycle:
@@ -159,4 +206,4 @@ function installFetchInactivityWatchdog(abort, opts) {
   };
 }
 
-module.exports = { installInactivityWatchdog, installFetchInactivityWatchdog };
+module.exports = { installInactivityWatchdog, installFetchInactivityWatchdog, installSignalForwarding };

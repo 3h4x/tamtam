@@ -2,6 +2,7 @@
 
 import { useEffect, useMemo, useState } from 'react'
 import { useToast } from '@/components/Toast'
+import { Button } from '@/components/ui/Button'
 
 interface Recipe {
   id: string
@@ -305,8 +306,9 @@ function CopyButton({ text, label = 'Copy' }: { text: string; label?: string }) 
   const { toast } = useToast()
   const [copied, setCopied] = useState(false)
   return (
-    <button
+    <Button
       type="button"
+      size="sm"
       onClick={async () => {
         try {
           await navigator.clipboard.writeText(text)
@@ -316,10 +318,9 @@ function CopyButton({ text, label = 'Copy' }: { text: string; label?: string }) 
           toast('Copy failed', 'error')
         }
       }}
-      className="text-xs px-2 py-0.5 rounded-sm border border-border bg-bg-tertiary text-text-secondary hover:text-text-primary hover:border-accent transition-colors cursor-pointer"
     >
       {copied ? 'Copied' : label}
-    </button>
+    </Button>
   )
 }
 
