@@ -144,7 +144,6 @@ export async function GET(
 
       function extractLogDetail(): string | null {
         try {
-          if (!existsSync(/*turbopackIgnore: true*/ logPath)) return 'log file missing';
           const content = readRedactedFileSync(logPath);
           if (!content.trim()) return 'log file empty — claude CLI exited without writing anything. Common causes: rate-limited (5-hour window), cold-start crash, or auth/session conflict with a concurrent run. Retrying usually works.';
           const lines = content.split('\n').map(l => l.trim()).filter(Boolean);
@@ -178,6 +177,7 @@ export async function GET(
           }
           return 'claude wrote JSON to log but never emitted a final result line';
         } catch (e: unknown) {
+          if ((e as NodeJS.ErrnoException).code === 'ENOENT') return 'log file missing';
           return `could not read log: ${errMsg(e)}`;
         }
       }
