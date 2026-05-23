@@ -1,5 +1,8 @@
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
 import { NextRequest } from 'next/server';
+import { mkdtempSync, rmSync, writeFileSync } from 'fs';
+import { tmpdir } from 'os';
+import { join } from 'path';
 import type { JobData } from '@/lib/jobs/job-storage';
 
 const NOW = 2_000_000_000_000;
@@ -156,6 +159,28 @@ describe('POST /api/jobs/{jobId}/continue', () => {
     expect(cmd).toContain('--print');
     expect(withBasePromptMock).toHaveBeenCalled();
     expect(prompt.startsWith('BASE')).toBe(true);
+  });
+
+  it('reconstructs the session id from the log tail when the job row is missing it', async () => {
+    const tempDir = mkdtempSync(join(tmpdir(), 'tamtam-continue-'));
+    try {
+      const logPath = join(tempDir, 'source.log');
+      writeFileSync(logPath, '{"type":"assistant","session_id":"12345678-1234-1234-1234-123456789abc"}\n');
+      getJobMock.mockReturnValue(makeJob({ sessionId: null, logPath }));
+
+      const res = await POST(
+        new NextRequest('http://localhost/api/jobs/job-source/continue', { method: 'POST' }),
+        { params: Promise.resolve({ jobId: 'job-source' }) },
+      );
+
+      expect(res.status).toBe(200);
+      const data = await res.json();
+      expect(data.resumed_session_id).toBe('12345678-1234-1234-1234-123456789abc');
+      const [, cmd] = startJobMock.mock.calls[0];
+      expect(cmd).toContain('--resume 12345678-1234-1234-1234-123456789abc');
+    } finally {
+      rmSync(tempDir, { recursive: true, force: true });
+    }
   });
 
   it('preserves source kind on the continuation job', async () => {
