@@ -1,4 +1,5 @@
 import { closeSync, fstatSync, openSync, readFileSync, readSync } from 'fs';
+import { open as openFile } from 'fs/promises';
 import { redactSecrets } from '@/lib/shared/log-redaction';
 
 export function readRedactedFileSync(path: string): string {
@@ -28,5 +29,27 @@ export function readRedactedTailSync(path: string, maxBytes: number): string {
     return redactSecrets(content);
   } finally {
     closeSync(fd);
+  }
+}
+
+export async function readRedactedTail(path: string, maxBytes: number): Promise<string> {
+  const file = await openFile(/*turbopackIgnore: true*/ path, 'r');
+  try {
+    const stats = await file.stat();
+    const bytesToRead = Math.min(stats.size, maxBytes);
+    if (bytesToRead === 0) return '';
+
+    const position = stats.size <= maxBytes ? 0 : stats.size - maxBytes;
+    const buf = Buffer.alloc(bytesToRead);
+    await file.read(buf, 0, bytesToRead, position);
+
+    let content = buf.toString('utf-8');
+    if (stats.size > maxBytes) {
+      const nl = content.indexOf('\n');
+      if (nl >= 0) content = content.slice(nl + 1);
+    }
+    return redactSecrets(content);
+  } finally {
+    await file.close();
   }
 }
