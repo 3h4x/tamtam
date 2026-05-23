@@ -1,4 +1,4 @@
-import { closeSync, fstatSync, openSync, readFileSync } from 'fs';
+import { open } from 'fs/promises';
 import { relative } from 'path';
 import { inArray, eq } from 'drizzle-orm';
 import { db, schema } from '@/lib/db';
@@ -90,18 +90,18 @@ function buildProjectConfigText(projectPath: string, project: {
   return lines.length > 1 ? lines.join('\n\n') : '';
 }
 
-function readProjectDocument(filePath: string): { text: string; updatedAt: number } | null {
-  let fd: number | null = null;
+async function readProjectDocument(filePath: string): Promise<{ text: string; updatedAt: number } | null> {
+  let handle: Awaited<ReturnType<typeof open>> | null = null;
   try {
-    fd = openSync(/*turbopackIgnore: true*/ filePath, 'r');
-    const text = readFileSync(fd, 'utf-8');
-    const stats = fstatSync(fd);
+    handle = await open(/*turbopackIgnore: true*/ filePath, 'r');
+    const text = await handle.readFile('utf-8');
+    const stats = await handle.stat();
     return { text, updatedAt: stats.mtimeMs / 1000 };
   } catch (error) {
     if ((error as NodeJS.ErrnoException).code === 'ENOENT') return null;
     throw error;
   } finally {
-    if (fd !== null) closeSync(fd);
+    await handle?.close();
   }
 }
 
@@ -125,7 +125,7 @@ export async function collectProjectRetrievalSources(project: string, projectPat
   const branchContext = getBranchContext(projectPath);
 
   for (const filePath of listProjectDocuments(projectPath, { includeAgentDocs: branchContext.isDefaultBranch })) {
-    const document = readProjectDocument(filePath);
+    const document = await readProjectDocument(filePath);
     if (!document) continue;
     const { text, updatedAt } = document;
     if (!text.trim()) continue;

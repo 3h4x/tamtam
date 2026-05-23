@@ -112,6 +112,7 @@ describe('collectProjectRetrievalSources', () => {
 
   afterEach(() => {
     rmSync(projectPath, { recursive: true, force: true });
+    vi.doUnmock('fs/promises');
     vi.resetModules();
   });
 
@@ -241,5 +242,43 @@ describe('collectProjectRetrievalSources', () => {
     const sources = await collectProjectRetrievalSources('myproject', projectPath);
 
     expect(sources.filter((source) => source.sourceKind === 'project_doc')).toEqual([]);
+  });
+
+  it('reads project documents without opening them all concurrently', async () => {
+    let activeHandles = 0;
+    let maxActiveHandles = 0;
+    const docPaths = ['README.md', 'docs/one.md', 'docs/two.md'].map((path) => join(projectPath, path));
+    const openMock = vi.fn(async (filePath: string) => {
+      activeHandles += 1;
+      maxActiveHandles = Math.max(maxActiveHandles, activeHandles);
+      return {
+        readFile: vi.fn(async () => `# ${filePath}`),
+        stat: vi.fn(async () => ({ mtimeMs: 1_700_000_000_000 })),
+        close: vi.fn(async () => {
+          activeHandles -= 1;
+        }),
+      };
+    });
+    vi.doMock('fs/promises', async () => {
+      const actual = await vi.importActual<typeof import('fs/promises')>('fs/promises');
+      return {
+        ...actual,
+        open: openMock,
+      };
+    });
+    listProjectDocumentsMock.mockReturnValue(docPaths);
+    await sharedHandle.db.insert(schema.projects).values({ name: 'myproject', path: projectPath, enabled: true }).execute();
+
+    const { collectProjectRetrievalSources } = await importSubject();
+    const sources = await collectProjectRetrievalSources('myproject', projectPath);
+
+    expect(openMock).toHaveBeenCalledTimes(docPaths.length);
+    expect(maxActiveHandles).toBe(1);
+    expect(activeHandles).toBe(0);
+    expect(sources.filter((source) => source.sourceKind === 'project_doc').map((source) => source.sourceId)).toEqual([
+      'README.md',
+      'docs/one.md',
+      'docs/two.md',
+    ]);
   });
 });
