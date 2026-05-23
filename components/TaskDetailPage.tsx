@@ -6,6 +6,7 @@ import { fetchTaskDetail } from '@/lib/client-api'
 import type { TaskDetail } from '@/lib/client-api'
 import { FleetHealth } from '@/hooks/useProjectHealth'
 import { formatDuration } from '@/lib/shared/statusConstants'
+import { Button } from '@/components/ui/Button'
 
 interface TaskDetailPageProps {
   fleet: FleetHealth
@@ -87,12 +88,11 @@ export function TaskDetailPage({
               )
             )}
             {task.ci === 'in_progress' && <span className="text-status-warning">CI ⋯</span>}
-            <button
-              className="px-3 py-1.5 text-sm border border-border rounded-md bg-bg-secondary text-text-primary hover:bg-bg-tertiary cursor-pointer"
+            <Button
               onClick={() => task.paused ? onResume(task.id) : onPause(task.id)}
             >
               {task.paused ? 'Resume' : 'Pause'}
-            </button>
+            </Button>
           </div>
         )}
       </div>
