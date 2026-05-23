@@ -29,8 +29,7 @@ function agentPromptPath(agentId: string): string {
 
 function cleanupFiles(agentId: string): void {
   try {
-    const p = agentPromptPath(agentId);
-    if (existsSync(/*turbopackIgnore: true*/ p)) unlinkSync(/*turbopackIgnore: true*/ p);
+    unlinkSync(/*turbopackIgnore: true*/ agentPromptPath(agentId));
   } catch {
     /* best-effort */
   }
