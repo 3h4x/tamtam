@@ -1,6 +1,7 @@
 'use client'
 
 import Link from 'next/link'
+import { Button } from '@/components/ui/Button'
 import type { Recommendation } from '@/lib/client-api'
 import { AUTO_APPLICABLE_RECOMMENDATION_TYPES } from '@/lib/client-api'
 import { formatAgo } from '@/lib/shared/format'
@@ -113,26 +114,30 @@ export function RecommendationCard({
         </div>
         <div className="flex items-start gap-2 shrink-0">
           {acceptable && (
-            <button
+            <Button
               type="button"
-              className="rounded bg-accent px-2 py-1 text-xs font-medium text-bg-primary hover:bg-accent/90 disabled:opacity-50"
+              variant="solid"
+              size="sm"
+              className="rounded text-bg-primary hover:bg-accent/90"
               disabled={busy}
               onClick={onAccept}
               aria-label={`Accept recommendation: ${actionLabel} (${item.project})`}
               title="Apply the suggested change automatically"
             >
               {busy ? 'applying…' : 'Accept'}
-            </button>
+            </Button>
           )}
-          <button
+          <Button
             type="button"
-            className="rounded border border-border bg-bg-tertiary px-2 py-1 text-xs text-text-secondary hover:text-text-primary disabled:opacity-50"
+            variant="secondary"
+            size="sm"
+            className="rounded bg-bg-tertiary text-text-secondary hover:text-text-primary"
             disabled={busy}
             onClick={onDismiss}
             aria-label={`Dismiss recommendation: ${actionLabel} (${item.project})`}
           >
             dismiss
-          </button>
+          </Button>
         </div>
       </div>
     </div>
