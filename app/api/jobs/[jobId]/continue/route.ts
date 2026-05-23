@@ -45,19 +45,17 @@ export async function POST(
     // (PM2 restart mid-stream is the common case). Fall back to reading
     // the tail of the log file.
     try {
-      const { existsSync, openSync, fstatSync, readSync, closeSync } = await import('fs');
-      if (existsSync(/*turbopackIgnore: true*/ sourceJob.logPath)) {
-        const fd = openSync(/*turbopackIgnore: true*/ sourceJob.logPath, 'r');
-        try {
-          const size = fstatSync(fd).size;
-          const len = Math.min(size, 8192);
-          const buf = Buffer.allocUnsafe(len);
-          readSync(fd, buf, 0, len, size - len);
-          const { findSessionIdInLog } = await import('@/lib/jobs/auto-resume');
-          sessionId = findSessionIdInLog(buf.toString('utf-8'));
-        } finally {
-          closeSync(fd);
-        }
+      const { openSync, fstatSync, readSync, closeSync } = await import('fs');
+      const fd = openSync(/*turbopackIgnore: true*/ sourceJob.logPath, 'r');
+      try {
+        const size = fstatSync(fd).size;
+        const len = Math.min(size, 8192);
+        const buf = Buffer.allocUnsafe(len);
+        readSync(fd, buf, 0, len, size - len);
+        const { findSessionIdInLog } = await import('@/lib/jobs/auto-resume');
+        sessionId = findSessionIdInLog(buf.toString('utf-8'));
+      } finally {
+        closeSync(fd);
       }
     } catch {}
   }
