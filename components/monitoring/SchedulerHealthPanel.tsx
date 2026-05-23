@@ -1,6 +1,7 @@
 'use client'
 
 import { useState, useCallback, useEffect } from 'react'
+import { Button } from '@/components/ui/Button'
 import { SectionHeader } from './shared'
 import { SchedulerFireTable } from './SchedulerFireTable'
 import type { SchedulerInternalEntry } from './SchedulerFireTable'
@@ -67,19 +68,23 @@ export function SchedulerHealthPanel() {
       <div className="flex items-center justify-between gap-2">
         <SectionHeader title="Scheduled agents" status={status} />
         <div className="flex gap-2">
-          <button
+          <Button
+            variant="ghost"
+            size="sm"
             onClick={load}
-            className="text-[11px] px-2 py-1 rounded border border-border text-text-tertiary hover:text-text-secondary bg-transparent cursor-pointer transition-colors"
+            className="border-border bg-transparent text-[11px] font-normal text-text-tertiary hover:bg-transparent hover:text-text-secondary"
           >
             Refresh
-          </button>
-          <button
+          </Button>
+          <Button
+            variant="ghost"
+            size="sm"
             onClick={reconcile}
             disabled={reconciling || !health || health.ok}
-            className="text-[11px] px-2 py-1 rounded border border-border text-text-tertiary hover:text-text-secondary bg-transparent cursor-pointer transition-colors disabled:opacity-40 disabled:cursor-not-allowed"
+            className="border-border bg-transparent text-[11px] font-normal text-text-tertiary hover:bg-transparent hover:text-text-secondary disabled:opacity-40"
           >
             {reconciling ? 'Reconciling…' : 'Reconcile'}
-          </button>
+          </Button>
         </div>
       </div>
       {loading && !health ? (
