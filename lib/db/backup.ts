@@ -47,12 +47,22 @@ export async function createDatabaseBackup(destPath: string): Promise<void> {
 }
 
 export function listBackupFiles(backupDir: string): BackupFileEntry[] {
-  return readdirSync(/*turbopackIgnore: true*/ backupDir)
-    .filter((name) => BACKUP_FILE_RE.test(name))
-    .map((name) => ({
-      name,
-      mtimeMs: statSync(/*turbopackIgnore: true*/ join(backupDir, name)).mtimeMs,
-    }));
+  const entries: BackupFileEntry[] = [];
+
+  for (const name of readdirSync(/*turbopackIgnore: true*/ backupDir)) {
+    if (!BACKUP_FILE_RE.test(name)) continue;
+    try {
+      entries.push({
+        name,
+        mtimeMs: statSync(/*turbopackIgnore: true*/ join(backupDir, name)).mtimeMs,
+      });
+    } catch (error) {
+      if (isMissingFileError(error)) continue;
+      throw error;
+    }
+  }
+
+  return entries;
 }
 
 export function selectBackupsToPrune(
@@ -102,6 +112,10 @@ function getBackupWeekKey(name: string, mtimeMs: number): string {
   const yearStart = new Date(date.getFullYear(), 0, 1);
   const week = Math.ceil((((date.getTime() - yearStart.getTime()) / 86400000) + 1) / 7);
   return `${date.getFullYear()}-${String(week).padStart(2, '0')}`;
+}
+
+function isMissingFileError(error: unknown): boolean {
+  return error instanceof Error && 'code' in error && error.code === 'ENOENT';
 }
 
 function pgEnvFromDatabaseUrl(dbUrl: string): { args: string[]; env: Record<string, string> } {
