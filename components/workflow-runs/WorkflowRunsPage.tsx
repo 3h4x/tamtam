@@ -12,6 +12,7 @@ import {
 import { WorkflowGraph } from '@/components/workflow-runs/WorkflowGraph';
 import { WorkflowRunsEmptyState, WorkflowRunsLoadingState } from '@/components/workflow-runs/WorkflowRunsStates';
 import { WorkflowStatusBadge } from '@/components/workflow-runs/workflow-run-status';
+import { Button } from '@/components/ui/Button';
 import { StandardTabs } from '@/components/ui/StandardTabs';
 
 interface WorkflowRunSummary {
@@ -430,13 +431,15 @@ export function WorkflowRunsPage() {
               {error}
             </p>
           </div>
-          <button
+          <Button
             type="button"
             onClick={retryLoad}
-            className="rounded-md border border-status-warning/30 px-2.5 py-1 text-xs font-medium text-status-warning transition-colors hover:bg-status-warning/10"
+            variant="warning"
+            size="sm"
+            className="px-2.5"
           >
             Retry now
-          </button>
+          </Button>
         </div>
       ) : null}
       {view === 'graph' && <WorkflowGraph />}
