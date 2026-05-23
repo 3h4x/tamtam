@@ -219,9 +219,7 @@ async function determineReviewScope(projPath: string): Promise<ReviewScope> {
 
 function releaseContextForReview(projectName: string): string {
   const jobs = listJobs();
-  const release = jobs
-    .filter((j) => j.project === projectName && j.kind === 'release' && j.finishedAt === null)
-    .sort((a, b) => (b.startedAt || 0) - (a.startedAt || 0))[0];
+  const release = findLatestActiveRelease(jobs, projectName);
   if (!release) {
     return 'PREVIOUS RELEASE REVIEW/FIX CONTEXT:\nNo active release context. Review the current uncommitted changes from first principles.';
   }
@@ -247,6 +245,15 @@ function releaseContextForReview(projectName: string): string {
 Use this as review memory. First verify whether earlier findings were actually fixed, then search sibling paths before adding new findings.
 
 ${blocks.join('\n\n')}`;
+}
+
+function findLatestActiveRelease(jobs: JobData[], projectName: string): JobData | undefined {
+  let latest: JobData | undefined;
+  for (const job of jobs) {
+    if (job.project !== projectName || job.kind !== 'release' || job.finishedAt !== null) continue;
+    if (!latest || (job.startedAt || 0) > (latest.startedAt || 0)) latest = job;
+  }
+  return latest;
 }
 
 function describePriorReviewStep(job: JobData): string {
