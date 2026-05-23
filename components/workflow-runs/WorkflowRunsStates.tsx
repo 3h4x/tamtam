@@ -2,6 +2,8 @@
 
 import Link from 'next/link'
 
+import { Button, buttonVariants } from '@/components/ui/Button'
+
 interface WorkflowRunsEmptyStateProps {
   title: string
   description: string
@@ -10,9 +12,6 @@ interface WorkflowRunsEmptyStateProps {
   onAction?: () => void
   actionHref?: string
 }
-
-const actionClassName =
-  'inline-flex items-center gap-1.5 rounded-md border border-border bg-bg-secondary px-3 py-1.5 text-sm font-medium text-text-primary transition-colors hover:bg-bg-tertiary'
 
 function EmptyStateGlyph() {
   return (
@@ -147,13 +146,13 @@ export function WorkflowRunsEmptyState({
           {meta ? <p className="text-xs font-mono text-text-tertiary">{meta}</p> : null}
         </div>
         {actionLabel && actionHref ? (
-          <Link href={actionHref} className={actionClassName}>
+          <Link href={actionHref} className={buttonVariants()}>
             {actionLabel}
           </Link>
         ) : actionLabel && onAction ? (
-          <button type="button" className={actionClassName} onClick={onAction}>
+          <Button type="button" onClick={onAction}>
             {actionLabel}
-          </button>
+          </Button>
         ) : null}
       </div>
     </div>
