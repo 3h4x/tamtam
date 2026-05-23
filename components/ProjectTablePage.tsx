@@ -32,6 +32,7 @@ import { getAggregateCi, getCiFailedUrl } from '@/lib/shared/statusConstants'
 import { LoadingState } from '@/components/LoadingState'
 import { ProjectLogo } from '@/components/ProjectLogo'
 import { useToast } from '@/components/Toast'
+import { Spinner } from '@/components/ui/Spinner'
 import { subscribeToSettingsChanged } from '@/lib/shared/settings-events'
 import { loadQuotaSnapshot } from '@/lib/client/quota'
 
@@ -127,14 +128,6 @@ function WarningDot() {
     <svg className="w-3.5 h-3.5 text-status-warning shrink-0" viewBox="0 0 14 14" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round">
       <path d="M7 1.5L12.5 12H1.5L7 1.5z" />
       <path d="M7 5.5v3M7 10v.5" strokeLinecap="round" />
-    </svg>
-  )
-}
-
-function SpinnerIcon() {
-  return (
-    <svg className="w-3.5 h-3.5 text-accent animate-spin shrink-0" viewBox="0 0 14 14" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round">
-      <path d="M7 1.5a5.5 5.5 0 1 1-3.889 1.611" />
     </svg>
   )
 }
@@ -592,7 +585,7 @@ const isReviewRunning = (projectName: string) => !!runtime[projectName]?.hasRunn
                   <div className="flex flex-wrap items-center gap-1.5">
                     {runningCount > 0 && (
                       <span title={runningKinds.join(', ')} className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded text-xs font-medium bg-accent/15 text-accent border border-accent/30">
-                        <SpinnerIcon />
+                        <Spinner size="lg" color="accent" shrink />
                         {runningCount > 1 ? `${runningCount} running` : 'running'}
                       </span>
                     )}
@@ -686,7 +679,7 @@ const isReviewRunning = (projectName: string) => !!runtime[projectName]?.hasRunn
                   {lastJob ? (
                     <span className="flex items-center gap-1.5 flex-wrap">
                       {lastJob.status === 'running' ? (
-                        <SpinnerIcon />
+                        <Spinner size="lg" color="accent" shrink />
                       ) : (
                         <StatusDot ok={lastJob.exitCode === 0} />
                       )}
@@ -746,7 +739,7 @@ const isReviewRunning = (projectName: string) => !!runtime[projectName]?.hasRunn
                       <StatusDot ok={false} />
                     )
                   )}
-                  {ci === 'in_progress' && <SpinnerIcon />}
+                  {ci === 'in_progress' && <Spinner size="lg" color="accent" shrink />}
                   {ci === null && <span className="text-text-tertiary text-sm">—</span>}
                 </td>
               </tr>
