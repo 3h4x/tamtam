@@ -1,5 +1,7 @@
 'use client'
 
+import { Button } from '@/components/ui/Button'
+
 interface ErrorStateProps {
   message: string
   onRetry?: () => void
@@ -25,12 +27,13 @@ export function ErrorState({ message, onRetry, hint }: ErrorStateProps) {
       <p className="text-sm text-text-secondary max-w-md">{message}</p>
       {hint && <p className="text-xs text-text-tertiary max-w-md">{hint}</p>}
       {onRetry && (
-        <button
-          className="mt-1 px-3 py-1.5 text-xs border border-border rounded-md text-text-primary hover:bg-bg-tertiary cursor-pointer transition-colors"
+        <Button
+          size="sm"
+          className="mt-1 rounded-md bg-transparent px-3 py-1.5 font-normal"
           onClick={onRetry}
         >
           Retry
-        </button>
+        </Button>
       )}
     </div>
   )
