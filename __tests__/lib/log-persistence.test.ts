@@ -1,4 +1,4 @@
-import { describe, it, expect, beforeEach, afterEach } from 'vitest';
+import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
 import { mkdtempSync, rmSync } from 'fs';
 import { join } from 'path';
 import { tmpdir } from 'os';
@@ -51,5 +51,39 @@ describe('log-persistence', () => {
     // job-0 and job-1 should be deleted (oldest)
     expect(remaining).toEqual([]);
     expect(readJobLogs('job-4', tempDir).length).toBe(1);
+  });
+
+  it('skips logs that vanish while cleanup stats entries', async () => {
+    vi.resetModules();
+    const unlinkSyncMock = vi.fn();
+    vi.doMock('fs', async () => {
+      const actual = await vi.importActual<typeof import('fs')>('fs');
+      return {
+        ...actual,
+        mkdirSync: vi.fn(),
+        readdirSync: vi.fn(() => ['gone.log', 'old.log', 'keep.log']),
+        statSync: vi.fn((path: string) => {
+          if (path.endsWith('gone.log')) {
+            const error = new Error('missing') as NodeJS.ErrnoException;
+            error.code = 'ENOENT';
+            throw error;
+          }
+          return { mtimeMs: path.endsWith('old.log') ? 1 : 2 };
+        }),
+        unlinkSync: unlinkSyncMock,
+      };
+    });
+
+    try {
+      const { cleanupOldLogs: cleanupWithMockedFs } = await import('@/lib/jobs/log-persistence');
+
+      cleanupWithMockedFs(1, '/tmp/tamtam-test');
+
+      expect(unlinkSyncMock).toHaveBeenCalledTimes(1);
+      expect(unlinkSyncMock.mock.calls[0]?.[0]).toContain('old.log');
+    } finally {
+      vi.doUnmock('fs');
+      vi.resetModules();
+    }
   });
 });
