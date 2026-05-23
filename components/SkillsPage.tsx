@@ -132,12 +132,14 @@ function SkillRow({ item, checked, onToggle, onEdit }: SkillRowProps) {
 
       {/* Edit */}
       {onEdit ? (
-        <button
-          className="px-2 py-1 text-xs border border-border rounded text-text-tertiary hover:text-text-primary hover:bg-bg-tertiary cursor-pointer"
+        <Button
+          type="button"
+          size="sm"
+          className="bg-transparent text-text-tertiary hover:text-text-primary font-normal"
           onClick={e => { e.preventDefault(); e.stopPropagation(); onEdit() }}
         >
           Edit
-        </button>
+        </Button>
       ) : <span />}
     </label>
   )
