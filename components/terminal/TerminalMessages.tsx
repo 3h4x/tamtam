@@ -3,6 +3,7 @@
 import { useState, type ReactNode } from 'react'
 import Markdown from 'react-markdown'
 import remarkGfm from 'remark-gfm'
+import { Button } from '@/components/ui/Button'
 import { renderAnsi, renderAnsiLines, hasAnsi, stripAnsi } from '@/lib/terminal/ansi-render'
 import type { TermEntry, ToolEntry, SkillItem } from '@/lib/terminal/terminal-session-store'
 import { ToolBlock } from './ToolBlock'
@@ -592,20 +593,23 @@ export function TerminalMessages({
             </div>
           </div>
           <div className="flex items-center gap-1.5 shrink-0">
-            <button
+            <Button
+              variant="primary"
+              size="sm"
               onClick={onResume}
-              className="px-2.5 py-1 text-xs rounded-md border border-accent/40 bg-accent/10 text-accent hover:bg-accent/20 cursor-pointer transition-colors"
+              className="px-2.5 rounded-md border-accent/40 font-normal"
               title="Re-submit the last user prompt against this session"
             >
               Resume
-            </button>
-            <button
+            </Button>
+            <Button
+              size="sm"
               onClick={onDismissError}
-              className="px-2 py-1 text-xs rounded-md border border-border bg-bg-secondary text-text-secondary hover:text-text-primary cursor-pointer transition-colors"
+              className="rounded-md text-text-secondary hover:text-text-primary font-normal"
               title="Dismiss"
             >
               Dismiss
-            </button>
+            </Button>
           </div>
         </div>
       )}
