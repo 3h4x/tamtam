@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { existsSync, readFileSync, mkdirSync, writeFileSync } from 'fs';
+import { readFileSync, mkdirSync, writeFileSync } from 'fs';
 import { join } from 'path';
 import { randomUUID } from 'crypto';
 import { extname } from 'path';
@@ -150,9 +150,14 @@ export async function POST(
   const docsBase = join(SKILLS_DIR, 'docs', 'skills');
   for (const pPath of personaPaths) {
     const docsFile = join(docsBase, `${pPath}.md`);
-    const personaFile = existsSync(/*turbopackIgnore: true*/ docsFile) ? docsFile : join(DATA_SKILLS_DIR, `${pPath}.md`);
     try {
-      const personaContent = readFileSync(/*turbopackIgnore: true*/ personaFile, 'utf-8');
+      let personaContent: string;
+      try {
+        personaContent = readFileSync(/*turbopackIgnore: true*/ docsFile, 'utf-8');
+      } catch (e: unknown) {
+        if ((e as NodeJS.ErrnoException).code !== 'ENOENT') throw e;
+        personaContent = readFileSync(/*turbopackIgnore: true*/ join(DATA_SKILLS_DIR, `${pPath}.md`), 'utf-8');
+      }
       prompt = personaContent + '\n\n---\n\n' + prompt;
     } catch {}
   }

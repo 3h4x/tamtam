@@ -2,6 +2,7 @@
 
 import { useEffect, useRef, useState } from 'react'
 import type { Skill } from '@/lib/client-api'
+import { Spinner } from '@/components/ui/Spinner'
 
 export function SkillEditor({
   skill,
@@ -96,7 +97,7 @@ export function SkillEditor({
             onClick={handleSave}
             disabled={!name.trim() || saving}
           >
-            {saving && <span className="inline-block w-3 h-3 rounded-full border-2 border-white border-t-transparent animate-spin shrink-0" />}
+            {saving && <Spinner color="white" shrink />}
             {saving ? 'Saving…' : saved ? 'Saved ✓' : 'Save'}
           </button>
         </div>

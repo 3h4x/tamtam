@@ -1,4 +1,4 @@
-import { existsSync, mkdirSync, readFileSync, statSync, writeFileSync } from 'fs';
+import { closeSync, fstatSync, mkdirSync, openSync, readFileSync, statSync, writeFileSync } from 'fs';
 import { join } from 'path';
 import { createHash } from 'crypto';
 import { parse as yamlParse, stringify as yamlStringify } from 'yaml';
@@ -33,7 +33,6 @@ export function readLegacyWorkflowFlags(
   projectPath: string
 ): Partial<Record<LegacyWorkflowKey, boolean | string>> {
   const configPath = join(/*turbopackIgnore: true*/ projectPath, '.tamtam', 'config.yml');
-  if (!existsSync(/*turbopackIgnore: true*/ configPath)) return {};
   let parsed: unknown;
   try {
     parsed = yamlParse(readFileSync(/*turbopackIgnore: true*/ configPath, 'utf-8'));
@@ -233,6 +232,20 @@ export function fingerprintWorkingTreeConfig(configPath: string): string {
   }
 }
 
+function readWorkingTreeConfig(configPath: string): { content: string; fingerprint: string } | null {
+  let fd: number | null = null;
+  try {
+    fd = openSync(/*turbopackIgnore: true*/ configPath, 'r');
+    const stats = fstatSync(fd, { bigint: true });
+    const content = readFileSync(fd, 'utf-8');
+    return { content, fingerprint: `${stats.mtimeNs}:${stats.size}` };
+  } catch {
+    return null;
+  } finally {
+    if (fd !== null) closeSync(fd);
+  }
+}
+
 export function loadFileConfigWithSource(projectPath: string): FileConfigLoadResult {
   const ctx = getBranchContext(projectPath);
 
@@ -250,18 +263,13 @@ export function loadFileConfigWithSource(projectPath: string): FileConfigLoadRes
 
   // On the default branch: read from the working tree as before.
   const configPath = join(/*turbopackIgnore: true*/ projectPath, '.tamtam', 'config.yml');
+  const read = readWorkingTreeConfig(configPath);
   const source: FileConfigSource = {
     kind: 'working-tree',
     path: configPath,
-    fingerprint: fingerprintWorkingTreeConfig(configPath),
+    fingerprint: read?.fingerprint ?? 'missing',
   };
-  if (!existsSync(/*turbopackIgnore: true*/ configPath)) return { config: null, source };
-
-  try {
-    return { config: parseConfigYaml(readFileSync(/*turbopackIgnore: true*/ configPath, 'utf-8')), source };
-  } catch {
-    return { config: null, source };
-  }
+  return { config: read ? parseConfigYaml(read.content) : null, source };
 }
 
 export function loadFileConfig(projectPath: string): FileProjectConfig | null {
@@ -292,14 +300,12 @@ export function writeFileConfig(
   // Read the raw YAML document to preserve unrecognized keys that TamTam doesn't know about.
   // loadFileConfig only returns recognized keys, so we must source unknown keys from the raw file.
   let rawDoc: Record<string, unknown> = {};
-  if (existsSync(/*turbopackIgnore: true*/ configPath)) {
-    try {
-      const parsed = yamlParse(readFileSync(/*turbopackIgnore: true*/ configPath, 'utf-8')) as unknown;
-      if (parsed && typeof parsed === 'object' && !Array.isArray(parsed)) {
-        rawDoc = parsed as Record<string, unknown>;
-      }
-    } catch { /* ignore parse errors — we'll overwrite with clean content */ }
-  }
+  try {
+    const parsed = yamlParse(readFileSync(/*turbopackIgnore: true*/ configPath, 'utf-8')) as unknown;
+    if (parsed && typeof parsed === 'object' && !Array.isArray(parsed)) {
+      rawDoc = parsed as Record<string, unknown>;
+    }
+  } catch { /* ignore missing/parse errors — we'll overwrite with clean content */ }
 
   // Flatten recognized keys from the raw doc for mutation, keyed by their leaf name.
   const ctx = getBranchContext(projectPath);
@@ -309,13 +315,9 @@ export function writeFileConfig(
   } else {
     // For writes on a feature branch, start from the working-tree file (if present) so we don't
     // lose local edits, even though reads come from the default branch.
-    if (existsSync(/*turbopackIgnore: true*/ configPath)) {
-      try {
-        baseConfig = parseConfigYaml(readFileSync(/*turbopackIgnore: true*/ configPath, 'utf-8')) ?? {};
-      } catch {
-        baseConfig = {};
-      }
-    } else {
+    try {
+      baseConfig = parseConfigYaml(readFileSync(/*turbopackIgnore: true*/ configPath, 'utf-8')) ?? {};
+    } catch {
       baseConfig = {};
     }
   }

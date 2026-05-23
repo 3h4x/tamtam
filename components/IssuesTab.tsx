@@ -10,6 +10,7 @@ import { ErrorState } from './ErrorState'
 import { PRRow } from '@/components/issues-tab/PRRow'
 import { IssueRow } from '@/components/issues-tab/IssueRow'
 import { useToast } from '@/components/Toast'
+import { Spinner } from '@/components/ui/Spinner'
 
 // Re-export types consumed by subcomponents so callers don't need to change
 export type { GhPullRequest, GhIssue, ProjectConfig }
@@ -227,7 +228,7 @@ ${idea}`
           >
             {refreshing ? (
               <span className="inline-flex items-center gap-1.5">
-                <span className="inline-block w-3 h-3 rounded-full border-2 border-current border-t-transparent animate-spin" />
+                <Spinner />
                 <span>Refreshing…</span>
               </span>
             ) : 'Refresh'}
@@ -303,7 +304,7 @@ ${idea}`
                     title={issuePlanningTitle}
                   >
                     {planning ? (
-                      <span className="inline-block h-3.5 w-3.5 rounded-full border-2 border-current border-t-transparent animate-spin" />
+                      <Spinner size="lg" />
                     ) : (
                       <svg width="13" height="13" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.7" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
                         <path d="M8 1.5v3" />

@@ -1,11 +1,13 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { getQuotaForProvider, clearQuotaCache, peekQuotaCacheForProvider, type QuotaProvider } from '@/lib/usage/quota';
-import { ProviderNotConfiguredError } from '@/lib/usage/quota-types';
+import { ProviderNotConfiguredError, type QuotaSnapshot } from '@/lib/usage/quota-types';
 import { getSettings } from '@/lib/shared/config';
 import {
+  peekEnabledProviderSnapshots,
   scheduledBurnRateBlockedAcrossProviders,
   warmEnabledProviderSnapshots,
 } from '@/lib/shared/job-control';
+import { computeSnapshotPace, computeGlobalPace } from '@/lib/usage/quota-pace';
 
 function gateEnabled(): boolean {
   try { return getSettings()?.budget_block_runs_enabled === true; } catch { return false; }
@@ -33,7 +35,19 @@ function unavailableReason(e: unknown): 'not_configured' | 'rate_limited' | 'una
 
 function quotaPayload(snapshot: object) {
   const throttle = scheduledBurnRateBlockedAcrossProviders();
-  return { ...snapshot, available: true, gateEnabled: gateEnabled(), schedulerThrottle: throttle };
+  // Per-CLI pace for this snapshot's windows + cross-provider ("global") pace
+  // so callers can see, without re-deriving, how much room is left to the
+  // fair-share pace line (or by how much it's exceeded), per provider and overall.
+  const pace = computeSnapshotPace(snapshot as QuotaSnapshot);
+  const globalPace = computeGlobalPace(peekEnabledProviderSnapshots());
+  return {
+    ...snapshot,
+    available: true,
+    gateEnabled: gateEnabled(),
+    schedulerThrottle: throttle,
+    pace,
+    globalPace,
+  };
 }
 
 function unavailablePayload(provider: QuotaProvider, e: unknown) {

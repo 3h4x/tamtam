@@ -4,6 +4,7 @@ import { useState, useEffect } from 'react'
 import Link from 'next/link'
 import { ErrorState } from './ErrorState'
 import { resolveGithubBoardUrl } from '@/lib/client/resolve-github-board-url'
+import { Spinner } from '@/components/ui/Spinner'
 
 interface ReleaseStep {
   job_id: string
@@ -60,7 +61,7 @@ function formatTs(secs: number): string {
 function StepGlyph({ step }: { step: ReleaseStep }) {
   if (step.status === 'running') {
     return (
-      <span className="inline-block w-4 h-4 rounded-full border-2 border-accent border-t-transparent animate-spin" />
+      <Spinner size="xl" color="accent" />
     )
   }
   if (step.status === 'aborted') {

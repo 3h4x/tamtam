@@ -166,11 +166,33 @@ export async function PATCH(request: NextRequest) {
         const updated = fileAgent.name !== nextName
           ? renameFileAgent(projPath, projectName, fileAgent.name, nextName, fileUpdates)
           : writeFileAgent(projPath, projectName, nextName, fileUpdates);
-        if (fileAgent.name !== nextName) {
-          if (override) {
+        // Operational config (enabled / schedule / model / skillIds) is owned by
+        // the DB override, NOT the committed .md — the frontmatter doesn't even
+        // carry `enabled`. Persist it here so in-place edits stick: previously
+        // the override was only written on rename, so enabling or rescheduling a
+        // file agent by name WITHOUT a rename was silently dropped. On rename,
+        // seed the new name from the old override first so unspecified
+        // operational fields carry over, then layer the requested changes.
+        if (
+          fields.enabled !== undefined
+          || fields.schedule !== undefined
+          || fields.model !== undefined
+          || fields.skillIds !== undefined
+        ) {
+          if (fileAgent.name !== nextName && override) {
             await setFileAgentOverride(projectName, nextName, override);
-            deleteFileAgentOverride(projectName, fileAgent.name);
           }
+          await setFileAgentOverride(projectName, nextName, {
+            enabled: fields.enabled,
+            schedule: fields.schedule !== undefined ? parsedSchedule.schedule : undefined,
+            model: parsedModel ?? undefined,
+            skillIds: fields.skillIds !== undefined ? fields.skillIds : undefined,
+          });
+        } else if (fileAgent.name !== nextName && override) {
+          await setFileAgentOverride(projectName, nextName, override);
+        }
+        if (fileAgent.name !== nextName) {
+          deleteFileAgentOverride(projectName, fileAgent.name);
         }
         try {
           if (updated.schedule && updated.enabled && (updated.prompt || updated.skillIds.length > 0)) {

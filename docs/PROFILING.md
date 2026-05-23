@@ -133,9 +133,20 @@ What that tells us:
 - **NFT bloat ≠ build wall.** Cutting NFT size with `outputFileTracingExcludes` (skills/docs/, docs/, public/, scripts/, `.disabled` siblings) saves ~14% deploy-bundle size but didn't move the build wall, because NFT tracing already runs in parallel (`parallelServerBuildTraces: true`).
 
 If you want a faster build, the levers in order of leverage are:
-1. Reduce route count (consolidate small CRUD endpoints) — directly subtracts ~1s per route removed.
-2. Reduce per-route transitive imports (split barrel files like `@/lib/jobs/job-storage`, lazy-init `@/lib/db`'s Pool, avoid pulling client components into API route trees).
-3. Avoid module-level work in `@/lib/db` (the Pool construction + drizzle pg-core's 200 column files get traced per entry).
+1. **Reduce route count** (consolidate small CRUD endpoints) — directly subtracts ~1s per route removed. Only mechanism proven to move the wall.
+2. *Probably not* per-route transitive import surgery — see "Levers that did NOT help" below.
+
+### Levers that did NOT help (tested, do not retry)
+
+- **`experimental.optimizePackageImports`** for `drizzle-orm`, `drizzle-orm/pg-core`, `@workflow/next`, `workflow` — went from 124.8s → 129.7s (**+5s**). Turbopack already does its own barrel tree-shaking; the legacy Webpack-era flag adds overhead.
+- **Lazy-init `lib/db` via Proxy** so `pg.Pool` constructs on first use — 124.8s → 141.5s (**+17s**). Turbopack bundles based on static `import` statements, not runtime usage, so deferring construction doesn't shrink any bundle. The Proxy indirection actively added work.
+- **Removing `withWorkflow` wrapper** — only −8s on a 125s build. Not enough to justify losing the workflow runtime.
+- **`outputFileTracingExcludes`** for skills/docs/, docs/, public/, scripts/, `.disabled` siblings — useful for deploy-bundle size (~14% smaller NFTs) but **does not move the build wall** because NFT generation already runs in parallel via `parallelServerBuildTraces: true`.
+- **Splitting the `@/lib/jobs/job-storage` barrel** so `markDone` / `runCompletionHooks` / `PIPELINE_STEP_KINDS` had to be imported directly from `@/lib/jobs/lifecycle` — Turbopack already tree-shakes static `export { x } from './y'` re-exports correctly, so the dep graph is identical to the barrel form. The refactor changed 17 callsites + 8 test files for **zero build benefit** and broke 120 tests that relied on the lazy load order around the barrel. Reverted.
+
+### Why the per-route cost is hard to dent
+
+Each API route is its own server entry point. Even with module dedup, Turbopack does per-entry chunking, source-map emission, NFT walking, route-manifest entry, and `check-page` + `is-page-static` (parallel, doesn't block wall). When a route imports anything in the workflow / lib-jobs / lib-db chain, Turbopack lumps it into shared chunks with ~80 sibling routes. That's why an individual route's `route.js.nft.json` lists 800+ files even though most of that is shared bundle, not extra compile work. The "84-sibling NFT leak" we found is this shared-chunking behaviour, not a bug to fix.
 
 ### Deep Turbopack trace (build)
 

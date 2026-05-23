@@ -15,6 +15,7 @@ import { notify } from '@/lib/shared/notifications';
 import { computeWeeklyBurnThrottle } from '@/lib/shared/budget-throttle';
 import { hardGateUtilizationFor } from '@/lib/usage/cli-picker';
 import { CLI_PROVIDERS_WITH_QUOTA, type CliProvider } from '@/lib/usage/cli-providers';
+import type { QuotaSnapshot } from '@/lib/usage/quota-types';
 
 export type JobsPausedResult = { ok: false; status: 409; detail: string };
 export type BudgetBlockedResult = {
@@ -222,6 +223,17 @@ export async function warmEnabledProviderSnapshots(
   } catch {
     // fail open
   }
+}
+
+/**
+ * Read-only snapshot of every enabled, quota-aware provider (no network — peeks
+ * the warm cache). Used to compute cross-provider ("global") pace. Call
+ * `warmEnabledProviderSnapshots()` first so the cache is populated.
+ */
+export function peekEnabledProviderSnapshots(): Array<{ provider: CliProvider; snapshot: QuotaSnapshot | null }> {
+  const enabled = getEnabledProviders().filter(hasQuotaFetcher);
+  const snaps = peekQuotaSnapshots(enabled);
+  return enabled.map((provider) => ({ provider, snapshot: snaps.get(provider) ?? null }));
 }
 
 export interface SchedulerThrottle {

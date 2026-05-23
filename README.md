@@ -14,6 +14,8 @@ The agent management dashboard built for Claude-compatible CLIs. Define skills, 
 |---|---|
 | **Multi-project overview** | All your git repos at a glance — uncommitted changes, CI status, last run |
 | **Skill composition** | DB-backed skills + file-based skills from `skills/docs/skills/` and `data/skills/`. Mix and match into agents |
+| **Library** | `/library` groups the agent catalog and the skills browser; `/skills` redirects to the Skills tab there |
+| **Agent guide** | `/agent` provides a copyable remote-operator guide with API recipes and route examples |
 | **Real-time streaming** | Token-by-token output via SSE. Watch the selected provider work in real time |
 | **Interactive terminal** | Full runner per project — model tier selector (Fast / Normal / Smart), skill picker, persistent sessions across reconnects |
 | **Smart push** | AI-generated commit messages, diff preview, one-click push |

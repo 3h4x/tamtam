@@ -124,8 +124,8 @@ export async function maybeAutoResume(job: JobData): Promise<{ resumed: true; ne
   // Read tail of log to look for session_id + result event.
   let tail = '';
   try {
-    const { existsSync, openSync, fstatSync, readSync, closeSync } = await import('fs');
-    if (!job.logPath || !existsSync(/*turbopackIgnore: true*/ job.logPath)) {
+    const { openSync, fstatSync, readSync, closeSync } = await import('fs');
+    if (!job.logPath) {
       return { resumed: false, reason: 'no log path' };
     }
     const fd = openSync(/*turbopackIgnore: true*/ job.logPath, 'r');
@@ -139,7 +139,10 @@ export async function maybeAutoResume(job: JobData): Promise<{ resumed: true; ne
     } finally {
       closeSync(fd);
     }
-  } catch {
+  } catch (err) {
+    if ((err as NodeJS.ErrnoException).code === 'ENOENT') {
+      return { resumed: false, reason: 'no log path' };
+    }
     return { resumed: false, reason: 'could not read log' };
   }
 

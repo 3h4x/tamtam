@@ -227,4 +227,19 @@ describe('collectProjectRetrievalSources', () => {
         .map((source) => source.sourceId)
     ).toEqual(['README.md']);
   });
+
+  it('skips a project doc that disappears before indexing opens it', async () => {
+    const readmePath = join(projectPath, 'README.md');
+    writeFileSync(readmePath, '# README\n\nTransient docs.\n');
+    listProjectDocumentsMock.mockImplementation(() => {
+      rmSync(readmePath, { force: true });
+      return [readmePath];
+    });
+    await sharedHandle.db.insert(schema.projects).values({ name: 'myproject', path: projectPath, enabled: true }).execute();
+
+    const { collectProjectRetrievalSources } = await importSubject();
+    const sources = await collectProjectRetrievalSources('myproject', projectPath);
+
+    expect(sources.filter((source) => source.sourceKind === 'project_doc')).toEqual([]);
+  });
 });

@@ -8,6 +8,8 @@ import type { Pm2LogData } from '@/components/monitoring/Pm2LogPanel'
 import { SchedulerHealthPanel } from '@/components/monitoring/SchedulerHealthPanel'
 import { OverviewTab } from '@/components/monitoring/OverviewTab'
 import { InfraTab } from '@/components/monitoring/InfraTab'
+import { StandardTabs } from '@/components/ui/StandardTabs'
+import type { StandardTabItem } from '@/components/ui/StandardTabs'
 
 interface ReadinessCheck {
   name: string
@@ -177,16 +179,12 @@ export function MonitoringPage() {
   const alertCount     = data.prometheus.alerts.length
   const infraIssues    = lokiErrorCount + downCount + alertCount
 
-  const tabs: Array<{
-    id: MonitoringTab
-    label: string
-    badge?: { count: number; variant: 'error' | 'warn' | 'ok' }
-  }> = [
+  const tabs: StandardTabItem<MonitoringTab>[] = [
     {
       id: 'overview',
       label: 'Overview',
       badge: data.hasIssues
-        ? { count: (pm2ErrorCount + infraIssues), variant: 'error' }
+        ? <TabBadge count={pm2ErrorCount + infraIssues} variant="error" />
         : undefined,
     },
     {
@@ -197,16 +195,16 @@ export function MonitoringPage() {
       id: 'logs',
       label: 'Logs',
       badge: pm2ErrorCount > 0
-        ? { count: pm2ErrorCount, variant: 'error' }
+        ? <TabBadge count={pm2ErrorCount} variant="error" />
         : pm2WarnCount > 0
-        ? { count: pm2WarnCount, variant: 'warn' }
+        ? <TabBadge count={pm2WarnCount} variant="warn" />
         : undefined,
     },
     {
       id: 'infra',
       label: 'Infra',
       badge: infraIssues > 0
-        ? { count: infraIssues, variant: 'error' }
+        ? <TabBadge count={infraIssues} variant="error" />
         : undefined,
     },
   ]
@@ -249,22 +247,12 @@ export function MonitoringPage() {
       </div>
 
       {/* Tab bar */}
-      <div className="flex items-center gap-0.5 border-b border-border">
-        {tabs.map(tab => (
-          <button
-            key={tab.id}
-            onClick={() => setActiveTab(tab.id)}
-            className={`flex items-center gap-1.5 px-3 py-2 text-sm font-medium border-b-2 -mb-px cursor-pointer transition-colors bg-transparent ${
-              activeTab === tab.id
-                ? 'border-text-primary text-text-primary'
-                : 'border-transparent text-text-tertiary hover:text-text-secondary hover:border-border'
-            }`}
-          >
-            {tab.label}
-            {tab.badge && <TabBadge count={tab.badge.count} variant={tab.badge.variant} />}
-          </button>
-        ))}
-      </div>
+      <StandardTabs
+        items={tabs}
+        activeTab={activeTab}
+        ariaLabel="Monitoring tabs"
+        onChange={setActiveTab}
+      />
 
       {/* Tab panels */}
       <div>

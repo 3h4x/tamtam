@@ -7,6 +7,7 @@ import type { GhPullRequest } from '@/lib/client-api'
 import { formatAgo } from '@/lib/shared/format'
 import { Labels, CheckIcon, GateBadge } from '@/components/issues-tab/shared'
 import type { MergeMethod, PrGates } from '@/components/issues-tab/shared'
+import { Spinner } from '@/components/ui/Spinner'
 
 function parseLinkedIssueNumber(body: string | null | undefined): string | null {
   if (!body) return null
@@ -300,7 +301,7 @@ export function PRRow({
               disabled={approving}
               title="Submit an APPROVE review (required by branch protection before merge)"
             >
-              {approving && <span className="inline-block w-2.5 h-2.5 rounded-full border-2 border-current border-t-transparent animate-spin shrink-0" />}
+              {approving && <Spinner size="sm" shrink />}
               Approve
             </button>
           )}
@@ -329,7 +330,7 @@ export function PRRow({
                   onClick={doMerge}
                   disabled={merging}
                 >
-                  {merging && <span className="inline-block w-2.5 h-2.5 rounded-full border-2 border-current border-t-transparent animate-spin shrink-0" />}
+                  {merging && <Spinner size="sm" shrink />}
                   Confirm
                 </button>
                 <button
@@ -357,7 +358,7 @@ export function PRRow({
               disabled={reviewing || jobsPaused}
               title={jobsPaused ? 'Jobs are paused globally. Resume jobs to start a PR review.' : 'AI code review of this PR\'s diff'}
             >
-              {reviewing && <span className="inline-block w-2.5 h-2.5 rounded-full border-2 border-current border-t-transparent animate-spin shrink-0" />}
+              {reviewing && <Spinner size="sm" shrink />}
               Review
             </button>
           )}
@@ -369,7 +370,7 @@ export function PRRow({
             aria-label="Open in Terminal"
           >
             {switchingBranch ? (
-              <span className="inline-block w-3 h-3 rounded-full border-2 border-current border-t-transparent animate-spin" />
+              <Spinner />
             ) : (
               <svg width="12" height="12" viewBox="0 0 16 16" fill="currentColor">
                 <path d="M2 2.75A.75.75 0 012.75 2h10.5a.75.75 0 01.75.75v10.5a.75.75 0 01-.75.75H2.75a.75.75 0 01-.75-.75V2.75zM3.5 3.5v9h9v-9h-9zm1.85 1.94a.75.75 0 011.06.02l2.25 2.25a.75.75 0 010 1.06l-2.25 2.25a.75.75 0 11-1.06-1.06L7.04 8 5.33 6.25a.75.75 0 01-.02-1.06l.04-.04zM8.5 10h3a.75.75 0 010 1.5h-3a.75.75 0 010-1.5z"/>

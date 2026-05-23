@@ -2397,6 +2397,33 @@ describe('agents API', () => {
       expect(writeFileAgentMock).toHaveBeenCalledOnce();
     });
 
+    it('persists an in-place enable for a file agent to the DB override (regression)', async () => {
+      // The .md frontmatter does not carry `enabled` — it lives in the DB
+      // override. Before the fix, by-name only wrote the override on rename, so
+      // enabling a file agent in place (no rename) was silently dropped.
+      const enabledAgent = {
+        id: 'file:myproj:my-agent', name: 'my-agent', project: 'myproj',
+        skillIds: [] as string[], model: 'sonnet', prompt: 'p', schedule: '30m',
+        enabled: true, createdAt: 0, updatedAt: 0,
+        source: 'file' as const, filePath: '/path/to/.tamtam/agents/my-agent.md',
+      };
+      resolveProjectPathMock.mockReturnValueOnce('/path/to/myproj');
+      scanFileAgentsMock.mockReturnValueOnce([{ ...enabledAgent, enabled: false }]);
+      writeFileAgentMock.mockReturnValueOnce(enabledAgent);
+
+      const res = await PATCH_BY_NAME(new NextRequest('http://localhost/api/agents/by-name', {
+        method: 'PATCH',
+        body: JSON.stringify({ project: 'myproj', name: 'my-agent', enabled: true }),
+      }));
+
+      expect(res.status).toBe(200);
+      expect(mocks.setFileAgentOverride).toHaveBeenCalledWith(
+        'myproj',
+        'my-agent',
+        expect.objectContaining({ enabled: true }),
+      );
+    });
+
     it('updates prerequisiteCommand in by-name file-agent fallback', async () => {
       const existingAgent = {
         id: 'file:myproj:my-agent', name: 'my-agent', project: 'myproj',

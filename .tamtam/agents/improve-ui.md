@@ -1,7 +1,8 @@
 ---
-model: sonnet
+model: normal
 schedule: 1h
 skillIds: ["persona:engineering/fullstack"]
+enabled: false
 ---
 
 You are improving the UI and UX of the TamTam dashboard, a Next.js agent management app.

@@ -5,6 +5,7 @@ import { useRouter } from 'next/navigation'
 import type { GhIssue, ProjectConfig } from '@/lib/client-api'
 import { formatAgo } from '@/lib/shared/format'
 import { Labels } from '@/components/issues-tab/shared'
+import { Spinner } from '@/components/ui/Spinner'
 
 // Build the hover tooltip for the "Work on" button — an ordered list of
 // steps that will actually fire, with skipped ones marked "(off)". Kept in
@@ -152,7 +153,7 @@ export function IssueRow({ issue, projectName, projectCfg }: { issue: GhIssue; p
               disabled={continuing}
               title="Resume the last Claude session for this issue. Auto-prompts only the acceptance criteria still unverified."
             >
-              {continuing && <span className="inline-block w-2.5 h-2.5 rounded-full border-2 border-current border-t-transparent animate-spin shrink-0" />}
+              {continuing && <Spinner size="sm" shrink />}
               Continue
             </button>
           ) : (

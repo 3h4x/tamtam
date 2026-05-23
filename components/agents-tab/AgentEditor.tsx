@@ -4,6 +4,7 @@ import { useState, useEffect, useMemo, useRef } from 'react'
 import { fetchProjectDocs, improveAgentPrompt } from '@/lib/client-api'
 import type { Agent, Skill, Persona, ProjectDoc } from '@/lib/client-api'
 import { Button } from '@/components/ui/Button'
+import { Spinner } from '@/components/ui/Spinner'
 import { useToast } from '@/components/Toast'
 import type { AgentTemplateRecord } from '@/components/SettingsPage'
 import { MODEL_TIERS, MODEL_LABELS, MODEL_DESCRIPTIONS, normalizeModelInput } from '@/lib/agents/model-aliases'
@@ -302,7 +303,7 @@ export function AgentEditor({
             className="inline-flex items-center gap-1.5 px-2 py-1 text-xs rounded-md border border-border bg-bg-secondary text-text-secondary hover:text-accent hover:border-accent/40 disabled:opacity-50 disabled:cursor-not-allowed cursor-pointer transition-colors"
           >
             {improving
-              ? <span className="inline-block w-3 h-3 rounded-full border-2 border-accent border-t-transparent animate-spin" />
+              ? <Spinner color="accent" />
               : null}
             <span>{improving ? 'Improving…' : 'Improve'}</span>
           </button>
@@ -553,7 +554,7 @@ export function AgentEditor({
             onClick={handleSave}
             disabled={!name.trim() || saving}
           >
-            {saving && <span className="inline-block w-3 h-3 rounded-full border-2 border-white border-t-transparent animate-spin shrink-0" />}
+            {saving && <Spinner color="white" shrink />}
             {saving ? 'Saving…' : isNew ? 'Create agent' : 'Save changes'}
           </Button>
         </div>

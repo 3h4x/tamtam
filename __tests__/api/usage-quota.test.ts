@@ -6,6 +6,7 @@ const clearQuotaCacheMock = vi.fn();
 const peekQuotaCacheForProviderMock = vi.fn().mockReturnValue(null);
 const scheduledBurnRateBlockedAcrossProvidersMock = vi.fn().mockReturnValue(null);
 const warmEnabledProviderSnapshotsMock = vi.fn().mockResolvedValue(undefined);
+const peekEnabledProviderSnapshotsMock = vi.fn().mockReturnValue([]);
 const getSettingsMock = vi.fn().mockReturnValue(null);
 
 vi.mock('@/lib/usage/quota', () => ({
@@ -17,6 +18,7 @@ vi.mock('@/lib/usage/quota', () => ({
 vi.mock('@/lib/shared/job-control', () => ({
   scheduledBurnRateBlockedAcrossProviders: scheduledBurnRateBlockedAcrossProvidersMock,
   warmEnabledProviderSnapshots: warmEnabledProviderSnapshotsMock,
+  peekEnabledProviderSnapshots: peekEnabledProviderSnapshotsMock,
 }));
 
 vi.mock('@/lib/shared/config', () => ({
@@ -34,6 +36,8 @@ describe('GET /api/usage/quota', () => {
     scheduledBurnRateBlockedAcrossProvidersMock.mockReturnValue(null);
     warmEnabledProviderSnapshotsMock.mockReset();
     warmEnabledProviderSnapshotsMock.mockResolvedValue(undefined);
+    peekEnabledProviderSnapshotsMock.mockReset();
+    peekEnabledProviderSnapshotsMock.mockReturnValue([]);
     getSettingsMock.mockReset();
     getSettingsMock.mockReturnValue(null);
   });
@@ -56,7 +60,7 @@ describe('GET /api/usage/quota', () => {
     const res = await GET(new NextRequest('http://localhost/api/usage/quota'));
     expect(res.status).toBe(200);
     const body = await res.json();
-    expect(body).toEqual({ ...snapshot, available: true, schedulerThrottle: null });
+    expect(body).toMatchObject({ ...snapshot, available: true, schedulerThrottle: null });
   });
 
   it('returns typed unavailable when underlying fetcher throws and no cache exists', async () => {
@@ -118,7 +122,7 @@ describe('GET /api/usage/quota', () => {
     expect(getQuotaForProviderMock).toHaveBeenCalledWith('active', { force: true });
     expect(warmEnabledProviderSnapshotsMock).toHaveBeenCalledWith({ force: true });
     const body = await res.json();
-    expect(body).toEqual({ ...snapshot, available: true, schedulerThrottle: null });
+    expect(body).toMatchObject({ ...snapshot, available: true, schedulerThrottle: null });
   });
 
   it('exposes schedulerThrottle: null when no provider is over the weekly burn cap', async () => {
