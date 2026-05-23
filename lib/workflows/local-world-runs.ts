@@ -201,7 +201,14 @@ export function readLocalStepFiles(runId: string): LocalStepFile[] {
   }
   return names
     .filter((name) => name.startsWith(`${runId}-`) && name.endsWith('.json'))
-    .map((name) => JSON.parse(readFileSync(/*turbopackIgnore: true*/ join(dir, name), 'utf8')) as LocalStepFile)
+    .flatMap((name) => {
+      try {
+        return [JSON.parse(readFileSync(/*turbopackIgnore: true*/ join(dir, name), 'utf8')) as LocalStepFile];
+      } catch (err) {
+        if ((err as NodeJS.ErrnoException).code === 'ENOENT') return [];
+        throw err;
+      }
+    })
     .sort((a, b) => {
       // ISO 8601 strings sort lexicographically the same as chronologically
       // — skip the Date parse on every comparison.
