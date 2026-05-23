@@ -186,10 +186,12 @@ function doSaveToDb(job: JobData): Promise<void> {
 // terminal the user watches during a release. Each pipeline step appends
 // its section to this job's log.
 export function findActiveReleaseJob(projectName: string): JobData | null {
-  const candidates = listJobs()
-    .filter(j => j.project === projectName && j.kind === 'release' && j.finishedAt === null)
-    .sort((a, b) => (b.startedAt || 0) - (a.startedAt || 0));
-  return candidates[0] ?? null;
+  let active: JobData | null = null;
+  for (const job of jobsCache.values()) {
+    if (job.project !== projectName || job.kind !== 'release' || job.finishedAt !== null) continue;
+    if (!active || (job.startedAt || 0) > (active.startedAt || 0)) active = job;
+  }
+  return active;
 }
 
 export function createJob(
