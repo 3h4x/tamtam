@@ -295,18 +295,20 @@ export function AgentEditor({
               <span className="text-xs text-text-tertiary font-normal normal-case">optional — skills define default behavior</span>
             )}
           </label>
-          <button
+          <Button
             type="button"
+            variant="secondary"
+            size="sm"
             onClick={handleImprove}
             disabled={isSystemAgent || improving || agentPrompt.trim().length < 3}
             title={isSystemAgent ? 'Built-in agent prompt is fixed' : 'Rewrite this prompt using project context (CLAUDE.md + selected skills/docs)'}
-            className="inline-flex items-center gap-1.5 px-2 py-1 text-xs rounded-md border border-border bg-bg-secondary text-text-secondary hover:text-accent hover:border-accent/40 disabled:opacity-50 disabled:cursor-not-allowed cursor-pointer transition-colors"
+            className="rounded-md text-text-secondary hover:text-accent hover:border-accent/40"
           >
             {improving
               ? <Spinner color="accent" />
               : null}
             <span>{improving ? 'Improving…' : 'Improve'}</span>
-          </button>
+          </Button>
         </div>
         <textarea
           id="agent-prompt"
