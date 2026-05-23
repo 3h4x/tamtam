@@ -322,9 +322,6 @@ export function renameFileAgent(
   const oldPath = join(dir, `${canonicalOldName}.md`);
   const newPath = join(dir, `${canonicalNewName}.md`);
 
-  if (!existsSync(/*turbopackIgnore: true*/ oldPath)) {
-    throw new Error(`agent '${canonicalOldName}' not found`);
-  }
   if (canonicalAgentNameKey(canonicalOldName) === canonicalAgentNameKey(canonicalNewName)) {
     const tempPath = join(dir, `.${canonicalOldName}.rename-${process.pid}-${Date.now()}.md`);
     renameSync(/*turbopackIgnore: true*/ oldPath, tempPath);
