@@ -4,21 +4,23 @@ import { NextRequest } from 'next/server';
 const getQuotaForProviderMock = vi.fn();
 const clearQuotaCacheMock = vi.fn();
 const peekQuotaCacheForProviderMock = vi.fn().mockReturnValue(null);
+const readPersistedSnapshotForProviderMock = vi.fn().mockResolvedValue(null);
 const scheduledBurnRateBlockedAcrossProvidersMock = vi.fn().mockReturnValue(null);
 const warmEnabledProviderSnapshotsMock = vi.fn().mockResolvedValue(undefined);
-const peekEnabledProviderSnapshotsMock = vi.fn().mockReturnValue([]);
+const readEnabledProviderSnapshotsMock = vi.fn().mockResolvedValue([]);
 const getSettingsMock = vi.fn().mockReturnValue(null);
 
 vi.mock('@/lib/usage/quota', () => ({
   getQuotaForProvider: getQuotaForProviderMock,
   clearQuotaCache: clearQuotaCacheMock,
   peekQuotaCacheForProvider: peekQuotaCacheForProviderMock,
+  readPersistedSnapshotForProvider: readPersistedSnapshotForProviderMock,
 }));
 
 vi.mock('@/lib/shared/job-control', () => ({
   scheduledBurnRateBlockedAcrossProviders: scheduledBurnRateBlockedAcrossProvidersMock,
   warmEnabledProviderSnapshots: warmEnabledProviderSnapshotsMock,
-  peekEnabledProviderSnapshots: peekEnabledProviderSnapshotsMock,
+  readEnabledProviderSnapshots: readEnabledProviderSnapshotsMock,
 }));
 
 vi.mock('@/lib/shared/config', () => ({
@@ -36,8 +38,10 @@ describe('GET /api/usage/quota', () => {
     scheduledBurnRateBlockedAcrossProvidersMock.mockReturnValue(null);
     warmEnabledProviderSnapshotsMock.mockReset();
     warmEnabledProviderSnapshotsMock.mockResolvedValue(undefined);
-    peekEnabledProviderSnapshotsMock.mockReset();
-    peekEnabledProviderSnapshotsMock.mockReturnValue([]);
+    readEnabledProviderSnapshotsMock.mockReset();
+    readEnabledProviderSnapshotsMock.mockResolvedValue([]);
+    readPersistedSnapshotForProviderMock.mockReset();
+    readPersistedSnapshotForProviderMock.mockResolvedValue(null);
     getSettingsMock.mockReset();
     getSettingsMock.mockReturnValue(null);
   });

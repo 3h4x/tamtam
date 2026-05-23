@@ -13,6 +13,11 @@ import {
   prefetchCodexQuota,
 } from '@/lib/usage/codex-quota';
 import { CLI_PROVIDERS_WITH_QUOTA, type CliProvider } from '@/lib/usage/cli-providers';
+import {
+  persistQuotaSnapshot,
+  readPersistedQuotaSnapshot,
+  type PersistableQuotaProvider,
+} from '@/lib/usage/quota-store';
 
 function isCodexProvider(): boolean {
   try {
@@ -25,16 +30,32 @@ function isCodexProvider(): boolean {
 export type QuotaProvider = 'active' | 'claude' | 'codex';
 
 export async function getQuota(options: { force?: boolean } = {}): Promise<QuotaSnapshot> {
-  return isCodexProvider() ? getCodexQuota(options) : getClaudeQuota(options);
+  const snap = isCodexProvider() ? await getCodexQuota(options) : await getClaudeQuota(options);
+  persistQuotaSnapshot(snap);
+  return snap;
 }
 
 export async function getQuotaForProvider(
   provider: QuotaProvider = 'active',
   options: { force?: boolean } = {},
 ): Promise<QuotaSnapshot> {
-  if (provider === 'codex') return getCodexQuota(options);
-  if (provider === 'claude') return getClaudeQuota(options);
+  if (provider === 'codex') { const s = await getCodexQuota(options); persistQuotaSnapshot(s); return s; }
+  if (provider === 'claude') { const s = await getClaudeQuota(options); persistQuotaSnapshot(s); return s; }
   return getQuota(options);
+}
+
+/**
+ * Last persisted snapshot for a provider (DB-backed), resolving 'active' to the
+ * configured CLI. Used to serve last-known values when the live fetch is
+ * unavailable and the in-memory cache is cold (e.g. right after a restart).
+ */
+export async function readPersistedSnapshotForProvider(
+  provider: QuotaProvider = 'active',
+): Promise<QuotaSnapshot | null> {
+  const concrete: PersistableQuotaProvider = provider === 'active'
+    ? (isCodexProvider() ? 'codex' : 'claude')
+    : provider;
+  return readPersistedQuotaSnapshot(concrete);
 }
 
 export function clearQuotaCache(): void {
@@ -100,11 +121,11 @@ export async function getQuotaSnapshots(
   for (const provider of providers) {
     if (provider === 'claude') {
       tasks.push(
-        getClaudeQuota(options).then((s) => { out.set(provider, s); }).catch(() => { out.set(provider, null); }),
+        getClaudeQuota(options).then((s) => { persistQuotaSnapshot(s); out.set(provider, s); }).catch(() => { out.set(provider, null); }),
       );
     } else if (provider === 'codex') {
       tasks.push(
-        getCodexQuota(options).then((s) => { out.set(provider, s); }).catch(() => { out.set(provider, null); }),
+        getCodexQuota(options).then((s) => { persistQuotaSnapshot(s); out.set(provider, s); }).catch(() => { out.set(provider, null); }),
       );
     } else {
       // No fetcher today — treat as null so the picker uses 0% utilization.
@@ -112,5 +133,32 @@ export async function getQuotaSnapshots(
     }
   }
   await Promise.all(tasks);
+  return out;
+}
+
+/**
+ * Like {@link peekQuotaSnapshots} but resilient: when a provider's in-memory
+ * snapshot is cold (null), fall back to the last DB-persisted snapshot (marked
+ * stale) so it still appears in pace / globalPace after a restart or while the
+ * upstream is rate-limited.
+ */
+export async function readResilientSnapshots(
+  providers: CliProvider[],
+): Promise<Map<CliProvider, QuotaSnapshot | null>> {
+  const out = new Map<CliProvider, QuotaSnapshot | null>();
+  for (const provider of providers) {
+    const live = provider === 'claude'
+      ? peekClaudeQuotaCache()
+      : provider === 'codex'
+        ? peekCodexQuotaCache()
+        : null;
+    if (live) { out.set(provider, live); continue; }
+    if (provider === 'claude' || provider === 'codex') {
+      const persisted = await readPersistedQuotaSnapshot(provider);
+      out.set(provider, persisted ? { ...persisted, stale: true } : null);
+    } else {
+      out.set(provider, null);
+    }
+  }
   return out;
 }

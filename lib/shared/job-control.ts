@@ -10,6 +10,7 @@ import {
   peekQuotaSnapshots,
   prefetchQuota,
   prefetchQuotaProviders,
+  readResilientSnapshots,
 } from '@/lib/usage/quota';
 import { notify } from '@/lib/shared/notifications';
 import { computeWeeklyBurnThrottle } from '@/lib/shared/budget-throttle';
@@ -233,6 +234,18 @@ export async function warmEnabledProviderSnapshots(
 export function peekEnabledProviderSnapshots(): Array<{ provider: CliProvider; snapshot: QuotaSnapshot | null }> {
   const enabled = getEnabledProviders().filter(hasQuotaFetcher);
   const snaps = peekQuotaSnapshots(enabled);
+  return enabled.map((provider) => ({ provider, snapshot: snaps.get(provider) ?? null }));
+}
+
+/**
+ * Async, DB-resilient variant of {@link peekEnabledProviderSnapshots}: when a
+ * provider's in-memory snapshot is cold, falls back to the last persisted
+ * snapshot so it still appears in global pace after a restart / while the
+ * upstream is rate-limited.
+ */
+export async function readEnabledProviderSnapshots(): Promise<Array<{ provider: CliProvider; snapshot: QuotaSnapshot | null }>> {
+  const enabled = getEnabledProviders().filter(hasQuotaFetcher);
+  const snaps = await readResilientSnapshots(enabled);
   return enabled.map((provider) => ({ provider, snapshot: snaps.get(provider) ?? null }));
 }
 
