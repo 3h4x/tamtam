@@ -1,4 +1,4 @@
-import { mkdirSync } from 'fs';
+import { mkdirSync, existsSync, statSync, rmSync } from 'fs';
 import { join } from 'path';
 import { resolveProjectPath, clearProjectDataCache } from '@/lib/shared/project-data';
 import { exec } from '@/lib/shared/shell';
@@ -284,6 +284,84 @@ export async function detectMainBranch(projPath: string, signal?: AbortSignal): 
   return mainR.exitCode === 0 ? 'main' : 'master';
 }
 
+// A `git` process that crashes or is SIGKILLed mid-write can leave
+// `.git/index.lock` behind. git then refuses every subsequent `add`/`commit`
+// until the file is removed. We only remove a lock after a conservative age
+// threshold and a path-specific process check, because deleting a live lock
+// defeats Git's index mutual exclusion.
+const STALE_INDEX_LOCK_MS = 10 * 60 * 1000;
+
+interface ClearStaleIndexLockOptions {
+  nowMs?: number;
+  staleMs?: number;
+  isGitProcessActive?: (projPath: string, lockPath: string) => Promise<boolean>;
+}
+
+function shellQuoteForDisplay(value: string): string {
+  return `'${value.replace(/'/g, `'"'"'`)}'`;
+}
+
+export function processTableHasPotentialGitIndexOwner(psStdout: string, projPath: string, lockPath: string): boolean {
+  const quotedPath = shellQuoteForDisplay(projPath);
+  const quotedLock = shellQuoteForDisplay(lockPath);
+  const hasExplicitOtherGitLocation = (cmd: string) =>
+    /(?:^|\s)-C\s+/.test(cmd)
+    || /(?:^|\s)--git-dir(?:=|\s+)/.test(cmd)
+    || /(?:^|\s)--work-tree(?:=|\s+)/.test(cmd);
+  const isIndexMutatingGitCommand = (cmd: string) =>
+    /\bgit(\s|$)/.test(cmd)
+    && /\b(add|commit|rm|mv|reset|checkout|switch|merge|rebase|cherry-pick|am|apply|stash|clean|restore)\b/.test(cmd);
+  return psStdout
+    .split('\n')
+    .some((line) => {
+      const cmd = line.trim();
+      if (!/\bgit(\s|$)/.test(cmd)) return false;
+      if (
+        cmd.includes(projPath)
+        || cmd.includes(quotedPath)
+        || cmd.includes(lockPath)
+        || cmd.includes(quotedLock)
+      ) {
+        return true;
+      }
+      // A live mutating `git` command can run from the repo cwd with no path
+      // in argv. `ps` does not expose cwd, so preserve the lock only for
+      // commands whose repository cannot be ruled out. Explicitly located
+      // Git commands that do not mention this project are unrelated.
+      return !hasExplicitOtherGitLocation(cmd) && isIndexMutatingGitCommand(cmd);
+    });
+}
+
+async function isGitProcessActiveForPath(projPath: string, lockPath: string): Promise<boolean> {
+  const ps = await exec('ps', ['-axo', 'pid=,command='], { timeout: 5000 });
+  if (ps.exitCode !== 0) return true;
+  return processTableHasPotentialGitIndexOwner(ps.stdout, projPath, lockPath);
+}
+
+export async function clearStaleIndexLock(
+  projPath: string,
+  log: (s: string) => void = () => {},
+  options: ClearStaleIndexLockOptions = {},
+): Promise<boolean> {
+  try {
+    const lockPath = join(/*turbopackIgnore: true*/ projPath, '.git', 'index.lock');
+    if (!existsSync(/*turbopackIgnore: true*/ lockPath)) return false;
+    const ageMs = (options.nowMs ?? Date.now()) - statSync(/*turbopackIgnore: true*/ lockPath).mtimeMs;
+    if (ageMs < (options.staleMs ?? STALE_INDEX_LOCK_MS)) return false;
+    const isActive = await (options.isGitProcessActive ?? isGitProcessActiveForPath)(projPath, lockPath);
+    if (isActive) {
+      log(`\n# keeping old .git/index.lock (age ${Math.round(ageMs / 1000)}s — git process ownership not ruled out)\n`);
+      return false;
+    }
+    rmSync(/*turbopackIgnore: true*/ lockPath, { force: true });
+    log(`\n# removed stale .git/index.lock (age ${Math.round(ageMs / 1000)}s — no path-specific git process)\n`);
+    return true;
+  } catch (e) {
+    log(`\n# could not remove stale index.lock: ${e instanceof Error ? e.message : String(e)}\n`);
+    return false;
+  }
+}
+
 async function runCommit(
   projectName: string,
   projPath: string,
@@ -386,6 +464,9 @@ async function runCommit(
   // creation. Retry on lock contention; fail-fast on any other non-zero
   // exit so the orchestrator records a real commit failure instead of
   // silently shipping nothing.
+  // Remove a stale lock left by a previously crashed/killed git before staging,
+  // so a single dead lock doesn't permanently brick this project's commits.
+  await clearStaleIndexLock(projPath, log);
   log(`\n$ git add -A\n`);
   let addR = await execStep('git', ['-C', projPath, 'add', '-A'], { timeout: 10000 });
   if (addR.stdout) log(addR.stdout);
@@ -394,6 +475,9 @@ async function runCommit(
     for (let attempt = 1; attempt <= 6 && addR.exitCode !== 0; attempt++) {
       log(`\n# index.lock held by another git process — retry ${attempt}/6 in ${attempt}s\n`);
       await new Promise(r => setTimeout(r, attempt * 1000));
+      // After waiting, retry the conservative stale-lock cleanup; it only
+      // unlinks old locks that have no path-specific git process.
+      await clearStaleIndexLock(projPath, log);
       addR = await execStep('git', ['-C', projPath, 'add', '-A'], { timeout: 10000 });
       if (addR.stdout) log(addR.stdout);
       if (addR.stderr) log(addR.stderr);
@@ -440,6 +524,29 @@ async function runCommit(
       return { ok: true, commitSha: '', message: 'Nothing to commit' };
     }
     return { ok: true, commitSha: '', message: 'Nothing to commit (already ahead)' };
+  }
+}
+
+async function recordDefaultDirtyCommitRecoveryMarker(
+  projectName: string,
+  projPath: string,
+  commitJobId: string,
+  log: (s: string) => void,
+  signal?: AbortSignal,
+): Promise<void> {
+  try {
+    const branchR = await exec('git', ['-C', projPath, 'branch', '--show-current'], { timeout: 5000, signal });
+    if (branchR.exitCode !== 0) return;
+    const currentBranch = branchR.stdout.trim();
+    const mainBranch = await detectMainBranch(projPath, signal);
+    if (!currentBranch || currentBranch !== mainBranch) return;
+    const statusR = await exec('git', ['-C', projPath, 'status', '--porcelain'], { timeout: 5000, signal });
+    if (statusR.exitCode !== 0 || !statusR.stdout.trim()) return;
+    const { setDefaultDirtyCommitRecoveryMarker } = await import('./commit-recovery-marker');
+    await setDefaultDirtyCommitRecoveryMarker(projectName, statusR.stdout, commitJobId);
+    log('\n# recorded default-branch dirty recovery marker for failed commit\n');
+  } catch (e) {
+    log(`\n# could not record default-branch dirty recovery marker: ${e instanceof Error ? e.message : String(e)}\n`);
   }
 }
 
@@ -510,9 +617,14 @@ export async function startProjectCommit(
     } catch {}
     if (result.ok) {
       clearProjectDataCache();
+      try {
+        const { clearDefaultDirtyCommitRecoveryMarker } = await import('./commit-recovery-marker');
+        await clearDefaultDirtyCommitRecoveryMarker(projectName);
+      } catch {}
       append(`\n# commit ok — ${'commitSha' in result && result.commitSha ? result.commitSha : 'no-op'}\n${result.message}\n`);
     } else {
       append(`\n# commit failed (${result.status})\n${result.detail}\n`);
+      await recordDefaultDirtyCommitRecoveryMarker(projectName, projPath, job.id, append, signal);
     }
 
     await markDone(job, result.ok ? 0 : 1);

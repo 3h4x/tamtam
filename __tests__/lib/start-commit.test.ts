@@ -1,5 +1,13 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { issueBranchName, deriveIssueContextFromBranch } from '@/lib/pipeline/start-commit';
+import { mkdtempSync, mkdirSync, writeFileSync, existsSync, utimesSync, rmSync } from 'fs';
+import { join } from 'path';
+import { tmpdir } from 'os';
+import {
+  issueBranchName,
+  deriveIssueContextFromBranch,
+  clearStaleIndexLock,
+  processTableHasPotentialGitIndexOwner,
+} from '@/lib/pipeline/start-commit';
 
 describe('issueBranchName', () => {
   it('produces fix/issue-N-slug from a normal title', () => {
@@ -27,6 +35,73 @@ describe('issueBranchName', () => {
 
   it('handles a purely numeric title', () => {
     expect(issueBranchName({ number: 10, title: '12345' })).toBe('fix/issue-10-12345');
+  });
+});
+
+describe('clearStaleIndexLock', () => {
+  let dir: string;
+  beforeEach(() => { dir = mkdtempSync(join(tmpdir(), 'tamtam-lock-')); mkdirSync(join(dir, '.git'), { recursive: true }); });
+  afterEach(() => { rmSync(dir, { recursive: true, force: true }); });
+
+  const lockPath = () => join(dir, '.git', 'index.lock');
+
+  it('removes an old orphaned lock so commits can proceed', async () => {
+    writeFileSync(lockPath(), '');
+    // Backdate the lock well past the conservative stale threshold.
+    const old = Date.now() / 1000 - 15 * 60;
+    utimesSync(lockPath(), old, old);
+    expect(await clearStaleIndexLock(dir, () => {}, {
+      isGitProcessActive: async () => false,
+    })).toBe(true);
+    expect(existsSync(lockPath())).toBe(false);
+  });
+
+  it('keeps a fresh lock (a live git op may still own it)', async () => {
+    writeFileSync(lockPath(), '');
+    expect(await clearStaleIndexLock(dir)).toBe(false);
+    expect(existsSync(lockPath())).toBe(true);
+  });
+
+  it('keeps an old lock when a git process for the project is still active', async () => {
+    writeFileSync(lockPath(), '');
+    const old = Date.now() / 1000 - 15 * 60;
+    utimesSync(lockPath(), old, old);
+    expect(await clearStaleIndexLock(dir, () => {}, {
+      isGitProcessActive: async () => true,
+    })).toBe(false);
+    expect(existsSync(lockPath())).toBe(true);
+  });
+
+  it('is a no-op when no lock exists', async () => {
+    expect(await clearStaleIndexLock(dir)).toBe(false);
+    expect(existsSync(lockPath())).toBe(false);
+  });
+});
+
+describe('processTableHasPotentialGitIndexOwner', () => {
+  const projPath = '/work/proj';
+  const lockPath = '/work/proj/.git/index.lock';
+
+  it('ignores unrelated git commands with explicit repository paths', () => {
+    const ps = [
+      '123 git -C /work/other commit -m unrelated',
+      '124 /usr/bin/git --git-dir=/work/else/.git status',
+      '125 git status',
+    ].join('\n');
+
+    expect(processTableHasPotentialGitIndexOwner(ps, projPath, lockPath)).toBe(false);
+  });
+
+  it('treats project-scoped git commands as potential lock owners', () => {
+    const ps = '123 git -C /work/proj status';
+
+    expect(processTableHasPotentialGitIndexOwner(ps, projPath, lockPath)).toBe(true);
+  });
+
+  it('preserves the lock for mutating git commands with unknown cwd', () => {
+    const ps = '123 /usr/bin/git commit -m update';
+
+    expect(processTableHasPotentialGitIndexOwner(ps, projPath, lockPath)).toBe(true);
   });
 });
 
@@ -122,6 +197,8 @@ describe('startProjectCommit', () => {
   let createJobMock: ReturnType<typeof vi.fn>;
   let markDoneMock: ReturnType<typeof vi.fn>;
   let updateJobMock: ReturnType<typeof vi.fn>;
+  let setDefaultDirtyCommitRecoveryMarkerMock: ReturnType<typeof vi.fn>;
+  let clearDefaultDirtyCommitRecoveryMarkerMock: ReturnType<typeof vi.fn>;
 
   beforeEach(async () => {
     vi.resetModules();
@@ -152,6 +229,8 @@ describe('startProjectCommit', () => {
     }));
     markDoneMock = vi.fn().mockResolvedValue(undefined);
     updateJobMock = vi.fn();
+    setDefaultDirtyCommitRecoveryMarkerMock = vi.fn().mockResolvedValue(undefined);
+    clearDefaultDirtyCommitRecoveryMarkerMock = vi.fn().mockResolvedValue(undefined);
 
     vi.doMock('@/lib/shared/project-data', () => ({
       resolveProjectPath: vi.fn().mockReturnValue('/path/to/proj'),
@@ -194,6 +273,10 @@ describe('startProjectCommit', () => {
       listJobs: listJobsMock,
       findActiveReleaseJob: findActiveReleaseJobMock,
       getJob: getJobMock,
+    }));
+    vi.doMock('@/lib/pipeline/commit-recovery-marker', () => ({
+      setDefaultDirtyCommitRecoveryMarker: setDefaultDirtyCommitRecoveryMarkerMock,
+      clearDefaultDirtyCommitRecoveryMarker: clearDefaultDirtyCommitRecoveryMarkerMock,
     }));
   });
 
@@ -247,7 +330,28 @@ describe('startProjectCommit', () => {
       abortProcessTree: true,
       signal: expect.any(Object),
     });
+    expect(clearDefaultDirtyCommitRecoveryMarkerMock).toHaveBeenCalledWith('proj');
     expect(markDoneMock).toHaveBeenCalledWith(createJobMock.mock.results[0].value, 0);
+  });
+
+  it('records a default-dirty recovery marker when staging fails on the default branch', async () => {
+    checkCliStartGateMock.mockResolvedValue({ ok: true, provider: 'codex' });
+    execMock
+      .mockResolvedValueOnce({ exitCode: 1, stdout: '', stderr: 'fatal: unable to add file' }) // git add -A
+      .mockResolvedValueOnce({ exitCode: 0, stdout: 'main\n', stderr: '' }) // branch --show-current
+      .mockResolvedValueOnce({ exitCode: 0, stdout: 'refs/remotes/origin/main\n', stderr: '' }) // origin HEAD
+      .mockResolvedValueOnce({ exitCode: 0, stdout: ' M src/index.ts\n', stderr: '' }); // status
+
+    const { startProjectCommit } = await import('@/lib/pipeline/start-commit');
+    const result = await startProjectCommit('proj');
+
+    expect(result.ok).toBe(false);
+    expect(setDefaultDirtyCommitRecoveryMarkerMock).toHaveBeenCalledWith(
+      'proj',
+      ' M src/index.ts\n',
+      'proj-commit-job',
+    );
+    expect(markDoneMock).toHaveBeenCalledWith(createJobMock.mock.results[0].value, 1);
   });
 
   it('findIssueContext recovers issue metadata from the active release trigger chain', async () => {

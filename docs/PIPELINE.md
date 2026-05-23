@@ -259,6 +259,19 @@ finished child instead of force-marking the release failed. Releases are only
 left alone when a child step is still genuinely running or another release now
 owns the project lock.
 
+The 30-second probe sweep also reconciles git state that is stranded outside an
+active release. Non-default `fix/issue-*` branches with unshipped work trigger a
+new release, empty local fix branches are checked back out to the default
+branch, and clean default branches that are ahead/behind their upstream trigger
+a push. Dirty default branches are more dangerous: TamTam only treats them as
+recoverable release work when current durable state proves release intent,
+either a `pending_release:<project>` flag or a
+`default_dirty_commit_recovery:<project>` marker written by a failed commit on
+the default branch. The marker expires after 24 hours and must still match the
+current dirty status with no dirty file newer than the failed commit. A bare
+dirty default branch, or one backed only by stale release history, is assumed to
+be human WIP and is left alone.
+
 When reconciliation detects a chain that ended at a non-terminal success step
 (`test`, `fix`, `review`, `commit`) without a successor, it re-fires that
 step's completion hook instead of silently finalizing the release green. This
@@ -322,15 +335,24 @@ in the `settings` table instead of dropping the request. Older queued flags
 that still have the legacy value are treated as pending with an unknown queue
 time.
 
-That queued release is retried from five places:
+That queued release is retried from six places:
 
 1. `releaseLock()` after the active pipeline finishes
 2. `syncJobsPauseState(false)` when the user resumes jobs
 3. server boot or stale-lock self-heal, if a queued project is found with no
    active pipeline lock
-4. the periodic recovery reconcile ticker, which drains pending releases before
+4. the stranded-branch reconciler, when the default branch is dirty and that
+   pending flag proves the dirty tree belongs to a queued release
+5. the periodic recovery reconcile ticker, which drains pending releases before
    replaying queued agent work for the same project
-5. manual retry from the automation queue surface
+6. manual retry from the automation queue surface
+
+During `commit`, TamTam may remove a stale `.git/index.lock` left by a killed
+git process before staging. The cleanup is intentionally conservative: the lock
+must be older than 10 minutes and the local process table must not show a git
+command for that project path. Fresh locks, old locks with an active git owner,
+and locks whose ownership cannot be checked are preserved so Git's index
+mutual exclusion stays intact.
 
 Lock release also writes a durable `pipeline_lock_events` row. The probe sweep
 consumes unhandled rows and runs the same ordered recovery drain when

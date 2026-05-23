@@ -4,6 +4,7 @@ import { useState, useEffect } from 'react'
 import { useSearchParams, useRouter, usePathname } from 'next/navigation'
 import { SkillsPage } from '@/components/SkillsPage'
 import { AgentCatalogList } from '@/components/library/AgentCatalogList'
+import { StandardTabs } from '@/components/ui/StandardTabs'
 
 type Tab = 'agents' | 'skills'
 
@@ -52,23 +53,12 @@ export function LibraryPage() {
         <p className="text-sm text-text-tertiary">{active.description}</p>
       </header>
 
-      <nav className="flex gap-1 border-b border-border" aria-label="Library section">
-        {TABS.map((t) => (
-          <button
-            key={t.id}
-            type="button"
-            onClick={() => setTab(t.id)}
-            className={`px-3 py-2 text-sm font-medium border-b-2 -mb-px transition-colors cursor-pointer ${
-              tab === t.id
-                ? 'border-accent text-text-primary'
-                : 'border-transparent text-text-tertiary hover:text-text-secondary'
-            }`}
-            aria-current={tab === t.id ? 'page' : undefined}
-          >
-            {t.label}
-          </button>
-        ))}
-      </nav>
+      <StandardTabs
+        items={TABS}
+        activeTab={tab}
+        ariaLabel="Library section"
+        onChange={setTab}
+      />
 
       <div>
         {tab === 'agents' ? <AgentCatalogList /> : <SkillsPage />}
