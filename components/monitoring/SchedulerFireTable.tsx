@@ -1,6 +1,7 @@
 'use client'
 
 import { useState } from 'react'
+import { Button } from '@/components/ui/Button'
 
 export interface SchedulerInternalEntry {
   agentId: string
@@ -79,12 +80,14 @@ export function SchedulerFireTable({ entries }: { entries: SchedulerInternalEntr
         })}
       </div>
       {sorted.length > 8 && (
-        <button
+        <Button
+          variant="ghost"
+          size="sm"
           onClick={() => setShowAll(v => !v)}
-          className="mt-1 text-[11px] text-text-tertiary hover:text-text-secondary cursor-pointer"
+          className="mt-1 !px-0 !py-0 text-[11px] font-normal text-text-tertiary hover:!bg-transparent hover:text-text-secondary"
         >
           {showAll ? 'Show less' : `Show all ${sorted.length}`}
-        </button>
+        </Button>
       )}
     </div>
   )
