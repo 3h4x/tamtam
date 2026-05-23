@@ -1,6 +1,7 @@
 import { describe, expect, it, vi, beforeEach, afterEach } from 'vitest';
 import {
   createDatabaseBackup,
+  listBackupFiles,
   pruneBackupFiles,
   selectBackupsToPrune,
   type BackupFileEntry,
@@ -159,6 +160,26 @@ describe('db backup retention', () => {
     expect(pruned).toEqual(['tamtam-20260512-1200.pgdump']);
     expect(rmSyncMock.mock.calls).toEqual([
       ['/tmp/backups/tamtam-20260512-1200.pgdump', { force: true }],
+    ]);
+  });
+
+  it('ignores backup files that disappear before they can be statted', () => {
+    readdirSyncMock.mockReturnValue([
+      'tamtam-20260513-1200.pgdump',
+      'tamtam-20260512-1200.pgdump',
+    ]);
+    statSyncMock.mockImplementation((path: string) => {
+      if (path.endsWith('20260513-1200.pgdump')) {
+        return { mtimeMs: Date.UTC(2026, 4, 13, 12, 0) };
+      }
+      throw Object.assign(new Error('missing'), { code: 'ENOENT' });
+    });
+
+    expect(listBackupFiles('/tmp/backups')).toEqual([
+      {
+        name: 'tamtam-20260513-1200.pgdump',
+        mtimeMs: Date.UTC(2026, 4, 13, 12, 0),
+      },
     ]);
   });
 });
