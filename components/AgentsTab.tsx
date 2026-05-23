@@ -13,6 +13,7 @@ import { RecommendedAgents } from '@/components/agents-tab/RecommendedAgents'
 import { RECOMMENDED_AGENTS, recommendedAgentMatchesName } from '@/lib/agents/recommended-agents'
 import { normalizeModelInput } from '@/lib/agents/model-aliases'
 import { useSchedulerHealth, type SchedulerEntry } from '@/hooks/useSchedulerHealth'
+import { Button } from '@/components/ui/Button'
 import { Table, type Column } from '@/components/ui/Table'
 
 interface AgentsTabProps {
@@ -369,24 +370,28 @@ export function AgentsTab({ projectName, projectJobs = [] }: AgentsTabProps) {
               {r.agent.enabled ? 'On' : 'Off'}
             </button>
           )}
-          <button
-            className="px-2 py-1 text-xs border border-border rounded-md bg-bg-secondary text-text-primary hover:bg-bg-tertiary cursor-pointer"
+          <Button
+            size="sm"
             onClick={() => setEditorParam(r.agent.id)}
           >
             Edit
-          </button>
+          </Button>
           <div className="inline-flex rounded-md overflow-hidden">
-            <button
-              className="px-2.5 py-1 text-xs bg-accent text-white hover:bg-accent-hover cursor-pointer disabled:cursor-not-allowed disabled:opacity-50"
+            <Button
+              variant="solid"
+              size="sm"
+              className="rounded-r-none px-2.5"
               onClick={() => handleRun(r.agent)}
               disabled={runSubmitting === r.agent.id || agentRunsBlocked}
               title={agentRunsBlocked ? blockedReason : r.agent.kind === 'system' ? 'Run the built-in system handler now' : undefined}
             >
               {runSubmitting === r.agent.id ? 'Starting…' : 'Run'}
-            </button>
+            </Button>
             {r.agent.kind !== 'system' && (
-              <button
-                className="px-1.5 py-1 text-xs bg-accent text-white hover:bg-accent-hover cursor-pointer disabled:cursor-not-allowed disabled:opacity-50 border-l border-white/20"
+              <Button
+                variant="solid"
+                size="sm"
+                className="rounded-l-none px-1.5 border-l border-white/20"
                 onClick={() => toggleCustomRun(r.agent.id)}
                 disabled={runSubmitting === r.agent.id || agentRunsBlocked}
                 aria-label="Run with additional context"
@@ -394,7 +399,7 @@ export function AgentsTab({ projectName, projectJobs = [] }: AgentsTabProps) {
                 title="Run with additional context"
               >
                 <span className={`inline-block transition-transform ${customRunOpenId === r.agent.id ? 'rotate-180' : ''}`}>▾</span>
-              </button>
+              </Button>
             )}
           </div>
         </div>
@@ -422,21 +427,24 @@ export function AgentsTab({ projectName, projectJobs = [] }: AgentsTabProps) {
           autoFocus
         />
         <div className="flex items-center gap-2 justify-end">
-          <button
-            className="px-2.5 py-1 text-xs border border-border rounded-md bg-bg-secondary text-text-secondary hover:bg-bg-tertiary cursor-pointer"
+          <Button
+            size="sm"
+            className="text-text-secondary"
             onClick={() => setCustomRunOpenId(null)}
             disabled={submitting}
           >
             Cancel
-          </button>
-          <button
-            className="px-2.5 py-1 text-xs bg-accent text-white rounded-md hover:bg-accent-hover cursor-pointer disabled:cursor-not-allowed disabled:opacity-50"
+          </Button>
+          <Button
+            variant="solid"
+            size="sm"
+            className="px-2.5"
             onClick={() => handleRun(r.agent, value)}
             disabled={submitting || agentRunsBlocked}
             title={agentRunsBlocked ? blockedReason : undefined}
           >
             {submitting ? 'Starting…' : value.trim() ? 'Run with context' : 'Run'}
-          </button>
+          </Button>
         </div>
       </div>
     )
@@ -488,12 +496,12 @@ export function AgentsTab({ projectName, projectJobs = [] }: AgentsTabProps) {
           Agents
           {agents.length > 0 && <span className="ml-2 text-text-tertiary font-normal">{agents.length}</span>}
         </h3>
-        <button
-          className="px-3 py-1.5 text-sm bg-accent text-white rounded-md hover:bg-accent-hover cursor-pointer"
+        <Button
+          variant="solid"
           onClick={() => { setRecommendedTemplate(null); setEditorParam('new') }}
         >
           + New Agent
-        </button>
+        </Button>
       </div>
 
       {agentRunsBlocked && (
