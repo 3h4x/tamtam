@@ -1,4 +1,4 @@
-import { mkdirSync, existsSync, statSync, rmSync } from 'fs';
+import { mkdirSync, statSync, rmSync } from 'fs';
 import { join } from 'path';
 import { resolveProjectPath, clearProjectDataCache } from '@/lib/shared/project-data';
 import { exec } from '@/lib/shared/shell';
@@ -345,8 +345,8 @@ export async function clearStaleIndexLock(
 ): Promise<boolean> {
   try {
     const lockPath = join(/*turbopackIgnore: true*/ projPath, '.git', 'index.lock');
-    if (!existsSync(/*turbopackIgnore: true*/ lockPath)) return false;
-    const ageMs = (options.nowMs ?? Date.now()) - statSync(/*turbopackIgnore: true*/ lockPath).mtimeMs;
+    const lockStat = statSync(/*turbopackIgnore: true*/ lockPath);
+    const ageMs = (options.nowMs ?? Date.now()) - lockStat.mtimeMs;
     if (ageMs < (options.staleMs ?? STALE_INDEX_LOCK_MS)) return false;
     const isActive = await (options.isGitProcessActive ?? isGitProcessActiveForPath)(projPath, lockPath);
     if (isActive) {
@@ -357,6 +357,7 @@ export async function clearStaleIndexLock(
     log(`\n# removed stale .git/index.lock (age ${Math.round(ageMs / 1000)}s — no path-specific git process)\n`);
     return true;
   } catch (e) {
+    if (e instanceof Error && 'code' in e && e.code === 'ENOENT') return false;
     log(`\n# could not remove stale index.lock: ${e instanceof Error ? e.message : String(e)}\n`);
     return false;
   }
