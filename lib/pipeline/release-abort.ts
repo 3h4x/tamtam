@@ -7,6 +7,7 @@ import {
   shouldSignalJobPid,
 } from '@/lib/jobs/cancellation';
 import { appendRedactedFileSync } from '@/lib/jobs/redacted-log-writer';
+import type { JobData } from '@/lib/jobs/types';
 
 export type ReleaseAbortResult =
   | { status: 'no_pipeline'; detail: string; httpStatus: 200 }
@@ -16,6 +17,15 @@ export type ReleaseAbortResult =
 export interface AbortActiveReleaseOptions {
   reason: 'user' | 'wall_clock_timeout';
   targetReleaseId?: string;
+}
+
+function findLatestActiveRelease(projectName: string): JobData | null {
+  let latest: JobData | null = null;
+  for (const job of listJobs()) {
+    if (job.project !== projectName || job.kind !== 'release' || job.finishedAt !== null) continue;
+    if (!latest || (job.startedAt ?? 0) > (latest.startedAt ?? 0)) latest = job;
+  }
+  return latest;
 }
 
 async function resolveTargetRelease(
@@ -38,9 +48,7 @@ async function resolveTargetRelease(
     return { releaseJob, lockJobId };
   }
 
-  releaseJob = listJobs()
-    .filter((job) => job.project === projectName && job.kind === 'release' && job.finishedAt === null)
-    .sort((a, b) => (b.startedAt ?? 0) - (a.startedAt ?? 0))[0] ?? null;
+  releaseJob = findLatestActiveRelease(projectName);
   return { releaseJob, lockJobId };
 }
 
