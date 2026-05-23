@@ -1,4 +1,4 @@
-import { existsSync, mkdirSync, readFileSync, writeFileSync, readdirSync, statSync, unlinkSync } from 'fs';
+import { mkdirSync, readFileSync, writeFileSync, readdirSync, statSync, unlinkSync } from 'fs';
 import { join } from 'path';
 import { homedir } from 'os';
 import { redactLogFrame } from '@/lib/shared/log-redaction';
@@ -50,7 +50,6 @@ export function readJobLogs(jobId: string, baseDir?: string): LogFrame[] {
 export function cleanupOldLogs(maxLogs = 100, baseDir?: string): void {
   if (maxLogs <= 0) return;
   const logsDir = getLogsDir(baseDir);
-  if (!existsSync(/*turbopackIgnore: true*/ logsDir)) return;
 
   const logFiles = readdirSync(/*turbopackIgnore: true*/ logsDir)
     .filter((f) => f.endsWith('.log'))
