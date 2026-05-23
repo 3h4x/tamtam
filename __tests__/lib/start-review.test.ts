@@ -620,6 +620,30 @@ describe('startProjectReview', () => {
     expect(mocks.readParsedLog).toHaveBeenCalledWith(expect.objectContaining({ id: 'prev-fix' }));
   });
 
+  it('uses the newest active release for prior review and fix context', async () => {
+    mocks.listJobs.mockReturnValue([
+      makeJob({ id: 'older-release', kind: 'release', finishedAt: null, startedAt: 10 }),
+      makeJob({ id: 'older-review', kind: 'review', releaseId: 'older-release', finishedAt: 20, startedAt: 20, exitCode: 0 }),
+      makeJob({ id: 'newer-release', kind: 'release', finishedAt: null, startedAt: 50 }),
+      makeJob({ id: 'newer-review', kind: 'review', releaseId: 'newer-release', finishedAt: 60, startedAt: 60, exitCode: 0 }),
+    ]);
+    mocks.readParsedLog.mockImplementation((job: { id: string }) => {
+      if (job.id === 'older-review') {
+        return 'Findings:\n- Finding ID: stale-release-context\n  Root cause: old release\n';
+      }
+      return 'Findings:\n- Finding ID: newest-release-context\n  Root cause: current release\n';
+    });
+    mocks.exec.mockResolvedValueOnce(resp(0, ' M lib/foo.ts'));
+
+    await startProjectReview('proj');
+
+    const prompt: string = mocks.startJob.mock.calls[0][2];
+    expect(prompt).toContain('newer-review');
+    expect(prompt).toContain('newest-release-context');
+    expect(prompt).not.toContain('older-review');
+    expect(prompt).not.toContain('stale-release-context');
+  });
+
   it('does not surface incidental id lines as findings in prior release context', async () => {
     mocks.listJobs.mockReturnValue([
       makeJob({ id: 'release-2', kind: 'release', finishedAt: null, startedAt: 10 }),
