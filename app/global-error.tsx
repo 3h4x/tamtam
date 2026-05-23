@@ -1,6 +1,7 @@
 'use client'
 
 import { useEffect } from 'react'
+import { Button } from '@/components/ui/Button'
 
 export default function GlobalError({
   error,
@@ -18,7 +19,7 @@ export default function GlobalError({
       <body>
         <div>
           <h2>Something went wrong</h2>
-          <button onClick={reset}>Try again</button>
+          <Button onClick={reset}>Try again</Button>
         </div>
       </body>
     </html>
