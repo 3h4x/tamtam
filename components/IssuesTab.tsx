@@ -10,6 +10,7 @@ import { ErrorState } from './ErrorState'
 import { PRRow } from '@/components/issues-tab/PRRow'
 import { IssueRow } from '@/components/issues-tab/IssueRow'
 import { useToast } from '@/components/Toast'
+import { Button } from '@/components/ui/Button'
 import { Spinner } from '@/components/ui/Spinner'
 
 // Re-export types consumed by subcomponents so callers don't need to change
@@ -220,8 +221,10 @@ ${idea}`
               )}
             </div>
           </div>
-          <button
-            className="ml-auto inline-flex items-center gap-1.5 rounded-md border border-border bg-bg-secondary px-2 py-1 text-[11px] text-text-primary hover:bg-bg-tertiary cursor-pointer disabled:opacity-60"
+          <Button
+            variant="secondary"
+            size="sm"
+            className="ml-auto rounded-md text-[11px] font-normal disabled:opacity-60"
             onClick={() => load('refresh')}
             disabled={refreshing}
             title="Force refresh from GitHub"
@@ -232,7 +235,7 @@ ${idea}`
                 <span>Refreshing…</span>
               </span>
             ) : 'Refresh'}
-          </button>
+          </Button>
         </div>
       </div>
 
@@ -297,8 +300,10 @@ ${idea}`
                   <span className="inline-flex items-center rounded-full border border-border bg-bg-tertiary px-1.5 py-0.5 text-[10px] font-medium text-text-secondary">runs in parallel</span>
                   <span className="inline-flex items-center rounded-full border border-border bg-bg-tertiary px-1.5 py-0.5 text-[10px] font-medium text-text-secondary">read-only</span>
                   <span className="inline-flex items-center rounded-full border border-border bg-bg-tertiary px-1.5 py-0.5 text-[10px] font-medium text-text-secondary">uses cto agent</span>
-                  <button
-                    className="ml-auto inline-flex items-center gap-1.5 rounded-md border border-accent/30 bg-accent/10 px-2.5 py-1.5 text-xs font-medium text-accent hover:bg-accent/15 cursor-pointer disabled:cursor-not-allowed disabled:opacity-50"
+                  <Button
+                    variant="primary"
+                    size="sm"
+                    className="ml-auto rounded-md border-accent/30 px-2.5 py-1.5 hover:bg-accent/15"
                     onClick={() => void handlePlanIssue()}
                     disabled={issuePlanningBlocked}
                     title={issuePlanningTitle}
@@ -318,7 +323,7 @@ ${idea}`
                       </svg>
                     )}
                     <span>{planning ? 'Planning...' : 'Plan issue'}</span>
-                  </button>
+                  </Button>
                 </div>
               </>
             )}
