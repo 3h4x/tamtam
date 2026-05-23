@@ -20,6 +20,7 @@ import { decidePrContext } from './pr-context';
 import { appendRedactedFileSync } from '@/lib/jobs/redacted-log-writer';
 import { isRetryableRemoteRefRejection } from './push-rejection';
 import { pauseProject } from './pause-project';
+import type { JobData } from '@/lib/jobs/types';
 
 /**
  * Distinguish a genuine merge conflict during a pull/rebase (which needs a human
@@ -45,6 +46,15 @@ export type PushResult =
   | { ok: false; jobId?: string; status: number; detail: string; blockingJobId?: string };
 
 const RETRIABLE_RELEASE_STEP_KINDS = new Set(['test', 'review', 'fix', 'commit', 'push', 'mark-dod', 'pr-wait', 'soak']);
+
+function latestStartedJob(jobs: JobData[], matches: (job: JobData) => boolean): JobData | undefined {
+  let latest: JobData | undefined;
+  for (const job of jobs) {
+    if (!matches(job)) continue;
+    if (!latest || (job.startedAt || 0) > (latest.startedAt || 0)) latest = job;
+  }
+  return latest;
+}
 
 export type ReleaseRetryValidation =
   | { ok: true; parentJobId: string | null; releaseLinkedRetry: boolean }
@@ -77,13 +87,13 @@ export async function validateReleaseLinkedRetry(
     };
   }
 
-  const latestReleaseStep = listJobs()
-    .filter((job) =>
+  const latestReleaseStep = latestStartedJob(
+    listJobs(),
+    (job) =>
       job.project === projectName
       && job.releaseId === normalizedParentJobId
-      && RETRIABLE_RELEASE_STEP_KINDS.has(job.kind)
-    )
-    .sort((a, b) => (b.startedAt || 0) - (a.startedAt || 0))[0];
+      && RETRIABLE_RELEASE_STEP_KINDS.has(job.kind),
+  );
 
   if (
     !latestReleaseStep
@@ -142,8 +152,8 @@ export async function validateReleaseLinkedCommitRetry(
     };
   }
   // Must be the project's most recent release.
-  const allReleases = listJobs().filter((j) => j.project === projectName && j.kind === 'release');
-  const latestRelease = allReleases.sort((a, b) => (b.startedAt || 0) - (a.startedAt || 0))[0];
+  const jobs = listJobs();
+  const latestRelease = latestStartedJob(jobs, (j) => j.project === projectName && j.kind === 'release');
   if (!latestRelease || latestRelease.id !== normalizedParentJobId) {
     return {
       ok: false,
@@ -152,13 +162,13 @@ export async function validateReleaseLinkedCommitRetry(
     };
   }
   // Latest pipeline step on this release must be a failed commit.
-  const latestStep = listJobs()
-    .filter((j) =>
+  const latestStep = latestStartedJob(
+    jobs,
+    (j) =>
       j.project === projectName
       && j.releaseId === normalizedParentJobId
-      && RETRIABLE_RELEASE_STEP_KINDS.has(j.kind)
-    )
-    .sort((a, b) => (b.startedAt || 0) - (a.startedAt || 0))[0];
+      && RETRIABLE_RELEASE_STEP_KINDS.has(j.kind),
+  );
   if (
     !latestStep
     || latestStep.kind !== 'commit'
