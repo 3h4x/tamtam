@@ -51,11 +51,9 @@ export async function detectTestCommand(projPath: string, projectName?: string):
   if (existsSync(join(/*turbopackIgnore: true*/ projPath, 'build.gradle')) || existsSync(join(/*turbopackIgnore: true*/ projPath, 'build.gradle.kts'))) return 'gradle test';
   for (const mk of ['Makefile', 'makefile', 'GNUmakefile']) {
     const p = join(/*turbopackIgnore: true*/ projPath, mk);
-    if (existsSync(/*turbopackIgnore: true*/ p)) {
-      try {
-        if (/^test\s*:/m.test(readFileSync(/*turbopackIgnore: true*/ p, 'utf-8'))) return 'make test';
-      } catch {}
-    }
+    try {
+      if (/^test\s*:/m.test(readFileSync(/*turbopackIgnore: true*/ p, 'utf-8'))) return 'make test';
+    } catch {}
   }
   return null;
 }
