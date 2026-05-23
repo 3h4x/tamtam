@@ -2,6 +2,7 @@
 
 import type { ProjectConfig, CustomAction } from '@/lib/client-api'
 import { getPipelineSteps, type StepToggleContext } from '@/lib/pipeline/pipeline-steps'
+import { Button } from '@/components/ui/Button'
 import { Spinner } from '@/components/ui/Spinner'
 
 const DEFAULT_ACTION_COLOR = '#2563eb'
@@ -535,12 +536,15 @@ export function ConfigTab({
             <h3 className="text-sm font-semibold text-text-primary">Custom Actions</h3>
             <p className="text-xs text-text-tertiary">Bash commands shown as buttons on the project page</p>
           </div>
-          <button
-            className="px-2.5 py-1 text-xs bg-accent text-white rounded hover:bg-accent-hover cursor-pointer transition-colors"
+          <Button
+            type="button"
+            variant="solid"
+            size="sm"
+            className="px-2.5"
             onClick={() => setEditActions([...editActions, { name: '', command: '', color: DEFAULT_ACTION_COLOR }])}
           >
             + Add Action
-          </button>
+          </Button>
         </div>
 
         <div className="px-4 py-3">

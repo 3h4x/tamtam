@@ -136,10 +136,20 @@ curl -s -X PATCH ${base}/api/settings \\
   },
   {
     id: 'quota',
-    title: 'Provider quota',
-    blurb: 'Active quota snapshot. POST force-clears the cache and re-fetches.',
+    title: 'Provider quota + pace',
+    blurb: 'Quota snapshot with pace math. POST force-clears the cache and re-fetches.',
     curl: (base) =>
       `curl -s ${base}/api/usage/quota\ncurl -s '${base}/api/usage/quota?provider=claude'\ncurl -s -X POST ${base}/api/usage/quota`,
+    notes:
+      'Response carries pace (this provider’s 5h/7d fair-share margin: paceMarginPct >0 = under pace, <0 = over, plus projectedPct at reset) and globalPace (the tightest provider+window across enabled providers, with bindingProvider/bindingWindow). Snapshots are persisted to the DB, so a rate-limited or just-restarted provider still appears (marked stale) instead of dropping out of pace.',
+  },
+  {
+    id: 'bridge',
+    title: 'Fleet bridge (pace + shipping status)',
+    blurb: 'One compact rollup: global pace, per-provider pace, and per-project shipping state for every project that has enabled agents.',
+    curl: (base) => `curl -s ${base}/api/stats/bridge`,
+    notes:
+      'projects[] is generic — one row per project with ≥1 enabled non-system agent. Each carries status (releasing | paused | attention | shipping | active | idle), releaseRunning, lastPushAt/lastPushOk, lastReleaseAt/lastReleaseOk, lastAgentAt; summary rolls up the counts. Use it as a single probe for “is the fleet pacing and shipping”.',
   },
   {
     id: 'recommendations',
@@ -164,7 +174,8 @@ const API_REFERENCE: ApiGroup[] = [
       { method: 'GET', path: '/api/monitoring', desc: 'Prometheus/Loki + notification + retention status.' },
       { method: 'GET', path: '/api/stats/usage', desc: 'Token usage. ?window=24h|7d|30d|all.' },
       { method: 'GET', path: '/api/stats/pipeline', desc: 'Pipeline health, verdicts, step durations.' },
-      { method: 'GET', path: '/api/usage/quota', desc: 'Active provider quota snapshot.' },
+      { method: 'GET', path: '/api/stats/bridge', desc: 'Fleet rollup: pace + per-project shipping status.' },
+      { method: 'GET', path: '/api/usage/quota', desc: 'Provider quota snapshot + pace (per-CLI + global).' },
     ],
   },
   {
@@ -252,6 +263,16 @@ const BEHAVIORS: { title: string; body: string }[] = [
     title: 'Release locks',
     body:
       'A release pipeline holds an exclusive project lock for its duration. Agent runs queue with code=pipeline_lock until the lock releases.',
+  },
+  {
+    title: 'Release-first workflow',
+    body:
+      'Release is the priority and runs after a productive agent run. A scheduled agent fire is skipped (then retried shortly) while the project still has a release pipeline running, uncommitted changes, or unpushed commits — so work never piles up un-shipped. The next run only starts once the tree is clean and the previous release has landed. Manual runs still bypass this.',
+  },
+  {
+    title: 'Pace signals',
+    body:
+      'paceMarginPct on /api/usage/quota answers “how much room is left to fair-share pace” per window (>0 under, <0 over); globalPace names the tightest provider+window across the fleet. /api/stats/bridge folds that together with per-project shipping state. Quota snapshots persist to the DB, so a rate-limited provider stays visible (stale) instead of disappearing from pace.',
   },
   {
     title: 'Schedule format',

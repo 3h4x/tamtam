@@ -7,6 +7,7 @@ import type { OllamaStatsResponse } from '@/app/api/stats/ollama/route'
 import { ErrorState } from './ErrorState'
 import { OllamaUsageCard } from './OllamaUsageCard'
 import { QuotaWidget } from './QuotaWidget'
+import { BridgeOverview } from './BridgeOverview'
 import {
   normalizeBudgetSubscriptionProviders,
   type BudgetSubscriptionProvider,
@@ -232,6 +233,8 @@ export function StatsPage() {
           </span>
         </div>
       </div>
+
+      <BridgeOverview />
 
       <QuotaWidget providers={budgetProviders} warnAt={warnAt} blockAt={blockAt} compact />
 
