@@ -50,8 +50,7 @@ export function listProjectDocuments(
       // checking ROOT_DOCS the same way keeps the two entry-points
       // consistent and prevents an accidental symlink at one of the
       // well-known root-doc paths from feeding the symlink target into
-      // retrieval indexing / docs picker. Same pattern as iter 80
-      // (project-logo).
+      // retrieval indexing / docs picker.
       if (lstatSync(/*turbopackIgnore: true*/ fullPath).isFile()) {
         files.add(fullPath);
       }
