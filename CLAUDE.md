@@ -58,7 +58,7 @@ Canonical post-edit command: **`pnpm run rebuild`** (build + idempotent PM2 rest
 
 ## Pages
 
-`/` projects, `/runs` (legacy `/jobs` redirects), `/agents`, `/monitoring`, `/pipeline`, `/recommendations`, `/stats`, `/workflow-runs`, `/workflow-runs/[runId]`, `/logs`, `/skills`, `/settings` → `/settings/general`, `/settings/[tab]`. Per-project: `/project/[name]`, `/project/[name]/[tab]` where tab ∈ `{overview, config, history, terminal, changes, issues, docs, agents}`, plus `/project/[name]/terminal/[sessionId]`, `/project/[name]/release/[releaseId]`, `/project/[name]/task/[task]`.
+`/` projects, `/runs` (legacy `/jobs` redirects), `/agents`, `/agent`, `/library`, `/monitoring`, `/pipeline`, `/recommendations`, `/stats`, `/workflow-runs`, `/workflow-runs/[runId]`, `/logs`, `/skills` (legacy redirect to `/library?tab=skills`), `/settings` → `/settings/general`, `/settings/[tab]`. Per-project: `/project/[name]`, `/project/[name]/[tab]` where tab ∈ `{overview, config, history, terminal, changes, issues, docs, agents}`, plus `/project/[name]/terminal/[sessionId]`, `/project/[name]/release/[releaseId]`, `/project/[name]/task/[task]`.
 
 ## Testing
 

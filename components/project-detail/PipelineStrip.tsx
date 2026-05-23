@@ -6,6 +6,7 @@ import { useState } from 'react'
 import { pushProject } from '@/lib/client-api'
 import type { JobInfo, ProjectConfig } from '@/lib/client-api'
 import { useToast } from '@/components/Toast'
+import { Spinner } from '@/components/ui/Spinner'
 import { formatAgo } from '@/lib/shared/format'
 
 type StepState = 'pending' | 'running' | 'done' | 'warning' | 'failed' | 'skipped'
@@ -748,7 +749,7 @@ export function PipelineStrip({
                 title={jobsPaused ? 'Jobs are paused globally. Resume jobs to start a push.' : 'Retry push'}
               >
                 {retryingPush
-                  ? <span className="inline-block w-2 h-2 rounded-full border border-current border-t-transparent animate-spin" />
+                  ? <Spinner size="xs" />
                   : '↻'}
               </button>
             )}
@@ -778,7 +779,7 @@ export function PipelineStrip({
               disabled={aborting}
               title="Confirm abort"
             >{aborting
-              ? <span className="inline-block w-2 h-2 rounded-full border border-current border-t-transparent animate-spin" />
+              ? <Spinner size="xs" />
               : 'yes'
             }</button>
             <button

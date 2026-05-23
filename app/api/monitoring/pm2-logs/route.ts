@@ -1,5 +1,5 @@
 import { NextResponse } from 'next/server';
-import { statSync, openSync, readSync, closeSync, fstatSync } from 'fs';
+import { openSync, readSync, closeSync, fstatSync } from 'fs';
 import { homedir } from 'os';
 import { join } from 'path';
 
@@ -16,19 +16,28 @@ const DEFAULT_TAIL_BYTES = 64 * 1024;
 // PM2 error log is routinely hundreds of MB, so readFile is not viable.
 // Returns { raw, truncated } — truncated=true when we read less than the full file
 // and the first line may be partial.
-function tailBytes(path: string, bytes: number): { raw: string; truncated: boolean } {
+function tailBytes(path: string, bytes: number): {
+  raw: string;
+  truncated: boolean;
+  size: number;
+  mtime: string;
+} {
   const fd = openSync(/*turbopackIgnore: true*/ path, 'r');
   try {
-    // fstatSync(fd) instead of statSync(path) so the size lookup is bound to
-    // the open file descriptor. Otherwise PM2's log rotation (rename + new
-    // file) between openSync and statSync would have us reading the old
-    // inode's data using the new file's size.
-    const size = fstatSync(fd).size;
+    // Bind size/mtime to the opened fd so PM2 log rotation cannot split the
+    // metadata and tail read across different files.
+    const stats = fstatSync(fd);
+    const size = stats.size;
     const readLen = Math.min(bytes, size);
     const offset = size - readLen;
     const buf = Buffer.alloc(readLen);
     readSync(fd, buf, 0, readLen, offset);
-    return { raw: buf.toString('utf8'), truncated: offset > 0 };
+    return {
+      raw: buf.toString('utf8'),
+      truncated: offset > 0,
+      size,
+      mtime: stats.mtime.toISOString(),
+    };
   } finally {
     closeSync(fd);
   }
@@ -84,9 +93,8 @@ export async function GET(request: Request): Promise<NextResponse> {
   if (searchParams.get('out') !== '0') targets.push([outPath, 'out']);
   for (const [path, source] of targets) {
     try {
-      const st = statSync(/*turbopackIgnore: true*/ path);
-      fileStats.push({ path, size: st.size, mtime: st.mtime.toISOString() });
-      const { raw, truncated } = tailBytes(path, DEFAULT_TAIL_BYTES);
+      const { raw, truncated, size, mtime } = tailBytes(path, DEFAULT_TAIL_BYTES);
+      fileStats.push({ path, size, mtime });
       entries.push(...parseLines(raw, source, limit, truncated));
     } catch (e) {
       fileStats.push({ path, size: null, mtime: null, error: e instanceof Error ? e.message : 'unavailable' });

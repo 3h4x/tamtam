@@ -1,4 +1,4 @@
-import { existsSync, readFileSync, statSync } from 'fs';
+import { closeSync, fstatSync, openSync, readFileSync } from 'fs';
 import { relative } from 'path';
 import { inArray, eq } from 'drizzle-orm';
 import { db, schema } from '@/lib/db';
@@ -90,6 +90,21 @@ function buildProjectConfigText(projectPath: string, project: {
   return lines.length > 1 ? lines.join('\n\n') : '';
 }
 
+function readProjectDocument(filePath: string): { text: string; updatedAt: number } | null {
+  let fd: number | null = null;
+  try {
+    fd = openSync(/*turbopackIgnore: true*/ filePath, 'r');
+    const text = readFileSync(fd, 'utf-8');
+    const stats = fstatSync(fd);
+    return { text, updatedAt: stats.mtimeMs / 1000 };
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException).code === 'ENOENT') return null;
+    throw error;
+  } finally {
+    if (fd !== null) closeSync(fd);
+  }
+}
+
 async function collectEffectiveProjectSkillIds(project: string, projectPath: string): Promise<string[]> {
   const agentRows = await db.select({ name: schema.agents.name, skillIds: schema.agents.skillIds })
     .from(schema.agents)
@@ -110,8 +125,9 @@ export async function collectProjectRetrievalSources(project: string, projectPat
   const branchContext = getBranchContext(projectPath);
 
   for (const filePath of listProjectDocuments(projectPath, { includeAgentDocs: branchContext.isDefaultBranch })) {
-    if (!existsSync(/*turbopackIgnore: true*/ filePath)) continue;
-    const text = readFileSync(/*turbopackIgnore: true*/ filePath, 'utf-8');
+    const document = readProjectDocument(filePath);
+    if (!document) continue;
+    const { text, updatedAt } = document;
     if (!text.trim()) continue;
     // Use `path.relative` instead of a string-replace with a hardcoded
     // '/' separator. `listProjectDocuments` returns paths joined with
@@ -126,7 +142,7 @@ export async function collectProjectRetrievalSources(project: string, projectPat
       sourceId,
       text,
       metadata: { filePath: sourceId },
-      updatedAt: statSync(/*turbopackIgnore: true*/ filePath).mtimeMs / 1000,
+      updatedAt,
     });
   }
 

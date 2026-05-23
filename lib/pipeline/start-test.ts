@@ -32,14 +32,12 @@ export async function detectTestCommand(projPath: string, projectName?: string):
     return existsSync(/*turbopackIgnore: true*/ venvPython) ? `${venvPython} -m pytest` : 'python3 -m pytest';
   }
   const pkgJson = join(/*turbopackIgnore: true*/ projPath, 'package.json');
-  if (existsSync(/*turbopackIgnore: true*/ pkgJson)) {
-    try {
-      const pkg = JSON.parse(readFileSync(/*turbopackIgnore: true*/ pkgJson, 'utf-8'));
-      if (pkg.scripts?.test) {
-        return existsSync(join(/*turbopackIgnore: true*/ projPath, 'pnpm-lock.yaml')) ? 'pnpm test' : 'npm test';
-      }
-    } catch {}
-  }
+  try {
+    const pkg = JSON.parse(readFileSync(/*turbopackIgnore: true*/ pkgJson, 'utf-8'));
+    if (pkg.scripts?.test) {
+      return existsSync(join(/*turbopackIgnore: true*/ projPath, 'pnpm-lock.yaml')) ? 'pnpm test' : 'npm test';
+    }
+  } catch {}
   if (existsSync(join(/*turbopackIgnore: true*/ projPath, 'foundry.toml'))) return 'forge test';
   if (existsSync(join(/*turbopackIgnore: true*/ projPath, 'Package.swift'))) {
     // Guard against triggering macOS Xcode GUI dialogs when running headless.

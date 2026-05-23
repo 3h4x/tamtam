@@ -15,6 +15,8 @@ import type { CliTabSettings } from '@/components/settings/CliTab'
 import { TrustedGithubUsersField } from '@/components/settings/TrustedGithubUsersField'
 import { dispatchSettingsChanged } from '@/lib/shared/settings-events'
 import { parseEnabledProviders } from '@/lib/usage/cli-providers'
+import { StandardTabs } from '@/components/ui/StandardTabs'
+import { Spinner } from '@/components/ui/Spinner'
 
 interface SettingsMap {
   workspace_path: string
@@ -394,7 +396,7 @@ export function SettingsPage({ initialTab }: { initialTab?: TabId } = {}) {
                            'bg-accent/40 cursor-default'
             } ${saving ? 'opacity-70 cursor-wait' : ''}`}
           >
-            {saving && <span className="inline-block w-3 h-3 rounded-full border-2 border-white border-t-transparent animate-spin shrink-0" />}
+            {saving && <Spinner color="white" shrink />}
             {saving ? 'Saving…' : saved ? 'Saved!' : 'Save Settings'}
           </button>
         </div>
@@ -426,21 +428,12 @@ export function SettingsPage({ initialTab }: { initialTab?: TabId } = {}) {
           )}
 
           {/* Tabs */}
-          <nav className="flex gap-1 border-b border-border">
-            {TABS.map((tab) => (
-              <button
-                key={tab.id}
-                onClick={() => switchTab(tab.id)}
-                className={`px-3 py-1.5 text-sm cursor-pointer transition-colors ${
-                  activeTab === tab.id
-                    ? 'border-b-2 border-accent text-accent -mb-px'
-                    : 'text-text-secondary hover:text-text-primary border-b-2 border-transparent -mb-px'
-                }`}
-              >
-                {tab.label}
-              </button>
-            ))}
-          </nav>
+          <StandardTabs
+            items={TABS}
+            activeTab={activeTab}
+            ariaLabel="Settings navigation"
+            onChange={switchTab}
+          />
 
           {GROUPS.filter((group) => group.id === activeTab).map((group) => {
             const allGroupFields = (Object.keys(FIELDS) as SettingsFieldKey[]).filter(
@@ -792,7 +785,7 @@ export function SettingsPage({ initialTab }: { initialTab?: TabId } = {}) {
                           projectsSaved ? 'bg-status-success' : 'bg-accent hover:bg-accent-hover'
                         } ${projectsSaving ? 'opacity-70 cursor-wait' : ''}`}
                       >
-                        {projectsSaving && <span className="inline-block w-3 h-3 rounded-full border-2 border-white border-t-transparent animate-spin shrink-0" />}
+                        {projectsSaving && <Spinner color="white" shrink />}
                         {projectsSaving ? 'Saving…' : projectsSaved ? 'Saved!' : `Save (${enabledCount} enabled)`}
                       </button>
                     </div>

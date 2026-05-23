@@ -2,6 +2,7 @@
 
 import type { ProjectConfig, CustomAction } from '@/lib/client-api'
 import { getPipelineSteps, type StepToggleContext } from '@/lib/pipeline/pipeline-steps'
+import { Spinner } from '@/components/ui/Spinner'
 
 const DEFAULT_ACTION_COLOR = '#2563eb'
 const LEGACY_ACTION_COLORS: Record<string, string> = {
@@ -180,7 +181,7 @@ export function ConfigTab({
             onClick={onSaveAll}
             disabled={anySaving || !anyDirty}
           >
-            {anySaving && <span className="inline-block w-3 h-3 rounded-full border-2 border-white border-t-transparent animate-spin shrink-0" />}
+            {anySaving && <Spinner color="white" shrink />}
             {anySaving ? 'Saving…' : allSaved ? 'Saved!' : 'Save'}
           </button>
         </div>

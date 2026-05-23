@@ -1,7 +1,7 @@
 ---
 provider: codex
 model: smart
-schedule: 1h
+schedule: 30m
 skillIds: ["persona:engineering-team/senior-fullstack"]
 prerequisiteCommand: ""
 ---
