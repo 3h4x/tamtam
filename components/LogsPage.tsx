@@ -1,6 +1,7 @@
 'use client'
 
 import { useState, useEffect } from 'react'
+import { Button } from '@/components/ui/Button'
 import { fetchProjects, fetchProjectLogs } from '@/lib/client-api'
 import type { LogEntry } from '@/lib/client-api'
 
@@ -103,12 +104,13 @@ export function LogsPage() {
               <path strokeLinecap="round" strokeLinejoin="round" d="M12 9v3.75m0 3.75h.008v.008H12v-.008zM21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
             </svg>
             <p className="text-sm text-text-secondary">{projectsError}</p>
-            <button
-              className="px-3 py-1.5 text-xs border border-border rounded-md text-text-primary hover:bg-bg-tertiary cursor-pointer"
+            <Button
+              size="sm"
+              className="px-3 py-1.5 rounded-md bg-transparent font-normal"
               onClick={loadProjects}
             >
               Retry
-            </button>
+            </Button>
           </div>
         ) : projects.length === 0 ? (
           <div className="flex flex-col items-center justify-center py-12 gap-2 text-center">
@@ -143,12 +145,13 @@ export function LogsPage() {
             <path strokeLinecap="round" strokeLinejoin="round" d="M12 9v3.75m0 3.75h.008v.008H12v-.008zM21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
           </svg>
           <p className="text-sm text-text-secondary">{logsError}</p>
-          <button
-            className="px-3 py-1.5 text-xs border border-border rounded-md text-text-primary hover:bg-bg-tertiary cursor-pointer"
+          <Button
+            size="sm"
+            className="px-3 py-1.5 rounded-md bg-transparent font-normal"
             onClick={() => selectedProject && loadLogs(selectedProject)}
           >
             Retry
-          </button>
+          </Button>
         </div>
       ) : (
         <>
