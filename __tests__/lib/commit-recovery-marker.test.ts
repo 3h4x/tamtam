@@ -68,4 +68,18 @@ describe('default dirty commit recovery marker', () => {
       hasDefaultDirtyCommitRecoveryMarker('proj', dir, ' M src/index.ts\n', failedAt + 120_000),
     ).resolves.toBe(false);
   });
+
+  it('accepts a matching dirty status when the dirty path is already gone', async () => {
+    const failedAt = Date.parse('2026-05-23T10:00:00Z');
+    const {
+      hasDefaultDirtyCommitRecoveryMarker,
+      setDefaultDirtyCommitRecoveryMarker,
+    } = await import('@/lib/pipeline/commit-recovery-marker');
+
+    await setDefaultDirtyCommitRecoveryMarker('proj', ' D src/removed.ts\n', 'commit-1', failedAt);
+
+    await expect(
+      hasDefaultDirtyCommitRecoveryMarker('proj', dir, ' D src/removed.ts\n', failedAt + 120_000),
+    ).resolves.toBe(true);
+  });
 });

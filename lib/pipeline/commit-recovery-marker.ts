@@ -1,4 +1,4 @@
-import { existsSync, readdirSync, statSync } from 'fs';
+import { readdirSync, statSync } from 'fs';
 import { join } from 'path';
 import { eq } from 'drizzle-orm';
 import { db, schema } from '@/lib/db';
@@ -60,18 +60,22 @@ function pathTreeNotNewerThanMarker(fullPath: string, maxMtimeMs: number): boole
   return true;
 }
 
+function isMissingPathError(err: unknown): boolean {
+  return (err as NodeJS.ErrnoException).code === 'ENOENT';
+}
+
 function dirtyFilesNotNewerThanMarker(projPath: string, status: string, failedAt: number): boolean {
   const paths = dirtyStatusPaths(status);
   if (!paths) return false;
   const maxMtimeMs = failedAt + 1000;
   for (const relPath of paths) {
     const fullPath = join(/*turbopackIgnore: true*/ projPath, relPath);
-    if (!existsSync(/*turbopackIgnore: true*/ fullPath)) continue;
     try {
       if (!pathTreeNotNewerThanMarker(fullPath, maxMtimeMs)) {
         return false;
       }
-    } catch {
+    } catch (err) {
+      if (isMissingPathError(err)) continue;
       return false;
     }
   }
