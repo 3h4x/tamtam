@@ -26,6 +26,7 @@ describe('GET /api/projects/personas', () => {
 
   afterEach(() => {
     vi.resetModules();
+    vi.doUnmock('fs');
     rmSync(tempDir, { recursive: true, force: true });
   });
 
@@ -143,5 +144,37 @@ describe('GET /api/projects/personas', () => {
 
     const second = await GET();
     expect((await second.json()).personas).toEqual([]);
+  });
+
+  it('skips a category directory that disappears during scan', async () => {
+    vi.resetModules();
+
+    const base = join(skillsDir, 'docs', 'skills');
+    const vanishedCat = join(base, 'vanished');
+    mkdirSync(vanishedCat, { recursive: true });
+
+    vi.doMock('fs', async (importOriginal) => {
+      const actual = await importOriginal<typeof import('fs')>();
+      return {
+        ...actual,
+        readdirSync: ((pathArg: Parameters<typeof actual.readdirSync>[0], options?: Parameters<typeof actual.readdirSync>[1]) => {
+          if (String(pathArg) === vanishedCat) {
+            const err = new Error('ENOENT: no such file or directory');
+            (err as NodeJS.ErrnoException).code = 'ENOENT';
+            throw err;
+          }
+          return actual.readdirSync(pathArg, options as never);
+        }) as typeof actual.readdirSync,
+      };
+    });
+    vi.doMock('@/lib/skills/skills', () => ({
+      SKILLS_DIR: skillsDir,
+      DATA_SKILLS_DIR: dataSkillsDir,
+    }));
+
+    const mod = await import('@/app/api/projects/personas/route');
+    const res = await mod.GET();
+    expect(res.status).toBe(200);
+    expect((await res.json()).personas).toEqual([]);
   });
 });

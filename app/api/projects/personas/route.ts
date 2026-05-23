@@ -29,7 +29,13 @@ function scanDir(base: string, personas: Persona[]) {
     if (!catEntry.isDirectory()) continue;
     const catDir = join(base, catEntry.name);
     const category = catEntry.name;
-    for (const entry of readdirSync(/*turbopackIgnore: true*/ catDir, { withFileTypes: true })) {
+    let entries: Dirent[];
+    try {
+      entries = readdirSync(/*turbopackIgnore: true*/ catDir, { withFileTypes: true });
+    } catch {
+      continue;
+    }
+    for (const entry of entries) {
       if (!entry.isFile() || !entry.name.endsWith('.md') || entry.name === 'index.md') continue;
       const fpath = join(catDir, entry.name);
       const slug = entry.name.replace('.md', '');
