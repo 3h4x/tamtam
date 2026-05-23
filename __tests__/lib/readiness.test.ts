@@ -59,6 +59,13 @@ function makeExecutable(dir: string, name: string): string {
   return file;
 }
 
+function makeNonExecutable(dir: string, name: string): string {
+  const file = join(dir, name);
+  writeFileSync(file, '#!/usr/bin/env bash\nexit 0\n');
+  chmodSync(file, 0o644);
+  return file;
+}
+
 describe('readiness checks', () => {
   let tempDir: string;
 
@@ -104,6 +111,22 @@ describe('readiness checks', () => {
       name: 'provider:claude',
       ok: false,
       severity: 'error',
+    }));
+  });
+
+  it('fails when the provider shim exists but is not executable', async () => {
+    const shim = makeNonExecutable(tempDir, 'claude-shim-not-executable');
+    mocks.resolveCliBinMock.mockReturnValue(shim);
+    const { getReadinessReport } = await import('@/lib/shared/readiness');
+
+    const report = await getReadinessReport({ projectName: 'proj', provider: 'claude', includeQuota: false });
+
+    expect(report.ok).toBe(false);
+    expect(report.checks).toContainEqual(expect.objectContaining({
+      name: 'provider:claude',
+      ok: false,
+      severity: 'error',
+      message: `Configured claude shim is not executable: ${shim}`,
     }));
   });
 
