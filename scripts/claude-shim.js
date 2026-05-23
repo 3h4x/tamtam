@@ -19,7 +19,7 @@
 const { spawn } = require('child_process');
 const { homedir } = require('os');
 const { join } = require('path');
-const { installInactivityWatchdog } = require('./shim-utils');
+const { installInactivityWatchdog, installSignalForwarding } = require('./shim-utils');
 
 const TIER_DEFAULTS = {
   fast: 'haiku',
@@ -68,7 +68,10 @@ if (require.main === module) {
   // Pipe stdout/stderr so the inactivity watchdog can observe data events,
   // then forward each chunk to the parent's stdout/stderr so streaming
   // output and exit codes pass through unchanged.
-  const child = spawn(bin, out, { stdio: ['inherit', 'pipe', 'pipe'], env: process.env });
+  let child;
+  const signalForwarding = installSignalForwarding(() => child);
+  child = spawn(bin, out, { stdio: ['inherit', 'pipe', 'pipe'], env: process.env });
+  signalForwarding.forwardPending();
 
   const watchdog = installInactivityWatchdog(child, { shimName: 'claude-shim' });
   child.stdout.on('data', (chunk) => {
@@ -80,21 +83,14 @@ if (require.main === module) {
     process.stderr.write(chunk);
   });
 
-  function forward(sig) {
-    return () => {
-      try { child.kill(sig); } catch { /* child may already be gone */ }
-    };
-  }
-  process.on('SIGTERM', forward('SIGTERM'));
-  process.on('SIGINT', forward('SIGINT'));
-  process.on('SIGHUP', forward('SIGHUP'));
-
   child.on('error', (err) => {
+    signalForwarding.dispose();
     watchdog.dispose();
     process.stderr.write(`[claude-shim] failed to launch ${bin}: ${err.message}\n`);
     process.exit(1);
   });
   child.on('close', (code, signal) => {
+    signalForwarding.dispose();
     watchdog.dispose();
     if (watchdog.timedOut()) {
       process.stderr.write(`[claude-shim] killed by inactivity watchdog\n`);

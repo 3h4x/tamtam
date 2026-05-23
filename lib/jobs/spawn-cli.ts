@@ -117,7 +117,7 @@ export async function runSubprocess(params: RunSubprocessParams): Promise<RunSub
       else abortSignal.addEventListener('abort', onAbort, { once: true });
     }
 
-    child.on('exit', (code, signal) => {
+    child.on('close', (code, signal) => {
       // Mirror job-runner.js's rc computation: signal → 128 + signum.
       let rc: number;
       if (code != null) {
