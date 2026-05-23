@@ -2,6 +2,7 @@
 
 import { useEffect, useRef, useState } from 'react'
 import type { Skill } from '@/lib/client-api'
+import { Button } from '@/components/ui/Button'
 import { Spinner } from '@/components/ui/Spinner'
 
 export function SkillEditor({
@@ -79,27 +80,30 @@ export function SkillEditor({
         </h3>
         <div className="flex items-center gap-2">
           {onDelete && (
-            <button
-              className="px-3 py-1.5 text-sm text-status-error border border-status-error rounded-md hover:bg-status-error/10 cursor-pointer"
+            <Button
+              type="button"
+              variant="danger"
               onClick={onDelete}
             >
               Delete
-            </button>
+            </Button>
           )}
-          <button
-            className="px-3 py-1.5 text-sm border border-border rounded-md bg-bg-secondary text-text-primary hover:bg-bg-tertiary cursor-pointer"
+          <Button
+            type="button"
+            variant="secondary"
             onClick={onCancel}
           >
             {skill ? 'Close' : 'Cancel'}
-          </button>
-          <button
-            className="px-3 py-1.5 text-sm bg-accent text-white rounded-md hover:bg-accent-hover cursor-pointer inline-flex items-center gap-1.5"
+          </Button>
+          <Button
+            type="button"
+            variant="solid"
             onClick={handleSave}
             disabled={!name.trim() || saving}
           >
             {saving && <Spinner color="white" shrink />}
             {saving ? 'Saving…' : saved ? 'Saved ✓' : 'Save'}
-          </button>
+          </Button>
         </div>
       </div>
 
