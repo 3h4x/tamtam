@@ -1,6 +1,7 @@
 'use client'
 
 import { useState } from 'react'
+import { Button } from '@/components/ui/Button'
 import { MODEL_TIERS, MODEL_LABELS, normalizeModelInput } from '@/lib/agents/model-aliases'
 
 export interface AgentTemplateRecord {
@@ -94,19 +95,16 @@ function TemplateForm({
         />
       </div>
       <div className="flex items-center gap-2 justify-end">
-        <button
-          onClick={onCancel}
-          className="px-3 py-1.5 text-sm border border-border rounded-lg text-text-secondary hover:text-text-primary hover:bg-bg-tertiary cursor-pointer transition-colors"
-        >
+        <Button onClick={onCancel} className="text-text-secondary">
           Cancel
-        </button>
-        <button
+        </Button>
+        <Button
+          variant="solid"
           onClick={onSave}
           disabled={!form.name.trim()}
-          className="px-3 py-1.5 text-sm bg-accent text-white rounded-lg hover:bg-accent-hover cursor-pointer transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
         >
           {isEdit ? 'Save' : 'Add Template'}
-        </button>
+        </Button>
       </div>
     </div>
   )
@@ -151,12 +149,14 @@ export function AgentTemplatesTab({ value, onChange }: { value: string; onChange
           <p className="text-xs text-text-tertiary">Custom templates shown in the Recommended section on each project</p>
         </div>
         {editing === null && (
-          <button
+          <Button
+            variant="solid"
+            size="sm"
             onClick={openNew}
-            className="px-3 py-1.5 text-xs bg-accent text-white rounded-md hover:bg-accent-hover cursor-pointer transition-colors"
+            className="px-3 py-1.5 rounded-md"
           >
             + Add Template
-          </button>
+          </Button>
         )}
       </div>
 
@@ -179,18 +179,21 @@ export function AgentTemplatesTab({ value, onChange }: { value: string; onChange
                 {t.description && <span className="text-xs text-text-tertiary truncate hidden sm:block">{t.description}</span>}
               </div>
               <div className="flex items-center gap-2 shrink-0">
-                <button
+                <Button
+                  size="sm"
                   onClick={() => openEdit(i)}
-                  className="px-2.5 py-1 text-xs border border-border rounded bg-bg-secondary text-text-secondary hover:text-text-primary hover:bg-bg-tertiary cursor-pointer transition-colors"
+                  className="px-2.5 text-text-secondary"
                 >
                   Edit
-                </button>
-                <button
+                </Button>
+                <Button
+                  variant="danger"
+                  size="sm"
                   onClick={() => remove(i)}
-                  className="px-2.5 py-1 text-xs border border-status-error/30 rounded text-status-error hover:bg-status-error/10 cursor-pointer transition-colors"
+                  className="px-2.5"
                 >
                   Delete
-                </button>
+                </Button>
               </div>
             </div>
           )
