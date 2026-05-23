@@ -1,6 +1,6 @@
 // Reconciler for stranded branches + out-of-sync default branches.
 //
-// Two scenarios, same sweep:
+// Three scenarios, same sweep:
 //
 //   1. Stranded `fix/issue-*` branch — the cron task's prereqSkipReason
 //      skips fires while the project sits on a non-default branch; the
@@ -14,6 +14,11 @@
 //      remote default. We launch a push (which `runPush` extends with an
 //      auto-rebase when `behind > 0`) so both pull and push happen in a
 //      single shot without going through the full test→review pipeline.
+//
+//   3. Dirty default branch with release provenance — a pending release or
+//      a current failed-commit recovery marker proves the dirty tree is
+//      TamTam-owned recovery work. Bare dirty default branches are left
+//      alone so human WIP is not released by the background sweep.
 //
 // Cooldown + attempt cap prevent hammering a project whose release / push
 // keeps failing.
@@ -48,7 +53,7 @@ const TAMTAM_BRANCH_PATTERN = /^fix\/issue-\d+/;
 const lastAttemptAt = new Map<string, number>();
 const attemptCount = new Map<string, number>();
 
-export type StrandedKind = 'fix-branch' | 'empty-fix-branch' | 'default-out-of-sync';
+export type StrandedKind = 'fix-branch' | 'empty-fix-branch' | 'default-out-of-sync' | 'default-dirty';
 
 export interface StrandedCandidate {
   project: string;
@@ -134,6 +139,31 @@ async function readAheadBehind(path: string): Promise<{ ahead: number; behind: n
   const m = line.match(/\+(\d+)\s+-(\d+)/);
   if (!m) return null;
   return { ahead: parseInt(m[1], 10) || 0, behind: parseInt(m[2], 10) || 0 };
+}
+
+async function hasPendingRelease(project: string): Promise<boolean> {
+  try {
+    const { getPendingRelease } = await import('@/lib/pipeline/pending-release');
+    return await getPendingRelease(project);
+  } catch {
+    return false;
+  }
+}
+
+async function hasDirtyDefaultReleaseEvidence(
+  project: string,
+  path: string,
+  dirtyStatus: string,
+  nowMs: number,
+): Promise<boolean> {
+  if (await hasPendingRelease(project)) return true;
+
+  try {
+    const { hasDefaultDirtyCommitRecoveryMarker } = await import('@/lib/pipeline/commit-recovery-marker');
+    return await hasDefaultDirtyCommitRecoveryMarker(project, path, dirtyStatus, nowMs);
+  } catch {
+    return false;
+  }
 }
 
 /**
@@ -223,6 +253,30 @@ export async function findStrandedBranches(nowMs: number = Date.now()): Promise<
       });
       continue;
     }
+    // Default branch with a DIRTY worktree is only recoverable when durable
+    // TamTam state proves release intent. A bare dirty default branch may be
+    // human WIP, so leave it alone instead of auto-committing it from the
+    // background probe sweep.
+    const dirtyStatus = await gitStatusPorcelain(path);
+    if (dirtyStatus && dirtyStatus.trim().length > 0) {
+      if (await hasDirtyDefaultReleaseEvidence(p.name, path, dirtyStatus, nowMs)) {
+        out.push({
+          project: p.name,
+          path,
+          branch: state.current,
+          defaultBranch: state.def,
+          kind: 'default-dirty',
+          ahead: 0,
+          behind: 0,
+          reason: `default ${state.def} has uncommitted changes (orphaned by an interrupted release)`,
+        });
+      }
+      // No release evidence means the dirty default branch is human WIP.
+      // Do not fall through to default-out-of-sync push recovery: push can
+      // run hooks that mutate the worktree, and recovery must not commit or
+      // ship ordinary local edits from the background sweep.
+      continue;
+    }
     const ab = await readAheadBehind(path);
     if (!ab) continue;
     if (ab.ahead === 0 && ab.behind === 0) continue;
@@ -265,7 +319,10 @@ export async function reconcileStrandedBranches(
     lastAttemptAt.set(c.project, nowMs);
     attemptCount.set(c.project, count + 1);
     try {
-      if (c.kind === 'fix-branch') {
+      if (c.kind === 'fix-branch' || c.kind === 'default-dirty') {
+        // Both need the full release pipeline to commit (then push) the work:
+        // a fix-branch has unshipped commits/dirt on a feature branch; a
+        // default-dirty has uncommitted changes on the default branch.
         const { start } = await import('workflow/api');
         const { releaseWorkflow } = await import('@/lib/workflows/release');
         const run = await start(releaseWorkflow, [c.project, { queueIfBlocked: true }]);

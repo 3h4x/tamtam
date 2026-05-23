@@ -30,6 +30,9 @@ describe('instrumentation', () => {
     vi.unstubAllEnvs();
     vi.clearAllMocks();
     vi.resetModules();
+    vi.doUnmock('@/lib/pipeline/start-pr-wait');
+    vi.doUnmock('@/lib/shared/enabled-projects');
+    vi.doUnmock('@/lib/jobs/stranded-branch-reconcile');
   });
 
   function mockDeps(agents: unknown[], options: { abortActiveRelease?: ReturnType<typeof vi.fn> } = {}) {
@@ -40,6 +43,9 @@ describe('instrumentation', () => {
     vi.doMock('@/lib/db', () => dbMock);
     vi.doMock('@/lib/shared/shell', () => ({ exec: noopExec }));
     vi.doMock('@/lib/pipeline/release-abort', () => ({ abortActiveRelease }));
+    vi.doMock('@/lib/jobs/stranded-branch-reconcile', () => ({
+      reconcileStrandedBranches: vi.fn().mockResolvedValue({ triggered: [], skipped: [] }),
+    }));
     vi.doMock('drizzle-orm', () => ({ isNotNull: vi.fn(v => v), eq: vi.fn((_a, b) => b), and: vi.fn((...args) => args) }));
   }
 
@@ -93,7 +99,12 @@ describe('instrumentation', () => {
       vi.doMock('@/lib/db', () => ({ db: dbMock, schema: schemaMock }));
       vi.doMock('@/lib/jobs/job-storage', () => jobStorageMock);
       vi.doMock('@/lib/jobs/storage', () => jobStorageMock);
-      vi.doMock('@/lib/shared/enabled-projects', () => ({ refreshProjectsCacheSync: vi.fn().mockResolvedValue(undefined) }));
+      vi.doMock('@/lib/shared/enabled-projects', () => ({
+        refreshProjectsCacheSync: vi.fn().mockResolvedValue(undefined),
+        listEnabledProjects: vi.fn(() => []),
+        isProjectArchived: vi.fn(() => false),
+        isProjectPaused: vi.fn(() => false),
+      }));
       vi.doMock('@/lib/agents/default-agent-skills', () => ({ backfillIssueCruncherPrerequisites: vi.fn().mockResolvedValue(undefined) }));
       vi.doMock('@/lib/jobs/verdict', () => ({ getVerdict: vi.fn(() => null) }));
       vi.doMock('@/lib/pipeline/release-abort', () => ({ abortActiveRelease: vi.fn().mockResolvedValue(undefined) }));
@@ -101,6 +112,9 @@ describe('instrumentation', () => {
       vi.doMock('@/lib/workflows/triggers/job-completion-router', () => ({ consumeJobCompletionEvents: vi.fn().mockResolvedValue(undefined) }));
       vi.doMock('@/lib/workflows/triggers/pipeline-lock-router', () => ({ consumePipelineLockEvents: vi.fn().mockResolvedValue(undefined) }));
       vi.doMock('@/lib/jobs/resource-sampler', () => ({ sampleRunningJobResources: vi.fn().mockResolvedValue(undefined) }));
+      vi.doMock('@/lib/jobs/stranded-branch-reconcile', () => ({
+        reconcileStrandedBranches: vi.fn().mockResolvedValue({ triggered: [], skipped: [] }),
+      }));
       vi.doMock('@/lib/shared/config', () => ({
         getSettings: vi.fn(() => ({
           retrieval_enabled: false,

@@ -1,10 +1,27 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
+import type { JobData } from '@/lib/jobs/types';
 
 // `findStrandedBranches` is pure-ish: it reads project list, project path,
 // pipeline lock state, running jobs, and shells out to git. We stub all of
 // those so the test is hermetic.
 
 interface GitResp { exitCode: number; stdout: string; stderr?: string }
+
+function makeJob(overrides: Partial<JobData> & Pick<JobData, 'id' | 'kind'>): JobData {
+  return {
+    id: overrides.id,
+    project: overrides.project ?? 'proj',
+    kind: overrides.kind,
+    prompt: null,
+    pid: 99999,
+    logPath: null,
+    startedAt: overrides.startedAt ?? 100,
+    finishedAt: overrides.finishedAt ?? null,
+    exitCode: overrides.exitCode ?? null,
+    seen: false,
+    releaseId: overrides.releaseId ?? null,
+  };
+}
 
 function gitStub(map: Record<string, GitResp>) {
   return vi.fn(async (_cmd: string, args: string[]) => {
@@ -19,7 +36,10 @@ function gitStub(map: Record<string, GitResp>) {
   });
 }
 
-function withCommonStubs(gitResponses: Record<string, GitResp>) {
+function withCommonStubs(
+  gitResponses: Record<string, GitResp>,
+  options: { jobs?: JobData[]; pendingRelease?: boolean; commitRecoveryMarker?: boolean } = {},
+) {
   const exec = gitStub(gitResponses);
   vi.doMock('@/lib/shared/enabled-projects', () => ({
     listEnabledProjects: () => [{ name: 'proj' }],
@@ -34,10 +54,16 @@ function withCommonStubs(gitResponses: Record<string, GitResp>) {
     isLockOwnedByActiveRelease: async () => false,
   }));
   vi.doMock('@/lib/jobs/job-storage', () => ({
-    listJobs: () => [],
+    listJobs: () => options.jobs ?? [],
   }));
   vi.doMock('@/lib/jobs/kinds', () => ({
     isAgentJobKind: () => false,
+  }));
+  vi.doMock('@/lib/pipeline/pending-release', () => ({
+    getPendingRelease: vi.fn().mockResolvedValue(!!options.pendingRelease),
+  }));
+  vi.doMock('@/lib/pipeline/commit-recovery-marker', () => ({
+    hasDefaultDirtyCommitRecoveryMarker: vi.fn().mockResolvedValue(!!options.commitRecoveryMarker),
   }));
   vi.doMock('@/lib/shared/shell', () => ({ exec }));
   return { exec };
@@ -152,6 +178,112 @@ describe('findStrandedBranches', () => {
     const { findStrandedBranches } = await import('@/lib/jobs/stranded-branch-reconcile');
     const candidates = await findStrandedBranches(Date.now());
 
+    expect(candidates).toEqual([]);
+  });
+
+  it('emits no candidate for a dirty default branch without release evidence', async () => {
+    withCommonStubs({
+      'branch --show-current': { exitCode: 0, stdout: 'main' },
+      'symbolic-ref refs/remotes/origin/HEAD': { exitCode: 0, stdout: 'refs/remotes/origin/main' },
+      'status --porcelain': { exitCode: 0, stdout: ' M app/components/indexnow-button.tsx' },
+      'status --porcelain=v2 --branch': { exitCode: 0, stdout: '# branch.ab +0 -0' },
+    });
+    const { findStrandedBranches } = await import('@/lib/jobs/stranded-branch-reconcile');
+    const candidates = await findStrandedBranches(Date.now());
+    expect(candidates).toEqual([]);
+  });
+
+  it('classifies a dirty default branch with a pending release as default-dirty → release', async () => {
+    withCommonStubs({
+      'branch --show-current': { exitCode: 0, stdout: 'main' },
+      'symbolic-ref refs/remotes/origin/HEAD': { exitCode: 0, stdout: 'refs/remotes/origin/main' },
+      'status --porcelain': { exitCode: 0, stdout: ' M app/components/indexnow-button.tsx' },
+      'status --porcelain=v2 --branch': { exitCode: 0, stdout: '# branch.ab +0 -0' },
+    }, { pendingRelease: true });
+    const { findStrandedBranches } = await import('@/lib/jobs/stranded-branch-reconcile');
+    const candidates = await findStrandedBranches(Date.now());
+    expect(candidates).toHaveLength(1);
+    expect(candidates[0].kind).toBe('default-dirty');
+    expect(candidates[0].branch).toBe('main');
+  });
+
+  it('does not classify a dirty default branch solely from stale failed commit release history', async () => {
+    withCommonStubs({
+      'branch --show-current': { exitCode: 0, stdout: 'main' },
+      'symbolic-ref refs/remotes/origin/HEAD': { exitCode: 0, stdout: 'refs/remotes/origin/main' },
+      'status --porcelain': { exitCode: 0, stdout: ' M app/components/indexnow-button.tsx' },
+      'status --porcelain=v2 --branch': { exitCode: 0, stdout: '# branch.ab +0 -0' },
+    }, {
+      jobs: [
+        makeJob({ id: 'release-1', kind: 'release', startedAt: 100, finishedAt: 200, exitCode: 1 }),
+        makeJob({ id: 'commit-1', kind: 'commit', startedAt: 150, finishedAt: 190, exitCode: 1, releaseId: 'release-1' }),
+      ],
+    });
+    const { findStrandedBranches } = await import('@/lib/jobs/stranded-branch-reconcile');
+    const candidates = await findStrandedBranches(Date.now());
+    expect(candidates).toEqual([]);
+  });
+
+  it('classifies a dirty default branch with a matching failed-commit recovery marker', async () => {
+    withCommonStubs({
+      'branch --show-current': { exitCode: 0, stdout: 'main' },
+      'symbolic-ref refs/remotes/origin/HEAD': { exitCode: 0, stdout: 'refs/remotes/origin/main' },
+      'status --porcelain': { exitCode: 0, stdout: ' M app/components/indexnow-button.tsx' },
+      'status --porcelain=v2 --branch': { exitCode: 0, stdout: '# branch.ab +0 -0' },
+    }, { commitRecoveryMarker: true });
+    const { findStrandedBranches } = await import('@/lib/jobs/stranded-branch-reconcile');
+    const candidates = await findStrandedBranches(Date.now());
+    expect(candidates).toHaveLength(1);
+    expect(candidates[0].kind).toBe('default-dirty');
+  });
+
+  it('dispatches a release for a dirty default branch with release evidence', async () => {
+    const releaseWorkflow = {};
+    const start = vi.fn().mockResolvedValue({
+      returnValue: Promise.resolve({ ok: true, step: 'review' }),
+    });
+    vi.doMock('workflow/api', () => ({ start }));
+    vi.doMock('@/lib/workflows/release', () => ({ releaseWorkflow }));
+    withCommonStubs({
+      'branch --show-current': { exitCode: 0, stdout: 'main' },
+      'symbolic-ref refs/remotes/origin/HEAD': { exitCode: 0, stdout: 'refs/remotes/origin/main' },
+      'status --porcelain': { exitCode: 0, stdout: ' M app/components/indexnow-button.tsx' },
+      'status --porcelain=v2 --branch': { exitCode: 0, stdout: '# branch.ab +0 -0' },
+    }, { pendingRelease: true });
+
+    const { reconcileStrandedBranches } = await import('@/lib/jobs/stranded-branch-reconcile');
+    const summary = await reconcileStrandedBranches(Date.now());
+
+    expect(start).toHaveBeenCalledWith(releaseWorkflow, ['proj', { queueIfBlocked: true }]);
+    expect(summary.triggered).toEqual([
+      expect.objectContaining({ project: 'proj', kind: 'default-dirty', outcome: 'started' }),
+    ]);
+  });
+
+  it('still classifies a clean default branch that is ahead/behind as default-out-of-sync → push', async () => {
+    withCommonStubs({
+      'branch --show-current': { exitCode: 0, stdout: 'main' },
+      'symbolic-ref refs/remotes/origin/HEAD': { exitCode: 0, stdout: 'refs/remotes/origin/main' },
+      'status --porcelain': { exitCode: 0, stdout: '' },
+      'status --porcelain=v2 --branch': { exitCode: 0, stdout: '# branch.ab +2 -1' },
+    });
+    const { findStrandedBranches } = await import('@/lib/jobs/stranded-branch-reconcile');
+    const candidates = await findStrandedBranches(Date.now());
+    expect(candidates).toHaveLength(1);
+    expect(candidates[0].kind).toBe('default-out-of-sync');
+    expect(candidates[0].ahead).toBe(2);
+    expect(candidates[0].behind).toBe(1);
+  });
+
+  it('emits no candidate for a clean, in-sync default branch', async () => {
+    withCommonStubs({
+      'branch --show-current': { exitCode: 0, stdout: 'main' },
+      'symbolic-ref refs/remotes/origin/HEAD': { exitCode: 0, stdout: 'refs/remotes/origin/main' },
+      'status --porcelain': { exitCode: 0, stdout: '' },
+      'status --porcelain=v2 --branch': { exitCode: 0, stdout: '# branch.ab +0 -0' },
+    });
+    const { findStrandedBranches } = await import('@/lib/jobs/stranded-branch-reconcile');
+    const candidates = await findStrandedBranches(Date.now());
     expect(candidates).toEqual([]);
   });
 });

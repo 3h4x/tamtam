@@ -43,6 +43,7 @@ export function StandardTabs<T extends string>({
       {items.map((item) => (
         <button
           key={item.id}
+          type="button"
           className={tabClass(item.id)}
           onClick={() => {
             if (item.onClick) {
@@ -51,6 +52,7 @@ export function StandardTabs<T extends string>({
             }
             onChange(item.id)
           }}
+          aria-current={activeTab === item.id ? 'page' : undefined}
           aria-label={item.ariaLabel}
           title={item.title}
         >
