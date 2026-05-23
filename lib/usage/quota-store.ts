@@ -22,7 +22,6 @@ function keyFor(provider: string): string {
 // resolve the same snapshot repeatedly) don't spam the DB with identical
 // upserts. Pinned to globalThis — Next.js duplicates modules across realms.
 declare global {
-  // eslint-disable-next-line no-var
   var __tamtamQuotaPersistedAt: Map<string, number> | undefined;
 }
 const _persistedAt: Map<string, number> = globalThis.__tamtamQuotaPersistedAt ?? new Map();
