@@ -8,9 +8,10 @@
 //   - Has the fix loop converged or are we re-flagging the same findings?
 //     (reviewIsStuck / fixContradictsReview)
 //   - Have we hit per-release iteration caps for review/test/commit/push?
-//     (recentStepCount + maxStepIterations) — TODO: separate task
-//   - Should we file a GitHub exhaustion issue instead of silently aborting?
-//     (tryReviewExhaustionFallback)                                  — TODO
+//     (checkIterationCap)
+//   - Should a DO NOT SHIP review abort, route through fix, or file a
+//     follow-up issue and continue to commit?
+//     (reviewDoNotShipAction / fileIssueForReviewId)
 //
 // When a guard trips, the dispatch decision is rewritten to
 // `{ next: 'abort', stopReason }`. The orchestrator's terminal-decision
