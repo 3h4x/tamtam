@@ -2,6 +2,7 @@
 
 import { useEffect, useId, useRef, useState } from 'react'
 import { INPUT_CLASS } from '@/components/settings/constants'
+import { Button } from '@/components/ui/Button'
 import {
   parseTrustedGithubUsers,
   serializeTrustedGithubUsers,
@@ -55,13 +56,14 @@ export function TrustedGithubUsersField({
         <label htmlFor={`${fieldId}-0`} className="block font-medium text-sm text-text-primary">
           Trusted GitHub Users
         </label>
-        <button
+        <Button
           type="button"
           onClick={() => updateUsers([...users, ''])}
-          className="rounded-lg border border-border bg-bg-primary px-2.5 py-1 text-xs font-medium text-text-secondary transition-colors hover:bg-bg-tertiary hover:text-text-primary"
+          size="sm"
+          className="rounded-lg bg-bg-primary px-2.5 text-text-secondary hover:bg-bg-tertiary hover:text-text-primary"
         >
           + Add user
-        </button>
+        </Button>
       </div>
 
       <div className="rounded-lg border border-border bg-bg-primary/60 p-3">
@@ -86,14 +88,15 @@ export function TrustedGithubUsersField({
                   autoCorrect="off"
                   spellCheck={false}
                 />
-                <button
+                <Button
                   type="button"
                   onClick={() => updateUsers(users.filter((_, itemIndex) => itemIndex !== index))}
-                  className="rounded-lg border border-border bg-bg-primary px-2.5 py-2 text-xs font-medium text-text-secondary transition-colors hover:bg-bg-tertiary hover:text-text-primary"
+                  size="sm"
+                  className="rounded-lg bg-bg-primary px-2.5 py-2 text-text-secondary hover:bg-bg-tertiary hover:text-text-primary"
                   aria-label={`Remove trusted GitHub user ${user || index + 1}`}
                 >
                   Remove
-                </button>
+                </Button>
               </div>
             ))}
           </div>
