@@ -263,7 +263,10 @@ The 30-second probe sweep also reconciles git state that is stranded outside an
 active release. Non-default `fix/issue-*` branches with unshipped work trigger a
 new release, empty local fix branches are checked back out to the default
 branch, and clean default branches that are ahead/behind their upstream trigger
-a push. Dirty default branches are more dangerous: TamTam only treats them as
+a push. Clean detached HEADs are reattached to the default branch; if the
+detached commit is ahead of `origin/<default>`, TamTam first pins it to a local
+`recover/detached-<sha>` branch so the checkout cannot orphan unpushed work.
+Dirty default branches are more dangerous: TamTam only treats them as
 recoverable release work when current durable state proves release intent,
 either a `pending_release:<project>` flag or a
 `default_dirty_commit_recovery:<project>` marker written by a failed commit on

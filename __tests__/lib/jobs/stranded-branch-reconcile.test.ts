@@ -286,4 +286,51 @@ describe('findStrandedBranches', () => {
     const candidates = await findStrandedBranches(Date.now());
     expect(candidates).toEqual([]);
   });
+
+  it('classifies a clean detached HEAD as detached-reattach (with unpushed commit count)', async () => {
+    withCommonStubs({
+      'branch --show-current': { exitCode: 0, stdout: '' }, // detached → empty
+      'symbolic-ref refs/remotes/origin/HEAD': { exitCode: 0, stdout: 'refs/remotes/origin/main' },
+      'rev-parse HEAD': { exitCode: 0, stdout: 'abc12345deadbeef' },
+      'status --porcelain': { exitCode: 0, stdout: '' },
+      'rev-list --count origin/main..HEAD': { exitCode: 0, stdout: '2' },
+    });
+    const { findStrandedBranches } = await import('@/lib/jobs/stranded-branch-reconcile');
+    const candidates = await findStrandedBranches(Date.now());
+    expect(candidates).toHaveLength(1);
+    expect(candidates[0].kind).toBe('detached-reattach');
+    expect(candidates[0].branch).toBe('(detached)');
+    expect(candidates[0].ahead).toBe(2);
+  });
+
+  it('does NOT auto-act on a dirty detached HEAD (would clobber edits)', async () => {
+    withCommonStubs({
+      'branch --show-current': { exitCode: 0, stdout: '' },
+      'symbolic-ref refs/remotes/origin/HEAD': { exitCode: 0, stdout: 'refs/remotes/origin/main' },
+      'rev-parse HEAD': { exitCode: 0, stdout: 'abc12345deadbeef' },
+      'status --porcelain': { exitCode: 0, stdout: ' M src/index.ts' },
+      'rev-list --count origin/main..HEAD': { exitCode: 0, stdout: '1' },
+    });
+    const { findStrandedBranches } = await import('@/lib/jobs/stranded-branch-reconcile');
+    const candidates = await findStrandedBranches(Date.now());
+    expect(candidates).toEqual([]);
+  });
+
+  it('dispatch reattaches a clean detached HEAD to default and preserves unpushed commits', async () => {
+    const { exec } = withCommonStubs({
+      'branch --show-current': { exitCode: 0, stdout: '' },
+      'symbolic-ref refs/remotes/origin/HEAD': { exitCode: 0, stdout: 'refs/remotes/origin/main' },
+      'rev-parse HEAD': { exitCode: 0, stdout: 'abc12345deadbeef' },
+      'status --porcelain': { exitCode: 0, stdout: '' },
+      'rev-list --count origin/main..HEAD': { exitCode: 0, stdout: '1' },
+    });
+    const { reconcileStrandedBranches } = await import('@/lib/jobs/stranded-branch-reconcile');
+    const summary = await reconcileStrandedBranches(Date.now());
+    const calls = exec.mock.calls.map((c: unknown[]) => (c[1] as string[]).join(' '));
+    expect(calls.some((a) => a.includes('branch -f recover/detached-abc12345'))).toBe(true);
+    expect(calls.some((a) => a.endsWith('checkout main'))).toBe(true);
+    expect(summary.triggered).toEqual([
+      expect.objectContaining({ project: 'proj', kind: 'detached-reattach', outcome: 'started' }),
+    ]);
+  });
 });
