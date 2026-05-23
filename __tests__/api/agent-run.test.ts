@@ -1831,6 +1831,22 @@ File-backed prompt.`);
       const res = await POST(req, { params: Promise.resolve({ agentId: 'agent-123' }) });
       expect(res.status).toBe(200);
     });
+
+    it('does not block scheduled fires when dirty count is below threshold', async () => {
+      mocks.getDirtyFileCount.mockResolvedValue(4);
+      settingsMock.dirty_worktree_block_threshold = 10;
+      await insertAgent({ schedule: '1h' });
+      const req = new NextRequest('http://localhost/api/agents/agent-123/run', {
+        method: 'POST',
+        headers: { 'x-tamtam-trigger': 'schedule' },
+        body: JSON.stringify({ prompt: 'do something' }),
+      });
+
+      const res = await POST(req, { params: Promise.resolve({ agentId: 'agent-123' }) });
+
+      expect(res.status).toBe(200);
+      expect(mocks.getDirtyFileCount).toHaveBeenCalledWith('/path/to/proj');
+    });
   });
 
   describe('doc_paths', () => {

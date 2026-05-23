@@ -1,4 +1,4 @@
-import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'fs';
+import { mkdirSync, readFileSync, writeFileSync } from 'fs';
 import { basename, join } from 'path';
 
 // Per-project, inside the project worktree so codex-sandboxed agents (which
@@ -92,7 +92,6 @@ export function ensureAgentMemoryDir(projPath: string): void {
  */
 function ensureTamtamCacheGitignore(projPath: string): void {
   const tamtamDir = join(/*turbopackIgnore: true*/ projPath, TAMTAM_DIR);
-  if (!existsSync(/*turbopackIgnore: true*/ tamtamDir)) return;
   const gitignorePath = join(/*turbopackIgnore: true*/ tamtamDir, GITIGNORE_FILENAME);
   // Skip existsSync precheck — readFileSync throws ENOENT, caught below.
   let existing = '';

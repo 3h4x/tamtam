@@ -751,9 +751,16 @@ export async function registerNode(): Promise<void> {
               // back) — the cron self-reenqueue keeps the schedule ticking.
               try {
                 const { listJobs } = await import('@/lib/jobs/job-storage');
-                const prWaitInFlight = listJobs().some(j =>
-                  j.project === agent.project && j.kind === 'pr-wait' && j.finishedAt === null);
+                const projectJobs = listJobs().filter(j => j.project === agent.project);
+                const prWaitInFlight = projectJobs.some(j => j.kind === 'pr-wait' && j.finishedAt === null);
                 if (prWaitInFlight) return skip('pr-wait in flight (awaiting merge)');
+                // Release-first workflow: a release fires after every run and
+                // must finish (green + pushed) before the next run starts —
+                // otherwise each run piles more uncommitted work onto an
+                // unshipped tree. Wait while a release pipeline is still in
+                // flight for this project.
+                const releaseRunning = projectJobs.some(j => j.kind === 'release' && j.finishedAt === null);
+                if (releaseRunning) return skip('release pipeline is running');
                 const { resolveProjectPath } = await import('@/lib/shared/project-data');
                 const projPath = resolveProjectPath(agent.project);
                 if (projPath) {
