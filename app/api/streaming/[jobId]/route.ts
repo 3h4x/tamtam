@@ -1,5 +1,5 @@
 import { NextRequest } from 'next/server';
-import { existsSync, readFileSync, watch, openSync, readSync, fstatSync, closeSync } from 'fs';
+import { readFileSync, watch, openSync, readSync, fstatSync, closeSync } from 'fs';
 import { join } from 'path';
 import { homedir } from 'os';
 import { getJob, probeJobStatus } from '@/lib/jobs/job-storage';
@@ -278,12 +278,6 @@ export async function GET(
         return;
       }
 
-      // If log file doesn't exist, there's nothing to watch (fs.watch would throw).
-      if (!existsSync(/*turbopackIgnore: true*/ logPath)) {
-        try { controller.close(); } catch {}
-        return;
-      }
-
       // Watch for new content
       let watcher: ReturnType<typeof watch> | null = null;
       let pollTimer: ReturnType<typeof setInterval> | null = null;
@@ -349,7 +343,12 @@ export async function GET(
 
       try {
         watcher = watch(/*turbopackIgnore: true*/ logPath, () => { checkFinished(); });
-      } catch {}
+      } catch (err) {
+        if ((err as NodeJS.ErrnoException).code === 'ENOENT') {
+          cleanup();
+          return;
+        }
+      }
 
       // Poll every STREAM_POLL_MS as a safety net — fs.watch can miss the finishedAt
       // transition if the last log write happens before the job's exit handler runs.
