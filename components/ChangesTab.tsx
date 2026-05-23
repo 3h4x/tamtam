@@ -4,6 +4,7 @@ import { useState, useEffect, useCallback, useRef, memo } from 'react'
 import { useRouter } from 'next/navigation'
 import { fetchChanges, fetchChangeDiff, pullProject, pushProject, PullDivergedError, checkoutDefaultBranch } from '@/lib/client-api'
 import type { ChangeFile, ChangeStatus, ChangesResponse } from '@/lib/client-api'
+import { Button, buttonVariants } from '@/components/ui/Button'
 
 const STATUS_LABEL: Record<ChangeStatus, string> = {
   M: 'modified',
@@ -237,12 +238,9 @@ export function ChangesTab({ projectName, jobsPaused = false }: ChangesTabProps)
     return (
       <div className="p-4">
         <div className="text-status-error text-sm mb-2">{error}</div>
-        <button
-          className="px-3 py-1.5 text-sm border border-border rounded-md bg-bg-secondary text-text-primary hover:bg-bg-tertiary cursor-pointer"
-          onClick={() => load('initial')}
-        >
+        <Button onClick={() => load('initial')}>
           Retry
-        </button>
+        </Button>
       </div>
     )
   }
@@ -262,17 +260,17 @@ export function ChangesTab({ projectName, jobsPaused = false }: ChangesTabProps)
         {onNonDefault && (
           <div className="mt-3 flex flex-col items-center gap-2">
             <div className="flex items-center gap-2">
-              <button
-                className="px-4 py-1.5 text-sm border border-status-info/60 bg-status-info/10 text-status-info rounded-md hover:bg-status-info/20 cursor-pointer disabled:opacity-50 disabled:cursor-not-allowed font-medium"
+              <Button
+                variant="info"
                 onClick={() => doSwitchDefault()}
                 disabled={switching}
                 title={`git checkout ${data!.defaultBranch}`}
               >
                 {switching ? 'Switching…' : `Switch to ${data!.defaultBranch}`}
-              </button>
+              </Button>
               {data?.openPrUrl && (
                 <a
-                  className="px-4 py-1.5 text-sm border border-border bg-bg-secondary text-text-primary rounded-md hover:bg-bg-tertiary cursor-pointer font-medium"
+                  className={buttonVariants({ variant: 'secondary' })}
                   href={data.openPrUrl}
                   target="_blank"
                   rel="noopener noreferrer"
@@ -293,14 +291,14 @@ export function ChangesTab({ projectName, jobsPaused = false }: ChangesTabProps)
             <p className="text-xs text-status-warning font-medium">
               ↑ {data!.ahead} commit{data!.ahead !== 1 ? 's' : ''} ahead of origin — not yet pushed
             </p>
-            <button
-              className="px-4 py-1.5 text-sm border border-status-warning/60 bg-status-warning/10 text-status-warning rounded-md hover:bg-status-warning/20 cursor-pointer disabled:opacity-50 disabled:cursor-not-allowed font-medium"
+            <Button
+              variant="warning"
               onClick={doPush}
               disabled={pushBlocked}
               title={pushTitle}
             >
               {pushing ? 'Pushing…' : `Push ${data!.ahead} commit${data!.ahead !== 1 ? 's' : ''}`}
-            </button>
+            </Button>
             {pushError && <p className="text-xs text-status-error">{pushError}</p>}
           </div>
         )}
@@ -329,14 +327,15 @@ export function ChangesTab({ projectName, jobsPaused = false }: ChangesTabProps)
             </p>
             {switchError && <p className="text-xs text-status-error mt-1">{switchError}</p>}
           </div>
-          <button
-            className="px-3 py-1.5 text-sm border border-status-warning/60 bg-status-warning/15 text-status-warning rounded-md hover:bg-status-warning/25 cursor-pointer disabled:opacity-50 disabled:cursor-not-allowed font-medium shrink-0"
+          <Button
+            variant="warning"
+            className="shrink-0"
             onClick={() => doSwitchDefault({ carryChanges: true })}
             disabled={switching}
             title={`git stash → git checkout ${data.defaultBranch} → git branch -D ${data.branch} → git stash pop`}
           >
             {switching ? 'Moving…' : `Move to ${data.defaultBranch}`}
-          </button>
+          </Button>
         </div>
       )}
       <div className="bg-bg-secondary rounded-lg p-4 mb-3 flex items-center gap-4 flex-wrap">
@@ -356,8 +355,9 @@ export function ChangesTab({ projectName, jobsPaused = false }: ChangesTabProps)
             <code className="font-mono text-xs bg-bg-tertiary px-1.5 py-0.5 rounded text-text-primary">{data.branch}</code>
             {data.defaultBranch && data.branch !== data.defaultBranch && (
               <>
-                <button
-                  className="px-2 py-1 text-xs border border-status-info/60 bg-status-info/10 text-status-info rounded-md hover:bg-status-info/20 cursor-pointer disabled:opacity-50 disabled:cursor-not-allowed font-medium"
+                <Button
+                  variant="info"
+                  size="sm"
                   onClick={() => doSwitchDefault()}
                   disabled={switching || data.totalFiles > 0}
                   title={data.totalFiles > 0
@@ -365,10 +365,10 @@ export function ChangesTab({ projectName, jobsPaused = false }: ChangesTabProps)
                     : `git checkout ${data.defaultBranch}`}
                 >
                   {switching ? 'Switching…' : `Switch to ${data.defaultBranch}`}
-                </button>
+                </Button>
                 {data.openPrUrl && (
                   <a
-                    className="px-2 py-1 text-xs border border-border bg-bg-secondary text-text-primary rounded-md hover:bg-bg-tertiary cursor-pointer font-medium"
+                    className={buttonVariants({ variant: 'secondary', size: 'sm' })}
                     href={data.openPrUrl}
                     target="_blank"
                     rel="noopener noreferrer"
@@ -387,14 +387,15 @@ export function ChangesTab({ projectName, jobsPaused = false }: ChangesTabProps)
             <span className="text-xs font-medium text-status-warning">
               ↑ {data.ahead} commit{data.ahead !== 1 ? 's' : ''} ahead
             </span>
-            <button
-              className="px-2 py-1 text-xs border border-status-warning/60 bg-status-warning/10 text-status-warning rounded-md hover:bg-status-warning/20 cursor-pointer disabled:opacity-50 disabled:cursor-not-allowed font-medium"
+            <Button
+              variant="warning"
+              size="sm"
               onClick={doPush}
               disabled={pushBlocked}
               title={pushTitle}
             >
               {pushing ? 'Pushing…' : 'Push'}
-            </button>
+            </Button>
           </div>
         )}
         {data.behind > 0 && !diverged && (
@@ -402,12 +403,9 @@ export function ChangesTab({ projectName, jobsPaused = false }: ChangesTabProps)
             <span className={`text-xs font-medium ${data.totalFiles > 0 ? 'text-text-tertiary' : 'text-status-warning'}`}>
               ↓ {data.behind} commit{data.behind !== 1 ? 's' : ''} behind origin/{data.branch}
             </span>
-            <button
-              className={`px-2 py-1 text-xs border rounded-md font-medium disabled:cursor-not-allowed ${
-                data.totalFiles > 0
-                  ? 'border-border bg-bg-secondary text-text-tertiary opacity-50'
-                  : 'bg-status-warning/15 border-status-warning/40 text-status-warning hover:bg-status-warning/25 cursor-pointer'
-              }`}
+            <Button
+              variant={data.totalFiles > 0 ? 'secondary' : 'warning'}
+              size="sm"
               onClick={() => doPull('ff-only')}
               disabled={pulling || data.totalFiles > 0}
               title={
@@ -417,34 +415,36 @@ export function ChangesTab({ projectName, jobsPaused = false }: ChangesTabProps)
               }
             >
               {pulling ? 'Pulling…' : 'Pull'}
-            </button>
+            </Button>
           </div>
         )}
         {diverged && (
           <div className="flex items-center gap-2 flex-wrap">
             <span className="text-xs text-status-error font-medium">Branches diverged — choose strategy:</span>
-            <button
-              className="px-2 py-1 text-xs bg-status-info/15 border border-status-info/40 text-status-info rounded-md hover:bg-status-info/25 cursor-pointer disabled:opacity-50 font-medium"
+            <Button
+              variant="info"
+              size="sm"
               onClick={() => doPull('rebase')}
               disabled={pulling}
               title="git pull --rebase (replay your commits on top of remote)"
             >
               {pulling ? 'Working…' : 'Rebase'}
-            </button>
-            <button
-              className="px-2 py-1 text-xs bg-bg-tertiary border border-border text-text-primary rounded-md hover:bg-bg-secondary cursor-pointer disabled:opacity-50 font-medium"
+            </Button>
+            <Button
+              size="sm"
               onClick={() => doPull('merge')}
               disabled={pulling}
               title="git pull --no-ff (create a merge commit)"
             >
               {pulling ? 'Working…' : 'Merge'}
-            </button>
-            <button
-              className="px-2 py-1 text-xs text-text-tertiary hover:text-text-secondary cursor-pointer"
+            </Button>
+            <Button
+              variant="ghost"
+              size="sm"
               onClick={() => setDiverged(false)}
             >
               ✕
-            </button>
+            </Button>
           </div>
         )}
         {pushError && (
@@ -453,14 +453,15 @@ export function ChangesTab({ projectName, jobsPaused = false }: ChangesTabProps)
         {pullError && (
           <span className="text-xs text-status-error">{pullError}</span>
         )}
-        <button
-          className="ml-auto px-2 py-1 text-xs border border-border rounded-md bg-bg-secondary text-text-primary hover:bg-bg-tertiary cursor-pointer disabled:opacity-60"
+        <Button
+          size="sm"
+          className="ml-auto"
           onClick={() => load('refresh')}
           disabled={refreshing}
           title="Refresh"
         >
           {refreshing ? 'Refreshing...' : 'Refresh'}
-        </button>
+        </Button>
       </div>
 
       <div className="border border-border rounded-lg overflow-hidden bg-bg-secondary">
