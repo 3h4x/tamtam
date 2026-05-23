@@ -45,6 +45,18 @@ interface ContinueIssueLookup {
   projectJobs: JobData[];
 }
 
+function findLatestJob(
+  jobs: JobData[],
+  predicate: (job: JobData) => boolean,
+): JobData | null {
+  let latest: JobData | null = null;
+  for (const job of jobs) {
+    if (!predicate(job)) continue;
+    if (!latest || job.startedAt > latest.startedAt) latest = job;
+  }
+  return latest;
+}
+
 function inferLegacyMarkDodIssueFromLineage(job: JobData, lookup: ContinueIssueLookup): number | null {
   const seen = new Set<string>();
   let cursor = job.parentJobId ? lookup.byId.get(job.parentJobId) ?? null : null;
@@ -56,13 +68,12 @@ function inferLegacyMarkDodIssueFromLineage(job: JobData, lookup: ContinueIssueL
   }
 
   if (job.releaseId) {
-    const releaseScopedIssue = lookup.projectJobs
-      .filter(
-        (candidate) =>
-          candidate.releaseId === job.releaseId &&
-          issueStamped(candidate),
-      )
-      .sort((a, b) => b.startedAt - a.startedAt)[0];
+    const releaseScopedIssue = findLatestJob(
+      lookup.projectJobs,
+      (candidate) =>
+        candidate.releaseId === job.releaseId &&
+        issueStamped(candidate),
+    );
     if (releaseScopedIssue) return releaseScopedIssue.ghIssueNumber ?? null;
   }
 
@@ -73,14 +84,13 @@ const LEGACY_CONTEXT_KINDS = new Set(['run', 'fix']);
 const CLAUDE_RESUME_KINDS = new Set(['run', 'fix']);
 
 function inferLegacyMarkDodIssueByTime(job: JobData, lookup: ContinueIssueLookup): number | null {
-  return lookup.projectJobs
-    .filter(
-      (candidate) =>
-        LEGACY_CONTEXT_KINDS.has(candidate.kind) &&
-        candidate.ghIssueNumber != null &&
-        candidate.startedAt <= job.startedAt,
-    )
-    .sort((a, b) => b.startedAt - a.startedAt)[0]?.ghIssueNumber ?? null;
+  return findLatestJob(
+    lookup.projectJobs,
+    (candidate) =>
+      LEGACY_CONTEXT_KINDS.has(candidate.kind) &&
+      candidate.ghIssueNumber != null &&
+      candidate.startedAt <= job.startedAt,
+  )?.ghIssueNumber ?? null;
 }
 
 function matchesIssueMarkDod(job: JobData, issueNumber: number, lookup: ContinueIssueLookup): boolean {
@@ -134,22 +144,23 @@ export async function GET(
 
   // Most recent Claude run that ran for this issue. We accept run/fix kinds
   // — both store a session_id and either is a valid resume target.
-  const lastClaudeForIssue = projectJobs
-    .filter(j =>
+  const lastClaudeForIssue = findLatestJob(
+    projectJobs,
+    (j) =>
       CLAUDE_RESUME_KINDS.has(j.kind)
       && j.ghIssueNumber === issueNumber
-      && j.sessionId
-    )
-    .sort((a, b) => b.startedAt - a.startedAt)[0] ?? null;
+      && !!j.sessionId,
+  );
 
   // Most recent mark-dod for this issue. mark-dod rows now persist their own
   // source issue/PR metadata, so a newer verification pass for some other
   // issue in the same project cannot leak its checklist into this prompt.
   // Older rows predate that stamp, so fall back to the latest issue-linked
   // run/fix context that existed before the legacy mark-dod fired.
-  const lastMarkDod = projectJobs
-    .filter(j => j.kind === 'mark-dod' && matchesIssueMarkDod(j, issueNumber, lookup))
-    .sort((a, b) => b.startedAt - a.startedAt)[0] ?? null;
+  const lastMarkDod = findLatestJob(
+    projectJobs,
+    (j) => j.kind === 'mark-dod' && matchesIssueMarkDod(j, issueNumber, lookup),
+  );
 
   // Parse the unverified items from the mark-dod log. Lines look like:
   //   # [unverified] 2.1 useTokenAllowance hook
