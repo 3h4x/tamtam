@@ -1,4 +1,4 @@
-import { accessSync, constants, existsSync } from 'fs';
+import { accessSync, constants } from 'fs';
 import { sql } from 'drizzle-orm';
 import { homedir } from 'os';
 import { join } from 'path';
@@ -50,6 +50,15 @@ function canExecutePath(path: string): boolean {
   }
 }
 
+function pathExists(path: string): boolean {
+  try {
+    accessSync(/*turbopackIgnore: true*/ path, constants.F_OK);
+    return true;
+  } catch {
+    return false;
+  }
+}
+
 async function commandExists(command: string): Promise<boolean> {
   const result = await exec('bash', ['-lc', `command -v "$1" >/dev/null 2>&1`, '_', command], { timeout: 3000 });
   return result.exitCode === 0;
@@ -66,12 +75,12 @@ async function executableExists(value: string): Promise<boolean> {
 
 async function providerBinaryCheck(provider: CliProvider, settings: TamTamConfig): Promise<ReadinessCheck> {
   const shim = resolveCliBin(provider, settings);
-  if (!canExecutePath(shim) && !existsSync(/*turbopackIgnore: true*/ shim)) {
+  if (!canExecutePath(shim)) {
     return check(
       `provider:${provider}`,
       false,
       'error',
-      `Configured ${provider} shim is missing: ${shim}`,
+      `Configured ${provider} shim is not executable: ${shim}`,
     );
   }
 
@@ -110,7 +119,7 @@ function workspaceCheck(settings: TamTamConfig): ReadinessCheck {
   const workspace = settings.workspace_path.trim();
   if (!workspace) return check('workspace', false, 'warn', 'Workspace path is not configured');
   const path = expandHome(workspace);
-  if (!existsSync(/*turbopackIgnore: true*/ path)) {
+  if (!pathExists(path)) {
     return check('workspace', false, 'error', `Workspace path does not exist: ${path}`);
   }
   return check('workspace', true, 'info', `Workspace path exists: ${path}`);
@@ -119,7 +128,7 @@ function workspaceCheck(settings: TamTamConfig): ReadinessCheck {
 function projectPathCheck(projectName: string): ReadinessCheck {
   const project = listEnabledProjects({ includeArchived: true }).find((p) => p.name === projectName);
   if (!project) return check('project-path', false, 'error', `Project ${projectName} is not configured`);
-  if (!existsSync(/*turbopackIgnore: true*/ project.path)) {
+  if (!pathExists(project.path)) {
     return check('project-path', false, 'error', `Project path does not exist: ${project.path}`);
   }
   return check('project-path', true, 'info', `Project path exists: ${project.path}`);
