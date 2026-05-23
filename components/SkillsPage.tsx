@@ -4,6 +4,7 @@ import { useState, useEffect, useRef } from 'react'
 import { fetchSkills, createSkill, updateSkill, deleteSkill, fetchProjects, createAgent, fetchAgents, fetchPersonas } from '@/lib/client-api'
 import type { Skill, Persona } from '@/lib/client-api'
 import { canonicalAgentNameKey } from '@/lib/agents/agent-name'
+import { Button } from '@/components/ui/Button'
 import { SkillEditor } from '@/components/skills-page/SkillEditor'
 import {
   buildSkillListItems,
@@ -373,12 +374,9 @@ export function SkillsPage() {
             {allItems.length} total · {libraryItems.length} library · {dbCustomItems.length + customPersonaItems.length} custom
           </p>
         </div>
-        <button
-          className="px-3 py-1.5 text-sm bg-accent text-white rounded-md hover:bg-accent-hover cursor-pointer"
-          onClick={openNewSkill}
-        >
+        <Button variant="solid" onClick={openNewSkill}>
           + New Skill
-        </button>
+        </Button>
       </div>
 
       <div className="flex flex-col gap-2 sm:flex-row sm:items-center">
@@ -572,19 +570,21 @@ export function SkillsPage() {
               ? <option value="">{projectsError ? 'Failed to load projects' : 'No projects available'}</option>
               : projects.map(p => <option key={p} value={p}>{p}</option>)}
           </select>
-          <button
-            className="px-4 py-1.5 text-sm bg-accent text-white rounded-md hover:bg-accent-hover cursor-pointer disabled:opacity-50 shrink-0"
+          <Button
+            variant="solid"
+            className="px-4 shrink-0"
             onClick={handleBulkCreate}
             disabled={bulkCreating || !selectedProject}
           >
             {bulkCreating ? 'Creating…' : 'Create Agents'}
-          </button>
-          <button
-            className="px-3 py-1.5 text-sm border border-border rounded-md text-text-secondary hover:text-text-primary hover:bg-bg-tertiary cursor-pointer shrink-0"
+          </Button>
+          <Button
+            variant="secondary"
+            className="text-text-secondary hover:text-text-primary shrink-0"
             onClick={() => setSelected(new Set())}
           >
             Clear
-          </button>
+          </Button>
         </div>
       </div>
     </div>
