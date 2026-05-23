@@ -6,9 +6,8 @@ import { listJobs } from '@/lib/jobs/job-storage';
 // dashboard actually needs — running jobs, the latest review verdict, the
 // most recent activity timestamp — without paging through every row.
 //
-// Previously these were computed client-side from a full 200-row /api/jobs
-// fetch. With history > 20k that scaled badly; this endpoint is O(rows in
-// memory) but ships only one entry per project.
+// Keep the response bounded even when job history is large: scan the
+// in-memory jobs once and ship only one entry per project.
 interface RuntimeEntry {
   hasRunningReview: boolean;
   hasRunningTest: boolean;
