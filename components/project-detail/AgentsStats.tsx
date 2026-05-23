@@ -3,6 +3,7 @@
 import { useRouter } from 'next/navigation'
 import { useSchedulerHealth } from '@/hooks/useSchedulerHealth'
 import { useAgentStats, type AgentStat } from '@/hooks/useAgentStats'
+import { Button } from '@/components/ui/Button'
 
 function formatDuration(ms: number | null): string {
   if (!ms || ms <= 0) return '—'
@@ -82,13 +83,13 @@ export function AgentsStats({ projectName }: { projectName: string }) {
           <div className="text-sm font-medium text-text-primary">No scheduled agents</div>
           <div className="text-xs text-text-tertiary mt-0.5">Add an agent to automate work for this project.</div>
         </div>
-        <button
+        <Button
           type="button"
-          className="px-3 py-1.5 text-sm bg-accent text-white rounded-md hover:bg-accent-hover cursor-pointer"
+          variant="solid"
           onClick={() => goToAgents()}
         >
           Open Agents tab
-        </button>
+        </Button>
       </section>
     )
   }
