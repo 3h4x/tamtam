@@ -2,7 +2,7 @@ import { NextRequest, NextResponse } from 'next/server';
 import { readdirSync } from 'fs';
 import { join } from 'path';
 import { getImproveConfig } from '@/lib/scheduling/scheduling';
-import { readRedactedTailSync } from '@/lib/jobs/redacted-log-reader';
+import { readRedactedTail } from '@/lib/jobs/redacted-log-reader';
 
 export async function GET(
   _request: NextRequest,
@@ -22,16 +22,19 @@ export async function GET(
     return NextResponse.json({ logs: [] });
   }
 
-  const logs = [];
-  for (const f of files) {
-    const filepath = join(/*turbopackIgnore: true*/ logDir, f);
-    try {
-      const content = readRedactedTailSync(filepath, 50_000);
-      logs.push({ filename: f, content });
-    } catch {
-      continue;
-    }
-  }
+  const logs = (
+    await Promise.all(
+      files.map(async (f) => {
+        const filepath = join(/*turbopackIgnore: true*/ logDir, f);
+        try {
+          const content = await readRedactedTail(filepath, 50_000);
+          return { filename: f, content };
+        } catch {
+          return null;
+        }
+      }),
+    )
+  ).filter((log): log is { filename: string; content: string } => log !== null);
 
   return NextResponse.json({ logs });
 }
