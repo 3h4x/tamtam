@@ -782,6 +782,36 @@ describe('startMarkDod', () => {
     expect(ghArgs).not.toContain('99');
   });
 
+  it('uses the newest unfinished release when duplicate active releases exist', async () => {
+    const olderRelease = makeReleaseJob({
+      id: 'release-42',
+      ghIssueNumber: 42,
+      ghIssueRepo: 'owner/repo',
+      startedAt: 1000,
+    });
+    const newerRelease = makeReleaseJob({
+      id: 'release-77',
+      ghIssueNumber: 77,
+      ghIssueRepo: 'owner/repo',
+      startedAt: 2000,
+    });
+    listJobsMock.mockReturnValue([
+      olderRelease,
+      newerRelease,
+      makeRunJob({ id: 'issue-42-run', ghIssueNumber: 42, ghIssueRepo: 'owner/repo', releaseId: 'release-42', startedAt: 1100 }),
+      makeRunJob({ id: 'issue-77-run', ghIssueNumber: 77, ghIssueRepo: 'owner/repo', releaseId: 'release-77', startedAt: 2100 }),
+    ]);
+    execMock.mockResolvedValue(resp(1, '', 'gh failed'));
+
+    const r = await startMarkDod('myproj', undefined);
+
+    expect(r.ok).toBe(true);
+    const ghArgs: string[] = execMock.mock.calls[0][1];
+    expect(ghArgs).toContain('issue');
+    expect(ghArgs).toContain('77');
+    expect(ghArgs).not.toContain('42');
+  });
+
   it('recovers a missing release-scoped ghIssueRepo from a sibling row in the same release', async () => {
     const activeRelease = makeReleaseJob({ id: 'release-42', ghIssueNumber: 42, ghIssueRepo: null });
     findActiveReleaseJobMock.mockReturnValue(activeRelease);

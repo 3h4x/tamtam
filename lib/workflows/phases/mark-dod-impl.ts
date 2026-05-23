@@ -105,6 +105,17 @@ interface ContextLookupBundle {
   activeRelease: JobData | null;
 }
 
+function findLatestActiveRelease(projectJobs: JobData[]): JobData | null {
+  let activeRelease: JobData | null = null;
+  for (const job of projectJobs) {
+    if (job.kind !== 'release' || job.finishedAt !== null) continue;
+    if (!activeRelease || (job.startedAt || 0) > (activeRelease.startedAt || 0)) {
+      activeRelease = job;
+    }
+  }
+  return activeRelease;
+}
+
 function findIssueContext(bundle: ContextLookupBundle): { number: number; repo: string } | null {
   const { projectName, projectJobs, activeRelease } = bundle;
   const activeReleaseIssue = findReleaseScopedIssueContext(projectName, activeRelease, projectJobs);
@@ -151,9 +162,7 @@ export function resolveMarkDodContext(
   // Mirror `findActiveReleaseJob` semantics: most-recent unfinished release.
   // Multiple shouldn't coexist, but if they do, picking the newest matches
   // every other caller in the codebase.
-  const activeRelease = projectJobs
-    .filter((j) => j.kind === 'release' && j.finishedAt === null)
-    .sort((a, b) => (b.startedAt || 0) - (a.startedAt || 0))[0] ?? null;
+  const activeRelease = findLatestActiveRelease(projectJobs);
   const bundle: ContextLookupBundle = { projectName, projectJobs, activeRelease };
   const issueCtx = findIssueContext(bundle);
   if (issueCtx) return { ctx: issueCtx, isPr: false };
