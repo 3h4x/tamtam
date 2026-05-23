@@ -16,6 +16,10 @@ function getLogsDir(baseDir?: string): string {
   return logsDir;
 }
 
+function isEnoent(error: unknown): boolean {
+  return error instanceof Error && 'code' in error && error.code === 'ENOENT';
+}
+
 export function writeJobLogs(jobId: string, frames: LogFrame[], baseDir?: string): void {
   const logsDir = getLogsDir(baseDir);
   const logFile = join(/*turbopackIgnore: true*/ logsDir, `${jobId}.log`);
@@ -31,7 +35,7 @@ export function readJobLogs(jobId: string, baseDir?: string): LogFrame[] {
   try {
     lines = readFileSync(/*turbopackIgnore: true*/ logFile, 'utf-8').split('\n');
   } catch (error) {
-    if (error instanceof Error && 'code' in error && error.code === 'ENOENT') return [];
+    if (isEnoent(error)) return [];
     throw error;
   }
 
@@ -51,10 +55,20 @@ export function cleanupOldLogs(maxLogs = 100, baseDir?: string): void {
   if (maxLogs <= 0) return;
   const logsDir = getLogsDir(baseDir);
 
-  const logFiles = readdirSync(/*turbopackIgnore: true*/ logsDir)
-    .filter((f) => f.endsWith('.log'))
-    .map((f) => ({ name: f, mtime: statSync(/*turbopackIgnore: true*/ join(logsDir, f)).mtimeMs }))
-    .sort((a, b) => a.mtime - b.mtime);
+  const logFiles: Array<{ name: string; mtime: number }> = [];
+  for (const f of readdirSync(/*turbopackIgnore: true*/ logsDir)) {
+    if (!f.endsWith('.log')) continue;
+    try {
+      logFiles.push({
+        name: f,
+        mtime: statSync(/*turbopackIgnore: true*/ join(logsDir, f)).mtimeMs,
+      });
+    } catch (error) {
+      if (isEnoent(error)) continue;
+      throw error;
+    }
+  }
+  logFiles.sort((a, b) => a.mtime - b.mtime);
 
   if (logFiles.length <= maxLogs) return;
 
