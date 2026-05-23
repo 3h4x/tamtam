@@ -53,7 +53,7 @@ const TAMTAM_BRANCH_PATTERN = /^fix\/issue-\d+/;
 const lastAttemptAt = new Map<string, number>();
 const attemptCount = new Map<string, number>();
 
-export type StrandedKind = 'fix-branch' | 'empty-fix-branch' | 'default-out-of-sync' | 'default-dirty';
+export type StrandedKind = 'fix-branch' | 'empty-fix-branch' | 'default-out-of-sync' | 'default-dirty' | 'detached-reattach';
 
 export interface StrandedCandidate {
   project: string;
@@ -102,6 +102,30 @@ async function readBranchState(path: string): Promise<{ current: string | null; 
   const def = defRaw ? defRaw.replace(/^refs\/remotes\/origin\//, '') : null;
   if (current == null && def == null) return null;
   return { current: current || null, def };
+}
+
+interface DetachedHead {
+  head: string;
+  /** Worktree has uncommitted changes (auto-checkout would conflict/lose them). */
+  isDirty: boolean;
+  /** Commits on the detached HEAD not yet on origin/<default> — work to preserve. */
+  ahead: number;
+}
+
+// A repo can land in a detached HEAD (e.g. a release that checked out a SHA and
+// then crashed/aborted before re-attaching). `git branch --show-current` returns
+// empty, so the cron's prereqSkipReason and the rest of this sweep skip it — and
+// `git push` fails forever with "You are not currently on a branch", so the
+// project's releases never ship and it never self-recovers. Detect it so we can
+// re-attach to the default branch (preserving any unpushed commits first).
+async function readDetachedHead(path: string, def: string): Promise<DetachedHead | null> {
+  const head = await gitOutput(path, ['rev-parse', 'HEAD']);
+  if (!head) return null; // unborn/empty repo or git error — nothing to reattach
+  const status = await gitStatusPorcelain(path);
+  const isDirty = !!(status && status.trim().length > 0);
+  const aheadRaw = await gitOutput(path, ['rev-list', '--count', `origin/${def}..HEAD`]);
+  const ahead = parseInt(aheadRaw ?? '0', 10) || 0;
+  return { head, isDirty, ahead };
 }
 
 interface ActivityIndex {
@@ -181,7 +205,7 @@ export async function findStrandedBranches(nowMs: number = Date.now()): Promise<
     const path = resolveProjectPath(p.name);
     if (!path) continue;
     const state = await readBranchState(path);
-    if (!state || !state.current || !state.def) continue;
+    if (!state || !state.def) continue;
     // Lock self-heal: getLock drops locks held by finished releases. We do
     // this even before the agent/recent-activity check so a stale lock from
     // an aborted release doesn't keep blocking forever.
@@ -189,6 +213,30 @@ export async function findStrandedBranches(nowMs: number = Date.now()): Promise<
     if (lock && (await isLockOwnedByActiveRelease(p.name))) continue;
     if (runningAgentProjects.has(p.name)) continue;
     if (recentlyActiveProjects.has(p.name)) continue;
+
+    if (!state.current) {
+      // Detached HEAD: re-attach to the default branch so the project can push
+      // again. Only act on a CLEAN worktree — a dirty detached checkout would
+      // conflict or clobber edits, which a background sweep must never risk.
+      // Unpushed commits (if any) are preserved on a recovery branch by the
+      // dispatcher before the checkout.
+      const det = await readDetachedHead(path, state.def);
+      if (det && !det.isDirty) {
+        out.push({
+          project: p.name,
+          path,
+          branch: '(detached)',
+          defaultBranch: state.def,
+          kind: 'detached-reattach',
+          ahead: det.ahead,
+          behind: 0,
+          reason: `detached HEAD at ${det.head.slice(0, 8)}`
+            + (det.ahead > 0 ? `, ${det.ahead} unpushed commit(s) to preserve` : '')
+            + ` — reattaching to ${state.def}`,
+        });
+      }
+      continue;
+    }
 
     if (state.current !== state.def) {
       if (!TAMTAM_BRANCH_PATTERN.test(state.current)) continue;
@@ -360,6 +408,37 @@ export async function reconcileStrandedBranches(
             await exec('git', ['-C', c.path, 'branch', '-D', c.branch], { timeout: 5000 }).catch(() => {});
             summary.triggered.push({ project: c.project, kind: c.kind, reason: c.reason, outcome: 'started', detail: `checked out ${c.defaultBranch}` });
             console.log(`[stranded-branch] ${c.project}: checked out ${c.defaultBranch} (deleted empty ${c.branch})`);
+          }
+        }
+      } else if (c.kind === 'detached-reattach') {
+        // Re-attach a detached HEAD to the default branch so pushes work again.
+        // Re-check dirtiness right before the checkout (race guard) and never
+        // touch a dirty tree. Preserve any unpushed commits on a recovery
+        // branch first so re-attaching can never lose work.
+        const status = await gitOutput(c.path, ['status', '--porcelain']);
+        if (status && status.trim().length > 0) {
+          summary.triggered.push({ project: c.project, kind: c.kind, reason: c.reason, outcome: 'rejected', detail: 'worktree became dirty mid-scan — skipping reattach' });
+          console.log(`[stranded-branch] ${c.project}: reattach skipped — dirty worktree`);
+        } else {
+          const head = await gitOutput(c.path, ['rev-parse', 'HEAD']);
+          let recoverBranch: string | null = null;
+          if (c.ahead > 0 && head) {
+            recoverBranch = `recover/detached-${head.slice(0, 8)}`;
+            const br = await exec('git', ['-C', c.path, 'branch', '-f', recoverBranch, head], { timeout: 5000 });
+            if (br.exitCode !== 0) {
+              summary.triggered.push({ project: c.project, kind: c.kind, reason: c.reason, outcome: 'rejected', detail: `failed to preserve recovery branch: ${(br.stderr || br.stdout || '').trim().slice(0, 200)}` });
+              continue;
+            }
+          }
+          const co = await exec('git', ['-C', c.path, 'checkout', c.defaultBranch], { timeout: 15000 });
+          if (co.exitCode !== 0) {
+            const detail = (co.stderr || co.stdout || '').trim().slice(0, 300);
+            summary.triggered.push({ project: c.project, kind: c.kind, reason: c.reason, outcome: 'rejected', detail });
+            console.warn(`[stranded-branch] ${c.project}: reattach checkout ${c.defaultBranch} failed — ${detail}`);
+          } else {
+            const detail = `reattached to ${c.defaultBranch}` + (recoverBranch ? ` (preserved ${c.ahead} commit(s) on ${recoverBranch})` : '');
+            summary.triggered.push({ project: c.project, kind: c.kind, reason: c.reason, outcome: 'started', detail });
+            console.log(`[stranded-branch] ${c.project}: ${detail}`);
           }
         }
       } else {
