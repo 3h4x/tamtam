@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { readdirSync, readFileSync, type Dirent } from 'fs';
+import { readdirSync, type Dirent } from 'fs';
+import { readFile } from 'fs/promises';
 import { join } from 'path';
 import { resolveProjectPath } from '@/lib/shared/project-data';
 
@@ -20,7 +21,7 @@ export async function GET(
   for (const candidate of ['README.md', 'readme.md', 'Readme.md']) {
     const p = join(/*turbopackIgnore: true*/ projPath, candidate);
     try {
-      const content = readFileSync(/*turbopackIgnore: true*/ p, 'utf-8');
+      const content = await readFile(/*turbopackIgnore: true*/ p, 'utf-8');
       docs.push({ name: 'README.md', path: candidate, content });
       hasRootReadme = true;
       break;
@@ -37,13 +38,18 @@ export async function GET(
   } catch {
     // no docs/ directory — fall through with empty list
   }
-  for (const entry of docsEntries) {
-    if (!entry.isFile() || !entry.name.endsWith('.md')) continue;
-    try {
-      const content = readFileSync(join(/*turbopackIgnore: true*/ docsDir, entry.name), 'utf-8');
-      docs.push({ name: entry.name, path: `docs/${entry.name}`, content });
-    } catch {}
-  }
+  const docReads = docsEntries
+    .filter((entry) => entry.isFile() && entry.name.endsWith('.md'))
+    .map(async (entry) => {
+      try {
+        const content = await readFile(join(/*turbopackIgnore: true*/ docsDir, entry.name), 'utf-8');
+        return { name: entry.name, path: `docs/${entry.name}`, content };
+      } catch {
+        return null;
+      }
+    });
+  const docResults = await Promise.all(docReads);
+  docs.push(...docResults.filter((doc): doc is { name: string; path: string; content: string } => doc !== null));
 
   if (hasRootReadme) {
     const rest = docs.splice(1).sort((a, b) => a.name.localeCompare(b.name));
