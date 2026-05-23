@@ -1,6 +1,7 @@
 'use client'
 
 import Link from 'next/link'
+import { buttonVariants } from '@/components/ui/Button'
 import { useProjects } from '@/components/ProjectsProvider'
 import { ProjectTablePage } from '@/components/ProjectTablePage'
 import { LoadingState } from '@/components/LoadingState'
@@ -21,7 +22,10 @@ export default function Home() {
         </p>
         <Link
           href="/settings"
-          className="mt-2 px-3 py-1.5 text-xs border border-border rounded-md text-text-primary hover:bg-bg-tertiary transition-colors"
+          className={buttonVariants({
+            variant: 'ghost',
+            className: 'mt-2 border-border text-text-primary text-xs hover:bg-bg-tertiary',
+          })}
         >
           Open Settings
         </Link>
