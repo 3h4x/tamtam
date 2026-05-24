@@ -1,4 +1,4 @@
-import { Dirent, existsSync, mkdirSync, readdirSync, readFileSync, renameSync, unlinkSync, writeFileSync } from 'fs';
+import { Dirent, linkSync, mkdirSync, readdirSync, readFileSync, renameSync, unlinkSync, writeFileSync } from 'fs';
 import { join } from 'path';
 import { getBranchContext, gitLsTreeSync, gitShowSync } from '@/lib/git/git-branch';
 import { getFileAgentOverrideSync } from '@/lib/agents/file-agent-overrides';
@@ -327,10 +327,15 @@ export function renameFileAgent(
     renameSync(/*turbopackIgnore: true*/ oldPath, tempPath);
     renameSync(/*turbopackIgnore: true*/ tempPath, newPath);
   } else {
-    if (existsSync(/*turbopackIgnore: true*/ newPath)) {
-      throw new Error(`agent '${canonicalNewName}' already exists`);
+    try {
+      linkSync(/*turbopackIgnore: true*/ oldPath, /*turbopackIgnore: true*/ newPath);
+    } catch (err) {
+      if ((err as NodeJS.ErrnoException).code === 'EEXIST') {
+        throw new Error(`agent '${canonicalNewName}' already exists`, { cause: err });
+      }
+      throw err;
     }
-    renameSync(/*turbopackIgnore: true*/ oldPath, newPath);
+    unlinkSync(/*turbopackIgnore: true*/ oldPath);
   }
 
   const content = readFileSync(/*turbopackIgnore: true*/ newPath, 'utf-8');

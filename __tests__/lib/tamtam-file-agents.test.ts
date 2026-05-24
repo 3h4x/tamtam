@@ -409,6 +409,32 @@ Original prompt.`);
     expect(files).toEqual(['self.md']);
     expect(loadFileAgent(tmpDir, 'proj', 'self')!.prompt).toBe('Case-only rename prompt.');
   });
+
+  it('does not overwrite an existing destination agent', () => {
+    writeAgent(tmpDir, 'Self', `---
+model: normal
+---
+Original prompt.`);
+    writeAgent(tmpDir, 'Renamed', `---
+model: normal
+---
+Existing prompt.`);
+
+    let thrown: unknown;
+    try {
+      renameFileAgent(tmpDir, 'proj', 'Self', 'Renamed', {
+        prompt: 'Updated prompt.',
+      });
+    } catch (err) {
+      thrown = err;
+    }
+
+    expect(thrown).toBeInstanceOf(Error);
+    expect((thrown as Error).message).toBe("agent 'Renamed' already exists");
+    expect(((thrown as { cause?: NodeJS.ErrnoException }).cause)?.code).toBe('EEXIST');
+
+    expect(loadFileAgent(tmpDir, 'proj', 'Renamed')!.prompt).toBe('Existing prompt.');
+  });
 });
 
 describe('writeFileAgent on feature branches', () => {
