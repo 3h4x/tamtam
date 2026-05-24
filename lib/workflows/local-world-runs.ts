@@ -220,10 +220,26 @@ export function readLocalStepFiles(runId: string): LocalStepFile[] {
 
 export function listLocalRunFilesNewestFirst(limit: number): Array<{ name: string; mtime: number }> {
   const dir = localWorldRunsDir();
-  const names = readdirSync(/*turbopackIgnore: true*/ dir).filter((n) => n.endsWith('.json'));
-  return names.map((name) => {
+  const newest: Array<{ name: string; mtime: number }> = [];
+
+  for (const name of readdirSync(/*turbopackIgnore: true*/ dir)) {
+    if (!name.endsWith('.json')) continue;
+
     let mtime = 0;
     try { mtime = statSync(/*turbopackIgnore: true*/ join(dir, name)).mtimeMs; } catch {}
-    return { name, mtime };
-  }).sort((a, b) => b.mtime - a.mtime).slice(0, limit);
+    const entry = { name, mtime };
+    let inserted = false;
+    for (let i = 0; i < newest.length; i++) {
+      const current = newest[i];
+      if (current && entry.mtime > current.mtime) {
+        newest.splice(i, 0, entry);
+        inserted = true;
+        break;
+      }
+    }
+    if (!inserted && newest.length < limit) newest.push(entry);
+    if (newest.length > limit) newest.pop();
+  }
+
+  return newest;
 }
