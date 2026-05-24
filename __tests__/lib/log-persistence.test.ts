@@ -86,4 +86,43 @@ describe('log-persistence', () => {
       vi.resetModules();
     }
   });
+
+  it('keeps the newest logs from an unsorted directory scan', async () => {
+    vi.resetModules();
+    const unlinkSyncMock = vi.fn();
+    vi.doMock('fs', async () => {
+      const actual = await vi.importActual<typeof import('fs')>('fs');
+      const mtimes: Record<string, number> = {
+        'middle.log': 30,
+        'oldest.log': 10,
+        'tie-old.log': 40,
+        'tie-new.log': 40,
+        'newest.log': 50,
+      };
+      return {
+        ...actual,
+        mkdirSync: vi.fn(),
+        readdirSync: vi.fn(() => ['middle.log', 'oldest.log', 'tie-old.log', 'tie-new.log', 'newest.log']),
+        statSync: vi.fn((path: string) => ({
+          mtimeMs: mtimes[path.split('/').pop() ?? ''] ?? 0,
+        })),
+        unlinkSync: unlinkSyncMock,
+      };
+    });
+
+    try {
+      const { cleanupOldLogs: cleanupWithMockedFs } = await import('@/lib/jobs/log-persistence');
+
+      cleanupWithMockedFs(2, '/tmp/tamtam-test');
+
+      expect(unlinkSyncMock.mock.calls.map(([path]) => String(path).split('/').pop()).sort()).toEqual([
+        'middle.log',
+        'oldest.log',
+        'tie-old.log',
+      ]);
+    } finally {
+      vi.doUnmock('fs');
+      vi.resetModules();
+    }
+  });
 });
