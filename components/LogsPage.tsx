@@ -128,13 +128,13 @@ export function LogsPage() {
         ) : (
           <div className="grid grid-cols-[repeat(auto-fill,minmax(160px,1fr))] gap-3">
             {projects.map((p) => (
-              <button
+              <Button
                 key={p}
-                className="px-4 py-3 text-sm border border-border rounded-lg bg-bg-secondary text-text-primary hover:bg-bg-tertiary cursor-pointer text-left font-medium transition-colors"
+                className="justify-start rounded-lg px-4 py-3 text-left"
                 onClick={() => loadLogs(p)}
               >
                 {p}
-              </button>
+              </Button>
             ))}
           </div>
         )
