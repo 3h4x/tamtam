@@ -3,6 +3,7 @@
 import { useEffect, useState } from 'react'
 import Link from 'next/link'
 import type { BridgeResponse, BridgeProject, BridgeProjectStatus } from '@/app/api/stats/bridge/route'
+import { buttonVariants } from '@/components/ui/Button'
 import type { GlobalPace, WindowPace, PaceStatus } from '@/lib/usage/quota-pace'
 
 // "The Bridge" — a compact command-center strip at the top of /stats. One card,
@@ -96,7 +97,11 @@ function ProjectChip({ p }: { p: BridgeProject }) {
     <Link
       href={`/project/${encodeURIComponent(p.project)}`}
       title={title}
-      className="inline-flex items-center gap-1.5 text-[11px] px-2 py-1 rounded border border-border/60 bg-bg-secondary hover:bg-bg-tertiary/60 no-underline whitespace-nowrap transition-colors"
+      className={buttonVariants({
+        variant: 'secondary',
+        size: 'sm',
+        className: 'text-[11px] font-normal border-border/60 hover:bg-bg-tertiary/60 whitespace-nowrap',
+      })}
       data-private
     >
       <span className={`h-1.5 w-1.5 rounded-full shrink-0 ${meta.dot}`} />

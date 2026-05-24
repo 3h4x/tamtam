@@ -137,6 +137,29 @@ describe('GET /api/jobs/notifications', () => {
     expect(data.runningCount).toBe(1);
   });
 
+  it('caps notification payloads at the newest 50 while preserving full counts', async () => {
+    const unseen = Array.from({ length: 55 }, (_, i) =>
+      makeJob({ id: `done-${i}`, finishedAt: 1000 + i, seen: false })
+    );
+    const running = Array.from({ length: 55 }, (_, i) =>
+      makeJob({ id: `run-${i}`, startedAt: 2000 + i, finishedAt: null, exitCode: null })
+    );
+    unseenFinishedMock.mockReturnValue(unseen);
+    listJobsMock.mockReturnValue(running);
+
+    const res = await GET();
+    const data = await res.json();
+
+    expect(data.count).toBe(55);
+    expect(data.jobs).toHaveLength(50);
+    expect(data.jobs[0].id).toBe('done-54');
+    expect(data.jobs.at(-1).id).toBe('done-5');
+    expect(data.runningCount).toBe(55);
+    expect(data.runningJobs).toHaveLength(50);
+    expect(data.runningJobs[0].id).toBe('run-54');
+    expect(data.runningJobs.at(-1).id).toBe('run-5');
+  });
+
   it('hides unseen failed pipeline jobs once a newer success supersedes them for the same project', async () => {
     const oldFail = makeJob({ id: 'old-fail', kind: 'release', exitCode: 1, finishedAt: 1000, seen: false });
     const newSuccess = makeJob({ id: 'new-pass', kind: 'release', exitCode: 0, finishedAt: 2000, seen: true });

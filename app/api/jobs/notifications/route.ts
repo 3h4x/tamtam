@@ -52,6 +52,16 @@ function notificationJob(job: JobData, parentKind?: string | null) {
   };
 }
 
+function insertNewestBy<T>(items: T[], item: T, limit: number, valueOf: (item: T) => number): void {
+  const value = valueOf(item);
+  let index = items.length;
+  while (index > 0 && value > valueOf(items[index - 1])) index--;
+  if (index >= limit) return;
+
+  items.splice(index, 0, item);
+  if (items.length > limit) items.pop();
+}
+
 export async function GET() {
   // The 30 s background probe sweep (`runProbeSweep` in
   // instrumentation-node.ts) keeps `finishedAt` fresh on every running row,
@@ -89,12 +99,21 @@ export async function GET() {
     return (j.finishedAt ?? 0) < cutoff;
   };
 
-  const jobs = unseenFinished()
-    .filter(j => !supersededByGreenSuccess(j))
-    .sort((a, b) => (b.finishedAt ?? 0) - (a.finishedAt ?? 0));
-  const running = allJobs
-    .filter(j => j.finishedAt === null)
-    .sort((a, b) => b.startedAt - a.startedAt);
+  const jobs: JobData[] = [];
+  let notificationCount = 0;
+  for (const j of unseenFinished()) {
+    if (supersededByGreenSuccess(j)) continue;
+    notificationCount++;
+    insertNewestBy(jobs, j, MAX_NOTIFICATION_JOBS, job => job.finishedAt ?? 0);
+  }
+
+  const running: JobData[] = [];
+  let runningCount = 0;
+  for (const j of allJobs) {
+    if (j.finishedAt !== null) continue;
+    runningCount++;
+    insertNewestBy(running, j, MAX_RUNNING_JOBS, job => job.startedAt);
+  }
 
   // Build a parent-kind lookup for the running slice. Only releases need
   // this — they're the wrapper kind that benefits from showing its agent.
@@ -111,9 +130,9 @@ export async function GET() {
   }
 
   return NextResponse.json({
-    count: jobs.length,
-    jobs: jobs.slice(0, MAX_NOTIFICATION_JOBS).map(j => notificationJob(j)),
-    runningCount: running.length,
+    count: notificationCount,
+    jobs: jobs.map(j => notificationJob(j)),
+    runningCount,
     runningJobs: runningSlice.map(j => notificationJob(j, parentKindByRunningId[j.id])),
   });
 }
