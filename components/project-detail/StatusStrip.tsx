@@ -1,5 +1,6 @@
 'use client'
 
+import { Spinner } from '@/components/ui/Spinner'
 import { formatAgo } from '@/lib/shared/format'
 import type { JobInfo } from '@/lib/client-api'
 
@@ -75,7 +76,7 @@ function StatusCard({ label, primary, detail, tone, onClick, disabled, running }
 function StartingDetail() {
   return (
     <span className="inline-flex items-center gap-1.5 rounded-full border border-border/70 bg-bg-tertiary/70 px-1.5 py-0.5 text-[11px] leading-none text-text-secondary">
-      <span className="spinner-sm !h-2.5 !w-2.5 !border-[1.5px]" aria-hidden />
+      <Spinner size="sm" className="!h-2.5 !w-2.5 !border-[1.5px]" aria-hidden />
       starting
     </span>
   )
