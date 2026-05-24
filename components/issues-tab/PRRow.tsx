@@ -7,6 +7,7 @@ import type { GhPullRequest } from '@/lib/client-api'
 import { formatAgo } from '@/lib/shared/format'
 import { Labels, CheckIcon, GateBadge } from '@/components/issues-tab/shared'
 import type { MergeMethod, PrGates } from '@/components/issues-tab/shared'
+import { Button } from '@/components/ui/Button'
 import { Spinner } from '@/components/ui/Spinner'
 
 function parseLinkedIssueNumber(body: string | null | undefined): string | null {
@@ -295,15 +296,18 @@ export function PRRow({
         </div>
         <div className="col-start-2 flex flex-wrap items-center justify-start gap-1 border-t border-border/60 pt-1.5 xl:col-start-auto xl:max-w-[420px] xl:justify-end xl:border-t-0 xl:pt-0 shrink-0">
           {!merged && needsApproval && (
-            <button
-              className="inline-flex items-center gap-1 rounded-md border border-accent/50 bg-accent/10 px-2 py-1 text-[10px] text-accent hover:bg-accent/20 cursor-pointer disabled:opacity-50"
+            <Button
+              type="button"
+              variant="primary"
+              size="sm"
+              className="rounded-md border-accent/50 text-[10px]"
               onClick={doApprove}
               disabled={approving}
               title="Submit an APPROVE review (required by branch protection before merge)"
             >
               {approving && <Spinner size="sm" shrink />}
               Approve
-            </button>
+            </Button>
           )}
           {!merged && (
             mergeConfirm ? (
@@ -325,42 +329,54 @@ export function PRRow({
                     </button>
                   ))}
                 </div>
-                <button
-                  className="inline-flex items-center gap-1 rounded-md bg-status-success px-2 py-1 text-[10px] font-medium text-white hover:opacity-90 cursor-pointer disabled:opacity-50"
+                <Button
+                  type="button"
+                  variant="success-solid"
+                  size="sm"
+                  className="rounded-md text-[10px] hover:opacity-90"
                   onClick={doMerge}
                   disabled={merging}
                 >
                   {merging && <Spinner size="sm" shrink />}
                   Confirm
-                </button>
-                <button
-                  className="rounded-md border border-border bg-bg-secondary px-2 py-1 text-[10px] text-text-secondary hover:bg-bg-tertiary cursor-pointer"
+                </Button>
+                <Button
+                  type="button"
+                  variant="secondary"
+                  size="sm"
+                  className="rounded-md text-[10px] text-text-secondary"
                   onClick={() => setMergeConfirm(false)}
                   disabled={merging}
                 >
                   ✕
-                </button>
+                </Button>
               </div>
             ) : (
-              <button
-                className="rounded-md border border-status-success/50 bg-status-success/10 px-2 py-1 text-[10px] text-status-success hover:bg-status-success/20 cursor-pointer"
+              <Button
+                type="button"
+                variant="secondary"
+                size="sm"
+                className="rounded-md border-status-success/50 bg-status-success/10 text-[10px] text-status-success hover:bg-status-success/20"
                 onClick={() => setMergeConfirm(true)}
                 title="Merge this PR"
               >
                 Merge
-              </button>
+              </Button>
             )
           )}
           {!merged && (
-            <button
-              className="inline-flex items-center gap-1 rounded-md border border-border bg-bg-secondary px-2 py-1 text-[10px] text-text-primary hover:bg-bg-tertiary cursor-pointer disabled:opacity-50"
+            <Button
+              type="button"
+              variant="secondary"
+              size="sm"
+              className="rounded-md text-[10px]"
               onClick={doReview}
               disabled={reviewing || jobsPaused}
               title={jobsPaused ? 'Jobs are paused globally. Resume jobs to start a PR review.' : 'AI code review of this PR\'s diff'}
             >
               {reviewing && <Spinner size="sm" shrink />}
               Review
-            </button>
+            </Button>
           )}
           <button
             className="flex items-center justify-center rounded-md border border-border bg-bg-secondary p-1.5 text-text-secondary hover:bg-bg-tertiary hover:text-text-primary cursor-pointer disabled:opacity-50"
