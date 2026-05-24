@@ -168,6 +168,20 @@ describe('PipelineStrip', () => {
     unmount()
   })
 
+  it('uses the newest review job when a release has multiple reviews', () => {
+    const { container, unmount } = renderStrip({
+      projectJobs: [
+        buildJob({ id: 'review-old', kind: 'review', started_at: 100, finished_at: 130, verdict: 'LGTM', release_id: 'rel-latest' }),
+        buildJob({ id: 'review-new', kind: 'review', started_at: 140, finished_at: 170, verdict: 'NEEDS ATTENTION', release_id: 'rel-latest' }),
+        buildJob({ id: 'fix-latest', kind: 'fix', started_at: 180, status: 'running', finished_at: null, exit_code: null, release_id: 'rel-latest' }),
+      ],
+    })
+
+    expect(container.querySelector('[aria-label^="review: attention. verdict: NEEDS ATTENTION"]')).not.toBeNull()
+    expect(container.querySelector('[aria-label^="review: done. LGTM"]')).toBeNull()
+    unmount()
+  })
+
   it('excludes concurrent standalone pipeline jobs while a release-backed chain is running', () => {
     const { container, unmount } = renderStrip({
       projectJobs: [
