@@ -101,7 +101,17 @@ function classifyLimitWindows(rateLimits: CodexRateLimits): {
 }
 
 async function listSessionFiles(root: string): Promise<string[]> {
-  const out: { path: string; mtimeMs: number }[] = [];
+  const newest: { path: string; mtimeMs: number }[] = [];
+
+  function rememberSessionFile(file: { path: string; mtimeMs: number }): void {
+    const insertAt = newest.findIndex((candidate) => file.mtimeMs > candidate.mtimeMs);
+    if (insertAt === -1) {
+      if (newest.length < MAX_FILES_TO_SCAN) newest.push(file);
+      return;
+    }
+    newest.splice(insertAt, 0, file);
+    if (newest.length > MAX_FILES_TO_SCAN) newest.length = MAX_FILES_TO_SCAN;
+  }
 
   async function walk(dir: string): Promise<void> {
     let entries;
@@ -118,7 +128,7 @@ async function listSessionFiles(root: string): Promise<string[]> {
       } else if (entry.isFile() && entry.name.endsWith('.jsonl')) {
         try {
           const s = await stat(/*turbopackIgnore: true*/ path);
-          out.push({ path, mtimeMs: s.mtimeMs });
+          rememberSessionFile({ path, mtimeMs: s.mtimeMs });
         } catch {
           /* ignore files removed during scan */
         }
@@ -127,10 +137,7 @@ async function listSessionFiles(root: string): Promise<string[]> {
   }
 
   await walk(root);
-  return out
-    .sort((a, b) => b.mtimeMs - a.mtimeMs)
-    .slice(0, MAX_FILES_TO_SCAN)
-    .map((f) => f.path);
+  return newest.map((f) => f.path);
 }
 
 function selectEffectiveRateLimits(samples: CodexRateLimits[]): CodexRateLimits | null {
@@ -268,6 +275,7 @@ export function prefetchCodexQuota(): void {
 export const __private__ = {
   newestRateLimitsFromContent,
   selectEffectiveRateLimits,
+  listSessionFiles,
   classifyLimitWindows,
   buildSnapshot,
   creditsExhausted,
