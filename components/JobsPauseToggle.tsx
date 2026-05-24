@@ -1,6 +1,7 @@
 'use client'
 
 import { useCallback, useEffect, useState } from 'react'
+import { Spinner } from '@/components/ui/Spinner'
 import { errMsg } from '@/lib/shared/types'
 import { fmtAbsolute } from '@/lib/shared/format-date'
 import { dispatchJobsPausedChanged } from '@/lib/shared/jobs-paused-events'
@@ -185,7 +186,7 @@ export function JobsPauseToggle() {
       } ${(loading || saving) && !showRebuild ? 'opacity-70 cursor-wait' : ''}`}
     >
       {showRebuild && (
-        <span className="spinner-sm shrink-0 !h-3 !w-3 !border-[1.5px]" aria-hidden="true" />
+        <Spinner size="md" shrink className="!h-3 !w-3 !border-[1.5px]" aria-hidden="true" />
       )}
       {label}
     </button>
