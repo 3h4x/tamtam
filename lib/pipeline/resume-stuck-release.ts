@@ -53,14 +53,12 @@ export async function findStuckFinalizedReleases(limit = 50): Promise<StuckRelea
   const stuck: StuckRelease[] = [];
   const all = listJobs();
   for (const release of releases) {
-    const children = all
-      .filter(
-        (j) =>
-          j.project === release.project &&
-          j.releaseId === release.id &&
-          PIPELINE_STEP_KINDS.has(j.kind),
-      )
-      .sort((a, b) => (a.startedAt ?? 0) - (b.startedAt ?? 0));
+    const children = all.filter(
+      (j) =>
+        j.project === release.project &&
+        j.releaseId === release.id &&
+        PIPELINE_STEP_KINDS.has(j.kind),
+    );
     const chain = buildReleaseStepChain(release as JobData, children);
     const last = getEffectiveReleaseChainTail(chain);
     if (!last) continue;
@@ -109,14 +107,12 @@ export async function resumeStuckRelease(
     return { ok: false, status: 'still_active', detail: 'release is still active — nothing to resume', attempted: false };
   }
 
-  const children = listJobs()
-    .filter(
-        (j) =>
-          j.project === projectName &&
-          j.releaseId === releaseId &&
-          PIPELINE_STEP_KINDS.has(j.kind),
-    )
-    .sort((a, b) => (a.startedAt ?? 0) - (b.startedAt ?? 0));
+  const children = listJobs().filter(
+    (j) =>
+      j.project === projectName &&
+      j.releaseId === releaseId &&
+      PIPELINE_STEP_KINDS.has(j.kind),
+  );
   const chain = buildReleaseStepChain(release, children);
   if (chain.length === 0) {
     return { ok: false, status: 'not_stuck', detail: 'release has no pipeline steps to resume from', attempted: false };
