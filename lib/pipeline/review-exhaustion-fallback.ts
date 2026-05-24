@@ -57,7 +57,8 @@ function renderFinding(f: ParsedFinding): string {
 }
 
 // Severity rank for picking the headline finding. Higher = more important.
-// Findings without a parsed severity sort last but keep their original parse order.
+// Findings without a parsed severity rank behind known severities; ties keep
+// their original parse order.
 const SEVERITY_RANK: Record<string, number> = { critical: 4, high: 3, medium: 2, low: 1 };
 
 function humanizeFindingId(id: string): string {
@@ -66,10 +67,17 @@ function humanizeFindingId(id: string): string {
 
 function buildIssueTitle(findings: ParsedFinding[]): string {
   if (findings.length === 0) return 'chore(review): unresolved review';
-  const ranked = findings
-    .map((f, i) => ({ f, i, rank: f.severity ? SEVERITY_RANK[f.severity] ?? 0 : 0 }))
-    .sort((a, b) => b.rank - a.rank || a.i - b.i);
-  const top = humanizeFindingId(ranked[0].f.id);
+  let topFinding = findings[0];
+  let topRank = topFinding.severity ? SEVERITY_RANK[topFinding.severity] ?? 0 : 0;
+  for (let i = 1; i < findings.length; i += 1) {
+    const finding = findings[i];
+    const rank = finding.severity ? SEVERITY_RANK[finding.severity] ?? 0 : 0;
+    if (rank > topRank) {
+      topFinding = finding;
+      topRank = rank;
+    }
+  }
+  const top = humanizeFindingId(topFinding.id);
   const extra = findings.length - 1;
   return extra > 0
     ? `chore(review): ${top} (+${extra} more)`
