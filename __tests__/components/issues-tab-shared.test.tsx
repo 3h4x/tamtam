@@ -84,7 +84,7 @@ describe('<CheckIcon />', () => {
 
   it('renders an animate-spin spinner when status is not COMPLETED', () => {
     flushSync(() => root.render(<CheckIcon conclusion={null} status="IN_PROGRESS" />));
-    expect(container.querySelector('svg')?.classList.contains('animate-spin')).toBe(true);
+    expect(container.querySelector('.animate-spin')).not.toBeNull();
   });
 
   it('renders a success checkmark when COMPLETED and conclusion is SUCCESS/NEUTRAL/SKIPPED', () => {

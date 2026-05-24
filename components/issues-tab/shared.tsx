@@ -1,5 +1,6 @@
 'use client'
 
+import { Spinner } from '@/components/ui/Spinner'
 import type { GhLabel } from '@/lib/client-api'
 
 export function Labels({ labels, limit }: { labels: GhLabel[]; limit?: number }) {
@@ -35,10 +36,7 @@ export function CheckIcon({ conclusion, status }: { conclusion: string | null; s
   const ok = conclusion === 'SUCCESS' || conclusion === 'NEUTRAL' || conclusion === 'SKIPPED'
   const pending = status !== 'COMPLETED'
   if (pending) return (
-    <svg width="10" height="10" viewBox="0 0 16 16" fill="currentColor" className="animate-spin opacity-70">
-      <path d="M8 0a8 8 0 100 16A8 8 0 008 0zm0 14A6 6 0 118 2a6 6 0 010 12z" opacity=".3"/>
-      <path d="M8 2a6 6 0 016 6h-2A4 4 0 008 4V2z"/>
-    </svg>
+    <Spinner size="sm" shrink className="opacity-70" />
   )
   if (ok) return (
     <svg width="10" height="10" viewBox="0 0 16 16" fill="currentColor">
