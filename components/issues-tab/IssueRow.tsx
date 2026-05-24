@@ -5,6 +5,7 @@ import { useRouter } from 'next/navigation'
 import type { GhIssue, ProjectConfig } from '@/lib/client-api'
 import { formatAgo } from '@/lib/shared/format'
 import { Labels } from '@/components/issues-tab/shared'
+import { Button } from '@/components/ui/Button'
 import { Spinner } from '@/components/ui/Spinner'
 
 // Build the hover tooltip for the "Work on" button — an ordered list of
@@ -139,31 +140,40 @@ export function IssueRow({ issue, projectName, projectCfg }: { issue: GhIssue; p
           )}
         </div>
         <div className="col-start-2 flex flex-wrap items-center justify-start gap-1 border-t border-border/60 pt-1.5 lg:col-start-auto lg:max-w-[280px] lg:justify-end lg:border-t-0 lg:pt-0 shrink-0">
-          <button
-            className="rounded-md px-2 py-1 text-[10px] text-text-tertiary hover:bg-bg-tertiary hover:text-text-primary cursor-pointer transition-colors"
+          <Button
+            type="button"
+            variant="ghost"
+            size="sm"
+            className="rounded-md border-none text-[10px] font-normal text-text-tertiary hover:bg-bg-tertiary hover:text-text-primary"
             onClick={discussInTerminal}
             title="Open a discussion about this issue in the terminal (no branch created)"
           >
             discuss
-          </button>
+          </Button>
           {hasContext ? (
-            <button
-              className="inline-flex items-center gap-1 rounded-md border border-accent/40 bg-accent/10 px-2 py-1 text-[10px] text-accent hover:bg-accent/20 cursor-pointer disabled:opacity-50 disabled:cursor-not-allowed"
+            <Button
+              type="button"
+              variant="primary"
+              size="sm"
+              className="gap-1 rounded-md border-accent/40 text-[10px] font-normal"
               onClick={continueWork}
               disabled={continuing}
               title="Resume the last Claude session for this issue. Auto-prompts only the acceptance criteria still unverified."
             >
               {continuing && <Spinner size="sm" shrink />}
               Continue
-            </button>
+            </Button>
           ) : (
-            <button
-              className="rounded-md border border-border bg-bg-secondary px-2 py-1 text-[10px] text-text-primary hover:bg-bg-tertiary cursor-pointer"
+            <Button
+              type="button"
+              variant="secondary"
+              size="sm"
+              className="rounded-md text-[10px] font-normal"
               onClick={openInTerminal}
               title={workOnTitle}
             >
               Work on
-            </button>
+            </Button>
           )}
           <a
             href={issue.url}
