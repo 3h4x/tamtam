@@ -3,6 +3,7 @@ import { runProject } from '@/lib/client-api'
 import { terminalStore, type SkillItem, type DocItem } from '@/lib/terminal/terminal-session-store'
 import type { ModelTier } from '@/lib/agents/model-aliases'
 import type { CliProvider } from '@/lib/usage/cli-providers'
+import { writeBrowserStorage } from '@/lib/client/browser-storage'
 
 interface SubmitDeps {
   projectName: string
@@ -49,7 +50,7 @@ export function useHandleSubmit(deps: SubmitDeps) {
     if (text) {
       setPromptHistory(prev => {
         const updated = [text, ...prev.filter(p => p !== text)].slice(0, 50)
-        try { localStorage.setItem('tamtam-prompt-history', JSON.stringify(updated)) } catch {}
+        writeBrowserStorage('tamtam-prompt-history', JSON.stringify(updated))
         return updated
       })
     }

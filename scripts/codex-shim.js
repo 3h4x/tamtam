@@ -10,7 +10,7 @@
  */
 
 const { spawn } = require('child_process');
-const { installInactivityWatchdog } = require('./shim-utils');
+const { installInactivityWatchdog, installSignalForwarding } = require('./shim-utils');
 
 const args = process.argv.slice(2);
 
@@ -448,32 +448,14 @@ function launchCodex({ prompt, model, streamJson, attempt = 0, retryState = null
     }
 
     let child;
-    let signalled = false;
-
-    function forwardSignal(sig) {
-      if (signalled) return;
-      signalled = true;
-      try { if (child) child.kill(sig); } catch { /* child may have already exited */ }
-    }
-
-    const onSigterm = () => forwardSignal('SIGTERM');
-    const onSigint = () => forwardSignal('SIGINT');
-    const onSighup = () => forwardSignal('SIGHUP');
-    process.on('SIGTERM', onSigterm);
-    process.on('SIGINT', onSigint);
-    process.on('SIGHUP', onSighup);
-
-    function removeSignalHandlers() {
-      process.off('SIGTERM', onSigterm);
-      process.off('SIGINT', onSigint);
-      process.off('SIGHUP', onSighup);
-    }
+    const signalForwarding = installSignalForwarding(() => child);
 
     child = spawn(codexBin, codexArgs, {
       cwd: cwd || process.cwd(),
       env: { ...process.env, FORCE_COLOR: '0' },
       stdio: ['pipe', 'pipe', 'pipe'],
     });
+    signalForwarding.forwardPending();
 
     const watchdog = installInactivityWatchdog(child, { shimName: 'codex-shim' });
     const state = retryState || createRetryState(streamJson);
@@ -561,12 +543,12 @@ function launchCodex({ prompt, model, streamJson, attempt = 0, retryState = null
     });
 
     child.on('error', (err) => {
-      removeSignalHandlers();
+      signalForwarding.dispose();
       watchdog.dispose();
       reject(err);
     });
     child.on('close', (code, signal) => {
-      removeSignalHandlers();
+      signalForwarding.dispose();
       watchdog.dispose();
       if (watchdog.timedOut() && !stderr.trim()) {
         stderr = `[codex-shim] killed by inactivity watchdog after ${process.env.SHIM_INACTIVITY_TIMEOUT_MS || 600000}ms with no output from child`;

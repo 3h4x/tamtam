@@ -1,6 +1,7 @@
 'use client'
 
 import { useState, useEffect } from 'react'
+import { readBrowserStorage, writeBrowserStorage } from '@/lib/client/browser-storage'
 
 const STORAGE_KEY = 'tamtam:privacy-mode'
 const CLASS_NAME = 'privacy-mode'
@@ -9,7 +10,7 @@ export function usePrivacyMode() {
   const [isPrivate, setIsPrivate] = useState(false)
 
   useEffect(() => {
-    const stored = localStorage.getItem(STORAGE_KEY)
+    const stored = readBrowserStorage(STORAGE_KEY)
     if (stored === 'true') {
       setIsPrivate(true)
       document.documentElement.classList.add(CLASS_NAME)
@@ -21,10 +22,10 @@ export function usePrivacyMode() {
       const next = !prev
       if (next) {
         document.documentElement.classList.add(CLASS_NAME)
-        localStorage.setItem(STORAGE_KEY, 'true')
+        writeBrowserStorage(STORAGE_KEY, 'true')
       } else {
         document.documentElement.classList.remove(CLASS_NAME)
-        localStorage.setItem(STORAGE_KEY, 'false')
+        writeBrowserStorage(STORAGE_KEY, 'false')
       }
       return next
     })

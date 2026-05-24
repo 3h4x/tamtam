@@ -19,6 +19,7 @@ import { useHandleSubmit } from '@/components/terminal/useHandleSubmit'
 import { useTerminalBootstrap } from '@/components/terminal/useTerminalBootstrap'
 import { MODEL_TIERS, normalizeModelInput, type ModelTier } from '@/lib/agents/model-aliases'
 import { type CliProvider } from '@/lib/usage/cli-providers'
+import { readBrowserStorageJson, writeBrowserStorage } from '@/lib/client/browser-storage'
 
 // Exported for unit testing — determines whether a job kind uses Claude's
 // stream-json output format (parsed path) vs raw log output.
@@ -137,7 +138,7 @@ export function TerminalTab({ projectName, initialSessionId }: TerminalTabProps)
   const inputRef = useRef<HTMLTextAreaElement>(null)
   const termRef = useRef<HTMLDivElement>(null)
   const [promptHistory, setPromptHistory] = useState<string[]>(() => {
-    try { return JSON.parse(localStorage.getItem('tamtam-prompt-history') || '[]') } catch { return [] }
+    return readBrowserStorageJson<string[]>('tamtam-prompt-history', [])
   })
   const [historyIdx, setHistoryIdx] = useState<number | null>(null)
   const draftBeforeHistoryRef = useRef<string>('')
@@ -155,7 +156,7 @@ export function TerminalTab({ projectName, initialSessionId }: TerminalTabProps)
   const [skillSearch, setSkillSearch] = useState('')
   const [showSkillPicker, setShowSkillPicker] = useState(false)
   const [skillUsage, setSkillUsage] = useState<Record<string, number>>(() => {
-    try { return JSON.parse(localStorage.getItem('tamtam-skill-usage') || '{}') } catch { return {} }
+    return readBrowserStorageJson<Record<string, number>>('tamtam-skill-usage', {})
   })
 
   // Docs catalog
@@ -276,7 +277,7 @@ export function TerminalTab({ projectName, initialSessionId }: TerminalTabProps)
       setShowSkillPicker(false)
       setSkillUsage(prev => {
         const updated = { ...prev, [item.id]: (prev[item.id] || 0) + 1 }
-        try { localStorage.setItem('tamtam-skill-usage', JSON.stringify(updated)) } catch {}
+        writeBrowserStorage('tamtam-skill-usage', JSON.stringify(updated))
         return updated
       })
     }
