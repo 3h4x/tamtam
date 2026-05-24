@@ -46,24 +46,49 @@ function latestJob<T extends JobData>(jobs: T[]): T | null {
   return best;
 }
 
+function latestPrContext(jobs: Iterable<JobData>, projectName?: string): PrContext | null {
+  let bestPr: PrContext | null = null;
+  let bestStartedAt = Number.NEGATIVE_INFINITY;
+  for (const job of jobs) {
+    if (projectName && job.project !== projectName) continue;
+    const pr = parsePrContextMeta(job.contextMeta);
+    if (!pr) continue;
+    if (!bestPr || job.startedAt > bestStartedAt) {
+      bestPr = pr;
+      bestStartedAt = job.startedAt;
+    }
+  }
+  return bestPr;
+}
+
 function recoverIssueRepo(
   projectName: string,
   issueNumber: number,
   jobs: JobData[],
   preferredReleaseId?: string | null,
 ): string | null {
-  const sameIssue = jobs
-    .filter(
-      (job) =>
-        job.project === projectName &&
-        job.ghIssueNumber === issueNumber &&
-        repoStamped(job.ghIssueRepo),
-    )
-    .sort((a, b) => b.startedAt - a.startedAt);
-  const preferred = preferredReleaseId
-    ? sameIssue.find((job) => job.releaseId === preferredReleaseId)
-    : null;
-  return preferred?.ghIssueRepo ?? sameIssue[0]?.ghIssueRepo ?? null;
+  let latestOverall: JobData | null = null;
+  let latestPreferred: JobData | null = null;
+  for (const job of jobs) {
+    if (
+      job.project !== projectName ||
+      job.ghIssueNumber !== issueNumber ||
+      !repoStamped(job.ghIssueRepo)
+    ) {
+      continue;
+    }
+    if (!latestOverall || job.startedAt > latestOverall.startedAt) {
+      latestOverall = job;
+    }
+    if (
+      preferredReleaseId &&
+      job.releaseId === preferredReleaseId &&
+      (!latestPreferred || job.startedAt > latestPreferred.startedAt)
+    ) {
+      latestPreferred = job;
+    }
+  }
+  return latestPreferred?.ghIssueRepo ?? latestOverall?.ghIssueRepo ?? null;
 }
 
 export function findReleaseScopedIssueJob(
@@ -135,11 +160,7 @@ export function findReleaseScopedPrContext(
   const parentChain = walkParentChain(activeRelease, byId).filter(
     (job) => job.project === projectName,
   );
-  const candidates = [...releaseScoped, ...parentChain]
-    .map((job) => ({ job, pr: parsePrContextMeta(job.contextMeta) }))
-    .filter((entry): entry is { job: JobData; pr: PrContext } => entry.pr !== null)
-    .sort((a, b) => b.job.startedAt - a.job.startedAt);
-  return candidates[0]?.pr ?? null;
+  return latestPrContext([...releaseScoped, ...parentChain]);
 }
 
 export function findLatestIssueRunContext(
@@ -165,12 +186,7 @@ export function findLatestPrContext(
   projectName: string,
   jobs: JobData[] = listJobs(),
 ): PrContext | null {
-  const candidates = jobs
-    .filter((candidate) => candidate.project === projectName)
-    .map((job) => ({ job, pr: parsePrContextMeta(job.contextMeta) }))
-    .filter((entry): entry is { job: JobData; pr: PrContext } => entry.pr !== null)
-    .sort((a, b) => b.job.startedAt - a.job.startedAt);
-  return candidates[0]?.pr ?? null;
+  return latestPrContext(jobs, projectName);
 }
 
 export function getJobById(jobId: string | null | undefined): JobData | null {
