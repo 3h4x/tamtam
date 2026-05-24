@@ -1,6 +1,39 @@
+import { mkdirSync, mkdtempSync, rmSync, utimesSync, writeFileSync } from 'fs';
+import { tmpdir } from 'os';
+import { join } from 'path';
 import { describe, it, expect } from 'vitest';
 
 describe('codex-quota', () => {
+  it('returns only the newest session files without requiring pre-sorted directory entries', async () => {
+    const { __private__ } = await import('@/lib/usage/codex-quota');
+    const tempDir = mkdtempSync(join(tmpdir(), 'tamtam-codex-quota-'));
+
+    try {
+      const nestedDir = join(tempDir, 'nested');
+      mkdirSync(nestedDir);
+      for (let i = 0; i < 25; i += 1) {
+        const dir = i % 2 === 0 ? tempDir : nestedDir;
+        const path = join(dir, `session-${String(24 - i).padStart(2, '0')}.jsonl`);
+        writeFileSync(path, '{}\n');
+        const mtime = new Date(Date.UTC(2026, 4, 2, 8, i));
+        utimesSync(path, mtime, mtime);
+      }
+      writeFileSync(join(tempDir, 'ignore.txt'), '{}\n');
+
+      const files = await __private__.listSessionFiles(tempDir);
+
+      expect(files).toHaveLength(20);
+      expect(files.map((file) => file.match(/session-(\d+)\.jsonl$/)?.[1])).toEqual([
+        '00', '01', '02', '03', '04',
+        '05', '06', '07', '08', '09',
+        '10', '11', '12', '13', '14',
+        '15', '16', '17', '18', '19',
+      ]);
+    } finally {
+      rmSync(tempDir, { recursive: true, force: true });
+    }
+  });
+
   it('parses the latest token_count rate-limit event from a session log', async () => {
     const { __private__ } = await import('@/lib/usage/codex-quota');
     const content = [
