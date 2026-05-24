@@ -32,6 +32,7 @@ import { getAggregateCi, getCiFailedUrl } from '@/lib/shared/statusConstants'
 import { LoadingState } from '@/components/LoadingState'
 import { ProjectLogo } from '@/components/ProjectLogo'
 import { useToast } from '@/components/Toast'
+import { Button } from '@/components/ui/Button'
 import { Spinner } from '@/components/ui/Spinner'
 import { subscribeToSettingsChanged } from '@/lib/shared/settings-events'
 import { loadQuotaSnapshot } from '@/lib/client/quota'
@@ -629,13 +630,15 @@ const isReviewRunning = (projectName: string) => !!runtime[projectName]?.hasRunn
                         {project.totalChanges}
                       </span>
                       {hasUnreviewed ? (
-                        <button
-                          className="px-2 py-0.5 text-xs border border-border rounded bg-bg-secondary text-text-secondary hover:text-text-primary hover:bg-bg-tertiary cursor-pointer transition-colors"
+                        <Button
+                          type="button"
+                          size="sm"
+                          className="px-2 py-0.5 bg-bg-secondary text-text-secondary hover:text-text-primary"
                           onClick={e => handleReview(e, project.project)}
                           disabled={reviewing}
                         >
                           {reviewing ? 'reviewing…' : 'review'}
-                        </button>
+                        </Button>
                       ) : verdict ? (
                         <span className={`text-xs font-medium ${
                           verdict === 'LGTM' ? 'text-status-success' :
