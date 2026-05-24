@@ -1383,6 +1383,77 @@ describe.skip('review_fix_max_iterations only caps review-side recovery', () => 
   });
 });
 
+describe('standalone review cap fallback', () => {
+  function makeFixJob(id: string, overrides: Partial<JobData> = {}): JobData {
+    const now = Date.now() / 1000;
+    return {
+      id,
+      project: 'proj',
+      kind: 'fix',
+      prompt: null,
+      pid: 99999,
+      logPath: null,
+      startedAt: now,
+      finishedAt: null,
+      exitCode: null,
+      seen: false,
+      durationMs: null,
+      inputTokens: null,
+      outputTokens: null,
+      cacheReadTokens: null,
+      cacheCreateTokens: null,
+      sessionId: null,
+      ...overrides,
+    };
+  }
+
+  beforeEach(async () => {
+    await resetTestState();
+    mocks.getProjectTestConfig.mockReturnValue({
+      autoPushEnabled: true, autoCommitEnabled: false, releaseAfterRun: false, prWorkflowEnabled: false,
+    });
+    mocks.getSettings.mockReturnValue({ review_fix_max_iterations: 1 });
+  });
+
+  it('cites the newest standalone review when the review cap is exhausted', async () => {
+    const now = Date.now() / 1000;
+    await insertJobsAndCache(getTestDb(), [
+      makeJobRow({
+        id: 'older-do-not-ship-review',
+        project: 'proj',
+        kind: 'review',
+        startedAt: now - 180,
+        finishedAt: now - 170,
+        exitCode: 0,
+        verdict: 'DO NOT SHIP',
+      }),
+      makeJobRow({
+        id: 'newer-needs-attention-review',
+        project: 'proj',
+        kind: 'review',
+        startedAt: now - 90,
+        finishedAt: now - 80,
+        exitCode: 0,
+        verdict: 'NEEDS ATTENTION',
+      }),
+    ]);
+
+    const fixJob = makeFixJob('standalone-cap-fix', {
+      parentJobId: 'newer-needs-attention-review',
+      startedAt: now - 30,
+    });
+
+    await markDone(fixJob, 0);
+
+    expect(mocks.startProjectReview).not.toHaveBeenCalled();
+    expect(mocks.fileReviewExhaustionIssue).toHaveBeenCalledOnce();
+    expect(mocks.fileReviewExhaustionIssue).toHaveBeenCalledWith(
+      expect.objectContaining({ id: 'newer-needs-attention-review' }),
+    );
+    expect(mocks.startProjectCommit).toHaveBeenCalledOnce();
+  });
+});
+
 // ─── concurrent step finalization guard ──────────────────────────────────────
 
 // Release-linked chain blocks short-circuit at lifecycle.ts ~line 488 — the
