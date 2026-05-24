@@ -246,6 +246,53 @@ describe('resume-stuck-release helpers', () => {
     expect(runCompletionHooksMock).not.toHaveBeenCalled();
   });
 
+  it('resumes from the latest chain step when storage returns children unsorted', async () => {
+    const now = Date.now() / 1000;
+    const release = makeJob({
+      id: 'release-unsorted-steps',
+      project: 'proj',
+      kind: 'release',
+      startedAt: now - 300,
+      finishedAt: now - 60,
+      exitCode: 0,
+    });
+    getJobMock.mockReturnValue(release);
+    listJobsMock.mockReturnValue([
+      makeJob({
+        id: 'review-1',
+        project: 'proj',
+        kind: 'review',
+        releaseId: 'release-unsorted-steps',
+        startedAt: now - 280,
+        finishedAt: now - 270,
+        exitCode: 0,
+      }),
+      makeJob({
+        id: 'test-1',
+        project: 'proj',
+        kind: 'test',
+        releaseId: 'release-unsorted-steps',
+        startedAt: now - 290,
+        finishedAt: now - 285,
+        exitCode: 0,
+      }),
+    ]);
+
+    const { resumeStuckRelease } = await import('@/lib/pipeline/resume-stuck-release');
+    const resumed = await resumeStuckRelease('proj', 'release-unsorted-steps');
+
+    expect(resumed).toEqual({
+      ok: true,
+      status: 'resumed',
+      detail: 'resumed',
+      attempted: true,
+      resumedFrom: { kind: 'review', id: 'review-1' },
+    });
+    expect(runCompletionHooksMock).toHaveBeenCalledWith(
+      expect.objectContaining({ id: 'review-1', kind: 'review' }),
+    );
+  });
+
   it('scans by release finishedAt, not startedAt', async () => {
     const now = Date.now() / 1000;
     await handle.db.insert(schema.jobs).values({
