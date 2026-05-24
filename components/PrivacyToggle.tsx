@@ -1,19 +1,20 @@
 'use client'
 
 import { usePrivacyMode } from '@/hooks/usePrivacyMode'
+import { Button } from '@/components/ui/Button'
 
 export function PrivacyToggle() {
   const { isPrivate, togglePrivacy } = usePrivacyMode()
 
   return (
-    <button
+    <Button
+      type="button"
+      variant={isPrivate ? 'warning' : 'secondary'}
       onClick={togglePrivacy}
       title={isPrivate ? 'Show project names' : 'Hide project names (privacy mode)'}
       aria-label={isPrivate ? 'Disable privacy mode' : 'Enable privacy mode'}
-      className={`w-9 h-9 flex items-center justify-center rounded-lg border transition-colors cursor-pointer ${
-        isPrivate
-          ? 'border-status-warning/60 bg-status-warning/10 text-status-warning hover:bg-status-warning/20'
-          : 'border-border bg-bg-secondary text-text-secondary hover:bg-bg-tertiary hover:text-text-primary'
+      className={`h-9 w-9 justify-center rounded-lg p-0 ${
+        isPrivate ? '' : 'text-text-secondary hover:text-text-primary'
       }`}
     >
       {isPrivate ? (
@@ -30,6 +31,6 @@ export function PrivacyToggle() {
           <circle cx="12" cy="12" r="3"/>
         </svg>
       )}
-    </button>
+    </Button>
   )
 }
