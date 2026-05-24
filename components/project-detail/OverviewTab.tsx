@@ -13,6 +13,7 @@ import { StatusStrip } from '@/components/project-detail/StatusStrip'
 import { AgentsStats } from '@/components/project-detail/AgentsStats'
 import { PipelineStatsPanel } from '@/components/project-detail/PipelineStatsPanel'
 import { PromptInsightsPanel } from '@/components/project-detail/PromptInsightsPanel'
+import { Spinner } from '@/components/ui/Spinner'
 import { formatAgo } from '@/lib/shared/format'
 import type { JobInfo, ProjectConfig } from '@/lib/client-api'
 
@@ -143,7 +144,7 @@ export function OverviewTab({
                 <div className="flex items-start justify-between gap-3">
                   <div className="min-w-0">
                     <div className="flex items-center gap-2">
-                      <span className="spinner-sm shrink-0 !h-3 !w-3 !border-[1.5px]" aria-hidden />
+                      <Spinner size="sm" shrink className="!h-3 !w-3 !border-[1.5px]" aria-hidden />
                       <span className="truncate text-sm font-medium text-text-primary">{activeWorkTitle(display)}</span>
                     </div>
                     <div className="mt-1 flex flex-wrap items-center gap-x-2 gap-y-1 text-xs text-text-secondary">
