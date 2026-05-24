@@ -25,6 +25,7 @@ describe('GET /api/projects/by-project/{projectName}/docs', () => {
 
   afterEach(() => {
     vi.resetModules();
+    vi.doUnmock('fs/promises');
     rmSync(tempDir, { recursive: true, force: true });
   });
 
@@ -126,6 +127,31 @@ describe('GET /api/projects/by-project/{projectName}/docs', () => {
     expect(data.docs[0].content).toBe('# lowercase readme');
     // README still sorts to position 0 ahead of docs/ entries.
     expect(data.docs[1].name).toBe('ZED.md');
+  });
+
+  it('keeps README candidate precedence when multiple casings exist', async () => {
+    vi.resetModules();
+    const projectPath = '/virtual/project';
+    vi.doMock('@/lib/shared/project-data', () => ({
+      resolveProjectPath: vi.fn().mockReturnValue(projectPath),
+    }));
+    vi.doMock('fs/promises', () => ({
+      readFile: vi.fn(async (path: string) => {
+        if (path.endsWith('/README.md')) {
+          await new Promise((resolve) => setTimeout(resolve, 5));
+          return '# canonical readme';
+        }
+        if (path.endsWith('/readme.md')) return '# lowercase readme';
+        throw new Error('missing');
+      }),
+    }));
+    const mod = await import('@/app/api/projects/by-project/[projectName]/docs/route');
+    const req = new NextRequest('http://localhost/api/projects/by-project/proj1/docs');
+    const res = await mod.GET(req, { params: Promise.resolve({ projectName: 'proj1' }) });
+    const data = await res.json();
+    expect(data.docs).toHaveLength(1);
+    expect(data.docs[0].path).toBe('README.md');
+    expect(data.docs[0].content).toBe('# canonical readme');
   });
 
   it('sorts docs entries when README candidates are absent', async () => {
