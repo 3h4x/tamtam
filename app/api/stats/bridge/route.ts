@@ -70,6 +70,14 @@ export interface BridgeResponse {
 const SHIP_WINDOW_MS = 2 * 60 * 60 * 1000;
 const ACTIVE_WINDOW_MS = 60 * 60 * 1000;
 const CACHE_TTL_MS = 15_000;
+const STATUS_SORT_RANK = {
+  attention: 0,
+  paused: 1,
+  releasing: 2,
+  shipping: 3,
+  active: 4,
+  idle: 5,
+} satisfies Record<BridgeProjectStatus, number>;
 
 let cache: { body: BridgeResponse; expiresAt: number } | null = null;
 
@@ -193,8 +201,7 @@ export async function GET() {
     })
     .sort((x, y) => {
       // Surface what needs eyes first, then most-recently-active.
-      const order: BridgeProjectStatus[] = ['attention', 'paused', 'releasing', 'shipping', 'active', 'idle'];
-      const d = order.indexOf(x.status) - order.indexOf(y.status);
+      const d = STATUS_SORT_RANK[x.status] - STATUS_SORT_RANK[y.status];
       if (d !== 0) return d;
       return (y.lastAgentAt ?? 0) - (x.lastAgentAt ?? 0);
     });
