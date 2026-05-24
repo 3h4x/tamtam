@@ -108,18 +108,7 @@ function stepIcon(s: StepState) {
   if (s === 'warning') return <span className="text-[10px] leading-none" aria-hidden>!</span>
   if (s === 'running') {
     return (
-      <svg
-        className="w-3 h-3 text-current animate-spin shrink-0"
-        viewBox="0 0 14 14"
-        fill="none"
-        stroke="currentColor"
-        strokeWidth="1.8"
-        strokeLinecap="round"
-        aria-hidden
-      >
-        <path d="M11.9 7A4.9 4.9 0 1 1 7 2.1" opacity="0.35" />
-        <path d="M7 2.1A4.9 4.9 0 0 1 11.9 7" />
-      </svg>
+      <Spinner size="md" shrink className="text-current" aria-hidden />
     )
   }
   if (s === 'skipped') return <span className="text-[10px] leading-none opacity-70" aria-hidden>⤼</span>
