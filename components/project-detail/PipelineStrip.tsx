@@ -146,6 +146,24 @@ function toJourneyStep(step: PipelineStep, role: PipelineJourneyStep['role'], me
   return { ...step, role, meta }
 }
 
+function findLatestJob(
+  jobs: Iterable<JobInfo>,
+  matches: (job: JobInfo) => boolean,
+  timestamp: (job: JobInfo) => number | null | undefined,
+): JobInfo | undefined {
+  let latest: JobInfo | undefined
+  let latestTimestamp = -Infinity
+  for (const job of jobs) {
+    if (!matches(job)) continue
+    const currentTimestamp = timestamp(job) ?? 0
+    if (!latest || currentTimestamp > latestTimestamp) {
+      latest = job
+      latestTimestamp = currentTimestamp
+    }
+  }
+  return latest
+}
+
 export function PipelineStrip({
   projectName,
   projectJobs,
@@ -182,12 +200,16 @@ export function PipelineStrip({
   }
   const pipelineJobs = projectJobs.filter(job => PIPELINE_KINDS.has(job.kind))
 
-  const activeReleaseJob = projectJobs
-    .filter(j => j.kind === 'release' && j.status === 'running')
-    .sort((a, b) => (b.started_at || 0) - (a.started_at || 0))[0]
-  const activePipelineJob = pipelineJobs
-    .filter(job => job.status === 'running')
-    .sort((a, b) => (b.started_at || 0) - (a.started_at || 0))[0]
+  const activeReleaseJob = findLatestJob(
+    projectJobs,
+    (job) => job.kind === 'release' && job.status === 'running',
+    (job) => job.started_at,
+  )
+  const activePipelineJob = findLatestJob(
+    pipelineJobs,
+    (job) => job.status === 'running',
+    (job) => job.started_at,
+  )
   const displayReleaseJob = activeReleaseJob ?? activePipelineJob ?? null
   const activePipelineChain = activePipelineJob ? resolvePipelineChain(activePipelineJob) : null
   const traceReleaseId = activeReleaseJob?.id ?? activePipelineChain?.releaseId ?? null
@@ -272,9 +294,7 @@ export function PipelineStrip({
     .sort((a, b) => (a.started_at || 0) - (b.started_at || 0))
 
   const latestOfKind = (kind: string): JobInfo | undefined =>
-    windowJobs
-      .filter((job) => job.kind === kind)
-      .sort((a, b) => (b.started_at || 0) - (a.started_at || 0))[0]
+    findLatestJob(windowJobs, (job) => job.kind === kind, (job) => job.started_at)
 
   const testJob = latestOfKind('test')
   const reviewJob = latestOfKind('review')
@@ -284,9 +304,11 @@ export function PipelineStrip({
   const dodJob = latestOfKind('mark-dod')
   const prWaitJob = latestOfKind('pr-wait')
   const soakJob = latestOfKind('soak')
-  const latestProjectReview = projectJobs
-    .filter((job) => job.kind === 'review' && job.status === 'done' && !!job.verdict)
-    .sort((a, b) => (b.finished_at || 0) - (a.finished_at || 0))[0]
+  const latestProjectReview = findLatestJob(
+    projectJobs,
+    (job) => job.kind === 'review' && job.status === 'done' && !!job.verdict,
+    (job) => job.finished_at,
+  )
 
   const runningStepKinds = new Set(
     windowJobs.filter((job) => job.status === 'running').map((job) => job.kind)
