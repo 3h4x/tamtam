@@ -10,19 +10,24 @@ describe('test-db helper', () => {
   // migrated boot (the two `new PGlite(...)` constructors are issued
   // synchronously before either `waitReady`/`migrate` is awaited), and
   // the empty test body itself is just an assertion query.
-  let fullDb: TestDbHandle;
-  let emptyDb: TestDbHandle;
+  let fullDb: TestDbHandle | undefined;
+  let emptyDb: TestDbHandle | undefined;
 
   beforeAll(async () => {
     [fullDb, emptyDb] = await Promise.all([createTestPgDb(), createTestPgDbEmpty()]);
   });
 
   afterAll(async () => {
-    await Promise.all([fullDb[Symbol.asyncDispose](), emptyDb[Symbol.asyncDispose]()]);
+    await Promise.all(
+      [fullDb, emptyDb].map(async (handle) => {
+        await handle?.[Symbol.asyncDispose]();
+      }),
+    );
   });
 
   it('createTestPgDb applies full schema and creates the vector extension', async () => {
-    const tables = await fullDb.db.execute(
+    expect(fullDb).toBeDefined();
+    const tables = await fullDb!.db.execute(
       sql`select table_name from information_schema.tables where table_schema = 'public' order by 1`,
     );
     const names = (tables.rows as Array<{ table_name: string }>).map((r) => r.table_name);
@@ -30,22 +35,24 @@ describe('test-db helper', () => {
     expect(names).toContain('agents');
     expect(names).toContain('retrieval_chunks');
     expect(names).toContain('job_completion_events');
-    const ext = await fullDb.db.execute(
+    const ext = await fullDb!.db.execute(
       sql`select extname from pg_extension where extname = 'vector'`,
     );
     expect(ext.rows).toHaveLength(1);
   });
 
   it('createTestPgDbEmpty boots a Postgres with no public tables', async () => {
-    const tables = await emptyDb.db.execute(
+    expect(emptyDb).toBeDefined();
+    const tables = await emptyDb!.db.execute(
       sql`select table_name from information_schema.tables where table_schema = 'public'`,
     );
     expect(tables.rows).toHaveLength(0);
   });
 
   it('round-trips a row through drizzle', async () => {
-    await fullDb.db.insert(schema.settings).values({ key: 'roundtrip-k', value: 'v' });
-    const rows = await fullDb.db
+    expect(fullDb).toBeDefined();
+    await fullDb!.db.insert(schema.settings).values({ key: 'roundtrip-k', value: 'v' });
+    const rows = await fullDb!.db
       .select()
       .from(schema.settings)
       .where(sql`${schema.settings.key} = 'roundtrip-k'`);

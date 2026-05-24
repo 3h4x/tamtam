@@ -2,6 +2,19 @@ import { defineConfig } from 'vitest/config';
 import path from 'path';
 
 const isCi = process.env.CI === 'true';
+const nodeMajor = Number.parseInt(process.versions.node.split('.')[0] ?? '0', 10);
+const isNode25OrNewer = Number.isFinite(nodeMajor) && nodeMajor >= 25;
+
+function projectMaxWorkers(localDefault: number): number {
+  if (isCi) return 4;
+
+  // PGlite boots PostgreSQL inside WASM. On Node 25, restoring many snapshots
+  // across forked Vitest workers can starve DB-backed beforeAll hooks long
+  // enough to hit the 30s hook timeout even though each suite passes alone.
+  if (isNode25OrNewer) return 4;
+
+  return localDefault;
+}
 
 // The 29 test files below each take >=500ms wall-clock (DB boots, heavy mocks,
 // or large prompt assembly). Routing them into their own worker pool keeps a
@@ -65,7 +78,7 @@ export default defineConfig({
           environment: 'node',
           globalSetup: ['./__tests__/global-setup.ts'],
           pool: 'forks',
-          maxWorkers: isCi ? 4 : 14,
+          maxWorkers: projectMaxWorkers(14),
           sequence: { groupOrder: 0 },
         },
       },
@@ -77,14 +90,14 @@ export default defineConfig({
           environment: 'node',
           globalSetup: ['./__tests__/global-setup.ts'],
           pool: 'forks',
-          maxWorkers: isCi ? 4 : 8,
+          maxWorkers: projectMaxWorkers(8),
           sequence: { groupOrder: 1 },
         },
       },
     ],
     silent: 'passed-only',
     testTimeout: 30000,
-    hookTimeout: 30000,
+    hookTimeout: isNode25OrNewer ? 60000 : 30000,
     teardownTimeout: 10000,
   },
 });

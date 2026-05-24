@@ -48,9 +48,13 @@ export function TaskDetailPage({
 
   return (
     <div className="p-6">
-      <button className="text-accent hover:underline text-sm mb-4 inline-block" onClick={() => router.push(`/project/${encodeURIComponent(name)}`)}>
+      <Button
+        variant="ghost"
+        className="mb-4 px-0 py-0 text-accent hover:bg-transparent hover:text-accent hover:underline font-normal"
+        onClick={() => router.push(`/project/${encodeURIComponent(name)}`)}
+      >
         &larr; Back to {name}
-      </button>
+      </Button>
 
       <div className="flex items-center justify-between mb-6">
         <h2 className="text-xl font-semibold text-text-primary">

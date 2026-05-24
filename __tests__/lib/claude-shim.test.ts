@@ -3,7 +3,7 @@ import { mkdtemp, writeFile, chmod, rm, readFile } from 'fs/promises';
 import { tmpdir } from 'os';
 import { join } from 'path';
 import { spawn } from 'child_process';
-import { describe, it, expect, afterEach } from 'vitest';
+import { describe, it, expect, afterEach, vi } from 'vitest';
 
 const _require = createRequire(import.meta.url);
 const shim = _require(join(process.cwd(), 'scripts/claude-shim.js')) as {
@@ -16,6 +16,14 @@ const tempDirs: string[] = [];
 afterEach(async () => {
   await Promise.all(tempDirs.splice(0).map((d) => rm(d, { recursive: true, force: true })));
 });
+
+async function waitForFile(path: string, timeoutMs = 10_000): Promise<string> {
+  let content = '';
+  await vi.waitFor(async () => {
+    content = await readFile(path, 'utf8');
+  }, { timeout: timeoutMs, interval: 5 });
+  return content;
+}
 
 describe('claude-shim model resolution', () => {
   it('translates fast → haiku (default)', () => {
@@ -102,15 +110,7 @@ setInterval(() => {}, 1000);
     );
     proc.stdin.end('');
 
-    const startedAt = Date.now();
-    while (Date.now() - startedAt < 2000) {
-      try {
-        await readFile(readyFile, 'utf8');
-        break;
-      } catch {
-        await new Promise((r) => setTimeout(r, 25));
-      }
-    }
+    await waitForFile(readyFile);
 
     const closePromise = new Promise<number | null>((resolve, reject) => {
       proc.on('error', reject);
@@ -121,8 +121,7 @@ setInterval(() => {}, 1000);
     const code = await closePromise;
 
     try {
-      const sig = await readFile(signalFile, 'utf8');
-      expect(sig).toBe('SIGTERM');
+      expect(await waitForFile(signalFile)).toBe('SIGTERM');
       expect(code).toBe(143);
     } finally {
       try {

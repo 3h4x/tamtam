@@ -10,6 +10,7 @@ import {
   readdirSync,
   readFileSync,
   renameSync,
+  rmSync,
   statSync,
   unlinkSync,
   writeFileSync,
@@ -24,21 +25,21 @@ export interface TestDbHandle {
   [Symbol.asyncDispose](): Promise<void>;
 }
 
-// Pending background snapshot writes. `[Symbol.asyncDispose]` awaits the
-// matching entry (if any) before closing the PGlite, so the cache is
-// reliably populated even when the caller disposes immediately after the
-// helper returns.
-const pendingDumps = new WeakMap<PGlite, Promise<void>>();
-
 // PGlite WASM cold start is ~700-1000ms per instance. Snapshotting a freshly
 // booted PGlite via `dumpDataDir` and restoring with `loadDataDir` cuts a
 // subsequent boot to ~250-400ms. We persist the snapshot to a per-version,
 // per-migration-hash file under the OS tmpdir so consecutive `pnpm test`
-// invocations and parallel vitest workers can share it. The snapshot is
-// written in the background after the handle is returned, so the first
-// call in a session is no slower than the original cold-boot path.
+// invocations and parallel vitest workers can share it.
+//
+// Snapshot creation must not run against the live handle returned to tests:
+// `dumpDataDir()` queues work on PGlite's single WASM thread, so a background
+// dump can sit ahead of the test's first DDL/query and trip Vitest's 30s hook
+// timeout under parallel full-suite load. Build snapshots with a private
+// handle before returning a test handle instead.
 const MIGRATIONS_DIR = join(process.cwd(), 'lib/db/migrations');
-const CACHE_DIR = join(tmpdir(), 'tamtam-pglite-cache-v2');
+const CACHE_DIR = join(tmpdir(), 'tamtam-pglite-cache-v3');
+const CACHE_LOCK_DIR = join(CACHE_DIR, '.snapshot-build.lock');
+const CACHE_LOCK_STALE_MS = 2 * 60 * 1000;
 
 let cachedMigrationsHash: string | null = null;
 let cachedRequiredPublicTables: string[] | null = null;
@@ -111,48 +112,12 @@ async function writeSnapshotAsync(file: string, dump: Blob | File): Promise<void
   }
 }
 
-function persistSnapshotInBackground(file: string, raw: PGlite): void {
-  // Kick off the dump SYNCHRONOUSLY so the dump command is enqueued on
-  // PGlite's WASM thread before the caller has a chance to issue any
-  // subsequent queries against `raw`. This guarantees the snapshot
-  // captures the state at the moment this function was called, not
-  // some later mutated state.
-  //
-  // The returned promise resolves with the disk-write completing; we
-  // store it in `pendingDumps` so `[Symbol.asyncDispose]` can await it.
-  if (existsSync(file)) {
-    pendingDumps.set(raw, Promise.resolve());
-    return;
-  }
-  const dumpPromise = raw.dumpDataDir();
-  const work = (async () => {
-    try {
-      const dump = await dumpPromise;
-      await writeSnapshotAsync(file, dump);
-    } catch {
-      // best-effort
-    }
-  })();
-  pendingDumps.set(raw, work);
-}
-
 function makeHandle(raw: PGlite): TestDbHandle {
   const db = drizzle(raw, { schema });
   return {
     db,
     raw,
     async [Symbol.asyncDispose]() {
-      // If a background snapshot dump is in flight, wait for it before
-      // closing so the cache reliably populates.
-      const pending = pendingDumps.get(raw);
-      if (pending) {
-        try {
-          await pending;
-        } catch {
-          // ignore
-        }
-        pendingDumps.delete(raw);
-      }
       await raw.close();
     },
   };
@@ -204,17 +169,71 @@ async function removeSnapshot(file: string): Promise<void> {
   }
 }
 
+function sleep(ms: number): Promise<void> {
+  return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
+async function withSnapshotBuildLock<T>(work: () => Promise<T>): Promise<T> {
+  while (true) {
+    try {
+      if (!existsSync(CACHE_DIR)) mkdirSync(CACHE_DIR, { recursive: true });
+      mkdirSync(CACHE_LOCK_DIR);
+      break;
+    } catch {
+      try {
+        const st = statSync(CACHE_LOCK_DIR);
+        if (Date.now() - st.mtimeMs > CACHE_LOCK_STALE_MS) {
+          rmSync(CACHE_LOCK_DIR, { recursive: true, force: true });
+          continue;
+        }
+      } catch {
+        continue;
+      }
+      await sleep(50);
+    }
+  }
+
+  try {
+    return await work();
+  } finally {
+    rmSync(CACHE_LOCK_DIR, { recursive: true, force: true });
+  }
+}
+
+async function buildSnapshot(kind: 'empty' | 'migrated', file: string): Promise<void> {
+  const handle = await bootPGlite();
+  try {
+    if (kind === 'migrated') {
+      await migrate(handle.db, { migrationsFolder: MIGRATIONS_DIR });
+    }
+    const dump = await handle.raw.dumpDataDir();
+    await writeSnapshotAsync(file, dump);
+  } finally {
+    await handle[Symbol.asyncDispose]();
+  }
+}
+
+async function ensureSnapshot(kind: 'empty' | 'migrated'): Promise<string> {
+  const file = cachePath(kind);
+  if (readSnapshot(file)) return file;
+
+  await withSnapshotBuildLock(async () => {
+    if (readSnapshot(file)) return;
+    await buildSnapshot(kind, file);
+  });
+  return file;
+}
+
 /**
  * Boot a PGlite instance and apply the full production migration set.
  * Use for tests that touch many tables or rely on real defaults/FKs.
  *
  * Uses a disk-cached snapshot keyed by the migrations folder hash; first
- * call pays the cold boot + migrate cost and writes a snapshot in the
- * background, subsequent runs restore from the snapshot (~250-400ms vs
- * ~1000ms cold).
+ * call pays the cold boot + migrate + dump cost on a private handle,
+ * subsequent calls restore from the snapshot (~250-400ms vs ~1000ms cold).
  */
 export async function createTestPgDb(): Promise<TestDbHandle> {
-  const file = cachePath('migrated');
+  const file = await ensureSnapshot('migrated');
   const cached = readSnapshot(file);
   if (cached) {
     const handle = await bootPGliteFromSnapshot(cached);
@@ -225,7 +244,6 @@ export async function createTestPgDb(): Promise<TestDbHandle> {
 
   const handle = await bootPGlite();
   await migrate(handle.db, { migrationsFolder: MIGRATIONS_DIR });
-  persistSnapshotInBackground(file, handle.raw);
   return handle;
 }
 
@@ -242,7 +260,7 @@ export async function createTestPgDb(): Promise<TestDbHandle> {
  * cache file for the no-migrations variant.
  */
 export async function createTestPgDbEmpty(): Promise<TestDbHandle> {
-  const file = cachePath('empty');
+  const file = await ensureSnapshot('empty');
   const cached = readSnapshot(file);
   if (cached) {
     const handle = await bootPGliteFromSnapshot(cached);
@@ -252,6 +270,5 @@ export async function createTestPgDbEmpty(): Promise<TestDbHandle> {
   }
 
   const handle = await bootPGlite();
-  persistSnapshotInBackground(file, handle.raw);
   return handle;
 }

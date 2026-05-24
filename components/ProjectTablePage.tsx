@@ -35,6 +35,7 @@ import { useToast } from '@/components/Toast'
 import { Spinner } from '@/components/ui/Spinner'
 import { subscribeToSettingsChanged } from '@/lib/shared/settings-events'
 import { loadQuotaSnapshot } from '@/lib/client/quota'
+import { readBrowserStorage, writeBrowserStorage } from '@/lib/client/browser-storage'
 
 type SortKey = 'project' | 'status' | 'changes' | 'last_run' | 'next_run' | 'ci'
 type SortDir = 'asc' | 'desc'
@@ -43,32 +44,12 @@ const PROJECT_SORT_KEY_STORAGE = 'tamtam.projects.sortKey'
 const PROJECT_SORT_DIR_STORAGE = 'tamtam.projects.sortDir'
 const sortKeys = new Set<SortKey>(['project', 'status', 'changes', 'last_run', 'next_run', 'ci'])
 
-function getProjectSortStorage(): Storage | null {
-  if (typeof window === 'undefined') return null
-
-  try {
-    const storage = window.localStorage
-    if (!storage || typeof storage.getItem !== 'function' || typeof storage.setItem !== 'function') return null
-    return storage
-  } catch {
-    return null
-  }
-}
-
 function readProjectSortSetting(key: string): string | null {
-  try {
-    return getProjectSortStorage()?.getItem(key) ?? null
-  } catch {
-    return null
-  }
+  return readBrowserStorage(key)
 }
 
 function writeProjectSortSetting(key: string, value: string) {
-  try {
-    getProjectSortStorage()?.setItem(key, value)
-  } catch {
-    // Sorting still works without persistence when storage is unavailable.
-  }
+  writeBrowserStorage(key, value)
 }
 
 interface SchedulerEntry {
