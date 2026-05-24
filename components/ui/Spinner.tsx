@@ -1,6 +1,8 @@
 'use client'
 
-interface SpinnerProps {
+import type { HTMLAttributes } from 'react'
+
+interface SpinnerProps extends Omit<HTMLAttributes<HTMLSpanElement>, 'color'> {
   size?: 'xs' | 'sm' | 'md' | 'lg' | 'xl'
   color?: 'current' | 'accent' | 'white'
   shrink?: boolean
@@ -20,14 +22,16 @@ const COLOR_CLASSES = {
   white: 'border-white',
 } as const
 
-export function Spinner({ size = 'md', color = 'current', shrink }: SpinnerProps) {
+export function Spinner({ size = 'md', color = 'current', shrink, className, ...props }: SpinnerProps) {
   return (
     <span
+      {...props}
       className={[
         'inline-block rounded-full border-t-transparent animate-spin',
         SIZE_CLASSES[size],
         COLOR_CLASSES[color],
         shrink ? 'shrink-0' : '',
+        className ?? '',
       ]
         .filter(Boolean)
         .join(' ')}
