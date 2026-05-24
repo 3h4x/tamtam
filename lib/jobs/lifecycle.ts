@@ -249,10 +249,15 @@ async function notifyReleaseAborted(release: JobData): Promise<void> {
 function findLatestReviewForRelease(currentJob: JobData): JobData | null {
   const releaseId = currentJob.releaseId;
   const project = currentJob.project;
-  const reviews = listJobs()
-    .filter((j) => j.project === project && j.kind === 'review' && (releaseId ? j.releaseId === releaseId : true))
-    .sort((a, b) => b.startedAt - a.startedAt);
-  return reviews[0] ?? null;
+  let latest: JobData | null = null;
+  for (const job of listJobs()) {
+    if (job.project !== project || job.kind !== 'review') continue;
+    if (releaseId && job.releaseId !== releaseId) continue;
+    if (!latest || job.startedAt > latest.startedAt) {
+      latest = job;
+    }
+  }
+  return latest;
 }
 
 // Try the new "ship-anyway + file issue" path. On success, chain to a commit
