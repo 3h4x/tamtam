@@ -9,6 +9,12 @@ export interface LogFrame {
   timestamp: string;
 }
 
+interface LogFileEntry {
+  name: string;
+  mtime: number;
+  order: number;
+}
+
 function getLogsDir(baseDir?: string): string {
   const base = baseDir ?? homedir();
   const logsDir = join(/*turbopackIgnore: true*/ base, '.tamtam', 'jobs');
@@ -18,6 +24,33 @@ function getLogsDir(baseDir?: string): string {
 
 function isEnoent(error: unknown): boolean {
   return error instanceof Error && 'code' in error && error.code === 'ENOENT';
+}
+
+function isNewerLogFile(entry: LogFileEntry, current: LogFileEntry): boolean {
+  return entry.mtime > current.mtime || (entry.mtime === current.mtime && entry.order > current.order);
+}
+
+function insertNewestBounded(
+  newest: LogFileEntry[],
+  entry: LogFileEntry,
+  limit: number,
+): LogFileEntry | null {
+  let inserted = false;
+  for (let i = 0; i < newest.length; i++) {
+    const current = newest[i];
+    if (current && isNewerLogFile(entry, current)) {
+      newest.splice(i, 0, entry);
+      inserted = true;
+      break;
+    }
+  }
+
+  if (!inserted) {
+    if (newest.length >= limit) return entry;
+    newest.push(entry);
+  }
+
+  return newest.length > limit ? newest.pop() ?? null : null;
 }
 
 export function writeJobLogs(jobId: string, frames: LogFrame[], baseDir?: string): void {
@@ -55,24 +88,26 @@ export function cleanupOldLogs(maxLogs = 100, baseDir?: string): void {
   if (maxLogs <= 0) return;
   const logsDir = getLogsDir(baseDir);
 
-  const logFiles: Array<{ name: string; mtime: number }> = [];
+  const newest: LogFileEntry[] = [];
+  const toDelete: LogFileEntry[] = [];
+  let order = 0;
   for (const f of readdirSync(/*turbopackIgnore: true*/ logsDir)) {
     if (!f.endsWith('.log')) continue;
     try {
-      logFiles.push({
+      const dropped = insertNewestBounded(newest, {
         name: f,
         mtime: statSync(/*turbopackIgnore: true*/ join(logsDir, f)).mtimeMs,
-      });
+        order,
+      }, maxLogs);
+      if (dropped) toDelete.push(dropped);
     } catch (error) {
       if (isEnoent(error)) continue;
       throw error;
+    } finally {
+      order += 1;
     }
   }
-  logFiles.sort((a, b) => a.mtime - b.mtime);
 
-  if (logFiles.length <= maxLogs) return;
-
-  const toDelete = logFiles.slice(0, logFiles.length - maxLogs);
   for (const file of toDelete) {
     try {
       unlinkSync(/*turbopackIgnore: true*/ join(logsDir, file.name));
