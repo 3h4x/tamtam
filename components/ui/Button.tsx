@@ -14,9 +14,10 @@ export type ButtonVariant =
   | 'info'        // blue border + translucent bg
 
 export type ButtonSize = 'sm' | 'md'
+export type ButtonDisabledCursor = 'not-allowed' | 'default' | 'wait'
 
 const BASE =
-  'inline-flex items-center gap-1.5 font-medium transition-colors cursor-pointer no-underline disabled:opacity-50 disabled:cursor-not-allowed'
+  'inline-flex items-center gap-1.5 font-medium transition-colors cursor-pointer no-underline disabled:opacity-50'
 
 const SIZE: Record<ButtonSize, string> = {
   sm: 'px-2 py-1 text-xs rounded',
@@ -35,32 +36,42 @@ const VARIANT: Record<ButtonVariant, string> = {
   info:         'border border-status-info/50 bg-status-info/10 text-status-info hover:bg-status-info/20',
 }
 
+const DISABLED_CURSOR: Record<ButtonDisabledCursor, string> = {
+  'not-allowed': 'disabled:cursor-not-allowed',
+  default:       'disabled:cursor-default',
+  wait:          'disabled:cursor-wait',
+}
+
 export function buttonVariants({
   variant = 'secondary',
   size = 'md',
+  disabledCursor = 'not-allowed',
   className,
 }: {
   variant?: ButtonVariant
   size?: ButtonSize
+  disabledCursor?: ButtonDisabledCursor
   className?: string
 } = {}): string {
-  return [BASE, SIZE[size], VARIANT[variant], className].filter(Boolean).join(' ')
+  return [BASE, SIZE[size], VARIANT[variant], DISABLED_CURSOR[disabledCursor], className].filter(Boolean).join(' ')
 }
 
 export interface ButtonProps extends React.ButtonHTMLAttributes<HTMLButtonElement> {
   variant?: ButtonVariant
   size?: ButtonSize
+  disabledCursor?: ButtonDisabledCursor
 }
 
 export function Button({
   variant = 'secondary',
   size = 'md',
+  disabledCursor = 'not-allowed',
   className,
   ...props
 }: ButtonProps) {
   return (
     <button
-      className={buttonVariants({ variant, size, className })}
+      className={buttonVariants({ variant, size, disabledCursor, className })}
       {...props}
     />
   )

@@ -17,6 +17,7 @@ import { dispatchSettingsChanged } from '@/lib/shared/settings-events'
 import { parseEnabledProviders } from '@/lib/usage/cli-providers'
 import { StandardTabs } from '@/components/ui/StandardTabs'
 import { Spinner } from '@/components/ui/Spinner'
+import { Button } from '@/components/ui/Button'
 
 interface SettingsMap {
   workspace_path: string
@@ -387,18 +388,24 @@ export function SettingsPage({ initialTab }: { initialTab?: TabId } = {}) {
           {isDirty && !saving && (
             <span className="text-xs text-text-tertiary">Unsaved changes · ⌘S</span>
           )}
-          <button
+          <Button
             onClick={handleSave}
             disabled={!canSave}
-            className={`px-4 py-2 text-white border-none rounded-lg font-semibold text-sm transition-colors inline-flex items-center gap-1.5 ${
-              saved      ? 'bg-status-success cursor-default' :
-              canSave ? 'bg-accent hover:bg-accent-hover cursor-pointer' :
-                           'bg-accent/40 cursor-default'
-            } ${saving ? 'opacity-70 cursor-wait' : ''}`}
+            variant={saved ? 'success-solid' : 'solid'}
+            disabledCursor={saving ? 'wait' : 'default'}
+            className={`px-4 py-2 rounded-lg font-semibold ${
+              saved
+                ? 'cursor-default hover:bg-status-success disabled:opacity-100'
+                : canSave
+                  ? ''
+                  : saving
+                    ? 'bg-accent/40 hover:bg-accent/40 cursor-wait disabled:opacity-70'
+                    : 'bg-accent/40 hover:bg-accent/40 cursor-default disabled:opacity-100'
+            }`}
           >
             {saving && <Spinner color="white" shrink />}
             {saving ? 'Saving…' : saved ? 'Saved!' : 'Save Settings'}
-          </button>
+          </Button>
         </div>
       </div>
 
@@ -778,16 +785,18 @@ export function SettingsPage({ initialTab }: { initialTab?: TabId } = {}) {
                     </div>
 
                     <div className="mt-3 pt-3 border-t border-border flex items-center gap-3">
-                      <button
+                      <Button
                         onClick={saveProjects}
                         disabled={projectsSaving}
-                        className={`px-4 py-1.5 text-white border-none rounded-lg font-semibold text-sm cursor-pointer transition-colors inline-flex items-center gap-1.5 ${
-                          projectsSaved ? 'bg-status-success' : 'bg-accent hover:bg-accent-hover'
-                        } ${projectsSaving ? 'opacity-70 cursor-wait' : ''}`}
+                        variant={projectsSaved ? 'success-solid' : 'solid'}
+                        disabledCursor={projectsSaving ? 'wait' : 'not-allowed'}
+                        className={`px-4 py-1.5 rounded-lg font-semibold ${
+                          projectsSaved ? 'hover:bg-status-success' : ''
+                        } ${projectsSaving ? 'opacity-70 cursor-wait disabled:opacity-70' : ''}`}
                       >
                         {projectsSaving && <Spinner color="white" shrink />}
                         {projectsSaving ? 'Saving…' : projectsSaved ? 'Saved!' : `Save (${enabledCount} enabled)`}
-                      </button>
+                      </Button>
                     </div>
 
                     {archivedProjects.length > 0 && (
@@ -910,15 +919,17 @@ export function SettingsPage({ initialTab }: { initialTab?: TabId } = {}) {
               </div>
             </div>
             <div className="px-5 py-4 border-t border-border flex items-center gap-3">
-              <button
+              <Button
                 onClick={handleBackup}
                 disabled={backingUp}
-                className={`px-4 py-1.5 text-white border-none rounded-lg font-semibold text-sm cursor-pointer transition-colors ${
-                  backupResult ? 'bg-status-success' : 'bg-accent hover:bg-accent-hover'
-                } ${backingUp ? 'opacity-50 cursor-wait' : ''}`}
+                variant={backupResult ? 'success-solid' : 'solid'}
+                disabledCursor={backingUp ? 'wait' : 'not-allowed'}
+                className={`px-4 py-1.5 rounded-lg font-semibold ${
+                  backupResult ? 'hover:bg-status-success' : ''
+                } ${backingUp ? 'opacity-50 cursor-wait disabled:opacity-50' : ''}`}
               >
                 {backingUp ? 'Backing up…' : backupResult ? 'Done!' : 'Manual Backup Now'}
-              </button>
+              </Button>
               {backupResult && (
                 <span className="font-mono text-xs text-text-secondary">{backupResult.filename}</span>
               )}

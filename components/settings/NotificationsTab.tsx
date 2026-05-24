@@ -118,6 +118,7 @@ export function NotificationsTab({
               type="submit"
               variant={testSuccess ? 'success-solid' : 'solid'}
               disabled={testSending || !settings.notification_webhook_url}
+              disabledCursor={testSending ? 'wait' : 'not-allowed'}
               className={`px-4 py-1.5 border-none rounded-lg font-semibold ${
                 testSending ? 'opacity-50 cursor-wait' : ''
               }`}
