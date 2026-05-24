@@ -7,6 +7,7 @@ import { ThemeToggle } from './ThemeToggle'
 import { NotificationBell } from './NotificationBell'
 import { PrivacyToggle } from './PrivacyToggle'
 import { JobsPauseToggle } from './JobsPauseToggle'
+import { Spinner } from '@/components/ui/Spinner'
 import { fetchRecommendationsSummary } from '@/lib/client-api'
 import { useTheme } from '@/hooks/useTheme'
 
@@ -95,7 +96,7 @@ export function Header({ loading, lastRefresh: _lastRefresh }: HeaderProps) {
         })}
       </nav>
       <div className="flex items-center gap-2 shrink-0 ml-auto">
-        {loading && <span className="text-xs text-text-tertiary animate-spin" aria-label="Loading" role="status">{'\u27F3'}</span>}
+        {loading && <Spinner size="md" shrink className="text-text-tertiary" aria-label="Loading" role="status" />}
         <PrivacyToggle />
         <JobsPauseToggle />
         <NotificationBell />
