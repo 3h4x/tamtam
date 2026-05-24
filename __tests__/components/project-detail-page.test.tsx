@@ -6,7 +6,7 @@ import { createRoot } from 'react-dom/client'
 import { flushSync } from 'react-dom'
 import { ProjectDetailPage } from '@/components/ProjectDetailPage'
 import type { FleetHealth } from '@/hooks/useProjectHealth'
-import type { CustomAction, ProjectConfig } from '@/lib/client-api'
+import type { CustomAction, JobInfo, ProjectConfig } from '@/lib/client-api'
 import { dispatchJobsPausedChanged } from '@/lib/shared/jobs-paused-events'
 import type { Task } from '@/lib/shared/types'
 
@@ -31,6 +31,7 @@ const {
   changesTabPropsMock,
   historyTabPropsMock,
   pipelineStripPropsMock,
+  overviewTabPropsMock,
 } = vi.hoisted(() => ({
   paramsState: {
     name: 'acme/widgets',
@@ -56,6 +57,7 @@ const {
   changesTabPropsMock: vi.fn(),
   historyTabPropsMock: vi.fn(),
   pipelineStripPropsMock: vi.fn(),
+  overviewTabPropsMock: vi.fn(),
 }))
 
 vi.mock('next/navigation', () => ({
@@ -168,7 +170,15 @@ vi.mock('@/components/project-detail/TabNav', () => ({
 }))
 
 vi.mock('@/components/project-detail/OverviewTab', () => ({
-  OverviewTab: ({ projectName }: { projectName: string }) => <div data-testid="overview-tab">{projectName}</div>,
+  OverviewTab: (props: {
+    projectName: string
+    latestReview?: JobInfo
+    latestTest?: JobInfo
+    verdict?: string
+  }) => {
+    overviewTabPropsMock(props)
+    return <div data-testid="overview-tab">{props.projectName}</div>
+  },
 }))
 
 function buildConfig(overrides: Partial<ProjectConfig> = {}): ProjectConfig {
@@ -215,6 +225,23 @@ function buildTask(overrides: Partial<Task> = {}): Task {
     ci: null,
     ci_failed_url: null,
     github: null,
+    ...overrides,
+  }
+}
+
+function buildJob(overrides: Partial<JobInfo>): JobInfo {
+  return {
+    id: 'job-1',
+    project: 'acme/widgets',
+    kind: 'test',
+    prompt: null,
+    pid: 0,
+    log_path: '/tmp/job.log',
+    status: 'done',
+    exit_code: 0,
+    started_at: 1000,
+    finished_at: 2000,
+    seen: false,
     ...overrides,
   }
 }
@@ -306,6 +333,7 @@ describe('ProjectDetailPage', () => {
     changesTabPropsMock.mockReset()
     historyTabPropsMock.mockReset()
     pipelineStripPropsMock.mockReset()
+    overviewTabPropsMock.mockReset()
     fetchJobsMock.mockResolvedValue({ jobs: [] })
     fetchProjectConfigMock.mockResolvedValue(buildConfig())
     updateProjectConfigMock.mockResolvedValue(buildConfig({ test_command: 'pnpm lint' }))
@@ -415,6 +443,27 @@ describe('ProjectDetailPage', () => {
       expect(fetchBehindMock).toHaveBeenCalledWith('acme/widgets')
     })
     expect(pullProjectMock).not.toHaveBeenCalled()
+
+    unmount()
+  })
+
+  it('picks the latest finished review and test jobs from unsorted polling results', async () => {
+    fetchJobsMock.mockResolvedValue({ jobs: [
+      buildJob({ id: 'old-review', kind: 'review', verdict: 'LGTM', finished_at: 2000 }),
+      buildJob({ id: 'latest-test', kind: 'test', finished_at: 5000 }),
+      buildJob({ id: 'latest-review', kind: 'review', verdict: 'NEEDS ATTENTION', finished_at: 4000 }),
+      buildJob({ id: 'old-test', kind: 'test', finished_at: 1000 }),
+    ] })
+
+    const { unmount } = renderPage()
+
+    await vi.waitFor(() => {
+      expect(overviewTabPropsMock).toHaveBeenLastCalledWith(expect.objectContaining({
+        latestReview: expect.objectContaining({ id: 'latest-review' }),
+        latestTest: expect.objectContaining({ id: 'latest-test' }),
+        verdict: 'NEEDS ATTENTION',
+      }))
+    })
 
     unmount()
   })

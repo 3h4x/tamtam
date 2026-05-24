@@ -36,6 +36,20 @@ interface ProjectDetailPageProps {
   onRefresh: () => Promise<void>
 }
 
+function latestFinishedJob(
+  jobs: JobInfo[],
+  matches: (job: JobInfo) => boolean,
+): JobInfo | undefined {
+  let latest: JobInfo | undefined
+  for (const job of jobs) {
+    if (!matches(job)) continue
+    if (!latest || (job.finished_at || 0) > (latest.finished_at || 0)) {
+      latest = job
+    }
+  }
+  return latest
+}
+
 export function ProjectDetailPage({
   fleet,
   onRefresh,
@@ -308,15 +322,11 @@ export function ProjectDetailPage({
   const isPipelineRunning = isPipelineBusy(projectJobs)
 
   // Get latest review verdict
-  const latestReview = projectJobs
-    .filter(j => j.kind === 'review' && j.status === 'done' && j.verdict)
-    .sort((a, b) => (b.finished_at || 0) - (a.finished_at || 0))[0]
+  const latestReview = latestFinishedJob(projectJobs, j => j.kind === 'review' && j.status === 'done' && !!j.verdict)
   const verdict = latestReview?.verdict as Verdict | undefined
 
   // Get latest test result
-  const latestTest = projectJobs
-    .filter(j => j.kind === 'test' && j.status === 'done')
-    .sort((a, b) => (b.finished_at || 0) - (a.finished_at || 0))[0]
+  const latestTest = latestFinishedJob(projectJobs, j => j.kind === 'test' && j.status === 'done')
 
   const running = projectJobs.filter(j => j.status === 'running')
   const releaseRunning = running.some(j => j.kind === 'release')
