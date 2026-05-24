@@ -89,6 +89,17 @@ describe('reviewIsStuck', () => {
     ).toBe(false);
   });
 
+  it('compares against the newest prior review even when jobs are unsorted', () => {
+    const older = makeJob({ id: 'r0', kind: 'review', releaseId: 'rel-1', startedAt: 50, exitCode: 0 });
+    const newer = makeJob({ id: 'r1', kind: 'review', releaseId: 'rel-1', startedAt: 150, exitCode: 0 });
+    expect(
+      reviewIsStuck(cur, {
+        listJobs: () => [older, cur, newer],
+        readParsedLog: (job) => (job.id === 'r1' ? 'A completely different finding.' : PROSE_FINDING),
+      }),
+    ).toBe(false);
+  });
+
   it('ignores reviews from other releases', () => {
     const otherRelease = makeJob({
       id: 'r0',
@@ -149,6 +160,48 @@ Verdict: NEEDS ATTENTION
     });
     expect(r.stuck).toBe(true);
     expect(r.ids).toEqual(['alpha']);
+  });
+
+  it('uses the newest prior fix even when jobs are unsorted', () => {
+    const olderFix = makeJob({
+      id: 'f0',
+      kind: 'fix',
+      releaseId: 'rel-1',
+      startedAt: 100,
+      exitCode: 0,
+    });
+    const newerFix = makeJob({
+      id: 'f1',
+      kind: 'fix',
+      releaseId: 'rel-1',
+      startedAt: 150,
+      exitCode: 0,
+    });
+    const olderFixLog = `
+Fix checklist:
+- Finding ID: alpha
+  Status: fixed
+`;
+    const newerFixLog = `
+Fix checklist:
+- Finding ID: beta
+  Status: fixed
+`;
+    const reviewLog = `
+Findings:
+- Finding ID: alpha
+Verdict: NEEDS ATTENTION
+`;
+    expect(
+      fixContradictsReview(cur, {
+        listJobs: () => [olderFix, cur, newerFix],
+        readParsedLog: (job) => {
+          if (job.id === 'f0') return olderFixLog;
+          if (job.id === 'f1') return newerFixLog;
+          return reviewLog;
+        },
+      }).stuck,
+    ).toBe(false);
   });
 
   it('does not flag when fix claimed Status: not fixed', () => {

@@ -52,6 +52,15 @@ export function findingsFingerprint(reviewLogText: string): string {
   return h.toString(36);
 }
 
+function latestStartedJob(jobs: JobData[], matches: (job: JobData) => boolean): JobData | null {
+  let latest: JobData | null = null;
+  for (const job of jobs) {
+    if (!matches(job)) continue;
+    if (!latest || job.startedAt > latest.startedAt) latest = job;
+  }
+  return latest;
+}
+
 /** True if the current review (assumed NEEDS ATTENTION / DO NOT SHIP) re-
  *  flags the same findings as the most-recent prior review in the same
  *  release. Returns false when no prior review exists or the fingerprints
@@ -62,19 +71,16 @@ export function findingsFingerprint(reviewLogText: string): string {
  *  unlinked reviews. */
 export function reviewIsStuck(currentReview: JobData, deps: ReleaseConvergenceDeps): boolean {
   if (!currentReview.releaseId) return false;
-  const reviews = deps
-    .listJobs()
-    .filter(
-      (j) =>
-        j.project === currentReview.project &&
-        j.kind === 'review' &&
-        j.releaseId === currentReview.releaseId &&
-        j.id !== currentReview.id &&
-        j.exitCode === 0,
-    )
-    .sort((a, b) => b.startedAt - a.startedAt);
-  if (reviews.length === 0) return false;
-  const prev = reviews[0];
+  const prev = latestStartedJob(
+    deps.listJobs(),
+    (j) =>
+      j.project === currentReview.project &&
+      j.kind === 'review' &&
+      j.releaseId === currentReview.releaseId &&
+      j.id !== currentReview.id &&
+      j.exitCode === 0,
+  );
+  if (!prev) return false;
   try {
     const cur = findingsFingerprint(deps.readParsedLog(currentReview));
     const old = findingsFingerprint(deps.readParsedLog(prev));
@@ -103,19 +109,16 @@ export function fixContradictsReview(
   deps: ReleaseConvergenceDeps,
 ): FixContradictionResult {
   if (!currentReview.releaseId) return { stuck: false, ids: [] };
-  const fixes = deps
-    .listJobs()
-    .filter(
-      (j) =>
-        j.project === currentReview.project &&
-        j.kind === 'fix' &&
-        j.releaseId === currentReview.releaseId &&
-        j.exitCode === 0 &&
-        j.startedAt < currentReview.startedAt,
-    )
-    .sort((a, b) => b.startedAt - a.startedAt);
-  if (fixes.length === 0) return { stuck: false, ids: [] };
-  const fixJob = fixes[0];
+  const fixJob = latestStartedJob(
+    deps.listJobs(),
+    (j) =>
+      j.project === currentReview.project &&
+      j.kind === 'fix' &&
+      j.releaseId === currentReview.releaseId &&
+      j.exitCode === 0 &&
+      j.startedAt < currentReview.startedAt,
+  );
+  if (!fixJob) return { stuck: false, ids: [] };
   try {
     const claimedFixed = new Set(
       extractFixClaims(deps.readParsedLog(fixJob))
