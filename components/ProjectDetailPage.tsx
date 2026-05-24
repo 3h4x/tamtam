@@ -24,6 +24,7 @@ import { AgentsTab } from '@/components/AgentsTab'
 import { buildProjectPath, buildProjectTerminalPath } from '@/lib/client/project-routes'
 import { resolveGithubBoardUrl } from '@/lib/client/resolve-github-board-url'
 import { ProjectLogo } from '@/components/ProjectLogo'
+import { Button } from '@/components/ui/Button'
 
 type Tab = 'overview' | 'config' | 'history' | 'terminal' | 'changes' | 'issues' | 'docs' | 'agents'
 const VALID_TABS: readonly Tab[] = ['overview', 'config', 'history', 'terminal', 'changes', 'issues', 'docs', 'agents']
@@ -281,9 +282,13 @@ export function ProjectDetailPage({
   if (!project) {
     return (
       <div className="py-2">
-        <button className="text-accent hover:underline text-sm mb-4 inline-block" onClick={() => router.push('/')}>
+        <Button
+          variant="ghost"
+          className="mb-4 px-0 py-0 text-accent hover:bg-transparent hover:text-accent hover:underline font-normal"
+          onClick={() => router.push('/')}
+        >
           &larr; Back to projects
-        </button>
+        </Button>
         <p className="text-text-secondary text-sm">
           Project &quot;{name}&quot; not found.
         </p>
