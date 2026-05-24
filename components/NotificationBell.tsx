@@ -6,6 +6,7 @@ import { useRouter } from 'next/navigation'
 import { fetchNotifications, markNotificationsSeen, markJobSeen } from '@/lib/client-api'
 import type { JobInfo } from '@/lib/client-api'
 import { jobIsFinished } from '@/lib/client/job-status'
+import { Spinner } from '@/components/ui/Spinner'
 
 // Sky view: one running entry per project (highest-priority kind wins)
 const KIND_PRIORITY: Record<string, number> = {
@@ -106,11 +107,7 @@ function StatusIcon({ success }: { success: boolean }) {
 }
 
 function RunningIcon() {
-  return (
-    <svg className="w-4 h-4 text-accent shrink-0 animate-spin" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round">
-      <path d="M8 2a6 6 0 1 1-4.243 1.757" />
-    </svg>
-  )
+  return <Spinner size="xl" color="accent" shrink />
 }
 
 export function NotificationBell() {
