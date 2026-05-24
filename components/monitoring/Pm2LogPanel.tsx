@@ -2,6 +2,7 @@
 
 import { useState, useMemo } from 'react'
 import { SectionHeader } from './shared'
+import { Button } from '@/components/ui/Button'
 
 export interface Pm2LogEntry {
   ts: string | null
@@ -32,9 +33,11 @@ const SOURCE_BADGES = {
 function CopyButton({ getText, label, className = '' }: { getText: () => string; label?: string; className?: string }) {
   const [copied, setCopied] = useState(false)
   return (
-    <button
+    <Button
       type="button"
-      className={`shrink-0 text-[10px] px-1.5 py-0.5 rounded border border-border text-text-tertiary hover:text-text-primary hover:border-text-tertiary bg-transparent cursor-pointer transition-colors ${className}`}
+      variant="ghost"
+      size="sm"
+      className={`shrink-0 gap-0 !border-border !bg-transparent px-1.5 py-0.5 text-[10px] font-normal text-text-tertiary hover:!border-text-tertiary hover:!bg-transparent hover:text-text-primary ${className}`}
       onClick={async (ev) => {
         ev.stopPropagation()
         try {
@@ -45,7 +48,7 @@ function CopyButton({ getText, label, className = '' }: { getText: () => string;
       }}
     >
       {copied ? 'Copied' : label ?? 'Copy'}
-    </button>
+    </Button>
   )
 }
 
@@ -143,13 +146,16 @@ export function Pm2LogPanel({ pm2Logs, onRefresh }: { pm2Logs: Pm2LogData | null
           {pm2Logs && (
             <div className="flex items-center gap-0.5 rounded-md border border-border overflow-hidden">
               {filterButtons.map(({ key, label, count }) => (
-                <button
+                <Button
+                  type="button"
+                  variant="ghost"
+                  size="sm"
                   key={key}
                   onClick={() => setLevelFilter(key)}
-                  className={`text-[11px] px-2 py-1 border-none cursor-pointer font-medium transition-colors flex items-center gap-1 ${
+                  className={`gap-1 rounded-none border-none px-2 py-1 text-[11px] ${
                     levelFilter === key
-                      ? 'bg-bg-secondary text-text-primary'
-                      : 'bg-transparent text-text-tertiary hover:text-text-secondary'
+                      ? '!bg-bg-secondary text-text-primary hover:!bg-bg-secondary'
+                      : '!bg-transparent text-text-tertiary hover:!bg-transparent hover:text-text-secondary'
                   }`}
                 >
                   {label}
@@ -160,28 +166,34 @@ export function Pm2LogPanel({ pm2Logs, onRefresh }: { pm2Logs: Pm2LogData | null
                       : LEVEL_COLORS.info.badge
                     }`}>{count}</span>
                   )}
-                </button>
+                </Button>
               ))}
             </div>
           )}
           {pm2Logs && (
-            <button
+            <Button
+              type="button"
+              variant="ghost"
+              size="sm"
               onClick={() => setHideStdout(h => !h)}
-              className={`text-[11px] px-2 py-1 rounded border cursor-pointer font-medium transition-colors ${
+              className={`px-2 py-1 text-[11px] ${
                 hideStdout
-                  ? 'border-text-tertiary text-text-primary bg-bg-secondary'
-                  : 'border-border text-text-tertiary hover:text-text-secondary bg-transparent'
+                  ? '!border-text-tertiary !bg-bg-secondary text-text-primary hover:!bg-bg-secondary'
+                  : '!border-border !bg-transparent text-text-tertiary hover:!bg-transparent hover:text-text-secondary'
               }`}
             >
               {hideStdout ? 'errors only' : 'all sources'}
-            </button>
+            </Button>
           )}
-          <button
+          <Button
+            type="button"
+            variant="ghost"
+            size="sm"
             onClick={onRefresh}
-            className="text-[11px] px-2 py-1 rounded border border-border text-text-tertiary hover:text-text-secondary bg-transparent cursor-pointer transition-colors"
+            className="!border-border !bg-transparent px-2 py-1 text-[11px] text-text-tertiary hover:!bg-transparent hover:text-text-secondary"
           >
             Refresh
-          </button>
+          </Button>
           {filtered.length > 0 && (
             <CopyButton
               label="Copy all"
