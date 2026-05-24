@@ -301,6 +301,28 @@ describe('GET /api/projects/[schedId]/detail', () => {
     expect(data.run_history[1].exit_code).toBe(0);
   });
 
+  it('limits run history to the newest 20 project jobs', async () => {
+    const projectJobs = Array.from({ length: 25 }, (_, i) => ({
+      project: 'sched-1',
+      startedAt: 1000 + i,
+      finishedAt: 1010 + i,
+      exitCode: i,
+    }));
+    listJobsMock.mockReturnValue([
+      ...projectJobs.slice(10),
+      { project: 'other', startedAt: 9999, finishedAt: 10000, exitCode: 99 },
+      ...projectJobs.slice(0, 10),
+    ]);
+
+    const req = new NextRequest('http://localhost/api/projects/sched-1/detail');
+    const res = await GET(req, { params: Promise.resolve({ schedId: 'sched-1' }) });
+    const data = await res.json();
+
+    expect(data.run_history).toHaveLength(20);
+    expect(data.run_history[0].exit_code).toBe(24);
+    expect(data.run_history.at(-1).exit_code).toBe(5);
+  });
+
   it('returns ended=null and duration_s=null for an unfinished job', async () => {
     listJobsMock.mockReturnValue([
       { project: 'sched-1', startedAt: 5000, finishedAt: null, exitCode: null },

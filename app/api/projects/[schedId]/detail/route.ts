@@ -4,8 +4,24 @@ import { join } from 'path';
 import { homedir } from 'os';
 import { getImproveConfig } from '@/lib/scheduling/scheduling';
 import { listJobs } from '@/lib/jobs/storage';
+import type { JobData } from '@/lib/jobs/types';
 
 const HISTORY_LIMIT = 20;
+
+function newestProjectJobs(jobs: readonly JobData[], project: string, limit: number): JobData[] {
+  const newest: JobData[] = [];
+  for (const job of jobs) {
+    if (job.project !== project) continue;
+    const insertAt = newest.findIndex((candidate) => job.startedAt > candidate.startedAt);
+    if (insertAt === -1) {
+      if (newest.length < limit) newest.push(job);
+      continue;
+    }
+    newest.splice(insertAt, 0, job);
+    if (newest.length > limit) newest.pop();
+  }
+  return newest;
+}
 
 export async function GET(
   _request: NextRequest,
@@ -30,10 +46,7 @@ export async function GET(
   let memoryContent: string | null = null;
   try { memoryContent = readFileSync(/*turbopackIgnore: true*/ memoryPath, 'utf-8'); } catch {}
 
-  const runHistory = listJobs()
-    .filter((j) => j.project === schedId)
-    .sort((a, b) => b.startedAt - a.startedAt)
-    .slice(0, HISTORY_LIMIT)
+  const runHistory = newestProjectJobs(listJobs(), schedId, HISTORY_LIMIT)
     .map((j) => ({
       started: new Date(j.startedAt * 1000).toISOString(),
       ended: j.finishedAt != null ? new Date(j.finishedAt * 1000).toISOString() : null,
