@@ -1,14 +1,16 @@
 'use client'
 
 import { useTheme } from '@/hooks/useTheme'
+import { Button } from '@/components/ui/Button'
 
 export function ThemeToggle() {
   const { theme, setTheme } = useTheme()
   const isDark = theme === 'dark'
 
   return (
-    <button
-      className="p-2 bg-transparent border border-border rounded-md cursor-pointer text-text-secondary hover:text-text-primary hover:border-text-tertiary text-lg leading-none"
+    <Button
+      variant="secondary"
+      className="p-2 bg-transparent text-text-secondary hover:text-text-primary hover:border-text-tertiary text-lg leading-none"
       onClick={() => setTheme(isDark ? 'light' : 'dark')}
       title={isDark ? 'Switch to light mode' : 'Switch to dark mode'}
       aria-label={isDark ? 'Switch to light mode' : 'Switch to dark mode'}
@@ -30,6 +32,6 @@ export function ThemeToggle() {
           <path d="M14 8.5A6.5 6.5 0 0 1 7.5 2 6.5 6.5 0 1 0 14 8.5Z" />
         </svg>
       )}
-    </button>
+    </Button>
   )
 }
