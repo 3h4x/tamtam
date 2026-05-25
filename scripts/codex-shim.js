@@ -137,9 +137,33 @@ function approvalFor(mode) {
   return 'never';
 }
 
-function permissionArgsFor(mode) {
+// TamTam writes the broker URL into TAMTAM_BROKER_URL when the per-run MCP
+// config is being injected. Codex doesn't have a `--mcp-config <file>` flag
+// — it reads from $CODEX_HOME/config.toml or `-c <key>=<value>` overrides.
+// Using `-c` keeps the user's normal CODEX_HOME (auth + sessions) intact and
+// just appends the broker MCP server inline.
+function brokerConfigFlags(env) {
+  const e = env || process.env;
+  const url = e.TAMTAM_BROKER_URL;
+  if (!url) return [];
+  const sse = `${url}/sse`;
+  return [
+    '-c', `mcp_servers.tamtam_browser.url="${sse}"`,
+    '-c', `mcp_servers.tamtam_browser.transport="sse"`,
+  ];
+}
+
+function permissionArgsFor(mode, env) {
   if (mode === 'bypassPermissions') {
     return ['--dangerously-bypass-approvals-and-sandbox'];
+  }
+  // When TamTam wraps the shim in `sandbox-exec`, the outer seatbelt profile
+  // is the real sandbox. Codex's built-in workspace-write profile would
+  // double-sandbox AND block loopback (which the broker needs). Tell codex
+  // to skip its own sandbox; the outer profile keeps the real restrictions.
+  const e = env || process.env;
+  if (e.TAMTAM_SANDBOX_PROFILE) {
+    return ['-a', approvalFor(mode), '--sandbox', 'danger-full-access'];
   }
   return ['-a', approvalFor(mode), '--sandbox', sandboxFor(mode)];
 }
@@ -435,6 +459,7 @@ function launchCodex({ prompt, model, streamJson, attempt = 0, retryState = null
     const codexBin = process.env.CODEX_BIN || 'codex';
     const codexArgs = [
       ...permissionArgsFor(permissionMode),
+      ...brokerConfigFlags(process.env),
       'exec',
     ];
     if (resumeSessionId && streamJson) {

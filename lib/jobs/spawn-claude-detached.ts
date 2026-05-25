@@ -25,9 +25,10 @@
 import { spawn } from 'child_process';
 import { openSync, closeSync, createReadStream, writeFileSync, mkdirSync, writeSync } from 'fs';
 import { join } from 'path';
-import { constants as osConstants, homedir } from 'os';
+import { constants as osConstants, homedir, tmpdir } from 'os';
 import { getImproveConfig } from '@/lib/scheduling/scheduling';
 import { splitCommand } from '@/lib/shared/split-command';
+import { wrapForSandbox } from '@/lib/shared/sandbox-wrap';
 import { measurePrompt, checkPromptSize } from './prompt-size';
 import { redactSecrets } from '@/lib/shared/log-redaction';
 import { buildChildEnv } from '@/lib/shared/child-env';
@@ -72,9 +73,13 @@ export async function startJobInProcess(
   if (cmdArgv.length === 0) {
     throw new Error(`startJobInProcess: empty command string for job ${jobId}`);
   }
-  const [bin, ...args] = cmdArgv;
+  const [rawBin, ...rawArgs] = cmdArgv;
+  const runDir = join(/*turbopackIgnore: true*/ tmpdir(), 'tamtam-runs', jobId);
+  const wrap = wrapForSandbox({ bin: rawBin, args: rawArgs, cwd, runDir });
+  const bin = wrap.bin;
+  const args = wrap.args;
 
-  const childEnv = buildChildEnv(options?.env);
+  const childEnv = buildChildEnv({ ...(options?.env ?? {}), ...wrap.env });
 
   const logFd = openSync(/*turbopackIgnore: true*/ logPath, 'a');
   const writeLog = (chunk: Buffer | string) => {

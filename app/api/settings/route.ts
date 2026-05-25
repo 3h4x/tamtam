@@ -217,6 +217,9 @@ const SETTING_KEYS = [
   'retrieval_context_limit',
   'retrieval_score_threshold',
   'retrieval_manage_ollama',
+  'browser_broker_enabled',
+  'browser_broker_image',
+  'tamtam_network_policy_strict',
 ] as const;
 
 function serializeSettingValue(key: string, value: unknown): string {
@@ -369,7 +372,9 @@ function validateAndSerializeSettingValue(
     key === 'legacy_completion_hook_auto_resume_enabled' ||
     key === 'legacy_pipeline_lock_inline_drain_enabled' ||
     key === 'legacy_completion_hook_agent_drain_enabled' ||
-    key === 'plain_test_phase_enabled'
+    key === 'plain_test_phase_enabled' ||
+    key === 'browser_broker_enabled' ||
+    key === 'tamtam_network_policy_strict'
   ) {
     return parseBooleanSetting(value, key);
   }

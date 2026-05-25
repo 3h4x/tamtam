@@ -310,11 +310,11 @@ describe('seedDefaultSkills seeded defaults snapshot', () => {
     expect(skill).toBeDefined();
     expect(skill!.name).toBe('agent:qa');
     expect(skill!.description).toContain('Playwright');
-    expect(skill!.content).toContain('mcp__plugin_playwright_playwright__browser_navigate');
-    expect(skill!.content).toContain('mcp__plugin_playwright_playwright__browser_snapshot');
-    expect(skill!.content).toContain('mcp__plugin_playwright_playwright__browser_console_messages');
-    expect(skill!.content).toContain('mcp__plugin_playwright_playwright__browser_take_screenshot');
-    expect(skill!.content).toContain('mcp__plugin_playwright_playwright__browser_wait_for');
+    expect(skill!.content).toContain('mcp__tamtam_browser__browser_navigate');
+    expect(skill!.content).toContain('mcp__tamtam_browser__browser_snapshot');
+    expect(skill!.content).toContain('mcp__tamtam_browser__browser_console_messages');
+    expect(skill!.content).toContain('mcp__tamtam_browser__browser_take_screenshot');
+    expect(skill!.content).toContain('mcp__tamtam_browser__browser_wait_for');
     expect(skill!.content).not.toMatch(/`browser_[^`]+`/);
     expect(skill!.content).not.toContain('Read `.tamtam/agents/<this-agent-name>.md` in the working tree');
     expect(skill!.content).not.toMatch(/read\s+`?\.tamtam\/agents/i);
@@ -515,11 +515,11 @@ describe('seedDefaultSkills isolated cases', () => {
     expect(skill).toBeDefined();
     expect(skill!.name).toBe('agent:qa');
     expect(skill!.description).toContain('Playwright');
-    expect(skill!.content).toContain('mcp__plugin_playwright_playwright__browser_navigate');
-    expect(skill!.content).toContain('mcp__plugin_playwright_playwright__browser_snapshot');
-    expect(skill!.content).toContain('mcp__plugin_playwright_playwright__browser_console_messages');
-    expect(skill!.content).toContain('mcp__plugin_playwright_playwright__browser_take_screenshot');
-    expect(skill!.content).toContain('mcp__plugin_playwright_playwright__browser_wait_for');
+    expect(skill!.content).toContain('mcp__tamtam_browser__browser_navigate');
+    expect(skill!.content).toContain('mcp__tamtam_browser__browser_snapshot');
+    expect(skill!.content).toContain('mcp__tamtam_browser__browser_console_messages');
+    expect(skill!.content).toContain('mcp__tamtam_browser__browser_take_screenshot');
+    expect(skill!.content).toContain('mcp__tamtam_browser__browser_wait_for');
     expect(skill!.content).not.toMatch(/`browser_[^`]+`/);
     expect(skill!.content).not.toContain('Read `.tamtam/agents/<this-agent-name>.md` in the working tree');
     expect(skill!.content).not.toMatch(/read\s+`?\.tamtam\/agents/i);
@@ -1135,7 +1135,7 @@ Report a short summary: visited routes, findings handed off (with the cto job id
     await waitForFast(async () => {
       const skill = await findSkill('agent-qa');
       expect(skill!.content).not.toBe(previousDefault);
-      expect(skill!.content).toContain('mcp__plugin_playwright_playwright__browser_navigate');
+      expect(skill!.content).toContain('mcp__tamtam_browser__browser_navigate');
       expect(skill!.content).not.toContain('Use Playwright MCP tools (`browser_navigate`');
     });
   });
