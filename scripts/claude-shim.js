@@ -56,6 +56,21 @@ function transformArgs(argv, env) {
       out.push(a);
     }
   }
+  // TamTam-injected per-run MCP config: append --mcp-config when the env var
+  // points at a writable file and the user hasn't already passed one in argv.
+  const e = env || process.env;
+  const mcpPath = e.TAMTAM_MCP_CONFIG_PATH;
+  if (mcpPath && !out.includes('--mcp-config') && !out.some((x) => x.startsWith('--mcp-config='))) {
+    out.push('--mcp-config', mcpPath);
+    // Claude requires explicit --allowedTools entries for headless MCP calls;
+    // without it the model is told the tool exists but is denied. Match the
+    // server name written by mcp-config-writer.ts: `tamtam_browser`.
+    const allowedFlag = out.findIndex((x) => x === '--allowedTools' || x === '--allowed-tools');
+    if (allowedFlag === -1) {
+      out.push('--allowedTools', 'mcp__tamtam_browser');
+    }
+    process.stderr.write(`[claude-shim] injecting --mcp-config ${mcpPath}\n`);
+  }
   return out;
 }
 

@@ -120,6 +120,9 @@ export interface TamTamConfig {
   outcome_classifier_enabled: boolean;
   outcome_classifier_model: string;
   project_sweep_enabled: boolean;
+  browser_broker_enabled: boolean;
+  browser_broker_image: string;
+  tamtam_network_policy_strict: boolean;
 }
 
 const DEFAULTS: TamTamConfig = {
@@ -222,6 +225,9 @@ const DEFAULTS: TamTamConfig = {
   outcome_classifier_enabled: false,
   outcome_classifier_model: 'gemma3:4b',
   project_sweep_enabled: false,
+  browser_broker_enabled: false,
+  browser_broker_image: 'mcr.microsoft.com/playwright:v1.59.1-noble',
+  tamtam_network_policy_strict: false,
 };
 
 let _cache: { config: TamTamConfig; time: number } | null = null;
@@ -476,6 +482,9 @@ export function buildConfigFromSettingsMap(map: Record<string, string>): TamTamC
     outcome_classifier_enabled: map.outcome_classifier_enabled === 'true',
     outcome_classifier_model: map.outcome_classifier_model ?? DEFAULTS.outcome_classifier_model,
     project_sweep_enabled: map.project_sweep_enabled === 'true',
+    browser_broker_enabled: map.browser_broker_enabled === 'true',
+    browser_broker_image: map.browser_broker_image ?? DEFAULTS.browser_broker_image,
+    tamtam_network_policy_strict: map.tamtam_network_policy_strict === 'true',
   };
   return config;
 }

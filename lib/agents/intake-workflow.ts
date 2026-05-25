@@ -587,11 +587,23 @@ async function startAgentStep(
   // and continue on failure so a flaky dev server start never blocks the
   // agent. The lifecycle module is idempotent; if a server is already up
   // (TamTam-owned or external), this is a no-op.
+  let projectRow: {
+    qaUrl: string | null;
+    website: string | null;
+    devServerReadyUrl: string | null;
+  } | null = null;
   try {
     const { db, schema } = await import('@/lib/db');
     const { eq } = await import('drizzle-orm');
     const rows = await db.select().from(schema.projects).where(eq(schema.projects.name, job.project));
     const row = rows[0];
+    if (row) {
+      projectRow = {
+        qaUrl: row.qaUrl ?? null,
+        website: row.website ?? null,
+        devServerReadyUrl: row.devServerReadyUrl ?? null,
+      };
+    }
     if (row?.devServerStartCommand) {
       const { ensureDevServerRunning } = await import('@/lib/dev-server/lifecycle');
       const r = await ensureDevServerRunning(
@@ -611,6 +623,20 @@ async function startAgentStep(
   } catch (e) {
     console.warn(`[dev-server] ensureDevServerRunning threw for ${job.project}:`, e);
   }
+
+  // Browser broker: when enabled in settings, spin up (or attach to) the
+  // shared Playwright MCP container and inject per-run MCP config + env so
+  // the spawned agent can drive Chromium via mcp__tamtam_browser__*.
+  const { prepareBrokerRun } = await import('@/lib/browser-broker/prepare-run');
+  const broker = await prepareBrokerRun({
+    jobId,
+    projectOrigins: {
+      qaUrl: projectRow?.qaUrl ?? null,
+      devServerReadyUrl: projectRow?.devServerReadyUrl ?? null,
+      website: projectRow?.website ?? null,
+    },
+    provider: composed.provider,
+  });
 
   // Write prereq artifact to disk.
   if (prereqArtifact) {
@@ -639,13 +665,17 @@ async function startAgentStep(
   updateJob(job);
 
   try {
+    const mergedEnv: Record<string, string> = { ...cliEnv, ...(broker?.env ?? {}) };
+    const fallbackEnv = fallback
+      ? { ...fallback.cliEnv, ...(broker?.env ?? {}) }
+      : undefined;
     const pid = await startInProcessAgentJob(jobId, cmd, fullPrompt, projPath, {
-      env: cliEnv,
+      env: mergedEnv,
       fallback: fallback
         ? {
             provider: fallback.provider,
             command: fallback.cmd,
-            env: fallback.cliEnv,
+            env: fallbackEnv,
           }
         : undefined,
     });

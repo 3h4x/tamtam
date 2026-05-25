@@ -18,9 +18,10 @@
 
 import { writeFileSync } from 'fs';
 import { join } from 'path';
-import { homedir } from 'os';
+import { homedir, tmpdir } from 'os';
 import { getImproveConfig } from '@/lib/scheduling/scheduling';
 import { splitCommand } from '@/lib/shared/split-command';
+import { wrapForSandbox } from '@/lib/shared/sandbox-wrap';
 import { runSubprocess } from './spawn-cli';
 import { measurePrompt, checkPromptSize } from './prompt-size';
 import type { CliProvider } from '@/lib/usage/cli-providers';
@@ -77,7 +78,12 @@ export async function startInProcessAgentJob(
   if (cmdArgv.length === 0) {
     throw new Error(`startInProcessAgentJob: empty command string for job ${jobId}`);
   }
-  const [bin, ...args] = cmdArgv;
+  const [rawBin, ...rawArgs] = cmdArgv;
+  const runDir = join(/*turbopackIgnore: true*/ tmpdir(), 'tamtam-runs', jobId);
+  const wrap = wrapForSandbox({ bin: rawBin, args: rawArgs, cwd, runDir });
+  const bin = wrap.bin;
+  const args = wrap.args;
+  const envWithWrap: Record<string, string> = { ...(options?.env ?? {}), ...wrap.env };
 
   const abortSignal = registerJobCancellation(jobId);
   let result;
@@ -88,7 +94,7 @@ export async function startInProcessAgentJob(
       cmdArgs: args,
       promptPath,
       logPath,
-      env: options?.env,
+      env: envWithWrap,
       cwd,
       abortSignal,
       onSpawn: (pid) => {
@@ -111,14 +117,16 @@ export async function startInProcessAgentJob(
           job.provider = fallback.provider;
           saveToDb(job);
         }
-        const [fallbackBin, ...fallbackArgs] = fallbackArgv;
+        const [rawFallbackBin, ...rawFallbackArgs] = fallbackArgv;
+        const fbWrap = wrapForSandbox({ bin: rawFallbackBin, args: rawFallbackArgs, cwd, runDir });
+        const fbEnv: Record<string, string> = { ...(fallback.env ?? {}), ...fbWrap.env };
         result = await runSubprocess({
           jobId,
-          cmd: fallbackBin,
-          cmdArgs: fallbackArgs,
+          cmd: fbWrap.bin,
+          cmdArgs: fbWrap.args,
           promptPath,
           logPath,
-          env: fallback.env,
+          env: fbEnv,
           cwd,
           abortSignal,
           onSpawn: (pid) => {

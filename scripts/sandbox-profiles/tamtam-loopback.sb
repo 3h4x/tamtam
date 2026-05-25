@@ -1,0 +1,38 @@
+;; TamTam seatbelt profile for sandboxed agent runs.
+;;
+;; Strategy: start permissive (allow default) and *narrow only what matters
+;; for TamTam's threat model*: outbound network egress (loopback only) and
+;; docker socket access. Filesystem isolation is provided by the agent CLI's
+;; own sandbox layer (Codex `workspace-write`) and by user-level file perms
+;; — we don't try to reproduce those here.
+;;
+;; This keeps the agent shell working (no dyld/Mach-service whack-a-mole) and
+;; narrows the *actual* problem: arbitrary outbound network is the difference
+;; between "QA agent can run Playwright via broker" and "QA agent can
+;; exfiltrate or be exfiltrated through".
+;;
+;; Parameters set by the shim via `sandbox-exec -D`:
+;;   WORKSPACE    Absolute path to the project working directory (currently
+;;                informational; reserved for future filesystem narrowing).
+;;   HOME_DIR     User home (currently informational).
+;;   RUN_DIR      Per-run scratch dir (currently informational).
+
+(version 1)
+(allow default)
+
+;; --- Network: deny everything outbound, then re-allow loopback only ------
+(deny network*)
+(allow network-bind (local ip "localhost:*"))
+(allow network-outbound (remote ip "localhost:*"))
+;; macOS syslog/asl — keeps tools that log via syslog from breaking.
+(allow network-outbound (literal "/private/var/run/syslog"))
+(allow network-outbound (literal "/private/var/run/asl_input"))
+
+;; --- Docker socket: explicit deny ---------------------------------------
+;; Block the well-known socket paths. macOS Docker Desktop publishes the
+;; socket at ~/.docker/run/docker.sock and symlinks /var/run/docker.sock to
+;; it; the file-read* deny blocks the symlink target lookup. Outbound network
+;; deny above already blocks Docker over TCP (it would be loopback-only and
+;; we don't allowlist its port).
+(deny file-read* file-write* (literal "/var/run/docker.sock"))
+(deny file-read* file-write* (literal "/private/var/run/docker.sock"))

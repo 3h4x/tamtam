@@ -179,6 +179,9 @@ describe('config', () => {
         retrieval_score_threshold: 0.8,
         retrieval_manage_ollama: true,
         retrieval_reindex_interval_hours: 16,
+        browser_broker_enabled: false,
+        browser_broker_image: 'mcr.microsoft.com/playwright:v1.59.1-noble',
+        tamtam_network_policy_strict: false,
       });
     });
 

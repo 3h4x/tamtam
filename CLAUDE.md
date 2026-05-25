@@ -133,6 +133,7 @@ Read the relevant file before touching the subsystem it covers.
 | `docs/AGENT.md` | Agents: composition, scheduling, intake workflow, concurrency rules | Creating, debugging, or changing agent behavior, attached docs, schedules, or intake orchestration |
 | `docs/API.md` | HTTP API route reference | Adding, changing, or testing any `app/api/*` route or response contract |
 | `docs/BACKUP.md` | Postgres backup and restore runbook | Touching backup/restore flows, DB maintenance scripts, or retention behavior for dumps |
+| `docs/BROWSER-BROKER.md` | Sandboxed Playwright access for agent runs (broker container + seatbelt profile) | Changing browser-broker container lifecycle, MCP injection, or the macOS sandbox profile; debugging QA agent Playwright failures |
 | `docs/CACHING.md` | In-memory and DB-backed cache strategy | Adding polling endpoints, debugging stale reads, or changing cache invalidation/TTL behavior |
 | `docs/COMMANDS.md` | Server lifecycle, tests, DB, and profiling commands | Running TamTam, choosing the right rebuild/dev/test command, or updating command guidance |
 | `docs/DATABASE.md` | Drizzle/Postgres schema reference | Editing schema, writing queries, or reasoning about persisted runtime state |
