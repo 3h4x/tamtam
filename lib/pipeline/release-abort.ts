@@ -5,6 +5,7 @@ import {
   requestJobCancellation,
   SAFE_PID_FLOOR,
   shouldSignalJobPid,
+  shouldSignalJobPidForWallClockTimeout,
 } from '@/lib/jobs/cancellation';
 import { appendRedactedFileSync } from '@/lib/jobs/redacted-log-writer';
 import type { JobData } from '@/lib/jobs/types';
@@ -80,17 +81,6 @@ export async function abortActiveRelease(
       && j.id !== releaseJob.parentJobId
   );
 
-  releaseJob.abortedAt = now;
-  updateJob(releaseJob);
-  if (releaseJob.logPath) {
-    try {
-      const label = options.reason === 'wall_clock_timeout'
-        ? 'wall-clock timeout'
-        : 'user';
-      appendRedactedFileSync(releaseJob.logPath, `\n# release aborted by ${label} — ${new Date().toISOString()}\n`);
-    } catch {}
-  }
-
   if (runningStep) {
     // Job termination is handled by requestJobCancellation for push/commit
     // kinds and by process.kill on the child PID for everything else.
@@ -99,13 +89,36 @@ export async function abortActiveRelease(
       runningStep.cancelRequestedExitCode = -3;
       const cancelled = await requestJobCancellation(runningStep.id, 20_000);
       if (!cancelled && runningStep.finishedAt === null) {
-        return {
-          status: 'abort_pending',
-          detail: `Timed out waiting for ${runningStep.kind} to stop cleanly`,
-          release_id: releaseJob.id,
-          killed_job_id: null,
-          httpStatus: 409,
-        };
+        if (options.reason !== 'wall_clock_timeout') {
+          // User-triggered abort: report `abort_pending` so the operator sees
+          // the step is still draining and can retry.
+          return {
+            status: 'abort_pending',
+            detail: `Timed out waiting for ${runningStep.kind} to stop cleanly`,
+            release_id: releaseJob.id,
+            killed_job_id: null,
+            httpStatus: 409,
+          };
+        }
+        if (!shouldSignalJobPidForWallClockTimeout(runningStep)) {
+          console.warn(
+            `[release-abort] wall-clock timeout: refusing to finalize ${runningStep.kind} ${runningStep.id} without a safe signal target (pid=${runningStep.pid})`,
+          );
+          return {
+            status: 'abort_pending',
+            detail: `Timed out waiting for ${runningStep.kind} to stop cleanly`,
+            release_id: releaseJob.id,
+            killed_job_id: null,
+            httpStatus: 409,
+          };
+        }
+        console.warn(
+          `[release-abort] wall-clock timeout: push/commit ${runningStep.id} did not cancel within 20s; SIGTERM+SIGKILL pid=${runningStep.pid}`,
+        );
+        try { process.kill(runningStep.pid, 'SIGTERM'); } catch {}
+        setTimeout(() => {
+          try { process.kill(runningStep.pid, 'SIGKILL'); } catch {}
+        }, 2000);
       }
     } else if (shouldSignalJobPid(runningStep)) {
       try { process.kill(runningStep.pid, 'SIGTERM'); } catch {}
@@ -124,6 +137,17 @@ export async function abortActiveRelease(
       runningStep.exitCode = -3;
       updateJob(runningStep);
     }
+  }
+
+  releaseJob.abortedAt = now;
+  updateJob(releaseJob);
+  if (releaseJob.logPath) {
+    try {
+      const label = options.reason === 'wall_clock_timeout'
+        ? 'wall-clock timeout'
+        : 'user';
+      appendRedactedFileSync(releaseJob.logPath, `\n# release aborted by ${label} — ${new Date().toISOString()}\n`);
+    } catch {}
   }
 
   const releaseAlreadyFinalized = releaseJob.finishedAt !== null;

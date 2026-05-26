@@ -1,14 +1,17 @@
 import { describe, expect, it } from 'vitest'
 import {
+  IMPROVE_SKILL_ID,
   ISSUE_CRUNCHER_SKILL_ID,
+  buildImprovePrerequisiteCommand,
   buildIssueCruncherPrerequisiteCommand,
+  hasImproveSkill,
   hasIssueCruncherSkill,
   normalizeStoredPrerequisiteCommand,
   parsePrerequisiteCommandInput,
   resolveAgentPrerequisiteCommand,
-} from '@/lib/agents/issue-cruncher'
+} from '@/lib/agents/prerequisites'
 
-describe('issue-cruncher helpers', () => {
+describe('prerequisite helpers', () => {
   it('detects whether the issue-cruncher skill is enabled', () => {
     expect(hasIssueCruncherSkill([ISSUE_CRUNCHER_SKILL_ID])).toBe(true)
     expect(hasIssueCruncherSkill(['other-skill'])).toBe(false)
@@ -62,5 +65,46 @@ describe('issue-cruncher helpers', () => {
       skillIds: ['other-skill'],
       prerequisiteCommand: undefined,
     })).toBeNull()
+  })
+
+  it('detects whether the improve skill is enabled', () => {
+    expect(hasImproveSkill([IMPROVE_SKILL_ID])).toBe(true)
+    expect(hasImproveSkill(['other-skill'])).toBe(false)
+    expect(hasImproveSkill(null)).toBe(false)
+  })
+
+  it('builds the improve prereq with project-source dirs and .tamtam excluded', () => {
+    const cmd = buildImprovePrerequisiteCommand()
+    expect(cmd).toMatch(/find app components lib hooks scripts docs/)
+    expect(cmd).toMatch(/-not -path '\*\/\.tamtam\/\*'/)
+    expect(cmd).toMatch(/-not -path '\*\/node_modules\/\*'/)
+    expect(cmd).toMatch(/-not -name '\*\.d\.ts'/)
+    expect(cmd).toMatch(/\\\( -name '\*\.ts'/)
+    expect(cmd).toMatch(/sort \| head -5/)
+    expect(cmd).toMatch(/\.tamtam\/cache\/audits\/improve\.md/)
+  })
+
+  it('auto-attaches improve prereq when the agent has the improve skill and no stored command', () => {
+    expect(resolveAgentPrerequisiteCommand({
+      project: 'proj',
+      skillIds: [IMPROVE_SKILL_ID],
+      prerequisiteCommand: undefined,
+    })).toBe(buildImprovePrerequisiteCommand())
+  })
+
+  it('prefers a stored prerequisite over both defaults', () => {
+    expect(resolveAgentPrerequisiteCommand({
+      project: 'proj',
+      skillIds: [IMPROVE_SKILL_ID],
+      prerequisiteCommand: 'echo hi',
+    })).toBe('echo hi')
+  })
+
+  it('issue-cruncher takes precedence when an agent somehow has both skills', () => {
+    expect(resolveAgentPrerequisiteCommand({
+      project: 'proj',
+      skillIds: [ISSUE_CRUNCHER_SKILL_ID, IMPROVE_SKILL_ID],
+      prerequisiteCommand: undefined,
+    })).toBe(buildIssueCruncherPrerequisiteCommand('proj'))
   })
 })

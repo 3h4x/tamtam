@@ -67,6 +67,10 @@ agent CLI:
    - Sets `TAMTAM_SANDBOX_PROFILE` so the codex shim knows to pass `--sandbox danger-full-access` to codex (which neutralizes codex's built-in workspace-write sandbox; the outer seatbelt profile is the real one).
 4. Spawn proceeds as normal.
 
+The same `prepareBrokerRun()` wiring is also used by the manual continue
+route and the background auto-resume path so resumed agent/terminal jobs
+keep the same broker MCP tools as the original launch.
+
 ## Origin allow-list
 
 The broker container has full internet access by itself (Chromium can navigate anywhere). This is acceptable because:

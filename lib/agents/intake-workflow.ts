@@ -10,7 +10,7 @@ import { exec } from '@/lib/shared/shell';
 import { normalizeModelInput } from '@/lib/agents/model-aliases';
 import { resolveCliBin, resolveCliEnv } from '@/lib/shared/cli-bin';
 import { isCliProvider, type CliProvider } from '@/lib/usage/cli-providers';
-import { hasIssueCruncherSkill } from '@/lib/agents/issue-cruncher';
+import { hasIssueCruncherSkill } from '@/lib/agents/prerequisites';
 import { updateJob } from '@/lib/jobs/job-storage';
 import { startInProcessAgentJob } from '@/lib/jobs/inline-agent';
 import { errMsg } from '@/lib/shared/types';
@@ -627,44 +627,49 @@ async function startAgentStep(
   // Browser broker: when enabled in settings, spin up (or attach to) the
   // shared Playwright MCP container and inject per-run MCP config + env so
   // the spawned agent can drive Chromium via mcp__tamtam_browser__*.
-  const { prepareBrokerRun } = await import('@/lib/browser-broker/prepare-run');
-  const broker = await prepareBrokerRun({
-    jobId,
-    projectOrigins: {
-      qaUrl: projectRow?.qaUrl ?? null,
-      devServerReadyUrl: projectRow?.devServerReadyUrl ?? null,
-      website: projectRow?.website ?? null,
-    },
-    provider: composed.provider,
-  });
+  let broker: { env: Record<string, string>; cleanup: (() => void) | undefined } | null = null;
+  try {
+    const { prepareBrokerRun } = await import('@/lib/browser-broker/prepare-run');
+    broker = await prepareBrokerRun({
+      jobId,
+      projectOrigins: {
+        qaUrl: projectRow?.qaUrl ?? null,
+        devServerReadyUrl: projectRow?.devServerReadyUrl ?? null,
+        website: projectRow?.website ?? null,
+      },
+      provider: composed.provider,
+    });
+  } catch (e) {
+    console.warn(`[intake-workflow] broker prep failed for ${jobId}; continuing without MCP injection:`, errMsg(e));
+  }
 
-  // Write prereq artifact to disk.
-  if (prereqArtifact) {
+  try {
+    // Write prereq artifact to disk.
+    if (prereqArtifact) {
+      try {
+        writeFileSync(/*turbopackIgnore: true*/ prereqArtifact.path, prereqArtifact.body);
+      } catch (e) {
+        console.error('[intake-workflow] failed to write prereq artifact:', errMsg(e));
+      }
+    }
+
+    // Preserve any keys the route added between `start()` returning and the
+    // first step running (notably `workflowRunId`, written so the jobs DELETE
+    // route can call `getRun(id).cancel()`). The compose step builds a fresh
+    // context_meta from scratch; without this merge, the route's late write
+    // would be silently clobbered here.
     try {
-      writeFileSync(/*turbopackIgnore: true*/ prereqArtifact.path, prereqArtifact.body);
-    } catch (e) {
-      console.error('[intake-workflow] failed to write prereq artifact:', errMsg(e));
+      const incoming = JSON.parse(contextMeta || '{}');
+      const existing = JSON.parse(job.contextMeta || '{}');
+      if (existing.workflowRunId && !incoming.workflowRunId) {
+        incoming.workflowRunId = existing.workflowRunId;
+      }
+      job.contextMeta = JSON.stringify(incoming);
+    } catch {
+      job.contextMeta = contextMeta;
     }
-  }
+    updateJob(job);
 
-  // Preserve any keys the route added between `start()` returning and the
-  // first step running (notably `workflowRunId`, written so the jobs DELETE
-  // route can call `getRun(id).cancel()`). The compose step builds a fresh
-  // context_meta from scratch; without this merge, the route's late write
-  // would be silently clobbered here.
-  try {
-    const incoming = JSON.parse(contextMeta || '{}');
-    const existing = JSON.parse(job.contextMeta || '{}');
-    if (existing.workflowRunId && !incoming.workflowRunId) {
-      incoming.workflowRunId = existing.workflowRunId;
-    }
-    job.contextMeta = JSON.stringify(incoming);
-  } catch {
-    job.contextMeta = contextMeta;
-  }
-  updateJob(job);
-
-  try {
     const mergedEnv: Record<string, string> = { ...cliEnv, ...(broker?.env ?? {}) };
     const fallbackEnv = fallback
       ? { ...fallback.cliEnv, ...(broker?.env ?? {}) }
@@ -678,6 +683,7 @@ async function startAgentStep(
             env: fallbackEnv,
           }
         : undefined,
+      cleanup: broker?.cleanup,
     });
     job.pid = pid;
     updateJob(job);

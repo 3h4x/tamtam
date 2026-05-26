@@ -83,3 +83,11 @@ export function shouldSignalJobPid(job: Pick<JobData, 'pid' | 'kind'>): boolean 
   if (job.pid === process.pid) return false;
   return job.pid > SAFE_PID_FLOOR && !isInlineServerKind(job.kind);
 }
+
+// Wall-clock aborts need a stricter safety check than the generic helper:
+// inline push/commit jobs may have already switched to a detached child pid,
+// so the timeout path must be able to signal them even though their kind is
+// inline. The only hard stop is self-kill / suspicious low pids.
+export function shouldSignalJobPidForWallClockTimeout(job: Pick<JobData, 'pid'>): boolean {
+  return job.pid !== process.pid && job.pid > SAFE_PID_FLOOR;
+}

@@ -11,7 +11,7 @@ import { listEnabledProjects } from '@/lib/shared/enabled-projects';
 import { parseOptionalKnownModelInput } from '@/lib/agents/model-aliases';
 import { parseOptionalAgentScheduleInput } from '@/lib/scheduling/agent-schedule';
 import { isCliProvider } from '@/lib/usage/cli-providers';
-import { parsePrerequisiteCommandInput, resolveAgentPrerequisiteCommand } from '@/lib/agents/issue-cruncher';
+import { parsePrerequisiteCommandInput, resolveAgentPrerequisiteCommand } from '@/lib/agents/prerequisites';
 import { isBuiltInRecommendedAgent } from '@/lib/agents/recommended-agents';
 import { loadAgentCronStates, getAllAgentLastAttempts } from '@/lib/scheduling/agent-cron-state';
 

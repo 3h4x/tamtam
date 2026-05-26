@@ -159,14 +159,14 @@ describe('SettingsPage', () => {
     document.body.innerHTML = ''
   })
 
-  it('rehydrates canonicalized review_fix_max_iterations after save', async () => {
+  it('preserves arbitrary review_fix_max_iterations values through display and save', async () => {
     const fetchMock = vi.fn(async (input: string, init?: RequestInit) => {
       if (input === '/api/settings' && !init) {
         return makeResponse({
           settings: {
             claude_provider: 'claude',
             cli_enabled_providers: 'claude',
-            review_fix_max_iterations: '3',
+            review_fix_max_iterations: '4',
           },
         })
       }
@@ -176,7 +176,7 @@ describe('SettingsPage', () => {
           settings: {
             claude_provider: 'claude',
             cli_enabled_providers: 'claude',
-            review_fix_max_iterations: '3',
+            review_fix_max_iterations: '7',
           },
         })
       }
@@ -190,13 +190,12 @@ describe('SettingsPage', () => {
     const { container, unmount } = renderSettingsPage()
 
     await waitForUi(() => {
-      expect(findInputByLabel(container, 'Review Fix Loop Iterations').value).toBe('3')
+      expect(findInputByLabel(container, 'Review Fix Loop Iterations').value).toBe('4')
       expect(getSaveButton(container).disabled).toBe(true)
     })
 
-    const input = findInputByLabel(container, 'Review Fix Loop Iterations')
     flushSync(() => {
-      setInputValue(input, '03')
+      setInputValue(findInputByLabel(container, 'Review Fix Loop Iterations'), '7')
     })
 
     await waitForUi(() => {
@@ -206,13 +205,7 @@ describe('SettingsPage', () => {
     getSaveButton(container).click()
 
     await waitForUi(() => {
-      expect(fetchMock).toHaveBeenCalledWith('/api/settings', expect.objectContaining({
-        method: 'PATCH',
-      }))
-    })
-
-    await waitForUi(() => {
-      expect(findInputByLabel(container, 'Review Fix Loop Iterations').value).toBe('3')
+      expect(findInputByLabel(container, 'Review Fix Loop Iterations').value).toBe('7')
       expect(getSaveButton(container).disabled).toBe(true)
     })
 
@@ -220,7 +213,7 @@ describe('SettingsPage', () => {
       ([input, init]) => input === '/api/settings' && (init as RequestInit | undefined)?.method === 'PATCH',
     )
     expect(patchCall).toBeTruthy()
-    expect((patchCall?.[1] as RequestInit).body).toContain('"review_fix_max_iterations":"03"')
+    expect((patchCall?.[1] as RequestInit).body).toContain('"review_fix_max_iterations":"7"')
 
     unmount()
   })
@@ -654,7 +647,7 @@ describe('SettingsPage', () => {
     })
 
     flushSync(() => {
-      setInputValue(findInputByLabel(container, 'Review Fix Loop Iterations'), '4')
+      setInputValue(findInputByLabel(container, 'Review Fix Loop Iterations'), '3')
     })
 
     getSaveButton(container).click()

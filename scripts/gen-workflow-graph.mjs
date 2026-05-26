@@ -40,10 +40,11 @@ async function loadSpec() {
   const tsxLoaderPath = require.resolve('tsx/esm/api');
   const { tsImport } = await import(pathToFileURL(tsxLoaderPath).href);
   const mod = await tsImport(pathToFileURL(specPath).href, import.meta.url);
-  if (!mod.TRIGGERS || !mod.TRANSITIONS) {
+  const spec = mod.TRIGGERS && mod.TRANSITIONS ? mod : mod.default ?? mod;
+  if (!spec.TRIGGERS || !spec.TRANSITIONS) {
     throw new Error('TRIGGERS / TRANSITIONS not exported from pipeline-spec.ts');
   }
-  return { TRIGGERS: mod.TRIGGERS, TRANSITIONS: mod.TRANSITIONS };
+  return { TRIGGERS: spec.TRIGGERS, TRANSITIONS: spec.TRANSITIONS };
 }
 
 // Convert a TRIGGERS + TRANSITIONS pair into a mermaid `flowchart LR` source.

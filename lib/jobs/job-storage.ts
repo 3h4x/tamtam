@@ -9,6 +9,7 @@ export {
   runWithParent,
   jobsCache,
   loadFromDb,
+  saveToDbAsync,
   saveToDb,
   findActiveReleaseJob,
   createJob,

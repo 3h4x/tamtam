@@ -32,6 +32,7 @@ import { wrapForSandbox } from '@/lib/shared/sandbox-wrap';
 import { measurePrompt, checkPromptSize } from './prompt-size';
 import { redactSecrets } from '@/lib/shared/log-redaction';
 import { buildChildEnv } from '@/lib/shared/child-env';
+import type { JobData } from '@/lib/jobs/types';
 
 // Canonical signal-name → signum table. Hoisted from the per-exit
 // `require('os').constants.signals` lookup in the child.on('exit') handler.
@@ -50,52 +51,70 @@ export async function startJobInProcess(
   command: string,
   prompt: string,
   cwd: string,
-  options?: { env?: Record<string, string> },
+  options?: { env?: Record<string, string>; cleanup?: () => void },
 ): Promise<number> {
-  const LOG_DIR = resolveLogDir();
-  mkdirSync(/*turbopackIgnore: true*/ LOG_DIR, { recursive: true });
-
-  const promptPath = join(/*turbopackIgnore: true*/ LOG_DIR, `${jobId}.prompt`);
-  const logPath = join(/*turbopackIgnore: true*/ LOG_DIR, `${jobId}.log`);
-
-  writeFileSync(/*turbopackIgnore: true*/ promptPath, prompt);
-
-  const promptBytes = measurePrompt(prompt);
-  const { jobsCache, saveToDb, markDone } = await import('@/lib/jobs/job-storage');
-  const job = jobsCache.get(jobId);
-  if (job) {
-    job.promptBytes = promptBytes;
-    checkPromptSize(jobId, job.kind, promptBytes);
-    saveToDb(job);
-  }
-
-  const cmdArgv = splitCommand(command);
-  if (cmdArgv.length === 0) {
-    throw new Error(`startJobInProcess: empty command string for job ${jobId}`);
-  }
-  const [rawBin, ...rawArgs] = cmdArgv;
-  const runDir = join(/*turbopackIgnore: true*/ tmpdir(), 'tamtam-runs', jobId);
-  const wrap = wrapForSandbox({ bin: rawBin, args: rawArgs, cwd, runDir });
-  const bin = wrap.bin;
-  const args = wrap.args;
-
-  const childEnv = buildChildEnv({ ...(options?.env ?? {}), ...wrap.env });
-
-  const logFd = openSync(/*turbopackIgnore: true*/ logPath, 'a');
-  const writeLog = (chunk: Buffer | string) => {
+  let cleanedUp = false;
+  const cleanup = () => {
+    if (cleanedUp) return;
+    cleanedUp = true;
     try {
-      writeSync(logFd, redactSecrets(Buffer.isBuffer(chunk) ? chunk.toString('utf8') : String(chunk)));
-    } catch { /* noop */ }
+      options?.cleanup?.();
+    } catch (err) {
+      console.warn(`[spawn-claude-detached] cleanup failed for ${jobId}:`, err);
+    }
   };
-  const logLine = (s: string) => writeLog(s.endsWith('\n') ? s : `${s}\n`);
 
-  const launchedSummary = [bin, ...args]
-    .map(a => (/\s/.test(a) ? `"${a.replace(/"/g, '\\"')}"` : a))
-    .join(' ');
-  logLine(`[tamtam] launching: ${launchedSummary}`);
-
+  let promptPath = '';
+  let logPath = '';
+  let logFd: number | null = null;
+  let logLine: ((s: string) => void) | null = null;
+  let jobsCache: Map<string, JobData> | null = null;
+  let markDone: ((job: JobData, exitCode: number) => Promise<void>) | null = null;
   let child;
   try {
+    const LOG_DIR = resolveLogDir();
+    mkdirSync(/*turbopackIgnore: true*/ LOG_DIR, { recursive: true });
+
+    promptPath = join(/*turbopackIgnore: true*/ LOG_DIR, `${jobId}.prompt`);
+    logPath = join(/*turbopackIgnore: true*/ LOG_DIR, `${jobId}.log`);
+
+    writeFileSync(/*turbopackIgnore: true*/ promptPath, prompt);
+
+    const promptBytes = measurePrompt(prompt);
+    const jobStorage = await import('@/lib/jobs/job-storage');
+    jobsCache = jobStorage.jobsCache;
+    markDone = jobStorage.markDone;
+    const job = jobsCache.get(jobId);
+    if (job) {
+      job.promptBytes = promptBytes;
+      checkPromptSize(jobId, job.kind, promptBytes);
+      jobStorage.saveToDb(job);
+    }
+
+    const cmdArgv = splitCommand(command);
+    if (cmdArgv.length === 0) {
+      throw new Error(`startJobInProcess: empty command string for job ${jobId}`);
+    }
+    const [rawBin, ...rawArgs] = cmdArgv;
+    const runDir = join(/*turbopackIgnore: true*/ tmpdir(), 'tamtam-runs', jobId);
+    const wrap = wrapForSandbox({ bin: rawBin, args: rawArgs, cwd, runDir });
+    const bin = wrap.bin;
+    const args = wrap.args;
+
+    const childEnv = buildChildEnv({ ...(options?.env ?? {}), ...wrap.env });
+
+    logFd = openSync(/*turbopackIgnore: true*/ logPath, 'a');
+    logLine = (s: string) => {
+      try {
+        writeSync(logFd!, redactSecrets(Buffer.isBuffer(s) ? s.toString('utf8') : String(s)));
+      } catch { /* noop */ }
+    };
+
+    const launchedSummary = [bin, ...args]
+      .map(a => (/\s/.test(a) ? `"${a.replace(/"/g, '\\"')}"` : a))
+      .join(' ');
+    logLine(`[tamtam] launching: ${launchedSummary}`);
+
     // Pass the log fd directly to the child for stdout/stderr. The kernel
     // dup's it into the child process; the child keeps writing to the file
     // even if our process disappears, so a PM2 restart no longer SIGPIPEs
@@ -107,15 +126,22 @@ export async function startJobInProcess(
       detached: true,
     });
   } catch (err) {
-    logLine(`[tamtam] spawn failed: ${(err as Error).message}`);
-    try { closeSync(logFd); } catch { /* noop */ }
+    if (logLine) {
+      logLine(`[tamtam] spawn failed: ${(err as Error).message}`);
+    }
+    try { if (logFd !== null) closeSync(logFd); } catch { /* noop */ }
+    logFd = null;
+    cleanup();
     throw err;
   }
 
   const pid = child.pid ?? 0;
 
   child.on('error', (err) => {
-    logLine(`[tamtam] spawn error: ${err.message}`);
+    logLine?.(`[tamtam] spawn error: ${err.message}`);
+    try { if (logFd !== null) closeSync(logFd); } catch { /* noop */ }
+    logFd = null;
+    cleanup();
   });
 
   // Pipe prompt file → stdin (matches scripts/job-runner.js).
@@ -140,13 +166,15 @@ export async function startJobInProcess(
     } else {
       rc = 1;
     }
-    logLine(`[tamtam] exited with code ${rc}${signal ? ` (signal ${signal})` : ''}`);
-    try { closeSync(logFd); } catch { /* noop */ }
+    logLine?.(`[tamtam] exited with code ${rc}${signal ? ` (signal ${signal})` : ''}`);
+    try { if (logFd !== null) closeSync(logFd); } catch { /* noop */ }
+    logFd = null;
+    cleanup();
     // markDone parses the log for tokens/cost, applies Claude is_error overrides,
     // persists, and fires the pipeline completion-hook chain that drives the next
     // step (review → fix loop, fix → re-review or re-push).
-    const liveJob = jobsCache.get(jobId);
-    if (liveJob) {
+    const liveJob = jobsCache?.get(jobId);
+    if (liveJob && markDone) {
       markDone(liveJob, rc).catch((e) => {
         console.error(`[spawn-claude-detached] markDone failed for ${jobId}:`, e);
       });

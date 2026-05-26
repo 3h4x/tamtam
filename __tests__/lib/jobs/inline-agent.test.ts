@@ -73,6 +73,21 @@ describe('startInProcessAgentJob', () => {
     expect(markDone).toHaveBeenCalledWith(expect.objectContaining({ id: 'job-1', pid: 2468 }), 0);
   });
 
+  it('defers broker cleanup until the subprocess finishes', async () => {
+    const cleanup = vi.fn();
+    runSubprocess = vi.fn(async (params: { onSpawn?: (pid: number) => void }) => {
+      params.onSpawn?.(2468);
+      expect(cleanup).not.toHaveBeenCalled();
+      return { pid: 2468, exitCode: 0, signal: null };
+    });
+    const { startInProcessAgentJob } = await import('@/lib/jobs/inline-agent');
+
+    await startInProcessAgentJob('job-1', 'agent-cli --flag', 'prompt', tempDir, { cleanup });
+
+    expect(cleanup).toHaveBeenCalledOnce();
+    expect(markDone).toHaveBeenCalledWith(expect.objectContaining({ id: 'job-1', pid: 2468 }), 0);
+  });
+
   it('retries once with the fallback provider after a transient failure', async () => {
     runSubprocess
       .mockImplementationOnce(async (params: { onSpawn?: (pid: number) => void }) => {

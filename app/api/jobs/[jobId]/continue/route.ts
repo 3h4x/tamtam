@@ -1,6 +1,8 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { join } from 'path';
 import { mkdirSync } from 'fs';
+import { eq } from 'drizzle-orm';
+import { db, schema } from '@/lib/db';
 import { getImproveConfig } from '@/lib/scheduling/scheduling';
 import { resolveProjectPath } from '@/lib/shared/project-data';
 import { getJob, createJob, updateJob } from '@/lib/jobs/job-storage';
@@ -11,6 +13,7 @@ import { resolveCliBin, resolveCliDefaultModel, resolveCliEnv } from '@/lib/shar
 import { checkCliStartGate } from '@/lib/usage/resolve-provider';
 import { findBlockingRunningJob } from '@/lib/jobs/project-active-job';
 import { buildResumePrompt } from '@/lib/jobs/auto-resume';
+import { prepareBrokerRun } from '@/lib/browser-broker/prepare-run';
 
 // How recently the source job must have finished to allow a --resume.
 // Beyond this window the provider's session cache is unreliable: model
@@ -122,13 +125,33 @@ export async function POST(
   job.sessionId = sessionId;
   job.logPath = join(/*turbopackIgnore: true*/ logDir, `${job.id}.log`);
 
+  let broker: { env: Record<string, string>; cleanup: () => void } | null = null;
+  try {
+    const rows = await db.select().from(schema.projects).where(eq(schema.projects.name, projectName)).limit(1);
+    const projectRow = rows[0] ?? null;
+    broker = await prepareBrokerRun({
+      jobId: job.id,
+      projectOrigins: {
+        qaUrl: projectRow?.qaUrl ?? null,
+        devServerReadyUrl: projectRow?.devServerReadyUrl ?? null,
+        website: projectRow?.website ?? null,
+      },
+      provider,
+    });
+  } catch (e) {
+    console.warn(`[job-continue] broker prep failed for ${job.id}:`, e);
+  }
+
   try {
     const pid = await startJobInProcess(
       job.id,
       `${claudeBin} --print --output-format stream-json --include-partial-messages --verbose --model ${model} ${getPermissionModeFlag()} --resume ${sessionId}`,
       prompt,
       projPath,
-      { env: cliEnv },
+      {
+        env: broker ? { ...cliEnv, ...broker.env } : cliEnv,
+        cleanup: broker?.cleanup,
+      },
     );
     job.pid = pid;
   } catch (e: unknown) {

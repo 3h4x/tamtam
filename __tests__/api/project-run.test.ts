@@ -38,6 +38,8 @@ const state = vi.hoisted(() => {
     getSettings: vi.fn(),
     getImproveConfig: vi.fn(),
     getQuotaSnapshots: vi.fn().mockResolvedValue(new Map()),
+    prepareBrokerRun: vi.fn(),
+    projectRows: [] as Array<Record<string, unknown>>,
   };
   return {
     fns,
@@ -63,8 +65,23 @@ vi.mock('@/lib/jobs/job-storage', () => ({
 vi.mock('@/lib/jobs/project-active-job', () => ({
   findBlockingRunningJob: (...args: unknown[]) => state.fns.findBlockingRunningJob(...args),
 }));
+vi.mock('@/lib/browser-broker/prepare-run', () => ({
+  prepareBrokerRun: (...args: unknown[]) => state.fns.prepareBrokerRun(...args),
+}));
 vi.mock('@/lib/jobs/spawn-claude-detached', () => ({
   startJobInProcess: (...args: unknown[]) => state.fns.startJob(...args),
+}));
+vi.mock('@/lib/db', () => ({
+  db: {
+    select: () => ({
+      from: () => ({
+        where: () => ({
+          limit: async () => state.fns.projectRows,
+        }),
+      }),
+    }),
+  },
+  schema: { projects: { name: 'name' } },
 }));
 vi.mock('@/lib/skills/skills', () => ({
   get SKILLS_DIR() { return state.skillsDir; },
@@ -129,11 +146,14 @@ describe('POST /api/projects/by-project/{projectName}/run', () => {
     state.fns.getSettings.mockReset().mockImplementation(() => ({
       cli_enabled_providers: ['claude'],
       cli_bin_claude: '/legacy/claude',
+      browser_broker_enabled: false,
     }));
     state.fns.getImproveConfig.mockReset().mockReturnValue({
       claudeBin: 'claude',
       logDir: join(tempDir, 'logs'),
     });
+    state.fns.prepareBrokerRun.mockReset().mockResolvedValue(null);
+    state.fns.projectRows = [];
 
     POST = (await routeModulePromise).POST;
   });
@@ -620,6 +640,40 @@ describe('POST /api/projects/by-project/{projectName}/run', () => {
       null,
       null,
     );
+  });
+
+  it('cleans up browser-broker config if the terminal job fails to start', async () => {
+    state.fns.getSettings.mockReturnValue({
+      cli_enabled_providers: ['claude'],
+      cli_bin_claude: '/legacy/claude',
+      browser_broker_enabled: true,
+    });
+    state.fns.projectRows = [
+      {
+        qaUrl: 'http://qa.local',
+        devServerReadyUrl: 'http://dev.local',
+        website: 'http://site.local',
+      },
+    ];
+    const brokerCleanup = vi.fn();
+    state.fns.prepareBrokerRun.mockResolvedValueOnce({
+      env: { TAMTAM_BROKER_URL: 'http://127.0.0.1:9000' },
+      runDir: '/tmp/tamtam-runs/test-job-id',
+      cleanup: brokerCleanup,
+    });
+    state.fns.startJob.mockImplementationOnce(async (_jobId: string, _cmd: string, _prompt: string, _cwd: string, options?: { cleanup?: () => void }) => {
+      options?.cleanup?.();
+      throw new Error('boom');
+    });
+
+    const req = new NextRequest('http://localhost/api/projects/by-project/proj1/run', {
+      method: 'POST',
+      body: JSON.stringify({ prompt: 'run my agent' }),
+    });
+    const res = await POST(req, { params: Promise.resolve({ projectName: 'proj1' }) });
+
+    expect(res.status).toBe(500);
+    expect(brokerCleanup).toHaveBeenCalledOnce();
   });
 });
 

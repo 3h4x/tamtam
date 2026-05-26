@@ -34,6 +34,8 @@ describe('POST /api/jobs/{jobId}/continue', () => {
   let startJobMock: ReturnType<typeof vi.fn>;
   let findBlockingRunningJobMock: ReturnType<typeof vi.fn>;
   let withBasePromptMock: ReturnType<typeof vi.fn>;
+  let prepareBrokerRunMock: ReturnType<typeof vi.fn>;
+  let projectRows: Array<Record<string, unknown>>;
 
   beforeEach(async () => {
     vi.resetModules();
@@ -48,6 +50,8 @@ describe('POST /api/jobs/{jobId}/continue', () => {
     startJobMock = vi.fn().mockResolvedValue(9999);
     findBlockingRunningJobMock = vi.fn().mockResolvedValue(null);
     withBasePromptMock = vi.fn((p: string) => `BASE\n\n---\n\n${p}`);
+    prepareBrokerRunMock = vi.fn().mockResolvedValue(null);
+    projectRows = [];
 
     vi.doMock('@/lib/jobs/job-storage', () => ({
       getJob: getJobMock,
@@ -78,6 +82,21 @@ describe('POST /api/jobs/{jobId}/continue', () => {
     }));
     vi.doMock('@/lib/jobs/project-active-job', () => ({
       findBlockingRunningJob: findBlockingRunningJobMock,
+    }));
+    vi.doMock('@/lib/browser-broker/prepare-run', () => ({
+      prepareBrokerRun: (...args: unknown[]) => (prepareBrokerRunMock as unknown as (...inner: unknown[]) => unknown)(...args),
+    }));
+    vi.doMock('@/lib/db', () => ({
+      db: {
+        select: () => ({
+          from: () => ({
+            where: () => ({
+              limit: async () => projectRows,
+            }),
+          }),
+        }),
+      },
+      schema: { projects: { name: 'name' } },
     }));
 
     const mod = await import('@/app/api/jobs/[jobId]/continue/route');
@@ -159,6 +178,40 @@ describe('POST /api/jobs/{jobId}/continue', () => {
     expect(cmd).toContain('--print');
     expect(withBasePromptMock).toHaveBeenCalled();
     expect(prompt.startsWith('BASE')).toBe(true);
+  });
+
+  it('keeps broker cleanup alive and injects MCP env when prepare succeeds', async () => {
+    getJobMock.mockReturnValue(makeJob());
+    projectRows = [
+      {
+        qaUrl: 'http://qa.local',
+        devServerReadyUrl: 'http://dev.local',
+        website: 'http://site.local',
+      },
+    ];
+    const cleanup = vi.fn();
+    prepareBrokerRunMock.mockResolvedValueOnce({
+      env: { TAMTAM_BROKER_URL: 'http://127.0.0.1:9000' },
+      runDir: '/tmp/tamtam-runs/job-continued',
+      cleanup,
+    });
+    startJobMock.mockImplementationOnce(async (_jobId: string, _cmd: string, _prompt: string, _cwd: string, options?: { env?: Record<string, string>; cleanup?: () => void }) => {
+      expect(options?.env).toMatchObject({
+        TAMTAM_BROKER_URL: 'http://127.0.0.1:9000',
+      });
+      expect(options?.cleanup).toBe(cleanup);
+      options?.cleanup?.();
+      return 9999;
+    });
+
+    const res = await POST(
+      new NextRequest('http://localhost/api/jobs/job-source/continue', { method: 'POST' }),
+      { params: Promise.resolve({ jobId: 'job-source' }) },
+    );
+
+    expect(res.status).toBe(200);
+    expect(prepareBrokerRunMock).toHaveBeenCalledOnce();
+    expect(cleanup).toHaveBeenCalledOnce();
   });
 
   it('reconstructs the session id from the log tail when the job row is missing it', async () => {

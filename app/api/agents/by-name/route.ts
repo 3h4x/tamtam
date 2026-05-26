@@ -12,7 +12,7 @@ import { resolveProjectPath } from '@/lib/shared/project-data';
 import { parseOptionalKnownModelInput } from '@/lib/agents/model-aliases';
 import { parseOptionalAgentScheduleInput } from '@/lib/scheduling/agent-schedule';
 import { isCliProvider } from '@/lib/usage/cli-providers';
-import { parsePrerequisiteCommandInput, resolveAgentPrerequisiteCommand } from '@/lib/agents/issue-cruncher';
+import { parsePrerequisiteCommandInput, resolveAgentPrerequisiteCommand } from '@/lib/agents/prerequisites';
 
 function withEffectivePrerequisite<T extends { project: string; skillIds: string[]; prerequisiteCommand?: string | null }>(
   agent: T,

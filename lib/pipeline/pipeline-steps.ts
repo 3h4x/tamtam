@@ -87,7 +87,7 @@ export const BUILT_IN_STEPS: PipelineStep[] = [
     isActive: ({ config }) => !config.review_disabled,
     description: ({ config }) => config.review_disabled
       ? 'Fix is skipped because review is disabled.'
-      : 'On a NEEDS ATTENTION or DO NOT SHIP verdict, Claude applies fixes and re-reviews (capped at 3 iterations). Runs automatically when review is on.',
+      : 'On a NEEDS ATTENTION or DO NOT SHIP verdict, Claude applies fixes and re-reviews until LGTM or the configured review-fix cap / release timeout stops it. Runs automatically when review is on.',
   },
   {
     id: 'commit',

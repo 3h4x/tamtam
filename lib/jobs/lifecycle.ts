@@ -6,7 +6,7 @@ import { parseStreamLines } from './claude-stream-parser';
 import { costUsd } from '@/lib/shared/usage-pricing';
 import { getVerdict, readLog, readParsedLog } from './verdict';
 import {
-  saveToDb,
+  saveToDbAsync,
   listJobs,
   getJob,
   persistVerdict,
@@ -1618,16 +1618,8 @@ export async function markDone(job: JobData, exitCode: number): Promise<void> {
     }
   }
   if (shouldAutoMarkSeen(job)) job.seen = true;
-  saveToDb(job);
+  await saveToDbAsync(job);
   void db.delete(schema.ghIssuesCache).where(eq(schema.ghIssuesCache.project, job.project)).execute().catch(() => {});
-  // Wait for `saveToDb` to flush before emitting the completion event.
-  // Otherwise a crash between emit and DB flush would let the consumer
-  // dispatch against stale exitCode/finishedAt and then mark the event
-  // consumed — permanently losing the downstream side effect.
-  try {
-    const { awaitInFlightSave } = await import('./storage');
-    await awaitInFlightSave(job.id);
-  } catch { /* best-effort; the consumer also re-reads getJob() */ }
   // Durable completion event: write a row before the inline hook chain so
   // a workflow consumer can re-drive downstream decisions (release-after-run,
   // release-after-fix-ci, auto-resume) on a crash/restart that interrupts the

@@ -4,7 +4,7 @@ import {
   hasIssueCruncherSkill,
   buildIssueCruncherPrerequisiteCommand,
   normalizeStoredPrerequisiteCommand,
-} from '@/lib/agents/issue-cruncher';
+} from '@/lib/agents/prerequisites';
 import { db, schema } from '@/lib/db';
 import { eq } from 'drizzle-orm';
 
@@ -175,7 +175,7 @@ NO WALL-CLOCK WAITS. If the code under test uses debouncing, setTimeout, setInte
 
 USER-EVENT + FAKE TIMERS. \`userEvent.type\` stalls under fake timers because each keystroke awaits a real-time delay. Either: (a) configure once with \`const user = userEvent.setup({ advanceTimers: vi.advanceTimersByTime })\` and use \`user.type\`, or (b) fire the input change directly (\`fireEvent.change(input, { target: { value: '...' } })\`) when the test only cares about the resulting handler call — not the keystroke choreography.
 
-BUDGET. A new unit test should finish in <500ms. After writing one, run \`pnpm vitest run <file> --reporter=verbose\` and read the duration. If a single test exceeds 1s, you have a real timer somewhere — fix it before stopping. Slow tests are a recurring offence; treat duration as part of correctness, not a nice-to-have.`,
+BUDGET. A new unit test should finish in <500ms. After writing one, run \`npx vitest run <file> --reporter=verbose\` and read the duration. If a single test exceeds 1s, you have a real timer somewhere — fix it before stopping. Slow tests are a recurring offence; treat duration as part of correctness, not a nice-to-have. (Use \`npx\` over \`pnpm\` — codex \`workspace-write\` sandbox blocks pnpm's IPC.)`,
   },
   {
     id: 'agent-self-improve',
@@ -343,10 +343,16 @@ Do NOT hand off to other agents and do NOT run \`gh issue create\`. Just leave t
     content: `You are the improve agent. Each run picks ONE rarely-touched file and applies ONE small, mechanical fix. Apply safe fixes inline; flag-and-stop on the risk patterns. Don't just report.
 
 ## 1. Pick the least-recently-verified file
-Run from the repo root:
-\`find app components lib hooks scripts docs -type f \\( -name '*.ts' -o -name '*.tsx' -o -name '*.md' -o -name '*.sh' \\) -printf '%T@ %p\\n' 2>/dev/null | sort -n | head -1\`
 
-That's your target. Skip generated files (\`*.d.ts\`, anything under \`node_modules\`, \`.next\`, \`dist\`, \`coverage\`). If the candidate is a tiny barrel/re-export with nothing meaningful inside, take the next one up — don't waste a turn on shrug-shaped files.
+**Prefer the prerequisite artifact.** The Prerequisite Output above already lists the top 5 oldest candidate files (post-filter) plus a tail of the per-project \`.tamtam/cache/audits/improve.md\` ledger. Pick the first entry that isn't:
+- a tiny barrel/re-export with nothing meaningful inside (e.g. one-line type re-exports),
+- a file that the audit log shows you already touched in a recent run with the same intended pattern.
+
+If the prerequisite output is absent (custom agent without prereq), run this find yourself from the repo root and take the top result:
+
+\`find app components lib hooks scripts docs -type f -not -path '*/.tamtam/*' -not -path '*/node_modules/*' -not -path '*/.next/*' -not -path '*/dist/*' -not -path '*/coverage/*' -not -name '*.d.ts' \\( -name '*.ts' -o -name '*.tsx' -o -name '*.md' -o -name '*.sh' \\) -printf '%T@ %p\\n' 2>/dev/null | sort -n | head -1\`
+
+Skip generated files (\`*.d.ts\`, anything under \`node_modules\`, \`.next\`, \`dist\`, \`coverage\`, \`.tamtam/\` — the latter is TamTam's per-project state, not project source).
 
 ## 2. Audit for one of these patterns
 
@@ -393,8 +399,8 @@ These are mechanical, low-risk patterns. **Pick one. Do not pile multiple change
 - Don't touch \`.test.ts\` files unless the source change provably breaks an existing assertion (e.g. an existsSync precheck removed → a test that asserted "existsSync was called" needs to be updated to assert the new flow).
 
 ## 4. Verify
-Run **only** these:
-1. \`pnpm type-check\`
+Run **only** these. Use \`npx\` rather than \`pnpm\` — pnpm 11 coordinates child processes through IPC channels that codex \`workspace-write\` sandboxes block, so \`pnpm type-check\` exits with "tsx IPC restriction" while \`npx tsc\` runs cleanly with the same tsconfig.
+1. \`npx tsc --noEmit\`
 2. \`npx vitest run <the-relevant-test-file>\` — find tests touching the file via \`find __tests__ -name '*<file-basename>*'\` or grep.
 
 Do NOT run the full test suite, do NOT run e2e tests, do NOT run \`pnpm rebuild\` / \`pnpm dev\`.
@@ -410,9 +416,15 @@ If the file you picked has none of the §2 patterns, say so: print \`IMPROVE_FIL
 
 ## 6. Append to the audit log
 
-After §5, append a one-line entry to \`.tamtam/improve-audit.md\` in the project root. This file is the running ledger of every \`agent:improve\` run for the project — useful when the next iteration wants to know what's already been touched and what patterns keep recurring.
+After §5, append a one-line entry to \`.tamtam/cache/audits/improve.md\`. This is the per-project running ledger of every \`agent:improve\` run — useful when the next iteration wants to know what's already been touched and what patterns keep recurring.
 
-Create the file with this header if it doesn't yet exist:
+The \`.tamtam/cache/\` subdir is gitignored by default (TamTam seeds \`.tamtam/.gitignore\` with \`cache/\` on first agent run), so audit files there stay out of commits without any per-agent gitignore edit.
+
+Create the parent dir + file with this header on first run:
+
+\`\`\`bash
+mkdir -p .tamtam/cache/audits
+\`\`\`
 
 \`\`\`
 # agent:improve — audit log
@@ -496,7 +508,7 @@ Pick the smallest fix that materially improves the measured cost. Reference the 
 ## 5. Make the change small and verifiable
 - Edit one route + the callers that consume the new shape (or one client helper). Keep the diff under ~80 lines.
 - Add or extend a vitest test in \`__tests__/api/\` that asserts the new payload shape (fields present, pagination metadata, summary path). Don't ship without it.
-- Type-check (\`pnpm type-check\`) and run the impacted vitest file. Do not run the full suite or e2e — too slow.
+- Type-check (\`npx tsc --noEmit\`) and run the impacted vitest file via \`npx vitest run <file>\`. Use \`npx\` rather than \`pnpm\` so the codex \`workspace-write\` sandbox doesn't trip on pnpm's IPC. Do not run the full suite or e2e — too slow.
 - Re-measure with Playwright. Print the before/after numbers (size + time + cadence) and the percent change.
 - If the measured win is under 30%, revert the change and pick a different target — perf changes that don't move the needle aren't worth the risk.
 

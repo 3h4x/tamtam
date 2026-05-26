@@ -127,7 +127,7 @@ describe('config', () => {
         commit_style: 'Use conventional commits. One line only, present tense, ≤50 chars, no trailing period. Types: feat|fix|docs|style|refactor|test|chore|ci|build|perf|revert.',
         review_verdict_rules: expect.stringContaining('Pragmatic verdict rules'),
         jobs_paused: false,
-        review_fix_max_iterations: 3,
+        review_fix_max_iterations: 0,
         review_fix_backoff_seconds: 0,
         review_do_not_ship_action: 'fix',
         release_wall_clock_timeout_minutes: 60,
@@ -630,10 +630,10 @@ describe('config', () => {
       expect(getSettings().review_fix_max_iterations).toBe(5);
     });
 
-    it('falls back to default when value is non-numeric', async () => {
+    it('falls back to default (unlimited) when value is non-numeric', async () => {
       await setSetting('review_fix_max_iterations', 'abc');
       await refresh();
-      expect(getSettings().review_fix_max_iterations).toBe(3);
+      expect(getSettings().review_fix_max_iterations).toBe(0);
     });
 
     it('preserves explicit zero as unlimited', async () => {
@@ -642,15 +642,15 @@ describe('config', () => {
       expect(getSettings().review_fix_max_iterations).toBe(0);
     });
 
-    it('falls back to default when value is negative', async () => {
+    it('falls back to default (unlimited) when value is negative', async () => {
       await setSetting('review_fix_max_iterations', '-1');
       await refresh();
-      expect(getSettings().review_fix_max_iterations).toBe(3);
+      expect(getSettings().review_fix_max_iterations).toBe(0);
     });
 
-    it('returns the default 3 when no DB row exists', async () => {
+    it('returns the default 0 (unlimited) when no DB row exists', async () => {
       await refresh();
-      expect(getSettings().review_fix_max_iterations).toBe(3);
+      expect(getSettings().review_fix_max_iterations).toBe(0);
     });
   });
 

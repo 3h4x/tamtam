@@ -4,7 +4,7 @@ import { getBranchContext, gitLsTreeSync, gitShowSync } from '@/lib/git/git-bran
 import { getFileAgentOverrideSync } from '@/lib/agents/file-agent-overrides';
 import { canonicalAgentNameKey, canonicalizeAgentName, getAgentNameValidationError } from '@/lib/agents/agent-name';
 import { normalizeModelInput } from '@/lib/agents/model-aliases';
-import { normalizeStoredPrerequisiteCommand } from '@/lib/agents/issue-cruncher';
+import { normalizeStoredPrerequisiteCommand } from '@/lib/agents/prerequisites';
 import { parseOptionalAgentScheduleInput } from '@/lib/scheduling/agent-schedule';
 import { isCliProvider } from '@/lib/usage/cli-providers';
 

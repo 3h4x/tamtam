@@ -28,7 +28,6 @@ describe('abortActiveRelease', () => {
   let notifyMock: ReturnType<typeof vi.fn>;
   let execMock: ReturnType<typeof vi.fn>;
   let requestJobCancellationMock: ReturnType<typeof vi.fn>;
-  let shouldSignalJobPidMock: ReturnType<typeof vi.fn>;
 
   beforeEach(() => {
     vi.resetModules();
@@ -42,7 +41,6 @@ describe('abortActiveRelease', () => {
     notifyMock = vi.fn().mockResolvedValue(undefined);
     execMock = vi.fn().mockResolvedValue({ exitCode: 0, stdout: '', stderr: '' });
     requestJobCancellationMock = vi.fn().mockResolvedValue(true);
-    shouldSignalJobPidMock = vi.fn().mockReturnValue(false);
 
     vi.doMock('@/lib/pipeline/pipeline-lock', () => ({
       getLock: getLockMock,
@@ -59,11 +57,13 @@ describe('abortActiveRelease', () => {
     vi.doMock('@/lib/shared/shell', () => ({
       exec: execMock,
     }));
-    vi.doMock('@/lib/jobs/cancellation', () => ({
-      requestJobCancellation: requestJobCancellationMock,
-      SAFE_PID_FLOOR: 100,
-      shouldSignalJobPid: shouldSignalJobPidMock,
-    }));
+    vi.doMock('@/lib/jobs/cancellation', async () => {
+      const actual = await vi.importActual<typeof import('@/lib/jobs/cancellation')>('@/lib/jobs/cancellation');
+      return {
+        ...actual,
+        requestJobCancellation: requestJobCancellationMock,
+      };
+    });
     vi.doMock('@/lib/jobs/redacted-log-writer', () => ({
       appendRedactedFileSync: vi.fn(),
     }));
@@ -102,6 +102,34 @@ describe('abortActiveRelease', () => {
       job_id: 'release-1',
       reason: 'wall_clock_timeout',
     }));
+  });
+
+  it('wall_clock_timeout does not finalize a wedged inline push step without a safe pid', async () => {
+    const release = makeJob();
+    const runningPush = makeJob({
+      id: 'push-1',
+      kind: 'push',
+      pid: process.pid,
+      releaseId: 'release-1',
+      startedAt: 1500,
+    });
+    getJobMock.mockReturnValue(release);
+    listJobsMock.mockReturnValue([release, runningPush]);
+    requestJobCancellationMock.mockResolvedValue(false);
+
+    const { abortActiveRelease } = await import('@/lib/pipeline/release-abort');
+    const result = await abortActiveRelease('proj1', { reason: 'wall_clock_timeout' });
+
+    expect(result).toEqual({
+      status: 'abort_pending',
+      detail: 'Timed out waiting for push to stop cleanly',
+      release_id: 'release-1',
+      killed_job_id: null,
+      httpStatus: 409,
+    });
+    expect(updateJobMock).not.toHaveBeenCalled();
+    expect(finalizeAbortedReleaseMock).not.toHaveBeenCalled();
+    expect(notifyMock).not.toHaveBeenCalled();
   });
 
   it('aborts the targeted expired release instead of the currently locked one', async () => {
@@ -220,10 +248,37 @@ describe('abortActiveRelease', () => {
       httpStatus: 409,
     });
     expect(requestJobCancellationMock).toHaveBeenCalledWith('commit-1', 20_000);
-    expect(updateJobMock).toHaveBeenCalledWith(expect.objectContaining({ id: 'release-1', abortedAt: expect.any(Number) }));
+    expect(updateJobMock).not.toHaveBeenCalled();
     expect(updateJobMock).not.toHaveBeenCalledWith(expect.objectContaining({ id: 'commit-1' }));
     expect(finalizeAbortedReleaseMock).not.toHaveBeenCalled();
     expect(notifyMock).not.toHaveBeenCalled();
+  });
+
+  it('wall_clock_timeout does not finalize a wedged inline commit step without a safe pid', async () => {
+    const release = makeJob();
+    const runningCommit = makeJob({
+      id: 'commit-1',
+      kind: 'commit',
+      pid: process.pid,
+      releaseId: 'release-1',
+      startedAt: 1500,
+    });
+    getJobMock.mockReturnValue(release);
+    listJobsMock.mockReturnValue([release, runningCommit]);
+    requestJobCancellationMock.mockResolvedValue(false);
+
+    const { abortActiveRelease } = await import('@/lib/pipeline/release-abort');
+    const result = await abortActiveRelease('proj1', { reason: 'wall_clock_timeout' });
+
+    expect(result).toEqual({
+      status: 'abort_pending',
+      detail: 'Timed out waiting for commit to stop cleanly',
+      release_id: 'release-1',
+      killed_job_id: null,
+      httpStatus: 409,
+    });
+    expect(updateJobMock).not.toHaveBeenCalled();
+    expect(finalizeAbortedReleaseMock).not.toHaveBeenCalled();
   });
 
   it('signals a non-inline running step and force-kills it on the timer', async () => {
@@ -238,7 +293,6 @@ describe('abortActiveRelease', () => {
     const killSpy = vi.spyOn(process, 'kill').mockImplementation(() => true);
     getJobMock.mockReturnValue(release);
     listJobsMock.mockReturnValue([release, runningReview]);
-    shouldSignalJobPidMock.mockReturnValue(true);
 
     const { abortActiveRelease } = await import('@/lib/pipeline/release-abort');
     const resultPromise = abortActiveRelease('proj1', { reason: 'user' });

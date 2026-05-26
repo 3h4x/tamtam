@@ -207,13 +207,41 @@ export async function POST(
     cmd += ` --resume ${resumeSessionId}`;
   }
 
+  // Wire the browser broker MCP into terminal runs the same way agent intake
+  // does — without this, a manual terminal session has no `mcp__tamtam_browser__*`
+  // tools even when `browser_broker_enabled` is on. The settings gate inside
+  // prepareBrokerRun makes this a no-op when the broker is disabled.
+  let mergedEnv = cliEnv;
+  let broker: { env: Record<string, string>; cleanup: () => void } | null = null;
+  try {
+    const { prepareBrokerRun } = await import('@/lib/browser-broker/prepare-run');
+    const { db, schema } = await import('@/lib/db');
+    const { eq } = await import('drizzle-orm');
+    const rows = await db.select().from(schema.projects).where(eq(schema.projects.name, projectName)).limit(1);
+    const projectRow = rows[0] ?? null;
+    broker = await prepareBrokerRun({
+      jobId: job.id,
+      projectOrigins: {
+        qaUrl: projectRow?.qaUrl ?? null,
+        devServerReadyUrl: projectRow?.devServerReadyUrl ?? null,
+        website: projectRow?.website ?? null,
+      },
+      provider,
+    });
+    if (broker) {
+      mergedEnv = { ...cliEnv, ...broker.env };
+    }
+  } catch (e) {
+    console.warn(`[terminal-run] broker prep failed for ${job.id}:`, e);
+  }
+
   try {
     const pid = await startJob(
       job.id,
       cmd,
       prompt,
       projPath,
-      { env: cliEnv }
+      { env: mergedEnv, cleanup: broker?.cleanup }
     );
     job.pid = pid;
   } catch (e: unknown) {

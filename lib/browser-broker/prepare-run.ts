@@ -26,7 +26,9 @@ export async function prepareBrokerRun(
 
   let broker;
   try {
-    broker = await ensureBrokerRunning();
+    broker = await ensureBrokerRunning({
+      image: settings.browser_broker_image?.trim() || undefined,
+    });
   } catch (err) {
     console.error(
       '[browser-broker] start failed; agent will run without MCP injection:',
@@ -34,16 +36,24 @@ export async function prepareBrokerRun(
     );
     return null;
   }
-  const allowedOrigins = computeAllowedOrigins(input.projectOrigins);
-  const written = writeRunMcpConfig({
-    jobId: input.jobId,
-    brokerUrl: broker.url,
-    allowedOrigins,
-    provider: input.provider,
-  });
-  return {
-    env: written.env,
-    runDir: written.runDir,
-    cleanup: () => cleanupRunMcpConfig(input.jobId),
-  };
+  try {
+    const allowedOrigins = computeAllowedOrigins(input.projectOrigins);
+    const written = writeRunMcpConfig({
+      jobId: input.jobId,
+      brokerUrl: broker.url,
+      allowedOrigins,
+      provider: input.provider,
+    });
+    return {
+      env: written.env,
+      runDir: written.runDir,
+      cleanup: () => cleanupRunMcpConfig(input.jobId),
+    };
+  } catch (err) {
+    console.error(
+      '[browser-broker] per-run config failed; agent will run without MCP injection:',
+      err instanceof Error ? err.message : String(err),
+    );
+    return null;
+  }
 }

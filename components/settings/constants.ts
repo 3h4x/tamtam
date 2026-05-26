@@ -1,11 +1,138 @@
-export type SettingsFieldKey = 'workspace_path' | 'github_owner' | 'trusted_github_users' | 'claude_provider' | 'claude_bin' | 'lmstudio_model' | 'log_dir' | 'frequency' | 'daytime' | 'weekends' | 'base_prompt' | 'default_model' | 'permission_mode' | 'commit_style' | 'review_verdict_rules' | 'review_fix_max_iterations' | 'review_fix_backoff_seconds' | 'review_do_not_ship_action' | 'release_wall_clock_timeout_minutes' | 'legacy_completion_hook_release_after_run_enabled' | 'legacy_completion_hook_release_after_fix_ci_enabled' | 'legacy_completion_hook_auto_resume_enabled' | 'legacy_pipeline_lock_inline_drain_enabled' | 'legacy_completion_hook_agent_drain_enabled' | 'plain_test_phase_enabled' | 'agent_templates' | 'log_retention_count' | 'log_retention_days' | 'job_row_retention_days' | 'workflow_run_retention_days' | 'backup_retention_count' | 'backup_retention_weekly_count' | 'notification_webhook_url' | 'notification_webhook_secret' | 'notification_on_release_success' | 'notification_on_release_fail' | 'notification_on_release_aborted' | 'notification_on_fix_loop_exhausted' | 'notification_on_review_do_not_ship' | 'notification_on_agent_run_fail' | 'notification_throttle_window_seconds' | 'notification_throttle_overrides' | 'pipeline_model_review' | 'pipeline_model_fix' | 'pipeline_model_dod' | 'pipeline_model_commit' | 'project_sweep_enabled' | 'dirty_worktree_block_threshold' | 'incremental_review_enabled'
+export type SettingsFieldKey =
+  | 'workspace_path'
+  | 'github_owner'
+  | 'trusted_github_users'
+  | 'claude_provider'
+  | 'claude_bin'
+  | 'lmstudio_model'
+  | 'log_dir'
+  | 'frequency'
+  | 'daytime'
+  | 'weekends'
+  | 'base_prompt'
+  | 'default_model'
+  | 'permission_mode'
+  | 'commit_style'
+  | 'review_verdict_rules'
+  | 'review_fix_max_iterations'
+  | 'review_fix_backoff_seconds'
+  | 'review_do_not_ship_action'
+  | 'release_wall_clock_timeout_minutes'
+  | 'legacy_completion_hook_release_after_run_enabled'
+  | 'legacy_completion_hook_release_after_fix_ci_enabled'
+  | 'legacy_completion_hook_auto_resume_enabled'
+  | 'legacy_pipeline_lock_inline_drain_enabled'
+  | 'legacy_completion_hook_agent_drain_enabled'
+  | 'plain_test_phase_enabled'
+  | 'agent_templates'
+  | 'log_retention_count'
+  | 'log_retention_days'
+  | 'job_row_retention_days'
+  | 'workflow_run_retention_days'
+  | 'backup_retention_count'
+  | 'backup_retention_weekly_count'
+  | 'notification_webhook_url'
+  | 'notification_webhook_secret'
+  | 'notification_on_release_success'
+  | 'notification_on_release_fail'
+  | 'notification_on_release_aborted'
+  | 'notification_on_fix_loop_exhausted'
+  | 'notification_on_review_do_not_ship'
+  | 'notification_on_agent_run_fail'
+  | 'notification_throttle_window_seconds'
+  | 'notification_throttle_overrides'
+  | 'pipeline_model_review'
+  | 'pipeline_model_fix'
+  | 'pipeline_model_dod'
+  | 'pipeline_model_commit'
+  | 'project_sweep_enabled'
+  | 'dirty_worktree_block_threshold'
+  | 'incremental_review_enabled'
+  | 'browser_broker_enabled'
+  | 'browser_broker_image'
+  | 'tamtam_network_policy_strict'
 
+// `subsection` groups fields into named cards within their tab. The
+// SUBSECTIONS registry below maps each id → display metadata (title, grid
+// columns, default-collapsed). Fields without a subsection are rendered
+// in a fallback flat grid for backwards compat.
 export interface FieldDef {
   label: string
   help: string
   group: 'agent' | 'pipeline' | 'general'
+  subsection?: string
   advanced?: boolean
+  collapsible?: boolean
   span?: number
+}
+
+export interface SubsectionDef {
+  title: string
+  description?: string
+  cols?: number
+  /** Wrap the whole subsection in <details>, collapsed by default. */
+  defaultCollapsed?: boolean
+  /** Only render when "Advanced" toggle is on at the tab level. */
+  advanced?: boolean
+}
+
+export const SUBSECTIONS: Record<string, SubsectionDef> = {
+  // General tab
+  workspace: {
+    title: 'Workspace',
+    description: 'Where TamTam scans for git projects and writes logs',
+    cols: 3,
+  },
+  scheduling: {
+    title: 'Scheduling',
+    description: 'When scheduled agents are allowed to run',
+    cols: 3,
+  },
+  base_prompt: {
+    title: 'Base Prompt',
+    description: 'Prepended to every TamTam-spawned run, agent, and review',
+    cols: 1,
+    defaultCollapsed: true,
+  },
+  browser_broker: {
+    title: 'Browser Broker (Sandboxed Playwright)',
+    description: 'Docker-hosted Playwright MCP that sandboxed agents can drive via mcp__tamtam_browser__*. See docs/BROWSER-BROKER.md.',
+    cols: 2,
+  },
+
+  // Pipeline tab
+  review: {
+    title: 'Review & Verdict',
+    description: 'Verdict rules and the review→fix loop',
+    cols: 2,
+  },
+  commit: {
+    title: 'Commit',
+    description: 'Commit message style and dirty-worktree gating',
+    cols: 2,
+  },
+  pipeline_models: {
+    title: 'Per-Phase Model Tiers',
+    description: 'Override the workspace default tier per pipeline phase',
+    cols: 2,
+  },
+  release_ops: {
+    title: 'Release Limits',
+    description: 'Timeouts and background workers around release runs',
+    cols: 2,
+  },
+  retention: {
+    title: 'Retention',
+    description: 'How long log files and run history are kept',
+    cols: 2,
+    defaultCollapsed: true,
+  },
+  legacy: {
+    title: 'Legacy Migration Switches',
+    description: 'Runtime kill switches for the workflow-event migration. Disable while routing the matching events through the durable path. Leave on unless you know what you are doing.',
+    cols: 2,
+    defaultCollapsed: true,
+  },
 }
 
 export const FIELDS: Record<SettingsFieldKey, FieldDef> = {
@@ -13,12 +140,22 @@ export const FIELDS: Record<SettingsFieldKey, FieldDef> = {
     label: 'Workspace Path',
     help: 'Root directory containing your git projects',
     group: 'general',
+    subsection: 'workspace',
     span: 2,
   },
   github_owner: {
     label: 'GitHub Owner',
     help: 'Default GitHub org/user for repos without an explicit remote',
     group: 'general',
+    subsection: 'workspace',
+    span: 1,
+  },
+  log_dir: {
+    label: 'Log Directory',
+    help: 'Directory where job logs are stored',
+    group: 'general',
+    subsection: 'workspace',
+    advanced: true,
     span: 1,
   },
   trusted_github_users: {
@@ -27,28 +164,63 @@ export const FIELDS: Record<SettingsFieldKey, FieldDef> = {
     group: 'general',
     span: 2,
   },
-  claude_provider: {
-    label: 'Agent CLI Provider',
-    help: 'Choose the Claude-compatible backend TamTam invokes for runs',
-    group: 'agent',
-    span: 1,
-  },
   frequency: {
     label: 'Base Frequency',
     help: 'How often scheduled agents run, e.g. "1h", "30m"',
     group: 'general',
+    subsection: 'scheduling',
     span: 1,
   },
   daytime: {
     label: 'Allowed Hours',
     help: 'Time window when agents are permitted to run',
     group: 'general',
+    subsection: 'scheduling',
     span: 1,
   },
   weekends: {
     label: 'Weekend Runs',
     help: 'Whether agents run on Saturdays and Sundays',
     group: 'general',
+    subsection: 'scheduling',
+    span: 1,
+  },
+  base_prompt: {
+    label: 'Base Prompt',
+    help: 'Prepended to every Claude invocation — runs, agents, and reviews',
+    group: 'general',
+    subsection: 'base_prompt',
+    span: 1,
+    collapsible: true,
+  },
+  browser_broker_enabled: {
+    label: 'Browser Broker',
+    help: 'Spin up a shared @playwright/mcp container so sandboxed agents can drive Chromium without escaping their sandbox.',
+    group: 'general',
+    subsection: 'browser_broker',
+    span: 1,
+  },
+  tamtam_network_policy_strict: {
+    label: 'Strict Network Policy (macOS)',
+    help: 'Wrap each agent CLI in sandbox-exec with a loopback-only seatbelt profile. Currently macOS only; blocks the LLM API call unless paired with hostname allowlisting (v2). Default off.',
+    group: 'general',
+    subsection: 'browser_broker',
+    span: 1,
+  },
+  browser_broker_image: {
+    label: 'Broker Image',
+    help: 'Docker image tag for the broker container. Defaults to the pinned Microsoft Playwright base image.',
+    group: 'general',
+    subsection: 'browser_broker',
+    span: 2,
+    advanced: true,
+  },
+
+  // Agent-group fields are rendered by CliTab — not by GROUPS auto-render.
+  claude_provider: {
+    label: 'Agent CLI Provider',
+    help: 'Choose the Claude-compatible backend TamTam invokes for runs',
+    group: 'agent',
     span: 1,
   },
   claude_bin: {
@@ -75,121 +247,184 @@ export const FIELDS: Record<SettingsFieldKey, FieldDef> = {
     group: 'agent',
     span: 1,
   },
-  log_dir: {
-    label: 'Log Directory',
-    help: 'Directory where job logs are stored',
-    group: 'general',
-    advanced: true,
-    span: 1,
-  },
-  base_prompt: {
-    label: 'Base Prompt',
-    help: 'Prepended to every Claude invocation — runs, agents, and reviews',
-    group: 'agent',
-    span: 2,
-  },
-  commit_style: {
-    label: 'Commit Message Style',
-    help: 'Style guide injected into the prompt when generating commit titles in the Push panel',
-    group: 'pipeline',
-    span: 2,
-  },
+
+  // Pipeline: review
   review_verdict_rules: {
     label: 'Review Verdict Rules',
     help: 'Rules that drive LGTM / NEEDS ATTENTION / DO NOT SHIP decisions in code reviews',
     group: 'pipeline',
+    subsection: 'review',
     span: 2,
+    collapsible: true,
   },
   review_fix_max_iterations: {
     label: 'Review Fix Loop Iterations',
-    help: 'How many review→fix verification rounds to attempt per release. Positive integers cap the loop, then file a follow-up issue with unresolved findings and ship the partial work. Set 0 for unlimited. Default 3.',
+    help: 'How many review→fix verification rounds to attempt per release. ∞ (default) lets the loop run until LGTM or the release wall-clock timeout aborts it. A finite cap caps the loop, then files a follow-up issue with unresolved findings and ships the partial work.',
     group: 'pipeline',
-    span: 1,
-  },
-  review_fix_backoff_seconds: {
-    label: 'Review Fix Loop Backoff (seconds)',
-    help: 'Base delay before each review→fix iteration past the third. Doubles each round (30→60→120→240→capped at 300). 0 disables. Useful with unlimited iterations so a slow-converging loop doesn\'t burn tokens/CI at full speed.',
-    group: 'pipeline',
+    subsection: 'review',
     span: 1,
   },
   review_do_not_ship_action: {
     label: 'Do Not Ship Action',
     help: 'Policy for DO NOT SHIP review verdicts. fix (default) routes back through the review fix loop; pass files a follow-up issue and continues to commit; abort stops the release.',
     group: 'pipeline',
+    subsection: 'review',
     span: 1,
   },
+  incremental_review_enabled: {
+    label: 'Incremental Review',
+    help: 'After an LGTM verdict, narrow the next review diff to commits since the last LGTM (uses a refs/tamtam/reviewed/<branch> ref).',
+    group: 'pipeline',
+    subsection: 'review',
+    span: 1,
+  },
+  review_fix_backoff_seconds: {
+    label: 'Review Fix Loop Backoff (seconds)',
+    help: 'Base delay before each review→fix iteration past the third. Doubles each round (30→60→120→240→capped at 300). 0 disables. Useful with unlimited iterations so a slow-converging loop doesn\'t burn tokens/CI at full speed.',
+    group: 'pipeline',
+    subsection: 'review',
+    advanced: true,
+    span: 1,
+  },
+
+  // Pipeline: commit
+  commit_style: {
+    label: 'Commit Message Style',
+    help: 'Style guide injected into the prompt when generating commit titles in the Push panel',
+    group: 'pipeline',
+    subsection: 'commit',
+    span: 2,
+    collapsible: true,
+  },
+  dirty_worktree_block_threshold: {
+    label: 'Dirty Worktree Block Threshold',
+    help: 'Block agent runs when the project has at least this many uncommitted files (incl. untracked). Default 1 blocks on any dirty worktree; set higher to allow small WIP, 0 to disable.',
+    group: 'pipeline',
+    subsection: 'commit',
+    span: 1,
+  },
+
+  // Pipeline: per-phase model tiers
+  pipeline_model_review: {
+    label: 'Review Tier',
+    help: 'Capability tier used for code review. "Default" uses the workspace Default Model Tier.',
+    group: 'pipeline',
+    subsection: 'pipeline_models',
+    span: 1,
+  },
+  pipeline_model_fix: {
+    label: 'Fix Tier',
+    help: 'Capability tier used for the fix step. "Default" uses the workspace Default Model Tier.',
+    group: 'pipeline',
+    subsection: 'pipeline_models',
+    span: 1,
+  },
+  pipeline_model_dod: {
+    label: 'DoD Tier',
+    help: 'Capability tier used for DoD verification. Empty defaults to Fast — verification is read-only and cheap.',
+    group: 'pipeline',
+    subsection: 'pipeline_models',
+    span: 1,
+  },
+  pipeline_model_commit: {
+    label: 'Commit Message Tier',
+    help: 'Capability tier used to generate commit messages. Empty defaults to Fast — short well-scoped task.',
+    group: 'pipeline',
+    subsection: 'pipeline_models',
+    span: 1,
+  },
+
+  // Pipeline: release limits / boot toggles
   release_wall_clock_timeout_minutes: {
     label: 'Release Timeout (minutes)',
     help: 'Overall wall-clock budget for a Release run before the recovery sweep aborts it as timed out. Default 60.',
     group: 'pipeline',
+    subsection: 'release_ops',
     span: 1,
   },
-  legacy_completion_hook_release_after_run_enabled: {
-    label: 'Legacy Release-After-Run Hook',
-    help: 'Runtime kill switch for the legacy completion hook that starts release-after-run. Disable while routing release triggers through the workflow event path.',
+  project_sweep_enabled: {
+    label: 'Project Sweep',
+    help: 'Run the background project sweep worker when TamTam starts.',
     group: 'pipeline',
-    span: 1,
-  },
-  legacy_completion_hook_release_after_fix_ci_enabled: {
-    label: 'Legacy Release-After-Fix-CI Hook',
-    help: 'Runtime kill switch for the legacy completion hook that starts release-after-fix-CI. Disable while routing fix-CI triggers through the workflow event path.',
-    group: 'pipeline',
-    span: 1,
-  },
-  legacy_completion_hook_auto_resume_enabled: {
-    label: 'Legacy Auto-Resume Hook',
-    help: 'Runtime kill switch for the legacy completion hook that starts auto-resume. Disable while routing auto-resume triggers through the workflow event path.',
-    group: 'pipeline',
-    span: 1,
-  },
-  legacy_pipeline_lock_inline_drain_enabled: {
-    label: 'Legacy Pipeline Lock Drain',
-    help: 'Runtime kill switch for inline pending-release and queued-agent draining after a pipeline lock is released. Disable while routing lock-release drains through the durable event path.',
-    group: 'pipeline',
-    span: 1,
-  },
-  legacy_completion_hook_agent_drain_enabled: {
-    label: 'Legacy Agent Queue Drain Hook',
-    help: 'Runtime kill switch for the legacy completion hook that drains queued agent runs. Disable while routing agent queue drains through the workflow event path.',
-    group: 'pipeline',
+    subsection: 'release_ops',
     span: 1,
   },
   plain_test_phase_enabled: {
     label: 'Plain Test Phase',
     help: 'Run the release test phase as the detected shell test command instead of launching a Claude-driven test agent. Keep disabled while the deterministic path bakes.',
     group: 'pipeline',
+    subsection: 'release_ops',
     span: 1,
   },
-  agent_templates: {
-    label: 'Agent Templates',
-    help: 'JSON array of custom agent templates (managed via the Templates tab)',
-    group: 'templates' as never,
-    span: 2,
-  },
+
+  // Pipeline: retention
   log_retention_count: {
     label: 'Log Retention (runs)',
     help: 'Keep log files for the last N finished runs per project. Older log files are deleted; the run row stays in history.',
     group: 'pipeline',
+    subsection: 'retention',
     span: 1,
   },
   log_retention_days: {
     label: 'Log Retention (days)',
     help: 'Delete log files for runs older than this many days. Set to 0 to disable age-based pruning.',
     group: 'pipeline',
+    subsection: 'retention',
     span: 1,
   },
   job_row_retention_days: {
     label: 'Run History Retention (days)',
     help: 'Nightly cleanup: delete run DB rows older than this many days. Set to 0 to disable.',
     group: 'pipeline',
+    subsection: 'retention',
     span: 1,
   },
   workflow_run_retention_days: {
     label: 'Workflow Trace Retention (days)',
     help: 'Nightly cleanup: delete completed workflow runtime traces older than this many days. Set to 0 to disable.',
     group: 'pipeline',
+    subsection: 'retention',
     span: 1,
   },
+
+  // Pipeline: legacy migration switches
+  legacy_completion_hook_release_after_run_enabled: {
+    label: 'Legacy Release-After-Run Hook',
+    help: 'Runtime kill switch for the legacy completion hook that starts release-after-run. Disable while routing release triggers through the workflow event path.',
+    group: 'pipeline',
+    subsection: 'legacy',
+    span: 1,
+  },
+  legacy_completion_hook_release_after_fix_ci_enabled: {
+    label: 'Legacy Release-After-Fix-CI Hook',
+    help: 'Runtime kill switch for the legacy completion hook that starts release-after-fix-CI. Disable while routing fix-CI triggers through the workflow event path.',
+    group: 'pipeline',
+    subsection: 'legacy',
+    span: 1,
+  },
+  legacy_completion_hook_auto_resume_enabled: {
+    label: 'Legacy Auto-Resume Hook',
+    help: 'Runtime kill switch for the legacy completion hook that starts auto-resume. Disable while routing auto-resume triggers through the workflow event path.',
+    group: 'pipeline',
+    subsection: 'legacy',
+    span: 1,
+  },
+  legacy_pipeline_lock_inline_drain_enabled: {
+    label: 'Legacy Pipeline Lock Drain',
+    help: 'Runtime kill switch for inline pending-release and queued-agent draining after a pipeline lock is released. Disable while routing lock-release drains through the durable event path.',
+    group: 'pipeline',
+    subsection: 'legacy',
+    span: 1,
+  },
+  legacy_completion_hook_agent_drain_enabled: {
+    label: 'Legacy Agent Queue Drain Hook',
+    help: 'Runtime kill switch for the legacy completion hook that drains queued agent runs. Disable while routing agent queue drains through the workflow event path.',
+    group: 'pipeline',
+    subsection: 'legacy',
+    span: 1,
+  },
+
+  // Other group: 'pipeline' kept for back-compat — fields rendered by their own tabs/components.
   backup_retention_count: {
     label: 'Backup Retention (files)',
     help: 'Keep this many newest Postgres backup files after each successful backup. Set to 0 to prune all older backups after each run while still keeping the newly created backup.',
@@ -201,6 +436,13 @@ export const FIELDS: Record<SettingsFieldKey, FieldDef> = {
     help: 'Also keep one older backup per week for this many weeks after the newest backups. Set to 0 to disable weekly retention.',
     group: 'pipeline',
     span: 1,
+  },
+
+  agent_templates: {
+    label: 'Agent Templates',
+    help: 'JSON array of custom agent templates (managed via the Templates tab)',
+    group: 'templates' as never,
+    span: 2,
   },
   notification_webhook_url: {
     label: 'Notification Webhook URL',
@@ -262,48 +504,6 @@ export const FIELDS: Record<SettingsFieldKey, FieldDef> = {
     group: 'notifications' as never,
     span: 1,
   },
-  pipeline_model_review: {
-    label: 'Review Tier',
-    help: 'Capability tier used for code review. "Default" uses the workspace Default Model Tier.',
-    group: 'pipeline',
-    span: 1,
-  },
-  pipeline_model_fix: {
-    label: 'Fix Tier',
-    help: 'Capability tier used for the fix step. "Default" uses the workspace Default Model Tier.',
-    group: 'pipeline',
-    span: 1,
-  },
-  pipeline_model_dod: {
-    label: 'DoD Tier',
-    help: 'Capability tier used for DoD verification. Empty defaults to Fast — verification is read-only and cheap.',
-    group: 'pipeline',
-    span: 1,
-  },
-  pipeline_model_commit: {
-    label: 'Commit Message Tier',
-    help: 'Capability tier used to generate commit messages. Empty defaults to Fast — short well-scoped task.',
-    group: 'pipeline',
-    span: 1,
-  },
-  project_sweep_enabled: {
-    label: 'Project Sweep',
-    help: 'Run the background project sweep worker when TamTam starts.',
-    group: 'pipeline',
-    span: 1,
-  },
-  dirty_worktree_block_threshold: {
-    label: 'Dirty Worktree Block Threshold',
-    help: 'Block agent runs when the project has at least this many uncommitted files (incl. untracked). Default 1 blocks on any dirty worktree; set higher to allow small WIP, 0 to disable.',
-    group: 'pipeline',
-    span: 1,
-  },
-  incremental_review_enabled: {
-    label: 'Incremental Review',
-    help: 'After an LGTM verdict, narrow the next review diff to commits since the last LGTM (uses a refs/tamtam/reviewed/<branch> ref).',
-    group: 'pipeline',
-    span: 1,
-  },
 }
 
 export const DEFAULTS: Record<SettingsFieldKey, string> = {
@@ -326,7 +526,7 @@ export const DEFAULTS: Record<SettingsFieldKey, string> = {
 - NEEDS ATTENTION when you have at least one finding but nothing that risks data loss, security regressions, or breakage in production. Orphaned code, dead imports, missing imports that happen to compile, hardcoded strings that should use env vars, non-ideal UX state leaks, stylistic inconsistencies — all NEEDS ATTENTION.
 - DO NOT SHIP when there is a real risk of breakage, data loss, security regression, or a test that hides behavior.
 - If LGTM, just confirm the changes look good and add nothing else.`,
-  review_fix_max_iterations: '3',
+  review_fix_max_iterations: '0',
   review_fix_backoff_seconds: '0',
   review_do_not_ship_action: 'fix',
   release_wall_clock_timeout_minutes: '60',
@@ -360,10 +560,13 @@ export const DEFAULTS: Record<SettingsFieldKey, string> = {
   project_sweep_enabled: 'false',
   dirty_worktree_block_threshold: '1',
   incremental_review_enabled: 'true',
+  browser_broker_enabled: 'false',
+  browser_broker_image: 'mcr.microsoft.com/playwright:v1.59.1-noble',
+  tamtam_network_policy_strict: 'false',
 }
 
 const FIELD_BASE = 'w-full h-10 px-3 py-2 bg-bg-primary text-text-primary border border-border rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-accent/30 focus:border-accent transition-colors'
 export const SELECT_CLASS = `${FIELD_BASE} appearance-none cursor-pointer bg-no-repeat bg-[right_0.6rem_center] pr-9 bg-[length:1rem] bg-[image:url("data:image/svg+xml;utf8,%3Csvg%20xmlns%3D%27http%3A%2F%2Fwww.w3.org%2F2000%2Fsvg%27%20viewBox%3D%270%200%2024%2024%27%20fill%3D%27none%27%20stroke%3D%27%23888%27%20stroke-width%3D%272%27%20stroke-linecap%3D%27round%27%20stroke-linejoin%3D%27round%27%3E%3Cpath%20d%3D%27M6%209l6%206%206-6%27%2F%3E%3C%2Fsvg%3E")]`
 export const INPUT_CLASS  = `${FIELD_BASE} font-mono placeholder:text-text-tertiary`
-export const COL_SPAN: Record<number, string> = { 1: 'col-span-1', 2: 'col-span-2', 3: 'col-span-3' }
-export const GRID_COLS: Record<number, string> = { 2: 'grid-cols-2', 3: 'grid-cols-3' }
+export const COL_SPAN: Record<number, string> = { 1: 'col-span-1', 2: 'col-span-2', 3: 'col-span-3', 4: 'col-span-4' }
+export const GRID_COLS: Record<number, string> = { 2: 'grid-cols-2', 3: 'grid-cols-3', 4: 'grid-cols-4' }
