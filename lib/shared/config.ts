@@ -123,6 +123,10 @@ export interface TamTamConfig {
   browser_broker_enabled: boolean;
   browser_broker_image: string;
   tamtam_network_policy_strict: boolean;
+  // --- Orchestrator (budget allocator) ---
+  orchestrator_enabled: boolean;
+  orchestrator_boost_margin_pct: number;
+  orchestrator_max_boosts_per_hour: number;
 }
 
 const DEFAULTS: TamTamConfig = {
@@ -231,6 +235,17 @@ const DEFAULTS: TamTamConfig = {
   browser_broker_enabled: false,
   browser_broker_image: 'mcr.microsoft.com/playwright:v1.59.1-noble',
   tamtam_network_policy_strict: false,
+  // Off by default — needs explicit opt-in. When on, the orchestrator-tick
+  // graphile task burns spare pace headroom by pushing bonus agent fires at
+  // healthy projects every 5 min, capped per-project.
+  orchestrator_enabled: false,
+  // Only boost when the binding provider is at least this many percentage
+  // points under the on-pace line. Smaller = more aggressive; larger = more
+  // conservative. 5pp leaves room for natural pace fluctuation.
+  orchestrator_boost_margin_pct: 5,
+  // Per-project rolling-hour cap. Two extra fires/hour over the existing
+  // schedule is meaningful but not a token furnace.
+  orchestrator_max_boosts_per_hour: 2,
 };
 
 let _cache: { config: TamTamConfig; time: number } | null = null;
@@ -488,6 +503,15 @@ export function buildConfigFromSettingsMap(map: Record<string, string>): TamTamC
     browser_broker_enabled: map.browser_broker_enabled === 'true',
     browser_broker_image: map.browser_broker_image ?? DEFAULTS.browser_broker_image,
     tamtam_network_policy_strict: map.tamtam_network_policy_strict === 'true',
+    orchestrator_enabled: map.orchestrator_enabled === 'true',
+    orchestrator_boost_margin_pct: parseIntOr(
+      map.orchestrator_boost_margin_pct,
+      DEFAULTS.orchestrator_boost_margin_pct,
+    ),
+    orchestrator_max_boosts_per_hour: parseIntOr(
+      map.orchestrator_max_boosts_per_hour,
+      DEFAULTS.orchestrator_max_boosts_per_hour,
+    ),
   };
   return config;
 }

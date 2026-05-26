@@ -1,0 +1,209 @@
+import { describe, expect, it } from 'vitest';
+import {
+  decideBoosts,
+  pruneBoostHistory,
+  recordBoosts,
+  type BoostAgentInput,
+  type BoostHistoryInput,
+  type BoostInput,
+  type BoostPaceInput,
+  type BoostProjectInput,
+} from '@/lib/orchestrator/budget-allocator';
+
+const NOW = 1_700_000_000_000;
+
+function makeAgent(overrides: Partial<BoostAgentInput> = {}): BoostAgentInput {
+  return {
+    id: 'agent-1',
+    name: 'improve',
+    project: 'borged',
+    enabled: true,
+    schedule: '15m',
+    lastDispatchMs: null,
+    ...overrides,
+  };
+}
+
+function makeProject(overrides: Partial<BoostProjectInput> = {}): BoostProjectInput {
+  return {
+    project: 'borged',
+    status: 'shipping',
+    paused: false,
+    releaseRunning: false,
+    lastPushAt: 1_699_999_000,
+    ...overrides,
+  };
+}
+
+function makeInput(overrides: Partial<BoostInput> = {}): BoostInput {
+  const pace: BoostPaceInput = { status: 'under_pace', marginPct: 20 };
+  return {
+    pace,
+    projects: [makeProject()],
+    agents: [makeAgent()],
+    history: { byProject: new Map() },
+    settings: { marginPct: 5, maxBoostsPerHour: 2 },
+    nowMs: NOW,
+    ...overrides,
+  };
+}
+
+describe('decideBoosts', () => {
+  it('returns no boosts when pace is on_pace or over_pace', () => {
+    expect(decideBoosts(makeInput({ pace: { status: 'on_pace', marginPct: 0 } }))).toEqual([]);
+    expect(decideBoosts(makeInput({ pace: { status: 'over_pace', marginPct: -2 } }))).toEqual([]);
+    expect(decideBoosts(makeInput({ pace: { status: 'paused', marginPct: 0 } }))).toEqual([]);
+    expect(decideBoosts(makeInput({ pace: { status: 'unknown', marginPct: 0 } }))).toEqual([]);
+  });
+
+  it('returns no boosts when margin is below the configured threshold', () => {
+    const r = decideBoosts(makeInput({
+      pace: { status: 'under_pace', marginPct: 3 },
+      settings: { marginPct: 5, maxBoostsPerHour: 2 },
+    }));
+    expect(r).toEqual([]);
+  });
+
+  it('boosts a shipping project with eligible agent when pace has headroom', () => {
+    const r = decideBoosts(makeInput());
+    expect(r).toHaveLength(1);
+    expect(r[0]).toMatchObject({ project: 'borged', agentId: 'agent-1', agentName: 'improve' });
+  });
+
+  it('does not boost a paused project', () => {
+    const r = decideBoosts(makeInput({ projects: [makeProject({ paused: true })] }));
+    expect(r).toEqual([]);
+  });
+
+  it('does not boost while a release is running for the project', () => {
+    const r = decideBoosts(makeInput({ projects: [makeProject({ releaseRunning: true })] }));
+    expect(r).toEqual([]);
+  });
+
+  it('only boosts shipping or active project statuses (skips idle/attention/releasing)', () => {
+    for (const status of ['idle', 'releasing', 'attention', 'paused']) {
+      const r = decideBoosts(makeInput({ projects: [makeProject({ status })] }));
+      expect(r, `status=${status} should not boost`).toEqual([]);
+    }
+    const active = decideBoosts(makeInput({ projects: [makeProject({ status: 'active' })] }));
+    expect(active).toHaveLength(1);
+  });
+
+  it('caps boosts at maxBoostsPerHour per project within the rolling window', () => {
+    const history: BoostHistoryInput = {
+      byProject: new Map([
+        ['borged', [NOW - 10 * 60 * 1000, NOW - 5 * 60 * 1000]],
+      ]),
+    };
+    const r = decideBoosts(makeInput({
+      history,
+      settings: { marginPct: 5, maxBoostsPerHour: 2 },
+    }));
+    expect(r).toEqual([]);
+  });
+
+  it('ignores history entries older than the rolling window', () => {
+    const history: BoostHistoryInput = {
+      byProject: new Map([
+        // 90 minutes ago — outside the 60-min window
+        ['borged', [NOW - 90 * 60 * 1000, NOW - 80 * 60 * 1000]],
+      ]),
+    };
+    const r = decideBoosts(makeInput({
+      history,
+      settings: { marginPct: 5, maxBoostsPerHour: 2 },
+    }));
+    expect(r).toHaveLength(1);
+  });
+
+  it('skips agents that fired in the last 5 minutes', () => {
+    const r = decideBoosts(makeInput({
+      agents: [makeAgent({ lastDispatchMs: NOW - 2 * 60 * 1000 })],
+    }));
+    expect(r).toEqual([]);
+  });
+
+  it('picks the agent with the oldest lastDispatchMs', () => {
+    const r = decideBoosts(makeInput({
+      agents: [
+        makeAgent({ id: 'a-recent', name: 'recent', lastDispatchMs: NOW - 10 * 60 * 1000 }),
+        makeAgent({ id: 'a-old', name: 'old', lastDispatchMs: NOW - 60 * 60 * 1000 }),
+        makeAgent({ id: 'a-never', name: 'never', lastDispatchMs: null }),
+      ],
+    }));
+    expect(r).toHaveLength(1);
+    expect(r[0].agentId).toBe('a-never');
+  });
+
+  it('skips disabled agents and agents without a schedule', () => {
+    const r = decideBoosts(makeInput({
+      agents: [
+        makeAgent({ id: 'a-disabled', enabled: false }),
+        makeAgent({ id: 'a-no-schedule', schedule: null }),
+        makeAgent({ id: 'a-empty-schedule', schedule: '   ' }),
+      ],
+    }));
+    expect(r).toEqual([]);
+  });
+
+  it('emits one boost per eligible project independently', () => {
+    const r = decideBoosts(makeInput({
+      projects: [
+        makeProject({ project: 'borged' }),
+        makeProject({ project: 'other', status: 'active' }),
+        makeProject({ project: 'sleepy', status: 'idle' }),
+      ],
+      agents: [
+        makeAgent({ id: 'a-borged', project: 'borged' }),
+        makeAgent({ id: 'a-other', project: 'other' }),
+        makeAgent({ id: 'a-sleepy', project: 'sleepy' }),
+      ],
+    }));
+    expect(r).toHaveLength(2);
+    expect(r.map((d) => d.project).sort()).toEqual(['borged', 'other']);
+  });
+
+  it('returns nothing when maxBoostsPerHour is zero (kill switch via setting)', () => {
+    const r = decideBoosts(makeInput({
+      settings: { marginPct: 5, maxBoostsPerHour: 0 },
+    }));
+    expect(r).toEqual([]);
+  });
+});
+
+describe('pruneBoostHistory', () => {
+  it('drops entries older than the rolling window and keeps recent ones', () => {
+    const before: BoostHistoryInput = {
+      byProject: new Map([
+        ['borged', [NOW - 90 * 60 * 1000, NOW - 30 * 60 * 1000, NOW - 5 * 60 * 1000]],
+        ['stale', [NOW - 120 * 60 * 1000]],
+      ]),
+    };
+    const after = pruneBoostHistory(before, NOW);
+    expect(after.byProject.get('borged')).toEqual([NOW - 30 * 60 * 1000, NOW - 5 * 60 * 1000]);
+    expect(after.byProject.has('stale')).toBe(false);
+  });
+});
+
+describe('recordBoosts', () => {
+  it('appends timestamps per decision without mutating the input map', () => {
+    const before: BoostHistoryInput = {
+      byProject: new Map([['borged', [NOW - 10 * 60 * 1000]]]),
+    };
+    const after = recordBoosts(before, [
+      { project: 'borged', agentId: 'a', agentName: 'n', reason: 'r' },
+      { project: 'other', agentId: 'b', agentName: 'm', reason: 'r' },
+    ], NOW);
+    // Original untouched
+    expect(before.byProject.get('borged')).toEqual([NOW - 10 * 60 * 1000]);
+    // New map has appended entries
+    expect(after.byProject.get('borged')).toEqual([NOW - 10 * 60 * 1000, NOW]);
+    expect(after.byProject.get('other')).toEqual([NOW]);
+  });
+
+  it('returns the input unchanged when there are no decisions', () => {
+    const before: BoostHistoryInput = { byProject: new Map() };
+    const after = recordBoosts(before, [], NOW);
+    expect(after).toBe(before);
+  });
+});

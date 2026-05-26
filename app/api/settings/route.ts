@@ -238,6 +238,9 @@ const SETTING_KEYS = [
   'browser_broker_enabled',
   'browser_broker_image',
   'tamtam_network_policy_strict',
+  'orchestrator_enabled',
+  'orchestrator_boost_margin_pct',
+  'orchestrator_max_boosts_per_hour',
 ] as const;
 
 function serializeSettingValue(key: string, value: unknown): string {
@@ -396,9 +399,13 @@ function validateAndSerializeSettingValue(
     key === 'legacy_completion_hook_agent_drain_enabled' ||
     key === 'plain_test_phase_enabled' ||
     key === 'browser_broker_enabled' ||
-    key === 'tamtam_network_policy_strict'
+    key === 'tamtam_network_policy_strict' ||
+    key === 'orchestrator_enabled'
   ) {
     return parseBooleanSetting(value, key);
+  }
+  if (key === 'orchestrator_boost_margin_pct' || key === 'orchestrator_max_boosts_per_hour') {
+    return parseNonNegativeIntegerSetting(value, key);
   }
 
   if (key === 'notification_throttle_window_seconds') {

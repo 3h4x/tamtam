@@ -17,6 +17,7 @@ const BOOLEAN_SELECT_FIELD_KEYS = new Set<SettingsFieldKey>([
   'plain_test_phase_enabled',
   'browser_broker_enabled',
   'tamtam_network_policy_strict',
+  'orchestrator_enabled',
 ])
 
 const LONG_TEXT_KEYS = new Set<SettingsFieldKey>(['base_prompt', 'commit_style', 'review_verdict_rules'])
@@ -115,7 +116,9 @@ export function SettingsField({
           <option value="">{(fieldKey === 'pipeline_model_dod' || fieldKey === 'pipeline_model_commit') ? 'Default (Fast)' : 'Default (workspace)'}</option>
           {MODEL_TIERS.map((model) => <option key={model} value={model}>{MODEL_LABELS[model]}</option>)}
         </select>
-      ) : fieldKey === 'review_fix_max_iterations' ? (
+      ) : fieldKey === 'review_fix_max_iterations'
+          || fieldKey === 'orchestrator_boost_margin_pct'
+          || fieldKey === 'orchestrator_max_boosts_per_hour' ? (
         <input
           type="number"
           min={0}

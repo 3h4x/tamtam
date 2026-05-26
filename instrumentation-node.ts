@@ -891,6 +891,57 @@ export async function registerNode(): Promise<void> {
               );
             },
           },
+          orchestratorTickDeps: {
+            loadConfig: async () => {
+              const { getSettings, initSettings } = await import('@/lib/shared/config');
+              await initSettings();
+              const s = getSettings();
+              if (!s.orchestrator_enabled) return null;
+              return {
+                marginPct: s.orchestrator_boost_margin_pct,
+                maxBoostsPerHour: s.orchestrator_max_boosts_per_hour,
+              };
+            },
+            loadBridge: async () => {
+              const baseUrl = process.env.TAMTAM_BASE_URL ?? 'http://localhost:1337';
+              const res = await fetch(`${baseUrl}/api/stats/bridge`);
+              if (!res.ok) throw new Error(`stats/bridge HTTP ${res.status}`);
+              return res.json();
+            },
+            loadAgents: async () => {
+              const { listEnabledScheduledAgents } = await import('@/lib/scheduling/internal-scheduler-helpers');
+              const { getAllAgentLastAttempts } = await import('@/lib/scheduling/agent-cron-state');
+              const [all, attempts] = await Promise.all([
+                listEnabledScheduledAgents(),
+                Promise.resolve(getAllAgentLastAttempts()),
+              ]);
+              return all.map((a) => ({
+                id: a.id,
+                name: a.name,
+                project: a.project,
+                enabled: a.enabled,
+                schedule: a.schedule ?? null,
+                lastDispatchMs: attempts.get(a.id)?.at ?? null,
+              }));
+            },
+            enqueueAgentFire: async (agentId, runAt) => {
+              await quickAddJob(
+                { connectionString },
+                'agent-cron',
+                { agentId },
+                { jobKey: `agent-cron-${agentId}`, jobKeyMode: 'replace', runAt, maxAttempts: 5 },
+              );
+            },
+            enqueueNextFire: async (runAt) => {
+              const { ORCHESTRATOR_TICK_JOB_KEY } = await import('@/lib/workflows/cron/orchestrator-tick-task');
+              await quickAddJob(
+                { connectionString },
+                'orchestrator-tick',
+                {},
+                { jobKey: ORCHESTRATOR_TICK_JOB_KEY, jobKeyMode: 'preserve_run_at', runAt, maxAttempts: 5 },
+              );
+            },
+          },
           dbBackupDeps: {
             createBackup: async () => {
               const {
@@ -969,7 +1020,14 @@ export async function registerNode(): Promise<void> {
           console.warn('[cron] seedProjectSweep failed:', err);
         }
 
-        console.log('[cron] graphile-worker cron pool started (agent-cron + system-cron + project-sweep)');
+        try {
+          const { seedOrchestratorTick } = await import('@/lib/workflows/cron/seed-orchestrator-tick');
+          await seedOrchestratorTick({ connectionString });
+        } catch (err) {
+          console.warn('[cron] seedOrchestratorTick failed:', err);
+        }
+
+        console.log('[cron] graphile-worker cron pool started (agent-cron + system-cron + project-sweep + orchestrator-tick)');
       } catch (err) {
         console.error('[cron] boot failed:', err);
       }

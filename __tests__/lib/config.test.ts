@@ -182,6 +182,9 @@ describe('config', () => {
         browser_broker_enabled: false,
         browser_broker_image: 'mcr.microsoft.com/playwright:v1.59.1-noble',
         tamtam_network_policy_strict: false,
+        orchestrator_enabled: false,
+        orchestrator_boost_margin_pct: 5,
+        orchestrator_max_boosts_per_hour: 2,
       });
     });
 
