@@ -1,6 +1,7 @@
 'use client'
 
 import { useCallback, useEffect, useState } from 'react'
+import { Button } from '@/components/ui/Button'
 import { Spinner } from '@/components/ui/Spinner'
 import { errMsg } from '@/lib/shared/types'
 import { fmtAbsolute } from '@/lib/shared/format-date'
@@ -167,7 +168,7 @@ export function JobsPauseToggle() {
         : 'Pause jobs'
 
   return (
-    <button
+    <Button
       type="button"
       role="switch"
       aria-checked={jobsPaused}
@@ -175,6 +176,7 @@ export function JobsPauseToggle() {
       title={title}
       aria-label={title}
       disabled={loading || saving || showRebuild}
+      disabledCursor="wait"
       className={`h-9 px-3 flex items-center justify-center gap-1.5 rounded-lg border transition-colors text-xs font-medium whitespace-nowrap ${
         showRebuild
           ? 'border-accent/60 bg-accent/10 text-accent cursor-wait'
@@ -189,6 +191,6 @@ export function JobsPauseToggle() {
         <Spinner size="md" shrink className="!h-3 !w-3 !border-[1.5px]" aria-hidden="true" />
       )}
       {label}
-    </button>
+    </Button>
   )
 }
