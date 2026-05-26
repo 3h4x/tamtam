@@ -109,6 +109,9 @@ interface SettingsMap {
   browser_broker_enabled: string
   browser_broker_image: string
   tamtam_network_policy_strict: string
+  orchestrator_enabled: string
+  orchestrator_boost_margin_pct: string
+  orchestrator_max_boosts_per_hour: string
 }
 
 const SETTINGS_DEFAULTS: SettingsMap = {
@@ -155,6 +158,9 @@ const SETTINGS_DEFAULTS: SettingsMap = {
   browser_broker_enabled: 'false',
   browser_broker_image: 'mcr.microsoft.com/playwright:v1.59.1-noble',
   tamtam_network_policy_strict: 'false',
+  orchestrator_enabled: 'false',
+  orchestrator_boost_margin_pct: '5',
+  orchestrator_max_boosts_per_hour: '2',
 }
 
 type TabId = 'general' | 'cli' | 'pipeline' | 'projects' | 'database' | 'templates' | 'notifications'
@@ -180,6 +186,7 @@ const TAB_LAYOUT: Partial<Record<TabId, TabLayoutEntry[]>> = {
     { kind: 'subsection', id: 'commit' },
     { kind: 'subsection', id: 'pipeline_models' },
     { kind: 'subsection', id: 'release_ops' },
+    { kind: 'subsection', id: 'orchestrator' },
     { kind: 'subsection', id: 'retention' },
     { kind: 'subsection', id: 'legacy' },
   ],

@@ -51,6 +51,9 @@ export type SettingsFieldKey =
   | 'browser_broker_enabled'
   | 'browser_broker_image'
   | 'tamtam_network_policy_strict'
+  | 'orchestrator_enabled'
+  | 'orchestrator_boost_margin_pct'
+  | 'orchestrator_max_boosts_per_hour'
 
 // `subsection` groups fields into named cards within their tab. The
 // SUBSECTIONS registry below maps each id → display metadata (title, grid
@@ -133,6 +136,11 @@ export const SUBSECTIONS: Record<string, SubsectionDef> = {
     cols: 2,
     defaultCollapsed: true,
   },
+  orchestrator: {
+    title: 'Orchestrator (Budget Allocator)',
+    description: 'When pace is under, push bonus agent fires at shipping projects every 5 min so spare token budget converts into shipped work instead of going unused. Off by default — opt-in.',
+    cols: 3,
+  },
 }
 
 export const FIELDS: Record<SettingsFieldKey, FieldDef> = {
@@ -205,6 +213,27 @@ export const FIELDS: Record<SettingsFieldKey, FieldDef> = {
     help: 'Wrap each agent CLI in sandbox-exec with a loopback-only seatbelt profile. Currently macOS only; blocks the LLM API call unless paired with hostname allowlisting (v2). Default off.',
     group: 'general',
     subsection: 'browser_broker',
+    span: 1,
+  },
+  orchestrator_enabled: {
+    label: 'Orchestrator',
+    help: 'Master switch. When on, the orchestrator-tick graphile cron fires every 5 min, looks at stats/bridge, and enqueues bonus agent runs on shipping projects whenever pace is under by at least the margin below. Skips paused, releasing, or stuck projects automatically.',
+    group: 'pipeline',
+    subsection: 'orchestrator',
+    span: 1,
+  },
+  orchestrator_boost_margin_pct: {
+    label: 'Boost margin (pp)',
+    help: 'Only push bonus fires when the binding provider has at least this many percentage points of headroom vs. the on-pace line. Smaller = more aggressive; larger = more conservative.',
+    group: 'pipeline',
+    subsection: 'orchestrator',
+    span: 1,
+  },
+  orchestrator_max_boosts_per_hour: {
+    label: 'Max boosts / project / hour',
+    help: 'Rolling-hour cap on bonus fires for any single project. Default 2 is two extra runs per hour over the existing schedule.',
+    group: 'pipeline',
+    subsection: 'orchestrator',
     span: 1,
   },
   browser_broker_image: {
@@ -563,6 +592,9 @@ export const DEFAULTS: Record<SettingsFieldKey, string> = {
   browser_broker_enabled: 'false',
   browser_broker_image: 'mcr.microsoft.com/playwright:v1.59.1-noble',
   tamtam_network_policy_strict: 'false',
+  orchestrator_enabled: 'false',
+  orchestrator_boost_margin_pct: '5',
+  orchestrator_max_boosts_per_hour: '2',
 }
 
 const FIELD_BASE = 'w-full h-10 px-3 py-2 bg-bg-primary text-text-primary border border-border rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-accent/30 focus:border-accent transition-colors'

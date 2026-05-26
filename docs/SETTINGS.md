@@ -159,6 +159,16 @@ All three are read live on each job (not cached), so changing them takes effect 
 | `review_do_not_ship_action` | enum `pass` \| `fix` \| `abort` | `fix` | What to do when a code review returns **DO NOT SHIP**. `fix` (default) routes through the same fix loop NEEDS ATTENTION uses (subject to `review_fix_max_iterations`). `pass` files a follow-up GitHub issue with the findings and continues to commit → push → mark-dod so the partial work still ships. `abort` keeps the legacy behavior of stopping the release immediately. |
 | `release_wall_clock_timeout_minutes` | number | `60` | Overall wall-clock budget for an active Release run. Each release meta-job stores `release_deadline_at`; the 30s probe sweep aborts expired releases with reason `wall_clock_timeout`. Per-project `.tamtam/config.yml` can override this with `pipeline.release_timeout_minutes`. |
 
+### Orchestrator
+
+The orchestrator budget allocator runs as a graphile-worker cron task (`orchestrator-tick`) every 5 minutes when enabled. It reads `/api/stats/bridge`, checks whether global pace is under the configured threshold, and then dispatches extra scheduled-agent fires for shipping or active projects while staying inside the per-project rolling-hour cap.
+
+| Key | Type | Default | Effect |
+|-----|------|---------|--------|
+| `orchestrator_enabled` | boolean | `false` | Master switch for the budget allocator cron |
+| `orchestrator_boost_margin_pct` | number | `5` | Minimum global pace headroom, in percentage points, required before the allocator can boost a project |
+| `orchestrator_max_boosts_per_hour` | number | `2` | Per-project rolling-hour cap on bonus fires |
+
 ### Worktree & Review Gates
 
 | Key | Type | Default | Effect |

@@ -330,6 +330,10 @@ a human or another explicit trigger starts a Release. For clean non-default
 branches with a ready-to-merge PR, the sweep can start `pr-wait`. The sweep
 does not dispatch release or `pr-wait` jobs while `jobs_paused` is enabled.
 
+### Orchestrator budget allocator
+
+When `orchestrator_enabled` is on, a separate `orchestrator-tick` graphile-worker job runs every 5 minutes. It reads the fleet pace and per-project shipping state from `/api/stats/bridge`, then enqueues bonus `agent-cron` fires for shipping or active projects while `globalPace.status === 'under_pace'` and the headroom exceeds `orchestrator_boost_margin_pct`. The per-project rolling-hour cap is controlled by `orchestrator_max_boosts_per_hour`. The tick self-reenqueues, so disabling the setting only stops boost decisions, not the singleton queue row.
+
 ### Pending-release recovery
 
 When a release trigger arrives while the project pipeline lock is held or jobs

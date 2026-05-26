@@ -18,6 +18,7 @@ import { createAgentCronTask, type AgentCronDeps, type AgentCronPayload } from '
 import { createSystemCronTask, type SystemCronDeps } from '@/lib/workflows/cron/system-cron-task';
 import { createProjectSweepTask, type ProjectSweepDeps } from '@/lib/workflows/cron/project-sweep-task';
 import { createDbBackupTask, type DbBackupDeps } from '@/lib/workflows/cron/db-backup-task';
+import { createOrchestratorTickTask, type OrchestratorTickDeps } from '@/lib/workflows/cron/orchestrator-tick-task';
 
 export interface StartCronWorkerOptions {
   connectionString: string;
@@ -29,6 +30,8 @@ export interface StartCronWorkerOptions {
   projectSweepDeps?: ProjectSweepDeps;
   /** Optional — when present, registers `db-backup` in the same pool. */
   dbBackupDeps?: DbBackupDeps;
+  /** Optional — when present, registers `orchestrator-tick` in the same pool. */
+  orchestratorTickDeps?: OrchestratorTickDeps;
   /** Lower than the workflow runtime's default (10) so cron tasks can't
    *  starve the queue if many fire concurrently. */
   concurrency?: number;
@@ -77,6 +80,9 @@ export async function startCronWorker(opts: StartCronWorkerOptions): Promise<Run
   }
   if (opts.dbBackupDeps) {
     taskList['db-backup'] = createDbBackupTask(opts.dbBackupDeps);
+  }
+  if (opts.orchestratorTickDeps) {
+    taskList['orchestrator-tick'] = createOrchestratorTickTask(opts.orchestratorTickDeps);
   }
 
   slot.startPromise = run({
