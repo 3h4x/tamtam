@@ -92,4 +92,46 @@ describe('computeGlobalPace', () => {
     expect(g.providers).toHaveLength(1);
     expect(g.bindingProvider).toBe('codex');
   });
+
+  it('skips windows with status=unknown when picking the binding constraint', () => {
+    // claude.5h has no msUntilReset → marginPct=0 status=unknown. A naive
+    // "lowest margin wins" would let it bind and zero out the global pace,
+    // hiding the real under_pace headroom on the other windows.
+    const g = computeGlobalPace([
+      {
+        provider: 'codex',
+        snapshot: {
+          fiveHour: { utilization: 1, msUntilReset: FIVE_HOUR_WINDOW_MS * 0.835 }, // +15ish under_pace
+          sevenDay: { utilization: 15, msUntilReset: pct(0.416) },                  // +26 under_pace
+        },
+      },
+      {
+        provider: 'claude',
+        snapshot: {
+          fiveHour: { utilization: 0, msUntilReset: null },                          // unknown — must be skipped
+          sevenDay: { utilization: 45, msUntilReset: pct(0.768) },                   // +31 under_pace
+        },
+      },
+    ]);
+    expect(g.status).toBe('under_pace');
+    expect(g.bindingProvider).toBe('codex');
+    expect(g.bindingWindow).toBe('5h');
+    expect(g.marginPct).not.toBe(0);
+    expect(g.marginPct).toBeGreaterThan(0);
+  });
+
+  it('returns unknown when every measured window is unknown', () => {
+    const g = computeGlobalPace([
+      {
+        provider: 'codex',
+        snapshot: {
+          fiveHour: { utilization: 0, msUntilReset: null },
+          sevenDay: { utilization: 0, msUntilReset: null },
+        },
+      },
+    ]);
+    expect(g.status).toBe('unknown');
+    expect(g.bindingProvider).toBeNull();
+    expect(g.marginPct).toBeNull();
+  });
 });

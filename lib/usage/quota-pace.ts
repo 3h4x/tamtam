@@ -132,6 +132,13 @@ export function computeGlobalPace(
     ];
     for (const [window, pace] of windows) {
       if (!pace) continue;
+      // A window with no time-elapsed data (msUntilReset missing → status
+      // 'unknown', paceMarginPct=0) isn't a real constraint — it just means we
+      // haven't observed usage in that bucket yet. Letting it bind would zero
+      // out marginPct and gate every consumer (orchestrator boosts, scheduler
+      // throttle) on a no-op signal. Skip it; binding falls through to the
+      // next-tightest measured window, or stays null if none exist.
+      if (pace.status === 'unknown') continue;
       if (
         !binding
         || pace.paceMarginPct < binding.pace.paceMarginPct
