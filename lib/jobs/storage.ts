@@ -87,13 +87,19 @@ export async function loadFromDb(): Promise<void> {
 // call site so existing helpers don't need to be made async.
 const inFlightSaves = new Map<string, Promise<void>>();
 
-export function saveToDb(job: JobData): void {
+export async function saveToDbAsync(job: JobData): Promise<void> {
   const prev = inFlightSaves.get(job.id) ?? Promise.resolve();
   const next = prev.then(() => doSaveToDb(job));
   inFlightSaves.set(job.id, next);
-  void next.finally(() => {
+  try {
+    await next;
+  } finally {
     if (inFlightSaves.get(job.id) === next) inFlightSaves.delete(job.id);
-  });
+  }
+}
+
+export function saveToDb(job: JobData): void {
+  void saveToDbAsync(job);
 }
 
 /** Block until any in-flight save for this job id has flushed. Lets

@@ -8,7 +8,7 @@ import { Spinner } from '@/components/ui/Spinner'
 import { useToast } from '@/components/Toast'
 import type { AgentTemplateRecord } from '@/components/SettingsPage'
 import { MODEL_TIERS, MODEL_LABELS, MODEL_DESCRIPTIONS, normalizeModelInput } from '@/lib/agents/model-aliases'
-import { resolveAgentPrerequisiteCommand } from '@/lib/agents/issue-cruncher'
+import { resolveAgentPrerequisiteCommand } from '@/lib/agents/prerequisites'
 import { CLI_PROVIDERS, type CliProvider } from '@/lib/usage/cli-providers'
 
 const MODELS = [...MODEL_TIERS]

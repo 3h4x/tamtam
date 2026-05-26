@@ -15,7 +15,18 @@ const BOOLEAN_SELECT_FIELD_KEYS = new Set<SettingsFieldKey>([
   'legacy_pipeline_lock_inline_drain_enabled',
   'legacy_completion_hook_agent_drain_enabled',
   'plain_test_phase_enabled',
+  'browser_broker_enabled',
+  'tamtam_network_policy_strict',
 ])
+
+const LONG_TEXT_KEYS = new Set<SettingsFieldKey>(['base_prompt', 'commit_style', 'review_verdict_rules'])
+
+function summarize(value: string, fallback: string): string {
+  const trimmed = (value ?? '').trim()
+  if (!trimmed) return fallback
+  const firstLine = trimmed.split(/\r?\n/)[0]
+  return firstLine.length > 90 ? `${firstLine.slice(0, 90)}…` : firstLine
+}
 
 export function SettingsField({
   fieldKey,
@@ -35,10 +46,37 @@ export function SettingsField({
     ? `<TamTam>/scripts/${provider === 'gemini' ? 'gemini-shim.js' : provider === 'lmstudio' ? 'lmstudio-shim.js' : provider === 'codex' ? 'codex-shim.js' : provider === 'deepagents' ? 'deepagents-shim.js' : 'claude-shim.js'}`
     : ''
 
+  if (LONG_TEXT_KEYS.has(fieldKey) && field.collapsible) {
+    const placeholderText = DEFAULTS[fieldKey] || ''
+    const preview = summarize(value, placeholderText ? summarize(placeholderText, '(empty)') : '(empty)')
+    return (
+      <details className={colSpanClass}>
+        <summary className="cursor-pointer list-none group">
+          <div className="flex items-baseline gap-2 mb-1.5">
+            <svg className="w-3 h-3 shrink-0 transition-transform group-open:rotate-90 text-text-tertiary"
+              fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2.5}>
+              <path strokeLinecap="round" strokeLinejoin="round" d="M9 5l7 7-7 7" />
+            </svg>
+            <span className="font-medium text-sm text-text-primary">{field.label}</span>
+            <span className="text-xs text-text-tertiary font-mono truncate">{preview}</span>
+          </div>
+        </summary>
+        <textarea
+          value={value}
+          onChange={(e) => onChange(fieldKey, e.target.value)}
+          placeholder={DEFAULTS[fieldKey]}
+          rows={fieldKey === 'review_verdict_rules' ? 8 : 3}
+          className="w-full px-3 py-2 bg-bg-primary text-text-primary border border-border rounded-lg font-mono text-xs focus:outline-none focus:ring-2 focus:ring-accent/30 focus:border-accent transition-colors placeholder:text-text-tertiary resize-y"
+        />
+        <p className="text-xs text-text-tertiary mt-1.5">{field.help}</p>
+      </details>
+    )
+  }
+
   return (
     <div className={colSpanClass}>
       <label className="block font-medium text-sm text-text-primary mb-1.5">{field.label}</label>
-      {fieldKey === 'base_prompt' || fieldKey === 'commit_style' || fieldKey === 'review_verdict_rules' ? (
+      {LONG_TEXT_KEYS.has(fieldKey) ? (
         <textarea
           value={value}
           onChange={(e) => onChange(fieldKey, e.target.value)}

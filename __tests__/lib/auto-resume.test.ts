@@ -1,4 +1,7 @@
-import { describe, it, expect, vi } from 'vitest';
+import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
+import { mkdtempSync, rmSync, writeFileSync } from 'fs';
+import { tmpdir } from 'os';
+import { join } from 'path';
 import {
   findSessionIdInLog,
   hasFinalResult,
@@ -82,5 +85,148 @@ describe('isAutoResumeEligible', () => {
   });
   it('accepts run kind', () => {
     expect(isAutoResumeEligible(jobOf({ kind: 'run' }), partialTail)).toBe(true);
+  });
+});
+
+describe('maybeAutoResume browser broker wiring', () => {
+  let maybeAutoResume: typeof import('@/lib/jobs/auto-resume').maybeAutoResume;
+  let resolveProjectPathMock: ReturnType<typeof vi.fn>;
+  let checkCliStartGateMock: ReturnType<typeof vi.fn>;
+  let prepareBrokerRunMock: ReturnType<typeof vi.fn>;
+  let startJobInProcessMock: ReturnType<typeof vi.fn>;
+  let createJobMock: ReturnType<typeof vi.fn>;
+  let updateJobMock: ReturnType<typeof vi.fn>;
+  let dbRows: Array<Record<string, unknown>>;
+  let cleanupMock: ReturnType<typeof vi.fn>;
+
+  beforeEach(async () => {
+    vi.resetModules();
+    resolveProjectPathMock = vi.fn().mockReturnValue('/path/to/proj');
+    checkCliStartGateMock = vi.fn().mockResolvedValue({ ok: true, provider: 'claude' });
+    cleanupMock = vi.fn();
+    prepareBrokerRunMock = vi.fn().mockResolvedValue({
+      env: { TAMTAM_BROKER_URL: 'http://127.0.0.1:9000' },
+      runDir: '/tmp/tamtam-runs/job-2',
+      cleanup: cleanupMock,
+    });
+    startJobInProcessMock = vi.fn().mockImplementation(async (_jobId: string, _cmd: string, _prompt: string, _cwd: string, options?: { env?: Record<string, string>; cleanup?: () => void }) => {
+      expect(options?.env).toMatchObject({
+        TAMTAM_BROKER_URL: 'http://127.0.0.1:9000',
+      });
+      expect(options?.cleanup).toBe(cleanupMock);
+      options?.cleanup?.();
+      return 12345;
+    });
+    createJobMock = vi.fn().mockImplementation(() => ({
+      id: 'job-2',
+      project: 'proj',
+      kind: 'agent:frontend',
+      prompt: null,
+      pid: 0,
+      logPath: '/tmp/job-2.log',
+      startedAt: NOW / 1000,
+      finishedAt: null,
+      exitCode: null,
+      seen: false,
+      sessionId: 'sess-2',
+      provider: 'claude',
+    }));
+    updateJobMock = vi.fn();
+    dbRows = [
+      {
+        qaUrl: 'http://qa.local',
+        devServerReadyUrl: 'http://dev.local',
+        website: 'http://site.local',
+      },
+    ];
+
+    vi.doMock('@/lib/shared/project-data', () => ({
+      resolveProjectPath: resolveProjectPathMock,
+    }));
+    vi.doMock('@/lib/usage/resolve-provider', () => ({
+      checkCliStartGate: checkCliStartGateMock,
+    }));
+    vi.doMock('@/lib/shared/config', () => ({
+      getSettings: () => ({
+        browser_broker_enabled: true,
+        browser_broker_image: 'custom/broker:2',
+      }),
+      getPermissionModeFlag: () => '--permission-mode bypassPermissions',
+      withBasePrompt: (p: string) => p,
+    }));
+    vi.doMock('@/lib/shared/cli-bin', () => ({
+      resolveCliBin: () => 'claude',
+      resolveCliDefaultModel: () => 'smart',
+      resolveCliEnv: () => ({ CLAUDE_BIN: 'claude' }),
+    }));
+    vi.doMock('@/lib/jobs/project-active-job', () => ({
+      findBlockingRunningJob: vi.fn().mockResolvedValue(null),
+    }));
+    vi.doMock('@/lib/jobs/job-storage', () => ({
+      createJob: createJobMock,
+      updateJob: updateJobMock,
+    }));
+    vi.doMock('@/lib/jobs/spawn-claude-detached', () => ({
+      startJobInProcess: startJobInProcessMock,
+    }));
+    vi.doMock('@/lib/scheduling/scheduling', () => ({
+      getImproveConfig: () => ({ logDir: '/tmp/tamtam-logs' }),
+    }));
+    vi.doMock('@/lib/browser-broker/prepare-run', () => ({
+      prepareBrokerRun: prepareBrokerRunMock,
+    }));
+    vi.doMock('@/lib/db', () => ({
+      db: {
+        select: () => ({
+          from: () => ({
+            where: () => ({
+              limit: async () => dbRows,
+            }),
+          }),
+        }),
+      },
+      schema: { projects: { name: 'name' } },
+    }));
+    vi.doMock('drizzle-orm', () => ({
+      eq: vi.fn(),
+    }));
+
+    ({ maybeAutoResume } = await import('@/lib/jobs/auto-resume'));
+  });
+
+  afterEach(() => {
+    vi.restoreAllMocks();
+  });
+
+  it('injects broker MCP env and preserves cleanup through resumed launches', async () => {
+    const tempDir = mkdtempSync(join(tmpdir(), 'tamtam-auto-resume-'));
+    try {
+      const logPath = join(tempDir, 'job-source.log');
+      writeFileSync(logPath, '{"session_id":"sess-2"}\n');
+
+      const result = await maybeAutoResume({
+        id: 'job-source',
+        project: 'proj',
+        kind: 'run',
+        prompt: null,
+        pid: 123,
+        logPath,
+        startedAt: (NOW - 60_000) / 1000,
+        finishedAt: NOW / 1000,
+        exitCode: 1,
+        seen: false,
+        sessionId: 'sess-2',
+        provider: 'claude',
+        model: 'smart',
+        contextMeta: JSON.stringify({ autoResumeChain: { count: 0 } }),
+      } as JobData);
+
+      expect(result).toEqual({ resumed: true, newJobId: 'job-2' });
+      expect(prepareBrokerRunMock).toHaveBeenCalledOnce();
+      expect(startJobInProcessMock).toHaveBeenCalledOnce();
+      expect(cleanupMock).toHaveBeenCalledOnce();
+    } finally {
+      rmSync(tempDir, { recursive: true, force: true });
+    }
   });
 });

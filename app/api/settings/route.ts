@@ -47,6 +47,23 @@ function parsePositiveIntegerSetting(
   return { value: String(parsed), error: null };
 }
 
+function parsePositiveIntegerInRangeSetting(
+  value: unknown,
+  label: string,
+  min: number,
+  max: number,
+): { value: string | null; error: string | null } {
+  const raw = String(value).trim();
+  if (!/^\d+$/.test(raw)) {
+    return { value: null, error: `${label} must be a positive integer.` };
+  }
+  const parsed = Number.parseInt(raw, 10);
+  if (!Number.isFinite(parsed) || parsed < min || parsed > max) {
+    return { value: null, error: `${label} must be a positive integer between ${min} and ${max}.` };
+  }
+  return { value: String(parsed), error: null };
+}
+
 function parseNonNegativeIntegerSetting(
   value: unknown,
   label: string,
@@ -217,6 +234,7 @@ const SETTING_KEYS = [
   'retrieval_context_limit',
   'retrieval_score_threshold',
   'retrieval_manage_ollama',
+  'retrieval_reindex_interval_hours',
   'browser_broker_enabled',
   'browser_broker_image',
   'tamtam_network_policy_strict',
@@ -330,7 +348,7 @@ function validateAndSerializeSettingValue(
   }
 
   if (key === 'review_fix_max_iterations') {
-    // Default is capped at 3, but an explicit 0 means unlimited review
+    // Default is unlimited (0), but any positive integer caps review
     // verification rounds until LGTM or the release wall clock aborts.
     return parseNonNegativeIntegerSetting(value, key);
   }
@@ -355,6 +373,10 @@ function validateAndSerializeSettingValue(
 
   if (key === 'retrieval_context_limit') {
     return parsePositiveIntegerSetting(value, key);
+  }
+
+  if (key === 'retrieval_reindex_interval_hours') {
+    return parsePositiveIntegerInRangeSetting(value, key, 1, 168);
   }
 
   if (key === 'retrieval_score_threshold') {

@@ -7,6 +7,7 @@ import {
   requestJobCancellation,
   SAFE_PID_FLOOR,
   shouldSignalJobPid,
+  shouldSignalJobPidForWallClockTimeout,
   throwIfJobCancelled,
 } from '@/lib/jobs/cancellation';
 
@@ -80,5 +81,9 @@ describe('job cancellation', () => {
     expect(shouldSignalJobPid({ pid: SAFE_PID_FLOOR + 1, kind: 'push' })).toBe(false);
     expect(shouldSignalJobPid({ pid: SAFE_PID_FLOOR + 1, kind: 'commit' })).toBe(false);
     expect(shouldSignalJobPid({ pid: SAFE_PID_FLOOR + 1, kind: 'review' })).toBe(true);
+  });
+
+  it('allows wall-clock timeout signaling for inline jobs with safe detached pids', () => {
+    expect(shouldSignalJobPidForWallClockTimeout({ pid: SAFE_PID_FLOOR + 1 })).toBe(true);
   });
 });

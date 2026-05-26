@@ -1,6 +1,6 @@
 import { db, schema } from '@/lib/db';
 import { normalizeModelInput } from '@/lib/agents/model-aliases';
-import { resolveAgentPrerequisiteCommand } from '@/lib/agents/issue-cruncher';
+import { resolveAgentPrerequisiteCommand } from '@/lib/agents/prerequisites';
 
 export type AgentRow = typeof schema.agents.$inferSelect;
 export type NormalizedAgent = Omit<AgentRow, 'skillIds' | 'docPaths'> & { skillIds: string[]; docPaths: string[] };

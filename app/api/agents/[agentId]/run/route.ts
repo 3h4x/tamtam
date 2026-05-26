@@ -20,7 +20,7 @@ import { normalizeModelInput } from '@/lib/agents/model-aliases';
 import { enqueueAgentRun, tryClaimAgentStartSlot, releaseAgentStartSlot, drainNextAgentRun } from '@/lib/agents/pending-agent-run';
 import { findBlockingRunningJob } from '@/lib/jobs/project-active-job';
 import { checkCliStartGate } from '@/lib/usage/resolve-provider';
-import { resolveAgentPrerequisiteCommand } from '@/lib/agents/issue-cruncher';
+import { resolveAgentPrerequisiteCommand } from '@/lib/agents/prerequisites';
 import { appendRedactedFileSync } from '@/lib/jobs/redacted-log-writer';
 import { runAgentIntakeWorkflow } from '@/lib/agents/intake-workflow';
 

@@ -87,7 +87,7 @@ describe('settings API', () => {
       expect(data.settings).toEqual({
         claude_provider: 'claude',
         cli_enabled_providers: 'claude',
-        review_fix_max_iterations: '3',
+        review_fix_max_iterations: '0',
         review_do_not_ship_action: 'fix',
         release_wall_clock_timeout_minutes: '60',
         plain_test_phase_enabled: 'false',
@@ -125,6 +125,7 @@ describe('settings API', () => {
         { key: 'retrieval_context_limit', value: '8' },
         { key: 'retrieval_score_threshold', value: '0.65' },
         { key: 'retrieval_manage_ollama', value: 'false' },
+        { key: 'retrieval_reindex_interval_hours', value: '12' },
       ]);
 
       const response = await GET();
@@ -137,6 +138,7 @@ describe('settings API', () => {
         retrieval_context_limit: '8',
         retrieval_score_threshold: '0.65',
         retrieval_manage_ollama: 'false',
+        retrieval_reindex_interval_hours: '12',
       });
     });
 
@@ -188,7 +190,7 @@ describe('settings API', () => {
       const response = await GET();
       const data = await response.json();
 
-      expect(data.settings.review_fix_max_iterations).toBe('3');
+      expect(data.settings.review_fix_max_iterations).toBe('0');
     });
 
     it('accepts zero (unlimited) as a valid review_fix_max_iterations', async () => {
@@ -206,7 +208,7 @@ describe('settings API', () => {
       const response = await GET();
       const data = await response.json();
 
-      expect(data.settings.review_fix_max_iterations).toBe('3');
+      expect(data.settings.review_fix_max_iterations).toBe('0');
     });
 
     it('returns the effective review_do_not_ship_action when the stored row is invalid', async () => {
@@ -595,6 +597,7 @@ describe('settings API', () => {
         'notification_on_review_do_not_ship',
         'notification_on_agent_run_fail',
         'budget_subscription_providers',
+        'retrieval_reindex_interval_hours',
       ];
 
       const body = Object.fromEntries(validKeys.map((k) => [
@@ -605,6 +608,7 @@ describe('settings API', () => {
           : k === 'review_fix_max_iterations' ? '5'
           : k === 'review_do_not_ship_action' ? 'fix'
           : k === 'release_wall_clock_timeout_minutes' ? '30'
+          : k === 'retrieval_reindex_interval_hours' ? '16'
           : k === 'agent_templates'
             ? JSON.stringify([{ name: 'template', description: 'desc', model: 'smart', schedule: '', prompt: '' }])
             : 'test-value',
@@ -959,6 +963,40 @@ describe('settings API', () => {
       expect(response.status).toBe(400);
       await expect(response.json()).resolves.toMatchObject({
         detail: expect.stringContaining('review_do_not_ship_action must be one of: pass, fix, abort'),
+      });
+      expect(await sharedHandle.db.select().from(schema.settings)).toEqual([]);
+    });
+
+    it('saves retrieval_reindex_interval_hours in canonical form', async () => {
+      const request = new NextRequest('http://localhost/api/settings', {
+        method: 'PATCH',
+        body: JSON.stringify({ retrieval_reindex_interval_hours: '016' }),
+      });
+      const response = await PATCH(request);
+
+      expect(response.status).toBe(200);
+      await expect(response.json()).resolves.toMatchObject({
+        status: 'ok',
+        settings: expect.objectContaining({
+          retrieval_reindex_interval_hours: '16',
+        }),
+      });
+
+      const rows = await sharedHandle.db.select().from(schema.settings);
+      const row = rows.find(r => r.key === 'retrieval_reindex_interval_hours');
+      expect(row?.value).toBe('16');
+    });
+
+    it('rejects out-of-range retrieval_reindex_interval_hours values', async () => {
+      const request = new NextRequest('http://localhost/api/settings', {
+        method: 'PATCH',
+        body: JSON.stringify({ retrieval_reindex_interval_hours: '169' }),
+      });
+      const response = await PATCH(request);
+
+      expect(response.status).toBe(400);
+      await expect(response.json()).resolves.toMatchObject({
+        detail: expect.stringContaining('retrieval_reindex_interval_hours must be a positive integer between 1 and 168'),
       });
       expect(await sharedHandle.db.select().from(schema.settings)).toEqual([]);
     });

@@ -25,6 +25,7 @@ import { wrapForSandbox } from '@/lib/shared/sandbox-wrap';
 import { runSubprocess } from './spawn-cli';
 import { measurePrompt, checkPromptSize } from './prompt-size';
 import type { CliProvider } from '@/lib/usage/cli-providers';
+import type { JobData } from '@/lib/jobs/types';
 
 function resolveLogDir(): string {
   try {
@@ -46,48 +47,65 @@ export async function startInProcessAgentJob(
       command: string;
       env?: Record<string, string>;
     };
+    cleanup?: () => void;
   },
 ): Promise<number> {
-  const LOG_DIR = resolveLogDir();
-  const { mkdirSync } = await import('fs');
-  mkdirSync(/*turbopackIgnore: true*/ LOG_DIR, { recursive: true });
-
-  const promptPath = join(/*turbopackIgnore: true*/ LOG_DIR, `${jobId}.prompt`);
-  const logPath = join(/*turbopackIgnore: true*/ LOG_DIR, `${jobId}.log`);
-
-  // app/api/jobs/[jobId]/rerun reads this file to restore the prompt.
-  writeFileSync(/*turbopackIgnore: true*/ promptPath, prompt);
-
-  const promptBytes = measurePrompt(prompt);
-  const { jobsCache, saveToDb, markDone } = await import('@/lib/jobs/job-storage');
-  const { registerJobCancellation, finishJobCancellation } = await import('./cancellation');
-
-  const job = jobsCache.get(jobId);
-  if (job) {
-    job.promptBytes = promptBytes;
-    checkPromptSize(jobId, job.kind, promptBytes);
-    // Idempotency: workflow replay re-enters the step body. If the previous
-    // attempt already finalized the job, exit early so we don't re-spawn.
-    if (job.finishedAt != null) return job.pid;
-    // Mark "owned by this process" so probe trusts step self-finalization.
-    job.pid = process.pid;
-    saveToDb(job);
-  }
-
-  const cmdArgv = splitCommand(command);
-  if (cmdArgv.length === 0) {
-    throw new Error(`startInProcessAgentJob: empty command string for job ${jobId}`);
-  }
-  const [rawBin, ...rawArgs] = cmdArgv;
-  const runDir = join(/*turbopackIgnore: true*/ tmpdir(), 'tamtam-runs', jobId);
-  const wrap = wrapForSandbox({ bin: rawBin, args: rawArgs, cwd, runDir });
-  const bin = wrap.bin;
-  const args = wrap.args;
-  const envWithWrap: Record<string, string> = { ...(options?.env ?? {}), ...wrap.env };
-
-  const abortSignal = registerJobCancellation(jobId);
-  let result;
+  let result: Awaited<ReturnType<typeof runSubprocess>> | null = null;
+  let job: JobData | null = null;
+  let markDone: ((job: JobData, exitCode: number) => Promise<void>) | null = null;
+  let finishJobCancellation: ((jobId: string) => void) | null = null;
+  let cleanedUp = false;
+  const cleanup = () => {
+    if (cleanedUp) return;
+    cleanedUp = true;
+    try {
+      options?.cleanup?.();
+    } catch (err) {
+      console.warn(`[inline-agent] cleanup failed for ${jobId}:`, err);
+    }
+  };
   try {
+    const LOG_DIR = resolveLogDir();
+    const { mkdirSync } = await import('fs');
+    mkdirSync(/*turbopackIgnore: true*/ LOG_DIR, { recursive: true });
+
+    const promptPath = join(/*turbopackIgnore: true*/ LOG_DIR, `${jobId}.prompt`);
+    const logPath = join(/*turbopackIgnore: true*/ LOG_DIR, `${jobId}.log`);
+
+    // app/api/jobs/[jobId]/rerun reads this file to restore the prompt.
+    writeFileSync(/*turbopackIgnore: true*/ promptPath, prompt);
+
+    const promptBytes = measurePrompt(prompt);
+    const { jobsCache, saveToDb, markDone: persistJobDone } = await import('@/lib/jobs/job-storage');
+    const cancellation = await import('./cancellation');
+    finishJobCancellation = cancellation.finishJobCancellation;
+    markDone = persistJobDone;
+
+    job = jobsCache.get(jobId) ?? null;
+    if (job) {
+      job.promptBytes = promptBytes;
+      checkPromptSize(jobId, job.kind, promptBytes);
+      // Idempotency: workflow replay re-enters the step body. If the previous
+      // attempt already finalized the job, exit early so we don't re-spawn.
+      if (job.finishedAt != null) return job.pid;
+      // Mark "owned by this process" so probe trusts step self-finalization.
+      job.pid = process.pid;
+      saveToDb(job);
+    }
+
+    const cmdArgv = splitCommand(command);
+    if (cmdArgv.length === 0) {
+      throw new Error(`startInProcessAgentJob: empty command string for job ${jobId}`);
+    }
+    const [rawBin, ...rawArgs] = cmdArgv;
+    const runDir = join(/*turbopackIgnore: true*/ tmpdir(), 'tamtam-runs', jobId);
+    const wrap = wrapForSandbox({ bin: rawBin, args: rawArgs, cwd, runDir });
+    const bin = wrap.bin;
+    const args = wrap.args;
+    const envWithWrap: Record<string, string> = { ...(options?.env ?? {}), ...wrap.env };
+
+    const abortSignal = cancellation.registerJobCancellation(jobId);
+
     result = await runSubprocess({
       jobId,
       cmd: bin,
@@ -138,16 +156,20 @@ export async function startInProcessAgentJob(
       }
     }
   } finally {
-    finishJobCancellation(jobId);
+    finishJobCancellation?.(jobId);
+    cleanup();
   }
 
   // Hand off to markDone — it parses the log for tokens/cost, applies
   // Claude is_error overrides, persists, and fires completion hooks
   // (release-after-run, pipeline chaining where applicable).
-  if (job) {
+  if (job && markDone && result) {
     await markDone(job, result.exitCode);
   }
 
+  if (!result) {
+    throw new Error(`startInProcessAgentJob: missing subprocess result for job ${jobId}`);
+  }
   return result.pid > 0 ? result.pid : process.pid;
 }
 

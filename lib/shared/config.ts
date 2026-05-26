@@ -171,7 +171,10 @@ const DEFAULTS: TamTamConfig = {
 - Prefer LGTM over NEEDS ATTENTION when in doubt. Do not list every stylistic opinion. Aim for fewer than 3 findings — if you have more, the review has drifted into nitpicking.
 - Keep LGTM responses short: one sentence confirmation is enough.`,
   jobs_paused: false,
-  review_fix_max_iterations: 3,
+  // 0 = unlimited review→fix verification rounds (default). Bound it via the
+  // wall-clock timeout instead; an honest LGTM is preferred over a forced
+  // partial ship when the reviewer is making progress.
+  review_fix_max_iterations: 0,
   review_fix_backoff_seconds: 0,
   review_do_not_ship_action: 'fix',
   release_wall_clock_timeout_minutes: 60,

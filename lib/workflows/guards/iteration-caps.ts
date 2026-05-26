@@ -9,7 +9,7 @@
 // clear stop reason.
 //
 // Three caps are tracked:
-//   review        → reviewFixMaxIterations (default 3, settings-driven)
+//   review        → reviewFixMaxIterations (default unlimited/0, settings-driven)
 //   test/commit/push → maxStepIterations (default 3, env-driven)
 //   push fix only → MAX_PUSH_FIX_ATTEMPTS (default 2, fix-from-push hook
 //                                           rejection cap; checked when

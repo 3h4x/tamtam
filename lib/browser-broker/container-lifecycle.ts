@@ -15,7 +15,11 @@ declare global {
   var __tamtamBrowserBrokerStarting: Promise<BrokerHandle> | undefined;
 }
 
-const HEALTH_PROBE_TIMEOUT_MS = 30_000;
+// First-run is slow: docker may need to pull the Playwright image (~2GB) and
+// `npx -y @playwright/mcp` fetches the package on container start. Cached
+// follow-ups settle in ~5–10 s. Keep the ceiling generous so parallel vitest
+// runs that compete with each other for docker resources still pass.
+const HEALTH_PROBE_TIMEOUT_MS = 120_000;
 const HEALTH_PROBE_INTERVAL_MS = 500;
 
 async function dockerAvailable(): Promise<boolean> {
@@ -41,16 +45,16 @@ async function waitForHealth(url: string): Promise<void> {
   throw new Error(`browser-broker: health probe timed out after ${HEALTH_PROBE_TIMEOUT_MS}ms`);
 }
 
-async function pullImageIfNeeded(): Promise<void> {
-  const present = await runShell('docker', ['image', 'inspect', BROKER_IMAGE], { timeout: 5_000 });
+async function pullImageIfNeeded(image: string): Promise<void> {
+  const present = await runShell('docker', ['image', 'inspect', image], { timeout: 5_000 });
   if (present.exitCode === 0) return;
-  const pull = await runShell('docker', ['pull', BROKER_IMAGE], { timeout: 300_000 });
+  const pull = await runShell('docker', ['pull', image], { timeout: 300_000 });
   if (pull.exitCode !== 0) {
-    throw new Error(`browser-broker: docker pull ${BROKER_IMAGE} failed: ${pull.stderr.trim() || pull.stdout.trim()}`);
+    throw new Error(`browser-broker: docker pull ${image} failed: ${pull.stderr.trim() || pull.stdout.trim()}`);
   }
 }
 
-async function runContainer(hostPort: number): Promise<{ id: string; name: string }> {
+async function runContainer(hostPort: number, image: string): Promise<{ id: string; name: string }> {
   const name = `tamtam-playwright-broker-${hostPort}`;
   await runShell('docker', ['rm', '-f', name], { timeout: 10_000 });
 
@@ -59,7 +63,7 @@ async function runContainer(hostPort: number): Promise<{ id: string; name: strin
     '--name', name,
     '-p', `127.0.0.1:${hostPort}:${BROKER_INTERNAL_PORT}`,
     '--add-host', 'host.docker.internal:host-gateway',
-    BROKER_IMAGE,
+    image,
     'sh', '-c',
     `npx -y ${BROKER_MCP_PACKAGE} --port ${BROKER_INTERNAL_PORT} --host 0.0.0.0 --headless`,
   ];
@@ -72,9 +76,11 @@ async function runContainer(hostPort: number): Promise<{ id: string; name: strin
 
 export interface EnsureOptions {
   // Pass nothing in production; tests can override.
+  image?: string;
 }
 
 export async function ensureBrokerRunning(_opts?: EnsureOptions): Promise<BrokerHandle> {
+  const image = _opts?.image?.trim() || BROKER_IMAGE;
   if (globalThis.__tamtamBrowserBroker) {
     if (await probeBrokerHealth(globalThis.__tamtamBrowserBroker.url)) {
       return globalThis.__tamtamBrowserBroker;
@@ -89,9 +95,9 @@ export async function ensureBrokerRunning(_opts?: EnsureOptions): Promise<Broker
     if (!(await dockerAvailable())) {
       throw new Error('browser-broker: docker is not running or not accessible');
     }
-    await pullImageIfNeeded();
+    await pullImageIfNeeded(image);
     const hostPort = await allocatePort();
-    const { id, name } = await runContainer(hostPort);
+    const { id, name } = await runContainer(hostPort, image);
     const url = `http://127.0.0.1:${hostPort}`;
     try {
       await waitForHealth(url);

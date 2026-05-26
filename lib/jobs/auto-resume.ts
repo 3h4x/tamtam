@@ -167,6 +167,9 @@ export async function maybeAutoResume(job: JobData): Promise<{ resumed: true; ne
     const { createJob, updateJob } = await import('@/lib/jobs/job-storage');
     const { startJobInProcess } = await import('@/lib/jobs/spawn-claude-detached');
     const { getImproveConfig } = await import('@/lib/scheduling/scheduling');
+    const { prepareBrokerRun } = await import('@/lib/browser-broker/prepare-run');
+    const { db, schema } = await import('@/lib/db');
+    const { eq } = await import('drizzle-orm');
     const { join } = await import('path');
     const { mkdirSync } = await import('fs');
 
@@ -218,12 +221,32 @@ export async function maybeAutoResume(job: JobData): Promise<{ resumed: true; ne
 
     const prompt = withBasePrompt(buildResumePrompt(job), { projectPath: projPath, provider });
 
+    let broker: { env: Record<string, string>; cleanup: () => void } | null = null;
+    try {
+      const rows = await db.select().from(schema.projects).where(eq(schema.projects.name, job.project)).limit(1);
+      const projectRow = rows[0] ?? null;
+      broker = await prepareBrokerRun({
+        jobId: newJob.id,
+        projectOrigins: {
+          qaUrl: projectRow?.qaUrl ?? null,
+          devServerReadyUrl: projectRow?.devServerReadyUrl ?? null,
+          website: projectRow?.website ?? null,
+        },
+        provider,
+      });
+    } catch (err) {
+      console.warn(`[auto-resume] broker prep failed for ${job.id}; continuing without MCP injection:`, err);
+    }
+
     const pid = await startJobInProcess(
       newJob.id,
       `${claudeBin} --print --output-format stream-json --include-partial-messages --verbose --model ${model} ${getPermissionModeFlag()} --resume ${sessionId}`,
       prompt,
       projPath,
-      { env: cliEnv },
+      {
+        env: broker ? { ...cliEnv, ...broker.env } : cliEnv,
+        cleanup: broker?.cleanup,
+      },
     );
     newJob.pid = pid;
     updateJob(newJob);

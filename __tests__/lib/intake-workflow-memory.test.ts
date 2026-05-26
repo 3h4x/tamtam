@@ -29,6 +29,8 @@ describe('runAgentIntakeWorkflow memory composition', () => {
   let buildMemoryBlockMock: ReturnType<typeof vi.fn>;
   let startInProcessAgentJobMock: ReturnType<typeof vi.fn>;
   let updateJobMock: ReturnType<typeof vi.fn>;
+  let prepareBrokerRunMock: ReturnType<typeof vi.fn>;
+  let brokerCleanupMock: ReturnType<typeof vi.fn>;
 
   async function importWorkflow() {
     const mod = await import('@/lib/agents/intake-workflow');
@@ -43,6 +45,16 @@ describe('runAgentIntakeWorkflow memory composition', () => {
     buildMemoryBlockMock = vi.fn().mockReturnValue('## Your Persistent Memory\nprior memory');
     startInProcessAgentJobMock = vi.fn().mockResolvedValue(12345);
     updateJobMock = vi.fn();
+    brokerCleanupMock = vi.fn();
+    prepareBrokerRunMock = vi.fn().mockResolvedValue({
+      env: { TAMTAM_BROKER_URL: 'http://127.0.0.1:9000' },
+      runDir: '/tmp/tamtam-runs/job-1',
+      cleanup: brokerCleanupMock,
+    });
+    startInProcessAgentJobMock = vi.fn().mockImplementation(async (_jobId: string, _cmd: string, _prompt: string, _cwd: string, options?: { cleanup?: () => void }) => {
+      options?.cleanup?.();
+      return 12345;
+    });
 
     vi.doMock('@/lib/agents/compose-skills', () => ({
       composeAgentSkills: vi.fn().mockResolvedValue({ docParts: [], parts: [], metaSkills: [], metaDocs: [] }),
@@ -69,6 +81,7 @@ describe('runAgentIntakeWorkflow memory composition', () => {
       getSettings: vi.fn().mockReturnValue({
         retrieval_enabled: false,
         permission_mode: 'bypassPermissions',
+        browser_broker_enabled: true,
         cli_bin_claude: '',
         cli_bin_codex: '',
         cli_bin_gemini: '',
@@ -80,6 +93,9 @@ describe('runAgentIntakeWorkflow memory composition', () => {
     vi.doMock('@/lib/shared/cli-bin', () => ({
       resolveCliBin: vi.fn().mockReturnValue('claude'),
       resolveCliEnv: vi.fn().mockReturnValue({}),
+    }));
+    vi.doMock('@/lib/browser-broker/prepare-run', () => ({
+      prepareBrokerRun: prepareBrokerRunMock,
     }));
     vi.doMock('@/lib/agents/issue-cruncher', () => ({
       hasIssueCruncherSkill: vi.fn().mockReturnValue(false),
@@ -148,5 +164,18 @@ describe('runAgentIntakeWorkflow memory composition', () => {
     expect(startInProcessAgentJobMock).toHaveBeenCalledOnce();
     const fullPrompt = startInProcessAgentJobMock.mock.calls[0]?.[2] as string;
     expect(fullPrompt).toContain('Your Persistent Memory');
+    expect(brokerCleanupMock).toHaveBeenCalledOnce();
+  });
+
+  it('continues without broker injection when broker prep fails', async () => {
+    prepareBrokerRunMock.mockRejectedValueOnce(new Error('boom'));
+    const runAgentIntakeWorkflow = await importWorkflow();
+
+    await runAgentIntakeWorkflow(makeParams(false));
+
+    expect(startInProcessAgentJobMock).toHaveBeenCalledOnce();
+    const options = startInProcessAgentJobMock.mock.calls[0]?.[4] as { env?: Record<string, string> } | undefined;
+    expect(options?.env?.TAMTAM_BROKER_URL).toBeUndefined();
+    expect(brokerCleanupMock).not.toHaveBeenCalled();
   });
 });

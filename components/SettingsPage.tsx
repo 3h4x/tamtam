@@ -3,7 +3,7 @@
 import { useState, useEffect, useCallback, useMemo, useRef } from 'react'
 import { useRouter } from 'next/navigation'
 import { errMsg } from '@/lib/shared/types'
-import { FIELDS, DEFAULTS, GRID_COLS } from '@/components/settings/constants'
+import { FIELDS, DEFAULTS, GRID_COLS, SUBSECTIONS } from '@/components/settings/constants'
 import type { SettingsFieldKey } from '@/components/settings/constants'
 import { SettingsField } from '@/components/settings/SettingsField'
 import { AgentTemplatesTab } from '@/components/settings/AgentTemplatesTab'
@@ -106,6 +106,9 @@ interface SettingsMap {
   retrieval_score_threshold: string
   retrieval_manage_ollama: string
   retrieval_reindex_interval_hours: string
+  browser_broker_enabled: string
+  browser_broker_image: string
+  tamtam_network_policy_strict: string
 }
 
 const SETTINGS_DEFAULTS: SettingsMap = {
@@ -149,19 +152,38 @@ const SETTINGS_DEFAULTS: SettingsMap = {
   retrieval_score_threshold: '0.8',
   retrieval_manage_ollama: 'true',
   retrieval_reindex_interval_hours: '16',
+  browser_broker_enabled: 'false',
+  browser_broker_image: 'mcr.microsoft.com/playwright:v1.59.1-noble',
+  tamtam_network_policy_strict: 'false',
 }
 
 type TabId = 'general' | 'cli' | 'pipeline' | 'projects' | 'database' | 'templates' | 'notifications'
 
-const GROUPS: {
-  id: TabId
-  title: string
-  description: string
-  cols: number
-}[] = [
-  { id: 'pipeline', title: 'Release Pipeline', description: 'Commit, review, fix-loop, and retention rules for the release pipeline', cols: 2 },
-  { id: 'general',  title: 'General',          description: 'Workspace location, GitHub defaults, trust allowlists, and scheduling windows', cols: 3 },
-]
+type TabLayoutEntry =
+  | { kind: 'subsection'; id: string }
+  | { kind: 'inline'; id: 'trusted' | 'retrieval' | 'github_board' }
+
+// Ordered list of cards rendered inside General / Pipeline tabs. Other tabs
+// have their own dedicated components and bypass this layout.
+const TAB_LAYOUT: Partial<Record<TabId, TabLayoutEntry[]>> = {
+  general: [
+    { kind: 'subsection', id: 'workspace' },
+    { kind: 'subsection', id: 'scheduling' },
+    { kind: 'inline', id: 'trusted' },
+    { kind: 'subsection', id: 'base_prompt' },
+    { kind: 'subsection', id: 'browser_broker' },
+    { kind: 'inline', id: 'retrieval' },
+    { kind: 'inline', id: 'github_board' },
+  ],
+  pipeline: [
+    { kind: 'subsection', id: 'review' },
+    { kind: 'subsection', id: 'commit' },
+    { kind: 'subsection', id: 'pipeline_models' },
+    { kind: 'subsection', id: 'release_ops' },
+    { kind: 'subsection', id: 'retention' },
+    { kind: 'subsection', id: 'legacy' },
+  ],
+}
 
 const TABS: { id: TabId; label: string }[] = [
   { id: 'general',       label: 'General' },
@@ -381,6 +403,325 @@ export function SettingsPage({ initialTab }: { initialTab?: TabId } = {}) {
   const activeProjects   = projects.filter((p) => !p.archived)
   const archivedProjects = projects.filter((p) =>  p.archived)
   const enabledCount     = activeProjects.filter((p) => p.enabled).length
+
+  function renderTabBody() {
+    const layout = TAB_LAYOUT[activeTab]
+    if (!layout) return null
+
+    // Build a per-subsection field list from FIELDS by subsection id.
+    // Provider-conditional fields (lmstudio_model / default_model) are
+    // not in general/pipeline subsections today, so no filtering needed —
+    // CliTab handles them.
+    const fieldsBySubsection = new Map<string, SettingsFieldKey[]>()
+    for (const key of Object.keys(FIELDS) as SettingsFieldKey[]) {
+      const sub = FIELDS[key].subsection
+      if (!sub) continue
+      const arr = fieldsBySubsection.get(sub) ?? []
+      arr.push(key)
+      fieldsBySubsection.set(sub, arr)
+    }
+
+    // Tab-level Advanced toggle: surfaces fields with `advanced: true` and
+    // subsections whose entire card is gated on advanced (e.g. legacy).
+    const tabHasAdvanced = layout.some((e) => {
+      if (e.kind !== 'subsection') return false
+      const sub = SUBSECTIONS[e.id]
+      if (sub?.advanced) return true
+      const fields = fieldsBySubsection.get(e.id) ?? []
+      return fields.some((k) => FIELDS[k].advanced)
+    })
+
+    function renderSubsection(subId: string) {
+      const sub = SUBSECTIONS[subId]
+      if (!sub) return null
+      if (sub.advanced && !showAdvanced) return null
+      const fields = (fieldsBySubsection.get(subId) ?? [])
+        .filter((k) => !FIELDS[k].advanced || showAdvanced)
+      if (fields.length === 0) return null
+      const cols = sub.cols ?? 2
+      const gridClass = GRID_COLS[cols] ?? 'grid-cols-2'
+      const body = (
+        <div className={`grid ${gridClass} gap-x-6 gap-y-4`}>
+          {fields.map((key) => (
+            <SettingsField key={key} fieldKey={key} value={settings[key]} provider={settings.claude_provider} onChange={handleChange} />
+          ))}
+        </div>
+      )
+      const header = (
+        <div className="flex items-baseline gap-3">
+          <h3 className="text-sm font-semibold text-text-primary">{sub.title}</h3>
+          {sub.description && <p className="text-xs text-text-tertiary">{sub.description}</p>}
+        </div>
+      )
+      return (
+        <section key={`sub:${subId}`} className="bg-bg-secondary rounded-lg border border-border">
+          {sub.defaultCollapsed ? (
+            <details>
+              <summary className="px-5 py-3 border-b border-border cursor-pointer list-none flex items-baseline gap-3 group">
+                <svg className="w-3 h-3 transition-transform group-open:rotate-90 text-text-tertiary"
+                  fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2.5}>
+                  <path strokeLinecap="round" strokeLinejoin="round" d="M9 5l7 7-7 7" />
+                </svg>
+                {header}
+              </summary>
+              <div className="px-5 py-4">{body}</div>
+            </details>
+          ) : (
+            <>
+              <div className="px-5 py-3 border-b border-border">{header}</div>
+              <div className="px-5 py-4">{body}</div>
+            </>
+          )}
+        </section>
+      )
+    }
+
+    function renderTrustedUsers() {
+      return (
+        <section key="inline:trusted" className="bg-bg-secondary rounded-lg border border-border">
+          <div className="px-5 py-3 border-b border-border flex items-baseline gap-3">
+            <h3 className="text-sm font-semibold text-text-primary">Trusted GitHub Users</h3>
+            <p className="text-xs text-text-tertiary">Workspace allowlist for issue/PR authors whose GitHub content TamTam treats as trusted.</p>
+          </div>
+          <div className="px-5 py-4">
+            <TrustedGithubUsersField
+              value={settings.trusted_github_users}
+              onChange={(value) => handleChange('trusted_github_users', value)}
+              onValidityChange={setTrustedGithubUsersError}
+            />
+          </div>
+        </section>
+      )
+    }
+
+    function renderRetrieval() {
+      return (
+        <section key="inline:retrieval" className="bg-bg-secondary rounded-lg border border-border">
+          <div className="px-5 py-3 border-b border-border flex items-center justify-between gap-4">
+            <div className="flex items-baseline gap-3 min-w-0">
+              <h3 className="text-sm font-semibold text-text-primary shrink-0">Retrieval (Embeddings)</h3>
+              <p className="text-xs text-text-tertiary truncate">Indexes project docs, skills, and config into pgvector via Ollama; injects top-matching chunks into agent prompts.</p>
+            </div>
+            <label className="inline-flex items-center gap-2 text-sm text-text-primary shrink-0">
+              <input
+                type="checkbox"
+                checked={settings.retrieval_enabled === 'true'}
+                onChange={(e) => handleChange('retrieval_enabled', e.target.checked ? 'true' : 'false')}
+                className="h-4 w-4 rounded border-border bg-bg-primary text-accent focus:ring-accent/30"
+              />
+              Enabled
+            </label>
+          </div>
+          <div className="px-5 py-4">
+            <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-4">
+              <div>
+                <label className="mb-1 block text-xs font-medium text-text-secondary">Ollama URL</label>
+                <input
+                  value={settings.retrieval_ollama_url}
+                  onChange={(e) => handleChange('retrieval_ollama_url', e.target.value)}
+                  placeholder="http://localhost:11434"
+                  className="w-full h-10 px-3 py-2 bg-bg-primary text-text-primary border border-border rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-accent/30 focus:border-accent transition-colors font-mono"
+                />
+              </div>
+              <div>
+                <label className="mb-1 block text-xs font-medium text-text-secondary">Embedding Model</label>
+                <input
+                  value={settings.retrieval_embedding_model}
+                  onChange={(e) => handleChange('retrieval_embedding_model', e.target.value)}
+                  placeholder="nomic-embed-text"
+                  className="w-full h-10 px-3 py-2 bg-bg-primary text-text-primary border border-border rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-accent/30 focus:border-accent transition-colors font-mono"
+                />
+              </div>
+              <div>
+                <label className="mb-1 block text-xs font-medium text-text-secondary">Context Limit</label>
+                <input
+                  type="number"
+                  min={1}
+                  value={settings.retrieval_context_limit}
+                  onChange={(e) => handleChange('retrieval_context_limit', e.target.value)}
+                  className="w-full h-10 px-3 py-2 bg-bg-primary text-text-primary border border-border rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-accent/30 focus:border-accent transition-colors font-mono"
+                />
+                <p className="mt-1 text-xs text-text-tertiary">Top-K chunks per prompt.</p>
+              </div>
+              <div>
+                <label className="mb-1 block text-xs font-medium text-text-secondary">Score Threshold</label>
+                <input
+                  type="number"
+                  min={0}
+                  max={1}
+                  step={0.05}
+                  value={settings.retrieval_score_threshold}
+                  onChange={(e) => handleChange('retrieval_score_threshold', e.target.value)}
+                  className="w-full h-10 px-3 py-2 bg-bg-primary text-text-primary border border-border rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-accent/30 focus:border-accent transition-colors font-mono"
+                />
+                <p className="mt-1 text-xs text-text-tertiary">0–1 cosine cutoff.</p>
+              </div>
+            </div>
+            <div className="mt-4 flex items-center gap-6 flex-wrap">
+              <div>
+                <label className="mb-1 block text-xs font-medium text-text-secondary">Reindex Interval (hours)</label>
+                <input
+                  type="number"
+                  min={1}
+                  max={168}
+                  step={1}
+                  value={settings.retrieval_reindex_interval_hours}
+                  onChange={(e) => handleChange('retrieval_reindex_interval_hours', e.target.value)}
+                  className="w-32 h-10 px-3 py-2 bg-bg-primary text-text-primary border border-border rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-accent/30 focus:border-accent transition-colors font-mono"
+                />
+              </div>
+              <label className="inline-flex items-center gap-2 text-sm text-text-primary">
+                <input
+                  type="checkbox"
+                  checked={settings.retrieval_manage_ollama === 'true'}
+                  onChange={(e) => handleChange('retrieval_manage_ollama', e.target.checked ? 'true' : 'false')}
+                  className="h-4 w-4 rounded border-border bg-bg-primary text-accent focus:ring-accent/30"
+                />
+                Auto-start Ollama if not running
+              </label>
+            </div>
+          </div>
+        </section>
+      )
+    }
+
+    function renderGithubBoard() {
+      return (
+        <section key="inline:github_board" className="bg-bg-secondary rounded-lg border border-border">
+          <details>
+            <summary className="px-5 py-3 border-b border-border cursor-pointer list-none flex items-center justify-between gap-4 group">
+              <div className="flex items-baseline gap-3 min-w-0">
+                <svg className="w-3 h-3 shrink-0 transition-transform group-open:rotate-90 text-text-tertiary"
+                  fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2.5}>
+                  <path strokeLinecap="round" strokeLinejoin="round" d="M9 5l7 7-7 7" />
+                </svg>
+                <h3 className="text-sm font-semibold text-text-primary">GitHub Board Sync</h3>
+                <p className="text-xs text-text-tertiary truncate">
+                  Mirrors run lifecycle to a global GitHub Project named <code className="font-mono">TamTam</code>.
+                </p>
+              </div>
+              <label
+                className="inline-flex items-center gap-2 text-sm text-text-primary shrink-0"
+                onClick={(e) => e.stopPropagation()}
+              >
+                <input
+                  type="checkbox"
+                  checked={settings.github_board_sync_enabled === 'true'}
+                  onChange={(e) => handleChange('github_board_sync_enabled', e.target.checked ? 'true' : 'false')}
+                  className="h-4 w-4 rounded border-border bg-bg-primary text-accent focus:ring-accent/30"
+                />
+                Enabled
+              </label>
+            </summary>
+            <div className="px-5 py-4">
+              <div className="grid gap-4 md:grid-cols-3">
+                <div>
+                  <label className="mb-1 block text-xs font-medium text-text-secondary">Project Owner</label>
+                  <input
+                    value={settings.github_board_project_owner}
+                    onChange={(e) => handleChange('github_board_project_owner', e.target.value)}
+                    placeholder={settings.github_owner || 'octocat'}
+                    className="w-full h-10 px-3 py-2 bg-bg-primary text-text-primary border border-border rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-accent/30 focus:border-accent transition-colors font-mono"
+                  />
+                </div>
+                <div>
+                  <label className="mb-1 block text-xs font-medium text-text-secondary">Project Title</label>
+                  <input
+                    value={settings.github_board_project_title}
+                    onChange={(e) => handleChange('github_board_project_title', e.target.value)}
+                    className="w-full h-10 px-3 py-2 bg-bg-primary text-text-primary border border-border rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-accent/30 focus:border-accent transition-colors font-mono"
+                  />
+                </div>
+                <div>
+                  <label className="mb-1 block text-xs font-medium text-text-secondary">Project Number</label>
+                  <input
+                    value={settings.github_board_project_number}
+                    readOnly
+                    className="w-full h-10 px-3 py-2 bg-bg-tertiary text-text-secondary border border-border rounded-lg text-sm font-mono"
+                  />
+                </div>
+              </div>
+              {settings.github_board_project_url && (
+                <div className="mt-3 flex items-center gap-3 flex-wrap">
+                  <a
+                    href={settings.github_board_view_url || settings.github_board_project_url}
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    className="inline-flex items-center gap-1 text-xs text-accent hover:underline"
+                  >
+                    Open board on GitHub ↗
+                  </a>
+                  {settings.github_board_view_url && (
+                    <span className="text-xs text-text-tertiary">(custom view configured)</span>
+                  )}
+                  <button
+                    type="button"
+                    disabled={boardResyncing || settings.github_board_sync_enabled !== 'true'}
+                    onClick={async () => {
+                      setBoardResyncing(true)
+                      setBoardResyncMsg(null)
+                      try {
+                        const res = await fetch('/api/settings/board-resync', { method: 'POST' })
+                        const data = await res.json()
+                        if (!res.ok || !data.ok) {
+                          setBoardResyncMsg(data.error || `HTTP ${res.status}`)
+                        } else {
+                          const rl = data.rateLimited ? ', rate-limited — wait 5 min and retry' : ''
+                          setBoardResyncMsg(`Resynced ${data.resynced}/${data.scanned} (last ${data.days}d, top ${data.limit}, ${data.failed} failed${rl})`)
+                        }
+                      } catch (e: unknown) {
+                        setBoardResyncMsg(`Failed: ${errMsg(e)}`)
+                      } finally {
+                        setBoardResyncing(false)
+                      }
+                    }}
+                    className="text-xs text-text-secondary hover:text-text-primary border border-border rounded px-2 py-1 disabled:opacity-50 disabled:cursor-not-allowed cursor-pointer"
+                  >
+                    {boardResyncing ? 'Resyncing…' : 'Resync recent runs'}
+                  </button>
+                  {boardResyncMsg && <span className="text-xs text-text-tertiary">{boardResyncMsg}</span>}
+                </div>
+              )}
+              <div className="mt-4">
+                <label className="mb-1 block text-xs font-medium text-text-secondary">Kanban view URL <span className="text-text-tertiary">(optional)</span></label>
+                <input
+                  value={settings.github_board_view_url}
+                  onChange={(e) => handleChange('github_board_view_url', e.target.value)}
+                  placeholder="https://github.com/users/.../projects/7/views/2"
+                  className="w-full h-10 px-3 py-2 bg-bg-primary text-text-primary border border-border rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-accent/30 focus:border-accent transition-colors font-mono"
+                />
+              </div>
+            </div>
+          </details>
+        </section>
+      )
+    }
+
+    return (
+      <>
+        {tabHasAdvanced && (
+          <div className="flex justify-end">
+            <label className="inline-flex items-center gap-1.5 text-xs text-text-tertiary hover:text-text-secondary transition-colors cursor-pointer">
+              <input
+                type="checkbox"
+                checked={showAdvanced}
+                onChange={(e) => setShowAdvanced(e.target.checked)}
+                className="h-3.5 w-3.5 rounded border-border bg-bg-primary text-accent focus:ring-accent/30 cursor-pointer"
+              />
+              Show advanced
+            </label>
+          </div>
+        )}
+        {layout.map((entry) => {
+          if (entry.kind === 'subsection') return renderSubsection(entry.id)
+          if (entry.id === 'trusted') return renderTrustedUsers()
+          if (entry.id === 'retrieval') return renderRetrieval()
+          if (entry.id === 'github_board') return renderGithubBoard()
+          return null
+        })}
+      </>
+    )
+  }
   return (
     <div>
       <div className="mb-6 flex items-center justify-between">
@@ -442,272 +783,7 @@ export function SettingsPage({ initialTab }: { initialTab?: TabId } = {}) {
             onChange={switchTab}
           />
 
-          {GROUPS.filter((group) => group.id === activeTab).map((group) => {
-            const allGroupFields = (Object.keys(FIELDS) as SettingsFieldKey[]).filter(
-              (k) => FIELDS[k].group === group.id
-            ).filter((k) => {
-              if (k === 'trusted_github_users') return false
-              // LM Studio replaces the semantic fast/normal/smart selector with
-              // its own model identifier field — show one or the other, never both.
-              if (k === 'lmstudio_model') return settings.claude_provider === 'lmstudio'
-              if (k === 'default_model') return settings.claude_provider !== 'lmstudio'
-              return true
-            })
-            const normalFields   = allGroupFields.filter((k) => !FIELDS[k].advanced)
-            const advancedFields = allGroupFields.filter((k) =>  FIELDS[k].advanced)
-            const gridClass      = GRID_COLS[group.cols] ?? 'grid-cols-2'
-
-            return (
-              <section key={group.id} className="bg-bg-secondary rounded-lg border border-border">
-                <div className="px-5 py-3 border-b border-border flex items-baseline gap-3">
-                  <h3 className="text-sm font-semibold text-text-primary">{group.title}</h3>
-                  <p className="text-xs text-text-tertiary">{group.description}</p>
-                </div>
-                <div className="px-5 py-4">
-                  <div className={`grid ${gridClass} gap-x-6 gap-y-4`}>
-                    {normalFields.map((key) => (
-                      <SettingsField key={key} fieldKey={key} value={settings[key]} provider={settings.claude_provider} onChange={handleChange} />
-                    ))}
-                  </div>
-
-                  {group.id === 'general' && (
-                    <div className="mt-4">
-                      <TrustedGithubUsersField
-                        value={settings.trusted_github_users}
-                        onChange={(value) => handleChange('trusted_github_users', value)}
-                        onValidityChange={setTrustedGithubUsersError}
-                      />
-                    </div>
-                  )}
-
-                  {group.id === 'general' && (
-                    <div className="mt-4 rounded-xl border border-border bg-bg-primary/50 p-4">
-                      <div className="flex items-start justify-between gap-4">
-                        <div>
-                          <h4 className="text-sm font-semibold text-text-primary">Retrieval (Embeddings)</h4>
-                          <p className="mt-1 text-xs text-text-tertiary">
-                            Index project docs, skills, and config into pgvector via local Ollama embeddings, and inject the top-matching chunks into agent prompts. Reindex per project from the project&apos;s Config tab.
-                          </p>
-                        </div>
-                        <label className="inline-flex items-center gap-2 text-sm text-text-primary shrink-0">
-                          <input
-                            type="checkbox"
-                            checked={settings.retrieval_enabled === 'true'}
-                            onChange={(e) => handleChange('retrieval_enabled', e.target.checked ? 'true' : 'false')}
-                            className="h-4 w-4 rounded border-border bg-bg-primary text-accent focus:ring-accent/30"
-                          />
-                          Enabled
-                        </label>
-                      </div>
-                      <div className="mt-4 grid gap-4 md:grid-cols-2 lg:grid-cols-4">
-                        <div>
-                          <label className="mb-1 block text-xs font-medium text-text-secondary">Ollama URL</label>
-                          <input
-                            value={settings.retrieval_ollama_url}
-                            onChange={(e) => handleChange('retrieval_ollama_url', e.target.value)}
-                            placeholder="http://localhost:11434"
-                            className="w-full h-10 px-3 py-2 bg-bg-primary text-text-primary border border-border rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-accent/30 focus:border-accent transition-colors font-mono"
-                          />
-                        </div>
-                        <div>
-                          <label className="mb-1 block text-xs font-medium text-text-secondary">Embedding Model</label>
-                          <input
-                            value={settings.retrieval_embedding_model}
-                            onChange={(e) => handleChange('retrieval_embedding_model', e.target.value)}
-                            placeholder="nomic-embed-text"
-                            className="w-full h-10 px-3 py-2 bg-bg-primary text-text-primary border border-border rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-accent/30 focus:border-accent transition-colors font-mono"
-                          />
-                        </div>
-                        <div>
-                          <label className="mb-1 block text-xs font-medium text-text-secondary">Context Limit</label>
-                          <input
-                            type="number"
-                            min={1}
-                            value={settings.retrieval_context_limit}
-                            onChange={(e) => handleChange('retrieval_context_limit', e.target.value)}
-                            className="w-full h-10 px-3 py-2 bg-bg-primary text-text-primary border border-border rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-accent/30 focus:border-accent transition-colors font-mono"
-                          />
-                          <p className="mt-1 text-xs text-text-tertiary">Top-K chunks injected per prompt.</p>
-                        </div>
-                        <div>
-                          <label className="mb-1 block text-xs font-medium text-text-secondary">Score Threshold</label>
-                          <input
-                            type="number"
-                            min={0}
-                            max={1}
-                            step={0.05}
-                            value={settings.retrieval_score_threshold}
-                            onChange={(e) => handleChange('retrieval_score_threshold', e.target.value)}
-                            className="w-full h-10 px-3 py-2 bg-bg-primary text-text-primary border border-border rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-accent/30 focus:border-accent transition-colors font-mono"
-                          />
-                          <p className="mt-1 text-xs text-text-tertiary">0–1 cosine similarity cutoff.</p>
-                        </div>
-                      </div>
-                      <div className="mt-4">
-                        <label className="mb-1 block text-xs font-medium text-text-secondary">Reindex Interval (hours)</label>
-                        <input
-                          type="number"
-                          min={1}
-                          max={168}
-                          step={1}
-                          value={settings.retrieval_reindex_interval_hours}
-                          onChange={(e) => handleChange('retrieval_reindex_interval_hours', e.target.value)}
-                          className="w-32 h-10 px-3 py-2 bg-bg-primary text-text-primary border border-border rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-accent/30 focus:border-accent transition-colors font-mono"
-                        />
-                        <p className="mt-1 text-xs text-text-tertiary">
-                          How often the built-in <code className="font-mono">documentation-reindex-vectors</code> system agent runs on every enabled project. 1–168 (1 hour to 7 days).
-                        </p>
-                      </div>
-                      <label className="mt-4 inline-flex items-center gap-2 text-sm text-text-primary">
-                        <input
-                          type="checkbox"
-                          checked={settings.retrieval_manage_ollama === 'true'}
-                          onChange={(e) => handleChange('retrieval_manage_ollama', e.target.checked ? 'true' : 'false')}
-                          className="h-4 w-4 rounded border-border bg-bg-primary text-accent focus:ring-accent/30"
-                        />
-                        Auto-start Ollama if not running
-                      </label>
-                    </div>
-                  )}
-
-                  {group.id === 'general' && (
-                    <div className="mt-6 rounded-xl border border-border bg-bg-primary/50 p-4">
-                      <div className="flex items-start justify-between gap-4">
-                        <div>
-                          <h4 className="text-sm font-semibold text-text-primary">GitHub Board Sync</h4>
-                          <p className="mt-1 text-xs text-text-tertiary">
-                            Creates or reuses a global GitHub Project named <code className="font-mono">TamTam</code> and mirrors run lifecycle there.
-                          </p>
-                        </div>
-                        <label className="inline-flex items-center gap-2 text-sm text-text-primary">
-                          <input
-                            type="checkbox"
-                            checked={settings.github_board_sync_enabled === 'true'}
-                            onChange={(e) => handleChange('github_board_sync_enabled', e.target.checked ? 'true' : 'false')}
-                            className="h-4 w-4 rounded border-border bg-bg-primary text-accent focus:ring-accent/30"
-                          />
-                          Enabled
-                        </label>
-                      </div>
-                      <div className="mt-4 grid gap-4 md:grid-cols-3">
-                        <div>
-                          <label className="mb-1 block text-xs font-medium text-text-secondary">Project Owner</label>
-                          <input
-                            value={settings.github_board_project_owner}
-                            onChange={(e) => handleChange('github_board_project_owner', e.target.value)}
-                            placeholder={settings.github_owner || 'octocat'}
-                            className="w-full h-10 px-3 py-2 bg-bg-primary text-text-primary border border-border rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-accent/30 focus:border-accent transition-colors font-mono"
-                          />
-                        </div>
-                        <div>
-                          <label className="mb-1 block text-xs font-medium text-text-secondary">Project Title</label>
-                          <input
-                            value={settings.github_board_project_title}
-                            onChange={(e) => handleChange('github_board_project_title', e.target.value)}
-                            className="w-full h-10 px-3 py-2 bg-bg-primary text-text-primary border border-border rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-accent/30 focus:border-accent transition-colors font-mono"
-                          />
-                        </div>
-                        <div>
-                          <label className="mb-1 block text-xs font-medium text-text-secondary">Project Number</label>
-                          <input
-                            value={settings.github_board_project_number}
-                            readOnly
-                            className="w-full h-10 px-3 py-2 bg-bg-tertiary text-text-secondary border border-border rounded-lg text-sm font-mono"
-                          />
-                        </div>
-                      </div>
-                      {settings.github_board_project_url && (
-                        <div className="mt-3 flex items-center gap-3">
-                          <a
-                            href={settings.github_board_view_url || settings.github_board_project_url}
-                            target="_blank"
-                            rel="noopener noreferrer"
-                            className="inline-flex items-center gap-1 text-xs text-accent hover:underline"
-                          >
-                            Open board on GitHub ↗
-                          </a>
-                          {settings.github_board_view_url && (
-                            <span className="text-xs text-text-tertiary">(custom view configured)</span>
-                          )}
-                          <button
-                            type="button"
-                            disabled={boardResyncing || settings.github_board_sync_enabled !== 'true'}
-                            onClick={async () => {
-                              setBoardResyncing(true)
-                              setBoardResyncMsg(null)
-                              try {
-                                const res = await fetch('/api/settings/board-resync', { method: 'POST' })
-                                const data = await res.json()
-                                if (!res.ok || !data.ok) {
-                                  setBoardResyncMsg(data.error || `HTTP ${res.status}`)
-                                } else {
-                                  const rl = data.rateLimited ? ', rate-limited — wait 5 min and retry' : ''
-                                  setBoardResyncMsg(`Resynced ${data.resynced}/${data.scanned} (last ${data.days}d, top ${data.limit}, ${data.failed} failed${rl})`)
-                                }
-                              } catch (e: unknown) {
-                                setBoardResyncMsg(`Failed: ${errMsg(e)}`)
-                              } finally {
-                                setBoardResyncing(false)
-                              }
-                            }}
-                            className="text-xs text-text-secondary hover:text-text-primary border border-border rounded px-2 py-1 disabled:opacity-50 disabled:cursor-not-allowed cursor-pointer"
-                          >
-                            {boardResyncing ? 'Resyncing…' : 'Resync recent runs'}
-                          </button>
-                          {boardResyncMsg && <span className="text-xs text-text-tertiary">{boardResyncMsg}</span>}
-                        </div>
-                      )}
-                      <div className="mt-4">
-                        <label className="mb-1 block text-xs font-medium text-text-secondary">Kanban view URL <span className="text-text-tertiary">(optional)</span></label>
-                        <input
-                          value={settings.github_board_view_url}
-                          onChange={(e) => handleChange('github_board_view_url', e.target.value)}
-                          placeholder="https://github.com/users/.../projects/7/views/2"
-                          className="w-full h-10 px-3 py-2 bg-bg-primary text-text-primary border border-border rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-accent/30 focus:border-accent transition-colors font-mono"
-                        />
-                      </div>
-                      {settings.github_board_project_url && (
-                        <div className="mt-4 rounded-lg border border-border bg-bg-secondary/50 p-3 text-xs text-text-secondary">
-                          <div className="font-semibold text-text-primary mb-1">Optional: pin a custom kanban view</div>
-                          <p className="text-text-tertiary mb-2">
-                            TamTam writes to the project&apos;s built-in <code className="font-mono">Status</code> field and adds <code className="font-mono">Review</code>, <code className="font-mono">Fixing</code>, and <code className="font-mono">Blocked</code> on top of GitHub&apos;s default <code className="font-mono">Todo / In Progress / Done</code>. The default <code className="font-mono">View 1</code> already groups by Status — no setup needed. To deep-link to a custom view from TamTam, create one and paste its URL above.
-                          </p>
-                          <ol className="list-decimal list-inside space-y-0.5 text-text-tertiary">
-                            <li>Open the board (link above) and click <span className="font-mono text-text-secondary">+ New view</span></li>
-                            <li>Pick <span className="font-mono text-text-secondary">Board</span> and group by <span className="font-mono text-text-secondary">Status</span></li>
-                            <li>Save, then copy the new view URL into the field above so all <span className="font-mono text-text-secondary">Board ↗</span> chips deep-link to it</li>
-                          </ol>
-                        </div>
-                      )}
-                    </div>
-                  )}
-
-                  {advancedFields.length > 0 && (
-                    <div className="mt-4">
-                      <button
-                        type="button"
-                        onClick={() => setShowAdvanced((v) => !v)}
-                        className="flex items-center gap-1.5 text-xs text-text-tertiary hover:text-text-secondary transition-colors cursor-pointer"
-                      >
-                        <svg className={`w-3 h-3 transition-transform ${showAdvanced ? 'rotate-90' : ''}`}
-                          fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2.5}>
-                          <path strokeLinecap="round" strokeLinejoin="round" d="M9 5l7 7-7 7" />
-                        </svg>
-                        Advanced
-                      </button>
-                      {showAdvanced && (
-                        <div className={`mt-4 grid ${gridClass} gap-x-6 gap-y-4 pl-4 border-l border-border`}>
-                          {advancedFields.map((key) => (
-                            <SettingsField key={key} fieldKey={key} value={settings[key]} provider={settings.claude_provider} onChange={handleChange} />
-                          ))}
-                        </div>
-                      )}
-                    </div>
-                  )}
-                </div>
-              </section>
-            )
-          })}
+          {renderTabBody()}
 
           {/* Projects */}
           {activeTab === 'projects' && settings.workspace_path && (
