@@ -6,9 +6,11 @@ import type { ReactNode } from 'react'
 export interface Column<T> {
   key: string
   label: string
+  title?: string
   sortable?: boolean
   sortValue?: (row: T) => number | string
   render: (row: T) => ReactNode
+  cellTitle?: (row: T) => string
   headerClass?: string
   cellClass?: string
 }
@@ -17,6 +19,9 @@ interface TableProps<T> {
   columns: Column<T>[]
   rows: T[]
   getRowKey: (row: T) => string
+  rowId?: (row: T) => string
+  rowClassName?: (row: T) => string
+  onRowClick?: (row: T) => void
   defaultSortKey?: string
   defaultSortDir?: 'asc' | 'desc'
   emptyState?: ReactNode
@@ -28,6 +33,9 @@ export function Table<T>({
   columns,
   rows,
   getRowKey,
+  rowId,
+  rowClassName,
+  onRowClick,
   defaultSortKey = '',
   defaultSortDir = 'asc',
   emptyState,
@@ -80,6 +88,7 @@ export function Table<T>({
                   .filter(Boolean)
                   .join(' ')}
                 onClick={col.sortable ? () => handleSort(col.key) : undefined}
+                title={col.title}
               >
                 <span className="inline-flex items-center gap-1">
                   {col.label}
@@ -105,11 +114,26 @@ export function Table<T>({
           ) : (
             sorted.map(row => {
               const expanded = expandedRender ? expandedRender(row) : null
+              const clickable = onRowClick !== undefined
               return (
                 <React.Fragment key={getRowKey(row)}>
-                  <tr className="border-b border-border last:border-0 transition-colors hover:bg-bg-secondary/40">
+                  <tr
+                    id={rowId?.(row)}
+                    className={[
+                      'border-b border-border last:border-0 transition-colors hover:bg-bg-secondary/40',
+                      clickable ? 'cursor-pointer' : '',
+                      rowClassName?.(row) ?? '',
+                    ]
+                      .filter(Boolean)
+                      .join(' ')}
+                    onClick={clickable ? () => onRowClick(row) : undefined}
+                  >
                     {columns.map(col => (
-                      <td key={col.key} className={`px-3 py-2.5 ${col.cellClass ?? ''}`}>
+                      <td
+                        key={col.key}
+                        className={`px-3 py-2.5 ${col.cellClass ?? ''}`}
+                        title={col.cellTitle?.(row)}
+                      >
                         {col.render(row)}
                       </td>
                     ))}
