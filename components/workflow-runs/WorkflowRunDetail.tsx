@@ -9,6 +9,7 @@ import {
   workflowStepNeedsAttention,
 } from '@/components/workflow-runs/WorkflowStepAttentionPanel';
 import { WorkflowStatusBadge, workflowStatusPresentation } from '@/components/workflow-runs/workflow-run-status';
+import { Table, type Column } from '@/components/ui/Table';
 
 interface Step {
   stepId: string;
@@ -308,6 +309,45 @@ export function WorkflowRunDetail({ runId }: { runId: string }) {
       completedLabel: formatRelativeTime(step.completedAt ?? step.startedAt, now),
       error: step.error,
     }));
+  const stepColumns: Column<Step>[] = [
+    {
+      key: 'step',
+      label: 'Step',
+      render: (step) => (
+        <div className="font-mono text-xs text-text-primary">
+          <div>{step.name}</div>
+          <StepDiagnostics error={step.error} output={step.output} className="mt-1" />
+        </div>
+      ),
+      cellTitle: (step) => step.rawName,
+    },
+    {
+      key: 'status',
+      label: 'Status',
+      render: (step) => <WorkflowStatusBadge status={step.status} />,
+    },
+    {
+      key: 'attempt',
+      label: 'Attempt',
+      render: (step) => step.attempt,
+      headerClass: 'text-right',
+      cellClass: 'text-right font-mono text-xs text-text-secondary',
+    },
+    {
+      key: 'duration',
+      label: 'Duration',
+      render: (step) => formatDurationCell(step.status, step.durationMs, step.startedAt, now),
+      headerClass: 'text-right',
+      cellClass: 'text-right font-mono text-xs text-text-secondary',
+    },
+    {
+      key: 'last-event',
+      label: 'Last event',
+      render: (step) => formatRelativeTime(step.completedAt ?? step.startedAt, now),
+      cellTitle: (step) => formatAbsoluteTime(step.completedAt ?? step.startedAt),
+      cellClass: 'whitespace-nowrap text-xs text-text-secondary',
+    },
+  ];
 
   return (
     <div className="p-4 sm:p-6 space-y-6">
@@ -445,50 +485,20 @@ export function WorkflowRunDetail({ runId }: { runId: string }) {
                 </div>
               ))}
             </div>
-            <div className="hidden overflow-hidden rounded-md border border-border sm:block">
-              <table className="w-full text-sm">
-                <thead className="bg-bg-secondary text-text-secondary text-xs uppercase tracking-wide">
-                  <tr>
-                    <th className="text-left px-3 py-2 font-medium">Step</th>
-                    <th className="text-left px-3 py-2 font-medium">Status</th>
-                    <th className="text-right px-3 py-2 font-medium">Attempt</th>
-                    <th className="text-right px-3 py-2 font-medium">Duration</th>
-                    <th className="text-left px-3 py-2 font-medium">Last event</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {data.steps.map((s) => (
-                    <tr
-                      key={s.stepId}
-                      id={workflowStepAnchorId(s.stepId, 'desktop')}
-                      className={`scroll-mt-4 border-t align-top ${
-                        workflowStepNeedsAttention(s)
-                          ? 'border-status-error/30 bg-status-error/10'
-                          : 'border-border'
-                      }`}
-                    >
-                      <td className="px-3 py-2 font-mono text-xs text-text-primary" title={s.rawName}>
-                        <div>{s.name}</div>
-                        <StepDiagnostics error={s.error} output={s.output} className="mt-1" />
-                      </td>
-                      <td className="px-3 py-2">
-                        <WorkflowStatusBadge status={s.status} />
-                      </td>
-                      <td className="px-3 py-2 text-right font-mono text-xs text-text-secondary">{s.attempt}</td>
-                      <td className="px-3 py-2 text-right font-mono text-xs text-text-secondary">
-                        {formatDurationCell(s.status, s.durationMs, s.startedAt, now)}
-                      </td>
-                      <td
-                        className="whitespace-nowrap px-3 py-2 text-xs text-text-secondary"
-                        title={formatAbsoluteTime(s.completedAt ?? s.startedAt)}
-                      >
-                        {formatRelativeTime(s.completedAt ?? s.startedAt, now)}
-                      </td>
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
-            </div>
+            <Table
+              columns={stepColumns}
+              rows={data.steps}
+              getRowKey={(step) => step.stepId}
+              rowId={(step) => workflowStepAnchorId(step.stepId, 'desktop')}
+              rowClassName={(step) =>
+                `hidden scroll-mt-4 align-top sm:table-row ${
+                  workflowStepNeedsAttention(step)
+                    ? 'border-status-error/30 bg-status-error/10'
+                    : 'border-border'
+                }`
+              }
+              className="hidden sm:block"
+            />
           </>
         )}
       </div>
