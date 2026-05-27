@@ -148,9 +148,11 @@ Read the relevant file before touching the subsystem it covers.
 | `docs/superpowers/plans/2026-04-16-docs-picker.md` | Historical implementation plan for docs picker | Tracing why the docs picker exists or comparing current behavior to the original plan |
 | `docs/superpowers/plans/2026-05-13-agent-retrieval.md` | Historical agent retrieval implementation plan | Reviewing the original retrieval rollout plan before changing retrieval ingestion or prompt-time lookup |
 | `docs/superpowers/plans/2026-05-13-durable-agent-orchestration.md` | Historical evaluation of durable agent orchestration | Understanding the earlier workflow adoption tradeoff analysis and why it was superseded |
+| `docs/superpowers/plans/2026-05-15-cron-migration-graphile.md` | Historical implementation plan for graphile-worker cron migration | Tracing why graphile-worker powers scheduled agents or comparing current scheduling behavior to the original plan |
 | `docs/superpowers/specs/2026-04-16-docs-picker-design.md` | Approved design for docs picker | Changing docs picker API/UI behavior and needing the approved contract |
 | `docs/superpowers/specs/2026-05-13-agent-retrieval-design.md` | Approved semantic retrieval design | Changing retrieval architecture, ranking, or storage assumptions |
 | `docs/superpowers/specs/2026-05-14-postgres-workflow-cutover-design.md` | Approved Postgres/workflow cutover design | Touching Postgres-only assumptions, workflow-always-on intake, or cleanup of older SQLite-era patterns |
+| `docs/superpowers/specs/2026-05-21-sandboxed-playwright-broker-design.md` | Approved design for sandboxed Playwright broker | Changing browser-broker container lifecycle, Playwright sandbox configuration, or QA agent MCP tool access under auto/acceptEdits permission modes |
 | `docs/TAMTAM-DIR.md` | `.tamtam/config.yml` and file-agent contract | Changing committed per-project config, agent files, or auto-attached docs behavior |
 | `docs/TESTING.md` | Vitest/PGlite patterns and mock rules | Adding tests, especially API tests, or debugging test harness setup |
 | `docs/UI.md` | Design tokens, component patterns, and visual rules | Changing UI styling, layout patterns, or deciding whether a visual choice fits TamTam |
