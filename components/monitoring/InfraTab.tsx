@@ -1,6 +1,7 @@
 'use client'
 
 import { useState } from 'react'
+import { Button } from '@/components/ui/Button'
 import { SectionHeader } from './shared'
 import type { MonitoringData, TimeWindow } from './types'
 import { WINDOW_LABELS } from './types'
@@ -97,10 +98,15 @@ function LogRow({ entry, color }: { entry: { ts: string; stream: Record<string, 
           </span>
         )}
         {expanded && isLong && (
-          <button
-            className="ml-2 text-text-tertiary underline hover:text-text-secondary cursor-pointer border-none bg-transparent text-xs font-mono"
+          <Button
+            type="button"
+            variant="ghost"
+            size="sm"
+            className="ml-2 !border-0 !bg-transparent !px-0 !py-0 align-baseline text-xs font-mono font-normal text-text-tertiary underline hover:!bg-transparent hover:text-text-secondary"
             onClick={e => { e.stopPropagation(); setExpanded(false) }}
-          >collapse</button>
+          >
+            collapse
+          </Button>
         )}
       </span>
     </div>
