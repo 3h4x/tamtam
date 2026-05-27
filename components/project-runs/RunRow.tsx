@@ -1,6 +1,7 @@
 'use client'
 
 import { formatAgo } from '@/lib/shared/format'
+import { isCancelledExitCode } from '@/lib/shared/job-exit-codes'
 import { formatDuration, formatTokens, formatCost, KIND_LABEL, KIND_COLOR, entryIsRunning, entryNeedsAttention } from '@/components/project-runs/utils'
 import type { Entry } from '@/components/project-runs/utils'
 
@@ -274,7 +275,7 @@ export function RunRow({ entry: e, onClick, expandable, expanded, onToggleExpand
   const effectiveRunning = entryIsRunning(e)
   const effectiveNeedsAttention = entryNeedsAttention(e)
   const statusFailureLabel = e.failureLabel
-    ?? (e.status === 'aborted' || e.exitCode === -3
+    ?? (e.status === 'aborted' || isCancelledExitCode(e.exitCode)
       ? 'cancelled'
       : null)
     ?? (e.releaseOutcome?.status === 'blocked'

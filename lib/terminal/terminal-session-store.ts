@@ -2,6 +2,7 @@
 // so switching tabs or navigating away does not drop live streams or history.
 
 import { createParseState, parseStreamLines } from '@/lib/jobs/claude-stream-parser'
+import { isCancelledExitCode } from '@/lib/shared/job-exit-codes'
 
 export interface ToolEntry {
   name: string
@@ -115,7 +116,7 @@ interface BuildTerminalEntriesOptions {
 
 export function terminalExitEntry(exitCode: number): Pick<TermEntry, 'role' | 'text'> {
   if (exitCode === 0) return { role: 'status', text: 'exit 0 — ok' }
-  if (exitCode === -2 || exitCode === -3) return { role: 'error', text: 'cancelled' }
+  if (isCancelledExitCode(exitCode)) return { role: 'error', text: 'cancelled' }
   return { role: 'error', text: `exit ${exitCode}` }
 }
 
