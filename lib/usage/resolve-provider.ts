@@ -47,6 +47,8 @@ function pickMostUrgentProvider(
 export interface ResolveProviderOptions {
   /** Inherit from this parent job's `provider` if set (pipeline children). */
   parentJobId?: string | null;
+  /** When true, do not repick if the parent provider is disabled or blocked. */
+  strictParentProvider?: boolean;
   /** Agent's stored preference, or explicit override from a route handler. */
   preferred?: string | null;
   /** When true, do not fall back to another provider if `preferred` cannot run. */
@@ -77,7 +79,7 @@ function enabledProvidersFromSettings(settings: ReturnType<typeof getSettings>):
 
 /**
  * Resolve which CLI provider should run a job. Order of precedence:
- *   1. parent's stored provider — pipeline children inherit
+ *   1. parent's stored provider — pipeline children inherit while it is runnable
  *   2. caller-supplied `preferred`, if it's still in the enabled set and
  *      survives the current budget gate
  *   3. policy pick: most-remaining-quota among enabled, gated by budget
@@ -90,18 +92,47 @@ function enabledProvidersFromSettings(settings: ReturnType<typeof getSettings>):
 export async function resolveProviderForRun(
   opts: ResolveProviderOptions = {},
 ): Promise<PickCliResult> {
-  if (opts.parentJobId) {
-    const parent = getJob(opts.parentJobId);
-    const inherited = parent?.provider;
-    if (typeof inherited === 'string' && isCliProvider(inherited)) {
-      return { provider: inherited };
-    }
-  }
-
   const settings = getSettings();
   // Tolerate older / mocked settings that omit the new cli_enabled_providers
   // key — fall back to the legacy `claude_provider` if present, else claude.
   const enabled = enabledProvidersFromSettings(settings);
+
+  if (opts.parentJobId) {
+    const parent = getJob(opts.parentJobId);
+    const inherited = parent?.provider;
+    if (typeof inherited === 'string' && isCliProvider(inherited)) {
+      if (!enabled.includes(inherited)) {
+        if (opts.strictParentProvider) {
+          return { provider: null, reason: 'parent_provider_unavailable' };
+        }
+        return { provider: inherited };
+      }
+      if (enabled.length <= 1 && !opts.strictParentProvider) {
+        return { provider: inherited };
+      }
+      try {
+        const snapshots = await getQuotaSnapshots(enabled);
+        const includeWeekly = !!settings.budget_block_on_weekly_pace_enabled;
+        const inheritedUtilization = hardGateUtilizationFor(snapshots.get(inherited) ?? null, { includeWeekly });
+        if (inheritedUtilization < (settings.budget_block_at_pct ?? 95)) {
+          return { provider: inherited, utilization: inheritedUtilization };
+        }
+        if (opts.strictParentProvider) {
+          return { provider: null, reason: 'parent_provider_blocked' };
+        }
+        return pickCliProvider({
+          enabled,
+          snapshots,
+          budgetBlockAtPct: settings.budget_block_at_pct ?? 95,
+          blockEnabled: !!settings.budget_block_runs_enabled,
+          blockOnWeeklyPace: includeWeekly,
+          requestedModel: opts.requestedModel ?? null,
+        });
+      } catch {
+        return { provider: inherited };
+      }
+    }
+  }
 
   if (enabled.length === 0) {
     return { provider: opts.fallback ?? 'claude' };
@@ -118,6 +149,19 @@ export async function resolveProviderForRun(
     // docs/SETTINGS.md → "Pace-aware provider routing".
     try {
       const snapshots = await getQuotaSnapshots(enabled);
+      const preferredUtilization = hardGateUtilizationFor(snapshots.get(preferred) ?? null, {
+        includeWeekly: !!settings.budget_block_on_weekly_pace_enabled,
+      });
+      if (preferredUtilization >= (settings.budget_block_at_pct ?? 95)) {
+        return pickCliProvider({
+          enabled,
+          snapshots,
+          budgetBlockAtPct: settings.budget_block_at_pct ?? 95,
+          blockEnabled: !!settings.budget_block_runs_enabled,
+          blockOnWeeklyPace: !!settings.budget_block_on_weekly_pace_enabled,
+          requestedModel: opts.requestedModel ?? null,
+        });
+      }
       const urgent = pickMostUrgentProvider(snapshots, enabled);
       if (urgent && urgent !== preferred) {
         return { provider: urgent, reason: 'pace_override' };
@@ -131,7 +175,7 @@ export async function resolveProviderForRun(
   // Fast path: only one enabled CLI → no need to fetch quotas to compare.
   // Budget gate can still kick in via the existing `runGates` helper at the
   // top of each route, so this is safe.
-  if (enabled.length === 1 && !settings.budget_block_runs_enabled) {
+  if (enabled.length === 1 && !settings.budget_block_runs_enabled && enabled[0] !== 'claude' && enabled[0] !== 'codex') {
     return { provider: enabled[0] };
   }
 
@@ -163,35 +207,47 @@ export async function checkCliStartGate(
       return { ok: false, status: paused.status, detail: paused.detail };
     }
   }
+  if (opts.strictParentProvider && opts.parentJobId) {
+    const parent = getJob(opts.parentJobId);
+    const inherited = parent?.provider;
+    if (typeof inherited === 'string' && isCliProvider(inherited)) {
+      return checkStrictProviderStart(inherited, 'Inherited', 'continue this provider-scoped session');
+    }
+  }
   if (opts.strictPreferred && opts.preferred && isCliProvider(opts.preferred)) {
-    const settings = getSettings();
-    const enabled = enabledProvidersFromSettings(settings);
-    const preferred = opts.preferred;
-    if (!enabled.includes(preferred)) {
-      return {
-        ok: false,
-        status: 409,
-        detail: `Selected provider '${preferred}' is not enabled. Pick another provider or enable it in Settings → CLI.`,
-      };
-    }
-    if (settings.budget_block_runs_enabled) {
-      const snapshots = await getQuotaSnapshots([preferred]);
-      const utilization = hardGateUtilizationFor(snapshots.get(preferred) ?? null, {
-        includeWeekly: !!settings.budget_block_on_weekly_pace_enabled,
-      });
-      if (utilization >= (settings.budget_block_at_pct ?? 95)) {
-        return {
-          ok: false,
-          status: 429,
-          detail: `Selected provider '${preferred}' is over budget right now. Pick another provider or wait for its quota window to reset.`,
-        };
-      }
-    }
-    return { ok: true, provider: preferred };
+    return checkStrictProviderStart(opts.preferred, 'Selected', 'start with this provider');
   }
   const picked = await resolveProviderForRun(opts);
   if (!picked.provider) {
     return { ok: false, status: 429, detail: ALL_PROVIDERS_BLOCKED_DETAIL };
   }
   return { ok: true, provider: picked.provider };
+}
+
+async function checkStrictProviderStart(
+  provider: CliProvider,
+  label: 'Selected' | 'Inherited',
+  actionHint: string,
+): Promise<CliStartGateResult> {
+  const settings = getSettings();
+  const enabled = enabledProvidersFromSettings(settings);
+  if (!enabled.includes(provider)) {
+    return {
+      ok: false,
+      status: 409,
+      detail: `${label} provider '${provider}' is not enabled. Pick another provider or enable it in Settings → CLI.`,
+    };
+  }
+  const snapshots = await getQuotaSnapshots([provider]);
+  const utilization = hardGateUtilizationFor(snapshots.get(provider) ?? null, {
+    includeWeekly: !!settings.budget_block_on_weekly_pace_enabled,
+  });
+  if (utilization >= (settings.budget_block_at_pct ?? 95)) {
+    return {
+      ok: false,
+      status: 429,
+      detail: `${label} provider '${provider}' is over budget right now. Wait for its quota window to reset before trying to ${actionHint}.`,
+    };
+  }
+  return { ok: true, provider };
 }

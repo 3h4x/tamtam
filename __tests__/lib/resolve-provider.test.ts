@@ -24,19 +24,46 @@ describe('resolveProviderForRun', () => {
 
     vi.doMock('@/lib/jobs/storage', () => ({ getJob: getJobMock, listJobs: vi.fn(), updateJob: vi.fn() }));
     vi.doMock('@/lib/shared/config', () => ({ getSettings: getSettingsMock }));
-    vi.doMock('@/lib/shared/job-control', () => ({ jobsPausedResult: jobsPausedResultMock }));
+    vi.doMock('@/lib/shared/job-control', () => ({
+      jobsPausedResult: jobsPausedResultMock,
+    }));
     vi.doMock('@/lib/usage/quota', () => ({ getQuotaSnapshots: getQuotaSnapshotsMock }));
   });
 
   afterEach(() => vi.resetModules());
 
-  it('inherits the parent job\'s provider when set', async () => {
+  it('inherits the parent job\'s provider when it is still runnable', async () => {
     getJobMock.mockReturnValue({ id: 'parent-1', provider: 'codex' } as JobData);
     const { resolveProviderForRun } = await import('@/lib/usage/resolve-provider');
     const result = await resolveProviderForRun({ parentJobId: 'parent-1' });
     expect(result.provider).toBe('codex');
-    // Parent inheritance should not even consult the picker.
-    expect(getQuotaSnapshotsMock).not.toHaveBeenCalled();
+    expect(getQuotaSnapshotsMock).toHaveBeenCalledWith(['claude', 'codex']);
+  });
+
+  it('repicks when the inherited parent provider is hard-limited and another provider is healthy', async () => {
+    getJobMock.mockReturnValue({ id: 'parent-1', provider: 'claude' } as JobData);
+    getQuotaSnapshotsMock.mockResolvedValue(new Map([
+      ['claude', { fiveHour: { utilization: 100 }, sevenDay: { utilization: 71, msUntilReset: 16 * 60 * 60 * 1000 } }],
+      ['codex', { fiveHour: { utilization: 3 }, sevenDay: { utilization: 18, msUntilReset: 74 * 60 * 60 * 1000 } }],
+    ]));
+    const { resolveProviderForRun } = await import('@/lib/usage/resolve-provider');
+    const result = await resolveProviderForRun({ parentJobId: 'parent-1' });
+    expect(result.provider).toBe('codex');
+  });
+
+  it('does not repick a blocked parent provider when parent inheritance is strict', async () => {
+    getJobMock.mockReturnValue({ id: 'parent-1', provider: 'claude' } as JobData);
+    getQuotaSnapshotsMock.mockResolvedValue(new Map([
+      ['claude', { fiveHour: { utilization: 100 } }],
+      ['codex', { fiveHour: { utilization: 3 } }],
+    ]));
+    const { resolveProviderForRun } = await import('@/lib/usage/resolve-provider');
+    const result = await resolveProviderForRun({
+      parentJobId: 'parent-1',
+      strictParentProvider: true,
+    });
+    expect(result.provider).toBeNull();
+    expect(result.reason).toBe('parent_provider_blocked');
   });
 
   it('falls through to the picker when the parent has no provider', async () => {
@@ -104,6 +131,22 @@ describe('resolveProviderForRun', () => {
     const result = await resolveProviderForRun();
     expect(result.provider).toBeNull();
     expect(result.reason).toBe('all_blocked');
+  });
+
+  it('does not block provider resolution when the budget gate is disabled', async () => {
+    getSettingsMock.mockReturnValue({
+      cli_enabled_providers: ['claude', 'codex'],
+      claude_provider: 'claude',
+      budget_block_at_pct: 95,
+      budget_block_runs_enabled: false,
+    });
+    getQuotaSnapshotsMock.mockResolvedValue(new Map([
+      ['claude', { fiveHour: { utilization: 99 } }],
+      ['codex', { fiveHour: { utilization: 98 } }],
+    ]));
+    const { resolveProviderForRun } = await import('@/lib/usage/resolve-provider');
+    const result = await resolveProviderForRun();
+    expect(result.provider).not.toBeNull();
   });
 
   it('fails open to provider order when all quota-aware providers are unknown', async () => {
@@ -211,6 +254,22 @@ describe('resolveProviderForRun', () => {
     expect(result).toEqual({ ok: true, provider: 'codex' });
   });
 
+  it('does not block the start gate when all providers are over threshold but budget blocking is disabled', async () => {
+    getSettingsMock.mockReturnValue({
+      cli_enabled_providers: ['claude', 'codex'],
+      claude_provider: 'claude',
+      budget_block_at_pct: 95,
+      budget_block_runs_enabled: false,
+    });
+    getQuotaSnapshotsMock.mockResolvedValue(new Map([
+      ['claude', { fiveHour: { utilization: 99 } }],
+      ['codex', { fiveHour: { utilization: 98 } }],
+    ]));
+    const { checkCliStartGate } = await import('@/lib/usage/resolve-provider');
+    const result = await checkCliStartGate('start a release');
+    expect(result.ok).toBe(true);
+  });
+
   it('blocks a strict preferred provider when it is disabled', async () => {
     getSettingsMock.mockReturnValue({
       cli_enabled_providers: ['codex'],
@@ -248,11 +307,12 @@ describe('resolveProviderForRun', () => {
     expect(result).toEqual({
       ok: false,
       status: 429,
-      detail: "Selected provider 'claude' is over budget right now. Pick another provider or wait for its quota window to reset.",
+      detail: "Selected provider 'claude' is over budget right now. Wait for its quota window to reset before trying to start with this provider.",
     });
   });
 
-  it('blocks the start gate when one provider is over budget and the sibling quota-aware snapshot is missing', async () => {
+  it('blocks strict parent inheritance instead of repicking across a provider-scoped session', async () => {
+    getJobMock.mockReturnValue({ id: 'parent-1', provider: 'claude' } as JobData);
     getSettingsMock.mockReturnValue({
       cli_enabled_providers: ['claude', 'codex'],
       claude_provider: 'claude',
@@ -261,11 +321,45 @@ describe('resolveProviderForRun', () => {
     });
     getQuotaSnapshotsMock.mockResolvedValue(new Map([
       ['claude', { fiveHour: { utilization: 99 } }],
-      ['codex', null],
+      ['codex', { fiveHour: { utilization: 10 } }],
     ]));
+    const { checkCliStartGate } = await import('@/lib/usage/resolve-provider');
+    const result = await checkCliStartGate('start a fix job', {
+      parentJobId: 'parent-1',
+      strictParentProvider: true,
+    });
+    expect(result).toEqual({
+      ok: false,
+      status: 429,
+      detail: "Inherited provider 'claude' is over budget right now. Wait for its quota window to reset before trying to continue this provider-scoped session.",
+    });
+    expect(getQuotaSnapshotsMock).toHaveBeenCalledWith(['claude']);
+  });
+
+  it('blocks the start gate without globally pausing when all enabled providers are unavailable', async () => {
+    getSettingsMock.mockReturnValue({
+      cli_enabled_providers: ['claude', 'codex'],
+      claude_provider: 'claude',
+      budget_block_at_pct: 95,
+      budget_block_runs_enabled: true,
+    });
+    getQuotaSnapshotsMock
+      .mockResolvedValueOnce(new Map([
+        ['claude', { fiveHour: { utilization: 99 } }],
+        ['codex', null],
+      ]))
+      .mockResolvedValueOnce(new Map([
+        ['claude', { fiveHour: { utilization: 40 } }],
+        ['codex', { fiveHour: { utilization: 10 } }],
+      ]));
     const { checkCliStartGate, ALL_PROVIDERS_BLOCKED_DETAIL } = await import('@/lib/usage/resolve-provider');
-    const result = await checkCliStartGate('start a release');
-    expect(result).toEqual({ ok: false, status: 429, detail: ALL_PROVIDERS_BLOCKED_DETAIL });
+    const blocked = await checkCliStartGate('start a release');
+    expect(blocked).toEqual({ ok: false, status: 429, detail: ALL_PROVIDERS_BLOCKED_DETAIL });
+    expect(jobsPausedResultMock).toHaveBeenCalledTimes(1);
+
+    const recovered = await checkCliStartGate('start a release');
+    expect(recovered).toEqual({ ok: true, provider: 'codex' });
+    expect(jobsPausedResultMock).toHaveBeenCalledTimes(2);
   });
 
   it('enforces the global pause by default', async () => {

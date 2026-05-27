@@ -8,6 +8,7 @@ import { getJob, createJob, readParsedLog, probeJobStatus, updateJob, listJobs }
 import { startJobInProcess } from '@/lib/jobs/spawn-claude-detached';
 import { acquireLock, isLockOwnedByActiveRelease } from './pipeline-lock';
 import { FIX_OUTPUT_CONTRACT, stripFinalVerdict, stripShimErrors, isReviewContentTooThin } from './review-contract';
+import { isCliProvider } from '@/lib/usage/cli-providers';
 
 export type StartFixResult =
   | { ok: true; jobId: string; pid: number }
@@ -49,14 +50,31 @@ export async function startFixFromJob(sourceJobId: string): Promise<StartFixResu
   const { logDir } = getImproveConfig();
   const projPath = resolveProjectPath(projectName);
   if (!projPath) return { ok: false, status: 404, detail: 'project not found' };
-  const gate = await checkCliStartGate('start a fix job', { parentJobId: sourceJob.id });
+  const resumeSessionId = sourceJob.sessionId ?? null;
+  const resumeProvider = resumeSessionId && isCliProvider(sourceJob.provider) ? sourceJob.provider : null;
+  if (resumeSessionId && !resumeProvider) {
+    return {
+      ok: false,
+      status: 409,
+      detail: `Cannot resume session ${resumeSessionId}: source job has no recorded CLI provider.`,
+    };
+  }
+  const gate = await checkCliStartGate('start a fix job', resumeProvider
+    ? { parentJobId: sourceJob.id, strictParentProvider: true }
+    : { parentJobId: sourceJob.id });
   if (!gate.ok) return gate;
   const provider = gate.provider;
+  if (resumeProvider && provider !== resumeProvider) {
+    return {
+      ok: false,
+      status: 409,
+      detail: `Cannot resume session on ${provider}: original session ran on ${resumeProvider}, which is currently disabled or over budget.`,
+    };
+  }
   const settings = getSettings();
   const cliBin = resolveCliBin(provider, settings);
   const cliEnv = resolveCliEnv(provider, settings);
 
-  const resumeSessionId = sourceJob.sessionId ?? null;
   const rawLog = readParsedLog(sourceJob);
   let findingsBlock = stripFinalVerdict(rawLog);
   const { cleaned: shimStripped, hadShimErrors } = stripShimErrors(findingsBlock);

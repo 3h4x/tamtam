@@ -18,7 +18,7 @@ describe('startFixFromJob', () => {
       id: 'src-job-1', project: 'myproject', kind: 'review', pid: 111,
       logPath: '/tmp/src-job-1.log', prompt: null,
       startedAt: Date.now() / 1000, finishedAt: 1000, exitCode: 1, seen: false,
-      sessionId: null, inputTokens: 0, outputTokens: 0,
+      sessionId: null, provider: 'claude', inputTokens: 0, outputTokens: 0,
       cacheReadTokens: 0, cacheCreateTokens: 0,
       ...overrides,
     };
@@ -181,6 +181,10 @@ describe('startFixFromJob', () => {
 
     await startFixFromJob('src-job-1');
 
+    expect(checkCliStartGateMock).toHaveBeenCalledWith('start a fix job', {
+      parentJobId: 'src-job-1',
+      strictParentProvider: true,
+    });
     const [, command, prompt] = startJobMock.mock.calls[0];
     expect(command).toContain('--resume ses-abc123');
     expect(prompt).toContain('Apply fixes for ALL the findings');
@@ -197,6 +201,56 @@ describe('startFixFromJob', () => {
     const updatedJob = updateJobMock.mock.calls[0][0];
     expect(updatedJob.promptBytes).toBeGreaterThan(0);
     expect(updatedJob.sessionId).toBe('ses-xyz');
+  });
+
+  it('does not launch a resumed fix when the source provider is blocked', async () => {
+    getJobMock.mockReturnValue(makeSourceJob({ sessionId: 'ses-abc123', provider: 'claude' }));
+    checkCliStartGateMock.mockResolvedValue({
+      ok: false,
+      status: 429,
+      detail: "Selected provider 'claude' is over budget right now. Pick another provider or wait for its quota window to reset.",
+    });
+
+    const r = await startFixFromJob('src-job-1');
+
+    expect(r.ok).toBe(false);
+    if (!r.ok) {
+      expect(r.status).toBe(429);
+      expect(r.detail).toContain("Selected provider 'claude' is over budget");
+    }
+    expect(checkCliStartGateMock).toHaveBeenCalledWith('start a fix job', {
+      parentJobId: 'src-job-1',
+      strictParentProvider: true,
+    });
+    expect(startJobMock).not.toHaveBeenCalled();
+  });
+
+  it('rejects a resumed fix when the source provider is unknown', async () => {
+    getJobMock.mockReturnValue(makeSourceJob({ sessionId: 'ses-abc123', provider: null }));
+
+    const r = await startFixFromJob('src-job-1');
+
+    expect(r.ok).toBe(false);
+    if (!r.ok) {
+      expect(r.status).toBe(409);
+      expect(r.detail).toContain('source job has no recorded CLI provider');
+    }
+    expect(checkCliStartGateMock).not.toHaveBeenCalled();
+    expect(startJobMock).not.toHaveBeenCalled();
+  });
+
+  it('rejects a resumed fix if the gate returns a different provider', async () => {
+    getJobMock.mockReturnValue(makeSourceJob({ sessionId: 'ses-abc123', provider: 'claude' }));
+    checkCliStartGateMock.mockResolvedValue({ ok: true, provider: 'codex' });
+
+    const r = await startFixFromJob('src-job-1');
+
+    expect(r.ok).toBe(false);
+    if (!r.ok) {
+      expect(r.status).toBe(409);
+      expect(r.detail).toContain('Cannot resume session on codex');
+    }
+    expect(startJobMock).not.toHaveBeenCalled();
   });
 
   it('truncates log output exceeding 12000 chars', async () => {

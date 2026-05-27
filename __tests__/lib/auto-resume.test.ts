@@ -222,6 +222,10 @@ describe('maybeAutoResume browser broker wiring', () => {
       } as JobData);
 
       expect(result).toEqual({ resumed: true, newJobId: 'job-2' });
+      expect(checkCliStartGateMock).toHaveBeenCalledWith('auto-resume', {
+        preferred: 'claude',
+        strictPreferred: true,
+      });
       expect(prepareBrokerRunMock).toHaveBeenCalledOnce();
       expect(startJobInProcessMock).toHaveBeenCalledOnce();
       expect(cleanupMock).toHaveBeenCalledOnce();
