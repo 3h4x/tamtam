@@ -943,6 +943,85 @@ export async function registerNode(): Promise<void> {
               );
             },
           },
+          usageSnapshotDeps: {
+            loadBridge: async () => {
+              const baseUrl = process.env.TAMTAM_BASE_URL ?? 'http://localhost:1337';
+              const res = await fetch(`${baseUrl}/api/stats/bridge`);
+              if (!res.ok) throw new Error(`stats/bridge HTTP ${res.status}`);
+              return res.json();
+            },
+            upsertSnapshots: async (rows) => {
+              const { db, schema } = await import('@/lib/db');
+              const { sql: drizzleSql } = await import('drizzle-orm');
+              if (rows.length === 0) return;
+              const recordedAt = Date.now() / 1000;
+              await db
+                .insert(schema.usageHourlySnapshot)
+                .values(rows.map((r) => ({ ...r, recordedAt })))
+                .onConflictDoUpdate({
+                  target: [
+                    schema.usageHourlySnapshot.bucketTs,
+                    schema.usageHourlySnapshot.provider,
+                    schema.usageHourlySnapshot.windowKey,
+                  ],
+                  set: {
+                    utilizationPct: drizzleSql`excluded.utilization_pct`,
+                    elapsedPct: drizzleSql`excluded.elapsed_pct`,
+                    projectedPct: drizzleSql`excluded.projected_pct`,
+                    paceMarginPct: drizzleSql`excluded.pace_margin_pct`,
+                    status: drizzleSql`excluded.status`,
+                    inputTokens: drizzleSql`excluded.input_tokens`,
+                    outputTokens: drizzleSql`excluded.output_tokens`,
+                    cacheReadTokens: drizzleSql`excluded.cache_read_tokens`,
+                    cacheCreateTokens: drizzleSql`excluded.cache_create_tokens`,
+                    jobCount: drizzleSql`excluded.job_count`,
+                    recordedAt: drizzleSql`excluded.recorded_at`,
+                  },
+                });
+            },
+            loadTokenAggregates: async (bucketStartMs, bucketEndMs) => {
+              const { db, schema } = await import('@/lib/db');
+              const { and, gte, lt, isNotNull, sql: drizzleSql } = await import('drizzle-orm');
+              const rows = await db
+                .select({
+                  provider: schema.jobs.provider,
+                  inputTokens: drizzleSql<number>`COALESCE(SUM(${schema.jobs.inputTokens}), 0)::bigint`,
+                  outputTokens: drizzleSql<number>`COALESCE(SUM(${schema.jobs.outputTokens}), 0)::bigint`,
+                  cacheReadTokens: drizzleSql<number>`COALESCE(SUM(${schema.jobs.cacheReadTokens}), 0)::bigint`,
+                  cacheCreateTokens: drizzleSql<number>`COALESCE(SUM(${schema.jobs.cacheCreateTokens}), 0)::bigint`,
+                  jobCount: drizzleSql<number>`COUNT(*)::int`,
+                })
+                .from(schema.jobs)
+                .where(and(
+                  isNotNull(schema.jobs.provider),
+                  isNotNull(schema.jobs.finishedAt),
+                  gte(schema.jobs.finishedAt, bucketStartMs / 1000),
+                  lt(schema.jobs.finishedAt, bucketEndMs / 1000),
+                ))
+                .groupBy(schema.jobs.provider);
+              const map = new Map<string, { inputTokens: number; outputTokens: number; cacheReadTokens: number; cacheCreateTokens: number; jobCount: number }>();
+              for (const r of rows) {
+                if (!r.provider) continue;
+                map.set(r.provider, {
+                  inputTokens: Number(r.inputTokens) || 0,
+                  outputTokens: Number(r.outputTokens) || 0,
+                  cacheReadTokens: Number(r.cacheReadTokens) || 0,
+                  cacheCreateTokens: Number(r.cacheCreateTokens) || 0,
+                  jobCount: Number(r.jobCount) || 0,
+                });
+              }
+              return map;
+            },
+            enqueueNextFire: async (runAt) => {
+              const { USAGE_SNAPSHOT_JOB_KEY } = await import('@/lib/workflows/cron/usage-snapshot-task');
+              await quickAddJob(
+                { connectionString },
+                'usage-snapshot',
+                {},
+                { jobKey: USAGE_SNAPSHOT_JOB_KEY, jobKeyMode: 'preserve_run_at', runAt, maxAttempts: 5 },
+              );
+            },
+          },
           dbBackupDeps: {
             createBackup: async () => {
               const {
@@ -1028,7 +1107,14 @@ export async function registerNode(): Promise<void> {
           console.warn('[cron] seedOrchestratorTick failed:', err);
         }
 
-        console.log('[cron] graphile-worker cron pool started (agent-cron + system-cron + project-sweep + orchestrator-tick)');
+        try {
+          const { seedUsageSnapshot } = await import('@/lib/workflows/cron/seed-usage-snapshot');
+          await seedUsageSnapshot({ connectionString });
+        } catch (err) {
+          console.warn('[cron] seedUsageSnapshot failed:', err);
+        }
+
+        console.log('[cron] graphile-worker cron pool started (agent-cron + system-cron + project-sweep + orchestrator-tick + usage-snapshot)');
       } catch (err) {
         console.error('[cron] boot failed:', err);
       }

@@ -89,7 +89,10 @@ const ROLLING_WINDOW_MS = 60 * 60 * 1000;
 // minutes — graphile already has its next-fire row queued from the previous
 // handler. Boosting too eagerly would replace that row with `runAt: now()`
 // every tick, defeating the schedule and burning the agent on a hot loop.
-const AGENT_RECENT_DISPATCH_COOLDOWN_MS = 5 * 60 * 1000;
+// 2-min default matches the typical agent runtime so a boost only fires when
+// the previous run actually finished, while still letting the orchestrator
+// rotate through the project's roster within a 5-min orchestrator tick.
+const AGENT_RECENT_DISPATCH_COOLDOWN_MS = 2 * 60 * 1000;
 
 const BOOSTABLE_PROJECT_STATUSES = new Set(['shipping', 'active']);
 
@@ -141,13 +144,24 @@ export function decideBoosts(input: BoostInput): BoostDecision[] {
       });
     if (ranked.length === 0) continue;
 
-    const pick = ranked[0];
-    decisions.push({
-      project: project.project,
-      agentId: pick.id,
-      agentName: pick.name,
-      reason: `pace under by ${input.pace.marginPct}pp; ${project.status} project`,
-    });
+    // When pace is severely under (margin far above the configured floor),
+    // boost more than one agent per project so the catch-up rate actually
+    // moves. `picksThisTick` grows with the headroom: 1 agent at the
+    // threshold, +1 per additional 15pp of margin, capped at 3 picks per
+    // project per tick (and bounded by the rate-limit budget below).
+    const slack = Math.max(0, input.pace.marginPct - input.settings.marginPct);
+    const desiredPicks = Math.min(3, 1 + Math.floor(slack / 15));
+    const budgetLeft = Math.max(0, input.settings.maxBoostsPerHour - recent.length);
+    const picksThisTick = Math.min(desiredPicks, budgetLeft, ranked.length);
+    for (let i = 0; i < picksThisTick; i++) {
+      const pick = ranked[i];
+      decisions.push({
+        project: project.project,
+        agentId: pick.id,
+        agentName: pick.name,
+        reason: `pace under by ${input.pace.marginPct}pp; ${project.status} project; pick ${i + 1}/${picksThisTick}`,
+      });
+    }
   }
 
   return decisions;

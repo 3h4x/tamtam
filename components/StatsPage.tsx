@@ -8,6 +8,7 @@ import { ErrorState } from './ErrorState'
 import { OllamaUsageCard } from './OllamaUsageCard'
 import { QuotaWidget } from './QuotaWidget'
 import { BridgeOverview } from './BridgeOverview'
+import { UsageHistoryChart } from './UsageHistoryChart'
 import {
   normalizeBudgetSubscriptionProviders,
   type BudgetSubscriptionProvider,
@@ -235,6 +236,14 @@ export function StatsPage() {
       </div>
 
       <BridgeOverview />
+
+      <section className="border border-border rounded-lg p-4 bg-bg-primary">
+        <div className="flex items-center justify-between mb-3">
+          <h2 className="text-sm font-medium text-text-primary">Tokens / hour (last 48h)</h2>
+          <span className="text-xs text-text-tertiary">actual vs expected vs catch-up</span>
+        </div>
+        <UsageHistoryChart />
+      </section>
 
       <QuotaWidget providers={budgetProviders} warnAt={warnAt} blockAt={blockAt} compact />
 

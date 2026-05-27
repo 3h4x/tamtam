@@ -318,3 +318,32 @@ export const ollamaUsage = pgTable('ollama_usage', {
 }, (t) => ({
   tsIdx: index('ollama_usage_ts').on(t.ts),
 }));
+
+// Hourly snapshot of per-provider pace metrics so /stats can render an
+// hour-by-hour utilization chart and the orchestrator can boost based on
+// trend (not just the current point-in-time snapshot). The cron task writes
+// one row per (bucket_ts, provider, window) and re-upserts within the hour
+// so the row reflects the latest snapshot taken in that bucket.
+export const usageHourlySnapshot = pgTable('usage_hourly_snapshot', {
+  id: serial('id').primaryKey(),
+  bucketTs: doublePrecision('bucket_ts').notNull(),
+  provider: text('provider').notNull(),
+  windowKey: text('window_key').notNull(),
+  utilizationPct: doublePrecision('utilization_pct').notNull(),
+  elapsedPct: doublePrecision('elapsed_pct').notNull(),
+  projectedPct: doublePrecision('projected_pct'),
+  paceMarginPct: doublePrecision('pace_margin_pct').notNull(),
+  status: text('status').notNull(),
+  // Per-bucket token totals aggregated from `jobs.finished_at` within this
+  // hour so the chart can render tokens/h directly (separate from the % math
+  // above). Null on legacy rows; the cron task fills them going forward.
+  inputTokens: bigint('input_tokens', { mode: 'number' }),
+  outputTokens: bigint('output_tokens', { mode: 'number' }),
+  cacheReadTokens: bigint('cache_read_tokens', { mode: 'number' }),
+  cacheCreateTokens: bigint('cache_create_tokens', { mode: 'number' }),
+  jobCount: integer('job_count'),
+  recordedAt: doublePrecision('recorded_at').notNull(),
+}, (t) => ({
+  bucketUniq: uniqueIndex('usage_hourly_snapshot_bucket').on(t.bucketTs, t.provider, t.windowKey),
+  bucketTsIdx: index('usage_hourly_snapshot_ts').on(t.bucketTs),
+}));

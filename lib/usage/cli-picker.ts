@@ -95,6 +95,21 @@ export function effectiveUtilizationFor(
  * route-level start gate aligned with the scheduler's synchronous
  * multi-provider budget verdicts after warm/fetch attempts.
  */
+function paceMarginPctFor(snapshot: QuotaSnapshot | null): number {
+  // paceMargin = how far below the steady 7-day burn line this provider is.
+  // Higher = more behind = more catch-up needed. Computed from the 7d window
+  // since that's where weekly pacing actually matters; the 5h window is too
+  // bursty to drive routing.
+  if (!snapshot) return 0;
+  const w = snapshot.sevenDay;
+  const reset = w?.msUntilReset;
+  const total = 7 * 24 * 60 * 60 * 1000;
+  if (typeof reset !== 'number' || !Number.isFinite(reset) || total <= 0) return 0;
+  const elapsedPct = Math.max(0, Math.min(100, (1 - reset / total) * 100));
+  const util = finiteOrZero(w?.utilization);
+  return elapsedPct - util;
+}
+
 export function pickCliProvider(opts: PickCliOptions): PickCliResult {
   const { enabled, snapshots, budgetBlockAtPct, blockEnabled, blockOnWeeklyPace, requestedModel } = opts;
   if (enabled.length === 0) {
@@ -103,8 +118,12 @@ export function pickCliProvider(opts: PickCliOptions): PickCliResult {
   const hasKnownQuotaAwareProvider = enabled.some((provider) =>
     hasQuotaFetcher(provider) && !!(snapshots.get(provider) ?? null)
   );
+  // Pace-aware routing (see docs/SETTINGS.md → "Pace-aware provider routing"):
+  // primary key is paceMarginPct (most-behind first) so the under-pace
+  // provider gets traffic; headroom is the tiebreak so a provider with no
+  // remaining budget still loses to one that can actually run a job.
   let bestProvider: CliProvider | null = null;
-  let bestHeadroom = -Infinity;
+  let bestScore = -Infinity;
   let bestUtilization = 0;
   for (const provider of enabled) {
     const snapshot = snapshots.get(provider) ?? null;
@@ -117,9 +136,14 @@ export function pickCliProvider(opts: PickCliOptions): PickCliResult {
       ? 100
       : effectiveUtilizationFor(snapshot, requestedModel);
     const headroom = 100 - utilization;
-    if (headroom > bestHeadroom) {
+    const paceMargin = paceMarginPctFor(snapshot);
+    // Weight paceMargin heavily so a meaningfully-behind provider wins over a
+    // less-behind one with similar headroom. Headroom/100 acts as a sub-point
+    // tiebreak that prevents picking a provider with effectively zero budget.
+    const score = paceMargin * 10 + headroom / 100;
+    if (score > bestScore) {
       bestProvider = provider;
-      bestHeadroom = headroom;
+      bestScore = score;
       bestUtilization = utilization;
     }
   }
