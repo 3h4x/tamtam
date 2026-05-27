@@ -27,17 +27,25 @@ export type QueuedAgentRunEntry = {
   agentName: string;
   triggeredBy: string;
   prompt: string;
+  modelOverride: 'fast' | 'normal' | 'smart' | null;
   enqueuedAt: number; // ms epoch
 };
+type EnqueueQueuedAgentRunEntry =
+  Omit<QueuedAgentRunEntry, 'id' | 'modelOverride'> &
+  { modelOverride?: QueuedAgentRunEntry['modelOverride'] };
+
+function toModelOverride(value: string | null): QueuedAgentRunEntry['modelOverride'] {
+  return value === 'fast' || value === 'normal' || value === 'smart' ? value : null;
+}
 
 function toEntry(row: typeof schema.queuedAgentRuns.$inferSelect): QueuedAgentRunEntry {
-  return { ...row, enqueuedAt: row.enqueuedAt * 1000 };
+  return { ...row, modelOverride: toModelOverride(row.modelOverride), enqueuedAt: row.enqueuedAt * 1000 };
 }
 
 /** Queue an agent run, or update its prompt if already queued (idempotent per project+agentId). */
 export function enqueueQueuedAgentRun(
   project: string,
-  entry: Omit<QueuedAgentRunEntry, 'id'>,
+  entry: EnqueueQueuedAgentRunEntry,
 ): void {
   void db.insert(schema.queuedAgentRuns)
     .values({
@@ -46,6 +54,7 @@ export function enqueueQueuedAgentRun(
       agentName: entry.agentName,
       triggeredBy: entry.triggeredBy,
       prompt: entry.prompt,
+      modelOverride: entry.modelOverride ?? null,
       enqueuedAt: entry.enqueuedAt / 1000,
     })
     .onConflictDoUpdate({
@@ -54,6 +63,7 @@ export function enqueueQueuedAgentRun(
         agentName: entry.agentName,
         triggeredBy: entry.triggeredBy,
         prompt: entry.prompt,
+        modelOverride: entry.modelOverride ?? null,
         enqueuedAt: entry.enqueuedAt / 1000,
       },
     })
@@ -193,13 +203,15 @@ export async function drainQueuedAgentRunsForProject(project: string): Promise<v
         const url = `${baseUrl}/api/agents/${encodeURIComponent(entry.agentId)}/run`;
         const controller = new AbortController();
         const timeout = setTimeout(() => controller.abort(), 15_000);
+        const replayBody: { prompt: string; model?: 'fast' | 'normal' | 'smart' } = { prompt: entry.prompt };
+        if (entry.modelOverride) replayBody.model = entry.modelOverride;
         const r = await fetch(url, {
           method: 'POST',
           headers: {
             'content-type': 'application/json',
             'x-tamtam-trigger': entry.triggeredBy,
           },
-          body: JSON.stringify({ prompt: entry.prompt }),
+          body: JSON.stringify(replayBody),
           signal: controller.signal,
         }).finally(() => clearTimeout(timeout));
         if (r.ok || r.status === 202) {

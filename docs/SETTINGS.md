@@ -166,13 +166,24 @@ These settings override the semantic model tier per pipeline phase. Leave a fiel
 
 ### Orchestrator
 
-The orchestrator budget allocator runs as a graphile-worker cron task (`orchestrator-tick`) every minute when enabled. It reads `/api/stats/bridge`, checks whether global pace is under the configured threshold, and then dispatches extra scheduled-agent fires for shipping or active projects while staying inside the per-project rolling-hour cap.
+The orchestrator budget allocator runs as a graphile-worker cron task (`orchestrator-tick`) every minute when enabled. It reads `/api/stats/bridge`, evaluates pace headroom across both the short (5h) binding window and the long (7d) weekly window, and dispatches extra scheduled-agent fires while staying inside the per-project rolling-hour cap.
 
 | Key | Type | Default | Effect |
 |-----|------|---------|--------|
 | `orchestrator_enabled` | boolean | `false` | Master switch for the budget allocator cron |
 | `orchestrator_boost_margin_pct` | number | `5` | Minimum global pace headroom, in percentage points, required before the allocator can boost a project |
 | `orchestrator_max_boosts_per_hour` | number | `2` | Per-project rolling-hour cap on bonus fires |
+
+**Decision logic** (`lib/orchestrator/budget-allocator.ts → decideBoosts`):
+
+- **Effective margin = max(short-window margin, weekly margin).** The short window catches up first; the 7-day weekly window lags. The orchestrator keeps firing while *either* signal shows headroom above `orchestrator_boost_margin_pct`, so the weekly deficit closes even when the short window is already on pace. This is what lets the fleet "exceed flat-rate pace" to recover an underspent week — without it, boosts would stop once the 5h window caught up, leaving the weekly gap permanently open.
+- **Weekly margin = max paceMarginPct across enabled providers' 7-day windows** (skipping `unknown` status). Computed in `lib/workflows/cron/orchestrator-tick-task.ts` from `bridge.globalPace.providers[*].sevenDay`.
+- **Project status set:** by default the orchestrator boosts `shipping`, `active`, `idle`, and `attention` projects. When pace is *severely* under (effective slack ≥ 10pp above the floor), it widens to also include `agent_running` so the per-project queue stacks the next run behind whatever is currently in flight. `releasing`, `error`, `stuck`, and `paused` are never boosted.
+- **Per-tick pick count:** 1 boost per project at the threshold, +1 per additional 10pp of slack, capped at 5 picks per project per tick (further bounded by `orchestrator_max_boosts_per_hour`).
+- **Aggressive catch-up:** when effective slack ≥ 20pp, the allocator also sets `modelOverride: 'smart'` on each boost decision. The orchestrator threads it through `agent-cron` → `POST /api/agents/[id]/run { model: 'smart' }` so the boosted fire runs at the smart tier regardless of the agent's stored model. Bigger model = ~3–5× tokens per call, multiplying the per-run impact when scheduling more runs alone can't close the weekly deficit before reset. Self-scheduled re-enqueues do NOT inherit the override — only the orchestrator-initiated boost fire runs at the elevated tier.
+- **Agent cooldown:** the allocator skips agents dispatched within the last 2 minutes so back-to-back ticks don't replace a still-queued fire with a new `runAt: now()`.
+
+**What balanced pace looks like.** When all enabled providers report `paceMarginPct < orchestrator_boost_margin_pct` on both their 5h and 7d windows, `decideBoosts` returns `[]` and the cron tick logs `no boost (pace ok or no eligible project)`. That's the steady state — the fleet's normal cron cadence carries the load without orchestrator amplification. If you observe persistent `under_pace` despite high boost volume, the bottleneck is *throughput* (per-project agent serialization caps concurrent agents at one per project) or *provider routing* (`lib/usage/cli-picker.ts` urgency formula `paceMargin / hoursLeft` can starve a provider whose window has more days remaining even when it has more absolute headroom).
 
 ### Worktree & Review Gates
 

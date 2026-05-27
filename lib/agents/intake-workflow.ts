@@ -7,7 +7,7 @@ import {
   ensureAgentMemoryDir,
 } from '@/lib/agents/agent-memory';
 import { exec } from '@/lib/shared/shell';
-import { normalizeModelInput } from '@/lib/agents/model-aliases';
+import { isCanonicalModelTier, normalizeModelInput } from '@/lib/agents/model-aliases';
 import { resolveCliBin, resolveCliEnv } from '@/lib/shared/cli-bin';
 import { isCliProvider, type CliProvider } from '@/lib/usage/cli-providers';
 import { hasIssueCruncherSkill } from '@/lib/agents/prerequisites';
@@ -193,6 +193,7 @@ async function composePromptStep(
           agentName,
           triggeredBy,
           prompt: taskPrompt,
+          modelOverride: isCanonicalModelTier(model) ? model : undefined,
           enqueuedAt: Date.now(),
         });
       } catch (err) {

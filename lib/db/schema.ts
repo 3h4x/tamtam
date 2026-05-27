@@ -205,6 +205,7 @@ export const queuedAgentRuns = pgTable('queued_agent_runs', {
   agentName: text('agent_name').notNull(),
   triggeredBy: text('triggered_by').notNull().default('manual'),
   prompt: text('prompt').notNull().default(''),
+  modelOverride: text('model_override'),
   enqueuedAt: doublePrecision('enqueued_at').notNull(),
 }, (t) => ({
   projectAgentUniq: uniqueIndex('queued_agent_runs_project_agent').on(t.project, t.agentId),

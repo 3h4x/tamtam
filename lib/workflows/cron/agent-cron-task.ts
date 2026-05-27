@@ -22,6 +22,11 @@ import { computeNextFire } from '@/lib/workflows/cron/parse-schedule';
 
 export interface AgentCronPayload {
   agentId: string;
+  /** When set on an orchestrator-enqueued boost fire, the agent run uses
+   *  this model tier instead of the agent's configured default. Self-
+   *  scheduled re-enqueues do NOT propagate this — only the boost fire it
+   *  was attached to runs at the elevated tier. */
+  modelOverride?: 'fast' | 'normal' | 'smart';
 }
 
 export interface AgentCronDeps {
@@ -32,8 +37,13 @@ export interface AgentCronDeps {
    *  Returns a non-null reason string when the run should be skipped this
    *  cycle (re-enqueue still happens; we just don't dispatch). */
   prereqSkipReason: (agent: AgentInput) => Promise<string | null>;
-  /** Dispatch the agent-run workflow. Returns the run id (telemetry only). */
-  startAgentRun: (agent: AgentInput) => Promise<string | null>;
+  /** Dispatch the agent-run workflow. Returns the run id (telemetry only).
+   *  `modelOverride` (orchestrator boost) replaces the agent's stored model
+   *  for this fire only. */
+  startAgentRun: (
+    agent: AgentInput,
+    modelOverride?: 'fast' | 'normal' | 'smart',
+  ) => Promise<string | null>;
   /** Dispatch a system (kind='system') agent through its internal handler
    *  instead of the LLM-CLI workflow. Returns null when no handler is
    *  registered for the given name — caller will fall back to skipping. */
@@ -101,7 +111,7 @@ export async function handleAgentCron(
     await deps.runSystemAgent(agent);
     return { status: 'dispatched', runId: null, reason: 'system' };
   }
-  const runId = await deps.startAgentRun(agent);
+  const runId = await deps.startAgentRun(agent, payload.modelOverride);
   return { status: 'dispatched', runId };
 }
 

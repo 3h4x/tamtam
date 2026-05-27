@@ -761,7 +761,7 @@ describe('POST /api/agents/{agentId}/run', () => {
     const req = new NextRequest('http://localhost/api/agents/agent-123/run', {
       method: 'POST',
       headers: { 'x-tamtam-trigger': 'schedule' },
-      body: JSON.stringify({ prompt: 'do something' }),
+      body: JSON.stringify({ prompt: 'do something', model: 'smart' }),
     });
 
     const res = await POST(req, { params: Promise.resolve({ agentId: 'agent-123' }) });
@@ -779,6 +779,7 @@ describe('POST /api/agents/{agentId}/run', () => {
     expect(entry.agentName).toBe('Test Agent');
     expect(entry.triggeredBy).toBe('schedule');
     expect(entry.prompt).toBe('do something');
+    expect(entry.modelOverride).toBe('smart');
   });
 
   it('returns 409 project_busy when a non-agent project job is already running', async () => {
@@ -967,7 +968,7 @@ describe('POST /api/agents/{agentId}/run', () => {
     const req = new NextRequest('http://localhost/api/agents/agent-123/run', {
       method: 'POST',
       headers: { 'x-tamtam-trigger': 'schedule' },
-      body: JSON.stringify({ prompt: 'do something' }),
+      body: JSON.stringify({ prompt: 'do something', model: 'smart' }),
     });
 
     const res = await POST(req, { params: Promise.resolve({ agentId: 'agent-123' }) });
@@ -978,6 +979,7 @@ describe('POST /api/agents/{agentId}/run', () => {
     expect(data.code).toBe('pipeline_lock');
     expect(data.blockingJobId).toBe('release-1');
     expect(mocks.enqueueQueuedAgentRun).toHaveBeenCalledTimes(1);
+    expect(mocks.enqueueQueuedAgentRun.mock.calls[0][1].modelOverride).toBe('smart');
     expect(mocks.enqueueAgentRun).not.toHaveBeenCalled();
     expect(mocks.probeJobStatus).not.toHaveBeenCalled();
   });
@@ -1132,6 +1134,60 @@ describe('POST /api/agents/{agentId}/run', () => {
       preferred: 'claude',
       strictPreferred: true,
       requestedModel: 'normal',
+      respectJobsPaused: false,
+    });
+  });
+
+  it('uses a valid body model override for the run gate and workflow command', async () => {
+    await insertAgent({ model: 'fast' });
+    const req = new NextRequest('http://localhost/api/agents/agent-123/run', {
+      method: 'POST',
+      body: JSON.stringify({ prompt: 'run tests', model: 'opus' }),
+    });
+
+    const res = await POST(req, { params: Promise.resolve({ agentId: 'agent-123' }) });
+
+    expect(res.status).toBe(200);
+    expect(mocks.checkCliStartGate).toHaveBeenCalledWith('start an agent run', {
+      preferred: null,
+      strictPreferred: false,
+      requestedModel: 'smart',
+      respectJobsPaused: false,
+    });
+    const [, cmd] = mocks.startJob.mock.calls[0];
+    expect(cmd).toContain('--model smart');
+  });
+
+  it('rejects invalid body model overrides instead of coercing to normal', async () => {
+    await insertAgent({ model: 'fast' });
+    const req = new NextRequest('http://localhost/api/agents/agent-123/run', {
+      method: 'POST',
+      body: JSON.stringify({ prompt: 'run tests', model: 'smart --resume injected' }),
+    });
+
+    const res = await POST(req, { params: Promise.resolve({ agentId: 'agent-123' }) });
+    const data = await res.json();
+
+    expect(res.status).toBe(400);
+    expect(data.detail).toContain('Invalid model');
+    expect(mocks.checkCliStartGate).not.toHaveBeenCalled();
+    expect(mocks.startJob).not.toHaveBeenCalled();
+  });
+
+  it('uses the stored agent model when body model is omitted', async () => {
+    await insertAgent({ model: 'smart' });
+    const req = new NextRequest('http://localhost/api/agents/agent-123/run', {
+      method: 'POST',
+      body: JSON.stringify({ prompt: 'run tests' }),
+    });
+
+    const res = await POST(req, { params: Promise.resolve({ agentId: 'agent-123' }) });
+
+    expect(res.status).toBe(200);
+    expect(mocks.checkCliStartGate).toHaveBeenCalledWith('start an agent run', {
+      preferred: null,
+      strictPreferred: false,
+      requestedModel: 'smart',
       respectJobsPaused: false,
     });
   });

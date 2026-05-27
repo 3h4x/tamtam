@@ -34,6 +34,7 @@ async function applyDdl(handle: TestDbHandle): Promise<void> {
       agent_name text NOT NULL,
       triggered_by text NOT NULL DEFAULT 'manual',
       prompt text NOT NULL DEFAULT '',
+      model_override text,
       enqueued_at double precision NOT NULL
     )
   `));

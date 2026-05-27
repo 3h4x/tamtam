@@ -174,6 +174,25 @@ describe('drainNextAgentRun', () => {
     expect(JSON.parse(opts.body).prompt).toBe('do the thing');
   });
 
+  it('preserves model override when replaying a queued agent run', async () => {
+    enqueueAgentRun('p1', {
+      agentId: 'agent-uuid-1',
+      agentName: 'improve',
+      triggeredBy: 'schedule',
+      prompt: 'do the thing',
+      modelOverride: 'smart',
+      enqueuedAt: 1,
+    });
+
+    await drainNextAgentRun('p1');
+
+    const [, opts] = fetchSpy.mock.calls[0];
+    expect(JSON.parse(opts.body)).toMatchObject({
+      prompt: 'do the thing',
+      model: 'smart',
+    });
+  });
+
   it('removes the entry from the queue after dispatch', async () => {
     enqueueAgentRun('p1', {
       agentId: 'a',

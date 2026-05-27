@@ -234,6 +234,25 @@ describe('decideBoosts', () => {
     expect(r).toHaveLength(3);
   });
 
+  it('promotes boosted runs to smart model when slack exceeds the aggressive-catchup threshold', () => {
+    // slack = 25 - 5 = 20 → meets AGGRESSIVE_CATCHUP_PP threshold
+    const r = decideBoosts(makeInput({
+      pace: { status: 'under_pace', marginPct: 25 },
+    }));
+    expect(r).toHaveLength(1);
+    expect(r[0].modelOverride).toBe('smart');
+    expect(r[0].reason).toContain('model→smart');
+  });
+
+  it('does not promote when slack is below the aggressive-catchup threshold', () => {
+    // slack = 12 - 5 = 7 → below threshold, no override
+    const r = decideBoosts(makeInput({
+      pace: { status: 'under_pace', marginPct: 12 },
+    }));
+    expect(r).toHaveLength(1);
+    expect(r[0].modelOverride).toBeUndefined();
+  });
+
   it('does not boost when both short and weekly margins are below the floor', () => {
     const r = decideBoosts(makeInput({
       pace: { status: 'on_pace', marginPct: -3, weeklyMarginPct: 2 },

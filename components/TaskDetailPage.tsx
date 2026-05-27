@@ -6,6 +6,7 @@ import { fetchTaskDetail } from '@/lib/client-api'
 import type { TaskDetail } from '@/lib/client-api'
 import { FleetHealth } from '@/hooks/useProjectHealth'
 import { formatDuration } from '@/lib/shared/statusConstants'
+import { ErrorState } from '@/components/ErrorState'
 import { Button } from '@/components/ui/Button'
 
 interface TaskDetailPageProps {
@@ -115,7 +116,7 @@ export function TaskDetailPage({
           ))}
         </div>
       )}
-      {error && <div className="text-status-error">Error: {error}</div>}
+      {error && <ErrorState message={`Error: ${error}`} />}
 
       {detail && (
         <div className="flex flex-col gap-6">
