@@ -80,10 +80,15 @@ function Pm2LogRow({ entry }: { entry: Pm2LogEntry }) {
             <span className="text-text-tertiary ml-1">…<span className="underline ml-0.5">expand</span></span>
           )}
           {isLong && expanded && (
-            <button
-              className="ml-2 text-text-tertiary underline hover:text-text-secondary bg-transparent border-none text-xs font-mono cursor-pointer"
+            <Button
+              type="button"
+              variant="ghost"
+              size="sm"
+              className="ml-2 !border-0 !bg-transparent !px-0 !py-0 align-baseline text-xs font-mono font-normal text-text-tertiary underline hover:!bg-transparent hover:text-text-secondary"
               onClick={ev => { ev.stopPropagation(); setExpanded(false) }}
-            >collapse</button>
+            >
+              collapse
+            </Button>
           )}
         </span>
         <CopyButton
