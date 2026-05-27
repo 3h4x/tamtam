@@ -116,7 +116,7 @@ export const SUBSECTIONS: Record<string, SubsectionDef> = {
   },
   pipeline_models: {
     title: 'Per-Phase Model Tiers',
-    description: 'Override the workspace default tier per pipeline phase',
+    description: 'Override the default tier per pipeline phase',
     cols: 2,
   },
   release_ops: {
@@ -343,7 +343,7 @@ export const FIELDS: Record<SettingsFieldKey, FieldDef> = {
   },
   pipeline_model_fix: {
     label: 'Fix Tier',
-    help: 'Capability tier used for the fix step. "Default" uses the workspace Default Model Tier.',
+    help: 'Capability tier used for the fix step. "Default" uses Smart because fixes edit code.',
     group: 'pipeline',
     subsection: 'pipeline_models',
     span: 1,

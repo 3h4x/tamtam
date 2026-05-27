@@ -29,6 +29,12 @@ function summarize(value: string, fallback: string): string {
   return firstLine.length > 90 ? `${firstLine.slice(0, 90)}…` : firstLine
 }
 
+function pipelineModelDefaultLabel(fieldKey: SettingsFieldKey): string {
+  if (fieldKey === 'pipeline_model_fix') return 'Default (Smart)'
+  if (fieldKey === 'pipeline_model_dod' || fieldKey === 'pipeline_model_commit') return 'Default (Fast)'
+  return 'Default (workspace)'
+}
+
 export function SettingsField({
   fieldKey,
   value,
@@ -113,7 +119,7 @@ export function SettingsField({
         </select>
       ) : fieldKey === 'pipeline_model_review' || fieldKey === 'pipeline_model_fix' || fieldKey === 'pipeline_model_dod' || fieldKey === 'pipeline_model_commit' ? (
         <select value={value} onChange={(e) => onChange(fieldKey, e.target.value)} className={SELECT_CLASS}>
-          <option value="">{(fieldKey === 'pipeline_model_dod' || fieldKey === 'pipeline_model_commit') ? 'Default (Fast)' : 'Default (workspace)'}</option>
+          <option value="">{pipelineModelDefaultLabel(fieldKey)}</option>
           {MODEL_TIERS.map((model) => <option key={model} value={model}>{MODEL_LABELS[model]}</option>)}
         </select>
       ) : fieldKey === 'review_fix_max_iterations'

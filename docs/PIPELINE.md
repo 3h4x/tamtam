@@ -82,6 +82,7 @@ Implications:
 - The shared start gate blocks on 5-hour usage and provider credits. When `budget_block_on_weekly_pace_enabled` is true, it also blocks on actual 7-day utilization; 7-day and model-specific weekly windows still influence provider headroom scoring. Scheduled agents also have a separate burn-rate throttle inside the internal scheduler.
 - Release/test/push entrypoints no longer rely on the legacy active-provider snapshot, so a full Claude window does not block a release when another enabled CLI is healthy.
 - Once a release starts, the chosen provider is stamped onto the release/test/push jobs so downstream review/fix/commit steps inherit the same provider instead of repicking mid-pipeline.
+- Per-phase model overrides are configured in Settings. With no override, `review` uses the workspace default tier, `fix` uses `smart` because it edits code, and `dod`/`commit` use `fast` for their narrow verification/message-generation tasks.
 
 ## Branch-derived PR behavior
 
