@@ -3,6 +3,7 @@
 import { useState, useEffect, useMemo } from 'react'
 import { fetchProjectDocs } from '@/lib/client-api'
 import type { ProjectDoc } from '@/lib/client-api'
+import { EmptyState } from '@/components/ui/EmptyState'
 import { ErrorState } from './ErrorState'
 
 interface DocsTabProps {
@@ -71,13 +72,19 @@ export function DocsTab({ projectName }: DocsTabProps) {
     />
   )
   if (docs.length === 0) return (
-    <div className="mt-2 rounded-lg border border-dashed border-border bg-bg-secondary p-6">
-      <p className="text-sm font-medium text-text-primary">No docs found</p>
-      <p className="mt-2 text-sm text-text-secondary">
-        Add a committed <code className="rounded bg-bg-tertiary px-1 py-0.5 font-mono text-xs">README.md</code> or
-        <code className="ml-1 rounded bg-bg-tertiary px-1 py-0.5 font-mono text-xs">docs/*.md</code> file to attach project context here.
-      </p>
-    </div>
+    <EmptyState
+      bordered
+      align="start"
+      paddingY="xs"
+      className="mt-2"
+      title={<span className="text-text-primary">No docs found</span>}
+      action={(
+        <p className="text-sm text-text-secondary">
+          Add a committed <code className="rounded bg-bg-tertiary px-1 py-0.5 font-mono text-xs">README.md</code> or
+          <code className="ml-1 rounded bg-bg-tertiary px-1 py-0.5 font-mono text-xs">docs/*.md</code> file to attach project context here.
+        </p>
+      )}
+    />
   )
 
   const current = docs.find((d) => d.name === active) ?? docs[0]
