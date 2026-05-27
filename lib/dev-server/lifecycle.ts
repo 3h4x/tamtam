@@ -469,7 +469,11 @@ export async function sweepOrphanDevServers(): Promise<{ stopped: string[]; kept
     return { stopped, kept };
   }
 
-  const { hasActiveWorkForProject } = await import('@/lib/dev-server/active-work');
+  const [{ hasActiveWorkForProject }, { db, schema }, { eq }] = await Promise.all([
+    import('@/lib/dev-server/active-work'),
+    import('@/lib/db'),
+    import('drizzle-orm'),
+  ]);
 
   for (const file of entries) {
     const pidPath = join(dir, file);
@@ -497,8 +501,6 @@ export async function sweepOrphanDevServers(): Promise<{ stopped: string[]; kept
 
     // Orphan: TamTam crashed/restarted, the run that started this is gone,
     // no successor is using it. Stop and clean up.
-    const { db, schema } = await import('@/lib/db');
-    const { eq } = await import('drizzle-orm');
     const rows = await db.select().from(schema.projects).where(eq(schema.projects.name, project));
     const config: DevServerConfig = {
       startCommand: rows[0]?.devServerStartCommand ?? null,
