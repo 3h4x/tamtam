@@ -321,11 +321,17 @@ export async function startProjectReview(
   const running = jobs.filter(
     (j) => j.project === projectName && j.kind === 'review' && j.finishedAt === null
   );
-  for (const j of running) {
-    if ((await probeJobStatus(j)) === 'running') {
+  const statuses = await Promise.allSettled(running.map((j) => probeJobStatus(j)));
+  let probeError: unknown = null;
+  for (let i = 0; i < statuses.length; i += 1) {
+    const status = statuses[i];
+    if (status.status === 'fulfilled' && status.value === 'running') {
+      const j = running[i];
       return { ok: false, status: 409, detail: `Review already in progress for ${projectName} (PID ${j.pid})` };
     }
+    if (status.status === 'rejected') probeError ??= status.reason;
   }
+  if (probeError) throw probeError;
 
   // Per-project review pre-step (e.g. regenerating DB types so the
   // reviewer sees freshly-generated DB types). Runs before scope detection

@@ -247,6 +247,24 @@ describe('startProjectReview', () => {
     }
   });
 
+  it('returns 409 when any active review probe reports running even if another probe fails', async () => {
+    const staleJob = makeJob({ id: 'stale-review', pid: 111, kind: 'review', finishedAt: null });
+    const activeJob = makeJob({ id: 'active-review', pid: 222, kind: 'review', finishedAt: null });
+    mocks.listJobs.mockReturnValue([staleJob, activeJob]);
+    mocks.probeJobStatus.mockImplementation((job) => {
+      if (job.id === 'active-review') return Promise.resolve('running');
+      return Promise.reject(new Error('transient probe failure'));
+    });
+
+    const r = await startProjectReview('proj');
+
+    expect(r.ok).toBe(false);
+    if (!r.ok) {
+      expect(r.status).toBe(409);
+      expect(r.detail).toContain('PID 222');
+    }
+  });
+
   it('does not return 409 when the "running" review job has actually exited', async () => {
     mocks.listJobs.mockReturnValue([makeJob({ kind: 'review', finishedAt: null })]);
     mocks.probeJobStatus.mockResolvedValue('done');
