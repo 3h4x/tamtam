@@ -8,6 +8,7 @@ interface EmptyStateProps {
   description?: ReactNode
   action?: ReactNode
   paddingY?: 'sm' | 'md' | 'lg'
+  bordered?: boolean
   className?: string
 }
 
@@ -23,14 +24,16 @@ export function EmptyState({
   description,
   action,
   paddingY = 'md',
+  bordered = false,
   className,
 }: EmptyStateProps) {
+  const border = bordered ? 'rounded-md border border-dashed border-border bg-bg-secondary' : ''
   return (
     <div
-      className={`flex flex-col items-center justify-center px-6 gap-2 text-center ${PADDING[paddingY]} ${className ?? ''}`}
+      className={`flex flex-col items-center justify-center px-6 gap-2 text-center ${PADDING[paddingY]} ${border} ${className ?? ''}`}
     >
       {icon}
-      <p className="text-sm text-text-secondary">{title}</p>
+      <p className="text-sm font-medium text-text-secondary">{title}</p>
       {description && (
         <p className="text-xs text-text-tertiary max-w-md">{description}</p>
       )}

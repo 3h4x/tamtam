@@ -12,6 +12,7 @@ import { IssueRow } from '@/components/issues-tab/IssueRow'
 import { useToast } from '@/components/Toast'
 import { Button } from '@/components/ui/Button'
 import { Spinner } from '@/components/ui/Spinner'
+import { EmptyState } from '@/components/ui/EmptyState'
 
 // Re-export types consumed by subcomponents so callers don't need to change
 export type { GhPullRequest, GhIssue, ProjectConfig }
@@ -371,12 +372,14 @@ ${idea}`
       )}
 
       {prs.length === 0 && issues.length === 0 && !ghError && (
-        <div className="rounded-md border border-dashed border-border bg-bg-secondary px-6 py-8 text-center">
-          <div className="mb-2 text-3xl leading-none text-text-tertiary">✓</div>
-          <p className="text-sm font-medium text-text-secondary">Inbox zero</p>
-          <p className="mt-1 text-xs text-text-tertiary">GitHub shows no open PRs or issues for this project.</p>
-          {repo && (
-            <p className="mt-3 text-xs text-text-tertiary">
+        <EmptyState
+          bordered
+          paddingY="sm"
+          icon={<div className="text-3xl leading-none text-text-tertiary">✓</div>}
+          title="Inbox zero"
+          description="GitHub shows no open PRs or issues for this project."
+          action={repo && (
+            <p className="mt-1 text-xs text-text-tertiary">
               <a
                 href={`https://github.com/${repo}`}
                 target="_blank"
@@ -387,7 +390,7 @@ ${idea}`
               </a>
             </p>
           )}
-        </div>
+        />
       )}
     </div>
   )
