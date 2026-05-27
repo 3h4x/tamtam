@@ -4,8 +4,8 @@
 // existing startFixFromJob helper takes a sourceJobId pointing at that
 // parent.
 //
-// Future iterations dispatch this workflow when the orchestrator decides
-// { next: 'fix', from: 'test' | 'review' }. Not wired yet.
+// Dispatched by releaseOrchestratorWorkflow via dispatchPhase when the
+// orchestrator decides { next: 'fix', from: 'test' | 'review' }.
 
 import type { StartFixResult } from '@/lib/pipeline/start-fix';
 import type { WaitForJobResult } from '@/lib/workflows/wait-for-job';
