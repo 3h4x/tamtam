@@ -17,6 +17,7 @@ interface UsageHistoryBucket {
   provider: string
   windowKey: string
   totalTokens: number | null
+  catchUpTokensPerHour: number | null
 }
 
 interface ProviderSeries {
@@ -52,6 +53,7 @@ type ChartPoint = {
   bucketTs: number
   hour: string
   actual: number | null
+  catchUp: number | null
 }
 
 function ProviderChart({
@@ -67,6 +69,7 @@ function ProviderChart({
         bucketTs: b.bucketTs,
         hour: fmtHour(b.bucketTs),
         actual: b.totalTokens,
+        catchUp: b.catchUpTokensPerHour,
       })),
     [series.buckets],
   )
@@ -81,9 +84,9 @@ function ProviderChart({
       <div className="flex items-center justify-between gap-3 text-xs">
         <span className="font-medium text-text-primary">{label}</span>
         <span className="flex gap-3 text-text-tertiary">
-          <span><span className="inline-block w-3 h-0.5 bg-status-info align-middle mr-1" />actual {fmtTokens(series.currentTokensPerHour)}/h</span>
-          <span><span className="inline-block w-3 h-0.5 bg-status-success align-middle mr-1 border-dashed" />expected {fmtTokens(series.expectedTokensPerHour)}/h</span>
-          <span><span className="inline-block w-3 h-0.5 bg-status-warning align-middle mr-1 border-dashed" />catch-up {fmtTokens(series.catchUpTokensPerHour)}/h</span>
+          <span title="Tokens/h burned this hour (average of last 3 buckets)"><span className="inline-block w-3 h-0.5 bg-status-info align-middle mr-1" />actual {fmtTokens(series.currentTokensPerHour)}/h</span>
+          <span title="Steady-state rate that uses exactly 100% of the window evenly"><span className="inline-block w-3 h-0.5 bg-status-success align-middle mr-1 border-dashed" />steady pace {fmtTokens(series.expectedTokensPerHour)}/h</span>
+          <span title="Max rate you can sustain until window reset and still land at 100%"><span className="inline-block w-3 h-0.5 bg-status-warning align-middle mr-1 border-dashed" />catch-up ceiling {fmtTokens(series.catchUpTokensPerHour)}/h</span>
         </span>
       </div>
       {!hasAnyTokens && !hasAnyRate ? (
@@ -142,14 +145,17 @@ function ProviderChart({
                 ifOverflow="extendDomain"
               />
             )}
-            {series.catchUpTokensPerHour !== null && (
-              <ReferenceLine
-                y={series.catchUpTokensPerHour}
-                stroke="var(--color-status-warning, #f59e0b)"
-                strokeDasharray="4 3"
-                ifOverflow="extendDomain"
-              />
-            )}
+            <Line
+              type="monotone"
+              dataKey="catchUp"
+              name="catch-up ceiling"
+              stroke="var(--color-status-warning, #f59e0b)"
+              strokeWidth={1.5}
+              strokeDasharray="4 3"
+              dot={false}
+              isAnimationActive={false}
+              connectNulls
+            />
           </LineChart>
         </ResponsiveContainer>
       </div>
@@ -198,13 +204,23 @@ export function UsageHistoryChart() {
   for (const s of sevenDay) for (const b of s.buckets) allTs.add(b.bucketTs)
   const sortedTs = Array.from(allTs).sort((a, b) => a - b)
   const aggregateBuckets: UsageHistoryBucket[] = sortedTs.map((ts) => {
-    const vals: number[] = []
+    const tokenVals: number[] = []
+    const catchVals: number[] = []
     for (const s of sevenDay) {
       const match = s.buckets.find((b) => b.bucketTs === ts)
-      if (match && match.totalTokens !== null) vals.push(match.totalTokens)
+      if (!match) continue
+      if (match.totalTokens !== null) tokenVals.push(match.totalTokens)
+      if (match.catchUpTokensPerHour !== null) catchVals.push(match.catchUpTokensPerHour)
     }
-    const avgVal = vals.length > 0 ? vals.reduce((a, b) => a + b, 0) / vals.length : null
-    return { bucketTs: ts, provider: 'avg', windowKey: '7d', totalTokens: avgVal }
+    const avgVal = tokenVals.length > 0 ? tokenVals.reduce((a, b) => a + b, 0) / tokenVals.length : null
+    const avgCatch = catchVals.length > 0 ? catchVals.reduce((a, b) => a + b, 0) / catchVals.length : null
+    return {
+      bucketTs: ts,
+      provider: 'avg',
+      windowKey: '7d',
+      totalTokens: avgVal,
+      catchUpTokensPerHour: avgCatch,
+    }
   })
   const aggregate: ProviderSeries = {
     provider: 'avg',

@@ -6,6 +6,7 @@ describe('resolveProviderForRun', () => {
   let getSettingsMock: ReturnType<typeof vi.fn>;
   let getQuotaSnapshotsMock: ReturnType<typeof vi.fn>;
   let jobsPausedResultMock: ReturnType<typeof vi.fn>;
+  let pauseJobsForQuotaExhaustionMock: ReturnType<typeof vi.fn>;
 
   beforeEach(() => {
     vi.resetModules();
@@ -21,11 +22,13 @@ describe('resolveProviderForRun', () => {
       ['codex', { fiveHour: { utilization: 10 } }],
     ]));
     jobsPausedResultMock = vi.fn().mockReturnValue(null);
+    pauseJobsForQuotaExhaustionMock = vi.fn().mockResolvedValue(undefined);
 
     vi.doMock('@/lib/jobs/storage', () => ({ getJob: getJobMock, listJobs: vi.fn(), updateJob: vi.fn() }));
     vi.doMock('@/lib/shared/config', () => ({ getSettings: getSettingsMock }));
     vi.doMock('@/lib/shared/job-control', () => ({
       jobsPausedResult: jobsPausedResultMock,
+      pauseJobsForQuotaExhaustion: pauseJobsForQuotaExhaustionMock,
     }));
     vi.doMock('@/lib/usage/quota', () => ({ getQuotaSnapshots: getQuotaSnapshotsMock }));
   });
@@ -385,7 +388,7 @@ describe('resolveProviderForRun', () => {
     expect(jobsPausedResultMock).toHaveBeenCalledTimes(2);
   });
 
-  it('blocks the start gate transiently when all enabled providers are unavailable', async () => {
+  it('blocks the start gate and globally pauses when all enabled providers are unavailable', async () => {
     getSettingsMock.mockReturnValue({
       cli_enabled_providers: ['claude', 'codex'],
       claude_provider: 'claude',
@@ -404,10 +407,12 @@ describe('resolveProviderForRun', () => {
     const { checkCliStartGate, ALL_PROVIDERS_BLOCKED_DETAIL } = await import('@/lib/usage/resolve-provider');
     const blocked = await checkCliStartGate('start a release');
     expect(blocked).toEqual({ ok: false, status: 429, detail: ALL_PROVIDERS_BLOCKED_DETAIL });
+    expect(pauseJobsForQuotaExhaustionMock).toHaveBeenCalledWith(ALL_PROVIDERS_BLOCKED_DETAIL);
     expect(jobsPausedResultMock).toHaveBeenCalledTimes(1);
 
     const recovered = await checkCliStartGate('start a release');
     expect(recovered).toEqual({ ok: true, provider: 'codex' });
+    expect(pauseJobsForQuotaExhaustionMock).toHaveBeenCalledTimes(1);
     expect(jobsPausedResultMock).toHaveBeenCalledTimes(2);
   });
 

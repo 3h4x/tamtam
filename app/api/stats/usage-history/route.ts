@@ -31,6 +31,13 @@ export interface UsageHistoryBucket {
   jobCount: number | null;
   /** Sum of input+output (the meaningful "tokens used" rate). */
   totalTokens: number | null;
+  /**
+   * Catch-up rate (tokens/h) at the time of this bucket: how fast the user
+   * could keep burning tokens to land exactly on 100% by window end, given
+   * the utilization and elapsed-time at that moment. Lets the chart show how
+   * the catch-up headroom has *evolved* instead of one flat reference line.
+   */
+  catchUpTokensPerHour: number | null;
 }
 
 interface ProviderSeries {
@@ -83,6 +90,7 @@ export async function GET(req: Request) {
       cacheCreateTokens: r.cacheCreateTokens !== null ? Number(r.cacheCreateTokens) : null,
       jobCount: r.jobCount,
       totalTokens,
+      catchUpTokensPerHour: null,
     };
     let series = grouped.get(key);
     if (!series) {
@@ -140,6 +148,20 @@ export async function GET(req: Request) {
         const remainingHours = Math.max(0.001, windowHours - elapsedHours);
         const catchUpTotal = (remainingPct / 100) * planTotal;
         series.catchUpTokensPerHour = catchUpTotal / remainingHours;
+
+        // Fill per-bucket catch-up rate using the same plan_total proxy. Lets
+        // the chart show how headroom has evolved instead of one flat line.
+        for (const b of series.buckets) {
+          const ub = b.utilizationPct;
+          const eb = b.elapsedPct;
+          if (ub == null || eb == null) continue;
+          const elapsedHoursBucket = (eb / 100) * windowHours;
+          const remainingHoursBucket = windowHours - elapsedHoursBucket;
+          if (remainingHoursBucket <= 0.001) continue;
+          const remainingPctBucket = Math.max(0, 100 - ub);
+          const catchUpTotalBucket = (remainingPctBucket / 100) * planTotal;
+          b.catchUpTokensPerHour = Math.max(0, catchUpTotalBucket / remainingHoursBucket);
+        }
       }
     }
   }
