@@ -235,9 +235,9 @@ describe('decideBoosts', () => {
   });
 
   it('promotes boosted runs to smart model when slack exceeds the aggressive-catchup threshold', () => {
-    // slack = 25 - 5 = 20 → meets AGGRESSIVE_CATCHUP_PP threshold
+    // slack = 20 - 5 = 15 → above AGGRESSIVE_CATCHUP_PP (10)
     const r = decideBoosts(makeInput({
-      pace: { status: 'under_pace', marginPct: 25 },
+      pace: { status: 'under_pace', marginPct: 20 },
     }));
     expect(r).toHaveLength(1);
     expect(r[0].modelOverride).toBe('smart');
@@ -245,7 +245,7 @@ describe('decideBoosts', () => {
   });
 
   it('does not promote when slack is below the aggressive-catchup threshold', () => {
-    // slack = 12 - 5 = 7 → below threshold, no override
+    // slack = 12 - 5 = 7 → below threshold (10), no override
     const r = decideBoosts(makeInput({
       pace: { status: 'under_pace', marginPct: 12 },
     }));

@@ -127,8 +127,9 @@ const SEVERELY_UNDER_STATUSES = new Set([
 // model tier promotion to `smart`. At this much weekly headroom, scheduling
 // more runs alone won't close the gap — each run also needs to burn more
 // tokens, which a stronger model accomplishes by reasoning longer and
-// emitting larger outputs.
-const AGGRESSIVE_CATCHUP_PP = 20;
+// emitting larger outputs. Kept low (~10pp) so promotion stays active as
+// the margin closes; turning it off only when we're nearly on pace.
+const AGGRESSIVE_CATCHUP_PP = 10;
 
 export function decideBoosts(input: BoostInput): BoostDecision[] {
   const now = input.nowMs ?? Date.now();
