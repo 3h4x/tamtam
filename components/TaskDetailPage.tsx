@@ -1,16 +1,31 @@
 'use client'
 
-import { useState, useEffect } from 'react'
+import { useState, useEffect, useRef } from 'react'
 import { useParams, useRouter } from 'next/navigation'
 import { fetchTaskDetail } from '@/lib/client-api'
 import type { TaskDetail } from '@/lib/client-api'
 import { FleetHealth } from '@/hooks/useProjectHealth'
 import { formatDuration } from '@/lib/shared/statusConstants'
+import { isCancelledExitCode } from '@/lib/shared/job-exit-codes'
 import { ErrorState } from '@/components/ErrorState'
 import { Button } from '@/components/ui/Button'
 import { Table, type Column } from '@/components/ui/Table'
 
 type RunHistoryEntry = TaskDetail['run_history'][number]
+const TASK_DETAIL_POLL_MS = 5000
+
+function renderExitState(run: RunHistoryEntry) {
+  if (run.exit_code === null) {
+    return <span className="text-status-warning">running</span>
+  }
+  if (run.exit_code === 0) {
+    return <span className="text-status-success">0</span>
+  }
+  if (isCancelledExitCode(run.exit_code)) {
+    return <span className="text-status-warning">cancelled</span>
+  }
+  return <span className="text-status-error">{run.exit_code}</span>
+}
 
 const runHistoryColumns: Column<RunHistoryEntry>[] = [
   {
@@ -34,14 +49,7 @@ const runHistoryColumns: Column<RunHistoryEntry>[] = [
   {
     key: 'exit',
     label: 'Exit',
-    render: (run) =>
-      run.exit_code === null ? (
-        <span className="text-status-warning">running</span>
-      ) : run.exit_code === 0 ? (
-        <span className="text-status-success">0</span>
-      ) : (
-        <span className="text-status-error">{run.exit_code}</span>
-      ),
+    render: (run) => renderExitState(run),
   },
 ]
 
@@ -67,6 +75,7 @@ export function TaskDetailPage({
   const [detail, setDetail] = useState<TaskDetail | null>(null)
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
+  const requestTokenRef = useRef(0)
 
   const project = fleet.projects.find(p => p.project === name)
   const taskHealth = project?.tasks.find(t => t.task.job === taskName)
@@ -75,12 +84,38 @@ export function TaskDetailPage({
   const schedId = task?.id || `${name}-${taskName}`
 
   useEffect(() => {
-    setLoading(true)
-    setError(null)
-    fetchTaskDetail(schedId)
-      .then(setDetail)
-      .catch(err => setError(err.message))
-      .finally(() => setLoading(false))
+    let cancelled = false
+
+    const loadDetail = async (mode: 'initial' | 'poll') => {
+      const token = ++requestTokenRef.current
+      if (mode === 'initial') {
+        setLoading(true)
+      }
+      try {
+        const nextDetail = await fetchTaskDetail(schedId)
+        if (cancelled || requestTokenRef.current !== token) return
+        setDetail(nextDetail)
+        setError(null)
+      } catch (err) {
+        if (cancelled || requestTokenRef.current !== token) return
+        setError(err instanceof Error ? err.message : 'Failed to fetch task detail')
+      } finally {
+        if (!cancelled && requestTokenRef.current === token) {
+          setLoading(false)
+        }
+      }
+    }
+
+    void loadDetail('initial')
+    const interval = setInterval(() => {
+      void loadDetail('poll')
+    }, TASK_DETAIL_POLL_MS)
+
+    return () => {
+      cancelled = true
+      requestTokenRef.current += 1
+      clearInterval(interval)
+    }
   }, [schedId])
 
   return (

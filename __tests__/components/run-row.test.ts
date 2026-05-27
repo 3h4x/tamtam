@@ -325,6 +325,21 @@ describe('RunRow', () => {
     unmount()
   })
 
+  it('renders stopped jobs with exit code -2 as cancelled', () => {
+    const entry = makeEntry({
+      exitCode: -2,
+    })
+
+    const { container, unmount } = renderRow({
+      entry,
+      onClick: vi.fn(),
+    })
+
+    expect(container.textContent).toContain('cancelled')
+    expect(container.textContent).not.toContain('exit -2')
+    unmount()
+  })
+
   it('renders NEEDS ATTENTION reviews as attention instead of green done', () => {
     const entry = makeEntry({
       verdict: 'NEEDS ATTENTION',
