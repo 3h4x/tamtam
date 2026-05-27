@@ -17,6 +17,7 @@ import { TerminalToolbar } from '@/components/terminal/TerminalToolbar'
 import { useSessionManager } from '@/components/terminal/useSessionManager'
 import { useHandleSubmit } from '@/components/terminal/useHandleSubmit'
 import { useTerminalBootstrap } from '@/components/terminal/useTerminalBootstrap'
+import { Button } from '@/components/ui/Button'
 import { MODEL_TIERS, normalizeModelInput, type ModelTier } from '@/lib/agents/model-aliases'
 import { type CliProvider } from '@/lib/usage/cli-providers'
 import { readBrowserStorageJson, writeBrowserStorage } from '@/lib/client/browser-storage'
@@ -498,14 +499,15 @@ export function TerminalTab({ projectName, initialSessionId }: TerminalTabProps)
               {issueContextRef.current.title ? ` — ${issueContextRef.current.title}` : ''}
             </span>
             {!showCloseStale ? (
-              <button
+              <Button
                 type="button"
+                size="sm"
                 onClick={() => setShowCloseStale(true)}
                 className="ml-auto px-2 py-1 rounded border border-border bg-bg-tertiary text-text-secondary hover:text-text-primary"
                 title="Close this issue with a verdict comment"
               >
                 Close with verdict
-              </button>
+              </Button>
             ) : (
               <div className="ml-auto flex items-start gap-2 w-full mt-2">
                 <select
@@ -526,21 +528,23 @@ export function TerminalTab({ projectName, initialSessionId }: TerminalTabProps)
                   className="flex-1 px-2 py-1 rounded border border-border bg-bg-tertiary text-text-primary text-xs font-mono"
                 />
                 <div className="flex flex-col gap-1">
-                  <button
+                  <Button
                     type="button"
+                    size="sm"
                     disabled={!closeStaleFindings.trim() || closingStale}
                     onClick={handleCloseStale}
                     className="px-2 py-1 rounded border border-border bg-accent/20 text-text-primary disabled:opacity-50"
                   >
                     {closingStale ? 'closing…' : 'Comment + Close'}
-                  </button>
-                  <button
+                  </Button>
+                  <Button
                     type="button"
+                    size="sm"
                     onClick={() => { setShowCloseStale(false); setCloseStaleFindings('') }}
                     className="px-2 py-1 rounded border border-border bg-bg-tertiary text-text-secondary"
                   >
                     cancel
-                  </button>
+                  </Button>
                 </div>
               </div>
             )}

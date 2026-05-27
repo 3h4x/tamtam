@@ -784,9 +784,14 @@ describe('config', () => {
   });
 
   describe('getPipelineModel', () => {
-    it('defaults review and fix to the workspace default tier', () => {
+    it('defaults review to the workspace default tier', () => {
       expect(getPipelineModel('review')).toBe('fast');
-      expect(getPipelineModel('fix')).toBe('fast');
+    });
+
+    it('defaults fix to smart regardless of workspace default', () => {
+      // Auto-fix is correctness-critical — even when default_model is `fast`,
+      // fix-phase must use a high-quality model so patches don't ship broken.
+      expect(getPipelineModel('fix')).toBe('smart');
     });
 
     it('defaults DoD and commit to fast', () => {

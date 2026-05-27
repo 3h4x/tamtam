@@ -539,10 +539,12 @@ async function recordDefaultDirtyCommitRecoveryMarker(
   signal?: AbortSignal,
 ): Promise<void> {
   try {
-    const branchR = await exec('git', ['-C', projPath, 'branch', '--show-current'], { timeout: 5000, signal });
+    const [branchR, mainBranch] = await Promise.all([
+      exec('git', ['-C', projPath, 'branch', '--show-current'], { timeout: 5000, signal }),
+      detectMainBranch(projPath, signal),
+    ]);
     if (branchR.exitCode !== 0) return;
     const currentBranch = branchR.stdout.trim();
-    const mainBranch = await detectMainBranch(projPath, signal);
     if (!currentBranch || currentBranch !== mainBranch) return;
     const statusR = await exec('git', ['-C', projPath, 'status', '--porcelain'], { timeout: 5000, signal });
     if (statusR.exitCode !== 0 || !statusR.stdout.trim()) return;

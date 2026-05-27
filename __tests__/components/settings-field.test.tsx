@@ -74,7 +74,7 @@ describe('SettingsField', () => {
     unmount()
   })
 
-  it('uses the pipeline-specific default copy for review and commit model selectors', () => {
+  it('uses the pipeline-specific default copy for pipeline model selectors', () => {
     const reviewField = renderSettingsField({
       fieldKey: 'pipeline_model_review',
       provider: 'claude',
@@ -84,6 +84,16 @@ describe('SettingsField', () => {
     if (!(reviewSelect instanceof HTMLSelectElement)) throw new Error('review select not found')
     expect(reviewSelect.options[0]?.textContent).toBe('Default (workspace)')
     reviewField.unmount()
+
+    const fixField = renderSettingsField({
+      fieldKey: 'pipeline_model_fix',
+      provider: 'claude',
+      value: '',
+    })
+    const fixSelect = fixField.container.querySelector('select')
+    if (!(fixSelect instanceof HTMLSelectElement)) throw new Error('fix select not found')
+    expect(fixSelect.options[0]?.textContent).toBe('Default (Smart)')
+    fixField.unmount()
 
     const commitField = renderSettingsField({
       fieldKey: 'pipeline_model_commit',

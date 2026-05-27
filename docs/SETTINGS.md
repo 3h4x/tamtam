@@ -160,6 +160,10 @@ All three are read live on each job (not cached), so changing them takes effect 
 | `review_do_not_ship_action` | enum `pass` \| `fix` \| `abort` | `fix` | What to do when a code review returns **DO NOT SHIP**. `fix` (default) routes through the same fix loop NEEDS ATTENTION uses (subject to `review_fix_max_iterations`). `pass` files a follow-up GitHub issue with the findings and continues to commit → push → mark-dod so the partial work still ships. `abort` keeps the legacy behavior of stopping the release immediately. |
 | `release_wall_clock_timeout_minutes` | number | `60` | Overall wall-clock budget for an active Release run. Each release meta-job stores `release_deadline_at`; the 30s probe sweep aborts expired releases with reason `wall_clock_timeout`. Per-project `.tamtam/config.yml` can override this with `pipeline.release_timeout_minutes`. |
 
+### Pipeline Model Tiers
+
+These settings override the semantic model tier per pipeline phase. Leave a field empty to use the phase default: `pipeline_model_review` uses the workspace `default_model`, `pipeline_model_fix` uses `smart`, and `pipeline_model_dod` / `pipeline_model_commit` use `fast`.
+
 ### Orchestrator
 
 The orchestrator budget allocator runs as a graphile-worker cron task (`orchestrator-tick`) every 5 minutes when enabled. It reads `/api/stats/bridge`, checks whether global pace is under the configured threshold, and then dispatches extra scheduled-agent fires for shipping or active projects while staying inside the per-project rolling-hour cap.

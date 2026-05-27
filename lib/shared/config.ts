@@ -204,8 +204,8 @@ const DEFAULTS: TamTamConfig = {
   notification_on_post_merge_revert: false,
   notification_throttle_window_seconds: 900,
   notification_throttle_overrides: { release_fail: 0, release_aborted: 0 },
-  // Empty string = use the per-step sensible default (review/fix → workspace
-  // default_model; dod/commit → fast since they're cheap classification tasks).
+  // Empty string = use the per-step sensible default (review → workspace
+  // default_model; fix → smart; dod/commit → fast).
   pipeline_model_review: '',
   pipeline_model_fix: '',
   pipeline_model_dod: '',
@@ -591,10 +591,9 @@ export function normalizePermissionMode(value: string | undefined): PermissionMo
 /**
  * Resolve the Claude model to use for a specific pipeline step. Returns the
  * user-configured override (Settings → Pipeline) when set; otherwise falls
- * back to the per-step default. `review` and `fix` default to the workspace
- * default_model (the user's general-purpose model); `dod` and `commit`
- * default to fast because they're cheap, well-scoped tasks where stronger
- * models would be wasteful.
+ * back to the per-step default. `review` defaults to the workspace
+ * default_model, `fix` defaults to smart because it edits code, and
+ * `dod`/`commit` default to fast because they're cheap, well-scoped tasks.
  */
 export type PipelineStepKind = 'review' | 'fix' | 'dod' | 'commit';
 
@@ -607,7 +606,16 @@ export function getPipelineModel(step: PipelineStepKind): string {
                         cfg.pipeline_model_commit
   );
   if (override) return normalizeModelInput(override);
+  // dod/commit are cheap, well-scoped — `fast` is the right default.
   if (step === 'dod' || step === 'commit') return 'fast';
+  // Auto-fix is correctness-critical: it edits code in response to a failed
+  // review or push hook. Running it on the user's general `default_model`
+  // means a workspace tuned to `default_model=fast` silently ships haiku
+  // patches, which are noisy and risk landing broken code. Hard-default fix
+  // to `smart` so quality stays high regardless of the general model. Users
+  // who genuinely want a cheaper fix can still override via
+  // `pipeline_model_fix`.
+  if (step === 'fix') return 'smart';
   return normalizeModelInput(cfg.default_model);
 }
 
