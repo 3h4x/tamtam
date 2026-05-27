@@ -212,6 +212,35 @@ describe('decideBoosts', () => {
     expect(r.map((d) => d.project).sort()).toEqual(['borged', 'other', 'sleepy']);
   });
 
+  it('boosts when 7d weekly margin is behind even if 5h short window is on_pace', () => {
+    const r = decideBoosts(makeInput({
+      pace: { status: 'on_pace', marginPct: -2, weeklyMarginPct: 30 },
+    }));
+    expect(r).toHaveLength(1);
+    expect(r[0].reason).toContain('weekly=30');
+  });
+
+  it('uses the larger of short/weekly margin for multi-pick slack', () => {
+    const r = decideBoosts(makeInput({
+      pace: { status: 'on_pace', marginPct: -5, weeklyMarginPct: 25 },
+      settings: { marginPct: 5, maxBoostsPerHour: 5 },
+      agents: [
+        makeAgent({ id: 'a', lastDispatchMs: null }),
+        makeAgent({ id: 'b', lastDispatchMs: NOW - 30 * 60 * 1000 }),
+        makeAgent({ id: 'c', lastDispatchMs: NOW - 60 * 60 * 1000 }),
+      ],
+    }));
+    // slack = 25 - 5 = 20 → desiredPicks = min(5, 1+2) = 3
+    expect(r).toHaveLength(3);
+  });
+
+  it('does not boost when both short and weekly margins are below the floor', () => {
+    const r = decideBoosts(makeInput({
+      pace: { status: 'on_pace', marginPct: -3, weeklyMarginPct: 2 },
+    }));
+    expect(r).toEqual([]);
+  });
+
   it('returns nothing when maxBoostsPerHour is zero (kill switch via setting)', () => {
     const r = decideBoosts(makeInput({
       settings: { marginPct: 5, maxBoostsPerHour: 0 },
