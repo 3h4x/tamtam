@@ -190,9 +190,12 @@ export async function isIssueContextCompatibleWithCurrentBranch(
   let currentBranch = '';
   let mainBranch = '';
   try {
-    const branchR = await exec('git', ['-C', projPath, 'branch', '--show-current'], { timeout: 5000 });
+    const [branchR, detected] = await Promise.all([
+      exec('git', ['-C', projPath, 'branch', '--show-current'], { timeout: 5000 }),
+      detectMainBranch(projPath),
+    ]);
     currentBranch = branchR.stdout.trim();
-    mainBranch = await detectMainBranch(projPath);
+    mainBranch = detected;
   } catch {
     // git unreachable — fall through with optimistic context.
   }
