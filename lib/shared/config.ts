@@ -1,6 +1,7 @@
 import { db, schema } from '@/lib/db';
 import { join } from 'path';
 import { readFileSync } from 'fs';
+import { isUndefinedTableError } from '@/lib/db/errors';
 import {
   normalizeBudgetSubscriptionProviders,
   type BudgetSubscriptionProvider,
@@ -339,11 +340,26 @@ export function getSettings(): TamTamConfig {
 }
 
 async function _doSettingsRefresh(): Promise<void> {
-  const rows = await db.select().from(schema.settings);
+  let rows: Array<typeof schema.settings.$inferSelect>;
+  try {
+    rows = await db.select().from(schema.settings);
+  } catch (e) {
+    if (isUndefinedTableError(e)) {
+      const config = DEFAULTS;
+      _cache = { config, time: Date.now() / 1000 };
+      syncProcessEnvFromConfig(config);
+      return;
+    }
+    throw e;
+  }
   const map: Record<string, string> = {};
   for (const row of rows) map[row.key] = row.value;
   const config = buildConfigFromSettingsMap(map);
   _cache = { config, time: Date.now() / 1000 };
+  syncProcessEnvFromConfig(config);
+}
+
+function syncProcessEnvFromConfig(config: Pick<TamTamConfig, 'lmstudio_model'>): void {
   if (config.lmstudio_model) {
     process.env.LMSTUDIO_MODEL = config.lmstudio_model;
   } else {

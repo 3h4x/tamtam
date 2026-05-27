@@ -48,6 +48,33 @@ async function applyDdl(handle: TestDbHandle): Promise<void> {
     )
   `));
   await handle.db.execute(sql.raw(`
+    CREATE TABLE IF NOT EXISTS settings (
+      key text PRIMARY KEY,
+      value text NOT NULL
+    )
+  `));
+  await handle.db.execute(sql.raw(`
+    CREATE TABLE IF NOT EXISTS maintenance_status (
+      key text PRIMARY KEY,
+      value text NOT NULL,
+      updated_at double precision NOT NULL
+    )
+  `));
+  await handle.db.execute(sql.raw(`
+    CREATE TABLE IF NOT EXISTS job_completion_events (
+      id serial PRIMARY KEY,
+      job_id text NOT NULL UNIQUE,
+      kind text NOT NULL,
+      exit_code integer,
+      project text NOT NULL,
+      release_id text,
+      gh_issue_number integer,
+      emitted_at double precision NOT NULL,
+      consumed_by text,
+      consumed_at double precision
+    )
+  `));
+  await handle.db.execute(sql.raw(`
     CREATE TABLE IF NOT EXISTS recommendations (
       id text PRIMARY KEY,
       project text NOT NULL,
@@ -103,7 +130,7 @@ async function truncateAll(): Promise<void> {
   // no extension reload). Single execute() with multi-statement is rejected by
   // PGlite, so issue them via a single CTE-style query.
   await sharedHandle.db.execute(sql.raw(
-    'WITH a AS (DELETE FROM jobs RETURNING 1), b AS (DELETE FROM recommendations RETURNING 1) DELETE FROM gh_issues_cache'
+    'WITH a AS (DELETE FROM jobs RETURNING 1), b AS (DELETE FROM recommendations RETURNING 1), c AS (DELETE FROM settings RETURNING 1), d AS (DELETE FROM maintenance_status RETURNING 1), e AS (DELETE FROM job_completion_events RETURNING 1) DELETE FROM gh_issues_cache'
   ));
 }
 
@@ -982,6 +1009,73 @@ describe('markDone – DB-level idempotency guard', () => {
     expect(row?.exitCode).toBe(0);
   });
 
+  it('lets only one concurrent caller claim a null-finished DB row', async () => {
+    await testDb.db.insert(schema.jobs).values({
+      id: 'db-guard-job-concurrent', project: 'guard-proj', kind: 'push',
+      prompt: null, pid: 1, logPath: null,
+      startedAt: Date.now() / 1000 - 5,
+      finishedAt: null,
+      exitCode: null,
+      seen: false, durationMs: null, inputTokens: null, outputTokens: null,
+      cacheReadTokens: null, cacheCreateTokens: null, sessionId: null,
+    } as any);
+
+    const first = makeJob('db-guard-job-concurrent');
+    const second = makeJob('db-guard-job-concurrent');
+
+    await Promise.all([
+      markDoneFn(first, 0),
+      markDoneFn(second, 99),
+    ]);
+
+    const row = (await testDb.db.select().from(schema.jobs)).find(r => r.id === 'db-guard-job-concurrent');
+    expect(row?.finishedAt).not.toBeNull();
+    expect(row?.exitCode).toBe(0);
+    expect(first.finishedAt).toBe(row?.finishedAt);
+    expect(second.finishedAt).toBe(row?.finishedAt);
+    expect(second.exitCode).toBe(0);
+  });
+
+  it('rolls back the DB finish claim when the durable completion event cannot be written', async () => {
+    await testDb.db.insert(schema.jobs).values({
+      id: 'db-guard-job-event-rollback', project: 'guard-proj', kind: 'push',
+      prompt: null, pid: 1, logPath: null,
+      startedAt: Date.now() / 1000 - 5,
+      finishedAt: null,
+      exitCode: null,
+      seen: false, durationMs: null, inputTokens: null, outputTokens: null,
+      cacheReadTokens: null, cacheCreateTokens: null, sessionId: null,
+    } as any);
+
+    await testDb.db.execute(sql.raw('DROP TABLE job_completion_events'));
+    try {
+      const job = makeJob('db-guard-job-event-rollback');
+      await expect(markDoneFn(job, 0)).rejects.toThrow();
+      expect(job.finishedAt).toBeNull();
+      expect(job.exitCode).toBe(0);
+
+      const row = (await testDb.db.select().from(schema.jobs))
+        .find(r => r.id === 'db-guard-job-event-rollback');
+      expect(row?.finishedAt).toBeNull();
+      expect(row?.exitCode).toBeNull();
+    } finally {
+      await testDb.db.execute(sql.raw(`
+        CREATE TABLE IF NOT EXISTS job_completion_events (
+          id serial PRIMARY KEY,
+          job_id text NOT NULL UNIQUE,
+          kind text NOT NULL,
+          exit_code integer,
+          project text NOT NULL,
+          release_id text,
+          gh_issue_number integer,
+          emitted_at double precision NOT NULL,
+          consumed_by text,
+          consumed_at double precision
+        )
+      `));
+    }
+  });
+
   it('proceeds normally when no DB row exists (new job not yet persisted)', async () => {
     // Job exists only in memory (no DB row inserted yet)
     const job = makeJob('db-guard-no-row');
@@ -990,6 +1084,11 @@ describe('markDone – DB-level idempotency guard', () => {
     // Should have finalized as normal
     expect(job.finishedAt).not.toBeNull();
     expect(job.exitCode).toBe(0);
+    const events = await testDb.db.select().from(schema.jobCompletionEvents);
+    expect(events.find(e => e.jobId === 'db-guard-no-row')).toMatchObject({
+      jobId: 'db-guard-no-row',
+      exitCode: 0,
+    });
   });
 
   it('in-memory guard still fires before the DB check (finishedAt already set)', async () => {

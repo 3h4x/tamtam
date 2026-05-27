@@ -85,7 +85,7 @@ afterAll(async () => {
 
 async function truncateAll(): Promise<void> {
   await sharedHandle.db.execute(sql.raw(
-    'WITH a AS (DELETE FROM jobs RETURNING 1), b AS (DELETE FROM recommendations RETURNING 1) DELETE FROM gh_issues_cache'
+    'WITH a AS (DELETE FROM jobs RETURNING 1), b AS (DELETE FROM recommendations RETURNING 1), c AS (DELETE FROM job_completion_events RETURNING 1) DELETE FROM gh_issues_cache'
   ));
 }
 
@@ -144,6 +144,20 @@ async function applyDdl(handle: TestDbHandle): Promise<void> {
       payload text,
       created_at double precision NOT NULL,
       updated_at double precision NOT NULL
+    )
+  `));
+  await handle.db.execute(sql.raw(`
+    CREATE TABLE IF NOT EXISTS job_completion_events (
+      id serial PRIMARY KEY,
+      job_id text NOT NULL UNIQUE,
+      kind text NOT NULL,
+      exit_code integer,
+      project text NOT NULL,
+      release_id text,
+      gh_issue_number integer,
+      emitted_at double precision NOT NULL,
+      consumed_by text,
+      consumed_at double precision
     )
   `));
   await handle.db.execute(sql.raw(`
@@ -346,7 +360,7 @@ describe('runCompletionHooks – mark-dod integration', () => {
   });
 
   it('does NOT call startMarkDod when there is no linked issue, even in PR Workflow', async () => {
-    await handle.db.execute(sql.raw('DELETE FROM jobs'));
+    await handle.db.execute(sql.raw('WITH a AS (DELETE FROM job_completion_events RETURNING 1) DELETE FROM jobs'));
     storageCache.clear();
     const logFile = join(tempDir, 'lgtm-noissue.log');
     writeFileSync(logFile, 'Verdict: LGTM\n');
@@ -356,7 +370,7 @@ describe('runCompletionHooks – mark-dod integration', () => {
   });
 
   it('still calls startMarkDod when the release-scoped source row is missing ghIssueRepo but a sibling row has it', async () => {
-    await handle.db.execute(sql.raw('DELETE FROM jobs'));
+    await handle.db.execute(sql.raw('WITH a AS (DELETE FROM job_completion_events RETURNING 1) DELETE FROM jobs'));
     storageCache.clear();
     const now = Date.now() / 1000;
     const seededRows = [

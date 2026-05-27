@@ -65,6 +65,20 @@ async function applyDdl(handle: TestDbHandle): Promise<void> {
     )
   `));
   await handle.db.execute(sql.raw(`
+    CREATE TABLE IF NOT EXISTS job_completion_events (
+      id serial PRIMARY KEY,
+      job_id text NOT NULL UNIQUE,
+      kind text NOT NULL,
+      exit_code integer,
+      project text NOT NULL,
+      release_id text,
+      gh_issue_number integer,
+      emitted_at double precision NOT NULL,
+      consumed_by text,
+      consumed_at double precision
+    )
+  `));
+  await handle.db.execute(sql.raw(`
     CREATE TABLE IF NOT EXISTS gh_issues_cache (
       project text PRIMARY KEY,
       repo text NOT NULL,
@@ -103,7 +117,7 @@ async function truncateAll(): Promise<void> {
   // no extension reload). Single execute() with multi-statement is rejected by
   // PGlite, so issue them via a single CTE-style query.
   await sharedHandle.db.execute(sql.raw(
-    'WITH a AS (DELETE FROM jobs RETURNING 1), b AS (DELETE FROM recommendations RETURNING 1) DELETE FROM gh_issues_cache'
+    'WITH a AS (DELETE FROM jobs RETURNING 1), b AS (DELETE FROM recommendations RETURNING 1), c AS (DELETE FROM job_completion_events RETURNING 1) DELETE FROM gh_issues_cache'
   ));
 }
 

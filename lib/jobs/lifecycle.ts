@@ -1,4 +1,4 @@
-import { eq } from 'drizzle-orm';
+import { and, eq, isNull } from 'drizzle-orm';
 import { readFileSync } from 'fs';
 import { db, schema } from '@/lib/db';
 import { markReviewed, setReviewedRef, getCurrentBranch } from '@/lib/git/git-utils';
@@ -7,6 +7,7 @@ import { costUsd } from '@/lib/shared/usage-pricing';
 import { getVerdict, readLog, readParsedLog } from './verdict';
 import {
   saveToDbAsync,
+  awaitInFlightSave,
   listJobs,
   getJob,
   persistVerdict,
@@ -1555,20 +1556,8 @@ async function retryFixCi(projectName: string): Promise<void> {
 export async function markDone(job: JobData, exitCode: number): Promise<void> {
   // Idempotent: if already finalized, don't double-fire hooks or rewrite DB.
   if (job.finishedAt !== null) return;
-  // Also check the DB — two concurrent probes can each hold a fresh JobData
-  // instance (fetched via separate listJobs() calls), both see finishedAt ===
-  // null, and both run the completion hook, producing double "release
-  // finished" markers, double fix chains, and orphaned child jobs. Consult
-  // the DB so the first writer wins.
-  const dbRows = await db.select({ finishedAt: schema.jobs.finishedAt })
-    .from(schema.jobs).where(eq(schema.jobs.id, job.id)).limit(1);
-  const dbRow = dbRows[0] ?? null;
-  if (dbRow?.finishedAt != null) {
-    job.finishedAt = dbRow.finishedAt; // keep in-memory object in sync
-    return;
-  }
-  job.finishedAt = Date.now() / 1000;
-  job.exitCode = exitCode;
+  await awaitInFlightSave(job.id);
+
   // Extract result metadata (tokens, duration, session) from log.
   // NOTE: we skip this for `release` meta-jobs. Their log is an aggregate of
   // child logs, so parseStreamLines would find the *child's* session_id and
@@ -1578,6 +1567,7 @@ export async function markDone(job: JobData, exitCode: number): Promise<void> {
   const shouldExtractMetadata = job.kind !== 'release';
   const rawLog = shouldExtractMetadata ? readLog(job, 50_000) : '';
   const events = shouldExtractMetadata ? parseStreamLines(rawLog) : [];
+  job.exitCode = exitCode;
   const doneEvent = events.find(e => e.type === 'done');
   if (doneEvent && doneEvent.type === 'done') {
     job.durationMs = doneEvent.result.duration;
@@ -1613,6 +1603,102 @@ export async function markDone(job: JobData, exitCode: number): Promise<void> {
       job.exitCode = 1;
     }
   }
+
+  // Claim the DB row and emit the durable completion event in one transaction.
+  // This preserves the crash-recovery invariant: once `jobs.finished_at` is
+  // visible, the event router also has a row it can replay after restart.
+  const finishedAt = Date.now() / 1000;
+  const claimedRows = await db.transaction(async (tx) => {
+    const rows = await tx.update(schema.jobs)
+      .set({
+        finishedAt,
+        exitCode: job.exitCode,
+        durationMs: job.durationMs ?? null,
+        inputTokens: job.inputTokens ?? null,
+        outputTokens: job.outputTokens ?? null,
+        cacheReadTokens: job.cacheReadTokens ?? null,
+        cacheCreateTokens: job.cacheCreateTokens ?? null,
+        sessionId: job.sessionId ?? null,
+        model: job.model ?? null,
+        costUsd: job.costUsd ?? null,
+      })
+      .where(and(eq(schema.jobs.id, job.id), isNull(schema.jobs.finishedAt)))
+      .returning({ finishedAt: schema.jobs.finishedAt, exitCode: schema.jobs.exitCode });
+    if (rows.length > 0) {
+      await tx.insert(schema.jobCompletionEvents).values({
+        jobId: job.id,
+        kind: job.kind,
+        exitCode: job.exitCode,
+        project: job.project,
+        releaseId: job.releaseId ?? null,
+        ghIssueNumber: job.ghIssueNumber ?? null,
+        emittedAt: finishedAt,
+      }).onConflictDoNothing({ target: schema.jobCompletionEvents.jobId }).execute();
+      return rows;
+    }
+
+    const insertedRows = await tx.insert(schema.jobs).values({
+      id: job.id,
+      project: job.project,
+      kind: job.kind,
+      prompt: job.prompt,
+      pid: job.pid,
+      logPath: job.logPath,
+      startedAt: job.startedAt,
+      finishedAt,
+      exitCode: job.exitCode,
+      seen: job.seen,
+      durationMs: job.durationMs ?? null,
+      inputTokens: job.inputTokens ?? null,
+      outputTokens: job.outputTokens ?? null,
+      cacheReadTokens: job.cacheReadTokens ?? null,
+      cacheCreateTokens: job.cacheCreateTokens ?? null,
+      sessionId: job.sessionId ?? null,
+      contextMeta: job.contextMeta ?? null,
+      userPrompt: job.userPrompt ?? null,
+      parentJobId: job.parentJobId ?? null,
+      ghIssueNumber: job.ghIssueNumber ?? null,
+      ghIssueRepo: job.ghIssueRepo ?? null,
+      ghIssueTitle: job.ghIssueTitle ?? null,
+      logPruned: job.logPruned ?? false,
+      verdict: job.verdict ?? null,
+      costUsd: job.costUsd ?? null,
+      model: job.model ?? null,
+      releaseId: job.releaseId ?? null,
+      abortedAt: job.abortedAt ?? null,
+      releaseDeadlineAt: job.releaseDeadlineAt ?? null,
+      promptBytes: job.promptBytes ?? null,
+      workSummary: job.workSummary ?? null,
+      modifiedFiles: job.modifiedFiles ?? null,
+      provider: job.provider ?? null,
+    }).onConflictDoNothing({ target: schema.jobs.id })
+      .returning({ finishedAt: schema.jobs.finishedAt, exitCode: schema.jobs.exitCode });
+    if (insertedRows.length === 0) return insertedRows;
+    await tx.insert(schema.jobCompletionEvents).values({
+      jobId: job.id,
+      kind: job.kind,
+      exitCode: job.exitCode,
+      project: job.project,
+      releaseId: job.releaseId ?? null,
+      ghIssueNumber: job.ghIssueNumber ?? null,
+      emittedAt: finishedAt,
+    }).onConflictDoNothing({ target: schema.jobCompletionEvents.jobId }).execute();
+    return insertedRows;
+  });
+  if (claimedRows.length === 0) {
+    const dbRows = await db
+      .select({ finishedAt: schema.jobs.finishedAt, exitCode: schema.jobs.exitCode })
+      .from(schema.jobs)
+      .where(eq(schema.jobs.id, job.id))
+      .limit(1);
+    const dbRow = dbRows[0] ?? null;
+    if (dbRow?.finishedAt != null) {
+      job.finishedAt = dbRow.finishedAt;
+      job.exitCode = dbRow.exitCode ?? job.exitCode;
+      return;
+    }
+  }
+  job.finishedAt = finishedAt;
   if (isAgentJobKind(job.kind) || (job.kind === 'run' && job.ghIssueNumber != null)) {
     try {
       const { finalizeAgentRunReport } = await import('@/lib/agents/agent-run-report');
@@ -1624,23 +1710,6 @@ export async function markDone(job: JobData, exitCode: number): Promise<void> {
   if (shouldAutoMarkSeen(job)) job.seen = true;
   await saveToDbAsync(job);
   void db.delete(schema.ghIssuesCache).where(eq(schema.ghIssuesCache.project, job.project)).execute().catch(() => {});
-  // Durable completion event: write a row before the inline hook chain so
-  // a workflow consumer can re-drive downstream decisions (release-after-run,
-  // release-after-fix-ci, auto-resume) on a crash/restart that interrupts the
-  // hook chain. Unique on jobId — duplicate markDone is silently skipped.
-  try {
-    await db.insert(schema.jobCompletionEvents).values({
-      jobId: job.id,
-      kind: job.kind,
-      exitCode: job.exitCode,
-      project: job.project,
-      releaseId: job.releaseId ?? null,
-      ghIssueNumber: job.ghIssueNumber ?? null,
-      emittedAt: Date.now() / 1000,
-    }).onConflictDoNothing({ target: schema.jobCompletionEvents.jobId }).execute();
-  } catch (eventErr) {
-    console.error(`[markDone] failed to emit job_completion_event for ${job.id}:`, eventErr);
-  }
   // Wrap completion hooks so a thrown handler can't strand the release
   // meta-job in `running`. The orchestrator workflow finalizes the meta-job
   // when its dispatch result is terminal; we just log here.

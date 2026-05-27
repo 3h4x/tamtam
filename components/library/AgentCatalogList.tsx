@@ -2,6 +2,7 @@
 
 import { useMemo, useState } from 'react'
 import { useAgentCatalog, type AgentCatalogClientEntry } from '@/hooks/useAgentCatalog'
+import { Spinner } from '@/components/ui/Spinner'
 
 const TIER_ORDER: Record<string, number> = {
   essential: 0,
@@ -63,7 +64,10 @@ export function AgentCatalogList() {
   if (loading && entries.length === 0) {
     return (
       <section className="rounded-lg border border-border bg-bg-secondary p-4">
-        <div className="text-sm text-text-tertiary">Loading agent catalog…</div>
+        <div className="flex items-center gap-2 text-sm text-text-tertiary">
+          <Spinner size="sm" shrink aria-label="Loading" role="status" />
+          <span>Loading agent catalog…</span>
+        </div>
       </section>
     )
   }

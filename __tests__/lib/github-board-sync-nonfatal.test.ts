@@ -46,6 +46,18 @@ async function applyJobsSchema(handle: TestDbHandle): Promise<void> {
     issues text NOT NULL DEFAULT '[]',
     fetched_at double precision NOT NULL
   )`));
+  await handle.db.execute(sql.raw(`CREATE TABLE IF NOT EXISTS job_completion_events (
+    id serial PRIMARY KEY,
+    job_id text NOT NULL UNIQUE,
+    kind text NOT NULL,
+    exit_code integer,
+    project text NOT NULL,
+    release_id text,
+    gh_issue_number integer,
+    emitted_at double precision NOT NULL,
+    consumed_by text,
+    consumed_at double precision
+  )`));
 }
 
 describe('GitHub board sync failures are non-fatal', () => {
@@ -67,7 +79,7 @@ describe('GitHub board sync failures are non-fatal', () => {
 
   beforeEach(async () => {
     vi.resetModules();
-    await sharedHandle.db.execute(sql.raw('TRUNCATE jobs, gh_issues_cache'));
+    await sharedHandle.db.execute(sql.raw('TRUNCATE jobs, gh_issues_cache, job_completion_events'));
     vi.doMock('@/lib/db', () => ({ db: sharedHandle.db, schema }));
   });
 
