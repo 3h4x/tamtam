@@ -285,19 +285,23 @@ async function decideStep(jobId: string): Promise<NextPhase> {
           const { resolveProjectPath } = await import('@/lib/shared/project-data');
           const projPath = resolveProjectPath(job.project);
           if (projPath) {
-            const { detectMainBranch } = await import('@/lib/pipeline/start-commit');
-            const defaultBranch = await detectMainBranch(projPath);
+            const [{ detectMainBranch }, { exec }] = await Promise.all([
+              import('@/lib/pipeline/start-commit'),
+              import('@/lib/shared/shell'),
+            ]);
             // Prefer the PR's recorded merge commit (canonical for squash
             // and rebase merges) and fall back to the local default-branch
             // tip if gh is unavailable. Without the fallback we'd silently
             // skip soak in offline environments.
-            const { exec } = await import('@/lib/shared/shell');
             let mergeSha = '';
-            const ghMerge = await exec(
-              'gh',
-              ['pr', 'view', String(prMeta.prNumber), '--repo', prMeta.prRepo, '--json', 'mergeCommit', '--jq', '.mergeCommit.oid'],
-              { cwd: projPath, timeout: 15_000 },
-            );
+            const [defaultBranch, ghMerge] = await Promise.all([
+              detectMainBranch(projPath),
+              exec(
+                'gh',
+                ['pr', 'view', String(prMeta.prNumber), '--repo', prMeta.prRepo, '--json', 'mergeCommit', '--jq', '.mergeCommit.oid'],
+                { cwd: projPath, timeout: 15_000 },
+              ),
+            ]);
             if (ghMerge.exitCode === 0) mergeSha = ghMerge.stdout.trim();
             if (!mergeSha) {
               await exec('git', ['-C', projPath, 'fetch', 'origin', defaultBranch], { timeout: 30_000 });
