@@ -76,7 +76,7 @@ Before any run/release path starts work, TamTam performs one shared async gate:
 
 Implications:
 
-- If `budget_block_runs_enabled` is off, the chooser still routes around exhausted quota-backed providers. If every enabled quota-backed provider is exhausted, the start is rejected with HTTP 429, but this does not toggle the manual global pause.
+- If `budget_block_runs_enabled` is off, the chooser still routes around exhausted quota-backed providers. If every enabled quota-backed provider is exhausted, the start is rejected with HTTP 429 and TamTam pauses jobs globally.
 - If exactly one CLI is enabled and it is over `budget_block_at_pct`, the start is rejected with HTTP 429.
 - If multiple CLIs are enabled, TamTam skips blocked providers and proceeds with the enabled provider that has the most remaining headroom.
 - The shared start gate blocks on 5-hour usage and provider credits. When `budget_block_on_weekly_pace_enabled` is true, it also blocks on actual 7-day utilization; 7-day and model-specific weekly windows still influence provider headroom scoring. Scheduled agents also have a separate burn-rate throttle inside the internal scheduler.

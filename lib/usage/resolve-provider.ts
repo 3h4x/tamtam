@@ -1,6 +1,6 @@
 import { getJob } from '@/lib/jobs/storage';
 import type { ModelTier } from '@/lib/agents/model-aliases';
-import { jobsPausedResult } from '@/lib/shared/job-control';
+import { jobsPausedResult, pauseJobsForQuotaExhaustion } from '@/lib/shared/job-control';
 import { getSettings } from '@/lib/shared/config';
 import { getQuotaSnapshots } from '@/lib/usage/quota';
 import { pickCliProvider, hardGateUtilizationFor, type PickCliResult } from '@/lib/usage/cli-picker';
@@ -219,6 +219,7 @@ export async function checkCliStartGate(
   }
   const picked = await resolveProviderForRun(opts);
   if (!picked.provider) {
+    await pauseJobsForQuotaExhaustion(ALL_PROVIDERS_BLOCKED_DETAIL);
     return { ok: false, status: 429, detail: ALL_PROVIDERS_BLOCKED_DETAIL };
   }
   return { ok: true, provider: picked.provider };

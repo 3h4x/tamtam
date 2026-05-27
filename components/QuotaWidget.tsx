@@ -88,24 +88,44 @@ function computePace(win: QuotaWindow, windowMs: number): Pace | null {
   return { elapsedFraction, ratio, projectedEndPct, status }
 }
 
+function fmtPaceRatio(ratio: number): string {
+  if (ratio < 0.01) return 'idle'
+  if (ratio >= 10) return `${ratio.toFixed(0)}× pace`
+  return `${ratio.toFixed(2)}× pace`
+}
+
 function PaceBadge({ pace }: { pace: Pace | null }) {
   if (!pace) return null
   if (pace.status === 'on-track') {
+    // "on pace" hides whether the user is barely using the window or close to
+    // tipping over. Always show the projected end-% so the badge carries
+    // genuine information. Differentiate "under pace" (<0.85×) from "on pace".
+    const isUnder = pace.ratio < 0.85
+    const projected = pace.projectedEndPct.toFixed(0)
     return (
-      <span className="text-[10px] px-1.5 py-0.5 rounded bg-status-success/15 text-status-success font-medium">
-        on pace
+      <span
+        className="text-[10px] px-1.5 py-0.5 rounded bg-status-success/15 text-status-success font-medium"
+        title={`${fmtPaceRatio(pace.ratio)} · projects ${projected}% by reset`}
+      >
+        {isUnder ? 'under pace' : 'on pace'} · projects {projected}%
       </span>
     )
   }
   if (pace.status === 'over') {
     return (
-      <span className="text-[10px] px-1.5 py-0.5 rounded bg-status-warning/15 text-status-warning font-medium">
-        {pace.ratio.toFixed(1)}× pace · projects {pace.projectedEndPct.toFixed(0)}%
+      <span
+        className="text-[10px] px-1.5 py-0.5 rounded bg-status-warning/15 text-status-warning font-medium"
+        title={`${fmtPaceRatio(pace.ratio)} · projects ${pace.projectedEndPct.toFixed(0)}% by reset`}
+      >
+        over pace · projects {pace.projectedEndPct.toFixed(0)}%
       </span>
     )
   }
   return (
-    <span className="text-[10px] px-1.5 py-0.5 rounded bg-status-error/15 text-status-error font-semibold">
+    <span
+      className="text-[10px] px-1.5 py-0.5 rounded bg-status-error/15 text-status-error font-semibold"
+      title={`${fmtPaceRatio(pace.ratio)} · projects ${pace.projectedEndPct.toFixed(0)}% by reset`}
+    >
       will exceed quota · projects {pace.projectedEndPct.toFixed(0)}%
     </span>
   )
@@ -382,7 +402,7 @@ export function QuotaWidget({
   )
 
   return (
-    <div className="space-y-3">
+    <div className={compact ? 'grid grid-cols-1 md:grid-cols-2 gap-3' : 'space-y-3'}>
       {cards.map((card) => {
         if (!card.snapshot) {
           return (

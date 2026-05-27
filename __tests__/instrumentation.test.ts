@@ -308,19 +308,25 @@ describe('instrumentation', () => {
 
     it('reaps abandoned inline jobs when pr-wait resume fails', async () => {
       vi.stubEnv('NODE_ENV', 'test');
+      mockDeps([]);
       const orphanedPrWait = { id: 'pr-wait-bad', kind: 'pr-wait', pid: 1234, finishedAt: null, contextMeta: '{', project: 'proj1' };
       const orphanedMarkDod = { id: 'mark-dod-1', kind: 'mark-dod', pid: 0, finishedAt: null, contextMeta: null, project: 'proj1' };
       const listJobsMock = vi.fn().mockReturnValue([orphanedPrWait, orphanedMarkDod]);
       const markDoneMock = vi.fn().mockResolvedValue(undefined);
       const resumePrWaitMock = vi.fn().mockReturnValue({ ok: false, error: 'malformed contextMeta' });
 
-      const { drainAllRecoveryWork, markDone, getWorldStart } = mockRegisterNodeBootDeps({
-        jobs: [orphanedPrWait, orphanedMarkDod],
+      vi.doMock('@/lib/jobs/job-storage', () => ({
+        listJobs: listJobsMock,
         markDone: markDoneMock,
-      });
-
+        updateJob: vi.fn(),
+        probeJobStatus: vi.fn(),
+        reconcileStaleRelease: vi.fn(),
+        PIPELINE_STEP_KINDS: new Set(),
+      }));
       vi.doMock('@/lib/pipeline/start-pr-wait', () => ({ resumePrWait: resumePrWaitMock }));
-      vi.doMock('@/lib/pipeline/recovery-drain', () => ({ drainAllRecoveryWork }));
+      vi.doMock('@/lib/pipeline/recovery-drain', () => ({
+        drainAllRecoveryWork: vi.fn().mockResolvedValue(undefined),
+      }));
 
       const { registerNode } = await import('@/instrumentation-node');
       await registerNode();
@@ -556,6 +562,11 @@ describe('instrumentation', () => {
     }
 
     it('probes all running claude-backed jobs', async () => {
+      // Defensive reset: earlier tests in this describe register mocks for
+      // `@/lib/jobs/job-storage` without `probeJobStatus` (e.g.
+      // `mockOrphanReleaseDeps`). Reset modules so the doMock below is the
+      // resolved factory when `runProbeSweep` dynamically imports it.
+      vi.resetModules();
       const { probeJobStatus } = mockJobStorage([
         makeJob('run'),
         makeJob('review'),

@@ -3,7 +3,7 @@
 // callback (see lib/workflows/cron/agent-cron-task.ts) — no scheduler-
 // side toggle needed because graphile-worker fires per-job and the
 // handler can decide to skip in flight.
-import { getActiveCliProvider, getSettings } from '@/lib/shared/config';
+import { getActiveCliProvider, getSettings, reloadConfig } from '@/lib/shared/config';
 import {
   getQuotaSnapshots,
   peekQuotaCache,
@@ -142,6 +142,23 @@ export function syncJobsPauseState(paused: boolean): void {
     // pause state itself doesn't need a scheduler-side toggle anymore.
     void drainAllRecoveryWorkAsync();
     void drainAllQueuedAgentsAsync();
+  }
+}
+
+export async function pauseJobsForQuotaExhaustion(detail: string): Promise<void> {
+  syncJobsPauseState(true);
+  try {
+    const { db, schema } = await import('@/lib/db');
+    await db.insert(schema.settings)
+      .values({ key: 'jobs_paused', value: 'true' })
+      .onConflictDoUpdate({
+        target: schema.settings.key,
+        set: { value: 'true' },
+      });
+    reloadConfig();
+    console.warn(`[job-control] jobs paused: ${detail}`);
+  } catch (error) {
+    console.error('[job-control] failed to persist quota-exhaustion pause:', error);
   }
 }
 
