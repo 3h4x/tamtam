@@ -116,7 +116,7 @@ async function assembleProject(
   // fallbacks the Push button silently disables on a branch that genuinely
   // has unpushed commits but is missing tracking config (e.g. after a
   // force-push that didn't set --set-upstream).
-  const unpushed = await (async () => {
+  const computeUnpushed = async (): Promise<number> => {
     const upstreamR = await exec('git', ['-C', cfg.path, 'rev-list', '--count', '@{u}..HEAD'], { timeout: 5000 });
     if (upstreamR.exitCode === 0 && upstreamR.stdout.trim()) {
       return parseInt(upstreamR.stdout.trim(), 10) || 0;
@@ -159,7 +159,22 @@ async function assembleProject(
       }
     }
     return 0;
-  })();
+  };
+
+  const computeGithubUrl = async (): Promise<string | null> => {
+    if (cfg.github) return `https://github.com/${cfg.github}`;
+    const r = await exec('git', ['-C', cfg.path, 'remote', 'get-url', 'origin'], { timeout: 5000 });
+    if (r.exitCode !== 0) return null;
+    let url = r.stdout.trim();
+    if (url.startsWith('git@github.com:')) {
+      url = 'https://github.com/' + url.slice('git@github.com:'.length).replace(/\.git$/, '');
+    } else {
+      url = url.replace(/\.git$/, '');
+    }
+    return url;
+  };
+
+  const [unpushed, githubUrl] = await Promise.all([computeUnpushed(), computeGithubUrl()]);
 
   const run = lastRuns[schedId];
   let lastRun: string | null = null;
@@ -177,22 +192,6 @@ async function assembleProject(
   const releaseTag = gh.release ?? null;
   const ci = gh.ci ?? null;
   const ciFailedUrl = gh.ciFailedUrl ?? null;
-
-  let githubUrl: string | null = null;
-  if (cfg.github) {
-    githubUrl = `https://github.com/${cfg.github}`;
-  } else {
-    const r = await exec('git', ['-C', cfg.path, 'remote', 'get-url', 'origin'], { timeout: 5000 });
-    if (r.exitCode === 0) {
-      let url = r.stdout.trim();
-      if (url.startsWith('git@github.com:')) {
-        url = 'https://github.com/' + url.slice('git@github.com:'.length).replace(/\.git$/, '');
-      } else {
-        url = url.replace(/\.git$/, '');
-      }
-      githubUrl = url;
-    }
-  }
 
   return {
     id: schedId,

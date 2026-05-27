@@ -94,12 +94,22 @@ const ROLLING_WINDOW_MS = 60 * 60 * 1000;
 // rotate through the project's roster within a 5-min orchestrator tick.
 const AGENT_RECENT_DISPATCH_COOLDOWN_MS = 2 * 60 * 1000;
 
-const BOOSTABLE_PROJECT_STATUSES = new Set(['shipping', 'active']);
-// When pace is *severely* under (margin far above the configured threshold),
-// loosen the eligibility so dormant projects can also burn budget. Keeps the
-// normal-pace behavior conservative.
-const SEVERELY_UNDER_PACE_PP = 20;
-const SEVERELY_UNDER_STATUSES = new Set(['shipping', 'active', 'idle', 'attention']);
+// Default boost set covers every project we *want* to be shipping. Idle and
+// attention projects are the obvious headroom — if pace is under, we'd rather
+// wake a dormant project than do nothing. Releasing / agent_running / stuck /
+// error / paused stay excluded (already burning, or operator should look).
+const BOOSTABLE_PROJECT_STATUSES = new Set(['shipping', 'active', 'idle', 'attention']);
+// When pace is *severely* under the floor, lean in harder: also fire on
+// `agent_running` so the per-project queue stacks up the next run, and tighten
+// the threshold so we trip the multi-pick branch with less slack.
+const SEVERELY_UNDER_PACE_PP = 10;
+const SEVERELY_UNDER_STATUSES = new Set([
+  'shipping',
+  'active',
+  'idle',
+  'attention',
+  'agent_running',
+]);
 
 export function decideBoosts(input: BoostInput): BoostDecision[] {
   const now = input.nowMs ?? Date.now();
@@ -156,10 +166,10 @@ export function decideBoosts(input: BoostInput): BoostDecision[] {
     // When pace is severely under (margin far above the configured floor),
     // boost more than one agent per project so the catch-up rate actually
     // moves. `picksThisTick` grows with the headroom: 1 agent at the
-    // threshold, +1 per additional 15pp of margin, capped at 3 picks per
+    // threshold, +1 per additional 10pp of margin, capped at 5 picks per
     // project per tick (and bounded by the rate-limit budget below).
     const slack = Math.max(0, input.pace.marginPct - input.settings.marginPct);
-    const desiredPicks = Math.min(3, 1 + Math.floor(slack / 15));
+    const desiredPicks = Math.min(5, 1 + Math.floor(slack / 10));
     const budgetLeft = Math.max(0, input.settings.maxBoostsPerHour - recent.length);
     const picksThisTick = Math.min(desiredPicks, budgetLeft, ranked.length);
     for (let i = 0; i < picksThisTick; i++) {

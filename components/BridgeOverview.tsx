@@ -30,9 +30,12 @@ function fmtMargin(n: number | null): string {
 const STATUS_META: Record<BridgeProjectStatus, { dot: string; tone: string; label: string }> = {
   shipping: { dot: 'bg-status-success', tone: 'text-status-success', label: 'shipping' },
   active: { dot: 'bg-accent', tone: 'text-accent', label: 'active' },
+  agent_running: { dot: 'bg-accent animate-pulse', tone: 'text-accent', label: 'agent running' },
   releasing: { dot: 'bg-status-warning animate-pulse', tone: 'text-status-warning', label: 'releasing' },
-  attention: { dot: 'bg-status-error', tone: 'text-status-error', label: 'needs attention' },
-  paused: { dot: 'bg-status-error', tone: 'text-status-error', label: 'paused' },
+  stuck: { dot: 'bg-status-error animate-pulse', tone: 'text-status-error', label: 'stuck' },
+  error: { dot: 'bg-status-error', tone: 'text-status-error', label: 'error' },
+  attention: { dot: 'bg-status-warning', tone: 'text-status-warning', label: 'needs attention' },
+  paused: { dot: 'bg-text-tertiary', tone: 'text-text-tertiary', label: 'paused' },
   idle: { dot: 'bg-text-tertiary/50', tone: 'text-text-tertiary', label: 'idle' },
 }
 
