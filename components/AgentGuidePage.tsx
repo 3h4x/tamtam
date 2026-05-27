@@ -258,7 +258,7 @@ const BEHAVIORS: { title: string; body: string }[] = [
   {
     title: 'Budget gates',
     body:
-      'When budget_block_runs_enabled and active provider quota > budget_block_at_pct, job starts return 429. Check /api/usage/quota before scheduling expensive work.',
+      'The provider chooser routes around exhausted quota-backed CLIs; if every enabled quota-backed provider is over budget_block_at_pct, job starts return 429. Check /api/usage/quota before scheduling expensive work.',
   },
   {
     title: 'Release locks',

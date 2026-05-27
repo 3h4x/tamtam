@@ -15,6 +15,7 @@ const mocks = vi.hoisted(() => {
     probeJobStatusMock: vi.fn(),
     startJobMock: vi.fn(),
     getSettingsMock: vi.fn(),
+    checkCliStartGateMock: vi.fn(),
     codeReviewerSkillRef: { value: '/nonexistent/code-reviewer.md' as string },
     existsSyncMock: vi.fn(),
     readFileSyncMock: vi.fn(),
@@ -35,6 +36,9 @@ vi.mock('@/lib/jobs/job-storage', () => ({
   probeJobStatus: mocks.probeJobStatusMock,
 }));
 vi.mock('@/lib/jobs/spawn-claude-detached', () => ({ startJobInProcess: mocks.startJobMock }));
+vi.mock('@/lib/usage/resolve-provider', () => ({
+  checkCliStartGate: mocks.checkCliStartGateMock,
+}));
 vi.mock('@/lib/shared/config', () => ({
   getSettings: () => mocks.getSettingsMock(),
   withBasePrompt: (s: string) => s,
@@ -90,6 +94,7 @@ describe('startPrReview', () => {
     mocks.listJobsMock.mockReturnValue([]);
     mocks.probeJobStatusMock.mockResolvedValue('done');
     mocks.getSettingsMock.mockReturnValue({ review_verdict_rules: 'Use LGTM / NEEDS ATTENTION / DO NOT SHIP.' });
+    mocks.checkCliStartGateMock.mockResolvedValue({ ok: true, provider: 'claude' });
     mocks.createJobMock.mockImplementation((project: string, kind: string) => ({
       id: `${project}-${kind}-id`, project, kind, pid: 0, logPath: '',
       prompt: null, startedAt: 0, finishedAt: null, exitCode: null, seen: false,
@@ -320,6 +325,7 @@ describe('loadReviewPrompt — skill file handling', () => {
     mocks.listJobsMock.mockReturnValue([]);
     mocks.probeJobStatusMock.mockResolvedValue('done');
     mocks.getSettingsMock.mockReturnValue({ review_verdict_rules: 'VERDICT_RULES' });
+    mocks.checkCliStartGateMock.mockResolvedValue({ ok: true, provider: 'claude' });
     mocks.createJobMock.mockImplementation((project: string, kind: string) => ({
       id: `${project}-${kind}-id`, project, kind, pid: 0, logPath: '',
       prompt: null, startedAt: 0, finishedAt: null, exitCode: null, seen: false,

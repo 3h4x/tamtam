@@ -124,7 +124,7 @@ export async function resolveProviderForRun(
           enabled,
           snapshots,
           budgetBlockAtPct: settings.budget_block_at_pct ?? 95,
-          blockEnabled: !!settings.budget_block_runs_enabled,
+          blockEnabled: true,
           blockOnWeeklyPace: includeWeekly,
           requestedModel: opts.requestedModel ?? null,
         });
@@ -157,7 +157,7 @@ export async function resolveProviderForRun(
           enabled,
           snapshots,
           budgetBlockAtPct: settings.budget_block_at_pct ?? 95,
-          blockEnabled: !!settings.budget_block_runs_enabled,
+          blockEnabled: true,
           blockOnWeeklyPace: !!settings.budget_block_on_weekly_pace_enabled,
           requestedModel: opts.requestedModel ?? null,
         });
@@ -191,7 +191,7 @@ export async function resolveProviderForRun(
     enabled,
     snapshots,
     budgetBlockAtPct: settings.budget_block_at_pct ?? 95,
-    blockEnabled: !!settings.budget_block_runs_enabled,
+    blockEnabled: true,
     blockOnWeeklyPace: includeWeekly,
     requestedModel: opts.requestedModel ?? null,
   });
