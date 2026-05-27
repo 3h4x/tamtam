@@ -10,7 +10,7 @@ See `docs/PIPELINE.md` for the full state machine.
 
 ## Concepts
 
-- **Skills** — reusable prompt blocks (DB-backed + file-based from `skills/docs/skills/` and `data/skills/`).
+- **Skills** — reusable prompt blocks (DB-backed + file-based personas from `skills/docs/skills/` and `data/skills/`).
 - **Agents** — skills + project docs + model + prompt + optional schedule + optional `prerequisiteCommand`. Intake runs through `runAgentIntakeWorkflow()` in `lib/agents/intake-workflow.ts` and hands off to `startInProcessAgentJob` in `lib/jobs/inline-agent.ts`; this repo pins the local workflow world by default (`WORKFLOW_TARGET_WORLD=local`, `WORKFLOW_LOCAL_DATA_DIR=data/workflow-data`). See `docs/AGENT.md`.
 - **Per-project dev servers** — optional `dev_server_start_command`, `dev_server_stop_command`, and `dev_server_ready_url` fields let TamTam start and stop a project's local app around agent runs. See `lib/dev-server/lifecycle.ts`.
 - **Runs** — individual executions; legacy `/jobs` redirects to `/runs`.

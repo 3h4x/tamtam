@@ -440,4 +440,89 @@ describe('pickCliProvider', () => {
       expect(result.provider).toBe('lmstudio');
     });
   });
+
+  describe('weekly catchup mode (5h near-cap penalty suppression)', () => {
+    // Setup: claude is materially behind on weekly pace AND its 5h window is
+    // projected to land above 80%. Codex is mildly behind on pace with a fresh
+    // 5h window. Without suppression, the near-cap penalty would shift traffic
+    // away from claude — but that defeats the catchup goal of burning claude's
+    // 7d budget while it has 5h headroom.
+    function makeSnap(args: {
+      provider: 'claude' | 'codex';
+      fiveHourUtil: number;
+      fiveHourMsUntilReset: number;
+      sevenDayUtil: number;
+      sevenDayMsUntilReset: number;
+    }): QuotaSnapshot {
+      return {
+        provider: args.provider,
+        fiveHour: { utilization: args.fiveHourUtil, resetsAt: null, msUntilReset: args.fiveHourMsUntilReset },
+        sevenDay: { utilization: args.sevenDayUtil, resetsAt: null, msUntilReset: args.sevenDayMsUntilReset },
+        fetchedAt: 0,
+        stale: false,
+      };
+    }
+
+    it('suppresses the 5h near-cap penalty when paceMargin >= 15pp so the behind provider keeps getting traffic', () => {
+      // claude: paceMargin = 50 - 35 = 15 (catchup mode), 5h projected = 95 (above 80, penalty would normally apply)
+      // codex:  paceMargin = 50 - 40 = 10, 5h fresh (no penalty)
+      // With suppression, claude's score = (15/84)*1000; codex's = (10/84)*1000 → claude wins.
+      const claudeSnap = makeSnap({
+        provider: 'claude',
+        fiveHourUtil: 95,
+        fiveHourMsUntilReset: 0,
+        sevenDayUtil: 35,
+        sevenDayMsUntilReset: 3.5 * 24 * 60 * 60 * 1000,
+      });
+      const codexSnap = makeSnap({
+        provider: 'codex',
+        fiveHourUtil: 0,
+        fiveHourMsUntilReset: 5 * 60 * 60 * 1000,
+        sevenDayUtil: 40,
+        sevenDayMsUntilReset: 3.5 * 24 * 60 * 60 * 1000,
+      });
+      const snapshots = new Map<CliProvider, QuotaSnapshot | null>([
+        ['claude', claudeSnap],
+        ['codex', codexSnap],
+      ]);
+      const result = pickCliProvider({
+        enabled: ['claude', 'codex'],
+        snapshots,
+        budgetBlockAtPct: 99,
+        blockEnabled: true,
+      });
+      expect(result.provider).toBe('claude');
+    });
+
+    it('applies the 5h near-cap penalty when paceMargin < 15pp so traffic shifts away from a saturating provider', () => {
+      // Same shape as above, but claude paceMargin = 50 - 36 = 14 (below catchup threshold).
+      // Penalty applies fully (projected 95 → (95-80)/15 = 1.0 * urgency), claude score ≈ headroom/100,
+      // codex unpenalized score = (10/84)*1000 → codex wins.
+      const claudeSnap = makeSnap({
+        provider: 'claude',
+        fiveHourUtil: 95,
+        fiveHourMsUntilReset: 0,
+        sevenDayUtil: 36,
+        sevenDayMsUntilReset: 3.5 * 24 * 60 * 60 * 1000,
+      });
+      const codexSnap = makeSnap({
+        provider: 'codex',
+        fiveHourUtil: 0,
+        fiveHourMsUntilReset: 5 * 60 * 60 * 1000,
+        sevenDayUtil: 40,
+        sevenDayMsUntilReset: 3.5 * 24 * 60 * 60 * 1000,
+      });
+      const snapshots = new Map<CliProvider, QuotaSnapshot | null>([
+        ['claude', claudeSnap],
+        ['codex', codexSnap],
+      ]);
+      const result = pickCliProvider({
+        enabled: ['claude', 'codex'],
+        snapshots,
+        budgetBlockAtPct: 99,
+        blockEnabled: true,
+      });
+      expect(result.provider).toBe('codex');
+    });
+  });
 });

@@ -158,12 +158,19 @@ export function pickCliProvider(opts: PickCliOptions): PickCliResult {
     // shifts to the other provider before we slam into the hard budget
     // block. Penalty grows linearly to ~full-urgency-cancel at 95%.
     // Projected = current_util × (100 / elapsedPct).
+    //
+    // Override: when the provider is materially behind on weekly pace
+    // (paceMargin ≥ 15pp), suppress the 5h penalty. The whole point of the
+    // weekly catch-up mode is to *use* the 5h headroom while we have it —
+    // shifting traffic away from claude as its 5h fills up is exactly what
+    // we don't want when claude/7d is the one we need to burn down.
     const fiveHourUtil = snapshot?.fiveHour?.utilization ?? 0;
     const fiveHourElapsed = snapshot?.fiveHour
       ? Math.max(1, (1 - (snapshot.fiveHour.msUntilReset ?? 1) / (5 * 60 * 60 * 1000)) * 100)
       : 100;
     const fiveHourProjected = fiveHourUtil * (100 / fiveHourElapsed);
-    const nearCapPenalty = fiveHourProjected > 80
+    const weeklyCatchupMode = paceMargin >= 15;
+    const nearCapPenalty = fiveHourProjected > 80 && !weeklyCatchupMode
       ? Math.min(1, (fiveHourProjected - 80) / 15) * urgency
       : 0;
     const score = (urgency - nearCapPenalty) * 1000 + headroom / 100;
