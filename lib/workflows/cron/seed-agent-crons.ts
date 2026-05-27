@@ -119,20 +119,20 @@ export async function seedAgentCrons(deps: SeedDeps): Promise<SeedResult> {
         const nextFromNow = computeNextFire(agent.schedule, agent.id, nowMs);
         const existingJob = existing.get(jobKey);
         const existingRunAt = existingJob?.runAt.getTime();
-        if (
-          existingJob
-          && existingRunAt
+        const healthy = existingJob
+          && typeof existingRunAt === 'number'
           && existingJob.attempts === 0
           && existingJob.isAvailable
-          && !existingJob.lockedAt
-          && existingRunAt > nowMs
-          && existingRunAt <= nextFromNow
-        ) {
+          && !existingJob.lockedAt;
+        if (healthy && existingRunAt! > nowMs && existingRunAt! <= nextFromNow) {
           // Already-queued fire in the future, no retry/error state to
           // clear — leave alone. Failed rows are replaced so Graphile
           // resets attempts/last_error on the keyed upsert.
           return { agentId: agent.id, outcome: { kind: 'preserved' } };
         }
+        // Past-due rows and unhealthy rows are replaced with the fresh
+        // schedule-derived fire time. This clears stale retry state and
+        // avoids preserving missed runs forever across restarts.
         await quickAddJob(
           { connectionString },
           'agent-cron',

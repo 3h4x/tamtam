@@ -153,12 +153,17 @@ export async function GET() {
     refreshProjectsCacheSync(),
   ]);
   const enabledProjects = listEnabledProjects();
+  // Drop agents whose project is disabled / archived — otherwise a disabled
+  // project that still has enabled agent rows would appear in the bridge
+  // fleet and skew every "all projects shipped" / pace / orchestrator signal.
+  const enabledProjectNames = new Set(enabledProjects.map((p) => p.name));
   const agentCount = new Map<string, number>();
   const dbAgentKeys = new Set<string>();
   for (const a of agents) {
     dbAgentKeys.add(`${a.project}:${canonicalAgentNameKey(a.name)}`);
     if (a.enabled === false) continue;
     if (a.kind === 'system') continue;
+    if (!enabledProjectNames.has(a.project)) continue;
     incrementAgentCount(agentCount, a.project);
   }
   for (const project of enabledProjects) {

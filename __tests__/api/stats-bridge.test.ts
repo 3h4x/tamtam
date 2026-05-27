@@ -166,6 +166,28 @@ describe('GET /api/stats/bridge', () => {
     expect(body.projects.find((project) => project.project === 'alpha')?.agents).toBe(2);
   });
 
+  it('excludes disabled projects even when they still have enabled agent rows', async () => {
+    await sharedHandle.db.insert(schema.projects).values([
+      { name: 'alive', path: '/tmp/alive', enabled: true, paused: false },
+      { name: 'disabled', path: '/tmp/disabled', enabled: false, paused: false },
+    ]);
+    await sharedHandle.db.insert(schema.agents).values([
+      makeAgent('alive-1', 'alive'),
+      // Project is disabled but its agents are still 'enabled' on the row.
+      // The bridge must NOT count these — otherwise disabled projects pollute
+      // the fleet view and skew the "all projects shipped" / pace summaries.
+      makeAgent('zombie-1', 'disabled'),
+      makeAgent('zombie-2', 'disabled'),
+    ]);
+
+    const res = await GET();
+    const body = await res.json() as BridgeResponse;
+
+    expect(body.projects.map((p) => p.project)).toEqual(['alive']);
+    expect(body.summary.projects).toBe(1);
+    expect(body.summary.agentsEnabled).toBe(1);
+  });
+
   it('includes file-backed agents with DB precedence', async () => {
     await sharedHandle.db.insert(schema.projects).values([
       { name: 'file-only', path: '/tmp/file-only', enabled: true, paused: false },

@@ -166,7 +166,7 @@ These settings override the semantic model tier per pipeline phase. Leave a fiel
 
 ### Orchestrator
 
-The orchestrator budget allocator runs as a graphile-worker cron task (`orchestrator-tick`) every 5 minutes when enabled. It reads `/api/stats/bridge`, checks whether global pace is under the configured threshold, and then dispatches extra scheduled-agent fires for shipping or active projects while staying inside the per-project rolling-hour cap.
+The orchestrator budget allocator runs as a graphile-worker cron task (`orchestrator-tick`) every minute when enabled. It reads `/api/stats/bridge`, checks whether global pace is under the configured threshold, and then dispatches extra scheduled-agent fires for shipping or active projects while staying inside the per-project rolling-hour cap.
 
 | Key | Type | Default | Effect |
 |-----|------|---------|--------|
