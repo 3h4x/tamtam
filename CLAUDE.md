@@ -4,7 +4,7 @@ Next.js monolith (App Router) for managing Claude-compatible CLI agents across m
 
 ## Vision
 
-A **quality-gated release pipeline** for each tracked repo: `test → review → (fix loop) → commit → push → DoD (mark-dod) → pr-wait/merge → soak`. The **Release** button triggers it; with `auto_push_enabled`, the chain continues automatically. PR-vs-direct is decided at runtime from branch context (default branch → push direct; non-default → open or reuse a PR). Verdicts (`LGTM` / `NEEDS ATTENTION` / `DO NOT SHIP`) drive fix loops, capped at 3 verification iterations per release.
+A **quality-gated release pipeline** for each tracked repo: `test → review → (fix loop) → commit → push → DoD (mark-dod) → pr-wait/merge → soak`. The **Release** button triggers it; with `auto_push_enabled`, the chain continues automatically. PR-vs-direct is decided at runtime from branch context (default branch → push direct; non-default → open or reuse a PR). Verdicts (`LGTM` / `NEEDS ATTENTION` / `DO NOT SHIP`) drive fix loops: review-side verification is governed by `review_fix_max_iterations` (default `0`, meaning run until LGTM or the release wall-clock timeout), while test/commit/push verification loops use `TAMTAM_MAX_STEP_ITERATIONS` (default 3).
 
 See `docs/PIPELINE.md` for the full state machine.
 
