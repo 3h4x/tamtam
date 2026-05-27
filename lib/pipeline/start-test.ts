@@ -70,12 +70,14 @@ export async function startProjectTest(projectName: string): Promise<StartTestRe
     projPath = resolveProjectPath(projectName);
   }
   if (!projPath) return { ok: false, status: 404, detail: 'project not found' };
-  const gate = await checkCliStartGate('start tests', { parentJobId: currentParent() });
+  const [gate, underRelease] = await Promise.all([
+    checkCliStartGate('start tests', { parentJobId: currentParent() }),
+    isLockOwnedByActiveRelease(projectName),
+  ]);
   if (!gate.ok) return gate;
 
   // Check for existing pipeline lock — but allow running under a parent
   // release job's lock (this step was kicked off by the release pipeline).
-  const underRelease = await isLockOwnedByActiveRelease(projectName);
   if (!underRelease) {
     const lock = await getLock(projectName);
     if (lock) {

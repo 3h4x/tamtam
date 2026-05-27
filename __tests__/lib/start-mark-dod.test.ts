@@ -128,12 +128,13 @@ const mocks = vi.hoisted(() => {
   const getJobStatusMock = vi.fn();
   const deleteJobMock = vi.fn();
   const ensureBranchForCtxMock = vi.fn();
+  const checkCliStartGateMock = vi.fn();
   return {
     execMock, listJobsMock, createJobMock, markDoneMock, updateJobMock,
     findActiveReleaseJobMock, getJobMock, resolveProjectPathMock,
     appendFileSyncMock, existsSyncMock, mkdirSyncMock, readFileSyncMock,
     writeFileSyncMock, unlinkSyncMock, readParsedLogMock, startJobMock,
-    getJobStatusMock, deleteJobMock, ensureBranchForCtxMock,
+    getJobStatusMock, deleteJobMock, ensureBranchForCtxMock, checkCliStartGateMock,
   };
 });
 
@@ -142,6 +143,9 @@ vi.mock('@/lib/scheduling/scheduling', () => ({
   getImproveConfig: () => ({ claudeBin: 'claude', logDir: '/tmp/tamtam-logs', projects: {} }),
 }));
 vi.mock('@/lib/shared/shell', () => ({ exec: mocks.execMock }));
+vi.mock('@/lib/usage/resolve-provider', () => ({
+  checkCliStartGate: mocks.checkCliStartGateMock,
+}));
 vi.mock('@/lib/shared/config', () => ({
   getPermissionModeFlag: () => '--permission-mode bypassPermissions',
   getPipelineModel: () => 'haiku',
@@ -217,7 +221,7 @@ describe('startMarkDod', () => {
     findActiveReleaseJobMock, getJobMock, resolveProjectPathMock,
     appendFileSyncMock, existsSyncMock, mkdirSyncMock, readFileSyncMock,
     writeFileSyncMock, unlinkSyncMock, readParsedLogMock, startJobMock,
-    getJobStatusMock, deleteJobMock, ensureBranchForCtxMock,
+    getJobStatusMock, deleteJobMock, ensureBranchForCtxMock, checkCliStartGateMock,
   } = mocks;
 
   function resp(exitCode: number, stdout = '', stderr = '') {
@@ -258,6 +262,7 @@ describe('startMarkDod', () => {
     getJobStatusMock.mockReset();
     deleteJobMock.mockReset();
     ensureBranchForCtxMock.mockReset();
+    checkCliStartGateMock.mockReset();
 
     listJobsMock.mockReturnValue([makeRunJob()]);
     createJobMock.mockImplementation((project: string, kind: string, pid: number) => ({
@@ -287,6 +292,7 @@ describe('startMarkDod', () => {
     getJobStatusMock.mockResolvedValue({ status: 'done', exitCode: 0 });
     deleteJobMock.mockResolvedValue(undefined);
     ensureBranchForCtxMock.mockResolvedValue({ switched: false, skipped: 'mocked in tests' });
+    checkCliStartGateMock.mockResolvedValue({ ok: true, provider: 'claude' });
   });
 
   const ISSUE_JSON = JSON.stringify({

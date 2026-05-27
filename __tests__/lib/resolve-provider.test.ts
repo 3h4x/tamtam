@@ -85,7 +85,7 @@ describe('resolveProviderForRun', () => {
       cli_enabled_providers: ['claude', 'codex'],
       claude_provider: 'claude',
       budget_block_at_pct: 95,
-      budget_block_runs_enabled: true,
+      budget_block_runs_enabled: false,
     });
     getQuotaSnapshotsMock.mockResolvedValue(new Map([
       ['claude', { fiveHour: { utilization: 99 } }],
@@ -133,7 +133,7 @@ describe('resolveProviderForRun', () => {
     expect(result.reason).toBe('all_blocked');
   });
 
-  it('does not block provider resolution when the budget gate is disabled', async () => {
+  it('blocks provider resolution when every quota-backed provider is exhausted even if the budget gate is disabled', async () => {
     getSettingsMock.mockReturnValue({
       cli_enabled_providers: ['claude', 'codex'],
       claude_provider: 'claude',
@@ -146,7 +146,8 @@ describe('resolveProviderForRun', () => {
     ]));
     const { resolveProviderForRun } = await import('@/lib/usage/resolve-provider');
     const result = await resolveProviderForRun();
-    expect(result.provider).not.toBeNull();
+    expect(result.provider).toBeNull();
+    expect(result.reason).toBe('all_blocked');
   });
 
   it('fails open to provider order when all quota-aware providers are unknown', async () => {
@@ -220,6 +221,22 @@ describe('resolveProviderForRun', () => {
     expect(result.reason).toBe('all_blocked');
   });
 
+  it('blocks a single quota-backed CLI over threshold even if budget blocking is disabled', async () => {
+    getSettingsMock.mockReturnValue({
+      cli_enabled_providers: ['codex'],
+      claude_provider: 'codex',
+      budget_block_at_pct: 95,
+      budget_block_runs_enabled: false,
+    });
+    getQuotaSnapshotsMock.mockResolvedValue(new Map([
+      ['codex', { fiveHour: { utilization: 99 } }],
+    ]));
+    const { resolveProviderForRun } = await import('@/lib/usage/resolve-provider');
+    const result = await resolveProviderForRun({});
+    expect(result.provider).toBeNull();
+    expect(result.reason).toBe('all_blocked');
+  });
+
   it('keeps a preferred provider when only its 7d burn is over threshold', async () => {
     const threeDaysMs = 3 * 24 * 60 * 60 * 1000;
     const fourDaysMs = 4 * 24 * 60 * 60 * 1000;
@@ -254,7 +271,7 @@ describe('resolveProviderForRun', () => {
     expect(result).toEqual({ ok: true, provider: 'codex' });
   });
 
-  it('does not block the start gate when all providers are over threshold but budget blocking is disabled', async () => {
+  it('blocks the start gate without mutating the manual jobs pause when all providers are over threshold even if budget blocking is disabled', async () => {
     getSettingsMock.mockReturnValue({
       cli_enabled_providers: ['claude', 'codex'],
       claude_provider: 'claude',
@@ -265,9 +282,10 @@ describe('resolveProviderForRun', () => {
       ['claude', { fiveHour: { utilization: 99 } }],
       ['codex', { fiveHour: { utilization: 98 } }],
     ]));
-    const { checkCliStartGate } = await import('@/lib/usage/resolve-provider');
+    const { checkCliStartGate, ALL_PROVIDERS_BLOCKED_DETAIL } = await import('@/lib/usage/resolve-provider');
     const result = await checkCliStartGate('start a release');
-    expect(result.ok).toBe(true);
+    expect(result).toEqual({ ok: false, status: 429, detail: ALL_PROVIDERS_BLOCKED_DETAIL });
+    expect(jobsPausedResultMock).toHaveBeenCalledTimes(1);
   });
 
   it('blocks a strict preferred provider when it is disabled', async () => {
@@ -336,7 +354,38 @@ describe('resolveProviderForRun', () => {
     expect(getQuotaSnapshotsMock).toHaveBeenCalledWith(['claude']);
   });
 
-  it('blocks the start gate without globally pausing when all enabled providers are unavailable', async () => {
+  it('keeps strict-provider quota blocks transient so later healthy starts can recover', async () => {
+    getSettingsMock.mockReturnValue({
+      cli_enabled_providers: ['claude', 'codex'],
+      claude_provider: 'claude',
+      budget_block_at_pct: 95,
+      budget_block_runs_enabled: true,
+    });
+    getQuotaSnapshotsMock
+      .mockResolvedValueOnce(new Map([
+        ['claude', { fiveHour: { utilization: 99 } }],
+      ]))
+      .mockResolvedValueOnce(new Map([
+        ['claude', { fiveHour: { utilization: 99 } }],
+        ['codex', { fiveHour: { utilization: 10 } }],
+      ]));
+    const { checkCliStartGate } = await import('@/lib/usage/resolve-provider');
+    const blocked = await checkCliStartGate('continue a job', {
+      preferred: 'claude',
+      strictPreferred: true,
+    });
+    expect(blocked).toEqual({
+      ok: false,
+      status: 429,
+      detail: "Selected provider 'claude' is over budget right now. Wait for its quota window to reset before trying to start with this provider.",
+    });
+
+    const recovered = await checkCliStartGate('start a release');
+    expect(recovered).toEqual({ ok: true, provider: 'codex' });
+    expect(jobsPausedResultMock).toHaveBeenCalledTimes(2);
+  });
+
+  it('blocks the start gate transiently when all enabled providers are unavailable', async () => {
     getSettingsMock.mockReturnValue({
       cli_enabled_providers: ['claude', 'codex'],
       claude_provider: 'claude',

@@ -4,6 +4,7 @@ import { useState, useEffect } from 'react'
 import { useRouter } from 'next/navigation'
 import { AgentsEmptyState, AgentsLoadingState } from '@/components/agents/AgentStates'
 import { StandardTabs, type StandardTabItem } from '@/components/ui/StandardTabs'
+import { Table, type Column } from '@/components/ui/Table'
 import { fetchAgents } from '@/lib/client-api'
 import type { Agent } from '@/lib/client-api'
 
@@ -131,6 +132,124 @@ export function AgentsPage() {
     ),
   }))
 
+  const columns: Column<Agent>[] = [
+    {
+      key: 'state',
+      label: 'State',
+      headerClass: 'px-4',
+      cellClass: 'px-4',
+      render: (agent) => {
+        const schedEntry = schedulerMap.get(agent.id)
+        const state = stateByAgentId.get(agent.id) ?? agentState(agent, schedEntry)
+        return (
+          <span
+            className={`px-2 py-0.5 text-xs rounded-full font-medium ${STATE_STYLE[state]}`}
+            title={state === 'unscheduled' ? 'Scheduled but not registered in internal scheduler' : undefined}
+          >
+            {STATE_LABEL[state]}
+          </span>
+        )
+      },
+    },
+    {
+      key: 'project',
+      label: 'Project',
+      headerClass: 'px-4',
+      cellClass: 'px-4 font-medium text-text-primary',
+      render: (agent) => <span data-private>{agent.project}</span>,
+    },
+    {
+      key: 'agent',
+      label: 'Agent',
+      headerClass: 'px-4',
+      cellClass: 'px-4 text-text-secondary font-mono text-xs',
+      render: (agent) => (
+        <span data-private>
+          {agent.name}
+          {agent.source === 'file' && (
+            <span className="ml-1.5 text-[10px] px-1 py-0.5 rounded bg-bg-tertiary text-text-tertiary border border-border">file</span>
+          )}
+          {agent.kind === 'system' && (
+            <span
+              className="ml-1.5 text-[10px] px-1 py-0.5 rounded bg-accent/10 text-accent border border-accent/30"
+              title="Built-in system agent — auto-managed by TamTam"
+            >system</span>
+          )}
+        </span>
+      ),
+    },
+    {
+      key: 'model',
+      label: 'Model',
+      headerClass: 'px-4',
+      cellClass: 'px-4 text-text-tertiary text-xs font-mono',
+      render: (agent) => agent.model,
+    },
+    {
+      key: 'schedule',
+      label: 'Schedule',
+      headerClass: 'px-4',
+      cellClass: 'px-4 text-text-secondary font-mono text-xs tabular-nums',
+      render: (agent) => agent.schedule || <span className="text-text-tertiary">—</span>,
+    },
+    {
+      key: 'nextFire',
+      label: 'Next Fire',
+      headerClass: 'px-4',
+      cellClass: 'px-4 text-xs tabular-nums',
+      render: (agent) => {
+        const schedEntry = schedulerMap.get(agent.id)
+        if (!schedEntry) return <span className="text-text-tertiary">—</span>
+        const isOverdue = schedEntry.nextFireMs < Date.now() - 30_000
+        const hasErrors = schedEntry.errorCount > 0
+        const tone = hasErrors ? 'text-status-warning' : isOverdue ? 'text-status-warning' : 'text-text-secondary'
+        const label = isOverdue ? 'overdue' : `in ${formatRelativeMs(schedEntry.nextFireMs)}`
+        const hint = hasErrors
+          ? `${schedEntry.errorCount} error(s): ${schedEntry.lastError ?? ''}`
+          : `${schedEntry.fireCount} fire(s) · next ${new Date(schedEntry.nextFireMs).toLocaleTimeString()}`
+        return <span className={`font-mono ${tone}`} title={hint}>{label}</span>
+      },
+    },
+    {
+      key: 'lastFire',
+      label: 'Last Fire',
+      headerClass: 'px-4',
+      cellClass: 'px-4 text-text-tertiary text-xs tabular-nums font-mono',
+      render: (agent) => {
+        const schedEntry = schedulerMap.get(agent.id)
+        return schedEntry
+          ? schedEntry.lastFireMs
+            ? formatAgoMs(schedEntry.lastFireMs)
+            : <span className="text-text-tertiary/50 italic">never fired</span>
+          : <span>—</span>
+      },
+    },
+    {
+      key: 'fires',
+      label: 'Fires',
+      headerClass: 'px-4 text-center',
+      cellClass: 'px-4 text-center tabular-nums text-xs text-text-secondary',
+      render: (agent) => {
+        const schedEntry = schedulerMap.get(agent.id)
+        return schedEntry ? schedEntry.fireCount : <span className="text-text-tertiary">—</span>
+      },
+    },
+    {
+      key: 'errors',
+      label: 'Errors',
+      headerClass: 'px-4 text-center',
+      cellClass: 'px-4 text-center tabular-nums text-xs',
+      render: (agent) => {
+        const schedEntry = schedulerMap.get(agent.id)
+        return schedEntry
+          ? schedEntry.errorCount > 0
+            ? <span className="text-status-warning font-medium" title={schedEntry.lastError ?? ''}>{schedEntry.errorCount}</span>
+            : <span className="text-text-tertiary">0</span>
+          : <span className="text-text-tertiary">—</span>
+      },
+    },
+  ]
+
   return (
     <div>
       <div className="flex items-center justify-between gap-4 mb-4 flex-wrap">
@@ -186,98 +305,22 @@ export function AgentsPage() {
           }
         />
       ) : (
-        <div className="overflow-x-auto">
-          <table className="w-full border-collapse">
-            <thead>
-              <tr className="text-left text-xs text-text-secondary uppercase tracking-wider border-b border-border">
-                <th className="px-4 py-2 font-medium">State</th>
-                <th className="px-4 py-2 font-medium">Project</th>
-                <th className="px-4 py-2 font-medium">Agent</th>
-                <th className="px-4 py-2 font-medium">Model</th>
-                <th className="px-4 py-2 font-medium">Schedule</th>
-                <th className="px-4 py-2 font-medium">Next Fire</th>
-                <th className="px-4 py-2 font-medium">Last Fire</th>
-                <th className="px-4 py-2 font-medium text-center">Fires</th>
-                <th className="px-4 py-2 font-medium text-center">Errors</th>
-              </tr>
-            </thead>
-            <tbody>
-              {filtered.map((agent) => {
-                const schedEntry = schedulerMap.get(agent.id)
-                const state = stateByAgentId.get(agent.id) ?? agentState(agent, schedEntry)
-                const accentBorder =
-                  state === 'active' ? 'border-l-status-success/40' :
-                  state === 'unscheduled' ? 'border-l-status-warning/60' :
-                  state === 'disabled' ? 'border-l-transparent' :
-                  'border-l-accent/30'
-                return (
-                  <tr
-                    key={agent.id}
-                    className={`border-t border-border hover:bg-bg-secondary/50 cursor-pointer border-l-2 ${accentBorder}`}
-                    onClick={() => router.push(`/project/${encodeURIComponent(agent.project)}`)}
-                  >
-                    <td className="px-4 py-2">
-                      <span
-                        className={`px-2 py-0.5 text-xs rounded-full font-medium ${STATE_STYLE[state]}`}
-                        title={state === 'unscheduled' ? 'Scheduled but not registered in internal scheduler' : undefined}
-                      >
-                        {STATE_LABEL[state]}
-                      </span>
-                    </td>
-                    <td className="px-4 py-2 font-medium text-text-primary" data-private>{agent.project}</td>
-                    <td className="px-4 py-2 text-text-secondary font-mono text-xs" data-private>
-                      {agent.name}
-                      {agent.source === 'file' && (
-                        <span className="ml-1.5 text-[10px] px-1 py-0.5 rounded bg-bg-tertiary text-text-tertiary border border-border">file</span>
-                      )}
-                      {agent.kind === 'system' && (
-                        <span
-                          className="ml-1.5 text-[10px] px-1 py-0.5 rounded bg-accent/10 text-accent border border-accent/30"
-                          title="Built-in system agent — auto-managed by TamTam"
-                        >system</span>
-                      )}
-                    </td>
-                    <td className="px-4 py-2 text-text-tertiary text-xs font-mono">{agent.model}</td>
-                    <td className="px-4 py-2 text-text-secondary font-mono text-xs tabular-nums">
-                      {agent.schedule || <span className="text-text-tertiary">—</span>}
-                    </td>
-                    <td className="px-4 py-2 text-xs tabular-nums">
-                      {schedEntry ? (() => {
-                        const isOverdue = schedEntry.nextFireMs < Date.now() - 30_000
-                        const hasErrors = schedEntry.errorCount > 0
-                        const tone = hasErrors ? 'text-status-warning' : isOverdue ? 'text-status-warning' : 'text-text-secondary'
-                        const label = isOverdue ? 'overdue' : `in ${formatRelativeMs(schedEntry.nextFireMs)}`
-                        const hint = hasErrors
-                          ? `${schedEntry.errorCount} error(s): ${schedEntry.lastError ?? ''}`
-                          : `${schedEntry.fireCount} fire(s) · next ${new Date(schedEntry.nextFireMs).toLocaleTimeString()}`
-                        return <span className={`font-mono ${tone}`} title={hint}>{label}</span>
-                      })() : (
-                        <span className="text-text-tertiary">—</span>
-                      )}
-                    </td>
-                    <td className="px-4 py-2 text-text-tertiary text-xs tabular-nums font-mono">
-                      {schedEntry
-                        ? schedEntry.lastFireMs
-                          ? formatAgoMs(schedEntry.lastFireMs)
-                          : <span className="text-text-tertiary/50 italic">never fired</span>
-                        : <span>—</span>}
-                    </td>
-                    <td className="px-4 py-2 text-center tabular-nums text-xs text-text-secondary">
-                      {schedEntry ? schedEntry.fireCount : <span className="text-text-tertiary">—</span>}
-                    </td>
-                    <td className="px-4 py-2 text-center tabular-nums text-xs">
-                      {schedEntry
-                        ? schedEntry.errorCount > 0
-                          ? <span className="text-status-warning font-medium" title={schedEntry.lastError ?? ''}>{schedEntry.errorCount}</span>
-                          : <span className="text-text-tertiary">0</span>
-                        : <span className="text-text-tertiary">—</span>}
-                    </td>
-                  </tr>
-                )
-              })}
-            </tbody>
-          </table>
-        </div>
+        <Table
+          columns={columns}
+          rows={filtered}
+          getRowKey={(agent) => agent.id}
+          rowClassName={(agent) => {
+            const schedEntry = schedulerMap.get(agent.id)
+            const state = stateByAgentId.get(agent.id) ?? agentState(agent, schedEntry)
+            const accentBorder =
+              state === 'active' ? 'border-l-status-success/40' :
+              state === 'unscheduled' ? 'border-l-status-warning/60' :
+              state === 'disabled' ? 'border-l-transparent' :
+              'border-l-accent/30'
+            return `border-l-2 ${accentBorder}`
+          }}
+          onRowClick={(agent) => router.push(`/project/${encodeURIComponent(agent.project)}`)}
+        />
       )}
     </div>
   )
