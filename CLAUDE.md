@@ -34,7 +34,7 @@ The `rebuild` script is now graceful by default (`scripts/rebuild-safe.sh`): it 
 - `app/` — pages and API route handlers.
 - `components/` — React client components; large pages have a co-located subfolder (`components/monitoring/`, `components/settings/`, …).
 - `hooks/` — custom React hooks.
-- `lib/` — business logic in domain folders: `workflows/`, `pipeline/`, `scheduling/`, `git/`, `jobs/`, `terminal/`, `agents/`, `skills/`, `recommendations/`, `shared/`, `usage/`, `db/`, `github/`, `client/`, `dev-server/`. `lib/client-api.ts` is the only top-level barrel.
+- `lib/` — business logic in domain folders: `workflows/`, `pipeline/`, `scheduling/`, `git/`, `jobs/`, `terminal/`, `agents/`, `skills/`, `recommendations/`, `shared/`, `usage/`, `db/`, `github/`, `client/`, `dev-server/`, `orchestrator/`, `browser-broker/`. `lib/client-api.ts` is the only top-level barrel.
 - `scripts/` — server startup + CLI shims.
 - `skills/` — vendored file-based skill library (curated, not a submodule).
 - `data/` — runtime artifacts (logs, `pg_dump` backups; gitignored). Live DB is Postgres via `DATABASE_URL`.

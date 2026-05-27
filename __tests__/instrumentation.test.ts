@@ -90,6 +90,7 @@ describe('instrumentation', () => {
       const jobStorageMock = {
         loadFromDb: vi.fn().mockResolvedValue(undefined),
         listJobs: vi.fn(() => jobs),
+        getJob: vi.fn((id: string) => jobs.find((j) => j.id === id) ?? null),
         markDone,
         updateJob: vi.fn(),
         probeJobStatus: vi.fn().mockResolvedValue(undefined),
