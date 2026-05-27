@@ -123,14 +123,15 @@ export async function doMerge(projPath: string, prNumber: number, repo: string, 
 
 export async function switchToDefault(projPath: string, log: (s: string) => void): Promise<{ ok: boolean; branch: string }> {
   try {
-    const symR = await exec('git', ['-C', projPath, 'symbolic-ref', 'refs/remotes/origin/HEAD'], { timeout: 5000 });
+    const [symR, curR] = await Promise.all([
+      exec('git', ['-C', projPath, 'symbolic-ref', 'refs/remotes/origin/HEAD'], { timeout: 5000 }),
+      exec('git', ['-C', projPath, 'branch', '--show-current'], { timeout: 5000 }),
+    ]);
     let mainBranch = 'main';
     if (symR.exitCode === 0) {
       const m = symR.stdout.trim().match(/refs\/remotes\/origin\/(.+)/);
       if (m) mainBranch = m[1];
     }
-
-    const curR = await exec('git', ['-C', projPath, 'branch', '--show-current'], { timeout: 5000 });
     const featureBranch = curR.stdout.trim();
     if (featureBranch === mainBranch) {
       const pullR = await exec('git', ['-C', projPath, 'pull', '--ff-only', 'origin', mainBranch], { timeout: 30000 });
