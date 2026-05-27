@@ -229,6 +229,13 @@ async function writeStamp(hash) {
   await writeFile(cacheStampPath, hash, 'utf-8').catch(() => {});
 }
 
+// Remove the stamp file entirely (used when restoring a "no prior stamp"
+// state on the use-committed-SVG path).
+async function clearStamp() {
+  const { unlink } = await import('node:fs/promises');
+  await unlink(cacheStampPath).catch(() => {});
+}
+
 async function buildInputHash(diagram) {
   const { createHash } = await import('node:crypto');
   const scriptSource = await readFile(fileURLToPath(import.meta.url), 'utf-8');
@@ -239,7 +246,26 @@ async function buildInputHash(diagram) {
     .digest('hex');
 }
 
+// Snapshot the stamp file content at script entry. The use-committed-SVG path
+// MUST NOT modify the stamp (the committed SVG is presumed to match whatever
+// stamp was already on disk — overwriting with a freshly-computed hash would
+// lie about provenance). We capture once, then restore in useCommittedSvg so
+// no intermediate code path can leave a stale or fabricated stamp behind.
+let initialStamp = undefined; // undefined = uncaptured, null = no file, string = content
+
+async function captureInitialStamp() {
+  if (initialStamp !== undefined) return;
+  initialStamp = await readUtf8(cacheStampPath);
+}
+
 async function useCommittedSvg() {
+  // Defensive: restore the stamp to its pre-script content. Guarantees this
+  // path leaves the on-disk cache stamp byte-identical to entry.
+  if (initialStamp === null) {
+    await clearStamp();
+  } else if (typeof initialStamp === 'string') {
+    await writeFile(cacheStampPath, initialStamp, 'utf-8').catch(() => {});
+  }
   process.stdout.write('[gen-workflow-graph] skipping render; using committed SVG because Chrome/Chromium is unavailable\n');
 }
 
@@ -247,6 +273,7 @@ async function main() {
   const spec = await loadSpec();
   const diagram = buildMermaid(spec);
   const hasExistingSvg = await fileExists(outPath);
+  await captureInitialStamp();
 
   // Hash the mermaid input + this renderer — if either changes we must
   // re-render. Hashing dodges the previous behaviour of launching Chrome on

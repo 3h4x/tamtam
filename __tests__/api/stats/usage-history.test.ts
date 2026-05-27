@@ -136,6 +136,75 @@ describe('GET /api/stats/usage-history', () => {
     expect(bucket.totalTokens).toBe((4000 + 1000) * 4);
   });
 
+  it('preserves null totals and rates for buckets with no jobs', async () => {
+    const now = Date.now();
+    const bucketTs = now - 60 * 60 * 1000;
+
+    await sharedHandle.db.insert(schema.usageHourlySnapshot).values({
+      bucketTs,
+      provider: 'claude',
+      windowKey: '7d',
+      utilizationPct: 50,
+      elapsedPct: 60,
+      projectedPct: null,
+      paceMarginPct: 10,
+      status: 'on_pace',
+      inputTokens: null,
+      outputTokens: null,
+      cacheReadTokens: null,
+      cacheCreateTokens: null,
+      jobCount: null,
+      recordedAt: now / 1000,
+    });
+
+    const req = new Request('http://localhost:3000/api/stats/usage-history?hours=48');
+    const res = await GET(req);
+    expect(res.status).toBe(200);
+    const json = await res.json() as any;
+
+    const series = json.series[0];
+    const bucket: UsageHistoryBucket = series.buckets[0];
+    expect(bucket.totalTokens).toBeNull();
+    expect(series.currentTokensPerHour).toBeNull();
+    expect(series.expectedTokensPerHour).toBeNull();
+    expect(series.catchUpTokensPerHour).toBeNull();
+  });
+
+  it('keeps real zero-token job buckets numeric', async () => {
+    const now = Date.now();
+    const bucketTs = now - 60 * 60 * 1000;
+
+    await sharedHandle.db.insert(schema.usageHourlySnapshot).values({
+      bucketTs,
+      provider: 'claude',
+      windowKey: '7d',
+      utilizationPct: 50,
+      elapsedPct: 60,
+      projectedPct: null,
+      paceMarginPct: 10,
+      status: 'on_pace',
+      inputTokens: 0,
+      outputTokens: 0,
+      cacheReadTokens: 0,
+      cacheCreateTokens: 0,
+      jobCount: 1,
+      recordedAt: now / 1000,
+    });
+
+    const req = new Request('http://localhost:3000/api/stats/usage-history?hours=48');
+    const res = await GET(req);
+    expect(res.status).toBe(200);
+    const json = await res.json() as any;
+
+    const series = json.series[0];
+    const bucket: UsageHistoryBucket = series.buckets[0];
+    expect(bucket.totalTokens).toBe(0);
+    expect(series.currentTokensPerHour).toBe(0);
+    expect(series.expectedTokensPerHour).toBe(0);
+    expect(series.catchUpTokensPerHour).toBe(0);
+    expect(bucket.catchUpTokensPerHour).toBe(0);
+  });
+
   it('filters data by time window', async () => {
     const now = Date.now();
     const old = now - 100 * 60 * 60 * 1000;

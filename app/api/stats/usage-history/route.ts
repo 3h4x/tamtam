@@ -71,9 +71,11 @@ export async function GET(req: Request) {
     const input = r.inputTokens ?? null;
     const output = r.outputTokens ?? null;
     // Normalize all token counts to tokens/h so the chart Y axis stays
-    // consistent if we ever change bucket granularity.
-    const totalTokens = input !== null && output !== null
-      ? (Number(input) + Number(output)) * PER_HOUR_SCALE
+    // consistent if we ever change bucket granularity. Keep null distinct
+    // from 0: null means no jobs ran in the bucket, while 0 means a job ran
+    // and reported zero input/output tokens.
+    const totalTokens = input !== null || output !== null
+      ? (Number(input ?? 0) + Number(output ?? 0)) * PER_HOUR_SCALE
       : null;
     const bucket: UsageHistoryBucket = {
       bucketTs: r.bucketTs,
@@ -119,6 +121,8 @@ export async function GET(req: Request) {
       .slice(-3)
       .map((b) => b.totalTokens)
       .filter((t): t is number => t !== null);
+    // Average over the last 3 buckets with observed token data. Null buckets
+    // mean no jobs ran and must stay out of the rate calculation.
     series.currentTokensPerHour = recent.length > 0
       ? recent.reduce((a, b) => a + b, 0) / recent.length
       : null;
@@ -126,9 +130,14 @@ export async function GET(req: Request) {
     // Use the window length to derive the expected rate. For 5h, the steady
     // pace burns 100% over 5 hours. For 7d, 100% over 168 hours. We don't
     // have raw token caps from the provider, so we express expected/catch-up
-    // as a ratio against `currentTokensPerHour` × the pace correction factor.
+    // as a ratio against the *observed* token throughput vs utilization.
     const windowHours = series.windowKey === '5h' ? 5 : 7 * 24;
-    if (series.currentTokensPerHour !== null) {
+    {
+      const allRates = series.buckets
+        .map((b) => b.totalTokens)
+        .filter((t): t is number => t !== null);
+      if (allRates.length === 0) continue;
+
       // Expected = steady rate equivalent to elapsedPct% of plan per the
       // window length. If we've used `utilizationPct` of plan in
       // `elapsedPct%` of the window, current_rate ≈ plan_total × utilization
@@ -137,10 +146,17 @@ export async function GET(req: Request) {
       const u = last.utilizationPct;
       const e = last.elapsedPct;
       if (u > 0 && e > 0) {
-        // plan_total ≈ current_total / utilization × 100, where
-        // current_total ≈ current_rate × elapsed_hours.
+        // plan_total ≈ current_total / utilization × 100. Use the broadest
+        // available throughput estimate: prefer the last-3-bucket average,
+        // but fall back to the average across every observed bucket when
+        // recent activity is idle (e.g. provider currently not in use but
+        // has historical usage in the window).
+        const avgRate = allRates.reduce((a, b) => a + b, 0) / allRates.length;
+        const rateForPlan = series.currentTokensPerHour && series.currentTokensPerHour > 0
+          ? series.currentTokensPerHour
+          : avgRate;
         const elapsedHours = (e / 100) * windowHours;
-        const currentTotal = series.currentTokensPerHour * elapsedHours;
+        const currentTotal = rateForPlan * elapsedHours;
         const planTotal = currentTotal / (u / 100);
         const expectedRate = planTotal / windowHours;
         series.expectedTokensPerHour = Math.max(0, expectedRate);
@@ -162,6 +178,11 @@ export async function GET(req: Request) {
           const catchUpTotalBucket = (remainingPctBucket / 100) * planTotal;
           b.catchUpTokensPerHour = Math.max(0, catchUpTotalBucket / remainingHoursBucket);
         }
+      } else {
+        // Observed jobs with no usable quota pace cannot derive a plan, but
+        // zero keeps the reference lines honest for a real zero-token series.
+        series.expectedTokensPerHour = 0;
+        series.catchUpTokensPerHour = 0;
       }
     }
   }

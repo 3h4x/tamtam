@@ -36,7 +36,9 @@ interface UsageHistoryResponse {
 }
 
 function fmtTokens(n: number | null | undefined): string {
-  if (n === null || n === undefined || !Number.isFinite(n)) return '—'
+  // No data → display 0 (e.g. provider with no jobs in a bucket). The em-dash
+  // placeholder is misleading because "no jobs" genuinely means "0 tokens".
+  if (n === null || n === undefined || !Number.isFinite(n)) return '0'
   if (n === 0) return '0'
   if (n < 1_000) return n.toFixed(0)
   if (n < 1_000_000) return `${(n / 1_000).toFixed(1)}K`

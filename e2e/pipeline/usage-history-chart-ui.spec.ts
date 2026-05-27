@@ -45,16 +45,17 @@ async function stubPageRoutes(page: import('@playwright/test').Page): Promise<vo
 
 // Build a minimal ProviderSeries for test data.
 function makeSeries(provider: string, opts: {
-  totalTokens?: number;
+  totalTokens?: number | null;
   currentTokensPerHour?: number | null;
   expectedTokensPerHour?: number | null;
   catchUpTokensPerHour?: number | null;
 } = {}) {
   const ts = Date.now() - 60 * 60 * 1000;
+  const totalTokens = Object.hasOwn(opts, 'totalTokens') ? opts.totalTokens ?? null : 1000;
   return {
     provider,
     windowKey: '7d',
-    buckets: [{ bucketTs: ts, provider, windowKey: '7d', totalTokens: opts.totalTokens ?? 1000 }],
+    buckets: [{ bucketTs: ts, provider, windowKey: '7d', totalTokens }],
     currentTokensPerHour: opts.currentTokensPerHour ?? 4000,
     expectedTokensPerHour: opts.expectedTokensPerHour ?? 3500,
     catchUpTokensPerHour: opts.catchUpTokensPerHour ?? 5000,
@@ -197,7 +198,7 @@ test.describe('UsageHistoryChart', () => {
   // -------------------------------------------------------------------------
   // Provider with no tokens — shows "No jobs routed" empty state
   // -------------------------------------------------------------------------
-  test('shows "No jobs routed" empty state for a provider with only null tokens', async ({
+  test('shows "No jobs routed" empty state for a provider with only null token history', async ({
     page,
   }) => {
     await stubPageRoutes(page);
@@ -208,7 +209,7 @@ test.describe('UsageHistoryChart', () => {
           hours: 48,
           series: [
             makeSeries('claude', {
-              totalTokens: 0,
+              totalTokens: null,
               currentTokensPerHour: null,
               expectedTokensPerHour: null,
               catchUpTokensPerHour: null,
