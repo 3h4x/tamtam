@@ -163,6 +163,7 @@ export async function maybeAutoResume(job: JobData): Promise<{ resumed: true; ne
     const { resolveCliBin, resolveCliDefaultModel, resolveCliEnv } = await import('@/lib/shared/cli-bin');
     const { getPermissionModeFlag, getSettings, withBasePrompt } = await import('@/lib/shared/config');
     const { checkCliStartGate } = await import('@/lib/usage/resolve-provider');
+    const { isCliProvider } = await import('@/lib/usage/cli-providers');
     const { findBlockingRunningJob } = await import('@/lib/jobs/project-active-job');
     const { createJob, updateJob } = await import('@/lib/jobs/job-storage');
     const { startJobInProcess } = await import('@/lib/jobs/spawn-claude-detached');
@@ -194,9 +195,19 @@ export async function maybeAutoResume(job: JobData): Promise<{ resumed: true; ne
       return { resumed: false, reason: `another job running for ${job.project} (${blocking.id})` };
     }
 
-    const gate = await checkCliStartGate('auto-resume', { preferred: job.provider ?? null });
+    const sourceProvider = isCliProvider(job.provider) ? job.provider : null;
+    if (!sourceProvider) {
+      return { resumed: false, reason: 'source job has no recorded CLI provider' };
+    }
+    const gate = await checkCliStartGate('auto-resume', {
+      preferred: sourceProvider,
+      strictPreferred: true,
+    });
     if (!gate.ok) return { resumed: false, reason: `start gate: ${gate.detail}` };
     const provider = gate.provider;
+    if (sourceProvider && provider !== sourceProvider) {
+      return { resumed: false, reason: `cannot resume ${sourceProvider} session on ${provider}` };
+    }
 
     const settings = getSettings();
     const claudeBin = resolveCliBin(provider, settings);

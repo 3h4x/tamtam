@@ -81,7 +81,7 @@ Implications:
 - If multiple CLIs are enabled, TamTam skips blocked providers and proceeds with the enabled provider that has the most remaining headroom.
 - The shared start gate blocks on 5-hour usage and provider credits. When `budget_block_on_weekly_pace_enabled` is true, it also blocks on actual 7-day utilization; 7-day and model-specific weekly windows still influence provider headroom scoring. Scheduled agents also have a separate burn-rate throttle inside the internal scheduler.
 - Release/test/push entrypoints no longer rely on the legacy active-provider snapshot, so a full Claude window does not block a release when another enabled CLI is healthy.
-- Once a release starts, the chosen provider is stamped onto the release/test/push jobs so downstream review/fix/commit steps inherit the same provider instead of repicking mid-pipeline.
+- Once a release starts, the chosen provider is stamped onto the release/test/push jobs so downstream review/fix/commit steps inherit the same provider instead of repicking mid-pipeline. If the inherited provider's immediate quota/session window is already hard-limited and another enabled provider is runnable, a child step that starts a fresh CLI session repicks instead of launching a known-doomed run with the exhausted provider. Steps that resume an existing provider session with `--resume` stay pinned to that provider and fail the start gate if it cannot run, because session IDs are provider-specific.
 - Per-phase model overrides are configured in Settings. With no override, `review` uses the workspace default tier, `fix` uses `smart` because it edits code, and `dod`/`commit` use `fast` for their narrow verification/message-generation tasks.
 
 ## Branch-derived PR behavior

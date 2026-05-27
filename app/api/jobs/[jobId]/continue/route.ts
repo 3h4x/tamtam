@@ -11,6 +11,7 @@ import { getPermissionModeFlag, getSettings, withBasePrompt } from '@/lib/shared
 import { errMsg } from '@/lib/shared/types';
 import { resolveCliBin, resolveCliDefaultModel, resolveCliEnv } from '@/lib/shared/cli-bin';
 import { checkCliStartGate } from '@/lib/usage/resolve-provider';
+import { isCliProvider } from '@/lib/usage/cli-providers';
 import { findBlockingRunningJob } from '@/lib/jobs/project-active-job';
 import { buildResumePrompt } from '@/lib/jobs/auto-resume';
 import { prepareBrokerRun } from '@/lib/browser-broker/prepare-run';
@@ -101,9 +102,24 @@ export async function POST(
     );
   }
 
-  const gate = await checkCliStartGate('continue a job', { preferred: sourceJob.provider ?? null });
+  const sourceProvider = isCliProvider(sourceJob.provider) ? sourceJob.provider : null;
+  if (!sourceProvider) {
+    return NextResponse.json(
+      { detail: `Cannot resume session ${sessionId}: source job has no recorded CLI provider.` },
+      { status: 409 },
+    );
+  }
+  const gate = await checkCliStartGate('continue a job', {
+    preferred: sourceProvider,
+    strictPreferred: true,
+  });
   if (!gate.ok) return NextResponse.json({ detail: gate.detail }, { status: gate.status });
   const provider = gate.provider;
+  if (sourceProvider && provider !== sourceProvider) {
+    return NextResponse.json({
+      detail: `Cannot resume session on ${provider}: original session ran on ${sourceProvider}, which is currently disabled or over budget.`,
+    }, { status: 409 });
+  }
 
   const settings = getSettings();
   const claudeBin = resolveCliBin(provider, settings);

@@ -35,6 +35,7 @@ describe('POST /api/jobs/{jobId}/continue', () => {
   let findBlockingRunningJobMock: ReturnType<typeof vi.fn>;
   let withBasePromptMock: ReturnType<typeof vi.fn>;
   let prepareBrokerRunMock: ReturnType<typeof vi.fn>;
+  let checkCliStartGateMock: ReturnType<typeof vi.fn>;
   let projectRows: Array<Record<string, unknown>>;
 
   beforeEach(async () => {
@@ -51,6 +52,7 @@ describe('POST /api/jobs/{jobId}/continue', () => {
     findBlockingRunningJobMock = vi.fn().mockResolvedValue(null);
     withBasePromptMock = vi.fn((p: string) => `BASE\n\n---\n\n${p}`);
     prepareBrokerRunMock = vi.fn().mockResolvedValue(null);
+    checkCliStartGateMock = vi.fn().mockResolvedValue({ ok: true, provider: 'claude' });
     projectRows = [];
 
     vi.doMock('@/lib/jobs/job-storage', () => ({
@@ -73,7 +75,7 @@ describe('POST /api/jobs/{jobId}/continue', () => {
       withBasePrompt: withBasePromptMock,
     }));
     vi.doMock('@/lib/usage/resolve-provider', () => ({
-      checkCliStartGate: vi.fn().mockResolvedValue({ ok: true, provider: 'claude' }),
+      checkCliStartGate: checkCliStartGateMock,
     }));
     vi.doMock('@/lib/shared/cli-bin', () => ({
       resolveCliBin: () => 'claude',
@@ -176,8 +178,65 @@ describe('POST /api/jobs/{jobId}/continue', () => {
     const [, cmd, prompt] = startJobMock.mock.calls[0];
     expect(cmd).toContain('--resume sess-abc');
     expect(cmd).toContain('--print');
+    expect(checkCliStartGateMock).toHaveBeenCalledWith('continue a job', {
+      preferred: 'claude',
+      strictPreferred: true,
+    });
     expect(withBasePromptMock).toHaveBeenCalled();
     expect(prompt.startsWith('BASE')).toBe(true);
+  });
+
+  it('does not resume on another provider when the source provider is blocked', async () => {
+    getJobMock.mockReturnValue(makeJob({ provider: 'claude' }));
+    checkCliStartGateMock.mockResolvedValueOnce({
+      ok: false,
+      status: 429,
+      detail: "Selected provider 'claude' is over budget right now. Pick another provider or wait for its quota window to reset.",
+    });
+
+    const res = await POST(
+      new NextRequest('http://localhost/api/jobs/job-source/continue', { method: 'POST' }),
+      { params: Promise.resolve({ jobId: 'job-source' }) },
+    );
+
+    expect(res.status).toBe(429);
+    const data = await res.json();
+    expect(data.detail).toContain("Selected provider 'claude' is over budget");
+    expect(checkCliStartGateMock).toHaveBeenCalledWith('continue a job', {
+      preferred: 'claude',
+      strictPreferred: true,
+    });
+    expect(startJobMock).not.toHaveBeenCalled();
+  });
+
+  it('rejects a continuation if the gate returns a different provider', async () => {
+    getJobMock.mockReturnValue(makeJob({ provider: 'claude' }));
+    checkCliStartGateMock.mockResolvedValueOnce({ ok: true, provider: 'codex' });
+
+    const res = await POST(
+      new NextRequest('http://localhost/api/jobs/job-source/continue', { method: 'POST' }),
+      { params: Promise.resolve({ jobId: 'job-source' }) },
+    );
+
+    expect(res.status).toBe(409);
+    const data = await res.json();
+    expect(data.detail).toContain('Cannot resume session on codex');
+    expect(startJobMock).not.toHaveBeenCalled();
+  });
+
+  it('rejects a continuation when the source provider is unknown', async () => {
+    getJobMock.mockReturnValue(makeJob({ provider: null }));
+
+    const res = await POST(
+      new NextRequest('http://localhost/api/jobs/job-source/continue', { method: 'POST' }),
+      { params: Promise.resolve({ jobId: 'job-source' }) },
+    );
+
+    expect(res.status).toBe(409);
+    const data = await res.json();
+    expect(data.detail).toContain('source job has no recorded CLI provider');
+    expect(checkCliStartGateMock).not.toHaveBeenCalled();
+    expect(startJobMock).not.toHaveBeenCalled();
   });
 
   it('keeps broker cleanup alive and injects MCP env when prepare succeeds', async () => {
