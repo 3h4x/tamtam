@@ -1,12 +1,7 @@
-// Fourth per-phase workflow scaffold: push. Different shape from
-// test/review/fix because push runs **inline** in the server process (not
-// spawned as a background job) — startProjectPush returns synchronously
-// with the commit SHA and optional PR info. So the phase workflow needs
-// just one step.
-//
-// Future iterations dispatch this when the orchestrator decides
-// { next: 'push' } from a review-LGTM or fresh-LGTM branch. Not wired
-// yet.
+// Push phase workflow. Different shape from test/review/fix because push
+// runs **inline** in the server process (not spawned as a background job)
+// — startProjectPush returns synchronously with the commit SHA and
+// optional PR info. So the phase workflow needs just one step.
 
 import type { PushResult } from '@/lib/pipeline/start-push';
 import { safeStartOrchestrator } from '@/lib/workflows/safe-start-orchestrator';
