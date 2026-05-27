@@ -401,9 +401,11 @@ async function runCommit(
   const needsBranch = !!issueCtx;
 
   if (needsBranch) {
-    const branchR = await execStep('git', ['-C', projPath, 'branch', '--show-current'], { timeout: 5000 });
+    const [branchR, mainBranch] = await Promise.all([
+      execStep('git', ['-C', projPath, 'branch', '--show-current'], { timeout: 5000 }),
+      detectMainBranch(projPath, signal),
+    ]);
     const currentBranch = branchR.stdout.trim();
-    const mainBranch = await detectMainBranch(projPath, signal);
     if (!currentBranch || currentBranch === mainBranch) {
       const featureBranch = issueCtx
         ? issueBranchName(issueCtx)
