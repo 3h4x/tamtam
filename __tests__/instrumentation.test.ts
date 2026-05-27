@@ -93,6 +93,7 @@ describe('instrumentation', () => {
         markDone,
         updateJob: vi.fn(),
         probeJobStatus: vi.fn().mockResolvedValue(undefined),
+        reconcileStaleRelease: vi.fn().mockResolvedValue(undefined),
         PIPELINE_STEP_KINDS: new Set(['test', 'review', 'fix', 'commit', 'push', 'mark-dod', 'pr-wait']),
       };
 
@@ -306,25 +307,19 @@ describe('instrumentation', () => {
 
     it('reaps abandoned inline jobs when pr-wait resume fails', async () => {
       vi.stubEnv('NODE_ENV', 'test');
-      mockDeps([]);
       const orphanedPrWait = { id: 'pr-wait-bad', kind: 'pr-wait', pid: 1234, finishedAt: null, contextMeta: '{', project: 'proj1' };
       const orphanedMarkDod = { id: 'mark-dod-1', kind: 'mark-dod', pid: 0, finishedAt: null, contextMeta: null, project: 'proj1' };
       const listJobsMock = vi.fn().mockReturnValue([orphanedPrWait, orphanedMarkDod]);
       const markDoneMock = vi.fn().mockResolvedValue(undefined);
       const resumePrWaitMock = vi.fn().mockReturnValue({ ok: false, error: 'malformed contextMeta' });
 
-      vi.doMock('@/lib/jobs/job-storage', () => ({
-        listJobs: listJobsMock,
+      const { drainAllRecoveryWork, markDone, getWorldStart } = mockRegisterNodeBootDeps({
+        jobs: [orphanedPrWait, orphanedMarkDod],
         markDone: markDoneMock,
-        updateJob: vi.fn(),
-        probeJobStatus: vi.fn(),
-        reconcileStaleRelease: vi.fn(),
-        PIPELINE_STEP_KINDS: new Set(),
-      }));
+      });
+
       vi.doMock('@/lib/pipeline/start-pr-wait', () => ({ resumePrWait: resumePrWaitMock }));
-      vi.doMock('@/lib/pipeline/recovery-drain', () => ({
-        drainAllRecoveryWork: vi.fn().mockResolvedValue(undefined),
-      }));
+      vi.doMock('@/lib/pipeline/recovery-drain', () => ({ drainAllRecoveryWork }));
 
       const { registerNode } = await import('@/instrumentation-node');
       await registerNode();
