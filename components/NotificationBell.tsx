@@ -6,6 +6,7 @@ import { useRouter } from 'next/navigation'
 import { fetchNotifications, markNotificationsSeen, markJobSeen } from '@/lib/client-api'
 import type { JobInfo } from '@/lib/client-api'
 import { jobIsFinished } from '@/lib/client/job-status'
+import { Button } from '@/components/ui/Button'
 import { Spinner } from '@/components/ui/Spinner'
 
 // Sky view: one running entry per project (highest-priority kind wins)
@@ -182,13 +183,13 @@ export function NotificationBell() {
   return (
     <div className="relative" ref={dropdownRef}>
       {/* Bell button */}
-      <button
+      <Button
         onClick={() => setOpen(v => !v)}
         title={[
           isRunning ? `${runningJobs.length} running` : '',
           unseenCount > 0 ? `${unseenCount} unread` : '',
         ].filter(Boolean).join(', ') || 'No notifications'}
-        className={`relative p-2 bg-transparent border rounded-md cursor-pointer transition-colors ${
+        className={`relative !p-2 bg-transparent border rounded-md cursor-pointer transition-colors ${
           open
             ? 'border-accent text-accent'
             : 'border-border text-text-secondary hover:text-text-primary hover:border-text-tertiary'
@@ -217,7 +218,7 @@ export function NotificationBell() {
         {isRunning && finishedJobs.length === 0 && (
           <span className="absolute -top-1 -right-1 w-2.5 h-2.5 bg-accent rounded-full animate-pulse" />
         )}
-      </button>
+      </Button>
 
       {/* Dropdown */}
       {open && (
@@ -227,12 +228,14 @@ export function NotificationBell() {
           <div className="flex items-center justify-between px-4 py-2.5 border-b border-border">
             <span className="text-sm font-semibold text-text-primary">Notifications</span>
             {finishedJobs.length > 0 && (
-              <button
+              <Button
+                variant="ghost"
+                size="sm"
                 onClick={handleClearAll}
-                className="text-xs text-text-tertiary hover:text-text-primary bg-transparent border-none cursor-pointer transition-colors"
+                className="!px-0 !py-0 text-xs font-normal text-text-tertiary hover:text-text-primary hover:bg-transparent bg-transparent border-none"
               >
                 Clear all
-              </button>
+              </Button>
             )}
           </div>
 

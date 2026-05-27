@@ -1,5 +1,5 @@
 ---
-provider: codex
+provider: auto
 model: smart
 schedule: 30m
 skillIds: ["persona:engineering-team/senior-fullstack"]

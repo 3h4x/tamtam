@@ -301,6 +301,12 @@ The chooser identifies whichever enabled provider is *most behind expected pace*
 
 This applies to every routing decision that doesn't have an explicit `provider:` override on the agent or job, including: agent intake, terminal runs, pipeline phase dispatch, orchestrator boost fires, and rerun. The model alias never influences provider choice; agents named `docs-claude` or `improve-codex` are conventions, not routing directives.
 
+**Pace override behavior:**
+
+When an agent or run has an explicit `provider:` preference and `budget_block_runs_enabled` is **false**, TamTam will override that preference if another enabled provider is *urgently* behind on pace. The urgency is calculated per-provider as `paceMarginPct / hoursLeftInWindow`, capturing the catch-up *rate* (percentage points per hour) required to hit the 7-day pace target before the window resets. When any enabled provider has urgency ≥ 1.0 pp/hour and exceeds the preferred provider's urgency, the run uses the most-urgent provider instead.
+
+**Example:** Provider A is 35pp behind pace with 24 hours left (1.46 pp/h urgency). Provider B is 35pp behind with 5 days left (0.29 pp/h urgency). An agent pinned to provider B will be rerouted to provider A because A is ~5× more urgent. Operator can disable this by enabling `budget_block_runs_enabled` (which applies a hard gate instead) or by pausing runs (`jobs_paused`) to avoid auto-reroute mid-flow.
+
 #### Review-fix backoff (default: 30 seconds)
 
 When a review returns a NEEDS ATTENTION or DO NOT SHIP verdict, TamTam dispatches a fix phase. If fix fails its CI checks and another review is needed, the next fix dispatch is delayed by `review_fix_backoff_seconds` using exponential backoff: iteration N waits `base * 2^(N-2)` seconds. The default of 30 seconds means iteration 4 waits 30s, iteration 5 waits 60s, iteration 6 waits 120s, etc., capped at 8 minutes. Set to 0 to disable the backoff and allow rapid re-tries (useful for flaky CI that self-heals quickly). See `dispatch-phase.ts` for the backoff schedule and cap.

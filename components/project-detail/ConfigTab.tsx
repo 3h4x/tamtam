@@ -509,7 +509,6 @@ export function ConfigTab({
               <div className="text-xs text-text-tertiary">When the watcher opens a revert PR, also enable squash auto-merge. Off = the revert PR stays open for human review.</div>
             </div>
           </label>
-        </div>
 
         {/* Trigger cadence */}
         <div className="px-4 py-2.5">
@@ -526,6 +525,7 @@ export function ConfigTab({
               <div className="text-xs text-text-tertiary">Auto-start release when a terminal or agent run finishes successfully.</div>
             </div>
           </label>
+        </div>
         </div>
       </div>
 

@@ -110,6 +110,16 @@ function paceMarginPctFor(snapshot: QuotaSnapshot | null): number {
   return elapsedPct - util;
 }
 
+function hoursLeftInWindowFor(snapshot: QuotaSnapshot | null): number {
+  // Time remaining in the 7d window — drives urgency weighting. A provider
+  // with 24h left and 35pp behind is FAR more urgent than another with 5
+  // days left and the same margin: same catch-up budget, 5× less time.
+  if (!snapshot) return 7 * 24;
+  const reset = snapshot.sevenDay?.msUntilReset;
+  if (typeof reset !== 'number' || !Number.isFinite(reset) || reset <= 0) return 7 * 24;
+  return reset / (60 * 60 * 1000);
+}
+
 export function pickCliProvider(opts: PickCliOptions): PickCliResult {
   const { enabled, snapshots, budgetBlockAtPct, blockEnabled, blockOnWeeklyPace, requestedModel } = opts;
   if (enabled.length === 0) {
@@ -137,10 +147,13 @@ export function pickCliProvider(opts: PickCliOptions): PickCliResult {
       : effectiveUtilizationFor(snapshot, requestedModel);
     const headroom = 100 - utilization;
     const paceMargin = paceMarginPctFor(snapshot);
-    // Weight paceMargin heavily so a meaningfully-behind provider wins over a
-    // less-behind one with similar headroom. Headroom/100 acts as a sub-point
-    // tiebreak that prevents picking a provider with effectively zero budget.
-    const score = paceMargin * 10 + headroom / 100;
+    const hoursLeft = Math.max(1, hoursLeftInWindowFor(snapshot));
+    // Urgency-weighted score: paceMargin per hour-left drives the pick — a
+    // provider 35pp behind with 24h left (1.46pp/h) beats one 35pp behind
+    // with 5 days left (0.29pp/h) by ~5×. Headroom/100 stays as a sub-point
+    // tiebreak so providers with effectively zero budget still lose.
+    const urgency = paceMargin / hoursLeft;
+    const score = urgency * 1000 + headroom / 100;
     if (score > bestScore) {
       bestProvider = provider;
       bestScore = score;

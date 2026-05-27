@@ -95,6 +95,11 @@ const ROLLING_WINDOW_MS = 60 * 60 * 1000;
 const AGENT_RECENT_DISPATCH_COOLDOWN_MS = 2 * 60 * 1000;
 
 const BOOSTABLE_PROJECT_STATUSES = new Set(['shipping', 'active']);
+// When pace is *severely* under (margin far above the configured threshold),
+// loosen the eligibility so dormant projects can also burn budget. Keeps the
+// normal-pace behavior conservative.
+const SEVERELY_UNDER_PACE_PP = 20;
+const SEVERELY_UNDER_STATUSES = new Set(['shipping', 'active', 'idle', 'attention']);
 
 export function decideBoosts(input: BoostInput): BoostDecision[] {
   const now = input.nowMs ?? Date.now();
@@ -117,10 +122,14 @@ export function decideBoosts(input: BoostInput): BoostDecision[] {
   }
 
   const decisions: BoostDecision[] = [];
+  const severelyUnderPace = (input.pace.marginPct - input.settings.marginPct) >= SEVERELY_UNDER_PACE_PP;
+  const allowedStatuses = severelyUnderPace ? SEVERELY_UNDER_STATUSES : BOOSTABLE_PROJECT_STATUSES;
   for (const project of input.projects) {
     if (project.paused) continue;
-    if (project.releaseRunning) continue;
-    if (!BOOSTABLE_PROJECT_STATUSES.has(project.status)) continue;
+    // releaseRunning USED to exclude — removed so agents can run in parallel
+    // with active releases (per-project agent serialization still applies via
+    // pending-agent-run, which queues or 409s as appropriate).
+    if (!allowedStatuses.has(project.status)) continue;
 
     const recent = (input.history.byProject.get(project.project) ?? []).filter(
       (ts) => now - ts < ROLLING_WINDOW_MS,

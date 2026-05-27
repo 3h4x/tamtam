@@ -327,14 +327,15 @@ export function TerminalMessages({
                 <span className="text-[10px] font-mono text-text-tertiary/40 uppercase tracking-wider">attach a skill</span>
                 <div className="flex flex-wrap justify-center gap-1.5 max-w-sm">
                   {allItems.slice(0, 4).map(item => (
-                    <button
+                    <Button
                       key={item.id}
-                      className="text-[11px] px-2 py-1 rounded bg-bg-secondary text-text-tertiary hover:text-text-primary hover:bg-bg-tertiary cursor-pointer border border-border font-mono transition-colors"
+                      size="sm"
+                      className="text-[11px] rounded bg-bg-secondary text-text-tertiary hover:text-text-primary font-mono font-normal"
                       onClick={() => onToggleItem(item)}
                       title={item.description}
                     >
                       {item.name}
-                    </button>
+                    </Button>
                   ))}
                 </div>
               </div>

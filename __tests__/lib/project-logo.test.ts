@@ -110,7 +110,7 @@ describe('detectProjectLogoPath', () => {
   it('skips directories that match candidate names', () => {
     setup();
     try {
-      // Create a directory named logo.png — statSync should detect it's not a file
+      // Create a directory named logo.png; lstatSync should detect it's not a file.
       const dirPath = join(projectRoot, 'public');
       mkdirSync(dirPath, { recursive: true });
       mkdirSync(join(dirPath, 'logo.png'), { recursive: true });
