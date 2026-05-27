@@ -292,6 +292,22 @@ Budget gate semantics:
 - Agent/file-agent `provider` preferences are soft: TamTam uses them when they are enabled and healthy, otherwise it falls back to the normal chooser.
 - Release/test/push entrypoints use the same chooser up front, so a full legacy `claude_provider` snapshot does not block work when another enabled provider is still healthy.
 - The weekly burn-rate throttle is enforced only for scheduled agent fires via `scheduledBurnRateBlocked()` in the internal scheduler; manual buttons and root pipeline starts do not 429 on projected 7-day pace alone. The separate `budget_block_on_weekly_pace_enabled` setting controls whether actual 7-day utilization is part of the hard start gate.
+
+#### Pace-aware provider routing (requirement)
+
+TamTam must decide which CLI provider an agent run targets based on **current pace**, not on the agent's name or its declared `model:`. The agent's model alias (sonnet/opus/gpt-5/gemini-2) is a hint about *capability tier*, not provider routing.
+
+The chooser identifies whichever enabled provider is *most behind expected pace* (largest `paceMarginPct` from `bridge.globalPace.providers`) and routes the run to the provider with the most remaining budget headroom to spend toward that catch-up — i.e. when pace is suffering on provider X, prefer the provider where we currently have more tokens to burn so the under-pace condition resolves fastest. This avoids the greedy "always pick max headroom" behavior, which starves any provider that has already burned half its window even when it remains the one we *need* to keep using to hit our weekly allocation.
+
+This applies to every routing decision that doesn't have an explicit `provider:` override on the agent or job, including: agent intake, terminal runs, pipeline phase dispatch, orchestrator boost fires, and rerun. The model alias never influences provider choice; agents named `docs-claude` or `improve-codex` are conventions, not routing directives.
+
+#### Review-fix backoff (default: 30 seconds)
+
+When a review returns a NEEDS ATTENTION or DO NOT SHIP verdict, TamTam dispatches a fix phase. If fix fails its CI checks and another review is needed, the next fix dispatch is delayed by `review_fix_backoff_seconds` using exponential backoff: iteration N waits `base * 2^(N-2)` seconds. The default of 30 seconds means iteration 4 waits 30s, iteration 5 waits 60s, iteration 6 waits 120s, etc., capped at 8 minutes. Set to 0 to disable the backoff and allow rapid re-tries (useful for flaky CI that self-heals quickly). See `dispatch-phase.ts` for the backoff schedule and cap.
+
+#### Stats bridge bootstrap requirement
+
+The `/api/stats/bridge` endpoint must be running for TamTam's observability features to work correctly. The usage snapshot cron task (`usage-snapshot`) fetches bridge state every 5 minutes to record hourly pace metrics. If this endpoint is unavailable, the cron task will fail gracefully (logged as a warning, retried up to 5 times) and the usage history chart will show no data. No TamTam core features are blocked by this, but the observability dashboard will be incomplete. To verify the endpoint is available, check `/api/stats/bridge` returns HTTP 200 with a `globalPace.providers` array.
 - Agent runs that were queued behind an active release lock or an older `pending_release` stay persisted in `queued_agent_runs` if replay hits a temporary 429 budget block; they are retried when the budget recovers, when jobs resume from pause, on boot, and by the periodic queued-agent recovery sweep.
 - `jobs_paused` blocks scheduled agent runs, pipeline steps, reruns, and CI-fix starts. It does **not** block manual terminal runs (`POST /api/projects/by-project/[name]/run`) or manually-triggered agent runs (`POST /api/agents/[id]/run` without `x-tamtam-trigger: schedule`); those two entry-points bypass the gate so operators can always run things interactively even while the pipeline is paused.
 - `rebuild_in_progress` is a UI-only sentinel set by `scripts/rebuild-safe.sh` alongside `jobs_paused=true` and cleared on unpause. The top-menu chip renders "rebuilding…" with a spinner instead of the ambiguous "jobs paused" while the flag is on, and the click handler is disabled so an operator cannot accidentally unpause mid-rebuild. Cleared by the script's EXIT trap on any failure path so the chip never lies about an active rebuild after the script has bailed.

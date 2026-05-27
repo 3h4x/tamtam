@@ -320,4 +320,124 @@ describe('pickCliProvider', () => {
     });
     expect(result.provider).toBe('claude');
   });
+
+  describe('pace-aware routing', () => {
+    it('picks the provider most behind on pace when headroom is similar', () => {
+      // Claude: 50% util, 60% elapsed = -10pp margin (behind)
+      // Codex: 50% util, 50% elapsed = 0pp margin (on pace)
+      // Both have 50 headroom, but Claude should win because it's more behind
+      const claudeSnap: QuotaSnapshot = {
+        provider: 'claude',
+        fiveHour: { utilization: 50, resetsAt: null, msUntilReset: null },
+        sevenDay: { utilization: 50, resetsAt: null, msUntilReset: 3 * 24 * 60 * 60 * 1000 },
+        fetchedAt: 0,
+        stale: false,
+      };
+      const codexSnap: QuotaSnapshot = {
+        provider: 'codex',
+        fiveHour: { utilization: 50, resetsAt: null, msUntilReset: null },
+        sevenDay: { utilization: 50, resetsAt: null, msUntilReset: 3.5 * 24 * 60 * 60 * 1000 },
+        fetchedAt: 0,
+        stale: false,
+      };
+      const snapshots = new Map<CliProvider, QuotaSnapshot | null>([
+        ['claude', claudeSnap],
+        ['codex', codexSnap],
+      ]);
+      const result = pickCliProvider({
+        enabled: ['claude', 'codex'],
+        snapshots,
+        budgetBlockAtPct: 95,
+        blockEnabled: true,
+      });
+      expect(result.provider).toBe('claude');
+    });
+
+    it('picks higher-headroom provider when pace margins are equal', () => {
+      // Both 10% behind pace (margin = -10), but Claude has 60 headroom vs Codex 40
+      const claudeSnap: QuotaSnapshot = {
+        provider: 'claude',
+        fiveHour: { utilization: 40, resetsAt: null, msUntilReset: null },
+        sevenDay: { utilization: 40, resetsAt: null, msUntilReset: 3 * 24 * 60 * 60 * 1000 },
+        fetchedAt: 0,
+        stale: false,
+      };
+      const codexSnap: QuotaSnapshot = {
+        provider: 'codex',
+        fiveHour: { utilization: 60, resetsAt: null, msUntilReset: null },
+        sevenDay: { utilization: 60, resetsAt: null, msUntilReset: 3 * 24 * 60 * 60 * 1000 },
+        fetchedAt: 0,
+        stale: false,
+      };
+      const snapshots = new Map<CliProvider, QuotaSnapshot | null>([
+        ['claude', claudeSnap],
+        ['codex', codexSnap],
+      ]);
+      const result = pickCliProvider({
+        enabled: ['claude', 'codex'],
+        snapshots,
+        budgetBlockAtPct: 95,
+        blockEnabled: true,
+      });
+      expect(result.provider).toBe('claude');
+    });
+
+    it('weights pace margin heavily so a more-behind provider wins despite lower headroom', () => {
+      // Claude: 30% util, 60% elapsed = -30pp margin, 70 headroom (score: -30*10 + 0.7 = -299.3)
+      // Codex: 10% util, 50% elapsed = -40pp margin, 90 headroom (score: -40*10 + 0.9 = -399.1)
+      // Higher (less negative) score wins → Claude
+      // But if we swap: Codex with 20% util (margin -30pp), 80 headroom vs Claude with margin -40pp:
+      // Codex: -30*10 + 0.8 = -299.2 vs Claude: -40*10 + 0.7 = -399.3 → Codex wins (more behind)
+      const claudeSnap: QuotaSnapshot = {
+        provider: 'claude',
+        fiveHour: { utilization: 20, resetsAt: null, msUntilReset: null },
+        sevenDay: { utilization: 20, resetsAt: null, msUntilReset: 2.92 * 24 * 60 * 60 * 1000 },
+        fetchedAt: 0,
+        stale: false,
+      };
+      const codexSnap: QuotaSnapshot = {
+        provider: 'codex',
+        fiveHour: { utilization: 10, resetsAt: null, msUntilReset: null },
+        sevenDay: { utilization: 10, resetsAt: null, msUntilReset: 2.83 * 24 * 60 * 60 * 1000 },
+        fetchedAt: 0,
+        stale: false,
+      };
+      const snapshots = new Map<CliProvider, QuotaSnapshot | null>([
+        ['claude', claudeSnap],
+        ['codex', codexSnap],
+      ]);
+      const result = pickCliProvider({
+        enabled: ['claude', 'codex'],
+        snapshots,
+        budgetBlockAtPct: 95,
+        blockEnabled: true,
+      });
+      // Codex is more behind, should win
+      expect(result.provider).toBe('codex');
+    });
+
+    it('treats missing snapshot (no pace margin) as fully available when provider is non-quota-aware', () => {
+      // Claude: known snapshot, 70% util on 7d (margin -20pp)
+      // LMStudio: no snapshot (non-quota-aware), treated as 0% util → max headroom, no pace margin
+      // Both are enabled. LMStudio should win on headroom (100 vs 30), score 1 vs -199.7
+      const claudeSnap: QuotaSnapshot = {
+        provider: 'claude',
+        fiveHour: { utilization: 70, resetsAt: null, msUntilReset: null },
+        sevenDay: { utilization: 70, resetsAt: null, msUntilReset: 3.5 * 24 * 60 * 60 * 1000 },
+        fetchedAt: 0,
+        stale: false,
+      };
+      const snapshots = new Map<CliProvider, QuotaSnapshot | null>([
+        ['claude', claudeSnap],
+        ['lmstudio', null],
+      ]);
+      const result = pickCliProvider({
+        enabled: ['claude', 'lmstudio'],
+        snapshots,
+        budgetBlockAtPct: 95,
+        blockEnabled: true,
+      });
+      expect(result.provider).toBe('lmstudio');
+    });
+  });
 });

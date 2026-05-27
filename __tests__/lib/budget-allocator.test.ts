@@ -136,7 +136,10 @@ describe('decideBoosts', () => {
   });
 
   it('picks the agent with the oldest lastDispatchMs', () => {
+    // marginPct=5 keeps slack==0 so only one pick fires; the test isolates
+    // the staleness ranking without engaging the multi-pick boost.
     const r = decideBoosts(makeInput({
+      pace: { status: 'under_pace', marginPct: 5 },
       agents: [
         makeAgent({ id: 'a-recent', name: 'recent', lastDispatchMs: NOW - 10 * 60 * 1000 }),
         makeAgent({ id: 'a-old', name: 'old', lastDispatchMs: NOW - 60 * 60 * 1000 }),
@@ -145,6 +148,21 @@ describe('decideBoosts', () => {
     }));
     expect(r).toHaveLength(1);
     expect(r[0].agentId).toBe('a-never');
+  });
+
+  it('boosts multiple agents per project when pace headroom is large', () => {
+    const r = decideBoosts(makeInput({
+      pace: { status: 'under_pace', marginPct: 25 },
+      settings: { marginPct: 5, maxBoostsPerHour: 3 },
+      agents: [
+        makeAgent({ id: 'a-never', name: 'never', lastDispatchMs: null }),
+        makeAgent({ id: 'a-old', name: 'old', lastDispatchMs: NOW - 60 * 60 * 1000 }),
+        makeAgent({ id: 'a-mid', name: 'mid', lastDispatchMs: NOW - 30 * 60 * 1000 }),
+      ],
+    }));
+    // slack=20 → desiredPicks=min(3,1+1)=2 picks; budget=3 unused; expect 2.
+    expect(r).toHaveLength(2);
+    expect(r.map((d) => d.agentId)).toEqual(['a-never', 'a-old']);
   });
 
   it('skips disabled agents and agents without a schedule', () => {
