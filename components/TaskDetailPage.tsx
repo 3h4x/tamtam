@@ -8,6 +8,42 @@ import { FleetHealth } from '@/hooks/useProjectHealth'
 import { formatDuration } from '@/lib/shared/statusConstants'
 import { ErrorState } from '@/components/ErrorState'
 import { Button } from '@/components/ui/Button'
+import { Table, type Column } from '@/components/ui/Table'
+
+type RunHistoryEntry = TaskDetail['run_history'][number]
+
+const runHistoryColumns: Column<RunHistoryEntry>[] = [
+  {
+    key: 'started',
+    label: 'Started',
+    render: (run) => (
+      <span className="text-text-secondary">
+        {run.started ? new Date(run.started).toLocaleString() : '—'}
+      </span>
+    ),
+  },
+  {
+    key: 'duration',
+    label: 'Duration',
+    render: (run) => (
+      <span className="text-text-secondary">
+        {run.duration_s !== null ? formatDuration(run.duration_s) : (run.ended ? '—' : 'running...')}
+      </span>
+    ),
+  },
+  {
+    key: 'exit',
+    label: 'Exit',
+    render: (run) =>
+      run.exit_code === null ? (
+        <span className="text-status-warning">running</span>
+      ) : run.exit_code === 0 ? (
+        <span className="text-status-success">0</span>
+      ) : (
+        <span className="text-status-error">{run.exit_code}</span>
+      ),
+  },
+]
 
 interface TaskDetailPageProps {
   fleet: FleetHealth
@@ -161,40 +197,12 @@ export function TaskDetailPage({
           {/* Run History */}
           <section className="bg-bg-secondary rounded-lg p-4">
             <h3 className="text-sm font-semibold text-text-secondary uppercase tracking-wider mb-3">Run History</h3>
-            {detail.run_history.length > 0 ? (
-              <table className="w-full border-collapse">
-                <thead>
-                  <tr className="text-left text-xs text-text-secondary uppercase tracking-wider">
-                    <th className="px-4 py-3">Started</th>
-                    <th className="px-4 py-3">Duration</th>
-                    <th className="px-4 py-3">Exit</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {detail.run_history.map((run, i) => (
-                    <tr key={i} className="border-t border-border">
-                      <td className="px-4 py-3 text-text-secondary text-sm">
-                        {run.started ? new Date(run.started).toLocaleString() : '—'}
-                      </td>
-                      <td className="px-4 py-3 text-text-secondary text-sm">
-                        {run.duration_s !== null ? formatDuration(run.duration_s) : (run.ended ? '—' : 'running...')}
-                      </td>
-                      <td className="px-4 py-3">
-                        {run.exit_code === null ? (
-                          <span className="text-status-warning">running</span>
-                        ) : run.exit_code === 0 ? (
-                          <span className="text-status-success">0</span>
-                        ) : (
-                          <span className="text-status-error">{run.exit_code}</span>
-                        )}
-                      </td>
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
-            ) : (
-              <div className="text-text-secondary text-sm">No runs yet</div>
-            )}
+            <Table
+              columns={runHistoryColumns}
+              rows={detail.run_history}
+              getRowKey={(run) => `${run.started ?? ''}|${run.ended ?? ''}|${run.exit_code ?? ''}`}
+              emptyState={<div className="px-3 py-2.5 text-text-secondary text-sm">No runs yet</div>}
+            />
           </section>
         </div>
       )}
