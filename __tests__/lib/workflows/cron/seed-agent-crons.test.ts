@@ -142,8 +142,8 @@ describe('seedAgentCrons', () => {
 
     it('overwrites an existing past run_at', async () => {
       const T0 = 1_700_000_000_000;
-      // existing row's run_at already in the past — fire was missed
-      // (e.g. server was down). Replace it with a fresh future fire.
+      // Existing row's run_at is already in the past — the fire was missed
+      // while the worker was down. Replace it with a fresh future fire.
       const existing = new Map([['agent-cron-a1', existingJob(T0 - 60_000)]]);
       const r = await seedAgentCrons({
         connectionString: 'postgres://stub',

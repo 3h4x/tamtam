@@ -49,8 +49,9 @@ export interface BoostAgentInput {
   /** Non-empty cron schedule string. We don't boost agents without a
    *  schedule — those are manual-trigger-only. */
   schedule: string | null;
-  /** Unix ms of the most recent successful dispatch/queue. Used to spread
-   *  boosts across the project's roster. */
+  /** Unix ms of the most recent real dispatch. Queued/skipped attempts must
+   *  not update this value, otherwise pending rows can starve an agent out of
+   *  boost eligibility without it actually running. */
   lastDispatchMs: number | null;
   /** `'system'` agents run internal handlers (e.g. retrieval reindex) that
    *  don't consume codex/claude budget — boosting them can't catch up pace.
@@ -95,10 +96,10 @@ const ROLLING_WINDOW_MS = 60 * 60 * 1000;
 // minutes — graphile already has its next-fire row queued from the previous
 // handler. Boosting too eagerly would replace that row with `runAt: now()`
 // every tick, defeating the schedule and burning the agent on a hot loop.
-// 2-min default matches the typical agent runtime so a boost only fires when
-// the previous run actually finished, while still letting the orchestrator
-// rotate through the project's roster within a 5-min orchestrator tick.
-const AGENT_RECENT_DISPATCH_COOLDOWN_MS = 2 * 60 * 1000;
+// Keep a real dispatch cool for a full orchestrator interval. Otherwise a
+// boosted agent can be selected again while its previous graphile fire is
+// still being processed, replacing the next-fire row with `runAt: now()`.
+const AGENT_RECENT_DISPATCH_COOLDOWN_MS = 5 * 60 * 1000;
 
 // Default boost set covers every project we *want* to be shipping. Idle and
 // attention projects are the obvious headroom — if pace is under, we'd rather

@@ -17,7 +17,7 @@ import {
   type BoostAgentInput,
 } from '@/lib/orchestrator/budget-allocator';
 
-export const ORCHESTRATOR_TICK_INTERVAL_MS = 2 * 60 * 1000;
+export const ORCHESTRATOR_TICK_INTERVAL_MS = 60 * 1000;
 export const ORCHESTRATOR_TICK_JOB_KEY = 'orchestrator-tick';
 
 export interface OrchestratorTickDeps {
