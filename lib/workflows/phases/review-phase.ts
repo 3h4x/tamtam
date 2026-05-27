@@ -1,11 +1,12 @@
 // Second per-phase workflow. Same shape as test-phase: kickoff →
 // await → return. Difference: the result also carries the parsed verdict
-// (LGTM / NEEDS ATTENTION / DO NOT SHIP / null) so the future orchestrator
-// can branch without re-parsing the log.
+// (LGTM / NEEDS ATTENTION / DO NOT SHIP / null) so the orchestrator can
+// branch without re-parsing the log.
 //
-// Future iterations replace the observation chain's polling with direct
-// dispatch of releaseReviewPhaseWorkflow. Until then, this workflow is
-// scaffold — not yet wired from anywhere.
+// Dispatched by releaseOrchestratorWorkflow via dispatchPhase. The workflow
+// re-dispatches the orchestrator when its review sub-step finishes so the
+// release chain continues through workflow runs instead of the legacy
+// completion-hook chain.
 
 import type { StartReviewResult } from '@/lib/pipeline/start-review';
 import type { WaitForJobResult } from '@/lib/workflows/wait-for-job';
