@@ -85,11 +85,12 @@ describe('<LogsPage />', () => {
     fetchProjectLogsMock.mockRejectedValue(new Error('500 internal'));
     await render();
     clickButtonByText('alpha');
-    // Resolve the rejected fetchProjectLogs and a re-render frame.
-    await new Promise((r) => setTimeout(r, 0));
-    flushSync(() => {});
-
-    expect(container.textContent).toContain('Failed to load logs.');
+    // Resolve the rejected fetchProjectLogs and the resulting re-render. The
+    // rejection + catch + setState chain crosses multiple microtask hops in
+    // React 19, so retry the assertion rather than relying on a single tick.
+    await waitFor(() => {
+      expect(container.textContent).toContain('Failed to load logs.');
+    });
     // Retry button is present and wired.
     const retry = Array.from(container.querySelectorAll('button')).find((b) => b.textContent?.trim() === 'Retry');
     expect(retry).toBeTruthy();
