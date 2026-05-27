@@ -229,6 +229,12 @@ describe('startRelease — release pipeline entry decision tree', () => {
   });
 
   it('blocks release startup while an agent prerequisite holds the project start slot', async () => {
+    // Dirty tree so the new "Nothing to release" early-exit doesn't fire
+    // before the blocking-agent-slot check we're exercising here.
+    execMock
+      .mockImplementationOnce(() => gitStatus(' M foo.ts\n'))
+      .mockImplementationOnce(() => gitAhead('0'))
+      .mockImplementation(defaultExec);
     const { tryClaimAgentStartSlot, releaseAgentStartSlot } = await import('@/lib/agents/pending-agent-run');
     expect(tryClaimAgentStartSlot('proj', 'Prereq Agent')).toEqual({ ok: true });
     try {
@@ -477,6 +483,10 @@ describe('startRelease — release pipeline entry decision tree', () => {
   });
 
   it('returns 409 when a pipeline job is already running for the project', async () => {
+    execMock
+      .mockImplementationOnce(() => gitStatus(' M foo.ts\n'))
+      .mockImplementationOnce(() => gitAhead('0'))
+      .mockImplementation(defaultExec);
     listJobsMock.mockReturnValue([
       { id: 'j1', project: 'proj', kind: 'test', finishedAt: null },
     ]);
@@ -487,6 +497,10 @@ describe('startRelease — release pipeline entry decision tree', () => {
   });
 
   it('returns 409 when a commit pipeline job is already running (commit is a pipeline kind)', async () => {
+    execMock
+      .mockImplementationOnce(() => gitStatus(' M foo.ts\n'))
+      .mockImplementationOnce(() => gitAhead('0'))
+      .mockImplementation(defaultExec);
     listJobsMock.mockReturnValue([
       { id: 'j1', project: 'proj', kind: 'commit', finishedAt: null },
     ]);
@@ -497,6 +511,10 @@ describe('startRelease — release pipeline entry decision tree', () => {
   });
 
   it('blocks release startup when another project job is already running', async () => {
+    execMock
+      .mockImplementationOnce(() => gitStatus(' M foo.ts\n'))
+      .mockImplementationOnce(() => gitAhead('0'))
+      .mockImplementation(defaultExec);
     listJobsMock.mockReturnValue([
       { id: 'j1', project: 'proj', kind: 'run', finishedAt: null },
     ]);
@@ -509,6 +527,29 @@ describe('startRelease — release pipeline entry decision tree', () => {
       expect(r.status).toBe(409);
       expect(r.blockingJobId).toBe('j1');
       expect(r.detail).toContain("Job 'run' is already running");
+    }
+  });
+
+  it('returns 400 "Nothing to release" before queueing, even when a blocking job is running with queueIfBlocked', async () => {
+    // Regression: prior order checked the blocking-job branch first, so a
+    // queueIfBlocked caller (release-after-run hook) would always queue a
+    // pending-release flag even when the working tree was empty. The flag
+    // then stuck forever because every drain attempt bounced off the same
+    // "agent already running" blocker. Fix: empty-tree check runs first.
+    execMock
+      .mockImplementationOnce(() => gitStatus(''))     // no changes
+      .mockImplementationOnce(() => gitAhead('0'))    // no unpushed
+      .mockImplementation(defaultExec);
+    listJobsMock.mockReturnValue([
+      { id: 'blocker', project: 'proj', kind: 'agent:foo', finishedAt: null },
+    ]);
+    probeJobStatusMock.mockResolvedValue('running');
+
+    const r = await startRelease('proj', { queueIfBlocked: true });
+    expect(r.ok).toBe(false);
+    if (!r.ok) {
+      expect(r.status).toBe(400);
+      expect(r.detail).toContain('Nothing to release');
     }
   });
 

@@ -190,6 +190,22 @@ export async function startRelease(projectName: string, options: StartReleaseOpt
     };
   }
 
+  // Check "Nothing to release" BEFORE the blocking-job / pipeline-running
+  // gates. Otherwise a release-after-run trigger on a project with no
+  // commitable changes still hits `queueRelease(...)` when another agent is
+  // running, which sets the pending-release flag. Subsequent drains keep
+  // bouncing off the same "agent already running" blocker, the flag never
+  // clears, and every new agent on the project gets stalled behind a
+  // pending release that never resolves. Doing the cheap git check first
+  // means empty trees return a clean 400 with no side effects.
+  const status = await readWorkingTreeStatus(projPath);
+  const changes = statusHasAnyPath(status);
+  const unpushed = await hasLocalCommitsAhead(projPath);
+  const hasOnlyTamtamChanges = changes && !statusHasNonTamtamPath(status) && !unpushed;
+  if (!changes && !unpushed) {
+    return { ok: false, status: 400, detail: 'Nothing to release — no changes and no unpushed commits' };
+  }
+
   const blockingJob = await findBlockingRunningJob(
     projectName,
     (job) => !RELEASE_PIPELINE_KINDS.has(job.kind),
@@ -210,14 +226,6 @@ export async function startRelease(projectName: string, options: StartReleaseOpt
   }
 
   const issueContext = await resolveReleaseIssueContext(projectName, projPath, sourceJob);
-
-  const status = await readWorkingTreeStatus(projPath);
-  const changes = statusHasAnyPath(status);
-  const unpushed = await hasLocalCommitsAhead(projPath);
-  const hasOnlyTamtamChanges = changes && !statusHasNonTamtamPath(status) && !unpushed;
-  if (!changes && !unpushed) {
-    return { ok: false, status: 400, detail: 'Nothing to release — no changes and no unpushed commits' };
-  }
 
   // Acquire the lock before creating the release job so that if we can't get
   // it, we return immediately without creating any DB row. The old approach

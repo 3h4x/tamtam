@@ -465,13 +465,18 @@ const path = ${JSON.stringify(attemptFile)};
 let attempt = 0;
 try { attempt = parseInt(fs.readFileSync(path, 'utf8'), 10) || 0; } catch {}
 fs.writeFileSync(path, String(attempt + 1));
+// Synchronous writes via fd 1 so output is flushed before process.exit(1).
+// console.log() to a pipe is async on macOS/Linux; process.exit() can discard
+// pending pipe writes, defeating the "streamed output then crashed" scenario
+// this test simulates.
+const emit = (obj) => fs.writeSync(1, JSON.stringify(obj) + '\\n');
 if (attempt === 0) {
-  console.log(JSON.stringify({ type: 'response_item', payload: { type: 'message', role: 'assistant', content: [{ type: 'output_text', text: 'partial' }] } }));
-  console.log(JSON.stringify({ type: 'event_msg', payload: { type: 'token_count', info: { last_token_usage: { input_tokens: 3, output_tokens: 1, cached_input_tokens: 2 } } } }));
+  emit({ type: 'response_item', payload: { type: 'message', role: 'assistant', content: [{ type: 'output_text', text: 'partial' }] } });
+  emit({ type: 'event_msg', payload: { type: 'token_count', info: { last_token_usage: { input_tokens: 3, output_tokens: 1, cached_input_tokens: 2 } } } });
   process.exit(1);
 }
-console.log(JSON.stringify({ type: 'response_item', payload: { type: 'message', role: 'assistant', content: [{ type: 'output_text', text: 'recovered' }] } }));
-console.log(JSON.stringify({ type: 'event_msg', payload: { type: 'token_count', info: { last_token_usage: { input_tokens: 5, output_tokens: 2, cached_input_tokens: 1 } } } }));
+emit({ type: 'response_item', payload: { type: 'message', role: 'assistant', content: [{ type: 'output_text', text: 'recovered' }] } });
+emit({ type: 'event_msg', payload: { type: 'token_count', info: { last_token_usage: { input_tokens: 5, output_tokens: 2, cached_input_tokens: 1 } } } });
 `);
 
     const result = await runNode([
@@ -549,12 +554,13 @@ const path = ${JSON.stringify(attemptFile)};
 let attempt = 0;
 try { attempt = parseInt(fs.readFileSync(path, 'utf8'), 10) || 0; } catch {}
 fs.writeFileSync(path, String(attempt + 1));
+const emit = (obj) => fs.writeSync(1, JSON.stringify(obj) + '\\n');
 if (attempt === 0) {
-  console.log(JSON.stringify({ type: 'response_item', payload: { type: 'message', role: 'assistant', content: [{ type: 'output_text', text: 'Hello' }] } }));
+  emit({ type: 'response_item', payload: { type: 'message', role: 'assistant', content: [{ type: 'output_text', text: 'Hello' }] } });
   process.exit(1);
 }
-console.log(JSON.stringify({ type: 'response_item', payload: { type: 'message', role: 'assistant', content: [{ type: 'output_text', text: 'Hello world' }] } }));
-console.log(JSON.stringify({ type: 'event_msg', payload: { type: 'token_count', info: { last_token_usage: { input_tokens: 7, output_tokens: 2 } } } }));
+emit({ type: 'response_item', payload: { type: 'message', role: 'assistant', content: [{ type: 'output_text', text: 'Hello world' }] } });
+emit({ type: 'event_msg', payload: { type: 'token_count', info: { last_token_usage: { input_tokens: 7, output_tokens: 2 } } } });
 `);
 
     const result = await runNode([
@@ -592,11 +598,12 @@ const path = ${JSON.stringify(attemptFile)};
 let attempt = 0;
 try { attempt = parseInt(fs.readFileSync(path, 'utf8'), 10) || 0; } catch {}
 fs.writeFileSync(path, String(attempt + 1));
-console.log(JSON.stringify({ type: 'response_item', payload: { type: 'message', role: 'assistant', content: [{ type: 'output_text', text: 'Hello' }] } }));
+const emit = (obj) => fs.writeSync(1, JSON.stringify(obj) + '\\n');
+emit({ type: 'response_item', payload: { type: 'message', role: 'assistant', content: [{ type: 'output_text', text: 'Hello' }] } });
 if (attempt === 0) {
   process.exit(1);
 }
-console.log(JSON.stringify({ type: 'event_msg', payload: { type: 'token_count', info: { last_token_usage: { input_tokens: 5, output_tokens: 1 } } } }));
+emit({ type: 'event_msg', payload: { type: 'token_count', info: { last_token_usage: { input_tokens: 5, output_tokens: 1 } } } });
 `);
 
     const result = await runNode([
