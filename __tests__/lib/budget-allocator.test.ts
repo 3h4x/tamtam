@@ -84,13 +84,26 @@ describe('decideBoosts', () => {
     expect(r).toHaveLength(1);
   });
 
-  it('only boosts shipping or active project statuses (skips idle/attention/releasing)', () => {
-    for (const status of ['idle', 'releasing', 'attention', 'paused']) {
-      const r = decideBoosts(makeInput({ projects: [makeProject({ status })] }));
+  it('boosts shipping/active/idle/attention but not releasing/error/paused/stuck', () => {
+    // marginPct=8 keeps slack below the severely-under threshold so we exercise
+    // the default boost set, not the widened one.
+    const pace = { status: 'under_pace' as const, marginPct: 8 };
+    for (const status of ['shipping', 'active', 'idle', 'attention']) {
+      const r = decideBoosts(makeInput({ pace, projects: [makeProject({ status })] }));
+      expect(r, `status=${status} should boost`).toHaveLength(1);
+    }
+    for (const status of ['releasing', 'agent_running', 'error', 'stuck', 'paused']) {
+      const r = decideBoosts(makeInput({ pace, projects: [makeProject({ status })] }));
       expect(r, `status=${status} should not boost`).toEqual([]);
     }
-    const active = decideBoosts(makeInput({ projects: [makeProject({ status: 'active' })] }));
-    expect(active).toHaveLength(1);
+  });
+
+  it('widens to agent_running when severely under pace', () => {
+    const r = decideBoosts(makeInput({
+      pace: { status: 'under_pace', marginPct: 30 },
+      projects: [makeProject({ status: 'agent_running' })],
+    }));
+    expect(r).toHaveLength(1);
   });
 
   it('caps boosts at maxBoostsPerHour per project within the rolling window', () => {
@@ -163,9 +176,9 @@ describe('decideBoosts', () => {
         makeAgent({ id: 'a-mid', name: 'mid', lastDispatchMs: NOW - 30 * 60 * 1000 }),
       ],
     }));
-    // slack=20 → desiredPicks=min(3,1+1)=2 picks; budget=3 unused; expect 2.
-    expect(r).toHaveLength(2);
-    expect(r.map((d) => d.agentId)).toEqual(['a-never', 'a-old']);
+    // slack=20 → desiredPicks=min(5,1+2)=3 picks; budget=3 unused; expect 3.
+    expect(r).toHaveLength(3);
+    expect(r.map((d) => d.agentId)).toEqual(['a-never', 'a-old', 'a-mid']);
   });
 
   it('skips disabled agents and agents without a schedule', () => {
@@ -185,15 +198,18 @@ describe('decideBoosts', () => {
         makeProject({ project: 'borged' }),
         makeProject({ project: 'other', status: 'active' }),
         makeProject({ project: 'sleepy', status: 'idle' }),
+        makeProject({ project: 'broken', status: 'error' }),
       ],
       agents: [
         makeAgent({ id: 'a-borged', project: 'borged' }),
         makeAgent({ id: 'a-other', project: 'other' }),
         makeAgent({ id: 'a-sleepy', project: 'sleepy' }),
+        makeAgent({ id: 'a-broken', project: 'broken' }),
       ],
     }));
-    expect(r).toHaveLength(2);
-    expect(r.map((d) => d.project).sort()).toEqual(['borged', 'other']);
+    // idle is in the boost set; error is not.
+    expect(r).toHaveLength(3);
+    expect(r.map((d) => d.project).sort()).toEqual(['borged', 'other', 'sleepy']);
   });
 
   it('returns nothing when maxBoostsPerHour is zero (kill switch via setting)', () => {

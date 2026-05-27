@@ -565,12 +565,45 @@ const isReviewRunning = (projectName: string) => !!runtime[projectName]?.hasRunn
                 {/* Status */}
                 <td className="px-4 py-2">
                   <div className="flex flex-wrap items-center gap-1.5">
-                    {runningCount > 0 && (
-                      <span title={runningKinds.join(', ')} className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded text-xs font-medium bg-accent/15 text-accent border border-accent/30">
-                        <Spinner size="lg" color="accent" shrink />
-                        {runningCount > 1 ? `${runningCount} running` : 'running'}
-                      </span>
-                    )}
+                    {(() => {
+                      const hasRelease = !!projectRuntime?.hasRunningRelease
+                      const releaseStartedAt = projectRuntime?.lastJob?.kind === 'release'
+                        && projectRuntime?.lastJob?.status === 'running'
+                        ? projectRuntime.lastJob.startedAt
+                        : null
+                      const releaseAgeMs = releaseStartedAt ? Date.now() - releaseStartedAt * 1000 : 0
+                      const isStuck = hasRelease && releaseAgeMs > 30 * 60 * 1000
+                      const agentNames = projectRuntime?.runningAgentNames ?? []
+                      const hasAgent = agentNames.length > 0
+                      return (
+                        <>
+                          {isStuck && (
+                            <span title={`Release running ${Math.round(releaseAgeMs / 60000)}m — operator should check`} className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded text-xs font-medium bg-status-error/10 text-status-error border border-status-error/30 animate-pulse">
+                              <StatusDot ok={false} />
+                              stuck
+                            </span>
+                          )}
+                          {hasRelease && !isStuck && (
+                            <span title={runningKinds.join(', ')} className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded text-xs font-medium bg-status-warning/10 text-status-warning border border-status-warning/30">
+                              <Spinner size="lg" color="current" shrink />
+                              releasing
+                            </span>
+                          )}
+                          {!hasRelease && hasAgent && (
+                            <span title={agentNames.join(', ')} className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded text-xs font-medium bg-accent/15 text-accent border border-accent/30">
+                              <Spinner size="lg" color="accent" shrink />
+                              {agentNames.length > 1 ? `${agentNames.length} agents` : 'agent'} running
+                            </span>
+                          )}
+                          {!hasRelease && !hasAgent && runningCount > 0 && (
+                            <span title={runningKinds.join(', ')} className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded text-xs font-medium bg-accent/15 text-accent border border-accent/30">
+                              <Spinner size="lg" color="accent" shrink />
+                              {runningCount > 1 ? `${runningCount} running` : 'running'}
+                            </span>
+                          )}
+                        </>
+                      )
+                    })()}
                     {project.status === 'error' && (
                       <span className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded text-xs font-medium bg-status-error/10 text-status-error border border-status-error/30">
                         <StatusDot ok={false} />

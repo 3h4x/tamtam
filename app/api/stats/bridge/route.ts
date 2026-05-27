@@ -22,7 +22,10 @@ import { computeGlobalPace, type GlobalPace } from '@/lib/usage/quota-pace';
 
 export type BridgeProjectStatus =
   | 'releasing'
+  | 'stuck'
+  | 'agent_running'
   | 'paused'
+  | 'error'
   | 'attention'
   | 'shipping'
   | 'active'
@@ -55,6 +58,9 @@ export interface BridgeResponse {
     projects: number;
     agentsEnabled: number;
     shipping: number;
+    stuck: number;
+    agent_running: number;
+    error: number;
     attention: number;
     releasing: number;
     paused: number;
@@ -71,13 +77,18 @@ const SHIP_WINDOW_MS = 2 * 60 * 60 * 1000;
 const ACTIVE_WINDOW_MS = 60 * 60 * 1000;
 const CACHE_TTL_MS = 15_000;
 const STATUS_SORT_RANK = {
-  attention: 0,
-  paused: 1,
-  releasing: 2,
-  shipping: 3,
-  active: 4,
-  idle: 5,
+  stuck: 0,
+  error: 1,
+  attention: 2,
+  paused: 3,
+  releasing: 4,
+  agent_running: 5,
+  shipping: 6,
+  active: 7,
+  idle: 8,
 } satisfies Record<BridgeProjectStatus, number>;
+// A release in flight longer than this is "stuck" — operator should look.
+const STUCK_RELEASE_MS = 30 * 60 * 1000;
 
 let cache: { body: BridgeResponse; expiresAt: number } | null = null;
 
@@ -88,6 +99,8 @@ interface ProjectAccum {
   lastReleaseOk: boolean | null;
   lastAgentAt: number | null;
   releaseRunning: boolean;
+  releaseStartedAt: number | null;
+  agentRunning: boolean;
 }
 
 function emptyAccum(): ProjectAccum {
@@ -98,14 +111,29 @@ function emptyAccum(): ProjectAccum {
     lastReleaseOk: null,
     lastAgentAt: null,
     releaseRunning: false,
+    releaseStartedAt: null,
+    agentRunning: false,
   };
 }
 
-function deriveStatus(p: BridgeProject, now: number): BridgeProjectStatus {
-  if (p.releaseRunning) return 'releasing';
+function deriveStatus(p: BridgeProject, now: number, a: ProjectAccum): BridgeProjectStatus {
+  // Stuck release takes precedence (release running too long)
+  if (p.releaseRunning && a.releaseStartedAt != null && (now - a.releaseStartedAt * 1000) > STUCK_RELEASE_MS) {
+    return 'stuck';
+  }
+  // Active release takes precedence over paused
+  if (p.releaseRunning) {
+    return 'releasing';
+  }
+  // Paused (only if not releasing)
   if (p.paused) return 'paused';
+  // Failed operations (both push and release)
   if (p.lastReleaseOk === false || p.lastPushOk === false) return 'attention';
+  // Active agent run
+  if (a.agentRunning) return 'agent_running';
+  // Recent push (shipping)
   if (p.lastPushAt != null && now - p.lastPushAt * 1000 < SHIP_WINDOW_MS) return 'shipping';
+  // Recent agent run (active)
   if (p.lastAgentAt != null && now - p.lastAgentAt * 1000 < ACTIVE_WINDOW_MS) return 'active';
   return 'idle';
 }
@@ -165,6 +193,9 @@ export async function GET() {
     } else if (j.kind === 'release') {
       if (j.finishedAt === null) {
         a.releaseRunning = true;
+        if (a.releaseStartedAt === null || j.startedAt < a.releaseStartedAt) {
+          a.releaseStartedAt = j.startedAt;
+        }
       } else if (a.lastReleaseAt === null || j.finishedAt > a.lastReleaseAt) {
         a.lastReleaseAt = j.finishedAt;
         a.lastReleaseOk = j.exitCode === 0;
@@ -173,6 +204,7 @@ export async function GET() {
       if (a.lastAgentAt === null || j.startedAt > a.lastAgentAt) {
         a.lastAgentAt = j.startedAt;
       }
+      if (j.finishedAt === null) a.agentRunning = true;
     }
   }
 
@@ -196,7 +228,7 @@ export async function GET() {
         lastReleaseOk: a.lastReleaseOk,
         lastAgentAt: a.lastAgentAt,
       };
-      proj.status = deriveStatus(proj, now);
+      proj.status = deriveStatus(proj, now, a);
       return proj;
     })
     .sort((x, y) => {
@@ -225,6 +257,9 @@ export async function GET() {
     projects: projects.length,
     agentsEnabled: Array.from(agentCount.values()).reduce((s, n) => s + n, 0),
     shipping: projects.filter((p) => p.status === 'shipping').length,
+    stuck: projects.filter((p) => p.status === 'stuck').length,
+    agent_running: projects.filter((p) => p.status === 'agent_running').length,
+    error: projects.filter((p) => p.status === 'error').length,
     attention: projects.filter((p) => p.status === 'attention').length,
     releasing: projects.filter((p) => p.status === 'releasing').length,
     paused: projects.filter((p) => p.status === 'paused').length,

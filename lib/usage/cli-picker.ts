@@ -153,7 +153,20 @@ export function pickCliProvider(opts: PickCliOptions): PickCliResult {
     // with 5 days left (0.29pp/h) by ~5×. Headroom/100 stays as a sub-point
     // tiebreak so providers with effectively zero budget still lose.
     const urgency = paceMargin / hoursLeft;
-    const score = urgency * 1000 + headroom / 100;
+    // Near-cap penalty: when a provider's 5h window is *projected* to land
+    // above 80% of its quota at end-of-window, taper the score so traffic
+    // shifts to the other provider before we slam into the hard budget
+    // block. Penalty grows linearly to ~full-urgency-cancel at 95%.
+    // Projected = current_util × (100 / elapsedPct).
+    const fiveHourUtil = snapshot?.fiveHour?.utilization ?? 0;
+    const fiveHourElapsed = snapshot?.fiveHour
+      ? Math.max(1, (1 - (snapshot.fiveHour.msUntilReset ?? 1) / (5 * 60 * 60 * 1000)) * 100)
+      : 100;
+    const fiveHourProjected = fiveHourUtil * (100 / fiveHourElapsed);
+    const nearCapPenalty = fiveHourProjected > 80
+      ? Math.min(1, (fiveHourProjected - 80) / 15) * urgency
+      : 0;
+    const score = (urgency - nearCapPenalty) * 1000 + headroom / 100;
     if (score > bestScore) {
       bestProvider = provider;
       bestScore = score;
