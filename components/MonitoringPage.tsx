@@ -8,6 +8,7 @@ import type { Pm2LogData } from '@/components/monitoring/Pm2LogPanel'
 import { SchedulerHealthPanel } from '@/components/monitoring/SchedulerHealthPanel'
 import { OverviewTab } from '@/components/monitoring/OverviewTab'
 import { InfraTab } from '@/components/monitoring/InfraTab'
+import { StatusDot } from '@/components/monitoring/shared'
 import { StandardTabs } from '@/components/ui/StandardTabs'
 import type { StandardTabItem } from '@/components/ui/StandardTabs'
 
@@ -22,12 +23,6 @@ interface ReadinessData {
   status: string
   ok: boolean
   checks: ReadinessCheck[]
-}
-
-function StatusDot({ ok }: { ok: boolean }) {
-  return (
-    <span className={`inline-block w-2 h-2 rounded-full shrink-0 ${ok ? 'bg-status-success' : 'bg-status-error'}`} />
-  )
 }
 
 function TabBadge({ count, variant }: { count: number; variant: 'error' | 'warn' | 'ok' }) {

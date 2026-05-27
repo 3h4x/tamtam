@@ -3,12 +3,7 @@
 import type { MonitoringData, TimeWindow } from './types'
 import { WINDOW_LABELS } from './types'
 import type { Pm2LogData } from './Pm2LogPanel'
-
-function StatusDot({ ok }: { ok: boolean }) {
-  return (
-    <span className={`inline-block w-2 h-2 rounded-full shrink-0 ${ok ? 'bg-status-success' : 'bg-status-error'}`} />
-  )
-}
+import { StatusDot } from './shared'
 
 function formatBytes(bytes: number): string {
   if (bytes < 1024) return `${bytes} B`
