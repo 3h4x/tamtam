@@ -42,6 +42,7 @@ function withTestDbAndStubs(opts: {
   legacyAgentDrainFlagEnabled?: boolean;
   getJobKind?: string;
   getJobExitCode?: number;
+  getJobFinishedAt?: number | null;
 } = {}) {
   const dispatchReleaseAfterRun = vi.fn().mockImplementation(async (job: { id: string }) => ({
     dispatched: opts.dispatchedFor ? opts.dispatchedFor(job.id) : true,
@@ -60,6 +61,7 @@ function withTestDbAndStubs(opts: {
       kind: opts.getJobKind ?? 'run',
       project: 'proj',
       exitCode: opts.getJobExitCode ?? 0,
+      finishedAt: 'getJobFinishedAt' in opts ? opts.getJobFinishedAt : 123,
       ghIssueNumber: null,
     }),
   }));
@@ -181,6 +183,25 @@ describe('consumeJobCompletionEvents', () => {
     expect(dispatchReleaseAfterRun).not.toHaveBeenCalled();
   });
 
+  it('routes failed events using the durable event exit code even when the cached job is stale', async () => {
+    const { maybeAutoResume, dispatchReleaseAfterRun } = withTestDbAndStubs({
+      getJobExitCode: 0,
+      getJobFinishedAt: null,
+    });
+    await insertEvent({ jobId: 'proj-run-stale-cache-fail', exitCode: 1, emittedAt: 456 });
+
+    const { consumeJobCompletionEvents } = await import('@/lib/workflows/triggers/job-completion-router');
+    await consumeJobCompletionEvents();
+
+    expect(maybeAutoResume).toHaveBeenCalledOnce();
+    expect(maybeAutoResume).toHaveBeenCalledWith(expect.objectContaining({
+      id: 'proj-run-stale-cache-fail',
+      exitCode: 1,
+      finishedAt: 456,
+    }));
+    expect(dispatchReleaseAfterRun).not.toHaveBeenCalled();
+  });
+
   it('skips auto-resume routing while its legacy hook flag is on', async () => {
     const { maybeAutoResume } = withTestDbAndStubs({
       getJobExitCode: 1,
@@ -245,6 +266,24 @@ describe('consumeJobCompletionEvents', () => {
     expect(result.routed).toBe(1);
     expect(dispatchReleaseAfterFixCi).toHaveBeenCalledOnce();
     expect(dispatchReleaseAfterRun).not.toHaveBeenCalled();
+  });
+
+  it('routes successful fix-ci events using the durable event exit code when the cache is stale', async () => {
+    const { dispatchReleaseAfterFixCi } = withTestDbAndStubs({
+      getJobKind: 'fix-ci',
+      getJobExitCode: 1,
+    });
+    await insertEvent({ jobId: 'proj-fix-ci-stale-cache-ok', kind: 'fix-ci', exitCode: 0 });
+
+    const { consumeJobCompletionEvents } = await import('@/lib/workflows/triggers/job-completion-router');
+    const result = await consumeJobCompletionEvents();
+
+    expect(result.routed).toBe(1);
+    expect(dispatchReleaseAfterFixCi).toHaveBeenCalledWith(expect.objectContaining({
+      id: 'proj-fix-ci-stale-cache-ok',
+      kind: 'fix-ci',
+      exitCode: 0,
+    }));
   });
 
   it('skips fix-ci dispatch while its legacy hook flag is on', async () => {

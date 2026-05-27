@@ -1,6 +1,7 @@
 import { unlinkSync, statSync } from 'fs';
 import { lt, and, isNotNull, eq, isNull } from 'drizzle-orm';
 import { db, schema } from '@/lib/db';
+import { isUndefinedTableError } from '@/lib/db/errors';
 import { getSettings } from '@/lib/shared/config';
 
 export interface RetentionConfig {
@@ -78,7 +79,11 @@ function persistRetentionSummary(summary: RetentionSummary): void {
       },
     })
     .execute()
-    .catch(e => console.error('[retention] failed to persist cleanup summary:', e));
+    .catch(e => {
+      if (!isUndefinedTableError(e)) {
+        console.error('[retention] failed to persist cleanup summary:', e);
+      }
+    });
 }
 
 async function readRetentionSummary<T extends RetentionSummary>(key: string): Promise<T | null> {
@@ -90,6 +95,7 @@ async function readRetentionSummary<T extends RetentionSummary>(key: string): Pr
     if (!rows[0]) return null;
     return JSON.parse(rows[0].value) as T;
   } catch (e) {
+    if (isUndefinedTableError(e)) return null;
     console.error('[retention] failed to read cleanup summary:', e);
     return null;
   }

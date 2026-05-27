@@ -13,6 +13,7 @@
 
 import { eq, isNull, asc } from 'drizzle-orm';
 import { db, schema } from '@/lib/db';
+import type { JobData } from '@/lib/jobs/types';
 
 const CONSUMER_TAG = 'job-completion-router';
 
@@ -26,6 +27,18 @@ interface CompletionEventRow {
   ghIssueNumber: number | null;
   emittedAt: number;
   consumedBy: string | null;
+}
+
+function jobFromEvent(cachedJob: JobData, row: CompletionEventRow): JobData {
+  return {
+    ...cachedJob,
+    kind: row.kind,
+    project: row.project,
+    exitCode: row.exitCode,
+    releaseId: row.releaseId,
+    ghIssueNumber: row.ghIssueNumber,
+    finishedAt: row.emittedAt,
+  };
 }
 
 /** One sweep tick: process all unconsumed events oldest-first. Caller is
@@ -75,8 +88,9 @@ async function routeEvent(row: CompletionEventRow): Promise<boolean> {
   if (k === 'run' || isAgentJobKind(row.kind)) {
     const { getSettings } = await import('@/lib/shared/config');
     const { getJob } = await import('@/lib/jobs/job-storage');
-    const job = getJob(row.jobId);
-    if (!job) return false;
+    const cachedJob = getJob(row.jobId);
+    if (!cachedJob) return false;
+    const job = jobFromEvent(cachedJob, row);
     let didSomething = false;
     // Failure path first: auto-resume runs whether or not anything else
     // happens. Returns early — we don't run release-after-run on failures.
@@ -130,8 +144,9 @@ async function routeEvent(row: CompletionEventRow): Promise<boolean> {
     const { getSettings } = await import('@/lib/shared/config');
     if (getSettings().legacy_completion_hook_release_after_fix_ci_enabled) return false;
     const { getJob } = await import('@/lib/jobs/job-storage');
-    const job = getJob(row.jobId);
-    if (!job) return false;
+    const cachedJob = getJob(row.jobId);
+    if (!cachedJob) return false;
+    const job = jobFromEvent(cachedJob, row);
     const { dispatchReleaseAfterFixCi } = await import('@/lib/workflows/triggers/release-after-fix-ci');
     const out = await dispatchReleaseAfterFixCi(job);
     return out.dispatched;

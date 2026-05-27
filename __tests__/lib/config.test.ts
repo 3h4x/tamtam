@@ -323,6 +323,23 @@ describe('config', () => {
       expect(process.env.LMSTUDIO_MODEL).toBe('gemma-4-e4b-uncensored-hauhaucs-aggressive');
     });
 
+    it('clears stale LM Studio model env when the settings table is missing', async () => {
+      await setSetting('lmstudio_model', 'gemma-4-e4b-uncensored-hauhaucs-aggressive');
+      await refresh();
+      expect(process.env.LMSTUDIO_MODEL).toBe('gemma-4-e4b-uncensored-hauhaucs-aggressive');
+
+      await sharedHandle.db.execute(sql.raw('DROP TABLE settings'));
+      try {
+        await refresh();
+
+        const config = getSettings();
+        expect(config.lmstudio_model).toBe('');
+        expect(process.env.LMSTUDIO_MODEL).toBeUndefined();
+      } finally {
+        await applyDdl(sharedHandle);
+      }
+    });
+
     it('infers provider from an existing shim path', async () => {
       await setSetting('claude_bin', '/opt/tamtam/scripts/lmstudio-shim.js');
       await refresh();
