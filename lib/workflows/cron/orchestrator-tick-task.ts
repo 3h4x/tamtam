@@ -35,6 +35,13 @@ export interface OrchestratorTickDeps {
     globalPace: {
       status: 'under_pace' | 'on_pace' | 'over_pace' | 'paused' | 'unknown';
       marginPct: number;
+      /** Per-provider per-window pace breakdown. Used to extract the 7-day
+       *  weekly margin so the orchestrator keeps boosting past short-window
+       *  catch-up until the weekly deficit closes. */
+      providers?: Array<{
+        provider: string;
+        sevenDay?: { paceMarginPct?: number; status?: string } | null;
+      }>;
     };
     projects: Array<{
       project: string;
@@ -101,8 +108,22 @@ export async function handleOrchestratorTick(
       ]);
       const pruned = pruneBoostHistory(getHistory(), nowMs);
       setHistory(pruned);
+      // Pull the largest weekly (7d) margin across providers — the binding
+      // globalPace only reflects the tightest window, so a 5h "on_pace" hides
+      // an underspent week. We must catch up before the weekly reset, so
+      // expose this to the allocator as a separate boost gate.
+      const weeklyMarginPct = (bridge.globalPace.providers ?? []).reduce<number>((max, p) => {
+        const m = p.sevenDay?.paceMarginPct;
+        if (typeof m !== 'number' || !isFinite(m)) return max;
+        if (p.sevenDay?.status === 'unknown') return max;
+        return m > max ? m : max;
+      }, -Infinity);
       decisions = decideBoosts({
-        pace: bridge.globalPace,
+        pace: {
+          status: bridge.globalPace.status,
+          marginPct: bridge.globalPace.marginPct,
+          weeklyMarginPct: isFinite(weeklyMarginPct) ? weeklyMarginPct : undefined,
+        },
         projects: bridge.projects,
         agents,
         history: pruned,

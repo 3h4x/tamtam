@@ -17,12 +17,18 @@
 // up a worker, database, or HTTP fetch.
 
 export interface BoostPaceInput {
-  /** Bridge's `globalPace.status`. Only `'under_pace'` triggers boosts. */
+  /** Bridge's `globalPace.status` on the *binding* (tightest) window. */
   status: 'under_pace' | 'on_pace' | 'over_pace' | 'paused' | 'unknown';
   /** Bridge's `globalPace.marginPct`: how many percentage points the binding
    *  provider has between elapsed-time and projected utilization. Higher
    *  margin = more headroom = safer to boost. */
   marginPct: number;
+  /** Max `paceMarginPct` across every enabled provider's 7-day window.
+   *  Positive means we're behind on weekly burn even if the short (5h) window
+   *  has caught up. The orchestrator must over-shoot the short-window pace to
+   *  recover this deficit before the weekly reset, so boosts continue while
+   *  this is above the configured floor — even when `status` is `'on_pace'`. */
+  weeklyMarginPct?: number;
 }
 
 export interface BoostProjectInput {
@@ -114,9 +120,15 @@ const SEVERELY_UNDER_STATUSES = new Set([
 export function decideBoosts(input: BoostInput): BoostDecision[] {
   const now = input.nowMs ?? Date.now();
 
-  if (input.pace.status !== 'under_pace') return [];
-  if (input.pace.marginPct < input.settings.marginPct) return [];
   if (input.settings.maxBoostsPerHour <= 0) return [];
+  // Effective margin = whichever window has more headroom. The short window
+  // catches up first; the 7-day weekly window lags. We must keep firing while
+  // EITHER signal shows headroom above the floor, so the weekly deficit
+  // actually closes instead of staying behind forever.
+  const weeklyMargin = input.pace.weeklyMarginPct ?? 0;
+  const shortMargin = input.pace.status === 'under_pace' ? input.pace.marginPct : -Infinity;
+  const effectiveMargin = Math.max(shortMargin, weeklyMargin);
+  if (effectiveMargin < input.settings.marginPct) return [];
 
   const agentsByProject = new Map<string, BoostAgentInput[]>();
   for (const agent of input.agents) {
@@ -132,7 +144,7 @@ export function decideBoosts(input: BoostInput): BoostDecision[] {
   }
 
   const decisions: BoostDecision[] = [];
-  const severelyUnderPace = (input.pace.marginPct - input.settings.marginPct) >= SEVERELY_UNDER_PACE_PP;
+  const severelyUnderPace = (effectiveMargin - input.settings.marginPct) >= SEVERELY_UNDER_PACE_PP;
   const allowedStatuses = severelyUnderPace ? SEVERELY_UNDER_STATUSES : BOOSTABLE_PROJECT_STATUSES;
   for (const project of input.projects) {
     if (project.paused) continue;
@@ -168,7 +180,7 @@ export function decideBoosts(input: BoostInput): BoostDecision[] {
     // moves. `picksThisTick` grows with the headroom: 1 agent at the
     // threshold, +1 per additional 10pp of margin, capped at 5 picks per
     // project per tick (and bounded by the rate-limit budget below).
-    const slack = Math.max(0, input.pace.marginPct - input.settings.marginPct);
+    const slack = Math.max(0, effectiveMargin - input.settings.marginPct);
     const desiredPicks = Math.min(5, 1 + Math.floor(slack / 10));
     const budgetLeft = Math.max(0, input.settings.maxBoostsPerHour - recent.length);
     const picksThisTick = Math.min(desiredPicks, budgetLeft, ranked.length);
@@ -178,7 +190,7 @@ export function decideBoosts(input: BoostInput): BoostDecision[] {
         project: project.project,
         agentId: pick.id,
         agentName: pick.name,
-        reason: `pace under by ${input.pace.marginPct}pp; ${project.status} project; pick ${i + 1}/${picksThisTick}`,
+        reason: `pace headroom ${effectiveMargin}pp (short=${input.pace.marginPct}, weekly=${weeklyMargin}); ${project.status} project; pick ${i + 1}/${picksThisTick}`,
       });
     }
   }
