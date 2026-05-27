@@ -782,7 +782,7 @@ export async function registerNode(): Promise<void> {
               }
               return null;
             },
-            startAgentRun: async (agent) => {
+            startAgentRun: async (agent, modelOverride) => {
               // Mirror the UI's "Run" button: POST { prompt } to the agent
               // run route. The route requires a body prompt (or skill list)
               // and rejects with 400 otherwise. The agent's own prompt is
@@ -794,12 +794,18 @@ export async function registerNode(): Promise<void> {
               // disabled/no-schedule agents). Cron also runs prereqSkipReason
               // before this call, so most of those skips fire there first;
               // the header is the safety net.
+              //
+              // `model` body field is set on orchestrator boost fires when
+              // the allocator decided to promote the tier — the route reads
+              // it and uses it in place of the agent's stored model.
               const baseUrl = process.env.TAMTAM_BASE_URL ?? 'http://localhost:1337';
               const prompt = agent.prompt?.trim() || `Run agent ${agent.name}`;
+              const body: Record<string, unknown> = { prompt };
+              if (modelOverride) body.model = modelOverride;
               const res = await fetch(`${baseUrl}/api/agents/${encodeURIComponent(agent.id)}/run`, {
                 method: 'POST',
                 headers: { 'content-type': 'application/json', 'x-tamtam-trigger': 'schedule' },
-                body: JSON.stringify({ prompt }),
+                body: JSON.stringify(body),
               });
               if (!res.ok) {
                 console.warn(`[cron] agent ${agent.id} run POST returned ${res.status}`);
@@ -925,11 +931,11 @@ export async function registerNode(): Promise<void> {
                 kind: a.kind,
               }));
             },
-            enqueueAgentFire: async (agentId, runAt) => {
+            enqueueAgentFire: async (agentId, runAt, modelOverride) => {
               await quickAddJob(
                 { connectionString },
                 'agent-cron',
-                { agentId },
+                modelOverride ? { agentId, modelOverride } : { agentId },
                 { jobKey: `agent-cron-${agentId}`, jobKeyMode: 'replace', runAt, maxAttempts: 5 },
               );
             },

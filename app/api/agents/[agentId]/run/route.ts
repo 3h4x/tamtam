@@ -16,7 +16,7 @@ import { getDirtyFileCount } from '@/lib/git/dirty-worktree';
 import { parseFileAgentId, loadFileAgent } from '@/lib/agents/tamtam-file-agents';
 import { isProjectPaused } from '@/lib/shared/enabled-projects';
 import { getSettings } from '@/lib/shared/config';
-import { normalizeModelInput } from '@/lib/agents/model-aliases';
+import { normalizeModelInput, parseOptionalKnownModelInput, type ModelTier } from '@/lib/agents/model-aliases';
 import { enqueueAgentRun, tryClaimAgentStartSlot, releaseAgentStartSlot, drainNextAgentRun } from '@/lib/agents/pending-agent-run';
 import { findBlockingRunningJob } from '@/lib/jobs/project-active-job';
 import { checkCliStartGate } from '@/lib/usage/resolve-provider';
@@ -84,6 +84,12 @@ export async function POST(
   const body = await request.json();
   const taskPrompt = body.prompt?.trim() ?? '';
   const readOnly = body.readOnly === true;
+  // Optional caller-supplied model override. Orchestrator boost fires set
+  // `model` after deciding to promote the tier for this run.
+  const { model: bodyModelOverride, error: modelError } = parseOptionalKnownModelInput(body.model, 'normal');
+  if (modelError) {
+    return NextResponse.json({ detail: modelError }, { status: 400 });
+  }
   if (agent.kind === 'system') {
     const result = await runSystemAgentStart(agent);
     return result.response;
@@ -139,6 +145,7 @@ export async function POST(
         agentName: agent.name,
         triggeredBy,
         prompt: taskPrompt,
+        modelOverride: bodyModelOverride,
         enqueuedAt: Date.now(),
       });
     } catch (err) {
@@ -201,6 +208,7 @@ export async function POST(
         agentName: agent.name,
         triggeredBy,
         prompt: taskPrompt,
+        modelOverride: bodyModelOverride ?? undefined,
         enqueuedAt: Date.now(),
       });
       return NextResponse.json(
@@ -235,6 +243,7 @@ export async function POST(
         agentName: agent.name,
         triggeredBy,
         prompt: taskPrompt,
+        modelOverride: bodyModelOverride ?? undefined,
         enqueuedAt: Date.now(),
       });
       return NextResponse.json(
@@ -264,6 +273,7 @@ export async function POST(
             agentName: agent.name,
             triggeredBy,
             prompt: taskPrompt,
+            modelOverride: bodyModelOverride,
             enqueuedAt: Date.now(),
           });
         } catch (err) {
@@ -328,7 +338,7 @@ export async function POST(
       }
     }
 
-    const result = await runAgentStart(agent, taskPrompt, triggeredBy, readOnly);
+    const result = await runAgentStart(agent, taskPrompt, triggeredBy, readOnly, bodyModelOverride);
     return result.response;
   } finally {
     if (claimedStartSlot) {
@@ -396,6 +406,7 @@ async function runAgentStart(
   taskPrompt: string,
   triggeredBy: string,
   readOnly: boolean,
+  modelOverride: ModelTier | null = null,
 ): Promise<{ response: NextResponse; startedJob: boolean }> {
 
   const projPath = resolveProjectPath(agent.project);
@@ -412,7 +423,11 @@ async function runAgentStart(
   const allSkillIds: string[] = JSON.parse(agent.skillIds);
   const docPathsParsed: string[] = JSON.parse(agent.docPaths || '[]');
 
-  const requestedModel = agent.model ? normalizeModelInput(agent.model, 'normal') : null;
+  // Caller's modelOverride (orchestrator boost) wins over the agent's stored
+  // model. The CLI gate, intake workflow, and job record all see this as if
+  // it were the agent's configured model for this run.
+  const effectiveModel = modelOverride ?? (agent.model || null);
+  const requestedModel = effectiveModel ? normalizeModelInput(effectiveModel, 'normal') : null;
   const { logDir } = getImproveConfig();
   const gate = await checkCliStartGate('start an agent run', {
     preferred: agent.provider ?? null,
@@ -469,7 +484,7 @@ async function runAgentStart(
       projPath,
       skillIds: allSkillIds,
       docPaths: docPathsParsed,
-      model: agent.model ?? null,
+      model: effectiveModel,
       taskPrompt,
       triggeredBy,
       provider,

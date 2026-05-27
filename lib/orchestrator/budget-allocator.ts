@@ -80,6 +80,12 @@ export interface BoostDecision {
   agentId: string;
   agentName: string;
   reason: string;
+  /** When set, the orchestrator-boosted fire uses this model tier instead of
+   *  the agent's configured default. The allocator promotes one tier
+   *  (fast→normal, normal→smart, smart→smart) when the weekly deficit is too
+   *  large to close via extra runs alone — bigger models burn more tokens
+   *  per call, multiplying the per-run impact of each boost. */
+  modelOverride?: 'fast' | 'normal' | 'smart';
 }
 
 export interface BoostInput {
@@ -117,6 +123,12 @@ const SEVERELY_UNDER_STATUSES = new Set([
   'attention',
   'agent_running',
 ]);
+// Slack threshold (effective margin - floor) above which boosted runs get a
+// model tier promotion to `smart`. At this much weekly headroom, scheduling
+// more runs alone won't close the gap — each run also needs to burn more
+// tokens, which a stronger model accomplishes by reasoning longer and
+// emitting larger outputs.
+const AGGRESSIVE_CATCHUP_PP = 20;
 
 export function decideBoosts(input: BoostInput): BoostDecision[] {
   const now = input.nowMs ?? Date.now();
@@ -145,7 +157,9 @@ export function decideBoosts(input: BoostInput): BoostDecision[] {
   }
 
   const decisions: BoostDecision[] = [];
-  const severelyUnderPace = (effectiveMargin - input.settings.marginPct) >= SEVERELY_UNDER_PACE_PP;
+  const slackPp = effectiveMargin - input.settings.marginPct;
+  const severelyUnderPace = slackPp >= SEVERELY_UNDER_PACE_PP;
+  const aggressiveCatchup = slackPp >= AGGRESSIVE_CATCHUP_PP;
   const allowedStatuses = severelyUnderPace ? SEVERELY_UNDER_STATUSES : BOOSTABLE_PROJECT_STATUSES;
   for (const project of input.projects) {
     if (project.paused) continue;
@@ -191,7 +205,8 @@ export function decideBoosts(input: BoostInput): BoostDecision[] {
         project: project.project,
         agentId: pick.id,
         agentName: pick.name,
-        reason: `pace headroom ${effectiveMargin}pp (short=${input.pace.marginPct}, weekly=${weeklyMargin}); ${project.status} project; pick ${i + 1}/${picksThisTick}`,
+        reason: `pace headroom ${effectiveMargin}pp (short=${input.pace.marginPct}, weekly=${weeklyMargin}); ${project.status} project; pick ${i + 1}/${picksThisTick}${aggressiveCatchup ? '; model→smart' : ''}`,
+        ...(aggressiveCatchup ? { modelOverride: 'smart' as const } : {}),
       });
     }
   }

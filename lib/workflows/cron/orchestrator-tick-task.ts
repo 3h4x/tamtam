@@ -56,7 +56,11 @@ export interface OrchestratorTickDeps {
   loadAgents: () => Promise<BoostAgentInput[]>;
   /** Enqueue an immediate fire for one agent. The wrapper around
    *  `quickAddJob('agent-cron', ..., { runAt: now })`. */
-  enqueueAgentFire: (agentId: string, runAt: Date) => Promise<void>;
+  enqueueAgentFire: (
+    agentId: string,
+    runAt: Date,
+    modelOverride?: 'fast' | 'normal' | 'smart',
+  ) => Promise<void>;
   /** Self-reenqueue (with key collision = replace). Mirrors the
    *  project-sweep pattern so a restart doesn't kill the chain. */
   enqueueNextFire: (runAt: Date) => Promise<void>;
@@ -135,7 +139,7 @@ export async function handleOrchestratorTick(
       });
       if (decisions.length > 0) {
         await Promise.all(
-          decisions.map((d) => deps.enqueueAgentFire(d.agentId, new Date(nowMs))),
+          decisions.map((d) => deps.enqueueAgentFire(d.agentId, new Date(nowMs), d.modelOverride)),
         );
         setHistory(recordBoosts(pruned, decisions, nowMs));
       }

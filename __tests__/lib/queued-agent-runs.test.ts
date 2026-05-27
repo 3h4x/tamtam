@@ -48,6 +48,7 @@ async function applyDdl(handle: TestDbHandle): Promise<void> {
       agent_name text NOT NULL,
       triggered_by text NOT NULL DEFAULT 'manual',
       prompt text NOT NULL DEFAULT '',
+      model_override text,
       enqueued_at double precision NOT NULL
     )
   `));
@@ -103,7 +104,24 @@ describe('queued-agent-runs', () => {
     expect(rows[0].agentName).toBe('docs');
     expect(rows[0].prompt).toBe('update docs');
     expect(rows[0].triggeredBy).toBe('schedule');
+    expect(rows[0].modelOverride).toBeNull();
     expect(rows[0].enqueuedAt).toBe(1_000_000); // converted back to ms
+  });
+
+  it('preserves model overrides through persisted queue replay', async () => {
+    enqueueQueuedAgentRun('myproject', {
+      project: 'myproject',
+      agentId: 'agent-1',
+      agentName: 'docs',
+      triggeredBy: 'schedule',
+      prompt: 'update docs',
+      modelOverride: 'smart',
+      enqueuedAt: 1_000_000,
+    });
+    await flush();
+
+    const rows = await listQueuedAgentRunsForProject('myproject');
+    expect(rows[0].modelOverride).toBe('smart');
   });
 
   it('is idempotent per project+agentId (upsert updates prompt)', async () => {
@@ -304,6 +322,33 @@ describe('queued-agent-runs', () => {
     await drainQueuedAgentRunsForProject('myproject');
 
     expect(await listQueuedAgentRunsForProject('myproject')).toHaveLength(1);
+    vi.unstubAllGlobals();
+  });
+
+  it('preserves model override in the replay POST body', async () => {
+    enqueueQueuedAgentRun('myproject', {
+      project: 'myproject',
+      agentId: 'agent-1',
+      agentName: 'docs',
+      triggeredBy: 'schedule',
+      prompt: 'run docs',
+      modelOverride: 'smart',
+      enqueuedAt: 1_000,
+    });
+    await flush();
+    const fetchSpy = vi.fn().mockResolvedValue({
+      ok: true,
+      status: 200,
+      text: vi.fn().mockResolvedValue(''),
+    });
+    vi.stubGlobal('fetch', fetchSpy);
+
+    await drainQueuedAgentRunsForProject('myproject');
+
+    expect(JSON.parse(fetchSpy.mock.calls[0][1].body)).toMatchObject({
+      prompt: 'run docs',
+      model: 'smart',
+    });
     vi.unstubAllGlobals();
   });
 

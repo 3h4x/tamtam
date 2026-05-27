@@ -17,6 +17,7 @@ export type QueueEntry = {
   triggeredBy: string;
   prompt: string;
   enqueuedAt: number;
+  modelOverride?: 'fast' | 'normal' | 'smart';
 };
 
 const queues = new Map<string, QueueEntry[]>();
@@ -229,13 +230,15 @@ export async function drainNextAgentRun(project: string): Promise<void> {
   };
   inFlight.add(project);
   try {
+    const body: { prompt: string; model?: 'fast' | 'normal' | 'smart' } = { prompt: next.prompt };
+    if (next.modelOverride) body.model = next.modelOverride;
     const r = await fetch(url, {
       method: 'POST',
       headers: {
         'content-type': 'application/json',
         'x-tamtam-trigger': next.triggeredBy,
       },
-      body: JSON.stringify({ prompt: next.prompt }),
+      body: JSON.stringify(body),
     });
     if (r.status === 202) {
       const body = await r.text().catch(() => '');

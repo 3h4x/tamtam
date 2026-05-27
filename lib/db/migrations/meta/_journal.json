@@ -120,6 +120,13 @@
             "when": 1779866653162,
             "tag": "0016_usage_hourly_snapshot",
             "breakpoints": true
+        },
+        {
+            "idx": 17,
+            "version": "7",
+            "when": 1779891164300,
+            "tag": "0017_queued_agent_model_override",
+            "breakpoints": true
         }
     ]
 }

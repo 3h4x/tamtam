@@ -130,6 +130,25 @@ Persisted dedupe state for outbound webhook throttling.
 
 ---
 
+### `queued_agent_runs`
+
+DB-backed deferred agent runs created when a release pipeline lock or pending release must run before new agent work. Rows are replayed by the recovery drain after the lock clears and survive server restarts.
+
+| Column | Type | Default | Notes |
+|--------|------|---------|-------|
+| `id` | SERIAL | — | PRIMARY KEY |
+| `project` | TEXT | — | owning project |
+| `agentId` | TEXT | — | deferred agent id |
+| `agentName` | TEXT | — | display name at queue time |
+| `triggeredBy` | TEXT | `manual` | original trigger header value |
+| `prompt` | TEXT | `''` | prompt to replay |
+| `modelOverride` | TEXT | — | nullable canonical per-run model tier (`fast`, `normal`, or `smart`) |
+| `enqueuedAt` | REAL | — | Unix timestamp (seconds) |
+
+Indexes: unique `queued_agent_runs_project_agent` on `(project, agentId)`.
+
+---
+
 ### `job_completion_events`
 
 Durable event log for job-completion trigger migration. Rows are written when a job reaches a terminal state; the probe sweep consumes unhandled rows and dispatches release-after-run, release-after-fix-CI, auto-resume, or queued-agent drain routing when the matching legacy inline hook is disabled.
