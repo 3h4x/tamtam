@@ -2,15 +2,9 @@
 
 import { useState } from 'react'
 import { Button } from '@/components/ui/Button'
-import { SectionHeader } from './shared'
+import { SectionHeader, StatusDot } from './shared'
 import type { MonitoringData, TimeWindow } from './types'
 import { WINDOW_LABELS } from './types'
-
-function StatusDot({ ok }: { ok: boolean }) {
-  return (
-    <span className={`inline-block w-2 h-2 rounded-full shrink-0 ${ok ? 'bg-status-success' : 'bg-status-error'}`} />
-  )
-}
 
 const SUMMARY_TONE_CLASSES = {
   neutral: 'border-border bg-bg-secondary',

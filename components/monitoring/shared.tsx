@@ -1,5 +1,11 @@
 'use client'
 
+export function StatusDot({ ok }: { ok: boolean }) {
+  return (
+    <span className={`inline-block w-2 h-2 rounded-full shrink-0 ${ok ? 'bg-status-success' : 'bg-status-error'}`} />
+  )
+}
+
 export function SectionHeader({ title, status }: { title: string; status: 'ok' | 'unavailable' | 'issue' }) {
   const colors = { ok: 'text-status-success', issue: 'text-status-warning', unavailable: 'text-text-tertiary' }
   return (
