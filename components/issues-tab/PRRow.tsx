@@ -378,8 +378,11 @@ export function PRRow({
               Review
             </Button>
           )}
-          <button
-            className="flex items-center justify-center rounded-md border border-border bg-bg-secondary p-1.5 text-text-secondary hover:bg-bg-tertiary hover:text-text-primary cursor-pointer disabled:opacity-50"
+          <Button
+            type="button"
+            variant="secondary"
+            size="sm"
+            className="h-[26px] w-[26px] justify-center gap-0 !p-0 text-text-secondary"
             onClick={openInTerminal}
             disabled={switchingBranch}
             title={`Open in Terminal (switches to ${pr.headRefName})`}
@@ -392,7 +395,7 @@ export function PRRow({
                 <path d="M2 2.75A.75.75 0 012.75 2h10.5a.75.75 0 01.75.75v10.5a.75.75 0 01-.75.75H2.75a.75.75 0 01-.75-.75V2.75zM3.5 3.5v9h9v-9h-9zm1.85 1.94a.75.75 0 011.06.02l2.25 2.25a.75.75 0 010 1.06l-2.25 2.25a.75.75 0 11-1.06-1.06L7.04 8 5.33 6.25a.75.75 0 01-.02-1.06l.04-.04zM8.5 10h3a.75.75 0 010 1.5h-3a.75.75 0 010-1.5z"/>
               </svg>
             )}
-          </button>
+          </Button>
           <a
             href={pr.url}
             target="_blank"
