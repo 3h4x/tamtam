@@ -133,10 +133,6 @@ function recentFixCiCount(projectName: string, windowSeconds: number): number {
   ).length;
 }
 
-// Cap auto-fix-from-push retries so a stubbornly-broken lint rule can't spin
-// Claude in a loop. Counts fix jobs spawned from a parent push within the
-// configured step window. Same 30min window as review-fix for consistency.
-const MAX_PUSH_FIX_ATTEMPTS = getPushFixAttemptCap();
 
 function parseJsonObject(value: string | null | undefined): Record<string, unknown> {
   if (!value) return {};
@@ -1264,8 +1260,8 @@ async function runCompletionHooksInner(job: JobData): Promise<void> {
   // pre-commit / pre-push hook (husky/eslint/lint-staged), spawn a generic
   // fix job that reads the hook error from the push log and edits the code.
   // The downstream `fix → re-push` chain is handled by the fromPushFailure
-  // branch below. Bounded by MAX_PUSH_FIX_ATTEMPTS per window to prevent
-  // infinite loops on a fundamentally-broken lint rule.
+  // branch below. Bounded by the dedicated push-fix cap so the release
+  // wall-clock timeout remains the ultimate stop on stubborn loops.
   if (job.kind === 'push' && job.exitCode !== 0) {
     try {
       const rawLog = readLog(job, 100_000);
@@ -1295,21 +1291,29 @@ async function runCompletionHooksInner(job: JobData): Promise<void> {
         console.log(`[push] pre-push tests failed for ${job.project} — not auto-retrying`);
       } else if (isHookRejection(rawLog)) {
         const attempts = recentFixFromPushCount(job.project);
-        if (attempts < MAX_PUSH_FIX_ATTEMPTS) {
+        const cap = getPushFixAttemptCap();
+        if (attempts < cap) {
+          const { computeFixBackoffSeconds } = await import('@/lib/workflows/dispatch-phase');
+          const { getSettings } = await import('@/lib/shared/config');
+          const backoff = computeFixBackoffSeconds(attempts, getSettings().review_fix_backoff_seconds);
+          if (backoff > 0) {
+            console.log(`[push] hook rejection backoff ${backoff}s before fix attempt ${attempts + 1}`);
+            await new Promise((res) => setTimeout(res, backoff * 1000));
+          }
           const { startFixFromJob } = await import('@/lib/pipeline/start-fix');
           const r = await startFixFromJob(job.id);
           if (r.ok) {
-            console.log(`[push] hook rejection → auto-fix ${r.jobId} (attempt ${attempts + 1}/${MAX_PUSH_FIX_ATTEMPTS})`);
+            console.log(`[push] hook rejection → auto-fix ${r.jobId} (attempt ${attempts + 1}/${cap})`);
             chainedNext = true;
           } else {
             console.log(`[push] hook rejection — could not start fix: ${r.detail}`);
           }
         } else {
-          releaseStopReason = `push fix cap reached for ${job.project} (${attempts}/${MAX_PUSH_FIX_ATTEMPTS}) — push hook failures still need recovery`;
+          releaseStopReason = `push fix cap reached for ${job.project} (${attempts}/${cap}) — push hook failures still need recovery`;
           noteReleaseStop(releaseStopReason);
           notificationEvent = 'fix_loop_exhausted';
           forcedReleaseExitCode = 1;
-          console.log(`[push] hook rejection — fix cap reached (${attempts}/${MAX_PUSH_FIX_ATTEMPTS}) — surfacing error`);
+          console.log(`[push] hook rejection — fix cap reached (${attempts}/${cap}) — surfacing error`);
         }
       }
     } catch (e) {

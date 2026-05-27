@@ -1,4 +1,4 @@
-import { afterEach, describe, expect, it } from 'vitest';
+import { afterEach, describe, expect, it, vi } from 'vitest';
 
 const originalMaxStepIterations = process.env.TAMTAM_MAX_STEP_ITERATIONS;
 const originalLegacyMaxFixIterations = process.env.TAMTAM_MAX_FIX_ITERATIONS;
@@ -43,6 +43,20 @@ describe('recovery-budget helpers', () => {
     const { getStepWindowSeconds, getPushFixAttemptCap } = await import('@/lib/pipeline/recovery-budget');
     expect(getStepWindowSeconds()).toBe(2700);
     expect(getPushFixAttemptCap()).toBe(2);
+  });
+
+  it('keeps push-fix retries finite even when review fix iterations are unlimited', async () => {
+    vi.resetModules();
+    vi.doMock('@/lib/shared/config', () => ({
+      getSettings: () => ({
+        review_fix_max_iterations: 0,
+      }),
+    }));
+
+    const { getPushFixAttemptCap } = await import('@/lib/pipeline/recovery-budget');
+    expect(getPushFixAttemptCap()).toBe(2);
+    vi.doUnmock('@/lib/shared/config');
+    vi.resetModules();
   });
 
   it('falls back to the legacy TAMTAM_FIX_WINDOW_SECONDS when the new alias is unset', async () => {

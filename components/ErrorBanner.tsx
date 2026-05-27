@@ -1,5 +1,7 @@
 'use client'
 
+import { Button } from '@/components/ui/Button'
+
 interface ErrorBannerProps {
   message: string
   onDismiss: () => void
@@ -12,13 +14,15 @@ export function ErrorBanner({ message, onDismiss }: ErrorBannerProps) {
           codebase's monochrome style instead of the colour-emoji default. */}
       <span className="text-lg leading-none">⚠</span>
       <span>{message}</span>
-      <button
+      <Button
+        variant="ghost"
+        size="sm"
         onClick={onDismiss}
-        className="ml-auto bg-transparent border-none p-0 text-inherit cursor-pointer"
+        className="ml-auto border-0 bg-transparent p-0 font-normal text-inherit hover:bg-transparent hover:text-inherit"
         aria-label="Dismiss error"
       >
         &#x2715;
-      </button>
+      </Button>
     </div>
   )
 }

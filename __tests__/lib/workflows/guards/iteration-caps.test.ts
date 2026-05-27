@@ -167,6 +167,22 @@ describe('checkIterationCap', () => {
     expect((r.rewritten as { stopReason: string }).stopReason).toContain('2/2');
   });
 
+  it('keeps push-fix retries finite even when reviewFixMaxIterations is zero', () => {
+    const push1 = makeJob({ id: 'p1', kind: 'push', releaseId: 'r1' });
+    const fix1 = makeJob({ id: 'f1', kind: 'fix', releaseId: 'r1', parentJobId: 'p1' });
+    const push2 = makeJob({ id: 'p2', kind: 'push', releaseId: 'r1' });
+    const fix2 = makeJob({ id: 'f2', kind: 'fix', releaseId: 'r1', parentJobId: 'p2', exitCode: 0 });
+    const decision: NextPhase = { next: 'push', from: 'fix' };
+    const deps = {
+      ...baseDeps([push1, fix1, push2, fix2]),
+      reviewFixMaxIterations: () => 0,
+    };
+    const r = checkIterationCap(fix2, decision, deps);
+    expect(r.rewritten).toMatchObject({ next: 'abort' });
+    expect((r.rewritten as { stopReason: string }).stopReason).toContain('push fix cap reached');
+    expect((r.rewritten as { stopReason: string }).stopReason).toContain('2/2');
+  });
+
   it('uses maxStepIterations when fix→push and fix parent is NOT a push', () => {
     const review1 = makeJob({ id: 'rev1', kind: 'review', releaseId: 'r1' });
     const fix1 = makeJob({ id: 'f1', kind: 'fix', releaseId: 'r1', parentJobId: 'rev1', exitCode: 0 });

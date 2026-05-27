@@ -20,6 +20,7 @@ function makeAgent(overrides: Partial<BoostAgentInput> = {}): BoostAgentInput {
     enabled: true,
     schedule: '15m',
     lastDispatchMs: null,
+    kind: 'user',
     ...overrides,
   };
 }
@@ -121,6 +122,17 @@ describe('decideBoosts', () => {
       agents: [makeAgent({ lastDispatchMs: NOW - 2 * 60 * 1000 })],
     }));
     expect(r).toEqual([]);
+  });
+
+  it('still boosts an agent whose prior real dispatch is outside the cooldown even if it was queued later', () => {
+    const r = decideBoosts(makeInput({
+      agents: [
+        makeAgent({ id: 'a-queued', name: 'queued-later', lastDispatchMs: NOW - 10 * 60 * 1000 }),
+        makeAgent({ id: 'a-recent', name: 'recent', lastDispatchMs: NOW - 2 * 60 * 1000 }),
+      ],
+    }));
+    expect(r).toHaveLength(1);
+    expect(r[0].agentId).toBe('a-queued');
   });
 
   it('picks the agent with the oldest lastDispatchMs', () => {

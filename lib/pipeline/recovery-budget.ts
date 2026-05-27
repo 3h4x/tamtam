@@ -48,9 +48,9 @@ export function getReviewDoNotShipAction(): ReviewDoNotShipAction {
 }
 
 /** Cap on automatic fix attempts triggered by repeated push hook rejections.
- *  Counted per project per `getStepWindowSeconds` window. Higher than 0
- *  because a stubbornly-broken lint rule shouldn't stop the pipeline forever
- *  in a tight loop. */
+ *  Separate from `review_fix_max_iterations`: push-hook retries stay on a
+ *  finite default so the review loop's unlimited setting cannot turn push
+ *  recovery into an unbounded retry chain. */
 export function getPushFixAttemptCap(): number {
   return DEFAULT_PUSH_FIX_ATTEMPTS;
 }

@@ -571,6 +571,18 @@ describe('GET /api/stats/pipeline', () => {
     expect(data.configSnapshot.stepWindowSeconds).toBe(1800);
   });
 
+  it('keeps the push-fix cap finite even when review fix iterations are unlimited', async () => {
+    getSettingsMock.mockReturnValueOnce({
+      review_verdict_rules: 'default rules',
+      commit_style: 'conventional commits',
+      review_fix_max_iterations: 0,
+    });
+
+    const res = await GET(new NextRequest('http://localhost/api/stats/pipeline'));
+    const data = await res.json();
+    expect(data.configSnapshot.maxPushFixAttempts).toBe(2);
+  });
+
   it('reads maxStepIterations from the shared recovery-budget env alias', async () => {
     process.env.TAMTAM_MAX_STEP_ITERATIONS = '5';
     delete process.env.TAMTAM_MAX_FIX_ITERATIONS;
