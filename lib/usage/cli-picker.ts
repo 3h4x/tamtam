@@ -169,7 +169,7 @@ export function pickCliProvider(opts: PickCliOptions): PickCliResult {
       ? Math.max(1, (1 - (snapshot.fiveHour.msUntilReset ?? 1) / (5 * 60 * 60 * 1000)) * 100)
       : 100;
     const fiveHourProjected = fiveHourUtil * (100 / fiveHourElapsed);
-    const weeklyCatchupMode = paceMargin >= 15;
+    const weeklyCatchupMode = paceMargin >= 15 && fiveHourUtil < budgetBlockAtPct;
     const nearCapPenalty = fiveHourProjected > 80 && !weeklyCatchupMode
       ? Math.min(1, (fiveHourProjected - 80) / 15) * urgency
       : 0;

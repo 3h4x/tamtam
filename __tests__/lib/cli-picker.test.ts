@@ -463,13 +463,13 @@ describe('pickCliProvider', () => {
       };
     }
 
-    it('suppresses the 5h near-cap penalty when paceMargin >= 15pp so the behind provider keeps getting traffic', () => {
-      // claude: paceMargin = 50 - 35 = 15 (catchup mode), 5h projected = 95 (above 80, penalty would normally apply)
+    it('suppresses the 5h near-cap penalty below the block line when paceMargin >= 15pp so the behind provider keeps getting traffic', () => {
+      // claude: paceMargin = 50 - 35 = 15 (catchup mode), 5h projected = 85 (above 80, penalty would normally apply)
       // codex:  paceMargin = 50 - 40 = 10, 5h fresh (no penalty)
       // With suppression, claude's score = (15/84)*1000; codex's = (10/84)*1000 → claude wins.
       const claudeSnap = makeSnap({
         provider: 'claude',
-        fiveHourUtil: 95,
+        fiveHourUtil: 85,
         fiveHourMsUntilReset: 0,
         sevenDayUtil: 35,
         sevenDayMsUntilReset: 3.5 * 24 * 60 * 60 * 1000,
@@ -492,6 +492,37 @@ describe('pickCliProvider', () => {
         blockEnabled: true,
       });
       expect(result.provider).toBe('claude');
+    });
+
+    it('does not let weekly catch-up override an exhausted 5h window', () => {
+      // Mirrors a live failure mode: Claude's weekly window needs catch-up and
+      // resets soon, but its 5h window is already full; Codex has much more
+      // immediate headroom and should receive the next root run.
+      const claudeSnap = makeSnap({
+        provider: 'claude',
+        fiveHourUtil: 100,
+        fiveHourMsUntilReset: 1.9 * 60 * 60 * 1000,
+        sevenDayUtil: 71,
+        sevenDayMsUntilReset: 15.9 * 60 * 60 * 1000,
+      });
+      const codexSnap = makeSnap({
+        provider: 'codex',
+        fiveHourUtil: 8,
+        fiveHourMsUntilReset: 5.5 * 60 * 1000,
+        sevenDayUtil: 17,
+        sevenDayMsUntilReset: 75.1 * 60 * 60 * 1000,
+      });
+      const snapshots = new Map<CliProvider, QuotaSnapshot | null>([
+        ['codex', codexSnap],
+        ['claude', claudeSnap],
+      ]);
+      const result = pickCliProvider({
+        enabled: ['codex', 'claude'],
+        snapshots,
+        budgetBlockAtPct: 95,
+        blockEnabled: false,
+      });
+      expect(result.provider).toBe('codex');
     });
 
     it('applies the 5h near-cap penalty when paceMargin < 15pp so traffic shifts away from a saturating provider', () => {

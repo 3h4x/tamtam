@@ -76,7 +76,7 @@ TamTam is a single Next.js 16 (App Router) application backed by Postgres. The N
 
 ## Getting started
 
-TamTam requires Node.js 24.x. The repo pins that version in [`.nvmrc`](.nvmrc) and enforces the same major via `package.json` `engines`.
+TamTam is developed against Node.js 24.x. The repo pins that version in [`.nvmrc`](.nvmrc); `package.json` `engines` allows Node.js `>=24 <26`.
 
 ```bash
 nvm use               # or install Node.js 24.x with your preferred version manager
@@ -144,7 +144,7 @@ LOKI_URL=...           # Loki base URL for log monitoring (default: http://local
 
 Skills are reusable instruction blocks injected into agent prompts. Two sources:
 
-- **DB-backed** — create and edit via `/skills`
+- **DB-backed** — create and edit via `/library?tab=skills` (`/skills` redirects there)
 - **File-based** — auto-scanned from `skills/docs/skills/` (vendored curated library) and `data/skills/` personas; any `.md` file in a category subdirectory, with optional YAML frontmatter (`title`, `description`)
 
 Agents are built by selecting a model, writing a prompt, and attaching any number of skills and project docs. Agents can also pin a provider or prerequisite command. At run time, attached content is prepended to the prompt before the configured provider sees it.

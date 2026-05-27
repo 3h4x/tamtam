@@ -52,14 +52,14 @@ async function loadReviewPrompt(projectName: string, projPath: string): Promise<
   const frameworks = detectReviewFrameworks(projPath);
   content = filterReviewFrameworkSections(content, frameworks);
   const { review_verdict_rules } = getSettings();
-  let reviewPromptAddendum: string | null = null;
-  try {
-    reviewPromptAddendum = (await getProjectPipelinePrompts(projectName)).reviewPromptAddendum;
-  } catch { /* test env without DB */ }
+  const [promptsResult, qaBlock] = await Promise.all([
+    getProjectPipelinePrompts(projectName).catch(() => null),
+    resolveQaTargetBlock(projectName),
+  ]);
+  const reviewPromptAddendum = promptsResult?.reviewPromptAddendum ?? null;
   const addendum = reviewPromptAddendum?.trim()
     ? '\n\n## Project-specific review guidance\n' + reviewPromptAddendum.trim()
     : '';
-  const qaBlock = await resolveQaTargetBlock(projectName);
   const frameworkBlock = formatReviewFrameworksBlock(frameworks);
   return content +
     '\n\n---\n\n' +
