@@ -76,9 +76,12 @@ describe('decideBoosts', () => {
     expect(r).toEqual([]);
   });
 
-  it('does not boost while a release is running for the project', () => {
+  it('still boosts while a release is running (parallel agents lifted the old exclusion)', () => {
+    // Pre-existing test asserted releaseRunning blocked boosts. The new policy
+    // lets agents run alongside releases — per-project agent serialization
+    // happens at the pending-agent-run layer, not here.
     const r = decideBoosts(makeInput({ projects: [makeProject({ releaseRunning: true })] }));
-    expect(r).toEqual([]);
+    expect(r).toHaveLength(1);
   });
 
   it('only boosts shipping or active project statuses (skips idle/attention/releasing)', () => {

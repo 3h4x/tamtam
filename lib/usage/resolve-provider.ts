@@ -4,7 +4,45 @@ import { jobsPausedResult } from '@/lib/shared/job-control';
 import { getSettings } from '@/lib/shared/config';
 import { getQuotaSnapshots } from '@/lib/usage/quota';
 import { pickCliProvider, hardGateUtilizationFor, type PickCliResult } from '@/lib/usage/cli-picker';
+import type { QuotaSnapshot } from '@/lib/usage/quota-types';
 import { isCliProvider, type CliProvider } from '@/lib/usage/cli-providers';
+
+const PACE_OVERRIDE_URGENCY_PP_PER_HOUR = 1.0;
+
+/** Compute (paceMargin / hoursLeft) for a snapshot's 7d window. Returns 0
+ *  when data is missing. Used as the urgency signal that decides whether to
+ *  override an agent's pinned provider. */
+function urgencyPpPerHour(snapshot: QuotaSnapshot | null): number {
+  if (!snapshot) return 0;
+  const w = snapshot.sevenDay;
+  const reset = w?.msUntilReset;
+  if (typeof reset !== 'number' || !Number.isFinite(reset) || reset <= 0) return 0;
+  const total = 7 * 24 * 60 * 60 * 1000;
+  const elapsedPct = (1 - reset / total) * 100;
+  const util = typeof w?.utilization === 'number' ? w.utilization : 0;
+  const margin = elapsedPct - util;
+  const hoursLeft = reset / (60 * 60 * 1000);
+  return margin / Math.max(1, hoursLeft);
+}
+
+/** Pick the provider with the highest urgency (paceMargin per hour-left) if
+ *  it exceeds the override threshold. Returns null when no provider is in
+ *  "urgent enough to hijack a pinned preference" territory. */
+function pickMostUrgentProvider(
+  snapshots: Map<CliProvider, QuotaSnapshot | null>,
+  enabled: CliProvider[],
+): CliProvider | null {
+  let best: CliProvider | null = null;
+  let bestUrgency = 0;
+  for (const p of enabled) {
+    const u = urgencyPpPerHour(snapshots.get(p) ?? null);
+    if (u > bestUrgency) {
+      best = p;
+      bestUrgency = u;
+    }
+  }
+  return bestUrgency >= PACE_OVERRIDE_URGENCY_PP_PER_HOUR ? best : null;
+}
 
 export interface ResolveProviderOptions {
   /** Inherit from this parent job's `provider` if set (pipeline children). */
@@ -74,6 +112,19 @@ export async function resolveProviderForRun(
     : null;
 
   if (preferred && !settings.budget_block_runs_enabled) {
+    // Pace-aware override: when another enabled provider's 7d window is
+    // running out and far behind expected pace, hijack the preferred pin
+    // so we actually use the budget that's about to expire. See
+    // docs/SETTINGS.md → "Pace-aware provider routing".
+    try {
+      const snapshots = await getQuotaSnapshots(enabled);
+      const urgent = pickMostUrgentProvider(snapshots, enabled);
+      if (urgent && urgent !== preferred) {
+        return { provider: urgent, reason: 'pace_override' };
+      }
+    } catch {
+      /* fall through to preferred */
+    }
     return { provider: preferred };
   }
 

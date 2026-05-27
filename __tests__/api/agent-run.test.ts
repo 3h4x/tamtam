@@ -68,6 +68,7 @@ vi.mock('@/lib/db', () => ({
 vi.mock('workflow/api', () => ({
   start: async (fn: (p: unknown) => Promise<void>, args: unknown[]) => {
     await fn(args[0]);
+    return { runId: 'mock-run-id' };
   },
 }));
 

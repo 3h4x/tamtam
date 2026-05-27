@@ -1,11 +1,10 @@
-// Shared agent-loading helper. Extracted from `reinstallAgents()` in
-// instrumentation-node.ts so the new graphile-cron path
-// (lib/workflows/cron/seed-agent-crons.ts) and the legacy in-memory
-// scheduler can use the same DB + .tamtam/agents/*.md scanning logic.
+// Shared agent-loading helper. Extracted from the retired `reinstallAgents()`
+// boot pass so the graphile-cron path
+// (lib/workflows/cron/seed-agent-crons.ts) can reuse the same DB +
+// .tamtam/agents/*.md scanning logic.
 //
-// When the in-memory scheduler is removed, this helper stays — the
-// graphile cron still needs a way to enumerate enabled scheduled
-// agents at boot.
+// This helper stays because graphile cron still needs a way to enumerate
+// enabled scheduled agents at boot.
 
 import { db, schema } from '@/lib/db';
 import { listEnabledProjects, refreshProjectsCacheSync } from '@/lib/shared/enabled-projects';

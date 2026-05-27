@@ -10,7 +10,6 @@ import {
   YAxis,
   Tooltip,
   ReferenceLine,
-  Legend,
 } from 'recharts'
 
 interface UsageHistoryBucket {
