@@ -14,6 +14,7 @@ import { WorkflowRunsEmptyState, WorkflowRunsLoadingState } from '@/components/w
 import { WorkflowStatusBadge } from '@/components/workflow-runs/workflow-run-status';
 import { Button } from '@/components/ui/Button';
 import { StandardTabs } from '@/components/ui/StandardTabs';
+import { Table, type Column } from '@/components/ui/Table';
 
 interface WorkflowRunSummary {
   id: string;
@@ -388,6 +389,72 @@ export function WorkflowRunsPage() {
         finishedTitle: formatTime(run.completedAt ?? run.startedAt ?? run.createdAt),
       };
     });
+  const workflowRunColumns: Column<WorkflowRunSummary>[] = [
+    {
+      key: 'workflow',
+      label: 'Workflow',
+      cellClass: 'max-w-[260px] font-mono text-xs text-text-primary',
+      cellTitle: (r) => r.rawName,
+      render: (r) => (
+        <div className="flex min-w-0 items-center gap-2">
+          <WorkflowStatusBadge status={r.status} />
+          <Link href={`/workflow-runs/${encodeURIComponent(r.id)}`} className="min-w-0 truncate hover:underline">
+            {r.name}
+          </Link>
+        </div>
+      ),
+    },
+    {
+      key: 'input',
+      label: 'Project / Args',
+      cellClass: 'max-w-[220px] truncate font-mono text-xs text-text-secondary',
+      cellTitle: (r) => formatTitle(r.input),
+      render: (r) => summarizeInput(r.input),
+    },
+    {
+      key: 'trigger',
+      label: 'Trigger',
+      title: 'Why this run was dispatched — parent job, source job, or trigger source.',
+      headerClass: 'font-medium',
+      cellClass: 'max-w-[240px] truncate font-mono text-xs text-text-tertiary',
+      cellTitle: (r) => formatTitle(r.input),
+      render: (r) => summarizeTrigger(r.input),
+    },
+    {
+      key: 'outcome',
+      label: 'Outcome',
+      title: 'End status with workflow-specific detail: verdict for review, exit code for test/push/commit/fix, error tail for failed.',
+      render: (r) => {
+        const outcome = summarizeOutcome(r);
+        return (
+          <span
+            className={`inline-block rounded border px-2 py-0.5 text-xs ${outcomeBadge(outcome.tone)}`}
+            title={r.error ?? ''}
+          >
+            {outcome.label}
+          </span>
+        );
+      },
+    },
+    {
+      key: 'duration',
+      label: 'Duration',
+      headerClass: 'text-right',
+      cellClass: 'text-right font-mono text-xs text-text-secondary',
+      render: (r) => formatDurationCell(r, now),
+    },
+    {
+      key: 'last-event',
+      label: 'Last event',
+      title: 'Completed time for finished runs, started time for active runs.',
+      cellClass: 'whitespace-nowrap text-xs text-text-secondary',
+      cellTitle: (r) => formatTime(workflowEventTime(r)),
+      render: (r) => {
+        const eventTime = workflowEventTime(r);
+        return formatRelativeTime(eventTime, now);
+      },
+    },
+  ];
 
   return (
     <div className="p-4 sm:p-6">
@@ -523,68 +590,15 @@ export function WorkflowRunsPage() {
             );
           })}
         </div>
-        <div className="hidden overflow-hidden rounded-md border border-border sm:block">
-          <table className="w-full text-sm">
-            <thead className="bg-bg-secondary text-xs uppercase tracking-wide text-text-secondary">
-              <tr>
-                <th className="px-3 py-2 text-left font-medium">Workflow</th>
-                <th className="px-3 py-2 text-left font-medium">Project / Args</th>
-                <th className="px-3 py-2 text-left font-medium" title="Why this run was dispatched — parent job, source job, or trigger source.">Trigger</th>
-                <th className="px-3 py-2 text-left font-medium" title="End status with workflow-specific detail: verdict for review, exit code for test/push/commit/fix, error tail for failed.">Outcome</th>
-                <th className="px-3 py-2 text-right font-medium">Duration</th>
-                <th className="px-3 py-2 text-left font-medium" title="Completed time for finished runs, started time for active runs.">Last event</th>
-              </tr>
-            </thead>
-            <tbody>
-              {filtered.map((r) => {
-                const outcome = summarizeOutcome(r);
-                const eventTime = workflowEventTime(r);
-                return (
-                  <tr
-                    key={r.id}
-                    className="cursor-pointer border-t border-border hover:bg-bg-tertiary/40"
-                    onClick={() => { window.location.href = `/workflow-runs/${encodeURIComponent(r.id)}`; }}
-                  >
-                    <td className="max-w-[260px] px-3 py-2 font-mono text-xs text-text-primary" title={r.rawName}>
-                      <div className="flex min-w-0 items-center gap-2">
-                        <WorkflowStatusBadge status={r.status} />
-                        <Link href={`/workflow-runs/${encodeURIComponent(r.id)}`} className="min-w-0 truncate hover:underline">
-                          {r.name}
-                        </Link>
-                      </div>
-                    </td>
-                    <td
-                      className="max-w-[220px] truncate px-3 py-2 font-mono text-xs text-text-secondary"
-                      title={formatTitle(r.input)}
-                    >
-                      {summarizeInput(r.input)}
-                    </td>
-                    <td
-                      className="max-w-[240px] truncate px-3 py-2 font-mono text-xs text-text-tertiary"
-                      title={formatTitle(r.input)}
-                    >
-                      {summarizeTrigger(r.input)}
-                    </td>
-                    <td className="px-3 py-2">
-                      <span className={`inline-block rounded border px-2 py-0.5 text-xs ${outcomeBadge(outcome.tone)}`} title={r.error ?? ''}>
-                        {outcome.label}
-                      </span>
-                    </td>
-                    <td className="px-3 py-2 text-right font-mono text-xs text-text-secondary">
-                      {formatDurationCell(r, now)}
-                    </td>
-                    <td
-                      className="whitespace-nowrap px-3 py-2 text-xs text-text-secondary"
-                      title={formatTime(eventTime)}
-                    >
-                      {formatRelativeTime(eventTime, now)}
-                    </td>
-                  </tr>
-                );
-              })}
-            </tbody>
-          </table>
-        </div>
+        <Table
+          columns={workflowRunColumns}
+          rows={filtered}
+          getRowKey={(r) => r.id}
+          onRowClick={(r) => {
+            window.location.href = `/workflow-runs/${encodeURIComponent(r.id)}`;
+          }}
+          className="hidden rounded-md sm:block"
+        />
         </>
       )}
       </>
