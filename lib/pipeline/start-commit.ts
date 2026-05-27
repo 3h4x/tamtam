@@ -151,7 +151,13 @@ export async function deriveIssueContextFromBranch(
   projPath: string,
   signal?: AbortSignal,
 ): Promise<IssueContext | null> {
-  const branchR = await exec('git', ['-C', projPath, 'branch', '--show-current'], { timeout: 5000, signal });
+  const [branchR, repoR] = await Promise.all([
+    exec('git', ['-C', projPath, 'branch', '--show-current'], { timeout: 5000, signal }),
+    exec(
+      'gh', ['repo', 'view', '--json', 'nameWithOwner', '--jq', '.nameWithOwner'],
+      { cwd: projPath, timeout: 10000, signal },
+    ),
+  ]);
   if (branchR.exitCode !== 0) return null;
   const currentBranch = branchR.stdout.trim();
   const m = currentBranch.match(/^fix\/issue-(\d+)(?:-|$)/);
@@ -159,10 +165,6 @@ export async function deriveIssueContextFromBranch(
   const number = parseInt(m[1], 10);
   if (!Number.isFinite(number) || number <= 0) return null;
 
-  const repoR = await exec(
-    'gh', ['repo', 'view', '--json', 'nameWithOwner', '--jq', '.nameWithOwner'],
-    { cwd: projPath, timeout: 10000, signal },
-  );
   const repo = repoR.exitCode === 0 ? repoR.stdout.trim() : '';
   if (!repo) return null;
 
