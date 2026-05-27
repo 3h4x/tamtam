@@ -2,6 +2,7 @@
 
 import { useState, useEffect } from 'react'
 import { Button } from '@/components/ui/Button'
+import { ErrorState } from '@/components/ErrorState'
 import { fetchProjects, fetchProjectLogs } from '@/lib/client-api'
 import type { LogEntry } from '@/lib/client-api'
 
@@ -104,19 +105,7 @@ export function LogsPage() {
             ))}
           </div>
         ) : projectsError ? (
-          <div className="flex flex-col items-center justify-center py-12 gap-3 text-center">
-            <svg className="w-8 h-8 text-status-error" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth="1.4">
-              <path strokeLinecap="round" strokeLinejoin="round" d="M12 9v3.75m0 3.75h.008v.008H12v-.008zM21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
-            </svg>
-            <p className="text-sm text-text-secondary">{projectsError}</p>
-            <Button
-              size="sm"
-              className="px-3 py-1.5 rounded-md bg-transparent font-normal"
-              onClick={loadProjects}
-            >
-              Retry
-            </Button>
-          </div>
+          <ErrorState message={projectsError} onRetry={loadProjects} />
         ) : projects.length === 0 ? (
           <div className="flex flex-col items-center justify-center py-12 gap-2 text-center">
             <svg className="w-8 h-8 text-text-tertiary" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth="1.2">
@@ -145,19 +134,10 @@ export function LogsPage() {
           ))}
         </div>
       ) : logsError ? (
-        <div className="flex flex-col items-center justify-center py-12 gap-3 text-center">
-          <svg className="w-8 h-8 text-status-error" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth="1.4">
-            <path strokeLinecap="round" strokeLinejoin="round" d="M12 9v3.75m0 3.75h.008v.008H12v-.008zM21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
-          </svg>
-          <p className="text-sm text-text-secondary">{logsError}</p>
-          <Button
-            size="sm"
-            className="px-3 py-1.5 rounded-md bg-transparent font-normal"
-            onClick={() => selectedProject && loadLogs(selectedProject)}
-          >
-            Retry
-          </Button>
-        </div>
+        <ErrorState
+          message={logsError}
+          onRetry={() => selectedProject && loadLogs(selectedProject)}
+        />
       ) : (
         <>
           {logs.length > 1 && (
