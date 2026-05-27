@@ -1,12 +1,12 @@
-// Fifth per-phase workflow scaffold: commit. Same shape as push — commit
+// Commit phase workflow. Same shape as push — commit
 // runs inline in the server (no background job to await), so the phase
 // workflow has a single 'use step'. CommitResult carries the optional
 // jobId for traceability (commit may be linked to a jobs-table row even
 // though it isn't a spawned subprocess).
 //
-// Future iterations dispatch this when the orchestrator decides
-// { next: 'commit' } — usually before push when there are uncommitted
-// changes from a fix loop. Not wired yet.
+// Dispatched by releaseOrchestratorWorkflow via dispatchPhase when the
+// orchestrator decides { next: 'commit' }, usually before push when there
+// are uncommitted changes from a fix loop.
 
 import type { CommitResult } from '@/lib/pipeline/start-commit';
 import { safeStartOrchestrator } from '@/lib/workflows/safe-start-orchestrator';
