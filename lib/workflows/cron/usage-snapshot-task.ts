@@ -91,9 +91,11 @@ export async function handleUsageSnapshot(
   let written = 0;
   let error: string | undefined;
   try {
-    const bridge = await deps.loadBridge();
     const bucketEndMs = bucketTs + USAGE_SNAPSHOT_BUCKET_MS;
-    const tokensByProvider = await deps.loadTokenAggregates(bucketTs, bucketEndMs);
+    const [bridge, tokensByProvider] = await Promise.all([
+      deps.loadBridge(),
+      deps.loadTokenAggregates(bucketTs, bucketEndMs),
+    ]);
     const rows: UsageSnapshotRow[] = [];
     for (const p of bridge.globalPace.providers) {
       const tk = tokensByProvider.get(p.provider) ?? null;
