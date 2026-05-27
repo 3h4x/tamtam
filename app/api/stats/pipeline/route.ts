@@ -75,7 +75,6 @@ export interface PipelineResponse {
 }
 
 const MAX_STEP_ITERATIONS = getMaxStepIterations();
-const MAX_PUSH_FIX_ATTEMPTS = getPushFixAttemptCap();
 const FIX_WINDOW_SECONDS = getStepWindowSeconds();
 const RECOVERY_STEP_KINDS = new Set<JobData['kind']>(['fix']);
 
@@ -399,7 +398,7 @@ export async function GET(request: NextRequest) {
       verdictRules: settings.review_verdict_rules,
       commitStyle: settings.commit_style,
       maxStepIterations: MAX_STEP_ITERATIONS,
-      maxPushFixAttempts: MAX_PUSH_FIX_ATTEMPTS,
+      maxPushFixAttempts: getPushFixAttemptCap(),
       stepWindowSeconds: FIX_WINDOW_SECONDS,
     },
   };

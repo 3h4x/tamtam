@@ -179,7 +179,10 @@ const DEFAULTS: TamTamConfig = {
   // wall-clock timeout instead; an honest LGTM is preferred over a forced
   // partial ship when the reviewer is making progress.
   review_fix_max_iterations: 0,
-  review_fix_backoff_seconds: 0,
+  // Base for exponential backoff between fix dispatches (review→fix and
+  // push→fix). 30s base means iteration 4 waits 30s, iter 5 60s, iter 6 120s,
+  // capped at MAX_BACKOFF_SECONDS in dispatch-phase.ts. Set to 0 to disable.
+  review_fix_backoff_seconds: 30,
   review_do_not_ship_action: 'fix',
   release_wall_clock_timeout_minutes: 60,
   log_retention_count: 200,

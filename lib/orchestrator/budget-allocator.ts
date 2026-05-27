@@ -46,6 +46,10 @@ export interface BoostAgentInput {
   /** Unix ms of the most recent successful dispatch/queue. Used to spread
    *  boosts across the project's roster. */
   lastDispatchMs: number | null;
+  /** `'system'` agents run internal handlers (e.g. retrieval reindex) that
+   *  don't consume codex/claude budget — boosting them can't catch up pace.
+   *  `'user'` agents go through the CLI and are the real boost candidates. */
+  kind: 'user' | 'system';
 }
 
 export interface BoostHistoryInput {
@@ -100,6 +104,10 @@ export function decideBoosts(input: BoostInput): BoostDecision[] {
   for (const agent of input.agents) {
     if (!agent.enabled) continue;
     if (!agent.schedule || agent.schedule.trim() === '') continue;
+    // System agents run internal handlers (reindex etc.), not CLI providers,
+    // so boosting them doesn't burn the budget the orchestrator is trying to
+    // catch up on. Skip them entirely.
+    if (agent.kind === 'system') continue;
     const arr = agentsByProject.get(agent.project) ?? [];
     arr.push(agent);
     agentsByProject.set(agent.project, arr);

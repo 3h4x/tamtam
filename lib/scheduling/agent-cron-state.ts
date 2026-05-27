@@ -80,6 +80,10 @@ export async function loadAgentCronStates(): Promise<Map<string, AgentCronState>
 // cron task realm and the route realm share the same store.
 declare global {
   var __tamtamAgentLastSkip: Map<string, { at: number; reason: string; status: 'skipped' | 'dispatched' | 'queued' }> | undefined;
+  // Separate from __tamtamAgentLastSkip — tracks only real dispatches so the
+  // orchestrator boost picker doesn't see 409-skipped agents as "just ran"
+  // and starve them out of the staleness ranking.
+  var __tamtamAgentLastDispatch: Map<string, number> | undefined;
 }
 
 function getStore(): Map<string, { at: number; reason: string; status: 'skipped' | 'dispatched' | 'queued' }> {
@@ -89,8 +93,19 @@ function getStore(): Map<string, { at: number; reason: string; status: 'skipped'
   return globalThis.__tamtamAgentLastSkip;
 }
 
+function getDispatchStore(): Map<string, number> {
+  if (!globalThis.__tamtamAgentLastDispatch) {
+    globalThis.__tamtamAgentLastDispatch = new Map();
+  }
+  return globalThis.__tamtamAgentLastDispatch;
+}
+
 export function recordAgentAttempt(agentId: string, status: 'skipped' | 'dispatched' | 'queued', reason: string): void {
-  getStore().set(agentId, { at: Date.now(), status, reason });
+  const now = Date.now();
+  getStore().set(agentId, { at: now, status, reason });
+  if (status === 'dispatched') {
+    getDispatchStore().set(agentId, now);
+  }
 }
 
 export function getAgentLastAttempt(agentId: string): { at: number; reason: string; status: string } | null {
@@ -99,4 +114,8 @@ export function getAgentLastAttempt(agentId: string): { at: number; reason: stri
 
 export function getAllAgentLastAttempts(): Map<string, { at: number; reason: string; status: string }> {
   return new Map(getStore());
+}
+
+export function getAllAgentLastDispatches(): Map<string, number> {
+  return new Map(getDispatchStore());
 }

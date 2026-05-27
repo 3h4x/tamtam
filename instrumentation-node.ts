@@ -910,10 +910,10 @@ export async function registerNode(): Promise<void> {
             },
             loadAgents: async () => {
               const { listEnabledScheduledAgents } = await import('@/lib/scheduling/internal-scheduler-helpers');
-              const { getAllAgentLastAttempts } = await import('@/lib/scheduling/agent-cron-state');
-              const [all, attempts] = await Promise.all([
+              const { getAllAgentLastDispatches } = await import('@/lib/scheduling/agent-cron-state');
+              const [all, dispatches] = await Promise.all([
                 listEnabledScheduledAgents(),
-                Promise.resolve(getAllAgentLastAttempts()),
+                Promise.resolve(getAllAgentLastDispatches()),
               ]);
               return all.map((a) => ({
                 id: a.id,
@@ -921,7 +921,8 @@ export async function registerNode(): Promise<void> {
                 project: a.project,
                 enabled: a.enabled,
                 schedule: a.schedule ?? null,
-                lastDispatchMs: attempts.get(a.id)?.at ?? null,
+                lastDispatchMs: dispatches.get(a.id) ?? null,
+                kind: a.kind,
               }));
             },
             enqueueAgentFire: async (agentId, runAt) => {
