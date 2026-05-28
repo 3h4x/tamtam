@@ -280,7 +280,18 @@ describe('instrumentation', () => {
       vi.stubEnv('NODE_ENV', 'test');
       mockDeps([]);
       const listJobsMock = vi.fn().mockReturnValue([
-        { id: 'pr-wait-1', kind: 'pr-wait', pid: 0, finishedAt: null, contextMeta: '{"prNumber":1}', project: 'proj1' },
+        {
+          id: 'pr-wait-1',
+          kind: 'pr-wait',
+          pid: 0,
+          finishedAt: null,
+          contextMeta: JSON.stringify({
+            prNumber: 1,
+            prRepo: 'owner/repo',
+            prUrl: 'https://github.com/owner/repo/pull/1',
+          }),
+          project: 'proj1',
+        },
       ]);
       const markDoneMock = vi.fn().mockResolvedValue(undefined);
       const resumePrWaitMock = vi.fn().mockReturnValue({ ok: true });
