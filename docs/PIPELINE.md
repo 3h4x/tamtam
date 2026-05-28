@@ -481,15 +481,15 @@ Checks the push job log for explicit local hook-failure markers from husky, lint
 
 | File | Function | Purpose |
 |------|----------|---------|
-| `lib/start-release.ts` | `startRelease(project)` | Pipeline entry point; creates meta-job, picks first step |
-| `lib/start-review.ts` | `startProjectReview(project)` | Spawns review Claude job as a detached child |
-| `lib/start-fix.ts` | `startFixFromJob(reviewJob)` | Resumes review session for fix, or starts fresh |
-| `lib/start-test.ts` | `startProjectTest(project)` | Detects and runs test command |
-| `lib/start-push.ts` | `startProjectPush(project)` | git add → commit message → push |
+| `lib/pipeline/start-release.ts` | `startRelease(project)` | Pipeline entry point; creates meta-job, picks first step |
+| `lib/pipeline/start-review.ts` | `startProjectReview(project)` | Spawns review Claude job as a detached child |
+| `lib/pipeline/start-fix.ts` | `startFixFromJob(reviewJob)` | Resumes review session for fix, or starts fresh |
+| `lib/pipeline/start-test.ts` | `startProjectTest(project)` | Detects and runs test command |
+| `lib/pipeline/start-push.ts` | `startProjectPush(project)` | git add → commit message → push |
 | `lib/pipeline/push-rejection.ts` | `isHookRejection`, `isTestFailureRejection` | Classifies push failure kind |
-| `lib/start-mark-dod.ts` | `startMarkDod(project)` | DoD verification against the linked issue or PR, with checkbox updates when issue criteria exist |
+| `lib/pipeline/start-mark-dod.ts` | `startMarkDod(project)` | DoD verification against the linked issue or PR, with checkbox updates when issue criteria exist |
 | `lib/pipeline/start-soak.ts` | `launchSoak`, `classifyDefaultBranchCi`, `openRevertPr`, `notifyPostMergeRevert` | Post-merge CI watcher + revert-PR opener. Pure helpers are unit-tested; the side-effectful loop is driven by `lib/workflows/phases/soak-phase.ts` |
-| `lib/job-storage.ts` | `markDone(jobId, exitCode)` | Called by the child-process exit handler; triggers all completion hooks |
+| `lib/jobs/job-storage.ts` | `markDone(jobId, exitCode)` | Called by the child-process exit handler; triggers all completion hooks |
 
 ---
 
