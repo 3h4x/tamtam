@@ -89,15 +89,17 @@ export function WorkflowRunsFilterPanel({
                 className="focus-ring w-full rounded-md border border-border bg-bg-primary px-3 py-1.5 pr-8 text-sm text-text-primary placeholder:text-text-tertiary focus:border-accent focus:outline-none"
               />
               {nameFilter ? (
-                <button
+                <Button
                   type="button"
                   onClick={() => onNameFilterChange('')}
-                  className="absolute right-2 top-1/2 -translate-y-1/2 text-sm text-text-tertiary transition-colors hover:text-text-primary"
+                  variant="ghost"
+                  size="icon-sm"
+                  className="absolute right-1.5 top-1/2 -translate-y-1/2"
                   aria-label="Clear search"
                   title="Clear search"
                 >
                   ×
-                </button>
+                </Button>
               ) : null}
             </div>
             <div className="mt-2 flex flex-wrap items-center gap-x-3 gap-y-1 text-[11px] text-text-tertiary">

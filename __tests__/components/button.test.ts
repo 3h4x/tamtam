@@ -35,6 +35,15 @@ describe('buttonVariants', () => {
     expect(cls).not.toContain('px-3')
   })
 
+  it('applies icon-sm size classes', () => {
+    const cls = buttonVariants({ size: 'icon-sm' })
+    expect(cls).toContain('h-6')
+    expect(cls).toContain('w-6')
+    expect(cls).toContain('p-0')
+    expect(cls).toContain('justify-center')
+    expect(cls).not.toContain('px-3')
+  })
+
   it('appends extra className', () => {
     const cls = buttonVariants({ className: 'my-extra-class' })
     expect(cls).toContain('my-extra-class')
