@@ -25,6 +25,7 @@ import { buildProjectPath, buildProjectTerminalPath } from '@/lib/client/project
 import { resolveGithubBoardUrl } from '@/lib/client/resolve-github-board-url'
 import { ProjectLogo } from '@/components/ProjectLogo'
 import { Button } from '@/components/ui/Button'
+import { PillButton } from '@/components/ui/Pill'
 
 type Tab = 'overview' | 'config' | 'history' | 'terminal' | 'changes' | 'issues' | 'docs' | 'agents'
 const VALID_TABS: readonly Tab[] = ['overview', 'config', 'history', 'terminal', 'changes', 'issues', 'docs', 'agents']
@@ -666,8 +667,11 @@ export function ProjectDetailPage({
               Board ↗
             </a>
           )}
-          <button
+          <PillButton
             type="button"
+            tone="warning"
+            active={!!config?.paused}
+            inactiveStyle="subtle"
             aria-label={config?.paused ? 'Resume project' : 'Pause project'}
             aria-pressed={!!config?.paused}
             onClick={async () => {
@@ -687,17 +691,21 @@ export function ProjectDetailPage({
             }}
             className={
               config?.paused
-                ? 'inline-flex items-center gap-1 rounded-full border border-status-warning/40 bg-status-warning/10 px-2 py-0.5 text-xs text-status-warning hover:bg-status-warning/20 transition-colors'
-                : 'inline-flex items-center gap-1 rounded-full border border-border bg-bg-secondary px-2 py-0.5 text-xs text-text-secondary hover:text-accent hover:border-accent/40 transition-colors'
+                ? 'gap-1 rounded-full border-status-warning/40 bg-status-warning/10 hover:bg-status-warning/20'
+                : 'gap-1 rounded-full bg-bg-secondary hover:border-accent/40 hover:bg-bg-secondary hover:text-accent'
             }
             title={config?.paused
               ? 'Project is paused — scheduled agents, agent API runs, and releases are blocked. Manual terminal sessions still work. Click to resume.'
               : 'Pause this project: blocks scheduled agents, agent API runs, and releases without affecting other projects.'}
           >
             {config?.paused ? 'Paused' : 'Pause'}
-          </button>
-          <button
+          </PillButton>
+          <PillButton
             type="button"
+            tone="accent"
+            active={!!config?.release_after_run}
+            inactiveStyle="subtle"
+            aria-pressed={!!config?.release_after_run}
             onClick={async () => {
               const next = !config?.release_after_run
               try {
@@ -715,15 +723,15 @@ export function ProjectDetailPage({
             }}
             className={
               config?.release_after_run
-                ? 'inline-flex items-center gap-1 rounded-full border border-accent/40 bg-accent/10 px-2 py-0.5 text-xs text-accent hover:bg-accent/20 transition-colors'
-                : 'inline-flex items-center gap-1 rounded-full border border-border bg-bg-secondary px-2 py-0.5 text-xs text-text-secondary hover:text-accent hover:border-accent/40 transition-colors'
+                ? 'gap-1 rounded-full border-accent/40 hover:bg-accent/20'
+                : 'gap-1 rounded-full bg-bg-secondary hover:border-accent/40 hover:bg-bg-secondary hover:text-accent'
             }
             title={config?.release_after_run
               ? 'Auto release is ON — release pipeline triggers after each terminal or agent run finishes. Click to disable.'
               : 'Auto release is OFF — click to auto-trigger the release pipeline after each terminal or agent run.'}
           >
             {config?.release_after_run ? 'Auto release ON' : 'Auto release'}
-          </button>
+          </PillButton>
         </div>
         <div className="flex items-center gap-2 flex-wrap justify-end">
           <ProjectActions
