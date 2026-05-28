@@ -31,7 +31,7 @@ describe('instrumentation', () => {
     vi.unstubAllEnvs();
     vi.clearAllMocks();
     vi.resetModules();
-    vi.doUnmock('@/lib/pipeline/start-pr-wait');
+    vi.doUnmock('@/lib/pipeline/pr-wait-resume');
     vi.doUnmock('@/lib/shared/enabled-projects');
     vi.doUnmock('@/lib/jobs/stranded-branch-reconcile');
   });
@@ -294,7 +294,7 @@ describe('instrumentation', () => {
         },
       ]);
       const markDoneMock = vi.fn().mockResolvedValue(undefined);
-      const resumePrWaitMock = vi.fn().mockReturnValue({ ok: true });
+      const resumeBootPrWaitMock = vi.fn().mockReturnValue({ ok: true });
 
       vi.doMock('@/lib/jobs/job-storage', () => ({
         listJobs: listJobsMock,
@@ -305,7 +305,7 @@ describe('instrumentation', () => {
         reconcileStaleRelease: vi.fn(),
         PIPELINE_STEP_KINDS: new Set(),
       }));
-      vi.doMock('@/lib/pipeline/start-pr-wait', () => ({ resumePrWait: resumePrWaitMock }));
+      vi.doMock('@/lib/pipeline/pr-wait-resume', () => ({ resumeBootPrWait: resumeBootPrWaitMock }));
       vi.doMock('@/lib/pipeline/recovery-drain', () => ({
         drainAllRecoveryWork: vi.fn().mockResolvedValue(undefined),
       }));
@@ -314,7 +314,7 @@ describe('instrumentation', () => {
       await registerNode();
 
       await vi.waitFor(() => {
-        expect(resumePrWaitMock).toHaveBeenCalledWith('pr-wait-1');
+        expect(resumeBootPrWaitMock).toHaveBeenCalledWith('pr-wait-1');
       }, { timeout: 2000, interval: 1 });
       expect(markDoneMock).not.toHaveBeenCalled();
     });
@@ -336,7 +336,7 @@ describe('instrumentation', () => {
       };
       const listJobsMock = vi.fn().mockReturnValue([orphanedPrWait]);
       const markDoneMock = vi.fn().mockResolvedValue(undefined);
-      const resumePrWaitMock = vi.fn().mockReturnValue({ ok: false, error: 'project not found' });
+      const resumeBootPrWaitMock = vi.fn().mockReturnValue({ ok: false, error: 'project not found' });
 
       vi.doMock('@/lib/jobs/job-storage', () => ({
         listJobs: listJobsMock,
@@ -347,7 +347,7 @@ describe('instrumentation', () => {
         reconcileStaleRelease: vi.fn(),
         PIPELINE_STEP_KINDS: new Set(),
       }));
-      vi.doMock('@/lib/pipeline/start-pr-wait', () => ({ resumePrWait: resumePrWaitMock }));
+      vi.doMock('@/lib/pipeline/pr-wait-resume', () => ({ resumeBootPrWait: resumeBootPrWaitMock }));
       vi.doMock('@/lib/pipeline/recovery-drain', () => ({
         drainAllRecoveryWork: vi.fn().mockResolvedValue(undefined),
       }));
@@ -355,7 +355,7 @@ describe('instrumentation', () => {
       const { registerNode } = await import('@/instrumentation-node');
       await registerNode();
 
-      expect(resumePrWaitMock).toHaveBeenCalledWith('pr-wait-missing-project');
+      expect(resumeBootPrWaitMock).toHaveBeenCalledWith('pr-wait-missing-project');
       expect(markDoneMock).toHaveBeenCalledWith(orphanedPrWait, -1);
     });
 
@@ -376,7 +376,7 @@ describe('instrumentation', () => {
       };
       const listJobsMock = vi.fn().mockReturnValue([orphanedPrWait]);
       const markDoneMock = vi.fn().mockResolvedValue(undefined);
-      const resumePrWaitMock = vi.fn(() => {
+      const resumeBootPrWaitMock = vi.fn(() => {
         throw new Error('resume failed');
       });
 
@@ -389,7 +389,7 @@ describe('instrumentation', () => {
         reconcileStaleRelease: vi.fn(),
         PIPELINE_STEP_KINDS: new Set(),
       }));
-      vi.doMock('@/lib/pipeline/start-pr-wait', () => ({ resumePrWait: resumePrWaitMock }));
+      vi.doMock('@/lib/pipeline/pr-wait-resume', () => ({ resumeBootPrWait: resumeBootPrWaitMock }));
       vi.doMock('@/lib/pipeline/recovery-drain', () => ({
         drainAllRecoveryWork: vi.fn().mockResolvedValue(undefined),
       }));
@@ -397,7 +397,7 @@ describe('instrumentation', () => {
       const { registerNode } = await import('@/instrumentation-node');
       await registerNode();
 
-      expect(resumePrWaitMock).toHaveBeenCalledWith('pr-wait-resume-throws');
+      expect(resumeBootPrWaitMock).toHaveBeenCalledWith('pr-wait-resume-throws');
       expect(markDoneMock).toHaveBeenCalledWith(orphanedPrWait, -1);
     });
 
@@ -408,7 +408,7 @@ describe('instrumentation', () => {
       const orphanedMarkDod = { id: 'mark-dod-1', kind: 'mark-dod', pid: 0, finishedAt: null, contextMeta: null, project: 'proj1' };
       const listJobsMock = vi.fn().mockReturnValue([orphanedPrWait, orphanedMarkDod]);
       const markDoneMock = vi.fn().mockResolvedValue(undefined);
-      const resumePrWaitMock = vi.fn();
+      const resumeBootPrWaitMock = vi.fn();
 
       vi.doMock('@/lib/jobs/job-storage', () => ({
         listJobs: listJobsMock,
@@ -419,7 +419,7 @@ describe('instrumentation', () => {
         reconcileStaleRelease: vi.fn(),
         PIPELINE_STEP_KINDS: new Set(),
       }));
-      vi.doMock('@/lib/pipeline/start-pr-wait', () => ({ resumePrWait: resumePrWaitMock }));
+      vi.doMock('@/lib/pipeline/pr-wait-resume', () => ({ resumeBootPrWait: resumeBootPrWaitMock }));
       vi.doMock('@/lib/pipeline/recovery-drain', () => ({
         drainAllRecoveryWork: vi.fn().mockResolvedValue(undefined),
       }));
@@ -428,7 +428,7 @@ describe('instrumentation', () => {
       await registerNode();
 
       await vi.waitFor(() => {
-        expect(resumePrWaitMock).not.toHaveBeenCalled();
+        expect(resumeBootPrWaitMock).not.toHaveBeenCalled();
         expect(markDoneMock).toHaveBeenCalledWith(orphanedPrWait, -1);
         expect(markDoneMock).toHaveBeenCalledWith(orphanedMarkDod, -1);
       }, { timeout: 2000, interval: 1 });
