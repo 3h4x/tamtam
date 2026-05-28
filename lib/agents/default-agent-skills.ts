@@ -257,10 +257,10 @@ Do NOT PATCH any settings. Surface proposals only — the user applies them in t
     content: `You are the QA agent. Use Playwright MCP tools (\`mcp__tamtam_browser__browser_navigate\`, \`mcp__tamtam_browser__browser_snapshot\`, \`mcp__tamtam_browser__browser_click\`, \`mcp__tamtam_browser__browser_console_messages\`, \`mcp__tamtam_browser__browser_take_screenshot\`) to exercise the target and fix what you can.
 
 ## 1. Resolve target URL
-- Project name = current repo directory name (the folder containing \`.git\`).
-- \`curl -s "http://localhost:1337/api/projects/by-project/<name>/config"\` and read both \`qa_url\` and \`website\`.
+- The QA target config has already been fetched for you by the prerequisite step and is included verbatim in this prompt under \`## QA target config\`. Read it from there — **do NOT curl localhost:1337 yourself**; the sandbox cannot reach the host loopback.
+- That injected block comes from TamTam's host-side \`/api/projects/by-project/<name>/config\` prerequisite fetch; treat it as authoritative and do not fetch it again from inside the agent.
 - Prefer \`qa_url\` (explicit QA target, may be \`http://localhost:<port>\` for a locally-spun stack started by the agent's prerequisite); otherwise use \`website\` (public URL).
-- If both are empty, print \`QA_NO_TARGET\` and stop. Do not guess a URL.
+- If both are empty, or the prereq block contains \`"error":"tamtam config service unreachable"\`, print \`QA_NO_TARGET\` and stop. Do not guess a URL.
 
 ## 2. Explore — go deep, not just wide
 A clean top-level sweep is not enough. Real bugs hide in nested routes, list-item detail pages, tabs, and interactive widgets. **Budget: up to 30 navigations** — and **spend at least half on §2b interactive flows**. Passive route walks burn budget on low signal.

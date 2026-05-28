@@ -39,16 +39,14 @@ describe.skipIf(!isMac || !dockerAvailable || !existsSync(profilePath))('sandbox
   it('allows loopback to the broker, blocks external network, blocks docker socket', async () => {
     const broker = await ensureBrokerRunning();
 
-    // 1. Loopback to broker must succeed. The MCP `/sse` endpoint is a
-    //    long-lived event stream — curl will reach the server, receive HTTP
-    //    200 headers, then time out reading the stream (exit 28). Either way
-    //    the HTTP status code in the printed output proves the connection
-    //    happened. A blocked connection prints code=000 with exit 7
-    //    (couldn't connect).
+    // 1. Loopback to broker must succeed. The MCP endpoint may return a
+    //    normal response or hold a long-lived stream open; either way the
+    //    printed HTTP status code proves the connection happened. A blocked
+    //    connection prints code=000 with exit 7 (couldn't connect).
     const loopback = await sandboxedShell('curl', [
       '-s', '-o', '/dev/null', '-w', '%{http_code}',
       '--max-time', '3',
-      `${broker.url}/sse`,
+      broker.mcpUrl,
     ], process.cwd());
     expect(loopback.stdout.trim(), `loopback stderr: ${loopback.stderr}`).toMatch(/^[2345]\d\d$/);
 

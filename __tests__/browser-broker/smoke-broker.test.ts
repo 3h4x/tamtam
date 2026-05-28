@@ -19,8 +19,9 @@ describe.skipIf(!dockerAvailable)('browser-broker smoke', () => {
   it('starts a broker, exposes loopback MCP, stops cleanly', async () => {
     const handle = await ensureBrokerRunning();
     expect(handle.url).toMatch(/^http:\/\/127\.0\.0\.1:\d+$/);
+    expect(handle.mcpUrl).toMatch(/^http:\/\/127\.0\.0\.1:\d+\/(?:mcp|sse)$/);
 
-    const probe = await fetch(`${handle.url}/sse`, {
+    const probe = await fetch(handle.mcpUrl, {
       method: 'GET',
       signal: AbortSignal.timeout(2_000),
     }).catch(() => null);

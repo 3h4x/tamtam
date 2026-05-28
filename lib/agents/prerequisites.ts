@@ -1,5 +1,6 @@
 export const ISSUE_CRUNCHER_SKILL_ID = 'agent-issue-cruncher';
 export const IMPROVE_SKILL_ID = 'agent-improve';
+export const QA_SKILL_ID = 'agent-qa';
 
 export function hasIssueCruncherSkill(skillIds: string[] | null | undefined): boolean {
   return Array.isArray(skillIds) && skillIds.includes(ISSUE_CRUNCHER_SKILL_ID);
@@ -7,6 +8,10 @@ export function hasIssueCruncherSkill(skillIds: string[] | null | undefined): bo
 
 export function hasImproveSkill(skillIds: string[] | null | undefined): boolean {
   return Array.isArray(skillIds) && skillIds.includes(IMPROVE_SKILL_ID);
+}
+
+export function hasQaSkill(skillIds: string[] | null | undefined): boolean {
+  return Array.isArray(skillIds) && skillIds.includes(QA_SKILL_ID);
 }
 
 export function normalizeStoredPrerequisiteCommand(
@@ -26,6 +31,21 @@ export function parsePrerequisiteCommandInput(value: unknown): string | undefine
 
 export function buildIssueCruncherPrerequisiteCommand(projectName: string): string {
   return `curl -fsS "http://localhost:1337/api/projects/by-project/${encodeURIComponent(projectName)}/issues?pick_top=1"`;
+}
+
+// agent:qa prereq — resolves the QA target (qa_url / website) from the
+// TamTam config service on the host *before* the agent starts, so the agent
+// itself never has to reach back to localhost:1337. Browser-broker containers
+// can't see the host's loopback, so a curl from inside the agent fails with
+// "connection refused" — but the prereq runs on the host where the API is
+// reachable, and its stdout is injected into the prompt verbatim.
+export function buildQaPrerequisiteCommand(projectName: string): string {
+  const url = `http://localhost:1337/api/projects/by-project/${encodeURIComponent(projectName)}/config`;
+  return (
+    `echo '## QA target config (resolved by prereq — do NOT re-curl)'; ` +
+    `curl -fsS "${url}" 2>/dev/null ` +
+    `|| echo '{"error":"tamtam config service unreachable from host"}'`
+  );
 }
 
 // agent:improve prereq — runs in the project cwd. Outputs the top 5
@@ -81,6 +101,7 @@ export function resolveAgentPrerequisiteCommand({
   const normalized = normalizeStoredPrerequisiteCommand(prerequisiteCommand);
   if (typeof normalized === 'string') return normalized || null;
   if (hasIssueCruncherSkill(skillIds)) return buildIssueCruncherPrerequisiteCommand(project);
+  if (hasQaSkill(skillIds)) return buildQaPrerequisiteCommand(project);
   if (hasImproveSkill(skillIds)) return buildImprovePrerequisiteCommand();
   return null;
 }

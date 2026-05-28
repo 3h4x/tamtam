@@ -41,6 +41,7 @@ export async function prepareBrokerRun(
     const written = writeRunMcpConfig({
       jobId: input.jobId,
       brokerUrl: broker.url,
+      brokerMcpUrl: broker.mcpUrl,
       allowedOrigins,
       provider: input.provider,
     });

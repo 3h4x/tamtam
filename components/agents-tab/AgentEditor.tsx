@@ -179,7 +179,7 @@ export function AgentEditor({
   const isNew = !agent
 
   return (
-    <div className="mx-auto w-full max-w-4xl px-2 py-4 flex flex-col gap-4">
+    <div className="w-full px-4 py-4 flex flex-col gap-4">
       {/* Header strip */}
       <div className="flex items-center justify-between">
         <div className="flex items-center gap-3 min-w-0">
@@ -207,117 +207,167 @@ export function AgentEditor({
         </div>
       )}
 
-      {/* Row 1: Name + Model + Provider */}
-      <div className="flex gap-4 items-end flex-wrap">
-        <div className="flex-1 min-w-[200px]">
-          <label htmlFor="agent-name" className="block mb-1.5 text-xs font-semibold text-text-tertiary uppercase tracking-wider">Name</label>
-          <input
-            ref={nameRef}
-            id="agent-name"
-            type="text"
-            className="w-full px-3 py-2 text-sm bg-bg-secondary border border-border rounded-lg text-text-primary placeholder:text-text-tertiary focus:outline-none focus:ring-2 focus:ring-accent/40 focus:border-accent transition-colors disabled:opacity-60 disabled:cursor-not-allowed"
-            value={name}
-            onChange={(e) => setName(e.target.value)}
-            onKeyDown={(e) => { if (e.key === 'Enter' && name.trim()) handleSave() }}
-            placeholder="e.g. security-guard"
-            disabled={isSystemAgent}
-            title={isSystemAgent ? 'Built-in agent name is fixed' : undefined}
-          />
+      {/* Main 2-column layout: settings (left) + prompt (right) */}
+      <div className="grid grid-cols-1 lg:grid-cols-2 gap-4 items-start">
+        {/* Left column — identity + run settings */}
+        <div className="flex flex-col gap-4">
+          <div>
+            <label htmlFor="agent-name" className="block mb-1.5 text-xs font-semibold text-text-tertiary uppercase tracking-wider">Name</label>
+            <input
+              ref={nameRef}
+              id="agent-name"
+              type="text"
+              className="w-full px-3 py-2 text-sm bg-bg-secondary border border-border rounded-lg text-text-primary placeholder:text-text-tertiary focus:outline-none focus:ring-2 focus:ring-accent/40 focus:border-accent transition-colors disabled:opacity-60 disabled:cursor-not-allowed"
+              value={name}
+              onChange={(e) => setName(e.target.value)}
+              onKeyDown={(e) => { if (e.key === 'Enter' && name.trim()) handleSave() }}
+              placeholder="e.g. security-guard"
+              disabled={isSystemAgent}
+              title={isSystemAgent ? 'Built-in agent name is fixed' : undefined}
+            />
+          </div>
+
+          <div>
+            <div className="mb-1.5 text-xs font-semibold text-text-tertiary uppercase tracking-wider">Model</div>
+            <SegmentedControl
+              ariaLabel="Model tier"
+              value={model}
+              onChange={(m) => setModel(m)}
+              disabled={isSystemAgent}
+              options={MODELS.map((m) => ({
+                value: m,
+                label: MODEL_LABELS[m],
+                title: isSystemAgent ? 'Built-in agent model is fixed' : MODEL_DESCRIPTIONS[m],
+              }))}
+            />
+          </div>
+
+          <div>
+            <div className="mb-1.5 text-xs font-semibold text-text-tertiary uppercase tracking-wider">Provider</div>
+            <SegmentedControl<'any' | CliProvider>
+              ariaLabel="CLI provider"
+              value={provider === null ? 'any' : provider}
+              onChange={(v) => setProvider(v === 'any' ? null : v)}
+              disabled={isSystemAgent}
+              options={[
+                {
+                  value: 'any',
+                  label: 'any',
+                  title: isSystemAgent
+                    ? 'Built-in agent provider is fixed'
+                    : 'Let TamTam choose any healthy enabled provider at run time',
+                },
+                ...CLI_PROVIDERS.map((cliProvider) => ({
+                  value: cliProvider,
+                  label: cliProvider,
+                  title: isSystemAgent
+                    ? 'Built-in agent provider is fixed'
+                    : `Require ${cliProvider} for this agent. If it is unavailable or over budget, the run will not start.`,
+                })),
+              ]}
+            />
+          </div>
+
+          {/* Schedule / Enabled / Boostable strip */}
+          <div className="flex items-center gap-4 px-3 py-2.5 rounded-lg bg-bg-secondary border border-border flex-wrap">
+            <div className="flex items-center gap-2 flex-1 min-w-[160px]">
+              <span className="text-xs text-text-tertiary whitespace-nowrap font-medium">Schedule</span>
+              <select
+                id="agent-schedule"
+                className="flex-1 min-w-0 px-2 py-1.5 text-xs bg-bg-primary border border-border rounded-md text-text-primary focus:outline-none focus:ring-1 focus:ring-accent/40 focus:border-accent transition-colors cursor-pointer disabled:opacity-60 disabled:cursor-not-allowed"
+                value={schedule}
+                onChange={(e) => setSchedule(e.target.value)}
+                disabled={isSystemAgent}
+                title={isSystemAgent ? 'Set in Settings → Retrieval' : undefined}
+              >
+                <option value="">Manual</option>
+                {SCHEDULES.map(s => <option key={s} value={s}>every {s}</option>)}
+              </select>
+            </div>
+            <div className="w-px h-4 bg-border shrink-0" />
+            <button
+              type="button"
+              role="switch"
+              aria-checked={enabled}
+              onClick={() => setEnabled(!enabled)}
+              className="flex items-center gap-2 cursor-pointer shrink-0"
+            >
+              <div className={`relative w-9 h-5 rounded-full transition-colors ${enabled ? 'bg-accent' : 'bg-bg-tertiary border border-border'}`}>
+                <div className={`absolute top-0.5 w-4 h-4 rounded-full bg-white shadow-sm transition-all duration-150 ${enabled ? 'left-[18px]' : 'left-0.5'}`} />
+              </div>
+              <span className="text-xs text-text-secondary font-medium">Enabled</span>
+            </button>
+            <div className="w-px h-4 bg-border shrink-0" />
+            <button
+              type="button"
+              role="switch"
+              aria-checked={boostable}
+              onClick={() => setBoostable(!boostable)}
+              disabled={isSystemAgent}
+              className="flex items-center gap-2 cursor-pointer shrink-0 disabled:opacity-50 disabled:cursor-not-allowed"
+              title="When off, the orchestrator never picks this agent for catch-up boost fires — it only runs on its own schedule. Use for blog/social-post style agents."
+            >
+              <div className={`relative w-9 h-5 rounded-full transition-colors ${boostable ? 'bg-accent' : 'bg-bg-tertiary border border-border'}`}>
+                <div className={`absolute top-0.5 w-4 h-4 rounded-full bg-white shadow-sm transition-all duration-150 ${boostable ? 'left-[18px]' : 'left-0.5'}`} />
+              </div>
+              <span className="text-xs text-text-secondary font-medium">Boostable</span>
+            </button>
+          </div>
         </div>
-        <div className="shrink-0">
-          <div className="mb-1.5 text-xs font-semibold text-text-tertiary uppercase tracking-wider">Model</div>
-          <SegmentedControl
-            ariaLabel="Model tier"
-            value={model}
-            onChange={(m) => setModel(m)}
+
+        {/* Right column — prompt */}
+        <div className="flex flex-col">
+          <div className="flex items-baseline justify-between mb-1.5 gap-2">
+            <label htmlFor="agent-prompt" className="flex items-baseline gap-2">
+              <span className="text-xs font-semibold text-text-tertiary uppercase tracking-wider">Prompt</span>
+              {selectedSkills.length > 0 && (
+                <span className="text-xs text-text-tertiary font-normal normal-case">optional — skills define default behavior</span>
+              )}
+            </label>
+            <Button
+              type="button"
+              variant="secondary"
+              size="sm"
+              onClick={handleImprove}
+              disabled={isSystemAgent || improving || agentPrompt.trim().length < 3}
+              title={isSystemAgent ? 'Built-in agent prompt is fixed' : 'Rewrite this prompt using project context (CLAUDE.md + selected skills/docs)'}
+              className="rounded-md text-text-secondary hover:text-accent hover:border-accent/40"
+            >
+              {improving ? <Spinner color="accent" /> : null}
+              <span>{improving ? 'Improving…' : 'Improve'}</span>
+            </Button>
+          </div>
+          <textarea
+            id="agent-prompt"
+            className="w-full px-3 py-2 text-sm bg-bg-secondary border border-border rounded-lg text-text-primary placeholder:text-text-tertiary focus:outline-none focus:ring-2 focus:ring-accent/40 focus:border-accent transition-colors font-mono resize-y disabled:opacity-60 disabled:cursor-not-allowed min-h-[420px]"
+            rows={20}
+            value={agentPrompt}
+            onChange={(e) => setAgentPrompt(e.target.value)}
+            placeholder={selectedSkills.length > 0
+              ? 'Optional: repo-specific hints to append to the skill (e.g. "focus on lib/auth").'
+              : 'What should this agent do when it runs?'}
             disabled={isSystemAgent}
-            options={MODELS.map((m) => ({
-              value: m,
-              label: MODEL_LABELS[m],
-              title: isSystemAgent ? 'Built-in agent model is fixed' : MODEL_DESCRIPTIONS[m],
-            }))}
-          />
-        </div>
-        <div className="shrink-0">
-          <div className="mb-1.5 text-xs font-semibold text-text-tertiary uppercase tracking-wider">Provider</div>
-          <SegmentedControl<'any' | CliProvider>
-            ariaLabel="CLI provider"
-            value={provider === null ? 'any' : provider}
-            onChange={(v) => setProvider(v === 'any' ? null : v)}
-            disabled={isSystemAgent}
-            options={[
-              {
-                value: 'any',
-                label: 'any',
-                title: isSystemAgent
-                  ? 'Built-in agent provider is fixed'
-                  : 'Let TamTam choose any healthy enabled provider at run time',
-              },
-              ...CLI_PROVIDERS.map((cliProvider) => ({
-                value: cliProvider,
-                label: cliProvider,
-                title: isSystemAgent
-                  ? 'Built-in agent provider is fixed'
-                  : `Require ${cliProvider} for this agent. If it is unavailable or over budget, the run will not start.`,
-              })),
-            ]}
+            title={isSystemAgent ? 'Built-in agent prompt is fixed' : undefined}
           />
         </div>
       </div>
 
-      {/* Prompt */}
+      {/* Prerequisite command — full width, multi-line */}
       <div>
-        <div className="flex items-baseline justify-between mb-1.5 gap-2">
-          <label htmlFor="agent-prompt" className="flex items-baseline gap-2">
-            <span className="text-xs font-semibold text-text-tertiary uppercase tracking-wider">Prompt</span>
-            {selectedSkills.length > 0 && (
-              <span className="text-xs text-text-tertiary font-normal normal-case">optional — skills define default behavior</span>
-            )}
-          </label>
-          <Button
-            type="button"
-            variant="secondary"
-            size="sm"
-            onClick={handleImprove}
-            disabled={isSystemAgent || improving || agentPrompt.trim().length < 3}
-            title={isSystemAgent ? 'Built-in agent prompt is fixed' : 'Rewrite this prompt using project context (CLAUDE.md + selected skills/docs)'}
-            className="rounded-md text-text-secondary hover:text-accent hover:border-accent/40"
-          >
-            {improving
-              ? <Spinner color="accent" />
-              : null}
-            <span>{improving ? 'Improving…' : 'Improve'}</span>
-          </Button>
-        </div>
-        <textarea
-          id="agent-prompt"
-          className="w-full px-3 py-2 text-sm bg-bg-secondary border border-border rounded-lg text-text-primary placeholder:text-text-tertiary focus:outline-none focus:ring-2 focus:ring-accent/40 focus:border-accent transition-colors font-mono resize-y disabled:opacity-60 disabled:cursor-not-allowed"
-          rows={10}
-          value={agentPrompt}
-          onChange={(e) => setAgentPrompt(e.target.value)}
-          placeholder={selectedSkills.length > 0
-            ? 'Optional: repo-specific hints to append to the skill (e.g. "focus on lib/auth").'
-            : 'What should this agent do when it runs?'}
-          disabled={isSystemAgent}
-          title={isSystemAgent ? 'Built-in agent prompt is fixed' : undefined}
-        />
-      </div>
-
-      {/* Prerequisite command */}
-      <div>
-        <label htmlFor="agent-prerequisite" className="flex items-baseline gap-2 mb-1.5">
+        <label htmlFor="agent-prerequisite" className="flex items-baseline gap-2 mb-1.5 flex-wrap">
           <span className="text-xs font-semibold text-text-tertiary uppercase tracking-wider">Prerequisite Command</span>
           <span className="text-xs text-text-tertiary font-normal normal-case">optional — runs before the agent; output injected into the prompt</span>
         </label>
-        <input
+        <textarea
           id="agent-prerequisite"
-          type="text"
-          className="w-full px-3 py-2 text-sm bg-bg-secondary border border-border rounded-lg text-text-primary placeholder:text-text-tertiary focus:outline-none focus:ring-2 focus:ring-accent/40 focus:border-accent transition-colors font-mono disabled:opacity-60 disabled:cursor-not-allowed"
+          className="w-full px-3 py-2 text-sm bg-bg-secondary border border-border rounded-lg text-text-primary placeholder:text-text-tertiary focus:outline-none focus:ring-2 focus:ring-accent/40 focus:border-accent transition-colors font-mono resize-y disabled:opacity-60 disabled:cursor-not-allowed"
+          rows={4}
           value={prerequisiteCommand}
           onChange={(e) => setPrerequisiteCommand(e.target.value)}
           placeholder="e.g. pnpm test"
           disabled={isSystemAgent}
           title={isSystemAgent ? 'Built-in agent prerequisite is fixed' : undefined}
+          spellCheck={false}
         />
       </div>
 
@@ -467,52 +517,6 @@ export function AgentEditor({
             )}
           </div>
         )}
-      </div>
-
-      {/* Settings strip: Schedule / Enabled */}
-      <div className="flex items-center gap-4 px-3 py-2.5 rounded-lg bg-bg-secondary border border-border flex-wrap">
-        <div className="flex items-center gap-2 flex-1 min-w-[160px]">
-          <span className="text-xs text-text-tertiary whitespace-nowrap font-medium">Schedule</span>
-          <select
-            id="agent-schedule"
-            className="flex-1 min-w-0 px-2 py-1.5 text-xs bg-bg-primary border border-border rounded-md text-text-primary focus:outline-none focus:ring-1 focus:ring-accent/40 focus:border-accent transition-colors cursor-pointer disabled:opacity-60 disabled:cursor-not-allowed"
-            value={schedule}
-            onChange={(e) => setSchedule(e.target.value)}
-            disabled={isSystemAgent}
-            title={isSystemAgent ? 'Set in Settings → Retrieval' : undefined}
-          >
-            <option value="">Manual</option>
-            {SCHEDULES.map(s => <option key={s} value={s}>every {s}</option>)}
-          </select>
-        </div>
-        <div className="w-px h-4 bg-border shrink-0" />
-        <button
-          type="button"
-          role="switch"
-          aria-checked={enabled}
-          onClick={() => setEnabled(!enabled)}
-          className="flex items-center gap-2 cursor-pointer shrink-0"
-        >
-          <div className={`relative w-9 h-5 rounded-full transition-colors ${enabled ? 'bg-accent' : 'bg-bg-tertiary border border-border'}`}>
-            <div className={`absolute top-0.5 w-4 h-4 rounded-full bg-white shadow-sm transition-all duration-150 ${enabled ? 'left-[18px]' : 'left-0.5'}`} />
-          </div>
-          <span className="text-xs text-text-secondary font-medium">Enabled</span>
-        </button>
-        <div className="w-px h-4 bg-border shrink-0" />
-        <button
-          type="button"
-          role="switch"
-          aria-checked={boostable}
-          onClick={() => setBoostable(!boostable)}
-          disabled={isSystemAgent}
-          className="flex items-center gap-2 cursor-pointer shrink-0 disabled:opacity-50 disabled:cursor-not-allowed"
-          title="When off, the orchestrator never picks this agent for catch-up boost fires — it only runs on its own schedule. Use for blog/social-post style agents."
-        >
-          <div className={`relative w-9 h-5 rounded-full transition-colors ${boostable ? 'bg-accent' : 'bg-bg-tertiary border border-border'}`}>
-            <div className={`absolute top-0.5 w-4 h-4 rounded-full bg-white shadow-sm transition-all duration-150 ${boostable ? 'left-[18px]' : 'left-0.5'}`} />
-          </div>
-          <span className="text-xs text-text-secondary font-medium">Boostable</span>
-        </button>
       </div>
 
       {/* Footer */}

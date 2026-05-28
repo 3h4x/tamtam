@@ -23,6 +23,8 @@ const WINDOW_OPTIONS: Array<{ value: Window; label: string }> = [
   { value: '30d', label: '30d' },
   { value: 'all', label: 'all' },
 ]
+// usage-history is bounded to 14d server-side, so 30d / all collapse to the max.
+const WINDOW_HOURS: Record<Window, number> = { '24h': 24, '7d': 168, '30d': 336, all: 336 }
 type SortKey = 'project' | 'runs' | 'totalTokens' | 'costUsd' | 'lastRunAt'
 
 function fmtTokens(n: number): string {
@@ -186,7 +188,7 @@ export function StatsPage() {
 
   if (loading && !data) {
     return (
-      <div className="max-w-6xl mx-auto space-y-6">
+      <div className="w-full space-y-6">
         <div className="skeleton h-11 w-full rounded-lg" />
         <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
           {Array.from({ length: 4 }).map((_, i) => <div key={i} className="skeleton h-20 rounded-lg" />)}
@@ -198,7 +200,7 @@ export function StatsPage() {
 
   if (error || !data) {
     return (
-      <div className="max-w-6xl mx-auto">
+      <div className="w-full">
         <ErrorState
           message={error ?? 'No usage data available.'}
           hint="Token usage data is collected from each Claude run's result event."
@@ -209,7 +211,7 @@ export function StatsPage() {
   }
 
   return (
-    <div className="max-w-6xl mx-auto space-y-6">
+    <div className="w-full space-y-6">
       {/* Header bar */}
       <div className="flex items-center gap-3 flex-wrap">
         <div>
@@ -233,20 +235,8 @@ export function StatsPage() {
         </div>
       </div>
 
-      <BridgeOverview />
-
-      <section className="border border-border rounded-lg p-4 bg-bg-primary">
-        <div className="flex items-center justify-between mb-3">
-          <h2 className="text-sm font-medium text-text-primary">Tokens / hour (last 48h)</h2>
-          <span className="text-xs text-text-tertiary">actual burn vs steady pace vs to-100% rate</span>
-        </div>
-        <UsageHistoryChart />
-      </section>
-
-      <QuotaWidget providers={budgetProviders} warnAt={warnAt} blockAt={blockAt} compact />
-
       {/* Totals */}
-      <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
+      <div className="grid grid-cols-2 lg:grid-cols-4 gap-3">
         <StatCard
           label="Total cost"
           value={fmtUsd(data.totals.costUsd)}
@@ -269,6 +259,21 @@ export function StatsPage() {
           value={data.totals.runs.toLocaleString()}
           sub={`across ${data.projects.length} project${data.projects.length === 1 ? '' : 's'}`}
         />
+      </div>
+
+      {/* Burn chart + bridge + quota row */}
+      <div className="grid grid-cols-1 xl:grid-cols-3 gap-4">
+        <section className="border border-border rounded-lg p-4 bg-bg-primary xl:col-span-2">
+          <div className="flex items-center justify-between mb-3">
+            <h2 className="text-sm font-medium text-text-primary">Tokens / hour ({WINDOW_LABELS[window_]})</h2>
+            <span className="text-xs text-text-tertiary">actual burn vs steady pace vs to-100% rate</span>
+          </div>
+          <UsageHistoryChart hours={WINDOW_HOURS[window_]} />
+        </section>
+        <div className="space-y-4">
+          <BridgeOverview />
+          <QuotaWidget providers={budgetProviders} warnAt={warnAt} blockAt={blockAt} compact />
+        </div>
       </div>
 
       {/* Table */}

@@ -8,6 +8,7 @@ import { describe, it, expect, beforeAll, afterAll, vi } from 'vitest';
 const _require = createRequire(import.meta.url);
 const shim = _require(join(process.cwd(), 'scripts/codex-shim.js')) as {
   resolveModel: (model: string, env?: Partial<NodeJS.ProcessEnv>) => string;
+  brokerConfigFlags: (env?: Partial<NodeJS.ProcessEnv>) => string[];
   permissionArgsFor: (mode: string) => string[];
   sandboxFor: (mode: string) => string;
   approvalFor: (mode: string) => string;
@@ -89,6 +90,27 @@ describe.concurrent('codex-shim', () => {
   it('maps plan to read-only sandbox with on-request approval', () => {
     const args = shim.permissionArgsFor('plan');
     expect(args).toEqual(['-a', 'on-request', '--sandbox', 'read-only']);
+  });
+
+  it('injects Codex streamable HTTP MCP config from the selected broker endpoint', () => {
+    expect(shim.brokerConfigFlags({
+      TAMTAM_BROKER_URL: 'http://127.0.0.1:9000',
+      TAMTAM_BROKER_MCP_URL: 'http://127.0.0.1:9000/mcp',
+    })).toEqual([
+      '-c',
+      'mcp_servers.tamtam_browser.url="http://127.0.0.1:9000/mcp"',
+    ]);
+  });
+
+  it('keeps Codex SSE transport config for legacy broker endpoints', () => {
+    expect(shim.brokerConfigFlags({
+      TAMTAM_BROKER_MCP_URL: 'http://127.0.0.1:9000/sse',
+    })).toEqual([
+      '-c',
+      'mcp_servers.tamtam_browser.url="http://127.0.0.1:9000/sse"',
+      '-c',
+      'mcp_servers.tamtam_browser.transport="sse"',
+    ]);
   });
 
   it('maps dontAsk to workspace-write sandbox without approval prompts', () => {

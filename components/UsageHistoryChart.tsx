@@ -122,7 +122,7 @@ function ProviderChart({
       </div>
       {!hasAnyTokens && !hasAnyRate ? (
         <div className="w-full h-40 bg-bg-secondary rounded flex items-center justify-center text-xs text-text-tertiary px-4 text-center">
-          No jobs routed to this provider in the last 48h. Agents currently run elsewhere; this chart will populate once a job completes here.
+          No jobs routed to this provider in this window. Agents currently run elsewhere; this chart will populate once a job completes here.
         </div>
       ) : (
       <div className="w-full h-40 bg-bg-secondary rounded">
@@ -199,7 +199,7 @@ function ProviderChart({
   )
 }
 
-export function UsageHistoryChart() {
+export function UsageHistoryChart({ hours = 24 }: { hours?: number } = {}) {
   const [data, setData] = useState<UsageHistoryResponse | null>(null)
   const [error, setError] = useState<string | null>(null)
   // Single-chart view: tab selector. Default shows the aggregate; clicking a
@@ -210,7 +210,7 @@ export function UsageHistoryChart() {
     let cancelled = false
     const load = async () => {
       try {
-        const res = await fetch('/api/stats/usage-history?hours=48')
+        const res = await fetch(`/api/stats/usage-history?hours=${hours}`)
         if (!res.ok) throw new Error(`HTTP ${res.status}`)
         const json = (await res.json()) as UsageHistoryResponse
         if (!cancelled) setData(json)
@@ -224,7 +224,7 @@ export function UsageHistoryChart() {
       cancelled = true
       clearInterval(id)
     }
-  }, [])
+  }, [hours])
 
   if (error) return <div className="text-sm text-status-error">usage-history: {error}</div>
   if (!data) return <div className="text-sm text-text-tertiary">Loading usage history…</div>

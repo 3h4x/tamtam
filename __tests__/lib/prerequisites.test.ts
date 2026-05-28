@@ -6,8 +6,10 @@ import { describe, expect, it } from 'vitest'
 import {
   IMPROVE_SKILL_ID,
   ISSUE_CRUNCHER_SKILL_ID,
+  QA_SKILL_ID,
   buildImprovePrerequisiteCommand,
   buildIssueCruncherPrerequisiteCommand,
+  buildQaPrerequisiteCommand,
   hasImproveSkill,
   hasIssueCruncherSkill,
   normalizeStoredPrerequisiteCommand,
@@ -181,6 +183,29 @@ describe('prerequisite helpers', () => {
     expect(resolveAgentPrerequisiteCommand({
       project: 'proj',
       skillIds: [ISSUE_CRUNCHER_SKILL_ID, IMPROVE_SKILL_ID],
+      prerequisiteCommand: undefined,
+    })).toBe(buildIssueCruncherPrerequisiteCommand('proj'))
+  })
+
+  it('builds the qa prereq to fetch project config from the host loopback', () => {
+    const cmd = buildQaPrerequisiteCommand('repo name/with space')
+    expect(cmd).toContain('curl -fsS "http://localhost:1337/api/projects/by-project/repo%20name%2Fwith%20space/config"')
+    expect(cmd).toMatch(/QA target config/)
+    expect(cmd).toContain('tamtam config service unreachable')
+  })
+
+  it('auto-attaches the qa prereq for qa-skilled agents with no stored command', () => {
+    expect(resolveAgentPrerequisiteCommand({
+      project: 'proj',
+      skillIds: [QA_SKILL_ID],
+      prerequisiteCommand: undefined,
+    })).toBe(buildQaPrerequisiteCommand('proj'))
+  })
+
+  it('issue-cruncher still wins over qa when both skills are present', () => {
+    expect(resolveAgentPrerequisiteCommand({
+      project: 'proj',
+      skillIds: [ISSUE_CRUNCHER_SKILL_ID, QA_SKILL_ID],
       prerequisiteCommand: undefined,
     })).toBe(buildIssueCruncherPrerequisiteCommand('proj'))
   })

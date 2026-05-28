@@ -137,20 +137,22 @@ function approvalFor(mode) {
   return 'never';
 }
 
-// TamTam writes the broker URL into TAMTAM_BROKER_URL when the per-run MCP
-// config is being injected. Codex doesn't have a `--mcp-config <file>` flag
-// — it reads from $CODEX_HOME/config.toml or `-c <key>=<value>` overrides.
-// Using `-c` keeps the user's normal CODEX_HOME (auth + sessions) intact and
-// just appends the broker MCP server inline.
+// TamTam writes the selected broker MCP endpoint into TAMTAM_BROKER_MCP_URL
+// when the per-run MCP config is being injected. Codex doesn't have a
+// `--mcp-config <file>` flag — it reads from $CODEX_HOME/config.toml or
+// `-c <key>=<value>` overrides. Using `-c` keeps the user's normal CODEX_HOME
+// (auth + sessions) intact and just appends the broker MCP server inline.
 function brokerConfigFlags(env) {
   const e = env || process.env;
-  const url = e.TAMTAM_BROKER_URL;
-  if (!url) return [];
-  const sse = `${url}/sse`;
-  return [
-    '-c', `mcp_servers.tamtam_browser.url="${sse}"`,
-    '-c', `mcp_servers.tamtam_browser.transport="sse"`,
+  const mcpUrl = e.TAMTAM_BROKER_MCP_URL || (e.TAMTAM_BROKER_URL ? `${e.TAMTAM_BROKER_URL}/mcp` : '');
+  if (!mcpUrl) return [];
+  const flags = [
+    '-c', `mcp_servers.tamtam_browser.url="${mcpUrl}"`,
   ];
+  if (mcpUrl.endsWith('/sse')) {
+    flags.push('-c', 'mcp_servers.tamtam_browser.transport="sse"');
+  }
+  return flags;
 }
 
 function permissionArgsFor(mode, env) {
@@ -652,4 +654,4 @@ if (require.main === module) (async () => {
   }
 })();
 
-module.exports = { resolveModel, permissionArgsFor, sandboxFor, approvalFor };
+module.exports = { resolveModel, brokerConfigFlags, permissionArgsFor, sandboxFor, approvalFor };

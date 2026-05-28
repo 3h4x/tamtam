@@ -5,6 +5,7 @@ import { tmpdir } from 'os';
 export interface WriteRunMcpConfigOptions {
   jobId: string;
   brokerUrl: string;
+  brokerMcpUrl?: string;
   allowedOrigins: string[];
   provider: 'claude' | 'codex' | 'gemini' | 'lmstudio' | 'deepagents';
 }
@@ -23,8 +24,9 @@ export function writeRunMcpConfig(opts: WriteRunMcpConfigOptions): WrittenMcpCon
   const runDir = runDirFor(opts.jobId);
   mkdirSync(/*turbopackIgnore: true*/ runDir, { recursive: true });
 
-  const sseUrl = `${opts.brokerUrl}/sse`;
+  const mcpUrl = opts.brokerMcpUrl ?? `${opts.brokerUrl}/mcp`;
   const allowedOriginsCsv = opts.allowedOrigins.join(',');
+  const transportType = mcpUrl.endsWith('/sse') ? 'sse' : 'http';
 
   // Claude reads its MCP config from a file path passed via --mcp-config.
   // Write a fresh JSON per run so the broker URL stays current as the
@@ -32,8 +34,8 @@ export function writeRunMcpConfig(opts: WriteRunMcpConfigOptions): WrittenMcpCon
   const claudeConfig = {
     mcpServers: {
       tamtam_browser: {
-        type: 'sse' as const,
-        url: sseUrl,
+        type: transportType,
+        url: mcpUrl,
       },
     },
   };
@@ -50,6 +52,7 @@ export function writeRunMcpConfig(opts: WriteRunMcpConfigOptions): WrittenMcpCon
     env: {
       TAMTAM_MCP_CONFIG_PATH: claudeConfigPath,
       TAMTAM_BROKER_URL: opts.brokerUrl,
+      TAMTAM_BROKER_MCP_URL: mcpUrl,
       TAMTAM_ALLOWED_ORIGINS: allowedOriginsCsv,
     },
   };
