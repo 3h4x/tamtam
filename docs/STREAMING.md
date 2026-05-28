@@ -12,8 +12,6 @@ TamTam's streamed runs share the same infrastructure: the Next.js server spawns 
 
 ---
 
----
-
 ## Common job lifecycle
 
 ```
