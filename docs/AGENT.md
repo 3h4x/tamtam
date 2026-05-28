@@ -621,8 +621,9 @@ The workflow world is started by `instrumentation-node.ts` at boot. If it fails 
 | `app/api/agents/[agentId]/route.ts` | Get, update, delete agents |
 | `app/api/agents/[agentId]/run/route.ts` | Run agent on-demand (skill composition happens here) |
 | `app/api/agents/scheduler-health/route.ts` | Scheduler reconciliation + health view |
-| `lib/scheduling/agent-scheduler.ts` | Schedule install/uninstall (thin facade over the internal scheduler) |
-| `lib/scheduling/internal-scheduler.ts` | In-process schedule timers, skip reasons, live state |
+| `lib/scheduling/agent-scheduler.ts` | Schedule install/uninstall facade backed by graphile-worker |
+| `lib/workflows/cron/seed-agent-crons.ts` | Boot-time schedule seeding and graphile-worker queue reconciliation |
+| `lib/workflows/cron/agent-cron-task.ts` | Scheduled-agent fire handling, runtime gates, and next-fire re-enqueue |
 | `components/AgentsTab.tsx` | UI for agent management |
 | `instrumentation-node.ts` | Boot-time scheduler install + other Node-only startup work |
 
