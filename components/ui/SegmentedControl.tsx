@@ -12,6 +12,7 @@ export interface SegmentedControlProps<T extends string> {
   value: T
   ariaLabel: string
   className?: string
+  disabled?: boolean
   onChange: (value: T) => void
 }
 
@@ -20,6 +21,7 @@ export function SegmentedControl<T extends string>({
   value,
   ariaLabel,
   className = '',
+  disabled = false,
   onChange,
 }: SegmentedControlProps<T>) {
   return (
@@ -34,7 +36,8 @@ export function SegmentedControl<T extends string>({
           <button
             key={option.value}
             type="button"
-            className={`cursor-pointer border-none px-2.5 py-1 text-xs font-medium transition-colors ${
+            disabled={disabled}
+            className={`cursor-pointer border-none px-2.5 py-1 text-xs font-medium transition-colors disabled:cursor-not-allowed disabled:opacity-60 ${
               active
                 ? 'bg-accent text-white'
                 : 'bg-bg-secondary text-text-secondary hover:bg-bg-tertiary hover:text-text-primary'
