@@ -12,6 +12,7 @@ export type ButtonVariant =
   | 'danger-solid'// solid red — confirmed destructive action
   | 'warning'     // amber border + translucent bg
   | 'info'        // blue border + translucent bg
+  | 'link'        // inline text-accent link — for inline prose/header actions
 
 export type ButtonSize = 'sm' | 'md'
 export type ButtonDisabledCursor = 'not-allowed' | 'default' | 'wait'
@@ -19,12 +20,20 @@ export type ButtonDisabledCursor = 'not-allowed' | 'default' | 'wait'
 const BASE =
   'inline-flex items-center gap-1.5 font-medium transition-colors cursor-pointer no-underline disabled:opacity-50'
 
+const LINK_BASE =
+  'inline cursor-pointer text-accent hover:underline transition-colors disabled:opacity-50'
+
 const SIZE: Record<ButtonSize, string> = {
   sm: 'px-2 py-1 text-xs rounded',
   md: 'px-3 py-1.5 text-sm rounded-md',
 }
 
-const VARIANT: Record<ButtonVariant, string> = {
+const LINK_TEXT_SIZE: Record<ButtonSize, string> = {
+  sm: 'text-xs',
+  md: 'text-sm',
+}
+
+const VARIANT: Record<Exclude<ButtonVariant, 'link'>, string> = {
   secondary:    'border border-border bg-bg-secondary text-text-primary hover:bg-bg-tertiary',
   primary:      'border border-accent bg-accent/10 text-accent hover:bg-accent/20',
   solid:        'border border-transparent bg-accent text-white hover:bg-accent-hover',
@@ -53,6 +62,9 @@ export function buttonVariants({
   disabledCursor?: ButtonDisabledCursor
   className?: string
 } = {}): string {
+  if (variant === 'link') {
+    return [LINK_BASE, LINK_TEXT_SIZE[size], DISABLED_CURSOR[disabledCursor], className].filter(Boolean).join(' ')
+  }
   return [BASE, SIZE[size], VARIANT[variant], DISABLED_CURSOR[disabledCursor], className].filter(Boolean).join(' ')
 }
 
