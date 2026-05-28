@@ -11,6 +11,7 @@ import {
   Tooltip,
   ReferenceLine,
 } from 'recharts'
+import { SegmentedControl } from '@/components/ui/SegmentedControl'
 
 interface UsageHistoryBucket {
   bucketTs: number
@@ -241,25 +242,14 @@ export function UsageHistoryChart() {
 
   return (
     <div className="flex flex-col gap-3">
-      <div className="flex flex-wrap gap-1">
-        {tabs.map((t) => {
-          const isActive = t.key === active.key
-          return (
-            <button
-              key={t.key}
-              type="button"
-              onClick={() => setSelected(t.key)}
-              className={`px-2 py-0.5 text-xs rounded border transition-colors ${
-                isActive
-                  ? 'border-status-info text-status-info bg-bg-primary'
-                  : 'border-border text-text-tertiary bg-bg-secondary hover:bg-bg-hover'
-              }`}
-            >
-              {t.label}
-            </button>
-          )
-        })}
-      </div>
+      <SegmentedControl
+        ariaLabel="Provider"
+        options={tabs.map((t) => ({ value: t.key, label: t.label }))}
+        value={active.key}
+        onChange={setSelected}
+        className="self-start"
+      />
+
       <ProviderChart
         label={active.key === 'avg' ? 'all providers · average' : `${active.series.provider} · 7d window`}
         series={active.series}
