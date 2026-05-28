@@ -9,6 +9,7 @@ import { OllamaUsageCard } from './OllamaUsageCard'
 import { QuotaWidget } from './QuotaWidget'
 import { BridgeOverview } from './BridgeOverview'
 import { UsageHistoryChart } from './UsageHistoryChart'
+import { SegmentedControl } from '@/components/ui/SegmentedControl'
 import {
   normalizeBudgetSubscriptionProviders,
   type BudgetSubscriptionProvider,
@@ -16,6 +17,12 @@ import {
 
 type Window = '24h' | '7d' | '30d' | 'all'
 const WINDOW_LABELS: Record<Window, string> = { '24h': '24 hours', '7d': '7 days', '30d': '30 days', all: 'All time' }
+const WINDOW_OPTIONS: Array<{ value: Window; label: string }> = [
+  { value: '24h', label: '24h' },
+  { value: '7d', label: '7d' },
+  { value: '30d', label: '30d' },
+  { value: 'all', label: 'all' },
+]
 type SortKey = 'project' | 'runs' | 'totalTokens' | 'costUsd' | 'lastRunAt'
 
 function fmtTokens(n: number): string {
@@ -214,21 +221,12 @@ export function StatsPage() {
           </p>
         </div>
         <div className="ml-auto flex items-center gap-2">
-          <div className="flex items-center gap-0.5 rounded border border-border overflow-hidden">
-            {(['24h', '7d', '30d', 'all'] as Window[]).map((w) => (
-              <button
-                key={w}
-                className={`text-xs px-2.5 py-1 border-none cursor-pointer font-medium transition-colors ${
-                  window_ === w
-                    ? 'bg-accent text-white'
-                    : 'text-text-secondary hover:text-text-primary bg-bg-secondary hover:bg-bg-tertiary'
-                }`}
-                onClick={() => { setWindow(w); setLoading(true) }}
-              >
-                {w}
-              </button>
-            ))}
-          </div>
+          <SegmentedControl
+            options={WINDOW_OPTIONS}
+            value={window_}
+            ariaLabel="Stats time window"
+            onChange={(w) => { setWindow(w); setLoading(true) }}
+          />
           <span className="text-xs text-text-tertiary">
             {loading ? 'Refreshing…' : `Updated ${new Date(data.generatedAt).toLocaleTimeString()}`}
           </span>
