@@ -244,6 +244,60 @@ test.describe('Runs page non-release live polling', () => {
     })
   })
 
+  test('active running filter turns into an empty state when its only job completes', async ({ page }) => {
+    let serveRunning = true
+
+    await stubRunsShellRoutes(page)
+    await page.route('**/api/jobs?limit=200', (route: Route) => {
+      const running = serveRunning
+      route.fulfill({
+        json: {
+          jobs: [
+            makeJob({
+              id: 'chat-run-filter-complete-1',
+              project: RUN_PROJECT,
+              kind: 'run',
+              prompt: 'Check the live filter state',
+              user_prompt: 'Check the live filter state',
+              session_id: 'sess-chat-run-filter-complete-1',
+              status: running ? 'running' : 'done',
+              exit_code: running ? null : 0,
+              started_at: now() - 60,
+              finished_at: running ? null : now() - 5,
+              work_summary: running ? 'Checking active work' : 'Live filter check complete',
+            }),
+          ],
+          total: 1,
+          pendingReleaseProjects: [],
+        },
+      })
+    })
+
+    await page.goto('/runs')
+
+    const row = runRow(page, RUN_PROJECT)
+    await expect(row).toBeVisible({ timeout: 8_000 })
+    await expect(row.getByLabel('running')).toBeVisible()
+
+    await page.getByRole('button', { name: /^running/ }).click()
+    await expect(row).toBeVisible()
+    await expect(page.getByText('Nothing is running right now')).toHaveCount(0)
+
+    serveRunning = false
+
+    await expect(page.getByText('Nothing is running right now')).toBeVisible({
+      timeout: 12_000,
+    })
+    await expect(page.getByText('There is no active run in all projects right now.')).toBeVisible()
+    await expect(row).toHaveCount(0)
+
+    await page.getByRole('button', { name: /^done/ }).click()
+    const doneRow = runRow(page, RUN_PROJECT)
+    await expect(doneRow).toBeVisible()
+    await expect(doneRow.getByLabel('done')).toBeVisible()
+    await expect(doneRow.getByText('Live filter check complete')).toBeVisible()
+  })
+
   test('agent row flips from running to cancelled without disturbing a concurrent chat run', async ({ page }) => {
     let pollCount = 0
 

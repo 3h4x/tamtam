@@ -1,7 +1,7 @@
-// Broker image is the upstream Playwright image; `@playwright/mcp` is fetched
-// at container start via npx. Pinning here so a Playwright release can't change
-// behavior under us. Tag updates go through a docs/SETTINGS.md entry.
-export const BROKER_IMAGE = 'mcr.microsoft.com/playwright:v1.59.1-noble';
+// Broker image has @playwright/mcp preinstalled, so the default startup path
+// works in offline/restricted CI. Custom non-MCP images still use the legacy
+// npx fallback to preserve existing broker image overrides.
+export const BROKER_IMAGE = 'mcr.microsoft.com/playwright/mcp:v0.0.30';
 
 export const BROKER_MCP_PACKAGE = '@playwright/mcp@0.0.30';
 

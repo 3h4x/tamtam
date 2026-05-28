@@ -10,7 +10,7 @@ keeps the sandbox narrow.
 
 A long-lived docker container managed by TamTam:
 
-- Image: `mcr.microsoft.com/playwright:v1.59.1-noble` + `@playwright/mcp` (fetched via `npx` at container start).
+- Image: `mcr.microsoft.com/playwright/mcp:v0.0.30` with `@playwright/mcp` preinstalled. Non-MCP image overrides are still supported through the legacy `npx -y @playwright/mcp@0.0.30` startup path.
 - Listens on `0.0.0.0:9333` inside the container, published only on `127.0.0.1:<dynamic>` on the host.
 - One broker per TamTam process. Per-run `BrowserContext` isolates cookies/storage between agent runs.
 
@@ -23,7 +23,7 @@ The sandbox itself is narrowed: only `127.0.0.1` egress, no docker socket, no ar
 | Key | Default | Effect |
 |---|---|---|
 | `browser_broker_enabled` | `false` | Master switch. Off = no broker, no MCP injection. |
-| `browser_broker_image` | `mcr.microsoft.com/playwright:v1.59.1-noble` | Pin override (defense in depth: if upstream pushes a bad image, change here). |
+| `browser_broker_image` | `mcr.microsoft.com/playwright/mcp:v0.0.30` | Pin override (defense in depth: if upstream pushes a bad image, change here). The pinned MCP image starts from its preinstalled CLI; custom non-MCP images start `@playwright/mcp` through `npx`. |
 | `tamtam_network_policy_strict` | `false` | When `true` on macOS: wraps the spawned CLI in `sandbox-exec -f scripts/sandbox-profiles/tamtam-loopback.sb`. Loopback-only egress, docker socket blocked. |
 
 `permission_mode=bypassPermissions` skips the sandbox wrap entirely — it's the explicit escape hatch for power users.
@@ -34,7 +34,7 @@ The sandbox itself is narrowed: only `127.0.0.1` egress, no docker socket, no ar
 TamTam process (unsandboxed)
   ├─ lib/browser-broker/
   │   ├─ container-lifecycle.ts  → docker run/stop/health
-  │   ├─ image.ts                → pinned image + MCP package version
+  │   ├─ image.ts                → pinned MCP image
   │   ├─ port-allocator.ts       → random loopback port in 49152-65535
   │   ├─ origin-allowlist.ts     → project qa_url / dev_server_ready_url / website
   │   ├─ mcp-config-writer.ts    → per-run Claude JSON + Codex TOML

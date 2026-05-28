@@ -180,7 +180,7 @@ describe('config', () => {
         retrieval_manage_ollama: true,
         retrieval_reindex_interval_hours: 16,
         browser_broker_enabled: false,
-        browser_broker_image: 'mcr.microsoft.com/playwright:v1.59.1-noble',
+        browser_broker_image: 'mcr.microsoft.com/playwright/mcp:v0.0.30',
         tamtam_network_policy_strict: false,
         orchestrator_enabled: false,
         orchestrator_boost_margin_pct: 5,
@@ -206,6 +206,15 @@ describe('config', () => {
       const config = getSettings();
 
       expect(config.github_owner).toBe('octocat');
+    });
+
+    it('normalizes the retired browser broker base image to the MCP image', async () => {
+      await setSetting('browser_broker_image', 'mcr.microsoft.com/playwright:v1.59.1-noble');
+      await refresh();
+
+      const config = getSettings();
+
+      expect(config.browser_broker_image).toBe('mcr.microsoft.com/playwright/mcp:v0.0.30');
     });
 
     it('parses stored GitHub board settings', async () => {

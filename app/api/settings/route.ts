@@ -3,6 +3,7 @@ import { eq } from 'drizzle-orm';
 import { db, schema } from '@/lib/db';
 import {
   buildConfigFromSettingsMap,
+  normalizeBrowserBrokerImage,
   normalizePermissionMode,
   reloadConfig,
   REVIEW_DO_NOT_SHIP_ACTIONS,
@@ -138,6 +139,7 @@ async function buildSettingsResponse(): Promise<Record<string, string>> {
   settings.review_do_not_ship_action = serializeSettingValue('review_do_not_ship_action', effective.review_do_not_ship_action);
   settings.release_wall_clock_timeout_minutes = serializeSettingValue('release_wall_clock_timeout_minutes', effective.release_wall_clock_timeout_minutes);
   settings.plain_test_phase_enabled = serializeSettingValue('plain_test_phase_enabled', effective.plain_test_phase_enabled);
+  settings.browser_broker_image = serializeSettingValue('browser_broker_image', effective.browser_broker_image);
   if (effective.cli_bin_claude) {
     settings.cli_bin_claude = serializeSettingValue('cli_bin_claude', effective.cli_bin_claude);
   }
@@ -256,6 +258,9 @@ function serializeSettingValue(key: string, value: unknown): string {
   }
   if (key === 'budget_subscription_providers') {
     return encodeBudgetSubscriptionProviders(normalizeBudgetSubscriptionProviders(String(value)));
+  }
+  if (key === 'browser_broker_image') {
+    return normalizeBrowserBrokerImage(String(value));
   }
   if (key === 'cli_enabled_providers') {
     if (Array.isArray(value)) {

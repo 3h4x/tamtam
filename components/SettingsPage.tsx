@@ -156,7 +156,7 @@ const SETTINGS_DEFAULTS: SettingsMap = {
   retrieval_manage_ollama: 'true',
   retrieval_reindex_interval_hours: '16',
   browser_broker_enabled: 'false',
-  browser_broker_image: 'mcr.microsoft.com/playwright:v1.59.1-noble',
+  browser_broker_image: 'mcr.microsoft.com/playwright/mcp:v0.0.30',
   tamtam_network_policy_strict: 'false',
   orchestrator_enabled: 'false',
   orchestrator_boost_margin_pct: '5',

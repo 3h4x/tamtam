@@ -238,7 +238,7 @@ export const FIELDS: Record<SettingsFieldKey, FieldDef> = {
   },
   browser_broker_image: {
     label: 'Broker Image',
-    help: 'Docker image tag for the broker container. Defaults to the pinned Microsoft Playwright base image.',
+    help: 'Docker image tag for the broker container. Defaults to the pinned Microsoft Playwright MCP image.',
     group: 'general',
     subsection: 'browser_broker',
     span: 2,
@@ -590,7 +590,7 @@ export const DEFAULTS: Record<SettingsFieldKey, string> = {
   dirty_worktree_block_threshold: '1',
   incremental_review_enabled: 'true',
   browser_broker_enabled: 'false',
-  browser_broker_image: 'mcr.microsoft.com/playwright:v1.59.1-noble',
+  browser_broker_image: 'mcr.microsoft.com/playwright/mcp:v0.0.30',
   tamtam_network_policy_strict: 'false',
   orchestrator_enabled: 'false',
   orchestrator_boost_margin_pct: '5',

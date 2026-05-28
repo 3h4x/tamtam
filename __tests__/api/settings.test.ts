@@ -91,6 +91,7 @@ describe('settings API', () => {
         review_do_not_ship_action: 'fix',
         release_wall_clock_timeout_minutes: '60',
         plain_test_phase_enabled: 'false',
+        browser_broker_image: 'mcr.microsoft.com/playwright/mcp:v0.0.30',
         provider_fallback_chain: '',
       });
     });
@@ -182,6 +183,18 @@ describe('settings API', () => {
       const data = await response.json();
 
       expect(data.settings.permission_mode).toBe('auto');
+    });
+
+    it('normalizes the retired browser broker image in the API response', async () => {
+      await sharedHandle.db.insert(schema.settings).values({
+        key: 'browser_broker_image',
+        value: 'mcr.microsoft.com/playwright:v1.59.1-noble',
+      });
+
+      const response = await GET();
+      const data = await response.json();
+
+      expect(data.settings.browser_broker_image).toBe('mcr.microsoft.com/playwright/mcp:v0.0.30');
     });
 
     it('falls back to the default review_fix_max_iterations when the stored row is invalid', async () => {
@@ -336,6 +349,24 @@ describe('settings API', () => {
 
       const data = await response.json();
       expect(data.settings.project_sweep_enabled).toBe('true');
+    });
+
+    it('canonicalizes retired browser broker images on save', async () => {
+      const request = new NextRequest('http://localhost/api/settings', {
+        method: 'PATCH',
+        body: JSON.stringify({
+          browser_broker_image: 'mcr.microsoft.com/playwright:v1.59.1-noble',
+        }),
+      });
+      const response = await PATCH(request);
+      expect(response.status).toBe(200);
+
+      const rows = await sharedHandle.db.select().from(schema.settings);
+      const row = rows.find((r) => r.key === 'browser_broker_image');
+      expect(row?.value).toBe('mcr.microsoft.com/playwright/mcp:v0.0.30');
+
+      const data = await response.json();
+      expect(data.settings.browser_broker_image).toBe('mcr.microsoft.com/playwright/mcp:v0.0.30');
     });
 
     it('updates legacy completion hook kill switches and returns them canonically', async () => {
