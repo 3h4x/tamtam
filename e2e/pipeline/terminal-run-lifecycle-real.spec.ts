@@ -9,6 +9,7 @@ import {
 
 const SUCCESS_PROJECT = 'terminal-run-success';
 const CANCEL_PROJECT = 'terminal-run-cancel';
+const FAILURE_PROJECT = 'terminal-run-failure';
 
 test.describe('Terminal run lifecycle', () => {
   test('ordinary run session clears its live badge and shows exit 0 after success', async ({
@@ -98,5 +99,54 @@ test.describe('Terminal run lifecycle', () => {
     await expect(page.getByText('live run')).not.toBeVisible({ timeout: 15_000 });
     await expect(page.getByText('cancelled').first()).toBeVisible({ timeout: 15_000 });
     await expect(page.getByText('exit 0 — ok')).toHaveCount(0);
+  });
+
+  test('ordinary run session clears its live badge and shows exit failure output', async ({
+    page,
+    request,
+  }) => {
+    resetShimState(FAILURE_PROJECT);
+    writeScenario(FAILURE_PROJECT, [
+      {
+        label: 'run',
+        sleep_ms: 3000,
+        text: 'The provider failed before finishing the terminal run.',
+        prompt_assert_contains: ['this text is intentionally absent from the prompt'],
+      },
+    ]);
+    await enableProject(request, FAILURE_PROJECT, { testsDisabled: true });
+
+    const runResp = await request.post(`/api/projects/by-project/${FAILURE_PROJECT}/run`, {
+      data: { prompt: 'Trigger a failing ordinary terminal run.' },
+    });
+    expect(runResp.status(), `run POST failed: ${await runResp.text()}`).toBe(200);
+
+    const runBody = await runResp.json() as { job_id: string };
+    expect(runBody.job_id, 'run job_id in response').toBeTruthy();
+
+    const runningRun = await waitForJobByIdRunning(request, runBody.job_id, 20_000);
+    expect(runningRun, 'terminal run should be running before failure').not.toBeNull();
+
+    await page.goto(`/project/${FAILURE_PROJECT}/terminal?job=${encodeURIComponent(runBody.job_id)}`);
+
+    await expect(page).toHaveURL(new RegExp(`/project/${FAILURE_PROJECT}/terminal/`), {
+      timeout: 20_000,
+    });
+    await expect(page.getByText('live run')).toBeVisible({ timeout: 20_000 });
+    await expect(page.getByText('Trigger a failing ordinary terminal run.')).toBeVisible({
+      timeout: 20_000,
+    });
+
+    const job = await waitForJobCompletion(request, runBody.job_id, 60_000);
+    expect(job?.['exit_code'], 'failed run exit code').toBe(1);
+
+    await expect(page.getByText('live run')).not.toBeVisible({ timeout: 15_000 });
+    await expect(page.getByText('exit 1').first()).toBeVisible({ timeout: 15_000 });
+    await expect(page.getByText('PROMPT ASSERTION FAILED').first()).toBeVisible({
+      timeout: 15_000,
+    });
+    await expect(
+      page.getByText('The provider failed before finishing the terminal run.'),
+    ).toBeVisible({ timeout: 15_000 });
   });
 });
