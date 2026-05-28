@@ -420,20 +420,10 @@ function findLinkedActiveReleaseJob(job: JobData): JobData | null {
   return release;
 }
 
-// Safety net: if the given job is a pipeline step, make sure the active
-// release for its project eventually gets finalized. The normal path is
-// via runCompletionHooks, but races (concurrent probes, a throw mid-hook)
-// can leave the release stranded with all its children already done. This
-// runs cheaply on every markDone call and only acts when the release has
-// no running children and its most recent child finished long enough ago
-// that we're confident nothing else is about to chain.
+// Pipeline child kinds that belong to a release meta-job. Used to silence
+// successful child notifications and to identify jobs owned by release
+// orchestration rather than interactive terminal handling.
 export const PIPELINE_STEP_KINDS = new Set(['test', 'review', 'fix', 'commit', 'push', 'pr-wait', 'mark-dod', 'soak']);
-
-// `reconcileStaleRelease` was retired when chain-loop closure landed: phase
-// workflows now re-dispatch the orchestrator with their sub-step jobId, and
-// the orchestrator finalizes the release meta-job when its dispatch result
-// is terminal. The reconciler's job (re-firing completion hooks when a
-// chain stalled) is no longer needed.
 
 export async function finalizeReleaseJob(release: JobData, exitCode: number): Promise<void> {
   if (release.finishedAt !== null) return;
