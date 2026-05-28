@@ -91,7 +91,7 @@ function makeSettings(overrides: Partial<TamTamConfig> = {}): TamTamConfig {
     outcome_classifier_model: 'gemma3:4b',
     project_sweep_enabled: false,
     browser_broker_enabled: false,
-    browser_broker_image: 'mcr.microsoft.com/playwright:v1.59.1-noble',
+    browser_broker_image: 'mcr.microsoft.com/playwright/mcp:v0.0.30',
     tamtam_network_policy_strict: false,
     orchestrator_enabled: false,
     orchestrator_boost_margin_pct: 5,

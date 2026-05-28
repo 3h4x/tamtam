@@ -17,6 +17,10 @@ import { isCliProvider, parseEnabledProviders, type CliProvider } from '@/lib/us
 export type ReviewDoNotShipAction = 'pass' | 'fix' | 'abort';
 
 export const REVIEW_DO_NOT_SHIP_ACTIONS: readonly ReviewDoNotShipAction[] = ['pass', 'fix', 'abort'];
+const DEFAULT_BROWSER_BROKER_IMAGE = 'mcr.microsoft.com/playwright/mcp:v0.0.30';
+const RETIRED_BROWSER_BROKER_IMAGES = new Set([
+  'mcr.microsoft.com/playwright:v1.59.1-noble',
+]);
 
 function parseReviewDoNotShipAction(
   raw: string | undefined,
@@ -26,6 +30,13 @@ function parseReviewDoNotShipAction(
     return raw as ReviewDoNotShipAction;
   }
   return fallback;
+}
+
+export function normalizeBrowserBrokerImage(raw: string | undefined): string {
+  if (!raw) return DEFAULT_BROWSER_BROKER_IMAGE;
+  const image = raw.trim();
+  if (!image) return DEFAULT_BROWSER_BROKER_IMAGE;
+  return RETIRED_BROWSER_BROKER_IMAGES.has(image) ? DEFAULT_BROWSER_BROKER_IMAGE : image;
 }
 
 export interface TamTamConfig {
@@ -237,7 +248,7 @@ const DEFAULTS: TamTamConfig = {
   outcome_classifier_model: 'gemma3:4b',
   project_sweep_enabled: false,
   browser_broker_enabled: false,
-  browser_broker_image: 'mcr.microsoft.com/playwright:v1.59.1-noble',
+  browser_broker_image: DEFAULT_BROWSER_BROKER_IMAGE,
   tamtam_network_policy_strict: false,
   // Off by default — needs explicit opt-in. When on, the orchestrator-tick
   // graphile task burns spare pace headroom by pushing bonus agent fires at
@@ -520,7 +531,7 @@ export function buildConfigFromSettingsMap(map: Record<string, string>): TamTamC
     outcome_classifier_model: map.outcome_classifier_model ?? DEFAULTS.outcome_classifier_model,
     project_sweep_enabled: map.project_sweep_enabled === 'true',
     browser_broker_enabled: map.browser_broker_enabled === 'true',
-    browser_broker_image: map.browser_broker_image ?? DEFAULTS.browser_broker_image,
+    browser_broker_image: normalizeBrowserBrokerImage(map.browser_broker_image),
     tamtam_network_policy_strict: map.tamtam_network_policy_strict === 'true',
     orchestrator_enabled: map.orchestrator_enabled === 'true',
     orchestrator_boost_margin_pct: parseIntOr(
