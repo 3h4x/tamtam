@@ -168,7 +168,7 @@ Model picker (Fast / Normal / Smart) persists via `PATCH /api/settings` (`defaul
 
 Review and fix jobs also use the provider-backed `stream-json` path, while shell-oriented jobs such as test and push write plain text (or mixed) output to the log. The SSE endpoint works the same way; clients either use `?raw=1` when they need the original log stream or consume the parsed text/tool events.
 
-The pipeline chain in `lib/job-storage.ts` completion hooks reads job output via the log file directly (not SSE) using `getJobLog()` — SSE is only for browser clients.
+The pipeline chain in `lib/jobs/job-storage.ts` completion hooks reads job output via the log file directly (not SSE) using `getJobLog()` — SSE is only for browser clients.
 
 Verdict detection (`getVerdict`) reads the **last 2000 chars** of the parsed log and looks for `Verdict: X` or a bare token on the final line.
 
@@ -189,11 +189,11 @@ Verdict detection (`getVerdict`) reads the **last 2000 chars** of the parsed log
 |------|------|
 | `app/api/streaming/[jobId]/route.ts` | SSE endpoint, tails log file, emits typed events |
 | `lib/claude-stream-parser.ts` | Parses NDJSON lines into typed events |
-| `lib/job-storage.ts` | Job CRUD, `markDone()`, completion hooks, verdict detection |
-| `lib/pm2-jobs.ts` | PM2 process lifecycle, exit handler → `markDone` |
+| `lib/jobs/job-storage.ts` | Job CRUD, `markDone()`, completion hooks, verdict detection |
+| `lib/jobs/spawn-claude-detached.ts` | In-process detached child spawn, exit handler → `markDone` |
 | `components/TerminalTab.tsx` | Terminal UI, SSE client, skill/docs/persona picker, session URL nav |
 | `app/project/[name]/terminal/[sessionId]/page.tsx` | Session-specific route |
-| `app/api/projects/by-project/[name]/run/route.ts` | Starts the selected provider via PM2, stores `contextMeta` |
+| `app/api/projects/by-project/[name]/run/route.ts` | Starts the selected provider in-process, stores `contextMeta` |
 | `app/api/projects/by-project/[name]/docs/route.ts` | Lists `docs/*.md` for docs picker |
 
 ---
