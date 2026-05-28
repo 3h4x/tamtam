@@ -4,6 +4,7 @@ import { useEffect, useState, useCallback } from 'react'
 import { useSearchParams } from 'next/navigation'
 import Link from 'next/link'
 import type { PipelineResponse, VerdictDistribution, DurationStats } from '@/app/api/stats/pipeline/route'
+import { Button } from '@/components/ui/Button'
 import { ErrorState } from './ErrorState'
 
 type Window = '24h' | '7d' | '30d' | 'all'
@@ -297,12 +298,14 @@ export function PipelinePage() {
           <h2 className="text-sm font-medium text-text-primary">Review verdict distribution</h2>
           <p className="text-xs text-text-tertiary mt-0.5">
             Breakdown of all completed reviews · tune{' '}
-            <button
-              className="text-accent hover:underline text-xs"
+            <Button
+              type="button"
+              variant="link"
+              size="sm"
               onClick={() => setShowConfig((v) => !v)}
             >
               verdict rules
-            </button>{' '}
+            </Button>{' '}
             in Settings → Behavior
           </p>
         </div>
