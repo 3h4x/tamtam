@@ -29,6 +29,9 @@ TamTam runs in **production mode** (`next start`) under PM2 — no HMR. After an
 ## Database
 
 - `pnpm db:generate` / `pnpm db:migrate` — Drizzle migrations. Always pair `lib/db/schema.ts` edits with both. Never edit migration files by hand or delete them.
+- `pnpm db:verify [DATABASE_URL]` — verify the live database and required extensions. With no argument, uses `DATABASE_URL`.
+- `pnpm db:verify --backup <path-to-backup.pgdump>` — verify a custom-format backup with `pg_restore --list` without touching the live database.
+- `pnpm db:restore <path-to-backup.pgdump>` — restore a custom-format backup into `DATABASE_URL`; stops TamTam, runs `pg_restore --clean --if-exists --no-owner`, verifies the live DB, then starts TamTam again. See `docs/BACKUP.md`.
 
 ## MCP
 
