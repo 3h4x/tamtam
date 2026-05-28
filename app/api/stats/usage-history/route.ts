@@ -180,10 +180,19 @@ export async function GET(req: Request) {
         const remainingPct = Math.max(0, 100 - u);
         const remainingHours = Math.max(0.001, windowHours - elapsedHours);
         const catchUpTotal = (remainingPct / 100) * planTotal;
-        series.catchUpTokensPerHour = catchUpTotal / remainingHours;
+        // The to-100% rate naturally diverges as remainingHours → 0 (last
+        // minutes of a window with any leftover quota), which is true math
+        // but visually implies a crisis. Cap at 5× the steady-state rate so
+        // the chart stays readable; beyond that the metric isn't actionable
+        // anyway (you can't suddenly burn 100× the normal rate).
+        const TO_100_CAP_RATIO = 5;
+        const rawCatchUp = catchUpTotal / remainingHours;
+        const cap = expectedRate * TO_100_CAP_RATIO;
+        series.catchUpTokensPerHour = Math.min(rawCatchUp, cap);
 
         // Fill per-bucket catch-up rate using the same plan_total proxy. Lets
         // the chart show how headroom has evolved instead of one flat line.
+        // Same cap applied to keep the line in-frame near window reset.
         for (const b of series.buckets) {
           const ub = b.utilizationPct;
           const eb = b.elapsedPct;
@@ -193,7 +202,8 @@ export async function GET(req: Request) {
           if (remainingHoursBucket <= 0.001) continue;
           const remainingPctBucket = Math.max(0, 100 - ub);
           const catchUpTotalBucket = (remainingPctBucket / 100) * planTotal;
-          b.catchUpTokensPerHour = Math.max(0, catchUpTotalBucket / remainingHoursBucket);
+          const rawBucket = catchUpTotalBucket / remainingHoursBucket;
+          b.catchUpTokensPerHour = Math.min(Math.max(0, rawBucket), cap);
         }
       } else {
         // Observed jobs with no usable quota pace cannot derive a plan, but
