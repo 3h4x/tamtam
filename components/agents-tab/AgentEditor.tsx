@@ -224,66 +224,42 @@ export function AgentEditor({
         </div>
         <div className="shrink-0">
           <div className="mb-1.5 text-xs font-semibold text-text-tertiary uppercase tracking-wider">Model</div>
-          <div className="flex gap-px p-0.5 rounded-lg bg-bg-secondary border border-border">
-            {MODELS.map(m => {
-              const label = MODEL_LABELS[m]
-              const desc = MODEL_DESCRIPTIONS[m]
-              const sel = model === m
-              return (
-                <button
-                  key={m}
-                  type="button"
-                  title={desc}
-                  className={`px-3 py-1.5 rounded-md text-xs font-medium cursor-pointer transition-all whitespace-nowrap disabled:opacity-60 disabled:cursor-not-allowed ${
-                    sel
-                      ? 'bg-accent text-white shadow-sm'
-                      : 'text-text-secondary hover:text-text-primary hover:bg-bg-tertiary'
-                  }`}
-                  onClick={() => setModel(m)}
-                  disabled={isSystemAgent}
-                >
-                  {label}
-                </button>
-              )
-            })}
-          </div>
+          <SegmentedControl
+            ariaLabel="Model tier"
+            value={model}
+            onChange={(m) => setModel(m)}
+            disabled={isSystemAgent}
+            options={MODELS.map((m) => ({
+              value: m,
+              label: MODEL_LABELS[m],
+              title: isSystemAgent ? 'Built-in agent model is fixed' : MODEL_DESCRIPTIONS[m],
+            }))}
+          />
         </div>
         <div className="shrink-0">
           <div className="mb-1.5 text-xs font-semibold text-text-tertiary uppercase tracking-wider">Provider</div>
-          <div className="flex gap-px p-0.5 rounded-lg bg-bg-secondary border border-border">
-            <button
-              type="button"
-              className={`px-3 py-1.5 rounded-md text-xs font-medium cursor-pointer transition-all whitespace-nowrap disabled:opacity-60 disabled:cursor-not-allowed ${
-                provider === null
-                  ? 'bg-accent text-white shadow-sm'
-                  : 'text-text-secondary hover:text-text-primary hover:bg-bg-tertiary'
-              }`}
-              onClick={() => setProvider(null)}
-              disabled={isSystemAgent}
-              title={isSystemAgent ? 'Built-in agent provider is fixed' : 'Let TamTam choose any healthy enabled provider at run time'}
-            >
-              any
-            </button>
-            {CLI_PROVIDERS.map((cliProvider) => {
-              const selected = provider === cliProvider
-              return (
-                <button
-                  key={cliProvider}
-                  type="button"
-                  className={`px-3 py-1.5 rounded-md text-xs font-medium cursor-pointer transition-all whitespace-nowrap disabled:opacity-60 disabled:cursor-not-allowed ${
-                    selected
-                      ? 'bg-accent text-white shadow-sm'
-                      : 'text-text-secondary hover:text-text-primary hover:bg-bg-tertiary'
-                  }`}
-                  onClick={() => setProvider(cliProvider)}
-                  disabled={isSystemAgent}
-                  title={isSystemAgent ? 'Built-in agent provider is fixed' : `Require ${cliProvider} for this agent. If it is unavailable or over budget, the run will not start.`}
-                >
-                  {cliProvider}
-                </button>
-              )
-            })}
-          </div>
+          <SegmentedControl<'any' | CliProvider>
+            ariaLabel="CLI provider"
+            value={provider === null ? 'any' : provider}
+            onChange={(v) => setProvider(v === 'any' ? null : v)}
+            disabled={isSystemAgent}
+            options={[
+              {
+                value: 'any',
+                label: 'any',
+                title: isSystemAgent
+                  ? 'Built-in agent provider is fixed'
+                  : 'Let TamTam choose any healthy enabled provider at run time',
+              },
+              ...CLI_PROVIDERS.map((cliProvider) => ({
+                value: cliProvider,
+                label: cliProvider,
+                title: isSystemAgent
+                  ? 'Built-in agent provider is fixed'
+                  : `Require ${cliProvider} for this agent. If it is unavailable or over budget, the run will not start.`,
+              })),
+            ]}
+          />
         </div>
       </div>
 
