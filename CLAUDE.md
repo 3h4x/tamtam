@@ -19,7 +19,7 @@ See `docs/PIPELINE.md` for the full state machine.
 
 ## Tech Stack
 
-Next.js 16 (App Router), React 19, TypeScript 6 strict, Tailwind v4, Drizzle ORM + `pg` (Postgres 16 with `vector` extension; `DATABASE_URL` required), vitest + Playwright, pnpm 11.1.2. Providers: Claude / Gemini / LM Studio / Codex / Deep Agents / custom via CLI shims.
+Next.js 16 (App Router), React 19, TypeScript 6 strict, Tailwind v4, Drizzle ORM + `pg` (Postgres 16 with `vector` extension; `DATABASE_URL` required), vitest + Playwright, pnpm 11.1.2. Providers: Claude / Gemini / LM Studio / Codex / Deep Agents via bundled CLI shims, plus custom Claude-compatible wrappers.
 
 ## Commands
 
@@ -98,7 +98,7 @@ The `rebuild` script is now graceful by default (`scripts/rebuild-safe.sh`): it 
 - **Scheduled agent intervals** are handled by graphile-worker (`lib/workflows/cron/seed-agent-crons.ts`, `lib/workflows/cron/agent-cron-task.ts`, and `lib/workflows/cron/start-cron-worker.ts`), **not PM2 cron** (PM2 `cron_restart` + `--no-autostart` silently no-ops). The worker pool is pinned on `globalThis.__tamtamCronWorker` so Next.js's separate module realms share the same runner.
 - **Per-project agent serialization** (`lib/agents/pending-agent-run.ts`): only one agent runs at a time per project; concurrent calls return HTTP 202 `queued`. Same-agent duplicates return 409.
 - **Background probe sweep** runs every 30s in `instrumentation-node.ts`, resolving hung Claude-CLI jobs and aborting releases past their deadline. `drainBootRecoveryWork` fires once at boot for cross-restart cleanup.
-- **Global pause + budget gates** (`lib/shared/job-control.ts`): when `jobs_paused`, pipeline routes return 409 and the scheduler pauses. When `budget_block_runs_enabled` and active quota > `budget_block_at_pct`, job starts return 429.
+- **Global pause + budget gates** (`lib/shared/job-control.ts`): when `jobs_paused`, pipeline routes return 409 and the scheduler pauses. When `budget_block_runs_enabled` is on, TamTam routes around enabled quota-backed providers at or above `budget_block_at_pct`; if every enabled provider is blocked, job starts return 429.
 - **Auto-attach docs** (`lib/skills/auto-attach-docs.ts`): keyword → project doc, injected on first invocation per session. Wired into terminal run, pipeline review, and agent intake — see `docs/TAMTAM-DIR.md`.
 - **Permission mode** for headless jobs defaults to `auto` — the bundled Claude, Gemini, and Codex shims translate `auto` to provider-native non-interactive flags so writes don't hang. `acceptEdits` and `bypassPermissions` remain available; `plan` is read-only.
 - **QA targets** are DB-backed: `website` is production; `qa_url` is the explicit QA override. Always prefer `qa_url` when both exist. If neither exists, QA flows should stop, not invent a target.
