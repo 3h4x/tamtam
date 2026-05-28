@@ -13,6 +13,7 @@ import { useToast } from '@/components/Toast'
 import { Button } from '@/components/ui/Button'
 import { Spinner } from '@/components/ui/Spinner'
 import { EmptyState } from '@/components/ui/EmptyState'
+import { Pill } from '@/components/ui/Pill'
 
 // Re-export types consumed by subcomponents so callers don't need to change
 export type { GhPullRequest, GhIssue, ProjectConfig }
@@ -195,14 +196,14 @@ ${idea}`
               {repo && (
                 <span className="min-w-0 truncate text-xs font-mono text-text-secondary">{repo}</span>
               )}
-              <span className="inline-flex items-center rounded-full border border-border bg-bg-tertiary px-1.5 py-0.5 text-[10px] font-medium text-text-secondary tabular-nums">
+              <Pill size="xs" className="gap-0 rounded-full bg-bg-tertiary px-1.5 py-0.5 text-[10px] text-text-secondary tabular-nums">
                 <span className="mr-1 text-text-primary">{prs.length}</span>
                 {' '}PR{prs.length === 1 ? '' : 's'}
-              </span>
-              <span className="inline-flex items-center rounded-full border border-border bg-bg-tertiary px-1.5 py-0.5 text-[10px] font-medium text-text-secondary tabular-nums">
+              </Pill>
+              <Pill size="xs" className="gap-0 rounded-full bg-bg-tertiary px-1.5 py-0.5 text-[10px] text-text-secondary tabular-nums">
                 <span className="mr-1 text-text-primary">{issues.length}</span>
                 {' '}issue{issues.length === 1 ? '' : 's'}
-              </span>
+              </Pill>
             </div>
             <div className="mt-1 flex flex-wrap items-center gap-x-2.5 gap-y-1 text-[11px] text-text-tertiary">
               {fromCache && cachedAt && (
@@ -298,9 +299,9 @@ ${idea}`
                   placeholder="Add a per-project quota override on the Settings -> Pipeline tab so heavy projects can have a higher token cap than the global default."
                 />
                 <div className="mt-2 flex flex-wrap items-center gap-2">
-                  <span className="inline-flex items-center rounded-full border border-border bg-bg-tertiary px-1.5 py-0.5 text-[10px] font-medium text-text-secondary">runs in parallel</span>
-                  <span className="inline-flex items-center rounded-full border border-border bg-bg-tertiary px-1.5 py-0.5 text-[10px] font-medium text-text-secondary">read-only</span>
-                  <span className="inline-flex items-center rounded-full border border-border bg-bg-tertiary px-1.5 py-0.5 text-[10px] font-medium text-text-secondary">uses cto agent</span>
+                  <Pill size="xs" className="rounded-full bg-bg-tertiary px-1.5 py-0.5 text-[10px] text-text-secondary">runs in parallel</Pill>
+                  <Pill size="xs" className="rounded-full bg-bg-tertiary px-1.5 py-0.5 text-[10px] text-text-secondary">read-only</Pill>
+                  <Pill size="xs" className="rounded-full bg-bg-tertiary px-1.5 py-0.5 text-[10px] text-text-secondary">uses cto agent</Pill>
                   <Button
                     variant="primary"
                     size="sm"
