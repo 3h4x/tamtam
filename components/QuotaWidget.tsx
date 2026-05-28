@@ -131,23 +131,85 @@ function PaceBadge({ pace }: { pace: Pace | null }) {
   )
 }
 
+/**
+ * Project when the under-pace gap closes (or when ahead-of-pace slack runs
+ * out), given the *current* burn rate vs the steady-state rate the window
+ * expects. Returns a short human-readable line, or `null` when there's
+ * nothing useful to say.
+ *
+ * Math: util grows at `elapsedRate × (burn/steady)` pp/h; elapsed grows at
+ * `elapsedRate` pp/h. So gap closure rate is `elapsedRate × (burn/steady − 1)`.
+ * The sign of (burn − steady) tells us whether we're catching up at all.
+ */
+function paceEtaText(
+  win: QuotaWindow,
+  pace: Pace | null,
+  windowMs: number | undefined,
+  burnTokensPerHour: number | null,
+  steadyTokensPerHour: number | null,
+): string | null {
+  if (!pace || !windowMs || win.msUntilReset == null) return null
+  if (burnTokensPerHour == null || steadyTokensPerHour == null) return null
+  if (!Number.isFinite(burnTokensPerHour) || !Number.isFinite(steadyTokensPerHour)) return null
+  if (steadyTokensPerHour <= 0) return null
+  const elapsedPct = pace.elapsedFraction * 100
+  const utilPct = win.utilization
+  const remainingHours = win.msUntilReset / (60 * 60 * 1000)
+  if (remainingHours <= 0) return null
+  const ratio = burnTokensPerHour / steadyTokensPerHour
+  const elapsedRatePp = 100 / (windowMs / (60 * 60 * 1000))
+  if (elapsedRatePp <= 0) return null
+  const gapPp = elapsedPct - utilPct // positive = under pace; negative = ahead
+  if (Math.abs(gapPp) < 0.5 && Math.abs(ratio - 1) < 0.05) return 'balanced'
+  if (gapPp > 0) {
+    // Under pace. Catching up requires ratio > 1.
+    if (ratio > 1.01) {
+      const etaHours = gapPp / (elapsedRatePp * (ratio - 1))
+      if (etaHours > remainingHours) {
+        const needed = (gapPp / remainingHours + elapsedRatePp) / elapsedRatePp
+        return `won't catch up before reset (need ${needed.toFixed(1)}× current burn)`
+      }
+      return `balanced in ${fmtCountdown(etaHours * 60 * 60 * 1000)}`
+    }
+    const gapGrowth = elapsedRatePp * (1 - ratio)
+    return `falling ${gapGrowth.toFixed(2)}pp/h further behind`
+  }
+  // Ahead of pace. Slack closes when ratio < 1.
+  if (ratio < 0.99) {
+    const etaHours = -gapPp / (elapsedRatePp * (1 - ratio))
+    return `slack closes in ${fmtCountdown(etaHours * 60 * 60 * 1000)}`
+  }
+  return null
+}
+
 function QuotaBar({
   label,
   win,
   warnAt,
   blockAt,
   windowMs,
+  burnTokensPerHour,
+  steadyTokensPerHour,
 }: {
   label: string
   win: QuotaWindow
   warnAt: number
   blockAt: number
   windowMs?: number
+  burnTokensPerHour?: number | null
+  steadyTokensPerHour?: number | null
 }) {
   const pct = Math.max(0, Math.min(100, win.utilization))
   const fillPct = pct === 0 ? 0 : Math.max(2, pct)
   const pace = windowMs ? computePace(win, windowMs) : null
   const expectedMarkerPct = pace ? pace.elapsedFraction * 100 : null
+  const etaText = paceEtaText(
+    win,
+    pace,
+    windowMs,
+    burnTokensPerHour ?? null,
+    steadyTokensPerHour ?? null,
+  )
   return (
     <div className="space-y-1">
       <div className="flex items-baseline justify-between gap-2 text-xs flex-wrap">
@@ -174,6 +236,14 @@ function QuotaBar({
           />
         )}
       </div>
+      {etaText && (
+        <div
+          className="text-[10px] text-text-tertiary tabular-nums"
+          title="Projection from observed burn rate vs steady-state rate. Positive ETA = will close the gap at this burn; otherwise we either fall further behind or burn slack."
+        >
+          {etaText}
+        </div>
+      )}
     </div>
   )
 }
@@ -292,11 +362,42 @@ export function QuotaWidget({
   const [cards, setCards] = useState<QuotaCardState[]>([])
   const [error, setError] = useState<string | null>(null)
   const [loading, setLoading] = useState(true)
+  // Map of `${provider}|${windowKey}` → recent burn + steady-state rates
+  // pulled from `/api/stats/usage-history`. Used by each `QuotaBar` to derive
+  // an ETA-to-balance line from the *current* workload, not from the average
+  // utilization across the whole window.
+  const [rates, setRates] = useState<Map<string, { burn: number | null; steady: number | null }>>(new Map())
   const providerKey = providers.join(',')
 
   useEffect(() => {
     let cancelled = false
     const selectedProviders = Array.from(new Set(providers))
+
+    async function loadRates() {
+      try {
+        const res = await fetch('/api/stats/usage-history?hours=4')
+        if (!res.ok) return
+        const json = await res.json() as {
+          series?: Array<{
+            provider: string
+            windowKey: string
+            currentTokensPerHour: number | null
+            expectedTokensPerHour: number | null
+          }>
+        }
+        if (cancelled) return
+        const next = new Map<string, { burn: number | null; steady: number | null }>()
+        for (const s of json.series ?? []) {
+          next.set(`${s.provider}|${s.windowKey}`, {
+            burn: s.currentTokensPerHour,
+            steady: s.expectedTokensPerHour,
+          })
+        }
+        setRates(next)
+      } catch {
+        // ETA is supplementary; ignore fetch failure.
+      }
+    }
 
     async function load() {
       try {
@@ -304,6 +405,7 @@ export function QuotaWidget({
           loadQuotaSnapshot('active'),
           Promise.all(selectedProviders.map((provider) => loadQuotaSnapshot(provider))),
         ])
+        void loadRates()
         const activeProvider = activeResult.snapshot?.provider
         const mergedCards = selectedProviders.map((provider, index) => {
           if (activeProvider === provider && activeResult.snapshot) {
@@ -383,8 +485,24 @@ export function QuotaWidget({
           warn ≥ {warnAt}% · block ≥ {blockAt}%
         </div>
       </div>
-      <QuotaBar label="5-hour rolling" win={snapshot.fiveHour} warnAt={warnAt} blockAt={blockAt} windowMs={FIVE_HOUR_MS} />
-      <QuotaBar label="7-day weekly" win={snapshot.sevenDay} warnAt={warnAt} blockAt={blockAt} windowMs={SEVEN_DAY_MS} />
+      <QuotaBar
+        label="5-hour rolling"
+        win={snapshot.fiveHour}
+        warnAt={warnAt}
+        blockAt={blockAt}
+        windowMs={FIVE_HOUR_MS}
+        burnTokensPerHour={rates.get(`${snapshot.provider}|5h`)?.burn ?? null}
+        steadyTokensPerHour={rates.get(`${snapshot.provider}|5h`)?.steady ?? null}
+      />
+      <QuotaBar
+        label="7-day weekly"
+        win={snapshot.sevenDay}
+        warnAt={warnAt}
+        blockAt={blockAt}
+        windowMs={SEVEN_DAY_MS}
+        burnTokensPerHour={rates.get(`${snapshot.provider}|7d`)?.burn ?? null}
+        steadyTokensPerHour={rates.get(`${snapshot.provider}|7d`)?.steady ?? null}
+      />
       <ExtraCreditsRow extra={snapshot.extra} provider={snapshot.provider} />
       {!compact && options.primary && <DailyBurnRow sevenDay={snapshot.sevenDay} />}
       {!compact && options.primary && snapshot.gateEnabled && <ScheduledAgentsRow sevenDay={snapshot.sevenDay} />}
