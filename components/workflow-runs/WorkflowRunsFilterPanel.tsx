@@ -1,5 +1,6 @@
 'use client';
 
+import { Button } from '@/components/ui/Button';
 import { workflowStatusPresentation } from '@/components/workflow-runs/workflow-run-status';
 
 export const STATUS_FILTERS = ['all', 'completed', 'running', 'pending', 'failed', 'cancelled'] as const;
@@ -105,13 +106,15 @@ export function WorkflowRunsFilterPanel({
                 <span className="font-mono text-accent">{statusCounts.running} running</span>
               ) : null}
               {hasActiveFilters ? (
-                <button
+                <Button
                   type="button"
-                  className="font-mono text-accent transition-colors hover:text-accent-hover"
+                  variant="link"
+                  size="sm"
+                  className="font-mono"
                   onClick={onClearFilters}
                 >
                   clear filters
-                </button>
+                </Button>
               ) : null}
             </div>
           </div>
