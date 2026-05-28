@@ -94,6 +94,69 @@ function runRow(page: import('@playwright/test').Page, project: string) {
 }
 
 test.describe('Runs page non-release live polling', () => {
+  test('global list picks up a newly-started chat run without reload', async ({ page }) => {
+    let serveRunning = false
+
+    await stubRunsShellRoutes(page)
+    await page.route('**/api/jobs?limit=200', (route: Route) => {
+      route.fulfill({
+        json: {
+          jobs: serveRunning
+            ? [
+                makeJob({
+                  id: 'chat-run-live-start-1',
+                  project: RUN_PROJECT,
+                  kind: 'run',
+                  prompt: 'Watch for a newly-started job',
+                  user_prompt: 'Watch for a newly-started job',
+                  session_id: 'sess-chat-run-live-start-1',
+                  status: 'running',
+                  exit_code: null,
+                  started_at: now() - 8,
+                  finished_at: null,
+                  work_summary: 'Bootstrapping the live run',
+                }),
+              ]
+            : [],
+          total: serveRunning ? 1 : 0,
+          pendingReleaseProjects: [],
+        },
+      })
+    })
+    await page.route('**/api/jobs/counts', (route: Route) =>
+      route.fulfill({
+        json: {
+          total: serveRunning ? 1 : 0,
+          byKind: serveRunning ? { run: 1 } : {},
+          byStatus: {
+            running: serveRunning ? 1 : 0,
+            done: 0,
+            aborted: 0,
+            failed: 0,
+          },
+          tokens: { input: 0, output: 0, cacheRead: 0, cacheCreate: 0, total: 0 },
+          cost: { total: 0, monthToDate: 0 },
+        },
+      }),
+    )
+
+    await page.goto('/runs')
+
+    await expect(page.getByText('No runs yet')).toBeVisible({ timeout: 8_000 })
+    await expect(page.getByText('Runs appear here after terminal work')).toBeVisible()
+    await expect(runRow(page, RUN_PROJECT)).toHaveCount(0)
+
+    serveRunning = true
+
+    const row = runRow(page, RUN_PROJECT)
+    await expect(row).toBeVisible({ timeout: 12_000 })
+    await expect(row.getByLabel('running')).toBeVisible()
+    await expect(row.getByText('running', { exact: true })).toBeVisible()
+    await expect(row.getByText('Watch for a newly-started job')).toBeVisible()
+    await expect(row.getByText('Bootstrapping the live run')).toBeVisible()
+    await expect(page.getByText('No runs yet')).toHaveCount(0)
+  })
+
   test('chat run row flips from running to done without reload', async ({ page }) => {
     let serveRunning = true
 
