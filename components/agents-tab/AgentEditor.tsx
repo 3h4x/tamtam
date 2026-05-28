@@ -4,6 +4,7 @@ import { useState, useEffect, useMemo, useRef } from 'react'
 import { fetchProjectDocs, improveAgentPrompt } from '@/lib/client-api'
 import type { Agent, Skill, Persona, ProjectDoc } from '@/lib/client-api'
 import { Button } from '@/components/ui/Button'
+import { SegmentedControl } from '@/components/ui/SegmentedControl'
 import { Spinner } from '@/components/ui/Spinner'
 import { useToast } from '@/components/Toast'
 import type { AgentTemplateRecord } from '@/components/SettingsPage'
@@ -346,30 +347,29 @@ export function AgentEditor({
       <div>
         <div className="flex items-center justify-between mb-2">
           <span className="text-xs font-semibold text-text-tertiary uppercase tracking-wider">Context</span>
-          <div className="flex gap-px p-0.5 rounded-md bg-bg-secondary border border-border">
-            <button
-              type="button"
-              onClick={() => setContextTab('skills')}
-              className={`px-3 py-1 text-xs rounded transition-colors cursor-pointer ${
-                contextTab === 'skills'
-                  ? 'bg-bg-primary text-text-primary shadow-sm'
-                  : 'text-text-tertiary hover:text-text-primary'
-              }`}
-            >
-              Skills{selectedSkills.length > 0 && <span className="ml-1.5 text-accent font-bold">{selectedSkills.length}</span>}
-            </button>
-            <button
-              type="button"
-              onClick={() => setContextTab('docs')}
-              className={`px-3 py-1 text-xs rounded transition-colors cursor-pointer ${
-                contextTab === 'docs'
-                  ? 'bg-bg-primary text-text-primary shadow-sm'
-                  : 'text-text-tertiary hover:text-text-primary'
-              }`}
-            >
-              Docs{selectedDocPaths.length > 0 && <span className="ml-1.5 text-status-success font-bold">{selectedDocPaths.length}</span>}
-            </button>
-          </div>
+          <SegmentedControl
+            ariaLabel="Agent context source"
+            value={contextTab}
+            onChange={setContextTab}
+            options={[
+              {
+                value: 'skills',
+                label: (
+                  <>
+                    Skills{selectedSkills.length > 0 && <span className="ml-1.5 font-bold">{selectedSkills.length}</span>}
+                  </>
+                ),
+              },
+              {
+                value: 'docs',
+                label: (
+                  <>
+                    Docs{selectedDocPaths.length > 0 && <span className="ml-1.5 font-bold">{selectedDocPaths.length}</span>}
+                  </>
+                ),
+              },
+            ]}
+          />
         </div>
 
         {(selectedSkills.length > 0 || selectedDocPaths.length > 0) && (
