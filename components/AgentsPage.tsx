@@ -3,6 +3,7 @@
 import { useState, useEffect } from 'react'
 import { useRouter } from 'next/navigation'
 import { AgentsEmptyState, AgentsLoadingState } from '@/components/agents/AgentStates'
+import { Pill, type PillTone } from '@/components/ui/Pill'
 import { StandardTabs, type StandardTabItem } from '@/components/ui/StandardTabs'
 import { Table, type Column } from '@/components/ui/Table'
 import { fetchAgents } from '@/lib/client-api'
@@ -52,11 +53,18 @@ function agentState(agent: Agent, schedEntry: SchedulerEntry | undefined): Agent
   return 'unscheduled'
 }
 
-const STATE_STYLE: Record<AgentState, string> = {
-  active: 'bg-status-success/15 text-status-success',
-  'on-demand': 'bg-accent/10 text-accent',
-  disabled: 'bg-bg-tertiary text-text-tertiary',
-  unscheduled: 'bg-status-warning/15 text-status-warning',
+const STATE_TONE: Record<AgentState, PillTone> = {
+  active: 'success',
+  'on-demand': 'accent',
+  disabled: 'neutral',
+  unscheduled: 'warning',
+}
+
+const STATE_CLASS_NAME: Record<AgentState, string> = {
+  active: 'rounded-full border-transparent',
+  'on-demand': 'rounded-full border-transparent',
+  disabled: 'rounded-full border-transparent bg-bg-tertiary text-text-tertiary',
+  unscheduled: 'rounded-full border-transparent',
 }
 
 const STATE_LABEL: Record<AgentState, string> = {
@@ -142,12 +150,14 @@ export function AgentsPage() {
         const schedEntry = schedulerMap.get(agent.id)
         const state = stateByAgentId.get(agent.id) ?? agentState(agent, schedEntry)
         return (
-          <span
-            className={`px-2 py-0.5 text-xs rounded-full font-medium ${STATE_STYLE[state]}`}
+          <Pill
+            className={STATE_CLASS_NAME[state]}
+            size="xs"
+            tone={STATE_TONE[state]}
             title={state === 'unscheduled' ? 'Scheduled but not registered in internal scheduler' : undefined}
           >
             {STATE_LABEL[state]}
-          </span>
+          </Pill>
         )
       },
     },
@@ -167,13 +177,18 @@ export function AgentsPage() {
         <span data-private>
           {agent.name}
           {agent.source === 'file' && (
-            <span className="ml-1.5 text-[10px] px-1 py-0.5 rounded bg-bg-tertiary text-text-tertiary border border-border">file</span>
+            <Pill className="ml-1.5 rounded bg-bg-tertiary px-1 py-0.5 text-[10px] font-normal text-text-tertiary">
+              file
+            </Pill>
           )}
           {agent.kind === 'system' && (
-            <span
-              className="ml-1.5 text-[10px] px-1 py-0.5 rounded bg-accent/10 text-accent border border-accent/30"
+            <Pill
+              className="ml-1.5 rounded border-accent/30 px-1 py-0.5 text-[10px] font-normal"
+              tone="accent"
               title="Built-in system agent — auto-managed by TamTam"
-            >system</span>
+            >
+              system
+            </Pill>
           )}
         </span>
       ),
