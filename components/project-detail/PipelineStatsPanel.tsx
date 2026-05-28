@@ -1,6 +1,7 @@
 'use client'
 
 import { useEffect, useState } from 'react'
+import { SegmentedControl } from '@/components/ui/SegmentedControl'
 import { fetchProjectPipelineStats } from '@/lib/client-api'
 import type { PipelineDurationStats, ProjectPipelineStats } from '@/lib/client-api'
 
@@ -183,22 +184,12 @@ export function PipelineStatsPanel({ projectName }: { projectName: string }) {
           </div>
         </div>
         <div className="flex flex-wrap items-center gap-2">
-          <div className="flex items-center gap-0.5 overflow-hidden rounded-md border border-border">
-            {WINDOWS.map((option) => (
-              <button
-                key={option}
-                type="button"
-                onClick={() => setWindow(option)}
-                className={`px-2.5 py-1 text-xs font-medium tabular-nums transition-colors ${
-                  window_ === option
-                    ? 'bg-accent text-white'
-                    : 'bg-bg-primary text-text-secondary hover:bg-bg-tertiary hover:text-text-primary'
-                }`}
-              >
-                {option}
-              </button>
-            ))}
-          </div>
+          <SegmentedControl<Window>
+            ariaLabel="Pipeline stats time window"
+            options={WINDOWS.map((option) => ({ value: option, label: option }))}
+            value={window_}
+            onChange={setWindow}
+          />
           <div className="text-xs text-text-tertiary tabular-nums">
             {loading ? 'Refreshing…' : data ? `Updated ${new Date(data.generatedAt).toLocaleTimeString()}` : '—'}
           </div>
