@@ -30,7 +30,7 @@ The agent management dashboard built for Claude-compatible CLIs. Define skills, 
 
 ## Architecture
 
-TamTam is a single Next.js 16 (App Router) application backed by Postgres. The Next.js server is supervised by PM2; agent intake runs through the workflow runtime, which TamTam pins to the local world by default (`WORKFLOW_TARGET_WORLD=local`, `WORKFLOW_LOCAL_DATA_DIR=data/workflow-data`), and scheduled agents run through graphile-worker, so a crash or restart does not lose in-flight work.
+TamTam is a single Next.js 16 (App Router) application backed by Postgres. The Next.js server is supervised by PM2; agent intake and release pipeline orchestration run through the workflow runtime, which TamTam pins to the local world by default (`WORKFLOW_TARGET_WORLD=local`, `WORKFLOW_LOCAL_DATA_DIR=data/workflow-data`), and scheduled agents run through graphile-worker, so a crash or restart does not lose in-flight work.
 
 ```
        ┌──────────────────────────────────────────────────────────────┐
@@ -38,8 +38,8 @@ TamTam is a single Next.js 16 (App Router) application backed by Postgres. The N
        │   pages + API routes + SSE streams + Server Components       │
        │                                                              │
        │  ┌───────────────────┐  ┌─────────────────────────────────┐  │
-       │  │  Agent intake     │→ │  Durable workflow (@workflow)   │  │
-       │  │  (POST /api/...)  │  │  runAgentIntakeWorkflow()       │  │
+       │  │ Agent intake +    │→ │  Durable workflow (@workflow)   │  │
+       │  │ release pipeline  │  │  intake + release orchestrator  │  │
        │  └───────────────────┘  └──────────────┬──────────────────┘  │
        │                                        ▼                     │
        │  ┌──────────────────────────────────────────────────────┐    │
@@ -66,7 +66,7 @@ TamTam is a single Next.js 16 (App Router) application backed by Postgres. The N
 
 - **Next.js 16** (App Router) — frontend, API routes, and SSE streaming in one process
 - **Postgres 16 + pgvector** via `pg.Pool` + Drizzle ORM — main source of truth for jobs, agents, skills, settings, and retrieval embeddings
-- **`workflow` runtime** — `"use workflow"` / `"use step"` orchestration for agent intake (`runAgentIntakeWorkflow()`); TamTam pins the local world by default (`WORKFLOW_TARGET_WORLD=local`, `WORKFLOW_LOCAL_DATA_DIR=data/workflow-data`) and keeps workflow data under `data/workflow-data`. A Postgres-backed workflow world is an explicit operator override, not the default.
+- **`workflow` runtime** — `"use workflow"` / `"use step"` orchestration for agent intake (`runAgentIntakeWorkflow()`) and the release pipeline (`releaseOrchestratorWorkflow()` plus phase workflows); TamTam pins the local world by default (`WORKFLOW_TARGET_WORLD=local`, `WORKFLOW_LOCAL_DATA_DIR=data/workflow-data`) and keeps workflow data under `data/workflow-data`. A Postgres-backed workflow world is an explicit operator override, not the default.
 - **graphile-worker** — durable cron queue for scheduled agents and system maintenance
 - **PM2** — supervises the long-running TamTam server; one-shot CLI jobs are spawned in-process by workflow steps and route handlers
 - **SSE** — token-by-token log streaming straight from job log files via `fs.watch` + NDJSON parser
