@@ -165,6 +165,10 @@ Use these reusable classes when Tailwind utilities would produce repetition. **P
 - `.focus-ring` — consistent ring for inputs
 - `.terminal-markdown` — markdown rendering inside the terminal pane (dark-only)
 
+### Segmented control (`components/ui/SegmentedControl.tsx`)
+
+Use `SegmentedControl` for compact single-choice filters inside headers and panels, such as time windows or provider tabs. It renders the canonical bordered button group with one active item and preserves state through a controlled `value`/`onChange` pair.
+
 **Toolbar atoms** (terminal panel header bar; all chips/groups align to a 24px row, inner tabs 20px):
 - `.toolbar-btn` — bordered chip for standalone toggles (e.g. NEW, RECENT, thinking, trace); 24px tall, mono font
 - `.toolbar-group` — grouped control container (e.g. ATTACH, MODEL); wraps `.toolbar-label` + one or more `.toolbar-tab` children
