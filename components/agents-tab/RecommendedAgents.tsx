@@ -1,8 +1,10 @@
 'use client'
 
+import type React from 'react'
 import { useState } from 'react'
 import type { AgentTemplateRecord } from '@/components/SettingsPage'
 import { Button, type ButtonVariant } from '@/components/ui/Button'
+import { Pill } from '@/components/ui/Pill'
 import { getModelLabel, MODEL_LABELS } from '@/lib/agents/model-aliases'
 import { recommendedAgentNameKey, recommendedAgentNameKeys } from '@/lib/agents/recommended-agents'
 
@@ -33,11 +35,29 @@ interface SuggestionStyle {
 type SuggestionLayout = 'full' | 'compact'
 
 const metadataBadgeClassName =
-  'rounded-full border border-border bg-bg-tertiary px-2 py-0.5 font-mono text-[10px] tabular-nums text-text-secondary'
+  '!rounded-full !border-border !bg-bg-tertiary !py-0.5 font-mono !text-[10px] !font-normal tabular-nums !text-text-secondary'
 const customBadgeClassName =
-  'rounded-full border border-accent/25 bg-accent/10 px-1.5 py-0.5 text-[10px] font-mono uppercase tracking-wide text-accent'
+  '!rounded-full !border-accent/25 !bg-accent/10 !px-1.5 !py-0.5 font-mono !text-[10px] !font-normal uppercase tracking-wide !text-accent'
 const sectionCountClassName =
-  'rounded-full bg-bg-tertiary px-2 py-0.5 text-[10px] font-mono tabular-nums text-text-tertiary'
+  '!rounded-full !border-transparent !bg-bg-tertiary !py-0.5 font-mono !text-[10px] !font-normal tabular-nums !text-text-tertiary'
+
+function SuggestionBadge({
+  children,
+  className,
+}: {
+  children: React.ReactNode
+  className: string
+}) {
+  return (
+    <Pill
+      className={className}
+      size="xs"
+      tone="neutral"
+    >
+      {children}
+    </Pill>
+  )
+}
 
 const suggestionPriority: Record<SuggestionTone, number> = {
   essential: 0,
@@ -137,7 +157,7 @@ function getSuggestionStyle(tone: SuggestionTone): SuggestionStyle {
   if (tone === 'essential') {
     return {
       badgeLabel: 'essential',
-      badgeClassName: 'border-status-warning/30 bg-status-warning/10 text-status-warning',
+      badgeClassName: '!border-status-warning/30 !bg-status-warning/10 !text-status-warning',
       cardClassName: 'border-status-warning/35 bg-status-warning/5',
       nameClassName: 'text-status-warning',
       buttonVariant: 'warning',
@@ -147,7 +167,7 @@ function getSuggestionStyle(tone: SuggestionTone): SuggestionStyle {
   if (tone === 'featured') {
     return {
       badgeLabel: 'featured',
-      badgeClassName: 'border-accent/25 bg-accent/10 text-accent',
+      badgeClassName: '!border-accent/25 !bg-accent/10 !text-accent',
       cardClassName: 'border-accent/30 bg-accent/5',
       nameClassName: 'text-accent',
       buttonVariant: 'primary',
@@ -156,7 +176,7 @@ function getSuggestionStyle(tone: SuggestionTone): SuggestionStyle {
 
   return {
     badgeLabel: 'recommended',
-    badgeClassName: 'border-border bg-bg-tertiary text-text-tertiary',
+    badgeClassName: '!border-border !bg-bg-tertiary !text-text-tertiary',
     cardClassName: 'border-border border-dashed bg-bg-secondary/50',
     nameClassName: 'text-text-secondary',
     buttonVariant: 'secondary',
@@ -173,12 +193,14 @@ function RecommendationNamePreview({
   return (
     <div className="flex flex-wrap items-center gap-1.5">
       {items.map(rec => (
-        <span
+        <Pill
           key={rec.name}
-          className="rounded-full border border-border bg-bg-tertiary/60 px-2 py-0.5 text-[10px] font-mono text-text-secondary"
+          className="!rounded-full !border-border !bg-bg-tertiary/60 !py-0.5 font-mono !text-[10px] !font-normal !text-text-secondary"
+          size="xs"
+          tone="neutral"
         >
           {rec.name}
-        </span>
+        </Pill>
       ))}
       {remainder > 0 && (
         <span className="text-[11px] text-text-tertiary">
@@ -263,7 +285,7 @@ export function RecommendedAgents({ agents, customTemplates, recommendedAgents, 
             <div className="flex min-w-0 flex-wrap items-center gap-1.5">
               <span className="text-sm font-medium text-text-primary">{rec.name}</span>
               {isCustom && (
-                <span className={customBadgeClassName}>custom</span>
+                <SuggestionBadge className={customBadgeClassName}>custom</SuggestionBadge>
               )}
             </div>
             {rec.description && (
@@ -298,13 +320,13 @@ export function RecommendedAgents({ agents, customTemplates, recommendedAgents, 
         <div className="min-w-0 flex-1">
           <div className="flex min-w-0 flex-wrap items-center gap-1.5">
             <span className={`text-sm font-medium ${style.nameClassName}`}>{rec.name}</span>
-            <span
-              className={`rounded-full border px-1.5 py-0.5 text-[10px] font-mono uppercase tracking-wide ${style.badgeClassName}`}
+            <SuggestionBadge
+              className={`!px-1.5 font-mono !text-[10px] !font-normal uppercase tracking-wide ${style.badgeClassName}`}
             >
               {style.badgeLabel}
-            </span>
+            </SuggestionBadge>
             {isCustom && (
-              <span className={customBadgeClassName}>custom</span>
+              <SuggestionBadge className={customBadgeClassName}>custom</SuggestionBadge>
             )}
           </div>
           {rec.description && (
@@ -315,12 +337,14 @@ export function RecommendedAgents({ agents, customTemplates, recommendedAgents, 
           {metadataLabels.length > 0 && (
             <div className="mt-2 flex flex-wrap gap-1.5">
               {metadataLabels.map(label => (
-                <span
+                <Pill
                   key={label}
                   className={metadataBadgeClassName}
+                  size="xs"
+                  tone="neutral"
                 >
                   {label}
-                </span>
+                </Pill>
               ))}
             </div>
           )}
@@ -347,9 +371,13 @@ export function RecommendedAgents({ agents, customTemplates, recommendedAgents, 
             {panelSummary}
           </p>
         </div>
-        <span className={`shrink-0 ${sectionCountClassName}`}>
+        <Pill
+          className={`shrink-0 ${sectionCountClassName}`}
+          size="xs"
+          tone="neutral"
+        >
           {suggestions.length} suggested
-        </span>
+        </Pill>
       </div>
       {prioritySuggestions.length > 0 && (
         <div className="space-y-2">
@@ -369,12 +397,16 @@ export function RecommendedAgents({ agents, customTemplates, recommendedAgents, 
             <p className="text-[10px] font-mono uppercase tracking-wide text-text-tertiary">
               {prioritySuggestions.length > 0 ? 'Optional templates' : 'Available now'}
             </p>
-            <span className={sectionCountClassName}>
+            <Pill
+              className={sectionCountClassName}
+              size="xs"
+              tone="neutral"
+            >
               {formatVisibleTemplateSummary(
                 visibleRecommendedSuggestions.length,
                 recommendedSuggestions.length,
               )}
-            </span>
+            </Pill>
           </div>
           <div className="grid gap-2 xl:grid-cols-2">
             {visibleRecommendedSuggestions.map(rec => renderSuggestion(rec, 'compact'))}
@@ -411,9 +443,13 @@ export function RecommendedAgents({ agents, customTemplates, recommendedAgents, 
           <div className="space-y-1">
             <div className="flex flex-wrap items-center gap-2">
               <p className="text-[10px] font-mono uppercase tracking-wide text-text-tertiary">Optional templates</p>
-              <span className={sectionCountClassName}>
+              <Pill
+                className={sectionCountClassName}
+                size="xs"
+                tone="neutral"
+              >
                 {formatVisibleTemplateSummary(0, recommendedSuggestions.length)}
-              </span>
+              </Pill>
             </div>
             <RecommendationNamePreview
               items={collapsedRecommendedPreview}
