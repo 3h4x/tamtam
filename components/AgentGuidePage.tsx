@@ -1,6 +1,6 @@
 'use client'
 
-import { useEffect, useMemo, useState } from 'react'
+import { useEffect, useLayoutEffect, useMemo, useState } from 'react'
 import { useToast } from '@/components/Toast'
 import { Button } from '@/components/ui/Button'
 
@@ -8,54 +8,57 @@ interface Recipe {
   id: string
   title: string
   blurb: string
-  curl: (base: string) => string
+  curl: (apiBase: string) => string
   notes?: string
 }
+
+const DEFAULT_ORIGIN = 'http://127.0.0.1:1337'
+const useIsomorphicLayoutEffect = typeof window === 'undefined' ? useEffect : useLayoutEffect
 
 const RECIPES: Recipe[] = [
   {
     id: 'health',
     title: 'Health check',
     blurb: 'Liveness probe. Use deep=1 for dependency status.',
-    curl: (base) => `curl -s ${base}/api/health\ncurl -s '${base}/api/health?deep=1'`,
+    curl: (apiBase) => `curl -s ${apiBase}/health\ncurl -s '${apiBase}/health?deep=1'`,
   },
   {
     id: 'projects',
     title: 'List projects',
     blurb: 'All tracked projects with metadata.',
-    curl: (base) => `curl -s ${base}/api/projects`,
+    curl: (apiBase) => `curl -s ${apiBase}/projects`,
   },
   {
     id: 'runs-recent',
     title: 'Recent runs',
     blurb: 'Newest first, paged. Filter by project/kind/status.',
-    curl: (base) =>
-      `curl -s '${base}/api/jobs?limit=20'\ncurl -s '${base}/api/jobs?project=<project>&status=running'\ncurl -s '${base}/api/jobs?kind=agent:<agent-name>&limit=5'`,
+    curl: (apiBase) =>
+      `curl -s '${apiBase}/jobs?limit=20'\ncurl -s '${apiBase}/jobs?project=<project>&status=running'\ncurl -s '${apiBase}/jobs?kind=agent:<agent-name>&limit=5'`,
   },
   {
     id: 'run-detail',
     title: 'Run detail + logs',
     blurb: 'Full record with parsed log; or fetch raw log file.',
-    curl: (base) => `curl -s ${base}/api/jobs/<jobId>\ncurl -s ${base}/api/jobs/<jobId>/logs`,
+    curl: (apiBase) => `curl -s ${apiBase}/jobs/<jobId>\ncurl -s ${apiBase}/jobs/<jobId>/logs`,
   },
   {
     id: 'run-stream',
     title: 'Stream a live run (SSE)',
     blurb: 'Server-sent events of parsed text deltas. Raw=1 for raw NDJSON lines.',
-    curl: (base) => `curl -N ${base}/api/streaming/<jobId>\ncurl -N '${base}/api/streaming/<jobId>?raw=1'`,
+    curl: (apiBase) => `curl -N ${apiBase}/streaming/<jobId>\ncurl -N '${apiBase}/streaming/<jobId>?raw=1'`,
   },
   {
     id: 'list-agents',
     title: 'List agents (with schedule telemetry)',
     blurb: 'fields=summary returns slim rows + live cron state.',
-    curl: (base) =>
-      `curl -s '${base}/api/agents?fields=summary'\ncurl -s '${base}/api/agents?project=<project>'\ncurl -s '${base}/api/agents?name=<agent-name>&project=<project>'`,
+    curl: (apiBase) =>
+      `curl -s '${apiBase}/agents?fields=summary'\ncurl -s '${apiBase}/agents?project=<project>'\ncurl -s '${apiBase}/agents?name=<agent-name>&project=<project>'`,
   },
   {
     id: 'create-agent',
     title: 'Create an agent',
     blurb: 'kind=user only. provider null = any enabled provider.',
-    curl: (base) => `curl -s -X POST ${base}/api/agents \\
+    curl: (apiBase) => `curl -s -X POST ${apiBase}/agents \\
   -H 'content-type: application/json' \\
   -d '{
     "project": "<project>",
@@ -75,12 +78,12 @@ const RECIPES: Recipe[] = [
     id: 'patch-agent',
     title: 'Update an agent',
     blurb: 'PATCH any writable field. null/empty string clears optional fields.',
-    curl: (base) => `curl -s -X PATCH ${base}/api/agents/<agentId> \\
+    curl: (apiBase) => `curl -s -X PATCH ${apiBase}/agents/<agentId> \\
   -H 'content-type: application/json' \\
   -d '{"schedule":"4h","enabled":true}'
 
 # Without UUID — lookup by project+name (and rename via currentName):
-curl -s -X PATCH ${base}/api/agents/by-name \\
+curl -s -X PATCH ${apiBase}/agents/by-name \\
   -H 'content-type: application/json' \\
   -d '{"project":"<project>","currentName":"<agent-name>","name":"<agent-name>","schedule":"12h"}'`,
   },
@@ -88,7 +91,7 @@ curl -s -X PATCH ${base}/api/agents/by-name \\
     id: 'run-agent',
     title: 'Trigger an agent run',
     blurb: 'Returns immediately with job_id; poll /api/jobs/<id> for status.',
-    curl: (base) => `curl -s -X POST ${base}/api/agents/<agentId>/run \\
+    curl: (apiBase) => `curl -s -X POST ${apiBase}/agents/<agentId>/run \\
   -H 'content-type: application/json' \\
   -d '{"prompt":"Optional extra instruction for this run","readOnly":false}'`,
     notes:
@@ -98,14 +101,14 @@ curl -s -X PATCH ${base}/api/agents/by-name \\
     id: 'scheduler-health',
     title: 'Scheduler health',
     blurb: 'Verify cron rows exist for all enabled scheduled agents. POST reinstalls missing ones.',
-    curl: (base) =>
-      `curl -s ${base}/api/agents/scheduler-health\ncurl -s -X POST ${base}/api/agents/scheduler-health`,
+    curl: (apiBase) =>
+      `curl -s ${apiBase}/agents/scheduler-health\ncurl -s -X POST ${apiBase}/agents/scheduler-health`,
   },
   {
     id: 'pause-project',
     title: 'Pause / archive a project',
     blurb: 'paused=true blocks scheduled fires + releases (manual terminal still works). archived hides from list.',
-    curl: (base) => `curl -s -X PATCH ${base}/api/projects/by-project/<project> \\
+    curl: (apiBase) => `curl -s -X PATCH ${apiBase}/projects/by-project/<project> \\
   -H 'content-type: application/json' \\
   -d '{"paused": true}'`,
   },
@@ -113,18 +116,18 @@ curl -s -X PATCH ${base}/api/agents/by-name \\
     id: 'release',
     title: 'Trigger release pipeline',
     blurb: 'test → review → fix → commit → push → mark-dod → pr-wait → soak. Honors release lock.',
-    curl: (base) => `curl -s -X POST ${base}/api/projects/by-project/<project>/release`,
+    curl: (apiBase) => `curl -s -X POST ${apiBase}/projects/by-project/<project>/release`,
   },
   {
     id: 'pause-global',
     title: 'Global pause / resume',
     blurb: 'Pause all scheduler activity and release pipelines. Manual terminal runs bypass this.',
-    curl: (base) => `curl -s -X PATCH ${base}/api/settings \\
+    curl: (apiBase) => `curl -s -X PATCH ${apiBase}/settings \\
   -H 'content-type: application/json' \\
   -d '{"jobs_paused": true}'
 
 # resume
-curl -s -X PATCH ${base}/api/settings \\
+curl -s -X PATCH ${apiBase}/settings \\
   -H 'content-type: application/json' \\
   -d '{"jobs_paused": false}'`,
   },
@@ -132,15 +135,15 @@ curl -s -X PATCH ${base}/api/settings \\
     id: 'queue',
     title: 'Inspect / drain automation queue',
     blurb: 'Deferred releases and queued agent runs. retry runs the same ordered drain as boot recovery.',
-    curl: (base) =>
-      `curl -s '${base}/api/automation-queue?project=<project>'\ncurl -s -X POST ${base}/api/automation-queue/retry -H 'content-type: application/json' -d '{"project":"<project>"}'`,
+    curl: (apiBase) =>
+      `curl -s '${apiBase}/automation-queue?project=<project>'\ncurl -s -X POST ${apiBase}/automation-queue/retry -H 'content-type: application/json' -d '{"project":"<project>"}'`,
   },
   {
     id: 'quota',
     title: 'Provider quota + pace',
     blurb: 'Quota snapshot with pace math. POST force-clears the cache and re-fetches.',
-    curl: (base) =>
-      `curl -s ${base}/api/usage/quota\ncurl -s '${base}/api/usage/quota?provider=claude'\ncurl -s -X POST ${base}/api/usage/quota`,
+    curl: (apiBase) =>
+      `curl -s ${apiBase}/usage/quota\ncurl -s '${apiBase}/usage/quota?provider=claude'\ncurl -s -X POST ${apiBase}/usage/quota`,
     notes:
       'Response carries pace (this provider’s 5h/7d fair-share margin: paceMarginPct >0 = under pace, <0 = over, plus projectedPct at reset) and globalPace (the tightest provider+window across enabled providers, with bindingProvider/bindingWindow). Snapshots are persisted to the DB, so a rate-limited or just-restarted provider still appears (marked stale) instead of dropping out of pace.',
   },
@@ -148,7 +151,7 @@ curl -s -X PATCH ${base}/api/settings \\
     id: 'bridge',
     title: 'Fleet bridge (pace + shipping status)',
     blurb: 'One compact rollup: global pace, per-provider pace, and per-project shipping state for every project that has enabled agents.',
-    curl: (base) => `curl -s ${base}/api/stats/bridge`,
+    curl: (apiBase) => `curl -s ${apiBase}/stats/bridge`,
     notes:
       'projects[] is generic — one row per project with ≥1 enabled non-system agent. Each carries status (releasing | paused | attention | shipping | active | idle), releaseRunning, lastPushAt/lastPushOk, lastReleaseAt/lastReleaseOk, lastAgentAt; summary rolls up the counts. Use it as a single probe for “is the fleet pacing and shipping”.',
   },
@@ -156,8 +159,8 @@ curl -s -X PATCH ${base}/api/settings \\
     id: 'recommendations',
     title: 'Recommendations',
     blurb: 'Cross-project open recommendations. Apply auto-applicable ones in place.',
-    curl: (base) =>
-      `curl -s ${base}/api/recommendations\ncurl -s '${base}/api/projects/by-project/<project>/recommendations'\ncurl -s -X POST ${base}/api/projects/by-project/<project>/recommendations/apply \\
+    curl: (apiBase) =>
+      `curl -s ${apiBase}/recommendations\ncurl -s '${apiBase}/projects/by-project/<project>/recommendations'\ncurl -s -X POST ${apiBase}/projects/by-project/<project>/recommendations/apply \\
   -H 'content-type: application/json' -d '{"id":"<recId>"}'`,
   },
 ]
@@ -293,10 +296,10 @@ const BEHAVIORS: { title: string; body: string }[] = [
 ]
 
 function useOrigin(): string {
-  const [origin, setOrigin] = useState('http://127.0.0.1:1337')
-  useEffect(() => {
+  const [origin, setOrigin] = useState(DEFAULT_ORIGIN)
+  useIsomorphicLayoutEffect(() => {
     if (typeof window !== 'undefined' && window.location?.origin) {
-      setOrigin(window.location.origin)
+      setOrigin((current) => (current === window.location.origin ? current : window.location.origin))
     }
   }, [])
   return origin
@@ -332,11 +335,11 @@ function CodeBlock({ children }: { children: string }) {
   )
 }
 
-function buildGuideMarkdown(origin: string): string {
+function buildGuideMarkdown(apiBase: string): string {
   const lines: string[] = []
   lines.push('# TamTam — Remote Operator Guide')
   lines.push('')
-  lines.push(`Base URL: ${origin}/api`)
+  lines.push(`Base URL: ${apiBase}`)
   lines.push('Auth: none (self-hosted; bind interface accordingly).')
   lines.push('')
   lines.push('## What TamTam is')
@@ -361,7 +364,7 @@ function buildGuideMarkdown(origin: string): string {
     lines.push(r.blurb)
     lines.push('')
     lines.push('```bash')
-    lines.push(r.curl(origin))
+    lines.push(r.curl(apiBase))
     lines.push('```')
     if (r.notes) {
       lines.push('')
@@ -390,7 +393,7 @@ function buildGuideMarkdown(origin: string): string {
 export function AgentGuidePage() {
   const origin = useOrigin()
   const apiBase = `${origin}/api`
-  const fullGuide = useMemo(() => buildGuideMarkdown(origin), [origin])
+  const fullGuide = useMemo(() => buildGuideMarkdown(apiBase), [apiBase])
 
   return (
     <div className="flex flex-col gap-6 pb-24 max-w-5xl">
@@ -491,7 +494,7 @@ export function AgentGuidePage() {
         <h2 className="text-base font-semibold text-text-primary">Common tasks</h2>
         <div className="grid gap-3">
           {RECIPES.map((r) => {
-            const snippet = r.curl(origin)
+            const snippet = r.curl(apiBase)
             return (
               <article key={r.id} className="border border-border rounded-md bg-bg-secondary">
                 <header className="flex items-start justify-between gap-3 px-4 py-2.5 bg-bg-tertiary border-b border-border">
