@@ -1,6 +1,7 @@
 'use client'
 
 import React from 'react'
+import { Button } from '@/components/ui/Button'
 
 function fmtTokens(n: number): string {
   if (n < 1000) return `${n}`
@@ -158,13 +159,15 @@ export function TerminalInput({
         {messageQueue.length > 0 && (
           <div className="flex items-center gap-1 ml-2 shrink-0 mt-0.5">
             <span className="text-xs text-text-tertiary font-mono">{messageQueue.length} queued</span>
-            <button
+            <Button
               type="button"
-              className="text-xs text-text-tertiary hover:text-text-secondary cursor-pointer border-none bg-transparent font-mono"
+              variant="ghost"
+              size="icon-sm"
+              className="font-mono"
               onClick={onClearQueue}
               title="Clear queued messages"
               aria-label="Clear queued messages"
-            >✕</button>
+            >✕</Button>
           </div>
         )}
       </div>
