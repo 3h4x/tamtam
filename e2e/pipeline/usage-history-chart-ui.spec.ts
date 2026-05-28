@@ -151,7 +151,7 @@ test.describe('UsageHistoryChart', () => {
     // Initial state: "all providers" tab is active (has border-status-info class)
     const allBtn = page.getByRole('button', { name: 'all providers' });
     await expect(allBtn).toBeVisible({ timeout: 8_000 });
-    await expect(allBtn).toHaveClass(/border-status-info/);
+    await expect(allBtn).toHaveAttribute('aria-pressed', 'true');
 
     // Chart label should show aggregate label
     await expect(page.getByText('all providers · average')).toBeVisible({ timeout: 5_000 });
@@ -161,8 +161,8 @@ test.describe('UsageHistoryChart', () => {
 
     // claude tab becomes active
     const claudeBtn = page.getByRole('button', { name: 'claude' });
-    await expect(claudeBtn).toHaveClass(/border-status-info/);
-    await expect(allBtn).not.toHaveClass(/border-status-info/);
+    await expect(claudeBtn).toHaveAttribute('aria-pressed', 'true');
+    await expect(allBtn).toHaveAttribute('aria-pressed', 'false');
 
     // Chart label updates to provider-specific label
     await expect(page.getByText('claude · 7d window')).toBeVisible({ timeout: 5_000 });
