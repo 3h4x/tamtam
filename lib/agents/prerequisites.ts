@@ -29,26 +29,41 @@ export function buildIssueCruncherPrerequisiteCommand(projectName: string): stri
 }
 
 // agent:improve prereq — runs in the project cwd. Outputs the top 5
-// least-recently-modified candidate source files (with .tamtam/, node_modules,
-// build artifacts, and *.d.ts filtered out) and the tail of the per-project
-// audit log so the agent can skip files it already touched recently.
+// least-recently-modified candidate source files and the tail of the
+// per-project audit log so the agent can skip files it already touched.
+//
+// Uses `git ls-files` (not `find`) so it lists tracked files plus untracked
+// files that are not ignored by the project's own git excludes. Git submodules
+// show up as a single gitlink entry, not their internal files, which keeps the
+// candidate set inside "our code" even when projects vendor large dependencies
+// (e.g. Solidity repos under `lib/`). Portable across macOS (BSD stat) and
+// Linux (GNU stat).
 //
 // Audit log lives under `.tamtam/cache/audits/<agent>.md`. The `cache/` subdir
-// is gitignored by default via `lib/agents/agent-memory.ts:ensureTamtamCacheGitignore`,
-// so every agent writing under it inherits the ignore for free — no per-file
-// rule per agent.
+// is gitignored by default via `lib/agents/agent-memory.ts:ensureTamtamCacheGitignore`.
 export const IMPROVE_AUDIT_PATH = '.tamtam/cache/audits/improve.md';
 
 export function buildImprovePrerequisiteCommand(): string {
-  const find =
-    `find app components lib hooks scripts docs -type f` +
-    ` -not -path '*/.tamtam/*' -not -path '*/node_modules/*'` +
-    ` -not -path '*/.next/*' -not -path '*/dist/*' -not -path '*/coverage/*'` +
-    ` -not -name '*.d.ts'` +
-    ` \\( -name '*.ts' -o -name '*.tsx' -o -name '*.md' -o -name '*.sh' \\)` +
-    ` -printf '%TY-%Tm-%Td %p\\n' 2>/dev/null | sort | head -5`;
+  // Skip generated, snapshot/fixture, report, and historical-archive files so
+  // the candidate list points at code the agent can actually improve. See
+  // tests for the full exclusion list rationale.
+  const candidates =
+    `stat_mode=$(if stat --version >/dev/null 2>&1; then printf gnu; else printf bsd; fi); ` +
+    `{ git ls-files 2>/dev/null; git ls-files --others --exclude-standard 2>/dev/null; }` +
+    ` | grep -Ei '\\.(ts|tsx|js|jsx|sol|py|rs|go|md|sh)$'` +
+    ` | grep -v '\\.d\\.ts$'` +
+    ` | grep -Ev '\\.(gen|generated)\\.[^/]+$'` +
+    ` | grep -Ev '(^|/)(\\.tamtam|node_modules)/'` +
+    ` | grep -Ev '(^|/)(__snapshots__|__fixtures__|fixtures|e2e-results|test-results|playwright-report|coverage|dist|build|out)/'` +
+    ` | grep -Ev '(^|/)(CHANGELOG|LICENSE|LICENCE)(\\.md)?$'` +
+    ` | grep -v '^docs/superpowers/plans/'` +
+    ` | grep -v '^docs/superpowers/specs/'` +
+    ` | while IFS= read -r f; do` +
+    ` if [ "$stat_mode" = gnu ]; then d=$(stat -c '%Y' "$f" 2>/dev/null); else d=$(stat -f '%m' "$f" 2>/dev/null); fi;` +
+    ` [ -n "$d" ] && printf '%s %s\\n' "$d" "$f";` +
+    ` done | sort -n | head -5`;
   return (
-    `echo '## Top 5 oldest candidate files'; ${find}; ` +
+    `echo '## Top 5 oldest candidate files'; ${candidates}; ` +
     `echo; echo '## Recent improve runs (tail of ${IMPROVE_AUDIT_PATH})'; ` +
     `tail -10 ${IMPROVE_AUDIT_PATH} 2>/dev/null || echo '(no audit log yet)'`
   );
