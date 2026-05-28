@@ -8,7 +8,7 @@ import { formatAgo } from '@/lib/shared/format'
 import { Labels, CheckIcon, GateBadge } from '@/components/issues-tab/shared'
 import type { MergeMethod, PrGates } from '@/components/issues-tab/shared'
 import { Button } from '@/components/ui/Button'
-import { PillButton, type PillTone } from '@/components/ui/Pill'
+import { Pill, PillButton, type PillTone } from '@/components/ui/Pill'
 import { SegmentedControl } from '@/components/ui/SegmentedControl'
 import { Spinner } from '@/components/ui/Spinner'
 
@@ -92,6 +92,10 @@ export function PRRow({
     : ciRollup === 'FAILURE' ? 'error'
     : ciRollup === 'PENDING' ? 'warning'
     : null
+  const reviewBadgeTone: PillTone =
+    pr.reviewDecision === 'APPROVED' ? 'success'
+    : pr.reviewDecision === 'CHANGES_REQUESTED' ? 'error'
+    : 'neutral'
 
   const [switchingBranch, setSwitchingBranch] = useState(false)
 
@@ -202,14 +206,14 @@ export function PRRow({
               #{pr.number}
             </span>
             {merged && (
-              <span className="px-1.5 py-0.5 text-[10px] rounded-full bg-status-success/15 text-status-success border border-status-success/30 font-medium">
+              <Pill tone="success" size="xs" className="rounded-full px-1.5 text-[10px]">
                 Merged
-              </span>
+              </Pill>
             )}
             {pr.isDraft && (
-              <span className="px-1.5 py-0.5 text-[10px] rounded-full bg-bg-tertiary text-text-secondary border border-border font-medium">
+              <Pill tone="neutral" size="xs" className="rounded-full bg-bg-tertiary px-1.5 text-[10px]">
                 Draft
-              </span>
+              </Pill>
             )}
           </div>
           <div className="flex flex-wrap items-center gap-x-2 gap-y-1 text-[11px] text-text-tertiary tabular-nums">
@@ -219,11 +223,17 @@ export function PRRow({
               {pr.headRefName} → {pr.baseRefName}
             </code>
             {reviewLabel && (
-              <span className={`px-1.5 py-0.5 rounded-full text-[10px] font-medium border ${
-                pr.reviewDecision === 'APPROVED' ? 'bg-status-success/10 text-status-success border-status-success/30'
-                : pr.reviewDecision === 'CHANGES_REQUESTED' ? 'bg-status-error/10 text-status-error border-status-error/30'
-                : 'bg-bg-tertiary text-text-secondary border-border'
-              }`}>{reviewLabel}</span>
+              <Pill
+                tone={reviewBadgeTone}
+                size="xs"
+                className={`rounded-full px-1.5 text-[10px] ${
+                  pr.reviewDecision === 'APPROVED' ? 'bg-status-success/10'
+                  : pr.reviewDecision === 'CHANGES_REQUESTED' ? 'bg-status-error/10'
+                  : 'bg-bg-tertiary'
+                }`}
+              >
+                {reviewLabel}
+              </Pill>
             )}
           </div>
           {((pr.labels?.length ?? 0) > 0 || gates || (ciRollup && ciBadgeTone)) && (
