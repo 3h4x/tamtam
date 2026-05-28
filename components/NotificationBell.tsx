@@ -8,6 +8,7 @@ import type { JobInfo } from '@/lib/client-api'
 import { jobIsFinished } from '@/lib/client/job-status'
 import { Button } from '@/components/ui/Button'
 import { Spinner } from '@/components/ui/Spinner'
+import { StatusIcon } from '@/components/ui/StatusIcon'
 
 // Sky view: one running entry per project (highest-priority kind wins)
 const KIND_PRIORITY: Record<string, number> = {
@@ -91,20 +92,6 @@ function collapseFinishedJobs(jobs: JobInfo[]): JobInfo[] {
   }
 
   return picked.sort((a, b) => (b.finished_at || 0) - (a.finished_at || 0))
-}
-
-function StatusIcon({ success }: { success: boolean }) {
-  return success ? (
-    <svg aria-label="success" className="w-4 h-4 text-status-success shrink-0" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-      <circle cx="8" cy="8" r="6.5" />
-      <path d="M5 8l2 2 4-4" />
-    </svg>
-  ) : (
-    <svg aria-label="attention" className="w-4 h-4 text-status-error shrink-0" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-      <circle cx="8" cy="8" r="6.5" />
-      <path d="M5.5 5.5l5 5M10.5 5.5l-5 5" />
-    </svg>
-  )
 }
 
 function RunningIcon() {
@@ -309,7 +296,7 @@ export function NotificationBell() {
                         onClick={() => handleJobClick(job)}
                         className="w-full flex items-center gap-3 px-4 py-3 border-b border-border/50 last:border-0 hover:bg-bg-secondary transition-colors bg-transparent cursor-pointer text-left"
                       >
-                        <StatusIcon success={state.success} />
+                        <StatusIcon ok={state.success} />
                         <div className="flex-1 min-w-0">
                           <div className="flex items-center gap-2 flex-wrap">
                             <span className="text-sm font-medium text-text-primary truncate">{job.project}</span>
