@@ -219,9 +219,8 @@ export async function getSchedulerHealth(
   };
 }
 
-/** Legacy export kept for the monitoring panel; returns an empty dump now
- *  that the in-memory scheduler is gone. The /monitoring page can switch
- *  to the graphile-worker queue API in a follow-up. */
+/** Legacy export kept for the monitoring response shape; graphile-worker
+ *  health now comes from getSchedulerHealth(). */
 export interface SchedulerEntryDump {
   agentId: string;
   project: string;
