@@ -633,7 +633,7 @@ async function runPush(
   //   - exit 0, count 0   → genuinely no changes
   //   - exit != 0         → no upstream; fall through to tryPush, which
   //                         retries with `--set-upstream` via the existing
-  //                         fallback at lines ~245-249 when push fails with
+  //                         fallback below when push fails with
   //                         "no upstream" / "set-upstream" stderr.
   const aheadR = await execStep('git', ['-C', projPath, 'rev-list', '--count', '@{u}..HEAD'], { timeout: 5000 });
   log(`\n$ git rev-list --count @{u}..HEAD\n${aheadR.stdout}`);
