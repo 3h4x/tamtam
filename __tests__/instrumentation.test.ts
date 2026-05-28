@@ -319,14 +319,14 @@ describe('instrumentation', () => {
       expect(markDoneMock).not.toHaveBeenCalled();
     });
 
-    it('reaps abandoned inline jobs when pr-wait resume fails', async () => {
+    it('reaps abandoned inline jobs when pr-wait contextMeta is malformed', async () => {
       vi.stubEnv('NODE_ENV', 'test');
       mockDeps([]);
       const orphanedPrWait = { id: 'pr-wait-bad', kind: 'pr-wait', pid: 1234, finishedAt: null, contextMeta: '{', project: 'proj1' };
       const orphanedMarkDod = { id: 'mark-dod-1', kind: 'mark-dod', pid: 0, finishedAt: null, contextMeta: null, project: 'proj1' };
       const listJobsMock = vi.fn().mockReturnValue([orphanedPrWait, orphanedMarkDod]);
       const markDoneMock = vi.fn().mockResolvedValue(undefined);
-      const resumePrWaitMock = vi.fn().mockReturnValue({ ok: false, error: 'malformed contextMeta' });
+      const resumePrWaitMock = vi.fn();
 
       vi.doMock('@/lib/jobs/job-storage', () => ({
         listJobs: listJobsMock,
@@ -346,7 +346,7 @@ describe('instrumentation', () => {
       await registerNode();
 
       await vi.waitFor(() => {
-        expect(resumePrWaitMock).toHaveBeenCalledWith('pr-wait-bad');
+        expect(resumePrWaitMock).not.toHaveBeenCalled();
         expect(markDoneMock).toHaveBeenCalledWith(orphanedPrWait, -1);
         expect(markDoneMock).toHaveBeenCalledWith(orphanedMarkDod, -1);
       }, { timeout: 2000, interval: 1 });
