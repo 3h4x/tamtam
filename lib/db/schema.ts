@@ -150,6 +150,11 @@ export const agents = pgTable('agents', {
   prompt: text('prompt').notNull().default(''),
   schedule: text('schedule'),
   enabled: boolean('enabled').notNull().default(true),
+  // When false, the orchestrator never picks this agent for a *boost* fire —
+  // it still runs on its own `schedule`. Use this for agents that produce
+  // user-visible artifacts on a deliberate cadence (blog posts, social
+  // posts) where extra firings would over-publish.
+  boostable: boolean('boostable').notNull().default(true),
   docPaths: text('doc_paths').notNull().default('[]'),
   provider: text('provider'),
   fallbackEnabled: boolean('fallback_enabled').notNull().default(false),

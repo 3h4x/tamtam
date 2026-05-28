@@ -14,6 +14,7 @@ import { normalizeModelInput } from '@/lib/agents/model-aliases';
 
 export interface FileAgentOverride {
   enabled?: boolean;
+  boostable?: boolean;
   schedule?: string | null;
   model?: string;
   skillIds?: string[];
@@ -135,6 +136,7 @@ export async function setFileAgentOverride(project: string, name: string, patch:
   const existing = (await getFileAgentOverride(project, name)) ?? {};
   const next: FileAgentOverride = { ...existing };
   if (patch.enabled !== undefined) next.enabled = patch.enabled;
+  if (patch.boostable !== undefined) next.boostable = patch.boostable;
   if (patch.schedule !== undefined) next.schedule = patch.schedule;
   if (patch.model !== undefined) next.model = normalizeModelInput(patch.model, 'normal');
   if (patch.skillIds !== undefined) next.skillIds = patch.skillIds;

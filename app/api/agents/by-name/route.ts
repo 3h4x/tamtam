@@ -88,6 +88,7 @@ export async function PATCH(request: NextRequest) {
     if (fields.prompt !== undefined) updates.prompt = fields.prompt;
     if (fields.schedule !== undefined) updates.schedule = parsedSchedule.schedule;
     if (fields.enabled !== undefined) updates.enabled = fields.enabled;
+    if (fields.boostable !== undefined) updates.boostable = fields.boostable;
     if (provider !== undefined) updates.provider = provider;
     if (fields.fallbackEnabled !== undefined) updates.fallbackEnabled = fields.fallbackEnabled === true;
     if (fields.prerequisiteCommand !== undefined) updates.prerequisiteCommand = prerequisiteCommand ?? '';
@@ -116,6 +117,7 @@ export async function PATCH(request: NextRequest) {
             schedule: agent.schedule,
             skillIds,
             enabled: agent.enabled,
+            boostable: agent.boostable,
             provider: agent.provider,
             prerequisiteCommand: agent.prerequisiteCommand,
           });
@@ -160,6 +162,7 @@ export async function PATCH(request: NextRequest) {
           schedule: fields.schedule !== undefined ? parsedSchedule.schedule : fileAgent.schedule,
           skillIds: fields.skillIds !== undefined ? fields.skillIds : fileAgent.skillIds,
           enabled: fields.enabled !== undefined ? fields.enabled : fileAgent.enabled,
+          boostable: fields.boostable !== undefined ? fields.boostable : (fileAgent.boostable ?? true),
           provider: provider !== undefined ? provider : fileAgent.provider,
           prerequisiteCommand: fields.prerequisiteCommand !== undefined ? prerequisiteCommand : fileAgent.prerequisiteCommand,
         };
@@ -175,6 +178,7 @@ export async function PATCH(request: NextRequest) {
         // operational fields carry over, then layer the requested changes.
         if (
           fields.enabled !== undefined
+          || fields.boostable !== undefined
           || fields.schedule !== undefined
           || fields.model !== undefined
           || fields.skillIds !== undefined
@@ -184,6 +188,7 @@ export async function PATCH(request: NextRequest) {
           }
           await setFileAgentOverride(projectName, nextName, {
             enabled: fields.enabled,
+            boostable: fields.boostable,
             schedule: fields.schedule !== undefined ? parsedSchedule.schedule : undefined,
             model: parsedModel ?? undefined,
             skillIds: fields.skillIds !== undefined ? fields.skillIds : undefined,

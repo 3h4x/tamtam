@@ -130,11 +130,15 @@ function ProviderChart({
           <LineChart data={data} margin={{ top: 8, right: 16, bottom: 4, left: 4 }}>
             <CartesianGrid strokeDasharray="3 3" stroke="currentColor" strokeOpacity={0.08} />
             <XAxis
-              dataKey="hour"
+              dataKey="bucketTs"
+              type="number"
+              domain={['dataMin', 'dataMax']}
+              scale="time"
               tick={{ fill: 'currentColor', fontSize: 10, opacity: 0.6 }}
               tickLine={false}
               axisLine={{ stroke: 'currentColor', strokeOpacity: 0.15 }}
               minTickGap={32}
+              tickFormatter={(v) => fmtHour(v as number)}
             />
             <YAxis
               tick={{ fill: 'currentColor', fontSize: 10, opacity: 0.6 }}
@@ -179,7 +183,7 @@ function ProviderChart({
             <Line
               type="monotone"
               dataKey="catchUp"
-              name="catch-up ceiling"
+              name="to-100% rate"
               stroke="var(--color-status-warning, #f59e0b)"
               strokeWidth={1.5}
               strokeDasharray="4 3"

@@ -9,13 +9,13 @@
 When TamTam checks out a PR head branch (via any non-default-branch release or the "Work on" issue flow), the working tree switches to the attacker-controlled branch. Without protection, any file in `.tamtam/` would be silently honoured — allowing:
 
 1. **New scheduled agents** — a PR adds `.tamtam/agents/pwn.md` with `schedule: 15m`, a malicious prompt, or a malicious `prerequisiteCommand`; TamTam registers and runs it automatically.
-2. **Gate bypass** — `tests_disabled: true`, `review_disabled: true`, `auto_pr_merge_enabled: true` in `.tamtam/config.yml` lets the attacker's PR skip every safety check and self-merge.
+2. **Verification weakening** — changing `pipeline.test_command`, `pipeline.release_timeout_minutes`, or `pipeline.review_prerequisite_command` in `.tamtam/config.yml` changes what TamTam executes or injects around release checks.
 3. **Trust escalation** — adding their own login to `safe_users` marks their content as trusted, enabling follow-on prompt injection via issue/PR bodies.
 4. **Prompt steering** — changing `commits.commit_style` injects attacker-controlled guidance into generated commit-message prompts.
 
 ### The Defence: Default-Branch Pinning
 
-`lib/tamtam-file-config.ts` and `lib/tamtam-file-agents.ts` detect the current branch at read time and, when on a **non-default branch**, read `.tamtam/` content from `origin/<defaultBranch>` via `git show` instead of the working tree.
+`lib/skills/tamtam-file-config.ts` and `lib/agents/tamtam-file-agents.ts` detect the current branch at read time and, when on a **non-default branch**, read `.tamtam/` content from `origin/<defaultBranch>` via `git show` instead of the working tree.
 
 #### How it works
 
@@ -51,6 +51,8 @@ The following fields are automatically protected by default-branch pinning:
 |---|---|
 | `safe_users` | Attacker marks themselves trusted; prompt injection via issue bodies |
 | `test_command` | Verification command changed or weakened before release |
+| `release_timeout_minutes` | Release wall-clock guard shortened or stretched for attacker-controlled work |
+| `review_prerequisite_command` | Shared pre-review command changed before review prompt assembly |
 | `custom_actions` | New project-page buttons run attacker-chosen shell commands |
 | `commit_style` | Commit-message generation prompt is steered by untrusted branch content |
 | `auto_attach_docs` | Keyword→doc rules are read from the trusted default branch; the **content** of the referenced docs is also fetched from `origin/<defaultBranch>` (not the working tree) so a feature branch cannot rewrite an already-trusted doc and have it injected into terminal, agent, or review prompts |
@@ -61,7 +63,7 @@ The following fields are automatically protected by default-branch pinning:
 | Layer | What it does |
 |---|---|
 | **Default-branch pinning** (this doc) | Policy: only trust `.tamtam/` config from `origin/<default>` |
-| **`<untrusted>` wrapping** (`lib/untrusted.ts`) | Wraps GitHub issue/PR text so Claude treats it as data, not instructions |
+| **`<untrusted>` wrapping** (`lib/shared/untrusted.ts`) | Wraps GitHub issue/PR text so Claude treats it as data, not instructions |
 | **Sandbox** (issue #51) | Runtime: limits filesystem/network access of agent processes |
 
 These layers are independent and complementary. Pinning stops the _registration_ of malicious agents; sandboxing limits what registered agents can do; untrusted wrapping stops prompt injection from issue/PR bodies.
@@ -124,9 +126,9 @@ This is a defensive last-mile filter, not a complete secret-management system. I
 
 ### Implementation Files
 
-- `lib/git-branch.ts` — synchronous git helpers (`getBranchContext`, `gitShowSync`, `gitLsTreeSync`)
-- `lib/tamtam-file-config.ts` — `loadFileConfig` (branch-aware), `writeFileConfig`
-- `lib/tamtam-file-agents.ts` — `scanFileAgents`, `loadFileAgent` (both branch-aware)
+- `lib/git/git-branch.ts` — synchronous git helpers (`getBranchContext`, `gitShowSync`, `gitLsTreeSync`)
+- `lib/skills/tamtam-file-config.ts` — `loadFileConfig` (branch-aware), `writeFileConfig`
+- `lib/agents/tamtam-file-agents.ts` — `scanFileAgents`, `loadFileAgent` (both branch-aware)
 - `lib/skills/auto-attach-docs.ts` — `resolveAutoAttachedDocs` (branch-aware: reads doc content via `gitShowSync` on non-default branches to match the trust ref used by `loadFileConfig`)
 - `lib/shared/log-redaction.ts` — shared log redaction patterns and environment-value masking
 - `__tests__/lib/tamtam-file-config-branch.test.ts` — unit tests for config branch-pinning

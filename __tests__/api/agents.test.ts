@@ -89,6 +89,7 @@ async function applyDdl(handle: TestDbHandle): Promise<void> {
       prompt text NOT NULL DEFAULT '',
       schedule text,
       enabled boolean NOT NULL DEFAULT true,
+      boostable boolean NOT NULL DEFAULT true,
       provider text,
       fallback_enabled boolean NOT NULL DEFAULT false,
       prerequisite_command text,
@@ -2424,6 +2425,34 @@ describe('agents API', () => {
       );
     });
 
+    it('persists boostable updates for a file agent to the DB override and file write payload', async () => {
+      const existingAgent = {
+        id: 'file:myproj:publisher', name: 'publisher', project: 'myproj',
+        skillIds: [] as string[], model: 'sonnet', prompt: 'publish carefully', schedule: '30m',
+        enabled: true, boostable: true, createdAt: 0, updatedAt: 0,
+        source: 'file' as const, filePath: '/path/to/.tamtam/agents/publisher.md',
+      };
+      const updatedAgent = { ...existingAgent, boostable: false };
+      resolveProjectPathMock.mockReturnValueOnce('/path/to/myproj');
+      scanFileAgentsMock.mockReturnValueOnce([existingAgent]);
+      writeFileAgentMock.mockReturnValueOnce(updatedAgent);
+
+      const res = await PATCH_BY_NAME(new NextRequest('http://localhost/api/agents/by-name', {
+        method: 'PATCH',
+        body: JSON.stringify({ project: 'myproj', name: 'publisher', boostable: false }),
+      }));
+
+      expect(res.status).toBe(200);
+      expect(mocks.setFileAgentOverride).toHaveBeenCalledWith(
+        'myproj',
+        'publisher',
+        expect.objectContaining({ boostable: false }),
+      );
+      expect(writeFileAgentMock).toHaveBeenCalledWith('/path/to/myproj', 'myproj', 'publisher', expect.objectContaining({
+        boostable: false,
+      }));
+    });
+
     it('updates prerequisiteCommand in by-name file-agent fallback', async () => {
       const existingAgent = {
         id: 'file:myproj:my-agent', name: 'my-agent', project: 'myproj',
@@ -2456,6 +2485,7 @@ describe('agents API', () => {
         skillIds: [],
 
         enabled: true,
+        boostable: true,
         provider: undefined,
         prerequisiteCommand: 'echo fresh',
       });
@@ -2493,6 +2523,7 @@ describe('agents API', () => {
         skillIds: [],
 
         enabled: true,
+        boostable: true,
         provider: undefined,
         prerequisiteCommand: '',
       });
@@ -2530,6 +2561,7 @@ describe('agents API', () => {
         skillIds: ['agent-issue-cruncher'],
 
         enabled: true,
+        boostable: true,
         provider: undefined,
         prerequisiteCommand: '',
       });
@@ -2560,6 +2592,7 @@ describe('agents API', () => {
         skillIds: [],
 
         enabled: true,
+        boostable: true,
         provider: undefined,
         prerequisiteCommand: undefined,
       });
@@ -2605,6 +2638,7 @@ describe('agents API', () => {
         schedule: null,
         skillIds: [],
         enabled: true,
+        boostable: true,
         provider: 'codex',
         prerequisiteCommand: null,
       });

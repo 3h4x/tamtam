@@ -36,6 +36,7 @@ export async function listEnabledScheduledAgents(): Promise<AgentInput[]> {
       prompt: a.prompt ?? '',
       enabled: !!a.enabled,
       kind: (a.kind === 'system' ? 'system' : 'user') as 'user' | 'system',
+      boostable: a.boostable ?? true,
     });
     dbAgentKeys.add(`${a.project}:${a.name}`);
   }
@@ -59,6 +60,8 @@ export async function listEnabledScheduledAgents(): Promise<AgentInput[]> {
             prompt: fa.prompt,
             enabled: fa.enabled,
             kind: 'user',
+            // File-agent override file may flip this off; default true.
+            boostable: (fa as { boostable?: boolean }).boostable ?? true,
           });
         }
       } catch (err) {

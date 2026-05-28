@@ -142,6 +142,13 @@ describe('file-agent-overrides', () => {
       expect(result.model).toBe('fast');
     });
 
+    it('stores boostable overrides without dropping existing fields', async () => {
+      await setFileAgentOverride('proj', 'agent', { enabled: true, schedule: '8h' });
+      const result = await setFileAgentOverride('proj', 'agent', { boostable: false });
+      expect(result).toEqual({ enabled: true, schedule: '8h', boostable: false });
+      expect(await getFileAgentOverride('proj', 'agent')).toEqual({ enabled: true, schedule: '8h', boostable: false });
+    });
+
     it('returns the merged value (not just the patch)', async () => {
       await setFileAgentOverride('proj', 'agent', { enabled: true });
       const result = await setFileAgentOverride('proj', 'agent', { schedule: '8h' });

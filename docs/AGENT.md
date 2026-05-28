@@ -34,6 +34,7 @@ Agents are reusable automation units that combine skills, optional attached proj
 | `prompt` | string | `''` | Default task prompt for scheduled runs |
 | `schedule` | string | `null` | Run interval for scheduling: `"30m"`, `"1h"`, `"8h"`, etc. or `null` for manual only |
 | `enabled` | boolean | `true` | Enable/disable without deletion |
+| `boostable` | boolean | `true` | Allow the orchestrator to pick this agent for bonus "boost" fires. Set to `false` for agents that should only run on their own schedule |
 | `provider` | string \| null | `null` | Optional required CLI provider (`claude`, `codex`, `gemini`, `lmstudio`, `deepagents`). `null` means "any enabled provider". When set, the run fails closed if that provider is disabled or over budget. |
 | `fallbackEnabled` | boolean | `false` | Opts the agent into one transient provider fallback retry using `provider_fallback_chain`. Built-in recommended agents are created with this enabled. |
 | `prerequisiteCommand` | string \| null | `null` | Optional `bash -c` command run in the project directory before the agent CLI starts. Output is captured to a prerequisite artifact and prepended to the agent prompt. |
@@ -87,7 +88,7 @@ curl -X POST http://localhost:1337/api/agents \
 ```
 
 **Required fields:** `name`, `project`  
-**Optional fields:** `skillIds` (default `[]`), `docPaths` (default `[]`), `model`, `prompt`, `schedule`, `enabled`, `provider`, `prerequisiteCommand`
+**Optional fields:** `skillIds` (default `[]`), `docPaths` (default `[]`), `model`, `prompt`, `schedule`, `enabled`, `boostable`, `provider`, `prerequisiteCommand`
 
 `POST /api/agents` always creates user agents. `kind: "system"` is reserved for TamTam's system-agent seeder and is rejected by the public create route.
 

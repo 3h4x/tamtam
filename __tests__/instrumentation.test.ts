@@ -319,6 +319,88 @@ describe('instrumentation', () => {
       expect(markDoneMock).not.toHaveBeenCalled();
     });
 
+    it('reaps abandoned pr-wait inline jobs when boot resume hits a missing project', async () => {
+      vi.stubEnv('NODE_ENV', 'test');
+      mockDeps([]);
+      const orphanedPrWait = {
+        id: 'pr-wait-missing-project',
+        kind: 'pr-wait',
+        pid: 0,
+        finishedAt: null,
+        contextMeta: JSON.stringify({
+          prNumber: 1,
+          prRepo: 'owner/repo',
+          prUrl: 'https://github.com/owner/repo/pull/1',
+        }),
+        project: 'proj1',
+      };
+      const listJobsMock = vi.fn().mockReturnValue([orphanedPrWait]);
+      const markDoneMock = vi.fn().mockResolvedValue(undefined);
+      const resumePrWaitMock = vi.fn().mockReturnValue({ ok: false, error: 'project not found' });
+
+      vi.doMock('@/lib/jobs/job-storage', () => ({
+        listJobs: listJobsMock,
+        getJob: vi.fn((id: string) => listJobsMock().find((job: { id: string }) => job.id === id) ?? null),
+        markDone: markDoneMock,
+        updateJob: vi.fn(),
+        probeJobStatus: vi.fn(),
+        reconcileStaleRelease: vi.fn(),
+        PIPELINE_STEP_KINDS: new Set(),
+      }));
+      vi.doMock('@/lib/pipeline/start-pr-wait', () => ({ resumePrWait: resumePrWaitMock }));
+      vi.doMock('@/lib/pipeline/recovery-drain', () => ({
+        drainAllRecoveryWork: vi.fn().mockResolvedValue(undefined),
+      }));
+
+      const { registerNode } = await import('@/instrumentation-node');
+      await registerNode();
+
+      expect(resumePrWaitMock).toHaveBeenCalledWith('pr-wait-missing-project');
+      expect(markDoneMock).toHaveBeenCalledWith(orphanedPrWait, -1);
+    });
+
+    it('reaps abandoned pr-wait inline jobs when boot resume throws', async () => {
+      vi.stubEnv('NODE_ENV', 'test');
+      mockDeps([]);
+      const orphanedPrWait = {
+        id: 'pr-wait-resume-throws',
+        kind: 'pr-wait',
+        pid: 0,
+        finishedAt: null,
+        contextMeta: JSON.stringify({
+          prNumber: 1,
+          prRepo: 'owner/repo',
+          prUrl: 'https://github.com/owner/repo/pull/1',
+        }),
+        project: 'proj1',
+      };
+      const listJobsMock = vi.fn().mockReturnValue([orphanedPrWait]);
+      const markDoneMock = vi.fn().mockResolvedValue(undefined);
+      const resumePrWaitMock = vi.fn(() => {
+        throw new Error('resume failed');
+      });
+
+      vi.doMock('@/lib/jobs/job-storage', () => ({
+        listJobs: listJobsMock,
+        getJob: vi.fn((id: string) => listJobsMock().find((job: { id: string }) => job.id === id) ?? null),
+        markDone: markDoneMock,
+        updateJob: vi.fn(),
+        probeJobStatus: vi.fn(),
+        reconcileStaleRelease: vi.fn(),
+        PIPELINE_STEP_KINDS: new Set(),
+      }));
+      vi.doMock('@/lib/pipeline/start-pr-wait', () => ({ resumePrWait: resumePrWaitMock }));
+      vi.doMock('@/lib/pipeline/recovery-drain', () => ({
+        drainAllRecoveryWork: vi.fn().mockResolvedValue(undefined),
+      }));
+
+      const { registerNode } = await import('@/instrumentation-node');
+      await registerNode();
+
+      expect(resumePrWaitMock).toHaveBeenCalledWith('pr-wait-resume-throws');
+      expect(markDoneMock).toHaveBeenCalledWith(orphanedPrWait, -1);
+    });
+
     it('reaps abandoned inline jobs when pr-wait contextMeta is malformed', async () => {
       vi.stubEnv('NODE_ENV', 'test');
       mockDeps([]);

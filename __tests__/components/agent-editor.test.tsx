@@ -128,6 +128,7 @@ describe('AgentEditor', () => {
         schedule: null,
 
         enabled: true,
+        boostable: true,
         provider: null,
         fallbackEnabled: false,
         prerequisiteCommand: null,
@@ -299,6 +300,7 @@ describe('AgentEditor', () => {
         model: 'normal',
         schedule: '2h',
         enabled: true,
+        boostable: true,
         provider: 'codex',
         fallbackEnabled: false,
         prerequisiteCommand: null,

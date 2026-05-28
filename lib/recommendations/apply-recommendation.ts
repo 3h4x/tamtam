@@ -142,6 +142,7 @@ async function updateDbAgentSchedule(expectedProject: string, agentId: string, s
           schedule: reverted.schedule,
           skillIds: JSON.parse(reverted.skillIds || '[]'),
           enabled: reverted.enabled,
+          boostable: reverted.boostable,
           provider: reverted.provider,
         })
       } catch {
@@ -171,6 +172,7 @@ async function updateDbAgentSchedule(expectedProject: string, agentId: string, s
         schedule: updated.schedule,
         skillIds: JSON.parse(updated.skillIds || '[]'),
         enabled: updated.enabled,
+        boostable: updated.boostable,
         provider: updated.provider,
       })
     } catch {

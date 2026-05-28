@@ -8,4 +8,8 @@ export type AgentInput = {
   // 'user' for normal agents (default), 'system' for built-in auto-seeded
   // agents that dispatch to internal handlers instead of spawning a CLI.
   kind: 'user' | 'system';
+  // When false, the orchestrator never picks this agent for a *boost* fire —
+  // it still runs on its own `schedule`. Use for blog-writer / social-poster
+  // style agents where boosting would over-publish.
+  boostable: boolean;
 };

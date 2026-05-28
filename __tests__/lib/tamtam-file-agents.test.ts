@@ -338,6 +338,20 @@ Original prompt.`);
     expect(content2).not.toContain('enabled:');
   });
 
+  it('preserves boostable: false when unrelated fields are updated', () => {
+    writeFileAgent(tmpDir, 'proj', 'publisher', {
+      prompt: 'Publish on a fixed cadence.',
+      boostable: false,
+    });
+    writeFileAgent(tmpDir, 'proj', 'publisher', { model: 'smart' });
+
+    const content = readFileSync(join(tmpDir, '.tamtam', 'agents', 'publisher.md'), 'utf-8');
+    expect(content).toContain('boostable: false');
+    const a = loadFileAgent(tmpDir, 'proj', 'publisher');
+    expect(a!.boostable).toBe(false);
+    expect(a!.model).toBe('smart');
+  });
+
   it('creates .tamtam/agents dir when missing', () => {
     writeFileAgent(tmpDir, 'proj', 'x', {});
     expect(existsSync(join(tmpDir, '.tamtam', 'agents', 'x.md'))).toBe(true);

@@ -403,6 +403,10 @@ function shouldEmitText(text, emittedTexts) {
   return true;
 }
 
+function isDeltaEventType(type) {
+  return type === 'response.output_text.delta' || type === 'output_text_delta';
+}
+
 // Codex occasionally exits 1 with empty stderr after streaming a few bytes of
 // assistant text — most often a transient backend hiccup, never accompanied by
 // a structured `error` event. Retrying once almost always succeeds. Any non-
@@ -525,12 +529,11 @@ function launchCodex({ prompt, model, streamJson, attempt = 0, retryState = null
         type === 'agent_message' ||
         type === 'assistant_message' ||
         type === 'message' ||
-        type === 'response.output_text.delta' ||
-        type === 'output_text_delta'
+        isDeltaEventType(type)
       ) {
         if (event.type === 'response_item' && type === 'message' && payload?.role !== 'assistant') return;
         const text = textFromEvent(payload);
-        if (!shouldEmitText(text, state.emittedTexts)) return;
+        if (!isDeltaEventType(type) && !shouldEmitText(text, state.emittedTexts)) return;
         const written = writeLogicalText(text, emitter, state, attempt);
         if (!written) return;
         fullText += written;
@@ -587,7 +590,7 @@ function launchCodex({ prompt, model, streamJson, attempt = 0, retryState = null
         && code === 1
         && !signal
         && !stderr.trim()
-        && fullText.trim();
+        && Boolean((fullText || state.logicalText).trim());
       if (isSilentCrash && attempt < MAX_TRANSIENT_RETRIES) {
         // Surface the retry to the user-visible stream so the log explains the
         // gap, then re-launch with the same args. Don't close the emitter —
