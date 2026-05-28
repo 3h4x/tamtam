@@ -41,8 +41,9 @@ Rules that hold for every recovery loop:
   needs-attention, re-commit after commit-fail, re-push after push-fail).
 - **Review and non-review loops use different caps.**
   `review_fix_max_iterations` governs only the review→fix verification
-  budget. It defaults to `3`; set it to `0` only when the review loop
-  should run until LGTM or the release wall-clock timeout. Test/commit/push
+  budget. It defaults to `0`, meaning the review loop runs until LGTM or
+  the release wall-clock timeout; set a positive value to cap review-side
+  verification rounds. Test/commit/push
   verification rounds use the shared `TAMTAM_MAX_STEP_ITERATIONS` env guard;
   the push-fix retry (when a pre-push hook rejects with lint/type nits) has
   its own hard cap (`getPushFixAttemptCap()=2`, counted as `fix` jobs whose
