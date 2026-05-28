@@ -1,6 +1,6 @@
 # `.tamtam/` Directory (per-project, committed to version control)
 
-Each tracked workspace project can have a `.tamtam/` directory in its root for version-controlled TamTam config. TamTam reads these files on every request; writes from the UI are saved back automatically.
+Each tracked workspace project can have a `.tamtam/` directory in its root for version-controlled TamTam config. TamTam reads these files on every request; selected team-contract UI edits are saved back automatically, while local/operator controls stay DB-only.
 
 On a feature/PR branch, config is read from `origin/<defaultBranch>` (not the working tree) to prevent privilege escalation from untrusted branches.
 
@@ -38,9 +38,9 @@ Supported keys: `test_command`, `release_timeout_minutes`, `review_prerequisite_
 
 **Workflow flags** (`auto_commit_enabled`, `auto_push_enabled`, `auto_pr_merge_enabled`, `release_after_run`, `test_cron_enabled`, `test_cron_schedule`, `tests_disabled`, `review_disabled`, `issue_auto_branch`) are **DB-only** — each developer opts in individually. Older `.tamtam/config.yml` files may still contain those keys; TamTam migrates them to the DB on startup and ignores them on subsequent reads.
 
-**Local review prompt controls** (`review_prompt_addendum`, `fix_prompt_addendum`) are DB-only. `pipeline.review_prerequisite_command` may be committed when the project has a shared pre-review codegen/schema command; otherwise the Config tab's DB value is used as the local fallback.
+**Local review prompt controls** (`review_prompt_addendum`, `fix_prompt_addendum`) are DB-only. `pipeline.review_prerequisite_command` may be committed when the project has a shared pre-review codegen/schema command; otherwise the Config tab's DB value is used as the local fallback. Config-tab edits to `review_prerequisite_command` update that DB fallback, not `.tamtam/config.yml`.
 
-Reader: `lib/skills/tamtam-file-config.ts` → `loadFileConfig(projectPath)` / `writeFileConfig(projectPath, updates)`. The Config tab shows a banner listing which keys come from the file; saving writes back.
+Reader: `lib/skills/tamtam-file-config.ts` → `loadFileConfig(projectPath)` / `writeFileConfig(projectPath, updates)`. The Config tab shows a banner listing which keys come from the file; saving writes back for `test_command`, `release_timeout_minutes`, and `commit_style`. Custom action edits also mirror `custom_actions` to the file.
 
 `auto_attach_docs` is enforced by `lib/skills/auto-attach-docs.ts` and wired into three "first-invocation" entry points:
 1. Terminal run route (`app/api/projects/by-project/[projectName]/run/route.ts`, gated on `!resumeSessionId`).
