@@ -13,9 +13,9 @@
 //     STILL flagging. The model and its own reviewer disagree on whether
 //     the finding is closed; another iteration won't help, bail.
 //
-// Lifted out of `lib/jobs/lifecycle.ts` so the workflow runtime can apply
-// the same guardrails. The original lifecycle copies stay in place until
-// the legacy chain blocks are deleted (see Phase guardrail-port plan).
+// The workflow runtime applies these guards before dispatching another
+// review-side fix iteration. Standalone jobs still rely on the legacy
+// lifecycle chain because they are not attached to a release orchestrator.
 
 import type { JobData } from '@/lib/jobs/types';
 import { extractFixClaims, extractFindingIds, findingsIdentity } from '@/lib/pipeline/review-contract';
