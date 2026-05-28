@@ -1,6 +1,7 @@
 'use client';
 
 import { Button } from '@/components/ui/Button';
+import { Pill, PillButton, type PillTone } from '@/components/ui/Pill';
 import { workflowStatusPresentation } from '@/components/workflow-runs/workflow-run-status';
 
 export const STATUS_FILTERS = ['all', 'completed', 'running', 'pending', 'failed', 'cancelled'] as const;
@@ -18,7 +19,7 @@ interface WorkflowRunsFilterPanelProps {
 
 interface FilterPresentation {
   glyph: string | null;
-  activeClassName: string;
+  tone: PillTone;
   glyphClassName: string;
 }
 
@@ -33,7 +34,13 @@ function workflowFilterPresentation(status: Exclude<StatusFilter, 'all'>): Filte
         : 'text-text-tertiary';
   return {
     glyph: presentation.glyph,
-    activeClassName: presentation.className,
+    tone: presentation.className.includes('text-status-success')
+      ? 'success'
+      : presentation.className.includes('text-status-error')
+        ? 'error'
+        : presentation.className.includes('text-accent')
+          ? 'accent'
+          : 'neutral',
     glyphClassName,
   };
 }
@@ -44,7 +51,7 @@ function workflowFilterPresentation(status: Exclude<StatusFilter, 'all'>): Filte
 const STATUS_FILTER_PRESENTATIONS: Record<StatusFilter, FilterPresentation> = {
   all: {
     glyph: null,
-    activeClassName: 'border-accent bg-accent/10 text-accent',
+    tone: 'accent',
     glyphClassName: 'text-text-tertiary',
   },
   completed: workflowFilterPresentation('completed'),
@@ -123,16 +130,17 @@ export function WorkflowRunsFilterPanel({
           {hasActiveFilters ? (
             <div className="flex flex-wrap gap-1.5 lg:max-w-[45%] lg:justify-end">
               {nameNeedle ? (
-                <span
-                  className="inline-flex max-w-full items-center gap-1.5 rounded-md border border-border bg-bg-primary px-2 py-1 text-xs text-text-secondary"
+                <Pill
+                  tone="neutral"
+                  className="max-w-full"
                   title={nameFilter.trim()}
                 >
                   <span className="text-text-tertiary">query</span>
                   <span className="max-w-[20rem] truncate font-mono text-text-primary">{nameFilter.trim()}</span>
-                </span>
+                </Pill>
               ) : null}
               {activeStatusPresentation ? (
-                <span className={`inline-flex items-center gap-1.5 rounded-md border px-2 py-1 text-xs ${activeStatusPresentation.activeClassName}`}>
+                <Pill tone={activeStatusPresentation.tone}>
                   {activeStatusPresentation.glyph ? (
                     <span className="leading-none" aria-hidden="true">
                       {activeStatusPresentation.glyph}
@@ -140,7 +148,7 @@ export function WorkflowRunsFilterPanel({
                   ) : null}
                   <span>status</span>
                   <span className="font-mono">{statusFilter}</span>
-                </span>
+                </Pill>
               ) : null}
             </div>
           ) : null}
@@ -151,16 +159,14 @@ export function WorkflowRunsFilterPanel({
           const presentation = statusFilterPresentation(status);
           const selected = statusFilter === status;
           return (
-            <button
+            <PillButton
               key={status}
               type="button"
               onClick={() => onStatusFilterChange(status)}
               aria-pressed={selected}
-              className={`inline-flex items-center gap-1.5 rounded-md border px-2.5 py-1 text-xs transition-colors ${
-                selected
-                  ? presentation.activeClassName
-                  : 'border-transparent bg-transparent text-text-secondary hover:border-border hover:bg-bg-primary hover:text-text-primary'
-              }`}
+              tone={presentation.tone}
+              active={selected}
+              className="px-2.5"
             >
               {presentation.glyph ? (
                 <span className={`leading-none ${selected ? '' : presentation.glyphClassName}`} aria-hidden="true">
@@ -169,7 +175,7 @@ export function WorkflowRunsFilterPanel({
               ) : null}
               <span>{status}</span>
               <span className="font-mono tabular-nums text-text-tertiary">{statusCounts[status]}</span>
-            </button>
+            </PillButton>
           );
         })}
       </div>
@@ -182,16 +188,16 @@ export function WorkflowRunsFilterPanel({
               const presentation = statusFilterPresentation(status);
               const selected = statusFilter === status;
               return (
-                <button
+                <PillButton
                   key={status}
                   type="button"
                   onClick={() => onStatusFilterChange(status)}
                   aria-label={`Show ${status} workflow runs`}
-                  className={`inline-flex items-center gap-1.5 rounded-md border px-2 py-0.5 transition-colors ${
-                    selected
-                      ? presentation.activeClassName
-                      : 'border-border bg-bg-primary text-text-secondary hover:bg-bg-tertiary hover:text-text-primary'
-                  }`}
+                  tone={presentation.tone}
+                  size="xs"
+                  active={selected}
+                  inactiveStyle="subtle"
+                  className={selected ? undefined : 'hover:bg-bg-tertiary'}
                 >
                   {presentation.glyph ? (
                     <span className={`leading-none ${selected ? '' : presentation.glyphClassName}`} aria-hidden="true">
@@ -200,7 +206,7 @@ export function WorkflowRunsFilterPanel({
                   ) : null}
                   <span>{status}</span>
                   <span className="font-mono tabular-nums text-text-tertiary">{count}</span>
-                </button>
+                </PillButton>
               );
             })}
           </div>
