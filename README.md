@@ -13,7 +13,7 @@ The agent management dashboard built for Claude-compatible CLIs. Define skills, 
 | Feature | Details |
 |---|---|
 | **Multi-project overview** | All your git repos at a glance — uncommitted changes, CI status, last run |
-| **Skill composition** | DB-backed skills + file-based personas from `skills/docs/skills/` and `data/skills/`. Mix and match into agents |
+| **Skill composition** | DB-backed skills + file-based personas from `skills/docs/skills/`, plus optional runtime personas from `data/skills/` when that directory exists. Mix and match into agents |
 | **Library** | `/library` groups the agent catalog and the skills browser; `/skills` redirects to the Skills tab there |
 | **Agent guide** | `/agent` provides a copyable remote-operator guide with API recipes and route examples |
 | **Real-time streaming** | Token-by-token output via SSE. Watch the selected provider work in real time |
@@ -145,7 +145,7 @@ LOKI_URL=...           # Loki base URL for log monitoring (default: http://local
 Skills are reusable instruction blocks injected into agent prompts. Two sources:
 
 - **DB-backed** — create and edit via `/library?tab=skills` (`/skills` redirects there)
-- **File-based** — auto-scanned from `skills/docs/skills/` (vendored curated library) and `data/skills/` personas; any `.md` file in a category subdirectory, with optional YAML frontmatter (`title`, `description`)
+- **File-based** — auto-scanned from `skills/docs/skills/` (vendored curated library) and optional `data/skills/` runtime personas; any `.md` file in a category subdirectory, with optional YAML frontmatter (`title`, `description`)
 
 Agents are built by selecting a model, writing a prompt, and attaching any number of skills and project docs. Agents can also pin a provider or prerequisite command. At run time, attached content is prepended to the prompt before the configured provider sees it.
 
