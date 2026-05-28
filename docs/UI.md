@@ -174,6 +174,10 @@ Use `SegmentedControl` for compact single-choice filters inside headers and pane
 
 Use the default tone for neutral panels. Use `tone="current"` only inside already-themed bars where the control should inherit the surrounding status color. Use `size="xs"` for tight summary bars and `size="sm"` for normal panel headers.
 
+### Pills (`components/ui/Pill.tsx`)
+
+Use `Pill` for compact read-only filter/status chips and `PillButton` for clickable filter chips. Supported tones are `neutral`, `accent`, `success`, `error`, `warning`, and `info`; use `active` for selected chips and `inactiveStyle="subtle"` when inactive chips should keep the bordered neutral background.
+
 **Toolbar atoms** (terminal panel header bar; all chips/groups align to a 24px row, inner tabs 20px):
 - `.toolbar-btn` — bordered chip for standalone toggles (e.g. NEW, RECENT, thinking, trace); 24px tall, mono font
 - `.toolbar-group` — grouped control container (e.g. ATTACH, MODEL); wraps `.toolbar-label` + one or more `.toolbar-tab` children
