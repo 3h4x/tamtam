@@ -14,6 +14,7 @@ import { RECOMMENDED_AGENTS, recommendedAgentMatchesName } from '@/lib/agents/re
 import { normalizeModelInput } from '@/lib/agents/model-aliases'
 import { useSchedulerHealth, type SchedulerEntry } from '@/hooks/useSchedulerHealth'
 import { Button } from '@/components/ui/Button'
+import { Pill } from '@/components/ui/Pill'
 import { Table, type Column } from '@/components/ui/Table'
 
 interface AgentsTabProps {
@@ -230,23 +231,25 @@ export function AgentsTab({ projectName, projectJobs = [] }: AgentsTabProps) {
             {r.agent.name}
           </span>
           {r.agent.provider && (
-            <span className="text-[10px] px-1.5 py-0.5 rounded-full border border-accent/25 bg-accent/10 text-accent font-mono" title="Required provider for this agent">
+            <Pill tone="accent" size="xs" className="rounded-full border-accent/25 px-1.5 py-0.5 font-mono text-[10px]" title="Required provider for this agent">
               {r.agent.provider}
-            </span>
+            </Pill>
           )}
           {r.agent.source === 'file' && (
-            <span className="text-[10px] px-1.5 py-0.5 rounded-full bg-bg-tertiary text-text-tertiary border border-border" title=".tamtam/agents/">
+            <Pill tone="neutral" size="xs" className="rounded-full bg-bg-tertiary px-1.5 py-0.5 text-[10px] text-text-tertiary" title=".tamtam/agents/">
               file
-            </span>
+            </Pill>
           )}
           {r.agent.kind === 'system' && (
-            <span
-              className="text-[10px] px-1.5 py-0.5 rounded-full bg-accent/10 text-accent border border-accent/30"
+            <Pill
+              tone="accent"
+              size="xs"
+              className="rounded-full border-accent/30 px-1.5 py-0.5 text-[10px]"
               title="Built-in system agent — auto-managed by TamTam"
-            >system</span>
+            >system</Pill>
           )}
           {!r.agent.enabled && r.agent.schedule && (
-            <span className="text-[10px] px-1.5 py-0.5 rounded-full bg-bg-tertiary text-text-tertiary">off</span>
+            <Pill tone="neutral" size="xs" className="rounded-full border-transparent bg-bg-tertiary px-1.5 py-0.5 text-[10px] text-text-tertiary">off</Pill>
           )}
         </div>
       ),
@@ -328,9 +331,9 @@ export function AgentsTab({ projectName, projectJobs = [] }: AgentsTabProps) {
       sortable: true,
       sortValue: r => r.agent.model,
       render: r => (
-        <span className="text-[10px] px-1.5 py-0.5 rounded-full bg-bg-tertiary text-text-secondary whitespace-nowrap">
+        <Pill tone="neutral" size="xs" className="rounded-full border-transparent bg-bg-tertiary px-1.5 py-0.5 text-[10px] text-text-secondary whitespace-nowrap">
           {r.agent.model}
-        </span>
+        </Pill>
       ),
     },
     {
@@ -341,9 +344,9 @@ export function AgentsTab({ projectName, projectJobs = [] }: AgentsTabProps) {
         r.skills.length > 0 ? (
           <div className="flex flex-wrap gap-1">
             {r.skills.map(s => (
-              <span key={s.id} className="text-[10px] px-1.5 py-0.5 rounded-full bg-accent/10 text-accent">
+              <Pill key={s.id} tone="accent" size="xs" className="rounded-full border-transparent px-1.5 py-0.5 text-[10px]">
                 {s.name}
-              </span>
+              </Pill>
             ))}
           </div>
         ) : (
