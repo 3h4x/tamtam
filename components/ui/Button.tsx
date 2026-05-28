@@ -6,6 +6,7 @@ export type ButtonVariant =
   | 'secondary'   // bordered neutral — the default workhorse
   | 'primary'     // translucent accent (border + bg/10)
   | 'solid'       // solid accent fill — marquee save/submit actions
+  | 'success'     // success text + hover fill — positive toggles
   | 'success-solid'// solid green — completed confirmations
   | 'ghost'       // transparent, text-secondary — nav links, separators
   | 'danger'      // error text + hover fill — "Delete" before confirmation
@@ -37,6 +38,7 @@ const VARIANT: Record<Exclude<ButtonVariant, 'link'>, string> = {
   secondary:    'border border-border bg-bg-secondary text-text-primary hover:bg-bg-tertiary',
   primary:      'border border-accent bg-accent/10 text-accent hover:bg-accent/20',
   solid:        'border border-transparent bg-accent text-white hover:bg-accent-hover',
+  success:      'border border-status-success text-status-success hover:bg-status-success/10',
   'success-solid':'border border-transparent bg-status-success text-white hover:bg-status-success',
   ghost:        'border border-transparent text-text-secondary hover:text-text-primary hover:bg-bg-tertiary/60',
   danger:       'border border-status-error text-status-error hover:bg-status-error/10',

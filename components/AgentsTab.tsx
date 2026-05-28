@@ -358,17 +358,14 @@ export function AgentsTab({ projectName, projectJobs = [] }: AgentsTabProps) {
       render: r => (
         <div className="flex items-center gap-1.5 justify-end">
           {r.agent.schedule && (
-            <button
-              className={`px-2 py-1 text-xs border rounded-md cursor-pointer ${
-                r.agent.enabled
-                  ? 'border-status-success/30 text-status-success hover:bg-status-success/10'
-                  : 'border-status-error/30 text-status-error hover:bg-status-error/10'
-              }`}
+            <Button
+              size="sm"
+              variant={r.agent.enabled ? 'success' : 'danger'}
               onClick={() => handleToggleEnabled(r.agent)}
               title={r.agent.enabled ? 'Disable scheduled runs' : 'Enable scheduled runs'}
             >
               {r.agent.enabled ? 'On' : 'Off'}
-            </button>
+            </Button>
           )}
           <Button
             size="sm"
