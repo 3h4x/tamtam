@@ -40,13 +40,8 @@ async function dispatchOrchestratorStep(
   projectName: string,
 ): Promise<void> {
   'use step';
-  // The legacy `workflowDriven` contextMeta flag stamping was removed when
-  // the lifecycle short-circuit moved to gating on `releaseId` directly
-  // (see lib/jobs/lifecycle.ts: `if (job.releaseId) return;`). Every
-  // release-linked pipeline step is owned by the orchestrator regardless
-  // of any flag — gating on linkage is more robust than a stamped marker
-  // (cascade #3 in the migration session was the canonical proof: stale
-  // flag stamps caused double-dispatch when the spawn site lost releaseId).
+  // Release-linked pipeline steps are owned by the orchestrator; the
+  // lifecycle completion hook short-circuits on `releaseId`.
   const { safeStartOrchestrator } = await import('@/lib/workflows/safe-start-orchestrator');
   await safeStartOrchestrator(firstStepJobId, projectName, releaseJobId, 'release-workflow');
 }
