@@ -34,6 +34,7 @@ import { ProjectLogo } from '@/components/ProjectLogo'
 import { useToast } from '@/components/Toast'
 import { Button } from '@/components/ui/Button'
 import { Spinner } from '@/components/ui/Spinner'
+import { StatusIcon } from '@/components/ui/StatusIcon'
 import { subscribeToSettingsChanged } from '@/lib/shared/settings-events'
 import { loadQuotaSnapshot } from '@/lib/client/quota'
 import { readBrowserStorage, writeBrowserStorage } from '@/lib/client/browser-storage'
@@ -89,20 +90,6 @@ interface ProjectTablePageProps {
   fleet: FleetHealth
   issueCounts?: Record<string, { prs: number; issues: number }>
   loading?: boolean
-}
-
-function StatusDot({ ok }: { ok: boolean }) {
-  return ok ? (
-    <svg className="w-3.5 h-3.5 text-status-success shrink-0" viewBox="0 0 14 14" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round">
-      <circle cx="7" cy="7" r="5.5" />
-      <path d="M4.5 7l1.8 1.8 3-3.5" />
-    </svg>
-  ) : (
-    <svg className="w-3.5 h-3.5 text-status-error shrink-0" viewBox="0 0 14 14" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round">
-      <circle cx="7" cy="7" r="5.5" />
-      <path d="M5 5l4 4M9 5l-4 4" />
-    </svg>
-  )
 }
 
 function WarningDot() {
@@ -579,7 +566,7 @@ const isReviewRunning = (projectName: string) => !!runtime[projectName]?.hasRunn
                         <>
                           {isStuck && (
                             <span title={`Release running ${Math.round(releaseAgeMs / 60000)}m — operator should check`} className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded text-xs font-medium bg-status-error/10 text-status-error border border-status-error/30 animate-pulse">
-                              <StatusDot ok={false} />
+                              <StatusIcon ok={false} size="sm" />
                               stuck
                             </span>
                           )}
@@ -606,7 +593,7 @@ const isReviewRunning = (projectName: string) => !!runtime[projectName]?.hasRunn
                     })()}
                     {project.status === 'error' && (
                       <span className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded text-xs font-medium bg-status-error/10 text-status-error border border-status-error/30">
-                        <StatusDot ok={false} />
+                        <StatusIcon ok={false} size="sm" />
                         error
                       </span>
                     )}
@@ -645,7 +632,7 @@ const isReviewRunning = (projectName: string) => !!runtime[projectName]?.hasRunn
                     )}
                     {runningCount === 0 && project.status !== 'error' && !showWarning && scheduledCount === 0 && lastJob && (
                       <span className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded text-xs font-medium text-text-tertiary">
-                        <StatusDot ok={true} />
+                        <StatusIcon ok={true} size="sm" />
                         idle
                       </span>
                     )}
@@ -681,7 +668,7 @@ const isReviewRunning = (projectName: string) => !!runtime[projectName]?.hasRunn
                           {verdict === 'LGTM' ? 'lgtm' : verdict === 'NEEDS ATTENTION' ? 'needs attention' : 'do not ship'}
                         </span>
                       ) : (
-                        <StatusDot ok={true} />
+                        <StatusIcon ok={true} size="sm" />
                       )}
                     </span>
                   ) : project.unpushed > 0 ? (
@@ -698,7 +685,7 @@ const isReviewRunning = (projectName: string) => !!runtime[projectName]?.hasRunn
                       {lastJob.status === 'running' ? (
                         <Spinner size="lg" color="accent" shrink />
                       ) : (
-                        <StatusDot ok={lastJob.exitCode === 0} />
+                        <StatusIcon ok={lastJob.exitCode === 0} size="sm" />
                       )}
                       <span className="text-xs text-text-secondary font-medium">{lastJob.kind.startsWith('agent:') ? lastJob.kind.slice(6) : lastJob.kind}</span>
                       <span className="text-xs text-text-tertiary">
@@ -746,14 +733,14 @@ const isReviewRunning = (projectName: string) => !!runtime[projectName]?.hasRunn
 
                 {/* CI */}
                 <td className="px-4 py-2" onClick={e => e.stopPropagation()}>
-                  {ci === 'success' && <StatusDot ok={true} />}
+                  {ci === 'success' && <StatusIcon ok={true} size="sm" />}
                   {ci === 'failure' && (
                     ciUrl ? (
                       <a href={ciUrl} target="_blank" rel="noopener noreferrer" onClick={e => e.stopPropagation()}>
-                        <StatusDot ok={false} />
+                        <StatusIcon ok={false} size="sm" />
                       </a>
                     ) : (
-                      <StatusDot ok={false} />
+                      <StatusIcon ok={false} size="sm" />
                     )
                   )}
                   {ci === 'in_progress' && <Spinner size="lg" color="accent" shrink />}
