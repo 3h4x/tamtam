@@ -117,7 +117,7 @@ function ProviderChart({
         <span className="flex gap-3 text-text-tertiary">
           <span title="Tokens/h burned this hour — sum of input + output + cache reads + cache creates, averaged over last 3 buckets. Same accounting as the quota uses."><span className="inline-block w-3 h-0.5 bg-status-info align-middle mr-1" />actual {fmtTokens(series.currentTokensPerHour)}/h</span>
           <span title="Steady-state rate that uses exactly 100% of the window evenly, derived from observed tokens vs utilization."><span className="inline-block w-3 h-0.5 bg-status-success align-middle mr-1 border-dashed" />steady pace {fmtTokens(series.expectedTokensPerHour)}/h</span>
-          <span title="The rate you'd need to sustain from now until window reset to STILL land at 100%. When this line rises, you are NOT catching up — every quiet hour shrinks the remaining time, so the required burn rate keeps climbing. When this line falls toward steady pace, you're actually catching up."><span className="inline-block w-3 h-0.5 bg-status-warning align-middle mr-1 border-dashed" />to-100% rate {fmtTokens(series.catchUpTokensPerHour)}/h</span>
+          <span title="The rate you'd need to sustain from now until window reset to STILL land at 100%. Rising = NOT catching up (every quiet hour shrinks the remaining time, so required burn climbs). Falling toward steady pace = actually catching up. Capped at 5× steady pace for readability — the raw value diverges in the last minutes of a window with leftover quota."><span className="inline-block w-3 h-0.5 bg-status-warning align-middle mr-1 border-dashed" />to-100% rate {fmtTokens(series.catchUpTokensPerHour)}/h</span>
         </span>
       </div>
       {!hasAnyTokens && !hasAnyRate ? (
