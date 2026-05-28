@@ -712,14 +712,16 @@ export function ProjectRunsTab({ projectName, jobsPaused = false }: ProjectRunsT
             />
             <span className="absolute left-2.5 top-1/2 -translate-y-1/2 text-text-tertiary text-xs" aria-hidden>⌕</span>
             {search && (
-              <button
+              <Button
                 type="button"
                 onClick={() => setSearch('')}
-                className="absolute right-2 top-1/2 -translate-y-1/2 text-text-tertiary hover:text-text-primary text-sm cursor-pointer"
+                variant="ghost"
+                size="icon-sm"
+                className="absolute right-1.5 top-1/2 -translate-y-1/2"
                 title="Clear search"
               >
                 ×
-              </button>
+              </Button>
             )}
           </div>
           <div className="mt-2 flex items-center gap-2 text-[11px] text-text-tertiary">
