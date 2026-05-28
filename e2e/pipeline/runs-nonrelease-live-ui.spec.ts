@@ -196,4 +196,116 @@ test.describe('Runs page non-release live polling', () => {
     await expect(agentRow.getByText('running', { exact: true })).toBeVisible({ timeout: 12_000 })
     await expect(agentRow.getByText('Reviewing open items')).toBeVisible()
   })
+
+  test('chat run row flips from running to exit code failure without reload', async ({ page }) => {
+    let serveRunning = true
+
+    await stubRunsShellRoutes(page)
+    await page.route('**/api/jobs?limit=200', (route: Route) => {
+      const running = serveRunning
+      route.fulfill({
+        json: {
+          jobs: [
+            makeJob({
+              id: 'chat-run-live-fail-1',
+              project: RUN_PROJECT,
+              kind: 'run',
+              prompt: 'Run the release notes audit',
+              user_prompt: 'Run the release notes audit',
+              session_id: 'sess-chat-run-live-fail-1',
+              status: running ? 'running' : 'done',
+              exit_code: running ? null : 2,
+              started_at: now() - 70,
+              finished_at: running ? null : now() - 4,
+              work_summary: running ? 'Inspecting recent changes' : 'Provider exited before completing the audit',
+            }),
+          ],
+          total: 1,
+          pendingReleaseProjects: [],
+        },
+      })
+    })
+
+    await page.goto('/runs')
+
+    const row = runRow(page, RUN_PROJECT)
+    await expect(row).toBeVisible({ timeout: 8_000 })
+    await expect(row.getByLabel('running')).toBeVisible()
+    await expect(row.getByText('running', { exact: true })).toBeVisible()
+    await expect(row.getByText('Inspecting recent changes')).toBeVisible()
+
+    serveRunning = false
+
+    await expect(row.getByLabel('needs attention')).toBeVisible({ timeout: 12_000 })
+    await expect(row.getByText('exit 2', { exact: true })).toBeVisible({ timeout: 12_000 })
+    await expect(row.getByLabel('running')).toHaveCount(0, { timeout: 12_000 })
+    await expect(row.getByText('Provider exited before completing the audit')).toBeVisible({
+      timeout: 12_000,
+    })
+  })
+
+  test('agent row flips from running to cancelled without disturbing a concurrent chat run', async ({ page }) => {
+    let pollCount = 0
+
+    await stubRunsShellRoutes(page)
+    await page.route('**/api/jobs?limit=200', (route: Route) => {
+      pollCount += 1
+      const agentCancelled = pollCount >= 2
+      route.fulfill({
+        json: {
+          jobs: [
+            makeJob({
+              id: 'chat-run-live-steady-1',
+              project: RUN_PROJECT,
+              kind: 'run',
+              prompt: 'Keep watching the release queue',
+              user_prompt: 'Keep watching the release queue',
+              session_id: 'sess-chat-run-live-steady-1',
+              status: 'running',
+              exit_code: null,
+              started_at: now() - 90,
+              finished_at: null,
+              work_summary: 'Waiting for the next run to finish',
+            }),
+            makeJob({
+              id: 'agent-run-live-cancel-1',
+              project: AGENT_PROJECT,
+              kind: 'agent:planner',
+              prompt: 'Planner agent',
+              user_prompt: 'Planner agent',
+              status: agentCancelled ? 'done' : 'running',
+              exit_code: agentCancelled ? -3 : null,
+              started_at: now() - 45,
+              finished_at: agentCancelled ? now() - 6 : null,
+              work_summary: agentCancelled ? 'Cancelled by operator during planning' : 'Drafting next actions',
+            }),
+          ],
+          total: 2,
+          pendingReleaseProjects: [],
+        },
+      })
+    })
+
+    await page.goto('/runs')
+
+    const chatRow = runRow(page, RUN_PROJECT)
+    const agentRow = runRow(page, AGENT_PROJECT)
+
+    await expect(chatRow).toBeVisible({ timeout: 8_000 })
+    await expect(agentRow).toBeVisible({ timeout: 8_000 })
+    await expect(chatRow.getByLabel('running')).toBeVisible()
+    await expect(agentRow.getByLabel('running')).toBeVisible()
+    await expect(agentRow.getByText('Drafting next actions')).toBeVisible()
+
+    await expect(agentRow.getByLabel('needs attention')).toBeVisible({ timeout: 12_000 })
+    await expect(agentRow.getByText('cancelled', { exact: true })).toBeVisible({ timeout: 12_000 })
+    await expect(agentRow.getByLabel('running')).toHaveCount(0, { timeout: 12_000 })
+    await expect(agentRow.getByText('Cancelled by operator during planning')).toBeVisible({
+      timeout: 12_000,
+    })
+
+    await expect(chatRow.getByLabel('running')).toBeVisible({ timeout: 12_000 })
+    await expect(chatRow.getByText('running', { exact: true })).toBeVisible({ timeout: 12_000 })
+    await expect(chatRow.getByText('Waiting for the next run to finish')).toBeVisible()
+  })
 })
