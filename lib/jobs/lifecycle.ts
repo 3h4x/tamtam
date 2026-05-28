@@ -116,10 +116,8 @@ function maxStepIterations(): number { return getMaxStepIterations(); }
 function reviewFixMaxIterations(): number { return getReviewFixMaxIterations(); }
 function stepWindowSeconds(): number { return getStepWindowSeconds(); }
 // fix-ci fast-crash auto-retry constants. Only crash-fast failures are retried
-// so real errors still surface. These were once user-tunable settings; the
-// values were never meaningful to operators and have been folded back into
-// hardcoded defaults to keep the Settings UI focused on the cap that matters
-// (review_fix_max_iterations).
+// so real errors still surface. Kept as hardcoded defaults — not surfaced in
+// Settings to keep the UI focused on review_fix_max_iterations.
 const FIX_CI_MAX_RETRIES = 2;
 const FIX_CI_RETRY_WINDOW_SECONDS = 120;
 const FIX_CI_FAST_CRASH_MS = 5000;
