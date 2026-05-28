@@ -299,4 +299,35 @@ test.describe('NotificationBell', () => {
     // Bell polls every 5 s — wait up to 12 s for badge to appear
     await expect(page.getByTitle('1 unread')).toBeVisible({ timeout: 12_000 });
   });
+
+  test('badge clears on 5s auto-poll when finished notifications disappear', async ({ page }) => {
+    let count = 1;
+    let jobs: NotifJob[] = [
+      makeNotifJob({
+        id: 'resolved-1',
+        project: 'resolved-project',
+        kind: 'push',
+        status: 'done',
+        exit_code: 0,
+        finished_at: now() - 5,
+      }),
+    ];
+
+    await stubShellRoutes(page);
+    await page.route('**/api/jobs/notifications', (route: Route) =>
+      route.fulfill({ json: { count, jobs, runningCount: 0, runningJobs: [] } }),
+    );
+
+    await page.goto('/runs');
+
+    const bellBtn = page.getByTitle('1 unread');
+    await expect(bellBtn).toBeVisible({ timeout: 8_000 });
+    await expect(bellBtn.locator('span.bg-status-error')).toHaveText('1');
+
+    count = 0;
+    jobs = [];
+
+    await expect(page.getByTitle('No notifications')).toBeVisible({ timeout: 12_000 });
+    await expect(bellBtn.locator('span.bg-status-error')).toHaveCount(0);
+  });
 });
