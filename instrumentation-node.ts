@@ -229,8 +229,8 @@ async function reapAbandonedInlineJobs(): Promise<void> {
         }
         if (hasValidResumeMeta) {
           try {
-            const { resumePrWait } = await import('@/lib/pipeline/start-pr-wait');
-            const r = resumePrWait(job.id);
+            const { resumeBootPrWait } = await import('@/lib/pipeline/pr-wait-resume');
+            const r = resumeBootPrWait(job.id);
             if (r.ok) {
               resumed += 1;
               console.log(`[boot] resumed pr-wait ${job.id} (server restarted mid-run)`);
