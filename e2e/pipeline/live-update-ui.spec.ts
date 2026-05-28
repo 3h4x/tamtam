@@ -244,6 +244,96 @@ test.describe('Auto-polling live update', () => {
     await expect(page.getByRole('button').filter({ hasText: 'test' }).first()).toBeVisible();
     await expect(page.getByText('done', { exact: true }).first()).toBeVisible();
   });
+
+  test('history parent run updates nested release outcome from running to done without reload', async ({
+    page,
+  }) => {
+    let serveReleaseRunning = true;
+
+    await stubCommonRoutes(page, PROJECT);
+
+    await page.route(
+      (url) =>
+        url.pathname === '/api/jobs' && url.searchParams.get('project') === PROJECT,
+      (route: Route) => {
+        const releaseRunning = serveReleaseRunning;
+        const ts = now();
+        route.fulfill({
+          json: {
+            jobs: [
+              {
+                id: 'chat-owned-release-parent',
+                project: PROJECT,
+                kind: 'run',
+                prompt: 'Ship the completed terminal work',
+                user_prompt: 'Ship the completed terminal work',
+                status: 'done',
+                exit_code: 0,
+                started_at: ts - 240,
+                finished_at: ts - 220,
+                pid: 0,
+                log_path: '',
+                seen: true,
+                session_id: 'sess-owned-release',
+                work_summary: 'Terminal work completed',
+              },
+              {
+                id: 'chat-owned-release',
+                project: PROJECT,
+                kind: 'release',
+                prompt: null,
+                status: releaseRunning ? 'running' : 'done',
+                exit_code: releaseRunning ? null : 0,
+                started_at: ts - 200,
+                finished_at: releaseRunning ? null : ts - 5,
+                pid: 0,
+                log_path: '',
+                seen: true,
+                parent_job_id: 'chat-owned-release-parent',
+              },
+              {
+                id: 'chat-owned-release-review',
+                project: PROJECT,
+                kind: 'review',
+                prompt: 'Review shipped work',
+                status: releaseRunning ? 'running' : 'done',
+                exit_code: releaseRunning ? null : 0,
+                started_at: ts - 180,
+                finished_at: releaseRunning ? null : ts - 20,
+                pid: 0,
+                log_path: '',
+                seen: true,
+                release_id: 'chat-owned-release',
+                parent_job_id: 'chat-owned-release',
+                verdict: releaseRunning ? null : 'LGTM',
+              },
+            ],
+            pendingReleaseProjects: [],
+          },
+        });
+      },
+    );
+
+    await page.goto(`/project/${PROJECT}/history`);
+
+    const ownerRow = page.getByRole('button')
+      .filter({ hasText: 'Ship the completed terminal work' })
+      .first();
+    await expect(ownerRow).toBeVisible({ timeout: 8_000 });
+    await expect(ownerRow.getByText('release running', { exact: true })).toBeVisible();
+    await expect(ownerRow.getByLabel('running')).toBeVisible();
+
+    serveReleaseRunning = false;
+
+    await expect(ownerRow.getByText('✓ release done', { exact: true })).toBeVisible({
+      timeout: 12_000,
+    });
+    await expect(ownerRow.getByText('release running', { exact: true })).toHaveCount(0, {
+      timeout: 12_000,
+    });
+    await expect(ownerRow.getByLabel('running')).toHaveCount(0, { timeout: 12_000 });
+    await expect(ownerRow.getByText('done', { exact: true })).toBeVisible();
+  });
 });
 
 // ─── Test 2a: Live running → failed transition ───────────────────────────────
