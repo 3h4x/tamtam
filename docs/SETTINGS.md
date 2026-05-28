@@ -323,6 +323,8 @@ This applies to every routing decision that doesn't have an explicit `provider:`
 
 When an agent or run has an explicit `provider:` preference and `budget_block_runs_enabled` is **false**, TamTam will override that preference if another enabled provider is *urgently* behind on pace. The urgency is calculated per-provider as `paceMarginPct / hoursLeftInWindow`, capturing the catch-up *rate* (percentage points per hour) required to hit the 7-day pace target before the window resets. When any enabled provider has urgency ≥ 1.0 pp/hour and exceeds the preferred provider's urgency, the run uses the most-urgent provider instead.
 
+That urgency is then damped by remaining total headroom so a provider with under 10 percentage points of total quota left does not win the chooser on weekly-catch-up pressure alone. At that point the router should favor the provider that can both catch up and still spend useful budget without immediately crowding the cap.
+
 **Example:** Provider A is 35pp behind pace with 24 hours left (1.46 pp/h urgency). Provider B is 35pp behind with 5 days left (0.29 pp/h urgency). An agent pinned to provider B will be rerouted to provider A because A is ~5× more urgent. Operator can disable this by enabling `budget_block_runs_enabled` (which applies a hard gate instead) or by pausing runs (`jobs_paused`) to avoid auto-reroute mid-flow.
 
 #### Review-fix backoff (default: 30 seconds)

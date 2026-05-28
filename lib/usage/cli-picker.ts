@@ -173,7 +173,16 @@ export function pickCliProvider(opts: PickCliOptions): PickCliResult {
     const nearCapPenalty = fiveHourProjected > 80 && !weeklyCatchupMode
       ? Math.min(1, (fiveHourProjected - 80) / 15) * urgency
       : 0;
-    const score = (urgency - nearCapPenalty) * 1000 + headroom / 100;
+    // Headroom floor: a provider with <10pp of total quota left should not
+    // win on weekly-catch-up urgency alone. Scale urgency by headroom/10 so a
+    // provider at 95% (5pp headroom) keeps only half its urgency, and one at
+    // 100% loses all of it. This prevents the picker from routing to the
+    // about-to-cap provider just because its remaining 3pp need to land in
+    // the last 3h of the week.
+    const HEADROOM_FLOOR = 10;
+    const headroomFactor = Math.min(1, Math.max(0, headroom) / HEADROOM_FLOOR);
+    const adjustedUrgency = (urgency - nearCapPenalty) * headroomFactor;
+    const score = adjustedUrgency * 1000 + headroom / 100;
     if (score > bestScore) {
       bestProvider = provider;
       bestScore = score;
