@@ -241,8 +241,8 @@ curl http://localhost:1337/api/jobs/<jobId>
 # Tail the raw log file
 tail -f ./data/logs/<jobId>.log
 
-# Check PM2 process list
-pm2 list
+# Re-probe and inspect the persisted job state
+curl http://localhost:1337/api/jobs/<jobId>
 
 # Replay full stream from offset 0
 curl -N http://localhost:1337/api/streaming/<jobId>
@@ -363,7 +363,7 @@ A floating **↓ latest** button appears in the bottom-right whenever you have s
 
 | Symptom | Likely Cause | Fix |
 |---------|-------------|-----|
-| Terminal shows nothing after submit | PM2 process didn't start; log file empty | Check `pm2 list`; look for "rate-limited" in done event `detail` |
+| Terminal shows nothing after submit | Detached child did not write output; log file empty | Check `/api/jobs/<jobId>` and the raw log; look for "rate-limited" in done event `detail` |
 | Stream stops mid-response | Claude rate limited or crashed | Check log file; `done` event `detail` has diagnosis |
 | Session history not restored on navigate | `sessionId` not saved (job didn't emit `result` line) | Job may have crashed before completion; check exit code |
 | `tool_use` events missing in terminal | Using `?raw=1` by mistake | Use default (parsed) mode for terminal UI |
