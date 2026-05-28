@@ -250,7 +250,7 @@ curl -N http://localhost:1337/api/streaming/<jobId>
 
 ## Testing the Terminal — Practical Guide
 
-Use Chrome DevTools MCP (`mcp__plugin_chrome-devtools-mcp_chrome-devtools__*`) or Playwright to verify terminal behavior. This section covers the observable UI states and how to reach each one.
+Use Playwright MCP (`mcp__playwright__*` / Playwright MCP tools) to verify terminal behavior. This section covers the observable UI states and how to reach each one.
 
 ### URL patterns
 
