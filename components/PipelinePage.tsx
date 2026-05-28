@@ -5,6 +5,7 @@ import { useSearchParams } from 'next/navigation'
 import Link from 'next/link'
 import type { PipelineResponse, VerdictDistribution, DurationStats } from '@/app/api/stats/pipeline/route'
 import { Button } from '@/components/ui/Button'
+import { SegmentedControl } from '@/components/ui/SegmentedControl'
 import { ErrorState } from './ErrorState'
 
 type Window = '24h' | '7d' | '30d' | 'all'
@@ -230,24 +231,20 @@ export function PipelinePage() {
           </p>
         </div>
         <div className="ml-auto flex items-center gap-2">
-          <div className="flex items-center gap-0.5 rounded border border-border overflow-hidden">
-            {(['24h', '7d', '30d', 'all'] as Window[]).map((w) => (
-              <button
-                key={w}
-                className={`text-xs px-2.5 py-1 border-none cursor-pointer font-medium transition-colors ${
-                  window_ === w
-                    ? 'bg-accent text-white'
-                    : 'text-text-secondary hover:text-text-primary bg-bg-secondary hover:bg-bg-tertiary'
-                }`}
-                onClick={() => {
-                  setWindow(w)
-                  setLoading(true)
-                }}
-              >
-                {w}
-              </button>
-            ))}
-          </div>
+          <SegmentedControl<Window>
+            ariaLabel="Time window"
+            options={[
+              { value: '24h', label: '24h' },
+              { value: '7d', label: '7d' },
+              { value: '30d', label: '30d' },
+              { value: 'all', label: 'all' },
+            ]}
+            value={window_}
+            onChange={(w) => {
+              setWindow(w)
+              setLoading(true)
+            }}
+          />
           <span className="text-xs text-text-tertiary">
             {loading ? 'Refreshing…' : `Updated ${new Date(data.generatedAt).toLocaleTimeString()}`}
           </span>
