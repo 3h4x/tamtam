@@ -9,6 +9,7 @@ import { SchedulerHealthPanel } from '@/components/monitoring/SchedulerHealthPan
 import { OverviewTab } from '@/components/monitoring/OverviewTab'
 import { InfraTab } from '@/components/monitoring/InfraTab'
 import { StatusDot } from '@/components/monitoring/shared'
+import { SegmentedControl } from '@/components/ui/SegmentedControl'
 import { StandardTabs } from '@/components/ui/StandardTabs'
 import type { StandardTabItem } from '@/components/ui/StandardTabs'
 
@@ -218,21 +219,14 @@ export function MonitoringPage() {
           {loading ? 'Refreshing…' : `Updated ${new Date(data.fetchedAt).toLocaleTimeString()}`}
           {' · auto-refresh 30s'}
         </span>
-        <div className="flex items-center gap-0.5 rounded border border-current/20 overflow-hidden">
-          {(['5m', '15m', '1h'] as TimeWindow[]).map(w => (
-            <button
-              key={w}
-              className={`text-xs px-2 py-0.5 border-none cursor-pointer font-medium transition-colors ${
-                window_ === w
-                  ? 'bg-current/20 text-current'
-                  : 'text-current/50 hover:text-current/80 bg-transparent'
-              }`}
-              onClick={() => handleWindowChange(w)}
-            >
-              {w}
-            </button>
-          ))}
-        </div>
+        <SegmentedControl
+          options={(['5m', '15m', '1h'] as TimeWindow[]).map(w => ({ value: w, label: w }))}
+          value={window_}
+          ariaLabel="Monitoring time window"
+          size="xs"
+          tone="current"
+          onChange={handleWindowChange}
+        />
         <button
           onClick={() => fetch_(window_)}
           className="text-xs px-2 py-0.5 rounded border border-current opacity-60 hover:opacity-100 transition-opacity cursor-pointer bg-transparent"
