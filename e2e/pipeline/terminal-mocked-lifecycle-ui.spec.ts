@@ -181,4 +181,58 @@ test.describe('Mocked terminal lifecycle UI', () => {
     await expect(page.getByText('live run')).toHaveCount(0, { timeout: 8_000 })
     await expect(page).toHaveURL(new RegExp(`/project/${PROJECT}/terminal/${SESSION_ID}`))
   })
+
+  test('terminal job deep link clears live state and shows stream failure details', async ({ page }) => {
+    let finishStream!: () => void
+    const streamDone = new Promise<void>((resolve) => {
+      finishStream = resolve
+    })
+
+    await stubProjectShell(page)
+    await page.route(`**/api/jobs/${JOB_ID}`, (route: Route) =>
+      route.fulfill({ json: runningJob() }),
+    )
+    await page.route(`**/api/streaming/${JOB_ID}`, async (route: Route) => {
+      await streamDone
+      await route.fulfill({
+        status: 200,
+        headers: {
+          'content-type': 'text/event-stream',
+          'cache-control': 'no-cache',
+        },
+        body: [
+          'data: Mocked review output failed in the terminal.',
+          '',
+          `event: done`,
+          `data: ${JSON.stringify({
+            exitCode: 2,
+            sessionId: SESSION_ID,
+            provider: 'claude',
+            detail: 'Mock provider failed hard',
+            duration: 900,
+          })}`,
+          '',
+        ].join('\n'),
+      })
+    })
+
+    await page.goto(`/project/${PROJECT}/terminal?job=${JOB_ID}`)
+
+    await expect(page.getByText('Review the mocked terminal lifecycle.')).toBeVisible({
+      timeout: 8_000,
+    })
+    await expect(page.getByText('live run')).toBeVisible({ timeout: 8_000 })
+    await expect(page.getByText(/receiving output|waiting for output/)).toBeVisible()
+
+    finishStream()
+
+    await expect(page.getByText('Mocked review output failed in the terminal.')).toBeVisible({
+      timeout: 8_000,
+    })
+    await expect(page.getByText('exit 2').first()).toBeVisible({ timeout: 8_000 })
+    await expect(page.getByText('Mock provider failed hard')).toBeVisible({ timeout: 8_000 })
+    await expect(page.getByText('live run')).toHaveCount(0, { timeout: 8_000 })
+    await expect(page.getByText(/receiving output|waiting for output/)).toHaveCount(0)
+    await expect(page).toHaveURL(new RegExp(`/project/${PROJECT}/terminal/${SESSION_ID}`))
+  })
 })
