@@ -27,6 +27,7 @@ Complete reference for TamTam HTTP API routes. All routes live under `app/api/`.
 - `/api/projects/[schedId]/detail` — Project scheduling detail (GET)
 - Project pause/resume is handled by `PATCH /api/projects/by-project/[name]` via the `paused` flag; there is no standalone pause/resume route.
 - `/api/projects/[schedId]/retrieval/reindex` — Re-index the project retrieval corpus (POST). The corpus includes committed project docs, DB-backed skills referenced by that project's agents, and synthesized project config guidance. Returns `200 { chunks, indexedSources, skippedSources, diagnostics }` on success, where `diagnostics` includes pre-reindex `missingSourcesBeforeReindex`, `staleSourcesBeforeReindex`, and per-source counts. Returns `400 { error }` when retrieval is disabled and `404 { error }` when the project is unknown. The retrieval store is `retrieval_chunks` on the same Postgres instance as the rest of TamTam (pgvector-backed `embedding vector(768)` column); the `vector` extension must be installed (the initial migration creates it).
+- `/api/projects/[schedId]/retrieval/stats` — Lightweight retrieval corpus counts for one project (GET). Returns `200 { records, chunks }`, where `records` is the number of `retrieval_records` rows and `chunks` is the summed chunk count for the project.
 - `/api/config/projects` — Scan workspace for git repos and configure projects (GET, PATCH)
 
 ## Project actions (`by-project/[name]/...`)
@@ -83,10 +84,16 @@ Complete reference for TamTam HTTP API routes. All routes live under `app/api/`.
 - `/api/jobs/[jobId]/rerun` — Re-run a job (POST). Returns `409 { detail, blocking_job_id }` when another job is already running for the project
 - `/api/jobs/[jobId]/fix` — Start AI fix run for a failed job (POST)
 - `/api/jobs/[jobId]/continue` — Resume a finished `run` or `agent:*` job's CLI session via `--resume <sessionId>` (POST). Rejects non-resumable kinds (`400`), jobs without a usable `sessionId` in the row or log tail (`400`), jobs with a resume session but no recorded CLI provider (`409`), still-running jobs (`409`), and jobs finished more than 30 minutes ago (`410`) since the provider session cache and first-invocation context (skills/docs/retrieval) are no longer reliable past that window. Returns `409 { detail, blocking_job_id }` when another job is already running for the project. The continuation job inherits the source job's `kind`, `sessionId`, and `provider`, sets `parentJobId` to the source job id, and runs with `base_prompt` plus a resume prompt that records the source job identity, original task when available, and a `RESUME_LOST_CONTEXT` escape hatch for evicted provider sessions. Because session IDs are provider-specific, the source provider is treated as strict: disabled or over-budget source providers block the continuation instead of falling back to another CLI.
+- `/api/jobs/[jobId]/replay-actions` — Re-run the server-side agent action orchestrator for a completed agent job (POST). Reads the job log, extracts a fenced `tamtam-actions` block, checks action eligibility, dispatches idempotent issue/branch actions, and records `contextMeta.agentActions` counts. Returns `404` when the job or project is missing, `400` when no log path exists, `409` when the job is still running or actions are ineligible, `200 { replayed: false, reason, detail? }` when no executable action block is present, or `200 { replayed: true, executed, errors }` after dispatch.
 - `/api/jobs/[jobId]/seen` — Mark job as seen (POST)
 - `/api/jobs/notifications` — Unseen job notifications (GET)
 - `/api/jobs/notifications/mark-seen` — Mark all notifications seen (POST → `{ status: 'ok', marked }`, where `marked` is the number of finished unseen jobs flipped in the in-memory jobs cache)
 - `/api/streaming/[jobId]` — SSE stream of parsed text deltas from NDJSON log (`?raw=1` for raw lines)
+
+## Workflow runs
+
+- `/api/workflow-runs` — Recent workflow runtime runs (GET, optional `?limit=`, capped at 200). With `WORKFLOW_TARGET_WORLD=local`, reads local-world JSON files under `WORKFLOW_LOCAL_DATA_DIR` / `data/workflow-data`; otherwise reads `workflow.workflow_runs` from `WORKFLOW_POSTGRES_URL` or `DATABASE_URL`. Returns `{ meta, runs }`; if no Postgres workflow URL is available, returns an empty list with a `reason`.
+- `/api/workflow-runs/[runId]` — Workflow run detail (GET). With the local world, returns the decoded local run file plus ordered local step files; otherwise reads the workflow run and ordered `workflow.workflow_steps` rows. Returns `200 { run, steps }`, `404` when the run is missing, `503` when no workflow Postgres URL is configured for a non-local world, or `500` on query/read failures.
 
 ## Cross-project recommendations
 
@@ -105,6 +112,7 @@ GitHub board cards carry four TEXT custom fields provisioned by `ensureProjectBo
 ## Health / Monitoring / Stats
 
 - `/api/health` — Health check (GET). Without query params this remains the lightweight public probe and returns `200 { status: 'ok' }`. `GET /api/health?deep=1` runs readiness checks and returns `{ status: 'ok'|'degraded', ok, checks: [{ name, ok, severity: 'info'|'warn'|'error', message }] }`; HTTP status is `503` only when an `error` severity dependency fails. Checks cover Postgres query, PM2, enabled provider launchers, scheduler connection state, workspace/project paths, `gh auth status` when auto-push projects can need PR workflow, and quota fetchability when budget gating is enabled.
+- `/api/sweep` — Trigger the project sweep runner on demand (POST). Returns the `runProjectSweep()` report on success or `500 { error }` when the sweep throws.
 - `/api/monitoring` — Prometheus + Loki status aggregation plus notification throttle state and separate retention telemetry for the latest nightly row cleanup and per-project log pruning summaries (GET); env: `PROMETHEUS_URL`, `LOKI_URL`
 - `/api/monitoring/pm2-logs` — Tail tamtam PM2 log files (error + out from `~/.pm2/logs/`), last 64 KB; `?limit=` (max 500), `?out=0` to suppress stdout (GET)
 - `/api/stats/usage` — Token usage per project and per agent kind (GET, `?window=24h|7d|30d|all`)
