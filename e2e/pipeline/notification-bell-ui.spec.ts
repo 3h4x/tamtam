@@ -330,4 +330,59 @@ test.describe('NotificationBell', () => {
     await expect(page.getByTitle('No notifications')).toBeVisible({ timeout: 12_000 });
     await expect(bellBtn.locator('span.bg-status-error')).toHaveCount(0);
   });
+
+  test('running dot changes to unread badge when a running job finishes on auto-poll', async ({
+    page,
+  }) => {
+    let count = 0;
+    let jobs: NotifJob[] = [];
+    let runningCount = 1;
+    let runningJobs: NotifJob[] = [
+      makeNotifJob({
+        id: 'running-to-finished',
+        project: 'transition-project',
+        kind: 'review',
+        status: 'running',
+        exit_code: null,
+        finished_at: null,
+      }),
+    ];
+
+    await stubShellRoutes(page);
+    await page.route('**/api/jobs/notifications', (route: Route) =>
+      route.fulfill({ json: { count, jobs, runningCount, runningJobs } }),
+    );
+
+    await page.goto('/runs');
+
+    const runningBell = page.getByTitle('1 running');
+    await expect(runningBell).toBeVisible({ timeout: 8_000 });
+    await expect(runningBell.locator('span.animate-pulse')).toBeVisible();
+    await expect(runningBell.locator('span.bg-status-error')).toHaveCount(0);
+
+    count = 1;
+    jobs = [
+      makeNotifJob({
+        id: 'running-to-finished',
+        project: 'transition-project',
+        kind: 'review',
+        status: 'done',
+        exit_code: 0,
+        finished_at: now() - 5,
+        verdict: 'LGTM',
+      }),
+    ];
+    runningCount = 0;
+    runningJobs = [];
+
+    const finishedBell = page.getByTitle('1 unread');
+    await expect(finishedBell).toBeVisible({ timeout: 12_000 });
+    await expect(finishedBell.locator('span.bg-status-error')).toHaveText('1');
+    await expect(finishedBell.locator('span.animate-pulse')).toHaveCount(0);
+
+    await finishedBell.click();
+    await expect(page.getByText(/running.*1 project/i)).toHaveCount(0);
+    await expect(page.getByText('transition-project')).toBeVisible({ timeout: 5_000 });
+    await expect(page.getByText('LGTM').first()).toBeVisible();
+  });
 });
