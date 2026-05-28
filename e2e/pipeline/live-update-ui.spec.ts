@@ -56,6 +56,14 @@ function makeJob(
   };
 }
 
+function runRow(page: import('@playwright/test').Page, project: string) {
+  return page.getByRole('button').filter({ hasText: project }).first();
+}
+
+function runningRunRows(page: import('@playwright/test').Page) {
+  return page.getByRole('button').filter({ has: page.locator('[aria-label="running"]') });
+}
+
 async function stubCommonRoutes(
   page: import('@playwright/test').Page,
   project: string,
@@ -370,11 +378,8 @@ test.describe('Concurrent jobs across projects', () => {
     await expect(page.getByText(ALPHA).first()).toBeVisible({ timeout: 8_000 });
     await expect(page.getByText(BETA).first()).toBeVisible({ timeout: 8_000 });
 
-    // The job list uses div-based cards (not table rows). Each running job card
-    // renders an animate-pulse dot (●) inside the status badge — count those
-    // to verify exactly 2 independent running jobs are visible.
-    const runningDots = page.locator('span.animate-pulse');
-    await expect(runningDots).toHaveCount(2, { timeout: 8_000 });
+    // Count row-scoped running status icons, not filter/header text.
+    await expect(runningRunRows(page)).toHaveCount(2, { timeout: 8_000 });
 
     // Clicking the "running" filter chip must keep both projects visible —
     // verifying that independent job state is preserved per project.
@@ -426,13 +431,18 @@ test.describe('Concurrent jobs across projects', () => {
 
     await page.goto('/runs');
 
-    await expect(page.getByText(ALPHA).first()).toBeVisible({ timeout: 8_000 });
-    await expect(page.getByText(BETA).first()).toBeVisible({ timeout: 8_000 });
-    await expect(page.locator('span.animate-pulse')).toHaveCount(2, { timeout: 8_000 });
+    const alphaRow = runRow(page, ALPHA);
+    const betaRow = runRow(page, BETA);
+
+    await expect(alphaRow).toBeVisible({ timeout: 8_000 });
+    await expect(betaRow).toBeVisible({ timeout: 8_000 });
+    await expect(runningRunRows(page)).toHaveCount(2, { timeout: 8_000 });
 
     alphaDone = true;
 
-    await expect(page.locator('span.animate-pulse')).toHaveCount(1, { timeout: 12_000 });
+    await expect(alphaRow.locator('[aria-label="running"]')).toHaveCount(0, { timeout: 12_000 });
+    await expect(betaRow.locator('[aria-label="running"]')).toBeVisible({ timeout: 12_000 });
+    await expect(runningRunRows(page)).toHaveCount(1, { timeout: 12_000 });
 
     await page.getByRole('button', { name: /^running/ }).click();
     await expect(page.getByText(BETA).first()).toBeVisible();
@@ -441,5 +451,125 @@ test.describe('Concurrent jobs across projects', () => {
     await page.getByRole('button', { name: /^done/ }).click();
     await expect(page.getByText(ALPHA).first()).toBeVisible();
     await expect(page.getByText(BETA).first()).not.toBeVisible();
+  });
+});
+
+// ─── Test 3: Global runs page polling transitions ───────────────────────────
+//
+// The global /runs page polls /api/jobs every 5 s without a project filter.
+// These tests verify that a single running job flips to its terminal state on
+// the next poll cycle, with no page reload and no orphaned spinner.
+
+test.describe('Global runs page polling transitions', () => {
+  test('/runs page transitions running→done via poll cycle without page reload', async ({
+    page,
+  }) => {
+    const project = 'runs-poll-done';
+    let serveRunning = true;
+
+    await page.route(
+      (url) => url.pathname === '/api/jobs' && !url.searchParams.has('project'),
+      (route: Route) =>
+        route.fulfill({
+          json: {
+            jobs: [
+              makeJob(
+                'runs-poll-done-job',
+                project,
+                serveRunning ? 'running' : 'done',
+                serveRunning ? null : 0,
+                'test',
+              ),
+            ],
+            pendingReleaseProjects: [],
+          },
+        }),
+    );
+
+    await page.route('**/api/jobs/notifications', (route: Route) =>
+      route.fulfill({ json: { notifications: [] } }),
+    );
+    await page.route('**/api/settings', (route: Route) =>
+      route.fulfill({ json: { jobs_paused: false, github_owner: '' } }),
+    );
+    await page.route('**/api/projects', (route: Route) =>
+      route.fulfill({
+        json: {
+          tasks: [makeTask(project)],
+          priorities: [],
+          issueCounts: {},
+        },
+      }),
+    );
+
+    await page.goto('/runs');
+
+    const row = runRow(page, project);
+
+    await expect(row).toBeVisible({ timeout: 8_000 });
+    await expect(row.locator('[aria-label="running"]')).toBeVisible({ timeout: 8_000 });
+    await expect(runningRunRows(page)).toHaveCount(1, { timeout: 8_000 });
+
+    serveRunning = false;
+
+    await expect(row.getByText('done', { exact: true })).toBeVisible({ timeout: 12_000 });
+    await expect(row.locator('[aria-label="running"]')).toHaveCount(0, { timeout: 12_000 });
+    await expect(runningRunRows(page)).toHaveCount(0, { timeout: 12_000 });
+  });
+
+  test('/runs page transitions running→cancelled via poll cycle without page reload', async ({
+    page,
+  }) => {
+    const project = 'runs-poll-cancelled';
+    let serveRunning = true;
+
+    await page.route(
+      (url) => url.pathname === '/api/jobs' && !url.searchParams.has('project'),
+      (route: Route) =>
+        route.fulfill({
+          json: {
+            jobs: [
+              makeJob(
+                'runs-poll-cancelled-job',
+                project,
+                serveRunning ? 'running' : 'done',
+                serveRunning ? null : -3,
+                'test',
+              ),
+            ],
+            pendingReleaseProjects: [],
+          },
+        }),
+    );
+
+    await page.route('**/api/jobs/notifications', (route: Route) =>
+      route.fulfill({ json: { notifications: [] } }),
+    );
+    await page.route('**/api/settings', (route: Route) =>
+      route.fulfill({ json: { jobs_paused: false, github_owner: '' } }),
+    );
+    await page.route('**/api/projects', (route: Route) =>
+      route.fulfill({
+        json: {
+          tasks: [makeTask(project)],
+          priorities: [],
+          issueCounts: {},
+        },
+      }),
+    );
+
+    await page.goto('/runs');
+
+    const row = runRow(page, project);
+
+    await expect(row).toBeVisible({ timeout: 8_000 });
+    await expect(row.locator('[aria-label="running"]')).toBeVisible({ timeout: 8_000 });
+    await expect(runningRunRows(page)).toHaveCount(1, { timeout: 8_000 });
+
+    serveRunning = false;
+
+    await expect(row.getByText('cancelled', { exact: true })).toBeVisible({ timeout: 12_000 });
+    await expect(row.locator('[aria-label="running"]')).toHaveCount(0, { timeout: 12_000 });
+    await expect(runningRunRows(page)).toHaveCount(0, { timeout: 12_000 });
   });
 });
