@@ -362,4 +362,68 @@ test.describe('Runs page non-release live polling', () => {
     await expect(chatRow.getByText('running', { exact: true })).toBeVisible({ timeout: 12_000 })
     await expect(chatRow.getByText('Waiting for the next run to finish')).toBeVisible()
   })
+
+  test('header running total clears after the counts poll follows a completed row', async ({ page }) => {
+    let serveRunning = true
+
+    await stubRunsShellRoutes(page)
+    await page.route('**/api/jobs?limit=200', (route: Route) => {
+      const running = serveRunning
+      route.fulfill({
+        json: {
+          jobs: [
+            makeJob({
+              id: 'chat-run-header-count-1',
+              project: RUN_PROJECT,
+              kind: 'run',
+              prompt: 'Check aggregate counts',
+              user_prompt: 'Check aggregate counts',
+              session_id: 'sess-chat-run-header-count-1',
+              status: running ? 'running' : 'done',
+              exit_code: running ? null : 0,
+              started_at: now() - 70,
+              finished_at: running ? null : now() - 6,
+              work_summary: running ? 'Counting active work' : 'Aggregate count check complete',
+            }),
+          ],
+          total: 1,
+          pendingReleaseProjects: [],
+        },
+      })
+    })
+    await page.route('**/api/jobs/counts', (route: Route) =>
+      route.fulfill({
+        json: {
+          total: 1,
+          byKind: { run: 1 },
+          byStatus: {
+            running: serveRunning ? 1 : 0,
+            done: serveRunning ? 0 : 1,
+            aborted: 0,
+            failed: 0,
+          },
+          tokens: { input: 0, output: 0, cacheRead: 0, cacheCreate: 0, total: 0 },
+          cost: { total: 0, monthToDate: 0 },
+        },
+      }),
+    )
+
+    await page.goto('/runs')
+
+    const row = runRow(page, RUN_PROJECT)
+    await expect(row).toBeVisible({ timeout: 8_000 })
+    await expect(row.getByLabel('running')).toBeVisible()
+    await expect(page.getByText(/1 total run .* 1 running/)).toBeVisible()
+
+    serveRunning = false
+
+    await expect(row.getByLabel('done')).toBeVisible({ timeout: 12_000 })
+    await expect(row.getByLabel('running')).toHaveCount(0, { timeout: 12_000 })
+    await expect(row.getByText('Aggregate count check complete')).toBeVisible({ timeout: 12_000 })
+
+    await expect(page.getByText(/1 total run .* 1 running/)).toHaveCount(0, {
+      timeout: 20_000,
+    })
+    await expect(page.getByText(/1 total run .* 1 grouped entry/)).toBeVisible()
+  })
 })
