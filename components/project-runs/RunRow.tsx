@@ -4,6 +4,7 @@ import { formatAgo } from '@/lib/shared/format'
 import { isCancelledExitCode } from '@/lib/shared/job-exit-codes'
 import { formatDuration, formatTokens, formatCost, KIND_LABEL, KIND_COLOR, entryIsRunning, entryNeedsAttention } from '@/components/project-runs/utils'
 import type { Entry } from '@/components/project-runs/utils'
+import { Button } from '@/components/ui/Button'
 
 export const RUN_ROW_GRID_CLASS = 'lg:grid-cols-[minmax(360px,1.2fr)_minmax(360px,1fr)_96px_120px_minmax(84px,auto)]'
 
@@ -414,15 +415,17 @@ export function RunRow({ entry: e, onClick, expandable, expanded, onToggleExpand
         <div className={`grid gap-3 lg:contents ${RUN_ROW_GRID_CLASS} lg:items-center`}>
           <div className="flex min-w-0 items-start gap-2">
             {expandable ? (
-              <button
+              <Button
                 type="button"
-                className="mt-0.5 flex h-6 w-6 shrink-0 items-center justify-center rounded border border-border bg-bg-secondary text-text-tertiary hover:text-text-primary cursor-pointer"
+                variant="secondary"
+                size="icon-sm"
+                className="mt-0.5 shrink-0 text-text-tertiary hover:text-text-primary"
                 onClick={(ev) => { ev.stopPropagation(); onToggleExpand?.() }}
                 title={expanded ? 'Collapse steps' : 'Expand steps'}
                 aria-expanded={expanded}
               >
                 <span className={`transition-transform inline-block ${expanded ? 'rotate-90' : ''}`}>▸</span>
-              </button>
+              </Button>
             ) : (
               <span className="h-6 w-6 shrink-0" aria-hidden="true" />
             )}
