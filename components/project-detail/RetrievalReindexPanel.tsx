@@ -6,9 +6,19 @@ import { Button } from '@/components/ui/Button'
 
 type ReindexResult = {
   ok?: boolean
-  totalChunks?: number
-  records?: number
+  chunks?: number
+  indexedSources?: number
+  skippedSources?: number
   error?: string
+}
+
+function settingsValue(settingsRes: unknown, key: string): unknown {
+  if (!settingsRes || typeof settingsRes !== 'object') return undefined
+  const direct = (settingsRes as Record<string, unknown>)[key]
+  if (direct !== undefined) return direct
+  const nested = (settingsRes as { settings?: unknown }).settings
+  if (!nested || typeof nested !== 'object') return undefined
+  return (nested as Record<string, unknown>)[key]
 }
 
 export function RetrievalReindexPanel({ projectName }: { projectName: string }) {
@@ -24,7 +34,8 @@ export function RetrievalReindexPanel({ projectName }: { projectName: string }) 
         fetch('/api/settings').then((r) => r.json()),
         fetch(`/api/projects/${encodeURIComponent(projectName)}/retrieval/stats`).then((r) => (r.ok ? r.json() : null)).catch(() => null),
       ])
-      setEnabled(settingsRes.retrieval_enabled === true || settingsRes.retrieval_enabled === 'true')
+      const retrievalEnabled = settingsValue(settingsRes, 'retrieval_enabled')
+      setEnabled(retrievalEnabled === true || retrievalEnabled === 'true')
       if (statsRes && typeof statsRes === 'object') {
         setChunkCount(typeof statsRes.chunks === 'number' ? statsRes.chunks : null)
         setRecordCount(typeof statsRes.records === 'number' ? statsRes.records : null)
@@ -54,7 +65,7 @@ export function RetrievalReindexPanel({ projectName }: { projectName: string }) 
   }
 
   return (
-    <div className="rounded-2xl border border-border bg-bg-secondary/50 p-6">
+    <div className="rounded-lg border border-border bg-bg-secondary/50 p-6">
       <div className="mb-4 flex items-start justify-between gap-4">
         <div>
           <h3 className="text-base font-semibold text-text-primary">Retrieval (Embeddings)</h3>
@@ -97,7 +108,7 @@ export function RetrievalReindexPanel({ projectName }: { projectName: string }) 
           }`}
         >
           {result.ok
-            ? `Reindex complete — ${result.totalChunks ?? 0} chunks across ${result.records ?? 0} records.`
+            ? `Reindex complete — ${result.chunks ?? 0} chunks, ${result.indexedSources ?? 0} indexed, ${result.skippedSources ?? 0} skipped.`
             : `Reindex failed: ${result.error ?? 'unknown error'}`}
         </div>
       )}
