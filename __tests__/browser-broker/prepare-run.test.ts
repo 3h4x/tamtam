@@ -9,6 +9,7 @@ describe('prepareBrokerRun', () => {
     vi.resetModules();
     ensureBrokerRunningMock = vi.fn().mockResolvedValue({
       url: 'http://127.0.0.1:9000',
+      mcpUrl: 'http://127.0.0.1:9000/mcp',
     });
     writeRunMcpConfigMock = vi.fn().mockReturnValue({
       runDir: '/tmp/tamtam-runs/job-1',
@@ -49,7 +50,10 @@ describe('prepareBrokerRun', () => {
     });
 
     expect(ensureBrokerRunningMock).toHaveBeenCalledWith({ image: 'custom/broker:2' });
-    expect(writeRunMcpConfigMock).toHaveBeenCalledOnce();
+    expect(writeRunMcpConfigMock).toHaveBeenCalledWith(expect.objectContaining({
+      brokerUrl: 'http://127.0.0.1:9000',
+      brokerMcpUrl: 'http://127.0.0.1:9000/mcp',
+    }));
     expect(result).toEqual(expect.objectContaining({
       env: { TAMTAM_MCP_CONFIG_PATH: '/tmp/tamtam-runs/job-1/mcp.json' },
       runDir: '/tmp/tamtam-runs/job-1',

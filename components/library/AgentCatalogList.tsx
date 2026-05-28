@@ -2,6 +2,7 @@
 
 import { useMemo, useState } from 'react'
 import { useAgentCatalog, type AgentCatalogClientEntry } from '@/hooks/useAgentCatalog'
+import { Pill } from '@/components/ui/Pill'
 import { Spinner } from '@/components/ui/Spinner'
 
 const TIER_ORDER: Record<string, number> = {
@@ -20,15 +21,15 @@ function tierLabel(tier: AgentCatalogClientEntry['tier']) {
 function dispatchBadge(dispatch: AgentCatalogClientEntry['dispatch']) {
   if (dispatch === 'internal') {
     return (
-      <span className="text-[10px] px-1.5 py-0.5 rounded-full bg-accent/10 text-accent border border-accent/30 font-medium whitespace-nowrap">
+      <Pill tone="accent" size="xs" className="rounded-full px-1.5 text-[10px] whitespace-nowrap">
         system
-      </span>
+      </Pill>
     )
   }
   return (
-    <span className="text-[10px] px-1.5 py-0.5 rounded-full bg-bg-primary text-text-tertiary border border-border font-medium whitespace-nowrap">
+    <Pill size="xs" className="rounded-full px-1.5 text-[10px] text-text-tertiary whitespace-nowrap">
       cli
-    </span>
+    </Pill>
   )
 }
 
@@ -135,13 +136,14 @@ function AgentCatalogRow({ entry }: { entry: AgentCatalogClientEntry }) {
         {entry.skillIds.length > 0 && (
           <div className="mt-1 flex flex-wrap gap-1">
             {entry.skillIds.map((id) => (
-              <span
+              <Pill
                 key={id}
-                className="text-[10px] px-1.5 py-0.5 rounded-full bg-bg-primary border border-border text-text-tertiary font-mono"
+                size="xs"
+                className="rounded-full px-1.5 text-[10px] text-text-tertiary font-mono"
                 title={id}
               >
                 {id}
-              </span>
+              </Pill>
             ))}
           </div>
         )}

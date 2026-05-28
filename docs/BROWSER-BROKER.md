@@ -12,6 +12,7 @@ A long-lived docker container managed by TamTam:
 
 - Image: `mcr.microsoft.com/playwright/mcp:v0.0.30` with `@playwright/mcp` preinstalled. Non-MCP image overrides are still supported through the legacy `npx -y @playwright/mcp@0.0.30` startup path.
 - Listens on `0.0.0.0:9333` inside the container, published only on `127.0.0.1:<dynamic>` on the host.
+- Probes `/mcp` first and falls back to legacy `/sse` so newer and older Playwright MCP images both work.
 - One broker per TamTam process. Per-run `BrowserContext` isolates cookies/storage between agent runs.
 
 Agent runs get a per-job MCP config written to `${tmpdir()}/tamtam-runs/<jobId>/`. The config registers the broker as the `tamtam_browser` MCP server, so the agent calls `mcp__tamtam_browser__browser_navigate`, `mcp__tamtam_browser__browser_take_screenshot`, etc.
@@ -42,7 +43,7 @@ TamTam process (unsandboxed)
   └─ scripts/sandbox-profiles/tamtam-loopback.sb
 
 Docker container: tamtam-playwright-broker-<port>
-  └─ @playwright/mcp HTTP/SSE on container :9333
+  └─ @playwright/mcp HTTP on container :9333 (/mcp or legacy /sse)
      → host 127.0.0.1:<dynamic>
 
 Sandboxed agent
@@ -98,7 +99,7 @@ For v1, the allow-list is metadata only — the agent can call any URL via the b
 
 Tested properties (`__tests__/browser-broker/sandbox-profile.test.ts`):
 
-- ✓ Loopback to the broker reaches the MCP SSE endpoint (HTTP 200 in stream-mode).
+- ✓ Loopback to the broker reaches the selected MCP endpoint (HTTP 200 in stream-mode).
 - ✓ External IP (`1.1.1.1`) is blocked (curl exits 7).
 - ✓ Docker socket (`/var/run/docker.sock`) is blocked (`Operation not permitted`).
 
@@ -139,5 +140,5 @@ It will be re-started on next agent run.
 |---|---|
 | `__tests__/browser-broker/origin-allowlist.test.ts` | Pure function: origin extraction, host.docker.internal twin, dedup. |
 | `__tests__/browser-broker/mcp-config-writer.test.ts` | Writes Claude JSON and Codex TOML, exposes env vars, cleanup works. |
-| `__tests__/browser-broker/smoke-broker.test.ts` | End-to-end: starts a real docker container, asserts `/sse` reachable. Skips when docker is unavailable. |
+| `__tests__/browser-broker/smoke-broker.test.ts` | End-to-end: starts a real docker container, asserts the selected MCP endpoint is reachable. Skips when docker is unavailable. |
 | `__tests__/browser-broker/sandbox-profile.test.ts` | Loopback to broker ✓, external blocked ✓, docker socket blocked ✓. Skips on non-Mac or missing docker. |

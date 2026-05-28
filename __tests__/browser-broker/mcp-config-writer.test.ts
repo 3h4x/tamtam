@@ -10,14 +10,28 @@ describe('writeRunMcpConfig', () => {
     cleanupRunMcpConfig(JOB_ID);
   });
 
-  it('emits Claude JSON pointing at the broker SSE endpoint', () => {
+  it('emits Claude JSON pointing at the broker MCP endpoint', () => {
     const out = writeRunMcpConfig({
       jobId: JOB_ID,
       brokerUrl: 'http://127.0.0.1:9000',
+      brokerMcpUrl: 'http://127.0.0.1:9000/mcp',
       allowedOrigins: ['http://localhost:3000', 'http://host.docker.internal:3000'],
       provider: 'claude',
     });
     expect(existsSync(out.claudeConfigPath)).toBe(true);
+    const parsed = JSON.parse(readFileSync(out.claudeConfigPath, 'utf8'));
+    expect(parsed.mcpServers.tamtam_browser.type).toBe('http');
+    expect(parsed.mcpServers.tamtam_browser.url).toBe('http://127.0.0.1:9000/mcp');
+  });
+
+  it('keeps legacy SSE config when the broker selected the SSE endpoint', () => {
+    const out = writeRunMcpConfig({
+      jobId: JOB_ID,
+      brokerUrl: 'http://127.0.0.1:9000',
+      brokerMcpUrl: 'http://127.0.0.1:9000/sse',
+      allowedOrigins: [],
+      provider: 'claude',
+    });
     const parsed = JSON.parse(readFileSync(out.claudeConfigPath, 'utf8'));
     expect(parsed.mcpServers.tamtam_browser.type).toBe('sse');
     expect(parsed.mcpServers.tamtam_browser.url).toBe('http://127.0.0.1:9000/sse');
@@ -32,6 +46,7 @@ describe('writeRunMcpConfig', () => {
     });
     expect(out.env.TAMTAM_MCP_CONFIG_PATH).toBe(out.claudeConfigPath);
     expect(out.env.TAMTAM_BROKER_URL).toBe('http://127.0.0.1:9000');
+    expect(out.env.TAMTAM_BROKER_MCP_URL).toBe('http://127.0.0.1:9000/mcp');
     expect(out.env.TAMTAM_ALLOWED_ORIGINS).toBe('http://localhost:3000');
     // Codex auth lives in the user's normal ~/.codex; we don't override
     // CODEX_HOME because that would orphan auth.json + session state.

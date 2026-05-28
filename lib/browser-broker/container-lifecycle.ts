@@ -1,5 +1,5 @@
 import { exec as runShell } from '@/lib/shared/shell';
-import { BROKER_IMAGE, BROKER_INTERNAL_PORT, BROKER_MCP_PACKAGE } from './image';
+import { BROKER_IMAGE, BROKER_INTERNAL_PORT, BROKER_MCP_ENDPOINT_PATHS, BROKER_MCP_PACKAGE } from './image';
 import { allocatePort } from './port-allocator';
 
 interface BrokerHandle {
@@ -7,6 +7,7 @@ interface BrokerHandle {
   containerName: string;
   hostPort: number;
   url: string;
+  mcpUrl: string;
   startedAt: number;
 }
 
@@ -27,13 +28,29 @@ async function dockerAvailable(): Promise<boolean> {
   return res.exitCode === 0;
 }
 
-async function probeBrokerHealth(url: string): Promise<boolean> {
+function brokerMcpUrl(baseUrl: string, endpointPath: string): string {
+  return `${baseUrl}${endpointPath}`;
+}
+
+function healthyMcpProbeStatus(status: number): boolean {
+  return status >= 200 && status < 500 && status !== 404;
+}
+
+async function probeBrokerMcpEndpoint(mcpUrl: string): Promise<boolean> {
   try {
-    const r = await fetch(`${url}/sse`, { method: 'GET', signal: AbortSignal.timeout(1_000) });
-    return r.status < 500;
+    const r = await fetch(mcpUrl, { method: 'GET', signal: AbortSignal.timeout(1_000) });
+    return healthyMcpProbeStatus(r.status);
   } catch {
     return false;
   }
+}
+
+async function probeBrokerHealth(url: string, endpointPaths: readonly string[] = BROKER_MCP_ENDPOINT_PATHS): Promise<string | null> {
+  for (const endpointPath of endpointPaths) {
+    const mcpUrl = brokerMcpUrl(url, endpointPath);
+    if (await probeBrokerMcpEndpoint(mcpUrl)) return mcpUrl;
+  }
+  return null;
 }
 
 async function containerExitReason(containerName: string): Promise<string | null> {
@@ -63,10 +80,11 @@ async function brokerStartError(message: string, containerName: string): Promise
   return new Error(`browser-broker: ${message}${detail}`);
 }
 
-async function waitForHealth(url: string, containerName: string, timeoutMs = HEALTH_PROBE_TIMEOUT_MS): Promise<void> {
+async function waitForHealth(url: string, containerName: string, timeoutMs = HEALTH_PROBE_TIMEOUT_MS): Promise<string> {
   const deadline = Date.now() + timeoutMs;
   while (Date.now() < deadline) {
-    if (await probeBrokerHealth(url)) return;
+    const mcpUrl = await probeBrokerHealth(url);
+    if (mcpUrl) return mcpUrl;
     const exitReason = await containerExitReason(containerName);
     if (exitReason) {
       throw await brokerStartError(exitReason, containerName);
@@ -90,7 +108,7 @@ async function runContainer(hostPort: number, image: string): Promise<{ id: stri
   await runShell('docker', ['rm', '-f', name], { timeout: 10_000 });
 
   const baseArgs = [
-    'run', '-d', '-i', '--rm', '--init',
+    'run', '-d', '-i', '--init',
     '--name', name,
     '-p', `127.0.0.1:${hostPort}:${BROKER_INTERNAL_PORT}`,
     '--add-host', 'host.docker.internal:host-gateway',
@@ -130,7 +148,11 @@ export interface EnsureOptions {
 export async function ensureBrokerRunning(_opts?: EnsureOptions): Promise<BrokerHandle> {
   const image = _opts?.image?.trim() || BROKER_IMAGE;
   if (globalThis.__tamtamBrowserBroker) {
-    if (await probeBrokerHealth(globalThis.__tamtamBrowserBroker.url)) {
+    const cachedMcpUrl = globalThis.__tamtamBrowserBroker.mcpUrl;
+    const mcpUrl = await probeBrokerHealth(globalThis.__tamtamBrowserBroker.url, [
+      cachedMcpUrl ? new URL(cachedMcpUrl).pathname : BROKER_MCP_ENDPOINT_PATHS[0],
+    ]);
+    if (mcpUrl) {
       return globalThis.__tamtamBrowserBroker;
     }
     globalThis.__tamtamBrowserBroker = undefined;
@@ -147,8 +169,9 @@ export async function ensureBrokerRunning(_opts?: EnsureOptions): Promise<Broker
     const hostPort = await allocatePort();
     const { id, name } = await runContainer(hostPort, image);
     const url = `http://127.0.0.1:${hostPort}`;
+    let mcpUrl: string;
     try {
-      await waitForHealth(url, name, _opts?.healthTimeoutMs);
+      mcpUrl = await waitForHealth(url, name, _opts?.healthTimeoutMs);
     } catch (err) {
       await runShell('docker', ['rm', '-f', name], { timeout: 10_000 });
       throw err;
@@ -158,6 +181,7 @@ export async function ensureBrokerRunning(_opts?: EnsureOptions): Promise<Broker
       containerName: name,
       hostPort,
       url,
+      mcpUrl,
       startedAt: Date.now(),
     };
     globalThis.__tamtamBrowserBroker = handle;

@@ -60,6 +60,7 @@ describe('ensureBrokerRunning', () => {
     expect(runArgs[imageIndex + 3]).toContain('npx -y @playwright/mcp@0.0.30');
     expect(runArgs[imageIndex + 3]).toContain('--port 9333');
     expect(runArgs[imageIndex + 3]).toContain('--host 0.0.0.0');
+    expect(runArgs[imageIndex + 3]).not.toContain('--allowed-hosts');
     expect(runArgs[imageIndex + 3]).toContain('--browser chromium');
     expect(runArgs[imageIndex + 3]).toContain('--headless');
     expect(runArgs[imageIndex + 3]).toContain('--no-sandbox');
@@ -98,9 +99,24 @@ describe('ensureBrokerRunning', () => {
       '--headless',
       '--no-sandbox',
     ]));
+    expect(runCall?.[1]).not.toContain('--allowed-hosts');
+    expect(runCall?.[1]).not.toContain('--rm');
     expect(runCall?.[1]).not.toContain('sh');
     expect(runCall?.[1]).not.toContain('npx');
-    expect(fetch).toHaveBeenCalledWith('http://127.0.0.1:4321/sse', expect.objectContaining({ method: 'GET' }));
+    expect(fetch).toHaveBeenCalledWith('http://127.0.0.1:4321/mcp', expect.objectContaining({ method: 'GET' }));
+  });
+
+  it('falls back to the legacy SSE endpoint when streamable HTTP is unavailable', async () => {
+    vi.mocked(fetch)
+      .mockResolvedValueOnce({ status: 404 } as Response)
+      .mockResolvedValueOnce({ status: 200 } as Response);
+    const { ensureBrokerRunning } = await import('@/lib/browser-broker/container-lifecycle');
+
+    const handle = await ensureBrokerRunning();
+
+    expect(handle.mcpUrl).toBe('http://127.0.0.1:4321/sse');
+    expect(fetch).toHaveBeenNthCalledWith(1, 'http://127.0.0.1:4321/mcp', expect.objectContaining({ method: 'GET' }));
+    expect(fetch).toHaveBeenNthCalledWith(2, 'http://127.0.0.1:4321/sse', expect.objectContaining({ method: 'GET' }));
   });
 
   it('fails fast with container logs when the broker container exits before health', async () => {
