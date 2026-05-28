@@ -65,7 +65,7 @@ export function applyReleaseGuards(input: ApplyReleaseGuardsInput): NextPhase {
 
   // 0. DO NOT SHIP policy — applied first because decideNextPhase routes
   // DO NOT SHIP straight to abort, and the user-configurable policy may want
-  // to (a) ship anyway with a follow-up issue (`pass`, default) or
+  // to (a) ship anyway with a follow-up issue (`pass`) or
   // (b) try the fix loop (`fix`) before deciding. `abort` (legacy) falls
   // through unchanged.
   if (
