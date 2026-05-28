@@ -87,9 +87,9 @@ function ProviderChart({
       <div className="flex items-center justify-between gap-3 text-xs">
         <span className="font-medium text-text-primary">{label}</span>
         <span className="flex gap-3 text-text-tertiary">
-          <span title="Tokens/h burned this hour (average of last 3 buckets)"><span className="inline-block w-3 h-0.5 bg-status-info align-middle mr-1" />actual {fmtTokens(series.currentTokensPerHour)}/h</span>
-          <span title="Steady-state rate that uses exactly 100% of the window evenly"><span className="inline-block w-3 h-0.5 bg-status-success align-middle mr-1 border-dashed" />steady pace {fmtTokens(series.expectedTokensPerHour)}/h</span>
-          <span title="Max rate you can sustain until window reset and still land at 100%"><span className="inline-block w-3 h-0.5 bg-status-warning align-middle mr-1 border-dashed" />catch-up ceiling {fmtTokens(series.catchUpTokensPerHour)}/h</span>
+          <span title="Tokens/h burned this hour — sum of input + output + cache reads + cache creates, averaged over last 3 buckets. Same accounting as the quota uses."><span className="inline-block w-3 h-0.5 bg-status-info align-middle mr-1" />actual {fmtTokens(series.currentTokensPerHour)}/h</span>
+          <span title="Steady-state rate that uses exactly 100% of the window evenly, derived from observed tokens vs utilization."><span className="inline-block w-3 h-0.5 bg-status-success align-middle mr-1 border-dashed" />steady pace {fmtTokens(series.expectedTokensPerHour)}/h</span>
+          <span title="Max rate you can sustain until window reset and still land at 100%."><span className="inline-block w-3 h-0.5 bg-status-warning align-middle mr-1 border-dashed" />catch-up ceiling {fmtTokens(series.catchUpTokensPerHour)}/h</span>
         </span>
       </div>
       {!hasAnyTokens && !hasAnyRate ? (

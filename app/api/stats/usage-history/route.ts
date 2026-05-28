@@ -29,7 +29,11 @@ export interface UsageHistoryBucket {
   cacheReadTokens: number | null;
   cacheCreateTokens: number | null;
   jobCount: number | null;
-  /** Sum of input+output (the meaningful "tokens used" rate). */
+  /**
+   * Total tokens used in this bucket, scaled to tokens/h. Includes input,
+   * output, cache reads, and cache creates so the rate matches what the
+   * provider's `utilizationPct` counts against quota.
+   */
   totalTokens: number | null;
   /**
    * Catch-up rate (tokens/h) at the time of this bucket: how fast the user
@@ -70,12 +74,25 @@ export async function GET(req: Request) {
     const key = `${r.provider}|${r.windowKey}`;
     const input = r.inputTokens ?? null;
     const output = r.outputTokens ?? null;
+    const cacheRead = r.cacheReadTokens ?? null;
+    const cacheCreate = r.cacheCreateTokens ?? null;
     // Normalize all token counts to tokens/h so the chart Y axis stays
-    // consistent if we ever change bucket granularity. Keep null distinct
-    // from 0: null means no jobs ran in the bucket, while 0 means a job ran
-    // and reported zero input/output tokens.
-    const totalTokens = input !== null || output !== null
-      ? (Number(input ?? 0) + Number(output ?? 0)) * PER_HOUR_SCALE
+    // consistent if we ever change bucket granularity. Sum *all* token
+    // categories — input + output + cache reads + cache creates — because
+    // that is what utilizationPct measures against the quota. Charting only
+    // input+output produced a series that was much smaller than the line
+    // derived from utilization, so the "steady pace" reference floated far
+    // above visible bars even when the user was actually on pace.
+    // Keep null distinct from 0: all four cells null means no jobs ran in
+    // the bucket; any cell populated means a job ran and we sum the rest as
+    // zero.
+    const anyTokenRecorded =
+      input !== null || output !== null || cacheRead !== null || cacheCreate !== null;
+    const totalTokens = anyTokenRecorded
+      ? (Number(input ?? 0)
+        + Number(output ?? 0)
+        + Number(cacheRead ?? 0)
+        + Number(cacheCreate ?? 0)) * PER_HOUR_SCALE
       : null;
     const bucket: UsageHistoryBucket = {
       bucketTs: r.bucketTs,
