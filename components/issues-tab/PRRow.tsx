@@ -8,6 +8,7 @@ import { formatAgo } from '@/lib/shared/format'
 import { Labels, CheckIcon, GateBadge } from '@/components/issues-tab/shared'
 import type { MergeMethod, PrGates } from '@/components/issues-tab/shared'
 import { Button } from '@/components/ui/Button'
+import { PillButton, type PillTone } from '@/components/ui/Pill'
 import { SegmentedControl } from '@/components/ui/SegmentedControl'
 import { Spinner } from '@/components/ui/Spinner'
 
@@ -86,10 +87,10 @@ export function PRRow({
     : checks.every(c => c.conclusion === 'SUCCESS' || c.conclusion === 'NEUTRAL' || c.conclusion === 'SKIPPED') ? 'SUCCESS'
     : 'FAILURE'
 
-  const ciBadgeClass =
-    ciRollup === 'SUCCESS' ? 'bg-status-success/10 text-status-success border-status-success/30'
-    : ciRollup === 'FAILURE' ? 'bg-status-error/10 text-status-error border-status-error/30'
-    : ciRollup === 'PENDING' ? 'bg-status-warning/10 text-status-warning border-status-warning/30'
+  const ciBadgeTone: PillTone | null =
+    ciRollup === 'SUCCESS' ? 'success'
+    : ciRollup === 'FAILURE' ? 'error'
+    : ciRollup === 'PENDING' ? 'warning'
     : null
 
   const [switchingBranch, setSwitchingBranch] = useState(false)
@@ -225,7 +226,7 @@ export function PRRow({
               }`}>{reviewLabel}</span>
             )}
           </div>
-          {((pr.labels?.length ?? 0) > 0 || gates || (ciRollup && ciBadgeClass)) && (
+          {((pr.labels?.length ?? 0) > 0 || gates || (ciRollup && ciBadgeTone)) && (
             <div className="flex flex-wrap items-center gap-1 text-xs text-text-tertiary">
               {(pr.labels?.length ?? 0) > 0 && <Labels labels={pr.labels} limit={4} />}
               {gates && (
@@ -248,9 +249,13 @@ export function PRRow({
                   />
                 </>
               )}
-              {ciRollup && ciBadgeClass && (
-                <button
-                  className={`inline-flex items-center gap-1 rounded-full border px-1.5 py-0.5 text-[10px] font-medium cursor-pointer transition-colors hover:opacity-80 ${ciBadgeClass}`}
+              {ciRollup && ciBadgeTone && (
+                <PillButton
+                  type="button"
+                  tone={ciBadgeTone}
+                  size="xs"
+                  active
+                  className="gap-1 text-[10px] hover:opacity-80"
                   onClick={e => { e.stopPropagation(); setChecksExpanded(v => !v) }}
                   title={checksExpanded ? 'Hide checks' : 'Show checks'}
                 >
@@ -259,7 +264,7 @@ export function PRRow({
                   <svg width="8" height="8" viewBox="0 0 16 16" fill="currentColor" className={`transition-transform ${checksExpanded ? 'rotate-180' : ''}`}>
                     <path d="M4.427 7.427l3.396 3.396a.25.25 0 00.354 0l3.396-3.396A.25.25 0 0011.396 7H4.604a.25.25 0 00-.177.427z"/>
                   </svg>
-                </button>
+                </PillButton>
               )}
             </div>
           )}
