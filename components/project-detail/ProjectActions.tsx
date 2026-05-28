@@ -260,12 +260,16 @@ export function ProjectActions({
           >
             {pulling ? 'Working…' : 'Merge'}
           </Button>
-          <button
-            className="px-1.5 py-1 text-xs text-text-tertiary hover:text-text-secondary cursor-pointer"
+          <Button
+            type="button"
+            variant="ghost"
+            size="icon-sm"
             onClick={onDismissDiverged}
             aria-label="Dismiss diverged warning"
             title="Dismiss"
-          >✕</button>
+          >
+            ✕
+          </Button>
         </span>
       ) : (
         <Button
