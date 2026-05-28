@@ -124,6 +124,10 @@ async function stubCommonRoutes(
   await page.route('**/api/jobs/notifications', (route: Route) =>
     route.fulfill({ json: { notifications: [] } }),
   );
+  await page.route(
+    (url) => url.pathname === '/api/automation-queue' && url.searchParams.get('project') === project,
+    (route: Route) => route.fulfill({ json: { items: [] } }),
+  );
   await page.route('**/api/settings', (route: Route) =>
     route.fulfill({ json: { jobs_paused: false, github_owner: '' } }),
   );
@@ -184,6 +188,61 @@ test.describe('Auto-polling live update', () => {
     // No orphaned spinner: the status badge with exactly "running" text must be gone.
     // Using { exact: true } to avoid matching the persistent "jobs running" header toggle.
     await expect(page.getByText('running', { exact: true })).not.toBeVisible();
+  });
+
+  test('history running filter clears when its only running job completes without reload', async ({
+    page,
+  }) => {
+    let serveRunning = true;
+
+    await stubCommonRoutes(page, PROJECT);
+
+    await page.route(
+      (url) =>
+        url.pathname === '/api/jobs' && url.searchParams.get('project') === PROJECT,
+      (route: Route) => {
+        route.fulfill({
+          json: {
+            jobs: [
+              makeJob(
+                'running-filter-clears-job',
+                PROJECT,
+                serveRunning ? 'running' : 'done',
+                serveRunning ? null : 0,
+                'test',
+              ),
+            ],
+            pendingReleaseProjects: [],
+          },
+        });
+      },
+    );
+
+    await page.goto(`/project/${PROJECT}/history`);
+
+    const row = page.getByRole('button')
+      .filter({ hasText: 'test' })
+      .filter({ has: page.locator('[aria-label="running"]') })
+      .first();
+
+    await expect(row).toBeVisible({ timeout: 8_000 });
+    await page.getByRole('button', { name: /^running/ }).click();
+    await expect(row).toBeVisible();
+    await expect(page.getByText('Nothing is running right now')).toHaveCount(0);
+
+    serveRunning = false;
+
+    await expect(page.getByText('Nothing is running right now')).toBeVisible({
+      timeout: 12_000,
+    });
+    await expect(
+      page.getByText('This project has no active terminal, agent, or pipeline work at the moment.'),
+    ).toBeVisible();
+    await expect(row).toHaveCount(0);
+
+    await page.getByRole('button', { name: /^all/ }).click();
+    await expect(page.getByRole('button').filter({ hasText: 'test' }).first()).toBeVisible();
+    await expect(page.getByText('done', { exact: true }).first()).toBeVisible();
   });
 });
 
