@@ -5,6 +5,7 @@ import type { ReactNode } from 'react'
 export interface SegmentedControlOption<T extends string> {
   value: T
   label: ReactNode
+  title?: string
 }
 
 export interface SegmentedControlProps<T extends string> {
@@ -37,6 +38,7 @@ export function SegmentedControl<T extends string>({
             key={option.value}
             type="button"
             disabled={disabled}
+            title={option.title}
             className={`cursor-pointer border-none px-2.5 py-1 text-xs font-medium transition-colors disabled:cursor-not-allowed disabled:opacity-60 ${
               active
                 ? 'bg-accent text-white'
