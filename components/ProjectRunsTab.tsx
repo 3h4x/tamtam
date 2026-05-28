@@ -14,6 +14,7 @@ import {
 } from '@/lib/client-api'
 import type { AutomationQueueItem, JobInfo } from '@/lib/client-api'
 import { Button } from '@/components/ui/Button'
+import { PillButton } from '@/components/ui/Pill'
 import {
   formatTokens,
   formatCost,
@@ -766,25 +767,29 @@ export function ProjectRunsTab({ projectName, jobsPaused = false }: ProjectRunsT
         </div>
         <div className="flex items-center gap-1.5 overflow-x-auto p-1 scrollbar-thin scrollbar-thumb-border scrollbar-track-transparent" style={{ scrollbarWidth: 'thin' }}>
           {([
-            { f: { kind: 'all' } as Filter, label: 'all', tone: 'neutral' },
+            { f: { kind: 'all' } as Filter, label: 'all', tone: 'accent' },
             { f: { kind: 'running' } as Filter, label: 'running', tone: 'info' },
             { f: { kind: 'failed' } as Filter, label: 'failed', tone: 'error' },
           ] as const).map(({ f, label, tone }) => {
             const count = counts[f.kind] ?? 0
             if ((f.kind === 'running' || f.kind === 'failed') && count === 0 && filterKey(filter) !== filterKey(f)) return null
             const active = filterKey(filter) === filterKey(f)
-            const toneCls =
-              tone === 'info' ? (active ? 'border-status-info bg-status-info/15 text-status-info' : 'border-transparent text-text-secondary hover:text-status-info hover:bg-bg-primary') :
-              tone === 'error' ? (active ? 'border-status-error bg-status-error/15 text-status-error' : 'border-transparent text-text-secondary hover:text-status-error hover:bg-bg-primary') :
-              (active ? 'border-accent bg-accent/15 text-accent' : 'border-transparent text-text-secondary hover:text-text-primary hover:bg-bg-primary')
             return (
-              <button
+              <PillButton
                 key={label}
-                className={`shrink-0 px-2.5 py-1 text-xs rounded-md font-mono cursor-pointer border ${toneCls}`}
+                type="button"
+                tone={tone}
+                size="sm"
+                active={active}
+                className={[
+                  'shrink-0 px-2.5 font-mono',
+                  !active && tone === 'info' ? 'hover:text-status-info' : undefined,
+                  !active && tone === 'error' ? 'hover:text-status-error' : undefined,
+                ].filter(Boolean).join(' ')}
                 onClick={() => setFilter(f)}
               >
                 {label} <span className="opacity-70">{count}</span>
-              </button>
+              </PillButton>
             )
           })}
           <span className="shrink-0 h-5 w-px bg-border mx-1" aria-hidden />
@@ -793,17 +798,17 @@ export function ProjectRunsTab({ projectName, jobsPaused = false }: ProjectRunsT
             const active = filter.kind === 'bucket' && filter.bucket === b
             if (count === 0 && !active) return null
             return (
-              <button
+              <PillButton
                 key={b}
-                className={`shrink-0 px-2.5 py-1 text-xs rounded-md font-mono cursor-pointer border ${
-                  active
-                    ? 'border-accent bg-accent/15 text-accent'
-                    : 'border-transparent text-text-secondary hover:text-text-primary hover:bg-bg-primary'
-                }`}
+                type="button"
+                tone="accent"
+                size="sm"
+                active={active}
+                className="shrink-0 px-2.5 font-mono"
                 onClick={() => setFilter({ kind: 'bucket', bucket: b })}
               >
                 {KIND_LABEL[b]} <span className="opacity-70">{count}</span>
-              </button>
+              </PillButton>
             )
           })}
         </div>
