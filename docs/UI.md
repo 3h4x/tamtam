@@ -137,6 +137,8 @@ import { Button, buttonVariants } from '@/components/ui/Button'
 | `secondary` | bordered neutral | default workhorse — most action buttons |
 | `primary` | translucent accent (border + bg/10) | contextual primary actions |
 | `solid` | solid accent fill | marquee save/submit actions |
+| `success` | success text + hover fill | positive toggles |
+| `success-solid` | solid green fill | completed confirmations |
 | `ghost` | transparent, text-secondary | nav links, separators, low-priority actions |
 | `danger` | error text + hover fill | "Delete" before confirmation |
 | `danger-solid` | solid red fill | confirmed destructive action |
