@@ -219,7 +219,15 @@ export async function checkCliStartGate(
   }
   const picked = await resolveProviderForRun(opts);
   if (!picked.provider) {
-    await pauseJobsForQuotaExhaustion(ALL_PROVIDERS_BLOCKED_DETAIL);
+    // Only auto-pause the global job switch when the user has opted into
+    // budget gating. With `budget_block_runs_enabled=false` a transient null
+    // (e.g. one provider's quota snapshot momentarily missing) used to flip
+    // the global pause and freeze every project until a human cleared it;
+    // surface the 429 to the caller but leave the switch alone.
+    const { getSettings } = await import('@/lib/shared/config');
+    if (getSettings().budget_block_runs_enabled) {
+      await pauseJobsForQuotaExhaustion(ALL_PROVIDERS_BLOCKED_DETAIL);
+    }
     return { ok: false, status: 429, detail: ALL_PROVIDERS_BLOCKED_DETAIL };
   }
   return { ok: true, provider: picked.provider };
