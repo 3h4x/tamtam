@@ -87,12 +87,13 @@ export function LogsPage() {
           {selectedProject && (
             <>
               {' — '}{selectedProject}
-              <button
-                className="text-accent hover:underline text-sm ml-2"
+              <Button
+                variant="link"
+                className="ml-2"
                 onClick={() => { setSelectedProject(null); setLogs([]); resetProjectScopedState() }}
               >
                 clear
-              </button>
+              </Button>
             </>
           )}
         </h2>

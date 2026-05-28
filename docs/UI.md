@@ -142,6 +142,7 @@ import { Button, buttonVariants } from '@/components/ui/Button'
 | `danger-solid` | solid red fill | confirmed destructive action |
 | `warning` | amber border + translucent bg | caution states (e.g. pull with conflicts) |
 | `info` | blue border + translucent bg | informational actions (e.g. Rebase) |
+| `link` | inline text-accent, hover underline, no padding | inline prose/header actions (e.g. "clear" beside a label) |
 
 **Size** (prop `size`, default `md`):
 
