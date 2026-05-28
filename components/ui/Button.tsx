@@ -15,7 +15,7 @@ export type ButtonVariant =
   | 'info'        // blue border + translucent bg
   | 'link'        // inline text-accent link — for inline prose/header actions
 
-export type ButtonSize = 'sm' | 'md'
+export type ButtonSize = 'sm' | 'md' | 'icon-sm'
 export type ButtonDisabledCursor = 'not-allowed' | 'default' | 'wait'
 
 const BASE =
@@ -27,11 +27,13 @@ const LINK_BASE =
 const SIZE: Record<ButtonSize, string> = {
   sm: 'px-2 py-1 text-xs rounded',
   md: 'px-3 py-1.5 text-sm rounded-md',
+  'icon-sm': 'h-6 w-6 justify-center rounded-md p-0 text-sm',
 }
 
 const LINK_TEXT_SIZE: Record<ButtonSize, string> = {
   sm: 'text-xs',
   md: 'text-sm',
+  'icon-sm': 'text-sm',
 }
 
 const VARIANT: Record<Exclude<ButtonVariant, 'link'>, string> = {

@@ -152,6 +152,7 @@ import { Button, buttonVariants } from '@/components/ui/Button'
 |------|---------|------|
 | `md` | `px-3 py-1.5` | `text-sm` |
 | `sm` | `px-2 py-1` | `text-xs` |
+| `icon-sm` | `h-6 w-6 p-0` | `text-sm` |
 
 All variants automatically apply `disabled:opacity-50 disabled:cursor-not-allowed` — pass `disabled` as a boolean prop.
 
