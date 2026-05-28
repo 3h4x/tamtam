@@ -668,6 +668,8 @@ export function ProjectDetailPage({
           )}
           <button
             type="button"
+            aria-label={config?.paused ? 'Resume project' : 'Pause project'}
+            aria-pressed={!!config?.paused}
             onClick={async () => {
               const next = !config?.paused
               try {
