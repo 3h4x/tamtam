@@ -8,7 +8,14 @@ import { formatAgo } from '@/lib/shared/format'
 import { Labels, CheckIcon, GateBadge } from '@/components/issues-tab/shared'
 import type { MergeMethod, PrGates } from '@/components/issues-tab/shared'
 import { Button } from '@/components/ui/Button'
+import { SegmentedControl } from '@/components/ui/SegmentedControl'
 import { Spinner } from '@/components/ui/Spinner'
+
+const MERGE_METHOD_OPTIONS: Array<{ value: MergeMethod; label: string }> = [
+  { value: 'squash', label: 'squash' },
+  { value: 'merge', label: 'merge' },
+  { value: 'rebase', label: 'rebase' },
+]
 
 function parseLinkedIssueNumber(body: string | null | undefined): string | null {
   if (!body) return null
@@ -312,23 +319,14 @@ export function PRRow({
           {!merged && (
             mergeConfirm ? (
               <div className="flex items-center gap-1">
-                <div className="flex rounded-md border border-border overflow-hidden text-[10px] font-mono">
-                  {(['squash', 'merge', 'rebase'] as const).map((m) => (
-                    <button
-                      key={m}
-                      type="button"
-                      className={`px-1.5 py-1 cursor-pointer transition-colors border-r border-border last:border-r-0 ${
-                        mergeMethod === m
-                          ? 'bg-accent/20 text-accent'
-                          : 'bg-bg-secondary text-text-secondary hover:bg-bg-tertiary'
-                      }`}
-                      onClick={() => setMergeMethod(m)}
-                      disabled={merging}
-                    >
-                      {m}
-                    </button>
-                  ))}
-                </div>
+                <SegmentedControl
+                  ariaLabel="Merge method"
+                  options={MERGE_METHOD_OPTIONS}
+                  value={mergeMethod}
+                  onChange={setMergeMethod}
+                  disabled={merging}
+                />
+
                 <Button
                   type="button"
                   variant="success-solid"
