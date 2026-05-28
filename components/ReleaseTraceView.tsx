@@ -4,6 +4,7 @@ import { useState, useEffect } from 'react'
 import Link from 'next/link'
 import { ErrorState } from './ErrorState'
 import { resolveGithubBoardUrl } from '@/lib/client/resolve-github-board-url'
+import { Pill, type PillTone } from '@/components/ui/Pill'
 import { Spinner } from '@/components/ui/Spinner'
 
 interface ReleaseStep {
@@ -81,16 +82,16 @@ function StepGlyph({ step }: { step: ReleaseStep }) {
 
 function verdictBadge(verdict: string | null) {
   if (!verdict) return null
-  const color =
+  const tone: PillTone =
     verdict === 'LGTM'
-      ? 'bg-status-success/15 text-status-success border-status-success/30'
+      ? 'success'
       : verdict === 'NEEDS ATTENTION'
-        ? 'bg-status-warning/15 text-status-warning border-status-warning/30'
-        : 'bg-status-error/15 text-status-error border-status-error/30'
+        ? 'warning'
+        : 'error'
   return (
-    <span className={`text-[10px] px-1.5 py-0.5 rounded border font-mono ${color}`}>
+    <Pill tone={tone} size="xs" className="text-[10px] px-1.5 rounded font-mono">
       {verdict}
-    </span>
+    </Pill>
   )
 }
 
@@ -248,25 +249,25 @@ export function ReleaseTraceView({ projectName, releaseId }: Props) {
           </div>
           <div className="flex items-center gap-2 shrink-0">
             {isRunning && (
-              <span className="flex items-center gap-1.5 text-xs px-2.5 py-1 rounded-full bg-accent/20 text-accent font-mono">
+              <Pill tone="accent" size="sm" className="rounded-full px-2.5 bg-accent/20 font-mono">
                 <span className="w-1.5 h-1.5 rounded-full bg-accent animate-pulse" />
                 running
-              </span>
+              </Pill>
             )}
             {isSuccess && (
-              <span className="text-xs px-2.5 py-1 rounded-full bg-status-success/15 text-status-success font-mono border border-status-success/30">
+              <Pill tone="success" size="sm" className="rounded-full px-2.5 font-mono">
                 success
-              </span>
+              </Pill>
             )}
             {isCancelled && (
-              <span className="text-xs px-2.5 py-1 rounded-full bg-status-error/15 text-status-error font-mono border border-status-error/30">
+              <Pill tone="error" size="sm" className="rounded-full px-2.5 font-mono">
                 cancelled
-              </span>
+              </Pill>
             )}
             {isFailed && (
-              <span className="text-xs px-2.5 py-1 rounded-full bg-status-error/15 text-status-error font-mono border border-status-error/30">
+              <Pill tone="error" size="sm" className="rounded-full px-2.5 font-mono">
                 failed
-              </span>
+              </Pill>
             )}
             {boardUrl && (
               <a
