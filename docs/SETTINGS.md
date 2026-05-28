@@ -214,23 +214,6 @@ Retention writes separate latest-summary records to `maintenance_status`: `reten
 | `log_dir` | string | `./data/logs` | Directory where job log files are written |
 | `launchagent_prefix` | string | `com.tamtam` | Prefix for macOS LaunchAgent plist filenames |
 
-### Notifications
-
-Outbound webhook fired when the release pipeline reaches a terminal state. Supports Slack incoming webhooks, Discord webhooks, and any generic HTTP receiver (e.g. ntfy).
-
-| Key | Type | Default | Effect |
-|-----|------|---------|--------|
-| `notification_webhook_url` | string | `''` | Destination URL; auto-detected as Slack / Discord / generic by URL pattern |
-| `notification_webhook_secret` | string | `''` | If set, every POST includes an `X-TamTam-Signature` HMAC-SHA256 hex header over the JSON body |
-| `notification_on_release_success` | boolean | `false` | Fire when the full release pipeline completes with exit 0 |
-| `notification_on_release_fail` | boolean | `false` | Fire when any pipeline step fails and the pipeline halts |
-| `notification_on_fix_loop_exhausted` | boolean | `false` | Fire when a release exhausts automated recovery budget (`test`/`review`/`commit`/`push` fix attempts) or stops because fix/review iterations are not converging |
-| `notification_on_review_do_not_ship` | boolean | `false` | Fire when a review returns a DO NOT SHIP verdict |
-| `notification_on_agent_run_fail` | boolean | `false` | Fire when any scheduled agent job exits non-zero |
-| `notification_on_budget_blocked` | boolean | `false` | Fire when a run is refused because the selected agent subscription budget threshold is exceeded (debounced once per window+resetsAt) |
-| `notification_throttle_window_seconds` | number | `900` | Suppress repeated webhook notifications with the same event/project/agent key for this many seconds |
-| `notification_throttle_overrides` | JSON object | `{ "release_fail": 0, "release_aborted": 0 }` | Per-event throttle windows in seconds; `0` always sends |
-
 ### Retrieval
 
 Semantic retrieval layer — embeds agent run reports plus project-scoped knowledge into the `retrieval_chunks` table (a pgvector-backed column on the same Postgres database TamTam uses for everything else) and injects relevant context into agent prompts at run time. The corpus includes committed project docs, DB-backed skills referenced by that project's agents, and synthesized project config guidance. Embeddings are generated locally via Ollama (`nomic-embed-text`). Enabled by default; toggle and tune from Settings → General → "Retrieval (Embeddings)". Trigger a per-project corpus rebuild from the project's Config tab → "Reindex now"; current chunk/record counts are surfaced via `GET /api/projects/[schedId]/retrieval/stats`.
@@ -349,7 +332,8 @@ The `/api/stats/bridge` endpoint must be running for TamTam's observability feat
     | 'fix_loop_exhausted'
     | 'review_do_not_ship'
     | 'agent_run_fail'
-    | 'budget_blocked';
+    | 'budget_blocked'
+    | 'post_merge_revert';
   project: string;
   agent?: string;         // set for agent_run_fail events
   job_id: string;
