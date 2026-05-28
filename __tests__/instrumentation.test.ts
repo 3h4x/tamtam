@@ -22,6 +22,7 @@ describe('instrumentation', () => {
   let originalRuntime: string | undefined;
 
   beforeEach(() => {
+    vi.resetModules();
     originalRuntime = process.env.NEXT_RUNTIME;
   });
 
@@ -286,6 +287,7 @@ describe('instrumentation', () => {
 
       vi.doMock('@/lib/jobs/job-storage', () => ({
         listJobs: listJobsMock,
+        getJob: vi.fn((id: string) => listJobsMock().find((job: { id: string }) => job.id === id) ?? null),
         markDone: markDoneMock,
         updateJob: vi.fn(),
         probeJobStatus: vi.fn(),
@@ -317,6 +319,7 @@ describe('instrumentation', () => {
 
       vi.doMock('@/lib/jobs/job-storage', () => ({
         listJobs: listJobsMock,
+        getJob: vi.fn((id: string) => listJobsMock().find((job: { id: string }) => job.id === id) ?? null),
         markDone: markDoneMock,
         updateJob: vi.fn(),
         probeJobStatus: vi.fn(),

@@ -1,10 +1,9 @@
-// First per-phase workflow scaffold. Drives the "test" phase of the
-// release pipeline: spawn the test sub-step via the existing fire-and-
-// forget startProjectTest helper, then await its completion via
-// waitForJobCompletion, then return a structured outcome.
+// Test phase workflow. Drives the "test" phase of the release pipeline:
+// spawn the test sub-step via the existing fire-and-forget startProjectTest
+// helper, then await its completion via waitForJobCompletion, then return a
+// structured outcome.
 //
-// Pattern this file establishes for future phase workflows (review, fix,
-// commit, push, mark-dod, pr-wait):
+// Pattern shared by the phase workflows:
 //
 //   1. kickoff step — wraps the existing startProject* helper. Cheap; returns
 //      immediately with the jobId or an ok:false reason.
