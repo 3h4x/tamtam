@@ -238,7 +238,7 @@ export function StatsPage() {
       <section className="border border-border rounded-lg p-4 bg-bg-primary">
         <div className="flex items-center justify-between mb-3">
           <h2 className="text-sm font-medium text-text-primary">Tokens / hour (last 48h)</h2>
-          <span className="text-xs text-text-tertiary">actual burn vs steady pace vs catch-up ceiling</span>
+          <span className="text-xs text-text-tertiary">actual burn vs steady pace vs to-100% rate</span>
         </div>
         <UsageHistoryChart />
       </section>

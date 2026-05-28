@@ -82,14 +82,42 @@ function ProviderChart({
     || series.expectedTokensPerHour !== null
     || series.catchUpTokensPerHour !== null
 
+  // Where will we actually land at window reset? actual_rate / steady_rate × 100.
+  // This is the single most useful summary number: it's the projected end-of-
+  // window utilization %, expressed at the *current* burn rate. If actual is
+  // half of steady, you'll land at 50%; if equal, you'll land at 100%.
+  const projectionPct = (() => {
+    const a = series.currentTokensPerHour
+    const s = series.expectedTokensPerHour
+    if (a == null || s == null || !Number.isFinite(a) || !Number.isFinite(s) || s <= 0) return null
+    return Math.round((a / s) * 100)
+  })()
+  const projectionTone =
+    projectionPct == null
+      ? 'text-text-tertiary'
+      : projectionPct >= 100
+        ? 'text-status-error'
+        : projectionPct >= 85
+          ? 'text-status-warning'
+          : 'text-status-success'
   return (
     <div className="flex flex-col gap-1">
       <div className="flex items-center justify-between gap-3 text-xs">
-        <span className="font-medium text-text-primary">{label}</span>
+        <span className="font-medium text-text-primary flex items-center gap-2">
+          {label}
+          {projectionPct != null && (
+            <span
+              className={`tabular-nums font-semibold ${projectionTone}`}
+              title="At the current burn rate, this is where utilization will land by window reset. Under 100% = under pace; over 100% = will exceed quota."
+            >
+              → projects {projectionPct}%
+            </span>
+          )}
+        </span>
         <span className="flex gap-3 text-text-tertiary">
           <span title="Tokens/h burned this hour — sum of input + output + cache reads + cache creates, averaged over last 3 buckets. Same accounting as the quota uses."><span className="inline-block w-3 h-0.5 bg-status-info align-middle mr-1" />actual {fmtTokens(series.currentTokensPerHour)}/h</span>
           <span title="Steady-state rate that uses exactly 100% of the window evenly, derived from observed tokens vs utilization."><span className="inline-block w-3 h-0.5 bg-status-success align-middle mr-1 border-dashed" />steady pace {fmtTokens(series.expectedTokensPerHour)}/h</span>
-          <span title="Max rate you can sustain until window reset and still land at 100%."><span className="inline-block w-3 h-0.5 bg-status-warning align-middle mr-1 border-dashed" />catch-up ceiling {fmtTokens(series.catchUpTokensPerHour)}/h</span>
+          <span title="The rate you'd need to sustain from now until window reset to STILL land at 100%. When this line rises, you are NOT catching up — every quiet hour shrinks the remaining time, so the required burn rate keeps climbing. When this line falls toward steady pace, you're actually catching up."><span className="inline-block w-3 h-0.5 bg-status-warning align-middle mr-1 border-dashed" />to-100% rate {fmtTokens(series.catchUpTokensPerHour)}/h</span>
         </span>
       </div>
       {!hasAnyTokens && !hasAnyRate ? (
