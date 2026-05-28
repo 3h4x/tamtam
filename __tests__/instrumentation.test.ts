@@ -306,6 +306,7 @@ describe('instrumentation', () => {
         PIPELINE_STEP_KINDS: new Set(),
       }));
       vi.doMock('@/lib/pipeline/pr-wait-resume', () => ({ resumeBootPrWait: resumeBootPrWaitMock }));
+      vi.doMock('@/lib/pipeline/start-pr-wait', () => ({ resumePrWait: resumeBootPrWaitMock }));
       vi.doMock('@/lib/pipeline/recovery-drain', () => ({
         drainAllRecoveryWork: vi.fn().mockResolvedValue(undefined),
       }));
@@ -348,6 +349,7 @@ describe('instrumentation', () => {
         PIPELINE_STEP_KINDS: new Set(),
       }));
       vi.doMock('@/lib/pipeline/pr-wait-resume', () => ({ resumeBootPrWait: resumeBootPrWaitMock }));
+      vi.doMock('@/lib/pipeline/start-pr-wait', () => ({ resumePrWait: resumeBootPrWaitMock }));
       vi.doMock('@/lib/pipeline/recovery-drain', () => ({
         drainAllRecoveryWork: vi.fn().mockResolvedValue(undefined),
       }));
@@ -390,6 +392,7 @@ describe('instrumentation', () => {
         PIPELINE_STEP_KINDS: new Set(),
       }));
       vi.doMock('@/lib/pipeline/pr-wait-resume', () => ({ resumeBootPrWait: resumeBootPrWaitMock }));
+      vi.doMock('@/lib/pipeline/start-pr-wait', () => ({ resumePrWait: resumeBootPrWaitMock }));
       vi.doMock('@/lib/pipeline/recovery-drain', () => ({
         drainAllRecoveryWork: vi.fn().mockResolvedValue(undefined),
       }));
@@ -420,6 +423,7 @@ describe('instrumentation', () => {
         PIPELINE_STEP_KINDS: new Set(),
       }));
       vi.doMock('@/lib/pipeline/pr-wait-resume', () => ({ resumeBootPrWait: resumeBootPrWaitMock }));
+      vi.doMock('@/lib/pipeline/start-pr-wait', () => ({ resumePrWait: resumeBootPrWaitMock }));
       vi.doMock('@/lib/pipeline/recovery-drain', () => ({
         drainAllRecoveryWork: vi.fn().mockResolvedValue(undefined),
       }));
