@@ -19,6 +19,7 @@ async function applyDdl(handle: TestDbHandle): Promise<void> {
       prompt text NOT NULL DEFAULT '',
       schedule text,
       enabled boolean NOT NULL DEFAULT true,
+      boostable boolean NOT NULL DEFAULT true,
       provider text,
       fallback_enabled boolean NOT NULL DEFAULT false,
       prerequisite_command text,

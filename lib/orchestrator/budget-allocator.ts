@@ -57,6 +57,11 @@ export interface BoostAgentInput {
    *  don't consume codex/claude budget — boosting them can't catch up pace.
    *  `'user'` agents go through the CLI and are the real boost candidates. */
   kind: 'user' | 'system';
+  /** When false, this agent fires only on its own schedule — never via a
+   *  boost. Use for agents that produce user-visible artifacts on a
+   *  deliberate cadence (blog posts, social posts) where extra firings would
+   *  over-publish. Default true. */
+  boostable: boolean;
 }
 
 export interface BoostHistoryInput {
@@ -152,6 +157,9 @@ export function decideBoosts(input: BoostInput): BoostDecision[] {
     // so boosting them doesn't burn the budget the orchestrator is trying to
     // catch up on. Skip them entirely.
     if (agent.kind === 'system') continue;
+    // Opt-out: blog-writer / social-poster style agents set boostable=false so
+    // the orchestrator never adds extra firings beyond their own cron.
+    if (agent.boostable === false) continue;
     const arr = agentsByProject.get(agent.project) ?? [];
     arr.push(agent);
     agentsByProject.set(agent.project, arr);

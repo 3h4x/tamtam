@@ -26,6 +26,7 @@ export interface AgentEditorSavePayload {
   model: string
   schedule: string | null
   enabled: boolean
+  boostable: boolean
   provider: CliProvider | null
   fallbackEnabled?: boolean
   prerequisiteCommand: string | null
@@ -69,6 +70,7 @@ export function AgentEditor({
   const [fallbackEnabled, setFallbackEnabled] = useState<boolean>(agent?.fallbackEnabled ?? template?.fallbackEnabled ?? false)
   const [schedule, setSchedule] = useState(agent?.schedule || template?.schedule || '')
   const [enabled, setEnabled] = useState<boolean>(agent ? agent.enabled : true)
+  const [boostable, setBoostable] = useState<boolean>(agent ? (agent.boostable ?? true) : true)
   const [prerequisiteCommand, setPrerequisiteCommand] = useState<string>(initialPrerequisite)
   const [saving, setSaving] = useState(false)
   const [improving, setImproving] = useState(false)
@@ -147,7 +149,7 @@ export function AgentEditor({
     if (!name.trim() || saving) return
     setSaving(true)
     try {
-      await onSave({ name, prompt: agentPrompt, skillIds: selectedSkills, docPaths: selectedDocPaths, model, schedule: schedule || null, enabled, provider, fallbackEnabled, prerequisiteCommand: prerequisiteCommand.trim() || null })
+      await onSave({ name, prompt: agentPrompt, skillIds: selectedSkills, docPaths: selectedDocPaths, model, schedule: schedule || null, enabled, boostable, provider, fallbackEnabled, prerequisiteCommand: prerequisiteCommand.trim() || null })
     } catch (err) {
       toast(err instanceof Error ? err.message : 'Failed to save agent', 'error')
     }
@@ -495,6 +497,21 @@ export function AgentEditor({
             <div className={`absolute top-0.5 w-4 h-4 rounded-full bg-white shadow-sm transition-all duration-150 ${enabled ? 'left-[18px]' : 'left-0.5'}`} />
           </div>
           <span className="text-xs text-text-secondary font-medium">Enabled</span>
+        </button>
+        <div className="w-px h-4 bg-border shrink-0" />
+        <button
+          type="button"
+          role="switch"
+          aria-checked={boostable}
+          onClick={() => setBoostable(!boostable)}
+          disabled={isSystemAgent}
+          className="flex items-center gap-2 cursor-pointer shrink-0 disabled:opacity-50 disabled:cursor-not-allowed"
+          title="When off, the orchestrator never picks this agent for catch-up boost fires — it only runs on its own schedule. Use for blog/social-post style agents."
+        >
+          <div className={`relative w-9 h-5 rounded-full transition-colors ${boostable ? 'bg-accent' : 'bg-bg-tertiary border border-border'}`}>
+            <div className={`absolute top-0.5 w-4 h-4 rounded-full bg-white shadow-sm transition-all duration-150 ${boostable ? 'left-[18px]' : 'left-0.5'}`} />
+          </div>
+          <span className="text-xs text-text-secondary font-medium">Boostable</span>
         </button>
       </div>
 

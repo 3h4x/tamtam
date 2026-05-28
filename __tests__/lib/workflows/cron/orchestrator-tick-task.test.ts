@@ -29,7 +29,7 @@ function makeDeps(overrides: Partial<OrchestratorTickDeps> = {}): OrchestratorTi
     loadConfig: vi.fn(async () => ({ marginPct: 5, maxBoostsPerHour: 2 })),
     loadBridge: vi.fn(async () => makeBridge()),
     loadAgents: vi.fn(async () => [
-      { id: 'a1', name: 'improve', project: 'borged', enabled: true, schedule: '15m', lastDispatchMs: null, kind: 'user' as const },
+      { id: 'a1', name: 'improve', project: 'borged', enabled: true, schedule: '15m', lastDispatchMs: null, kind: 'user' as const, boostable: true },
     ]),
     enqueueAgentFire: vi.fn(async () => {}),
     enqueueNextFire: vi.fn(async () => {}),

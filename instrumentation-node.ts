@@ -218,18 +218,28 @@ async function reapAbandonedInlineJobs(): Promise<void> {
     let reaped = 0;
     for (const job of orphaned) {
       if (job.kind === 'pr-wait' && job.contextMeta) {
+        let hasValidResumeMeta = false;
         try {
-          JSON.parse(job.contextMeta);
-          const { resumePrWait } = await import('@/lib/pipeline/start-pr-wait');
-          const r = resumePrWait(job.id);
-          if (r.ok) {
-            resumed += 1;
-            console.log(`[boot] resumed pr-wait ${job.id} (server restarted mid-run)`);
-            continue;
-          }
-          console.warn(`[boot] could not resume pr-wait ${job.id}: ${r.error} — reaping instead`);
+          const parsed = JSON.parse(job.contextMeta);
+          hasValidResumeMeta = typeof parsed?.prNumber === 'number'
+            && typeof parsed?.prRepo === 'string'
+            && typeof parsed?.prUrl === 'string';
         } catch (err) {
-          console.error(`[boot] resumePrWait threw for ${job.id}:`, err);
+          console.error(`[boot] pr-wait contextMeta parse failed for ${job.id}:`, err);
+        }
+        if (hasValidResumeMeta) {
+          try {
+            const { resumePrWait } = await import('@/lib/pipeline/start-pr-wait');
+            const r = resumePrWait(job.id);
+            if (r.ok) {
+              resumed += 1;
+              console.log(`[boot] resumed pr-wait ${job.id} (server restarted mid-run)`);
+              continue;
+            }
+            console.warn(`[boot] could not resume pr-wait ${job.id}: ${r.error} — reaping instead`);
+          } catch (err) {
+            console.error(`[boot] resumePrWait threw for ${job.id} — reaping instead:`, err);
+          }
         }
       }
       try {
@@ -930,6 +940,7 @@ export async function registerNode(): Promise<void> {
                 schedule: a.schedule ?? null,
                 lastDispatchMs: dispatches.get(a.id) ?? null,
                 kind: a.kind,
+                boostable: a.boostable,
               }));
             },
             enqueueAgentFire: async (agentId, runAt, modelOverride) => {

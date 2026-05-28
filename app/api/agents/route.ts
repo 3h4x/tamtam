@@ -191,6 +191,7 @@ export async function POST(request: NextRequest) {
     prompt: prompt || '',
     schedule: parsedSchedule,
     enabled: enabled !== false,
+    boostable: body.boostable !== false,
     provider,
     fallbackEnabled,
     prerequisiteCommand,
@@ -212,6 +213,7 @@ export async function POST(request: NextRequest) {
           schedule: agent.schedule,
           skillIds: skillIdsList,
           enabled: agent.enabled,
+          boostable: agent.boostable,
           provider: agent.provider,
           prerequisiteCommand: agent.prerequisiteCommand,
         });

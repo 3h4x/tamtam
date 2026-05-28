@@ -21,6 +21,7 @@ function makeAgent(overrides: Partial<BoostAgentInput> = {}): BoostAgentInput {
     schedule: '15m',
     lastDispatchMs: null,
     kind: 'user',
+    boostable: true,
     ...overrides,
   };
 }
@@ -96,6 +97,16 @@ describe('decideBoosts', () => {
       const r = decideBoosts(makeInput({ pace, projects: [makeProject({ status })] }));
       expect(r, `status=${status} should not boost`).toEqual([]);
     }
+  });
+
+  it('skips agents flagged boostable=false even when under pace', () => {
+    // A blog-writer style agent should fire only on its own schedule, never
+    // via a boost — even with maximum slack.
+    const r = decideBoosts(makeInput({
+      pace: { status: 'under_pace', marginPct: 40 },
+      agents: [makeAgent({ name: 'blog', boostable: false })],
+    }));
+    expect(r).toEqual([]);
   });
 
   it('widens to agent_running when severely under pace', () => {

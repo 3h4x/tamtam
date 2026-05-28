@@ -55,6 +55,7 @@ function makeFileAgent(name: string, project: string, overrides: { enabled?: boo
     prompt: '',
     schedule: null,
     enabled: overrides.enabled ?? true,
+    boostable: true,
     provider: null,
     prerequisiteCommand: null,
     kind: overrides.kind ?? 'user',

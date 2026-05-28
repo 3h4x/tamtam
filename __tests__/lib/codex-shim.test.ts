@@ -194,6 +194,41 @@ for (const event of events) console.log(JSON.stringify(event));
     expect(final.is_error).toBe(false);
   });
 
+  it('preserves repeated Codex output deltas', async () => {
+    const { behaviorPath } = await makeFakeCodex(`
+const events = [
+  { type: 'event_msg', payload: { type: 'response.output_text.delta', delta: 'ha' } },
+  { type: 'event_msg', payload: { type: 'response.output_text.delta', delta: 'ha' } },
+  { type: 'event_msg', payload: { type: 'output_text_delta', delta: '!' } },
+  { type: 'event_msg', payload: { type: 'token_count', info: { last_token_usage: { input_tokens: 10, output_tokens: 3 } } } },
+];
+for (const event of events) console.log(JSON.stringify(event));
+`);
+
+    const result = await runNode([
+      'scripts/codex-shim.js',
+      '--output-format',
+      'stream-json',
+      '--model',
+      'sonnet',
+    ], {
+      ...process.env,
+      CODEX_BIN: sharedFakeCodex,
+      FAKE_CODEX_SCRIPT: behaviorPath,
+    });
+
+    expect(result.code).toBe(0);
+    const lines = result.stdout.trim().split(/\r?\n/).map((line) => JSON.parse(line));
+    const text = lines
+      .filter((line) => line.type === 'stream_event' && line.event?.type === 'content_block_delta')
+      .map((line) => line.event.delta.text)
+      .join('');
+    const final = lines.find((line) => line.type === 'result');
+
+    expect(text).toBe('haha!');
+    expect(final.is_error).toBe(false);
+  });
+
   it('parses real Codex item.completed agent_message events', async () => {
     const sessionId = '019de81b-075a-7410-a6eb-0031655a589f';
     const { behaviorPath } = await makeFakeCodex(`
@@ -510,6 +545,50 @@ emit({ type: 'event_msg', payload: { type: 'token_count', info: { last_token_usa
     expect(text).toContain('retrying once');
     expect(text).toContain('recovered');
     expect(finals[0].duration_ms).toBeGreaterThanOrEqual(0);
+  });
+
+  it('retries once when codex exits 1 after output deltas with no stderr', async () => {
+    const { dir, behaviorPath } = await makeFakeCodex('');
+    const attemptFile = join(dir, 'attempt');
+    await writeFile(behaviorPath, `
+const fs = require('fs');
+const path = ${JSON.stringify(attemptFile)};
+let attempt = 0;
+try { attempt = parseInt(fs.readFileSync(path, 'utf8'), 10) || 0; } catch {}
+fs.writeFileSync(path, String(attempt + 1));
+const emit = (obj) => fs.writeSync(1, JSON.stringify(obj) + '\\n');
+if (attempt === 0) {
+  emit({ type: 'event_msg', payload: { type: 'response.output_text.delta', delta: 'pa' } });
+  emit({ type: 'event_msg', payload: { type: 'response.output_text.delta', delta: 'rtial' } });
+  process.exit(1);
+}
+emit({ type: 'event_msg', payload: { type: 'response.output_text.delta', delta: 'recovered' } });
+emit({ type: 'event_msg', payload: { type: 'token_count', info: { last_token_usage: { input_tokens: 5, output_tokens: 2, cached_input_tokens: 1 } } } });
+`);
+
+    const result = await runNode([
+      'scripts/codex-shim.js',
+      '--output-format',
+      'stream-json',
+      '--model',
+      'sonnet',
+    ], {
+      ...process.env,
+      CODEX_BIN: sharedFakeCodex,
+      FAKE_CODEX_SCRIPT: behaviorPath,
+    });
+
+    expect(parseInt(await readFile(attemptFile, 'utf8'), 10)).toBe(2);
+    expect(result.code).toBe(0);
+    const lines = result.stdout.trim().split(/\r?\n/).map((l) => JSON.parse(l));
+    const text = lines
+      .filter((l) => l.type === 'stream_event' && l.event?.type === 'content_block_delta')
+      .map((l) => l.event.delta.text)
+      .join('');
+
+    expect(text).toContain('partial');
+    expect(text).toContain('retrying once');
+    expect(text).toContain('recovered');
   });
 
   it('does not retry when codex exits 1 with stderr (real failure)', async () => {

@@ -228,6 +228,7 @@ async function applyDdl(handle: TestDbHandle): Promise<void> {
       prompt text NOT NULL DEFAULT '',
       schedule text,
       enabled boolean NOT NULL DEFAULT true,
+      boostable boolean NOT NULL DEFAULT true,
       provider text,
       fallback_enabled boolean NOT NULL DEFAULT false,
       prerequisite_command text,
@@ -1841,6 +1842,23 @@ File-backed prompt.`);
       expect(data.code).toBe('awaiting_pr_merge');
       expect(data.detail).toMatch(/pr-wait in flight/);
       expect(mocks.startJob).not.toHaveBeenCalled();
+    });
+
+    it('allows scheduled fires when the only pr-wait job for the project is finished', async () => {
+      mocks.listJobs.mockReset().mockReturnValue([
+        { id: 'proj1-pr-wait-1', project: 'proj1', kind: 'pr-wait', finishedAt: Date.now() / 1000 },
+      ]);
+      await insertAgent({ schedule: '1h' });
+      const req = new NextRequest('http://localhost/api/agents/agent-123/run', {
+        method: 'POST',
+        headers: { 'x-tamtam-trigger': 'schedule' },
+        body: JSON.stringify({ prompt: 'do task' }),
+      });
+
+      const res = await POST(req, { params: Promise.resolve({ agentId: 'agent-123' }) });
+
+      expect(res.status).toBe(200);
+      expect(mocks.startJob).toHaveBeenCalledOnce();
     });
 
     it('still allows manual (non-schedule) runs even when pr-wait is in flight', async () => {

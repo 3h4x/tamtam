@@ -388,6 +388,7 @@ async function runSystemAgentStart(
     prompt: agent.prompt ?? '',
     enabled: agent.enabled,
     kind: 'system',
+    boostable: true,
   });
   return {
     response: NextResponse.json({

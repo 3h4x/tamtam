@@ -18,6 +18,7 @@ export interface FileAgent {
   prompt: string;
   schedule: string | null;
   enabled: boolean;
+  boostable: boolean;
   provider: string | null;
   prerequisiteCommand: string | null;
   kind: string;
@@ -33,12 +34,13 @@ export interface FileAgentUpdates {
   schedule?: string | null;
   skillIds?: string[];
   enabled?: boolean;
+  boostable?: boolean;
   provider?: string | null;
   prerequisiteCommand?: string | null;
 }
 
 // Canonical frontmatter key order for serialization
-const FM_KEY_ORDER = ['provider', 'model', 'schedule', 'skillIds', 'enabled', 'prerequisiteCommand'] as const;
+const FM_KEY_ORDER = ['provider', 'model', 'schedule', 'skillIds', 'enabled', 'boostable', 'prerequisiteCommand'] as const;
 
 function normalizeFileAgentProvider(value: string | null | undefined): string | null {
   if (typeof value !== 'string') return null;
@@ -127,6 +129,10 @@ function buildFileAgent(
       override?.enabled !== undefined
         ? override.enabled
         : meta.enabled !== 'false',
+    boostable:
+      override?.boostable !== undefined
+        ? override.boostable
+        : meta.boostable !== 'false',
     provider: normalizeFileAgentProvider(meta.provider),
     prerequisiteCommand: parsePrerequisiteCommand(meta.prerequisiteCommand),
     kind: 'user',
@@ -143,6 +149,7 @@ function serializeAgent(
   schedule: string | null,
   skillIds: string[],
   enabled: boolean,
+  boostable: boolean,
   prompt: string,
   prerequisiteCommand: string | null
 ): string {
@@ -159,6 +166,8 @@ function serializeAgent(
       fmLines.push(`skillIds: ${JSON.stringify(skillIds)}`);
     } else if (key === 'enabled' && !enabled) {
       fmLines.push(`enabled: false`);
+    } else if (key === 'boostable' && !boostable) {
+      fmLines.push(`boostable: false`);
     } else if (key === 'prerequisiteCommand' && prerequisiteCommand !== null) {
       fmLines.push(`prerequisiteCommand: ${JSON.stringify(prerequisiteCommand)}`);
     }
@@ -284,6 +293,7 @@ export function writeFileAgent(
   if (scheduleError) throw new Error(scheduleError);
   const skillIds = updates.skillIds ?? current?.skillIds ?? [];
   const enabled = updates.enabled !== undefined ? updates.enabled : (current?.enabled ?? true);
+  const boostable = updates.boostable !== undefined ? updates.boostable : (current?.boostable ?? true);
   const provider = updates.provider !== undefined
     ? normalizeFileAgentProvider(updates.provider)
     : (current?.provider ?? null);
@@ -292,7 +302,7 @@ export function writeFileAgent(
     ? (normalizeStoredPrerequisiteCommand(updates.prerequisiteCommand) ?? null)
     : (current?.prerequisiteCommand ?? null);
 
-  const content = serializeAgent(provider, model, schedule, skillIds, enabled, prompt, prerequisiteCommand);
+  const content = serializeAgent(provider, model, schedule, skillIds, enabled, boostable, prompt, prerequisiteCommand);
   writeFileSync(/*turbopackIgnore: true*/ filePath, content);
 
   return buildFileAgent(filePath, canonicalAgentName, projectName, content, Date.now() / 1000);

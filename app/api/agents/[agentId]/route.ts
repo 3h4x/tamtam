@@ -76,12 +76,14 @@ export async function PATCH(
       // file (the agent's "identity"); everything else is per-environment.
       if (
         body.enabled !== undefined ||
+        body.boostable !== undefined ||
         body.schedule !== undefined ||
         body.model !== undefined ||
         body.skillIds !== undefined
       ) {
         await setFileAgentOverride(parsedFile.project, parsedFile.name, {
           enabled: body.enabled,
+          boostable: body.boostable,
           schedule: body.schedule !== undefined ? parsedSchedule.schedule : undefined,
           model: parsedModel ?? undefined,
           skillIds: body.skillIds,
@@ -149,6 +151,7 @@ export async function PATCH(
   if (!isSystemAgent && body.prompt !== undefined) updates.prompt = body.prompt;
   if (!isSystemAgent && body.schedule !== undefined) updates.schedule = parsedSchedule.schedule;
   if (body.enabled !== undefined) updates.enabled = body.enabled;
+  if (!isSystemAgent && body.boostable !== undefined) updates.boostable = body.boostable;
   if (!isSystemAgent && provider !== undefined) updates.provider = provider;
   if (!isSystemAgent && body.fallbackEnabled !== undefined) updates.fallbackEnabled = body.fallbackEnabled === true;
   if (!isSystemAgent && body.prerequisiteCommand !== undefined) {
@@ -182,6 +185,7 @@ export async function PATCH(
           schedule: agent.schedule,
           skillIds,
           enabled: agent.enabled,
+          boostable: agent.boostable,
           provider: agent.provider,
           prerequisiteCommand: agent.prerequisiteCommand,
         });

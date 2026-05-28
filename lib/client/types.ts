@@ -273,6 +273,9 @@ export interface Agent {
   prompt: string
   schedule: string | null
   enabled: boolean
+  /** When false, the orchestrator skips this agent for *boost* fires — it
+   *  still runs on its own `schedule`. Default true. */
+  boostable?: boolean
   provider?: string | null
   fallbackEnabled?: boolean
   prerequisiteCommand?: string | null
