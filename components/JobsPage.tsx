@@ -6,6 +6,7 @@ import { fetchJobs, fetchProjects } from '@/lib/client-api'
 import type { JobInfo } from '@/lib/client-api'
 import { resolveGithubBoardUrl } from '@/lib/client/resolve-github-board-url'
 import { buttonVariants } from '@/components/ui/Button'
+import { PillButton, type PillTone } from '@/components/ui/Pill'
 import {
   buildEntries,
   groupReleaseChildren,
@@ -36,6 +37,13 @@ type Filter =
 
 function filterKey(f: Filter): string {
   return f.kind === 'bucket' ? `b:${f.bucket}` : f.kind
+}
+
+function statusFilterHoverClass(tone: PillTone): string {
+  if (tone === 'info') return 'hover:text-status-info'
+  if (tone === 'error') return 'hover:text-status-error'
+  if (tone === 'success') return 'hover:text-status-success'
+  return 'hover:text-text-primary'
 }
 
 function renderChain(node: Entry, depth: number, navigate: (e: Entry) => void): React.ReactNode {
@@ -297,8 +305,8 @@ export function JobsPage() {
       </div>
 
       <div className="flex items-center gap-1.5 overflow-x-auto mb-3 pb-0.5 scrollbar-thin scrollbar-thumb-border scrollbar-track-transparent" style={{ scrollbarWidth: 'thin' }}>
-          {([
-          { f: { kind: 'all' } as Filter, label: 'all', tone: 'neutral' },
+        {([
+          { f: { kind: 'all' } as Filter, label: 'all', tone: 'accent' },
           { f: { kind: 'running' } as Filter, label: 'running', tone: 'info' },
           { f: { kind: 'failed' } as Filter, label: 'failed', tone: 'error' },
           { f: { kind: 'done' } as Filter, label: 'done', tone: 'success' },
@@ -306,19 +314,17 @@ export function JobsPage() {
           const count = loadedCounts[f.kind] ?? 0
           if ((f.kind === 'running' || f.kind === 'failed') && count === 0 && filterKey(filter) !== filterKey(f)) return null
           const active = filterKey(filter) === filterKey(f)
-          const toneCls =
-            tone === 'info' ? (active ? 'border-status-info bg-status-info/15 text-status-info' : 'border-border bg-bg-secondary text-text-secondary hover:text-status-info') :
-            tone === 'error' ? (active ? 'border-status-error bg-status-error/15 text-status-error' : 'border-border bg-bg-secondary text-text-secondary hover:text-status-error') :
-            tone === 'success' ? (active ? 'border-status-success bg-status-success/15 text-status-success' : 'border-border bg-bg-secondary text-text-secondary hover:text-status-success') :
-            (active ? 'border-accent bg-accent/15 text-accent' : 'border-border bg-bg-secondary text-text-secondary hover:text-text-primary')
           return (
-            <button
+            <PillButton
               key={label}
-              className={`shrink-0 px-2.5 py-1 text-xs rounded-full font-mono cursor-pointer border ${toneCls}`}
+              tone={tone}
+              active={active}
+              inactiveStyle="subtle"
+              className={`shrink-0 rounded-full font-mono ${active ? '' : statusFilterHoverClass(tone)}`}
               onClick={() => setFilter(f)}
             >
               {label} <span className="opacity-70">{count}</span>
-            </button>
+            </PillButton>
           )
         })}
         <span className="shrink-0 h-5 w-px bg-border mx-1" aria-hidden />
@@ -327,17 +333,16 @@ export function JobsPage() {
           const active = filter.kind === 'bucket' && filter.bucket === b
           if (count === 0 && !active) return null
           return (
-            <button
+            <PillButton
               key={b}
-              className={`shrink-0 px-2.5 py-1 text-xs rounded-full font-mono cursor-pointer border ${
-                active
-                  ? 'border-accent bg-accent/15 text-accent'
-                  : 'border-border bg-bg-secondary text-text-secondary hover:text-text-primary'
-              }`}
+              tone="accent"
+              active={active}
+              inactiveStyle="subtle"
+              className="shrink-0 rounded-full font-mono"
               onClick={() => setFilter({ kind: 'bucket', bucket: b })}
             >
               {KIND_LABEL[b]} <span className="opacity-70">{count}</span>
-            </button>
+            </PillButton>
           )
         })}
       </div>
