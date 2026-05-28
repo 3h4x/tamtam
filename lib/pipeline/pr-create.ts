@@ -21,8 +21,8 @@ function normalizeExecResult(result: ExecLikeResult) {
 function extractCreatedPrUrl(stdout: string): string | null {
   const matches = stdout.match(/https:\/\/github\.com\/[^/\s]+\/[^/\s]+\/pull\/\d+/g);
   if (matches && matches.length > 0) return matches[matches.length - 1];
-  // Fallback: a line that begins with https:// — covers older gh behavior
-  // and the existing test mocks that don't emit a full /pull/N URL pattern.
+  // Fallback: a line that begins with https:// covers older gh behavior that
+  // may not include a github.com/.../pull/N URL.
   const fallback = stdout.trim().split('\n').find((l) => l.startsWith('https://'));
   return fallback ?? null;
 }
