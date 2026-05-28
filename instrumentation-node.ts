@@ -219,6 +219,7 @@ async function reapAbandonedInlineJobs(): Promise<void> {
     for (const job of orphaned) {
       if (job.kind === 'pr-wait' && job.contextMeta) {
         try {
+          JSON.parse(job.contextMeta);
           const { resumePrWait } = await import('@/lib/pipeline/start-pr-wait');
           const r = resumePrWait(job.id);
           if (r.ok) {
