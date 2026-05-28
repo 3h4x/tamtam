@@ -595,13 +595,15 @@ export function ConfigTab({
                     }}
                     title="Button color"
                   />
-                  <button
-                    className="flex items-center justify-center h-8 w-8 text-text-tertiary hover:text-status-error hover:bg-status-error/10 rounded-md cursor-pointer transition-colors"
+                  <Button
+                    type="button"
+                    variant="danger"
+                    size="icon-sm"
                     onClick={() => setEditActions(editActions.filter((_, j) => j !== i))}
                     title="Remove"
                   >
                     &times;
-                  </button>
+                  </Button>
                 </div>
               ))}
             </div>
