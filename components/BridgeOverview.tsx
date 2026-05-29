@@ -34,7 +34,7 @@ const STATUS_META: Record<BridgeProjectStatus, { dot: string; tone: string; labe
   releasing: { dot: 'bg-status-warning animate-pulse', tone: 'text-status-warning', label: 'releasing' },
   stuck: { dot: 'bg-status-error animate-pulse', tone: 'text-status-error', label: 'stuck' },
   error: { dot: 'bg-status-error', tone: 'text-status-error', label: 'error' },
-  attention: { dot: 'bg-status-warning', tone: 'text-status-warning', label: 'needs attention' },
+  attention: { dot: 'bg-status-error', tone: 'text-status-error', label: 'needs attention' },
   paused: { dot: 'bg-text-tertiary', tone: 'text-text-tertiary', label: 'paused' },
   idle: { dot: 'bg-text-tertiary/50', tone: 'text-text-tertiary', label: 'idle' },
 }
@@ -159,7 +159,28 @@ export function BridgeOverview() {
         </div>
       )}
 
-      {/* Row 3 — project shipping chips */}
+      {/* Row 3a — "needs attention" projects, surfaced prominently so the
+          eye lands on them first. Only renders when at least one project is
+          stuck / errored / flagged for attention; the "all projects" strip
+          below still includes them for completeness. */}
+      {(() => {
+        const attention = data.projects.filter(
+          (p) => p.status === 'attention' || p.status === 'stuck' || p.status === 'error',
+        )
+        if (attention.length === 0) return null
+        return (
+          <div className="flex items-center gap-2 flex-wrap rounded-md border border-status-error/40 bg-status-error/[0.06] px-2 py-1.5">
+            <span className="text-[10px] uppercase tracking-wider font-mono text-status-error font-semibold">
+              needs attention
+            </span>
+            {attention.map((p) => (
+              <ProjectChip key={`att-${p.project}`} p={p} />
+            ))}
+          </div>
+        )
+      })()}
+
+      {/* Row 3b — all project shipping chips */}
       {data.projects.length > 0 ? (
         <div className="flex items-center gap-1.5 flex-wrap">
           {data.projects.map((p) => (

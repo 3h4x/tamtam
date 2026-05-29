@@ -64,6 +64,7 @@ function renderTerminalMessages(history: TermEntry[]) {
       elapsedMs: 0,
       idleSec: 0,
       spinnerFrame: 0,
+      runMeta: null,
       autoScroll: true,
       allItems: [],
       onScroll: () => {},

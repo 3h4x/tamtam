@@ -152,6 +152,50 @@ export function TerminalTab({ projectName, initialSessionId }: TerminalTabProps)
   const [idleSec, setIdleSec] = useState(0)
   const lastActivityRef = useRef<number>(Date.now())
 
+  // What is *actually* running right now. The LIVE RUN block in
+  // TerminalMessages renders the kind / provider / model from here so a
+  // user landing on the page sees more than a spinner + "receiving output".
+  const [runMeta, setRunMeta] = useState<{
+    kind: string
+    provider: string | null
+    model: string | null
+    agentName: string | null
+    releaseId: string | null
+  } | null>(null)
+  useEffect(() => {
+    if (!streaming || !currentJobId) { setRunMeta(null); return }
+    setRunMeta(null)
+    let cancelled = false
+    ;(async () => {
+      try {
+        const r = await fetch(`/api/jobs/${encodeURIComponent(currentJobId)}`)
+        if (!r.ok) {
+          if (!cancelled) setRunMeta(null)
+          return
+        }
+        const d = await r.json()
+        if (cancelled) return
+        let agentName: string | null = null
+        if (typeof d.context_meta === 'string' && d.context_meta) {
+          try {
+            const meta = JSON.parse(d.context_meta) as { agent?: { name?: string } }
+            agentName = meta?.agent?.name ?? null
+          } catch { /* ignore malformed meta */ }
+        }
+        setRunMeta({
+          kind: d.kind ?? '',
+          provider: d.provider ?? null,
+          model: d.model ?? null,
+          agentName,
+          releaseId: d.release_id ?? null,
+        })
+      } catch {
+        if (!cancelled) setRunMeta(null)
+      }
+    })()
+    return () => { cancelled = true }
+  }, [streaming, currentJobId])
+
   // Skills catalog
   const [allItems, setAllItems] = useState<SkillItem[]>([])
   const [skillSearch, setSkillSearch] = useState('')
@@ -610,6 +654,7 @@ export function TerminalTab({ projectName, initialSessionId }: TerminalTabProps)
           elapsedMs={elapsedMs}
           idleSec={idleSec}
           spinnerFrame={spinnerFrame}
+          runMeta={runMeta}
           autoScroll={autoScroll}
           allItems={allItems}
           onScroll={handleScroll}
