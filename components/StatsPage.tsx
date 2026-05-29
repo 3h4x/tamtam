@@ -104,7 +104,7 @@ export function StatsPage() {
   const [ollama, setOllama] = useState<OllamaStatsResponse | null>(null)
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
-  const [window_, setWindow] = useState<Window>('24h')
+  const [window_, setWindow] = useState<Window>('30d')
   const [sortKey, setSortKey] = useState<SortKey>('costUsd')
   const [sortDir, setSortDir] = useState<'asc' | 'desc'>('desc')
   const [warnAt, setWarnAt] = useState(80)
