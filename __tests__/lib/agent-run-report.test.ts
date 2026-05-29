@@ -41,7 +41,11 @@ describe('finalizeAgentRunReport', () => {
 
   beforeEach(() => {
     vi.resetModules();
-    execMock = vi.fn();
+    // Default: empty success. Tests that need specific stdout use
+    // `.mockResolvedValueOnce(...)`; subsequent calls (numstat) fall back
+    // to this empty result so the worktree-delta path doesn't crash on
+    // undefined when a test only stubs the first two execs.
+    execMock = vi.fn().mockResolvedValue({ exitCode: 0, stdout: '', stderr: '' });
     upsertRecommendationMock = vi.fn();
     resolveProjectPathMock = vi.fn().mockReturnValue('/repo');
     ingestAgentRunMock = vi.fn().mockResolvedValue({ contentHash: 'hash-1', skipped: false, stored: true });
@@ -66,9 +70,15 @@ describe('finalizeAgentRunReport', () => {
     vi.doMock('@/lib/agents/retrieval/ingestion', () => ({ ingestAgentRun: ingestAgentRunMock }));
     vi.doMock('@/lib/db', () => ({
       db: {
+        // Two consumers: retrieval (`select().from().where().limit()`) and
+        // fruitfulness (`select(cols).from().where().orderBy().limit()`).
+        // The `where` builder also has to expose `orderBy` for the second.
         select: vi.fn().mockReturnValue({
           from: vi.fn().mockReturnValue({
-            where: vi.fn().mockReturnValue({ limit: vi.fn().mockResolvedValue([]) }),
+            where: vi.fn().mockReturnValue({
+              limit: vi.fn().mockResolvedValue([]),
+              orderBy: vi.fn().mockReturnValue({ limit: vi.fn().mockResolvedValue([]) }),
+            }),
           }),
         }),
         insert: vi.fn().mockReturnValue({
@@ -77,7 +87,21 @@ describe('finalizeAgentRunReport', () => {
           }),
         }),
       },
-      schema: { retrievalRecords: { id: 'id' } },
+      schema: {
+        retrievalRecords: { id: 'id' },
+        jobs: {
+          id: 'id',
+          kind: 'kind',
+          project: 'project',
+          startedAt: 'started_at',
+          exitCode: 'exit_code',
+          finishedAt: 'finished_at',
+          modifiedFiles: 'modified_files',
+          linesAdded: 'lines_added',
+          linesRemoved: 'lines_removed',
+          contextMeta: 'context_meta',
+        },
+      },
     }));
   });
 
@@ -95,6 +119,44 @@ describe('finalizeAgentRunReport', () => {
       { path: 'src/lib/foo.ts', status: 'M', confidence: 'high' },
     ]);
     expect(upsertRecommendationMock).not.toHaveBeenCalled();
+  });
+
+  it('captures LOC delta from git diff --numstat for both committed and uncommitted change', async () => {
+    // Call order (worktreeDelta fires all four in one Promise.all):
+    //   1. git diff --name-status BASE..HEAD
+    //   2. git diff --numstat     BASE..HEAD
+    //   3. git status --porcelain
+    //   4. git diff --numstat     HEAD       (uncommitted)
+    execMock
+      .mockResolvedValueOnce({ exitCode: 0, stdout: 'M\tsrc/foo.ts\n', stderr: '' })
+      .mockResolvedValueOnce({ exitCode: 0, stdout: '10\t3\tsrc/foo.ts\n', stderr: '' })
+      .mockResolvedValueOnce({ exitCode: 0, stdout: ' M src/bar.ts\n', stderr: '' })
+      .mockResolvedValueOnce({ exitCode: 0, stdout: '2\t1\tsrc/bar.ts\n', stderr: '' });
+    const { finalizeAgentRunReport } = await import('@/lib/agents/agent-run-report');
+    const job = makeJob();
+
+    await finalizeAgentRunReport(job, log('TamTam Run Report\nSummary: Edited two files.\nFiles changed: src/foo.ts, src/bar.ts\nActionable work: yes\n'));
+
+    // Both committed (10/3) and uncommitted (2/1) deltas sum together.
+    expect(job.linesAdded).toBe(12);
+    expect(job.linesRemoved).toBe(4);
+  });
+
+  it('treats binary file deltas (`-` in numstat) as zero LOC', async () => {
+    execMock
+      .mockResolvedValueOnce({ exitCode: 0, stdout: 'M\tsrc/img.png\n', stderr: '' })
+      .mockResolvedValueOnce({ exitCode: 0, stdout: '-\t-\tsrc/img.png\n', stderr: '' })
+      .mockResolvedValueOnce({ exitCode: 0, stdout: '', stderr: '' })
+      .mockResolvedValueOnce({ exitCode: 0, stdout: '', stderr: '' });
+    const { finalizeAgentRunReport } = await import('@/lib/agents/agent-run-report');
+    const job = makeJob();
+
+    await finalizeAgentRunReport(job, log('TamTam Run Report\nSummary: Updated an asset.\nFiles changed: src/img.png\nActionable work: yes\n'));
+
+    expect(job.linesAdded).toBe(0);
+    expect(job.linesRemoved).toBe(0);
+    // Still recorded the file change — fruitfulness considers either signal.
+    expect(JSON.parse(job.modifiedFiles ?? '[]')).toHaveLength(1);
   });
 
   it('creates a schedule recommendation for successful no-op runs', async () => {
@@ -176,7 +238,32 @@ describe('finalizeAgentRunReport', () => {
     expect(JSON.parse(job.modifiedFiles ?? '[]')).toEqual([
       { path: 'src/lib/foo.ts', status: 'M', confidence: 'low' },
     ]);
+    expect(job.linesAdded).toBe(0);
+    expect(job.linesRemoved).toBe(0);
     expect(upsertRecommendationMock).not.toHaveBeenCalled();
+  });
+
+  it('does not attribute pre-existing dirty-baseline LOC to the agent', async () => {
+    execMock
+      .mockResolvedValueOnce({ exitCode: 0, stdout: '', stderr: '' })
+      .mockResolvedValueOnce({ exitCode: 0, stdout: '7\t2\tsrc/lib/pre-existing-commit.ts\n', stderr: '' })
+      .mockResolvedValueOnce({ exitCode: 0, stdout: ' M src/lib/pre-existing.ts\n', stderr: '' })
+      .mockResolvedValueOnce({ exitCode: 0, stdout: '99\t12\tsrc/lib/pre-existing.ts\n', stderr: '' });
+    const { finalizeAgentRunReport } = await import('@/lib/agents/agent-run-report');
+    const job = makeJob({
+      contextMeta: JSON.stringify({
+        agent: { id: 'agent-1', name: 'tests', schedule: '2h', triggeredBy: 'schedule' },
+        baseline: { head: 'abc123', status: ' M src/lib/pre-existing.ts\n', dirty: true },
+      }),
+    });
+
+    await finalizeAgentRunReport(job, log('TamTam Run Report\nSummary: No changes made.\nFiles changed: none\nActionable work: no\n'));
+
+    expect(JSON.parse(job.modifiedFiles ?? '[]')).toEqual([
+      { path: 'src/lib/pre-existing.ts', status: 'M', confidence: 'low' },
+    ]);
+    expect(job.linesAdded).toBe(0);
+    expect(job.linesRemoved).toBe(0);
   });
 
   it('does not recommend schedule changes for failed runs', async () => {

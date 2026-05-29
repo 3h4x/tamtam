@@ -44,6 +44,8 @@ async function applyDdl(handle: TestDbHandle): Promise<void> {
       prompt_bytes integer,
       work_summary text,
       modified_files text,
+      lines_added integer,
+      lines_removed integer,
       provider text
     )
   `));
@@ -171,9 +173,12 @@ function toCachedJob(row: JobInsert): JobData {
     model: row.model ?? null,
     releaseId: row.releaseId ?? null,
     abortedAt: row.abortedAt ?? null,
+    releaseDeadlineAt: row.releaseDeadlineAt ?? null,
     promptBytes: row.promptBytes ?? null,
     workSummary: row.workSummary ?? null,
     modifiedFiles: row.modifiedFiles ?? null,
+    linesAdded: row.linesAdded ?? null,
+    linesRemoved: row.linesRemoved ?? null,
     provider: row.provider ?? null,
   };
 }
@@ -1638,6 +1643,7 @@ describe('runCompletionHooks – release-after-run', () => {
   const getProjectTestConfigMock = vi.fn();
   const setPendingReleaseMock = vi.fn();
   const shouldKeepPendingReleaseMock = vi.fn();
+  const execMock = vi.fn();
   let markDoneFn: typeof import('@/lib/jobs/job-storage').markDone;
   let storageCache: Map<string, JobData>;
   let resetVerdictCache: () => void;
@@ -1678,6 +1684,7 @@ describe('runCompletionHooks – release-after-run', () => {
     );
     setPendingReleaseMock.mockReset();
     shouldKeepPendingReleaseMock.mockReset().mockReturnValue(false);
+    execMock.mockReset().mockResolvedValue({ exitCode: 0, stdout: '', stderr: '' });
   }
 
   // Slow path: only the 2 tests that exercise a different module-load shape
@@ -1699,7 +1706,7 @@ describe('runCompletionHooks – release-after-run', () => {
 
     vi.doMock('@/lib/db', () => ({ db: sharedHandle.db, schema }));
     vi.doMock('@/lib/shared/shell', () => ({
-      exec: vi.fn().mockResolvedValue({ exitCode: 0, stdout: '', stderr: '' }),
+      exec: execMock,
     }));
     vi.doMock('@/lib/git/git-utils', () => ({
       markReviewed: vi.fn().mockResolvedValue(undefined),
@@ -1792,13 +1799,38 @@ describe('runCompletionHooks – release-after-run', () => {
     });
   });
 
-  it('triggers startRelease after agent:x job finishes with exit 0 when releaseAfterRun=true', async () => {
+  it('skips startRelease after agent:x when finalize left no changed files (idle-cycle)', async () => {
+    // markDone runs finalizeAgentRunReport before the release-after-run
+    // hook, which reads the worktree via the mocked git exec. With the
+    // default empty-stdout mock the agent has produced nothing, and the
+    // new shippable-change gate must skip the release dispatch. Without
+    // this gate the legacy behavior fired an empty release every cycle.
     const job = makeJob('agent:my-agent');
     await markDoneFn(job, 0);
-    expect(startReleaseMock).toHaveBeenCalledWith('my-proj', {
-      queueIfBlocked: true,
-      sourceJobId: job.id,
+    expect(startReleaseMock).not.toHaveBeenCalled();
+  });
+
+  it('skips startRelease after agent:x when finalize only saw dirty-baseline files', async () => {
+    execMock
+      .mockResolvedValueOnce({ exitCode: 0, stdout: '', stderr: '' })
+      .mockResolvedValueOnce({ exitCode: 0, stdout: '13\t4\tsrc/pre-existing-commit.ts\n', stderr: '' })
+      .mockResolvedValueOnce({ exitCode: 0, stdout: ' M src/pre-existing.ts\n', stderr: '' })
+      .mockResolvedValueOnce({ exitCode: 0, stdout: '99\t12\tsrc/pre-existing.ts\n', stderr: '' });
+    const job = makeJob('agent:my-agent', {
+      contextMeta: JSON.stringify({
+        agent: { id: 'agent-1', name: 'my-agent', schedule: '15m', triggeredBy: 'schedule' },
+        baseline: { head: 'abc123', dirty: true, status: ' M src/pre-existing.ts\n' },
+      }),
     });
+
+    await markDoneFn(job, 0);
+
+    expect(job.modifiedFiles).toBe(JSON.stringify([
+      { path: 'src/pre-existing.ts', status: 'M', confidence: 'low' },
+    ]));
+    expect(job.linesAdded).toBe(0);
+    expect(job.linesRemoved).toBe(0);
+    expect(startReleaseMock).not.toHaveBeenCalled();
   });
 
   it('triggers startRelease after fix-ci job finishes with exit 0', async () => {

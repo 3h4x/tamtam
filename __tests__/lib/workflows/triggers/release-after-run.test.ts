@@ -148,4 +148,122 @@ describe('dispatchReleaseAfterRun', () => {
     expect(out.dispatched).toBe(false);
     expect(setPendingRelease).not.toHaveBeenCalled();
   });
+
+  describe('shippable-change gate', () => {
+    // After an agent finishes, finalizeAgentRunReport stamps modifiedFiles
+    // + linesAdded/linesRemoved on the job row BEFORE the completion hook
+    // fires dispatchReleaseAfterRun. The gate reads those fields directly
+    // — no git re-read, no error-string match — and skips dispatching a
+    // release when the agent produced nothing this cycle.
+    it('skips dispatch when an agent run has no files and zero LOC', async () => {
+      const { dispatchReleaseWorkflow } = mockDeps({ releaseAfterRun: true });
+      const { dispatchReleaseAfterRun } = await import('@/lib/workflows/triggers/release-after-run');
+      const out = await dispatchReleaseAfterRun(baseJob({
+        kind: 'agent:improve',
+        modifiedFiles: '[]',
+        linesAdded: 0,
+        linesRemoved: 0,
+      }));
+      expect(out.dispatched).toBe(false);
+      expect(out.reason).toMatch(/no changed files or LOC/);
+      expect(dispatchReleaseWorkflow).not.toHaveBeenCalled();
+    });
+
+    it('skips dispatch when modifiedFiles is null (no metadata) and LOC is 0', async () => {
+      const { dispatchReleaseWorkflow } = mockDeps({ releaseAfterRun: true });
+      const { dispatchReleaseAfterRun } = await import('@/lib/workflows/triggers/release-after-run');
+      const out = await dispatchReleaseAfterRun(baseJob({
+        kind: 'agent:improve',
+        modifiedFiles: null,
+        linesAdded: null,
+        linesRemoved: null,
+      }));
+      expect(out.dispatched).toBe(false);
+      expect(dispatchReleaseWorkflow).not.toHaveBeenCalled();
+    });
+
+    it('dispatches when the agent changed at least one file', async () => {
+      const { dispatchReleaseWorkflow } = mockDeps({ releaseAfterRun: true });
+      const { dispatchReleaseAfterRun } = await import('@/lib/workflows/triggers/release-after-run');
+      const out = await dispatchReleaseAfterRun(baseJob({
+        kind: 'agent:improve',
+        modifiedFiles: JSON.stringify([{ path: 'a.ts', status: 'M' }]),
+        linesAdded: 0,
+        linesRemoved: 0,
+      }));
+      expect(out.dispatched).toBe(true);
+      expect(dispatchReleaseWorkflow).toHaveBeenCalled();
+    });
+
+    it('skips dispatch when only low-confidence dirty-baseline files are present', async () => {
+      const { dispatchReleaseWorkflow } = mockDeps({ releaseAfterRun: true });
+      const { dispatchReleaseAfterRun } = await import('@/lib/workflows/triggers/release-after-run');
+      const out = await dispatchReleaseAfterRun(baseJob({
+        kind: 'agent:improve',
+        modifiedFiles: JSON.stringify([{ path: 'pre-existing.ts', status: 'M', confidence: 'low' }]),
+        linesAdded: 0,
+        linesRemoved: 0,
+      }));
+      expect(out.dispatched).toBe(false);
+      expect(out.reason).toMatch(/no changed files or LOC/);
+      expect(dispatchReleaseWorkflow).not.toHaveBeenCalled();
+    });
+
+    it('dispatches when the agent moved LOC even without a parseable file list (binary rename edge)', async () => {
+      const { dispatchReleaseWorkflow } = mockDeps({ releaseAfterRun: true });
+      const { dispatchReleaseAfterRun } = await import('@/lib/workflows/triggers/release-after-run');
+      const out = await dispatchReleaseAfterRun(baseJob({
+        kind: 'agent:improve',
+        modifiedFiles: '[]',
+        linesAdded: 5,
+        linesRemoved: 2,
+      }));
+      expect(out.dispatched).toBe(true);
+      expect(dispatchReleaseWorkflow).toHaveBeenCalled();
+    });
+
+    it('treats malformed modifiedFiles JSON as "no change" — fail closed', async () => {
+      const { dispatchReleaseWorkflow } = mockDeps({ releaseAfterRun: true });
+      const { dispatchReleaseAfterRun } = await import('@/lib/workflows/triggers/release-after-run');
+      const out = await dispatchReleaseAfterRun(baseJob({
+        kind: 'agent:improve',
+        modifiedFiles: 'not-json',
+        linesAdded: 0,
+        linesRemoved: 0,
+      }));
+      expect(out.dispatched).toBe(false);
+      expect(dispatchReleaseWorkflow).not.toHaveBeenCalled();
+    });
+
+    it('exempts issue-cruncher even when modifiedFiles is empty', async () => {
+      // Issue work may have committed branch work with no working-tree
+      // delta at finalize time; the release pipeline still needs to fire
+      // to open/update the PR.
+      const { dispatchReleaseWorkflow } = mockDeps({ releaseAfterRun: true });
+      const { dispatchReleaseAfterRun } = await import('@/lib/workflows/triggers/release-after-run');
+      const out = await dispatchReleaseAfterRun(baseJob({
+        kind: 'agent:issue-cruncher',
+        ghIssueNumber: 42,
+        modifiedFiles: '[]',
+        linesAdded: 0,
+        linesRemoved: 0,
+      }));
+      expect(out.dispatched).toBe(true);
+      expect(dispatchReleaseWorkflow).toHaveBeenCalled();
+    });
+
+    it('exempts issue-linked `run` jobs even when modifiedFiles is empty', async () => {
+      const { dispatchReleaseWorkflow } = mockDeps({ releaseAfterRun: true });
+      const { dispatchReleaseAfterRun } = await import('@/lib/workflows/triggers/release-after-run');
+      const out = await dispatchReleaseAfterRun(baseJob({
+        kind: 'run',
+        ghIssueNumber: 7,
+        modifiedFiles: '[]',
+        linesAdded: 0,
+        linesRemoved: 0,
+      }));
+      expect(out.dispatched).toBe(true);
+      expect(dispatchReleaseWorkflow).toHaveBeenCalled();
+    });
+  });
 });

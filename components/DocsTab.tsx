@@ -38,6 +38,16 @@ export function DocsTab({ projectName }: DocsTabProps) {
 
   useEffect(() => { load() }, [projectName])
 
+  // Pre-compute line counts once per docs change instead of scanning every
+  // doc's content on every render (sidebar + header). Must run before any
+  // conditional early return below so hook order stays stable across the
+  // loading → loaded transition (Rules of Hooks).
+  const lineCounts = useMemo(() => {
+    const m = new Map<string, number>()
+    for (const d of docs) m.set(d.name, countLines(d.content))
+    return m
+  }, [docs])
+
   if (loading) return (
     <div className="mt-2 flex gap-3">
       <div className="w-52 shrink-0 rounded-lg border border-border bg-bg-secondary p-2">
@@ -88,13 +98,6 @@ export function DocsTab({ projectName }: DocsTabProps) {
   )
 
   const current = docs.find((d) => d.name === active) ?? docs[0]
-  // Pre-compute line counts once per docs change instead of scanning every
-  // doc's content on every render (sidebar + header).
-  const lineCounts = useMemo(() => {
-    const m = new Map<string, number>()
-    for (const d of docs) m.set(d.name, countLines(d.content))
-    return m
-  }, [docs])
   const currentLineCount = lineCounts.get(current.name) ?? 0
 
   return (

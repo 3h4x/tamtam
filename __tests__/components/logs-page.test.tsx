@@ -106,8 +106,9 @@ describe('<LogsPage />', () => {
     });
     await render();
     clickButtonByText('alpha');
-    await new Promise((r) => setTimeout(r, 0));
-    flushSync(() => {});
+    await waitFor(() => {
+      expect(container.querySelector('input[type="text"]')).toBeTruthy();
+    });
 
     const input = container.querySelector('input[type="text"]') as HTMLInputElement | null;
     expect(input).toBeTruthy();
@@ -119,11 +120,13 @@ describe('<LogsPage />', () => {
 
     // Switch back to the project list and pick a different project.
     clickButtonByText('clear');
-    await new Promise((r) => setTimeout(r, 0));
-    flushSync(() => {});
+    await waitFor(() => {
+      expect(container.textContent).toContain('beta');
+    });
     clickButtonByText('beta');
-    await new Promise((r) => setTimeout(r, 0));
-    flushSync(() => {});
+    await waitFor(() => {
+      expect(container.querySelector('input[type="text"]')).toBeTruthy();
+    });
 
     const inputAfter = container.querySelector('input[type="text"]') as HTMLInputElement | null;
     if (inputAfter) {

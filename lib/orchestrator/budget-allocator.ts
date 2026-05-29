@@ -62,6 +62,16 @@ export interface BoostAgentInput {
    *  deliberate cadence (blog posts, social posts) where extra firings would
    *  over-publish. Default true. */
   boostable: boolean;
+  /** Optional per-agent fruitfulness over the recent run window. When
+   *  populated and `runs >= UNFRUITFUL_MIN_SAMPLE`, the allocator demotes
+   *  agents below `UNFRUITFUL_RATE_THRESHOLD` so productive agents pick up
+   *  the boost slot first. Omit when unknown (new agents, missing samples) —
+   *  the allocator treats absence as "give it a chance" rather than
+   *  penalizing on missing data. */
+  fruitfulness?: {
+    rate: number;
+    runs: number;
+  };
 }
 
 export interface BoostHistoryInput {
@@ -136,6 +146,30 @@ const SEVERELY_UNDER_STATUSES = new Set([
 // the margin closes; turning it off only when we're nearly on pace.
 const AGGRESSIVE_CATCHUP_PP = 10;
 
+// Fruitfulness deprioritization thresholds.
+//
+// An agent is demoted into the "low-priority" tier when we've seen at least
+// `UNFRUITFUL_MIN_SAMPLE` recent finished runs and `fruitfulRuns / runs` is
+// below `UNFRUITFUL_RATE_THRESHOLD`. Demoted agents only get picked when no
+// fruitful candidates remain in the same project — they still keep their
+// scheduled cadence (this is a *boost* gate, not a disable), and they re-
+// enter the priority tier as soon as a run produces output.
+//
+// The min-sample floor is intentional: a brand-new agent with one empty run
+// shouldn't be exiled from boosts forever; it needs a fair shake. 5 runs is
+// enough to distinguish "agent is just doing maintenance and finding nothing
+// today" (acceptable noise) from "agent never produces anything" (a stuck
+// loop the orchestrator should stop feeding tokens).
+const UNFRUITFUL_MIN_SAMPLE = 5;
+const UNFRUITFUL_RATE_THRESHOLD = 0.2;
+
+function isUnfruitful(agent: BoostAgentInput): boolean {
+  const f = agent.fruitfulness;
+  if (!f) return false;
+  if (f.runs < UNFRUITFUL_MIN_SAMPLE) return false;
+  return f.rate < UNFRUITFUL_RATE_THRESHOLD;
+}
+
 export function decideBoosts(input: BoostInput): BoostDecision[] {
   const now = input.nowMs ?? Date.now();
 
@@ -185,18 +219,25 @@ export function decideBoosts(input: BoostInput): BoostDecision[] {
     const candidates = agentsByProject.get(project.project) ?? [];
     if (candidates.length === 0) continue;
 
-    // Spread the boost across the roster: pick the agent that hasn't run
-    // recently. `lastDispatchMs === null` (never dispatched) sorts first.
-    const ranked = candidates
-      .filter((a) =>
-        a.lastDispatchMs === null
-        || now - a.lastDispatchMs > AGENT_RECENT_DISPATCH_COOLDOWN_MS,
-      )
-      .sort((a, b) => {
-        const am = a.lastDispatchMs ?? 0;
-        const bm = b.lastDispatchMs ?? 0;
-        return am - bm;
-      });
+    // Spread the boost across the roster, but rank in two tiers:
+    //   1. agents that are still considered fruitful (or have no signal yet)
+    //   2. agents that have run repeatedly without producing anything
+    // Within each tier, oldest-dispatch-first. The orchestrator only falls to
+    // tier 2 when tier 1 is exhausted, so a project full of stuck agents
+    // still gets *some* boost (better than nothing while the user fixes
+    // them), but a healthy agent always wins the slot.
+    const eligible = candidates.filter((a) =>
+      a.lastDispatchMs === null
+      || now - a.lastDispatchMs > AGENT_RECENT_DISPATCH_COOLDOWN_MS,
+    );
+    const byStaleness = (a: BoostAgentInput, b: BoostAgentInput): number => {
+      const am = a.lastDispatchMs ?? 0;
+      const bm = b.lastDispatchMs ?? 0;
+      return am - bm;
+    };
+    const fruitfulTier = eligible.filter((a) => !isUnfruitful(a)).sort(byStaleness);
+    const unfruitfulTier = eligible.filter((a) => isUnfruitful(a)).sort(byStaleness);
+    const ranked = [...fruitfulTier, ...unfruitfulTier];
     if (ranked.length === 0) continue;
 
     // When pace is severely under (margin far above the configured floor),

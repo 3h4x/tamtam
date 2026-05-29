@@ -140,7 +140,7 @@ TEST
   │                              → when review_disabled is on: COMMIT for uncommitted changes, PUSH for unpushed commits
   │                              → when only dirty working-tree paths are under `.tamtam/` and no unpushed commits exist: COMMIT (review has no scope)
   │                              → otherwise start PUSH/no-op
-  └─ exit ≠0 → completion hook → start FIX → re-run TEST (capped at 3 tests per release)
+  └─ exit ≠0 → completion hook → start FIX → re-run TEST (`fix_max_iterations`; default 0 = unlimited)
                                  → otherwise finalize release (exit 1)
 
 REVIEW
