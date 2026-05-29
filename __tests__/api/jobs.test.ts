@@ -476,8 +476,15 @@ describe('GET /api/projects/runtime', () => {
 });
 
 describe('GET /api/jobs/[jobId]', () => {
+  let tempDir: string;
+
   beforeEach(() => {
     resetDefaults();
+    tempDir = mkdtempSync(join(tmpdir(), 'tamtam-job-detail-test-'));
+  });
+
+  afterEach(() => {
+    rmSync(tempDir, { recursive: true, force: true });
   });
 
   it('returns 404 for nonexistent job', async () => {
@@ -499,6 +506,56 @@ describe('GET /api/jobs/[jobId]', () => {
     expect(data.id).toBe('job-123');
     expect(data.log).toBe('display log content');
     expect(mocks.readLog).not.toHaveBeenCalled();
+  });
+
+  it('omits failure detail for failed plain-text logs already returned in log output', async () => {
+    const logPath = join(tempDir, 'plain-failure.log');
+    writeFileSync(logPath, 'fatal: auth expired\n');
+    const job = makeJob({ id: 'job-plain-fail', finishedAt: 2000, exitCode: 1, logPath });
+    mocks.getJob.mockReturnValue(job);
+
+    const req = new NextRequest('http://localhost/api/jobs/job-plain-fail');
+    const res = await jobGET(req, { params: Promise.resolve({ jobId: 'job-plain-fail' }) });
+    expect(res.status).toBe(200);
+    const data = await res.json();
+    expect(data.log).toBe('display log content');
+    expect(data).not.toHaveProperty('detail');
+  });
+
+  it('returns failure detail for wrapper-only logs with no replayable CLI output', async () => {
+    const logPath = join(tempDir, 'wrapper-only.log');
+    writeFileSync(logPath, '[tamtam] launching: cli\n[tamtam] exit 1\n');
+    const job = makeJob({ id: 'job-wrapper-fail', finishedAt: 2000, exitCode: 1, logPath });
+    mocks.getJob.mockReturnValue(job);
+
+    const req = new NextRequest('http://localhost/api/jobs/job-wrapper-fail');
+    const res = await jobGET(req, { params: Promise.resolve({ jobId: 'job-wrapper-fail' }) });
+    expect(res.status).toBe(200);
+    const data = await res.json();
+    expect(data.detail).toContain('immediately without producing any output');
+  });
+
+  it('returns failure detail for failed jobs whose log file is missing', async () => {
+    const logPath = join(tempDir, 'missing-failure.log');
+    const job = makeJob({ id: 'job-missing-fail', finishedAt: 2000, exitCode: 1, logPath });
+    mocks.getJob.mockReturnValue(job);
+
+    const req = new NextRequest('http://localhost/api/jobs/job-missing-fail');
+    const res = await jobGET(req, { params: Promise.resolve({ jobId: 'job-missing-fail' }) });
+    expect(res.status).toBe(200);
+    const data = await res.json();
+    expect(data.detail).toBe('log file missing');
+  });
+
+  it('returns read failure detail for failed jobs whose log path cannot be read', async () => {
+    const job = makeJob({ id: 'job-unreadable-fail', finishedAt: 2000, exitCode: 1, logPath: tempDir });
+    mocks.getJob.mockReturnValue(job);
+
+    const req = new NextRequest('http://localhost/api/jobs/job-unreadable-fail');
+    const res = await jobGET(req, { params: Promise.resolve({ jobId: 'job-unreadable-fail' }) });
+    expect(res.status).toBe(200);
+    const data = await res.json();
+    expect(data.detail).toMatch(/could not read log/i);
   });
 
   it('returns RAW log for release jobs (aggregated pipeline output)', async () => {

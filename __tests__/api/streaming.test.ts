@@ -458,7 +458,11 @@ describe('GET /api/streaming/[jobId] – extractLogDetail in done event', () => 
     probeJobStatusImpl = vi.fn().mockResolvedValue('running');
   });
 
-  async function getDonePayload(logContent: string, exitCode: number): Promise<Record<string, unknown>> {
+  async function getDonePayload(
+    logContent: string,
+    exitCode: number,
+    query = 'raw=1',
+  ): Promise<Record<string, unknown>> {
     const logFile = join(tempDir, `test-${Date.now()}.log`);
     writeFileSync(logFile, logContent);
     getJobMock.mockReturnValue({
@@ -468,7 +472,8 @@ describe('GET /api/streaming/[jobId] – extractLogDetail in done event', () => 
     } as any);
 
     const ac = new AbortController();
-    const request = new NextRequest(`http://localhost/api/streaming/job-detail?raw=1`, {
+    const suffix = query ? `?${query}` : '';
+    const request = new NextRequest(`http://localhost/api/streaming/job-detail${suffix}`, {
       signal: ac.signal,
     });
     const response = await GET(request, { params: Promise.resolve({ jobId: 'job-detail' }) });
@@ -521,17 +526,47 @@ describe('GET /api/streaming/[jobId] – extractLogDetail in done event', () => 
     expect(payload.detail).toBe('log file missing');
   });
 
+  it('done event with unreadable log has read failure detail', async () => {
+    getJobMock.mockReturnValue({
+      logPath: tempDir,
+      finishedAt: Date.now() / 1000,
+      exitCode: 1,
+    } as any);
+
+    const ac = new AbortController();
+    const request = new NextRequest(`http://localhost/api/streaming/job-unreadable?raw=1`, { signal: ac.signal });
+    const response = await GET(request, { params: Promise.resolve({ jobId: 'job-unreadable' }) });
+    const events = await collectClosedSSEStream(response);
+    const combined = events.join('');
+
+    const match = combined.match(/event: done\ndata: (.+)/);
+    expect(match).not.toBeNull();
+    const payload = JSON.parse(match![1]);
+    expect(payload.detail).toMatch(/could not read log/i);
+  });
+
   it('done event with empty log has detail about empty output', async () => {
     const payload = await getDonePayload('', 1);
     expect(payload.detail).toMatch(/empty/i);
     expect(payload.exitCode).toBe(1);
   });
 
-  it('done event with non-JSON lines returns last non-JSON lines as detail', async () => {
+  it('done event with non-JSON lines omits detail because raw output already streams', async () => {
     const content = 'some error output\nanother error line\n';
     const payload = await getDonePayload(content, 2);
-    expect(payload.detail).toContain('some error output');
-    expect(payload.detail).toContain('another error line');
+    expect(payload).not.toHaveProperty('detail');
+  });
+
+  it('done event in parsed mode includes mixed non-JSON failure lines as detail', async () => {
+    const line = '{"type":"stream_event","event":{"type":"content_block_delta","index":0,"delta":{"type":"text_delta","text":"partial answer"}}}';
+    const payload = await getDonePayload(`${line}\nfatal: auth expired\n`, 1, '');
+    expect(payload.detail).toBe('fatal: auth expired');
+  });
+
+  it('done event in raw mode omits mixed non-JSON detail because raw output already streams', async () => {
+    const line = '{"type":"stream_event","event":{"type":"content_block_delta","index":0,"delta":{"type":"text_delta","text":"partial answer"}}}';
+    const payload = await getDonePayload(`${line}\nfatal: auth expired\n`, 1);
+    expect(payload).not.toHaveProperty('detail');
   });
 
   it('done event with only stream_event JSON has partial-output detail', async () => {
@@ -546,12 +581,10 @@ describe('GET /api/streaming/[jobId] – extractLogDetail in done event', () => 
     expect(payload.detail).toMatch(/never emitted|no result/i);
   });
 
-  it('done event detail respects last 20 non-JSON lines limit', async () => {
+  it('done event with timestamp-prefixed JSON still emits JSON-only detail', async () => {
     const lines = Array.from({ length: 25 }, (_, i) => `error line ${i + 1}`).join('\n');
-    const payload = await getDonePayload(lines + '\n', 1);
-    expect(payload.detail as string).toContain('error line 25');
-    expect(payload.detail as string).toContain('error line 6');
-    expect(payload.detail as string).not.toContain('error line 5');
+    const payload = await getDonePayload(`2026-05-29T10:00:00Z: ${JSON.stringify({ type: 'other', lines })}\n`, 1);
+    expect(payload.detail).toMatch(/never emitted|no result/i);
   });
 
   it('done event with only [tamtam] wrapper lines has specific wrapper-only detail', async () => {
@@ -599,6 +632,50 @@ describe('GET /api/streaming/[jobId] – passthrough mode', () => {
 
     expect(combined).toContain('event: raw\ndata: plain shell output');
     expect(combined).toContain('event: raw\ndata: more shell output');
+  });
+
+  it('omits done detail for failed passthrough logs because raw lines were already emitted', async () => {
+    const logFile = join(tempDir, 'pt-failed.log');
+    writeFileSync(logFile, 'plain shell failure\nmore shell failure\n');
+    getJobMock.mockReturnValue({
+      logPath: logFile,
+      finishedAt: Date.now() / 1000,
+      exitCode: 1,
+    } as any);
+
+    const ac = new AbortController();
+    const req = new NextRequest('http://localhost/api/streaming/job-pt-failed?passthrough=1', { signal: ac.signal });
+    const response = await GET(req, { params: Promise.resolve({ jobId: 'job-pt-failed' }) });
+    const events = await collectClosedSSEStream(response);
+    const combined = events.join('');
+
+    expect(combined).toContain('event: raw\ndata: plain shell failure');
+    const match = combined.match(/event: done\ndata: (.+)/);
+    expect(match).not.toBeNull();
+    const payload = JSON.parse(match![1]);
+    expect(payload.exitCode).toBe(1);
+    expect(payload).not.toHaveProperty('detail');
+  });
+
+  it('includes done detail for failed passthrough jobs whose log file is missing', async () => {
+    const logFile = join(tempDir, 'pt-missing.log');
+    getJobMock.mockReturnValue({
+      logPath: logFile,
+      finishedAt: Date.now() / 1000,
+      exitCode: 1,
+    } as any);
+
+    const ac = new AbortController();
+    const req = new NextRequest('http://localhost/api/streaming/job-pt-missing?passthrough=1', { signal: ac.signal });
+    const response = await GET(req, { params: Promise.resolve({ jobId: 'job-pt-missing' }) });
+    const events = await collectClosedSSEStream(response);
+    const combined = events.join('');
+
+    const match = combined.match(/event: done\ndata: (.+)/);
+    expect(match).not.toBeNull();
+    const payload = JSON.parse(match![1]);
+    expect(payload.exitCode).toBe(1);
+    expect(payload.detail).toBe('log file missing');
   });
 
   it('parses JSON stream_event text_delta while passing raw lines through', async () => {

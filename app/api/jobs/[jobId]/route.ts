@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { getJob, jobToDict, readDisplayLog, readLog, readLogHead, probeJobStatus, updateJob } from '@/lib/jobs/job-storage';
+import { extractFailureLogDetail } from '@/lib/jobs/failure-log-detail';
 import {
   getJobCancellationSignal,
   requestJobCancellation,
@@ -35,6 +36,12 @@ export async function GET(
   // output / commit / push details. Serve the raw aggregate instead so
   // "open terminal on a release" shows the full pipeline output verbatim.
   data.log = job.kind === 'release' ? readLog(job) : readDisplayLog(job);
+  if ((job.exitCode ?? 0) !== 0 && job.logPath) {
+    const detail = extractFailureLogDetail(job.logPath, {
+      missingDetail: 'log file missing',
+    });
+    if (detail) data.detail = detail;
+  }
   return NextResponse.json(data);
 }
 

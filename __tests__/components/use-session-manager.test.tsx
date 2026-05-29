@@ -532,6 +532,7 @@ describe('useSessionManager', () => {
           json: async () => ({
             exit_code: 1,
             log: 'fatal: auth expired',
+            detail: 'fatal: auth expired',
             context_meta: null,
             log_pruned: false,
           }),

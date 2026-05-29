@@ -4,9 +4,8 @@ import { join } from 'path';
 import { homedir } from 'os';
 import { getJob, probeJobStatus } from '@/lib/jobs/job-storage';
 import { parseStreamLines, createParseState, type ParseState } from '@/lib/jobs/claude-stream-parser';
-import { errMsg } from '@/lib/shared/types';
 import { redactSecrets } from '@/lib/shared/log-redaction';
-import { readRedactedFileSync } from '@/lib/jobs/redacted-log-reader';
+import { extractFailureLogDetail } from '@/lib/jobs/failure-log-detail';
 
 // Poll interval for the fs.watch fallback. Read once at module load so tests
 // can shrink it via TAMTAM_STREAM_POLL_MS to keep the poll-path test fast.
@@ -143,43 +142,14 @@ export async function GET(
       }
 
       function extractLogDetail(): string | null {
-        try {
-          const content = readRedactedFileSync(logPath);
-          if (!content.trim()) return 'log file empty — claude CLI exited without writing anything. Common causes: rate-limited (5-hour window), cold-start crash, or auth/session conflict with a concurrent run. Retrying usually works.';
-          const lines = content.split('\n').map(l => l.trim()).filter(Boolean);
-          // If every non-empty line is a [tamtam] wrapper marker (the launch
-          // banner and exit-code tail), claude CLI never actually emitted
-          // anything. Surface that as a diagnosable message instead of
-          // echoing the launching command as "detail" — that was useless to
-          // the user.
-          const wrapperOnly = lines.every(l => l.startsWith('[tamtam]'));
-          if (wrapperOnly) {
-            return 'claude CLI exited immediately without producing any output. Usually one of: (1) invalid --resume session id, (2) rate-limited (5-hour window), (3) auth expired, or (4) a concurrent claude run in the same project holding the session. Try again, or start a new session without --resume.';
-          }
-          // Match parseStreamLines' prefix stripping — aggregate release logs
-          // emit `<ISO-timestamp>: <json>` per line, and without this a JSON.parse
-          // of the raw line fails and the entire stream-json payload gets
-          // classified as "non-JSON" and surfaced as error detail (red text in
-          // the terminal).
-          const TS_PREFIX_RE = /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d+)?(?:Z|[+-]\d{2}:?\d{2})?:\s/;
-          const nonJson: string[] = [];
-          for (const line of lines) {
-            if (line.startsWith('[tamtam]')) continue; // drop wrapper chrome from detail
-            const tsMatch = line.match(TS_PREFIX_RE);
-            const body = tsMatch ? line.slice(tsMatch[0].length) : line;
-            try { JSON.parse(body); } catch { nonJson.push(line); }
-          }
-          if (nonJson.length > 0) return nonJson.slice(-20).join('\n');
-          // Only JSON in log, no `"type":"result"` — Claude was streaming tokens then died mid-response
-          const hasAnyStream = content.includes('"stream_event"');
-          if (hasAnyStream) {
-            return 'claude streamed partial output but never emitted a final result — likely killed/crashed mid-response';
-          }
-          return 'claude wrote JSON to log but never emitted a final result line';
-        } catch (e: unknown) {
-          if ((e as NodeJS.ErrnoException).code === 'ENOENT') return 'log file missing';
-          return `could not read log: ${errMsg(e)}`;
-        }
+        return extractFailureLogDetail(logPath, {
+          missingDetail: 'log file missing',
+          emptyDetail: 'log file empty - claude CLI exited without writing anything. Common causes: rate-limited (5-hour window), cold-start crash, or auth/session conflict with a concurrent run. Retrying usually works.',
+          wrapperOnlyDetail: 'claude CLI exited immediately without producing any output. Usually one of: (1) invalid --resume session id, (2) rate-limited (5-hour window), (3) auth expired, or (4) a concurrent claude run in the same project holding the session. Try again, or start a new session without --resume.',
+          partialStreamDetail: 'claude streamed partial output but never emitted a final result - likely killed/crashed mid-response',
+          jsonOnlyDetail: 'claude wrote JSON to log but never emitted a final result line',
+          includeNonJsonDetail: !raw && !passthrough,
+        });
       }
 
       // Flush any incomplete trailing line held in passPending / parsedPending so
@@ -203,8 +173,7 @@ export async function GET(
         flushParsedPending();
         try {
           const payload: Record<string, unknown> = { exitCode: exitCode ?? null };
-          // passthrough jobs already streamed all log content — skip detail to avoid duplicating it as red error text
-          if (!passthrough && (exitCode ?? 0) !== 0) {
+          if ((exitCode ?? 0) !== 0) {
             const detail = extractLogDetail();
             if (detail) payload.detail = detail;
           }
@@ -329,8 +298,7 @@ export async function GET(
         flushParsedPending();
         try {
           const payload: Record<string, unknown> = { exitCode: exitCode ?? null };
-          // passthrough jobs already streamed all log content — skip detail to avoid duplicating it as red error text
-          if (!passthrough && (exitCode ?? 0) !== 0) {
+          if ((exitCode ?? 0) !== 0) {
             const detail = extractLogDetail();
             if (detail) payload.detail = detail;
           }

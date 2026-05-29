@@ -120,6 +120,22 @@ export function terminalExitEntry(exitCode: number): Pick<TermEntry, 'role' | 't
   return { role: 'error', text: `exit ${exitCode}` }
 }
 
+export function appendUniqueErrorDetail(
+  entries: TermEntry[],
+  detail: string | null | undefined,
+  fromIndex = 0,
+): void {
+  const trimmed = detail?.trim()
+  if (!trimmed) return
+  if (entries.slice(fromIndex).some((entry) => entry.text.trim() === trimmed)) return
+  entries.push({ role: 'error', text: detail! })
+}
+
+function hasEntryText(entries: TermEntry[], detail: string | null | undefined): boolean {
+  const trimmed = detail?.trim()
+  return !!trimmed && entries.some((entry) => entry.text.trim() === trimmed)
+}
+
 function emptyRecoveredBuffers(): RecoveredBuffers {
   return {
     history: [],
@@ -446,6 +462,7 @@ class TerminalStore {
       }
       if (exitCode !== null) {
         newEntries.push(terminalExitEntry(exitCode))
+        appendUniqueErrorDetail(newEntries, typeof payload.detail === 'string' ? payload.detail : null, baseHistory.length)
       }
       let pendingAutoSubmit = s.pendingAutoSubmit
       let messageQueue = s.messageQueue
@@ -489,8 +506,32 @@ class TerminalStore {
         lastStats: stats,
         pendingAutoSubmit,
         messageQueue,
+        restoredFor: sid ?? s.restoredFor,
       }
     })
+  }
+
+  private async hydrateFinalDetail(
+    projectName: string,
+    jobId: string,
+    expectedSessionKey: string,
+    expectedHistory: TermEntry[],
+  ): Promise<void> {
+    try {
+      const response = await fetch(`/api/jobs/${encodeURIComponent(jobId)}`)
+      if (!response.ok) return
+      const payload = await response.json() as { detail?: string | null }
+      const detail = payload.detail
+      if (!detail) return
+      this.update(projectName, (s) => {
+        if (s.history !== expectedHistory) return {}
+        if (s.currentJobId !== null || s.streaming || s.sessionKey !== expectedSessionKey) return {}
+        if (hasEntryText(s.history, detail)) return {}
+        return {
+          history: [...s.history, { role: 'error' as const, text: detail }],
+        }
+      })
+    } catch {}
   }
 
   private async recoverStream(
@@ -756,9 +797,7 @@ class TerminalStore {
         } else if (metadata.exitCode !== undefined && metadata.exitCode !== null) {
           const ok = metadata.exitCode === 0
           newEntries.push(terminalExitEntry(metadata.exitCode))
-          if (!ok && typeof metadata.detail === 'string' && metadata.detail) {
-            newEntries.push({ role: 'error', text: metadata.detail })
-          }
+          if (!ok) appendUniqueErrorDetail(newEntries, metadata.detail)
           if (ok) nextLastError = null
         } else {
           // No metadata.error and no exitCode — treat as clean end; clear
@@ -812,8 +851,13 @@ class TerminalStore {
           lastError: nextLastError,
           pendingAutoSubmit,
           messageQueue,
+          restoredFor: sid ?? s.restoredFor,
         }
       })
+      if (metadata.exitCode !== undefined && metadata.exitCode !== null && metadata.exitCode !== 0) {
+        const finalized = this.get(projectName)
+        void this.hydrateFinalDetail(projectName, jobId, finalized.sessionKey, finalized.history)
+      }
     })
 
     es.onerror = () => {
