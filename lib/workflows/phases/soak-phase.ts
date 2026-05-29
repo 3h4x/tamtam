@@ -1,6 +1,6 @@
 // Soak phase workflow. Runs after `pr-wait` merges a release PR. Watches
-// the default branch's CI on the merge commit for a configurable window and
-// — on failure — opens (and optionally auto-merges) a revert PR.
+// the default branch's CI on the merge commit until it reaches a terminal
+// state and — on failure — opens (and optionally auto-merges) a revert PR.
 //
 // The phase is no-op when the project's `post_merge_watch_minutes` is 0 or
 // the prior pr-wait did not actually merge. In both cases the workflow
