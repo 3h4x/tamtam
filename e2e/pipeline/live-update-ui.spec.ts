@@ -1113,3 +1113,134 @@ test.describe('Global runs page polling transitions', () => {
     await expect(runningRunRows(page)).toHaveCount(0, { timeout: 12_000 });
   });
 });
+
+// ─── Test 4: /runs page with chained release outcome ─────────────────────────
+//
+// JobsPage.tsx wraps flattenReleaseChildren() calls in a Fragment key so
+// React can track phase siblings when the list re-renders. Verify that a run
+// job that owns a release shows the correct outcome text as the release
+// transitions and that no React key warnings fire during the update cycle.
+// This is the JobsPage (global /runs) equivalent of the ProjectRunsTab test
+// "history parent run updates nested release outcome from running to done
+// without reload" in the Auto-polling section above.
+
+test.describe('Global runs page: chained release outcome', () => {
+  test('/runs page shows run with owned release outcome and transitions running→done without React key warnings', async ({
+    page,
+  }) => {
+    const reactKeyWarnings = captureReactKeyWarnings(page);
+    const project = 'runs-owned-release';
+    let releaseRunning = true;
+    const ts = now();
+
+    await page.route(
+      (url) => url.pathname === '/api/jobs' && !url.searchParams.has('project'),
+      (route: Route) => {
+        const running = releaseRunning;
+        route.fulfill({
+          json: {
+            jobs: [
+              {
+                id: 'run-owned-release-1',
+                project,
+                kind: 'run',
+                prompt: 'Kick off the release workflow',
+                user_prompt: 'Kick off the release workflow',
+                status: 'done',
+                exit_code: 0,
+                started_at: ts - 300,
+                finished_at: ts - 280,
+                pid: 0,
+                log_path: '',
+                seen: true,
+                session_id: 'sess-owned-release-1',
+                work_summary: 'Release pipeline initiated',
+              },
+              {
+                id: 'release-owned-1',
+                project,
+                kind: 'release',
+                prompt: null,
+                status: running ? 'running' : 'done',
+                exit_code: running ? null : 0,
+                started_at: ts - 260,
+                finished_at: running ? null : ts - 10,
+                pid: 0,
+                log_path: '',
+                seen: true,
+                parent_job_id: 'run-owned-release-1',
+              },
+              {
+                id: 'review-owned-1',
+                project,
+                kind: 'review',
+                prompt: null,
+                status: running ? 'running' : 'done',
+                exit_code: running ? null : 0,
+                started_at: ts - 240,
+                finished_at: running ? null : ts - 30,
+                pid: 0,
+                log_path: '',
+                seen: true,
+                release_id: 'release-owned-1',
+                parent_job_id: 'release-owned-1',
+                verdict: running ? null : 'LGTM',
+              },
+              {
+                id: 'commit-owned-1',
+                project,
+                kind: 'commit',
+                prompt: null,
+                status: running ? 'running' : 'done',
+                exit_code: running ? null : 0,
+                started_at: ts - 180,
+                finished_at: running ? null : ts - 15,
+                pid: 0,
+                log_path: '',
+                seen: true,
+                release_id: 'release-owned-1',
+                parent_job_id: 'release-owned-1',
+              },
+            ],
+            pendingReleaseProjects: [],
+          },
+        });
+      },
+    );
+
+    await page.route('**/api/jobs/notifications', (route: Route) =>
+      route.fulfill({ json: { notifications: [] } }),
+    );
+    await page.route('**/api/settings', (route: Route) =>
+      route.fulfill({ json: { jobs_paused: false, github_owner: '' } }),
+    );
+    await page.route('**/api/projects', (route: Route) =>
+      route.fulfill({
+        json: {
+          tasks: [makeTask(project)],
+          priorities: [],
+          issueCounts: {},
+        },
+      }),
+    );
+
+    await page.goto('/runs');
+
+    const row = page.getByRole('button').filter({ hasText: 'Kick off the release workflow' }).first();
+    await expect(row).toBeVisible({ timeout: 8_000 });
+
+    // Phase 1: release is running — the run row must show the "release running"
+    // outcome chip inline so the user sees the pipeline status at a glance.
+    await expect(row.getByText('release running', { exact: true })).toBeVisible({ timeout: 8_000 });
+    await expect(row.getByLabel('running')).toBeVisible({ timeout: 8_000 });
+
+    // Flip mock so the next poll returns the completed state.
+    releaseRunning = false;
+
+    // Phase 2: auto-poll picks up the completed release — "✓ release done" must
+    // appear and the running indicator must clear, with no React key warnings.
+    await expect(row.getByText('✓ release done', { exact: true })).toBeVisible({ timeout: 12_000 });
+    await expect(row.getByLabel('running')).toHaveCount(0, { timeout: 12_000 });
+    expect(reactKeyWarnings).toEqual([]);
+  });
+});

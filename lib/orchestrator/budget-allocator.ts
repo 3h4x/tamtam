@@ -245,8 +245,7 @@ export function decideBoosts(input: BoostInput): BoostDecision[] {
     // moves. `picksThisTick` grows with the headroom: 1 agent at the
     // threshold, +1 per additional 10pp of margin, capped at 5 picks per
     // project per tick (and bounded by the rate-limit budget below).
-    const slack = Math.max(0, effectiveMargin - input.settings.marginPct);
-    const desiredPicks = Math.min(5, 1 + Math.floor(slack / 10));
+    const desiredPicks = Math.min(5, 1 + Math.floor(slackPp / 10));
     const budgetLeft = Math.max(0, input.settings.maxBoostsPerHour - recent.length);
     const picksThisTick = Math.min(desiredPicks, budgetLeft, ranked.length);
     for (let i = 0; i < picksThisTick; i++) {
