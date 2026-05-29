@@ -159,6 +159,19 @@ export const AGENT_CATALOG: AgentCatalogEntry[] = [
     fallbackEnabled: true,
   },
   {
+    // Metadata source of truth lives in skills/docs/skills/tamtam/agent-test-e2e.md.
+    // The fields below are inline fallbacks; the .md `agent:` block overrides them at API serialize time.
+    name: 'test-e2e',
+    aliases: ['tests-e2e', 'e2e-tests'],
+    description: 'Adds Playwright end-to-end tests for recently-changed UI / new routes. Matches the existing harness — no new abstractions per run.',
+    dispatch: 'cli',
+    defaultSchedule: '24h',
+    defaultModel: 'normal',
+    prompt: '',
+    skillIds: ['agent-test-e2e'],
+    fallbackEnabled: true,
+  },
+  {
     name: 'cto',
     description: 'Thinks from a CTO perspective about product direction and creates prioritized GitHub issues for missing features, gaps, and strategic improvements.',
     dispatch: 'cli',
