@@ -96,7 +96,7 @@ export async function DELETE(
   }
 
   // Propagate cancellation to the workflow runtime when the job was launched
-  // through Vercel Workflow (signalled by `workflowRunId` on contextMeta).
+  // by a durable workflow (signalled by `workflowRunId` on contextMeta).
   // Without this, the workflow_runs row stays "completed" even though the CLI
   // was killed — making restart-replay or operator inspection misleading.
   try {
