@@ -1,11 +1,11 @@
 // Third per-phase workflow scaffold: fix. Slightly different shape from
-// test/review — fix runs in the context of an earlier (failed) job: a test
-// that exited non-zero or a review that returned NEEDS ATTENTION. The
-// existing startFixFromJob helper takes a sourceJobId pointing at that
-// parent.
+// test/review — fix runs in the context of an earlier job that needs
+// remediation: a failed test/commit/push, or a review that returned
+// NEEDS ATTENTION or DO NOT SHIP. The existing startFixFromJob helper
+// takes a sourceJobId pointing at that parent.
 //
 // Dispatched by releaseOrchestratorWorkflow via dispatchPhase when the
-// orchestrator decides { next: 'fix', from: 'test' | 'review' }.
+// orchestrator decides { next: 'fix', from: 'test' | 'review' | 'commit' | 'push' }.
 
 import type { StartFixResult } from '@/lib/pipeline/start-fix';
 import type { WaitForJobResult } from '@/lib/workflows/wait-for-job';
