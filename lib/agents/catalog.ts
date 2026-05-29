@@ -200,6 +200,8 @@ export const AGENT_CATALOG: AgentCatalogEntry[] = [
     fallbackEnabled: true,
   },
   {
+    // Metadata source of truth lives in skills/docs/skills/tamtam/agent-docs-generate.md.
+    // The fields below are inline fallbacks; the .md `agent:` block overrides them at API serialize time.
     name: 'docs-generate',
     description: 'Generates one new doc page per run for an under-documented subsystem (architecture / concept / comparison / synthesis). Never edits existing docs.',
     dispatch: 'cli',
@@ -209,12 +211,6 @@ export const AGENT_CATALOG: AgentCatalogEntry[] = [
     skillIds: ['agent-docs-generate'],
     tier: 'essential',
     fallbackEnabled: true,
-    inspiration: [
-      {
-        label: "Karpathy's LLM Wiki Stack",
-        url: 'https://github.com/ScrapingArt/Karpathy-LLM-Wiki-Stack',
-      },
-    ],
   },
   {
     name: 'qa',
@@ -228,6 +224,8 @@ export const AGENT_CATALOG: AgentCatalogEntry[] = [
     fallbackEnabled: true,
   },
   {
+    // Metadata source of truth lives in skills/docs/skills/tamtam/agent-improve.md.
+    // The fields below are inline fallbacks; the .md `agent:` block overrides them at API serialize time.
     name: 'improve',
     description: 'Walks up to 5 least-recently-modified source files, applies ONE safe family-rubric fix to the first one with a real instance (resource lifecycle, hot-path waste, defensive-code-that-doesn\'t-defend, drift), or `touch`es clean files to rotate them out of the queue. Verifies edits with type-check + the relevant vitest file.',
     dispatch: 'cli',
@@ -237,12 +235,6 @@ export const AGENT_CATALOG: AgentCatalogEntry[] = [
     skillIds: ['agent-improve'],
     tier: 'featured',
     fallbackEnabled: true,
-    inspiration: [
-      {
-        label: "Karpathy's coding guidelines (think first, simplicity, surgical changes, verifiable success)",
-        url: 'https://github.com/multica-ai/andrej-karpathy-skills/blob/main/skills/karpathy-guidelines/SKILL.md',
-      },
-    ],
   },
   {
     name: 'manage-agents',

@@ -15,6 +15,10 @@ export interface AgentCatalogClientEntry {
   tier: 'essential' | 'featured' | 'recommended' | null
   fallbackEnabled: boolean
   inspiration: ReadonlyArray<{ label: string; url: string }>
+  requires: ReadonlyArray<string>
+  outputs: ReadonlyArray<string>
+  relatedAgents: ReadonlyArray<string>
+  version: string | null
 }
 
 // The catalog is static (lives in `lib/agents/catalog.ts`), so one fetch
