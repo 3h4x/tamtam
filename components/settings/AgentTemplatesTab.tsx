@@ -2,6 +2,7 @@
 
 import { useState } from 'react'
 import { Button } from '@/components/ui/Button'
+import { EmptyState } from '@/components/ui/EmptyState'
 import { Pill } from '@/components/ui/Pill'
 import { MODEL_TIERS, MODEL_LABELS, normalizeModelInput } from '@/lib/agents/model-aliases'
 
@@ -164,9 +165,11 @@ export function AgentTemplatesTab({ value, onChange }: { value: string; onChange
 
       <div className="px-5 py-4 flex flex-col gap-3">
         {templates.length === 0 && editing === null && (
-          <p className="text-sm text-text-tertiary text-center py-4">
-            No custom templates yet. Add one to override or extend the built-in recommended agents.
-          </p>
+          <EmptyState
+            paddingY="xs"
+            title="No custom templates yet"
+            description="Add one to override or extend the built-in recommended agents."
+          />
         )}
 
         {templates.map((t, i) => (
