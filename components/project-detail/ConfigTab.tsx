@@ -3,6 +3,7 @@
 import type { ProjectConfig, CustomAction } from '@/lib/client-api'
 import { getPipelineSteps, type StepToggleContext } from '@/lib/pipeline/pipeline-steps'
 import { Button } from '@/components/ui/Button'
+import { EmptyState } from '@/components/ui/EmptyState'
 import { Spinner } from '@/components/ui/Spinner'
 
 const DEFAULT_ACTION_COLOR = '#2563eb'
@@ -549,7 +550,7 @@ export function ConfigTab({
 
         <div className="px-4 py-3">
           {editActions.length === 0 ? (
-            <p className="text-sm text-text-tertiary text-center py-3">No custom actions yet.</p>
+            <EmptyState paddingY="xs" title="No custom actions yet" />
           ) : (
             <div className="space-y-1.5">
               <div className="grid gap-x-2 px-1" style={{ gridTemplateColumns: '9rem 1fr 2.5rem 2rem' }}>
