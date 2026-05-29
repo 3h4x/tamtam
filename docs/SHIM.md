@@ -83,7 +83,7 @@ Settings → Workspace → **Agent CLI Provider** controls which binary TamTam i
 - `deepagents` — TamTam resolves the binary to `<TamTam>/scripts/deepagents-shim.js` automatically and forwards the configured Deep Agents Code executable/backend through env
 - `custom` — uses the path in **Claude CLI Path** verbatim (for forks of the Claude CLI or wrapper scripts)
 
-Switching the provider away from `gemini`/`lmstudio`/`codex`/`deepagents` clears any leftover shim path from the Claude CLI Path field so a stale `…/scripts/gemini-shim.js` doesn't keep getting executed under the `claude` provider. `lib/config.ts` enforces the same rule on the server side: a shim path stored under `claude` or `custom` is treated as unset and falls back to the default.
+Switching the provider away from `gemini`/`lmstudio`/`codex`/`deepagents` clears any leftover shim path from the Claude CLI Path field so a stale `…/scripts/gemini-shim.js` doesn't keep getting executed under the `claude` provider. `lib/shared/config.ts` enforces the same rule on the server side: a shim path stored under `claude` or `custom` is treated as unset and falls back to the default.
 
 ## Codex CLI Shim
 

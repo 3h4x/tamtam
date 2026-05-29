@@ -86,7 +86,7 @@ Ignored:      system init/hooks/status, assistant, rate_limit_event, message_sta
 
 ## NDJSON parser
 
-`lib/claude-stream-parser.ts` — `parseStreamLines(content: string): ParsedEvent[]`
+`lib/jobs/claude-stream-parser.ts` — `parseStreamLines(content: string): ParsedEvent[]`
 
 Types: `text` | `thinking` | `tool_use` (name, input) | `tool_result` (content) | `done` (result with duration, sessionId, tokens)
 
@@ -186,7 +186,7 @@ Verdict detection (`getVerdict`) reads the **last 2000 chars** of the parsed log
 | File | Role |
 |------|------|
 | `app/api/streaming/[jobId]/route.ts` | SSE endpoint, tails log file, emits typed events |
-| `lib/claude-stream-parser.ts` | Parses NDJSON lines into typed events |
+| `lib/jobs/claude-stream-parser.ts` | Parses NDJSON lines into typed events |
 | `lib/jobs/job-storage.ts` | Job CRUD, `markDone()`, completion hooks, verdict detection |
 | `lib/jobs/spawn-claude-detached.ts` | In-process detached child spawn, exit handler → `markDone` |
 | `components/TerminalTab.tsx` | Terminal UI, SSE client, skill/docs/persona picker, session URL nav |

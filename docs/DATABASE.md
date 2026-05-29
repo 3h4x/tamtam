@@ -7,7 +7,7 @@ Postgres 16 (with the `vector` extension) accessed via `pg.Pool` and Drizzle ORM
 - Adding a new column or table (check existing schema first)
 - Debugging missing data after a server restart (memory vs DB cache)
 - Understanding job kinds when filtering runs
-- Writing a new query in `lib/job-storage.ts` or related files
+- Writing a new query in `lib/jobs/job-storage.ts` or related files
 
 ---
 

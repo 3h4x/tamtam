@@ -164,7 +164,7 @@ Useful signals from this repo's last capture: 9433 unique modules processed, 240
 
 - **Build-time NFT trace bloat.** `pnpm build` runs `scripts/strip-runtime-data-from-nft.mjs` and then `scripts/check-nft-sizes.mjs` after Next finishes compiling. The strip step removes runtime `data/` entries from the boot-only `instrumentation.js.nft.json`; the guard then scans all `.nft.json` files under `.next/server` and fails when any trace exceeds about 1.5 MB of NFT JSON or 8,000 files. This usually means a server-route dependency has an unbounded dynamic `fs.*` path that Turbopack cannot statically analyze. Fix the call site by adding `/*turbopackIgnore: true*/` next to the runtime-dynamic path argument, or add a narrow `outputFileTracingExcludes` entry in `next.config.ts` for runtime artifact directories that should never ship in route bundles. Do not raise the thresholds unless the top offenders are understood and intentionally bounded.
 - **`sample <pid>`** (macOS) for a 5 s call-graph snapshot of any Node process: `sample $(pgrep -P $(pm2 pid tamtam) next-server | head -1) 5 -mayDie`. Look at the top of the output ("Call graph:" section) for the hot stack. Heavy time in `uv__io_poll` / `Builtins_PromiseFulfillReactionJob` usually means the event loop is saturated by JS work, not native syscalls. Lighter than `--cpu-prof` because it doesn't restart the process.
-- **`/api/jobs` cost.** Tamtam's `/api/jobs` materializes list rows through `jobToListDict`, a slim serializer that omits log paths and ships prompt previews. It still derives verdicts through `jobToDict`, and `getVerdict` is memoized per finished job (`lib/job-storage.ts:verdictCache`) to avoid re-reading review logs on every poll. If you add per-row work to that endpoint, cache it the same way.
+- **`/api/jobs` cost.** Tamtam's `/api/jobs` materializes list rows through `jobToListDict`, a slim serializer that omits log paths and ships prompt previews. It still derives verdicts through `jobToDict`, and `getVerdict` is memoized per finished job (`lib/jobs/job-storage.ts:verdictCache`) to avoid re-reading review logs on every poll. If you add per-row work to that endpoint, cache it the same way.
 - **PM2 zombie next-server.** If `pm2 restart tamtam` leaves an orphan `next-server` listening on 1337, the new PM2 process errors with EADDRINUSE and the orphan keeps serving stale code. Symptoms: edits don't show up; both ports busy. Fix: `lsof -ti:1337 | xargs kill -9; pm2 delete tamtam; pnpm start`.
 
 ---
@@ -195,7 +195,7 @@ Activity Monitor: `next-server (v16.2.4)` at 720–810% across ~7 worker threads
 
 Sequence we followed:
 
-1. Memoized `getVerdict` (`lib/job-storage.ts`). `/api/jobs` warm dropped 670 → 290 ms. CPU **unchanged** — not the root cause, but worth keeping.
+1. Memoized `getVerdict` (`lib/jobs/job-storage.ts`). `/api/jobs` warm dropped 670 → 290 ms. CPU **unchanged** — not the root cause, but worth keeping.
 2. Speculated about `data/logs/` writes triggering Turbopack's watcher; **no evidence** for it. Did not ship the log_dir move.
 3. Captured `NEXT_TURBOPACK_TRACING=1` for 30 s → 3.2 GB binary trace.
 4. `strings | sort | uniq -c | sort -rn | head` revealed 17k+ writes of `_app.js` / `_error.js` and 170k `invalidate` events — a Pages-Router fallback rebuild loop inside Turbopack's persistent FS cache, independent of user code.
