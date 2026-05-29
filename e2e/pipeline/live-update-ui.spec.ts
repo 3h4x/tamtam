@@ -760,6 +760,67 @@ test.describe('Global runs page polling transitions', () => {
     await expect(runningRunRows(page)).toHaveCount(0, { timeout: 12_000 });
   });
 
+  test('/runs page reveals failed filter after a running job fails without reload', async ({
+    page,
+  }) => {
+    const project = 'runs-poll-failed-filter';
+    let serveRunning = true;
+
+    await page.route(
+      (url) => url.pathname === '/api/jobs' && !url.searchParams.has('project'),
+      (route: Route) =>
+        route.fulfill({
+          json: {
+            jobs: [
+              makeJob(
+                'runs-poll-failed-filter-job',
+                project,
+                serveRunning ? 'running' : 'done',
+                serveRunning ? null : 1,
+                'test',
+              ),
+            ],
+            pendingReleaseProjects: [],
+          },
+        }),
+    );
+
+    await page.route('**/api/jobs/notifications', (route: Route) =>
+      route.fulfill({ json: { notifications: [] } }),
+    );
+    await page.route('**/api/settings', (route: Route) =>
+      route.fulfill({ json: { jobs_paused: false, github_owner: '' } }),
+    );
+    await page.route('**/api/projects', (route: Route) =>
+      route.fulfill({
+        json: {
+          tasks: [makeTask(project)],
+          priorities: [],
+          issueCounts: {},
+        },
+      }),
+    );
+
+    await page.goto('/runs');
+
+    const row = runRow(page, project);
+
+    await expect(row).toBeVisible({ timeout: 8_000 });
+    await expect(page.getByRole('button', { name: /^running/ })).toBeVisible();
+    await expect(page.getByRole('button', { name: /^failed/ })).toHaveCount(0);
+
+    serveRunning = false;
+
+    const failedFilter = page.getByRole('button', { name: /^failed/ });
+    await expect(failedFilter).toBeVisible({ timeout: 12_000 });
+    await expect(row.getByText('exit 1', { exact: true })).toBeVisible({ timeout: 12_000 });
+
+    await failedFilter.click();
+    await expect(row).toBeVisible();
+    await expect(page.getByRole('button', { name: /^running/ })).toHaveCount(0);
+    await expect(row.locator('[aria-label="needs attention"]')).toBeVisible();
+  });
+
   test('/runs page transitions running→cancelled via poll cycle without page reload', async ({
     page,
   }) => {
