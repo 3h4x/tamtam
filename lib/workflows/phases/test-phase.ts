@@ -13,8 +13,8 @@
 //      branch (next: review on success, next: fix on failure) without
 //      replicating decision logic.
 //
-// Dispatched by releaseOrchestratorWorkflow. The orchestrator invokes one
-// phase workflow per chain tick; this one wraps start-test.
+// Dispatched through dispatch-phase.ts as one workflow phase per chain tick;
+// this phase wraps start-test.
 
 import type { StartTestResult } from '@/lib/pipeline/start-test';
 import type { WaitForJobResult } from '@/lib/workflows/wait-for-job';
