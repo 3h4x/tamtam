@@ -1,10 +1,8 @@
 // Polls the jobs cache until a job reaches a terminal state, used inside
-// Vercel Workflow steps to await pipeline sub-steps whose spawn helpers
-// (startProjectTest, startProjectReview, …) return immediately. Today the
-// completion-hook chain in lib/jobs/lifecycle.ts drives the pipeline after
-// the first spawn; this helper is the seam for moving that chain into a
-// workflow body — a step calls a spawn helper, then awaits this until the
-// child finishes, then the workflow body decides the next step.
+// workflow steps to await pipeline sub-steps whose spawn helpers
+// (startProjectTest, startProjectReview, ...) return immediately. A phase
+// step calls a spawn helper, waits here until the child finishes, then the
+// release orchestrator decides the next step.
 //
 // Polling vs LISTEN/NOTIFY: the jobs table is read through an in-memory
 // cache that the lifecycle layer mutates synchronously after markDone, so
