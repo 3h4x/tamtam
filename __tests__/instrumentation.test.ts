@@ -98,6 +98,8 @@ describe('instrumentation', () => {
         getJob: vi.fn((id: string) => jobs.find((j) => j.id === id) ?? null),
         markDone,
         updateJob: vi.fn(),
+        persistVerdict: vi.fn(),
+        awaitInFlightSave: vi.fn().mockResolvedValue(undefined),
         probeJobStatus: vi.fn().mockResolvedValue(undefined),
         reconcileStaleRelease: vi.fn().mockResolvedValue(undefined),
         PIPELINE_STEP_KINDS: new Set(['test', 'review', 'fix', 'commit', 'push', 'mark-dod', 'pr-wait']),
@@ -106,6 +108,11 @@ describe('instrumentation', () => {
       vi.doMock('@/lib/db', () => ({ db: dbMock, schema: schemaMock }));
       vi.doMock('@/lib/jobs/job-storage', () => jobStorageMock);
       vi.doMock('@/lib/jobs/storage', () => jobStorageMock);
+      vi.doMock('@/lib/jobs/lifecycle', () => ({
+        markDone,
+        runCompletionHooks: vi.fn().mockResolvedValue(undefined),
+        PIPELINE_STEP_KINDS: jobStorageMock.PIPELINE_STEP_KINDS,
+      }));
       vi.doMock('@/lib/shared/enabled-projects', () => ({
         refreshProjectsCacheSync: vi.fn().mockResolvedValue(undefined),
         listEnabledProjects: vi.fn(() => []),
