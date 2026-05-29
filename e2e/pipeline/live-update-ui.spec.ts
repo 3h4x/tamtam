@@ -573,7 +573,7 @@ test.describe('Concurrent jobs across projects', () => {
 
     // The "done" filter chip must show 0 jobs — verified by the empty state message.
     await page.getByRole('button', { name: /^done/ }).click();
-    await expect(page.getByText(/no done runs/i)).toBeVisible();
+    await expect(page.getByText('No completed runs in view')).toBeVisible();
   });
 
   test('/runs page keeps concurrent job transitions isolated when one job finishes and the other keeps running', async ({
