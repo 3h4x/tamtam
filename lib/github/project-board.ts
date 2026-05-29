@@ -628,8 +628,8 @@ function durationLine(rootJob: JobData): string {
   return rootJob.finishedAt ? `Duration: ${human}` : `Duration: running for ${human}`;
 }
 
-function aggregateTokens(rootJob: JobData): { input: number; output: number; cacheRead: number; cacheCreate: number } {
-  const jobs = [rootJob, ...descendantJobs(rootJob)];
+function aggregateTokens(rootJob: JobData, descendants: JobData[]): { input: number; output: number; cacheRead: number; cacheCreate: number } {
+  const jobs = [rootJob, ...descendants];
   let input = 0, output = 0, cacheRead = 0, cacheCreate = 0;
   for (const j of jobs) {
     input += j.inputTokens ?? 0;
@@ -640,8 +640,8 @@ function aggregateTokens(rootJob: JobData): { input: number; output: number; cac
   return { input, output, cacheRead, cacheCreate };
 }
 
-function costLine(rootJob: JobData): string {
-  const tokens = aggregateTokens(rootJob);
+function costLine(rootJob: JobData, descendants: JobData[]): string {
+  const tokens = aggregateTokens(rootJob, descendants);
   const total = totalTokens({
     inputTokens: tokens.input,
     outputTokens: tokens.output,
@@ -660,11 +660,11 @@ function costLine(rootJob: JobData): string {
   return `Cost: ${costStr} · ${totalStr} tokens (in ${tokens.input} / out ${tokens.output} / cache-read ${tokens.cacheRead})`;
 }
 
-function verdictLine(rootJob: JobData): string {
+function verdictLine(rootJob: JobData, descendants: JobData[]): string {
   if (rootJob.verdict) return `Verdict: ${rootJob.verdict}`;
-  const descendants = descendantJobs(rootJob).filter((j) => j.kind === 'review' && j.verdict);
-  descendants.sort((a, b) => (b.startedAt ?? 0) - (a.startedAt ?? 0));
-  const latest = descendants[0];
+  const reviews = descendants.filter((j) => j.kind === 'review' && j.verdict);
+  reviews.sort((a, b) => (b.startedAt ?? 0) - (a.startedAt ?? 0));
+  const latest = reviews[0];
   return latest?.verdict ? `Verdict: ${latest.verdict} (review ${latest.id.slice(0, 7)})` : '';
 }
 
@@ -678,6 +678,9 @@ function buildBody(job: JobData, boardMeta: StoredBoardMeta): string {
   const activities = boardMeta.activities ?? [];
   const issueContext = buildIssueContext(job);
   const prompt = rootPrompt(job).trim();
+  // Compute the descendant set once: descendantJobs scans the whole job cache
+  // and walks ancestors per row, and both verdictLine and costLine need it.
+  const descendants = descendantJobs(job);
   return [
     `TamTam Job ID: ${job.id}`,
     `Project: ${job.project}`,
@@ -685,9 +688,9 @@ function buildBody(job: JobData, boardMeta: StoredBoardMeta): string {
     `Branch: ${branch || '(unknown)'}`,
     `Run URL: ${jobUrl(job)}`,
     issueContext ? `Issue/PR context: ${issueContext}` : '',
-    verdictLine(job),
+    verdictLine(job, descendants),
     durationLine(job),
-    costLine(job),
+    costLine(job, descendants),
     statusDetailLine(boardMeta),
     '',
     'Task',
