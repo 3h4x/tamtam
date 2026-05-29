@@ -13,6 +13,7 @@ import { WorkflowGraph } from '@/components/workflow-runs/WorkflowGraph';
 import { WorkflowRunsEmptyState, WorkflowRunsLoadingState } from '@/components/workflow-runs/WorkflowRunsStates';
 import { WorkflowStatusBadge } from '@/components/workflow-runs/workflow-run-status';
 import { Button } from '@/components/ui/Button';
+import { Pill, type PillTone } from '@/components/ui/Pill';
 import { StandardTabs } from '@/components/ui/StandardTabs';
 import { Table, type Column } from '@/components/ui/Table';
 
@@ -129,12 +130,12 @@ function summarizeOutcome(run: WorkflowRunSummary): { label: string; tone: 'ok' 
   return { label: 'completed', tone: 'ok' };
 }
 
-function outcomeBadge(tone: 'ok' | 'warn' | 'err' | 'info'): string {
+function outcomePillTone(tone: 'ok' | 'warn' | 'err' | 'info'): PillTone {
   switch (tone) {
-    case 'ok':   return 'bg-status-success/15 text-status-success border-status-success/30';
-    case 'warn': return 'bg-status-warning/15 text-status-warning border-status-warning/30';
-    case 'err':  return 'bg-status-error/15 text-status-error border-status-error/30';
-    case 'info': return 'bg-accent/15 text-accent border-accent/30';
+    case 'ok': return 'success';
+    case 'warn': return 'warning';
+    case 'err': return 'error';
+    case 'info': return 'accent';
   }
 }
 
@@ -164,24 +165,25 @@ function workflowRunsErrorDetail(value: unknown): string | null {
   return null;
 }
 
-function modeBadge(mode: RunsMeta['mode'] | undefined): { label: string; className: string } {
+function modeBadge(mode: RunsMeta['mode'] | undefined): { label: string; tone: PillTone; className?: string } {
   switch (mode) {
     case 'drive':
       return {
         // The orchestrator workflow drives the release pipeline.
         label: 'Release: workflow drives',
-        className: 'bg-status-success/15 text-status-success border-status-success/30',
+        tone: 'success',
       };
     case 'observation_only':
       return {
         // Releases create workflow_runs but the chain is still driven by hooks.
         label: 'Release: workflow observes (hooks drive)',
-        className: 'bg-accent/15 text-accent border-accent/30',
+        tone: 'accent',
       };
     default:
       return {
         label: 'Release mode unknown',
-        className: 'bg-bg-tertiary text-text-tertiary border-border',
+        tone: 'neutral',
+        className: 'bg-bg-tertiary text-text-tertiary',
       };
   }
 }
@@ -427,12 +429,9 @@ export function WorkflowRunsPage() {
       render: (r) => {
         const outcome = summarizeOutcome(r);
         return (
-          <span
-            className={`inline-block rounded border px-2 py-0.5 text-xs ${outcomeBadge(outcome.tone)}`}
-            title={r.error ?? ''}
-          >
+          <Pill tone={outcomePillTone(outcome.tone)} size="xs" title={r.error ?? ''}>
             {outcome.label}
-          </span>
+          </Pill>
         );
       },
     },
@@ -465,9 +464,9 @@ export function WorkflowRunsPage() {
           const title =
             `TAMTAM_RELEASE_WORKFLOW_DRIVE=${data.meta.releaseWorkflowDrive ? 'on (default)' : '0 (observation fallback)'}`;
           return (
-            <span className={`inline-block px-2 py-0.5 rounded border text-xs ${badge.className}`} title={title}>
+            <Pill tone={badge.tone} size="xs" className={badge.className} title={title}>
               {badge.label}
-            </span>
+            </Pill>
           );
         })()}
         <span className="text-xs text-text-tertiary">
@@ -564,9 +563,14 @@ export function WorkflowRunsPage() {
                       </div>
                     </div>
                   </div>
-                  <span className={`shrink-0 max-w-[45%] truncate rounded border px-2 py-0.5 text-xs ${outcomeBadge(outcome.tone)}`} title={r.error ?? ''}>
+                  <Pill
+                    tone={outcomePillTone(outcome.tone)}
+                    size="xs"
+                    className="shrink-0 max-w-[45%] truncate"
+                    title={r.error ?? ''}
+                  >
                     {outcome.label}
-                  </span>
+                  </Pill>
                 </div>
                 <div className="mt-2 grid grid-cols-3 gap-2 text-xs">
                   <div className="min-w-0">
