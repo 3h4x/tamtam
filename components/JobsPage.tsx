@@ -167,7 +167,7 @@ export function JobsPage() {
     const c = {
       all: entries.length, running: 0, done: 0, failed: 0,
       run: 0, release: 0, review: 0, test: 0, fix: 0, 'fix-ci': 0,
-      commit: 0, push: 0, 'mark-dod': 0, 'pr-wait': 0, agent: 0, other: 0,
+      commit: 0, push: 0, 'mark-dod': 0, 'pr-wait': 0, soak: 0, agent: 0, other: 0,
     } as Record<string, number>
     for (const e of entries) {
       c[e.bucket] += 1

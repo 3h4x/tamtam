@@ -340,6 +340,53 @@ describe('RunRow', () => {
     unmount()
   })
 
+  it('does not duplicate the mark-dod category when the title already includes DoD detail', () => {
+    const entry = makeEntry({
+      kind: 'mark-dod',
+      bucket: 'mark-dod',
+      title: 'Mark DoD - 2/3 verified, 1 unverified',
+      subtitle: null,
+      navSessionId: null,
+      model: null,
+      inputTokens: 0,
+      outputTokens: 0,
+      costUsd: 0,
+    })
+
+    const { container, unmount } = renderRow({
+      entry,
+      onClick: vi.fn(),
+    })
+
+    expect(container.textContent).toContain('Mark DoD - 2/3 verified, 1 unverified')
+    expect(container.textContent?.match(/Mark DoD/g)).toHaveLength(1)
+    unmount()
+  })
+
+  it('does not prefix synthetic pipeline-step release rows with Release pipeline', () => {
+    const entry = makeEntry({
+      kind: 'release',
+      bucket: 'release',
+      title: 'Pipeline steps',
+      subtitle: null,
+      navSessionId: null,
+      model: null,
+      inputTokens: 0,
+      outputTokens: 0,
+      costUsd: 0,
+    })
+
+    const { container, unmount } = renderRow({
+      entry,
+      onClick: vi.fn(),
+    })
+
+    expect(container.textContent).toContain('Pipeline steps')
+    expect(container.textContent).not.toContain('Release pipelinePipeline steps')
+    expect(container.textContent).not.toContain('Release pipeline Pipeline steps')
+    unmount()
+  })
+
   it('renders NEEDS ATTENTION reviews as attention instead of green done', () => {
     const entry = makeEntry({
       verdict: 'NEEDS ATTENTION',

@@ -2,7 +2,7 @@
 
 import { formatAgo } from '@/lib/shared/format'
 import { isCancelledExitCode } from '@/lib/shared/job-exit-codes'
-import { formatDuration, formatTokens, formatCost, KIND_LABEL, KIND_COLOR, entryIsRunning, entryNeedsAttention } from '@/components/project-runs/utils'
+import { formatDuration, formatTokens, formatCost, KIND_LABEL, KIND_COLOR, entryIsRunning, entryNeedsAttention, runKindDisplayName, shouldShowStableKindTitle } from '@/components/project-runs/utils'
 import type { Entry } from '@/components/project-runs/utils'
 import { Button } from '@/components/ui/Button'
 import { Pill } from '@/components/ui/Pill'
@@ -305,10 +305,17 @@ export function RunRow({ entry: e, onClick, expandable, expanded, onToggleExpand
   const fileCount = modifiedFileCount(e.modifiedFiles)
   const durationLabel = formatDuration(e.startedAt, e.finishedAt)
   const startedLabel = formatAgo(e.startedAt)
+  // Pipeline-step rows now carry their work_summary in the title (see
+  // titleForJob), so only chat/agent rows surface their own summary on this
+  // secondary line — otherwise it would duplicate the title. childFailureSummary
+  // is about a parent's failed *children* (releases/agent-owned releases) and
+  // still applies regardless of kind.
+  const isConversationalRow = e.bucket === 'run' || e.bucket === 'agent'
+  const ownSummary = isConversationalRow ? formatRunSummaryText(e.workSummary) : null
   const childFailureSummary = effectiveNeedsAttention ? formatRunSummaryText(latestFailureSummary(e)) : null
-  const runSummary = effectiveRunning ? null : formatRunSummaryText(e.workSummary) ?? childFailureSummary
+  const runSummary = effectiveRunning ? null : (ownSummary ?? childFailureSummary)
   const liveDetail = effectiveRunning
-    ? (e.workSummary ? formatRunSummaryText(e.workSummary) : e.subtitle?.trim() || null)
+    ? (isConversationalRow && e.workSummary ? formatRunSummaryText(e.workSummary) : e.subtitle?.trim() || null)
     : null
   const summaryParts = splitSummary(summary)
   const failedStepLabel = effectiveNeedsAttention
@@ -390,6 +397,8 @@ export function RunRow({ entry: e, onClick, expandable, expanded, onToggleExpand
   const visibleSummaryParts = effectiveNeedsAttention && !failedStepLabel
     ? summaryParts.slice(-1)
     : []
+  const stableKindTitle = runKindDisplayName(e.kind)
+  const showStableKindTitle = shouldShowStableKindTitle(e)
 
   // Tree connector lines. Ancestor levels get a full-height vertical rail;
   // the current depth gets a half-height vertical + horizontal stub (└─ shape).
@@ -437,7 +446,12 @@ export function RunRow({ entry: e, onClick, expandable, expanded, onToggleExpand
                 <span className={`shrink-0 inline-flex h-5 min-w-[58px] items-center justify-center rounded px-1.5 text-[10px] font-mono font-semibold ${KIND_COLOR[e.bucket]}`}>
                   {KIND_LABEL[e.bucket]}
                 </span>
-                <div className="min-w-0 truncate text-sm font-medium text-text-primary group-hover:text-accent">
+                {showStableKindTitle && (
+                  <span className="shrink-0 text-sm font-medium text-text-primary">
+                    {stableKindTitle}
+                  </span>
+                )}
+                <div className="min-w-0 truncate text-sm font-medium text-text-primary group-hover:text-accent" title={e.title}>
                   {e.title}
                 </div>
               </div>

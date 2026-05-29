@@ -1603,6 +1603,23 @@ export async function markDone(job: JobData, exitCode: number): Promise<void> {
     } catch (e) {
       console.log(`[job ${job.id}] failed to finalize agent run report:`, e);
     }
+  } else if (
+    (job.kind === 'review' || job.kind === 'fix' || job.kind === 'fix-ci') &&
+    rawLog &&
+    !job.workSummary
+  ) {
+    // LLM-driven steps emit a final summary of what they found/changed. Capture
+    // it the same way agents do so the History row's title says what the review
+    // or fix actually did instead of a generic "Code review" / "Auto-fix" label.
+    try {
+      const { extractAssistantTextFromRawLog, extractWorkSummary } = await import(
+        '@/lib/agents/work-summary-extractor.mjs'
+      );
+      const { summary } = extractWorkSummary(extractAssistantTextFromRawLog(rawLog));
+      if (summary) job.workSummary = summary;
+    } catch (e) {
+      console.log(`[job ${job.id}] failed to extract step summary:`, e);
+    }
   }
 
   // Claim the DB row and emit the durable completion event in one transaction.

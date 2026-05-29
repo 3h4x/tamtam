@@ -174,7 +174,38 @@ test.describe('Home status badge live transitions', () => {
     await expect(page.getByText('releasing')).toHaveCount(0);
   });
 
-  // ─── Test 3: agent running → idle ──────────────────────────────────────────
+  // ─── Test 3: releasing → idle ─────────────────────────────────────────────
+  test('clears the "releasing" badge after the release finishes on next runtime poll', async ({
+    page,
+  }) => {
+    test.setTimeout(TRANSITION_TIMEOUT);
+    let phase: 'releasing' | 'idle' = 'releasing';
+
+    await stubCommonRoutes(page);
+    await page.route('**/api/projects/runtime', (route: Route) => {
+      const body =
+        phase === 'releasing'
+          ? makeRuntime(PROJECT, {
+              hasRunningRelease: true,
+              runningCount: 1,
+              runningKinds: ['release'],
+              releaseStartedAt: now() - 60,
+            })
+          : makeRuntime(PROJECT);
+      route.fulfill({ json: { projects: body } });
+    });
+
+    await page.goto('/');
+    await expect(page.getByText(PROJECT)).toBeVisible({ timeout: 8_000 });
+    await expect(page.getByText('releasing')).toBeVisible({ timeout: 8_000 });
+
+    // Release completes — next poll must clear the badge.
+    phase = 'idle';
+    await expect(page.getByText('releasing')).toHaveCount(0, { timeout: 40_000 });
+    await expect(page.locator('span.animate-pulse').filter({ hasText: 'stuck' })).toHaveCount(0);
+  });
+
+  // ─── Test 4: agent running → idle ──────────────────────────────────────────
   test('clears the "agent running" badge after the agent finishes', async ({ page }) => {
     test.setTimeout(TRANSITION_TIMEOUT);
     let phase: 'running' | 'idle' = 'running';

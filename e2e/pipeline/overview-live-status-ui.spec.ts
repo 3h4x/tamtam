@@ -191,6 +191,46 @@ test.describe('Overview tab live status polling', () => {
     await expect(page.getByRole('button', { name: /tests running/i })).toHaveCount(0);
   });
 
+  test('review card flips from running to DO NOT SHIP and clears the active-work banner without reload', async ({
+    page,
+  }) => {
+    let serveRunning = true;
+
+    await stubOverviewRoutes(page);
+    await page.route(
+      (url) => url.pathname === '/api/jobs' && url.searchParams.get('project') === PROJECT,
+      (route: Route) =>
+        route.fulfill({
+          json: {
+            jobs: [
+              serveRunning
+                ? makeJob('review-dns-live', 'review', 'running', null)
+                : makeJob('review-dns-live', 'review', 'done', 0, {
+                    verdict: 'DO NOT SHIP',
+                    session_id: 'sess-review-dns-live',
+                  }),
+            ],
+            pendingReleaseProjects: [],
+          },
+        }),
+    );
+
+    await page.goto(`/project/${PROJECT}`);
+
+    await expect(page.getByText('1 running now')).toBeVisible({ timeout: 8_000 });
+    await expect(page.getByRole('button', { name: /review running/i }).first()).toBeVisible({
+      timeout: 8_000,
+    });
+
+    serveRunning = false;
+
+    await expect(page.getByText('1 running now')).not.toBeVisible({ timeout: 12_000 });
+    await expect(
+      page.getByRole('button', { name: /review do not ship/i }).first(),
+    ).toBeVisible({ timeout: 12_000 });
+    await expect(page.getByRole('button', { name: /review running/i })).toHaveCount(0);
+  });
+
   test('overview keeps concurrent review and test transitions isolated as one finishes and the other keeps running', async ({
     page,
   }) => {

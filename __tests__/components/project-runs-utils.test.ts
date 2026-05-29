@@ -13,8 +13,11 @@ import {
   flattenReleaseChildren,
   flattenPipelineSteps,
   parseJobCountsResponse,
+  buildEntries,
+  shouldShowStableKindTitle,
 } from '@/components/project-runs/utils';
 import type { Entry } from '@/components/project-runs/utils';
+import type { JobInfo } from '@/lib/client-api';
 
 // ---------------------------------------------------------------------------
 // parseJobCountsResponse
@@ -630,5 +633,149 @@ describe('flattenReleaseChildren', () => {
       { entry: fix, depth: 2 },
       { entry: review, depth: 1 },
     ]);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// titleForJob (exercised through buildEntries) — pipeline-step rows describe
+// their outcome in the title slot instead of a static "Test run"/"Code review".
+// ---------------------------------------------------------------------------
+describe('buildEntries — pipeline-step titles', () => {
+  let n = 0;
+  function makeJob(partial: Partial<JobInfo> & { kind: string }): JobInfo {
+    n += 1;
+    return {
+      id: `job-${n}`,
+      project: 'p',
+      prompt: null,
+      pid: 1,
+      log_path: '',
+      status: 'done',
+      exit_code: 0,
+      started_at: 1000 + n,
+      finished_at: 2000 + n,
+      seen: true,
+      ...partial,
+    };
+  }
+  const titleOf = (partial: Partial<JobInfo> & { kind: string }): string =>
+    buildEntries([makeJob(partial)])[0].title;
+
+  it('shows pass/fail for a completed test from its exit code', () => {
+    expect(titleOf({ kind: 'test', exit_code: 0 })).toBe('✅ Tests passed');
+    expect(titleOf({ kind: 'test', exit_code: 1 })).toBe('❌ Tests failed');
+  });
+
+  it('marks a cancelled or running test distinctly', () => {
+    expect(titleOf({ kind: 'test', status: 'aborted', exit_code: -3 })).toBe('Tests cancelled');
+    expect(titleOf({ kind: 'test', status: 'running', exit_code: null, finished_at: null })).toBe('Running tests…');
+  });
+
+  it('prefers a captured work_summary over the derived test status', () => {
+    expect(titleOf({ kind: 'test', exit_code: 0, work_summary: '142 tests, 0 failures' }))
+      .toBe('142 tests, 0 failures');
+  });
+
+  it('uses the review verdict when no summary was captured', () => {
+    expect(titleOf({ kind: 'review', verdict: 'LGTM' })).toBe('✓ LGTM — looks good to ship');
+    expect(titleOf({ kind: 'review', verdict: 'NEEDS ATTENTION' })).toBe('⚠ Needs attention');
+    expect(titleOf({ kind: 'review', verdict: 'DO NOT SHIP' })).toBe('✗ Do not ship');
+  });
+
+  it('prefers the review finding summary over the verdict', () => {
+    expect(titleOf({ kind: 'review', verdict: 'NEEDS ATTENTION', work_summary: 'Address race in poller' }))
+      .toBe('Address race in poller');
+  });
+
+  it('surfaces the commit/push/fix work_summary in the title', () => {
+    expect(titleOf({ kind: 'commit', work_summary: 'fix(api): handle null (abc1234)' }))
+      .toBe('fix(api): handle null (abc1234)');
+    expect(titleOf({ kind: 'push', work_summary: 'Pushed as abc1234' })).toBe('Pushed as abc1234');
+    expect(titleOf({ kind: 'fix', work_summary: 'Lowercased contract address before persist' }))
+      .toBe('Lowercased contract address before persist');
+  });
+
+  it('falls back to the kind label for steps with no captured summary', () => {
+    expect(titleOf({ kind: 'commit' })).toBe('Commit');
+    expect(titleOf({ kind: 'push' })).toBe('Push');
+    expect(titleOf({ kind: 'fix' })).toBe('Auto-fix');
+  });
+
+  it('uses stable titles for pr-wait and soak so row prefixes do not duplicate them', () => {
+    expect(titleOf({ kind: 'pr-wait' })).toBe('PR wait');
+    expect(titleOf({ kind: 'soak' })).toBe('Soak');
+  });
+
+  it('does not request a stable prefix for mark-dod detail titles', () => {
+    const [entry] = buildEntries([makeJob({
+      kind: 'mark-dod',
+      context_meta: JSON.stringify({ total: 3, verified: 2 }),
+    })]);
+
+    expect(entry.title).toBe('Mark DoD — 2/3 ✓, 1 unverified');
+    expect(shouldShowStableKindTitle(entry)).toBe(false);
+  });
+
+  it('does not request a stable prefix for synthetic pipeline-step release rows', () => {
+    const grouped = groupReleaseChildren(buildEntries([
+      makeJob({ id: 'test-1', kind: 'test', started_at: 1000, finished_at: 1010 }),
+      makeJob({ id: 'push-1', kind: 'push', started_at: 1020, finished_at: 1030, exit_code: 1 }),
+    ]));
+
+    expect(grouped).toHaveLength(1);
+    expect(grouped[0].title).toBe('Pipeline steps');
+    expect(shouldShowStableKindTitle(grouped[0])).toBe(false);
+  });
+
+  it('refreshes a merged review title when a later turn captures a summary', () => {
+    const entries = buildEntries([
+      makeJob({
+        kind: 'review',
+        session_id: 'sess-review',
+        status: 'running',
+        exit_code: null,
+        finished_at: null,
+      }),
+      makeJob({
+        kind: 'review',
+        session_id: 'sess-review',
+        status: 'done',
+        exit_code: 0,
+        verdict: 'NEEDS ATTENTION',
+        work_summary: 'Address race in poller',
+      }),
+    ]);
+
+    expect(entries).toHaveLength(1);
+    expect(entries[0].title).toBe('Address race in poller');
+    expect(entries[0].verdict).toBe('NEEDS ATTENTION');
+  });
+
+  it('refreshes a merged fix title when a later turn captures a summary', () => {
+    const entries = buildEntries([
+      makeJob({
+        kind: 'fix',
+        session_id: 'sess-fix',
+        status: 'running',
+        exit_code: null,
+        finished_at: null,
+      }),
+      makeJob({
+        kind: 'fix',
+        session_id: 'sess-fix',
+        status: 'done',
+        exit_code: 0,
+        work_summary: 'Lowercased contract address before persist',
+      }),
+    ]);
+
+    expect(entries).toHaveLength(1);
+    expect(entries[0].title).toBe('Lowercased contract address before persist');
+  });
+
+  it('keeps the agent task name and run prompt as the title', () => {
+    expect(titleOf({ kind: 'agent:improve-frontend', work_summary: 'Fixed a telemetry dead-end' }))
+      .toBe('improve-frontend');
+    expect(titleOf({ kind: 'run', user_prompt: 'add a dark mode toggle' })).toBe('add a dark mode toggle');
   });
 });

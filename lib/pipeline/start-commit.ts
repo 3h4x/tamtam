@@ -560,6 +560,24 @@ async function recordDefaultDirtyCommitRecoveryMarker(
   }
 }
 
+// One-line outcome for the commit job's History row title. runCommit returns a
+// status-only `message` ('committed' / 'Nothing to commit'); read the actual
+// subject from HEAD so the row reads like "fix(x): …  (abc1234)".
+async function summarizeCommit(
+  projPath: string,
+  result: Extract<CommitResult, { ok: true }>,
+  signal?: AbortSignal,
+): Promise<string> {
+  if (!result.commitSha) return result.message || 'Nothing to commit';
+  try {
+    const subjR = await exec('git', ['-C', projPath, 'log', '-1', '--format=%s'], { timeout: 5000, signal });
+    const subject = subjR.exitCode === 0 ? subjR.stdout.trim() : '';
+    return subject ? `${subject} (${result.commitSha})` : `Committed ${result.commitSha}`;
+  } catch {
+    return `Committed ${result.commitSha}`;
+  }
+}
+
 export async function startProjectCommit(
   projectName: string,
   options: { parentJobId?: string | null } = {},
@@ -631,6 +649,9 @@ export async function startProjectCommit(
         const { clearDefaultDirtyCommitRecoveryMarker } = await import('./commit-recovery-marker');
         await clearDefaultDirtyCommitRecoveryMarker(projectName);
       } catch {}
+      // Record what the commit did so the History row's title shows the
+      // outcome (commit subject + sha) instead of a generic "Commit" label.
+      job.workSummary = await summarizeCommit(projPath, result, signal);
       append(`\n# commit ok — ${'commitSha' in result && result.commitSha ? result.commitSha : 'no-op'}\n${result.message}\n`);
     } else {
       append(`\n# commit failed (${result.status})\n${result.detail}\n`);

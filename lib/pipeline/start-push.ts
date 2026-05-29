@@ -45,6 +45,14 @@ export type PushResult =
   | { ok: true; jobId?: string; commitSha: string; message: string; prUrl?: string; prNumber?: number; prRepo?: string }
   | { ok: false; jobId?: string; status: number; detail: string; blockingJobId?: string };
 
+// One-line outcome for the push job's History row title — the opened PR, the
+// pushed sha, or the no-op message — instead of a generic "Push" label.
+function summarizePush(result: Extract<PushResult, { ok: true }>): string {
+  if (result.prUrl) return result.prNumber ? `Opened PR #${result.prNumber}` : (result.message || 'Pushed');
+  if (result.commitSha) return `Pushed as ${result.commitSha}`;
+  return result.message || 'Pushed';
+}
+
 const RETRIABLE_RELEASE_STEP_KINDS = new Set(['test', 'review', 'fix', 'commit', 'push', 'mark-dod', 'pr-wait', 'soak']);
 
 function latestStartedJob(jobs: JobData[], matches: (job: JobData) => boolean): JobData | undefined {
@@ -256,6 +264,7 @@ export async function startProjectPush(
     if (result.ok) {
       invalidateProject(projectName);
       clearProjectDataCache();
+      job.workSummary = summarizePush(result);
       append(`\n# push ok — ${'commitSha' in result && result.commitSha ? result.commitSha : 'no-op'}\n${result.message}\n`);
       if (result.prUrl) {
         job.contextMeta = JSON.stringify({ prUrl: result.prUrl, prNumber: result.prNumber, prRepo: result.prRepo });
@@ -375,6 +384,7 @@ export async function launchProjectPush(
       if (result.ok) {
         invalidateProject(projectName);
         clearProjectDataCache();
+        job.workSummary = summarizePush(result);
         append(`\n# push ok — ${'commitSha' in result && result.commitSha ? result.commitSha : 'no-op'}\n${result.message}\n`);
         if (result.prUrl) {
           job.contextMeta = JSON.stringify({ prUrl: result.prUrl, prNumber: result.prNumber, prRepo: result.prRepo });

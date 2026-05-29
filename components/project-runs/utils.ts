@@ -1,5 +1,6 @@
 import type { JobInfo } from '@/lib/client-api'
 import { costUsd as computeCost } from '@/lib/shared/usage-pricing'
+import { isCancelledExitCode } from '@/lib/shared/job-exit-codes'
 
 export function formatDuration(startedAt: number, finishedAt: number | null): string {
   const end = finishedAt || Date.now() / 1000
@@ -189,6 +190,38 @@ export function activeWorkBadgeLabel(kindOrBucket: string): string {
   return KIND_LABEL[bucketOf(kindOrBucket)]
 }
 
+export function runKindDisplayName(kindOrBucket: string): string {
+  const bucket = kindOrBucket in KIND_LABEL ? kindOrBucket as KindBucket : bucketOf(kindOrBucket)
+  if (bucket === 'run') return 'Chat'
+  if (bucket === 'release') return 'Release pipeline'
+  if (bucket === 'review') return 'Code review'
+  if (bucket === 'test') return 'Test run'
+  if (bucket === 'fix') return 'Auto-fix'
+  if (bucket === 'fix-ci') return 'Fix CI'
+  if (bucket === 'commit') return 'Commit'
+  if (bucket === 'push') return 'Push'
+  if (bucket === 'mark-dod') return 'Mark DoD'
+  if (bucket === 'pr-wait') return 'PR wait'
+  if (bucket === 'soak') return 'Soak'
+  if (bucket === 'agent') return 'Agent'
+  return 'Action'
+}
+
+export function shouldShowStableKindTitle(entry: Pick<Entry, 'bucket' | 'kind' | 'title'>): boolean {
+  if (entry.bucket === 'run' || entry.bucket === 'agent') return false
+
+  const stableKindTitle = runKindDisplayName(entry.kind)
+  if (stableKindTitle === entry.title) return false
+
+  // These titles already carry their category and detail in one phrase. A
+  // separate stable prefix would read as "Mark DoD Mark DoD - ..." or
+  // "Release pipeline Pipeline steps".
+  if (entry.bucket === 'mark-dod') return false
+  if (entry.bucket === 'release' && entry.title === 'Pipeline steps') return false
+
+  return true
+}
+
 export function activeWorkAccentClass(kind: string): string {
   const bucket = bucketOf(kind)
   if (bucket === 'run' || bucket === 'release') return 'border-l-accent'
@@ -201,6 +234,19 @@ export function activeWorkAccentClass(kind: string): string {
 export function activeWorkTitle(job: JobInfo): string {
   const bucket = bucketOf(job.kind)
   if (bucket === 'run') return 'chat'
+  if (
+    bucket === 'fix-ci'
+    || bucket === 'mark-dod'
+    || bucket === 'test'
+    || bucket === 'review'
+    || bucket === 'fix'
+    || bucket === 'commit'
+    || bucket === 'push'
+    || bucket === 'pr-wait'
+    || bucket === 'soak'
+  ) {
+    return runKindDisplayName(bucket)
+  }
   return titleForJob(job, bucket)
 }
 
@@ -387,16 +433,54 @@ function truncate(s: string, n: number): string {
   return s.slice(0, n - 1) + '…'
 }
 
+function reviewVerdictTitle(verdict: string): string {
+  if (verdict === 'LGTM') return '✓ LGTM — looks good to ship'
+  if (verdict === 'DO NOT SHIP') return '✗ Do not ship'
+  return '⚠ Needs attention'
+}
+
+// Pipeline-step rows are already tagged by the [kind] pill, so a static
+// "Test run" / "Code review" title just repeats it. Use the title slot to
+// say what the step actually did — pass/fail, verdict, what was committed or
+// pushed, what the fix changed — preferring the captured work_summary and
+// falling back to a derived status (or the kind label while the step is still
+// running, or when nothing was captured).
 function titleForJob(job: JobInfo, bucket: KindBucket): string {
   const prompt = job.user_prompt || job.prompt
   if (bucket === 'run') return prompt ? truncate(prompt, 140) : '(empty prompt)'
+  if (bucket === 'agent') return job.kind.replace(/^agent:/, '') || 'agent'
   if (bucket === 'release') return 'Release pipeline'
-  if (bucket === 'review') return 'Code review'
-  if (bucket === 'test') return 'Test run'
-  if (bucket === 'fix') return 'Auto-fix'
-  if (bucket === 'fix-ci') return 'Fix CI'
-  if (bucket === 'commit') return 'Commit'
-  if (bucket === 'push') return 'Push'
+
+  const running = job.status === 'running'
+  const summary = job.work_summary?.trim()
+
+  if (bucket === 'test') {
+    if (running) return 'Running tests…'
+    if (summary) return truncate(summary, 140)
+    if (job.status === 'aborted' || isCancelledExitCode(job.exit_code)) return 'Tests cancelled'
+    return job.exit_code === 0 ? '✅ Tests passed' : '❌ Tests failed'
+  }
+  if (bucket === 'review') {
+    if (running) return 'Reviewing changes…'
+    if (summary) return truncate(summary, 140)
+    if (job.verdict) return reviewVerdictTitle(job.verdict)
+    return 'Code review'
+  }
+  if (bucket === 'fix' || bucket === 'fix-ci') {
+    if (running) return bucket === 'fix-ci' ? 'Fixing CI…' : 'Applying fixes…'
+    if (summary) return truncate(summary, 140)
+    return bucket === 'fix-ci' ? 'Fix CI' : 'Auto-fix'
+  }
+  if (bucket === 'commit') {
+    if (running) return 'Committing…'
+    if (summary) return truncate(summary, 140)
+    return 'Commit'
+  }
+  if (bucket === 'push') {
+    if (running) return 'Pushing…'
+    if (summary) return truncate(summary, 140)
+    return 'Push'
+  }
   if (bucket === 'mark-dod') {
     try {
       const meta = JSON.parse(job.context_meta ?? '')
@@ -408,8 +492,8 @@ function titleForJob(job: JobInfo, bucket: KindBucket): string {
     } catch {}
     return 'Mark DoD'
   }
-  if (bucket === 'pr-wait') return 'PR wait (CI + merge)'
-  if (bucket === 'agent') return job.kind.replace(/^agent:/, '') || 'agent'
+  if (bucket === 'pr-wait') return 'PR wait'
+  if (bucket === 'soak') return 'Soak'
   return job.kind
 }
 
@@ -510,6 +594,10 @@ export function buildEntries(jobs: JobInfo[]): Entry[] {
         existing.costUsd += jobCost(j)
         existing.navJobId = j.id
         existing.workSummary = j.work_summary ?? existing.workSummary
+        if (!isConversational) {
+          existing.title = titleForJob({ ...j, work_summary: existing.workSummary }, bucket)
+          existing.subtitle = subtitleForJob(j, bucket)
+        }
         existing.modifiedFiles = j.modified_files ?? existing.modifiedFiles
         existing.outcomeVerdict = outcomeVerdictFromContext(j.context_meta)
         const followupIssue = followupIssueFromContext(j.context_meta)
