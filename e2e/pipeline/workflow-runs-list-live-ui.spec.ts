@@ -11,7 +11,7 @@ type WorkflowRunSummary = {
   id: string;
   name: string;
   rawName: string;
-  status: 'running' | 'completed' | 'failed';
+  status: 'running' | 'completed' | 'failed' | 'cancelled';
   createdAt: string;
   startedAt: string | null;
   completedAt: string | null;
@@ -135,5 +135,34 @@ test.describe('Workflow runs list live polling', () => {
     await expect(attentionPanel.getByText('release orchestration failed after review')).toBeVisible();
     await expect(page.getByLabel('Active workflow runs')).toHaveCount(0);
     await expect(page.getByRole('button', { name: /failed 1/i })).toBeVisible();
+  });
+
+  test('active run moves to cancelled attention state without reload', async ({ page }) => {
+    let serveRunning = true;
+
+    await stubWorkflowRunsShell(page);
+    await stubWorkflowRuns(page, () => [
+      serveRunning
+        ? makeRun('running')
+        : makeRun('cancelled', { error: 'release was cancelled before completion' }),
+    ]);
+
+    await page.goto('/workflow-runs');
+
+    await expect(page.getByLabel('Active workflow runs')).toBeVisible({ timeout: 8_000 });
+    await expect(page.getByLabel('status running').first()).toBeVisible();
+    await expect(page.getByLabel('Workflow runs needing attention')).toHaveCount(0);
+
+    const stableUrl = page.url();
+    serveRunning = false;
+
+    const attentionPanel = page.getByLabel('Workflow runs needing attention');
+    await expect(attentionPanel).toBeVisible({ timeout: 12_000 });
+    await expect(attentionPanel.getByText('needs attention')).toBeVisible();
+    await expect(attentionPanel.getByLabel('status cancelled')).toBeVisible();
+    await expect(attentionPanel.getByText('release was cancelled before completion')).toBeVisible();
+    await expect(page.getByLabel('Active workflow runs')).toHaveCount(0);
+    await expect(page.getByRole('button', { name: /cancelled 1/i })).toBeVisible();
+    await expect(page).toHaveURL(stableUrl);
   });
 });

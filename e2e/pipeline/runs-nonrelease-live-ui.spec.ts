@@ -361,6 +361,56 @@ test.describe('Runs page non-release live polling', () => {
     await expect(doneRow.getByText('Live filter check complete')).toBeVisible()
   })
 
+  test('active done filter populates when a running chat run completes', async ({ page }) => {
+    let serveRunning = true
+
+    await stubRunsShellRoutes(page)
+    await page.route('**/api/jobs?limit=200', (route: Route) => {
+      const running = serveRunning
+      route.fulfill({
+        json: {
+          jobs: [
+            makeJob({
+              id: 'chat-run-done-filter-live-1',
+              project: RUN_PROJECT,
+              kind: 'run',
+              prompt: 'Wait for the done filter to fill',
+              user_prompt: 'Wait for the done filter to fill',
+              session_id: 'sess-chat-run-done-filter-live-1',
+              status: running ? 'running' : 'done',
+              exit_code: running ? null : 0,
+              started_at: now() - 75,
+              finished_at: running ? null : now() - 5,
+              work_summary: running ? 'Still running before filter switch' : 'Done filter filled live',
+            }),
+          ],
+          total: 1,
+          pendingReleaseProjects: [],
+        },
+      })
+    })
+
+    await page.goto('/runs')
+
+    const row = runRow(page, RUN_PROJECT)
+    await expect(row).toBeVisible({ timeout: 8_000 })
+    await expect(row.getByLabel('running')).toBeVisible()
+
+    await page.getByRole('button', { name: /^done/ }).click()
+    await expect(page.getByText('No completed runs in view')).toBeVisible()
+    await expect(page.getByText('The current view only contains running or attention-needed work.')).toBeVisible()
+    await expect(row).toHaveCount(0)
+
+    serveRunning = false
+
+    const doneRow = runRow(page, RUN_PROJECT)
+    await expect(doneRow).toBeVisible({ timeout: 12_000 })
+    await expect(doneRow.getByLabel('done')).toBeVisible({ timeout: 12_000 })
+    await expect(doneRow.getByText('done', { exact: true })).toBeVisible({ timeout: 12_000 })
+    await expect(doneRow.getByText('Done filter filled live')).toBeVisible({ timeout: 12_000 })
+    await expect(doneRow.getByLabel('running')).toHaveCount(0, { timeout: 12_000 })
+  })
+
   test('agent row flips from running to cancelled without disturbing a concurrent chat run', async ({ page }) => {
     let pollCount = 0
 
