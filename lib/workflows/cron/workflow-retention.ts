@@ -1,6 +1,6 @@
-// Retention sweep for the `workflow.workflow_*` tables that the Vercel
-// Workflow runtime owns. Runs from the daily `system-cron` graphile-worker
-// task — see `lib/workflows/cron/system-cron-task.ts`.
+// Retention sweep for `workflow.workflow_*` tables in a Postgres-backed
+// workflow world. Runs from the daily `system-cron` graphile-worker task —
+// see `lib/workflows/cron/system-cron-task.ts`.
 //
 // Without this, `workflow_runs` and `workflow_events` grow unbounded — the
 // migration plan flagged that as a risk (`workflow_*` table growth). The
