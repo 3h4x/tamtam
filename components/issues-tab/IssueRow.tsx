@@ -6,6 +6,7 @@ import type { GhIssue, ProjectConfig } from '@/lib/client-api'
 import { formatAgo } from '@/lib/shared/format'
 import { Labels } from '@/components/issues-tab/shared'
 import { Button } from '@/components/ui/Button'
+import { Pill } from '@/components/ui/Pill'
 import { Spinner } from '@/components/ui/Spinner'
 
 // Build the hover tooltip for the "Work on" button — an ordered list of
@@ -120,17 +121,17 @@ export function IssueRow({ issue, projectName, projectCfg }: { issue: GhIssue; p
             >
               <span className="line-clamp-2">{issue.title}</span>
             </button>
-            <span className="shrink-0 rounded-full border border-border bg-bg-tertiary px-1.5 py-0.5 text-[10px] font-mono text-text-secondary tabular-nums">
+            <Pill size="xs" className="shrink-0 rounded-full bg-bg-tertiary px-1.5 py-0.5 text-[10px] font-mono text-text-secondary tabular-nums">
               #{issue.number}
-            </span>
+            </Pill>
           </div>
           <div className="flex flex-wrap items-center gap-x-2 gap-y-1 text-[11px] text-text-tertiary tabular-nums">
             <span className="text-text-tertiary">by <span className="text-text-secondary">{issue.author?.login}</span></span>
             <span title={issue.createdAt}>{formatAgo(new Date(issue.createdAt).getTime() / 1000)}</span>
             {issue.assignees?.length > 0 && (
-              <span className="max-w-[240px] truncate rounded bg-bg-tertiary px-1.5 py-0.5 text-[10px] text-text-secondary" title={issue.assignees.map((a) => a.login).join(', ')}>
+              <Pill size="xs" className="max-w-[240px] truncate rounded bg-bg-tertiary px-1.5 py-0.5 text-[10px] text-text-secondary" title={issue.assignees.map((a) => a.login).join(', ')}>
                 assigned {issue.assignees.map((a) => a.login).join(', ')}
-              </span>
+              </Pill>
             )}
           </div>
           {issue.labels.length > 0 && (
