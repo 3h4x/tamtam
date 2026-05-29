@@ -5,6 +5,8 @@ import { isCancelledExitCode } from '@/lib/shared/job-exit-codes'
 import { formatDuration, formatTokens, formatCost, KIND_LABEL, KIND_COLOR, entryIsRunning, entryNeedsAttention } from '@/components/project-runs/utils'
 import type { Entry } from '@/components/project-runs/utils'
 import { Button } from '@/components/ui/Button'
+import { Pill } from '@/components/ui/Pill'
+import type { PillTone } from '@/components/ui/Pill'
 
 export const RUN_ROW_GRID_CLASS = 'lg:grid-cols-[minmax(360px,1.2fr)_minmax(360px,1fr)_96px_120px_minmax(84px,auto)]'
 
@@ -71,17 +73,17 @@ function StepChip({ value }: { value: string }) {
   const failed = value.includes('✗') || lower.includes('fail') || lower.includes('attention') || lower.includes('ship') || lower.includes('blocked')
   const pending = lower.includes('pending') || lower.includes('queued') || lower.includes('running')
   const done = lower.includes('✓') || lower.includes('lgtm') || lower.includes('done') || lower.includes('completed')
-  const tone = failed
-    ? 'border-status-error/30 bg-status-error/10 text-status-error'
+  const tone: PillTone = failed
+    ? 'error'
     : pending
-    ? 'border-status-info/30 bg-status-info/10 text-status-info'
+    ? 'info'
     : done
-    ? 'border-status-success/30 bg-status-success/10 text-status-success'
-    : 'border-border bg-bg-primary text-text-secondary'
+    ? 'success'
+    : 'neutral'
   return (
-    <span className={`inline-flex h-5 items-center rounded border px-1.5 text-[10px] font-mono ${tone}`}>
+    <Pill tone={tone} size="xs" className="h-5 rounded px-1.5 text-[10px] font-mono">
       {value}
-    </span>
+    </Pill>
   )
 }
 
@@ -210,30 +212,32 @@ function VerdictBadge({
   // states are already shown by RowStateBadge — emitting a second "done" or
   // "exit X" badge here just duplicates that without adding information.
   if (!verdict || isRunning || isFailed) return null
+  const tone: PillTone = verdict === 'LGTM'
+    ? 'success'
+    : verdict === 'DO NOT SHIP'
+    ? 'error'
+    : 'warning'
+  const label = verdict === 'LGTM' ? '✓ LGTM' : verdict === 'DO NOT SHIP' ? '✗ DNS' : '⚠ ATTN'
   return (
-    <span className={`inline-flex h-5 items-center rounded border px-1.5 text-[10px] font-medium font-mono ${
-      verdict === 'LGTM' ? 'bg-status-success/15 text-status-success border border-status-success/30' :
-      verdict === 'DO NOT SHIP' ? 'bg-status-error/15 text-status-error border border-status-error/30' :
-      'bg-status-warning/15 text-status-warning border border-status-warning/30'
-    }`} title={`Review verdict: ${verdict}`}>
-      {verdict === 'LGTM' ? '✓ LGTM' : verdict === 'DO NOT SHIP' ? '✗ DNS' : '⚠ ATTN'}
-    </span>
+    <Pill tone={tone} size="xs" className="h-5 rounded px-1.5 text-[10px] font-mono" title={`Review verdict: ${verdict}`}>
+      {label}
+    </Pill>
   )
 }
 
 function ReleaseOutcomeBadge({ entry }: { entry: Entry }) {
   const outcome = entry.releaseOutcome
   if (!outcome) return null
-  const cls =
-    outcome.status === 'running' ? 'bg-status-info/15 text-status-info border-status-info/30' :
-    outcome.status === 'done' ? 'bg-status-success/15 text-status-success border-status-success/30' :
-    outcome.status === 'blocked' ? 'bg-status-warning/15 text-status-warning border-status-warning/30' :
-    'bg-status-error/15 text-status-error border-status-error/30'
+  const tone: PillTone =
+    outcome.status === 'running' ? 'info' :
+    outcome.status === 'done' ? 'success' :
+    outcome.status === 'blocked' ? 'warning' :
+    'error'
   const label = outcome.status === 'done' ? '✓ release done' : outcome.label
   return (
-    <span className={`inline-flex h-5 items-center gap-1 rounded border px-1.5 text-[10px] font-medium ${cls}`}>
+    <Pill tone={tone} size="xs" className="h-5 gap-1 rounded px-1.5 text-[10px]">
       {label}
-    </span>
+    </Pill>
   )
 }
 
@@ -250,24 +254,20 @@ function RowStateBadge({
 }) {
   if (isRunning) {
     return (
-      <span className="inline-flex h-5 items-center gap-1.5 rounded border border-status-info/30 bg-status-info/15 px-1.5 text-[10px] font-medium text-status-info">
+      <Pill tone="info" size="xs" className="h-5 gap-1.5 rounded px-1.5 text-[10px]">
         <span className="relative flex h-1.5 w-1.5">
           <span className="absolute inline-flex h-full w-full animate-ping rounded-full bg-status-info opacity-60" />
           <span className="relative inline-flex h-1.5 w-1.5 rounded-full bg-status-info" />
         </span>
         running
-      </span>
+      </Pill>
     )
   }
 
   return (
-    <span className={`inline-flex h-5 items-center gap-1 rounded border px-1.5 text-[10px] font-medium ${
-      isFailed
-        ? 'border-status-error/30 bg-status-error/15 text-status-error'
-        : 'border-status-success/30 bg-status-success/15 text-status-success'
-    }`}>
+    <Pill tone={isFailed ? 'error' : 'success'} size="xs" className="h-5 gap-1 rounded px-1.5 text-[10px]">
       {isFailed ? (failureLabel ?? `exit ${exitCode}`) : 'done'}
-    </span>
+    </Pill>
   )
 }
 
@@ -330,18 +330,20 @@ export function RunRow({ entry: e, onClick, expandable, expanded, onToggleExpand
     if (e.bucket !== 'run' && e.bucket !== 'agent') return null
     if (isRunning) return null
     const label = v === 'done' ? '✓ done' : v === 'asked_question' ? '? asked' : '↻ unfinished'
-    const tone = v === 'done'
-      ? 'border-status-success/30 bg-status-success/10 text-status-success'
+    const tone: PillTone = v === 'done'
+      ? 'success'
       : v === 'asked_question'
-      ? 'border-status-info/30 bg-status-info/10 text-status-info'
-      : 'border-status-warning/30 bg-status-warning/10 text-status-warning'
+      ? 'info'
+      : 'warning'
     return (
-      <span
-        className={`inline-flex h-5 items-center rounded border px-1.5 text-[10px] font-mono ${tone}`}
+      <Pill
+        tone={tone}
+        size="xs"
+        className="h-5 rounded px-1.5 text-[10px] font-mono"
         title={`Local-LLM outcome verdict: ${v.replace('_', ' ')}`}
       >
         {label}
-      </span>
+      </Pill>
     )
   })()
   // Audit chip — when a review's DO NOT SHIP / NEEDS-ATTENTION-exhausted
@@ -462,13 +464,14 @@ export function RunRow({ entry: e, onClick, expandable, expanded, onToggleExpand
               {followupIssueBadge}
               {releaseBadge}
               {showProgressBadge && (
-                <span className={`inline-flex h-5 items-center rounded border px-1.5 text-[10px] font-medium font-mono ${progressTone}`}>
+                <Pill size="xs" className={`h-5 rounded px-1.5 text-[10px] font-mono ${progressTone}`}>
                   {progressLabel}
-                </span>
+                </Pill>
               )}
               {showPromptChip && (
-                <span
-                  className={`inline-flex h-5 items-center rounded px-1.5 text-[10px] font-mono font-medium border ${
+                <Pill
+                  size="xs"
+                  className={`h-5 rounded px-1.5 text-[10px] font-mono ${
                     promptIsAlert
                       ? 'bg-status-error/15 text-status-error border-status-error/30'
                       : 'bg-status-warning/15 text-status-warning border-status-warning/30'
@@ -476,12 +479,12 @@ export function RunRow({ entry: e, onClick, expandable, expanded, onToggleExpand
                   title={`Prompt piped to provider: ${promptBytes.toLocaleString()} bytes (~${Math.round(promptBytes / 4).toLocaleString()} tokens). Every cache-read of this prefix is billed.`}
                 >
                   prompt {promptKbLabel}
-                </span>
+                </Pill>
               )}
               {e.logPruned && (
-                <span className="inline-flex h-5 items-center rounded bg-text-tertiary/15 px-1.5 text-[10px] font-medium text-text-tertiary" title="Log file deleted by retention policy">
+                <Pill size="xs" className="h-5 rounded border-transparent bg-text-tertiary/15 px-1.5 text-[10px] text-text-tertiary" title="Log file deleted by retention policy">
                   pruned
-                </span>
+                </Pill>
               )}
             </div>
 
