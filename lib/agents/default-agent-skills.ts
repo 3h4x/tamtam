@@ -272,7 +272,18 @@ Score candidates by: appears in many files (high), no doc covers it (required), 
   - "Future work" / "TODO" sections — write what is, not what could be.
   - Editing any file other than the new \`docs/<TITLE>.md\` you create. No CLAUDE.md "Docs Reference" update (that's docs-claude's job on its next run).
 
-## Step 4 — Report
+## Step 4 — Make it retrieval-friendly
+The page you write is automatically picked up by TamTam's vectorization pipeline on the next \`agent:documentation-reindex-vectors\` tick (default 16h). The chunker splits on blank lines, drags markdown headings forward into their chunks, and hard-splits any block longer than ~1800 characters. Shape the page so retrieval recovers the right chunk for natural-language queries:
+
+- **Front-load the summary.** The first chunk carries the most weight at retrieval time. Make line 1 a single sentence that names the topic + when to read this doc, then a 2–4 sentence abstract that contains the keywords a future maintainer would query with (function names, error strings, symptom phrases, the name of the subsystem).
+- **One \`##\` heading per coherent concept.** The chunker drags each heading into the chunk that follows it; without headings, a chunk is a faceless slab of text and the retriever has nothing to anchor to.
+- **Use \`###\` for sub-points inside a long section** so the chunker breaks cleanly between them instead of cutting mid-paragraph.
+- **Cap individual blocks at ~1500 characters.** That includes tables and fenced code blocks. A 50-row table or a 200-line code dump gets split mid-row/mid-function and the retrieved chunk loses its header context. If you need a long table, break it after every 10–15 rows with a "(continued)" sub-heading.
+- **Use blank lines between paragraphs.** The chunker treats consecutive non-blank lines as one block; a wall of text becomes one giant block the splitter has to hard-cut.
+- **Keep prose dense in nouns the code uses.** Real type names, real function names, real error strings. Vague paraphrases ("the orchestrator does the thing") don't embed close to a query like "release-orchestrator phase transition".
+- Do NOT trigger a reindex yourself — there's no \`tamtam-actions\` action for it, and curl-to-localhost is sandboxed off. The next scheduled reindex will pick the file up automatically.
+
+## Step 5 — Report
 Output in your TamTam Run Report:
 \`\`\`
 ## docs-generate

@@ -520,12 +520,7 @@ export async function registerNode(): Promise<void> {
     console.error('[boot] issue-cruncher prerequisite backfill failed:', err);
   }
   void backfillVerdicts();
-  const inlineReapPromise = reapAbandonedInlineJobs();
-  if (process.env.VITEST || process.env.NODE_ENV === 'test') {
-    await inlineReapPromise;
-  } else {
-    void inlineReapPromise;
-  }
+  await reapAbandonedInlineJobs();
   // reapOrphanReleases + drainBootRecoveryWork must NOT run until the
   // workflow world has finished starting and re-enqueued its persisted
   // runs. A fixed setTimeout(8000) was insufficient because
