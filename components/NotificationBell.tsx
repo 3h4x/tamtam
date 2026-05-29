@@ -326,7 +326,7 @@ export function NotificationBell() {
           {/* Footer */}
           <div className="px-4 py-2.5 border-t border-border">
             <Link
-              href="/runs"
+              href="/workflow-runs"
               onClick={() => setOpen(false)}
               className="text-xs text-text-tertiary hover:text-text-primary transition-colors no-underline flex items-center gap-1"
             >

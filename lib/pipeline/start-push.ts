@@ -220,8 +220,8 @@ export async function startProjectPush(
     return gate;
   }
 
-  // Track every push attempt as a job so it appears in /runs with a log file
-  // the user can inspect — same pattern as tests/review.
+  // Track every push attempt as a job so it appears in run history with a log
+  // file the user can inspect — same pattern as tests/review.
   const { logDir } = getImproveConfig();
   mkdirSync(/*turbopackIgnore: true*/ logDir, { recursive: true });
   // Stamp issue context on the push job so downstream hooks can pick it up

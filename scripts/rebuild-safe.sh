@@ -215,7 +215,7 @@ done
 # "Invariant: The client reference manifest for route ... does not exist".
 # Auto-recover with a clean rebuild instead of leaving the user staring at
 # `Internal Server Error`.
-SMOKE_PAGES=("/" "/runs" "/agents" "/settings/general")
+SMOKE_PAGES=("/" "/workflow-runs" "/agents" "/settings/general")
 smoke_test() {
   local failures=0
   for path in "${SMOKE_PAGES[@]}"; do
