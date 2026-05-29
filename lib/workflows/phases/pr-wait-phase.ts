@@ -261,8 +261,7 @@ async function runPostMergeMarkDodStep(
   prRepo: string,
 ): Promise<void> {
   'use step';
-  const { appendLogForJob } = await import('@/lib/workflows/phases/pr-wait-log');
-  const { findIssueTargetForPostMergeDod } = await import('@/lib/workflows/phases/pr-wait-log');
+  const { appendLogForJob, findIssueTargetForPostMergeDod } = await import('@/lib/workflows/phases/pr-wait-log');
   const { startMarkDod } = await import('@/lib/pipeline/start-mark-dod');
 
   const issueTarget = findIssueTargetForPostMergeDod(jobId);
