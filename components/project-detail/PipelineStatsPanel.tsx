@@ -1,6 +1,7 @@
 'use client'
 
 import { useEffect, useState } from 'react'
+import { Pill } from '@/components/ui/Pill'
 import { SegmentedControl } from '@/components/ui/SegmentedControl'
 import { fetchProjectPipelineStats } from '@/lib/client-api'
 import type { PipelineDurationStats, ProjectPipelineStats } from '@/lib/client-api'
@@ -85,9 +86,13 @@ function StepCard({ step, stats }: { step: (typeof STEP_ORDER)[number]; stats?: 
           <div className="text-sm font-medium text-text-primary">{meta.label}</div>
           <div className="mt-0.5 text-xs text-text-tertiary">{meta.detail}</div>
         </div>
-        <div className="shrink-0 rounded-full border border-border bg-bg-secondary px-2 py-0.5 text-[11px] tabular-nums text-text-secondary">
+        <Pill
+          tone="neutral"
+          size="xs"
+          className="shrink-0 rounded-full bg-bg-secondary text-[11px] font-normal tabular-nums"
+        >
           {stats?.count ?? 0} run{stats?.count === 1 ? '' : 's'}
-        </div>
+        </Pill>
       </div>
       <div className="mt-3 flex items-end justify-between gap-3">
         <div>
