@@ -5,16 +5,13 @@ import { join } from 'path';
 import { tmpdir } from 'os';
 import type { JobData } from '@/lib/jobs/job-storage';
 
-const originalMaxStepIterations = process.env.TAMTAM_MAX_STEP_ITERATIONS;
-const originalLegacyMaxFixIterations = process.env.TAMTAM_MAX_FIX_ITERATIONS;
+// The shared step time-window env vars still exist (they govern the
+// legacy hook's wall-clock window, not the iteration cap). Snapshot +
+// restore them so a test that tweaks the window doesn't leak.
 const originalStepWindowSeconds = process.env.TAMTAM_STEP_WINDOW_SECONDS;
 const originalLegacyFixWindowSeconds = process.env.TAMTAM_FIX_WINDOW_SECONDS;
 
 function restoreRecoveryBudgetEnv() {
-  if (originalMaxStepIterations === undefined) delete process.env.TAMTAM_MAX_STEP_ITERATIONS;
-  else process.env.TAMTAM_MAX_STEP_ITERATIONS = originalMaxStepIterations;
-  if (originalLegacyMaxFixIterations === undefined) delete process.env.TAMTAM_MAX_FIX_ITERATIONS;
-  else process.env.TAMTAM_MAX_FIX_ITERATIONS = originalLegacyMaxFixIterations;
   if (originalStepWindowSeconds === undefined) delete process.env.TAMTAM_STEP_WINDOW_SECONDS;
   else process.env.TAMTAM_STEP_WINDOW_SECONDS = originalStepWindowSeconds;
   if (originalLegacyFixWindowSeconds === undefined) delete process.env.TAMTAM_FIX_WINDOW_SECONDS;
@@ -583,9 +580,7 @@ describe('GET /api/stats/pipeline', () => {
     expect(data.configSnapshot.maxPushFixAttempts).toBe(2);
   });
 
-  it('reads maxStepIterations from the shared recovery-budget env alias', async () => {
-    process.env.TAMTAM_MAX_STEP_ITERATIONS = '5';
-    delete process.env.TAMTAM_MAX_FIX_ITERATIONS;
+  it('reads maxStepIterations from the unified `review_fix_max_iterations` setting', async () => {
     vi.resetModules();
 
     listJobsMock = vi.fn().mockReturnValue([]);
@@ -593,6 +588,7 @@ describe('GET /api/stats/pipeline', () => {
     getSettingsMock = vi.fn().mockReturnValue({
       review_verdict_rules: 'default rules',
       commit_style: 'conventional commits',
+      review_fix_max_iterations: 5,
     });
     vi.doMock('@/lib/jobs/job-storage', () => ({
       listJobs: listJobsMock,
@@ -606,6 +602,32 @@ describe('GET /api/stats/pipeline', () => {
     const res = await GET(new NextRequest('http://localhost/api/stats/pipeline'));
     const data = await res.json();
     expect(data.configSnapshot.maxStepIterations).toBe(5);
+  });
+
+  it('reports unlimited maxStepIterations when the setting is 0', async () => {
+    vi.resetModules();
+
+    listJobsMock = vi.fn().mockReturnValue([]);
+    getVerdictMock = vi.fn().mockReturnValue(null);
+    getSettingsMock = vi.fn().mockReturnValue({
+      review_verdict_rules: 'default rules',
+      commit_style: 'conventional commits',
+      review_fix_max_iterations: 0,
+    });
+    vi.doMock('@/lib/jobs/job-storage', () => ({
+      listJobs: listJobsMock,
+      getVerdict: getVerdictMock,
+    }));
+    vi.doMock('@/lib/shared/config', () => ({ getSettings: getSettingsMock }));
+
+    const mod = await import('@/app/api/stats/pipeline/route');
+    GET = mod.GET as typeof GET;
+
+    const res = await GET(new NextRequest('http://localhost/api/stats/pipeline'));
+    const data = await res.json();
+    // Infinity is not JSON-representable; the route serializes it to null
+    // to communicate "no cap" without smuggling a number sentinel.
+    expect(data.configSnapshot.maxStepIterations).toBeNull();
   });
 
   it('falls back to 30d for invalid window', async () => {

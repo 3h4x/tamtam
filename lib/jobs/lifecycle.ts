@@ -108,16 +108,16 @@ function reviewSourceType(job: Pick<JobData, 'contextMeta'>): string | null {
   }
 }
 
-// Cap runaway review→fix→review loops when auto-push is on. The shared helper
+// Cap runaway fix→step→fix loops when auto-push is on. The shared helper
 // keeps lifecycle enforcement, stats snapshots, and docs on the same contract.
-// Read live each time so the user can tune `review_fix_max_iterations` in
+// Read live each time so the user can tune `fix_max_iterations` in
 // Settings → Pipeline without restarting the server.
 function maxStepIterations(): number { return getMaxStepIterations(); }
 function reviewFixMaxIterations(): number { return getReviewFixMaxIterations(); }
 function stepWindowSeconds(): number { return getStepWindowSeconds(); }
 // fix-ci fast-crash auto-retry constants. Only crash-fast failures are retried
 // so real errors still surface. Kept as hardcoded defaults — not surfaced in
-// Settings to keep the UI focused on review_fix_max_iterations.
+// Settings to keep the UI focused on the single `fix_max_iterations` knob.
 const FIX_CI_MAX_RETRIES = 2;
 const FIX_CI_RETRY_WINDOW_SECONDS = 120;
 const FIX_CI_FAST_CRASH_MS = 5000;

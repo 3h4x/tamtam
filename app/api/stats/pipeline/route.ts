@@ -68,13 +68,23 @@ export interface PipelineResponse {
   configSnapshot: {
     verdictRules: string;
     commitStyle: string;
-    maxStepIterations: number;
+    /** Cap on per-release step retries (review/test/commit/push fix loops).
+     *  `null` means the operator opted into unlimited iterations via
+     *  `review_fix_max_iterations = 0`. */
+    maxStepIterations: number | null;
     maxPushFixAttempts: number;
     stepWindowSeconds: number;
   };
 }
 
-const MAX_STEP_ITERATIONS = getMaxStepIterations();
+// JSON.stringify turns Infinity into null, which loses the "unlimited"
+// signal silently. Normalize to `null` explicitly so the client type
+// (`number | null`) matches what's on the wire and consumers can render
+// "∞" instead of crashing on "no cap".
+function serializeMaxStepIterations(): number | null {
+  const cap = getMaxStepIterations();
+  return Number.isFinite(cap) ? cap : null;
+}
 const FIX_WINDOW_SECONDS = getStepWindowSeconds();
 const RECOVERY_STEP_KINDS = new Set<JobData['kind']>(['fix']);
 
@@ -397,7 +407,7 @@ export async function GET(request: NextRequest) {
     configSnapshot: {
       verdictRules: settings.review_verdict_rules,
       commitStyle: settings.commit_style,
-      maxStepIterations: MAX_STEP_ITERATIONS,
+      maxStepIterations: serializeMaxStepIterations(),
       maxPushFixAttempts: getPushFixAttemptCap(),
       stepWindowSeconds: FIX_WINDOW_SECONDS,
     },

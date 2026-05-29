@@ -158,6 +158,75 @@ test.describe('Runs page non-release live polling', () => {
     await expect(page.getByText('No runs yet')).toHaveCount(0)
   })
 
+  test('active running filter fills from its empty state when a new chat run starts', async ({ page }) => {
+    let serveRunning = false
+
+    await stubRunsShellRoutes(page)
+    await page.route('**/api/jobs?limit=200', (route: Route) => {
+      route.fulfill({
+        json: {
+          jobs: serveRunning
+            ? [
+                makeJob({
+                  id: 'chat-run-running-filter-start-1',
+                  project: RUN_PROJECT,
+                  kind: 'run',
+                  prompt: 'Watch the running filter wake up',
+                  user_prompt: 'Watch the running filter wake up',
+                  session_id: 'sess-chat-run-running-filter-start-1',
+                  status: 'running',
+                  exit_code: null,
+                  started_at: now() - 6,
+                  finished_at: null,
+                  work_summary: 'Fresh live work appeared while the running filter was active',
+                }),
+              ]
+            : [],
+          total: serveRunning ? 1 : 0,
+          pendingReleaseProjects: [],
+        },
+      })
+    })
+    await page.route('**/api/jobs/counts', (route: Route) =>
+      route.fulfill({
+        json: {
+          total: serveRunning ? 1 : 0,
+          byKind: serveRunning ? { run: 1 } : {},
+          byStatus: {
+            running: serveRunning ? 1 : 0,
+            done: 0,
+            aborted: 0,
+            failed: 0,
+          },
+          tokens: { input: 0, output: 0, cacheRead: 0, cacheCreate: 0, total: 0 },
+          cost: { total: 0, monthToDate: 0 },
+        },
+      }),
+    )
+
+    await page.goto('/runs')
+
+    await page.getByRole('button', { name: /^running/ }).click()
+    await expect(page.getByText('Nothing is running right now')).toBeVisible({ timeout: 8_000 })
+    await expect(page.getByText('There is no active run in all projects right now.')).toBeVisible()
+    await expect(runRow(page, RUN_PROJECT)).toHaveCount(0)
+
+    serveRunning = true
+
+    const row = runRow(page, RUN_PROJECT)
+    await expect(row).toBeVisible({ timeout: 12_000 })
+    await expect(row.getByLabel('running')).toBeVisible({ timeout: 12_000 })
+    await expect(row.getByText('running', { exact: true })).toBeVisible({ timeout: 12_000 })
+    await expect(row.getByText('Watch the running filter wake up')).toBeVisible({ timeout: 12_000 })
+    await expect(
+      row.getByText('Fresh live work appeared while the running filter was active'),
+    ).toBeVisible({ timeout: 12_000 })
+    await expect(page.getByText('Nothing is running right now')).toHaveCount(0)
+    await expect(page.getByRole('button', { name: /^running 1/i })).toBeVisible({
+      timeout: 12_000,
+    })
+  })
+
   test('chat run row flips from running to done without reload', async ({ page }) => {
     let serveRunning = true
 

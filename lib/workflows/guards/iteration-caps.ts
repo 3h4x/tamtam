@@ -8,12 +8,17 @@
 // but the next verification step is skipped and the release fails with a
 // clear stop reason.
 //
-// Three caps are tracked:
-//   review        → reviewFixMaxIterations (default unlimited/0, settings-driven)
-//   test/commit/push → maxStepIterations (default 3, env-driven)
-//   push fix only → MAX_PUSH_FIX_ATTEMPTS (default 2, fix-from-push hook
-//                                           rejection cap; checked when
-//                                           fix→push is dispatched)
+// Two caps are tracked:
+//   review / test / commit / push (step verification loops)
+//     → `review_fix_max_iterations` setting via getMaxStepIterations() /
+//       getReviewFixMaxIterations() (both delegate to the same setting;
+//       default 3, settings-driven, `0` ⇒ unlimited until LGTM or release
+//       wall-clock timeout). See `lib/pipeline/recovery-budget.ts`.
+//   push-hook rejection retries
+//     → MAX_PUSH_FIX_ATTEMPTS (hardcoded 2; checked when fix→push is
+//       dispatched). Decoupled from `review_fix_max_iterations` so a
+//       permanently rejecting pre-push hook can't loop forever when the
+//       setting is 0.
 //
 // Lifted out of `lib/jobs/lifecycle.ts` (`recentStepCount` + the per-block
 // cap branches at ~line 740 onward). The legacy hook keeps its copies for

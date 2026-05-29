@@ -97,6 +97,71 @@ export function computeSnapshotPace(
   };
 }
 
+export interface UtilizationPaceSample {
+  /** Bucket timestamp in milliseconds (Date#getTime). */
+  bucketTs: number;
+  /** Quota utilization of the window at that bucket (0–100+). */
+  utilizationPct: number;
+}
+
+export interface UtilizationPace {
+  /** Observed utilization growth rate over the recent segment, in
+   *  percentage-points per hour (≥0). */
+  currentPpPerHour: number;
+  /** Steady-state utilization growth that lands at exactly 100% by window
+   *  reset, in percentage-points per hour (always >0). */
+  steadyPpPerHour: number;
+}
+
+const HOUR_MS = 60 * 60 * 1000;
+// A utilization drop larger than this between adjacent buckets is read as a
+// window reset (e.g. 95% → 5%), not real negative usage. Smaller dips are
+// integer-rounding noise in the provider's reported %, so they stay within the
+// same segment.
+const RESET_DROP_PP = 10;
+
+/**
+ * Derive a burn/steady pace purely from the persisted quota *utilization* time
+ * series — the external quota budget we snapshot every bucket — so a trend can
+ * be shown for any provider with utilization history, even one that isn't
+ * currently running jobs in TamTam (no token throughput to derive from).
+ *
+ * The rate is expressed in utilization percentage-points per hour. Since
+ * downstream pace math only consumes the dimensionless `current / steady`
+ * ratio plus the live elapsed/utilization gap, pp/h slots in wherever a
+ * tokens/h burn rate would.
+ *
+ * Robust to window resets: only the most recent segment since the last reset
+ * is measured, so a reset boundary inside the sample window can't produce a
+ * bogus negative or inflated slope. Returns null when fewer than two samples
+ * span any time in the current segment.
+ */
+export function deriveUtilizationPace(
+  samples: UtilizationPaceSample[],
+  windowMs: number,
+): UtilizationPace | null {
+  const steadyPpPerHour = 100 / (windowMs / HOUR_MS);
+  if (samples.length < 2) return null;
+  const sorted = [...samples].sort((a, b) => a.bucketTs - b.bucketTs);
+  // Walk forward, restarting the segment whenever utilization drops by more
+  // than the reset threshold. The final segment is the most recent run.
+  let segStartIdx = 0;
+  for (let i = 1; i < sorted.length; i++) {
+    if (sorted[i].utilizationPct < sorted[i - 1].utilizationPct - RESET_DROP_PP) {
+      segStartIdx = i;
+    }
+  }
+  const segStart = sorted[segStartIdx];
+  const segEnd = sorted[sorted.length - 1];
+  const spanMs = segEnd.bucketTs - segStart.bucketTs;
+  if (spanMs <= 0) return null;
+  // Clamp to ≥0: small rounding dips inside the segment can make the net
+  // delta slightly negative, but a window's utilization never truly falls.
+  const deltaPp = Math.max(0, segEnd.utilizationPct - segStart.utilizationPct);
+  const currentPpPerHour = deltaPp / (spanMs / HOUR_MS);
+  return { currentPpPerHour, steadyPpPerHour };
+}
+
 const STATUS_SEVERITY: Record<PaceStatus, number> = {
   under_pace: 0,
   on_pace: 1,
