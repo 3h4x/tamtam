@@ -196,20 +196,20 @@ FIX
   └─ exit ≠0 → completion hook → finalize release (exit 1)
 
 PUSH
-  ├─ exit 0  → completion hook → start MARK-DOD when issue-linked, or when a generic push produced a PR and auto-merge is off
-  │                              → start PR-MERGE-WAIT when a push produced a PR and auto-merge is on
+  ├─ exit 0  → completion hook → start mark-dod when issue-linked, or when a generic push produced a PR and auto-merge is off
+  │                              → start pr-wait when a push produced a PR and auto-merge is on
   │                              → otherwise finalize release (exit 0)
   └─ exit ≠0 → completion hook
-      ├─ isHookRejection(log) → start FIX-PUSH (if attempts < 2 per 30 min)
+      ├─ isHookRejection(log) → start fix with parent push (if attempts < 2 per 30 min)
       └─ Not a hook error    → finalize release (exit 1)
 
-FIX-PUSH
+push-parent fix
   ├─ exit 0  → completion hook → start PUSH (retry)
   └─ exit ≠0 → completion hook → finalize release (exit 1)
 ```
 
-MARK-DOD
-  ├─ auto_pr_merge_enabled + PR context → start PR-MERGE-WAIT
+mark-dod
+  ├─ auto_pr_merge_enabled + PR context → start pr-wait
   └─ otherwise                          → finalize release (exit 0)
 
 `mark-dod` is non-fatal: its exit code is ignored for phase routing because
@@ -217,13 +217,13 @@ its job is to tick acceptance-criteria checkboxes after the push has already
 landed. If auto-merge is enabled and the push produced or reused a PR, TamTam
 still continues into `pr-wait` even when `mark-dod` exits nonzero.
 
-PR-MERGE-WAIT
+pr-wait
   ├─ CI passes → merge PR → switch to default branch
-  │              ├─ project has post_merge_watch_minutes > 0 → start SOAK
+  │              ├─ project has post_merge_watch_minutes > 0 → start soak
   │              └─ otherwise                                 → finalize release (exit 0)
   └─ CI fails  → seed failed CI URL → dispatch fix-ci → finalize release (exit 1)
 
-SOAK
+soak
   ├─ default-branch CI on merge sha passes within window → finalize release (exit 0)
   ├─ default-branch CI on merge sha fails within window  → open revert PR
   │     ├─ auto_revert_enabled → enable squash auto-merge on the revert PR
@@ -316,8 +316,8 @@ Called by `markDone()` after every job finishes. Hooks run in order:
 5. **Test chaining**: If `test` exits 0 AND (in-release OR `auto_push_enabled`): start REVIEW, except when `review_disabled` is on or the only dirty working-tree paths are under `.tamtam/` with no unpushed commits (the reviewer excludes `.tamtam/` from working-tree scope). With review disabled, uncommitted changes go to COMMIT and existing unpushed commits go to PUSH. With `.tamtam/`-only dirty paths and no unpushed commits, the workflow-driven release routes to COMMIT because review has no non-`.tamtam` scope.
 6. **Push hook fix**: If `push` exits ≠0 and log matches hook rejection patterns: start a generic `fix` job whose `parentJobId` points at the failed push (within `getPushFixAttemptCap()=2`). The fix prompt reads the hook error from the parent push's log.
 7. **Fix→push re-push**: When that `fix` (parent.kind === `push`) exits 0: re-run PUSH.
-8. **DoD**: If `push` exits 0 and the release is issue-linked, or the push produced a PR without issue context: start MARK-DOD unless auto-merge defers it to post-merge.
-9. **PR merge wait**: If a push produced a PR and `auto_pr_merge_enabled`: start PR-MERGE-WAIT; issue-linked DoD is deferred to post-merge on that path.
+8. **DoD**: If `push` exits 0 and the release is issue-linked, or the push produced a PR without issue context: start `mark-dod` unless auto-merge defers it to post-merge.
+9. **PR merge wait**: If a push produced a PR and `auto_pr_merge_enabled`: start `pr-wait`; issue-linked DoD is deferred to post-merge on that path.
 10. **Release finalization**: If a pipeline job ran but no chaining happened, write `# release finished — exit {code}` to meta-log and mark the release job done.
 11. **Fix-CI auto-retry**: If `fix-ci` exits ≠0 within ~5 s of starting (boot crash): schedule retry after 500–3000 ms backoff. Capped at 2 retries within a 120-s window. These are hardcoded constants — not user-tunable.
 12. **Fix-CI release chaining**: If `fix-ci` exits 0, TamTam immediately tries `startRelease(project, { queueIfBlocked: true, sourceJobId: fixCiJob.id })` so the uncommitted CI fix goes through the normal quality gate (`test → review → commit → push`). This includes `fix-ci` jobs auto-dispatched by `pr-wait` after failed PR checks. If release start is temporarily blocked by the same conditions as release-after-run (active pipeline lock, pause gate, budget block, retryable pre-start failure), the hook preserves release intent by setting the pending-release flag for the project; that queued retry is project-scoped and does not retain `sourceJobId`.
