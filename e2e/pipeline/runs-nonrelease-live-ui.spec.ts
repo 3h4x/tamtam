@@ -307,6 +307,72 @@ test.describe('Runs page non-release live polling', () => {
     })
   })
 
+  test('active failed filter includes a running chat run as soon as it fails', async ({ page }) => {
+    let serveRunning = true
+
+    await stubRunsShellRoutes(page)
+    await page.route('**/api/jobs?limit=200', (route: Route) => {
+      const running = serveRunning
+      route.fulfill({
+        json: {
+          jobs: [
+            makeJob({
+              id: 'chat-run-failed-filter-live-1',
+              project: RUN_PROJECT,
+              kind: 'run',
+              prompt: 'Watch the failed filter while running',
+              user_prompt: 'Watch the failed filter while running',
+              session_id: 'sess-chat-run-failed-filter-live-1',
+              status: running ? 'running' : 'done',
+              exit_code: running ? null : 2,
+              started_at: now() - 70,
+              finished_at: running ? null : now() - 5,
+              work_summary: running ? 'Still running outside the failed filter' : 'Failed filter filled live',
+            }),
+            makeJob({
+              id: 'agent-run-existing-failure-1',
+              project: AGENT_PROJECT,
+              kind: 'agent:planner',
+              prompt: 'Existing failed planner agent',
+              user_prompt: 'Existing failed planner agent',
+              status: 'done',
+              exit_code: 1,
+              started_at: now() - 140,
+              finished_at: now() - 120,
+              work_summary: 'Existing failure keeps the failed filter selectable',
+            }),
+          ],
+          total: 2,
+          pendingReleaseProjects: [],
+        },
+      })
+    })
+
+    await page.goto('/runs')
+
+    const runningRow = runRow(page, RUN_PROJECT)
+    const failedRow = runRow(page, AGENT_PROJECT)
+
+    await expect(runningRow).toBeVisible({ timeout: 8_000 })
+    await expect(runningRow.getByLabel('running')).toBeVisible()
+    await expect(failedRow.getByLabel('needs attention')).toBeVisible()
+
+    await page.getByRole('button', { name: /^failed/ }).click()
+    await expect(failedRow).toBeVisible()
+    await expect(failedRow.getByText('Existing failure keeps the failed filter selectable')).toBeVisible()
+    await expect(runningRow).toHaveCount(0)
+
+    serveRunning = false
+
+    const newlyFailedRow = runRow(page, RUN_PROJECT)
+    await expect(newlyFailedRow).toBeVisible({ timeout: 12_000 })
+    await expect(newlyFailedRow.getByLabel('needs attention')).toBeVisible({ timeout: 12_000 })
+    await expect(newlyFailedRow.getByText('exit 2', { exact: true })).toBeVisible({ timeout: 12_000 })
+    await expect(newlyFailedRow.getByText('Failed filter filled live')).toBeVisible({ timeout: 12_000 })
+    await expect(newlyFailedRow.getByLabel('running')).toHaveCount(0, { timeout: 12_000 })
+    await expect(failedRow).toBeVisible()
+  })
+
   test('active running filter turns into an empty state when its only job completes', async ({ page }) => {
     let serveRunning = true
 
