@@ -398,6 +398,130 @@ test.describe('Mocked terminal lifecycle UI', () => {
     await expect(page.getByText('live run')).toHaveCount(0, { timeout: 8_000 })
   })
 
+  test('terminal landing page auto-attaches to a release failure and clears live state', async ({
+    page,
+  }) => {
+    let serveRunningRelease = false
+    let finishStream!: () => void
+    const streamDone = new Promise<void>((resolve) => {
+      finishStream = resolve
+    })
+
+    await stubProjectShell(page, () => (serveRunningRelease ? [runningReleaseJob()] : []))
+    await page.route(`**/api/jobs/${RELEASE_JOB_ID}`, (route: Route) =>
+      route.fulfill({ json: runningReleaseJob() }),
+    )
+    await page.route(`**/api/streaming/${RELEASE_JOB_ID}`, async (route: Route) => {
+      await streamDone
+      await route.fulfill({
+        status: 200,
+        headers: {
+          'content-type': 'text/event-stream',
+          'cache-control': 'no-cache',
+        },
+        body: [
+          'data: Release output failed after auto-attach.',
+          '',
+          `event: done`,
+          `data: ${JSON.stringify({
+            exitCode: 2,
+            provider: 'claude',
+            detail: 'Release failed during push after auto-attach',
+            duration: 1400,
+          })}`,
+          '',
+        ].join('\n'),
+      })
+    })
+
+    await page.goto(`/project/${PROJECT}/terminal`)
+
+    await expect(page.getByRole('button', { name: 'new' })).toBeVisible({ timeout: 8_000 })
+    await expect(page.getByText('live run')).toHaveCount(0)
+
+    serveRunningRelease = true
+
+    await expect(page).toHaveURL(
+      new RegExp(`/project/${PROJECT}/terminal\\?job=${encodeURIComponent(RELEASE_JOB_ID)}`),
+      { timeout: 12_000 },
+    )
+    await expect(page.getByText('live run')).toBeVisible({ timeout: 8_000 })
+    await expect(page.getByText(/receiving output|waiting for output/)).toBeVisible()
+
+    finishStream()
+
+    await expect(page.getByText('Release output failed after auto-attach.')).toBeVisible({
+      timeout: 8_000,
+    })
+    await expect(page.getByText('exit 2').first()).toBeVisible({ timeout: 8_000 })
+    await expect(page.getByText('Release failed during push after auto-attach')).toBeVisible({
+      timeout: 8_000,
+    })
+    await expect(page.getByText('live run')).toHaveCount(0, { timeout: 8_000 })
+    await expect(page.getByText(/receiving output|waiting for output/)).toHaveCount(0)
+  })
+
+  test('terminal landing page auto-attaches to a cancelled release and clears live state', async ({
+    page,
+  }) => {
+    let serveRunningRelease = false
+    let finishStream!: () => void
+    const streamDone = new Promise<void>((resolve) => {
+      finishStream = resolve
+    })
+
+    await stubProjectShell(page, () => (serveRunningRelease ? [runningReleaseJob()] : []))
+    await page.route(`**/api/jobs/${RELEASE_JOB_ID}`, (route: Route) =>
+      route.fulfill({ json: runningReleaseJob() }),
+    )
+    await page.route(`**/api/streaming/${RELEASE_JOB_ID}`, async (route: Route) => {
+      await streamDone
+      await route.fulfill({
+        status: 200,
+        headers: {
+          'content-type': 'text/event-stream',
+          'cache-control': 'no-cache',
+        },
+        body: [
+          'data: Release output was cancelled after auto-attach.',
+          '',
+          `event: done`,
+          `data: ${JSON.stringify({
+            exitCode: -3,
+            provider: 'claude',
+            duration: 1100,
+          })}`,
+          '',
+        ].join('\n'),
+      })
+    })
+
+    await page.goto(`/project/${PROJECT}/terminal`)
+
+    await expect(page.getByRole('button', { name: 'new' })).toBeVisible({ timeout: 8_000 })
+    await expect(page.getByText('live run')).toHaveCount(0)
+
+    serveRunningRelease = true
+
+    await expect(page).toHaveURL(
+      new RegExp(`/project/${PROJECT}/terminal\\?job=${encodeURIComponent(RELEASE_JOB_ID)}`),
+      { timeout: 12_000 },
+    )
+    await expect(page.getByText('live run')).toBeVisible({ timeout: 8_000 })
+    await expect(page.getByText(/receiving output|waiting for output/)).toBeVisible()
+
+    finishStream()
+
+    await expect(page.getByText('Release output was cancelled after auto-attach.')).toBeVisible({
+      timeout: 8_000,
+    })
+    await expect(page.getByText('cancelled', { exact: true }).first()).toBeVisible({
+      timeout: 8_000,
+    })
+    await expect(page.getByText('live run')).toHaveCount(0, { timeout: 8_000 })
+    await expect(page.getByText(/receiving output|waiting for output/)).toHaveCount(0)
+  })
+
   test('terminal landing page stays idle when a non-release run starts elsewhere', async ({
     page,
   }) => {
