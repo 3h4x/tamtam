@@ -147,6 +147,22 @@ function AgentCatalogRow({ entry }: { entry: AgentCatalogClientEntry }) {
             ))}
           </div>
         )}
+        {entry.inspiration.length > 0 && (
+          <div className="mt-1 flex flex-wrap items-center gap-1.5 text-[10px] text-text-tertiary">
+            <span>inspired by</span>
+            {entry.inspiration.map((ref) => (
+              <a
+                key={ref.url}
+                href={ref.url}
+                target="_blank"
+                rel="noreferrer noopener"
+                className="underline decoration-text-tertiary/40 hover:text-accent hover:decoration-accent"
+              >
+                {ref.label}
+              </a>
+            ))}
+          </div>
+        )}
       </div>
 
       <div className="text-[10px] text-text-tertiary whitespace-nowrap">

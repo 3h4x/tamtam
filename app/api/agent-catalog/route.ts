@@ -18,6 +18,7 @@ export async function GET() {
     autoSeed: entry.autoSeed === true,
     tier: entry.tier ?? null,
     fallbackEnabled: entry.fallbackEnabled === true,
+    inspiration: entry.inspiration ?? [],
   }));
   return NextResponse.json({ entries });
 }

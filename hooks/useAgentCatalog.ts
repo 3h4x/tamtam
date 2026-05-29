@@ -14,6 +14,7 @@ export interface AgentCatalogClientEntry {
   autoSeed: boolean
   tier: 'essential' | 'featured' | 'recommended' | null
   fallbackEnabled: boolean
+  inspiration: ReadonlyArray<{ label: string; url: string }>
 }
 
 // The catalog is static (lives in `lib/agents/catalog.ts`), so one fetch

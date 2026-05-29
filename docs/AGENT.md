@@ -110,6 +110,7 @@ Behavior:
 Current notable entries:
 
 - `docs-claude` is marked `essential` because TamTam depends on project-specific Claude guidance being present and current.
+- `docs-generate` is marked `essential` because it creates a new Layer-2 docs page for an uncovered subsystem, then links its design back to the existing wiki instead of editing established docs in place.
 - `manage-agents` is marked `featured` because it maintains the project's broader agent fleet.
 - `cto` is the strategic issue-planning agent. Its shipped skill reads `CLAUDE.md`, `README.md`, and project docs before proposing work, checks open issues and implementation evidence before filing, and marks issues that need external account/vendor setup with `human-needed` so autonomous implementers do not pick them as code-ready.
 - `issue-cruncher` is marked `featured` and manual-only because it is a high-leverage entry point into TamTam's core issue-to-release workflow: pick a ready GitHub issue, close stale or unverifiable ones by default during validation, implement actionable work on an issue branch, then hand off to the existing release pipeline.
