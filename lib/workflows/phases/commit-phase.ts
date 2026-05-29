@@ -34,12 +34,6 @@ export async function releaseCommitPhaseWorkflow(
   'use workflow';
   const r = await commitStep(projectName, options, releaseJobId);
   if (!r.ok) {
-    // Commit failures route to fix via the orchestrator (commit fail → fix).
-    // We don't have a jobId here unless start-commit created a row; if it did,
-    // re-dispatch so the orchestrator can decide.
-    if (releaseJobId) {
-      await dispatchOrchestratorTickStep(null, projectName, releaseJobId);
-    }
     return {
       ok: false,
       reason: 'commit_failed',
@@ -75,11 +69,10 @@ async function commitStep(
 }
 
 async function dispatchOrchestratorTickStep(
-  jobId: string | null,
+  jobId: string,
   projectName: string,
   releaseJobId: string,
 ): Promise<void> {
   'use step';
-  if (!jobId) return;
   await safeStartOrchestrator(jobId, projectName, releaseJobId, 'commit-phase');
 }
