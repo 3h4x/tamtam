@@ -203,8 +203,9 @@ async function migrateLegacyFileWorkflowFlags(): Promise<void> {
 // resume metadata, so we still reap it as exit -1.
 //
 // Older pr-wait rows created before pid=0 was the convention have pid set to
-// the previous next-server's PID. They look like dead-PM2 jobs to the probe
-// sweep but PM2 doesn't know them, so probe eventually marks them exit -1.
+// the previous next-server's PID. That process is gone after a restart, so the
+// probe sweep's generic pid-liveness check (process.kill(pid, 0)) sees it dead
+// and eventually marks the row exit -1.
 // Catch them here too: if contextMeta is intact, resume; otherwise reap.
 async function reapAbandonedInlineJobs(): Promise<void> {
   try {
