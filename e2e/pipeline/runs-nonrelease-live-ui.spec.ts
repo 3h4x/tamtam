@@ -3,6 +3,7 @@ import type { Route } from '@playwright/test'
 
 const RUN_PROJECT = 'runs-chat-live'
 const AGENT_PROJECT = 'runs-agent-live'
+const OTHER_PROJECT = 'runs-scope-reset-live'
 
 const now = () => Math.floor(Date.now() / 1000)
 
@@ -425,6 +426,140 @@ test.describe('Runs page non-release live polling', () => {
     await expect(doneRow).toBeVisible()
     await expect(doneRow.getByLabel('done')).toBeVisible()
     await expect(doneRow.getByText('Live filter check complete')).toBeVisible()
+  })
+
+  test('project-scoped running filter clears to the scoped empty state and resets back to all projects', async ({ page }) => {
+    let serveScopedRunning = true
+
+    await stubRunsShellRoutes(page)
+    await page.route(
+      (url) => url.pathname === '/api/jobs' && url.searchParams.get('project') === RUN_PROJECT,
+      (route: Route) => {
+        const running = serveScopedRunning
+        route.fulfill({
+          json: {
+            jobs: [
+              makeJob({
+                id: 'chat-run-scoped-filter-1',
+                project: RUN_PROJECT,
+                kind: 'run',
+                prompt: 'Watch the scoped running filter',
+                user_prompt: 'Watch the scoped running filter',
+                session_id: 'sess-chat-run-scoped-filter-1',
+                status: running ? 'running' : 'done',
+                exit_code: running ? null : 0,
+                started_at: now() - 65,
+                finished_at: running ? null : now() - 5,
+                work_summary: running ? 'Scoped run still active' : 'Scoped run finished cleanly',
+              }),
+            ],
+            total: 1,
+            pendingReleaseProjects: [],
+          },
+        })
+      },
+    )
+    await page.route(
+      (url) => url.pathname === '/api/jobs' && !url.searchParams.has('project'),
+      (route: Route) => {
+        const running = serveScopedRunning
+        route.fulfill({
+          json: {
+            jobs: [
+              makeJob({
+                id: 'chat-run-global-steady-1',
+                project: OTHER_PROJECT,
+                kind: 'run',
+                prompt: 'Keep a global run active',
+                user_prompt: 'Keep a global run active',
+                session_id: 'sess-chat-run-global-steady-1',
+                status: 'running',
+                exit_code: null,
+                started_at: now() - 40,
+                finished_at: null,
+                work_summary: 'Other project still has active work',
+              }),
+              makeJob({
+                id: 'chat-run-scoped-filter-1',
+                project: RUN_PROJECT,
+                kind: 'run',
+                prompt: 'Watch the scoped running filter',
+                user_prompt: 'Watch the scoped running filter',
+                session_id: 'sess-chat-run-scoped-filter-1',
+                status: running ? 'running' : 'done',
+                exit_code: running ? null : 0,
+                started_at: now() - 65,
+                finished_at: running ? null : now() - 5,
+                work_summary: running ? 'Scoped run still active' : 'Scoped run finished cleanly',
+              }),
+            ],
+            total: 2,
+            pendingReleaseProjects: [],
+          },
+        })
+      },
+    )
+    await page.route(
+      (url) => url.pathname === '/api/jobs/counts' && url.searchParams.get('project') === RUN_PROJECT,
+      (route: Route) =>
+        route.fulfill({
+          json: {
+            total: 1,
+            byKind: { run: 1 },
+            byStatus: {
+              running: serveScopedRunning ? 1 : 0,
+              done: serveScopedRunning ? 0 : 1,
+              aborted: 0,
+              failed: 0,
+            },
+            tokens: { input: 0, output: 0, cacheRead: 0, cacheCreate: 0, total: 0 },
+            cost: { total: 0, monthToDate: 0 },
+          },
+        }),
+    )
+    await page.route(
+      (url) => url.pathname === '/api/jobs/counts' && !url.searchParams.has('project'),
+      (route: Route) =>
+        route.fulfill({
+          json: {
+            total: 2,
+            byKind: { run: 2 },
+            byStatus: {
+              running: serveScopedRunning ? 2 : 1,
+              done: serveScopedRunning ? 0 : 1,
+              aborted: 0,
+              failed: 0,
+            },
+            tokens: { input: 0, output: 0, cacheRead: 0, cacheCreate: 0, total: 0 },
+            cost: { total: 0, monthToDate: 0 },
+          },
+        }),
+    )
+
+    await page.goto(`/runs?project=${encodeURIComponent(RUN_PROJECT)}`)
+
+    const scopedRow = runRow(page, RUN_PROJECT)
+    await expect(scopedRow).toBeVisible({ timeout: 8_000 })
+    await expect(scopedRow.getByLabel('running')).toBeVisible()
+
+    await page.getByRole('button', { name: /^running/ }).click()
+    await expect(scopedRow.getByText('Scoped run still active')).toBeVisible()
+
+    serveScopedRunning = false
+
+    await expect(page.getByText('Nothing is running right now')).toBeVisible({
+      timeout: 12_000,
+    })
+    await expect(page.getByText(`There is no active run in ${RUN_PROJECT} right now.`)).toBeVisible()
+    await expect(page.getByRole('button', { name: 'Show all projects' })).toBeVisible()
+
+    await page.getByRole('button', { name: 'Show all projects' }).click()
+
+    const otherRow = runRow(page, OTHER_PROJECT)
+    await expect(otherRow).toBeVisible({ timeout: 12_000 })
+    await expect(otherRow.getByLabel('running')).toBeVisible({ timeout: 12_000 })
+    await expect(otherRow.getByText('Other project still has active work')).toBeVisible()
+    await expect(page).toHaveURL(/\/runs$/)
   })
 
   test('active done filter populates when a running chat run completes', async ({ page }) => {
