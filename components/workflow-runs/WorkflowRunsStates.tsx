@@ -3,6 +3,7 @@
 import Link from 'next/link'
 
 import { Button, buttonVariants } from '@/components/ui/Button'
+import { EmptyState } from '@/components/ui/EmptyState'
 
 interface WorkflowRunsEmptyStateProps {
   title: string
@@ -136,25 +137,29 @@ export function WorkflowRunsEmptyState({
   onAction,
   actionHref,
 }: WorkflowRunsEmptyStateProps) {
+  const action = actionLabel && actionHref ? (
+    <Link href={actionHref} className={buttonVariants()}>
+      {actionLabel}
+    </Link>
+  ) : actionLabel && onAction ? (
+    <Button type="button" onClick={onAction}>
+      {actionLabel}
+    </Button>
+  ) : null
+
   return (
-    <div className="rounded-md border border-border bg-bg-secondary px-6 py-8 text-center">
-      <div className="flex flex-col items-center gap-3">
-        <EmptyStateGlyph />
-        <div className="space-y-1">
-          <h3 className="text-sm font-medium text-text-primary">{title}</h3>
-          <p className="max-w-md text-sm text-text-secondary">{description}</p>
-          {meta ? <p className="text-xs font-mono text-text-tertiary">{meta}</p> : null}
-        </div>
-        {actionLabel && actionHref ? (
-          <Link href={actionHref} className={buttonVariants()}>
-            {actionLabel}
-          </Link>
-        ) : actionLabel && onAction ? (
-          <Button type="button" onClick={onAction}>
-            {actionLabel}
-          </Button>
-        ) : null}
-      </div>
-    </div>
+    <EmptyState
+      icon={<EmptyStateGlyph />}
+      title={<span className="text-text-primary">{title}</span>}
+      description={(
+        <>
+          <span className="block text-sm text-text-secondary">{description}</span>
+          {meta ? <span className="mt-1 block font-mono text-xs text-text-tertiary">{meta}</span> : null}
+        </>
+      )}
+      action={action}
+      paddingY="sm"
+      className="rounded-md border border-border bg-bg-secondary"
+    />
   )
 }
