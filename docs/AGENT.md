@@ -508,7 +508,7 @@ after the running-job check but before the first request has created its job row
 
 ### Spawn-grace in `probeJobStatus`
 
-Job rows are inserted with `pid=0` and the real pid is persisted asynchronously after spawn returns. `probeJobStatus` treats `pid<=0` as **still spawning** for the first 30 seconds after `startedAt` — otherwise a concurrent duplicate-check would `markDone(-1)` the sibling mid-spawn and tear down its Claude process, producing a phantom `exit -1 @ 0s` row next to the real run. After the grace window, `pid<=0` is treated as dead as before. See `lib/job-storage.ts:probeJobStatus`.
+Job rows are inserted with `pid=0` and the real pid is persisted asynchronously after spawn returns. `probeJobStatus` treats `pid<=0` as **still spawning** for the first 30 seconds after `startedAt` — otherwise a concurrent duplicate-check would `markDone(-1)` the sibling mid-spawn and tear down its Claude process, producing a phantom `exit -1 @ 0s` row next to the real run. After the grace window, `pid<=0` is treated as dead as before. See `lib/jobs/job-storage.ts:probeJobStatus`.
 
 ### Drain circuit breaker
 
