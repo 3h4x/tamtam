@@ -33,6 +33,7 @@ import { LoadingState } from '@/components/LoadingState'
 import { ProjectLogo } from '@/components/ProjectLogo'
 import { useToast } from '@/components/Toast'
 import { Button } from '@/components/ui/Button'
+import { Pill } from '@/components/ui/Pill'
 import { Spinner } from '@/components/ui/Spinner'
 import { StatusIcon } from '@/components/ui/StatusIcon'
 import { subscribeToSettingsChanged } from '@/lib/shared/settings-events'
@@ -161,24 +162,27 @@ function AgentPills({
           tooltipParts.push('on-demand')
         }
         return (
-          <span
+          <Pill
             key={agent.id}
             title={tooltipParts.join(' · ')}
-            className={`inline-flex items-center gap-1 px-1.5 py-0.5 rounded text-xs font-medium transition-colors ${
+            tone={isRunning ? 'accent' : 'neutral'}
+            size="xs"
+            active={isRunning}
+            className={`px-1.5 ${
               isRunning
-                ? 'bg-accent/15 text-accent border border-accent/30'
-                : 'bg-bg-tertiary text-text-secondary border border-transparent'
+                ? 'border-accent/30 bg-accent/15'
+                : 'border-transparent bg-bg-tertiary text-text-secondary'
             }`}
           >
             {isRunning && <span className="w-1.5 h-1.5 rounded-full bg-accent animate-pulse shrink-0" />}
             {agent.name}
-          </span>
+          </Pill>
         )
       })}
       {overflow > 0 && (
-        <span className="inline-flex items-center px-1.5 py-0.5 rounded text-xs text-text-tertiary bg-bg-tertiary">
+        <Pill size="xs" className="border-transparent bg-bg-tertiary px-1.5 font-normal text-text-tertiary">
           +{overflow}
-        </span>
+        </Pill>
       )}
     </div>
   )
@@ -519,27 +523,30 @@ const isReviewRunning = (projectName: string) => !!runtime[projectName]?.hasRunn
                     <ProjectLogo projectName={project.project} size={20} />
                     <span className="font-medium text-text-primary" data-private>{project.project}</span>
                     {counts && counts.prs > 0 && (
-                      <span
+                      <Pill
                         title={`${counts.prs} open PR${counts.prs !== 1 ? 's' : ''}`}
-                        className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded text-xs font-medium bg-accent/15 text-accent border border-accent/30"
+                        tone="accent"
+                        size="xs"
+                        className="border-accent/30 bg-accent/15 px-1.5"
                       >
                         <svg className="w-3 h-3 shrink-0" viewBox="0 0 16 16" fill="currentColor">
                           <path d="M7.177 3.073L9.573.677A.25.25 0 0110 .854v4.792a.25.25 0 01-.427.177L7.177 3.427a.25.25 0 010-.354zM3.75 2.5a.75.75 0 100 1.5.75.75 0 000-1.5zm-2.25.75a2.25 2.25 0 113 2.122v5.256a2.251 2.251 0 11-1.5 0V5.372A2.25 2.25 0 011.5 3.25zM11 2.5h-1V4h1a1 1 0 011 1v5.628a2.251 2.251 0 101.5 0V5A2.5 2.5 0 0011 2.5zm1 10.25a.75.75 0 111.5 0 .75.75 0 01-1.5 0zM3.75 12a.75.75 0 100 1.5.75.75 0 000-1.5z" />
                         </svg>
                         {counts.prs}
-                      </span>
+                      </Pill>
                     )}
                     {counts && counts.issues > 0 && (
-                      <span
+                      <Pill
                         title={`${counts.issues} open issue${counts.issues !== 1 ? 's' : ''}`}
-                        className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded text-xs font-medium bg-bg-tertiary text-text-secondary border border-border"
+                        size="xs"
+                        className="bg-bg-tertiary px-1.5"
                       >
                         <svg className="w-3 h-3 shrink-0" viewBox="0 0 16 16" fill="currentColor">
                           <path d="M8 9.5a1.5 1.5 0 100-3 1.5 1.5 0 000 3z" />
                           <path fillRule="evenodd" d="M8 0a8 8 0 100 16A8 8 0 008 0zM1.5 8a6.5 6.5 0 1113 0 6.5 6.5 0 01-13 0z" />
                         </svg>
                         {counts.issues}
-                      </span>
+                      </Pill>
                     )}
                   </span>
                 </td>
@@ -565,76 +572,78 @@ const isReviewRunning = (projectName: string) => !!runtime[projectName]?.hasRunn
                       return (
                         <>
                           {isStuck && (
-                            <span title={`Release running ${Math.round(releaseAgeMs / 60000)}m — operator should check`} className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded text-xs font-medium bg-status-error/10 text-status-error border border-status-error/30 animate-pulse">
+                            <Pill title={`Release running ${Math.round(releaseAgeMs / 60000)}m — operator should check`} tone="error" size="xs" className="border-status-error/30 bg-status-error/10 px-1.5 animate-pulse">
                               <StatusIcon ok={false} size="sm" />
                               stuck
-                            </span>
+                            </Pill>
                           )}
                           {hasRelease && !isStuck && (
-                            <span title={runningKinds.join(', ')} className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded text-xs font-medium bg-status-warning/10 text-status-warning border border-status-warning/30">
+                            <Pill title={runningKinds.join(', ')} tone="warning" size="xs" className="border-status-warning/30 bg-status-warning/10 px-1.5">
                               <Spinner size="lg" color="current" shrink />
                               releasing
-                            </span>
+                            </Pill>
                           )}
                           {!hasRelease && hasAgent && (
-                            <span title={agentNames.join(', ')} className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded text-xs font-medium bg-accent/15 text-accent border border-accent/30">
+                            <Pill title={agentNames.join(', ')} tone="accent" size="xs" className="border-accent/30 bg-accent/15 px-1.5">
                               <Spinner size="lg" color="accent" shrink />
                               {agentNames.length > 1 ? `${agentNames.length} agents` : 'agent'} running
-                            </span>
+                            </Pill>
                           )}
                           {!hasRelease && !hasAgent && runningCount > 0 && (
-                            <span title={runningKinds.join(', ')} className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded text-xs font-medium bg-accent/15 text-accent border border-accent/30">
+                            <Pill title={runningKinds.join(', ')} tone="accent" size="xs" className="border-accent/30 bg-accent/15 px-1.5">
                               <Spinner size="lg" color="accent" shrink />
                               {runningCount > 1 ? `${runningCount} running` : 'running'}
-                            </span>
+                            </Pill>
                           )}
                         </>
                       )
                     })()}
                     {project.status === 'error' && (
-                      <span className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded text-xs font-medium bg-status-error/10 text-status-error border border-status-error/30">
+                      <Pill tone="error" size="xs" className="border-status-error/30 bg-status-error/10 px-1.5">
                         <StatusIcon ok={false} size="sm" />
                         error
-                      </span>
+                      </Pill>
                     )}
                     {schedulesPaused ? (
-                      <span
+                      <Pill
                         title={schedulerPaused ? 'Internal scheduler paused (Resume jobs in header)' : 'Scheduled agents paused by weekly budget'}
-                        className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded text-xs font-medium bg-status-warning/10 text-status-warning border border-status-warning/30"
+                        tone="warning"
+                        size="xs"
+                        className="border-status-warning/30 bg-status-warning/10 px-1.5"
                       >
                         scheduled paused
-                      </span>
+                      </Pill>
                     ) : projectPaused && (
-                      <span title="Project schedule paused" className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded text-xs font-medium bg-status-warning/10 text-status-warning border border-status-warning/30">
+                      <Pill title="Project schedule paused" tone="warning" size="xs" className="border-status-warning/30 bg-status-warning/10 px-1.5">
                         scheduled paused
-                      </span>
+                      </Pill>
                     )}
                     {outOfSync && (
-                      <span title="Schedule out of sync with config" className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded text-xs font-medium bg-status-warning/10 text-status-warning border border-status-warning/30">
+                      <Pill title="Schedule out of sync with config" tone="warning" size="xs" className="border-status-warning/30 bg-status-warning/10 px-1.5">
                         <WarningDot />
                         out of sync
-                      </span>
+                      </Pill>
                     )}
                     {showWarning && !projectPaused && !outOfSync && !schedulesPaused && (
-                      <span title="Project flagged with a warning (e.g. stale data)" className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded text-xs font-medium bg-status-warning/10 text-status-warning border border-status-warning/30">
+                      <Pill title="Project flagged with a warning (e.g. stale data)" tone="warning" size="xs" className="border-status-warning/30 bg-status-warning/10 px-1.5">
                         <WarningDot />
                         warning
-                      </span>
+                      </Pill>
                     )}
                     {scheduledCount > 0 && !schedulesPaused && (
-                      <span title={`${scheduledCount} scheduled agent${scheduledCount !== 1 ? 's' : ''}`} className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded text-xs font-medium bg-bg-tertiary text-text-secondary border border-border">
+                      <Pill title={`${scheduledCount} scheduled agent${scheduledCount !== 1 ? 's' : ''}`} size="xs" className="bg-bg-tertiary px-1.5">
                         <svg className="w-3 h-3 shrink-0" viewBox="0 0 14 14" fill="none" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round">
                           <circle cx="7" cy="7" r="5.5" />
                           <path d="M7 4v3l2 1.5" />
                         </svg>
                         {scheduledCount} scheduled
-                      </span>
+                      </Pill>
                     )}
                     {runningCount === 0 && project.status !== 'error' && !showWarning && scheduledCount === 0 && lastJob && (
-                      <span className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded text-xs font-medium text-text-tertiary">
+                      <Pill size="xs" active={false} className="px-1.5 text-text-tertiary">
                         <StatusIcon ok={true} size="sm" />
                         idle
-                      </span>
+                      </Pill>
                     )}
                     {runningCount === 0 && project.status !== 'error' && !showWarning && scheduledCount === 0 && !lastJob && (
                       <span className="text-text-tertiary text-xs">—</span>
@@ -694,13 +703,13 @@ const isReviewRunning = (projectName: string) => !!runtime[projectName]?.hasRunn
                           : formatAgo(lastJob.finishedAt ?? lastJob.startedAt)}
                       </span>
                       {lastJob.verdict && lastJob.status !== 'running' && (
-                        <span className={`text-[10px] px-1 py-0.5 rounded font-mono font-medium ${
-                          lastJob.verdict === 'LGTM' ? 'bg-status-success/15 text-status-success' :
-                          lastJob.verdict === 'DO NOT SHIP' ? 'bg-status-error/15 text-status-error' :
-                          'bg-status-warning/15 text-status-warning'
-                        }`}>
+                        <Pill
+                          tone={lastJob.verdict === 'LGTM' ? 'success' : lastJob.verdict === 'DO NOT SHIP' ? 'error' : 'warning'}
+                          size="xs"
+                          className="border-transparent px-1 py-0.5 font-mono text-[10px]"
+                        >
                           {lastJob.verdict === 'LGTM' ? 'lgtm' : lastJob.verdict === 'DO NOT SHIP' ? 'dns' : 'attn'}
-                        </span>
+                        </Pill>
                       )}
                     </span>
                   ) : (
