@@ -8,6 +8,7 @@ import {
   type CliProvider,
 } from '@/lib/usage/cli-providers'
 import { loadQuotaSnapshot } from '@/lib/client/quota'
+import { Pill } from '@/components/ui/Pill'
 
 const INPUT_CLASS =
   'w-full h-10 px-3 py-2 bg-bg-primary text-text-primary border border-border rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-accent/30 focus:border-accent transition-colors font-mono'
@@ -171,9 +172,9 @@ export function CliTab({
                         </span>
                       )}
                       {summary.blockedNow && (
-                        <span className="px-1.5 py-0.5 rounded text-[10px] bg-status-error/15 text-status-error uppercase tracking-wide">
+                        <Pill tone="error" size="xs" className="rounded px-1.5 py-0.5 text-[10px] uppercase tracking-wide">
                           blocked
-                        </span>
+                        </Pill>
                       )}
                     </div>
                   )}
