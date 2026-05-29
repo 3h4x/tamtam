@@ -2,6 +2,7 @@
 
 import Link from 'next/link'
 import { Button } from '@/components/ui/Button'
+import { Pill } from '@/components/ui/Pill'
 import type { Recommendation } from '@/lib/client-api'
 import { AUTO_APPLICABLE_RECOMMENDATION_TYPES } from '@/lib/client-api'
 import { formatAgo } from '@/lib/shared/format'
@@ -74,9 +75,13 @@ export function RecommendationCard({
       <div className="flex items-start justify-between gap-3">
         <div className="min-w-0">
           <div className="flex items-center gap-2 flex-wrap">
-            <span className="inline-flex items-center rounded bg-accent/10 px-1.5 py-0.5 text-[10px] font-mono font-medium text-accent border border-accent/25">
+            <Pill
+              tone="accent"
+              size="xs"
+              className="rounded px-1.5 text-[10px] font-mono border-accent/25"
+            >
               {typeLabel(item.type)}
-            </span>
+            </Pill>
             {item.agent_name && <span className="font-mono text-xs text-text-tertiary">agent:{item.agent_name}</span>}
             <span className="font-mono text-xs text-text-tertiary">updated {formatAgo(item.updated_at)}</span>
             {showProjectLink && (

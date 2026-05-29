@@ -614,9 +614,11 @@ The audit log is project-scoped and commits with the repo so it survives a TamTa
 
 **Hard stop — do NOT do any of these:**
 - Run \`git\` commands (TamTam's release pipeline owns version control).
-- Mutate state outside the source file you targeted (no schema changes, no settings writes, no DB queries).
+- Mutate state outside the candidate files you audited (no schema changes, no settings writes, no DB queries). The only exception is the \`touch\` rotation in §4 (mtime only — content unchanged, \`git status\` stays clean) and the audit-log append in §7.
+- Modify a candidate file's CONTENT on a clean run. \`touch\` only. No comments, no blank lines, no "audited YYYY-MM-DD" markers in the source — that would dirty git and is forbidden.
 - Touch security-sensitive code (auth, payments, crypto, command construction) without a real, named, single-pattern reason — \`gh\` argument refactors don't count.
-- Bundle multiple patterns in one run. If you find three, fix one, leave the rest for the next run.
+- Bundle multiple fixes in one run. The §3 rule is one fix per run: the moment you apply a fix, the candidate walk stops.
+- Audit more than 5 candidates in a single run. The cap exists to bound token cost; if the prerequisite list rotated 5 clean files, the next run will see a different top-of-queue.
 - Add comments to "document the fix" — the diff itself is the documentation. Brief WHY comments are fine when the pattern's not self-evident (e.g. "Single-pass max-by-X over project-wide lists that can reach thousands of entries"); past-tense "Was previously …" comments are not.`,
   },
   {

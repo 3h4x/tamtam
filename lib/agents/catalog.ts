@@ -229,7 +229,7 @@ export const AGENT_CATALOG: AgentCatalogEntry[] = [
   },
   {
     name: 'improve',
-    description: 'Audits the least-recently-modified source file and applies one safe, mechanical code-quality fix per run (TOCTOU collapse, parallel I/O, rotted-comment cleanup, dead try/catch, hot-path hoists). Verifies with type-check + the relevant vitest file.',
+    description: 'Walks up to 5 least-recently-modified source files, applies ONE safe family-rubric fix to the first one with a real instance (resource lifecycle, hot-path waste, defensive-code-that-doesn\'t-defend, drift), or `touch`es clean files to rotate them out of the queue. Verifies edits with type-check + the relevant vitest file.',
     dispatch: 'cli',
     defaultSchedule: '12h',
     defaultModel: 'normal',
