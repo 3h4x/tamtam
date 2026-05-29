@@ -385,4 +385,46 @@ test.describe('NotificationBell', () => {
     await expect(page.getByText('transition-project')).toBeVisible({ timeout: 5_000 });
     await expect(page.getByText('LGTM').first()).toBeVisible();
   });
+
+  test('running dot clears when the only running job disappears on auto-poll', async ({
+    page,
+  }) => {
+    let runningCount = 1;
+    let runningJobs: NotifJob[] = [
+      makeNotifJob({
+        id: 'running-to-idle',
+        project: 'idle-project',
+        kind: 'run',
+        status: 'running',
+        exit_code: null,
+        finished_at: null,
+        session_id: 'session-running-to-idle',
+      }),
+    ];
+
+    await stubShellRoutes(page);
+    await page.route('**/api/jobs/notifications', (route: Route) =>
+      route.fulfill({ json: { count: 0, jobs: [], runningCount, runningJobs } }),
+    );
+
+    await page.goto('/runs');
+
+    const runningBell = page.getByTitle('1 running');
+    await expect(runningBell).toBeVisible({ timeout: 8_000 });
+    await expect(runningBell.locator('span.animate-pulse')).toBeVisible();
+
+    await runningBell.click();
+    await expect(page.getByText(/running.*1 project/i)).toBeVisible({ timeout: 5_000 });
+    await expect(page.getByText('idle-project')).toBeVisible();
+
+    runningCount = 0;
+    runningJobs = [];
+
+    const idleBell = page.getByTitle('No notifications');
+    await expect(idleBell).toBeVisible({ timeout: 12_000 });
+    await expect(idleBell.locator('span.animate-pulse')).toHaveCount(0);
+    await expect(page.getByText(/running.*1 project/i)).toHaveCount(0);
+    await expect(page.getByText('idle-project')).toHaveCount(0);
+    await expect(page.getByText('All caught up')).toBeVisible({ timeout: 5_000 });
+  });
 });
