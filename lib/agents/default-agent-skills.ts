@@ -425,15 +425,23 @@ Source: https://github.com/multica-ai/andrej-karpathy-skills/blob/main/skills/ka
 4. **Goal-driven verification.** Before editing, name the exact check that proves the fix is correct (a specific type-check pass + a specific test file). After editing, run those — not a wider net. If the check you named is wrong for this fix, you didn't think hard enough in step 1.
 
 
-## 1. Pick the least-recently-verified file
+## 1. Walk the candidate queue (do not stop at the first file)
 
-**Prefer the prerequisite artifact.** The Prerequisite Output above already lists the top 5 oldest candidate files (post-filter) plus a tail of the per-project \`.tamtam/cache/audits/improve.md\` ledger. Pick the first entry that isn't:
-- a tiny barrel/re-export with nothing meaningful inside (e.g. one-line type re-exports),
-- a file that the audit log shows you already touched in a recent run with the same intended pattern.
+The candidate queue is the **top 5 oldest source files** the prerequisite gave you. You walk them **in order**, and you do exactly ONE of two things per file:
 
-If the prerequisite output is absent (custom agent without prereq), run this find yourself from the repo root and take the top result:
+- **Found a real instance in any family (1–4)** → apply ONE fix to that file, verify, stop the loop. Skip every remaining candidate.
+- **Clean (no real instance)** → \`touch <path>\` from the repo root so the filesystem mtime advances past now, append one clean row to \`.tamtam/cache/audits/improve.md\`, and **continue to the next candidate**. Do NOT stop yet.
 
-\`find app components lib hooks scripts docs -type f -not -path '*/.tamtam/*' -not -path '*/node_modules/*' -not -path '*/.next/*' -not -path '*/dist/*' -not -path '*/coverage/*' -not -name '*.d.ts' \\( -name '*.ts' -o -name '*.tsx' -o -name '*.md' -o -name '*.sh' \\) -printf '%T@ %p\\n' 2>/dev/null | sort -n | head -1\`
+\`touch\` is mandatory on a clean audit. Without it the same file stays at the top of next run's oldest-first queue and the agent keeps re-auditing it. \`touch\` only bumps mtime — file content is unchanged and \`git status\` stays clean, so the release pipeline is unaffected.
+
+Caps and order:
+- Walk **at most 5 candidates** per run (the prerequisite list size). If all 5 are clean, stop, report all 5 rotations, and let the next run pick up from the new top of the queue.
+- Skip a candidate without auditing only if it is a tiny barrel/re-export with nothing meaningful inside (e.g. a one-line type re-export). Skipping for any other reason — "this is just config", "this is just an SVG" — is laziness; audit it against the rubric and \`touch\` it as clean if no instance.
+- If the audit log shows a file was already audited under this exact prompt within the last few runs, it should not be at the top of the queue at all (the previous run should have touched it). If it is, treat that as a queue-rotation bug, audit it once, touch it, and continue.
+
+If the prerequisite output is absent (custom agent without the standard prereq), run this find yourself from the repo root and take the top 5:
+
+\`find app components lib hooks scripts docs -type f -not -path '*/.tamtam/*' -not -path '*/node_modules/*' -not -path '*/.next/*' -not -path '*/dist/*' -not -path '*/coverage/*' -not -name '*.d.ts' \\( -name '*.ts' -o -name '*.tsx' -o -name '*.md' -o -name '*.sh' \\) -printf '%T@ %p\\n' 2>/dev/null | sort -n | head -5\`
 
 Skip generated files (\`*.d.ts\`, anything under \`node_modules\`, \`.next\`, \`dist\`, \`coverage\`, \`.tamtam/\` — the latter is TamTam's per-project state, not project source).
 
@@ -519,32 +527,50 @@ If you find yourself about to do any of the following, stop and re-read the rubr
 
 If none of the five families produce a real instance, the file is clean. That is the correct, expected, productive outcome — not a failure.
 
-## 3. Apply ONE fix
-- Edit the source file. Keep the diff minimal — one concern, one pattern.
+## 3. Apply ONE fix (when you find a real instance)
+The moment one of the candidates yields a real Family 1–4 instance:
+- Edit that source file. Keep the diff minimal — one concern, one pattern.
 - Don't introduce new abstractions, helpers, or hypothetical-future flexibility.
 - Don't rename variables/functions opportunistically.
 - Don't touch \`.test.ts\` files unless the source change provably breaks an existing assertion (e.g. an existsSync precheck removed → a test that asserted "existsSync was called" needs to be updated to assert the new flow).
+- **Stop the candidate walk.** Do not audit the remaining candidates in this run. One fix per run.
 
-## 4. Verify
-Run **only** these. Use \`npx\` rather than \`pnpm\` — pnpm 11 coordinates child processes through IPC channels that codex \`workspace-write\` sandboxes block, so \`pnpm type-check\` exits with "tsx IPC restriction" while \`npx tsc\` runs cleanly with the same tsconfig.
+For Family 5 (flag-and-stop): emit the sentinel, do NOT touch the file (it has a real human-action issue, not a clean queue rotation), and stop the walk. Treat a Family-5 hit the same as a fix for "should I keep walking?" — you stop.
+
+## 4. Rotate clean candidates forward
+For every candidate you audited and found clean:
+- \`touch <path>\` from the repo root. This advances the filesystem mtime past now, so next run's oldest-first queue picks the *next* file instead of looping on the same one.
+- Append a clean row to \`.tamtam/cache/audits/improve.md\` (see §6 for the format) — this is the project-scoped record. The audit log is appended; the file is touched. Both happen.
+- Do NOT modify the file's content. \`touch\` only. Adding comments, blank lines, or "audited on Y/M/D" markers to the source file would dirty git and is forbidden.
+
+## 5. Verify (only when you applied a fix)
+Run **only** these on the one file you edited. Use \`npx\` rather than \`pnpm\` — pnpm 11 coordinates child processes through IPC channels that codex \`workspace-write\` sandboxes block, so \`pnpm type-check\` exits with "tsx IPC restriction" while \`npx tsc\` runs cleanly with the same tsconfig.
 1. \`npx tsc --noEmit\`
 2. \`npx vitest run <the-relevant-test-file>\` — find tests touching the file via \`find __tests__ -name '*<file-basename>*'\` or grep.
 
-Do NOT run the full test suite, do NOT run e2e tests, do NOT run \`pnpm rebuild\` / \`pnpm dev\`.
+Do NOT run the full test suite, do NOT run e2e tests, do NOT run \`pnpm rebuild\` / \`pnpm dev\`. If no fix was applied (all 5 candidates clean), skip verification entirely — there is nothing to verify.
 
-## 5. Report
-Print a short summary:
+## 6. Report
+Print a short summary at the end of the run. Pick exactly one of the two shapes:
+
+**Shape A — a fix was applied (at most one per run):**
 - **File touched** (path)
+- **Candidates walked before the fix** (e.g. "2 clean → fixed the 3rd")
 - **Family** (Family 1 / 2 / 3 / 4 / 5 by name — e.g. "Family 1: resource-lifecycle")
 - **Instance** (one sentence: the specific thing you matched — "unhandled \`'error'\` event on pg \`Pool\` exported at line 9")
 - **Change** (one or two sentences, present tense — what the new code does, why)
 - **Verification** (type-check pass + test-file: N/N passing)
 
-If the file you picked has no real instance in any family, say so: print \`IMPROVE_FILE_CLEAN <path>\` and stop. Don't invent a fix to justify the run; cycling files until something matches is the expected behavior — the next run will pick the next-oldest file.
+**Shape B — all candidates clean:**
+- **Candidates rotated** (list each path you touched + clean-logged, in walk order)
+- One line: "queue rotated forward — next run starts on a different file."
+- Final sentinel: \`IMPROVE_QUEUE_ROTATED <n>\` where n is the number of files touched.
 
-## 6. Append to the audit log
+Per-file sentinels remain for the audit log: \`IMPROVE_FILE_CLEAN <path>\` for each clean walk, \`IMPROVE_CREDENTIAL_LEAK\` / \`IMPROVE_FILE_DEAD_ORPHAN\` / \`IMPROVE_FILE_DUPLICATE\` / \`IMPROVE_STALE_PATH\` for Family-5 hits (each stops the walk; emit at most one).
 
-After §5, append a one-line entry to \`.tamtam/cache/audits/improve.md\`. This is the per-project running ledger of every \`agent:improve\` run — useful when the next iteration wants to know what's already been touched and what patterns keep recurring.
+## 7. Append to the audit log
+
+Append one row per audited candidate to \`.tamtam/cache/audits/improve.md\` — both for fixes and for clean rotations. This is the per-project running ledger; the next run reads it to understand what's already been touched and what patterns recur.
 
 The \`.tamtam/cache/\` subdir is gitignored by default (TamTam seeds \`.tamtam/.gitignore\` with \`cache/\` on first agent run), so audit files there stay out of commits without any per-agent gitignore edit.
 
@@ -561,18 +587,26 @@ mkdir -p .tamtam/cache/audits
 |---|---|---|---|
 \`\`\`
 
-Then append one row per run, in this exact format:
+Then append one row per audited file, in this exact format:
 
 \`\`\`
-| YYYY-MM-DDTHH:MM | <relative path> | <family from §2 — e.g. "F1: resource-lifecycle"> | <one sentence, present tense> |
+| YYYY-MM-DDTHH:MM | <relative path> | <family — e.g. "F1: resource-lifecycle"> | <one sentence, present tense> |
 \`\`\`
 
-Use the same path the user would see (\`lib/foo/bar.ts\`, not absolute). For \`IMPROVE_FILE_CLEAN\` runs, still append a row with \`Family: clean\` and \`Change: no real instance in any family, skipped\` so the next run can see this file was already audited recently. For the Family-5 sentinel cases (\`CREDENTIAL_LEAK\`, \`FILE_DEAD_ORPHAN\`, \`FILE_DUPLICATE\`, \`STALE_PATH\`), append with \`Family: F5: <sentinel>\` and a one-sentence description — those are human-action items, not edits.
+Use the same path the user would see (\`lib/foo/bar.ts\`, not absolute).
+
+Per-row rules:
+- **Clean rotation** (you \`touch\`ed the file in §4): \`Family: clean\`, \`Change: clean — touched to rotate queue\`. The mtime bump is what actually rotates the queue; this row is just the audit trail.
+- **Fix applied** (§3): \`Family: F1..F4: <name>\`, \`Change: <one sentence in present tense>\`.
+- **Family-5 hit** (sentinel, no edit): \`Family: F5: <sentinel name>\`, \`Change: <one sentence — the human-action item>\`. Do NOT \`touch\` the file — Family-5 is a real blocker, not a clean rotation, and you want it to keep surfacing at the top until a human resolves it.
+
+A typical clean-only run appends 5 rows (one per walked candidate). A fix run appends 1–N rows: 0–4 clean rows for the candidates walked before the fix, plus one fix row.
 
 The audit log is project-scoped and commits with the repo so it survives a TamTam reinstall.
 
-**Sentinels** (one per run, last line of output):
-- \`IMPROVE_FILE_CLEAN <path>\` — no matching pattern, no action.
+**Sentinels** (printed in the report, in addition to the per-shape final line):
+- \`IMPROVE_FILE_CLEAN <path>\` — one per clean-and-touched candidate in this run.
+- \`IMPROVE_QUEUE_ROTATED <n>\` — final line of a Shape-B run (all candidates clean).
 - \`IMPROVE_CREDENTIAL_LEAK <path>:<line> <kind>\` — committed secret found; no edit applied.
 - \`IMPROVE_FILE_DEAD_ORPHAN <path>\` — module only consumed by its own test; flag for human cleanup.
 - \`IMPROVE_FILE_DUPLICATE <path> superseded_by=<sibling-path>\` — sibling consumed instead; flag for human cleanup.

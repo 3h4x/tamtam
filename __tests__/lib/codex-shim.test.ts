@@ -31,6 +31,10 @@ beforeAll(async () => {
   sharedRoot = await mkdtemp(join(tmpdir(), 'tamtam-codex-shim-shared-'));
   sharedFakeCodex = join(sharedRoot, 'codex');
   await writeFile(sharedFakeCodex, `#!/usr/bin/env node
+const fs = require('fs');
+console.log = (...args) => {
+  fs.writeSync(1, args.join(' ') + '\\n');
+};
 const scriptPath = process.env.FAKE_CODEX_SCRIPT;
 if (!scriptPath) {
   process.stderr.write('FAKE_CODEX_SCRIPT not set\\n');
