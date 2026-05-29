@@ -98,7 +98,7 @@ Model aliases:
 
 Override with `CODEX_MODEL`, `CODEX_FAST_MODEL`, `CODEX_NORMAL_MODEL`, or `CODEX_SMART_MODEL`. Legacy `CODEX_HAIKU_MODEL`, `CODEX_SONNET_MODEL`, and `CODEX_OPUS_MODEL` still work as fallbacks.
 
-Permission mapping normalizes TamTam's headless modes to non-interactive Codex launches: `acceptEdits`, `auto`, `default`, and `dontAsk` all use `workspace-write` with `-a never`; `plan` uses `read-only`; `bypassPermissions` uses Codex's explicit full-bypass flag. When the browser broker is injected on macOS without TamTam's outer `sandbox-exec` wrapper, the shim also enables Codex workspace-write network access so MCP loopback calls can reach `127.0.0.1:<broker port>`. That override is intentionally not passed on Linux because Codex's legacy Linux sandbox path can fail when workspace-write network access is enabled. Set `CODEX_DANGEROUS_BYPASS=1` only if you intentionally want TamTam's `bypassPermissions` mode to run Codex with `danger-full-access`.
+Permission mapping normalizes TamTam's headless modes to non-interactive Codex launches: `acceptEdits`, `auto`, `default`, and `dontAsk` all use `workspace-write` with `-a never`; `plan` uses `read-only`; `bypassPermissions` uses Codex's explicit full-bypass flag. When the browser broker is injected, Codex 0.128.0 rejects MCP tool calls under `workspace-write`, so the shim promotes write-capable broker runs (`acceptEdits`, `auto`, `default`, and `dontAsk`) to `--sandbox danger-full-access`. If TamTam's outer `sandbox-exec` wrapper is active, that outer seatbelt profile is the real sandbox. `plan` remains `read-only` even with broker env present, so broker tool calls may not work in that mode.
 
 Manual usage:
 

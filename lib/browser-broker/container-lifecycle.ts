@@ -119,6 +119,10 @@ async function runContainer(hostPort: number, image: string): Promise<{ id: stri
     '--browser', 'chromium',
     '--headless',
     '--no-sandbox',
+    // Concurrent agent runs collide on the shared chromium profile and the
+    // second one errors with `Browser is already in use`. --isolated gives
+    // each MCP session its own profile/context.
+    '--isolated',
   ];
   const cmd = image === BROKER_IMAGE ? [
     ...baseArgs,
@@ -130,7 +134,7 @@ async function runContainer(hostPort: number, image: string): Promise<{ id: stri
     ...baseArgs,
     image,
     'sh', '-c',
-    `npx -y ${BROKER_MCP_PACKAGE} --port ${BROKER_INTERNAL_PORT} --host 0.0.0.0 --browser chromium --headless --no-sandbox`,
+    `npx -y ${BROKER_MCP_PACKAGE} --port ${BROKER_INTERNAL_PORT} --host 0.0.0.0 --browser chromium --headless --no-sandbox --isolated`,
   ];
   const res = await runShell('docker', cmd, { timeout: 30_000 });
   if (res.exitCode !== 0) {

@@ -160,30 +160,29 @@ function brokerMcpUrlFor(env) {
   return e.TAMTAM_BROKER_MCP_URL || (e.TAMTAM_BROKER_URL ? `${e.TAMTAM_BROKER_URL}/mcp` : '');
 }
 
-function platformFor(env) {
-  return (env && env.TAMTAM_CODEX_SHIM_PLATFORM) || process.platform;
-}
-
 function permissionArgsFor(mode, env) {
   if (mode === 'bypassPermissions') {
     return ['--dangerously-bypass-approvals-and-sandbox'];
+  }
+  if (mode === 'plan') {
+    return ['-a', approvalFor(mode), '--sandbox', sandboxFor(mode)];
   }
   // When TamTam wraps the shim in `sandbox-exec`, the outer seatbelt profile
   // is the real sandbox. Codex's built-in workspace-write profile would
   // double-sandbox AND block loopback (which the broker needs). Tell codex
   // to skip its own sandbox; the outer profile keeps the real restrictions.
   const e = env || process.env;
-  if (e.TAMTAM_SANDBOX_PROFILE) {
+  // Codex 0.128.0 rejects MCP tool calls under `workspace-write` with
+  // `user cancelled MCP tool call`, regardless of approvals_reviewer or
+  // per-server approval_mode. `danger-full-access` is the only sandbox
+  // policy that lets write-capable agent modes reach the loopback broker.
+  // `plan` is handled above so it keeps its read-only sandbox contract.
+  // When the outer seatbelt is the real sandbox (TAMTAM_SANDBOX_PROFILE)
+  // OR the broker is being injected for this run, promote to danger-full-access.
+  if (e.TAMTAM_SANDBOX_PROFILE || brokerMcpUrlFor(e)) {
     return ['-a', approvalFor(mode), '--sandbox', 'danger-full-access'];
   }
-  const base = ['-a', approvalFor(mode), '--sandbox', sandboxFor(mode)];
-  // macOS Codex workspace-write blocks loopback without this override. Do
-  // not pass it on Linux: Codex's legacy Linux sandbox path can panic when
-  // network_access is enabled.
-  if (brokerMcpUrlFor(e) && sandboxFor(mode) === 'workspace-write' && platformFor(e) === 'darwin') {
-    base.push('-c', 'sandbox_workspace_write.network_access=true');
-  }
-  return base;
+  return ['-a', approvalFor(mode), '--sandbox', sandboxFor(mode)];
 }
 
 function emitJson(value) {
