@@ -25,7 +25,7 @@ import { buildProjectPath, buildProjectTerminalPath } from '@/lib/client/project
 import { resolveGithubBoardUrl } from '@/lib/client/resolve-github-board-url'
 import { ProjectLogo } from '@/components/ProjectLogo'
 import { Button } from '@/components/ui/Button'
-import { PillButton } from '@/components/ui/Pill'
+import { Pill, PillButton } from '@/components/ui/Pill'
 
 type Tab = 'overview' | 'config' | 'history' | 'terminal' | 'changes' | 'issues' | 'docs' | 'agents'
 const VALID_TABS: readonly Tab[] = ['overview', 'config', 'history', 'terminal', 'changes', 'issues', 'docs', 'agents']
@@ -603,8 +603,10 @@ export function ProjectDetailPage({
             const ahead = branchCommitsAhead ?? 0
             const behind = behindCount
             return (
-              <span
-                className="inline-flex items-center gap-1.5 rounded-full border border-accent/30 bg-accent-light px-2 py-0.5 text-xs font-mono text-accent"
+              <Pill
+                tone="accent"
+                size="xs"
+                className="rounded-full border-accent/30 bg-accent-light font-mono"
                 title={`On feature branch ${currentBranch} — default is ${defaultBranch ?? 'unknown'}`}
                 data-private
               >
@@ -621,7 +623,7 @@ export function ProjectDetailPage({
                     ↓{behind}
                   </span>
                 )}
-              </span>
+              </Pill>
             )
           })()}
           {currentBranch && githubUrl && (() => {
@@ -645,8 +647,9 @@ export function ProjectDetailPage({
             )
           })()}
           {releaseTag && (
-            <span
-              className="inline-flex items-center gap-1 rounded-full border border-border bg-bg-secondary px-2 py-0.5 text-xs text-text-secondary font-mono tabular-nums"
+            <Pill
+              size="xs"
+              className="gap-1 rounded-full bg-bg-secondary font-mono tabular-nums"
               title="Latest release"
               data-private
             >
@@ -654,7 +657,7 @@ export function ProjectDetailPage({
                 <path d="M2.5 7.775V2.75a.25.25 0 01.25-.25h5.025a.25.25 0 01.177.073l6.25 6.25a.25.25 0 010 .354l-5.025 5.025a.25.25 0 01-.354 0l-6.25-6.25a.25.25 0 01-.073-.177zm-1.5 0V2.75C1 1.784 1.784 1 2.75 1h5.025c.464 0 .91.184 1.238.513l6.25 6.25a1.75 1.75 0 010 2.474l-5.026 5.026a1.75 1.75 0 01-2.474 0l-6.25-6.25A1.75 1.75 0 011 7.775zM6 5a1 1 0 100 2 1 1 0 000-2z" />
               </svg>
               {releaseTag}
-            </span>
+            </Pill>
           )}
           {boardUrl && (
             <a
