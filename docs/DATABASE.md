@@ -65,7 +65,7 @@ Audit trail for every run, review, fix, test, push, agent execution.
 | `project` | TEXT | — | NOT NULL; project name |
 | `kind` | TEXT | — | NOT NULL; see [Job Kinds](#job-kinds) |
 | `prompt` | TEXT | — | nullable; prompt sent to Claude |
-| `pid` | INTEGER | — | NOT NULL; PM2 process ID |
+| `pid` | INTEGER | — | NOT NULL; spawned child PID, server PID for inline coordinator jobs, or `0` when no external process is owned |
 | `logPath` | TEXT | — | nullable; absolute path to NDJSON log file |
 | `startedAt` | REAL | — | NOT NULL; Unix timestamp (seconds) |
 | `finishedAt` | REAL | — | nullable; null while running |
