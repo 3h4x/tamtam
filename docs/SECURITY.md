@@ -95,7 +95,8 @@ Claude prompt-injection probe (issue body asking the agent to run a forbidden to
 
 **Implications for `permission_mode`:**
 
-- `auto` (current default) → for codex this is `-a never --sandbox workspace-write`, which keeps the network/FS sandbox as the real safety boundary. Equivalent to `acceptEdits` for codex routing.
+- `auto` (current default) without browser broker injection → for codex this is `-a never --sandbox workspace-write`, which keeps the network/FS sandbox as the real safety boundary. Equivalent to `acceptEdits` for codex routing.
+- Broker-enabled Codex runs in write-capable modes (`auto`, `acceptEdits`, `default`, `dontAsk`) are promoted to `--sandbox danger-full-access` so MCP loopback calls can reach TamTam's browser broker. When `tamtam_network_policy_strict` wraps the process in the macOS seatbelt profile, that outer profile is the real safety boundary. Without that wrapper, enabling the browser broker deliberately broadens the Codex trust boundary. `plan` remains `read-only` even with broker env present.
 - `bypassPermissions` → for codex this is `--dangerously-bypass-approvals-and-sandbox`. The sandbox is fully off and `--disallowed-tools` is silently dropped — there is no defense-in-depth left for an issue-cruncher run under that mode. Treat `bypassPermissions` as a deliberate trust escalation for codex-driven agent work and prefer `auto` whenever possible.
 
 **Plugging the codex gap**: the codex shim could be updated to honor `--disallowed-tools` (e.g. via codex's `--config tools.shell.deny_patterns=…` or a wrapper that inspects shell invocations before passing them to codex). Until that lands, the issue-cruncher's only enforced barriers on codex are the sandbox and the model itself; the skill prompt's `## Hard rules — do not bypass` claim that gh-issue commands are "blocked at the permission layer" is technically only true for Claude.

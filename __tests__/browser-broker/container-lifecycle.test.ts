@@ -64,6 +64,7 @@ describe('ensureBrokerRunning', () => {
     expect(runArgs[imageIndex + 3]).toContain('--browser chromium');
     expect(runArgs[imageIndex + 3]).toContain('--headless');
     expect(runArgs[imageIndex + 3]).toContain('--no-sandbox');
+    expect(runArgs[imageIndex + 3]).toContain('--isolated');
     expect(runArgs).not.toContain('--entrypoint');
     expect(runArgs).not.toContain('/app/cli.js');
   });
@@ -98,6 +99,7 @@ describe('ensureBrokerRunning', () => {
       '--browser', 'chromium',
       '--headless',
       '--no-sandbox',
+      '--isolated',
     ]));
     expect(runCall?.[1]).not.toContain('--allowed-hosts');
     expect(runCall?.[1]).not.toContain('--rm');

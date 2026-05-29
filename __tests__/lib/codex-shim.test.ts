@@ -132,48 +132,44 @@ describe.concurrent('codex-shim', () => {
     expect(args).toEqual(['-a', 'never', '--sandbox', 'workspace-write']);
   });
 
-  it('opens workspace-write network when broker URL is set so loopback MCP calls reach the broker', () => {
+  it('promotes broker-enabled runs to danger-full-access so Codex 0.128.0 lets MCP calls through', () => {
     const args = shim.permissionArgsFor('acceptEdits', {
       TAMTAM_BROKER_MCP_URL: 'http://127.0.0.1:9000/mcp',
-      TAMTAM_CODEX_SHIM_PLATFORM: 'darwin',
-    });
-    expect(args).toEqual([
-      '-a', 'never',
-      '--sandbox', 'workspace-write',
-      '-c', 'sandbox_workspace_write.network_access=true',
-    ]);
-  });
-
-  it('opens workspace-write network for derived broker MCP URLs on macOS', () => {
-    const args = shim.permissionArgsFor('acceptEdits', {
-      TAMTAM_BROKER_URL: 'http://127.0.0.1:9000',
-      TAMTAM_CODEX_SHIM_PLATFORM: 'darwin',
-    });
-    expect(args).toEqual([
-      '-a', 'never',
-      '--sandbox', 'workspace-write',
-      '-c', 'sandbox_workspace_write.network_access=true',
-    ]);
-  });
-
-  it('does not add the workspace-write network flag on Linux', () => {
-    const args = shim.permissionArgsFor('acceptEdits', {
-      TAMTAM_BROKER_MCP_URL: 'http://127.0.0.1:9000/mcp',
-      TAMTAM_CODEX_SHIM_PLATFORM: 'linux',
-    });
-    expect(args).toEqual(['-a', 'never', '--sandbox', 'workspace-write']);
-  });
-
-  it('does not add network_access flag when outer seatbelt is the real sandbox', () => {
-    const args = shim.permissionArgsFor('acceptEdits', {
-      TAMTAM_BROKER_MCP_URL: 'http://127.0.0.1:9000/mcp',
-      TAMTAM_SANDBOX_PROFILE: '/path/to/profile.sb',
-      TAMTAM_CODEX_SHIM_PLATFORM: 'darwin',
     });
     expect(args).toEqual(['-a', 'never', '--sandbox', 'danger-full-access']);
   });
 
-  it('launches broker-enabled Codex on Linux without the unsupported network flag', async () => {
+  it('promotes broker runs to danger-full-access when MCP URL is derived from TAMTAM_BROKER_URL', () => {
+    const args = shim.permissionArgsFor('acceptEdits', {
+      TAMTAM_BROKER_URL: 'http://127.0.0.1:9000',
+    });
+    expect(args).toEqual(['-a', 'never', '--sandbox', 'danger-full-access']);
+  });
+
+  it('keeps broker-enabled plan runs read-only', () => {
+    const args = shim.permissionArgsFor('plan', {
+      TAMTAM_BROKER_MCP_URL: 'http://127.0.0.1:9000/mcp',
+    });
+    expect(args).toEqual(['-a', 'on-request', '--sandbox', 'read-only']);
+  });
+
+  it('keeps plan read-only when outer seatbelt is present', () => {
+    const args = shim.permissionArgsFor('plan', {
+      TAMTAM_BROKER_MCP_URL: 'http://127.0.0.1:9000/mcp',
+      TAMTAM_SANDBOX_PROFILE: '/path/to/profile.sb',
+    });
+    expect(args).toEqual(['-a', 'on-request', '--sandbox', 'read-only']);
+  });
+
+  it('keeps danger-full-access when outer seatbelt is the real sandbox', () => {
+    const args = shim.permissionArgsFor('acceptEdits', {
+      TAMTAM_BROKER_MCP_URL: 'http://127.0.0.1:9000/mcp',
+      TAMTAM_SANDBOX_PROFILE: '/path/to/profile.sb',
+    });
+    expect(args).toEqual(['-a', 'never', '--sandbox', 'danger-full-access']);
+  });
+
+  it('launches broker-enabled Codex with danger-full-access sandbox', async () => {
     const { dir, behaviorPath } = await makeFakeCodex(`
 const fs = require('fs');
 fs.writeFileSync(process.env.CODEX_ARGV_FILE, JSON.stringify(process.argv.slice(2)));
@@ -195,13 +191,46 @@ console.log('ok');
       FAKE_CODEX_SCRIPT: behaviorPath,
       CODEX_ARGV_FILE: argvPath,
       TAMTAM_BROKER_MCP_URL: 'http://127.0.0.1:9000/mcp',
-      TAMTAM_CODEX_SHIM_PLATFORM: 'linux',
     });
 
     expect(result.code).toBe(0);
     const argv = JSON.parse(await waitForFile(argvPath)) as string[];
     expect(argv).toContain('mcp_servers.tamtam_browser.url="http://127.0.0.1:9000/mcp"');
+    expect(argv).toContain('danger-full-access');
+    expect(argv).not.toContain('workspace-write');
     expect(argv).not.toContain('sandbox_workspace_write.network_access=true');
+  });
+
+  it('launches broker-enabled Codex plan with read-only sandbox', async () => {
+    const { dir, behaviorPath } = await makeFakeCodex(`
+const fs = require('fs');
+fs.writeFileSync(process.env.CODEX_ARGV_FILE, JSON.stringify(process.argv.slice(2)));
+console.log('ok');
+`);
+    const argvPath = join(dir, 'argv.json');
+
+    const result = await runNode([
+      'scripts/codex-shim.js',
+      '--model',
+      'sonnet',
+      '--permission-mode',
+      'plan',
+      '-p',
+      'Review the diff',
+    ], {
+      ...process.env,
+      CODEX_BIN: sharedFakeCodex,
+      FAKE_CODEX_SCRIPT: behaviorPath,
+      CODEX_ARGV_FILE: argvPath,
+      TAMTAM_BROKER_MCP_URL: 'http://127.0.0.1:9000/mcp',
+    });
+
+    expect(result.code).toBe(0);
+    const argv = JSON.parse(await waitForFile(argvPath)) as string[];
+    expect(argv).toContain('mcp_servers.tamtam_browser.url="http://127.0.0.1:9000/mcp"');
+    expect(argv).toContain('read-only');
+    expect(argv).not.toContain('danger-full-access');
+    expect(argv).not.toContain('workspace-write');
   });
 
   it('resolves semantic tiers through the new env vars', () => {
