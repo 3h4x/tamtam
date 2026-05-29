@@ -9,7 +9,7 @@ const _require = createRequire(import.meta.url);
 const shim = _require(join(process.cwd(), 'scripts/codex-shim.js')) as {
   resolveModel: (model: string, env?: Partial<NodeJS.ProcessEnv>) => string;
   brokerConfigFlags: (env?: Partial<NodeJS.ProcessEnv>) => string[];
-  permissionArgsFor: (mode: string) => string[];
+  permissionArgsFor: (mode: string, env?: Partial<NodeJS.ProcessEnv>) => string[];
   sandboxFor: (mode: string) => string;
   approvalFor: (mode: string) => string;
 };
@@ -130,6 +130,78 @@ describe.concurrent('codex-shim', () => {
   it('maps default to workspace-write sandbox without approval prompts', () => {
     const args = shim.permissionArgsFor('default');
     expect(args).toEqual(['-a', 'never', '--sandbox', 'workspace-write']);
+  });
+
+  it('opens workspace-write network when broker URL is set so loopback MCP calls reach the broker', () => {
+    const args = shim.permissionArgsFor('acceptEdits', {
+      TAMTAM_BROKER_MCP_URL: 'http://127.0.0.1:9000/mcp',
+      TAMTAM_CODEX_SHIM_PLATFORM: 'darwin',
+    });
+    expect(args).toEqual([
+      '-a', 'never',
+      '--sandbox', 'workspace-write',
+      '-c', 'sandbox_workspace_write.network_access=true',
+    ]);
+  });
+
+  it('opens workspace-write network for derived broker MCP URLs on macOS', () => {
+    const args = shim.permissionArgsFor('acceptEdits', {
+      TAMTAM_BROKER_URL: 'http://127.0.0.1:9000',
+      TAMTAM_CODEX_SHIM_PLATFORM: 'darwin',
+    });
+    expect(args).toEqual([
+      '-a', 'never',
+      '--sandbox', 'workspace-write',
+      '-c', 'sandbox_workspace_write.network_access=true',
+    ]);
+  });
+
+  it('does not add the workspace-write network flag on Linux', () => {
+    const args = shim.permissionArgsFor('acceptEdits', {
+      TAMTAM_BROKER_MCP_URL: 'http://127.0.0.1:9000/mcp',
+      TAMTAM_CODEX_SHIM_PLATFORM: 'linux',
+    });
+    expect(args).toEqual(['-a', 'never', '--sandbox', 'workspace-write']);
+  });
+
+  it('does not add network_access flag when outer seatbelt is the real sandbox', () => {
+    const args = shim.permissionArgsFor('acceptEdits', {
+      TAMTAM_BROKER_MCP_URL: 'http://127.0.0.1:9000/mcp',
+      TAMTAM_SANDBOX_PROFILE: '/path/to/profile.sb',
+      TAMTAM_CODEX_SHIM_PLATFORM: 'darwin',
+    });
+    expect(args).toEqual(['-a', 'never', '--sandbox', 'danger-full-access']);
+  });
+
+  it('launches broker-enabled Codex on Linux without the unsupported network flag', async () => {
+    const { dir, behaviorPath } = await makeFakeCodex(`
+const fs = require('fs');
+fs.writeFileSync(process.env.CODEX_ARGV_FILE, JSON.stringify(process.argv.slice(2)));
+console.log('ok');
+`);
+    const argvPath = join(dir, 'argv.json');
+
+    const result = await runNode([
+      'scripts/codex-shim.js',
+      '--model',
+      'sonnet',
+      '--permission-mode',
+      'acceptEdits',
+      '-p',
+      'Review the diff',
+    ], {
+      ...process.env,
+      CODEX_BIN: sharedFakeCodex,
+      FAKE_CODEX_SCRIPT: behaviorPath,
+      CODEX_ARGV_FILE: argvPath,
+      TAMTAM_BROKER_MCP_URL: 'http://127.0.0.1:9000/mcp',
+      TAMTAM_CODEX_SHIM_PLATFORM: 'linux',
+    });
+
+    expect(result.code).toBe(0);
+    const argv = JSON.parse(await waitForFile(argvPath)) as string[];
+    expect(argv).toContain('mcp_servers.tamtam_browser.url="http://127.0.0.1:9000/mcp"');
+    expect(argv).not.toContain('sandbox_workspace_write.network_access=true');
   });
 
   it('resolves semantic tiers through the new env vars', () => {
