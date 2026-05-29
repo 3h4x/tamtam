@@ -110,12 +110,13 @@ describe('pending-release queue', () => {
     await waitForListed(['proj-b']);
   });
 
-  it('drain calls startRelease and clears the flag', async () => {
+  it('drain retries the project-scoped release without source metadata and clears the flag', async () => {
     setPendingRelease('proj');
     await waitForPending('proj', true);
     await drainPendingRelease('proj');
     expect(mocks.startReleaseMock).toHaveBeenCalledOnce();
     expect(mocks.startReleaseMock).toHaveBeenCalledWith('proj');
+    expect(mocks.startReleaseMock).not.toHaveBeenCalledWith('proj', expect.objectContaining({ sourceJobId: expect.any(String) }));
     await waitForPending('proj', false);
   });
 
