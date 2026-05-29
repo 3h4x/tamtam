@@ -6,6 +6,7 @@ import type { Skill, Persona } from '@/lib/client-api'
 import { canonicalAgentNameKey } from '@/lib/agents/agent-name'
 import { Button } from '@/components/ui/Button'
 import { Pill } from '@/components/ui/Pill'
+import { EmptyState } from '@/components/ui/EmptyState'
 import { SkillEditor } from '@/components/skills-page/SkillEditor'
 import {
   buildSkillListItems,
@@ -462,10 +463,14 @@ export function SkillsPage() {
           <span className="text-xs text-text-tertiary tabular-nums">{customItems.length}</span>
         </div>
         {customItems.length === 0 ? (
-          <div className="text-text-secondary text-sm p-6 bg-bg-secondary rounded-lg border border-border text-center">
-            <p>{search ? 'No custom skills match this search.' : 'No custom skills yet.'}</p>
-            {!search && <p className="text-xs text-text-tertiary mt-1">Use <span className="font-medium">+ New Skill</span> to create one.</p>}
-          </div>
+          <EmptyState
+            bordered
+            paddingY="xs"
+            title={search ? 'No custom skills match this search.' : 'No custom skills yet.'}
+            description={!search ? (
+              <>Use <span className="font-medium">+ New Skill</span> to create one.</>
+            ) : undefined}
+          />
         ) : (
           <div className="rounded-lg border border-border overflow-hidden divide-y divide-border">
             {customItems.map(item => (
