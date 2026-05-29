@@ -489,4 +489,70 @@ test.describe('Runs page non-release live polling', () => {
     })
     await expect(page.getByText(/1 total run .* 1 grouped entry/)).toBeVisible()
   })
+
+  test('header running total appears when a new chat run starts without reload', async ({ page }) => {
+    let serveRunning = false
+
+    await stubRunsShellRoutes(page)
+    await page.route('**/api/jobs?limit=200', (route: Route) => {
+      route.fulfill({
+        json: {
+          jobs: serveRunning
+            ? [
+                makeJob({
+                  id: 'chat-run-header-start-1',
+                  project: RUN_PROJECT,
+                  kind: 'run',
+                  prompt: 'Start from an empty run list',
+                  user_prompt: 'Start from an empty run list',
+                  session_id: 'sess-chat-run-header-start-1',
+                  status: 'running',
+                  exit_code: null,
+                  started_at: now() - 5,
+                  finished_at: null,
+                  work_summary: 'New run just started',
+                }),
+              ]
+            : [],
+          total: serveRunning ? 1 : 0,
+          pendingReleaseProjects: [],
+        },
+      })
+    })
+    await page.route('**/api/jobs/counts', (route: Route) =>
+      route.fulfill({
+        json: {
+          total: serveRunning ? 1 : 0,
+          byKind: serveRunning ? { run: 1 } : {},
+          byStatus: {
+            running: serveRunning ? 1 : 0,
+            done: 0,
+            aborted: 0,
+            failed: 0,
+          },
+          tokens: { input: 0, output: 0, cacheRead: 0, cacheCreate: 0, total: 0 },
+          cost: { total: 0, monthToDate: 0 },
+        },
+      }),
+    )
+
+    await page.goto('/runs')
+
+    await expect(page.getByText('No runs yet')).toBeVisible({ timeout: 8_000 })
+    await expect(page.getByText(/0 total runs/)).toBeVisible()
+    await expect(runRow(page, RUN_PROJECT)).toHaveCount(0)
+
+    serveRunning = true
+
+    const row = runRow(page, RUN_PROJECT)
+    await expect(row).toBeVisible({ timeout: 12_000 })
+    await expect(row.getByLabel('running')).toBeVisible()
+    await expect(row.getByText('New run just started')).toBeVisible()
+
+    await expect(page.getByText(/1 total run .* 1 running/)).toBeVisible({
+      timeout: 20_000,
+    })
+    await expect(page.getByRole('button', { name: /^running 1$/ })).toBeVisible()
+    await expect(page.getByText('No runs yet')).toHaveCount(0)
+  })
 })
