@@ -3,6 +3,7 @@
 import { fetchJobs } from '@/lib/client-api'
 import { useRouter } from 'next/navigation'
 import { buildProjectTerminalPath } from '@/lib/client/project-routes'
+import { Pill } from '@/components/ui/Pill'
 import { StandardTabs, type StandardTabItem } from '@/components/ui/StandardTabs'
 
 type Tab = 'overview' | 'config' | 'history' | 'terminal' | 'changes' | 'issues' | 'docs' | 'agents'
@@ -55,12 +56,14 @@ export function TabNav({ projectName, activeTab, totalChanges, issueCount, runni
       label: 'Changes',
       ariaLabel: totalChanges > 0 ? `Changes, ${totalChanges} pending` : 'Changes',
       badge: totalChanges > 0 ? (
-        <span
-          className="ml-1.5 px-1.5 py-0.5 text-[10px] rounded-full bg-accent-light text-accent font-medium tabular-nums"
+        <Pill
+          tone="accent"
+          size="xs"
+          className="ml-1.5 rounded-full border-transparent bg-accent-light px-1.5 py-0.5 text-[10px] text-accent tabular-nums"
           aria-hidden="true"
         >
           {totalChanges}
-        </span>
+        </Pill>
       ) : null,
     },
     { id: 'history', label: 'History' },
@@ -71,12 +74,14 @@ export function TabNav({ projectName, activeTab, totalChanges, issueCount, runni
       mobileLabel: 'Issues',
       ariaLabel: issueBadgeCount > 0 ? `Issues and pull requests, ${issueBadgeCount} open` : 'Issues and pull requests',
       badge: issueBadgeCount > 0 ? (
-        <span
-          className="ml-1.5 px-1.5 py-0.5 text-[10px] rounded-full bg-accent-light text-accent font-medium tabular-nums"
+        <Pill
+          tone="accent"
+          size="xs"
+          className="ml-1.5 rounded-full border-transparent bg-accent-light px-1.5 py-0.5 text-[10px] text-accent tabular-nums"
           aria-hidden="true"
         >
           {issueBadgeCount}
-        </span>
+        </Pill>
       ) : null,
     },
     { id: 'docs', label: 'Docs' },
