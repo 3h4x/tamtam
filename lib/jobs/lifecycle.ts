@@ -115,14 +115,16 @@ function reviewSourceType(job: Pick<JobData, 'contextMeta'>): string | null {
 function maxStepIterations(): number { return getMaxStepIterations(); }
 function reviewFixMaxIterations(): number { return getReviewFixMaxIterations(); }
 function stepWindowSeconds(): number { return getStepWindowSeconds(); }
-// fix-ci fast-crash auto-retry constants. Only crash-fast failures are retried
-// so real errors still surface. Kept as hardcoded defaults — not surfaced in
-// Settings to keep the UI focused on the single `fix_max_iterations` knob.
-const FIX_CI_MAX_RETRIES = 2;
+// fix-ci fast-crash auto-retry constants. Only crash-fast failures
+// (the fix-ci job died in under FIX_CI_FAST_CRASH_MS) are retried so
+// real errors still surface. The retry count is sourced from the same
+// single global `fix_max_iterations` setting as every other fix loop —
+// when the operator sets it to 0 ("unlimited"), fix-CI crash retries
+// also become unbounded within the rolling FIX_CI_RETRY_WINDOW_SECONDS.
 const FIX_CI_RETRY_WINDOW_SECONDS = 120;
 const FIX_CI_FAST_CRASH_MS = 5000;
 function getFixCiRetryConfig(): { maxRetries: number; windowSeconds: number; fastCrashMs: number } {
-  return { maxRetries: FIX_CI_MAX_RETRIES, windowSeconds: FIX_CI_RETRY_WINDOW_SECONDS, fastCrashMs: FIX_CI_FAST_CRASH_MS };
+  return { maxRetries: getMaxStepIterations(), windowSeconds: FIX_CI_RETRY_WINDOW_SECONDS, fastCrashMs: FIX_CI_FAST_CRASH_MS };
 }
 
 function recentFixCiCount(projectName: string, windowSeconds: number): number {

@@ -686,7 +686,7 @@ describe.skip('reviewIsStuck convergence guard', () => {
       prWorkflowEnabled: false,
     });
     mocks.getSettings.mockReturnValue({
-      review_fix_max_iterations: 3,
+      fix_max_iterations: 3,
     });
     mocks.fileReviewExhaustionIssue.mockResolvedValue({ ok: true, issueNumber: 42, issueUrl: 'https://github.com/owner/repo/issues/42' });
   });
@@ -1058,7 +1058,7 @@ describe.skip('fix→review review-count cap', () => {
       autoPushEnabled: true, autoCommitEnabled: false, releaseAfterRun: false, prWorkflowEnabled: false,
     });
     mocks.getSettings.mockReturnValue({
-      review_fix_max_iterations: 3,
+      fix_max_iterations: 3,
     });
   });
 
@@ -1163,7 +1163,7 @@ describe.skip('fix→review review-count cap', () => {
 // Skipped: cap differentiation lives in iteration-caps.ts now (different
 // caps per kind: reviewFixMaxIterations vs maxStepIterations vs
 // pushFixAttemptCap). Tests in iteration-caps.test.ts.
-describe.skip('review_fix_max_iterations only caps review-side recovery', () => {
+describe.skip('fix_max_iterations only caps review-side recovery', () => {
   function makeFixJob(id: string, overrides: Partial<JobData> = {}): JobData {
     const now = Date.now() / 1000;
     return {
@@ -1193,7 +1193,7 @@ describe.skip('review_fix_max_iterations only caps review-side recovery', () => 
       autoPushEnabled: true, autoCommitEnabled: false, releaseAfterRun: false, prWorkflowEnabled: false,
     });
     mocks.getSettings.mockReturnValue({
-      review_fix_max_iterations: 1,
+      fix_max_iterations: 1,
     });
   });
 
@@ -1201,7 +1201,7 @@ describe.skip('review_fix_max_iterations only caps review-side recovery', () => 
     delete process.env.TAMTAM_MAX_STEP_ITERATIONS;
   });
 
-  it('still re-runs tests after a failed test fix when review_fix_max_iterations is 1', async () => {
+  it('still re-runs tests after a failed test fix when fix_max_iterations is 1', async () => {
     const now = Date.now() / 1000;
     const releaseId = 'release-test-retry';
     await insertJobsAndCache(getTestDb(), [
@@ -1221,7 +1221,7 @@ describe.skip('review_fix_max_iterations only caps review-side recovery', () => 
     expect(notifyEvents).not.toContain('fix_loop_exhausted');
   });
 
-  it('caps the next review when review_fix_max_iterations is 1', async () => {
+  it('caps the next review when fix_max_iterations is 1', async () => {
     const now = Date.now() / 1000;
     const releaseId = 'release-review-cap-1';
     await insertJobsAndCache(getTestDb(), [
@@ -1412,7 +1412,7 @@ describe('standalone review cap fallback', () => {
     mocks.getProjectTestConfig.mockReturnValue({
       autoPushEnabled: true, autoCommitEnabled: false, releaseAfterRun: false, prWorkflowEnabled: false,
     });
-    mocks.getSettings.mockReturnValue({ review_fix_max_iterations: 1 });
+    mocks.getSettings.mockReturnValue({ fix_max_iterations: 1 });
   });
 
   it('cites the newest standalone review when the review cap is exhausted', async () => {
@@ -2302,7 +2302,7 @@ describe('workflow-driven release short-circuit', () => {
     mocks.getProjectTestConfig.mockReturnValue({
       autoPushEnabled: true, autoCommitEnabled: false, releaseAfterRun: false, prWorkflowEnabled: false,
     });
-    mocks.getSettings.mockReturnValue({ review_fix_max_iterations: 3 });
+    mocks.getSettings.mockReturnValue({ fix_max_iterations: 3 });
   });
 
   it('skips startProjectReview when the release is workflow-driven (test → review chain)', async () => {

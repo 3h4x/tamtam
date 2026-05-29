@@ -159,14 +159,14 @@ describe('SettingsPage', () => {
     document.body.innerHTML = ''
   })
 
-  it('preserves arbitrary review_fix_max_iterations values through display and save', async () => {
+  it('preserves arbitrary fix_max_iterations values through display and save', async () => {
     const fetchMock = vi.fn(async (input: string, init?: RequestInit) => {
       if (input === '/api/settings' && !init) {
         return makeResponse({
           settings: {
             claude_provider: 'claude',
             cli_enabled_providers: 'claude',
-            review_fix_max_iterations: '4',
+            fix_max_iterations: '4',
           },
         })
       }
@@ -176,7 +176,7 @@ describe('SettingsPage', () => {
           settings: {
             claude_provider: 'claude',
             cli_enabled_providers: 'claude',
-            review_fix_max_iterations: '7',
+            fix_max_iterations: '7',
           },
         })
       }
@@ -213,7 +213,7 @@ describe('SettingsPage', () => {
       ([input, init]) => input === '/api/settings' && (init as RequestInit | undefined)?.method === 'PATCH',
     )
     expect(patchCall).toBeTruthy()
-    expect((patchCall?.[1] as RequestInit).body).toContain('"review_fix_max_iterations":"7"')
+    expect((patchCall?.[1] as RequestInit).body).toContain('"fix_max_iterations":"7"')
 
     unmount()
   })
@@ -479,7 +479,7 @@ describe('SettingsPage', () => {
           settings: {
             claude_provider: 'claude',
             cli_enabled_providers: 'claude',
-            review_fix_max_iterations: '0',
+            fix_max_iterations: '0',
           },
         })
       }
@@ -489,7 +489,7 @@ describe('SettingsPage', () => {
           settings: {
             claude_provider: 'claude',
             cli_enabled_providers: 'claude',
-            review_fix_max_iterations: '5',
+            fix_max_iterations: '5',
           },
         })
       }
@@ -524,7 +524,7 @@ describe('SettingsPage', () => {
 
     expect(settingsEvents).toHaveLength(1)
     expect(settingsEvents[0].detail.settings).toMatchObject({
-      review_fix_max_iterations: '5',
+      fix_max_iterations: '5',
       claude_provider: 'claude',
       cli_enabled_providers: 'claude',
     })
@@ -625,7 +625,7 @@ describe('SettingsPage', () => {
           settings: {
             claude_provider: 'claude',
             cli_enabled_providers: 'claude',
-            review_fix_max_iterations: '0',
+            fix_max_iterations: '0',
           },
         })
       }

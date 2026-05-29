@@ -365,9 +365,10 @@ export function QuotaWidget({
   const [error, setError] = useState<string | null>(null)
   const [loading, setLoading] = useState(true)
   // Map of `${provider}|${windowKey}` → recent burn + steady-state rates
-  // pulled from `/api/stats/usage-history`. Used by each `QuotaBar` to derive
-  // an ETA-to-balance line from the *current* workload, not from the average
-  // utilization across the whole window.
+  // (utilization pp/h) pulled from `/api/stats/usage-history`. Used by each
+  // `QuotaBar` to derive an ETA-to-balance line. Sourced from the persisted
+  // quota utilization series so it's present for every provider, not just the
+  // one currently burning tokens in TamTam.
   const [rates, setRates] = useState<Map<string, { burn: number | null; steady: number | null }>>(new Map())
   const providerKey = providers.join(',')
 
