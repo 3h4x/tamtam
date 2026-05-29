@@ -12,6 +12,7 @@ import { StatusDot } from '@/components/monitoring/shared'
 import { SegmentedControl } from '@/components/ui/SegmentedControl'
 import { StandardTabs } from '@/components/ui/StandardTabs'
 import type { StandardTabItem } from '@/components/ui/StandardTabs'
+import { Pill, type PillTone } from '@/components/ui/Pill'
 
 interface ReadinessCheck {
   name: string
@@ -28,12 +29,14 @@ interface ReadinessData {
 
 function TabBadge({ count, variant }: { count: number; variant: 'error' | 'warn' | 'ok' }) {
   if (count === 0) return null
-  const cls =
-    variant === 'error' ? 'bg-status-error/15 text-status-error' :
-    variant === 'warn'  ? 'bg-status-warning/15 text-status-warning' :
-    'bg-status-success/15 text-status-success'
+  const tone: PillTone =
+    variant === 'error' ? 'error' :
+    variant === 'warn' ? 'warning' :
+    'success'
   return (
-    <span className={`text-[10px] px-1.5 py-0.5 rounded-full font-medium ${cls}`}>{count}</span>
+    <Pill tone={tone} size="xs" className="rounded-full border-transparent px-1.5 text-[10px]">
+      {count}
+    </Pill>
   )
 }
 
@@ -42,11 +45,9 @@ function ReadinessPanel({ readiness }: { readiness: ReadinessData | null }) {
   const tone = readiness.ok
     ? 'border-status-success/40 bg-status-success/5'
     : 'border-status-warning/40 bg-status-warning/5'
-  const badge = (item: ReadinessCheck) => {
-    if (item.ok) return 'bg-status-success/15 text-status-success'
-    return item.severity === 'error'
-      ? 'bg-status-error/15 text-status-error'
-      : 'bg-status-warning/15 text-status-warning'
+  const readinessTone = (item: ReadinessCheck): PillTone => {
+    if (item.ok) return 'success'
+    return item.severity === 'error' ? 'error' : 'warning'
   }
   return (
     <div className={`rounded-lg border ${tone} p-4`}>
@@ -57,18 +58,18 @@ function ReadinessPanel({ readiness }: { readiness: ReadinessData | null }) {
             {readiness.ok ? 'Required local dependencies are available' : 'One or more checks need attention'}
           </div>
         </div>
-        <span className={`text-xs px-2 py-1 rounded-full ${readiness.ok ? 'bg-status-success/15 text-status-success' : 'bg-status-warning/15 text-status-warning'}`}>
+        <Pill tone={readiness.ok ? 'success' : 'warning'} size="sm" className="rounded-full border-transparent">
           {readiness.status}
-        </span>
+        </Pill>
       </div>
       <div className="grid grid-cols-1 md:grid-cols-2 gap-2 mt-3">
         {readiness.checks.map((item) => (
           <div key={item.name} className="rounded-md border border-border bg-bg-primary px-3 py-2">
             <div className="flex items-center justify-between gap-2">
               <span className="text-sm font-medium text-text-primary">{item.name}</span>
-              <span className={`text-[10px] px-1.5 py-0.5 rounded-full ${badge(item)}`}>
+              <Pill tone={readinessTone(item)} size="xs" className="rounded-full border-transparent px-1.5 text-[10px]">
                 {item.ok ? 'pass' : item.severity}
-              </span>
+              </Pill>
             </div>
             <div className="text-xs text-text-tertiary mt-1">{item.message}</div>
           </div>
