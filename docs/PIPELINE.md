@@ -330,10 +330,12 @@ Called by `markDone()` after every job finishes. Hooks run in order:
 
 When `project_sweep_enabled` is on, the graphile-worker project sweep runs
 every 5 minutes. It starts release work only for non-default branches with
-local changes or unpushed commits; work on the default branch is skipped until
-a human or another explicit trigger starts a Release. For clean non-default
-branches with a ready-to-merge PR, the sweep can start `pr-wait`. The sweep
-does not dispatch release or `pr-wait` jobs while `jobs_paused` is enabled.
+local changes or unpushed commits; work on the default branch is skipped
+unless the project has `auto_push_enabled` set, in which case the sweep can
+self-heal a dirty default-branch worktree by starting Release directly. For
+clean non-default branches with a ready-to-merge PR, the sweep can start
+`pr-wait`. The sweep does not dispatch release or `pr-wait` jobs while
+`jobs_paused` is enabled.
 
 ### Orchestrator budget allocator
 

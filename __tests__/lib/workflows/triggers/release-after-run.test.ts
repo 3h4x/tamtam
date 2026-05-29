@@ -200,7 +200,10 @@ describe('dispatchReleaseAfterRun', () => {
       const { dispatchReleaseAfterRun } = await import('@/lib/workflows/triggers/release-after-run');
       const out = await dispatchReleaseAfterRun(baseJob({
         kind: 'agent:improve',
-        modifiedFiles: JSON.stringify([{ path: 'pre-existing.ts', status: 'M', confidence: 'low' }]),
+        modifiedFiles: JSON.stringify([
+          { path: 'docs/stale-1.md', status: '??', confidence: 'low' },
+          { path: 'docs/stale-2.md', status: '??', confidence: 'low' },
+        ]),
         linesAdded: 0,
         linesRemoved: 0,
       }));

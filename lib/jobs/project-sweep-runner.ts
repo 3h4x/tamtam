@@ -135,6 +135,20 @@ async function gatherView(name: string): Promise<ProjectSweepView | null> {
     }
   }
 
+  // auto_push_enabled is the operator's explicit authorization for
+  // direct-to-default pushes. When true, the sweep treats default-branch
+  // pending work as self-healable instead of waiting for an explicit
+  // trigger. Read via `getProjectTestConfig` so per-project overrides and
+  // file-backed config both flow through. Default false on missing config.
+  let autoPushEnabled = false;
+  try {
+    const { getProjectTestConfig } = await import('@/lib/scheduling/scheduling');
+    const cfg = await getProjectTestConfig(name);
+    autoPushEnabled = !!cfg?.autoPushEnabled;
+  } catch {
+    // best-effort — leave autoPushEnabled false
+  }
+
   return {
     name,
     path,
@@ -146,6 +160,7 @@ async function gatherView(name: string): Promise<ProjectSweepView | null> {
     defaultBranchCi,
     prOnBranch,
     paused,
+    autoPushEnabled,
   };
 }
 

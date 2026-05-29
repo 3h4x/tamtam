@@ -44,6 +44,14 @@ export interface ProjectSweepView {
   } | null;
   /** True when the project is paused or archived in the DB. */
   paused: boolean;
+  /** Project's `auto_push_enabled` flag. When true, the operator has
+   *  explicitly authorized TamTam to push to the default branch without a
+   *  manual trigger — the sweep takes that as authorization to self-heal
+   *  default-branch worktrees that have accumulated pending work (e.g.
+   *  files left uncommitted by a previous agent run that never released).
+   *  When false the sweep stays conservative and waits for an explicit
+   *  trigger (manual button, agent completion via release-after-run). */
+  autoPushEnabled: boolean;
 }
 
 export function decideSweepAction(view: ProjectSweepView): SweepAction {
@@ -57,12 +65,22 @@ export function decideSweepAction(view: ProjectSweepView): SweepAction {
   const onDefault = view.currentBranch === view.defaultBranch;
   const hasWork = view.uncommittedCount > 0 || view.hasUnpushedCommits;
 
-  // Default branch + work pending. Sweep does not auto-release on the
-  // default branch — direct-push-to-default is a high-blast-radius action
-  // and should only run when a human or an explicit trigger (agent
-  // completion, manual release button) asks for it.
+  // Default branch + work pending. The sweep used to skip this case
+  // unconditionally — direct-push-to-default is a high-blast-radius action
+  // — but that left auto_push projects stuck whenever a previous agent run
+  // produced uncommitted work and the release-after-run trigger didn't
+  // fire (per-file attribution gate, lock conflict, rebuild kill). Symptom:
+  // dirty files sit on `main` for hours, every new agent attributes them as
+  // pre-existing and the gate keeps refusing to ship.
+  //
+  // When `auto_push_enabled` is on the operator has explicitly authorized
+  // direct-to-default pushes, so let the sweep self-heal. When it's off we
+  // still wait for an explicit trigger.
   if (onDefault && hasWork) {
-    return { kind: 'skip', reason: 'changes on default branch — auto-release disabled, needs explicit trigger' };
+    if (!view.autoPushEnabled) {
+      return { kind: 'skip', reason: 'changes on default branch — auto_push disabled, needs explicit trigger' };
+    }
+    return { kind: 'release', reason: 'changes on default branch — auto_push self-healing the worktree' };
   }
 
   // Non-default branch with local work — release will commit + push +

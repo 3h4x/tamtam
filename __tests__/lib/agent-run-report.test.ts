@@ -221,32 +221,78 @@ describe('finalizeAgentRunReport', () => {
     expect(upsertRecommendationMock).not.toHaveBeenCalled();
   });
 
-  it('keeps dirty-baseline file summaries non-empty but still skips schedule backoff', async () => {
+  it('attributes a baseline-dirty path as low confidence when the agent did not touch it', async () => {
+    // Baseline: src/lib/foo.ts already dirty (someone left it uncommitted).
+    // Agent's run: no committed delta, status still shows the same file.
+    // Expectation: file persists as low confidence; LOC is 0; gate would skip.
     execMock
-      .mockResolvedValueOnce({ exitCode: 0, stdout: 'M\tsrc/lib/foo.ts\n', stderr: '' })
-      .mockResolvedValueOnce({ exitCode: 0, stdout: 'M  src/lib/foo.ts\n', stderr: '' });
+      .mockResolvedValueOnce({ exitCode: 0, stdout: '', stderr: '' })
+      .mockResolvedValueOnce({ exitCode: 0, stdout: '', stderr: '' })
+      .mockResolvedValueOnce({ exitCode: 0, stdout: ' M src/lib/foo.ts\n', stderr: '' })
+      .mockResolvedValueOnce({ exitCode: 0, stdout: '99\t12\tsrc/lib/foo.ts\n', stderr: '' });
     const { finalizeAgentRunReport } = await import('@/lib/agents/agent-run-report');
     const job = makeJob({
       contextMeta: JSON.stringify({
         agent: { id: 'agent-1', name: 'tests', schedule: '2h', triggeredBy: 'schedule' },
-        baseline: { head: 'abc123', status: 'M\tsrc/lib/foo.ts\n', dirty: true },
+        baseline: { head: 'abc123', status: ' M src/lib/foo.ts\n', dirty: true },
       }),
     });
 
-    await finalizeAgentRunReport(job, log('TamTam Run Report\nSummary: Added focused coverage.\nFiles changed: src/lib/foo.ts\nActionable work: no\n'));
+    await finalizeAgentRunReport(job, log('TamTam Run Report\nSummary: Re-audited; no edits required.\nFiles changed: none\nActionable work: no\n'));
 
     expect(JSON.parse(job.modifiedFiles ?? '[]')).toEqual([
       { path: 'src/lib/foo.ts', status: 'M', confidence: 'low' },
     ]);
     expect(job.linesAdded).toBe(0);
     expect(job.linesRemoved).toBe(0);
-    expect(upsertRecommendationMock).not.toHaveBeenCalled();
   });
 
-  it('does not attribute pre-existing dirty-baseline LOC to the agent', async () => {
+  it('attributes high confidence on a NEW path even when the baseline was dirty', async () => {
+    // Baseline has src/lib/pre-existing.ts dirty (poisoning the prior model).
+    // Agent then creates src/lib/new.ts. Under the old "global confidence"
+    // model the new file would be marked low and the gate would skip — that
+    // was the bug that made bonker stop releasing. Per-file attribution
+    // correctly marks the pre-existing path low and the new path high, so
+    // the gate accepts and the release fires.
     execMock
       .mockResolvedValueOnce({ exitCode: 0, stdout: '', stderr: '' })
-      .mockResolvedValueOnce({ exitCode: 0, stdout: '7\t2\tsrc/lib/pre-existing-commit.ts\n', stderr: '' })
+      .mockResolvedValueOnce({ exitCode: 0, stdout: '', stderr: '' })
+      .mockResolvedValueOnce({
+        exitCode: 0,
+        stdout: ' M src/lib/pre-existing.ts\n?? src/lib/new.ts\n',
+        stderr: '',
+      })
+      .mockResolvedValueOnce({
+        exitCode: 0,
+        stdout: '99\t12\tsrc/lib/pre-existing.ts\n42\t0\tsrc/lib/new.ts\n',
+        stderr: '',
+      });
+    const { finalizeAgentRunReport } = await import('@/lib/agents/agent-run-report');
+    const job = makeJob({
+      contextMeta: JSON.stringify({
+        agent: { id: 'agent-1', name: 'tests', schedule: '2h', triggeredBy: 'schedule' },
+        baseline: { head: 'abc123', status: ' M src/lib/pre-existing.ts\n', dirty: true },
+      }),
+    });
+
+    await finalizeAgentRunReport(job, log('TamTam Run Report\nSummary: Added a new doc.\nFiles changed: src/lib/new.ts\nActionable work: yes\n'));
+
+    expect(JSON.parse(job.modifiedFiles ?? '[]')).toEqual([
+      { path: 'src/lib/new.ts', status: '??', confidence: 'high' },
+      { path: 'src/lib/pre-existing.ts', status: 'M', confidence: 'low' },
+    ]);
+    // Only the agent's own file contributes LOC; pre-existing 99/12 is filtered.
+    expect(job.linesAdded).toBe(42);
+    expect(job.linesRemoved).toBe(0);
+  });
+
+  it('attributes high confidence to committed delta even on a dirty baseline', async () => {
+    // The agent committed src/lib/foo.ts during its run (BASE..HEAD shows
+    // the commit). Even if pre-existing.ts is also dirty, the committed
+    // delta is unambiguously the agent's work.
+    execMock
+      .mockResolvedValueOnce({ exitCode: 0, stdout: 'M\tsrc/lib/foo.ts\n', stderr: '' })
+      .mockResolvedValueOnce({ exitCode: 0, stdout: '5\t3\tsrc/lib/foo.ts\n', stderr: '' })
       .mockResolvedValueOnce({ exitCode: 0, stdout: ' M src/lib/pre-existing.ts\n', stderr: '' })
       .mockResolvedValueOnce({ exitCode: 0, stdout: '99\t12\tsrc/lib/pre-existing.ts\n', stderr: '' });
     const { finalizeAgentRunReport } = await import('@/lib/agents/agent-run-report');
@@ -257,10 +303,59 @@ describe('finalizeAgentRunReport', () => {
       }),
     });
 
-    await finalizeAgentRunReport(job, log('TamTam Run Report\nSummary: No changes made.\nFiles changed: none\nActionable work: no\n'));
+    await finalizeAgentRunReport(job, log('TamTam Run Report\nSummary: Refactored foo.\nFiles changed: src/lib/foo.ts\nActionable work: yes\n'));
+
+    const files = JSON.parse(job.modifiedFiles ?? '[]') as Array<Record<string, unknown>>;
+    expect(files).toContainEqual({ path: 'src/lib/foo.ts', status: 'M', confidence: 'high' });
+    expect(files).toContainEqual({ path: 'src/lib/pre-existing.ts', status: 'M', confidence: 'low' });
+    // Committed 5/3 counts; pre-existing 99/12 filtered.
+    expect(job.linesAdded).toBe(5);
+    expect(job.linesRemoved).toBe(3);
+  });
+
+  it('keeps a baseline-dirty path high confidence when the agent committed that same path', async () => {
+    execMock
+      .mockResolvedValueOnce({ exitCode: 0, stdout: 'M\tsrc/lib/foo.ts\n', stderr: '' })
+      .mockResolvedValueOnce({ exitCode: 0, stdout: '5\t3\tsrc/lib/foo.ts\n', stderr: '' })
+      .mockResolvedValueOnce({ exitCode: 0, stdout: ' M src/lib/foo.ts\n', stderr: '' })
+      .mockResolvedValueOnce({ exitCode: 0, stdout: '99\t12\tsrc/lib/foo.ts\n', stderr: '' });
+    const { finalizeAgentRunReport } = await import('@/lib/agents/agent-run-report');
+    const job = makeJob({
+      contextMeta: JSON.stringify({
+        agent: { id: 'agent-1', name: 'tests', schedule: '2h', triggeredBy: 'schedule' },
+        baseline: { head: 'abc123', status: ' M src/lib/foo.ts\n', dirty: true },
+      }),
+    });
+
+    await finalizeAgentRunReport(job, log('TamTam Run Report\nSummary: Committed foo.\nFiles changed: src/lib/foo.ts\nActionable work: yes\n'));
+
+    expect(JSON.parse(job.modifiedFiles ?? '[]')).toEqual([
+      { path: 'src/lib/foo.ts', status: 'M', confidence: 'high' },
+    ]);
+    // Count the committed delta, not the pre-existing dirty worktree residue.
+    expect(job.linesAdded).toBe(5);
+    expect(job.linesRemoved).toBe(3);
+  });
+
+  it('does not attribute unrelated committed delta on a dirty-baseline no-op report', async () => {
+    execMock
+      .mockResolvedValueOnce({ exitCode: 0, stdout: 'M\tsrc/lib/unrelated.ts\n', stderr: '' })
+      .mockResolvedValueOnce({ exitCode: 0, stdout: '13\t4\tsrc/lib/unrelated.ts\n', stderr: '' })
+      .mockResolvedValueOnce({ exitCode: 0, stdout: ' M src/lib/pre-existing.ts\n', stderr: '' })
+      .mockResolvedValueOnce({ exitCode: 0, stdout: '99\t12\tsrc/lib/pre-existing.ts\n', stderr: '' });
+    const { finalizeAgentRunReport } = await import('@/lib/agents/agent-run-report');
+    const job = makeJob({
+      contextMeta: JSON.stringify({
+        agent: { id: 'agent-1', name: 'tests', schedule: '2h', triggeredBy: 'schedule' },
+        baseline: { head: 'abc123', status: ' M src/lib/pre-existing.ts\n', dirty: true },
+      }),
+    });
+
+    await finalizeAgentRunReport(job, log('TamTam Run Report\nSummary: Re-audited; no edits required.\nFiles changed: none\nActionable work: no\n'));
 
     expect(JSON.parse(job.modifiedFiles ?? '[]')).toEqual([
       { path: 'src/lib/pre-existing.ts', status: 'M', confidence: 'low' },
+      { path: 'src/lib/unrelated.ts', status: 'M', confidence: 'low' },
     ]);
     expect(job.linesAdded).toBe(0);
     expect(job.linesRemoved).toBe(0);

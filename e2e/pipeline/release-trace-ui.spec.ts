@@ -247,6 +247,7 @@ test('release trace polls from running to failed without page reload', async ({
   page,
 }) => {
   let serveRunning = true;
+  const failureExcerpt = 'Push failed: rejected because the remote branch diverged.';
 
   await stubShellRoutes(page);
   await stubSettings(page);
@@ -282,7 +283,7 @@ test('release trace polls from running to failed without page reload', async ({
                 started_at: now() - 20,
                 finished_at: now() - 1,
                 verdict: 'DO NOT SHIP',
-                log_excerpt: 'Verdict: DO NOT SHIP',
+                log_excerpt: failureExcerpt,
               }),
             ],
           });
@@ -301,6 +302,10 @@ test('release trace polls from running to failed without page reload', async ({
   await expect(page.getByText('DO NOT SHIP').first()).toBeVisible();
   await expect(page.getByText('running', { exact: true })).not.toBeVisible();
   await expect(page.getByText('running…')).toHaveCount(0);
+  await expect(page.getByText(failureExcerpt)).not.toBeVisible();
+
+  await page.getByRole('button', { name: /review/i }).first().click();
+  await expect(page.getByText(failureExcerpt)).toBeVisible({ timeout: 8_000 });
 });
 
 test('release trace polls from running to cancelled without page reload', async ({

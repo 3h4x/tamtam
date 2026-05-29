@@ -66,12 +66,18 @@ function parsePorcelain(stdout: string, confidence: 'high' | 'low'): ModifiedFil
 // binary files. We treat `-` as 0 (the file changed but we don't know how
 // many text lines moved, so it counts toward "this agent did something"
 // only via the modified_files count, not the LOC total).
-function parseNumstat(stdout: string): LinesDelta {
+//
+// `attributedPaths`, when non-null, restricts the LOC sum to those paths so
+// pre-existing dirty files don't inflate the agent's apparent productivity.
+// `null` means "count everything" (e.g. clean baseline — every line is new).
+function parseNumstat(stdout: string, attributedPaths: Set<string> | null): LinesDelta {
   let added = 0;
   let removed = 0;
   for (const raw of stdout.split('\n')) {
     const parts = raw.split('\t');
     if (parts.length < 3) continue;
+    const path = parts.slice(2).join('\t').trim();
+    if (attributedPaths !== null && !attributedPaths.has(path)) continue;
     const a = parts[0] === '-' ? 0 : Number.parseInt(parts[0], 10);
     const r = parts[1] === '-' ? 0 : Number.parseInt(parts[1], 10);
     if (Number.isFinite(a)) added += a;
@@ -80,25 +86,73 @@ function parseNumstat(stdout: string): LinesDelta {
   return { added, removed };
 }
 
+function parseReportedChangedPaths(text: string): Set<string> | null {
+  const reportIdx = text.toLowerCase().lastIndexOf('tamtam run report');
+  const report = reportIdx >= 0 ? text.slice(reportIdx) : text;
+  const match = report.match(/^\s*[-*]?\s*Files changed:\s*(.+)$/im);
+  const raw = match?.[1]?.trim();
+  if (!raw) return null;
+  if (/^(none|no|n\/a)$/i.test(raw)) return new Set();
+  const paths = raw
+    .split(',')
+    .map((p) => p.trim().replace(/^`|`$/g, ''))
+    .filter(Boolean);
+  return new Set(paths);
+}
+
 interface WorktreeDelta {
   files: ModifiedFile[];
   lines: LinesDelta;
 }
 
-async function worktreeDelta(job: JobData, ctx: AgentContextMeta): Promise<WorktreeDelta> {
+/** Extract the path component from one `git status --porcelain` line.
+ *  Renames show as `XY old -> new`; we key on the *new* path because that's
+ *  what's in the worktree post-rename. */
+function porcelainPath(line: string): string | null {
+  const trimmed = line.trim();
+  if (!trimmed) return null;
+  const raw = line.slice(3).trim();
+  if (!raw) return null;
+  return raw.includes(' -> ') ? raw.split(' -> ').pop() || raw : raw;
+}
+
+/** Build the set of paths that were already dirty in the worktree when the
+ *  agent started. Used for per-file confidence attribution: anything in this
+ *  set is pre-existing and gets `confidence: 'low'`; anything outside it is
+ *  attributable to this agent run. */
+function parseBaselinePaths(baselineStatus: string | null | undefined): Set<string> {
+  const set = new Set<string>();
+  if (!baselineStatus) return set;
+  for (const line of baselineStatus.split('\n')) {
+    const path = porcelainPath(line);
+    if (path) set.add(path);
+  }
+  return set;
+}
+
+async function worktreeDelta(
+  job: JobData,
+  ctx: AgentContextMeta,
+  reportedChangedPaths: Set<string> | null,
+): Promise<WorktreeDelta> {
   const empty: WorktreeDelta = { files: [], lines: { added: 0, removed: 0 } };
   const projPath = resolveProjectPath(job.project);
   if (!projPath) return empty;
-  const confidence: 'high' | 'low' = ctx.baseline?.dirty ? 'low' : 'high';
   const files = new Map<string, ModifiedFile>();
   let added = 0;
   let removed = 0;
+  const baselineDirty = !!ctx.baseline?.dirty;
+
+  // Per-file attribution: a path that was already in the porcelain baseline
+  // when the agent started is pre-existing dirt (`low`). A path that appears
+  // only in the post-run worktree is the agent's work (`high`). Without this,
+  // a single stale untracked file from a previous cycle marks *every*
+  // subsequent file low-confidence and the gate keeps skipping releases that
+  // should fire — defeating autonomy.
+  const baselinePaths = parseBaselinePaths(ctx.baseline?.status);
 
   // All four git reads target the same worktree and are independent — fire
   // them in one Promise.all to keep the per-run overhead to one round-trip.
-  // When the run started dirty, file names are kept as low-confidence context,
-  // but LOC is not attributed: BASE..HEAD and HEAD diffs can include operator
-  // edits that predate the agent run.
   const baselineHead = ctx.baseline?.head;
   const [diffR, diffNumR, statusR, dirtyNumR] = await Promise.all([
     baselineHead
@@ -108,27 +162,53 @@ async function worktreeDelta(job: JobData, ctx: AgentContextMeta): Promise<Workt
       ? exec('git', ['-C', projPath, 'diff', '--numstat', `${baselineHead}..HEAD`], { timeout: 10000 })
       : Promise.resolve(null),
     exec('git', ['-C', projPath, 'status', '--porcelain'], { timeout: 5000 }),
-    // `HEAD` includes staged + unstaged changes. Only count it when the run
-    // started clean; on a dirty baseline it would also include pre-existing
-    // operator edits we cannot attribute to this agent.
     exec('git', ['-C', projPath, 'diff', '--numstat', 'HEAD'], { timeout: 10000 }),
   ]);
 
+  // Clean baseline: BASE..HEAD is attributable. Dirty baseline: require the
+  // agent's report to corroborate the path so unrelated parallel commits do
+  // not make a no-op scheduled run look shippable.
   if (diffR && diffR.exitCode === 0) {
-    for (const file of parseNameStatus(diffR.stdout, confidence)) files.set(file.path, file);
+    for (const file of parseNameStatus(diffR.stdout, 'high')) {
+      const confidence: 'high' | 'low' = !baselineDirty || reportedChangedPaths?.has(file.path)
+        ? 'high'
+        : 'low';
+      files.set(file.path, { ...file, confidence });
+    }
   }
-  const dirtyChanged = statusR?.exitCode === 0
-    && (ctx.baseline?.dirty || statusR.stdout !== (ctx.baseline?.status ?? ''));
-  if (dirtyChanged) {
-    for (const file of parsePorcelain(statusR.stdout, confidence)) files.set(file.path, file);
+
+  // Uncommitted delta: per-file confidence based on baseline membership.
+  if (statusR?.exitCode === 0) {
+    for (const file of parsePorcelain(statusR.stdout, 'high')) {
+      const confidence: 'high' | 'low' = baselinePaths.has(file.path) ? 'low' : 'high';
+      const existing = files.get(file.path);
+      if (existing?.confidence === 'high') continue;
+      // The agent did NOT introduce this path; it was already dirty. Mark
+      // low so the gate filters it but the path remains visible for telemetry.
+      files.set(file.path, { ...file, confidence });
+    }
   }
-  if (!ctx.baseline?.dirty && diffNumR && diffNumR.exitCode === 0) {
-    const d = parseNumstat(diffNumR.stdout);
+
+  // LOC attribution: only count lines on paths the agent is responsible for.
+  // Build the set of high-confidence paths and scope both numstat sums to it.
+  // On a dirty baseline, BASE..HEAD is scoped to high-confidence paths for the
+  // same reason as uncommitted numstat: a parallel commit should not fire the
+  // release-after-run gate for an idle agent.
+  const attributedPaths = new Set<string>();
+  for (const file of files.values()) {
+    if (file.confidence !== 'low') attributedPaths.add(file.path);
+  }
+
+  if (diffNumR && diffNumR.exitCode === 0) {
+    const d = parseNumstat(diffNumR.stdout, baselineDirty ? attributedPaths : null);
     added += d.added;
     removed += d.removed;
   }
-  if (!ctx.baseline?.dirty && dirtyChanged && dirtyNumR?.exitCode === 0) {
-    const d = parseNumstat(dirtyNumR.stdout);
+  if (dirtyNumR?.exitCode === 0) {
+    const dirtyAttributedPaths = baselineDirty
+      ? new Set(Array.from(attributedPaths).filter((path) => !baselinePaths.has(path)))
+      : attributedPaths;
+    const d = parseNumstat(dirtyNumR.stdout, dirtyAttributedPaths);
     added += d.added;
     removed += d.removed;
   }
@@ -273,7 +353,7 @@ export async function finalizeAgentRunReport(job: JobData, rawLog: string): Prom
   const ctx = parseContextMeta(job.contextMeta);
   const text = extractAssistantTextFromRawLog(rawLog);
   const { summary, actionable } = extractWorkSummary(text);
-  const { files, lines } = await worktreeDelta(job, ctx);
+  const { files, lines } = await worktreeDelta(job, ctx, parseReportedChangedPaths(text));
   job.workSummary = summary;
   job.modifiedFiles = JSON.stringify(files);
   job.linesAdded = lines.added;
