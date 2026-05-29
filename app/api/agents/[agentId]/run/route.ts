@@ -59,9 +59,9 @@ export async function POST(
 
   if (!agent) return NextResponse.json({ detail: 'agent not found' }, { status: 404 });
 
-  // Reject scheduled triggers for disabled agents. PM2 may still hold stale
-  // cron entries (e.g. after a rename or schedule clear) — this is the final
-  // guard so disabled/unscheduled agents don't silently keep running.
+  // Reject scheduled triggers for disabled agents. Graphile-worker may still
+  // hold stale schedule rows (e.g. after a rename or schedule clear) — this is
+  // the final guard so disabled/unscheduled agents don't silently keep running.
   const triggeredBy = request.headers.get('x-tamtam-trigger') || 'manual';
   const isScheduled = triggeredBy === 'schedule';
   if (!agent.enabled && isScheduled) {
@@ -472,9 +472,9 @@ async function runAgentStart(
   });
 
   // Durable workflow path is the only agent intake path. The workflow owns
-  // prompt composition, optional prereq execution, retrieval, memory, and PM2
-  // spawn; everything after spawn (lifecycle, streaming, completion hooks)
-  // remains unchanged.
+  // prompt composition, optional prereq execution, retrieval, memory, and
+  // in-process spawn; everything after spawn (lifecycle, streaming, completion
+  // hooks) remains unchanged.
   try {
     const { start } = await import('workflow/api');
     const run = await start(runAgentIntakeWorkflow, [{
