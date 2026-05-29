@@ -155,6 +155,15 @@ function brokerConfigFlags(env) {
   return flags;
 }
 
+function brokerMcpUrlFor(env) {
+  const e = env || process.env;
+  return e.TAMTAM_BROKER_MCP_URL || (e.TAMTAM_BROKER_URL ? `${e.TAMTAM_BROKER_URL}/mcp` : '');
+}
+
+function platformFor(env) {
+  return (env && env.TAMTAM_CODEX_SHIM_PLATFORM) || process.platform;
+}
+
 function permissionArgsFor(mode, env) {
   if (mode === 'bypassPermissions') {
     return ['--dangerously-bypass-approvals-and-sandbox'];
@@ -167,7 +176,14 @@ function permissionArgsFor(mode, env) {
   if (e.TAMTAM_SANDBOX_PROFILE) {
     return ['-a', approvalFor(mode), '--sandbox', 'danger-full-access'];
   }
-  return ['-a', approvalFor(mode), '--sandbox', sandboxFor(mode)];
+  const base = ['-a', approvalFor(mode), '--sandbox', sandboxFor(mode)];
+  // macOS Codex workspace-write blocks loopback without this override. Do
+  // not pass it on Linux: Codex's legacy Linux sandbox path can panic when
+  // network_access is enabled.
+  if (brokerMcpUrlFor(e) && sandboxFor(mode) === 'workspace-write' && platformFor(e) === 'darwin') {
+    base.push('-c', 'sandbox_workspace_write.network_access=true');
+  }
+  return base;
 }
 
 function emitJson(value) {

@@ -66,6 +66,7 @@ agent CLI:
 3. `wrapForSandbox({ bin, args, cwd, runDir })` in `lib/jobs/inline-agent.ts` and `lib/jobs/spawn-claude-detached.ts`:
    - If `tamtam_network_policy_strict = true` and platform is macOS: replaces the spawn command with `sandbox-exec -D … -f tamtam-loopback.sb <bin> <args...>`.
    - Sets `TAMTAM_SANDBOX_PROFILE` so the codex shim knows to pass `--sandbox danger-full-access` to codex (which neutralizes codex's built-in workspace-write sandbox; the outer seatbelt profile is the real one).
+   - If the broker is enabled on macOS without the outer seatbelt wrapper, the codex shim opens Codex's workspace-write network access so MCP loopback calls can reach the broker. The shim does not pass that Codex override on Linux because Codex's legacy Linux sandbox path can fail with workspace-write network access enabled.
 4. Spawn proceeds as normal.
 
 The same `prepareBrokerRun()` wiring is also used by the manual continue
@@ -105,7 +106,7 @@ Tested properties (`__tests__/browser-broker/sandbox-profile.test.ts`):
 
 ## Linux
 
-V1 is macOS-only. Linux uses Codex's built-in landlock + seccomp, which doesn't easily express "loopback-only network." The broker itself works on Linux (the docker container is platform-portable), so a v2 task is to wrap Codex on Linux in `bwrap`/firejail with an analogous network policy.
+V1's strict network policy is macOS-only. Linux uses Codex's built-in landlock + seccomp, which doesn't easily express "loopback-only network." The broker itself works on Linux (the docker container is platform-portable), but the codex shim does not enable Codex's workspace-write network override there because that legacy sandbox path can fail when network access is turned on. A v2 task is to wrap Codex on Linux in `bwrap`/firejail with an analogous loopback-only policy.
 
 `tamtam_network_policy_strict = true` on Linux is currently a no-op (logs the gap; proceeds without wrap).
 

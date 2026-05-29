@@ -146,4 +146,29 @@ test.describe('Task detail live polling', () => {
     await expect(page.getByText('running', { exact: true })).toHaveCount(0)
     await expect(page.getByText('-3')).toHaveCount(0)
   })
+
+  test('run history renders a failed exit code when a running task fails without reload', async ({
+    page,
+  }) => {
+    let serveRunning = true
+
+    await stubTaskPage(page)
+    await page.route(
+      `**/api/projects/${encodeURIComponent(TASK_ID)}/detail`,
+      (route: Route) => route.fulfill({ json: serveRunning ? runningDetail() : finishedDetail(2) }),
+    )
+
+    await page.goto(`/project/${PROJECT}/task/review`)
+
+    await expect(page.getByText('running').first()).toBeVisible({ timeout: 8_000 })
+    await expect(page.getByText('running...').first()).toBeVisible({ timeout: 8_000 })
+
+    serveRunning = false
+
+    await expect(page.getByText('12s').first()).toBeVisible({ timeout: 12_000 })
+    await expect(page.getByText('2').first()).toBeVisible({ timeout: 12_000 })
+    await expect(page.getByText('running', { exact: true })).toHaveCount(0)
+    await expect(page.getByText('running...', { exact: true })).toHaveCount(0)
+    await expect(page.getByText('cancelled')).toHaveCount(0)
+  })
 })
