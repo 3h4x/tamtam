@@ -150,12 +150,22 @@ export function computeFleetHealth(tasks: Task[]): FleetHealth {
     return a.project.localeCompare(b.project)
   })
 
+  const statusCounts: Record<HealthStatus, number> = {
+    error: 0,
+    warning: 0,
+    healthy: 0,
+    unknown: 0,
+  }
+  for (const project of projects) {
+    statusCounts[project.status] += 1
+  }
+
   return {
     projects,
-    errorCount: projects.filter(p => p.status === 'error').length,
-    warningCount: projects.filter(p => p.status === 'warning').length,
-    healthyCount: projects.filter(p => p.status === 'healthy').length,
-    unknownCount: projects.filter(p => p.status === 'unknown').length,
+    errorCount: statusCounts.error,
+    warningCount: statusCounts.warning,
+    healthyCount: statusCounts.healthy,
+    unknownCount: statusCounts.unknown,
     totalTasks: tasks.length,
     totalChanges: projects.reduce((sum, p) => sum + p.totalChanges, 0),
     totalUnreviewed: projects.reduce((sum, p) => sum + p.unreviewedCount, 0),
