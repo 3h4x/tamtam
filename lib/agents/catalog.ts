@@ -64,6 +64,10 @@ export interface AgentCatalogEntry {
   /** When true, runs that fail on the primary provider may retry once on
    *  the fallback provider. Mirrors the legacy recommended-agent flag. */
   fallbackEnabled?: boolean;
+  /** External references that inspired the agent — surfaced in the
+   *  catalog UI so future maintainers can trace why a built-in exists
+   *  and where its design vocabulary came from. */
+  inspiration?: ReadonlyArray<{ label: string; url: string }>;
 }
 
 // The canonical catalog. Order is meaningful only for tie-breaking inside
@@ -196,6 +200,23 @@ export const AGENT_CATALOG: AgentCatalogEntry[] = [
     fallbackEnabled: true,
   },
   {
+    name: 'docs-generate',
+    description: 'Generates one new doc page per run for an under-documented subsystem (architecture / concept / comparison / synthesis). Never edits existing docs.',
+    dispatch: 'cli',
+    defaultSchedule: '24h',
+    defaultModel: 'smart',
+    prompt: '',
+    skillIds: ['agent-docs-generate'],
+    tier: 'essential',
+    fallbackEnabled: true,
+    inspiration: [
+      {
+        label: "Karpathy's LLM Wiki Stack",
+        url: 'https://github.com/ScrapingArt/Karpathy-LLM-Wiki-Stack',
+      },
+    ],
+  },
+  {
     name: 'qa',
     description: 'Browses the configured QA target with Playwright, fixes 1-2 small safe issues directly, and reports the rest.',
     dispatch: 'cli',
@@ -216,6 +237,12 @@ export const AGENT_CATALOG: AgentCatalogEntry[] = [
     skillIds: ['agent-improve'],
     tier: 'featured',
     fallbackEnabled: true,
+    inspiration: [
+      {
+        label: "Karpathy's coding guidelines (think first, simplicity, surgical changes, verifiable success)",
+        url: 'https://github.com/multica-ai/andrej-karpathy-skills/blob/main/skills/karpathy-guidelines/SKILL.md',
+      },
+    ],
   },
   {
     name: 'manage-agents',

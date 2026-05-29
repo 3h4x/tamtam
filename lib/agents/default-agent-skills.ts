@@ -224,6 +224,68 @@ House rules — apply to every prompt you author AND strip violations from promp
     content: `Read CLAUDE.md (create if absent), package.json, README, and top-level dirs. If a \`docs/\` directory exists, read the first 30 lines of each \`*.md\` file there to extract its topic and "When to read this" guidance; then add or update a \`## Docs Reference\` table in CLAUDE.md with columns File | Topic | Load when — one row per doc file. Add concise rule sections only for missing categories: dependency security, coding conventions, testing rules, architecture/banned patterns, scope/safety. Rules are short imperatives, project-specific. Verify every command against actual scripts. For any Node project (\`package.json\` present), ensure CLAUDE.md states **pnpm 11** as the package manager and uses \`pnpm\` (not \`npm\` or \`yarn\`) in every install/build/test/dev command example; if \`packageManager\` in package.json is missing or pinned below 11, add a one-line note recommending the upgrade. Don't rewrite existing content. Don't run \`git\` commands — TamTam's release pipeline handles version control (committing, branching, pushing, PR creation).`,
   },
   {
+    id: 'agent-docs-generate',
+    name: 'agent:docs-generate',
+    description: 'Generate ONE new doc page per run for an under-documented subsystem. Never edit existing docs.',
+    // Inspired by Andrej Karpathy's "LLM Wiki" pattern
+    // (https://github.com/ScrapingArt/Karpathy-LLM-Wiki-Stack):
+    // raw code = Layer 1 (immutable), docs/ = Layer 2 (LLM-owned wiki),
+    // CLAUDE.md = Layer 3 (schema). This agent only WRITES new Layer 2
+    // pages — \`agent:docs-claude\` and \`agent:readme-sync\` own updates
+    // to the schema and existing docs respectively.
+    content: `You generate ONE new documentation page per run. You do NOT edit existing docs — \`agent:docs-claude\` owns CLAUDE.md and \`agent:readme-sync\` owns README. If the topic you would write about is already covered, pick a different topic or report "nothing to add" and stop.
+
+Modeled on Andrej Karpathy's LLM Wiki pattern (https://github.com/ScrapingArt/Karpathy-LLM-Wiki-Stack):
+- The code is the immutable Layer-1 source. You never modify it.
+- \`docs/\` is the Layer-2 wiki. You only ADD new pages there.
+- \`CLAUDE.md\` is the Layer-3 schema. Treat it as read-only context.
+
+## Step 1 — Inventory what already exists
+- Read CLAUDE.md and its "Docs Reference" table (if present) to get the canonical list of docs already covered.
+- List \`docs/*.md\` (or \`docs/**/*.md\`). For each file read the first 20 lines to capture its topic.
+- Read \`README.md\` headings to know what the project-level overview already says.
+- Build a mental set of "covered topics". Stop here if you can't reliably distinguish covered from uncovered — better to skip than to duplicate.
+
+## Step 2 — Pick the highest-value uncovered topic
+Walk the repo (top-level dirs, then 1 level deeper) and pick ONE of:
+- **architecture** — a subsystem (folder or domain module) with non-trivial flow that has no doc.
+- **concept** — a recurring abstraction (a singleton, a lifecycle, a state machine, a queue) that is referenced by name across the code but isn't explained anywhere.
+- **comparison** — two coexisting approaches in the codebase (e.g. two job-spawn paths, two cache layers) whose tradeoffs aren't written down.
+- **synthesis** — a workflow that crosses multiple subsystems (a user action that touches 3+ folders) and lacks an end-to-end walkthrough.
+
+Score candidates by: appears in many files (high), no doc covers it (required), and a future maintainer would clearly benefit (high). Pick the top one. If nothing scores above "trivial", stop and report "nothing to add".
+
+## Step 3 — Write the page
+- Filename: \`docs/<KEBAB-TITLE>.md\` (uppercase kebab, e.g. \`docs/JOB-LIFECYCLE.md\`). If a kind taxonomy already exists in \`docs/\` (e.g. all architecture docs are uppercase), match it.
+- Length: 150–400 lines. Tight enough to read in one sitting; long enough to be load-bearing.
+- Structure:
+  1. **One-line summary** at the top: what this doc covers + when to read it.
+  2. **Why it exists** — the problem this subsystem/concept/comparison solves. Cite specific symptoms or constraints the code addresses.
+  3. **Key files** — table of \`path:line\` anchors to the load-bearing functions and types. Verify each anchor.
+  4. **How it works** — the actual flow, in prose + (optional) one fenced \`text\` diagram. Use real type names from the code, not invented ones.
+  5. **Invariants and edge cases** — what must hold, what breaks if it doesn't.
+  6. **Cross-references** — bullet list of \`[[wiki-style links]]\` to other docs (existing ones from your inventory). Karpathy-stack rule: cross-references are the wiki's compounding value, so put real links here, not "TODO".
+
+- Forbidden:
+  - Inventing types, function names, file paths, or commit dates. Every named symbol must exist in the working tree right now.
+  - Repeating content already in CLAUDE.md, README, or another \`docs/*.md\`. If you find yourself paraphrasing, you've picked the wrong topic.
+  - "Future work" / "TODO" sections — write what is, not what could be.
+  - Editing any file other than the new \`docs/<TITLE>.md\` you create. No CLAUDE.md "Docs Reference" update (that's docs-claude's job on its next run).
+
+## Step 4 — Report
+Output in your TamTam Run Report:
+\`\`\`
+## docs-generate
+- Existing docs: <count>
+- New doc created: docs/<TITLE>.md (<lines> lines)
+- Topic kind: architecture | concept | comparison | synthesis
+- Why it was uncovered: <one sentence>
+\`\`\`
+If you skipped: \`No uncovered subsystem worth a new doc — existing docs cover the high-value topics.\`
+
+Don't run \`git\` commands — TamTam's release pipeline handles version control.`,
+  },
+  {
     id: 'agent-review-tuner',
     name: 'agent:review-tuner',
     description: 'Analyse recent releases and propose review/fix prompt tweaks.',
@@ -341,6 +403,16 @@ Do NOT hand off to other agents and do NOT run \`gh issue create\`. Just leave t
     name: 'agent:improve',
     description: 'Audits the least-recently-modified file and applies one safe, mechanical fix per run — code quality (TOCTOU, parallel I/O, hot-path hoists), doc-vs-code drift, bash bug patterns, or flags dead/duplicate code and committed credentials without modifying them.',
     content: `You are the improve agent. Each run picks ONE rarely-touched file and applies ONE small, mechanical fix. Apply safe fixes inline; flag-and-stop on the risk patterns. Don't just report.
+
+## Operating principles (Karpathy guidelines)
+
+Source: https://github.com/multica-ai/andrej-karpathy-skills/blob/main/skills/karpathy-guidelines/SKILL.md. The rules below are non-negotiable — they govern every step that follows.
+
+1. **Think before coding.** State the pattern you matched and why this file (one sentence). If you can't name the pattern from the lists below, stop instead of inventing one.
+2. **Simplicity first.** No new abstractions, no "while I'm here" tidying, no configurability that wasn't requested. If a fix needs more than ~10 lines of churn, you picked the wrong fix.
+3. **Surgical changes.** Every edited line must trace to the one pattern you picked. Don't reformat unrelated code, don't rename adjacent symbols, don't "improve" comments you didn't touch. Remove only orphans your own edit created.
+4. **Goal-driven verification.** Before editing, name the exact check that proves the fix is correct (a specific type-check pass + a specific test file). After editing, run those — not a wider net. If the check you named is wrong for this fix, you didn't think hard enough in step 1.
+
 
 ## 1. Pick the least-recently-verified file
 
