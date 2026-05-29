@@ -277,6 +277,135 @@ describe('decideBoosts', () => {
     }));
     expect(r).toEqual([]);
   });
+
+  describe('fruitfulness deprioritization', () => {
+    it('prefers a fruitful agent over an unfruitful one even when unfruitful is staler', () => {
+      const r = decideBoosts(makeInput({
+        pace: { status: 'under_pace', marginPct: 5 },
+        agents: [
+          // staler dispatch but proven unfruitful
+          makeAgent({
+            id: 'a-stuck',
+            name: 'stuck',
+            lastDispatchMs: NOW - 60 * 60 * 1000,
+            fruitfulness: { rate: 0, runs: 10 },
+          }),
+          // less stale but fruitful
+          makeAgent({
+            id: 'a-good',
+            name: 'good',
+            lastDispatchMs: NOW - 20 * 60 * 1000,
+            fruitfulness: { rate: 0.7, runs: 10 },
+          }),
+        ],
+      }));
+      expect(r).toHaveLength(1);
+      expect(r[0].agentId).toBe('a-good');
+    });
+
+    it('still picks an unfruitful agent when it is the only candidate', () => {
+      const r = decideBoosts(makeInput({
+        pace: { status: 'under_pace', marginPct: 5 },
+        agents: [
+          makeAgent({
+            id: 'a-stuck',
+            name: 'stuck',
+            lastDispatchMs: null,
+            fruitfulness: { rate: 0, runs: 10 },
+          }),
+        ],
+      }));
+      // Tier-2 fallback fires when tier-1 is empty — better to keep some
+      // forward progress than waste pace headroom entirely.
+      expect(r).toHaveLength(1);
+      expect(r[0].agentId).toBe('a-stuck');
+    });
+
+    it('does not demote agents below the minimum sample size', () => {
+      // Only 3 runs of empty output is "new agent settling in", not "stuck".
+      const r = decideBoosts(makeInput({
+        pace: { status: 'under_pace', marginPct: 5 },
+        agents: [
+          makeAgent({
+            id: 'a-new',
+            name: 'new',
+            lastDispatchMs: NOW - 60 * 60 * 1000,
+            fruitfulness: { rate: 0, runs: 3 },
+          }),
+          makeAgent({
+            id: 'a-good',
+            name: 'good',
+            lastDispatchMs: NOW - 20 * 60 * 1000,
+            fruitfulness: { rate: 0.7, runs: 10 },
+          }),
+        ],
+      }));
+      // a-new isn't demoted yet → it's the staler one → it wins on staleness.
+      expect(r).toHaveLength(1);
+      expect(r[0].agentId).toBe('a-new');
+    });
+
+    it('does not penalize agents with no fruitfulness signal', () => {
+      // Missing data is treated as "unknown" → fair shake, not demoted.
+      const r = decideBoosts(makeInput({
+        pace: { status: 'under_pace', marginPct: 5 },
+        agents: [
+          makeAgent({
+            id: 'a-unknown',
+            name: 'unknown',
+            lastDispatchMs: NOW - 60 * 60 * 1000,
+            // fruitfulness intentionally absent
+          }),
+          makeAgent({
+            id: 'a-good',
+            name: 'good',
+            lastDispatchMs: NOW - 20 * 60 * 1000,
+            fruitfulness: { rate: 0.7, runs: 10 },
+          }),
+        ],
+      }));
+      expect(r).toHaveLength(1);
+      expect(r[0].agentId).toBe('a-unknown');
+    });
+
+    it('demotes only agents whose rate is strictly below the threshold (20%)', () => {
+      // rate exactly at 0.2 must NOT be demoted — boundary check.
+      const r = decideBoosts(makeInput({
+        pace: { status: 'under_pace', marginPct: 5 },
+        agents: [
+          makeAgent({
+            id: 'a-borderline',
+            name: 'borderline',
+            lastDispatchMs: NOW - 60 * 60 * 1000,
+            fruitfulness: { rate: 0.2, runs: 10 },
+          }),
+          makeAgent({
+            id: 'a-good',
+            name: 'good',
+            lastDispatchMs: NOW - 20 * 60 * 1000,
+            fruitfulness: { rate: 0.7, runs: 10 },
+          }),
+        ],
+      }));
+      // a-borderline at exactly the threshold stays in tier 1 → wins on staleness.
+      expect(r).toHaveLength(1);
+      expect(r[0].agentId).toBe('a-borderline');
+    });
+
+    it('still demotes when slack lets multiple picks fire', () => {
+      const r = decideBoosts(makeInput({
+        pace: { status: 'under_pace', marginPct: 25 },
+        settings: { marginPct: 5, maxBoostsPerHour: 5 },
+        agents: [
+          makeAgent({ id: 'a-stuck', name: 'stuck', lastDispatchMs: null, fruitfulness: { rate: 0, runs: 10 } }),
+          makeAgent({ id: 'a-good-1', name: 'g1', lastDispatchMs: NOW - 60 * 60 * 1000, fruitfulness: { rate: 0.8, runs: 10 } }),
+          makeAgent({ id: 'a-good-2', name: 'g2', lastDispatchMs: NOW - 30 * 60 * 1000, fruitfulness: { rate: 0.5, runs: 10 } }),
+        ],
+      }));
+      // slack=20 → desiredPicks=3; tier order is g1, g2, then stuck.
+      expect(r.map((d) => d.agentId)).toEqual(['a-good-1', 'a-good-2', 'a-stuck']);
+    });
+  });
 });
 
 describe('pruneBoostHistory', () => {

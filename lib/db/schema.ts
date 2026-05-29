@@ -113,6 +113,13 @@ export const jobs = pgTable('jobs', {
   promptBytes: integer('prompt_bytes'),
   workSummary: text('work_summary'),
   modifiedFiles: text('modified_files'),
+  // Per-job LOC delta. Combined with `modifiedFiles` (which records *which*
+  // files changed) these power the orchestrator's "did this agent actually
+  // produce anything" fruitfulness signal. Populated by
+  // `finalizeAgentRunReport` from `git diff --numstat`. Nullable so older
+  // jobs and non-agent rows stay valid without backfill.
+  linesAdded: integer('lines_added'),
+  linesRemoved: integer('lines_removed'),
   provider: text('provider'),
 });
 

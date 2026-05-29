@@ -47,6 +47,8 @@ async function applyDdl(handle: TestDbHandle): Promise<void> {
       prompt_bytes integer,
       work_summary text,
       modified_files text,
+      lines_added integer,
+      lines_removed integer,
       provider text
     )
   `));
@@ -432,9 +434,12 @@ function populateJobCache(rows: ReadonlyArray<Record<string, unknown>>): void {
       model: (r.model as string | null | undefined) ?? null,
       releaseId: (r.releaseId as string | null | undefined) ?? null,
       abortedAt: (r.abortedAt as number | null | undefined) ?? null,
+      releaseDeadlineAt: (r.releaseDeadlineAt as number | null | undefined) ?? null,
       promptBytes: (r.promptBytes as number | null | undefined) ?? null,
       workSummary: (r.workSummary as string | null | undefined) ?? null,
       modifiedFiles: (r.modifiedFiles as string | null | undefined) ?? null,
+      linesAdded: (r.linesAdded as number | null | undefined) ?? null,
+      linesRemoved: (r.linesRemoved as number | null | undefined) ?? null,
       provider: (r.provider as string | null | undefined) ?? null,
     });
   }
@@ -1934,6 +1939,36 @@ describe('auto-mark seen on completion', () => {
       0,
     );
     expect(seen).toBe(false);
+  });
+
+  it('persists agent report fields before emitting the durable completion event', async () => {
+    mocks.finalizeAgentRunReport.mockImplementationOnce(async (job: JobData) => {
+      expect(job.finishedAt).not.toBeNull();
+      job.workSummary = 'Changed the release gate.';
+      job.modifiedFiles = JSON.stringify([{ path: 'lib/jobs/lifecycle.ts', status: 'M' }]);
+      job.linesAdded = 12;
+      job.linesRemoved = 3;
+    });
+
+    const job = makeInMemoryJob('agent-report-fields', 'agent:improve');
+    await markDone(job, 0);
+
+    const row = (await getTestDb().select().from(schema.jobs).where(eq(schema.jobs.id, job.id))).at(0);
+    expect(row).toMatchObject({
+      finishedAt: expect.any(Number),
+      workSummary: 'Changed the release gate.',
+      modifiedFiles: JSON.stringify([{ path: 'lib/jobs/lifecycle.ts', status: 'M' }]),
+      linesAdded: 12,
+      linesRemoved: 3,
+    });
+
+    const event = (await getTestDb().select().from(schema.jobCompletionEvents).where(eq(schema.jobCompletionEvents.jobId, job.id))).at(0);
+    expect(event).toMatchObject({
+      jobId: job.id,
+      kind: 'agent:improve',
+      exitCode: 0,
+      project: 'proj',
+    });
   });
 });
 

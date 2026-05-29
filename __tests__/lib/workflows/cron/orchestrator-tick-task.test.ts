@@ -5,6 +5,7 @@ import {
   ORCHESTRATOR_TICK_INTERVAL_MS,
   type OrchestratorTickDeps,
 } from '@/lib/workflows/cron/orchestrator-tick-task';
+import { loadBoostAgents } from '@/lib/orchestrator/boost-agent-loader';
 
 const NOW = 1_700_000_000_000;
 
@@ -80,6 +81,29 @@ describe('handleOrchestratorTick', () => {
     // whether decisions fire depends on allocator logic; the important check is
     // that if decisions > 0, enqueueAgentFire was called the same number of times
     expect(deps.enqueueAgentFire).toHaveBeenCalledTimes(r.decisions.length);
+  });
+
+  it('still dispatches boosts when fruitfulness enrichment fails', async () => {
+    const deps = makeDeps({
+      loadBridge: vi.fn(async () =>
+        makeBridge({ globalPace: { status: 'under_pace', marginPct: 50 } }),
+      ),
+      loadAgents: vi.fn(async () => loadBoostAgents({
+        listAgents: vi.fn(async () => [
+          { id: 'a1', name: 'improve', project: 'borged', schedule: '15m', prompt: '', enabled: true, kind: 'user' as const, boostable: true },
+        ]),
+        getDispatches: vi.fn(() => new Map<string, number>()),
+        loadFruitfulness: vi.fn(async () => {
+          throw new Error('fruitfulness unavailable');
+        }),
+      })),
+    });
+
+    const r = await handleOrchestratorTick(deps);
+
+    expect(r.error).toBeUndefined();
+    expect(r.decisions.map((d) => d.agentId)).toEqual(['a1']);
+    expect(deps.enqueueAgentFire).toHaveBeenCalledTimes(1);
   });
 
   it('captures loadBridge errors and still re-enqueues next fire', async () => {

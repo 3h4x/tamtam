@@ -44,6 +44,8 @@ async function applyDdl(handle: TestDbHandle): Promise<void> {
       prompt_bytes integer,
       work_summary text,
       modified_files text,
+      lines_added integer,
+      lines_removed integer,
       provider text
     )
   `));
@@ -172,9 +174,12 @@ async function syncCacheFromDb(): Promise<void> {
       model: row.model ?? null,
       releaseId: row.releaseId ?? null,
       abortedAt: row.abortedAt ?? null,
+      releaseDeadlineAt: row.releaseDeadlineAt ?? null,
       promptBytes: row.promptBytes ?? null,
       workSummary: row.workSummary ?? null,
       modifiedFiles: row.modifiedFiles ?? null,
+      linesAdded: row.linesAdded ?? null,
+      linesRemoved: row.linesRemoved ?? null,
       provider: row.provider ?? null,
     });
   }

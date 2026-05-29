@@ -31,6 +31,8 @@ export interface JobData {
   promptBytes?: number | null;
   workSummary?: string | null;
   modifiedFiles?: string | null;
+  linesAdded?: number | null;
+  linesRemoved?: number | null;
   provider?: string | null;
   cancelRequestedExitCode?: number | null;
 }

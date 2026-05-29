@@ -62,6 +62,8 @@ export async function loadFromDb(): Promise<void> {
         promptBytes: row.promptBytes ?? null,
         workSummary: row.workSummary ?? null,
         modifiedFiles: row.modifiedFiles ?? null,
+        linesAdded: row.linesAdded ?? null,
+        linesRemoved: row.linesRemoved ?? null,
         provider: row.provider ?? null,
       });
     }
@@ -146,6 +148,8 @@ function doSaveToDb(job: JobData): Promise<void> {
         promptBytes: job.promptBytes ?? null,
         workSummary: job.workSummary ?? null,
         modifiedFiles: job.modifiedFiles ?? null,
+        linesAdded: job.linesAdded ?? null,
+        linesRemoved: job.linesRemoved ?? null,
         provider: job.provider ?? null,
       })
       .onConflictDoUpdate({
@@ -178,6 +182,8 @@ function doSaveToDb(job: JobData): Promise<void> {
           promptBytes: job.promptBytes ?? null,
           workSummary: job.workSummary ?? null,
           modifiedFiles: job.modifiedFiles ?? null,
+          linesAdded: job.linesAdded ?? null,
+          linesRemoved: job.linesRemoved ?? null,
           provider: job.provider ?? null,
         },
       })
@@ -260,6 +266,8 @@ export function createJob(
     releaseDeadlineAt: null,
     workSummary: null,
     modifiedFiles: null,
+    linesAdded: null,
+    linesRemoved: null,
     provider: provider ?? null,
   };
   jobsCache.set(jobId, job);
@@ -401,6 +409,8 @@ export function jobToDict(job: JobData): Record<string, unknown> {
   d.prompt_bytes = job.promptBytes ?? null;
   d.work_summary = job.workSummary ?? null;
   d.modified_files = job.modifiedFiles ?? null;
+  d.lines_added = job.linesAdded ?? null;
+  d.lines_removed = job.linesRemoved ?? null;
   d.provider = job.provider ?? null;
   const verdict = getVerdict(job);
   if (verdict !== null) d.verdict = verdict;

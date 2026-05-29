@@ -37,6 +37,8 @@ async function applyJobsSchema(handle: TestDbHandle): Promise<void> {
     prompt_bytes integer,
     work_summary text,
     modified_files text,
+    lines_added integer,
+    lines_removed integer,
     provider text
   )`));
   await handle.db.execute(sql.raw(`CREATE TABLE IF NOT EXISTS gh_issues_cache (

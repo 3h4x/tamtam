@@ -923,20 +923,16 @@ export async function registerNode(): Promise<void> {
             loadAgents: async () => {
               const { listEnabledScheduledAgents } = await import('@/lib/scheduling/internal-scheduler-helpers');
               const { getAllAgentLastDispatches } = await import('@/lib/scheduling/agent-cron-state');
-              const [all, dispatches] = await Promise.all([
-                listEnabledScheduledAgents(),
-                Promise.resolve(getAllAgentLastDispatches()),
-              ]);
-              return all.map((a) => ({
-                id: a.id,
-                name: a.name,
-                project: a.project,
-                enabled: a.enabled,
-                schedule: a.schedule ?? null,
-                lastDispatchMs: dispatches.get(a.id) ?? null,
-                kind: a.kind,
-                boostable: a.boostable,
-              }));
+              const { loadAllAgentFruitfulness } = await import('@/lib/agents/fruitfulness');
+              const { loadBoostAgents } = await import('@/lib/orchestrator/boost-agent-loader');
+              return loadBoostAgents({
+                listAgents: listEnabledScheduledAgents,
+                getDispatches: getAllAgentLastDispatches,
+                loadFruitfulness: () => loadAllAgentFruitfulness({ limit: 10 }),
+                onFruitfulnessError: (err) => {
+                  console.warn('[orchestrator] fruitfulness load failed; continuing without stats:', err);
+                },
+              });
             },
             enqueueAgentFire: async (agentId, runAt, modelOverride) => {
               await quickAddJob(
