@@ -211,15 +211,17 @@ export function StatsPage() {
   }
 
   return (
-    <div className="w-full space-y-6">
+    <div className="w-full space-y-5">
       {/* Header bar */}
       <div className="flex items-center gap-3 flex-wrap">
-        <div>
-          <h1 className="text-xl font-semibold text-text-primary">Statistics</h1>
+        <div className="min-w-0">
+          <div className="flex items-baseline gap-2">
+            <h1 className="text-xl font-semibold text-text-primary">Statistics</h1>
+            <span className="text-xs text-text-tertiary">· token usage & estimated cost</span>
+          </div>
           <p className="text-xs text-text-tertiary mt-0.5">
-            Token usage and estimated cost per project · pricing assumes Sonnet rates
-            (in {fmtUsd(data.pricing.input)}/M · out {fmtUsd(data.pricing.output)}/M ·
-            cache write {fmtUsd(data.pricing.cacheWrite)}/M · read {fmtUsd(data.pricing.cacheRead)}/M)
+            Pricing assumes Sonnet rates: input {fmtUsd(data.pricing.input)}/M · output {fmtUsd(data.pricing.output)}/M ·
+            cache write {fmtUsd(data.pricing.cacheWrite)}/M · cache read {fmtUsd(data.pricing.cacheRead)}/M
           </p>
         </div>
         <div className="ml-auto flex items-center gap-2">
@@ -229,11 +231,14 @@ export function StatsPage() {
             ariaLabel="Stats time window"
             onChange={(w) => { setWindow(w); setLoading(true) }}
           />
-          <span className="text-xs text-text-tertiary">
+          <span className="text-xs text-text-tertiary tabular-nums">
             {loading ? 'Refreshing…' : `Updated ${new Date(data.generatedAt).toLocaleTimeString()}`}
           </span>
         </div>
       </div>
+
+      {/* Bridge — fleet command center, top-of-page */}
+      <BridgeOverview />
 
       {/* Totals */}
       <div className="grid grid-cols-2 lg:grid-cols-4 gap-3">
@@ -261,17 +266,16 @@ export function StatsPage() {
         />
       </div>
 
-      {/* Burn chart + bridge + quota row */}
-      <div className="grid grid-cols-1 xl:grid-cols-3 gap-4">
-        <section className="border border-border rounded-lg p-4 bg-bg-primary xl:col-span-2">
-          <div className="flex items-center justify-between mb-3">
+      {/* Burn chart + quota row — chart on left, quota stacked on right */}
+      <div className="grid grid-cols-1 xl:grid-cols-5 gap-4">
+        <section className="border border-border rounded-lg p-4 bg-bg-primary xl:col-span-3">
+          <div className="flex items-center justify-between mb-3 gap-2 flex-wrap">
             <h2 className="text-sm font-medium text-text-primary">Tokens / hour ({WINDOW_LABELS[window_]})</h2>
-            <span className="text-xs text-text-tertiary">actual burn vs steady pace vs to-100% rate</span>
+            <span className="text-[11px] text-text-tertiary">actual · steady pace · to-100% rate</span>
           </div>
           <UsageHistoryChart hours={WINDOW_HOURS[window_]} />
         </section>
-        <div className="space-y-4">
-          <BridgeOverview />
+        <div className="xl:col-span-2">
           <QuotaWidget providers={budgetProviders} warnAt={warnAt} blockAt={blockAt} compact />
         </div>
       </div>
