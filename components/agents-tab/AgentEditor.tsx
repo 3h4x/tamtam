@@ -4,6 +4,7 @@ import { useState, useEffect, useMemo, useRef } from 'react'
 import { fetchProjectDocs, improveAgentPrompt } from '@/lib/client-api'
 import type { Agent, Skill, Persona, ProjectDoc } from '@/lib/client-api'
 import { Button } from '@/components/ui/Button'
+import { Pill } from '@/components/ui/Pill'
 import { SegmentedControl } from '@/components/ui/SegmentedControl'
 import { Spinner } from '@/components/ui/Spinner'
 import { useToast } from '@/components/Toast'
@@ -405,23 +406,23 @@ export function AgentEditor({
             {selectedSkills.map(id => {
               const item = itemById.get(id)
               return (
-                <span key={id} className="inline-flex items-center gap-1 pl-2 pr-1 py-0.5 text-xs rounded-full bg-accent/15 text-accent border border-accent/25 font-medium">
+                <Pill key={id} tone="accent" size="xs" className="gap-1 rounded-full border-accent/25 bg-accent/15 pl-2 pr-1 py-0.5">
                   {item?.name || id}
                   {!isSystemAgent && (
                     <button type="button" className="w-4 h-4 flex items-center justify-center rounded-full hover:bg-accent/20 cursor-pointer opacity-60 hover:opacity-100 transition-opacity" onClick={() => toggleSkill(id)}>×</button>
                   )}
-                </span>
+                </Pill>
               )
             })}
             {selectedDocPaths.map(path => {
               const doc = docByPath.get(path)
               return (
-                <span key={path} className="inline-flex items-center gap-1 pl-2 pr-1 py-0.5 text-xs rounded-full border border-status-success/30 bg-status-success/10 text-status-success font-medium">
+                <Pill key={path} tone="success" size="xs" className="gap-1 rounded-full bg-status-success/10 pl-2 pr-1 py-0.5">
                   {doc?.name || path}
                   {!isSystemAgent && (
                     <button type="button" className="w-4 h-4 flex items-center justify-center rounded-full hover:bg-status-success/20 cursor-pointer opacity-60 hover:opacity-100 transition-opacity" onClick={() => toggleDoc(path)}>×</button>
                   )}
-                </span>
+                </Pill>
               )
             })}
           </div>
