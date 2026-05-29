@@ -828,6 +828,71 @@ test.describe('Runs page non-release live polling', () => {
     await expect(chatRow.getByText('Waiting for the next run to finish')).toBeVisible()
   })
 
+  test('agent row flips from running to failed without disturbing a concurrent chat run', async ({ page }) => {
+    let pollCount = 0
+
+    await stubRunsShellRoutes(page)
+    await page.route('**/api/jobs?limit=200', (route: Route) => {
+      pollCount += 1
+      const agentFailed = pollCount >= 2
+      route.fulfill({
+        json: {
+          jobs: [
+            makeJob({
+              id: 'chat-run-live-steady-2',
+              project: RUN_PROJECT,
+              kind: 'run',
+              prompt: 'Keep watching the release queue',
+              user_prompt: 'Keep watching the release queue',
+              session_id: 'sess-chat-run-live-steady-2',
+              status: 'running',
+              exit_code: null,
+              started_at: now() - 90,
+              finished_at: null,
+              work_summary: 'Waiting for the next run to finish',
+            }),
+            makeJob({
+              id: 'agent-run-live-fail-1',
+              project: AGENT_PROJECT,
+              kind: 'agent:planner',
+              prompt: 'Planner agent',
+              user_prompt: 'Planner agent',
+              status: agentFailed ? 'done' : 'running',
+              exit_code: agentFailed ? 2 : null,
+              started_at: now() - 45,
+              finished_at: agentFailed ? now() - 6 : null,
+              work_summary: agentFailed ? 'Planner hit a hard failure during drafting' : 'Drafting next actions',
+            }),
+          ],
+          total: 2,
+          pendingReleaseProjects: [],
+        },
+      })
+    })
+
+    await page.goto('/runs')
+
+    const chatRow = runRow(page, RUN_PROJECT)
+    const agentRow = runRow(page, AGENT_PROJECT)
+
+    await expect(chatRow).toBeVisible({ timeout: 8_000 })
+    await expect(agentRow).toBeVisible({ timeout: 8_000 })
+    await expect(chatRow.getByLabel('running')).toBeVisible()
+    await expect(agentRow.getByLabel('running')).toBeVisible()
+    await expect(agentRow.getByText('Drafting next actions')).toBeVisible()
+
+    await expect(agentRow.getByLabel('needs attention')).toBeVisible({ timeout: 12_000 })
+    await expect(agentRow.getByText('exit 2', { exact: true })).toBeVisible({ timeout: 12_000 })
+    await expect(agentRow.getByLabel('running')).toHaveCount(0, { timeout: 12_000 })
+    await expect(agentRow.getByText('Planner hit a hard failure during drafting')).toBeVisible({
+      timeout: 12_000,
+    })
+
+    await expect(chatRow.getByLabel('running')).toBeVisible({ timeout: 12_000 })
+    await expect(chatRow.getByText('running', { exact: true })).toBeVisible({ timeout: 12_000 })
+    await expect(chatRow.getByText('Waiting for the next run to finish')).toBeVisible()
+  })
+
   test('header running total clears after the counts poll follows a completed row', async ({ page }) => {
     let serveRunning = true
 
