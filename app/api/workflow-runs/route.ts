@@ -1,13 +1,13 @@
-// GET /api/workflow-runs — recent rows from the Vercel Workflow Postgres
-// World. Surfaces the workflow_runs table so the observation chain
-// (lib/workflows/release.ts) is visible without psql.
+// GET /api/workflow-runs — recent workflow runtime runs. Surfaces either
+// local-world JSON run files or Postgres workflow rows so the observation
+// chain (lib/workflows/release.ts) is visible without filesystem or psql
+// access.
 //
-// The Workflow DB is typically a separate Postgres database from the
-// main TamTam DB (WORKFLOW_POSTGRES_URL vs DATABASE_URL), so this route
-// opens its own pg.Pool cached on globalThis (Next.js duplicates modules
-// across realms — globalThis prevents one pool per realm). When the env
-// var is unset, returns an empty list rather than failing — the app
-// boots fine without Workflow enabled.
+// When the runtime uses a Postgres world, the Workflow DB may be separate
+// from the main TamTam DB (WORKFLOW_POSTGRES_URL vs DATABASE_URL), so this
+// route opens its own pg.Pool cached on globalThis (Next.js duplicates
+// modules across realms — globalThis prevents one pool per realm). When no
+// Postgres URL is available, returns an empty list rather than failing.
 
 import { NextResponse } from 'next/server';
 import { Pool } from 'pg';
