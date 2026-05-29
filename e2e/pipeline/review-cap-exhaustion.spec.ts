@@ -25,14 +25,14 @@ test.describe('Review-cap exhaustion → file issue + ship anyway', () => {
     // immediately and the exhaustion fallback fires after a single fix
     // iteration. Cuts the test runtime to one review→fix→review cycle.
     const patch = await request.patch('/api/settings', {
-      data: { review_fix_max_iterations: '1' },
+      data: { fix_max_iterations: '1' },
     });
-    expect(patch.ok(), `failed to set review_fix_max_iterations: ${patch.status()}`).toBe(true);
+    expect(patch.ok(), `failed to set fix_max_iterations: ${patch.status()}`).toBe(true);
   });
 
   test.afterAll(async ({ request }) => {
     // Restore the default so other specs in the same harness aren't affected.
-    await request.patch('/api/settings', { data: { review_fix_max_iterations: '3' } });
+    await request.patch('/api/settings', { data: { fix_max_iterations: '3' } });
   });
 
   test('files a follow-up issue and chains to commit + push when review cap trips', async ({ request }) => {

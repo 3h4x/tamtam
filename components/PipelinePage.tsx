@@ -132,7 +132,7 @@ export function PipelinePage() {
   const [data, setData] = useState<PipelineResponse | null>(null)
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
-  const [window_, setWindow] = useState<Window>('30d')
+  const [window_, setWindow] = useState<Window>('24h')
   const [showConfig, setShowConfig] = useState(false)
 
   const load = useCallback(

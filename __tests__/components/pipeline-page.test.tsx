@@ -26,7 +26,7 @@ vi.mock('next/link', () => ({
 
 function makePipelineResponse(overrides: Partial<PipelineResponse> = {}): PipelineResponse {
   return {
-    window: '30d',
+    window: '24h',
     generatedAt: new Date('2026-05-10T10:00:00Z').getTime(),
     project: null,
     verdicts: {
@@ -104,7 +104,7 @@ describe('PipelinePage', () => {
 
   it('labels release and step-duration metrics to match the rendered avg values', async () => {
     const fetchMock = vi.fn(async (input: string) => {
-      if (input === '/api/stats/pipeline?window=30d') {
+      if (input === '/api/stats/pipeline?window=24h') {
         return makeResponse(makePipelineResponse())
       }
       throw new Error(`Unexpected fetch: ${input}`)
@@ -128,7 +128,7 @@ describe('PipelinePage', () => {
     body.configSnapshot.maxStepIterations = null
 
     const fetchMock = vi.fn(async (input: string) => {
-      if (input === '/api/stats/pipeline?window=30d') {
+      if (input === '/api/stats/pipeline?window=24h') {
         return makeResponse(body)
       }
       throw new Error(`Unexpected fetch: ${input}`)

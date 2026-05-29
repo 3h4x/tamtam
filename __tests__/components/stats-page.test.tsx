@@ -40,7 +40,7 @@ vi.mock('@/components/QuotaWidget', () => ({
 
 function makeUsageResponse(overrides: Partial<UsageResponse> = {}): UsageResponse {
   return {
-    window: '30d',
+    window: '24h',
     generatedAt: new Date('2026-05-08T12:34:56Z').getTime(),
     pricing: {
       input: 3,
@@ -103,7 +103,7 @@ function makeUsageResponse(overrides: Partial<UsageResponse> = {}): UsageRespons
 
 function makeOllamaResponse(overrides: Partial<OllamaStatsResponse> = {}): OllamaStatsResponse {
   return {
-    window: '30d',
+    window: '24h',
     generatedAt: new Date('2026-05-08T12:34:56Z').getTime(),
     totals: {
       calls: 3,
@@ -205,8 +205,8 @@ describe('StatsPage', () => {
 
   it('loads usage data and applies budget settings to the quota widget', async () => {
     const fetchMock = vi.fn(async (input: string) => {
-      if (input === '/api/stats/usage?window=30d') return makeResponse(makeUsageResponse())
-      if (input === '/api/stats/ollama?window=30d') return makeResponse(makeOllamaResponse())
+      if (input === '/api/stats/usage?window=24h') return makeResponse(makeUsageResponse())
+      if (input === '/api/stats/ollama?window=24h') return makeResponse(makeOllamaResponse())
       if (input === '/api/settings') {
         return makeResponse({
           settings: {
@@ -243,10 +243,10 @@ describe('StatsPage', () => {
 
   it('refetches when the window changes and re-sorts by project name on demand', async () => {
     const fetchMock = vi.fn(async (input: string) => {
-      if (input === '/api/stats/usage?window=30d') {
+      if (input === '/api/stats/usage?window=24h') {
         return makeResponse(makeUsageResponse())
       }
-      if (input === '/api/stats/ollama?window=30d') {
+      if (input === '/api/stats/ollama?window=24h') {
         return makeResponse(makeOllamaResponse())
       }
       if (input === '/api/stats/usage?window=7d') {
@@ -316,10 +316,10 @@ describe('StatsPage', () => {
   it('shows the error state and retries the stats request', async () => {
     const fetchMock = vi.fn(async (input: string) => {
       if (input === '/api/settings') return makeResponse({ settings: {} })
-      if (input === '/api/stats/ollama?window=30d') {
+      if (input === '/api/stats/ollama?window=24h') {
         return makeResponse(makeOllamaResponse())
       }
-      if (input === '/api/stats/usage?window=30d') {
+      if (input === '/api/stats/usage?window=24h') {
         if (fetchMock.mock.calls.filter(([url]) => url === input).length === 1) {
           return makeResponse({ error: 'nope' }, false)
         }
@@ -341,7 +341,7 @@ describe('StatsPage', () => {
     textButton(container, 'Retry').click()
 
     await vi.waitFor(() => {
-      expect(container.textContent).toContain('No usage data in the last 30 days.')
+      expect(container.textContent).toContain('No usage data in the last 24 hours.')
     })
 
     unmount()

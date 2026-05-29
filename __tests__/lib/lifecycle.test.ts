@@ -1160,9 +1160,10 @@ describe.skip('fix→review review-count cap', () => {
   });
 });
 
-// Skipped: cap differentiation lives in iteration-caps.ts now (different
-// caps per kind: reviewFixMaxIterations vs maxStepIterations vs
-// pushFixAttemptCap). Tests in iteration-caps.test.ts.
+// Skipped: cap enforcement lives in iteration-caps.ts now (fixIterationCap
+// for review/test/commit/push step verification loops; pushFixAttemptCap
+// for the separate pre-push-hook rejection retry budget). Tests in
+// iteration-caps.test.ts.
 describe.skip('fix_max_iterations only caps review-side recovery', () => {
   function makeFixJob(id: string, overrides: Partial<JobData> = {}): JobData {
     const now = Date.now() / 1000;

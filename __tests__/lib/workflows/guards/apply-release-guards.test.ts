@@ -25,8 +25,7 @@ function deps(policy: ReviewDoNotShipAction, jobs: JobData[] = []) {
   return {
     listJobs: () => jobs,
     readParsedLog: () => '',
-    maxStepIterations: () => 3,
-    reviewFixMaxIterations: () => 3,
+    fixIterationCap: () => 3,
     pushFixAttemptCap: () => 2,
     reviewDoNotShipAction: () => policy,
   };

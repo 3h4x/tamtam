@@ -31,37 +31,32 @@ describe('recovery-budget — unified fix-iteration cap', () => {
     restoreEnv();
   });
 
-  it('treats setting=0 as unlimited for both step and review caps', async () => {
+  it('treats setting=0 as unlimited', async () => {
     mockSettings(0);
-    const { getMaxStepIterations, getReviewFixMaxIterations } = await import('@/lib/pipeline/recovery-budget');
-    expect(getMaxStepIterations()).toBe(Number.POSITIVE_INFINITY);
-    expect(getReviewFixMaxIterations()).toBe(Number.POSITIVE_INFINITY);
+    const { getFixIterationCap } = await import('@/lib/pipeline/recovery-budget');
+    expect(getFixIterationCap()).toBe(Number.POSITIVE_INFINITY);
   });
 
-  it('returns the configured setting for both caps when > 0', async () => {
+  it('returns the configured setting when > 0', async () => {
     mockSettings(5);
-    const { getMaxStepIterations, getReviewFixMaxIterations } = await import('@/lib/pipeline/recovery-budget');
-    expect(getMaxStepIterations()).toBe(5);
-    expect(getReviewFixMaxIterations()).toBe(5);
+    const { getFixIterationCap } = await import('@/lib/pipeline/recovery-budget');
+    expect(getFixIterationCap()).toBe(5);
   });
 
   it('falls back to the default of 3 when settings are unavailable', async () => {
     mockSettingsThrow();
-    const { getMaxStepIterations, getReviewFixMaxIterations } = await import('@/lib/pipeline/recovery-budget');
-    expect(getMaxStepIterations()).toBe(3);
-    expect(getReviewFixMaxIterations()).toBe(3);
+    const { getFixIterationCap } = await import('@/lib/pipeline/recovery-budget');
+    expect(getFixIterationCap()).toBe(3);
   });
 
   it('falls back to the default of 3 when the setting is null or negative', async () => {
     mockSettings(null);
     let recovery = await import('@/lib/pipeline/recovery-budget');
-    expect(recovery.getMaxStepIterations()).toBe(3);
-    expect(recovery.getReviewFixMaxIterations()).toBe(3);
+    expect(recovery.getFixIterationCap()).toBe(3);
 
     mockSettings(-1);
     recovery = await import('@/lib/pipeline/recovery-budget');
-    expect(recovery.getMaxStepIterations()).toBe(3);
-    expect(recovery.getReviewFixMaxIterations()).toBe(3);
+    expect(recovery.getFixIterationCap()).toBe(3);
   });
 
   it('keeps push-fix rejection retries finite even when the setting is 0', async () => {

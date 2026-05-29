@@ -114,10 +114,10 @@ describe('GET /api/stats/ollama', () => {
     expect(body.totals.inputTokens).toBe(1);
   });
 
-  it('defaults to 30d when window param is missing or invalid', async () => {
+  it('defaults to 24h when window param is missing or invalid', async () => {
     const { GET } = await import('@/app/api/stats/ollama/route');
     const res = await GET({ nextUrl: new URL('http://localhost/api/stats/ollama?window=bogus') } as never);
     const body = await res.json();
-    expect(body.window).toBe('30d');
+    expect(body.window).toBe('24h');
   });
 });

@@ -19,8 +19,7 @@ import { findingsIdentity, extractFindingIds, extractFixClaims } from '@/lib/pip
 import { hasFreshLgtm, hasLocalCommitsAhead } from '@/lib/pipeline/release-state';
 import {
   getPushFixAttemptCap,
-  getMaxStepIterations,
-  getReviewFixMaxIterations,
+  getFixIterationCap,
   getStepWindowSeconds,
 } from '@/lib/pipeline/recovery-budget';
 import {
@@ -108,23 +107,23 @@ function reviewSourceType(job: Pick<JobData, 'contextMeta'>): string | null {
   }
 }
 
-// Cap runaway fix→step→fix loops when auto-push is on. The shared helper
-// keeps lifecycle enforcement, stats snapshots, and docs on the same contract.
-// Read live each time so the user can tune `fix_max_iterations` in
+// Cap runaway fix→step→fix loops when auto-push is on. The call sites
+// below call `getFixIterationCap()` directly so the single source of
+// truth (the `fix_max_iterations` setting) is visible everywhere — no
+// per-step aliases that would suggest the test/commit/push/review caps
+// can diverge. Read live each time so the user can tune the setting in
 // Settings → Pipeline without restarting the server.
-function maxStepIterations(): number { return getMaxStepIterations(); }
-function reviewFixMaxIterations(): number { return getReviewFixMaxIterations(); }
 function stepWindowSeconds(): number { return getStepWindowSeconds(); }
-// fix-ci fast-crash auto-retry constants. Only crash-fast failures
-// (the fix-ci job died in under FIX_CI_FAST_CRASH_MS) are retried so
-// real errors still surface. The retry count is sourced from the same
-// single global `fix_max_iterations` setting as every other fix loop —
-// when the operator sets it to 0 ("unlimited"), fix-CI crash retries
-// also become unbounded within the rolling FIX_CI_RETRY_WINDOW_SECONDS.
+// fix-ci fast-crash auto-retry constants. Only crash-fast failures (the
+// fix-ci job died in under FIX_CI_FAST_CRASH_MS) are retried so real
+// errors still surface. Kept finite even when `fix_max_iterations = 0`
+// so a permanently broken fix-ci environment can't loop forever — same
+// rationale as the push-hook rejection cap.
+const FIX_CI_MAX_RETRIES = 2;
 const FIX_CI_RETRY_WINDOW_SECONDS = 120;
 const FIX_CI_FAST_CRASH_MS = 5000;
 function getFixCiRetryConfig(): { maxRetries: number; windowSeconds: number; fastCrashMs: number } {
-  return { maxRetries: getMaxStepIterations(), windowSeconds: FIX_CI_RETRY_WINDOW_SECONDS, fastCrashMs: FIX_CI_FAST_CRASH_MS };
+  return { maxRetries: FIX_CI_MAX_RETRIES, windowSeconds: FIX_CI_RETRY_WINDOW_SECONDS, fastCrashMs: FIX_CI_FAST_CRASH_MS };
 }
 
 function recentFixCiCount(projectName: string, windowSeconds: number): number {
@@ -751,8 +750,8 @@ async function runCompletionHooksInner(job: JobData): Promise<void> {
             console.log(`[release] skipping mark-dod for ${job.project} (hasIssueContext=${hasIssueContext})`);
           }
           const commitCount = recentStepCount(job.project, 'commit', job);
-          if (commitCount >= maxStepIterations()) {
-            releaseStopReason = `commit cap reached for ${job.project} (${commitCount}/${maxStepIterations()}) — commits keep cycling, stopping`;
+          if (commitCount >= getFixIterationCap()) {
+            releaseStopReason = `commit cap reached for ${job.project} (${commitCount}/${getFixIterationCap()}) — commits keep cycling, stopping`;
             noteReleaseStop(releaseStopReason);
             notificationEvent = 'fix_loop_exhausted';
             forcedReleaseExitCode = 1;
@@ -869,8 +868,8 @@ async function runCompletionHooksInner(job: JobData): Promise<void> {
           // commit step in between. Cap on push retries to avoid spinning
           // on a stubbornly-broken hook.
           const pushCount = recentStepCount(job.project, 'push', job);
-          if (pushCount >= maxStepIterations()) {
-            releaseStopReason = `push cap reached for ${job.project} (${pushCount}/${maxStepIterations()}) — push hook keeps rejecting, stopping`;
+          if (pushCount >= getFixIterationCap()) {
+            releaseStopReason = `push cap reached for ${job.project} (${pushCount}/${getFixIterationCap()}) — push hook keeps rejecting, stopping`;
             noteReleaseStop(releaseStopReason);
             notificationEvent = 'fix_loop_exhausted';
             forcedReleaseExitCode = 1;
@@ -892,8 +891,8 @@ async function runCompletionHooksInner(job: JobData): Promise<void> {
           // prior fix). Cap on number of commits so a stubbornly-failing
           // hook can't churn commit→fix→commit forever.
           const commitCount = recentStepCount(job.project, 'commit', job);
-          if (commitCount >= maxStepIterations()) {
-            releaseStopReason = `commit cap reached for ${job.project} (${commitCount}/${maxStepIterations()}) — commit keeps failing, stopping`;
+          if (commitCount >= getFixIterationCap()) {
+            releaseStopReason = `commit cap reached for ${job.project} (${commitCount}/${getFixIterationCap()}) — commit keeps failing, stopping`;
             noteReleaseStop(releaseStopReason);
             notificationEvent = 'fix_loop_exhausted';
             forcedReleaseExitCode = 1;
@@ -915,8 +914,8 @@ async function runCompletionHooksInner(job: JobData): Promise<void> {
           // round), not fixes; the trailing fix lands but the next test is
           // skipped once the budget is spent.
           const testCount = recentStepCount(job.project, 'test', job);
-          if (testCount >= maxStepIterations()) {
-            releaseStopReason = `test cap reached for ${job.project} (${testCount}/${maxStepIterations()}) — tests still need verification`;
+          if (testCount >= getFixIterationCap()) {
+            releaseStopReason = `test cap reached for ${job.project} (${testCount}/${getFixIterationCap()}) — tests still need verification`;
             noteReleaseStop(releaseStopReason);
             notificationEvent = 'fix_loop_exhausted';
             forcedReleaseExitCode = 1;
@@ -939,7 +938,7 @@ async function runCompletionHooksInner(job: JobData): Promise<void> {
           // and `fixContradictsReview` only catch identical-finding repeats.
           // Count completed reviews; bail before starting review #(MAX+1).
           const reviewCount = recentStepCount(job.project, 'review', job);
-          const reviewCap = reviewFixMaxIterations();
+          const reviewCap = getFixIterationCap();
           if (reviewCap > 0 && reviewCount >= reviewCap) {
             const legacyStop = `review cap reached for ${job.project} (${reviewCount}/${reviewCap}) — review keeps surfacing new findings, stopping`;
             const reviewToCite = findLatestReviewForRelease(job) ?? job;
@@ -1029,8 +1028,8 @@ async function runCompletionHooksInner(job: JobData): Promise<void> {
           } catch {}
         }
         const pushCount = recentStepCount(job.project, 'push', job);
-        if (pushCount >= maxStepIterations()) {
-          releaseStopReason = `push cap reached for ${job.project} (${pushCount}/${maxStepIterations()}) — pushes keep cycling, stopping`;
+        if (pushCount >= getFixIterationCap()) {
+          releaseStopReason = `push cap reached for ${job.project} (${pushCount}/${getFixIterationCap()}) — pushes keep cycling, stopping`;
           noteReleaseStop(releaseStopReason);
           notificationEvent = 'fix_loop_exhausted';
           forcedReleaseExitCode = 1;
@@ -1080,8 +1079,8 @@ async function runCompletionHooksInner(job: JobData): Promise<void> {
           const reviewDisabled = !!(await getProjectTestConfig(job.project))?.reviewDisabled;
           if (freshLgtm) {
             const pushCount = recentStepCount(job.project, 'push', job);
-            if (pushCount >= maxStepIterations()) {
-              releaseStopReason = `push cap reached for ${job.project} (${pushCount}/${maxStepIterations()}) — pushes keep cycling, stopping`;
+            if (pushCount >= getFixIterationCap()) {
+              releaseStopReason = `push cap reached for ${job.project} (${pushCount}/${getFixIterationCap()}) — pushes keep cycling, stopping`;
               noteReleaseStop(releaseStopReason);
               notificationEvent = 'fix_loop_exhausted';
               forcedReleaseExitCode = 1;
@@ -1099,8 +1098,8 @@ async function runCompletionHooksInner(job: JobData): Promise<void> {
             }
           } else if (reviewDisabled && hasUncommittedChanges) {
             const commitCount = recentStepCount(job.project, 'commit', job);
-            if (commitCount >= maxStepIterations()) {
-              releaseStopReason = `commit cap reached for ${job.project} (${commitCount}/${maxStepIterations()}) — commits keep cycling, stopping`;
+            if (commitCount >= getFixIterationCap()) {
+              releaseStopReason = `commit cap reached for ${job.project} (${commitCount}/${getFixIterationCap()}) — commits keep cycling, stopping`;
               noteReleaseStop(releaseStopReason);
               notificationEvent = 'fix_loop_exhausted';
               forcedReleaseExitCode = 1;

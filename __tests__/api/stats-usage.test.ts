@@ -45,7 +45,7 @@ describe('GET /api/stats/usage', () => {
     expect(data.agents).toEqual([]);
     expect(data.totals.runs).toBe(0);
     expect(data.totals.costUsd).toBe(0);
-    expect(data.window).toBe('30d');
+    expect(data.window).toBe('24h');
     expect(data.pricing).toEqual(PRICE_PER_MTOK);
   });
 
@@ -103,10 +103,10 @@ describe('GET /api/stats/usage', () => {
     expect(data.totals.runs).toBe(1);
   });
 
-  it('falls back to 30d for invalid window param', async () => {
+  it('falls back to 24h for invalid window param', async () => {
     const res = await GET(new NextRequest('http://localhost/api/stats/usage?window=bogus'));
     const data = await res.json();
-    expect(data.window).toBe('30d');
+    expect(data.window).toBe('24h');
   });
 
   it('reports lastRunAt as the most recent startedAt', async () => {

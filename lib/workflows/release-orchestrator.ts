@@ -181,8 +181,7 @@ async function decideStep(jobId: string): Promise<NextPhase> {
   const { decideNextPhase } = await import('@/lib/workflows/decide-next-phase');
   const { applyReleaseGuards } = await import('@/lib/workflows/guards/apply-release-guards');
   const {
-    getMaxStepIterations,
-    getReviewFixMaxIterations,
+    getFixIterationCap,
     getPushFixAttemptCap,
     getReviewDoNotShipAction,
   } = await import('@/lib/pipeline/recovery-budget');
@@ -347,8 +346,7 @@ async function decideStep(jobId: string): Promise<NextPhase> {
     deps: {
       listJobs,
       readParsedLog,
-      maxStepIterations: getMaxStepIterations,
-      reviewFixMaxIterations: getReviewFixMaxIterations,
+      fixIterationCap: getFixIterationCap,
       pushFixAttemptCap: getPushFixAttemptCap,
       reviewDoNotShipAction: getReviewDoNotShipAction,
     },
