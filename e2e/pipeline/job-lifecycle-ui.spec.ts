@@ -484,4 +484,72 @@ test.describe('Job lifecycle UI badges', () => {
     await expect(page.getByText('1 running now')).toHaveCount(0, { timeout: 12_000 });
     await expect(page.getByText('active work')).toHaveCount(0, { timeout: 12_000 });
   });
+
+  // -------------------------------------------------------------------------
+  // Overview tab — running banner appears when a new job starts via poll
+  // Verifies the live-polling path on the overview tab: the banner must appear
+  // on the next poll cycle when a new running job is detected, without reload.
+  // -------------------------------------------------------------------------
+  test('overview tab shows running banner when a new job appears via poll', async ({ page }) => {
+    let serveRunning = false;
+    await mockJobScenario(page, () =>
+      serveRunning
+        ? [
+            makeJob({
+              id: 'job-live-overview-appear',
+              kind: 'review',
+              status: 'running',
+              exit_code: null,
+              started_at: now() - 3,
+              finished_at: null,
+              session_id: 'sess-live-overview-appear',
+            }),
+          ]
+        : [],
+    );
+
+    await page.goto(`/project/${PROJECT}`);
+
+    // No jobs yet — running banner must be absent.
+    await expect(page.getByText('running', { exact: true })).not.toBeVisible({ timeout: 5_000 });
+
+    // New job starts — flip the mock.
+    serveRunning = true;
+
+    // Overview tab picks up the running job on the next poll cycle.
+    await expect(page.getByText('1 running').first()).toBeVisible({ timeout: 12_000 });
+  });
+
+  // -------------------------------------------------------------------------
+  // Overview tab — cancelled job clears running banner via poll
+  // Complements the success-transition test: verifies the same clearing
+  // behaviour when a running job finishes with exit_code=-3 (cancelled).
+  // -------------------------------------------------------------------------
+  test('overview tab clears active-work banner when running job transitions to cancelled via poll', async ({
+    page,
+  }) => {
+    let serveRunning = true;
+    await mockJobScenario(page, () => [
+      makeJob({
+        id: 'job-live-overview-cancel',
+        kind: 'review',
+        status: serveRunning ? 'running' : 'done',
+        exit_code: serveRunning ? null : -3,
+        started_at: now() - 30,
+        finished_at: serveRunning ? null : now() - 5,
+        session_id: 'sess-live-overview-cancel',
+      }),
+    ]);
+
+    await page.goto(`/project/${PROJECT}`);
+
+    await expect(page.getByText('1 running').first()).toBeVisible({ timeout: 8_000 });
+    await expect(page.getByText('review').first()).toBeVisible();
+
+    // Job is cancelled — flip the mock.
+    serveRunning = false;
+
+    await expect(page.getByText('1 running now')).toHaveCount(0, { timeout: 12_000 });
+    await expect(page.getByText('active work')).toHaveCount(0, { timeout: 12_000 });
+  });
 });
