@@ -5,6 +5,7 @@ import { fetchSkills, createSkill, updateSkill, deleteSkill, fetchProjects, crea
 import type { Skill, Persona } from '@/lib/client-api'
 import { canonicalAgentNameKey } from '@/lib/agents/agent-name'
 import { Button } from '@/components/ui/Button'
+import { Pill } from '@/components/ui/Pill'
 import { SkillEditor } from '@/components/skills-page/SkillEditor'
 import {
   buildSkillListItems,
@@ -102,16 +103,16 @@ function SkillRow({ item, checked, onToggle, onEdit }: SkillRowProps) {
 
       {/* Source */}
       <div className="hidden sm:block">
-        <span className="text-[11px] px-1.5 py-0.5 rounded-full bg-bg-primary border border-border text-text-secondary font-medium whitespace-nowrap">
+        <Pill size="xs" className="rounded-full px-1.5 py-0.5 text-[11px] whitespace-nowrap">
           {sourceText}
-        </span>
+        </Pill>
       </div>
 
       {/* Category / Schedule */}
       <div className="hidden sm:block">
-        <span className="text-[11px] px-1.5 py-0.5 rounded-full bg-bg-primary border border-border text-text-tertiary font-medium whitespace-nowrap">
+        <Pill size="xs" className="rounded-full px-1.5 py-0.5 text-[11px] text-text-tertiary whitespace-nowrap">
           {categoryText}
-        </span>
+        </Pill>
       </div>
 
       {/* Description */}
