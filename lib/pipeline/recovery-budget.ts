@@ -2,29 +2,26 @@ import { getSettings, type ReviewDoNotShipAction } from '@/lib/shared/config';
 
 // Single source of truth for the pipeline's step-iteration cap.
 //
-// One user-facing setting (`fix_max_iterations`, persisted in
-// `app_settings`) governs every step-verification loop the release
-// pipeline runs — review→fix→review, test→fix→test, commit→fix→commit,
-// and the review-driven push→fix→push leg. Previously each leg had its
-// own knob (settings for review, env vars for the rest), so an operator
-// who set `fix_max_iterations = 0` to mean "loop until LGTM" was
-// surprised when the test loop still aborted at 3/3.
+// ONE user-facing setting — `fix_max_iterations`, persisted in
+// `app_settings` — governs every retry loop the release pipeline runs:
+// review→fix→review, test→fix→test, commit→fix→commit, the review-driven
+// push→fix→push leg, AND the pre-push-hook rejection retry. Previously
+// each leg had its own knob (settings for review, env vars for the rest,
+// a hardcoded 2 for push-hook retries) so an operator who set
+// `fix_max_iterations = 0` to mean "loop until success" was surprised
+// when the test loop aborted at 3/3 or the push-hook leg at 2/2. One
+// setting now drives them all.
 //
-// The two consumers (`getReviewFixMaxIterations` and
-// `getMaxStepIterations`) both delegate to `readFixIterationCap()` so
-// any future tweak — clamping, telemetry, per-project overrides —
-// happens in one place.
+// Every consumer (`getReviewFixMaxIterations`, `getMaxStepIterations`,
+// `getPushFixAttemptCap`) delegates to `readFixIterationCap()` so any
+// future tweak — clamping, telemetry, per-project overrides — happens
+// in one place.
 //
-// Carve-outs (intentionally NOT covered by the setting):
-//   - `getPushFixAttemptCap()` — the push pre-push-hook rejection cap
-//     stays a hardcoded 2 even when the setting is 0, so a permanently
-//     failing pre-push hook can't loop forever.
-//   - `getStepWindowSeconds()` — a time-based rolling window used by the
-//     legacy standalone hook (no releaseId). Different concept, kept
-//     env-driven (`TAMTAM_STEP_WINDOW_SECONDS`).
+// `getStepWindowSeconds()` is a separate concept (time-based rolling
+// window used by the legacy standalone hook, no releaseId) and stays
+// env-driven (`TAMTAM_STEP_WINDOW_SECONDS`).
 
 const DEFAULT_FIX_ITERATION_CAP = 3;
-const DEFAULT_PUSH_FIX_ATTEMPTS = 2;
 const DEFAULT_STEP_WINDOW_SECONDS = 30 * 60;
 
 function parsePositiveInt(raw: string | undefined, fallback: number): number {
@@ -35,7 +32,7 @@ function parsePositiveInt(raw: string | undefined, fallback: number): number {
 /**
  * Resolve the configured per-release iteration cap. Returns
  * `Number.POSITIVE_INFINITY` when the setting is 0 (operator-opted
- * "loop until LGTM"). Returns the integer setting when > 0. Falls back
+ * "loop until success"). Returns the integer setting when > 0. Falls back
  * to `DEFAULT_FIX_ITERATION_CAP` when the settings store hasn't been
  * initialized yet (early boot, tests that don't seed settings).
  *
@@ -76,13 +73,13 @@ export function getReviewDoNotShipAction(): ReviewDoNotShipAction {
   }
 }
 
-/** Cap on automatic fix attempts triggered by repeated push hook rejections.
- *  Deliberately decoupled from `fix_max_iterations`: even when the
- *  iteration cap is set to 0 ("unlimited"), push-hook retries stay finite
- *  so a permanently rejecting pre-push hook can't turn push recovery into
- *  an unbounded retry chain. */
+/** Cap on automatic fix attempts triggered by repeated push pre-push-hook
+ *  rejections. Reads the same single global `fix_max_iterations` setting:
+ *  there is intentionally no separate knob. When the operator sets
+ *  `fix_max_iterations = 0`, this cap also becomes unlimited — the only
+ *  outer bound is then the release wall-clock timeout. */
 export function getPushFixAttemptCap(): number {
-  return DEFAULT_PUSH_FIX_ATTEMPTS;
+  return readFixIterationCap();
 }
 
 /** Time window the legacy completion hook uses to decide whether two

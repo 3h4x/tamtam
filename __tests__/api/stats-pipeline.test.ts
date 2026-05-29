@@ -572,7 +572,7 @@ describe('GET /api/stats/pipeline', () => {
     getSettingsMock.mockReturnValueOnce({
       review_verdict_rules: 'default rules',
       commit_style: 'conventional commits',
-      review_fix_max_iterations: 0,
+      fix_max_iterations: 0,
     });
 
     const res = await GET(new NextRequest('http://localhost/api/stats/pipeline'));
@@ -580,7 +580,7 @@ describe('GET /api/stats/pipeline', () => {
     expect(data.configSnapshot.maxPushFixAttempts).toBe(2);
   });
 
-  it('reads maxStepIterations from the unified `review_fix_max_iterations` setting', async () => {
+  it('reads maxStepIterations from the unified `fix_max_iterations` setting', async () => {
     vi.resetModules();
 
     listJobsMock = vi.fn().mockReturnValue([]);
@@ -588,7 +588,7 @@ describe('GET /api/stats/pipeline', () => {
     getSettingsMock = vi.fn().mockReturnValue({
       review_verdict_rules: 'default rules',
       commit_style: 'conventional commits',
-      review_fix_max_iterations: 5,
+      fix_max_iterations: 5,
     });
     vi.doMock('@/lib/jobs/job-storage', () => ({
       listJobs: listJobsMock,
@@ -612,7 +612,7 @@ describe('GET /api/stats/pipeline', () => {
     getSettingsMock = vi.fn().mockReturnValue({
       review_verdict_rules: 'default rules',
       commit_style: 'conventional commits',
-      review_fix_max_iterations: 0,
+      fix_max_iterations: 0,
     });
     vi.doMock('@/lib/jobs/job-storage', () => ({
       listJobs: listJobsMock,

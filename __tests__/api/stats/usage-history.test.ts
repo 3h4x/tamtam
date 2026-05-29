@@ -170,6 +170,61 @@ describe('GET /api/stats/usage-history', () => {
     expect(series.catchUpTokensPerHour).toBeNull();
   });
 
+  it('derives utilization-based pace even when token columns are null', async () => {
+    const now = Date.now();
+    // Two buckets, rising utilization (6% → 10% over one hour), no token data —
+    // mirrors a provider with real external quota usage but no jobs routed to
+    // it in TamTam. The token-derived rates stay null; the utilization-derived
+    // pace must still be populated so the quota card can show a trend.
+    await sharedHandle.db.insert(schema.usageHourlySnapshot).values([
+      {
+        bucketTs: now - 2 * 60 * 60 * 1000,
+        provider: 'claude',
+        windowKey: '7d',
+        utilizationPct: 6,
+        elapsedPct: 60,
+        projectedPct: null,
+        paceMarginPct: 54,
+        status: 'under_pace',
+        inputTokens: null,
+        outputTokens: null,
+        cacheReadTokens: null,
+        cacheCreateTokens: null,
+        jobCount: null,
+        recordedAt: now / 1000,
+      },
+      {
+        bucketTs: now - 1 * 60 * 60 * 1000,
+        provider: 'claude',
+        windowKey: '7d',
+        utilizationPct: 10,
+        elapsedPct: 60,
+        projectedPct: null,
+        paceMarginPct: 50,
+        status: 'under_pace',
+        inputTokens: null,
+        outputTokens: null,
+        cacheReadTokens: null,
+        cacheCreateTokens: null,
+        jobCount: null,
+        recordedAt: now / 1000,
+      },
+    ]);
+
+    const req = new Request('http://localhost:3000/api/stats/usage-history?hours=48');
+    const res = await GET(req);
+    expect(res.status).toBe(200);
+    const json = await res.json() as any;
+
+    const series = json.series[0];
+    expect(series.currentTokensPerHour).toBeNull();
+    expect(series.expectedTokensPerHour).toBeNull();
+    // +4pp over 1h.
+    expect(series.currentUtilizationPpPerHour).toBeCloseTo(4, 5);
+    // Steady-state for the 7d (168h) window.
+    expect(series.steadyUtilizationPpPerHour).toBeCloseTo(100 / 168, 5);
+  });
+
   it('keeps real zero-token job buckets numeric', async () => {
     const now = Date.now();
     const bucketTs = now - 60 * 60 * 1000;

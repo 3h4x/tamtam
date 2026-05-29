@@ -13,7 +13,7 @@ function restoreEnv() {
 function mockSettings(value: number | null | undefined): void {
   vi.resetModules();
   vi.doMock('@/lib/shared/config', () => ({
-    getSettings: () => ({ review_fix_max_iterations: value }),
+    getSettings: () => ({ fix_max_iterations: value }),
   }));
 }
 

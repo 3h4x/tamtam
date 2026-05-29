@@ -127,7 +127,7 @@ describe('config', () => {
         commit_style: 'Use conventional commits. One line only, present tense, ≤50 chars, no trailing period. Types: feat|fix|docs|style|refactor|test|chore|ci|build|perf|revert.',
         review_verdict_rules: expect.stringContaining('Pragmatic verdict rules'),
         jobs_paused: false,
-        review_fix_max_iterations: 0,
+        fix_max_iterations: 0,
         review_fix_backoff_seconds: 30,
         review_do_not_ship_action: 'fix',
         release_wall_clock_timeout_minutes: 60,
@@ -652,34 +652,34 @@ describe('config', () => {
     );
   });
 
-  describe('review_fix_max_iterations', () => {
-    it('parses review_fix_max_iterations from DB as integer', async () => {
-      await setSetting('review_fix_max_iterations', '5');
+  describe('fix_max_iterations', () => {
+    it('parses fix_max_iterations from DB as integer', async () => {
+      await setSetting('fix_max_iterations', '5');
       await refresh();
-      expect(getSettings().review_fix_max_iterations).toBe(5);
+      expect(getSettings().fix_max_iterations).toBe(5);
     });
 
     it('falls back to default (unlimited) when value is non-numeric', async () => {
-      await setSetting('review_fix_max_iterations', 'abc');
+      await setSetting('fix_max_iterations', 'abc');
       await refresh();
-      expect(getSettings().review_fix_max_iterations).toBe(0);
+      expect(getSettings().fix_max_iterations).toBe(0);
     });
 
     it('preserves explicit zero as unlimited', async () => {
-      await setSetting('review_fix_max_iterations', '0');
+      await setSetting('fix_max_iterations', '0');
       await refresh();
-      expect(getSettings().review_fix_max_iterations).toBe(0);
+      expect(getSettings().fix_max_iterations).toBe(0);
     });
 
     it('falls back to default (unlimited) when value is negative', async () => {
-      await setSetting('review_fix_max_iterations', '-1');
+      await setSetting('fix_max_iterations', '-1');
       await refresh();
-      expect(getSettings().review_fix_max_iterations).toBe(0);
+      expect(getSettings().fix_max_iterations).toBe(0);
     });
 
     it('returns the default 0 (unlimited) when no DB row exists', async () => {
       await refresh();
-      expect(getSettings().review_fix_max_iterations).toBe(0);
+      expect(getSettings().fix_max_iterations).toBe(0);
     });
   });
 

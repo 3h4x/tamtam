@@ -135,7 +135,7 @@ async function buildSettingsResponse(): Promise<Record<string, string>> {
   settings.claude_provider = serializeSettingValue('claude_provider', effective.claude_provider);
   settings.cli_enabled_providers = serializeSettingValue('cli_enabled_providers', effective.cli_enabled_providers);
   settings.provider_fallback_chain = serializeSettingValue('provider_fallback_chain', effective.provider_fallback_chain);
-  settings.review_fix_max_iterations = serializeSettingValue('review_fix_max_iterations', effective.review_fix_max_iterations);
+  settings.fix_max_iterations = serializeSettingValue('fix_max_iterations', effective.fix_max_iterations);
   settings.review_do_not_ship_action = serializeSettingValue('review_do_not_ship_action', effective.review_do_not_ship_action);
   settings.release_wall_clock_timeout_minutes = serializeSettingValue('release_wall_clock_timeout_minutes', effective.release_wall_clock_timeout_minutes);
   settings.plain_test_phase_enabled = serializeSettingValue('plain_test_phase_enabled', effective.plain_test_phase_enabled);
@@ -188,7 +188,7 @@ const SETTING_KEYS = [
   'review_verdict_rules',
   'jobs_paused',
   'rebuild_in_progress',
-  'review_fix_max_iterations',
+  'fix_max_iterations',
   'review_fix_backoff_seconds',
   'review_do_not_ship_action',
   'release_wall_clock_timeout_minutes',
@@ -355,7 +355,7 @@ function validateAndSerializeSettingValue(
     return { value: parsed.model, error: null };
   }
 
-  if (key === 'review_fix_max_iterations') {
+  if (key === 'fix_max_iterations') {
     // Default is unlimited (0), but any positive integer caps review
     // verification rounds until LGTM or the release wall clock aborts.
     return parseNonNegativeIntegerSetting(value, key);
