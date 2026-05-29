@@ -4,6 +4,7 @@ import { useState, useEffect, useMemo, useRef } from 'react'
 import { fetchProjectDocs, improveAgentPrompt } from '@/lib/client-api'
 import type { Agent, Skill, Persona, ProjectDoc } from '@/lib/client-api'
 import { Button } from '@/components/ui/Button'
+import { EmptyState } from '@/components/ui/EmptyState'
 import { Pill } from '@/components/ui/Pill'
 import { SegmentedControl } from '@/components/ui/SegmentedControl'
 import { Spinner } from '@/components/ui/Spinner'
@@ -444,7 +445,7 @@ export function AgentEditor({
             />
             <div className="max-h-72 overflow-y-auto rounded-lg border border-border divide-y divide-border">
               {filteredItems.length === 0 ? (
-                <div className="px-4 py-3 text-sm text-text-tertiary text-center">No matches</div>
+                <EmptyState paddingY="xs" title="No matches" />
               ) : (
                 filteredItems.slice(0, 60).map(item => {
                   const isSelected = selectedSkills.includes(item.id)
@@ -489,7 +490,7 @@ export function AgentEditor({
         {contextTab === 'docs' && (
           <div className="max-h-72 overflow-y-auto rounded-lg border border-border divide-y divide-border">
             {availableDocs.length === 0 ? (
-              <div className="px-4 py-3 text-sm text-text-tertiary text-center">No docs found for this project</div>
+              <EmptyState paddingY="xs" title="No docs found for this project" />
             ) : (
               availableDocs.map(doc => {
                 const isSelected = selectedDocPaths.includes(doc.path)
