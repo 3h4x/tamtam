@@ -1811,9 +1811,13 @@ describe('runCompletionHooks – release-after-run', () => {
   });
 
   it('skips startRelease after agent:x when finalize only saw dirty-baseline files', async () => {
+    // Realistic case: agent did NOT commit (BASE..HEAD empty), the only
+    // file in the worktree was the same one already dirty in the baseline.
+    // Per-file attribution marks it low confidence; the gate then skips
+    // the release-after-run dispatch.
     execMock
       .mockResolvedValueOnce({ exitCode: 0, stdout: '', stderr: '' })
-      .mockResolvedValueOnce({ exitCode: 0, stdout: '13\t4\tsrc/pre-existing-commit.ts\n', stderr: '' })
+      .mockResolvedValueOnce({ exitCode: 0, stdout: '', stderr: '' })
       .mockResolvedValueOnce({ exitCode: 0, stdout: ' M src/pre-existing.ts\n', stderr: '' })
       .mockResolvedValueOnce({ exitCode: 0, stdout: '99\t12\tsrc/pre-existing.ts\n', stderr: '' });
     const job = makeJob('agent:my-agent', {
@@ -1831,6 +1835,69 @@ describe('runCompletionHooks – release-after-run', () => {
     expect(job.linesAdded).toBe(0);
     expect(job.linesRemoved).toBe(0);
     expect(startReleaseMock).not.toHaveBeenCalled();
+  });
+
+  it('skips startRelease after agent:x when dirty-baseline run only sees an unrelated commit', async () => {
+    execMock
+      .mockResolvedValueOnce({ exitCode: 0, stdout: 'M\tsrc/unrelated-commit.ts\n', stderr: '' })
+      .mockResolvedValueOnce({ exitCode: 0, stdout: '13\t4\tsrc/unrelated-commit.ts\n', stderr: '' })
+      .mockResolvedValueOnce({ exitCode: 0, stdout: '', stderr: '' })
+      .mockResolvedValueOnce({ exitCode: 0, stdout: '', stderr: '' });
+    const job = makeJob('agent:my-agent', {
+      contextMeta: JSON.stringify({
+        agent: { id: 'agent-1', name: 'my-agent', schedule: '15m', triggeredBy: 'schedule' },
+        baseline: { head: 'abc123', dirty: true, status: ' M src/pre-existing.ts\n' },
+      }),
+    });
+
+    await markDoneFn(job, 0);
+
+    expect(job.modifiedFiles).toBe(JSON.stringify([
+      { path: 'src/unrelated-commit.ts', status: 'M', confidence: 'low' },
+    ]));
+    expect(job.linesAdded).toBe(0);
+    expect(job.linesRemoved).toBe(0);
+    expect(startReleaseMock).not.toHaveBeenCalled();
+  });
+
+  it('triggers startRelease after agent:x adds a NEW file even on a dirty baseline', async () => {
+    // The autonomy fix: a stale dirty file in the worktree must not prevent
+    // the orchestrator from releasing changes the agent legitimately made
+    // on top of it. Per-file attribution marks the new file high confidence;
+    // the gate accepts it; release dispatches.
+    execMock
+      .mockResolvedValueOnce({ exitCode: 0, stdout: '', stderr: '' })
+      .mockResolvedValueOnce({ exitCode: 0, stdout: '', stderr: '' })
+      .mockResolvedValueOnce({
+        exitCode: 0,
+        stdout: ' M src/pre-existing.ts\n?? src/new-from-agent.md\n',
+        stderr: '',
+      })
+      .mockResolvedValueOnce({
+        exitCode: 0,
+        stdout: '99\t12\tsrc/pre-existing.ts\n8\t0\tsrc/new-from-agent.md\n',
+        stderr: '',
+      });
+    const job = makeJob('agent:my-agent', {
+      contextMeta: JSON.stringify({
+        agent: { id: 'agent-1', name: 'my-agent', schedule: '15m', triggeredBy: 'schedule' },
+        baseline: { head: 'abc123', dirty: true, status: ' M src/pre-existing.ts\n' },
+      }),
+    });
+
+    await markDoneFn(job, 0);
+
+    // The new file lands as high-confidence; pre-existing stays low.
+    const files = JSON.parse(job.modifiedFiles ?? '[]') as Array<Record<string, unknown>>;
+    expect(files).toContainEqual({ path: 'src/new-from-agent.md', status: '??', confidence: 'high' });
+    expect(files).toContainEqual({ path: 'src/pre-existing.ts', status: 'M', confidence: 'low' });
+    // Only the new file's LOC counts; pre-existing 99/12 is filtered.
+    expect(job.linesAdded).toBe(8);
+    expect(job.linesRemoved).toBe(0);
+    expect(startReleaseMock).toHaveBeenCalledWith('my-proj', {
+      queueIfBlocked: true,
+      sourceJobId: job.id,
+    });
   });
 
   it('triggers startRelease after fix-ci job finishes with exit 0', async () => {

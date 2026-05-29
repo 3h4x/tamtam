@@ -4,6 +4,9 @@ import type { Page, Route } from '@playwright/test'
 const PROJECT = 'terminal-mocked-lifecycle'
 const JOB_ID = 'mock-review-live-1'
 const SESSION_ID = 'mock-session-live-1'
+const RELEASE_JOB_ID = 'mock-release-live-1'
+const RUN_JOB_ID = 'mock-run-live-1'
+const RUN_SESSION_ID = 'mock-run-session-live-1'
 
 const now = () => Math.floor(Date.now() / 1000)
 
@@ -74,7 +77,53 @@ function runningJob() {
   }
 }
 
-async function stubProjectShell(page: Page): Promise<void> {
+function runningReleaseJob() {
+  return {
+    id: RELEASE_JOB_ID,
+    project: PROJECT,
+    kind: 'release',
+    status: 'running',
+    exit_code: null,
+    started_at: now() - 5,
+    finished_at: null,
+    pid: 0,
+    log_path: '',
+    seen: true,
+    session_id: null,
+    user_prompt: null,
+    prompt: null,
+    context_meta: null,
+    provider: 'claude',
+    work_summary: 'Review is running in the release pipeline.',
+    release_id: RELEASE_JOB_ID,
+  }
+}
+
+function runningTerminalRunJob() {
+  return {
+    id: RUN_JOB_ID,
+    project: PROJECT,
+    kind: 'run',
+    status: 'running',
+    exit_code: null,
+    started_at: now() - 5,
+    finished_at: null,
+    pid: 0,
+    log_path: '',
+    seen: true,
+    session_id: RUN_SESSION_ID,
+    user_prompt: 'Keep the landing page idle.',
+    prompt: 'Keep the landing page idle.',
+    context_meta: null,
+    provider: 'claude',
+    work_summary: 'A separate terminal run started elsewhere.',
+  }
+}
+
+async function stubProjectShell(
+  page: Page,
+  jobsForProject: () => unknown[] = () => [runningJob()],
+): Promise<void> {
   await page.route('**/api/projects', (route: Route) =>
     route.fulfill({
       json: { tasks: [makeTask()], priorities: [], issueCounts: {} },
@@ -125,7 +174,7 @@ async function stubProjectShell(page: Page): Promise<void> {
     (url) => url.pathname === '/api/jobs' && url.searchParams.get('project') === PROJECT,
     (route: Route) =>
       route.fulfill({
-        json: { jobs: [runningJob()], pendingReleaseProjects: [] },
+        json: { jobs: jobsForProject(), pendingReleaseProjects: [] },
       }),
   )
 }
@@ -288,5 +337,84 @@ test.describe('Mocked terminal lifecycle UI', () => {
     await expect(page.getByText('live run')).toHaveCount(0, { timeout: 8_000 })
     await expect(page.getByText(/receiving output|waiting for output/)).toHaveCount(0)
     await expect(page).toHaveURL(new RegExp(`/project/${PROJECT}/terminal/${SESSION_ID}`))
+  })
+
+  test('terminal landing page auto-attaches when a release starts after the page is already open', async ({
+    page,
+  }) => {
+    let serveRunningRelease = false
+    let finishStream!: () => void
+    const streamDone = new Promise<void>((resolve) => {
+      finishStream = resolve
+    })
+
+    await stubProjectShell(page, () => (serveRunningRelease ? [runningReleaseJob()] : []))
+    await page.route(`**/api/jobs/${RELEASE_JOB_ID}`, (route: Route) =>
+      route.fulfill({ json: runningReleaseJob() }),
+    )
+    await page.route(`**/api/streaming/${RELEASE_JOB_ID}`, async (route: Route) => {
+      await streamDone
+      await route.fulfill({
+        status: 200,
+        headers: {
+          'content-type': 'text/event-stream',
+          'cache-control': 'no-cache',
+        },
+        body: [
+          'data: Release output reached the terminal after auto-attach.',
+          '',
+          `event: done`,
+          `data: ${JSON.stringify({
+            exitCode: 0,
+            provider: 'claude',
+            duration: 1400,
+          })}`,
+          '',
+        ].join('\n'),
+      })
+    })
+
+    await page.goto(`/project/${PROJECT}/terminal`)
+
+    await expect(page.getByRole('button', { name: 'new' })).toBeVisible({ timeout: 8_000 })
+    await expect(page.getByText('live run')).toHaveCount(0)
+
+    serveRunningRelease = true
+
+    await expect(page).toHaveURL(
+      new RegExp(`/project/${PROJECT}/terminal\\?job=${encodeURIComponent(RELEASE_JOB_ID)}`),
+      { timeout: 12_000 },
+    )
+    await expect(page.getByText('live run')).toBeVisible({ timeout: 8_000 })
+    await expect(page.getByTitle('View unified release trace')).toBeVisible({ timeout: 8_000 })
+    await expect(page.getByText(/receiving output|waiting for output/)).toBeVisible()
+
+    finishStream()
+
+    await expect(
+      page.getByText('Release output reached the terminal after auto-attach.'),
+    ).toBeVisible({ timeout: 8_000 })
+    await expect(page.getByText('exit 0 — ok').first()).toBeVisible({ timeout: 8_000 })
+    await expect(page.getByText('live run')).toHaveCount(0, { timeout: 8_000 })
+  })
+
+  test('terminal landing page stays idle when a non-release run starts elsewhere', async ({
+    page,
+  }) => {
+    let serveRunningRun = false
+
+    await stubProjectShell(page, () => (serveRunningRun ? [runningTerminalRunJob()] : []))
+
+    await page.goto(`/project/${PROJECT}/terminal`)
+
+    await expect(page.getByRole('button', { name: 'new' })).toBeVisible({ timeout: 8_000 })
+    await expect(page.getByText('live run')).toHaveCount(0)
+
+    serveRunningRun = true
+
+    await expect(page).toHaveURL(`/project/${PROJECT}/terminal`)
+    await expect(page.getByRole('button', { name: 'new' })).toBeVisible()
+    await expect(page.getByText('live run')).toHaveCount(0)
+    await expect(page.getByTitle('View unified release trace')).toHaveCount(0)
   })
 })

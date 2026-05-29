@@ -20,13 +20,9 @@ async function getReleaseAfterRunFlag(projectName: string): Promise<boolean> {
 /** True when the finished agent job left some shippable change behind. We
  *  count from the metadata `finalizeAgentRunReport` already wrote to the
  *  job row — `modifiedFiles` is a JSON array and `linesAdded`/`linesRemoved`
- *  are the LOC delta. No git re-read needed. Either signal is enough so
- *  binary edits and pure renames still count.
- *
- *  Returning `false` short-circuits the release-after-run dispatch so a
- *  scheduled agent that produced nothing this cycle doesn't burn test +
- *  review tokens on a release that has nothing to ship and will abort at
- *  the review-scope check anyway. */
+ *  are the attributed LOC delta. No git re-read needed. Either signal is
+ *  enough so binary edits and pure renames still count. Low-confidence files
+ *  are dirty-baseline context only and must not fire an autonomous release. */
 function agentProducedShippableChange(job: JobData): boolean {
   const lines = (job.linesAdded ?? 0) + (job.linesRemoved ?? 0);
   if (lines > 0) return true;
@@ -69,10 +65,9 @@ export async function dispatchReleaseAfterRun(job: JobData): Promise<DispatchRel
   // so an idle agent that found nothing this cycle still spun up a release
   // — test/review tokens burned, and the release aborted at the review
   // scope check with "No uncommitted changes or unpushed commits to
-  // review". For projects with frequent agents (e.g. improve every 15
-  // minutes) this looped on ~96% failed releases per day. Issue-cruncher
-  // runs are exempted because they may produce a committed branch with no
-  // working-tree delta but still need a release to open/update the PR.
+  // review". Issue-cruncher runs are exempted because they may produce a
+  // committed branch with no working-tree delta but still need a release to
+  // open/update the PR.
   const issueLinked = job.kind === 'agent:issue-cruncher' || (job.kind === 'run' && job.ghIssueNumber != null);
   if (isAgentJobKind(job.kind) && !issueLinked && !agentProducedShippableChange(job)) {
     return { dispatched: false, reason: 'agent produced no changed files or LOC' };

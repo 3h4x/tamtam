@@ -13,6 +13,7 @@ function view(overrides: Partial<ProjectSweepView> = {}): ProjectSweepView {
     defaultBranchCi: 'success',
     prOnBranch: null,
     paused: false,
+    autoPushEnabled: false,
     ...overrides,
   };
 }
@@ -32,6 +33,11 @@ describe('decideSweepAction', () => {
   it('skips unpushed commits on default branch (auto-release disabled there)', () => {
     const a = decideSweepAction(view({ hasUnpushedCommits: true }));
     expect(a.kind).toBe('skip');
+  });
+  it('triggers release on default branch with work when auto-push is enabled', () => {
+    const a = decideSweepAction(view({ autoPushEnabled: true, uncommittedCount: 2 }));
+    expect(a.kind).toBe('release');
+    expect(a.reason).toMatch(/auto_push/);
   });
   it('triggers release on non-default branch with changes (regardless of CI)', () => {
     const a = decideSweepAction(view({ currentBranch: 'fix/issue-1', uncommittedCount: 4, defaultBranchCi: 'failure' }));
