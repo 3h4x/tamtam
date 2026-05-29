@@ -1,6 +1,7 @@
 import { useState, useCallback } from 'react'
 import { useRouter } from 'next/navigation'
 import {
+  appendUniqueErrorDetail,
   buildTerminalEntriesFromJobLog,
   terminalExitEntry,
   terminalStore,
@@ -39,6 +40,7 @@ interface JobDetail {
   provider?: string | null
   prompt?: string | null
   user_prompt?: string | null
+  detail?: string | null
 }
 
 export function useSessionManager(projectName: string) {
@@ -187,6 +189,7 @@ export function useSessionManager(projectName: string) {
             passthrough: hasPrerequisiteContext(data.context_meta),
             fallbackRole: 'error',
           }))
+          appendUniqueErrorDetail(entries, data.detail)
         } else {
           entries.push(...buildTerminalEntriesFromJobLog(data.log, {
             passthrough: hasPrerequisiteContext(data.context_meta),
@@ -199,6 +202,7 @@ export function useSessionManager(projectName: string) {
         }
       } else if (exitEntry && exitCode !== 0) {
         entries.push(exitEntry)
+        appendUniqueErrorDetail(entries, data.detail)
       }
       let loadedSkills: SkillItem[] = []
       let loadedDocs: DocItem[] = []

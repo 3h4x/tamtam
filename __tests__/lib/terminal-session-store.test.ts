@@ -334,6 +334,73 @@ describe('TerminalStore – startStream EventSource integration', () => {
     expect(errorEntries[1].text).toBe('log file missing');
   });
 
+  it('done event does not duplicate detail text already flushed from the stream', () => {
+    const p = proj();
+    terminalStore.startStream(p, 'job-duplicate-detail');
+    const es = esInstances[esInstances.length - 1];
+    es.emit('message', 'fatal: auth expired');
+    es.emit('done', JSON.stringify({ exitCode: 1, detail: 'fatal: auth expired' }));
+    const s = terminalStore.get(p);
+    expect(s.history.filter((e) => e.text === 'fatal: auth expired')).toHaveLength(1);
+    expect(s.history).toEqual([
+      { role: 'assistant', text: 'fatal: auth expired' },
+      { role: 'error', text: 'exit 1' },
+    ]);
+  });
+
+  it('post-finalization detail hydration does not duplicate an existing error detail', async () => {
+    const p = proj();
+    const fetchSpy = vi.spyOn(globalThis, 'fetch').mockResolvedValue({
+      ok: true,
+      json: async () => ({ detail: 'log file missing' }),
+    } as Response);
+
+    terminalStore.startStream(p, 'job-hydrate-detail');
+    const es = esInstances[esInstances.length - 1];
+    es.emit('done', JSON.stringify({ exitCode: 1, detail: 'log file missing' }));
+
+    await vi.waitFor(() => {
+      expect(fetchSpy).toHaveBeenCalledWith('/api/jobs/job-hydrate-detail');
+    });
+
+    expect(terminalStore.get(p).history.filter((e) => e.text === 'log file missing')).toHaveLength(1);
+    fetchSpy.mockRestore();
+  });
+
+  it('post-finalization detail hydration is ignored after switching sessions', async () => {
+    const p = proj();
+    let resolveFetch: (value: Response) => void = () => {};
+    const fetchPromise = new Promise<Response>((resolve) => {
+      resolveFetch = resolve;
+    });
+    const fetchSpy = vi.spyOn(globalThis, 'fetch').mockReturnValue(fetchPromise);
+    const jsonSpy = vi.fn().mockResolvedValue({ detail: 'log file missing' });
+
+    terminalStore.startStream(p, 'job-stale-detail');
+    const es = esInstances[esInstances.length - 1];
+    es.emit('done', JSON.stringify({ exitCode: 1, sessionId: 'sess-old' }));
+    terminalStore.update(p, () => ({
+      sessionKey: 'sess-new',
+      claudeSessionId: 'sess-new',
+      history: [{ role: 'user', text: 'new session prompt' }],
+    }));
+
+    resolveFetch({
+      ok: true,
+      json: jsonSpy,
+    } as unknown as Response);
+
+    await vi.waitFor(() => {
+      expect(jsonSpy).toHaveBeenCalled();
+    });
+
+    expect(fetchSpy).toHaveBeenCalledWith('/api/jobs/job-stale-detail');
+    expect(terminalStore.get(p).history).toEqual([
+      { role: 'user', text: 'new session prompt' },
+    ]);
+    fetchSpy.mockRestore();
+  });
+
   it('done event with error=true surfaces claude run failure + errorText', () => {
     const p = proj();
     terminalStore.startStream(p, 'job-api-err');

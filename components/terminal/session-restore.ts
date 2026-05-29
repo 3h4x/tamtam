@@ -1,4 +1,5 @@
 import {
+  appendUniqueErrorDetail,
   buildTerminalEntriesFromJobLog,
   terminalExitEntry,
   type DocItem,
@@ -37,6 +38,7 @@ interface JobLogDetail {
   prompt?: string | null
   user_prompt?: string | null
   provider?: string | null
+  detail?: string | null
 }
 
 export function isRestorableSessionKind(kind: string): boolean {
@@ -178,6 +180,7 @@ export async function buildEntriesForCompletedJobs(jobs: RestorableJob[]): Promi
 
     const prompt = restoredPrompt(jobWithDetail)
     if (prompt) entries.push({ role: 'user', text: prompt })
+    const jobEntryStart = entries.length
 
     const detail = logData[index]
     const exitCode = typeof detail?.exit_code === 'number' ? detail.exit_code : job.exit_code
@@ -198,6 +201,7 @@ export async function buildEntriesForCompletedJobs(jobs: RestorableJob[]): Promi
           passthrough: hasPrerequisiteContext(job.context_meta),
           fallbackRole: 'error',
         }))
+        appendUniqueErrorDetail(entries, detail.detail, jobEntryStart)
       } else {
         entries.push(...buildTerminalEntriesFromJobLog(detail.log, {
           passthrough: hasPrerequisiteContext(job.context_meta),
@@ -208,6 +212,7 @@ export async function buildEntriesForCompletedJobs(jobs: RestorableJob[]): Promi
       if (exitEntry) entries.push(exitEntry)
     } else if (exitEntry && exitCode !== 0) {
       entries.push(exitEntry)
+      appendUniqueErrorDetail(entries, detail?.detail, jobEntryStart)
     }
   })
   return entries
