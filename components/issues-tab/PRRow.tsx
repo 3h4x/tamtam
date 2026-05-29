@@ -202,9 +202,9 @@ export function PRRow({
             >
               <span className="line-clamp-2">{pr.title}</span>
             </button>
-            <span className="shrink-0 rounded-full border border-border bg-bg-tertiary px-1.5 py-0.5 text-[10px] font-mono text-text-secondary tabular-nums">
+            <Pill tone="neutral" size="xs" className="shrink-0 rounded-full bg-bg-tertiary px-1.5 py-0.5 text-[10px] font-mono tabular-nums">
               #{pr.number}
-            </span>
+            </Pill>
             {merged && (
               <Pill tone="success" size="xs" className="rounded-full px-1.5 text-[10px]">
                 Merged
