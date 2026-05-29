@@ -293,7 +293,7 @@ export async function PATCH(
   );
   if (writeResults.some((ok) => !ok)) return notFound();
 
-  // If any cron field changed, reconcile the PM2 cron entry.
+  // If any cron field changed, reconcile the in-process test schedule.
   if (body.test_cron_schedule !== undefined || body.test_cron_enabled !== undefined) {
     const cfg = await getProjectTestConfig(projectName);
     if (cfg && cfg.testCronEnabled && cfg.testCronSchedule) {
