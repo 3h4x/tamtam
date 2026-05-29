@@ -363,7 +363,7 @@ describe('drainNextAgentRun', () => {
 
   it('drops the head after MAX_CONSECUTIVE_FAILURES 5xx replays (circuit breaker)', async () => {
     // Five identical 500s should trip the breaker and dropHead. Without this,
-    // a route that fails fast (e.g. PM2 spawn EBADF) was re-fired by the
+    // a route that fails fast (e.g. child-process spawn EBADF) was re-fired by the
     // lifecycle drain ~50/sec, producing thousands of dead jobs on a single
     // queued entry.
     fetchSpy.mockResolvedValue(jsonResponse({ detail: 'Failed to start' }, 500));
