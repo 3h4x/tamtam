@@ -261,6 +261,86 @@ test.describe('Runs page non-release live polling', () => {
     await expect(agentRow.getByText('Reviewing open items')).toBeVisible()
   })
 
+  test('active running filter drops the completed row while keeping the other live row visible', async ({ page }) => {
+    let pollCount = 0
+
+    await stubRunsShellRoutes(page)
+    await page.route('**/api/jobs?limit=200', (route: Route) => {
+      pollCount += 1
+      const chatDone = pollCount >= 2
+      route.fulfill({
+        json: {
+          jobs: [
+            makeJob({
+              id: 'chat-run-running-filter-live-1',
+              project: RUN_PROJECT,
+              kind: 'run',
+              prompt: 'Watch the running filter update',
+              user_prompt: 'Watch the running filter update',
+              session_id: 'sess-chat-run-running-filter-live-1',
+              status: chatDone ? 'done' : 'running',
+              exit_code: chatDone ? 0 : null,
+              started_at: now() - 95,
+              finished_at: chatDone ? now() - 6 : null,
+              work_summary: chatDone ? 'Completed after the filter was already active' : 'Still running in the filtered list',
+            }),
+            makeJob({
+              id: 'agent-run-running-filter-live-1',
+              project: AGENT_PROJECT,
+              kind: 'agent:planner',
+              prompt: 'Planner agent',
+              user_prompt: 'Planner agent',
+              status: 'running',
+              exit_code: null,
+              started_at: now() - 55,
+              finished_at: null,
+              work_summary: 'Continuing to plan follow-up work',
+            }),
+          ],
+          total: 2,
+          pendingReleaseProjects: [],
+        },
+      })
+    })
+    await page.route('**/api/jobs/counts', (route: Route) =>
+      route.fulfill({
+        json: {
+          total: 2,
+          byKind: { run: 1, 'agent:planner': 1 },
+          byStatus: {
+            running: pollCount >= 2 ? 1 : 2,
+            done: pollCount >= 2 ? 1 : 0,
+            aborted: 0,
+            failed: 0,
+          },
+          tokens: { input: 0, output: 0, cacheRead: 0, cacheCreate: 0, total: 0 },
+          cost: { total: 0, monthToDate: 0 },
+        },
+      }),
+    )
+
+    await page.goto('/runs')
+
+    const chatRow = runRow(page, RUN_PROJECT)
+    const agentRow = runRow(page, AGENT_PROJECT)
+
+    await expect(chatRow).toBeVisible({ timeout: 8_000 })
+    await expect(agentRow).toBeVisible({ timeout: 8_000 })
+
+    await page.getByRole('button', { name: /^running/ }).click()
+
+    await expect(chatRow.getByLabel('running')).toBeVisible()
+    await expect(agentRow.getByLabel('running')).toBeVisible()
+    await expect(page.getByText('Nothing is running right now')).toHaveCount(0)
+
+    await expect(chatRow).toHaveCount(0, { timeout: 12_000 })
+    await expect(agentRow).toBeVisible({ timeout: 12_000 })
+    await expect(agentRow.getByLabel('running')).toBeVisible({ timeout: 12_000 })
+    await expect(agentRow.getByText('Continuing to plan follow-up work')).toBeVisible()
+    await expect(page.getByRole('button', { name: /^running 1/i })).toBeVisible({ timeout: 12_000 })
+    await expect(page.getByText('Nothing is running right now')).toHaveCount(0)
+  })
+
   test('chat run row flips from running to exit code failure without reload', async ({ page }) => {
     let serveRunning = true
 
