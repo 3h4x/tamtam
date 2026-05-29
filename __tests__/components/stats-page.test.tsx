@@ -227,6 +227,11 @@ describe('StatsPage', () => {
       expect(container.textContent).toContain('zeta')
     })
 
+    const visibleText = (container.textContent ?? '').replace(/\s+/g, ' ')
+    expect(visibleText).toContain(
+      'Pricing assumes Sonnet rates: input $3.00/M · output $15.00/M · cache write $3.75/M · cache read $0.30/M',
+    )
+
     const quotaWidget = container.querySelector('[data-testid="quota-widget"]')
     expect(quotaWidget?.getAttribute('data-providers')).toBe('codex')
     expect(quotaWidget?.getAttribute('data-warn-at')).toBe('70')
