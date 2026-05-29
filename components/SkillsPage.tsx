@@ -498,9 +498,11 @@ export function SkillsPage() {
           <span className="text-xs text-text-tertiary tabular-nums">{visibleLibraryItems.length}</span>
         </div>
         {libraryGroups.length === 0 ? (
-          <div className="text-text-secondary text-sm p-6 bg-bg-secondary rounded-lg border border-border text-center">
-            <p>No library skills match this search.</p>
-          </div>
+          <EmptyState
+            bordered
+            paddingY="xs"
+            title="No library skills match this search."
+          />
         ) : (
           <div className="flex flex-col gap-4">
             {libraryGroups.map(group => {
