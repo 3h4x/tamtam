@@ -443,6 +443,41 @@ test.describe('Auto-polling live update: running → cancelled', () => {
 // disappears on the next poll cycle without a page reload.
 
 test.describe('Auto-polling live update: pending release banner', () => {
+  test('history tab shows the queued release banner when pendingReleaseProjects gains the project', async ({
+    page,
+  }) => {
+    let queued = false;
+
+    await stubCommonRoutes(page, PROJECT);
+
+    await page.route(
+      (url) =>
+        url.pathname === '/api/jobs' && url.searchParams.get('project') === PROJECT,
+      (route: Route) => {
+        route.fulfill({
+          json: {
+            jobs: [],
+            pendingReleaseProjects: queued ? [PROJECT] : [],
+          },
+        });
+      },
+    );
+
+    await page.goto(`/project/${PROJECT}/history`);
+
+    await expect(
+      page.getByText(/Release queued — will fire automatically/i),
+    ).toHaveCount(0, { timeout: 8_000 });
+
+    queued = true;
+
+    const banner = page.getByRole('link', {
+      name: /Release queued — will fire automatically/i,
+    });
+    await expect(banner).toBeVisible({ timeout: 12_000 });
+    await expect(banner).toHaveAttribute('href', `/pipeline?project=${PROJECT}`);
+  });
+
   test('history tab clears the queued release banner when pendingReleaseProjects no longer includes the project', async ({
     page,
   }) => {
