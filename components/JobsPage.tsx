@@ -97,7 +97,8 @@ export function JobsPage() {
     fetchProjects()
       .then((data) => {
         if (!active) return
-        setProjects(data.tasks.map((task) => task.id).sort((a, b) => a.localeCompare(b)))
+        const names = [...new Set(data.tasks.map((task) => task.project))]
+        setProjects(names.sort((a, b) => a.localeCompare(b)))
       })
       .catch(() => undefined)
     return () => { active = false }

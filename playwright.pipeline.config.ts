@@ -31,6 +31,11 @@ export default defineConfig({
       // webServer prepare step and dropped by globalTeardown. Override via
       // E2E_DATABASE_URL when your local Postgres lives elsewhere.
       DATABASE_URL: process.env.E2E_DATABASE_URL ?? 'postgres://tamtam:tamtam@localhost:5432/tamtam_e2e_pipeline',
+      // Keep the local workflow runtime isolated from the repo's normal
+      // persisted runs so boot recovery and cron seeding do not resurrect
+      // unrelated work into the port 1338 harness.
+      WORKFLOW_TARGET_WORLD: 'local',
+      WORKFLOW_LOCAL_DATA_DIR: `${E2E_BASE}/workflow-data`,
       // Run the probe sweep every 500 ms so PM2 job completion is picked up quickly.
       TAMTAM_PROBE_INTERVAL_MS: '500',
       TAMTAM_PR_WAIT_POLL_MS: '250',

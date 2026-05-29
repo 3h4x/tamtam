@@ -162,8 +162,8 @@ test.describe('Runs page non-release live polling', () => {
     await expect(page.getByText('No runs yet')).toHaveCount(0)
   })
 
-  test('active running filter fills from its empty state when a new chat run starts', async ({ page }) => {
-    let serveRunning = false
+  test('active running filter repopulates when a new chat run starts after the filter has gone empty', async ({ page }) => {
+    let serveRunning = true
 
     await stubRunsShellRoutes(page)
     await page.route('**/api/jobs?limit=200', (route: Route) => {
@@ -210,14 +210,21 @@ test.describe('Runs page non-release live polling', () => {
 
     await page.goto('/runs')
 
+    const row = runRow(page, RUN_PROJECT)
+    await expect(row).toBeVisible({ timeout: 12_000 })
+    await expect(row.getByLabel('running')).toBeVisible({ timeout: 12_000 })
+
     await filterChip(page, 'running').click()
-    await expect(page.getByText('Nothing is running right now')).toBeVisible({ timeout: 8_000 })
-    await expect(page.getByText('There is no active run in all projects right now.')).toBeVisible()
+    await expect(row.getByText('Watch the running filter wake up')).toBeVisible({ timeout: 12_000 })
+
+    serveRunning = false
+
+    await expect(page.getByText('No runs yet')).toBeVisible({ timeout: 8_000 })
+    await expect(page.getByText('Runs appear here after terminal work')).toBeVisible()
     await expect(runRow(page, RUN_PROJECT)).toHaveCount(0)
 
     serveRunning = true
 
-    const row = runRow(page, RUN_PROJECT)
     await expect(row).toBeVisible({ timeout: 12_000 })
     await expect(row.getByLabel('running')).toBeVisible({ timeout: 12_000 })
     await expect(row.getByText('running', { exact: true })).toBeVisible({ timeout: 12_000 })
@@ -225,7 +232,7 @@ test.describe('Runs page non-release live polling', () => {
     await expect(
       row.getByText('Fresh live work appeared while the running filter was active'),
     ).toBeVisible({ timeout: 12_000 })
-    await expect(page.getByText('Nothing is running right now')).toHaveCount(0)
+    await expect(page.getByText('No runs yet')).toHaveCount(0)
     await expect(filterChip(page, 'running')).toHaveText(/running 1/i, {
       timeout: 12_000,
     })
@@ -690,7 +697,13 @@ test.describe('Runs page non-release live polling', () => {
 
     await page.goto(`/runs?project=${encodeURIComponent(RUN_PROJECT)}`)
 
-    const scopedRow = runRow(page, RUN_PROJECT)
+    await expect(
+      page.getByRole('combobox', { name: 'Filter runs by project' }),
+    ).toHaveValue(RUN_PROJECT)
+
+    const scopedRow = page.getByRole('button').filter({
+      hasText: 'Watch the scoped running filter',
+    }).first()
     await expect(scopedRow).toBeVisible({ timeout: 8_000 })
     await expect(scopedRow.getByLabel('running')).toBeVisible()
 

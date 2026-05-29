@@ -1,5 +1,7 @@
 #!/usr/bin/env node
 import { spawnSync } from 'child_process';
+import { mkdirSync, rmSync } from 'fs';
+import { join } from 'path';
 import { Client } from 'pg';
 
 const mode = process.argv[2];
@@ -25,6 +27,8 @@ const adminUrl = new URL(process.env.E2E_PG_ADMIN_URL || targetUrl);
 adminUrl.pathname = '/postgres';
 
 const admin = new Client({ connectionString: adminUrl.toString() });
+const e2eBase = '/tmp/tamtam-e2e-pipeline';
+const workflowDataDir = join(e2eBase, 'workflow-data');
 
 try {
   await admin.connect();
@@ -37,6 +41,8 @@ try {
 }
 
 if (mode === 'prepare') {
+  rmSync(workflowDataDir, { recursive: true, force: true });
+  mkdirSync(workflowDataDir, { recursive: true });
   const result = spawnSync('pnpm', ['db:migrate'], {
     stdio: 'inherit',
     env: { ...process.env, DATABASE_URL: targetUrl },

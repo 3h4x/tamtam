@@ -73,7 +73,7 @@ describe('JobsPage', () => {
       pendingReleaseProjects: [],
     })
     fetchProjectsMock.mockResolvedValue({
-      tasks: [{ id: 'acme/widgets' }],
+      tasks: [{ id: 'acme/widgets', project: 'acme/widgets' }],
       priorities: [],
       issueCounts: {},
     })
@@ -123,6 +123,32 @@ describe('JobsPage', () => {
     expect(runningButton.className).toContain('text-status-info')
     expect(runningButton.className).not.toContain('text-status-warning')
     expect(runningBadge.className).toContain('text-status-info')
+    unmount()
+  })
+
+  it('deduplicates project filter options from task rows', async () => {
+    fetchProjectsMock.mockResolvedValue({
+      tasks: [
+        { id: 'acme/widgets:agent-a', project: 'acme/widgets' },
+        { id: 'beta/app:agent-a', project: 'beta/app' },
+        { id: 'acme/widgets:agent-b', project: 'acme/widgets' },
+      ],
+      priorities: [],
+      issueCounts: {},
+    })
+
+    const { container, unmount } = renderJobsPage()
+
+    await vi.waitFor(() => {
+      const select = container.querySelector('select')
+      if (!(select instanceof HTMLSelectElement)) throw new Error('project filter not found')
+      expect(Array.from(select.options).map((option) => option.value)).toEqual([
+        '',
+        'acme/widgets',
+        'beta/app',
+      ])
+    }, WAIT_FOR_UI)
+
     unmount()
   })
 
