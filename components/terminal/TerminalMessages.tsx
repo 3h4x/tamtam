@@ -45,6 +45,14 @@ interface TerminalMessagesProps {
   elapsedMs: number
   idleSec: number
   spinnerFrame: number
+  /** Metadata for whatever is currently streaming — surfaced in the LIVE RUN block. */
+  runMeta: {
+    kind: string
+    provider: string | null
+    model: string | null
+    agentName: string | null
+    releaseId: string | null
+  } | null
   autoScroll: boolean
   allItems: SkillItem[]
   onScroll: () => void
@@ -267,6 +275,7 @@ export function TerminalMessages({
   elapsedMs,
   idleSec,
   spinnerFrame,
+  runMeta,
   autoScroll,
   allItems,
   onScroll,
@@ -487,11 +496,32 @@ export function TerminalMessages({
           const isIdle = idleSec >= 5
           const isVeryIdle = idleSec >= 10
           const idleLabel = isIdle ? ` · idle ${idleSec}s` : ''
+          // Compose a "what is running" descriptor from the job metadata.
+          // Order: agent name (most specific) → kind → "running". Provider/model
+          // shown as a separate dim chip group on the right so the headline
+          // stays scannable.
+          const runHeadline = runMeta?.agentName
+            ? runMeta.agentName
+            : runMeta?.kind
+              ? runMeta.kind
+              : ''
+          const runProvider = runMeta?.provider ?? null
+          const runModel = runMeta?.model ?? null
           return (
             <div className="mx-3 mt-1 rounded-r-md border-l-2 border-accent/30 bg-accent/[0.03] px-4 py-2">
-              <div className="mb-1 flex items-center justify-between gap-2">
-                <div className="flex items-center gap-2">
+              <div className="mb-1 flex items-center justify-between gap-2 flex-wrap">
+                <div className="flex items-center gap-2 flex-wrap">
                   <RoleBadge label="live run" tone={isIdle ? 'warning' : 'info'} />
+                  {runHeadline && (
+                    <span className="text-[11px] font-mono font-medium text-text-secondary" title={runMeta?.releaseId ? `release ${runMeta.releaseId}` : undefined}>
+                      {runHeadline}
+                    </span>
+                  )}
+                  {(runProvider || runModel) && (
+                    <span className="text-[10px] font-mono text-text-tertiary">
+                      {[runProvider, runModel].filter(Boolean).join(' · ')}
+                    </span>
+                  )}
                   <span className={`text-[10px] uppercase tracking-wider font-mono ${isIdle ? 'text-status-warning' : 'text-text-tertiary'}`}>
                     {isIdle ? 'waiting for output' : 'receiving output'}
                   </span>
