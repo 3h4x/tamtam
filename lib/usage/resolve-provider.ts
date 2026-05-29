@@ -224,7 +224,6 @@ export async function checkCliStartGate(
     // (e.g. one provider's quota snapshot momentarily missing) used to flip
     // the global pause and freeze every project until a human cleared it;
     // surface the 429 to the caller but leave the switch alone.
-    const { getSettings } = await import('@/lib/shared/config');
     if (getSettings().budget_block_runs_enabled) {
       await pauseJobsForQuotaExhaustion(ALL_PROVIDERS_BLOCKED_DETAIL);
     }
