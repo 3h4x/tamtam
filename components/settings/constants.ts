@@ -14,7 +14,7 @@ export type SettingsFieldKey =
   | 'permission_mode'
   | 'commit_style'
   | 'review_verdict_rules'
-  | 'review_fix_max_iterations'
+  | 'fix_max_iterations'
   | 'review_fix_backoff_seconds'
   | 'review_do_not_ship_action'
   | 'release_wall_clock_timeout_minutes'
@@ -286,9 +286,9 @@ export const FIELDS: Record<SettingsFieldKey, FieldDef> = {
     span: 2,
     collapsible: true,
   },
-  review_fix_max_iterations: {
-    label: 'Review Fix Loop Iterations',
-    help: 'How many review→fix verification rounds to attempt per release. ∞ (default) lets the loop run until LGTM or the release wall-clock timeout aborts it. A finite cap caps the loop, then files a follow-up issue with unresolved findings and ships the partial work.',
+  fix_max_iterations: {
+    label: 'Fix Loop Iterations',
+    help: 'Single global cap on per-release fix→step→fix retries (review, test, commit, and review-driven push). ∞ (default) lets every loop run until success — LGTM / green test / clean commit / successful push — or the release wall-clock timeout aborts. A finite cap caps every step at that value; review-side exhaustion files a follow-up issue with unresolved findings and ships the partial work; test/commit/push exhaustion aborts without filing. The push pre-push-hook rejection retry is a separate hardcoded cap (2) so a permanently failing hook can\'t loop forever when this is 0.',
     group: 'pipeline',
     subsection: 'review',
     span: 1,
@@ -555,7 +555,7 @@ export const DEFAULTS: Record<SettingsFieldKey, string> = {
 - NEEDS ATTENTION when you have at least one finding but nothing that risks data loss, security regressions, or breakage in production. Orphaned code, dead imports, missing imports that happen to compile, hardcoded strings that should use env vars, non-ideal UX state leaks, stylistic inconsistencies — all NEEDS ATTENTION.
 - DO NOT SHIP when there is a real risk of breakage, data loss, security regression, or a test that hides behavior.
 - If LGTM, just confirm the changes look good and add nothing else.`,
-  review_fix_max_iterations: '0',
+  fix_max_iterations: '0',
   review_fix_backoff_seconds: '0',
   review_do_not_ship_action: 'fix',
   release_wall_clock_timeout_minutes: '60',

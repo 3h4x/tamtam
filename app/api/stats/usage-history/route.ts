@@ -7,6 +7,7 @@ import { NextResponse } from 'next/server';
 import { db, schema } from '@/lib/db';
 import { and, gte, sql } from 'drizzle-orm';
 import { USAGE_SNAPSHOT_BUCKET_MS } from '@/lib/workflows/cron/usage-snapshot-task';
+import { deriveUtilizationPace } from '@/lib/usage/quota-pace';
 
 const DEFAULT_HOURS = 48;
 const MAX_HOURS = 24 * 14; // bound the response so a stray ?hours=99999 doesn't dump the table
@@ -51,6 +52,15 @@ interface ProviderSeries {
   currentTokensPerHour: number | null;
   expectedTokensPerHour: number | null;
   catchUpTokensPerHour: number | null;
+  /**
+   * Burn/steady pace derived from the persisted quota *utilization* series
+   * rather than TamTam's own token throughput. Populated for any provider with
+   * utilization history, so the quota card's pace trend renders even when no
+   * jobs are currently routed to that provider (token columns are null).
+   * Units are utilization percentage-points per hour.
+   */
+  currentUtilizationPpPerHour: number | null;
+  steadyUtilizationPpPerHour: number | null;
 }
 
 export async function GET(req: Request) {
@@ -120,6 +130,8 @@ export async function GET(req: Request) {
         currentTokensPerHour: null,
         expectedTokensPerHour: null,
         catchUpTokensPerHour: null,
+        currentUtilizationPpPerHour: null,
+        steadyUtilizationPpPerHour: null,
       };
       grouped.set(key, series);
     }
@@ -149,6 +161,19 @@ export async function GET(req: Request) {
     // have raw token caps from the provider, so we express expected/catch-up
     // as a ratio against the *observed* token throughput vs utilization.
     const windowHours = series.windowKey === '5h' ? 5 : 7 * 24;
+
+    // Utilization-based pace: derived from the persisted quota utilization
+    // time series, independent of token throughput, so it's available even
+    // when no jobs ran for this provider in the window. Drives the quota
+    // card's "falling Npp/h" trend symmetrically across providers.
+    const utilPace = deriveUtilizationPace(
+      series.buckets.map((b) => ({ bucketTs: b.bucketTs, utilizationPct: b.utilizationPct })),
+      windowHours * 60 * 60 * 1000,
+    );
+    if (utilPace) {
+      series.currentUtilizationPpPerHour = utilPace.currentPpPerHour;
+      series.steadyUtilizationPpPerHour = utilPace.steadyPpPerHour;
+    }
     {
       const allRates = series.buckets
         .map((b) => b.totalTokens)

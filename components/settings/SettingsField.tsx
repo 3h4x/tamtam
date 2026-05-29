@@ -122,7 +122,7 @@ export function SettingsField({
           <option value="">{pipelineModelDefaultLabel(fieldKey)}</option>
           {MODEL_TIERS.map((model) => <option key={model} value={model}>{MODEL_LABELS[model]}</option>)}
         </select>
-      ) : fieldKey === 'review_fix_max_iterations'
+      ) : fieldKey === 'fix_max_iterations'
           || fieldKey === 'orchestrator_boost_margin_pct'
           || fieldKey === 'orchestrator_max_boosts_per_hour' ? (
         <input
