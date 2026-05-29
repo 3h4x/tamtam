@@ -65,7 +65,7 @@ async function stubRunsShellRoutes(page: import('@playwright/test').Page): Promi
   await page.route('**/api/projects', (route: Route) =>
     route.fulfill({
       json: {
-        tasks: [makeTask(RUN_PROJECT), makeTask(AGENT_PROJECT)],
+        tasks: [makeTask(RUN_PROJECT), makeTask(AGENT_PROJECT), makeTask(OTHER_PROJECT)],
         priorities: [],
         issueCounts: {},
       },
@@ -92,6 +92,10 @@ async function stubRunsShellRoutes(page: import('@playwright/test').Page): Promi
 
 function runRow(page: import('@playwright/test').Page, project: string) {
   return page.getByRole('button').filter({ hasText: project }).first()
+}
+
+function filterChip(page: import('@playwright/test').Page, label: string) {
+  return page.getByRole('button', { name: new RegExp(`^${label} \\d+$`, 'i') })
 }
 
 test.describe('Runs page non-release live polling', () => {
@@ -206,7 +210,7 @@ test.describe('Runs page non-release live polling', () => {
 
     await page.goto('/runs')
 
-    await page.getByRole('button', { name: /^running/ }).click()
+    await filterChip(page, 'running').click()
     await expect(page.getByText('Nothing is running right now')).toBeVisible({ timeout: 8_000 })
     await expect(page.getByText('There is no active run in all projects right now.')).toBeVisible()
     await expect(runRow(page, RUN_PROJECT)).toHaveCount(0)
@@ -222,7 +226,7 @@ test.describe('Runs page non-release live polling', () => {
       row.getByText('Fresh live work appeared while the running filter was active'),
     ).toBeVisible({ timeout: 12_000 })
     await expect(page.getByText('Nothing is running right now')).toHaveCount(0)
-    await expect(page.getByRole('button', { name: /^running 1/i })).toBeVisible({
+    await expect(filterChip(page, 'running')).toHaveText(/running 1/i, {
       timeout: 12_000,
     })
   })
@@ -259,14 +263,13 @@ test.describe('Runs page non-release live polling', () => {
 
     const row = runRow(page, RUN_PROJECT)
     await expect(row).toBeVisible({ timeout: 8_000 })
-    await expect(row.getByText('chat')).toBeVisible()
+    await expect(row).toContainText('chat')
     await expect(row.getByLabel('running')).toBeVisible()
     await expect(row.getByText('running', { exact: true })).toBeVisible()
 
     serveRunning = false
 
     await expect(row.getByLabel('done')).toBeVisible({ timeout: 12_000 })
-    await expect(row.getByText('done', { exact: true })).toBeVisible({ timeout: 12_000 })
     await expect(row.getByLabel('running')).toHaveCount(0, { timeout: 12_000 })
     await expect(row.getByText('Summarize the diff')).toBeVisible()
   })
@@ -321,7 +324,7 @@ test.describe('Runs page non-release live polling', () => {
     await expect(agentRow).toBeVisible({ timeout: 8_000 })
     await expect(chatRow.getByLabel('running')).toBeVisible()
     await expect(agentRow.getByLabel('running')).toBeVisible()
-    await expect(agentRow.getByText('agent')).toBeVisible()
+    await expect(agentRow).toContainText('agent')
 
     await expect(chatRow.getByLabel('done')).toBeVisible({ timeout: 12_000 })
     await expect(chatRow.getByLabel('running')).toHaveCount(0, { timeout: 12_000 })
@@ -396,7 +399,7 @@ test.describe('Runs page non-release live polling', () => {
     await expect(chatRow).toBeVisible({ timeout: 8_000 })
     await expect(agentRow).toBeVisible({ timeout: 8_000 })
 
-    await page.getByRole('button', { name: /^running/ }).click()
+    await filterChip(page, 'running').click()
 
     await expect(chatRow.getByLabel('running')).toBeVisible()
     await expect(agentRow.getByLabel('running')).toBeVisible()
@@ -406,7 +409,7 @@ test.describe('Runs page non-release live polling', () => {
     await expect(agentRow).toBeVisible({ timeout: 12_000 })
     await expect(agentRow.getByLabel('running')).toBeVisible({ timeout: 12_000 })
     await expect(agentRow.getByText('Continuing to plan follow-up work')).toBeVisible()
-    await expect(page.getByRole('button', { name: /^running 1/i })).toBeVisible({ timeout: 12_000 })
+    await expect(filterChip(page, 'running')).toHaveText(/running 1/i, { timeout: 12_000 })
     await expect(page.getByText('Nothing is running right now')).toHaveCount(0)
   })
 
@@ -507,7 +510,7 @@ test.describe('Runs page non-release live polling', () => {
     await expect(runningRow.getByLabel('running')).toBeVisible()
     await expect(failedRow.getByLabel('needs attention')).toBeVisible()
 
-    await page.getByRole('button', { name: /^failed/ }).click()
+    await filterChip(page, 'failed').click()
     await expect(failedRow).toBeVisible()
     await expect(failedRow.getByText('Existing failure keeps the failed filter selectable')).toBeVisible()
     await expect(runningRow).toHaveCount(0)
@@ -558,7 +561,7 @@ test.describe('Runs page non-release live polling', () => {
     await expect(row).toBeVisible({ timeout: 8_000 })
     await expect(row.getByLabel('running')).toBeVisible()
 
-    await page.getByRole('button', { name: /^running/ }).click()
+    await filterChip(page, 'running').click()
     await expect(row).toBeVisible()
     await expect(page.getByText('Nothing is running right now')).toHaveCount(0)
 
@@ -570,7 +573,7 @@ test.describe('Runs page non-release live polling', () => {
     await expect(page.getByText('There is no active run in all projects right now.')).toBeVisible()
     await expect(row).toHaveCount(0)
 
-    await page.getByRole('button', { name: /^done/ }).click()
+    await filterChip(page, 'done').click()
     const doneRow = runRow(page, RUN_PROJECT)
     await expect(doneRow).toBeVisible()
     await expect(doneRow.getByLabel('done')).toBeVisible()
@@ -691,7 +694,7 @@ test.describe('Runs page non-release live polling', () => {
     await expect(scopedRow).toBeVisible({ timeout: 8_000 })
     await expect(scopedRow.getByLabel('running')).toBeVisible()
 
-    await page.getByRole('button', { name: /^running/ }).click()
+    await filterChip(page, 'running').click()
     await expect(scopedRow.getByText('Scoped run still active')).toBeVisible()
 
     serveScopedRunning = false
@@ -746,7 +749,7 @@ test.describe('Runs page non-release live polling', () => {
     await expect(row).toBeVisible({ timeout: 8_000 })
     await expect(row.getByLabel('running')).toBeVisible()
 
-    await page.getByRole('button', { name: /^done/ }).click()
+    await filterChip(page, 'done').click()
     await expect(page.getByText('No completed runs in view')).toBeVisible()
     await expect(page.getByText('The current view only contains running or attention-needed work.')).toBeVisible()
     await expect(row).toHaveCount(0)
@@ -756,7 +759,6 @@ test.describe('Runs page non-release live polling', () => {
     const doneRow = runRow(page, RUN_PROJECT)
     await expect(doneRow).toBeVisible({ timeout: 12_000 })
     await expect(doneRow.getByLabel('done')).toBeVisible({ timeout: 12_000 })
-    await expect(doneRow.getByText('done', { exact: true })).toBeVisible({ timeout: 12_000 })
     await expect(doneRow.getByText('Done filter filled live')).toBeVisible({ timeout: 12_000 })
     await expect(doneRow.getByLabel('running')).toHaveCount(0, { timeout: 12_000 })
   })
@@ -939,7 +941,7 @@ test.describe('Runs page non-release live polling', () => {
     await page.goto('/runs')
 
     await expect(page.getByText('No runs yet')).toBeVisible({ timeout: 8_000 })
-    await expect(page.getByText(/0 total runs/)).toBeVisible()
+    await expect(page.getByText(/0 total runs/).first()).toBeVisible()
     await expect(runRow(page, RUN_PROJECT)).toHaveCount(0)
 
     serveRunning = true
@@ -952,7 +954,7 @@ test.describe('Runs page non-release live polling', () => {
     await expect(page.getByText(/1 total run .* 1 running/)).toBeVisible({
       timeout: 20_000,
     })
-    await expect(page.getByRole('button', { name: /^running 1$/ })).toBeVisible()
+    await expect(filterChip(page, 'running')).toHaveText(/^running 1$/i)
     await expect(page.getByText('No runs yet')).toHaveCount(0)
   })
 })

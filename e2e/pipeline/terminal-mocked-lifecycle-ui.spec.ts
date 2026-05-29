@@ -77,6 +77,17 @@ function runningJob() {
   }
 }
 
+function finishedJob(exitCode: number, output: string, detail?: string) {
+  return {
+    ...runningJob(),
+    status: 'done',
+    exit_code: exitCode,
+    finished_at: now() - 1,
+    log: output,
+    ...(detail ? { detail } : {}),
+  }
+}
+
 function runningReleaseJob() {
   return {
     id: RELEASE_JOB_ID,
@@ -96,6 +107,17 @@ function runningReleaseJob() {
     provider: 'claude',
     work_summary: 'Review is running in the release pipeline.',
     release_id: RELEASE_JOB_ID,
+  }
+}
+
+function finishedReleaseJob(exitCode: number, output: string, detail?: string) {
+  return {
+    ...runningReleaseJob(),
+    status: 'done',
+    exit_code: exitCode,
+    finished_at: now() - 1,
+    log: output,
+    ...(detail ? { detail } : {}),
   }
 }
 
@@ -181,14 +203,19 @@ async function stubProjectShell(
 
 test.describe('Mocked terminal lifecycle UI', () => {
   test('terminal job deep link shows live run, then clears after streamed success', async ({ page }) => {
+    let serveRunningJob = true
     let finishStream!: () => void
     const streamDone = new Promise<void>((resolve) => {
       finishStream = resolve
     })
 
-    await stubProjectShell(page)
+    await stubProjectShell(page, () => (serveRunningJob ? [runningJob()] : []))
     await page.route(`**/api/jobs/${JOB_ID}`, (route: Route) =>
-      route.fulfill({ json: runningJob() }),
+      route.fulfill({
+        json: serveRunningJob
+          ? runningJob()
+          : finishedJob(0, 'Mocked review output reached the terminal.\n'),
+      }),
     )
     await page.route(`**/api/streaming/${JOB_ID}`, async (route: Route) => {
       await streamDone
@@ -221,6 +248,7 @@ test.describe('Mocked terminal lifecycle UI', () => {
     await expect(page.getByText('live run')).toBeVisible({ timeout: 8_000 })
     await expect(page.getByText(/receiving output|waiting for output/)).toBeVisible()
 
+    serveRunningJob = false
     finishStream()
 
     await expect(page.getByText('Mocked review output reached the terminal.')).toBeVisible({
@@ -232,14 +260,19 @@ test.describe('Mocked terminal lifecycle UI', () => {
   })
 
   test('terminal job deep link clears live state and shows stream failure details', async ({ page }) => {
+    let serveRunningJob = true
     let finishStream!: () => void
     const streamDone = new Promise<void>((resolve) => {
       finishStream = resolve
     })
 
-    await stubProjectShell(page)
+    await stubProjectShell(page, () => (serveRunningJob ? [runningJob()] : []))
     await page.route(`**/api/jobs/${JOB_ID}`, (route: Route) =>
-      route.fulfill({ json: runningJob() }),
+      route.fulfill({
+        json: serveRunningJob
+          ? runningJob()
+          : finishedJob(2, 'Mocked review output failed in the terminal.\n', 'Mock provider failed hard'),
+      }),
     )
     await page.route(`**/api/streaming/${JOB_ID}`, async (route: Route) => {
       await streamDone
@@ -273,6 +306,7 @@ test.describe('Mocked terminal lifecycle UI', () => {
     await expect(page.getByText('live run')).toBeVisible({ timeout: 8_000 })
     await expect(page.getByText(/receiving output|waiting for output/)).toBeVisible()
 
+    serveRunningJob = false
     finishStream()
 
     await expect(page.getByText('Mocked review output failed in the terminal.')).toBeVisible({
@@ -286,14 +320,19 @@ test.describe('Mocked terminal lifecycle UI', () => {
   })
 
   test('terminal job deep link clears live state after streamed cancellation', async ({ page }) => {
+    let serveRunningJob = true
     let finishStream!: () => void
     const streamDone = new Promise<void>((resolve) => {
       finishStream = resolve
     })
 
-    await stubProjectShell(page)
+    await stubProjectShell(page, () => (serveRunningJob ? [runningJob()] : []))
     await page.route(`**/api/jobs/${JOB_ID}`, (route: Route) =>
-      route.fulfill({ json: runningJob() }),
+      route.fulfill({
+        json: serveRunningJob
+          ? runningJob()
+          : finishedJob(-3, 'Mocked review output stopped before completion.\n'),
+      }),
     )
     await page.route(`**/api/streaming/${JOB_ID}`, async (route: Route) => {
       await streamDone
@@ -326,6 +365,7 @@ test.describe('Mocked terminal lifecycle UI', () => {
     await expect(page.getByText('live run')).toBeVisible({ timeout: 8_000 })
     await expect(page.getByText(/receiving output|waiting for output/)).toBeVisible()
 
+    serveRunningJob = false
     finishStream()
 
     await expect(page.getByText('Mocked review output stopped before completion.')).toBeVisible({
@@ -350,7 +390,11 @@ test.describe('Mocked terminal lifecycle UI', () => {
 
     await stubProjectShell(page, () => (serveRunningRelease ? [runningReleaseJob()] : []))
     await page.route(`**/api/jobs/${RELEASE_JOB_ID}`, (route: Route) =>
-      route.fulfill({ json: runningReleaseJob() }),
+      route.fulfill({
+        json: serveRunningRelease
+          ? runningReleaseJob()
+          : finishedReleaseJob(0, 'Release output reached the terminal after auto-attach.\n'),
+      }),
     )
     await page.route(`**/api/streaming/${RELEASE_JOB_ID}`, async (route: Route) => {
       await streamDone
@@ -389,6 +433,7 @@ test.describe('Mocked terminal lifecycle UI', () => {
     await expect(page.getByTitle('View unified release trace')).toBeVisible({ timeout: 8_000 })
     await expect(page.getByText(/receiving output|waiting for output/)).toBeVisible()
 
+    serveRunningRelease = false
     finishStream()
 
     await expect(
@@ -409,7 +454,11 @@ test.describe('Mocked terminal lifecycle UI', () => {
 
     await stubProjectShell(page, () => (serveRunningRelease ? [runningReleaseJob()] : []))
     await page.route(`**/api/jobs/${RELEASE_JOB_ID}`, (route: Route) =>
-      route.fulfill({ json: runningReleaseJob() }),
+      route.fulfill({
+        json: serveRunningRelease
+          ? runningReleaseJob()
+          : finishedReleaseJob(2, 'Release output failed after auto-attach.\n', 'Release failed during push after auto-attach'),
+      }),
     )
     await page.route(`**/api/streaming/${RELEASE_JOB_ID}`, async (route: Route) => {
       await streamDone
@@ -448,6 +497,7 @@ test.describe('Mocked terminal lifecycle UI', () => {
     await expect(page.getByText('live run')).toBeVisible({ timeout: 8_000 })
     await expect(page.getByText(/receiving output|waiting for output/)).toBeVisible()
 
+    serveRunningRelease = false
     finishStream()
 
     await expect(page.getByText('Release output failed after auto-attach.')).toBeVisible({
@@ -472,7 +522,11 @@ test.describe('Mocked terminal lifecycle UI', () => {
 
     await stubProjectShell(page, () => (serveRunningRelease ? [runningReleaseJob()] : []))
     await page.route(`**/api/jobs/${RELEASE_JOB_ID}`, (route: Route) =>
-      route.fulfill({ json: runningReleaseJob() }),
+      route.fulfill({
+        json: serveRunningRelease
+          ? runningReleaseJob()
+          : finishedReleaseJob(-3, 'Release output was cancelled after auto-attach.\n'),
+      }),
     )
     await page.route(`**/api/streaming/${RELEASE_JOB_ID}`, async (route: Route) => {
       await streamDone
@@ -510,6 +564,7 @@ test.describe('Mocked terminal lifecycle UI', () => {
     await expect(page.getByText('live run')).toBeVisible({ timeout: 8_000 })
     await expect(page.getByText(/receiving output|waiting for output/)).toBeVisible()
 
+    serveRunningRelease = false
     finishStream()
 
     await expect(page.getByText('Release output was cancelled after auto-attach.')).toBeVisible({
