@@ -64,6 +64,13 @@ function runningRunRows(page: import('@playwright/test').Page) {
   return page.getByRole('button').filter({ has: page.locator('[aria-label="running"]') });
 }
 
+function statusFilterButton(
+  page: import('@playwright/test').Page,
+  label: 'running' | 'done' | 'failed',
+) {
+  return page.getByRole('button', { name: new RegExp(`^${label} \\d+$`) }).first();
+}
+
 async function stubCommonRoutes(
   page: import('@playwright/test').Page,
   project: string,
@@ -173,9 +180,10 @@ test.describe('Auto-polling live update', () => {
     );
 
     await page.goto(`/project/${PROJECT}/history`);
+    const row = page.getByRole('button').filter({ hasText: 'Test run' }).first();
 
     // Phase 1: the initial fetch returns "running" — verify the badge is visible.
-    await expect(page.getByText('running').first()).toBeVisible({ timeout: 8_000 });
+    await expect(row.locator('[aria-label="running"]')).toBeVisible({ timeout: 8_000 });
 
     // Flip the mock so the next poll (≤5 s away) will return "done".
     serveRunning = false;
@@ -183,11 +191,8 @@ test.describe('Auto-polling live update', () => {
     // Phase 2: wait for the auto-poll to fire and the UI to update.
     // Allow 12 s: one full 5 s poll cycle + rendering time + safety buffer.
     // No page.reload() — the polling loop must pick up the change.
-    await expect(page.getByText('done').first()).toBeVisible({ timeout: 12_000 });
-
-    // No orphaned spinner: the status badge with exactly "running" text must be gone.
-    // Using { exact: true } to avoid matching the persistent "jobs running" header toggle.
-    await expect(page.getByText('running', { exact: true })).not.toBeVisible();
+    await expect(row.locator('[aria-label="done"]')).toBeVisible({ timeout: 12_000 });
+    await expect(row.locator('[aria-label="running"]')).toHaveCount(0, { timeout: 12_000 });
   });
 
   test('history running filter clears when its only running job completes without reload', async ({
@@ -226,7 +231,7 @@ test.describe('Auto-polling live update', () => {
       .first();
 
     await expect(row).toBeVisible({ timeout: 8_000 });
-    await page.getByRole('button', { name: /^running/ }).click();
+    await statusFilterButton(page, 'running').click();
     await expect(row).toBeVisible();
     await expect(page.getByText('Nothing is running right now')).toHaveCount(0);
 
@@ -240,7 +245,7 @@ test.describe('Auto-polling live update', () => {
     ).toBeVisible();
     await expect(row).toHaveCount(0);
 
-    await page.getByRole('button', { name: /^all/ }).click();
+    await page.getByRole('button', { name: /^all \d+$/ }).click();
     await expect(page.getByRole('button').filter({ hasText: 'test' }).first()).toBeVisible();
     await expect(page.getByText('done', { exact: true }).first()).toBeVisible();
   });
@@ -332,7 +337,7 @@ test.describe('Auto-polling live update', () => {
       timeout: 12_000,
     });
     await expect(ownerRow.getByLabel('running')).toHaveCount(0, { timeout: 12_000 });
-    await expect(ownerRow.getByText('done', { exact: true })).toBeVisible();
+    await expect(ownerRow.locator('[aria-label="done"]')).toBeVisible();
   });
 });
 
@@ -374,14 +379,59 @@ test.describe('Auto-polling live update: running → failed', () => {
     await page.goto(`/project/${PROJECT}/history`);
 
     // Phase 1: job is running — confirm badge is visible.
-    await expect(page.getByText('running').first()).toBeVisible({ timeout: 8_000 });
+    const row = page.getByRole('button').filter({ hasText: 'Test run' }).first();
+    await expect(row.locator('[aria-label="running"]')).toBeVisible({ timeout: 8_000 });
 
     // Flip mock so next poll returns the failed state.
     serveRunning = false;
 
     // Phase 2: polling picks up failure without a page reload.
-    await expect(page.getByText('exit 1').first()).toBeVisible({ timeout: 12_000 });
-    await expect(page.getByText('running', { exact: true })).not.toBeVisible();
+    await expect(row.getByText('exit 1', { exact: true })).toBeVisible({ timeout: 12_000 });
+    await expect(row.locator('[aria-label="running"]')).toHaveCount(0, { timeout: 12_000 });
+  });
+
+  test('history tab shows the failed job reason after a running job exits non-zero', async ({
+    page,
+  }) => {
+    let serveRunning = true;
+    const failureReason = 'Review failed because the release notes step timed out.';
+
+    await stubCommonRoutes(page, PROJECT);
+
+    await page.route(
+      (url) =>
+        url.pathname === '/api/jobs' && url.searchParams.get('project') === PROJECT,
+      (route: Route) => {
+        route.fulfill({
+          json: {
+            jobs: [
+              {
+                ...makeJob(
+                  'fail-poll-reason-job',
+                  PROJECT,
+                  serveRunning ? 'running' : 'done',
+                  serveRunning ? null : 1,
+                  'test',
+                ),
+                work_summary: serveRunning ? 'Running release checks…' : failureReason,
+              },
+            ],
+            pendingReleaseProjects: [],
+          },
+        });
+      },
+    );
+
+    await page.goto(`/project/${PROJECT}/history`);
+
+    const row = page.getByRole('button').filter({ hasText: 'Test run' }).first();
+    await expect(row.locator('[aria-label="running"]')).toBeVisible({ timeout: 8_000 });
+
+    serveRunning = false;
+
+    await expect(row.getByText('exit 1', { exact: true })).toBeVisible({ timeout: 12_000 });
+    await expect(row.getByText(failureReason)).toBeVisible({ timeout: 12_000 });
+    await expect(row.locator('[aria-label="running"]')).toHaveCount(0, { timeout: 12_000 });
   });
 });
 
@@ -424,15 +474,16 @@ test.describe('Auto-polling live update: running → cancelled', () => {
     await page.goto(`/project/${PROJECT}/history`);
 
     // Phase 1: running badge visible initially.
-    await expect(page.getByText('running').first()).toBeVisible({ timeout: 8_000 });
+    const row = page.getByRole('button').filter({ hasText: 'Test run' }).first();
+    await expect(row.locator('[aria-label="running"]')).toBeVisible({ timeout: 8_000 });
 
     // Flip mock so the next poll delivers the cancelled state.
     serveRunning = false;
 
     // Phase 2: "cancelled" badge appears (exit_code=-3 maps to label "cancelled");
     // no spinner remains.
-    await expect(page.getByText('cancelled').first()).toBeVisible({ timeout: 12_000 });
-    await expect(page.getByText('running', { exact: true })).not.toBeVisible();
+    await expect(row.getByText('cancelled', { exact: true })).toBeVisible({ timeout: 12_000 });
+    await expect(row.locator('[aria-label="running"]')).toHaveCount(0, { timeout: 12_000 });
   });
 });
 
@@ -559,20 +610,20 @@ test.describe('Concurrent jobs across projects', () => {
     await page.goto('/runs');
 
     // Both project names must be visible in the job list.
-    await expect(page.getByText(ALPHA).first()).toBeVisible({ timeout: 8_000 });
-    await expect(page.getByText(BETA).first()).toBeVisible({ timeout: 8_000 });
+    await expect(runRow(page, ALPHA)).toBeVisible({ timeout: 8_000 });
+    await expect(runRow(page, BETA)).toBeVisible({ timeout: 8_000 });
 
     // Count row-scoped running status icons, not filter/header text.
     await expect(runningRunRows(page)).toHaveCount(2, { timeout: 8_000 });
 
     // Clicking the "running" filter chip must keep both projects visible —
     // verifying that independent job state is preserved per project.
-    await page.getByRole('button', { name: /^running/ }).click();
-    await expect(page.getByText(ALPHA).first()).toBeVisible();
-    await expect(page.getByText(BETA).first()).toBeVisible();
+    await statusFilterButton(page, 'running').click();
+    await expect(runRow(page, ALPHA)).toBeVisible();
+    await expect(runRow(page, BETA)).toBeVisible();
 
     // The "done" filter chip must show 0 jobs — verified by the empty state message.
-    await page.getByRole('button', { name: /^done/ }).click();
+    await statusFilterButton(page, 'done').click();
     await expect(page.getByText('No completed runs in view')).toBeVisible();
   });
 
@@ -628,13 +679,9 @@ test.describe('Concurrent jobs across projects', () => {
     await expect(betaRow.locator('[aria-label="running"]')).toBeVisible({ timeout: 12_000 });
     await expect(runningRunRows(page)).toHaveCount(1, { timeout: 12_000 });
 
-    await page.getByRole('button', { name: /^running/ }).click();
-    await expect(page.getByText(BETA).first()).toBeVisible();
-    await expect(page.getByText(ALPHA).first()).not.toBeVisible();
-
-    await page.getByRole('button', { name: /^done/ }).click();
-    await expect(page.getByText(ALPHA).first()).toBeVisible();
-    await expect(page.getByText(BETA).first()).not.toBeVisible();
+    await statusFilterButton(page, 'running').click();
+    await expect(runRow(page, BETA)).toBeVisible();
+    await expect(runRow(page, ALPHA)).toHaveCount(0);
   });
 });
 
@@ -760,6 +807,64 @@ test.describe('Global runs page polling transitions', () => {
     await expect(runningRunRows(page)).toHaveCount(0, { timeout: 12_000 });
   });
 
+  test('/runs page shows the failure reason text after a running job fails without reload', async ({
+    page,
+  }) => {
+    const project = 'runs-poll-failed-reason';
+    let serveRunning = true;
+    const failureReason = 'Push failed because the remote hook rejected the branch.';
+
+    await page.route(
+      (url) => url.pathname === '/api/jobs' && !url.searchParams.has('project'),
+      (route: Route) =>
+        route.fulfill({
+          json: {
+            jobs: [
+              {
+                ...makeJob(
+                  'runs-poll-failed-reason-job',
+                  project,
+                  serveRunning ? 'running' : 'done',
+                  serveRunning ? null : 1,
+                  'push',
+                ),
+                work_summary: serveRunning ? 'Pushing branch to remote…' : failureReason,
+              },
+            ],
+            pendingReleaseProjects: [],
+          },
+        }),
+    );
+
+    await page.route('**/api/jobs/notifications', (route: Route) =>
+      route.fulfill({ json: { notifications: [] } }),
+    );
+    await page.route('**/api/settings', (route: Route) =>
+      route.fulfill({ json: { jobs_paused: false, github_owner: '' } }),
+    );
+    await page.route('**/api/projects', (route: Route) =>
+      route.fulfill({
+        json: {
+          tasks: [makeTask(project)],
+          priorities: [],
+          issueCounts: {},
+        },
+      }),
+    );
+
+    await page.goto('/runs');
+
+    const row = runRow(page, project);
+
+    await expect(row.locator('[aria-label="running"]')).toBeVisible({ timeout: 8_000 });
+
+    serveRunning = false;
+
+    await expect(row.getByText('exit 1', { exact: true })).toBeVisible({ timeout: 12_000 });
+    await expect(row.getByText(failureReason)).toBeVisible({ timeout: 12_000 });
+    await expect(row.locator('[aria-label="running"]')).toHaveCount(0, { timeout: 12_000 });
+  });
+
   test('/runs page reveals failed filter after a running job fails without reload', async ({
     page,
   }) => {
@@ -806,18 +911,18 @@ test.describe('Global runs page polling transitions', () => {
     const row = runRow(page, project);
 
     await expect(row).toBeVisible({ timeout: 8_000 });
-    await expect(page.getByRole('button', { name: /^running/ })).toBeVisible();
-    await expect(page.getByRole('button', { name: /^failed/ })).toHaveCount(0);
+    await expect(statusFilterButton(page, 'running')).toBeVisible();
+    await expect(statusFilterButton(page, 'failed')).toHaveCount(0);
 
     serveRunning = false;
 
-    const failedFilter = page.getByRole('button', { name: /^failed/ });
+    const failedFilter = statusFilterButton(page, 'failed');
     await expect(failedFilter).toBeVisible({ timeout: 12_000 });
     await expect(row.getByText('exit 1', { exact: true })).toBeVisible({ timeout: 12_000 });
 
     await failedFilter.click();
     await expect(row).toBeVisible();
-    await expect(page.getByRole('button', { name: /^running/ })).toHaveCount(0);
+    await expect(statusFilterButton(page, 'running')).toHaveCount(0);
     await expect(row.locator('[aria-label="needs attention"]')).toBeVisible();
   });
 

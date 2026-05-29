@@ -89,9 +89,13 @@ function renderChain(
               // Skip the release wrapper row even when nested deeper than the
               // top-level expansion site — its phases attach directly to its
               // owner so the workflow reads as one continuous chain.
-              ? flattenReleaseChildren(c.children ?? [], depth + 1).map(({ entry, depth: d }) => (
-                  <RunRow key={entry.key} entry={entry} onClick={() => navigate(entry)} depth={d} />
-                ))
+              ? (
+                  <Fragment key={c.key}>
+                    {flattenReleaseChildren(c.children ?? [], depth + 1).map(({ entry, depth: d }) => (
+                      <RunRow key={entry.key} entry={entry} onClick={() => navigate(entry)} depth={d} />
+                    ))}
+                  </Fragment>
+                )
               : renderChain(c, depth + 1, navigate, actionsFor)
           )
       }
@@ -896,9 +900,13 @@ export function ProjectRunsTab({ projectName, jobsPaused = false }: ProjectRunsT
                               <>
                                 {(e.chainedChildren ?? []).map((root) =>
                                   root.kind === 'release'
-                                    ? flattenReleaseChildren(root.children ?? [], 1).map(({ entry, depth: d }) => (
-                                        <RunRow key={entry.key} entry={entry} onClick={() => navigate(entry)} depth={d} />
-                                      ))
+                                    ? (
+                                        <Fragment key={root.key}>
+                                          {flattenReleaseChildren(root.children ?? [], 1).map(({ entry, depth: d }) => (
+                                            <RunRow key={entry.key} entry={entry} onClick={() => navigate(entry)} depth={d} />
+                                          ))}
+                                        </Fragment>
+                                      )
                                     : renderChain(root, 1, navigate, releaseActionsFor)
                                 )}
                                 {/* Per-turn cost breakdown for multi-turn chat/agent rows.

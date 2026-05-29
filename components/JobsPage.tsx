@@ -68,9 +68,13 @@ function renderChain(node: Entry, depth: number, navigate: (e: Entry) => void): 
               // Skip the release wrapper row when it appears as a chained
               // child of something else — fold its phases inline so the
               // workflow reads as one continuous chain.
-              ? flattenReleaseChildren(c.children ?? [], depth + 1).map(({ entry, depth: d }) => (
-                  <RunRow key={entry.key} entry={entry} onClick={() => navigate(entry)} depth={d} />
-                ))
+              ? (
+                  <Fragment key={c.key}>
+                    {flattenReleaseChildren(c.children ?? [], depth + 1).map(({ entry, depth: d }) => (
+                      <RunRow key={entry.key} entry={entry} onClick={() => navigate(entry)} depth={d} />
+                    ))}
+                  </Fragment>
+                )
               : renderChain(c, depth + 1, navigate)
           )
       }
@@ -419,9 +423,13 @@ export function JobsPage() {
                               ))
                             : e.chainedChildren?.map((c) =>
                                 c.kind === 'release'
-                                  ? flattenReleaseChildren(c.children ?? [], 1).map(({ entry, depth: d }) => (
-                                      <RunRow key={entry.key} entry={entry} onClick={() => navigate(entry)} depth={d} />
-                                    ))
+                                  ? (
+                                      <Fragment key={c.key}>
+                                        {flattenReleaseChildren(c.children ?? [], 1).map(({ entry, depth: d }) => (
+                                          <RunRow key={entry.key} entry={entry} onClick={() => navigate(entry)} depth={d} />
+                                        ))}
+                                      </Fragment>
+                                    )
                                   : renderChain(c, 1, navigate)
                               )
                           }
