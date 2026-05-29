@@ -146,10 +146,9 @@ describe('releaseReviewPhaseWorkflow', () => {
   });
 
   it('finalizes the release when start_failed and releaseJobId is set (prereq strand fix)', async () => {
-    // Regression for #171: a failed review prereq returned ok:false without
-    // any in-flight child job, leaving the release running until the wall-
-    // clock timeout 90 min later. The phase must drive the release to a
-    // terminal state immediately.
+    // A failed review prereq returns ok:false without any in-flight child job,
+    // leaving the release running until the wall-clock timeout. The phase must
+    // drive the release to a terminal state immediately.
     startProjectReviewMock.mockResolvedValue({
       ok: false,
       status: 500,
