@@ -2,6 +2,7 @@
 
 import { useState } from 'react'
 import { Button } from '@/components/ui/Button'
+import { Pill } from '@/components/ui/Pill'
 import { MODEL_TIERS, MODEL_LABELS, normalizeModelInput } from '@/lib/agents/model-aliases'
 
 export interface AgentTemplateRecord {
@@ -174,8 +175,8 @@ export function AgentTemplatesTab({ value, onChange }: { value: string; onChange
             <div key={i} className="p-3 rounded-lg border border-border bg-bg-primary flex items-start justify-between gap-4">
               <div className="flex items-center gap-2 flex-wrap min-w-0">
                 <span className="font-medium text-sm text-text-primary">{t.name}</span>
-                <span className="text-xs px-2 py-0.5 rounded-full bg-bg-tertiary text-text-tertiary">{t.model}</span>
-                {t.schedule && <span className="text-xs px-2 py-0.5 rounded-full bg-bg-tertiary text-text-tertiary">every {t.schedule}</span>}
+                <Pill size="xs" className="rounded-full border-transparent bg-bg-tertiary px-2 text-text-tertiary">{t.model}</Pill>
+                {t.schedule && <Pill size="xs" className="rounded-full border-transparent bg-bg-tertiary px-2 text-text-tertiary">every {t.schedule}</Pill>}
                 {t.description && <span className="text-xs text-text-tertiary truncate hidden sm:block">{t.description}</span>}
               </div>
               <div className="flex items-center gap-2 shrink-0">
