@@ -621,10 +621,23 @@ export function ProjectRunsTab({ projectName, jobsPaused = false }: ProjectRunsT
         )
       })()
     ) : null
-    const buttons = [stopButton, continueButton, rerunButton, stepRetryButton, releaseButton].filter(Boolean)
+    const buttonItems: Array<{ key: string; node: React.ReactNode } | null> = [
+      stopButton ? { key: 'stop', node: stopButton } : null,
+      continueButton ? { key: 'continue', node: continueButton } : null,
+      rerunButton ? { key: 'rerun', node: rerunButton } : null,
+      stepRetryButton ? { key: 'retry-commit', node: stepRetryButton } : null,
+      releaseButton ? { key: 'release', node: releaseButton } : null,
+    ]
+    const buttons = buttonItems.filter((button): button is { key: string; node: React.ReactNode } => button !== null)
     if (buttons.length === 0) return null
-    if (buttons.length === 1) return buttons[0]
-    return <div className="flex flex-wrap items-center justify-end gap-1.5">{buttons}</div>
+    if (buttons.length === 1) return buttons[0].node
+    return (
+      <div className="flex flex-wrap items-center justify-end gap-1.5">
+        {buttons.map((button) => (
+          <Fragment key={button.key}>{button.node}</Fragment>
+        ))}
+      </div>
+    )
   }
 
   return (
