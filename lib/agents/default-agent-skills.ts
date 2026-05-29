@@ -437,43 +437,87 @@ If the prerequisite output is absent (custom agent without prereq), run this fin
 
 Skip generated files (\`*.d.ts\`, anything under \`node_modules\`, \`.next\`, \`dist\`, \`coverage\`, \`.tamtam/\` — the latter is TamTam's per-project state, not project source).
 
-## 2. Audit for one of these patterns
+## 2. Audit by family, not by checklist
 
-These are mechanical, low-risk patterns. **Pick one. Do not pile multiple changes into a single run.**
+You are looking for ONE concrete instance of ONE of the five families below. Each family is a rubric — given the file in front of you, you apply judgment within the rubric to find a real instance, not match against a fixed pattern list.
 
-### Flag-and-stop patterns (do NOT modify the file in-band)
+**The discipline:** before you edit anything, you must say out loud:
+- The family you matched (Family 1–5 by name).
+- The specific instance (one sentence: "unhandled \`Pool\` 'error' event on the pg pool exported at line N").
+- Why it's an improvement, not a stylistic preference (the cost of leaving it: silent crash, latency, leak, contradicts docs).
 
-- **Committed credential**: a literal that matches \`eyJ[A-Za-z0-9_-]+\\.[A-Za-z0-9_-]+\\.[A-Za-z0-9_-]+\` (JWT shape), or a string containing \`service_role\`, \`SUPABASE_SERVICE_ROLE\`, \`PRIVATE_KEY\`, \`password = '…'\` with a non-placeholder value. Deletion does NOT remove it from git history — rotation in the upstream provider is the only real fix. Print \`IMPROVE_CREDENTIAL_LEAK <path>:<line> <kind>\` and stop. Do not edit the file.
-- **DEAD self-tested orphan**: a module whose only consumers (via \`grep -rln "from .*<basename>"\`) are its own colocated \`*.test.ts\` / \`*.integration.test.ts\`. The grep shows "1 consumer" but it's the test, not production. Print \`IMPROVE_FILE_DEAD_ORPHAN <path>\` and stop — deletion of pre-existing files belongs in a deliberate cleanup pass, not an improvement run.
-- **DUPLICATE route/module**: two files implement the same behavior but only one is consumed by the frontend/business logic. Detect by greping the route path or default-export name across \`src/\` and \`app/\` — if the sibling file is consumed and the current file is not, print \`IMPROVE_FILE_DUPLICATE <path> superseded_by=<sibling-path>\` and stop.
-- **Stale path string** (post-refactor rot): \`dotenv.config({ path: 'frontend/…' })\`, \`cd frontend && …\`, \`from '../../frontend/…'\` where the named directory no longer exists. Verify via \`[ -d <prefix> ]\`. Print \`IMPROVE_STALE_PATH <path>:<line> "<offending-string>"\` and stop — the right fix depends on which post-refactor layout is canonical, so don't guess.
+If you can't name a family OR the instance is borderline ("could change but won't be wrong if I don't"), the file is clean. Emit \`IMPROVE_FILE_CLEAN <path>\` and stop. Cycling files until something matches is the expected behavior — the next run picks the next-oldest file.
 
-### Mechanical code fixes (apply inline)
+### Family 1 — Resource-lifecycle footguns
 
-- **Rotted refactor narrative** (per CLAUDE.md): drop "Previously…", "Was duplicated…", "The original code…", "we used to do X but now…". Keep the durable WHY in present tense. Also drop caller-reference rot ("Used by IssuesTab and RunRow", "Matches the convention from … route", "Extracted from app/api/…").
-- **TOCTOU**: \`existsSync(p) → readFileSync(p)\` (or readdirSync, openSync, etc.) where the next read is already inside a try/catch → drop the existsSync. ENOENT falls into the catch the same way.
-- **Multi-pass over the same array**: \`x.map().filter().find()\` chains that can be a single short-circuiting \`for\`-loop.
-- **Independent I/O** (git/gh/fs/fetch): two awaits in a row with no data dependency → \`Promise.all\`. The short-circuit between them is usually the rare case.
-- **Per-request allocations**: \`const SET = new Set([...])\` / \`const RE = /…/\` / lookup tables declared inside a handler → hoist to module scope.
-- **Dead try/catch**: wrapping APIs that don't actually throw (e.g. \`new Date(iso).toLocaleString()\` returns the string \`"Invalid Date"\`, never throws). Replace with a real \`Number.isFinite(Date.parse(iso))\` style check.
-- **O(n²) string concat in stream handlers**: \`out += chunk.toString()\` accumulating stdout → \`Buffer[]\` push + \`Buffer.concat(...).toString('utf8')\` at close.
-- **Hot-path \`toLowerCase()\` in filter callbacks**: \`x.filter(item => item.field.toLowerCase().includes(search.toLowerCase()))\` recomputes search lowercase per item → hoist once outside the filter.
-- **Redundant TS casts**: \`x.field as Foo\` where the source already declares the field as \`Foo\`.
-- **Dynamic \`await import()\`** with no circular-dependency reason → static import at the top.
+Long-lived resources (DB pools, file watchers, child processes, HTTP servers, sockets, intervals) need three things: an error listener so a transient failure doesn't crash the process, a timeout so a dead peer doesn't hang the caller, and a graceful shutdown so a restart doesn't leak. Each is a one-line fix in the singleton's init.
 
-### Bash bug patterns (apply inline; \`.sh\` targets)
+Archetypal instances (not exhaustive — judge by the rubric):
+- A \`pg.Pool\` constructed without an \`'error'\` listener → \`pool.on('error', (e) => console.error('[<name>] idle client error', e))\`. Without it, an idle-client disconnect crashes Node.
+- A long-lived network/DB pool without timeouts → add \`idleTimeoutMillis\`, \`connectionTimeoutMillis\`, and \`statement_timeout\` (or equivalent) so failures fail fast.
+- A module-scope \`fs.watch\` / \`chokidar\` / \`child_process.spawn\` / \`setInterval\` with no shutdown path → register \`process.on('SIGTERM', () => watcher.close())\` (or equivalent).
+- A \`fetch\` to an external host without an \`AbortController\` + timeout → wrap with a 5–30s abort.
 
-- **Postfix increment under \`set -e\`**: \`((var++))\` exits with status 1 when \`var\` was 0 (postfix returns the old value, and \`(( ))\` reports failure on a zero result). Combined with \`set -e\`, this kills the script silently on the first counter bump. Fix: \`var=$((var + 1))\` — arithmetic assignment always exits 0.
-- **\`local x=$(cmd)\` masks \`$?\`**: bash's \`local\` builtin always returns 0, so \`local x=$(cmd) ; if [ $? -ne 0 ]; then …\` checks \`local\`'s exit code, not \`cmd\`'s. Fix: split the declaration — \`local x ; if ! x=$(cmd); then …\`. Same issue with \`declare\` and \`readonly\`.
-- **\`set -e\` + piped subshell loops swallow counters**: \`while read line; do ((count++)); done <<< "$data"\` — the loop runs in a subshell when on the right side of a pipe; increments are lost. Either switch to \`< <(…)\` process substitution, or use a tmpfile.
+### Family 2 — Hot-path waste
 
-### Doc-vs-code drift (apply inline; \`.md\` targets)
+Work that runs per-request, per-iteration, or per-render that could run once. The fix is hoisting or batching — never abstraction.
 
-- **Stale package-manager command**: \`npm run <script>\`, \`npx <script>\` referenced in docs when the project's \`packageManager\` field pins pnpm (or vice versa). Fix: rewrite to the project's pinned manager. Verify by grepping \`packageManager\` in \`package.json\`.
-- **Stale CLI**: docs documenting \`brg <subcommand>\` style invocations when the codebase has migrated to \`pnpm <alias>\` (or any analogous CLI rename — check \`package.json\` scripts for the canonical form). Fix: rewrite to the documented alias.
-- **Doc references a file that doesn't exist**: links like \`[Foo](./foo.md)\` or inline mentions of \`src/lib/<name>.ts\` — verify each with \`ls\` before deleting. If the file moved, update the link; if it was deleted, remove the line.
-- **Doc claims a barrel export / config key / table column that doesn't exist**: e.g. \`docs/UI.md\` lists \`FarcasterIcon\` as a design-system export but it's not in \`design-system/index.ts\`. Verify the claim by grep; either add the missing export (one-line change in the barrel) or remove the doc claim.
-- **Version drift**: doc says \`pnpm v9.15.4+ required\` while \`package.json:engines.pnpm\` says \`>=11.0.0\`. Fix the doc to match the source-of-truth field, not the other way around.
+Archetypal instances:
+- \`const SET = new Set([...])\` / \`const RE = /…/\` / lookup tables built inside a handler → hoist to module scope.
+- \`x.filter(item => item.field.toLowerCase().includes(search.toLowerCase()))\` → compute \`search.toLowerCase()\` once outside the filter.
+- Multi-pass array chains (\`x.map().filter().find()\`) where a single short-circuiting \`for\` does the same → collapse.
+- Two independent \`await\`s in a row with no data dependency → \`Promise.all\`. The short-circuit between them is rarely the hot path.
+- \`out += chunk.toString()\` accumulating a stream → \`Buffer[]\` push + \`Buffer.concat(...).toString('utf8')\` at close.
+
+### Family 3 — Defensive code that doesn't defend
+
+Checks, casts, try/catches that look protective but add no protection (and sometimes mask real bugs). Removing them is a net improvement.
+
+Archetypal instances:
+- TOCTOU: \`existsSync(p)\` immediately followed by \`readFileSync(p)\` inside a \`try/catch\` → drop the \`existsSync\`; ENOENT falls into the catch the same way.
+- Dead try/catch wrapping APIs that don't throw (e.g. \`new Date(iso).toLocaleString()\` returns the string \`"Invalid Date"\`) → replace with a real \`Number.isFinite(Date.parse(iso))\` check.
+- Redundant TS casts: \`x.field as Foo\` where the source already declares \`field: Foo\`.
+- Dynamic \`await import()\` with no circular-dependency reason → static import at the top.
+- (Bash) Postfix increment under \`set -e\`: \`((var++))\` exits 1 when \`var\` was 0 → \`var=$((var + 1))\`.
+- (Bash) \`local x=$(cmd)\` masks \`$?\` — \`local\` always exits 0 → split into \`local x; if ! x=$(cmd); then …\`.
+- (Bash) Piped \`while read … do ((c++)); done\` runs in a subshell and loses \`c\` → \`< <(…)\` process substitution.
+
+### Family 4 — Drift between docs/comments and code
+
+Text right next to code (or in a sibling doc) that contradicts the code today. Removing or aligning it is a real improvement because future readers trust the comment over the code.
+
+Archetypal instances:
+- Rotted refactor narrative: "Previously…", "Was duplicated…", "Extracted from app/api/…", "Used by IssuesTab and RunRow". Keep durable WHY in present tense; drop history + caller references.
+- Doc references a file that doesn't exist (verify with \`ls\` first): update the link if the file moved; remove the line if it was deleted.
+- Doc claims a barrel export / config key / table column that doesn't exist (verify with \`grep\`): either add the one-line export or remove the claim.
+- Stale package-manager command (\`npm run X\` when \`packageManager\` pins pnpm, or vice versa) → rewrite to the pinned manager.
+- Stale CLI name (\`brg <subcommand>\` after a rename to \`pnpm <alias>\`) → rewrite to the current alias.
+- Version drift (\`pnpm v9.15.4+ required\` while \`engines.pnpm: '>=11.0.0'\`) → align the doc to the source-of-truth field.
+
+### Family 5 — Dead, duplicate, or leaking (flag-and-stop, do NOT edit)
+
+Deletion or rotation is a deliberate human decision, not an improve-run edit. You flag with a sentinel and stop.
+
+Archetypal instances:
+- **Committed credential**: literal matching \`eyJ[A-Za-z0-9_-]+\\.[A-Za-z0-9_-]+\\.[A-Za-z0-9_-]+\` (JWT shape), or a string containing \`service_role\`, \`SUPABASE_SERVICE_ROLE\`, \`PRIVATE_KEY\`, \`password = '…'\` with a non-placeholder value. Deletion does NOT remove it from git history — rotation upstream is the only real fix. Sentinel: \`IMPROVE_CREDENTIAL_LEAK <path>:<line> <kind>\`.
+- **Self-tested orphan**: module whose only consumers (via \`grep -rln "from .*<basename>"\`) are its own colocated \`*.test.ts\` / \`*.integration.test.ts\`. Sentinel: \`IMPROVE_FILE_DEAD_ORPHAN <path>\`.
+- **Duplicate route/module**: a sibling file implements the same behavior and IS consumed; this file isn't. Sentinel: \`IMPROVE_FILE_DUPLICATE <path> superseded_by=<sibling-path>\`.
+- **Stale path string**: \`dotenv.config({ path: 'frontend/…' })\`, \`cd frontend && …\`, \`from '../../frontend/…'\` where the named directory no longer exists (\`[ -d <prefix> ]\` returns false). The right fix depends on which post-refactor layout is canonical, so don't guess. Sentinel: \`IMPROVE_STALE_PATH <path>:<line> "<offending-string>"\`.
+
+### Not in scope — these are NOT improvements
+
+If you find yourself about to do any of the following, stop and re-read the rubric. None of these belong in an improve run, even when the diff would be small and the change "obviously nicer":
+
+- Naming changes (\`db()\` → \`getDb()\`, single-letter rename, casing conventions).
+- Formatting, quote style, semicolons, indentation, import ordering.
+- Adding comments to "document the fix" or "clarify intent" on code you didn't otherwise change.
+- Refactoring to extract a helper, factor out a hook, or introduce an abstraction for code with one call site.
+- Tightening types you didn't have to touch (e.g. \`any\` → \`unknown\` on an untouched signature).
+- "While I'm here" tidying — adjacent unrelated lint warnings, related but separate dead code, etc.
+- Touching test files unless the source change provably breaks an existing assertion.
+- Performance speculation without a measurement ("this might be faster" without a benchmark).
+
+If none of the five families produce a real instance, the file is clean. That is the correct, expected, productive outcome — not a failure.
 
 ## 3. Apply ONE fix
 - Edit the source file. Keep the diff minimal — one concern, one pattern.
@@ -491,11 +535,12 @@ Do NOT run the full test suite, do NOT run e2e tests, do NOT run \`pnpm rebuild\
 ## 5. Report
 Print a short summary:
 - **File touched** (path)
-- **Pattern category** (one of the §2 categories — exactly as named)
+- **Family** (Family 1 / 2 / 3 / 4 / 5 by name — e.g. "Family 1: resource-lifecycle")
+- **Instance** (one sentence: the specific thing you matched — "unhandled \`'error'\` event on pg \`Pool\` exported at line 9")
 - **Change** (one or two sentences, present tense — what the new code does, why)
 - **Verification** (type-check pass + test-file: N/N passing)
 
-If the file you picked has none of the §2 patterns, say so: print \`IMPROVE_FILE_CLEAN <path>\` and stop. Don't invent a fix to justify the run; cycling files until something matches is the expected behavior — the next run will pick the next-oldest file.
+If the file you picked has no real instance in any family, say so: print \`IMPROVE_FILE_CLEAN <path>\` and stop. Don't invent a fix to justify the run; cycling files until something matches is the expected behavior — the next run will pick the next-oldest file.
 
 ## 6. Append to the audit log
 
@@ -512,17 +557,17 @@ mkdir -p .tamtam/cache/audits
 \`\`\`
 # agent:improve — audit log
 
-| Date | File | Pattern | Change |
+| Date | File | Family | Change |
 |---|---|---|---|
 \`\`\`
 
 Then append one row per run, in this exact format:
 
 \`\`\`
-| YYYY-MM-DDTHH:MM | <relative path> | <pattern category from §2> | <one sentence, present tense> |
+| YYYY-MM-DDTHH:MM | <relative path> | <family from §2 — e.g. "F1: resource-lifecycle"> | <one sentence, present tense> |
 \`\`\`
 
-Use the same path the user would see (\`lib/foo/bar.ts\`, not absolute). For \`IMPROVE_FILE_CLEAN\` runs, still append a row with \`Pattern: clean\` and \`Change: no matching pattern, skipped\` so the next run can see this file was already audited recently. For the other sentinel cases (\`CREDENTIAL_LEAK\`, \`FILE_DEAD_ORPHAN\`, \`FILE_DUPLICATE\`, \`STALE_PATH\`), append with \`Pattern: <sentinel>\` and a one-sentence description — those are human-action items, not edits.
+Use the same path the user would see (\`lib/foo/bar.ts\`, not absolute). For \`IMPROVE_FILE_CLEAN\` runs, still append a row with \`Family: clean\` and \`Change: no real instance in any family, skipped\` so the next run can see this file was already audited recently. For the Family-5 sentinel cases (\`CREDENTIAL_LEAK\`, \`FILE_DEAD_ORPHAN\`, \`FILE_DUPLICATE\`, \`STALE_PATH\`), append with \`Family: F5: <sentinel>\` and a one-sentence description — those are human-action items, not edits.
 
 The audit log is project-scoped and commits with the repo so it survives a TamTam reinstall.
 
