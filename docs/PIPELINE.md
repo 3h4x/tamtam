@@ -1,8 +1,8 @@
 # Release Pipeline — How It Works
 
-The pipeline is a quality-gated sequence driven by the selected provider. The registry is unified per project: `test → review → fix → commit → push → dod → merge → soak`.
+The pipeline is a quality-gated sequence driven by the selected provider. The registry is unified per project: `test → review → fix → commit → push → mark-dod → pr-wait → soak`.
 
-`soak` is opt-in: when the project's `post_merge_watch_minutes` is `0` (the default), the chain still ends at `merge` and the release is finalised. When it is positive (any value enables soak — the integer is no longer a duration cap), TamTam polls the default branch's CI on the merge commit until it terminates:
+`soak` is opt-in: when the project's `post_merge_watch_minutes` is `0` (the default), the chain still ends after `pr-wait` merges the PR and the release is finalised. When it is positive (any value enables soak — the integer is no longer a duration cap), TamTam polls the default branch's CI on the merge commit until it terminates:
 
 - **All checks pass** → soak exits 0, release finalises, project unlocks normally.
 - **Any check fails** → soak pauses the project (`projects.paused = true` — admission gates reject new agent runs until a human resumes from Settings) and opens a revert PR. `auto_revert_enabled` controls whether the revert PR is auto-merged or left open for review.
@@ -91,8 +91,8 @@ There is no longer a per-project pipeline mode selector. Push behavior is decide
 
 | Working-copy branch | Push behavior | Downstream steps |
 |---------------------|---------------|------------------|
-| Default branch | Push directly to the current branch | `dod` runs only when the release is issue-linked; `merge` is skipped |
-| Any non-default branch | Push current branch and open or reuse a PR | `dod` runs for issue-linked releases and for generic PR-backed pushes when auto-merge is off; `merge` runs when auto-merge is enabled |
+| Default branch | Push directly to the current branch | `mark-dod` runs only when the release is issue-linked; `pr-wait` is skipped |
+| Any non-default branch | Push current branch and open or reuse a PR | `mark-dod` runs for issue-linked releases and for generic PR-backed pushes when auto-merge is off; `pr-wait` runs when auto-merge is enabled |
 
 `fix/issue-<n>-<slug>` branches are first-class release branches. They no longer auto-return to the default branch after push; the working copy returns to the default branch after PR merge.
 
