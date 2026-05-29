@@ -1,6 +1,7 @@
 import { NextResponse } from 'next/server';
 import { AGENT_CATALOG } from '@/lib/agents/catalog';
 import { findFileBackedSkill } from '@/lib/agents/skills-from-files';
+import { resolveFileBackedSkillPrerequisiteTemplate } from '@/lib/agents/file-skill-prerequisites';
 
 // Static catalog read — the array lives in code, so this endpoint is
 // cheap, idempotent, and safe to cache aggressively client-side. The
@@ -33,6 +34,7 @@ export async function GET() {
       outputs: file?.outputs ?? [],
       relatedAgents: file?.relatedAgents ?? [],
       version: file?.version ?? null,
+      prerequisiteCommand: resolveFileBackedSkillPrerequisiteTemplate(entry.skillIds),
     };
   });
   return NextResponse.json({ entries });

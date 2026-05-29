@@ -10,7 +10,7 @@ import { Spinner } from '@/components/ui/Spinner'
 import { useToast } from '@/components/Toast'
 import type { AgentTemplateRecord } from '@/components/SettingsPage'
 import { MODEL_TIERS, MODEL_LABELS, MODEL_DESCRIPTIONS, normalizeModelInput } from '@/lib/agents/model-aliases'
-import { resolveAgentPrerequisiteCommand } from '@/lib/agents/prerequisites'
+import { resolveAgentPrerequisiteCommand, substitutePrerequisiteProjectPlaceholder } from '@/lib/agents/prerequisites'
 import { CLI_PROVIDERS, type CliProvider } from '@/lib/usage/cli-providers'
 
 const MODELS = [...MODEL_TIERS]
@@ -55,7 +55,9 @@ export function AgentEditor({
   const initialSkillIds = agent?.skillIds || template?.skillIds || []
   const initialPrerequisite = agent
     ? (agent.prerequisiteCommand ?? '')
-    : (resolveAgentPrerequisiteCommand({
+    : (template?.prerequisiteCommand
+        ? substitutePrerequisiteProjectPlaceholder(template.prerequisiteCommand, project)
+        : resolveAgentPrerequisiteCommand({
         project,
         skillIds: initialSkillIds,
         prerequisiteCommand: null,
@@ -121,12 +123,14 @@ export function AgentEditor({
     if (agent) setEnabled(agent.enabled)
     setPrerequisiteCommand(agent
       ? (agent.prerequisiteCommand ?? '')
-      : (resolveAgentPrerequisiteCommand({
+      : (template?.prerequisiteCommand
+          ? substitutePrerequisiteProjectPlaceholder(template.prerequisiteCommand, project)
+          : resolveAgentPrerequisiteCommand({
           project,
           skillIds: src.skillIds || [],
           prerequisiteCommand: null,
         }) ?? ''))
-  }, [agent?.id, project, template?.name])
+  }, [agent?.id, project, template?.name, template?.prerequisiteCommand])
 
   useEffect(() => {
     if (!agent) nameRef.current?.focus()

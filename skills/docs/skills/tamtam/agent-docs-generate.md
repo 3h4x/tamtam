@@ -56,7 +56,7 @@ Score candidates by: appears in many files (high), no doc covers it (required), 
   3. **Key files** — table of `path:line` anchors to the load-bearing functions and types. Verify each anchor.
   4. **How it works** — the actual flow, in prose + (optional) one fenced `text` diagram. Use real type names from the code, not invented ones.
   5. **Invariants and edge cases** — what must hold, what breaks if it doesn't.
-  6. **Cross-references** — bullet list of `[[wiki-style links]]` to other docs (existing ones from your inventory). Cross-references are the wiki's compounding value, so put real links here, not "TODO".
+  6. **Cross-references** — bullet list of standard markdown links (`[TITLE](./TITLE.md)`) to other docs from your inventory. These must render and click through on GitHub — do NOT use `[[wiki-style]]` syntax (it's an Obsidian convention that renders as plain text on GitHub). Cross-references are the wiki's compounding value, so put real links here, not "TODO".
 
 - Forbidden:
   - Inventing types, function names, file paths, or commit dates. Every named symbol must exist in the working tree right now.

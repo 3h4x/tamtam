@@ -15,6 +15,7 @@ import {
   normalizeStoredPrerequisiteCommand,
   parsePrerequisiteCommandInput,
   resolveAgentPrerequisiteCommand,
+  substitutePrerequisiteProjectPlaceholder,
 } from '@/lib/agents/prerequisites'
 
 describe('prerequisite helpers', () => {
@@ -37,6 +38,19 @@ describe('prerequisite helpers', () => {
     expect(parsePrerequisiteCommandInput('  pnpm lint  ')).toBe('pnpm lint')
     expect(parsePrerequisiteCommandInput('   ')).toBe('')
     expect(parsePrerequisiteCommandInput(42)).toBe('')
+  })
+
+  it('substitutes the URL-encoded project placeholder in default prerequisites', () => {
+    expect(substitutePrerequisiteProjectPlaceholder('echo {{project}}', 'repo name/with space')).toBe(
+      'echo repo%20name%2Fwith%20space',
+    )
+
+    expect(resolveAgentPrerequisiteCommand({
+      project: 'repo name/with space',
+      skillIds: ['agent-custom'],
+      prerequisiteCommand: undefined,
+      defaultPrerequisiteCommand: 'curl "http://localhost:1337/api/projects/by-project/{{project}}/config"',
+    })).toBe('curl "http://localhost:1337/api/projects/by-project/repo%20name%2Fwith%20space/config"')
   })
 
   it('builds the pick-top issues endpoint with URL-encoded project names', () => {

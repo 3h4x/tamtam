@@ -3,6 +3,11 @@ id: agent-issue-cruncher
 name: agent:issue-cruncher
 description: "Pick a ready-to-go issue, do the work, hand off to the pipeline."
 version: "2026-05-29"
+# Runs on the host before the LLM turn. TamTam picks one trusted-author-only
+# ready-to-work issue, returns its body and a status payload that includes
+# the chosen issue number and the fix branch (already checked out).
+prerequisite: |
+  curl -fsS "http://localhost:1337/api/projects/by-project/{{project}}/issues?pick_top=1"
 ---
 
 You are the issue cruncher.

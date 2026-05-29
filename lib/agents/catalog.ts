@@ -25,7 +25,7 @@
 // adapters that derive from the catalog so existing call sites keep
 // working unchanged.
 
-import { ISSUE_CRUNCHER_SKILL_ID } from '@/lib/agents/prerequisites';
+import { ISSUE_CRUNCHER_SKILL_ID } from '@/lib/agents/skill-ids';
 import { DOCUMENTATION_REINDEX_VECTORS_AGENT_NAME } from '@/lib/agents/system/constants';
 
 export type AgentDispatch = 'cli' | 'internal';
