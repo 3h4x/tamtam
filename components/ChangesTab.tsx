@@ -5,6 +5,7 @@ import { useRouter } from 'next/navigation'
 import { fetchChanges, fetchChangeDiff, pullProject, pushProject, PullDivergedError, checkoutDefaultBranch } from '@/lib/client-api'
 import type { ChangeFile, ChangeStatus, ChangesResponse } from '@/lib/client-api'
 import { Button, buttonVariants } from '@/components/ui/Button'
+import { ErrorState } from '@/components/ErrorState'
 
 const STATUS_LABEL: Record<ChangeStatus, string> = {
   M: 'modified',
@@ -235,14 +236,7 @@ export function ChangesTab({ projectName, jobsPaused = false }: ChangesTabProps)
   }
 
   if (error) {
-    return (
-      <div className="p-4">
-        <div className="text-status-error text-sm mb-2">{error}</div>
-        <Button onClick={() => load('initial')}>
-          Retry
-        </Button>
-      </div>
-    )
+    return <ErrorState message={error} onRetry={() => load('initial')} />
   }
 
   if (!data || data.files.length === 0) {
