@@ -18,15 +18,17 @@ const PROJECT_ROOT = dirname(fileURLToPath(import.meta.url));
 // probe marks it exit -1. Pin the data dir to `data/workflow-data/`
 // (gitignored, never wiped by builds). Set before `withWorkflow()` so
 // the package's `if (!env)` default doesn't shadow this.
-// Always force the data dir (PM2 caches env across restarts, so a one-shot
-// `if (!set)` guard wouldn't displace a stale `.next/workflow-data` value
-// snapshotted on an earlier launch). WORKFLOW_TARGET_WORLD we only set
-// when missing so an explicit override (Vercel, CI) still wins.
+// Default the data dir while still preserving explicit overrides (pipeline
+// e2e, operators, CI). PM2 can cache env across restarts, so also displace
+// the old volatile workflow default when it appears in a saved snapshot.
 if (!process.env.WORKFLOW_TARGET_WORLD) {
   process.env.WORKFLOW_TARGET_WORLD = 'local';
 }
 if (process.env.WORKFLOW_TARGET_WORLD === 'local') {
-  process.env.WORKFLOW_LOCAL_DATA_DIR = 'data/workflow-data';
+  const localDataDir = process.env.WORKFLOW_LOCAL_DATA_DIR;
+  if (!localDataDir || localDataDir === '.next/workflow-data') {
+    process.env.WORKFLOW_LOCAL_DATA_DIR = 'data/workflow-data';
+  }
 }
 
 const nextConfig: NextConfig = {

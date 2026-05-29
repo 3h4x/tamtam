@@ -9,4 +9,10 @@ describe('next output file tracing config', () => {
     expect(source).toContain("'data/**'");
     expect(source).not.toMatch(/['"](?:\*\*\/)?skills\/docs\/\*\*['"]/);
   });
+
+  it('preserves explicit local workflow data dir overrides', () => {
+    expect(source).toContain("const localDataDir = process.env.WORKFLOW_LOCAL_DATA_DIR;");
+    expect(source).toContain("if (!localDataDir || localDataDir === '.next/workflow-data')");
+    expect(source).not.toContain("process.env.WORKFLOW_LOCAL_DATA_DIR = 'data/workflow-data';\n}");
+  });
 });
