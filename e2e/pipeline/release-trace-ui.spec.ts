@@ -243,6 +243,124 @@ test('release trace polls from running to success without page reload', async ({
   await expect(page.getByText('running…')).toHaveCount(0);
 });
 
+test('release trace polls from running to failed without page reload', async ({
+  page,
+}) => {
+  let serveRunning = true;
+
+  await stubShellRoutes(page);
+  await stubSettings(page);
+  await page.route(
+    `**/api/projects/by-project/${PROJECT}/release/${RELEASE_ID}`,
+    (route: Route) => {
+      const trace = serveRunning
+        ? makeTrace({
+            status: 'running',
+            exit_code: null,
+            finished_at: null,
+            steps: [
+              makeStep({
+                job_id: 'step-review-live-failure',
+                kind: 'review',
+                status: 'running',
+                exit_code: null,
+                started_at: now() - 20,
+                finished_at: null,
+              }),
+            ],
+          })
+        : makeTrace({
+            status: 'done',
+            exit_code: 1,
+            finished_at: now() - 1,
+            steps: [
+              makeStep({
+                job_id: 'step-review-live-failure',
+                kind: 'review',
+                status: 'done',
+                exit_code: 1,
+                started_at: now() - 20,
+                finished_at: now() - 1,
+                verdict: 'DO NOT SHIP',
+                log_excerpt: 'Verdict: DO NOT SHIP',
+              }),
+            ],
+          });
+      route.fulfill({ json: trace });
+    },
+  );
+
+  await page.goto(`/project/${PROJECT}/release/${RELEASE_ID}`);
+
+  await expect(page.getByText('running').first()).toBeVisible({ timeout: 8_000 });
+  await expect(page.getByText('running…').first()).toBeVisible();
+
+  serveRunning = false;
+
+  await expect(page.getByText('failed').first()).toBeVisible({ timeout: 12_000 });
+  await expect(page.getByText('DO NOT SHIP').first()).toBeVisible();
+  await expect(page.getByText('running', { exact: true })).not.toBeVisible();
+  await expect(page.getByText('running…')).toHaveCount(0);
+});
+
+test('release trace polls from running to cancelled without page reload', async ({
+  page,
+}) => {
+  let serveRunning = true;
+
+  await stubShellRoutes(page);
+  await stubSettings(page);
+  await page.route(
+    `**/api/projects/by-project/${PROJECT}/release/${RELEASE_ID}`,
+    (route: Route) => {
+      const trace = serveRunning
+        ? makeTrace({
+            status: 'running',
+            exit_code: null,
+            finished_at: null,
+            steps: [
+              makeStep({
+                job_id: 'step-review-live-cancel',
+                kind: 'review',
+                status: 'running',
+                exit_code: null,
+                started_at: now() - 20,
+                finished_at: null,
+              }),
+            ],
+          })
+        : makeTrace({
+            status: 'aborted',
+            exit_code: -3,
+            finished_at: now() - 1,
+            steps: [
+              makeStep({
+                job_id: 'step-review-live-cancel',
+                kind: 'review',
+                status: 'aborted',
+                exit_code: -3,
+                started_at: now() - 20,
+                finished_at: now() - 1,
+                log_excerpt: 'Cancelled before completion',
+              }),
+            ],
+          });
+      route.fulfill({ json: trace });
+    },
+  );
+
+  await page.goto(`/project/${PROJECT}/release/${RELEASE_ID}`);
+
+  await expect(page.getByText('running').first()).toBeVisible({ timeout: 8_000 });
+  await expect(page.getByText('running…').first()).toBeVisible();
+
+  serveRunning = false;
+
+  await expect(page.getByText('cancelled').first()).toBeVisible({ timeout: 12_000 });
+  await expect(page.getByText('running', { exact: true })).not.toBeVisible();
+  await expect(page.getByText('running…')).toHaveCount(0);
+});
+
 // ─── Test 3: cancelled badge ──────────────────────────────────────────────────
 
 test('release trace shows "cancelled" status badge for aborted releases', async ({
