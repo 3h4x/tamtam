@@ -57,7 +57,7 @@ interface SettingsMap {
   review_verdict_rules: string
   jobs_paused: string
   rebuild_in_progress: string
-  review_fix_max_iterations: string
+  fix_max_iterations: string
   review_fix_backoff_seconds: string
   review_do_not_ship_action: string
   release_wall_clock_timeout_minutes: string

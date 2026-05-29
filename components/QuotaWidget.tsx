@@ -145,18 +145,20 @@ function paceEtaText(
   win: QuotaWindow,
   pace: Pace | null,
   windowMs: number | undefined,
-  burnTokensPerHour: number | null,
-  steadyTokensPerHour: number | null,
+  burnRate: number | null,
+  steadyRate: number | null,
 ): string | null {
   if (!pace || !windowMs || win.msUntilReset == null) return null
-  if (burnTokensPerHour == null || steadyTokensPerHour == null) return null
-  if (!Number.isFinite(burnTokensPerHour) || !Number.isFinite(steadyTokensPerHour)) return null
-  if (steadyTokensPerHour <= 0) return null
+  if (burnRate == null || steadyRate == null) return null
+  if (!Number.isFinite(burnRate) || !Number.isFinite(steadyRate)) return null
+  if (steadyRate <= 0) return null
   const elapsedPct = pace.elapsedFraction * 100
   const utilPct = win.utilization
   const remainingHours = win.msUntilReset / (60 * 60 * 1000)
   if (remainingHours <= 0) return null
-  const ratio = burnTokensPerHour / steadyTokensPerHour
+  // Only the dimensionless current/steady ratio matters here, so burn and
+  // steady can be in any consistent unit (utilization pp/h, in practice).
+  const ratio = burnRate / steadyRate
   const elapsedRatePp = 100 / (windowMs / (60 * 60 * 1000))
   if (elapsedRatePp <= 0) return null
   const gapPp = elapsedPct - utilPct // positive = under pace; negative = ahead
@@ -188,16 +190,16 @@ function QuotaBar({
   warnAt,
   blockAt,
   windowMs,
-  burnTokensPerHour,
-  steadyTokensPerHour,
+  burnRate,
+  steadyRate,
 }: {
   label: string
   win: QuotaWindow
   warnAt: number
   blockAt: number
   windowMs?: number
-  burnTokensPerHour?: number | null
-  steadyTokensPerHour?: number | null
+  burnRate?: number | null
+  steadyRate?: number | null
 }) {
   const pct = Math.max(0, Math.min(100, win.utilization))
   const fillPct = pct === 0 ? 0 : Math.max(2, pct)
@@ -207,8 +209,8 @@ function QuotaBar({
     win,
     pace,
     windowMs,
-    burnTokensPerHour ?? null,
-    steadyTokensPerHour ?? null,
+    burnRate ?? null,
+    steadyRate ?? null,
   )
   return (
     <div className="space-y-1">
@@ -381,16 +383,19 @@ export function QuotaWidget({
           series?: Array<{
             provider: string
             windowKey: string
-            currentTokensPerHour: number | null
-            expectedTokensPerHour: number | null
+            currentUtilizationPpPerHour: number | null
+            steadyUtilizationPpPerHour: number | null
           }>
         }
         if (cancelled) return
+        // Pace is derived from the persisted quota *utilization* series (pp/h),
+        // not token throughput — so the trend renders for every provider with
+        // utilization history, including ones not currently running jobs here.
         const next = new Map<string, { burn: number | null; steady: number | null }>()
         for (const s of json.series ?? []) {
           next.set(`${s.provider}|${s.windowKey}`, {
-            burn: s.currentTokensPerHour,
-            steady: s.expectedTokensPerHour,
+            burn: s.currentUtilizationPpPerHour,
+            steady: s.steadyUtilizationPpPerHour,
           })
         }
         setRates(next)
@@ -491,8 +496,8 @@ export function QuotaWidget({
         warnAt={warnAt}
         blockAt={blockAt}
         windowMs={FIVE_HOUR_MS}
-        burnTokensPerHour={rates.get(`${snapshot.provider}|5h`)?.burn ?? null}
-        steadyTokensPerHour={rates.get(`${snapshot.provider}|5h`)?.steady ?? null}
+        burnRate={rates.get(`${snapshot.provider}|5h`)?.burn ?? null}
+        steadyRate={rates.get(`${snapshot.provider}|5h`)?.steady ?? null}
       />
       <QuotaBar
         label="7-day weekly"
@@ -500,8 +505,8 @@ export function QuotaWidget({
         warnAt={warnAt}
         blockAt={blockAt}
         windowMs={SEVEN_DAY_MS}
-        burnTokensPerHour={rates.get(`${snapshot.provider}|7d`)?.burn ?? null}
-        steadyTokensPerHour={rates.get(`${snapshot.provider}|7d`)?.steady ?? null}
+        burnRate={rates.get(`${snapshot.provider}|7d`)?.burn ?? null}
+        steadyRate={rates.get(`${snapshot.provider}|7d`)?.steady ?? null}
       />
       <ExtraCreditsRow extra={snapshot.extra} provider={snapshot.provider} />
       {!compact && options.primary && <DailyBurnRow sevenDay={snapshot.sevenDay} />}
