@@ -143,7 +143,7 @@ TEST
 REVIEW
   ├─ exit 0  → completion hook → extract verdict
   │   ├─ LGTM              → start PUSH
-  │   ├─ NEEDS ATTENTION   → start FIX → re-run REVIEW (default cap: 3 reviews per release; 0 = unlimited)
+  │   ├─ NEEDS ATTENTION   → start FIX → re-run REVIEW (`review_fix_max_iterations`; default 0 = unlimited)
   │   ├─ DO NOT SHIP       → policy from `review_do_not_ship_action`:
   │   │                       `fix` (default)  → start FIX → re-run REVIEW (cap-bounded)
   │   │                       `pass`           → file follow-up issue → start COMMIT
@@ -618,7 +618,7 @@ The recommended **`agent:review-tuner`** built-in agent reads the last ~20 relea
 | Metric | What it tells you | Action |
 |---|---|---|
 | LGTM rate < 50% | Reviews consistently block — rules may be too strict | Loosen `review_verdict_rules` in Settings → Behavior, or add a per-project `review_prompt_addendum` in the project Config tab |
-| Fix convergence low, hit-cap count high | Recovery loops cannot converge inside the configured review/test cap | Increase `TAMTAM_MAX_STEP_ITERATIONS` (legacy alias: `TAMTAM_MAX_FIX_ITERATIONS`) or adjust the review prompt |
+| Fix convergence low, hit-cap count high | Recovery loops cannot converge inside the configured review or test/commit/push cap | Increase `review_fix_max_iterations` for review loops or `TAMTAM_MAX_STEP_ITERATIONS` for test/commit/push loops, or adjust the review prompt |
 | `review` p95 > 5 min | Review jobs are slow | Check model choice; consider switching to Haiku for review |
 | Pipeline success < 80% | Releases failing frequently | Check step durations + History tab for the most recent failures |
 | MTTR high | Long time from start to push | High `fix` median duration or many fix iterations — check fix loop stats |
@@ -632,7 +632,8 @@ Returns `PipelineResponse` (see `app/api/stats/pipeline/route.ts` for full type)
 Recovery-loop attribution prefers explicit `releaseId` links on `fix` jobs. For historical rows or partially stamped data where `releaseId` is absent, the stats API falls back to the release's `[startedAt, finishedAt]` window so older dashboards do not silently lose recovery iterations.
 
 The `configSnapshot` section reflects the same shared recovery-budget helper used by runtime enforcement:
-- review/test cap: `TAMTAM_MAX_STEP_ITERATIONS` with legacy fallback to `TAMTAM_MAX_FIX_ITERATIONS`
+- review cap: `review_fix_max_iterations` (default 0 = unlimited)
+- test/commit/push cap: `TAMTAM_MAX_STEP_ITERATIONS` with legacy fallback to `TAMTAM_MAX_FIX_ITERATIONS`
 - fallback window: `TAMTAM_STEP_WINDOW_SECONDS` (legacy alias: `TAMTAM_FIX_WINDOW_SECONDS`)
 - push-fix cap: hardcoded `2` (counted as `fix` jobs whose parent is a `push` in the same release)
 
@@ -644,10 +645,10 @@ The `configSnapshot` section reflects the same shared recovery-budget helper use
 |---------|-------------|-----|
 | Pipeline stops after test with no next step | `auto_push_enabled` is off and no active Release | Use 🚀 Release button or enable `auto_push_enabled` |
 | Review exits 0 but no verdict found | Verdict buried early in a long log | Check last 2000 chars of log; rephrase review prompt to emit verdict at the end |
-| Fix loop runs 3 times then stops | Review/test verification cap reached within the configured fallback window | Fix manually, increase `TAMTAM_MAX_STEP_ITERATIONS` (legacy alias: `TAMTAM_MAX_FIX_ITERATIONS`), or wait for `TAMTAM_STEP_WINDOW_SECONDS` to reset |
+| Fix loop stops before convergence | Review or test/commit/push verification cap reached within the configured fallback window | Fix manually, increase `review_fix_max_iterations` for review loops or `TAMTAM_MAX_STEP_ITERATIONS` for test/commit/push loops, or wait for `TAMTAM_STEP_WINDOW_SECONDS` to reset |
 | Push fails, no `fix` job spawned to recover | Hook strings not matched by `isHookRejection` | Check the push log for hook output; add new hook string patterns to `lib/pipeline/push-rejection.ts` |
 | Release button grayed out / 400 | No changes and no unpushed commits | Make a change or verify `git status` |
-| `DO NOT SHIP` verdict loops forever | Fix cap reached | Inspect fix logs; may need manual code changes |
+| `DO NOT SHIP` verdict loops forever | Review verification cap or release timeout reached | Inspect fix logs; may need manual code changes |
 | DoD step skipped | No linked GitHub issue and no PR context from the push | DoD only runs when the release is issue-linked or the push produced a PR |
 | PR not created after push | The working copy is already on the default branch | Re-run from a non-default branch if you want PR flow |
 
