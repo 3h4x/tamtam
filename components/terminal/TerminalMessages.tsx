@@ -4,6 +4,7 @@ import { useState, type ReactNode } from 'react'
 import Markdown from 'react-markdown'
 import remarkGfm from 'remark-gfm'
 import { Button } from '@/components/ui/Button'
+import { Pill, type PillTone } from '@/components/ui/Pill'
 import { renderAnsi, renderAnsiLines, hasAnsi, stripAnsi } from '@/lib/terminal/ansi-render'
 import type { TermEntry, ToolEntry, SkillItem } from '@/lib/terminal/terminal-session-store'
 import { ToolBlock } from './ToolBlock'
@@ -78,37 +79,48 @@ const spinnerChars = ['⠋', '⠙', '⠹', '⠸', '⠼', '⠴', '⠦', '⠧', '�
 type LogTone = 'default' | 'info' | 'success' | 'warning' | 'error'
 type RawLineKind = 'ambient' | 'meta' | 'command' | 'divider'
 
-const LOG_TONE_STYLES: Record<LogTone, { badge: string; line: string; text: string; block: string }> = {
+const LOG_TONE_STYLES: Record<LogTone, { line: string; text: string; block: string }> = {
   default: {
-    badge: 'bg-bg-tertiary text-text-tertiary',
     line: 'border-border/30',
     text: 'text-text-secondary',
     block: 'bg-transparent',
   },
   info: {
-    badge: 'bg-accent/15 text-accent',
     line: 'border-accent/25',
     text: 'text-text-secondary',
     block: 'bg-accent/[0.04]',
   },
   success: {
-    badge: 'bg-status-success/15 text-status-success',
     line: 'border-status-success/25',
     text: 'text-text-secondary',
     block: 'bg-status-success/[0.05]',
   },
   warning: {
-    badge: 'bg-status-warning/15 text-status-warning',
     line: 'border-status-warning/25',
     text: 'text-text-secondary',
     block: 'bg-status-warning/[0.06]',
   },
   error: {
-    badge: 'bg-status-error/15 text-status-error',
     line: 'border-status-error/25',
     text: 'text-status-error',
     block: 'bg-status-error/[0.07]',
   },
+}
+
+const LOG_BADGE_TONE: Record<LogTone, PillTone> = {
+  default: 'neutral',
+  info: 'accent',
+  success: 'success',
+  warning: 'warning',
+  error: 'error',
+}
+
+const LOG_BADGE_CLASS: Record<LogTone, string> = {
+  default: 'bg-bg-tertiary text-text-tertiary',
+  info: 'bg-accent/15 text-accent',
+  success: 'bg-status-success/15 text-status-success',
+  warning: 'bg-status-warning/15 text-status-warning',
+  error: 'bg-status-error/15 text-status-error',
 }
 
 function classifyLogLine(text: string, fallback: LogTone = 'default'): LogTone {
@@ -141,11 +153,18 @@ function paneClass(tone: LogTone, variant: 'flat' | 'terminal' = 'flat'): string
 }
 
 function RoleBadge({ label, tone = 'default' }: { label: string; tone?: LogTone }) {
-  const style = LOG_TONE_STYLES[tone]
   return (
-    <span className={`inline-flex items-center rounded-full px-1.5 py-0.5 text-[10px] uppercase tracking-wider font-mono ${style.badge}`}>
+    <Pill tone={LOG_BADGE_TONE[tone]} size="xs" className={`rounded-full border-transparent px-1.5 text-[10px] uppercase tracking-wider font-mono ${LOG_BADGE_CLASS[tone]}`}>
       {label}
-    </span>
+    </Pill>
+  )
+}
+
+function LogBadge({ label, tone }: { label: string; tone: LogTone }) {
+  return (
+    <Pill tone={LOG_BADGE_TONE[tone]} size="xs" className={`mt-0.5 min-w-10 shrink-0 justify-center rounded-full border-transparent px-1.5 text-[10px] uppercase tracking-wider font-mono ${LOG_BADGE_CLASS[tone]}`}>
+      {label}
+    </Pill>
   )
 }
 
@@ -195,9 +214,7 @@ function LogBlock({
           if (kind === 'command') {
             return (
               <div key={`${index}:${line}`} className={`flex items-start gap-2 rounded-r-sm border-l-2 px-2 py-1 ${style.line} ${style.block}`}>
-                <span className={`mt-0.5 inline-flex min-w-10 justify-center rounded-full px-1.5 py-0.5 text-[10px] uppercase tracking-wider font-mono shrink-0 ${style.badge}`}>
-                  cmd
-                </span>
+                <LogBadge label="cmd" tone={tone} />
                 {renderLogLineContent(line, renderedLine, 'min-w-0 flex-1 whitespace-pre-wrap break-words text-xs text-text-primary')}
               </div>
             )
@@ -206,9 +223,7 @@ function LogBlock({
           if (kind === 'meta' || tone !== 'default') {
             return (
               <div key={`${index}:${line}`} className={`flex items-start gap-2 rounded-r-sm border-l px-2 py-1 ${style.line} ${style.block}`}>
-                <span className={`mt-0.5 inline-flex min-w-10 justify-center rounded-full px-1.5 py-0.5 text-[10px] uppercase tracking-wider font-mono shrink-0 ${style.badge}`}>
-                  {tone === 'success' ? 'ok' : tone === 'warning' ? 'warn' : tone === 'error' ? 'err' : kind === 'meta' ? 'meta' : tone}
-                </span>
+                <LogBadge label={tone === 'success' ? 'ok' : tone === 'warning' ? 'warn' : tone === 'error' ? 'err' : kind === 'meta' ? 'meta' : tone} tone={tone} />
                 {renderLogLineContent(line, renderedLine, `min-w-0 flex-1 whitespace-pre-wrap break-words text-xs ${style.text}`)}
               </div>
             )
@@ -240,9 +255,7 @@ function LogBlock({
         }
         return (
           <div key={`${index}:${line}`} className={`flex items-start gap-2 rounded-r-sm border-l-2 px-2 py-1 ${style.line} ${style.block}`}>
-            <span className={`mt-0.5 inline-flex min-w-10 justify-center rounded-full px-1.5 py-0.5 text-[10px] uppercase tracking-wider font-mono shrink-0 ${style.badge}`}>
-              {tone === 'success' ? 'ok' : tone === 'warning' ? 'warn' : tone === 'error' ? 'err' : tone}
-            </span>
+            <LogBadge label={tone === 'success' ? 'ok' : tone === 'warning' ? 'warn' : tone === 'error' ? 'err' : tone} tone={tone} />
             {renderLogLineContent(line, renderedLine, `min-w-0 flex-1 whitespace-pre-wrap break-words text-xs ${style.text}`)}
           </div>
         )
