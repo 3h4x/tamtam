@@ -148,6 +148,10 @@ function installSignalForwarding(getChild, signals = ['SIGTERM', 'SIGINT', 'SIGH
   };
 }
 
+function isBrokenPipeError(err) {
+  return err && (err.code === 'EPIPE' || err.code === 'ECONNRESET');
+}
+
 /**
  * Variant for shims that don't spawn a child process — e.g. lmstudio-shim
  * talks to a local HTTP server via fetch. Caller passes an abort function
@@ -206,4 +210,9 @@ function installFetchInactivityWatchdog(abort, opts) {
   };
 }
 
-module.exports = { installInactivityWatchdog, installFetchInactivityWatchdog, installSignalForwarding };
+module.exports = {
+  installInactivityWatchdog,
+  installFetchInactivityWatchdog,
+  installSignalForwarding,
+  isBrokenPipeError,
+};

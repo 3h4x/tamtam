@@ -12,14 +12,15 @@ import { resolveProjectPath } from '@/lib/shared/project-data';
 import { parseOptionalKnownModelInput } from '@/lib/agents/model-aliases';
 import { parseOptionalAgentScheduleInput } from '@/lib/scheduling/agent-schedule';
 import { isCliProvider } from '@/lib/usage/cli-providers';
-import { parsePrerequisiteCommandInput, resolveAgentPrerequisiteCommand } from '@/lib/agents/prerequisites';
+import { parsePrerequisiteCommandInput } from '@/lib/agents/prerequisites';
+import { resolveAgentPrerequisiteCommandWithFileSkills } from '@/lib/agents/file-skill-prerequisites';
 
 function withEffectivePrerequisite<T extends { project: string; skillIds: string[]; prerequisiteCommand?: string | null }>(
   agent: T,
 ): T {
   return {
     ...agent,
-    prerequisiteCommand: resolveAgentPrerequisiteCommand({
+    prerequisiteCommand: resolveAgentPrerequisiteCommandWithFileSkills({
       project: agent.project,
       skillIds: agent.skillIds,
       prerequisiteCommand: agent.prerequisiteCommand,

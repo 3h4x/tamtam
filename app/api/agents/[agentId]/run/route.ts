@@ -20,7 +20,7 @@ import { normalizeModelInput, parseOptionalKnownModelInput, type ModelTier } fro
 import { enqueueAgentRun, tryClaimAgentStartSlot, releaseAgentStartSlot, drainNextAgentRun } from '@/lib/agents/pending-agent-run';
 import { findBlockingRunningJob } from '@/lib/jobs/project-active-job';
 import { checkCliStartGate } from '@/lib/usage/resolve-provider';
-import { resolveAgentPrerequisiteCommand } from '@/lib/agents/prerequisites';
+import { resolveAgentPrerequisiteCommandWithFileSkills } from '@/lib/agents/file-skill-prerequisites';
 import { appendRedactedFileSync } from '@/lib/jobs/redacted-log-writer';
 import { runAgentIntakeWorkflow } from '@/lib/agents/intake-workflow';
 
@@ -465,7 +465,7 @@ async function runAgentStart(
   updateJob(job);
   mkdirSync(/*turbopackIgnore: true*/ logDir, { recursive: true });
 
-  const prereqCmd = resolveAgentPrerequisiteCommand({
+  const prereqCmd = resolveAgentPrerequisiteCommandWithFileSkills({
     project: agent.project,
     skillIds: allSkillIds,
     prerequisiteCommand: agent.prerequisiteCommand,

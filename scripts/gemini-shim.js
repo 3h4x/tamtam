@@ -8,7 +8,7 @@
  */
 const { spawn } = require('child_process');
 const readline = require('readline');
-const { installInactivityWatchdog, installSignalForwarding } = require('./shim-utils');
+const { installInactivityWatchdog, installSignalForwarding, isBrokenPipeError } = require('./shim-utils');
 
 // Mapping Claude permission modes to Gemini approval modes
 const APPROVAL_MAP = {
@@ -180,6 +180,11 @@ if (require.main === module) {
     process.stderr.write(chunk);
   });
 
+  gemini.stdin.on('error', (err) => {
+    if (isBrokenPipeError(err)) return;
+    process.stderr.write(`[gemini-shim] failed to write prompt to gemini stdin: ${err.message}\n`);
+    try { gemini.kill('SIGTERM'); } catch { /* child may already be gone */ }
+  });
   process.stdin.pipe(gemini.stdin);
 
   const rl = readline.createInterface({ input: gemini.stdout, terminal: false });

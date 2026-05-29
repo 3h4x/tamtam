@@ -27,6 +27,16 @@ describe('GET /api/agent-catalog', () => {
     expect(improve?.tier).toBe('featured');
   });
 
+  it('exposes file-backed prerequisite templates in the public catalog', async () => {
+    const res = await GET();
+    const data = await res.json();
+    const qa = data.entries.find((entry: { name: string }) => entry.name === 'qa');
+    const improve = data.entries.find((entry: { name: string }) => entry.name === 'improve');
+
+    expect(qa?.prerequisiteCommand).toContain('{{project}}/config');
+    expect(improve?.prerequisiteCommand).toContain('## Top 5 oldest candidate files');
+  });
+
   it('does not leak the server-only handlerKey field', async () => {
     const res = await GET();
     const data = await res.json();

@@ -9,6 +9,46 @@ agent:
   tier: featured
   fallbackEnabled: true
   aliases: []
+# Runs in the project cwd before the LLM turn starts; stdout is injected
+# into the prompt under "## Prerequisite Output". Uses `git ls-files`
+# (not `find`) so it lists tracked + non-ignored-untracked files; git
+# submodules show up as a single gitlink entry, keeping the candidate
+# set inside "our code" even when projects vendor large dependencies.
+# Portable across macOS (BSD stat) and Linux (GNU stat).
+prerequisite: |
+  echo '## Top 5 oldest candidate files'
+
+  # macOS uses BSD stat (`stat -f`); Linux GNU stat (`stat -c`). Detect once.
+  stat_mode=$(if stat --version >/dev/null 2>&1; then printf gnu; else printf bsd; fi)
+
+  # Candidate set = tracked files + non-ignored untracked files.
+  # Filter to source-like extensions, then exclude:
+  #   - generated artifacts (.d.ts, *.gen.*, *.generated.*)
+  #   - vendored / build dirs (.tamtam, node_modules, dist, build, out, coverage)
+  #   - test scaffolding (__snapshots__, __fixtures__, fixtures, *-results, *-report)
+  #   - historical-archive files (CHANGELOG, LICENSE)
+  #   - superpowers plan/spec docs (history, not active code)
+  { git ls-files 2>/dev/null; git ls-files --others --exclude-standard 2>/dev/null; } \
+    | grep -Ei '\.(ts|tsx|js|jsx|sol|py|rs|go|md|sh)$' \
+    | grep -v '\.d\.ts$' \
+    | grep -Ev '\.(gen|generated)\.[^/]+$' \
+    | grep -Ev '(^|/)(\.tamtam|node_modules)/' \
+    | grep -Ev '(^|/)(__snapshots__|__fixtures__|fixtures|e2e-results|test-results|playwright-report|coverage|dist|build|out)/' \
+    | grep -Ev '(^|/)(CHANGELOG|LICENSE|LICENCE)(\.md)?$' \
+    | grep -v '^docs/superpowers/plans/' \
+    | grep -v '^docs/superpowers/specs/' \
+    | while IFS= read -r f; do
+        if [ "$stat_mode" = gnu ]; then
+          d=$(stat -c '%Y' "$f" 2>/dev/null)
+        else
+          d=$(stat -f '%m' "$f" 2>/dev/null)
+        fi
+        [ -n "$d" ] && printf '%s %s\n' "$d" "$f"
+      done | sort -n | head -5
+
+  echo
+  echo '## Recent improve runs (tail of .tamtam/cache/audits/improve.md)'
+  tail -10 .tamtam/cache/audits/improve.md 2>/dev/null || echo '(no audit log yet)'
 references:
   - label: "Karpathy's coding guidelines (think first, simplicity, surgical, verifiable success)"
     url: https://github.com/multica-ai/andrej-karpathy-skills/blob/main/skills/karpathy-guidelines/SKILL.md

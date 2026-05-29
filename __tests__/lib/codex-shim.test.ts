@@ -392,6 +392,34 @@ console.log(JSON.stringify({ type: 'event_msg', payload: { type: 'token_count', 
     expect(final.result).toBe('[codex-shim] codex produced no assistant output');
   });
 
+  it('does not crash when a fast Codex child closes stdin before reading the prompt', async () => {
+    const { behaviorPath } = await makeFakeCodex(`
+const fs = require('fs');
+try { fs.closeSync(0); } catch {}
+fs.writeSync(1, JSON.stringify({ type: 'item.completed', item: { type: 'agent_message', text: 'done' } }) + '\\n');
+fs.writeSync(1, JSON.stringify({ type: 'turn.completed', usage: { input_tokens: 10, output_tokens: 1 } }) + '\\n');
+`);
+
+    const result = await runNode([
+      'scripts/codex-shim.js',
+      '--output-format',
+      'stream-json',
+      '--model',
+      'sonnet',
+    ], {
+      ...process.env,
+      CODEX_BIN: sharedFakeCodex,
+      FAKE_CODEX_SCRIPT: behaviorPath,
+    });
+
+    expect(result.code).toBe(0);
+    const lines = result.stdout.trim().split(/\r?\n/).map((line) => JSON.parse(line));
+    const final = lines.find((line) => line.type === 'result');
+
+    expect(final.is_error).toBe(false);
+    expect(final.result).toBe('');
+  });
+
   it('passes through plain JSON assistant output in text mode', async () => {
     const { behaviorPath } = await makeFakeCodex(`
 console.log(JSON.stringify({ results: [{ index: 1, text: 'criterion', verified: true }] }));

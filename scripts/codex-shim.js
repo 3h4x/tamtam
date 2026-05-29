@@ -10,7 +10,7 @@
  */
 
 const { spawn } = require('child_process');
-const { installInactivityWatchdog, installSignalForwarding } = require('./shim-utils');
+const { installInactivityWatchdog, installSignalForwarding, isBrokenPipeError } = require('./shim-utils');
 
 const args = process.argv.slice(2);
 
@@ -498,6 +498,11 @@ function launchCodex({ prompt, model, streamJson, attempt = 0, retryState = null
     let usageCaptured = false;
     let sessionId = state.sessionId || resumeSessionId;
 
+    child.stdin.on('error', (err) => {
+      if (isBrokenPipeError(err)) return;
+      if (!stderr.trim()) stderr = `[codex-shim] failed to write prompt to codex stdin: ${err.message}`;
+      try { child.kill('SIGTERM'); } catch { /* child may already be gone */ }
+    });
     child.stdin.end(prompt);
 
     const handleLine = (line) => {

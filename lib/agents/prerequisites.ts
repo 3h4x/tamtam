@@ -1,6 +1,15 @@
-export const ISSUE_CRUNCHER_SKILL_ID = 'agent-issue-cruncher';
-export const IMPROVE_SKILL_ID = 'agent-improve';
-export const QA_SKILL_ID = 'agent-qa';
+export {
+  IMPROVE_AUDIT_PATH,
+  IMPROVE_SKILL_ID,
+  ISSUE_CRUNCHER_SKILL_ID,
+  QA_SKILL_ID,
+} from '@/lib/agents/skill-ids';
+import {
+  IMPROVE_AUDIT_PATH,
+  IMPROVE_SKILL_ID,
+  ISSUE_CRUNCHER_SKILL_ID,
+  QA_SKILL_ID,
+} from '@/lib/agents/skill-ids';
 
 export function hasIssueCruncherSkill(skillIds: string[] | null | undefined): boolean {
   return Array.isArray(skillIds) && skillIds.includes(ISSUE_CRUNCHER_SKILL_ID);
@@ -33,12 +42,6 @@ export function buildIssueCruncherPrerequisiteCommand(projectName: string): stri
   return `curl -fsS "http://localhost:1337/api/projects/by-project/${encodeURIComponent(projectName)}/issues?pick_top=1"`;
 }
 
-// agent:qa prereq — resolves the QA target (qa_url / website) from the
-// TamTam config service on the host *before* the agent starts, so the agent
-// itself never has to reach back to localhost:1337. Browser-broker containers
-// can't see the host's loopback, so a curl from inside the agent fails with
-// "connection refused" — but the prereq runs on the host where the API is
-// reachable, and its stdout is injected into the prompt verbatim.
 export function buildQaPrerequisiteCommand(projectName: string): string {
   const url = `http://localhost:1337/api/projects/by-project/${encodeURIComponent(projectName)}/config`;
   return (
@@ -48,25 +51,7 @@ export function buildQaPrerequisiteCommand(projectName: string): string {
   );
 }
 
-// agent:improve prereq — runs in the project cwd. Outputs the top 5
-// least-recently-modified candidate source files and the tail of the
-// per-project audit log so the agent can skip files it already touched.
-//
-// Uses `git ls-files` (not `find`) so it lists tracked files plus untracked
-// files that are not ignored by the project's own git excludes. Git submodules
-// show up as a single gitlink entry, not their internal files, which keeps the
-// candidate set inside "our code" even when projects vendor large dependencies
-// (e.g. Solidity repos under `lib/`). Portable across macOS (BSD stat) and
-// Linux (GNU stat).
-//
-// Audit log lives under `.tamtam/cache/audits/<agent>.md`. The `cache/` subdir
-// is gitignored by default via `lib/agents/agent-memory.ts:ensureTamtamCacheGitignore`.
-export const IMPROVE_AUDIT_PATH = '.tamtam/cache/audits/improve.md';
-
 export function buildImprovePrerequisiteCommand(): string {
-  // Skip generated, snapshot/fixture, report, and historical-archive files so
-  // the candidate list points at code the agent can actually improve. See
-  // tests for the full exclusion list rationale.
   const candidates =
     `stat_mode=$(if stat --version >/dev/null 2>&1; then printf gnu; else printf bsd; fi); ` +
     `{ git ls-files 2>/dev/null; git ls-files --others --exclude-standard 2>/dev/null; }` +
@@ -89,17 +74,30 @@ export function buildImprovePrerequisiteCommand(): string {
   );
 }
 
+export function substitutePrerequisiteProjectPlaceholder(command: string, projectName: string): string {
+  return command.replaceAll('{{project}}', encodeURIComponent(projectName));
+}
+
 export function resolveAgentPrerequisiteCommand({
   project,
   skillIds,
   prerequisiteCommand,
+  defaultPrerequisiteCommand,
 }: {
   project: string;
   skillIds: string[] | null | undefined;
   prerequisiteCommand: string | null | undefined;
+  defaultPrerequisiteCommand?: string | null | undefined;
 }): string | null {
   const normalized = normalizeStoredPrerequisiteCommand(prerequisiteCommand);
   if (typeof normalized === 'string') return normalized || null;
+  const normalizedDefault = normalizeStoredPrerequisiteCommand(defaultPrerequisiteCommand);
+  if (typeof normalizedDefault === 'string') {
+    return normalizedDefault
+      ? substitutePrerequisiteProjectPlaceholder(normalizedDefault, project)
+      : null;
+  }
+  if (!Array.isArray(skillIds)) return null;
   if (hasIssueCruncherSkill(skillIds)) return buildIssueCruncherPrerequisiteCommand(project);
   if (hasQaSkill(skillIds)) return buildQaPrerequisiteCommand(project);
   if (hasImproveSkill(skillIds)) return buildImprovePrerequisiteCommand();

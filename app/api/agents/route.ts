@@ -11,7 +11,8 @@ import { listEnabledProjects } from '@/lib/shared/enabled-projects';
 import { parseOptionalKnownModelInput } from '@/lib/agents/model-aliases';
 import { parseOptionalAgentScheduleInput } from '@/lib/scheduling/agent-schedule';
 import { isCliProvider } from '@/lib/usage/cli-providers';
-import { parsePrerequisiteCommandInput, resolveAgentPrerequisiteCommand } from '@/lib/agents/prerequisites';
+import { parsePrerequisiteCommandInput } from '@/lib/agents/prerequisites';
+import { resolveAgentPrerequisiteCommandWithFileSkills } from '@/lib/agents/file-skill-prerequisites';
 import { isBuiltInRecommendedAgent } from '@/lib/agents/recommended-agents';
 import { loadAgentCronStates, getAllAgentLastAttempts } from '@/lib/scheduling/agent-cron-state';
 
@@ -30,7 +31,7 @@ function withEffectivePrerequisite<T extends { project: string; skillIds: string
 ): T {
   return {
     ...agent,
-    prerequisiteCommand: resolveAgentPrerequisiteCommand({
+    prerequisiteCommand: resolveAgentPrerequisiteCommandWithFileSkills({
       project: agent.project,
       skillIds: agent.skillIds,
       prerequisiteCommand: agent.prerequisiteCommand,
@@ -162,7 +163,7 @@ export async function POST(request: NextRequest) {
   const parsedPrerequisiteCommand = parsePrerequisiteCommandInput(body.prerequisiteCommand);
   const prerequisiteCommand = parsedPrerequisiteCommand !== undefined
     ? parsedPrerequisiteCommand
-    : resolveAgentPrerequisiteCommand({
+    : resolveAgentPrerequisiteCommandWithFileSkills({
         project: projectName,
         skillIds: skillIdsList,
         prerequisiteCommand: null,

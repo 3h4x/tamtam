@@ -1,6 +1,6 @@
 import { db, schema } from '@/lib/db';
 import { normalizeModelInput } from '@/lib/agents/model-aliases';
-import { resolveAgentPrerequisiteCommand } from '@/lib/agents/prerequisites';
+import { resolveAgentPrerequisiteCommandWithFileSkills } from '@/lib/agents/file-skill-prerequisites';
 
 export type AgentRow = typeof schema.agents.$inferSelect;
 export type NormalizedAgent = Omit<AgentRow, 'skillIds' | 'docPaths'> & { skillIds: string[]; docPaths: string[] };
@@ -12,7 +12,7 @@ export function normalizeAgent(row: AgentRow): NormalizedAgent {
     model: normalizeModelInput(row.model, 'normal'),
     skillIds,
     docPaths: JSON.parse(row.docPaths || '[]'),
-    prerequisiteCommand: resolveAgentPrerequisiteCommand({
+    prerequisiteCommand: resolveAgentPrerequisiteCommandWithFileSkills({
       project: row.project,
       skillIds,
       prerequisiteCommand: row.prerequisiteCommand,

@@ -488,6 +488,38 @@ describe('POST /api/agents/{agentId}/run', () => {
     rmSync(join(tempSkillsDir, 'docs'), { recursive: true, force: true });
   });
 
+  it('runs prerequisite commands declared in file-backed skill frontmatter', async () => {
+    const skillDir = join(tempSkillsDir, 'docs', 'skills', 'tamtam');
+    mkdirSync(skillDir, { recursive: true });
+    writeFileSync(join(skillDir, 'agent-qa.md'), `---
+id: agent-qa
+name: agent:qa
+description: QA agent
+prerequisite: |
+  echo frontmatter {{project}}
+---
+
+Use the QA agent.
+`);
+
+    await insertAgent({ skillIds: '["agent-qa"]' });
+    const req = new NextRequest('http://localhost/api/agents/agent-123/run', {
+      method: 'POST',
+      body: JSON.stringify({ prompt: 'verify the target' }),
+    });
+
+    await POST(req, { params: Promise.resolve({ agentId: 'agent-123' }) });
+
+    expect(mocks.shellRun).toHaveBeenCalledWith(
+      'bash',
+      ['-c', 'echo frontmatter proj1'],
+      expect.objectContaining({ cwd: '/path/to/proj' }),
+    );
+    const [, , fullPrompt] = mocks.startJob.mock.calls[0];
+    expect(fullPrompt).toContain('## Prerequisite Output');
+    expect(fullPrompt).toContain('Command: `echo frontmatter proj1`');
+  });
+
   it('returns 404 if agent not found', async () => {
     const req = new NextRequest('http://localhost/api/agents/nonexistent/run', {
       method: 'POST',

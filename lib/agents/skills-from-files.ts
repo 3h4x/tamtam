@@ -57,6 +57,11 @@ export interface FileBackedSkill {
    *  each row, and a bump invalidates prior "clean" audit entries so the
    *  agent re-evaluates files under the new rubric. */
   version?: string;
+  /** Shell command run before the LLM turn starts; stdout is injected
+   *  into the prompt. May contain `{{project}}` as a placeholder for
+   *  the URL-encoded project name (substituted server-side). When
+   *  omitted, the agent has no default prerequisite. */
+  prerequisite?: string;
   agentDefaults?: FileBackedAgentDefaults;
   references?: FileBackedReference[];
   requires?: string[];
@@ -201,12 +206,21 @@ export function loadTamTamFileSkills(): FileBackedSkill[] {
       else if (fm.version instanceof Date) version = fm.version.toISOString().slice(0, 10);
       else throw new Error(`[tamtam-file-skills] ${fname}: "version" must be a string, number, or YYYY-MM-DD date`);
     }
+    let prerequisite: string | undefined;
+    if (fm.prerequisite != null) {
+      if (typeof fm.prerequisite !== 'string') {
+        throw new Error(`[tamtam-file-skills] ${fname}: "prerequisite" must be a string (shell command)`);
+      }
+      const trimmed = fm.prerequisite.trim();
+      if (trimmed) prerequisite = trimmed;
+    }
     skills.push({
       id,
       name,
       description,
       content: body,
       version,
+      prerequisite,
       agentDefaults: optionalAgentDefaults(fm.agent, fname),
       references: optionalReferences(fm.references, fname),
       requires: optionalStringList(fm.requires, 'requires', fname),

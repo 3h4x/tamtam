@@ -1,9 +1,9 @@
 import { AGENT_CATALOG } from '@/lib/agents/catalog';
 import {
   hasIssueCruncherSkill,
-  buildIssueCruncherPrerequisiteCommand,
   normalizeStoredPrerequisiteCommand,
 } from '@/lib/agents/prerequisites';
+import { resolveAgentPrerequisiteCommandWithFileSkills } from '@/lib/agents/file-skill-prerequisites';
 import { loadTamTamFileSkills } from '@/lib/agents/skills-from-files';
 import { db, schema } from '@/lib/db';
 import { eq } from 'drizzle-orm';
@@ -39,7 +39,12 @@ export async function backfillIssueCruncherPrerequisites(): Promise<void> {
     }
     if (!hasIssueCruncherSkill(skillIds)) continue;
     const stored = normalizeStoredPrerequisiteCommand(agent.prerequisiteCommand);
-    const target = buildIssueCruncherPrerequisiteCommand(agent.project);
+    const target = resolveAgentPrerequisiteCommandWithFileSkills({
+      project: agent.project,
+      skillIds,
+      prerequisiteCommand: null,
+    });
+    if (!target) continue;
     // Backfill empty rows. Also overwrite legacy auto-generated URLs so the
     // hardened endpoint replaces the older slim-list path on the next run.
     // User-customised commands (anything not matching the legacy regex) are left alone.

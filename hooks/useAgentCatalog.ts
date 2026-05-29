@@ -19,6 +19,7 @@ export interface AgentCatalogClientEntry {
   outputs: ReadonlyArray<string>
   relatedAgents: ReadonlyArray<string>
   version: string | null
+  prerequisiteCommand: string | null
 }
 
 // The catalog is static (lives in `lib/agents/catalog.ts`), so one fetch
