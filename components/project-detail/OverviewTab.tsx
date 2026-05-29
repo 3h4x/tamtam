@@ -12,6 +12,7 @@ import {
 import { StatusStrip } from '@/components/project-detail/StatusStrip'
 import { AgentsStats } from '@/components/project-detail/AgentsStats'
 import { PipelineStatsPanel } from '@/components/project-detail/PipelineStatsPanel'
+import { Pill } from '@/components/ui/Pill'
 import { PromptInsightsPanel } from '@/components/project-detail/PromptInsightsPanel'
 import { Spinner } from '@/components/ui/Spinner'
 import { formatAgo } from '@/lib/shared/format'
@@ -116,9 +117,9 @@ export function OverviewTab({
                 const count = activeCounts[bucket]
                 if (count === 0) return null
                 return (
-                  <span key={bucket} className="rounded-full border border-border bg-bg-tertiary px-2 py-0.5">
+                  <Pill key={bucket} size="xs" className="rounded-full bg-bg-tertiary px-2 py-0.5 text-[11px] tabular-nums">
                     {activeWorkBadgeLabel(bucket)} {count}
-                  </span>
+                  </Pill>
                 )
               })}
             </div>
@@ -160,9 +161,9 @@ export function OverviewTab({
                       )}
                     </div>
                   </div>
-                  <span className="shrink-0 rounded-full border border-border bg-bg-secondary px-1.5 py-0.5 text-[10px] uppercase tracking-wider text-text-tertiary">
+                  <Pill size="xs" className="shrink-0 rounded-full bg-bg-secondary px-1.5 py-0.5 text-[10px] uppercase tracking-wider text-text-tertiary">
                     {activeWorkBadgeLabel(displayKind)}
-                  </span>
+                  </Pill>
                 </div>
               </button>
               )
