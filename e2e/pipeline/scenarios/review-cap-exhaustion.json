@@ -1,5 +1,5 @@
 {
-  "description": "Review cap exhaustion: review returns NEEDS ATTENTION with a Finding ID, fix runs, then the cap (review_fix_max_iterations=1) trips before review #2 starts. The exhaustion fallback files a follow-up issue and chains to commit + push.",
+  "description": "Review cap exhaustion: review returns NEEDS ATTENTION with a Finding ID, fix runs, then the cap (fix_max_iterations=1) trips before review #2 starts. The exhaustion fallback files a follow-up issue and chains to commit + push.",
   "steps": [
     {
       "label": "review-1",

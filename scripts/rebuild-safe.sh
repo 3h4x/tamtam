@@ -184,6 +184,18 @@ if ! pnpm build; then
   exit 2
 fi
 
+# Apply pending DB migrations BEFORE swapping in the new code. Skipping this
+# (the previous behavior) silently dropped operator-tuned settings any time a
+# migration renamed a key — the new server booted, read the missing key,
+# defaulted it, and only the operator running `pnpm db:migrate` by hand would
+# recover it. Treat migrate failures the same way as build failures: don't
+# restart, exit non-zero so the EXIT trap unpauses jobs against the old code.
+log "applying DB migrations..."
+if ! pnpm db:migrate; then
+  log "ERROR: db:migrate failed — NOT restarting; old code keeps running. Fix the migration and re-run."
+  exit 2
+fi
+
 log "restarting via pm2..."
 if ! bash "$SCRIPT_DIR/pm2-start.sh"; then
   log "ERROR: pm2 restart failed — leaving jobs PAUSED so half-restarted server doesn't pick up work"

@@ -17,10 +17,10 @@ before declaring the release dead. This is the contract:
 
 | Step that failed | Recovery step | Re-verification | Cap                                  |
 |------------------|---------------|-----------------|--------------------------------------|
-| `test` exit ≠ 0  | `fix` (sees test log) | re-run `test` | `review_fix_max_iterations` |
-| `review` not LGTM | `fix` (sees review findings) | re-run `review` | `review_fix_max_iterations` |
-| `commit` exit ≠ 0 | `fix` (sees commit log) | re-run `commit` | `review_fix_max_iterations` |
-| `push` exit ≠ 0  | `fix` (reads hook log; bails if pre-push tests failed, branch protection blocks the direct push, or the remote moved and the push step could not recover) | re-run `push` | `getPushFixAttemptCap()=2` for hook-rejection fix; `review_fix_max_iterations` for review-driven push recovery |
+| `test` exit ≠ 0  | `fix` (sees test log) | re-run `test` | `fix_max_iterations` |
+| `review` not LGTM | `fix` (sees review findings) | re-run `review` | `fix_max_iterations` |
+| `commit` exit ≠ 0 | `fix` (sees commit log) | re-run `commit` | `fix_max_iterations` |
+| `push` exit ≠ 0  | `fix` (reads hook log; bails if pre-push tests failed, branch protection blocks the direct push, or the remote moved and the push step could not recover) | re-run `push` | `getPushFixAttemptCap()=2` for hook-rejection fix; `fix_max_iterations` for review-driven push recovery |
 
 Rules that hold for every recovery loop:
 
@@ -40,7 +40,7 @@ Rules that hold for every recovery loop:
   originally failed (re-test after test-fail, re-review after
   needs-attention, re-commit after commit-fail, re-push after push-fail).
 - **One cap rules every step verification loop.** A single user-facing
-  setting — `review_fix_max_iterations` — governs the verification budget
+  setting — `fix_max_iterations` — governs the verification budget
   for review, test, commit, and the review-driven push leg. It defaults to
   `0`, meaning every loop runs until success (LGTM / green test / clean
   commit / successful push) or the release wall-clock timeout aborts.
@@ -146,7 +146,7 @@ TEST
 REVIEW
   ├─ exit 0  → completion hook → extract verdict
   │   ├─ LGTM              → start PUSH
-  │   ├─ NEEDS ATTENTION   → start FIX → re-run REVIEW (`review_fix_max_iterations`; default 0 = unlimited)
+  │   ├─ NEEDS ATTENTION   → start FIX → re-run REVIEW (`fix_max_iterations`; default 0 = unlimited)
   │   ├─ DO NOT SHIP       → policy from `review_do_not_ship_action`:
   │   │                       `fix` (default)  → start FIX → re-run REVIEW (cap-bounded)
   │   │                       `pass`           → file follow-up issue → start COMMIT
@@ -324,7 +324,7 @@ Called by `markDone()` after every job finishes. Hooks run in order:
 10. **Release finalization**: If a pipeline job ran but no chaining happened, write `# release finished — exit {code}` to meta-log and mark the release job done.
 11. **Fix-CI auto-retry**: If `fix-ci` exits ≠0 within ~5 s of starting (boot crash): schedule retry after 500–3000 ms backoff. Capped at 2 retries within a 120-s window. These are hardcoded constants — not user-tunable.
 12. **Fix-CI release chaining**: If `fix-ci` exits 0, TamTam immediately tries `startRelease(project, { queueIfBlocked: true, sourceJobId: fixCiJob.id })` so the uncommitted CI fix goes through the normal quality gate (`test → review → commit → push`). This includes `fix-ci` jobs auto-dispatched by `pr-wait` after failed PR checks. If release start is temporarily blocked by the same conditions as release-after-run (active pipeline lock, pause gate, budget block, retryable pre-start failure), the hook preserves release intent by setting the pending-release flag for the project; that queued retry is project-scoped and does not retain `sourceJobId`.
-13. **Review-exhaustion fallback**: If a **NEEDS ATTENTION** review→fix loop hits `review_fix_max_iterations`, repeats the same findings (`reviewIsStuck`), or the fixer claims a Finding ID was fixed but the reviewer still flags it (`fixContradictsReview`): file a follow-up issue titled `chore(review): <headline-finding-id> (+N more)` using the highest-severity structured `Finding ID` as the headline (or `chore(review): <headline-finding-id>` when exactly one finding exists, or `chore(review): unresolved review` when no structured findings were extracted). The issue body contains the structured unresolved findings or a quoted prose excerpt. The issue title/body intentionally omit release handles, job IDs, exhaustion reasons, shim launch lines, stream-json telemetry, and permission-mode flags. TamTam tries to apply the canonical labels `tamtam` `review-followup` `priority-medium`, skips any of those labels that do not exist in the repo, then chains to commit + push so the partial work ships. Falls back to the legacy abort if `gh issue create` fails. These follow-up issues intentionally keep the findings under `## Problem`, then emit `## Acceptance criteria` as unchecked `- [ ]` checkboxes so `mark-dod` can parse and tick them on later work; unlike the CTO issue-planning flow, they omit `## Proposed approach` because the reviewer findings are the source of truth. **DO NOT SHIP** reviews are routed by `review_do_not_ship_action` (default `fix`): `fix` drives the fix loop within the same review iteration cap; `pass` files the same follow-up issue and chains to commit; `abort` retains the legacy stop-before-commit behavior.
+13. **Review-exhaustion fallback**: If a **NEEDS ATTENTION** review→fix loop hits `fix_max_iterations`, repeats the same findings (`reviewIsStuck`), or the fixer claims a Finding ID was fixed but the reviewer still flags it (`fixContradictsReview`): file a follow-up issue titled `chore(review): <headline-finding-id> (+N more)` using the highest-severity structured `Finding ID` as the headline (or `chore(review): <headline-finding-id>` when exactly one finding exists, or `chore(review): unresolved review` when no structured findings were extracted). The issue body contains the structured unresolved findings or a quoted prose excerpt. The issue title/body intentionally omit release handles, job IDs, exhaustion reasons, shim launch lines, stream-json telemetry, and permission-mode flags. TamTam tries to apply the canonical labels `tamtam` `review-followup` `priority-medium`, skips any of those labels that do not exist in the repo, then chains to commit + push so the partial work ships. Falls back to the legacy abort if `gh issue create` fails. These follow-up issues intentionally keep the findings under `## Problem`, then emit `## Acceptance criteria` as unchecked `- [ ]` checkboxes so `mark-dod` can parse and tick them on later work; unlike the CTO issue-planning flow, they omit `## Proposed approach` because the reviewer findings are the source of truth. **DO NOT SHIP** reviews are routed by `review_do_not_ship_action` (default `fix`): `fix` drives the fix loop within the same review iteration cap; `pass` files the same follow-up issue and chains to commit; `abort` retains the legacy stop-before-commit behavior.
 
 ### Project sweep
 
@@ -442,7 +442,7 @@ Accepts markdown wrapping (`**LGTM**`, `` `LGTM` ``) and optional colon/dash del
 
 | Cap | Limit | Window | Setting |
 |-----|-------|--------|---------|
-| Every step-verification loop (review / test / commit / push) | unbounded fixes; configurable verification rounds | per release; 30 min fallback for standalone chaining | `review_fix_max_iterations` (DB setting, default 0; explicit 0 = unlimited until LGTM, green test, clean commit, successful push, or the release timeout). One setting drives every loop. Cap counts completed `review` / `test` / `commit` / `push` runs in the release, not fixes. On **NEEDS ATTENTION** review-side exhaustion (cap, stuck, fix-contradicts-review) TamTam files a follow-up issue and chains to commit+push (see step 13 above) instead of aborting; test/commit/push exhaustion aborts without filing. **DO NOT SHIP** verdicts follow `review_do_not_ship_action` (default `fix`): `fix` consumes the same verification budget, `pass` files a follow-up issue and commits, and `abort` stops before commit/push. The standalone (no `releaseId`) chain still uses a 30-min wall-clock window from `TAMTAM_STEP_WINDOW_SECONDS` (alias `TAMTAM_FIX_WINDOW_SECONDS`); that's a different concept (time, not iteration count) and stays env-driven. |
+| Every step-verification loop (review / test / commit / push) | unbounded fixes; configurable verification rounds | per release; 30 min fallback for standalone chaining | `fix_max_iterations` (DB setting, default 0; explicit 0 = unlimited until LGTM, green test, clean commit, successful push, or the release timeout). One setting drives every loop. Cap counts completed `review` / `test` / `commit` / `push` runs in the release, not fixes. On **NEEDS ATTENTION** review-side exhaustion (cap, stuck, fix-contradicts-review) TamTam files a follow-up issue and chains to commit+push (see step 13 above) instead of aborting; test/commit/push exhaustion aborts without filing. **DO NOT SHIP** verdicts follow `review_do_not_ship_action` (default `fix`): `fix` consumes the same verification budget, `pass` files a follow-up issue and commits, and `abort` stops before commit/push. The standalone (no `releaseId`) chain still uses a 30-min wall-clock window from `TAMTAM_STEP_WINDOW_SECONDS` (alias `TAMTAM_FIX_WINDOW_SECONDS`); that's a different concept (time, not iteration count) and stays env-driven. |
 | Push-fix attempts | 2 attempts | per release | hardcoded `getPushFixAttemptCap()=2`. Counts `fix` jobs whose `parentJobId` is a `push` job in the same release. |
 | Fix-CI auto-retry | 2 attempts | 120 s | hardcoded constants in `lib/jobs/lifecycle.ts` (boot-crash recovery only — non-user-tunable since 2026-05) |
 | Fix-CI fast-crash | — | — | hardcoded `5000` ms — only retries if job died in under this |
@@ -620,7 +620,7 @@ The recommended **`agent:review-tuner`** built-in agent reads the last ~20 relea
 | Metric | What it tells you | Action |
 |---|---|---|
 | LGTM rate < 50% | Reviews consistently block — rules may be too strict | Loosen `review_verdict_rules` in Settings → Behavior, or add a per-project `review_prompt_addendum` in the project Config tab |
-| Fix convergence low, hit-cap count high | Recovery loops cannot converge inside the configured step cap | Increase `review_fix_max_iterations` (the single setting governs every step loop; `0` removes the cap entirely), or adjust the review prompt |
+| Fix convergence low, hit-cap count high | Recovery loops cannot converge inside the configured step cap | Increase `fix_max_iterations` (the single setting governs every step loop; `0` removes the cap entirely), or adjust the review prompt |
 | `review` p95 > 5 min | Review jobs are slow | Check model choice; consider switching to Haiku for review |
 | Pipeline success < 80% | Releases failing frequently | Check step durations + History tab for the most recent failures |
 | MTTR high | Long time from start to push | High `fix` median duration or many fix iterations — check fix loop stats |
@@ -634,9 +634,9 @@ Returns `PipelineResponse` (see `app/api/stats/pipeline/route.ts` for full type)
 Recovery-loop attribution prefers explicit `releaseId` links on `fix` jobs. For historical rows or partially stamped data where `releaseId` is absent, the stats API falls back to the release's `[startedAt, finishedAt]` window so older dashboards do not silently lose recovery iterations.
 
 The `configSnapshot` section reflects the same shared recovery-budget helper used by runtime enforcement:
-- step cap (review / test / commit / push): `review_fix_max_iterations` (default 0 = unlimited; the single user-facing knob, serialized to `null` in the JSON response when 0/unlimited)
+- step cap (review / test / commit / push): `fix_max_iterations` (default 0 = unlimited; the single user-facing knob, serialized to `null` in the JSON response when 0/unlimited)
 - standalone-chain time window: `TAMTAM_STEP_WINDOW_SECONDS` (legacy alias: `TAMTAM_FIX_WINDOW_SECONDS`) — wall-clock, not iteration count
-- push pre-push-hook rejection cap: hardcoded `2` (counted as `fix` jobs whose parent is a `push` in the same release; intentionally decoupled from `review_fix_max_iterations` so a permanently failing hook can't loop forever when the setting is 0)
+- push pre-push-hook rejection cap: hardcoded `2` (counted as `fix` jobs whose parent is a `push` in the same release; intentionally decoupled from `fix_max_iterations` so a permanently failing hook can't loop forever when the setting is 0)
 
 ---
 
@@ -646,7 +646,7 @@ The `configSnapshot` section reflects the same shared recovery-budget helper use
 |---------|-------------|-----|
 | Pipeline stops after test with no next step | `auto_push_enabled` is off and no active Release | Use 🚀 Release button or enable `auto_push_enabled` |
 | Review exits 0 but no verdict found | Verdict buried early in a long log | Check last 2000 chars of log; rephrase review prompt to emit verdict at the end |
-| Fix loop stops before convergence | Step verification cap reached within the configured fallback window | Fix manually, raise `review_fix_max_iterations` (single global step cap; `0` removes it entirely), or wait for `TAMTAM_STEP_WINDOW_SECONDS` to reset the standalone-chain time window |
+| Fix loop stops before convergence | Step verification cap reached within the configured fallback window | Fix manually, raise `fix_max_iterations` (single global step cap; `0` removes it entirely), or wait for `TAMTAM_STEP_WINDOW_SECONDS` to reset the standalone-chain time window |
 | Push fails, no `fix` job spawned to recover | Hook strings not matched by `isHookRejection` | Check the push log for hook output; add new hook string patterns to `lib/pipeline/push-rejection.ts` |
 | Release button grayed out / 400 | No changes and no unpushed commits | Make a change or verify `git status` |
 | `DO NOT SHIP` verdict loops forever | Review verification cap or release timeout reached | Inspect fix logs; may need manual code changes |

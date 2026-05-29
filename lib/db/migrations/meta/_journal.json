@@ -134,6 +134,13 @@
       "when": 1779959385294,
       "tag": "0018_agent_boostable",
       "breakpoints": true
+    },
+    {
+      "idx": 19,
+      "version": "7",
+      "when": 1780050000000,
+      "tag": "0019_rename_fix_max_iterations_setting",
+      "breakpoints": true
     }
   ]
 }

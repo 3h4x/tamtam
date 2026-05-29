@@ -23,8 +23,7 @@ function makeJob(overrides: Partial<JobData> & Pick<JobData, 'id' | 'kind'>): Jo
 
 const baseDeps = (jobs: JobData[]) => ({
   listJobs: () => jobs,
-  maxStepIterations: () => 3,
-  reviewFixMaxIterations: () => 3,
+  fixIterationCap: () => 3,
   pushFixAttemptCap: () => 2,
 });
 
@@ -95,7 +94,7 @@ describe('checkIterationCap', () => {
     expect(checkIterationCap(job, decision, baseDeps([])).rewritten).toBeUndefined();
   });
 
-  it('aborts when reviewFixMaxIterations is reached on from=fix → review', () => {
+  it('aborts when fixIterationCap is reached on from=fix → review', () => {
     const fixJob = makeJob({ id: 'f1', kind: 'fix', releaseId: 'r1', exitCode: 0 });
     const jobs = [
       makeJob({ id: 'rev1', kind: 'review', releaseId: 'r1' }),
@@ -111,7 +110,7 @@ describe('checkIterationCap', () => {
     expect((r.rewritten as { stopReason: string }).stopReason).toContain('3/3');
   });
 
-  it('does not abort review reruns when reviewFixMaxIterations is zero', () => {
+  it('does not abort review reruns when fixIterationCap is zero', () => {
     const fixJob = makeJob({ id: 'f1', kind: 'fix', releaseId: 'r1', exitCode: 0 });
     const jobs = [
       makeJob({ id: 'rev1', kind: 'review', releaseId: 'r1' }),
@@ -122,13 +121,13 @@ describe('checkIterationCap', () => {
     const decision: NextPhase = { next: 'review', from: 'fix' };
     const deps = {
       ...baseDeps(jobs),
-      reviewFixMaxIterations: () => 0,
+      fixIterationCap: () => 0,
     };
 
     expect(checkIterationCap(fixJob, decision, deps).rewritten).toBeUndefined();
   });
 
-  it('aborts when maxStepIterations is reached on from=fix → test', () => {
+  it('aborts when fixIterationCap is reached on from=fix → test', () => {
     const fixJob = makeJob({ id: 'f1', kind: 'fix', releaseId: 'r1', exitCode: 0 });
     const jobs = [
       makeJob({ id: 't1', kind: 'test', releaseId: 'r1' }),
@@ -142,7 +141,7 @@ describe('checkIterationCap', () => {
     expect((r.rewritten as { stopReason: string }).stopReason).toContain('test cap reached');
   });
 
-  it('aborts when maxStepIterations is reached on from=fix → commit', () => {
+  it('aborts when fixIterationCap is reached on from=fix → commit', () => {
     const fixJob = makeJob({ id: 'f1', kind: 'fix', releaseId: 'r1', exitCode: 0 });
     const jobs = [
       makeJob({ id: 'c1', kind: 'commit', releaseId: 'r1' }),
@@ -167,7 +166,7 @@ describe('checkIterationCap', () => {
     expect((r.rewritten as { stopReason: string }).stopReason).toContain('2/2');
   });
 
-  it('keeps push-fix retries finite even when reviewFixMaxIterations is zero', () => {
+  it('keeps push-fix retries finite even when fixIterationCap is zero', () => {
     const push1 = makeJob({ id: 'p1', kind: 'push', releaseId: 'r1' });
     const fix1 = makeJob({ id: 'f1', kind: 'fix', releaseId: 'r1', parentJobId: 'p1' });
     const push2 = makeJob({ id: 'p2', kind: 'push', releaseId: 'r1' });
@@ -175,7 +174,7 @@ describe('checkIterationCap', () => {
     const decision: NextPhase = { next: 'push', from: 'fix' };
     const deps = {
       ...baseDeps([push1, fix1, push2, fix2]),
-      reviewFixMaxIterations: () => 0,
+      fixIterationCap: () => 0,
     };
     const r = checkIterationCap(fix2, decision, deps);
     expect(r.rewritten).toMatchObject({ next: 'abort' });
@@ -183,7 +182,7 @@ describe('checkIterationCap', () => {
     expect((r.rewritten as { stopReason: string }).stopReason).toContain('2/2');
   });
 
-  it('uses maxStepIterations when fix→push and fix parent is NOT a push', () => {
+  it('uses fixIterationCap when fix→push and fix parent is NOT a push', () => {
     const review1 = makeJob({ id: 'rev1', kind: 'review', releaseId: 'r1' });
     const fix1 = makeJob({ id: 'f1', kind: 'fix', releaseId: 'r1', parentJobId: 'rev1', exitCode: 0 });
     const jobs = [

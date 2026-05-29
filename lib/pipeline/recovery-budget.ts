@@ -3,19 +3,24 @@ import { getSettings, type ReviewDoNotShipAction } from '@/lib/shared/config';
 // Single source of truth for the pipeline's step-iteration cap.
 //
 // ONE user-facing setting — `fix_max_iterations`, persisted in
-// `app_settings` — governs every retry loop the release pipeline runs:
-// review→fix→review, test→fix→test, commit→fix→commit, the review-driven
-// push→fix→push leg, AND the pre-push-hook rejection retry. Previously
-// each leg had its own knob (settings for review, env vars for the rest,
-// a hardcoded 2 for push-hook retries) so an operator who set
-// `fix_max_iterations = 0` to mean "loop until success" was surprised
-// when the test loop aborted at 3/3 or the push-hook leg at 2/2. One
-// setting now drives them all.
+// `app_settings` — governs every review-driven fix loop the release
+// pipeline runs: review→fix→review, test→fix→test, commit→fix→commit,
+// and the review-driven push→fix→push leg. Default `0` means "loop
+// until success or the release wall-clock timeout."
 //
-// Every consumer (`getReviewFixMaxIterations`, `getMaxStepIterations`,
-// `getPushFixAttemptCap`) delegates to `readFixIterationCap()` so any
-// future tweak — clamping, telemetry, per-project overrides — happens
-// in one place.
+// `getFixIterationCap()` is the only export for this knob. There used
+// to be two parallel exports (`getMaxStepIterations`,
+// `getReviewFixMaxIterations`) but they always returned the same
+// value, which falsely suggested to readers that the two could diverge
+// at runtime. They never did. One function, one setting.
+//
+// Two failure-recovery caps stay deliberately separate and finite even
+// when `fix_max_iterations = 0`, so a permanently broken environment
+// cannot loop forever:
+//   - `getPushFixAttemptCap()` (this file) — pre-push-hook rejection
+//     retries cap at 2 attempts.
+//   - `FIX_CI_MAX_RETRIES` (in `lib/jobs/lifecycle.ts`) — fix-CI
+//     fast-crash recovery caps at 2 retries within a 120s window.
 //
 // `getStepWindowSeconds()` is a separate concept (time-based rolling
 // window used by the legacy standalone hook, no releaseId) and stays
@@ -30,7 +35,7 @@ function parsePositiveInt(raw: string | undefined, fallback: number): number {
 }
 
 /**
- * Resolve the configured per-release iteration cap. Returns
+ * Resolve the configured per-release fix-loop iteration cap. Returns
  * `Number.POSITIVE_INFINITY` when the setting is 0 (operator-opted
  * "loop until success"). Returns the integer setting when > 0. Falls back
  * to `DEFAULT_FIX_ITERATION_CAP` when the settings store hasn't been
@@ -38,8 +43,12 @@ function parsePositiveInt(raw: string | undefined, fallback: number): number {
  *
  * Reads live each call so an operator tuning the setting in the UI sees
  * the new value on the next release step without restarting the server.
+ *
+ * Applies uniformly to the review, test, commit, and review-driven push
+ * verification loops. There is no separate per-step variant — the cap is
+ * one number by design.
  */
-function readFixIterationCap(): number {
+export function getFixIterationCap(): number {
   try {
     const value = getSettings().fix_max_iterations;
     if (value === 0) return Number.POSITIVE_INFINITY;
@@ -48,16 +57,6 @@ function readFixIterationCap(): number {
     // settings not yet loaded — drop through to the safety default.
   }
   return DEFAULT_FIX_ITERATION_CAP;
-}
-
-/** Cap on `test`, `commit`, and push-recovery verification loops. */
-export function getMaxStepIterations(): number {
-  return readFixIterationCap();
-}
-
-/** Cap on the `review→fix→review` verification loop. */
-export function getReviewFixMaxIterations(): number {
-  return readFixIterationCap();
 }
 
 /** Policy applied when review returns `DO NOT SHIP`. Default `pass` files a
@@ -74,17 +73,15 @@ export function getReviewDoNotShipAction(): ReviewDoNotShipAction {
 }
 
 /** Cap on automatic fix attempts triggered by repeated push pre-push-hook
- *  rejections. Reads the same single global `fix_max_iterations` setting:
- *  there is intentionally no separate knob. When the operator sets
- *  `fix_max_iterations = 0`, this cap also becomes unlimited — the only
- *  outer bound is then the release wall-clock timeout. */
+ *  rejections. Kept separate from `fix_max_iterations` so hook failures stay
+ *  finite even when the main fix-loop cap is unlimited. */
 export function getPushFixAttemptCap(): number {
-  return readFixIterationCap();
+  return 2;
 }
 
 /** Time window the legacy completion hook uses to decide whether two
  *  back-to-back step runs belong to the same chain. Iteration-count caps
- *  are handled by `getMaxStepIterations()`; this knob is a different
+ *  are handled by `getFixIterationCap()`; this knob is a different
  *  concept (wall-clock window, not retry count) and remains env-driven. */
 export function getStepWindowSeconds(): number {
   return parsePositiveInt(

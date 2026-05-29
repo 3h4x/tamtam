@@ -5,7 +5,7 @@ import type { JobData } from '@/lib/jobs/job-storage';
 import { getSettings } from '@/lib/shared/config';
 import {
   getPushFixAttemptCap,
-  getMaxStepIterations,
+  getFixIterationCap,
   getStepWindowSeconds,
 } from '@/lib/pipeline/recovery-budget';
 
@@ -70,7 +70,7 @@ export interface PipelineResponse {
     commitStyle: string;
     /** Cap on per-release step retries (review/test/commit/push fix loops).
      *  `null` means the operator opted into unlimited iterations via
-     *  `review_fix_max_iterations = 0`. */
+     *  `fix_max_iterations = 0`. */
     maxStepIterations: number | null;
     maxPushFixAttempts: number;
     stepWindowSeconds: number;
@@ -82,7 +82,7 @@ export interface PipelineResponse {
 // (`number | null`) matches what's on the wire and consumers can render
 // "∞" instead of crashing on "no cap".
 function serializeMaxStepIterations(): number | null {
-  const cap = getMaxStepIterations();
+  const cap = getFixIterationCap();
   return Number.isFinite(cap) ? cap : null;
 }
 const FIX_WINDOW_SECONDS = getStepWindowSeconds();
@@ -381,10 +381,10 @@ function computeMetrics(
 }
 
 export async function GET(request: NextRequest) {
-  const param = request.nextUrl.searchParams.get('window') ?? '30d';
+  const param = request.nextUrl.searchParams.get('window') ?? '24h';
   const window: Window = (Object.keys(WINDOWS) as Window[]).includes(param as Window)
     ? (param as Window)
-    : '30d';
+    : '24h';
   const project = request.nextUrl.searchParams.get('project') ?? null;
 
   const cacheKey = `${window}:${project ?? ''}`;

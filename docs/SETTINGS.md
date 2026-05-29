@@ -155,9 +155,9 @@ All three are read live on each job (not cached), so changing them takes effect 
 
 | Key | Type | Default | Effect |
 |-----|------|---------|--------|
-| `review_fix_max_iterations` | number | `0` | **Unified per-release step-retry cap.** Governs every step-verification loop the release pipeline runs: review→fix→review, test→fix→test, commit→fix→commit, and the review-driven push→fix→push leg. Set to `0` to run all loops until LGTM / a green test / a clean commit / a successful push (or the release wall-clock timeout aborts). `1` ships after a single failing review *and* a single failing test/commit/push; `3` is the implicit safety fallback when the setting hasn't been initialized (early boot, tests). When the review-side cap (or stuck-findings / fix-contradicts-review) trips, TamTam files a follow-up GitHub issue titled from the highest-severity structured `Finding ID` (`chore(review): <headline-finding-id> (+N more)`, the bare `Finding ID` when only one exists, or `chore(review): unresolved review` when none were extracted), tries to apply the canonical labels `tamtam` `review-followup` `priority-medium`, and skips any missing repo labels, then continues to commit + push so the partial work ships. The issue body carries the structured unresolved findings; if the review did not emit structured Finding blocks, the issue includes a quoted prose excerpt instead. The fallback issue keeps findings under `## Problem` and writes `## Acceptance criteria` as unchecked `- [ ]` checkboxes so later `mark-dod` runs can tick verified items; only the CTO issue-planning flow uses the full `Problem` / `Proposed approach` / `Acceptance criteria` template. **DO NOT SHIP** reviews are routed by the separate `review_do_not_ship_action` setting (see below). The push pre-push-hook rejection cap is intentionally separate (`getPushFixAttemptCap()`, hardcoded at 2) so a permanently failing pre-push hook can't loop forever even when this setting is 0. |
+| `fix_max_iterations` | number | `0` | **Unified per-release step-retry cap.** Governs every step-verification loop the release pipeline runs: review→fix→review, test→fix→test, commit→fix→commit, and the review-driven push→fix→push leg. Set to `0` to run all loops until LGTM / a green test / a clean commit / a successful push (or the release wall-clock timeout aborts). `1` ships after a single failing review *and* a single failing test/commit/push; `3` is the implicit safety fallback when the setting hasn't been initialized (early boot, tests). When the review-side cap (or stuck-findings / fix-contradicts-review) trips, TamTam files a follow-up GitHub issue titled from the highest-severity structured `Finding ID` (`chore(review): <headline-finding-id> (+N more)`, the bare `Finding ID` when only one exists, or `chore(review): unresolved review` when none were extracted), tries to apply the canonical labels `tamtam` `review-followup` `priority-medium`, and skips any missing repo labels, then continues to commit + push so the partial work ships. The issue body carries the structured unresolved findings; if the review did not emit structured Finding blocks, the issue includes a quoted prose excerpt instead. The fallback issue keeps findings under `## Problem` and writes `## Acceptance criteria` as unchecked `- [ ]` checkboxes so later `mark-dod` runs can tick verified items; only the CTO issue-planning flow uses the full `Problem` / `Proposed approach` / `Acceptance criteria` template. **DO NOT SHIP** reviews are routed by the separate `review_do_not_ship_action` setting (see below). The push pre-push-hook rejection cap is intentionally separate (`getPushFixAttemptCap()`, hardcoded at 2) so a permanently failing pre-push hook can't loop forever even when this setting is 0. |
 | `review_fix_backoff_seconds` | number | `30` | Base delay, in seconds, before each review→fix iteration after the third completed review in the same release. The delay doubles on each additional round (30 → 60 → 120 → 240, capped at 300) so a slow-converging review loop does not burn tokens or CI at full speed. Set to `0` to disable the backoff entirely. |
-| `review_do_not_ship_action` | enum `pass` \| `fix` \| `abort` | `fix` | What to do when a code review returns **DO NOT SHIP**. `fix` (default) routes through the same fix loop NEEDS ATTENTION uses (subject to `review_fix_max_iterations`). `pass` files a follow-up GitHub issue with the findings and continues to commit → push → mark-dod so the partial work still ships. `abort` keeps the legacy behavior of stopping the release immediately. |
+| `review_do_not_ship_action` | enum `pass` \| `fix` \| `abort` | `fix` | What to do when a code review returns **DO NOT SHIP**. `fix` (default) routes through the same fix loop NEEDS ATTENTION uses (subject to `fix_max_iterations`). `pass` files a follow-up GitHub issue with the findings and continues to commit → push → mark-dod so the partial work still ships. `abort` keeps the legacy behavior of stopping the release immediately. |
 | `release_wall_clock_timeout_minutes` | number | `60` | Overall wall-clock budget for an active Release run. Each release meta-job stores `release_deadline_at`; the 30s probe sweep aborts expired releases with reason `wall_clock_timeout`. Per-project `.tamtam/config.yml` can override this with `pipeline.release_timeout_minutes`. |
 
 ### Pipeline Model Tiers
@@ -406,7 +406,7 @@ cli_default_model_deepagents, log_dir,
 frequency, daytime, weekends, launchagent_prefix, workspace_path,
 base_prompt, default_model, permission_mode, commit_style,
 review_verdict_rules, jobs_paused,
-review_fix_max_iterations, release_wall_clock_timeout_minutes,
+fix_max_iterations, release_wall_clock_timeout_minutes,
 legacy_completion_hook_release_after_run_enabled,
 legacy_completion_hook_release_after_fix_ci_enabled,
 legacy_completion_hook_auto_resume_enabled,
@@ -466,14 +466,14 @@ The same config endpoint also exposes file-backed team-contract values from `.ta
 | Use conventional commits | `commit_style` — already the default |
 | Run agents 24/7 (not just nights) | `daytime = true` |
 | Run agents on weekends | `weekends = on` |
-| Cap or uncap every step-verification loop (review, test, commit, push) | `review_fix_max_iterations` — the single global step-retry knob. `0` = unlimited (run until success; the release wall-clock timeout is the outer safety bound); `1` = ship/abort after a single failing verification of each step; any `N ≥ 1` caps every step at N |
+| Cap or uncap every step-verification loop (review, test, commit, push) | `fix_max_iterations` — the single global step-retry knob. `0` = unlimited (run until success; the release wall-clock timeout is the outer safety bound); `1` = ship/abort after a single failing verification of each step; any `N ≥ 1` caps every step at N |
 | Faster polling after a run | Handled automatically by `startFastPolling()` in UI |
 
 ### Settings that take effect immediately vs on next run
 
 | Immediate (no restart) | Next job only |
 |-----------------------|---------------|
-| `review_fix_max_iterations` | `base_prompt`, `commit_style`, `review_verdict_rules` (read at job start) |
+| `fix_max_iterations` | `base_prompt`, `commit_style`, `review_verdict_rules` (read at job start) |
 | `workspace_path` (next projects scan) | `claude_bin`, `permission_mode` (read at job start) |
 
 ### Common Issues
@@ -483,6 +483,6 @@ The same config endpoint also exposes file-backed team-contract values from `.ta
 | Projects list empty | `workspace_path` not set or wrong path | Go to Settings → set workspace path |
 | Claude not found | `claude_bin` path wrong | Verify with `which claude` and update the setting |
 | Reviews always pass | `review_verdict_rules` too permissive | Tighten the rules in Settings → Behavior |
-| Reviews keep churning until cap, never landing | `review_fix_max_iterations` too high for the project | Lower to `2` or `1`; partial work still ships and a follow-up issue is filed |
-| Reviews / tests / commits keep running until timeout | `review_fix_max_iterations = 0` disables every step cap | Set a finite cap such as `1` or `2` if you want the loop to stop before timeout |
+| Reviews keep churning until cap, never landing | `fix_max_iterations` too high for the project | Lower to `2` or `1`; partial work still ships and a follow-up issue is filed |
+| Reviews / tests / commits keep running until timeout | `fix_max_iterations = 0` disables every step cap | Set a finite cap such as `1` or `2` if you want the loop to stop before timeout |
 | Agents run during the day unexpectedly | `daytime = true` | Set `daytime = false` for night-only |

@@ -68,7 +68,7 @@ export async function fetchTaskDetail(taskId: string): Promise<TaskDetail> {
 
 export async function fetchProjectPipelineStats(
   projectName: string,
-  window_: '24h' | '7d' | '30d' | 'all' = '30d',
+  window_: '24h' | '7d' | '30d' | 'all' = '24h',
 ): Promise<ProjectPipelineStats> {
   const params = new URLSearchParams({
     project: projectName,

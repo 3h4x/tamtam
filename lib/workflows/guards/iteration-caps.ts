@@ -10,10 +10,10 @@
 //
 // Two caps are tracked:
 //   review / test / commit / push (step verification loops)
-//     → `fix_max_iterations` setting via getMaxStepIterations() /
-//       getReviewFixMaxIterations() (both delegate to the same setting;
-//       default 3, settings-driven, `0` ⇒ unlimited until LGTM or release
-//       wall-clock timeout). See `lib/pipeline/recovery-budget.ts`.
+//     → `fix_max_iterations` setting via getFixIterationCap() (default 3,
+//       settings-driven, `0` ⇒ unlimited until LGTM or release wall-clock
+//       timeout). One number governs every step. See
+//       `lib/pipeline/recovery-budget.ts`.
 //   push-hook rejection retries
 //     → MAX_PUSH_FIX_ATTEMPTS (hardcoded 2; checked when fix→push is
 //       dispatched). Decoupled from `fix_max_iterations` so a
@@ -31,10 +31,9 @@ export interface IterationCapDeps {
   /** Walk the project's job cache. Same contract as `listJobs` from
    *  `lib/jobs/job-storage`. */
   listJobs: () => JobData[];
-  /** maxStepIterations() from `lib/pipeline/recovery-budget`. */
-  maxStepIterations: () => number;
-  /** reviewFixMaxIterations() from `lib/pipeline/recovery-budget`. */
-  reviewFixMaxIterations: () => number;
+  /** getFixIterationCap() from `lib/pipeline/recovery-budget`. Applies
+   *  uniformly to review/test/commit/push step verification loops. */
+  fixIterationCap: () => number;
   /** getPushFixAttemptCap() from `lib/pipeline/recovery-budget`. */
   pushFixAttemptCap: () => number;
 }
@@ -112,7 +111,7 @@ export function checkIterationCap(
   // once per cascade and review→push fires once per LGTM.
   if (decision.next === 'review' && decision.from === 'fix') {
     const count = countSiblingSteps(job.project, 'review', job.releaseId, deps);
-    const cap = deps.reviewFixMaxIterations();
+    const cap = deps.fixIterationCap();
     // cap === 0 → unlimited iterations (opt-in cap). The fix loop keeps
     // running until the reviewer returns LGTM or the wall-clock timeout
     // aborts the release.
@@ -130,7 +129,7 @@ export function checkIterationCap(
 
   if (decision.next === 'test' && decision.from === 'fix') {
     const count = countSiblingSteps(job.project, 'test', job.releaseId, deps);
-    const cap = deps.maxStepIterations();
+    const cap = deps.fixIterationCap();
     if (count >= cap) {
       return {
         rewritten: {
@@ -145,7 +144,7 @@ export function checkIterationCap(
 
   if (decision.next === 'commit' && decision.from === 'fix') {
     const count = countSiblingSteps(job.project, 'commit', job.releaseId, deps);
-    const cap = deps.maxStepIterations();
+    const cap = deps.fixIterationCap();
     if (count >= cap) {
       return {
         rewritten: {
@@ -178,7 +177,7 @@ export function checkIterationCap(
       }
     } else {
       const count = countSiblingSteps(job.project, 'push', job.releaseId, deps);
-      const cap = deps.maxStepIterations();
+      const cap = deps.fixIterationCap();
       if (count >= cap) {
         return {
           rewritten: {

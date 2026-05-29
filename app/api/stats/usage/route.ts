@@ -60,10 +60,10 @@ export interface UsageResponse {
 }
 
 export async function GET(request: NextRequest) {
-  const param = request.nextUrl.searchParams.get('window') ?? '30d';
+  const param = request.nextUrl.searchParams.get('window') ?? '24h';
   const window: Window = (Object.keys(WINDOWS) as Window[]).includes(param as Window)
     ? (param as Window)
-    : '30d';
+    : '24h';
 
   const cached = cache.get(window);
   if (cached && cached.expiresAt > Date.now()) {

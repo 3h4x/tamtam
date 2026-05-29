@@ -127,7 +127,7 @@ describe('GET /api/stats/pipeline', () => {
     expect(data.pipelineSuccess.total).toBe(0);
     expect(data.fixLoop.total).toBe(0);
     expect(data.projects).toEqual([]);
-    expect(data.window).toBe('30d');
+    expect(data.window).toBe('24h');
   });
 
   it('counts verdict distribution correctly', async () => {
@@ -630,10 +630,10 @@ describe('GET /api/stats/pipeline', () => {
     expect(data.configSnapshot.maxStepIterations).toBeNull();
   });
 
-  it('falls back to 30d for invalid window', async () => {
+  it('falls back to 24h for invalid window', async () => {
     const res = await GET(new NextRequest('http://localhost/api/stats/pipeline?window=bogus'));
     const data = await res.json();
-    expect(data.window).toBe('30d');
+    expect(data.window).toBe('24h');
   });
 });
 

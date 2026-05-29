@@ -288,7 +288,7 @@ export const FIELDS: Record<SettingsFieldKey, FieldDef> = {
   },
   fix_max_iterations: {
     label: 'Fix Loop Iterations',
-    help: 'Single global cap on per-release fix→step→fix retries (review, test, commit, and review-driven push). ∞ (default) lets every loop run until success — LGTM / green test / clean commit / successful push — or the release wall-clock timeout aborts. A finite cap caps every step at that value; review-side exhaustion files a follow-up issue with unresolved findings and ships the partial work; test/commit/push exhaustion aborts without filing. The push pre-push-hook rejection retry is a separate hardcoded cap (2) so a permanently failing hook can\'t loop forever when this is 0.',
+    help: 'Single global cap on per-release fix→step→fix retries — applied uniformly to review, test, commit, and review-driven push loops. ∞ (default) lets each loop run until success (LGTM / green test / clean commit / successful push) or the release wall-clock timeout aborts. With a finite cap, exhaustion is NOT symmetric across step kinds: review exhaustion on a NEEDS ATTENTION verdict files a follow-up issue with unresolved findings and ships the partial work (review with a DO NOT SHIP verdict still aborts); test, commit, and push exhaustion abort the release immediately without filing an issue. The push pre-push-hook rejection retry is a separate hardcoded cap (2) so a permanently failing hook can\'t loop forever when this is 0.',
     group: 'pipeline',
     subsection: 'review',
     span: 1,

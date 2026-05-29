@@ -190,12 +190,12 @@ describe('SettingsPage', () => {
     const { container, unmount } = renderSettingsPage()
 
     await waitForUi(() => {
-      expect(findInputByLabel(container, 'Review Fix Loop Iterations').value).toBe('4')
+      expect(findInputByLabel(container, 'Fix Loop Iterations').value).toBe('4')
       expect(getSaveButton(container).disabled).toBe(true)
     })
 
     flushSync(() => {
-      setInputValue(findInputByLabel(container, 'Review Fix Loop Iterations'), '7')
+      setInputValue(findInputByLabel(container, 'Fix Loop Iterations'), '7')
     })
 
     await waitForUi(() => {
@@ -205,7 +205,7 @@ describe('SettingsPage', () => {
     getSaveButton(container).click()
 
     await waitForUi(() => {
-      expect(findInputByLabel(container, 'Review Fix Loop Iterations').value).toBe('7')
+      expect(findInputByLabel(container, 'Fix Loop Iterations').value).toBe('7')
       expect(getSaveButton(container).disabled).toBe(true)
     })
 
@@ -504,11 +504,11 @@ describe('SettingsPage', () => {
     const { container, unmount } = renderSettingsPage()
 
     await waitForUi(() => {
-      expect(findInputByLabel(container, 'Review Fix Loop Iterations').value).toBe('0')
+      expect(findInputByLabel(container, 'Fix Loop Iterations').value).toBe('0')
     })
 
     flushSync(() => {
-      setInputValue(findInputByLabel(container, 'Review Fix Loop Iterations'), '5')
+      setInputValue(findInputByLabel(container, 'Fix Loop Iterations'), '5')
     })
 
     await waitForUi(() => {
@@ -643,11 +643,11 @@ describe('SettingsPage', () => {
     const { container, unmount } = renderSettingsPage()
 
     await waitForUi(() => {
-      expect(findInputByLabel(container, 'Review Fix Loop Iterations').value).toBe('0')
+      expect(findInputByLabel(container, 'Fix Loop Iterations').value).toBe('0')
     })
 
     flushSync(() => {
-      setInputValue(findInputByLabel(container, 'Review Fix Loop Iterations'), '3')
+      setInputValue(findInputByLabel(container, 'Fix Loop Iterations'), '3')
     })
 
     getSaveButton(container).click()
