@@ -80,7 +80,12 @@ export interface TamTamConfig {
   commit_style: string;
   review_verdict_rules: string;
   jobs_paused: boolean;
-  review_fix_max_iterations: number;
+  /** Single global cap on per-release step-verification retries. Covers
+   *  review→fix→review, test→fix→test, commit→fix→commit, and the
+   *  review-driven push→fix→push leg uniformly. `0` ⇒ unlimited (run
+   *  until success or the release wall-clock timeout). See
+   *  `lib/pipeline/recovery-budget.ts` for the resolution logic. */
+  fix_max_iterations: number;
   review_fix_backoff_seconds: number;
   review_do_not_ship_action: ReviewDoNotShipAction;
   release_wall_clock_timeout_minutes: number;
@@ -187,10 +192,11 @@ const DEFAULTS: TamTamConfig = {
 - Prefer LGTM over NEEDS ATTENTION when in doubt. Do not list every stylistic opinion. Aim for fewer than 3 findings — if you have more, the review has drifted into nitpicking.
 - Keep LGTM responses short: one sentence confirmation is enough.`,
   jobs_paused: false,
-  // 0 = unlimited review→fix verification rounds (default). Bound it via the
-  // wall-clock timeout instead; an honest LGTM is preferred over a forced
-  // partial ship when the reviewer is making progress.
-  review_fix_max_iterations: 0,
+  // 0 = unlimited step-verification rounds across review, test, commit,
+  // and review-driven push retries (default). Bound the pipeline via the
+  // wall-clock timeout instead; an honest green build is preferred over
+  // a forced partial ship when the loops are making progress.
+  fix_max_iterations: 0,
   // Base for exponential backoff between fix dispatches (review→fix and
   // push→fix). 30s base means iteration 4 waits 30s, iter 5 60s, iter 6 120s,
   // capped at MAX_BACKOFF_SECONDS in dispatch-phase.ts. Set to 0 to disable.
@@ -431,7 +437,7 @@ export function buildConfigFromSettingsMap(map: Record<string, string>): TamTamC
     commit_style: map.commit_style ?? DEFAULTS.commit_style,
     review_verdict_rules: map.review_verdict_rules ?? DEFAULTS.review_verdict_rules,
     jobs_paused: map.jobs_paused === 'true',
-    review_fix_max_iterations: parseNonNegativeIntOr(map.review_fix_max_iterations, DEFAULTS.review_fix_max_iterations),
+    fix_max_iterations: parseNonNegativeIntOr(map.fix_max_iterations, DEFAULTS.fix_max_iterations),
     review_fix_backoff_seconds: parseNonNegativeIntOr(map.review_fix_backoff_seconds, DEFAULTS.review_fix_backoff_seconds),
     review_do_not_ship_action: parseReviewDoNotShipAction(
       map.review_do_not_ship_action,

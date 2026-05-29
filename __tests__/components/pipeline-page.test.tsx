@@ -122,4 +122,38 @@ describe('PipelinePage', () => {
 
     unmount()
   })
+
+  it('renders unlimited iteration caps consistently in pipeline settings labels', async () => {
+    const body = makePipelineResponse()
+    body.configSnapshot.maxStepIterations = null
+
+    const fetchMock = vi.fn(async (input: string) => {
+      if (input === '/api/stats/pipeline?window=30d') {
+        return makeResponse(body)
+      }
+      throw new Error(`Unexpected fetch: ${input}`)
+    })
+    vi.stubGlobal('fetch', fetchMock)
+
+    const { container, unmount } = renderPipelinePage()
+
+    await vi.waitFor(() => {
+      expect(container.textContent).toContain('Review/test cap: ∞ iterations per step')
+    })
+
+    const configButton = Array.from(container.querySelectorAll('button')).find((button) =>
+      button.textContent?.includes('Active configuration'),
+    )
+    expect(configButton).toBeDefined()
+
+    flushSync(() => {
+      configButton?.dispatchEvent(new MouseEvent('click', { bubbles: true }))
+    })
+
+    await vi.waitFor(() => {
+      expect(container.textContent).toContain('Verdict rules · review/test cap: ∞ iterations per step')
+    })
+
+    unmount()
+  })
 })

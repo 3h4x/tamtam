@@ -4,10 +4,53 @@ import {
   computeWindowPace,
   computeSnapshotPace,
   computeGlobalPace,
+  deriveUtilizationPace,
+  type UtilizationPaceSample,
 } from '@/lib/usage/quota-pace';
 import { SEVEN_DAY_WINDOW_MS } from '@/lib/shared/budget-throttle';
 
 const pct = (frac: number) => SEVEN_DAY_WINDOW_MS - Math.round(frac * SEVEN_DAY_WINDOW_MS);
+
+const QUARTER_HOUR_MS = 15 * 60 * 1000;
+// Build evenly-spaced (15-min) samples from a list of utilization %s.
+const series = (utils: number[], stepMs = QUARTER_HOUR_MS): UtilizationPaceSample[] =>
+  utils.map((utilizationPct, i) => ({ bucketTs: i * stepMs, utilizationPct }));
+
+describe('deriveUtilizationPace', () => {
+  it('measures the recent utilization slope as percentage-points per hour', () => {
+    // 10 → 12 → 16 over two 30-min steps = 60 min; +6pp / 1h = 6pp/h.
+    const p = deriveUtilizationPace(series([10, 12, 16], 30 * 60 * 1000), FIVE_HOUR_WINDOW_MS)!;
+    expect(p.currentPpPerHour).toBeCloseTo(6, 5);
+    // Steady pace that lands at 100% over a 5h window = 20pp/h.
+    expect(p.steadyPpPerHour).toBeCloseTo(20, 5);
+  });
+
+  it('reports a zero burn rate for an idle (flat-utilization) provider', () => {
+    const p = deriveUtilizationPace(series([10, 10, 10, 10]), FIVE_HOUR_WINDOW_MS)!;
+    expect(p.currentPpPerHour).toBe(0);
+    expect(p.steadyPpPerHour).toBeCloseTo(20, 5);
+  });
+
+  it('ignores a window reset and only measures the most recent segment', () => {
+    // The window resets between index 1 and 2 (95% → 5%). Only the post-reset
+    // run (5 → 8 → 11 over 30 min) should count: +6pp / 0.5h = 12pp/h.
+    const p = deriveUtilizationPace(series([90, 95, 5, 8, 11]), FIVE_HOUR_WINDOW_MS)!;
+    expect(p.currentPpPerHour).toBeCloseTo(12, 5);
+  });
+
+  it('treats small rounding dips as noise, not a reset', () => {
+    // 60 → 61 → 60 → 62 across 45 min. The 1pp dip is not a reset, so the whole
+    // span counts: +2pp / 0.75h ≈ 2.67pp/h.
+    const p = deriveUtilizationPace(series([60, 61, 60, 62]), SEVEN_DAY_WINDOW_MS)!;
+    expect(p.currentPpPerHour).toBeCloseTo(2 / 0.75, 5);
+    expect(p.steadyPpPerHour).toBeCloseTo(100 / 168, 5);
+  });
+
+  it('returns null when there is no measurable span', () => {
+    expect(deriveUtilizationPace([], FIVE_HOUR_WINDOW_MS)).toBeNull();
+    expect(deriveUtilizationPace(series([42]), FIVE_HOUR_WINDOW_MS)).toBeNull();
+  });
+});
 
 describe('computeWindowPace', () => {
   it('reports headroom when under the fair-share pace line', () => {

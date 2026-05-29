@@ -24,6 +24,10 @@ function fmtPct(rate: number | null | undefined): string {
   return `${Math.round(rate * 100)}%`
 }
 
+function fmtIterationCap(cap: number | null): string {
+  return cap == null ? '∞' : String(cap)
+}
+
 function StatCard({
   label,
   value,
@@ -343,7 +347,7 @@ export function PipelinePage() {
           <div className="px-4 py-3 border-b border-border bg-bg-tertiary">
             <h2 className="text-sm font-medium text-text-primary">Fix loop detail</h2>
             <p className="text-xs text-text-tertiary mt-0.5">
-              Review/test cap: {configSnapshot.maxStepIterations} iterations per step
+              Review/test cap: {fmtIterationCap(configSnapshot.maxStepIterations)} iterations per step
               {' · '}
               push fix cap: {configSnapshot.maxPushFixAttempts} attempts
             </p>
@@ -470,7 +474,7 @@ export function PipelinePage() {
           <div className="px-4 py-4 space-y-4">
             <div>
               <div className="text-xs font-medium text-text-secondary uppercase tracking-wide mb-1">
-                Verdict rules · review/test cap: {configSnapshot.maxStepIterations} iterations per step
+                Verdict rules · review/test cap: {fmtIterationCap(configSnapshot.maxStepIterations)} iterations per step
               </div>
               <div className="text-xs text-text-secondary mb-2">
                 push fix cap: {configSnapshot.maxPushFixAttempts} attempts · standalone fallback window: {Math.round(configSnapshot.stepWindowSeconds / 60)} min
