@@ -9,6 +9,7 @@ import {
   workflowStepNeedsAttention,
 } from '@/components/workflow-runs/WorkflowStepAttentionPanel';
 import { WorkflowStatusBadge, workflowStatusPresentation } from '@/components/workflow-runs/workflow-run-status';
+import { Pill } from '@/components/ui/Pill';
 import { Table, type Column } from '@/components/ui/Table';
 
 interface Step {
@@ -362,9 +363,9 @@ export function WorkflowRunDetail({ runId }: { runId: string }) {
           </h2>
           <WorkflowStatusBadge status={data.run.status} />
           <span className="text-xs text-text-tertiary font-mono">{data.run.id}</span>
-          <span className="rounded border border-border bg-bg-tertiary px-1.5 py-0.5 font-mono text-[11px] text-text-secondary">
+          <Pill size="xs" tone="neutral" className="bg-bg-tertiary px-1.5 font-mono text-[11px] font-normal">
             {isLiveRun ? 'live · refreshes every 5s' : 'final snapshot'}
-          </span>
+          </Pill>
           {lastLoadedAt != null ? (
             <span className="text-[11px] text-text-tertiary" title={new Date(lastLoadedAt).toLocaleString()}>
               refreshed {new Date(lastLoadedAt).toLocaleTimeString()}
