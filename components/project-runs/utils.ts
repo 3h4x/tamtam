@@ -340,6 +340,71 @@ export interface ReleaseOutcome {
   blockingJobId?: string | null
 }
 
+function childTerminallyStopsRunningRelease(entry: Entry): boolean {
+  if (entry.status === 'aborted' || isCancelledExitCode(entry.exitCode)) return true
+
+  // These verification steps can legitimately sit failed/attention-needed
+  // while the orchestrator is between the failed step and the fix/retry child.
+  if (entry.kind === 'test' || entry.kind === 'review' || entry.kind === 'commit' || entry.kind === 'push') {
+    return false
+  }
+
+  return entry.status === 'done' && entry.exitCode !== null && entry.exitCode !== 0
+}
+
+function deriveReleaseState(rel: Entry, children: Entry[]): Pick<Entry, 'status' | 'finishedAt' | 'exitCode' | 'failureLabel'> {
+  if (rel.status !== 'running' || children.length === 0) {
+    const failureLabel = rel.status === 'aborted'
+      ? 'release cancelled'
+      : rel.status === 'done' && rel.exitCode !== null && rel.exitCode !== 0
+      ? children.length === 0 ? 'release blocked' : 'release failed'
+      : rel.failureLabel
+    return {
+      status: rel.status,
+      finishedAt: rel.finishedAt,
+      exitCode: rel.exitCode,
+      failureLabel,
+    }
+  }
+
+  const sorted = sortPipelineEntriesByActivity(children)
+  const runningChild = [...sorted].reverse().find((child) => child.status === 'running')
+  if (runningChild) {
+    return {
+      status: rel.status,
+      finishedAt: rel.finishedAt,
+      exitCode: rel.exitCode,
+      failureLabel: rel.failureLabel,
+    }
+  }
+
+  const last = sorted[sorted.length - 1]
+  if (!last || !childTerminallyStopsRunningRelease(last)) {
+    return {
+      status: rel.status,
+      finishedAt: rel.finishedAt,
+      exitCode: rel.exitCode,
+      failureLabel: rel.failureLabel,
+    }
+  }
+
+  if (last.status === 'aborted' || isCancelledExitCode(last.exitCode)) {
+    return {
+      status: 'aborted',
+      finishedAt: last.finishedAt ?? last.lastActivityAt,
+      exitCode: last.exitCode ?? -3,
+      failureLabel: 'release cancelled',
+    }
+  }
+
+  return {
+    status: 'done',
+    finishedAt: last.finishedAt ?? last.lastActivityAt,
+    exitCode: last.exitCode ?? rel.exitCode ?? 1,
+    failureLabel: 'release failed',
+  }
+}
+
 function releaseOutcomeFor(rel: Entry): ReleaseOutcome {
   if (rel.status === 'running') {
     return { status: 'running', label: 'release running', releaseJobId: rel.navJobId }
@@ -822,11 +887,7 @@ export function groupReleaseChildren(entries: Entry[]): Entry[] {
   const releasesByKey = new Map<string, Entry>()
   for (const r of releases) {
     const kids = (childrenByParent.get(r.key) ?? []).sort((a, b) => a.startedAt - b.startedAt)
-    const failureLabel = r.status === 'aborted'
-      ? 'release cancelled'
-      : r.status === 'done' && r.exitCode !== null && r.exitCode !== 0
-      ? kids.length === 0 ? 'release blocked' : 'release failed'
-      : r.failureLabel
+    const derivedState = deriveReleaseState(r, kids)
     // Roll up child usage onto the release row so the parent shows the total
     // of its review/fix/commit/push work — release meta-jobs themselves carry
     // zero direct cost. Children continue to show their individual values, so
@@ -843,7 +904,10 @@ export function groupReleaseChildren(entries: Entry[]): Entry[] {
       ...r,
       children: kids,
       chainedChildren: buildChain(r, kids),
-      failureLabel,
+      status: derivedState.status,
+      finishedAt: derivedState.finishedAt,
+      exitCode: derivedState.exitCode,
+      failureLabel: derivedState.failureLabel,
       costUsd: rolledCostUsd,
       inputTokens: rolledInput,
       outputTokens: rolledOutput,

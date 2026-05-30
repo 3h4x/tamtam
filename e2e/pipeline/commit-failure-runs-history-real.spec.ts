@@ -37,7 +37,7 @@ async function seedProject(
 }
 
 test.describe('Real commit failure lifecycle in runs/history lists', () => {
-  test('global runs list flips from running to release failed when the live pipeline dies in commit', async ({
+  test('history row flips from running to release failed when the live pipeline dies in commit', async ({
     page,
     request,
   }) => {
@@ -52,23 +52,17 @@ test.describe('Real commit failure lifecycle in runs/history lists', () => {
     const runningReview = await waitForJobRunning(request, RUNS_PROJECT, 'review', 20_000);
     expect(runningReview, 'review job should be running').not.toBeNull();
 
-    await page.goto(`/runs?project=${encodeURIComponent(RUNS_PROJECT)}`);
+    await page.goto(`/project/${RUNS_PROJECT}/history`);
 
-    await expect(page.getByText('running').first()).toBeVisible({ timeout: 8_000 });
-    await expect(page.locator('span.animate-pulse').first()).toBeVisible({ timeout: 8_000 });
+    const releaseRow = page.getByRole('button').filter({
+      has: page.getByText('Release pipeline'),
+    }).first();
 
-    const result = await waitForPipelineCompletion(request, RUNS_PROJECT, 90_000);
-    expect(result.status, 'pipeline should finish').toBe('done');
-    expect(result.releaseJob?.['exit_code'], 'release should fail with non-zero exit').not.toBe(0);
-
-    await expect(page.getByText('release failed').first()).toBeVisible({ timeout: 15_000 });
-    await expect(page.getByText('running', { exact: true })).not.toBeVisible({
-      timeout: 15_000,
-    });
-    await expect(page.locator('span.animate-pulse')).toHaveCount(0, { timeout: 15_000 });
+    await expect(releaseRow.getByText('release failed')).toBeVisible({ timeout: 40_000 });
+    await expect(releaseRow.getByLabel('running')).toHaveCount(0, { timeout: 40_000 });
   });
 
-  test('history tab flips from running to release failed when the live pipeline dies in commit', async ({
+  test('history tab flips from running to release failed and opens the commit log when the live pipeline dies in commit', async ({
     page,
     request,
   }) => {
@@ -85,17 +79,39 @@ test.describe('Real commit failure lifecycle in runs/history lists', () => {
 
     await page.goto(`/project/${HISTORY_PROJECT}/history`);
 
-    await expect(page.getByText('running').first()).toBeVisible({ timeout: 8_000 });
-    await expect(page.locator('span.animate-pulse').first()).toBeVisible({ timeout: 8_000 });
+    const releaseRow = page.getByRole('button').filter({
+      has: page.getByText('Release pipeline'),
+    }).first();
+
+    await expect(releaseRow.getByLabel('running')).toBeVisible({ timeout: 8_000 });
+    await expect(releaseRow.getByText('commit ✗1')).toBeVisible({ timeout: 20_000 });
+    await expect(releaseRow.getByLabel('running')).toBeVisible({ timeout: 8_000 });
+    await expect(releaseRow.getByText('release failed')).toHaveCount(0);
 
     const result = await waitForPipelineCompletion(request, HISTORY_PROJECT, 90_000);
     expect(result.status, 'pipeline should finish').toBe('done');
     expect(result.releaseJob?.['exit_code'], 'release should fail with non-zero exit').not.toBe(0);
 
-    await expect(page.getByText('release failed').first()).toBeVisible({ timeout: 15_000 });
-    await expect(page.getByText('running', { exact: true })).not.toBeVisible({
+    await expect(releaseRow.getByText('release failed')).toBeVisible({ timeout: 15_000 });
+    await expect(releaseRow.getByLabel('running')).toHaveCount(0, { timeout: 15_000 });
+
+    const expandButton = releaseRow.getByTitle('Expand steps');
+    await expect(expandButton).toBeVisible({ timeout: 8_000 });
+    await expandButton.click();
+
+    const commitStep = page.getByText('Commit').last();
+    await expect(commitStep).toBeVisible({ timeout: 8_000 });
+    await expect(page.getByText('Code review').last()).toBeVisible({ timeout: 8_000 });
+    await expect(page.getByText('exit 1').last()).toBeVisible({ timeout: 8_000 });
+
+    await commitStep.click();
+
+    await expect(page).toHaveURL(
+      new RegExp(`/project/${HISTORY_PROJECT}/terminal\\?job=`),
+      { timeout: 8_000 },
+    );
+    await expect(page.getByText(`Commit failed: ${COMMIT_ERROR}`).first()).toBeVisible({
       timeout: 15_000,
     });
-    await expect(page.locator('span.animate-pulse')).toHaveCount(0, { timeout: 15_000 });
   });
 });

@@ -319,7 +319,9 @@ export function RunRow({ entry: e, onClick, expandable, expanded, onToggleExpand
     : null
   const summaryParts = splitSummary(summary)
   const failedStepLabel = effectiveNeedsAttention
-    ? progressLabel ?? lastFailedSummaryPart(summaryParts)
+    ? e.bucket === 'release' && statusFailureLabel === 'release failed'
+      ? null
+      : progressLabel ?? lastFailedSummaryPart(summaryParts)
     : null
   const verdictBadge = (
     <VerdictBadge

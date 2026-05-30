@@ -469,6 +469,37 @@ describe('groupReleaseChildren', () => {
     expect(rel?.children?.map(c => c.kind).sort()).toEqual(['review', 'test']);
   });
 
+  it.each([
+    ['test', undefined],
+    ['review', 'NEEDS ATTENTION'],
+    ['commit', undefined],
+  ] as const)('keeps a running release live while a failed %s step can still enter a fix loop', (kind, verdict) => {
+    const release = makeReleaseEntry('rel-1', 1000, null);
+    const child = makeStepEntry(`${kind}-1`, kind, 1010, 'rel-1', kind === 'review' ? 0 : 1);
+    child.verdict = verdict;
+
+    const out = groupReleaseChildren([release, child]);
+    const rel = out.find(e => e.navJobId === 'rel-1');
+
+    expect(rel?.status).toBe('running');
+    expect(rel?.finishedAt).toBeNull();
+    expect(rel?.exitCode).toBeNull();
+    expect(rel?.failureLabel).toBeNull();
+  });
+
+  it('still cancels a running release when the latest child is cancelled', () => {
+    const release = makeReleaseEntry('rel-1', 1000, null);
+    const child = makeStepEntry('commit-1', 'commit', 1010, 'rel-1', -3);
+    child.status = 'aborted';
+
+    const out = groupReleaseChildren([release, child]);
+    const rel = out.find(e => e.navJobId === 'rel-1');
+
+    expect(rel?.status).toBe('aborted');
+    expect(rel?.exitCode).toBe(-3);
+    expect(rel?.failureLabel).toBe('release cancelled');
+  });
+
   it('a single orphaned pipeline step is NOT clustered into a vgroup', () => {
     const test = makeStepEntry('lone-test', 'test', 1000);
     const out = groupReleaseChildren([test]);
