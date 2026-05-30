@@ -511,9 +511,11 @@ function releasePartialDodJobs(): MockJob[] {
 
 async function mockProjectShell(
   page: Page,
-  jobs: MockJob[] = releaseBackedJobs(),
+  jobs: MockJob[] | (() => MockJob[]) = releaseBackedJobs(),
   options: { lastPushError?: string | null } = {},
 ): Promise<void> {
+  const currentJobs = () => typeof jobs === 'function' ? jobs() : jobs
+
   await page.route('**/api/projects', (route: Route) =>
     route.fulfill({
       json: {
@@ -551,7 +553,7 @@ async function mockProjectShell(
   )
   await page.route(
     (url) => url.pathname === '/api/jobs' && url.searchParams.get('project') === PROJECT,
-    (route: Route) => route.fulfill({ json: { jobs, pendingReleaseProjects: [] } }),
+    (route: Route) => route.fulfill({ json: { jobs: currentJobs(), pendingReleaseProjects: [] } }),
   )
   await page.route(`**/api/projects/by-project/${PROJECT}/config`, (route: Route) =>
     route.fulfill({
@@ -612,6 +614,112 @@ async function mockProjectShell(
 }
 
 test.describe('PipelineStrip visibility', () => {
+  test('terminal tab polls from review to commit and clears the strip after completion', async ({ page }) => {
+    let phase: 'review' | 'commit' | 'done' = 'review'
+
+    await mockProjectShell(page, () => {
+      if (phase === 'review') return releaseBackedJobs()
+
+      if (phase === 'commit') {
+        const releaseId = 'strip-release-1'
+        return [
+          {
+            id: releaseId,
+            project: PROJECT,
+            kind: 'release',
+            status: 'running',
+            exit_code: null,
+            started_at: now() - 30,
+            finished_at: null,
+            pid: 0,
+            log_path: '',
+            seen: true,
+            session_id: null,
+            context_meta: null,
+            provider: 'claude',
+            work_summary: 'Commit is running.',
+          },
+          {
+            id: 'strip-test-1',
+            project: PROJECT,
+            kind: 'test',
+            status: 'done',
+            exit_code: 0,
+            started_at: now() - 25,
+            finished_at: now() - 22,
+            pid: 0,
+            log_path: '',
+            seen: true,
+            session_id: null,
+            parent_job_id: releaseId,
+            release_id: null,
+            context_meta: null,
+            provider: 'claude',
+            work_summary: 'Tests passed.',
+          },
+          {
+            id: 'strip-review-1',
+            project: PROJECT,
+            kind: 'review',
+            status: 'done',
+            exit_code: 0,
+            started_at: now() - 20,
+            finished_at: now() - 15,
+            pid: 0,
+            log_path: '',
+            seen: true,
+            session_id: 'strip-review-session',
+            parent_job_id: 'strip-test-1',
+            release_id: null,
+            context_meta: null,
+            provider: 'claude',
+            work_summary: 'Review passed.',
+            verdict: 'LGTM',
+          },
+          {
+            id: 'strip-commit-1',
+            project: PROJECT,
+            kind: 'commit',
+            status: 'running',
+            exit_code: null,
+            started_at: now() - 5,
+            finished_at: null,
+            pid: 0,
+            log_path: '',
+            seen: true,
+            session_id: null,
+            parent_job_id: 'strip-review-1',
+            release_id: null,
+            context_meta: null,
+            provider: 'claude',
+            work_summary: 'Commit is running.',
+          },
+        ]
+      }
+
+      return []
+    })
+    await page.goto(`/project/${PROJECT}/terminal`)
+
+    await expect(page.getByLabel(/pipeline summary: review running/i)).toBeVisible({ timeout: 8_000 })
+    await expect(page.getByTitle('review in progress — click to open terminal')).toBeVisible()
+    await expect(page.getByTitle('commit in progress — click to open terminal')).toHaveCount(0)
+
+    phase = 'commit'
+
+    await expect(page.getByLabel(/pipeline summary: commit running/i)).toBeVisible({ timeout: 12_000 })
+    await expect(page.getByTitle('test completed — click to view log')).toBeVisible()
+    await expect(page.getByTitle('verdict: LGTM — click to view findings')).toBeVisible()
+    await expect(page.getByTitle('commit in progress — click to open terminal')).toBeVisible()
+    await expect(page.getByTitle('review in progress — click to open terminal')).toHaveCount(0)
+
+    phase = 'done'
+
+    await expect(page.getByLabel(/pipeline summary:/i)).toHaveCount(0, { timeout: 12_000 })
+    await expect(page.getByTitle('View unified release trace')).toHaveCount(0, { timeout: 12_000 })
+    await expect(page.getByRole('button', { name: 'abort' })).toHaveCount(0, { timeout: 12_000 })
+  })
+
   test('terminal tab shows active pipeline status and release abort controls', async ({ page }) => {
     await mockProjectShell(page)
     await page.goto(`/project/${PROJECT}/terminal`)

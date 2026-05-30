@@ -197,6 +197,50 @@ test.describe('WorkflowRunDetail UI', () => {
     await expect(page.locator('[aria-label="status running"]')).toHaveCount(0);
   });
 
+  test('live run transitions to cancelled final snapshot and surfaces the cancelled step after poll', async ({ page }) => {
+    let serveRunning = true;
+
+    await stubShellRoutes(page);
+    await page.route(`**/api/workflow-runs/${RUN_ID}`, (route: Route) =>
+      route.fulfill({
+        json: serveRunning
+          ? ({
+              run: makeRun('running'),
+              steps: [makeStep('s1', 'run-review', 'running')],
+            } satisfies RunDetail)
+          : ({
+              run: makeRun('cancelled', { error: 'release was cancelled before completion' }),
+              steps: [
+                makeStep('s1', 'run-review', 'cancelled', {
+                  completedAt: null,
+                  durationMs: null,
+                  error: 'release was cancelled before completion',
+                }),
+              ],
+            } satisfies RunDetail),
+      }),
+    );
+
+    await page.goto(`/workflow-runs/${RUN_ID}`);
+
+    await expect(page.locator('[aria-label="status running"]').first()).toBeVisible({ timeout: 8_000 });
+    await expect(page.getByText('live · refreshes every 5s')).toBeVisible({ timeout: 8_000 });
+    await expect(page.getByText('final snapshot')).toHaveCount(0);
+
+    serveRunning = false;
+
+    await expect(page.locator('[aria-label="status cancelled"]').first()).toBeVisible({ timeout: 12_000 });
+    await expect(page.getByText('final snapshot')).toBeVisible({ timeout: 12_000 });
+    await expect(page.getByText('release was cancelled before completion').first()).toBeVisible({
+      timeout: 12_000,
+    });
+    await expect(visibleStepAttentionLink(page, /release was cancelled before completion/i)).toBeVisible({
+      timeout: 12_000,
+    });
+    await expect(page.getByText('live · refreshes every 5s')).toHaveCount(0);
+    await expect(page.locator('[aria-label="status running"]')).toHaveCount(0);
+  });
+
   // ---------------------------------------------------------------------------
   // Failed run with error message
   // ---------------------------------------------------------------------------
