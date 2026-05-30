@@ -133,13 +133,15 @@ export function AgentsStats({ projectName }: { projectName: string }) {
             {totalFiles > 0 && <span>{totalFiles} files touched</span>}
           </div>
         )}
-        <button
+        <Button
           type="button"
-          className="text-xs text-text-secondary hover:text-accent transition-colors cursor-pointer"
+          variant="link"
+          size="sm"
+          className="text-text-secondary hover:text-accent"
           onClick={() => goToAgents()}
         >
           Manage →
-        </button>
+        </Button>
       </header>
       <ul className="divide-y divide-border">
         {entries.map(e => {
