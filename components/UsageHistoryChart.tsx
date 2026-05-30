@@ -11,6 +11,7 @@ import {
   Tooltip,
   ReferenceLine,
 } from 'recharts'
+import { EmptyState } from '@/components/ui/EmptyState'
 import { SegmentedControl } from '@/components/ui/SegmentedControl'
 
 interface UsageHistoryBucket {
@@ -121,9 +122,12 @@ function ProviderChart({
         </span>
       </div>
       {!hasAnyTokens && !hasAnyRate ? (
-        <div className="w-full h-40 bg-bg-secondary rounded flex items-center justify-center text-xs text-text-tertiary px-4 text-center">
-          No jobs routed to this provider in this window. Agents currently run elsewhere; this chart will populate once a job completes here.
-        </div>
+        <EmptyState
+          title="No jobs routed to this provider in this window."
+          description="Agents currently run elsewhere; this chart will populate once a job completes here."
+          paddingY="xs"
+          className="h-40 rounded bg-bg-secondary"
+        />
       ) : (
       <div className="w-full h-40 bg-bg-secondary rounded">
         <ResponsiveContainer width="100%" height="100%">
@@ -231,7 +235,15 @@ export function UsageHistoryChart({ hours = 24 }: { hours?: number } = {}) {
 
   const sevenDay = data.series.filter((s) => s.windowKey === '7d')
   if (sevenDay.length === 0) {
-    return <div className="text-sm text-text-tertiary">No history yet — first snapshot lands within ~5 min of boot.</div>
+    return (
+      <EmptyState
+        title="No history yet"
+        description="First snapshot lands within ~5 min of boot."
+        paddingY="xs"
+        align="start"
+        className="!px-0 !py-0"
+      />
+    )
   }
 
   // Build aggregate: union of all bucket timestamps; per-bucket avg totalTokens across providers.
