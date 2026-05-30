@@ -35,7 +35,7 @@ function applyCodes(state: State, codes: number[]): State {
   let s = { ...state }
   for (let i = 0; i < codes.length; i++) {
     const c = codes[i]
-    if (c === 0 || isNaN(c)) s = {}
+    if (c === 0) s = {}
     else if (c === 1) s.bold = true
     else if (c === 2) s.dim = true
     else if (c === 3) s.italic = true
