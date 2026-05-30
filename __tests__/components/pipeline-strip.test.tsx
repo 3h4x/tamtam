@@ -18,8 +18,8 @@ vi.mock('next/navigation', () => ({
 }))
 
 vi.mock('next/link', () => ({
-  default: ({ children, href, className }: React.PropsWithChildren<{ href: string; className?: string }>) => (
-    <a href={href} className={className}>{children}</a>
+  default: ({ children, href, className, title }: React.PropsWithChildren<{ href: string; className?: string; title?: string }>) => (
+    <a href={href} className={className} title={title}>{children}</a>
   ),
 }))
 
@@ -29,10 +29,6 @@ vi.mock('@/lib/client-api', () => ({
 
 vi.mock('@/components/Toast', () => ({
   useToast: () => ({ toast: toastMock }),
-}))
-
-vi.mock('@/lib/shared/format', () => ({
-  formatAgo: (ts: number) => `ago:${ts}`,
 }))
 
 function buildConfig(overrides: Partial<ProjectConfig> = {}): ProjectConfig {
@@ -134,275 +130,9 @@ describe('PipelineStrip', () => {
     unmount()
   })
 
-  it('only shows jobs that actually ran on the short-circuit push path', () => {
-    const { container, unmount } = renderStrip({
-      projectJobs: [
-        buildJob({ id: 'test-1', kind: 'test', started_at: 100, finished_at: 110, release_id: 'rel-1' }),
-        buildJob({ id: 'push-1', kind: 'push', started_at: 120, status: 'running', finished_at: null, exit_code: null, release_id: 'rel-1' }),
-      ],
-    })
-
-    // review/fix/commit never ran — they should not appear at all
-    expect(container.querySelector('[aria-label^="review:"]')).toBeNull()
-    expect(container.querySelector('[aria-label^="fix:"]')).toBeNull()
-    expect(container.querySelector('[aria-label^="commit:"]')).toBeNull()
-    // test chip is present with label 'test' (not 'run')
-    expect(container.querySelector('[aria-label^="test:"]')).not.toBeNull()
-    expect(container.textContent).toContain('push')
-    expect(container.textContent).toContain('running')
-    unmount()
-  })
-
-  it('excludes unrelated nearby pipeline jobs that are not linked to the running release', () => {
-    const { container, unmount } = renderStrip({
-      projectJobs: [
-        buildJob({ id: 'manual-test', kind: 'test', started_at: 100, finished_at: 110 }),
-        buildJob({ id: 'release-review', kind: 'review', started_at: 120, finished_at: 150, verdict: 'LGTM', release_id: 'rel-2' }),
-        buildJob({ id: 'release-push', kind: 'push', started_at: 160, status: 'running', finished_at: null, exit_code: null, release_id: 'rel-2' }),
-      ],
-    })
-
-    expect(container.querySelector('[aria-label="test: done. tests passed (ago:110) — click to view log"]')).toBeNull()
-    expect(container.querySelector('[aria-label^="review: done. LGTM"]')).not.toBeNull()
-    expect(container.querySelector('[aria-label^="push:"]')).not.toBeNull()
-    unmount()
-  })
-
-  it('uses the newest review job when a release has multiple reviews', () => {
-    const { container, unmount } = renderStrip({
-      projectJobs: [
-        buildJob({ id: 'review-old', kind: 'review', started_at: 100, finished_at: 130, verdict: 'LGTM', release_id: 'rel-latest' }),
-        buildJob({ id: 'review-new', kind: 'review', started_at: 140, finished_at: 170, verdict: 'NEEDS ATTENTION', release_id: 'rel-latest' }),
-        buildJob({ id: 'fix-latest', kind: 'fix', started_at: 180, status: 'running', finished_at: null, exit_code: null, release_id: 'rel-latest' }),
-      ],
-    })
-
-    expect(container.querySelector('[aria-label^="review: attention. verdict: NEEDS ATTENTION"]')).not.toBeNull()
-    expect(container.querySelector('[aria-label^="review: done. LGTM"]')).toBeNull()
-    unmount()
-  })
-
-  it('excludes concurrent standalone pipeline jobs while a release-backed chain is running', () => {
-    const { container, unmount } = renderStrip({
-      projectJobs: [
-        buildJob({ id: 'rel-standalone-filter', kind: 'release', started_at: 90, status: 'running', finished_at: null, exit_code: null }),
-        buildJob({ id: 'release-review-running', kind: 'review', started_at: 100, status: 'running', finished_at: null, exit_code: null, release_id: 'rel-standalone-filter' }),
-        buildJob({ id: 'manual-test-running', kind: 'test', started_at: 110, status: 'running', finished_at: null, exit_code: null }),
-      ],
-    })
-
-    expect(container.querySelector('[aria-label^="review: running."]')).not.toBeNull()
-    expect(container.querySelector('[aria-label^="test: running."]')).toBeNull()
-    expect(container.querySelector('a[href="/project/acme%2Fwidgets/release/rel-standalone-filter"]')).not.toBeNull()
-    unmount()
-  })
-
-  it('renders test chip with label "test" when a test job is running', () => {
-    const { container, unmount } = renderStrip({
-      projectJobs: [
-        buildJob({ id: 'test-run-1', kind: 'test', started_at: 100, status: 'running', finished_at: null, exit_code: null, session_id: 'test-session' }),
-      ],
-    })
-
-    expect(container.querySelector('[aria-label^="test: running."]')).not.toBeNull()
-    expect(container.textContent).toContain('test')
-    expect(Array.from(container.querySelectorAll('button')).some(button => button.textContent === 'abort')).toBe(false)
-    unmount()
-  })
-
-  it('keeps the summary chip non-actionable while removing click CTA copy for running steps', () => {
-    const { container, unmount } = renderStrip({
-      projectJobs: [
-        buildJob({ id: 'review-running-1', kind: 'review', started_at: 100, status: 'running', finished_at: null, exit_code: null, session_id: 'review-running-session' }),
-      ],
-    })
-
-    const summary = container.querySelector('[aria-label^="pipeline summary:"]')
-    if (!(summary instanceof HTMLDivElement)) throw new Error('summary chip not found')
-    expect(summary.textContent).not.toContain('click to')
-    expect(summary.getAttribute('title')).toBe('review in progress')
-
-    const reviewButton = container.querySelector('[aria-label^="review: running."]')
-    if (!(reviewButton instanceof HTMLButtonElement)) throw new Error('review button not found')
-    expect(reviewButton.getAttribute('title')).toBe('review in progress — click to open terminal')
-
-    unmount()
-  })
-
-  it('shows parent-linked pipeline ancestors when release_id is absent and omits the trace link', () => {
-    const { container, unmount } = renderStrip({
-      projectJobs: [
-        buildJob({ id: 'test-parent', kind: 'test', started_at: 100, finished_at: 110 }),
-        buildJob({ id: 'review-parent', kind: 'review', started_at: 120, finished_at: 150, verdict: 'NEEDS ATTENTION', parent_job_id: 'test-parent' }),
-        buildJob({ id: 'fix-child', kind: 'fix', started_at: 160, status: 'running', finished_at: null, exit_code: null, parent_job_id: 'review-parent' }),
-      ],
-    })
-
-    expect(container.querySelector('[aria-label^="test: done."]')).not.toBeNull()
-    expect(container.querySelector('[aria-label^="fix: running."]')).not.toBeNull()
-    expect(container.textContent).toContain('start')
-    expect(container.textContent).toContain('now')
-    expect(container.textContent).toContain('goal')
-    expect(container.querySelector('a[title="View unified release trace"]')).toBeNull()
-    expect(Array.from(container.querySelectorAll('button')).some(button => button.textContent === 'abort')).toBe(false)
-    unmount()
-  })
-
-  it('shows review as attention and fix as running independently after a NEEDS ATTENTION verdict', () => {
-    const { container, unmount } = renderStrip({
-      projectJobs: [
-        buildJob({ id: 'review-1', kind: 'review', started_at: 100, verdict: 'NEEDS ATTENTION', session_id: 'review-session', release_id: 'rel-3' }),
-        buildJob({ id: 'fix-1', kind: 'fix', started_at: 120, status: 'running', finished_at: null, exit_code: null, session_id: 'fix-session', release_id: 'rel-3' }),
-      ],
-    })
-
-    // review chip shows as attention (NEEDS ATTENTION verdict), opens the review session
-    const reviewButton = container.querySelector('[aria-label^="review: attention."]')
-    if (!(reviewButton instanceof HTMLButtonElement)) throw new Error('review button not found')
-    reviewButton.dispatchEvent(new MouseEvent('click', { bubbles: true }))
-    expect(pushMock).toHaveBeenCalledWith('/project/acme%2Fwidgets/terminal/review-session')
-
-    pushMock.mockReset()
-
-    // fix chip shows as running, opens the fix session
-    const fixButton = container.querySelector('[aria-label^="fix: running."]')
-    if (!(fixButton instanceof HTMLButtonElement)) throw new Error('fix button not found')
-    fixButton.dispatchEvent(new MouseEvent('click', { bubbles: true }))
-    expect(pushMock).toHaveBeenCalledWith('/project/acme%2Fwidgets/terminal/fix-session')
-
-    unmount()
-  })
-
-  it('renders connectors only between the three journey chips', () => {
-    const { container, unmount } = renderStrip({
-      projectJobs: [
-        buildJob({ id: 'release-journey-root', kind: 'release', started_at: 90, status: 'running', finished_at: null, exit_code: null }),
-        buildJob({ id: 'test-journey', kind: 'test', started_at: 100, release_id: 'release-journey-root' }),
-        buildJob({ id: 'review-journey', kind: 'review', started_at: 120, verdict: 'LGTM', release_id: 'release-journey-root' }),
-        buildJob({ id: 'commit-journey', kind: 'commit', started_at: 140, release_id: 'release-journey-root' }),
-        buildJob({ id: 'push-journey', kind: 'push', started_at: 160, status: 'running', finished_at: null, exit_code: null, release_id: 'release-journey-root' }),
-      ],
-    })
-
-    const connectors = Array.from(container.querySelectorAll('span'))
-      .filter((span) => typeof span.className === 'string' && span.className.includes('h-0.5') && span.className.includes('w-4'))
-    expect(connectors).toHaveLength(2)
-    unmount()
-  })
-
-  it('keeps the summary chip non-actionable while removing click CTA copy for attention states', () => {
-    const { container, unmount } = renderStrip({
-      projectJobs: [
-        buildJob({ id: 'release-attention-root', kind: 'release', started_at: 90, status: 'running', finished_at: null, exit_code: null }),
-        buildJob({ id: 'review-attention-1', kind: 'review', started_at: 100, verdict: 'NEEDS ATTENTION', session_id: 'review-attention-session', release_id: 'release-attention-root' }),
-      ],
-    })
-
-    const summary = container.querySelector('[aria-label^="pipeline summary:"]')
-    if (!(summary instanceof HTMLDivElement)) throw new Error('summary chip not found')
-    expect(summary.textContent).not.toContain('click to')
-    expect(summary.getAttribute('title')).toBe('verdict: NEEDS ATTENTION')
-
-    const reviewButton = container.querySelector('[aria-label^="review: attention."]')
-    if (!(reviewButton instanceof HTMLButtonElement)) throw new Error('review button not found')
-    expect(reviewButton.getAttribute('title')).toBe('verdict: NEEDS ATTENTION — click to view findings')
-
-    unmount()
-  })
-
-  it('marks a completed review with no verdict as failed unknown while a linked fix is running', () => {
-    const { container, unmount } = renderStrip({
-      projectJobs: [
-        buildJob({ id: 'review-unknown', kind: 'review', started_at: 100, verdict: undefined, release_id: 'rel-unknown' }),
-        buildJob({ id: 'fix-unknown', kind: 'fix', started_at: 120, status: 'running', finished_at: null, exit_code: null, release_id: 'rel-unknown' }),
-      ],
-    })
-
-    expect(container.querySelector('[aria-label^="review: failed. verdict: unknown"]')).not.toBeNull()
-    unmount()
-  })
-
-  it('hides the strip after a failed pipeline step when nothing is still running', () => {
-    const { container, unmount } = renderStrip({
-      projectJobs: [
-        buildJob({ id: 'push-failed', kind: 'push', started_at: 100, exit_code: 1, finished_at: 110, release_id: 'rel-failed' }),
-      ],
-      config: buildConfig({ last_push_error: 'Push failed: remote rejected' }),
-      unpushed: 1,
-    })
-
-    expect(container.innerHTML).toBe('')
-    unmount()
-  })
-
-  it('retries a failed push from the retry button and opens the new push job', async () => {
-    pushProjectMock.mockResolvedValue({ job_id: 'push-2' })
-
-    const { container, unmount } = renderStrip({
-      config: buildConfig({ auto_pr_merge_enabled: true }),
-      projectJobs: [
-        buildJob({ id: 'review-1', kind: 'review', started_at: 100, verdict: 'LGTM', session_id: 'review-session', release_id: 'rel-4' }),
-        buildJob({ id: 'push-1', kind: 'push', started_at: 150, exit_code: 1, finished_at: 160, release_id: 'rel-4' }),
-        buildJob({ id: 'dod-1', kind: 'mark-dod', started_at: 200, status: 'running', finished_at: null, exit_code: null, release_id: 'rel-4' }),
-      ],
-    })
-
-    const retryButton = container.querySelector('button[title="Retry push"]')
-    if (!(retryButton instanceof HTMLButtonElement)) throw new Error('retry button not found')
-
-    // Only job-backed steps should render; auto-merge stays hidden until pr-wait actually starts.
-    expect(container.querySelector('[aria-label^="merge:"]')).toBeNull()
-
-    retryButton.dispatchEvent(new MouseEvent('click', { bubbles: true }))
-
-    await vi.waitFor(() => {
-      expect(pushProjectMock).toHaveBeenCalledWith('acme/widgets', { releaseId: 'rel-4' })
-      expect(pushMock).toHaveBeenCalledWith('/project/acme%2Fwidgets/terminal?job=push-2')
-    })
-
-    unmount()
-  })
-
-  it('disables failed-push retry while jobs are paused', () => {
-    const { container, unmount } = renderStrip({
-      jobsPaused: true,
-      config: buildConfig({ auto_pr_merge_enabled: true }),
-      projectJobs: [
-        buildJob({ id: 'review-1', kind: 'review', started_at: 100, verdict: 'LGTM', release_id: 'rel-4' }),
-        buildJob({ id: 'push-1', kind: 'push', started_at: 150, exit_code: 1, finished_at: 160, release_id: 'rel-4' }),
-        buildJob({ id: 'dod-1', kind: 'mark-dod', started_at: 200, status: 'running', finished_at: null, exit_code: null, release_id: 'rel-4' }),
-      ],
-    })
-
-    const retryButton = container.querySelector('button[title="Jobs are paused globally. Resume jobs to start a push."]')
-    if (!(retryButton instanceof HTMLButtonElement)) throw new Error('retry button not found')
-    expect(retryButton.disabled).toBe(true)
-
-    retryButton.dispatchEvent(new MouseEvent('click', { bubbles: true }))
-    expect(pushProjectMock).not.toHaveBeenCalled()
-    expect(toastMock).not.toHaveBeenCalled()
-
-    unmount()
-  })
-
-  it('shows merge during pr-wait without a synthetic pre-merge dod step', () => {
-    const { container, unmount } = renderStrip({
-      config: buildConfig({ auto_pr_merge_enabled: true }),
-      projectJobs: [
-        buildJob({ id: 'review-merge-1', kind: 'review', started_at: 100, verdict: 'LGTM', release_id: 'rel-merge-1' }),
-        buildJob({ id: 'push-merge-1', kind: 'push', started_at: 150, finished_at: 160, release_id: 'rel-merge-1' }),
-        buildJob({ id: 'pr-wait-1', kind: 'pr-wait', started_at: 170, status: 'running', finished_at: null, exit_code: null, release_id: 'rel-merge-1' }),
-      ],
-    })
-
-    expect(container.querySelector('[aria-label^="merge: running."]')).not.toBeNull()
-    expect(container.querySelector('[aria-label^="dod:"]')).toBeNull()
-
-    unmount()
-  })
-
-  it('confirms and aborts the active release pipeline', async () => {
+  it('surfaces an active release step with a trace link and abort control', async () => {
     const fetchMock = vi.fn().mockResolvedValue({
+      ok: true,
       json: async () => ({ status: 'aborted' }),
     })
     vi.stubGlobal('fetch', fetchMock)
@@ -410,17 +140,26 @@ describe('PipelineStrip', () => {
     const { container, onRefresh, unmount } = renderStrip({
       projectJobs: [
         buildJob({ id: 'release-1', kind: 'release', started_at: 90, status: 'running', finished_at: null, exit_code: null }),
-        buildJob({ id: 'review-1', kind: 'review', started_at: 100, status: 'running', finished_at: null, exit_code: null }),
+        buildJob({ id: 'review-1', kind: 'review', started_at: 100, status: 'running', finished_at: null, exit_code: null, session_id: 'review-session', release_id: 'release-1' }),
       ],
     })
 
-    const abortButton = Array.from(container.querySelectorAll('button')).find(button => button.textContent === 'abort')
+    expect(container.querySelector('[aria-label="pipeline summary: review running"]')).not.toBeNull()
+    expect(container.querySelector('[aria-label^="review: running."]')).not.toBeNull()
+    expect(container.querySelector('a[title="View unified release trace"]')).not.toBeNull()
+
+    const reviewButton = container.querySelector('[aria-label^="review: running."]')
+    if (!(reviewButton instanceof HTMLButtonElement)) throw new Error('review button not found')
+    reviewButton.dispatchEvent(new MouseEvent('click', { bubbles: true }))
+    expect(pushMock).toHaveBeenCalledWith('/project/acme%2Fwidgets/terminal/review-session')
+
+    const abortButton = Array.from(container.querySelectorAll('button')).find((button) => button.textContent === 'abort')
     if (!(abortButton instanceof HTMLButtonElement)) throw new Error('abort button not found')
     flushSync(() => {
       abortButton.dispatchEvent(new MouseEvent('click', { bubbles: true }))
     })
 
-    const confirmButton = Array.from(container.querySelectorAll('button')).find(button => button.textContent === 'yes')
+    const confirmButton = Array.from(container.querySelectorAll('button')).find((button) => button.textContent === 'yes')
     if (!(confirmButton instanceof HTMLButtonElement)) throw new Error('confirm button not found')
     flushSync(() => {
       confirmButton.dispatchEvent(new MouseEvent('click', { bubbles: true }))
@@ -435,45 +174,251 @@ describe('PipelineStrip', () => {
     unmount()
   })
 
-  it('treats abort-pending release responses as accepted aborts', async () => {
+  it('allows aborting an active release while jobs are paused', async () => {
     const fetchMock = vi.fn().mockResolvedValue({
-      ok: false,
-      status: 409,
-      json: async () => ({
-        status: 'abort_pending',
-        detail: 'Timed out waiting for push to stop cleanly',
-        release_id: 'release-1',
-        killed_job_id: null,
-      }),
+      ok: true,
+      json: async () => ({ status: 'aborted' }),
     })
     vi.stubGlobal('fetch', fetchMock)
 
     const { container, onRefresh, unmount } = renderStrip({
+      jobsPaused: true,
       projectJobs: [
         buildJob({ id: 'release-1', kind: 'release', started_at: 90, status: 'running', finished_at: null, exit_code: null }),
-        buildJob({ id: 'push-1', kind: 'push', started_at: 100, status: 'running', finished_at: null, exit_code: null, release_id: 'release-1' }),
+        buildJob({ id: 'review-1', kind: 'review', started_at: 100, status: 'running', finished_at: null, exit_code: null, session_id: 'review-session', release_id: 'release-1' }),
       ],
     })
 
-    const abortButton = Array.from(container.querySelectorAll('button')).find(button => button.textContent === 'abort')
+    const abortButton = Array.from(container.querySelectorAll('button')).find((button) => button.textContent === 'abort')
     if (!(abortButton instanceof HTMLButtonElement)) throw new Error('abort button not found')
     flushSync(() => {
       abortButton.dispatchEvent(new MouseEvent('click', { bubbles: true }))
     })
 
-    const confirmButton = Array.from(container.querySelectorAll('button')).find(button => button.textContent === 'yes')
+    const confirmButton = Array.from(container.querySelectorAll('button')).find((button) => button.textContent === 'yes')
     if (!(confirmButton instanceof HTMLButtonElement)) throw new Error('confirm button not found')
+    expect(confirmButton.disabled).toBe(false)
     flushSync(() => {
       confirmButton.dispatchEvent(new MouseEvent('click', { bubbles: true }))
     })
 
     await vi.waitFor(() => {
       expect(fetchMock).toHaveBeenCalledWith('/api/projects/by-project/acme%2Fwidgets/release/abort', { method: 'POST' })
-      expect(toastMock).toHaveBeenCalledWith('Pipeline abort pending', 'info')
+      expect(toastMock).toHaveBeenCalledWith('Pipeline aborted', 'success')
       expect(onRefresh).toHaveBeenCalled()
     })
-    expect(toastMock).not.toHaveBeenCalledWith('No active pipeline', 'info')
 
+    unmount()
+  })
+
+  it('keeps transitive parent-linked release steps visible when child rows omit release_id', () => {
+    const { container, unmount } = renderStrip({
+      projectJobs: [
+        buildJob({ id: 'release-1', kind: 'release', started_at: 90, status: 'running', finished_at: null, exit_code: null }),
+        buildJob({ id: 'test-1', kind: 'test', started_at: 100, parent_job_id: 'release-1' }),
+        buildJob({ id: 'review-1', kind: 'review', started_at: 130, status: 'running', finished_at: null, exit_code: null, session_id: 'review-session', parent_job_id: 'test-1' }),
+      ],
+    })
+
+    expect(container.querySelector('[aria-label="pipeline summary: review running"]')).not.toBeNull()
+    expect(container.querySelector('[aria-label^="test: done."]')).not.toBeNull()
+    expect(container.querySelector('[aria-label^="review: running."]')).not.toBeNull()
+    expect(container.querySelector('a[href="/project/acme%2Fwidgets/release/release-1"]')).not.toBeNull()
+    expect(Array.from(container.querySelectorAll('button')).some((button) => button.textContent === 'abort')).toBe(true)
+    unmount()
+  })
+
+  it('does not summarize unrelated standalone jobs while a release is active', () => {
+    const { container, unmount } = renderStrip({
+      projectJobs: [
+        buildJob({ id: 'release-1', kind: 'release', started_at: 90, status: 'running', finished_at: null, exit_code: null }),
+        buildJob({ id: 'manual-test', kind: 'test', started_at: 130, status: 'running', finished_at: null, exit_code: null, session_id: 'manual-test-session' }),
+      ],
+    })
+
+    expect(container.querySelector('[aria-label="pipeline summary: release running"]')).not.toBeNull()
+    expect(container.querySelector('[aria-label="pipeline summary: test running"]')).toBeNull()
+    expect(container.querySelector('[aria-label^="test: running."]')).toBeNull()
+    expect(container.querySelector('a[href="/project/acme%2Fwidgets/release/release-1"]')).not.toBeNull()
+    expect(Array.from(container.querySelectorAll('button')).some((button) => button.textContent === 'abort')).toBe(true)
+    unmount()
+  })
+
+  it('renders only the newest job for each step kind during release fix loops', () => {
+    const { container, unmount } = renderStrip({
+      projectJobs: [
+        buildJob({ id: 'release-1', kind: 'release', started_at: 90, status: 'running', finished_at: null, exit_code: null }),
+        buildJob({ id: 'test-1', kind: 'test', started_at: 100, release_id: 'release-1' }),
+        buildJob({ id: 'review-old', kind: 'review', started_at: 130, verdict: 'NEEDS ATTENTION', session_id: 'review-old-session', release_id: 'release-1' }),
+        buildJob({ id: 'fix-1', kind: 'fix', started_at: 160, release_id: 'release-1' }),
+        buildJob({ id: 'review-new', kind: 'review', started_at: 190, status: 'running', finished_at: null, exit_code: null, session_id: 'review-new-session', release_id: 'release-1' }),
+      ],
+    })
+
+    const reviewButtons = container.querySelectorAll('[aria-label^="review:"]')
+    expect(reviewButtons).toHaveLength(1)
+    expect(container.querySelector('[aria-label="pipeline summary: review running"]')).not.toBeNull()
+    expect(container.querySelector('[aria-label^="review: running."]')).not.toBeNull()
+    expect(container.querySelector('[aria-label^="review: attention."]')).toBeNull()
+    expect(container.textContent).toContain('2/3')
+
+    const reviewButton = reviewButtons[0]
+    if (!(reviewButton instanceof HTMLButtonElement)) throw new Error('review button not found')
+    reviewButton.dispatchEvent(new MouseEvent('click', { bubbles: true }))
+    expect(pushMock).toHaveBeenCalledWith('/project/acme%2Fwidgets/terminal/review-new-session')
+
+    unmount()
+  })
+
+  it('surfaces last push error details and retries a release-linked failed push', async () => {
+    pushProjectMock.mockResolvedValue({ status: 'started', job_id: 'push-2' })
+    const { container, unmount } = renderStrip({
+      config: buildConfig({ last_push_error: 'Push failed: remote rejected: protected branch' }),
+      projectJobs: [
+        buildJob({ id: 'release-1', kind: 'release', started_at: 90, status: 'running', finished_at: null, exit_code: null }),
+        buildJob({ id: 'push-1', kind: 'push', started_at: 130, exit_code: 1, finished_at: 150, release_id: 'release-1' }),
+        buildJob({ id: 'fix-1', kind: 'fix', started_at: 160, status: 'running', finished_at: null, exit_code: null, session_id: 'fix-session', release_id: 'release-1' }),
+      ],
+    })
+
+    expect(container.querySelector('[aria-label="pipeline summary: fix running"]')).not.toBeNull()
+    expect(container.querySelector('[aria-label^="push: failed. Push failed: remote rejected: protected branch"]')).not.toBeNull()
+
+    const pushButton = container.querySelector('[aria-label^="push: failed."]')
+    if (!(pushButton instanceof HTMLButtonElement)) throw new Error('push button not found')
+    pushButton.dispatchEvent(new MouseEvent('click', { bubbles: true }))
+    expect(pushMock).toHaveBeenCalledWith('/project/acme%2Fwidgets/terminal?job=push-1')
+
+    const retryButton = container.querySelector('button[title="Retry push"]')
+    if (!(retryButton instanceof HTMLButtonElement)) throw new Error('retry button not found')
+    retryButton.dispatchEvent(new MouseEvent('click', { bubbles: true }))
+
+    await vi.waitFor(() => {
+      expect(pushProjectMock).toHaveBeenCalledWith('acme/widgets', { releaseId: 'release-1' })
+      expect(pushMock).toHaveBeenCalledWith('/project/acme%2Fwidgets/terminal?job=push-2')
+    })
+
+    unmount()
+  })
+
+  it('disables release-linked failed-push retry while jobs are paused', () => {
+    const { container, unmount } = renderStrip({
+      jobsPaused: true,
+      config: buildConfig({ last_push_error: 'Push failed: remote rejected: protected branch' }),
+      projectJobs: [
+        buildJob({ id: 'release-1', kind: 'release', started_at: 90, status: 'running', finished_at: null, exit_code: null }),
+        buildJob({ id: 'push-1', kind: 'push', started_at: 130, exit_code: 1, finished_at: 150, release_id: 'release-1' }),
+        buildJob({ id: 'fix-1', kind: 'fix', started_at: 160, status: 'running', finished_at: null, exit_code: null, session_id: 'fix-session', release_id: 'release-1' }),
+      ],
+    })
+
+    const retryButton = container.querySelector('button[title="Jobs are paused globally. Resume jobs to start a push."]')
+    if (!(retryButton instanceof HTMLButtonElement)) throw new Error('paused retry button not found')
+    expect(retryButton.disabled).toBe(true)
+
+    retryButton.dispatchEvent(new MouseEvent('click', { bubbles: true }))
+    expect(pushProjectMock).not.toHaveBeenCalled()
+    expect(toastMock).not.toHaveBeenCalledWith('Jobs are paused globally. Resume jobs to start a push.', 'info')
+
+    unmount()
+  })
+
+  it('marks completed review jobs with no verdict as failed unknown', () => {
+    const { container, unmount } = renderStrip({
+      projectJobs: [
+        buildJob({ id: 'release-1', kind: 'release', started_at: 90, status: 'running', finished_at: null, exit_code: null }),
+        buildJob({ id: 'review-1', kind: 'review', started_at: 130, verdict: undefined, session_id: 'review-session', release_id: 'release-1' }),
+        buildJob({ id: 'fix-1', kind: 'fix', started_at: 160, status: 'running', finished_at: null, exit_code: null, session_id: 'fix-session', release_id: 'release-1' }),
+      ],
+    })
+
+    expect(container.querySelector('[aria-label="pipeline summary: fix running"]')).not.toBeNull()
+    expect(container.querySelector('[aria-label^="review: failed. verdict: unknown"]')).not.toBeNull()
+    expect(container.querySelector('[aria-label^="review: done."]')).toBeNull()
+
+    const reviewButton = container.querySelector('[aria-label^="review: failed."]')
+    if (!(reviewButton instanceof HTMLButtonElement)) throw new Error('review button not found')
+    reviewButton.dispatchEvent(new MouseEvent('click', { bubbles: true }))
+    expect(pushMock).toHaveBeenCalledWith('/project/acme%2Fwidgets/terminal/review-session')
+
+    unmount()
+  })
+
+  it('marks DO NOT SHIP reviews as failed instead of done during active releases', () => {
+    const { container, unmount } = renderStrip({
+      projectJobs: [
+        buildJob({ id: 'release-1', kind: 'release', started_at: 90, status: 'running', finished_at: null, exit_code: null }),
+        buildJob({ id: 'test-1', kind: 'test', started_at: 110, release_id: 'release-1' }),
+        buildJob({ id: 'review-1', kind: 'review', started_at: 130, verdict: 'DO NOT SHIP', session_id: 'review-session', release_id: 'release-1' }),
+        buildJob({ id: 'fix-1', kind: 'fix', started_at: 160, status: 'running', finished_at: null, exit_code: null, session_id: 'fix-session', release_id: 'release-1' }),
+      ],
+    })
+
+    expect(container.querySelector('[aria-label="pipeline summary: fix running"]')).not.toBeNull()
+    expect(container.querySelector('[aria-label^="review: failed. verdict: DO NOT SHIP"]')).not.toBeNull()
+    expect(container.querySelector('[aria-label^="review: done. verdict: DO NOT SHIP"]')).toBeNull()
+    expect(container.textContent).toContain('1/3')
+
+    const reviewButton = container.querySelector('[aria-label^="review: failed."]')
+    if (!(reviewButton instanceof HTMLButtonElement)) throw new Error('review button not found')
+    reviewButton.dispatchEvent(new MouseEvent('click', { bubbles: true }))
+    expect(pushMock).toHaveBeenCalledWith('/project/acme%2Fwidgets/terminal/review-session')
+
+    unmount()
+  })
+
+  it('marks completed DoD as attention when verification counts are incomplete', () => {
+    const { container, unmount } = renderStrip({
+      projectJobs: [
+        buildJob({ id: 'release-1', kind: 'release', started_at: 90, status: 'running', finished_at: null, exit_code: null }),
+        buildJob({
+          id: 'dod-1',
+          kind: 'mark-dod',
+          started_at: 130,
+          release_id: 'release-1',
+          context_meta: JSON.stringify({ verified: 2, total: 3 }),
+        }),
+        buildJob({ id: 'merge-1', kind: 'pr-wait', started_at: 160, status: 'running', finished_at: null, exit_code: null, release_id: 'release-1' }),
+      ],
+    })
+
+    expect(container.querySelector('[aria-label="pipeline summary: merge running"]')).not.toBeNull()
+    expect(container.querySelector('[aria-label^="dod: attention. DoD: 2 / 3 verified"]')).not.toBeNull()
+    expect(container.querySelector('[title="DoD: 2 / 3 verified — 1 unticked — click to view log"]')).not.toBeNull()
+    expect(container.textContent).toContain('0/2')
+
+    unmount()
+  })
+
+  it('shows standalone running pipeline jobs without release-only controls', () => {
+    const { container, unmount } = renderStrip({
+      projectJobs: [
+        buildJob({ id: 'test-1', kind: 'test', started_at: 100, status: 'running', finished_at: null, exit_code: null }),
+      ],
+    })
+
+    expect(container.querySelector('[aria-label="pipeline summary: test running"]')).not.toBeNull()
+    expect(container.querySelector('[aria-label^="test: running."]')).not.toBeNull()
+    expect(container.querySelector('a[title="View unified release trace"]')).toBeNull()
+    expect(Array.from(container.querySelectorAll('button')).some((button) => button.textContent === 'abort')).toBe(false)
+    unmount()
+  })
+
+  it('keeps standalone parent-linked pipeline ancestors visible without release controls', () => {
+    const { container, unmount } = renderStrip({
+      projectJobs: [
+        buildJob({ id: 'test-1', kind: 'test', started_at: 100 }),
+        buildJob({ id: 'review-1', kind: 'review', started_at: 130, verdict: 'NEEDS ATTENTION', parent_job_id: 'test-1' }),
+        buildJob({ id: 'fix-1', kind: 'fix', started_at: 160, status: 'running', finished_at: null, exit_code: null, session_id: 'fix-session', parent_job_id: 'review-1' }),
+      ],
+    })
+
+    expect(container.querySelector('[aria-label="pipeline summary: fix running"]')).not.toBeNull()
+    expect(container.querySelector('[aria-label^="test: done."]')).not.toBeNull()
+    expect(container.querySelector('[aria-label^="review: attention."]')).not.toBeNull()
+    expect(container.querySelector('[aria-label^="fix: running."]')).not.toBeNull()
+    expect(container.querySelector('a[title="View unified release trace"]')).toBeNull()
+    expect(Array.from(container.querySelectorAll('button')).some((button) => button.textContent === 'abort')).toBe(false)
     unmount()
   })
 })

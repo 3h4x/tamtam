@@ -1168,6 +1168,7 @@ Use the QA agent.
       strictPreferred: true,
       requestedModel: 'normal',
       respectJobsPaused: false,
+      isScheduled: false,
     });
   });
 
@@ -1186,6 +1187,7 @@ Use the QA agent.
       strictPreferred: false,
       requestedModel: 'smart',
       respectJobsPaused: false,
+      isScheduled: false,
     });
     const [, cmd] = mocks.startJob.mock.calls[0];
     expect(cmd).toContain('--model smart');
@@ -1222,6 +1224,7 @@ Use the QA agent.
       strictPreferred: false,
       requestedModel: 'smart',
       respectJobsPaused: false,
+      isScheduled: false,
     });
   });
 
@@ -2177,6 +2180,63 @@ describe('POST /api/agents/{agentId}/run weekly quota gating', () => {
     });
     const res = await POST(req, { params: Promise.resolve({ agentId: 'agent-123' }) });
     const data = await res.json();
+    expect(res.status).toBe(429);
+    expect(data.code).toBe('providers_over_budget');
+    expect(data.detail).toContain("Selected provider 'claude' is over budget right now");
+    expect(mocks.startJob).not.toHaveBeenCalled();
+  });
+
+  it('returns 429 for a scheduled pinned-provider agent projected over weekly pace', async () => {
+    const weekMs = 7 * 24 * 60 * 60 * 1000;
+    await sharedHandle.db.execute(sql.raw("UPDATE agents SET schedule = '1h' WHERE id = 'agent-123'"));
+    mocks.getSettings.mockImplementation(() => ({
+      workspace_path: '',
+      github_owner: '',
+      claude_bin: 'claude',
+      log_dir: '/tmp/logs',
+      cli_enabled_providers: ['claude', 'codex'],
+      claude_provider: 'claude',
+      budget_block_at_pct: 95,
+      budget_block_runs_enabled: true,
+      budget_block_on_weekly_pace_enabled: true,
+      cli_bin_claude: '',
+      cli_bin_codex: '',
+      cli_bin_gemini: '',
+      cli_bin_lmstudio: '',
+      frequency: '1h',
+      daytime: false,
+      weekends: false,
+      launchagent_prefix: 'com.tamtam',
+      base_prompt: '',
+      permission_mode: 'bypassPermissions',
+      dirty_worktree_block_threshold: 0,
+    }));
+    snapshots = new Map<CliProvider, QuotaSnapshot | null>([
+      ['claude', {
+        provider: 'claude',
+        fiveHour: { utilization: 11, resetsAt: null, msUntilReset: null },
+        sevenDay: { utilization: 40, resetsAt: null, msUntilReset: weekMs - 50 * 60 * 60 * 1000 },
+        fetchedAt: 0,
+        stale: false,
+      }],
+      ['codex', {
+        provider: 'codex',
+        fiveHour: { utilization: 5, resetsAt: null, msUntilReset: null },
+        sevenDay: { utilization: 10, resetsAt: null, msUntilReset: weekMs - 50 * 60 * 60 * 1000 },
+        fetchedAt: 0,
+        stale: false,
+      }],
+    ]);
+    mocks.getQuotaSnapshots.mockImplementation(() => Promise.resolve(snapshots));
+
+    const req = new NextRequest('http://localhost/api/agents/agent-123/run', {
+      method: 'POST',
+      headers: { 'x-tamtam-trigger': 'schedule' },
+      body: JSON.stringify({ prompt: 'do something' }),
+    });
+    const res = await POST(req, { params: Promise.resolve({ agentId: 'agent-123' }) });
+    const data = await res.json();
+
     expect(res.status).toBe(429);
     expect(data.code).toBe('providers_over_budget');
     expect(data.detail).toContain("Selected provider 'claude' is over budget right now");

@@ -6,6 +6,7 @@ import { getQuotaSnapshots } from '@/lib/usage/quota';
 import { pickCliProvider, hardGateUtilizationFor, type PickCliResult } from '@/lib/usage/cli-picker';
 import type { QuotaSnapshot } from '@/lib/usage/quota-types';
 import { isCliProvider, type CliProvider } from '@/lib/usage/cli-providers';
+import { computeWeeklyBurnThrottle } from '@/lib/shared/budget-throttle';
 
 const PACE_OVERRIDE_URGENCY_PP_PER_HOUR = 1.0;
 
@@ -59,6 +60,10 @@ export interface ResolveProviderOptions {
   fallback?: CliProvider;
   /** Defaults to true; set false only for explicit manual bypasses. */
   respectJobsPaused?: boolean;
+  /** When true, providers whose 7-day utilization is projected to exceed
+   *  quota are skipped in the picker. Set only for scheduled (cron) fires —
+   *  manual/UI starts must not be blocked on a pace projection alone. */
+  isScheduled?: boolean;
 }
 
 export type CliStartGateResult =
@@ -126,6 +131,7 @@ export async function resolveProviderForRun(
           budgetBlockAtPct: settings.budget_block_at_pct ?? 95,
           blockEnabled: true,
           blockOnWeeklyPace: includeWeekly,
+          blockOnProjectedWeekly: !!opts.isScheduled && includeWeekly,
           requestedModel: opts.requestedModel ?? null,
         });
       } catch {
@@ -159,6 +165,7 @@ export async function resolveProviderForRun(
           budgetBlockAtPct: settings.budget_block_at_pct ?? 95,
           blockEnabled: true,
           blockOnWeeklyPace: !!settings.budget_block_on_weekly_pace_enabled,
+          blockOnProjectedWeekly: !!opts.isScheduled && !!settings.budget_block_on_weekly_pace_enabled,
           requestedModel: opts.requestedModel ?? null,
         });
       }
@@ -193,6 +200,7 @@ export async function resolveProviderForRun(
     budgetBlockAtPct: settings.budget_block_at_pct ?? 95,
     blockEnabled: true,
     blockOnWeeklyPace: includeWeekly,
+    blockOnProjectedWeekly: !!opts.isScheduled && includeWeekly,
     requestedModel: opts.requestedModel ?? null,
   });
 }
@@ -211,11 +219,15 @@ export async function checkCliStartGate(
     const parent = getJob(opts.parentJobId);
     const inherited = parent?.provider;
     if (typeof inherited === 'string' && isCliProvider(inherited)) {
-      return checkStrictProviderStart(inherited, 'Inherited', 'continue this provider-scoped session');
+      return checkStrictProviderStart(inherited, 'Inherited', 'continue this provider-scoped session', {
+        isScheduled: !!opts.isScheduled,
+      });
     }
   }
   if (opts.strictPreferred && opts.preferred && isCliProvider(opts.preferred)) {
-    return checkStrictProviderStart(opts.preferred, 'Selected', 'start with this provider');
+    return checkStrictProviderStart(opts.preferred, 'Selected', 'start with this provider', {
+      isScheduled: !!opts.isScheduled,
+    });
   }
   const picked = await resolveProviderForRun(opts);
   if (!picked.provider) {
@@ -236,6 +248,7 @@ async function checkStrictProviderStart(
   provider: CliProvider,
   label: 'Selected' | 'Inherited',
   actionHint: string,
+  options: { isScheduled?: boolean } = {},
 ): Promise<CliStartGateResult> {
   const settings = getSettings();
   const enabled = enabledProvidersFromSettings(settings);
@@ -247,10 +260,17 @@ async function checkStrictProviderStart(
     };
   }
   const snapshots = await getQuotaSnapshots([provider]);
-  const utilization = hardGateUtilizationFor(snapshots.get(provider) ?? null, {
-    includeWeekly: !!settings.budget_block_on_weekly_pace_enabled,
-  });
+  const snapshot = snapshots.get(provider) ?? null;
+  const includeWeekly = !!settings.budget_block_on_weekly_pace_enabled;
+  const utilization = hardGateUtilizationFor(snapshot, { includeWeekly });
   if (utilization >= (settings.budget_block_at_pct ?? 95)) {
+    return {
+      ok: false,
+      status: 429,
+      detail: `${label} provider '${provider}' is over budget right now. Wait for its quota window to reset before trying to ${actionHint}.`,
+    };
+  }
+  if (options.isScheduled && includeWeekly && snapshot && computeWeeklyBurnThrottle(snapshot.sevenDay)) {
     return {
       ok: false,
       status: 429,

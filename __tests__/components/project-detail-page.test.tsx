@@ -30,7 +30,6 @@ const {
   issuesTabPropsMock,
   changesTabPropsMock,
   historyTabPropsMock,
-  pipelineStripPropsMock,
   overviewTabPropsMock,
 } = vi.hoisted(() => ({
   paramsState: {
@@ -56,7 +55,6 @@ const {
   issuesTabPropsMock: vi.fn(),
   changesTabPropsMock: vi.fn(),
   historyTabPropsMock: vi.fn(),
-  pipelineStripPropsMock: vi.fn(),
   overviewTabPropsMock: vi.fn(),
 }))
 
@@ -141,13 +139,6 @@ vi.mock('@/components/project-detail/ConfigTab', () => ({
       <button type="button" onClick={() => void props.onSaveAll()}>save all</button>
     </div>
   ),
-}))
-
-vi.mock('@/components/project-detail/PipelineStrip', () => ({
-  PipelineStrip: (props: { jobsPaused: boolean }) => {
-    pipelineStripPropsMock(props)
-    return <div data-testid="pipeline-strip" data-jobs-paused={props.jobsPaused ? 'true' : 'false'} />
-  },
 }))
 
 vi.mock('@/components/project-detail/ProjectActions', () => ({
@@ -332,7 +323,6 @@ describe('ProjectDetailPage', () => {
     issuesTabPropsMock.mockReset()
     changesTabPropsMock.mockReset()
     historyTabPropsMock.mockReset()
-    pipelineStripPropsMock.mockReset()
     overviewTabPropsMock.mockReset()
     fetchJobsMock.mockResolvedValue({ jobs: [] })
     fetchProjectConfigMock.mockResolvedValue(buildConfig())
@@ -642,27 +632,6 @@ describe('ProjectDetailPage', () => {
     await vi.waitFor(() => {
       expect(container.querySelector('[data-testid="history-tab"]')?.getAttribute('data-jobs-paused')).toBe('false')
       expect(historyTabPropsMock).toHaveBeenLastCalledWith(expect.objectContaining({ jobsPaused: false }))
-    })
-
-    unmount()
-  })
-
-  it('updates terminal pipeline retry pause state live without remounting the project page', async () => {
-    paramsState.tab = 'terminal'
-    const { container, unmount } = renderPage()
-
-    await vi.waitFor(() => {
-      expect(container.querySelector('[data-testid="pipeline-strip"]')?.getAttribute('data-jobs-paused')).toBe('false')
-      expect(pipelineStripPropsMock).toHaveBeenLastCalledWith(expect.objectContaining({ jobsPaused: false }))
-    })
-
-    flushSync(() => {
-      dispatchJobsPausedChanged(true)
-    })
-
-    await vi.waitFor(() => {
-      expect(container.querySelector('[data-testid="pipeline-strip"]')?.getAttribute('data-jobs-paused')).toBe('true')
-      expect(pipelineStripPropsMock).toHaveBeenLastCalledWith(expect.objectContaining({ jobsPaused: true }))
     })
 
     unmount()

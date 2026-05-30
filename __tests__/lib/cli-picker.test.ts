@@ -1,7 +1,8 @@
 import { describe, expect, it } from 'vitest';
 import type { QuotaSnapshot } from '@/lib/usage/quota-types';
 import type { CliProvider } from '@/lib/usage/cli-providers';
-import { pickCliProvider } from '@/lib/usage/cli-picker';
+import { pickCliProvider, hardGateUtilizationFor } from '@/lib/usage/cli-picker';
+import { SEVEN_DAY_WINDOW_MS } from '@/lib/shared/budget-throttle';
 
 function snapshot(provider: 'claude' | 'codex', utilization: number): QuotaSnapshot {
   return {
@@ -438,6 +439,168 @@ describe('pickCliProvider', () => {
         blockEnabled: true,
       });
       expect(result.provider).toBe('lmstudio');
+    });
+  });
+
+  describe('blockOnWeeklyPace (current 7d hard gate)', () => {
+    const WEEK = SEVEN_DAY_WINDOW_MS;
+
+    it('blocks a provider whose current 7d utilization crosses the threshold', () => {
+      const snapshots = new Map<CliProvider, QuotaSnapshot | null>([
+        ['claude', {
+          provider: 'claude',
+          fiveHour: { utilization: 11, resetsAt: null, msUntilReset: null },
+          sevenDay: { utilization: 99, resetsAt: null, msUntilReset: WEEK - 49 * 60 * 60 * 1000 },
+          fetchedAt: 0, stale: false,
+        }],
+        ['codex', {
+          provider: 'codex',
+          fiveHour: { utilization: 5, resetsAt: null, msUntilReset: null },
+          sevenDay: { utilization: 30, resetsAt: null, msUntilReset: WEEK - 49 * 60 * 60 * 1000 },
+          fetchedAt: 0, stale: false,
+        }],
+      ]);
+      const result = pickCliProvider({
+        enabled: ['claude', 'codex'],
+        snapshots,
+        budgetBlockAtPct: 95,
+        blockEnabled: true,
+        blockOnWeeklyPace: true,
+      });
+      expect(result.provider).toBe('codex');
+    });
+
+    it('blocks all providers and returns null when every current 7d utilization crosses the threshold', () => {
+      const over = (provider: 'claude' | 'codex', util: number): QuotaSnapshot => ({
+        provider,
+        fiveHour: { utilization: 10, resetsAt: null, msUntilReset: null },
+        sevenDay: { utilization: util, resetsAt: null, msUntilReset: WEEK - 50 * 60 * 60 * 1000 },
+        fetchedAt: 0, stale: false,
+      });
+      const snapshots = new Map<CliProvider, QuotaSnapshot | null>([
+        ['claude', over('claude', 99)],
+        ['codex', over('codex', 96)],
+      ]);
+      const result = pickCliProvider({
+        enabled: ['claude', 'codex'],
+        snapshots,
+        budgetBlockAtPct: 95,
+        blockEnabled: true,
+        blockOnWeeklyPace: true,
+      });
+      expect(result.provider).toBeNull();
+      expect(result.reason).toBe('all_blocked');
+    });
+
+    it('does not block on projected weekly pace when current 7d utilization is below threshold', () => {
+      const projectedOver: QuotaSnapshot = {
+        provider: 'claude',
+        fiveHour: { utilization: 10, resetsAt: null, msUntilReset: null },
+        // 40% used after 50h projects to 134%, but the hard gate uses current utilization only.
+        sevenDay: { utilization: 40, resetsAt: null, msUntilReset: WEEK - 50 * 60 * 60 * 1000 },
+        fetchedAt: 0, stale: false,
+      };
+      const util = hardGateUtilizationFor(projectedOver, { includeWeekly: true });
+      expect(util).toBe(40);
+    });
+
+    it('does not include current 7d utilization when blockOnWeeklyPace is false', () => {
+      const claudeSnap: QuotaSnapshot = {
+        provider: 'claude',
+        fiveHour: { utilization: 11, resetsAt: null, msUntilReset: null },
+        sevenDay: { utilization: 35, resetsAt: null, msUntilReset: WEEK - 49 * 60 * 60 * 1000 },
+        fetchedAt: 0, stale: false,
+      };
+      const util = hardGateUtilizationFor(claudeSnap);
+      // Without includeWeekly: max(5h=11%, credits=0)
+      expect(util).toBe(11);
+    });
+  });
+
+  describe('blockOnProjectedWeekly (scheduled-fire projected 7d gate)', () => {
+    const WEEK = SEVEN_DAY_WINDOW_MS;
+
+    it('skips a provider whose projected 7d exceeds 100% and routes to the under-pace provider', () => {
+      // Claude: 35% used after 49h → projected 35*(168/49)≈120% → skipped
+      // Codex: 90% used after 157h → projected 90*(168/157)≈96% → under 100%, passes
+      const claudeSnap: QuotaSnapshot = {
+        provider: 'claude',
+        fiveHour: { utilization: 11, resetsAt: null, msUntilReset: 3.5 * 60 * 60 * 1000 },
+        sevenDay: { utilization: 35, resetsAt: null, msUntilReset: WEEK - 49 * 60 * 60 * 1000 },
+        fetchedAt: 0, stale: false,
+      };
+      const codexSnap: QuotaSnapshot = {
+        provider: 'codex',
+        fiveHour: { utilization: 5, resetsAt: null, msUntilReset: 1.5 * 60 * 60 * 1000 },
+        sevenDay: { utilization: 90, resetsAt: null, msUntilReset: WEEK - 157 * 60 * 60 * 1000 },
+        fetchedAt: 0, stale: false,
+      };
+      const result = pickCliProvider({
+        enabled: ['claude', 'codex'],
+        snapshots: new Map<CliProvider, QuotaSnapshot | null>([['claude', claudeSnap], ['codex', codexSnap]]),
+        budgetBlockAtPct: 95,
+        blockEnabled: true,
+        blockOnProjectedWeekly: true,
+      });
+      expect(result.provider).toBe('codex');
+    });
+
+    it('returns null when every provider is projected to exceed 7d quota', () => {
+      // Both over-pace and projected > 100%
+      const over = (provider: 'claude' | 'codex', util: number, elapsedH: number): QuotaSnapshot => ({
+        provider,
+        fiveHour: { utilization: 5, resetsAt: null, msUntilReset: null },
+        sevenDay: { utilization: util, resetsAt: null, msUntilReset: WEEK - elapsedH * 60 * 60 * 1000 },
+        fetchedAt: 0, stale: false,
+      });
+      const result = pickCliProvider({
+        enabled: ['claude', 'codex'],
+        snapshots: new Map<CliProvider, QuotaSnapshot | null>([
+          ['claude', over('claude', 40, 50)],  // projected 134%
+          ['codex', over('codex', 30, 48)],    // projected 105%
+        ]),
+        budgetBlockAtPct: 95,
+        blockEnabled: true,
+        blockOnProjectedWeekly: true,
+      });
+      expect(result.provider).toBeNull();
+      expect(result.reason).toBe('all_blocked');
+    });
+
+    it('does not block when the window is too fresh and usage is low (stability guard)', () => {
+      // 2h elapsed, 3% used → stability guard prevents projection (2h < 6h MIN and 3% < 20% EARLY)
+      const snap: QuotaSnapshot = {
+        provider: 'claude',
+        fiveHour: { utilization: 3, resetsAt: null, msUntilReset: null },
+        sevenDay: { utilization: 3, resetsAt: null, msUntilReset: WEEK - 2 * 60 * 60 * 1000 },
+        fetchedAt: 0, stale: false,
+      };
+      const result = pickCliProvider({
+        enabled: ['claude'],
+        snapshots: new Map<CliProvider, QuotaSnapshot | null>([['claude', snap]]),
+        budgetBlockAtPct: 95,
+        blockEnabled: true,
+        blockOnProjectedWeekly: true,
+      });
+      expect(result.provider).toBe('claude');
+    });
+
+    it('does not apply to manual starts (blockOnProjectedWeekly omitted)', () => {
+      // Same projected-over-pace Claude snapshot — but without the flag it is NOT skipped
+      const claudeSnap: QuotaSnapshot = {
+        provider: 'claude',
+        fiveHour: { utilization: 11, resetsAt: null, msUntilReset: null },
+        sevenDay: { utilization: 35, resetsAt: null, msUntilReset: WEEK - 49 * 60 * 60 * 1000 },
+        fetchedAt: 0, stale: false,
+      };
+      const result = pickCliProvider({
+        enabled: ['claude'],
+        snapshots: new Map<CliProvider, QuotaSnapshot | null>([['claude', claudeSnap]]),
+        budgetBlockAtPct: 95,
+        blockEnabled: true,
+        // blockOnProjectedWeekly intentionally omitted (manual start)
+      });
+      expect(result.provider).toBe('claude');
     });
   });
 

@@ -561,7 +561,13 @@ This keeps unrelated manual `test` / `review` / `fix` runs out of the strip even
 
 ### Visibility rule
 
-The strip is visible whenever any pipeline-kind job (`test`, `review`, `fix`, `commit`, `push`, `mark-dod`) has `status='running'`. It disappears as soon as no pipeline job is running.
+The strip is visible whenever a real `release` job is still running, even during
+short handoff gaps between child steps. In that state the strip stays scoped to
+the release trace and ignores unrelated standalone jobs on the same project. If
+there is no running release, the strip is visible while a standalone
+pipeline-kind job (`test`, `review`, `fix`, `commit`, `push`, `mark-dod`,
+`pr-wait`, `soak`) has `status='running'`; it disappears once there is no
+running release and no standalone running pipeline job.
 
 ### Step chip states
 

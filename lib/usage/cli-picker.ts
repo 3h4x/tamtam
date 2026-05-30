@@ -1,18 +1,23 @@
 import type { QuotaSnapshot } from '@/lib/usage/quota-types';
 import type { CliProvider } from '@/lib/usage/cli-providers';
 import type { ModelTier } from '@/lib/agents/model-aliases';
+import { computeWeeklyBurnThrottle } from '@/lib/shared/budget-throttle';
 
 export interface PickCliOptions {
   enabled: CliProvider[];
   snapshots: Map<CliProvider, QuotaSnapshot | null>;
   budgetBlockAtPct: number;
   blockEnabled: boolean;
-  /** When true, the hard gate includes 7-day pace utilization too — so a
-   *  provider at 99% weekly pace is treated as blocked even if its 5h
-   *  burst is fine. Defaults to false to preserve historical "manual
-   *  starts always go through" behavior; opt in via the
-   *  `budget_block_on_weekly_pace_enabled` setting. */
+  /** When true, the hard gate includes current 7-day utilization too, so a
+   *  provider at 99% weekly usage is treated as blocked even if its 5h
+   *  burst is fine. Opt in via the `budget_block_on_weekly_pace_enabled`
+   *  setting. */
   blockOnWeeklyPace?: boolean;
+  /** When true, a provider whose 7-day utilization is projected to exceed
+   *  100% by window reset is skipped in favour of providers still under
+   *  pace.  Intended for scheduled (cron) fires only — manual/UI starts
+   *  must not be rejected based on a pace projection alone. */
+  blockOnProjectedWeekly?: boolean;
   requestedModel?: ModelTier | null;
 }
 
@@ -33,13 +38,15 @@ function hasQuotaFetcher(provider: CliProvider): boolean {
 
 /**
  * Compute the hard-gate utilization (%) for a single provider snapshot.
- * This is the only signal that can 429 a manual/root start:
+ * These are the only signals that can 429 a manual/root start:
  *   - 5h rolling window utilization (immediate burst quota)
  *   - credits/extra utilization, when the provider exposes a credits pool
+ *   - current 7d utilization, when weekly hard gating is enabled
  *
- * The 7d window is deliberately not a hard gate for manual/root starts. It is
- * used for provider preference and scheduled-work throttling, where pacing the
- * weekly quota is useful without blocking explicit user actions for days.
+ * When `includeWeekly` is true (opt-in via `budget_block_on_weekly_pace_enabled`),
+ * the gate also includes current 7-day utilization. Projected weekly burn is
+ * intentionally reserved for scheduled-work throttling so manual/root starts do
+ * not 429 on pace projection alone.
  */
 export function hardGateUtilizationFor(
   snapshot: QuotaSnapshot | null,
@@ -121,7 +128,7 @@ function hoursLeftInWindowFor(snapshot: QuotaSnapshot | null): number {
 }
 
 export function pickCliProvider(opts: PickCliOptions): PickCliResult {
-  const { enabled, snapshots, budgetBlockAtPct, blockEnabled, blockOnWeeklyPace, requestedModel } = opts;
+  const { enabled, snapshots, budgetBlockAtPct, blockEnabled, blockOnWeeklyPace, blockOnProjectedWeekly, requestedModel } = opts;
   if (enabled.length === 0) {
     return { provider: null, reason: 'no_enabled_providers' };
   }
@@ -142,6 +149,11 @@ export function pickCliProvider(opts: PickCliOptions): PickCliResult {
     if (blockEnabled && missingKnownQuotaAware) continue;
     const hardGateUtilization = hardGateUtilizationFor(snapshot, { includeWeekly: blockOnWeeklyPace });
     if (blockEnabled && hardGateUtilization >= budgetBlockAtPct) continue;
+    // Scheduled-fire gate: if this provider's 7d window is projected to
+    // exceed quota before reset, skip it so the fire routes to a provider
+    // that's still under pace. `computeWeeklyBurnThrottle` applies the same
+    // stability guards (min elapsed, early-usage threshold) used elsewhere.
+    if (blockOnProjectedWeekly && snapshot && computeWeeklyBurnThrottle(snapshot.sevenDay)) continue;
     const utilization = missingKnownQuotaAware
       ? 100
       : effectiveUtilizationFor(snapshot, requestedModel);

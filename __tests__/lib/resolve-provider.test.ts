@@ -388,6 +388,103 @@ describe('resolveProviderForRun', () => {
     expect(jobsPausedResultMock).toHaveBeenCalledTimes(2);
   });
 
+  it('does not block a generic start gate on projected weekly pace alone', async () => {
+    const weekMs = 7 * 24 * 60 * 60 * 1000;
+    getSettingsMock.mockReturnValue({
+      cli_enabled_providers: ['claude'],
+      claude_provider: 'claude',
+      budget_block_at_pct: 95,
+      budget_block_runs_enabled: true,
+      budget_block_on_weekly_pace_enabled: true,
+    });
+    getQuotaSnapshotsMock.mockResolvedValue(new Map([
+      ['claude', {
+        fiveHour: { utilization: 11 },
+        sevenDay: { utilization: 40, msUntilReset: weekMs - 50 * 60 * 60 * 1000 },
+      }],
+    ]));
+    const { checkCliStartGate } = await import('@/lib/usage/resolve-provider');
+    const result = await checkCliStartGate('start a release');
+    expect(result).toEqual({ ok: true, provider: 'claude' });
+  });
+
+  it('does not block a strict preferred provider on projected weekly pace alone', async () => {
+    const weekMs = 7 * 24 * 60 * 60 * 1000;
+    getSettingsMock.mockReturnValue({
+      cli_enabled_providers: ['claude'],
+      claude_provider: 'claude',
+      budget_block_at_pct: 95,
+      budget_block_runs_enabled: true,
+      budget_block_on_weekly_pace_enabled: true,
+    });
+    getQuotaSnapshotsMock.mockResolvedValue(new Map([
+      ['claude', {
+        fiveHour: { utilization: 11 },
+        sevenDay: { utilization: 40, msUntilReset: weekMs - 50 * 60 * 60 * 1000 },
+      }],
+    ]));
+    const { checkCliStartGate } = await import('@/lib/usage/resolve-provider');
+    const result = await checkCliStartGate('start an agent run', {
+      preferred: 'claude',
+      strictPreferred: true,
+    });
+    expect(result).toEqual({ ok: true, provider: 'claude' });
+  });
+
+  it('blocks a scheduled strict preferred provider on projected weekly pace', async () => {
+    const weekMs = 7 * 24 * 60 * 60 * 1000;
+    getSettingsMock.mockReturnValue({
+      cli_enabled_providers: ['claude'],
+      claude_provider: 'claude',
+      budget_block_at_pct: 95,
+      budget_block_runs_enabled: true,
+      budget_block_on_weekly_pace_enabled: true,
+    });
+    getQuotaSnapshotsMock.mockResolvedValue(new Map([
+      ['claude', {
+        fiveHour: { utilization: 11 },
+        sevenDay: { utilization: 40, msUntilReset: weekMs - 50 * 60 * 60 * 1000 },
+      }],
+    ]));
+    const { checkCliStartGate } = await import('@/lib/usage/resolve-provider');
+    const result = await checkCliStartGate('start an agent run', {
+      preferred: 'claude',
+      strictPreferred: true,
+      isScheduled: true,
+    });
+    expect(result).toEqual({
+      ok: false,
+      status: 429,
+      detail: "Selected provider 'claude' is over budget right now. Wait for its quota window to reset before trying to start with this provider.",
+    });
+  });
+
+  it('blocks a strict preferred provider on current weekly utilization when the weekly hard gate is enabled', async () => {
+    getSettingsMock.mockReturnValue({
+      cli_enabled_providers: ['claude'],
+      claude_provider: 'claude',
+      budget_block_at_pct: 95,
+      budget_block_runs_enabled: true,
+      budget_block_on_weekly_pace_enabled: true,
+    });
+    getQuotaSnapshotsMock.mockResolvedValue(new Map([
+      ['claude', {
+        fiveHour: { utilization: 11 },
+        sevenDay: { utilization: 99, msUntilReset: 4 * 24 * 60 * 60 * 1000 },
+      }],
+    ]));
+    const { checkCliStartGate } = await import('@/lib/usage/resolve-provider');
+    const result = await checkCliStartGate('start an agent run', {
+      preferred: 'claude',
+      strictPreferred: true,
+    });
+    expect(result).toEqual({
+      ok: false,
+      status: 429,
+      detail: "Selected provider 'claude' is over budget right now. Wait for its quota window to reset before trying to start with this provider.",
+    });
+  });
+
   it('blocks the start gate and globally pauses when all enabled providers are unavailable', async () => {
     getSettingsMock.mockReturnValue({
       cli_enabled_providers: ['claude', 'codex'],

@@ -402,6 +402,7 @@ At the end of your run, include a short final section exactly named "TamTam Run 
     currentProvider: safeProvider,
     requestedModel,
     respectJobsPaused: triggeredBy === 'schedule',
+    isScheduled: triggeredBy === 'schedule',
     settings,
   });
   const fallback = fallbackProvider
@@ -534,12 +535,14 @@ async function resolveFallbackProvider({
   currentProvider,
   requestedModel,
   respectJobsPaused,
+  isScheduled,
   settings,
 }: {
   enabled: boolean;
   currentProvider: CliProvider;
   requestedModel: ReturnType<typeof normalizeModelInput> | null;
   respectJobsPaused: boolean;
+  isScheduled: boolean;
   settings: ReturnType<typeof getSettings>;
 }): Promise<CliProvider | null> {
   if (!enabled) return null;
@@ -554,6 +557,7 @@ async function resolveFallbackProvider({
     strictPreferred: true,
     requestedModel,
     respectJobsPaused,
+    isScheduled,
   });
   return gate.ok ? gate.provider : null;
 }

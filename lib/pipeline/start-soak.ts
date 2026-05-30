@@ -390,11 +390,19 @@ export async function finalizeSoakJob(jobId: string, exitCode: number): Promise<
  * Returns true on success, false on any failure (already logged).
  */
 export async function pauseProjectForSoakFailure(projectName: string): Promise<boolean> {
-  const { db } = await import('@/lib/db');
-  const schema = await import('@/lib/db/schema');
-  const { eq } = await import('drizzle-orm');
-  const { clearProjectDataCache } = await import('@/lib/shared/project-data');
-  const { refreshProjectsCacheSync } = await import('@/lib/shared/enabled-projects');
+  const [
+    { db },
+    schema,
+    { eq },
+    { clearProjectDataCache },
+    { refreshProjectsCacheSync },
+  ] = await Promise.all([
+    import('@/lib/db'),
+    import('@/lib/db/schema'),
+    import('drizzle-orm'),
+    import('@/lib/shared/project-data'),
+    import('@/lib/shared/enabled-projects'),
+  ]);
   try {
     await db.update(schema.projects)
       .set({ paused: true })

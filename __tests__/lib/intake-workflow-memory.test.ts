@@ -31,6 +31,7 @@ describe('runAgentIntakeWorkflow memory composition', () => {
   let updateJobMock: ReturnType<typeof vi.fn>;
   let prepareBrokerRunMock: ReturnType<typeof vi.fn>;
   let brokerCleanupMock: ReturnType<typeof vi.fn>;
+  let checkCliStartGateMock: ReturnType<typeof vi.fn>;
 
   async function importWorkflow() {
     const mod = await import('@/lib/agents/intake-workflow');
@@ -51,6 +52,7 @@ describe('runAgentIntakeWorkflow memory composition', () => {
       runDir: '/tmp/tamtam-runs/job-1',
       cleanup: brokerCleanupMock,
     });
+    checkCliStartGateMock = vi.fn().mockResolvedValue({ ok: true, provider: 'claude' });
     startInProcessAgentJobMock = vi.fn().mockImplementation(async (_jobId: string, _cmd: string, _prompt: string, _cwd: string, options?: { cleanup?: () => void }) => {
       options?.cleanup?.();
       return 12345;
@@ -88,6 +90,7 @@ describe('runAgentIntakeWorkflow memory composition', () => {
         cli_bin_lmstudio: '',
         claude_bin: 'claude',
         base_prompt: '',
+        provider_fallback_chain: ['codex', 'claude'],
       }),
     }));
     vi.doMock('@/lib/shared/cli-bin', () => ({
@@ -101,7 +104,7 @@ describe('runAgentIntakeWorkflow memory composition', () => {
       hasIssueCruncherSkill: vi.fn().mockReturnValue(false),
     }));
     vi.doMock('@/lib/usage/resolve-provider', () => ({
-      checkCliStartGate: vi.fn().mockResolvedValue({ ok: true, provider: 'claude' }),
+      checkCliStartGate: checkCliStartGateMock,
     }));
     vi.doMock('@/lib/jobs/job-storage', () => ({
       getJob: vi.fn().mockReturnValue({
@@ -177,5 +180,32 @@ describe('runAgentIntakeWorkflow memory composition', () => {
     const options = startInProcessAgentJobMock.mock.calls[0]?.[4] as { env?: Record<string, string> } | undefined;
     expect(options?.env?.TAMTAM_BROKER_URL).toBeUndefined();
     expect(brokerCleanupMock).not.toHaveBeenCalled();
+  });
+
+  it('applies scheduled provider gating when resolving a fallback provider', async () => {
+    checkCliStartGateMock.mockResolvedValueOnce({
+      ok: false,
+      status: 429,
+      detail: 'fallback projected over weekly pace',
+    });
+    const runAgentIntakeWorkflow = await importWorkflow();
+
+    await runAgentIntakeWorkflow({
+      ...makeParams(false),
+      triggeredBy: 'schedule',
+      provider: 'codex',
+      fallbackEnabled: true,
+    });
+
+    expect(checkCliStartGateMock).toHaveBeenCalledWith('retry an agent run with a fallback provider', {
+      preferred: 'claude',
+      strictPreferred: true,
+      requestedModel: null,
+      respectJobsPaused: true,
+      isScheduled: true,
+    });
+    expect(startInProcessAgentJobMock).toHaveBeenCalledOnce();
+    const options = startInProcessAgentJobMock.mock.calls[0]?.[4] as { fallback?: unknown } | undefined;
+    expect(options?.fallback).toBeUndefined();
   });
 });

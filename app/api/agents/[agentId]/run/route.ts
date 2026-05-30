@@ -435,6 +435,7 @@ async function runAgentStart(
     strictPreferred: !!agent.provider,
     requestedModel,
     respectJobsPaused: triggeredBy === 'schedule',
+    isScheduled: triggeredBy === 'schedule',
   });
   if (!gate.ok) {
     const gateCode =

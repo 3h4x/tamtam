@@ -1,844 +1,714 @@
-import { test, expect } from '@playwright/test';
-import type { Route } from '@playwright/test';
+import { test, expect } from '@playwright/test'
+import type { Page, Route } from '@playwright/test'
 
-// PipelineStrip UI tests — use the 1338 test server with mocked API responses
-// to verify that the pipeline strip in the Terminal tab appears when pipeline
-// steps are running, shows the correct step labels, and disappears when idle.
-// Also tests the JobsPauseToggle ARIA state in the header.
+const PROJECT = 'pipeline-strip-ui'
 
-const PROJECT = 'pipeline-strip-ui';
+const now = () => Math.floor(Date.now() / 1000)
 
-const BASE_TASK = {
-  id: `${PROJECT}-1`,
-  project: PROJECT,
-  job: null,
-  priority: null,
-  launchctl: 'running',
-  path: `/tmp/${PROJECT}`,
-  fires_at: '',
-  sync: true,
-  changes: 5,
-  unpushed: 0,
-  reviewed: false,
-  last_run: null,
-  last_run_ago: null,
-  last_run_duration_s: null,
-  last_run_exit: null,
-  release_tag: null,
-  ci: null,
-  ci_failed_url: null,
-  github: null,
-};
-
-type MockJob = {
-  id: string;
-  project: string;
-  kind: string;
-  status: 'running' | 'done';
-  exit_code: number | null;
-  started_at: number;
-  finished_at: number | null;
-  verdict?: string;
-  session_id?: string;
-  pid?: number;
-  log_path?: string;
-  seen?: boolean;
-  parent_job_id?: string | null;
-  release_id?: string | null;
-};
-
-function makeJob(
-  overrides: Partial<MockJob> &
-    Pick<MockJob, 'id' | 'kind' | 'status' | 'exit_code' | 'started_at' | 'finished_at'>,
-): MockJob {
-  return {
-    project: PROJECT,
-    pid: 0,
-    log_path: '',
-    seen: true,
-    ...overrides,
-  };
+interface MockJob {
+  id: string
+  project: string
+  kind: string
+  status: 'done' | 'running'
+  exit_code: number | null
+  started_at: number
+  finished_at: number | null
+  pid: number
+  log_path: string
+  seen: boolean
+  session_id: string | null
+  parent_job_id?: string | null
+  release_id?: string | null
+  context_meta: string | null
+  provider: string
+  work_summary: string
+  verdict?: string
 }
 
-async function mockScenario(
-  page: import('@playwright/test').Page,
-  jobs: MockJob[],
-  settingsOverride?: Record<string, unknown>,
+function releaseBackedJobs(): MockJob[] {
+  const releaseId = 'strip-release-1'
+  return [
+    {
+      id: releaseId,
+      project: PROJECT,
+      kind: 'release',
+      status: 'running',
+      exit_code: null,
+      started_at: now() - 20,
+      finished_at: null,
+      pid: 0,
+      log_path: '',
+      seen: true,
+      session_id: null,
+      context_meta: null,
+      provider: 'claude',
+      work_summary: 'Review is running.',
+    },
+    {
+      id: 'strip-test-1',
+      project: PROJECT,
+      kind: 'test',
+      status: 'done',
+      exit_code: 0,
+      started_at: now() - 15,
+      finished_at: now() - 12,
+      pid: 0,
+      log_path: '',
+      seen: true,
+      session_id: null,
+      parent_job_id: releaseId,
+      release_id: null,
+      context_meta: null,
+      provider: 'claude',
+      work_summary: 'Tests passed.',
+    },
+    {
+      id: 'strip-review-1',
+      project: PROJECT,
+      kind: 'review',
+      status: 'running',
+      exit_code: null,
+      started_at: now() - 10,
+      finished_at: null,
+      pid: 0,
+      log_path: '',
+      seen: true,
+      session_id: 'strip-review-session',
+      parent_job_id: 'strip-test-1',
+      release_id: null,
+      context_meta: null,
+      provider: 'claude',
+      work_summary: 'Review is running.',
+    },
+  ]
+}
+
+function standaloneParentChainJobs(): MockJob[] {
+  return [
+    {
+      id: 'strip-standalone-test',
+      project: PROJECT,
+      kind: 'test',
+      status: 'done',
+      exit_code: 0,
+      started_at: now() - 30,
+      finished_at: now() - 25,
+      pid: 0,
+      log_path: '',
+      seen: true,
+      session_id: null,
+      context_meta: null,
+      provider: 'claude',
+      work_summary: 'Tests passed.',
+    },
+    {
+      id: 'strip-standalone-review',
+      project: PROJECT,
+      kind: 'review',
+      status: 'done',
+      exit_code: 0,
+      started_at: now() - 20,
+      finished_at: now() - 15,
+      pid: 0,
+      log_path: '',
+      seen: true,
+      session_id: 'strip-standalone-review-session',
+      parent_job_id: 'strip-standalone-test',
+      context_meta: null,
+      provider: 'claude',
+      work_summary: 'Review needs attention.',
+      verdict: 'NEEDS ATTENTION',
+    },
+    {
+      id: 'strip-standalone-fix',
+      project: PROJECT,
+      kind: 'fix',
+      status: 'running',
+      exit_code: null,
+      started_at: now() - 10,
+      finished_at: null,
+      pid: 0,
+      log_path: '',
+      seen: true,
+      session_id: 'strip-standalone-fix-session',
+      parent_job_id: 'strip-standalone-review',
+      context_meta: null,
+      provider: 'claude',
+      work_summary: 'Fix is running.',
+    },
+  ]
+}
+
+function activeReleaseWithStandaloneRunningJob(): MockJob[] {
+  return [
+    {
+      id: 'strip-active-release-gap',
+      project: PROJECT,
+      kind: 'release',
+      status: 'running',
+      exit_code: null,
+      started_at: now() - 20,
+      finished_at: null,
+      pid: 0,
+      log_path: '',
+      seen: true,
+      session_id: null,
+      context_meta: null,
+      provider: 'claude',
+      work_summary: 'Release is between child steps.',
+    },
+    {
+      id: 'strip-unrelated-standalone-test',
+      project: PROJECT,
+      kind: 'test',
+      status: 'running',
+      exit_code: null,
+      started_at: now() - 10,
+      finished_at: null,
+      pid: 0,
+      log_path: '',
+      seen: true,
+      session_id: 'strip-unrelated-standalone-test-session',
+      context_meta: null,
+      provider: 'claude',
+      work_summary: 'Standalone test is running.',
+    },
+  ]
+}
+
+function releaseFixLoopJobs(): MockJob[] {
+  const releaseId = 'strip-loop-release'
+  return [
+    {
+      id: releaseId,
+      project: PROJECT,
+      kind: 'release',
+      status: 'running',
+      exit_code: null,
+      started_at: now() - 60,
+      finished_at: null,
+      pid: 0,
+      log_path: '',
+      seen: true,
+      session_id: null,
+      context_meta: null,
+      provider: 'claude',
+      work_summary: 'Release is running.',
+    },
+    {
+      id: 'strip-loop-test',
+      project: PROJECT,
+      kind: 'test',
+      status: 'done',
+      exit_code: 0,
+      started_at: now() - 50,
+      finished_at: now() - 45,
+      pid: 0,
+      log_path: '',
+      seen: true,
+      session_id: null,
+      release_id: releaseId,
+      context_meta: null,
+      provider: 'claude',
+      work_summary: 'Tests passed.',
+    },
+    {
+      id: 'strip-loop-review-old',
+      project: PROJECT,
+      kind: 'review',
+      status: 'done',
+      exit_code: 0,
+      started_at: now() - 40,
+      finished_at: now() - 35,
+      pid: 0,
+      log_path: '',
+      seen: true,
+      session_id: 'strip-loop-review-old-session',
+      release_id: releaseId,
+      context_meta: null,
+      provider: 'claude',
+      work_summary: 'Review needs attention.',
+      verdict: 'NEEDS ATTENTION',
+    },
+    {
+      id: 'strip-loop-fix',
+      project: PROJECT,
+      kind: 'fix',
+      status: 'done',
+      exit_code: 0,
+      started_at: now() - 30,
+      finished_at: now() - 20,
+      pid: 0,
+      log_path: '',
+      seen: true,
+      session_id: 'strip-loop-fix-session',
+      release_id: releaseId,
+      context_meta: null,
+      provider: 'claude',
+      work_summary: 'Fix applied.',
+    },
+    {
+      id: 'strip-loop-review-new',
+      project: PROJECT,
+      kind: 'review',
+      status: 'running',
+      exit_code: null,
+      started_at: now() - 10,
+      finished_at: null,
+      pid: 0,
+      log_path: '',
+      seen: true,
+      session_id: 'strip-loop-review-new-session',
+      release_id: releaseId,
+      context_meta: null,
+      provider: 'claude',
+      work_summary: 'Review is running.',
+    },
+  ]
+}
+
+function releasePushFailureJobs(): MockJob[] {
+  const releaseId = 'strip-push-fail-release'
+  return [
+    {
+      id: releaseId,
+      project: PROJECT,
+      kind: 'release',
+      status: 'running',
+      exit_code: null,
+      started_at: now() - 40,
+      finished_at: null,
+      pid: 0,
+      log_path: '',
+      seen: true,
+      session_id: null,
+      context_meta: null,
+      provider: 'claude',
+      work_summary: 'Release is recovering from push failure.',
+    },
+    {
+      id: 'strip-push-failed',
+      project: PROJECT,
+      kind: 'push',
+      status: 'done',
+      exit_code: 1,
+      started_at: now() - 30,
+      finished_at: now() - 20,
+      pid: 0,
+      log_path: '',
+      seen: true,
+      session_id: null,
+      release_id: releaseId,
+      context_meta: null,
+      provider: 'claude',
+      work_summary: 'Push failed.',
+    },
+    {
+      id: 'strip-push-fix-running',
+      project: PROJECT,
+      kind: 'fix',
+      status: 'running',
+      exit_code: null,
+      started_at: now() - 10,
+      finished_at: null,
+      pid: 0,
+      log_path: '',
+      seen: true,
+      session_id: 'strip-push-fix-session',
+      release_id: releaseId,
+      context_meta: null,
+      provider: 'claude',
+      work_summary: 'Fix is running.',
+    },
+  ]
+}
+
+function releaseUnknownReviewJobs(): MockJob[] {
+  const releaseId = 'strip-unknown-review-release'
+  return [
+    {
+      id: releaseId,
+      project: PROJECT,
+      kind: 'release',
+      status: 'running',
+      exit_code: null,
+      started_at: now() - 40,
+      finished_at: null,
+      pid: 0,
+      log_path: '',
+      seen: true,
+      session_id: null,
+      context_meta: null,
+      provider: 'claude',
+      work_summary: 'Release is recovering from an unknown review.',
+    },
+    {
+      id: 'strip-unknown-review',
+      project: PROJECT,
+      kind: 'review',
+      status: 'done',
+      exit_code: 0,
+      started_at: now() - 20,
+      finished_at: now() - 15,
+      pid: 0,
+      log_path: '',
+      seen: true,
+      session_id: 'strip-unknown-review-session',
+      release_id: releaseId,
+      context_meta: null,
+      provider: 'claude',
+      work_summary: 'Review completed without a parsed verdict.',
+    },
+    {
+      id: 'strip-unknown-fix',
+      project: PROJECT,
+      kind: 'fix',
+      status: 'running',
+      exit_code: null,
+      started_at: now() - 10,
+      finished_at: null,
+      pid: 0,
+      log_path: '',
+      seen: true,
+      session_id: 'strip-unknown-fix-session',
+      release_id: releaseId,
+      context_meta: null,
+      provider: 'claude',
+      work_summary: 'Fix is running.',
+    },
+  ]
+}
+
+function releaseDoNotShipJobs(): MockJob[] {
+  const releaseId = 'strip-do-not-ship-release'
+  return [
+    {
+      id: releaseId,
+      project: PROJECT,
+      kind: 'release',
+      status: 'running',
+      exit_code: null,
+      started_at: now() - 40,
+      finished_at: null,
+      pid: 0,
+      log_path: '',
+      seen: true,
+      session_id: null,
+      context_meta: null,
+      provider: 'claude',
+      work_summary: 'Release is blocked by review.',
+    },
+    {
+      id: 'strip-do-not-ship-test',
+      project: PROJECT,
+      kind: 'test',
+      status: 'done',
+      exit_code: 0,
+      started_at: now() - 30,
+      finished_at: now() - 25,
+      pid: 0,
+      log_path: '',
+      seen: true,
+      session_id: null,
+      release_id: releaseId,
+      context_meta: null,
+      provider: 'claude',
+      work_summary: 'Tests passed.',
+    },
+    {
+      id: 'strip-do-not-ship-review',
+      project: PROJECT,
+      kind: 'review',
+      status: 'done',
+      exit_code: 0,
+      started_at: now() - 20,
+      finished_at: now() - 15,
+      pid: 0,
+      log_path: '',
+      seen: true,
+      session_id: 'strip-do-not-ship-review-session',
+      release_id: releaseId,
+      context_meta: null,
+      provider: 'claude',
+      work_summary: 'Review says do not ship.',
+      verdict: 'DO NOT SHIP',
+    },
+    {
+      id: 'strip-do-not-ship-fix',
+      project: PROJECT,
+      kind: 'fix',
+      status: 'running',
+      exit_code: null,
+      started_at: now() - 10,
+      finished_at: null,
+      pid: 0,
+      log_path: '',
+      seen: true,
+      session_id: 'strip-do-not-ship-fix-session',
+      release_id: releaseId,
+      context_meta: null,
+      provider: 'claude',
+      work_summary: 'Fix is running.',
+    },
+  ]
+}
+
+function releasePartialDodJobs(): MockJob[] {
+  const releaseId = 'strip-dod-release'
+  return [
+    {
+      id: releaseId,
+      project: PROJECT,
+      kind: 'release',
+      status: 'running',
+      exit_code: null,
+      started_at: now() - 40,
+      finished_at: null,
+      pid: 0,
+      log_path: '',
+      seen: true,
+      session_id: null,
+      context_meta: null,
+      provider: 'claude',
+      work_summary: 'Release is waiting for merge.',
+    },
+    {
+      id: 'strip-dod-partial',
+      project: PROJECT,
+      kind: 'mark-dod',
+      status: 'done',
+      exit_code: 0,
+      started_at: now() - 30,
+      finished_at: now() - 20,
+      pid: 0,
+      log_path: '',
+      seen: true,
+      session_id: null,
+      release_id: releaseId,
+      context_meta: JSON.stringify({ verified: 2, total: 3 }),
+      provider: 'claude',
+      work_summary: 'DoD partially verified.',
+    },
+    {
+      id: 'strip-pr-wait-running',
+      project: PROJECT,
+      kind: 'pr-wait',
+      status: 'running',
+      exit_code: null,
+      started_at: now() - 10,
+      finished_at: null,
+      pid: 0,
+      log_path: '',
+      seen: true,
+      session_id: null,
+      release_id: releaseId,
+      context_meta: null,
+      provider: 'claude',
+      work_summary: 'Waiting for merge.',
+    },
+  ]
+}
+
+async function mockProjectShell(
+  page: Page,
+  jobs: MockJob[] = releaseBackedJobs(),
+  options: { lastPushError?: string | null } = {},
 ): Promise<void> {
-  await page.route('**/api/projects', (route: Route) => {
+  await page.route('**/api/projects', (route: Route) =>
     route.fulfill({
       json: {
-        tasks: [BASE_TASK],
+        tasks: [{
+          id: `${PROJECT}-1`,
+          project: PROJECT,
+          job: null,
+          priority: null,
+          launchctl: 'running',
+          path: `/tmp/${PROJECT}`,
+          fires_at: '',
+          sync: true,
+          changes: 0,
+          unpushed: 0,
+          reviewed: true,
+          last_run: null,
+          last_run_ago: null,
+          last_run_duration_s: null,
+          last_run_exit: null,
+          release_tag: null,
+          ci: null,
+          ci_failed_url: null,
+          github: null,
+        }],
         priorities: [],
         issueCounts: {},
       },
-    });
-  });
-
-  await page.route(
-    (url) => url.pathname === '/api/jobs' && url.searchParams.get('project') === PROJECT,
-    (route: Route) => {
-      route.fulfill({ json: { jobs, pendingReleaseProjects: [] } });
-    },
-  );
-
-  await page.route(
-    `**/api/projects/by-project/${PROJECT}/config`,
-    (route: Route) => {
-      route.fulfill({
-        json: {
-          project: PROJECT,
-          test_command: '',
-          detected_test_command: '',
-          effective_test_command: '',
-          test_cron_enabled: false,
-          test_cron_schedule: '',
-          auto_push_enabled: false,
-          auto_commit_enabled: false,
-          auto_pr_merge_enabled: false,
-          pr_workflow_enabled: false,
-          release_after_run: false,
-          tests_disabled: true,
-          review_disabled: false,
-          issue_auto_branch: false,
-        },
-      });
-    },
-  );
-
-  await page.route(
-    `**/api/projects/by-project/${PROJECT}/action`,
-    (route: Route) => route.fulfill({ json: { actions: [] } }),
-  );
-  await page.route(
-    `**/api/agents?project=${PROJECT}`,
-    (route: Route) => route.fulfill({ json: { agents: [] } }),
-  );
-  await page.route(
-    `**/api/projects/by-project/${PROJECT}/branch`,
-    (route: Route) =>
-      route.fulfill({
-        json: { branch: 'master', defaultBranch: 'master', commitsAhead: null },
-      }),
-  );
-  await page.route(
-    `**/api/projects/by-project/${PROJECT}/behind`,
-    (route: Route) => route.fulfill({ json: { behind: 0, ahead: 0 } }),
-  );
-  await page.route(
-    `**/api/projects/by-project/${PROJECT}/issues`,
-    (route: Route) => route.fulfill({ json: { prs: [], issues: [] } }),
-  );
-  await page.route('**/api/streaming/**', (route: Route) =>
-    route.fulfill({ status: 204, body: '' }),
-  );
+    }),
+  )
+  await page.route('**/api/settings', (route: Route) =>
+    route.fulfill({ json: { settings: { jobs_paused: 'false' }, github_owner: '' } }),
+  )
   await page.route('**/api/jobs/notifications', (route: Route) =>
     route.fulfill({ json: { notifications: [] } }),
-  );
-  await page.route('**/api/settings', (route: Route) =>
-    route.fulfill({ json: settingsOverride ?? { settings: { jobs_paused: 'false' } } }),
-  );
-  // TerminalTab fetches skills and personas on mount.
-  await page.route('**/api/skills', (route: Route) =>
-    route.fulfill({ json: { skills: [] } }),
-  );
-  await page.route('**/api/projects/personas', (route: Route) =>
-    route.fulfill({ json: { personas: [] } }),
-  );
+  )
+  await page.route(
+    (url) => url.pathname === '/api/jobs' && url.searchParams.get('project') === PROJECT,
+    (route: Route) => route.fulfill({ json: { jobs, pendingReleaseProjects: [] } }),
+  )
+  await page.route(`**/api/projects/by-project/${PROJECT}/config`, (route: Route) =>
+    route.fulfill({
+      json: {
+        project: PROJECT,
+        test_command: '',
+        release_timeout_minutes: null,
+        detected_test_command: '',
+        effective_test_command: '',
+        test_cron_enabled: false,
+        test_cron_schedule: '',
+        auto_push_enabled: false,
+        auto_commit_enabled: false,
+        auto_pr_merge_enabled: false,
+        release_after_run: false,
+        tests_disabled: true,
+        review_disabled: false,
+        issue_auto_branch: false,
+        last_push_error: options.lastPushError ?? null,
+        last_push_at: options.lastPushError ? now() : null,
+      },
+    }),
+  )
+  await page.route(`**/api/projects/by-project/${PROJECT}/action`, (route: Route) =>
+    route.fulfill({ json: { actions: [] } }),
+  )
+  await page.route(`**/api/projects/by-project/${PROJECT}/behind`, (route: Route) =>
+    route.fulfill({ json: { behind: 0, ahead: 0 } }),
+  )
+  await page.route(`**/api/projects/by-project/${PROJECT}/branch`, (route: Route) =>
+    route.fulfill({ json: { branch: 'main', defaultBranch: 'main', commitsAhead: null } }),
+  )
+  await page.route(
+    (url) =>
+      url.pathname === `/api/projects/by-project/${PROJECT}/issues` &&
+      url.searchParams.get('summary') === '1',
+    (route: Route) =>
+      route.fulfill({
+        json: {
+          repo: '',
+          prCount: 0,
+          issueCount: 0,
+          openPrBranches: [],
+          error: null,
+          cached: false,
+          cachedAt: now(),
+        },
+      }),
+  )
+  await page.route('**/api/skills', (route: Route) => route.fulfill({ json: { skills: [] } }))
+  await page.route('**/api/projects/personas', (route: Route) => route.fulfill({ json: { personas: [] } }))
+  await page.route(`**/api/projects/by-project/${PROJECT}/release/abort`, (route: Route) =>
+    route.fulfill({ json: { status: 'aborted' } }),
+  )
+  await page.route(`**/api/projects/by-project/${PROJECT}/push`, (route: Route) =>
+    route.fulfill({ json: { status: 'started', job_id: 'strip-push-retry' } }),
+  )
 }
 
-const now = () => Math.floor(Date.now() / 1000);
-
 test.describe('PipelineStrip visibility', () => {
-  test('pipeline strip reflects test → review → fix → commit → push transitions and disappears once the release finishes', async ({ page }) => {
-    const releaseId = 'strip-live-release'
-    const phaseJobs = {
-      test: [
-        makeJob({
-          id: releaseId,
-          kind: 'release',
-          status: 'running',
-          exit_code: null,
-          started_at: now() - 60,
-          finished_at: null,
-        }),
-        makeJob({
-          id: 'strip-step-test',
-          kind: 'test',
-          status: 'running',
-          exit_code: null,
-          started_at: now() - 50,
-          finished_at: null,
-          session_id: 'sess-strip-test',
-          release_id: releaseId,
-        }),
-      ],
-      review: [
-        makeJob({
-          id: releaseId,
-          kind: 'release',
-          status: 'running',
-          exit_code: null,
-          started_at: now() - 60,
-          finished_at: null,
-        }),
-        makeJob({
-          id: 'strip-step-test',
-          kind: 'test',
-          status: 'done',
-          exit_code: 0,
-          started_at: now() - 50,
-          finished_at: now() - 40,
-          release_id: releaseId,
-        }),
-        makeJob({
-          id: 'strip-step-review-1',
-          kind: 'review',
-          status: 'running',
-          exit_code: null,
-          started_at: now() - 30,
-          finished_at: null,
-          session_id: 'sess-strip-review-1',
-          release_id: releaseId,
-        }),
-      ],
-      fix: [
-        makeJob({
-          id: releaseId,
-          kind: 'release',
-          status: 'running',
-          exit_code: null,
-          started_at: now() - 60,
-          finished_at: null,
-        }),
-        makeJob({
-          id: 'strip-step-test',
-          kind: 'test',
-          status: 'done',
-          exit_code: 0,
-          started_at: now() - 50,
-          finished_at: now() - 40,
-          release_id: releaseId,
-        }),
-        makeJob({
-          id: 'strip-step-review-1',
-          kind: 'review',
-          status: 'done',
-          exit_code: 0,
-          started_at: now() - 30,
-          finished_at: now() - 20,
-          verdict: 'NEEDS ATTENTION',
-          session_id: 'sess-strip-review-1',
-          release_id: releaseId,
-        }),
-        makeJob({
-          id: 'strip-step-fix',
-          kind: 'fix',
-          status: 'running',
-          exit_code: null,
-          started_at: now() - 10,
-          finished_at: null,
-          session_id: 'sess-strip-fix',
-          release_id: releaseId,
-        }),
-      ],
-      commit: [
-        makeJob({
-          id: releaseId,
-          kind: 'release',
-          status: 'running',
-          exit_code: null,
-          started_at: now() - 60,
-          finished_at: null,
-        }),
-        makeJob({
-          id: 'strip-step-test',
-          kind: 'test',
-          status: 'done',
-          exit_code: 0,
-          started_at: now() - 50,
-          finished_at: now() - 40,
-          release_id: releaseId,
-        }),
-        makeJob({
-          id: 'strip-step-fix',
-          kind: 'fix',
-          status: 'done',
-          exit_code: 0,
-          started_at: now() - 25,
-          finished_at: now() - 15,
-          session_id: 'sess-strip-fix',
-          release_id: releaseId,
-        }),
-        makeJob({
-          id: 'strip-step-review-2',
-          kind: 'review',
-          status: 'done',
-          exit_code: 0,
-          started_at: now() - 14,
-          finished_at: now() - 12,
-          verdict: 'LGTM',
-          session_id: 'sess-strip-review-2',
-          release_id: releaseId,
-        }),
-        makeJob({
-          id: 'strip-step-commit',
-          kind: 'commit',
-          status: 'running',
-          exit_code: null,
-          started_at: now() - 5,
-          finished_at: null,
-          release_id: releaseId,
-        }),
-      ],
-      push: [
-        makeJob({
-          id: releaseId,
-          kind: 'release',
-          status: 'running',
-          exit_code: null,
-          started_at: now() - 60,
-          finished_at: null,
-        }),
-        makeJob({
-          id: 'strip-step-test',
-          kind: 'test',
-          status: 'done',
-          exit_code: 0,
-          started_at: now() - 50,
-          finished_at: now() - 40,
-          release_id: releaseId,
-        }),
-        makeJob({
-          id: 'strip-step-fix',
-          kind: 'fix',
-          status: 'done',
-          exit_code: 0,
-          started_at: now() - 25,
-          finished_at: now() - 15,
-          session_id: 'sess-strip-fix',
-          release_id: releaseId,
-        }),
-        makeJob({
-          id: 'strip-step-review-2',
-          kind: 'review',
-          status: 'done',
-          exit_code: 0,
-          started_at: now() - 14,
-          finished_at: now() - 12,
-          verdict: 'LGTM',
-          session_id: 'sess-strip-review-2',
-          release_id: releaseId,
-        }),
-        makeJob({
-          id: 'strip-step-commit',
-          kind: 'commit',
-          status: 'done',
-          exit_code: 0,
-          started_at: now() - 11,
-          finished_at: now() - 7,
-          release_id: releaseId,
-        }),
-        makeJob({
-          id: 'strip-step-push',
-          kind: 'push',
-          status: 'running',
-          exit_code: null,
-          started_at: now() - 6,
-          finished_at: null,
-          session_id: 'sess-strip-push',
-          release_id: releaseId,
-        }),
-      ],
-      done: [
-        makeJob({
-          id: releaseId,
-          kind: 'release',
-          status: 'done',
-          exit_code: 0,
-          started_at: now() - 60,
-          finished_at: now() - 1,
-        }),
-        makeJob({
-          id: 'strip-step-test',
-          kind: 'test',
-          status: 'done',
-          exit_code: 0,
-          started_at: now() - 50,
-          finished_at: now() - 40,
-          release_id: releaseId,
-        }),
-        makeJob({
-          id: 'strip-step-fix',
-          kind: 'fix',
-          status: 'done',
-          exit_code: 0,
-          started_at: now() - 25,
-          finished_at: now() - 15,
-          session_id: 'sess-strip-fix',
-          release_id: releaseId,
-        }),
-        makeJob({
-          id: 'strip-step-review-2',
-          kind: 'review',
-          status: 'done',
-          exit_code: 0,
-          started_at: now() - 14,
-          finished_at: now() - 12,
-          verdict: 'LGTM',
-          session_id: 'sess-strip-review-2',
-          release_id: releaseId,
-        }),
-        makeJob({
-          id: 'strip-step-commit',
-          kind: 'commit',
-          status: 'done',
-          exit_code: 0,
-          started_at: now() - 11,
-          finished_at: now() - 7,
-          release_id: releaseId,
-        }),
-        makeJob({
-          id: 'strip-step-push',
-          kind: 'push',
-          status: 'done',
-          exit_code: 0,
-          started_at: now() - 6,
-          finished_at: now() - 2,
-          session_id: 'sess-strip-push',
-          release_id: releaseId,
-        }),
-      ],
-    } satisfies Record<string, MockJob[]>;
+  test('terminal tab shows active pipeline status and release abort controls', async ({ page }) => {
+    await mockProjectShell(page)
+    await page.goto(`/project/${PROJECT}/terminal`)
 
-    let phase: keyof typeof phaseJobs = 'test';
+    await expect(page.getByLabel(/pipeline summary: review running/i)).toBeVisible({ timeout: 8_000 })
+    await expect(page.getByTitle('test completed — click to view log')).toBeVisible()
+    await expect(page.getByTitle('review in progress — click to open terminal')).toBeVisible()
+    await expect(page.getByTitle('View unified release trace')).toBeVisible()
 
-    await mockScenario(page, [], { jobs_paused: 'false' });
-    await page.unroute(
-      (url) => url.pathname === '/api/jobs' && url.searchParams.get('project') === PROJECT,
-    );
-    await page.route(
-      (url) => url.pathname === '/api/jobs' && url.searchParams.get('project') === PROJECT,
-      (route: Route) => {
-        route.fulfill({ json: { jobs: phaseJobs[phase], pendingReleaseProjects: [] } });
-      },
-    );
+    await page.getByRole('button', { name: 'abort' }).click()
+    await expect(page.getByText('abort?')).toBeVisible()
+    await page.getByRole('button', { name: 'yes', exact: true }).click()
+  })
 
-    await page.goto(`/project/${PROJECT}/terminal`);
+  test('terminal tab keeps standalone parent-linked pipeline context without release controls', async ({ page }) => {
+    await mockProjectShell(page, standaloneParentChainJobs())
+    await page.goto(`/project/${PROJECT}/terminal`)
 
-    await expect(page.getByLabel(/pipeline summary: test running/i)).toBeVisible({ timeout: 8_000 });
-    await expect(page.getByTitle('tests running — click to open terminal')).toBeVisible();
-    await expect(page.getByRole('button', { name: 'abort' })).toBeVisible();
+    await expect(page.getByLabel(/pipeline summary: fix running/i)).toBeVisible({ timeout: 8_000 })
+    await expect(page.getByTitle('test completed — click to view log')).toBeVisible()
+    await expect(page.getByTitle('verdict: NEEDS ATTENTION — click to view findings')).toBeVisible()
+    await expect(page.getByTitle('fix in progress — click to open terminal')).toBeVisible()
+    await expect(page.getByTitle('View unified release trace')).toHaveCount(0)
+    await expect(page.getByRole('button', { name: 'abort' })).toHaveCount(0)
+  })
 
-    phase = 'review';
-    await page.reload();
-    await expect(page.getByLabel(/pipeline summary: review running/i)).toBeVisible({ timeout: 8_000 });
-    await expect(page.getByTitle(/tests passed/i).first()).toBeVisible();
-    await expect(page.getByTitle('review in progress — click to open terminal')).toBeVisible();
+  test('terminal tab keeps active releases scoped away from unrelated standalone jobs', async ({ page }) => {
+    await mockProjectShell(page, activeReleaseWithStandaloneRunningJob())
+    await page.goto(`/project/${PROJECT}/terminal`)
 
-    phase = 'fix';
-    await page.reload();
-    await expect(page.getByLabel(/pipeline summary: fix running/i)).toBeVisible({ timeout: 8_000 });
-    await expect(page.getByTitle(/verdict: NEEDS ATTENTION/i)).toBeVisible();
-    await expect(page.getByTitle('fix in progress — click to open terminal')).toBeVisible();
+    await expect(page.getByLabel(/pipeline summary: release running/i)).toBeVisible({ timeout: 8_000 })
+    await expect(page.getByLabel(/pipeline summary: test running/i)).toHaveCount(0)
+    await expect(page.getByLabel(/test: running/i)).toHaveCount(0)
+    await expect(page.getByTitle('View unified release trace')).toBeVisible()
+    await expect(page.getByRole('button', { name: 'abort' })).toBeVisible()
+  })
 
-    phase = 'commit';
-    await page.reload();
-    await expect(page.getByLabel(/pipeline summary: commit running/i)).toBeVisible({ timeout: 8_000 });
-    await expect(page.getByTitle(/LGTM/i).first()).toBeVisible();
-    await expect(page.getByTitle('commit in progress — click to open terminal')).toBeVisible();
+  test('terminal tab collapses repeated release loop steps to the latest job per kind', async ({ page }) => {
+    await mockProjectShell(page, releaseFixLoopJobs())
+    await page.goto(`/project/${PROJECT}/terminal`)
 
-    phase = 'push';
-    await page.reload();
-    await expect(page.getByLabel(/pipeline summary: push running/i)).toBeVisible({ timeout: 8_000 });
-    await expect(page.getByTitle('push in progress — click to open terminal')).toBeVisible();
-    await expect(page.getByTitle('View unified release trace')).toBeVisible();
+    await expect(page.getByLabel(/pipeline summary: review running/i)).toBeVisible({ timeout: 8_000 })
+    await expect(page.locator('button[aria-label^="review:"]')).toHaveCount(1)
+    await expect(page.getByTitle('review in progress — click to open terminal')).toBeVisible()
+    await expect(page.getByTitle('verdict: NEEDS ATTENTION — click to view findings')).toHaveCount(0)
+    await expect(page.getByTitle('fix completed — click to view log')).toBeVisible()
+    await expect(page.getByTitle('View unified release trace')).toBeVisible()
+    await expect(page.getByRole('button', { name: 'abort' })).toBeVisible()
+  })
 
-    phase = 'done';
-    await page.reload();
-    await expect(page.getByLabel(/pipeline summary:/i)).toHaveCount(0);
-    await expect(page.getByRole('button', { name: 'abort' })).toHaveCount(0);
-  });
+  test('terminal tab surfaces push failure details during recovery', async ({ page }) => {
+    await mockProjectShell(page, releasePushFailureJobs(), {
+      lastPushError: 'Push failed: remote rejected: protected branch',
+    })
+    await page.goto(`/project/${PROJECT}/terminal`)
 
-  // ---------------------------------------------------------------------------
-  // Strip visible when review is running
-  // ---------------------------------------------------------------------------
-  test('pipeline strip shows step labels for a standalone running review without abort controls', async ({ page }) => {
-    const jobs: MockJob[] = [
-      makeJob({
-        id: 'strip-review-running',
-        kind: 'review',
-        status: 'running',
-        exit_code: null,
-        started_at: now() - 10,
-        finished_at: null,
-        session_id: 'sess-strip-1',
-      }),
-    ];
-    await mockScenario(page, jobs);
-    await page.goto(`/project/${PROJECT}/terminal`);
+    await expect(page.getByLabel(/pipeline summary: fix running/i)).toBeVisible({ timeout: 8_000 })
+    await expect(page.getByTitle('Push failed: remote rejected: protected branch')).toBeVisible()
+    await expect(page.getByTitle('fix in progress — click to open terminal')).toBeVisible()
 
-    // The strip renders only jobs that actually ran — a single review chip.
-    await expect(
-      page.getByTitle('review in progress — click to open terminal'),
-    ).toBeVisible({ timeout: 8_000 });
+    const retryRequest = page.waitForRequest((request) =>
+      request.method() === 'POST' &&
+      request.url().endsWith(`/api/projects/by-project/${PROJECT}/push`) &&
+      request.postDataJSON()?.release_id === 'strip-push-fail-release',
+    )
+    await page.getByRole('button', { name: 'retry push' }).click()
+    await retryRequest
+    await expect(page).toHaveURL(new RegExp(`/project/${PROJECT}/terminal\\?job=strip-push-retry$`))
+  })
 
-    // Pending downstream steps are not shown in the pipeline strip; only the
-    // running job appears. Scope the assertion to the strip itself so it
-    // doesn't collide with always-visible header buttons (e.g. "Push").
-    const strip = page.locator('[aria-label^="pipeline summary"]').locator('..');
-    await expect(strip.getByText('fix', { exact: true })).not.toBeVisible();
-    await expect(strip.getByText('commit', { exact: true })).not.toBeVisible();
-    await expect(strip.getByText('push', { exact: true })).not.toBeVisible();
+  test('terminal tab marks DO NOT SHIP reviews as failed during active releases', async ({ page }) => {
+    await mockProjectShell(page, releaseDoNotShipJobs())
+    await page.goto(`/project/${PROJECT}/terminal`)
 
-    // Standalone pipeline-kind jobs do not expose the release abort control.
-    await expect(page.getByRole('button', { name: 'abort' })).toHaveCount(0);
-  });
+    await expect(page.getByLabel(/pipeline summary: fix running/i)).toBeVisible({ timeout: 8_000 })
+    await expect(page.getByLabel(/review: failed\. verdict: DO NOT SHIP/i)).toBeVisible()
+    await expect(page.getByLabel(/review: done\. verdict: DO NOT SHIP/i)).toHaveCount(0)
+    await expect(page.getByTitle('fix in progress — click to open terminal')).toBeVisible()
+  })
 
-  test('pipeline strip keeps parent-linked ancestors visible without a release trace link', async ({ page }) => {
-    const jobs: MockJob[] = [
-      makeJob({
-        id: 'strip-parent-test',
-        kind: 'test',
-        status: 'done',
-        exit_code: 0,
-        started_at: now() - 40,
-        finished_at: now() - 30,
-      }),
-      makeJob({
-        id: 'strip-parent-review',
-        kind: 'review',
-        status: 'done',
-        exit_code: 0,
-        started_at: now() - 25,
-        finished_at: now() - 20,
-        verdict: 'NEEDS ATTENTION',
-        parent_job_id: 'strip-parent-test',
-      }),
-      makeJob({
-        id: 'strip-parent-fix',
-        kind: 'fix',
-        status: 'running',
-        exit_code: null,
-        started_at: now() - 10,
-        finished_at: null,
-        parent_job_id: 'strip-parent-review',
-        session_id: 'sess-parent-fix',
-      }),
-    ];
-    await mockScenario(page, jobs);
-    await page.goto(`/project/${PROJECT}/terminal`);
+  test('terminal tab marks verdictless completed reviews as failed unknown', async ({ page }) => {
+    await mockProjectShell(page, releaseUnknownReviewJobs())
+    await page.goto(`/project/${PROJECT}/terminal`)
 
-    await expect(page.getByTitle(/tests passed/i).first()).toBeVisible({ timeout: 8_000 });
-    await expect(page.getByTitle(/verdict: NEEDS ATTENTION/i).first()).toBeVisible();
-    await expect(page.getByTitle(/fix in progress/i).first()).toBeVisible();
-    await expect(page.getByTitle('View unified release trace')).toHaveCount(0);
-    await expect(page.getByRole('button', { name: 'abort' })).toHaveCount(0);
-  });
+    await expect(page.getByLabel(/pipeline summary: fix running/i)).toBeVisible({ timeout: 8_000 })
+    await expect(page.getByLabel(/review: failed\. verdict: unknown/i)).toBeVisible()
+    await expect(page.getByLabel(/review: done/i)).toHaveCount(0)
+    await expect(page.getByTitle('fix in progress — click to open terminal')).toBeVisible()
+  })
 
-  test('pipeline strip excludes concurrent standalone jobs from the active release chain', async ({ page }) => {
-    const jobs: MockJob[] = [
-      makeJob({
-        id: 'strip-release-root',
-        kind: 'release',
-        status: 'running',
-        exit_code: null,
-        started_at: now() - 30,
-        finished_at: null,
-      }),
-      makeJob({
-        id: 'strip-release-review',
-        kind: 'review',
-        status: 'running',
-        exit_code: null,
-        started_at: now() - 20,
-        finished_at: null,
-        session_id: 'sess-release-review',
-        release_id: 'strip-release-root',
-      }),
-      makeJob({
-        id: 'strip-manual-test',
-        kind: 'test',
-        status: 'running',
-        exit_code: null,
-        started_at: now() - 10,
-        finished_at: null,
-      }),
-    ];
-    await mockScenario(page, jobs);
-    await page.goto(`/project/${PROJECT}/terminal`);
+  test('terminal tab marks partial DoD verification as attention while merge waits', async ({ page }) => {
+    await mockProjectShell(page, releasePartialDodJobs())
+    await page.goto(`/project/${PROJECT}/terminal`)
 
-    await expect(page.getByTitle('review in progress — click to open terminal')).toBeVisible({ timeout: 8_000 });
-    await expect(page.getByTitle('tests running — click to open terminal')).toHaveCount(0);
-    await expect(page.getByTitle('View unified release trace')).toBeVisible();
-  });
-
-  // ---------------------------------------------------------------------------
-  // Strip absent when no pipeline steps are running
-  // ---------------------------------------------------------------------------
-  test('pipeline strip is absent from terminal tab when no pipeline steps are running', async ({
-    page,
-  }) => {
-    const jobs: MockJob[] = [
-      makeJob({
-        id: 'strip-push-done',
-        kind: 'push',
-        status: 'done',
-        exit_code: 0,
-        started_at: now() - 120,
-        finished_at: now() - 60,
-      }),
-    ];
-    await mockScenario(page, jobs);
-    await page.goto(`/project/${PROJECT}/terminal`);
-
-    // PipelineStrip returns null — the abort button must not appear.
-    await expect(page.getByRole('button', { name: 'abort' })).not.toBeVisible({
-      timeout: 5_000,
-    });
-  });
-
-  test('pipeline strip hides once a failed step is idle with no running pipeline jobs', async ({ page }) => {
-    const jobs: MockJob[] = [
-      makeJob({
-        id: 'strip-push-failed',
-        kind: 'push',
-        status: 'done',
-        exit_code: 1,
-        started_at: now() - 120,
-        finished_at: now() - 60,
-        release_id: 'rel-failed',
-      }),
-    ];
-    await mockScenario(page, jobs);
-    await page.goto(`/project/${PROJECT}/terminal`);
-
-    await expect(page.getByRole('button', { name: 'abort' })).not.toBeVisible({
-      timeout: 5_000,
-    });
-    await expect(page.getByTitle(/push failed/i)).toHaveCount(0);
-  });
-
-  // ---------------------------------------------------------------------------
-  // Strip shows doneCount / totalSteps progress indicator
-  // ---------------------------------------------------------------------------
-  test('pipeline strip progress counter shows running step label when one job is running', async ({ page }) => {
-    // Only a review job is running — the strip renders exactly one step.
-    // When there is a running step, the summary shows "<label> running" rather
-    // than "doneCount/totalSteps done" (the counter only appears when all steps
-    // are finished and none is actively running).
-    const jobs: MockJob[] = [
-      makeJob({
-        id: 'strip-review-prog',
-        kind: 'review',
-        status: 'running',
-        exit_code: null,
-        started_at: now() - 5,
-        finished_at: null,
-        session_id: 'sess-strip-prog',
-      }),
-    ];
-    await mockScenario(page, jobs);
-    await page.goto(`/project/${PROJECT}/terminal`);
-
-    // The summary text is "review running" (label + stateLabel of the running step).
-    await expect(page.getByText('review running')).toBeVisible({ timeout: 8_000 });
-  });
-
-  // ---------------------------------------------------------------------------
-  // Strip shows "confirm abort" prompt on first click of abort button
-  // ---------------------------------------------------------------------------
-  test('pipeline strip shows abort confirmation on first click', async ({ page }) => {
-    const jobs: MockJob[] = [
-      makeJob({
-        id: 'strip-abort-release',
-        kind: 'release',
-        status: 'running',
-        exit_code: null,
-        started_at: now() - 20,
-        finished_at: null,
-      }),
-      makeJob({
-        id: 'strip-abort-confirm',
-        kind: 'review',
-        status: 'running',
-        exit_code: null,
-        started_at: now() - 15,
-        finished_at: null,
-        session_id: 'sess-strip-abort',
-        release_id: 'strip-abort-release',
-      }),
-    ];
-    // The abort POST goes to the real server; mock it to avoid affecting state.
-    await mockScenario(page, jobs);
-    await page.route(
-      `**/api/projects/by-project/${PROJECT}/release/abort`,
-      (route: Route) => route.fulfill({ json: { status: 'no_active_pipeline' } }),
-    );
-    await page.goto(`/project/${PROJECT}/terminal`);
-
-    // Wait for strip to be visible.
-    await expect(page.getByRole('button', { name: 'abort' })).toBeVisible({
-      timeout: 8_000,
-    });
-
-    // First click sets confirmAbort = true, which swaps the abort button for
-    // the "abort? yes / no" confirmation row.
-    await page.getByRole('button', { name: 'abort' }).click();
-    await expect(page.getByText('abort?')).toBeVisible();
-    await expect(page.getByRole('button', { name: 'yes', exact: true })).toBeVisible();
-    await expect(page.getByRole('button', { name: 'no', exact: true })).toBeVisible();
-
-    // Clicking "no" dismisses the confirmation and restores the abort button.
-    await page.getByRole('button', { name: 'no', exact: true }).click();
-    await expect(page.getByRole('button', { name: 'abort' })).toBeVisible();
-  });
-});
-
-test.describe('PipelineStrip completion transition', () => {
-  // ---------------------------------------------------------------------------
-  // Strip disappears when the running pipeline job completes
-  // ---------------------------------------------------------------------------
-  test('pipeline strip disappears from terminal tab when a release-backed running job transitions to done', async ({
-    page,
-  }) => {
-    let serveRunning = true;
-
-    // Dynamic mock: flips from a running review job to no jobs on the next poll.
-    await page.route('**/api/projects', (route: Route) => {
-      route.fulfill({
-        json: { tasks: [BASE_TASK], priorities: [], issueCounts: {} },
-      });
-    });
-    await page.route(
-      (url) => url.pathname === '/api/jobs' && url.searchParams.get('project') === PROJECT,
-      (route: Route) => {
-        const jobs = serveRunning
-          ? [
-              makeJob({
-                id: 'strip-transition-release',
-                kind: 'release',
-                status: 'running',
-                exit_code: null,
-                started_at: now() - 10,
-                finished_at: null,
-              }),
-              makeJob({
-                id: 'strip-transition-job',
-                kind: 'review',
-                status: 'running',
-                exit_code: null,
-                started_at: now() - 5,
-                finished_at: null,
-                session_id: 'sess-strip-trans',
-                release_id: 'strip-transition-release',
-              }),
-            ]
-          : [];
-        route.fulfill({ json: { jobs, pendingReleaseProjects: [] } });
-      },
-    );
-    await page.route(
-      `**/api/projects/by-project/${PROJECT}/config`,
-      (route: Route) => {
-        route.fulfill({
-          json: {
-            project: PROJECT,
-            test_command: '',
-            detected_test_command: '',
-            effective_test_command: '',
-            test_cron_enabled: false,
-            test_cron_schedule: '',
-            auto_push_enabled: false,
-            auto_commit_enabled: false,
-            auto_pr_merge_enabled: false,
-            pr_workflow_enabled: false,
-            release_after_run: false,
-            tests_disabled: true,
-            review_disabled: false,
-            issue_auto_branch: false,
-          },
-        });
-      },
-    );
-    await page.route(
-      `**/api/projects/by-project/${PROJECT}/action`,
-      (route: Route) => route.fulfill({ json: { actions: [] } }),
-    );
-    await page.route(
-      `**/api/agents?project=${PROJECT}`,
-      (route: Route) => route.fulfill({ json: { agents: [] } }),
-    );
-    await page.route(
-      `**/api/projects/by-project/${PROJECT}/branch`,
-      (route: Route) =>
-        route.fulfill({
-          json: { branch: 'master', defaultBranch: 'master', commitsAhead: null },
-        }),
-    );
-    await page.route(
-      `**/api/projects/by-project/${PROJECT}/behind`,
-      (route: Route) => route.fulfill({ json: { behind: 0, ahead: 0 } }),
-    );
-    await page.route(
-      `**/api/projects/by-project/${PROJECT}/issues`,
-      (route: Route) => route.fulfill({ json: { prs: [], issues: [] } }),
-    );
-    await page.route('**/api/streaming/**', (route: Route) =>
-      route.fulfill({ status: 204, body: '' }),
-    );
-    await page.route('**/api/jobs/notifications', (route: Route) =>
-      route.fulfill({ json: { notifications: [] } }),
-    );
-    await page.route('**/api/settings', (route: Route) =>
-      route.fulfill({ json: { settings: { jobs_paused: 'false' } } }),
-    );
-    await page.route('**/api/skills', (route: Route) =>
-      route.fulfill({ json: { skills: [] } }),
-    );
-    await page.route('**/api/projects/personas', (route: Route) =>
-      route.fulfill({ json: { personas: [] } }),
-    );
-
-    await page.goto(`/project/${PROJECT}/terminal`);
-
-    // Phase 1: strip is visible because a review job is running.
-    const abortBtn = page.getByRole('button', { name: 'abort' });
-    await expect(abortBtn).toBeVisible({ timeout: 8_000 });
-
-    // Flip the mock: next poll will return no running jobs.
-    serveRunning = false;
-
-    // Phase 2: wait for the next poll (up to 12 s) and assert the strip vanishes.
-    // ProjectDetailPage polls /api/jobs every 10 s; allow 14 s for safety.
-    await expect(abortBtn).not.toBeVisible({ timeout: 14_000 });
-  });
-});
-
-test.describe('JobsPauseToggle ARIA state', () => {
-  // ---------------------------------------------------------------------------
-  // Toggle shows unpaused state (aria-checked=false) by default
-  // ---------------------------------------------------------------------------
-  test('pause toggle is unchecked when jobs_paused is false', async ({ page }) => {
-    await mockScenario(page, [], { settings: { jobs_paused: 'false' } });
-    await page.goto(`/project/${PROJECT}/terminal`);
-
-    // Aria-label changes: "Pause jobs" (running) or "Jobs paused — click to resume" (paused).
-    const toggle = page.getByRole('switch', { name: /pause jobs|jobs paused/i });
-    await expect(toggle).toBeVisible({ timeout: 5_000 });
-    await expect(toggle).toHaveAttribute('aria-checked', 'false');
-  });
-
-  // ---------------------------------------------------------------------------
-  // Toggle shows paused state (aria-checked=true) when jobs are paused
-  // ---------------------------------------------------------------------------
-  test('pause toggle is checked when jobs_paused is true', async ({ page }) => {
-    await mockScenario(page, [], { settings: { jobs_paused: 'true' } });
-    await page.goto(`/project/${PROJECT}/terminal`);
-
-    // Aria-label changes: "Pause jobs" (running) or "Jobs paused — click to resume" (paused).
-    const toggle = page.getByRole('switch', { name: /pause jobs|jobs paused/i });
-    await expect(toggle).toBeVisible({ timeout: 5_000 });
-    await expect(toggle).toHaveAttribute('aria-checked', 'true');
-  });
-});
+    await expect(page.getByLabel(/pipeline summary: merge running/i)).toBeVisible({ timeout: 8_000 })
+    await expect(page.getByTitle('DoD: 2 / 3 verified — 1 unticked — click to view log')).toBeVisible()
+    await expect(page.getByLabel(/dod: attention/i)).toBeVisible()
+    await expect(page.getByTitle('waiting for CI checks and auto-merge — click to open terminal')).toBeVisible()
+  })
+})
