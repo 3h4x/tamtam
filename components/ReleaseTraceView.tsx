@@ -4,6 +4,7 @@ import { useState, useEffect } from 'react'
 import Link from 'next/link'
 import { ErrorState } from './ErrorState'
 import { resolveGithubBoardUrl } from '@/lib/client/resolve-github-board-url'
+import { buttonVariants } from '@/components/ui/Button'
 import { Pill, type PillTone } from '@/components/ui/Pill'
 import { Spinner } from '@/components/ui/Spinner'
 
@@ -217,7 +218,7 @@ export function ReleaseTraceView({ projectName, releaseId }: Props) {
             <div className="flex items-center gap-2 mb-1">
               <Link
                 href={`/project/${encodeURIComponent(projectName)}`}
-                className="text-accent hover:underline font-mono text-sm"
+                className={buttonVariants({ variant: 'link', size: 'md', className: 'font-mono' })}
               >
                 {projectName}
               </Link>
