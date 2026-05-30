@@ -22,9 +22,12 @@ test.describe('Fix-loop cap for DO NOT SHIP reviews', () => {
     await enableProject(request, PROJECT, { testsDisabled: true });
 
     const patch = await request.patch('/api/settings', {
-      data: { fix_max_iterations: '3' },
+      data: {
+        fix_max_iterations: '3',
+        review_do_not_ship_action: 'fix',
+      },
     });
-    expect(patch.ok(), `failed to set fix_max_iterations: ${patch.status()}`).toBe(true);
+    expect(patch.ok(), `failed to set review loop settings: ${patch.status()}`).toBe(true);
   });
 
   test('stops after three fixes and does not commit or push', async ({ request }) => {

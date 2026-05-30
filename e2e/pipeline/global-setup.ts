@@ -23,6 +23,7 @@ const PROJECTS = [
   'strip-live',
   'history-live-done',
   'history-live-abort',
+  'review-failure-history',
   'codex-shim',
   'review-cap-exhaustion',
   'fix-loop-cap-do-not-ship',
