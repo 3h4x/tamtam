@@ -11,6 +11,7 @@ import {
 import { WorkflowStatusBadge, workflowStatusPresentation } from '@/components/workflow-runs/workflow-run-status';
 import { humanizeWorkflowLabel, humanizeEmbeddedNames } from '@/components/workflow-runs/humanize';
 import { summarizeInput, summarizeTrigger } from '@/components/workflow-runs/summarize';
+import { ErrorState } from '@/components/ErrorState';
 import { buttonVariants } from '@/components/ui/Button';
 import { Pill } from '@/components/ui/Pill';
 import { Table, type Column } from '@/components/ui/Table';
@@ -290,9 +291,7 @@ export function WorkflowRunDetail({ runId }: { runId: string }) {
     return (
       <div className="p-6">
         <Link href="/workflow-runs" className={buttonVariants({ variant: 'link' })}>← Back to workflow runs</Link>
-        <div className="mt-4 rounded-md border border-status-error/30 bg-status-error/10 px-3 py-2 text-sm text-status-error">
-          Failed to load workflow run: {error}
-        </div>
+        <ErrorState message={`Failed to load workflow run: ${error}`} />
       </div>
     );
   }
