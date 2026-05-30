@@ -3,7 +3,7 @@
 import { useEffect, useMemo, useState } from 'react'
 import { fetchAllOpenRecommendations, updateRecommendation, applyRecommendation } from '@/lib/client-api'
 import type { Recommendation } from '@/lib/client-api'
-import { Button } from '@/components/ui/Button'
+import { ErrorState } from '@/components/ErrorState'
 import { EmptyState } from '@/components/ui/EmptyState'
 import { RecommendationCard } from '@/components/recommendations/RecommendationCard'
 
@@ -128,28 +128,20 @@ export function GlobalRecommendationsPage() {
       </div>
 
       {loadError && (
-        <div className="rounded-lg border border-status-error/30 bg-status-error/10 p-4 text-sm text-status-error">
-          <div>Failed to load recommendations.</div>
-          <div className="mt-1 text-xs opacity-80">{loadError}</div>
-          <Button
-            type="button"
-            variant="danger"
-            size="sm"
-            className="mt-3"
-            onClick={() => {
-              setLoading(true)
-              void load()
-                .catch((err) => {
-                  setLoadError(loadErrorMessage(err))
-                })
-                .finally(() => {
-                  setLoading(false)
-                })
-            }}
-          >
-            Retry
-          </Button>
-        </div>
+        <ErrorState
+          message="Failed to load recommendations."
+          hint={loadError}
+          onRetry={() => {
+            setLoading(true)
+            void load()
+              .catch((err) => {
+                setLoadError(loadErrorMessage(err))
+              })
+              .finally(() => {
+                setLoading(false)
+              })
+          }}
+        />
       )}
 
       {!loadError && grouped.length === 0 ? (
