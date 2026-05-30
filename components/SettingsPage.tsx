@@ -661,7 +661,7 @@ export function SettingsPage({ initialTab }: { initialTab?: TabId } = {}) {
                   {settings.github_board_view_url && (
                     <span className="text-xs text-text-tertiary">(custom view configured)</span>
                   )}
-                  <button
+                  <Button
                     type="button"
                     disabled={boardResyncing || settings.github_board_sync_enabled !== 'true'}
                     onClick={async () => {
@@ -682,10 +682,12 @@ export function SettingsPage({ initialTab }: { initialTab?: TabId } = {}) {
                         setBoardResyncing(false)
                       }
                     }}
-                    className="text-xs text-text-secondary hover:text-text-primary border border-border rounded px-2 py-1 disabled:opacity-50 disabled:cursor-not-allowed cursor-pointer"
+                    size="sm"
+                    variant="ghost"
+                    className="border-border"
                   >
                     {boardResyncing ? 'Resyncing…' : 'Resync recent runs'}
-                  </button>
+                  </Button>
                   {boardResyncMsg && <span className="text-xs text-text-tertiary">{boardResyncMsg}</span>}
                 </div>
               )}
