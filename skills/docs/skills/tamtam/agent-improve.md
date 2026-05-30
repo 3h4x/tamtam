@@ -2,7 +2,7 @@
 id: agent-improve
 name: agent:improve
 description: "Walks up to 5 oldest unaudited source files (oldest commit first), applies fixes by family rubric (F1–F4), continues scanning after small/F3/F4 fixes and stops after substantial F1/F2 ones, and records every audited file in a content-hash ledger so the queue advances without re-running on unchanged files."
-version: "2026-05-30"
+version: "2026-05-30b"
 agent:
   defaultSchedule: 12h
   defaultModel: normal
@@ -114,6 +114,8 @@ These rules are non-negotiable — they govern every step that follows.
 4. **Goal-driven verification.** Before editing, name the exact check that proves the fix is correct. After editing, run only that — not a wider net.
 
 ## 1. Walk the candidate queue (do not stop at the first file)
+
+**If the prerequisite output says the queue is empty** (the line "(all tracked and non-ignored untracked files audited at current content — idle until a file changes)" appears, or the candidate list is blank), output `IMPROVE_QUEUE_ROTATED 0` and **stop immediately**. Do NOT invent work, do NOT add tests, do NOT modify any file. The queue will refill automatically when source files change.
 
 The candidate queue is the **5 oldest unaudited source files** (oldest commit first) the prerequisite gave you. The prerequisite has already excluded every file whose current content is in the ledger, so each candidate is genuinely unaudited at its present bytes. You walk them **in order**, and per file you do exactly ONE of:
 

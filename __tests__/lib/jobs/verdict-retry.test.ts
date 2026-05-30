@@ -1,7 +1,7 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 
-// Expose the private `classify` function for unit testing by importing the
-// module after mocking its dependencies so the spawn path is never exercised.
+// Import after mocking dependencies so retry behavior can be tested without
+// launching a real CLI process.
 vi.mock('@/lib/shared/config', () => ({
   getSettings: vi.fn(),
   getPermissionModeFlag: vi.fn(() => '--permission-mode auto'),
