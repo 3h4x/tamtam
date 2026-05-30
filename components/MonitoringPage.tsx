@@ -9,6 +9,7 @@ import { SchedulerHealthPanel } from '@/components/monitoring/SchedulerHealthPan
 import { OverviewTab } from '@/components/monitoring/OverviewTab'
 import { InfraTab } from '@/components/monitoring/InfraTab'
 import { StatusDot } from '@/components/monitoring/shared'
+import { Button } from '@/components/ui/Button'
 import { SegmentedControl } from '@/components/ui/SegmentedControl'
 import { StandardTabs } from '@/components/ui/StandardTabs'
 import type { StandardTabItem } from '@/components/ui/StandardTabs'
@@ -228,12 +229,14 @@ export function MonitoringPage() {
           tone="current"
           onChange={handleWindowChange}
         />
-        <button
+        <Button
+          variant="ghost"
+          size="sm"
           onClick={() => fetch_(window_)}
-          className="text-xs px-2 py-0.5 rounded border border-current opacity-60 hover:opacity-100 transition-opacity cursor-pointer bg-transparent"
+          className="border-current bg-transparent px-2 py-0.5 text-xs !text-current opacity-60 hover:bg-transparent hover:text-current hover:opacity-100"
         >
           Refresh
-        </button>
+        </Button>
       </div>
 
       {/* Tab bar */}
