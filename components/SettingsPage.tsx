@@ -18,6 +18,7 @@ import { parseEnabledProviders } from '@/lib/usage/cli-providers'
 import { StandardTabs } from '@/components/ui/StandardTabs'
 import { Spinner } from '@/components/ui/Spinner'
 import { Button } from '@/components/ui/Button'
+import { Pill } from '@/components/ui/Pill'
 
 interface SettingsMap {
   workspace_path: string
@@ -804,9 +805,9 @@ export function SettingsPage({ initialTab }: { initialTab?: TabId } = {}) {
                     Git repositories in <code className="font-mono bg-bg-tertiary px-1 py-0.5 rounded">{settings.workspace_path}</code>
                   </p>
                   {activeProjects.length > 0 && (
-                    <span className="inline-flex items-center px-2 py-0.5 rounded-full text-xs font-medium bg-accent/10 text-accent">
+                    <Pill tone="accent" size="xs" className="rounded-full border-transparent">
                       {enabledCount}/{activeProjects.length}
-                    </span>
+                    </Pill>
                   )}
                 </div>
                 {projects.length > 0 && (
