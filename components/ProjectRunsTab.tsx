@@ -752,13 +752,15 @@ export function ProjectRunsTab({ projectName, jobsPaused = false }: ProjectRunsT
               </span>
             )}
             {(search.trim() || filter.kind !== 'all') && (
-              <button
+              <Button
                 type="button"
-                className="font-mono text-accent hover:text-accent-hover cursor-pointer"
+                variant="link"
+                size="sm"
+                className="font-mono text-[11px]"
                 onClick={() => { setSearch(''); setFilter({ kind: 'all' }) }}
               >
                 clear filters
-              </button>
+              </Button>
             )}
           </div>
         </div>
