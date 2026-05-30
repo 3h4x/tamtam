@@ -318,4 +318,90 @@ test.describe('Workflow runs list live polling', () => {
     await expect(completedBetaRow.getByLabel('status completed')).toBeVisible({ timeout: 12_000 });
     await expect(completedBetaRow.getByText('LGTM')).toBeVisible({ timeout: 12_000 });
   });
+
+  test('two active runs stay isolated when one fails into attention and the other keeps running', async ({
+    page,
+  }) => {
+    let phase: 'both-running' | 'one-failed' | 'done' = 'both-running';
+
+    await stubWorkflowRunsShell(page);
+    await stubWorkflowRuns(page, () => {
+      if (phase === 'both-running') {
+        return [
+          makeRun('running', {
+            id: 'workflow-run-failing',
+            input: ['workflow-failing', { triggeredBy: 'agent-failing' }],
+          }),
+          makeRun('running', {
+            id: 'workflow-run-steady',
+            input: ['workflow-steady', { triggeredBy: 'agent-steady' }],
+          }),
+        ];
+      }
+
+      if (phase === 'one-failed') {
+        return [
+          makeRun('failed', {
+            id: 'workflow-run-failing',
+            input: ['workflow-failing', { triggeredBy: 'agent-failing' }],
+            error: 'release orchestration failed after review',
+          }),
+          makeRun('running', {
+            id: 'workflow-run-steady',
+            input: ['workflow-steady', { triggeredBy: 'agent-steady' }],
+          }),
+        ];
+      }
+
+      return [
+        makeRun('failed', {
+          id: 'workflow-run-failing',
+          input: ['workflow-failing', { triggeredBy: 'agent-failing' }],
+          error: 'release orchestration failed after review',
+        }),
+        makeRun('completed', {
+          id: 'workflow-run-steady',
+          input: ['workflow-steady', { triggeredBy: 'agent-steady' }],
+          output: { verdict: 'LGTM' },
+        }),
+      ];
+    });
+
+    await page.goto('/workflow-runs');
+
+    const activePanel = page.getByLabel('Active workflow runs');
+    const attentionPanel = page.getByLabel('Workflow runs needing attention');
+    await expect(activePanel).toBeVisible({ timeout: 8_000 });
+    await expect(activePanel.getByText('2 runs')).toBeVisible();
+    await expect(activePanel.getByRole('link', { name: /workflow-failing/i })).toBeVisible();
+    await expect(activePanel.getByRole('link', { name: /workflow-steady/i })).toBeVisible();
+    await expect(page.getByText('2 running')).toBeVisible();
+    await expect(attentionPanel).toHaveCount(0);
+
+    phase = 'one-failed';
+
+    const failedRow = attentionPanel.getByRole('link', { name: /workflow-failing/i }).first();
+    await expect(activePanel.getByText('1 run')).toBeVisible({ timeout: 12_000 });
+    await expect(activePanel.getByRole('link', { name: /workflow-failing/i })).toHaveCount(0, {
+      timeout: 12_000,
+    });
+    await expect(activePanel.getByRole('link', { name: /workflow-steady/i })).toBeVisible();
+    await expect(failedRow).toBeVisible({ timeout: 12_000 });
+    await expect(failedRow.getByLabel('status failed')).toBeVisible({ timeout: 12_000 });
+    await expect(attentionPanel.getByText('release orchestration failed after review')).toBeVisible({
+      timeout: 12_000,
+    });
+    await expect(page.getByRole('button', { name: /failed 1/i })).toBeVisible({ timeout: 12_000 });
+    await expect(page.getByText('1 running')).toBeVisible({ timeout: 12_000 });
+
+    phase = 'done';
+
+    await expect(activePanel).toHaveCount(0, { timeout: 12_000 });
+    await expect(page.getByText('1 running')).toHaveCount(0, { timeout: 12_000 });
+    await expect(failedRow).toBeVisible();
+
+    const completedRow = page.getByRole('row').filter({ hasText: 'workflow-steady' }).first();
+    await expect(completedRow.getByLabel('status completed')).toBeVisible({ timeout: 12_000 });
+    await expect(completedRow.getByText('LGTM')).toBeVisible({ timeout: 12_000 });
+  });
 });
