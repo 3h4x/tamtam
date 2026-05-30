@@ -3,6 +3,7 @@
 import { useState, useMemo } from 'react'
 import { SectionHeader } from './shared'
 import { Button } from '@/components/ui/Button'
+import { EmptyState } from '@/components/ui/EmptyState'
 import { SegmentedControl } from '@/components/ui/SegmentedControl'
 
 export interface Pm2LogEntry {
@@ -206,9 +207,12 @@ export function Pm2LogPanel({ pm2Logs, onRefresh }: { pm2Logs: Pm2LogData | null
       </div>
 
       {!pm2Logs ? (
-        <div className="rounded-lg border border-border bg-bg-secondary px-4 py-3 text-sm text-text-tertiary">
-          PM2 logs are unavailable right now. Refresh to retry after the monitoring API responds.
-        </div>
+        <EmptyState
+          align="start"
+          paddingY="xs"
+          title="PM2 logs are unavailable right now. Refresh to retry after the monitoring API responds."
+          className="rounded-lg border border-border bg-bg-secondary px-4 py-3"
+        />
       ) : missingAllFiles ? (
         <div className="rounded-lg border border-border bg-bg-secondary px-4 py-3 space-y-2">
           <p className="text-sm text-text-primary">PM2 log files were not found on this host.</p>
@@ -243,13 +247,16 @@ export function Pm2LogPanel({ pm2Logs, onRefresh }: { pm2Logs: Pm2LogData | null
           </div>
 
           {filtered.length === 0 ? (
-            <div className="rounded-lg border border-border bg-bg-secondary px-4 py-3 text-sm text-text-tertiary">
-              {allEntries.length === 0
+            <EmptyState
+              align="start"
+              paddingY="xs"
+              title={allEntries.length === 0
                 ? 'No recent PM2 log lines in the available files.'
                 : levelFilter === 'warn+'
                 ? 'No warnings or errors in the current source selection.'
                 : `No ${levelFilter} entries in the current source selection.`}
-            </div>
+              className="rounded-lg border border-border bg-bg-secondary px-4 py-3"
+            />
           ) : (
             <div className="rounded-md border border-border overflow-hidden overflow-y-auto" style={{ maxHeight: '500px' }}>
               {filtered.map((e, i) => <Pm2LogRow key={i} entry={e} />)}
