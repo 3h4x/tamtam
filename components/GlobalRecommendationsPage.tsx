@@ -4,6 +4,7 @@ import { useEffect, useMemo, useState } from 'react'
 import { fetchAllOpenRecommendations, updateRecommendation, applyRecommendation } from '@/lib/client-api'
 import type { Recommendation } from '@/lib/client-api'
 import { Button } from '@/components/ui/Button'
+import { EmptyState } from '@/components/ui/EmptyState'
 import { RecommendationCard } from '@/components/recommendations/RecommendationCard'
 
 // Cross-project Recommendations page. Lists every open recommendation grouped
@@ -152,9 +153,12 @@ export function GlobalRecommendationsPage() {
       )}
 
       {!loadError && grouped.length === 0 ? (
-        <div className="rounded-lg border border-border bg-bg-secondary p-4 text-sm text-text-tertiary">
-          No open recommendations across any project.
-        </div>
+        <EmptyState
+          bordered
+          paddingY="xs"
+          align="start"
+          title="No open recommendations across any project."
+        />
       ) : !loadError ? (
         grouped.map(([project, projectItems]) => (
           <section key={project}>
