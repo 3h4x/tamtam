@@ -125,7 +125,7 @@ When changing this catalog:
 
 ## Built-in System Agents
 
-The `agents` table has a `kind` column with two values: `'user'` (default — everything created via UI/API/file) and `'system'` (built-in, auto-seeded per project, dispatched to an internal handler instead of the LLM-CLI intake workflow). System agents share the agents table, the scheduled-agent cron pipeline, and the `/runs` UI; they differ only at the cron-task dispatch point in `lib/workflows/cron/agent-cron-task.ts`, which routes `kind='system'` to `runSystemAgent()` (registered in `lib/agents/system/index.ts`) instead of `startAgentRun()`.
+The `agents` table has a `kind` column with two values: `'user'` (default — everything created via UI/API/file) and `'system'` (built-in, auto-seeded per project, dispatched to an internal handler instead of the LLM-CLI intake workflow). System agents share the agents table, the scheduled-agent cron pipeline, and the `/workflow-runs` UI; they differ only at the cron-task dispatch point in `lib/workflows/cron/agent-cron-task.ts`, which routes `kind='system'` to `runSystemAgent()` (registered in `lib/agents/system/index.ts`) instead of `startAgentRun()`.
 
 Lifecycle:
 

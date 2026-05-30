@@ -231,7 +231,7 @@ When enabled, TamTam starts Ollama via PM2 (`ollama-serve`) on boot if not alrea
 
 #### Built-in documentation-reindex-vectors agent
 
-A `kind='system'` agent named `documentation-reindex-vectors` is auto-seeded for every enabled project. It is a built-in TamTam agent — visible in `/agents` and the project's agents tab with a `system` badge, scheduled by the same graphile-worker cron pipeline as user agents (default `16h`), and surfaced in `/runs` like any other run. It does **not** spawn a CLI; the scheduled tick dispatches to an internal handler in `lib/agents/system/retrieval-maintenance.ts`.
+A `kind='system'` agent named `documentation-reindex-vectors` is auto-seeded for every enabled project. It is a built-in TamTam agent — visible in `/agents` and the project's agents tab with a `system` badge, scheduled by the same graphile-worker cron pipeline as user agents (default `16h`), and surfaced in `/workflow-runs` like any other run. It does **not** spawn a CLI; the scheduled tick dispatches to an internal handler in `lib/agents/system/retrieval-maintenance.ts`.
 
 Each fire does three things deterministically and finishes with a cheap-LLM quality check:
 

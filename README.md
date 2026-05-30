@@ -113,7 +113,7 @@ Runtime config, including notification throttle state, lives in the Postgres dat
 Per-project dev-server lifecycle fields (`dev_server_start_command`, `dev_server_stop_command`, `dev_server_ready_url`) live in `/project/[name]/config` as DB-only project metadata and let TamTam start, gate, and tear down a project's own app during agent runs.
 
 The Settings area is split across `/settings/general`, `/settings/cli`, `/settings/pipeline`, `/settings/notifications`, `/settings/projects`, `/settings/templates`, and `/settings/database`.
-Bare `/settings` redirects to `/settings/general`, and job history lives at `/workflow-runs`.
+Bare `/settings` redirects to `/settings/general`, and job history lives at `/workflow-runs` while per-project history stays under `/project/[name]/history`.
 
 | Setting | Where |
 |---|---|
