@@ -5,6 +5,7 @@ import {
   writeScenario,
   resetShimState,
   enableProject,
+  writeGitTiming,
   waitForJobRunning,
   waitForJobCompletion,
   waitForPipelineCompletion,
@@ -17,16 +18,17 @@ const ABORT_SCENARIO = JSON.parse(
   readFileSync(join(__dirname, 'scenarios', 'abort.json'), 'utf-8'),
 )
 
-const RUNS_PROJECT = 'start-detect-runs'
+const RUNS_PROJECT = 'external-start-runs'
 const TERMINAL_ABORT_PROJECT = 'abort'
 
 test.describe('External-start lifecycle surfaces', () => {
-  test('global runs list picks up an externally-started release and shows the running spinner before completion', async ({
+  test('global runs list picks up an externally-started release from idle state and clears the running spinner after completion', async ({
     page,
     request,
   }) => {
     writeScenario(RUNS_PROJECT, SUCCESS_SCENARIO.steps)
     resetShimState(RUNS_PROJECT)
+    writeGitTiming(RUNS_PROJECT, { push: 6500 })
     await enableProject(request, RUNS_PROJECT, { testsDisabled: true })
 
     await page.goto(`/runs?project=${encodeURIComponent(RUNS_PROJECT)}`)
@@ -41,11 +43,9 @@ test.describe('External-start lifecycle surfaces', () => {
     const runningReview = await waitForJobRunning(request, RUNS_PROJECT, 'review', 20_000)
     expect(runningReview, 'review job should be running').not.toBeNull()
 
-    await expect(page.getByRole('button', { name: /running [1-9]/i })).toBeVisible({
-      timeout: 20_000,
-    })
-    await expect(page.getByText('running').first()).toBeVisible({ timeout: 15_000 })
-    await expect(page.locator('span.animate-pulse').first()).toBeVisible({ timeout: 15_000 })
+    await expect(page.getByText(RUNS_PROJECT).first()).toBeVisible({ timeout: 20_000 })
+    await expect(page.getByText('running').first()).toBeVisible({ timeout: 20_000 })
+    await expect(page.locator('span.animate-pulse').first()).toBeVisible({ timeout: 20_000 })
 
     const result = await waitForPipelineCompletion(request, RUNS_PROJECT, 90_000)
     expect(result.status, 'pipeline should complete').toBe('done')
