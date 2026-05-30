@@ -14,6 +14,7 @@ import {
 import { ErrorState } from '@/components/ErrorState'
 import { EmptyState } from '@/components/ui/EmptyState'
 import { SegmentedControl } from '@/components/ui/SegmentedControl'
+import { Spinner } from '@/components/ui/Spinner'
 
 interface UsageHistoryBucket {
   bucketTs: number
@@ -232,7 +233,14 @@ export function UsageHistoryChart({ hours = 24 }: { hours?: number } = {}) {
   }, [hours])
 
   if (error) return <ErrorState message={`usage-history: ${error}`} />
-  if (!data) return <div className="text-sm text-text-tertiary">Loading usage history…</div>
+  if (!data) {
+    return (
+      <div className="flex items-center gap-2 text-sm text-text-tertiary">
+        <Spinner size="sm" shrink aria-label="Loading" role="status" />
+        <span>Loading usage history…</span>
+      </div>
+    )
+  }
 
   const sevenDay = data.series.filter((s) => s.windowKey === '7d')
   if (sevenDay.length === 0) {
