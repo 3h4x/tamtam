@@ -11,6 +11,7 @@ import {
 import { WorkflowStatusBadge, workflowStatusPresentation } from '@/components/workflow-runs/workflow-run-status';
 import { humanizeWorkflowLabel, humanizeEmbeddedNames } from '@/components/workflow-runs/humanize';
 import { summarizeInput, summarizeTrigger } from '@/components/workflow-runs/summarize';
+import { buttonVariants } from '@/components/ui/Button';
 import { Pill } from '@/components/ui/Pill';
 import { Table, type Column } from '@/components/ui/Table';
 
@@ -275,7 +276,7 @@ export function WorkflowRunDetail({ runId }: { runId: string }) {
   if (notFound) {
     return (
       <div className="space-y-4 p-4 sm:p-6">
-        <Link href="/workflow-runs" className="text-accent text-sm hover:underline">← Back to workflow runs</Link>
+        <Link href="/workflow-runs" className={buttonVariants({ variant: 'link' })}>← Back to workflow runs</Link>
         <WorkflowRunsEmptyState
           title="Workflow run not found"
           description="The run may have been pruned, or the URL no longer points to an existing workflow record."
@@ -288,7 +289,7 @@ export function WorkflowRunDetail({ runId }: { runId: string }) {
   if (error && !data) {
     return (
       <div className="p-6">
-        <Link href="/workflow-runs" className="text-accent text-sm hover:underline">← Back to workflow runs</Link>
+        <Link href="/workflow-runs" className={buttonVariants({ variant: 'link' })}>← Back to workflow runs</Link>
         <div className="mt-4 rounded-md border border-status-error/30 bg-status-error/10 px-3 py-2 text-sm text-status-error">
           Failed to load workflow run: {error}
         </div>
@@ -359,7 +360,7 @@ export function WorkflowRunDetail({ runId }: { runId: string }) {
   return (
     <div className="p-4 sm:p-6 space-y-6">
       <div>
-        <Link href="/workflow-runs" className="text-accent text-sm hover:underline">← Back to workflow runs</Link>
+        <Link href="/workflow-runs" className={buttonVariants({ variant: 'link' })}>← Back to workflow runs</Link>
       </div>
 
       <div className="border border-border rounded-md p-4 bg-bg-secondary">
