@@ -1510,8 +1510,6 @@ async function runCompletionHooksInner(job: JobData): Promise<void> {
     try {
       const { hasActiveWorkForProject } = await import('@/lib/dev-server/active-work');
       if (!(await hasActiveWorkForProject(job.project))) {
-        const { db, schema } = await import('@/lib/db');
-        const { eq } = await import('drizzle-orm');
         const rows = await db.select().from(schema.projects).where(eq(schema.projects.name, job.project));
         const row = rows[0];
         if (row?.devServerStartCommand) {
