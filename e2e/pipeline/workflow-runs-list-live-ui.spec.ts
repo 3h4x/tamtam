@@ -25,7 +25,7 @@ function makeRun(
   status: WorkflowRunSummary['status'],
   overrides: Partial<WorkflowRunSummary> = {},
 ): WorkflowRunSummary {
-  const terminal = status === 'completed' || status === 'failed';
+  const terminal = status === 'completed' || status === 'failed' || status === 'cancelled';
   return {
     id: RUN_ID,
     name: 'release-orchestrator',
@@ -90,22 +90,23 @@ test.describe('Workflow runs list live polling', () => {
 
     await page.goto('/workflow-runs');
 
-    await expect(page.getByRole('heading', { name: 'Workflow runs' })).toBeVisible({
+    await expect(page.getByRole('heading', { name: 'Activity' })).toBeVisible({
       timeout: 8_000,
     });
     await expect(page.getByLabel('Active workflow runs')).toBeVisible({ timeout: 8_000 });
     await expect(page.getByLabel('Active workflow runs').getByText('active now')).toBeVisible();
     await expect(page.getByLabel('status running').first()).toBeVisible();
     await expect(page.getByText('1 running')).toBeVisible();
-    await expect(page.getByRole('link', { name: /release-orchestrator/i }).first()).toBeVisible();
+    await expect(page.getByRole('link', { name: /release orchestrator/i }).first()).toBeVisible();
     await expect(page.getByText(PROJECT).first()).toBeVisible();
 
     const stableUrl = page.url();
     serveRunning = false;
 
     await expect(page.getByLabel('Active workflow runs')).toHaveCount(0, { timeout: 12_000 });
-    await expect(page.getByLabel('status completed').first()).toBeVisible({ timeout: 12_000 });
-    await expect(page.getByText('LGTM').first()).toBeVisible({ timeout: 12_000 });
+    const completedRow = page.getByRole('row').filter({ hasText: PROJECT }).first();
+    await expect(completedRow.getByLabel('status completed')).toBeVisible({ timeout: 12_000 });
+    await expect(completedRow.getByText('LGTM')).toBeVisible({ timeout: 12_000 });
     await expect(page.getByText('1 running')).toHaveCount(0);
     await expect(page).toHaveURL(stableUrl);
   });
@@ -159,10 +160,82 @@ test.describe('Workflow runs list live polling', () => {
     const attentionPanel = page.getByLabel('Workflow runs needing attention');
     await expect(attentionPanel).toBeVisible({ timeout: 12_000 });
     await expect(attentionPanel.getByText('needs attention')).toBeVisible();
-    await expect(attentionPanel.getByLabel('status cancelled')).toBeVisible();
-    await expect(attentionPanel.getByText('release was cancelled before completion')).toBeVisible();
+    const cancelledRow = attentionPanel.getByRole('link', { name: /status cancelled/i }).first();
+    await expect(cancelledRow.getByLabel('status cancelled')).toBeVisible();
+    await expect(cancelledRow).toContainText('cancelled');
     await expect(page.getByLabel('Active workflow runs')).toHaveCount(0);
     await expect(page.getByRole('button', { name: /cancelled 1/i })).toBeVisible();
     await expect(page).toHaveURL(stableUrl);
+  });
+
+  test('two active runs stay isolated when one completes and the other keeps running', async ({
+    page,
+  }) => {
+    let phase: 'both-running' | 'one-completed' | 'all-completed' = 'both-running';
+
+    await stubWorkflowRunsShell(page);
+    await stubWorkflowRuns(page, () => {
+      if (phase === 'both-running') {
+        return [
+          makeRun('running', { id: 'workflow-run-alpha', input: ['workflow-alpha', { triggeredBy: 'agent-a' }] }),
+          makeRun('running', { id: 'workflow-run-beta', input: ['workflow-beta', { triggeredBy: 'agent-b' }] }),
+        ];
+      }
+
+      if (phase === 'one-completed') {
+        return [
+          makeRun('completed', {
+            id: 'workflow-run-alpha',
+            input: ['workflow-alpha', { triggeredBy: 'agent-a' }],
+            output: { verdict: 'LGTM' },
+          }),
+          makeRun('running', { id: 'workflow-run-beta', input: ['workflow-beta', { triggeredBy: 'agent-b' }] }),
+        ];
+      }
+
+      return [
+        makeRun('completed', {
+          id: 'workflow-run-alpha',
+          input: ['workflow-alpha', { triggeredBy: 'agent-a' }],
+          output: { verdict: 'LGTM' },
+        }),
+        makeRun('completed', {
+          id: 'workflow-run-beta',
+          input: ['workflow-beta', { triggeredBy: 'agent-b' }],
+          output: { verdict: 'LGTM' },
+        }),
+      ];
+    });
+
+    await page.goto('/workflow-runs');
+
+    const activePanel = page.getByLabel('Active workflow runs');
+    await expect(activePanel).toBeVisible({ timeout: 8_000 });
+    await expect(activePanel.getByText('2 runs')).toBeVisible();
+    await expect(activePanel.getByRole('link', { name: /workflow-alpha/i })).toBeVisible();
+    await expect(activePanel.getByRole('link', { name: /workflow-beta/i })).toBeVisible();
+    await expect(page.getByText('2 running')).toBeVisible();
+
+    phase = 'one-completed';
+
+    await expect(activePanel.getByText('1 run')).toBeVisible({ timeout: 12_000 });
+    await expect(activePanel.getByRole('link', { name: /workflow-alpha/i })).toHaveCount(0, {
+      timeout: 12_000,
+    });
+    await expect(activePanel.getByRole('link', { name: /workflow-beta/i })).toBeVisible();
+    await expect(page.getByText('1 running')).toBeVisible({ timeout: 12_000 });
+
+    const completedAlphaRow = page.getByRole('row').filter({ hasText: 'workflow-alpha' }).first();
+    await expect(completedAlphaRow.getByLabel('status completed')).toBeVisible({ timeout: 12_000 });
+    await expect(completedAlphaRow.getByText('LGTM')).toBeVisible({ timeout: 12_000 });
+
+    phase = 'all-completed';
+
+    await expect(activePanel).toHaveCount(0, { timeout: 12_000 });
+    await expect(page.getByText('1 running')).toHaveCount(0, { timeout: 12_000 });
+
+    const completedBetaRow = page.getByRole('row').filter({ hasText: 'workflow-beta' }).first();
+    await expect(completedBetaRow.getByLabel('status completed')).toBeVisible({ timeout: 12_000 });
+    await expect(completedBetaRow.getByText('LGTM')).toBeVisible({ timeout: 12_000 });
   });
 });

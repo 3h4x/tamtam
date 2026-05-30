@@ -1,5 +1,5 @@
 import { test, expect } from '@playwright/test';
-import type { Page, Route } from '@playwright/test';
+import type { Locator, Page, Route } from '@playwright/test';
 
 // WorkflowRunDetail UI tests — verify running/completed/failed/cancelled/404
 // edge cases using mocked API. All tests use the port 1338 test server; no
@@ -96,6 +96,10 @@ async function stubShellRoutes(page: Page): Promise<void> {
   );
 }
 
+function visibleStepAttentionLink(page: Page, text: RegExp): Locator {
+  return page.locator('a:visible[href^="#workflow-step-"]').filter({ hasText: text }).first();
+}
+
 test.describe('WorkflowRunDetail UI', () => {
   // ---------------------------------------------------------------------------
   // Running state
@@ -151,6 +155,46 @@ test.describe('WorkflowRunDetail UI', () => {
     await expect(page.getByText('final snapshot')).toBeVisible({ timeout: 12_000 });
     await expect(page.locator('[aria-label="status completed"]').first()).toBeVisible({ timeout: 12_000 });
     await expect(page.getByText('live · refreshes every 5s')).toHaveCount(0);
+  });
+
+  test('live run transitions to failed final snapshot and surfaces the error after poll', async ({ page }) => {
+    let serveRunning = true;
+
+    await stubShellRoutes(page);
+    await page.route(`**/api/workflow-runs/${RUN_ID}`, (route: Route) =>
+      route.fulfill({
+        json: serveRunning
+          ? ({
+              run: makeRun('running'),
+              steps: [makeStep('s1', 'run-review', 'running')],
+            } satisfies RunDetail)
+          : ({
+              run: makeRun('failed', { error: 'release orchestration failed after review' }),
+              steps: [
+                makeStep('s1', 'run-review', 'failed', {
+                  error: 'release orchestration failed after review',
+                }),
+              ],
+            } satisfies RunDetail),
+      }),
+    );
+
+    await page.goto(`/workflow-runs/${RUN_ID}`);
+
+    await expect(page.locator('[aria-label="status running"]').first()).toBeVisible({ timeout: 8_000 });
+    await expect(page.getByText('live · refreshes every 5s')).toBeVisible({ timeout: 8_000 });
+    await expect(page.getByText('final snapshot')).toHaveCount(0);
+
+    serveRunning = false;
+
+    await expect(page.locator('[aria-label="status failed"]').first()).toBeVisible({ timeout: 12_000 });
+    await expect(page.getByText('final snapshot')).toBeVisible({ timeout: 12_000 });
+    await expect(page.getByText('release orchestration failed after review').first()).toBeVisible({
+      timeout: 12_000,
+    });
+    await expect(page.getByText('needs attention')).toBeVisible({ timeout: 12_000 });
+    await expect(page.getByText('live · refreshes every 5s')).toHaveCount(0);
+    await expect(page.locator('[aria-label="status running"]')).toHaveCount(0);
   });
 
   // ---------------------------------------------------------------------------
@@ -225,7 +269,9 @@ test.describe('WorkflowRunDetail UI', () => {
     await expect(page.getByText('final snapshot')).toBeVisible({ timeout: 8_000 });
     // Attention panel for the cancelled step
     await expect(page.getByText('needs attention')).toBeVisible({ timeout: 8_000 });
-    await expect(page.getByText('cancelled before completion')).toBeVisible({ timeout: 8_000 });
+    await expect(visibleStepAttentionLink(page, /cancelled before completion/i)).toBeVisible({
+      timeout: 8_000,
+    });
   });
 
   // ---------------------------------------------------------------------------
@@ -251,9 +297,11 @@ test.describe('WorkflowRunDetail UI', () => {
 
     await expect(page.getByText('needs attention')).toBeVisible({ timeout: 8_000 });
     // Step name visible in the attention panel
-    await expect(page.getByText('deploy-contracts').first()).toBeVisible({ timeout: 8_000 });
+    await expect(visibleStepAttentionLink(page, /deploy contracts/i)).toBeVisible({
+      timeout: 8_000,
+    });
     // First line of the error (truncated at newline)
-    await expect(page.getByText('deployment error: out of gas').first()).toBeVisible({
+    await expect(visibleStepAttentionLink(page, /deployment error: out of gas/i)).toBeVisible({
       timeout: 8_000,
     });
   });
