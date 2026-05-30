@@ -130,7 +130,6 @@ describe('POST /api/projects/by-project/[projectName]/pr-branch', () => {
   });
 
   it('returns 400 when branch contains a null byte', async () => {
-    // Specifically exercises the branch.includes('\0') path added in the refactor
     const res = await POST(makeRequest({ branch: 'feat/bad\x00name' }), {
       params: Promise.resolve({ projectName: 'myproj' }),
     });
