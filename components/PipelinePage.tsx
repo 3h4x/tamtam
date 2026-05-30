@@ -455,8 +455,10 @@ export function PipelinePage() {
 
       {/* Config snapshot */}
       <div className="rounded-lg border border-border bg-bg-secondary overflow-hidden">
-        <button
-          className="w-full flex items-center justify-between px-4 py-3 border-b border-border bg-bg-tertiary text-left cursor-pointer"
+        <Button
+          type="button"
+          variant="secondary"
+          className="w-full justify-between rounded-none border-x-0 border-t-0 bg-bg-tertiary px-4 py-3 text-left hover:bg-bg-tertiary"
           onClick={() => setShowConfig((v) => !v)}
         >
           <div>
@@ -473,7 +475,7 @@ export function PipelinePage() {
             </p>
           </div>
           <span className="text-text-tertiary text-xs ml-4">{showConfig ? '▲ hide' : '▼ show'}</span>
-        </button>
+        </Button>
         {showConfig && (
           <div className="px-4 py-4 space-y-4">
             <div>
