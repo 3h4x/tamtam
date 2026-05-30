@@ -4,7 +4,7 @@ import { useEffect, useState, useCallback } from 'react'
 import { useSearchParams } from 'next/navigation'
 import Link from 'next/link'
 import type { PipelineResponse, VerdictDistribution, DurationStats } from '@/app/api/stats/pipeline/route'
-import { Button } from '@/components/ui/Button'
+import { Button, buttonVariants } from '@/components/ui/Button'
 import { SegmentedControl } from '@/components/ui/SegmentedControl'
 import { ErrorState } from './ErrorState'
 
@@ -224,7 +224,7 @@ export function PipelinePage() {
             {projectFilter && (
               <span className="ml-2 text-sm font-normal text-text-tertiary">
                 — {projectFilter}{' '}
-                <Link href="/pipeline" className="text-accent hover:underline text-xs ml-1">
+                <Link href="/pipeline" className={buttonVariants({ variant: 'link', size: 'sm', className: 'ml-1' })}>
                   show all
                 </Link>
               </span>
@@ -463,7 +463,11 @@ export function PipelinePage() {
             <h2 className="text-sm font-medium text-text-primary">Active configuration</h2>
             <p className="text-xs text-text-tertiary mt-0.5">
               Verdict rules and commit style applied during this period — edit in{' '}
-              <Link href="/settings" className="text-accent hover:underline" onClick={(e) => e.stopPropagation()}>
+              <Link
+                href="/settings"
+                className={buttonVariants({ variant: 'link', size: 'sm' })}
+                onClick={(e) => e.stopPropagation()}
+              >
                 Settings → Behavior
               </Link>
             </p>
