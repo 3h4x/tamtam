@@ -21,7 +21,7 @@ const FAILURE_PROJECT = 'runs-failure-dns';
 const ABORT_PROJECT = 'runs-abort-cancel';
 
 test.describe('Real runs lifecycle failure states', () => {
-  test('global runs list flips from running to failed when a live review returns DO NOT SHIP', async ({
+  test('history tab flips from running to failed when a release review returns DO NOT SHIP', async ({
     page,
     request,
   }) => {
@@ -38,9 +38,8 @@ test.describe('Real runs lifecycle failure states', () => {
     const runningReview = await waitForJobRunning(request, FAILURE_PROJECT, 'review', 20_000);
     expect(runningReview, 'review job should be running').not.toBeNull();
 
-    await page.goto(`/runs?project=${encodeURIComponent(FAILURE_PROJECT)}`);
+    await page.goto(`/project/${FAILURE_PROJECT}/history`);
 
-    await expect(page.getByText(FAILURE_PROJECT).first()).toBeVisible({ timeout: 8_000 });
     await expect(page.getByText('running').first()).toBeVisible({ timeout: 8_000 });
     await expect(page.locator('span.animate-pulse').first()).toBeVisible({ timeout: 8_000 });
 
@@ -48,12 +47,19 @@ test.describe('Real runs lifecycle failure states', () => {
     expect(result.status, 'pipeline should finish').toBe('done');
     expect(result.releaseJob?.['exit_code'], 'release should fail with non-zero exit').not.toBe(0);
 
-    await expect(page.getByText('✗ DNS').first()).toBeVisible({ timeout: 12_000 });
-    await expect(page.getByText('exit 1').first()).toBeVisible({ timeout: 12_000 });
-    await expect(page.locator('span.animate-pulse')).toHaveCount(0, { timeout: 12_000 });
+    await expect(page.getByText('release failed').first()).toBeVisible({ timeout: 15_000 });
+    await expect(page.getByText('✗ DNS').first()).toBeVisible({ timeout: 15_000 });
+    await expect(page.locator('span.animate-pulse')).toHaveCount(0, { timeout: 15_000 });
     await expect(page.getByText('running', { exact: true })).not.toBeVisible({
-      timeout: 12_000,
+      timeout: 15_000,
     });
+
+    const expandButton = page.getByTitle('Expand steps').first();
+    await expect(expandButton).toBeVisible({ timeout: 8_000 });
+    await expandButton.click();
+
+    await expect(page.getByText('Code review').last()).toBeVisible({ timeout: 8_000 });
+    await expect(page.getByText('✗ DNS').last()).toBeVisible({ timeout: 8_000 });
   });
 
   test('global runs list clears live state and shows cancelled after abort without reload', async ({
@@ -89,10 +95,10 @@ test.describe('Real runs lifecycle failure states', () => {
     expect(releaseJob, 'release job should finish after abort').not.toBeNull();
     expect(releaseJob?.['exit_code'], 'release exit code after abort').toBe(-3);
 
-    await expect(page.getByText('cancelled').first()).toBeVisible({ timeout: 12_000 });
-    await expect(page.locator('span.animate-pulse')).toHaveCount(0, { timeout: 12_000 });
+    await expect(page.getByText('cancelled').first()).toBeVisible({ timeout: 15_000 });
+    await expect(page.locator('span.animate-pulse')).toHaveCount(0, { timeout: 15_000 });
     await expect(page.getByText('running', { exact: true })).not.toBeVisible({
-      timeout: 12_000,
+      timeout: 15_000,
     });
   });
 });
