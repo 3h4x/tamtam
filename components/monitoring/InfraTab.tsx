@@ -2,6 +2,7 @@
 
 import { useState } from 'react'
 import { Button } from '@/components/ui/Button'
+import { EmptyState } from '@/components/ui/EmptyState'
 import { SectionHeader, StatusDot } from './shared'
 import type { MonitoringData, TimeWindow } from './types'
 import { WINDOW_LABELS } from './types'
@@ -35,9 +36,13 @@ function SummaryCard({
 
 function EmptyPanel({ message }: { message: string }) {
   return (
-    <div className="rounded-lg border border-border bg-bg-secondary px-3 py-4 text-sm text-text-tertiary">
-      {message}
-    </div>
+    <EmptyState
+      align="start"
+      bordered
+      paddingY="xs"
+      title={<span className="font-normal text-text-tertiary">{message}</span>}
+      className="rounded-lg px-3 py-4"
+    />
   )
 }
 
