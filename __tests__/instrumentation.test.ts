@@ -69,6 +69,7 @@ describe('instrumentation', () => {
       const drainAllRecoveryWork = options.drainAllRecoveryWork ?? vi.fn().mockResolvedValue(undefined);
       const markDone = options.markDone ?? vi.fn().mockResolvedValue(undefined);
       const getWorldStart = options.getWorldStart ?? vi.fn().mockResolvedValue(undefined);
+      const shellExec = vi.fn().mockResolvedValue({ exitCode: 0, stdout: '', stderr: '' });
       const dbMock = {
         select: vi.fn().mockReturnValue({
           from: vi.fn().mockReturnValue({
@@ -106,6 +107,7 @@ describe('instrumentation', () => {
       };
 
       vi.doMock('@/lib/db', () => ({ db: dbMock, schema: schemaMock }));
+      vi.doMock('@/lib/shared/shell', () => ({ exec: shellExec }));
       vi.doMock('@/lib/jobs/job-storage', () => jobStorageMock);
       vi.doMock('@/lib/jobs/storage', () => jobStorageMock);
       vi.doMock('@/lib/jobs/lifecycle', () => ({
@@ -176,7 +178,7 @@ describe('instrumentation', () => {
       vi.doMock('workflow/runtime', () => ({ getWorld: () => ({ start: getWorldStart }) }));
       vi.doMock('drizzle-orm', () => ({ isNotNull: vi.fn(v => v), eq: vi.fn((_a, b) => b), and: vi.fn((...args) => args) }));
 
-      return { drainAllRecoveryWork, markDone, getWorldStart };
+      return { drainAllRecoveryWork, markDone, getWorldStart, shellExec };
     }
 
     it('backfills issue-cruncher prerequisites during boot', async () => {
@@ -192,6 +194,24 @@ describe('instrumentation', () => {
       await registerNode();
 
       expect(backfillIssueCruncherPrerequisitesMock).toHaveBeenCalledTimes(1);
+    });
+
+    it('does not remove broker containers during boot registration', async () => {
+      vi.stubEnv('NODE_ENV', 'test');
+      const { shellExec } = mockRegisterNodeBootDeps();
+
+      const { registerNode } = await import('@/instrumentation-node');
+      await registerNode();
+
+      const brokerRemoveCall = shellExec.mock.calls.find((call: unknown[]) => {
+        const [cmd, args] = call;
+        return cmd === 'docker'
+          && Array.isArray(args)
+          && args[0] === 'rm'
+          && args.includes('-f')
+          && args.some((arg) => typeof arg === 'string' && arg.startsWith('tamtam-playwright-broker-'));
+      });
+      expect(brokerRemoveCall).toBeUndefined();
     });
 
     it('waitForWorkflowReady resolves immediately in test mode', async () => {

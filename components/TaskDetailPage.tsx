@@ -201,7 +201,7 @@ export function TaskDetailPage({
             {detail.prompt_content ? (
               <pre className="font-mono text-sm text-text-primary whitespace-pre-wrap bg-bg-tertiary rounded-md p-3 overflow-x-auto">{detail.prompt_content}</pre>
             ) : (
-              <div className="text-text-secondary text-sm">No prompt file found</div>
+              <EmptyState title="No prompt file found" paddingY="xs" align="start" className="px-0" />
             )}
           </section>
 
@@ -214,7 +214,7 @@ export function TaskDetailPage({
             {detail.memory_content ? (
               <pre className="font-mono text-sm text-text-primary whitespace-pre-wrap bg-bg-tertiary rounded-md p-3 overflow-x-auto">{detail.memory_content}</pre>
             ) : (
-              <div className="text-text-secondary text-sm">No memory yet</div>
+              <EmptyState title="No memory yet" paddingY="xs" align="start" className="px-0" />
             )}
           </section>
 
