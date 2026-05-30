@@ -36,10 +36,10 @@ export function WorkflowRunsActivePanel({ items }: { items: WorkflowRunsActiveIt
           >
             <div className="flex items-start justify-between gap-3">
               <div className="min-w-0">
-                <div className="truncate font-mono text-text-primary" title={item.rawName}>
+                <div className="truncate text-sm font-medium text-text-primary" title={item.rawName}>
                   {item.name}
                 </div>
-                <div className="mt-1 truncate font-mono text-text-secondary" title={item.inputTitle}>
+                <div className="mt-1 truncate text-text-secondary" title={item.inputTitle}>
                   {item.inputLabel}
                 </div>
               </div>
@@ -47,7 +47,7 @@ export function WorkflowRunsActivePanel({ items }: { items: WorkflowRunsActiveIt
             </div>
             <div className="mt-2 grid grid-cols-3 gap-2 font-mono text-[11px] text-text-tertiary">
               <div className="min-w-0">
-                <div className="uppercase tracking-wide">trigger</div>
+                <div className="uppercase tracking-wide">why it ran</div>
                 <div className="truncate text-text-secondary" title={item.triggerLabel}>
                   {item.triggerLabel}
                 </div>

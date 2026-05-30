@@ -456,6 +456,66 @@ describe('WorkflowRunsPage', () => {
     unmount()
   })
 
+  it('filters runs by the displayed humanized workflow label', async () => {
+    vi.stubGlobal('fetch', vi.fn().mockResolvedValue({
+      ok: true,
+      json: async () => ({
+        runs: [
+          {
+            id: 'run-release',
+            name: 'releaseOrchestratorWorkflow',
+            rawName: 'workflow//./lib/workflows/release-orchestrator//releaseOrchestratorWorkflow',
+            status: 'running',
+            createdAt: '2026-05-20T11:49:00Z',
+            startedAt: '2026-05-20T11:50:00Z',
+            completedAt: null,
+            durationMs: null,
+            input: ['acme'],
+            output: null,
+            error: null,
+          },
+          {
+            id: 'run-agent',
+            name: 'runAgentIntakeWorkflow',
+            rawName: 'workflow//./lib/workflows/agents/intake-workflow//runAgentIntakeWorkflow',
+            status: 'completed',
+            createdAt: '2026-05-20T11:45:00Z',
+            startedAt: '2026-05-20T11:46:00Z',
+            completedAt: '2026-05-20T11:46:30Z',
+            durationMs: 30_000,
+            input: ['beta'],
+            output: { ok: true },
+            error: null,
+          },
+        ],
+        meta: { workflowEnabled: true, releaseWorkflow: true, releaseWorkflowDrive: true, mode: 'drive' },
+      }),
+    }))
+
+    const { container, unmount } = renderWorkflowRunsPage()
+
+    await vi.waitFor(() => {
+      expect(container.textContent).toContain('Release pipeline')
+      expect(container.textContent).toContain('Agent run')
+    })
+
+    const filterInput = container.querySelector<HTMLInputElement>('input[placeholder*="Filter workflow"]')
+    expect(filterInput).toBeTruthy()
+
+    flushSync(() => {
+      if (!filterInput) throw new Error('filter input not found')
+      setInputValue(filterInput, 'pipeline')
+    })
+
+    await vi.waitFor(() => {
+      expect(container.textContent).toContain('1 of 2 recent')
+      expect(container.textContent).toContain('Release pipeline')
+      expect(container.textContent).not.toContain('Agent run')
+    })
+
+    unmount()
+  })
+
   it('surfaces failed and cancelled runs as attention shortcuts', async () => {
     vi.stubGlobal('fetch', vi.fn().mockResolvedValue({
       ok: true,

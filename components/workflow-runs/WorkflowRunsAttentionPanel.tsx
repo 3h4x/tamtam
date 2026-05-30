@@ -48,17 +48,17 @@ export function WorkflowRunsAttentionPanel({ items }: { items: WorkflowRunsAtten
             <div className="min-w-0">
               <div className="flex min-w-0 items-center gap-2">
                 <WorkflowStatusBadge status={item.status} />
-                <span className="truncate font-mono text-text-primary" title={item.rawName}>
+                <span className="truncate text-sm font-medium text-text-primary" title={item.rawName}>
                   {item.name}
                 </span>
               </div>
-              <div className="mt-1 truncate font-mono text-text-secondary" title={item.inputTitle}>
+              <div className="mt-1 truncate text-text-secondary" title={item.inputTitle}>
                 {item.inputLabel}
               </div>
             </div>
             <div className="min-w-0">
-              <div className="uppercase tracking-wide text-text-tertiary">trigger</div>
-              <div className="truncate font-mono text-text-secondary" title={item.triggerLabel}>
+              <div className="uppercase tracking-wide text-text-tertiary">why it ran</div>
+              <div className="truncate text-text-secondary" title={item.triggerLabel}>
                 {item.triggerLabel}
               </div>
             </div>

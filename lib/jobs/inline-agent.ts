@@ -16,7 +16,7 @@
 // self-finalization during the short pre-spawn window; the real child pid
 // lets liveness checks and resource sampling target the job process.
 
-import { writeFileSync } from 'fs';
+import { mkdirSync, writeFileSync } from 'fs';
 import { join } from 'path';
 import { homedir, tmpdir } from 'os';
 import { getImproveConfig } from '@/lib/scheduling/scheduling';
@@ -66,7 +66,6 @@ export async function startInProcessAgentJob(
   };
   try {
     const LOG_DIR = resolveLogDir();
-    const { mkdirSync } = await import('fs');
     mkdirSync(/*turbopackIgnore: true*/ LOG_DIR, { recursive: true });
 
     const promptPath = join(/*turbopackIgnore: true*/ LOG_DIR, `${jobId}.prompt`);

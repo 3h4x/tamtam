@@ -12,6 +12,14 @@ import {
 import { WorkflowGraph } from '@/components/workflow-runs/WorkflowGraph';
 import { WorkflowRunsEmptyState, WorkflowRunsLoadingState } from '@/components/workflow-runs/WorkflowRunsStates';
 import { WorkflowStatusBadge } from '@/components/workflow-runs/workflow-run-status';
+import { humanizeWorkflowLabel } from '@/components/workflow-runs/humanize';
+import {
+  formatTitle,
+  outcomePillTone,
+  summarizeInput,
+  summarizeOutcome,
+  summarizeTrigger,
+} from '@/components/workflow-runs/summarize';
 import { Button } from '@/components/ui/Button';
 import { Pill, type PillTone } from '@/components/ui/Pill';
 import { StandardTabs } from '@/components/ui/StandardTabs';
@@ -29,114 +37,6 @@ interface WorkflowRunSummary {
   input: unknown;
   output: unknown;
   error: string | null;
-}
-
-// Pull a human-readable first-line summary out of a workflow input.
-// Workflow inputs are always devalue-encoded; once decoded they're usually
-// `[firstArg, secondArg?]`. The first arg is either a primitive (project
-// name) or an object (params). Look for the most operator-useful key.
-function summarizeInput(input: unknown): string {
-  if (input == null) return '—';
-  if (Array.isArray(input)) {
-    if (input.length === 0) return '—';
-    const head = summarizeArg(input[0]);
-    return input.length > 1 ? `${head} (+${input.length - 1})` : head;
-  }
-  return summarizeArg(input);
-}
-
-function summarizeArg(value: unknown): string {
-  if (value == null) return 'null';
-  if (typeof value === 'string') return value;
-  if (typeof value === 'number' || typeof value === 'boolean') return String(value);
-  if (typeof value === 'object') {
-    // Prefer the most identifying field. project/projectName is what most
-    // operators look for first; agentName/jobId help narrow within a project.
-    const obj = value as Record<string, unknown>;
-    const project = pickString(obj, ['project', 'projectName']);
-    const agent = pickString(obj, ['agentName', 'agentId']);
-    const job = pickString(obj, ['jobId']);
-    if (project && agent) return `${project} · ${agent}`;
-    if (project) return project;
-    if (agent) return agent;
-    if (job) return job;
-    return '[object]';
-  }
-  return `[${typeof value}]`;
-}
-
-function pickString(obj: Record<string, unknown>, keys: string[]): string | null {
-  for (const k of keys) {
-    const v = obj[k];
-    if (typeof v === 'string' && v.length > 0) return v;
-  }
-  return null;
-}
-
-/** "Why did this run?" — extracted from input args. For release/phase
- *  workflows the first arg is usually projectName; subsequent args carry
- *  sourceJobId / parentJobId / agentName. */
-function summarizeTrigger(input: unknown): string {
-  if (!Array.isArray(input)) return '—';
-  // Most workflows take (projectName, ...rest). Skip the project name (it
-  // gets its own column) and surface the *why* — agent, parent job, etc.
-  for (let i = 1; i < input.length; i++) {
-    const v = input[i];
-    if (v == null) continue;
-    if (typeof v === 'string') return v;
-    if (typeof v === 'object') {
-      const o = v as Record<string, unknown>;
-      const reason = pickString(o, ['triggeredBy', 'reason', 'sourceJobId', 'parentJobId', 'agentName']);
-      if (reason) return reason;
-      const queue = o.queueIfBlocked === true ? 'queue-if-blocked' : null;
-      if (queue) return queue;
-    }
-  }
-  return '—';
-}
-
-/** "What's the end status?" — combines status with the most useful detail
- *  the workflow output carries: review verdict, exit code, error tail. */
-function summarizeOutcome(run: WorkflowRunSummary): { label: string; tone: 'ok' | 'warn' | 'err' | 'info' } {
-  if (run.status === 'running' || run.status === 'pending') {
-    return { label: run.status, tone: 'info' };
-  }
-  if (run.status === 'cancelled') return { label: 'cancelled', tone: 'err' };
-  if (run.status === 'failed') {
-    const tail = run.error ? run.error.split('\n')[0].slice(0, 60) : 'failed';
-    return { label: tail, tone: 'err' };
-  }
-  // Completed: dig into output for verdict / exit code.
-  const out = run.output;
-  if (out && typeof out === 'object' && !Array.isArray(out)) {
-    const o = out as Record<string, unknown>;
-    const verdict = pickString(o, ['verdict']);
-    if (verdict) {
-      const tone = verdict === 'LGTM' ? 'ok' : verdict === 'DO NOT SHIP' ? 'err' : 'warn';
-      return { label: verdict, tone };
-    }
-    if (typeof o.exitCode === 'number') {
-      return o.exitCode === 0
-        ? { label: 'exit 0', tone: 'ok' }
-        : { label: `exit ${o.exitCode}`, tone: 'err' };
-    }
-    if (typeof o.dispatched === 'boolean') {
-      return { label: o.dispatched ? 'dispatched' : 'skipped', tone: o.dispatched ? 'ok' : 'info' };
-    }
-    if (typeof o.ok === 'boolean') {
-      return o.ok ? { label: 'ok', tone: 'ok' } : { label: 'not ok', tone: 'warn' };
-    }
-  }
-  return { label: 'completed', tone: 'ok' };
-}
-
-function outcomePillTone(tone: 'ok' | 'warn' | 'err' | 'info'): PillTone {
-  switch (tone) {
-    case 'ok': return 'success';
-    case 'warn': return 'warning';
-    case 'err': return 'error';
-    case 'info': return 'accent';
-  }
 }
 
 interface RunsMeta {
@@ -170,13 +70,13 @@ function modeBadge(mode: RunsMeta['mode'] | undefined): { label: string; tone: P
     case 'drive':
       return {
         // The orchestrator workflow drives the release pipeline.
-        label: 'Release: workflow drives',
+        label: 'Releases run automatically',
         tone: 'success',
       };
     case 'observation_only':
       return {
         // Releases create workflow_runs but the chain is still driven by hooks.
-        label: 'Release: workflow observes (hooks drive)',
+        label: 'Releases run via hooks',
         tone: 'accent',
       };
     default:
@@ -231,16 +131,6 @@ function workflowEventTime(run: WorkflowRunSummary): string | null {
   if (run.completedAt) return run.completedAt;
   if (run.startedAt) return run.startedAt;
   return run.createdAt;
-}
-
-function formatTitle(value: unknown): string {
-  if (value == null) return '';
-  if (typeof value === 'string') return value;
-  try {
-    return JSON.stringify(value);
-  } catch {
-    return String(value);
-  }
 }
 
 export function WorkflowRunsPage() {
@@ -346,6 +236,7 @@ export function WorkflowRunsPage() {
     // when there's actually a search needle to match against.
     const outcome = summarizeOutcome(r);
     const searchableText = [
+      humanizeWorkflowLabel(r.name),
       r.name,
       r.rawName,
       r.status,
@@ -363,7 +254,7 @@ export function WorkflowRunsPage() {
     .filter((run) => run.status === 'running' || run.status === 'pending')
     .map((run) => ({
       id: run.id,
-      name: run.name,
+      name: humanizeWorkflowLabel(run.name),
       rawName: run.rawName,
       status: run.status,
       inputLabel: summarizeInput(run.input),
@@ -379,7 +270,7 @@ export function WorkflowRunsPage() {
       const outcome = summarizeOutcome(run);
       return {
         id: run.id,
-        name: run.name,
+        name: humanizeWorkflowLabel(run.name),
         rawName: run.rawName,
         status: run.status,
         inputLabel: summarizeInput(run.input),
@@ -394,31 +285,34 @@ export function WorkflowRunsPage() {
   const workflowRunColumns: Column<WorkflowRunSummary>[] = [
     {
       key: 'workflow',
-      label: 'Workflow',
-      cellClass: 'max-w-[260px] font-mono text-xs text-text-primary',
+      label: 'Activity',
+      cellClass: 'max-w-[260px] text-sm text-text-primary',
       cellTitle: (r) => r.rawName,
       render: (r) => (
         <div className="flex min-w-0 items-center gap-2">
           <WorkflowStatusBadge status={r.status} />
-          <Link href={`/workflow-runs/${encodeURIComponent(r.id)}`} className="min-w-0 truncate hover:underline">
-            {r.name}
+          <Link
+            href={`/workflow-runs/${encodeURIComponent(r.id)}`}
+            className="min-w-0 truncate font-medium hover:underline"
+          >
+            {humanizeWorkflowLabel(r.name)}
           </Link>
         </div>
       ),
     },
     {
       key: 'input',
-      label: 'Project / Args',
-      cellClass: 'max-w-[220px] truncate font-mono text-xs text-text-secondary',
+      label: 'Project',
+      cellClass: 'max-w-[220px] truncate text-sm text-text-secondary',
       cellTitle: (r) => formatTitle(r.input),
       render: (r) => summarizeInput(r.input),
     },
     {
       key: 'trigger',
-      label: 'Trigger',
+      label: 'Why it ran',
       title: 'Why this run was dispatched — parent job, source job, or trigger source.',
       headerClass: 'font-medium',
-      cellClass: 'max-w-[240px] truncate font-mono text-xs text-text-tertiary',
+      cellClass: 'max-w-[240px] truncate text-xs text-text-tertiary',
       cellTitle: (r) => formatTitle(r.input),
       render: (r) => summarizeTrigger(r.input),
     },
@@ -457,8 +351,8 @@ export function WorkflowRunsPage() {
 
   return (
     <div className="p-4 sm:p-6">
-      <div className="mb-4 flex items-baseline gap-3 flex-wrap">
-        <h2 className="text-lg font-semibold text-text-primary">Workflow runs</h2>
+      <div className="mb-1 flex items-baseline gap-3 flex-wrap">
+        <h2 className="text-lg font-semibold text-text-primary">Activity</h2>
         {data.meta && (() => {
           const badge = modeBadge(data.meta.mode);
           const title =
@@ -485,6 +379,9 @@ export function WorkflowRunsPage() {
           onChange={setView}
         />
       </div>
+      <p className="mb-4 text-sm text-text-secondary">
+        Everything TamTam is doing across your projects — releases, scheduled agents, and pipeline checks — as it happens.
+      </p>
       {error ? (
         <div
           className="mb-3 flex flex-wrap items-start justify-between gap-3 rounded-md border border-status-warning/30 bg-status-warning/10 px-3 py-2 text-sm text-text-primary"
@@ -553,12 +450,12 @@ export function WorkflowRunsPage() {
               >
                 <div className="flex items-start justify-between gap-3">
                   <div className="min-w-0">
-                    <div className="truncate font-mono text-xs text-text-primary" title={r.rawName}>
-                      {r.name}
+                    <div className="truncate text-sm font-medium text-text-primary" title={r.rawName}>
+                      {humanizeWorkflowLabel(r.name)}
                     </div>
                     <div className="mt-1 flex min-w-0 items-center gap-2">
                       <WorkflowStatusBadge status={r.status} />
-                      <div className="min-w-0 truncate font-mono text-xs text-text-secondary" title={formatTitle(r.input)}>
+                      <div className="min-w-0 truncate text-xs text-text-secondary" title={formatTitle(r.input)}>
                         {inputSummary}
                       </div>
                     </div>
@@ -574,8 +471,8 @@ export function WorkflowRunsPage() {
                 </div>
                 <div className="mt-2 grid grid-cols-3 gap-2 text-xs">
                   <div className="min-w-0">
-                    <div className="uppercase tracking-wide text-text-tertiary">Trigger</div>
-                    <div className="truncate font-mono text-text-secondary" title={formatTitle(r.input)}>
+                    <div className="uppercase tracking-wide text-text-tertiary">Why it ran</div>
+                    <div className="truncate text-text-secondary" title={formatTitle(r.input)}>
                       {triggerSummary}
                     </div>
                   </div>

@@ -9,6 +9,8 @@ import {
   workflowStepNeedsAttention,
 } from '@/components/workflow-runs/WorkflowStepAttentionPanel';
 import { WorkflowStatusBadge, workflowStatusPresentation } from '@/components/workflow-runs/workflow-run-status';
+import { humanizeWorkflowLabel, humanizeEmbeddedNames } from '@/components/workflow-runs/humanize';
+import { summarizeInput, summarizeTrigger } from '@/components/workflow-runs/summarize';
 import { Pill } from '@/components/ui/Pill';
 import { Table, type Column } from '@/components/ui/Table';
 
@@ -37,6 +39,7 @@ interface RunDetail {
     startedAt: string | null;
     completedAt: string | null;
     durationMs: number | null;
+    input: unknown;
     output: unknown;
     error: string | null;
   };
@@ -135,8 +138,8 @@ function WorkflowStepTrace({ steps, now }: { steps: Step[]; now: number }) {
                   </span>
                 </span>
                 <div className="min-w-0">
-                  <div className="truncate font-mono text-xs text-text-primary" title={step.rawName}>
-                    {index + 1}. {step.name}
+                  <div className="truncate text-xs font-medium text-text-primary" title={step.rawName}>
+                    {index + 1}. {humanizeWorkflowLabel(step.name)}
                   </div>
                   <div className="truncate font-mono text-[11px] tabular-nums text-text-tertiary">
                     attempt {step.attempt} · {timing}
@@ -180,7 +183,7 @@ function StepDiagnostics({
       <div className="mt-2 space-y-2">
         {error != null ? (
           <div className="rounded border border-status-error/30 bg-status-error/10 p-2 whitespace-pre-wrap text-status-error">
-            {error}
+            {humanizeEmbeddedNames(error)}
           </div>
         ) : null}
         {output != null ? (
@@ -296,13 +299,16 @@ export function WorkflowRunDetail({ runId }: { runId: string }) {
 
   const now = Date.now();
   const isLiveRun = !isTerminalWorkflowStatus(data.run.status);
+  const runLabel = humanizeWorkflowLabel(data.run.name);
+  const projectLabel = summarizeInput(data.run.input);
+  const triggerLabel = summarizeTrigger(data.run.input);
   const stepStatusCounts = countStepStatuses(data.steps);
   const runDuration = formatDurationCell(data.run.status, data.run.durationMs, data.run.startedAt, now);
   const attentionSteps = data.steps
     .filter(workflowStepNeedsAttention)
     .map((step) => ({
       stepId: step.stepId,
-      name: step.name,
+      name: humanizeWorkflowLabel(step.name),
       rawName: step.rawName,
       status: step.status,
       attempt: step.attempt,
@@ -315,8 +321,8 @@ export function WorkflowRunDetail({ runId }: { runId: string }) {
       key: 'step',
       label: 'Step',
       render: (step) => (
-        <div className="font-mono text-xs text-text-primary">
-          <div>{step.name}</div>
+        <div className="text-xs text-text-primary">
+          <div className="font-medium">{humanizeWorkflowLabel(step.name)}</div>
           <StepDiagnostics error={step.error} output={step.output} className="mt-1" />
         </div>
       ),
@@ -357,12 +363,11 @@ export function WorkflowRunDetail({ runId }: { runId: string }) {
       </div>
 
       <div className="border border-border rounded-md p-4 bg-bg-secondary">
-        <div className="flex flex-wrap items-baseline gap-3 mb-2">
-          <h2 className="text-lg font-semibold text-text-primary font-mono" title={data.run.rawName}>
-            {data.run.name}
+        <div className="flex flex-wrap items-baseline gap-3 mb-1">
+          <h2 className="text-lg font-semibold text-text-primary" title={data.run.rawName}>
+            {runLabel}
           </h2>
           <WorkflowStatusBadge status={data.run.status} />
-          <span className="text-xs text-text-tertiary font-mono">{data.run.id}</span>
           <Pill size="xs" tone="neutral" className="bg-bg-tertiary px-1.5 font-mono text-[11px] font-normal">
             {isLiveRun ? 'live · refreshes every 5s' : 'final snapshot'}
           </Pill>
@@ -372,6 +377,17 @@ export function WorkflowRunDetail({ runId }: { runId: string }) {
             </span>
           ) : null}
         </div>
+        <p className="mb-3 text-sm text-text-secondary">
+          {projectLabel !== '—' ? (
+            <>
+              Project <span className="font-medium text-text-primary">{projectLabel}</span>
+            </>
+          ) : (
+            'No project context recorded'
+          )}
+          {triggerLabel !== '—' ? <> · triggered by {triggerLabel}</> : null}
+          <span className="ml-2 font-mono text-[11px] text-text-tertiary">{data.run.id}</span>
+        </p>
         <div className="grid grid-cols-2 sm:grid-cols-4 gap-3 text-xs">
           <div>
             <div className="text-text-tertiary uppercase tracking-wide">Created</div>
@@ -398,7 +414,7 @@ export function WorkflowRunDetail({ runId }: { runId: string }) {
         </div>
         {data.run.error != null && (
           <div className="mt-3 p-2 rounded border border-status-error/30 bg-status-error/10 text-status-error text-xs whitespace-pre-wrap">
-            {data.run.error}
+            {humanizeEmbeddedNames(data.run.error)}
           </div>
         )}
         {data.run.output != null && (
@@ -459,8 +475,8 @@ export function WorkflowRunDetail({ runId }: { runId: string }) {
                 >
                   <div className="flex items-start justify-between gap-3">
                     <div className="min-w-0">
-                      <div className="truncate font-mono text-xs text-text-primary" title={s.rawName}>
-                        {s.name}
+                      <div className="truncate text-sm font-medium text-text-primary" title={s.rawName}>
+                        {humanizeWorkflowLabel(s.name)}
                       </div>
                       <div className="mt-1 font-mono text-xs tabular-nums text-text-secondary">
                         attempt {s.attempt} · {formatDurationCell(s.status, s.durationMs, s.startedAt, now)}

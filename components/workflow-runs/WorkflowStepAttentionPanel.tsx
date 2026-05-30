@@ -1,6 +1,7 @@
 'use client';
 
 import { WorkflowStatusBadge } from '@/components/workflow-runs/workflow-run-status';
+import { humanizeEmbeddedNames } from '@/components/workflow-runs/humanize';
 
 export interface WorkflowStepAttentionItem {
   stepId: string;
@@ -27,7 +28,7 @@ function summarizeStepIssue(step: WorkflowStepAttentionItem): string {
     // the first one (matters for long multi-line stack-trace errors).
     const nl = step.error.indexOf('\n');
     const firstLine = nl >= 0 ? step.error.slice(0, nl) : step.error;
-    return firstLine.slice(0, 96);
+    return humanizeEmbeddedNames(firstLine).slice(0, 96);
   }
   if (step.status === 'cancelled') return 'cancelled before completion';
   return `status ${step.status}`;
@@ -80,7 +81,7 @@ function StepAttentionCard({
     >
       <div className="flex items-start justify-between gap-3">
         <div className="min-w-0">
-          <div className="truncate font-mono text-text-primary" title={step.rawName}>
+          <div className="truncate text-sm font-medium text-text-primary" title={step.rawName}>
             {step.name}
           </div>
           <div className="mt-1 truncate text-text-secondary" title={step.error ?? summarizeStepIssue(step)}>
