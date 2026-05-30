@@ -1,4 +1,5 @@
 import { test, expect } from '@playwright/test';
+import type { Locator } from '@playwright/test';
 import { readFileSync } from 'fs';
 import { join } from 'path';
 import {
@@ -16,8 +17,12 @@ const UI_LIVE_SCENARIO = JSON.parse(
 const RUNS_PROJECT = 'runs-live';
 const STRIP_PROJECT = 'strip-live';
 
+function workflowRunLink(panel: Locator, project: string): Locator {
+  return panel.getByRole('link').filter({ hasText: project }).first();
+}
+
 test.describe('Real lifecycle UI surfaces', () => {
-  test('global runs list shows a live running job, then flips to done without reload', async ({
+  test('workflow runs page shows a live running release, then flips to completed without reload', async ({
     page,
     request,
   }) => {
@@ -34,21 +39,21 @@ test.describe('Real lifecycle UI surfaces', () => {
     const reviewJob = await waitForJobRunning(request, RUNS_PROJECT, 'review', 20_000);
     expect(reviewJob, 'review job should be running').not.toBeNull();
 
-    await page.goto(`/runs?project=${encodeURIComponent(RUNS_PROJECT)}`);
+    await page.goto('/workflow-runs');
 
-    await expect(page.getByText(RUNS_PROJECT).first()).toBeVisible({ timeout: 8_000 });
-    await expect(page.getByText('running').first()).toBeVisible({ timeout: 8_000 });
-    await expect(page.locator('span.animate-pulse').first()).toBeVisible({ timeout: 8_000 });
+    const activePanel = page.getByLabel('Active workflow runs');
+    const activeRunCard = workflowRunLink(activePanel, RUNS_PROJECT);
+    await expect(activePanel).toBeVisible({ timeout: 8_000 });
+    await expect(activeRunCard).toBeVisible({ timeout: 8_000 });
+    await expect(activeRunCard.getByLabel('status running')).toBeVisible({ timeout: 8_000 });
 
     const result = await waitForPipelineCompletion(request, RUNS_PROJECT, 90_000);
     expect(result.status, 'pipeline should complete').toBe('done');
     expect(result.releaseJob?.['exit_code'], 'release exit code').toBe(0);
 
-    await expect(page.getByText('done').first()).toBeVisible({ timeout: 12_000 });
-    await expect(page.getByText('running', { exact: true })).not.toBeVisible({
-      timeout: 12_000,
-    });
-    await expect(page.locator('span.animate-pulse')).toHaveCount(0, { timeout: 12_000 });
+    const completedRow = page.getByRole('row').filter({ hasText: RUNS_PROJECT }).first();
+    await expect(activeRunCard).toHaveCount(0, { timeout: 12_000 });
+    await expect(completedRow.getByLabel('status completed')).toBeVisible({ timeout: 12_000 });
   });
 
   test('terminal pipeline strip shows the live release chain and disappears when the release finishes', async ({
@@ -80,7 +85,7 @@ test.describe('Real lifecycle UI surfaces', () => {
     await expect(page.getByTitle('review in progress — click to open terminal')).toBeVisible({
       timeout: 8_000,
     });
-    await expect(page.getByTitle('View unified release trace')).toBeVisible({ timeout: 8_000 });
+    await expect(page.getByTitle('View unified release trace').first()).toBeVisible({ timeout: 8_000 });
     await expect(page.getByRole('button', { name: 'abort' })).toBeVisible({ timeout: 8_000 });
 
     const result = await waitForPipelineCompletion(request, STRIP_PROJECT, 90_000);

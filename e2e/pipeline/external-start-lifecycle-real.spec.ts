@@ -1,4 +1,5 @@
 import { test, expect } from '@playwright/test'
+import type { Locator } from '@playwright/test'
 import { readFileSync } from 'fs'
 import { join } from 'path'
 import {
@@ -21,8 +22,12 @@ const ABORT_SCENARIO = JSON.parse(
 const RUNS_PROJECT = 'external-start-runs'
 const TERMINAL_ABORT_PROJECT = 'abort'
 
+function workflowRunLink(panel: Locator, project: string): Locator {
+  return panel.getByRole('link').filter({ hasText: project }).first()
+}
+
 test.describe('External-start lifecycle surfaces', () => {
-  test('global runs list picks up an externally-started release from idle state and clears the running spinner after completion', async ({
+  test('workflow runs page picks up an externally-started release from idle state and clears active state after completion', async ({
     page,
     request,
   }) => {
@@ -31,8 +36,10 @@ test.describe('External-start lifecycle surfaces', () => {
     writeGitTiming(RUNS_PROJECT, { push: 6500 })
     await enableProject(request, RUNS_PROJECT, { testsDisabled: true })
 
-    await page.goto(`/runs?project=${encodeURIComponent(RUNS_PROJECT)}`)
-    await expect(page.getByText(RUNS_PROJECT)).toHaveCount(0)
+    await page.goto('/workflow-runs')
+    const activePanel = page.getByLabel('Active workflow runs')
+    const activeRunCard = workflowRunLink(activePanel, RUNS_PROJECT)
+    await expect(activeRunCard).toHaveCount(0)
 
     const releaseResponse = await request.post(`/api/projects/by-project/${RUNS_PROJECT}/release`)
     expect(
@@ -43,19 +50,17 @@ test.describe('External-start lifecycle surfaces', () => {
     const runningReview = await waitForJobRunning(request, RUNS_PROJECT, 'review', 20_000)
     expect(runningReview, 'review job should be running').not.toBeNull()
 
-    await expect(page.getByText(RUNS_PROJECT).first()).toBeVisible({ timeout: 20_000 })
-    await expect(page.getByText('running').first()).toBeVisible({ timeout: 20_000 })
-    await expect(page.locator('span.animate-pulse').first()).toBeVisible({ timeout: 20_000 })
+    await expect(activePanel).toBeVisible({ timeout: 20_000 })
+    await expect(activeRunCard).toBeVisible({ timeout: 20_000 })
+    await expect(activeRunCard.getByLabel('status running')).toBeVisible({ timeout: 20_000 })
 
     const result = await waitForPipelineCompletion(request, RUNS_PROJECT, 90_000)
     expect(result.status, 'pipeline should complete').toBe('done')
     expect(result.releaseJob?.['exit_code'], 'release exit code').toBe(0)
 
-    await expect(page.getByText('done').first()).toBeVisible({ timeout: 15_000 })
-    await expect(page.getByText('running', { exact: true })).not.toBeVisible({
-      timeout: 15_000,
-    })
-    await expect(page.locator('span.animate-pulse')).toHaveCount(0, { timeout: 15_000 })
+    const completedRow = page.getByRole('row').filter({ hasText: RUNS_PROJECT }).first()
+    await expect(activeRunCard).toHaveCount(0, { timeout: 15_000 })
+    await expect(completedRow.getByLabel('status completed')).toBeVisible({ timeout: 15_000 })
   })
 
   test('fresh terminal landing page auto-attaches to an externally-started release and clears live state after abort', async ({
