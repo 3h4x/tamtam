@@ -5,3 +5,7 @@ export const QA_SKILL_ID = 'agent-qa';
 // Path used by the improve agent's audit log. Exported so the seeder
 // and tests can reference the exact path the prereq command writes to.
 export const IMPROVE_AUDIT_PATH = '.tamtam/cache/audits/improve.md';
+// Content-addressed ledger of audited files: one git blob SHA per line. A file is
+// re-audited only when its bytes change (new SHA), so unchanged files drop out of the
+// candidate queue without relying on filesystem mtime. Lives in the gitignored cache.
+export const IMPROVE_LEDGER_PATH = '.tamtam/cache/audits/improve-ledger.txt';

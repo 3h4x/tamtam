@@ -1,50 +1,85 @@
 ---
 id: agent-improve
 name: agent:improve
-description: "Walks up to 5 oldest source files, applies fixes by family rubric (F1–F4), continues scanning after small/F3/F4 fixes and stops after substantial F1/F2 ones, or `touch`es clean files to rotate them out of the queue."
-version: "2026-05-29"
+description: "Walks up to 5 oldest unaudited source files (oldest commit first), applies fixes by family rubric (F1–F4), continues scanning after small/F3/F4 fixes and stops after substantial F1/F2 ones, and records every audited file in a content-hash ledger so the queue advances without re-running on unchanged files."
+version: "2026-05-30"
 agent:
   defaultSchedule: 12h
   defaultModel: normal
   tier: featured
   fallbackEnabled: true
   aliases: []
-# Runs in the project cwd before the LLM turn starts; stdout is injected
-# into the prompt under "## Prerequisite Output". Uses `git ls-files`
-# (not `find`) so it lists tracked + non-ignored-untracked files; git
-# submodules show up as a single gitlink entry, keeping the candidate
-# set inside "our code" even when projects vendor large dependencies.
-# Portable across macOS (BSD stat) and Linux (GNU stat).
+# Runs in the project cwd before the LLM turn starts; stdout is injected into the
+# prompt under "## Prerequisite Output". Selection is CONTENT-ADDRESSED, not mtime-
+# based: `git ls-files` lists tracked plus non-ignored untracked files (so
+# .gitignore'd trees like node_modules / target / dist / .venv are skipped for free).
+# Tracked and untracked files are both hashed with `git hash-object`, so the ledger
+# key reflects the working tree's current bytes. A file whose current SHA is already
+# in the ledger has been audited at this exact content and is skipped, so it
+# re-surfaces only when its bytes change. Ordering is by latest-commit time;
+# untracked files have no commit time and sort as oldest so new source gets audited
+# promptly.
 prerequisite: |
-  echo '## Top 5 oldest candidate files'
+  echo '## Next 5 unaudited candidates (oldest commit first, current content)'
 
-  # macOS uses BSD stat (`stat -f`); Linux GNU stat (`stat -c`). Detect once.
-  stat_mode=$(if stat --version >/dev/null 2>&1; then printf gnu; else printf bsd; fi)
+  LEDGER=.tamtam/cache/audits/improve-ledger.txt
+  mkdir -p .tamtam/cache/audits; : >> "$LEDGER"
 
-  # Candidate set = tracked files + non-ignored untracked files.
-  # Filter to source-like extensions, then exclude:
-  #   - generated artifacts (.d.ts, *.gen.*, *.generated.*)
-  #   - vendored / build dirs (.tamtam, node_modules, dist, build, out, coverage)
-  #   - test scaffolding (__snapshots__, __fixtures__, fixtures, *-results, *-report)
-  #   - historical-archive files (CHANGELOG, LICENSE)
-  #   - superpowers plan/spec docs (history, not active code)
-  { git ls-files 2>/dev/null; git ls-files --others --exclude-standard 2>/dev/null; } \
-    | grep -Ei '\.(ts|tsx|js|jsx|sol|py|rs|go|md|sh)$' \
-    | grep -v '\.d\.ts$' \
-    | grep -Ev '\.(gen|generated)\.[^/]+$' \
-    | grep -Ev '(^|/)(\.tamtam|node_modules)/' \
-    | grep -Ev '(^|/)(__snapshots__|__fixtures__|fixtures|e2e-results|test-results|playwright-report|coverage|dist|build|out)/' \
-    | grep -Ev '(^|/)(CHANGELOG|LICENSE|LICENCE)(\.md)?$' \
-    | grep -v '^docs/superpowers/plans/' \
-    | grep -v '^docs/superpowers/specs/' \
-    | while IFS= read -r f; do
-        if [ "$stat_mode" = gnu ]; then
-          d=$(stat -c '%Y' "$f" 2>/dev/null)
-        else
-          d=$(stat -f '%m' "$f" 2>/dev/null)
-        fi
-        [ -n "$d" ] && printf '%s %s\n' "$d" "$f"
-      done | sort -n | head -5
+  # path -> latest commit epoch (single history pass; first-seen line = newest commit)
+  git log --format='@%ct' --name-only --no-renames 2>/dev/null \
+    | awk '/^@/{t=substr($0,2);next} NF&&!seen[$0]++{age[$0]=t} END{for(p in age)print age[p]"\t"p}' \
+    > .tamtam/cache/audits/.improve-age.tmp
+
+  # tracked candidates + current blob SHA, minus generated/vendored/archive paths and ledger hits
+  git ls-files 2>/dev/null \
+    | while IFS= read -r path; do
+        case "$path" in
+          *.ts|*.tsx|*.js|*.jsx|*.sol|*.py|*.rs|*.go|*.md|*.sh) ;;
+          *) continue;;
+        esac
+        case "$path" in
+          *.d.ts|*.gen.*|*.generated.*) continue;;
+          .tamtam/*|*/.tamtam/*|node_modules/*|*/node_modules/*) continue;;
+          *__snapshots__/*|*__fixtures__/*|*/fixtures/*|*/test-results/*|*/playwright-report/*|*/coverage/*|*/dist/*|*/build/*|*/out/*) continue;;
+          docs/superpowers/plans/*|docs/superpowers/specs/*) continue;;
+          CHANGELOG.md|LICENSE|LICENSE.md|LICENCE|LICENCE.md) continue;;
+        esac
+        sha=$(git hash-object -- "$path" 2>/dev/null) || continue
+        [ -n "$sha" ] || continue
+        grep -qxF "$sha" "$LEDGER" 2>/dev/null && continue
+        printf '%s\t%s\n' "$sha" "$path"
+      done > .tamtam/cache/audits/.improve-cand.tmp
+
+  # non-ignored untracked candidates get the same git-blob hash shape
+  git ls-files --others --exclude-standard 2>/dev/null \
+    | while IFS= read -r path; do
+        case "$path" in
+          *.ts|*.tsx|*.js|*.jsx|*.sol|*.py|*.rs|*.go|*.md|*.sh) ;;
+          *) continue;;
+        esac
+        case "$path" in
+          *.d.ts|*.gen.*|*.generated.*) continue;;
+          .tamtam/*|*/.tamtam/*|node_modules/*|*/node_modules/*) continue;;
+          *__snapshots__/*|*__fixtures__/*|*/fixtures/*|*/test-results/*|*/playwright-report/*|*/coverage/*|*/dist/*|*/build/*|*/out/*) continue;;
+          docs/superpowers/plans/*|docs/superpowers/specs/*) continue;;
+          CHANGELOG.md|LICENSE|LICENSE.md|LICENCE|LICENCE.md) continue;;
+        esac
+        sha=$(git hash-object -- "$path" 2>/dev/null) || continue
+        [ -n "$sha" ] || continue
+        grep -qxF "$sha" "$LEDGER" 2>/dev/null && continue
+        printf '%s\t%s\n' "$sha" "$path"
+      done >> .tamtam/cache/audits/.improve-cand.tmp
+
+  # join age onto candidates (missing age = 0 = oldest), oldest-first, take 5
+  out=$(awk -F'\t' 'BEGIN{first=ARGV[1]} FILENAME==first{age[$2]=$1;next}{a=age[$2];if(a=="")a=0;print a"\t"$2"\t"$1}' \
+          .tamtam/cache/audits/.improve-age.tmp .tamtam/cache/audits/.improve-cand.tmp \
+        | sort -n | head -5 | awk -F'\t' '{printf "%s  (blob %s)\n",$2,$3}')
+  rm -f .tamtam/cache/audits/.improve-age.tmp .tamtam/cache/audits/.improve-cand.tmp
+  if [ -n "$out" ]; then
+    printf '%s\n' "$out"
+  else
+    echo '(all tracked and non-ignored untracked files audited at current content — idle until a file changes)'
+  fi
 
   echo
   echo '## Recent improve runs (tail of .tamtam/cache/audits/improve.md)'
@@ -59,7 +94,7 @@ requires:
 outputs:
   - "Audit-log rows appended to `.tamtam/cache/audits/improve.md`"
   - "0–3 source-file edits (small F3/F4 stack or one substantial F1/F2)"
-  - "0–5 mtime-only `touch`es for queue rotation (no content change)"
+  - "1 blob-SHA line per audited file appended to `.tamtam/cache/audits/improve-ledger.txt` (queue advancement; no content change)"
   - "Sentinels: `IMPROVE_FILE_CLEAN`, `IMPROVE_QUEUE_ROTATED`, `IMPROVE_CREDENTIAL_LEAK`, `IMPROVE_FILE_DEAD_ORPHAN`, `IMPROVE_FILE_DUPLICATE`, `IMPROVE_STALE_PATH`"
 relatedAgents:
   - agent:docs-claude
@@ -80,26 +115,28 @@ These rules are non-negotiable — they govern every step that follows.
 
 ## 1. Walk the candidate queue (do not stop at the first file)
 
-The candidate queue is the **top 5 oldest source files** the prerequisite gave you. You walk them **in order**, and per file you do exactly ONE of:
+The candidate queue is the **5 oldest unaudited source files** (oldest commit first) the prerequisite gave you. The prerequisite has already excluded every file whose current content is in the ledger, so each candidate is genuinely unaudited at its present bytes. You walk them **in order**, and per file you do exactly ONE of:
 
-- **Found a real instance in Families 1–4** → apply ONE fix to that file, verify per §5. Whether you continue scanning the remaining candidates depends on whether the fix was *small* or *substantial* (see §3).
-- **Clean (no real instance)** → `touch <path>` from the repo root so the filesystem mtime advances past now, append one clean row to `.tamtam/cache/audits/improve.md`, and continue to the next candidate.
-- **Family-5 hit (credential leak / dead orphan / duplicate / stale path)** → emit the sentinel, do NOT touch the file (you want it to keep surfacing until a human resolves it), and stop the walk.
+- **Found a real instance in Families 1–4** → apply ONE fix to that file, verify per §5, then **record it in the ledger** (below). Whether you continue scanning the remaining candidates depends on whether the fix was *small* or *substantial* (see §3).
+- **Clean (no real instance)** → append one clean row to `.tamtam/cache/audits/improve.md`, **record it in the ledger**, and continue to the next candidate. Do NOT modify the file.
+- **Family-5 hit (credential leak / dead orphan / duplicate / stale path)** → emit the sentinel, append the human-action row to the audit log, **record it in the ledger**, and **continue to the next candidate**. Do NOT stop the walk: the ledger entry keeps the parked file out of the queue until a human resolves it (which changes its content). This is the key fix for the old deadlock where an un-editable oldest file was re-selected forever.
 
-`touch` is mandatory on a clean audit. Without it the same file stays at the top of next run's oldest-first queue and the agent keeps re-auditing it. `touch` only bumps mtime — file content is unchanged, `git status` stays clean, the release pipeline is unaffected.
+**Record in the ledger — mandatory on EVERY audited file, whatever the outcome (fix, clean, or Family-5 park):**
+
+```bash
+git hash-object -- "<path>" >> .tamtam/cache/audits/improve-ledger.txt
+```
+
+This appends the file's current blob SHA — the content-addressed "audited" marker that replaces the old `touch`. It changes no file content (`git status` stays clean) and demotes the file from the queue until its bytes actually change, at which point the SHA differs and the file re-surfaces automatically. Never `touch` files for rotation, and never write an "audited" marker into the source file itself.
 
 Caps and order:
 - Walk **at most 5 candidates** per run (the prerequisite list size).
-- **At most 3 fixes per run** total. After the third fix, stop regardless of remaining small-fix candidates.
+- **At most 3 fixes per run** total. After the third fix, stop regardless of remaining small-fix candidates. (Still record the files you actually audited; unwalked candidates are simply left for the next run.)
 - **At most 1 fix per file.** Don't pile patterns onto the same file in one run.
-- Skip a candidate without auditing only if it is a tiny barrel/re-export with nothing meaningful inside (one-line type re-export). "It's just config" / "it's just an SVG" is laziness — audit it against the rubric and `touch` it as clean if no instance.
-- If the audit log shows a file was already audited under this exact prompt within the last few runs, it should not be at the top of the queue at all (the previous run should have touched it). If it is, treat that as a queue-rotation bug, audit it once, touch it, and continue.
+- Skip a candidate without auditing only if it is a tiny barrel/re-export with nothing meaningful inside (one-line type re-export). "It's just config" / "it's just an SVG" is laziness — audit it against the rubric and record it in the ledger as clean if no instance.
+- A candidate should never be one you audited at this same content in a recent run — the prerequisite filters those via the ledger. If you see an obvious repeat, the previous run failed to record it; audit it once, record it, and continue.
 
-If the prerequisite output is absent (custom agent without the standard prereq), run this find yourself from the repo root and take the top 5:
-
-`find app components lib hooks scripts docs -type f -not -path '*/.tamtam/*' -not -path '*/node_modules/*' -not -path '*/.next/*' -not -path '*/dist/*' -not -path '*/coverage/*' -not -name '*.d.ts' \( -name '*.ts' -o -name '*.tsx' -o -name '*.md' -o -name '*.sh' \) -printf '%T@ %p\n' 2>/dev/null | sort -n | head -5`
-
-Skip generated files (`*.d.ts`, anything under `node_modules`, `.next`, `dist`, `coverage`, `.tamtam/` — the latter is TamTam's per-project state, not project source).
+If the prerequisite output is absent (custom agent without the standard prereq), reproduce its selection from the repo root: list tracked source files via `git ls-files -- '*.ts' '*.tsx' '*.js' '*.jsx' '*.sol' '*.py' '*.rs' '*.go' '*.md' '*.sh'`, list non-ignored untracked source files via `git ls-files --others --exclude-standard -- ...`, hash every candidate's current content with `git hash-object -- "<path>"`, drop any candidate whose blob SHA already appears in `.tamtam/cache/audits/improve-ledger.txt`, prefer the oldest by latest commit time with untracked files first, and take the first 5. Skip generated/vendored paths (`*.d.ts`, `node_modules`, `dist`, `build`, `out`, `coverage`, `.tamtam/`).
 
 ## 2. Audit by family, not by checklist
 
@@ -166,9 +203,9 @@ Archetypal instances:
 
 F4 fixes are pure text and never change runtime behavior → always **small** (see §3).
 
-### Family 5 — Dead, duplicate, or leaking (flag-and-stop, do NOT edit)
+### Family 5 — Dead, duplicate, or leaking (flag, record, and continue — do NOT edit)
 
-Deletion or rotation is a deliberate human decision, not an improve-run edit. You flag with a sentinel and stop.
+Deletion or rotation is a deliberate human decision, not an improve-run edit. You flag with a sentinel, append the human-action row to the audit log, record the file in the ledger (so it stops re-surfacing until a human resolves it and its content changes), and **continue to the next candidate** — do not stop the walk.
 
 Archetypal instances:
 - **Committed credential**: literal matching `eyJ[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+` (JWT shape), or a string containing `service_role`, `SUPABASE_SERVICE_ROLE`, `PRIVATE_KEY`, `password = '…'` with a non-placeholder value. Deletion does NOT remove it from git history — rotation upstream is the only real fix. Sentinel: `IMPROVE_CREDENTIAL_LEAK <path>:<line> <kind>`.
@@ -209,13 +246,13 @@ You already paid the cost of loading the prerequisite, the skill, and a model co
 Small fix:
 1. Make the edit (minimal diff).
 2. Run only `npx tsc --noEmit` (no test file needed since runtime didn't change).
-3. Append the fix row to the audit log.
+3. Append the fix row to the audit log and record the file in the ledger (`git hash-object -- "<path>" >> .tamtam/cache/audits/improve-ledger.txt`, see §1).
 4. Continue to the next candidate, subject to the §1 caps (3 fixes total, 1 per file).
 
 Substantial fix:
 1. Make the edit.
 2. Run `npx tsc --noEmit` AND `npx vitest run <relevant-test-file>` — find tests touching the file via `find __tests__ -name '*<file-basename>*'` or grep.
-3. Append the fix row to the audit log.
+3. Append the fix row to the audit log and record the file in the ledger (§1).
 4. **Stop the walk.** Do not audit remaining candidates.
 
 For all fixes, regardless of class:
@@ -227,9 +264,9 @@ For all fixes, regardless of class:
 ## 4. Rotate clean candidates forward
 
 For every candidate you audited and found clean:
-- `touch <path>` from the repo root. This advances the filesystem mtime past now, so next run's oldest-first queue picks the *next* file instead of looping on the same one.
+- Record it in the ledger: `git hash-object -- "<path>" >> .tamtam/cache/audits/improve-ledger.txt`. This appends the file's current blob SHA so next run's prerequisite filters it out and the queue picks the *next* file instead of looping on the same one. The file re-enters the queue automatically only if its content later changes (different SHA).
 - Append a clean row to `.tamtam/cache/audits/improve.md` (see §7).
-- Do NOT modify the file's content. `touch` only. Adding comments, blank lines, or "audited on Y/M/D" markers to the source file would dirty git and is forbidden.
+- Do NOT modify the file's content. The ledger entry lives in `.tamtam/cache/`, not in the source. Adding comments, blank lines, `touch`, or "audited on Y/M/D" markers to the source file would dirty git and is forbidden.
 
 ## 5. Verify
 
@@ -247,20 +284,20 @@ Print a summary at the end of the run. Pick the shape that matches what happened
 
 **Shape A — at least one fix applied:**
 - **Fixes applied** (1–3): per fix, list path · family · class (small | substantial) · one-sentence change.
-- **Clean rotations** (0–4): paths that were walked, found clean, and `touch`ed before/between the fixes.
-- **Why the walk ended** (`substantial fix — stopped`, `3-fix cap reached`, `5-candidate cap reached`, `Family-5 hit — stopped`).
+- **Clean rotations** (0–4): paths that were walked, found clean, and recorded in the ledger before/between the fixes.
+- **Why the walk ended** (`substantial fix — stopped`, `3-fix cap reached`, `5-candidate cap reached`, `queue exhausted`).
 - **Verification** (type-check pass; for substantial fixes also test-file: N/N passing).
 
 **Shape B — all candidates clean:**
-- **Candidates rotated** (list each path you touched + clean-logged, in walk order).
+- **Candidates rotated** (list each path you ledger-recorded + clean-logged, in walk order).
 - One line: "queue rotated forward — next run starts on a different file."
-- Final sentinel: `IMPROVE_QUEUE_ROTATED <n>` where n is the number of files touched.
+- Final sentinel: `IMPROVE_QUEUE_ROTATED <n>` where n is the number of files recorded as clean.
 
 Per-file sentinels are still emitted for the audit log: `IMPROVE_FILE_CLEAN <path>` for each clean walk; the Family-5 sentinels (`IMPROVE_CREDENTIAL_LEAK` / `IMPROVE_FILE_DEAD_ORPHAN` / `IMPROVE_FILE_DUPLICATE` / `IMPROVE_STALE_PATH`) for Family-5 hits.
 
 ## 7. Append to the audit log
 
-Append one row per audited candidate to `.tamtam/cache/audits/improve.md` — both for fixes and for clean rotations. This is the per-project running ledger; the next run reads it to understand what's already been touched and what patterns recur.
+Append one row per audited candidate to `.tamtam/cache/audits/improve.md` — both for fixes and for clean rotations. This is the human-readable trail (what patterns recur, what needs human cleanup); the machine-readable queue state is the separate blob-SHA ledger at `.tamtam/cache/audits/improve-ledger.txt` from §1. Write both for every audited file.
 
 The `.tamtam/cache/` subdir is gitignored by default (TamTam seeds `.tamtam/.gitignore` with `cache/` on first agent run), so audit files there stay out of commits without any per-agent gitignore edit.
 
@@ -286,15 +323,15 @@ Then append one row per audited file, including the **current prompt version** (
 Use the same path the user would see (`lib/foo/bar.ts`, not absolute). For the prompt version, copy the `version:` value from this skill's frontmatter exactly. If a file's last audit row carries an older version, treat the previous `clean` as expired and re-audit it under the current rubric.
 
 Per-row rules:
-- **Clean rotation** (you `touch`ed the file in §4): `Family: clean`, `Change: clean — touched to rotate queue`.
+- **Clean rotation** (recorded in the ledger in §4): `Family: clean`, `Change: clean — recorded in ledger to rotate queue`.
 - **Small fix** (§3): `Family: F3/F4: <name> (small)`, `Change: <one sentence in present tense>`.
 - **Substantial fix** (§3): `Family: F1..F4: <name>`, `Change: <one sentence in present tense>`.
-- **Family-5 hit** (sentinel, no edit): `Family: F5: <sentinel name>`, `Change: <one sentence — the human-action item>`. Do NOT `touch` the file.
+- **Family-5 hit** (sentinel, no edit): `Family: F5: <sentinel name>`, `Change: <one sentence — the human-action item>`. Record it in the ledger like any other audited file (the SHA marker keeps it out of the queue until a human resolves it); do NOT edit the source file.
 
-The audit log is project-scoped and commits with the repo so it survives a TamTam reinstall.
+Both the audit log and the ledger live under `.tamtam/cache/` (gitignored), so they stay local to the machine running the agent and never dirty the repo.
 
 **Sentinels** (printed in the report, in addition to the per-shape final line):
-- `IMPROVE_FILE_CLEAN <path>` — one per clean-and-touched candidate in this run.
+- `IMPROVE_FILE_CLEAN <path>` — one per clean-and-recorded candidate in this run.
 - `IMPROVE_QUEUE_ROTATED <n>` — final line of a Shape-B run (all candidates clean).
 - `IMPROVE_CREDENTIAL_LEAK <path>:<line> <kind>` — committed secret found; no edit applied.
 - `IMPROVE_FILE_DEAD_ORPHAN <path>` — module only consumed by its own test; flag for human cleanup.
@@ -302,9 +339,9 @@ The audit log is project-scoped and commits with the repo so it survives a TamTa
 - `IMPROVE_STALE_PATH <path>:<line> "<offending-string>"` — path string references a deleted directory.
 
 **Hard stop — do NOT do any of these:**
-- Run `git` commands (TamTam's release pipeline owns version control).
-- Mutate state outside the candidate files you audited (no schema changes, no settings writes, no DB queries). The only exceptions are the `touch` rotation in §4 (mtime only — content unchanged, `git status` stays clean) and the audit-log append in §7.
-- Modify a candidate file's CONTENT on a clean run. `touch` only. No comments, no blank lines, no "audited YYYY-MM-DD" markers in the source — that would dirty git and is forbidden.
+- Run **mutating** `git` commands — no `add`, `commit`, `checkout`, `switch`, `reset`, `rm`, `stash`, `push`, `tag` (TamTam's release pipeline owns version control). Read-only git is allowed and required for selection/ledger: `git hash-object`, `git ls-files`, `git log` only.
+- Mutate state outside the candidate files you audited (no schema changes, no settings writes, no DB queries). The only exceptions are the ledger append in §1/§4 (`git hash-object -- "<path>" >> .tamtam/cache/audits/improve-ledger.txt` — a gitignored cache file; source content unchanged, `git status` stays clean) and the audit-log append in §7.
+- Modify a candidate file's CONTENT on a clean run. Record the file in the ledger instead. No `touch`, no comments, no blank lines, no "audited YYYY-MM-DD" markers in the source — that would dirty git and is forbidden.
 - Touch security-sensitive code (auth, payments, crypto, command construction) without a real, named, single-pattern reason — `gh` argument refactors don't count.
 - Apply more than 1 fix to the same file in one run, or more than 3 fixes total per run, or audit more than 5 candidates per run. The caps exist to bound token cost and review burden.
 - Add comments to "document the fix" — the diff itself is the documentation. Brief WHY comments are fine when the pattern's not self-evident; past-tense "Was previously …" comments are not.

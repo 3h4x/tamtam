@@ -76,6 +76,6 @@ Reader: `lib/agents/tamtam-file-agents.ts` → `scanFileAgents(projectPath, proj
 
 ## `.tamtam/cache/` (per-project, **not** committed)
 
-Local-only scratch space inside the project worktree. The only writer today is the agent memory system (`lib/agents/agent-memory.ts`), which stores the "remember this for next run" file at `.tamtam/cache/agent-memory/<agentName>.md`. The directory lives inside the worktree (rather than a global `~/.cache/tamtam/...` path) so codex-sandboxed agents — whose writable roots are limited to the workspace — can rewrite their own memory file at the end of a run.
+Local-only scratch space inside the project worktree. Writers include the agent memory system (`lib/agents/agent-memory.ts`), which stores the "remember this for next run" file at `.tamtam/cache/agent-memory/<agentName>.md`, and the improve-agent audit artifacts under `.tamtam/cache/audits/`. The directory lives inside the worktree (rather than a global `~/.cache/tamtam/...` path) so codex-sandboxed agents — whose writable roots are limited to the workspace — can rewrite their own local cache files at the end of a run.
 
 `ensureAgentMemoryDir(projPath)` also writes `.tamtam/.gitignore` with `cache/` on first use. That ignore file is committed (it's the only sensible way to give every project the rule without editing each repo's root `.gitignore`); the cache contents themselves stay local.

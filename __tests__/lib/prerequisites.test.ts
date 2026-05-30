@@ -1,5 +1,5 @@
 import { execFileSync } from 'child_process'
-import { chmodSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'fs'
+import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'fs'
 import { tmpdir } from 'os'
 import { join } from 'path'
 import { describe, expect, it } from 'vitest'
@@ -93,33 +93,29 @@ describe('prerequisite helpers', () => {
     expect(hasImproveSkill(null)).toBe(false)
   })
 
-  it('builds the improve prereq with git ls-files, excludes generated/fixture/archive paths, and tails the audit log', () => {
+  it('builds the improve prereq with git blob hashes, ledger filtering, and audit-log tailing', () => {
     const cmd = buildImprovePrerequisiteCommand()
     expect(cmd).toMatch(/git ls-files/)
+    expect(cmd).not.toMatch(/git ls-files -s/)
     expect(cmd).toMatch(/git ls-files --others --exclude-standard/)
-    expect(cmd).toMatch(/grep -Ev '\(\^\|\/\)\(\\\.tamtam\|node_modules\)\//)
-    expect(cmd).toMatch(/grep -v '\\\.d\\\.ts\$'/)
-    expect(cmd).toMatch(/grep -Ei '\\\.\(ts\|tsx\|js\|jsx\|sol\|py\|rs\|go\|md\|sh\)\$'/)
-    expect(cmd).toMatch(/__snapshots__\|__fixtures__\|fixtures\|e2e-results\|test-results/)
-    expect(cmd).toMatch(/CHANGELOG\|LICENSE/)
+    expect(cmd).toMatch(/git hash-object/)
+    expect(cmd).toMatch(/improve-ledger\.txt/)
+    expect(cmd).toMatch(/grep -qxF "\$sha"/)
+    expect(cmd).toContain('*__snapshots__/*|*__fixtures__/*|*/fixtures/*')
+    expect(cmd).toContain('*/test-results/*|*/playwright-report/*')
+    expect(cmd).toContain('CHANGELOG.md|LICENSE|LICENSE.md')
     expect(cmd).toMatch(/docs\/superpowers\/plans\//)
-    expect(cmd).toMatch(/\\\.\(gen\|generated\)\\\./)
-    expect(cmd).toMatch(/stat --version/)
-    expect(cmd).toMatch(/stat_mode=.*gnu/)
-    expect(cmd).toMatch(/if \[ "\$stat_mode" = gnu \]/)
-    expect(cmd).toMatch(/stat -f '%m'/)
-    expect(cmd).toMatch(/stat -c '%Y'/)
-    expect(cmd).not.toMatch(/stat -f '%m' "\$f" 2>\/dev\/null \|\| stat -c '%Y'/)
-    expect(cmd).not.toMatch(/stat -f '%Sm'/)
-    expect(cmd).not.toMatch(/stat -c '%y'/)
+    expect(cmd).toContain('*.gen.*|*.generated.*')
+    expect(cmd).not.toMatch(/stat --version/)
+    expect(cmd).not.toMatch(/stat -f/)
+    expect(cmd).not.toMatch(/stat -c/)
     expect(cmd).toMatch(/sort -n \| head -5/)
     expect(cmd).toMatch(/\.tamtam\/cache\/audits\/improve\.md/)
     expect(cmd).not.toMatch(/\bfind app components lib hooks\b/)
   })
 
-  it('uses the GNU stat mtime branch without probing BSD stat per file', () => {
+  it('surfaces tracked and non-ignored untracked files, then suppresses recorded blob hashes', () => {
     const repo = mkdtempSync(join(tmpdir(), 'tamtam-improve-prereq-'))
-    const fakeBin = join(repo, 'fake-bin')
     try {
       execFileSync('git', ['init', '-q'], { cwd: repo })
       writeFileSync(join(repo, 'old.ts'), 'export const oldFile = true\n')
@@ -137,41 +133,68 @@ describe('prerequisite helpers', () => {
         'packages/foo/node_modules/bar.ts',
         'packages/foo/.tamtam/cache/a.md',
       ], { cwd: repo })
-      mkdirSync(fakeBin)
-      writeFileSync(join(fakeBin, 'stat'), [
-        '#!/usr/bin/env bash',
-        'if [ "$1" = "--version" ]; then echo "stat (GNU coreutils)"; exit 0; fi',
-        'if [ "$1" = "-f" ]; then echo "9999999999"; exit 0; fi',
-        'if [ "$1" = "-c" ]; then',
-        '  case "$3" in',
-        '    packages/foo/node_modules/bar.ts) echo "1" ;;',
-        '    packages/foo/.tamtam/cache/a.md) echo "2" ;;',
-        '    untracked.ts) echo "5" ;;',
-        '    old.ts) echo "10" ;;',
-        '    new.ts) echo "20" ;;',
-        '    *) exit 1 ;;',
-        '  esac',
-        '  exit 0',
-        'fi',
-        'exit 1',
-        '',
-      ].join('\n'))
-      chmodSync(join(fakeBin, 'stat'), 0o755)
 
       const output = execFileSync('bash', ['-c', buildImprovePrerequisiteCommand()], {
         cwd: repo,
         encoding: 'utf8',
-        env: { ...process.env, PATH: `${fakeBin}:${process.env.PATH ?? ''}` },
       })
 
-      expect(output).toContain('10 old.ts')
-      expect(output).toContain('20 new.ts')
-      expect(output).toContain('5 untracked.ts')
-      expect(output).not.toContain('1 packages/foo/node_modules/bar.ts')
-      expect(output).not.toContain('2 packages/foo/.tamtam/cache/a.md')
-      expect(output).not.toContain('9999999999')
-      expect(output.indexOf('5 untracked.ts')).toBeLessThan(output.indexOf('10 old.ts'))
-      expect(output.indexOf('10 old.ts')).toBeLessThan(output.indexOf('20 new.ts'))
+      const oldSha = execFileSync('git', ['hash-object', '--', 'old.ts'], {
+        cwd: repo,
+        encoding: 'utf8',
+      }).trim()
+      const untrackedSha = execFileSync('git', ['hash-object', '--', 'untracked.ts'], {
+        cwd: repo,
+        encoding: 'utf8',
+      }).trim()
+
+      expect(output).toContain(`old.ts  (blob ${oldSha})`)
+      expect(output).toContain('new.ts  (blob ')
+      expect(output).toContain(`untracked.ts  (blob ${untrackedSha})`)
+      expect(output).not.toContain('packages/foo/node_modules/bar.ts')
+      expect(output).not.toContain('packages/foo/.tamtam/cache/a.md')
+
+      writeFileSync(join(repo, '.tamtam/cache/audits/improve-ledger.txt'), `${oldSha}\n${untrackedSha}\n`)
+
+      const afterLedger = execFileSync('bash', ['-c', buildImprovePrerequisiteCommand()], {
+        cwd: repo,
+        encoding: 'utf8',
+      })
+
+      expect(afterLedger).not.toContain('old.ts  (blob ')
+      expect(afterLedger).not.toContain('untracked.ts  (blob ')
+      expect(afterLedger).toContain('new.ts  (blob ')
+    } finally {
+      rmSync(repo, { recursive: true, force: true })
+    }
+  })
+
+  it('hashes dirty tracked files from the working tree instead of the index', () => {
+    const repo = mkdtempSync(join(tmpdir(), 'tamtam-improve-prereq-dirty-'))
+    try {
+      execFileSync('git', ['init', '-q'], { cwd: repo })
+      writeFileSync(join(repo, 'dirty.ts'), 'export const dirtyFile = "indexed"\n')
+      execFileSync('git', ['add', 'dirty.ts'], { cwd: repo })
+
+      const indexedSha = execFileSync('git', ['hash-object', '--', 'dirty.ts'], {
+        cwd: repo,
+        encoding: 'utf8',
+      }).trim()
+      writeFileSync(join(repo, 'dirty.ts'), 'export const dirtyFile = "working-tree"\n')
+      const workingTreeSha = execFileSync('git', ['hash-object', '--', 'dirty.ts'], {
+        cwd: repo,
+        encoding: 'utf8',
+      }).trim()
+      mkdirSync(join(repo, '.tamtam/cache/audits'), { recursive: true })
+      writeFileSync(join(repo, '.tamtam/cache/audits/improve-ledger.txt'), `${indexedSha}\n`)
+
+      const output = execFileSync('bash', ['-c', buildImprovePrerequisiteCommand()], {
+        cwd: repo,
+        encoding: 'utf8',
+      })
+
+      expect(output).toContain(`dirty.ts  (blob ${workingTreeSha})`)
+      expect(output).not.toContain(`dirty.ts  (blob ${indexedSha})`)
     } finally {
       rmSync(repo, { recursive: true, force: true })
     }
