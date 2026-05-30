@@ -29,6 +29,7 @@ import {
 } from '@/lib/pipeline/release-context';
 import { getJobKind, isAgentJobKind, isClaudeBackedJobKind } from '@/lib/jobs/kinds';
 import { appendRedactedFileSync } from '@/lib/jobs/redacted-log-writer';
+import { isCancelledExitCode } from '@/lib/shared/job-exit-codes';
 
 async function getProjectPipelineConfig(projectName: string): Promise<{ autoCommitEnabled: boolean; autoPushEnabled: boolean; releaseAfterRun: boolean; autoPrMergeEnabled: boolean }> {
   try {
@@ -1252,7 +1253,7 @@ async function runCompletionHooksInner(job: JobData): Promise<void> {
   // The downstream `fix → re-push` chain is handled by the fromPushFailure
   // branch below. Bounded by the dedicated push-fix cap so the release
   // wall-clock timeout remains the ultimate stop on stubborn loops.
-  if (job.kind === 'push' && job.exitCode !== 0) {
+  if (job.kind === 'push' && job.exitCode !== 0 && !isCancelledExitCode(job.exitCode)) {
     try {
       const rawLog = readLog(job, 100_000);
       const { isHookRejection, isTestFailureRejection, isRemoteRaceRejection } = await import('@/lib/pipeline/push-rejection');

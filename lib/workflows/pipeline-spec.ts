@@ -117,6 +117,12 @@ export const TRANSITIONS: ReadonlyArray<Transition> = [
   // push
   { from: 'push', when: { exitCode: 0 },
     to: 'mark-dod', label: 'exit 0' },
+  { from: 'push', when: { exitCode: -2 },
+    to: 'abort',    label: 'cancelled',
+    set: { stopReason: 'push cancelled' } },
+  { from: 'push', when: { exitCode: -3 },
+    to: 'abort',    label: 'release aborted',
+    set: { stopReason: 'push cancelled by release abort or timeout' } },
   { from: 'push', when: { exitCode: { ne: 0 } },
     to: 'fix',      label: 'exit ≠ 0', guardable: ['iteration-cap'] },
 

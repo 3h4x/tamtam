@@ -2095,6 +2095,46 @@ describe.skip('push fix cap notifications', () => {
     expect(releaseRow?.contextMeta).toContain('"releaseStopReason":"push fix cap reached for proj');
     expect(readFileSync(releaseLog, 'utf8')).toContain('push fix cap reached for proj');
   });
+
+});
+
+describe('cancelled push completion', () => {
+  let tempDir: string;
+
+  beforeEach(async () => {
+    await resetTestState();
+    tempDir = mkdtempSync(join(tmpdir(), 'tamtam-cancelled-push-'));
+    mocks.isHookRejection.mockReturnValue(true);
+  });
+
+  afterEach(() => {
+    rmSync(tempDir, { recursive: true, force: true });
+  });
+
+  it('does not treat a wall-clock-cancelled push as a hook rejection', async () => {
+    const now = Date.now() / 1000;
+    const pushLog = join(tempDir, 'push-cancelled.log');
+    writeFileSync(pushLog, [
+      '# push start',
+      '$ git rev-list --count @{u}..HEAD',
+      '1',
+      '$ git push',
+      '# push cancelled',
+    ].join('\n'));
+
+    const pushJob = makeJobRow({
+      id: 'push-cancelled',
+      project: 'proj',
+      kind: 'push',
+      logPath: pushLog,
+      startedAt: now - 10,
+    }) as unknown as JobData;
+
+    await markDone(pushJob, -3);
+
+    expect(mocks.isHookRejection).not.toHaveBeenCalled();
+    expect(mocks.startFixFromJob).not.toHaveBeenCalled();
+  });
 });
 
 // ─── agent drain hook ─────────────────────────────────────────────────────────

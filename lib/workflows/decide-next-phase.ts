@@ -8,7 +8,8 @@
 //   review DO NOT SHIP     → abort
 //   review null verdict    → fix  (treat as NEEDS ATTENTION per review-contract)
 //   push pass  → mark-dod
-//   push fail  → fix  (the generic fix phase reads the failing source job's
+//   push fail  → fix  (except cancellation exits -2/-3, which abort; the
+//                      generic fix phase reads the failing source job's
 //                      log to decide what to fix — same workflow handles
 //                      test failures, review findings, and hook rejections)
 //   commit pass → push      (chain into the next pipeline step)
@@ -32,6 +33,7 @@ export type NextPhase =
   | { next: 'fix'; from: 'push' }
   | { next: 'push'; from: 'test' | 'commit' | 'fix' }
   | { next: 'abort'; from: 'review'; verdict: 'DO NOT SHIP' | 'NEEDS ATTENTION'; stopReason?: string }
+  | { next: 'abort'; from: 'push'; stopReason?: string }
   | { next: 'mark-dod'; from: 'push' }
   | { next: 'pr-wait'; from: 'mark-dod' | 'push'; pr: { prNumber: number; prRepo: string; prUrl: string } }
   | { next: 'soak'; from: 'pr-wait'; soak: { mergeSha: string; prNumber: number; prRepo: string; prUrl: string; defaultBranch: string; watchMinutes: number; autoRevert: boolean } }

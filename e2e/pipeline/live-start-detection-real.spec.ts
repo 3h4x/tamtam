@@ -15,40 +15,50 @@ const START_SCENARIO = JSON.parse(
   readFileSync(join(__dirname, 'scenarios', 'ui-live-transition.json'), 'utf-8'),
 );
 
-const RUNS_PROJECT = 'start-detect-runs';
+const HISTORY_PROJECT = 'start-detect-runs';
 const TERMINAL_PROJECT = 'start-detect-terminal';
 const TERMINAL_RUN_PROJECT = 'start-detect-run-idle';
 const TERMINAL_AGENT_PROJECT = 'start-detect-agent-idle';
+const DEFAULT_DIRTY_WORKTREE_BLOCK_THRESHOLD = 1;
 
 test.describe('Real idle-page job start detection', () => {
-  test('runs page detects a newly-started release and clears the spinner after completion without reload', async ({
+  test.afterEach(async ({ request }) => {
+    await request.patch('/api/settings', {
+      data: { dirty_worktree_block_threshold: DEFAULT_DIRTY_WORKTREE_BLOCK_THRESHOLD },
+    });
+  });
+
+  test('history tab detects a newly-started release and clears the spinner after completion without reload', async ({
     page,
     request,
   }) => {
-    writeScenario(RUNS_PROJECT, START_SCENARIO.steps);
-    resetShimState(RUNS_PROJECT);
-    writeGitTiming(RUNS_PROJECT, { push: 6500 });
-    await enableProject(request, RUNS_PROJECT, { testsDisabled: true });
+    writeScenario(HISTORY_PROJECT, START_SCENARIO.steps);
+    resetShimState(HISTORY_PROJECT);
+    writeGitTiming(HISTORY_PROJECT, { push: 6500 });
+    await enableProject(request, HISTORY_PROJECT, { testsDisabled: true });
 
-    await page.goto(`/runs?project=${encodeURIComponent(RUNS_PROJECT)}`);
+    await page.goto(`/project/${HISTORY_PROJECT}/history`);
     await expect(page.getByText('No runs yet').first()).toBeVisible({ timeout: 8_000 });
 
-    const releaseResp = await request.post(`/api/projects/by-project/${RUNS_PROJECT}/release`);
+    const releaseResp = await request.post(`/api/projects/by-project/${HISTORY_PROJECT}/release`);
     expect(
       releaseResp.status(),
       `release POST failed: ${await releaseResp.text()}`,
     ).toBe(200);
 
-    await expect(page.getByRole('button', { name: /running [1-9]/i })).toBeVisible({
+    const releaseRow = page.getByRole('button').filter({ hasText: 'Release pipeline' }).first();
+
+    await expect(releaseRow).toBeVisible({
       timeout: 20_000,
     });
-    await expect(page.getByText('running').first()).toBeVisible({ timeout: 20_000 });
+    await expect(releaseRow.getByLabel('running')).toBeVisible({ timeout: 20_000 });
+    await expect(page.getByText('No runs yet')).toHaveCount(0, { timeout: 20_000 });
 
-    const result = await waitForPipelineCompletion(request, RUNS_PROJECT, 90_000);
+    const result = await waitForPipelineCompletion(request, HISTORY_PROJECT, 90_000);
     expect(result.status, 'pipeline should complete').toBe('done');
     expect(result.releaseJob?.['exit_code'], 'release exit code').toBe(0);
 
-    await expect(page.getByText('done').first()).toBeVisible({ timeout: 15_000 });
+    await expect(releaseRow.getByLabel('done')).toBeVisible({ timeout: 15_000 });
     await expect(page.locator('span.animate-pulse')).toHaveCount(0, { timeout: 15_000 });
   });
 
@@ -130,6 +140,9 @@ test.describe('Real idle-page job start detection', () => {
     writeScenario(TERMINAL_AGENT_PROJECT, START_SCENARIO.steps);
     resetShimState(TERMINAL_AGENT_PROJECT);
     await enableProject(request, TERMINAL_AGENT_PROJECT, { testsDisabled: true });
+    await request.patch('/api/settings', {
+      data: { dirty_worktree_block_threshold: 0 },
+    });
 
     await page.goto(`/project/${TERMINAL_AGENT_PROJECT}/terminal`);
     await expect(page.getByRole('button', { name: 'new' })).toBeVisible({ timeout: 8_000 });

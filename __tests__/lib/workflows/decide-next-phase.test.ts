@@ -116,6 +116,14 @@ describe('decideNextPhase', () => {
         from: 'push',
       });
     });
+
+    it('exit -3 → abort instead of fix', () => {
+      expect(decideNextPhase({ kind: 'push', exitCode: -3, verdict: null })).toEqual({
+        next: 'abort',
+        from: 'push',
+        stopReason: 'push cancelled by release abort or timeout',
+      });
+    });
   });
 
   describe('commit kind', () => {
