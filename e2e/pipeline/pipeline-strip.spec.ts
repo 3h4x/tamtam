@@ -614,6 +614,254 @@ async function mockProjectShell(
 }
 
 test.describe('PipelineStrip visibility', () => {
+  test('terminal tab walks test review fix commit push in order and then clears the strip', async ({ page }) => {
+    let phase: 'test' | 'review' | 'fix' | 'commit' | 'push' | 'done' = 'test'
+    const releaseId = 'strip-full-sequence-release'
+
+    await mockProjectShell(page, () => {
+      if (phase === 'done') return []
+
+      const jobs: MockJob[] = [
+        {
+          id: releaseId,
+          project: PROJECT,
+          kind: 'release',
+          status: 'running',
+          exit_code: null,
+          started_at: now() - 120,
+          finished_at: null,
+          pid: 0,
+          log_path: '',
+          seen: true,
+          session_id: null,
+          context_meta: null,
+          provider: 'claude',
+          work_summary: `${phase} is running.`,
+        },
+      ]
+
+      if (phase === 'test') {
+        jobs.push({
+          id: 'strip-full-test',
+          project: PROJECT,
+          kind: 'test',
+          status: 'running',
+          exit_code: null,
+          started_at: now() - 10,
+          finished_at: null,
+          pid: 0,
+          log_path: '',
+          seen: true,
+          session_id: 'strip-full-test-session',
+          parent_job_id: releaseId,
+          release_id: null,
+          context_meta: null,
+          provider: 'claude',
+          work_summary: 'Tests are running.',
+        })
+        return jobs
+      }
+
+      jobs.push({
+        id: 'strip-full-test',
+        project: PROJECT,
+        kind: 'test',
+        status: 'done',
+        exit_code: 0,
+        started_at: now() - 90,
+        finished_at: now() - 80,
+        pid: 0,
+        log_path: '',
+        seen: true,
+        session_id: 'strip-full-test-session',
+        parent_job_id: releaseId,
+        release_id: null,
+        context_meta: null,
+        provider: 'claude',
+        work_summary: 'Tests passed.',
+      })
+
+      if (phase === 'review') {
+        jobs.push({
+          id: 'strip-full-review',
+          project: PROJECT,
+          kind: 'review',
+          status: 'running',
+          exit_code: null,
+          started_at: now() - 10,
+          finished_at: null,
+          pid: 0,
+          log_path: '',
+          seen: true,
+          session_id: 'strip-full-review-session',
+          parent_job_id: 'strip-full-test',
+          release_id: null,
+          context_meta: null,
+          provider: 'claude',
+          work_summary: 'Review is running.',
+        })
+        return jobs
+      }
+
+      jobs.push({
+        id: 'strip-full-review',
+        project: PROJECT,
+        kind: 'review',
+        status: 'done',
+        exit_code: 0,
+        started_at: now() - 70,
+        finished_at: now() - 60,
+        pid: 0,
+        log_path: '',
+        seen: true,
+        session_id: 'strip-full-review-session',
+        parent_job_id: 'strip-full-test',
+        release_id: null,
+        context_meta: null,
+        provider: 'claude',
+        work_summary: 'Review asked for follow-up.',
+        verdict: 'NEEDS ATTENTION',
+      })
+
+      if (phase === 'fix') {
+        jobs.push({
+          id: 'strip-full-fix',
+          project: PROJECT,
+          kind: 'fix',
+          status: 'running',
+          exit_code: null,
+          started_at: now() - 10,
+          finished_at: null,
+          pid: 0,
+          log_path: '',
+          seen: true,
+          session_id: 'strip-full-fix-session',
+          parent_job_id: 'strip-full-review',
+          release_id: null,
+          context_meta: null,
+          provider: 'claude',
+          work_summary: 'Fix is running.',
+        })
+        return jobs
+      }
+
+      jobs.push({
+        id: 'strip-full-fix',
+        project: PROJECT,
+        kind: 'fix',
+        status: 'done',
+        exit_code: 0,
+        started_at: now() - 50,
+        finished_at: now() - 40,
+        pid: 0,
+        log_path: '',
+        seen: true,
+        session_id: 'strip-full-fix-session',
+        parent_job_id: 'strip-full-review',
+        release_id: null,
+        context_meta: null,
+        provider: 'claude',
+        work_summary: 'Fix completed.',
+      })
+
+      if (phase === 'commit') {
+        jobs.push({
+          id: 'strip-full-commit',
+          project: PROJECT,
+          kind: 'commit',
+          status: 'running',
+          exit_code: null,
+          started_at: now() - 10,
+          finished_at: null,
+          pid: 0,
+          log_path: '',
+          seen: true,
+          session_id: null,
+          parent_job_id: 'strip-full-fix',
+          release_id: null,
+          context_meta: null,
+          provider: 'claude',
+          work_summary: 'Commit is running.',
+        })
+        return jobs
+      }
+
+      jobs.push({
+        id: 'strip-full-commit',
+        project: PROJECT,
+        kind: 'commit',
+        status: 'done',
+        exit_code: 0,
+        started_at: now() - 30,
+        finished_at: now() - 20,
+        pid: 0,
+        log_path: '',
+        seen: true,
+        session_id: null,
+        parent_job_id: 'strip-full-fix',
+        release_id: null,
+        context_meta: null,
+        provider: 'claude',
+        work_summary: 'Commit completed.',
+      })
+
+      jobs.push({
+        id: 'strip-full-push',
+        project: PROJECT,
+        kind: 'push',
+        status: 'running',
+        exit_code: null,
+        started_at: now() - 10,
+        finished_at: null,
+        pid: 0,
+        log_path: '',
+        seen: true,
+        session_id: null,
+        parent_job_id: 'strip-full-commit',
+        release_id: null,
+        context_meta: null,
+        provider: 'claude',
+        work_summary: 'Push is running.',
+      })
+      return jobs
+    })
+
+    await page.goto(`/project/${PROJECT}/terminal`)
+
+    await expect(page.getByLabel(/pipeline summary: test running/i)).toBeVisible({ timeout: 8_000 })
+    await expect(page.getByTitle('tests running — click to open terminal')).toBeVisible()
+
+    phase = 'review'
+
+    await expect(page.getByLabel(/pipeline summary: review running/i)).toBeVisible({ timeout: 12_000 })
+    await expect(page.getByTitle('test completed — click to view log')).toBeVisible()
+    await expect(page.getByTitle('review in progress — click to open terminal')).toBeVisible()
+
+    phase = 'fix'
+
+    await expect(page.getByLabel(/pipeline summary: fix running/i)).toBeVisible({ timeout: 12_000 })
+    await expect(page.getByTitle('verdict: NEEDS ATTENTION — click to view findings')).toBeVisible()
+    await expect(page.getByTitle('fix in progress — click to open terminal')).toBeVisible()
+
+    phase = 'commit'
+
+    await expect(page.getByLabel(/pipeline summary: commit running/i)).toBeVisible({ timeout: 12_000 })
+    await expect(page.getByTitle('fix completed — click to view log')).toBeVisible()
+    await expect(page.getByTitle('commit in progress — click to open terminal')).toBeVisible()
+
+    phase = 'push'
+
+    await expect(page.getByLabel(/pipeline summary: push running/i)).toBeVisible({ timeout: 12_000 })
+    await expect(page.getByTitle('commit completed — click to view log')).toBeVisible()
+    await expect(page.getByTitle('push in progress — click to open terminal')).toBeVisible()
+
+    phase = 'done'
+
+    await expect(page.getByLabel(/pipeline summary:/i)).toHaveCount(0, { timeout: 12_000 })
+    await expect(page.getByTitle('View unified release trace')).toHaveCount(0, { timeout: 12_000 })
+    await expect(page.getByRole('button', { name: 'abort' })).toHaveCount(0, { timeout: 12_000 })
+  })
+
   test('terminal tab polls from review to commit and clears the strip after completion', async ({ page }) => {
     let phase: 'review' | 'commit' | 'done' = 'review'
 
