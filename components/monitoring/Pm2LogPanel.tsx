@@ -3,6 +3,7 @@
 import { useState, useMemo } from 'react'
 import { SectionHeader } from './shared'
 import { Button } from '@/components/ui/Button'
+import { SegmentedControl } from '@/components/ui/SegmentedControl'
 
 export interface Pm2LogEntry {
   ts: string | null
@@ -149,31 +150,27 @@ export function Pm2LogPanel({ pm2Logs, onRefresh }: { pm2Logs: Pm2LogData | null
         <SectionHeader title="tamtam (PM2)" status={status} />
         <div className="flex items-center gap-2 flex-wrap">
           {pm2Logs && (
-            <div className="flex items-center gap-0.5 rounded-md border border-border overflow-hidden">
-              {filterButtons.map(({ key, label, count }) => (
-                <Button
-                  type="button"
-                  variant="ghost"
-                  size="sm"
-                  key={key}
-                  onClick={() => setLevelFilter(key)}
-                  className={`gap-1 rounded-none border-none px-2 py-1 text-[11px] ${
-                    levelFilter === key
-                      ? '!bg-bg-secondary text-text-primary hover:!bg-bg-secondary'
-                      : '!bg-transparent text-text-tertiary hover:!bg-transparent hover:text-text-secondary'
-                  }`}
-                >
-                  {label}
-                  {count != null && count > 0 && (
-                    <span className={`text-[10px] px-1 rounded ${
-                      key === 'error' ? LEVEL_COLORS.error.badge
-                      : key === 'warn' ? LEVEL_COLORS.warn.badge
-                      : LEVEL_COLORS.info.badge
-                    }`}>{count}</span>
-                  )}
-                </Button>
-              ))}
-            </div>
+            <SegmentedControl<LogLevelFilter>
+              ariaLabel="PM2 log level filter"
+              size="xs"
+              options={filterButtons.map(({ key, label, count }) => ({
+                value: key,
+                label: (
+                  <span className="inline-flex items-center gap-1">
+                    {label}
+                    {count != null && count > 0 && (
+                      <span className={`rounded px-1 text-[10px] ${
+                        key === 'error' ? LEVEL_COLORS.error.badge
+                        : key === 'warn' ? LEVEL_COLORS.warn.badge
+                        : LEVEL_COLORS.info.badge
+                      }`}>{count}</span>
+                    )}
+                  </span>
+                ),
+              }))}
+              value={levelFilter}
+              onChange={setLevelFilter}
+            />
           )}
           {pm2Logs && (
             <Button
