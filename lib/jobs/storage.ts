@@ -65,6 +65,7 @@ export async function loadFromDb(): Promise<void> {
         linesAdded: row.linesAdded ?? null,
         linesRemoved: row.linesRemoved ?? null,
         provider: row.provider ?? null,
+        runScore: row.runScore ?? null,
       });
     }
     if (isTestEnv) loaded = true;
@@ -151,6 +152,7 @@ function doSaveToDb(job: JobData): Promise<void> {
         linesAdded: job.linesAdded ?? null,
         linesRemoved: job.linesRemoved ?? null,
         provider: job.provider ?? null,
+        runScore: job.runScore ?? null,
       })
       .onConflictDoUpdate({
         target: schema.jobs.id,
@@ -185,6 +187,7 @@ function doSaveToDb(job: JobData): Promise<void> {
           linesAdded: job.linesAdded ?? null,
           linesRemoved: job.linesRemoved ?? null,
           provider: job.provider ?? null,
+          runScore: job.runScore ?? null,
         },
       })
       .execute()
@@ -269,6 +272,7 @@ export function createJob(
     linesAdded: null,
     linesRemoved: null,
     provider: provider ?? null,
+    runScore: null,
   };
   jobsCache.set(jobId, job);
   saveToDb(job);
@@ -412,6 +416,7 @@ export function jobToDict(job: JobData): Record<string, unknown> {
   d.lines_added = job.linesAdded ?? null;
   d.lines_removed = job.linesRemoved ?? null;
   d.provider = job.provider ?? null;
+  d.run_score = job.runScore ?? null;
   const verdict = getVerdict(job);
   if (verdict !== null) d.verdict = verdict;
   return d;

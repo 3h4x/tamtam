@@ -43,7 +43,8 @@ async function applyDdl(handle: TestDbHandle): Promise<void> {
       modified_files text,
       lines_added integer,
       lines_removed integer,
-      provider text
+      provider text,
+      run_score integer
     )
   `));
 }

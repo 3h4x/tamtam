@@ -1,5 +1,5 @@
-// Accept minutes (`Nm`), hours (`Nh`), and days (`Nd`). `d` was added so the
-// UI can offer 3d / 7d / 30d intervals for low-frequency audit-style agents
+// Accept minutes (`Nm`), hours (`Nh`), and days (`Nd`). Day suffixes let the UI
+// offer 3d / 7d / 30d intervals for low-frequency audit-style agents
 // without forcing the operator to compute `72h`/`168h`/`720h` by hand.
 const AGENT_SCHEDULE_RE = /^[1-9]\d*[mhd]$/i;
 

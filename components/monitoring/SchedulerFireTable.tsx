@@ -2,6 +2,8 @@
 
 import { useState } from 'react'
 import { Button } from '@/components/ui/Button'
+import { Table } from '@/components/ui/Table'
+import type { Column } from '@/components/ui/Table'
 
 export interface SchedulerInternalEntry {
   agentId: string
@@ -42,6 +44,59 @@ export function SchedulerFireTable({ entries }: { entries: SchedulerInternalEntr
   })
   const overdue = sorted.filter(e => e.nextFireMs < now)
   const visible = showAll ? sorted : sorted.slice(0, 8)
+  const columns: Column<SchedulerInternalEntry>[] = [
+    {
+      key: 'agent',
+      label: 'Agent',
+      headerClass: '!py-1.5 !text-[10px] w-full',
+      cellClass: '!py-1.5 text-xs font-mono w-full max-w-0 overflow-hidden',
+      render: e => <span className="block min-w-0 truncate text-text-primary" data-private>{e.project}/{e.name}</span>,
+      cellTitle: e => e.lastError ?? '',
+    },
+    {
+      key: 'schedule',
+      label: 'Sched',
+      headerClass: '!py-1.5 !text-[10px] w-[4.5rem]',
+      cellClass: '!py-1.5 text-xs font-mono whitespace-nowrap w-[4.5rem]',
+      render: e => <span className="text-text-tertiary">{e.schedule}</span>,
+      cellTitle: e => e.lastError ?? '',
+    },
+    {
+      key: 'next',
+      label: 'Next',
+      headerClass: '!py-1.5 !text-[10px] w-[4.75rem]',
+      cellClass: '!py-1.5 text-xs font-mono whitespace-nowrap w-[4.75rem]',
+      render: e => {
+        const isOverdue = e.nextFireMs < now
+        return <span className={isOverdue ? 'text-status-warning' : 'text-text-secondary'}>{fmtRelative(e.nextFireMs, now)}</span>
+      },
+      cellTitle: e => e.lastError ?? '',
+    },
+    {
+      key: 'last',
+      label: 'Last',
+      headerClass: '!py-1.5 !text-[10px] w-[4.75rem]',
+      cellClass: '!py-1.5 text-xs font-mono whitespace-nowrap w-[4.75rem]',
+      render: e => (
+        <span className={(e.lastJobMs ?? e.lastFireMs) === null ? 'text-text-tertiary' : 'text-text-secondary'}>
+          {fmtRelative(e.lastJobMs ?? e.lastFireMs, now)}
+        </span>
+      ),
+      cellTitle: e => e.lastError ?? '',
+    },
+    {
+      key: 'fires',
+      label: 'Fires',
+      headerClass: '!py-1.5 !text-[10px] w-[4rem]',
+      cellClass: '!py-1.5 text-xs font-mono whitespace-nowrap w-[4rem]',
+      render: e => (
+        <span className={e.errorCount > 0 ? 'text-status-error' : 'text-text-secondary'}>
+          {e.fireCount}{e.errorCount > 0 ? `/${e.errorCount}!` : ''}
+        </span>
+      ),
+      cellTitle: e => e.lastError ?? '',
+    },
+  ]
 
   return (
     <div>
@@ -51,34 +106,13 @@ export function SchedulerFireTable({ entries }: { entries: SchedulerInternalEntr
           <span className="ml-2 text-status-warning">({overdue.length} overdue)</span>
         )}
       </h3>
-      <div className="rounded-md border border-border overflow-hidden">
-        <div className="grid grid-cols-[1fr_auto_auto_auto_auto] gap-3 px-3 py-1.5 text-[10px] uppercase tracking-wide text-text-tertiary border-b border-border bg-bg-secondary/30">
-          <span>Agent</span>
-          <span>Sched</span>
-          <span>Next</span>
-          <span>Last</span>
-          <span>Fires</span>
-        </div>
-        {visible.map(e => {
-          const isOverdue = e.nextFireMs < now
-          const hasError = !!e.lastError
-          return (
-            <div
-              key={e.agentId}
-              className={`grid grid-cols-[1fr_auto_auto_auto_auto] gap-3 px-3 py-1.5 text-xs font-mono border-t border-border first:border-t-0 ${hasError ? 'bg-status-error/5' : ''}`}
-              title={e.lastError ?? ''}
-            >
-              <span className="text-text-primary truncate" data-private>{e.project}/{e.name}</span>
-              <span className="text-text-tertiary">{e.schedule}</span>
-              <span className={isOverdue ? 'text-status-warning' : 'text-text-secondary'}>{fmtRelative(e.nextFireMs, now)}</span>
-              <span className={(e.lastJobMs ?? e.lastFireMs) === null ? 'text-text-tertiary' : 'text-text-secondary'}>{fmtRelative(e.lastJobMs ?? e.lastFireMs, now)}</span>
-              <span className={e.errorCount > 0 ? 'text-status-error' : 'text-text-secondary'}>
-                {e.fireCount}{e.errorCount > 0 ? `/${e.errorCount}!` : ''}
-              </span>
-            </div>
-          )
-        })}
-      </div>
+      <Table
+        columns={columns}
+        rows={visible}
+        getRowKey={e => e.agentId}
+        rowClassName={e => e.lastError ? 'bg-status-error/5' : ''}
+        className="rounded-md text-xs [&_table]:table-fixed"
+      />
       {sorted.length > 8 && (
         <Button
           variant="ghost"

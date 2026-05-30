@@ -30,6 +30,7 @@ import {
 import { getJobKind, isAgentJobKind, isClaudeBackedJobKind } from '@/lib/jobs/kinds';
 import { appendRedactedFileSync } from '@/lib/jobs/redacted-log-writer';
 import { isCancelledExitCode } from '@/lib/shared/job-exit-codes';
+import { computeRunScore } from '@/lib/agents/run-score';
 
 async function getProjectPipelineConfig(projectName: string): Promise<{ autoCommitEnabled: boolean; autoPushEnabled: boolean; releaseAfterRun: boolean; autoPrMergeEnabled: boolean }> {
   try {
@@ -1621,6 +1622,14 @@ export async function markDone(job: JobData, exitCode: number): Promise<void> {
     }
   }
 
+  job.runScore = computeRunScore({
+    exitCode: job.exitCode,
+    modifiedFiles: job.modifiedFiles ?? null,
+    linesAdded: job.linesAdded ?? null,
+    linesRemoved: job.linesRemoved ?? null,
+    workSummary: job.workSummary ?? null,
+  });
+
   // Claim the DB row and emit the durable completion event in one transaction.
   // This preserves the crash-recovery invariant: once `jobs.finished_at` is
   // visible, the event router also has a row it can replay after restart. Agent
@@ -1646,6 +1655,7 @@ export async function markDone(job: JobData, exitCode: number): Promise<void> {
           modifiedFiles: job.modifiedFiles ?? null,
           linesAdded: job.linesAdded ?? null,
           linesRemoved: job.linesRemoved ?? null,
+          runScore: job.runScore ?? null,
         })
         .where(and(eq(schema.jobs.id, job.id), isNull(schema.jobs.finishedAt)))
         .returning({ finishedAt: schema.jobs.finishedAt, exitCode: schema.jobs.exitCode });
@@ -1698,6 +1708,7 @@ export async function markDone(job: JobData, exitCode: number): Promise<void> {
         linesAdded: job.linesAdded ?? null,
         linesRemoved: job.linesRemoved ?? null,
         provider: job.provider ?? null,
+        runScore: job.runScore ?? null,
       }).onConflictDoNothing({ target: schema.jobs.id })
         .returning({ finishedAt: schema.jobs.finishedAt, exitCode: schema.jobs.exitCode });
       if (insertedRows.length === 0) return insertedRows;

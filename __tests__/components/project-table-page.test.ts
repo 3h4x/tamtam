@@ -217,6 +217,106 @@ describe('ProjectTablePage', () => {
     unmount()
   })
 
+  it('renders project agent pills with schedule and on-demand context', async () => {
+    const nextFireMs = Date.now() + 30 * 60 * 1000
+    const lastFireMs = Date.now() - 15 * 60 * 1000
+    fetchAgents.mockResolvedValue({
+      agents: [
+        {
+          id: 'agent-nightly',
+          name: 'nightly',
+          project: 'acme/widgets',
+          skillIds: [],
+          docPaths: [],
+          model: 'claude',
+          prompt: '',
+          schedule: '1h',
+          enabled: true,
+          createdAt: 1,
+          updatedAt: 1,
+        },
+        {
+          id: 'agent-adhoc',
+          name: 'adhoc',
+          project: 'acme/widgets',
+          skillIds: [],
+          docPaths: [],
+          model: 'claude',
+          prompt: '',
+          schedule: null,
+          enabled: true,
+          createdAt: 1,
+          updatedAt: 1,
+        },
+      ],
+    })
+    vi.stubGlobal('fetch', vi.fn(async (input: RequestInfo | URL) => {
+      const url = String(input)
+      if (url === '/api/agents/scheduler-health') {
+        return {
+          ok: true,
+          json: async () => ({
+            internal: {
+              paused: false,
+              entries: [{
+                agentId: 'agent-nightly',
+                project: 'acme/widgets',
+                name: 'nightly',
+                schedule: '1h',
+                enabled: true,
+                nextFireMs,
+                lastFireMs,
+              }],
+            },
+          }),
+        }
+      }
+      if (url === '/api/settings') {
+        return {
+          ok: true,
+          json: async () => ({ settings: { budget_block_runs_enabled: 'false' } }),
+        }
+      }
+      return { ok: false, json: async () => ({}) }
+    }))
+
+    const fleet = createFleetHealth([
+      {
+        project: 'acme/widgets',
+        status: 'healthy',
+        tasks: [],
+        totalChanges: 0,
+        unpushed: 0,
+        unreviewedCount: 0,
+        lastRunAgo: null,
+      },
+    ])
+
+    const { container, unmount } = renderProjectTablePage({
+      fleet,
+      issueCounts: {},
+      loading: false,
+    })
+
+    await waitForFast(() => {
+      expect(container.textContent).toContain('Agents')
+      expect(container.textContent).toContain('nightly')
+      expect(container.textContent).toContain('adhoc')
+    })
+
+    const nightlyPill = Array.from(container.querySelectorAll('[title]'))
+      .find(el => el.textContent === 'nightly')
+    const adhocPill = Array.from(container.querySelectorAll('[title]'))
+      .find(el => el.textContent === 'adhoc')
+
+    expect(nightlyPill?.getAttribute('title')).toContain('schedule: 1h')
+    expect(nightlyPill?.getAttribute('title')).toContain('next in 30m')
+    expect(nightlyPill?.getAttribute('title')).toContain('last 15m ago')
+    expect(adhocPill?.getAttribute('title')).toBe('on-demand')
+
+    unmount()
+  })
+
   it('labels scheduler-paused projects as scheduled paused so running manual work is not misread as fully paused', async () => {
     const nextFireMs = Date.now() + 10_000
     vi.stubGlobal('fetch', vi.fn(async (input: RequestInfo | URL) => {

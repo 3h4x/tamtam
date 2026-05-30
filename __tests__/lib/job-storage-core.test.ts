@@ -46,7 +46,8 @@ async function applyDdl(handle: TestDbHandle): Promise<void> {
       modified_files text,
       lines_added integer,
       lines_removed integer,
-      provider text
+      provider text,
+      run_score integer
     )
   `));
   await handle.db.execute(sql.raw(`
@@ -181,6 +182,7 @@ async function syncCacheFromDb(): Promise<void> {
       linesAdded: row.linesAdded ?? null,
       linesRemoved: row.linesRemoved ?? null,
       provider: row.provider ?? null,
+      runScore: row.runScore ?? null,
     });
   }
 }
@@ -541,6 +543,7 @@ describe('job-storage', () => {
       release.ghIssueRepo = 'owner/repo';
       release.ghIssueTitle = 'Fix login bug';
       release.releaseId = release.id;
+      release.runScore = 95;
       updateJob(release);
 
       vi.resetModules();
@@ -561,6 +564,7 @@ describe('job-storage', () => {
       expect(persisted?.ghIssueRepo).toBe('owner/repo');
       expect(persisted?.ghIssueTitle).toBe('Fix login bug');
       expect(persisted?.releaseId).toBe(release.id);
+      expect(persisted?.runScore).toBe(95);
     });
 
     it('persists mark-dod issue stamps and context meta added after createJob across a reload', async () => {
@@ -1097,6 +1101,7 @@ describe('job-storage', () => {
         cacheReadTokens: null,
         cacheCreateTokens: null,
         sessionId: null,
+        runScore: 91,
       };
 
       const dict = jobToDict(job);
@@ -1116,6 +1121,7 @@ describe('job-storage', () => {
       expect(dict).toHaveProperty('duration_ms');
       expect(dict).toHaveProperty('input_tokens');
       expect(dict).toHaveProperty('session_id');
+      expect(dict.run_score).toBe(91);
     });
 
     it('converts finished job to dict', () => {

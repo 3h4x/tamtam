@@ -471,6 +471,9 @@ const isReviewRunning = (projectName: string) => !!runtime[projectName]?.hasRunn
             <th className={thClass('status')} onClick={() => handleSort('status')}>
               <span className="flex items-center gap-1">Status <SortIcon active={sortKey === 'status'} dir={sortDir} /></span>
             </th>
+            <th className={thClass('ci')} onClick={() => handleSort('ci')}>
+              <span className="flex items-center gap-1">CI <SortIcon active={sortKey === 'ci'} dir={sortDir} /></span>
+            </th>
             <th className={thClass('changes')} onClick={() => handleSort('changes')}>
               <span className="flex items-center gap-1">Changes <SortIcon active={sortKey === 'changes'} dir={sortDir} /></span>
             </th>
@@ -479,9 +482,6 @@ const isReviewRunning = (projectName: string) => !!runtime[projectName]?.hasRunn
             </th>
             <th className={thClass('next_run')} onClick={() => handleSort('next_run')}>
               <span className="flex items-center gap-1">Next Run <SortIcon active={sortKey === 'next_run'} dir={sortDir} /></span>
-            </th>
-            <th className={thClass('ci')} onClick={() => handleSort('ci')}>
-              <span className="flex items-center gap-1">CI <SortIcon active={sortKey === 'ci'} dir={sortDir} /></span>
             </th>
           </tr>
         </thead>
@@ -651,6 +651,22 @@ const isReviewRunning = (projectName: string) => !!runtime[projectName]?.hasRunn
                   </div>
                 </td>
 
+                {/* CI */}
+                <td className="px-4 py-2" onClick={e => e.stopPropagation()}>
+                  {ci === 'success' && <StatusIcon ok={true} size="sm" />}
+                  {ci === 'failure' && (
+                    ciUrl ? (
+                      <a href={ciUrl} target="_blank" rel="noopener noreferrer" onClick={e => e.stopPropagation()}>
+                        <StatusIcon ok={false} size="sm" />
+                      </a>
+                    ) : (
+                      <StatusIcon ok={false} size="sm" />
+                    )
+                  )}
+                  {ci === 'in_progress' && <Spinner size="lg" color="accent" shrink />}
+                  {ci === null && <span className="text-text-tertiary text-sm">—</span>}
+                </td>
+
                 {/* Changes */}
                 <td className="px-4 py-2" onClick={e => e.stopPropagation()}>
                   {project.totalChanges > 0 ? (
@@ -738,22 +754,6 @@ const isReviewRunning = (projectName: string) => !!runtime[projectName]?.hasRunn
                   })() : (
                     <span className="text-text-tertiary">—</span>
                   )}
-                </td>
-
-                {/* CI */}
-                <td className="px-4 py-2" onClick={e => e.stopPropagation()}>
-                  {ci === 'success' && <StatusIcon ok={true} size="sm" />}
-                  {ci === 'failure' && (
-                    ciUrl ? (
-                      <a href={ciUrl} target="_blank" rel="noopener noreferrer" onClick={e => e.stopPropagation()}>
-                        <StatusIcon ok={false} size="sm" />
-                      </a>
-                    ) : (
-                      <StatusIcon ok={false} size="sm" />
-                    )
-                  )}
-                  {ci === 'in_progress' && <Spinner size="lg" color="accent" shrink />}
-                  {ci === null && <span className="text-text-tertiary text-sm">—</span>}
                 </td>
               </tr>
             )

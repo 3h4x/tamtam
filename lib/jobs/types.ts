@@ -35,4 +35,5 @@ export interface JobData {
   linesRemoved?: number | null;
   provider?: string | null;
   cancelRequestedExitCode?: number | null;
+  runScore?: number | null;
 }

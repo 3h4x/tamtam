@@ -53,6 +53,25 @@ describe('<SchedulerFireTable />', () => {
     expect(container.textContent).toContain('never');
   });
 
+  it('keeps long agent names bounded inside the compact table layout', () => {
+    render([
+      makeEntry({
+        project: 'very-long-owner-name/very-long-project-name',
+        name: 'very-long-agent-name-that-should-not-push-status-columns-offscreen',
+      }),
+    ]);
+
+    const wrapper = container.querySelector('.overflow-x-auto');
+    const agentCell = container.querySelector('td');
+    const agentLabel = agentCell?.querySelector('[data-private]');
+
+    expect(wrapper?.className).toContain('[&_table]:table-fixed');
+    expect(agentCell?.className).toContain('max-w-0');
+    expect(agentCell?.className).toContain('overflow-hidden');
+    expect(agentLabel?.className).toContain('block');
+    expect(agentLabel?.className).toContain('truncate');
+  });
+
   it('formats future fires with "in X" prefix', () => {
     const now = 1_700_000_000_000;
     vi.useFakeTimers();

@@ -49,7 +49,8 @@ async function applyDdl(handle: TestDbHandle): Promise<void> {
       modified_files text,
       lines_added integer,
       lines_removed integer,
-      provider text
+      provider text,
+      run_score integer
     )
   `));
   await handle.db.execute(sql.raw(`
@@ -441,6 +442,7 @@ function populateJobCache(rows: ReadonlyArray<Record<string, unknown>>): void {
       linesAdded: (r.linesAdded as number | null | undefined) ?? null,
       linesRemoved: (r.linesRemoved as number | null | undefined) ?? null,
       provider: (r.provider as string | null | undefined) ?? null,
+      runScore: (r.runScore as number | null | undefined) ?? null,
     });
   }
 }
@@ -1960,6 +1962,7 @@ describe('auto-mark seen on completion', () => {
       modifiedFiles: JSON.stringify([{ path: 'lib/jobs/lifecycle.ts', status: 'M' }]),
       linesAdded: 12,
       linesRemoved: 3,
+      runScore: 91,
     });
 
     const event = (await getTestDb().select().from(schema.jobCompletionEvents).where(eq(schema.jobCompletionEvents.jobId, job.id))).at(0);
