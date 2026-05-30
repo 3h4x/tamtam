@@ -8,6 +8,7 @@ import type { JobInfo } from '@/lib/client-api'
 import { jobIsFinished } from '@/lib/client/job-status'
 import { Button } from '@/components/ui/Button'
 import { EmptyState } from '@/components/ui/EmptyState'
+import { Pill } from '@/components/ui/Pill'
 import { Spinner } from '@/components/ui/Spinner'
 import { StatusIcon } from '@/components/ui/StatusIcon'
 
@@ -45,9 +46,9 @@ function KindBadge({ kind }: { kind: string }) {
     test: 'test',
   }
   return (
-    <span className="inline-flex items-center px-1.5 py-0.5 rounded text-xs font-medium bg-bg-tertiary text-text-tertiary">
+    <Pill size="xs" className="rounded border-transparent bg-bg-tertiary px-1.5 text-text-tertiary">
       {labels[kind] ?? kind}
-    </span>
+    </Pill>
   )
 }
 
