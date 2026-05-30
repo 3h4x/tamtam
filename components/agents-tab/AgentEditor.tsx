@@ -414,7 +414,15 @@ export function AgentEditor({
                 <Pill key={id} tone="accent" size="xs" className="gap-1 rounded-full border-accent/25 bg-accent/15 pl-2 pr-1 py-0.5">
                   {item?.name || id}
                   {!isSystemAgent && (
-                    <button type="button" className="w-4 h-4 flex items-center justify-center rounded-full hover:bg-accent/20 cursor-pointer opacity-60 hover:opacity-100 transition-opacity" onClick={() => toggleSkill(id)}>×</button>
+                    <Button
+                      type="button"
+                      variant="ghost"
+                      size="icon-sm"
+                      className="!h-4 !w-4 !rounded-full border-transparent bg-transparent !p-0 !text-current opacity-60 hover:bg-accent/20 hover:!text-current hover:opacity-100"
+                      onClick={() => toggleSkill(id)}
+                    >
+                      ×
+                    </Button>
                   )}
                 </Pill>
               )
@@ -425,7 +433,15 @@ export function AgentEditor({
                 <Pill key={path} tone="success" size="xs" className="gap-1 rounded-full bg-status-success/10 pl-2 pr-1 py-0.5">
                   {doc?.name || path}
                   {!isSystemAgent && (
-                    <button type="button" className="w-4 h-4 flex items-center justify-center rounded-full hover:bg-status-success/20 cursor-pointer opacity-60 hover:opacity-100 transition-opacity" onClick={() => toggleDoc(path)}>×</button>
+                    <Button
+                      type="button"
+                      variant="ghost"
+                      size="icon-sm"
+                      className="!h-4 !w-4 !rounded-full border-transparent bg-transparent !p-0 !text-current opacity-60 hover:bg-status-success/20 hover:!text-current hover:opacity-100"
+                      onClick={() => toggleDoc(path)}
+                    >
+                      ×
+                    </Button>
                   )}
                 </Pill>
               )
