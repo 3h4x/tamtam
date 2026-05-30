@@ -147,7 +147,7 @@ describe('buildDiffContext', () => {
   it('lists skipped files in the SKIPPED line', () => {
     const diff = makeDiffSection('pnpm-lock.yaml') + makeDiffSection('src/app.ts');
     const result = buildDiffContext('', diff);
-    expect(result.context).toContain('SKIPPED (lock/generated/binary): pnpm-lock.yaml');
+    expect(result.context).toContain('SKIPPED (lock/build/binary): pnpm-lock.yaml');
     expect(result.includedFiles).toContain('src/app.ts');
   });
 

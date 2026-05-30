@@ -81,7 +81,7 @@ export function buildDiffContext(stat: string, rawDiff: string): DiffContextResu
 
   const parts: string[] = [];
   if (stat.trim()) parts.push(`CHANGES:\n${stat.trim()}`);
-  if (skippedFiles.length > 0) parts.push(`SKIPPED (lock/generated/binary): ${skippedFiles.join(', ')}`);
+  if (skippedFiles.length > 0) parts.push(`SKIPPED (lock/build/binary): ${skippedFiles.join(', ')}`);
   if (included.length > 0) parts.push(`DIFF:\n${included.join('\n')}`);
 
   return { context: parts.join('\n\n'), includedFiles, skippedFiles, truncated };
