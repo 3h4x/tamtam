@@ -297,4 +297,67 @@ test.describe('Overview tab live status polling', () => {
     });
     await expect(page.getByRole('button', { name: /tests running/i })).toHaveCount(0);
   });
+
+  test('overview keeps concurrent transitions isolated when one job is cancelled and the other keeps running', async ({
+    page,
+  }) => {
+    let phase: 'both-running' | 'review-cancelled' | 'all-done' = 'both-running';
+
+    await stubOverviewRoutes(page);
+    await page.route(
+      (url) => url.pathname === '/api/jobs' && url.searchParams.get('project') === PROJECT,
+      (route: Route) => {
+        const jobs =
+          phase === 'both-running'
+            ? [
+                makeJob('review-cancel-live', 'review', 'running', null),
+                makeJob('test-steady-live', 'test', 'running', null),
+              ]
+            : phase === 'review-cancelled'
+              ? [
+                  makeJob('review-cancel-live', 'review', 'done', -3, {
+                    session_id: 'sess-review-cancel-live',
+                  }),
+                  makeJob('test-steady-live', 'test', 'running', null),
+                ]
+              : [
+                  makeJob('review-cancel-live', 'review', 'done', -3, {
+                    session_id: 'sess-review-cancel-live',
+                  }),
+                  makeJob('test-steady-live', 'test', 'done', 0),
+                ];
+
+        route.fulfill({ json: { jobs, pendingReleaseProjects: [] } });
+      },
+    );
+
+    await page.goto(`/project/${PROJECT}`);
+
+    await expect(page.getByText('2 running now')).toBeVisible({ timeout: 8_000 });
+    await expect(page.getByRole('button', { name: /review running/i }).first()).toBeVisible({
+      timeout: 8_000,
+    });
+    await expect(page.getByRole('button', { name: /tests running/i }).first()).toBeVisible({
+      timeout: 8_000,
+    });
+
+    phase = 'review-cancelled';
+
+    await expect(page.getByText('1 running now')).toBeVisible({ timeout: 12_000 });
+    await expect(page.getByRole('button', { name: /review not run yet/i }).first()).toBeVisible({
+      timeout: 12_000,
+    });
+    await expect(page.getByRole('button', { name: /tests running/i }).first()).toBeVisible({
+      timeout: 12_000,
+    });
+    await expect(page.getByRole('button', { name: /review running/i })).toHaveCount(0);
+
+    phase = 'all-done';
+
+    await expect(page.getByText('1 running now')).not.toBeVisible({ timeout: 12_000 });
+    await expect(page.getByRole('button', { name: /tests Passed/i }).first()).toBeVisible({
+      timeout: 12_000,
+    });
+    await expect(page.getByRole('button', { name: /tests running/i })).toHaveCount(0);
+  });
 });

@@ -814,6 +814,68 @@ test.describe('Project history concurrent rows', () => {
     await expect(runningRunRows(page)).toHaveCount(2, { timeout: 12_000 });
     expect(reactKeyWarnings).toEqual([]);
   });
+
+  test('history tab keeps concurrent rows isolated when one job is cancelled and the other keeps running', async ({
+    page,
+  }) => {
+    const reactKeyWarnings = captureReactKeyWarnings(page);
+    let testCancelled = false;
+    const reviewStartedAt = now() - 60;
+    const testStartedAt = now() - 55;
+
+    await stubCommonRoutes(page, PROJECT);
+
+    await page.route(
+      (url) =>
+        url.pathname === '/api/jobs' && url.searchParams.get('project') === PROJECT,
+      (route: Route) =>
+        route.fulfill({
+          json: {
+            jobs: [
+              makeJob('history-review-running', PROJECT, 'running', null, 'review', {
+                startedAt: reviewStartedAt,
+              }),
+              makeJob(
+                'history-test-cancel-transition',
+                PROJECT,
+                testCancelled ? 'done' : 'running',
+                testCancelled ? -3 : null,
+                'test',
+                {
+                  startedAt: testStartedAt,
+                  finishedAt: testCancelled ? testStartedAt + 20 : null,
+                },
+              ),
+            ],
+            pendingReleaseProjects: [],
+          },
+        }),
+    );
+
+    await page.goto(`/project/${PROJECT}/history`);
+
+    const pipelineRow = historyRowByTitle(page, 'Pipeline steps');
+    const reviewRow = historyRowByTitle(page, 'Code review');
+    const testRow = historyRowByTitle(page, 'Test run');
+
+    await expect(pipelineRow).toBeVisible({ timeout: 8_000 });
+    await expect(pipelineRow.locator('[aria-label="running"]')).toBeVisible({ timeout: 8_000 });
+    await pipelineRow.getByRole('button', { name: '▸' }).click();
+    await expect(reviewRow).toBeVisible({ timeout: 8_000 });
+    await expect(testRow).toBeVisible({ timeout: 8_000 });
+    await expect(runningRunRows(page)).toHaveCount(3, { timeout: 8_000 });
+
+    testCancelled = true;
+
+    await expect(testRow.getByText('cancelled', { exact: true })).toBeVisible({
+      timeout: 12_000,
+    });
+    await expect(testRow.locator('[aria-label="running"]')).toHaveCount(0, { timeout: 12_000 });
+    await expect(reviewRow.locator('[aria-label="running"]')).toBeVisible({ timeout: 12_000 });
+    await expect(pipelineRow.locator('[aria-label="running"]')).toBeVisible({ timeout: 12_000 });
+    await expect(runningRunRows(page)).toHaveCount(2, { timeout: 12_000 });
+    expect(reactKeyWarnings).toEqual([]);
+  });
 });
 
 // ─── Test 3: Global runs page polling transitions ───────────────────────────
