@@ -19,6 +19,7 @@ import { StandardTabs } from '@/components/ui/StandardTabs'
 import { Spinner } from '@/components/ui/Spinner'
 import { Button } from '@/components/ui/Button'
 import { Pill } from '@/components/ui/Pill'
+import { ErrorBanner } from '@/components/ErrorBanner'
 
 interface SettingsMap {
   workspace_path: string
@@ -776,14 +777,7 @@ export function SettingsPage({ initialTab }: { initialTab?: TabId } = {}) {
         </div>
       ) : (
         <div className="space-y-4">
-          {error && (
-            <div className="flex items-center gap-2 p-3 bg-status-error/10 border border-status-error/30 rounded-lg text-status-error text-sm">
-              <svg className="w-4 h-4 shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
-                <circle cx="12" cy="12" r="10" /><line x1="15" y1="9" x2="9" y2="15" /><line x1="9" y1="9" x2="15" y2="15" />
-              </svg>
-              {error}
-            </div>
-          )}
+          {error && <ErrorBanner message={error} onDismiss={() => setError(null)} />}
 
           {/* Tabs */}
           <StandardTabs
