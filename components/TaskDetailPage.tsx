@@ -9,6 +9,7 @@ import { formatDuration } from '@/lib/shared/statusConstants'
 import { isCancelledExitCode } from '@/lib/shared/job-exit-codes'
 import { ErrorState } from '@/components/ErrorState'
 import { Button } from '@/components/ui/Button'
+import { EmptyState } from '@/components/ui/EmptyState'
 import { Table, type Column } from '@/components/ui/Table'
 
 type RunHistoryEntry = TaskDetail['run_history'][number]
@@ -236,7 +237,7 @@ export function TaskDetailPage({
               columns={runHistoryColumns}
               rows={detail.run_history}
               getRowKey={(run) => `${run.started ?? ''}|${run.ended ?? ''}|${run.exit_code ?? ''}`}
-              emptyState={<div className="px-3 py-2.5 text-text-secondary text-sm">No runs yet</div>}
+              emptyState={<EmptyState title="No runs yet" paddingY="xs" />}
             />
           </section>
         </div>
