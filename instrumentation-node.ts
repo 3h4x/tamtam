@@ -952,6 +952,29 @@ export async function registerNode(): Promise<void> {
                 { jobKey: ORCHESTRATOR_TICK_JOB_KEY, jobKeyMode: 'preserve_run_at', runAt, maxAttempts: 5 },
               );
             },
+            recordBoostRecommendations: async (decisions) => {
+              const { upsertRecommendation } = await import('@/lib/recommendations/recommendations');
+              await Promise.all(
+                decisions.map((d) =>
+                  upsertRecommendation({
+                    project: d.project,
+                    sourceKind: 'orchestrator',
+                    sourceId: null,
+                    agentId: d.agentId,
+                    agentName: d.agentName,
+                    type: 'orchestrator_boost',
+                    title: d.modelOverride === 'smart'
+                      ? `Boosted ${d.agentName} in smart mode`
+                      : `Boosted ${d.agentName}`,
+                    detail: d.reason,
+                    payload: {
+                      reason: d.reason,
+                      modelOverride: d.modelOverride ?? null,
+                    },
+                  }),
+                ),
+              );
+            },
           },
           usageSnapshotDeps: {
             loadBridge: async () => {

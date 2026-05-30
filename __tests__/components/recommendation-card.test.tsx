@@ -141,6 +141,26 @@ describe('RecommendationCard', () => {
     unmount()
   })
 
+  it('shows AUTO pill for orchestrator-sourced recommendations', () => {
+    const { container, unmount } = renderCard({
+      item: makeRecommendation({ source_kind: 'orchestrator', type: 'orchestrator_boost', title: 'Boosted improve' }),
+    })
+
+    expect(container.textContent).toContain('AUTO')
+    expect(container.textContent).toContain('boost')
+    expect(container.textContent).not.toContain('Accept')
+
+    unmount()
+  })
+
+  it('does not show AUTO pill for agent-sourced recommendations', () => {
+    const { container, unmount } = renderCard()
+
+    expect(container.textContent).not.toContain('AUTO')
+
+    unmount()
+  })
+
   it('disables actions and shows the busy label while an apply is in flight', () => {
     const { container, unmount } = renderCard({ busy: true })
 

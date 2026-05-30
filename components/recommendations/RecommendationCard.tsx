@@ -9,6 +9,7 @@ import { formatAgo } from '@/lib/shared/format'
 
 function typeLabel(type: string): string {
   if (type === 'agent_schedule_backoff') return 'schedule'
+  if (type === 'orchestrator_boost') return 'boost'
   return type.replace(/_/g, ' ')
 }
 
@@ -75,6 +76,15 @@ export function RecommendationCard({
       <div className="flex items-start justify-between gap-3">
         <div className="min-w-0">
           <div className="flex items-center gap-2 flex-wrap">
+            {item.source_kind === 'orchestrator' && (
+              <Pill
+                tone="success"
+                size="xs"
+                className="rounded px-1.5 text-[10px] font-mono"
+              >
+                AUTO
+              </Pill>
+            )}
             <Pill
               tone="accent"
               size="xs"

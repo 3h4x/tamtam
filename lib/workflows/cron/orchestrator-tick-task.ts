@@ -65,6 +65,11 @@ export interface OrchestratorTickDeps {
    *  project-sweep pattern so a restart doesn't kill the chain. */
   enqueueNextFire: (runAt: Date) => Promise<void>;
   now?: () => number;
+  /** Optional — when present, persists each boost decision as an
+   *  orchestrator_boost recommendation so the /recommendations page can show
+   *  what the orchestrator did automatically. Fire-and-forget; errors are
+   *  swallowed so a recommendation write failure never blocks the tick. */
+  recordBoostRecommendations?: (decisions: BoostDecision[]) => Promise<void>;
 }
 
 export interface OrchestratorTickResult {
@@ -142,6 +147,9 @@ export async function handleOrchestratorTick(
           decisions.map((d) => deps.enqueueAgentFire(d.agentId, new Date(nowMs), d.modelOverride)),
         );
         setHistory(recordBoosts(pruned, decisions, nowMs));
+        if (deps.recordBoostRecommendations) {
+          deps.recordBoostRecommendations(decisions).catch(() => {});
+        }
       }
     }
   } catch (err) {

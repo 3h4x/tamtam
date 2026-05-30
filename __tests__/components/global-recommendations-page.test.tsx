@@ -80,12 +80,12 @@ describe('GlobalRecommendationsPage', () => {
     document.body.innerHTML = ''
   })
 
-  it('groups open recommendations by project and orders the busiest project first', async () => {
+  it('shows all recommendations in a flat list sorted newest-first (no project grouping)', async () => {
     fetchAllOpenRecommendationsMock.mockResolvedValue({
       recommendations: [
-        makeRecommendation({ id: 'beta-1', project: 'beta', title: 'Beta 1' }),
-        makeRecommendation({ id: 'alpha-1', project: 'alpha', title: 'Alpha 1' }),
-        makeRecommendation({ id: 'beta-2', project: 'beta', title: 'Beta 2' }),
+        makeRecommendation({ id: 'beta-1', project: 'beta', title: 'Beta 1', updated_at: 300 }),
+        makeRecommendation({ id: 'alpha-1', project: 'alpha', title: 'Alpha 1', updated_at: 200 }),
+        makeRecommendation({ id: 'beta-2', project: 'beta', title: 'Beta 2', updated_at: 100 }),
       ],
     })
 
@@ -96,11 +96,14 @@ describe('GlobalRecommendationsPage', () => {
       expect(container.textContent).toContain('3 open')
       expect(container.textContent).toContain('Beta 1')
       expect(container.textContent).toContain('Alpha 1')
+      expect(container.textContent).toContain('Beta 2')
     })
 
-    const headings = Array.from(container.querySelectorAll('h2')).map((node) => node.textContent?.replace(/\s+/g, ' ').trim())
-    expect(headings).toEqual(['beta2', 'alpha1'])
+    // No project-group headings — flat list only
+    const h2s = Array.from(container.querySelectorAll('h2'))
+    expect(h2s).toHaveLength(0)
 
+    // Project links still appear via showProjectLink on each card
     const links = Array.from(container.querySelectorAll('a')).map((node) => node.getAttribute('href'))
     expect(links).toContain('/project/beta')
     expect(links).toContain('/project/alpha')

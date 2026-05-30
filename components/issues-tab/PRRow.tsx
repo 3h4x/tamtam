@@ -7,7 +7,7 @@ import type { GhPullRequest } from '@/lib/client-api'
 import { formatAgo } from '@/lib/shared/format'
 import { Labels, CheckIcon, GateBadge } from '@/components/issues-tab/shared'
 import type { MergeMethod, PrGates } from '@/components/issues-tab/shared'
-import { Button } from '@/components/ui/Button'
+import { Button, buttonVariants } from '@/components/ui/Button'
 import { Pill, PillButton, type PillTone } from '@/components/ui/Pill'
 import { SegmentedControl } from '@/components/ui/SegmentedControl'
 import { Spinner } from '@/components/ui/Spinner'
@@ -413,7 +413,11 @@ export function PRRow({
             href={pr.url}
             target="_blank"
             rel="noopener noreferrer"
-            className="flex items-center justify-center rounded-md border border-border bg-bg-secondary p-1.5 text-text-tertiary hover:bg-bg-tertiary hover:text-text-primary"
+            className={buttonVariants({
+              variant: 'secondary',
+              size: 'icon-sm',
+              className: 'h-[26px] w-[26px] text-text-tertiary hover:text-text-primary',
+            })}
             title="Open pull request on GitHub"
             aria-label="Open on GitHub"
           >

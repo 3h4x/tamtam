@@ -2,7 +2,7 @@
 id: agent-improve
 name: agent:improve
 description: "Walks up to 5 oldest unaudited source files (oldest commit first), applies fixes by family rubric (F1–F4), continues scanning after small/F3/F4 fixes and stops after substantial F1/F2 ones, and records every audited file in a content-hash ledger so the queue advances without re-running on unchanged files."
-version: "2026-05-30b"
+version: "2026-05-30c"
 agent:
   defaultSchedule: 12h
   defaultModel: normal
@@ -115,7 +115,7 @@ These rules are non-negotiable — they govern every step that follows.
 
 ## 1. Walk the candidate queue (do not stop at the first file)
 
-**If the prerequisite output says the queue is empty** (the line "(all tracked and non-ignored untracked files audited at current content — idle until a file changes)" appears, or the candidate list is blank), output `IMPROVE_QUEUE_ROTATED 0` and **stop immediately**. Do NOT invent work, do NOT add tests, do NOT modify any file. The queue will refill automatically when source files change.
+**If the prerequisite output says the queue is empty** (the line "(all tracked and non-ignored untracked files audited at current content — idle until a file changes)" appears, or the candidate list is blank), output `IMPROVE_QUEUE_ROTATED 0` and **stop immediately**. This means output that one line and do nothing else — no file reads, no code inspection, no search for "alternative improvements", no "coverage gaps", no "lifecycle issues", no "regression tests", no source edits of any kind. The queue is the only source of work. There is no separate pool of "other improvements" to look for. Idle is the correct, expected, productive outcome when the queue is empty. The queue will refill automatically when source files change.
 
 The candidate queue is the **5 oldest unaudited source files** (oldest commit first) the prerequisite gave you. The prerequisite has already excluded every file whose current content is in the ledger, so each candidate is genuinely unaudited at its present bytes. You walk them **in order**, and per file you do exactly ONE of:
 
@@ -225,7 +225,7 @@ If you find yourself about to do any of the following, stop and re-read the rubr
 - Refactoring to extract a helper, factor out a hook, or introduce an abstraction for code with one call site.
 - Tightening types you didn't have to touch (e.g. `any` → `unknown` on an untouched signature).
 - "While I'm here" tidying — adjacent unrelated lint warnings, related but separate dead code, etc.
-- Touching test files unless the source change provably breaks an existing assertion.
+- Touching test files unless the source change provably breaks an existing assertion. Specifically: adding new test coverage is never an improve fix — it is not in any family (F1–F5). Test-only edits are forbidden.
 - Performance speculation without a measurement ("this might be faster" without a benchmark).
 
 If none of the five families produce a real instance, the file is clean. That is the correct, expected, productive outcome — not a failure.
@@ -347,3 +347,4 @@ Both the audit log and the ledger live under `.tamtam/cache/` (gitignored), so t
 - Touch security-sensitive code (auth, payments, crypto, command construction) without a real, named, single-pattern reason — `gh` argument refactors don't count.
 - Apply more than 1 fix to the same file in one run, or more than 3 fixes total per run, or audit more than 5 candidates per run. The caps exist to bound token cost and review burden.
 - Add comments to "document the fix" — the diff itself is the documentation. Brief WHY comments are fine when the pattern's not self-evident; past-tense "Was previously …" comments are not.
+- Search for alternative work, "coverage gaps", "lifecycle issues", or any other improvements when the queue is empty. If the queue is empty, output `IMPROVE_QUEUE_ROTATED 0` and stop. No file reads, no code inspection, no edits. Full stop.

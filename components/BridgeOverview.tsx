@@ -4,6 +4,7 @@ import { useEffect, useState } from 'react'
 import Link from 'next/link'
 import type { BridgeResponse, BridgeProject, BridgeProjectStatus } from '@/app/api/stats/bridge/route'
 import { buttonVariants } from '@/components/ui/Button'
+import { Pill } from '@/components/ui/Pill'
 import type { GlobalPace, WindowPace, PaceStatus } from '@/lib/usage/quota-pace'
 
 // "The Bridge" — a compact command-center strip at the top of /stats. One card,
@@ -70,7 +71,7 @@ function tightestWindow(p: { fiveHour: WindowPace | null; sevenDay: WindowPace |
 function ProviderChip({ provider, fiveHour, sevenDay }: GlobalPace['providers'][number]) {
   const tight = tightestWindow({ fiveHour, sevenDay })
   return (
-    <span className="inline-flex items-center gap-1.5 text-[11px] px-2 py-0.5 rounded bg-bg-tertiary/60 whitespace-nowrap">
+    <Pill size="xs" className="border-transparent bg-bg-tertiary/60 text-[11px] font-normal whitespace-nowrap">
       <span className="font-medium text-text-secondary">{provider}</span>
       {sevenDay && (
         <span className="tabular-nums text-text-tertiary">
@@ -85,7 +86,7 @@ function ProviderChip({ provider, fiveHour, sevenDay }: GlobalPace['providers'][
         </span>
       )}
       {!tight && <span className="text-text-tertiary">no data</span>}
-    </span>
+    </Pill>
   )
 }
 
@@ -144,9 +145,9 @@ export function BridgeOverview() {
         <span className="text-[10px] text-text-tertiary">fleet pace · shipping status</span>
         <span className={`ml-auto text-xs font-medium tabular-nums ${pace.tone}`}>{pace.text}</span>
         {data.throttle && (
-          <span className="text-[10px] px-1.5 py-0.5 rounded bg-status-error/15 text-status-error font-semibold whitespace-nowrap">
+          <Pill size="xs" tone="error" className="border-transparent text-[10px] font-semibold whitespace-nowrap">
             scheduler throttled · {data.throttle.worstProvider} {Math.round(data.throttle.projectedPct)}%
-          </span>
+          </Pill>
         )}
       </div>
 

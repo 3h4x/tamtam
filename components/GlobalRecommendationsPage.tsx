@@ -1,15 +1,15 @@
 'use client'
 
-import { useEffect, useMemo, useState } from 'react'
+import { useEffect, useState } from 'react'
 import { fetchAllOpenRecommendations, updateRecommendation, applyRecommendation } from '@/lib/client-api'
 import type { Recommendation } from '@/lib/client-api'
 import { ErrorState } from '@/components/ErrorState'
 import { EmptyState } from '@/components/ui/EmptyState'
 import { RecommendationCard } from '@/components/recommendations/RecommendationCard'
 
-// Cross-project Recommendations page. Lists every open recommendation grouped
-// by project, with the same Accept/dismiss buttons used inside each project's
-// Recommendations tab. Hidden when no opens exist.
+// Cross-project Recommendations page. Lists every open recommendation sorted
+// newest-first, with the same Accept/dismiss buttons used inside each project's
+// Recommendations tab.
 export function GlobalRecommendationsPage() {
   const [items, setItems] = useState<Recommendation[]>([])
   const [loading, setLoading] = useState(true)
@@ -59,16 +59,6 @@ export function GlobalRecommendationsPage() {
       .finally(() => { if (active) setLoading(false) })
     return () => { active = false }
   }, [])
-
-  const grouped = useMemo(() => {
-    const m = new Map<string, Recommendation[]>()
-    for (const item of items) {
-      const arr = m.get(item.project) ?? []
-      arr.push(item)
-      m.set(item.project, arr)
-    }
-    return Array.from(m.entries()).sort((a, b) => b[1].length - a[1].length)
-  }, [items])
 
   const dismiss = async (item: Recommendation) => {
     startUpdating(item.id)
@@ -144,7 +134,7 @@ export function GlobalRecommendationsPage() {
         />
       )}
 
-      {!loadError && grouped.length === 0 ? (
+      {!loadError && items.length === 0 ? (
         <EmptyState
           bordered
           paddingY="xs"
@@ -152,27 +142,19 @@ export function GlobalRecommendationsPage() {
           title="No open recommendations across any project."
         />
       ) : !loadError ? (
-        grouped.map(([project, projectItems]) => (
-          <section key={project}>
-            <h2 className="text-sm font-semibold text-text-primary mb-2 flex items-center gap-2">
-              <span>{project}</span>
-              <span className="text-xs font-mono text-text-tertiary">{projectItems.length}</span>
-            </h2>
-            <div className="rounded-lg border border-border bg-bg-secondary overflow-hidden">
-              {projectItems.map((item) => (
-                <RecommendationCard
-                  key={item.id}
-                  item={item}
-                  busy={updating.has(item.id)}
-                  errorMessage={errors[item.id] ?? null}
-                  onAccept={() => accept(item)}
-                  onDismiss={() => dismiss(item)}
-                  showProjectLink
-                />
-              ))}
-            </div>
-          </section>
-        ))
+        <div className="rounded-lg border border-border bg-bg-secondary overflow-hidden">
+          {items.map((item) => (
+            <RecommendationCard
+              key={item.id}
+              item={item}
+              busy={updating.has(item.id)}
+              errorMessage={errors[item.id] ?? null}
+              onAccept={() => accept(item)}
+              onDismiss={() => dismiss(item)}
+              showProjectLink
+            />
+          ))}
+        </div>
       ) : null}
     </div>
   )
