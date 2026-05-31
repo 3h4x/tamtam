@@ -7,10 +7,11 @@ import { flushSync } from 'react-dom'
 import { GlobalRecommendationsPage } from '@/components/GlobalRecommendationsPage'
 import type { Recommendation } from '@/lib/client-api'
 
-const { fetchAllOpenRecommendationsMock, updateRecommendationMock, applyRecommendationMock } = vi.hoisted(() => ({
+const { fetchAllOpenRecommendationsMock, updateRecommendationMock, applyRecommendationMock, runAgentMock } = vi.hoisted(() => ({
   fetchAllOpenRecommendationsMock: vi.fn(),
   updateRecommendationMock: vi.fn(),
   applyRecommendationMock: vi.fn(),
+  runAgentMock: vi.fn(),
 }))
 
 vi.mock('@/lib/client-api', async () => {
@@ -20,6 +21,7 @@ vi.mock('@/lib/client-api', async () => {
     fetchAllOpenRecommendations: fetchAllOpenRecommendationsMock,
     updateRecommendation: updateRecommendationMock,
     applyRecommendation: applyRecommendationMock,
+    runAgent: runAgentMock,
   }
 })
 
@@ -129,7 +131,7 @@ describe('GlobalRecommendationsPage', () => {
       expect(container.textContent).toContain('Beta')
     })
 
-    const acceptButton = Array.from(container.querySelectorAll('button')).find((node) => node.textContent === 'Accept')
+    const acceptButton = Array.from(container.querySelectorAll('button')).find((node) => node.textContent === 'Apply suggested change')
     acceptButton?.dispatchEvent(new MouseEvent('click', { bubbles: true }))
 
     await fastWaitFor(() => {
@@ -180,7 +182,7 @@ describe('GlobalRecommendationsPage', () => {
       expect(container.textContent).toContain('Alpha')
     })
 
-    const acceptButton = Array.from(container.querySelectorAll('button')).find((node) => node.textContent === 'Accept')
+    const acceptButton = Array.from(container.querySelectorAll('button')).find((node) => node.textContent === 'Apply suggested change')
     acceptButton?.dispatchEvent(new MouseEvent('click', { bubbles: true }))
 
     await fastWaitFor(() => {

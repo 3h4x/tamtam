@@ -237,7 +237,7 @@ export function ReleaseTraceView({ projectName, releaseId }: Props) {
                 <span className="mr-1">triggered by</span>
                 <Link
                   href={`/project/${encodeURIComponent(projectName)}/terminal?job=${encodeURIComponent(trace.trigger.job_id)}`}
-                  className="text-accent hover:underline"
+                  className={buttonVariants({ variant: 'link', className: 'text-xs font-mono' })}
                 >
                   ← {trace.trigger.label}
                 </Link>
@@ -356,7 +356,7 @@ export function ReleaseTraceView({ projectName, releaseId }: Props) {
                       </span>
                       <Link
                         href={`/project/${encodeURIComponent(projectName)}/terminal?job=${encodeURIComponent(step.job_id)}`}
-                        className="text-[10px] text-accent hover:underline font-mono shrink-0 z-10"
+                        className={buttonVariants({ variant: 'link', className: 'text-[10px] font-mono shrink-0 z-10' })}
                         onClick={(e) => e.stopPropagation()}
                       >
                         full log →

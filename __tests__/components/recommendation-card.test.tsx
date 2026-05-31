@@ -5,6 +5,7 @@ import { afterEach, describe, expect, it, vi } from 'vitest'
 import { createRoot } from 'react-dom/client'
 import { flushSync } from 'react-dom'
 import type { Recommendation } from '@/lib/client-api'
+import { isAutoRecommendation } from '@/lib/client-api'
 import { RecommendationCard } from '@/components/recommendations/RecommendationCard'
 
 vi.mock('next/link', () => ({
@@ -41,6 +42,7 @@ function renderCard(overrides: Partial<React.ComponentProps<typeof Recommendatio
     errorMessage: null,
     onAccept: vi.fn(),
     onDismiss: vi.fn(),
+    onRunNow: vi.fn(),
     showProjectLink: false,
     ...overrides,
   }
@@ -64,18 +66,31 @@ describe('RecommendationCard', () => {
     document.body.innerHTML = ''
   })
 
-  it('renders accept controls, schedule details, and a project link for auto-applicable recommendations', () => {
+  it('classifies orchestrator informational recommendations as auto', () => {
+    expect(isAutoRecommendation('orchestrator_boost')).toBe(true)
+    expect(isAutoRecommendation('agent_unfruitful')).toBe(true)
+    expect(isAutoRecommendation('orchestrator_agent_health')).toBe(true)
+    expect(isAutoRecommendation('agent_schedule_backoff')).toBe(false)
+  })
+
+  it('renders a Fix menu with apply, schedule details, and a project link for auto-applicable recommendations', () => {
     const { container, unmount } = renderCard({ showProjectLink: true })
 
-    const link = container.querySelector('a')
-    if (!(link instanceof HTMLAnchorElement)) throw new Error('project link not found')
+    const projectLink = Array.from(container.querySelectorAll('a')).find((a) => a.textContent?.includes('alpha/core'))
+    if (!(projectLink instanceof HTMLAnchorElement)) throw new Error('project link not found')
 
-    expect(container.textContent).toContain('Accept')
+    expect(container.textContent).toContain('Fix')
+    expect(container.textContent).toContain('Apply suggested change')
+    expect(container.textContent).toContain('Run agent now')
+    expect(container.textContent).toContain('Edit agent')
     expect(container.textContent).toContain('dismiss')
     expect(container.textContent).toContain('current 4h / suggested 8h')
     expect(container.textContent).toContain('agent:tests')
-    expect(link.getAttribute('href')).toBe('/project/alpha%2Fcore')
-    expect(link.textContent).toBe('alpha/core →')
+    expect(projectLink.getAttribute('href')).toBe('/project/alpha%2Fcore')
+
+    // Edit agent link points at the agent editor for this agent
+    const editLink = Array.from(container.querySelectorAll('a')).find((a) => a.textContent?.includes('Edit agent'))
+    expect(editLink?.getAttribute('href')).toBe('/project/alpha%2Fcore/agents?agent=agent-1')
 
     unmount()
   })
@@ -122,33 +137,54 @@ describe('RecommendationCard', () => {
 
     expect(container.textContent).toContain('current 4h / suggested 8h')
     expect(container.textContent).not.toContain('Why')
-    expect(container.textContent).toContain('Accept')
+    expect(container.textContent).toContain('Apply suggested change')
     expect(container.textContent).toContain('dismiss')
 
     unmount()
   })
 
-  it('hides accept for non-auto-applicable recommendations and surfaces inline errors', () => {
+  it('omits "apply" but still offers Fix actions for non-auto-applicable manual recommendations', () => {
     const { container, unmount } = renderCard({
       item: makeRecommendation({ type: 'some_future_type', payload: null }),
       errorMessage: 'apply failed',
     })
 
-    expect(container.textContent).not.toContain('Accept')
+    // Not auto-applicable → no "Apply suggested change", but still a manual
+    // recommendation with an agent → Fix menu offers Run/Edit.
+    expect(container.textContent).not.toContain('Apply suggested change')
+    expect(container.textContent).toContain('Fix')
+    expect(container.textContent).toContain('Run agent now')
+    expect(container.textContent).toContain('Edit agent')
     expect(container.textContent).toContain('dismiss')
     expect(container.textContent).toContain('apply failed')
 
     unmount()
   })
 
-  it('shows AUTO pill for orchestrator-sourced recommendations', () => {
+  it('shows AUTO pill and no Fix menu for orchestrator boost recommendations', () => {
     const { container, unmount } = renderCard({
       item: makeRecommendation({ source_kind: 'orchestrator', type: 'orchestrator_boost', title: 'Boosted improve' }),
     })
 
     expect(container.textContent).toContain('AUTO')
     expect(container.textContent).toContain('boost')
-    expect(container.textContent).not.toContain('Accept')
+    // AUTO recommendations are informational — no Fix, no apply, dismiss only.
+    expect(container.textContent).not.toContain('Fix')
+    expect(container.textContent).not.toContain('Apply suggested change')
+    expect(container.textContent).toContain('dismiss')
+
+    unmount()
+  })
+
+  it('shows AUTO pill and no Fix menu for unfruitful recommendations', () => {
+    const { container, unmount } = renderCard({
+      item: makeRecommendation({ source_kind: 'agent:tests', type: 'agent_unfruitful', title: "tests isn't producing changes" }),
+    })
+
+    expect(container.textContent).toContain('AUTO')
+    expect(container.textContent).toContain('unfruitful')
+    expect(container.textContent).not.toContain('Fix')
+    expect(container.textContent).toContain('dismiss')
 
     unmount()
   })
@@ -181,8 +217,9 @@ describe('RecommendationCard', () => {
     expect(container.textContent).toContain('42/100')
     expect(container.textContent).toContain('avg score')
     expect(container.textContent).toContain('39/100')
-    // No Accept button — health recommendations are dismiss-only
+    // Health recommendations are informational: AUTO pill, no Fix or Accept actions.
     expect(container.textContent).not.toContain('Accept')
+    expect(container.textContent).not.toContain('Fix')
 
     unmount()
   })
@@ -195,12 +232,35 @@ describe('RecommendationCard', () => {
     unmount()
   })
 
-  it('disables actions and shows the busy label while an apply is in flight', () => {
+  it('disables actions and shows the busy label while a Fix action is in flight', () => {
     const { container, unmount } = renderCard({ busy: true })
 
     const buttons = Array.from(container.querySelectorAll('button'))
     expect(buttons.every((button) => button.disabled)).toBe(true)
-    expect(container.textContent).toContain('applying…')
+    expect(container.textContent).toContain('working…')
+
+    unmount()
+  })
+
+  it('fires onRunNow when the Run agent now Fix action is clicked', () => {
+    const onRunNow = vi.fn()
+    // default item is agent_schedule_backoff → a manual recommendation with a Fix menu
+    const { container, unmount } = renderCard({ onRunNow })
+
+    const runBtn = Array.from(container.querySelectorAll('button')).find((b) => b.textContent === 'Run agent now')
+    runBtn?.dispatchEvent(new MouseEvent('click', { bubbles: true }))
+    expect(onRunNow).toHaveBeenCalledOnce()
+
+    unmount()
+  })
+
+  it('fires onAccept when the Apply suggested change Fix action is clicked', () => {
+    const onAccept = vi.fn()
+    const { container, unmount } = renderCard({ onAccept })
+
+    const applyBtn = Array.from(container.querySelectorAll('button')).find((b) => b.textContent === 'Apply suggested change')
+    applyBtn?.dispatchEvent(new MouseEvent('click', { bubbles: true }))
+    expect(onAccept).toHaveBeenCalledOnce()
 
     unmount()
   })

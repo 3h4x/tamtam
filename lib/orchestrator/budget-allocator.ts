@@ -250,11 +250,16 @@ export function decideBoosts(input: BoostInput): BoostDecision[] {
     const picksThisTick = Math.min(desiredPicks, budgetLeft, ranked.length);
     for (let i = 0; i < picksThisTick; i++) {
       const pick = ranked[i];
+      const headroomPct = Math.round(effectiveMargin);
+      const pickNote = picksThisTick > 1 ? ` (extra run ${i + 1} of ${picksThisTick})` : '';
+      const modeNote = aggressiveCatchup
+        ? ' Running in smart mode to catch up on this week’s budget.'
+        : '';
       decisions.push({
         project: project.project,
         agentId: pick.id,
         agentName: pick.name,
-        reason: `pace headroom ${effectiveMargin}pp (short=${input.pace.marginPct}, weekly=${weeklyMargin}); ${project.status} project; pick ${i + 1}/${picksThisTick}${aggressiveCatchup ? '; model→smart' : ''}`,
+        reason: `Queued an extra run because ${project.project} is ${project.status} and about ${headroomPct}% budget headroom is free to spend.${pickNote}${modeNote}`,
         ...(aggressiveCatchup ? { modelOverride: 'smart' as const } : {}),
       });
     }

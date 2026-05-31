@@ -1,7 +1,7 @@
 'use client'
 
 import { useEffect, useState } from 'react'
-import { fetchAllOpenRecommendations, updateRecommendation, applyRecommendation } from '@/lib/client-api'
+import { fetchAllOpenRecommendations, updateRecommendation, applyRecommendation, runAgent } from '@/lib/client-api'
 import type { Recommendation } from '@/lib/client-api'
 import { ErrorState } from '@/components/ErrorState'
 import { EmptyState } from '@/components/ui/EmptyState'
@@ -21,6 +21,9 @@ export function GlobalRecommendationsPage() {
   const [updating, setUpdating] = useState<ReadonlySet<string>>(() => new Set())
   const [errors, setErrors] = useState<Record<string, string>>({})
   const [loadError, setLoadError] = useState<string | null>(null)
+  // Transient confirmation banner for Fix actions that don't remove the card
+  // (e.g. "Run agent now").
+  const [notice, setNotice] = useState<string | null>(null)
 
   const startUpdating = (id: string) =>
     setUpdating((prev) => {
@@ -98,6 +101,23 @@ export function GlobalRecommendationsPage() {
     }
   }
 
+  // "Run agent now" Fix action. Unlike accept/dismiss this does NOT resolve the
+  // recommendation — it kicks off a fresh run so the operator can see whether
+  // the agent behaves better. The card stays until the next analysis clears it.
+  const runNow = async (item: Recommendation) => {
+    if (!item.agent_id) return
+    startUpdating(item.id)
+    setErrors((prev) => { const { [item.id]: _, ...rest } = prev; void _; return rest })
+    try {
+      await runAgent(item.agent_id, '')
+      setNotice(`Triggered a run of ${item.agent_name ?? 'the agent'} in ${item.project}.`)
+    } catch (err) {
+      setErrors((prev) => ({ ...prev, [item.id]: err instanceof Error ? err.message : 'Failed to run agent' }))
+    } finally {
+      finishUpdating(item.id)
+    }
+  }
+
   if (loading) {
     return (
       <div className="px-4 py-6 max-w-5xl mx-auto">
@@ -116,6 +136,20 @@ export function GlobalRecommendationsPage() {
         </div>
         <div className="text-xs font-mono text-text-tertiary tabular-nums">{items.length} open</div>
       </div>
+
+      {notice && (
+        <div className="flex items-center justify-between gap-3 rounded border border-accent/30 bg-accent/10 px-3 py-2 text-xs text-text-secondary">
+          <span>{notice}</span>
+          <button
+            type="button"
+            className="font-mono text-text-tertiary hover:text-text-primary"
+            onClick={() => setNotice(null)}
+            aria-label="Dismiss notice"
+          >
+            ✕
+          </button>
+        </div>
+      )}
 
       {loadError && (
         <ErrorState
@@ -151,6 +185,7 @@ export function GlobalRecommendationsPage() {
               errorMessage={errors[item.id] ?? null}
               onAccept={() => accept(item)}
               onDismiss={() => dismiss(item)}
+              onRunNow={() => runNow(item)}
               showProjectLink
             />
           ))}

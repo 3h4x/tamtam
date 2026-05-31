@@ -228,7 +228,8 @@ describe('decideBoosts', () => {
       pace: { status: 'on_pace', marginPct: -2, weeklyMarginPct: 30 },
     }));
     expect(r).toHaveLength(1);
-    expect(r[0].reason).toContain('weekly=30');
+    // weekly margin 30 wins over the -2 short window → ~30% headroom in the reason
+    expect(r[0].reason).toContain('30% budget headroom');
   });
 
   it('uses the larger of short/weekly margin for multi-pick slack', () => {
@@ -252,7 +253,7 @@ describe('decideBoosts', () => {
     }));
     expect(r).toHaveLength(1);
     expect(r[0].modelOverride).toBe('smart');
-    expect(r[0].reason).toContain('model→smart');
+    expect(r[0].reason).toContain('smart mode');
   });
 
   it('does not promote when slack is below the aggressive-catchup threshold', () => {

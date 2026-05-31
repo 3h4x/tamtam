@@ -73,6 +73,8 @@ export {
   updateRecommendation,
   applyRecommendation,
   AUTO_APPLICABLE_RECOMMENDATION_TYPES,
+  AUTO_RECOMMENDATION_TYPES,
+  isAutoRecommendation,
 } from './client/projects'
 export type { RecommendationsSummary } from './client/projects'
 

@@ -553,6 +553,25 @@ export const AUTO_APPLICABLE_RECOMMENDATION_TYPES = new Set([
   'agent_schedule_backoff',
 ])
 
+// "AUTO" recommendations are ones the orchestrator already acted on or handles
+// automatically — they are informational, carry the AUTO pill, and offer no
+// Fix actions (only dismiss). Everything NOT in this set is "manual": it flags
+// something the orchestrator detected but cannot resolve on its own, so the
+// operator is offered Fix actions. This is the auto-vs-manual delimiter the
+// recommendations UI keys off.
+//   - orchestrator_boost   : the orchestrator already fired the extra run
+//   - agent_unfruitful     : the orchestrator already deprioritizes the agent
+//   - orchestrator_agent_health : the orchestrator already diagnosed the trend
+export const AUTO_RECOMMENDATION_TYPES = new Set([
+  'orchestrator_boost',
+  'agent_unfruitful',
+  'orchestrator_agent_health',
+])
+
+export function isAutoRecommendation(type: string): boolean {
+  return AUTO_RECOMMENDATION_TYPES.has(type)
+}
+
 /**
  * Apply a recommendation by performing the underlying mutation it suggests
  * on the server and only then marking the recommendation as `applied`.

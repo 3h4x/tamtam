@@ -4,7 +4,7 @@ import Link from 'next/link'
 import { Button } from '@/components/ui/Button'
 import { Pill } from '@/components/ui/Pill'
 import type { Recommendation } from '@/lib/client-api'
-import { AUTO_APPLICABLE_RECOMMENDATION_TYPES } from '@/lib/client-api'
+import { AUTO_APPLICABLE_RECOMMENDATION_TYPES, isAutoRecommendation } from '@/lib/client-api'
 import { formatAgo } from '@/lib/shared/format'
 
 function typeLabel(type: string): string {
@@ -77,6 +77,9 @@ interface RecommendationCardProps {
   errorMessage: string | null
   onAccept: () => void
   onDismiss: () => void
+  // Fires the agent immediately (manual "Run now" Fix action). Optional so the
+  // per-project recommendations tab can omit it.
+  onRunNow?: () => void
   // When set, renders a small "View in project →" link — used by the global
   // recommendations page so each card stays linked to its source project.
   showProjectLink?: boolean
@@ -88,17 +91,25 @@ export function RecommendationCard({
   errorMessage,
   onAccept,
   onDismiss,
+  onRunNow,
   showProjectLink,
 }: RecommendationCardProps) {
   const acceptable = AUTO_APPLICABLE_RECOMMENDATION_TYPES.has(item.type)
   const actionLabel = item.title.trim() || typeLabel(item.type)
   const reasoningRows = recommendationReasoning(item.payload)
+  // Manual recommendations (anything the orchestrator does NOT handle on its
+  // own) get Fix actions. They need a concrete agent to act on.
+  const manual = !isAutoRecommendation(item.type)
+  const showFixMenu = manual && Boolean(item.agent_id)
+  const editHref = item.agent_id
+    ? `/project/${encodeURIComponent(item.project)}/agents?agent=${encodeURIComponent(item.agent_id)}`
+    : null
   return (
     <div className="border-b border-border last:border-b-0 p-3">
       <div className="flex items-start justify-between gap-3">
         <div className="min-w-0">
           <div className="flex items-center gap-2 flex-wrap">
-            {item.source_kind === 'orchestrator' && (
+            {isAutoRecommendation(item.type) && (
               <Pill
                 tone="success"
                 size="xs"
@@ -150,19 +161,48 @@ export function RecommendationCard({
           )}
         </div>
         <div className="flex items-start gap-2 shrink-0">
-          {acceptable && (
-            <Button
-              type="button"
-              variant="solid"
-              size="sm"
-              className="rounded text-bg-primary hover:bg-accent/90"
-              disabled={busy}
-              onClick={onAccept}
-              aria-label={`Accept recommendation: ${actionLabel} (${item.project})`}
-              title="Apply the suggested change automatically"
-            >
-              {busy ? 'applying…' : 'Accept'}
-            </Button>
+          {showFixMenu && (
+            <details className="relative group">
+              <summary
+                className="list-none cursor-pointer select-none rounded bg-accent px-2.5 py-1 text-xs font-medium text-bg-primary hover:bg-accent/90 [&::-webkit-details-marker]:hidden"
+                aria-label={`Fix recommendation: ${actionLabel} (${item.project})`}
+              >
+                {busy ? 'working…' : 'Fix ▾'}
+              </summary>
+              <div className="absolute right-0 z-10 mt-1 w-48 overflow-hidden rounded border border-border bg-bg-secondary shadow-lg">
+                {acceptable && (
+                  <button
+                    type="button"
+                    className="block w-full px-3 py-2 text-left text-xs text-text-secondary hover:bg-bg-tertiary hover:text-text-primary disabled:opacity-50"
+                    disabled={busy}
+                    onClick={onAccept}
+                    title="Apply the suggested change automatically"
+                  >
+                    Apply suggested change
+                  </button>
+                )}
+                {onRunNow && (
+                  <button
+                    type="button"
+                    className="block w-full px-3 py-2 text-left text-xs text-text-secondary hover:bg-bg-tertiary hover:text-text-primary disabled:opacity-50"
+                    disabled={busy}
+                    onClick={onRunNow}
+                    title="Trigger an immediate run of this agent"
+                  >
+                    Run agent now
+                  </button>
+                )}
+                {editHref && (
+                  <Link
+                    href={editHref}
+                    className="block w-full px-3 py-2 text-left text-xs text-text-secondary hover:bg-bg-tertiary hover:text-text-primary"
+                    title="Open the agent editor to adjust its prompt, schedule, or model"
+                  >
+                    Edit agent…
+                  </Link>
+                )}
+              </div>
+            </details>
           )}
           <Button
             type="button"
