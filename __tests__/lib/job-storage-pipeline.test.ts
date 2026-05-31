@@ -2411,6 +2411,7 @@ describe('persistVerdict', () => {
   let createJobFn: typeof import('@/lib/jobs/job-storage').createJob;
   let getJobFn: typeof import('@/lib/jobs/job-storage').getJob;
   let persistVerdictFn: typeof import('@/lib/jobs/job-storage').persistVerdict;
+  let awaitInFlightSaveFn: typeof import('@/lib/jobs/storage').awaitInFlightSave;
   let storageCache: Map<string, JobData>;
 
   beforeAll(async () => {
@@ -2420,7 +2421,9 @@ describe('persistVerdict', () => {
     createJobFn = mod.createJob;
     getJobFn = mod.getJob;
     persistVerdictFn = mod.persistVerdict;
-    storageCache = (await import('@/lib/jobs/storage')).jobsCache;
+    const storage = await import('@/lib/jobs/storage');
+    awaitInFlightSaveFn = storage.awaitInFlightSave;
+    storageCache = storage.jobsCache;
   });
 
   beforeEach(async () => {
@@ -2437,6 +2440,7 @@ describe('persistVerdict', () => {
     const job = createJobFn('proj', 'review', 1, '/log');
     persistVerdictFn(job.id, 'LGTM');
 
+    await awaitInFlightSaveFn(job.id);
     await flushDbQueue();
 
     const rows = await testDb.db.select().from(schema.jobs);
@@ -2452,6 +2456,7 @@ describe('persistVerdict', () => {
     persistVerdictFn(job.id, 'NEEDS ATTENTION');
     persistVerdictFn(job.id, 'DO NOT SHIP');
 
+    await awaitInFlightSaveFn(job.id);
     await flushDbQueue();
 
     const rows = await testDb.db.select().from(schema.jobs);

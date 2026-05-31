@@ -22,6 +22,8 @@ describe('saveToDb per-job serialization', () => {
 
   it('serializes back-to-back saves for the same job (second snapshot wins)', async () => {
     const order: string[] = [];
+    const firstStarted = deferred<void>();
+    const firstCanFinish = deferred<void>();
 
     // Mock @/lib/db with an `insert(...)` that resolves after a controllable
     // delay. Both calls go through the same path; the first one is slow,
@@ -39,10 +41,10 @@ describe('saveToDb per-job serialization', () => {
           return chain;
         },
         execute: async () => {
-          // First call sleeps; second call resolves immediately.
           if (callTag === 'first') {
             firstCallStarted = true;
-            await new Promise((r) => setTimeout(r, 30));
+            firstStarted.resolve();
+            await firstCanFinish.promise;
           } else {
             await Promise.resolve();
           }
@@ -65,7 +67,7 @@ describe('saveToDb per-job serialization', () => {
       },
     }));
 
-    const { saveToDb } = await import('@/lib/jobs/storage');
+    const { awaitInFlightSave, saveToDb } = await import('@/lib/jobs/storage');
 
     const job1 = makeJob('job-A', null);
     const job2 = makeJob('job-A', '/tmp/test.log');
@@ -73,10 +75,12 @@ describe('saveToDb per-job serialization', () => {
     saveToDb(job1);
     saveToDb(job2);
 
-    // Wait for both queued ops to drain.
-    await new Promise((r) => setTimeout(r, 60));
-
+    await firstStarted.promise;
     expect(firstCallStarted).toBe(true);
+    await Promise.resolve();
+    expect(order).toEqual([]);
+    firstCanFinish.resolve();
+    await awaitInFlightSave('job-A');
     // The first save (with logPath=null) must complete BEFORE the second
     // (with logPath=/tmp/test.log) — no clobbering.
     expect(order).toEqual([
@@ -86,16 +90,23 @@ describe('saveToDb per-job serialization', () => {
   });
 
   it('does NOT serialize across distinct jobs', async () => {
-    const startTimes: Record<string, number> = {};
-    const t0 = Date.now();
+    const firstStarted = deferred<void>();
+    const secondStarted = deferred<void>();
+    const firstCanFinish = deferred<void>();
+    const started: string[] = [];
     let callCount = 0;
     const fakeChain = (jobId: string) => {
       const chain = {
         values: (v: unknown) => chain,
         onConflictDoUpdate: () => chain,
         execute: async () => {
-          startTimes[jobId] = Date.now() - t0;
-          await new Promise((r) => setTimeout(r, 50));
+          started.push(jobId);
+          if (jobId === 'job-0') {
+            firstStarted.resolve();
+            await firstCanFinish.promise;
+          } else {
+            secondStarted.resolve();
+          }
         },
       };
       return chain;
@@ -104,15 +115,26 @@ describe('saveToDb per-job serialization', () => {
       db: { insert: () => fakeChain(`job-${callCount++}`), select: () => ({ from: () => ({ all: () => [] }) }) },
       schema: { jobs: { id: 'id' } },
     }));
-    const { saveToDb } = await import('@/lib/jobs/storage');
+    const { awaitInFlightSave, saveToDb } = await import('@/lib/jobs/storage');
     saveToDb(makeJob('job-X', null));
     saveToDb(makeJob('job-Y', null));
-    await new Promise((r) => setTimeout(r, 80));
-    // Both writes started within ~10ms of each other (same tick), not
-    // serialized 50ms apart.
-    expect(Math.abs(startTimes['job-0'] - startTimes['job-1'])).toBeLessThan(20);
+    await firstStarted.promise;
+    await secondStarted.promise;
+    expect(started).toEqual(['job-0', 'job-1']);
+    firstCanFinish.resolve();
+    await Promise.all([awaitInFlightSave('job-X'), awaitInFlightSave('job-Y')]);
   });
 });
+
+function deferred<T>() {
+  let resolve!: (value: T | PromiseLike<T>) => void;
+  let reject!: (reason?: unknown) => void;
+  const promise = new Promise<T>((res, rej) => {
+    resolve = res;
+    reject = rej;
+  });
+  return { promise, resolve, reject };
+}
 
 function makeJob(id: string, logPath: string | null) {
   return {

@@ -90,15 +90,18 @@ export async function loadFromDb(): Promise<void> {
 // call site so existing helpers don't need to be made async.
 const inFlightSaves = new Map<string, Promise<void>>();
 
+function enqueueJobWrite(jobId: string, write: () => Promise<void>): Promise<void> {
+  const prev = inFlightSaves.get(jobId) ?? Promise.resolve();
+  const next = prev.catch(() => undefined).then(write);
+  inFlightSaves.set(jobId, next);
+  return next.finally(() => {
+    if (inFlightSaves.get(jobId) === next) inFlightSaves.delete(jobId);
+  });
+}
+
 export async function saveToDbAsync(job: JobData): Promise<void> {
-  const prev = inFlightSaves.get(job.id) ?? Promise.resolve();
-  const next = prev.then(() => doSaveToDb(job));
-  inFlightSaves.set(job.id, next);
-  try {
-    await next;
-  } finally {
-    if (inFlightSaves.get(job.id) === next) inFlightSaves.delete(job.id);
-  }
+  const snapshot = { ...job };
+  await enqueueJobWrite(snapshot.id, () => doSaveToDb(snapshot));
 }
 
 export function saveToDb(job: JobData): void {
@@ -297,11 +300,12 @@ export function getJob(jobId: string): JobData | null {
 export function persistVerdict(jobId: string, verdict: string): void {
   const job = jobsCache.get(jobId);
   if (job) job.verdict = verdict;
-  void db.update(schema.jobs)
-    .set({ verdict })
-    .where(eq(schema.jobs.id, jobId))
-    .execute()
-    .catch(e => console.error(`Failed to persist verdict for ${jobId}:`, e));
+  void enqueueJobWrite(jobId, async () => {
+    await db.update(schema.jobs)
+      .set({ verdict })
+      .where(eq(schema.jobs.id, jobId))
+      .execute();
+  }).catch(e => console.error(`Failed to persist verdict for ${jobId}:`, e));
 }
 
 export function listJobs(): JobData[] {

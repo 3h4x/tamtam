@@ -171,31 +171,39 @@ export function RecommendationCard({
               </summary>
               <div className="absolute right-0 z-10 mt-1 w-48 overflow-hidden rounded border border-border bg-bg-secondary shadow-lg">
                 {acceptable && (
-                  <button
+                  <Button
                     type="button"
-                    className="block w-full px-3 py-2 text-left text-xs text-text-secondary hover:bg-bg-tertiary hover:text-text-primary disabled:opacity-50"
+                    variant="ghost"
+                    size="sm"
+                    className="w-full justify-start rounded-none px-3 py-2 font-normal"
                     disabled={busy}
                     onClick={onAccept}
                     title="Apply the suggested change automatically"
                   >
                     Apply suggested change
-                  </button>
+                  </Button>
                 )}
                 {onRunNow && (
-                  <button
+                  <Button
                     type="button"
-                    className="block w-full px-3 py-2 text-left text-xs text-text-secondary hover:bg-bg-tertiary hover:text-text-primary disabled:opacity-50"
+                    variant="ghost"
+                    size="sm"
+                    className="w-full justify-start rounded-none px-3 py-2 font-normal"
                     disabled={busy}
                     onClick={onRunNow}
                     title="Trigger an immediate run of this agent"
                   >
                     Run agent now
-                  </button>
+                  </Button>
                 )}
                 {editHref && (
                   <Link
                     href={editHref}
-                    className="block w-full px-3 py-2 text-left text-xs text-text-secondary hover:bg-bg-tertiary hover:text-text-primary"
+                    className={buttonVariants({
+                      variant: 'ghost',
+                      size: 'sm',
+                      className: 'w-full justify-start rounded-none px-3 py-2 font-normal',
+                    })}
                     title="Open the agent editor to adjust its prompt, schedule, or model"
                   >
                     Edit agent…
