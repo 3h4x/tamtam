@@ -1,9 +1,9 @@
 'use client'
 
+import { StatusIcon } from '@/components/ui/StatusIcon'
+
 export function StatusDot({ ok }: { ok: boolean }) {
-  return (
-    <span className={`inline-block w-2 h-2 rounded-full shrink-0 ${ok ? 'bg-status-success' : 'bg-status-error'}`} />
-  )
+  return <StatusIcon ok={ok} size="sm" className="h-3.5 w-3.5" />
 }
 
 export function SectionHeader({ title, status }: { title: string; status: 'ok' | 'unavailable' | 'issue' }) {
