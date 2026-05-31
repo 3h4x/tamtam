@@ -1,7 +1,7 @@
 'use client'
 
 import Link from 'next/link'
-import { Button } from '@/components/ui/Button'
+import { Button, buttonVariants } from '@/components/ui/Button'
 import { Pill } from '@/components/ui/Pill'
 import type { Recommendation } from '@/lib/client-api'
 import { AUTO_APPLICABLE_RECOMMENDATION_TYPES, isAutoRecommendation } from '@/lib/client-api'
@@ -130,7 +130,7 @@ export function RecommendationCard({
             {showProjectLink && (
               <Link
                 href={`/project/${encodeURIComponent(item.project)}`}
-                className="font-mono text-xs text-accent hover:underline"
+                className={buttonVariants({ variant: 'link', size: 'sm', className: 'font-mono' })}
               >
                 {item.project} →
               </Link>
