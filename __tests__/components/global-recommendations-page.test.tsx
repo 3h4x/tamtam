@@ -76,6 +76,7 @@ describe('GlobalRecommendationsPage', () => {
     fetchAllOpenRecommendationsMock.mockReset()
     updateRecommendationMock.mockReset()
     applyRecommendationMock.mockReset()
+    runAgentMock.mockReset()
   })
 
   afterEach(() => {
@@ -223,6 +224,32 @@ describe('GlobalRecommendationsPage', () => {
 
     expect(container.textContent).not.toContain('Failed to dismiss')
     expect(container.textContent).not.toContain('Beta')
+
+    unmount()
+  })
+
+  it('runs the agent and shows a notice without removing the card on Run agent now', async () => {
+    const alpha = makeRecommendation({ id: 'alpha-1', project: 'alpha', title: 'Alpha', agent_id: 'agent-1', agent_name: 'improve' })
+
+    fetchAllOpenRecommendationsMock.mockResolvedValue({ recommendations: [alpha] })
+    runAgentMock.mockResolvedValue({ status: 'started', jobId: 'job-9' })
+
+    const { container, unmount } = renderPage()
+
+    await fastWaitFor(() => {
+      expect(container.textContent).toContain('Alpha')
+    })
+
+    const runButton = Array.from(container.querySelectorAll('button')).find((node) => node.textContent === 'Run agent now')
+    runButton?.dispatchEvent(new MouseEvent('click', { bubbles: true }))
+
+    await fastWaitFor(() => {
+      expect(runAgentMock).toHaveBeenCalledWith('agent-1', '')
+      expect(container.textContent).toContain('Triggered a run of improve in alpha.')
+    })
+
+    // The recommendation stays — Run now does not resolve it.
+    expect(container.textContent).toContain('Alpha')
 
     unmount()
   })

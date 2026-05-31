@@ -78,6 +78,82 @@ async function stubWorkflowRuns(page: Page, runs: () => WorkflowRunSummary[]): P
 }
 
 test.describe('Workflow runs list live polling', () => {
+  test('page already open picks up two newly-started runs, then isolates one failure while the other stays active', async ({
+    page,
+  }) => {
+    let phase: 'idle' | 'both-running' | 'one-failed' = 'idle';
+
+    await stubWorkflowRunsShell(page);
+    await stubWorkflowRuns(page, () => {
+      if (phase === 'idle') return [];
+      if (phase === 'both-running') {
+        return [
+          makeRun('running', {
+            id: 'workflow-run-start-failing',
+            input: ['workflow-start-failing', { triggeredBy: 'agent-failing' }],
+          }),
+          makeRun('running', {
+            id: 'workflow-run-start-steady',
+            input: ['workflow-start-steady', { triggeredBy: 'agent-steady' }],
+          }),
+        ];
+      }
+      return [
+        makeRun('failed', {
+          id: 'workflow-run-start-failing',
+          input: ['workflow-start-failing', { triggeredBy: 'agent-failing' }],
+          error: 'release orchestration failed after review',
+        }),
+        makeRun('running', {
+          id: 'workflow-run-start-steady',
+          input: ['workflow-start-steady', { triggeredBy: 'agent-steady' }],
+        }),
+      ];
+    });
+
+    await page.goto('/workflow-runs');
+
+    await expect(page.getByRole('heading', { name: 'Activity' })).toBeVisible({
+      timeout: 8_000,
+    });
+    await expect(page.getByLabel('Active workflow runs')).toHaveCount(0);
+    await expect(page.getByLabel('Workflow runs needing attention')).toHaveCount(0);
+
+    phase = 'both-running';
+
+    const activePanel = page.getByLabel('Active workflow runs');
+    await expect(activePanel).toBeVisible({ timeout: 12_000 });
+    await expect(activePanel.getByText('2 runs')).toBeVisible({ timeout: 12_000 });
+    await expect(
+      activePanel.getByRole('link', { name: /workflow-start-failing/i }),
+    ).toBeVisible({ timeout: 12_000 });
+    await expect(
+      activePanel.getByRole('link', { name: /workflow-start-steady/i }),
+    ).toBeVisible({ timeout: 12_000 });
+    await expect(page.getByText('2 running')).toBeVisible({ timeout: 12_000 });
+
+    phase = 'one-failed';
+
+    const attentionPanel = page.getByLabel('Workflow runs needing attention');
+    const failedRow = attentionPanel.getByRole('link', { name: /workflow-start-failing/i }).first();
+    await expect(activePanel.getByText('1 run')).toBeVisible({ timeout: 12_000 });
+    await expect(
+      activePanel.getByRole('link', { name: /workflow-start-failing/i }),
+    ).toHaveCount(0, {
+      timeout: 12_000,
+    });
+    await expect(
+      activePanel.getByRole('link', { name: /workflow-start-steady/i }),
+    ).toBeVisible({ timeout: 12_000 });
+    await expect(failedRow).toBeVisible({ timeout: 12_000 });
+    await expect(failedRow.getByLabel('status failed')).toBeVisible({ timeout: 12_000 });
+    await expect(attentionPanel.getByText('release orchestration failed after review')).toBeVisible({
+      timeout: 12_000,
+    });
+    await expect(page.getByRole('button', { name: /failed 1/i })).toBeVisible({ timeout: 12_000 });
+    await expect(page.getByText('1 running')).toBeVisible({ timeout: 12_000 });
+  });
+
   test('page already open picks up a newly-started run, then settles to completed without reload', async ({
     page,
   }) => {
