@@ -5,6 +5,7 @@ import Link from 'next/link'
 import { ErrorState } from './ErrorState'
 import { resolveGithubBoardUrl } from '@/lib/client/resolve-github-board-url'
 import { buttonVariants } from '@/components/ui/Button'
+import { EmptyState } from '@/components/ui/EmptyState'
 import { Pill, type PillTone } from '@/components/ui/Pill'
 import { Spinner } from '@/components/ui/Spinner'
 
@@ -297,9 +298,7 @@ export function ReleaseTraceView({ projectName, releaseId }: Props) {
 
       {/* Timeline */}
       {trace.steps.length === 0 ? (
-        <div className="text-text-tertiary text-sm font-mono px-2">
-          No pipeline steps recorded yet.
-        </div>
+        <EmptyState title="No pipeline steps recorded yet" paddingY="xs" align="start" className="px-2" />
       ) : (
         <div className="relative">
           {/* Vertical line */}
