@@ -281,6 +281,92 @@ test.describe('History tab non-release live polling', () => {
     })
   })
 
+  test('chat run flips from running to exit 1 without reload and clears the live badge', async ({
+    page,
+  }) => {
+    let serveRunning = true
+
+    await stubHistoryShell(page, () => [
+      makeJob({
+        id: 'chat-run-failure-live-1',
+        kind: 'run',
+        prompt: 'Trigger a failing chat run',
+        user_prompt: 'Trigger a failing chat run',
+        session_id: 'sess-chat-run-failure-live-1',
+        status: serveRunning ? 'running' : 'done',
+        exit_code: serveRunning ? null : 1,
+        started_at: now() - 15,
+        finished_at: serveRunning ? null : now() - 1,
+        work_summary: serveRunning
+          ? 'Streaming output before the provider aborts'
+          : 'Provider exited before completing the requested work',
+      }),
+    ])
+
+    await page.goto(`/project/${PROJECT}/history`)
+
+    const row = runRow(page, 'Trigger a failing chat run')
+    await expect(row).toBeVisible({ timeout: 8_000 })
+    await expect(row.getByLabel('running')).toBeVisible({ timeout: 8_000 })
+    await expect(row.getByText('Streaming output before the provider aborts')).toBeVisible({
+      timeout: 8_000,
+    })
+
+    serveRunning = false
+
+    await expect(row.getByText('exit 1', { exact: true })).toBeVisible({ timeout: 12_000 })
+    await expect(row.getByLabel('running')).toHaveCount(0, { timeout: 12_000 })
+    await expect(
+      row.getByText('Provider exited before completing the requested work'),
+    ).toBeVisible({ timeout: 12_000 })
+    await expect(page.getByText('1 running')).toHaveCount(0, { timeout: 12_000 })
+    await expect(filterChip(page, 'failed')).toHaveText(/failed 1/i, { timeout: 12_000 })
+  })
+
+  test('chat run flips from running to cancelled without reload and does not show a raw exit code', async ({
+    page,
+  }) => {
+    let serveRunning = true
+
+    await stubHistoryShell(page, () => [
+      makeJob({
+        id: 'chat-run-cancel-live-1',
+        kind: 'run',
+        prompt: 'Cancel a live chat run',
+        user_prompt: 'Cancel a live chat run',
+        session_id: 'sess-chat-run-cancel-live-1',
+        status: serveRunning ? 'running' : 'done',
+        exit_code: serveRunning ? null : -2,
+        started_at: now() - 15,
+        finished_at: serveRunning ? null : now() - 1,
+        work_summary: serveRunning
+          ? 'Waiting for the operator cancellation request'
+          : 'Cancelled before the provider finished streaming output',
+      }),
+    ])
+
+    await page.goto(`/project/${PROJECT}/history`)
+
+    const row = runRow(page, 'Cancel a live chat run')
+    await expect(row).toBeVisible({ timeout: 8_000 })
+    await expect(row.getByLabel('running')).toBeVisible({ timeout: 8_000 })
+    await expect(row.getByText('Waiting for the operator cancellation request')).toBeVisible({
+      timeout: 8_000,
+    })
+
+    serveRunning = false
+
+    await expect(row.getByText('cancelled', { exact: true })).toBeVisible({
+      timeout: 12_000,
+    })
+    await expect(row.getByLabel('running')).toHaveCount(0, { timeout: 12_000 })
+    await expect(
+      row.getByText('Cancelled before the provider finished streaming output'),
+    ).toBeVisible({ timeout: 12_000 })
+    await expect(row.getByText('-2')).toHaveCount(0)
+    await expect(page.getByText('1 running')).toHaveCount(0, { timeout: 12_000 })
+  })
+
   test('chat run and agent run keep independent live state as one finishes and the other keeps running', async ({
     page,
   }) => {
