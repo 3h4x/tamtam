@@ -10,6 +10,7 @@ import { isCancelledExitCode } from '@/lib/shared/job-exit-codes'
 import { ErrorState } from '@/components/ErrorState'
 import { Button } from '@/components/ui/Button'
 import { EmptyState } from '@/components/ui/EmptyState'
+import { Pill } from '@/components/ui/Pill'
 import { Table, type Column } from '@/components/ui/Table'
 
 type RunHistoryEntry = TaskDetail['run_history'][number]
@@ -135,9 +136,13 @@ export function TaskDetailPage({
         </h2>
         {task && (
           <div className="flex items-center gap-3">
-            <span className={`px-2 py-0.5 text-xs rounded-full font-medium ${task.paused ? 'bg-status-warning/15 text-status-warning' : 'bg-status-success/15 text-status-success'}`}>
+            <Pill
+              tone={task.paused ? 'warning' : 'success'}
+              size="xs"
+              className="rounded-full border-transparent"
+            >
               {task.paused ? 'paused' : 'active'}
-            </span>
+            </Pill>
             {task.fires_at && <span className="text-text-secondary text-sm">{task.fires_at}</span>}
             {task.priority && (
               <select
