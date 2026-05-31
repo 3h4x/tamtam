@@ -404,4 +404,98 @@ test.describe('Workflow runs list live polling', () => {
     await expect(completedRow.getByLabel('status completed')).toBeVisible({ timeout: 12_000 });
     await expect(completedRow.getByText('LGTM')).toBeVisible({ timeout: 12_000 });
   });
+
+  test('two active runs stay isolated when one is cancelled and the other keeps running', async ({
+    page,
+  }) => {
+    let phase: 'both-running' | 'one-cancelled' | 'done' = 'both-running';
+
+    await stubWorkflowRunsShell(page);
+    await stubWorkflowRuns(page, () => {
+      if (phase === 'both-running') {
+        return [
+          makeRun('running', {
+            id: 'workflow-run-cancelled',
+            input: ['workflow-cancelled', { triggeredBy: 'agent-cancelled' }],
+          }),
+          makeRun('running', {
+            id: 'workflow-run-steady-cancel-peer',
+            input: ['workflow-steady-cancel-peer', { triggeredBy: 'agent-steady' }],
+          }),
+        ];
+      }
+
+      if (phase === 'one-cancelled') {
+        return [
+          makeRun('cancelled', {
+            id: 'workflow-run-cancelled',
+            input: ['workflow-cancelled', { triggeredBy: 'agent-cancelled' }],
+            error: 'release was cancelled before completion',
+          }),
+          makeRun('running', {
+            id: 'workflow-run-steady-cancel-peer',
+            input: ['workflow-steady-cancel-peer', { triggeredBy: 'agent-steady' }],
+          }),
+        ];
+      }
+
+      return [
+        makeRun('cancelled', {
+          id: 'workflow-run-cancelled',
+          input: ['workflow-cancelled', { triggeredBy: 'agent-cancelled' }],
+          error: 'release was cancelled before completion',
+        }),
+        makeRun('completed', {
+          id: 'workflow-run-steady-cancel-peer',
+          input: ['workflow-steady-cancel-peer', { triggeredBy: 'agent-steady' }],
+          output: { verdict: 'LGTM' },
+        }),
+      ];
+    });
+
+    await page.goto('/workflow-runs');
+
+    const activePanel = page.getByLabel('Active workflow runs');
+    const attentionPanel = page.getByLabel('Workflow runs needing attention');
+    await expect(activePanel).toBeVisible({ timeout: 8_000 });
+    await expect(activePanel.getByText('2 runs')).toBeVisible();
+    await expect(activePanel.getByRole('link', { name: /workflow-cancelled/i })).toBeVisible();
+    await expect(
+      activePanel.getByRole('link', { name: /workflow-steady-cancel-peer/i }),
+    ).toBeVisible();
+    await expect(page.getByText('2 running')).toBeVisible();
+    await expect(attentionPanel).toHaveCount(0);
+
+    phase = 'one-cancelled';
+
+    const cancelledRow = attentionPanel.getByRole('link', { name: /workflow-cancelled/i }).first();
+    await expect(activePanel.getByText('1 run')).toBeVisible({ timeout: 12_000 });
+    await expect(activePanel.getByRole('link', { name: /workflow-cancelled/i })).toHaveCount(0, {
+      timeout: 12_000,
+    });
+    await expect(
+      activePanel.getByRole('link', { name: /workflow-steady-cancel-peer/i }),
+    ).toBeVisible();
+    await expect(cancelledRow).toBeVisible({ timeout: 12_000 });
+    await expect(cancelledRow.getByLabel('status cancelled')).toBeVisible({ timeout: 12_000 });
+    await expect(attentionPanel.getByTitle('release was cancelled before completion')).toBeVisible({
+      timeout: 12_000,
+    });
+    await expect(page.getByRole('button', { name: /cancelled 1/i })).toBeVisible({
+      timeout: 12_000,
+    });
+    await expect(page.getByText('1 running')).toBeVisible({ timeout: 12_000 });
+
+    phase = 'done';
+
+    await expect(activePanel).toHaveCount(0, { timeout: 12_000 });
+    await expect(page.getByText('1 running')).toHaveCount(0, { timeout: 12_000 });
+    await expect(cancelledRow).toBeVisible();
+
+    const completedRow = page.getByRole('row')
+      .filter({ hasText: 'workflow-steady-cancel-peer' })
+      .first();
+    await expect(completedRow.getByLabel('status completed')).toBeVisible({ timeout: 12_000 });
+    await expect(completedRow.getByText('LGTM')).toBeVisible({ timeout: 12_000 });
+  });
 });
