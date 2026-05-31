@@ -3,14 +3,21 @@
 import { useEffect, useState } from 'react'
 import Link from 'next/link'
 import type { BridgeResponse, BridgeProject, BridgeProjectStatus } from '@/app/api/stats/bridge/route'
+import type { SystemSample } from '@/lib/shared/system-metrics'
 import { buttonVariants } from '@/components/ui/Button'
 import { Pill } from '@/components/ui/Pill'
 import type { GlobalPace, WindowPace, PaceStatus } from '@/lib/usage/quota-pace'
 
 // "The Bridge" — a compact command-center strip at the top of /stats. One card,
-// three dense rows: pace headroom, per-provider pace chips, and a per-project
-// shipping status line. Generic: it renders whatever projects the API reports
-// as having enabled agents.
+// dense rows: fleet pace, host resources, per-provider pace, per-project
+// shipping status. Generic: it renders whatever projects the API reports as
+// having enabled agents, plus live host CPU/memory/disk from the in-process
+// system-metrics sampler.
+
+interface SystemMetricsResponse {
+  current: SystemSample | null
+  samples: SystemSample[]
+}
 
 function fmtAgo(epochSec: number | null): string {
   if (!epochSec) return '—'
@@ -26,6 +33,15 @@ function fmtMargin(n: number | null): string {
   if (n == null) return '—'
   const r = Math.round(n)
   return r >= 0 ? `+${r}` : `${r}`
+}
+
+// Three-band tone for a host metric: below `warn` is healthy, `warn`–`err` is
+// caution, at/above `err` is hot. Null (no sample yet) is muted.
+function metricTone(value: number | null, warn: number, err: number): string {
+  if (value == null) return 'text-text-tertiary'
+  if (value >= err) return 'text-status-error'
+  if (value >= warn) return 'text-status-warning'
+  return 'text-status-success'
 }
 
 const STATUS_META: Record<BridgeProjectStatus, { dot: string; tone: string; label: string }> = {
@@ -66,6 +82,59 @@ function tightestWindow(p: { fiveHour: WindowPace | null; sevenDay: WindowPace |
   const both = [p.fiveHour, p.sevenDay].filter(Boolean) as WindowPace[]
   if (both.length === 0) return null
   return both.reduce((a, b) => (a.paceMarginPct <= b.paceMarginPct ? a : b))
+}
+
+// One labelled host metric: dim label + colour-coded value. Renders nothing
+// when the value is unavailable (e.g. disk/io on a host without df/iostat).
+function HostMetric({ label, value, tone, title }: { label: string; value: string | null; tone: string; title: string }) {
+  if (value == null) return null
+  return (
+    <span className="inline-flex items-baseline gap-1 whitespace-nowrap" title={title}>
+      <span className="text-text-tertiary">{label}</span>
+      <span className={`tabular-nums font-medium ${tone}`}>{value}</span>
+    </span>
+  )
+}
+
+// Compact host-resource strip: CPU · load-per-core · memory · disk · disk IO.
+// Driven by the in-process system-metrics sampler (one sample/min). Mirrors
+// the goro Grafana signals but for whatever host TamTam itself runs on.
+function HostMetrics({ s }: { s: SystemSample }) {
+  return (
+    <div className="flex items-center gap-x-3 gap-y-1 flex-wrap text-[11px] border-t border-border/60 pt-2">
+      <span className="text-[10px] uppercase tracking-wider font-mono text-text-tertiary">host</span>
+      <HostMetric
+        label="cpu"
+        value={s.cpuPct == null ? null : `${Math.round(s.cpuPct)}%`}
+        tone={metricTone(s.cpuPct, 70, 90)}
+        title={`Whole-host CPU utilization across ${s.cpuCount} cores`}
+      />
+      <HostMetric
+        label="load"
+        value={`${s.loadPerCore.toFixed(2)}×`}
+        tone={metricTone(s.loadPerCore, 1, 1.5)}
+        title={`1-min load ${s.load1.toFixed(2)} / ${s.cpuCount} cores (5m ${s.load5.toFixed(2)}, 15m ${s.load15.toFixed(2)}). Above 1× = more runnable work than cores.`}
+      />
+      <HostMetric
+        label="mem"
+        value={`${Math.round(s.memPct)}%`}
+        tone={metricTone(s.memPct, 80, 92)}
+        title={`${Math.round(s.memUsedMb)} / ${Math.round(s.memTotalMb)} MB used`}
+      />
+      <HostMetric
+        label="disk"
+        value={s.diskUsedPct == null ? null : `${Math.round(s.diskUsedPct)}%`}
+        tone={metricTone(s.diskUsedPct, 80, 90)}
+        title="Root filesystem usage"
+      />
+      <HostMetric
+        label="io"
+        value={s.diskIoMbS == null ? null : `${s.diskIoMbS.toFixed(1)}MB/s`}
+        tone="text-text-secondary"
+        title="Combined disk throughput"
+      />
+    </div>
+  )
 }
 
 function ProviderChip({ provider, fiveHour, sevenDay }: GlobalPace['providers'][number]) {
@@ -117,17 +186,26 @@ function ProjectChip({ p }: { p: BridgeProject }) {
 
 export function BridgeOverview() {
   const [data, setData] = useState<BridgeResponse | null>(null)
+  const [system, setSystem] = useState<SystemSample | null>(null)
   const [failed, setFailed] = useState(false)
 
   useEffect(() => {
     let cancelled = false
-    const load = () =>
-      fetch('/api/stats/bridge')
+    const load = () => {
+      // Two independent endpoints. Bridge drives the card; system metrics are
+      // supplementary, so a system fetch failure must not blank the card.
+      const bridge = fetch('/api/stats/bridge')
         .then((r) => (r.ok ? (r.json() as Promise<BridgeResponse>) : Promise.reject()))
         .then((d) => { if (!cancelled) { setData(d); setFailed(false) } })
         .catch(() => { if (!cancelled) setFailed(true) })
-    load()
-    const id = setInterval(load, 30_000)
+      fetch('/api/stats/system')
+        .then((r) => (r.ok ? (r.json() as Promise<SystemMetricsResponse>) : Promise.reject()))
+        .then((d) => { if (!cancelled) setSystem(d.current) })
+        .catch(() => { /* host metrics are optional */ })
+      return bridge
+    }
+    void load()
+    const id = setInterval(() => void load(), 30_000)
     return () => { cancelled = true; clearInterval(id) }
   }, [])
 
@@ -142,7 +220,7 @@ export function BridgeOverview() {
       {/* Row 1 — title + global pace + throttle */}
       <div className="flex items-center gap-2 flex-wrap">
         <span className="text-xs font-semibold text-text-primary uppercase tracking-wide">Bridge</span>
-        <span className="text-[10px] text-text-tertiary">fleet pace · shipping status</span>
+        <span className="text-[10px] text-text-tertiary">fleet pace · shipping status · host</span>
         <span className={`ml-auto text-xs font-medium tabular-nums ${pace.tone}`}>{pace.text}</span>
         {data.throttle && (
           <Pill size="xs" tone="error" className="border-transparent text-[10px] font-semibold whitespace-nowrap">
@@ -151,7 +229,10 @@ export function BridgeOverview() {
         )}
       </div>
 
-      {/* Row 2 — per-provider pace chips */}
+      {/* Row 2 — live host resources (CPU / load / mem / disk / IO) */}
+      {system && <HostMetrics s={system} />}
+
+      {/* Row 3 — per-provider pace chips */}
       {data.globalPace.providers.length > 0 && (
         <div className="flex items-center gap-1.5 flex-wrap">
           {data.globalPace.providers.map((p) => (
@@ -160,7 +241,7 @@ export function BridgeOverview() {
         </div>
       )}
 
-      {/* Row 3a — "needs attention" projects, surfaced prominently so the
+      {/* Row 4a — "needs attention" projects, surfaced prominently so the
           eye lands on them first. Only renders when at least one project is
           stuck / errored / flagged for attention; the "all projects" strip
           below still includes them for completeness. */}
@@ -181,7 +262,7 @@ export function BridgeOverview() {
         )
       })()}
 
-      {/* Row 3b — all project shipping chips */}
+      {/* Row 4b — all project shipping chips */}
       {data.projects.length > 0 ? (
         <div className="flex items-center gap-1.5 flex-wrap">
           {data.projects.map((p) => (
@@ -192,7 +273,7 @@ export function BridgeOverview() {
         <div className="text-[11px] text-text-tertiary">No projects with enabled agents.</div>
       )}
 
-      {/* Row 4 — one-line summary */}
+      {/* Row 5 — one-line summary */}
       <div className="text-[10px] text-text-tertiary tabular-nums">
         {s.projects} project{s.projects === 1 ? '' : 's'} · {s.agentsEnabled} agent{s.agentsEnabled === 1 ? '' : 's'}
         {s.shipping > 0 && <> · <span className="text-status-success">{s.shipping} shipping</span></>}

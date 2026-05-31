@@ -4,6 +4,7 @@ import { useEffect, useState } from 'react'
 import { fetchAllOpenRecommendations, updateRecommendation, applyRecommendation, runAgent } from '@/lib/client-api'
 import type { Recommendation } from '@/lib/client-api'
 import { ErrorState } from '@/components/ErrorState'
+import { Button } from '@/components/ui/Button'
 import { EmptyState } from '@/components/ui/EmptyState'
 import { RecommendationCard } from '@/components/recommendations/RecommendationCard'
 
@@ -140,14 +141,16 @@ export function GlobalRecommendationsPage() {
       {notice && (
         <div className="flex items-center justify-between gap-3 rounded border border-accent/30 bg-accent/10 px-3 py-2 text-xs text-text-secondary">
           <span>{notice}</span>
-          <button
+          <Button
             type="button"
-            className="font-mono text-text-tertiary hover:text-text-primary"
+            variant="ghost"
+            size="icon-sm"
+            className="h-auto w-auto rounded-none border-none bg-transparent p-0 font-mono text-text-tertiary hover:bg-transparent hover:text-text-primary"
             onClick={() => setNotice(null)}
             aria-label="Dismiss notice"
           >
             ✕
-          </button>
+          </Button>
         </div>
       )}
 
