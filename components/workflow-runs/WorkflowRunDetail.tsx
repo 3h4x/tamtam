@@ -14,6 +14,7 @@ import { summarizeInput, summarizeTrigger } from '@/components/workflow-runs/sum
 import { ErrorState } from '@/components/ErrorState';
 import { buttonVariants } from '@/components/ui/Button';
 import { Pill } from '@/components/ui/Pill';
+import { Spinner } from '@/components/ui/Spinner';
 import { Table, type Column } from '@/components/ui/Table';
 
 interface Step {
@@ -135,9 +136,13 @@ function WorkflowStepTrace({ steps, now }: { steps: Step[]; now: number }) {
                   aria-label={`step ${index + 1} status ${step.status}`}
                   title={`status: ${step.status}`}
                 >
-                  <span className={`leading-none ${presentation.spin ? 'animate-spin' : ''}`} aria-hidden="true">
-                    {presentation.glyph}
-                  </span>
+                  {presentation.spin ? (
+                    <Spinner size="sm" shrink aria-hidden="true" />
+                  ) : (
+                    <span className="leading-none" aria-hidden="true">
+                      {presentation.glyph}
+                    </span>
+                  )}
                 </span>
                 <div className="min-w-0">
                   <div className="truncate text-xs font-medium text-text-primary" title={step.rawName}>
