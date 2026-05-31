@@ -539,13 +539,16 @@ export function TerminalMessages({
                     {isIdle ? 'waiting for output' : 'receiving output'}
                   </span>
                 </div>
-                <button
-                  className="shrink-0 rounded bg-status-error/20 px-1.5 py-0.5 text-[10px] text-status-error hover:bg-status-error/40 cursor-pointer border-none font-mono leading-none"
+                <Button
+                  type="button"
+                  variant="danger"
+                  size="sm"
+                  className="shrink-0 rounded border-none bg-status-error/20 px-1.5 py-0.5 text-[10px] hover:bg-status-error/40 font-mono leading-none"
                   onClick={onCancel}
                   title="Cancel execution"
                 >
                   cancel
-                </button>
+                </Button>
               </div>
               <div className="flex items-center gap-2">
                 <span className="relative inline-flex h-5 w-5 shrink-0 items-center justify-center">
