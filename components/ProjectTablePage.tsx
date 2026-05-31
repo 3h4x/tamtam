@@ -2,8 +2,7 @@
 
 import { useState, useEffect } from 'react'
 import { useRouter } from 'next/navigation'
-import { reviewProject, fetchAgents } from '@/lib/client-api'
-import type { Agent } from '@/lib/client-api'
+import { reviewProject } from '@/lib/client-api'
 
 interface ProjectRuntimeEntry {
   hasRunningReview: boolean
@@ -121,73 +120,6 @@ function SortIcon({ active, dir }: { active: boolean; dir: SortDir }) {
   )
 }
 
-function AgentPills({
-  agents,
-  runningNames,
-  schedulerEntries,
-}: {
-  agents: Agent[]
-  runningNames: Set<string>
-  schedulerEntries: SchedulerEntry[]
-}) {
-  if (agents.length === 0) return <span className="text-text-tertiary">—</span>
-
-  const MAX_VISIBLE = 4
-  const visible = agents.slice(0, MAX_VISIBLE)
-  const overflow = agents.length - MAX_VISIBLE
-
-  return (
-    <div className="flex flex-wrap gap-1">
-      {visible.map((agent) => {
-        const isRunning = runningNames.has(agent.name)
-        const sched = schedulerEntries.find(e => e.name === agent.name)
-        let tooltipParts: string[] = []
-        if (agent.schedule) tooltipParts.push(`schedule: ${agent.schedule}`)
-        if (sched) {
-          const now = Date.now()
-          const delta = sched.nextFireMs - now
-          if (delta > 0) {
-            const min = Math.round(delta / 60000)
-            tooltipParts.push(min < 60 ? `next in ${min}m` : `next in ${Math.round(min / 60)}h`)
-          } else if (delta > -30000) {
-            tooltipParts.push('next: now')
-          }
-          if (sched.lastFireMs) {
-            const agoMin = Math.round((now - sched.lastFireMs) / 60000)
-            tooltipParts.push(agoMin < 60 ? `last ${agoMin}m ago` : `last ${Math.round(agoMin / 60)}h ago`)
-          } else {
-            tooltipParts.push('never fired')
-          }
-        } else if (!agent.schedule) {
-          tooltipParts.push('on-demand')
-        }
-        return (
-          <Pill
-            key={agent.id}
-            title={tooltipParts.join(' · ')}
-            tone={isRunning ? 'accent' : 'neutral'}
-            size="xs"
-            active={isRunning}
-            className={`px-1.5 ${
-              isRunning
-                ? 'border-accent/30 bg-accent/15'
-                : 'border-transparent bg-bg-tertiary text-text-secondary'
-            }`}
-          >
-            {isRunning && <span className="w-1.5 h-1.5 rounded-full bg-accent animate-pulse shrink-0" />}
-            {agent.name}
-          </Pill>
-        )
-      })}
-      {overflow > 0 && (
-        <Pill size="xs" className="border-transparent bg-bg-tertiary px-1.5 font-normal text-text-tertiary">
-          +{overflow}
-        </Pill>
-      )}
-    </div>
-  )
-}
-
 const healthOrder: Record<string, number> = { error: 0, warning: 1, unknown: 2, healthy: 3 }
 const ciOrder: Record<string, number> = { failure: 0, in_progress: 1, success: 2 }
 
@@ -195,7 +127,6 @@ export function ProjectTablePage({ fleet, issueCounts = {}, loading = false }: P
   const router = useRouter()
   const { toast } = useToast()
   const [runtime, setRuntime] = useState<Record<string, ProjectRuntimeEntry>>({})
-  const [agentsByProject, setAgentsByProject] = useState<Record<string, Agent[]>>({})
   const [schedulerByProject, setSchedulerByProject] = useState<Record<string, SchedulerEntry[]>>({})
   const [schedulerPaused, setSchedulerPaused] = useState(false)
   const [budgetGateEnabled, setBudgetGateEnabled] = useState(false)
@@ -330,34 +261,9 @@ export function ProjectTablePage({ fleet, issueCounts = {}, loading = false }: P
     return () => { active = false; clearInterval(interval) }
   }, [])
 
-  useEffect(() => {
-    let active = true
-    const load = async () => {
-      try {
-        const data = await fetchAgents(undefined, { fields: 'summary' })
-        if (!active) return
-        const grouped: Record<string, Agent[]> = {}
-        for (const agent of data.agents) {
-          if (!grouped[agent.project]) grouped[agent.project] = []
-          grouped[agent.project].push(agent)
-        }
-        setAgentsByProject(grouped)
-      } catch { /* ignore */ }
-    }
-    load()
-    // Poll agents every 30s (was 10s). Reduced frequency to cut server load; agent
-    // list changes (enable/disable, new agents) may be stale for up to 30s, but
-    // this is acceptable since agent configuration changes infrequently.
-    const interval = setInterval(load, 30000)
-    return () => { active = false; clearInterval(interval) }
-  }, [])
-
 const isReviewRunning = (projectName: string) => !!runtime[projectName]?.hasRunningReview
 
   const getLatestVerdict = (projectName: string) => runtime[projectName]?.latestVerdict ?? undefined
-
-  const getRunningAgentNames = (projectName: string): Set<string> =>
-    new Set(runtime[projectName]?.runningAgentNames ?? [])
 
   const getRecentTs = (name: string) => runtime[name]?.lastActivityAt ?? 0
 
@@ -467,7 +373,6 @@ const isReviewRunning = (projectName: string) => !!runtime[projectName]?.hasRunn
             <th className={thClass('project')} onClick={() => handleSort('project')}>
               <span className="flex items-center gap-1">Project <SortIcon active={sortKey === 'project'} dir={sortDir} /></span>
             </th>
-            <th className="px-4 py-2.5 font-medium">Agents</th>
             <th className={thClass('status')} onClick={() => handleSort('status')}>
               <span className="flex items-center gap-1">Status <SortIcon active={sortKey === 'status'} dir={sortDir} /></span>
             </th>
@@ -497,9 +402,6 @@ const isReviewRunning = (projectName: string) => !!runtime[projectName]?.hasRunn
             const runningCount = projectRuntime?.runningCount ?? 0
             const runningKinds = projectRuntime?.runningKinds ?? []
             const lastJob = projectRuntime?.lastJob ?? null
-
-            const agents = agentsByProject[project.project] || []
-            const runningAgentNames = getRunningAgentNames(project.project)
 
             // show warning in STATUS only for non-unreviewed reasons (paused, out-of-sync, stale)
             const showWarning = project.status === 'warning' && !hasUnreviewed
@@ -549,11 +451,6 @@ const isReviewRunning = (projectName: string) => !!runtime[projectName]?.hasRunn
                       </Pill>
                     )}
                   </span>
-                </td>
-
-                {/* Agents */}
-                <td className="px-4 py-2 max-w-[280px]" onClick={e => e.stopPropagation()}>
-                  <AgentPills agents={agents} runningNames={runningAgentNames} schedulerEntries={schedulerByProject[project.project] ?? []} />
                 </td>
 
                 {/* Status */}
