@@ -1,6 +1,7 @@
 'use client'
 
 import { Spinner } from '@/components/ui/Spinner'
+import { Pill, PillButton } from '@/components/ui/Pill'
 import type { GhLabel } from '@/lib/client-api'
 
 export function Labels({ labels, limit }: { labels: GhLabel[]; limit?: number }) {
@@ -79,7 +80,7 @@ export function GateBadge({
   const cls = `inline-flex items-center gap-1 rounded-full border px-1.5 py-0.5 text-[9px] font-medium ${GATE_CLASS[state]} ${onClick && !disabled ? 'cursor-pointer hover:opacity-80 transition-opacity' : ''} ${disabled ? 'cursor-not-allowed opacity-60' : ''}`
   if (onClick) {
     return (
-      <button
+      <PillButton
         type="button"
         className={cls}
         title={title}
@@ -88,13 +89,13 @@ export function GateBadge({
       >
         <span>{busy ? '⟳' : GATE_SYMBOL[state]}</span>
         <span>{label}</span>
-      </button>
+      </PillButton>
     )
   }
   return (
-    <span className={cls} title={title}>
+    <Pill className={cls} title={title}>
       <span>{GATE_SYMBOL[state]}</span>
       <span>{label}</span>
-    </span>
+    </Pill>
   )
 }
