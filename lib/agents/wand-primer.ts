@@ -4,7 +4,7 @@
 // and update it only when agent semantics actually change.
 export const WAND_PRIMER = `# How TamTam agents work
 
-TamTam runs each agent as a single Claude CLI invocation per scheduled fire or
+TamTam runs each agent as a single selected-provider CLI invocation per scheduled fire or
 manual trigger. The agent receives:
 
 - A composed system prompt built from selected skills (DB-backed and
