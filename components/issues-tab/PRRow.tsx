@@ -195,13 +195,15 @@ export function PRRow({
         </span>
         <div className="min-w-0 space-y-1.5">
           <div className="flex min-w-0 items-start gap-2">
-            <button
-              className="min-w-0 flex-1 text-sm text-text-primary font-medium hover:text-accent text-left cursor-pointer leading-5"
+            <Button
+              type="button"
+              variant="link"
+              className="min-w-0 flex-1 text-sm text-text-primary font-medium hover:text-accent hover:no-underline text-left leading-5"
               onClick={() => setExpanded((v) => !v)}
               title={pr.title}
             >
               <span className="line-clamp-2">{pr.title}</span>
-            </button>
+            </Button>
             <Pill tone="neutral" size="xs" className="shrink-0 rounded-full bg-bg-tertiary px-1.5 py-0.5 text-[10px] font-mono tabular-nums">
               #{pr.number}
             </Pill>
