@@ -153,6 +153,40 @@ describe('RecommendationCard', () => {
     unmount()
   })
 
+  it('renders health metrics for orchestrator_agent_health recommendations', () => {
+    const { container, unmount } = renderCard({
+      item: makeRecommendation({
+        source_kind: 'orchestrator',
+        type: 'orchestrator_agent_health',
+        title: 'improve — loop detected',
+        detail: 'Agent keeps touching the same file. Review the prompt scope.',
+        payload: {
+          concern: true,
+          concernType: 'loop',
+          severity: 'high',
+          runsAnalyzed: 3,
+          lastRunScore: 42,
+          avgRunScore: 38.7,
+        },
+      }),
+    })
+
+    expect(container.textContent).toContain('AUTO')
+    expect(container.textContent).toContain('health')
+    expect(container.textContent).toContain('concern')
+    expect(container.textContent).toContain('loop')
+    expect(container.textContent).toContain('severity')
+    expect(container.textContent).toContain('high')
+    expect(container.textContent).toContain('last score')
+    expect(container.textContent).toContain('42/100')
+    expect(container.textContent).toContain('avg score')
+    expect(container.textContent).toContain('39/100')
+    // No Accept button — health recommendations are dismiss-only
+    expect(container.textContent).not.toContain('Accept')
+
+    unmount()
+  })
+
   it('does not show AUTO pill for agent-sourced recommendations', () => {
     const { container, unmount } = renderCard()
 

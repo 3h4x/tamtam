@@ -17,7 +17,7 @@ import { dispatchSettingsChanged } from '@/lib/shared/settings-events'
 import { parseEnabledProviders } from '@/lib/usage/cli-providers'
 import { StandardTabs } from '@/components/ui/StandardTabs'
 import { Spinner } from '@/components/ui/Spinner'
-import { Button } from '@/components/ui/Button'
+import { Button, buttonVariants } from '@/components/ui/Button'
 import { Pill } from '@/components/ui/Pill'
 import { ErrorBanner } from '@/components/ErrorBanner'
 
@@ -656,7 +656,11 @@ export function SettingsPage({ initialTab }: { initialTab?: TabId } = {}) {
                     href={settings.github_board_view_url || settings.github_board_project_url}
                     target="_blank"
                     rel="noopener noreferrer"
-                    className="inline-flex items-center gap-1 text-xs text-accent hover:underline"
+                    className={buttonVariants({
+                      variant: 'link',
+                      size: 'sm',
+                      className: 'inline-flex items-center gap-1',
+                    })}
                   >
                     Open board on GitHub ↗
                   </a>

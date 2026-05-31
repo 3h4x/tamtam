@@ -16,6 +16,7 @@ import {
   type BoostHistoryInput,
   type BoostAgentInput,
 } from '@/lib/orchestrator/budget-allocator';
+import type { HealthAnalysisOutcome } from '@/lib/orchestrator/agent-health-analysis';
 
 export const ORCHESTRATOR_TICK_INTERVAL_MS = 60 * 1000;
 export const ORCHESTRATOR_TICK_JOB_KEY = 'orchestrator-tick';
@@ -70,6 +71,29 @@ export interface OrchestratorTickDeps {
    *  what the orchestrator did automatically. Fire-and-forget; errors are
    *  swallowed so a recommendation write failure never blocks the tick. */
   recordBoostRecommendations?: (decisions: BoostDecision[]) => Promise<void>;
+  /** Optional — when present, runs an LLM-based health analysis on a small
+   *  set of eligible agents per tick (those with new runs since their last
+   *  completed analysis). Gated on safe pace and tracked on globalThis.
+   *  Fire-and-forget; errors are swallowed. */
+  analyzeAgentHealth?: (candidates: AnalysisCandidate[]) => Promise<HealthAnalysisOutcome[]>;
+  /** Optional — returns the newest finished scheduled run for an agent. Used
+   *  to avoid re-analyzing old finished samples while a newer dispatch is
+   *  still queued or running. */
+  loadLatestFinishedRunStartedAt?: (candidate: AnalysisCandidate) => Promise<number | null>;
+}
+
+/** Minimal agent identity passed to the health analysis phase. The analysis
+ *  function loads the agent's own recent runs from the DB; the tick only needs
+ *  to tell it *which* agents to look at. */
+export interface AnalysisCandidate {
+  id: string;
+  name: string;
+  project: string;
+}
+
+interface HealthAnalysisMarker {
+  analyzedAtMs: number;
+  latestRunStartedAt: number;
 }
 
 export interface OrchestratorTickResult {
@@ -79,12 +103,128 @@ export interface OrchestratorTickResult {
   nextFireAt: Date;
 }
 
+// Pace statuses where it's safe to spend tokens on health analysis. Anything
+// else (will_exceed, exceeded, unknown, paused) skips the LLM phase so the
+// orchestrator never burns budget diagnosing agents while over plan.
+const HEALTH_ANALYSIS_SAFE_PACE = new Set(['under_pace', 'on_pace']);
+// Cap LLM calls per tick so a large fleet can't fan out dozens of Haiku
+// requests in a single 60s tick.
+const HEALTH_ANALYSIS_MAX_PER_TICK = 3;
+
 // History lives on globalThis so the rolling rate-limit window survives the
 // per-tick function call without persisting to DB. Lost on restart (intentional —
 // fresh boot starts with a clean budget; better than over-charging from stale
 // in-memory state).
 declare global {
   var __tamtamOrchestratorHistory: BoostHistoryInput | undefined;
+  // agentId -> latest scheduled run covered by a completed health analysis.
+  // In-memory only (lost on restart, which just gives every agent a fresh
+  // analysis pass — safe).
+  var __tamtamAgentHealthAnalyzed: Map<string, HealthAnalysisMarker | number> | undefined;
+  // agentIds currently being analyzed. Suppresses duplicate LLM calls when a
+  // tick fires again before the previous fire-and-forget analysis settles.
+  var __tamtamAgentHealthInFlight: Set<string> | undefined;
+}
+
+function getHealthAnalyzedMap(): Map<string, HealthAnalysisMarker | number> {
+  if (!globalThis.__tamtamAgentHealthAnalyzed) {
+    globalThis.__tamtamAgentHealthAnalyzed = new Map();
+  }
+  return globalThis.__tamtamAgentHealthAnalyzed;
+}
+
+function healthMarker(value: HealthAnalysisMarker | number | undefined): HealthAnalysisMarker | null {
+  if (value == null) return null;
+  if (typeof value === 'number') {
+    return { analyzedAtMs: value, latestRunStartedAt: value };
+  }
+  return value;
+}
+
+function getHealthInFlightSet(): Set<string> {
+  if (!globalThis.__tamtamAgentHealthInFlight) {
+    globalThis.__tamtamAgentHealthInFlight = new Set();
+  }
+  return globalThis.__tamtamAgentHealthInFlight;
+}
+
+/** Pick up to N agents to analyze this tick: enabled, user-kind, scheduled,
+ *  and either never analyzed or has a newer finished scheduled run than the
+ *  latest run covered by a completed analysis. Dispatch time is used as a
+ *  cheap prefilter before the DB freshness lookup so a large fleet does not
+ *  perform one query per already-covered agent every tick. Oldest-analyzed
+ *  first so every agent eventually gets a turn instead of the same few being
+ *  re-picked. */
+async function selectHealthCandidates(
+  agents: BoostAgentInput[],
+  loadLatestFinishedRunStartedAt?: (candidate: AnalysisCandidate) => Promise<number | null>,
+): Promise<AnalysisCandidate[]> {
+  const analyzed = getHealthAnalyzedMap();
+  const inFlight = getHealthInFlightSet();
+  const possible: Array<{
+    candidate: AnalysisCandidate;
+    analyzedAtMs: number;
+    marker?: HealthAnalysisMarker;
+  }> = [];
+
+  for (const agent of agents) {
+    if (agent.kind !== 'user' || !agent.enabled || !agent.schedule) continue;
+    if (inFlight.has(agent.id)) continue;
+
+    const candidate = { id: agent.id, name: agent.name, project: agent.project };
+    const marker = healthMarker(analyzed.get(agent.id));
+    if (marker) {
+      if (agent.lastDispatchMs == null || agent.lastDispatchMs <= marker.latestRunStartedAt) continue;
+      possible.push({ candidate, analyzedAtMs: marker.analyzedAtMs, marker });
+      continue;
+    }
+
+    possible.push({ candidate, analyzedAtMs: 0 });
+  }
+
+  const selected = possible
+    .sort((a, b) => {
+      return a.analyzedAtMs - b.analyzedAtMs;
+    })
+    .slice(0, HEALTH_ANALYSIS_MAX_PER_TICK);
+
+  const candidates: AnalysisCandidate[] = [];
+  for (const item of selected) {
+    if (!item.marker) {
+      candidates.push(item.candidate);
+      continue;
+    }
+    if (!loadLatestFinishedRunStartedAt) continue;
+    const latestFinished = await loadLatestFinishedRunStartedAt(item.candidate);
+    if (latestFinished == null || latestFinished <= item.marker.latestRunStartedAt) continue;
+    candidates.push(item.candidate);
+  }
+  return candidates;
+}
+
+function recordHealthAnalysisOutcomes(outcomes: HealthAnalysisOutcome[], analyzedAtMs: number): void {
+  const analyzed = getHealthAnalyzedMap();
+  for (const outcome of outcomes) {
+    if (!outcome.analyzed || outcome.latestRunStartedAt == null) continue;
+    analyzed.set(outcome.agentId, {
+      analyzedAtMs,
+      latestRunStartedAt: outcome.latestRunStartedAt,
+    });
+  }
+}
+
+function markHealthAnalysisInFlight(candidates: AnalysisCandidate[]): void {
+  const inFlight = getHealthInFlightSet();
+  for (const candidate of candidates) {
+    inFlight.add(candidate.id);
+  }
+}
+
+function clearHealthAnalysisInFlight(candidates: AnalysisCandidate[]): void {
+  const inFlight = getHealthInFlightSet();
+  for (const candidate of candidates) {
+    inFlight.delete(candidate.id);
+  }
 }
 
 function getHistory(): BoostHistoryInput {
@@ -149,6 +289,20 @@ export async function handleOrchestratorTick(
         setHistory(recordBoosts(pruned, decisions, nowMs));
         if (deps.recordBoostRecommendations) {
           deps.recordBoostRecommendations(decisions).catch(() => {});
+        }
+      }
+
+      // Health analysis phase — gated on safe pace so we never spend tokens
+      // diagnosing agents while over budget. Fire-and-forget so a slow Haiku
+      // call can't delay the next tick.
+      if (deps.analyzeAgentHealth && HEALTH_ANALYSIS_SAFE_PACE.has(bridge.globalPace.status as string)) {
+        const candidates = await selectHealthCandidates(agents, deps.loadLatestFinishedRunStartedAt);
+        if (candidates.length > 0) {
+          markHealthAnalysisInFlight(candidates);
+          deps.analyzeAgentHealth(candidates)
+            .then((outcomes) => recordHealthAnalysisOutcomes(outcomes, nowMs))
+            .catch(() => {})
+            .finally(() => clearHealthAnalysisInFlight(candidates));
         }
       }
     }

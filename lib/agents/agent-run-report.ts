@@ -358,6 +358,8 @@ export async function finalizeAgentRunReport(job: JobData, rawLog: string): Prom
   job.modifiedFiles = JSON.stringify(files);
   job.linesAdded = lines.added;
   job.linesRemoved = lines.removed;
+  // run_score is computed centrally in lib/jobs/lifecycle.ts after this
+  // returns, so every finalized job (agent + step) is scored from one place.
   if (job.kind === 'agent:issue-cruncher' && job.ghIssueNumber == null) {
     const parsed = parseIssueNumberFromSummary(summary);
     if (parsed != null) job.ghIssueNumber = parsed;

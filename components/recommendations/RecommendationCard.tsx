@@ -10,6 +10,8 @@ import { formatAgo } from '@/lib/shared/format'
 function typeLabel(type: string): string {
   if (type === 'agent_schedule_backoff') return 'schedule'
   if (type === 'orchestrator_boost') return 'boost'
+  if (type === 'orchestrator_agent_health') return 'health'
+  if (type === 'agent_unfruitful') return 'unfruitful'
   return type.replace(/_/g, ' ')
 }
 
@@ -27,9 +29,29 @@ function booleanLabel(value: unknown): string | null {
   return null
 }
 
+// Health recommendations (orchestrator_agent_health) carry their metrics at
+// the top level of the payload rather than under a nested `reasoning` object.
+function healthReasoning(payload: Recommendation['payload']): Array<{ label: string; value: string }> {
+  if (!payload || typeof payload !== 'object') return []
+  const p = payload as Record<string, unknown>
+  const rows: Array<{ label: string; value: string }> = []
+  const severity = stringValue(p.severity)
+  const concernType = stringValue(p.concernType)
+  const runsAnalyzed = numberValue(p.runsAnalyzed)
+  const lastRunScore = numberValue(p.lastRunScore)
+  const avgRunScore = numberValue(p.avgRunScore)
+
+  if (concernType) rows.push({ label: 'concern', value: concernType })
+  if (severity) rows.push({ label: 'severity', value: severity })
+  if (runsAnalyzed != null) rows.push({ label: 'runs analyzed', value: String(runsAnalyzed) })
+  if (lastRunScore != null) rows.push({ label: 'last score', value: `${lastRunScore}/100` })
+  if (avgRunScore != null) rows.push({ label: 'avg score', value: `${Math.round(avgRunScore)}/100` })
+  return rows
+}
+
 function recommendationReasoning(payload: Recommendation['payload']): Array<{ label: string; value: string }> {
   const raw = payload?.reasoning
-  if (!raw || typeof raw !== 'object' || Array.isArray(raw)) return []
+  if (!raw || typeof raw !== 'object' || Array.isArray(raw)) return healthReasoning(payload)
   const reasoning = raw as Record<string, unknown>
   const rows: Array<{ label: string; value: string }> = []
   const summary = stringValue(reasoning.summary)

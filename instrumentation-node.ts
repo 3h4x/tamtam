@@ -986,6 +986,14 @@ export async function registerNode(): Promise<void> {
                 ),
               );
             },
+            analyzeAgentHealth: async (candidates) => {
+              const { analyzeAgentHealth } = await import('@/lib/orchestrator/agent-health-analysis');
+              return analyzeAgentHealth(candidates);
+            },
+            loadLatestFinishedRunStartedAt: async (candidate) => {
+              const { loadLatestFinishedScheduledRunStartedAt } = await import('@/lib/orchestrator/agent-health-analysis');
+              return loadLatestFinishedScheduledRunStartedAt(candidate);
+            },
           },
           usageSnapshotDeps: {
             loadBridge: async () => {
