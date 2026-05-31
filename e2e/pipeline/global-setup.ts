@@ -48,6 +48,8 @@ const PROJECTS = [
   'commit-failure-runs-expand',
   'push-failure-runs-expand',
   'review-failure-runs-expand',
+  'workflow-run-detail-failure',
+  'workflow-run-detail-abort',
   'agent-prereq-terminal',
   'issue-cruncher-prereq',
   'pr-workflow-auto-merge',
