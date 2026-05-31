@@ -5,7 +5,7 @@ import { useRouter } from 'next/navigation'
 import type { GhIssue, ProjectConfig } from '@/lib/client-api'
 import { formatAgo } from '@/lib/shared/format'
 import { Labels } from '@/components/issues-tab/shared'
-import { Button } from '@/components/ui/Button'
+import { Button, buttonVariants } from '@/components/ui/Button'
 import { Pill } from '@/components/ui/Pill'
 import { Spinner } from '@/components/ui/Spinner'
 
@@ -180,8 +180,13 @@ export function IssueRow({ issue, projectName, projectCfg }: { issue: GhIssue; p
             href={issue.url}
             target="_blank"
             rel="noopener noreferrer"
-            className="flex items-center justify-center rounded-md border border-border bg-bg-secondary p-1.5 text-text-tertiary hover:bg-bg-tertiary hover:text-text-primary"
+            className={buttonVariants({
+              variant: 'secondary',
+              size: 'icon-sm',
+              className: 'text-text-tertiary hover:text-text-primary',
+            })}
             title="Open issue on GitHub"
+            aria-label="Open issue on GitHub"
           >
             <svg width="12" height="12" viewBox="0 0 16 16" fill="currentColor">
               <path d="M10.604 1h4.146a.25.25 0 01.25.25v4.146a.25.25 0 01-.427.177L13.03 4.03 9.28 7.78a.75.75 0 01-1.06-1.06l3.75-3.75-1.543-1.543A.25.25 0 0110.604 1zM3.75 2A1.75 1.75 0 002 3.75v8.5c0 .966.784 1.75 1.75 1.75h8.5A1.75 1.75 0 0014 12.25v-3.5a.75.75 0 00-1.5 0v3.5a.25.25 0 01-.25.25h-8.5a.25.25 0 01-.25-.25v-8.5a.25.25 0 01.25-.25h3.5a.75.75 0 000-1.5h-3.5z"/>
