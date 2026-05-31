@@ -7,6 +7,7 @@ import {
   type BudgetSubscriptionProvider,
 } from '@/lib/usage/subscription-providers'
 import { loadQuotaSnapshot } from '@/lib/client/quota'
+import { Pill } from '@/components/ui/Pill'
 
 interface QuotaWindow {
   utilization: number
@@ -103,31 +104,37 @@ function PaceBadge({ pace }: { pace: Pace | null }) {
     const isUnder = pace.ratio < 0.85
     const projected = pace.projectedEndPct.toFixed(0)
     return (
-      <span
-        className="text-[10px] px-1.5 py-0.5 rounded bg-status-success/15 text-status-success font-medium"
+      <Pill
+        tone="success"
+        size="xs"
+        className="rounded px-1.5 text-[10px]"
         title={`${fmtPaceRatio(pace.ratio)} · projects ${projected}% by reset`}
       >
         {isUnder ? 'under pace' : 'on pace'} · projects {projected}%
-      </span>
+      </Pill>
     )
   }
   if (pace.status === 'over') {
     return (
-      <span
-        className="text-[10px] px-1.5 py-0.5 rounded bg-status-warning/15 text-status-warning font-medium"
+      <Pill
+        tone="warning"
+        size="xs"
+        className="rounded px-1.5 text-[10px]"
         title={`${fmtPaceRatio(pace.ratio)} · projects ${pace.projectedEndPct.toFixed(0)}% by reset`}
       >
         over pace · projects {pace.projectedEndPct.toFixed(0)}%
-      </span>
+      </Pill>
     )
   }
   return (
-    <span
-      className="text-[10px] px-1.5 py-0.5 rounded bg-status-error/15 text-status-error font-semibold"
+    <Pill
+      tone="error"
+      size="xs"
+      className="rounded px-1.5 text-[10px] font-semibold"
       title={`${fmtPaceRatio(pace.ratio)} · projects ${pace.projectedEndPct.toFixed(0)}% by reset`}
     >
       will exceed quota · projects {pace.projectedEndPct.toFixed(0)}%
-    </span>
+    </Pill>
   )
 }
 
