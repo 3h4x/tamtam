@@ -165,8 +165,10 @@ export function LogsPage() {
           ) : (
             filteredLogs.map((log) => (
               <div key={log.filename} className="mb-2 border border-border rounded-lg overflow-hidden">
-                <button
-                  className="w-full flex items-center justify-between px-4 py-2.5 bg-bg-secondary text-text-primary text-sm font-medium cursor-pointer hover:bg-bg-tertiary transition-colors text-left"
+                <Button
+                  type="button"
+                  variant="ghost"
+                  className="w-full justify-between gap-3 rounded-none border-0 bg-bg-secondary px-4 py-2.5 text-left text-sm font-medium text-text-primary hover:bg-bg-tertiary"
                   onClick={() => toggleLog(log.filename)}
                 >
                   <span className="font-mono truncate">{log.filename}</span>
@@ -176,7 +178,7 @@ export function LogsPage() {
                   >
                     <path strokeLinecap="round" strokeLinejoin="round" d="M19 9l-7 7-7-7" />
                   </svg>
-                </button>
+                </Button>
                 {expandedLogs.has(log.filename) && (
                   <pre className="font-mono text-sm text-text-primary whitespace-pre-wrap bg-bg-tertiary p-4 overflow-x-auto max-h-[500px] overflow-y-auto border-t border-border">{log.content}</pre>
                 )}
