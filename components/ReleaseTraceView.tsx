@@ -276,7 +276,11 @@ export function ReleaseTraceView({ projectName, releaseId }: Props) {
                 href={`${boardUrl}?filterQuery=${encodeURIComponent(releaseId)}`}
                 target="_blank"
                 rel="noopener noreferrer"
-                className="text-xs px-2.5 py-1 rounded-full bg-bg-primary text-text-secondary font-mono border border-border hover:text-accent hover:border-accent/40 transition-colors"
+                className={buttonVariants({
+                  variant: 'secondary',
+                  size: 'sm',
+                  className: 'rounded-full bg-bg-primary px-2.5 font-mono font-normal text-text-secondary hover:border-accent/40 hover:bg-bg-primary hover:text-accent',
+                })}
                 title="View this run on the GitHub project board"
               >
                 Board ↗
