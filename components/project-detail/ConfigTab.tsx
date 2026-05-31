@@ -4,6 +4,7 @@ import type { ProjectConfig, CustomAction } from '@/lib/client-api'
 import { getPipelineSteps, type StepToggleContext } from '@/lib/pipeline/pipeline-steps'
 import { Button } from '@/components/ui/Button'
 import { EmptyState } from '@/components/ui/EmptyState'
+import { Pill, PillButton } from '@/components/ui/Pill'
 import { Spinner } from '@/components/ui/Spinner'
 
 const DEFAULT_ACTION_COLOR = '#2563eb'
@@ -370,7 +371,6 @@ export function ConfigTab({
                     const active = step.isActive(stepCtx)
                     const toggleable = !!step.onToggle && !step.mandatory
                     const title = step.description(stepCtx)
-                    const baseChip = 'px-2 py-1 text-xs rounded font-mono border transition-colors'
                     const chipClass = active
                       ? 'bg-accent/15 text-accent border-accent/30 hover:bg-accent/25'
                       : 'bg-bg-tertiary text-text-tertiary border-border hover:bg-bg-primary hover:text-text-secondary'
@@ -378,25 +378,29 @@ export function ConfigTab({
                     return (
                       <span key={step.id} className="flex items-center gap-1.5">
                         {toggleable ? (
-                          <button
+                          <PillButton
                             type="button"
                             title={title}
                             onClick={() => step.onToggle!(stepCtx)}
-                            className={`${baseChip} ${chipClass} ${cursorClass}`}
+                            active={active}
+                            inactiveStyle="subtle"
+                            className={`py-1 font-mono ${chipClass} ${cursorClass}`}
                           >
                             {step.label}
-                          </button>
+                          </PillButton>
                         ) : (
-                          <span
+                          <Pill
                             title={title}
                             aria-disabled
-                            className={`${baseChip} ${chipClass} ${cursorClass} opacity-90`}
+                            active={active}
+                            inactiveStyle="subtle"
+                            className={`py-1 font-mono ${chipClass} ${cursorClass} opacity-90`}
                           >
                             {step.mandatory
                               ? null
                               : <span className="mr-1 text-[10px] opacity-60">↻</span>}
                             {step.label}
-                          </span>
+                          </Pill>
                         )}
                         {i < steps.length - 1 && <span className="text-text-tertiary text-xs">→</span>}
                       </span>
