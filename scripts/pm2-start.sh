@@ -40,6 +40,18 @@ if [ ! -x "$NEXT_BIN" ] && [ ! -f "$NEXT_BIN" ]; then
   exit 1
 fi
 
+# Ensure the Postgres container from docker-compose.yml is up before PM2
+# starts the Next.js server. Without this, the server boots, hits
+# ECONNREFUSED on every query, and floods logs until someone notices.
+if [ -f "docker-compose.yml" ]; then
+  if ! docker info >/dev/null 2>&1; then
+    echo "[pm2-start] Docker daemon is not running — start Docker Desktop and retry" >&2
+    exit 1
+  fi
+  echo "[pm2-start] ensuring docker compose services are up"
+  docker compose up -d --wait
+fi
+
 start_fresh() {
   # Wipe any stale `tamtam` entries (legacy bash-wrapped, errored, etc.).
   pm2 delete "$NAME" >/dev/null 2>&1 || true
