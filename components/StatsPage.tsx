@@ -9,6 +9,7 @@ import { OllamaUsageCard } from './OllamaUsageCard'
 import { QuotaWidget } from './QuotaWidget'
 import { BridgeOverview } from './BridgeOverview'
 import { UsageHistoryChart } from './UsageHistoryChart'
+import { EmptyState } from '@/components/ui/EmptyState'
 import { SegmentedControl } from '@/components/ui/SegmentedControl'
 import {
   normalizeBudgetSubscriptionProviders,
@@ -299,8 +300,15 @@ export function StatsPage() {
             <tbody>
               {sorted.length === 0 && (
                 <tr>
-                  <td colSpan={8} className="px-3 py-12 text-center text-text-tertiary text-sm">
-                    No usage data in the last {WINDOW_LABELS[window_].toLowerCase()}.
+                  <td colSpan={8}>
+                    <EmptyState
+                      paddingY="md"
+                      title={(
+                        <span className="font-normal text-text-tertiary">
+                          No usage data in the last {WINDOW_LABELS[window_].toLowerCase()}.
+                        </span>
+                      )}
+                    />
                   </td>
                 </tr>
               )}
