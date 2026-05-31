@@ -395,6 +395,83 @@ test.describe('Workflow runs list live polling', () => {
     await expect(completedBetaRow.getByText('LGTM')).toBeVisible({ timeout: 12_000 });
   });
 
+  test('idle page picks up two newly-started runs, then isolates one completion while the other stays active', async ({
+    page,
+  }) => {
+    let phase: 'idle' | 'both-running' | 'one-completed' = 'idle';
+
+    await stubWorkflowRunsShell(page);
+    await stubWorkflowRuns(page, () => {
+      if (phase === 'idle') return [];
+
+      if (phase === 'both-running') {
+        return [
+          makeRun('running', {
+            id: 'workflow-run-idle-alpha',
+            input: ['workflow-idle-alpha', { triggeredBy: 'agent-alpha' }],
+          }),
+          makeRun('running', {
+            id: 'workflow-run-idle-beta',
+            input: ['workflow-idle-beta', { triggeredBy: 'agent-beta' }],
+          }),
+        ];
+      }
+
+      return [
+        makeRun('completed', {
+          id: 'workflow-run-idle-alpha',
+          input: ['workflow-idle-alpha', { triggeredBy: 'agent-alpha' }],
+          output: { verdict: 'LGTM' },
+        }),
+        makeRun('running', {
+          id: 'workflow-run-idle-beta',
+          input: ['workflow-idle-beta', { triggeredBy: 'agent-beta' }],
+        }),
+      ];
+    });
+
+    await page.goto('/workflow-runs');
+
+    await expect(page.getByRole('heading', { name: 'Activity' })).toBeVisible({
+      timeout: 8_000,
+    });
+    await expect(page.getByLabel('Active workflow runs')).toHaveCount(0);
+
+    phase = 'both-running';
+
+    const activePanel = page.getByLabel('Active workflow runs');
+    await expect(activePanel).toBeVisible({ timeout: 12_000 });
+    await expect(activePanel.getByText('2 runs')).toBeVisible({ timeout: 12_000 });
+    await expect(
+      activePanel.getByRole('link', { name: /workflow-idle-alpha/i }),
+    ).toBeVisible({ timeout: 12_000 });
+    await expect(
+      activePanel.getByRole('link', { name: /workflow-idle-beta/i }),
+    ).toBeVisible({ timeout: 12_000 });
+    await expect(page.getByRole('button', { name: /running 2/i })).toBeVisible({
+      timeout: 12_000,
+    });
+
+    phase = 'one-completed';
+
+    await expect(activePanel.getByText('1 run')).toBeVisible({ timeout: 12_000 });
+    await expect(
+      activePanel.getByRole('link', { name: /workflow-idle-alpha/i }),
+    ).toHaveCount(0, {
+      timeout: 12_000,
+    });
+    await expect(
+      activePanel.getByRole('link', { name: /workflow-idle-beta/i }),
+    ).toBeVisible({ timeout: 12_000 });
+    await expect(page.getByRole('button', { name: /running 1/i })).toBeVisible({
+      timeout: 12_000,
+    });
+
+    const completedRow = page.getByRole('row').filter({ hasText: 'workflow-idle-alpha' }).first();
+    await expect(completedRow.getByLabel('status completed')).toBeVisible({ timeout: 12_000 });
+    await expect(completedRow.getByText('LGTM')).toBeVisible({ timeout: 12_000 });
+  });
+
   test('two active runs stay isolated when one fails into attention and the other keeps running', async ({
     page,
   }) => {

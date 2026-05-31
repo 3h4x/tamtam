@@ -968,6 +968,123 @@ test.describe('PipelineStrip visibility', () => {
     await expect(page.getByRole('button', { name: 'abort' })).toHaveCount(0, { timeout: 12_000 })
   })
 
+  test('idle terminal page picks up a newly-started pipeline strip and clears it after completion', async ({ page }) => {
+    let phase: 'idle' | 'test' | 'review' | 'done' = 'idle'
+    const releaseId = 'strip-idle-start-release'
+
+    await mockProjectShell(page, () => {
+      if (phase === 'idle' || phase === 'done') return []
+
+      const jobs: MockJob[] = [
+        {
+          id: releaseId,
+          project: PROJECT,
+          kind: 'release',
+          status: 'running',
+          exit_code: null,
+          started_at: now() - 30,
+          finished_at: null,
+          pid: 0,
+          log_path: '',
+          seen: true,
+          session_id: null,
+          context_meta: null,
+          provider: 'claude',
+          work_summary: `${phase} is running.`,
+        },
+      ]
+
+      if (phase === 'test') {
+        jobs.push({
+          id: 'strip-idle-start-test',
+          project: PROJECT,
+          kind: 'test',
+          status: 'running',
+          exit_code: null,
+          started_at: now() - 5,
+          finished_at: null,
+          pid: 0,
+          log_path: '',
+          seen: true,
+          session_id: 'strip-idle-start-test-session',
+          parent_job_id: releaseId,
+          release_id: null,
+          context_meta: null,
+          provider: 'claude',
+          work_summary: 'Tests are running.',
+        })
+        return jobs
+      }
+
+      jobs.push({
+        id: 'strip-idle-start-test',
+        project: PROJECT,
+        kind: 'test',
+        status: 'done',
+        exit_code: 0,
+        started_at: now() - 20,
+        finished_at: now() - 15,
+        pid: 0,
+        log_path: '',
+        seen: true,
+        session_id: 'strip-idle-start-test-session',
+        parent_job_id: releaseId,
+        release_id: null,
+        context_meta: null,
+        provider: 'claude',
+        work_summary: 'Tests passed.',
+      })
+      jobs.push({
+        id: 'strip-idle-start-review',
+        project: PROJECT,
+        kind: 'review',
+        status: 'running',
+        exit_code: null,
+        started_at: now() - 5,
+        finished_at: null,
+        pid: 0,
+        log_path: '',
+        seen: true,
+        session_id: 'strip-idle-start-review-session',
+        parent_job_id: 'strip-idle-start-test',
+        release_id: null,
+        context_meta: null,
+        provider: 'claude',
+        work_summary: 'Review is running.',
+      })
+      return jobs
+    })
+
+    await page.goto(`/project/${PROJECT}/terminal`)
+
+    await expect(page.getByLabel(/pipeline summary:/i)).toHaveCount(0)
+    await expect(page.getByTitle('View unified release trace')).toHaveCount(0)
+
+    phase = 'test'
+
+    await expect(page.getByLabel(/pipeline summary: test running/i)).toBeVisible({ timeout: 12_000 })
+    await expect(page.getByTitle('tests running — click to open terminal')).toBeVisible({
+      timeout: 12_000,
+    })
+    await expect(page.getByRole('button', { name: 'abort' })).toBeVisible({ timeout: 12_000 })
+
+    phase = 'review'
+
+    await expect(page.getByLabel(/pipeline summary: review running/i)).toBeVisible({ timeout: 12_000 })
+    await expect(page.getByTitle('test completed — click to view log')).toBeVisible({
+      timeout: 12_000,
+    })
+    await expect(page.getByTitle('review in progress — click to open terminal')).toBeVisible({
+      timeout: 12_000,
+    })
+
+    phase = 'done'
+
+    await expect(page.getByLabel(/pipeline summary:/i)).toHaveCount(0, { timeout: 12_000 })
+    await expect(page.getByTitle('View unified release trace')).toHaveCount(0, { timeout: 12_000 })
+    await expect(page.getByRole('button', { name: 'abort' })).toHaveCount(0, { timeout: 12_000 })
+  })
+
   test('terminal tab shows active pipeline status and release abort controls', async ({ page }) => {
     await mockProjectShell(page)
     await page.goto(`/project/${PROJECT}/terminal`)
