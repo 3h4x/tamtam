@@ -189,13 +189,15 @@ export function AgentEditor({
       {/* Header strip */}
       <div className="flex items-center justify-between">
         <div className="flex items-center gap-3 min-w-0">
-          <button
+          <Button
             type="button"
             onClick={onBack}
-            className="text-sm text-text-secondary hover:text-text-primary transition-colors cursor-pointer"
+            variant="ghost"
+            size="sm"
+            className="!px-0 !py-0 rounded-none border-none bg-transparent text-sm font-normal text-text-secondary hover:bg-transparent hover:text-text-primary"
           >
             ← Back to agents
-          </button>
+          </Button>
           <span className="text-text-tertiary">/</span>
           <h2 className="text-base font-semibold text-text-primary truncate">
             {isNew ? 'New agent' : `Edit — ${agent.name}`}

@@ -1,0 +1,69 @@
+import { test, expect } from '@playwright/test';
+import type { Locator } from '@playwright/test';
+import { readFileSync } from 'fs';
+import { join } from 'path';
+import {
+  writeScenario,
+  resetShimState,
+  enableProject,
+  waitForJobRunning,
+  waitForPipelineCompletion,
+} from './helpers';
+
+const BASE_SCENARIO = JSON.parse(
+  readFileSync(join(__dirname, 'scenarios', 'ui-live-transition.json'), 'utf-8'),
+);
+
+const PROJECT = 'workflow-runs-live-start-real';
+const SUCCESS_STEPS = BASE_SCENARIO.steps.map(
+  (step: { label?: string; sleep_ms?: number; text: string }) =>
+    step.label === 'review' ? { ...step, sleep_ms: 10_000 } : step,
+);
+
+function workflowRunLink(scope: Locator, project: string): Locator {
+  return scope.getByRole('link').filter({ hasText: project }).first();
+}
+
+test.describe('Real workflow-runs live start transitions', () => {
+  test('workflow-runs page picks up a newly-started release and settles it to completed without reload', async ({
+    page,
+    request,
+  }) => {
+    resetShimState(PROJECT);
+    writeScenario(PROJECT, SUCCESS_STEPS);
+    await enableProject(request, PROJECT, { testsDisabled: true });
+
+    await page.goto('/workflow-runs');
+
+    await expect(page.getByRole('heading', { name: 'Activity' })).toBeVisible({
+      timeout: 8_000,
+    });
+    await expect(page.getByRole('link', { name: new RegExp(PROJECT, 'i') })).toHaveCount(0);
+
+    const releaseResp = await request.post(`/api/projects/by-project/${PROJECT}/release`);
+    expect(
+      releaseResp.status(),
+      `release POST failed: ${await releaseResp.text()}`,
+    ).toBe(200);
+
+    const runningReview = await waitForJobRunning(request, PROJECT, 'review', 20_000);
+    expect(runningReview, 'review job should be running').not.toBeNull();
+
+    const stableUrl = page.url();
+    const activePanel = page.getByLabel('Active workflow runs');
+    await expect(activePanel).toBeVisible({ timeout: 12_000 });
+    await expect(workflowRunLink(activePanel, PROJECT)).toBeVisible({ timeout: 12_000 });
+    await expect(activePanel.getByLabel('status running').first()).toBeVisible({
+      timeout: 12_000,
+    });
+
+    const result = await waitForPipelineCompletion(request, PROJECT, 90_000);
+    expect(result.status, 'pipeline should complete').toBe('done');
+    expect(result.releaseJob?.['exit_code'], 'release exit code').toBe(0);
+
+    await expect(workflowRunLink(activePanel, PROJECT)).toHaveCount(0, { timeout: 15_000 });
+    const completedRow = page.getByRole('row').filter({ hasText: PROJECT }).first();
+    await expect(completedRow.getByLabel('status completed')).toBeVisible({ timeout: 15_000 });
+    await expect(page).toHaveURL(stableUrl);
+  });
+});

@@ -16,21 +16,17 @@ const FAILURE_SCENARIO = JSON.parse(
 const ABORT_SCENARIO = JSON.parse(
   readFileSync(join(__dirname, 'scenarios', 'abort.json'), 'utf-8'),
 );
+const SUCCESS_SCENARIO = JSON.parse(
+  readFileSync(join(__dirname, 'scenarios', 'ui-live-long.json'), 'utf-8'),
+);
 
+const SUCCESS_PROJECT = 'workflow-run-detail-success';
 const FAILURE_PROJECT = 'workflow-run-detail-failure';
 const CANCELLED_PROJECT = 'workflow-run-detail-abort';
 const LONG_FAILURE_STEPS = FAILURE_SCENARIO.steps.map(
   (step: { label?: string; sleep_ms?: number; text: string }) =>
     step.label === 'review' ? { ...step, sleep_ms: 10_000 } : step,
 );
-
-type WorkflowRunSummary = {
-  id: string;
-  status: string;
-  createdAt: string;
-  input: unknown;
-  error: string | null;
-};
 
 type WorkflowRunDetail = {
   run: {
@@ -43,44 +39,6 @@ type WorkflowRunDetail = {
     error: string | null;
   }>;
 };
-
-function workflowRunForProject(
-  runs: WorkflowRunSummary[],
-  project: string,
-  startedAfterMs: number,
-  status?: string,
-): WorkflowRunSummary | undefined {
-  return runs.find(
-    (run) =>
-      Array.isArray(run.input) &&
-      run.input[0] === project &&
-      Date.parse(run.createdAt) >= startedAfterMs &&
-      (status == null || run.status === status),
-  );
-}
-
-async function waitForWorkflowRunStatus(
-  request: APIRequestContext,
-  project: string,
-  startedAfterMs: number,
-  status: string,
-  timeoutMs = 30_000,
-): Promise<WorkflowRunSummary> {
-  const deadline = Date.now() + timeoutMs;
-  let lastRun: WorkflowRunSummary | undefined;
-  while (Date.now() < deadline) {
-    const resp = await request.get('/api/workflow-runs?limit=100');
-    if (resp.ok()) {
-      const body = (await resp.json()) as { runs?: WorkflowRunSummary[] };
-      lastRun = workflowRunForProject(body.runs ?? [], project, startedAfterMs, status);
-      if (lastRun?.status === status) return lastRun;
-    }
-    await new Promise((resolve) => setTimeout(resolve, 300));
-  }
-  throw new Error(
-    `Timed out waiting for workflow run ${project} to reach ${status}; last status was ${lastRun?.status ?? 'missing'}`,
-  );
-}
 
 async function waitForWorkflowRunTerminal(
   request: APIRequestContext,
@@ -105,6 +63,66 @@ async function waitForWorkflowRunTerminal(
 }
 
 test.describe('Real workflow-run detail live transitions', () => {
+  test('successful release detail flips from live running to final completed snapshot without reload', async ({
+    page,
+    request,
+  }) => {
+    writeScenario(SUCCESS_PROJECT, SUCCESS_SCENARIO.steps);
+    resetShimState(SUCCESS_PROJECT);
+    await enableProject(request, SUCCESS_PROJECT, { testsDisabled: true });
+
+    const releaseResp = await request.post(`/api/projects/by-project/${SUCCESS_PROJECT}/release`);
+    expect(
+      releaseResp.status(),
+      `release POST failed: ${await releaseResp.text()}`,
+    ).toBe(200);
+
+    const runningReview = await waitForJobRunning(request, SUCCESS_PROJECT, 'review', 20_000);
+    expect(runningReview, 'review job should be running').not.toBeNull();
+
+    await page.goto('/workflow-runs');
+
+    const activePanel = page.getByLabel('Active workflow runs');
+    const runningRunLink = activePanel.getByRole('link').filter({ hasText: SUCCESS_PROJECT }).first();
+    await expect(activePanel).toBeVisible({ timeout: 12_000 });
+    await expect(runningRunLink).toBeVisible({ timeout: 12_000 });
+    await expect(activePanel.getByLabel('status running').first()).toBeVisible({
+      timeout: 12_000,
+    });
+
+    const runHref = await runningRunLink.getAttribute('href');
+    expect(runHref, 'workflow run link href').toBeTruthy();
+    const runId = runHref?.split('/').pop();
+    expect(runId, 'workflow run id from href').toBeTruthy();
+
+    await page.goto(runHref!);
+
+    await expect(page.locator('[aria-label="status running"]').first()).toBeVisible({
+      timeout: 8_000,
+    });
+    await expect(page.getByText('live · refreshes every 5s')).toBeVisible({ timeout: 8_000 });
+    await expect(
+      page.locator('p').filter({ hasText: `Project ${SUCCESS_PROJECT}` }).first(),
+    ).toBeVisible({ timeout: 8_000 });
+    await expect(page.getByText(/running\s*1/i).first()).toBeVisible({ timeout: 8_000 });
+
+    const stableUrl = page.url();
+
+    const completedRun = await waitForWorkflowRunTerminal(request, runId!, 60_000);
+    expect(completedRun.run.status, 'workflow run should complete').toBe('completed');
+
+    await expect(page.getByText('final snapshot')).toBeVisible({ timeout: 15_000 });
+    await expect(page.getByText('live · refreshes every 5s')).toHaveCount(0, {
+      timeout: 15_000,
+    });
+    await expect(page.locator('[aria-label="status completed"]').first()).toBeVisible({
+      timeout: 15_000,
+    });
+    await expect(page.getByText(/completed\s*[1-9]/i).first()).toBeVisible({ timeout: 15_000 });
+    await expect(page.getByText('needs attention')).toHaveCount(0);
+    await expect(page).toHaveURL(stableUrl);
+  });
+
   test('failed release detail flips from live running to final failed snapshot without reload', async ({
     page,
     request,
@@ -113,7 +131,6 @@ test.describe('Real workflow-run detail live transitions', () => {
     resetShimState(FAILURE_PROJECT);
     await enableProject(request, FAILURE_PROJECT, { testsDisabled: true });
 
-    const releaseStartedAt = Date.now();
     const releaseResp = await request.post(`/api/projects/by-project/${FAILURE_PROJECT}/release`);
     expect(
       releaseResp.status(),
@@ -123,14 +140,22 @@ test.describe('Real workflow-run detail live transitions', () => {
     const runningReview = await waitForJobRunning(request, FAILURE_PROJECT, 'review', 20_000);
     expect(runningReview, 'review job should be running').not.toBeNull();
 
-    const runningRun = await waitForWorkflowRunStatus(
-      request,
-      FAILURE_PROJECT,
-      releaseStartedAt,
-      'running',
-    );
+    await page.goto('/workflow-runs');
 
-    await page.goto(`/workflow-runs/${runningRun.id}`);
+    const activePanel = page.getByLabel('Active workflow runs');
+    const runningRunLink = activePanel.getByRole('link').filter({ hasText: FAILURE_PROJECT }).first();
+    await expect(activePanel).toBeVisible({ timeout: 12_000 });
+    await expect(runningRunLink).toBeVisible({ timeout: 12_000 });
+    await expect(activePanel.getByLabel('status running').first()).toBeVisible({
+      timeout: 12_000,
+    });
+
+    const runHref = await runningRunLink.getAttribute('href');
+    expect(runHref, 'workflow run link href').toBeTruthy();
+    const runId = runHref?.split('/').pop();
+    expect(runId, 'workflow run id from href').toBeTruthy();
+
+    await page.goto(runHref!);
 
     await expect(page.locator('[aria-label="status running"]').first()).toBeVisible({
       timeout: 8_000,
@@ -143,7 +168,7 @@ test.describe('Real workflow-run detail live transitions', () => {
 
     const stableUrl = page.url();
 
-    const failedRun = await waitForWorkflowRunTerminal(request, runningRun.id, 60_000);
+    const failedRun = await waitForWorkflowRunTerminal(request, runId!, 60_000);
     expect(failedRun.run.status, 'workflow run should leave the live state').not.toBe('running');
     expect(failedRun.run.status, 'workflow run should leave the pending state').not.toBe('pending');
 
@@ -174,7 +199,6 @@ test.describe('Real workflow-run detail live transitions', () => {
     resetShimState(CANCELLED_PROJECT);
     await enableProject(request, CANCELLED_PROJECT, { testsDisabled: true });
 
-    const releaseStartedAt = Date.now();
     const releaseResp = await request.post(`/api/projects/by-project/${CANCELLED_PROJECT}/release`);
     expect(
       releaseResp.status(),
@@ -187,14 +211,22 @@ test.describe('Real workflow-run detail live transitions', () => {
     const runningReview = await waitForJobRunning(request, CANCELLED_PROJECT, 'review', 20_000);
     expect(runningReview, 'review job should be running').not.toBeNull();
 
-    const runningRun = await waitForWorkflowRunStatus(
-      request,
-      CANCELLED_PROJECT,
-      releaseStartedAt,
-      'running',
-    );
+    await page.goto('/workflow-runs');
 
-    await page.goto(`/workflow-runs/${runningRun.id}`);
+    const activePanel = page.getByLabel('Active workflow runs');
+    const runningRunLink = activePanel.getByRole('link').filter({ hasText: CANCELLED_PROJECT }).first();
+    await expect(activePanel).toBeVisible({ timeout: 12_000 });
+    await expect(runningRunLink).toBeVisible({ timeout: 12_000 });
+    await expect(activePanel.getByLabel('status running').first()).toBeVisible({
+      timeout: 12_000,
+    });
+
+    const runHref = await runningRunLink.getAttribute('href');
+    expect(runHref, 'workflow run link href').toBeTruthy();
+    const runId = runHref?.split('/').pop();
+    expect(runId, 'workflow run id from href').toBeTruthy();
+
+    await page.goto(runHref!);
 
     await expect(page.locator('[aria-label="status running"]').first()).toBeVisible({
       timeout: 8_000,
@@ -214,7 +246,7 @@ test.describe('Real workflow-run detail live transitions', () => {
     expect(releaseJob, 'release job should finish after abort').not.toBeNull();
     expect(releaseJob?.['exit_code'], 'release exit code after abort').toBe(-3);
 
-    const cancelledRun = await waitForWorkflowRunTerminal(request, runningRun.id, 30_000);
+    const cancelledRun = await waitForWorkflowRunTerminal(request, runId!, 30_000);
 
     await expect(page.getByText('final snapshot')).toBeVisible({ timeout: 15_000 });
     await expect(page.getByText('live · refreshes every 5s')).toHaveCount(0, {
