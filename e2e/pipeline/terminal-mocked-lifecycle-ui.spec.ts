@@ -5,6 +5,8 @@ const PROJECT = 'terminal-mocked-lifecycle'
 const JOB_ID = 'mock-review-live-1'
 const SESSION_ID = 'mock-session-live-1'
 const RELEASE_JOB_ID = 'mock-release-live-1'
+const RELEASE_JOB_ID_OLDER = 'mock-release-live-older'
+const RELEASE_JOB_ID_NEWER = 'mock-release-live-newer'
 const RUN_JOB_ID = 'mock-run-live-1'
 const RUN_SESSION_ID = 'mock-run-session-live-1'
 
@@ -88,7 +90,12 @@ function finishedJob(exitCode: number, output: string, detail?: string) {
   }
 }
 
-function runningReleaseJob() {
+function runningReleaseJob(overrides: Partial<{
+  id: string
+  started_at: number
+  work_summary: string
+  release_id: string
+}> = {}) {
   return {
     id: RELEASE_JOB_ID,
     project: PROJECT,
@@ -107,12 +114,18 @@ function runningReleaseJob() {
     provider: 'claude',
     work_summary: 'Review is running in the release pipeline.',
     release_id: RELEASE_JOB_ID,
+    ...overrides,
   }
 }
 
-function finishedReleaseJob(exitCode: number, output: string, detail?: string) {
+function finishedReleaseJob(
+  exitCode: number,
+  output: string,
+  detail?: string,
+  overrides: Partial<ReturnType<typeof runningReleaseJob>> = {},
+) {
   return {
-    ...runningReleaseJob(),
+    ...runningReleaseJob(overrides),
     status: 'done',
     exit_code: exitCode,
     finished_at: now() - 1,
@@ -581,8 +594,13 @@ test.describe('Mocked terminal lifecycle UI', () => {
     page,
   }) => {
     let serveRunningRun = false
+    let runningRunPolls = 0
 
-    await stubProjectShell(page, () => (serveRunningRun ? [runningTerminalRunJob()] : []))
+    await stubProjectShell(page, () => {
+      if (!serveRunningRun) return []
+      runningRunPolls += 1
+      return [runningTerminalRunJob()]
+    })
 
     await page.goto(`/project/${PROJECT}/terminal`)
 
@@ -591,9 +609,101 @@ test.describe('Mocked terminal lifecycle UI', () => {
 
     serveRunningRun = true
 
+    await expect.poll(() => runningRunPolls, { timeout: 4_000 }).toBeGreaterThan(0)
     await expect(page).toHaveURL(`/project/${PROJECT}/terminal`)
     await expect(page.getByRole('button', { name: 'new' })).toBeVisible()
     await expect(page.getByText('live run')).toHaveCount(0)
     await expect(page.getByTitle('View unified release trace')).toHaveCount(0)
+  })
+
+  test('terminal landing page ignores a live run until a release starts, then auto-attaches to the release', async ({
+    page,
+  }) => {
+    let phase: 'idle' | 'run-only' | 'run-and-release' = 'idle'
+    let runOnlyPolls = 0
+
+    await stubProjectShell(page, () => {
+      if (phase === 'run-only') {
+        runOnlyPolls += 1
+        return [runningTerminalRunJob()]
+      }
+      if (phase === 'run-and-release') return [runningTerminalRunJob(), runningReleaseJob()]
+      return []
+    })
+    await page.route(`**/api/jobs/${RELEASE_JOB_ID}`, (route: Route) =>
+      route.fulfill({
+        json: runningReleaseJob(),
+      }),
+    )
+    await page.route(`**/api/streaming/${RELEASE_JOB_ID}`, (route: Route) =>
+      route.fulfill({ status: 204, body: '' }),
+    )
+
+    await page.goto(`/project/${PROJECT}/terminal`)
+
+    await expect(page.getByRole('button', { name: 'new' })).toBeVisible({ timeout: 8_000 })
+    await expect(page.getByText('live run')).toHaveCount(0)
+
+    phase = 'run-only'
+
+    await expect.poll(() => runOnlyPolls, { timeout: 4_000 }).toBeGreaterThan(0)
+    await expect(page).toHaveURL(`/project/${PROJECT}/terminal`)
+    await expect(page.getByRole('button', { name: 'new' })).toBeVisible()
+    await expect(page.getByText('live run')).toHaveCount(0)
+    await expect(page.getByTitle('View unified release trace')).toHaveCount(0)
+
+    phase = 'run-and-release'
+
+    await expect(page).toHaveURL(
+      new RegExp(`/project/${PROJECT}/terminal\\?job=${encodeURIComponent(RELEASE_JOB_ID)}`),
+      { timeout: 12_000 },
+    )
+    await expect(page.getByText('live run')).toBeVisible({ timeout: 8_000 })
+    await expect(page.getByTitle('View unified release trace').first()).toBeVisible({
+      timeout: 8_000,
+    })
+  })
+
+  test('terminal landing page auto-attaches to the newest running release when multiple releases are live', async ({
+    page,
+  }) => {
+    const olderRelease = runningReleaseJob({
+      id: RELEASE_JOB_ID_OLDER,
+      release_id: RELEASE_JOB_ID_OLDER,
+      started_at: now() - 20,
+      work_summary: 'Older release is still running.',
+    })
+    const newerRelease = runningReleaseJob({
+      id: RELEASE_JOB_ID_NEWER,
+      release_id: RELEASE_JOB_ID_NEWER,
+      started_at: now() - 3,
+      work_summary: 'Newest release should win the auto-attach.',
+    })
+
+    await stubProjectShell(page, () => [olderRelease, newerRelease])
+    await page.route(`**/api/jobs/${RELEASE_JOB_ID_OLDER}`, (route: Route) =>
+      route.fulfill({
+        json: olderRelease,
+      }),
+    )
+    await page.route(`**/api/jobs/${RELEASE_JOB_ID_NEWER}`, (route: Route) =>
+      route.fulfill({
+        json: newerRelease,
+      }),
+    )
+    await page.route(`**/api/streaming/${RELEASE_JOB_ID_NEWER}`, (route: Route) =>
+      route.fulfill({ status: 204, body: '' }),
+    )
+
+    await page.goto(`/project/${PROJECT}/terminal`)
+
+    await expect(page).toHaveURL(
+      new RegExp(`/project/${PROJECT}/terminal\\?job=${encodeURIComponent(RELEASE_JOB_ID_NEWER)}`),
+      { timeout: 12_000 },
+    )
+    await expect(page.getByText('live run')).toBeVisible({ timeout: 8_000 })
+    await expect(page.getByTitle('View unified release trace').first()).toBeVisible({
+      timeout: 8_000,
+    })
   })
 })
