@@ -465,4 +465,203 @@ test.describe('History tab non-release live polling', () => {
     ).toBeVisible({ timeout: 12_000 })
     await expect(page.getByText('1 running')).toHaveCount(0, { timeout: 12_000 })
   })
+
+  test('chat run failure does not clear a concurrent agent run that is still active', async ({
+    page,
+  }) => {
+    let phase: 'both-running' | 'chat-failed' | 'all-done' = 'both-running'
+
+    await stubHistoryShell(page, () => {
+      const chatRun =
+        phase === 'both-running'
+          ? makeJob({
+              id: 'chat-run-concurrent-failure-1',
+              kind: 'run',
+              prompt: 'Investigate the flaky provider output',
+              user_prompt: 'Investigate the flaky provider output',
+              session_id: 'sess-chat-run-concurrent-failure-1',
+              status: 'running',
+              exit_code: null,
+              started_at: now() - 80,
+              finished_at: null,
+              work_summary: 'Chat run is still streaming provider output',
+            })
+          : makeJob({
+              id: 'chat-run-concurrent-failure-1',
+              kind: 'run',
+              prompt: 'Investigate the flaky provider output',
+              user_prompt: 'Investigate the flaky provider output',
+              session_id: 'sess-chat-run-concurrent-failure-1',
+              status: 'done',
+              exit_code: 1,
+              started_at: now() - 80,
+              finished_at: now() - 10,
+              work_summary: 'Provider exited before the chat run could finish',
+            })
+
+      const plannerRun =
+        phase === 'all-done'
+          ? makeJob({
+              id: 'planner-run-concurrent-failure-1',
+              kind: 'agent:release-planner',
+              prompt: 'Keep planning while the chat run settles',
+              user_prompt: 'Keep planning while the chat run settles',
+              session_id: 'sess-planner-run-concurrent-failure-1',
+              status: 'done',
+              exit_code: 0,
+              started_at: now() - 60,
+              finished_at: now() - 5,
+              work_summary: 'Planner finished after the failed chat run was recorded',
+            })
+          : makeJob({
+              id: 'planner-run-concurrent-failure-1',
+              kind: 'agent:release-planner',
+              prompt: 'Keep planning while the chat run settles',
+              user_prompt: 'Keep planning while the chat run settles',
+              session_id: 'sess-planner-run-concurrent-failure-1',
+              status: 'running',
+              exit_code: null,
+              started_at: now() - 60,
+              finished_at: null,
+              work_summary: 'Planner is still mapping follow-up work',
+            })
+
+      return [chatRun, plannerRun]
+    })
+
+    await page.goto(`/project/${PROJECT}/history`)
+
+    const chatRow = runRow(page, 'Investigate the flaky provider output')
+    const plannerRow = runRow(page, 'release-planner')
+
+    await expect(chatRow).toBeVisible({ timeout: 8_000 })
+    await expect(plannerRow).toBeVisible({ timeout: 8_000 })
+    await expect(chatRow.getByLabel('running')).toBeVisible({ timeout: 8_000 })
+    await expect(plannerRow.getByLabel('running')).toBeVisible({ timeout: 8_000 })
+    await expect(page.getByText('2 running')).toBeVisible({ timeout: 8_000 })
+
+    phase = 'chat-failed'
+
+    await expect(chatRow.getByText('exit 1', { exact: true })).toBeVisible({ timeout: 12_000 })
+    await expect(chatRow.getByLabel('running')).toHaveCount(0, { timeout: 12_000 })
+    await expect(
+      chatRow.getByText('Provider exited before the chat run could finish'),
+    ).toBeVisible({ timeout: 12_000 })
+    await expect(plannerRow.getByLabel('running')).toBeVisible({ timeout: 12_000 })
+    await expect(
+      plannerRow.getByText('Planner is still mapping follow-up work'),
+    ).toBeVisible({ timeout: 12_000 })
+    await expect(page.getByText('1 running')).toBeVisible({ timeout: 12_000 })
+    await expect(filterChip(page, 'failed')).toHaveText(/failed 1/i, { timeout: 12_000 })
+
+    phase = 'all-done'
+
+    await expect(plannerRow.getByLabel('done')).toBeVisible({ timeout: 12_000 })
+    await expect(plannerRow.getByLabel('running')).toHaveCount(0, { timeout: 12_000 })
+    await expect(
+      plannerRow.getByText('Planner finished after the failed chat run was recorded'),
+    ).toBeVisible({ timeout: 12_000 })
+    await expect(page.getByText('1 running')).toHaveCount(0, { timeout: 12_000 })
+    await expect(filterChip(page, 'failed')).toHaveText(/failed 1/i, { timeout: 12_000 })
+  })
+
+  test('agent cancellation does not clear a concurrent chat run that is still active', async ({
+    page,
+  }) => {
+    let phase: 'both-running' | 'agent-cancelled' | 'all-done' = 'both-running'
+
+    await stubHistoryShell(page, () => {
+      const chatRun =
+        phase === 'all-done'
+          ? makeJob({
+              id: 'chat-run-concurrent-cancel-1',
+              kind: 'run',
+              prompt: 'Finish the surviving chat run',
+              user_prompt: 'Finish the surviving chat run',
+              session_id: 'sess-chat-run-concurrent-cancel-1',
+              status: 'done',
+              exit_code: 0,
+              started_at: now() - 80,
+              finished_at: now() - 5,
+              work_summary: 'Chat run completed after the agent cancellation',
+            })
+          : makeJob({
+              id: 'chat-run-concurrent-cancel-1',
+              kind: 'run',
+              prompt: 'Finish the surviving chat run',
+              user_prompt: 'Finish the surviving chat run',
+              session_id: 'sess-chat-run-concurrent-cancel-1',
+              status: 'running',
+              exit_code: null,
+              started_at: now() - 80,
+              finished_at: null,
+              work_summary: 'Chat run is still working through the requested task',
+            })
+
+      const plannerRun =
+        phase === 'both-running'
+          ? makeJob({
+              id: 'planner-run-concurrent-cancel-1',
+              kind: 'agent:release-planner',
+              prompt: 'Abort this planner while the chat run keeps going',
+              user_prompt: 'Abort this planner while the chat run keeps going',
+              session_id: 'sess-planner-run-concurrent-cancel-1',
+              status: 'running',
+              exit_code: null,
+              started_at: now() - 60,
+              finished_at: null,
+              work_summary: 'Planner is still active before the cancellation lands',
+            })
+          : makeJob({
+              id: 'planner-run-concurrent-cancel-1',
+              kind: 'agent:release-planner',
+              prompt: 'Abort this planner while the chat run keeps going',
+              user_prompt: 'Abort this planner while the chat run keeps going',
+              session_id: 'sess-planner-run-concurrent-cancel-1',
+              status: 'done',
+              exit_code: -2,
+              started_at: now() - 60,
+              finished_at: now() - 10,
+              work_summary: 'Planner was cancelled while the chat run kept running',
+            })
+
+      return [chatRun, plannerRun]
+    })
+
+    await page.goto(`/project/${PROJECT}/history`)
+
+    const chatRow = runRow(page, 'Finish the surviving chat run')
+    const plannerRow = runRow(page, 'release-planner')
+
+    await expect(chatRow).toBeVisible({ timeout: 8_000 })
+    await expect(plannerRow).toBeVisible({ timeout: 8_000 })
+    await expect(chatRow.getByLabel('running')).toBeVisible({ timeout: 8_000 })
+    await expect(plannerRow.getByLabel('running')).toBeVisible({ timeout: 8_000 })
+    await expect(page.getByText('2 running')).toBeVisible({ timeout: 8_000 })
+
+    phase = 'agent-cancelled'
+
+    await expect(plannerRow.getByText('cancelled', { exact: true })).toBeVisible({
+      timeout: 12_000,
+    })
+    await expect(plannerRow.getByLabel('running')).toHaveCount(0, { timeout: 12_000 })
+    await expect(
+      plannerRow.getByText('Planner was cancelled while the chat run kept running'),
+    ).toBeVisible({ timeout: 12_000 })
+    await expect(chatRow.getByLabel('running')).toBeVisible({ timeout: 12_000 })
+    await expect(
+      chatRow.getByText('Chat run is still working through the requested task'),
+    ).toBeVisible({ timeout: 12_000 })
+    await expect(page.getByText('1 running')).toBeVisible({ timeout: 12_000 })
+    await expect(plannerRow.getByText('-2')).toHaveCount(0)
+
+    phase = 'all-done'
+
+    await expect(chatRow.getByLabel('done')).toBeVisible({ timeout: 12_000 })
+    await expect(chatRow.getByLabel('running')).toHaveCount(0, { timeout: 12_000 })
+    await expect(
+      chatRow.getByText('Chat run completed after the agent cancellation'),
+    ).toBeVisible({ timeout: 12_000 })
+    await expect(page.getByText('1 running')).toHaveCount(0, { timeout: 12_000 })
+  })
 })
