@@ -100,6 +100,10 @@ function visibleStepAttentionLink(page: Page, text: RegExp): Locator {
   return page.locator('a:visible[href^="#workflow-step-"]').filter({ hasText: text }).first();
 }
 
+function stepRow(page: Page, stepId: string): Locator {
+  return page.locator(`#workflow-step-desktop-${encodeURIComponent(stepId)}`);
+}
+
 test.describe('WorkflowRunDetail UI', () => {
   // ---------------------------------------------------------------------------
   // Running state
@@ -155,6 +159,53 @@ test.describe('WorkflowRunDetail UI', () => {
     await expect(page.getByText('final snapshot')).toBeVisible({ timeout: 12_000 });
     await expect(page.locator('[aria-label="status completed"]').first()).toBeVisible({ timeout: 12_000 });
     await expect(page.getByText('live · refreshes every 5s')).toHaveCount(0);
+  });
+
+  test('live run keeps prior completed steps stable while the active step flips to completed after poll', async ({
+    page,
+  }) => {
+    let serveRunning = true;
+
+    await stubShellRoutes(page);
+    await page.route(`**/api/workflow-runs/${RUN_ID}`, (route: Route) =>
+      route.fulfill({
+        json: serveRunning
+          ? ({
+              run: makeRun('running'),
+              steps: [
+                makeStep('s1', 'fetch-context', 'completed'),
+                makeStep('s2', 'run-review', 'running'),
+              ],
+            } satisfies RunDetail)
+          : ({
+              run: makeRun('completed'),
+              steps: [
+                makeStep('s1', 'fetch-context', 'completed'),
+                makeStep('s2', 'run-review', 'completed'),
+              ],
+            } satisfies RunDetail),
+      }),
+    );
+
+    await page.goto(`/workflow-runs/${RUN_ID}`);
+
+    const completedFetchRow = stepRow(page, 's1');
+    const runningReviewRow = stepRow(page, 's2');
+
+    await expect(page.locator('[aria-label="status running"]').first()).toBeVisible({ timeout: 8_000 });
+    await expect(completedFetchRow).toContainText('fetch context');
+    await expect(completedFetchRow.getByLabel('status completed')).toBeVisible({ timeout: 8_000 });
+    await expect(runningReviewRow).toContainText('run review');
+    await expect(runningReviewRow.getByLabel('status running')).toBeVisible({ timeout: 8_000 });
+    await expect(page.getByText('live · refreshes every 5s')).toBeVisible({ timeout: 8_000 });
+
+    serveRunning = false;
+
+    await expect(page.getByText('final snapshot')).toBeVisible({ timeout: 12_000 });
+    await expect(runningReviewRow.getByLabel('status completed')).toBeVisible({ timeout: 12_000 });
+    await expect(runningReviewRow.getByLabel('status running')).toHaveCount(0, { timeout: 12_000 });
+    await expect(completedFetchRow.getByLabel('status completed')).toBeVisible({ timeout: 12_000 });
+    await expect(page.getByText(/completed\s*2/i).first()).toBeVisible({ timeout: 12_000 });
   });
 
   test('live run transitions to failed final snapshot and surfaces the error after poll', async ({ page }) => {
