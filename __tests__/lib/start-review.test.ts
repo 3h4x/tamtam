@@ -603,11 +603,14 @@ describe('startProjectReview', () => {
     expect(prompt).toContain('Do not require docs for trivial refactors');
   });
 
-  it('includes prior release review and fix context in follow-up reviews', async () => {
+  it('includes prior release review, fix, and host-test context in follow-up reviews', async () => {
     mocks.listJobs.mockReturnValue([
       makeJob({ id: 'release-1', kind: 'release', finishedAt: null, startedAt: 10 }),
       makeJob({ id: 'prev-review', kind: 'review', releaseId: 'release-1', finishedAt: 20, startedAt: 20, exitCode: 0 }),
       makeJob({ id: 'prev-fix', kind: 'fix', releaseId: 'release-1', finishedAt: 30, startedAt: 30, exitCode: 0 }),
+      // Host-side test run after the review-driven fix (review → fix → test → review).
+      // Plain test output (no stream-json) — readParsedLog returns it raw.
+      makeJob({ id: 'prev-test', kind: 'test', releaseId: 'release-1', finishedAt: 40, startedAt: 40, exitCode: 1 }),
     ]);
     mocks.readLog.mockImplementation((job: { id: string }) => {
       if (job.id === 'prev-review') {
@@ -622,6 +625,9 @@ describe('startProjectReview', () => {
       if (job.id === 'prev-review') {
         return 'Findings:\n- Finding ID: shared-server-validation\n  Root cause: server route bypass\nVerdict: DO NOT SHIP\n';
       }
+      if (job.id === 'prev-test') {
+        return 'FAIL src/lib/api/submissions.integration.test.ts\n  × should enforce rolling frequency windows\nTest Files  1 failed\n     Tests  1 failed | 96 passed';
+      }
       return 'Fix checklist:\n- Finding ID: shared-server-validation\n  Status: fixed\n';
     });
     mocks.exec.mockResolvedValueOnce(resp(0, ' M lib/foo.ts'));
@@ -629,13 +635,18 @@ describe('startProjectReview', () => {
     await startProjectReview('proj');
 
     const prompt: string = mocks.startJob.mock.calls[0][2];
-    expect(prompt).toContain('PREVIOUS RELEASE REVIEW/FIX CONTEXT');
+    expect(prompt).toContain('PREVIOUS RELEASE REVIEW/FIX/TEST CONTEXT');
     expect(prompt).toContain('prev-review');
     expect(prompt).toContain('shared-server-validation');
     expect(prompt).toContain('First verify whether earlier findings were actually fixed');
+    // The host test result must feed into review so it knows what the fix broke.
+    expect(prompt).toContain('prev-test');
+    expect(prompt).toContain('should enforce rolling frequency windows');
+    expect(prompt).toContain('1 failed | 96 passed');
     expect(prompt).not.toContain('"type":"stream_event"');
     expect(mocks.readParsedLog).toHaveBeenCalledWith(expect.objectContaining({ id: 'prev-review' }));
     expect(mocks.readParsedLog).toHaveBeenCalledWith(expect.objectContaining({ id: 'prev-fix' }));
+    expect(mocks.readParsedLog).toHaveBeenCalledWith(expect.objectContaining({ id: 'prev-test' }));
   });
 
   it('uses the newest active release for prior review and fix context', async () => {

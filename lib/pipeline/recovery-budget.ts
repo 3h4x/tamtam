@@ -4,7 +4,7 @@ import { getSettings, type ReviewDoNotShipAction } from '@/lib/shared/config';
 //
 // ONE user-facing setting — `fix_max_iterations`, persisted in
 // `app_settings` — governs every review-driven fix loop the release
-// pipeline runs: review→fix→review, test→fix→test, commit→fix→commit,
+// pipeline runs: review→fix→test→review, test→fix→test, commit→fix→commit,
 // and the review-driven push→fix→push leg. Default `0` means "loop
 // until success or the release wall-clock timeout."
 //

@@ -10,6 +10,8 @@ const getProjectTestConfigMock = vi.fn();
 const resolveProjectPathMock = vi.fn();
 const execMock = vi.fn();
 const hasLocalCommitsAheadMock = vi.fn();
+const hasRunnableTestCommandMock = vi.fn();
+const isReviewRetestJobMock = vi.fn();
 
 vi.mock('@/lib/workflows/wait-for-job', () => ({
   waitForJobCompletion: waitForJobCompletionMock,
@@ -59,6 +61,11 @@ vi.mock('@/lib/pipeline/release-state', () => ({
   hasLocalCommitsAhead: hasLocalCommitsAheadMock,
 }));
 
+vi.mock('@/lib/pipeline/start-test', () => ({
+  hasRunnableTestCommand: hasRunnableTestCommandMock,
+  isReviewRetestJob: isReviewRetestJobMock,
+}));
+
 import { releaseOrchestratorWorkflow } from '@/lib/workflows/release-orchestrator';
 
 describe('releaseOrchestratorWorkflow', () => {
@@ -71,6 +78,8 @@ describe('releaseOrchestratorWorkflow', () => {
     resolveProjectPathMock.mockReset().mockReturnValue('/repo/project');
     execMock.mockReset().mockResolvedValue({ exitCode: 0, stdout: '' });
     hasLocalCommitsAheadMock.mockReset().mockResolvedValue(false);
+    hasRunnableTestCommandMock.mockReset().mockResolvedValue(true);
+    isReviewRetestJobMock.mockReset().mockReturnValue(false);
     listJobsMock.mockReset().mockReturnValue([]);
     readParsedLogMock.mockReset().mockReturnValue('');
     finalizeReleaseJobMock.mockReset();
@@ -296,6 +305,42 @@ Verdict: NEEDS ATTENTION
       expect.objectContaining({ projectName: 'test-tt', parentJobId: 'release-1', prevJobId: 'test-1' }),
     );
     expect(r.decision).toEqual({ next: 'commit', from: 'test' });
+  });
+
+  it('forces a review after a review-driven re-test even when review is disabled', async () => {
+    const testJob = {
+      id: 'test-review-retest',
+      kind: 'test',
+      exitCode: 0,
+      finishedAt: 100,
+      project: 'test-tt',
+      contextMeta: JSON.stringify({ pipelineReason: 'review-retest' }),
+    };
+    waitForJobCompletionMock.mockResolvedValue({
+      job: testJob,
+      finished: true,
+      reason: 'finished',
+    });
+    getJobMock.mockReturnValue(testJob);
+    isReviewRetestJobMock.mockReturnValue(true);
+    getProjectTestConfigMock.mockResolvedValue({ reviewDisabled: true });
+    execMock.mockResolvedValue({ exitCode: 0, stdout: ' M file.ts\n' });
+    dispatchPhaseMock.mockResolvedValue({
+      dispatched: true,
+      phase: 'review',
+      childRunId: 'wrun_review',
+    });
+
+    const r = await releaseOrchestratorWorkflow('test-review-retest', {
+      projectName: 'test-tt',
+      parentJobId: 'release-1',
+    });
+
+    expect(dispatchPhaseMock).toHaveBeenCalledWith(
+      { next: 'review', from: 'test' },
+      expect.objectContaining({ projectName: 'test-tt', parentJobId: 'release-1', prevJobId: 'test-review-retest' }),
+    );
+    expect(r.decision).toEqual({ next: 'review', from: 'test' });
   });
 
   it('skips review and dispatches push after a successful test when review is disabled and only unpushed commits remain', async () => {
@@ -541,6 +586,96 @@ Verdict: NEEDS ATTENTION
     const r = await releaseOrchestratorWorkflow('review-1', { projectName: 'test-tt' });
     expect(r.decision).toEqual({ next: 'fix', from: 'review', verdict: 'NEEDS ATTENTION' });
     expect(r.dispatch).toMatchObject({ dispatched: true, phase: 'fix' });
+  });
+
+  it('routes review-driven fix back to review when no host test command is runnable', async () => {
+    const fixJob = {
+      id: 'fix-1',
+      kind: 'fix',
+      exitCode: 0,
+      finishedAt: 100,
+      project: 'test-tt',
+      parentJobId: 'review-1',
+      releaseId: 'release-1',
+    };
+    const reviewJob = {
+      id: 'review-1',
+      kind: 'review',
+      exitCode: 0,
+      finishedAt: 90,
+      project: 'test-tt',
+      releaseId: 'release-1',
+    };
+    waitForJobCompletionMock.mockResolvedValue({
+      job: fixJob,
+      finished: true,
+      reason: 'finished',
+    });
+    getJobMock.mockImplementation((id: string) =>
+      id === 'fix-1' ? fixJob : id === 'review-1' ? reviewJob : null,
+    );
+    hasRunnableTestCommandMock.mockResolvedValue(false);
+    dispatchPhaseMock.mockResolvedValue({
+      dispatched: true,
+      phase: 'review',
+      childRunId: 'wrun_review',
+    });
+
+    const r = await releaseOrchestratorWorkflow('fix-1', {
+      projectName: 'test-tt',
+      parentJobId: 'release-1',
+    });
+
+    expect(hasRunnableTestCommandMock).toHaveBeenCalledWith('test-tt');
+    expect(r.decision).toEqual({ next: 'review', from: 'fix' });
+    expect(dispatchPhaseMock).toHaveBeenCalledWith(
+      { next: 'review', from: 'fix' },
+      expect.objectContaining({ projectName: 'test-tt', parentJobId: 'release-1', prevJobId: 'fix-1' }),
+    );
+  });
+
+  it('marks review-driven fix re-tests so the following test cannot skip review', async () => {
+    const fixJob = {
+      id: 'fix-review-retest',
+      kind: 'fix',
+      exitCode: 0,
+      finishedAt: 100,
+      project: 'test-tt',
+      parentJobId: 'review-1',
+      releaseId: 'release-1',
+    };
+    const reviewJob = {
+      id: 'review-1',
+      kind: 'review',
+      exitCode: 0,
+      finishedAt: 90,
+      project: 'test-tt',
+      releaseId: 'release-1',
+    };
+    waitForJobCompletionMock.mockResolvedValue({
+      job: fixJob,
+      finished: true,
+      reason: 'finished',
+    });
+    getJobMock.mockImplementation((id: string) =>
+      id === 'fix-review-retest' ? fixJob : id === 'review-1' ? reviewJob : null,
+    );
+    dispatchPhaseMock.mockResolvedValue({
+      dispatched: true,
+      phase: 'test',
+      childRunId: 'wrun_test',
+    });
+
+    const r = await releaseOrchestratorWorkflow('fix-review-retest', {
+      projectName: 'test-tt',
+      parentJobId: 'release-1',
+    });
+
+    expect(r.decision).toEqual({ next: 'test', from: 'fix', reviewRetest: true });
+    expect(dispatchPhaseMock).toHaveBeenCalledWith(
+      { next: 'test', from: 'fix', reviewRetest: true },
+      expect.objectContaining({ projectName: 'test-tt', parentJobId: 'release-1', prevJobId: 'fix-review-retest' }),
+    );
   });
 
   it('records terminal dispatch outcome for next=done', async () => {

@@ -81,7 +81,7 @@ export interface TamTamConfig {
   review_verdict_rules: string;
   jobs_paused: boolean;
   /** Single global cap on per-release step-verification retries. Covers
-   *  review→fix→review, test→fix→test, commit→fix→commit, and the
+   *  review→fix→test→review, test→fix→test, commit→fix→commit, and the
    *  review-driven push→fix→push leg uniformly. `0` ⇒ unlimited (run
    *  until success or the release wall-clock timeout). See
    *  `lib/pipeline/recovery-budget.ts` for the resolution logic. */

@@ -182,9 +182,10 @@ export function runGates(action = 'start new jobs'): JobsPausedResult | BudgetBl
 
 /**
  * Gate for auto-chained pipeline re-entries (completion hooks).
- * Once a release is already in flight, the user's intent is test→fix→review
- * →commit→push. Keep hard gates (pause, 5h quota, credits), but do not apply
- * the scheduled-agent weekly burn projection mid-release.
+ * Once a release is already in flight, the user's intent is to continue the
+ * quality-gated test/review/fix/commit/push chain. Keep hard gates (pause,
+ * 5h quota, credits), but do not apply the scheduled-agent weekly burn
+ * projection mid-release.
  */
 export function runAutoChainGates(action = 'continue pipeline'): JobsPausedResult | BudgetBlockedResult | null {
   return runGates(action);

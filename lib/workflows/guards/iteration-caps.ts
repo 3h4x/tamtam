@@ -128,15 +128,28 @@ export function checkIterationCap(
   }
 
   if (decision.next === 'test' && decision.from === 'fix') {
-    const count = countSiblingSteps(job.project, 'test', job.releaseId, deps);
+    // A review-driven fix re-runs the host-side test phase before re-review
+    // (review → fix → test → review). Such a fix carries `parentKind: 'review'`,
+    // so it must be bounded by the REVIEW loop cap and counted as review cycles
+    // — not lumped into the test-failure loop. Detect by the fix's parent kind,
+    // mirroring the push branch below. Plain test-failure fixes (parent test)
+    // keep the test-loop cap.
+    const fixParent = job.parentJobId
+      ? deps.listJobs().find((j) => j.id === job.parentJobId) ?? null
+      : null;
+    const isReviewDriven = fixParent?.kind === 'review';
+    const loopKind = isReviewDriven ? 'review' : 'test';
+    const count = countSiblingSteps(job.project, loopKind, job.releaseId, deps);
     const cap = deps.fixIterationCap();
-    if (count >= cap) {
+    if (cap > 0 && count >= cap) {
       return {
         rewritten: {
           next: 'abort',
           from: 'review',
           verdict: 'NEEDS ATTENTION',
-          stopReason: `test cap reached for ${job.project} (${count}/${cap}) — tests still need verification`,
+          stopReason: isReviewDriven
+            ? `review cap reached for ${job.project} (${count}/${cap}) — review keeps surfacing new findings, stopping`
+            : `test cap reached for ${job.project} (${count}/${cap}) — tests still need verification`,
         },
       };
     }

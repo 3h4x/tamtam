@@ -95,10 +95,14 @@ export async function dispatchPhase(
         const { getSettings } = await import('@/lib/shared/config');
         if (getSettings().plain_test_phase_enabled) {
           const { pnpmTestPhaseWorkflow } = await import('@/lib/workflows/phases/pnpm-test-phase');
-          run = await start(pnpmTestPhaseWorkflow, [ctx.projectName, ctx.parentJobId]);
+          run = decision.reviewRetest
+            ? await start(pnpmTestPhaseWorkflow, [ctx.projectName, ctx.parentJobId, { reviewRetest: true }])
+            : await start(pnpmTestPhaseWorkflow, [ctx.projectName, ctx.parentJobId]);
         } else {
           const { releaseTestPhaseWorkflow } = await import('@/lib/workflows/phases/test-phase');
-          run = await start(releaseTestPhaseWorkflow, [ctx.projectName, ctx.parentJobId]);
+          run = decision.reviewRetest
+            ? await start(releaseTestPhaseWorkflow, [ctx.projectName, ctx.parentJobId, { reviewRetest: true }])
+            : await start(releaseTestPhaseWorkflow, [ctx.projectName, ctx.parentJobId]);
         }
         break;
       }

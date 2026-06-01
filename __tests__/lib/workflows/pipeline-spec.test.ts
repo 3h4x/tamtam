@@ -65,6 +65,7 @@ describe('pipeline-spec', () => {
       { name: 'commit ok → push',    inputs: { kind: 'commit', exitCode: 0, verdict: null } },
       { name: 'push ok → mark-dod',  inputs: { kind: 'push', exitCode: 0, verdict: null } },
       { name: 'fix from push',       inputs: { kind: 'fix', exitCode: 0, verdict: null, parentKind: 'push' } },
+      { name: 'fix from review without host tests', inputs: { kind: 'fix', exitCode: 0, verdict: null, parentKind: 'review', hostTestsAvailable: false } },
       { name: 'mark-dod auto-merge', inputs: { kind: 'mark-dod', exitCode: 0, verdict: null, autoPrMergeEnabled: true, pushPrContext: { prNumber: 1, prRepo: 'x/y', prUrl: 'u' } } },
     ];
     for (const c of cases) {

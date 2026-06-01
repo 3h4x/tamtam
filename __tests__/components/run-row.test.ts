@@ -363,6 +363,29 @@ describe('RunRow', () => {
     unmount()
   })
 
+  it('keeps the stable pipeline step name visible beside descriptive titles', () => {
+    const entry = makeEntry({
+      kind: 'test',
+      bucket: 'test',
+      title: 'Running tests...',
+      subtitle: null,
+      navSessionId: null,
+      model: null,
+      inputTokens: 0,
+      outputTokens: 0,
+      costUsd: 0,
+    })
+
+    const { container, unmount } = renderRow({
+      entry,
+      onClick: vi.fn(),
+    })
+
+    expect(container.textContent).toContain('Test run')
+    expect(container.textContent).toContain('Running tests...')
+    unmount()
+  })
+
   it('does not prefix synthetic pipeline-step release rows with Release pipeline', () => {
     const entry = makeEntry({
       kind: 'release',

@@ -12,6 +12,7 @@ export const CODEX_BIN = join(__dirname, 'mocks', 'codex-bin.js');
 const PROJECTS = [
   'happy-path',
   'needs-attention',
+  'review-retest-live',
   'abort',
   'paused',
   'release-controls-happy-path',

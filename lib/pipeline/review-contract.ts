@@ -32,7 +32,7 @@ export const FIX_OUTPUT_CONTRACT = `FIX METHOD — required:
 - Apply fixes for ALL findings, including any sibling paths named in Affected paths.
 - Treat each finding as a root-cause contract. Search for equivalent client, server, alternate route, shared helper, storage, canonicalization, and test gaps before editing.
 - Do not stop after changing the first referenced file if the same invariant exists elsewhere.
-- Run the most relevant tests or linters you can.
+- Run the most relevant tests or linters you can. If a test can't run in your environment (e.g. it needs a service, database, or container you can't reach and self-skips), do NOT try to provision infrastructure and do NOT treat the skip as a blocker or a reason to stop — just make the code change. The pipeline re-runs the full test suite on the host (outside this sandbox, with those services available) in the \`test\` step immediately after this fix, and routes back to you if anything fails. Report such tests as "deferred to host test step", not as failures.
 
 FINAL RESPONSE FORMAT:
 Fix checklist:

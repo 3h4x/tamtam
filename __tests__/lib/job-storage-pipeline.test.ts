@@ -193,7 +193,7 @@ async function insertJobsAndSync(rows: JobInsert | JobInsert[]): Promise<void> {
   }
 }
 
-// Skipped: the release-linked legacy chain that drove fix→review fires
+// Skipped: the release-linked legacy chain that drove fix re-verification fires
 // only for non-workflow-driven jobs now. The orchestrator + applyReleaseGuards
 // own this for release-linked jobs. See:
 //   __tests__/lib/workflows/decide-next-phase.test.ts (fix → re-verify routing)
@@ -909,7 +909,7 @@ describe.skip('runCompletionHooks – auto-push pipeline', () => {
 
     expect(startFixFromJobMock).toHaveBeenCalledWith(job.id);
     // Release stays open — the trailing fix continues; the cap fires on the
-    // next review (fix→review hook), not here.
+    // next fix-driven verification round, not here.
     const releaseRow = (await testDb.db.select().from(schema.jobs)).find(r => r.id === 'release-cap');
     expect(releaseRow?.finishedAt).toBeNull();
   });

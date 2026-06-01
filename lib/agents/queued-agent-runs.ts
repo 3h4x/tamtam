@@ -203,6 +203,7 @@ export async function drainQueuedAgentRunsForProject(project: string): Promise<v
         const url = `${baseUrl}/api/agents/${encodeURIComponent(entry.agentId)}/run`;
         const controller = new AbortController();
         const timeout = setTimeout(() => controller.abort(), 15_000);
+        timeout.unref?.();
         const replayBody: { prompt: string; model?: 'fast' | 'normal' | 'smart' } = { prompt: entry.prompt };
         if (entry.modelOverride) replayBody.model = entry.modelOverride;
         const r = await fetch(url, {

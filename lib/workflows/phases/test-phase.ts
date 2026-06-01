@@ -40,9 +40,10 @@ export type TestPhaseResult =
 export async function releaseTestPhaseWorkflow(
   projectName: string,
   releaseJobId?: string,
+  options: { reviewRetest?: boolean } = {},
 ): Promise<TestPhaseResult> {
   'use workflow';
-  const started = await spawnTestStep(projectName, releaseJobId);
+  const started = await spawnTestStep(projectName, releaseJobId, options);
   if (!started.ok) {
     return {
       ok: false,
@@ -72,14 +73,23 @@ export async function releaseTestPhaseWorkflow(
 async function spawnTestStep(
   projectName: string,
   releaseJobId?: string,
+  options: { reviewRetest?: boolean } = {},
 ): Promise<StartTestResult> {
   'use step';
   const { startProjectTest } = await import('@/lib/pipeline/start-test');
   // See review-phase.ts for the rationale: parentContext doesn't carry across
   // workflow step boundaries, so wrap explicitly to preserve release linkage.
-  if (!releaseJobId) return startProjectTest(projectName);
+  if (!releaseJobId) {
+    return options.reviewRetest
+      ? startProjectTest(projectName, options)
+      : startProjectTest(projectName);
+  }
   const { runWithParent } = await import('@/lib/jobs/parent-context');
-  return runWithParent(releaseJobId, () => startProjectTest(projectName));
+  return runWithParent(releaseJobId, () =>
+    options.reviewRetest
+      ? startProjectTest(projectName, options)
+      : startProjectTest(projectName),
+  );
 }
 
 async function awaitTestCompletionStep(jobId: string): Promise<WaitForJobResult> {

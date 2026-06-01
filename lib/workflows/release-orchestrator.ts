@@ -212,12 +212,19 @@ async function decideStep(jobId: string): Promise<NextPhase> {
   let hasUncommittedChanges = false;
   let hasUnpushedCommits = false;
   if (job.kind === 'test' && (job.exitCode ?? -1) === 0) {
-    let configReviewDisabled = false;
+    let isReviewRetest = false;
     try {
-      const { getProjectTestConfig } = await import('@/lib/scheduling/scheduling');
-      configReviewDisabled = !!(await getProjectTestConfig(job.project))?.reviewDisabled;
-      reviewDisabled = configReviewDisabled;
+      const { isReviewRetestJob } = await import('@/lib/pipeline/start-test');
+      isReviewRetest = isReviewRetestJob(job);
     } catch {}
+    let configReviewDisabled = false;
+    if (!isReviewRetest) {
+      try {
+        const { getProjectTestConfig } = await import('@/lib/scheduling/scheduling');
+        configReviewDisabled = !!(await getProjectTestConfig(job.project))?.reviewDisabled;
+        reviewDisabled = configReviewDisabled;
+      } catch {}
+    }
     try {
       const { resolveProjectPath } = await import('@/lib/shared/project-data');
       const projPath = resolveProjectPath(job.project);
@@ -243,7 +250,9 @@ async function decideStep(jobId: string): Promise<NextPhase> {
         // reviewer simply has nothing to evaluate this round.
         const nothingForReviewerToSee = !hasReviewablePath && !hasUnpushedCommits;
         const hasShippableState = hasUncommittedChanges || hasUnpushedCommits;
-        reviewDisabled = reviewDisabled || (nothingForReviewerToSee && hasShippableState);
+        if (!isReviewRetest) {
+          reviewDisabled = reviewDisabled || (nothingForReviewerToSee && hasShippableState);
+        }
       }
     } catch {}
   }
@@ -335,6 +344,18 @@ async function decideStep(jobId: string): Promise<NextPhase> {
       console.warn('[release-orchestrator] soak context resolution failed:', err);
     }
   }
+  // A review-driven fix re-runs the host-side test phase before re-review
+  // only when TamTam can actually start a test job. If tests are disabled or
+  // no command is detectable, fall back to the original direct re-review path.
+  let hostTestsAvailable = true;
+  if (job.kind === 'fix' && parentKind === 'review') {
+    try {
+      const { hasRunnableTestCommand } = await import('@/lib/pipeline/start-test');
+      hostTestsAvailable = await hasRunnableTestCommand(job.project);
+    } catch {
+      hostTestsAvailable = false;
+    }
+  }
   const decision = decideNextPhase({
     kind: job.kind,
     exitCode: job.exitCode ?? -1,
@@ -343,6 +364,7 @@ async function decideStep(jobId: string): Promise<NextPhase> {
     pushPrContext,
     autoPrMergeEnabled,
     reviewDisabled,
+    hostTestsAvailable,
     hasUncommittedChanges,
     hasUnpushedCommits,
     soakContext,

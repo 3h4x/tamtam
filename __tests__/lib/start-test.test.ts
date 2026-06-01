@@ -11,6 +11,8 @@ import { tmpdir } from 'os';
 const mocks = vi.hoisted(() => ({
   getImproveConfigMock: vi.fn(),
   getProjectTestConfigMock: vi.fn(),
+  resolveProjectPathMock: vi.fn(),
+  refreshProjectsCacheSyncMock: vi.fn(),
   execSyncMock: vi.fn(),
 }));
 
@@ -19,7 +21,10 @@ vi.mock('@/lib/scheduling/scheduling', () => ({
   getProjectTestConfig: (...args: unknown[]) => mocks.getProjectTestConfigMock(...args),
 }));
 vi.mock('@/lib/shared/project-data', () => ({
-  resolveProjectPath: vi.fn(),
+  resolveProjectPath: (...args: unknown[]) => mocks.resolveProjectPathMock(...args),
+}));
+vi.mock('@/lib/shared/enabled-projects', () => ({
+  refreshProjectsCacheSync: (...args: unknown[]) => mocks.refreshProjectsCacheSyncMock(...args),
 }));
 vi.mock('@/lib/jobs/job-storage', () => ({
   createJob: vi.fn(),
@@ -54,7 +59,7 @@ vi.mock('child_process', async (importOriginal) => ({
 }));
 
 // Single top-level import — all tests below share this resolved module graph.
-import { detectTestCommand } from '@/lib/pipeline/start-test';
+import { detectTestCommand, hasRunnableTestCommand, isReviewRetestJob } from '@/lib/pipeline/start-test';
 
 describe('detectTestCommand', () => {
   let projDir: string;
@@ -63,6 +68,8 @@ describe('detectTestCommand', () => {
     projDir = mkdtempSync(join(tmpdir(), 'tamtam-detect-'));
     mocks.getImproveConfigMock.mockReturnValue({ projects: {}, claudeBin: 'claude', logDir: '/tmp' });
     mocks.getProjectTestConfigMock.mockReturnValue(null);
+    mocks.resolveProjectPathMock.mockReset().mockReturnValue(projDir);
+    mocks.refreshProjectsCacheSyncMock.mockReset();
     mocks.execSyncMock.mockReset();
   });
 
@@ -153,5 +160,33 @@ describe('detectTestCommand', () => {
     writeFileSync(join(projDir, 'package.json'), JSON.stringify({ scripts: { test: 'vitest' } }));
     writeFileSync(join(projDir, 'pnpm-lock.yaml'), '');
     await expect(detectTestCommand(projDir, 'myproj')).resolves.toBeNull();
+  });
+
+  it('reports whether a project has a runnable host test command', async () => {
+    writeFileSync(join(projDir, 'package.json'), JSON.stringify({ scripts: { test: 'vitest' } }));
+    writeFileSync(join(projDir, 'pnpm-lock.yaml'), '');
+
+    await expect(hasRunnableTestCommand('myproj')).resolves.toBe(true);
+
+    mocks.getProjectTestConfigMock.mockReturnValue({ testsDisabled: true });
+    await expect(hasRunnableTestCommand('myproj')).resolves.toBe(false);
+  });
+
+  it('reports no runnable host test command when the project path cannot be resolved', async () => {
+    mocks.resolveProjectPathMock.mockReturnValue(null);
+
+    await expect(hasRunnableTestCommand('missing')).resolves.toBe(false);
+    expect(mocks.refreshProjectsCacheSyncMock).toHaveBeenCalledOnce();
+  });
+
+  it('detects review-driven re-test job context metadata', () => {
+    expect(isReviewRetestJob({
+      kind: 'test',
+      contextMeta: JSON.stringify({ pipelineReason: 'review-retest' }),
+    })).toBe(true);
+    expect(isReviewRetestJob({
+      kind: 'test',
+      contextMeta: JSON.stringify({ pipelineReason: 'other' }),
+    })).toBe(false);
   });
 });

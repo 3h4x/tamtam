@@ -183,6 +183,7 @@ function ownsLivePidfile(pidfile: DevServerPidFile): boolean {
 async function fetchReadyOnce(url: string, timeoutMs: number): Promise<boolean> {
   const ac = new AbortController();
   const t = setTimeout(() => ac.abort(), timeoutMs);
+  t.unref?.();
   try {
     const resp = await fetch(url, { signal: ac.signal, redirect: 'manual' });
     // Any response (including 3xx/4xx) means the server bound the port and

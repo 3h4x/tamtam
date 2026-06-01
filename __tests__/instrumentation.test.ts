@@ -38,6 +38,9 @@ describe('instrumentation', () => {
     vi.doUnmock('@/lib/jobs/job-storage');
     vi.doUnmock('@/lib/jobs/storage');
     vi.doUnmock('@/lib/workflows/safe-start-orchestrator');
+    vi.doUnmock('@/lib/db');
+    vi.doUnmock('@/lib/shared/shell');
+    vi.doUnmock('drizzle-orm');
   });
 
   function mockDeps(agents: unknown[], options: { abortActiveRelease?: ReturnType<typeof vi.fn> } = {}) {
@@ -543,6 +546,10 @@ describe('instrumentation', () => {
       // in the runProbeSweep block below).
       vi.doUnmock('@/lib/jobs/job-storage');
       vi.doUnmock('@/lib/jobs/storage');
+      vi.doUnmock('@/lib/db');
+      vi.doUnmock('@/lib/shared/shell');
+      vi.doUnmock('@/lib/workflows/safe-start-orchestrator');
+      vi.doUnmock('drizzle-orm');
       vi.resetModules();
       vi.doMock('@/lib/jobs/job-storage', () => storageMock);
       // Also mock the non-barrel path so the barrel bypass doesn't fall through to real storage.ts

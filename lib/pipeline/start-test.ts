@@ -11,6 +11,23 @@ import { getLock, acquireLock, isLockOwnedByActiveRelease } from './pipeline-loc
 import { checkCliStartGate } from '@/lib/usage/resolve-provider';
 import { findBlockingRunningJob } from '@/lib/jobs/project-active-job';
 import { markCloseHandlerPending, clearCloseHandlerPending } from '@/lib/jobs/spawned-close-pending';
+import type { JobData } from '@/lib/jobs/types';
+
+const REVIEW_RETEST_REASON = 'review-retest';
+
+export interface StartTestOptions {
+  reviewRetest?: boolean;
+}
+
+export function isReviewRetestJob(job: Pick<JobData, 'kind' | 'contextMeta'>): boolean {
+  if (job.kind !== 'test' || !job.contextMeta) return false;
+  try {
+    const meta = JSON.parse(job.contextMeta) as { pipelineReason?: unknown };
+    return meta.pipelineReason === REVIEW_RETEST_REASON;
+  } catch {
+    return false;
+  }
+}
 
 export async function detectTestCommand(projPath: string, projectName?: string): Promise<string | null> {
   // Explicit off-switch — overrides user/auto-detected command. Wrapped in
@@ -58,11 +75,25 @@ export async function detectTestCommand(projPath: string, projectName?: string):
   return null;
 }
 
+export async function hasRunnableTestCommand(projectName: string): Promise<boolean> {
+  let projPath = resolveProjectPath(projectName);
+  if (!projPath) {
+    const { refreshProjectsCacheSync } = await import('@/lib/shared/enabled-projects');
+    await refreshProjectsCacheSync();
+    projPath = resolveProjectPath(projectName);
+  }
+  if (!projPath) return false;
+  return (await detectTestCommand(projPath, projectName)) !== null;
+}
+
 export type StartTestResult =
   | { ok: true; jobId: string; pid: number; logPath: string; testCmd: string }
   | { ok: false; status: number; detail: string; blockingJobId?: string };
 
-export async function startProjectTest(projectName: string): Promise<StartTestResult> {
+export async function startProjectTest(
+  projectName: string,
+  options: StartTestOptions = {},
+): Promise<StartTestResult> {
   let projPath = resolveProjectPath(projectName);
   if (!projPath) {
     const { refreshProjectsCacheSync } = await import('@/lib/shared/enabled-projects');
@@ -118,7 +149,10 @@ export async function startProjectTest(projectName: string): Promise<StartTestRe
 
   mkdirSync(/*turbopackIgnore: true*/ logDir, { recursive: true });
 
-  const job = createJob(projectName, 'test', 0, '');
+  const contextMeta = options.reviewRetest
+    ? JSON.stringify({ pipelineReason: REVIEW_RETEST_REASON })
+    : undefined;
+  const job = createJob(projectName, 'test', 0, '', undefined, contextMeta);
   job.provider = gate.provider;
   const logPath = join(/*turbopackIgnore: true*/ logDir, `${job.id}.log`);
   job.logPath = logPath;

@@ -776,9 +776,9 @@ async function runCompletionHooksInner(job: JobData): Promise<void> {
             notificationEvent = 'review_do_not_ship';
           }
           // Fixes are unbounded — every NEEDS ATTENTION / DO NOT SHIP triggers
-          // a fix. The cap lives on the verification side: the fix→review
-          // hook counts reviews and bails before starting the (MAX+1)-th
-          // review. The trailing fix may go unverified, which is the explicit
+          // a fix. The cap lives on the verification side: review-driven fixes
+          // count reviews and bail before starting the next re-test/re-review
+          // round. The trailing fix may go unverified, which is the explicit
           // tradeoff: applying the fix is more useful than burning a final
           // review we couldn't act on.
           const contradiction = fixContradictsReview(job);
@@ -850,16 +850,12 @@ async function runCompletionHooksInner(job: JobData): Promise<void> {
     try {
       const { autoCommitEnabled, autoPushEnabled } = await getProjectPipelineConfig(job.project);
       if (!!findLinkedActiveReleaseJob(job) || autoPushEnabled || autoCommitEnabled) {
-        // Branch on what triggered this fix: a failing test or a NEEDS_ATTENTION
-        // review. Both call into the same `fix` kind, but the recovery path is
-        // different — a fix from a test failure must re-run tests (the tests are
-        // the source of truth for "is the bug actually fixed"), while a fix
-        // from a review must re-run review (the reviewer's checklist is the
-        // source of truth there). Previously every fix went straight to review,
-        // so a failing test followed by a successful fix would skip the
-        // re-test entirely and merge code that hadn't been verified.
+        // Branch on what triggered this fix. Review-driven fixes also re-run
+        // host-side tests first; the normal test→review chain then re-judges
+        // the freshly-tested tree.
         const parent = job.parentJobId ? getJob(job.parentJobId) : null;
         const fromTestFailure = parent?.kind === 'test' && parent.exitCode !== null && parent.exitCode !== 0;
+        const fromReviewFailure = parent?.kind === 'review';
         const fromCommitFailure = parent?.kind === 'commit' && parent.exitCode !== null && parent.exitCode !== 0;
         const fromPushFailure = parent?.kind === 'push' && parent.exitCode !== null && parent.exitCode !== 0;
 
@@ -910,27 +906,78 @@ async function runCompletionHooksInner(job: JobData): Promise<void> {
               forcedReleaseExitCode = 1;
             }
           }
-        } else if (fromTestFailure) {
-          // Cap on number of test runs — a persistently-broken test can't
-          // churn test→fix→test→fix forever. Counts tests (the verification
-          // round), not fixes; the trailing fix lands but the next test is
-          // skipped once the budget is spent.
-          const testCount = recentStepCount(job.project, 'test', job);
-          if (testCount >= getFixIterationCap()) {
-            releaseStopReason = `test cap reached for ${job.project} (${testCount}/${getFixIterationCap()}) — tests still need verification`;
-            noteReleaseStop(releaseStopReason);
-            notificationEvent = 'fix_loop_exhausted';
-            forcedReleaseExitCode = 1;
-          } else {
-            const { startProjectTest } = await import('@/lib/pipeline/start-test');
-            const r = await startProjectTest(job.project);
-            if (r.ok) {
-              console.log(`[fix→test] re-running tests after fix ${job.id} (test #${testCount + 1})`);
-              chainedNext = true;
+        } else if (fromTestFailure || fromReviewFailure) {
+          // Count verification rounds, not fixes. For review-driven fixes,
+          // the re-test is part of the review loop budget: review→fix→test
+          // →review still spends review attempts, not the test-failure budget.
+          const loopKind = fromReviewFailure ? 'review' : 'test';
+          const count = recentStepCount(job.project, loopKind, job);
+          const cap = getFixIterationCap();
+          if (cap > 0 && count >= cap) {
+            if (fromReviewFailure) {
+              const legacyStop = `review cap reached for ${job.project} (${count}/${cap}) — review keeps surfacing new findings, stopping`;
+              const reviewToCite = findLatestReviewForRelease(job) ?? parent ?? job;
+              if (isDoNotShipReview(reviewToCite)) {
+                notificationEvent = 'review_do_not_ship';
+                releaseStopReason = legacyStop;
+                noteReleaseStop(releaseStopReason);
+                forcedReleaseExitCode = 1;
+              } else {
+                notificationEvent = 'fix_loop_exhausted';
+                const fb = await tryReviewExhaustionFallback(reviewToCite, 'review-cap');
+                if (fb.chainedNext) {
+                  chainedNext = true;
+                } else if (fb.releaseStopReason) {
+                  releaseStopReason = fb.releaseStopReason;
+                  forcedReleaseExitCode = fb.forcedReleaseExitCode ?? 1;
+                } else {
+                  releaseStopReason = legacyStop;
+                  noteReleaseStop(releaseStopReason);
+                  forcedReleaseExitCode = 1;
+                }
+              }
             } else {
-              releaseStopReason = `skipped re-test for ${job.project}: ${r.detail}`;
+              releaseStopReason = `test cap reached for ${job.project} (${count}/${cap}) — tests still need verification`;
               noteReleaseStop(releaseStopReason);
+              notificationEvent = 'fix_loop_exhausted';
               forcedReleaseExitCode = 1;
+            }
+          } else {
+            let shouldRunHostTest = fromTestFailure;
+            if (fromReviewFailure) {
+              try {
+                const { hasRunnableTestCommand } = await import('@/lib/pipeline/start-test');
+                shouldRunHostTest = await hasRunnableTestCommand(job.project);
+              } catch {
+                shouldRunHostTest = false;
+              }
+            }
+
+            if (shouldRunHostTest) {
+              const { startProjectTest } = await import('@/lib/pipeline/start-test');
+              const r = fromReviewFailure
+                ? await startProjectTest(job.project, { reviewRetest: true })
+                : await startProjectTest(job.project);
+              if (r.ok) {
+                const label = fromReviewFailure ? 'review re-test' : 'test';
+                console.log(`[fix→test] re-running tests after fix ${job.id} (${label} #${count + 1})`);
+                chainedNext = true;
+              } else {
+                releaseStopReason = `skipped re-test for ${job.project}: ${r.detail}`;
+                noteReleaseStop(releaseStopReason);
+                forcedReleaseExitCode = 1;
+              }
+            } else {
+              const { startProjectReview } = await import('@/lib/pipeline/start-review');
+              const r = await startProjectReview(job.project);
+              if (r.ok) {
+                console.log(`[fix→review] no runnable host test for ${job.project}; re-running review after fix ${job.id} (review #${count + 1})`);
+                chainedNext = true;
+              } else {
+                releaseStopReason = `skipped re-review for ${job.project}: ${r.detail}`;
+                noteReleaseStop(releaseStopReason);
+                forcedReleaseExitCode = 1;
+              }
             }
           }
         } else {
@@ -1074,8 +1121,21 @@ async function runCompletionHooksInner(job: JobData): Promise<void> {
         const freshLgtm = projPath && !hasUncommittedChanges && hasUnpushedCommits
           ? await hasFreshLgtm(job.project, projPath)
           : false;
+        const { isReviewRetestJob } = await import('@/lib/pipeline/start-test');
+        const isReviewRetest = isReviewRetestJob(job);
 
-        if (hasUncommittedChanges || hasUnpushedCommits) {
+        if (isReviewRetest) {
+          const { startProjectReview } = await import('@/lib/pipeline/start-review');
+          const r = await startProjectReview(job.project);
+          if (r.ok) {
+            console.log(`[release] review re-test passed → started review ${r.jobId} for ${job.project}`);
+            chainedNext = true;
+          } else {
+            releaseStopReason = `review re-test→review skipped for ${job.project}: ${r.detail}`;
+            noteReleaseStop(releaseStopReason);
+            forcedReleaseExitCode = 1;
+          }
+        } else if (hasUncommittedChanges || hasUnpushedCommits) {
           // Review disabled → skip straight to commit (agent prompt covers review).
           const { getProjectTestConfig } = await import('@/lib/scheduling/scheduling');
           const reviewDisabled = !!(await getProjectTestConfig(job.project))?.reviewDisabled;
@@ -1159,9 +1219,9 @@ async function runCompletionHooksInner(job: JobData): Promise<void> {
     }
   }
 
-  // Test failed: kick off a fix job using the test log. The fix→review hook
-  // chains back through review → commit → push. Fixes are unbounded — the
-  // loop is bounded on the verification side (next test/review).
+  // Test failed: kick off a fix job using the test log. A successful fix
+  // chains back through test → review → commit → push. Fixes are unbounded —
+  // the loop is bounded on the verification side (next test/review).
   if (job.kind === 'test' && job.exitCode !== null && job.exitCode !== 0) {
     try {
       const { autoCommitEnabled, autoPushEnabled } = await getProjectPipelineConfig(job.project);

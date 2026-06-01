@@ -189,6 +189,8 @@ const mocks = vi.hoisted(() => ({
   startProjectReview: vi.fn(),
   // pipeline/start-test
   startProjectTest: vi.fn(),
+  hasRunnableTestCommand: vi.fn(),
+  isReviewRetestJob: vi.fn(),
   // pipeline/start-mark-dod
   startMarkDod: vi.fn(),
   // pipeline/start-pr-wait
@@ -263,6 +265,8 @@ vi.mock('@/lib/pipeline/start-review', () => ({
 }));
 vi.mock('@/lib/pipeline/start-test', () => ({
   startProjectTest: mocks.startProjectTest,
+  hasRunnableTestCommand: mocks.hasRunnableTestCommand,
+  isReviewRetestJob: mocks.isReviewRetestJob,
 }));
 vi.mock('@/lib/pipeline/start-mark-dod', () => ({
   startMarkDod: mocks.startMarkDod,
@@ -352,6 +356,8 @@ function applyDefaultMocks(): void {
   mocks.startProjectCommit.mockResolvedValue({ ok: true, commitSha: 'abc123', message: 'commit ok', jobId: 'commit-auto' });
   mocks.startProjectReview.mockResolvedValue({ ok: true, jobId: 'review-next' });
   mocks.startProjectTest.mockResolvedValue({ ok: true, jobId: 'test-next' });
+  mocks.hasRunnableTestCommand.mockResolvedValue(true);
+  mocks.isReviewRetestJob.mockReturnValue(false);
   mocks.startMarkDod.mockResolvedValue({ ok: true, verified: 1, total: 1, changed: false });
   mocks.launchPrWait.mockReturnValue({ jobId: 'pr-wait-job' });
   mocks.retryVerdictWithClaude.mockResolvedValue(null);
@@ -1423,6 +1429,103 @@ describe('standalone review cap fallback', () => {
     mocks.getSettings.mockReturnValue({ fix_max_iterations: 1 });
   });
 
+  it('re-runs host tests after a review-driven fix before re-reviewing', async () => {
+    mocks.getSettings.mockReturnValue({ fix_max_iterations: 2 });
+    const now = Date.now() / 1000;
+    await insertJobsAndCache(getTestDb(), [
+      makeJobRow({
+        id: 'review-parent',
+        project: 'proj',
+        kind: 'review',
+        startedAt: now - 90,
+        finishedAt: now - 80,
+        exitCode: 0,
+        verdict: 'NEEDS ATTENTION',
+      }),
+    ]);
+
+    const fixJob = makeFixJob('fix-from-review', {
+      parentJobId: 'review-parent',
+      startedAt: now - 30,
+    });
+
+    await markDone(fixJob, 0);
+
+    expect(mocks.startProjectTest).toHaveBeenCalledOnce();
+    expect(mocks.startProjectTest).toHaveBeenCalledWith('proj', { reviewRetest: true });
+    expect(mocks.startProjectReview).not.toHaveBeenCalled();
+    expect(mocks.fileReviewExhaustionIssue).not.toHaveBeenCalled();
+  });
+
+  it('forces re-review after a review-driven re-test even when review is disabled', async () => {
+    mocks.resolveProjectPath.mockReturnValue('/repo/project');
+    mocks.exec.mockResolvedValue({ exitCode: 0, stdout: ' M file.ts\n', stderr: '' });
+    mocks.getProjectTestConfig.mockReturnValue({
+      autoPushEnabled: true,
+      autoCommitEnabled: false,
+      releaseAfterRun: false,
+      prWorkflowEnabled: false,
+      reviewDisabled: true,
+    });
+    mocks.isReviewRetestJob.mockReturnValue(true);
+    const now = Date.now() / 1000;
+    const testJob: JobData = {
+      id: 'review-retest',
+      project: 'proj',
+      kind: 'test',
+      prompt: null,
+      pid: 99999,
+      logPath: null,
+      startedAt: now - 30,
+      finishedAt: null,
+      exitCode: null,
+      seen: false,
+      durationMs: null,
+      inputTokens: null,
+      outputTokens: null,
+      cacheReadTokens: null,
+      cacheCreateTokens: null,
+      sessionId: null,
+      contextMeta: JSON.stringify({ pipelineReason: 'review-retest' }),
+    };
+
+    await markDone(testJob, 0);
+
+    expect(mocks.startProjectReview).toHaveBeenCalledOnce();
+    expect(mocks.startProjectReview).toHaveBeenCalledWith('proj');
+    expect(mocks.startProjectCommit).not.toHaveBeenCalled();
+  });
+
+  it('falls back to re-review after a review-driven fix when no host test command is runnable', async () => {
+    mocks.getSettings.mockReturnValue({ fix_max_iterations: 2 });
+    mocks.hasRunnableTestCommand.mockResolvedValue(false);
+    const now = Date.now() / 1000;
+    await insertJobsAndCache(getTestDb(), [
+      makeJobRow({
+        id: 'review-parent',
+        project: 'proj',
+        kind: 'review',
+        startedAt: now - 90,
+        finishedAt: now - 80,
+        exitCode: 0,
+        verdict: 'NEEDS ATTENTION',
+      }),
+    ]);
+
+    const fixJob = makeFixJob('fix-from-review-no-tests', {
+      parentJobId: 'review-parent',
+      startedAt: now - 30,
+    });
+
+    await markDone(fixJob, 0);
+
+    expect(mocks.hasRunnableTestCommand).toHaveBeenCalledWith('proj');
+    expect(mocks.startProjectTest).not.toHaveBeenCalled();
+    expect(mocks.startProjectReview).toHaveBeenCalledOnce();
+    expect(mocks.startProjectReview).toHaveBeenCalledWith('proj');
+    expect(mocks.fileReviewExhaustionIssue).not.toHaveBeenCalled();
+  });
+
   it('cites the newest standalone review when the review cap is exhausted', async () => {
     const now = Date.now() / 1000;
     await insertJobsAndCache(getTestDb(), [
@@ -1453,6 +1556,7 @@ describe('standalone review cap fallback', () => {
 
     await markDone(fixJob, 0);
 
+    expect(mocks.startProjectTest).not.toHaveBeenCalled();
     expect(mocks.startProjectReview).not.toHaveBeenCalled();
     expect(mocks.fileReviewExhaustionIssue).toHaveBeenCalledOnce();
     expect(mocks.fileReviewExhaustionIssue).toHaveBeenCalledWith(

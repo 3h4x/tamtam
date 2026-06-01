@@ -18,9 +18,10 @@ export interface PnpmTestPhaseResult {
 export async function pnpmTestPhaseWorkflow(
   projectName: string,
   releaseJobId?: string,
+  options: { reviewRetest?: boolean } = {},
 ): Promise<PnpmTestPhaseResult> {
   'use workflow';
-  const started = await spawnPlainTestStep(projectName, releaseJobId);
+  const started = await spawnPlainTestStep(projectName, releaseJobId, options);
   if (!started.ok) {
     const noCommand = started.status === 400 && /detect test command/i.test(started.detail);
     return {
@@ -52,12 +53,21 @@ export async function pnpmTestPhaseWorkflow(
 async function spawnPlainTestStep(
   projectName: string,
   releaseJobId?: string,
+  options: { reviewRetest?: boolean } = {},
 ): Promise<StartTestResult> {
   'use step';
   const { startProjectTest } = await import('@/lib/pipeline/start-test');
-  if (!releaseJobId) return startProjectTest(projectName);
+  if (!releaseJobId) {
+    return options.reviewRetest
+      ? startProjectTest(projectName, options)
+      : startProjectTest(projectName);
+  }
   const { runWithParent } = await import('@/lib/jobs/parent-context');
-  return runWithParent(releaseJobId, () => startProjectTest(projectName));
+  return runWithParent(releaseJobId, () =>
+    options.reviewRetest
+      ? startProjectTest(projectName, options)
+      : startProjectTest(projectName),
+  );
 }
 
 async function awaitPlainTestCompletionStep(jobId: string): Promise<WaitForJobResult> {

@@ -68,7 +68,7 @@ export interface Transition {
    *  NextPhase output (e.g. 'testExitCode', 'pushPrContext'). */
   carries?: ReadonlyArray<'testExitCode' | 'verdict' | 'pushPrContext' | 'stopReason' | 'soakContext'>;
   /** Constant projection fields the matcher should set on the NextPhase. */
-  set?: Record<string, string>;
+  set?: Record<string, string | boolean>;
   /** Guards that may rewrite this decision before dispatch. Diagram annotates
    *  these edges so guard presence is visually discoverable. */
   guardable?: ReadonlyArray<GuardName>;
@@ -128,7 +128,16 @@ export const TRANSITIONS: ReadonlyArray<Transition> = [
 
   // fix re-verifies its parent step
   { from: 'fix', when: { parentKind: 'test'   }, to: 'test',   label: 'parent test',   guardable: ['iteration-cap'] },
-  { from: 'fix', when: { parentKind: 'review' }, to: 'review', label: 'parent review', guardable: ['iteration-cap'] },
+  // A review-driven fix re-runs the host-side test phase before re-review, so
+  // review judges a freshly-tested tree (test pass → review; test fail → fix).
+  // This mirrors the post-agent-run test gate and runs the project's test
+  // command on the host — outside any provider sandbox — so integration suites
+  // that need Docker/Supabase actually execute instead of self-skipping.
+  // When no host test step is runnable (tests disabled or no command detected)
+  // there is no test job to tick on, so fall back to the original re-review
+  // directly. This row must precede the general one.
+  { from: 'fix', when: { parentKind: 'review', hostTestsAvailable: { eq: false } }, to: 'review', label: 'parent review (no host test)', guardable: ['iteration-cap'] },
+  { from: 'fix', when: { parentKind: 'review' }, to: 'test',   label: 'parent review → re-test', set: { reviewRetest: true }, guardable: ['iteration-cap'] },
   { from: 'fix', when: { parentKind: 'commit' }, to: 'commit', label: 'parent commit', guardable: ['iteration-cap'] },
   { from: 'fix', when: { parentKind: 'push'   }, to: 'push',   label: 'parent push',   guardable: ['iteration-cap'] },
   { from: 'fix', when: {},                       to: 'done',   label: 'no parent' },

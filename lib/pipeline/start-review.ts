@@ -228,21 +228,22 @@ function releaseContextForReview(projectName: string): string {
     .filter((j) =>
       j.project === projectName &&
       j.releaseId === release.id &&
-      (j.kind === 'review' || j.kind === 'fix') &&
+      (j.kind === 'review' || j.kind === 'fix' || j.kind === 'test') &&
       j.finishedAt !== null
     )
     .sort((a, b) => (a.startedAt || 0) - (b.startedAt || 0));
 
   if (prior.length === 0) {
-    return `PREVIOUS RELEASE REVIEW/FIX CONTEXT:\nRelease ${release.id} has no previous review/fix iterations.`;
+    return `PREVIOUS RELEASE REVIEW/FIX/TEST CONTEXT:\nRelease ${release.id} has no previous review/fix/test iterations.`;
   }
 
   const blocks: string[] = [];
   for (const job of prior.slice(-6)) {
     blocks.push(describePriorReviewStep(job));
   }
-  return `PREVIOUS RELEASE REVIEW/FIX CONTEXT:
-Use this as review memory. First verify whether earlier findings were actually fixed, then search sibling paths before adding new findings.
+  return `PREVIOUS RELEASE REVIEW/FIX/TEST CONTEXT:
+Use this as review memory. The pipeline runs the host-side test suite after each review-driven fix (review → fix → test → review), so the \`test\` steps below show what the latest fix actually fixed or broke against the real test suite — trust those host results over the fix step's own claims about what it fixed.
+First verify whether earlier findings were actually fixed (a green \`test\` step after the fix is strong evidence they were), then search sibling paths before adding new findings.
 
 ${blocks.join('\n\n')}`;
 }

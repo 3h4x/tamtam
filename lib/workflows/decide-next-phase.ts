@@ -16,7 +16,10 @@
 //   commit fail → fix       (re-fix and try the commit again)
 //   fix pass    → re-verify the parent step that triggered the fix:
 //                   parent test    → next: 'test'    (was the bug really fixed?)
-//                   parent review  → next: 'review'  (do the findings hold?)
+//                   parent review  → next: 'test'    (re-run host-side tests,
+//                                    then test→review re-judges a tested tree;
+//                                    falls back to next: 'review' when no
+//                                    host test step is runnable)
 //                   parent commit  → next: 'commit'  (does the hook still reject?)
 //                   parent push    → next: 'push'    (does the hook still reject?)
 //                   no parent      → done
@@ -24,7 +27,7 @@
 //   anything else          → unknown (safe fallback, e.g. release meta-job)
 
 export type NextPhase =
-  | { next: 'test'; from: 'fix' }
+  | { next: 'test'; from: 'fix'; reviewRetest?: boolean }
   | { next: 'review'; from: 'test' | 'fix' }
   | { next: 'commit'; from: 'test' | 'review' | 'fix'; fileIssueForReviewId?: string }
   | { next: 'fix'; from: 'test'; testExitCode: number }
@@ -62,6 +65,11 @@ export interface DecisionInputs {
   /** Project-level review off-switch. When true, a passing test should
    *  skip the review phase and keep release side effects moving. */
   reviewDisabled?: boolean;
+  /** Whether a host-side test step can actually run. Only meaningful for
+   *  review-driven fix completions: when false, re-verify by going straight
+   *  back to `review` instead of dispatching a `test` phase that would fail
+   *  to start because tests are disabled or no command can be detected. */
+  hostTestsAvailable?: boolean;
   /** Whether the project worktree has uncommitted changes after test. */
   hasUncommittedChanges?: boolean;
   /** Whether the current branch has local commits not pushed upstream. */

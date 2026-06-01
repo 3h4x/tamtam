@@ -19,7 +19,7 @@ not fixable failures. This is the contract:
 | Step that failed | Recovery step | Re-verification | Cap                                  |
 |------------------|---------------|-----------------|--------------------------------------|
 | `test` exit ≠ 0  | `fix` (sees test log) | re-run `test` | `fix_max_iterations` |
-| `review` not LGTM | `fix` (sees review findings) | re-run `review` | `fix_max_iterations` |
+| `review` not LGTM | `fix` (sees review findings) | re-run `test`, then `test → review` (falls back to re-`review` directly when no host test step is runnable) | `fix_max_iterations` |
 | `commit` exit ≠ 0 | `fix` (sees commit log) | re-run `commit` | `fix_max_iterations` |
 | `push` exit ≠ 0, except cancellation exits | `fix` (reads hook log; bails if pre-push tests failed, branch protection blocks the direct push, or the remote moved and the push step could not recover) | re-run `push` | `getPushFixAttemptCap()=2` for hook-rejection fix; `fix_max_iterations` for review-driven push recovery |
 | `push` exit `-2` / `-3` | abort (`push cancelled` / `push cancelled by release abort or timeout`) | none | release abort / wall-clock timeout |
@@ -39,8 +39,14 @@ Rules that hold for every recovery loop:
   in a try/catch.
 - **Recovery never silently skips a verification step.** When a recovery
   fix succeeds, the next call MUST be the verification step that
-  originally failed (re-test after test-fail, re-review after
-  needs-attention, re-commit after commit-fail, re-push after push-fail).
+  originally failed (re-test after test-fail, re-commit after
+  commit-fail, re-push after push-fail). A **review-driven** fix
+  (needs-attention) re-runs the host-side `test` phase first — so review
+  always re-judges a freshly-tested tree — then `test → review`
+  re-reviews: `review → fix → test → review`. Running tests in the review
+  loop on the host (outside any provider sandbox) means integration suites
+  that need Docker/Supabase actually execute instead of self-skipping, and
+  a fix that breaks a test is caught by `test` (→ fix) before re-review.
 - **One cap rules every step verification loop.** A single user-facing
   setting — `fix_max_iterations` — governs the verification budget
   for review, test, commit, and the review-driven push leg. It defaults to
@@ -148,9 +154,9 @@ TEST
 REVIEW
   ├─ exit 0  → completion hook → extract verdict
   │   ├─ LGTM              → start PUSH
-  │   ├─ NEEDS ATTENTION   → start FIX → re-run REVIEW (`fix_max_iterations`; default 0 = unlimited)
+  │   ├─ NEEDS ATTENTION   → start FIX → re-run TEST → REVIEW (`fix_max_iterations`; default 0 = unlimited)
   │   ├─ DO NOT SHIP       → policy from `review_do_not_ship_action`:
-  │   │                       `fix` (default)  → start FIX → re-run REVIEW (cap-bounded)
+  │   │                       `fix` (default)  → start FIX → re-run TEST → REVIEW (cap-bounded)
   │   │                       `pass`           → file follow-up issue → start COMMIT
   │   │                       `abort`          → finalize release (exit 1)
   │   └─ No verdict found  → finalize release (exit 1)
@@ -197,7 +203,10 @@ actionable review content, the fix launcher refuses to start a fix; rerun the
 review step instead of asking a fixer to act on infrastructure output.
 
 FIX
-  ├─ exit 0  → completion hook → start REVIEW (loop)
+  ├─ exit 0 after test-parent fix   → completion hook → start TEST (loop)
+  ├─ exit 0 after review-parent fix → completion hook → start TEST, then TEST starts REVIEW on pass (loop)
+  ├─ exit 0 after commit-parent fix → completion hook → start COMMIT (loop)
+  ├─ exit 0 after push-parent fix   → completion hook → start PUSH (loop)
   └─ exit ≠0 → completion hook → finalize release (exit 1)
 
 PUSH

@@ -23,13 +23,11 @@ interface PrometheusResult {
 async function fetchWithTimeout(url: string, ms = 5000): Promise<Response> {
   const controller = new AbortController()
   const id = setTimeout(() => controller.abort(), ms)
+  id.unref?.()
   try {
-    const res = await fetch(url, { signal: controller.signal, cache: 'no-store' })
+    return await fetch(url, { signal: controller.signal, cache: 'no-store' })
+  } finally {
     clearTimeout(id)
-    return res
-  } catch (e) {
-    clearTimeout(id)
-    throw e
   }
 }
 

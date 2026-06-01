@@ -150,8 +150,16 @@ describe('decideNextPhase', () => {
       });
     });
 
-    it('parent review → next: review (re-run review after fix)', () => {
+    it('parent review → next: test (re-run host-side tests, then test→review)', () => {
       expect(decideNextPhase({ kind: 'fix', exitCode: 0, verdict: null, parentKind: 'review' })).toEqual({
+        next: 'test',
+        from: 'fix',
+        reviewRetest: true,
+      });
+    });
+
+    it('parent review with no runnable host test → next: review (no test job to run)', () => {
+      expect(decideNextPhase({ kind: 'fix', exitCode: 0, verdict: null, parentKind: 'review', hostTestsAvailable: false })).toEqual({
         next: 'review',
         from: 'fix',
       });

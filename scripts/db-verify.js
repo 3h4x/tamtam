@@ -3,7 +3,7 @@
 // `--backup <file>`, a custom-format dump produced by `pg_dump --format=custom`.
 
 const { spawnSync } = require('child_process');
-const { existsSync, statSync } = require('fs');
+const { statSync } = require('fs');
 const { Client } = require('pg');
 
 async function main(deps = {}) {
@@ -11,11 +11,10 @@ async function main(deps = {}) {
   const env = deps.env ?? process.env;
   const PgClient = deps.Client ?? Client;
   const spawn = deps.spawnSync ?? spawnSync;
-  const exists = deps.existsSync ?? existsSync;
   const stat = deps.statSync ?? statSync;
 
   if (argv[0] === '--backup') {
-    return verifyBackup(argv[1], { spawn, exists, stat });
+    return verifyBackup(argv[1], { spawn, stat });
   }
   if (argv.length === 0) {
     return verifyLiveDatabase(env.DATABASE_URL, PgClient);
@@ -56,17 +55,22 @@ async function verifyLiveDatabase(dbUrl, PgClient = Client) {
 
 function verifyBackup(dumpPath, deps = {}) {
   const spawn = deps.spawn ?? spawnSync;
-  const exists = deps.exists ?? existsSync;
   const stat = deps.stat ?? statSync;
   if (!dumpPath) {
     console.error('Usage: node scripts/db-verify.js --backup <path-to-backup.pgdump>');
     return 1;
   }
-  if (!exists(dumpPath)) {
-    console.error(`Backup file not found: ${dumpPath}`);
+  let size;
+  try {
+    size = stat(dumpPath).size;
+  } catch (error) {
+    if (error && typeof error === 'object' && 'code' in error && error.code === 'ENOENT') {
+      console.error(`Backup file not found: ${dumpPath}`);
+    } else {
+      console.error(`Backup file cannot be inspected: ${error instanceof Error ? error.message : String(error)}`);
+    }
     return 1;
   }
-  const size = stat(dumpPath).size;
   if (size === 0) {
     console.error(`Backup file is empty: ${dumpPath}`);
     return 1;
