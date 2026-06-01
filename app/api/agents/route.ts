@@ -12,6 +12,7 @@ import { parseOptionalKnownModelInput } from '@/lib/agents/model-aliases';
 import { parseOptionalAgentScheduleInput } from '@/lib/scheduling/agent-schedule';
 import { isCliProvider } from '@/lib/usage/cli-providers';
 import { parsePrerequisiteCommandInput } from '@/lib/agents/prerequisites';
+import { parseOptionalPermissionModeInput } from '@/lib/shared/config';
 import { resolveAgentPrerequisiteCommandWithFileSkills } from '@/lib/agents/file-skill-prerequisites';
 import { isBuiltInRecommendedAgent } from '@/lib/agents/recommended-agents';
 import { loadAgentCronStates, getAllAgentLastAttempts } from '@/lib/scheduling/agent-cron-state';
@@ -176,6 +177,10 @@ export async function POST(request: NextRequest) {
   if (scheduleError) {
     return NextResponse.json({ detail: scheduleError }, { status: 400 });
   }
+  const { mode: permissionMode, error: permissionModeError } = parseOptionalPermissionModeInput(body.permissionMode);
+  if (permissionModeError) {
+    return NextResponse.json({ detail: permissionModeError }, { status: 400 });
+  }
 
   const now = Date.now() / 1000;
   const id = `agent-${Date.now()}`;
@@ -196,6 +201,7 @@ export async function POST(request: NextRequest) {
     provider,
     fallbackEnabled,
     prerequisiteCommand,
+    permissionMode,
     kind: 'user',
     createdAt: now,
     updatedAt: now,

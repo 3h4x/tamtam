@@ -57,6 +57,7 @@ function makeAgentRow(overrides: Partial<typeof schema.agents.$inferSelect> = {}
     provider: null,
     fallbackEnabled: false,
     prerequisiteCommand: null,
+    permissionMode: null,
     kind: 'user',
     createdAt: 1000,
     updatedAt: 1000,

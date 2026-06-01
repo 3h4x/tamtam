@@ -403,7 +403,7 @@ async function runSystemAgentStart(
 }
 
 async function runAgentStart(
-  agent: { id: string; name: string; project: string; skillIds: string; docPaths: string; model: string; prompt: string; schedule: string | null; enabled: boolean; provider?: string | null; fallbackEnabled?: boolean; prerequisiteCommand?: string | null },
+  agent: { id: string; name: string; project: string; skillIds: string; docPaths: string; model: string; prompt: string; schedule: string | null; enabled: boolean; provider?: string | null; fallbackEnabled?: boolean; prerequisiteCommand?: string | null; permissionMode?: string | null },
   taskPrompt: string,
   triggeredBy: string,
   readOnly: boolean,
@@ -496,6 +496,7 @@ async function runAgentStart(
       baseContextMeta: initialContextMeta,
       prereqCmd: prereqCmd ?? null,
       readOnly,
+      permissionMode: agent.permissionMode ?? null,
     }]);
     // Record the workflow run id in context_meta so the jobs DELETE route
     // can propagate user-initiated aborts to the runtime via

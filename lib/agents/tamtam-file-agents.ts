@@ -21,6 +21,7 @@ export interface FileAgent {
   boostable: boolean;
   provider: string | null;
   prerequisiteCommand: string | null;
+  permissionMode: string | null;
   kind: string;
   createdAt: number;
   updatedAt: number;
@@ -135,6 +136,9 @@ function buildFileAgent(
         : meta.boostable !== 'false',
     provider: normalizeFileAgentProvider(meta.provider),
     prerequisiteCommand: parsePrerequisiteCommand(meta.prerequisiteCommand),
+    // Operational/per-environment config — stored in the DB override, not
+    // committed frontmatter. null → inherit the global `permission_mode`.
+    permissionMode: override?.permissionMode ?? null,
     kind: 'user',
     createdAt: now,
     updatedAt: now,

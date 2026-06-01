@@ -13,12 +13,9 @@ import type { AgentTemplateRecord } from '@/components/SettingsPage'
 import { MODEL_TIERS, MODEL_LABELS, MODEL_DESCRIPTIONS, normalizeModelInput } from '@/lib/agents/model-aliases'
 import { resolveAgentPrerequisiteCommand, substitutePrerequisiteProjectPlaceholder } from '@/lib/agents/prerequisites'
 import { CLI_PROVIDERS, type CliProvider } from '@/lib/usage/cli-providers'
+import { AgentScheduleStrip } from '@/components/agents-tab/AgentScheduleStrip'
 
 const MODELS = [...MODEL_TIERS]
-// `Manual` is rendered as a hardcoded <option value="">; SCHEDULES below is
-// the non-empty list — dropped the leading '' sentinel + the .filter(Boolean)
-// that used to mask it at render time.
-const SCHEDULES = ['15m', '30m', '1h', '2h', '4h', '8h', '12h', '24h', '3d', '7d', '30d']
 // Mirror of VALID_PERMISSION_MODES (lib/shared/config.ts) kept inline so this
 // client component doesn't pull server config. '' = inherit the global
 // `permission_mode` setting; a non-empty value overrides it for this agent.
@@ -36,6 +33,7 @@ export interface AgentEditorSavePayload {
   provider: CliProvider | null
   fallbackEnabled?: boolean
   prerequisiteCommand: string | null
+  permissionMode: string | null
 }
 
 export function AgentEditor({
@@ -80,6 +78,7 @@ export function AgentEditor({
   const [enabled, setEnabled] = useState<boolean>(agent ? agent.enabled : true)
   const [boostable, setBoostable] = useState<boolean>(agent ? (agent.boostable ?? true) : true)
   const [prerequisiteCommand, setPrerequisiteCommand] = useState<string>(initialPrerequisite)
+  const [permissionMode, setPermissionMode] = useState<string>(agent?.permissionMode ?? '')
   const [saving, setSaving] = useState(false)
   const [improving, setImproving] = useState(false)
   const [confirmDelete, setConfirmDelete] = useState(false)
@@ -124,6 +123,7 @@ export function AgentEditor({
     setModel(normalizeModelInput(src.model, 'normal'))
     setProvider((agent?.provider as CliProvider | null | undefined) ?? null)
     setFallbackEnabled(agent?.fallbackEnabled ?? template?.fallbackEnabled ?? false)
+    setPermissionMode(agent?.permissionMode ?? '')
     setSchedule(src.schedule || '')
     if (agent) setEnabled(agent.enabled)
     setPrerequisiteCommand(agent
@@ -159,7 +159,7 @@ export function AgentEditor({
     if (!name.trim() || saving) return
     setSaving(true)
     try {
-      await onSave({ name, prompt: agentPrompt, skillIds: selectedSkills, docPaths: selectedDocPaths, model, schedule: schedule || null, enabled, boostable, provider, fallbackEnabled, prerequisiteCommand: prerequisiteCommand.trim() || null })
+      await onSave({ name, prompt: agentPrompt, skillIds: selectedSkills, docPaths: selectedDocPaths, model, schedule: schedule || null, enabled, boostable, provider, fallbackEnabled, prerequisiteCommand: prerequisiteCommand.trim() || null, permissionMode: permissionMode || null })
     } catch (err) {
       toast(err instanceof Error ? err.message : 'Failed to save agent', 'error')
     }
@@ -280,51 +280,32 @@ export function AgentEditor({
             />
           </div>
 
-          {/* Schedule / Enabled / Boostable strip */}
-          <div className="flex items-center gap-4 px-3 py-2.5 rounded-lg bg-bg-secondary border border-border flex-wrap">
-            <div className="flex items-center gap-2 flex-1 min-w-[160px]">
-              <span className="text-xs text-text-tertiary whitespace-nowrap font-medium">Schedule</span>
-              <select
-                id="agent-schedule"
-                className="flex-1 min-w-0 px-2 py-1.5 text-xs bg-bg-primary border border-border rounded-md text-text-primary focus:outline-none focus:ring-1 focus:ring-accent/40 focus:border-accent transition-colors cursor-pointer disabled:opacity-60 disabled:cursor-not-allowed"
-                value={schedule}
-                onChange={(e) => setSchedule(e.target.value)}
-                disabled={isSystemAgent}
-                title={isSystemAgent ? 'Set in Settings → Retrieval' : undefined}
-              >
-                <option value="">Manual</option>
-                {SCHEDULES.map(s => <option key={s} value={s}>every {s}</option>)}
-              </select>
-            </div>
-            <div className="w-px h-4 bg-border shrink-0" />
-            <button
-              type="button"
-              role="switch"
-              aria-checked={enabled}
-              onClick={() => setEnabled(!enabled)}
-              className="flex items-center gap-2 cursor-pointer shrink-0"
-            >
-              <div className={`relative w-9 h-5 rounded-full transition-colors ${enabled ? 'bg-accent' : 'bg-bg-tertiary border border-border'}`}>
-                <div className={`absolute top-0.5 w-4 h-4 rounded-full bg-white shadow-sm transition-all duration-150 ${enabled ? 'left-[18px]' : 'left-0.5'}`} />
-              </div>
-              <span className="text-xs text-text-secondary font-medium">Enabled</span>
-            </button>
-            <div className="w-px h-4 bg-border shrink-0" />
-            <button
-              type="button"
-              role="switch"
-              aria-checked={boostable}
-              onClick={() => setBoostable(!boostable)}
+          <div>
+            <div className="mb-1.5 text-xs font-semibold text-text-tertiary uppercase tracking-wider">Permission mode</div>
+            <select
+              aria-label="Permission mode"
+              className="w-full px-3 py-2 text-sm bg-bg-secondary border border-border rounded-lg text-text-primary focus:outline-none focus:ring-2 focus:ring-accent/40 focus:border-accent transition-colors cursor-pointer disabled:opacity-60 disabled:cursor-not-allowed"
+              value={permissionMode}
+              onChange={(e) => setPermissionMode(e.target.value)}
               disabled={isSystemAgent}
-              className="flex items-center gap-2 cursor-pointer shrink-0 disabled:opacity-50 disabled:cursor-not-allowed"
-              title="When off, the orchestrator never picks this agent for catch-up boost fires — it only runs on its own schedule. Use for blog/social-post style agents."
+              title={isSystemAgent ? 'Built-in agent permission mode is fixed' : "Overrides the global permission mode for this agent's runs."}
             >
-              <div className={`relative w-9 h-5 rounded-full transition-colors ${boostable ? 'bg-accent' : 'bg-bg-tertiary border border-border'}`}>
-                <div className={`absolute top-0.5 w-4 h-4 rounded-full bg-white shadow-sm transition-all duration-150 ${boostable ? 'left-[18px]' : 'left-0.5'}`} />
-              </div>
-              <span className="text-xs text-text-secondary font-medium">Boostable</span>
-            </button>
+              <option value="">Default (global setting)</option>
+              {PERMISSION_MODES.map((m) => <option key={m} value={m}>{m}</option>)}
+            </select>
+            <p className="text-xs text-text-tertiary mt-1">Leave on Default to inherit Settings → CLI. Override to run this agent with a specific mode (e.g. <span className="font-mono">bypassPermissions</span>).</p>
           </div>
+
+          {/* Schedule / Enabled / Boostable strip */}
+          <AgentScheduleStrip
+            schedule={schedule}
+            setSchedule={setSchedule}
+            enabled={enabled}
+            setEnabled={setEnabled}
+            boostable={boostable}
+            setBoostable={setBoostable}
+            isSystemAgent={isSystemAgent}
+          />
         </div>
 
         {/* Right column — prompt */}

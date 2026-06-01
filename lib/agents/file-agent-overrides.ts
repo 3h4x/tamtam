@@ -18,6 +18,7 @@ export interface FileAgentOverride {
   schedule?: string | null;
   model?: string;
   skillIds?: string[];
+  permissionMode?: string | null;
 }
 
 function keyFor(project: string, name: string): string {
@@ -140,6 +141,7 @@ export async function setFileAgentOverride(project: string, name: string, patch:
   if (patch.schedule !== undefined) next.schedule = patch.schedule;
   if (patch.model !== undefined) next.model = normalizeModelInput(patch.model, 'normal');
   if (patch.skillIds !== undefined) next.skillIds = patch.skillIds;
+  if (patch.permissionMode !== undefined) next.permissionMode = patch.permissionMode;
   const value = JSON.stringify(next);
   await db.insert(schema.settings)
     .values({ key: keyFor(project, name), value })

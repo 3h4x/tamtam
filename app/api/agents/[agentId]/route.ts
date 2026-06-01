@@ -14,6 +14,7 @@ import { parseOptionalAgentScheduleInput } from '@/lib/scheduling/agent-schedule
 import { isCliProvider } from '@/lib/usage/cli-providers';
 import { parsePrerequisiteCommandInput } from '@/lib/agents/prerequisites';
 import { resolveAgentPrerequisiteCommandWithFileSkills } from '@/lib/agents/file-skill-prerequisites';
+import { parseOptionalPermissionModeInput } from '@/lib/shared/config';
 
 function withEffectivePrerequisite<T extends { project: string; skillIds: string[]; prerequisiteCommand?: string | null }>(
   agent: T,
@@ -64,6 +65,10 @@ export async function PATCH(
     ? parseOptionalAgentScheduleInput(body.schedule)
     : { schedule: undefined, error: null };
   if (parsedSchedule.error) return NextResponse.json({ detail: parsedSchedule.error }, { status: 400 });
+  const { mode: parsedPermissionMode, error: permissionModeError } = parseOptionalPermissionModeInput(body.permissionMode);
+  if (body.permissionMode !== undefined && permissionModeError) {
+    return NextResponse.json({ detail: permissionModeError }, { status: 400 });
+  }
 
   if (parsedFile) {
     const projPath = resolveProjectPath(parsedFile.project);
@@ -80,7 +85,8 @@ export async function PATCH(
         body.boostable !== undefined ||
         body.schedule !== undefined ||
         body.model !== undefined ||
-        body.skillIds !== undefined
+        body.skillIds !== undefined ||
+        body.permissionMode !== undefined
       ) {
         await setFileAgentOverride(parsedFile.project, parsedFile.name, {
           enabled: body.enabled,
@@ -88,6 +94,7 @@ export async function PATCH(
           schedule: body.schedule !== undefined ? parsedSchedule.schedule : undefined,
           model: parsedModel ?? undefined,
           skillIds: body.skillIds,
+          permissionMode: body.permissionMode !== undefined ? parsedPermissionMode : undefined,
         });
       }
       // Prompt edits always flow to the file. Provider frontmatter and the
@@ -161,6 +168,7 @@ export async function PATCH(
   if (!isSystemAgent && body.prerequisiteCommand !== undefined) {
     updates.prerequisiteCommand = parsePrerequisiteCommandInput(body.prerequisiteCommand) ?? '';
   }
+  if (!isSystemAgent && body.permissionMode !== undefined) updates.permissionMode = parsedPermissionMode;
 
   await db.update(schema.agents).set(updates).where(eq(schema.agents.id, agentId)).execute();
   clearAgentsCache();

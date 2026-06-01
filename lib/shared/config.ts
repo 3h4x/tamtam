@@ -622,6 +622,20 @@ export function normalizePermissionMode(value: string | undefined): PermissionMo
 }
 
 /**
+ * Parse a per-agent permission-mode override coming from an API body.
+ * Returns `{ mode: null }` for null/empty/undefined (inherit the global
+ * setting) and `{ error }` for an unrecognized non-empty value so the route
+ * can reject it instead of silently dropping it.
+ */
+export function parseOptionalPermissionModeInput(value: unknown): { mode: string | null; error?: string } {
+  if (value === undefined || value === null || value === '') return { mode: null };
+  if (typeof value !== 'string' || !(VALID_PERMISSION_MODES as readonly string[]).includes(value)) {
+    return { mode: null, error: `permissionMode must be one of: ${VALID_PERMISSION_MODES.join(', ')}` };
+  }
+  return { mode: value };
+}
+
+/**
  * Resolve the Claude model to use for a specific pipeline step. Returns the
  * user-configured override (Settings → Pipeline) when set; otherwise falls
  * back to the per-step default. `review` defaults to the workspace

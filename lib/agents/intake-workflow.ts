@@ -46,6 +46,8 @@ export interface AgentIntakeParams {
   baseContextMeta: string;
   prereqCmd: string | null;
   readOnly: boolean;
+  /** Per-agent permission-mode override; null → inherit the global setting. */
+  permissionMode?: string | null;
 }
 
 interface PrereqResult {
@@ -175,6 +177,7 @@ async function composePromptStep(
     logDir,
     baseContextMeta,
     readOnly,
+    permissionMode,
   } = params;
 
   // Post-prereq release-lock re-check (prereq can run for minutes).
@@ -396,7 +399,8 @@ At the end of your run, include a short final section exactly named "TamTam Run 
   const issueCruncherDenyFlag = hasIssueCruncherSkill(skillIds)
     ? ` --disallowed-tools "Bash(gh issue:*),Bash(gh api repos/*/issues:*),Bash(gh api repos/*/issues/*:*),Bash(git checkout:*),Bash(git switch:*)"`
     : '';
-  const cmd = `${claudeBin} --print --output-format stream-json --include-partial-messages --verbose ${getPermissionModeFlag()} ${modelFlag}${issueCruncherDenyFlag}`;
+  const permissionModeFlag = getPermissionModeFlag(permissionMode);
+  const cmd = `${claudeBin} --print --output-format stream-json --include-partial-messages --verbose ${permissionModeFlag} ${modelFlag}${issueCruncherDenyFlag}`;
   const fallbackProvider = await resolveFallbackProvider({
     enabled: fallbackEnabled,
     currentProvider: safeProvider,
@@ -408,7 +412,7 @@ At the end of your run, include a short final section exactly named "TamTam Run 
   const fallback = fallbackProvider
     ? {
         provider: fallbackProvider,
-        cmd: `${resolveCliBin(fallbackProvider, settings)} --print --output-format stream-json --include-partial-messages --verbose ${getPermissionModeFlag()} ${modelFlag}${issueCruncherDenyFlag}`,
+        cmd: `${resolveCliBin(fallbackProvider, settings)} --print --output-format stream-json --include-partial-messages --verbose ${permissionModeFlag} ${modelFlag}${issueCruncherDenyFlag}`,
         cliEnv: resolveCliEnv(fallbackProvider, settings),
       }
     : null;
