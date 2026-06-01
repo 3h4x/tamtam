@@ -120,6 +120,20 @@ export function terminalExitEntry(exitCode: number): Pick<TermEntry, 'role' | 't
   return { role: 'error', text: `exit ${exitCode}` }
 }
 
+function humanizeCancelledRawLine(line: string): string {
+  return line.replace(
+    /^(# .*?finished) — exit -(2|3) — /,
+    '$1 — cancelled — ',
+  )
+}
+
+function humanizeCancelledRawLog(log: string): string {
+  return log
+    .split('\n')
+    .map(humanizeCancelledRawLine)
+    .join('\n')
+}
+
 export function appendUniqueErrorDetail(
   entries: TermEntry[],
   detail: string | null | undefined,
@@ -183,7 +197,7 @@ function appendParsedEventsToBuffers(
     onRawLine: passthrough
       ? (line) => {
           flushClaudeBuffers()
-          rawBuffer += `${line}\n`
+          rawBuffer += `${humanizeCancelledRawLine(line)}\n`
         }
       : undefined,
   })
@@ -247,19 +261,20 @@ function appendParsedEventsToBuffers(
 
 function rebuildRecoveredBuffers(log: string, raw: boolean, passthrough: boolean): RecoveredBuffers {
   if (!log) return emptyRecoveredBuffers()
+  const normalizedLog = humanizeCancelledRawLog(log)
 
   if (raw) {
     return {
       history: [],
       streamBuffer: '',
       thinkingBuffer: '',
-      rawBuffer: log,
+      rawBuffer: normalizedLog,
       streamTools: [],
       usedPlainTextFallback: false,
     }
   }
 
-  return appendParsedEventsToBuffers(log, passthrough)
+  return appendParsedEventsToBuffers(normalizedLog, passthrough)
 }
 
 function resolvedFallbackRole(
@@ -670,7 +685,7 @@ class TerminalStore {
       const line = (event as MessageEvent).data
       this.update(projectName, (s) => ({
         ...flushClaudeBuffers(s),
-        rawBuffer: s.rawBuffer + line + '\n',
+        rawBuffer: s.rawBuffer + humanizeCancelledRawLine(line) + '\n',
       }))
     })
 

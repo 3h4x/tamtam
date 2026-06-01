@@ -1,6 +1,7 @@
 'use client'
 
 import { usePromptInsights } from '@/hooks/usePromptInsights'
+import { EmptyState } from '@/components/ui/EmptyState'
 import { Spinner } from '@/components/ui/Spinner'
 
 function formatBytes(n: number): string {
@@ -44,9 +45,16 @@ export function PromptInsightsPanel({ projectName }: { projectName: string }) {
     return (
       <section className="rounded-md border border-border bg-bg-secondary p-3">
         <div className="text-sm font-medium text-text-primary mb-1">Prompt insights</div>
-        <div className="text-xs text-text-tertiary">
-          No agent runs in the last {data?.windowDays ?? 7} days yet.
-        </div>
+        <EmptyState
+          align="start"
+          paddingX="none"
+          paddingY="none"
+          title={(
+            <span className="text-xs font-normal text-text-tertiary">
+              No agent runs in the last {data?.windowDays ?? 7} days yet.
+            </span>
+          )}
+        />
       </section>
     )
   }

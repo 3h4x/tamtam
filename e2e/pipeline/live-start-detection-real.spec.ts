@@ -17,21 +17,33 @@ const START_SCENARIO = JSON.parse(
 const ABORT_SCENARIO = JSON.parse(
   readFileSync(join(__dirname, 'scenarios', 'abort.json'), 'utf-8'),
 );
+const FAILURE_SCENARIO = JSON.parse(
+  readFileSync(join(__dirname, 'scenarios', 'review-failure.json'), 'utf-8'),
+);
 
 const HISTORY_PROJECT = 'start-detect-runs';
 const TERMINAL_PROJECT = 'start-detect-terminal';
 const HISTORY_CANCEL_PROJECT = 'start-detect-runs-cancelled';
+const HISTORY_FAILURE_PROJECT = 'start-detect-runs-failure-idle';
 const TERMINAL_CANCEL_PROJECT = 'start-detect-terminal-cancelled';
 const TERMINAL_RUN_PROJECT = 'start-detect-run-idle';
 const TERMINAL_AGENT_PROJECT = 'start-detect-agent-idle';
 const DEFAULT_DIRTY_WORKTREE_BLOCK_THRESHOLD = 1;
+const DEFAULT_DO_NOT_SHIP_ACTION = 'fix';
 const ACTIVE_PIPELINE_SUMMARY =
   /pipeline summary: (release|test|review|fix|commit|push|dod|merge|soak) running/i;
+const LONG_FAILURE_STEPS = FAILURE_SCENARIO.steps.map(
+  (step: { label?: string; sleep_ms?: number; text: string }) =>
+    step.label === 'review' ? { ...step, sleep_ms: 20_000 } : step,
+);
 
 test.describe('Real idle-page job start detection', () => {
   test.afterEach(async ({ request }) => {
     await request.patch('/api/settings', {
-      data: { dirty_worktree_block_threshold: DEFAULT_DIRTY_WORKTREE_BLOCK_THRESHOLD },
+      data: {
+        dirty_worktree_block_threshold: DEFAULT_DIRTY_WORKTREE_BLOCK_THRESHOLD,
+        review_do_not_ship_action: DEFAULT_DO_NOT_SHIP_ACTION,
+      },
     });
   });
 
@@ -103,6 +115,48 @@ test.describe('Real idle-page job start detection', () => {
     expect(releaseJob?.['exit_code'], 'release exit code after abort').toBe(-3);
 
     await expect(releaseRow.getByText('cancelled at review')).toBeVisible({ timeout: 15_000 });
+    await expect(releaseRow.getByLabel('running')).toHaveCount(0, { timeout: 15_000 });
+    await expect(page.locator('span.animate-pulse')).toHaveCount(0, { timeout: 15_000 });
+  });
+
+  test('history tab detects a newly-started release and clears the spinner after a blocked review without reload', async ({
+    page,
+    request,
+  }) => {
+    writeScenario(HISTORY_FAILURE_PROJECT, LONG_FAILURE_STEPS);
+    resetShimState(HISTORY_FAILURE_PROJECT);
+    await enableProject(request, HISTORY_FAILURE_PROJECT, { testsDisabled: true });
+    const patch = await request.patch('/api/settings', {
+      data: { review_do_not_ship_action: 'abort' },
+    });
+    expect(
+      patch.ok(),
+      `failed to set review_do_not_ship_action: ${patch.status()}`,
+    ).toBe(true);
+
+    await page.goto(`/project/${HISTORY_FAILURE_PROJECT}/history`);
+    await expect(page.getByText('No runs yet').first()).toBeVisible({ timeout: 8_000 });
+
+    const releaseResp = await request.post(`/api/projects/by-project/${HISTORY_FAILURE_PROJECT}/release`);
+    expect(
+      releaseResp.status(),
+      `release POST failed: ${await releaseResp.text()}`,
+    ).toBe(200);
+
+    const releaseRow = page.getByRole('button').filter({ hasText: 'Release pipeline' }).first();
+
+    await expect(releaseRow).toBeVisible({ timeout: 20_000 });
+    await expect(releaseRow.getByLabel('running')).toBeVisible({ timeout: 20_000 });
+    await expect(page.getByText('No runs yet')).toHaveCount(0, { timeout: 20_000 });
+
+    const result = await waitForPipelineCompletion(request, HISTORY_FAILURE_PROJECT, 90_000);
+    expect(result.status, 'pipeline should finish').toBe('done');
+    expect(result.releaseJob?.['exit_code'], 'release should fail with non-zero exit').not.toBe(0);
+
+    await expect(releaseRow.getByText('cancelled after review')).toBeVisible({ timeout: 15_000 });
+    await expect(
+      releaseRow.getByText(/critical security vulnerabilities/i),
+    ).toBeVisible({ timeout: 15_000 });
     await expect(releaseRow.getByLabel('running')).toHaveCount(0, { timeout: 15_000 });
     await expect(page.locator('span.animate-pulse')).toHaveCount(0, { timeout: 15_000 });
   });

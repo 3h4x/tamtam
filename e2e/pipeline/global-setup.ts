@@ -36,6 +36,7 @@ const PROJECTS = [
   'external-start-failure',
   'start-detect-runs',
   'start-detect-runs-cancelled',
+  'start-detect-runs-failure-idle',
   'start-detect-terminal',
   'start-detect-terminal-cancelled',
   'start-detect-run-idle',
