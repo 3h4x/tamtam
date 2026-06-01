@@ -34,6 +34,8 @@ describe('recommendations storage', () => {
   let updateRecommendationStatus: typeof import('@/lib/recommendations/recommendations').updateRecommendationStatus;
   let resolveRecommendationIfOpen: typeof import('@/lib/recommendations/recommendations').resolveRecommendationIfOpen;
   let recommendationId: typeof import('@/lib/recommendations/recommendations').recommendationId;
+  let listAllOpenRecommendations: typeof import('@/lib/recommendations/recommendations').listAllOpenRecommendations;
+  let listAllResolvedRecommendations: typeof import('@/lib/recommendations/recommendations').listAllResolvedRecommendations;
 
   beforeAll(async () => {
     sharedHandle = await createTestPgDbEmpty();
@@ -53,7 +55,7 @@ describe('recommendations storage', () => {
     vi.resetModules();
     await sharedHandle.db.execute(sql.raw('TRUNCATE recommendations'));
     vi.doMock('@/lib/db', () => ({ db: sharedHandle.db, schema }));
-    ({ upsertRecommendation, listRecommendations, updateRecommendationStatus, resolveRecommendationIfOpen, recommendationId } = await import('@/lib/recommendations/recommendations'));
+    ({ upsertRecommendation, listRecommendations, updateRecommendationStatus, resolveRecommendationIfOpen, recommendationId, listAllOpenRecommendations, listAllResolvedRecommendations } = await import('@/lib/recommendations/recommendations'));
   });
 
   afterEach(async () => {
@@ -157,6 +159,27 @@ describe('recommendations storage', () => {
 
   it('returns null when updating a missing recommendation', async () => {
     expect(await updateRecommendationStatus('portal', 'missing', 'applied')).toBeNull();
+  });
+
+  it('splits open (Unresolved) from non-open (History) across projects', async () => {
+    const base = (over: { id: string; status: string; updatedAt: number }) => ({
+      id: over.id, project: 'portal', sourceKind: 'agent:x', type: 'agent_unfruitful',
+      title: over.id, detail: 'd', status: over.status, createdAt: 1, updatedAt: over.updatedAt,
+    });
+    await handle.db.insert(schema.recommendations).values([
+      base({ id: 'open-1', status: 'open', updatedAt: 50 }),
+      base({ id: 'resolved-1', status: 'resolved', updatedAt: 70 }),
+      base({ id: 'dismissed-1', status: 'dismissed', updatedAt: 60 }),
+      base({ id: 'applied-1', status: 'applied', updatedAt: 80 }),
+    ]);
+
+    const open = await listAllOpenRecommendations();
+    expect(open.map((r) => r.id)).toEqual(['open-1']);
+
+    // History = everything not open, newest-first.
+    const history = await listAllResolvedRecommendations();
+    expect(history.map((r) => r.id)).toEqual(['applied-1', 'resolved-1', 'dismissed-1']);
+    expect(history.map((r) => r.status)).toEqual(['applied', 'resolved', 'dismissed']);
   });
 
   it('auto-resolves an open recommendation when the condition clears', async () => {

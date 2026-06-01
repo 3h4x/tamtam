@@ -48,9 +48,16 @@ function EmptyPanel({ message }: { message: string }) {
 
 function UnavailablePanel({ endpoint }: { endpoint: string }) {
   return (
-    <div className="rounded-lg border border-border bg-bg-secondary px-3 py-4 text-sm text-text-tertiary">
-      Not reachable at <span className="font-mono text-text-secondary" data-private>{endpoint}</span>
-    </div>
+    <EmptyState
+      align="start"
+      paddingY="xs"
+      className="rounded-lg border border-border bg-bg-secondary px-3 py-4"
+      title={
+        <span className="font-normal text-text-tertiary">
+          Not reachable at <span className="font-mono text-text-secondary" data-private>{endpoint}</span>
+        </span>
+      }
+    />
   )
 }
 

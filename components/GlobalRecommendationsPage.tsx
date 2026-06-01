@@ -1,20 +1,30 @@
 'use client'
 
 import { useEffect, useState } from 'react'
-import { fetchAllOpenRecommendations, updateRecommendation, applyRecommendation, runAgent, updateAgent } from '@/lib/client-api'
+import { fetchAllOpenRecommendations, fetchRecommendationsHistory, updateRecommendation, applyRecommendation, runAgent, updateAgent } from '@/lib/client-api'
 import type { Recommendation } from '@/lib/client-api'
 import { ErrorState } from '@/components/ErrorState'
 import { Button } from '@/components/ui/Button'
 import { EmptyState } from '@/components/ui/EmptyState'
 import { RecommendationCard } from '@/components/recommendations/RecommendationCard'
+import { RecommendationHistoryRow } from '@/components/recommendations/RecommendationHistoryRow'
 import { recommendationBackoffSchedule } from '@/components/recommendations/schedule-backoff'
 
-// Cross-project Recommendations page. Lists every open recommendation sorted
-// newest-first, with the same Accept/dismiss buttons used inside each project's
-// Recommendations tab.
+type RecommendationsTab = 'unresolved' | 'history'
+
+// Cross-project Recommendations page. Two tabs: "Unresolved" (open work that
+// needs attention) and "History" (what was already done — auto-resolved by the
+// orchestrator, or dismissed/applied by the operator).
 export function GlobalRecommendationsPage() {
   const [items, setItems] = useState<Recommendation[]>([])
   const [loading, setLoading] = useState(true)
+  const [tab, setTab] = useState<RecommendationsTab>('unresolved')
+  // History is loaded lazily the first time the tab is opened, then refreshed
+  // whenever an action resolves a card (so it stays in sync without polling).
+  const [history, setHistory] = useState<Recommendation[]>([])
+  const [historyLoading, setHistoryLoading] = useState(false)
+  const [historyLoaded, setHistoryLoaded] = useState(false)
+  const [historyError, setHistoryError] = useState<string | null>(null)
   // Tracks every recommendation currently being applied/dismissed. A single
   // string slot would have meant: clicking Accept on card B while card A is
   // still in flight overwrites A's busy state (UI lie), and whichever of
@@ -47,6 +57,32 @@ export function GlobalRecommendationsPage() {
     const data = await fetchAllOpenRecommendations()
     setItems(data.recommendations)
     setLoadError(null)
+  }
+
+  const loadHistory = async () => {
+    setHistoryLoading(true)
+    try {
+      const data = await fetchRecommendationsHistory()
+      setHistory(data.recommendations)
+      setHistoryError(null)
+      setHistoryLoaded(true)
+    } catch (err) {
+      setHistoryError(err instanceof Error ? err.message : 'Failed to load history')
+    } finally {
+      setHistoryLoading(false)
+    }
+  }
+
+  // Lazily load history the first time the tab is opened.
+  useEffect(() => {
+    if (tab === 'history' && !historyLoaded && !historyLoading) void loadHistory()
+  }, [tab, historyLoaded, historyLoading])
+
+  // An action that resolved/dismissed/applied a card invalidates the cached
+  // history so it reloads (lazily on next open, or immediately if visible).
+  const invalidateHistory = () => {
+    setHistoryLoaded(false)
+    if (tab === 'history') void loadHistory()
   }
 
   const patchRecommendationPayload = (id: string, patch: Record<string, unknown>) => {
@@ -88,6 +124,7 @@ export function GlobalRecommendationsPage() {
       await updateRecommendation(item.project, item.id, 'dismissed')
       setItems((prev) => prev.filter((candidate) => candidate.id !== item.id))
       window.dispatchEvent(new CustomEvent('tamtam:recommendations-changed'))
+      invalidateHistory()
       try {
         await load()
       } catch (err) {
@@ -107,6 +144,7 @@ export function GlobalRecommendationsPage() {
       await applyRecommendation(item.project, item)
       setItems((prev) => prev.filter((candidate) => candidate.id !== item.id))
       window.dispatchEvent(new CustomEvent('tamtam:recommendations-changed'))
+      invalidateHistory()
       try {
         await load()
       } catch (err) {
@@ -230,9 +268,29 @@ export function GlobalRecommendationsPage() {
       <div className="flex items-baseline justify-between gap-3">
         <div>
           <h1 className="text-xl font-semibold text-text-primary">Recommendations</h1>
-          <p className="text-xs text-text-tertiary mt-1">Open agent and scheduler suggestions across every project.</p>
+          <p className="text-xs text-text-tertiary mt-1">Agent and scheduler suggestions across every project.</p>
         </div>
         <div className="text-xs font-mono text-text-tertiary tabular-nums">{items.length} open</div>
+      </div>
+
+      <div className="flex gap-4 border-b border-border" role="tablist" aria-label="Recommendations">
+        {(['unresolved', 'history'] as const).map((t) => (
+          <button
+            key={t}
+            type="button"
+            role="tab"
+            aria-selected={tab === t}
+            onClick={() => setTab(t)}
+            className={[
+              '-mb-px border-b-2 px-1 pb-2 text-sm font-medium transition-colors',
+              tab === t
+                ? 'border-accent text-text-primary'
+                : 'border-transparent text-text-tertiary hover:text-text-secondary',
+            ].join(' ')}
+          >
+            {t === 'unresolved' ? `Unresolved (${items.length})` : `History${historyLoaded ? ` (${history.length})` : ''}`}
+          </button>
+        ))}
       </div>
 
       {notice && (
@@ -251,50 +309,80 @@ export function GlobalRecommendationsPage() {
         </div>
       )}
 
-      {loadError && (
-        <ErrorState
-          message="Failed to load recommendations."
-          hint={loadError}
-          onRetry={() => {
-            setLoading(true)
-            void load()
-              .catch((err) => {
-                setLoadError(loadErrorMessage(err))
-              })
-              .finally(() => {
-                setLoading(false)
-              })
-          }}
-        />
+      {tab === 'unresolved' && (
+        <>
+          {loadError && (
+            <ErrorState
+              message="Failed to load recommendations."
+              hint={loadError}
+              onRetry={() => {
+                setLoading(true)
+                void load()
+                  .catch((err) => {
+                    setLoadError(loadErrorMessage(err))
+                  })
+                  .finally(() => {
+                    setLoading(false)
+                  })
+              }}
+            />
+          )}
+
+          {!loadError && items.length === 0 ? (
+            <EmptyState
+              bordered
+              paddingY="xs"
+              align="start"
+              title="No open recommendations across any project."
+            />
+          ) : !loadError ? (
+            <div className="rounded-lg border border-border bg-bg-secondary overflow-hidden">
+              {items.map((item) => (
+                <RecommendationCard
+                  key={item.id}
+                  item={item}
+                  busy={updating.has(item.id)}
+                  errorMessage={errors[item.id] ?? null}
+                  onAccept={() => accept(item)}
+                  onDismiss={() => dismiss(item)}
+                  onRunNow={() => runNow(item)}
+                  onBackOff={(schedule) => backOff(item, schedule)}
+                  onInvestigate={() => investigate(item)}
+                  onStopBoosting={() => stopBoosting(item)}
+                  onDisable={() => disable(item)}
+                  showProjectLink
+                />
+              ))}
+            </div>
+          ) : null}
+        </>
       )}
 
-      {!loadError && items.length === 0 ? (
-        <EmptyState
-          bordered
-          paddingY="xs"
-          align="start"
-          title="No open recommendations across any project."
-        />
-      ) : !loadError ? (
-        <div className="rounded-lg border border-border bg-bg-secondary overflow-hidden">
-          {items.map((item) => (
-            <RecommendationCard
-              key={item.id}
-              item={item}
-              busy={updating.has(item.id)}
-              errorMessage={errors[item.id] ?? null}
-              onAccept={() => accept(item)}
-              onDismiss={() => dismiss(item)}
-              onRunNow={() => runNow(item)}
-              onBackOff={(schedule) => backOff(item, schedule)}
-              onInvestigate={() => investigate(item)}
-              onStopBoosting={() => stopBoosting(item)}
-              onDisable={() => disable(item)}
-              showProjectLink
+      {tab === 'history' && (
+        <>
+          {historyError && (
+            <ErrorState message="Failed to load history." hint={historyError} onRetry={() => void loadHistory()} />
+          )}
+          {!historyError && historyLoading && !historyLoaded ? (
+            <div className="rounded-lg border border-border bg-bg-secondary p-4">
+              <div className="skeleton h-3 w-48 rounded" />
+            </div>
+          ) : !historyError && historyLoaded && history.length === 0 ? (
+            <EmptyState
+              bordered
+              paddingY="xs"
+              align="start"
+              title="Nothing resolved yet — auto-resolved, dismissed, and applied recommendations will appear here."
             />
-          ))}
-        </div>
-      ) : null}
+          ) : !historyError ? (
+            <div className="rounded-lg border border-border bg-bg-secondary overflow-hidden">
+              {history.map((item) => (
+                <RecommendationHistoryRow key={item.id} item={item} />
+              ))}
+            </div>
+          ) : null}
+        </>
+      )}
     </div>
   )
 }

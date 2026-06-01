@@ -1,4 +1,5 @@
 import { describe, it, expect, beforeAll, beforeEach, afterAll, vi } from 'vitest';
+import { NextRequest } from 'next/server';
 import { sql } from 'drizzle-orm';
 import * as schema from '@/lib/db/schema';
 import { createTestPgDbEmpty, type TestDbHandle } from '@/__tests__/helpers/test-db';
@@ -102,7 +103,7 @@ describe('GET /api/recommendations (cross-project list)', () => {
     await seed('portal', 'dismissed', 'b');
     await seed('tamtam', 'open', 'c');
 
-    const res = await GET();
+    const res = await GET(new NextRequest('http://localhost/api/recommendations'));
     const data = await res.json();
     expect(data.recommendations).toHaveLength(2);
     for (const r of data.recommendations) {

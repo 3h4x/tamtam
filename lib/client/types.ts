@@ -242,7 +242,9 @@ export interface Recommendation {
   type: string
   title: string
   detail: string
-  status: 'open' | 'dismissed' | 'applied'
+  // 'resolved' = auto-retired by the orchestrator when the condition cleared;
+  // 'dismissed' / 'applied' = operator actions. Non-open rows appear in History.
+  status: 'open' | 'dismissed' | 'applied' | 'resolved'
   payload: Record<string, unknown> | null
   created_at: number
   updated_at: number

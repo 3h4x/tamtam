@@ -531,6 +531,19 @@ describe('instrumentation', () => {
         reconcileStaleRelease: reconcileStaleReleaseMock,
       };
 
+      // reapOrphanReleases dynamically imports each dependency at call time.
+      // Under fork-pool CPU starvation the afterEach doUnmock → beforeEach
+      // resetModules → per-test doMock re-registration can race, leaving a
+      // *previous* test's storageMock active. That stale mock makes markDone
+      // resolve against a different vi.fn() than the one this test holds,
+      // surfacing as "expected markDone to be called … Number of calls: 0"
+      // even though production logged a successful reap. Explicitly clear both
+      // job-storage paths and reset the module registry before re-registering
+      // so residue can't survive into this test (mirrors mockJobStorageModule
+      // in the runProbeSweep block below).
+      vi.doUnmock('@/lib/jobs/job-storage');
+      vi.doUnmock('@/lib/jobs/storage');
+      vi.resetModules();
       vi.doMock('@/lib/jobs/job-storage', () => storageMock);
       // Also mock the non-barrel path so the barrel bypass doesn't fall through to real storage.ts
       vi.doMock('@/lib/jobs/storage', () => storageMock);

@@ -4,7 +4,7 @@ import Link from 'next/link'
 import { Button, buttonVariants } from '@/components/ui/Button'
 import { Pill } from '@/components/ui/Pill'
 import type { Recommendation } from '@/lib/client-api'
-import { AUTO_APPLICABLE_RECOMMENDATION_TYPES, isAutoRecommendation } from '@/lib/client-api'
+import { AUTO_APPLICABLE_RECOMMENDATION_TYPES, isAutoRecommendation, isManualRecommendation } from '@/lib/client-api'
 import { formatAgo } from '@/lib/shared/format'
 import { recommendationBackoffSchedule } from '@/components/recommendations/schedule-backoff'
 
@@ -20,14 +20,14 @@ function stringValue(value: unknown): string | null {
   return typeof value === 'string' && value.trim() ? value.trim() : null
 }
 
-// Auto/manual badge. `agent_unfruitful` is auto-*detected* but its remediation
-// is entirely the operator's (widen the prompt, throttle, disable) — labelling
-// it AUTO implies the orchestrator will fix it, which it won't. So it carries a
-// warning-toned MANUAL pill, while the genuinely informational/already-acted
-// types (boost, health) keep the green AUTO pill.
+// Auto/manual badge keyed on WHO resolves the recommendation. AUTO = the
+// orchestrator resolves it end-to-end (only `orchestrator_boost`) → green pill,
+// no Fix actions. MANUAL = the orchestrator only detects it; the operator must
+// act (unfruitful, health, schedule_backoff) → amber pill + Fix menu. See
+// `AUTO_RECOMMENDATION_TYPES` / `MANUAL_RECOMMENDATION_TYPES`.
 function recommendationBadge(type: string): { text: string; tone: 'success' | 'warning' } | null {
-  if (type === 'agent_unfruitful') return { text: 'MANUAL', tone: 'warning' }
   if (isAutoRecommendation(type)) return { text: 'AUTO', tone: 'success' }
+  if (isManualRecommendation(type)) return { text: 'MANUAL', tone: 'warning' }
   return null
 }
 
@@ -149,14 +149,12 @@ export function RecommendationCard({
   const acceptable = AUTO_APPLICABLE_RECOMMENDATION_TYPES.has(item.type)
   const actionLabel = item.title.trim() || typeLabel(item.type)
   const reasoningRows = recommendationReasoning(item.payload)
-  // Fix actions apply to any recommendation that names an agent the operator
-  // can remediate. That includes the `agent_unfruitful` card: the orchestrator
-  // deprioritizes it automatically, but the operator still wants one-click ways
-  // to act on the advice (widen prompt → Edit, check work → Run, investigate →
-  // Run investigation/View logs, reduce noise → Decrease rate, stop the bleeding
-  // → Stop boosting/Disable agent). Only `orchestrator_boost` (already acted)
-  // and `orchestrator_agent_health` (informational) have nothing to fix.
-  const showFixMenu = Boolean(item.agent_id) && (!isAutoRecommendation(item.type) || item.type === 'agent_unfruitful')
+  // Fix actions appear on every MANUAL recommendation that names an agent the
+  // operator can remediate (unfruitful, health, schedule_backoff): widen prompt
+  // → Edit, check work → Run, investigate → Run investigation/View logs, reduce
+  // noise → Decrease rate, stop the bleeding → Stop boosting/Disable agent. AUTO
+  // recommendations (`orchestrator_boost`) are orchestrator-resolved — dismiss only.
+  const showFixMenu = Boolean(item.agent_id) && isManualRecommendation(item.type)
   const badge = recommendationBadge(item.type)
   const backoffSchedule = recommendationBackoffSchedule(item)
   const editableAgent = isUserEditableAgentId(item.agent_id)

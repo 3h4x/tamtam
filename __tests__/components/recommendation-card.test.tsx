@@ -5,7 +5,7 @@ import { afterEach, describe, expect, it, vi } from 'vitest'
 import { createRoot } from 'react-dom/client'
 import { flushSync } from 'react-dom'
 import type { Recommendation } from '@/lib/client-api'
-import { isAutoRecommendation } from '@/lib/client-api'
+import { isAutoRecommendation, isManualRecommendation } from '@/lib/client-api'
 import { RecommendationCard } from '@/components/recommendations/RecommendationCard'
 
 vi.mock('next/link', () => ({
@@ -67,11 +67,18 @@ describe('RecommendationCard', () => {
     document.body.innerHTML = ''
   })
 
-  it('classifies orchestrator informational recommendations as auto', () => {
+  it('classifies AUTO as orchestrator-resolved and MANUAL as operator-actionable', () => {
+    // AUTO = orchestrator resolves it end-to-end (only boost). Everything the
+    // operator must act on is MANUAL, even though the orchestrator detected it.
     expect(isAutoRecommendation('orchestrator_boost')).toBe(true)
-    expect(isAutoRecommendation('agent_unfruitful')).toBe(true)
-    expect(isAutoRecommendation('orchestrator_agent_health')).toBe(true)
+    expect(isAutoRecommendation('agent_unfruitful')).toBe(false)
+    expect(isAutoRecommendation('orchestrator_agent_health')).toBe(false)
     expect(isAutoRecommendation('agent_schedule_backoff')).toBe(false)
+
+    expect(isManualRecommendation('agent_unfruitful')).toBe(true)
+    expect(isManualRecommendation('orchestrator_agent_health')).toBe(true)
+    expect(isManualRecommendation('agent_schedule_backoff')).toBe(true)
+    expect(isManualRecommendation('orchestrator_boost')).toBe(false)
   })
 
   it('renders a Fix menu with apply, schedule details, and a project link for auto-applicable recommendations', () => {
@@ -144,20 +151,34 @@ describe('RecommendationCard', () => {
     unmount()
   })
 
-  it('omits "apply" but still offers Fix actions for non-auto-applicable manual recommendations', () => {
+  it('omits "apply" but still offers Fix actions for manual recommendations that are not auto-applicable', () => {
     const { container, unmount } = renderCard({
-      item: makeRecommendation({ type: 'some_future_type', payload: null }),
+      item: makeRecommendation({ type: 'agent_unfruitful', payload: null }),
       errorMessage: 'apply failed',
     })
 
-    // Not auto-applicable → no "Apply suggested change", but still a manual
-    // recommendation with an agent → Fix menu offers Run/Edit.
+    // Manual + not auto-applicable → no "Apply suggested change", but still a
+    // manual recommendation with an agent → Fix menu offers Run/Edit.
     expect(container.textContent).not.toContain('Apply suggested change')
     expect(container.textContent).toContain('Fix')
     expect(container.textContent).toContain('Run agent now')
     expect(container.textContent).toContain('Edit agent')
     expect(container.textContent).toContain('dismiss')
     expect(container.textContent).toContain('apply failed')
+
+    unmount()
+  })
+
+  it('shows no badge and no Fix menu for an unclassified recommendation type', () => {
+    const { container, unmount } = renderCard({
+      item: makeRecommendation({ type: 'some_future_type', payload: null }),
+    })
+
+    // Unknown types are neither AUTO nor MANUAL → no pill, no Fix menu (dismiss only).
+    expect(container.textContent).not.toContain('AUTO')
+    expect(container.textContent).not.toContain('MANUAL')
+    expect(container.textContent).not.toContain('Fix')
+    expect(container.textContent).toContain('dismiss')
 
     unmount()
   })
@@ -382,7 +403,6 @@ describe('RecommendationCard', () => {
       }),
     })
 
-    expect(container.textContent).toContain('AUTO')
     expect(container.textContent).toContain('health')
     expect(container.textContent).toContain('concern')
     expect(container.textContent).toContain('loop')
@@ -392,9 +412,28 @@ describe('RecommendationCard', () => {
     expect(container.textContent).toContain('42/100')
     expect(container.textContent).toContain('avg score')
     expect(container.textContent).toContain('39/100')
-    // Health recommendations are informational: AUTO pill, no Fix or Accept actions.
-    expect(container.textContent).not.toContain('Accept')
-    expect(container.textContent).not.toContain('Fix')
+    // Health is MANUAL: the orchestrator only diagnosed it, so it carries the
+    // MANUAL pill and a Fix menu (narrow scope → Edit, throttle → Decrease rate).
+    expect(container.textContent).toContain('MANUAL')
+    expect(container.textContent).not.toContain('AUTO')
+    expect(container.textContent).toContain('Fix')
+
+    unmount()
+  })
+
+  it('offers a Fix menu (Edit + Decrease rate) on a health recommendation', () => {
+    const { container, unmount } = renderCard({
+      item: makeRecommendation({
+        source_kind: 'orchestrator',
+        type: 'orchestrator_agent_health',
+        title: 'improve — noise detected',
+        payload: { concern: true, concernType: 'noise', severity: 'low' },
+      }),
+    })
+
+    const labels = Array.from(container.querySelectorAll('button,a')).map((n) => n.textContent)
+    expect(labels).toContain('Decrease rate') // health with no schedule defaults to 8h
+    expect(labels.some((l) => l?.includes('Edit agent'))).toBe(true)
 
     unmount()
   })

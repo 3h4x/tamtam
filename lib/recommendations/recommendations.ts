@@ -173,6 +173,20 @@ export async function listAllOpenRecommendations(): Promise<RecommendationRow[]>
   return rows.map(rowToDict);
 }
 
+/**
+ * Every non-open recommendation across all projects, newest-first — the
+ * "History" tab. Includes orchestrator `resolved` rows plus operator
+ * `dismissed` / `applied` rows so the operator can see what was done.
+ */
+export async function listAllResolvedRecommendations(): Promise<RecommendationRow[]> {
+  const rows = await db
+    .select()
+    .from(schema.recommendations)
+    .where(sql`${schema.recommendations.status} <> 'open'`)
+    .orderBy(desc(schema.recommendations.updatedAt));
+  return rows.map(rowToDict);
+}
+
 export async function updateRecommendationStatus(project: string, id: string, status: RecommendationStatus): Promise<RecommendationRow | null> {
   const now = Date.now() / 1000;
   await db.update(schema.recommendations)

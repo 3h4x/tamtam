@@ -70,11 +70,14 @@ export {
   fetchProjectDocs,
   fetchRecommendationsSummary,
   fetchAllOpenRecommendations,
+  fetchRecommendationsHistory,
   updateRecommendation,
   applyRecommendation,
   AUTO_APPLICABLE_RECOMMENDATION_TYPES,
   AUTO_RECOMMENDATION_TYPES,
+  MANUAL_RECOMMENDATION_TYPES,
   isAutoRecommendation,
+  isManualRecommendation,
 } from './client/projects'
 export type { RecommendationsSummary } from './client/projects'
 

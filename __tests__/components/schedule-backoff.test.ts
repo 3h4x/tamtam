@@ -46,10 +46,11 @@ describe('recommendationBackoffSchedule', () => {
     expect(recommendationBackoffSchedule(makeRec({ payload: null }))).toBe('8h')
   })
 
-  it('returns null for non-unfruitful recommendation types', () => {
+  it('is eligible for unfruitful and health (noise → run less), but not other types', () => {
+    // Health/noise concerns advise fewer runs, so backoff applies there too.
+    expect(recommendationBackoffSchedule(makeRec({ type: 'orchestrator_agent_health', payload: { currentSchedule: '15m' } }))).toBe('1h')
     expect(recommendationBackoffSchedule(makeRec({ type: 'agent_schedule_backoff' }))).toBeNull()
     expect(recommendationBackoffSchedule(makeRec({ type: 'orchestrator_boost' }))).toBeNull()
-    expect(recommendationBackoffSchedule(makeRec({ type: 'orchestrator_agent_health' }))).toBeNull()
   })
 
   it('returns null for system agents (not user-editable)', () => {

@@ -97,7 +97,7 @@ Complete reference for TamTam HTTP API routes. All routes live under `app/api/`.
 
 ## Cross-project recommendations
 
-- `/api/recommendations` — Read-only list of every `open` recommendation across all projects, newest first (GET). Uses the same recommendation row shape as the per-project route, including the structured `agent_schedule_backoff` and `orchestrator_agent_health` payloads described above.
+- `/api/recommendations` — Read-only cross-project recommendation list, newest first (GET). Default (no query param) returns every `open` recommendation for the Unresolved tab; `?state=history` returns every non-open recommendation (`resolved` / `dismissed` / `applied`) for the History tab. Uses the same recommendation row shape as the per-project route, including the structured `agent_schedule_backoff` and `orchestrator_agent_health` payloads described above.
 - `/api/recommendations/summary` — Read-only summary of all `open` recommendations (`{ openCount, byProject }`) for header/global UI polling (GET)
 
 ## Settings

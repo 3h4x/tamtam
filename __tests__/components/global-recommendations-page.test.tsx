@@ -7,8 +7,9 @@ import { flushSync } from 'react-dom'
 import { GlobalRecommendationsPage } from '@/components/GlobalRecommendationsPage'
 import type { Recommendation } from '@/lib/client-api'
 
-const { fetchAllOpenRecommendationsMock, updateRecommendationMock, applyRecommendationMock, runAgentMock, updateAgentMock } = vi.hoisted(() => ({
+const { fetchAllOpenRecommendationsMock, fetchRecommendationsHistoryMock, updateRecommendationMock, applyRecommendationMock, runAgentMock, updateAgentMock } = vi.hoisted(() => ({
   fetchAllOpenRecommendationsMock: vi.fn(),
+  fetchRecommendationsHistoryMock: vi.fn(),
   updateRecommendationMock: vi.fn(),
   applyRecommendationMock: vi.fn(),
   runAgentMock: vi.fn(),
@@ -20,6 +21,7 @@ vi.mock('@/lib/client-api', async () => {
   return {
     ...actual,
     fetchAllOpenRecommendations: fetchAllOpenRecommendationsMock,
+    fetchRecommendationsHistory: fetchRecommendationsHistoryMock,
     updateRecommendation: updateRecommendationMock,
     applyRecommendation: applyRecommendationMock,
     runAgent: runAgentMock,
@@ -76,6 +78,8 @@ const fastWaitFor = (callback: Parameters<typeof vi.waitFor>[0]) =>
 describe('GlobalRecommendationsPage', () => {
   beforeEach(() => {
     fetchAllOpenRecommendationsMock.mockReset()
+    fetchRecommendationsHistoryMock.mockReset()
+    fetchRecommendationsHistoryMock.mockResolvedValue({ recommendations: [] })
     updateRecommendationMock.mockReset()
     applyRecommendationMock.mockReset()
     runAgentMock.mockReset()
@@ -457,6 +461,40 @@ describe('GlobalRecommendationsPage', () => {
     })
 
     confirmSpy.mockRestore()
+    unmount()
+  })
+
+  it('lazy-loads the History tab and shows how each recommendation was resolved', async () => {
+    fetchAllOpenRecommendationsMock.mockResolvedValue({ recommendations: [makeRecommendation({ id: 'open-1', title: 'Still open' })] })
+    fetchRecommendationsHistoryMock.mockResolvedValue({
+      recommendations: [
+        makeRecommendation({ id: 'r1', title: 'Recovered agent', type: 'agent_unfruitful', status: 'resolved', updated_at: 80 }),
+        makeRecommendation({ id: 'a1', title: 'Applied backoff', type: 'agent_schedule_backoff', status: 'applied', updated_at: 70 }),
+        makeRecommendation({ id: 'd1', title: 'Dismissed noise', type: 'orchestrator_agent_health', status: 'dismissed', updated_at: 60 }),
+      ],
+    })
+
+    const { container, unmount } = renderPage()
+    await fastWaitFor(() => expect(container.textContent).toContain('Still open'))
+    // History not fetched until the tab is opened.
+    expect(fetchRecommendationsHistoryMock).not.toHaveBeenCalled()
+
+    const historyTab = Array.from(container.querySelectorAll('button')).find((b) => b.textContent?.startsWith('History'))
+    historyTab?.dispatchEvent(new MouseEvent('click', { bubbles: true }))
+
+    await fastWaitFor(() => {
+      expect(fetchRecommendationsHistoryMock).toHaveBeenCalledTimes(1)
+      expect(container.textContent).toContain('Recovered agent')
+      expect(container.textContent).toContain('auto-resolved')
+      expect(container.textContent).toContain('applied')
+      expect(container.textContent).toContain('dismissed')
+    })
+
+    // History is a read-only record — no Fix menu or per-row dismiss control.
+    expect(container.textContent).not.toContain('Fix ▾')
+    // The open card is hidden while the History tab is active.
+    expect(container.textContent).not.toContain('Still open')
+
     unmount()
   })
 
