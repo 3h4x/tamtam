@@ -1,5 +1,7 @@
 export const CHUNK_SIZE = 1800;   // ~512 tokens at ~3.5 chars/token
 export const CHUNK_OVERLAP = 200;
+const MARKDOWN_HEADING_RE = /^#{1,6}\s+[^\n]+$/;
+const HEADED_BLOCK_RE = /^(#{1,6}\s+[^\n]+)\n\n([\s\S]+)$/;
 
 function splitIntoBlocks(text: string): string[] {
   const paragraphs = text
@@ -12,7 +14,7 @@ function splitIntoBlocks(text: string): string[] {
   let pendingHeading = '';
 
   for (const paragraph of paragraphs) {
-    if (/^#{1,6}\s+[^\n]+$/.test(paragraph)) {
+    if (MARKDOWN_HEADING_RE.test(paragraph)) {
       pendingHeading = pendingHeading ? `${pendingHeading}\n${paragraph}` : paragraph;
       continue;
     }
@@ -27,7 +29,7 @@ function splitIntoBlocks(text: string): string[] {
 function splitOversizedBlock(block: string): string[] {
   if (block.length <= CHUNK_SIZE) return [block];
 
-  const headingMatch = block.match(/^(#{1,6}\s+[^\n]+)\n\n([\s\S]+)$/);
+  const headingMatch = block.match(HEADED_BLOCK_RE);
   const heading = headingMatch ? `${headingMatch[1]}\n\n` : '';
   const body = headingMatch ? headingMatch[2] : block;
   const maxBodyLength = Math.max(1, CHUNK_SIZE - heading.length);

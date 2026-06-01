@@ -684,6 +684,15 @@ describe('instrumentation', () => {
       // runProbeSweep dynamically imports job-storage. Keep each test's mock
       // factory isolated from any instrumentation-node import cached by a
       // previous test in this file or by the wider Vitest project.
+      //
+      // The preceding reapOrphanReleases block registers its own
+      // `vi.doMock('@/lib/jobs/job-storage', …)` with a differently-shaped
+      // storageMock (no probeJobStatus / PIPELINE_STEP_KINDS). Under fork-pool
+      // CPU starvation the doUnmock→doMock re-registration can race, leaving
+      // that stale mock active and yielding 0 probe calls. Explicitly clear
+      // both module paths before re-registering so residue can't survive.
+      vi.doUnmock('@/lib/jobs/job-storage');
+      vi.doUnmock('@/lib/jobs/storage');
       vi.resetModules();
       vi.doMock('@/lib/jobs/job-storage', factory);
     }
