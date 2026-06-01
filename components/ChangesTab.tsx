@@ -5,6 +5,7 @@ import { useRouter } from 'next/navigation'
 import { fetchChanges, fetchChangeDiff, pullProject, pushProject, PullDivergedError, checkoutDefaultBranch } from '@/lib/client-api'
 import type { ChangeFile, ChangeStatus, ChangesResponse } from '@/lib/client-api'
 import { Button, buttonVariants } from '@/components/ui/Button'
+import { EmptyState } from '@/components/ui/EmptyState'
 import { ErrorState } from '@/components/ErrorState'
 
 const STATUS_LABEL: Record<ChangeStatus, string> = {
@@ -246,57 +247,62 @@ export function ChangesTab({ projectName, jobsPaused = false }: ChangesTabProps)
       ? 'Jobs are paused globally. Resume jobs to start a push.'
       : `Push ${data?.ahead ?? 0} commit${data?.ahead === 1 ? '' : 's'} to origin`
     return (
-      <div className="p-6 text-center text-text-secondary">
-        <p className="text-sm">No uncommitted changes.</p>
-        {data?.branch && (
-          <p className="text-xs text-text-tertiary mt-1">on branch <code className="font-mono">{data.branch}</code></p>
-        )}
-        {onNonDefault && (
-          <div className="mt-3 flex flex-col items-center gap-2">
-            <div className="flex items-center gap-2">
-              <Button
-                variant="info"
-                onClick={() => doSwitchDefault()}
-                disabled={switching}
-                title={`git checkout ${data!.defaultBranch}`}
-              >
-                {switching ? 'Switching…' : `Switch to ${data!.defaultBranch}`}
-              </Button>
-              {data?.openPrUrl && (
-                <a
-                  className={buttonVariants({ variant: 'secondary' })}
-                  href={data.openPrUrl}
-                  target="_blank"
-                  rel="noopener noreferrer"
-                  title={`Open existing PR: ${data.openPrUrl}`}
-                >
-                  View PR ↗
-                </a>
-              )}
-            </div>
-            {data?.branchMerged && (
-              <p className="text-xs text-text-tertiary">Feature branch is already merged into <code className="font-mono">{data.defaultBranch}</code>.</p>
+      <EmptyState
+        paddingY="xs"
+        title={<span className="font-normal text-text-secondary">No uncommitted changes.</span>}
+        action={
+          <div className="-mt-2">
+            {data?.branch && (
+              <p className="text-xs text-text-tertiary mt-1">on branch <code className="font-mono">{data.branch}</code></p>
             )}
-            {switchError && <p className="text-xs text-status-error">{switchError}</p>}
+            {onNonDefault && (
+              <div className="mt-3 flex flex-col items-center gap-2">
+                <div className="flex items-center gap-2">
+                  <Button
+                    variant="info"
+                    onClick={() => doSwitchDefault()}
+                    disabled={switching}
+                    title={`git checkout ${data!.defaultBranch}`}
+                  >
+                    {switching ? 'Switching…' : `Switch to ${data!.defaultBranch}`}
+                  </Button>
+                  {data?.openPrUrl && (
+                    <a
+                      className={buttonVariants({ variant: 'secondary' })}
+                      href={data.openPrUrl}
+                      target="_blank"
+                      rel="noopener noreferrer"
+                      title={`Open existing PR: ${data.openPrUrl}`}
+                    >
+                      View PR ↗
+                    </a>
+                  )}
+                </div>
+                {data?.branchMerged && (
+                  <p className="text-xs text-text-tertiary">Feature branch is already merged into <code className="font-mono">{data.defaultBranch}</code>.</p>
+                )}
+                {switchError && <p className="text-xs text-status-error">{switchError}</p>}
+              </div>
+            )}
+            {(data?.ahead ?? 0) > 0 && (
+              <div className="mt-3 flex flex-col items-center gap-2">
+                <p className="text-xs text-status-warning font-medium">
+                  ↑ {data!.ahead} commit{data!.ahead !== 1 ? 's' : ''} ahead of origin — not yet pushed
+                </p>
+                <Button
+                  variant="warning"
+                  onClick={doPush}
+                  disabled={pushBlocked}
+                  title={pushTitle}
+                >
+                  {pushing ? 'Pushing…' : `Push ${data!.ahead} commit${data!.ahead !== 1 ? 's' : ''}`}
+                </Button>
+                {pushError && <p className="text-xs text-status-error">{pushError}</p>}
+              </div>
+            )}
           </div>
-        )}
-        {(data?.ahead ?? 0) > 0 && (
-          <div className="mt-3 flex flex-col items-center gap-2">
-            <p className="text-xs text-status-warning font-medium">
-              ↑ {data!.ahead} commit{data!.ahead !== 1 ? 's' : ''} ahead of origin — not yet pushed
-            </p>
-            <Button
-              variant="warning"
-              onClick={doPush}
-              disabled={pushBlocked}
-              title={pushTitle}
-            >
-              {pushing ? 'Pushing…' : `Push ${data!.ahead} commit${data!.ahead !== 1 ? 's' : ''}`}
-            </Button>
-            {pushError && <p className="text-xs text-status-error">{pushError}</p>}
-          </div>
-        )}
-      </div>
+        }
+      />
     )
   }
 
