@@ -2,7 +2,7 @@
 
 import { useEffect, useState, useCallback, useMemo } from 'react'
 import Link from 'next/link'
-import type { UsageResponse, ProjectUsageRow } from '@/app/api/stats/usage/route'
+import type { UsageResponse, ProjectUsageRow, AgentUsageRow } from '@/app/api/stats/usage/route'
 import type { OllamaStatsResponse } from '@/app/api/stats/ollama/route'
 import { ErrorState } from './ErrorState'
 import { OllamaUsageCard } from './OllamaUsageCard'
@@ -11,6 +11,7 @@ import { BridgeOverview } from './BridgeOverview'
 import { UsageHistoryChart } from './UsageHistoryChart'
 import { EmptyState } from '@/components/ui/EmptyState'
 import { SegmentedControl } from '@/components/ui/SegmentedControl'
+import { Table } from '@/components/ui/Table'
 import {
   normalizeBudgetSubscriptionProviders,
   type BudgetSubscriptionProvider,
@@ -211,6 +212,9 @@ export function StatsPage() {
     )
   }
 
+  const topAgents = data.agents.slice(0, 5)
+  const topAgentMaxCost = data.agents[0]?.costUsd ?? 1
+
   return (
     <div className="w-full space-y-5">
       {/* Header bar */}
@@ -376,47 +380,74 @@ export function StatsPage() {
       </div>
 
       {/* Top agents by kind */}
-      {data.agents.length > 0 && (
+      {topAgents.length > 0 && (
         <div className="rounded-lg border border-border bg-bg-secondary overflow-hidden">
           <div className="px-4 py-3 border-b border-border bg-bg-tertiary">
             <h2 className="text-sm font-medium text-text-primary">Top agents / pipeline steps</h2>
             <p className="text-xs text-text-tertiary mt-0.5">Cost breakdown by run kind — shows which step burns the most</p>
           </div>
-          <div className="overflow-x-auto">
-            <table className="w-full text-sm border-collapse">
-              <thead className="border-b border-border">
-                <tr>
-                  <th className="px-3 py-2 text-xs font-medium text-text-secondary text-left">Kind</th>
-                  <th className="px-3 py-2 text-xs font-medium text-text-secondary text-right">Runs</th>
-                  <th className="px-3 py-2 text-xs font-medium text-text-secondary text-right">Tokens</th>
-                  <th className="px-3 py-2 text-xs font-medium text-text-secondary text-right" title="Average prompt size sent to Claude per run (estimated tokens; actual cache size may be larger for non-agent kinds)">Avg prompt</th>
-                  <th className="px-3 py-2 text-xs font-medium text-text-secondary text-right">Cost</th>
-                  <th className="px-3 py-2 text-xs font-medium text-text-secondary w-32">Share</th>
-                </tr>
-              </thead>
-              <tbody>
-                {data.agents.slice(0, 5).map((r) => (
-                  <tr key={r.kind} className="border-b border-border/40 last:border-b-0 hover:bg-bg-tertiary/40 transition-colors">
-                    <td className="px-3 py-2.5 font-mono text-text-primary">{r.kind}</td>
-                    <td className="px-3 py-2.5 text-right tabular-nums text-text-secondary">
-                      {r.runs.toLocaleString()}
-                      {r.kind === 'commit' && r.commitProducingRuns > 0 && (
-                        <span className="block text-xs text-text-tertiary">{r.commitProducingRuns.toLocaleString()} committed</span>
-                      )}
-                    </td>
-                    <td className="px-3 py-2.5 text-right tabular-nums text-text-secondary">{fmtTokens(r.totalTokens)}</td>
-                    <td className="px-3 py-2.5 text-right tabular-nums text-text-tertiary" title={r.avgPromptBytes != null ? `${r.avgPromptBytes.toLocaleString()} bytes over ${r.promptSamples} run${r.promptSamples === 1 ? '' : 's'}` : 'no prompt-size samples'}>
-                      {r.avgPromptTokens != null ? `~${fmtTokens(r.avgPromptTokens)}` : '—'}
-                    </td>
-                    <td className="px-3 py-2.5 text-right tabular-nums font-semibold text-accent">{fmtUsd(r.costUsd)}</td>
-                    <td className="px-3 py-2.5">
-                      <Bar value={r.costUsd} max={data.agents[0]?.costUsd ?? 1} />
-                    </td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-          </div>
+          <Table<AgentUsageRow>
+            className="rounded-none border-0"
+            columns={[
+              {
+                key: 'kind',
+                label: 'Kind',
+                render: (r) => <span className="font-mono text-text-primary">{r.kind}</span>,
+              },
+              {
+                key: 'runs',
+                label: 'Runs',
+                headerClass: 'text-right',
+                cellClass: 'text-right tabular-nums text-text-secondary',
+                render: (r) => (
+                  <>
+                    {r.runs.toLocaleString()}
+                    {r.kind === 'commit' && r.commitProducingRuns > 0 && (
+                      <span className="block text-xs text-text-tertiary">
+                        {r.commitProducingRuns.toLocaleString()} committed
+                      </span>
+                    )}
+                  </>
+                ),
+              },
+              {
+                key: 'tokens',
+                label: 'Tokens',
+                headerClass: 'text-right',
+                cellClass: 'text-right tabular-nums text-text-secondary',
+                render: (r) => fmtTokens(r.totalTokens),
+              },
+              {
+                key: 'avg-prompt',
+                label: 'Avg prompt',
+                title: 'Average prompt size sent to Claude per run (estimated tokens; actual cache size may be larger for non-agent kinds)',
+                headerClass: 'text-right',
+                cellClass: 'text-right tabular-nums text-text-tertiary',
+                cellTitle: (r) => (
+                  r.avgPromptBytes != null
+                    ? `${r.avgPromptBytes.toLocaleString()} bytes over ${r.promptSamples} run${r.promptSamples === 1 ? '' : 's'}`
+                    : 'no prompt-size samples'
+                ),
+                render: (r) => (r.avgPromptTokens != null ? `~${fmtTokens(r.avgPromptTokens)}` : '—'),
+              },
+              {
+                key: 'cost',
+                label: 'Cost',
+                headerClass: 'text-right',
+                cellClass: 'text-right tabular-nums font-semibold text-accent',
+                render: (r) => fmtUsd(r.costUsd),
+              },
+              {
+                key: 'share',
+                label: 'Share',
+                headerClass: 'w-32',
+                render: (r) => <Bar value={r.costUsd} max={topAgentMaxCost} />,
+              },
+            ]}
+            rows={topAgents}
+            getRowKey={(r) => r.kind}
+            rowClassName={() => 'hover:bg-bg-tertiary/40'}
+          />
         </div>
       )}
 

@@ -36,12 +36,6 @@ function mount() {
   return container
 }
 
-async function flushDocsLoad() {
-  await Promise.resolve()
-  await Promise.resolve()
-  await new Promise((resolve) => setTimeout(resolve, 0))
-}
-
 describe('DocsTab', () => {
   // Regression: useMemo used to live below the loading/error/empty early
   // returns, so the loaded render called one more hook than the loading
@@ -60,9 +54,7 @@ describe('DocsTab', () => {
 
     // Flush the resolved fetch + the resulting state updates. Without the
     // fix this re-render adds a hook and throws React #310.
-    await flushDocsLoad()
-
-    expect(container.textContent).toContain('README.md')
+    await vi.waitFor(() => expect(container.textContent).toContain('README.md'))
     expect(container.textContent).toContain('docs/API.md')
     expect(container.textContent).toContain('2 files')
     // Header line count for the active doc (README.md has 3 lines).
@@ -73,8 +65,6 @@ describe('DocsTab', () => {
     fetchProjectDocsMock.mockResolvedValue({ docs: [] })
 
     const container = mount()
-    await flushDocsLoad()
-
-    expect(container.textContent).toContain('No docs found')
+    await vi.waitFor(() => expect(container.textContent).toContain('No docs found'))
   })
 })

@@ -680,6 +680,14 @@ describe('instrumentation', () => {
 
 
   describe('runProbeSweep()', () => {
+    function mockJobStorageModule(factory: () => Record<string, unknown>) {
+      // runProbeSweep dynamically imports job-storage. Keep each test's mock
+      // factory isolated from any instrumentation-node import cached by a
+      // previous test in this file or by the wider Vitest project.
+      vi.resetModules();
+      vi.doMock('@/lib/jobs/job-storage', factory);
+    }
+
     function mockJobStorage(
       jobs: unknown[],
       options: {
@@ -692,7 +700,7 @@ describe('instrumentation', () => {
       const reconcileStaleRelease = options.reconcileStaleRelease ?? vi.fn().mockResolvedValue(undefined);
       const pipelineStepKinds = options.pipelineStepKinds ?? new Set(['test', 'review', 'fix', 'commit', 'push', 'pr-wait', 'mark-dod']);
       const storageMock = { listJobs: () => jobs, probeJobStatus, reconcileStaleRelease, PIPELINE_STEP_KINDS: pipelineStepKinds };
-      vi.doMock('@/lib/jobs/job-storage', () => storageMock);
+      mockJobStorageModule(() => storageMock);
       return { probeJobStatus, reconcileStaleRelease };
     }
 
@@ -701,11 +709,6 @@ describe('instrumentation', () => {
     }
 
     it('probes all running claude-backed jobs', async () => {
-      // Defensive reset: earlier tests in this describe register mocks for
-      // `@/lib/jobs/job-storage` without `probeJobStatus` (e.g.
-      // `mockOrphanReleaseDeps`). Reset modules so the doMock below is the
-      // resolved factory when `runProbeSweep` dynamically imports it.
-      vi.resetModules();
       const { probeJobStatus } = mockJobStorage([
         makeJob('run'),
         makeJob('review'),
@@ -765,7 +768,7 @@ describe('instrumentation', () => {
     });
 
     it('swallows top-level errors when listJobs throws', async () => {
-      vi.doMock('@/lib/jobs/job-storage', () => ({
+      mockJobStorageModule(() => ({
         listJobs: () => { throw new Error('db unavailable'); },
         probeJobStatus: vi.fn(),
       }));
@@ -777,7 +780,7 @@ describe('instrumentation', () => {
 
     it('still probes claude-backed jobs when PIPELINE_STEP_KINDS is unavailable', async () => {
       const probeJobStatus = vi.fn().mockResolvedValue(undefined);
-      vi.doMock('@/lib/jobs/job-storage', () => ({
+      mockJobStorageModule(() => ({
         listJobs: () => [makeJob('run'), makeJob('review')],
         probeJobStatus,
       }));
