@@ -26,6 +26,11 @@ interface TableProps<T> {
   defaultSortDir?: 'asc' | 'desc'
   emptyState?: ReactNode
   className?: string
+  tableClassName?: string
+  tableTextClassName?: string
+  cellPaddingClassName?: string
+  bordered?: boolean
+  showHeader?: boolean
   expandedRender?: (row: T) => ReactNode
 }
 
@@ -40,6 +45,11 @@ export function Table<T>({
   defaultSortDir = 'asc',
   emptyState,
   className,
+  tableClassName,
+  tableTextClassName = 'text-sm',
+  cellPaddingClassName = 'px-3 py-2.5',
+  bordered = true,
+  showHeader = true,
   expandedRender,
 }: TableProps<T>) {
   const [sortKey, setSortKey] = useState(defaultSortKey)
@@ -73,37 +83,43 @@ export function Table<T>({
       })
 
   return (
-    <div className={`overflow-x-auto rounded-lg border border-border ${className ?? ''}`}>
-      <table className="w-full text-sm">
-        <thead>
-          <tr className="border-b border-border bg-bg-secondary">
-            {columns.map(col => (
-              <th
-                key={col.key}
-                className={[
-                  'px-3 py-2 text-left text-xs font-semibold text-text-secondary uppercase tracking-wider whitespace-nowrap',
-                  col.sortable ? 'cursor-pointer select-none hover:text-text-primary' : '',
-                  col.headerClass ?? '',
-                ]
-                  .filter(Boolean)
-                  .join(' ')}
-                onClick={col.sortable ? () => handleSort(col.key) : undefined}
-                title={col.title}
-              >
-                <span className="inline-flex items-center gap-1">
-                  {col.label}
-                  {col.sortable && (
-                    <span
-                      className={`text-[10px] ${sortKey === col.key ? 'text-accent' : 'text-text-tertiary'}`}
-                    >
-                      {sortKey === col.key ? (sortDir === 'asc' ? '↑' : '↓') : '↕'}
-                    </span>
-                  )}
-                </span>
-              </th>
-            ))}
-          </tr>
-        </thead>
+    <div className={[
+      'overflow-x-auto',
+      bordered ? 'rounded-lg border border-border' : '',
+      className ?? '',
+    ].filter(Boolean).join(' ')}>
+      <table className={`w-full ${tableTextClassName} ${tableClassName ?? ''}`}>
+        {showHeader && (
+          <thead>
+            <tr className="border-b border-border bg-bg-secondary">
+              {columns.map(col => (
+                <th
+                  key={col.key}
+                  className={[
+                    'px-3 py-2 text-left text-xs font-semibold text-text-secondary uppercase tracking-wider whitespace-nowrap',
+                    col.sortable ? 'cursor-pointer select-none hover:text-text-primary' : '',
+                    col.headerClass ?? '',
+                  ]
+                    .filter(Boolean)
+                    .join(' ')}
+                  onClick={col.sortable ? () => handleSort(col.key) : undefined}
+                  title={col.title}
+                >
+                  <span className="inline-flex items-center gap-1">
+                    {col.label}
+                    {col.sortable && (
+                      <span
+                        className={`text-[10px] ${sortKey === col.key ? 'text-accent' : 'text-text-tertiary'}`}
+                      >
+                        {sortKey === col.key ? (sortDir === 'asc' ? '↑' : '↓') : '↕'}
+                      </span>
+                    )}
+                  </span>
+                </th>
+              ))}
+            </tr>
+          </thead>
+        )}
         <tbody>
           {sorted.length === 0 ? (
             emptyState ? (
@@ -131,7 +147,7 @@ export function Table<T>({
                     {columns.map(col => (
                       <td
                         key={col.key}
-                        className={`px-3 py-2.5 ${col.cellClass ?? ''}`}
+                        className={`${cellPaddingClassName} ${col.cellClass ?? ''}`}
                         title={col.cellTitle?.(row)}
                       >
                         {col.render(row)}

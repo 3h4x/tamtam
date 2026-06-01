@@ -2,6 +2,7 @@
 
 import type { OllamaStatsResponse } from '@/app/api/stats/ollama/route'
 import { EmptyState } from '@/components/ui/EmptyState'
+import { Table, type Column } from '@/components/ui/Table'
 
 function fmtTokens(n: number): string {
   if (n === 0) return '0'
@@ -90,24 +91,48 @@ interface BreakdownRow {
 }
 
 function Breakdown({ title, rows }: { title: string; rows: BreakdownRow[] }) {
+  const columns: Column<BreakdownRow>[] = [
+    {
+      key: 'key',
+      label: 'key',
+      render: (r) => r.key,
+      cellTitle: (r) => r.key,
+      cellClass: 'pr-2 text-text-primary font-mono truncate max-w-[140px]',
+    },
+    {
+      key: 'calls',
+      label: 'calls',
+      render: (r) => r.calls.toLocaleString(),
+      cellClass: 'px-2 text-right tabular-nums text-text-secondary',
+    },
+    {
+      key: 'tokens',
+      label: 'tokens',
+      render: (r) => fmtTokens(r.inputTokens),
+      cellClass: 'px-2 text-right tabular-nums text-text-tertiary',
+    },
+    {
+      key: 'duration',
+      label: 'duration',
+      render: (r) => fmtDuration(r.durationMs),
+      cellClass: 'pl-2 text-right tabular-nums text-text-tertiary',
+    },
+  ]
+
   return (
     <div className="bg-bg-secondary p-4">
       <div className="text-xs font-medium text-text-secondary uppercase tracking-wide mb-2">{title}</div>
-      <table className="w-full text-xs">
-        <tbody>
-          {rows.length === 0 && (
-            <tr><td className="py-1 text-text-tertiary">—</td></tr>
-          )}
-          {rows.slice(0, 6).map((r) => (
-            <tr key={r.key} className="border-b border-border/30 last:border-b-0">
-              <td className="py-1 pr-2 text-text-primary font-mono truncate max-w-[140px]" title={r.key}>{r.key}</td>
-              <td className="py-1 px-2 text-right tabular-nums text-text-secondary">{r.calls.toLocaleString()}</td>
-              <td className="py-1 px-2 text-right tabular-nums text-text-tertiary">{fmtTokens(r.inputTokens)}</td>
-              <td className="py-1 pl-2 text-right tabular-nums text-text-tertiary">{fmtDuration(r.durationMs)}</td>
-            </tr>
-          ))}
-        </tbody>
-      </table>
+      <Table
+        columns={columns}
+        rows={rows.slice(0, 6)}
+        getRowKey={(r) => r.key}
+        showHeader={false}
+        bordered={false}
+        tableTextClassName="text-xs"
+        cellPaddingClassName="py-1"
+        rowClassName={() => 'border-border/30 hover:bg-transparent'}
+        emptyState={<div className="py-1 text-text-tertiary">—</div>}
+      />
     </div>
   )
 }
