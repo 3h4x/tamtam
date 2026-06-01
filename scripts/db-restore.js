@@ -10,7 +10,7 @@
 //   5. Restart TamTam.
 
 const { spawnSync } = require('child_process');
-const { existsSync, statSync } = require('fs');
+const { statSync } = require('fs');
 const { join, resolve } = require('path');
 
 const repoRoot = resolve(__dirname, '..');
@@ -19,7 +19,6 @@ function main(deps = {}) {
   const argv = deps.argv ?? process.argv.slice(2);
   const env = deps.env ?? process.env;
   const spawn = deps.spawnSync ?? spawnSync;
-  const exists = deps.existsSync ?? existsSync;
   const stat = deps.statSync ?? statSync;
   const backupArg = argv[0];
 
@@ -29,7 +28,14 @@ function main(deps = {}) {
   }
 
   const backupPath = resolve(backupArg);
-  if (!exists(backupPath) || stat(backupPath).size === 0) {
+  let backupStats;
+  try {
+    backupStats = stat(backupPath);
+  } catch {
+    console.error(`Backup file missing or empty: ${backupPath}`);
+    return 1;
+  }
+  if (backupStats.size === 0) {
     console.error(`Backup file missing or empty: ${backupPath}`);
     return 1;
   }
