@@ -84,4 +84,15 @@ describe('AgentGuidePage', () => {
       expect(copied).not.toContain('"project": "tamtam"')
     })
   })
+
+  it('keeps row separators in the API reference tables', async () => {
+    await render()
+
+    const apiHealthCell = Array.from(container.querySelectorAll('td')).find((cell) => cell.textContent === '/api/health')
+    const tableShell = apiHealthCell?.closest('div.overflow-x-auto')
+
+    expect(tableShell?.className).toContain('[&_tbody_tr]:border-b')
+    expect(tableShell?.className).toContain('[&_tbody_tr]:border-border')
+    expect(tableShell?.className).not.toContain('[&_tbody_tr]:border-b-0')
+  })
 })

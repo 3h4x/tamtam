@@ -3,6 +3,7 @@
 import { useEffect, useLayoutEffect, useMemo, useState } from 'react'
 import { useToast } from '@/components/Toast'
 import { Button } from '@/components/ui/Button'
+import { Table, type Column } from '@/components/ui/Table'
 
 interface Recipe {
   id: string
@@ -170,6 +171,8 @@ interface ApiGroup {
   rows: { method: string; path: string; desc: string }[]
 }
 
+type ApiRow = ApiGroup['rows'][number]
+
 const API_REFERENCE: ApiGroup[] = [
   {
     title: 'Health & telemetry',
@@ -244,6 +247,30 @@ const API_REFERENCE: ApiGroup[] = [
       { method: 'GET', path: '/api/recommendations', desc: 'Open recommendations across projects.' },
       { method: 'GET', path: '/api/recommendations/summary', desc: 'Counts for header polling.' },
     ],
+  },
+]
+
+const API_REFERENCE_COLUMNS: Column<ApiRow>[] = [
+  {
+    key: 'method',
+    label: 'Method',
+    headerClass: 'px-4 py-1.5 w-16',
+    cellClass: 'px-4 py-1.5 text-accent',
+    render: (row) => row.method,
+  },
+  {
+    key: 'path',
+    label: 'Path',
+    headerClass: 'px-4 py-1.5',
+    cellClass: 'px-4 py-1.5 text-text-primary',
+    render: (row) => row.path,
+  },
+  {
+    key: 'desc',
+    label: 'Description',
+    headerClass: 'px-4 py-1.5 font-sans normal-case tracking-normal',
+    cellClass: 'px-4 py-1.5 font-sans text-text-secondary',
+    render: (row) => row.desc,
   },
 ]
 
@@ -539,24 +566,12 @@ export function AgentGuidePage() {
               <div className="px-4 py-2 bg-bg-tertiary border-b border-border">
                 <h3 className="text-sm font-semibold text-text-primary">{g.title}</h3>
               </div>
-              <table className="w-full text-xs font-mono">
-                <thead>
-                  <tr className="text-text-tertiary uppercase tracking-wider">
-                    <th className="text-left px-4 py-1.5 w-16 font-medium">Method</th>
-                    <th className="text-left px-4 py-1.5 font-medium">Path</th>
-                    <th className="text-left px-4 py-1.5 font-medium font-sans normal-case tracking-normal">Description</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {g.rows.map((row) => (
-                    <tr key={`${row.method} ${row.path}`} className="border-t border-border">
-                      <td className="px-4 py-1.5 text-accent">{row.method}</td>
-                      <td className="px-4 py-1.5 text-text-primary">{row.path}</td>
-                      <td className="px-4 py-1.5 font-sans text-text-secondary">{row.desc}</td>
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
+              <Table
+                columns={API_REFERENCE_COLUMNS}
+                rows={g.rows}
+                getRowKey={(row) => `${row.method} ${row.path}`}
+                className="rounded-none border-0 [&_table]:text-xs [&_table]:font-mono [&_thead_tr]:!bg-transparent [&_tbody_tr]:border-b [&_tbody_tr]:border-border"
+              />
             </div>
           ))}
         </div>
