@@ -222,13 +222,14 @@ export interface PipelineResult {
 }
 
 /**
- * Polls the jobs API until the project's active release job reaches a
- * finished state (finishedAt != null) or the timeout expires.
+ * Polls the jobs API until the project's release job reaches a finished state
+ * (finishedAt != null) or the timeout expires.
  */
 export async function waitForPipelineCompletion(
   request: APIRequestContext,
   project: string,
   timeoutMs = 60_000,
+  releaseJobId?: string,
 ): Promise<PipelineResult> {
   const deadline = Date.now() + timeoutMs;
   while (Date.now() < deadline) {
@@ -236,7 +237,10 @@ export async function waitForPipelineCompletion(
     if (resp.ok()) {
       const body = await resp.json() as { jobs: Array<Record<string, unknown>> };
       const releaseJob = body.jobs?.find(
-        j => j['kind'] === 'release' && j['project'] === project,
+        j =>
+          j['kind'] === 'release' &&
+          j['project'] === project &&
+          (releaseJobId == null || j['id'] === releaseJobId),
       );
       if (releaseJob && releaseJob['finished_at'] != null) {
         return { status: 'done', releaseJob };

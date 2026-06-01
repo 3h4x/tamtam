@@ -60,6 +60,8 @@ const PROJECTS = [
   'workflow-run-detail-abort',
   'workflow-run-detail-success',
   'workflow-runs-live-start-real',
+  'workflow-runs-live-start-cancelled',
+  'workflow-runs-live-start-failure',
   'workflow-runs-real-success',
   'workflow-runs-real-failure',
   'workflow-runs-real-cancelled',

@@ -136,7 +136,12 @@ test.describe('External-start lifecycle surfaces', () => {
       timeout: 15_000,
     })
 
-    const result = await waitForPipelineCompletion(request, TERMINAL_FAILURE_PROJECT, 90_000)
+    const result = await waitForPipelineCompletion(
+      request,
+      TERMINAL_FAILURE_PROJECT,
+      90_000,
+      releaseBody.release_job_id,
+    )
     expect(result.status, 'pipeline should finish').toBe('done')
     expect(result.releaseJob?.['exit_code'], 'release should fail with non-zero exit').not.toBe(0)
 
