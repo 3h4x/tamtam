@@ -105,6 +105,8 @@ function renderChain(
 
 const PAGE_SIZE = 50
 const MAX_REFRESH_PAGE_SIZE = 200
+const ACTIVE_POLL_MS = 5000
+const IDLE_POLL_MS = 1000
 
 function mergeJobs(newer: JobInfo[], older: JobInfo[], maxRows: number): JobInfo[] {
   const byId = new Map<string, JobInfo>()
@@ -245,9 +247,19 @@ export function ProjectRunsTab({ projectName, jobsPaused = false }: ProjectRunsT
   // it without forcing a re-mounted interval on every state change.
   const windowSizeRef = useRef<number>(PAGE_SIZE)
   windowSizeRef.current = Math.max(PAGE_SIZE, jobs.length)
+  const jobsRef = useRef<JobInfo[]>([])
+  jobsRef.current = jobs
 
   useEffect(() => {
     let active = true
+    let timer: ReturnType<typeof setTimeout> | null = null
+    const scheduleNext = () => {
+      if (!active) return
+      const hasRunningJob = jobsRef.current.some((job) => job.status === 'running')
+      timer = setTimeout(() => {
+        void poll()
+      }, hasRunningJob ? ACTIVE_POLL_MS : IDLE_POLL_MS)
+    }
     const poll = async () => {
       try {
         // Refresh only the rows already on screen so 5s polling doesn't
@@ -261,10 +273,15 @@ export function ProjectRunsTab({ projectName, jobsPaused = false }: ProjectRunsT
           setLoading(false)
         }
       } catch {}
+      finally {
+        scheduleNext()
+      }
     }
-    poll()
-    const interval = setInterval(poll, 5000)
-    return () => { active = false; clearInterval(interval) }
+    void poll()
+    return () => {
+      active = false
+      if (timer) clearTimeout(timer)
+    }
   }, [projectName])
 
   useEffect(() => {

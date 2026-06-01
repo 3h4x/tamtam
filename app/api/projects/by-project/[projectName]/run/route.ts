@@ -109,6 +109,15 @@ export async function POST(
     }, { status: 400 });
   }
 
+  // Preserve what the operator actually typed for list/detail UI. The
+  // execution prompt is expanded below with personas, auto-attached docs,
+  // and the shared base prompt, but history rows should still show the
+  // original user-facing request when the caller didn't send userPrompt
+  // separately.
+  if (!userPrompt.trim()) {
+    userPrompt = prompt;
+  }
+
   const blockingJob = await findBlockingRunningJob(projectName);
   if (blockingJob) {
     return NextResponse.json({

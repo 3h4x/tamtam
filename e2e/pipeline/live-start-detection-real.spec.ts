@@ -26,6 +26,7 @@ const TERMINAL_PROJECT = 'start-detect-terminal';
 const HISTORY_CANCEL_PROJECT = 'start-detect-runs-cancelled';
 const HISTORY_FAILURE_PROJECT = 'start-detect-runs-failure-idle';
 const HISTORY_RUN_PROJECT = 'start-detect-history-run-idle';
+const HISTORY_RUN_FAILURE_PROJECT = 'start-detect-history-run-failure';
 const HISTORY_RUN_CANCEL_PROJECT = 'start-detect-history-run-cancelled';
 const TERMINAL_CANCEL_PROJECT = 'start-detect-terminal-cancelled';
 const TERMINAL_FAILURE_PROJECT = 'start-detect-terminal-failure-idle';
@@ -210,6 +211,58 @@ test.describe('Real idle-page job start detection', () => {
     await expect(runRow.getByLabel('running')).toHaveCount(0, { timeout: 15_000 });
     await expect(
       runRow.getByText('Background run finished after history auto-detection.'),
+    ).toBeVisible({ timeout: 15_000 });
+    await expect(page.locator('span.animate-pulse')).toHaveCount(0, { timeout: 15_000 });
+  });
+
+  test('history tab detects a newly-started ordinary run and clears its spinner after failure without reload', async ({
+    page,
+    request,
+  }) => {
+    resetShimState(HISTORY_RUN_FAILURE_PROJECT);
+    writeScenario(HISTORY_RUN_FAILURE_PROJECT, [
+      {
+        label: 'run',
+        sleep_ms: 3000,
+        text: 'The background run failed after history auto-detection.',
+        prompt_assert_contains: ['this text is intentionally absent from the prompt'],
+      },
+    ]);
+    await enableProject(request, HISTORY_RUN_FAILURE_PROJECT, { testsDisabled: true });
+
+    await page.goto(`/project/${HISTORY_RUN_FAILURE_PROJECT}/history`);
+    await expect(page.getByText('No runs yet').first()).toBeVisible({ timeout: 8_000 });
+
+    const runResp = await request.post(`/api/projects/by-project/${HISTORY_RUN_FAILURE_PROJECT}/run`, {
+      data: { prompt: 'Watch this failing ordinary run appear in history.' },
+    });
+    expect(
+      runResp.status(),
+      `run POST failed: ${await runResp.text()}`,
+    ).toBe(200);
+
+    const runBody = await runResp.json() as { job_id: string };
+    expect(runBody.job_id, 'run job_id in response').toBeTruthy();
+
+    const runningRun = await waitForJobByIdRunning(request, runBody.job_id, 20_000);
+    expect(runningRun, 'ordinary run should start running before failure').not.toBeNull();
+
+    const runRow = page.getByRole('button').filter({
+      hasText: 'Watch this failing ordinary run appear in history.',
+    }).first();
+
+    await expect(runRow).toBeVisible({ timeout: 20_000 });
+    await expect(runRow.getByLabel('running')).toBeVisible({ timeout: 20_000 });
+    await expect(page.getByText('No runs yet')).toHaveCount(0, { timeout: 20_000 });
+
+    const runJob = await waitForJobCompletion(request, runBody.job_id, 60_000);
+    expect(runJob?.['exit_code'], 'run exit code').toBe(1);
+
+    await expect(runRow.getByText('exit 1', { exact: true })).toBeVisible({ timeout: 15_000 });
+    await expect(runRow.getByLabel('running')).toHaveCount(0, { timeout: 15_000 });
+    await expect(runRow.getByText('PROMPT ASSERTION FAILED')).toBeVisible({ timeout: 15_000 });
+    await expect(
+      runRow.getByText('The background run failed after history auto-detection.'),
     ).toBeVisible({ timeout: 15_000 });
     await expect(page.locator('span.animate-pulse')).toHaveCount(0, { timeout: 15_000 });
   });
