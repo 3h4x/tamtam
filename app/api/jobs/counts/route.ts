@@ -2,11 +2,8 @@ import { NextRequest, NextResponse } from 'next/server';
 import { listJobs } from '@/lib/jobs/job-storage';
 import { jobNeedsAttention } from '@/lib/jobs/status';
 
-// Lightweight aggregation endpoint. The list endpoint used to serve double
-// duty as the source of badge counts ("21,537 entries · 25.3M tok · $385.18"
-// at the top of the History tab, plus the tab-bucket counters); doing that
-// from the full /api/jobs payload forced every caller that just needed a
-// number to pull every row. This endpoint returns only the aggregates.
+// Lightweight aggregation endpoint for badge and history summary counts.
+// Returns only aggregates so callers do not pull the full /api/jobs payload.
 export async function GET(request: NextRequest) {
   const sp = request.nextUrl.searchParams;
   const project = sp.get('project');
