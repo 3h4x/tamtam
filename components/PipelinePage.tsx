@@ -523,10 +523,16 @@ export function PipelinePage() {
       </div>
 
       {pipelineSuccess.total === 0 && verdicts.total === 0 && (
-        <p className="text-xs text-text-tertiary text-center">
-          No pipeline data in the last window. Trigger a{' '}
-          <span className="font-medium">Release</span> from any project to start collecting metrics.
-        </p>
+        <EmptyState
+          paddingX="none"
+          paddingY="none"
+          title={
+            <span className="text-xs font-normal text-text-tertiary">
+              No pipeline data in the last window. Trigger a{' '}
+              <span className="font-medium">Release</span> from any project to start collecting metrics.
+            </span>
+          }
+        />
       )}
     </div>
   )
