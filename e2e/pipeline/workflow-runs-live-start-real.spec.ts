@@ -3,6 +3,8 @@ import type { Locator } from '@playwright/test';
 import { mkdirSync, readFileSync, rmSync } from 'fs';
 import { join } from 'path';
 import {
+  acquirePipelineSharedStateLock,
+  type PipelineSharedStateLock,
   writeScenario,
   resetShimState,
   enableProject,
@@ -20,16 +22,23 @@ const SUCCESS_STEPS = BASE_SCENARIO.steps.map(
   (step: { label?: string; sleep_ms?: number; text: string }) =>
     step.label === 'review' ? { ...step, sleep_ms: 10_000 } : step,
 );
+let sharedStateLock: PipelineSharedStateLock | null = null;
 
 function workflowRunLink(scope: Locator, project: string): Locator {
   return scope.getByRole('link').filter({ hasText: project }).first();
 }
 
 test.describe('Real workflow-runs live start transitions', () => {
-  test.beforeEach(() => {
+  test.beforeEach(async () => {
+    sharedStateLock = await acquirePipelineSharedStateLock('workflow-runs-live-start-real');
     rmSync(join(E2E_BASE, 'workflow-data'), { recursive: true, force: true });
     mkdirSync(join(E2E_BASE, 'workflow-data', 'runs'), { recursive: true });
     mkdirSync(join(E2E_BASE, 'workflow-data', 'steps'), { recursive: true });
+  });
+
+  test.afterEach(() => {
+    sharedStateLock?.release();
+    sharedStateLock = null;
   });
 
   test('workflow-runs page picks up a newly-started release and settles it to completed without reload', async ({

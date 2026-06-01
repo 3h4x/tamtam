@@ -2,6 +2,8 @@ import { test, expect } from '@playwright/test';
 import { readFileSync } from 'fs';
 import { join } from 'path';
 import {
+  acquirePipelineSharedStateLock,
+  type PipelineSharedStateLock,
   writeScenario,
   resetShimState,
   enableProject,
@@ -15,16 +17,26 @@ const SCENARIO = JSON.parse(
 
 const PROJECT = 'review-failure-history';
 const DEFAULT_DO_NOT_SHIP_ACTION = 'fix';
+let sharedStateLock: PipelineSharedStateLock | null = null;
 
 test.describe('Real review failure drill-in from project history', () => {
+  test.beforeEach(async () => {
+    sharedStateLock = await acquirePipelineSharedStateLock('review-failure-history-real');
+  });
+
   test.afterEach(async ({ request }) => {
-    const patch = await request.patch('/api/settings', {
-      data: { review_do_not_ship_action: DEFAULT_DO_NOT_SHIP_ACTION },
-    });
-    expect(
-      patch.ok(),
-      `failed to restore review_do_not_ship_action: ${patch.status()}`,
-    ).toBe(true);
+    try {
+      const patch = await request.patch('/api/settings', {
+        data: { review_do_not_ship_action: DEFAULT_DO_NOT_SHIP_ACTION },
+      });
+      expect(
+        patch.ok(),
+        `failed to restore review_do_not_ship_action: ${patch.status()}`,
+      ).toBe(true);
+    } finally {
+      sharedStateLock?.release();
+      sharedStateLock = null;
+    }
   });
 
   test('DO NOT SHIP review flips the history row to cancelled after review and opens the findings without reload', async ({

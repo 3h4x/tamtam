@@ -2,6 +2,8 @@ import { test, expect } from '@playwright/test';
 import { readFileSync } from 'fs';
 import { join } from 'path';
 import {
+  acquirePipelineSharedStateLock,
+  type PipelineSharedStateLock,
   writeScenario,
   resetShimState,
   readShimCalls,
@@ -14,9 +16,11 @@ const SCENARIO = JSON.parse(
 );
 
 const PROJECT = 'fix-loop-cap-do-not-ship';
+let sharedStateLock: PipelineSharedStateLock | null = null;
 
 test.describe('Fix-loop cap for DO NOT SHIP reviews', () => {
   test.beforeAll(async ({ request }) => {
+    sharedStateLock = await acquirePipelineSharedStateLock('fix-loop-cap-do-not-ship');
     writeScenario(PROJECT, SCENARIO.steps);
     resetShimState(PROJECT);
     await enableProject(request, PROJECT, { testsDisabled: true });
@@ -28,6 +32,21 @@ test.describe('Fix-loop cap for DO NOT SHIP reviews', () => {
       },
     });
     expect(patch.ok(), `failed to set review loop settings: ${patch.status()}`).toBe(true);
+  });
+
+  test.afterAll(async ({ request }) => {
+    try {
+      const patch = await request.patch('/api/settings', {
+        data: {
+          fix_max_iterations: '0',
+          review_do_not_ship_action: 'fix',
+        },
+      });
+      expect(patch.ok(), `failed to restore review loop settings: ${patch.status()}`).toBe(true);
+    } finally {
+      sharedStateLock?.release();
+      sharedStateLock = null;
+    }
   });
 
   test('stops after three fixes and does not commit or push', async ({ request }) => {

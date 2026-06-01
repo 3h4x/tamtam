@@ -1,11 +1,44 @@
-import { readFileSync, writeFileSync, mkdirSync } from 'fs';
+import { readFileSync, writeFileSync, mkdirSync, rmSync } from 'fs';
 import { join } from 'path';
 import type { APIRequestContext } from '@playwright/test';
-import { SHIM_DIR, WORKSPACE_DIR } from './global-setup';
+import { E2E_BASE, SHIM_DIR, WORKSPACE_DIR } from './global-setup';
 
 // ---------------------------------------------------------------------------
 // Scenario + state management
 // ---------------------------------------------------------------------------
+
+export interface PipelineSharedStateLock {
+  release: () => void;
+}
+
+export async function acquirePipelineSharedStateLock(
+  owner: string,
+  timeoutMs = 300_000,
+): Promise<PipelineSharedStateLock> {
+  const lockDir = join(E2E_BASE, 'shared-state.lock');
+  const deadline = Date.now() + timeoutMs;
+
+  while (Date.now() < deadline) {
+    try {
+      mkdirSync(lockDir, { recursive: false });
+      writeFileSync(join(lockDir, 'owner'), `${owner}\n${new Date().toISOString()}\n`);
+      let released = false;
+      return {
+        release: () => {
+          if (released) return;
+          released = true;
+          rmSync(lockDir, { recursive: true, force: true });
+        },
+      };
+    } catch (err) {
+      const code = (err as NodeJS.ErrnoException).code;
+      if (code !== 'EEXIST') throw err;
+      await new Promise((resolve) => setTimeout(resolve, 250));
+    }
+  }
+
+  throw new Error(`Timed out waiting for e2e shared-state lock: ${owner}`);
+}
 
 export function writeScenario(
   project: string,

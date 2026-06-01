@@ -93,6 +93,24 @@ export function summarizeOutcome(run: OutcomeInput): { label: string; tone: Outc
   const out = run.output;
   if (out && typeof out === 'object' && !Array.isArray(out)) {
     const o = out as Record<string, unknown>;
+    const decision = o.decision;
+    if (decision && typeof decision === 'object' && !Array.isArray(decision)) {
+      const verdict = pickString(decision as Record<string, unknown>, ['verdict']);
+      if (verdict) {
+        const tone: OutcomeTone = verdict === 'LGTM' ? 'ok' : verdict === 'DO NOT SHIP' ? 'err' : 'warn';
+        return { label: verdict, tone };
+      }
+    }
+    const waited = o.waited;
+    if (waited && typeof waited === 'object' && !Array.isArray(waited)) {
+      const job = (waited as Record<string, unknown>).job;
+      if (job && typeof job === 'object' && !Array.isArray(job)) {
+        const exitCode = (job as Record<string, unknown>).exitCode;
+        if (typeof exitCode === 'number' && exitCode !== 0) {
+          return { label: `exit ${exitCode}`, tone: 'err' };
+        }
+      }
+    }
     const verdict = pickString(o, ['verdict']);
     if (verdict) {
       const tone: OutcomeTone = verdict === 'LGTM' ? 'ok' : verdict === 'DO NOT SHIP' ? 'err' : 'warn';

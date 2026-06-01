@@ -590,6 +590,75 @@ describe('WorkflowRunsPage', () => {
     unmount()
   })
 
+  it('counts completed warning and error outcomes in the attention shortcuts', async () => {
+    vi.stubGlobal('fetch', vi.fn().mockResolvedValue({
+      ok: true,
+      json: async () => ({
+        runs: [
+          {
+            id: 'run-dns',
+            name: 'releaseOrchestratorWorkflow',
+            rawName: 'workflow.releaseOrchestratorWorkflow',
+            status: 'completed',
+            createdAt: '2026-05-20T11:49:00Z',
+            startedAt: '2026-05-20T11:50:00Z',
+            completedAt: '2026-05-20T11:50:30Z',
+            durationMs: 30_000,
+            input: ['acme'],
+            output: { decision: { verdict: 'DO NOT SHIP' } },
+            error: null,
+          },
+          {
+            id: 'run-abort',
+            name: 'releaseOrchestratorWorkflow',
+            rawName: 'workflow.releaseOrchestratorWorkflow',
+            status: 'completed',
+            createdAt: '2026-05-20T11:45:00Z',
+            startedAt: '2026-05-20T11:46:00Z',
+            completedAt: '2026-05-20T11:46:30Z',
+            durationMs: 30_000,
+            input: ['beta'],
+            output: { waited: { job: { exitCode: -3 } } },
+            error: null,
+          },
+          {
+            id: 'run-ok',
+            name: 'releaseOrchestratorWorkflow',
+            rawName: 'workflow.releaseOrchestratorWorkflow',
+            status: 'completed',
+            createdAt: '2026-05-20T11:40:00Z',
+            startedAt: '2026-05-20T11:41:00Z',
+            completedAt: '2026-05-20T11:41:30Z',
+            durationMs: 30_000,
+            input: ['gamma'],
+            output: { decision: { verdict: 'LGTM' } },
+            error: null,
+          },
+        ],
+        meta: { workflowEnabled: true, releaseWorkflow: true, releaseWorkflowDrive: true, mode: 'drive' },
+      }),
+    }))
+
+    const { container, unmount } = renderWorkflowRunsPage()
+
+    await vi.waitFor(() => {
+      expect(container.textContent).toContain('needs attention')
+      expect(container.textContent).toContain('2 recent')
+    })
+
+    const attentionPanel = container.querySelector('section[aria-label="Workflow runs needing attention"]')
+    expect(attentionPanel?.textContent).toContain('2 runs')
+    expect(attentionPanel?.textContent).toContain('DO NOT SHIP')
+    expect(attentionPanel?.textContent).toContain('exit -3')
+    expect(attentionPanel?.textContent).not.toContain('gamma')
+
+    const completedShortcut = container.querySelector<HTMLButtonElement>('button[aria-label="Show completed workflow runs"]')
+    expect(completedShortcut?.textContent).toContain('completed')
+    expect(completedShortcut?.textContent).toContain('2')
+
+    unmount()
+  })
+
   it('shows failed and cancelled runs in a direct attention panel', async () => {
     vi.stubGlobal('fetch', vi.fn().mockResolvedValue({
       ok: true,

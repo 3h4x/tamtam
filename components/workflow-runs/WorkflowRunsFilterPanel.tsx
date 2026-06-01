@@ -11,6 +11,7 @@ interface WorkflowRunsFilterPanelProps {
   nameFilter: string;
   statusFilter: StatusFilter;
   statusCounts: Record<StatusFilter, number>;
+  attentionStatusCounts: Record<StatusFilter, number>;
   resultsSummary: string;
   onNameFilterChange: (value: string) => void;
   onStatusFilterChange: (value: StatusFilter) => void;
@@ -69,6 +70,7 @@ export function WorkflowRunsFilterPanel({
   nameFilter,
   statusFilter,
   statusCounts,
+  attentionStatusCounts,
   resultsSummary,
   onNameFilterChange,
   onStatusFilterChange,
@@ -77,9 +79,9 @@ export function WorkflowRunsFilterPanel({
   const nameNeedle = nameFilter.trim().toLowerCase();
   const hasActiveFilters = nameNeedle.length > 0 || statusFilter !== 'all';
   const activeStatusPresentation = statusFilter !== 'all' ? statusFilterPresentation(statusFilter) : null;
-  const attentionStatuses = (['failed', 'cancelled'] as const)
-    .filter((status) => statusCounts[status] > 0)
-    .map((status) => ({ status, count: statusCounts[status] }));
+  const attentionStatuses = STATUS_FILTERS
+    .filter((status) => status !== 'all' && attentionStatusCounts[status] > 0)
+    .map((status) => ({ status, count: attentionStatusCounts[status] }));
   const attentionCount = attentionStatuses.reduce((total, item) => total + item.count, 0);
 
   return (

@@ -2,6 +2,8 @@ import { test, expect } from '@playwright/test';
 import { readFileSync } from 'fs';
 import { join } from 'path';
 import {
+  acquirePipelineSharedStateLock,
+  type PipelineSharedStateLock,
   writeScenario,
   resetShimState,
   readShimCalls,
@@ -14,9 +16,11 @@ const SCENARIO = JSON.parse(
 );
 
 const PROJECT = 'review-cap-exhaustion';
+let sharedStateLock: PipelineSharedStateLock | null = null;
 
 test.describe('Review-cap exhaustion → file issue + ship anyway', () => {
   test.beforeAll(async ({ request }) => {
+    sharedStateLock = await acquirePipelineSharedStateLock('review-cap-exhaustion');
     writeScenario(PROJECT, SCENARIO.steps);
     resetShimState(PROJECT);
     await enableProject(request, PROJECT, { testsDisabled: true });
@@ -31,8 +35,13 @@ test.describe('Review-cap exhaustion → file issue + ship anyway', () => {
   });
 
   test.afterAll(async ({ request }) => {
-    // Restore the default so other specs in the same harness aren't affected.
-    await request.patch('/api/settings', { data: { fix_max_iterations: '3' } });
+    try {
+      const patch = await request.patch('/api/settings', { data: { fix_max_iterations: '0' } });
+      expect(patch.ok(), `failed to restore fix_max_iterations: ${patch.status()}`).toBe(true);
+    } finally {
+      sharedStateLock?.release();
+      sharedStateLock = null;
+    }
   });
 
   test('files a follow-up issue and chains to commit + push when review cap trips', async ({ request }) => {

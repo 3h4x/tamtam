@@ -32,6 +32,9 @@ export async function releaseOrchestratorWorkflow(
   'use workflow';
   const waited = await waitStep(jobId);
   if (!waited.finished || !waited.job) return { waited, decision: null, dispatch: null };
+  if (ctx.parentJobId && await releaseAlreadyFinalizedStep(ctx.parentJobId)) {
+    return { waited, decision: null, dispatch: null };
+  }
   const decision = await decideStep(waited.job.id);
   // When the guard rewrote a DO NOT SHIP / NEEDS ATTENTION abort into a
   // "ship anyway with follow-up issue" decision, file the GitHub issue with
@@ -173,6 +176,13 @@ async function waitStep(jobId: string): Promise<WaitForJobResult> {
   'use step';
   const { waitForJobCompletion } = await import('@/lib/workflows/wait-for-job');
   return waitForJobCompletion(jobId);
+}
+
+async function releaseAlreadyFinalizedStep(releaseJobId: string): Promise<boolean> {
+  'use step';
+  const { getJob } = await import('@/lib/jobs/job-storage');
+  const release = getJob(releaseJobId);
+  return release?.kind === 'release' && release.finishedAt !== null;
 }
 
 async function decideStep(jobId: string): Promise<NextPhase> {

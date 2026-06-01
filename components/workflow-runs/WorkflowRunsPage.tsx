@@ -133,6 +133,12 @@ function workflowEventTime(run: WorkflowRunSummary): string | null {
   return run.createdAt;
 }
 
+function workflowRunNeedsAttention(run: WorkflowRunSummary): boolean {
+  if (run.status === 'failed' || run.status === 'cancelled') return true;
+  const outcome = summarizeOutcome(run);
+  return outcome.tone === 'err' || outcome.tone === 'warn';
+}
+
 export function WorkflowRunsPage() {
   const [data, setData] = useState<RunsResponse | null>(null);
   const [error, setError] = useState<string | null>(null);
@@ -229,6 +235,23 @@ export function WorkflowRunsPage() {
       cancelled: 0,
     },
   );
+  const attentionStatusCounts = data.runs.reduce<Record<StatusFilter, number>>(
+    (counts, run) => {
+      if (!workflowRunNeedsAttention(run)) return counts;
+      counts.all += 1;
+      const status = STATUS_FILTERS.find((s) => s !== 'all' && s === run.status);
+      if (status) counts[status] += 1;
+      return counts;
+    },
+    {
+      all: 0,
+      completed: 0,
+      running: 0,
+      pending: 0,
+      failed: 0,
+      cancelled: 0,
+    },
+  );
   const filtered = data.runs.filter((r) => {
     if (statusFilter !== 'all' && r.status !== statusFilter) return false;
     if (!nameNeedle) return true;
@@ -265,7 +288,7 @@ export function WorkflowRunsPage() {
       startedTitle: formatTime(run.startedAt ?? run.createdAt),
     }));
   const attentionRuns = filtered
-    .filter((run) => run.status === 'failed' || run.status === 'cancelled')
+    .filter(workflowRunNeedsAttention)
     .map((run) => {
       const outcome = summarizeOutcome(run);
       return {
@@ -414,6 +437,7 @@ export function WorkflowRunsPage() {
             nameFilter={nameFilter}
             statusFilter={statusFilter}
             statusCounts={statusCounts}
+            attentionStatusCounts={attentionStatusCounts}
             resultsSummary={resultsSummary}
             onNameFilterChange={setNameFilter}
             onStatusFilterChange={setStatusFilter}
