@@ -27,8 +27,9 @@ function workflowRunLink(scope: Locator, project: string): Locator {
 
 test.describe('Real workflow-runs live start transitions', () => {
   test.beforeEach(() => {
-    rmSync(join(E2E_BASE, 'workflow-data', 'runs'), { recursive: true, force: true });
+    rmSync(join(E2E_BASE, 'workflow-data'), { recursive: true, force: true });
     mkdirSync(join(E2E_BASE, 'workflow-data', 'runs'), { recursive: true });
+    mkdirSync(join(E2E_BASE, 'workflow-data', 'steps'), { recursive: true });
   });
 
   test('workflow-runs page picks up a newly-started release and settles it to completed without reload', async ({

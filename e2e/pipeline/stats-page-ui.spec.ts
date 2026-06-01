@@ -124,11 +124,46 @@ async function stubStatsRoutes(
   // BridgeOverview fetches /api/stats/bridge and /api/stats/system
   await page.route('**/api/stats/bridge**', (route: Route) =>
     route.fulfill({
-      json: { projects: [], pace: null, providers: [], generatedAt: Date.now() },
+      json: {
+        generatedAt: Date.now(),
+        globalPace: {
+          status: 'unknown',
+          bindingProvider: null,
+          bindingWindow: null,
+          marginPct: null,
+          projectedPct: null,
+          providers: [],
+        },
+        throttle: null,
+        projects: [],
+        summary: {
+          projects: 0,
+          agentsEnabled: 0,
+          shipping: 0,
+          stuck: 0,
+          agent_running: 0,
+          error: 0,
+          attention: 0,
+          releasing: 0,
+          paused: 0,
+          active: 0,
+          idle: 0,
+          runningReleases: 0,
+        },
+      },
     }),
   );
   await page.route('**/api/stats/system**', (route: Route) =>
     route.fulfill({ json: { current: null, samples: [] } }),
+  );
+  await page.route('**/api/stats/usage-history**', (route: Route) =>
+    route.fulfill({
+      json: {
+        generatedAt: Date.now(),
+        hours: 24,
+        series: [],
+      },
+    }),
   );
   // BridgeOverview fetches /api/projects/runtime
   await page.route('**/api/projects/runtime**', (route: Route) =>
@@ -296,54 +331,20 @@ test('stats page does not show top agents table when agents list is empty', asyn
 test('stats page re-fetches with a new window when the selector is changed', async ({ page }) => {
   let lastWindowParam = '24h';
 
-  await page.route('**/api/stats/usage**', (route: Route) => {
+  await stubStatsRoutes(page, makeUsageResponse({ window: '24h' }));
+
+  await page.route((url) => url.pathname === '/api/stats/usage', (route: Route) => {
     const url = new URL(route.request().url());
     lastWindowParam = url.searchParams.get('window') ?? '24h';
     route.fulfill({
       json: makeUsageResponse({ window: lastWindowParam }),
     });
   });
-  await page.route('**/api/stats/ollama**', (route: Route) =>
-    route.fulfill({ status: 404, body: '' }),
-  );
-  await page.route('**/api/settings', (route: Route) =>
-    route.fulfill({
-      json: {
-        settings: { jobs_paused: 'false', budget_warn_at_pct: '80', budget_block_at_pct: '95' },
-        github_owner: '',
-      },
-    }),
-  );
-  await page.route('**/api/jobs/notifications', (route: Route) =>
-    route.fulfill({ json: { notifications: [] } }),
-  );
-  await page.route('**/api/usage/quota**', (route: Route) =>
-    route.fulfill({
-      json: {
-        gateEnabled: false,
-        sevenDay: { utilization: 0, resetsAt: null, msUntilReset: null },
-      },
-    }),
-  );
-  await page.route('**/api/stats/bridge**', (route: Route) =>
-    route.fulfill({
-      json: { projects: [], pace: null, providers: [], generatedAt: Date.now() },
-    }),
-  );
-  await page.route('**/api/stats/system**', (route: Route) =>
-    route.fulfill({ json: { current: null, samples: [] } }),
-  );
-  await page.route('**/api/projects/runtime**', (route: Route) =>
-    route.fulfill({ json: {} }),
-  );
-  await page.route('**/api/projects**', (route: Route) =>
-    route.fulfill({ json: { tasks: [], priorities: [], issueCounts: {} } }),
-  );
 
   await page.goto('/stats');
 
   // Page loads with 24h window.
-  await expect(page.getByText('Statistics').first()).toBeVisible({ timeout: 8_000 });
+  await expect(page.getByRole('button', { name: '24h' })).toBeVisible({ timeout: 8_000 });
   expect(lastWindowParam).toBe('24h');
 
   // Click the "7d" segment.
