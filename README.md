@@ -162,7 +162,7 @@ Prompt is optional when skills are attached — skills alone are enough to run a
 
 Run any agent on demand from the UI, or let the scheduler fire it automatically.
 
-TamTam also ships a curated recommended-agent catalog in the Agents tab, including `issue-cruncher`, `qa`, `docs-claude`, and `manage-agents`.
+TamTam also ships a built-in agent catalog in the Agents tab, mixing auto-seeded internal handlers like `documentation-reindex-vectors` with CLI templates such as `issue-cruncher`, `qa`, `docs-claude`, and `manage-agents`.
 
 ## Testing
 

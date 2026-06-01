@@ -11,7 +11,7 @@ See `docs/PIPELINE.md` for the full state machine.
 ## Concepts
 
 - **Skills** — reusable prompt blocks (DB-backed + file-based personas from `skills/docs/skills/`, plus optional runtime personas from `data/skills/` when that directory exists).
-- **Agents** — skills + project docs + model + prompt + optional schedule + optional `prerequisiteCommand`. Intake runs through `runAgentIntakeWorkflow()` in `lib/agents/intake-workflow.ts` and hands off to `startInProcessAgentJob` in `lib/jobs/inline-agent.ts`; this repo pins the local workflow world by default (`WORKFLOW_TARGET_WORLD=local`, `WORKFLOW_LOCAL_DATA_DIR=data/workflow-data`). See `docs/AGENT.md`.
+- **Agents** — skills + project docs + model + prompt + optional schedule + optional `prerequisiteCommand`. Built-in catalog entries live in `lib/agents/catalog.ts` and cover both auto-seeded internal handlers and CLI templates. Intake runs through `runAgentIntakeWorkflow()` in `lib/agents/intake-workflow.ts` and hands off to `startInProcessAgentJob` in `lib/jobs/inline-agent.ts`; this repo pins the local workflow world by default (`WORKFLOW_TARGET_WORLD=local`, `WORKFLOW_LOCAL_DATA_DIR=data/workflow-data`). See `docs/AGENT.md`.
 - **Per-project dev servers** — optional `dev_server_start_command`, `dev_server_stop_command`, and `dev_server_ready_url` fields let TamTam start and stop a project's local app around agent runs. See `lib/dev-server/lifecycle.ts`.
 - **Runs** — individual executions, surfaced per project under the history tab (`/project/[name]/history`).
 - **Custom Actions** — per-project bash commands with configurable button color.
