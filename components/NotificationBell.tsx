@@ -6,7 +6,7 @@ import { useRouter } from 'next/navigation'
 import { fetchNotifications, markNotificationsSeen, markJobSeen } from '@/lib/client-api'
 import type { JobInfo } from '@/lib/client-api'
 import { jobIsFinished } from '@/lib/client/job-status'
-import { Button } from '@/components/ui/Button'
+import { Button, buttonVariants } from '@/components/ui/Button'
 import { EmptyState } from '@/components/ui/EmptyState'
 import { Pill } from '@/components/ui/Pill'
 import { Spinner } from '@/components/ui/Spinner'
@@ -329,7 +329,11 @@ export function NotificationBell() {
             <Link
               href="/workflow-runs"
               onClick={() => setOpen(false)}
-              className="text-xs text-text-tertiary hover:text-text-primary transition-colors no-underline flex items-center gap-1"
+              className={buttonVariants({
+                variant: 'link',
+                size: 'sm',
+                className: 'inline-flex items-center [gap:0.25rem] text-text-tertiary no-underline hover:text-text-primary hover:no-underline',
+              })}
             >
               View all runs
               <svg className="w-3 h-3" fill="none" viewBox="0 0 6 10" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
