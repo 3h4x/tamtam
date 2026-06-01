@@ -257,7 +257,7 @@ Actionable project suggestions derived from agent outcomes and scheduler signals
 | `type` | TEXT | — | NOT NULL; e.g. `agent_schedule_backoff` |
 | `title` | TEXT | — | NOT NULL; short display title |
 | `detail` | TEXT | — | NOT NULL; operator-facing explanation |
-| `status` | TEXT | `open` | `open`, `dismissed`, or `applied` |
+| `status` | TEXT | `open` | `open`, `dismissed`, `applied`, or `resolved` (auto-cleared after the triggering condition no longer holds) |
 | `payload` | TEXT | — | nullable; JSON metadata for UI/actions |
 | `createdAt` | REAL | — | NOT NULL; Unix timestamp |
 | `updatedAt` | REAL | — | NOT NULL; Unix timestamp |

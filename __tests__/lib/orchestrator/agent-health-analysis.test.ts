@@ -1,12 +1,14 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 
-const { upsertRecommendationMock, dbSelectMock } = vi.hoisted(() => ({
+const { upsertRecommendationMock, resolveRecommendationIfOpenMock, dbSelectMock } = vi.hoisted(() => ({
   upsertRecommendationMock: vi.fn(),
+  resolveRecommendationIfOpenMock: vi.fn().mockResolvedValue(null),
   dbSelectMock: vi.fn(),
 }))
 
 vi.mock('@/lib/recommendations/recommendations', () => ({
   upsertRecommendation: upsertRecommendationMock,
+  resolveRecommendationIfOpen: resolveRecommendationIfOpenMock,
 }))
 
 // Mock DB: return fake job rows via the Drizzle chain
@@ -69,6 +71,8 @@ function runPrintReturning(verdict: object | null): (prompt: string) => Promise<
 describe('analyzeAgentHealth', () => {
   beforeEach(() => {
     upsertRecommendationMock.mockReset()
+    resolveRecommendationIfOpenMock.mockReset()
+    resolveRecommendationIfOpenMock.mockResolvedValue(null)
     dbSelectMock.mockReset()
     dbSelectMock.mockReturnValue([mockRun(), mockRun(), mockRun()])
   })
@@ -153,11 +157,19 @@ describe('analyzeAgentHealth', () => {
     expect(outcomes).toEqual([{ agentId: 'agent-001', analyzed: true, latestRunStartedAt: 1000000 }])
   })
 
-  it('does not write recommendation when concern=false', async () => {
+  it('retires any open health recommendation when concern=false', async () => {
     const runPrint = runPrintReturning({ concern: false, concernType: 'none', severity: 'low', summary: 'working well', recommendation: null })
     const outcomes = await analyzeAgentHealth([candidateA], { runPrint })
     expect(upsertRecommendationMock).not.toHaveBeenCalled()
+    // Healthy now → auto-retire a stale loop/noise recommendation if one is open.
+    expect(resolveRecommendationIfOpenMock).toHaveBeenCalledWith('alpha', 'orchestrator_agent_health', { agentId: 'agent-001', agentName: 'improve' })
     expect(outcomes).toEqual([{ agentId: 'agent-001', analyzed: true, latestRunStartedAt: 1000000 }])
+  })
+
+  it('does not resolve when the runner returns null (gated/failed) — no verdict', async () => {
+    const runPrint = runPrintReturning(null)
+    await analyzeAgentHealth([candidateA], { runPrint })
+    expect(resolveRecommendationIfOpenMock).not.toHaveBeenCalled()
   })
 
   it('does not write recommendation when the runner returns null (gated/failed)', async () => {

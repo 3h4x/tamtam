@@ -321,6 +321,26 @@ describe('ProjectRunsTab release actions', () => {
     unmount()
   })
 
+  it('does not show retry commit before the failed release has finalized', async () => {
+    fetchJobsMock.mockResolvedValue({
+      jobs: [
+        makeJob({ id: 'rel-commit-running', kind: 'release', started_at: 100, finished_at: null, status: 'running', exit_code: null }),
+        makeJob({ id: 'review-ok', kind: 'review', started_at: 110, finished_at: 120, exit_code: 0, verdict: 'LGTM', release_id: 'rel-commit-running' }),
+        makeJob({ id: 'commit-failed', kind: 'commit', started_at: 125, finished_at: 135, exit_code: 1, release_id: 'rel-commit-running' }),
+      ],
+      pendingReleaseProjects: [],
+    })
+    const { container, unmount } = renderTab()
+
+    await waitFor(() => {
+      expect(fetchJobsMock).toHaveBeenCalledWith('alpha', expect.objectContaining({ limit: expect.any(Number) }))
+      expect(container.textContent).toContain('failed at commit')
+      expect(container.textContent).not.toContain('Retry commit')
+    })
+
+    unmount()
+  })
+
   it('aborts a running release through the release abort endpoint', async () => {
     const fetchMock = vi.fn(async () => makeResponse({ status: 'aborted' }))
     vi.stubGlobal('fetch', fetchMock)

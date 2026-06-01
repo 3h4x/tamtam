@@ -14,15 +14,33 @@ const SCENARIO = JSON.parse(
 );
 
 const PROJECT = 'review-failure-runs-expand';
+const DEFAULT_DO_NOT_SHIP_ACTION = 'fix';
 
-test.describe('Real review failure drill-in from global runs', () => {
-  test('failed review expands into nested steps and opens the review findings from /runs without reload', async ({
+test.describe('Real review failure drill-in from project history', () => {
+  test.afterEach(async ({ request }) => {
+    const patch = await request.patch('/api/settings', {
+      data: { review_do_not_ship_action: DEFAULT_DO_NOT_SHIP_ACTION },
+    });
+    expect(
+      patch.ok(),
+      `failed to restore review_do_not_ship_action: ${patch.status()}`,
+    ).toBe(true);
+  });
+
+  test('failed review expands into nested steps and opens the review findings from project history without reload', async ({
     page,
     request,
   }) => {
     writeScenario(PROJECT, SCENARIO.steps);
     resetShimState(PROJECT);
     await enableProject(request, PROJECT, { testsDisabled: true });
+    const patch = await request.patch('/api/settings', {
+      data: { review_do_not_ship_action: 'abort' },
+    });
+    expect(
+      patch.ok(),
+      `failed to set review_do_not_ship_action: ${patch.status()}`,
+    ).toBe(true);
 
     const releaseResp = await request.post(`/api/projects/by-project/${PROJECT}/release`);
     expect(
@@ -33,22 +51,27 @@ test.describe('Real review failure drill-in from global runs', () => {
     const runningReview = await waitForJobRunning(request, PROJECT, 'review', 20_000);
     expect(runningReview, 'review job should be running').not.toBeNull();
 
-    await page.goto(`/runs?project=${encodeURIComponent(PROJECT)}`);
+    await page.goto(`/project/${PROJECT}/history`);
 
-    await expect(page.getByText('running').first()).toBeVisible({ timeout: 8_000 });
-    await expect(page.locator('span.animate-pulse').first()).toBeVisible({ timeout: 8_000 });
+    const releaseRow = page.getByRole('button').filter({
+      has: page.getByText('Release pipeline'),
+    }).first();
+
+    await expect(releaseRow.getByLabel('running')).toBeVisible({ timeout: 8_000 });
 
     const result = await waitForPipelineCompletion(request, PROJECT, 30_000);
     expect(result.status, 'pipeline should finish').toBe('done');
     expect(result.releaseJob?.['exit_code'], 'release should fail with non-zero exit').not.toBe(0);
 
-    await expect(page.getByText('release failed').first()).toBeVisible({ timeout: 15_000 });
-    await expect(page.locator('span.animate-pulse')).toHaveCount(0, { timeout: 15_000 });
-    await expect(page.getByText('running', { exact: true })).not.toBeVisible({
+    await expect(releaseRow.getByText('cancelled after review')).toBeVisible({ timeout: 15_000 });
+    await expect(releaseRow.getByText(/critical security vulnerabilities/i)).toBeVisible({
+      timeout: 15_000,
+    });
+    await expect(releaseRow.getByLabel('running')).toHaveCount(0, {
       timeout: 15_000,
     });
 
-    const expandButton = page.getByTitle('Expand steps').first();
+    const expandButton = releaseRow.getByTitle('Expand steps');
     await expect(expandButton).toBeVisible({ timeout: 8_000 });
     await expandButton.click();
 

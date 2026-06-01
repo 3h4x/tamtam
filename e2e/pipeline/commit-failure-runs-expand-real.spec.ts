@@ -19,8 +19,8 @@ const PROJECT = 'commit-failure-runs-expand';
 const COMMIT_DELAY_MS = 6500;
 const COMMIT_ERROR = 'pre-commit hook rejected staged changes';
 
-test.describe('Real commit failure drill-in from global runs', () => {
-  test('failed release expands into nested steps and opens the commit log from /runs without reload', async ({
+test.describe('Real commit failure drill-in from project history', () => {
+  test('history row surfaces failed-at-commit state and opens the commit log from project history without reload', async ({
     page,
     request,
   }) => {
@@ -44,22 +44,30 @@ test.describe('Real commit failure drill-in from global runs', () => {
     const runningReview = await waitForJobRunning(request, PROJECT, 'review', 20_000);
     expect(runningReview, 'review job should be running').not.toBeNull();
 
-    await page.goto(`/runs?project=${encodeURIComponent(PROJECT)}`);
+    await page.goto(`/project/${PROJECT}/history`);
 
-    await expect(page.getByText('running').first()).toBeVisible({ timeout: 8_000 });
-    await expect(page.locator('span.animate-pulse').first()).toBeVisible({ timeout: 8_000 });
+    const releaseRow = page.getByRole('button').filter({
+      has: page.getByText('Release pipeline'),
+    }).first();
+
+    await expect(releaseRow.getByLabel('running')).toBeVisible({ timeout: 8_000 });
+    const runningCommit = await waitForJobRunning(request, PROJECT, 'commit', 40_000);
+    expect(runningCommit, 'commit job should be running').not.toBeNull();
+    await expect(releaseRow.getByText('now: commit')).toBeVisible({ timeout: 15_000 });
+    await expect(releaseRow.getByRole('button', { name: 'Retry commit' })).toHaveCount(0);
 
     const result = await waitForPipelineCompletion(request, PROJECT, 90_000);
     expect(result.status, 'pipeline should finish').toBe('done');
     expect(result.releaseJob?.['exit_code'], 'release should fail with non-zero exit').not.toBe(0);
 
-    await expect(page.getByText('release failed').first()).toBeVisible({ timeout: 15_000 });
-    await expect(page.locator('span.animate-pulse')).toHaveCount(0, { timeout: 15_000 });
-    await expect(page.getByText('running', { exact: true })).not.toBeVisible({
+    await expect(releaseRow.getByText('release failed')).toBeVisible({ timeout: 15_000 });
+    await expect(releaseRow.getByText('failed at commit')).toBeVisible({ timeout: 15_000 });
+    await expect(releaseRow.getByLabel('running')).toHaveCount(0, { timeout: 15_000 });
+    await expect(releaseRow.getByRole('button', { name: 'Retry commit' })).toBeVisible({
       timeout: 15_000,
     });
 
-    const expandButton = page.getByTitle('Expand steps').first();
+    const expandButton = releaseRow.getByTitle('Expand steps');
     await expect(expandButton).toBeVisible({ timeout: 8_000 });
     await expandButton.click();
 

@@ -21,7 +21,7 @@
 import { spawn } from 'child_process';
 import { and, desc, isNotNull, like, sql, type SQL } from 'drizzle-orm';
 import { db, schema } from '@/lib/db';
-import { upsertRecommendation } from '@/lib/recommendations/recommendations';
+import { upsertRecommendation, resolveRecommendationIfOpen } from '@/lib/recommendations/recommendations';
 import { resolveCliBin, resolveCliEnv } from '@/lib/shared/cli-bin';
 import { getSettings, getPermissionModeFlag } from '@/lib/shared/config';
 import { checkCliStartGate } from '@/lib/usage/resolve-provider';
@@ -316,6 +316,14 @@ export async function analyzeAgentHealth(
             lastRunScore: runs[0]?.runScore ?? null,
             avgRunScore: avgScore,
           },
+        });
+      } else {
+        // Latest analysis found no concern — retire any open health
+        // recommendation for this agent so a resolved loop/noise trend doesn't
+        // linger on the board.
+        await resolveRecommendationIfOpen(candidate.project, 'orchestrator_agent_health', {
+          agentId: candidate.id,
+          agentName: candidate.name,
         });
       }
       outcomes.push({ agentId: candidate.id, analyzed: true, latestRunStartedAt });

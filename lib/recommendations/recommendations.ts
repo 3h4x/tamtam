@@ -1,7 +1,11 @@
 import { and, desc, eq, sql } from 'drizzle-orm';
 import { db, schema } from '@/lib/db';
 
-export type RecommendationStatus = 'open' | 'dismissed' | 'applied';
+// `resolved` is a terminal status set automatically by the detectors when the
+// condition that produced a recommendation no longer holds (e.g. an unfruitful
+// agent starts producing again). It's distinct from the operator-driven
+// `dismissed` / `applied` so auto-retirement never masks a human decision.
+export type RecommendationStatus = 'open' | 'dismissed' | 'applied' | 'resolved';
 
 export interface RecommendationPayload {
   [key: string]: unknown;
@@ -61,14 +65,17 @@ function rowToDict(row: typeof schema.recommendations.$inferSelect): Recommendat
   };
 }
 
+// Deterministic id for a recommendation. The same (project, type, agent) always
+// maps to the same row so re-detection upserts in place — and so the recovery
+// resolver can address the exact row without a lookup. `agentKey` must be the
+// already-resolved `agentId || agentName || 'project'` used at creation time.
+export function recommendationId(project: string, type: string, agentKey: string): string {
+  return [project, type, agentKey].join(':').replace(/[^a-zA-Z0-9:_-]+/g, '-');
+}
+
 export async function upsertRecommendation(input: RecommendationInput): Promise<RecommendationRow | null> {
   const now = Date.now() / 1000;
-  const idBase = [
-    input.project,
-    input.type,
-    input.agentId || input.agentName || 'project',
-  ].join(':');
-  const id = idBase.replace(/[^a-zA-Z0-9:_-]+/g, '-');
+  const id = recommendationId(input.project, input.type, input.agentId || input.agentName || 'project');
   try {
     await db.insert(schema.recommendations)
       .values({
@@ -194,4 +201,20 @@ export async function updateRecommendationStatusIfCurrent(
     .returning({ id: schema.recommendations.id });
   if (updated.length === 0) return null;
   return getRecommendation(project, id);
+}
+
+/**
+ * Auto-retire a recommendation whose triggering condition no longer holds.
+ * Flips `open → resolved` for the deterministic (project, type, agent) row and
+ * is a no-op when no open row exists or it was already `dismissed`/`applied`
+ * (so it never overrides an operator's decision). Detectors call this on the
+ * recovery branch where they used to just `return`.
+ */
+export async function resolveRecommendationIfOpen(
+  project: string,
+  type: string,
+  agent: { agentId?: string | null; agentName?: string | null },
+): Promise<RecommendationRow | null> {
+  const id = recommendationId(project, type, agent.agentId || agent.agentName || 'project');
+  return updateRecommendationStatusIfCurrent(project, id, 'open', 'resolved');
 }

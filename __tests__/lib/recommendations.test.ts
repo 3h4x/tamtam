@@ -32,6 +32,8 @@ describe('recommendations storage', () => {
   let upsertRecommendation: typeof import('@/lib/recommendations/recommendations').upsertRecommendation;
   let listRecommendations: typeof import('@/lib/recommendations/recommendations').listRecommendations;
   let updateRecommendationStatus: typeof import('@/lib/recommendations/recommendations').updateRecommendationStatus;
+  let resolveRecommendationIfOpen: typeof import('@/lib/recommendations/recommendations').resolveRecommendationIfOpen;
+  let recommendationId: typeof import('@/lib/recommendations/recommendations').recommendationId;
 
   beforeAll(async () => {
     sharedHandle = await createTestPgDbEmpty();
@@ -51,7 +53,7 @@ describe('recommendations storage', () => {
     vi.resetModules();
     await sharedHandle.db.execute(sql.raw('TRUNCATE recommendations'));
     vi.doMock('@/lib/db', () => ({ db: sharedHandle.db, schema }));
-    ({ upsertRecommendation, listRecommendations, updateRecommendationStatus } = await import('@/lib/recommendations/recommendations'));
+    ({ upsertRecommendation, listRecommendations, updateRecommendationStatus, resolveRecommendationIfOpen, recommendationId } = await import('@/lib/recommendations/recommendations'));
   });
 
   afterEach(async () => {
@@ -155,5 +157,49 @@ describe('recommendations storage', () => {
 
   it('returns null when updating a missing recommendation', async () => {
     expect(await updateRecommendationStatus('portal', 'missing', 'applied')).toBeNull();
+  });
+
+  it('auto-resolves an open recommendation when the condition clears', async () => {
+    const created = await upsertRecommendation({
+      project: 'portal',
+      sourceKind: 'agent:audit',
+      agentId: 'agent-7',
+      agentName: 'audit',
+      type: 'agent_unfruitful',
+      title: "audit isn't producing changes",
+      detail: 'No changes.',
+    });
+    // Resolver must address the same deterministic id upsert created.
+    expect(created!.id).toBe(recommendationId('portal', 'agent_unfruitful', 'agent-7'));
+
+    const resolved = await resolveRecommendationIfOpen('portal', 'agent_unfruitful', { agentId: 'agent-7', agentName: 'audit' });
+    expect(resolved?.status).toBe('resolved');
+
+    // Resolved rows drop off the open list.
+    expect((await listRecommendations('portal')).filter((r) => r.status === 'open')).toHaveLength(0);
+  });
+
+  it('falls back to agent name then "project" when resolving by key', async () => {
+    await upsertRecommendation({
+      project: 'portal', sourceKind: 'agent:x', agentName: 'namedonly',
+      type: 'agent_unfruitful', title: 't', detail: 'd',
+    });
+    const resolved = await resolveRecommendationIfOpen('portal', 'agent_unfruitful', { agentId: null, agentName: 'namedonly' });
+    expect(resolved?.status).toBe('resolved');
+  });
+
+  it('does not override an operator decision or invent a row', async () => {
+    // No open row → no-op.
+    expect(await resolveRecommendationIfOpen('portal', 'agent_unfruitful', { agentId: 'ghost' })).toBeNull();
+
+    // Already dismissed by the operator → resolver leaves it dismissed.
+    const created = await upsertRecommendation({
+      project: 'portal', sourceKind: 'agent:audit', agentId: 'agent-9', agentName: 'audit',
+      type: 'agent_unfruitful', title: 't', detail: 'd',
+    });
+    await updateRecommendationStatus('portal', created!.id, 'dismissed');
+    expect(await resolveRecommendationIfOpen('portal', 'agent_unfruitful', { agentId: 'agent-9' })).toBeNull();
+    const rows = await listRecommendations('portal');
+    expect(rows.find((r) => r.id === created!.id)?.status).toBe('dismissed');
   });
 });

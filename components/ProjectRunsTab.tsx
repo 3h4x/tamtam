@@ -474,6 +474,14 @@ export function ProjectRunsTab({ projectName, jobsPaused = false }: ProjectRunsT
   }
 
   const failedRetryableStep = (release: Entry): Entry | null => {
+    if (
+      release.status === 'running'
+      || release.finishedAt === null
+      || release.exitCode === null
+      || release.exitCode === 0
+    ) {
+      return null
+    }
     const failed = (release.children ?? [])
       .filter((child) => child.status === 'done' && child.exitCode !== null && child.exitCode !== 0)
       .sort((a, b) => b.startedAt - a.startedAt)[0]

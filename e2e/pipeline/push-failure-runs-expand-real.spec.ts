@@ -19,8 +19,8 @@ const PROJECT = 'push-failure-runs-expand';
 const PUSH_DELAY_MS = 6500;
 const PUSH_ERROR = 'rejected by remote hook';
 
-test.describe('Real push failure drill-in from global runs', () => {
-  test('failed release expands into nested steps and opens the push log from /runs without reload', async ({
+test.describe('Real push failure drill-in from project history', () => {
+  test('cancelled-after-fix release expands into nested steps and opens the push log from project history without reload', async ({
     page,
     request,
   }) => {
@@ -44,22 +44,27 @@ test.describe('Real push failure drill-in from global runs', () => {
     const runningReview = await waitForJobRunning(request, PROJECT, 'review', 20_000);
     expect(runningReview, 'review job should be running').not.toBeNull();
 
-    await page.goto(`/runs?project=${encodeURIComponent(PROJECT)}`);
+    await page.goto(`/project/${PROJECT}/history`);
 
-    await expect(page.getByText('running').first()).toBeVisible({ timeout: 8_000 });
-    await expect(page.locator('span.animate-pulse').first()).toBeVisible({ timeout: 8_000 });
+    const releaseRow = page.getByRole('button').filter({
+      has: page.getByText('Release pipeline'),
+    }).first();
+
+    await expect(releaseRow.getByLabel('running')).toBeVisible({ timeout: 8_000 });
 
     const result = await waitForPipelineCompletion(request, PROJECT, 90_000);
     expect(result.status, 'pipeline should finish').toBe('done');
     expect(result.releaseJob?.['exit_code'], 'release should fail with non-zero exit').not.toBe(0);
 
-    await expect(page.getByText('release failed').first()).toBeVisible({ timeout: 15_000 });
-    await expect(page.locator('span.animate-pulse')).toHaveCount(0, { timeout: 15_000 });
-    await expect(page.getByText('running', { exact: true })).not.toBeVisible({
+    await expect(releaseRow.getByText('cancelled after fix')).toBeVisible({ timeout: 15_000 });
+    await expect(releaseRow.getByLabel('running')).toHaveCount(0, {
+      timeout: 15_000,
+    });
+    await expect(releaseRow.getByRole('button', { name: 'Continue release' })).toBeVisible({
       timeout: 15_000,
     });
 
-    const expandButton = page.getByTitle('Expand steps').first();
+    const expandButton = releaseRow.getByTitle('Expand steps');
     await expect(expandButton).toBeVisible({ timeout: 8_000 });
     await expandButton.click();
 

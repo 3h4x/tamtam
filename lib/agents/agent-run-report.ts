@@ -1,7 +1,7 @@
 import { resolveProjectPath } from '@/lib/shared/project-data';
 // exec wraps child_process.execFile safely — args are arrays, no shell injection risk
 import { exec } from '@/lib/shared/shell';
-import { upsertRecommendation } from '@/lib/recommendations/recommendations';
+import { upsertRecommendation, resolveRecommendationIfOpen } from '@/lib/recommendations/recommendations';
 import { isAgentJobKind } from '@/lib/jobs/kinds';
 import type { JobData } from '@/lib/jobs/types';
 import { extractAssistantTextFromRawLog, extractWorkSummary } from '@/lib/agents/work-summary-extractor.mjs';
@@ -261,7 +261,13 @@ async function maybeRecommendFruitfulness(job: JobData, ctx: AgentContextMeta): 
 
   const stats = computeFruitfulness(samples);
   if (stats.runs < UNFRUITFUL_MIN_SAMPLE) return;
-  if (stats.rate >= UNFRUITFUL_RATE_THRESHOLD) return;
+  if (stats.rate >= UNFRUITFUL_RATE_THRESHOLD) {
+    // The agent recovered — its scheduled runs are producing again. Retire any
+    // open "isn't producing changes" recommendation so it doesn't linger as a
+    // false flag (the row stays until something closes it).
+    await resolveRecommendationIfOpen(job.project, 'agent_unfruitful', { agentId, agentName });
+    return;
+  }
 
   const currentSchedule = ctx.agent?.schedule ?? null;
   const fruitfulPct = Math.round(stats.rate * 100);
@@ -296,8 +302,15 @@ async function maybeRecommendFruitfulness(job: JobData, ctx: AgentContextMeta): 
 
 function maybeRecommendSchedule(job: JobData, ctx: AgentContextMeta, files: ModifiedFile[], actionable: boolean | null): void {
   const agentName = ctx.agent?.name ?? job.kind.replace(/^agent:/, '');
+  const agentId = ctx.agent?.id ?? null;
   const currentSchedule = ctx.agent?.schedule ?? null;
   const hours = scheduleHours(currentSchedule);
+
+  // Recovery: if a scheduled run found actionable work (or changed files), a
+  // prior "run less often" recommendation is no longer valid — retire it.
+  if (ctx.agent?.triggeredBy === 'schedule' && (files.length > 0 || actionable === true)) {
+    void resolveRecommendationIfOpen(job.project, 'agent_schedule_backoff', { agentId, agentName });
+  }
   if (
     job.exitCode !== 0 ||
     ctx.agent?.triggeredBy !== 'schedule' ||

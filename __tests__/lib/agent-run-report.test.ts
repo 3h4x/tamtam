@@ -29,6 +29,8 @@ const log = (text: string) => [
 describe('finalizeAgentRunReport', () => {
   let execMock: ReturnType<typeof vi.fn>;
   let upsertRecommendationMock: ReturnType<typeof vi.fn>;
+  let resolveRecommendationIfOpenMock: ReturnType<typeof vi.fn>;
+  let loadRecentAgentSamplesMock: ReturnType<typeof vi.fn>;
   let resolveProjectPathMock: ReturnType<typeof vi.fn>;
   let ingestAgentRunMock: ReturnType<typeof vi.fn>;
   let insertExecuteMock: ReturnType<typeof vi.fn>;
@@ -47,6 +49,8 @@ describe('finalizeAgentRunReport', () => {
     // undefined when a test only stubs the first two execs.
     execMock = vi.fn().mockResolvedValue({ exitCode: 0, stdout: '', stderr: '' });
     upsertRecommendationMock = vi.fn();
+    resolveRecommendationIfOpenMock = vi.fn().mockResolvedValue(null);
+    loadRecentAgentSamplesMock = vi.fn().mockResolvedValue([]);
     resolveProjectPathMock = vi.fn().mockReturnValue('/repo');
     ingestAgentRunMock = vi.fn().mockResolvedValue({ contentHash: 'hash-1', skipped: false, stored: true });
     insertExecuteMock = vi.fn().mockResolvedValue(undefined);
@@ -58,7 +62,11 @@ describe('finalizeAgentRunReport', () => {
     };
     vi.doMock('@/lib/shared/project-data', () => ({ resolveProjectPath: resolveProjectPathMock }));
     vi.doMock('@/lib/shared/shell', () => ({ exec: execMock }));
-    vi.doMock('@/lib/recommendations/recommendations', () => ({ upsertRecommendation: upsertRecommendationMock }));
+    vi.doMock('@/lib/recommendations/recommendations', () => ({ upsertRecommendation: upsertRecommendationMock, resolveRecommendationIfOpen: resolveRecommendationIfOpenMock }));
+    vi.doMock('@/lib/agents/fruitfulness', async () => {
+      const actual = await vi.importActual<typeof import('@/lib/agents/fruitfulness')>('@/lib/agents/fruitfulness');
+      return { ...actual, loadRecentAgentSamples: loadRecentAgentSamplesMock };
+    });
     vi.doMock('@/lib/shared/config', () => ({ getSettings: () => settingsMock }));
     vi.doMock('@/lib/agents/retrieval/pgvector-backend', () => ({
       PgvectorBackend: class {
@@ -190,6 +198,43 @@ describe('finalizeAgentRunReport', () => {
         },
       }),
     }));
+  });
+
+  it('retires a stale unfruitful recommendation once the agent recovers', async () => {
+    // Five fruitful prior scheduled runs → window rate well above threshold,
+    // so this finalize should resolve any open "isn't producing changes" rec
+    // instead of re-asserting it. This run itself is an ambiguous no-op so the
+    // schedule path stays out of the way.
+    loadRecentAgentSamplesMock.mockResolvedValue(
+      Array.from({ length: 5 }, (_, i) => ({
+        jobId: `prior-${i}`, startedAt: 90 - i, exitCode: 0,
+        modifiedFilesCount: 1, linesAdded: 5, linesRemoved: 0,
+      })),
+    );
+    execMock
+      .mockResolvedValueOnce({ exitCode: 0, stdout: '', stderr: '' })
+      .mockResolvedValueOnce({ exitCode: 0, stdout: '', stderr: '' });
+    const { finalizeAgentRunReport } = await import('@/lib/agents/agent-run-report');
+    const job = makeJob();
+
+    await finalizeAgentRunReport(job, log('TamTam Run Report\nSummary: Nothing to do.\nFiles changed: none\n'));
+    // maybeRecommendFruitfulness is fire-and-forget — let its microtasks settle.
+    await new Promise((r) => setTimeout(r, 0));
+
+    expect(resolveRecommendationIfOpenMock).toHaveBeenCalledWith('portal', 'agent_unfruitful', { agentId: 'agent-1', agentName: 'tests' });
+    expect(upsertRecommendationMock).not.toHaveBeenCalled();
+  });
+
+  it('retires a stale schedule-backoff recommendation when a scheduled run does real work', async () => {
+    execMock
+      .mockResolvedValueOnce({ exitCode: 0, stdout: 'M\tsrc/lib/foo.ts\n', stderr: '' })
+      .mockResolvedValueOnce({ exitCode: 0, stdout: '', stderr: '' });
+    const { finalizeAgentRunReport } = await import('@/lib/agents/agent-run-report');
+    const job = makeJob();
+
+    await finalizeAgentRunReport(job, log('TamTam Run Report\nSummary: Fixed it.\nFiles changed: src/lib/foo.ts\nActionable work: yes\n'));
+
+    expect(resolveRecommendationIfOpenMock).toHaveBeenCalledWith('portal', 'agent_schedule_backoff', { agentId: 'agent-1', agentName: 'tests' });
   });
 
   it('does not recommend schedule changes for manual runs', async () => {
