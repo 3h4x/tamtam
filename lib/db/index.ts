@@ -8,5 +8,6 @@ if (!connectionString) {
 }
 
 export const pool = new Pool({ connectionString, max: 10 });
+pool.on('error', (err) => console.error('[db] idle client error', err));
 export const db = drizzle(pool, { schema });
 export { schema };
