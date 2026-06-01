@@ -1000,6 +1000,36 @@ describe('agents API', () => {
       expect(data.detail).toBe('not found');
     });
 
+    it('rejects schedule updates for system agents', async () => {
+      const db = testDb.db;
+      const now = Date.now() / 1000;
+      await db.insert(schema.agents)
+        .values({
+          id: 'system:proj1:documentation-reindex-vectors',
+          name: 'documentation-reindex-vectors',
+          project: 'proj1',
+          skillIds: '[]',
+          model: 'normal',
+          prompt: '',
+          schedule: '1h',
+          kind: 'system',
+          createdAt: now,
+          updatedAt: now,
+        });
+
+      const response = await PATCH(new NextRequest('http://localhost/api/agents/system%3Aproj1%3Adocumentation-reindex-vectors', {
+        method: 'PATCH',
+        body: JSON.stringify({ schedule: '8h' }),
+      }), {
+        params: Promise.resolve({ agentId: 'system:proj1:documentation-reindex-vectors' }),
+      });
+
+      expect(response.status).toBe(400);
+      await expect(response.json()).resolves.toMatchObject({
+        detail: 'System agent schedule is managed by settings',
+      });
+    });
+
     it('updates agent name', async () => {
       const db = testDb.db;
       const now = Date.now() / 1000;
@@ -2029,6 +2059,29 @@ describe('agents API', () => {
         body: JSON.stringify({ project: 'myproj', name: 'Nobody' }),
       }));
       expect(res.status).toBe(404);
+    });
+
+    it('rejects schedule updates for system agents by project+name', async () => {
+      await seedAgent(testDb.db, {
+        id: 'system:myproj:documentation-reindex-vectors',
+        name: 'documentation-reindex-vectors',
+        kind: 'system',
+        schedule: '1h',
+      });
+
+      const res = await PATCH_BY_NAME(new NextRequest('http://localhost/api/agents/by-name', {
+        method: 'PATCH',
+        body: JSON.stringify({
+          project: 'myproj',
+          name: 'documentation-reindex-vectors',
+          schedule: '8h',
+        }),
+      }));
+
+      expect(res.status).toBe(400);
+      await expect(res.json()).resolves.toMatchObject({
+        detail: 'System agent schedule is managed by settings',
+      });
     });
 
     it('updates prompt by project+name', async () => {

@@ -2,7 +2,7 @@
 id: agent-improve
 name: agent:improve
 description: "Walks up to 5 oldest unaudited source files (oldest commit first), applies fixes by family rubric (F1–F4), continues scanning after small/F3/F4 fixes and stops after substantial F1/F2 ones, and records every audited file in a content-hash ledger so the queue advances without re-running on unchanged files."
-version: "2026-05-30c"
+version: "2026-05-31"
 agent:
   defaultSchedule: 12h
   defaultModel: normal
@@ -42,6 +42,7 @@ prerequisite: |
           .tamtam/*|*/.tamtam/*|node_modules/*|*/node_modules/*) continue;;
           *__snapshots__/*|*__fixtures__/*|*/fixtures/*|*/test-results/*|*/playwright-report/*|*/coverage/*|*/dist/*|*/build/*|*/out/*) continue;;
           docs/superpowers/plans/*|docs/superpowers/specs/*) continue;;
+          skills/docs/*) continue;;
           CHANGELOG.md|LICENSE|LICENSE.md|LICENCE|LICENCE.md) continue;;
         esac
         sha=$(git hash-object -- "$path" 2>/dev/null) || continue
@@ -62,6 +63,7 @@ prerequisite: |
           .tamtam/*|*/.tamtam/*|node_modules/*|*/node_modules/*) continue;;
           *__snapshots__/*|*__fixtures__/*|*/fixtures/*|*/test-results/*|*/playwright-report/*|*/coverage/*|*/dist/*|*/build/*|*/out/*) continue;;
           docs/superpowers/plans/*|docs/superpowers/specs/*) continue;;
+          skills/docs/*) continue;;
           CHANGELOG.md|LICENSE|LICENSE.md|LICENCE|LICENCE.md) continue;;
         esac
         sha=$(git hash-object -- "$path" 2>/dev/null) || continue

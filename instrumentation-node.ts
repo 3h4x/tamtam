@@ -95,6 +95,31 @@ export async function runProbeSweep(): Promise<void> {
   } catch (err) {
     console.error('[probe-sweep] stranded-branch reconcile error:', err);
   }
+  // Safety net: drain in-memory agent queues for projects where nothing is
+  // currently running. The primary drain path is the lifecycle hook that fires
+  // drainNextAgentRun on every agent finish. But a race between the drain and
+  // a concurrent agent start (e.g. boost claiming startingAgents before the
+  // lifecycle check) causes the drain to return early without scheduling a
+  // retry, leaving the queue stuck indefinitely. This sweep fires every 30 s —
+  // cheap, idempotent (inFlight + hasAgentStartSlot guards in drainNextAgentRun
+  // prevent re-entrant drains).
+  try {
+    const { listQueuedProjects, drainNextAgentRun } = await import('@/lib/agents/pending-agent-run');
+    const { listJobs } = await import('@/lib/jobs/job-storage');
+    const { isAgentJobKind } = await import('@/lib/jobs/kinds');
+    const runningProjects = new Set(
+      listJobs()
+        .filter((j) => j?.finishedAt === null && isAgentJobKind(j?.kind))
+        .map((j) => j.project),
+    );
+    for (const project of listQueuedProjects()) {
+      if (!runningProjects.has(project)) {
+        void drainNextAgentRun(project);
+      }
+    }
+  } catch (err) {
+    console.error('[probe-sweep] stalled-queue drain:', err);
+  }
 }
 
 /**
@@ -993,6 +1018,14 @@ export async function registerNode(): Promise<void> {
             loadLatestFinishedRunStartedAt: async (candidate) => {
               const { loadLatestFinishedScheduledRunStartedAt } = await import('@/lib/orchestrator/agent-health-analysis');
               return loadLatestFinishedScheduledRunStartedAt(candidate);
+            },
+            getProjectQueueCounts: async () => {
+              const { listQueuedProjects, listQueuedAgents } = await import('@/lib/agents/pending-agent-run');
+              const counts = new Map<string, number>();
+              for (const project of listQueuedProjects()) {
+                counts.set(project, listQueuedAgents(project).length);
+              }
+              return counts;
             },
           },
           usageSnapshotDeps: {

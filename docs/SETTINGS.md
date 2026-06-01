@@ -243,14 +243,14 @@ Settings hook: editing `retrieval_embedding_model` in `/settings/general` enqueu
 
 Operator controls:
 
-- **Schedule + enabled** are editable from the standard agents UI per project. Other fields (name, prompt, skills, prereq, model, provider) are locked — the agent is auto-managed.
+- **Enabled** is editable from the standard agents UI per project. Schedule is managed globally from Settings -> Retrieval via `retrieval_reindex_interval_hours`. Other fields (name, prompt, skills, prereq, model, provider) are locked — the agent is auto-managed.
 - **Disable** removes scheduled runs but keeps the row.
 - **Delete** writes a `system_agent_dismissed:<project>:documentation-reindex-vectors` settings marker so the seeder does not recreate it on next boot. To re-enable, delete that settings key.
 - **Manual reindex** via the existing project Config tab → "Reindex now" continues to work and uses the same `reindexProject()` function.
 
 Known caveats:
 
-- A run that completes before this system agent fires still indexes its own agent_run chunk (existing behavior), but the doc/skill/config corpus only refreshes on the agent's schedule. To force a refresh sooner: change `schedule` to `1m` momentarily, or hit the manual reindex endpoint.
+- A run that completes before this system agent fires still indexes its own agent_run chunk (existing behavior), but the doc/skill/config corpus only refreshes on the agent's schedule. To force a refresh sooner: lower `retrieval_reindex_interval_hours` in Settings -> Retrieval momentarily, or hit the manual reindex endpoint.
 - `GET /api/projects/[schedId]/retrieval/stats` still returns counts only; per-source missing/stale status comes from each maintenance run's `contextMeta.retrievalHealth` or from a fresh manual reindex.
 
 ### Outcome Classifier

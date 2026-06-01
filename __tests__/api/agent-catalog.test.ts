@@ -37,6 +37,16 @@ describe('GET /api/agent-catalog', () => {
     expect(improve?.prerequisiteCommand).toContain('## Next 5 unaudited candidates');
   });
 
+  it('describes system-agent schedule ownership as Settings-managed', async () => {
+    const res = await GET();
+    const data = await res.json();
+    const reindex = data.entries.find((entry: { name: string }) => entry.name === 'documentation-reindex-vectors');
+
+    expect(reindex?.dispatch).toBe('internal');
+    expect(reindex?.description).toContain('schedule is managed from Settings > Retrieval');
+    expect(reindex?.description).not.toMatch(/edit schedule/i);
+  });
+
   it('does not leak the server-only handlerKey field', async () => {
     const res = await GET();
     const data = await res.json();

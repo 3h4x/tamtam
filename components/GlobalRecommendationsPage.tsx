@@ -1,12 +1,13 @@
 'use client'
 
 import { useEffect, useState } from 'react'
-import { fetchAllOpenRecommendations, updateRecommendation, applyRecommendation, runAgent } from '@/lib/client-api'
+import { fetchAllOpenRecommendations, updateRecommendation, applyRecommendation, runAgent, updateAgent } from '@/lib/client-api'
 import type { Recommendation } from '@/lib/client-api'
 import { ErrorState } from '@/components/ErrorState'
 import { Button } from '@/components/ui/Button'
 import { EmptyState } from '@/components/ui/EmptyState'
 import { RecommendationCard } from '@/components/recommendations/RecommendationCard'
+import { recommendationBackoffSchedule } from '@/components/recommendations/schedule-backoff'
 
 // Cross-project Recommendations page. Lists every open recommendation sorted
 // newest-first, with the same Accept/dismiss buttons used inside each project's
@@ -46,6 +47,22 @@ export function GlobalRecommendationsPage() {
     const data = await fetchAllOpenRecommendations()
     setItems(data.recommendations)
     setLoadError(null)
+  }
+
+  const patchRecommendationPayload = (id: string, patch: Record<string, unknown>) => {
+    setItems((prev) =>
+      prev.map((item) => {
+        if (item.id !== id) return item
+        const basePayload = item.payload && typeof item.payload === 'object' ? item.payload : {}
+        return {
+          ...item,
+          payload: {
+            ...basePayload,
+            ...patch,
+          },
+        }
+      }),
+    )
   }
 
   useEffect(() => {
@@ -114,6 +131,86 @@ export function GlobalRecommendationsPage() {
       setNotice(`Triggered a run of ${item.agent_name ?? 'the agent'} in ${item.project}.`)
     } catch (err) {
       setErrors((prev) => ({ ...prev, [item.id]: err instanceof Error ? err.message : 'Failed to run agent' }))
+    } finally {
+      finishUpdating(item.id)
+    }
+  }
+
+  // "Decrease rate" Fix action. Like Run now, this does not resolve the
+  // recommendation; it only applies a slower cadence when the payload proves
+  // that the target is actually a backoff.
+  const backOff = async (item: Recommendation, requestedSchedule?: string) => {
+    if (!item.agent_id) return
+    const schedule = requestedSchedule ?? recommendationBackoffSchedule(item)
+    if (!schedule) return
+    startUpdating(item.id)
+    setErrors((prev) => { const { [item.id]: _, ...rest } = prev; void _; return rest })
+    try {
+      await updateAgent(item.agent_id, { schedule })
+      patchRecommendationPayload(item.id, { currentSchedule: schedule })
+      setNotice(`Set ${item.agent_name ?? 'the agent'} in ${item.project} to run every ${schedule}.`)
+    } catch (err) {
+      setErrors((prev) => ({ ...prev, [item.id]: err instanceof Error ? err.message : 'Failed to update schedule' }))
+    } finally {
+      finishUpdating(item.id)
+    }
+  }
+
+  // "Run investigation" Fix action. Fires the agent read-only with a diagnostic
+  // prompt so it reports why its recent scheduled runs produced no changes
+  // instead of attempting (and likely failing) to make edits.
+  const investigate = async (item: Recommendation) => {
+    if (!item.agent_id) return
+    startUpdating(item.id)
+    setErrors((prev) => { const { [item.id]: _, ...rest } = prev; void _; return rest })
+    try {
+      await runAgent(
+        item.agent_id,
+        'Your recent scheduled runs produced no file changes. Investigate why: review the ' +
+          'project state and your own task scope, and report whether there is genuinely no ' +
+          'actionable work, the prompt is too narrow, or something is blocking you from making ' +
+          'changes. Do not modify any files — report your findings only.',
+        { readOnly: true },
+      )
+      setNotice(`Started a read-only investigation run of ${item.agent_name ?? 'the agent'} in ${item.project}.`)
+    } catch (err) {
+      setErrors((prev) => ({ ...prev, [item.id]: err instanceof Error ? err.message : 'Failed to start investigation' }))
+    } finally {
+      finishUpdating(item.id)
+    }
+  }
+
+  // "Stop boosting" Fix action. Leaves the agent on its schedule but tells the
+  // orchestrator to stop firing extra boost runs for it.
+  const stopBoosting = async (item: Recommendation) => {
+    if (!item.agent_id) return
+    startUpdating(item.id)
+    setErrors((prev) => { const { [item.id]: _, ...rest } = prev; void _; return rest })
+    try {
+      await updateAgent(item.agent_id, { boostable: false })
+      patchRecommendationPayload(item.id, { boostable: false })
+      setNotice(`Stopped boost runs for ${item.agent_name ?? 'the agent'} in ${item.project}.`)
+    } catch (err) {
+      setErrors((prev) => ({ ...prev, [item.id]: err instanceof Error ? err.message : 'Failed to update agent' }))
+    } finally {
+      finishUpdating(item.id)
+    }
+  }
+
+  // "Disable agent" Fix action. The most disruptive control, so it's confirmed
+  // before stopping the agent's scheduled runs entirely.
+  const disable = async (item: Recommendation) => {
+    if (!item.agent_id) return
+    const label = item.agent_name ?? 'this agent'
+    if (!window.confirm(`Disable ${label} in ${item.project}? It will no longer run on its schedule.`)) return
+    startUpdating(item.id)
+    setErrors((prev) => { const { [item.id]: _, ...rest } = prev; void _; return rest })
+    try {
+      await updateAgent(item.agent_id, { enabled: false })
+      patchRecommendationPayload(item.id, { enabled: false })
+      setNotice(`Disabled ${label} in ${item.project}.`)
+    } catch (err) {
+      setErrors((prev) => ({ ...prev, [item.id]: err instanceof Error ? err.message : 'Failed to disable agent' }))
     } finally {
       finishUpdating(item.id)
     }
@@ -189,6 +286,10 @@ export function GlobalRecommendationsPage() {
               onAccept={() => accept(item)}
               onDismiss={() => dismiss(item)}
               onRunNow={() => runNow(item)}
+              onBackOff={(schedule) => backOff(item, schedule)}
+              onInvestigate={() => investigate(item)}
+              onStopBoosting={() => stopBoosting(item)}
+              onDisable={() => disable(item)}
               showProjectLink
             />
           ))}

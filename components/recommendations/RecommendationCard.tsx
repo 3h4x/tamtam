@@ -6,6 +6,7 @@ import { Pill } from '@/components/ui/Pill'
 import type { Recommendation } from '@/lib/client-api'
 import { AUTO_APPLICABLE_RECOMMENDATION_TYPES, isAutoRecommendation } from '@/lib/client-api'
 import { formatAgo } from '@/lib/shared/format'
+import { recommendationBackoffSchedule } from '@/components/recommendations/schedule-backoff'
 
 function typeLabel(type: string): string {
   if (type === 'agent_schedule_backoff') return 'schedule'
@@ -19,6 +20,35 @@ function stringValue(value: unknown): string | null {
   return typeof value === 'string' && value.trim() ? value.trim() : null
 }
 
+// Auto/manual badge. `agent_unfruitful` is auto-*detected* but its remediation
+// is entirely the operator's (widen the prompt, throttle, disable) — labelling
+// it AUTO implies the orchestrator will fix it, which it won't. So it carries a
+// warning-toned MANUAL pill, while the genuinely informational/already-acted
+// types (boost, health) keep the green AUTO pill.
+function recommendationBadge(type: string): { text: string; tone: 'success' | 'warning' } | null {
+  if (type === 'agent_unfruitful') return { text: 'MANUAL', tone: 'warning' }
+  if (isAutoRecommendation(type)) return { text: 'AUTO', tone: 'success' }
+  return null
+}
+
+// The job whose log explains the recommendation. Unfruitful carries it at the
+// payload top level; schedule recs nest it under `reasoning`.
+function recommendationSourceJobId(payload: Recommendation['payload']): string | null {
+  if (!payload || typeof payload !== 'object') return null
+  const p = payload as Record<string, unknown>
+  const top = stringValue(p.sourceJobId)
+  if (top) return top
+  const reasoning = p.reasoning
+  if (reasoning && typeof reasoning === 'object' && !Array.isArray(reasoning)) {
+    return stringValue((reasoning as Record<string, unknown>).sourceJobId)
+  }
+  return null
+}
+
+function isUserEditableAgentId(agentId: string | null): boolean {
+  return agentId !== null && !agentId.startsWith('system:')
+}
+
 function numberValue(value: unknown): number | null {
   return typeof value === 'number' && Number.isFinite(value) ? value : null
 }
@@ -27,6 +57,12 @@ function booleanLabel(value: unknown): string | null {
   if (value === true) return 'yes'
   if (value === false) return 'no'
   return null
+}
+
+function payloadBoolean(payload: Recommendation['payload'], key: string): boolean | null {
+  if (!payload || typeof payload !== 'object') return null
+  const value = (payload as Record<string, unknown>)[key]
+  return typeof value === 'boolean' ? value : null
 }
 
 // Health recommendations (orchestrator_agent_health) carry their metrics at
@@ -80,6 +116,18 @@ interface RecommendationCardProps {
   // Fires the agent immediately (manual "Run now" Fix action). Optional so the
   // per-project recommendations tab can omit it.
   onRunNow?: () => void
+  // Lengthens the agent's schedule to reduce noise. Only rendered when the
+  // recommendation payload supports a strictly slower target schedule.
+  onBackOff?: (schedule: string) => void
+  // Runs the agent with a read-only diagnostic prompt to investigate why it
+  // stopped producing changes. Only rendered for user-editable agents.
+  onInvestigate?: () => void
+  // Stops orchestrator boost fires for the agent while leaving its schedule
+  // intact. Only rendered for user-editable agents.
+  onStopBoosting?: () => void
+  // Disables the agent entirely (no scheduled runs). The most disruptive Fix
+  // action; only rendered for user-editable agents.
+  onDisable?: () => void
   // When set, renders a small "View in project →" link — used by the global
   // recommendations page so each card stays linked to its source project.
   showProjectLink?: boolean
@@ -92,15 +140,38 @@ export function RecommendationCard({
   onAccept,
   onDismiss,
   onRunNow,
+  onBackOff,
+  onInvestigate,
+  onStopBoosting,
+  onDisable,
   showProjectLink,
 }: RecommendationCardProps) {
   const acceptable = AUTO_APPLICABLE_RECOMMENDATION_TYPES.has(item.type)
   const actionLabel = item.title.trim() || typeLabel(item.type)
   const reasoningRows = recommendationReasoning(item.payload)
-  // Manual recommendations (anything the orchestrator does NOT handle on its
-  // own) get Fix actions. They need a concrete agent to act on.
-  const manual = !isAutoRecommendation(item.type)
-  const showFixMenu = manual && Boolean(item.agent_id)
+  // Fix actions apply to any recommendation that names an agent the operator
+  // can remediate. That includes the `agent_unfruitful` card: the orchestrator
+  // deprioritizes it automatically, but the operator still wants one-click ways
+  // to act on the advice (widen prompt → Edit, check work → Run, investigate →
+  // Run investigation/View logs, reduce noise → Decrease rate, stop the bleeding
+  // → Stop boosting/Disable agent). Only `orchestrator_boost` (already acted)
+  // and `orchestrator_agent_health` (informational) have nothing to fix.
+  const showFixMenu = Boolean(item.agent_id) && (!isAutoRecommendation(item.type) || item.type === 'agent_unfruitful')
+  const badge = recommendationBadge(item.type)
+  const backoffSchedule = recommendationBackoffSchedule(item)
+  const editableAgent = isUserEditableAgentId(item.agent_id)
+  const sourceJobId = recommendationSourceJobId(item.payload)
+  const logsHref = sourceJobId
+    ? `/project/${encodeURIComponent(item.project)}/terminal?job=${encodeURIComponent(sourceJobId)}`
+    : null
+  const agentEnabled = payloadBoolean(item.payload, 'enabled')
+  const agentBoostable = payloadBoolean(item.payload, 'boostable')
+  const actionableAgent = editableAgent && agentEnabled !== false
+  const showRunNow = Boolean(onRunNow && agentEnabled !== false)
+  const showBackOff = Boolean(onBackOff && backoffSchedule && actionableAgent)
+  const showInvestigate = Boolean(onInvestigate && actionableAgent)
+  const showStopBoosting = Boolean(onStopBoosting && actionableAgent && agentBoostable !== false)
+  const showDisable = Boolean(onDisable && actionableAgent)
   const editHref = item.agent_id
     ? `/project/${encodeURIComponent(item.project)}/agents?agent=${encodeURIComponent(item.agent_id)}`
     : null
@@ -109,13 +180,13 @@ export function RecommendationCard({
       <div className="flex items-start justify-between gap-3">
         <div className="min-w-0">
           <div className="flex items-center gap-2 flex-wrap">
-            {isAutoRecommendation(item.type) && (
+            {badge && (
               <Pill
-                tone="success"
+                tone={badge.tone}
                 size="xs"
                 className="rounded px-1.5 text-[10px] font-mono"
               >
-                AUTO
+                {badge.text}
               </Pill>
             )}
             <Pill
@@ -183,7 +254,7 @@ export function RecommendationCard({
                     Apply suggested change
                   </Button>
                 )}
-                {onRunNow && (
+                {showRunNow && (
                   <Button
                     type="button"
                     variant="ghost"
@@ -194,6 +265,76 @@ export function RecommendationCard({
                     title="Trigger an immediate run of this agent"
                   >
                     Run agent now
+                  </Button>
+                )}
+                {logsHref && (
+                  <Link
+                    href={logsHref}
+                    className={buttonVariants({
+                      variant: 'ghost',
+                      size: 'sm',
+                      className: 'w-full justify-start rounded-none px-3 py-2 font-normal',
+                    })}
+                    title="Open the log of the run that produced this recommendation"
+                  >
+                    View logs →
+                  </Link>
+                )}
+                {showInvestigate && (
+                  <Button
+                    type="button"
+                    variant="ghost"
+                    size="sm"
+                    className="w-full justify-start rounded-none px-3 py-2 font-normal"
+                    disabled={busy}
+                    onClick={onInvestigate}
+                    title="Run the agent read-only to diagnose why it stopped producing changes"
+                  >
+                    Run investigation
+                  </Button>
+                )}
+                {showBackOff && (
+                  <Button
+                    type="button"
+                    variant="ghost"
+                    size="sm"
+                    className="w-full justify-start rounded-none px-3 py-2 font-normal"
+                    disabled={busy}
+                    onClick={() => {
+                      if (backoffSchedule) onBackOff?.(backoffSchedule)
+                    }}
+                    title={`Run less often — change the agent's schedule to ${backoffSchedule}`}
+                  >
+                    Decrease rate
+                  </Button>
+                )}
+                {(showStopBoosting || showDisable) && (
+                  <div className="border-t border-border" role="separator" />
+                )}
+                {showStopBoosting && (
+                  <Button
+                    type="button"
+                    variant="ghost"
+                    size="sm"
+                    className="w-full justify-start rounded-none px-3 py-2 font-normal"
+                    disabled={busy}
+                    onClick={onStopBoosting}
+                    title="Keep the agent on its schedule but stop orchestrator boost fires"
+                  >
+                    Stop boosting
+                  </Button>
+                )}
+                {showDisable && (
+                  <Button
+                    type="button"
+                    variant="ghost"
+                    size="sm"
+                    className="w-full justify-start rounded-none px-3 py-2 font-normal text-status-error"
+                    disabled={busy}
+                    onClick={onDisable}
+                    title="Disable the agent entirely — it will no longer run on its schedule"
+                  >
+                    Disable agent
                   </Button>
                 )}
                 {editHref && (

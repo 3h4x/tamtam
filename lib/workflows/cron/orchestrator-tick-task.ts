@@ -80,6 +80,12 @@ export interface OrchestratorTickDeps {
    *  to avoid re-analyzing old finished samples while a newer dispatch is
    *  still queued or running. */
   loadLatestFinishedRunStartedAt?: (candidate: AnalysisCandidate) => Promise<number | null>;
+  /** Optional — returns pending in-memory queue depth per project. When a
+   *  project has agents already waiting in the queue, a new boost would only
+   *  lengthen the queue behind those waiting agents; skipping the boost lets
+   *  the queue drain naturally and prevents high-frequency agents from starving
+   *  lower-frequency ones. */
+  getProjectQueueCounts?: () => Promise<Map<string, number>> | Map<string, number>;
 }
 
 /** Minimal agent identity passed to the health analysis phase. The analysis
@@ -283,12 +289,25 @@ export async function handleOrchestratorTick(
         nowMs,
       });
       if (decisions.length > 0) {
-        await Promise.all(
-          decisions.map((d) => deps.enqueueAgentFire(d.agentId, new Date(nowMs), d.modelOverride)),
-        );
-        setHistory(recordBoosts(pruned, decisions, nowMs));
-        if (deps.recordBoostRecommendations) {
-          deps.recordBoostRecommendations(decisions).catch(() => {});
+        // Skip boost decisions for projects that already have agents waiting in
+        // the in-memory pending queue. Those queued agents will drain naturally
+        // when the current run finishes — boosting again only lengthens the
+        // queue further and lets a high-frequency agent starve waiting ones.
+        const queueCounts = deps.getProjectQueueCounts
+          ? await Promise.resolve(deps.getProjectQueueCounts())
+          : new Map<string, number>();
+        const toFire = decisions.filter((d) => (queueCounts.get(d.project) ?? 0) === 0);
+        if (toFire.length > 0) {
+          await Promise.all(
+            toFire.map((d) => deps.enqueueAgentFire(d.agentId, new Date(nowMs), d.modelOverride)),
+          );
+          setHistory(recordBoosts(pruned, toFire, nowMs));
+          if (deps.recordBoostRecommendations) {
+            deps.recordBoostRecommendations(toFire).catch(() => {});
+          }
+          decisions = toFire;
+        } else {
+          decisions = [];
         }
       }
 

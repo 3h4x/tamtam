@@ -273,11 +273,13 @@ async function maybeRecommendFruitfulness(job: JobData, ctx: AgentContextMeta): 
     agentName,
     type: 'agent_unfruitful',
     title: `${agentName} isn't producing changes`,
+    // Keep the detail factual. The remediation advice (widen the prompt,
+    // check for real work, lengthen the schedule) is surfaced as actionable
+    // Fix buttons on the recommendation card rather than as prose here.
     detail:
       `Across the last ${stats.runs} scheduled runs, ${agentName} changed files ${stats.fruitfulRuns} times (${fruitfulPct}%) ` +
       `and moved ${stats.totalLinesChanged} lines total. ` +
-      `The orchestrator will deprioritize boosting this agent until it starts producing again. ` +
-      `Consider: (a) widen the prompt, (b) check the agent has actual work to do, or (c) lengthen the schedule to reduce noise.`,
+      `The orchestrator will deprioritize boosting this agent until it starts producing again.`,
     payload: {
       reason: 'agent produced no changes across recent scheduled runs',
       currentSchedule,

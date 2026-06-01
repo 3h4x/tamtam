@@ -145,6 +145,9 @@ export async function PATCH(
   // this route — identity, behavior, AND schedule are owned by TamTam.
   // The schedule for `documentation-reindex-vectors` is set via
   // `retrieval_reindex_interval_hours` in /settings.
+  if (isSystemAgent && body.schedule !== undefined) {
+    return NextResponse.json({ detail: 'System agent schedule is managed by settings' }, { status: 400 });
+  }
   if (!isSystemAgent && body.name !== undefined) updates.name = nextName;
   if (!isSystemAgent && body.skillIds !== undefined) updates.skillIds = JSON.stringify(body.skillIds);
   if (!isSystemAgent && body.docPaths !== undefined) updates.docPaths = JSON.stringify(body.docPaths);

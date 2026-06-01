@@ -581,257 +581,198 @@ test.describe('Auto-polling live update: pending release banner', () => {
   });
 });
 
-// ─── Test 2e: Global runs page live polling ─────────────────────────────────
-//
-// The global /runs page fetches /api/jobs without a project filter. Keep this
-// coverage separate from project history and /workflow-runs because those pages
-// render different list contracts.
+type WorkflowRunSummary = {
+  id: string;
+  name: string;
+  rawName: string;
+  status: 'running' | 'completed' | 'failed' | 'cancelled';
+  createdAt: string;
+  startedAt: string | null;
+  completedAt: string | null;
+  durationMs: number | null;
+  input: unknown;
+  output: unknown;
+  error: string | null;
+};
 
-test.describe('Global runs page live polling', () => {
-  test('/runs page shows independent running jobs across projects and isolates one completion', async ({
-    page,
-  }) => {
-    const alpha = 'alpha-project';
-    const beta = 'beta-project';
-    let alphaDone = false;
+function makeWorkflowRun(
+  project: string,
+  status: WorkflowRunSummary['status'],
+  overrides: Partial<WorkflowRunSummary> = {},
+): WorkflowRunSummary {
+  const terminal = status === 'completed' || status === 'failed' || status === 'cancelled';
+  return {
+    id: `workflow-${project}`,
+    name: 'release-orchestrator',
+    rawName: 'release-orchestrator',
+    status,
+    createdAt: '2026-05-29T10:00:00.000Z',
+    startedAt: '2026-05-29T10:00:02.000Z',
+    completedAt: terminal ? '2026-05-29T10:00:14.000Z' : null,
+    durationMs: terminal ? 12_000 : null,
+    input: [project, { triggeredBy: `agent-${project}` }],
+    output: null,
+    error: null,
+    ...overrides,
+  };
+}
 
-    await page.route(
-      (url) => url.pathname === '/api/jobs' && !url.searchParams.has('project'),
-      (route: Route) =>
-        route.fulfill({
-          json: {
-            jobs: [
-              makeJob('job-alpha', alpha, alphaDone ? 'done' : 'running', alphaDone ? 0 : null, 'review'),
-              makeJob('job-beta', beta, 'running', null, 'test'),
-            ],
-            pendingReleaseProjects: [],
-          },
-        }),
-    );
-    await page.route('**/api/jobs/notifications', (route: Route) =>
-      route.fulfill({ json: { notifications: [] } }),
-    );
-    await page.route('**/api/settings', (route: Route) =>
-      route.fulfill({ json: { jobs_paused: false, github_owner: '' } }),
-    );
-    await page.route('**/api/projects', (route: Route) =>
+async function stubWorkflowRunsShell(page: import('@playwright/test').Page): Promise<void> {
+  await page.route('**/api/settings', (route: Route) =>
+    route.fulfill({ json: { settings: { jobs_paused: 'false' }, github_owner: '' } }),
+  );
+  await page.route('**/api/projects', (route: Route) =>
+    route.fulfill({ json: { tasks: [], priorities: [], issueCounts: {} } }),
+  );
+  await page.route('**/api/jobs/notifications', (route: Route) =>
+    route.fulfill({ json: { count: 0, jobs: [], runningCount: 0, runningJobs: [] } }),
+  );
+  await page.route(
+    (url) => url.pathname === '/api/jobs' && !url.searchParams.has('project'),
+    (route: Route) =>
+      route.fulfill({ json: { jobs: [], total: 0, pendingReleaseProjects: [] } }),
+  );
+}
+
+async function stubWorkflowRuns(
+  page: import('@playwright/test').Page,
+  runs: () => WorkflowRunSummary[],
+): Promise<void> {
+  await page.route(
+    (url) => url.pathname === '/api/workflow-runs' && url.searchParams.get('limit') === '100',
+    (route: Route) =>
       route.fulfill({
         json: {
-          tasks: [makeTask(alpha), makeTask(beta)],
-          priorities: [],
-          issueCounts: {},
+          runs: runs(),
+          meta: {
+            workflowEnabled: true,
+            releaseWorkflow: true,
+            releaseWorkflowDrive: true,
+            mode: 'drive',
+          },
         },
       }),
-    );
+  );
+}
 
-    await page.goto('/runs');
+// ─── Test 2e: Workflow runs page live polling ───────────────────────────────
+//
+// The legacy /runs route no longer exists. Keep the live multi-project polling
+// coverage on /workflow-runs, which is the supported global activity surface.
 
-    const alphaRow = runRow(page, alpha);
-    const betaRow = runRow(page, beta);
-
-    await expect(alphaRow).toBeVisible({ timeout: 8_000 });
-    await expect(betaRow).toBeVisible({ timeout: 8_000 });
-    await expect(runningRunRows(page)).toHaveCount(2, { timeout: 8_000 });
-
-    await statusFilterButton(page, 'running').click();
-    await expect(alphaRow).toBeVisible();
-    await expect(betaRow).toBeVisible();
-
-    alphaDone = true;
-
-    await expect(alphaRow.locator('[aria-label="running"]')).toHaveCount(0, { timeout: 12_000 });
-    await expect(betaRow.locator('[aria-label="running"]')).toBeVisible({ timeout: 12_000 });
-    await expect(runningRunRows(page)).toHaveCount(1, { timeout: 12_000 });
-    await expect(runRow(page, beta)).toBeVisible();
-    await expect(runRow(page, alpha)).toHaveCount(0);
-  });
-
-  test('/runs page transitions running jobs to done, failed, and cancelled without reload', async ({
+test.describe('Workflow runs page live polling', () => {
+  test('/workflow-runs shows independent active runs across projects and isolates one completion', async ({
     page,
   }) => {
-    const doneProject = 'runs-poll-done';
-    const failedProject = 'runs-poll-failed';
-    const cancelledProject = 'runs-poll-cancelled';
+    const reactKeyWarnings = captureReactKeyWarnings(page);
+    const alpha = 'workflow-alpha-project';
+    const beta = 'workflow-beta-project';
+    let phase: 'both-running' | 'alpha-completed' = 'both-running';
+
+    await stubWorkflowRunsShell(page);
+    await stubWorkflowRuns(page, () =>
+      phase === 'both-running'
+        ? [
+            makeWorkflowRun(alpha, 'running'),
+            makeWorkflowRun(beta, 'running'),
+          ]
+        : [
+            makeWorkflowRun(alpha, 'completed', { output: { verdict: 'LGTM' } }),
+            makeWorkflowRun(beta, 'running'),
+          ],
+    );
+
+    await page.goto('/workflow-runs');
+
+    const activePanel = page.getByLabel('Active workflow runs');
+    await expect(activePanel).toBeVisible({ timeout: 8_000 });
+    await expect(activePanel.getByText('2 runs')).toBeVisible({ timeout: 8_000 });
+    await expect(activePanel.getByRole('link', { name: new RegExp(alpha, 'i') })).toBeVisible({
+      timeout: 8_000,
+    });
+    await expect(activePanel.getByRole('link', { name: new RegExp(beta, 'i') })).toBeVisible({
+      timeout: 8_000,
+    });
+    await expect(page.getByText('2 running')).toBeVisible({ timeout: 8_000 });
+
+    await page.getByRole('button', { name: /running 2/i }).click();
+    await expect(page.getByRole('row').filter({ hasText: /release orchestrator/i })).toHaveCount(2);
+
+    phase = 'alpha-completed';
+
+    await expect(activePanel.getByText('1 run')).toBeVisible({ timeout: 12_000 });
+    await expect(activePanel.getByRole('link', { name: new RegExp(alpha, 'i') })).toHaveCount(0, {
+      timeout: 12_000,
+    });
+    await expect(activePanel.getByRole('link', { name: new RegExp(beta, 'i') })).toBeVisible({
+      timeout: 12_000,
+    });
+    await expect(page.getByText('1 running')).toBeVisible({ timeout: 12_000 });
+
+    await page.getByRole('button', { name: /all \d+/i }).click();
+
+    const completedRow = page.getByRole('row').filter({ hasText: alpha }).first();
+    await expect(completedRow.getByLabel('status completed')).toBeVisible({ timeout: 12_000 });
+    await expect(completedRow.getByText('LGTM')).toBeVisible({ timeout: 12_000 });
+    expect(reactKeyWarnings).toEqual([]);
+  });
+
+  test('/workflow-runs transitions running runs to completed, failed, and cancelled without reload', async ({
+    page,
+  }) => {
+    const doneProject = 'workflow-runs-poll-done';
+    const failedProject = 'workflow-runs-poll-failed';
+    const cancelledProject = 'workflow-runs-poll-cancelled';
     const failureReason = 'Push failed because the remote hook rejected the branch.';
     let terminal = false;
 
-    await page.route(
-      (url) => url.pathname === '/api/jobs' && !url.searchParams.has('project'),
-      (route: Route) =>
-        route.fulfill({
-          json: {
-            jobs: [
-              makeJob('runs-poll-done-job', doneProject, terminal ? 'done' : 'running', terminal ? 0 : null, 'test'),
-              {
-                ...makeJob('runs-poll-failed-job', failedProject, terminal ? 'done' : 'running', terminal ? 1 : null, 'push'),
-                work_summary: terminal ? failureReason : 'Pushing branch to remote...',
-              },
-              makeJob(
-                'runs-poll-cancelled-job',
-                cancelledProject,
-                terminal ? 'done' : 'running',
-                terminal ? -3 : null,
-                'test',
-              ),
-            ],
-            pendingReleaseProjects: [],
-          },
-        }),
-    );
-    await page.route('**/api/jobs/notifications', (route: Route) =>
-      route.fulfill({ json: { notifications: [] } }),
-    );
-    await page.route('**/api/settings', (route: Route) =>
-      route.fulfill({ json: { jobs_paused: false, github_owner: '' } }),
-    );
-    await page.route('**/api/projects', (route: Route) =>
-      route.fulfill({
-        json: {
-          tasks: [makeTask(doneProject), makeTask(failedProject), makeTask(cancelledProject)],
-          priorities: [],
-          issueCounts: {},
-        },
-      }),
-    );
+    await stubWorkflowRunsShell(page);
+    await stubWorkflowRuns(page, () => [
+      terminal
+        ? makeWorkflowRun(doneProject, 'completed', { output: { verdict: 'LGTM' } })
+        : makeWorkflowRun(doneProject, 'running'),
+      terminal
+        ? makeWorkflowRun(failedProject, 'failed', { error: failureReason })
+        : makeWorkflowRun(failedProject, 'running'),
+      terminal
+        ? makeWorkflowRun(cancelledProject, 'cancelled', {
+            error: 'release was cancelled before completion',
+          })
+        : makeWorkflowRun(cancelledProject, 'running'),
+    ]);
 
-    await page.goto('/runs');
+    await page.goto('/workflow-runs');
 
-    const doneRow = runRow(page, doneProject);
-    const failedRow = runRow(page, failedProject);
-    const cancelledRow = runRow(page, cancelledProject);
-
-    await expect(doneRow.locator('[aria-label="running"]')).toBeVisible({ timeout: 8_000 });
-    await expect(failedRow.locator('[aria-label="running"]')).toBeVisible({ timeout: 8_000 });
-    await expect(cancelledRow.locator('[aria-label="running"]')).toBeVisible({ timeout: 8_000 });
-    await expect(runningRunRows(page)).toHaveCount(3, { timeout: 8_000 });
-    await expect(statusFilterButton(page, 'failed')).toHaveCount(0);
+    const activePanel = page.getByLabel('Active workflow runs');
+    await expect(activePanel).toBeVisible({ timeout: 8_000 });
+    await expect(activePanel.getByText('3 runs')).toBeVisible({ timeout: 8_000 });
+    await expect(page.getByText('3 running')).toBeVisible({ timeout: 8_000 });
+    await expect(page.getByRole('button', { name: /failed 1/i })).toHaveCount(0);
 
     terminal = true;
 
-    await expect(doneRow.getByText('done', { exact: true })).toBeVisible({ timeout: 12_000 });
-    await expect(failedRow.getByText('exit 1', { exact: true })).toBeVisible({ timeout: 12_000 });
-    await expect(failedRow.getByText(failureReason)).toBeVisible({ timeout: 12_000 });
-    await expect(cancelledRow.getByText('cancelled', { exact: true })).toBeVisible({ timeout: 12_000 });
-    await expect(runningRunRows(page)).toHaveCount(0, { timeout: 12_000 });
+    const attentionPanel = page.getByLabel('Workflow runs needing attention');
+    const doneRow = page.getByRole('row').filter({ hasText: doneProject }).first();
+    const failedRow = attentionPanel.getByRole('link', { name: new RegExp(failedProject, 'i') }).first();
+    const cancelledRow = attentionPanel.getByRole('link', { name: new RegExp(cancelledProject, 'i') }).first();
 
-    const failedFilter = statusFilterButton(page, 'failed');
+    await expect(activePanel).toHaveCount(0, { timeout: 12_000 });
+    await expect(doneRow.getByLabel('status completed')).toBeVisible({ timeout: 12_000 });
+    await expect(doneRow.getByText('LGTM')).toBeVisible({ timeout: 12_000 });
+    await expect(failedRow.getByLabel('status failed')).toBeVisible({ timeout: 12_000 });
+    await expect(failedRow.getByText(failureReason)).toBeVisible({ timeout: 12_000 });
+    await expect(cancelledRow.getByLabel('status cancelled')).toBeVisible({ timeout: 12_000 });
+    await expect(cancelledRow.getByTitle('release was cancelled before completion')).toBeVisible({
+      timeout: 12_000,
+    });
+    await expect(page.getByText('3 running')).toHaveCount(0, { timeout: 12_000 });
+
+    const failedFilter = page.getByRole('button', { name: /failed 1/i });
     await expect(failedFilter).toBeVisible({ timeout: 12_000 });
     await failedFilter.click();
     await expect(failedRow).toBeVisible();
     await expect(doneRow).toHaveCount(0);
     await expect(cancelledRow).toHaveCount(0);
-  });
-
-  test('/runs page updates owned release outcome on the parent run without React key warnings', async ({
-    page,
-  }) => {
-    const reactKeyWarnings = captureReactKeyWarnings(page);
-    const project = 'runs-owned-release';
-    let releaseRunning = true;
-    const ts = now();
-
-    await page.route(
-      (url) => url.pathname === '/api/jobs' && !url.searchParams.has('project'),
-      (route: Route) => {
-        const running = releaseRunning;
-        route.fulfill({
-          json: {
-            jobs: [
-              {
-                id: 'run-owned-release-1',
-                project,
-                kind: 'run',
-                prompt: 'Kick off the release workflow',
-                user_prompt: 'Kick off the release workflow',
-                status: 'done',
-                exit_code: 0,
-                started_at: ts - 300,
-                finished_at: ts - 280,
-                pid: 0,
-                log_path: '',
-                seen: true,
-                session_id: 'sess-owned-release-1',
-                work_summary: 'Release pipeline initiated',
-              },
-              {
-                id: 'release-owned-1',
-                project,
-                kind: 'release',
-                prompt: null,
-                status: running ? 'running' : 'done',
-                exit_code: running ? null : 0,
-                started_at: ts - 260,
-                finished_at: running ? null : ts - 10,
-                pid: 0,
-                log_path: '',
-                seen: true,
-                parent_job_id: 'run-owned-release-1',
-              },
-              {
-                id: 'review-owned-1',
-                project,
-                kind: 'review',
-                prompt: null,
-                status: running ? 'running' : 'done',
-                exit_code: running ? null : 0,
-                started_at: ts - 240,
-                finished_at: running ? null : ts - 30,
-                pid: 0,
-                log_path: '',
-                seen: true,
-                release_id: 'release-owned-1',
-                parent_job_id: 'release-owned-1',
-                verdict: running ? null : 'LGTM',
-              },
-              {
-                id: 'commit-owned-1',
-                project,
-                kind: 'commit',
-                prompt: null,
-                status: running ? 'running' : 'done',
-                exit_code: running ? null : 0,
-                started_at: ts - 180,
-                finished_at: running ? null : ts - 15,
-                pid: 0,
-                log_path: '',
-                seen: true,
-                release_id: 'release-owned-1',
-                parent_job_id: 'release-owned-1',
-              },
-            ],
-            pendingReleaseProjects: [],
-          },
-        });
-      },
-    );
-    await page.route('**/api/jobs/notifications', (route: Route) =>
-      route.fulfill({ json: { notifications: [] } }),
-    );
-    await page.route('**/api/settings', (route: Route) =>
-      route.fulfill({ json: { jobs_paused: false, github_owner: '' } }),
-    );
-    await page.route('**/api/projects', (route: Route) =>
-      route.fulfill({
-        json: {
-          tasks: [makeTask(project)],
-          priorities: [],
-          issueCounts: {},
-        },
-      }),
-    );
-
-    await page.goto('/runs');
-
-    const row = page.getByRole('button').filter({ hasText: 'Kick off the release workflow' }).first();
-    await expect(row).toBeVisible({ timeout: 8_000 });
-    await expect(row.getByText('release running', { exact: true })).toBeVisible({ timeout: 8_000 });
-    await expect(row.getByLabel('running')).toBeVisible({ timeout: 8_000 });
-
-    releaseRunning = false;
-
-    await expect(row.getByText('✓ release done', { exact: true })).toBeVisible({ timeout: 12_000 });
-    await expect(row.getByLabel('running')).toHaveCount(0, { timeout: 12_000 });
-    expect(reactKeyWarnings).toEqual([]);
   });
 });
 

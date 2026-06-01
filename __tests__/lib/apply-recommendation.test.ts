@@ -201,6 +201,51 @@ describe('applyRecommendation', () => {
     expect(normalizeAgentMock).toHaveBeenCalledTimes(1);
   });
 
+  it('rejects DB-backed system agents without changing their Settings-managed schedule', async () => {
+    await handle.db.insert(schema.agents).values({
+      id: 'system:portal:documentation-reindex-vectors',
+      name: 'documentation-reindex-vectors',
+      project: 'portal',
+      skillIds: '[]',
+      docPaths: '[]',
+      model: 'normal',
+      prompt: '',
+      schedule: '1h',
+      enabled: true,
+      kind: 'system',
+      createdAt: 100,
+      updatedAt: 100,
+    });
+    await handle.db.insert(schema.recommendations).values({
+      id: 'rec-system-agent',
+      project: 'portal',
+      sourceKind: 'agent:documentation-reindex-vectors',
+      agentId: 'system:portal:documentation-reindex-vectors',
+      agentName: 'documentation-reindex-vectors',
+      type: 'agent_schedule_backoff',
+      title: 'Run documentation reindex less often',
+      detail: 'No actionable work.',
+      status: 'open',
+      payload: JSON.stringify({ recommendedSchedule: '8h' }),
+      createdAt: 100,
+      updatedAt: 100,
+    });
+
+    await expect(applyRecommendation('portal', 'rec-system-agent')).rejects.toMatchObject({
+      name: 'ApplyRecommendationError',
+      status: 400,
+      message: 'System agent schedule is managed by settings',
+    });
+
+    const agentRows = await handle.db.select().from(schema.agents).where(eq(schema.agents.id, 'system:portal:documentation-reindex-vectors'));
+    const recRows = await handle.db.select().from(schema.recommendations).where(eq(schema.recommendations.id, 'rec-system-agent'));
+    expect(agentRows[0]?.schedule).toBe('1h');
+    expect(recRows[0]?.status).toBe('open');
+    expect(installAgentScheduleMock).not.toHaveBeenCalled();
+    expect(uninstallAgentScheduleMock).not.toHaveBeenCalled();
+    expect(clearAgentsCacheMock).not.toHaveBeenCalled();
+  });
+
   it('uninstalls live schedule state when the DB agent is disabled', async () => {
     await handle.db.insert(schema.agents).values({
       id: 'agent-disabled',

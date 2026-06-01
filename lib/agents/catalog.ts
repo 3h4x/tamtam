@@ -79,8 +79,8 @@ export const AGENT_CATALOG: AgentCatalogEntry[] = [
     description:
       'Auto-managed: refreshes the pgvector retrieval corpus for this project, ' +
       'wipes stale embeddings when the embedding model changes, and verifies ' +
-      'result quality with a small local LLM. Edit schedule or disable from ' +
-      'the agents UI.',
+      'result quality with a small local LLM. Disable per project from the ' +
+      'agents UI; schedule is managed from Settings > Retrieval.',
     dispatch: 'internal',
     handlerKey: 'documentation-reindex-vectors',
     defaultSchedule: '16h',
@@ -88,8 +88,8 @@ export const AGENT_CATALOG: AgentCatalogEntry[] = [
     prompt:
       'Auto-managed: refreshes the pgvector retrieval corpus for this project, ' +
       'wipes stale embeddings when the embedding model changes, and verifies ' +
-      'result quality with a small local LLM. Edit schedule or disable from ' +
-      'the agents UI.',
+      'result quality with a small local LLM. Disable per project from the ' +
+      'agents UI; schedule is managed from Settings > Retrieval.',
     skillIds: [],
     autoSeed: true,
   },

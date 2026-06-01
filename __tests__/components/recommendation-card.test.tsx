@@ -43,6 +43,7 @@ function renderCard(overrides: Partial<React.ComponentProps<typeof Recommendatio
     onAccept: vi.fn(),
     onDismiss: vi.fn(),
     onRunNow: vi.fn(),
+    onBackOff: vi.fn(),
     showProjectLink: false,
     ...overrides,
   }
@@ -176,17 +177,191 @@ describe('RecommendationCard', () => {
     unmount()
   })
 
-  it('shows AUTO pill and no Fix menu for unfruitful recommendations', () => {
+  it('shows a MANUAL pill and an actionable Fix menu for unfruitful recommendations', () => {
     const { container, unmount } = renderCard({
       item: makeRecommendation({ source_kind: 'agent:tests', type: 'agent_unfruitful', title: "tests isn't producing changes" }),
+      onInvestigate: vi.fn(),
+      onStopBoosting: vi.fn(),
+      onDisable: vi.fn(),
     })
 
-    expect(container.textContent).toContain('AUTO')
+    // Unfruitful is auto-*detected* but the remediation is the operator's, so it
+    // carries a MANUAL pill (not AUTO) and surfaces remediation as Fix buttons.
+    expect(container.textContent).toContain('MANUAL')
+    expect(container.textContent).not.toContain('AUTO')
     expect(container.textContent).toContain('unfruitful')
-    expect(container.textContent).not.toContain('Fix')
+    expect(container.textContent).toContain('Fix')
+    expect(container.textContent).toContain('Run agent now')
+    expect(container.textContent).toContain('Run investigation')
+    expect(container.textContent).toContain('Decrease rate')
+    expect(container.textContent).toContain('Stop boosting')
+    expect(container.textContent).toContain('Disable agent')
+    expect(container.textContent).toContain('Edit agent')
+    // Not auto-applicable → no dedicated "Apply suggested change".
+    expect(container.textContent).not.toContain('Apply suggested change')
     expect(container.textContent).toContain('dismiss')
 
     unmount()
+  })
+
+  it('links "View logs" to the source job that produced the recommendation', () => {
+    const { container, unmount } = renderCard({
+      item: makeRecommendation({
+        source_kind: 'agent:tests',
+        type: 'agent_unfruitful',
+        title: "tests isn't producing changes",
+        payload: { currentSchedule: '15m', sourceJobId: 'job-77' },
+      }),
+    })
+
+    const logsLink = Array.from(container.querySelectorAll('a')).find((a) => a.textContent?.includes('View logs'))
+    expect(logsLink?.getAttribute('href')).toBe('/project/alpha%2Fcore/terminal?job=job-77')
+
+    unmount()
+  })
+
+  it('omits "View logs" when the payload has no source job', () => {
+    const { container, unmount } = renderCard({
+      item: makeRecommendation({
+        source_kind: 'agent:tests',
+        type: 'agent_unfruitful',
+        title: "tests isn't producing changes",
+        payload: { currentSchedule: '15m' },
+      }),
+    })
+
+    expect(container.textContent).not.toContain('View logs')
+
+    unmount()
+  })
+
+  it('fires onInvestigate, onStopBoosting, and onDisable from the Fix menu', () => {
+    const onInvestigate = vi.fn()
+    const onStopBoosting = vi.fn()
+    const onDisable = vi.fn()
+    const { container, unmount } = renderCard({
+      item: makeRecommendation({ source_kind: 'agent:tests', type: 'agent_unfruitful', title: "tests isn't producing changes" }),
+      onInvestigate,
+      onStopBoosting,
+      onDisable,
+    })
+
+    const click = (label: string) =>
+      Array.from(container.querySelectorAll('button'))
+        .find((b) => b.textContent === label)
+        ?.dispatchEvent(new MouseEvent('click', { bubbles: true }))
+
+    click('Run investigation')
+    click('Stop boosting')
+    click('Disable agent')
+
+    expect(onInvestigate).toHaveBeenCalledOnce()
+    expect(onStopBoosting).toHaveBeenCalledOnce()
+    expect(onDisable).toHaveBeenCalledOnce()
+
+    unmount()
+  })
+
+  it('hides agent-management actions for system-agent recommendations', () => {
+    const { container, unmount } = renderCard({
+      item: makeRecommendation({
+        agent_id: 'system:alpha:documentation-reindex-vectors',
+        source_kind: 'agent:documentation-reindex-vectors',
+        type: 'agent_unfruitful',
+        title: "documentation-reindex-vectors isn't producing changes",
+      }),
+      onInvestigate: vi.fn(),
+      onStopBoosting: vi.fn(),
+      onDisable: vi.fn(),
+    })
+
+    expect(container.textContent).toContain('Fix')
+    expect(container.textContent).toContain('Run agent now')
+    // System agents aren't user-editable — no schedule/boost/disable controls.
+    expect(container.textContent).not.toContain('Decrease rate')
+    expect(container.textContent).not.toContain('Run investigation')
+    expect(container.textContent).not.toContain('Stop boosting')
+    expect(container.textContent).not.toContain('Disable agent')
+
+    unmount()
+  })
+
+  it('hides boost and disable controls when local payload state says they already changed', () => {
+    const stopped = renderCard({
+      item: makeRecommendation({
+        source_kind: 'agent:tests',
+        type: 'agent_unfruitful',
+        title: "tests isn't producing changes",
+        payload: { currentSchedule: '15m', boostable: false },
+      }),
+      onInvestigate: vi.fn(),
+      onStopBoosting: vi.fn(),
+      onDisable: vi.fn(),
+    })
+    expect(stopped.container.textContent).toContain('Run investigation')
+    expect(stopped.container.textContent).not.toContain('Stop boosting')
+    expect(stopped.container.textContent).toContain('Disable agent')
+    stopped.unmount()
+
+    const disabled = renderCard({
+      item: makeRecommendation({
+        source_kind: 'agent:tests',
+        type: 'agent_unfruitful',
+        title: "tests isn't producing changes",
+        payload: { currentSchedule: '15m', enabled: false },
+      }),
+      onInvestigate: vi.fn(),
+      onStopBoosting: vi.fn(),
+      onDisable: vi.fn(),
+    })
+    expect(disabled.container.textContent).not.toContain('Run agent now')
+    expect(disabled.container.textContent).not.toContain('Run investigation')
+    expect(disabled.container.textContent).not.toContain('Stop boosting')
+    expect(disabled.container.textContent).not.toContain('Disable agent')
+    expect(disabled.container.textContent).toContain('Edit agent')
+    disabled.unmount()
+  })
+
+  it('fires onBackOff with the next-slower cadence when Decrease rate is clicked', () => {
+    const onBackOff = vi.fn()
+    const { container, unmount } = renderCard({
+      item: makeRecommendation({ source_kind: 'agent:tests', type: 'agent_unfruitful', title: "tests isn't producing changes" }),
+      onBackOff,
+    })
+
+    const backOffBtn = Array.from(container.querySelectorAll('button')).find((b) => b.textContent === 'Decrease rate')
+    backOffBtn?.dispatchEvent(new MouseEvent('click', { bubbles: true }))
+    expect(onBackOff).toHaveBeenCalledOnce()
+    // default payload currentSchedule is '4h' → next ladder rung is '8h'
+    expect(onBackOff).toHaveBeenCalledWith('8h')
+
+    unmount()
+  })
+
+  it('hides Decrease rate only once the agent is at the slowest cadence', () => {
+    const slower = renderCard({
+      item: makeRecommendation({
+        source_kind: 'agent:tests',
+        type: 'agent_unfruitful',
+        title: "tests isn't producing changes",
+        payload: { currentSchedule: '24h' },
+      }),
+    })
+    // 24h still has a slower rung (7d), so Decrease rate stays available.
+    expect(slower.container.textContent).toContain('Decrease rate')
+    slower.unmount()
+
+    const slowest = renderCard({
+      item: makeRecommendation({
+        source_kind: 'agent:tests',
+        type: 'agent_unfruitful',
+        title: "tests isn't producing changes",
+        payload: { currentSchedule: '7d' },
+      }),
+    })
+    expect(slowest.container.textContent).toContain('Fix')
+    expect(slowest.container.textContent).not.toContain('Decrease rate')
+    slowest.unmount()
   })
 
   it('renders health metrics for orchestrator_agent_health recommendations', () => {

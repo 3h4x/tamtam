@@ -7,11 +7,12 @@ import { flushSync } from 'react-dom'
 import { GlobalRecommendationsPage } from '@/components/GlobalRecommendationsPage'
 import type { Recommendation } from '@/lib/client-api'
 
-const { fetchAllOpenRecommendationsMock, updateRecommendationMock, applyRecommendationMock, runAgentMock } = vi.hoisted(() => ({
+const { fetchAllOpenRecommendationsMock, updateRecommendationMock, applyRecommendationMock, runAgentMock, updateAgentMock } = vi.hoisted(() => ({
   fetchAllOpenRecommendationsMock: vi.fn(),
   updateRecommendationMock: vi.fn(),
   applyRecommendationMock: vi.fn(),
   runAgentMock: vi.fn(),
+  updateAgentMock: vi.fn(),
 }))
 
 vi.mock('@/lib/client-api', async () => {
@@ -22,6 +23,7 @@ vi.mock('@/lib/client-api', async () => {
     updateRecommendation: updateRecommendationMock,
     applyRecommendation: applyRecommendationMock,
     runAgent: runAgentMock,
+    updateAgent: updateAgentMock,
   }
 })
 
@@ -77,6 +79,7 @@ describe('GlobalRecommendationsPage', () => {
     updateRecommendationMock.mockReset()
     applyRecommendationMock.mockReset()
     runAgentMock.mockReset()
+    updateAgentMock.mockReset()
   })
 
   afterEach(() => {
@@ -253,4 +256,208 @@ describe('GlobalRecommendationsPage', () => {
 
     unmount()
   })
+
+  it('decreases the rate via updateAgent on the Decrease rate Fix action', async () => {
+    const alpha = makeRecommendation({
+      id: 'alpha-1', project: 'alpha', title: 'Alpha',
+      type: 'agent_unfruitful', agent_id: 'agent-1', agent_name: 'improve',
+      payload: { currentSchedule: '4h' },
+    })
+
+    fetchAllOpenRecommendationsMock.mockResolvedValue({ recommendations: [alpha] })
+    updateAgentMock.mockResolvedValue({ agent: { id: 'agent-1' } })
+
+    const { container, unmount } = renderPage()
+
+    await fastWaitFor(() => {
+      expect(container.textContent).toContain('Alpha')
+    })
+
+    const backOffButton = Array.from(container.querySelectorAll('button')).find((node) => node.textContent === 'Decrease rate')
+    backOffButton?.dispatchEvent(new MouseEvent('click', { bubbles: true }))
+
+    await fastWaitFor(() => {
+      expect(updateAgentMock).toHaveBeenCalledWith('agent-1', { schedule: '8h' })
+      expect(container.textContent).toContain('to run every 8h')
+    })
+
+    const nextBackOffButton = Array.from(container.querySelectorAll('button')).find((node) => node.textContent === 'Decrease rate')
+    nextBackOffButton?.dispatchEvent(new MouseEvent('click', { bubbles: true }))
+
+    await fastWaitFor(() => {
+      expect(updateAgentMock).toHaveBeenCalledWith('agent-1', { schedule: '24h' })
+      expect(container.textContent).toContain('to run every 24h')
+    })
+
+    unmount()
+  })
+
+  it('keeps Decrease rate available until the slowest cadence and hides it at 7d', async () => {
+    const alpha = makeRecommendation({
+      id: 'alpha-1',
+      project: 'alpha',
+      title: 'Alpha',
+      type: 'agent_unfruitful',
+      agent_id: 'agent-1',
+      agent_name: 'improve',
+      payload: { currentSchedule: '24h' },
+    })
+    const beta = makeRecommendation({
+      id: 'beta-1',
+      project: 'beta',
+      title: 'Beta',
+      type: 'agent_unfruitful',
+      agent_id: 'agent-2',
+      agent_name: 'review',
+      payload: { currentSchedule: '7d' },
+    })
+
+    fetchAllOpenRecommendationsMock.mockResolvedValue({ recommendations: [alpha, beta] })
+    updateAgentMock.mockResolvedValue({ agent: { id: 'agent-1' } })
+
+    const { container, unmount } = renderPage()
+
+    await fastWaitFor(() => {
+      expect(container.textContent).toContain('Alpha')
+      expect(container.textContent).toContain('Beta')
+    })
+
+    // 24h still has a slower rung → exactly one Decrease rate button (alpha).
+    const decreaseButtons = Array.from(container.querySelectorAll('button')).filter((n) => n.textContent === 'Decrease rate')
+    expect(decreaseButtons).toHaveLength(1)
+    decreaseButtons[0]?.dispatchEvent(new MouseEvent('click', { bubbles: true }))
+
+    await fastWaitFor(() => {
+      expect(updateAgentMock).toHaveBeenCalledWith('agent-1', { schedule: '7d' })
+      expect(container.textContent).toContain('to run every 7d')
+      expect(Array.from(container.querySelectorAll('button')).filter((n) => n.textContent === 'Decrease rate')).toHaveLength(0)
+    })
+
+    unmount()
+  })
+
+  it('does not offer agent-management actions for system-agent recommendations', async () => {
+    const alpha = makeRecommendation({
+      id: 'alpha-1',
+      project: 'alpha',
+      title: 'Alpha',
+      type: 'agent_unfruitful',
+      agent_id: 'system:alpha:documentation-reindex-vectors',
+      agent_name: 'documentation-reindex-vectors',
+      payload: { currentSchedule: '1h' },
+    })
+
+    fetchAllOpenRecommendationsMock.mockResolvedValue({ recommendations: [alpha] })
+
+    const { container, unmount } = renderPage()
+
+    await fastWaitFor(() => {
+      expect(container.textContent).toContain('Alpha')
+    })
+
+    expect(container.textContent).not.toContain('Decrease rate')
+    expect(container.textContent).not.toContain('Run investigation')
+    expect(container.textContent).not.toContain('Stop boosting')
+    expect(container.textContent).not.toContain('Disable agent')
+    expect(updateAgentMock).not.toHaveBeenCalled()
+
+    unmount()
+  })
+
+  it('runs a read-only investigation on the Run investigation Fix action', async () => {
+    const alpha = makeRecommendation({
+      id: 'alpha-1', project: 'alpha', title: 'Alpha',
+      type: 'agent_unfruitful', agent_id: 'agent-1', agent_name: 'improve',
+      payload: { currentSchedule: '15m' },
+    })
+
+    fetchAllOpenRecommendationsMock.mockResolvedValue({ recommendations: [alpha] })
+    runAgentMock.mockResolvedValue({ status: 'started', jobId: 'job-9' })
+
+    const { container, unmount } = renderPage()
+
+    await fastWaitFor(() => {
+      expect(container.textContent).toContain('Alpha')
+    })
+
+    const button = Array.from(container.querySelectorAll('button')).find((node) => node.textContent === 'Run investigation')
+    button?.dispatchEvent(new MouseEvent('click', { bubbles: true }))
+
+    await fastWaitFor(() => {
+      expect(runAgentMock).toHaveBeenCalledWith('agent-1', expect.stringContaining('Investigate'), { readOnly: true })
+      expect(container.textContent).toContain('read-only investigation run of improve in alpha')
+    })
+
+    unmount()
+  })
+
+  it('stops boosting via updateAgent on the Stop boosting Fix action', async () => {
+    const alpha = makeRecommendation({
+      id: 'alpha-1', project: 'alpha', title: 'Alpha',
+      type: 'agent_unfruitful', agent_id: 'agent-1', agent_name: 'improve',
+      payload: { currentSchedule: '15m' },
+    })
+
+    fetchAllOpenRecommendationsMock.mockResolvedValue({ recommendations: [alpha] })
+    updateAgentMock.mockResolvedValue({ agent: { id: 'agent-1' } })
+
+    const { container, unmount } = renderPage()
+
+    await fastWaitFor(() => {
+      expect(container.textContent).toContain('Alpha')
+    })
+
+    const button = Array.from(container.querySelectorAll('button')).find((node) => node.textContent === 'Stop boosting')
+    button?.dispatchEvent(new MouseEvent('click', { bubbles: true }))
+
+    await fastWaitFor(() => {
+      expect(updateAgentMock).toHaveBeenCalledWith('agent-1', { boostable: false })
+      expect(container.textContent).toContain('Stopped boost runs for improve in alpha')
+      expect(container.textContent).not.toContain('Stop boosting')
+    })
+
+    unmount()
+  })
+
+  it('disables the agent only after confirmation on the Disable agent Fix action', async () => {
+    const alpha = makeRecommendation({
+      id: 'alpha-1', project: 'alpha', title: 'Alpha',
+      type: 'agent_unfruitful', agent_id: 'agent-1', agent_name: 'improve',
+      payload: { currentSchedule: '15m' },
+    })
+
+    fetchAllOpenRecommendationsMock.mockResolvedValue({ recommendations: [alpha] })
+    updateAgentMock.mockResolvedValue({ agent: { id: 'agent-1' } })
+    const confirmSpy = vi.spyOn(window, 'confirm')
+
+    const { container, unmount } = renderPage()
+
+    await fastWaitFor(() => {
+      expect(container.textContent).toContain('Alpha')
+    })
+
+    const disableButton = () => Array.from(container.querySelectorAll('button')).find((node) => node.textContent === 'Disable agent')
+
+    // Cancelled confirm → no mutation.
+    confirmSpy.mockReturnValueOnce(false)
+    disableButton()?.dispatchEvent(new MouseEvent('click', { bubbles: true }))
+    expect(updateAgentMock).not.toHaveBeenCalled()
+
+    // Accepted confirm → disables the agent.
+    confirmSpy.mockReturnValueOnce(true)
+    disableButton()?.dispatchEvent(new MouseEvent('click', { bubbles: true }))
+
+    await fastWaitFor(() => {
+      expect(updateAgentMock).toHaveBeenCalledWith('agent-1', { enabled: false })
+      expect(container.textContent).toContain('Disabled improve in alpha')
+      expect(container.textContent).not.toContain('Run agent now')
+      expect(container.textContent).not.toContain('Run investigation')
+      expect(container.textContent).not.toContain('Stop boosting')
+      expect(container.textContent).not.toContain('Disable agent')
+    })
+
+    confirmSpy.mockRestore()
+    unmount()
+  })
+
 })

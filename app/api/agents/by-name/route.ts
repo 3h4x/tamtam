@@ -73,6 +73,10 @@ export async function PATCH(request: NextRequest) {
 
   if (existing) {
     const nextName = requestedName ?? existing.name;
+    const isSystemAgent = existing.kind === 'system';
+    if (isSystemAgent && fields.schedule !== undefined) {
+      return NextResponse.json({ detail: 'System agent schedule is managed by settings' }, { status: 400 });
+    }
     if (requestedName !== null) {
       const conflict = await findAgentNameConflict(projectName, nextName, {
         excludeDbAgentId: existing.id,
@@ -83,16 +87,16 @@ export async function PATCH(request: NextRequest) {
       }
     }
     const updates: Record<string, unknown> = { updatedAt: Date.now() / 1000 };
-    if (requestedName !== null) updates.name = nextName;
-    if (fields.skillIds !== undefined) updates.skillIds = JSON.stringify(fields.skillIds);
-    if (fields.model !== undefined) updates.model = parsedModel ?? 'normal';
-    if (fields.prompt !== undefined) updates.prompt = fields.prompt;
-    if (fields.schedule !== undefined) updates.schedule = parsedSchedule.schedule;
+    if (!isSystemAgent && requestedName !== null) updates.name = nextName;
+    if (!isSystemAgent && fields.skillIds !== undefined) updates.skillIds = JSON.stringify(fields.skillIds);
+    if (!isSystemAgent && fields.model !== undefined) updates.model = parsedModel ?? 'normal';
+    if (!isSystemAgent && fields.prompt !== undefined) updates.prompt = fields.prompt;
+    if (!isSystemAgent && fields.schedule !== undefined) updates.schedule = parsedSchedule.schedule;
     if (fields.enabled !== undefined) updates.enabled = fields.enabled;
-    if (fields.boostable !== undefined) updates.boostable = fields.boostable;
-    if (provider !== undefined) updates.provider = provider;
-    if (fields.fallbackEnabled !== undefined) updates.fallbackEnabled = fields.fallbackEnabled === true;
-    if (fields.prerequisiteCommand !== undefined) updates.prerequisiteCommand = prerequisiteCommand ?? '';
+    if (!isSystemAgent && fields.boostable !== undefined) updates.boostable = fields.boostable;
+    if (!isSystemAgent && provider !== undefined) updates.provider = provider;
+    if (!isSystemAgent && fields.fallbackEnabled !== undefined) updates.fallbackEnabled = fields.fallbackEnabled === true;
+    if (!isSystemAgent && fields.prerequisiteCommand !== undefined) updates.prerequisiteCommand = prerequisiteCommand ?? '';
 
     await db.update(schema.agents).set(updates).where(eq(schema.agents.id, existing.id)).execute();
     clearAgentsCache();
@@ -105,8 +109,9 @@ export async function PATCH(request: NextRequest) {
       let skillIds: string[] = [];
       try { skillIds = JSON.parse(agent.skillIds || '[]'); } catch { /* keep empty */ }
 
-      // Sync to .tamtam/agents/<name>.md for version control
-      const projPath = resolveProjectPath(agent.project);
+      // Sync to .tamtam/agents/<name>.md for version control. System agents
+      // are DB-only and their handler owns all behavior fields.
+      const projPath = agent.kind !== 'system' ? resolveProjectPath(agent.project) : null;
       if (projPath) {
         try {
           if (existing.name !== agent.name) {

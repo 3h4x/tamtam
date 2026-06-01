@@ -203,7 +203,7 @@ const API_REFERENCE: ApiGroup[] = [
       { method: 'GET', path: '/api/agents', desc: 'List agents. fields=summary, project, name filters.' },
       { method: 'POST', path: '/api/agents', desc: 'Create user agent.' },
       { method: 'GET', path: '/api/agents/[agentId]', desc: 'Agent detail.' },
-      { method: 'PATCH', path: '/api/agents/[agentId]', desc: 'Update agent (system: schedule/enabled only).' },
+      { method: 'PATCH', path: '/api/agents/[agentId]', desc: 'Update agent (system: enabled only).' },
       { method: 'DELETE', path: '/api/agents/[agentId]', desc: 'Remove agent.' },
       { method: 'PATCH', path: '/api/agents/by-name', desc: 'Update by project+name; rename via currentName.' },
       { method: 'POST', path: '/api/agents/[agentId]/run', desc: 'Trigger run. body: { prompt, readOnly? }.' },

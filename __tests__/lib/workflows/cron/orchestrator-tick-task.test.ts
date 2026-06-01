@@ -165,6 +165,30 @@ describe('handleOrchestratorTick', () => {
     const r = await handleOrchestratorTick(deps);
     expect(r.error).toBeUndefined();
   });
+  it('skips boost for projects that already have agents waiting in the queue', async () => {
+    const deps = makeDeps({
+      loadBridge: vi.fn(async () =>
+        makeBridge({ globalPace: { status: 'under_pace', marginPct: 50 } }),
+      ),
+      // borged has 2 agents queued — boost should be suppressed
+      getProjectQueueCounts: vi.fn(async () => new Map([['borged', 2]])),
+    });
+    const r = await handleOrchestratorTick(deps);
+    expect(r.decisions).toHaveLength(0);
+    expect(deps.enqueueAgentFire).not.toHaveBeenCalled();
+  });
+
+  it('fires boost for projects with empty queue even when getProjectQueueCounts is provided', async () => {
+    const deps = makeDeps({
+      loadBridge: vi.fn(async () =>
+        makeBridge({ globalPace: { status: 'under_pace', marginPct: 50 } }),
+      ),
+      getProjectQueueCounts: vi.fn(async () => new Map([['other-project', 3]])),
+    });
+    const r = await handleOrchestratorTick(deps);
+    // borged has nothing queued — boost should fire normally
+    expect(deps.enqueueAgentFire).toHaveBeenCalledTimes(r.decisions.length);
+  });
 });
 
 describe('handleOrchestratorTick — health analysis phase', () => {

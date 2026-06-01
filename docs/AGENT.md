@@ -130,7 +130,7 @@ The `agents` table has a `kind` column with two values: `'user'` (default — ev
 Lifecycle:
 
 - **Seeded** at TamTam boot via `seedSystemAgents()` (`lib/agents/system/seed.ts`) for every enabled project, before `seedAgentCrons()` runs. The seeder is also called per-project after a PATCH on `/api/config/projects` flips a project to `enabled: true`. Idempotent: a project that already has a row, or that has a `system_agent_dismissed:<project>:<name>` settings marker, is skipped. Name conflicts with existing DB or file agents (case-insensitive) are also skipped — user-owned names take precedence.
-- **Locked at the API:** POST `/api/agents` rejects `kind=system` (400). PATCH `/api/agents/[agentId]` strips mutating fields for `kind=system` rows — only `schedule` and `enabled` are honored. DELETE writes a dismissal marker so the seeder does not recreate the row on next boot. System agents are also excluded from `.tamtam/agents/*.md` file sync (DB-only).
+- **Locked at the API:** POST `/api/agents` rejects `kind=system` (400). PATCH `/api/agents/[agentId]` strips mutating fields for `kind=system` rows, rejects `schedule`, and honors only `enabled`. DELETE writes a dismissal marker so the seeder does not recreate the row on next boot. System agents are also excluded from `.tamtam/agents/*.md` file sync (DB-only).
 - **Dispatched** by the cron task with no CLI spawn. The handler writes its own job row (`createJob`), performs the work in-process, fills in `workSummary` + `contextMeta.retrievalHealth`, and persists via `updateJob` — bypassing `markDone` because the post-processing chain (stream-json parsing, outcome-classifier hooks, release chain) assumes a CLI session that system agents don't produce.
 
 Current entries:

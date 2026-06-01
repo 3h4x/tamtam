@@ -381,6 +381,54 @@ describe('/api/projects/by-project/[projectName]/recommendations', () => {
     expect(installAgentScheduleMock).toHaveBeenCalledTimes(2);
   });
 
+  it('rejects applying schedule recommendations to system agents', async () => {
+    await sharedHandle.db.insert(schema.agents).values({
+      id: 'system:portal:documentation-reindex-vectors',
+      name: 'documentation-reindex-vectors',
+      project: 'portal',
+      skillIds: '[]',
+      docPaths: '[]',
+      model: 'normal',
+      prompt: '',
+      schedule: '1h',
+      enabled: true,
+      kind: 'system',
+      createdAt: 100,
+      updatedAt: 100,
+    });
+    await sharedHandle.db.insert(schema.recommendations).values({
+      id: 'rec-system-agent',
+      project: 'portal',
+      sourceKind: 'agent:documentation-reindex-vectors',
+      sourceId: 'job-1',
+      agentId: 'system:portal:documentation-reindex-vectors',
+      agentName: 'documentation-reindex-vectors',
+      type: 'agent_schedule_backoff',
+      title: 'Run documentation reindex less often',
+      detail: 'No actionable work.',
+      status: 'open',
+      payload: JSON.stringify({ recommendedSchedule: '8h' }),
+      createdAt: 100,
+      updatedAt: 100,
+    });
+
+    const req = new NextRequest('http://test', {
+      method: 'POST',
+      body: JSON.stringify({ id: 'rec-system-agent' }),
+    });
+    const res = await APPLY(req, { params: Promise.resolve({ projectName: 'portal' }) });
+    const data = await res.json();
+
+    expect(res.status).toBe(400);
+    expect(data.detail).toBe('System agent schedule is managed by settings');
+    const agentRows = await sharedHandle.db.select().from(schema.agents).where(eq(schema.agents.id, 'system:portal:documentation-reindex-vectors'));
+    expect(agentRows[0]?.schedule).toBe('1h');
+    const recRows = await sharedHandle.db.select().from(schema.recommendations).where(eq(schema.recommendations.id, 'rec-system-agent'));
+    expect(recRows[0]?.status).toBe('open');
+    expect(installAgentScheduleMock).not.toHaveBeenCalled();
+    expect(uninstallAgentScheduleMock).not.toHaveBeenCalled();
+  });
+
   it('fails closed and rolls a file agent schedule back when scheduler sync throws', async () => {
     parseFileAgentIdMock.mockReturnValue({ project: 'portal', name: 'tests' });
     resolveProjectPathMock.mockReturnValue('/tmp/portal');

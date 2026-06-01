@@ -123,6 +123,9 @@ async function updateDbAgentSchedule(expectedProject: string, agentId: string, s
   if (existing.project !== expectedProject) {
     throw new ApplyRecommendationError(409, 'Recommendation target belongs to a different project')
   }
+  if (existing.kind === 'system') {
+    throw new ApplyRecommendationError(400, 'System agent schedule is managed by settings')
+  }
   const previousSchedule = existing.schedule
   const rollback = async () => {
     await db.update(schema.agents)
