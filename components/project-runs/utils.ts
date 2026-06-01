@@ -324,6 +324,10 @@ export interface Entry {
   // link so the History row can show "→ filed #N".
   followupIssueUrl?: string | null
   followupIssueNumber?: number | null
+  // Set on release entries when the orchestrator recorded a stop reason in
+  // context_meta (e.g. "review startup failed: prereq command exited 1").
+  // Used as a fallback summary when no child job failure provides one.
+  releaseStopReason?: string | null
   // Every original job id that collapsed into this entry (session-grouped
   // turns share an entry). Used by `groupReleaseChildren` to resolve
   // `parent_job_id` edges when the parent might itself be a multi-turn
@@ -603,6 +607,14 @@ export function followupIssueFromContext(
   } catch { return null }
 }
 
+function releaseStopReasonFromContext(ctx: string | null | undefined): string | null {
+  if (!ctx) return null
+  try {
+    const m = JSON.parse(ctx)
+    return typeof m?.releaseStopReason === 'string' ? m.releaseStopReason : null
+  } catch { return null }
+}
+
 function parentLabelFor(parentJob: JobInfo | undefined): string | null {
   if (!parentJob) return null
   const bucket = bucketOf(parentJob.kind)
@@ -723,6 +735,7 @@ export function buildEntries(jobs: JobInfo[]): Entry[] {
       outcomeVerdict: outcomeVerdictFromContext(j.context_meta),
       followupIssueUrl: followupIssueFromContext(j.context_meta)?.url ?? null,
       followupIssueNumber: followupIssueFromContext(j.context_meta)?.number ?? null,
+      releaseStopReason: releaseStopReasonFromContext(j.context_meta),
       _jobIds: [j.id],
     }
     if (canSessionMerge) {

@@ -111,28 +111,6 @@ function VerdictBar({ verdicts }: { verdicts: VerdictDistribution }) {
   )
 }
 
-function DurationRow({ label, stats }: { label: string; stats: DurationStats | undefined }) {
-  if (!stats) {
-    return (
-      <tr className="border-b border-border/40 last:border-b-0">
-        <td className="px-3 py-2 font-mono text-sm text-text-primary">{label}</td>
-        <td className="px-3 py-2 text-right text-text-tertiary text-sm" colSpan={4}>
-          no data
-        </td>
-      </tr>
-    )
-  }
-  return (
-    <tr className="border-b border-border/40 last:border-b-0 hover:bg-bg-tertiary/40">
-      <td className="px-3 py-2 font-mono text-sm text-text-primary">{label}</td>
-      <td className="px-3 py-2 text-right tabular-nums text-sm text-text-secondary">{stats.count.toLocaleString()}</td>
-      <td className="px-3 py-2 text-right tabular-nums text-sm font-medium text-text-primary">{fmtDuration(stats.avg)}</td>
-      <td className="px-3 py-2 text-right tabular-nums text-sm font-medium text-text-primary">{fmtDuration(stats.median)}</td>
-      <td className="px-3 py-2 text-right tabular-nums text-sm text-text-secondary">{fmtDuration(stats.p95)}</td>
-    </tr>
-  )
-}
-
 const STEP_KINDS = ['release', 'test', 'review', 'fix', 'commit', 'push', 'pr-wait', 'mark-dod'] as const
 
 export function PipelinePage() {
@@ -331,24 +309,46 @@ export function PipelinePage() {
           <h2 className="text-sm font-medium text-text-primary">Step durations</h2>
           <p className="text-xs text-text-tertiary mt-0.5">Avg, median, and p95 wall-clock time per pipeline step</p>
         </div>
-        <div className="overflow-x-auto">
-          <table className="w-full text-sm border-collapse">
-            <thead className="border-b border-border">
-              <tr>
-                <th className="px-3 py-2 text-xs font-medium text-text-secondary text-left">Step</th>
-                <th className="px-3 py-2 text-xs font-medium text-text-secondary text-right">Runs</th>
-                <th className="px-3 py-2 text-xs font-medium text-text-secondary text-right">Avg</th>
-                <th className="px-3 py-2 text-xs font-medium text-text-secondary text-right">Median</th>
-                <th className="px-3 py-2 text-xs font-medium text-text-secondary text-right">p95</th>
-              </tr>
-            </thead>
-            <tbody>
-              {STEP_KINDS.map((kind) => (
-                <DurationRow key={kind} label={kind} stats={stepDurations[kind]} />
-              ))}
-            </tbody>
-          </table>
-        </div>
+        <Table<{ kind: string; stats: DurationStats | undefined }>
+          className="rounded-none border-0"
+          columns={[
+            {
+              key: 'step',
+              label: 'Step',
+              render: (r) => <span className="font-mono text-text-primary">{r.kind}</span>,
+            },
+            {
+              key: 'runs',
+              label: 'Runs',
+              headerClass: 'text-right',
+              cellClass: 'text-right tabular-nums text-text-secondary',
+              render: (r) => (r.stats ? r.stats.count.toLocaleString() : ''),
+            },
+            {
+              key: 'avg',
+              label: 'Avg',
+              headerClass: 'text-right',
+              cellClass: 'text-right tabular-nums font-medium text-text-primary',
+              render: (r) => (r.stats ? fmtDuration(r.stats.avg) : ''),
+            },
+            {
+              key: 'median',
+              label: 'Median',
+              headerClass: 'text-right',
+              cellClass: 'text-right tabular-nums font-medium text-text-primary',
+              render: (r) => (r.stats ? fmtDuration(r.stats.median) : ''),
+            },
+            {
+              key: 'p95',
+              label: 'p95',
+              headerClass: 'text-right',
+              cellClass: 'text-right tabular-nums text-text-secondary',
+              render: (r) => (r.stats ? fmtDuration(r.stats.p95) : <span className="text-text-tertiary">no data</span>),
+            },
+          ]}
+          rows={STEP_KINDS.map((kind) => ({ kind, stats: stepDurations[kind] }))}
+          getRowKey={(r) => r.kind}
+        />
       </div>
 
       {/* Fix loop detail */}

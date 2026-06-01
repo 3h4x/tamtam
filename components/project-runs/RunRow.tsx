@@ -313,7 +313,11 @@ export function RunRow({ entry: e, onClick, expandable, expanded, onToggleExpand
   const isConversationalRow = e.bucket === 'run' || e.bucket === 'agent'
   const ownSummary = isConversationalRow ? formatRunSummaryText(e.workSummary) : null
   const childFailureSummary = effectiveNeedsAttention ? formatRunSummaryText(latestFailureSummary(e)) : null
-  const runSummary = effectiveRunning ? null : (ownSummary ?? childFailureSummary)
+  const releaseStopSummary =
+    effectiveNeedsAttention && e.bucket === 'release' && e.releaseStopReason
+      ? formatRunSummaryText(e.releaseStopReason)
+      : null
+  const runSummary = effectiveRunning ? null : (ownSummary ?? childFailureSummary ?? releaseStopSummary)
   const liveDetail = effectiveRunning
     ? (isConversationalRow && e.workSummary ? formatRunSummaryText(e.workSummary) : e.subtitle?.trim() || null)
     : null
