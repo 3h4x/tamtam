@@ -3,6 +3,7 @@
 import { useState, useEffect, useMemo } from 'react'
 import { fetchProjectDocs } from '@/lib/client-api'
 import type { ProjectDoc } from '@/lib/client-api'
+import { Button } from '@/components/ui/Button'
 import { EmptyState } from '@/components/ui/EmptyState'
 import { ErrorState } from './ErrorState'
 
@@ -110,12 +111,14 @@ export function DocsTab({ projectName }: DocsTabProps) {
           </div>
           <div className="flex flex-col gap-1 p-2">
             {docs.map((doc) => (
-              <button
+              <Button
                 key={doc.name}
+                type="button"
+                variant="ghost"
                 onClick={() => setActive(doc.name)}
-                className={`flex w-full items-center justify-between gap-3 rounded-md px-2.5 py-2 text-left text-xs transition-colors ${
+                className={`flex w-full items-center justify-between gap-3 rounded-md border-0 px-2.5 py-2 text-left text-xs ${
                   doc.name === current.name
-                    ? 'bg-accent/15 text-accent'
+                    ? 'bg-accent/15 text-accent hover:bg-accent/15 hover:text-accent'
                     : 'text-text-secondary hover:bg-bg-tertiary hover:text-text-primary'
                 }`}
                 title={doc.path}
@@ -124,7 +127,7 @@ export function DocsTab({ projectName }: DocsTabProps) {
                 <span className={`shrink-0 tabular-nums ${doc.name === current.name ? 'text-accent' : 'text-text-tertiary'}`}>
                   {lineCounts.get(doc.name) ?? 0}
                 </span>
-              </button>
+              </Button>
             ))}
           </div>
         </div>
