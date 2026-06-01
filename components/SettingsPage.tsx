@@ -19,6 +19,7 @@ import { StandardTabs } from '@/components/ui/StandardTabs'
 import { Spinner } from '@/components/ui/Spinner'
 import { Button, buttonVariants } from '@/components/ui/Button'
 import { Pill } from '@/components/ui/Pill'
+import { EmptyState } from '@/components/ui/EmptyState'
 import { ErrorBanner } from '@/components/ErrorBanner'
 
 interface SettingsMap {
@@ -916,9 +917,15 @@ export function SettingsPage({ initialTab }: { initialTab?: TabId } = {}) {
           )}
 
           {activeTab === 'projects' && !settings.workspace_path && (
-            <p className="text-sm text-text-secondary bg-bg-secondary rounded-lg border border-border px-5 py-6 text-center">
-              Set a workspace path in the Workspace tab first to list projects here.
-            </p>
+            <EmptyState
+              paddingY="xs"
+              title={
+                <span className="font-normal text-text-secondary">
+                  Set a workspace path in the Workspace tab first to list projects here.
+                </span>
+              }
+              className="bg-bg-secondary rounded-lg border border-border px-5"
+            />
           )}
 
           {/* Agent Templates */}
