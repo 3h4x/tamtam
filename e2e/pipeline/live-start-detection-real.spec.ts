@@ -14,9 +14,14 @@ import {
 const START_SCENARIO = JSON.parse(
   readFileSync(join(__dirname, 'scenarios', 'ui-live-transition.json'), 'utf-8'),
 );
+const ABORT_SCENARIO = JSON.parse(
+  readFileSync(join(__dirname, 'scenarios', 'abort.json'), 'utf-8'),
+);
 
 const HISTORY_PROJECT = 'start-detect-runs';
 const TERMINAL_PROJECT = 'start-detect-terminal';
+const HISTORY_CANCEL_PROJECT = 'start-detect-runs-cancelled';
+const TERMINAL_CANCEL_PROJECT = 'start-detect-terminal-cancelled';
 const TERMINAL_RUN_PROJECT = 'start-detect-run-idle';
 const TERMINAL_AGENT_PROJECT = 'start-detect-agent-idle';
 const DEFAULT_DIRTY_WORKTREE_BLOCK_THRESHOLD = 1;
@@ -65,6 +70,43 @@ test.describe('Real idle-page job start detection', () => {
     await expect(page.locator('span.animate-pulse')).toHaveCount(0, { timeout: 15_000 });
   });
 
+  test('history tab detects a newly-started release and clears the spinner after abort without reload', async ({
+    page,
+    request,
+  }) => {
+    writeScenario(HISTORY_CANCEL_PROJECT, ABORT_SCENARIO.steps);
+    resetShimState(HISTORY_CANCEL_PROJECT);
+    await enableProject(request, HISTORY_CANCEL_PROJECT, { testsDisabled: true });
+
+    await page.goto(`/project/${HISTORY_CANCEL_PROJECT}/history`);
+    await expect(page.getByText('No runs yet').first()).toBeVisible({ timeout: 8_000 });
+
+    const releaseResp = await request.post(`/api/projects/by-project/${HISTORY_CANCEL_PROJECT}/release`);
+    expect(
+      releaseResp.status(),
+      `release POST failed: ${await releaseResp.text()}`,
+    ).toBe(200);
+
+    const releaseBody = await releaseResp.json() as { release_job_id: string };
+    expect(releaseBody.release_job_id, 'release_job_id in response').toBeTruthy();
+
+    const releaseRow = page.getByRole('button').filter({ hasText: 'Release pipeline' }).first();
+
+    await expect(releaseRow).toBeVisible({ timeout: 20_000 });
+    await expect(releaseRow.getByLabel('running')).toBeVisible({ timeout: 20_000 });
+    await expect(page.getByText('No runs yet')).toHaveCount(0, { timeout: 20_000 });
+
+    const abortResp = await request.post(`/api/projects/by-project/${HISTORY_CANCEL_PROJECT}/release/abort`);
+    expect(abortResp.status()).toBe(200);
+
+    const releaseJob = await waitForJobCompletion(request, releaseBody.release_job_id, 15_000);
+    expect(releaseJob?.['exit_code'], 'release exit code after abort').toBe(-3);
+
+    await expect(releaseRow.getByText('cancelled at review')).toBeVisible({ timeout: 15_000 });
+    await expect(releaseRow.getByLabel('running')).toHaveCount(0, { timeout: 15_000 });
+    await expect(page.locator('span.animate-pulse')).toHaveCount(0, { timeout: 15_000 });
+  });
+
   test('terminal landing page auto-attaches to a newly-started release and clears live state after completion', async ({
     page,
     request,
@@ -106,6 +148,47 @@ test.describe('Real idle-page job start detection', () => {
     await expect(page.getByText('live run')).not.toBeVisible({ timeout: 15_000 });
     await expect(page.getByLabel(/pipeline summary:/i)).toHaveCount(0, { timeout: 15_000 });
     await expect(page.getByText('exit 0 — ok').first()).toBeVisible({ timeout: 15_000 });
+  });
+
+  test('terminal landing page auto-attaches to a newly-started release and clears live state after abort', async ({
+    page,
+    request,
+  }) => {
+    writeScenario(TERMINAL_CANCEL_PROJECT, ABORT_SCENARIO.steps);
+    resetShimState(TERMINAL_CANCEL_PROJECT);
+    await enableProject(request, TERMINAL_CANCEL_PROJECT, { testsDisabled: true });
+
+    await page.goto(`/project/${TERMINAL_CANCEL_PROJECT}/terminal`);
+    await expect(page.getByRole('button', { name: 'new' })).toBeVisible({ timeout: 8_000 });
+    await expect(page.getByText('live run')).toHaveCount(0);
+
+    const releaseResp = await request.post(`/api/projects/by-project/${TERMINAL_CANCEL_PROJECT}/release`);
+    expect(
+      releaseResp.status(),
+      `release POST failed: ${await releaseResp.text()}`,
+    ).toBe(200);
+
+    const releaseBody = await releaseResp.json() as { release_job_id: string };
+    expect(releaseBody.release_job_id, 'release_job_id in response').toBeTruthy();
+
+    await expect(page).toHaveURL(
+      new RegExp(`/project/${TERMINAL_CANCEL_PROJECT}/terminal\\?job=${encodeURIComponent(releaseBody.release_job_id)}`),
+      { timeout: 20_000 },
+    );
+    await expect(page.getByText('live run')).toBeVisible({ timeout: 20_000 });
+    await expect(page.getByLabel(ACTIVE_PIPELINE_SUMMARY)).toBeVisible({ timeout: 20_000 });
+    await expect(page.getByRole('button', { name: 'abort' })).toBeVisible({ timeout: 20_000 });
+
+    const abortResp = await request.post(`/api/projects/by-project/${TERMINAL_CANCEL_PROJECT}/release/abort`);
+    expect(abortResp.status()).toBe(200);
+
+    const releaseJob = await waitForJobCompletion(request, releaseBody.release_job_id, 15_000);
+    expect(releaseJob?.['exit_code'], 'release exit code after abort').toBe(-3);
+
+    await expect(page.getByText('live run')).not.toBeVisible({ timeout: 15_000 });
+    await expect(page.getByLabel(/pipeline summary:/i)).toHaveCount(0, { timeout: 15_000 });
+    await expect(page.getByText('cancelled').first()).toBeVisible({ timeout: 15_000 });
+    await expect(page.getByText('exit -3')).toHaveCount(0);
   });
 
   test('terminal landing page does not auto-attach to a newly-started terminal run', async ({
