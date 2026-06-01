@@ -4,6 +4,7 @@ import { useRouter } from 'next/navigation'
 import { useSchedulerHealth } from '@/hooks/useSchedulerHealth'
 import { useAgentStats, type AgentStat } from '@/hooks/useAgentStats'
 import { Button } from '@/components/ui/Button'
+import { EmptyState } from '@/components/ui/EmptyState'
 
 function formatDuration(ms: number | null): string {
   if (!ms || ms <= 0) return '—'
@@ -78,18 +79,25 @@ export function AgentsStats({ projectName }: { projectName: string }) {
 
   if (entries.length === 0) {
     return (
-      <section className="mb-4 rounded-lg border border-border bg-bg-secondary px-3 py-3 flex items-center justify-between gap-3">
-        <div>
-          <div className="text-sm font-medium text-text-primary">No scheduled agents</div>
-          <div className="text-xs text-text-tertiary mt-0.5">Add an agent to automate work for this project.</div>
-        </div>
-        <Button
-          type="button"
-          variant="solid"
-          onClick={() => goToAgents()}
-        >
-          Open Agents tab
-        </Button>
+      <section className="mb-4 rounded-lg border border-border bg-bg-secondary">
+        <EmptyState
+          title="No scheduled agents"
+          description="Add an agent to automate work for this project."
+          paddingY="none"
+          paddingX="sm"
+          align="start"
+          actionLayout="inline"
+          className="rounded-lg py-3"
+          action={(
+            <Button
+              type="button"
+              variant="solid"
+              onClick={() => goToAgents()}
+            >
+              Open Agents tab
+            </Button>
+          )}
+        />
       </section>
     )
   }
