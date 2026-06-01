@@ -6,6 +6,7 @@ import Link from 'next/link'
 import type { PipelineResponse, VerdictDistribution, DurationStats } from '@/app/api/stats/pipeline/route'
 import { Button, buttonVariants } from '@/components/ui/Button'
 import { SegmentedControl } from '@/components/ui/SegmentedControl'
+import { Table } from '@/components/ui/Table'
 import { ErrorState } from './ErrorState'
 
 type Window = '24h' | '7d' | '30d' | 'all'
@@ -381,75 +382,88 @@ export function PipelinePage() {
           <div className="px-4 py-3 border-b border-border bg-bg-tertiary">
             <h2 className="text-sm font-medium text-text-primary">Per-project breakdown</h2>
           </div>
-          <div className="overflow-x-auto">
-            <table className="w-full text-sm border-collapse">
-              <thead className="border-b border-border">
-                <tr>
-                  <th className="px-3 py-2 text-xs font-medium text-text-secondary text-left">Project</th>
-                  <th className="px-3 py-2 text-xs font-medium text-text-secondary text-right">Releases</th>
-                  <th className="px-3 py-2 text-xs font-medium text-text-secondary text-right">Success</th>
-                  <th className="px-3 py-2 text-xs font-medium text-text-secondary text-right">LGTM rate</th>
-                  <th className="px-3 py-2 text-xs font-medium text-text-secondary text-right">Avg recovery iters</th>
-                  <th className="px-3 py-2 text-xs font-medium text-text-secondary text-right">Median release</th>
-                </tr>
-              </thead>
-              <tbody>
-                {projects.map((r) => (
-                  <tr
-                    key={r.project}
-                    className="border-b border-border/40 last:border-b-0 hover:bg-bg-tertiary/40 transition-colors"
+          <Table<PipelineResponse['projects'][number]>
+            className="rounded-none border-0"
+            columns={[
+              {
+                key: 'project',
+                label: 'Project',
+                render: (r) => (
+                  <Link
+                    href={`/pipeline?project=${encodeURIComponent(r.project)}`}
+                    className="font-medium text-text-primary hover:text-accent no-underline"
+                    data-private
                   >
-                    <td className="px-3 py-2.5">
-                      <Link
-                        href={`/pipeline?project=${encodeURIComponent(r.project)}`}
-                        className="font-medium text-text-primary hover:text-accent no-underline"
-                        data-private
-                      >
-                        {r.project}
-                      </Link>
-                    </td>
-                    <td className="px-3 py-2.5 text-right tabular-nums text-text-secondary">{r.releases}</td>
-                    <td className="px-3 py-2.5">
-                      <div className="flex items-center justify-end gap-1.5">
-                        {r.releases > 0 && (
-                          <div className="w-16 h-1.5 rounded-full bg-bg-tertiary overflow-hidden">
-                            <div
-                              className={`h-full rounded-full transition-all duration-500 ${r.successRate >= 0.9 ? 'bg-status-success' : r.successRate >= 0.6 ? 'bg-status-warning' : 'bg-status-error'}`}
-                              style={{ width: `${Math.round(r.successRate * 100)}%` }}
-                            />
-                          </div>
-                        )}
-                        <span className={`tabular-nums font-medium ${r.successRate >= 0.9 ? 'text-status-success' : r.successRate >= 0.6 ? 'text-status-warning' : 'text-status-error'}`}>
-                          {fmtPct(r.successRate)}
-                        </span>
+                    {r.project}
+                  </Link>
+                ),
+              },
+              {
+                key: 'releases',
+                label: 'Releases',
+                headerClass: 'text-right',
+                cellClass: 'text-right tabular-nums text-text-secondary',
+                render: (r) => r.releases,
+              },
+              {
+                key: 'success',
+                label: 'Success',
+                headerClass: 'text-right',
+                render: (r) => (
+                  <div className="flex items-center justify-end gap-1.5">
+                    {r.releases > 0 && (
+                      <div className="w-16 h-1.5 rounded-full bg-bg-tertiary overflow-hidden">
+                        <div
+                          className={`h-full rounded-full transition-all duration-500 ${r.successRate >= 0.9 ? 'bg-status-success' : r.successRate >= 0.6 ? 'bg-status-warning' : 'bg-status-error'}`}
+                          style={{ width: `${Math.round(r.successRate * 100)}%` }}
+                        />
                       </div>
-                    </td>
-                    <td className="px-3 py-2.5">
-                      <div className="flex items-center justify-end gap-1.5">
-                        {r.reviewCount > 0 && (
-                          <div className="w-16 h-1.5 rounded-full bg-bg-tertiary overflow-hidden">
-                            <div
-                              className={`h-full rounded-full transition-all duration-500 ${r.lgtmRate >= 0.8 ? 'bg-status-success' : r.lgtmRate >= 0.5 ? 'bg-status-warning' : 'bg-status-error'}`}
-                              style={{ width: `${Math.round(r.lgtmRate * 100)}%` }}
-                            />
-                          </div>
-                        )}
-                        <span className={`tabular-nums ${r.reviewCount === 0 ? 'text-text-tertiary' : r.lgtmRate >= 0.8 ? 'text-status-success' : r.lgtmRate >= 0.5 ? 'text-status-warning' : 'text-status-error'}`}>
-                          {r.reviewCount > 0 ? fmtPct(r.lgtmRate) : '—'}
-                        </span>
+                    )}
+                    <span className={`tabular-nums font-medium ${r.successRate >= 0.9 ? 'text-status-success' : r.successRate >= 0.6 ? 'text-status-warning' : 'text-status-error'}`}>
+                      {fmtPct(r.successRate)}
+                    </span>
+                  </div>
+                ),
+              },
+              {
+                key: 'lgtm-rate',
+                label: 'LGTM rate',
+                headerClass: 'text-right',
+                render: (r) => (
+                  <div className="flex items-center justify-end gap-1.5">
+                    {r.reviewCount > 0 && (
+                      <div className="w-16 h-1.5 rounded-full bg-bg-tertiary overflow-hidden">
+                        <div
+                          className={`h-full rounded-full transition-all duration-500 ${r.lgtmRate >= 0.8 ? 'bg-status-success' : r.lgtmRate >= 0.5 ? 'bg-status-warning' : 'bg-status-error'}`}
+                          style={{ width: `${Math.round(r.lgtmRate * 100)}%` }}
+                        />
                       </div>
-                    </td>
-                    <td className="px-3 py-2.5 text-right tabular-nums text-text-secondary">
-                      {r.fixIterationsAvg > 0 ? r.fixIterationsAvg : '—'}
-                    </td>
-                    <td className="px-3 py-2.5 text-right tabular-nums text-text-secondary">
-                      {fmtDuration(r.medianReleaseDurationMs)}
-                    </td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-          </div>
+                    )}
+                    <span className={`tabular-nums ${r.reviewCount === 0 ? 'text-text-tertiary' : r.lgtmRate >= 0.8 ? 'text-status-success' : r.lgtmRate >= 0.5 ? 'text-status-warning' : 'text-status-error'}`}>
+                      {r.reviewCount > 0 ? fmtPct(r.lgtmRate) : '—'}
+                    </span>
+                  </div>
+                ),
+              },
+              {
+                key: 'avg-recovery-iters',
+                label: 'Avg recovery iters',
+                headerClass: 'text-right',
+                cellClass: 'text-right tabular-nums text-text-secondary',
+                render: (r) => (r.fixIterationsAvg > 0 ? r.fixIterationsAvg : '—'),
+              },
+              {
+                key: 'median-release',
+                label: 'Median release',
+                headerClass: 'text-right',
+                cellClass: 'text-right tabular-nums text-text-secondary',
+                render: (r) => fmtDuration(r.medianReleaseDurationMs),
+              },
+            ]}
+            rows={projects}
+            getRowKey={(r) => r.project}
+            rowClassName={() => 'hover:bg-bg-tertiary/40'}
+          />
         </div>
       )}
 
