@@ -20,8 +20,8 @@ Related: [PIPELINE.md](PIPELINE.md) — pipeline state machine.
 
 Write an e2e pipeline test when you need to verify that **completion hooks
 chain correctly** across multiple pipeline steps, or that the probe sweep picks
-up a PM2 job's exit code and triggers the right follow-on step. Unit tests
-cannot catch these because they mock the async job lifecycle.
+up a detached child process exit code and triggers the right follow-on step.
+Unit tests cannot catch these because they mock the async job lifecycle.
 
 ---
 
@@ -58,7 +58,7 @@ e2e/pipeline/
 | Next.js API handlers | **Real** |
 | Postgres database | **Real** (isolated DB via `E2E_DATABASE_URL`, default `tamtam_e2e_pipeline` on the local Postgres; recreated by the harness) |
 | Probe sweep / completion hooks | **Real** (sped up via `TAMTAM_PROBE_INTERVAL_MS=500`) |
-| PM2 job lifecycle | **Real** (uses the local PM2 daemon) |
+| Detached job lifecycle | **Real** (uses child processes started by the API handlers) |
 | Claude CLI | **Mocked** (`e2e/pipeline/mocks/claude-shim.js`) |
 | `git` binary | **Mocked** (`e2e/pipeline/mocks/bin/git`) |
 | `gh` (GitHub CLI) | **Mocked** (`e2e/pipeline/mocks/bin/gh`) |
@@ -68,9 +68,9 @@ The Claude shim is configured as the server's `claude_bin` setting via the API
 on `PATH` in the webServer env so all `exec('git', …)` calls in the server
 process are intercepted.
 
-> **Note on PM2 jobs**: Review and fix jobs run via the real PM2 daemon. The
-> claude shim is invoked with its absolute path, so PM2's PATH is irrelevant.
-> Git is only called inline (in the server process), never from PM2 jobs.
+> **Note on detached jobs**: Review and fix jobs run as detached child
+> processes. The claude shim is invoked with its absolute path, so PATH is
+> only relevant for inline server calls such as git and gh.
 
 ---
 
