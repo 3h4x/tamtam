@@ -26,6 +26,7 @@ const TERMINAL_PROJECT = 'start-detect-terminal';
 const HISTORY_CANCEL_PROJECT = 'start-detect-runs-cancelled';
 const HISTORY_FAILURE_PROJECT = 'start-detect-runs-failure-idle';
 const TERMINAL_CANCEL_PROJECT = 'start-detect-terminal-cancelled';
+const TERMINAL_FAILURE_PROJECT = 'start-detect-terminal-failure-idle';
 const TERMINAL_RUN_PROJECT = 'start-detect-run-idle';
 const TERMINAL_AGENT_PROJECT = 'start-detect-agent-idle';
 const DEFAULT_DIRTY_WORKTREE_BLOCK_THRESHOLD = 1;
@@ -242,6 +243,57 @@ test.describe('Real idle-page job start detection', () => {
     await expect(page.getByText('live run')).not.toBeVisible({ timeout: 15_000 });
     await expect(page.getByLabel(/pipeline summary:/i)).toHaveCount(0, { timeout: 15_000 });
     await expect(page.getByText('cancelled').first()).toBeVisible({ timeout: 15_000 });
+    await expect(page.getByText('exit -3')).toHaveCount(0);
+  });
+
+  test('terminal landing page auto-attaches to a newly-started release and clears live state after a blocked review', async ({
+    page,
+    request,
+  }) => {
+    writeScenario(TERMINAL_FAILURE_PROJECT, LONG_FAILURE_STEPS);
+    resetShimState(TERMINAL_FAILURE_PROJECT);
+    await enableProject(request, TERMINAL_FAILURE_PROJECT, { testsDisabled: true });
+    const patch = await request.patch('/api/settings', {
+      data: { review_do_not_ship_action: 'abort' },
+    });
+    expect(
+      patch.ok(),
+      `failed to set review_do_not_ship_action: ${patch.status()}`,
+    ).toBe(true);
+
+    await page.goto(`/project/${TERMINAL_FAILURE_PROJECT}/terminal`);
+    await expect(page.getByRole('button', { name: 'new' })).toBeVisible({ timeout: 8_000 });
+    await expect(page.getByText('live run')).toHaveCount(0);
+
+    const releaseResp = await request.post(`/api/projects/by-project/${TERMINAL_FAILURE_PROJECT}/release`);
+    expect(
+      releaseResp.status(),
+      `release POST failed: ${await releaseResp.text()}`,
+    ).toBe(200);
+
+    const releaseBody = await releaseResp.json() as { release_job_id: string };
+    expect(releaseBody.release_job_id, 'release_job_id in response').toBeTruthy();
+
+    await expect(page).toHaveURL(
+      new RegExp(`/project/${TERMINAL_FAILURE_PROJECT}/terminal\\?job=${encodeURIComponent(releaseBody.release_job_id)}`),
+      { timeout: 20_000 },
+    );
+    await expect(page.getByText('live run')).toBeVisible({ timeout: 20_000 });
+    await expect(page.getByLabel(ACTIVE_PIPELINE_SUMMARY)).toBeVisible({ timeout: 20_000 });
+    await expect(page.getByTitle('View unified release trace').first()).toBeVisible({
+      timeout: 20_000,
+    });
+
+    const result = await waitForPipelineCompletion(request, TERMINAL_FAILURE_PROJECT, 90_000);
+    expect(result.status, 'pipeline should finish').toBe('done');
+    expect(result.releaseJob?.['exit_code'], 'release should fail with non-zero exit').not.toBe(0);
+
+    await expect(page.getByText('live run')).not.toBeVisible({ timeout: 15_000 });
+    await expect(page.getByLabel(/pipeline summary:/i)).toHaveCount(0, { timeout: 15_000 });
+    await expect(page.getByText('cancelled').first()).toBeVisible({ timeout: 15_000 });
+    await expect(
+      page.getByText(/critical security vulnerabilities/i).first(),
+    ).toBeVisible({ timeout: 15_000 });
     await expect(page.getByText('exit -3')).toHaveCount(0);
   });
 

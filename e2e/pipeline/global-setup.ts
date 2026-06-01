@@ -39,6 +39,7 @@ const PROJECTS = [
   'start-detect-runs-failure-idle',
   'start-detect-terminal',
   'start-detect-terminal-cancelled',
+  'start-detect-terminal-failure-idle',
   'start-detect-run-idle',
   'start-detect-agent-idle',
   'queued-release-history',
