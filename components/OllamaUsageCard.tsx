@@ -1,6 +1,7 @@
 'use client'
 
 import type { OllamaStatsResponse } from '@/app/api/stats/ollama/route'
+import { EmptyState } from '@/components/ui/EmptyState'
 
 function fmtTokens(n: number): string {
   if (n === 0) return '0'
@@ -58,9 +59,14 @@ export function OllamaUsageCard({ data, windowLabel }: { data: OllamaStatsRespon
       )}
 
       {totals.calls === 0 && (
-        <div className="px-4 py-8 text-center text-sm text-text-tertiary">
-          No Ollama activity in the last {windowLabel.toLowerCase()}.
-        </div>
+        <EmptyState
+          paddingY="sm"
+          title={(
+            <span className="font-normal text-text-tertiary">
+              No Ollama activity in the last {windowLabel.toLowerCase()}.
+            </span>
+          )}
+        />
       )}
     </div>
   )
