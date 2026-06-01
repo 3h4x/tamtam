@@ -62,6 +62,7 @@ const PROJECTS = [
   'workflow-runs-real-cancelled',
   'workflow-runs-real-dns',
   'workflow-runs-real-abort',
+  'runs-same-project-real',
   'agent-prereq-terminal',
   'issue-cruncher-prereq',
   'pr-workflow-auto-merge',
