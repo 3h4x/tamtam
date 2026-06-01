@@ -18,8 +18,8 @@ async function applyDdl(handle: TestDbHandle): Promise<void> {
   `));
 }
 
-// Shared PGlite handle for every describe block — was previously booted per
-// test (19 tests × ~500ms boot ≈ 10s overhead).
+// Shared PGlite handle for every describe block to avoid repeated database
+// boot overhead.
 let sharedHandle: TestDbHandle;
 
 async function truncateGhStatus(): Promise<void> {
