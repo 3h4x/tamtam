@@ -33,6 +33,7 @@ const PROJECTS = [
   'strip-full-live',
   'strip-abort-commit',
   'external-start-runs',
+  'external-start-failure',
   'start-detect-runs',
   'start-detect-terminal',
   'start-detect-run-idle',
