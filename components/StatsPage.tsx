@@ -11,7 +11,7 @@ import { BridgeOverview } from './BridgeOverview'
 import { UsageHistoryChart } from './UsageHistoryChart'
 import { EmptyState } from '@/components/ui/EmptyState'
 import { SegmentedControl } from '@/components/ui/SegmentedControl'
-import { Table } from '@/components/ui/Table'
+import { Table, type Column } from '@/components/ui/Table'
 import {
   normalizeBudgetSubscriptionProviders,
   type BudgetSubscriptionProvider,
@@ -27,7 +27,6 @@ const WINDOW_OPTIONS: Array<{ value: Window; label: string }> = [
 ]
 // usage-history is bounded to 14d server-side, so 30d / all collapse to the max.
 const WINDOW_HOURS: Record<Window, number> = { '24h': 24, '7d': 168, '30d': 336, all: 336 }
-type SortKey = 'project' | 'runs' | 'totalTokens' | 'costUsd' | 'lastRunAt'
 
 function fmtTokens(n: number): string {
   if (n === 0) return '0'
@@ -79,36 +78,12 @@ function StatCard({ label, value, sub, noPrivate }: { label: string; value: stri
   )
 }
 
-function SortHeader({
-  k, label, current, dir, onSort, align = 'left',
-}: {
-  k: SortKey; label: string; current: SortKey; dir: 'asc' | 'desc'
-  onSort: (k: SortKey) => void; align?: 'left' | 'right'
-}) {
-  const active = current === k
-  return (
-    <th
-      className={`px-3 py-2 text-xs font-medium text-text-secondary cursor-pointer select-none hover:text-text-primary transition-colors ${align === 'right' ? 'text-right' : 'text-left'}`}
-      onClick={() => onSort(k)}
-    >
-      <span className="inline-flex items-center gap-1">
-        {label}
-        <span className={`text-[10px] ${active ? 'text-accent' : 'text-text-tertiary opacity-30'}`}>
-          {active ? (dir === 'desc' ? '▼' : '▲') : '↕'}
-        </span>
-      </span>
-    </th>
-  )
-}
-
 export function StatsPage() {
   const [data, setData] = useState<UsageResponse | null>(null)
   const [ollama, setOllama] = useState<OllamaStatsResponse | null>(null)
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
   const [window_, setWindow] = useState<Window>('24h')
-  const [sortKey, setSortKey] = useState<SortKey>('costUsd')
-  const [sortDir, setSortDir] = useState<'asc' | 'desc'>('desc')
   const [warnAt, setWarnAt] = useState(80)
   const [blockAt, setBlockAt] = useState(95)
   const [budgetProviders, setBudgetProviders] = useState<BudgetSubscriptionProvider[]>(
@@ -164,29 +139,101 @@ export function StatsPage() {
       .catch(() => { /* keep defaults on error */ })
   }, [])
 
-  const onSort = (k: SortKey) => {
-    if (k === sortKey) setSortDir((d) => (d === 'desc' ? 'asc' : 'desc'))
-    else { setSortKey(k); setSortDir(k === 'project' ? 'asc' : 'desc') }
-  }
-
-  const sorted = useMemo(() => {
-    if (!data) return []
-    const rows = [...data.projects]
-    rows.sort((a, b) => {
-      const av = a[sortKey] as number | string | null
-      const bv = b[sortKey] as number | string | null
-      let cmp = 0
-      if (typeof av === 'string' && typeof bv === 'string') cmp = av.localeCompare(bv)
-      else cmp = ((av as number | null) ?? 0) - ((bv as number | null) ?? 0)
-      return sortDir === 'desc' ? -cmp : cmp
-    })
-    return rows
-  }, [data, sortKey, sortDir])
-
+  const projectRows = data?.projects ?? []
   const maxCost = useMemo(
-    () => sorted.reduce((m, r) => Math.max(m, r.costUsd), 0),
-    [sorted]
+    () => projectRows.reduce((m, r) => Math.max(m, r.costUsd), 0),
+    [projectRows]
   )
+
+  // Mask everything except this app's own row from screenshots/redaction.
+  const priv = (project: string) => (project === 'tamtam' ? {} : { 'data-private': true as const })
+
+  const projectColumns: Column<ProjectUsageRow>[] = [
+    {
+      key: 'project',
+      label: 'Project',
+      sortable: true,
+      sortValue: (r) => r.project,
+      initialSortDir: 'asc',
+      render: (r) => (
+        <Link
+          href={`/project/${encodeURIComponent(r.project)}`}
+          className="font-medium text-text-primary hover:text-accent no-underline"
+          {...priv(r.project)}
+        >
+          {r.project}
+        </Link>
+      ),
+    },
+    {
+      key: 'runs',
+      label: 'Runs',
+      sortable: true,
+      sortValue: (r) => r.runs,
+      initialSortDir: 'desc',
+      headerClass: 'text-right',
+      cellClass: 'text-right tabular-nums text-text-secondary',
+      render: (r) => <span {...priv(r.project)}>{r.runs.toLocaleString()}</span>,
+    },
+    {
+      key: 'totalTokens',
+      label: 'Tokens',
+      sortable: true,
+      sortValue: (r) => r.totalTokens,
+      initialSortDir: 'desc',
+      headerClass: 'text-right',
+      cellClass: 'text-right tabular-nums font-medium text-text-primary',
+      render: (r) => <span {...priv(r.project)}>{fmtTokens(r.totalTokens)}</span>,
+    },
+    {
+      key: 'inout',
+      label: 'In / Out',
+      headerClass: 'text-right',
+      cellClass: 'text-right tabular-nums text-xs text-text-tertiary',
+      render: (r) => (
+        <span {...priv(r.project)}>
+          {fmtTokens(r.inputTokens)} / {fmtTokens(r.outputTokens)}
+        </span>
+      ),
+    },
+    {
+      key: 'cache',
+      label: 'Cache R / W',
+      headerClass: 'text-right',
+      cellClass: 'text-right tabular-nums text-xs text-text-tertiary',
+      render: (r) => (
+        <span {...priv(r.project)}>
+          {fmtTokens(r.cacheReadTokens)} / {fmtTokens(r.cacheCreateTokens)}
+        </span>
+      ),
+    },
+    {
+      key: 'costUsd',
+      label: 'Cost',
+      sortable: true,
+      sortValue: (r) => r.costUsd,
+      initialSortDir: 'desc',
+      headerClass: 'text-right',
+      cellClass: 'text-right tabular-nums font-semibold text-accent',
+      render: (r) => <span {...priv(r.project)}>{fmtUsd(r.costUsd)}</span>,
+    },
+    {
+      key: 'share',
+      label: 'Share',
+      headerClass: 'w-32',
+      render: (r) => <Bar value={r.costUsd} max={maxCost} />,
+    },
+    {
+      key: 'lastRunAt',
+      label: 'Last run',
+      sortable: true,
+      sortValue: (r) => r.lastRunAt ?? 0,
+      initialSortDir: 'desc',
+      headerClass: 'text-right',
+      cellClass: 'text-right text-xs text-text-tertiary tabular-nums',
+      render: (r) => fmtAgo(r.lastRunAt),
+    },
+  ]
 
   if (loading && !data) {
     return (
@@ -287,96 +334,44 @@ export function StatsPage() {
 
       {/* Table */}
       <div className="rounded-lg border border-border bg-bg-secondary overflow-hidden">
-        <div className="overflow-x-auto">
-          <table className="w-full text-sm border-collapse">
-            <thead className="bg-bg-tertiary border-b border-border">
-              <tr>
-                <SortHeader k="project" label="Project" current={sortKey} dir={sortDir} onSort={onSort} />
-                <SortHeader k="runs" label="Runs" current={sortKey} dir={sortDir} onSort={onSort} align="right" />
-                <SortHeader k="totalTokens" label="Tokens" current={sortKey} dir={sortDir} onSort={onSort} align="right" />
-                <th className="px-3 py-2 text-xs font-medium text-text-secondary text-right">In / Out</th>
-                <th className="px-3 py-2 text-xs font-medium text-text-secondary text-right">Cache R / W</th>
-                <SortHeader k="costUsd" label="Cost" current={sortKey} dir={sortDir} onSort={onSort} align="right" />
-                <th className="px-3 py-2 text-xs font-medium text-text-secondary w-32">Share</th>
-                <SortHeader k="lastRunAt" label="Last run" current={sortKey} dir={sortDir} onSort={onSort} align="right" />
-              </tr>
-            </thead>
-            <tbody>
-              {sorted.length === 0 && (
-                <tr>
-                  <td colSpan={8}>
-                    <EmptyState
-                      paddingY="md"
-                      title={(
-                        <span className="font-normal text-text-tertiary">
-                          No usage data in the last {WINDOW_LABELS[window_].toLowerCase()}.
-                        </span>
-                      )}
-                    />
-                  </td>
-                </tr>
+        <Table<ProjectUsageRow>
+          bordered={false}
+          className="rounded-none"
+          defaultSortKey="costUsd"
+          defaultSortDir="desc"
+          columns={projectColumns}
+          rows={projectRows}
+          getRowKey={(r) => r.project}
+          rowClassName={() => 'hover:bg-bg-tertiary/40'}
+          emptyState={(
+            <EmptyState
+              paddingY="md"
+              title={(
+                <span className="font-normal text-text-tertiary">
+                  No usage data in the last {WINDOW_LABELS[window_].toLowerCase()}.
+                </span>
               )}
-              {sorted.map((r: ProjectUsageRow) => {
-                const privateAttr = r.project === 'tamtam' ? {} : { 'data-private': true };
-                return (
-                  <tr
-                    key={r.project}
-                    className="border-b border-border/40 last:border-b-0 hover:bg-bg-tertiary/40 transition-colors"
-                  >
-                    <td className="px-3 py-2.5">
-                      <Link
-                        href={`/project/${encodeURIComponent(r.project)}`}
-                        className="font-medium text-text-primary hover:text-accent no-underline"
-                        {...privateAttr}
-                      >
-                        {r.project}
-                      </Link>
-                    </td>
-                    <td className="px-3 py-2.5 text-right tabular-nums text-text-secondary" {...privateAttr}>{r.runs.toLocaleString()}</td>
-                    <td className="px-3 py-2.5 text-right tabular-nums font-medium text-text-primary" {...privateAttr}>
-                      {fmtTokens(r.totalTokens)}
-                    </td>
-                    <td className="px-3 py-2.5 text-right tabular-nums text-xs text-text-tertiary" {...privateAttr}>
-                      {fmtTokens(r.inputTokens)} / {fmtTokens(r.outputTokens)}
-                    </td>
-                    <td className="px-3 py-2.5 text-right tabular-nums text-xs text-text-tertiary" {...privateAttr}>
-                      {fmtTokens(r.cacheReadTokens)} / {fmtTokens(r.cacheCreateTokens)}
-                    </td>
-                    <td className="px-3 py-2.5 text-right tabular-nums font-semibold text-accent" {...privateAttr}>
-                      {fmtUsd(r.costUsd)}
-                    </td>
-                    <td className="px-3 py-2.5">
-                      <Bar value={r.costUsd} max={maxCost} />
-                    </td>
-                    <td className="px-3 py-2.5 text-right text-xs text-text-tertiary tabular-nums">
-                      {fmtAgo(r.lastRunAt)}
-                    </td>
-                  </tr>
-                );
-              })}
-            </tbody>
-            {sorted.length > 0 && (
-              <tfoot className="bg-bg-tertiary border-t border-border">
-                <tr>
-                  <td className="px-3 py-2.5 text-xs font-medium text-text-secondary uppercase tracking-wide">Total</td>
-                  <td className="px-3 py-2.5 text-right tabular-nums text-text-primary font-medium" data-private>{data.totals.runs.toLocaleString()}</td>
-                  <td className="px-3 py-2.5 text-right tabular-nums text-text-primary font-medium" data-private>{fmtTokens(data.totals.totalTokens)}</td>
-                  <td className="px-3 py-2.5 text-right tabular-nums text-xs text-text-tertiary" data-private>
-                    {fmtTokens(data.totals.inputTokens)} / {fmtTokens(data.totals.outputTokens)}
-                  </td>
-                  <td className="px-3 py-2.5 text-right tabular-nums text-xs text-text-tertiary" data-private>
-                    {fmtTokens(data.totals.cacheReadTokens)} / {fmtTokens(data.totals.cacheCreateTokens)}
-                  </td>
-                  <td className="px-3 py-2.5 text-right tabular-nums font-semibold text-accent" data-private>
-                    {fmtUsd(data.totals.costUsd)}
-                  </td>
-                  <td />
-                  <td />
-                </tr>
-              </tfoot>
-            )}
-          </table>
-        </div>
+            />
+          )}
+          footer={projectRows.length > 0 ? (
+            <tr className="bg-bg-tertiary border-t border-border">
+              <td className="px-3 py-2.5 text-xs font-medium text-text-secondary uppercase tracking-wide">Total</td>
+              <td className="px-3 py-2.5 text-right tabular-nums text-text-primary font-medium" data-private>{data.totals.runs.toLocaleString()}</td>
+              <td className="px-3 py-2.5 text-right tabular-nums text-text-primary font-medium" data-private>{fmtTokens(data.totals.totalTokens)}</td>
+              <td className="px-3 py-2.5 text-right tabular-nums text-xs text-text-tertiary" data-private>
+                {fmtTokens(data.totals.inputTokens)} / {fmtTokens(data.totals.outputTokens)}
+              </td>
+              <td className="px-3 py-2.5 text-right tabular-nums text-xs text-text-tertiary" data-private>
+                {fmtTokens(data.totals.cacheReadTokens)} / {fmtTokens(data.totals.cacheCreateTokens)}
+              </td>
+              <td className="px-3 py-2.5 text-right tabular-nums font-semibold text-accent" data-private>
+                {fmtUsd(data.totals.costUsd)}
+              </td>
+              <td />
+              <td />
+            </tr>
+          ) : undefined}
+        />
       </div>
 
       {/* Top agents by kind */}

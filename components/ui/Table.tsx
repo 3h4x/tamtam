@@ -9,6 +9,9 @@ export interface Column<T> {
   title?: string
   sortable?: boolean
   sortValue?: (row: T) => number | string
+  // Direction applied the first time this column is selected for sorting.
+  // Defaults to 'asc'; numeric columns commonly want 'desc' first.
+  initialSortDir?: 'asc' | 'desc'
   render: (row: T) => ReactNode
   cellTitle?: (row: T) => string
   headerClass?: string
@@ -32,6 +35,9 @@ interface TableProps<T> {
   bordered?: boolean
   showHeader?: boolean
   expandedRender?: (row: T) => ReactNode
+  // Optional <tfoot> content (e.g. a totals row). Rendered verbatim inside
+  // a <tfoot> after the body; supply a <tr> with cells matching the columns.
+  footer?: ReactNode
 }
 
 export function Table<T>({
@@ -51,6 +57,7 @@ export function Table<T>({
   bordered = true,
   showHeader = true,
   expandedRender,
+  footer,
 }: TableProps<T>) {
   const [sortKey, setSortKey] = useState(defaultSortKey)
   const [sortDir, setSortDir] = useState<'asc' | 'desc'>(defaultSortDir)
@@ -60,7 +67,7 @@ export function Table<T>({
       setSortDir(d => (d === 'asc' ? 'desc' : 'asc'))
     } else {
       setSortKey(key)
-      setSortDir('asc')
+      setSortDir(columns.find(c => c.key === key)?.initialSortDir ?? 'asc')
     }
   }
 
@@ -166,6 +173,7 @@ export function Table<T>({
             })
           )}
         </tbody>
+        {footer && <tfoot>{footer}</tfoot>}
       </table>
     </div>
   )
