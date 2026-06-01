@@ -2,6 +2,7 @@
 
 import { useMemo, useState } from 'react'
 import { useAgentCatalog, type AgentCatalogClientEntry } from '@/hooks/useAgentCatalog'
+import { EmptyState } from '@/components/ui/EmptyState'
 import { Pill } from '@/components/ui/Pill'
 import { Spinner } from '@/components/ui/Spinner'
 
@@ -89,21 +90,31 @@ export function AgentCatalogList() {
         </span>
       </div>
 
-      {grouped.map(([groupKey, items]) => (
-        <section key={groupKey}>
-          <div className="flex items-baseline gap-3 mb-1 px-4">
-            <h3 className="text-xs font-semibold text-text-tertiary uppercase tracking-wider">
-              {groupKey === 'auto-seeded' ? 'Auto-seeded (system)' : tierLabel(groupKey as AgentCatalogClientEntry['tier'])}
-            </h3>
-            <span className="text-xs text-text-tertiary tabular-nums">{items.length}</span>
-          </div>
-          <div className="rounded-lg border border-border overflow-hidden divide-y divide-border bg-bg-secondary">
-            {items.map((entry) => (
-              <AgentCatalogRow key={entry.name} entry={entry} />
-            ))}
-          </div>
+      {filtered.length === 0 ? (
+        <section className="rounded-lg border border-border bg-bg-secondary">
+          <EmptyState
+            title={search.trim() ? 'No agents match current search' : 'No agent catalog entries yet'}
+            description={search.trim() ? 'Try a different name, description, or skill.' : undefined}
+            paddingY="sm"
+          />
         </section>
-      ))}
+      ) : (
+        grouped.map(([groupKey, items]) => (
+          <section key={groupKey}>
+            <div className="flex items-baseline gap-3 mb-1 px-4">
+              <h3 className="text-xs font-semibold text-text-tertiary uppercase tracking-wider">
+                {groupKey === 'auto-seeded' ? 'Auto-seeded (system)' : tierLabel(groupKey as AgentCatalogClientEntry['tier'])}
+              </h3>
+              <span className="text-xs text-text-tertiary tabular-nums">{items.length}</span>
+            </div>
+            <div className="rounded-lg border border-border overflow-hidden divide-y divide-border bg-bg-secondary">
+              {items.map((entry) => (
+                <AgentCatalogRow key={entry.name} entry={entry} />
+              ))}
+            </div>
+          </section>
+        ))
+      )}
     </div>
   )
 }
