@@ -6,6 +6,7 @@ import type { Recommendation } from '@/lib/client-api'
 import { ErrorState } from '@/components/ErrorState'
 import { Button } from '@/components/ui/Button'
 import { EmptyState } from '@/components/ui/EmptyState'
+import { StandardTabs } from '@/components/ui/StandardTabs'
 import { RecommendationCard } from '@/components/recommendations/RecommendationCard'
 import { RecommendationHistoryRow } from '@/components/recommendations/RecommendationHistoryRow'
 import { recommendationBackoffSchedule } from '@/components/recommendations/schedule-backoff'
@@ -263,6 +264,11 @@ export function GlobalRecommendationsPage() {
     )
   }
 
+  const tabs = [
+    { id: 'unresolved' as const, label: `Unresolved (${items.length})` },
+    { id: 'history' as const, label: `History${historyLoaded ? ` (${history.length})` : ''}` },
+  ]
+
   return (
     <div className="px-4 py-6 max-w-5xl mx-auto space-y-6">
       <div className="flex items-baseline justify-between gap-3">
@@ -273,25 +279,13 @@ export function GlobalRecommendationsPage() {
         <div className="text-xs font-mono text-text-tertiary tabular-nums">{items.length} open</div>
       </div>
 
-      <div className="flex gap-4 border-b border-border" role="tablist" aria-label="Recommendations">
-        {(['unresolved', 'history'] as const).map((t) => (
-          <button
-            key={t}
-            type="button"
-            role="tab"
-            aria-selected={tab === t}
-            onClick={() => setTab(t)}
-            className={[
-              '-mb-px border-b-2 px-1 pb-2 text-sm font-medium transition-colors',
-              tab === t
-                ? 'border-accent text-text-primary'
-                : 'border-transparent text-text-tertiary hover:text-text-secondary',
-            ].join(' ')}
-          >
-            {t === 'unresolved' ? `Unresolved (${items.length})` : `History${historyLoaded ? ` (${history.length})` : ''}`}
-          </button>
-        ))}
-      </div>
+      <StandardTabs
+        items={tabs}
+        activeTab={tab}
+        ariaLabel="Recommendations"
+        variant="tabs"
+        onChange={setTab}
+      />
 
       {notice && (
         <div className="flex items-center justify-between gap-3 rounded border border-accent/30 bg-accent/10 px-3 py-2 text-xs text-text-secondary">

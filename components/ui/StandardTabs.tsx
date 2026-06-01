@@ -18,6 +18,7 @@ export interface StandardTabsProps<T extends string> {
   activeTab: T
   ariaLabel: string
   className?: string
+  variant?: 'navigation' | 'tabs'
   onChange: (tab: T) => void
 }
 
@@ -26,8 +27,10 @@ export function StandardTabs<T extends string>({
   activeTab,
   ariaLabel,
   className = '',
+  variant = 'navigation',
   onChange,
 }: StandardTabsProps<T>) {
+  const Container = variant === 'tabs' ? 'div' : 'nav'
   const tabClass = (tab: T) =>
     `relative shrink-0 px-3 py-1.5 text-sm cursor-pointer transition-colors focus:outline-none focus-visible:text-text-primary ${
       activeTab === tab
@@ -36,9 +39,10 @@ export function StandardTabs<T extends string>({
     }`
 
   return (
-    <nav
+    <Container
       className={`flex min-w-0 gap-1 overflow-x-auto scrollbar-none border-b border-border ${className}`}
       aria-label={ariaLabel}
+      role={variant === 'tabs' ? 'tablist' : undefined}
     >
       {items.map((item) => (
         <button
@@ -52,7 +56,9 @@ export function StandardTabs<T extends string>({
             }
             onChange(item.id)
           }}
-          aria-current={activeTab === item.id ? 'page' : undefined}
+          role={variant === 'tabs' ? 'tab' : undefined}
+          aria-selected={variant === 'tabs' ? activeTab === item.id : undefined}
+          aria-current={variant === 'navigation' && activeTab === item.id ? 'page' : undefined}
           aria-label={item.ariaLabel}
           title={item.title}
         >
@@ -68,6 +74,6 @@ export function StandardTabs<T extends string>({
           {item.indicator}
         </button>
       ))}
-    </nav>
+    </Container>
   )
 }

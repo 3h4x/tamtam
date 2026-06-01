@@ -121,6 +121,34 @@ describe('GlobalRecommendationsPage', () => {
     unmount()
   })
 
+  it('renders recommendations sections as real tabs', async () => {
+    fetchAllOpenRecommendationsMock.mockResolvedValue({
+      recommendations: [makeRecommendation({ id: 'alpha-1', project: 'alpha', title: 'Alpha' })],
+    })
+
+    const { container, unmount } = renderPage()
+
+    await fastWaitFor(() => {
+      expect(container.querySelector('[role="tablist"]')?.getAttribute('aria-label')).toBe('Recommendations')
+    })
+
+    const tabs = Array.from(container.querySelectorAll<HTMLButtonElement>('[role="tab"]'))
+    expect(tabs.map((tab) => tab.textContent)).toEqual(['Unresolved (1)', 'History'])
+    expect(tabs[0]?.getAttribute('aria-selected')).toBe('true')
+    expect(tabs[1]?.getAttribute('aria-selected')).toBe('false')
+
+    flushSync(() => {
+      tabs[1]?.dispatchEvent(new MouseEvent('click', { bubbles: true }))
+    })
+
+    await fastWaitFor(() => {
+      expect(tabs[0]?.getAttribute('aria-selected')).toBe('false')
+      expect(tabs[1]?.getAttribute('aria-selected')).toBe('true')
+    })
+
+    unmount()
+  })
+
   it('applies a recommendation, reloads, and leaves dismiss errors inline to the item', async () => {
     const alpha = makeRecommendation({ id: 'alpha-1', project: 'alpha', title: 'Alpha' })
     const beta = makeRecommendation({ id: 'beta-1', project: 'beta', title: 'Beta' })
