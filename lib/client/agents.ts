@@ -28,7 +28,7 @@ export async function fetchAgents(
   return { agents: data.agents }
 }
 
-export async function createAgent(agent: { name: string; project: string; skillIds: string[]; docPaths?: string[]; model: string; prompt?: string; schedule?: string | null; enabled?: boolean; boostable?: boolean; provider?: string | null; prerequisiteCommand?: string | null }): Promise<{ agent: Agent }> {
+export async function createAgent(agent: { name: string; project: string; skillIds: string[]; docPaths?: string[]; model: string; prompt?: string; schedule?: string | null; enabled?: boolean; boostable?: boolean; provider?: string | null; prerequisiteCommand?: string | null; permissionMode?: string | null }): Promise<{ agent: Agent }> {
   const response = await fetch('/api/agents', {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
@@ -41,7 +41,7 @@ export async function createAgent(agent: { name: string; project: string; skillI
   return response.json()
 }
 
-export async function updateAgent(agentId: string, updates: Partial<{ name: string; skillIds: string[]; docPaths: string[]; model: string; prompt: string; schedule: string | null; enabled: boolean; boostable: boolean; provider: string | null; prerequisiteCommand: string | null }>): Promise<{ agent: Agent }> {
+export async function updateAgent(agentId: string, updates: Partial<{ name: string; skillIds: string[]; docPaths: string[]; model: string; prompt: string; schedule: string | null; enabled: boolean; boostable: boolean; provider: string | null; prerequisiteCommand: string | null; permissionMode: string | null }>): Promise<{ agent: Agent }> {
   const response = await fetch(`/api/agents/${encodeURIComponent(agentId)}`, {
     method: 'PATCH',
     headers: { 'Content-Type': 'application/json' },

@@ -19,6 +19,10 @@ const MODELS = [...MODEL_TIERS]
 // the non-empty list — dropped the leading '' sentinel + the .filter(Boolean)
 // that used to mask it at render time.
 const SCHEDULES = ['15m', '30m', '1h', '2h', '4h', '8h', '12h', '24h', '3d', '7d', '30d']
+// Mirror of VALID_PERMISSION_MODES (lib/shared/config.ts) kept inline so this
+// client component doesn't pull server config. '' = inherit the global
+// `permission_mode` setting; a non-empty value overrides it for this agent.
+const PERMISSION_MODES = ['auto', 'acceptEdits', 'bypassPermissions', 'dontAsk', 'default', 'plan'] as const
 
 export interface AgentEditorSavePayload {
   name: string
