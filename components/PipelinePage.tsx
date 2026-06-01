@@ -5,6 +5,7 @@ import { useSearchParams } from 'next/navigation'
 import Link from 'next/link'
 import type { PipelineResponse, VerdictDistribution, DurationStats } from '@/app/api/stats/pipeline/route'
 import { Button, buttonVariants } from '@/components/ui/Button'
+import { EmptyState } from '@/components/ui/EmptyState'
 import { SegmentedControl } from '@/components/ui/SegmentedControl'
 import { Table } from '@/components/ui/Table'
 import { ErrorState } from './ErrorState'
@@ -62,7 +63,15 @@ function StatCard({
 function VerdictBar({ verdicts }: { verdicts: VerdictDistribution }) {
   const { lgtm, needsAttention, doNotShip, parseFailed, prunedMissingVerdict, total } = verdicts
   if (total === 0) {
-    return <div className="text-sm text-text-tertiary py-2">No review data in this period.</div>
+    return (
+      <EmptyState
+        title={<span className="font-normal text-text-tertiary">No review data in this period.</span>}
+        align="start"
+        paddingX="none"
+        paddingY="none"
+        className="py-2"
+      />
+    )
   }
   const pct = (n: number) => (total > 0 ? Math.round((n / total) * 100) : 0)
   const segments = [
