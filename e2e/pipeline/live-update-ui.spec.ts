@@ -451,6 +451,55 @@ test.describe('Auto-polling live update: running → failed', () => {
     await expect(row.getByText(failureReason)).toBeVisible({ timeout: 12_000 });
     await expect(row.locator('[aria-label="running"]')).toHaveCount(0, { timeout: 12_000 });
   });
+
+  test('history tab transitions a running review to "review verdict missing" without reload', async ({
+    page,
+  }) => {
+    let serveRunning = true;
+
+    await stubCommonRoutes(page, PROJECT);
+
+    await page.route(
+      (url) =>
+        url.pathname === '/api/jobs' && url.searchParams.get('project') === PROJECT,
+      (route: Route) => {
+        route.fulfill({
+          json: {
+            jobs: [
+              {
+                ...makeJob(
+                  'review-verdict-missing-job',
+                  PROJECT,
+                  serveRunning ? 'running' : 'done',
+                  serveRunning ? null : 0,
+                  'review',
+                ),
+                work_summary: serveRunning
+                  ? 'Review is still running.'
+                  : 'Review finished without writing a formal verdict line.',
+              },
+            ],
+            pendingReleaseProjects: [],
+          },
+        });
+      },
+    );
+
+    await page.goto(`/project/${PROJECT}/history`);
+
+    const row = page.getByRole('button').filter({ hasText: 'Code review' }).first();
+    await expect(row.locator('[aria-label="running"]')).toBeVisible({ timeout: 8_000 });
+
+    serveRunning = false;
+
+    await expect(row.getByText('review verdict missing', { exact: true })).toBeVisible({
+      timeout: 12_000,
+    });
+    await expect(row.getByText('Review finished without writing a formal verdict line.')).toBeVisible({
+      timeout: 12_000,
+    });
+    await expect(row.locator('[aria-label="running"]')).toHaveCount(0, { timeout: 12_000 });
+  });
 });
 
 // ─── Test 2b: Live running → cancelled transition ────────────────────────────
