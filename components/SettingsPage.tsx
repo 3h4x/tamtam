@@ -859,14 +859,16 @@ export function SettingsPage({ initialTab }: { initialTab?: TabId } = {}) {
                               {proj.name}
                             </span>
                           </label>
-                          <button
+                          <Button
                             type="button"
+                            variant="link"
+                            size="sm"
                             onClick={() => setArchived(proj.name, true)}
-                            className="text-[10px] text-text-tertiary hover:text-text-primary opacity-0 group-hover:opacity-100 transition-opacity"
+                            className="text-[10px] text-text-tertiary hover:text-text-primary hover:no-underline opacity-0 group-hover:opacity-100 transition-opacity"
                             title="Archive — hide from dashboards and scheduling"
                           >
                             Archive
-                          </button>
+                          </Button>
                         </div>
                       ))}
                     </div>
@@ -900,13 +902,15 @@ export function SettingsPage({ initialTab }: { initialTab?: TabId } = {}) {
                               <span className="font-mono text-xs truncate text-text-tertiary line-through flex-1 min-w-0">
                                 {proj.name}
                               </span>
-                              <button
+                              <Button
                                 type="button"
+                                variant="link"
+                                size="sm"
                                 onClick={() => setArchived(proj.name, false)}
-                                className="text-[10px] text-text-secondary hover:text-text-primary"
+                                className="text-[10px] text-text-secondary hover:text-text-primary hover:no-underline"
                               >
                                 Unarchive
-                              </button>
+                              </Button>
                             </div>
                           ))}
                         </div>
