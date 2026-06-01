@@ -124,6 +124,9 @@ export function summarizeOutcome(run: OutcomeInput): { label: string; tone: Outc
     if (typeof o.dispatched === 'boolean') {
       return { label: o.dispatched ? 'dispatched' : 'skipped', tone: o.dispatched ? 'ok' : 'info' };
     }
+    if (o.skipped === true) {
+      return { label: 'skipped', tone: 'info' };
+    }
     if (typeof o.ok === 'boolean') {
       return o.ok ? { label: 'ok', tone: 'ok' } : { label: 'not ok', tone: 'warn' };
     }

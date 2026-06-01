@@ -281,6 +281,9 @@ export interface Agent {
   provider?: string | null
   fallbackEnabled?: boolean
   prerequisiteCommand?: string | null
+  /** Per-agent permission-mode override. null/absent → inherit the global
+   *  `permission_mode` setting. One of VALID_PERMISSION_MODES otherwise. */
+  permissionMode?: string | null
   createdAt: number
   updatedAt: number
   source?: 'db' | 'file'

@@ -167,6 +167,10 @@ export const agents = pgTable('agents', {
   provider: text('provider'),
   fallbackEnabled: boolean('fallback_enabled').notNull().default(false),
   prerequisiteCommand: text('prerequisite_command'),
+  // Per-agent permission-mode override. NULL means "inherit the global
+  // `permission_mode` setting"; a non-null value is one of
+  // VALID_PERMISSION_MODES and wins for this agent's runs.
+  permissionMode: text('permission_mode'),
   // 'user' for normal user-defined agents (default), 'system' for built-in
   // agents auto-seeded per project that dispatch to internal handlers
   // instead of spawning a CLI. System agents share the table and the

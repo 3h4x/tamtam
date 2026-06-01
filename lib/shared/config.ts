@@ -652,8 +652,16 @@ export function getPipelineModel(step: PipelineStepKind): string {
   return normalizeModelInput(cfg.default_model);
 }
 
-/** Returns the --permission-mode flag string for the Claude CLI. */
-export function getPermissionModeFlag(): string {
+/**
+ * Returns the --permission-mode flag string for the Claude CLI.
+ *
+ * Pass `override` to use a per-agent permission mode; when it is null/undefined
+ * or not a recognized mode, falls back to the global `permission_mode` setting.
+ */
+export function getPermissionModeFlag(override?: string | null): string {
+  if (override && (VALID_PERMISSION_MODES as readonly string[]).includes(override)) {
+    return `--permission-mode ${override}`;
+  }
   const { permission_mode } = getSettings();
   const mode = normalizePermissionMode(permission_mode);
   return `--permission-mode ${mode}`;

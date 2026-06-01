@@ -36,6 +36,11 @@ export type MarkDodPhaseResult =
       changed: boolean;
     }
   | {
+      ok: true;
+      skipped: true;
+      reason: 'no_context';
+    }
+  | {
       ok: false;
       reason: 'mark_dod_failed';
       status: number;
@@ -110,6 +115,10 @@ function toPhaseResult(r: MarkDodResult): MarkDodPhaseResult {
       total: r.total,
       changed: r.changed,
     };
+  }
+  // No PR/issue context means mark-dod doesn't apply — skip cleanly rather than fail.
+  if (r.status === 400 && r.detail === 'no issue or PR context on latest run') {
+    return { ok: true, skipped: true, reason: 'no_context' };
   }
   return { ok: false, reason: 'mark_dod_failed', status: r.status, detail: r.detail };
 }
