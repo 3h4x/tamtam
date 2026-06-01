@@ -40,11 +40,27 @@ function makeNotifJob(
   };
 }
 
-// Minimal stubs needed to render the /runs page without real API calls.
+// Minimal stubs needed to render the workflow activity shell without real API
+// calls.
 async function stubShellRoutes(page: import('@playwright/test').Page): Promise<void> {
   await page.route(
     (url) => url.pathname === '/api/jobs' && !url.searchParams.has('project'),
     (route: Route) => route.fulfill({ json: { jobs: [], pendingReleaseProjects: [] } }),
+  );
+  await page.route(
+    (url) => url.pathname === '/api/workflow-runs' && url.searchParams.get('limit') === '100',
+    (route: Route) =>
+      route.fulfill({
+        json: {
+          runs: [],
+          meta: {
+            workflowEnabled: true,
+            releaseWorkflow: true,
+            releaseWorkflowDrive: true,
+            mode: 'drive',
+          },
+        },
+      }),
   );
   await page.route('**/api/settings', (route: Route) =>
     route.fulfill({ json: { settings: { jobs_paused: 'false' }, github_owner: '' } }),
@@ -64,7 +80,7 @@ test.describe('NotificationBell', () => {
       route.fulfill({ json: { count: 0, jobs: [], runningCount: 0, runningJobs: [] } }),
     );
 
-    await page.goto('/runs');
+    await page.goto('/workflow-runs');
 
     const bellBtn = page.getByTitle('No notifications');
     await expect(bellBtn).toBeVisible({ timeout: 8_000 });
@@ -95,7 +111,7 @@ test.describe('NotificationBell', () => {
       }),
     );
 
-    await page.goto('/runs');
+    await page.goto('/workflow-runs');
 
     // Button title reflects unseenCount=2
     const bellBtn = page.getByTitle('2 unread');
@@ -126,7 +142,7 @@ test.describe('NotificationBell', () => {
       }),
     );
 
-    await page.goto('/runs');
+    await page.goto('/workflow-runs');
 
     // Bell title reflects 1 running, no unread
     const bellBtn = page.getByTitle('1 running');
@@ -157,7 +173,7 @@ test.describe('NotificationBell', () => {
       }),
     );
 
-    await page.goto('/runs');
+    await page.goto('/workflow-runs');
 
     await page.getByTitle('1 running').click();
 
@@ -187,7 +203,7 @@ test.describe('NotificationBell', () => {
       }),
     );
 
-    await page.goto('/runs');
+    await page.goto('/workflow-runs');
 
     await page.getByTitle('1 unread').click();
 
@@ -224,7 +240,7 @@ test.describe('NotificationBell', () => {
       }),
     );
 
-    await page.goto('/runs');
+    await page.goto('/workflow-runs');
 
     await page.getByTitle('1 unread').click();
 
@@ -258,7 +274,7 @@ test.describe('NotificationBell', () => {
       route.fulfill({ json: { status: 'ok', marked: 1 } }),
     );
 
-    await page.goto('/runs');
+    await page.goto('/workflow-runs');
 
     const bellBtn = page.getByTitle('1 unread');
     await expect(bellBtn).toBeVisible({ timeout: 8_000 });
@@ -285,7 +301,7 @@ test.describe('NotificationBell', () => {
       route.fulfill({ json: { count, jobs, runningCount: 0, runningJobs: [] } }),
     );
 
-    await page.goto('/runs');
+    await page.goto('/workflow-runs');
 
     // Initially empty — no badge
     await expect(page.getByTitle('No notifications')).toBeVisible({ timeout: 8_000 });
@@ -318,7 +334,7 @@ test.describe('NotificationBell', () => {
       route.fulfill({ json: { count, jobs, runningCount: 0, runningJobs: [] } }),
     );
 
-    await page.goto('/runs');
+    await page.goto('/workflow-runs');
 
     const bellBtn = page.getByTitle('1 unread');
     await expect(bellBtn).toBeVisible({ timeout: 8_000 });
@@ -353,7 +369,7 @@ test.describe('NotificationBell', () => {
       route.fulfill({ json: { count, jobs, runningCount, runningJobs } }),
     );
 
-    await page.goto('/runs');
+    await page.goto('/workflow-runs');
 
     const runningBell = page.getByTitle('1 running');
     await expect(runningBell).toBeVisible({ timeout: 8_000 });
@@ -407,7 +423,7 @@ test.describe('NotificationBell', () => {
       route.fulfill({ json: { count: 0, jobs: [], runningCount, runningJobs } }),
     );
 
-    await page.goto('/runs');
+    await page.goto('/workflow-runs');
 
     const runningBell = page.getByTitle('1 running');
     await expect(runningBell).toBeVisible({ timeout: 8_000 });
