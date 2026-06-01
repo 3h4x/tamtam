@@ -25,6 +25,8 @@ const HISTORY_PROJECT = 'start-detect-runs';
 const TERMINAL_PROJECT = 'start-detect-terminal';
 const HISTORY_CANCEL_PROJECT = 'start-detect-runs-cancelled';
 const HISTORY_FAILURE_PROJECT = 'start-detect-runs-failure-idle';
+const HISTORY_RUN_PROJECT = 'start-detect-history-run-idle';
+const HISTORY_RUN_CANCEL_PROJECT = 'start-detect-history-run-cancelled';
 const TERMINAL_CANCEL_PROJECT = 'start-detect-terminal-cancelled';
 const TERMINAL_FAILURE_PROJECT = 'start-detect-terminal-failure-idle';
 const TERMINAL_RUN_PROJECT = 'start-detect-run-idle';
@@ -159,6 +161,109 @@ test.describe('Real idle-page job start detection', () => {
       releaseRow.getByText(/critical security vulnerabilities/i),
     ).toBeVisible({ timeout: 15_000 });
     await expect(releaseRow.getByLabel('running')).toHaveCount(0, { timeout: 15_000 });
+    await expect(page.locator('span.animate-pulse')).toHaveCount(0, { timeout: 15_000 });
+  });
+
+  test('history tab detects a newly-started ordinary run and clears its spinner after success without reload', async ({
+    page,
+    request,
+  }) => {
+    resetShimState(HISTORY_RUN_PROJECT);
+    writeScenario(HISTORY_RUN_PROJECT, [
+      {
+        label: 'run',
+        sleep_ms: 3000,
+        text: 'Background run finished after history auto-detection.',
+      },
+    ]);
+    await enableProject(request, HISTORY_RUN_PROJECT, { testsDisabled: true });
+
+    await page.goto(`/project/${HISTORY_RUN_PROJECT}/history`);
+    await expect(page.getByText('No runs yet').first()).toBeVisible({ timeout: 8_000 });
+
+    const runResp = await request.post(`/api/projects/by-project/${HISTORY_RUN_PROJECT}/run`, {
+      data: { prompt: 'Watch this ordinary run appear in history.' },
+    });
+    expect(
+      runResp.status(),
+      `run POST failed: ${await runResp.text()}`,
+    ).toBe(200);
+
+    const runBody = await runResp.json() as { job_id: string };
+    expect(runBody.job_id, 'run job_id in response').toBeTruthy();
+
+    const runningRun = await waitForJobByIdRunning(request, runBody.job_id, 20_000);
+    expect(runningRun, 'ordinary run should start running').not.toBeNull();
+
+    const runRow = page.getByRole('button').filter({
+      hasText: 'Watch this ordinary run appear in history.',
+    }).first();
+
+    await expect(runRow).toBeVisible({ timeout: 20_000 });
+    await expect(runRow.getByLabel('running')).toBeVisible({ timeout: 20_000 });
+    await expect(page.getByText('No runs yet')).toHaveCount(0, { timeout: 20_000 });
+
+    const runJob = await waitForJobCompletion(request, runBody.job_id, 60_000);
+    expect(runJob?.['exit_code'], 'run exit code').toBe(0);
+
+    await expect(runRow.getByLabel('done')).toBeVisible({ timeout: 15_000 });
+    await expect(runRow.getByLabel('running')).toHaveCount(0, { timeout: 15_000 });
+    await expect(
+      runRow.getByText('Background run finished after history auto-detection.'),
+    ).toBeVisible({ timeout: 15_000 });
+    await expect(page.locator('span.animate-pulse')).toHaveCount(0, { timeout: 15_000 });
+  });
+
+  test('history tab detects a newly-started ordinary run and clears its spinner after cancellation without reload', async ({
+    page,
+    request,
+  }) => {
+    resetShimState(HISTORY_RUN_CANCEL_PROJECT);
+    writeScenario(HISTORY_RUN_CANCEL_PROJECT, [
+      {
+        label: 'run',
+        sleep_ms: 10000,
+        text: 'This line should lose the race to cancellation.',
+      },
+    ]);
+    await enableProject(request, HISTORY_RUN_CANCEL_PROJECT, { testsDisabled: true });
+
+    await page.goto(`/project/${HISTORY_RUN_CANCEL_PROJECT}/history`);
+    await expect(page.getByText('No runs yet').first()).toBeVisible({ timeout: 8_000 });
+
+    const runResp = await request.post(`/api/projects/by-project/${HISTORY_RUN_CANCEL_PROJECT}/run`, {
+      data: { prompt: 'Cancel this ordinary run from history.' },
+    });
+    expect(
+      runResp.status(),
+      `run POST failed: ${await runResp.text()}`,
+    ).toBe(200);
+
+    const runBody = await runResp.json() as { job_id: string };
+    expect(runBody.job_id, 'run job_id in response').toBeTruthy();
+
+    const runningRun = await waitForJobByIdRunning(request, runBody.job_id, 20_000);
+    expect(runningRun, 'ordinary run should be running before cancellation').not.toBeNull();
+
+    const runRow = page.getByRole('button').filter({
+      hasText: 'Cancel this ordinary run from history.',
+    }).first();
+
+    await expect(runRow).toBeVisible({ timeout: 20_000 });
+    await expect(runRow.getByLabel('running')).toBeVisible({ timeout: 20_000 });
+    await expect(page.getByText('No runs yet')).toHaveCount(0, { timeout: 20_000 });
+
+    const cancelResp = await request.delete(`/api/jobs/${encodeURIComponent(runBody.job_id)}`);
+    expect(cancelResp.status(), `cancel DELETE failed: ${await cancelResp.text()}`).toBe(200);
+
+    const runJob = await waitForJobCompletion(request, runBody.job_id, 20_000);
+    expect(runJob?.['exit_code'], 'cancelled run exit code').toBe(-2);
+
+    await expect(runRow.getByText('cancelled', { exact: true })).toBeVisible({
+      timeout: 15_000,
+    });
+    await expect(runRow.getByLabel('running')).toHaveCount(0, { timeout: 15_000 });
+    await expect(runRow.getByText('-2')).toHaveCount(0);
     await expect(page.locator('span.animate-pulse')).toHaveCount(0, { timeout: 15_000 });
   });
 

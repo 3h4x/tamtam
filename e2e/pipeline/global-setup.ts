@@ -38,6 +38,8 @@ const PROJECTS = [
   'start-detect-runs',
   'start-detect-runs-cancelled',
   'start-detect-runs-failure-idle',
+  'start-detect-history-run-idle',
+  'start-detect-history-run-cancelled',
   'start-detect-terminal',
   'start-detect-terminal-cancelled',
   'start-detect-terminal-failure-idle',
