@@ -831,9 +831,11 @@ export function SettingsPage({ initialTab }: { initialTab?: TabId } = {}) {
                     ))}
                   </div>
                 ) : projects.length === 0 ? (
-                  <p className="text-text-secondary text-sm py-4 text-center">
-                    No git repositories found. Save your workspace path first.
-                  </p>
+                  <EmptyState
+                    title="No git repositories found. Save your workspace path first."
+                    paddingY="xs"
+                    className="px-0"
+                  />
                 ) : (
                   <>
                     <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-4 gap-1">
