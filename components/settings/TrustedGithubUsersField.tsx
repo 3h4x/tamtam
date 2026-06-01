@@ -3,6 +3,7 @@
 import { useEffect, useId, useRef, useState } from 'react'
 import { INPUT_CLASS } from '@/components/settings/constants'
 import { Button } from '@/components/ui/Button'
+import { EmptyState } from '@/components/ui/EmptyState'
 import {
   parseTrustedGithubUsers,
   serializeTrustedGithubUsers,
@@ -68,7 +69,12 @@ export function TrustedGithubUsersField({
 
       <div className="rounded-lg border border-border bg-bg-primary/60 p-3">
         {users.length === 0 ? (
-          <p className="text-sm text-text-secondary">No trusted GitHub logins configured.</p>
+          <EmptyState
+            title={<span className="font-normal">No trusted GitHub logins configured.</span>}
+            paddingX="none"
+            paddingY="none"
+            align="start"
+          />
         ) : (
           <div className="space-y-2">
             {users.map((user, index) => (
