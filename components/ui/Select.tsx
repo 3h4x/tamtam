@@ -2,11 +2,18 @@
 
 import React from 'react'
 
-// Canonical <select> styling shared across settings/config forms: full-width,
-// fixed-height, with the standard accent focus ring and a custom chevron via an
-// inline SVG background. Pass `className` to extend non-conflicting utilities.
+// Canonical <select> styling shared across settings/config forms: a standard
+// accent focus ring and a custom chevron via an inline SVG background. Pass
+// `className` to extend non-conflicting utilities. `size="compact"` shrinks the
+// control (and its chevron) for inline strips; `size="default"` is the
+// full-width, fixed-height settings/config control.
 const SELECT_BASE =
-  'w-full h-10 px-3 py-2 text-text-primary border border-border rounded-lg text-sm focus:outline-none focus:ring-2 focus:border-accent transition-colors appearance-none cursor-pointer bg-no-repeat bg-[right_0.6rem_center] pr-9 bg-[length:1rem] bg-[image:url("data:image/svg+xml;utf8,%3Csvg%20xmlns%3D%27http%3A%2F%2Fwww.w3.org%2F2000%2Fsvg%27%20viewBox%3D%270%200%2024%2024%27%20fill%3D%27none%27%20stroke%3D%27%23888%27%20stroke-width%3D%272%27%20stroke-linecap%3D%27round%27%20stroke-linejoin%3D%27round%27%3E%3Cpath%20d%3D%27M6%209l6%206%206-6%27%2F%3E%3C%2Fsvg%3E")]'
+  'text-text-primary border border-border focus:outline-none focus:ring-2 focus:border-accent transition-colors appearance-none cursor-pointer bg-no-repeat bg-[image:url("data:image/svg+xml;utf8,%3Csvg%20xmlns%3D%27http%3A%2F%2Fwww.w3.org%2F2000%2Fsvg%27%20viewBox%3D%270%200%2024%2024%27%20fill%3D%27none%27%20stroke%3D%27%23888%27%20stroke-width%3D%272%27%20stroke-linecap%3D%27round%27%20stroke-linejoin%3D%27round%27%3E%3Cpath%20d%3D%27M6%209l6%206%206-6%27%2F%3E%3C%2Fsvg%3E")]'
+
+const SIZE_CLASSES = {
+  default: 'w-full h-10 px-3 py-2 text-sm rounded-lg pr-9 bg-[right_0.6rem_center] bg-[length:1rem]',
+  compact: 'h-8 px-2 py-1 text-xs rounded-md pr-7 bg-[right_0.45rem_center] bg-[length:0.85rem]',
+} as const
 
 const SURFACE_CLASSES = {
   primary: 'bg-bg-primary',
@@ -18,15 +25,16 @@ const FOCUS_RING_CLASSES = {
   strong: 'focus:ring-accent/40',
 } as const
 
-export interface SelectProps extends React.SelectHTMLAttributes<HTMLSelectElement> {
+export interface SelectProps extends Omit<React.SelectHTMLAttributes<HTMLSelectElement>, 'size'> {
   surface?: keyof typeof SURFACE_CLASSES
   focusRing?: keyof typeof FOCUS_RING_CLASSES
+  size?: keyof typeof SIZE_CLASSES
 }
 
-export function Select({ className, surface = 'primary', focusRing = 'default', ...props }: SelectProps) {
+export function Select({ className, surface = 'primary', focusRing = 'default', size = 'default', ...props }: SelectProps) {
   return (
     <select
-      className={[SELECT_BASE, SURFACE_CLASSES[surface], FOCUS_RING_CLASSES[focusRing], className].filter(Boolean).join(' ')}
+      className={[SELECT_BASE, SIZE_CLASSES[size], SURFACE_CLASSES[surface], FOCUS_RING_CLASSES[focusRing], className].filter(Boolean).join(' ')}
       {...props}
     />
   )
