@@ -1,6 +1,8 @@
 'use client'
 
-import { FIELDS, DEFAULTS, COL_SPAN, SELECT_CLASS, INPUT_CLASS } from '@/components/settings/constants'
+import { FIELDS, DEFAULTS, COL_SPAN } from '@/components/settings/constants'
+import { Select } from '@/components/ui/Select'
+import { Input } from '@/components/ui/Input'
 import type { SettingsFieldKey } from '@/components/settings/constants'
 import { MODEL_TIERS, MODEL_LABELS, getProviderModelHint } from '@/lib/agents/model-aliases'
 
@@ -92,76 +94,75 @@ export function SettingsField({
           className="w-full px-3 py-2 bg-bg-primary text-text-primary border border-border rounded-lg font-mono text-xs focus:outline-none focus:ring-2 focus:ring-accent/30 focus:border-accent transition-colors placeholder:text-text-tertiary resize-y"
         />
       ) : fieldKey === 'daytime' ? (
-        <select value={value} onChange={(e) => onChange(fieldKey, e.target.value)} className={SELECT_CLASS}>
+        <Select value={value} onChange={(e) => onChange(fieldKey, e.target.value)}>
           <option value="false">Night only (20:00–05:59)</option>
           <option value="true">Any time (24/7)</option>
-        </select>
+        </Select>
       ) : fieldKey === 'weekends' ? (
-        <select value={value} onChange={(e) => onChange(fieldKey, e.target.value)} className={SELECT_CLASS}>
+        <Select value={value} onChange={(e) => onChange(fieldKey, e.target.value)}>
           <option value="off">Weekdays only</option>
           <option value="on">Include weekends</option>
-        </select>
+        </Select>
       ) : fieldKey === 'claude_provider' ? (
-        <select value={value} onChange={(e) => onChange(fieldKey, e.target.value)} className={SELECT_CLASS}>
+        <Select value={value} onChange={(e) => onChange(fieldKey, e.target.value)}>
           <option value="claude">Claude CLI</option>
           <option value="gemini">Gemini shim</option>
           <option value="lmstudio">LM Studio shim</option>
           <option value="codex">Codex shim</option>
           <option value="deepagents">Deep Agents shim</option>
           <option value="custom">Custom executable</option>
-        </select>
+        </Select>
       ) : fieldKey === 'default_model' ? (
-        <select value={value} onChange={(e) => onChange(fieldKey, e.target.value)} className={SELECT_CLASS}>
+        <Select value={value} onChange={(e) => onChange(fieldKey, e.target.value)}>
           {MODEL_TIERS.map((model) => {
             const hint = getProviderModelHint(provider, model)
             return <option key={model} value={model}>{hint ? `${MODEL_LABELS[model]} → ${hint}` : MODEL_LABELS[model]}</option>
           })}
-        </select>
+        </Select>
       ) : fieldKey === 'pipeline_model_review' || fieldKey === 'pipeline_model_fix' || fieldKey === 'pipeline_model_dod' || fieldKey === 'pipeline_model_commit' ? (
-        <select value={value} onChange={(e) => onChange(fieldKey, e.target.value)} className={SELECT_CLASS}>
+        <Select value={value} onChange={(e) => onChange(fieldKey, e.target.value)}>
           <option value="">{pipelineModelDefaultLabel(fieldKey)}</option>
           {MODEL_TIERS.map((model) => <option key={model} value={model}>{MODEL_LABELS[model]}</option>)}
-        </select>
+        </Select>
       ) : fieldKey === 'fix_max_iterations'
           || fieldKey === 'orchestrator_boost_margin_pct'
           || fieldKey === 'orchestrator_max_boosts_per_hour' ? (
-        <input
+        <Input
           type="number"
           min={0}
           step={1}
           value={value}
           onChange={(e) => onChange(fieldKey, e.target.value)}
           placeholder={DEFAULTS[fieldKey]}
-          className={INPUT_CLASS}
         />
       ) : fieldKey === 'review_do_not_ship_action' ? (
-        <select value={value || 'pass'} onChange={(e) => onChange(fieldKey, e.target.value)} className={SELECT_CLASS}>
+        <Select value={value || 'pass'} onChange={(e) => onChange(fieldKey, e.target.value)}>
           <option value="pass">Pass with follow-up issue (default)</option>
           <option value="fix">Try fix loop</option>
           <option value="abort">Abort release</option>
-        </select>
+        </Select>
       ) : BOOLEAN_SELECT_FIELD_KEYS.has(fieldKey) ? (
-        <select value={value || 'false'} onChange={(e) => onChange(fieldKey, e.target.value)} className={SELECT_CLASS}>
+        <Select value={value || 'false'} onChange={(e) => onChange(fieldKey, e.target.value)}>
           <option value="true">Enabled</option>
           <option value="false">Disabled</option>
-        </select>
+        </Select>
       ) : fieldKey === 'permission_mode' ? (
-        <select value={value} onChange={(e) => onChange(fieldKey, e.target.value)} className={SELECT_CLASS}>
+        <Select value={value} onChange={(e) => onChange(fieldKey, e.target.value)}>
           <option value="bypassPermissions">bypassPermissions</option>
           <option value="acceptEdits">acceptEdits</option>
           <option value="auto">auto</option>
           <option value="dontAsk">dontAsk</option>
           <option value="plan">plan</option>
           <option value="default">default</option>
-        </select>
+        </Select>
       ) : (
-        <input
+        <Input
           type="text"
           value={shimManaged ? shimDisplay : value}
           disabled={shimManaged}
           onChange={(e) => onChange(fieldKey, e.target.value)}
           placeholder={DEFAULTS[fieldKey] || `Enter ${field.label.toLowerCase()}`}
-          className={`${INPUT_CLASS} ${shimManaged ? 'opacity-70 cursor-not-allowed' : ''}`}
+          className={shimManaged ? 'opacity-70 cursor-not-allowed' : ''}
         />
       )}
       <p className="text-xs text-text-tertiary mt-1.5">{field.help}</p>

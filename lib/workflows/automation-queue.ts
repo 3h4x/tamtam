@@ -76,11 +76,11 @@ async function listPendingReleaseItems(projectFilter?: string): Promise<Automati
 
 async function listQueuedAgentItems(projectFilter?: string): Promise<AutomationQueueItem[]> {
   const projects = projectFilter ? [projectFilter] : await listQueuedAgentRunProjects();
+  const pending = await listPendingReleases();
   const items: AutomationQueueItem[] = [];
   for (const project of projects) {
-    const [queued, pending, state] = await Promise.all([
+    const [queued, state] = await Promise.all([
       listQueuedAgentRunsForProject(project),
-      listPendingReleases(),
       itemState(project),
     ]);
     const hasPendingRelease = pending.some((entry) => entry.project === project);
