@@ -1,10 +1,7 @@
 // Close a GitHub issue via the `gh` CLI.
 //
-// Extracted from `app/api/projects/by-project/[projectName]/issue-close/route.ts`
-// so both the HTTP route and the agent-action orchestrator can use the same
-// code path. Callers in the agent-action path don't go through HTTP — the
-// agent's sandbox blocks localhost, so they invoke this helper directly from
-// `markDone` after parsing the agent's emitted action block.
+// Shared by HTTP routes and agent actions; agent sandboxes cannot call
+// localhost APIs, so action execution invokes this helper directly.
 
 import { eq, and } from 'drizzle-orm';
 import { exec } from '@/lib/shared/shell';

@@ -4,10 +4,8 @@
 //   1. fetch current body (via `gh issue/pr view --json body,title,author`)
 //   2. write replacement body (via `gh issue/pr edit --body-file <tmp>`)
 //
-// Extracted from `lib/workflows/phases/mark-dod-impl.ts` so the same code
-// path serves both mark-dod (in-process, no sandbox issue) and the agent
-// action orchestrator (where the agent emits an `issue-edit-body` action
-// from inside a network-blocked sandbox).
+// Shared by mark-dod and agent actions; agent sandboxes cannot call
+// localhost APIs, so action execution invokes this helper directly.
 //
 // Uses --body-file (not --body) for writes because Markdown bodies routinely
 // exceed argv length limits and quoting safely on every shell is fragile.
