@@ -18,6 +18,7 @@ import { useSessionManager } from '@/components/terminal/useSessionManager'
 import { useHandleSubmit } from '@/components/terminal/useHandleSubmit'
 import { useTerminalBootstrap } from '@/components/terminal/useTerminalBootstrap'
 import { Button } from '@/components/ui/Button'
+import { Select } from '@/components/ui/Select'
 import { MODEL_TIERS, normalizeModelInput, type ModelTier } from '@/lib/agents/model-aliases'
 import { type CliProvider } from '@/lib/usage/cli-providers'
 import { readBrowserStorageJson, writeBrowserStorage } from '@/lib/client/browser-storage'
@@ -554,16 +555,17 @@ export function TerminalTab({ projectName, initialSessionId }: TerminalTabProps)
               </Button>
             ) : (
               <div className="ml-auto flex items-start gap-2 w-full mt-2">
-                <select
+                <Select
+                  surface="tertiary"
+                  size="compact"
                   value={closeStaleReason}
                   onChange={(e) => setCloseStaleReason(e.target.value as typeof closeStaleReason)}
-                  className="px-2 py-1 rounded border border-border bg-bg-tertiary text-text-primary text-xs"
                 >
                   <option value="stale">stale</option>
                   <option value="duplicate">duplicate</option>
                   <option value="wontfix">wontfix</option>
                   <option value="fixed">fixed</option>
-                </select>
+                </Select>
                 <textarea
                   value={closeStaleFindings}
                   onChange={(e) => setCloseStaleFindings(e.target.value)}

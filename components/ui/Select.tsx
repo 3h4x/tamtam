@@ -18,6 +18,7 @@ const SIZE_CLASSES = {
 const SURFACE_CLASSES = {
   primary: 'bg-bg-primary',
   secondary: 'bg-bg-secondary',
+  tertiary: 'bg-bg-tertiary',
 } as const
 
 const FOCUS_RING_CLASSES = {
