@@ -8,6 +8,34 @@ import type { Route } from '@playwright/test';
 const PROJECT = 'paused-release-ui';
 const now = () => Math.floor(Date.now() / 1000);
 
+function releaseButton(page: import('@playwright/test').Page) {
+  return page.getByRole('button', { name: 'Release', exact: true });
+}
+
+function projectIssuesPathMatcher(url: URL) {
+  return url.pathname === `/api/projects/by-project/${PROJECT}/issues`;
+}
+
+function projectIssuesMatcher(url: URL) {
+  return projectIssuesPathMatcher(url) && url.searchParams.get('summary') !== '1';
+}
+
+function projectIssuesSummaryMatcher(url: URL) {
+  return projectIssuesPathMatcher(url) && url.searchParams.get('summary') === '1';
+}
+
+function emptyIssuesSummary() {
+  return {
+    repo: '',
+    prCount: 0,
+    issueCount: 0,
+    openPrBranches: [],
+    error: null,
+    cached: false,
+    cachedAt: now(),
+  };
+}
+
 function makeTask(project: string, changes = 5, unpushed = 0) {
   return {
     id: `${project}-1`,
@@ -66,6 +94,9 @@ async function stubCommonRoutes(
   await page.route(`**/api/projects/by-project/${PROJECT}/action`, (route: Route) =>
     route.fulfill({ json: { actions: [] } }),
   );
+  await page.route(projectIssuesSummaryMatcher, (route: Route) =>
+    route.fulfill({ json: emptyIssuesSummary() }),
+  );
   await page.route(`**/api/agents?project=${PROJECT}`, (route: Route) =>
     route.fulfill({ json: { agents: [] } }),
   );
@@ -77,7 +108,7 @@ async function stubCommonRoutes(
   await page.route(`**/api/projects/by-project/${PROJECT}/behind`, (route: Route) =>
     route.fulfill({ json: { behind: 0, ahead: 0 } }),
   );
-  await page.route(`**/api/projects/by-project/${PROJECT}/issues`, (route: Route) =>
+  await page.route(projectIssuesMatcher, (route: Route) =>
     route.fulfill({ json: { prs: [], issues: [] } }),
   );
   await page.route('**/api/streaming/**', (route: Route) =>
@@ -111,7 +142,7 @@ test('Release button is disabled up front when jobs are paused globally', async 
 
   await page.goto(`/project/${PROJECT}/issues`);
 
-  const releaseBtn = page.getByRole('button', { name: /release/i }).first();
+  const releaseBtn = releaseButton(page);
   await expect(releaseBtn).toBeVisible({ timeout: 8_000 });
   await expect(releaseBtn).toBeDisabled();
   await expect(releaseBtn).toHaveAttribute('title', /jobs are paused globally/i);
@@ -142,7 +173,7 @@ test('clicking Release when jobs are paused shows a "paused" toast, not "already
   await page.goto(`/project/${PROJECT}/issues`);
 
   // Release button is enabled when changes > 0 and pipeline is idle.
-  const releaseBtn = page.getByRole('button', { name: /release/i }).first();
+  const releaseBtn = releaseButton(page);
   await expect(releaseBtn).toBeVisible({ timeout: 8_000 });
   await expect(releaseBtn).not.toBeDisabled();
 
@@ -180,7 +211,7 @@ test('clicking Release when pipeline is already running shows a "Pipeline is run
 
   await page.goto(`/project/${PROJECT}/issues`);
 
-  const releaseBtn = page.getByRole('button', { name: /release/i }).first();
+  const releaseBtn = releaseButton(page);
   await expect(releaseBtn).toBeVisible({ timeout: 8_000 });
   await expect(releaseBtn).not.toBeDisabled();
 
@@ -217,7 +248,7 @@ test('successful release shows an info toast with the step name', async ({ page 
 
   await page.goto(`/project/${PROJECT}/issues`);
 
-  const releaseBtn = page.getByRole('button', { name: /release/i }).first();
+  const releaseBtn = releaseButton(page);
   await expect(releaseBtn).toBeVisible({ timeout: 8_000 });
 
   await releaseBtn.click();
@@ -264,6 +295,9 @@ test('Release button is disabled when there are no local changes', async ({ page
   await page.route(`**/api/projects/by-project/${PROJECT}/action`, (route: Route) =>
     route.fulfill({ json: { actions: [] } }),
   );
+  await page.route(projectIssuesSummaryMatcher, (route: Route) =>
+    route.fulfill({ json: emptyIssuesSummary() }),
+  );
   await page.route(`**/api/agents?project=${PROJECT}`, (route: Route) =>
     route.fulfill({ json: { agents: [] } }),
   );
@@ -273,7 +307,7 @@ test('Release button is disabled when there are no local changes', async ({ page
   await page.route(`**/api/projects/by-project/${PROJECT}/behind`, (route: Route) =>
     route.fulfill({ json: { behind: 0, ahead: 0 } }),
   );
-  await page.route(`**/api/projects/by-project/${PROJECT}/issues`, (route: Route) =>
+  await page.route(projectIssuesMatcher, (route: Route) =>
     route.fulfill({ json: { prs: [], issues: [] } }),
   );
   await page.route('**/api/streaming/**', (route: Route) =>
@@ -294,7 +328,7 @@ test('Release button is disabled when there are no local changes', async ({ page
   await page.goto(`/project/${PROJECT}/issues`);
 
   // Release button should exist but be disabled.
-  const releaseBtn = page.getByRole('button', { name: /release/i }).first();
+  const releaseBtn = releaseButton(page);
   await expect(releaseBtn).toBeVisible({ timeout: 8_000 });
   await expect(releaseBtn).toBeDisabled();
 });
@@ -333,6 +367,19 @@ test('Release button is disabled when jobs are paused globally', async ({ page }
   await page.route(`**/api/projects/by-project/${PROJECT}/action`, (route: Route) =>
     route.fulfill({ json: { actions: [] } }),
   );
+  await page.route(projectIssuesSummaryMatcher, (route: Route) =>
+    route.fulfill({
+      json: {
+        repo: '',
+        prCount: 1,
+        issueCount: 0,
+        openPrBranches: [{ branch: 'fix/issue-77-gates', number: 77 }],
+        error: null,
+        cached: false,
+        cachedAt: now(),
+      },
+    }),
+  );
   await page.route(`**/api/agents?project=${PROJECT}`, (route: Route) =>
     route.fulfill({ json: { agents: [] } }),
   );
@@ -342,7 +389,7 @@ test('Release button is disabled when jobs are paused globally', async ({ page }
   await page.route(`**/api/projects/by-project/${PROJECT}/behind`, (route: Route) =>
     route.fulfill({ json: { behind: 0, ahead: 0 } }),
   );
-  await page.route(`**/api/projects/by-project/${PROJECT}/issues`, (route: Route) =>
+  await page.route(projectIssuesMatcher, (route: Route) =>
     route.fulfill({ json: { prs: [], issues: [] } }),
   );
   await page.route('**/api/streaming/**', (route: Route) =>
@@ -362,7 +409,7 @@ test('Release button is disabled when jobs are paused globally', async ({ page }
 
   await page.goto(`/project/${PROJECT}/issues`);
 
-  const releaseBtn = page.getByRole('button', { name: /release/i }).first();
+  const releaseBtn = releaseButton(page);
   await expect(releaseBtn).toBeVisible({ timeout: 8_000 });
   await expect(releaseBtn).toBeDisabled();
   await expect(releaseBtn).toHaveAttribute('title', /jobs are paused globally/i);
@@ -413,7 +460,7 @@ test('header pause toggle updates Release and PR Review without reloading', asyn
   await page.route(`**/api/projects/by-project/${PROJECT}/behind`, (route: Route) =>
     route.fulfill({ json: { behind: 0, ahead: 0 } }),
   );
-  await page.route(`**/api/projects/by-project/${PROJECT}/issues`, (route: Route) =>
+  await page.route(projectIssuesMatcher, (route: Route) =>
     route.fulfill({
       json: {
         prs: [{
@@ -481,7 +528,7 @@ test('header pause toggle updates Release and PR Review without reloading', asyn
 
   await page.goto(`/project/${PROJECT}/issues`);
 
-  const releaseBtn = page.getByRole('button', { name: /release/i }).first();
+  const releaseBtn = releaseButton(page);
   const reviewBtn = page.getByRole('button', { name: 'Review', exact: true });
   const dodBtn = page.getByRole('button', { name: /2\/2/i });
   const pauseToggle = page.getByRole('switch');
@@ -557,7 +604,7 @@ test('Release button shows "Releasing…" and is pre-disabled when a pipeline jo
   // busy=true → button text changes to "Releasing…" and becomes disabled.
   // Note: button is NOT disabled because of jobsPaused — the title should say
   // "Release pipeline already running", not "Jobs are paused globally".
-  const releaseBtn = page.getByRole('button', { name: /releasing/i });
+  const releaseBtn = page.getByRole('button', { name: 'Releasing…', exact: true });
   await expect(releaseBtn).toBeVisible({ timeout: 8_000 });
   await expect(releaseBtn).toBeDisabled();
   await expect(releaseBtn).toHaveAttribute('title', /release pipeline already running/i);
@@ -610,7 +657,7 @@ test('Release button re-enables without page reload when the running pipeline jo
   // Phase 1: pipeline is busy → button shows "Releasing…" and is disabled.
   // Note: "Releasing…" does NOT match /release/i ("releas" matches but the 7th
   // char is 'i' not 'e'), so we match with /releasing/i for the busy state.
-  const busyBtn = page.getByRole('button', { name: /releasing/i });
+  const busyBtn = page.getByRole('button', { name: 'Releasing…', exact: true });
   await expect(busyBtn).toBeVisible({ timeout: 8_000 });
   await expect(busyBtn).toBeDisabled();
 
@@ -618,8 +665,8 @@ test('Release button re-enables without page reload when the running pipeline jo
   jobRunning = false;
 
   // Phase 2: within 15 s the poll fires, isPipelineRunning flips to false,
-  // and the Release button re-enables (text changes to "🚀 Release") — no page.reload().
-  const idleBtn = page.getByRole('button', { name: '🚀 Release' });
+  // and the Release button re-enables — no page.reload().
+  const idleBtn = releaseButton(page);
   await expect(idleBtn).toBeVisible({ timeout: 15_000 });
   await expect(idleBtn).toBeEnabled();
   await expect(busyBtn).not.toBeVisible();
