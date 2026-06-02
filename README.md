@@ -24,7 +24,14 @@ The agent management dashboard built for Claude-compatible CLIs. Define skills, 
 | **Release pipeline** | Quality-gated, branch-context-driven flow: test → review → fix loop → commit → push → DoD (`mark-dod`) → pr-wait/merge → soak. Default-branch releases push directly; non-default branches open or reuse a PR. The unified `fix_max_iterations` cap (default `0`, unlimited until LGTM or release timeout) governs review/test/commit/non-hook push verification; push-hook rejection fixes are capped at 2 attempts |
 | **Cross-project recommendations** | Open agent and scheduler suggestions across every project in `/recommendations` |
 | **Semantic retrieval** | Optional local context injection from committed project docs, DB-backed skills, project config guidance, and completed agent run reports via `pgvector` + Ollama |
+| **Orchestrator** | Autonomous boost/health tick that scores agent runs, surfaces fruitfulness/health signals, and creates/auto-resolves recommendations |
 | **Pipeline health** | Live release pipeline metrics in `/pipeline` |
+| **Monitoring** | `/monitoring` dashboards backed by Prometheus + Loki (Grafana-compatible) |
+| **Stats & logs** | Usage/cost stats in `/stats` and a cross-run log viewer in `/logs` |
+| **QA browser broker** | Sandboxed Playwright (containerized) so QA agents can drive a real browser under `auto`/`acceptEdits` without host access |
+| **Budget controls** | Subscription/quota-aware routing that warns and blocks runs as enabled providers approach their cap |
+| **Backup & restore** | Hot `pg_dump` backups with retention from `/settings/database`, plus a restore runbook |
+| **Auto-attach docs** | Keyword-matched project docs injected into the prompt on first use per session |
 | **Custom actions** | Per-project bash commands (deploy, migrate, seed) as colored buttons |
 | **Notifications** | Unseen run alerts with bell badge; outbound webhooks (Slack, Discord, ntfy, generic) for release success/fail/aborted, fix-loop-exhausted, review-do-not-ship, post-merge-revert, agent-run-fail, and budget-blocked events |
 
@@ -176,12 +183,11 @@ pnpm check          # lint + type-check + test (all in one)
 
 API routes are covered by vitest tests in `__tests__/api/`, often with combined route coverage files. Follow the existing pattern: in-memory PGlite via `__tests__/helpers/test-db.ts`, mocked shell/PM2 calls.
 
-## Architecture notes
+## Routes
 
-- Most CLI calls (git, gh, pm2) go through `lib/shared/shell.ts`; a few specialized helpers use direct `child_process` spawning when they need tighter process control.
-- `lib/shared/project-data.ts` assembles project state with a 10s TTL cache
-- `instrumentation-node.ts` handles boot-time recovery, the 30s probe sweep, graphile-worker cron seeding/worker startup, and nightly retention cleanup after startup
-- Project detail tabs live at `/project/[name]` and `/project/[name]/[tab]` (`overview`, `config`, `history`, `terminal`, `changes`, `issues`, `docs`, `agents`)
-- Project release traces and task detail pages live at `/project/[name]/release/[releaseId]` and `/project/[name]/task/[task]`
-- Streaming uses the selected provider's `stream-json` output → job log file → `fs.watch` → NDJSON parser → SSE
-- See `docs/STREAMING.md` for the full terminal streaming architecture
+- Project detail tabs: `/project/[name]` and `/project/[name]/[tab]` (`overview`, `config`, `history`, `terminal`, `changes`, `issues`, `docs`, `agents`)
+- Release traces and task detail: `/project/[name]/release/[releaseId]` and `/project/[name]/task/[task]`
+
+## Internals
+
+Subsystem-level details (CLI shell wrapper, boot recovery and probe sweep, caching, streaming, pipeline state machine, orchestrator, retrieval, browser broker, etc.) live in [`docs/`](docs/) — start from the docs table in [`CLAUDE.md`](CLAUDE.md). For terminal streaming specifically, see [`docs/STREAMING.md`](docs/STREAMING.md).

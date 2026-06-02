@@ -21,6 +21,7 @@ import { Button, buttonVariants } from '@/components/ui/Button'
 import { Pill } from '@/components/ui/Pill'
 import { EmptyState } from '@/components/ui/EmptyState'
 import { Input } from '@/components/ui/Input'
+import { Checkbox } from '@/components/ui/Checkbox'
 import { ErrorBanner } from '@/components/ErrorBanner'
 
 interface SettingsMap {
@@ -514,11 +515,9 @@ export function SettingsPage({ initialTab }: { initialTab?: TabId } = {}) {
               <p className="text-xs text-text-tertiary truncate">Indexes project docs, skills, and config into pgvector via Ollama; injects top-matching chunks into agent prompts.</p>
             </div>
             <label className="inline-flex items-center gap-2 text-sm text-text-primary shrink-0">
-              <input
-                type="checkbox"
+              <Checkbox
                 checked={settings.retrieval_enabled === 'true'}
                 onChange={(e) => handleChange('retrieval_enabled', e.target.checked ? 'true' : 'false')}
-                className="h-4 w-4 rounded border-border bg-bg-primary text-accent focus:ring-accent/30"
               />
               Enabled
             </label>
@@ -578,11 +577,9 @@ export function SettingsPage({ initialTab }: { initialTab?: TabId } = {}) {
                 />
               </div>
               <label className="inline-flex items-center gap-2 text-sm text-text-primary">
-                <input
-                  type="checkbox"
+                <Checkbox
                   checked={settings.retrieval_manage_ollama === 'true'}
                   onChange={(e) => handleChange('retrieval_manage_ollama', e.target.checked ? 'true' : 'false')}
-                  className="h-4 w-4 rounded border-border bg-bg-primary text-accent focus:ring-accent/30"
                 />
                 Auto-start Ollama if not running
               </label>
@@ -611,11 +608,9 @@ export function SettingsPage({ initialTab }: { initialTab?: TabId } = {}) {
                 className="inline-flex items-center gap-2 text-sm text-text-primary shrink-0"
                 onClick={(e) => e.stopPropagation()}
               >
-                <input
-                  type="checkbox"
+                <Checkbox
                   checked={settings.github_board_sync_enabled === 'true'}
                   onChange={(e) => handleChange('github_board_sync_enabled', e.target.checked ? 'true' : 'false')}
-                  className="h-4 w-4 rounded border-border bg-bg-primary text-accent focus:ring-accent/30"
                 />
                 Enabled
               </label>
