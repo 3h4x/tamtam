@@ -708,11 +708,11 @@ export function SettingsPage({ initialTab }: { initialTab?: TabId } = {}) {
         {tabHasAdvanced && (
           <div className="flex justify-end">
             <label className="inline-flex items-center gap-1.5 text-xs text-text-tertiary hover:text-text-secondary transition-colors cursor-pointer">
-              <input
-                type="checkbox"
+              <Checkbox
+                size="sm"
                 checked={showAdvanced}
                 onChange={(e) => setShowAdvanced(e.target.checked)}
-                className="h-3.5 w-3.5 rounded border-border bg-bg-primary text-accent focus:ring-accent/30 cursor-pointer"
+                className="cursor-pointer"
               />
               Show advanced
             </label>
@@ -839,11 +839,11 @@ export function SettingsPage({ initialTab }: { initialTab?: TabId } = {}) {
                           }`}
                         >
                           <label className="flex items-center gap-2.5 flex-1 min-w-0 cursor-pointer">
-                            <input
-                              type="checkbox"
+                            <Checkbox
+                              variant="native"
+                              size="sm"
                               checked={proj.enabled}
                               onChange={() => toggleProject(proj.name)}
-                              className="w-3.5 h-3.5 accent-accent rounded shrink-0"
                             />
                             <span className={`font-mono text-xs truncate ${proj.enabled ? 'text-text-primary font-medium' : 'text-text-secondary'}`}>
                               {proj.name}
