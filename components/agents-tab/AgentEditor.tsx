@@ -7,6 +7,7 @@ import { Button } from '@/components/ui/Button'
 import { EmptyState } from '@/components/ui/EmptyState'
 import { Pill } from '@/components/ui/Pill'
 import { SegmentedControl } from '@/components/ui/SegmentedControl'
+import { Select } from '@/components/ui/Select'
 import { Spinner } from '@/components/ui/Spinner'
 import { useToast } from '@/components/Toast'
 import type { AgentTemplateRecord } from '@/components/SettingsPage'
@@ -282,9 +283,11 @@ export function AgentEditor({
 
           <div>
             <div className="mb-1.5 text-xs font-semibold text-text-tertiary uppercase tracking-wider">Permission mode</div>
-            <select
+            <Select
               aria-label="Permission mode"
-              className="w-full px-3 py-2 text-sm bg-bg-secondary border border-border rounded-lg text-text-primary focus:outline-none focus:ring-2 focus:ring-accent/40 focus:border-accent transition-colors cursor-pointer disabled:opacity-60 disabled:cursor-not-allowed"
+              surface="secondary"
+              focusRing="strong"
+              className="disabled:opacity-60 disabled:cursor-not-allowed"
               value={permissionMode}
               onChange={(e) => setPermissionMode(e.target.value)}
               disabled={isSystemAgent}
@@ -292,7 +295,7 @@ export function AgentEditor({
             >
               <option value="">Default (global setting)</option>
               {PERMISSION_MODES.map((m) => <option key={m} value={m}>{m}</option>)}
-            </select>
+            </Select>
             <p className="text-xs text-text-tertiary mt-1">Leave on Default to inherit Settings → CLI. Override to run this agent with a specific mode (e.g. <span className="font-mono">bypassPermissions</span>).</p>
           </div>
 
