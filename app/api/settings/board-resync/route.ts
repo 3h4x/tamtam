@@ -8,6 +8,7 @@ const MAX_DAYS = 90;
 const DEFAULT_LIMIT = 100;
 const MAX_LIMIT = 1000;
 const SYNC_DELAY_MS = 250;
+const CHILD_KINDS = new Set(['test', 'review', 'fix', 'fix-ci', 'commit', 'push', 'mark-dod', 'pr-wait', 'soak']);
 
 export async function POST(request: NextRequest) {
   const settings = getSettings();
@@ -26,14 +27,13 @@ export async function POST(request: NextRequest) {
   // child jobs (test/review/fix/commit/push/...) are routed to their release
   // root by syncJobToProjectBoard, so syncing them directly would just be
   // redundant queue work — skip them here.
-  const childKinds = new Set(['test', 'review', 'fix', 'fix-ci', 'commit', 'push', 'mark-dod', 'pr-wait', 'soak']);
   // Newest jobs first so the budget gets spent on the most recent state.
   const jobs = listJobs()
     .filter((job) => {
       if ((job.startedAt ?? 0) < cutoff) return false;
       if (job.parentJobId) return false;
       if (job.releaseId) return false;
-      if (childKinds.has(job.kind)) return false;
+      if (CHILD_KINDS.has(job.kind)) return false;
       return true;
     })
     .sort((a, b) => (b.startedAt ?? 0) - (a.startedAt ?? 0))
