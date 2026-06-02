@@ -37,6 +37,7 @@ export interface InputProps extends React.InputHTMLAttributes<HTMLInputElement> 
   fontFamily?: 'mono' | 'sans'
   paddingX?: 'default' | 'compact'
   appearance?: 'default' | 'muted'
+  ref?: React.Ref<HTMLInputElement>
 }
 
 export function Input({
@@ -46,10 +47,12 @@ export function Input({
   fontFamily = 'mono',
   paddingX = 'default',
   appearance = 'default',
+  ref,
   ...props
 }: InputProps) {
   return (
     <input
+      ref={ref}
       className={[
         fullWidth ? 'w-full' : null,
         INPUT_BASE,
