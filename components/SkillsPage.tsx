@@ -9,6 +9,7 @@ import { Pill } from '@/components/ui/Pill'
 import { EmptyState } from '@/components/ui/EmptyState'
 import { Checkbox } from '@/components/ui/Checkbox'
 import { Select } from '@/components/ui/Select'
+import { SearchInput } from '@/components/ui/SearchInput'
 import { SkillEditor } from '@/components/skills-page/SkillEditor'
 import {
   buildSkillListItems,
@@ -386,10 +387,8 @@ export function SkillsPage() {
       </div>
 
       <div className="flex flex-col gap-2 sm:flex-row sm:items-center">
-        <input
-          type="search"
+        <SearchInput
           aria-label="Search skills"
-          className="w-full sm:max-w-md px-3 py-2 text-sm bg-bg-secondary border border-border rounded-md text-text-primary placeholder:text-text-tertiary focus:outline-none focus:ring-2 focus:ring-accent/20 focus:border-accent transition-colors"
           value={skillSearch}
           onChange={(e) => setSkillSearch(e.target.value)}
           placeholder="Search skills by name, category, or description"

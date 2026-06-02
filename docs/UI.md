@@ -174,6 +174,10 @@ Use `SegmentedControl` for compact single-choice filters inside headers and pane
 
 Use the default tone for neutral panels. Use `tone="current"` only inside already-themed bars where the control should inherit the surrounding status color. Use `size="xs"` for tight summary bars and `size="sm"` for normal panel headers.
 
+### Search input (`components/ui/SearchInput.tsx`)
+
+Use `SearchInput` for search/filter fields in page and panel headers (skills list, agent catalog). It renders the canonical secondary-surface, sans-font field with the softer accent focus ring. It is intentionally distinct from `Input` (the mono, fixed-height form field) — don't swap one for the other. Defaults `type="search"`; extend with `className` for one-off width tweaks.
+
 ### Pills (`components/ui/Pill.tsx`)
 
 Use `Pill` for compact read-only filter/status chips and `PillButton` for clickable filter chips. Supported tones are `neutral`, `accent`, `success`, `error`, `warning`, and `info`; use `active` for selected chips and `inactiveStyle="subtle"` when inactive chips should keep the bordered neutral background.

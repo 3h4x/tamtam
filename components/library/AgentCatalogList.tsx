@@ -5,6 +5,7 @@ import { useAgentCatalog, type AgentCatalogClientEntry } from '@/hooks/useAgentC
 import { EmptyState } from '@/components/ui/EmptyState'
 import { Pill } from '@/components/ui/Pill'
 import { Spinner } from '@/components/ui/Spinner'
+import { SearchInput } from '@/components/ui/SearchInput'
 
 const TIER_ORDER: Record<string, number> = {
   essential: 0,
@@ -77,10 +78,8 @@ export function AgentCatalogList() {
   return (
     <div className="flex flex-col gap-4">
       <div className="flex items-center gap-3">
-        <input
-          type="search"
+        <SearchInput
           aria-label="Search agent catalog"
-          className="w-full sm:max-w-md px-3 py-2 text-sm bg-bg-secondary border border-border rounded-md text-text-primary placeholder:text-text-tertiary focus:outline-none focus:ring-2 focus:ring-accent/20 focus:border-accent transition-colors"
           value={search}
           onChange={(e) => setSearch(e.target.value)}
           placeholder="Search agents by name, description, or skill"
