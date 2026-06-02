@@ -1,8 +1,7 @@
 // Decision module: "a fix-ci job just succeeded — should we trigger a
-// release pipeline?". Extracted from the inline block in
-// lib/jobs/lifecycle.ts so the orchestration choice lives outside the
-// markDone hook chain and can be re-driven from a workflow trigger / replay
-// path without duplicating the dispatch + pending-release policy.
+// release pipeline?". The orchestration choice lives outside the markDone
+// hook chain so it can be re-driven from a workflow trigger / replay path
+// without duplicating the dispatch + pending-release policy.
 //
 // Same shape as `release-after-run`: callers are the legacy completion
 // hook (gated on `legacy_completion_hook_release_after_fix_ci_enabled`)
