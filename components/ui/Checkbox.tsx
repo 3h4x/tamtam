@@ -19,6 +19,14 @@ export interface CheckboxProps extends Omit<React.InputHTMLAttributes<HTMLInputE
   variant?: 'default' | 'native'
 }
 
-export function Checkbox({ className, variant = 'default', ...props }: CheckboxProps) {
-  return <input type="checkbox" className={[CHECKBOX_BASE[variant], className].filter(Boolean).join(' ')} {...props} />
-}
+export const Checkbox = React.forwardRef<HTMLInputElement, CheckboxProps>(
+  ({ className, variant = 'default', ...props }, ref) => (
+    <input
+      ref={ref}
+      type="checkbox"
+      className={[CHECKBOX_BASE[variant], className].filter(Boolean).join(' ')}
+      {...props}
+    />
+  ),
+)
+Checkbox.displayName = 'Checkbox'

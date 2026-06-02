@@ -7,6 +7,7 @@ import { canonicalAgentNameKey } from '@/lib/agents/agent-name'
 import { Button } from '@/components/ui/Button'
 import { Pill } from '@/components/ui/Pill'
 import { EmptyState } from '@/components/ui/EmptyState'
+import { Checkbox } from '@/components/ui/Checkbox'
 import { SkillEditor } from '@/components/skills-page/SkillEditor'
 import {
   buildSkillListItems,
@@ -85,11 +86,11 @@ function SkillRow({ item, checked, onToggle, onEdit }: SkillRowProps) {
     <label
       className="grid grid-cols-[1rem_1rem_minmax(0,1fr)_auto] sm:grid-cols-[1rem_1rem_minmax(9rem,13rem)_7rem_7rem_minmax(0,1fr)_auto] items-center gap-x-3 gap-y-1 px-4 py-3 cursor-pointer hover:bg-bg-tertiary/50 transition-colors group"
     >
-      <input
-        type="checkbox"
+      <Checkbox
+        variant="native"
         checked={checked}
         onChange={onToggle}
-        className="w-4 h-4 rounded border-border accent-accent cursor-pointer"
+        className="border-border"
       />
 
       {/* Icon */}
@@ -403,8 +404,8 @@ export function SkillsPage() {
       {agentItems.length > 0 && (
         <section>
           <div className="flex items-center gap-3 mb-1 px-4">
-            <input
-              type="checkbox"
+            <Checkbox
+              variant="native"
               aria-label="Select all built-in agent skills"
               checked={agentAllChecked}
               ref={el => { if (el) el.indeterminate = !agentAllChecked && agentSomeChecked }}
@@ -416,7 +417,7 @@ export function SkillsPage() {
                 else ids.forEach(id => next.add(id))
                 return next
               })}
-              className="w-4 h-4 rounded border-border accent-accent cursor-pointer"
+              className="border-border"
             />
             <h3 className="text-xs font-semibold text-text-tertiary uppercase tracking-wider">Built-in Agents</h3>
             <span className="text-xs text-text-tertiary tabular-nums">{agentItems.length}</span>
@@ -443,8 +444,8 @@ export function SkillsPage() {
       <section>
         <div className="flex items-center gap-3 mb-1 px-4">
           {customItems.length > 0 && (
-            <input
-              type="checkbox"
+            <Checkbox
+              variant="native"
               aria-label="Select all custom skills"
               checked={customAllChecked}
               ref={el => { if (el) el.indeterminate = !customAllChecked && customSomeChecked }}
@@ -456,7 +457,7 @@ export function SkillsPage() {
                 else ids.forEach(id => next.add(id))
                 return next
               })}
-              className="w-4 h-4 rounded border-border accent-accent cursor-pointer"
+              className="border-border"
             />
           )}
           <h3 className="text-xs font-semibold text-text-tertiary uppercase tracking-wider">Custom Skills</h3>
@@ -511,8 +512,8 @@ export function SkillsPage() {
               return (
                 <div key={group.category}>
                   <div className="flex items-center gap-3 mb-1 px-4">
-                    <input
-                      type="checkbox"
+                    <Checkbox
+                      variant="native"
                       aria-label={`Select all ${categoryLabel(group.category)} skills`}
                       checked={groupAllChecked}
                       ref={el => { if (el) el.indeterminate = !groupAllChecked && groupSomeChecked }}
@@ -524,7 +525,7 @@ export function SkillsPage() {
                         else ids.forEach(id => next.add(id))
                         return next
                       })}
-                      className="w-4 h-4 rounded border-border accent-accent cursor-pointer"
+                      className="border-border"
                     />
                     <h4 className="text-xs font-semibold text-text-tertiary uppercase tracking-wider">{categoryLabel(group.category)}</h4>
                     <span className="text-xs text-text-tertiary tabular-nums">{group.items.length}</span>
