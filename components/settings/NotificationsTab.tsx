@@ -3,6 +3,7 @@
 import { useState } from 'react'
 import { errMsg } from '@/lib/shared/types'
 import { Button } from '@/components/ui/Button'
+import { Checkbox } from '@/components/ui/Checkbox'
 
 export interface NotificationsSettings {
   notification_webhook_url: string
@@ -174,11 +175,10 @@ export function NotificationsTab({
               key={key}
               className="flex items-center gap-2.5 py-2 px-1 -mx-1 rounded hover:bg-bg-tertiary/40 cursor-pointer transition-colors"
             >
-              <input
-                type="checkbox"
+              <Checkbox
+                variant="native"
                 checked={settings[key] === 'true'}
                 onChange={(e) => onChange(key, e.target.checked ? 'true' : 'false')}
-                className="w-4 h-4 accent-accent rounded shrink-0 cursor-pointer"
               />
               <div className="flex-1 min-w-0 flex items-baseline gap-1.5 flex-wrap">
                 <span className="font-medium text-sm text-text-primary shrink-0">{label}</span>

@@ -9,6 +9,7 @@ import {
 } from '@/lib/usage/cli-providers'
 import { loadQuotaSnapshot } from '@/lib/client/quota'
 import { Pill } from '@/components/ui/Pill'
+import { Checkbox } from '@/components/ui/Checkbox'
 
 const INPUT_CLASS =
   'w-full h-10 px-3 py-2 bg-bg-primary text-text-primary border border-border rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-accent/30 focus:border-accent transition-colors font-mono'
@@ -333,11 +334,10 @@ export function CliTab({
         </div>
         <div className="px-5 py-4 space-y-4">
           <label className="flex items-center gap-2.5 cursor-pointer">
-            <input
-              type="checkbox"
+            <Checkbox
+              variant="native"
               checked={blockEnabled}
               onChange={(e) => onChange('budget_block_runs_enabled', e.target.checked ? 'true' : 'false')}
-              className="w-4 h-4 accent-accent rounded shrink-0 cursor-pointer"
             />
             <div className="flex-1 min-w-0 flex items-baseline gap-1.5 flex-wrap">
               <span className="font-medium text-sm text-text-primary shrink-0">Skip CLIs over budget</span>
@@ -345,11 +345,10 @@ export function CliTab({
             </div>
           </label>
           <label className="flex items-center gap-2.5 cursor-pointer">
-            <input
-              type="checkbox"
+            <Checkbox
+              variant="native"
               checked={weeklyPaceEnabled}
               onChange={(e) => onChange('budget_block_on_weekly_pace_enabled', e.target.checked ? 'true' : 'false')}
-              className="w-4 h-4 accent-accent rounded shrink-0 cursor-pointer"
               disabled={!blockEnabled}
             />
             <div className="flex-1 min-w-0 flex items-baseline gap-1.5 flex-wrap">

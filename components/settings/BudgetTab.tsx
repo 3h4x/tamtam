@@ -1,6 +1,7 @@
 'use client'
 
 import { QuotaWidget } from '@/components/QuotaWidget'
+import { Checkbox } from '@/components/ui/Checkbox'
 import {
   BUDGET_SUBSCRIPTION_PROVIDERS,
   encodeBudgetSubscriptionProviders,
@@ -89,11 +90,10 @@ export function BudgetTab({
           </div>
 
           <label className="flex items-center gap-2.5 py-2 px-1 -mx-1 rounded hover:bg-bg-tertiary/40 cursor-pointer transition-colors">
-            <input
-              type="checkbox"
+            <Checkbox
+              variant="native"
               checked={enabled}
               onChange={(e) => onChange('budget_block_runs_enabled', e.target.checked ? 'true' : 'false')}
-              className="w-4 h-4 accent-accent rounded shrink-0 cursor-pointer"
             />
             <div className="flex-1 min-w-0 flex items-baseline gap-1.5 flex-wrap">
               <span className="font-medium text-sm text-text-primary shrink-0">Block runs over budget</span>
@@ -104,11 +104,10 @@ export function BudgetTab({
           </label>
 
           <label className="flex items-center gap-2.5 py-2 px-1 -mx-1 rounded hover:bg-bg-tertiary/40 cursor-pointer transition-colors">
-            <input
-              type="checkbox"
+            <Checkbox
+              variant="native"
               checked={weeklyPaceEnabled}
               onChange={(e) => onChange('budget_block_on_weekly_pace_enabled', e.target.checked ? 'true' : 'false')}
-              className="w-4 h-4 accent-accent rounded shrink-0 cursor-pointer"
               disabled={!enabled}
             />
             <div className="flex-1 min-w-0 flex items-baseline gap-1.5 flex-wrap">
