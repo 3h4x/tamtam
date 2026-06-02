@@ -276,10 +276,9 @@ export function ConfigTab({
 
           <div className="pt-2 border-t border-border">
             <label className="flex items-center gap-2 cursor-pointer select-none">
-              <input
+              <Checkbox
+                variant="native"
                 id="test-cron-enabled"
-                type="checkbox"
-                className="w-4 h-4 cursor-pointer accent-accent"
                 checked={testCronEnabledInput}
                 onChange={(e) => setTestCronEnabledInput(e.target.checked)}
               />
@@ -311,10 +310,10 @@ export function ConfigTab({
         </div>
         <div className="px-4 py-3">
           <label className="flex items-start gap-2 cursor-pointer select-none">
-            <input
+            <Checkbox
+              variant="native"
+              className="mt-0.5"
               id="issue-auto-branch"
-              type="checkbox"
-              className="w-4 h-4 mt-0.5 cursor-pointer accent-accent"
               checked={issueAutoBranchInput}
               onChange={(e) => setIssueAutoBranchInput(e.target.checked)}
             />
