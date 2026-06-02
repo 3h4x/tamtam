@@ -636,10 +636,10 @@ export function SettingsPage({ initialTab }: { initialTab?: TabId } = {}) {
                 </div>
                 <div>
                   <label className="mb-1 block text-xs font-medium text-text-secondary">Project Number</label>
-                  <input
+                  <Input
                     value={settings.github_board_project_number}
                     readOnly
-                    className="w-full h-10 px-3 py-2 bg-bg-tertiary text-text-secondary border border-border rounded-lg text-sm font-mono"
+                    appearance="muted"
                   />
                 </div>
               </div>
