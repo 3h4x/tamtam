@@ -9,7 +9,7 @@ import React from 'react'
 // note there is no tailwind-merge, so overriding a base utility that conflicts
 // won't win — prefer leaving genuinely different inputs raw.
 const INPUT_BASE =
-  'w-full px-3 bg-bg-primary text-text-primary border border-border text-sm focus:outline-none focus:ring-2 focus:ring-accent/30 focus:border-accent transition-colors font-mono'
+  'px-3 bg-bg-primary text-text-primary border border-border text-sm focus:outline-none focus:ring-2 focus:ring-accent/30 focus:border-accent transition-colors font-mono'
 
 const SIZE_CLASSES: Record<'default' | 'compact', string> = {
   default: 'h-10 py-2 rounded-lg',
@@ -18,12 +18,13 @@ const SIZE_CLASSES: Record<'default' | 'compact', string> = {
 
 export interface InputProps extends React.InputHTMLAttributes<HTMLInputElement> {
   inputSize?: 'default' | 'compact'
+  fullWidth?: boolean
 }
 
-export function Input({ className, inputSize = 'default', ...props }: InputProps) {
+export function Input({ className, inputSize = 'default', fullWidth = true, ...props }: InputProps) {
   return (
     <input
-      className={[INPUT_BASE, SIZE_CLASSES[inputSize], className].filter(Boolean).join(' ')}
+      className={[fullWidth ? 'w-full' : null, INPUT_BASE, SIZE_CLASSES[inputSize], className].filter(Boolean).join(' ')}
       {...props}
     />
   )

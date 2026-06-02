@@ -567,14 +567,15 @@ export function SettingsPage({ initialTab }: { initialTab?: TabId } = {}) {
             <div className="mt-4 flex items-center gap-6 flex-wrap">
               <div>
                 <label className="mb-1 block text-xs font-medium text-text-secondary">Reindex Interval (hours)</label>
-                <input
+                <Input
                   type="number"
                   min={1}
                   max={168}
                   step={1}
                   value={settings.retrieval_reindex_interval_hours}
                   onChange={(e) => handleChange('retrieval_reindex_interval_hours', e.target.value)}
-                  className="w-32 h-10 px-3 py-2 bg-bg-primary text-text-primary border border-border rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-accent/30 focus:border-accent transition-colors font-mono"
+                  fullWidth={false}
+                  className="w-32"
                 />
               </div>
               <label className="inline-flex items-center gap-2 text-sm text-text-primary">
