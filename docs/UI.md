@@ -174,6 +174,10 @@ Use `SegmentedControl` for compact single-choice filters inside headers and pane
 
 Use the default tone for neutral panels. Use `tone="current"` only inside already-themed bars where the control should inherit the surrounding status color. Use `size="xs"` for tight summary bars and `size="sm"` for normal panel headers.
 
+### Text input (`components/ui/Input.tsx`)
+
+Use `Input` for mono text form fields. `inputSize="default"` (the default) is the fixed-height (`h-10`), `rounded-lg` settings field; `inputSize="compact"` is the shorter, `rounded-md` config-form field used in dense forms like the project Config tab. It deliberately uses `inputSize` (not the native `size` attribute). Extend with `className` for non-conflicting utilities (e.g. `placeholder:text-text-tertiary`); there is no tailwind-merge, so don't override a conflicting base utility.
+
 ### Search input (`components/ui/SearchInput.tsx`)
 
 Use `SearchInput` for search/filter fields in page and panel headers (skills list, agent catalog). It renders the canonical secondary-surface, sans-font field with the softer accent focus ring. It is intentionally distinct from `Input` (the mono, fixed-height form field) — don't swap one for the other. Defaults `type="search"`; extend with `className` for one-off width tweaks.

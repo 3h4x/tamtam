@@ -3,14 +3,28 @@
 import React from 'react'
 
 // Canonical text-input styling shared across settings/config forms: full-width,
-// fixed-height, mono, with the standard accent focus ring. Pass `className` to
-// extend (appended last); note there is no tailwind-merge, so overriding a base
-// utility that conflicts won't win — prefer leaving genuinely different inputs raw.
+// mono, with the standard accent focus ring. `size="default"` is the fixed-height
+// (h-10), comfortably rounded settings field; `size="compact"` is the shorter,
+// tighter-radius config-form field. Pass `className` to extend (appended last);
+// note there is no tailwind-merge, so overriding a base utility that conflicts
+// won't win — prefer leaving genuinely different inputs raw.
 const INPUT_BASE =
-  'w-full h-10 px-3 py-2 bg-bg-primary text-text-primary border border-border rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-accent/30 focus:border-accent transition-colors font-mono'
+  'w-full px-3 bg-bg-primary text-text-primary border border-border text-sm focus:outline-none focus:ring-2 focus:ring-accent/30 focus:border-accent transition-colors font-mono'
 
-export interface InputProps extends React.InputHTMLAttributes<HTMLInputElement> {}
+const SIZE_CLASSES: Record<'default' | 'compact', string> = {
+  default: 'h-10 py-2 rounded-lg',
+  compact: 'py-1.5 rounded-md',
+}
 
-export function Input({ className, ...props }: InputProps) {
-  return <input className={[INPUT_BASE, className].filter(Boolean).join(' ')} {...props} />
+export interface InputProps extends React.InputHTMLAttributes<HTMLInputElement> {
+  inputSize?: 'default' | 'compact'
+}
+
+export function Input({ className, inputSize = 'default', ...props }: InputProps) {
+  return (
+    <input
+      className={[INPUT_BASE, SIZE_CLASSES[inputSize], className].filter(Boolean).join(' ')}
+      {...props}
+    />
+  )
 }

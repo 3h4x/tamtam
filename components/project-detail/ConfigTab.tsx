@@ -5,6 +5,7 @@ import { getPipelineSteps, type StepToggleContext } from '@/lib/pipeline/pipelin
 import { Button } from '@/components/ui/Button'
 import { Checkbox } from '@/components/ui/Checkbox'
 import { EmptyState } from '@/components/ui/EmptyState'
+import { Input } from '@/components/ui/Input'
 import { Pill, PillButton } from '@/components/ui/Pill'
 import { Spinner } from '@/components/ui/Spinner'
 
@@ -202,10 +203,11 @@ export function ConfigTab({
             <label className="block font-medium text-xs text-text-secondary mb-1" htmlFor="project-website">
               Website
             </label>
-            <input
+            <Input
+              inputSize="compact"
+              className="placeholder:text-text-tertiary"
               id="project-website"
               type="text"
-              className="w-full px-3 py-1.5 text-sm bg-bg-primary border border-border rounded-md text-text-primary font-mono focus:outline-none focus:ring-2 focus:ring-accent/30 focus:border-accent transition-colors placeholder:text-text-tertiary"
               value={websiteInput}
               onChange={(e) => setWebsiteInput(e.target.value)}
               placeholder="https://example.com"
@@ -215,10 +217,11 @@ export function ConfigTab({
             <label className="block font-medium text-xs text-text-secondary mb-1" htmlFor="project-qa-url">
               QA URL <span className="text-text-tertiary font-normal">(overrides Website for QA)</span>
             </label>
-            <input
+            <Input
+              inputSize="compact"
+              className="placeholder:text-text-tertiary"
               id="project-qa-url"
               type="text"
-              className="w-full px-3 py-1.5 text-sm bg-bg-primary border border-border rounded-md text-text-primary font-mono focus:outline-none focus:ring-2 focus:ring-accent/30 focus:border-accent transition-colors placeholder:text-text-tertiary"
               value={qaUrlInput}
               onChange={(e) => setQaUrlInput(e.target.value)}
               placeholder="http://localhost:1338"
@@ -241,10 +244,11 @@ export function ConfigTab({
             <label className="block font-medium text-xs text-text-secondary mb-1" htmlFor="test-command">
               Test Command
             </label>
-            <input
+            <Input
+              inputSize="compact"
+              className="placeholder:text-text-tertiary"
               id="test-command"
               type="text"
-              className="w-full px-3 py-1.5 text-sm bg-bg-primary border border-border rounded-md text-text-primary font-mono focus:outline-none focus:ring-2 focus:ring-accent/30 focus:border-accent transition-colors placeholder:text-text-tertiary"
               value={testCommandInput}
               onChange={(e) => setTestCommandInput(e.target.value)}
               placeholder={config.detected_test_command || 'e.g. npm test, pytest, forge test'}
@@ -260,11 +264,12 @@ export function ConfigTab({
               Release timeout (minutes)
               <span aria-hidden="true" className="ml-2 text-text-tertiary font-normal">.tamtam/config.yml</span>
             </label>
-            <input
+            <Input
+              inputSize="compact"
+              className="placeholder:text-text-tertiary"
               id="release-timeout-minutes"
               type="text"
               inputMode="numeric"
-              className="w-full px-3 py-1.5 text-sm bg-bg-primary border border-border rounded-md text-text-primary font-mono focus:outline-none focus:ring-2 focus:ring-accent/30 focus:border-accent transition-colors placeholder:text-text-tertiary"
               value={releaseTimeoutMinutesInput}
               onChange={(e) => setReleaseTimeoutMinutesInput(e.target.value)}
               placeholder="60"
@@ -444,9 +449,10 @@ export function ConfigTab({
             <label className="block font-medium text-xs text-text-secondary mb-1" htmlFor="review-prerequisite-command">
               Review prerequisite command
             </label>
-            <input
+            <Input
+              inputSize="compact"
+              className="placeholder:text-text-tertiary"
               id="review-prerequisite-command"
-              className="w-full px-3 py-1.5 text-sm bg-bg-primary border border-border rounded-md text-text-primary font-mono focus:outline-none focus:ring-2 focus:ring-accent/30 focus:border-accent transition-colors placeholder:text-text-tertiary"
               value={reviewPrerequisiteCommandInput}
               onChange={(e) => setReviewPrerequisiteCommandInput(e.target.value)}
               placeholder="e.g. pnpm db:types"
