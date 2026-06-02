@@ -11,7 +11,7 @@ type AllowedReason = (typeof ALLOWED_REASONS)[number];
 
 // Close an issue with a verdict comment when a TamTam run determines the
 // issue is stale, dead, or otherwise no longer actionable. The findings string
-// is posted as a comment first, then the issue is closed (state-reason: not_planned).
+// is posted as a comment first, then the issue is closed with the mapped state reason.
 //
 // Body: { findings: string; reason?: 'stale' | 'duplicate' | 'wontfix' | 'fixed' }
 export async function POST(
