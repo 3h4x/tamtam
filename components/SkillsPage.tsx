@@ -8,6 +8,7 @@ import { Button } from '@/components/ui/Button'
 import { Pill } from '@/components/ui/Pill'
 import { EmptyState } from '@/components/ui/EmptyState'
 import { Checkbox } from '@/components/ui/Checkbox'
+import { Select } from '@/components/ui/Select'
 import { SkillEditor } from '@/components/skills-page/SkillEditor'
 import {
   buildSkillListItems,
@@ -571,8 +572,10 @@ export function SkillsPage() {
             <span className="text-xs text-status-error font-medium">{projectsError}</span>
           )}
           <label className="text-xs text-text-secondary shrink-0">Create agents for</label>
-          <select
-            className="px-2 py-1.5 text-sm bg-bg-tertiary border border-border rounded text-text-primary focus:outline-none focus:ring-1 focus:ring-accent disabled:opacity-50"
+          <Select
+            surface="tertiary"
+            size="compact"
+            className="shrink-0 disabled:opacity-50"
             value={selectedProject}
             onChange={e => setSelectedProject(e.target.value)}
             disabled={projects.length === 0}
@@ -580,7 +583,7 @@ export function SkillsPage() {
             {projects.length === 0
               ? <option value="">{projectsError ? 'Failed to load projects' : 'No projects available'}</option>
               : projects.map(p => <option key={p} value={p}>{p}</option>)}
-          </select>
+          </Select>
           <Button
             variant="solid"
             className="px-4 shrink-0"
