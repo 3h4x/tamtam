@@ -10,6 +10,7 @@ import { Pill } from '@/components/ui/Pill'
 import { SegmentedControl } from '@/components/ui/SegmentedControl'
 import { Select } from '@/components/ui/Select'
 import { Spinner } from '@/components/ui/Spinner'
+import { Textarea } from '@/components/ui/Textarea'
 import { useToast } from '@/components/Toast'
 import type { AgentTemplateRecord } from '@/components/SettingsPage'
 import { MODEL_TIERS, MODEL_LABELS, MODEL_DESCRIPTIONS, normalizeModelInput } from '@/lib/agents/model-aliases'
@@ -335,9 +336,9 @@ export function AgentEditor({
               <span>{improving ? 'Improving…' : 'Improve'}</span>
             </Button>
           </div>
-          <textarea
+          <Textarea
             id="agent-prompt"
-            className="w-full px-3 py-2 text-sm bg-bg-secondary border border-border rounded-lg text-text-primary placeholder:text-text-tertiary focus:outline-none focus:ring-2 focus:ring-accent/40 focus:border-accent transition-colors font-mono resize-y disabled:opacity-60 disabled:cursor-not-allowed min-h-[420px]"
+            className="min-h-[420px]"
             rows={20}
             value={agentPrompt}
             onChange={(e) => setAgentPrompt(e.target.value)}
@@ -356,9 +357,8 @@ export function AgentEditor({
           <span className="text-xs font-semibold text-text-tertiary uppercase tracking-wider">Prerequisite Command</span>
           <span className="text-xs text-text-tertiary font-normal normal-case">optional — runs before the agent; output injected into the prompt</span>
         </label>
-        <textarea
+        <Textarea
           id="agent-prerequisite"
-          className="w-full px-3 py-2 text-sm bg-bg-secondary border border-border rounded-lg text-text-primary placeholder:text-text-tertiary focus:outline-none focus:ring-2 focus:ring-accent/40 focus:border-accent transition-colors font-mono resize-y disabled:opacity-60 disabled:cursor-not-allowed"
           rows={4}
           value={prerequisiteCommand}
           onChange={(e) => setPrerequisiteCommand(e.target.value)}
