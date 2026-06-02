@@ -9,22 +9,48 @@ import React from 'react'
 // note there is no tailwind-merge, so overriding a base utility that conflicts
 // won't win — prefer leaving genuinely different inputs raw.
 const INPUT_BASE =
-  'px-3 bg-bg-primary text-text-primary border border-border text-sm focus:outline-none focus:ring-2 focus:ring-accent/30 focus:border-accent transition-colors font-mono'
+  'bg-bg-primary text-text-primary border border-border text-sm focus:outline-none focus:ring-2 focus:ring-accent/30 focus:border-accent transition-colors'
 
 const SIZE_CLASSES: Record<'default' | 'compact', string> = {
   default: 'h-10 py-2 rounded-lg',
   compact: 'py-1.5 rounded-md',
 }
 
+const FONT_CLASSES: Record<'mono' | 'sans', string> = {
+  mono: 'font-mono',
+  sans: 'font-sans',
+}
+
+const PADDING_X_CLASSES: Record<'default' | 'compact', string> = {
+  default: 'px-3',
+  compact: 'px-2.5',
+}
+
 export interface InputProps extends React.InputHTMLAttributes<HTMLInputElement> {
   inputSize?: 'default' | 'compact'
   fullWidth?: boolean
+  fontFamily?: 'mono' | 'sans'
+  paddingX?: 'default' | 'compact'
 }
 
-export function Input({ className, inputSize = 'default', fullWidth = true, ...props }: InputProps) {
+export function Input({
+  className,
+  inputSize = 'default',
+  fullWidth = true,
+  fontFamily = 'mono',
+  paddingX = 'default',
+  ...props
+}: InputProps) {
   return (
     <input
-      className={[fullWidth ? 'w-full' : null, INPUT_BASE, SIZE_CLASSES[inputSize], className].filter(Boolean).join(' ')}
+      className={[
+        fullWidth ? 'w-full' : null,
+        INPUT_BASE,
+        SIZE_CLASSES[inputSize],
+        FONT_CLASSES[fontFamily],
+        PADDING_X_CLASSES[paddingX],
+        className,
+      ].filter(Boolean).join(' ')}
       {...props}
     />
   )

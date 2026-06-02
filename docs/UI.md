@@ -178,7 +178,7 @@ Use the default tone for neutral panels. Use `tone="current"` only inside alread
 
 ### Text input (`components/ui/Input.tsx`)
 
-Use `Input` for mono text form fields. `inputSize="default"` (the default) is the fixed-height (`h-10`), `rounded-lg` settings field; `inputSize="compact"` is the shorter, `rounded-md` config-form field used in dense forms like the project Config tab. It deliberately uses `inputSize` (not the native `size` attribute). Inputs are full-width by default; pass `fullWidth={false}` when a fixed-width field like `className="w-32"` is intentional. Extend with `className` for non-conflicting utilities (e.g. `placeholder:text-text-tertiary`); there is no tailwind-merge, so don't override a conflicting base utility.
+Use `Input` for text form fields. `inputSize="default"` (the default) is the fixed-height (`h-10`), `rounded-lg` settings field; `inputSize="compact"` is the shorter, `rounded-md` config-form field used in dense forms like the project Config tab. It deliberately uses `inputSize` (not the native `size` attribute). Inputs are mono by default; pass `fontFamily="sans"` only when preserving an existing sans label-style field. Inputs are full-width by default; pass `fullWidth={false}` when a fixed-width field like `className="w-32"` is intentional. Use `paddingX="compact"` for dense fields that need `px-2.5`. Extend with `className` for non-conflicting utilities (e.g. `placeholder:text-text-tertiary`); there is no tailwind-merge, so don't override a conflicting base utility.
 
 ### Search input (`components/ui/SearchInput.tsx`)
 

@@ -571,10 +571,12 @@ export function ConfigTab({
               </div>
               {editActions.map((action, i) => (
                 <div key={i} className="grid items-center gap-2" style={{ gridTemplateColumns: '9rem 1fr 2.5rem 2rem' }}>
-                  <input
+                  <Input
+                    inputSize="compact"
+                    fontFamily="sans"
+                    paddingX="compact"
                     type="text"
                     aria-label={`Action ${i + 1} label`}
-                    className="px-2.5 py-1.5 text-sm bg-bg-primary border border-border rounded-md text-text-primary focus:outline-none focus:ring-2 focus:ring-accent/30 focus:border-accent transition-colors"
                     value={action.name}
                     onChange={(e) => {
                       const next = [...editActions]
@@ -583,10 +585,11 @@ export function ConfigTab({
                     }}
                     placeholder="Deploy"
                   />
-                  <input
+                  <Input
+                    inputSize="compact"
+                    paddingX="compact"
                     type="text"
                     aria-label={`Action ${i + 1} command`}
-                    className="px-2.5 py-1.5 text-sm bg-bg-primary border border-border rounded-md text-text-primary font-mono focus:outline-none focus:ring-2 focus:ring-accent/30 focus:border-accent transition-colors"
                     value={action.command}
                     onChange={(e) => {
                       const next = [...editActions]
