@@ -151,12 +151,11 @@ export function CliTab({
             return (
               <div key={provider} className={`px-5 py-3 ${isEnabled ? '' : 'opacity-60'}`}>
                 <label className="flex items-center gap-3 cursor-pointer">
-                  <input
-                    type="checkbox"
+                  <Checkbox
+                    variant="native"
                     checked={isEnabled}
                     disabled={isLastEnabled}
                     onChange={(e) => toggleProvider(provider, e.target.checked)}
-                    className="w-4 h-4 accent-accent rounded shrink-0 cursor-pointer"
                   />
                   <div className="flex-1 min-w-0 flex items-baseline gap-3">
                     <div className="font-medium text-sm text-text-primary w-24 shrink-0">{PROVIDER_LABELS[provider]}</div>
