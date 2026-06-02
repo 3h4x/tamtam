@@ -3,6 +3,7 @@
 import type { ProjectConfig, CustomAction } from '@/lib/client-api'
 import { getPipelineSteps, type StepToggleContext } from '@/lib/pipeline/pipeline-steps'
 import { Button } from '@/components/ui/Button'
+import { Checkbox } from '@/components/ui/Checkbox'
 import { EmptyState } from '@/components/ui/EmptyState'
 import { Pill, PillButton } from '@/components/ui/Pill'
 import { Spinner } from '@/components/ui/Spinner'
@@ -487,10 +488,10 @@ export function ConfigTab({
         {/* Post-merge soak (wait for default-branch CI on the merge commit). */}
         <div className="px-4 py-3 border-t border-border space-y-3">
           <label className="flex items-start gap-2 cursor-pointer select-none">
-            <input
+            <Checkbox
+              variant="native"
               id="post-merge-watch-enabled"
-              type="checkbox"
-              className="w-4 h-4 accent-accent mt-0.5 shrink-0 cursor-pointer"
+              className="mt-0.5"
               checked={postMergeWatchMinutes > 0}
               onChange={(e) => setPostMergeWatchMinutesInput(e.target.checked ? '1' : '0')}
             />
@@ -502,10 +503,10 @@ export function ConfigTab({
             </div>
           </label>
           <label className="flex items-start gap-2 cursor-pointer select-none">
-            <input
+            <Checkbox
+              variant="native"
               id="auto-revert-enabled"
-              type="checkbox"
-              className="w-4 h-4 accent-accent mt-0.5 shrink-0 cursor-pointer"
+              className="mt-0.5"
               checked={autoRevertEnabledInput}
               onChange={(e) => setAutoRevertEnabledInput(e.target.checked)}
             />
@@ -518,10 +519,10 @@ export function ConfigTab({
         {/* Trigger cadence */}
         <div className="px-4 py-2.5">
           <label className="flex items-start gap-2 cursor-pointer select-none">
-            <input
+            <Checkbox
+              variant="native"
               id="release-after-run"
-              type="checkbox"
-              className="w-4 h-4 accent-accent mt-0.5 shrink-0 cursor-pointer"
+              className="mt-0.5"
               checked={releaseAfterRunInput}
               onChange={(e) => setReleaseAfterRunInput(e.target.checked)}
             />
