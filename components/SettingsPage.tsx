@@ -20,6 +20,7 @@ import { Spinner } from '@/components/ui/Spinner'
 import { Button, buttonVariants } from '@/components/ui/Button'
 import { Pill } from '@/components/ui/Pill'
 import { EmptyState } from '@/components/ui/EmptyState'
+import { Input } from '@/components/ui/Input'
 import { ErrorBanner } from '@/components/ErrorBanner'
 
 interface SettingsMap {
@@ -526,43 +527,39 @@ export function SettingsPage({ initialTab }: { initialTab?: TabId } = {}) {
             <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-4">
               <div>
                 <label className="mb-1 block text-xs font-medium text-text-secondary">Ollama URL</label>
-                <input
+                <Input
                   value={settings.retrieval_ollama_url}
                   onChange={(e) => handleChange('retrieval_ollama_url', e.target.value)}
                   placeholder="http://localhost:11434"
-                  className="w-full h-10 px-3 py-2 bg-bg-primary text-text-primary border border-border rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-accent/30 focus:border-accent transition-colors font-mono"
                 />
               </div>
               <div>
                 <label className="mb-1 block text-xs font-medium text-text-secondary">Embedding Model</label>
-                <input
+                <Input
                   value={settings.retrieval_embedding_model}
                   onChange={(e) => handleChange('retrieval_embedding_model', e.target.value)}
                   placeholder="nomic-embed-text"
-                  className="w-full h-10 px-3 py-2 bg-bg-primary text-text-primary border border-border rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-accent/30 focus:border-accent transition-colors font-mono"
                 />
               </div>
               <div>
                 <label className="mb-1 block text-xs font-medium text-text-secondary">Context Limit</label>
-                <input
+                <Input
                   type="number"
                   min={1}
                   value={settings.retrieval_context_limit}
                   onChange={(e) => handleChange('retrieval_context_limit', e.target.value)}
-                  className="w-full h-10 px-3 py-2 bg-bg-primary text-text-primary border border-border rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-accent/30 focus:border-accent transition-colors font-mono"
                 />
                 <p className="mt-1 text-xs text-text-tertiary">Top-K chunks per prompt.</p>
               </div>
               <div>
                 <label className="mb-1 block text-xs font-medium text-text-secondary">Score Threshold</label>
-                <input
+                <Input
                   type="number"
                   min={0}
                   max={1}
                   step={0.05}
                   value={settings.retrieval_score_threshold}
                   onChange={(e) => handleChange('retrieval_score_threshold', e.target.value)}
-                  className="w-full h-10 px-3 py-2 bg-bg-primary text-text-primary border border-border rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-accent/30 focus:border-accent transition-colors font-mono"
                 />
                 <p className="mt-1 text-xs text-text-tertiary">0–1 cosine cutoff.</p>
               </div>
@@ -627,19 +624,17 @@ export function SettingsPage({ initialTab }: { initialTab?: TabId } = {}) {
               <div className="grid gap-4 md:grid-cols-3">
                 <div>
                   <label className="mb-1 block text-xs font-medium text-text-secondary">Project Owner</label>
-                  <input
+                  <Input
                     value={settings.github_board_project_owner}
                     onChange={(e) => handleChange('github_board_project_owner', e.target.value)}
                     placeholder={settings.github_owner || 'octocat'}
-                    className="w-full h-10 px-3 py-2 bg-bg-primary text-text-primary border border-border rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-accent/30 focus:border-accent transition-colors font-mono"
                   />
                 </div>
                 <div>
                   <label className="mb-1 block text-xs font-medium text-text-secondary">Project Title</label>
-                  <input
+                  <Input
                     value={settings.github_board_project_title}
                     onChange={(e) => handleChange('github_board_project_title', e.target.value)}
-                    className="w-full h-10 px-3 py-2 bg-bg-primary text-text-primary border border-border rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-accent/30 focus:border-accent transition-colors font-mono"
                   />
                 </div>
                 <div>
@@ -700,11 +695,10 @@ export function SettingsPage({ initialTab }: { initialTab?: TabId } = {}) {
               )}
               <div className="mt-4">
                 <label className="mb-1 block text-xs font-medium text-text-secondary">Kanban view URL <span className="text-text-tertiary">(optional)</span></label>
-                <input
+                <Input
                   value={settings.github_board_view_url}
                   onChange={(e) => handleChange('github_board_view_url', e.target.value)}
                   placeholder="https://github.com/users/.../projects/7/views/2"
-                  className="w-full h-10 px-3 py-2 bg-bg-primary text-text-primary border border-border rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-accent/30 focus:border-accent transition-colors font-mono"
                 />
               </div>
             </div>
