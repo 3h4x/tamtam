@@ -32,8 +32,8 @@ export async function findAgentNameConflict(
   const projectPath = options.projectPath ?? resolveProjectPath(project);
   if (!projectPath) return null;
 
-  // Normalize the exclude name once instead of per-iteration; compute each
-  // agent's canonical key once per iteration instead of twice.
+  // Hoist the exclude key out of the loop and compute each agent's
+  // canonical key once per iteration.
   const excludeFileKey = options.excludeFileAgentName
     ? canonicalAgentNameKey(options.excludeFileAgentName)
     : null;

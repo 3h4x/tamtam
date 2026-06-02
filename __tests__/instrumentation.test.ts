@@ -465,11 +465,13 @@ describe('instrumentation', () => {
       const { registerNode } = await import('@/instrumentation-node');
       await registerNode();
 
-      await vi.waitFor(() => {
-        expect(resumeBootPrWaitMock).not.toHaveBeenCalled();
-        expect(markDoneMock).toHaveBeenCalledWith(orphanedPrWait, -1);
-        expect(markDoneMock).toHaveBeenCalledWith(orphanedMarkDod, -1);
-      }, { timeout: 2000, interval: 1 });
+      // registerNode() awaits the inline-reap promise under NODE_ENV==='test',
+      // so the reap has already run by the time it resolves — assert directly
+      // (like the sibling pr-wait reap tests above) instead of polling, which
+      // flakes under heavy parallel CI contention.
+      expect(resumeBootPrWaitMock).not.toHaveBeenCalled();
+      expect(markDoneMock).toHaveBeenCalledWith(orphanedPrWait, -1);
+      expect(markDoneMock).toHaveBeenCalledWith(orphanedMarkDod, -1);
     });
   });
 
@@ -700,21 +702,30 @@ describe('instrumentation', () => {
 
 
   describe('runProbeSweep()', () => {
+    // runProbeSweep dynamically imports job-storage. The preceding
+    // reapOrphanReleases block registers its own
+    // `vi.doMock('@/lib/jobs/job-storage', …)` with a differently-shaped
+    // storageMock (no probeJobStatus / PIPELINE_STEP_KINDS). The earlier
+    // approach re-registered a *new* doMock factory per test and relied on
+    // doUnmock→resetModules→doMock ordering to evict the stale one; under
+    // fork-pool CPU starvation that eviction could race, leaving the stale
+    // reap-shaped mock active and yielding 0 probe calls.
+    //
+    // Instead register the doMock factory ONCE per test against a stable,
+    // live holder. The factory always returns whatever `currentStorageMock`
+    // points at right now, so the value a test installs can never lose a race
+    // with a prior test's registration — there is only one factory, and it
+    // reads the holder at import time.
+    let currentStorageMock: Record<string, unknown>;
+
+    beforeEach(() => {
+      currentStorageMock = { listJobs: () => [], probeJobStatus: vi.fn() };
+      vi.doMock('@/lib/jobs/job-storage', () => currentStorageMock);
+      vi.doMock('@/lib/jobs/storage', () => currentStorageMock);
+    });
+
     function mockJobStorageModule(factory: () => Record<string, unknown>) {
-      // runProbeSweep dynamically imports job-storage. Keep each test's mock
-      // factory isolated from any instrumentation-node import cached by a
-      // previous test in this file or by the wider Vitest project.
-      //
-      // The preceding reapOrphanReleases block registers its own
-      // `vi.doMock('@/lib/jobs/job-storage', …)` with a differently-shaped
-      // storageMock (no probeJobStatus / PIPELINE_STEP_KINDS). Under fork-pool
-      // CPU starvation the doUnmock→doMock re-registration can race, leaving
-      // that stale mock active and yielding 0 probe calls. Explicitly clear
-      // both module paths before re-registering so residue can't survive.
-      vi.doUnmock('@/lib/jobs/job-storage');
-      vi.doUnmock('@/lib/jobs/storage');
-      vi.resetModules();
-      vi.doMock('@/lib/jobs/job-storage', factory);
+      currentStorageMock = factory();
     }
 
     function mockJobStorage(
