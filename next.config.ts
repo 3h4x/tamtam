@@ -62,8 +62,16 @@ const nextConfig: NextConfig = {
   // rebuilds still re-compiled from scratch (150-200s) AND paid the
   // additional cache read/write overhead. Disk pressure also caused the
   // build worker to thrash on macOS. Leave the experimental flag off
-  // until Turbopack's build cache stabilizes; a 115s clean build is
-  // faster than a 180s "warm" build that also fills the disk.
+  // until Turbopack's build cache stabilizes; a clean build that fits the
+  // available CPU is faster than a "warm" build that also fills the disk.
+  // NOTE: observed clean-build wall time is dominated by host CPU
+  // contention, not config — `run-turbopack` ranges ~280s at 88% core
+  // saturation to ~890s once the 1-min load average exceeds the core
+  // count (live server + scheduled agents + overlapping builds). Don't
+  // re-tune compile flags off a single slow number; check the per-build
+  // `load` block in data/build-metrics.jsonl (captured by
+  // scripts/build-with-metrics.mjs) first, and prefer `pnpm rebuild`
+  // (which pauses jobs) over a raw `pnpm build` on a busy box.
   // Type-checking is slow and we already run it via the dedicated
   // `pnpm type-check` command (and CI), so doing it again inside
   // `next build` doubles up. Skip during build; fix any real errors

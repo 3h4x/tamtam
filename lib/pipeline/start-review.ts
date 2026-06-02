@@ -328,7 +328,7 @@ export async function startProjectReview(
     const status = statuses[i];
     if (status.status === 'fulfilled' && status.value === 'running') {
       const j = running[i];
-      return { ok: false, status: 409, detail: `Review already in progress for ${projectName} (PID ${j.pid})` };
+      return { ok: false, status: 409, detail: `Review already in progress for ${projectName} (PID ${j.pid})`, blockingJobId: j.id };
     }
     if (status.status === 'rejected') probeError ??= status.reason;
   }

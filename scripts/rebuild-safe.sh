@@ -15,11 +15,26 @@
 #                                already dead and you just need to bring
 #                                it up.
 #
+# The server (PM2 `tamtam`) is STOPPED before the build and brought back by
+# pm2-start.sh after a successful build + migrate. This trades brief build-time
+# downtime for safety: a build that overwrites `.next/` while `next start` is
+# live can leave the server crash-looping on a half-written build.
+#
+# A cross-process mutex (atomic `mkdir` lock in TMPDIR) serializes rebuilds so a
+# manual rebuild and a scheduled self-agent rebuild can never build at once.
+#
+# Env knobs (lock):
+#   TAMTAM_REBUILD_LOCK_WAIT  default 900 (seconds) — how long to wait for a
+#                             concurrent rebuild before giving up (exit 4)
+#
 # Exit codes:
 #   0   built + restarted + unpaused
-#   2   build failed (server NOT restarted; pause is reverted)
+#   2   build or migrate failed (server left STOPPED, jobs left paused; fix
+#       and re-run rebuild — a successful run restarts + unpauses)
 #   3   restart failed (pause is left ON intentionally so the server
 #       doesn't pick up the new code half-restarted)
+#   4   could not acquire the build lock within TAMTAM_REBUILD_LOCK_WAIT
+#       (another rebuild is running; no side effects — nothing paused/stopped)
 
 set -euo pipefail
 
@@ -29,8 +44,55 @@ WALL_CLOCK_TIMEOUT_S="${TAMTAM_REBUILD_WALL_CLOCK_TIMEOUT:-1800}"
 FORCE="${TAMTAM_REBUILD_FORCE:-0}"
 POLL_INTERVAL_S=5
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+# Cross-process build mutex. Two rebuilds (e.g. a manual one + a scheduled
+# self-agent that edits UI and runs `pnpm run rebuild`) must never build at
+# once: they fight over `.next/lock`, and each one's `pm2 stop tamtam` yanks
+# the server out from under the other. macOS has no util-linux `flock`, so we
+# use an atomic `mkdir` lock keyed on the repo path. Kept in TMPDIR (not under
+# `.next/`, which the smoke-recovery path wipes; not in the repo, which would
+# dirty the git tree agents inspect).
+__repo_hash="$(printf '%s' "$PWD" | shasum 2>/dev/null | cut -c1-12 || true)"
+LOCK_DIR="${TMPDIR:-/tmp}/tamtam-rebuild-${__repo_hash:-default}.lock"
+LOCK_WAIT_S="${TAMTAM_REBUILD_LOCK_WAIT:-900}"
+LOCK_HELD=0
 
 log() { printf '[rebuild-safe] %s\n' "$*"; }
+
+# Acquire the build mutex. Blocks (polling) until the current holder finishes
+# or `LOCK_WAIT_S` elapses. A second concurrent rebuild waits rather than
+# racing; if it waits out the timeout it exits WITHOUT building or touching
+# pause/server state (the holder's build already covers the current code).
+# Stale locks from a crashed rebuild are reclaimed via the recorded PID.
+acquire_lock() {
+  local start; start=$(date +%s)
+  mkdir -p "$(dirname "$LOCK_DIR")" 2>/dev/null || true
+  while ! mkdir "$LOCK_DIR" 2>/dev/null; do
+    local holder=""
+    [ -f "$LOCK_DIR/pid" ] && holder=$(cat "$LOCK_DIR/pid" 2>/dev/null || echo "")
+    if [ -n "$holder" ] && ! kill -0 "$holder" 2>/dev/null; then
+      log "reclaiming stale rebuild lock from dead PID $holder"
+      rm -rf "$LOCK_DIR"
+      continue
+    fi
+    local elapsed=$(( $(date +%s) - start ))
+    if [ "$elapsed" -ge "$LOCK_WAIT_S" ]; then
+      log "another rebuild has held the lock for ${LOCK_WAIT_S}s — giving up without building (its build covers current code)"
+      exit 4
+    fi
+    log "another rebuild in progress (holder PID ${holder:-?}); waiting... (${elapsed}s)"
+    sleep "$POLL_INTERVAL_S"
+  done
+  echo "$$" > "$LOCK_DIR/pid"
+  LOCK_HELD=1
+  log "acquired build lock"
+}
+
+release_lock() {
+  if [ "${LOCK_HELD:-0}" = 1 ]; then
+    rm -rf "$LOCK_DIR" 2>/dev/null || true
+    LOCK_HELD=0
+  fi
+}
 
 # Hard wall-clock kill switch — if anything in this script hangs (drain
 # polling against a crash-looping server, pnpm build that never returns,
@@ -133,6 +195,7 @@ except Exception:
 PAUSED=0
 trap '
   cleanup_watchdog
+  release_lock
   if [ "$PAUSED" = 1 ] && [ "${KEEP_PAUSED:-0}" != 1 ]; then
     unpause_jobs >/dev/null 2>&1 || true
     printf "[rebuild-safe] unpaused jobs in exit trap\n"
@@ -147,6 +210,10 @@ trap '
 # on SIGTERM by default, but make it explicit so the unpause path is
 # obvious.
 trap 'printf "[rebuild-safe] WALL CLOCK timeout (%ss) — bailing\n" "$WALL_CLOCK_TIMEOUT_S"; exit 124' TERM
+
+# Serialize against any other rebuild BEFORE pausing/stopping anything. A
+# waiter that times out here exits 4 with no side effects.
+acquire_lock
 
 if [ "$FORCE" = 1 ]; then
   log "force mode: skipping pause/drain"
@@ -178,9 +245,70 @@ else
   fi
 fi
 
+# Stop the server BEFORE building. `pnpm build` overwrites `.next/` in place;
+# if the live `next start` reloads (PM2 restart, crash, OOM) while the build is
+# mid-write, it boots against a half-written `.next/` and crash-loops
+# ("Could not find a production build in the '.next' directory" / missing
+# manifests), which then starves the build of CPU/RAM and can get the build
+# itself OOM-killed. Stopping PM2 first gives the build the machine to itself
+# and guarantees no live server can pick up an in-progress `.next/`. The server
+# is brought back by pm2-start.sh after a successful build + migrate.
+SERVER_STOPPED=0
+# Returns 0 if the pm2 `tamtam` entry is in the `online` state, 1 otherwise.
+# A live `next start` during the build is the worst case: it both races the
+# `.next/` overwrite (crash-loop risk) AND steals CPU from the build, which
+# is the dominant driver of slow builds on this box (see build-with-metrics
+# `load` block). So we must be sure it is actually down, not assume it.
+server_is_online() {
+  pm2 jlist 2>/dev/null | python3 -c "
+import json, sys
+try:
+  procs = json.load(sys.stdin)
+  for p in procs:
+    if p.get('name') == 'tamtam':
+      sys.exit(0 if p.get('pm2_env', {}).get('status') == 'online' else 1)
+except Exception:
+  pass
+sys.exit(1)
+" 2>/dev/null
+}
+stop_server() {
+  if ! pm2 describe tamtam >/dev/null 2>&1; then
+    log "no pm2 tamtam entry — nothing to stop"
+    return
+  fi
+  log "stopping tamtam (pm2) before build..."
+  pm2 stop tamtam >/dev/null 2>&1 || true
+  # Verify it actually stopped. A swallowed `pm2 stop` failure that left the
+  # server online used to be invisible — the build then ran against a live
+  # server (contention + crash-loop risk). Retry with a delete, then refuse
+  # to build if it is still up rather than proceeding blind.
+  for attempt in 1 2; do
+    if ! server_is_online; then
+      SERVER_STOPPED=1
+      return
+    fi
+    log "WARN: tamtam still online after stop (attempt ${attempt}) — escalating to pm2 delete"
+    pm2 delete tamtam >/dev/null 2>&1 || true
+    sleep 1
+  done
+  if server_is_online; then
+    log "ERROR: could not stop tamtam (pm2) — refusing to build against a live server."
+    log "       Stop it manually (\`pm2 stop tamtam\`) and re-run rebuild."
+    KEEP_PAUSED=1
+    exit 3
+  fi
+  SERVER_STOPPED=1
+}
+stop_server
+
 log "building..."
 if ! pnpm build; then
-  log "build failed — leaving server running, jobs will be unpaused on exit"
+  # Server is already stopped, so a broken/partial `.next/` can't crash-loop.
+  # Leave it stopped and jobs paused; fix the build and re-run rebuild (a
+  # successful run restarts the server and unpauses at the end).
+  log "build failed — server left STOPPED, jobs left paused. Fix the build and re-run rebuild."
+  KEEP_PAUSED=1
   exit 2
 fi
 
@@ -192,7 +320,10 @@ fi
 # restart, exit non-zero so the EXIT trap unpauses jobs against the old code.
 log "applying DB migrations..."
 if ! pnpm db:migrate; then
-  log "ERROR: db:migrate failed — NOT restarting; old code keeps running. Fix the migration and re-run."
+  # Server is stopped at this point (we stop before build). Leave it stopped
+  # and jobs paused rather than starting new code against an un-migrated DB.
+  log "ERROR: db:migrate failed — server left STOPPED, jobs left paused. Fix the migration and re-run rebuild."
+  KEEP_PAUSED=1
   exit 2
 fi
 

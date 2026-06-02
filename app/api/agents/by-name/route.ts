@@ -11,6 +11,7 @@ import { deleteFileAgentOverride, getFileAgentOverride, setFileAgentOverride } f
 import { resolveProjectPath } from '@/lib/shared/project-data';
 import { parseOptionalKnownModelInput } from '@/lib/agents/model-aliases';
 import { parseOptionalAgentScheduleInput } from '@/lib/scheduling/agent-schedule';
+import { parseOptionalPermissionModeInput } from '@/lib/shared/config';
 import { isCliProvider } from '@/lib/usage/cli-providers';
 import { parsePrerequisiteCommandInput } from '@/lib/agents/prerequisites';
 import { resolveAgentPrerequisiteCommandWithFileSkills } from '@/lib/agents/file-skill-prerequisites';
@@ -67,6 +68,10 @@ export async function PATCH(request: NextRequest) {
     ? parseOptionalAgentScheduleInput(fields.schedule)
     : { schedule: undefined, error: null };
   if (parsedSchedule.error) return NextResponse.json({ detail: parsedSchedule.error }, { status: 400 });
+  const { mode: parsedPermissionMode, error: permissionModeError } = parseOptionalPermissionModeInput(fields.permissionMode);
+  if (fields.permissionMode !== undefined && permissionModeError) {
+    return NextResponse.json({ detail: permissionModeError }, { status: 400 });
+  }
 
   // Try DB agent first
   const existing = await findDbAgentByProjectAndName(projectName, lookupName);
@@ -97,6 +102,7 @@ export async function PATCH(request: NextRequest) {
     if (!isSystemAgent && provider !== undefined) updates.provider = provider;
     if (!isSystemAgent && fields.fallbackEnabled !== undefined) updates.fallbackEnabled = fields.fallbackEnabled === true;
     if (!isSystemAgent && fields.prerequisiteCommand !== undefined) updates.prerequisiteCommand = prerequisiteCommand ?? '';
+    if (!isSystemAgent && fields.permissionMode !== undefined) updates.permissionMode = parsedPermissionMode;
 
     await db.update(schema.agents).set(updates).where(eq(schema.agents.id, existing.id)).execute();
     clearAgentsCache();
@@ -188,6 +194,7 @@ export async function PATCH(request: NextRequest) {
           || fields.schedule !== undefined
           || fields.model !== undefined
           || fields.skillIds !== undefined
+          || fields.permissionMode !== undefined
         ) {
           if (fileAgent.name !== nextName && override) {
             await setFileAgentOverride(projectName, nextName, override);
@@ -198,6 +205,7 @@ export async function PATCH(request: NextRequest) {
             schedule: fields.schedule !== undefined ? parsedSchedule.schedule : undefined,
             model: parsedModel ?? undefined,
             skillIds: fields.skillIds !== undefined ? fields.skillIds : undefined,
+            permissionMode: fields.permissionMode !== undefined ? parsedPermissionMode : undefined,
           });
         } else if (fileAgent.name !== nextName && override) {
           await setFileAgentOverride(projectName, nextName, override);

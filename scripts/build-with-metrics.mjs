@@ -22,7 +22,7 @@
 //                                deep turbopack profiling (3+ GB trace)
 
 import { spawn, execFileSync } from 'node:child_process';
-import { cpus, totalmem } from 'node:os';
+import { cpus, totalmem, loadavg } from 'node:os';
 import { existsSync, mkdirSync, copyFileSync, appendFileSync, statSync } from 'node:fs';
 import { resolve } from 'node:path';
 import { pathToFileURL } from 'node:url';
@@ -50,13 +50,71 @@ if (!IS_CLI) process.exit(0);
 
 const require = createRequire(import.meta.url);
 
+// Refuse to start if another `next build` is already in flight. Two builds
+// sharing one `.next/` directory don't queue — they CLOBBER each other:
+// Next's `.next/lock` makes the loser hard-fail (~2s `exit=1`), and a
+// concurrent clean / `rm -rf .next` (rebuild's smoke-recovery) yanks temp
+// manifests out from under the winner mid-write (`ENOENT _buildManifest
+// .js.tmp...`). Both wreck the build AND the metrics/trace record. Fail
+// fast with a clear message instead of producing a confusing partial run.
+// Override with TAMTAM_BUILD_ALLOW_CONCURRENT=1 if you really mean it.
+function otherBuildPids() {
+  try {
+    const out = execFileSync('ps', ['-A', '-o', 'pid=,command='], { encoding: 'utf-8' });
+    const self = process.pid;
+    const pids = [];
+    for (const line of out.split('\n')) {
+      const m = line.trim().match(/^(\d+)\s+(.*)$/);
+      if (!m) continue;
+      const pid = Number.parseInt(m[1], 10);
+      const cmd = m[2];
+      if (pid === self) continue;
+      // The actual compiler process: `next/dist/bin/next build`.
+      if (/node\b.*\/next\/dist\/bin\/next\b.*\bbuild\b/.test(cmd)) pids.push(pid);
+    }
+    return pids;
+  } catch {
+    return [];
+  }
+}
+if (process.env.TAMTAM_BUILD_ALLOW_CONCURRENT !== '1') {
+  const others = otherBuildPids();
+  if (others.length > 0) {
+    console.error(
+      `[build-metrics] ✗ another \`next build\` is already running (pid ${others.join(', ')}). ` +
+      `Two builds share one .next/ and clobber each other — refusing to start. ` +
+      `Wait for it to finish (e.g. \`pnpm rebuild\`), or set TAMTAM_BUILD_ALLOW_CONCURRENT=1 to override.`
+    );
+    process.exit(1);
+  }
+}
+
 console.log(`[build-metrics] CPUs=${CPU_COUNT} · RAM=${TOTAL_RAM_GB.toFixed(0)} GB · metrics→ data/build-metrics.jsonl${label ? ` · label=${label}` : ''}`);
+
+// Oversubscription is the dominant driver of build-time variance on this
+// box: history shows the SAME codebase compile in ~295s at 88% core
+// saturation but balloon to ~1100s once the 1-min load average climbs
+// past the core count (the live TamTam server + scheduled agents +
+// overlapping builds all contend for the same cores). `pnpm rebuild`
+// pauses jobs to avoid this; a raw `pnpm build` does not. Warn loudly so
+// the operator knows a slow build here is contention, not a regression.
+const startLoad1 = loadavg()[0];
+if (startLoad1 > CPU_COUNT) {
+  console.warn(
+    `[build-metrics] ⚠ load average ${startLoad1.toFixed(1)} exceeds ${CPU_COUNT} cores — ` +
+    `machine is oversubscribed. Expect 2-3× slower turbopack compile. ` +
+    `Prefer \`pnpm rebuild\` (pauses jobs) or wait for load to drop.`
+  );
+}
 
 // ── Sampler (covers ALL child processes spawned during this run) ──────
 let maxRssKb = 0;
 let maxCpuPct = 0;
 let cpuSamples = 0;
 let cpuTotal = 0;
+let maxLoad1 = startLoad1;
+let loadTotal = 0;
+let loadSamples = 0;
 let currentChildPid = null;
 
 function descendantPids(rootPid) {
@@ -107,6 +165,12 @@ function samplePidStats(pids) {
 let sampler = null;
 if (!skipMetrics) {
   sampler = setInterval(() => {
+    // Sample system load every tick (cheap, no child needed) so we can
+    // attribute slow builds to host contention after the fact.
+    const l1 = loadavg()[0];
+    if (l1 > maxLoad1) maxLoad1 = l1;
+    loadTotal += l1;
+    loadSamples += 1;
     if (currentChildPid === null) return;
     const stats = samplePidStats(descendantPids(currentChildPid));
     if (!stats) return;
@@ -286,6 +350,14 @@ async function persist(exitCode) {
       peak_pct_of_total: Math.round((peakRssMb / 1024 / TOTAL_RAM_GB) * 100),
     },
     host: { cpu_count: CPU_COUNT, total_ram_gb: Math.round(TOTAL_RAM_GB) },
+    load: skipMetrics ? null : {
+      start_1m: Math.round(startLoad1 * 100) / 100,
+      peak_1m: Math.round(maxLoad1 * 100) / 100,
+      avg_1m: loadSamples > 0 ? Math.round((loadTotal / loadSamples) * 100) / 100 : null,
+      // >1 means demand exceeded core count for at least part of the build —
+      // the build was CPU-starved and the wall time is inflated accordingly.
+      peak_oversubscription: Math.round((maxLoad1 / CPU_COUNT) * 100) / 100,
+    },
     next_size_mb: existsSync(resolve(REPO_ROOT, '.next/server'))
       ? Math.round(statSync(resolve(REPO_ROOT, '.next/server')).size / 1024 / 1024) || null
       : null,
@@ -310,6 +382,9 @@ async function persist(exitCode) {
   if (!skipMetrics) {
     console.log(`[build-metrics] cpu peak=${peakCpuPct}% (${Math.round(peakCoreSat)}% of ${CPU_COUNT}-core capacity) · avg=${avgCpu}%`);
     console.log(`[build-metrics] rss peak=${(peakRssMb / 1024).toFixed(2)} GB (${Math.round((peakRssMb / 1024 / TOTAL_RAM_GB) * 100)}% of ${TOTAL_RAM_GB.toFixed(0)} GB)`);
+    const oversub = maxLoad1 / CPU_COUNT;
+    const loadFlag = oversub > 1 ? ` ⚠ ${oversub.toFixed(1)}× oversubscribed — wall time inflated by host contention` : '';
+    console.log(`[build-metrics] load 1m start=${startLoad1.toFixed(1)} peak=${maxLoad1.toFixed(1)} avg=${loadSamples > 0 ? (loadTotal / loadSamples).toFixed(1) : '?'} (${CPU_COUNT} cores)${loadFlag}`);
   }
   if (traceSummary) {
     console.log(`[build-metrics] trace: next-build=${traceSummary.next_build_ms}ms · run-turbopack=${traceSummary.run_turbopack_ms}ms · use-build-worker=${traceSummary.use_build_worker}`);

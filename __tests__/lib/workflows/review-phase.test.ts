@@ -29,6 +29,11 @@ vi.mock('@/lib/jobs/redacted-log-writer', () => ({
   appendRedactedFileSync: (...args: unknown[]) => appendRedactedFileSyncMock(...args),
 }));
 
+const safeStartOrchestratorMock = vi.fn();
+vi.mock('@/lib/workflows/safe-start-orchestrator', () => ({
+  safeStartOrchestrator: (...args: unknown[]) => safeStartOrchestratorMock(...args),
+}));
+
 import { releaseReviewPhaseWorkflow } from '@/lib/workflows/phases/review-phase';
 
 describe('releaseReviewPhaseWorkflow', () => {
@@ -40,6 +45,7 @@ describe('releaseReviewPhaseWorkflow', () => {
     updateJobMock.mockReset();
     markDoneMock.mockReset().mockResolvedValue(undefined);
     appendRedactedFileSyncMock.mockReset();
+    safeStartOrchestratorMock.mockReset().mockResolvedValue(undefined);
   });
 
   function startOk() {
@@ -172,6 +178,62 @@ describe('releaseReviewPhaseWorkflow', () => {
     }));
   });
 
+  it('attaches to an in-progress review of the same project instead of aborting the release', async () => {
+    // Boot-recovery re-drive raced an already-running review → 409. The phase
+    // must attach to that review and continue, NOT finalize the release.
+    startProjectReviewMock.mockResolvedValue({
+      ok: false,
+      status: 409,
+      detail: 'Review already in progress for test-tt (PID 68968)',
+      blockingJobId: 'inflight-review-1',
+    });
+    getJobMock.mockImplementation((id: string) =>
+      id === 'inflight-review-1'
+        ? { id: 'inflight-review-1', kind: 'review', project: 'test-tt', exitCode: 0, verdict: 'LGTM' }
+        : undefined,
+    );
+    waitForJobCompletionMock.mockResolvedValue({
+      job: { id: 'inflight-review-1', kind: 'review', exitCode: 0, finishedAt: 100 },
+      finished: true,
+      reason: 'finished',
+    });
+    getVerdictMock.mockReturnValue('LGTM');
+
+    const r = await releaseReviewPhaseWorkflow('test-tt', 'release-1');
+
+    expect(waitForJobCompletionMock).toHaveBeenCalledWith('inflight-review-1');
+    expect(markDoneMock).not.toHaveBeenCalled(); // release NOT aborted
+    expect(safeStartOrchestratorMock).toHaveBeenCalled(); // chain continues
+    expect(r.ok).toBe(true);
+    if (r.ok) {
+      expect(r.jobId).toBe('inflight-review-1');
+      expect(r.verdict).toBe('LGTM');
+    }
+  });
+
+  it('does NOT attach when the 409 blocker is not a review of this project (real conflict aborts)', async () => {
+    // e.g. a pipeline-lock 409 blocked by some other job kind — genuine
+    // conflict, must finalize the release rather than attach.
+    startProjectReviewMock.mockResolvedValue({
+      ok: false,
+      status: 409,
+      detail: 'Pipeline is running for test-tt',
+      blockingJobId: 'some-release-job',
+    });
+    getJobMock.mockImplementation((id: string) =>
+      id === 'some-release-job'
+        ? { id: 'some-release-job', kind: 'release', project: 'test-tt', finishedAt: null, contextMeta: null, logPath: '/tmp/r.log' }
+        : (id === 'release-1'
+            ? { id: 'release-1', kind: 'release', finishedAt: null, contextMeta: null, logPath: '/tmp/release.log', project: 'test-tt' }
+            : undefined),
+    );
+
+    const r = await releaseReviewPhaseWorkflow('test-tt', 'release-1');
+    expect(waitForJobCompletionMock).not.toHaveBeenCalled();
+    expect(markDoneMock).toHaveBeenCalledWith(expect.objectContaining({ id: 'release-1' }), 1);
+    expect(r.ok).toBe(false);
+  });
+
   it('does not call markDone when start_failed but no releaseJobId', async () => {
     startProjectReviewMock.mockResolvedValue({
       ok: false,
@@ -206,6 +268,7 @@ describe('review-phase source guards', () => {
     'async function spawnReviewStep',
     'async function awaitReviewCompletionStep',
     'async function readReviewVerdictStep',
+    'async function resolveAttachableReviewStep',
   ])("'%s' body has the right directive", (sig) => {
     const fnIndex = SRC.indexOf(sig);
     expect(fnIndex).toBeGreaterThan(-1);

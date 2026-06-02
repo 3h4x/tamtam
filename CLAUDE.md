@@ -80,7 +80,7 @@ The `rebuild` script is now graceful by default (`scripts/rebuild-safe.sh`): it 
 
 ## Definition of Done for UI/Frontend Changes
 
-- Server running (`pnpm run rebuild` if a build is needed) before testing. In Codex sandboxed sessions, do not rebuild; use the existing reachable app if available, otherwise do static verification plus `pnpm type-check`.
+- Assume the app is **already running** and test against it. Agents must **NOT** run `pnpm build`, `pnpm run rebuild`, `pnpm start`, `pnpm restart`, or start/stop dev servers: `pnpm run rebuild` runs `pm2 stop tamtam`, which kills the very server the agent runs under and takes TamTam down. Verify with `pnpm type-check`, `pnpm lint`, and targeted tests, and do visual checks against the already-reachable app. Rebuilds/restarts are an operator action performed out-of-band, never inside an agent run.
 - Use Playwright only via MCP (`mcp__playwright__*` / Playwright MCP tools) to navigate and screenshot. Do not launch Playwright, Puppeteer, Chrome, or Chromium from shell in Codex sandboxed sessions; browser process launch is blocked there. Chrome DevTools MCP is unreliable — prefer Playwright MCP.
 - Test golden path + key edge cases visually; check adjacent features for regressions.
 - Do **NOT** claim frontend work complete without the Playwright screenshot step.

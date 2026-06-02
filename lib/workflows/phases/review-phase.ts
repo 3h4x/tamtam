@@ -37,42 +37,75 @@ export async function releaseReviewPhaseWorkflow(
 ): Promise<ReviewPhaseResult> {
   'use workflow';
   const started = await spawnReviewStep(projectName, releaseJobId);
-  if (!started.ok) {
-    // Prereq-command failure (or any other startProjectReview failure)
-    // returns before a review job row exists. Without finalizing the
-    // release here, the meta-job stays in `running` with no in-flight
-    // child until the wall-clock timeout 90 min later. Drive the release
-    // to a terminal state immediately so the trace explains the failure.
-    if (releaseJobId) {
-      const detail = `review startup failed: ${started.detail}`;
-      await finalizeReleaseOnReviewStartFailureStep(releaseJobId, detail);
+  let reviewJobId: string;
+  if (started.ok) {
+    reviewJobId = started.jobId;
+  } else {
+    // A 409 "Review already in progress" is a transient concurrency
+    // condition, not a real failure — e.g. a boot-recovery re-drive of this
+    // release (after a TamTam restart mid-pipeline) racing the review that
+    // was already running. If the blocker is itself a review of THIS
+    // project, attach to it and continue the release from its result instead
+    // of aborting: the in-flight review covers the same working tree, so its
+    // verdict is exactly what this phase needs. Aborting here stranded
+    // releases that were otherwise fine (the racing review completed cleanly).
+    const attachJobId = started.status === 409 && started.blockingJobId
+      ? await resolveAttachableReviewStep(started.blockingJobId, projectName)
+      : null;
+    if (attachJobId) {
+      reviewJobId = attachJobId;
+    } else {
+      // Prereq-command failure (or any other startProjectReview failure)
+      // returns before a review job row exists. Without finalizing the
+      // release here, the meta-job stays in `running` with no in-flight
+      // child until the wall-clock timeout 90 min later. Drive the release
+      // to a terminal state immediately so the trace explains the failure.
+      if (releaseJobId) {
+        const detail = `review startup failed: ${started.detail}`;
+        await finalizeReleaseOnReviewStartFailureStep(releaseJobId, detail);
+      }
+      return {
+        ok: false,
+        reason: 'start_failed',
+        status: started.status,
+        detail: started.detail,
+        ...(started.blockingJobId ? { blockingJobId: started.blockingJobId } : {}),
+      };
     }
-    return {
-      ok: false,
-      reason: 'start_failed',
-      status: started.status,
-      detail: started.detail,
-      ...(started.blockingJobId ? { blockingJobId: started.blockingJobId } : {}),
-    };
   }
-  const waited = await awaitReviewCompletionStep(started.jobId);
-  const verdict = waited.finished ? await readReviewVerdictStep(started.jobId) : null;
+  const waited = await awaitReviewCompletionStep(reviewJobId);
+  const verdict = waited.finished ? await readReviewVerdictStep(reviewJobId) : null;
   // Close the loop: re-dispatch the orchestrator for this sub-step so the
   // chain continues fully through workflow runs. Without this the legacy
   // reconciler's hook re-fire is the only thing that moves the chain past
   // review, and the release meta-job ends up finalized as exit=-1 by the
   // reconciler instead of by the workflow runtime.
   if (waited.finished && releaseJobId) {
-    await dispatchOrchestratorTickStep(started.jobId, projectName, releaseJobId);
+    await dispatchOrchestratorTickStep(reviewJobId, projectName, releaseJobId);
   }
   return {
     ok: true,
-    jobId: started.jobId,
+    jobId: reviewJobId,
     finished: waited.finished,
     reason: waited.reason,
     exitCode: waited.job?.exitCode ?? null,
     verdict,
   };
+}
+
+// Given the job that blocked a fresh review start, decide whether it's safe to
+// attach to instead of treating the 409 as fatal. Only an actual review job
+// for the same project qualifies — a pipeline-lock 409 (blocked by some other
+// job kind) is a genuine conflict and falls through to the failure path.
+async function resolveAttachableReviewStep(
+  blockingJobId: string,
+  projectName: string,
+): Promise<string | null> {
+  'use step';
+  const { getJob } = await import('@/lib/jobs/job-storage');
+  const j = getJob(blockingJobId);
+  if (j && j.kind === 'review' && j.project === projectName) return blockingJobId;
+  return null;
 }
 
 async function spawnReviewStep(

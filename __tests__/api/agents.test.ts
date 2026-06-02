@@ -93,6 +93,7 @@ async function applyDdl(handle: TestDbHandle): Promise<void> {
       provider text,
       fallback_enabled boolean NOT NULL DEFAULT false,
       prerequisite_command text,
+      permission_mode text,
       kind text NOT NULL DEFAULT 'user',
       created_at double precision NOT NULL,
       updated_at double precision NOT NULL
@@ -525,6 +526,43 @@ describe('agents API', () => {
       expect(response.status).toBe(400);
       const data = await response.json();
       expect(data.detail).toContain('required');
+    });
+
+    it('defaults permissionMode to null (inherit global) when omitted', async () => {
+      const request = new NextRequest('http://localhost/api/agents', {
+        method: 'POST',
+        body: JSON.stringify({ name: 'Default Perm', project: 'proj1' }),
+      });
+
+      const response = await POST(request);
+      expect(response.status).toBe(201);
+      const data = await response.json();
+      expect(data.agent.permissionMode).toBeNull();
+    });
+
+    it('persists a valid permissionMode override', async () => {
+      const request = new NextRequest('http://localhost/api/agents', {
+        method: 'POST',
+        body: JSON.stringify({ name: 'Bypass Perm', project: 'proj1', permissionMode: 'bypassPermissions' }),
+      });
+
+      const response = await POST(request);
+      expect(response.status).toBe(201);
+      const data = await response.json();
+      expect(data.agent.permissionMode).toBe('bypassPermissions');
+    });
+
+    it('rejects an unrecognized permissionMode', async () => {
+      const request = new NextRequest('http://localhost/api/agents', {
+        method: 'POST',
+        body: JSON.stringify({ name: 'Bad Perm', project: 'proj1', permissionMode: 'yolo' }),
+      });
+
+      const response = await POST(request);
+      expect(response.status).toBe(400);
+      await expect(response.json()).resolves.toMatchObject({
+        detail: expect.stringContaining('permissionMode'),
+      });
     });
 
     it('rejects unsafe agent names on create', async () => {
@@ -1059,6 +1097,65 @@ describe('agents API', () => {
       expect(response.status).toBe(200);
       const data = await response.json();
       expect(data.agent.name).toBe('New Name');
+    });
+
+    it('updates and clears a permissionMode override', async () => {
+      const db = testDb.db;
+      const now = Date.now() / 1000;
+      await db.insert(schema.agents)
+        .values({
+          id: 'agent-perm',
+          name: 'Perm Agent',
+          project: 'proj1',
+          skillIds: '[]',
+          model: 'sonnet',
+          prompt: '',
+          schedule: null,
+          createdAt: now,
+          updatedAt: now,
+        });
+
+      const set = await PATCH(new NextRequest('http://localhost/api/agents/agent-perm', {
+        method: 'PATCH',
+        body: JSON.stringify({ permissionMode: 'acceptEdits' }),
+      }), { params: Promise.resolve({ agentId: 'agent-perm' }) });
+      expect(set.status).toBe(200);
+      expect((await set.json()).agent.permissionMode).toBe('acceptEdits');
+
+      // Empty string clears the override back to inherit-global (null).
+      const cleared = await PATCH(new NextRequest('http://localhost/api/agents/agent-perm', {
+        method: 'PATCH',
+        body: JSON.stringify({ permissionMode: '' }),
+      }), { params: Promise.resolve({ agentId: 'agent-perm' }) });
+      expect(cleared.status).toBe(200);
+      expect((await cleared.json()).agent.permissionMode).toBeNull();
+    });
+
+    it('rejects an unrecognized permissionMode on update', async () => {
+      const db = testDb.db;
+      const now = Date.now() / 1000;
+      await db.insert(schema.agents)
+        .values({
+          id: 'agent-perm-bad',
+          name: 'Perm Bad',
+          project: 'proj1',
+          skillIds: '[]',
+          model: 'sonnet',
+          prompt: '',
+          schedule: null,
+          createdAt: now,
+          updatedAt: now,
+        });
+
+      const response = await PATCH(new NextRequest('http://localhost/api/agents/agent-perm-bad', {
+        method: 'PATCH',
+        body: JSON.stringify({ permissionMode: 'nope' }),
+      }), { params: Promise.resolve({ agentId: 'agent-perm-bad' }) });
+
+      expect(response.status).toBe(400);
+      await expect(response.json()).resolves.toMatchObject({
+        detail: expect.stringContaining('permissionMode'),
+      });
     });
 
     it('rejects unsafe agent names on update', async () => {

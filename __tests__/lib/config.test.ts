@@ -650,6 +650,19 @@ describe('config', () => {
         expect(getPermissionModeFlag()).toBe(`--permission-mode ${mode}`);
       }
     );
+
+    it('uses a valid per-agent override instead of the global setting', async () => {
+      await setSetting('permission_mode', 'auto');
+      await refresh();
+      expect(getPermissionModeFlag('bypassPermissions')).toBe('--permission-mode bypassPermissions');
+    });
+
+    it('falls back to the global setting when the override is null or unrecognized', async () => {
+      await setSetting('permission_mode', 'acceptEdits');
+      await refresh();
+      expect(getPermissionModeFlag(null)).toBe('--permission-mode acceptEdits');
+      expect(getPermissionModeFlag('yolo')).toBe('--permission-mode acceptEdits');
+    });
   });
 
   describe('fix_max_iterations', () => {
