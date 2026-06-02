@@ -1,7 +1,7 @@
 import { mkdtempSync, rmSync } from 'fs';
 import { tmpdir } from 'os';
 import { join } from 'path';
-import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { JobData } from '@/lib/jobs/types';
 
 describe('startInProcessAgentJob', () => {
@@ -12,18 +12,27 @@ describe('startInProcessAgentJob', () => {
   let markDone: ReturnType<typeof vi.fn>;
   let runSubprocess: ReturnType<typeof vi.fn>;
 
+  // Under vitest `silent: 'passed-only'`, console output from passing tests is
+  // buffered and flushed to the parent over RPC at worker close. The real
+  // (un-mocked) wrapForSandbox/checkPromptSize paths can emit console.warn, and
+  // a buffered onUserConsoleLog flushing as the forked worker tears down
+  // surfaces as an "EnvironmentTeardownError: Closing rpc while
+  // onUserConsoleLog was pending" unhandled rejection. Silence console for the
+  // entire file lifetime via plain assignment (not vi.spyOn) so per-test
+  // `restoreAllMocks` can't re-enable it in the inter-test / teardown windows
+  // where buffered async work would otherwise log.
+  const originalConsole = { warn: console.warn, log: console.log, error: console.error };
+  beforeAll(() => {
+    console.warn = () => {};
+    console.log = () => {};
+    console.error = () => {};
+  });
+  afterAll(() => {
+    Object.assign(console, originalConsole);
+  });
+
   beforeEach(() => {
     vi.resetModules();
-    // Under vitest `silent: 'passed-only'`, console output from passing tests is
-    // buffered and flushed to the parent over RPC at worker close. The real
-    // (un-mocked) wrapForSandbox/checkPromptSize paths can emit console.warn,
-    // and a buffered onUserConsoleLog flushing as the forked worker tears down
-    // surfaces as an "EnvironmentTeardownError: Closing rpc while
-    // onUserConsoleLog was pending" unhandled rejection. Silence console here so
-    // nothing is buffered for that flush.
-    vi.spyOn(console, 'warn').mockImplementation(() => {});
-    vi.spyOn(console, 'log').mockImplementation(() => {});
-    vi.spyOn(console, 'error').mockImplementation(() => {});
     tempDir = mkdtempSync(join(tmpdir(), 'tamtam-inline-agent-'));
     savedPids = [];
     saveToDb = vi.fn((job: JobData) => {

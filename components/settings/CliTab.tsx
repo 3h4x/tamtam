@@ -12,6 +12,7 @@ import { Pill } from '@/components/ui/Pill'
 import { Checkbox } from '@/components/ui/Checkbox'
 import { Input } from '@/components/ui/Input'
 import { Select } from '@/components/ui/Select'
+import { Textarea } from '@/components/ui/Textarea'
 
 const PROVIDER_LABELS: Record<CliProvider, string> = {
   claude: 'Claude',
@@ -311,10 +312,11 @@ export function CliTab({
           </div>
           <div>
             <label className="block text-xs text-text-secondary mb-1">Base prompt prepended to every run</label>
-            <textarea
+            <Textarea
               value={settings.base_prompt ?? ''}
               onChange={(e) => onChange('base_prompt', e.target.value)}
-              className="w-full min-h-[72px] px-3 py-2 bg-bg-primary text-text-primary border border-border rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-accent/30 focus:border-accent transition-colors font-mono"
+              resize="none"
+              className="min-h-[72px]"
             />
           </div>
         </div>
