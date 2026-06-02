@@ -29,10 +29,9 @@ export function formatReviewFrameworksBlock(frameworks: string[]): string {
   return `FRAMEWORK: ${frameworks.join(', ')}.`;
 }
 
-// Strip framework checklist sections that don't match the detected stack. The
-// model used to filter at runtime from the FRAMEWORK: line plus file-extension
-// fallbacks; since per-repo detection is deterministic, pre-filter the prompt
-// so the reviewer only sees applicable checklists.
+// Strip framework checklist sections that don't match the detected stack.
+// Since per-repo detection is deterministic, pre-filter the prompt so the
+// reviewer only sees applicable checklists.
 export function filterReviewFrameworkSections(content: string, frameworks: string[]): string {
   const enabled = new Set(frameworks.map((f) => f.split('@')[0]));
   const lines = content.split('\n');
