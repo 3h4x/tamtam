@@ -8,6 +8,7 @@ import { EmptyState } from '@/components/ui/EmptyState'
 import { Input } from '@/components/ui/Input'
 import { Pill, PillButton } from '@/components/ui/Pill'
 import { Spinner } from '@/components/ui/Spinner'
+import { Textarea } from '@/components/ui/Textarea'
 
 const DEFAULT_ACTION_COLOR = '#2563eb'
 const LEGACY_ACTION_COLORS: Record<string, string> = {
@@ -435,10 +436,11 @@ export function ConfigTab({
             <label className="block font-medium text-xs text-text-secondary mb-1" htmlFor="review-prompt-addendum">
               Review prompt addendum
             </label>
-            <textarea
+            <Textarea
               id="review-prompt-addendum"
+              inputSize="compact"
+              resize="both"
               rows={3}
-              className="w-full px-3 py-1.5 text-sm bg-bg-primary border border-border rounded-md text-text-primary font-mono focus:outline-none focus:ring-2 focus:ring-accent/30 focus:border-accent transition-colors placeholder:text-text-tertiary"
               value={reviewPromptAddendumInput}
               onChange={(e) => setReviewPromptAddendumInput(e.target.value)}
               placeholder="e.g. Treat console.log as a non-blocker for this CLI tool."
@@ -463,10 +465,11 @@ export function ConfigTab({
             <label className="block font-medium text-xs text-text-secondary mb-1" htmlFor="fix-prompt-addendum">
               Fix prompt addendum
             </label>
-            <textarea
+            <Textarea
               id="fix-prompt-addendum"
+              inputSize="compact"
+              resize="both"
               rows={3}
-              className="w-full px-3 py-1.5 text-sm bg-bg-primary border border-border rounded-md text-text-primary font-mono focus:outline-none focus:ring-2 focus:ring-accent/30 focus:border-accent transition-colors placeholder:text-text-tertiary"
               value={fixPromptAddendumInput}
               onChange={(e) => setFixPromptAddendumInput(e.target.value)}
               placeholder="e.g. Prefer minimal diffs; do not refactor unrelated code."
@@ -478,10 +481,11 @@ export function ConfigTab({
               Commit message style
               <span aria-hidden="true" className="ml-2 text-text-tertiary font-normal">.tamtam/config.yml</span>
             </label>
-            <textarea
+            <Textarea
               id="commit-style"
+              inputSize="compact"
+              resize="both"
               rows={4}
-              className="w-full px-3 py-1.5 text-sm bg-bg-primary border border-border rounded-md text-text-primary font-mono focus:outline-none focus:ring-2 focus:ring-accent/30 focus:border-accent transition-colors placeholder:text-text-tertiary"
               value={commitStyleInput}
               onChange={(e) => setCommitStyleInput(e.target.value)}
               placeholder={'e.g. Conventional commits, imperative mood, subject under 72 chars, no trailing period.\nFormat: <type>(<scope>): <description>.'}

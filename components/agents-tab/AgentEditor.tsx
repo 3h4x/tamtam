@@ -338,6 +338,7 @@ export function AgentEditor({
           </div>
           <Textarea
             id="agent-prompt"
+            appearance="elevated"
             className="min-h-[420px]"
             rows={20}
             value={agentPrompt}
@@ -359,6 +360,7 @@ export function AgentEditor({
         </label>
         <Textarea
           id="agent-prerequisite"
+          appearance="elevated"
           rows={4}
           value={prerequisiteCommand}
           onChange={(e) => setPrerequisiteCommand(e.target.value)}
