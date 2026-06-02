@@ -118,17 +118,17 @@ describe.concurrent('codex-shim', () => {
   });
 
   it('maps dontAsk to workspace-write sandbox without approval prompts', () => {
-    const args = shim.permissionArgsFor('dontAsk');
+    const args = shim.permissionArgsFor('dontAsk', {});
     expect(args).toEqual(['-a', 'never', '--sandbox', 'workspace-write']);
   });
 
   it('maps acceptEdits to workspace-write sandbox without approval prompts', () => {
-    const args = shim.permissionArgsFor('acceptEdits');
+    const args = shim.permissionArgsFor('acceptEdits', {});
     expect(args).toEqual(['-a', 'never', '--sandbox', 'workspace-write']);
   });
 
   it('maps default to workspace-write sandbox without approval prompts', () => {
-    const args = shim.permissionArgsFor('default');
+    const args = shim.permissionArgsFor('default', {});
     expect(args).toEqual(['-a', 'never', '--sandbox', 'workspace-write']);
   });
 
