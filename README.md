@@ -50,7 +50,7 @@ TamTam is a single Next.js 16 (App Router) application backed by Postgres. The N
                         │                          │
                         ▼                          ▼
         ┌─────────────────────────────┐   ┌────────────────────────┐
-        │ Postgres 16 + pgvector      │   │ Ollama (local, opt.)   │
+        │ Postgres 18 + pgvector      │   │ Ollama (local, opt.)   │
         │ (Drizzle ORM, node-postgres)│   │ embeddings for         │
         │  · jobs, agents, skills,    │   │ pgvector retrieval     │
         │    projects, settings…      │   └────────────────────────┘
@@ -65,7 +65,7 @@ TamTam is a single Next.js 16 (App Router) application backed by Postgres. The N
 ## Stack
 
 - **Next.js 16** (App Router) — frontend, API routes, and SSE streaming in one process
-- **Postgres 16 + pgvector** via `pg.Pool` + Drizzle ORM — main source of truth for jobs, agents, skills, settings, and retrieval embeddings
+- **Postgres 18 + pgvector** via `pg.Pool` + Drizzle ORM — main source of truth for jobs, agents, skills, settings, and retrieval embeddings
 - **`workflow` runtime** — `"use workflow"` / `"use step"` orchestration for agent intake (`runAgentIntakeWorkflow()`) and the release pipeline (`releaseOrchestratorWorkflow()` plus phase workflows); TamTam pins the local world by default (`WORKFLOW_TARGET_WORLD=local`, `WORKFLOW_LOCAL_DATA_DIR=data/workflow-data`) and keeps workflow data under `data/workflow-data`. A Postgres-backed workflow world is an explicit operator override, not the default.
 - **graphile-worker** — durable cron queue for scheduled agents and system maintenance
 - **PM2** — supervises the long-running TamTam server; one-shot CLI jobs are spawned in-process by workflow steps and route handlers
@@ -81,7 +81,7 @@ TamTam is developed against Node.js 24.x. The repo pins that version in [`.nvmrc
 ```bash
 nvm use               # or install Node.js 24.x with your preferred version manager
 pnpm install
-docker compose up -d postgres                                           # Postgres 16 + pgvector on :5432
+docker compose up -d postgres                                           # Postgres 18 + pgvector on :5432
 DATABASE_URL=postgres://tamtam:tamtam@localhost:5432/tamtam pnpm db:migrate
 echo 'DATABASE_URL=postgres://tamtam:tamtam@localhost:5432/tamtam' > .env.local
 pnpm run rebuild   # build + PM2-managed start/restart on :1337 (canonical after edits)
@@ -103,7 +103,7 @@ pnpm mcp:http <tool> [json_args]  # call local TamTam HTTP endpoints via .tamtam
 
 > `pnpm dev` is for active local debugging only — it runs foreground without PM2 and must not be left running as the long-lived server.
 
-> `pnpm dev:qa` starts a seeded TamTam instance at `http://localhost:1338` with `next dev` inside Docker. The working tree is bind-mounted, so code edits are picked up by the dev watcher without rebuilding the image. It uses mocked `git`, `gh`, `pm2`, and provider shims plus an isolated `pgvector/pgvector:pg16` Postgres and workspace under Compose volumes.
+> `pnpm dev:qa` starts a seeded TamTam instance at `http://localhost:1338` with `next dev` inside Docker. The working tree is bind-mounted, so code edits are picked up by the dev watcher without rebuilding the image. It uses mocked `git`, `gh`, `pm2`, and provider shims plus an isolated `pgvector/pgvector:pg18` Postgres and workspace under Compose volumes.
 
 > `pnpm mcp:http` uses the sibling `mcp-http-tools` checkout by default; set `MCP_HTTP_TOOLS_DIR` if that repo lives elsewhere.
 

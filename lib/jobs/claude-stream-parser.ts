@@ -164,7 +164,7 @@ export function parseStreamLines(content: string, options: ParseOptions = {}): P
     // turn and {"type":"system","subtype":"status","status":null} after. Suppress text
     // deltas during compaction so the raw compaction prompt/summary doesn't leak into
     // the terminal — emit a single `compacting` marker event instead.
-    if (parsed.type === 'system' && (parsed as Record<string, unknown>).subtype === 'status') {
+    if (parsed.type === 'system' && parsed.subtype === 'status') {
       const status = (parsed as Record<string, unknown>).status;
       if (status === 'compacting' && !state.isCompacting) {
         state.isCompacting = true;
