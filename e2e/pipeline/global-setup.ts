@@ -7,6 +7,7 @@ export const SHIM_DIR = join(E2E_BASE, 'shim-state');
 export const WORKSPACE_DIR = join(E2E_BASE, 'workspace');
 export const CLAUDE_SHIM = join(__dirname, 'mocks', 'claude-shim.js');
 export const CODEX_BIN = join(__dirname, 'mocks', 'codex-bin.js');
+export const GEMINI_BIN = join(__dirname, 'mocks', 'gemini-bin.js');
 
 // Projects exercised by the pipeline specs.
 const PROJECTS = [
@@ -62,6 +63,7 @@ const PROJECTS = [
   'workflow-runs-live-start-real',
   'workflow-runs-live-start-cancelled',
   'workflow-runs-live-start-failure',
+  'workflow-runs-terminal-dual-surface',
   'workflow-runs-real-success',
   'workflow-runs-real-failure',
   'workflow-runs-real-cancelled',
@@ -119,6 +121,9 @@ export default async function globalSetup(): Promise<void> {
   } catch { /* already executable */ }
   try {
     chmodSync(CODEX_BIN, 0o755);
+  } catch { /* already executable */ }
+  try {
+    chmodSync(GEMINI_BIN, 0o755);
   } catch { /* already executable */ }
 
   // Configure the test server: point workspace_path at our temp workspace,
