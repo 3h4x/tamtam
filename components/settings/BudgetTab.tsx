@@ -68,12 +68,11 @@ export function BudgetTab({
                   key={provider}
                   className="flex items-center gap-2.5 py-2 px-1 rounded hover:bg-bg-tertiary/40 cursor-pointer transition-colors"
                 >
-                  <input
-                    type="checkbox"
+                  <Checkbox
+                    variant="native"
                     checked={providers.includes(provider)}
                     disabled={providers.length === 1 && providers.includes(provider)}
                     onChange={(e) => toggleProvider(provider, e.target.checked)}
-                    className="w-4 h-4 accent-accent rounded shrink-0 cursor-pointer"
                   />
                   <div className="flex-1 min-w-0 flex items-baseline gap-1.5">
                     <span className="font-medium text-sm text-text-primary shrink-0">
