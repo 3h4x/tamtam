@@ -22,6 +22,7 @@ import { Pill } from '@/components/ui/Pill'
 import { EmptyState } from '@/components/ui/EmptyState'
 import { Input } from '@/components/ui/Input'
 import { Checkbox } from '@/components/ui/Checkbox'
+import { Select } from '@/components/ui/Select'
 import { ErrorBanner } from '@/components/ErrorBanner'
 
 interface SettingsMap {
@@ -957,14 +958,13 @@ export function SettingsPage({ initialTab }: { initialTab?: TabId } = {}) {
             <div className="px-5 py-4 grid grid-cols-2 gap-4">
               <div>
                 <label className="block font-medium text-sm text-text-primary mb-1.5">Auto-backup</label>
-                <select
+                <Select
                   value={settings.db_backup_enabled || 'true'}
                   onChange={(e) => handleChange('db_backup_enabled', e.target.value)}
-                  className="w-full px-3 py-2 bg-bg-primary text-text-primary border border-border rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-accent/30 focus:border-accent"
                 >
                   <option value="true">Enabled</option>
                   <option value="false">Disabled</option>
-                </select>
+                </Select>
                 <p className="text-xs text-text-tertiary mt-1.5">Runs in the background on the cron interval below.</p>
               </div>
               <div>

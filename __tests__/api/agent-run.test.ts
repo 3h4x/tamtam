@@ -282,13 +282,20 @@ async function applyDdl(handle: TestDbHandle): Promise<void> {
       updated_at double precision NOT NULL
     )
   `));
+  await handle.db.execute(sql.raw(`
+    CREATE TABLE IF NOT EXISTS maintenance_status (
+      key text PRIMARY KEY,
+      value text NOT NULL,
+      updated_at double precision NOT NULL
+    )
+  `));
 }
 
 async function resetAgentRunTables(handle: TestDbHandle): Promise<void> {
   // PGlite rejects multi-statement prepared queries; a single CTE keeps the
   // per-test cleanup to one round-trip.
   await handle.db.execute(sql.raw(
-    'TRUNCATE agents, skills, projects'
+    'TRUNCATE agents, skills, projects, maintenance_status'
   ));
 }
 
@@ -896,6 +903,7 @@ Use the QA agent.
 
   it('drains the queued different agent after a pre-start failure by the slot holder', async () => {
     await insertAgent({ schedule: '1h' });
+    await insertAgent({ id: 'agent-456', name: 'Other Agent', schedule: '1h' });
     const pendingStart = deferred<void>();
     mocks.tryClaimAgentStartSlot.mockReturnValueOnce({ ok: true });
     mocks.startJob.mockImplementationOnce(async () => {
@@ -913,13 +921,12 @@ Use the QA agent.
     void pendingFirst.catch(() => undefined);
     await Promise.resolve();
 
-    mocks.tryClaimAgentStartSlot.mockReturnValueOnce({ ok: false, runningAgent: 'Other Agent' });
-    const otherReq = new NextRequest('http://localhost/api/agents/agent-123/run', {
+    const otherReq = new NextRequest('http://localhost/api/agents/agent-456/run', {
       method: 'POST',
       headers: { 'x-tamtam-trigger': 'schedule' },
       body: JSON.stringify({ prompt: 'queued prompt' }),
     });
-    const queuedRes = await POST(otherReq, { params: Promise.resolve({ agentId: 'agent-123' }) });
+    const queuedRes = await POST(otherReq, { params: Promise.resolve({ agentId: 'agent-456' }) });
     pendingStart.resolve();
     const failedRes = await pendingFirst;
 
