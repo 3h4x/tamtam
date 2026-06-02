@@ -11,9 +11,7 @@ import { loadQuotaSnapshot } from '@/lib/client/quota'
 import { Pill } from '@/components/ui/Pill'
 import { Checkbox } from '@/components/ui/Checkbox'
 import { Input } from '@/components/ui/Input'
-
-const SELECT_CLASS =
-  'w-full h-10 px-3 py-2 bg-bg-primary text-text-primary border border-border rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-accent/30 focus:border-accent transition-colors font-mono appearance-none'
+import { Select } from '@/components/ui/Select'
 
 const PROVIDER_LABELS: Record<CliProvider, string> = {
   claude: 'Claude',
@@ -196,15 +194,15 @@ export function CliTab({
                     </div>
                     <div>
                       <label className="block text-xs text-text-tertiary mb-1">Default model tier for {PROVIDER_LABELS[provider]}</label>
-                      <select
+                      <Select
                         value={settings[`cli_default_model_${provider}`] || 'normal'}
                         onChange={(e) => onChange(`cli_default_model_${provider}`, e.target.value)}
-                        className={SELECT_CLASS}
+                        className="font-mono"
                       >
                         {MODEL_TIERS.map((tier) => (
                           <option key={tier} value={tier}>{tier}</option>
                         ))}
-                      </select>
+                      </Select>
                     </div>
                     {provider === 'lmstudio' && (
                       <div className="md:col-span-2">
@@ -221,14 +219,14 @@ export function CliTab({
                       <div className="md:col-span-2 grid gap-4 md:grid-cols-2">
                         <div>
                           <label className="block text-xs text-text-tertiary mb-1">Local backend</label>
-                          <select
+                          <Select
                             value={settings.cli_deepagents_backend || 'lmstudio'}
                             onChange={(e) => onChange('cli_deepagents_backend', e.target.value)}
-                            className={SELECT_CLASS}
+                            className="font-mono"
                           >
                             <option value="lmstudio">LM Studio</option>
                             <option value="ollama">Ollama</option>
-                          </select>
+                          </Select>
                         </div>
                         <div>
                           <label className="block text-xs text-text-tertiary mb-1">Backend base URL</label>
@@ -284,23 +282,23 @@ export function CliTab({
           <div className="grid grid-cols-2 gap-4">
             <div>
               <label className="block text-xs text-text-secondary mb-1">Default model tier</label>
-              <select
+              <Select
                 value={settings.default_model || 'fast'}
                 onChange={(e) => onChange('default_model', e.target.value)}
-                className={SELECT_CLASS}
+                className="font-mono"
               >
                 {MODEL_TIERS.map((tier) => (
                   <option key={tier} value={tier}>{tier}</option>
                 ))}
-              </select>
+              </Select>
               <p className="text-xs text-text-tertiary mt-1">Used as the terminal UI preselect. Background launchers use the per-provider defaults above when no explicit model is supplied.</p>
             </div>
             <div>
               <label className="block text-xs text-text-secondary mb-1">Permission mode</label>
-              <select
+              <Select
                 value={settings.permission_mode || 'auto'}
                 onChange={(e) => onChange('permission_mode', e.target.value)}
-                className={SELECT_CLASS}
+                className="font-mono"
               >
                 <option value="bypassPermissions">bypassPermissions</option>
                 <option value="acceptEdits">acceptEdits</option>
@@ -308,7 +306,7 @@ export function CliTab({
                 <option value="dontAsk">dontAsk</option>
                 <option value="default">default</option>
                 <option value="plan">plan</option>
-              </select>
+              </Select>
             </div>
           </div>
           <div>
