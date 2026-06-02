@@ -331,9 +331,9 @@ export async function ghStatusLookup(
     unique[dedupCfgs[i].project] = { repo: repos[i], path: dedupCfgs[i].path ?? '' };
   }
 
-  // Probe every project's local HEAD in parallel before the staleness loop —
-  // the prior `for (await localHead(path))` walked one git rev-parse per
-  // project sequentially, multiplying per-project subprocess latency by N.
+  // Probe every project's local HEAD in parallel before the staleness loop so
+  // subprocess latency scales with the slowest project instead of the sum of
+  // every project's git rev-parse.
   const uniqueEntries = Object.entries(unique);
   const localShaList = await Promise.all(
     uniqueEntries.map(async ([, { path }]) => (path ? await localHead(path) : null)),
