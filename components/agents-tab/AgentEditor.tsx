@@ -5,6 +5,7 @@ import { fetchProjectDocs, improveAgentPrompt } from '@/lib/client-api'
 import type { Agent, Skill, Persona, ProjectDoc } from '@/lib/client-api'
 import { Button } from '@/components/ui/Button'
 import { EmptyState } from '@/components/ui/EmptyState'
+import { Input } from '@/components/ui/Input'
 import { Pill } from '@/components/ui/Pill'
 import { SegmentedControl } from '@/components/ui/SegmentedControl'
 import { Select } from '@/components/ui/Select'
@@ -226,11 +227,12 @@ export function AgentEditor({
         <div className="flex flex-col gap-4">
           <div>
             <label htmlFor="agent-name" className="block mb-1.5 text-xs font-semibold text-text-tertiary uppercase tracking-wider">Name</label>
-            <input
+            <Input
               ref={nameRef}
               id="agent-name"
               type="text"
-              className="w-full px-3 py-2 text-sm bg-bg-secondary border border-border rounded-lg text-text-primary placeholder:text-text-tertiary focus:outline-none focus:ring-2 focus:ring-accent/40 focus:border-accent transition-colors disabled:opacity-60 disabled:cursor-not-allowed"
+              fontFamily="sans"
+              className="placeholder:text-text-tertiary disabled:opacity-60 disabled:cursor-not-allowed"
               value={name}
               onChange={(e) => setName(e.target.value)}
               onKeyDown={(e) => { if (e.key === 'Enter' && name.trim()) handleSave() }}
@@ -441,9 +443,10 @@ export function AgentEditor({
 
         {contextTab === 'skills' && (
           <div className="flex flex-col gap-1.5">
-            <input
+            <Input
               type="text"
-              className="w-full px-3 py-2 text-sm bg-bg-secondary border border-border rounded-lg text-text-primary placeholder:text-text-tertiary focus:outline-none focus:ring-2 focus:ring-accent/40 focus:border-accent transition-colors disabled:opacity-60 disabled:cursor-not-allowed"
+              fontFamily="sans"
+              className="placeholder:text-text-tertiary disabled:opacity-60 disabled:cursor-not-allowed"
               value={skillSearch}
               onChange={(e) => setSkillSearch(e.target.value)}
               placeholder="Search skills and personas..."
