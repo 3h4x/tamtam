@@ -16,7 +16,6 @@ export async function POST(
     chunks: result.chunks,
     indexedSources: result.indexedSources,
     skippedSources: result.skippedSources,
-    // Pass diagnostics through as-is — was 5 lines of 1:1 field copying.
     diagnostics: result.diagnostics,
   });
 }
