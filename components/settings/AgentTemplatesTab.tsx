@@ -4,6 +4,7 @@ import { useState } from 'react'
 import { Button } from '@/components/ui/Button'
 import { EmptyState } from '@/components/ui/EmptyState'
 import { Pill } from '@/components/ui/Pill'
+import { Select } from '@/components/ui/Select'
 import { MODEL_TIERS, MODEL_LABELS, normalizeModelInput } from '@/lib/agents/model-aliases'
 
 export interface AgentTemplateRecord {
@@ -67,24 +68,22 @@ function TemplateForm({
         </div>
         <div>
           <label className="block text-xs font-medium text-text-primary mb-1">Model</label>
-          <select
+          <Select
             value={form.model}
             onChange={e => setField('model', e.target.value)}
-            className="w-full px-3 py-2 text-sm bg-bg-primary border border-border rounded-lg text-text-primary focus:outline-none focus:ring-2 focus:ring-accent/40 focus:border-accent cursor-pointer"
           >
             {TEMPLATE_MODELS.map(m => <option key={m} value={m}>{MODEL_LABELS[m]}</option>)}
-          </select>
+          </Select>
         </div>
         <div>
           <label className="block text-xs font-medium text-text-primary mb-1">Schedule</label>
-          <select
+          <Select
             value={form.schedule}
             onChange={e => setField('schedule', e.target.value)}
-            className="w-full px-3 py-2 text-sm bg-bg-primary border border-border rounded-lg text-text-primary focus:outline-none focus:ring-2 focus:ring-accent/40 focus:border-accent cursor-pointer"
           >
             <option value="">Manual</option>
             {TEMPLATE_SCHEDULES.map(s => <option key={s} value={s}>every {s}</option>)}
-          </select>
+          </Select>
         </div>
       </div>
       <div>
