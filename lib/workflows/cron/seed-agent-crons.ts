@@ -231,17 +231,24 @@ async function sweepDeadOrphansFromPg(connectionString: string): Promise<void> {
     // queue accurately reflects live agents only. File-based agents
     // (`agent-cron-file:proj:name`) are intentionally left alone — they
     // have their own lifecycle outside the `agents` DB table.
-    await pool.query(`
-      DELETE FROM graphile_worker._private_jobs j
-      USING graphile_worker._private_tasks t
-      WHERE j.task_id = t.id
-        AND t.identifier = 'agent-cron'
-        AND j.locked_at IS NULL
-        AND j.key LIKE 'agent-cron-agent-%'
-        AND replace(j.key, 'agent-cron-', '') NOT IN (
-          SELECT id FROM agents WHERE enabled AND schedule IS NOT NULL AND schedule != ''
-        )
-    `);
+    try {
+      await pool.query(`
+        DELETE FROM graphile_worker._private_jobs j
+        USING graphile_worker._private_tasks t
+        WHERE j.task_id = t.id
+          AND t.identifier = 'agent-cron'
+          AND j.locked_at IS NULL
+          AND j.key LIKE 'agent-cron-agent-%'
+          AND replace(j.key, 'agent-cron-', '') NOT IN (
+            SELECT id FROM agents WHERE enabled AND schedule IS NOT NULL AND schedule != ''
+          )
+      `);
+    } catch (err) {
+      // 42P01 = undefined_table: agents table doesn't exist yet on a fresh DB
+      // (migrations haven't run). Skip silently — there are no orphan rows to
+      // sweep on a brand-new schema.
+      if ((err as { code?: string }).code !== '42P01') throw err;
+    }
     // (3) Keyed rows scheduled absurdly far in the future (more than 60
     // days out). The cron task should never produce such a value — every
     // supported schedule unit caps at 30 days. A row with `run_at > now()
