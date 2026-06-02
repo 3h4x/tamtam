@@ -11,6 +11,7 @@ import { ErrorState } from '@/components/ErrorState'
 import { Button } from '@/components/ui/Button'
 import { EmptyState } from '@/components/ui/EmptyState'
 import { Pill } from '@/components/ui/Pill'
+import { Select } from '@/components/ui/Select'
 import { Table, type Column } from '@/components/ui/Table'
 
 type RunHistoryEntry = TaskDetail['run_history'][number]
@@ -145,8 +146,9 @@ export function TaskDetailPage({
             </Pill>
             {task.fires_at && <span className="text-text-secondary text-sm">{task.fires_at}</span>}
             {task.priority && (
-              <select
-                className="px-2 py-1 text-sm bg-bg-secondary border border-border rounded-md text-text-primary"
+              <Select
+                surface="secondary"
+                size="compact"
                 value={task.priority || ''}
                 onChange={async (e) => {
                   const val = e.target.value
@@ -159,7 +161,7 @@ export function TaskDetailPage({
                 {priorities.map((p) => (
                   <option key={p} value={p}>{p}</option>
                 ))}
-              </select>
+              </Select>
             )}
             {task.ci === 'success' && <span className="text-status-success">CI ✓</span>}
             {task.ci === 'failure' && (

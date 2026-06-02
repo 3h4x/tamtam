@@ -14,6 +14,16 @@ describe('startInProcessAgentJob', () => {
 
   beforeEach(() => {
     vi.resetModules();
+    // Under vitest `silent: 'passed-only'`, console output from passing tests is
+    // buffered and flushed to the parent over RPC at worker close. The real
+    // (un-mocked) wrapForSandbox/checkPromptSize paths can emit console.warn,
+    // and a buffered onUserConsoleLog flushing as the forked worker tears down
+    // surfaces as an "EnvironmentTeardownError: Closing rpc while
+    // onUserConsoleLog was pending" unhandled rejection. Silence console here so
+    // nothing is buffered for that flush.
+    vi.spyOn(console, 'warn').mockImplementation(() => {});
+    vi.spyOn(console, 'log').mockImplementation(() => {});
+    vi.spyOn(console, 'error').mockImplementation(() => {});
     tempDir = mkdtempSync(join(tmpdir(), 'tamtam-inline-agent-'));
     savedPids = [];
     saveToDb = vi.fn((job: JobData) => {
