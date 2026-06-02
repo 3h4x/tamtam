@@ -41,6 +41,7 @@ export type DispatchPhaseOutcome =
   | { dispatched: true; phase: NextPhase['next']; childRunId: string }
   | { dispatched: false; reason: 'terminal'; phase: 'done' | 'abort' | 'unknown' }
   | { dispatched: false; reason: 'missing_context'; phase: NextPhase['next']; missing: string[] }
+  | { dispatched: false; reason: 'duplicate_suppressed'; phase: NextPhase['next'] }
   | { dispatched: false; reason: 'dispatch_failed'; phase: NextPhase['next']; error: string };
 
 export async function dispatchPhase(
@@ -65,14 +66,15 @@ export async function dispatchPhase(
   // `start(release*PhaseWorkflow, ...)` and we end up with TWO push or
   // TWO fix jobs running side-by-side for the same release. If a child
   // step of the target kind is already in-flight for this release, skip
-  // the dispatch — the existing run will progress the chain.
+  // the dispatch — the existing run (and the orchestrator tick that owns it)
+  // will progress the chain. This is a BENIGN concurrency condition, NOT a
+  // failure: the in-flight child covers the same working tree. It gets its
+  // own `duplicate_suppressed` reason so the orchestrator bows out without
+  // finalizing the release as aborted (see release-orchestrator.ts). Folding
+  // it into `dispatch_failed` previously aborted healthy releases whose phase
+  // was actively running after a restart storm.
   if (ctx.parentJobId && await releaseHasInFlightChildOfKind(ctx.parentJobId, decision.next)) {
-    return {
-      dispatched: false,
-      reason: 'dispatch_failed',
-      phase: decision.next,
-      error: `duplicate dispatch suppressed: in-flight ${decision.next} child already exists for release ${ctx.parentJobId}`,
-    };
+    return { dispatched: false, reason: 'duplicate_suppressed', phase: decision.next };
   }
 
   // Retry once on transient chunk-load errors. Next.js sometimes throws

@@ -7,6 +7,7 @@ import { resolveProjectPath } from '@/lib/shared/project-data';
 import { getJob, createJob, readParsedLog, probeJobStatus, updateJob, listJobs } from '@/lib/jobs/job-storage';
 import { startJobInProcess } from '@/lib/jobs/spawn-claude-detached';
 import { acquireLock, isLockOwnedByActiveRelease } from './pipeline-lock';
+import { tryClaimPipelineStartSlot, setPipelineStartSlotJob, releasePipelineStartSlot } from './pipeline-start-slot';
 import { FIX_OUTPUT_CONTRACT, stripFinalVerdict, stripShimErrors, isReviewContentTooThin } from './review-contract';
 import { isCliProvider } from '@/lib/usage/cli-providers';
 
@@ -47,6 +48,16 @@ export async function startFixFromJob(sourceJobId: string): Promise<StartFixResu
     }
   }
 
+  // Atomic per-(release, phase) start claim. The dup guard above is keyed on
+  // the source job; two DIFFERENT sources under the SAME release (e.g. two
+  // racing review jobs) bypass it. Claim on the release so only one fix runs
+  // per release at a time. No-op for standalone (non-release) fixes.
+  const releaseId = sourceJob.releaseId ?? null;
+  const startClaim = tryClaimPipelineStartSlot(releaseId, 'fix');
+  if (!startClaim.ok) {
+    return { ok: false, status: 409, detail: `Fix already in progress for ${projectName}`, blockingJobId: startClaim.jobId ?? undefined };
+  }
+  try {
   const { logDir } = getImproveConfig();
   const projPath = resolveProjectPath(projectName);
   if (!projPath) return { ok: false, status: 404, detail: 'project not found' };
@@ -158,6 +169,7 @@ Do not commit — just make the code changes.${fixAddendum}
   }
 
   const job = createJob(projectName, 'fix', 0, '', undefined, undefined, undefined, undefined, undefined, undefined, sourceJob.id);
+  setPipelineStartSlotJob(releaseId, 'fix', job.id);
   job.provider = provider;
   const logPath = join(/*turbopackIgnore: true*/ logDir, `${job.id}.log`);
   job.logPath = logPath;
@@ -199,4 +211,7 @@ Do not commit — just make the code changes.${fixAddendum}
   }
 
   return { ok: true, jobId: job.id, pid: job.pid };
+  } finally {
+    releasePipelineStartSlot(releaseId, 'fix');
+  }
 }

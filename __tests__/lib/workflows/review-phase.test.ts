@@ -268,7 +268,6 @@ describe('review-phase source guards', () => {
     'async function spawnReviewStep',
     'async function awaitReviewCompletionStep',
     'async function readReviewVerdictStep',
-    'async function resolveAttachableReviewStep',
   ])("'%s' body has the right directive", (sig) => {
     const fnIndex = SRC.indexOf(sig);
     expect(fnIndex).toBeGreaterThan(-1);

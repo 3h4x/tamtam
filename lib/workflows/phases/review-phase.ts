@@ -11,6 +11,7 @@
 import type { StartReviewResult } from '@/lib/pipeline/start-review';
 import type { WaitForJobResult } from '@/lib/workflows/wait-for-job';
 import { safeStartOrchestrator } from '@/lib/workflows/safe-start-orchestrator';
+import { resolveAttachableInflightStep } from '@/lib/workflows/phases/attach-inflight';
 
 export type ReviewVerdict = 'LGTM' | 'NEEDS ATTENTION' | 'DO NOT SHIP' | null;
 
@@ -50,7 +51,7 @@ export async function releaseReviewPhaseWorkflow(
     // verdict is exactly what this phase needs. Aborting here stranded
     // releases that were otherwise fine (the racing review completed cleanly).
     const attachJobId = started.status === 409 && started.blockingJobId
-      ? await resolveAttachableReviewStep(started.blockingJobId, projectName)
+      ? await resolveAttachableInflightStep(started.blockingJobId, projectName, 'review')
       : null;
     if (attachJobId) {
       reviewJobId = attachJobId;
@@ -91,21 +92,6 @@ export async function releaseReviewPhaseWorkflow(
     exitCode: waited.job?.exitCode ?? null,
     verdict,
   };
-}
-
-// Given the job that blocked a fresh review start, decide whether it's safe to
-// attach to instead of treating the 409 as fatal. Only an actual review job
-// for the same project qualifies — a pipeline-lock 409 (blocked by some other
-// job kind) is a genuine conflict and falls through to the failure path.
-async function resolveAttachableReviewStep(
-  blockingJobId: string,
-  projectName: string,
-): Promise<string | null> {
-  'use step';
-  const { getJob } = await import('@/lib/jobs/job-storage');
-  const j = getJob(blockingJobId);
-  if (j && j.kind === 'review' && j.project === projectName) return blockingJobId;
-  return null;
 }
 
 async function spawnReviewStep(

@@ -352,6 +352,32 @@ export async function startRelease(projectName: string, options: StartReleaseOpt
     // done, and release the lock — mirroring boot recovery.
     try {
       const releaseJob = getJob(releaseJobId);
+      // A 409 is transient: another driver already started this phase for the
+      // release (e.g. a boot-recovery resume that won the atomic start claim).
+      // Don't finalize — the in-flight step + orchestrator will drive the
+      // chain. Leaving the release running (and the lock held by the in-flight
+      // holder) is correct; the probe sweep reaps it if the holder vanished.
+      // Bow out silently BEFORE writing any failure state: the release is
+      // healthy, so persisting a `releaseStopReason` or appending a "failed"
+      // log line would make a running release read as failed to the operator.
+      if (result.status === 409) {
+        return result;
+      }
+      // Persist + log the failure reason. Previously the release row was
+      // finalized exit 1 with NO recorded detail, so a blocked release showed
+      // an empty log and the operator couldn't tell why it didn't continue.
+      if (releaseJob) {
+        try {
+          const meta = releaseJob.contextMeta ? JSON.parse(releaseJob.contextMeta) : {};
+          const merged = (meta && typeof meta === 'object' && !Array.isArray(meta)) ? meta as Record<string, unknown> : {};
+          merged.releaseStopReason = `release first-step failed: ${result.detail}`;
+          releaseJob.contextMeta = JSON.stringify(merged);
+          updateJob(releaseJob);
+        } catch { /* best-effort */ }
+        if (releaseJob.logPath) {
+          try { appendRedactedFileSync(releaseJob.logPath, `\n# release first-step failed: ${result.detail}\n`); } catch {}
+        }
+      }
       if (releaseJob && releaseJob.finishedAt === null) {
         const { finalizeReleaseJob } = await import('@/lib/jobs/lifecycle');
         await finalizeReleaseJob(releaseJob, 1);

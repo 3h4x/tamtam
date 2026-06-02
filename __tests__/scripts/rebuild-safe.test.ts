@@ -28,6 +28,15 @@ fi
 pnpm() {
   return 1
 }
+# Stub pm2 too: with DRAIN_TIMEOUT=0 the drain loop breaks (not exits) and the
+# script proceeds to stop_server(), which otherwise runs the REAL
+# \`pm2 stop tamtam\` / \`pm2 delete tamtam\` against the live server running this
+# very test suite (the pre-push hook runs \`pnpm test\`). Returning non-zero makes
+# \`pm2 describe tamtam\` fail so stop_server treats it as "no entry — nothing to
+# stop" and never touches a real process. Keeps the test hermetic.
+pm2() {
+  return 1
+}
 `);
 
       const result = spawnSync('bash', ['scripts/rebuild-safe.sh'], {

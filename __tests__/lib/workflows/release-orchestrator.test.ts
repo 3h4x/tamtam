@@ -797,6 +797,47 @@ Verdict: NEEDS ATTENTION
     expect(release.contextMeta).toContain('missing context for push dispatch: prevJobId');
   });
 
+  it('does NOT finalize the release when dispatch is duplicate_suppressed', async () => {
+    // Regression: a concurrent orchestrator resume (boot recovery / completion
+    // router / pre-restart zombie tick) already started this phase. The
+    // suppression is benign — the in-flight child drives the chain — so this
+    // tick must bow out without aborting the release. Previously this was a
+    // `dispatch_failed` and aborted healthy releases (e.g. an LGTM review still
+    // in-flight when a zombie tick tried to re-dispatch review).
+    const release = {
+      id: 'rel-dup',
+      kind: 'release',
+      project: 'test-tt',
+      finishedAt: null,
+      contextMeta: null,
+      logPath: null,
+    };
+    waitForJobCompletionMock.mockResolvedValue({
+      job: { id: 'review-dup', kind: 'review', exitCode: 0, finishedAt: 400 },
+      finished: true,
+      reason: 'finished',
+    });
+    getJobMock.mockImplementation((id: string) =>
+      id === 'rel-dup'
+        ? release
+        : id === 'review-dup'
+          ? { id: 'review-dup', kind: 'review', exitCode: 0 }
+          : null,
+    );
+    dispatchPhaseMock.mockResolvedValue({
+      dispatched: false,
+      reason: 'duplicate_suppressed',
+      phase: 'review',
+    });
+    const result = await releaseOrchestratorWorkflow('review-dup', {
+      projectName: 'test-tt',
+      parentJobId: 'rel-dup',
+    });
+    expect(finalizeAbortedReleaseMock).not.toHaveBeenCalled();
+    expect(release.contextMeta).toBeNull();
+    expect(result.dispatch).toMatchObject({ reason: 'duplicate_suppressed' });
+  });
+
   it('forwards full DispatchContext (dodOverride, parentJobId, prevJobId)', async () => {
     waitForJobCompletionMock.mockResolvedValue({
       job: { id: 'push-1', kind: 'push', exitCode: 1, finishedAt: 100 },

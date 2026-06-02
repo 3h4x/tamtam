@@ -4,6 +4,8 @@ import { resolve } from 'path';
 
 const startProjectTestMock = vi.fn();
 const waitForJobCompletionMock = vi.fn();
+const getJobMock = vi.fn();
+const safeStartOrchestratorMock = vi.fn();
 
 vi.mock('@/lib/pipeline/start-test', () => ({
   startProjectTest: (...args: unknown[]) => startProjectTestMock(...args),
@@ -13,12 +15,46 @@ vi.mock('@/lib/workflows/wait-for-job', () => ({
   waitForJobCompletion: (...args: unknown[]) => waitForJobCompletionMock(...args),
 }));
 
+vi.mock('@/lib/jobs/job-storage', () => ({
+  getJob: (...args: unknown[]) => getJobMock(...args),
+}));
+
+vi.mock('@/lib/workflows/safe-start-orchestrator', () => ({
+  safeStartOrchestrator: (...args: unknown[]) => safeStartOrchestratorMock(...args),
+}));
+
 import { releaseTestPhaseWorkflow } from '@/lib/workflows/phases/test-phase';
 
 describe('releaseTestPhaseWorkflow', () => {
   beforeEach(() => {
     startProjectTestMock.mockReset();
     waitForJobCompletionMock.mockReset();
+    getJobMock.mockReset();
+    safeStartOrchestratorMock.mockReset().mockResolvedValue(undefined);
+  });
+
+  it('attaches to an in-flight test of the same project on a 409 instead of aborting', async () => {
+    startProjectTestMock.mockResolvedValue({
+      ok: false,
+      status: 409,
+      detail: 'Tests already running for test-tt',
+      blockingJobId: 'inflight-test-1',
+    });
+    getJobMock.mockImplementation((id: string) =>
+      id === 'inflight-test-1'
+        ? { id: 'inflight-test-1', kind: 'test', project: 'test-tt', exitCode: 0 }
+        : undefined,
+    );
+    waitForJobCompletionMock.mockResolvedValue({
+      job: { id: 'inflight-test-1', kind: 'test', exitCode: 0, finishedAt: 100 },
+      finished: true,
+      reason: 'finished',
+    });
+
+    const r = await releaseTestPhaseWorkflow('test-tt', 'release-1');
+    expect(waitForJobCompletionMock).toHaveBeenCalledWith('inflight-test-1');
+    expect(r.ok).toBe(true);
+    if (r.ok) expect(r.jobId).toBe('inflight-test-1');
   });
 
   it('returns ok with exit code on a successful test run', async () => {

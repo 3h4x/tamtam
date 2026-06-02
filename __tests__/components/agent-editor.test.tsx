@@ -132,6 +132,7 @@ describe('AgentEditor', () => {
         provider: null,
         fallbackEnabled: false,
         prerequisiteCommand: null,
+        permissionMode: null,
       })
     })
 
@@ -304,6 +305,7 @@ describe('AgentEditor', () => {
         provider: 'codex',
         fallbackEnabled: false,
         prerequisiteCommand: null,
+        permissionMode: null,
       })
     })
 

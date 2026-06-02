@@ -15,6 +15,7 @@ import { withBasePrompt, getPermissionModeFlag, getSettings, getPipelineModel } 
 import { loadFileConfig } from '@/lib/skills/tamtam-file-config';
 import { resolveAutoAttachedDocs, formatAutoAttachedDocsBlock } from '@/lib/skills/auto-attach-docs';
 import { getLock, acquireLock, isLockOwnedByActiveRelease } from './pipeline-lock';
+import { tryClaimPipelineStartSlot, setPipelineStartSlotJob, releasePipelineStartSlot } from './pipeline-start-slot';
 import { extractFindingIds, REVIEW_OUTPUT_CONTRACT, stripFinalVerdict } from './review-contract';
 import { detectReviewFrameworks, filterReviewFrameworkSections, formatReviewFrameworksBlock } from './review-frameworks';
 import { reviewablePathsFromStatus, statusHasNonTamtamPath, statusPath } from '@/lib/pipeline/review-scope';
@@ -318,6 +319,19 @@ export async function startProjectReview(
     }
   }
 
+  // Atomic per-(release, phase) start claim. The running-job check below is
+  // check-then-create: a phase workflow doesn't create its job until after
+  // this point, so N concurrent orchestrator resumes (after a restart) all
+  // pass the check and all create a review. Hold a synchronous in-process slot
+  // across the check→createJob window so only the first caller proceeds; a
+  // loser gets 409 + the in-flight job id to attach to. No-op when not
+  // release-linked (currentParent() null → standalone review).
+  const releaseId = currentParent();
+  const startClaim = tryClaimPipelineStartSlot(releaseId, 'review');
+  if (!startClaim.ok) {
+    return { ok: false, status: 409, detail: `Review already in progress for ${projectName}`, blockingJobId: startClaim.jobId ?? undefined };
+  }
+  try {
   const jobs = listJobs();
   const running = jobs.filter(
     (j) => j.project === projectName && j.kind === 'review' && j.finishedAt === null
@@ -389,6 +403,7 @@ export async function startProjectReview(
     ? JSON.stringify({ autoAttachedDocs: autoDocs.map((d) => d.rulePath) })
     : undefined;
   const job = createJob(projectName, 'review', 0, '', undefined, contextMeta);
+  setPipelineStartSlotJob(releaseId, 'review', job.id);
   job.provider = provider;
   const logPath = join(logDir, `${job.id}.log`);
   job.logPath = logPath;
@@ -422,4 +437,7 @@ export async function startProjectReview(
   }
 
   return { ok: true, jobId: job.id, pid: job.pid, logPath };
+  } finally {
+    releasePipelineStartSlot(releaseId, 'review');
+  }
 }

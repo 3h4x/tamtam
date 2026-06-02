@@ -68,7 +68,25 @@ export async function releaseOrchestratorWorkflow(
   //                            that the caller didn't pass. Programmer error;
   //                            finalize and surface so it doesn't silently
   //                            hang the release.
+  //   - `duplicate_suppressed` — another orchestrator run already started this
+  //                            phase for the same release. Benign; bow out
+  //                            without finalizing so the in-flight child drives
+  //                            the chain.
   if (dispatch.dispatched === false && ctx.parentJobId) {
+    // Duplicate dispatch suppressed: an in-flight child of this kind already
+    // exists for the release (a concurrent orchestrator resume — boot
+    // recovery, the completion-event router, or a pre-restart tick — beat us
+    // to it). The in-flight child covers the same working tree and the
+    // orchestrator tick that owns it will progress the chain. Bow out WITHOUT
+    // finalizing: finalizing here would abort a healthy release whose phase is
+    // actively running (e.g. an LGTM review still in-flight when a zombie tick
+    // from a restart storm tried to re-dispatch review).
+    if (dispatch.reason === 'duplicate_suppressed') {
+      console.warn(
+        `[release-orchestrator] duplicate ${dispatch.phase} dispatch suppressed for ${ctx.parentJobId} — in-flight child owns the chain; leaving release running`,
+      );
+      return { waited, decision, dispatch };
+    }
     // Transient chunk-load dispatch failures (Next.js rewrote .next during
     // a rebuild while this orchestrator tick was importing the next phase
     // workflow) are NOT terminal — the release-reconcile probe sweep will

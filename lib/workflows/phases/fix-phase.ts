@@ -10,6 +10,7 @@
 import type { StartFixResult } from '@/lib/pipeline/start-fix';
 import type { WaitForJobResult } from '@/lib/workflows/wait-for-job';
 import { safeStartOrchestrator } from '@/lib/workflows/safe-start-orchestrator';
+import { resolveAttachableInflightStep } from '@/lib/workflows/phases/attach-inflight';
 
 export type FixPhaseResult =
   | {
@@ -36,25 +37,37 @@ export async function releaseFixPhaseWorkflow(
 ): Promise<FixPhaseResult> {
   'use workflow';
   const started = await spawnFixStep(sourceJobId, releaseJobId);
-  if (!started.ok) {
-    return {
-      ok: false,
-      reason: 'start_failed',
-      sourceJobId,
-      status: started.status,
-      detail: started.detail,
-      ...(started.blockingJobId ? { blockingJobId: started.blockingJobId } : {}),
-    };
+  let fixJobId: string;
+  if (started.ok) {
+    fixJobId = started.jobId;
+  } else {
+    // A 409 means a fix for this release is already in flight (lost the atomic
+    // start claim, e.g. two racing review sources under one release). Attach
+    // to it and continue instead of aborting the release.
+    const attach = started.status === 409 && projectName
+      ? await resolveAttachableInflightStep(started.blockingJobId, projectName, 'fix')
+      : null;
+    if (!attach) {
+      return {
+        ok: false,
+        reason: 'start_failed',
+        sourceJobId,
+        status: started.status,
+        detail: started.detail,
+        ...(started.blockingJobId ? { blockingJobId: started.blockingJobId } : {}),
+      };
+    }
+    fixJobId = attach;
   }
-  const waited = await awaitFixCompletionStep(started.jobId);
+  const waited = await awaitFixCompletionStep(fixJobId);
   // Re-dispatch the orchestrator so the chain progresses through workflow
   // runs (typically fix → test for another verification round).
   if (waited.finished && projectName && releaseJobId) {
-    await dispatchOrchestratorTickStep(started.jobId, projectName, releaseJobId);
+    await dispatchOrchestratorTickStep(fixJobId, projectName, releaseJobId);
   }
   return {
     ok: true,
-    jobId: started.jobId,
+    jobId: fixJobId,
     sourceJobId,
     finished: waited.finished,
     reason: waited.reason,

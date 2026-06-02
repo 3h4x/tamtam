@@ -250,11 +250,12 @@ describe('dispatchPhase', () => {
     ]);
     const decision: NextPhase = { next: 'push', from: 'commit' };
     const r = await dispatchPhase(decision, { projectName: 'p', parentJobId: 'release-1' });
+    // Benign concurrency condition — its own reason so the orchestrator bows
+    // out instead of aborting the release (see release-orchestrator.test.ts).
     expect(r).toMatchObject({
       dispatched: false,
-      reason: 'dispatch_failed',
+      reason: 'duplicate_suppressed',
       phase: 'push',
-      error: expect.stringContaining('duplicate dispatch suppressed'),
     });
     expect(startMock).not.toHaveBeenCalled();
   });

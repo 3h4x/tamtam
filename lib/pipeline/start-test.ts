@@ -8,6 +8,7 @@ import { buildChildEnv } from '@/lib/shared/child-env';
 import { shellQuote } from '@/lib/shared/shell';
 import { createJob, listJobs, probeJobStatus, updateJob, markDone } from '@/lib/jobs/job-storage';
 import { getLock, acquireLock, isLockOwnedByActiveRelease } from './pipeline-lock';
+import { tryClaimPipelineStartSlot, setPipelineStartSlotJob, releasePipelineStartSlot } from './pipeline-start-slot';
 import { checkCliStartGate } from '@/lib/usage/resolve-provider';
 import { findBlockingRunningJob } from '@/lib/jobs/project-active-job';
 import { markCloseHandlerPending, clearCloseHandlerPending } from '@/lib/jobs/spawned-close-pending';
@@ -129,6 +130,15 @@ export async function startProjectTest(
     };
   }
 
+  // Atomic per-(release, phase) start claim — closes the check-then-create
+  // race so concurrent orchestrator resumes can't launch duplicate test jobs
+  // for one release. No-op for standalone (non-release) tests.
+  const releaseId = currentParent();
+  const startClaim = tryClaimPipelineStartSlot(releaseId, 'test');
+  if (!startClaim.ok) {
+    return { ok: false, status: 409, detail: `Tests already running for ${projectName}`, blockingJobId: startClaim.jobId ?? undefined };
+  }
+  try {
   const jobs = listJobs();
   const running = jobs.filter(
     (j) => j.project === projectName && j.kind === 'test' && j.finishedAt === null
@@ -153,6 +163,7 @@ export async function startProjectTest(
     ? JSON.stringify({ pipelineReason: REVIEW_RETEST_REASON })
     : undefined;
   const job = createJob(projectName, 'test', 0, '', undefined, contextMeta);
+  setPipelineStartSlotJob(releaseId, 'test', job.id);
   job.provider = gate.provider;
   const logPath = join(/*turbopackIgnore: true*/ logDir, `${job.id}.log`);
   job.logPath = logPath;
@@ -230,4 +241,7 @@ export async function startProjectTest(
   });
 
   return { ok: true, jobId: job.id, pid: job.pid, logPath, testCmd };
+  } finally {
+    releasePipelineStartSlot(releaseId, 'test');
+  }
 }

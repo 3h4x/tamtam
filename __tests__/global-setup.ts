@@ -1,8 +1,7 @@
+import { enforceTestDatabaseUrl } from '@/__tests__/helpers/guard-database-url';
+
 export default function globalSetup() {
-  // Tests use PGlite via __tests__/helpers/test-db.ts and mock @/lib/db.
-  // Guard: if a test accidentally imports @/lib/db before installing its mock,
-  // make the connection point at an obviously-test URL rather than production.
-  if (!process.env.DATABASE_URL) {
-    process.env.DATABASE_URL = 'postgres://tamtam_test@localhost:5432/tamtam_test';
-  }
+  // Runs once in the main process before forked workers spawn, so the override
+  // is inherited by every worker's process.env. See guard-database-url.ts.
+  enforceTestDatabaseUrl();
 }

@@ -19,6 +19,7 @@
 import type { StartTestResult } from '@/lib/pipeline/start-test';
 import type { WaitForJobResult } from '@/lib/workflows/wait-for-job';
 import { safeStartOrchestrator } from '@/lib/workflows/safe-start-orchestrator';
+import { resolveAttachableInflightStep } from '@/lib/workflows/phases/attach-inflight';
 
 export type TestPhaseResult =
   | {
@@ -44,29 +45,43 @@ export async function releaseTestPhaseWorkflow(
 ): Promise<TestPhaseResult> {
   'use workflow';
   const started = await spawnTestStep(projectName, releaseJobId, options);
-  if (!started.ok) {
-    return {
-      ok: false,
-      reason: 'start_failed',
-      status: started.status,
-      detail: started.detail,
-      ...(started.blockingJobId ? { blockingJobId: started.blockingJobId } : {}),
-    };
+  let testJobId: string;
+  let testCmd = '';
+  if (started.ok) {
+    testJobId = started.jobId;
+    testCmd = started.testCmd;
+  } else {
+    // A 409 means another orchestrator resume already started this phase's
+    // test for the release (lost the atomic start claim). Attach to the
+    // in-flight test and continue instead of aborting the release.
+    const attach = started.status === 409
+      ? await resolveAttachableInflightStep(started.blockingJobId, projectName, 'test')
+      : null;
+    if (!attach) {
+      return {
+        ok: false,
+        reason: 'start_failed',
+        status: started.status,
+        detail: started.detail,
+        ...(started.blockingJobId ? { blockingJobId: started.blockingJobId } : {}),
+      };
+    }
+    testJobId = attach;
   }
-  const waited = await awaitTestCompletionStep(started.jobId);
+  const waited = await awaitTestCompletionStep(testJobId);
   // Close the loop: re-dispatch the orchestrator for this sub-step so the
   // chain continues fully through workflow runs (test → review on pass,
   // test → fix on fail).
   if (waited.finished && releaseJobId) {
-    await dispatchOrchestratorTickStep(started.jobId, projectName, releaseJobId);
+    await dispatchOrchestratorTickStep(testJobId, projectName, releaseJobId);
   }
   return {
     ok: true,
-    jobId: started.jobId,
+    jobId: testJobId,
     finished: waited.finished,
     reason: waited.reason,
     exitCode: waited.job?.exitCode ?? null,
-    testCmd: started.testCmd,
+    testCmd,
   };
 }
 

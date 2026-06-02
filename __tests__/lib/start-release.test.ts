@@ -753,6 +753,30 @@ describe('startRelease — release pipeline entry decision tree', () => {
     }
   });
 
+  it('does NOT write a stop reason or finalize on a 409 first-step (release bows out healthy)', async () => {
+    // A 409 means another driver already started this phase for the release.
+    // The release is still healthy — the in-flight holder drives the chain — so
+    // the cleanup path must bow out BEFORE persisting `releaseStopReason` or
+    // appending a "failed" log line, and must not finalize the release row.
+    detectTestCommandMock.mockReturnValue('pnpm test');
+    execMock
+      .mockImplementationOnce(() => gitStatus(' M foo.ts\n'))
+      .mockImplementationOnce(() => gitAhead('0'))
+      .mockImplementation(defaultExec);
+    startProjectTestMock.mockResolvedValue({ ok: false, status: 409, detail: 'Tests already running for proj' });
+    const releaseRow: { id: string; project: string; kind: string; finishedAt: number | null; logPath: string | null; contextMeta: string | null } = {
+      id: 'proj-release-rel-id', project: 'proj', kind: 'release', finishedAt: null, logPath: '/tmp/x.log', contextMeta: null,
+    };
+    getJobMock.mockImplementation((id: string) => (id === 'proj-release-rel-id' ? releaseRow : null));
+
+    const r = await startRelease('proj');
+
+    expect(r.ok).toBe(false);
+    if (!r.ok) expect(r.status).toBe(409);
+    expect(releaseRow.contextMeta).toBeNull();
+    expect(mocks.finalizeReleaseJobMock).not.toHaveBeenCalled();
+  });
+
   it('propagates failure from startProjectReview', async () => {
     detectTestCommandMock.mockReturnValue(null);
     execMock
