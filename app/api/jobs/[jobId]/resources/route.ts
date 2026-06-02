@@ -50,7 +50,7 @@ export async function GET(
   const limit = parsedLimit.value;
 
   try {
-    const where = since != null && Number.isFinite(since)
+    const where = since != null
       ? and(eq(schema.jobResourceSamples.jobId, jobId), gte(schema.jobResourceSamples.sampledAt, since))
       : eq(schema.jobResourceSamples.jobId, jobId);
 
