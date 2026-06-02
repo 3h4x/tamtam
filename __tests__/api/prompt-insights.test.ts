@@ -43,6 +43,20 @@ describe('GET /api/projects/by-project/[projectName]/prompt-insights', () => {
     expect(res.status).toBe(400);
   });
 
+  it('rejects non-decimal days params', async () => {
+    for (const rawDays of ['1.5', '1e1', '0x10', '']) {
+      const req = new NextRequest(`http://localhost/api/projects/by-project/demo/prompt-insights?days=${encodeURIComponent(rawDays)}`);
+      const res = await GET(req, { params: Promise.resolve({ projectName: 'demo' }) });
+      expect(res.status).toBe(400);
+    }
+  });
+
+  it('accepts in-range decimal days param', async () => {
+    const req = new NextRequest('http://localhost/api/projects/by-project/demo/prompt-insights?days=10');
+    const res = await GET(req, { params: Promise.resolve({ projectName: 'demo' }) });
+    expect(res.status).toBe(200);
+  });
+
   it('returns empty-shaped result when no agent jobs exist', async () => {
     const req = new NextRequest('http://localhost/api/projects/by-project/demo/prompt-insights');
     const res = await GET(req, { params: Promise.resolve({ projectName: 'demo' }) });

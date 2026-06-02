@@ -17,8 +17,14 @@ export async function GET(
   const rawDays = url.searchParams.get('days');
   let days = DEFAULT_WINDOW_DAYS;
   if (rawDays !== null) {
-    const parsed = Number.parseInt(rawDays, 10);
-    if (!Number.isFinite(parsed) || parsed < 1 || parsed > MAX_WINDOW_DAYS) {
+    if (!/^\d+$/.test(rawDays)) {
+      return NextResponse.json(
+        { error: `days must be an integer between 1 and ${MAX_WINDOW_DAYS}` },
+        { status: 400 },
+      );
+    }
+    const parsed = Number(rawDays);
+    if (parsed < 1 || parsed > MAX_WINDOW_DAYS) {
       return NextResponse.json(
         { error: `days must be an integer between 1 and ${MAX_WINDOW_DAYS}` },
         { status: 400 },
