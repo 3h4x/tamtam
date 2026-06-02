@@ -2,11 +2,8 @@
 // phase workflow's tail. Wraps `start(releaseOrchestratorWorkflow, …)` in
 // the same chunk-load retry as `dispatch-phase.ts` so a `pnpm rebuild`
 // mid-flight doesn't orphan releases (Next.js chunk path was rewritten
-// between two import attempts).
-//
-// Each per-phase wrapper used to inline its own `start()` + try/catch,
-// which silently logged the chunk error and let the release orphan. This
-// helper makes the retry behavior uniform.
+// between two import attempts). Centralizing the retry keeps every
+// per-phase wrapper's behavior uniform.
 
 const CHUNK_ERROR_PATTERNS = [
   /Failed to load chunk/i,
