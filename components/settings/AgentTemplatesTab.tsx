@@ -6,6 +6,7 @@ import { EmptyState } from '@/components/ui/EmptyState'
 import { Input } from '@/components/ui/Input'
 import { Pill } from '@/components/ui/Pill'
 import { Select } from '@/components/ui/Select'
+import { Textarea } from '@/components/ui/Textarea'
 import { MODEL_TIERS, MODEL_LABELS, normalizeModelInput } from '@/lib/agents/model-aliases'
 
 export interface AgentTemplateRecord {
@@ -89,12 +90,11 @@ function TemplateForm({
       </div>
       <div>
         <label className="block text-xs font-medium text-text-primary mb-1">Prompt</label>
-        <textarea
+        <Textarea
           value={form.prompt}
           onChange={e => setField('prompt', e.target.value)}
           placeholder="What should this agent do when it runs?"
           rows={4}
-          className="w-full px-3 py-2 text-sm bg-bg-primary border border-border rounded-lg text-text-primary placeholder:text-text-tertiary focus:outline-none focus:ring-2 focus:ring-accent/40 focus:border-accent font-mono resize-y"
         />
       </div>
       <div className="flex items-center gap-2 justify-end">
