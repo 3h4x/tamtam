@@ -10,10 +10,10 @@ import {
 import { loadQuotaSnapshot } from '@/lib/client/quota'
 import { Pill } from '@/components/ui/Pill'
 import { Checkbox } from '@/components/ui/Checkbox'
+import { Input } from '@/components/ui/Input'
 
-const INPUT_CLASS =
-  'w-full h-10 px-3 py-2 bg-bg-primary text-text-primary border border-border rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-accent/30 focus:border-accent transition-colors font-mono'
-const SELECT_CLASS = INPUT_CLASS + ' appearance-none'
+const SELECT_CLASS =
+  'w-full h-10 px-3 py-2 bg-bg-primary text-text-primary border border-border rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-accent/30 focus:border-accent transition-colors font-mono appearance-none'
 
 const PROVIDER_LABELS: Record<CliProvider, string> = {
   claude: 'Claude',
@@ -187,12 +187,11 @@ export function CliTab({
                   <div className="mt-3 ml-7 grid gap-4 md:grid-cols-2">
                     <div>
                       <label className="block text-xs text-text-tertiary mb-1">{providerBinLabel(provider)}</label>
-                      <input
+                      <Input
                         type="text"
                         value={settings[`cli_bin_${provider}`] ?? ''}
                         placeholder={provider === 'lmstudio' ? 'http://127.0.0.1:1234' : provider}
                         onChange={(e) => onChange(`cli_bin_${provider}`, e.target.value)}
-                        className={INPUT_CLASS}
                       />
                     </div>
                     <div>
@@ -210,12 +209,11 @@ export function CliTab({
                     {provider === 'lmstudio' && (
                       <div className="md:col-span-2">
                         <label className="block text-xs text-text-tertiary mb-1">LM Studio model id</label>
-                        <input
+                        <Input
                           type="text"
                           value={settings.lmstudio_model ?? ''}
                           placeholder="qwen2.5-coder-14b-instruct"
                           onChange={(e) => onChange('lmstudio_model', e.target.value)}
-                          className={INPUT_CLASS}
                         />
                       </div>
                     )}
@@ -234,12 +232,11 @@ export function CliTab({
                         </div>
                         <div>
                           <label className="block text-xs text-text-tertiary mb-1">Backend base URL</label>
-                          <input
+                          <Input
                             type="text"
                             value={settings.cli_deepagents_base_url ?? ''}
                             placeholder={settings.cli_deepagents_backend === 'ollama' ? 'http://127.0.0.1:11434' : 'http://127.0.0.1:1234'}
                             onChange={(e) => onChange('cli_deepagents_base_url', e.target.value)}
-                            className={INPUT_CLASS}
                           />
                         </div>
                       </div>
@@ -358,25 +355,23 @@ export function CliTab({
           <div className="grid grid-cols-2 gap-4">
             <div>
               <label className="block text-xs text-text-secondary mb-1">Block threshold (%)</label>
-              <input
+              <Input
                 type="number"
                 min={0}
                 max={100}
                 value={settings.budget_block_at_pct}
                 onChange={(e) => onChange('budget_block_at_pct', clampPct(e.target.value))}
-                className={INPUT_CLASS}
                 disabled={!blockEnabled}
               />
             </div>
             <div>
               <label className="block text-xs text-text-secondary mb-1">Warn threshold (%)</label>
-              <input
+              <Input
                 type="number"
                 min={0}
                 max={100}
                 value={settings.budget_warn_at_pct}
                 onChange={(e) => onChange('budget_warn_at_pct', clampPct(e.target.value))}
-                className={INPUT_CLASS}
               />
             </div>
           </div>

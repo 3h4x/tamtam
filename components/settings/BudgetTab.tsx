@@ -2,6 +2,7 @@
 
 import { QuotaWidget } from '@/components/QuotaWidget'
 import { Checkbox } from '@/components/ui/Checkbox'
+import { Input } from '@/components/ui/Input'
 import {
   BUDGET_SUBSCRIPTION_PROVIDERS,
   encodeBudgetSubscriptionProviders,
@@ -17,9 +18,6 @@ export interface BudgetSettings {
   budget_warn_at_pct: string
   [key: string]: string
 }
-
-const INPUT_CLASS =
-  'w-full h-10 px-3 py-2 bg-bg-primary text-text-primary border border-border rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-accent/30 focus:border-accent transition-colors font-mono'
 
 function clampPct(raw: string): string {
   const n = parseInt(raw, 10)
@@ -120,13 +118,12 @@ export function BudgetTab({
           <div className="grid grid-cols-2 gap-4">
             <div>
               <label className="block font-medium text-sm text-text-primary mb-1.5">Block threshold (%)</label>
-              <input
+              <Input
                 type="number"
                 min={0}
                 max={100}
                 value={settings.budget_block_at_pct}
                 onChange={(e) => onChange('budget_block_at_pct', clampPct(e.target.value))}
-                className={INPUT_CLASS}
                 disabled={!enabled}
               />
               <p className="text-xs text-text-tertiary mt-1.5">
@@ -135,13 +132,12 @@ export function BudgetTab({
             </div>
             <div>
               <label className="block font-medium text-sm text-text-primary mb-1.5">Warn threshold (%)</label>
-              <input
+              <Input
                 type="number"
                 min={0}
                 max={100}
                 value={settings.budget_warn_at_pct}
                 onChange={(e) => onChange('budget_warn_at_pct', clampPct(e.target.value))}
-                className={INPUT_CLASS}
               />
               <p className="text-xs text-text-tertiary mt-1.5">
                 Quota bar above turns yellow at this percentage. Cosmetic only. Default 80.
