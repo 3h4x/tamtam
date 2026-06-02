@@ -107,10 +107,10 @@ describe('<LogsPage />', () => {
     await render();
     clickButtonByText('alpha');
     await waitFor(() => {
-      expect(container.querySelector('input[type="text"]')).toBeTruthy();
+      expect(container.querySelector('input[type="search"]')).toBeTruthy();
     });
 
-    const input = container.querySelector('input[type="text"]') as HTMLInputElement | null;
+    const input = container.querySelector('input[type="search"]') as HTMLInputElement | null;
     expect(input).toBeTruthy();
     // Type a search query.
     if (input) {
@@ -125,10 +125,10 @@ describe('<LogsPage />', () => {
     });
     clickButtonByText('beta');
     await waitFor(() => {
-      expect(container.querySelector('input[type="text"]')).toBeTruthy();
+      expect(container.querySelector('input[type="search"]')).toBeTruthy();
     });
 
-    const inputAfter = container.querySelector('input[type="text"]') as HTMLInputElement | null;
+    const inputAfter = container.querySelector('input[type="search"]') as HTMLInputElement | null;
     if (inputAfter) {
       expect(inputAfter.value).toBe('');
     }

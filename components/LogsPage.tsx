@@ -4,6 +4,7 @@ import { useState, useEffect } from 'react'
 import { Button } from '@/components/ui/Button'
 import { ErrorState } from '@/components/ErrorState'
 import { EmptyState } from '@/components/ui/EmptyState'
+import { SearchInput } from '@/components/ui/SearchInput'
 import { fetchProjects, fetchProjectLogs } from '@/lib/client-api'
 import type { LogEntry } from '@/lib/client-api'
 
@@ -145,9 +146,8 @@ export function LogsPage() {
       ) : (
         <>
           {logs.length > 1 && (
-            <input
-              type="text"
-              className="w-full max-w-[400px] mb-4 px-3 py-2 text-sm bg-bg-secondary border border-border rounded-md text-text-primary placeholder:text-text-secondary focus:outline-none focus:ring-2 focus:ring-accent/20 focus:border-accent transition-colors"
+            <SearchInput
+              className="max-w-[400px] mb-4"
               value={search}
               onChange={(e) => setSearch(e.target.value)}
               placeholder="Search logs..."
