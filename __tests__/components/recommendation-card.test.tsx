@@ -225,7 +225,7 @@ describe('RecommendationCard', () => {
     unmount()
   })
 
-  it('links "View logs" to the source job that produced the recommendation', () => {
+  it('links "Show Recent Run" to the source job that produced the recommendation', () => {
     const { container, unmount } = renderCard({
       item: makeRecommendation({
         source_kind: 'agent:tests',
@@ -235,13 +235,13 @@ describe('RecommendationCard', () => {
       }),
     })
 
-    const logsLink = Array.from(container.querySelectorAll('a')).find((a) => a.textContent?.includes('View logs'))
-    expect(logsLink?.getAttribute('href')).toBe('/project/alpha%2Fcore/terminal?job=job-77')
+    const runLink = Array.from(container.querySelectorAll('a')).find((a) => a.textContent?.includes('Show Recent Run'))
+    expect(runLink?.getAttribute('href')).toBe('/project/alpha%2Fcore/terminal?job=job-77')
 
     unmount()
   })
 
-  it('omits "View logs" when the payload has no source job', () => {
+  it('falls back to the recommendation source id for the recent run link', () => {
     const { container, unmount } = renderCard({
       item: makeRecommendation({
         source_kind: 'agent:tests',
@@ -252,6 +252,8 @@ describe('RecommendationCard', () => {
     })
 
     expect(container.textContent).not.toContain('View logs')
+    const runLink = Array.from(container.querySelectorAll('a')).find((a) => a.textContent?.includes('Show Recent Run'))
+    expect(runLink?.getAttribute('href')).toBe('/project/alpha%2Fcore/terminal?job=job-1')
 
     unmount()
   })
@@ -397,6 +399,7 @@ describe('RecommendationCard', () => {
           concernType: 'loop',
           severity: 'high',
           runsAnalyzed: 3,
+          runIds: ['job-newest', 'job-older'],
           lastRunScore: 42,
           avgRunScore: 38.7,
         },
@@ -417,6 +420,8 @@ describe('RecommendationCard', () => {
     expect(container.textContent).toContain('MANUAL')
     expect(container.textContent).not.toContain('AUTO')
     expect(container.textContent).toContain('Fix')
+    const runLink = Array.from(container.querySelectorAll('a')).find((a) => a.textContent?.includes('Show Recent Run'))
+    expect(runLink?.getAttribute('href')).toBe('/project/alpha%2Fcore/terminal?job=job-newest')
 
     unmount()
   })

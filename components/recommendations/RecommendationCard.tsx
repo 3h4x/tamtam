@@ -45,6 +45,18 @@ function recommendationSourceJobId(payload: Recommendation['payload']): string |
   return null
 }
 
+function recommendationRecentRunId(item: Recommendation): string | null {
+  const payload = item.payload
+  if (payload && typeof payload === 'object') {
+    const runIds = (payload as Record<string, unknown>).runIds
+    if (Array.isArray(runIds)) {
+      const first = runIds.find((runId): runId is string => typeof runId === 'string' && runId.trim().length > 0)
+      if (first) return first
+    }
+  }
+  return recommendationSourceJobId(payload) ?? item.source_id
+}
+
 function isUserEditableAgentId(agentId: string | null): boolean {
   return agentId !== null && !agentId.startsWith('system:')
 }
@@ -159,7 +171,11 @@ export function RecommendationCard({
   const backoffSchedule = recommendationBackoffSchedule(item)
   const editableAgent = isUserEditableAgentId(item.agent_id)
   const sourceJobId = recommendationSourceJobId(item.payload)
-  const logsHref = sourceJobId
+  const recentRunId = recommendationRecentRunId(item)
+  const recentRunHref = recentRunId
+    ? `/project/${encodeURIComponent(item.project)}/terminal?job=${encodeURIComponent(recentRunId)}`
+    : null
+  const logsHref = sourceJobId && sourceJobId !== recentRunId
     ? `/project/${encodeURIComponent(item.project)}/terminal?job=${encodeURIComponent(sourceJobId)}`
     : null
   const agentEnabled = payloadBoolean(item.payload, 'enabled')
@@ -230,6 +246,15 @@ export function RecommendationCard({
           )}
         </div>
         <div className="flex items-start gap-2 shrink-0">
+          {recentRunHref && (
+            <Link
+              href={recentRunHref}
+              className={buttonVariants({ variant: 'secondary', size: 'sm' })}
+              title="Open the most recent run used by this recommendation"
+            >
+              Show Recent Run
+            </Link>
+          )}
           {showFixMenu && (
             <details className="relative group">
               <summary

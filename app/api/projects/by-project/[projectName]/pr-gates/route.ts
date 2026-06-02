@@ -84,12 +84,9 @@ export async function GET(
   let dodSummary: string | null = null;
 
   if (issueNumber != null && !Number.isNaN(issueNumber)) {
-    // Hoist the project-scoped job slice once: previously, 4 separate
-    // `listJobs()` calls each rescanned the full ~25k-entry cache to derive
-    // the same per-project filter. One pre-filter + 4 linear scans of the
-    // (~1k-entry) slice is significantly cheaper, and the linear scans
-    // replace the prior `.filter().sort()[0]` pattern (O(K log K)) with an
-    // O(K) max-by-finishedAt pick.
+    // Filter the project-scoped job slice once, then do 4 linear max-by-
+    // finishedAt scans of that (~1k-entry) slice — cheaper than rescanning
+    // the full ~25k-entry cache per gate.
     const projectJobs = listJobs().filter((j) => j.project === projectName);
     const testJob = latestForIssue(projectJobs, issueNumber, 'test') ?? latestAny(projectJobs, 'test');
     if (testJob) tests = testJob.exitCode === 0 ? 'pass' : 'fail';
