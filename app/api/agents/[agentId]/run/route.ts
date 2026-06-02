@@ -18,6 +18,11 @@ import { isProjectPaused } from '@/lib/shared/enabled-projects';
 import { getSettings } from '@/lib/shared/config';
 import { normalizeModelInput, parseOptionalKnownModelInput, type ModelTier } from '@/lib/agents/model-aliases';
 import { enqueueAgentRun, tryClaimAgentStartSlot, releaseAgentStartSlot, drainNextAgentRun } from '@/lib/agents/pending-agent-run';
+import {
+  attachJobToDurableAgentRunSlot,
+  releaseDurableAgentRunSlot,
+  tryClaimDurableAgentRunSlot,
+} from '@/lib/agents/durable-agent-run-slot';
 import { findBlockingRunningJob } from '@/lib/jobs/project-active-job';
 import { checkCliStartGate } from '@/lib/usage/resolve-provider';
 import { resolveAgentPrerequisiteCommandWithFileSkills } from '@/lib/agents/file-skill-prerequisites';
@@ -229,9 +234,59 @@ export async function POST(
   // CLI gate) to createJob, producing two simultaneous agent runs for the
   // same project.
   let claimedStartSlot = false;
+  let durableStartSlotToken: string | null = null;
+  let startedJob = false;
   if (!readOnly) {
+    let durableSlot: Awaited<ReturnType<typeof tryClaimDurableAgentRunSlot>>;
+    try {
+      durableSlot = await tryClaimDurableAgentRunSlot({
+        project: agent.project,
+        agentId: agent.id,
+        agentName: agent.name,
+      });
+    } catch (err) {
+      console.error('[agent-run-route] failed to claim durable agent run slot:', err);
+      return NextResponse.json(
+        { detail: `Failed to reserve agent run slot for ${agent.project}` },
+        { status: 500 },
+      );
+    }
+
+    if (!durableSlot.ok) {
+      if (durableSlot.runningAgent === agent.name) {
+        return NextResponse.json(
+          {
+            code: 'already_running',
+            detail: `Agent '${agent.name}' is already running for ${agent.project}${durableSlot.jobId ? ` (job ${durableSlot.jobId})` : ''}`,
+            blockingJobId: durableSlot.jobId,
+          },
+          { status: 409 },
+        );
+      }
+      enqueueAgentRun(agent.project, {
+        agentId: agent.id,
+        agentName: agent.name,
+        triggeredBy,
+        prompt: taskPrompt,
+        modelOverride: bodyModelOverride ?? undefined,
+        enqueuedAt: Date.now(),
+      });
+      return NextResponse.json(
+        {
+          status: 'queued',
+          detail: `Agent '${agent.name}' queued — '${durableSlot.runningAgent}' is running for ${agent.project}`,
+          blockingJobId: durableSlot.jobId,
+          agent: agent.name,
+        },
+        { status: 202 },
+      );
+    }
+    durableStartSlotToken = durableSlot.token;
+
     const slot = tryClaimAgentStartSlot(agent.project, agent.name);
     if (!slot.ok) {
+      await releaseDurableAgentRunSlot(agent.project, durableStartSlotToken);
+      durableStartSlotToken = null;
       if (slot.runningAgent === agent.name) {
         return NextResponse.json(
           { code: 'already_starting', detail: `Agent '${agent.name}' is already starting for ${agent.project}` },
@@ -338,17 +393,31 @@ export async function POST(
       }
     }
 
-    const result = await runAgentStart(agent, taskPrompt, triggeredBy, readOnly, bodyModelOverride);
+    const result = await runAgentStart(agent, taskPrompt, triggeredBy, readOnly, bodyModelOverride, durableStartSlotToken);
+    startedJob = result.startedJob;
     return result.response;
   } finally {
     if (claimedStartSlot) {
       releaseAgentStartSlot(agent.project);
+    }
+    if (durableStartSlotToken && !startedJob) {
+      try {
+        await releaseDurableAgentRunSlot(agent.project, durableStartSlotToken);
+      } catch (err) {
+        console.error('[agent-run-route] failed to release durable agent run slot:', err);
+      }
+    }
+    if (claimedStartSlot) {
       // Always re-check the queue after releasing the synchronous start slot.
       // Fast-finishing agents can complete and trigger a lifecycle drain before
       // this route unwinds; that drain now no-ops while the slot is held, so the
       // post-release route drain is the handoff that guarantees queued work
       // keeps moving whether startup succeeded or failed.
-      await drainNextAgentRun(agent.project);
+      try {
+        await drainNextAgentRun(agent.project);
+      } catch (err) {
+        console.error('[agent-run-route] post-start queue drain failed:', err);
+      }
     }
   }
 }
@@ -408,7 +477,8 @@ async function runAgentStart(
   triggeredBy: string,
   readOnly: boolean,
   modelOverride: ModelTier | null = null,
-): Promise<{ response: NextResponse; startedJob: boolean }> {
+  durableStartSlotToken: string | null = null,
+): Promise<{ response: NextResponse; startedJob: boolean; jobId?: string }> {
 
   const projPath = resolveProjectPath(agent.project);
   if (!projPath) {
@@ -465,6 +535,23 @@ async function runAgentStart(
   job.logPath = logPath;
   updateJob(job);
   mkdirSync(/*turbopackIgnore: true*/ logDir, { recursive: true });
+
+  if (durableStartSlotToken) {
+    const attached = await attachJobToDurableAgentRunSlot(agent.project, durableStartSlotToken, job.id);
+    if (!attached) {
+      job.finishedAt = Date.now() / 1000;
+      job.exitCode = -1;
+      updateJob(job);
+      await markDone(job, -1);
+      return {
+        response: NextResponse.json(
+          { detail: `Agent '${agent.name}' lost its run slot before workflow start` },
+          { status: 409 },
+        ),
+        startedJob: false,
+      };
+    }
+  }
 
   const prereqCmd = resolveAgentPrerequisiteCommandWithFileSkills({
     project: agent.project,
@@ -530,5 +617,6 @@ async function runAgentStart(
       via: 'workflow',
     }),
     startedJob: true,
+    jobId: job.id,
   };
 }

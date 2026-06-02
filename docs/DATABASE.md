@@ -229,6 +229,11 @@ Index: `pipeline_lock_events_unconsumed` on `(consumedBy, emittedAt)`.
 
 Persisted latest-status records for server maintenance tasks. Values are JSON payloads so narrowly scoped maintenance subsystems can evolve their summary shape without a schema change.
 
+Also stores transient cross-process coordination keys whose state must survive
+Next.js module/runtime boundaries. Current key prefix:
+`agent_run_slot:<project>` reserves one mutable agent run per project until the
+owning agent job reaches a terminal state.
+
 | Column | Type | Default | Notes |
 |--------|------|---------|-------|
 | `key` | TEXT | — | PRIMARY KEY; retention uses `retention:project-logs:last` and `retention:nightly:last` |

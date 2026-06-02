@@ -190,9 +190,16 @@ Possible responses:
 }
 ```
 
-When the route is between duplicate-check and spawn, the response may
-still be `202 queued`, but without a `blockingJobId`. In that case the
-blocking agent is only "starting" and has not landed its job row yet.
+Mutable agent runs are serialized by a durable per-project run slot stored in
+`maintenance_status` for the lifetime of the active agent job. This covers
+parallel cron fires, route races, and separate Next.js runtime contexts whose
+in-memory job caches may not yet agree. Same-agent duplicates return `409`;
+different agents for the same project return `202 queued` and are drained when
+the running agent finishes.
+
+When the route is between duplicate-check and job creation, the response may
+still be `202 queued`, but without a `blockingJobId`. In that case the blocking
+agent has the durable run slot but has not landed its job row yet.
 
 When a release pipeline currently holds the project's pipeline lock, the same
 route returns `202 queued` with `code: "pipeline_lock"`. If no release is

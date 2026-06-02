@@ -1499,6 +1499,15 @@ async function runCompletionHooksInner(job: JobData): Promise<void> {
     }
   }
 
+  if (isAgentJobKind(job.kind)) {
+    try {
+      const { releaseDurableAgentRunSlotForJob } = await import('@/lib/agents/durable-agent-run-slot');
+      await releaseDurableAgentRunSlotForJob(job);
+    } catch (e) {
+      console.error(`[agent-run-slot] release hook error for ${job.project}/${job.id}:`, e);
+    }
+  }
+
   // Release-after-fix-ci: extracted to lib/workflows/triggers/release-after-fix-ci.ts.
   // The legacy hook stays gated on a kill switch so we can flip behavior to
   // the workflow-driven event router without redeploying.
