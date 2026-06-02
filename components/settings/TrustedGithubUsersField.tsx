@@ -1,8 +1,8 @@
 'use client'
 
 import { useEffect, useId, useRef, useState } from 'react'
-import { INPUT_CLASS } from '@/components/settings/constants'
 import { Button } from '@/components/ui/Button'
+import { Input } from '@/components/ui/Input'
 import { EmptyState } from '@/components/ui/EmptyState'
 import {
   parseTrustedGithubUsers,
@@ -79,7 +79,7 @@ export function TrustedGithubUsersField({
           <div className="space-y-2">
             {users.map((user, index) => (
               <div key={index} className="flex items-center gap-2">
-                <input
+                <Input
                   id={`${fieldId}-${index}`}
                   type="text"
                   value={user}
@@ -89,7 +89,7 @@ export function TrustedGithubUsersField({
                     updateUsers(nextUsers)
                   }}
                   placeholder="octocat"
-                  className={INPUT_CLASS}
+                  className="placeholder:text-text-tertiary"
                   autoCapitalize="none"
                   autoCorrect="off"
                   spellCheck={false}

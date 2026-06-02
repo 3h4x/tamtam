@@ -597,7 +597,5 @@ export const DEFAULTS: Record<SettingsFieldKey, string> = {
   orchestrator_max_boosts_per_hour: '2',
 }
 
-const FIELD_BASE = 'w-full h-10 px-3 py-2 bg-bg-primary text-text-primary border border-border rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-accent/30 focus:border-accent transition-colors'
-export const INPUT_CLASS  = `${FIELD_BASE} font-mono placeholder:text-text-tertiary`
 export const COL_SPAN: Record<number, string> = { 1: 'col-span-1', 2: 'col-span-2', 3: 'col-span-3', 4: 'col-span-4' }
 export const GRID_COLS: Record<number, string> = { 2: 'grid-cols-2', 3: 'grid-cols-3', 4: 'grid-cols-4' }
