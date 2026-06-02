@@ -30,7 +30,7 @@ export function canExecuteAgentActions(
   }
 
   // Single pass: short-circuit on first missing-context or mismatch; no
-  // intermediate array. Was `.map().filter()` then `.find()` over actions.
+  // intermediate array.
   for (const action of actions) {
     const n = actionIssueNumber(action);
     if (n == null) continue;
