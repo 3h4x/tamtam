@@ -3,6 +3,7 @@
 import { useState } from 'react'
 import { Button } from '@/components/ui/Button'
 import { EmptyState } from '@/components/ui/EmptyState'
+import { Input } from '@/components/ui/Input'
 import { Pill } from '@/components/ui/Pill'
 import { Select } from '@/components/ui/Select'
 import { MODEL_TIERS, MODEL_LABELS, normalizeModelInput } from '@/lib/agents/model-aliases'
@@ -48,22 +49,22 @@ function TemplateForm({
       <div className="grid grid-cols-2 gap-3">
         <div>
           <label className="block text-xs font-medium text-text-primary mb-1">Name</label>
-          <input
+          <Input
             type="text"
             value={form.name}
             onChange={e => setField('name', e.target.value)}
             placeholder="e.g. security-review"
-            className="w-full px-3 py-2 text-sm bg-bg-primary border border-border rounded-lg text-text-primary placeholder:text-text-tertiary focus:outline-none focus:ring-2 focus:ring-accent/40 focus:border-accent"
+            className="placeholder:text-text-tertiary"
           />
         </div>
         <div>
           <label className="block text-xs font-medium text-text-primary mb-1">Description</label>
-          <input
+          <Input
             type="text"
             value={form.description}
             onChange={e => setField('description', e.target.value)}
             placeholder="Short description shown in the list"
-            className="w-full px-3 py-2 text-sm bg-bg-primary border border-border rounded-lg text-text-primary placeholder:text-text-tertiary focus:outline-none focus:ring-2 focus:ring-accent/40 focus:border-accent"
+            className="placeholder:text-text-tertiary"
           />
         </div>
         <div>
