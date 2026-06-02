@@ -3,6 +3,7 @@
 import { FIELDS, DEFAULTS, COL_SPAN } from '@/components/settings/constants'
 import { Select } from '@/components/ui/Select'
 import { Input } from '@/components/ui/Input'
+import { Textarea } from '@/components/ui/Textarea'
 import type { SettingsFieldKey } from '@/components/settings/constants'
 import { MODEL_TIERS, MODEL_LABELS, getProviderModelHint } from '@/lib/agents/model-aliases'
 
@@ -70,12 +71,12 @@ export function SettingsField({
             <span className="text-xs text-text-tertiary font-mono truncate">{preview}</span>
           </div>
         </summary>
-        <textarea
+        <Textarea
           value={value}
           onChange={(e) => onChange(fieldKey, e.target.value)}
           placeholder={DEFAULTS[fieldKey]}
           rows={fieldKey === 'review_verdict_rules' ? 8 : 3}
-          className="w-full px-3 py-2 bg-bg-primary text-text-primary border border-border rounded-lg font-mono text-xs focus:outline-none focus:ring-2 focus:ring-accent/30 focus:border-accent transition-colors placeholder:text-text-tertiary resize-y"
+          fontSize="xs"
         />
         <p className="text-xs text-text-tertiary mt-1.5">{field.help}</p>
       </details>
@@ -86,12 +87,12 @@ export function SettingsField({
     <div className={colSpanClass}>
       <label className="block font-medium text-sm text-text-primary mb-1.5">{field.label}</label>
       {LONG_TEXT_KEYS.has(fieldKey) ? (
-        <textarea
+        <Textarea
           value={value}
           onChange={(e) => onChange(fieldKey, e.target.value)}
           placeholder={DEFAULTS[fieldKey]}
           rows={fieldKey === 'review_verdict_rules' ? 8 : 3}
-          className="w-full px-3 py-2 bg-bg-primary text-text-primary border border-border rounded-lg font-mono text-xs focus:outline-none focus:ring-2 focus:ring-accent/30 focus:border-accent transition-colors placeholder:text-text-tertiary resize-y"
+          fontSize="xs"
         />
       ) : fieldKey === 'daytime' ? (
         <Select value={value} onChange={(e) => onChange(fieldKey, e.target.value)}>

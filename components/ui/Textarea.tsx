@@ -6,12 +6,18 @@ import React from 'react'
 // Mirrors Input's composable API: `appearance="default"` is the inset bg-primary
 // field (matches Input and most settings/config textareas); `appearance="elevated"`
 // is the raised bg-secondary field used by the agent prompt editor. `inputSize`
-// switches between the comfortably-rounded (default) and tighter compact field.
+// switches between the comfortably-rounded (default) and tighter compact field;
+// `fontSize` switches the base `text-sm` to `text-xs` for dense forms.
 // Pass `className` to extend (appended last); note there is no tailwind-merge, so
 // overriding a base utility that conflicts won't win — prefer leaving genuinely
 // different textareas raw.
 const TEXTAREA_BASE =
-  'w-full px-3 text-sm border border-border text-text-primary placeholder:text-text-tertiary focus:outline-none focus:border-accent transition-colors disabled:opacity-60 disabled:cursor-not-allowed'
+  'w-full px-3 border border-border text-text-primary placeholder:text-text-tertiary focus:outline-none focus:border-accent transition-colors disabled:opacity-60 disabled:cursor-not-allowed'
+
+const FONT_SIZE_CLASSES: Record<'sm' | 'xs', string> = {
+  sm: 'text-sm',
+  xs: 'text-xs',
+}
 
 const APPEARANCE_CLASSES: Record<'default' | 'elevated', string> = {
   default: 'bg-bg-primary focus:ring-2 focus:ring-accent/30',
@@ -38,6 +44,7 @@ export interface TextareaProps extends React.TextareaHTMLAttributes<HTMLTextArea
   appearance?: 'default' | 'elevated'
   inputSize?: 'default' | 'compact'
   fontFamily?: 'mono' | 'sans'
+  fontSize?: 'sm' | 'xs'
   resize?: 'y' | 'both' | 'none'
   ref?: React.Ref<HTMLTextAreaElement>
 }
@@ -47,6 +54,7 @@ export function Textarea({
   appearance = 'default',
   inputSize = 'default',
   fontFamily = 'mono',
+  fontSize = 'sm',
   resize = 'y',
   ref,
   ...props
@@ -59,6 +67,7 @@ export function Textarea({
         APPEARANCE_CLASSES[appearance],
         SIZE_CLASSES[inputSize],
         FONT_CLASSES[fontFamily],
+        FONT_SIZE_CLASSES[fontSize],
         RESIZE_CLASSES[resize],
         className,
       ].filter(Boolean).join(' ')}
