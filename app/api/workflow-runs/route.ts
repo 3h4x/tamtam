@@ -52,6 +52,9 @@ function getWorkflowPool(): Pool | null {
   if (!globalThis.__tamtamWorkflowRunsPool) {
     globalThis.__tamtamWorkflowRunsPool = new Pool({ connectionString: url, max: 2 });
   }
+  if (globalThis.__tamtamWorkflowRunsPool.listenerCount('error') === 0) {
+    globalThis.__tamtamWorkflowRunsPool.on('error', (err) => console.error('[workflow-runs] idle pg client error', err));
+  }
   return globalThis.__tamtamWorkflowRunsPool;
 }
 

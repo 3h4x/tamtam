@@ -6,10 +6,18 @@ import { stringify as devalueStringify } from 'devalue';
 
 const mocks = vi.hoisted(() => ({
   poolQueryMock: vi.fn(),
+  errorListenerCount: 0,
 }));
 
 vi.mock('pg', () => ({
   Pool: class FakePool {
+    listenerCount = vi.fn((event: string) => event === 'error' ? mocks.errorListenerCount : 0);
+    on = vi.fn((event: string, _listener: (err: Error) => void) => {
+      if (event === 'error') {
+        mocks.errorListenerCount += 1;
+      }
+      return this;
+    });
     query = mocks.poolQueryMock;
   },
 }));
@@ -21,7 +29,16 @@ async function importRoute() {
   return await import('@/app/api/workflow-runs/[runId]/route');
 }
 
+async function importListRoute() {
+  vi.resetModules();
+  return await import('@/app/api/workflow-runs/route');
+}
+
 function makeRequest(url = 'http://test/api/workflow-runs/wrun_1'): Request {
+  return new Request(url);
+}
+
+function makeListRequest(url = 'http://test/api/workflow-runs'): Request {
   return new Request(url);
 }
 
@@ -55,6 +72,8 @@ const STEP_ROW = {
 describe('GET /api/workflow-runs/[runId]', () => {
   beforeEach(() => {
     poolQueryMock.mockReset();
+    mocks.errorListenerCount = 0;
+    Reflect.deleteProperty(globalThis, '__tamtamWorkflowRunsPool');
     delete process.env.WORKFLOW_TARGET_WORLD;
     delete process.env.WORKFLOW_LOCAL_DATA_DIR;
   });
@@ -222,5 +241,21 @@ describe('GET /api/workflow-runs/[runId]', () => {
     );
     expect(stepsQueryCall).toBeDefined();
     expect(stepsQueryCall![0]).toMatch(/ORDER BY created_at ASC, attempt ASC/);
+  });
+
+  it('attaches the shared pool error listener when the detail route initializes the pool first', async () => {
+    process.env.WORKFLOW_POSTGRES_URL = 'postgres://test/wf';
+    poolQueryMock
+      .mockResolvedValueOnce({ rows: [RUN_ROW] })
+      .mockResolvedValueOnce({ rows: [] })
+      .mockResolvedValueOnce({ rows: [] });
+
+    const { GET } = await importRoute();
+    await GET(makeRequest(), makeParams('wrun_1'));
+
+    const listRoute = await importListRoute();
+    await listRoute.GET(makeListRequest());
+
+    expect(mocks.errorListenerCount).toBe(1);
   });
 });

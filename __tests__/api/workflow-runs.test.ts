@@ -6,10 +6,18 @@ import { stringify as devalueStringify } from 'devalue';
 
 const mocks = vi.hoisted(() => ({
   poolQueryMock: vi.fn(),
+  errorListenerCount: 0,
 }));
 
 vi.mock('pg', () => ({
   Pool: class FakePool {
+    listenerCount = vi.fn((event: string) => event === 'error' ? mocks.errorListenerCount : 0);
+    on = vi.fn((event: string, _listener: (err: Error) => void) => {
+      if (event === 'error') {
+        mocks.errorListenerCount += 1;
+      }
+      return this;
+    });
     query = mocks.poolQueryMock;
   },
 }));
@@ -21,13 +29,28 @@ async function importRoute() {
   return await import('@/app/api/workflow-runs/route');
 }
 
+async function importDetailRoute() {
+  vi.resetModules();
+  return await import('@/app/api/workflow-runs/[runId]/route');
+}
+
 function makeRequest(url = 'http://test/api/workflow-runs'): Request {
   return new Request(url);
+}
+
+function makeDetailRequest(url = 'http://test/api/workflow-runs/wrun_1'): Request {
+  return new Request(url);
+}
+
+function makeDetailParams(runId: string) {
+  return { params: Promise.resolve({ runId }) };
 }
 
 describe('GET /api/workflow-runs', () => {
   beforeEach(() => {
     poolQueryMock.mockReset();
+    mocks.errorListenerCount = 0;
+    Reflect.deleteProperty(globalThis, '__tamtamWorkflowRunsPool');
     delete process.env.WORKFLOW_TARGET_WORLD;
     delete process.env.WORKFLOW_LOCAL_DATA_DIR;
   });
@@ -236,5 +259,35 @@ describe('GET /api/workflow-runs', () => {
     expect(res.status).toBe(500);
     const body = await res.json();
     expect(body.detail).toMatch(/relation/);
+  });
+
+  it('attaches the shared pool error listener when the list route initializes the pool first', async () => {
+    process.env.WORKFLOW_POSTGRES_URL = 'postgres://test/wf';
+    poolQueryMock
+      .mockResolvedValueOnce({ rows: [] })
+      .mockResolvedValueOnce({
+        rows: [{
+          id: 'wrun_1',
+          name: 'workflow//./lib/workflows/release//releaseObservationWorkflow',
+          status: 'completed',
+          created_at: new Date('2026-05-14T20:00:00Z'),
+          started_at: null,
+          completed_at: null,
+          input: null,
+          input_cbor: null,
+          output: null,
+          output_cbor: null,
+          error: null,
+        }],
+      })
+      .mockResolvedValueOnce({ rows: [] });
+
+    const { GET } = await importRoute();
+    await GET(makeRequest());
+
+    const detailRoute = await importDetailRoute();
+    await detailRoute.GET(makeDetailRequest(), makeDetailParams('wrun_1'));
+
+    expect(mocks.errorListenerCount).toBe(1);
   });
 });
