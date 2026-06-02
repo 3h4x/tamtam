@@ -67,8 +67,8 @@ export async function sampleRunningJobResources(): Promise<{ sampled: number; sk
 
   // Spawn `ps` in parallel — each call is an independent subprocess and
   // they don't share resources. The probe sweep runs on a 30s cadence,
-  // so on a busy server with a dozen running jobs the sequential `await`
-  // chain was burning ~100ms of wall time per tick just on subprocess
+  // so on a busy server with a dozen running jobs serial launches would add
+  // avoidable wall time per tick just on subprocess
   // launches. `Promise.all` collapses that to roughly `max(per-ps)`.
   const now = Date.now() / 1000;
   const settled = await Promise.all(running.map((job) => sampleOne(job.id, job.pid as number)));

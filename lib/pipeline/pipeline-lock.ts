@@ -152,7 +152,7 @@ async function drainPendingReleaseAsync(projectName: string): Promise<void> {
   // queue) operate on independent stores, so run them concurrently. Lock
   // release latency drops from `recovery + agent` to `max(recovery, agent)`.
   // Errors stay isolated per drain branch — one failing doesn't stop the
-  // other from making progress. Same iter 109 pattern.
+  // other from making progress.
   await Promise.allSettled([
     (async () => {
       try {

@@ -1,8 +1,6 @@
 // Add and/or remove labels on a GitHub issue via the `gh` CLI, creating
 // labels as needed.
-//
-// Extracted from `app/api/projects/by-project/[projectName]/issue-label/route.ts`
-// for shared use by the agent-action orchestrator.
+// Shared helper for routes and internal actions that need label mutation.
 
 import { eq, and } from 'drizzle-orm';
 import { exec } from '@/lib/shared/shell';
