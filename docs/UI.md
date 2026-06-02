@@ -156,6 +156,8 @@ import { Button, buttonVariants } from '@/components/ui/Button'
 
 All variants automatically apply `disabled:opacity-50 disabled:cursor-not-allowed` — pass `disabled` as a boolean prop.
 
+For neutral secondary buttons inside primary-surface panels, pass `surface="primary"` to keep the same bordered button treatment without changing the background token. The default surface remains `secondary`.
+
 ### CSS utility classes (from `app/globals.css`)
 
 Use these reusable classes when Tailwind utilities would produce repetition. **Prefer the `Button` component** over raw CSS classes for all interactive buttons.

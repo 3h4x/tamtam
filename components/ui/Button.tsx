@@ -17,6 +17,7 @@ export type ButtonVariant =
 
 export type ButtonSize = 'sm' | 'md' | 'icon-sm'
 export type ButtonDisabledCursor = 'not-allowed' | 'default' | 'wait'
+export type ButtonSurface = 'secondary' | 'primary'
 
 const BASE =
   'inline-flex items-center gap-1.5 font-medium transition-colors cursor-pointer no-underline disabled:opacity-50'
@@ -36,8 +37,12 @@ const LINK_TEXT_SIZE: Record<ButtonSize, string> = {
   'icon-sm': 'text-sm',
 }
 
-const VARIANT: Record<Exclude<ButtonVariant, 'link'>, string> = {
-  secondary:    'border border-border bg-bg-secondary text-text-primary hover:bg-bg-tertiary',
+const SECONDARY_SURFACE: Record<ButtonSurface, string> = {
+  secondary: 'bg-bg-secondary text-text-primary',
+  primary: 'bg-bg-primary text-text-secondary hover:text-text-primary',
+}
+
+const VARIANT: Record<Exclude<ButtonVariant, 'link' | 'secondary'>, string> = {
   primary:      'border border-accent bg-accent/10 text-accent hover:bg-accent/20',
   solid:        'border border-transparent bg-accent text-white hover:bg-accent-hover',
   success:      'border border-status-success text-status-success hover:bg-status-success/10',
@@ -59,35 +64,42 @@ export function buttonVariants({
   variant = 'secondary',
   size = 'md',
   disabledCursor = 'not-allowed',
+  surface = 'secondary',
   className,
 }: {
   variant?: ButtonVariant
   size?: ButtonSize
   disabledCursor?: ButtonDisabledCursor
+  surface?: ButtonSurface
   className?: string
 } = {}): string {
   if (variant === 'link') {
     return [LINK_BASE, LINK_TEXT_SIZE[size], DISABLED_CURSOR[disabledCursor], className].filter(Boolean).join(' ')
   }
-  return [BASE, SIZE[size], VARIANT[variant], DISABLED_CURSOR[disabledCursor], className].filter(Boolean).join(' ')
+  const variantClass = variant === 'secondary'
+    ? ['border border-border hover:bg-bg-tertiary', SECONDARY_SURFACE[surface]].join(' ')
+    : VARIANT[variant]
+  return [BASE, SIZE[size], variantClass, DISABLED_CURSOR[disabledCursor], className].filter(Boolean).join(' ')
 }
 
 export interface ButtonProps extends React.ButtonHTMLAttributes<HTMLButtonElement> {
   variant?: ButtonVariant
   size?: ButtonSize
   disabledCursor?: ButtonDisabledCursor
+  surface?: ButtonSurface
 }
 
 export function Button({
   variant = 'secondary',
   size = 'md',
   disabledCursor = 'not-allowed',
+  surface = 'secondary',
   className,
   ...props
 }: ButtonProps) {
   return (
     <button
-      className={buttonVariants({ variant, size, disabledCursor, className })}
+      className={buttonVariants({ variant, size, disabledCursor, surface, className })}
       {...props}
     />
   )

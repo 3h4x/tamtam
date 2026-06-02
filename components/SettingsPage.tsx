@@ -801,14 +801,22 @@ export function SettingsPage({ initialTab }: { initialTab?: TabId } = {}) {
                 </div>
                 {projects.length > 0 && (
                   <div className="flex gap-1.5">
-                    <button onClick={() => toggleAll(true)}
-                      className="px-2.5 py-1 text-xs border border-border rounded bg-bg-primary text-text-secondary hover:text-text-primary hover:bg-bg-tertiary cursor-pointer transition-colors">
+                    <Button
+                      type="button"
+                      size="sm"
+                      surface="primary"
+                      onClick={() => toggleAll(true)}
+                    >
                       All
-                    </button>
-                    <button onClick={() => toggleAll(false)}
-                      className="px-2.5 py-1 text-xs border border-border rounded bg-bg-primary text-text-secondary hover:text-text-primary hover:bg-bg-tertiary cursor-pointer transition-colors">
+                    </Button>
+                    <Button
+                      type="button"
+                      size="sm"
+                      surface="primary"
+                      onClick={() => toggleAll(false)}
+                    >
                       None
-                    </button>
+                    </Button>
                   </div>
                 )}
               </div>
