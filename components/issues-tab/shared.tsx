@@ -20,12 +20,13 @@ export function Labels({ labels, limit }: { labels: GhLabel[]; limit?: number })
         </span>
       ))}
       {hidden > 0 && (
-        <span
-          className="rounded-full border border-border bg-bg-tertiary px-1.5 py-0.5 text-[9px] font-medium text-text-tertiary"
+        <Pill
+          size="xs"
+          className="rounded-full bg-bg-tertiary px-1.5 py-0.5 text-[9px] font-medium text-text-tertiary"
           title={labels.slice(visible.length).map((l) => l.name).join(', ')}
         >
           +{hidden}
-        </span>
+        </Pill>
       )}
     </span>
   )
