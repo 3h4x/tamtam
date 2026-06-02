@@ -977,37 +977,34 @@ export function SettingsPage({ initialTab }: { initialTab?: TabId } = {}) {
               </div>
               <div>
                 <label className="block font-medium text-sm text-text-primary mb-1.5">Backup Interval (minutes)</label>
-                <input
+                <Input
                   type="number"
                   min={1}
                   step={1}
                   value={settings.db_backup_interval_minutes || '15'}
                   onChange={(e) => handleChange('db_backup_interval_minutes', e.target.value)}
-                  className="w-full px-3 py-2 bg-bg-primary text-text-primary border border-border rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-accent/30 focus:border-accent"
                 />
                 <p className="text-xs text-text-tertiary mt-1.5">How often the auto-backup fires. Default 15.</p>
               </div>
               <div>
                 <label className="block font-medium text-sm text-text-primary mb-1.5">Recent backups to keep</label>
-                <input
+                <Input
                   type="number"
                   min={0}
                   step={1}
                   value={settings.backup_retention_count || '14'}
                   onChange={(e) => handleChange('backup_retention_count', e.target.value)}
-                  className="w-full px-3 py-2 bg-bg-primary text-text-primary border border-border rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-accent/30 focus:border-accent"
                 />
                 <p className="text-xs text-text-tertiary mt-1.5">Newest N pgdump files retained after each backup.</p>
               </div>
               <div>
                 <label className="block font-medium text-sm text-text-primary mb-1.5">Weekly backups to keep</label>
-                <input
+                <Input
                   type="number"
                   min={0}
                   step={1}
                   value={settings.backup_retention_weekly_count || '8'}
                   onChange={(e) => handleChange('backup_retention_weekly_count', e.target.value)}
-                  className="w-full px-3 py-2 bg-bg-primary text-text-primary border border-border rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-accent/30 focus:border-accent"
                 />
                 <p className="text-xs text-text-tertiary mt-1.5">One older backup per week kept beyond the recent N.</p>
               </div>

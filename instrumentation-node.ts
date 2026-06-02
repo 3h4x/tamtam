@@ -1207,7 +1207,9 @@ export async function registerNode(): Promise<void> {
   }
 
   const probeIntervalMs = parseInt(process.env.TAMTAM_PROBE_INTERVAL_MS ?? '', 10) || 30_000;
-  setInterval(runProbeSweep, probeIntervalMs);
+  if (!(process.env.VITEST || (process.env.NODE_ENV as string) === 'test')) {
+    setInterval(runProbeSweep, probeIntervalMs);
+  }
 
   // Note: the hook-failure recovery loops that used to live here
   // (drainStaleQueuedAgentRuns scheduler, reconcileRecovery sweep,
