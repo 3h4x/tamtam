@@ -1,6 +1,27 @@
 # Database — Schema Reference
 
-Postgres 16 (with the `vector` extension) accessed via `pg.Pool` and Drizzle ORM. Connection string lives in `DATABASE_URL` (required). Schema in `lib/db/`.
+Postgres 18 (with the `vector` extension) accessed via `pg.Pool` and Drizzle ORM. Connection string lives in `DATABASE_URL` (required). Schema in `lib/db/`.
+
+## Upgrading the Postgres major version (pg16 → pg18)
+
+The bundled `docker-compose.yml` / `docker-compose.qa.yml` pin `pgvector/pgvector:pg18`. The named volume is mounted at `/var/lib/postgresql` (not `/var/lib/postgresql/data`): the Postgres 18 official image — which the pgvector image is built on — moved the default `PGDATA` to a version-scoped subdirectory (`/var/lib/postgresql/18/docker`), so the mount must sit one level up to persist the cluster.
+
+A major-version jump is **not** an in-place upgrade. A volume previously populated by `pg16` (under the old `/var/lib/postgresql/data` layout) will not be read by `pg18`, and a fresh cluster will be initialized. To preserve data, dump under the old image first and restore after switching:
+
+```bash
+# 1. With the OLD (pg16) compose still in place, dump:
+docker compose exec postgres pg_dump -U tamtam -d tamtam -Fc > tamtam.pre18.dump
+# 2. Stop and remove the old volume so pg18 starts a clean cluster:
+docker compose down
+docker volume rm tamtam-postgres-data   # tamtam-qa-postgres for the QA compose
+# 3. Bring up pg18 and verify the cluster is healthy:
+docker compose up -d
+docker compose exec postgres pg_isready -U tamtam -d tamtam
+# 4. Restore:
+docker compose exec -T postgres pg_restore -U tamtam -d tamtam --clean --if-exists < tamtam.pre18.dump
+```
+
+QA volumes are ephemeral and can simply be recreated.
 
 ## When to read this
 

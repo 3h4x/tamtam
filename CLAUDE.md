@@ -19,7 +19,7 @@ See `docs/PIPELINE.md` for the full state machine.
 
 ## Tech Stack
 
-Next.js 16 (App Router), React 19, TypeScript 6 strict, Tailwind v4, Drizzle ORM + `pg` (Postgres 16 with `vector` extension; `DATABASE_URL` required), vitest + Playwright, pnpm 11.1.2. Providers: Claude / Gemini / LM Studio / Codex / Deep Agents via bundled CLI shims, plus custom Claude-compatible wrappers.
+Next.js 16 (App Router), React 19, TypeScript 6 strict, Tailwind v4, Drizzle ORM + `pg` (Postgres 18 with `vector` extension; `DATABASE_URL` required), vitest + Playwright, pnpm 11.1.2. Providers: Claude / Gemini / LM Studio / Codex / Deep Agents via bundled CLI shims, plus custom Claude-compatible wrappers.
 
 ## Commands
 

@@ -1,12 +1,12 @@
 services:
   postgres:
-    image: pgvector/pgvector:pg16
+    image: pgvector/pgvector:pg18
     environment:
       POSTGRES_USER: tamtam
       POSTGRES_PASSWORD: tamtam
       POSTGRES_DB: tamtam_qa
     volumes:
-      - tamtam-qa-postgres:/var/lib/postgresql/data
+      - tamtam-qa-postgres:/var/lib/postgresql
     healthcheck:
       test: ["CMD-SHELL", "pg_isready -U tamtam -d tamtam_qa"]
       interval: 2s
