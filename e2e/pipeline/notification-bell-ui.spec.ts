@@ -402,6 +402,61 @@ test.describe('NotificationBell', () => {
     await expect(page.getByText('LGTM').first()).toBeVisible();
   });
 
+  test('running dot changes to failure badge when a running job fails on auto-poll', async ({
+    page,
+  }) => {
+    let count = 0;
+    let jobs: NotifJob[] = [];
+    let runningCount = 1;
+    let runningJobs: NotifJob[] = [
+      makeNotifJob({
+        id: 'running-to-failed',
+        project: 'failed-transition-project',
+        kind: 'test',
+        status: 'running',
+        exit_code: null,
+        finished_at: null,
+      }),
+    ];
+
+    await stubShellRoutes(page);
+    await page.route('**/api/jobs/notifications', (route: Route) =>
+      route.fulfill({ json: { count, jobs, runningCount, runningJobs } }),
+    );
+
+    await page.goto('/workflow-runs');
+
+    const runningBell = page.getByTitle('1 running');
+    await expect(runningBell).toBeVisible({ timeout: 8_000 });
+    await expect(runningBell.locator('span.animate-pulse')).toBeVisible();
+    await expect(runningBell.locator('span.bg-status-error')).toHaveCount(0);
+
+    count = 1;
+    jobs = [
+      makeNotifJob({
+        id: 'running-to-failed',
+        project: 'failed-transition-project',
+        kind: 'test',
+        status: 'done',
+        exit_code: 1,
+        finished_at: now() - 5,
+      }),
+    ];
+    runningCount = 0;
+    runningJobs = [];
+
+    const failedBell = page.getByTitle('1 unread');
+    await expect(failedBell).toBeVisible({ timeout: 12_000 });
+    await expect(failedBell.locator('span.bg-status-error')).toHaveText('1');
+    await expect(failedBell.locator('span.animate-pulse')).toHaveCount(0);
+
+    await failedBell.click();
+    await expect(page.getByText(/running.*1 project/i)).toHaveCount(0);
+    await expect(page.getByText('failed-transition-project')).toBeVisible({ timeout: 5_000 });
+    await expect(page.locator('[aria-label="attention"]').first()).toBeVisible();
+    await expect(page.getByText('exit 1').first()).toBeVisible();
+  });
+
   test('running dot clears when the only running job disappears on auto-poll', async ({
     page,
   }) => {
