@@ -269,7 +269,55 @@ test.describe('ConfigTab save flow', () => {
   });
 
   // ---------------------------------------------------------------------------
-  // Test 6: Pipeline step toggle (clicking "review" chip) marks form dirty
+  // Test 6: Cron schedule toggle shows/hides the interval input and marks dirty
+  // ---------------------------------------------------------------------------
+  test('enabling Run on schedule reveals interval input and marks form dirty', async ({ page }) => {
+    await stubShell(page);
+    await page.goto(`/project/${PROJECT}/config`);
+
+    await expect(page.getByLabel('Website')).toBeVisible({ timeout: 8_000 });
+
+    // Interval input should not exist while cron is disabled.
+    await expect(page.getByLabel('Schedule interval')).not.toBeVisible();
+
+    // Find and click the "Run on schedule" checkbox.
+    const cronToggle = page.getByRole('checkbox', { name: /run on schedule/i });
+    await expect(cronToggle).toBeVisible({ timeout: 5_000 });
+    await cronToggle.click();
+
+    // Interval input should now be visible.
+    await expect(page.getByLabel('Schedule interval')).toBeVisible({ timeout: 3_000 });
+
+    // Form should be dirty.
+    await expect(page.getByText('Unsaved changes')).toBeVisible({ timeout: 3_000 });
+    await expect(page.getByRole('button', { name: /^Save$/ })).toBeEnabled();
+  });
+
+  // ---------------------------------------------------------------------------
+  // Test 7: Typing a schedule interval marks the form dirty
+  // ---------------------------------------------------------------------------
+  test('typing a schedule interval marks the form dirty', async ({ page }) => {
+    await stubShell(page);
+    // Start with cron enabled so the interval input is immediately visible.
+    await page.route(
+      `**/api/projects/by-project/${PROJECT}/config`,
+      (route: Route) => {
+        if (route.request().method() !== 'GET') { route.continue(); return; }
+        route.fulfill({ json: makeProjectConfig({ test_cron_enabled: true, test_cron_schedule: '1h' }) });
+      },
+    );
+
+    await page.goto(`/project/${PROJECT}/config`);
+    await expect(page.getByLabel('Schedule interval')).toBeVisible({ timeout: 8_000 });
+
+    await page.getByLabel('Schedule interval').fill('30m');
+
+    await expect(page.getByText('Unsaved changes')).toBeVisible({ timeout: 3_000 });
+    await expect(page.getByRole('button', { name: /^Save$/ })).toBeEnabled();
+  });
+
+  // ---------------------------------------------------------------------------
+  // Test 8: Pipeline step toggle (clicking "review" chip) marks form dirty
   // ---------------------------------------------------------------------------
   test('toggling the review pipeline step marks the form dirty', async ({ page }) => {
     await stubShell(page);
