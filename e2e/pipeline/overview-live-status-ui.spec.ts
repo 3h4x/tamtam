@@ -30,7 +30,7 @@ function makeTask(project: string) {
 
 function makeJob(
   id: string,
-  kind: 'review' | 'test',
+  kind: string,
   status: 'running' | 'done',
   exitCode: number | null,
   overrides: Record<string, unknown> = {},
@@ -124,6 +124,106 @@ async function stubOverviewRoutes(page: Page): Promise<void> {
 }
 
 test.describe('Overview tab live status polling', () => {
+  test('agent active-work card clears after the agent run finishes without reload', async ({
+    page,
+  }) => {
+    let serveRunning = true;
+
+    await stubOverviewRoutes(page);
+    await page.route(
+      (url) => url.pathname === '/api/jobs' && url.searchParams.get('project') === PROJECT,
+      (route: Route) =>
+        route.fulfill({
+          json: {
+            jobs: serveRunning
+              ? [
+                  makeJob('agent-live', 'agent:research', 'running', null, {
+                    provider: 'claude',
+                    user_prompt: 'Research release blockers',
+                    prompt: 'Research release blockers',
+                  }),
+                ]
+              : [
+                  makeJob('agent-live', 'agent:research', 'done', 0, {
+                    provider: 'claude',
+                    user_prompt: 'Research release blockers',
+                    prompt: 'Research release blockers',
+                    finished_at: now() - 5,
+                  }),
+                ],
+            pendingReleaseProjects: [],
+          },
+        }),
+    );
+
+    await page.goto(`/project/${PROJECT}`);
+
+    await expect(page.getByText('active work')).toBeVisible({ timeout: 8_000 });
+    await expect(page.getByText('1 running now')).toBeVisible({ timeout: 8_000 });
+    await expect(page.getByRole('button', { name: /research/i }).first()).toBeVisible({
+      timeout: 8_000,
+    });
+
+    serveRunning = false;
+
+    await expect(page.getByText('active work')).toHaveCount(0, { timeout: 12_000 });
+    await expect(page.getByText('1 running now')).toHaveCount(0, { timeout: 12_000 });
+  });
+
+  test('release active-work card uses its parent agent identity while the release is running', async ({
+    page,
+  }) => {
+    let serveRunning = true;
+
+    await stubOverviewRoutes(page);
+    await page.route(
+      (url) => url.pathname === '/api/jobs' && url.searchParams.get('project') === PROJECT,
+      (route: Route) =>
+        route.fulfill({
+          json: {
+            jobs: serveRunning
+              ? [
+                  makeJob('release-live', 'release', 'running', null, {
+                    parent_job_id: 'agent-parent-live',
+                    provider: 'claude',
+                  }),
+                  makeJob('agent-parent-live', 'agent:improve', 'done', 0, {
+                    provider: 'claude',
+                    finished_at: now() - 15,
+                  }),
+                ]
+              : [
+                  makeJob('release-live', 'release', 'done', 0, {
+                    parent_job_id: 'agent-parent-live',
+                    finished_at: now() - 5,
+                    work_summary: 'Released successfully.',
+                  }),
+                  makeJob('agent-parent-live', 'agent:improve', 'done', 0, {
+                    provider: 'claude',
+                    finished_at: now() - 15,
+                  }),
+                ],
+            pendingReleaseProjects: [],
+          },
+        }),
+    );
+
+    await page.goto(`/project/${PROJECT}`);
+
+    await expect(page.getByText('active work')).toBeVisible({ timeout: 8_000 });
+    await expect(page.getByText('1 running now')).toBeVisible({ timeout: 8_000 });
+    await expect(page.getByRole('button', { name: /improve/i }).first()).toBeVisible({
+      timeout: 8_000,
+    });
+    await expect(page.getByText('release in progress')).toBeVisible({ timeout: 8_000 });
+    await expect(page.getByText('Release pipeline')).toHaveCount(0);
+
+    serveRunning = false;
+
+    await expect(page.getByText('active work')).toHaveCount(0, { timeout: 12_000 });
+    await expect(page.getByText('release in progress')).toHaveCount(0, { timeout: 12_000 });
+  });
+
   test('review card flips from running to LGTM and clears the active-work banner without reload', async ({
     page,
   }) => {
