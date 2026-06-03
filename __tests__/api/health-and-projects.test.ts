@@ -35,7 +35,7 @@ describe('GET /api/health', () => {
   });
 
   it('returns status ok', async () => {
-    const res = await HealthGET();
+    const res = await HealthGET(new NextRequest('http://localhost/api/health'));
     expect(res.status).toBe(200);
     const data = await res.json();
     expect(data.status).toBe('ok');

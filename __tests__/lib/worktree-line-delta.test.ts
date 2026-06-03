@@ -34,9 +34,22 @@ describe('worktreeLineDelta', () => {
     expect(await worktreeLineDelta(dir)).toBe(3);
   });
 
-  it('counts untracked files via intent-to-add', async () => {
+  it('counts untracked files without staging them', async () => {
     writeFileSync(join(dir, 'b.txt'), 'x\ny\n');
     expect(await worktreeLineDelta(dir)).toBe(2);
+  });
+
+  it('preserves pre-existing staged changes while counting untracked files', async () => {
+    writeFileSync(join(dir, 'a.txt'), 'one\ntwo\nthree\nfour\n');
+    await git(dir, 'add', 'a.txt');
+    writeFileSync(join(dir, 'b.txt'), 'x\ny\n');
+
+    const before = await git(dir, 'status', '--porcelain');
+    expect(before).toContain('M  a.txt');
+    expect(before).toContain('?? b.txt');
+
+    expect(await worktreeLineDelta(dir)).toBe(3);
+    expect(await git(dir, 'status', '--porcelain')).toBe(before);
   });
 
   it('ignores binary rows (numstat dash)', async () => {

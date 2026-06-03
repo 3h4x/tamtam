@@ -3,7 +3,7 @@ import { resolveCliBin, resolveCliDefaultModel, resolveCliEnv } from '@/lib/shar
 import type { TamTamConfig } from '@/lib/shared/config';
 
 function makeSettings(overrides: Partial<TamTamConfig> = {}): TamTamConfig {
-  return {
+  const base: TamTamConfig = {
     workspace_path: '',
     github_owner: '',
     trusted_github_users: [],
@@ -45,6 +45,8 @@ function makeSettings(overrides: Partial<TamTamConfig> = {}): TamTamConfig {
     review_verdict_rules: '',
     jobs_paused: false,
     fix_max_iterations: 3,
+    release_min_lines: 0,
+    release_reinforce_max_iterations: 3,
     review_fix_backoff_seconds: 0,
     review_do_not_ship_action: 'pass',
     release_wall_clock_timeout_minutes: 60,
@@ -102,7 +104,13 @@ function makeSettings(overrides: Partial<TamTamConfig> = {}): TamTamConfig {
     legacy_pipeline_lock_inline_drain_enabled: true,
     legacy_completion_hook_agent_drain_enabled: true,
     plain_test_phase_enabled: false,
+  };
+  return {
+    ...base,
     ...overrides,
+    release_min_lines: overrides.release_min_lines ?? base.release_min_lines,
+    release_reinforce_max_iterations:
+      overrides.release_reinforce_max_iterations ?? base.release_reinforce_max_iterations,
   };
 }
 

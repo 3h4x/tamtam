@@ -126,6 +126,8 @@ export function SettingsField({
           {MODEL_TIERS.map((model) => <option key={model} value={model}>{MODEL_LABELS[model]}</option>)}
         </Select>
       ) : fieldKey === 'fix_max_iterations'
+          || fieldKey === 'release_min_lines'
+          || fieldKey === 'release_reinforce_max_iterations'
           || fieldKey === 'orchestrator_boost_margin_pct'
           || fieldKey === 'orchestrator_max_boosts_per_hour' ? (
         <Input

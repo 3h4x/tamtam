@@ -64,6 +64,8 @@ interface SettingsMap {
   jobs_paused: string
   rebuild_in_progress: string
   fix_max_iterations: string
+  release_min_lines: string
+  release_reinforce_max_iterations: string
   review_fix_backoff_seconds: string
   review_do_not_ship_action: string
   release_wall_clock_timeout_minutes: string

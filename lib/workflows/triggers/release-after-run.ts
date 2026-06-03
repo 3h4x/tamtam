@@ -47,6 +47,72 @@ export interface DispatchReleaseAfterRunOutcome {
   reason: string;
 }
 
+/** Reinforce-or-release decision for the auto-release path. Returns a terminal
+ *  outcome when it handled the run (reinforced), or null to mean "proceed with
+ *  the normal release dispatch below". Only consulted for non-issue agent jobs
+ *  when release_min_lines > 0. */
+async function reinforceOrReleaseDecision(
+  job: JobData,
+): Promise<DispatchReleaseAfterRunOutcome | null> {
+  const { getSettings } = await import('@/lib/shared/config');
+  const { release_min_lines, release_reinforce_max_iterations } = getSettings();
+  if (release_min_lines <= 0) return null; // gate disabled -> normal release
+
+  const { resolveProjectPath } = await import('@/lib/shared/project-data');
+  const projPath = resolveProjectPath(job.project);
+  if (!projPath) return null; // can't measure -> don't block release
+
+  const { decidePrContext } = await import('@/lib/pipeline/pr-context');
+  const prDecision = await decidePrContext(projPath);
+  if (prDecision.shouldOpenPr) {
+    return null; // non-default branches need the release pipeline to open/reuse a PR
+  }
+
+  const { worktreeLineDelta } = await import('@/lib/git/worktree-line-delta');
+  const loc = await worktreeLineDelta(projPath);
+
+  const {
+    getReinforceState,
+    bumpReinforceState,
+    clearReinforceState,
+    redispatchAgentForReinforce,
+    buildReinforcePrompt,
+    getJobAgentId,
+  } = await import('@/lib/workflows/triggers/reinforce-state');
+
+  if (loc >= release_min_lines) {
+    clearReinforceState(job.project);
+    return null; // threshold met -> normal release
+  }
+
+  const agentId = await getJobAgentId(job.id);
+  if (!agentId) return null; // no agent to re-run -> release whatever exists
+
+  const state = getReinforceState(job.project);
+  const madeProgress = loc > state.lastSeenLoc;
+  const underCap =
+    release_reinforce_max_iterations === 0 ||
+    state.iterations < release_reinforce_max_iterations;
+
+  if (madeProgress && underCap) {
+    bumpReinforceState(job.project, loc);
+    const accepted = await redispatchAgentForReinforce(agentId, job.project, buildReinforcePrompt(loc));
+    if (accepted) {
+      return {
+        dispatched: false,
+        reason: `reinforcing (loc ${loc} < ${release_min_lines}, iter ${state.iterations + 1})`,
+      };
+    }
+    // Re-dispatch not accepted (queued/failed) -> fall through to release.
+    clearReinforceState(job.project);
+    return null;
+  }
+
+  // No progress or cap reached -> ship whatever exists.
+  clearReinforceState(job.project);
+  return null;
+}
+
 export async function dispatchReleaseAfterRun(job: JobData): Promise<DispatchReleaseAfterRunOutcome> {
   // Issue work is dispatched the same as regular runs. The release pipeline
   // detects the non-default branch via `decidePrContext` and opens (or
@@ -75,6 +141,15 @@ export async function dispatchReleaseAfterRun(job: JobData): Promise<DispatchRel
 
   const releaseAfterRun = await getReleaseAfterRunFlag(job.project);
   if (!releaseAfterRun) return { dispatched: false, reason: 'releaseAfterRun=false for project' };
+
+  // Reinforce-to-threshold: for working-tree-dirty agent runs (not issue/PR
+  // work, not plain `run` jobs), keep re-running the agent until the
+  // accumulated change is large enough to justify a release. Default-off via
+  // release_min_lines=0.
+  if (isAgentJobKind(job.kind) && !issueLinked) {
+    const reinforced = await reinforceOrReleaseDecision(job);
+    if (reinforced) return reinforced;
+  }
 
   const { dispatchReleaseWorkflow } = await import('@/lib/workflows/dispatch-release');
   const r = await dispatchReleaseWorkflow(job.project, { queueIfBlocked: true, sourceJobId: job.id });

@@ -32,6 +32,10 @@ if (process.env.WORKFLOW_TARGET_WORLD === 'local') {
 }
 
 const nextConfig: NextConfig = {
+  // Isolated build output dir for experimental builds (e.g. a webpack-vs-
+  // turbopack A/B) so they never clobber the live `.next` the running server
+  // serves from. Set via TAMTAM_DIST_DIR; unset ⇒ Next's standard `.next`.
+  ...(process.env.TAMTAM_DIST_DIR ? { distDir: process.env.TAMTAM_DIST_DIR } : {}),
   // `pg` and `graphile-worker` rely on native bindings / dynamic
   // require, so they have to stay external. Tried extending this list
   // to workflow/drizzle/cbor/etc., but it made `check-page` and

@@ -33,18 +33,25 @@ export function clearReinforceState(project: string): void {
   store().delete(project);
 }
 
-/** Resolve the agent_id for a finished job row. JobData does not surface it,
- *  but the jobs table column does. Returns null for non-agent rows or when the
- *  job/agent is gone. */
+/** Resolve the agent id for a finished job row. JobData does not surface it,
+ *  but agent runs store invocation metadata in jobs.context_meta. Returns null
+ *  for non-agent rows, legacy rows without metadata, or malformed metadata. */
 export async function getJobAgentId(jobId: string): Promise<string | null> {
   const { db, schema } = await import('@/lib/db');
   const { eq } = await import('drizzle-orm');
   const rows = await db
-    .select({ agentId: schema.jobs.agentId })
+    .select({ contextMeta: schema.jobs.contextMeta })
     .from(schema.jobs)
     .where(eq(schema.jobs.id, jobId))
     .limit(1);
-  return rows[0]?.agentId ?? null;
+  const rawMeta = rows[0]?.contextMeta;
+  if (!rawMeta) return null;
+  try {
+    const parsed = JSON.parse(rawMeta) as { agent?: { id?: unknown } };
+    return typeof parsed.agent?.id === 'string' ? parsed.agent.id : null;
+  } catch {
+    return null;
+  }
 }
 
 /** Re-dispatch the finished agent to keep working, via the same internal

@@ -136,6 +136,8 @@ async function buildSettingsResponse(): Promise<Record<string, string>> {
   settings.cli_enabled_providers = serializeSettingValue('cli_enabled_providers', effective.cli_enabled_providers);
   settings.provider_fallback_chain = serializeSettingValue('provider_fallback_chain', effective.provider_fallback_chain);
   settings.fix_max_iterations = serializeSettingValue('fix_max_iterations', effective.fix_max_iterations);
+  settings.release_min_lines = serializeSettingValue('release_min_lines', effective.release_min_lines);
+  settings.release_reinforce_max_iterations = serializeSettingValue('release_reinforce_max_iterations', effective.release_reinforce_max_iterations);
   settings.review_do_not_ship_action = serializeSettingValue('review_do_not_ship_action', effective.review_do_not_ship_action);
   settings.release_wall_clock_timeout_minutes = serializeSettingValue('release_wall_clock_timeout_minutes', effective.release_wall_clock_timeout_minutes);
   settings.plain_test_phase_enabled = serializeSettingValue('plain_test_phase_enabled', effective.plain_test_phase_enabled);
@@ -189,6 +191,8 @@ const SETTING_KEYS = [
   'jobs_paused',
   'rebuild_in_progress',
   'fix_max_iterations',
+  'release_min_lines',
+  'release_reinforce_max_iterations',
   'review_fix_backoff_seconds',
   'review_do_not_ship_action',
   'release_wall_clock_timeout_minutes',
@@ -358,6 +362,16 @@ function validateAndSerializeSettingValue(
   if (key === 'fix_max_iterations') {
     // Default is unlimited (0), but any positive integer caps review
     // verification rounds until LGTM or the release wall clock aborts.
+    return parseNonNegativeIntegerSetting(value, key);
+  }
+  if (key === 'release_min_lines') {
+    // 0 disables the gate; any positive integer is the minimum cumulative
+    // working-tree LOC before an auto-release fires.
+    return parseNonNegativeIntegerSetting(value, key);
+  }
+  if (key === 'release_reinforce_max_iterations') {
+    // 0 = unlimited (no-progress exit terminates); otherwise the max
+    // consecutive reinforce re-runs before releasing whatever exists.
     return parseNonNegativeIntegerSetting(value, key);
   }
   if (key === 'review_fix_backoff_seconds') {

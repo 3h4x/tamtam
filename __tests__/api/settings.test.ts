@@ -88,6 +88,8 @@ describe('settings API', () => {
         claude_provider: 'claude',
         cli_enabled_providers: 'claude',
         fix_max_iterations: '0',
+        release_min_lines: '0',
+        release_reinforce_max_iterations: '3',
         review_do_not_ship_action: 'fix',
         release_wall_clock_timeout_minutes: '60',
         plain_test_phase_enabled: 'false',

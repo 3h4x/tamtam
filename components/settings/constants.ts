@@ -15,6 +15,8 @@ export type SettingsFieldKey =
   | 'commit_style'
   | 'review_verdict_rules'
   | 'fix_max_iterations'
+  | 'release_min_lines'
+  | 'release_reinforce_max_iterations'
   | 'review_fix_backoff_seconds'
   | 'review_do_not_ship_action'
   | 'release_wall_clock_timeout_minutes'
@@ -371,6 +373,21 @@ export const FIELDS: Record<SettingsFieldKey, FieldDef> = {
     subsection: 'release_ops',
     span: 1,
   },
+  release_min_lines: {
+    label: 'Release Min Lines Changed',
+    help: 'Minimum cumulative working-tree lines changed (added + removed) before an auto-triggered release fires. 0 (default) disables the gate. When set, a sub-threshold agent run is reinforced — the same agent is re-dispatched to do more — instead of running the pipeline on a trivial diff. Only applies to the auto-release path (Release After Run) for working-tree-dirty agent runs.',
+    group: 'pipeline',
+    subsection: 'release_ops',
+    span: 1,
+  },
+  release_reinforce_max_iterations: {
+    label: 'Reinforce Max Iterations',
+    help: 'Max consecutive reinforce re-runs per project before releasing whatever exists. 0 = unlimited (stops only when a re-run adds no new lines). Only used when Release Min Lines Changed is set.',
+    group: 'pipeline',
+    subsection: 'release_ops',
+    advanced: true,
+    span: 1,
+  },
   project_sweep_enabled: {
     label: 'Project Sweep',
     help: 'Run the background project sweep worker when TamTam starts.',
@@ -556,6 +573,8 @@ export const DEFAULTS: Record<SettingsFieldKey, string> = {
 - DO NOT SHIP when there is a real risk of breakage, data loss, security regression, or a test that hides behavior.
 - If LGTM, just confirm the changes look good and add nothing else.`,
   fix_max_iterations: '0',
+  release_min_lines: '0',
+  release_reinforce_max_iterations: '3',
   review_fix_backoff_seconds: '0',
   review_do_not_ship_action: 'fix',
   release_wall_clock_timeout_minutes: '60',

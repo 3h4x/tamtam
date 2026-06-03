@@ -1178,7 +1178,7 @@ describe('parseTestScheduleToCron', () => {
 describe('GET /api/health', () => {
   it('returns status ok', async () => {
     const mod = await import('@/app/api/health/route');
-    const res = await mod.GET();
+    const res = await mod.GET(new NextRequest('http://localhost/api/health'));
     expect(res.status).toBe(200);
     const data = await res.json();
     expect(data.status).toBe('ok');

@@ -21,6 +21,8 @@
     "peek:summary": "node scripts/peek-summary.mjs",
     "gen:workflow-graph": "node scripts/gen-workflow-graph.mjs",
     "build": "node scripts/build-with-metrics.mjs",
+    "build:turbopack": "TAMTAM_BUILD_BUNDLER=turbopack TAMTAM_BUILD_LABEL=turbopack node scripts/build-with-metrics.mjs",
+    "build:webpack-test": "TAMTAM_BUILD_BUNDLER=webpack TAMTAM_DIST_DIR=.next-webpack-test TAMTAM_BUILD_LABEL=webpack-test node scripts/build-with-metrics.mjs",
     "build:raw": "NODE_ENV=production next build",
     "build:debug": "NODE_ENV=production next build --debug",
     "build:cpu-prof": "NODE_ENV=production next build --experimental-cpu-prof",
