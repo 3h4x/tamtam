@@ -61,7 +61,10 @@ function mockDeps({
 }
 
 describe('dispatchReleaseAfterRun', () => {
-  beforeEach(() => vi.resetModules());
+  beforeEach(() => {
+    vi.resetModules();
+    vi.spyOn(console, 'log').mockImplementation(() => {});
+  });
   afterEach(() => { vi.resetModules(); vi.restoreAllMocks(); });
 
   it('dispatches release for issue-cruncher so the pipeline opens a PR', async () => {

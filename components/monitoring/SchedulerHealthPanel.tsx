@@ -2,6 +2,7 @@
 
 import { useState, useCallback, useEffect } from 'react'
 import { Button } from '@/components/ui/Button'
+import { InlineLoading } from '@/components/ui/InlineLoading'
 import { SectionHeader } from './shared'
 import { SchedulerFireTable } from './SchedulerFireTable'
 import type { SchedulerInternalEntry } from './SchedulerFireTable'
@@ -92,7 +93,9 @@ export function SchedulerHealthPanel() {
         </div>
       </div>
       {loading && !health ? (
-        <div className="skeleton h-16 rounded-md" />
+        <div className="rounded-md border border-border bg-bg-secondary p-3">
+          <InlineLoading label="Loading scheduler health..." />
+        </div>
       ) : error ? (
         <p className="text-sm text-status-error">{error}</p>
       ) : health ? (
