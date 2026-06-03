@@ -104,6 +104,7 @@ describe('/api/automation-queue', () => {
         code: 'pipeline_lock',
         queuedAt: 1710000000000,
         blockingJobId: 'release-lock-1',
+        nextRetryState: 'blocked',
         retryAllowed: true,
         cancelAllowed: true,
       }),
@@ -320,7 +321,11 @@ describe('/api/automation-queue', () => {
     const data = await res.json();
     expect(data.status).toBe('stayed_queued');
     expect(data.items).toEqual([
-      expect.objectContaining({ kind: 'queued_agent_run', agentId: 'agent-1' }),
+      expect.objectContaining({
+        kind: 'queued_agent_run',
+        agentId: 'agent-1',
+        retryAllowed: true,
+      }),
     ]);
   });
 });

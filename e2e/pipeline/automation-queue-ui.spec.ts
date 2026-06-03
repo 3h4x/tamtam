@@ -95,7 +95,7 @@ function queuedAgentItem(): QueueItem {
     queuedAt: (now() - 90) * 1000,
     blockingJobId: 'release-blocking-job-abcdef123456',
     nextRetryState: 'blocked',
-    retryAllowed: false,
+    retryAllowed: true,
     cancelAllowed: true,
     agentId: 'agent-run-42',
     agentName: 'Planner',
@@ -292,6 +292,82 @@ test.describe('History queued automation UI', () => {
     await expect(releaseRow).toBeVisible({ timeout: 8_000 });
     await expect(releaseRow.getByLabel('running')).toBeVisible();
     await expect(releaseRow.getByText('running', { exact: true })).toBeVisible();
-    await expect(releaseRow.getByText('Queued release is running')).toBeVisible();
+  });
+
+  test('queued release Retry can stay queued and keep retry available while blocked', async ({
+    page,
+  }) => {
+    let retryPayload: unknown = null;
+    let queueItems = [queuedReleaseItem()];
+    const blockedItem = {
+      ...queuedReleaseItem(),
+      reason: 'Release lock is still held by an active pipeline',
+      code: 'pipeline_lock',
+      blockingJobId: 'release-lock-holder-abcdef123456',
+      nextRetryState: 'blocked' as const,
+      retryAllowed: true,
+      cancelAllowed: true,
+    };
+
+    await stubHistoryShellRoutes(page);
+    await stubHistoryJobs(page, () => []);
+    await page.route(
+      (url) => url.pathname === '/api/automation-queue' && url.searchParams.get('project') === PROJECT,
+      (route: Route) => {
+        route.fulfill({ json: { items: queueItems } });
+      },
+    );
+    await page.route('**/api/automation-queue/retry', (route: Route) => {
+      retryPayload = JSON.parse(route.request().postData() || '{}');
+      queueItems = [blockedItem];
+      route.fulfill({ json: { status: 'stayed_queued', items: [blockedItem] } });
+    });
+
+    await page.goto(`/project/${PROJECT}/history`);
+
+    await expect(page.getByText('Pending release')).toBeVisible({ timeout: 8_000 });
+    await page.getByRole('button', { name: 'Retry' }).click();
+
+    await expect.poll(() => retryPayload).toEqual({ project: PROJECT });
+    await expect(page.getByText('Queued automation')).toBeVisible();
+    await expect(page.getByText('pipeline_lock')).toBeVisible();
+    await expect(page.getByText(/blocked by abcdef123456/)).toBeVisible();
+    await expect(page.getByText('Release lock is still held by an active pipeline')).toBeVisible();
+    await expect(page.getByRole('button', { name: 'Retry' })).toBeEnabled();
+    await expect(page.getByRole('button').filter({ hasText: 'Release pipeline' })).toHaveCount(0);
+  });
+
+  test('queued agent Cancel failure keeps the row and shows a failed action state', async ({
+    page,
+  }) => {
+    let cancelPayload: unknown = null;
+
+    await stubHistoryShellRoutes(page);
+    await stubHistoryJobs(page, () => []);
+    await page.route(
+      (url) => url.pathname === '/api/automation-queue' && url.searchParams.get('project') === PROJECT,
+      (route: Route) => {
+        route.fulfill({ json: { items: [queuedAgentItem()] } });
+      },
+    );
+    await page.route('**/api/automation-queue/cancel', (route: Route) => {
+      cancelPayload = JSON.parse(route.request().postData() || '{}');
+      route.fulfill({ status: 500, json: { detail: 'Queue backend rejected the cancel request.' } });
+    });
+
+    await page.goto(`/project/${PROJECT}/history`);
+
+    await expect(page.getByText('Planner agent')).toBeVisible({ timeout: 8_000 });
+    await page.getByRole('button', { name: 'Cancel' }).first().click();
+
+    await expect.poll(() => cancelPayload).toEqual({
+      kind: 'queued_agent_run',
+      project: PROJECT,
+      id: '42',
+    });
+    await expect(page.getByRole('button', { name: 'failed' })).toBeDisabled();
+    await expect(page.getByText('Queued automation')).toBeVisible();
+    await expect(page.getByText('Planner agent')).toBeVisible();
+    await expect(page.getByText('pipeline_lock')).toBeVisible();
   });
 });
