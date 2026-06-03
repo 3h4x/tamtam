@@ -197,6 +197,7 @@ describe('GET /api/agents/scheduler-health', () => {
           query: vi.fn(async () => ({
             rows: queueRows(),
           })),
+          on: vi.fn(),
           end: vi.fn(async () => undefined),
         };
       }),
@@ -327,6 +328,7 @@ describe('GET /api/agents/scheduler-health', () => {
           query: vi.fn(async () => ({
             rows: queueRows(),
           })),
+          on: vi.fn(),
           end: vi.fn(async () => undefined),
         };
       }),
@@ -378,6 +380,7 @@ describe('GET /api/agents/scheduler-health', () => {
           query: vi.fn(async () => ({
             rows: queueRows(),
           })),
+          on: vi.fn(),
           end: vi.fn(async () => undefined),
         };
       }),

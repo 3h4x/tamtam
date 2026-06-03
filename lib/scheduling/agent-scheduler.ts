@@ -146,7 +146,14 @@ export type SchedulerHealth = {
 
 async function loadAgentCronQueueKeys(keys: string[], connectionString: string): Promise<Set<string>> {
   if (keys.length === 0) return new Set();
-  const pool = new Pool({ connectionString, max: 1 });
+  const pool = new Pool({
+    connectionString,
+    max: 1,
+    connectionTimeoutMillis: 5000,
+    idleTimeoutMillis: 10000,
+    statement_timeout: 10000,
+  });
+  pool.on('error', (err) => console.error('[agent-scheduler] graphile health pool idle client error:', err));
   try {
     const { rows } = await pool.query<{ key: string }>(
       `
