@@ -337,6 +337,37 @@ test.describe('History queued automation UI', () => {
     await expect(page.getByRole('button').filter({ hasText: 'Release pipeline' })).toHaveCount(0);
   });
 
+  test('queued release Retry failure keeps the row and shows a failed action state', async ({
+    page,
+  }) => {
+    let retryPayload: unknown = null;
+
+    await stubHistoryShellRoutes(page);
+    await stubHistoryJobs(page, () => []);
+    await page.route(
+      (url) => url.pathname === '/api/automation-queue' && url.searchParams.get('project') === PROJECT,
+      (route: Route) => {
+        route.fulfill({ json: { items: [queuedReleaseItem()] } });
+      },
+    );
+    await page.route('**/api/automation-queue/retry', (route: Route) => {
+      retryPayload = JSON.parse(route.request().postData() || '{}');
+      route.fulfill({ status: 500, json: { detail: 'Recovery drain failed before starting work.' } });
+    });
+
+    await page.goto(`/project/${PROJECT}/history`);
+
+    await expect(page.getByText('Pending release')).toBeVisible({ timeout: 8_000 });
+    await page.getByRole('button', { name: 'Retry' }).click();
+
+    await expect.poll(() => retryPayload).toEqual({ project: PROJECT });
+    await expect(page.getByRole('button', { name: 'failed' })).toBeDisabled();
+    await expect(page.getByText('Queued automation')).toBeVisible();
+    await expect(page.getByText('Pending release')).toBeVisible();
+    await expect(page.getByText('jobs_paused')).toBeVisible();
+    await expect(page.getByRole('button').filter({ hasText: 'Release pipeline' })).toHaveCount(0);
+  });
+
   test('queued agent Cancel failure keeps the row and shows a failed action state', async ({
     page,
   }) => {
