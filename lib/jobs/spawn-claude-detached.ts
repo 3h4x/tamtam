@@ -144,7 +144,7 @@ export async function startJobInProcess(
     cleanup();
   });
 
-  // Pipe prompt file → stdin (matches scripts/job-runner.js).
+  // Pipe prompt file → stdin.
   try {
     const promptStream = createReadStream(/*turbopackIgnore: true*/ promptPath);
     promptStream.on('error', (err) => {

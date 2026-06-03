@@ -7,7 +7,7 @@
 // a Node-only vitest context.
 //
 // Forward-compatibility: `PipelineStep.id` is intentionally the same string as
-// the server-side job `kind` (see `lib/job-storage.ts`). When a later PR adds a
+// the server-side job `kind` (see `lib/jobs/job-storage.ts`). When a later PR adds a
 // parallel server-side `registerStepRunner()` for execution logic, plugins will
 // not have to coordinate two naming systems.
 
