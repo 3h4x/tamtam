@@ -107,9 +107,7 @@ export function AgentsPage() {
     return () => { active = false; clearInterval(interval) }
   }, [])
 
-  // Single pass: was 5 separate .filter() loops (one for `filtered`, four
-  // for counts), each calling getState(a) → schedulerMap.get(a.id). With N
-  // agents that's 5N getState calls; now N.
+  // Single pass keeps filter results, counts, and scheduler lookups aligned.
   const filtered: Agent[] = []
   const stateByAgentId = new Map<string, AgentState>()
   let activeCount = 0

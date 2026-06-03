@@ -232,8 +232,7 @@ export function RecommendedAgents({ agents, customTemplates, recommendedAgents, 
     })
   if (suggestions.length === 0) return null
 
-  // Single-pass partition: was two opposite-predicate filters, each computing
-  // getSuggestionTone(rec) again per item. One walk + per-item tone evaluation.
+  // Single-pass partition keeps priority and recommended buckets consistent.
   const prioritySuggestions: RecommendedAgent[] = []
   const recommendedSuggestions: RecommendedAgent[] = []
   for (const rec of suggestions) {
