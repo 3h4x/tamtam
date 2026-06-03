@@ -78,6 +78,10 @@ function makeRuntime(project: string, overrides: RuntimeShape = {}): Record<stri
   };
 }
 
+function rowFor(page: import('@playwright/test').Page, project: string) {
+  return page.getByRole('row').filter({ hasText: project });
+}
+
 async function stubCommonRoutes(page: import('@playwright/test').Page): Promise<void> {
   await page.route('**/api/projects', (route: Route) =>
     route.fulfill({
@@ -232,5 +236,67 @@ test.describe('Home status badge live transitions', () => {
     await expect(page.getByText('agent running')).toHaveCount(0, { timeout: 40_000 });
     await expect(page.getByText('releasing')).toHaveCount(0);
     await expect(page.locator('span.animate-pulse').filter({ hasText: 'stuck' })).toHaveCount(0);
+  });
+
+  test('clears the generic "running" badge after a non-release job finishes', async ({ page }) => {
+    test.setTimeout(TRANSITION_TIMEOUT);
+    let phase: 'running' | 'idle' = 'running';
+
+    await stubCommonRoutes(page);
+    await page.route('**/api/projects/runtime', (route: Route) => {
+      const body =
+        phase === 'running'
+          ? makeRuntime(PROJECT, {
+              hasRunningRelease: false,
+              runningCount: 1,
+              runningKinds: ['review'],
+              runningAgentNames: [],
+            })
+          : makeRuntime(PROJECT);
+      route.fulfill({ json: { projects: body } });
+    });
+
+    await page.goto('/');
+    const row = rowFor(page, PROJECT);
+    await expect(row).toBeVisible({ timeout: 8_000 });
+    await expect(row.getByText('running', { exact: true })).toBeVisible({ timeout: 8_000 });
+
+    phase = 'idle';
+    await expect(row.getByText('running', { exact: true })).toHaveCount(0, { timeout: 40_000 });
+    await expect(row.getByText('releasing')).toHaveCount(0);
+    await expect(row.locator('span.animate-pulse').filter({ hasText: 'stuck' })).toHaveCount(0);
+  });
+
+  test('updates the agent badge count when one of two running agents finishes', async ({ page }) => {
+    test.setTimeout(TRANSITION_TIMEOUT);
+    let phase: 'two-running' | 'one-running' = 'two-running';
+
+    await stubCommonRoutes(page);
+    await page.route('**/api/projects/runtime', (route: Route) => {
+      const body =
+        phase === 'two-running'
+          ? makeRuntime(PROJECT, {
+              hasRunningRelease: false,
+              runningCount: 2,
+              runningKinds: ['agent:improve', 'agent:test-gen'],
+              runningAgentNames: ['improve', 'test-gen'],
+            })
+          : makeRuntime(PROJECT, {
+              hasRunningRelease: false,
+              runningCount: 1,
+              runningKinds: ['agent:improve'],
+              runningAgentNames: ['improve'],
+            });
+      route.fulfill({ json: { projects: body } });
+    });
+
+    await page.goto('/');
+    await expect(page.getByText(PROJECT)).toBeVisible({ timeout: 8_000 });
+    await expect(page.getByText('2 agents running')).toBeVisible({ timeout: 8_000 });
+
+    phase = 'one-running';
+    await expect(page.getByText('agent running')).toBeVisible({ timeout: 40_000 });
+    await expect(page.getByText('2 agents running')).toHaveCount(0);
+    await expect(page.getByText('releasing')).toHaveCount(0);
   });
 });
