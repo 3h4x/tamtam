@@ -4,10 +4,8 @@
 // LLM fix because the failure is a transient remote race
 // (`isRemoteRaceRejection`).
 //
-// Previously co-located with `startFixPush` in `start-fix-push.ts`. After
-// the fix-push workflow was collapsed into the generic `fix` phase, these
-// detectors live in their own module so the lifecycle hook can still
-// classify push failures without pulling in start-fix.
+// These detectors live in their own module so the lifecycle hook can
+// classify push failures without pulling in the fix phase's start-fix code.
 
 /** Is this push failure a hook rejection (lint/typecheck nit) worth auto-fixing?
  *
