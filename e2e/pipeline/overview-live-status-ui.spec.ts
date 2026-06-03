@@ -621,4 +621,104 @@ test.describe('Overview tab live status polling', () => {
       timeout: 12_000,
     });
   });
+
+  test('active-work overflow shows the plural count and decrements live as hidden jobs finish', async ({
+    page,
+  }) => {
+    // 6 concurrent running jobs → 4 cards visible, 2 hidden → "+2 more running jobs"
+    // (plural). As the two oldest (hidden) jobs finish one at a time the banner
+    // must read "+1 more running job" (singular) and then clear entirely, while
+    // the four newest cards stay put. Exercises the pluralization branch in
+    // OverviewTab that the live e2e suite otherwise only covers in the singular.
+    let phase: 'six' | 'five' | 'four' = 'six';
+    const baseStarted = now() - 20;
+
+    await stubOverviewRoutes(page);
+    await page.route(
+      (url) => url.pathname === '/api/jobs' && url.searchParams.get('project') === PROJECT,
+      (route: Route) => {
+        // Visible (4 newest, always running): agent, run, review, test.
+        const visible = [
+          makeJob('plural-agent-live', 'agent:research', 'running', null, {
+            started_at: baseStarted + 5,
+            provider: 'claude',
+            user_prompt: 'Map the rollout risk',
+            prompt: 'Map the rollout risk',
+          }),
+          makeJob('plural-run-live', 'run', 'running', null, {
+            started_at: baseStarted + 4,
+            user_prompt: 'Investigate the latest failed workflow',
+            prompt: 'Investigate the latest failed workflow',
+          }),
+          makeJob('plural-review-live', 'review', 'running', null, {
+            started_at: baseStarted + 3,
+          }),
+          makeJob('plural-test-live', 'test', 'running', null, {
+            started_at: baseStarted + 2,
+          }),
+        ];
+        // Hidden (2 oldest): commit then push. They finish first so the visible
+        // set never changes — only the overflow banner moves.
+        const hiddenCommit = makeJob(
+          'plural-commit-live',
+          'commit',
+          phase === 'six' ? 'running' : 'done',
+          phase === 'six' ? null : 0,
+          {
+            started_at: baseStarted + 1,
+            finished_at: phase === 'six' ? null : now() - 1,
+          },
+        );
+        const hiddenPush = makeJob(
+          'plural-push-live',
+          'push',
+          phase === 'four' ? 'done' : 'running',
+          phase === 'four' ? 0 : null,
+          {
+            started_at: baseStarted,
+            finished_at: phase === 'four' ? now() - 1 : null,
+          },
+        );
+
+        route.fulfill({
+          json: { jobs: [...visible, hiddenCommit, hiddenPush], pendingReleaseProjects: [] },
+        });
+      },
+    );
+
+    await page.goto(`/project/${PROJECT}`);
+
+    const activeWork = page.locator('section').filter({ hasText: 'active work' }).first();
+
+    await expect(page.getByText('6 running now')).toBeVisible({ timeout: 8_000 });
+    await expect(activeWork.getByText('+2 more running jobs')).toBeVisible({ timeout: 8_000 });
+    await expect(activeWork.getByRole('button', { name: /agent/i }).first()).toBeVisible({
+      timeout: 8_000,
+    });
+    await expect(activeWork.getByRole('button', { name: /code review/i }).first()).toBeVisible({
+      timeout: 8_000,
+    });
+    await expect(activeWork.getByRole('button', { name: /commit/i })).toHaveCount(0);
+    await expect(activeWork.getByRole('button', { name: /push/i })).toHaveCount(0);
+
+    phase = 'five';
+
+    await expect(page.getByText('5 running now')).toBeVisible({ timeout: 12_000 });
+    await expect(activeWork.getByText('+1 more running job')).toBeVisible({ timeout: 12_000 });
+    await expect(activeWork.getByText('+2 more running jobs')).toHaveCount(0, { timeout: 12_000 });
+    await expect(activeWork.getByRole('button', { name: /commit/i })).toHaveCount(0);
+    await expect(activeWork.getByRole('button', { name: /push/i })).toHaveCount(0);
+
+    phase = 'four';
+
+    await expect(page.getByText('4 running now')).toBeVisible({ timeout: 12_000 });
+    await expect(activeWork.getByText(/more running job/)).toHaveCount(0, { timeout: 12_000 });
+    await expect(activeWork.getByRole('button', { name: /agent/i }).first()).toBeVisible({
+      timeout: 12_000,
+    });
+    await expect(activeWork.getByRole('button', { name: /test run/i }).first()).toBeVisible({
+      timeout: 12_000,
+    });
+    await expect(activeWork.getByRole('button', { name: /push/i })).toHaveCount(0);
+  });
 });
