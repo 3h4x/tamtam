@@ -185,6 +185,45 @@ test.describe('NotificationBell', () => {
     await expect(page.getByRole('button', { name: 'Clear all' })).toHaveCount(0);
   });
 
+  test('dropdown shows parent agent identity for an agent-triggered running release', async ({
+    page,
+  }) => {
+    await stubShellRoutes(page);
+    await page.route('**/api/jobs/notifications', (route: Route) =>
+      route.fulfill({
+        json: {
+          count: 0,
+          jobs: [],
+          runningCount: 1,
+          runningJobs: [
+            makeNotifJob({
+              id: 'release-from-agent',
+              project: 'agent-release-project',
+              kind: 'release',
+              status: 'running',
+              exit_code: null,
+              finished_at: null,
+              parent_kind: 'agent:improve',
+              parent_job_id: 'agent-parent',
+            }),
+          ],
+        },
+      }),
+    );
+
+    await page.goto('/workflow-runs');
+
+    const bellBtn = page.getByTitle('1 running');
+    await expect(bellBtn).toBeVisible({ timeout: 8_000 });
+    await bellBtn.click();
+
+    await expect(page.getByText(/running.*1 project/i)).toBeVisible({ timeout: 5_000 });
+    await expect(page.getByText('agent-release-project')).toBeVisible();
+    await expect(page.getByText('agent:improve')).toBeVisible();
+    await expect(page.getByText('release in progress')).toBeVisible();
+    await expect(page.getByText('release', { exact: true })).toHaveCount(0);
+  });
+
   // -------------------------------------------------------------------------
   // Dropdown — success icon for a passing push job
   // -------------------------------------------------------------------------
