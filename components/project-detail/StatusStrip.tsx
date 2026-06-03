@@ -1,5 +1,6 @@
 'use client'
 
+import { Button } from '@/components/ui/Button'
 import { Spinner } from '@/components/ui/Spinner'
 import { formatAgo } from '@/lib/shared/format'
 import type { JobInfo } from '@/lib/client-api'
@@ -54,13 +55,15 @@ const TONE_DOT: Record<StatusCardProps['tone'], string> = {
 function StatusCard({ label, primary, detail, tone, onClick, disabled, running }: StatusCardProps) {
   const clickable = !!onClick && !disabled
   return (
-    <button
+    <Button
       type="button"
-      className={`group min-w-0 text-left border rounded-md px-2.5 py-1.5 flex items-center gap-2 transition-colors ${TONE_RING[tone]} ${
-        clickable ? 'bg-bg-secondary hover:bg-bg-tertiary cursor-pointer' : 'bg-bg-secondary cursor-default'
-      } ${disabled ? 'opacity-60' : ''}`}
+      variant="ghost"
+      className={`group min-w-0 text-left rounded-md px-2.5 py-1.5 gap-2 font-normal ${TONE_RING[tone]} ${
+        clickable ? 'bg-bg-secondary hover:bg-bg-tertiary cursor-pointer' : 'bg-bg-secondary hover:bg-bg-secondary cursor-default'
+      } ${disabled ? 'opacity-60 disabled:opacity-60' : 'disabled:opacity-100'}`}
       onClick={clickable ? onClick : undefined}
       disabled={!clickable}
+      disabledCursor="default"
     >
       <span className={`inline-block w-1.5 h-1.5 rounded-full shrink-0 ${TONE_DOT[tone]} ${running ? 'animate-pulse' : ''}`} />
       <span className="text-[10px] uppercase tracking-wider text-text-tertiary shrink-0">{label}</span>
@@ -69,7 +72,7 @@ function StatusCard({ label, primary, detail, tone, onClick, disabled, running }
       {clickable && (
         <span className="text-text-tertiary text-xs opacity-0 group-hover:opacity-100 transition-opacity shrink-0" aria-hidden>›</span>
       )}
-    </button>
+    </Button>
   )
 }
 

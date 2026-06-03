@@ -208,4 +208,21 @@ describe('runAgentIntakeWorkflow memory composition', () => {
     const options = startInProcessAgentJobMock.mock.calls[0]?.[4] as { fallback?: unknown } | undefined;
     expect(options?.fallback).toBeUndefined();
   });
+
+  it('preserves the agent schedule from baseContextMeta into the composed context_meta', async () => {
+    const runAgentIntakeWorkflow = await importWorkflow();
+
+    await runAgentIntakeWorkflow({
+      ...makeParams(false),
+      triggeredBy: 'schedule',
+      baseContextMeta: JSON.stringify({ agent: { id: 'agent-1', name: 'cto', schedule: '15m' } }),
+    });
+
+    expect(updateJobMock).toHaveBeenCalled();
+    const lastJob = updateJobMock.mock.calls.at(-1)?.[0] as { contextMeta?: string } | undefined;
+    const meta = JSON.parse(lastJob?.contextMeta || '{}') as { agent?: { schedule?: string | null } };
+    // Without preservation the compose step rebuilds `agent` from id/name/triggeredBy
+    // only, dropping schedule and rendering the schedule-backoff detector inert.
+    expect(meta.agent?.schedule).toBe('15m');
+  });
 });

@@ -272,11 +272,19 @@ async function composePromptStep(
   // passing valid JSON; this is belt-and-suspenders.
   let baseCtx: Record<string, unknown> = {};
   try { baseCtx = JSON.parse(baseContextMeta) as Record<string, unknown>; } catch { /* default empty */ }
+  // The run route seeds `agent.schedule` into baseContextMeta; preserve it here
+  // so the finalizer's schedule-backoff detector can fire. Rebuilding the agent
+  // block from id/name/triggeredBy alone (the prior behavior) silently dropped
+  // the schedule, leaving `maybeRecommendSchedule` permanently inert — idle
+  // agents were then mislabeled `agent_unfruitful` instead of getting the
+  // correct "run less often" recommendation.
+  const baseAgentSchedule =
+    (baseCtx.agent as { schedule?: string | null } | undefined)?.schedule ?? null;
   const contextMetaObj: Record<string, unknown> = {
     ...baseCtx,
     skills: composed.metaSkills,
     docs: composed.metaDocs,
-    agent: { id: agentId, name: agentName, triggeredBy },
+    agent: { id: agentId, name: agentName, triggeredBy, schedule: baseAgentSchedule },
     baseline: {
       head: headR.exitCode === 0 ? headR.stdout.trim() : null,
       status: statusR.exitCode === 0 ? statusR.stdout : null,
