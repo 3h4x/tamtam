@@ -83,6 +83,7 @@ const PROJECTS = [
   'pr-workflow-reuse-existing-pr',
   'issue-release-auto-branch',
   'issue-release-zombie-branch-recovery',
+  'pipeline-metrics-surface',
 ];
 
 export default async function globalSetup(): Promise<void> {
