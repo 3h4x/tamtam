@@ -221,7 +221,6 @@ export async function GET(req: Request) {
         for (const b of series.buckets) {
           const ub = b.utilizationPct;
           const eb = b.elapsedPct;
-          if (ub == null || eb == null) continue;
           const elapsedHoursBucket = (eb / 100) * windowHours;
           const remainingHoursBucket = windowHours - elapsedHoursBucket;
           if (remainingHoursBucket <= 0.001) continue;
