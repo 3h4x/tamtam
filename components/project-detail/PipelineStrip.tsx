@@ -6,6 +6,7 @@ import { useState } from 'react'
 import { pushProject } from '@/lib/client-api'
 import type { JobInfo, ProjectConfig } from '@/lib/client-api'
 import { useToast } from '@/components/Toast'
+import { Button } from '@/components/ui/Button'
 import { Spinner } from '@/components/ui/Spinner'
 import { buildProjectTerminalPath } from '@/lib/client/project-routes'
 
@@ -302,16 +303,18 @@ export function PipelineStrip({
                 <span className="font-mono text-[9px] uppercase tracking-[0.12em]">{state}</span>
               </button>
               {canRetryPush && (
-                <button
+                <Button
                   type="button"
-                  className="inline-flex min-h-[28px] min-w-[24px] items-center justify-center rounded border border-status-error/40 px-1.5 py-0.5 font-mono text-[10px] leading-none text-status-error hover:bg-status-error/10 disabled:opacity-50"
+                  variant="danger"
+                  size="sm"
+                  className="min-h-[28px] min-w-[24px] justify-center px-1.5 py-0.5 font-mono text-[10px] leading-none"
                   onClick={retryPush}
                   disabled={retryingPush || jobsPaused}
                   title={jobsPaused ? 'Jobs are paused globally. Resume jobs to start a push.' : 'Retry push'}
                   aria-label="retry push"
                 >
                   {retryingPush ? <Spinner size="xs" /> : 'retry'}
-                </button>
+                </Button>
               )}
             </span>
           )
@@ -331,33 +334,39 @@ export function PipelineStrip({
           confirmAbort ? (
             <div className="flex items-center gap-1 shrink-0">
               <span className="text-[10px] font-mono text-text-tertiary">abort?</span>
-              <button
+              <Button
                 type="button"
-                className="inline-flex min-w-[28px] items-center justify-center rounded border border-status-error/40 px-1.5 py-0.5 text-[10px] font-mono leading-none text-status-error hover:bg-status-error/15"
+                variant="danger"
+                size="sm"
+                className="min-w-[28px] justify-center px-1.5 py-0.5 text-[10px] font-mono leading-none"
                 onClick={abortRelease}
                 disabled={aborting}
                 title="Confirm abort"
               >
                 {aborting ? <Spinner size="xs" /> : 'yes'}
-              </button>
-              <button
+              </Button>
+              <Button
                 type="button"
-                className="rounded border border-border/50 px-1.5 py-0.5 text-[10px] font-mono leading-none text-text-tertiary hover:bg-bg-tertiary"
+                variant="secondary"
+                size="sm"
+                className="px-1.5 py-0.5 text-[10px] font-mono leading-none text-text-tertiary"
                 onClick={() => setConfirmAbort(false)}
               >
                 no
-              </button>
+              </Button>
             </div>
           ) : (
-            <button
+            <Button
               type="button"
-              className="shrink-0 rounded px-1.5 py-0.5 text-[10px] font-mono leading-none text-text-tertiary hover:bg-status-error/10 hover:text-status-error"
+              variant="danger"
+              size="sm"
+              className="shrink-0 border-transparent bg-transparent px-1.5 py-0.5 text-[10px] font-mono leading-none text-text-tertiary hover:text-status-error"
               onClick={abortRelease}
               disabled={aborting}
               title="Abort the running pipeline"
             >
               abort
-            </button>
+            </Button>
           )
         )}
       </div>
