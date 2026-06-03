@@ -2,6 +2,7 @@
 
 import type { ProjectConfig, CustomAction } from '@/lib/client-api'
 import { getPipelineSteps, type StepToggleContext } from '@/lib/pipeline/pipeline-steps'
+import { ErrorState } from '@/components/ErrorState'
 import { Button } from '@/components/ui/Button'
 import { Checkbox } from '@/components/ui/Checkbox'
 import { EmptyState } from '@/components/ui/EmptyState'
@@ -154,7 +155,7 @@ export function ConfigTab({
   }
 
   if (!config) {
-    return <div className="text-text-secondary text-sm">Failed to load configuration</div>
+    return <ErrorState message="Failed to load configuration" />
   }
 
   return (
