@@ -21,7 +21,7 @@ Live in the Next.js server process. Lost on restart — clients see a cold miss 
 |-------|------|-----|--------|----------------|
 | Project data | `lib/shared/project-data.ts` | 10s | `/api/projects` response (tasks, priorities) | `clearProjectDataCache()` — called on project CRUD |
 | Settings | `lib/shared/config.ts` | 5s | All settings reads via `getSettings()` | `reloadConfig()` — called by `PATCH /api/settings` |
-| Agents list | `app/api/agents/route.ts` | 10s | `GET /api/agents` (all agents, filtered by project) | `clearAgentsCache()` — called on agent create/update/delete |
+| Agents list | `lib/agents/agents-cache.ts` | 10s | `GET /api/agents` (all agents, filtered by project) | `clearAgentsCache()` — called on agent create/update/delete |
 
 ### 2. In-memory jobs Map (no TTL)
 
@@ -64,7 +64,7 @@ mutation → DB write → clearXxxCache() → next GET rebuilds cache
 |--------------|---------------|
 | Project enabled/disabled | `clearProjectDataCache()` in `lib/shared/project-data.ts` |
 | Settings updated | `reloadConfig()` in `lib/shared/config.ts` |
-| Agent created/updated/deleted | `clearAgentsCache()` in `app/api/agents/route.ts` |
+| Agent created/updated/deleted | `clearAgentsCache()` in `lib/agents/agents-cache.ts` |
 | Issues refreshed | Row upserted in `gh_issues_cache`; `?refresh=1` bypasses TTL check |
 | Issue detail refreshed | Row upserted in `gh_issue_detail_cache`; `?refresh=1` bypasses TTL check; current trust allowlists are applied again on every cache hit |
 
@@ -109,7 +109,7 @@ psql "$DATABASE_URL" -c \
 |------|------|
 | `lib/shared/project-data.ts` | 10s TTL cache for project task data |
 | `lib/shared/config.ts` | 5s TTL cache for all settings |
-| `app/api/agents/route.ts` | 10s TTL cache for agents list + `clearAgentsCache()` |
+| `lib/agents/agents-cache.ts` | 10s TTL cache for agents list + `clearAgentsCache()` |
 | `lib/jobs/job-storage.ts` | In-memory jobs Map + DB persistence |
 | `app/api/projects/by-project/[name]/issues/route.ts` | 5-min DB caches via `gh_issues_cache` and `gh_issue_detail_cache` |
 | `app/api/jobs/notifications/route.ts` | Serves running jobs from in-memory Map (no extra DB query) |
