@@ -84,6 +84,7 @@ const PROJECTS = [
   'issue-release-auto-branch',
   'issue-release-zombie-branch-recovery',
   'pipeline-metrics-surface',
+  'pipeline-metrics-failure-surface',
 ];
 
 export default async function globalSetup(): Promise<void> {
