@@ -290,10 +290,14 @@ export function ConfigTab({
               />
               <span className="text-sm font-medium text-text-primary">Run on schedule</span>
               {testCronEnabledInput && (
-                <input
+                <Input
+                  appearance="muted"
+                  inputSize="compact"
+                  paddingX="compact"
+                  fullWidth={false}
                   type="text"
                   aria-label="Schedule interval"
-                  className="ml-2 w-28 px-2 py-1 text-xs bg-bg-tertiary border border-border rounded text-text-primary font-mono"
+                  className="ml-2 w-28 text-xs"
                   value={testCronScheduleInput}
                   onChange={(e) => setTestCronScheduleInput(e.target.value)}
                   placeholder="1h"
