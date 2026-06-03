@@ -1,6 +1,6 @@
 import { createHash } from 'crypto';
 import { mkdirSync, readFileSync, writeFileSync } from 'fs';
-import { join, resolve, relative, sep } from 'path';
+import { join, resolve, relative } from 'path';
 import { homedir } from 'os';
 import { exec } from '@/lib/shared/shell';
 
@@ -14,7 +14,7 @@ const REVIEW_DIR = join(homedir(), '.cache', 'tamtam', 'schedule-reviews');
 function reviewStatePath(project: string): string | null {
   const candidate = resolve(REVIEW_DIR, `${project}.hash`);
   const rel = relative(REVIEW_DIR, candidate);
-  if (rel === '..' || rel.startsWith(`..${sep}`) || rel.startsWith('..')) return null;
+  if (rel.startsWith('..')) return null;
   return candidate;
 }
 
