@@ -65,8 +65,7 @@ const TRANSIENT_RETRY_MS = 60_000;
 // Reasons that resolve on their own within seconds-to-minutes.
 // `prereqSkipReason` returns free-form strings; substring matching here
 // is intentionally loose so a small wording change doesn't break the
-// fast-retry path. One combined regex (case-insensitive) replaces the
-// previous OR chain of six toLowerCase()+includes() calls.
+// fast-retry path. The combined regex is case-insensitive.
 const TRANSIENT_SKIP_RE =
   /jobs paused|pr-wait in flight|non-default branch|pipeline_lock|release pipeline is running|behind origin\//i;
 
