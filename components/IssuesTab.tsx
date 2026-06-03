@@ -13,6 +13,7 @@ import { useToast } from '@/components/Toast'
 import { Button } from '@/components/ui/Button'
 import { Spinner } from '@/components/ui/Spinner'
 import { EmptyState } from '@/components/ui/EmptyState'
+import { InlineLoading } from '@/components/ui/InlineLoading'
 import { Pill } from '@/components/ui/Pill'
 import { Textarea } from '@/components/ui/Textarea'
 
@@ -233,10 +234,7 @@ ${idea}`
             title="Force refresh from GitHub"
           >
             {refreshing ? (
-              <span className="inline-flex items-center gap-1.5">
-                <Spinner />
-                <span>Refreshing…</span>
-              </span>
+              <InlineLoading label="Refreshing…" className="!gap-1.5 !text-[11px] text-current" />
             ) : 'Refresh'}
           </Button>
         </div>
