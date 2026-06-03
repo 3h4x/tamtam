@@ -1,7 +1,5 @@
-// Shared agent-loading helper. Extracted from the retired `reinstallAgents()`
-// boot pass so the graphile-cron path
-// (lib/workflows/cron/seed-agent-crons.ts) can reuse the same DB +
-// .tamtam/agents/*.md scanning logic.
+// Shared agent-loading helper for the graphile-cron path. It reuses the same
+// DB + .tamtam/agents/*.md scanning logic as the agents API.
 //
 // This helper stays because graphile cron still needs a way to enumerate
 // enabled scheduled agents at boot.
