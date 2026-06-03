@@ -538,4 +538,87 @@ test.describe('Overview tab live status polling', () => {
     });
     await expect(page.getByRole('button', { name: /tests running/i })).toHaveCount(0);
   });
+
+  test('active-work overflow count clears when one of five running jobs finishes', async ({
+    page,
+  }) => {
+    let phase: 'five-running' | 'four-running' = 'five-running';
+    const baseStarted = now() - 10;
+
+    await stubOverviewRoutes(page);
+    await page.route(
+      (url) => url.pathname === '/api/jobs' && url.searchParams.get('project') === PROJECT,
+      (route: Route) => {
+        const jobs = [
+          makeJob('overflow-agent-live', 'agent:research', 'running', null, {
+            started_at: baseStarted + 4,
+            provider: 'claude',
+            user_prompt: 'Map the rollout risk',
+            prompt: 'Map the rollout risk',
+          }),
+          makeJob('overflow-run-live', 'run', 'running', null, {
+            started_at: baseStarted + 3,
+            user_prompt: 'Investigate the latest failed workflow',
+            prompt: 'Investigate the latest failed workflow',
+          }),
+          makeJob('overflow-review-live', 'review', 'running', null, {
+            started_at: baseStarted + 2,
+          }),
+          makeJob('overflow-test-live', 'test', 'running', null, {
+            started_at: baseStarted + 1,
+          }),
+          makeJob(
+            'overflow-push-live',
+            'push',
+            phase === 'five-running' ? 'running' : 'done',
+            phase === 'five-running' ? null : 0,
+            {
+              started_at: baseStarted,
+              finished_at: phase === 'five-running' ? null : now() - 1,
+            },
+          ),
+        ];
+
+        route.fulfill({ json: { jobs, pendingReleaseProjects: [] } });
+      },
+    );
+
+    await page.goto(`/project/${PROJECT}`);
+
+    const activeWork = page.locator('section').filter({ hasText: 'active work' }).first();
+
+    await expect(page.getByText('5 running now')).toBeVisible({ timeout: 8_000 });
+    await expect(activeWork.getByText('+1 more running job')).toBeVisible({ timeout: 8_000 });
+    await expect(activeWork.getByRole('button', { name: /agent/i }).first()).toBeVisible({
+      timeout: 8_000,
+    });
+    await expect(activeWork.getByRole('button', { name: /chat/i }).first()).toBeVisible({
+      timeout: 8_000,
+    });
+    await expect(activeWork.getByRole('button', { name: /code review/i }).first()).toBeVisible({
+      timeout: 8_000,
+    });
+    await expect(activeWork.getByRole('button', { name: /test run/i }).first()).toBeVisible({
+      timeout: 8_000,
+    });
+    await expect(activeWork.getByRole('button', { name: /push/i })).toHaveCount(0);
+
+    phase = 'four-running';
+
+    await expect(page.getByText('4 running now')).toBeVisible({ timeout: 12_000 });
+    await expect(activeWork.getByText('+1 more running job')).toHaveCount(0, { timeout: 12_000 });
+    await expect(activeWork.getByRole('button', { name: /push/i })).toHaveCount(0);
+    await expect(activeWork.getByRole('button', { name: /agent/i }).first()).toBeVisible({
+      timeout: 12_000,
+    });
+    await expect(activeWork.getByRole('button', { name: /chat/i }).first()).toBeVisible({
+      timeout: 12_000,
+    });
+    await expect(activeWork.getByRole('button', { name: /code review/i }).first()).toBeVisible({
+      timeout: 12_000,
+    });
+    await expect(activeWork.getByRole('button', { name: /test run/i }).first()).toBeVisible({
+      timeout: 12_000,
+    });
+  });
 });
