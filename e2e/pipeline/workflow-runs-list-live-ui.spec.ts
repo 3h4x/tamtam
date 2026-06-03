@@ -11,7 +11,7 @@ type WorkflowRunSummary = {
   id: string;
   name: string;
   rawName: string;
-  status: 'running' | 'completed' | 'failed' | 'cancelled';
+  status: 'pending' | 'running' | 'completed' | 'failed' | 'cancelled';
   createdAt: string;
   startedAt: string | null;
   completedAt: string | null;
@@ -265,6 +265,55 @@ test.describe('Workflow runs list live polling', () => {
     await expect(completedRow.getByText('LGTM')).toBeVisible({ timeout: 12_000 });
     await expect(page.getByText('1 running')).toHaveCount(0);
     await expect(page).toHaveURL(stableUrl);
+  });
+
+  test('pending workflow becomes running and then completed without stale status counts', async ({
+    page,
+  }) => {
+    let phase: 'pending' | 'running' | 'completed' = 'pending';
+
+    await stubWorkflowRunsShell(page);
+    await stubWorkflowRuns(page, () => {
+      if (phase === 'pending') {
+        return [
+          makeRun('pending', {
+            startedAt: null,
+            durationMs: null,
+          }),
+        ];
+      }
+      if (phase === 'running') return [makeRun('running')];
+      return [makeRun('completed', { output: { verdict: 'LGTM' } })];
+    });
+
+    await page.goto('/workflow-runs');
+
+    const activePanel = page.getByLabel('Active workflow runs');
+    await expect(activePanel).toBeVisible({ timeout: 8_000 });
+    await expect(activePanel.getByLabel('status pending')).toBeVisible();
+    await expect(page.getByRole('button', { name: /^pending 1$/i })).toBeVisible();
+    await expect(page.getByText('1 running')).toHaveCount(0);
+
+    phase = 'running';
+
+    await expect(activePanel.getByLabel('status running')).toBeVisible({ timeout: 12_000 });
+    await expect(activePanel.getByLabel('status pending')).toHaveCount(0, { timeout: 12_000 });
+    await expect(page.getByRole('button', { name: /^running 1$/i })).toBeVisible({
+      timeout: 12_000,
+    });
+    await expect(page.getByRole('button', { name: /^pending 0$/i })).toBeVisible({
+      timeout: 12_000,
+    });
+    await expect(page.getByText('1 running')).toBeVisible({ timeout: 12_000 });
+
+    phase = 'completed';
+
+    await expect(activePanel).toHaveCount(0, { timeout: 12_000 });
+    const completedRow = page.getByRole('row').filter({ hasText: PROJECT }).first();
+    await expect(completedRow.getByLabel('status completed')).toBeVisible({ timeout: 12_000 });
+    await expect(completedRow.getByText('LGTM')).toBeVisible({ timeout: 12_000 });
+    await expect(page.getByText('1 running')).toHaveCount(0, { timeout: 12_000 });
+    await expect(page.getByRole('button', { name: /^pending 0$/i })).toBeVisible();
   });
 
   test('active run moves to attention panel when the workflow fails', async ({ page }) => {
