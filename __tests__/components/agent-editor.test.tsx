@@ -241,6 +241,36 @@ describe('AgentEditor', () => {
     unmount()
   })
 
+  it('consumes autoImprove without calling improve when the existing prompt is too short', async () => {
+    const onAutoImproveConsumed = vi.fn()
+    const { unmount } = renderEditor({
+      agent: {
+        id: 'agent-1',
+        name: 'empty',
+        project: 'alpha',
+        skillIds: [],
+        docPaths: [],
+        model: 'normal',
+        prompt: '',
+        schedule: null,
+        enabled: true,
+        prerequisiteCommand: null,
+        createdAt: 0,
+        updatedAt: 0,
+      },
+      template: undefined,
+      autoImprove: true,
+      onAutoImproveConsumed,
+    })
+
+    await vi.waitFor(() => {
+      expect(onAutoImproveConsumed).toHaveBeenCalledOnce()
+    })
+    expect(improveAgentPromptMock).not.toHaveBeenCalled()
+
+    unmount()
+  })
+
   it('locks non-operational fields for system agents', async () => {
     const { container, unmount } = renderEditor({
       agent: {

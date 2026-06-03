@@ -76,6 +76,21 @@ interface HealthVerdict {
 const PRINT_TIMEOUT_MS = 60_000;
 const PRINT_KILL_GRACE_MS = 5_000;
 
+// A run that changed nothing AND whose summary says there was nothing to do is
+// idle-by-design, not a health problem. Matches the common "no actionable work"
+// phrasings plus the improve agent's empty-queue sentinel. Used to (a) skip the
+// LLM entirely when every analyzed run is idle and (b) annotate idle runs in the
+// prompt so the model doesn't mistake a caught-up agent for loop/noise.
+const IDLE_SUMMARY_RE =
+  /no actionable|nothing to (do|change|fix|consolidate)|already (clean|audited)|queue (is )?empty|IMPROVE_QUEUE_ROTATED|idle until|no .{0,30}target|no (coverage |edits )?(gaps?|required)/i;
+
+function runIndicatesIdle(run: RunRow): boolean {
+  if (run.modifiedFilesCount > 0 || run.linesChanged > 0) return false;
+  const summary = run.workSummary?.trim();
+  if (!summary) return false;
+  return IDLE_SUMMARY_RE.test(summary);
+}
+
 function escapeLike(v: string): string {
   return v.replace(/[\\%_]/g, (ch) => `\\${ch}`);
 }
@@ -166,7 +181,7 @@ function buildPrompt(candidate: HealthCandidate, runs: RunRow[]): string {
   const runBlocks = runs
     .map((r, i) =>
       [
-        `Run ${i + 1} (score: ${r.runScore ?? 'n/a'}/100, files: ${r.modifiedFilesCount}, lines: ${r.linesChanged}):`,
+        `Run ${i + 1} (score: ${r.runScore ?? 'n/a'}/100, files: ${r.modifiedFilesCount}, lines: ${r.linesChanged})${runIndicatesIdle(r) ? ' [idle — reported no actionable work]' : ''}:`,
         r.workSummary?.trim() || '(no summary available)',
       ].join('\n'),
     )
@@ -190,7 +205,15 @@ Definitions:
 - drift: agent works on unrelated things or off-prompt
 - noise: agent produces activity but no meaningful progress (reformatting, trivial tweaks)
 - quality: agent changes look incorrect, risky, or counter-productive
-- none: agent appears healthy and productive`;
+- none: agent appears healthy and productive
+
+IMPORTANT — idle is healthy, not a concern: many agents only act when there is
+work to do (a queue, a coverage gap, a drifted doc). A run that made no changes
+because it found no actionable work — including runs marked "[idle]" above, runs
+reporting an empty queue, or "nothing to do" — is the correct, expected outcome,
+NOT loop or noise. Do NOT raise a concern for an agent that is simply idle
+because there is nothing to act on. Only flag loop/noise/quality when the agent
+is actually making (or attempting) changes that repeat, drift, or look wrong.`;
 }
 
 /** Strip a leading ```json\n…\n``` fence if the model wraps its JSON despite
@@ -283,6 +306,20 @@ export async function analyzeAgentHealth(
       const runs = await loadRecentRuns(candidate, 3);
       if (runs.length === 0) continue;
       const latestRunStartedAt = runs[0]?.startedAt ?? null;
+
+      // Deterministic short-circuit: if every analyzed run is idle-by-design
+      // (no changes, reported no actionable work), the agent is healthy and
+      // simply caught up. Skip the LLM call entirely — it saves a budget-gated
+      // spend and removes the chance of the model mislabeling idle as loop/noise.
+      // Retire any stale health concern so a now-idle agent's card clears.
+      if (runs.every(runIndicatesIdle)) {
+        await resolveRecommendationIfOpen(candidate.project, 'orchestrator_agent_health', {
+          agentId: candidate.id,
+          agentName: candidate.name,
+        });
+        outcomes.push({ agentId: candidate.id, analyzed: true, latestRunStartedAt });
+        continue;
+      }
 
       const text = await runPrint(buildPrompt(candidate, runs));
       if (!text) continue;

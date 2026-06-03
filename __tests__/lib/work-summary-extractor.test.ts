@@ -131,6 +131,26 @@ describe('work-summary-extractor', () => {
     });
   });
 
+  it('treats the improve agent IMPROVE_QUEUE_ROTATED sentinel as no actionable work', () => {
+    const text = extractAssistantTextFromRawLog(log('IMPROVE_QUEUE_ROTATED 0'));
+
+    // A clean-walk sentinel (no standard report) means the queue was empty —
+    // idle, not broken. The summary is persisted so later health analysis can
+    // recognize the run as idle without rereading the raw log.
+    expect(extractWorkSummary(text)).toEqual({
+      summary: 'IMPROVE_QUEUE_ROTATED: queue empty; no actionable work.',
+      actionable: false,
+    });
+  });
+
+  it('does not let the sentinel override an explicit "Actionable work: yes"', () => {
+    const text = extractAssistantTextFromRawLog(
+      log('TamTam Run Report\nSummary: Fixed a thing.\nActionable work: yes\nIMPROVE_QUEUE_ROTATED 3\n')
+    );
+
+    expect(extractWorkSummary(text).actionable).toBe(true);
+  });
+
   it('returns null summary when there is no assistant text', () => {
     expect(extractWorkSummary('')).toEqual({ summary: null, actionable: null });
   });

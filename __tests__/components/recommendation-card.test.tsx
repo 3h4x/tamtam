@@ -218,9 +218,48 @@ describe('RecommendationCard', () => {
     expect(container.textContent).toContain('Stop boosting')
     expect(container.textContent).toContain('Disable agent')
     expect(container.textContent).toContain('Edit agent')
+    // "Improve prompt" deep-links to the editor with the one-shot improve flag
+    // so the failure-aware rewrite fires on arrival.
+    const improveLink = Array.from(container.querySelectorAll('a')).find((a) => a.textContent?.includes('Improve prompt'))
+    expect(improveLink?.getAttribute('href')).toBe('/project/alpha%2Fcore/agents?agent=agent-1&improve=1')
     // Not auto-applicable → no dedicated "Apply suggested change".
     expect(container.textContent).not.toContain('Apply suggested change')
     expect(container.textContent).toContain('dismiss')
+
+    unmount()
+  })
+
+  it('omits "Improve prompt" for schedule-backoff (a cadence fix, not a prompt one)', () => {
+    const { container, unmount } = renderCard({
+      item: makeRecommendation({ type: 'agent_schedule_backoff' }),
+    })
+
+    expect(container.textContent).toContain('Fix')
+    expect(container.textContent).toContain('Edit agent')
+    expect(container.textContent).not.toContain('Improve prompt')
+
+    unmount()
+  })
+
+  it('omits "Improve prompt" for an idle-cause unfruitful recommendation (cadence is the lever)', () => {
+    const { container, unmount } = renderCard({
+      item: makeRecommendation({ type: 'agent_unfruitful', payload: { cause: 'idle' } }),
+    })
+
+    expect(container.textContent).toContain('Fix')
+    expect(container.textContent).toContain('Edit agent')
+    expect(container.textContent).not.toContain('Improve prompt')
+
+    unmount()
+  })
+
+  it('offers "Improve prompt" for an unproductive-cause unfruitful recommendation', () => {
+    const { container, unmount } = renderCard({
+      item: makeRecommendation({ type: 'agent_unfruitful', payload: { cause: 'unproductive' } }),
+    })
+
+    const improveLink = Array.from(container.querySelectorAll('a')).find((a) => a.textContent?.includes('Improve prompt'))
+    expect(improveLink?.getAttribute('href')).toBe('/project/alpha%2Fcore/agents?agent=agent-1&improve=1')
 
     unmount()
   })

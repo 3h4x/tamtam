@@ -189,6 +189,21 @@ export function RecommendationCard({
   const editHref = item.agent_id
     ? `/project/${encodeURIComponent(item.project)}/agents?agent=${encodeURIComponent(item.agent_id)}`
     : null
+  // "Improve prompt" deep-links to the editor and auto-runs the failure-aware
+  // improve flow (it folds in the agent's recent run outcomes). Offered only
+  // where a prompt rewrite is the plausible fix — an agent that produces
+  // nothing (`agent_unfruitful`) or shows a loop/noise trend
+  // (`orchestrator_agent_health`). Schedule-backoff is a cadence fix, not a
+  // prompt one, so it's excluded. An `agent_unfruitful` whose cause is `idle`
+  // (the agent correctly keeps finding no work) is also excluded — its lever is
+  // a slower schedule, not a prompt rewrite.
+  const unfruitfulCause = stringValue((item.payload as Record<string, unknown> | null)?.cause)
+  const promptFixApplies =
+    (item.type === 'agent_unfruitful' && unfruitfulCause !== 'idle') ||
+    item.type === 'orchestrator_agent_health'
+  const improveHref = editHref && editableAgent && promptFixApplies
+    ? `${editHref}&improve=1`
+    : null
   return (
     <div className="border-b border-border last:border-b-0 p-3">
       <div className="flex items-start justify-between gap-3">
@@ -359,6 +374,19 @@ export function RecommendationCard({
                   >
                     Disable agent
                   </Button>
+                )}
+                {improveHref && (
+                  <Link
+                    href={improveHref}
+                    className={buttonVariants({
+                      variant: 'ghost',
+                      size: 'sm',
+                      className: 'w-full justify-start rounded-none px-3 py-2 font-normal',
+                    })}
+                    title="Open the editor and rewrite the prompt using the agent's recent run outcomes"
+                  >
+                    Improve prompt
+                  </Link>
                 )}
                 {editHref && (
                   <Link

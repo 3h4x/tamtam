@@ -8,6 +8,7 @@ import { AgentsTab } from '@/components/AgentsTab'
 
 const {
   pushMock,
+  replaceMock,
   toastMock,
   fetchAgentsMock,
   fetchSkillsMock,
@@ -17,6 +18,7 @@ const {
   editorPropsMock,
 } = vi.hoisted(() => ({
   pushMock: vi.fn(),
+  replaceMock: vi.fn(),
   toastMock: vi.fn(),
   fetchAgentsMock: vi.fn(),
   fetchSkillsMock: vi.fn(),
@@ -27,7 +29,7 @@ const {
 }))
 
 vi.mock('next/navigation', () => ({
-  useRouter: () => ({ push: pushMock }),
+  useRouter: () => ({ push: pushMock, replace: replaceMock }),
   usePathname: () => '/project/alpha/agents',
   useSearchParams: () => searchParamsMock(),
 }))
@@ -87,18 +89,32 @@ describe('AgentsTab queued runs', () => {
     searchParamsMock.mockReturnValue(new URLSearchParams())
     editorPropsMock.mockReset()
     fetchAgentsMock.mockResolvedValue({
-      agents: [{
-        id: 'agent-1',
-        name: 'Docs',
-        project: 'alpha',
-        skillIds: [],
-        docPaths: [],
-        model: 'normal',
-        prompt: 'Run docs',
-        schedule: null,
+      agents: [
+        {
+          id: 'agent-1',
+          name: 'Docs',
+          project: 'alpha',
+          skillIds: [],
+          docPaths: [],
+          model: 'normal',
+          prompt: 'Run docs',
+          schedule: null,
 
-        enabled: true,
-      }],
+          enabled: true,
+        },
+        {
+          id: 'agent-2',
+          name: 'Review',
+          project: 'alpha',
+          skillIds: [],
+          docPaths: [],
+          model: 'normal',
+          prompt: 'Run review',
+          schedule: null,
+
+          enabled: true,
+        },
+      ],
     })
     fetchSkillsMock.mockResolvedValue({ skills: [] })
     fetchPersonasMock.mockResolvedValue({ personas: [] })
@@ -114,6 +130,7 @@ describe('AgentsTab queued runs', () => {
 
   afterEach(() => {
     pushMock.mockReset()
+    replaceMock.mockReset()
     toastMock.mockReset()
     fetchAgentsMock.mockReset()
     fetchSkillsMock.mockReset()
@@ -186,5 +203,37 @@ describe('AgentsTab queued runs', () => {
     })
 
     unmount()
+  })
+
+  it('clears stale improve params when leaving the editor before a later manual agent selection', async () => {
+    searchParamsMock.mockReturnValue(new URLSearchParams('agent=agent-1&improve=1'))
+    const { unmount } = renderTab()
+
+    await vi.waitFor(() => {
+      const latestProps = editorPropsMock.mock.calls.at(-1)?.[0] as { autoImprove?: boolean; onBack?: () => void } | undefined
+      expect(latestProps?.autoImprove).toBe(true)
+      expect(latestProps?.onBack).toBeTypeOf('function')
+    })
+
+    const firstEditorProps = editorPropsMock.mock.calls.at(-1)?.[0] as { onBack: () => void }
+    firstEditorProps.onBack()
+
+    await vi.waitFor(() => {
+      expect(replaceMock).toHaveBeenCalledWith('/project/alpha/agents?agent=agent-1')
+      expect(pushMock).toHaveBeenCalledWith('/project/alpha/agents')
+    })
+
+    unmount()
+    editorPropsMock.mockReset()
+    searchParamsMock.mockReturnValue(new URLSearchParams('agent=agent-2'))
+    const second = renderTab()
+
+    await vi.waitFor(() => {
+      const latestProps = editorPropsMock.mock.calls.at(-1)?.[0] as { agent?: { id: string }; autoImprove?: boolean } | undefined
+      expect(latestProps?.agent?.id).toBe('agent-2')
+      expect(latestProps?.autoImprove).toBe(false)
+    })
+
+    second.unmount()
   })
 })

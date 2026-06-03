@@ -48,6 +48,8 @@ export function AgentEditor({
   onSave,
   onDelete,
   onBack,
+  autoImprove,
+  onAutoImproveConsumed,
 }: {
   agent?: Agent
   template?: AgentTemplateRecord
@@ -57,6 +59,11 @@ export function AgentEditor({
   onSave: (data: AgentEditorSavePayload) => Promise<void>
   onDelete?: () => void
   onBack: () => void
+  // When true (e.g. arriving from a recommendation's "Improve prompt" action),
+  // run the failure-aware improve flow once on mount so the operator lands on a
+  // proposed rewrite ready to review and save.
+  autoImprove?: boolean
+  onAutoImproveConsumed?: () => void
 }) {
   const initialSkillIds = agent?.skillIds || template?.skillIds || []
   const initialPrerequisite = agent
@@ -84,6 +91,7 @@ export function AgentEditor({
   const [permissionMode, setPermissionMode] = useState<string>(agent?.permissionMode ?? '')
   const [saving, setSaving] = useState(false)
   const [improving, setImproving] = useState(false)
+  const autoImproveFiredRef = useRef(false)
   const [confirmDelete, setConfirmDelete] = useState(false)
   const [skillSearch, setSkillSearch] = useState('')
   const nameRef = useRef<HTMLInputElement>(null)
@@ -179,6 +187,8 @@ export function AgentEditor({
         draftPrompt: draft,
         skillIds: selectedSkills,
         docPaths: selectedDocPaths,
+        // Existing agent → pass identity so the rewrite sees recent run outcomes.
+        ...(agent ? { agentId: agent.id, agentName: name.trim() || agent.name } : {}),
       })
       if (result.improvedPrompt) setAgentPrompt(result.improvedPrompt)
       toast('Prompt improved (Cmd+Z to undo)', 'success')
@@ -188,6 +198,18 @@ export function AgentEditor({
       setImproving(false)
     }
   }
+
+  // One-shot: when launched with autoImprove (the recommendation "Improve
+  // prompt" action), run the failure-aware improve once the existing agent's
+  // prompt has loaded. Guarded by a ref so it never re-fires on re-render.
+  useEffect(() => {
+    if (!autoImprove || autoImproveFiredRef.current) return
+    autoImproveFiredRef.current = true
+    onAutoImproveConsumed?.()
+    if (isSystemAgent || !agent || agentPrompt.trim().length < 3) return
+    // Fires at most once per editor mount, gated by autoImproveFiredRef above.
+    void handleImprove()
+  }, [autoImprove, agent?.id, agentPrompt])
 
   const isNew = !agent
 

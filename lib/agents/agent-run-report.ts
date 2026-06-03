@@ -237,7 +237,27 @@ const UNFRUITFUL_MIN_SAMPLE = 5;
 const UNFRUITFUL_RATE_THRESHOLD = 0.2;
 const UNFRUITFUL_SAMPLE_LIMIT = 10;
 
-async function maybeRecommendFruitfulness(job: JobData, ctx: AgentContextMeta): Promise<void> {
+// Two very different situations both surface as "0 changes across N runs":
+//   - idle: the agent keeps reporting "no actionable work" — there is genuinely
+//     nothing to do, so the fix is a slower cadence (`agent_schedule_backoff`).
+//   - unproductive: the agent reports it DID find work but lands no changes —
+//     its prompt/approach is failing, so the fix is to improve the prompt.
+// Conflating them sends the operator to the wrong lever. We disambiguate with
+// the just-finished run's `actionable` signal (the freshest, zero-extra-query
+// indicator of which pattern this streak is in).
+type UnfruitfulCause = 'idle' | 'unproductive' | 'unknown';
+
+function unfruitfulCause(actionable: boolean | null): UnfruitfulCause {
+  if (actionable === false) return 'idle';
+  if (actionable === true) return 'unproductive';
+  return 'unknown';
+}
+
+async function maybeRecommendFruitfulness(
+  job: JobData,
+  ctx: AgentContextMeta,
+  actionable: boolean | null,
+): Promise<void> {
   const agentId = ctx.agent?.id ?? null;
   const agentName = ctx.agent?.name ?? job.kind.replace(/^agent:/, '');
   // Manual triggers shouldn't push the running average toward "deprioritize" —
@@ -269,8 +289,32 @@ async function maybeRecommendFruitfulness(job: JobData, ctx: AgentContextMeta): 
     return;
   }
 
+  const cause = unfruitfulCause(actionable);
+  // An agent that's idle by design (it reports no actionable work — e.g. the
+  // improve agent with an empty queue) is not "unproductive" and needs no
+  // "isn't producing changes" flag: that framing is a false alarm that clutters
+  // the queue every cycle. The idle case is owned by `agent_schedule_backoff`
+  // (raised separately when the cadence is tightenable). Retire any stale
+  // unfruitful row and stop — boost deprioritization still happens live off the
+  // fruitfulness stats, independent of this recommendation row.
+  if (cause === 'idle') {
+    await resolveRecommendationIfOpen(job.project, 'agent_unfruitful', { agentId, agentName });
+    return;
+  }
+
   const currentSchedule = ctx.agent?.schedule ?? null;
   const fruitfulPct = Math.round(stats.rate * 100);
+  const factual =
+    `Across the last ${stats.runs} scheduled runs, ${agentName} changed files ${stats.fruitfulRuns} times (${fruitfulPct}%) ` +
+    `and moved ${stats.totalLinesChanged} lines total. ` +
+    `The orchestrator will deprioritize boosting this agent until it starts producing again.`;
+  // Point the operator at the right lever. The card also gates its
+  // "Improve prompt" action on this signal. (cause === 'idle' returned above,
+  // so only 'unproductive' and 'unknown' reach here.)
+  const leverHint =
+    cause === 'unproductive'
+      ? ' The last run reported it found work but produced no changes — its prompt likely needs to target the work more concretely (try Improve prompt).'
+      : '';
   await upsertRecommendation({
     project: job.project,
     sourceKind: job.kind,
@@ -279,15 +323,11 @@ async function maybeRecommendFruitfulness(job: JobData, ctx: AgentContextMeta): 
     agentName,
     type: 'agent_unfruitful',
     title: `${agentName} isn't producing changes`,
-    // Keep the detail factual. The remediation advice (widen the prompt,
-    // check for real work, lengthen the schedule) is surfaced as actionable
-    // Fix buttons on the recommendation card rather than as prose here.
-    detail:
-      `Across the last ${stats.runs} scheduled runs, ${agentName} changed files ${stats.fruitfulRuns} times (${fruitfulPct}%) ` +
-      `and moved ${stats.totalLinesChanged} lines total. ` +
-      `The orchestrator will deprioritize boosting this agent until it starts producing again.`,
+    detail: factual + leverHint,
     payload: {
       reason: 'agent produced no changes across recent scheduled runs',
+      cause,
+      lastRunActionable: actionable,
       currentSchedule,
       window: stats.runs,
       fruitfulRuns: stats.fruitfulRuns,
@@ -383,7 +423,7 @@ export async function finalizeAgentRunReport(job: JobData, rawLog: string): Prom
     maybeRecommendSchedule(job, ctx, files, actionable);
     // Fire-and-forget — the recommendation surfaces in /recommendations on
     // the next render; a transient DB error must not fail the job finalize.
-    void maybeRecommendFruitfulness(job, ctx).catch((e) => {
+    void maybeRecommendFruitfulness(job, ctx, actionable).catch((e) => {
       console.warn('[agent-run-report] fruitfulness recommendation failed:', e);
     });
   }

@@ -3,6 +3,8 @@ import { NextRequest } from 'next/server';
 import { mkdtempSync, rmSync, writeFileSync } from 'fs';
 import { join } from 'path';
 import { tmpdir } from 'os';
+import { createTestPgDb, type TestDbHandle } from '@/__tests__/helpers/test-db';
+import * as schema from '@/lib/db/schema';
 
 function makeMockProcess() {
   const listeners: Record<string, ((...args: any[]) => void)[]> = {};
@@ -47,9 +49,11 @@ describe('POST /api/agents/improve-prompt', () => {
   let spawnMock: ReturnType<typeof vi.fn>;
   let projDir: string;
   let mockProc: ReturnType<typeof makeMockProcess>;
+  let handle: TestDbHandle;
 
   beforeEach(async () => {
     vi.resetModules();
+    handle = await createTestPgDb();
     projDir = mkdtempSync(join(tmpdir(), 'tamtam-improve-prompt-'));
     writeFileSync(join(projDir, 'CLAUDE.md'), '# Test project\n\nSays hello.');
 
@@ -76,6 +80,7 @@ describe('POST /api/agents/improve-prompt', () => {
     vi.doMock('@/lib/agents/compose-skills', () => ({
       composeAgentSkills: () => ({ parts: [], docParts: [], metaSkills: [], metaDocs: [] }),
     }));
+    vi.doMock('@/lib/db', () => ({ db: handle.db, schema }));
     vi.doMock('child_process', async () => {
       const actual = await vi.importActual<any>('child_process');
       return { ...actual, spawn: spawnMock };
@@ -85,13 +90,41 @@ describe('POST /api/agents/improve-prompt', () => {
     POST = mod.POST;
   });
 
-  afterEach(() => {
+  afterEach(async () => {
     vi.useRealTimers();
     vi.resetModules();
     rmSync(projDir, { recursive: true, force: true });
+    vi.doUnmock('@/lib/db');
+    await handle?.[Symbol.asyncDispose]();
     delete process.env.TAMTAM_IMPROVE_PROMPT_TEST;
     delete process.env.CODEX_SANDBOX_NETWORK_DISABLED;
   });
+
+  function meta(agentId: string, agentName: string) {
+    return JSON.stringify({ agent: { id: agentId, name: agentName, triggeredBy: 'schedule' } });
+  }
+
+  function legacyMeta(agentName: string) {
+    return JSON.stringify({ agent: { name: agentName, triggeredBy: 'schedule' }, sourceJobId: 'legacy-source' });
+  }
+
+  async function insertJob(overrides: Partial<typeof schema.jobs.$inferInsert> = {}) {
+    await handle.db.insert(schema.jobs).values({
+      id: overrides.id ?? `job-${Math.random()}`,
+      project: overrides.project ?? 'alpha',
+      kind: overrides.kind ?? 'agent:improve',
+      pid: overrides.pid ?? 1,
+      startedAt: overrides.startedAt ?? 100,
+      finishedAt: overrides.finishedAt ?? 200,
+      exitCode: overrides.exitCode ?? 0,
+      seen: overrides.seen ?? false,
+      contextMeta: overrides.contextMeta ?? meta('agent-1', 'improve'),
+      workSummary: overrides.workSummary ?? null,
+      modifiedFiles: overrides.modifiedFiles ?? null,
+      linesAdded: overrides.linesAdded ?? null,
+      linesRemoved: overrides.linesRemoved ?? null,
+    });
+  }
 
   it('returns 400 when project is missing', async () => {
     const req = new NextRequest('http://localhost/api/agents/improve-prompt', {
@@ -186,6 +219,124 @@ describe('POST /api/agents/improve-prompt', () => {
     expect(options.env.CODEX_SANDBOX_OVERRIDE).toBeUndefined();
     expect(options.env.HOME).toBeTruthy();
     expect(options.env.PATH).toContain('/usr/local/bin');
+
+    mockProc.emitStdout('Improved prompt\n');
+    mockProc.emitClose(0);
+    const res = await promise;
+    expect(res.status).toBe(200);
+  });
+
+  it('includes low-yield run feedback for existing agents with only low-confidence modified files', async () => {
+    await insertJob({
+      workSummary: 'Touched only low-confidence noise.',
+      modifiedFiles: JSON.stringify([{ path: 'noise.log', status: 'M', confidence: 'low' }]),
+      linesAdded: 0,
+      linesRemoved: 0,
+    });
+
+    const req = new NextRequest('http://localhost/api/agents/improve-prompt', {
+      method: 'POST',
+      body: JSON.stringify({
+        project: 'alpha',
+        draftPrompt: 'make useful changes',
+        skillIds: [],
+        docPaths: [],
+        agentId: 'agent-1',
+        agentName: 'improve',
+      }),
+    });
+    const promise = POST(req);
+    await new Promise((r) => setTimeout(r, 0));
+
+    expect(mockProc.stdinChunks[0]).toContain('## Recent run outcomes (improve around this)');
+    expect(mockProc.stdinChunks[0]).toContain('produced changes in only 0 of its last 1 runs');
+    expect(mockProc.stdinChunks[0]).toContain('Run 1 (no changes');
+
+    mockProc.emitStdout('Improved prompt\n');
+    mockProc.emitClose(0);
+    const res = await promise;
+    expect(res.status).toBe(200);
+  });
+
+  it('includes target-agent feedback even when newer sibling-agent runs dominate project history', async () => {
+    await insertJob({
+      id: 'target-low-yield',
+      startedAt: 100,
+      workSummary: 'Target agent found work but landed nothing.',
+      linesAdded: 0,
+      linesRemoved: 0,
+    });
+    for (let i = 0; i < 30; i++) {
+      await insertJob({
+        id: `sibling-${i}`,
+        startedAt: 1_000 + i,
+        contextMeta: meta('agent-2', 'other'),
+        kind: 'agent:other',
+        workSummary: `Sibling agent changed file ${i}.`,
+        modifiedFiles: JSON.stringify([{ path: `sibling-${i}.ts`, status: 'M' }]),
+        linesAdded: 1,
+      });
+    }
+
+    const req = new NextRequest('http://localhost/api/agents/improve-prompt', {
+      method: 'POST',
+      body: JSON.stringify({
+        project: 'alpha',
+        draftPrompt: 'make useful changes',
+        skillIds: [],
+        docPaths: [],
+        agentId: 'agent-1',
+        agentName: 'improve',
+      }),
+    });
+    const promise = POST(req);
+    await new Promise((r) => setTimeout(r, 0));
+
+    expect(mockProc.stdinChunks[0]).toContain('## Recent run outcomes (improve around this)');
+    expect(mockProc.stdinChunks[0]).toContain('Target agent found work but landed nothing.');
+    expect(mockProc.stdinChunks[0]).not.toContain('Sibling agent changed file');
+
+    mockProc.emitStdout('Improved prompt\n');
+    mockProc.emitClose(0);
+    const res = await promise;
+    expect(res.status).toBe(200);
+  });
+
+  it('includes legacy name-only run feedback without leaking same-name rows from a different agent id', async () => {
+    await insertJob({
+      id: 'legacy-name-only',
+      startedAt: 100,
+      contextMeta: legacyMeta('improve'),
+      workSummary: 'Legacy improve row found work but landed nothing.',
+      linesAdded: 0,
+      linesRemoved: 0,
+    });
+    await insertJob({
+      id: 'different-id-same-name',
+      startedAt: 200,
+      contextMeta: meta('agent-2', 'improve'),
+      workSummary: 'Different id same-name row must not appear.',
+      modifiedFiles: JSON.stringify([{ path: 'other.ts', status: 'M' }]),
+      linesAdded: 1,
+    });
+
+    const req = new NextRequest('http://localhost/api/agents/improve-prompt', {
+      method: 'POST',
+      body: JSON.stringify({
+        project: 'alpha',
+        draftPrompt: 'make useful changes',
+        skillIds: [],
+        docPaths: [],
+        agentId: 'agent-1',
+        agentName: 'improve',
+      }),
+    });
+    const promise = POST(req);
+    await new Promise((r) => setTimeout(r, 0));
+
+    expect(mockProc.stdinChunks[0]).toContain('## Recent run outcomes (improve around this)');
+    expect(mockProc.stdinChunks[0]).toContain('Legacy improve row found work but landed nothing.');
+    expect(mockProc.stdinChunks[0]).not.toContain('Different id same-name row');
 
     mockProc.emitStdout('Improved prompt\n');
     mockProc.emitClose(0);

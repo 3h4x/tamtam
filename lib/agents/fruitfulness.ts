@@ -99,7 +99,7 @@ export function jobToSample(job: JobData): FruitfulnessSample | null {
   };
 }
 
-function countFruitfulModifiedFiles(arr: unknown[]): number {
+export function countFruitfulModifiedFiles(arr: unknown[]): number {
   let count = 0;
   for (const item of arr) {
     if (!item || typeof item !== 'object') {

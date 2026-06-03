@@ -10,6 +10,7 @@ import { composeAgentSkills } from '@/lib/agents/compose-skills';
 import { WAND_PRIMER } from '@/lib/agents/wand-primer';
 import { errMsg } from '@/lib/shared/types';
 import { buildChildEnv } from '@/lib/shared/child-env';
+import { loadRecentRunOutcomes, formatRunFeedbackBlock } from '@/lib/agents/run-feedback';
 
 const IMPROVE_TIMEOUT_MS = 120_000;
 const IMPROVE_KILL_GRACE_MS = 5_000;
@@ -109,7 +110,7 @@ async function runClaudePrint(
 }
 
 export async function POST(request: NextRequest) {
-  let body: { project?: string; draftPrompt?: string; skillIds?: string[]; docPaths?: string[] };
+  let body: { project?: string; draftPrompt?: string; skillIds?: string[]; docPaths?: string[]; agentId?: string; agentName?: string };
   try {
     body = await request.json();
   } catch {
@@ -120,6 +121,8 @@ export async function POST(request: NextRequest) {
   const draftPrompt = (body.draftPrompt || '').trim();
   const skillIds = Array.isArray(body.skillIds) ? body.skillIds.filter((s): s is string => typeof s === 'string') : [];
   const docPaths = Array.isArray(body.docPaths) ? body.docPaths.filter((s): s is string => typeof s === 'string') : [];
+  const agentId = typeof body.agentId === 'string' && body.agentId.trim() ? body.agentId.trim() : null;
+  const agentName = typeof body.agentName === 'string' && body.agentName.trim() ? body.agentName.trim() : null;
 
   if (!project) return NextResponse.json({ detail: 'project is required' }, { status: 400 });
   if (!draftPrompt) return NextResponse.json({ detail: 'draftPrompt is required' }, { status: 400 });
@@ -154,6 +157,19 @@ export async function POST(request: NextRequest) {
   if (claudeMd) contextSections.push(`## Project CLAUDE.md\n${claudeMd}`);
   contextSections.push(...composed.docParts);
   contextSections.push(...composed.parts);
+
+  // When improving an existing agent, fold in its recent run outcomes so the
+  // rewrite can target *why* the agent has been unproductive rather than just
+  // polishing prose. Best-effort: a DB hiccup here must not block the rewrite.
+  if (agentId || agentName) {
+    try {
+      const outcomes = await loadRecentRunOutcomes({ project, agentId, agentName });
+      const feedback = formatRunFeedbackBlock(outcomes);
+      if (feedback) contextSections.push(feedback);
+    } catch (e) {
+      console.error('[improve-prompt] failed to load run feedback:', errMsg(e));
+    }
+  }
 
   const metaInstruction = `You are rewriting a TamTam agent prompt. Read the project context and the agent's selected skills/docs above, then rewrite the user's draft below into a precise, concrete prompt that this agent will execute.
 

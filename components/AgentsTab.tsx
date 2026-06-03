@@ -86,6 +86,7 @@ export function AgentsTab({ projectName, projectJobs = [] }: AgentsTabProps) {
 
   const setEditorParam = (value: string | null) => {
     const next = new URLSearchParams(Array.from(searchParams.entries()))
+    next.delete('improve')
     if (value) next.set('agent', value)
     else {
       next.delete('agent')
@@ -93,6 +94,16 @@ export function AgentsTab({ projectName, projectJobs = [] }: AgentsTabProps) {
     }
     const qs = next.toString()
     router.push(qs ? `${pathname}?${qs}` : pathname)
+  }
+
+  // Strip the one-shot `improve` flag from the URL after the editor consumes it
+  // so a re-render or back-navigation doesn't re-trigger an improve run.
+  const clearImproveParam = () => {
+    if (!searchParams.get('improve')) return
+    const next = new URLSearchParams(Array.from(searchParams.entries()))
+    next.delete('improve')
+    const qs = next.toString()
+    router.replace(qs ? `${pathname}?${qs}` : pathname)
   }
 
   const [customTemplates, setCustomTemplates] = useState<AgentTemplateRecord[]>([])
@@ -177,7 +188,11 @@ export function AgentsTab({ projectName, projectJobs = [] }: AgentsTabProps) {
     setCustomRunOpenId(prev => (prev === agentId ? null : agentId))
   }
 
-  const closeEditor = () => { setRecommendedTemplate(null); setEditorParam(null) }
+  const closeEditor = () => {
+    setRecommendedTemplate(null)
+    clearImproveParam()
+    setEditorParam(null)
+  }
 
   const handleSaveAgent = async (data: AgentEditorSavePayload) => {
     const parseAgent = (a: Agent & { skillIds: string | string[]; docPaths?: string | string[] }): Agent => ({
@@ -464,6 +479,8 @@ export function AgentsTab({ projectName, projectJobs = [] }: AgentsTabProps) {
         onSave={handleSaveAgent}
         onDelete={editing ? () => handleDelete(editing.id) : undefined}
         onBack={closeEditor}
+        autoImprove={Boolean(editing) && searchParams.get('improve') === '1'}
+        onAutoImproveConsumed={clearImproveParam}
       />
     )
   }

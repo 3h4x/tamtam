@@ -64,6 +64,10 @@ export interface ImprovePromptInput {
   draftPrompt: string
   skillIds: string[]
   docPaths: string[]
+  /** When improving an existing agent, identify it so the rewrite can fold in
+   *  the agent's recent run outcomes and target why it's been unproductive. */
+  agentId?: string
+  agentName?: string
 }
 
 export async function improveAgentPrompt(input: ImprovePromptInput): Promise<{ improvedPrompt: string }> {

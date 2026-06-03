@@ -133,6 +133,58 @@ describe('analyzeAgentHealth', () => {
     expect(outcomes).toEqual([])
   })
 
+  function idleRun(overrides: Partial<{ id: string; workSummary: string; startedAt: number }> = {}) {
+    return {
+      id: overrides.id ?? 'idle-1',
+      kind: 'agent:improve',
+      workSummary: overrides.workSummary ?? 'No actionable target this pass.',
+      runScore: 35,
+      modifiedFiles: JSON.stringify([]),
+      linesAdded: 0,
+      linesRemoved: 0,
+      startedAt: overrides.startedAt ?? 1000000,
+      contextMeta: JSON.stringify({ agent: { id: 'agent-001', name: 'improve', triggeredBy: 'schedule' } }),
+    }
+  }
+
+  function improveSentinelRun(overrides: Partial<{ id: string; startedAt: number }> = {}) {
+    return idleRun({
+      id: overrides.id ?? 'improve-sentinel',
+      startedAt: overrides.startedAt,
+      workSummary: 'IMPROVE_QUEUE_ROTATED: queue empty; no actionable work.',
+    })
+  }
+
+  it('skips the LLM and retires open health concern when every analyzed run is idle', async () => {
+    dbSelectMock.mockReturnValue([
+      idleRun({ id: 'idle-3', startedAt: 3000000 }),
+      improveSentinelRun({ id: 'idle-2', startedAt: 2000000 }),
+      idleRun({ id: 'idle-1', startedAt: 1000000 }),
+    ])
+    const runPrint = vi.fn(async () => JSON.stringify({ concern: true, concernType: 'noise', severity: 'medium', summary: 's', recommendation: 'r' }))
+    const outcomes = await analyzeAgentHealth([candidateA], { runPrint })
+
+    // Idle-by-design → no LLM spend, no concern raised, stale concern retired.
+    expect(runPrint).not.toHaveBeenCalled()
+    expect(upsertRecommendationMock).not.toHaveBeenCalled()
+    expect(resolveRecommendationIfOpenMock).toHaveBeenCalledWith('alpha', 'orchestrator_agent_health', { agentId: 'agent-001', agentName: 'improve' })
+    expect(outcomes).toEqual([{ agentId: 'agent-001', analyzed: true, latestRunStartedAt: 3000000 }])
+  })
+
+  it('still analyzes (and annotates idle runs) when only some runs are idle', async () => {
+    dbSelectMock.mockReturnValue([
+      mockRun({ id: 'changed', workSummary: 'Touched the same file again.', startedAt: 3000000 }),
+      improveSentinelRun({ id: 'idle-1', startedAt: 1000000 }),
+    ])
+    const runPrint = vi.fn(async (_prompt: string) => JSON.stringify({ concern: false, concernType: 'none', severity: 'low', summary: 'ok', recommendation: null }))
+    await analyzeAgentHealth([candidateA], { runPrint })
+
+    expect(runPrint).toHaveBeenCalledOnce()
+    const prompt = runPrint.mock.calls[0][0]
+    expect(prompt).toContain('[idle — reported no actionable work]')
+    expect(prompt).toContain('idle is healthy, not a concern')
+  })
+
   it('writes orchestrator_agent_health recommendation when concern=true', async () => {
     const runPrint = runPrintReturning({
       concern: true,

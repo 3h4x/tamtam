@@ -157,10 +157,11 @@ export function AgentsStats({ projectName }: { projectName: string }) {
           const summary = stat ? statSummaryLine(stat) : []
           return (
             <li key={e.agentId}>
-              <button
+              <Button
                 type="button"
+                variant="ghost"
                 onClick={() => goToAgents(e.agentId)}
-                className="w-full px-3 py-2 flex items-center justify-between gap-3 text-left hover:bg-bg-tertiary/40 transition-colors cursor-pointer"
+                className="w-full justify-between !gap-3 !rounded-none !border-0 bg-transparent !px-3 !py-2 text-left font-normal hover:!bg-bg-tertiary/40"
               >
                 <div className="min-w-0 flex-1">
                   <div className="flex items-center gap-2 min-w-0">
@@ -187,7 +188,7 @@ export function AgentsStats({ projectName }: { projectName: string }) {
                     <div className="mt-0.5 text-[11px] text-status-warning truncate">skipped: {e.lastSkippedReason}</div>
                   )}
                 </div>
-              </button>
+              </Button>
             </li>
           )
         })}

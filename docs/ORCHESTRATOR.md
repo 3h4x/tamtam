@@ -34,7 +34,13 @@ interval. Each tick:
 - **Health** (`agent-health-analysis.ts`): an LLM reviews the agent's last 3
   runs and returns a verdict (`concern` + `concernType` like loop/noise). On a
   concern it writes an `orchestrator_agent_health` recommendation; on a clean
-  verdict it auto-resolves any open one (see Lifecycle).
+  verdict it auto-resolves any open one (see Lifecycle). When *every* analyzed
+  run is idle-by-design (no changes + a "no actionable work" summary, incl. the
+  improve agent's `IMPROVE_QUEUE_ROTATED` sentinel, which the finalizer persists
+  as a no-actionable-work summary), it short-circuits *before* the LLM call —
+  retiring any open concern and skipping the spend — so a caught-up agent is
+  never mislabeled loop/noise. Mixed windows still go to the LLM, with idle runs
+  annotated and the prompt told that idle is healthy.
 
 ## Recommendations
 
@@ -47,7 +53,7 @@ surfacing things worth attention. They live in the `recommendations` table
 | Type | Source | Meaning |
 |------|--------|---------|
 | `orchestrator_boost` | tick loop | The orchestrator already fired an extra run. Informational. |
-| `agent_unfruitful` | agent finalizer (`lib/agents/agent-run-report.ts`) | Scheduled runs aren't producing changes. |
+| `agent_unfruitful` | agent finalizer (`lib/agents/agent-run-report.ts`) | Scheduled runs aren't producing changes. Payload `cause` disambiguates: `unproductive` (last run found work but landed nothing → improve the prompt) vs `unknown`. The `idle` case (last run reported no actionable work — incl. the improve agent's `IMPROVE_QUEUE_ROTATED` sentinel) does **not** raise this recommendation at all: idle-by-design is not a failure, so it's owned by `agent_schedule_backoff` and any stale unfruitful row is auto-retired. Boost deprioritization still happens live off the fruitfulness stats, independent of this row. The `/recommendations` card offers "Improve prompt" for `unproductive`/`unknown`. |
 | `orchestrator_agent_health` | health analysis | An LLM flagged a loop/noise trend over recent runs. |
 | `agent_schedule_backoff` | agent finalizer | A scheduled run found no actionable work; consider a slower cadence. |
 

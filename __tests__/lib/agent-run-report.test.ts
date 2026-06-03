@@ -225,6 +225,67 @@ describe('finalizeAgentRunReport', () => {
     expect(upsertRecommendationMock).not.toHaveBeenCalled();
   });
 
+  it('tags an unfruitful streak as "unproductive" when the last run found work but landed nothing', async () => {
+    loadRecentAgentSamplesMock.mockResolvedValue(
+      Array.from({ length: 5 }, (_, i) => ({
+        jobId: `prior-${i}`, startedAt: 90 - i, exitCode: 0,
+        modifiedFilesCount: 0, linesAdded: 0, linesRemoved: 0,
+      })),
+    );
+    const { finalizeAgentRunReport } = await import('@/lib/agents/agent-run-report');
+    const job = makeJob();
+
+    // Actionable work: yes, but 0 files changed → the prompt is failing to land.
+    await finalizeAgentRunReport(job, log('TamTam Run Report\nSummary: Tried to consolidate but hit a blocker.\nFiles changed: none\nActionable work: yes\n'));
+    await new Promise((r) => setTimeout(r, 0));
+
+    const call = upsertRecommendationMock.mock.calls.find((c) => c[0]?.type === 'agent_unfruitful');
+    expect(call).toBeTruthy();
+    expect(call?.[0].payload.cause).toBe('unproductive');
+    expect(call?.[0].payload.lastRunActionable).toBe(true);
+    expect(call?.[0].detail).toContain('Improve prompt');
+  });
+
+  it('suppresses the unfruitful flag when the last run reported no actionable work (idle, not broken)', async () => {
+    loadRecentAgentSamplesMock.mockResolvedValue(
+      Array.from({ length: 5 }, (_, i) => ({
+        jobId: `prior-${i}`, startedAt: 90 - i, exitCode: 0,
+        modifiedFilesCount: 0, linesAdded: 0, linesRemoved: 0,
+      })),
+    );
+    const { finalizeAgentRunReport } = await import('@/lib/agents/agent-run-report');
+    const job = makeJob();
+
+    await finalizeAgentRunReport(job, log('TamTam Run Report\nSummary: No actionable target this pass.\nFiles changed: none\nActionable work: no\n'));
+    await new Promise((r) => setTimeout(r, 0));
+
+    // Idle-by-design → no "isn't producing changes" recommendation; the idle
+    // case is owned by agent_schedule_backoff. Any stale row is retired instead.
+    const unfruitfulUpsert = upsertRecommendationMock.mock.calls.find((c) => c[0]?.type === 'agent_unfruitful');
+    expect(unfruitfulUpsert).toBeUndefined();
+    expect(resolveRecommendationIfOpenMock).toHaveBeenCalledWith('portal', 'agent_unfruitful', { agentId: 'agent-1', agentName: 'tests' });
+  });
+
+  it('suppresses the unfruitful flag for an improve agent idle sentinel run', async () => {
+    loadRecentAgentSamplesMock.mockResolvedValue(
+      Array.from({ length: 5 }, (_, i) => ({
+        jobId: `prior-${i}`, startedAt: 90 - i, exitCode: 0,
+        modifiedFilesCount: 0, linesAdded: 0, linesRemoved: 0,
+      })),
+    );
+    const { finalizeAgentRunReport } = await import('@/lib/agents/agent-run-report');
+    const job = makeJob();
+
+    // The improve agent signals an empty queue with its sentinel, not a report.
+    await finalizeAgentRunReport(job, log('IMPROVE_QUEUE_ROTATED 0'));
+    await new Promise((r) => setTimeout(r, 0));
+
+    expect(job.workSummary).toBe('IMPROVE_QUEUE_ROTATED: queue empty; no actionable work.');
+    const unfruitfulUpsert = upsertRecommendationMock.mock.calls.find((c) => c[0]?.type === 'agent_unfruitful');
+    expect(unfruitfulUpsert).toBeUndefined();
+    expect(resolveRecommendationIfOpenMock).toHaveBeenCalledWith('portal', 'agent_unfruitful', { agentId: 'agent-1', agentName: 'tests' });
+  });
+
   it('retires a stale schedule-backoff recommendation when a scheduled run does real work', async () => {
     execMock
       .mockResolvedValueOnce({ exitCode: 0, stdout: 'M\tsrc/lib/foo.ts\n', stderr: '' })
