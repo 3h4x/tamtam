@@ -3,11 +3,8 @@
 // post-merge DoD verification.
 //
 // The polling loop lives inside the workflow body and uses workflow-native
-// `sleep` between iterations. That replaces the previous setTimeout-driven
-// runPrWaitLoop, which only survived restarts via the bespoke resumePrWait
-// path triggered from `reapAbandonedInlineJobs`. Workflow runtime now owns
-// durability: a restart mid-poll resumes from the event log without needing
-// the boot-time reaper.
+// `sleep` between iterations. Workflow runtime owns durability: a restart
+// mid-poll resumes from the event log.
 //
 // Each side-effectful operation (gh poll, merge, branch switch, mark-dod
 // invocation, finalize) is its own `'use step'` so its result is cached and
