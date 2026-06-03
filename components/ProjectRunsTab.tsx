@@ -15,6 +15,7 @@ import {
 import type { AutomationQueueItem, JobInfo } from '@/lib/client-api'
 import { Button } from '@/components/ui/Button'
 import { PillButton } from '@/components/ui/Pill'
+import { SearchField } from '@/components/ui/SearchField'
 import {
   formatTokens,
   formatCost,
@@ -745,28 +746,13 @@ export function ProjectRunsTab({ projectName, jobsPaused = false }: ProjectRunsT
       <div className="mb-3 rounded-lg border border-border bg-bg-secondary">
         <div className="grid gap-3 border-b border-border p-3 lg:grid-cols-[minmax(280px,1fr)_auto] lg:items-start">
         <div>
-          <div className="relative">
-            <input
-              type="text"
-              value={search}
-              onChange={(e) => setSearch(e.target.value)}
-              placeholder="Search prompts, models, session ids…"
-              className="w-full pl-8 pr-8 py-1.5 text-sm bg-bg-primary border border-border rounded-md text-text-primary placeholder:text-text-tertiary focus:outline-none focus:ring-2 focus:ring-accent/20 focus:border-accent transition-colors"
-            />
-            <span className="absolute left-2.5 top-1/2 -translate-y-1/2 text-text-tertiary text-xs" aria-hidden>⌕</span>
-            {search && (
-              <Button
-                type="button"
-                onClick={() => setSearch('')}
-                variant="ghost"
-                size="icon-sm"
-                className="absolute right-1.5 top-1/2 -translate-y-1/2"
-                title="Clear search"
-              >
-                ×
-              </Button>
-            )}
-          </div>
+          <SearchField
+            value={search}
+            onChange={setSearch}
+            placeholder="Search prompts, models, session ids…"
+            leadingGlyph="⌕"
+            inputClassName="w-full pl-8 pr-8 py-1.5 text-sm bg-bg-primary border border-border rounded-md text-text-primary placeholder:text-text-tertiary focus:outline-none focus:ring-2 focus:ring-accent/20 focus:border-accent transition-colors"
+          />
           <div className="mt-2 flex items-center gap-2 text-[11px] text-text-tertiary">
             <span className="font-mono">
               showing {filtered.length} of {summary?.total ?? (totalJobs || entries.length)}
