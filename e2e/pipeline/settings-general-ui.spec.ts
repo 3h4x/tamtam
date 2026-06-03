@@ -150,7 +150,7 @@ test.describe('Settings general page save flow', () => {
         patchCount += 1;
         const body = route.request().postDataJSON() as Record<string, string>;
         if (body.github_owner !== undefined) savedGithubOwner = body.github_owner;
-        await new Promise<void>((r) => setTimeout(r, 60));
+        await page.getByRole('button', { name: /Saving/i }).waitFor({ state: 'visible' });
         await route.fulfill({ json: { settings: makeSettings({ github_owner: savedGithubOwner }) } });
         return;
       }
@@ -239,8 +239,8 @@ test.describe('Settings general page save flow', () => {
 
     await expect(page.getByRole('button', { name: 'Save Settings' })).toBeVisible({ timeout: 10_000 });
 
-    // Tabs may render as links or as role=tab elements
-    const pipelineNavItem = page.getByText('Pipeline').first();
+    const settingsNav = page.getByRole('navigation', { name: 'Settings navigation' });
+    const pipelineNavItem = settingsNav.getByRole('button', { name: 'Pipeline' });
     await expect(pipelineNavItem).toBeVisible({ timeout: 5_000 });
     await pipelineNavItem.click();
 
