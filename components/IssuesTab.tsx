@@ -14,6 +14,7 @@ import { Button } from '@/components/ui/Button'
 import { Spinner } from '@/components/ui/Spinner'
 import { EmptyState } from '@/components/ui/EmptyState'
 import { Pill } from '@/components/ui/Pill'
+import { Textarea } from '@/components/ui/Textarea'
 
 // Re-export types consumed by subcomponents so callers don't need to change
 export type { GhPullRequest, GhIssue, ProjectConfig }
@@ -283,7 +284,7 @@ ${idea}`
               </div>
             ) : (
               <>
-                <textarea
+                <Textarea
                   rows={3}
                   value={issueDraft}
                   onChange={(event) => setIssueDraft(event.target.value)}
@@ -295,7 +296,9 @@ ${idea}`
                     }
                   }}
                   disabled={agentsLoading || planning || !ctoAgent}
-                  className="focus-ring mt-3 w-full resize-y rounded-md border border-border bg-bg-primary px-3 py-2 font-mono text-xs leading-5 text-text-primary placeholder:text-text-tertiary disabled:cursor-not-allowed disabled:opacity-50"
+                  fontSize="xs"
+                  resize="y"
+                  className="mt-3 leading-5"
                   placeholder="Add a per-project quota override on the Settings -> Pipeline tab so heavy projects can have a higher token cap than the global default."
                 />
                 <div className="mt-2 flex flex-wrap items-center gap-2">
