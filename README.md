@@ -20,7 +20,7 @@ The agent management dashboard built for Claude-compatible CLIs. Define skills, 
 | **Interactive terminal** | Full runner per project — model tier selector (Fast / Normal / Smart), skill picker, persistent sessions across reconnects |
 | **Smart push** | AI-generated commit messages, diff preview, one-click push |
 | **CI repair** | Failed CI run? One click sends the selected provider to fix it |
-| **Scheduling** | Built-in interval scheduler — daily reviews, nightly audits, whatever you need, running unattended |
+| **Scheduling** | Graphile-worker-backed interval scheduler — daily reviews, nightly audits, whatever you need, running unattended |
 | **Release pipeline** | Quality-gated, branch-context-driven flow: test → review → fix loop → commit → push → DoD (`mark-dod`) → pr-wait/merge → soak. Default-branch releases push directly; non-default branches open or reuse a PR. The unified `fix_max_iterations` cap (default `0`, unlimited until LGTM or release timeout) governs review/test/commit/non-hook push verification; push-hook rejection fixes are capped at 2 attempts. Optional `release_min_lines` reinforces sub-threshold auto-release work by re-dispatching the same agent before the pipeline fires |
 | **Cross-project recommendations** | Open agent and scheduler suggestions across every project in `/recommendations` |
 | **Semantic retrieval** | Optional local context injection from committed project docs, DB-backed skills, project config guidance, and completed agent run reports via `pgvector` + Ollama |
