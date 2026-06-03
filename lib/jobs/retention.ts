@@ -155,10 +155,9 @@ export async function pruneProjectLogs(project: string, cfg?: RetentionConfig): 
     .sort((a, b) => b.startedAt - a.startedAt);
   summary.rowsScanned = rows.length;
 
-  // Collect eligible rows directly instead of collecting IDs and then
-  // re-finding each row via `rows.find(...)` (O(K*N)). The rows array is
-  // already sorted descending by startedAt so the index-based count check
-  // still applies.
+  // Collect eligible rows in one pass to avoid re-finding each row by ID.
+  // The rows array is already sorted descending by startedAt so the
+  // index-based count check still applies.
   type EligibleRow = { id: string; logPath: string | null };
   const toPrune: EligibleRow[] = [];
   for (let i = 0; i < rows.length; i++) {

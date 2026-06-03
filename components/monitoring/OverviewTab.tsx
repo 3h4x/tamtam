@@ -43,10 +43,8 @@ export function OverviewTab({
   pm2Logs: Pm2LogData | null
   window_: TimeWindow
 }) {
-  // Partition in one pass each — previously we filtered the same array
-  // twice (up/down for services, error/warn for pm2 logs), allocating two
-  // intermediate arrays per render. The monitoring page polls on a fixed
-  // cadence, so cutting the per-render work helps even though N is small.
+  // Partition in one pass each to avoid allocating duplicate arrays on
+  // every monitoring poll render, even when the service/log lists are small.
   const downServices: typeof data.prometheus.services = []
   const upServices: typeof data.prometheus.services = []
   for (const s of data.prometheus.services) {
