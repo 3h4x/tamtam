@@ -2,9 +2,9 @@
 //
 // Fires every 5 minutes (self-reenqueue). Reads the bridge's per-provider
 // pace snapshot and writes one row per provider+window into
-// `usage_hourly_snapshot`, bucketed to the start of the current hour. Re-
-// upserts within the same hour so the row reflects the latest snapshot
-// captured in that bucket (cheap, deterministic, idempotent on restart).
+// `usage_hourly_snapshot`, bucketed to the start of the current 15-min
+// window. Re-upserts within the same bucket so the row reflects the latest
+// snapshot captured in that bucket (cheap, deterministic, idempotent on restart).
 
 import type { JobHelpers, Task } from 'graphile-worker';
 
