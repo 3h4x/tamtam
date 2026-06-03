@@ -43,6 +43,7 @@ type MockJob = {
   log_path?: string;
   seen?: boolean;
   parent_job_id?: string | null;
+  work_summary?: string | null;
 };
 
 async function mockJobScenario(
@@ -488,6 +489,41 @@ test.describe('Job lifecycle UI badges', () => {
     await expect(row.getByText('exit 5', { exact: true })).toBeVisible({ timeout: 12_000 });
     await expect(row.getByLabel('running')).toHaveCount(0, { timeout: 12_000 });
     await expect(row.getByText('running', { exact: true })).toHaveCount(0);
+  });
+
+  test('history tab surfaces failure detail after a running job fails via poll', async ({
+    page,
+  }) => {
+    let serveRunning = true;
+    const failureDetail = 'Unit test failed: expected checkout guard to block unsafe branch switch';
+    await mockJobScenario(page, () => [
+      makeJob({
+        id: 'job-live-history-failed-detail',
+        kind: 'test',
+        status: serveRunning ? 'running' : 'done',
+        exit_code: serveRunning ? null : 1,
+        started_at: now() - 45,
+        finished_at: serveRunning ? null : now() - 5,
+        session_id: 'sess-live-history-failed-detail',
+        work_summary: serveRunning ? null : failureDetail,
+      }),
+    ]);
+
+    await page.goto(`/project/${PROJECT}/history`);
+
+    const row = page.getByRole('button')
+      .filter({ hasText: 'test' })
+      .filter({ hasText: 'started' })
+      .first();
+    await expect(row).toBeVisible();
+    await expect(row.getByLabel('running')).toBeVisible();
+    await expect(row.getByText('Running tests…')).toBeVisible();
+
+    serveRunning = false;
+
+    await expect(row.getByText('exit 1', { exact: true })).toBeVisible({ timeout: 12_000 });
+    await expect(row.getByText(failureDetail)).toBeVisible({ timeout: 12_000 });
+    await expect(row.getByLabel('running')).toHaveCount(0, { timeout: 12_000 });
   });
 
   test('history tab flips a running job to cancelled without leaving a running badge', async ({
