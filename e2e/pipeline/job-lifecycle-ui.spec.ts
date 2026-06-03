@@ -638,6 +638,66 @@ test.describe('Job lifecycle UI badges', () => {
     await expect(page.getByText('active work')).toHaveCount(0, { timeout: 12_000 });
   });
 
+  test('overview tab keeps a surviving active job when another job completes via poll', async ({
+    page,
+  }) => {
+    let phase: 'both-running' | 'review-done' | 'all-done' = 'both-running';
+    await mockJobScenario(page, () => {
+      const reviewRunning = phase === 'both-running';
+      const testRunning = phase !== 'all-done';
+
+      return [
+        makeJob({
+          id: 'job-live-overview-review-peer',
+          kind: 'review',
+          status: reviewRunning ? 'running' : 'done',
+          exit_code: reviewRunning ? null : 0,
+          started_at: now() - 30,
+          finished_at: reviewRunning ? null : now() - 8,
+          verdict: reviewRunning ? undefined : 'LGTM',
+          session_id: 'sess-live-overview-review-peer',
+        }),
+        makeJob({
+          id: 'job-live-overview-test-peer',
+          kind: 'test',
+          status: testRunning ? 'running' : 'done',
+          exit_code: testRunning ? null : 0,
+          started_at: now() - 20,
+          finished_at: testRunning ? null : now() - 4,
+          session_id: 'sess-live-overview-test-peer',
+        }),
+      ];
+    });
+
+    await page.goto(`/project/${PROJECT}`);
+
+    const activeWork = page.getByText('active work').locator('..').locator('..').locator('..');
+
+    await expect(page.getByText('2 running now')).toBeVisible({ timeout: 8_000 });
+    await expect(activeWork.getByRole('button', { name: /review/i })).toBeVisible({
+      timeout: 8_000,
+    });
+    await expect(activeWork.getByRole('button', { name: /test/i })).toBeVisible({
+      timeout: 8_000,
+    });
+
+    phase = 'review-done';
+
+    await expect(page.getByText('1 running now')).toBeVisible({ timeout: 12_000 });
+    await expect(activeWork.getByRole('button', { name: /test/i })).toBeVisible({
+      timeout: 12_000,
+    });
+    await expect(activeWork.getByRole('button', { name: /review/i })).toHaveCount(0, {
+      timeout: 12_000,
+    });
+    await expect(page.getByText('2 running now')).toHaveCount(0, { timeout: 12_000 });
+
+    phase = 'all-done';
+
+    await expect(page.getByText('active work')).toHaveCount(0, { timeout: 12_000 });
+    await expect(page.getByText('1 running now')).toHaveCount(0, { timeout: 12_000 });
+  });
+
   // -------------------------------------------------------------------------
   // Overview tab — running banner appears when a new job starts via poll
   // Verifies the live-polling path on the overview tab: the banner must appear
