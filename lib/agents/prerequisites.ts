@@ -33,8 +33,12 @@ export function normalizeStoredPrerequisiteCommand(
   return trimmed ? trimmed : '';
 }
 
-export function parsePrerequisiteCommandInput(value: unknown): string | undefined {
+export function parsePrerequisiteCommandInput(value: unknown): string | null | undefined {
   if (value === undefined) return undefined;
+  // null means "no explicit override — inherit the skill/template default".
+  // Coercing it to '' would persist an explicit empty override that both
+  // dirties the committed .md file and suppresses the skill's default prereq.
+  if (value === null) return null;
   if (typeof value !== 'string') return '';
   const trimmed = value.trim();
   return trimmed ? trimmed : '';

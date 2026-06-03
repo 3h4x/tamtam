@@ -38,6 +38,11 @@ describe('prerequisite helpers', () => {
     expect(parsePrerequisiteCommandInput('  pnpm lint  ')).toBe('pnpm lint')
     expect(parsePrerequisiteCommandInput('   ')).toBe('')
     expect(parsePrerequisiteCommandInput(42)).toBe('')
+    // null preserves "inherit the default" — it must NOT collapse to ''.
+    // Coercing null→'' persisted an explicit empty override that dirtied the
+    // committed .md frontmatter and suppressed the skill's default prereq when
+    // an unrelated field (e.g. permission mode) was edited.
+    expect(parsePrerequisiteCommandInput(null)).toBeNull()
   })
 
   it('substitutes the URL-encoded project placeholder in default prerequisites', () => {

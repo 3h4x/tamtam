@@ -300,6 +300,48 @@ export function ChangesTab({ projectName, jobsPaused = false }: ChangesTabProps)
                 {pushError && <p className="text-xs text-status-error">{pushError}</p>}
               </div>
             )}
+            {(data?.behind ?? 0) > 0 && !diverged && (
+              <div className="mt-3 flex flex-col items-center gap-2">
+                <p className="text-xs text-status-warning font-medium">
+                  ↓ {data!.behind} commit{data!.behind !== 1 ? 's' : ''} behind origin{data?.branch ? `/${data.branch}` : ''}
+                </p>
+                <Button
+                  variant="warning"
+                  onClick={() => doPull('ff-only')}
+                  disabled={pulling}
+                  title={`git pull --ff-only on ${data?.branch ?? 'branch'}`}
+                >
+                  {pulling ? 'Pulling…' : 'Pull'}
+                </Button>
+                {pullError && <p className="text-xs text-status-error">{pullError}</p>}
+              </div>
+            )}
+            {diverged && (
+              <div className="mt-3 flex flex-col items-center gap-2">
+                <p className="text-xs text-status-error font-medium">Branches diverged — choose strategy:</p>
+                <div className="flex items-center gap-2">
+                  <Button
+                    variant="info"
+                    onClick={() => doPull('rebase')}
+                    disabled={pulling}
+                    title="git pull --rebase (replay your commits on top of remote)"
+                  >
+                    {pulling ? 'Working…' : 'Rebase'}
+                  </Button>
+                  <Button
+                    onClick={() => doPull('merge')}
+                    disabled={pulling}
+                    title="git pull --no-ff (create a merge commit)"
+                  >
+                    {pulling ? 'Working…' : 'Merge'}
+                  </Button>
+                  <Button variant="ghost" onClick={() => setDiverged(false)}>
+                    ✕
+                  </Button>
+                </div>
+                {pullError && <p className="text-xs text-status-error">{pullError}</p>}
+              </div>
+            )}
           </div>
         }
       />
