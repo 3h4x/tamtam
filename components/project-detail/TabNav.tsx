@@ -23,9 +23,7 @@ export function TabNav({ projectName, activeTab, totalChanges, issueCount, runni
 
   const handleTerminalClick = async () => {
     try {
-      // Filter at the API level: we want the single most recent `run`-kind
-      // job that has a session_id. Previously this pulled the whole project
-      // jobs list and filtered client-side — costly on large histories.
+      // Filter at the API level for the newest `run` job with a session_id.
       const data = await fetchJobs(projectName, { kind: 'run', limit: 5 })
       const lastSession = data.jobs.find(j => j.session_id)
       if (lastSession?.session_id) {
