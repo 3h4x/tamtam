@@ -156,6 +156,7 @@ Read the relevant file before touching the subsystem it covers.
 | `docs/superpowers/specs/2026-05-14-postgres-workflow-cutover-design.md` | Approved Postgres/workflow cutover design | Touching Postgres-only assumptions, workflow-always-on intake, or cleanup of older SQLite-era patterns |
 | `docs/superpowers/specs/2026-05-21-sandboxed-playwright-broker-design.md` | Approved design for sandboxed Playwright broker | Changing browser-broker container lifecycle, Playwright sandbox configuration, or QA agent MCP tool access under auto/acceptEdits permission modes |
 | `docs/superpowers/specs/2026-05-31-agent-run-scoring-health-analysis-design.md` | Approved design for agent run scoring and orchestrator health analysis | Changing run-score persistence, orchestrator health analysis, or recommendation semantics for agent health findings |
+| `docs/superpowers/specs/2026-06-03-reinforce-to-threshold-design.md` | Approved design for reinforce-to-threshold before release | Planning or implementing the auto-release minimum-lines gate, reinforce re-dispatch loop, or related settings |
 | `docs/TAMTAM-DIR.md` | `.tamtam/config.yml` and file-agent contract | Changing committed per-project config, agent files, or auto-attached docs behavior |
 | `docs/TESTING.md` | Vitest/PGlite patterns and mock rules | Adding tests, especially API tests, or debugging test harness setup |
 | `docs/UI.md` | Design tokens, component patterns, and visual rules | Changing UI styling, layout patterns, or deciding whether a visual choice fits TamTam |
