@@ -2,7 +2,7 @@
 
 import { usePromptInsights } from '@/hooks/usePromptInsights'
 import { EmptyState } from '@/components/ui/EmptyState'
-import { Spinner } from '@/components/ui/Spinner'
+import { InlineLoading } from '@/components/ui/InlineLoading'
 
 function formatBytes(n: number): string {
   if (n < 1024) return `${n} B`
@@ -34,10 +34,7 @@ export function PromptInsightsPanel({ projectName }: { projectName: string }) {
     return (
       <section className="rounded-md border border-border bg-bg-secondary p-3">
         <div className="text-sm font-medium text-text-primary mb-1">Prompt insights</div>
-        <div className="inline-flex items-center gap-1.5 text-xs text-text-tertiary" role="status">
-          <Spinner size="sm" shrink aria-hidden="true" />
-          Loading…
-        </div>
+        <InlineLoading className="!gap-1.5 !text-xs" label="Loading…" />
       </section>
     )
   }
