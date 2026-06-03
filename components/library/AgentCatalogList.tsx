@@ -4,7 +4,7 @@ import { useMemo, useState } from 'react'
 import { useAgentCatalog, type AgentCatalogClientEntry } from '@/hooks/useAgentCatalog'
 import { EmptyState } from '@/components/ui/EmptyState'
 import { Pill } from '@/components/ui/Pill'
-import { Spinner } from '@/components/ui/Spinner'
+import { InlineLoading } from '@/components/ui/InlineLoading'
 import { SearchInput } from '@/components/ui/SearchInput'
 
 const TIER_ORDER: Record<string, number> = {
@@ -67,10 +67,7 @@ export function AgentCatalogList() {
   if (loading && entries.length === 0) {
     return (
       <section className="rounded-lg border border-border bg-bg-secondary p-4">
-        <div className="flex items-center gap-2 text-sm text-text-tertiary">
-          <Spinner size="sm" shrink aria-label="Loading" role="status" />
-          <span>Loading agent catalog…</span>
-        </div>
+        <InlineLoading label="Loading agent catalog…" />
       </section>
     )
   }
