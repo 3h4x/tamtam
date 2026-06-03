@@ -7,14 +7,15 @@ import { flushSync } from 'react-dom'
 import { TerminalTab } from '@/components/TerminalTab'
 import { terminalStore } from '@/lib/terminal/terminal-session-store'
 
-const { replaceMock, pushMock } = vi.hoisted(() => ({
+const { replaceMock, pushMock, searchParamsMock } = vi.hoisted(() => ({
   replaceMock: vi.fn(),
   pushMock: vi.fn(),
+  searchParamsMock: vi.fn(() => new URLSearchParams()),
 }))
 
 vi.mock('next/navigation', () => ({
   useRouter: () => ({ replace: replaceMock, push: pushMock }),
-  useSearchParams: () => new URLSearchParams(),
+  useSearchParams: () => searchParamsMock(),
 }))
 
 vi.mock('@/lib/client-api', () => ({
@@ -79,6 +80,8 @@ describe('TerminalTab live-run metadata', () => {
   beforeEach(() => {
     replaceMock.mockReset()
     pushMock.mockReset()
+    searchParamsMock.mockReset()
+    searchParamsMock.mockReturnValue(new URLSearchParams())
     terminalStore.reset('proj')
   })
 
@@ -142,6 +145,34 @@ describe('TerminalTab live-run metadata', () => {
       expect(container.textContent).not.toContain('codex · smart')
       expect(container.textContent).toContain('live run')
     })
+
+    unmount()
+  })
+
+  it('preserves native textarea resize behavior in the issue close form', async () => {
+    vi.stubGlobal('fetch', vi.fn(async (input: RequestInfo | URL) => {
+      const url = String(input)
+      if (url === '/api/settings') {
+        return {
+          ok: true,
+          json: async () => ({ settings: {} }),
+        }
+      }
+      throw new Error(`Unexpected fetch: ${url}`)
+    }))
+    searchParamsMock.mockReturnValue(new URLSearchParams('issue_number=42&issue_repo=owner%2Frepo&issue_title=Bug'))
+
+    const { container, unmount } = renderTerminalTab()
+    const closeButton = Array.from(container.querySelectorAll('button'))
+      .find((button) => button.textContent === 'Close with verdict')
+
+    flushSync(() => {
+      closeButton?.dispatchEvent(new MouseEvent('click', { bubbles: true }))
+    })
+
+    const textarea = container.querySelector('textarea')
+    expect(textarea?.className).toContain(' resize ')
+    expect(textarea?.className).not.toContain('resize-y')
 
     unmount()
   })

@@ -19,6 +19,7 @@ import { useHandleSubmit } from '@/components/terminal/useHandleSubmit'
 import { useTerminalBootstrap } from '@/components/terminal/useTerminalBootstrap'
 import { Button } from '@/components/ui/Button'
 import { Select } from '@/components/ui/Select'
+import { Textarea } from '@/components/ui/Textarea'
 import { MODEL_TIERS, normalizeModelInput, type ModelTier } from '@/lib/agents/model-aliases'
 import { type CliProvider } from '@/lib/usage/cli-providers'
 import { readBrowserStorageJson, writeBrowserStorage } from '@/lib/client/browser-storage'
@@ -566,12 +567,16 @@ export function TerminalTab({ projectName, initialSessionId }: TerminalTabProps)
                   <option value="wontfix">wontfix</option>
                   <option value="fixed">fixed</option>
                 </Select>
-                <textarea
+                <Textarea
                   value={closeStaleFindings}
                   onChange={(e) => setCloseStaleFindings(e.target.value)}
                   placeholder="Findings to post as a comment before closing…"
                   rows={3}
-                  className="flex-1 px-2 py-1 rounded border border-border bg-bg-tertiary text-text-primary text-xs font-mono"
+                  appearance="muted"
+                  inputSize="compact"
+                  fontSize="xs"
+                  resize="both"
+                  className="flex-1 !px-2 !py-1"
                 />
                 <div className="flex flex-col gap-1">
                   <Button
