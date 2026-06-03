@@ -24,8 +24,8 @@ const AGENTS_CACHE_TTL = 10; // seconds
 let _agentsCache: { agents: AgentRow[]; time: number } | null = null;
 // Track the in-flight refresh as a Promise (not a boolean) so concurrent
 // callers can await the same fetch instead of returning immediately and
-// reading still-stale (or empty-on-cold-start) cache state. Boolean-guard
-// versions deduplicate the DB call but leak the freshness signal — async
+// reading still-stale (or empty-on-cold-start) cache state. A boolean guard
+// deduplicates the DB call but leaks the freshness signal — async
 // callers would receive whatever was cached at the moment they called,
 // not the post-refresh value.
 let _agentsRefreshPromise: Promise<void> | null = null;

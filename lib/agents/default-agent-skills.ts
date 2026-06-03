@@ -15,7 +15,7 @@ interface DefaultSkill {
   content: string;
 }
 
-// All default-agent skills now live as markdown files under
+// All default-agent skills live as markdown files under
 // `skills/docs/skills/tamtam/` with YAML frontmatter. The loader at
 // `lib/agents/skills-from-files.ts` is the single source of truth.
 // Each .md file owns its own id/name/description/version, the prompt
