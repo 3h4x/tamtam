@@ -103,7 +103,7 @@ test.describe('ChangesTab git actions', () => {
 
     await page.goto(`/project/${PROJECT}/changes`);
 
-    const pushBtn = page.getByRole('button', { name: 'Push', exact: true });
+    const pushBtn = page.getByTitle(/Push 2 commits to origin/);
     await expect(pushBtn).toBeVisible({ timeout: 8_000 });
     await expect(page.getByText('↑ 2 commits ahead')).toBeVisible();
     await pushBtn.click();
@@ -127,7 +127,7 @@ test.describe('ChangesTab git actions', () => {
 
     await page.goto(`/project/${PROJECT}/changes`);
 
-    const pushBtn = page.getByRole('button', { name: 'Push', exact: true });
+    const pushBtn = page.getByTitle(/Push 1 commit to origin/);
     await expect(pushBtn).toBeVisible({ timeout: 8_000 });
     await pushBtn.click();
 
@@ -156,12 +156,13 @@ test.describe('ChangesTab git actions', () => {
 
     await page.goto(`/project/${PROJECT}/changes`);
 
-    const pullBtn = page.getByRole('button', { name: 'Pull', exact: true });
+    const pullBtn = page.getByTitle(/git pull --ff-only/);
     await expect(pullBtn).toBeVisible({ timeout: 8_000 });
     await expect(page.getByText(/↓ 3 commits behind/)).toBeVisible();
     await pullBtn.click();
 
     await expect(page.getByText(/commits behind/)).not.toBeVisible({ timeout: 5_000 });
+    await expect(page.getByText('No uncommitted changes')).toBeVisible();
     expect(pulled).toBe(true);
   });
 
@@ -170,12 +171,13 @@ test.describe('ChangesTab git actions', () => {
   // -------------------------------------------------------------------------
   test('a diverged pull shows the strategy picker and rebase recovers', async ({ page }) => {
     await stubShell(page);
-    let attempt = 0;
+    const attempts: Array<string | undefined> = [];
     await page.route(`**/api/projects/by-project/${PROJECT}/changes`, (route: Route) => {
       const method = route.request().method();
       if (method === 'POST') {
-        attempt += 1;
-        if (attempt === 1) {
+        const body = route.request().postDataJSON() as { strategy?: string };
+        attempts.push(body.strategy);
+        if (attempts.length === 1) {
           // First ff-only pull reports divergence.
           route.fulfill({ status: 409, json: { diverged: true } });
         } else {
@@ -185,32 +187,70 @@ test.describe('ChangesTab git actions', () => {
         return;
       }
       route.fulfill({
-        json: makeChanges({ files: [], totalFiles: 0, totalAdditions: 0, totalDeletions: 0, behind: attempt >= 2 ? 0 : 2 }),
+        json: makeChanges({ files: [], totalFiles: 0, totalAdditions: 0, totalDeletions: 0, behind: attempts.length >= 2 ? 0 : 2 }),
       });
     });
 
     await page.goto(`/project/${PROJECT}/changes`);
 
-    const pullBtn = page.getByRole('button', { name: 'Pull', exact: true });
+    const pullBtn = page.getByTitle(/git pull --ff-only/);
     await expect(pullBtn).toBeVisible({ timeout: 8_000 });
     await pullBtn.click();
 
     // Strategy picker appears.
     await expect(page.getByText('Branches diverged — choose strategy:')).toBeVisible({ timeout: 5_000 });
-    const rebaseBtn = page.getByRole('button', { name: 'Rebase', exact: true });
+    const rebaseBtn = page.getByTitle(/git pull --rebase/);
     await expect(rebaseBtn).toBeVisible();
-    await page.getByRole('button', { name: 'Merge', exact: true }).first().waitFor();
+    await page.getByTitle(/git pull --no-ff/).waitFor();
 
     await rebaseBtn.click();
 
     // After rebase, the picker and behind indicator are gone.
     await expect(page.getByText('Branches diverged — choose strategy:')).not.toBeVisible({ timeout: 5_000 });
     await expect(page.getByText(/commits behind/)).not.toBeVisible();
-    expect(attempt).toBe(2);
+    expect(attempts).toEqual(['ff-only', 'rebase']);
   });
 
   // -------------------------------------------------------------------------
-  // Test 5: Switch to default branch from a clean non-default branch
+  // Test 5: Diverged pull surfaces the strategy picker; Merge recovers
+  // -------------------------------------------------------------------------
+  test('a diverged pull shows the strategy picker and merge recovers', async ({ page }) => {
+    await stubShell(page);
+    const attempts: Array<string | undefined> = [];
+    await page.route(`**/api/projects/by-project/${PROJECT}/changes`, (route: Route) => {
+      const method = route.request().method();
+      if (method === 'POST') {
+        const body = route.request().postDataJSON() as { strategy?: string };
+        attempts.push(body.strategy);
+        if (attempts.length === 1) {
+          route.fulfill({ status: 409, json: { diverged: true } });
+          return;
+        }
+        route.fulfill({ json: { status: 'ok', output: 'Merged' } });
+        return;
+      }
+      route.fulfill({
+        json: makeChanges({ files: [], totalFiles: 0, totalAdditions: 0, totalDeletions: 0, behind: attempts.length >= 2 ? 0 : 2 }),
+      });
+    });
+
+    await page.goto(`/project/${PROJECT}/changes`);
+
+    const pullBtn = page.getByTitle(/git pull --ff-only/);
+    await expect(pullBtn).toBeVisible({ timeout: 8_000 });
+    await pullBtn.click();
+
+    await expect(page.getByText('Branches diverged — choose strategy:')).toBeVisible({ timeout: 5_000 });
+    await page.getByTitle(/git pull --no-ff/).click();
+
+    await expect(page.getByText('Branches diverged — choose strategy:')).not.toBeVisible({ timeout: 5_000 });
+    await expect(page.getByText(/commits behind/)).not.toBeVisible();
+    await expect(page.getByText('No uncommitted changes')).toBeVisible();
+    expect(attempts).toEqual(['ff-only', 'merge']);
+  });
+
+  // -------------------------------------------------------------------------
+  // Test 6: Switch to default branch from a clean non-default branch
   // -------------------------------------------------------------------------
   test('switching to the default branch from a feature branch refreshes', async ({ page }) => {
     await stubShell(page);
@@ -246,7 +286,7 @@ test.describe('ChangesTab git actions', () => {
   });
 
   // -------------------------------------------------------------------------
-  // Test 6: A failed branch switch surfaces an inline error
+  // Test 7: A failed branch switch surfaces an inline error
   // -------------------------------------------------------------------------
   test('a failed branch switch shows an inline error', async ({ page }) => {
     await stubShell(page);
