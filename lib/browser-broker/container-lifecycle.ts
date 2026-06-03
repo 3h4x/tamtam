@@ -22,6 +22,18 @@ declare global {
 const HEALTH_PROBE_TIMEOUT_MS = 120_000;
 const HEALTH_PROBE_INTERVAL_MS = 500;
 const LOG_TAIL_LINES = 80;
+const SHUTDOWN_SIGNALS = ['SIGINT', 'SIGTERM'] as const;
+let brokerShutdownHookInstalled = false;
+
+function installBrokerShutdownHook(): void {
+  if (brokerShutdownHookInstalled) return;
+  brokerShutdownHookInstalled = true;
+  for (const signal of SHUTDOWN_SIGNALS) {
+    process.once(signal, () => {
+      void stopBroker().catch((err) => console.error('[browser-broker] shutdown cleanup failed', err));
+    });
+  }
+}
 
 async function dockerAvailable(): Promise<boolean> {
   const res = await runShell('docker', ['info', '--format', '{{.ServerVersion}}'], { timeout: 5_000 });
@@ -189,6 +201,7 @@ export async function ensureBrokerRunning(_opts?: EnsureOptions): Promise<Broker
       startedAt: Date.now(),
     };
     globalThis.__tamtamBrowserBroker = handle;
+    installBrokerShutdownHook();
     return handle;
   })();
 
