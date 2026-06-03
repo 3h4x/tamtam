@@ -11,6 +11,7 @@
 // can handle.
 
 import type { JobData } from '@/lib/jobs/types';
+import { getJob } from '@/lib/jobs/job-storage';
 
 export interface WaitForJobOptions {
   /** Poll cadence in ms. Default 5000. */
@@ -44,7 +45,6 @@ export async function waitForJobCompletion(
   const timeoutMs = options.timeoutMs ?? DEFAULT_TIMEOUT_MS;
   const signal = options.signal;
 
-  const { getJob } = await import('@/lib/jobs/job-storage');
   const startedAt = Date.now();
 
   // Eager first check — if the job is already finished (or never existed),
