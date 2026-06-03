@@ -18,10 +18,26 @@ const EMPTY_USAGE = {
 
 const EMPTY_BRIDGE = {
   generatedAt: Date.now(),
-  globalPace: { status: 'ok', marginsOk: true },
+  globalPace: {
+    status: 'unknown',
+    marginPct: null,
+    projectedPct: null,
+    bindingProvider: null,
+    bindingWindow: null,
+    providers: [],
+  },
   throttle: null,
   projects: [],
   summary: { projects: 0, agentsEnabled: 0, releasing: 0, stuck: 0, attention: 0 },
+};
+
+const EMPTY_OLLAMA = {
+  window: '24h',
+  generatedAt: Date.now(),
+  totals: { calls: 0, inputTokens: 0, durationMs: 0, lastCallAt: null },
+  models: [],
+  sources: [],
+  projects: [],
 };
 
 async function stubPageRoutes(page: import('@playwright/test').Page): Promise<void> {
@@ -33,7 +49,7 @@ async function stubPageRoutes(page: import('@playwright/test').Page): Promise<vo
     return route.fulfill({ json: EMPTY_USAGE });
   });
   await page.route('**/api/stats/ollama*', (route: Route) =>
-    route.fulfill({ json: { status: 'unavailable' } }),
+    route.fulfill({ json: EMPTY_OLLAMA }),
   );
   await page.route('**/api/stats/bridge*', (route: Route) =>
     route.fulfill({ json: EMPTY_BRIDGE }),
@@ -56,9 +72,9 @@ function makeSeries(provider: string, opts: {
     provider,
     windowKey: '7d',
     buckets: [{ bucketTs: ts, provider, windowKey: '7d', totalTokens }],
-    currentTokensPerHour: opts.currentTokensPerHour ?? 4000,
-    expectedTokensPerHour: opts.expectedTokensPerHour ?? 3500,
-    catchUpTokensPerHour: opts.catchUpTokensPerHour ?? 5000,
+    currentTokensPerHour: Object.hasOwn(opts, 'currentTokensPerHour') ? opts.currentTokensPerHour ?? null : 4000,
+    expectedTokensPerHour: Object.hasOwn(opts, 'expectedTokensPerHour') ? opts.expectedTokensPerHour ?? null : 3500,
+    catchUpTokensPerHour: Object.hasOwn(opts, 'catchUpTokensPerHour') ? opts.catchUpTokensPerHour ?? null : 5000,
   };
 }
 

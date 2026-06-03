@@ -7,6 +7,10 @@ import type { Page, Route } from '@playwright/test';
 
 const PROJECT = 'config-tab-save-ui';
 
+function websiteField(page: Page) {
+  return page.getByRole('textbox', { name: 'Website', exact: true });
+}
+
 function makeTask() {
   return {
     id: `${PROJECT}-1`,
@@ -145,7 +149,7 @@ test.describe('ConfigTab save flow', () => {
     await page.goto(`/project/${PROJECT}/config`);
 
     // Wait for config to load (website field becomes visible)
-    await expect(page.getByLabel('Website')).toBeVisible({ timeout: 8_000 });
+    await expect(websiteField(page)).toBeVisible({ timeout: 8_000 });
 
     const saveBtn = page.getByRole('button', { name: /^Save$/ });
     await expect(saveBtn).toBeVisible();
@@ -160,9 +164,9 @@ test.describe('ConfigTab save flow', () => {
     await stubShell(page);
     await page.goto(`/project/${PROJECT}/config`);
 
-    await expect(page.getByLabel('Website')).toBeVisible({ timeout: 8_000 });
+    await expect(websiteField(page)).toBeVisible({ timeout: 8_000 });
 
-    await page.getByLabel('Website').fill('https://example.com');
+    await websiteField(page).fill('https://example.com');
 
     await expect(page.getByText('Unsaved changes')).toBeVisible({ timeout: 3_000 });
     const saveBtn = page.getByRole('button', { name: /^Save$/ });
@@ -170,11 +174,12 @@ test.describe('ConfigTab save flow', () => {
   });
 
   // ---------------------------------------------------------------------------
-  // Test 3: Successful save cycle — Saving… → Saved!
+  // Test 3: Successful save cycle — Saving… → clean disabled Save
   // ---------------------------------------------------------------------------
-  test('clicking Save shows Saving then Saved after successful PATCH', async ({ page }) => {
+  test('clicking Save shows Saving then clears dirty state after successful PATCH', async ({ page }) => {
     let patchBody: Record<string, unknown> | null = null;
     let patchCallCount = 0;
+    let serverConfig = makeProjectConfig();
 
     await stubShell(page);
 
@@ -183,21 +188,22 @@ test.describe('ConfigTab save flow', () => {
       if (route.request().method() === 'PATCH') {
         patchCallCount += 1;
         patchBody = route.request().postDataJSON() as Record<string, unknown>;
+        serverConfig = makeProjectConfig({ website: patchBody.website });
         await new Promise((r) => setTimeout(r, 50));
         await route.fulfill({ json: { status: 'ok' } });
         return;
       }
       if (route.request().method() === 'GET') {
-        await route.fulfill({ json: makeProjectConfig({ website: 'https://example.com' }) });
+        await route.fulfill({ json: serverConfig });
         return;
       }
       route.continue();
     });
 
     await page.goto(`/project/${PROJECT}/config`);
-    await expect(page.getByLabel('Website')).toBeVisible({ timeout: 8_000 });
+    await expect(websiteField(page)).toBeVisible({ timeout: 8_000 });
 
-    await page.getByLabel('Website').fill('https://example.com');
+    await websiteField(page).fill('https://example.com');
     await expect(page.getByText('Unsaved changes')).toBeVisible({ timeout: 3_000 });
 
     const saveBtn = page.getByRole('button', { name: /^Save$/ });
@@ -206,8 +212,9 @@ test.describe('ConfigTab save flow', () => {
     // Button should briefly show Saving…
     await expect(page.getByRole('button', { name: /Saving/i })).toBeVisible({ timeout: 3_000 });
 
-    // Then transition to Saved!
-    await expect(page.getByRole('button', { name: /Saved!/i })).toBeVisible({ timeout: 5_000 });
+    // Then transition back to a clean, disabled Save button.
+    await expect(page.getByRole('button', { name: /^Save$/ })).toBeDisabled({ timeout: 5_000 });
+    await expect(page.getByText('Unsaved changes')).toHaveCount(0, { timeout: 5_000 });
 
     // Verify the PATCH was called and included the website value.
     expect(patchCallCount).toBe(1);
@@ -236,15 +243,15 @@ test.describe('ConfigTab save flow', () => {
     });
 
     await page.goto(`/project/${PROJECT}/config`);
-    await expect(page.getByLabel('Website')).toBeVisible({ timeout: 8_000 });
+    await expect(websiteField(page)).toBeVisible({ timeout: 8_000 });
 
-    await page.getByLabel('Website').fill('https://broken.example.com');
+    await websiteField(page).fill('https://broken.example.com');
     await expect(page.getByText('Unsaved changes')).toBeVisible({ timeout: 3_000 });
 
     await page.getByRole('button', { name: /^Save$/ }).click();
 
-    // An error toast should appear (the toast system renders with text from the error).
-    await expect(page.getByText(/failed to save config/i).first()).toBeVisible({ timeout: 5_000 });
+    // An error toast should appear (the client surfaces the server detail).
+    await expect(page.getByText(/internal server error|failed to update config/i).first()).toBeVisible({ timeout: 5_000 });
     // Save button must return to enabled (not stuck in saving state).
     await expect(page.getByRole('button', { name: /^Save$/ })).toBeEnabled({ timeout: 3_000 });
   });
@@ -256,14 +263,14 @@ test.describe('ConfigTab save flow', () => {
     await stubShell(page);
     await page.goto(`/project/${PROJECT}/config`);
 
-    await expect(page.getByLabel('Website')).toBeVisible({ timeout: 8_000 });
+    await expect(websiteField(page)).toBeVisible({ timeout: 8_000 });
 
     // Make it dirty.
-    await page.getByLabel('Website').fill('https://example.com');
+    await websiteField(page).fill('https://example.com');
     await expect(page.getByText('Unsaved changes')).toBeVisible({ timeout: 3_000 });
 
     // Revert to original (empty).
-    await page.getByLabel('Website').fill('');
+    await websiteField(page).fill('');
     await expect(page.getByText('Unsaved changes')).not.toBeVisible({ timeout: 3_000 });
     await expect(page.getByRole('button', { name: /^Save$/ })).toBeDisabled();
   });
@@ -275,7 +282,7 @@ test.describe('ConfigTab save flow', () => {
     await stubShell(page);
     await page.goto(`/project/${PROJECT}/config`);
 
-    await expect(page.getByLabel('Website')).toBeVisible({ timeout: 8_000 });
+    await expect(websiteField(page)).toBeVisible({ timeout: 8_000 });
 
     // Interval input should not exist while cron is disabled.
     await expect(page.getByLabel('Schedule interval')).not.toBeVisible();
@@ -323,7 +330,7 @@ test.describe('ConfigTab save flow', () => {
     await stubShell(page);
     await page.goto(`/project/${PROJECT}/config`);
 
-    await expect(page.getByLabel('Website')).toBeVisible({ timeout: 8_000 });
+    await expect(websiteField(page)).toBeVisible({ timeout: 8_000 });
 
     // The review chip should be active (review_disabled=false in config).
     // Clicking it will set review_disabled=true → dirty.

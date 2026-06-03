@@ -255,7 +255,7 @@ test.describe('History tab non-release live polling', () => {
     await expect(row.getByLabel('running')).toBeVisible({ timeout: 12_000 })
 
     await filterChip(page, 'running').click()
-    await expect(filterChip(page, 'running')).toHaveText(/running 1/i, {
+    await expect(filterChip(page, 'running')).toHaveText('running 1', {
       timeout: 12_000,
     })
 
@@ -276,7 +276,7 @@ test.describe('History tab non-release live polling', () => {
     await expect(
       row.getByText('Fresh live work appeared while the running filter was active'),
     ).toBeVisible({ timeout: 12_000 })
-    await expect(filterChip(page, 'running')).toHaveText(/running 1/i, {
+    await expect(filterChip(page, 'running')).toHaveText('running 1', {
       timeout: 12_000,
     })
   })
@@ -320,7 +320,7 @@ test.describe('History tab non-release live polling', () => {
       row.getByText('Provider exited before completing the requested work'),
     ).toBeVisible({ timeout: 12_000 })
     await expect(page.getByText('1 running')).toHaveCount(0, { timeout: 12_000 })
-    await expect(filterChip(page, 'failed')).toHaveText(/failed 1/i, { timeout: 12_000 })
+    await expect(filterChip(page, 'failed')).toHaveText('failed 1', { timeout: 12_000 })
   })
 
   test('chat run flips from running to cancelled without reload and does not show a raw exit code', async ({
@@ -552,7 +552,7 @@ test.describe('History tab non-release live polling', () => {
       plannerRow.getByText('Planner is still mapping follow-up work'),
     ).toBeVisible({ timeout: 12_000 })
     await expect(page.getByText('1 running')).toBeVisible({ timeout: 12_000 })
-    await expect(filterChip(page, 'failed')).toHaveText(/failed 1/i, { timeout: 12_000 })
+    await expect(filterChip(page, 'failed')).toHaveText('failed 1', { timeout: 12_000 })
 
     phase = 'all-done'
 
@@ -562,7 +562,7 @@ test.describe('History tab non-release live polling', () => {
       plannerRow.getByText('Planner finished after the failed chat run was recorded'),
     ).toBeVisible({ timeout: 12_000 })
     await expect(page.getByText('1 running')).toHaveCount(0, { timeout: 12_000 })
-    await expect(filterChip(page, 'failed')).toHaveText(/failed 1/i, { timeout: 12_000 })
+    await expect(filterChip(page, 'failed')).toHaveText('failed 1', { timeout: 12_000 })
   })
 
   test('agent cancellation does not clear a concurrent chat run that is still active', async ({

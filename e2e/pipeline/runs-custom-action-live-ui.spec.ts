@@ -3,7 +3,7 @@ import type { Page, Route } from '@playwright/test'
 
 // Custom actions are per-project bash commands surfaced as buttons. Their jobs
 // carry `kind === <actionName>`, which buckets to 'other' → the runs list shows
-// them with the "action" badge and the action name as the title. No other spec
+// them with the "action" badge plus the action name. No other spec
 // exercises this run kind, so this covers the running → done / running → exit
 // lifecycle for a custom action row, fully mocked (no shim/exec needed).
 
@@ -63,7 +63,7 @@ function makeJob(overrides: MockJob): MockJob {
 }
 
 function runRow(page: Page, text: string) {
-  return page.getByRole('button').filter({ hasText: text }).first()
+  return page.getByRole('button').filter({ hasText: text }).filter({ hasText: 'started' }).first()
 }
 
 function filterChip(page: Page, label: 'running' | 'failed' | 'all') {
@@ -191,13 +191,13 @@ test.describe('History tab custom action live polling', () => {
     // Custom-action jobs bucket to 'other' → the "action" kind badge.
     await expect(row.getByText('action', { exact: true })).toBeVisible({ timeout: 8_000 })
     await expect(row.getByLabel('running')).toBeVisible({ timeout: 8_000 })
-    await expect(page.getByText('1 running')).toBeVisible({ timeout: 8_000 })
+    await expect(filterChip(page, 'running')).toHaveText('running 1', { timeout: 8_000 })
 
     serveRunning = false
 
     await expect(row.getByLabel('done')).toBeVisible({ timeout: 12_000 })
     await expect(row.getByLabel('running')).toHaveCount(0, { timeout: 12_000 })
-    await expect(page.getByText('1 running')).toHaveCount(0, { timeout: 12_000 })
+    await expect(filterChip(page, 'running')).toHaveCount(0, { timeout: 12_000 })
   })
 
   test('custom action flips from running to exit 1 without reload and lands in the failed filter', async ({
@@ -231,7 +231,7 @@ test.describe('History tab custom action live polling', () => {
 
     await expect(row.getByText('exit 1', { exact: true })).toBeVisible({ timeout: 12_000 })
     await expect(row.getByLabel('running')).toHaveCount(0, { timeout: 12_000 })
-    await expect(page.getByText('1 running')).toHaveCount(0, { timeout: 12_000 })
-    await expect(filterChip(page, 'failed')).toHaveText(/failed 1/i, { timeout: 12_000 })
+    await expect(filterChip(page, 'running')).toHaveCount(0, { timeout: 12_000 })
+    await expect(filterChip(page, 'failed')).toHaveText('failed 1', { timeout: 12_000 })
   })
 })
