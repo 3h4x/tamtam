@@ -726,6 +726,13 @@ describe('instrumentation', () => {
 
     function mockJobStorageModule(factory: () => Record<string, unknown>) {
       currentStorageMock = factory();
+      // Force a fresh module registry so the next dynamic import of
+      // job-storage re-evaluates the (surviving) doMock factory and reads the
+      // holder we just set. Without this, a stale registry entry imported by a
+      // prior test under fork-pool CPU contention could shadow this mock,
+      // leaving runProbeSweep with the default empty-listJobs mock (0 probes).
+      // resetModules clears the import cache but preserves doMock registrations.
+      vi.resetModules();
     }
 
     function mockJobStorage(

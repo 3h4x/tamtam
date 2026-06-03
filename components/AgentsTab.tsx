@@ -16,6 +16,7 @@ import { useSchedulerHealth, type SchedulerEntry } from '@/hooks/useSchedulerHea
 import { Button } from '@/components/ui/Button'
 import { Pill } from '@/components/ui/Pill'
 import { Table, type Column } from '@/components/ui/Table'
+import { Textarea } from '@/components/ui/Textarea'
 
 interface AgentsTabProps {
   projectName: string
@@ -418,8 +419,9 @@ export function AgentsTab({ projectName, projectJobs = [] }: AgentsTabProps) {
           Additional context for <span className="font-medium text-text-primary">{r.agent.name}</span>
           <span className="ml-1 text-text-tertiary">(appended to the agent's prompt)</span>
         </label>
-        <textarea
-          className="w-full min-h-[80px] px-3 py-2 text-sm bg-bg-primary border border-border rounded-md font-mono text-text-primary focus:outline-none focus:ring-1 focus:ring-accent"
+        <Textarea
+          className="min-h-[80px]"
+          resize="both"
           placeholder="e.g. focus on the auth module, ignore generated files…"
           value={value}
           onChange={e => setCustomRunInput(prev => ({ ...prev, [r.agent.id]: e.target.value }))}
