@@ -132,7 +132,7 @@ function readReleaseLogTail(release: JobData, tailBytes = 50_000): string {
   // and openSync'd it separately — if PM2 rotated the log between the
   // two syscalls, the open fd pointed at the new file but `start` was
   // computed from the old file's size. Now the size + read both operate
-  // on the same open fd (same race-fix as iter 65 / iter 86).
+  // on the same open fd.
   let fd: number;
   try {
     fd = openSync(/*turbopackIgnore: true*/ release.logPath, 'r');
