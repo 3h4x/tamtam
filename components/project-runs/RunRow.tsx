@@ -6,6 +6,7 @@ import { formatDuration, formatTokens, formatCost, KIND_LABEL, KIND_COLOR, entry
 import type { Entry } from '@/components/project-runs/utils'
 import { Button } from '@/components/ui/Button'
 import { Pill } from '@/components/ui/Pill'
+import { StatusIcon as UiStatusIcon } from '@/components/ui/StatusIcon'
 import type { PillTone } from '@/components/ui/Pill'
 
 export const RUN_ROW_GRID_CLASS = 'lg:grid-cols-[minmax(360px,1.2fr)_minmax(360px,1fr)_96px_120px_minmax(84px,auto)]'
@@ -56,16 +57,10 @@ function StatusIcon({
   }
   if (needsAttention) {
     return (
-      <span className="flex h-5 w-5 shrink-0 items-center justify-center rounded-full border border-status-error/35 bg-status-error/10 text-[11px] font-semibold text-status-error" aria-label="needs attention">
-        !
-      </span>
+      <UiStatusIcon ok={false} className="h-5 w-5" ariaLabel="needs attention" />
     )
   }
-  return (
-    <span className="flex h-5 w-5 shrink-0 items-center justify-center rounded-full border border-status-success/35 bg-status-success/10 text-[11px] font-semibold text-status-success" aria-label="done">
-      ✓
-    </span>
-  )
+  return <UiStatusIcon ok={true} className="h-5 w-5" ariaLabel="done" />
 }
 
 function StepChip({ value }: { value: string }) {

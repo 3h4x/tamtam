@@ -5,10 +5,12 @@ type Size = 'sm' | 'md'
 export function StatusIcon({
   ok,
   className,
+  ariaLabel,
   size = 'md',
 }: {
   ok: boolean
   className?: string
+  ariaLabel?: string
   size?: Size
 }) {
   const sm = size === 'sm'
@@ -23,7 +25,7 @@ export function StatusIcon({
 
   return ok ? (
     <svg
-      aria-label="success"
+      aria-label={ariaLabel ?? 'success'}
       className={`${cls} text-status-success shrink-0`}
       viewBox={viewBox}
       fill="none"
@@ -37,7 +39,7 @@ export function StatusIcon({
     </svg>
   ) : (
     <svg
-      aria-label="attention"
+      aria-label={ariaLabel ?? 'attention'}
       className={`${cls} text-status-error shrink-0`}
       viewBox={viewBox}
       fill="none"
