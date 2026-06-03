@@ -2,7 +2,7 @@
 
 import { useCallback, useEffect, useState } from 'react'
 import { Button } from '@/components/ui/Button'
-import { Spinner } from '@/components/ui/Spinner'
+import { InlineLoading } from '@/components/ui/InlineLoading'
 import { errMsg } from '@/lib/shared/types'
 import { fmtAbsolute } from '@/lib/shared/format-date'
 import { dispatchJobsPausedChanged } from '@/lib/shared/jobs-paused-events'
@@ -187,10 +187,12 @@ export function JobsPauseToggle() {
               : 'border-border bg-bg-secondary text-text-secondary hover:bg-bg-tertiary hover:text-text-primary cursor-pointer'
       } ${(loading || saving) && !showRebuild ? 'opacity-70 cursor-wait' : ''}`}
     >
-      {showRebuild && (
-        <Spinner size="md" shrink className="!h-3 !w-3 !border-[1.5px]" aria-hidden="true" />
-      )}
-      {label}
+      {showRebuild ? (
+        <InlineLoading
+          label={label}
+          className="!gap-1.5 !text-xs text-current [&_[role=status]]:!h-3 [&_[role=status]]:!w-3 [&_[role=status]]:!border-[1.5px]"
+        />
+      ) : label}
     </Button>
   )
 }
