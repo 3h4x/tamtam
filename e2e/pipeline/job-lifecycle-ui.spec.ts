@@ -526,6 +526,57 @@ test.describe('Job lifecycle UI badges', () => {
     await expect(row.getByLabel('running')).toHaveCount(0, { timeout: 12_000 });
   });
 
+  test('running filter clears and failed filter picks up a test job failure without reload', async ({
+    page,
+  }) => {
+    let serveRunning = true;
+    const failureDetail = 'Integration tests failed after the worker exited with code 4';
+    await mockJobScenario(page, () => [
+      makeJob({
+        id: 'job-live-history-filter-failure',
+        kind: 'test',
+        status: serveRunning ? 'running' : 'done',
+        exit_code: serveRunning ? null : 4,
+        started_at: now() - 45,
+        finished_at: serveRunning ? null : now() - 5,
+        session_id: 'sess-live-history-filter-failure',
+        work_summary: serveRunning ? 'Tests are still running' : failureDetail,
+      }),
+    ]);
+
+    await page.goto(`/project/${PROJECT}/history`);
+
+    const row = page.getByRole('button')
+      .filter({ hasText: 'test' })
+      .filter({ hasText: 'started' })
+      .first();
+    await expect(row).toBeVisible();
+    await expect(row.getByLabel('running')).toBeVisible();
+
+    await page.getByRole('button', { name: /^running \d+$/i }).click();
+    await expect(page.getByRole('button', { name: /^running 1$/i })).toBeVisible();
+    await expect(row.getByText('Running tests…')).toBeVisible();
+
+    serveRunning = false;
+
+    await expect(page.getByText('Nothing is running right now')).toBeVisible({
+      timeout: 12_000,
+    });
+    await expect(row).toHaveCount(0);
+
+    const failedFilter = page.getByRole('button', { name: /^failed 1$/i });
+    await expect(failedFilter).toBeVisible({ timeout: 12_000 });
+    await failedFilter.click();
+
+    const failedRow = page.getByRole('button')
+      .filter({ hasText: 'test' })
+      .filter({ hasText: failureDetail })
+      .first();
+    await expect(failedRow).toBeVisible({ timeout: 12_000 });
+    await expect(failedRow.getByText('exit 4', { exact: true })).toBeVisible();
+    await expect(failedRow.getByLabel('running')).toHaveCount(0);
+  });
+
   test('history tab flips a running job to cancelled without leaving a running badge', async ({
     page,
   }) => {
