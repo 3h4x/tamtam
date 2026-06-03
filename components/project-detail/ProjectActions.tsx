@@ -275,7 +275,7 @@ export function ProjectActions({
         <Button
           variant={pullVariant}
           onClick={() => onPull('ff-only')}
-          disabled={pullPrimaryDisabled || totalChanges > 0}
+          disabled={pullPrimaryDisabled}
           title={
             totalChanges > 0
               ? `Commit or stash your ${totalChanges} local change${totalChanges !== 1 ? 's' : ''} before pulling`
