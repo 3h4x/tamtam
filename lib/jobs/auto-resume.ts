@@ -106,8 +106,8 @@ export function isAutoResumeEligible(job: JobData, _tail: string): boolean {
   return true;
 }
 
-/** Reads the tail of a finished job's log and decides whether to auto-
- *  resume. If yes, calls the same in-process spawn the /continue route
+/** Reads the tail of a finished job's log to recover the session_id and
+ *  decide whether to auto-resume. If yes, calls the same in-process spawn the /continue route
  *  uses, then bumps the chain counter on the new job. */
 export async function maybeAutoResume(job: JobData): Promise<{ resumed: true; newJobId: string } | { resumed: false; reason: string }> {
   // Cheap exits first.
