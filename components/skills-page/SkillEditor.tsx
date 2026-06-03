@@ -4,6 +4,7 @@ import { useEffect, useRef, useState } from 'react'
 import type { Skill } from '@/lib/client-api'
 import { Button } from '@/components/ui/Button'
 import { Input } from '@/components/ui/Input'
+import { Textarea } from '@/components/ui/Textarea'
 import { Spinner } from '@/components/ui/Spinner'
 
 export function SkillEditor({
@@ -139,9 +140,10 @@ export function SkillEditor({
 
       <div className="flex flex-col min-h-0">
         <label htmlFor="skill-content" className="block mb-1 text-sm font-medium text-text-primary">Prompt Content</label>
-        <textarea
+        <Textarea
           id="skill-content"
-          className="w-full px-3 py-2 text-sm bg-bg-tertiary border border-border rounded-md text-text-primary font-mono resize-y focus:outline-none focus:ring-2 focus:ring-accent/20 focus:border-accent transition-colors h-[60vh] min-h-[240px]"
+          appearance="muted"
+          className="h-[60vh] min-h-[240px]"
           value={content}
           onChange={(e) => setContent(e.target.value)}
           placeholder="The system prompt / instructions for this skill..."
