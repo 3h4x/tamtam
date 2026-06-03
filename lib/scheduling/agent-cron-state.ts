@@ -29,6 +29,9 @@ function getPool(): Pool | null {
   const connectionString = process.env.WORKFLOW_POSTGRES_URL ?? process.env.DATABASE_URL;
   if (!connectionString) return null;
   _pool = new Pool({ connectionString, max: 2, idleTimeoutMillis: 30_000 });
+  if (typeof _pool.on === 'function') {
+    _pool.on('error', (err) => console.error('[agent-cron-state] idle client error:', err));
+  }
   return _pool;
 }
 
