@@ -20,7 +20,9 @@
 // stray import can never reach production even if env propagation changes.
 
 // Intentionally points at a database/role that don't exist in normal dev/CI.
-export const SAFE_TEST_DATABASE_URL = 'postgres://tamtam_test@localhost:5432/tamtam_test';
+// Include a password so accidental real pg clients fail as ordinary connection
+// errors instead of pg's passwordless SCRAM client-side type error.
+export const SAFE_TEST_DATABASE_URL = 'postgres://tamtam_test:tamtam_test@localhost:5432/tamtam_test';
 
 // A URL is safe only if it targets a database whose name ends in `_test`.
 // Anything else — including the developer's live `…/tamtam` — is production.

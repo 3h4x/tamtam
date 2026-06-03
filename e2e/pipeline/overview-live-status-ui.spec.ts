@@ -83,9 +83,19 @@ async function stubOverviewRoutes(page: Page): Promise<void> {
     (route: Route) => route.fulfill({ json: { actions: [] } }),
   );
   await page.route(
-    `**/api/projects/by-project/${PROJECT}/issues/summary`,
+    `**/api/projects/by-project/${PROJECT}/issues?summary=1`,
     (route: Route) =>
-      route.fulfill({ json: { issueCount: 0, prCount: 0, openPrBranches: [] } }),
+      route.fulfill({
+        json: {
+          repo: '',
+          issueCount: 0,
+          prCount: 0,
+          openPrBranches: [],
+          error: null,
+          cached: true,
+          cachedAt: Date.now(),
+        },
+      }),
   );
   await page.route(
     `**/api/projects/by-project/${PROJECT}/branch`,

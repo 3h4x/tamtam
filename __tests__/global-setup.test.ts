@@ -31,9 +31,10 @@ describe('__tests__/global-setup.ts', () => {
     process.env.DATABASE_URL = 'postgres://example:password@localhost:5432/already_set';
 
     const { default: globalSetup } = await import('@/__tests__/global-setup');
+    const { SAFE_TEST_DATABASE_URL } = await import('@/__tests__/helpers/guard-database-url');
     globalSetup();
 
-    expect(process.env.DATABASE_URL).toBe('postgres://tamtam_test@localhost:5432/tamtam_test');
+    expect(process.env.DATABASE_URL).toBe(SAFE_TEST_DATABASE_URL);
   });
 
   it('preserves an ambient DATABASE_URL that already targets a _test database', async () => {

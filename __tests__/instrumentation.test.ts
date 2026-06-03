@@ -476,6 +476,59 @@ describe('instrumentation', () => {
   });
 
   describe('reapOrphanReleases()', () => {
+    let currentOrphanStorageMock: Record<string, unknown>;
+    let currentOrphanDbMock: Record<string, unknown>;
+    let currentOrphanShellMock: Record<string, unknown>;
+    let currentOrphanWorkflowMock: Record<string, unknown>;
+    let currentOrphanDrizzleMock: Record<string, unknown>;
+
+    beforeEach(() => {
+      currentOrphanStorageMock = {
+        listJobs: vi.fn(() => []),
+        getJob: vi.fn(() => null),
+        markDone: vi.fn().mockResolvedValue(undefined),
+        updateJob: vi.fn(),
+        reconcileStaleRelease: vi.fn().mockResolvedValue(undefined),
+      };
+      currentOrphanDbMock = {
+        db: {
+          select: vi.fn().mockReturnValue({
+            from: vi.fn().mockReturnValue({
+              where: vi.fn().mockReturnValue({
+                limit: vi.fn().mockReturnValue({
+                  then(onFulfilled: (rows: unknown[]) => unknown, onRejected?: (err: unknown) => unknown) {
+                    return Promise.resolve([]).then(onFulfilled, onRejected);
+                  },
+                }),
+              }),
+            }),
+          }),
+          delete: vi.fn().mockReturnValue({
+            where: vi.fn().mockReturnValue({ execute: vi.fn().mockResolvedValue(undefined) }),
+          }),
+        },
+        schema: { pipelineLocks: { project: 'project' } },
+      };
+      currentOrphanShellMock = {
+        exec: vi.fn().mockResolvedValue({ exitCode: 0, stdout: '', stderr: '' }),
+      };
+      currentOrphanWorkflowMock = {
+        safeStartOrchestrator: vi.fn().mockResolvedValue(true),
+      };
+      currentOrphanDrizzleMock = { eq: vi.fn((_a, b) => b) };
+
+      // Register one durable factory per dependency for this describe block.
+      // The factory reads the current holder at import time, so resetModules()
+      // cannot resurrect a stale mock or fall through to the real pg-backed DB
+      // when the slow Vitest fork pool is under CPU pressure.
+      vi.doMock('@/lib/jobs/job-storage', () => currentOrphanStorageMock);
+      vi.doMock('@/lib/jobs/storage', () => currentOrphanStorageMock);
+      vi.doMock('@/lib/db', () => currentOrphanDbMock);
+      vi.doMock('@/lib/shared/shell', () => currentOrphanShellMock);
+      vi.doMock('@/lib/workflows/safe-start-orchestrator', () => currentOrphanWorkflowMock);
+      vi.doMock('drizzle-orm', () => currentOrphanDrizzleMock);
+    });
+
     function mockOrphanReleaseDeps({
       jobs,
       lockRow = null,
@@ -537,31 +590,15 @@ describe('instrumentation', () => {
       };
 
       // reapOrphanReleases dynamically imports each dependency at call time.
-      // Under fork-pool CPU starvation the afterEach doUnmock → beforeEach
-      // resetModules → per-test doMock re-registration can race, leaving a
-      // *previous* test's storageMock active. That stale mock makes markDone
-      // resolve against a different vi.fn() than the one this test holds,
-      // surfacing as "expected markDone to be called … Number of calls: 0"
-      // even though production logged a successful reap. Explicitly clear both
-      // job-storage paths and reset the module registry before re-registering
-      // so residue can't survive into this test (mirrors mockJobStorageModule
-      // in the runProbeSweep block below).
-      vi.doUnmock('@/lib/jobs/job-storage');
-      vi.doUnmock('@/lib/jobs/storage');
-      vi.doUnmock('@/lib/db');
-      vi.doUnmock('@/lib/shared/shell');
-      vi.doUnmock('@/lib/workflows/safe-start-orchestrator');
-      vi.doUnmock('drizzle-orm');
+      // resetModules clears the import cache but preserves the durable
+      // doMock factories from this describe block; they read these current
+      // holders when instrumentation-node dynamically imports dependencies.
+      currentOrphanStorageMock = storageMock;
+      currentOrphanDbMock = { db: dbMock, schema: { pipelineLocks: { project: 'project' } } };
+      currentOrphanShellMock = { exec: execMock };
+      currentOrphanWorkflowMock = { safeStartOrchestrator: safeStartOrchestratorMock };
+      currentOrphanDrizzleMock = { eq: vi.fn((_a, b) => b) };
       vi.resetModules();
-      vi.doMock('@/lib/jobs/job-storage', () => storageMock);
-      // Also mock the non-barrel path so the barrel bypass doesn't fall through to real storage.ts
-      vi.doMock('@/lib/jobs/storage', () => storageMock);
-      vi.doMock('@/lib/db', () => ({ db: dbMock, schema: { pipelineLocks: { project: 'project' } } }));
-      vi.doMock('@/lib/shared/shell', () => ({ exec: execMock }));
-      vi.doMock('@/lib/workflows/safe-start-orchestrator', () => ({
-        safeStartOrchestrator: safeStartOrchestratorMock,
-      }));
-      vi.doMock('drizzle-orm', () => ({ eq: vi.fn((_a, b) => b) }));
 
       return { execMock, markDoneMock, updateJobMock, reconcileStaleReleaseMock, safeStartOrchestratorMock, deleteRun };
     }
