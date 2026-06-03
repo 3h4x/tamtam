@@ -86,6 +86,14 @@ export interface TamTamConfig {
    *  until success or the release wall-clock timeout). See
    *  `lib/pipeline/recovery-budget.ts` for the resolution logic. */
   fix_max_iterations: number;
+  /** Minimum cumulative working-tree LOC (added+removed) required before the
+   *  auto-release path fires. 0 disables the gate (current behavior). When
+   *  set, sub-threshold agent runs are reinforced (the agent is re-dispatched
+   *  to do more) instead of releasing. */
+  release_min_lines: number;
+  /** Max consecutive reinforce re-runs per project before releasing whatever
+   *  exists. 0 = unlimited (relies on the no-progress exit). */
+  release_reinforce_max_iterations: number;
   review_fix_backoff_seconds: number;
   review_do_not_ship_action: ReviewDoNotShipAction;
   release_wall_clock_timeout_minutes: number;
@@ -197,6 +205,8 @@ const DEFAULTS: TamTamConfig = {
   // wall-clock timeout instead; an honest green build is preferred over
   // a forced partial ship when the loops are making progress.
   fix_max_iterations: 0,
+  release_min_lines: 0,
+  release_reinforce_max_iterations: 3,
   // Base for exponential backoff between fix dispatches (review→fix and
   // push→fix). 30s base means iteration 4 waits 30s, iter 5 60s, iter 6 120s,
   // capped at MAX_BACKOFF_SECONDS in dispatch-phase.ts. Set to 0 to disable.
@@ -438,6 +448,11 @@ export function buildConfigFromSettingsMap(map: Record<string, string>): TamTamC
     review_verdict_rules: map.review_verdict_rules ?? DEFAULTS.review_verdict_rules,
     jobs_paused: map.jobs_paused === 'true',
     fix_max_iterations: parseNonNegativeIntOr(map.fix_max_iterations, DEFAULTS.fix_max_iterations),
+    release_min_lines: parseNonNegativeIntOr(map.release_min_lines, DEFAULTS.release_min_lines),
+    release_reinforce_max_iterations: parseNonNegativeIntOr(
+      map.release_reinforce_max_iterations,
+      DEFAULTS.release_reinforce_max_iterations,
+    ),
     review_fix_backoff_seconds: parseNonNegativeIntOr(map.review_fix_backoff_seconds, DEFAULTS.review_fix_backoff_seconds),
     review_do_not_ship_action: parseReviewDoNotShipAction(
       map.review_do_not_ship_action,
