@@ -1,6 +1,7 @@
 import { exec } from '@/lib/shared/shell';
 import { getVerdict, listJobs } from '@/lib/jobs/job-storage';
 import { isReviewed } from '@/lib/git/git-utils';
+import { getDefaultBranchSync } from '@/lib/git/git-branch';
 import type { JobData } from '@/lib/jobs/types';
 
 function isPrReviewJob(job: Pick<JobData, 'contextMeta'>): boolean {
@@ -58,7 +59,6 @@ export async function hasLocalCommitsAhead(projPath: string): Promise<boolean> {
   // push, so the release should proceed instead of returning a misleading
   // "Nothing to release".
   try {
-    const { getDefaultBranchSync } = await import('@/lib/git/git-branch');
     const defaultBranch = getDefaultBranchSync(projPath);
     if (!defaultBranch) return false;
     const aheadR = await exec(
