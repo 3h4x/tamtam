@@ -8,6 +8,7 @@ import { NotificationBell } from './NotificationBell'
 import { PrivacyToggle } from './PrivacyToggle'
 import { JobsPauseToggle } from './JobsPauseToggle'
 import { buttonVariants } from '@/components/ui/Button'
+import { Pill } from '@/components/ui/Pill'
 import { Spinner } from '@/components/ui/Spinner'
 import { fetchRecommendationsSummary } from '@/lib/client-api'
 import { useTheme } from '@/hooks/useTheme'
@@ -85,12 +86,14 @@ export function Header({ loading, lastRefresh: _lastRefresh }: HeaderProps) {
             >
               {item.label}
               {item.countKey && count > 0 && (
-                <span
-                  className="inline-flex items-center justify-center min-w-[1.25rem] px-1.5 rounded-full bg-accent/15 text-accent text-[10px] font-mono tabular-nums leading-4"
+                <Pill
+                  tone="accent"
+                  size="xs"
+                  className="min-w-[1.25rem] justify-center rounded-full border-transparent px-1.5 py-0 text-[10px] font-mono font-normal tabular-nums leading-4"
                   aria-label={`${count} open recommendation${count === 1 ? '' : 's'}`}
                 >
                   {count}
-                </span>
+                </Pill>
               )}
             </Link>
           )
