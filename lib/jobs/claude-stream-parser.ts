@@ -35,6 +35,8 @@ type ParsedLine = {
   terminal_reason?: string;
 };
 
+const TS_PREFIX_RE = /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d+)?(?:Z|[+-]\d{2}:?\d{2})?:\s/;
+
 export type ParsedEvent =
   | { type: 'text'; text: string }
   | { type: 'thinking'; text: string }
@@ -140,8 +142,6 @@ export function parseStreamLines(content: string, options: ParseOptions = {}): P
   // PM2 can be configured to prepend an ISO timestamp to every line
   // (PM2_LOG_DATE_FORMAT / pm2 set). Strip it so JSON.parse sees a valid object.
   // Example prefix: `2026-04-22T12:51:05: {...}` (note the `: ` separator).
-  const TS_PREFIX_RE = /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d+)?(?:Z|[+-]\d{2}:?\d{2})?:\s/;
-
   for (const line of content.split('\n')) {
     let trimmed = line.trim();
     if (!trimmed) continue;
