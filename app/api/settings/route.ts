@@ -243,6 +243,7 @@ const SETTING_KEYS = [
   'retrieval_reindex_interval_hours',
   'browser_broker_enabled',
   'browser_broker_image',
+  'browser_broker_mode',
   'tamtam_network_policy_strict',
   'orchestrator_enabled',
   'orchestrator_boost_margin_pct',
@@ -265,6 +266,9 @@ function serializeSettingValue(key: string, value: unknown): string {
   }
   if (key === 'browser_broker_image') {
     return normalizeBrowserBrokerImage(String(value));
+  }
+  if (key === 'browser_broker_mode') {
+    return String(value) === 'host' ? 'host' : 'docker';
   }
   if (key === 'cli_enabled_providers') {
     if (Array.isArray(value)) {

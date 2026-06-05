@@ -37,6 +37,17 @@ export async function runProbeSweep(): Promise<void> {
   } catch (err) {
     console.error('[probe-sweep] error:', err);
   }
+  // Heal zombie rows: jobs the in-memory cache already marked finished but whose
+  // `finished_at` DB write was dropped (DB unreachable at finalize). The probe
+  // above can't catch these — it only re-probes cache-running jobs — so a stale
+  // DB row would otherwise pin the durable agent-run slot and 409-block the
+  // agent forever. Runs every sweep + once at boot.
+  try {
+    const { reconcileFinishedDbRows } = await import('@/lib/jobs/finished-row-reconcile');
+    await reconcileFinishedDbRows();
+  } catch (err) {
+    console.error('[probe-sweep] finished-row reconcile error:', err);
+  }
   try {
     const jobStorage = await import('@/lib/jobs/job-storage');
     const { abortActiveRelease } = await import('@/lib/pipeline/release-abort');

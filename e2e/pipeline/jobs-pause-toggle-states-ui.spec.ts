@@ -197,4 +197,60 @@ test.describe('JobsPauseToggle chip states', () => {
     await expect(toggle).toHaveText('jobs paused', { timeout: 3_000 });
     await expect(toggle).toHaveAttribute('aria-checked', 'true');
   });
+
+  // -----------------------------------------------------------------------
+  // State 7: both rebuild_in_progress=true AND jobs_paused=true
+  //   rebuild_in_progress takes precedence — shows "rebuilding…", not "jobs paused"
+  // -----------------------------------------------------------------------
+  test('shows "rebuilding…" (not "jobs paused") when both flags are true', async ({ page }) => {
+    await stubShellRoutes(page, { rebuild_in_progress: 'true', jobs_paused: 'true' });
+
+    await page.goto('/workflow-runs');
+
+    const toggle = page.getByRole('switch');
+    await expect(toggle).toBeVisible({ timeout: 8_000 });
+    await expect(toggle).toHaveText(/rebuilding/i);
+    await expect(toggle).toBeDisabled();
+    // Spinner must be present (rebuild state, not manual-pause state)
+    await expect(toggle.locator('[role=status]')).toBeVisible();
+    // Title must be the rebuild message, not the manual-pause message
+    await expect(toggle).toHaveAttribute('title', /rebuild in progress/i);
+  });
+
+  // -----------------------------------------------------------------------
+  // State 8: rebuild clears (poll) but jobs_paused remains true →
+  //   chip transitions from "rebuilding…" to "jobs paused"
+  // -----------------------------------------------------------------------
+  test('transitions from "rebuilding…" to "jobs paused" when rebuild clears but pause stays', async ({ page }) => {
+    let rebuildInProgress = true;
+
+    await stubShellRoutes(page);
+    // Both flags start true; rebuild flips to false on demand
+    await page.route('**/api/settings', (route: Route) =>
+      route.fulfill({
+        json: {
+          settings: {
+            jobs_paused: 'true',
+            rebuild_in_progress: rebuildInProgress ? 'true' : 'false',
+          },
+          github_owner: '',
+        },
+      }),
+    );
+
+    await page.goto('/workflow-runs');
+
+    const toggle = page.getByRole('switch');
+    await expect(toggle).toBeVisible({ timeout: 8_000 });
+    await expect(toggle).toHaveText(/rebuilding/i);
+    await expect(toggle).toBeDisabled();
+
+    // Rebuild finishes but manual pause was also set — chip should switch to "jobs paused"
+    rebuildInProgress = false;
+
+    // Poll interval is 5s — wait up to 12s for the chip to update
+    await expect(toggle).toHaveText('jobs paused', { timeout: 12_000 });
+    await expect(toggle).toBeEnabled();
+    await expect(toggle).toHaveAttribute('aria-checked', 'true');
+  });
 });

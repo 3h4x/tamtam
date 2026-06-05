@@ -24,7 +24,8 @@ The sandbox itself is narrowed: only `127.0.0.1` egress, no docker socket, no ar
 | Key | Default | Effect |
 |---|---|---|
 | `browser_broker_enabled` | `false` | Master switch. Off = no broker, no MCP injection. |
-| `browser_broker_image` | `mcr.microsoft.com/playwright/mcp:v0.0.30` | Pin override (defense in depth: if upstream pushes a bad image, change here). The pinned MCP image starts from its preinstalled CLI; custom non-MCP images start `@playwright/mcp` through `npx`. |
+| `browser_broker_mode` | `docker` | `docker` runs the Playwright MCP in a sandboxed container; `host` spawns `@playwright/mcp` directly on the host (a detached, loopback-bound process group, killed via the process group on stop). Host mode avoids Docker VM memory pressure but **forgoes the container sandbox** — `tamtam_network_policy_strict` becomes the only isolation. Host mode skips the image pull and the `host.docker.internal` rewrite (the host reaches loopback directly). |
+| `browser_broker_image` | `mcr.microsoft.com/playwright/mcp:v0.0.30` | (docker mode) Pin override (defense in depth: if upstream pushes a bad image, change here). The pinned MCP image starts from its preinstalled CLI; custom non-MCP images start `@playwright/mcp` through `npx`. |
 | `tamtam_network_policy_strict` | `false` | When `true` on macOS: wraps the spawned CLI in `sandbox-exec -f scripts/sandbox-profiles/tamtam-loopback.sb`. Loopback-only egress, docker socket blocked. |
 
 `permission_mode=bypassPermissions` skips the sandbox wrap entirely — it's the explicit escape hatch for power users.

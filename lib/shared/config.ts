@@ -147,6 +147,10 @@ export interface TamTamConfig {
   project_sweep_enabled: boolean;
   browser_broker_enabled: boolean;
   browser_broker_image: string;
+  /** `docker` (default) runs the Playwright MCP browser in a sandboxed
+   *  container; `host` spawns it directly on the host. Host mode avoids
+   *  Docker memory pressure but forgoes the container sandbox. */
+  browser_broker_mode: 'docker' | 'host';
   tamtam_network_policy_strict: boolean;
   // --- Orchestrator (budget allocator) ---
   orchestrator_enabled: boolean;
@@ -265,6 +269,7 @@ const DEFAULTS: TamTamConfig = {
   project_sweep_enabled: false,
   browser_broker_enabled: false,
   browser_broker_image: DEFAULT_BROWSER_BROKER_IMAGE,
+  browser_broker_mode: 'docker',
   tamtam_network_policy_strict: false,
   // Off by default — needs explicit opt-in. When on, the orchestrator-tick
   // graphile task burns spare pace headroom by pushing bonus agent fires at
@@ -553,6 +558,7 @@ export function buildConfigFromSettingsMap(map: Record<string, string>): TamTamC
     project_sweep_enabled: map.project_sweep_enabled === 'true',
     browser_broker_enabled: map.browser_broker_enabled === 'true',
     browser_broker_image: normalizeBrowserBrokerImage(map.browser_broker_image),
+    browser_broker_mode: map.browser_broker_mode === 'host' ? 'host' : 'docker',
     tamtam_network_policy_strict: map.tamtam_network_policy_strict === 'true',
     orchestrator_enabled: map.orchestrator_enabled === 'true',
     orchestrator_boost_margin_pct: parseIntOr(

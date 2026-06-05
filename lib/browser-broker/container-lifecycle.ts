@@ -1,10 +1,19 @@
+import { spawn } from 'child_process';
+import { mkdirSync, openSync } from 'fs';
+import { tmpdir } from 'os';
+import { join } from 'path';
 import { exec as runShell } from '@/lib/shared/shell';
+import { getSettings } from '@/lib/shared/config';
 import { BROKER_IMAGE, BROKER_INTERNAL_PORT, BROKER_MCP_ENDPOINT_PATHS, BROKER_MCP_PACKAGE } from './image';
 import { allocatePort } from './port-allocator';
 
 interface BrokerHandle {
-  containerId: string;
-  containerName: string;
+  mode: 'docker' | 'host';
+  // Docker mode only.
+  containerId?: string;
+  containerName?: string;
+  // Host mode only.
+  pid?: number;
   hostPort: number;
   url: string;
   mcpUrl: string;
@@ -155,6 +164,89 @@ async function runContainer(hostPort: number, image: string): Promise<{ id: stri
   return { id: res.stdout.trim(), name };
 }
 
+function hostProcessAlive(pid: number): boolean {
+  try {
+    process.kill(pid, 0);
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+// Host mode: run the Playwright MCP server directly on the host instead of in
+// docker. Avoids Docker VM memory pressure, but forgoes the container sandbox
+// — the seatbelt wrap (`tamtam_network_policy_strict`) is the only remaining
+// isolation. The MCP binds to a loopback host port directly, so no internal
+// port mapping or `host.docker.internal` rewrite is needed.
+function spawnHostBroker(hostPort: number): number {
+  const logDir = join(/*turbopackIgnore: true*/ tmpdir(), 'tamtam-runs', 'browser-broker');
+  mkdirSync(/*turbopackIgnore: true*/ logDir, { recursive: true });
+  const logPath = join(/*turbopackIgnore: true*/ logDir, `host-${hostPort}.log`);
+  const logFd = openSync(/*turbopackIgnore: true*/ logPath, 'a');
+  const args = [
+    '-y', BROKER_MCP_PACKAGE,
+    '--port', String(hostPort),
+    '--host', '127.0.0.1',
+    '--browser', 'chromium',
+    '--headless',
+    '--isolated',
+  ];
+  const child = spawn('npx', args, {
+    detached: true,
+    stdio: ['ignore', logFd, logFd],
+  });
+  child.unref();
+  if (!child.pid) {
+    throw new Error('browser-broker: failed to spawn host Playwright MCP process');
+  }
+  return child.pid;
+}
+
+async function waitForHostHealth(url: string, pid: number, timeoutMs = HEALTH_PROBE_TIMEOUT_MS): Promise<string> {
+  const deadline = Date.now() + timeoutMs;
+  while (Date.now() < deadline) {
+    const mcpUrl = await probeBrokerHealth(url);
+    if (mcpUrl) return mcpUrl;
+    if (!hostProcessAlive(pid)) {
+      throw new Error(`browser-broker: host MCP process ${pid} exited before becoming healthy`);
+    }
+    await new Promise((r) => setTimeout(r, HEALTH_PROBE_INTERVAL_MS));
+  }
+  throw new Error(`browser-broker: host MCP health probe timed out after ${timeoutMs}ms`);
+}
+
+async function startHostBroker(healthTimeoutMs?: number): Promise<BrokerHandle> {
+  const hostPort = await allocatePort();
+  const pid = spawnHostBroker(hostPort);
+  const url = `http://127.0.0.1:${hostPort}`;
+  let mcpUrl: string;
+  try {
+    mcpUrl = await waitForHostHealth(url, pid, healthTimeoutMs);
+  } catch (err) {
+    try { process.kill(-pid, 'SIGKILL'); } catch { /* group may already be gone */ }
+    throw err;
+  }
+  return { mode: 'host', pid, hostPort, url, mcpUrl, startedAt: Date.now() };
+}
+
+async function startDockerBroker(image: string, healthTimeoutMs?: number): Promise<BrokerHandle> {
+  if (!(await dockerAvailable())) {
+    throw new Error('browser-broker: docker is not running or not accessible');
+  }
+  await pullImageIfNeeded(image);
+  const hostPort = await allocatePort();
+  const { id, name } = await runContainer(hostPort, image);
+  const url = `http://127.0.0.1:${hostPort}`;
+  let mcpUrl: string;
+  try {
+    mcpUrl = await waitForHealth(url, name, healthTimeoutMs);
+  } catch (err) {
+    await runShell('docker', ['rm', '-f', name], { timeout: 10_000 });
+    throw err;
+  }
+  return { mode: 'docker', containerId: id, containerName: name, hostPort, url, mcpUrl, startedAt: Date.now() };
+}
+
 export interface EnsureOptions {
   // Pass nothing in production; tests can override.
   image?: string;
@@ -177,29 +269,11 @@ export async function ensureBrokerRunning(_opts?: EnsureOptions): Promise<Broker
     return globalThis.__tamtamBrowserBrokerStarting;
   }
 
+  const mode = getSettings().browser_broker_mode === 'host' ? 'host' : 'docker';
   const starting = (async () => {
-    if (!(await dockerAvailable())) {
-      throw new Error('browser-broker: docker is not running or not accessible');
-    }
-    await pullImageIfNeeded(image);
-    const hostPort = await allocatePort();
-    const { id, name } = await runContainer(hostPort, image);
-    const url = `http://127.0.0.1:${hostPort}`;
-    let mcpUrl: string;
-    try {
-      mcpUrl = await waitForHealth(url, name, _opts?.healthTimeoutMs);
-    } catch (err) {
-      await runShell('docker', ['rm', '-f', name], { timeout: 10_000 });
-      throw err;
-    }
-    const handle: BrokerHandle = {
-      containerId: id,
-      containerName: name,
-      hostPort,
-      url,
-      mcpUrl,
-      startedAt: Date.now(),
-    };
+    const handle = mode === 'host'
+      ? await startHostBroker(_opts?.healthTimeoutMs)
+      : await startDockerBroker(image, _opts?.healthTimeoutMs);
     globalThis.__tamtamBrowserBroker = handle;
     installBrokerShutdownHook();
     return handle;
@@ -217,7 +291,16 @@ export async function stopBroker(): Promise<void> {
   const handle = globalThis.__tamtamBrowserBroker;
   if (!handle) return;
   globalThis.__tamtamBrowserBroker = undefined;
-  await runShell('docker', ['rm', '-f', handle.containerName], { timeout: 10_000 });
+  if (handle.mode === 'host') {
+    if (handle.pid) {
+      // Kill the whole process group (detached spawn) so chromium children die too.
+      try { process.kill(-handle.pid, 'SIGTERM'); } catch { /* already gone */ }
+    }
+    return;
+  }
+  if (handle.containerName) {
+    await runShell('docker', ['rm', '-f', handle.containerName], { timeout: 10_000 });
+  }
 }
 
 export function brokerEndpoint(): string | null {

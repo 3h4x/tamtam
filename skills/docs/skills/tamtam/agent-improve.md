@@ -1,8 +1,8 @@
 ---
 id: agent-improve
 name: agent:improve
-description: "Walks up to 5 oldest unaudited source files (oldest commit first), applies fixes by family rubric (F1–F4), continues scanning after small/F3/F4 fixes and stops after substantial F1/F2 ones, and records every audited file in a content-hash ledger so the queue advances without re-running on unchanged files."
-version: "2026-05-31"
+description: "Walks up to 5 oldest unaudited source files (oldest commit first), applies fixes by family rubric (F1–F4), flags credential/dead/oversized files (F5/F6) for humans, continues scanning after small/F3/F4 fixes and stops after substantial F1/F2 ones, and records every audited file in a content-hash ledger. When every file is audited at its current content the ledger rotates and the agent re-verifies from the oldest file again (prompt/model improve over time), so it never goes idle while source exists."
+version: "2026-06-05"
 agent:
   defaultSchedule: 12h
   defaultModel: normal
@@ -75,8 +75,10 @@ prerequisite: |
   # so a prior `clean` verdict is re-checked each pass rather than trusted forever.
   ROTATED=0
   if [ ! -s "$CAND" ] && [ -s "$LEDGER" ]; then
-    ts=$(date -u +%Y%m%dT%H%M%SZ)
-    mv "$LEDGER" "$LEDGER.$ts.pass" 2>/dev/null || true
+    # Roll the just-completed pass aside (single fixed name — never accumulates)
+    # so the last pass stays inspectable, then start the next pass with an empty
+    # ledger so every file re-surfaces oldest-first.
+    mv "$LEDGER" "$LEDGER.prev" 2>/dev/null || true
     : > "$LEDGER"
     pass=$(( $(cat "$PASSFILE" 2>/dev/null || echo 0) + 1 ))
     echo "$pass" > "$PASSFILE"
@@ -124,7 +126,7 @@ outputs:
   - "Audit-log rows appended to `.tamtam/cache/audits/improve.md`"
   - "0–3 source-file edits (small F3/F4 stack or one substantial F1/F2)"
   - "1 blob-SHA line per audited file appended to `.tamtam/cache/audits/improve-ledger.txt` (queue advancement; no content change)"
-  - "Sentinels: `IMPROVE_FILE_CLEAN`, `IMPROVE_QUEUE_ROTATED`, `IMPROVE_CREDENTIAL_LEAK`, `IMPROVE_FILE_DEAD_ORPHAN`, `IMPROVE_FILE_DUPLICATE`, `IMPROVE_STALE_PATH`"
+  - "Sentinels: `IMPROVE_FILE_CLEAN`, `IMPROVE_QUEUE_ROTATED`, `IMPROVE_CREDENTIAL_LEAK`, `IMPROVE_FILE_DEAD_ORPHAN`, `IMPROVE_FILE_DUPLICATE`, `IMPROVE_STALE_PATH`, `IMPROVE_FILE_TOO_LONG`"
 relatedAgents:
   - agent:docs-claude
   - agent:docs-generate
@@ -153,6 +155,7 @@ The candidate queue is the **5 oldest candidates** (oldest commit first) the pre
 - **Found a real instance in Families 1–4** → apply ONE fix to that file, verify per §5, then **record it in the ledger** (below). Whether you continue scanning the remaining candidates depends on whether the fix was *small* or *substantial* (see §3).
 - **Clean (no real instance)** → append one clean row to `.tamtam/cache/audits/improve.md`, **record it in the ledger**, and continue to the next candidate. Do NOT modify the file.
 - **Family-5 hit (credential leak / dead orphan / duplicate / stale path)** → emit the sentinel, append the human-action row to the audit log, **record it in the ledger**, and **continue to the next candidate**. Do NOT stop the walk: the ledger entry keeps the parked file out of the queue until a human resolves it (which changes its content). This is the key fix for the old deadlock where an un-editable oldest file was re-selected forever.
+- **Family-6 hit (oversized file)** → the candidate is marked `⚠ OVERSIZED` by the prerequisite (≥ the line threshold). Emit `IMPROVE_FILE_TOO_LONG <path> <lines>`, append the human-action row, **record it in the ledger**, and **continue**. Like Family-5, you do NOT perform the split yourself — safely carving a large file into focused modules is a supervised refactor, not a single surgical improve edit, and doing it blind risks breaking imports/behavior with only a type-check to catch it. Flagging surfaces it for a dedicated refactor. (You may still apply ONE genuine F1–F4 fix to an oversized file if you find one — oversize is an *additional* signal, not a reason to skip the rubric.)
 
 **Record in the ledger — mandatory on EVERY audited file, whatever the outcome (fix, clean, or Family-5 park):**
 
@@ -246,6 +249,18 @@ Archetypal instances:
 - **Duplicate route/module**: a sibling file implements the same behavior and IS consumed; this file isn't. Sentinel: `IMPROVE_FILE_DUPLICATE <path> superseded_by=<sibling-path>`.
 - **Stale path string**: `dotenv.config({ path: 'frontend/…' })`, `cd frontend && …`, `from '../../frontend/…'` where the named directory no longer exists (`[ -d <prefix> ]` returns false). The right fix depends on which post-refactor layout is canonical, so don't guess. Sentinel: `IMPROVE_STALE_PATH <path>:<line> "<offending-string>"`.
 
+### Family 6 — Oversized file (flag, record, and continue — do NOT split here)
+
+A file at or above the line threshold (`IMPROVE_OVERSIZE_LINES`, default 1000) is hard to hold in working context: the middle of a long file gets less attention than its head and tail, both for a reader and for a model, so bugs hide there and edits drift. Such a file should be broken into focused modules — but that is a **supervised refactor**, not a one-shot improve edit, so you flag it rather than splitting it.
+
+The prerequisite already tags oversized candidates with `⚠ OVERSIZED (>=N lines …)`. When you see one:
+- Emit `IMPROVE_FILE_TOO_LONG <path> <lines>`.
+- Append the human-action row to the audit log (`Family: F6: oversized`, `Change: <lines> lines — split into focused modules`).
+- Record it in the ledger like any audited file (so it stops re-surfacing until its content changes — e.g. after the split).
+- Continue the walk. Do NOT attempt the split: carving a large module touches many imports and call sites, and the improve run only verifies with `tsc` + one test file — not enough to land a multi-file refactor safely.
+
+This is a flag, never an auto-edit. A separate refactor pass (or a human) does the actual split. Counting against caps: a Family-6 flag is not a "fix" — it does not count toward the 3-fix cap, exactly like Family-5.
+
 ### Not in scope — these are NOT improvements
 
 If you find yourself about to do any of the following, stop and re-read the rubric:
@@ -320,13 +335,14 @@ Print a summary at the end of the run. Pick the shape that matches what happened
 - **Clean rotations** (0–4): paths that were walked, found clean, and recorded in the ledger before/between the fixes.
 - **Why the walk ended** (`substantial fix — stopped`, `3-fix cap reached`, `5-candidate cap reached`, `queue exhausted`).
 - **Verification** (type-check pass; for substantial fixes also test-file: N/N passing).
+- If this was a **re-verification pass**, say so and note whether the re-check confirmed prior verdicts or overturned one.
 
 **Shape B — all candidates clean:**
 - **Candidates rotated** (list each path you ledger-recorded + clean-logged, in walk order).
-- One line: "queue rotated forward — next run starts on a different file."
+- One line: "queue rotated forward — next run starts on a different file" (or, on a re-verification pass, "re-verification pass #N — prior verdicts re-confirmed").
 - Final sentinel: `IMPROVE_QUEUE_ROTATED <n>` where n is the number of files recorded as clean.
 
-Per-file sentinels are still emitted for the audit log: `IMPROVE_FILE_CLEAN <path>` for each clean walk; the Family-5 sentinels (`IMPROVE_CREDENTIAL_LEAK` / `IMPROVE_FILE_DEAD_ORPHAN` / `IMPROVE_FILE_DUPLICATE` / `IMPROVE_STALE_PATH`) for Family-5 hits.
+Per-file sentinels are still emitted for the audit log: `IMPROVE_FILE_CLEAN <path>` for each clean walk; the Family-5 sentinels (`IMPROVE_CREDENTIAL_LEAK` / `IMPROVE_FILE_DEAD_ORPHAN` / `IMPROVE_FILE_DUPLICATE` / `IMPROVE_STALE_PATH`) for Family-5 hits; `IMPROVE_FILE_TOO_LONG <path> <lines>` for Family-6 (oversized) hits.
 
 ## 7. Append to the audit log
 
@@ -360,6 +376,7 @@ Per-row rules:
 - **Small fix** (§3): `Family: F3/F4: <name> (small)`, `Change: <one sentence in present tense>`.
 - **Substantial fix** (§3): `Family: F1..F4: <name>`, `Change: <one sentence in present tense>`.
 - **Family-5 hit** (sentinel, no edit): `Family: F5: <sentinel name>`, `Change: <one sentence — the human-action item>`. Record it in the ledger like any other audited file (the SHA marker keeps it out of the queue until a human resolves it); do NOT edit the source file.
+- **Family-6 hit** (oversized, sentinel, no edit): `Family: F6: oversized`, `Change: <lines> lines — split into focused modules`. Record it in the ledger like any other audited file; do NOT split the file here.
 
 Both the audit log and the ledger live under `.tamtam/cache/` (gitignored), so they stay local to the machine running the agent and never dirty the repo.
 
@@ -370,6 +387,7 @@ Both the audit log and the ledger live under `.tamtam/cache/` (gitignored), so t
 - `IMPROVE_FILE_DEAD_ORPHAN <path>` — module only consumed by its own test; flag for human cleanup.
 - `IMPROVE_FILE_DUPLICATE <path> superseded_by=<sibling-path>` — sibling consumed instead; flag for human cleanup.
 - `IMPROVE_STALE_PATH <path>:<line> "<offending-string>"` — path string references a deleted directory.
+- `IMPROVE_FILE_TOO_LONG <path> <lines>` — file at/over the line threshold; flag for a supervised refactor (no split applied here).
 
 **Hard stop — do NOT do any of these:**
 - Run **mutating** `git` commands — no `add`, `commit`, `checkout`, `switch`, `reset`, `rm`, `stash`, `push`, `tag` (TamTam's release pipeline owns version control). Read-only git is allowed and required for selection/ledger: `git hash-object`, `git ls-files`, `git log` only.
