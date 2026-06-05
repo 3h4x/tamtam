@@ -256,4 +256,124 @@ test.describe('History stop action lifecycle', () => {
     await expect(row.getByLabel('running')).toHaveCount(0)
     await expect(row.getByText(/now: review/i)).toHaveCount(0)
   })
+
+  // -------------------------------------------------------------------------
+  // Stop failure path — DELETE returns non-OK; button shows "failed" briefly
+  // then resets to "Stop" while the running badge persists (job still running).
+  // -------------------------------------------------------------------------
+  test('Stop button shows "failed" label and running badge persists when DELETE returns 500', async ({
+    page,
+  }) => {
+    await stubHistoryShellRoutes(page)
+    await stubHistoryJobs(page, () => [
+      makeJob({
+        id: RUN_JOB_ID,
+        kind: 'run',
+        status: 'running',
+        exit_code: null,
+        prompt: 'Stop this ordinary run',
+        user_prompt: 'Stop this ordinary run',
+        work_summary: 'Still running after failed stop',
+        session_id: 'sess-history-stop-fail',
+      }),
+    ])
+    await page.route(`**/api/jobs/${RUN_JOB_ID}`, (route: Route) => {
+      if (route.request().method() === 'DELETE') {
+        route.fulfill({
+          status: 500,
+          json: { detail: 'Internal error stopping the job process' },
+        })
+        return
+      }
+      route.continue()
+    })
+
+    await page.goto(`/project/${PROJECT}/history`)
+
+    const row = runRow(page)
+    await expect(row).toBeVisible({ timeout: 8_000 })
+    await expect(row.getByLabel('running')).toBeVisible()
+
+    const stopBtn = row.getByRole('button', { name: 'Stop' })
+    await expect(stopBtn).toBeVisible()
+    await stopBtn.click()
+
+    // Stop button flips to "failed" and is disabled while the error state persists.
+    await expect(row.getByRole('button', { name: 'failed' })).toBeVisible({ timeout: 5_000 })
+    await expect(row.getByRole('button', { name: 'failed' })).toBeDisabled()
+
+    // Running badge must still be present — the job was not stopped.
+    await expect(row.getByLabel('running')).toBeVisible()
+
+    // After the reset timeout (~2.5 s) the button returns to "Stop".
+    await expect(row.getByRole('button', { name: 'Stop' })).toBeVisible({ timeout: 5_000 })
+    // Running badge must still be present after the button resets.
+    await expect(row.getByLabel('running')).toBeVisible()
+  })
+
+  // -------------------------------------------------------------------------
+  // Stop in-flight — "stopping" label + disabled while DELETE is pending;
+  // button resets to "Stop" after the request completes (success path but
+  // delayed, so we can observe the intermediate state).
+  // -------------------------------------------------------------------------
+  test('Stop button shows "stopping" and is disabled while the DELETE is in-flight', async ({
+    page,
+  }) => {
+    let resolveDELETE!: () => void
+    const deleteStarted = new Promise<void>((res) => { resolveDELETE = res })
+    let deleteCompleted = false
+
+    await stubHistoryShellRoutes(page)
+    await stubHistoryJobs(page, () => [
+      makeJob({
+        id: RUN_JOB_ID,
+        kind: 'run',
+        status: deleteCompleted ? 'done' : 'running',
+        exit_code: deleteCompleted ? -2 : null,
+        prompt: 'Stop this ordinary run',
+        user_prompt: 'Stop this ordinary run',
+        work_summary: deleteCompleted ? 'Cancelled by operator' : 'In-flight stop test',
+        session_id: 'sess-history-stop-inflight',
+      }),
+    ])
+
+    // Hold the DELETE in-flight until the test signals completion.
+    await page.route(`**/api/jobs/${RUN_JOB_ID}`, async (route: Route) => {
+      if (route.request().method() === 'DELETE') {
+        resolveDELETE()
+        // Await an external signal before resolving so the test can observe the
+        // intermediate UI state. The delete-started promise resolves when the
+        // handler is entered; we then wait for the test to advance via a short
+        // delay, then fulfill.
+        await new Promise<void>((res) => setTimeout(res, 600))
+        deleteCompleted = true
+        route.fulfill({ json: { status: 'cancelled' } })
+        return
+      }
+      route.continue()
+    })
+
+    await page.goto(`/project/${PROJECT}/history`)
+
+    const row = runRow(page)
+    await expect(row).toBeVisible({ timeout: 8_000 })
+    await expect(row.getByLabel('running')).toBeVisible()
+
+    const stopBtn = row.getByRole('button', { name: 'Stop' })
+    await expect(stopBtn).toBeEnabled()
+    await stopBtn.click()
+
+    // Wait until the DELETE handler is entered (the click was registered and
+    // the request left the browser) before asserting the in-flight state.
+    await deleteStarted
+
+    // While the request is pending the button label changes to "stopping"
+    // and the button is disabled so the user cannot double-click.
+    await expect(row.getByRole('button', { name: 'stopping' })).toBeVisible({ timeout: 3_000 })
+    await expect(row.getByRole('button', { name: 'stopping' })).toBeDisabled()
+
+    // After the DELETE resolves and the poll catches up, the badge clears.
+    await expect(row.getByText('cancelled', { exact: true })).toBeVisible({ timeout: 8_000 })
+    await expect(row.getByLabel('running')).toHaveCount(0, { timeout: 8_000 })
+  })
 })

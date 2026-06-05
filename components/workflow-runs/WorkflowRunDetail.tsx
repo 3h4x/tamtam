@@ -13,6 +13,7 @@ import { humanizeWorkflowLabel, humanizeEmbeddedNames } from '@/components/workf
 import { summarizeInput, summarizeTrigger } from '@/components/workflow-runs/summarize';
 import { ErrorState } from '@/components/ErrorState';
 import { buttonVariants } from '@/components/ui/Button';
+import { ErrorCallout } from '@/components/ui/ErrorCallout';
 import { Pill } from '@/components/ui/Pill';
 import { Spinner } from '@/components/ui/Spinner';
 import { Table, type Column } from '@/components/ui/Table';
@@ -189,9 +190,7 @@ function StepDiagnostics({
       </summary>
       <div className="mt-2 space-y-2">
         {error != null ? (
-          <div className="rounded border border-status-error/30 bg-status-error/10 p-2 whitespace-pre-wrap text-status-error">
-            {humanizeEmbeddedNames(error)}
-          </div>
+          <ErrorCallout>{humanizeEmbeddedNames(error)}</ErrorCallout>
         ) : null}
         {output != null ? (
           <pre className="overflow-x-auto rounded border border-border bg-bg-tertiary p-2 text-text-primary">
@@ -418,9 +417,7 @@ export function WorkflowRunDetail({ runId }: { runId: string }) {
           </div>
         </div>
         {data.run.error != null && (
-          <div className="mt-3 p-2 rounded border border-status-error/30 bg-status-error/10 text-status-error text-xs whitespace-pre-wrap">
-            {humanizeEmbeddedNames(data.run.error)}
-          </div>
+          <ErrorCallout className="mt-3 text-xs">{humanizeEmbeddedNames(data.run.error)}</ErrorCallout>
         )}
         {data.run.output != null && (
           <details className="mt-3 text-xs">
