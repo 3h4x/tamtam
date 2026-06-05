@@ -7,6 +7,7 @@ import {
   deriveIssueContextFromBranch,
   clearStaleIndexLock,
   processTableHasPotentialGitIndexOwner,
+  stageProjectChanges,
 } from '@/lib/pipeline/start-commit';
 
 describe('issueBranchName', () => {
@@ -102,6 +103,55 @@ describe('processTableHasPotentialGitIndexOwner', () => {
     const ps = '123 /usr/bin/git commit -m update';
 
     expect(processTableHasPotentialGitIndexOwner(ps, projPath, lockPath)).toBe(true);
+  });
+});
+
+describe('stageProjectChanges', () => {
+  it('stages tracked changes and explicit untracked files without broad add pathspecs', async () => {
+    const execStep = vi.fn()
+      .mockResolvedValueOnce({ exitCode: 0, stdout: '', stderr: '' })
+      .mockResolvedValueOnce({ exitCode: 0, stdout: 'src/new.ts\0.tamtam/cache/agent-memory/review.md\0', stderr: '' })
+      .mockResolvedValueOnce({ exitCode: 0, stdout: '', stderr: '' });
+    const log = vi.fn();
+
+    const result = await stageProjectChanges('/repo/project', execStep, log);
+
+    expect(result.exitCode).toBe(0);
+    expect(execStep).toHaveBeenCalledTimes(3);
+    expect(execStep).toHaveBeenNthCalledWith(
+      1,
+      'git',
+      ['-C', '/repo/project', 'add', '-u', '--', '.'],
+      { timeout: 10000 },
+    );
+    expect(execStep).toHaveBeenNthCalledWith(
+      2,
+      'git',
+      ['-C', '/repo/project', 'ls-files', '--others', '--exclude-standard', '-z'],
+      { timeout: 10000 },
+    );
+    expect(execStep).toHaveBeenNthCalledWith(
+      3,
+      'git',
+      ['-C', '/repo/project', 'add', '--', 'src/new.ts'],
+      { timeout: 10000 },
+    );
+    const args = execStep.mock.calls.flatMap(([, callArgs]) => callArgs as string[]);
+    expect(args).not.toContain('-A');
+    expect(args).not.toContain(':(exclude).tamtam/cache');
+    expect(args).not.toContain(':(exclude).tamtam/cache/**');
+    expect(args).not.toContain('.tamtam/cache/agent-memory/review.md');
+  });
+
+  it('does not run a second git add when only ignored or cache paths are untracked', async () => {
+    const execStep = vi.fn()
+      .mockResolvedValueOnce({ exitCode: 0, stdout: '', stderr: '' })
+      .mockResolvedValueOnce({ exitCode: 0, stdout: '.tamtam/cache/audits/improve.md\0', stderr: '' });
+
+    const result = await stageProjectChanges('/repo/project', execStep, vi.fn());
+
+    expect(result).toEqual({ exitCode: 0, stdout: '', stderr: '' });
+    expect(execStep).toHaveBeenCalledTimes(2);
   });
 });
 
@@ -306,7 +356,9 @@ describe('startProjectCommit', () => {
   it('runs git commit with process-tree cancellation enabled', async () => {
     checkCliStartGateMock.mockResolvedValue({ ok: true, provider: 'codex' });
     execMock
-      .mockResolvedValueOnce({ exitCode: 0, stdout: '', stderr: '' }) // git add -A
+      .mockResolvedValueOnce({ exitCode: 0, stdout: '', stderr: '' }) // git add -u
+      .mockResolvedValueOnce({ exitCode: 0, stdout: 'src/new.ts\0', stderr: '' }) // git ls-files --others
+      .mockResolvedValueOnce({ exitCode: 0, stdout: '', stderr: '' }) // git add -- src/new.ts
       .mockResolvedValueOnce({ exitCode: 0, stdout: 'M src/index.ts\n', stderr: '' }) // git diff --cached --name-status
       .mockResolvedValueOnce({ exitCode: 0, stdout: ' src/index.ts | 1 +\n', stderr: '' }) // git diff --stat
       .mockResolvedValueOnce({ exitCode: 0, stdout: 'diff --git a/src/index.ts b/src/index.ts\n', stderr: '' }) // git diff
@@ -324,10 +376,14 @@ describe('startProjectCommit', () => {
     const addCall = execMock.mock.calls.find(
       ([cmd, args]) => cmd === 'git' && Array.isArray(args) && args[0] === '-C' && args[2] === 'add',
     );
+    const addUntrackedCall = execMock.mock.calls.find(
+      ([cmd, args]) => cmd === 'git' && Array.isArray(args) && args[0] === '-C' && args[2] === 'add' && args.includes('src/new.ts'),
+    );
     const generatorCall = execMock.mock.calls.find(
       ([cmd, args]) => cmd === 'codex' && Array.isArray(args) && args.includes('--print'),
     );
-    expect(addCall?.[1]).toEqual(expect.arrayContaining([':(exclude).tamtam/cache/**']));
+    expect(addCall?.[1]).toEqual(['-C', '/path/to/proj', 'add', '-u', '--', '.']);
+    expect(addUntrackedCall?.[1]).toEqual(['-C', '/path/to/proj', 'add', '--', 'src/new.ts']);
     expect(generatorCall?.[1]).toEqual(expect.arrayContaining(['--permission-mode', 'acceptEdits']));
     expect(commitCall?.[2]).toMatchObject({
       timeout: 30000,
@@ -338,10 +394,35 @@ describe('startProjectCommit', () => {
     expect(markDoneMock).toHaveBeenCalledWith(createJobMock.mock.results[0].value, 0);
   });
 
+  it('does not pass ignored .tamtam cache paths to git add', async () => {
+    checkCliStartGateMock.mockResolvedValue({ ok: true, provider: 'codex' });
+    execMock
+      .mockResolvedValueOnce({ exitCode: 0, stdout: '', stderr: '' }) // git add -u
+      .mockResolvedValueOnce({ exitCode: 0, stdout: 'src/new.ts\0.tamtam/cache/agent-memory/review.md\0', stderr: '' }) // git ls-files --others
+      .mockResolvedValueOnce({ exitCode: 0, stdout: '', stderr: '' }) // git add -- src/new.ts
+      .mockResolvedValueOnce({ exitCode: 0, stdout: 'A src/new.ts\n', stderr: '' }) // git diff --cached --name-status
+      .mockResolvedValueOnce({ exitCode: 0, stdout: ' src/new.ts | 1 +\n', stderr: '' }) // git diff --stat
+      .mockResolvedValueOnce({ exitCode: 0, stdout: 'diff --git a/src/new.ts b/src/new.ts\n', stderr: '' }) // git diff
+      .mockResolvedValueOnce({ exitCode: 0, stdout: 'feat: add new file\n', stderr: '' }) // codex
+      .mockResolvedValueOnce({ exitCode: 0, stdout: '[main abc123] feat: add new file\n', stderr: '' }) // git commit
+      .mockResolvedValueOnce({ exitCode: 0, stdout: 'abc123\n', stderr: '' }); // git rev-parse
+
+    const { startProjectCommit } = await import('@/lib/pipeline/start-commit');
+    const result = await startProjectCommit('proj');
+
+    expect(result.ok).toBe(true);
+    const addCalls = execMock.mock.calls
+      .filter(([cmd, args]) => cmd === 'git' && Array.isArray(args) && args[2] === 'add')
+      .map(([, args]) => args);
+    expect(addCalls).toContainEqual(['-C', '/path/to/proj', 'add', '-u', '--', '.']);
+    expect(addCalls).toContainEqual(['-C', '/path/to/proj', 'add', '--', 'src/new.ts']);
+    expect(addCalls.flat()).not.toContain('.tamtam/cache/agent-memory/review.md');
+  });
+
   it('records a default-dirty recovery marker when staging fails on the default branch', async () => {
     checkCliStartGateMock.mockResolvedValue({ ok: true, provider: 'codex' });
     execMock
-      .mockResolvedValueOnce({ exitCode: 1, stdout: '', stderr: 'fatal: unable to add file' }) // git add -A
+      .mockResolvedValueOnce({ exitCode: 1, stdout: '', stderr: 'fatal: unable to add file' }) // git add -u
       .mockResolvedValueOnce({ exitCode: 0, stdout: 'main\n', stderr: '' }) // branch --show-current
       .mockResolvedValueOnce({ exitCode: 0, stdout: 'refs/remotes/origin/main\n', stderr: '' }) // origin HEAD
       .mockResolvedValueOnce({ exitCode: 0, stdout: ' M src/index.ts\n', stderr: '' }); // status

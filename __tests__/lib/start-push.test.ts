@@ -12,6 +12,7 @@ const mocks = vi.hoisted(() => {
   const markDoneMock = vi.fn();
   const updateJobMock = vi.fn();
   const generateCommitMessageMock = vi.fn();
+  const stageProjectChangesMock = vi.fn();
   const findIssueContextMock = vi.fn();
   const detectMainBranchMock = vi.fn();
   const issueBranchNameMock = vi.fn();
@@ -32,7 +33,7 @@ const mocks = vi.hoisted(() => {
   const pauseProjectMock = vi.fn();
   return {
     execMock, setProjectPushResultMock, createJobMock, markDoneMock,
-    updateJobMock, generateCommitMessageMock, findIssueContextMock,
+    updateJobMock, generateCommitMessageMock, stageProjectChangesMock, findIssueContextMock,
     detectMainBranchMock, issueBranchNameMock, deriveIssueContextFromBranchMock,
     checkCliStartGateMock, getProjectTestConfigMock, getLockMock,
     acquireLockMock, isLockOwnedByActiveReleaseMock, getJobMock, listJobsMock,
@@ -71,6 +72,7 @@ vi.mock('@/lib/pipeline/pipeline-lock', () => ({
 }));
 vi.mock('@/lib/pipeline/start-commit', () => ({
   generateCommitMessage: mocks.generateCommitMessageMock,
+  stageProjectChanges: mocks.stageProjectChangesMock,
   findIssueContext: mocks.findIssueContextMock,
   detectMainBranch: mocks.detectMainBranchMock,
   issueBranchName: mocks.issueBranchNameMock,
@@ -126,6 +128,15 @@ function resetSharedMocks() {
   mocks.createJobMock.mockImplementation(defaultCreateJob);
   mocks.markDoneMock.mockResolvedValue(undefined);
   mocks.generateCommitMessageMock.mockResolvedValue('feat: test');
+  mocks.stageProjectChangesMock.mockImplementation(async (projPath, execStep) => {
+    const trackedR = await execStep('git', ['-C', projPath, 'add', '-u', '--', '.'], { timeout: 10000 });
+    if (trackedR.exitCode !== 0) return trackedR;
+    const untrackedR = await execStep('git', ['-C', projPath, 'ls-files', '--others', '--exclude-standard', '-z'], { timeout: 10000 });
+    if (untrackedR.exitCode !== 0) return untrackedR;
+    const untracked = String(untrackedR.stdout || '').split('\0').filter(Boolean).filter(path => path !== '.tamtam/cache' && !path.startsWith('.tamtam/cache/'));
+    if (untracked.length === 0) return { exitCode: 0, stdout: '', stderr: '' };
+    return execStep('git', ['-C', projPath, 'add', '--', ...untracked], { timeout: 10000 });
+  });
   mocks.checkCliStartGateMock.mockResolvedValue({ ok: true, provider: 'claude' });
   mocks.getProjectTestConfigMock.mockReturnValue(null);
   mocks.getLockMock.mockReturnValue(null);
@@ -319,6 +330,7 @@ describe('startProjectPush — push result tracking', () => {
       .mockImplementationOnce(() => resp(1, '', 'hook failed'))
       .mockImplementationOnce(() => resp(0, ' M lint.ts\n'))
       .mockImplementationOnce(() => resp(0))
+      .mockImplementationOnce(() => resp(0, ''))
       .mockImplementationOnce(() => resp(0, '[master abc123] feat: test\n'))
       .mockImplementationOnce(() => resp(0))
       .mockImplementationOnce(() => resp(0, 'abc1234'));
@@ -474,7 +486,8 @@ describe('startProjectPush — push result tracking', () => {
       .mockImplementationOnce(() => resp(0, '# branch.head master\n# branch.ab +0 -0\n')) // behind check
       .mockImplementationOnce(() => resp(1, '', 'pre-push hook: lint failed'))   // git push (pre-push hook fails)
       .mockImplementationOnce(() => resp(0, 'M\t.lint-cache\n'))                 // git status --porcelain (hook left changes)
-      .mockImplementationOnce(() => resp(0))                                     // git add -A (stage hook changes)
+      .mockImplementationOnce(() => resp(0))                                     // git add -u (stage tracked hook changes)
+      .mockImplementationOnce(() => resp(0, ''))                                 // git ls-files --others
       .mockImplementationOnce(() => resp(0))                                     // git commit (fix commit)
       .mockImplementationOnce(() => resp(0))                                     // git push (retry — succeeds)
       .mockImplementationOnce(() => resp(0, 'def5678'));                         // git rev-parse
@@ -486,6 +499,11 @@ describe('startProjectPush — push result tracking', () => {
       ([cmd, args]: any) => cmd === 'git' && args.includes('commit') && args.includes('chore: apply lint fixes')
     );
     expect(fixCommit).toBeTruthy();
+    const addCalls = execMock.mock.calls
+      .filter(([cmd, args]: any) => cmd === 'git' && args.includes('add'))
+      .map(([, args]: any) => args);
+    expect(addCalls).toContainEqual(['-C', '/path/to/proj', 'add', '-u', '--', '.']);
+    expect(addCalls.flat()).not.toContain('-A');
   });
 
   it('does not throw when setProjectPushResult throws', async () => {

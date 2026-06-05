@@ -13,7 +13,7 @@ import {
   throwIfJobCancelled,
 } from '@/lib/jobs/cancellation';
 import { getLock, acquireLock, isLockOwnedByActiveRelease } from './pipeline-lock';
-import { generateCommitMessage, findIssueContext, deriveIssueContextFromBranch } from './start-commit';
+import { generateCommitMessage, findIssueContext, deriveIssueContextFromBranch, stageProjectChanges } from './start-commit';
 import { checkCliStartGate } from '@/lib/usage/resolve-provider';
 import { createGenericPR, createIssuePR } from './pr-create';
 import { decidePrContext } from './pr-context';
@@ -757,7 +757,11 @@ async function runPush(
     const hookHasChanges = !!hookChangesR.stdout.trim();
     if (hookHasChanges) {
       log(`\n# pre-push hook left new changes — committing delta\n`);
-      await execStep('git', ['-C', projPath, 'add', '-A'], { timeout: 10000 });
+      const stageR = await stageProjectChanges(projPath, execStep, log);
+      if (stageR.exitCode !== 0) {
+        const detail = (stageR.stderr.trim() || stageR.stdout.trim() || `git add exited ${stageR.exitCode}`).slice(0, 2000);
+        return { ok: false, status: 500, detail: `Stage failed after pre-push hook changes: ${detail}` };
+      }
       const fixMsg = await generateCommitMessage(projPath, projectName, provider, signal);
       log(`# fix commit message: ${fixMsg}\n\n$ git commit -m "${fixMsg}"\n`);
       const fixCommitR = await execStep('git', ['-C', projPath, 'commit', '-m', fixMsg], { timeout: 30000 });

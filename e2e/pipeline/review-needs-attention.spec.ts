@@ -69,7 +69,7 @@ test.describe('Review needs-attention pipeline', () => {
 
     // Verify git calls: commit and push each once.
     const calls = readShimCalls(PROJECT);
-    assertGitCallOnce(calls, 'add', 'add -A');
+    expect(calls.some(c => c.args.includes('add') && c.args.includes('-u')), 'git add -u call').toBe(true);
     assertGitCallOnce(calls, 'commit', 'commit');
     assertGitCallOnce(calls, 'push', 'push');
 

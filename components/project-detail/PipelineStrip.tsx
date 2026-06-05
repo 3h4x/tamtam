@@ -291,9 +291,11 @@ export function PipelineStrip({
           const canRetryPush = !!traceReleaseId && job.kind === 'push' && state === 'failed'
           return (
             <span key={job.id} className="inline-flex items-center gap-1">
-              <button
+              <Button
                 type="button"
-                className={`inline-flex min-h-[36px] items-center gap-2 rounded-md border px-2.5 py-1.5 text-[11px] transition-colors hover:brightness-110 ${stateClass(state)}`}
+                variant="ghost"
+                size="sm"
+                className={`min-h-[36px] gap-2 rounded-md px-2.5 py-1.5 text-[11px] hover:brightness-110 ${stateClass(state)}`}
                 onClick={() => openJob(job)}
                 aria-label={`${label}: ${state}. ${hint}`}
                 title={hint}
@@ -301,7 +303,7 @@ export function PipelineStrip({
                 {state === 'running' ? <Spinner size="sm" shrink /> : <span className="text-[10px]">{state === 'done' ? '✓' : '!'}</span>}
                 <span className="font-medium text-text-primary">{label}</span>
                 <span className="font-mono text-[9px] uppercase tracking-[0.12em]">{state}</span>
-              </button>
+              </Button>
               {canRetryPush && (
                 <Button
                   type="button"

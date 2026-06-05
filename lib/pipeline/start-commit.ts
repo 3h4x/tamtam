@@ -368,6 +368,40 @@ export async function clearStaleIndexLock(
   }
 }
 
+function splitNulPaths(stdout: string): string[] {
+  return stdout.split('\0').filter(Boolean);
+}
+
+function isTamtamCachePath(path: string): boolean {
+  return path === '.tamtam/cache' || path.startsWith('.tamtam/cache/');
+}
+
+export async function stageProjectChanges(
+  projPath: string,
+  execStep: typeof exec,
+  log: (s: string) => void,
+): Promise<{ exitCode: number; stdout: string; stderr: string }> {
+  log(`\n$ git add -u -- .\n`);
+  const trackedR = await execStep('git', ['-C', projPath, 'add', '-u', '--', '.'], { timeout: 10000 });
+  if (trackedR.stdout) log(trackedR.stdout);
+  if (trackedR.stderr) log(trackedR.stderr);
+  if (trackedR.exitCode !== 0) return trackedR;
+
+  log(`\n$ git ls-files --others --exclude-standard -z\n`);
+  const untrackedR = await execStep('git', ['-C', projPath, 'ls-files', '--others', '--exclude-standard', '-z'], { timeout: 10000 });
+  if (untrackedR.stderr) log(untrackedR.stderr);
+  if (untrackedR.exitCode !== 0) return untrackedR;
+
+  const untracked = splitNulPaths(untrackedR.stdout).filter(path => !isTamtamCachePath(path));
+  if (untracked.length === 0) return { exitCode: 0, stdout: '', stderr: '' };
+
+  log(`\n$ git add -- ${untracked.map(p => JSON.stringify(p)).join(' ')}\n`);
+  const addR = await execStep('git', ['-C', projPath, 'add', '--', ...untracked], { timeout: 10000 });
+  if (addR.stdout) log(addR.stdout);
+  if (addR.stderr) log(addR.stderr);
+  return addR;
+}
+
 async function runCommit(
   projectName: string,
   projPath: string,
@@ -463,7 +497,7 @@ async function runCommit(
   // Stage all changes including new (untracked) files. Keep TamTam's local
   // scratch cache out even if a project's ignore rule is missing or stale.
   //
-  // `git add -A` can transiently fail when another git process holds
+  // Git staging can transiently fail when another git process holds
   // `.git/index.lock` (a prior step's pre-push hook, a concurrent
   // worktree status check, an IDE indexing pass). When that happens the
   // command exits non-zero and stages nothing — but the original code
@@ -475,11 +509,7 @@ async function runCommit(
   // Remove a stale lock left by a previously crashed/killed git before staging,
   // so a single dead lock doesn't permanently brick this project's commits.
   await clearStaleIndexLock(projPath, log);
-  const addArgs = ['-C', projPath, 'add', '-A', '--', '.', ':(exclude).tamtam/cache', ':(exclude).tamtam/cache/**'];
-  log(`\n$ git add -A -- . ':(exclude).tamtam/cache' ':(exclude).tamtam/cache/**'\n`);
-  let addR = await execStep('git', addArgs, { timeout: 10000 });
-  if (addR.stdout) log(addR.stdout);
-  if (addR.stderr) log(addR.stderr);
+  let addR = await stageProjectChanges(projPath, execStep, log);
   if (addR.exitCode !== 0 && /index\.lock|unable to create.*lock/i.test(addR.stderr)) {
     for (let attempt = 1; attempt <= 6 && addR.exitCode !== 0; attempt++) {
       log(`\n# index.lock held by another git process — retry ${attempt}/6 in ${attempt}s\n`);
@@ -487,9 +517,7 @@ async function runCommit(
       // After waiting, retry the conservative stale-lock cleanup; it only
       // unlinks old locks that have no path-specific git process.
       await clearStaleIndexLock(projPath, log);
-      addR = await execStep('git', addArgs, { timeout: 10000 });
-      if (addR.stdout) log(addR.stdout);
-      if (addR.stderr) log(addR.stderr);
+      addR = await stageProjectChanges(projPath, execStep, log);
     }
   }
   if (addR.exitCode !== 0) {
@@ -513,7 +541,11 @@ async function runCommit(
       const hookChangesR = await execStep('git', ['-C', projPath, 'status', '--porcelain'], { timeout: 5000 });
       if (hookChangesR.stdout.trim()) {
         log(`\n# pre-commit hook modified files — staging and retrying commit\n`);
-        await execStep('git', addArgs, { timeout: 10000 });
+        const hookStageR = await stageProjectChanges(projPath, execStep, log);
+        if (hookStageR.exitCode !== 0) {
+          const detail = (hookStageR.stderr.trim() || hookStageR.stdout.trim() || `git add exited ${hookStageR.exitCode}`).slice(0, 2000);
+          return { ok: false, status: 500, detail: `Stage failed after pre-commit hook changes: ${detail}` };
+        }
         commitR = await execStep('git', ['-C', projPath, 'commit', '-m', message], { timeout: 30000 });
         if (commitR.stdout) log(commitR.stdout);
         if (commitR.stderr) log(commitR.stderr);

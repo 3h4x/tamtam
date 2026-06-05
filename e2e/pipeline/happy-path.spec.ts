@@ -46,8 +46,8 @@ test.describe('Happy-path pipeline', () => {
     // Verify that git shim recorded the expected calls.
     const calls = readShimCalls(PROJECT);
 
-    // git add -A must have been called exactly once.
-    assertGitCallOnce(calls, 'add', 'add -A');
+    // Commit staging updates tracked paths, then stages unignored untracked paths.
+    expect(calls.some(c => c.args.includes('add') && c.args.includes('-u')), 'git add -u call').toBe(true);
 
     // git commit -m <msg> must have been called exactly once.
     const commitCalls = calls.filter(c => c.args.includes('commit'));
