@@ -107,13 +107,16 @@ function finishedSessionJob(exitCode: number, detail?: string) {
 }
 
 function jobsForProject(
-  phase: 'running' | 'success' | 'failure',
+  phase: 'running' | 'success' | 'failure' | 'cancelled',
 ): Array<ReturnType<typeof previousSessionJob> | ReturnType<typeof runningSessionJob> | ReturnType<typeof finishedSessionJob>> {
   if (phase === 'running') {
     return [previousSessionJob(), runningSessionJob()]
   }
   if (phase === 'success') {
     return [previousSessionJob(), finishedSessionJob(0)]
+  }
+  if (phase === 'cancelled') {
+    return [previousSessionJob(), finishedSessionJob(-2)]
   }
   return [previousSessionJob(), finishedSessionJob(2, 'Mock provider failed after the final pass')]
 }
@@ -312,7 +315,7 @@ test.describe('Mocked ordinary run dual-surface lifecycle', () => {
   test('history clears its spinner when the run fails and terminal shows the provider detail', async ({
     page,
   }) => {
-    let phase: 'running' | 'success' | 'failure' = 'running'
+    let phase: 'running' | 'success' | 'failure' | 'cancelled' = 'running'
     let finishStream!: () => void
     const streamDone = new Promise<void>((resolve) => {
       finishStream = resolve
@@ -385,5 +388,84 @@ test.describe('Mocked ordinary run dual-surface lifecycle', () => {
 
     await expect(runRow.getByText('exit 2').first()).toBeVisible({ timeout: 12_000 })
     await expect(runRow.getByLabel('running')).toHaveCount(0, { timeout: 12_000 })
+  })
+
+  test('history and terminal both clear the live spinner when the run is cancelled', async ({
+    page,
+  }) => {
+    let phase: 'running' | 'success' | 'failure' | 'cancelled' = 'running'
+    let finishStream!: () => void
+    const streamDone = new Promise<void>((resolve) => {
+      finishStream = resolve
+    })
+
+    await stubSharedRoutes(page.context(), () => jobsForProject(phase))
+    await page.context().route(`**/api/jobs/${PREVIOUS_JOB_ID}`, (route: Route) =>
+      route.fulfill({
+        json: {
+          ...previousSessionJob(),
+          log: 'Earlier terminal output is restored.\n',
+        },
+      }),
+    )
+    await page.context().route(`**/api/jobs/${CURRENT_JOB_ID}`, (route: Route) =>
+      route.fulfill({
+        json: phase === 'running'
+          ? runningSessionJob()
+          : {
+              ...finishedSessionJob(-2),
+              log: 'Final streamed output stopped before the session completed.\n',
+            },
+      }),
+    )
+    await page.context().route(`**/api/streaming/${CURRENT_JOB_ID}`, async (route: Route) => {
+      await streamDone
+      await route.fulfill({
+        status: 200,
+        headers: {
+          'content-type': 'text/event-stream',
+          'cache-control': 'no-cache',
+        },
+        body: [
+          'data: Final streamed output stopped before the session completed.',
+          '',
+          'event: done',
+          `data: ${JSON.stringify({
+            exitCode: -2,
+            sessionId: SESSION_ID,
+            provider: 'claude',
+            duration: 700,
+          })}`,
+          '',
+        ].join('\n'),
+      })
+    })
+
+    const { historyPage, terminalPage } = await openDualSurfacePages(page)
+
+    const runRow = historyPage.getByRole('button')
+      .filter({ hasText: 'Streaming on the terminal while history polls.' })
+      .first()
+
+    await expect(runRow).toBeVisible({ timeout: 8_000 })
+    await expect(runRow.getByLabel('running')).toBeVisible({ timeout: 8_000 })
+    await expect(terminalPage.getByText('live run')).toBeVisible({ timeout: 8_000 })
+
+    phase = 'cancelled'
+    finishStream()
+
+    await expect(
+      terminalPage.getByText('Final streamed output stopped before the session completed.'),
+    ).toBeVisible({ timeout: 8_000 })
+    await expect(terminalPage.getByText('cancelled', { exact: true }).first()).toBeVisible({
+      timeout: 8_000,
+    })
+    await expect(terminalPage.getByText('live run')).toHaveCount(0, { timeout: 8_000 })
+
+    await expect(runRow.getByText('cancelled', { exact: true }).first()).toBeVisible({
+      timeout: 12_000,
+    })
+    await expect(runRow.getByLabel('running')).toHaveCount(0, { timeout: 12_000 })
+    await expect(historyPage.getByText('1 running')).toHaveCount(0, { timeout: 12_000 })
   })
 })

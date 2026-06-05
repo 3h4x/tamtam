@@ -300,6 +300,14 @@ export function ProjectRunsTab({ projectName, jobsPaused = false }: ProjectRunsT
 
   useEffect(() => {
     let active = true
+    let timer: ReturnType<typeof setTimeout> | null = null
+    const scheduleNext = () => {
+      if (!active) return
+      const hasRunningJob = jobsRef.current.some((job) => job.status === 'running')
+      timer = setTimeout(() => {
+        void loadCounts()
+      }, hasRunningJob ? ACTIVE_POLL_MS : IDLE_POLL_MS)
+    }
     const loadCounts = async () => {
       try {
         const res = await fetch(`/api/jobs/counts?project=${encodeURIComponent(projectName)}`)
@@ -307,10 +315,15 @@ export function ProjectRunsTab({ projectName, jobsPaused = false }: ProjectRunsT
         const data = parseJobCountsResponse(await res.json())
         if (active) setSummary(data)
       } catch {}
+      finally {
+        scheduleNext()
+      }
     }
-    loadCounts()
-    const interval = setInterval(loadCounts, 15000)
-    return () => { active = false; clearInterval(interval) }
+    void loadCounts()
+    return () => {
+      active = false
+      if (timer) clearTimeout(timer)
+    }
   }, [projectName])
 
   const hasMore = totalJobs > jobs.length
