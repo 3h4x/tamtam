@@ -120,8 +120,6 @@ function LogRow({ entry, color }: { entry: { ts: string; stream: Record<string, 
 }
 
 export function InfraTab({ data, window_ }: { data: MonitoringData; window_: TimeWindow }) {
-  // Single-pass partition — previously filtered the same array twice with
-  // opposite predicates, allocating two intermediate arrays per render.
   const downServices: typeof data.prometheus.services = []
   const upServices: typeof data.prometheus.services = []
   for (const s of data.prometheus.services) {
