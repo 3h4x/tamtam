@@ -17,6 +17,9 @@ interface SearchFieldProps {
   wrapperClassName?: string
   leadingGlyph?: React.ReactNode
   clearLabel?: string
+  showClearButton?: boolean
+  inputRef?: React.Ref<HTMLInputElement>
+  onKeyDown?: React.KeyboardEventHandler<HTMLInputElement>
 }
 
 export function SearchField({
@@ -27,14 +30,19 @@ export function SearchField({
   wrapperClassName,
   leadingGlyph,
   clearLabel = 'Clear search',
+  showClearButton = true,
+  inputRef,
+  onKeyDown,
 }: SearchFieldProps) {
   return (
     <div className={wrapperClassName ? `relative ${wrapperClassName}` : 'relative'}>
       <input
+        ref={inputRef}
         type="text"
         value={value}
         onChange={(e) => onChange(e.target.value)}
         placeholder={placeholder}
+        onKeyDown={onKeyDown}
         className={inputClassName}
       />
       {leadingGlyph ? (
@@ -45,7 +53,7 @@ export function SearchField({
           {leadingGlyph}
         </span>
       ) : null}
-      {value ? (
+      {showClearButton && value ? (
         <Button
           type="button"
           onClick={() => onChange('')}

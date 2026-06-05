@@ -6,6 +6,7 @@ import type { SkillItem, DocItem } from '@/lib/terminal/terminal-session-store'
 import { MODEL_TIERS, MODEL_LABELS, MODEL_DESCRIPTIONS, type ModelTier } from '@/lib/agents/model-aliases'
 import { dispatchSettingsChanged } from '@/lib/shared/settings-events'
 import { CLI_PROVIDERS, type CliProvider } from '@/lib/usage/cli-providers'
+import { SearchField } from '@/components/ui/SearchField'
 import { ToolbarDropdown, type ToolbarDropdownOption } from './ToolbarDropdown'
 
 const PROVIDER_LABELS: Record<CliProvider, string> = {
@@ -180,13 +181,13 @@ export function TerminalToolbar({
                 </button>
                 {showSkillPicker && (
                   <div className="absolute top-full right-0 mt-1 w-96 bg-bg-secondary border border-border rounded-lg shadow-lg z-50 overflow-hidden whitespace-normal">
-                    <input
-                      ref={skillSearchRef}
-                      type="text"
-                      className="focus-ring w-full px-3 py-2.5 text-sm bg-bg-primary border-b border-border text-text-primary outline-none placeholder:text-text-tertiary/40 font-mono"
+                    <SearchField
+                      inputRef={skillSearchRef}
+                      inputClassName="focus-ring w-full px-3 py-2.5 text-sm bg-bg-primary border-b border-border text-text-primary outline-none placeholder:text-text-tertiary/40 font-mono"
                       value={skillSearch}
-                      onChange={(e) => onSkillSearchChange(e.target.value)}
+                      onChange={onSkillSearchChange}
                       placeholder="search skills..."
+                      showClearButton={false}
                       onKeyDown={(e) => {
                         if (e.key === 'Escape') { onToggleSkillPicker(); onSkillSearchChange('') }
                         if (e.key === 'Enter' && filteredItems.length > 0) onToggleItem(filteredItems[0])
@@ -250,13 +251,13 @@ export function TerminalToolbar({
                 </button>
                 {showDocsPicker && (
                   <div className="absolute top-full right-0 mt-1 w-72 bg-bg-secondary border border-border rounded-lg shadow-lg z-50 overflow-hidden whitespace-normal">
-                    <input
-                      ref={docsSearchRef}
-                      type="text"
-                      className="focus-ring w-full px-3 py-2.5 text-sm bg-bg-primary border-b border-border text-text-primary outline-none placeholder:text-text-tertiary/40 font-mono"
+                    <SearchField
+                      inputRef={docsSearchRef}
+                      inputClassName="focus-ring w-full px-3 py-2.5 text-sm bg-bg-primary border-b border-border text-text-primary outline-none placeholder:text-text-tertiary/40 font-mono"
                       value={docsSearch}
-                      onChange={(e) => onDocsSearchChange(e.target.value)}
+                      onChange={onDocsSearchChange}
                       placeholder="search docs..."
+                      showClearButton={false}
                       onKeyDown={(e) => {
                         if (e.key === 'Escape') { onToggleDocsPicker(); onDocsSearchChange('') }
                         if (e.key === 'Enter' && filteredDocs.length > 0) onToggleDoc(filteredDocs[0])
