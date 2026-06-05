@@ -14,15 +14,33 @@ const FAILURE_SCENARIO = JSON.parse(
 );
 
 const PROJECT = 'review-failure';
+const DEFAULT_DO_NOT_SHIP_ACTION = 'fix';
 
 test.describe('Real failed release lifecycle surfaces', () => {
   test.beforeEach(async ({ request }) => {
     writeScenario(PROJECT, FAILURE_SCENARIO.steps);
     resetShimState(PROJECT);
     await enableProject(request, PROJECT, { testsDisabled: true });
+    const patch = await request.patch('/api/settings', {
+      data: { review_do_not_ship_action: 'abort' },
+    });
+    expect(
+      patch.ok(),
+      `failed to set review_do_not_ship_action: ${patch.status()}`,
+    ).toBe(true);
   });
 
-  test('release trace flips from running to failed and exposes the review findings without reload', async ({
+  test.afterEach(async ({ request }) => {
+    const patch = await request.patch('/api/settings', {
+      data: { review_do_not_ship_action: DEFAULT_DO_NOT_SHIP_ACTION },
+    });
+    expect(
+      patch.ok(),
+      `failed to restore review_do_not_ship_action: ${patch.status()}`,
+    ).toBe(true);
+  });
+
+  test('release trace flips from running to cancelled and exposes the review findings without reload', async ({
     page,
     request,
   }) => {
@@ -50,7 +68,7 @@ test.describe('Real failed release lifecycle surfaces', () => {
     expect(result.status, 'pipeline should finish').toBe('done');
     expect(result.releaseJob?.['exit_code'], 'release should fail with non-zero exit').not.toBe(0);
 
-    await expect(page.getByText('failed').first()).toBeVisible({ timeout: 15_000 });
+    await expect(page.getByText('cancelled').first()).toBeVisible({ timeout: 15_000 });
     await expect(page.getByText('DO NOT SHIP').first()).toBeVisible({ timeout: 15_000 });
     await expect(page.getByText('running', { exact: true })).not.toBeVisible({
       timeout: 15_000,
@@ -103,5 +121,8 @@ test.describe('Real failed release lifecycle surfaces', () => {
       timeout: 15_000,
     });
     await expect(page.getByText(/DO NOT SHIP/).first()).toBeVisible({ timeout: 8_000 });
+    await expect(page.getByText(/critical security vulnerabilities/i)).toBeVisible({
+      timeout: 8_000,
+    });
   });
 });
