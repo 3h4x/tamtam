@@ -134,6 +134,38 @@ function finishedReleaseJob(
   }
 }
 
+function finishedReleaseChildJob(
+  overrides: Partial<{
+    id: string
+    kind: string
+    status: 'done' | 'running' | 'aborted'
+    exit_code: number | null
+    started_at: number
+    finished_at: number | null
+    session_id: string | null
+    work_summary: string | null
+  }> = {},
+) {
+  return {
+    id: 'mock-release-child-1',
+    project: PROJECT,
+    kind: 'fix',
+    status: 'done',
+    exit_code: 1,
+    started_at: now() - 3,
+    finished_at: now() - 1,
+    pid: 0,
+    log_path: '',
+    seen: true,
+    session_id: 'mock-release-child-session-1',
+    parent_job_id: RELEASE_JOB_ID,
+    context_meta: null,
+    provider: 'claude',
+    work_summary: 'Release child failed.',
+    ...overrides,
+  }
+}
+
 function runningTerminalRunJob() {
   return {
     id: RUN_JOB_ID,
@@ -819,6 +851,221 @@ test.describe('Mocked terminal lifecycle UI', () => {
 
     await expect(releaseRow.getByLabel('done')).toBeVisible({ timeout: 12_000 })
     await expect(releaseRow.getByLabel('running')).toHaveCount(0, { timeout: 12_000 })
+    await expect(historyPage.getByText('No runs yet')).toHaveCount(0)
+  })
+
+  test('history list and terminal landing page stay in sync across a mocked release failure', async ({
+    page,
+  }) => {
+    let phase: 'idle' | 'running' | 'failed' = 'idle'
+    let finishStream!: () => void
+    const streamDone = new Promise<void>((resolve) => {
+      finishStream = resolve
+    })
+
+    const historyPage = await page.context().newPage()
+    const jobsForProject = () => {
+      if (phase === 'running') return [runningReleaseJob()]
+      if (phase === 'failed') {
+        const failedChild = finishedReleaseChildJob({
+          id: 'mock-release-push-failed',
+          kind: 'fix',
+          exit_code: 2,
+          work_summary: 'Release failed while both surfaces were open.',
+        })
+        return [
+          finishedReleaseJob(
+            2,
+            'Release output failed on both surfaces.\n',
+            'Release failed while both surfaces were open.',
+          ),
+          failedChild,
+        ]
+      }
+      return []
+    }
+
+    await stubProjectShell(page, jobsForProject)
+    await stubProjectShell(historyPage, jobsForProject)
+    await page.route(`**/api/jobs/${RELEASE_JOB_ID}`, (route: Route) =>
+      route.fulfill({
+        json:
+          phase === 'running'
+            ? runningReleaseJob()
+            : finishedReleaseJob(
+                2,
+                'Release output failed on both surfaces.\n',
+                'Release failed while both surfaces were open.',
+              ),
+      }),
+    )
+    await page.route(`**/api/streaming/${RELEASE_JOB_ID}`, async (route: Route) => {
+      await streamDone
+      await route.fulfill({
+        status: 200,
+        headers: {
+          'content-type': 'text/event-stream',
+          'cache-control': 'no-cache',
+        },
+        body: [
+          'data: Release output failed on both surfaces.',
+          '',
+          'event: done',
+          `data: ${JSON.stringify({
+            exitCode: 2,
+            provider: 'claude',
+            detail: 'Release failed while both surfaces were open.',
+            duration: 1500,
+          })}`,
+          '',
+        ].join('\n'),
+      })
+    })
+
+    await Promise.all([
+      page.goto(`/project/${PROJECT}/terminal`),
+      historyPage.goto(`/project/${PROJECT}/history`),
+    ])
+
+    await expect(page.getByRole('button', { name: 'new' })).toBeVisible({ timeout: 8_000 })
+    await expect(page.getByText('live run')).toHaveCount(0)
+    await expect(historyPage.getByText('No runs yet')).toBeVisible({ timeout: 8_000 })
+
+    phase = 'running'
+
+    const releaseRow = historyPage.getByRole('button').filter({ hasText: 'Release pipeline' }).first()
+    await expect(releaseRow).toBeVisible({ timeout: 12_000 })
+    await expect(releaseRow.getByLabel('running')).toBeVisible({ timeout: 12_000 })
+
+    await expect(page).toHaveURL(
+      new RegExp(`/project/${PROJECT}/terminal\\?job=${encodeURIComponent(RELEASE_JOB_ID)}`),
+      { timeout: 12_000 },
+    )
+    await expect(page.getByText('live run')).toBeVisible({ timeout: 8_000 })
+
+    phase = 'failed'
+    finishStream()
+
+    await expect(page.getByText('Release output failed on both surfaces.')).toBeVisible({
+      timeout: 8_000,
+    })
+    await expect(page.getByText('exit 2').first()).toBeVisible({ timeout: 8_000 })
+    await expect(page.getByText('Release failed while both surfaces were open.')).toBeVisible({
+      timeout: 8_000,
+    })
+    await expect(page.getByText('live run')).toHaveCount(0, { timeout: 8_000 })
+
+    await expect(releaseRow.getByLabel('running')).toHaveCount(0, { timeout: 12_000 })
+    await expect(releaseRow.getByText('release failed', { exact: true })).toBeVisible({
+      timeout: 12_000,
+    })
+    await expect(historyPage.getByText('No runs yet')).toHaveCount(0)
+  })
+
+  test('history list and terminal landing page stay in sync across a mocked release cancellation', async ({
+    page,
+  }) => {
+    let phase: 'idle' | 'running' | 'cancelled' = 'idle'
+    let finishStream!: () => void
+    const streamDone = new Promise<void>((resolve) => {
+      finishStream = resolve
+    })
+
+    const historyPage = await page.context().newPage()
+    const jobsForProject = () => {
+      if (phase === 'running') return [runningReleaseJob()]
+      if (phase === 'cancelled') {
+        const cancelledChild = finishedReleaseChildJob({
+          id: 'mock-release-review-cancelled',
+          kind: 'fix',
+          status: 'aborted',
+          exit_code: -3,
+          work_summary: 'Release output was cancelled on both surfaces.',
+        })
+        return [
+          finishedReleaseJob(
+            -3,
+            'Release output was cancelled on both surfaces.\n',
+            undefined,
+            { status: 'aborted' },
+          ),
+          cancelledChild,
+        ]
+      }
+      return []
+    }
+
+    await stubProjectShell(page, jobsForProject)
+    await stubProjectShell(historyPage, jobsForProject)
+    await page.route(`**/api/jobs/${RELEASE_JOB_ID}`, (route: Route) =>
+      route.fulfill({
+        json:
+          phase === 'running'
+            ? runningReleaseJob()
+            : finishedReleaseJob(
+                -3,
+                'Release output was cancelled on both surfaces.\n',
+                undefined,
+                { status: 'aborted' },
+              ),
+      }),
+    )
+    await page.route(`**/api/streaming/${RELEASE_JOB_ID}`, async (route: Route) => {
+      await streamDone
+      await route.fulfill({
+        status: 200,
+        headers: {
+          'content-type': 'text/event-stream',
+          'cache-control': 'no-cache',
+        },
+        body: [
+          'data: Release output was cancelled on both surfaces.',
+          '',
+          'event: done',
+          `data: ${JSON.stringify({
+            exitCode: -3,
+            provider: 'claude',
+            duration: 1200,
+          })}`,
+          '',
+        ].join('\n'),
+      })
+    })
+
+    await Promise.all([
+      page.goto(`/project/${PROJECT}/terminal`),
+      historyPage.goto(`/project/${PROJECT}/history`),
+    ])
+
+    await expect(page.getByRole('button', { name: 'new' })).toBeVisible({ timeout: 8_000 })
+    await expect(page.getByText('live run')).toHaveCount(0)
+    await expect(historyPage.getByText('No runs yet')).toBeVisible({ timeout: 8_000 })
+
+    phase = 'running'
+
+    const releaseRow = historyPage.getByRole('button').filter({ hasText: 'Release pipeline' }).first()
+    await expect(releaseRow).toBeVisible({ timeout: 12_000 })
+    await expect(releaseRow.getByLabel('running')).toBeVisible({ timeout: 12_000 })
+
+    await expect(page).toHaveURL(
+      new RegExp(`/project/${PROJECT}/terminal\\?job=${encodeURIComponent(RELEASE_JOB_ID)}`),
+      { timeout: 12_000 },
+    )
+    await expect(page.getByText('live run')).toBeVisible({ timeout: 8_000 })
+
+    phase = 'cancelled'
+    finishStream()
+
+    await expect(page.getByText('Release output was cancelled on both surfaces.')).toBeVisible({
+      timeout: 8_000,
+    })
+    await expect(page.getByText('cancelled', { exact: true }).first()).toBeVisible({
+      timeout: 8_000,
+    })
+    await expect(page.getByText('live run')).toHaveCount(0, { timeout: 8_000 })
+
+    await expect(releaseRow.getByLabel('running')).toHaveCount(0, { timeout: 12_000 })
+    await expect(releaseRow.getByText('cancelled').first()).toBeVisible({ timeout: 12_000 })
     await expect(historyPage.getByText('No runs yet')).toHaveCount(0)
   })
 })
