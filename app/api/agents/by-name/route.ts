@@ -183,9 +183,7 @@ export async function PATCH(request: NextRequest) {
           : writeFileAgent(projPath, projectName, nextName, fileUpdates);
         // Operational config (enabled / schedule / model / skillIds) is owned by
         // the DB override, NOT the committed .md — the frontmatter doesn't even
-        // carry `enabled`. Persist it here so in-place edits stick: previously
-        // the override was only written on rename, so enabling or rescheduling a
-        // file agent by name WITHOUT a rename was silently dropped. On rename,
+        // carry `enabled`. Persist it here so in-place edits stick. On rename,
         // seed the new name from the old override first so unspecified
         // operational fields carry over, then layer the requested changes.
         if (
