@@ -74,6 +74,11 @@ export async function pruneOldWorkflowRuns(opts: PruneOptions): Promise<Workflow
   summary.cutoffIso = new Date(cutoffMs).toISOString();
 
   const pool = new Pool({ connectionString: url, max: 2 });
+  // Guard `.on` so test doubles that only stub `connect`/`end` don't trip on a
+  // missing listener API.
+  if (typeof pool.on === 'function') {
+    pool.on('error', (e) => console.error('[workflow-retention] idle client error', e));
+  }
   try {
     const client = await pool.connect();
     try {
