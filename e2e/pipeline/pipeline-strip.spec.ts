@@ -509,6 +509,70 @@ function releasePartialDodJobs(): MockJob[] {
   ]
 }
 
+function releaseSoakRunningJobs(): MockJob[] {
+  const releaseId = 'strip-soak-release'
+  const base = (id: string, kind: string, startOffset: number, endOffset: number | null, extra: Partial<MockJob> = {}): MockJob => ({
+    id,
+    project: PROJECT,
+    kind,
+    status: endOffset !== null ? 'done' : 'running',
+    exit_code: endOffset !== null ? 0 : null,
+    started_at: now() - startOffset,
+    finished_at: endOffset !== null ? now() - endOffset : null,
+    pid: 0,
+    log_path: '',
+    seen: true,
+    session_id: null,
+    release_id: releaseId,
+    context_meta: null,
+    provider: 'claude',
+    work_summary: '',
+    ...extra,
+  })
+  return [
+    { ...base(releaseId, 'release', 120, null), release_id: null },
+    base('strip-soak-test', 'test', 110, 100),
+    { ...base('strip-soak-review', 'review', 90, 80), verdict: 'LGTM', session_id: 'strip-soak-review-session' },
+    base('strip-soak-commit', 'commit', 70, 60),
+    base('strip-soak-push', 'push', 50, 40),
+    base('strip-soak-dod', 'mark-dod', 35, 25),
+    base('strip-soak-pr-wait', 'pr-wait', 20, 10),
+    { ...base('strip-soak-soak', 'soak', 5, null), session_id: 'strip-soak-soak-session' },
+  ]
+}
+
+function releaseSoakFailedJobs(): MockJob[] {
+  const releaseId = 'strip-soak-fail-release'
+  const base = (id: string, kind: string, startOffset: number, endOffset: number | null, exitCode = 0, extra: Partial<MockJob> = {}): MockJob => ({
+    id,
+    project: PROJECT,
+    kind,
+    status: endOffset !== null ? 'done' : 'running',
+    exit_code: endOffset !== null ? exitCode : null,
+    started_at: now() - startOffset,
+    finished_at: endOffset !== null ? now() - endOffset : null,
+    pid: 0,
+    log_path: '',
+    seen: true,
+    session_id: null,
+    release_id: releaseId,
+    context_meta: null,
+    provider: 'claude',
+    work_summary: '',
+    ...extra,
+  })
+  return [
+    { ...base(releaseId, 'release', 120, null), release_id: null },
+    base('strip-soak-fail-test', 'test', 110, 100),
+    { ...base('strip-soak-fail-review', 'review', 90, 80, 0), verdict: 'LGTM', session_id: 'strip-soak-fail-review-session' },
+    base('strip-soak-fail-commit', 'commit', 70, 60),
+    base('strip-soak-fail-push', 'push', 50, 40),
+    base('strip-soak-fail-dod', 'mark-dod', 35, 25),
+    base('strip-soak-fail-pr-wait', 'pr-wait', 20, 10),
+    base('strip-soak-fail-soak', 'soak', 5, 1, 1),
+  ]
+}
+
 async function mockProjectShell(
   page: Page,
   jobs: MockJob[] | (() => MockJob[]) = releaseBackedJobs(),
@@ -1183,5 +1247,27 @@ test.describe('PipelineStrip visibility', () => {
     await expect(page.getByTitle('DoD: 2 / 3 verified — 1 unticked — click to view log')).toBeVisible()
     await expect(page.getByLabel(/dod: attention/i)).toBeVisible()
     await expect(page.getByTitle('waiting for CI checks and auto-merge — click to open terminal')).toBeVisible()
+  })
+
+  test('terminal tab shows soak phase running with CI-watching hint', async ({ page }) => {
+    await mockProjectShell(page, releaseSoakRunningJobs())
+    await page.goto(`/project/${PROJECT}/terminal`)
+
+    await expect(page.getByLabel(/pipeline summary: soak running/i)).toBeVisible({ timeout: 8_000 })
+    await expect(page.getByTitle('watching default-branch CI on the merge commit — click to open terminal')).toBeVisible()
+    await expect(page.getByLabel(/soak: running\./i)).toBeVisible()
+    await expect(page.getByTitle('View unified release trace')).toBeVisible()
+    await expect(page.getByRole('button', { name: 'abort' })).toBeVisible()
+  })
+
+  test('terminal tab shows soak phase failed state', async ({ page }) => {
+    await mockProjectShell(page, releaseSoakFailedJobs())
+    await page.goto(`/project/${PROJECT}/terminal`)
+
+    await expect(page.getByLabel(/pipeline summary: soak failed/i)).toBeVisible({ timeout: 8_000 })
+    await expect(page.getByLabel(/soak: failed\./i)).toBeVisible()
+    await expect(page.getByTitle('soak failed — click to view log')).toBeVisible()
+    await expect(page.getByTitle('View unified release trace')).toBeVisible()
+    await expect(page.getByRole('button', { name: 'abort' })).toBeVisible()
   })
 })
