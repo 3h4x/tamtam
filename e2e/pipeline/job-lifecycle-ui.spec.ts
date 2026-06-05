@@ -765,4 +765,73 @@ test.describe('Job lifecycle UI badges', () => {
     await expect(page.getByText('1 running now')).toHaveCount(0, { timeout: 12_000 });
     await expect(page.getByText('active work')).toHaveCount(0, { timeout: 12_000 });
   });
+
+  // -------------------------------------------------------------------------
+  // History tab — two concurrent jobs hold independent state
+  // Both a test and a review job run at once; when the test job fails the
+  // review job must keep its running badge (no cross-row contamination), then
+  // each row settles to its own terminal outcome.
+  // -------------------------------------------------------------------------
+  test('history tab keeps two concurrent jobs independent as each settles via poll', async ({
+    page,
+  }) => {
+    let phase: 'both-running' | 'test-failed' | 'all-done' = 'both-running';
+    await mockJobScenario(page, () => {
+      const testRunning = phase === 'both-running';
+      const reviewRunning = phase !== 'all-done';
+
+      return [
+        makeJob({
+          id: 'job-concurrent-test',
+          kind: 'test',
+          status: testRunning ? 'running' : 'done',
+          exit_code: testRunning ? null : 1,
+          started_at: now() - 40,
+          finished_at: testRunning ? null : now() - 6,
+          session_id: 'sess-concurrent-test',
+        }),
+        makeJob({
+          id: 'job-concurrent-review',
+          kind: 'review',
+          status: reviewRunning ? 'running' : 'done',
+          exit_code: reviewRunning ? null : 0,
+          started_at: now() - 35,
+          finished_at: reviewRunning ? null : now() - 3,
+          verdict: reviewRunning ? undefined : 'LGTM',
+          session_id: 'sess-concurrent-review',
+        }),
+      ];
+    });
+
+    await page.goto(`/project/${PROJECT}/history`);
+
+    const testRow = page.getByRole('button')
+      .filter({ hasText: 'test' })
+      .filter({ hasText: 'started' })
+      .first();
+    const reviewRow = page.getByRole('button')
+      .filter({ hasText: 'review' })
+      .filter({ hasText: 'started' })
+      .first();
+
+    // Both jobs start out running, each with its own running badge.
+    await expect(testRow.getByLabel('running')).toBeVisible();
+    await expect(reviewRow.getByLabel('running')).toBeVisible();
+
+    // The test job fails while review keeps running — the review row must not
+    // pick up the failure state.
+    phase = 'test-failed';
+
+    await expect(testRow.getByText('exit 1', { exact: true })).toBeVisible({ timeout: 12_000 });
+    await expect(testRow.getByLabel('running')).toHaveCount(0, { timeout: 12_000 });
+    await expect(reviewRow.getByLabel('running')).toBeVisible();
+    await expect(reviewRow.getByText('exit 1')).toHaveCount(0);
+
+    // Review then completes with its own LGTM verdict; the test row stays failed.
+    phase = 'all-done';
+
+    await expect(reviewRow.getByText('✓ LGTM')).toBeVisible({ timeout: 12_000 });
+    await expect(reviewRow.getByLabel('running')).toHaveCount(0, { timeout: 12_000 });
+    await expect(testRow.getByText('exit 1', { exact: true })).toBeVisible();
+  });
 });

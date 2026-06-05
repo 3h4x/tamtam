@@ -1,8 +1,9 @@
 'use client'
 
-import { useState, useEffect, useRef } from 'react'
+import { useState, useEffect, useRef, useCallback } from 'react'
 import Link from 'next/link'
 import { useRouter } from 'next/navigation'
+import { usePolling } from '@/hooks/usePolling'
 import { fetchNotifications, markNotificationsSeen, markJobSeen } from '@/lib/client-api'
 import type { JobInfo } from '@/lib/client-api'
 import { jobIsFinished } from '@/lib/client/job-status'
@@ -108,36 +109,32 @@ export function NotificationBell() {
   const [open, setOpen] = useState(false)
   const dropdownRef = useRef<HTMLDivElement>(null)
 
-  useEffect(() => {
-    const poll = async () => {
-      try {
-        const notifs = await fetchNotifications()
-        setUnseenCount(notifs.count)
+  // Throws on failure so usePolling backs off instead of hammering a wedged
+  // backend every 5s — a Postgres restart once piled up overlapping in-flight
+  // requests into a thundering herd. State stays untouched on error.
+  const poll = useCallback(async () => {
+    const notifs = await fetchNotifications()
+    setUnseenCount(notifs.count)
 
-        // Sky view: one running entry per project (highest-priority kind wins).
-        // KIND_PRIORITY + kindPriority hoisted to module level — they don't
-        // change between polls.
-        const runningByProject = new Map<string, JobInfo>()
-        for (const j of (notifs.runningJobs ?? [])) {
-          const existing = runningByProject.get(j.project)
-          if (!existing || kindPriority(j.kind) > kindPriority(existing.kind)) {
-            runningByProject.set(j.project, j)
-          }
-        }
-        setRunningJobs([...runningByProject.values()])
-
-        // Sky view: one finished entry per project. Prefer the newest
-        // actionable attention item over a newer green remediation step so an
-        // unsuperseded failure stays visible until a terminal success clears it.
-        setFinishedJobs(collapseFinishedJobs(notifs.jobs))
-      } catch {
-        // ignore
+    // Sky view: one running entry per project (highest-priority kind wins).
+    // KIND_PRIORITY + kindPriority hoisted to module level — they don't
+    // change between polls.
+    const runningByProject = new Map<string, JobInfo>()
+    for (const j of (notifs.runningJobs ?? [])) {
+      const existing = runningByProject.get(j.project)
+      if (!existing || kindPriority(j.kind) > kindPriority(existing.kind)) {
+        runningByProject.set(j.project, j)
       }
     }
-    poll()
-    const id = setInterval(poll, 5000)
-    return () => clearInterval(id)
+    setRunningJobs([...runningByProject.values()])
+
+    // Sky view: one finished entry per project. Prefer the newest
+    // actionable attention item over a newer green remediation step so an
+    // unsuperseded failure stays visible until a terminal success clears it.
+    setFinishedJobs(collapseFinishedJobs(notifs.jobs))
   }, [])
+
+  usePolling(poll, { intervalMs: 5000 })
 
   useEffect(() => {
     if (!open) return

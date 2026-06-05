@@ -1,6 +1,7 @@
 'use client'
 
 import { useCallback, useEffect, useState } from 'react'
+import { usePolling } from '@/hooks/usePolling'
 import { Button } from '@/components/ui/Button'
 import { InlineLoading } from '@/components/ui/InlineLoading'
 import { errMsg } from '@/lib/shared/types'
@@ -31,48 +32,40 @@ export function JobsPauseToggle() {
   const [autoThrottle, setAutoThrottle] = useState<SchedulerThrottle | null>(null)
   const [quotaRefreshSeq, setQuotaRefreshSeq] = useState(0)
 
+  const applySettings = useCallback((
+    settings: Record<string, string | undefined>,
+    { merge }: { merge: boolean },
+  ) => {
+    if (!merge || 'jobs_paused' in settings) {
+      setJobsPaused(settings.jobs_paused === 'true')
+    }
+    if (!merge || 'rebuild_in_progress' in settings) {
+      setRebuildInProgress(settings.rebuild_in_progress === 'true')
+    }
+    if (!merge || 'budget_block_runs_enabled' in settings) {
+      const enabled = settings.budget_block_runs_enabled === 'true'
+      setBudgetGateEnabled(enabled)
+      if (!enabled) setAutoThrottle(null)
+    }
+  }, [])
+
+  // Initial load + out-of-band change subscription. The initial fetch maps a
+  // failure to a safe "jobs running" default and clears the loading state.
   useEffect(() => {
     let live = true
-    const applySettings = (
-      settings: Record<string, string | undefined>,
-      { merge }: { merge: boolean },
-    ) => {
-      if (!merge || 'jobs_paused' in settings) {
-        setJobsPaused(settings.jobs_paused === 'true')
-      }
-      if (!merge || 'rebuild_in_progress' in settings) {
-        setRebuildInProgress(settings.rebuild_in_progress === 'true')
-      }
-      if (!merge || 'budget_block_runs_enabled' in settings) {
-        const enabled = settings.budget_block_runs_enabled === 'true'
-        setBudgetGateEnabled(enabled)
-        if (!enabled) setAutoThrottle(null)
-      }
-    }
-    // Poll /api/settings so the chip reflects out-of-band changes — the
-    // rebuild-safe.sh script PATCHes rebuild_in_progress server-side via
-    // curl, which never fires the in-browser settings-changed event. 5s
-    // is short enough that "rebuilding…" appears almost immediately when
-    // the script flips the flag, and disappears just as fast on unpause.
-    //
-    // `initial=true` handles the loading->false transition + catches map to
-    // a safe "jobs running" default. Recurring polls stay silent on transient
-    // errors so the chip doesn't flicker mid-rebuild.
-    const fetchSettings = async (initial: boolean) => {
+    const fetchInitial = async () => {
       try {
         const res = await fetch('/api/settings')
-        if (!initial && !res.ok) return
         const data = await res.json()
         if (!live) return
         applySettings(data.settings ?? {}, { merge: false })
       } catch {
-        if (initial && live) setJobsPaused(false)
+        if (live) setJobsPaused(false)
       } finally {
-        if (initial && live) setLoading(false)
+        if (live) setLoading(false)
       }
     }
-    void fetchSettings(true)
-    const pollId = setInterval(() => fetchSettings(false), 5_000)
+    void fetchInitial()
     const unsubscribe = subscribeToSettingsChanged((settings) => {
       if (!live) return
       applySettings(settings, { merge: true })
@@ -80,10 +73,25 @@ export function JobsPauseToggle() {
     })
     return () => {
       live = false
-      clearInterval(pollId)
       unsubscribe()
     }
-  }, [])
+  }, [applySettings])
+
+  // Poll /api/settings so the chip reflects out-of-band changes — the
+  // rebuild-safe.sh script PATCHes rebuild_in_progress server-side via curl,
+  // which never fires the in-browser settings-changed event. 5s is short enough
+  // that "rebuilding…" appears almost immediately when the script flips the
+  // flag, and disappears just as fast on unpause. Throwing on a non-ok response
+  // lets usePolling back off (instead of hammering) when the server is wedged;
+  // transient failures leave the chip state untouched so it doesn't flicker.
+  const pollSettings = useCallback(async () => {
+    const res = await fetch('/api/settings')
+    if (!res.ok) throw new Error(`settings poll failed: ${res.status}`)
+    const data = await res.json()
+    applySettings(data.settings ?? {}, { merge: false })
+  }, [applySettings])
+
+  usePolling(pollSettings, { intervalMs: 5_000, immediate: false })
 
   useEffect(() => {
     let live = true
