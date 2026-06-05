@@ -512,8 +512,11 @@ export function ChangesTab({ projectName, jobsPaused = false }: ChangesTabProps)
           const isExpanded = !!entry?.expanded
           return (
             <div key={file.filename} className="border-b border-border last:border-b-0">
-              <button
-                className="w-full flex items-center gap-3 px-3 py-2 text-left hover:bg-bg-tertiary cursor-pointer"
+              <Button
+                type="button"
+                variant="ghost"
+                size="sm"
+                className="w-full !justify-start !gap-3 !rounded-none !border-0 !px-3 !py-2 text-left !font-normal !text-text-primary hover:bg-bg-tertiary"
                 onClick={() => toggleExpand(file)}
               >
                 <span className="text-text-tertiary text-xs w-3">{isExpanded ? '▾' : '▸'}</span>
@@ -535,7 +538,7 @@ export function ChangesTab({ projectName, jobsPaused = false }: ChangesTabProps)
                     <StatBar additions={file.additions} deletions={file.deletions} />
                   </>
                 )}
-              </button>
+              </Button>
               {isExpanded && (
                 <div className="border-t border-border bg-bg-primary overflow-x-auto">
                   {file.binary ? (
