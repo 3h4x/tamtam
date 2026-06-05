@@ -41,11 +41,11 @@ DATABASE_URL=postgres://user@host:5432/tamtam pnpm db:restore /abs/path/to/tamta
 The restore script:
 
 1. Stops the PM2-managed TamTam server (best-effort).
-2. Runs `pg_restore --clean --if-exists <backup>` using the connection details from `DATABASE_URL`.
+2. Runs `pg_restore --clean --if-exists --no-owner <backup>` using the connection details from `DATABASE_URL`.
 3. Re-verifies the live database with `node scripts/db-verify.js`.
 4. Restarts TamTam with `pnpm start`.
 
-`pg_restore --clean --if-exists` drops and recreates objects before reloading, so the target database does not need to be empty.
+`pg_restore --clean --if-exists --no-owner` drops and recreates objects before reloading, so the target database does not need to be empty.
 
 ## Off-Host Copies
 
