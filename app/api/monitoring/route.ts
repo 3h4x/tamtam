@@ -8,6 +8,7 @@ import {
 
 const PROMETHEUS_URL = process.env.PROMETHEUS_URL ?? 'http://localhost:9090'
 const LOKI_URL = process.env.LOKI_URL ?? 'http://localhost:3100'
+const EXCLUDE_LOW_LEVELS = '!~ "(?i)(\\\\blevel=(info|debug|trace)\\\\b|\\"level\\"\\\\s*:\\\\s*\\"(info|debug|trace)\\"|(^|\\\\s)\\\\[(info|debug|trace)\\\\])"'
 
 interface LogLine {
   ts: string
@@ -107,7 +108,6 @@ export async function GET(request: Request) {
       //   logfmt:  level=info
       //   JSON:    "level":"info" or "level": "info"
       //   bracket: [INFO] [DEBUG]
-      const EXCLUDE_LOW_LEVELS = '!~ "(?i)(\\\\blevel=(info|debug|trace)\\\\b|\\"level\\"\\\\s*:\\\\s*\\"(info|debug|trace)\\"|(^|\\\\s)\\\\[(info|debug|trace)\\\\])"'
       const [errors, warnings] = await Promise.all([
         queryLoki(`{job!=""} |~ "(?i)\\\\b(err|error|fatal|panic)\\\\b" !~ "(?i)\\\\b(no|zero)\\\\s+(err|error|errors|fatal|panic)\\\\b" ${EXCLUDE_LOW_LEVELS}`, start15mNs, 30),
         queryLoki(`{job!=""} |~ "(?i)\\\\b(warn|warning)\\\\b" !~ "(?i)\\\\b(no|zero)\\\\s+(warn|warning|warnings)\\\\b" ${EXCLUDE_LOW_LEVELS}`, start15mNs, 20),
