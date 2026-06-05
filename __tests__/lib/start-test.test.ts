@@ -2,6 +2,7 @@ import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
 import { mkdtempSync, rmSync, writeFileSync } from 'fs';
 import { join } from 'path';
 import { tmpdir } from 'os';
+import { EventEmitter } from 'events';
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Hoisted shared mocks. Top-level vi.mock() with vi.hoisted() lets every test
@@ -14,6 +15,16 @@ const mocks = vi.hoisted(() => ({
   resolveProjectPathMock: vi.fn(),
   refreshProjectsCacheSyncMock: vi.fn(),
   execSyncMock: vi.fn(),
+  spawnMock: vi.fn(),
+  createJobMock: vi.fn(),
+  listJobsMock: vi.fn(),
+  probeJobStatusMock: vi.fn(),
+  updateJobMock: vi.fn(),
+  markDoneMock: vi.fn(),
+  getLockMock: vi.fn(),
+  acquireLockMock: vi.fn(),
+  releaseLockMock: vi.fn(),
+  isLockOwnedByActiveReleaseMock: vi.fn(),
 }));
 
 vi.mock('@/lib/scheduling/scheduling', () => ({
@@ -27,11 +38,11 @@ vi.mock('@/lib/shared/enabled-projects', () => ({
   refreshProjectsCacheSync: (...args: unknown[]) => mocks.refreshProjectsCacheSyncMock(...args),
 }));
 vi.mock('@/lib/jobs/job-storage', () => ({
-  createJob: vi.fn(),
-  listJobs: vi.fn().mockReturnValue([]),
-  probeJobStatus: vi.fn().mockResolvedValue('done'),
-  updateJob: vi.fn(),
-  markDone: vi.fn().mockResolvedValue(undefined),
+  createJob: (...args: unknown[]) => mocks.createJobMock(...args),
+  listJobs: (...args: unknown[]) => mocks.listJobsMock(...args),
+  probeJobStatus: (...args: unknown[]) => mocks.probeJobStatusMock(...args),
+  updateJob: (...args: unknown[]) => mocks.updateJobMock(...args),
+  markDone: (...args: unknown[]) => mocks.markDoneMock(...args),
 }));
 // Stub heavy transitive deps that detectTestCommand doesn't need, so the
 // module graph for start-test.ts is small and module init stays cheap.
@@ -44,9 +55,10 @@ vi.mock('@/lib/jobs/project-active-job', () => ({
   findBlockingRunningJob: vi.fn().mockResolvedValue(null),
 }));
 vi.mock('@/lib/pipeline/pipeline-lock', () => ({
-  getLock: vi.fn().mockReturnValue(null),
-  acquireLock: vi.fn().mockResolvedValue({ acquired: true, lock: null }),
-  isLockOwnedByActiveRelease: vi.fn().mockReturnValue(false),
+  getLock: (...args: unknown[]) => mocks.getLockMock(...args),
+  acquireLock: (...args: unknown[]) => mocks.acquireLockMock(...args),
+  releaseLock: (...args: unknown[]) => mocks.releaseLockMock(...args),
+  isLockOwnedByActiveRelease: (...args: unknown[]) => mocks.isLockOwnedByActiveReleaseMock(...args),
 }));
 // Stub out the file-config loader so anything reaching wrapIfUntrusted /
 // getBranchContext does not shell out to `git` (via execFileSync).
@@ -56,10 +68,11 @@ vi.mock('@/lib/skills/tamtam-file-config', () => ({
 vi.mock('child_process', async (importOriginal) => ({
   ...(await importOriginal<typeof import('child_process')>()),
   execSync: (...args: unknown[]) => mocks.execSyncMock(...args),
+  spawn: (...args: unknown[]) => mocks.spawnMock(...args),
 }));
 
 // Single top-level import — all tests below share this resolved module graph.
-import { detectTestCommand, hasRunnableTestCommand, isReviewRetestJob } from '@/lib/pipeline/start-test';
+import { detectTestCommand, hasRunnableTestCommand, isReviewRetestJob, startProjectTest } from '@/lib/pipeline/start-test';
 
 describe('detectTestCommand', () => {
   let projDir: string;
@@ -71,6 +84,29 @@ describe('detectTestCommand', () => {
     mocks.resolveProjectPathMock.mockReset().mockReturnValue(projDir);
     mocks.refreshProjectsCacheSyncMock.mockReset();
     mocks.execSyncMock.mockReset();
+    mocks.spawnMock.mockReset();
+    mocks.createJobMock.mockReset().mockImplementation((project: string, kind: string, pid: number, logPath: string) => ({
+      id: `${project}-${kind}-id`,
+      project,
+      kind,
+      pid,
+      logPath,
+      startedAt: Date.now() / 1000,
+      finishedAt: null,
+      exitCode: null,
+      contextMeta: null,
+    }));
+    mocks.listJobsMock.mockReset().mockReturnValue([]);
+    mocks.probeJobStatusMock.mockReset().mockResolvedValue('done');
+    mocks.updateJobMock.mockReset();
+    mocks.markDoneMock.mockReset().mockImplementation(async (job: { finishedAt: number | null; exitCode: number | null }, exitCode: number) => {
+      job.exitCode = exitCode;
+      job.finishedAt = Date.now() / 1000;
+    });
+    mocks.getLockMock.mockReset().mockResolvedValue(null);
+    mocks.acquireLockMock.mockReset().mockResolvedValue({ acquired: true, lock: null });
+    mocks.releaseLockMock.mockReset().mockResolvedValue(undefined);
+    mocks.isLockOwnedByActiveReleaseMock.mockReset().mockResolvedValue(false);
   });
 
   afterEach(() => {
@@ -188,5 +224,31 @@ describe('detectTestCommand', () => {
       kind: 'test',
       contextMeta: JSON.stringify({ pipelineReason: 'other' }),
     })).toBe(false);
+  });
+
+  it('releases a standalone test pipeline lock when spawn errors before lock acquisition completes', async () => {
+    writeFileSync(join(projDir, 'package.json'), JSON.stringify({ scripts: { test: 'vitest' } }));
+    writeFileSync(join(projDir, 'pnpm-lock.yaml'), '');
+    const child = new EventEmitter() as EventEmitter & { pid: number; unref: () => void };
+    child.pid = 12345;
+    child.unref = vi.fn();
+    mocks.spawnMock.mockReturnValue(child);
+    let resolveAcquireLock!: () => void;
+    mocks.acquireLockMock.mockImplementation(() => new Promise((resolve) => {
+      resolveAcquireLock = () => resolve({ acquired: true, lock: null });
+    }));
+
+    const start = startProjectTest('myproj');
+    for (let i = 0; i < 10 && child.listenerCount('error') === 0; i += 1) {
+      await new Promise((resolve) => setTimeout(resolve, 0));
+    }
+    expect(child.listenerCount('error')).toBeGreaterThan(0);
+    child.emit('error', new Error('spawn failed'));
+    resolveAcquireLock();
+    const result = await start;
+
+    expect(result.ok).toBe(true);
+    expect(mocks.markDoneMock).toHaveBeenCalledWith(expect.objectContaining({ id: 'myproj-test-id' }), -1);
+    expect(mocks.releaseLockMock).toHaveBeenCalledWith('myproj', 'myproj-test-id');
   });
 });

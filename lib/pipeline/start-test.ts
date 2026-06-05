@@ -7,7 +7,7 @@ import { resolveProjectPath } from '@/lib/shared/project-data';
 import { buildChildEnv } from '@/lib/shared/child-env';
 import { shellQuote } from '@/lib/shared/shell';
 import { createJob, listJobs, probeJobStatus, updateJob, markDone } from '@/lib/jobs/job-storage';
-import { getLock, acquireLock, isLockOwnedByActiveRelease } from './pipeline-lock';
+import { getLock, acquireLock, releaseLock, isLockOwnedByActiveRelease } from './pipeline-lock';
 import { tryClaimPipelineStartSlot, setPipelineStartSlotJob, releasePipelineStartSlot } from './pipeline-start-slot';
 import { checkCliStartGate } from '@/lib/usage/resolve-provider';
 import { findBlockingRunningJob } from '@/lib/jobs/project-active-job';
@@ -203,23 +203,37 @@ export async function startProjectTest(
     detached: true,
     env: childEnv,
   });
+  markCloseHandlerPending(job.id);
+  let spawnError: unknown = null;
+  let spawnErrorFinalized: Promise<void> | null = null;
+  proc.on('error', (e) => {
+    spawnError = e;
+    clearCloseHandlerPending(job.id);
+    spawnErrorFinalized = markDone(job, -1).catch((err) => {
+      console.log(`[start-test] markDone failed after spawn error for ${job.id}:`, err);
+    });
+  });
 
   job.pid = proc.pid ?? 0;
   proc.unref();
   updateJob(job);
-  markCloseHandlerPending(job.id);
 
   // Acquire pipeline lock — skip if we're running under a parent release lock
   // (the release meta-job owns the lock for the full pipeline duration).
   if (!underRelease) {
     try {
       await acquireLock(projectName, job.id);
+      if (spawnError) {
+        await spawnErrorFinalized;
+        await releaseLock(projectName, job.id);
+      }
     } catch (e) {
       console.log(`[start-test] failed to acquire pipeline lock for ${projectName}:`, e);
     }
   }
 
   proc.on('close', (code) => {
+    if (spawnError) return;
     clearCloseHandlerPending(job.id);
     // Prefer the sentinel file's exit code over the proc 'close' code when the
     // close handler reports signal-kill (code=null). The sentinel is written
