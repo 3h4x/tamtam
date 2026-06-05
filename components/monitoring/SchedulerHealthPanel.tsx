@@ -2,6 +2,7 @@
 
 import { useState, useCallback, useEffect } from 'react'
 import { Button } from '@/components/ui/Button'
+import { ErrorCallout } from '@/components/ui/ErrorCallout'
 import { InlineLoading } from '@/components/ui/InlineLoading'
 import { SectionHeader } from './shared'
 import { SchedulerFireTable } from './SchedulerFireTable'
@@ -97,7 +98,7 @@ export function SchedulerHealthPanel() {
           <InlineLoading label="Loading scheduler health..." />
         </div>
       ) : error ? (
-        <p className="text-sm text-status-error">{error}</p>
+        <ErrorCallout className="text-sm">{error}</ErrorCallout>
       ) : health ? (
         <div className="space-y-3 text-sm">
           <div className="flex flex-wrap gap-x-6 gap-y-1 text-text-tertiary">
@@ -107,11 +108,11 @@ export function SchedulerHealthPanel() {
           </div>
 
           {health.errors.length > 0 && (
-            <div className="rounded-md border border-status-error/30 bg-status-error/5 p-2 space-y-1">
+            <ErrorCallout className="space-y-1">
               {health.errors.map((e, i) => (
                 <div key={i} className="text-xs text-status-error font-mono">{e}</div>
               ))}
-            </div>
+            </ErrorCallout>
           )}
 
           {health.missing.length > 0 && (
