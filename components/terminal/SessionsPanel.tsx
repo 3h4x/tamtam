@@ -1,5 +1,7 @@
 'use client'
 
+import { Button } from '@/components/ui/Button'
+
 export interface SessionItem {
   id: string
   prompt: string | null
@@ -47,15 +49,16 @@ export function SessionsPanel({ sessions, loadingSessions, onRestore }: Sessions
           const dotClass = isRunning ? 'bg-status-warning animate-pulse' : isSuccess ? 'bg-status-success' : isFailed ? 'bg-status-error' : 'bg-text-tertiary'
           const dotTitle = isRunning ? 'running' : isSuccess ? 'done' : isFailed ? `exit ${session.exitCode}` : 'unknown'
           return (
-            <button
+            <Button
               key={session.id}
-              className="flex items-center gap-3 w-full px-4 py-2 text-left hover:bg-bg-tertiary border-none bg-transparent border-b border-border/50 last:border-b-0 cursor-pointer"
+              variant="ghost"
               onClick={() => onRestore(session)}
+              className="w-full !justify-start !gap-3 !rounded-none !border-x-0 !border-t-0 border-b border-border/50 last:border-b-0 bg-transparent !px-4 !py-2 text-left !font-normal hover:!bg-bg-tertiary"
             >
               <span className={`w-1.5 h-1.5 rounded-full shrink-0 ${dotClass}`} title={dotTitle} />
               <span className="text-xs text-text-primary font-mono truncate flex-1">{prompt}</span>
               <span className="text-xs text-text-tertiary font-mono shrink-0">{timeAgo}</span>
-            </button>
+            </Button>
           )
         })
       )}
