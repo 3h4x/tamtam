@@ -310,6 +310,7 @@ export async function ensureDevServerRunning(
       stdio: ['ignore', logFd, logFd],
       env: buildChildEnv(),
     });
+    child.once('error', (e) => console.error(`[dev-server] spawn error for ${project}:`, e));
   } catch (e) {
     try { closeSync(logFd); } catch {}
     return { status: 'spawn_failed', error: (e as Error).message };

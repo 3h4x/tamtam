@@ -549,7 +549,7 @@ export function TerminalTab({ projectName, initialSessionId }: TerminalTabProps)
                 type="button"
                 size="sm"
                 onClick={() => setShowCloseStale(true)}
-                className="ml-auto px-2 py-1 rounded border border-border bg-bg-tertiary text-text-secondary hover:text-text-primary"
+                className="ml-auto"
                 title="Close this issue with a verdict comment"
               >
                 Close with verdict
@@ -582,17 +582,17 @@ export function TerminalTab({ projectName, initialSessionId }: TerminalTabProps)
                   <Button
                     type="button"
                     size="sm"
+                    variant="primary"
                     disabled={!closeStaleFindings.trim() || closingStale}
                     onClick={handleCloseStale}
-                    className="px-2 py-1 rounded border border-border bg-accent/20 text-text-primary disabled:opacity-50"
                   >
                     {closingStale ? 'closing…' : 'Comment + Close'}
                   </Button>
                   <Button
                     type="button"
                     size="sm"
+                    variant="ghost"
                     onClick={() => { setShowCloseStale(false); setCloseStaleFindings('') }}
-                    className="px-2 py-1 rounded border border-border bg-bg-tertiary text-text-secondary"
                   >
                     cancel
                   </Button>
