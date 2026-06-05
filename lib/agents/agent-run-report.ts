@@ -213,6 +213,33 @@ async function worktreeDelta(
     removed += d.removed;
   }
 
+  // Untracked (`??`) files are invisible to `git diff`, so neither numstat above
+  // counts their lines — a brand-new file (e.g. a docs-generate page) would
+  // otherwise contribute 0 LOC despite landing in `modifiedFiles`, depressing
+  // run_score and starving the reinforce-to-threshold release gate. Diff each
+  // attributed untracked path against /dev/null to recover its added-line count.
+  // We scope to high-confidence paths and exclude pre-existing baseline dirt,
+  // mirroring the uncommitted-numstat attribution above. `git diff --no-index`
+  // exits 1 when it finds a difference (the normal case here), so both 0 and 1
+  // are success; binary files come back as `-`/`-` and count 0, as elsewhere.
+  const untrackedAttributed = Array.from(files.values()).filter(
+    (f) => f.status === '??' && f.confidence !== 'low' && !baselinePaths.has(f.path),
+  );
+  if (untrackedAttributed.length > 0) {
+    const numstats = await Promise.all(
+      untrackedAttributed.map((f) =>
+        exec('git', ['-C', projPath, 'diff', '--numstat', '--no-index', '--', '/dev/null', f.path], { timeout: 10000 }),
+      ),
+    );
+    for (const r of numstats) {
+      if (r.exitCode === 0 || r.exitCode === 1) {
+        const d = parseNumstat(r.stdout, null);
+        added += d.added;
+        removed += d.removed;
+      }
+    }
+  }
+
   return {
     files: Array.from(files.values()).sort((a, b) => a.path.localeCompare(b.path)),
     lines: { added, removed },

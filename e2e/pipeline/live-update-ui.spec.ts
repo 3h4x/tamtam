@@ -359,6 +359,53 @@ test.describe('Auto-polling live update', () => {
   });
 });
 
+// ─── Test 1b: New job appears in history from zero-jobs state ────────────────
+//
+// All existing "live update" tests start with the job already present when the
+// page loads. This test verifies the history tab picks up a brand-new running
+// job on the next poll cycle starting from an empty state — the "job starts
+// while you are already on the page" path.
+
+test.describe('Auto-polling live update: new job appears from empty state', () => {
+  test('history tab renders a new running job row when none existed on load', async ({ page }) => {
+    let jobExists = false;
+
+    await stubCommonRoutes(page, PROJECT);
+
+    await page.route(
+      (url) =>
+        url.pathname === '/api/jobs' && url.searchParams.get('project') === PROJECT,
+      (route: Route) => {
+        route.fulfill({
+          json: {
+            jobs: jobExists
+              ? [makeJob('new-job-appears', PROJECT, 'running', null, 'test')]
+              : [],
+            pendingReleaseProjects: [],
+          },
+        });
+      },
+    );
+
+    await page.goto(`/project/${PROJECT}/history`);
+
+    // Confirm the history is truly empty on page load (ProjectRunsEmptyState mode:'empty').
+    await expect(page.getByText('No runs yet')).toBeVisible({ timeout: 8_000 });
+    await expect(page.getByRole('button').filter({ hasText: 'Test run' })).toHaveCount(0);
+
+    // New job starts — flip the mock so the next 5 s poll delivers it.
+    jobExists = true;
+
+    // The history tab must pick up the new row without a page reload.
+    const row = page.getByRole('button').filter({ hasText: 'Test run' }).first();
+    await expect(row).toBeVisible({ timeout: 12_000 });
+    await expect(row.locator('[aria-label="running"]')).toBeVisible({ timeout: 12_000 });
+
+    // Empty-state message must disappear once the job appears.
+    await expect(page.getByText('No runs yet')).toHaveCount(0);
+  });
+});
+
 // ─── Test 2a: Live running → failed transition ───────────────────────────────
 //
 // Mirrors the running→done test above but for the failure case.

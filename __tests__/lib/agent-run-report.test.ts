@@ -167,6 +167,61 @@ describe('finalizeAgentRunReport', () => {
     expect(JSON.parse(job.modifiedFiles ?? '[]')).toHaveLength(1);
   });
 
+  it('counts untracked (new) file lines that git diff cannot see', async () => {
+    // A brand-new file is `??` in porcelain but invisible to `git diff`, so the
+    // two numstat calls report 0 lines. The collector recovers its line count
+    // with `git diff --numstat --no-index -- /dev/null <path>` (5th exec call,
+    // which exits 1 because it finds a difference).
+    execMock
+      .mockResolvedValueOnce({ exitCode: 0, stdout: '', stderr: '' })                  // 1. name-status BASE..HEAD
+      .mockResolvedValueOnce({ exitCode: 0, stdout: '', stderr: '' })                  // 2. numstat BASE..HEAD
+      .mockResolvedValueOnce({ exitCode: 0, stdout: '?? docs/new.md\n', stderr: '' })  // 3. status --porcelain
+      .mockResolvedValueOnce({ exitCode: 0, stdout: '', stderr: '' })                  // 4. numstat HEAD (misses untracked)
+      .mockResolvedValueOnce({ exitCode: 1, stdout: '12\t0\t/dev/null => docs/new.md\n', stderr: '' }); // 5. --no-index
+    const { finalizeAgentRunReport } = await import('@/lib/agents/agent-run-report');
+    const job = makeJob();
+
+    await finalizeAgentRunReport(job, log('TamTam Run Report\nSummary: Added a new doc page.\nFiles changed: docs/new.md\nActionable work: yes\n'));
+
+    expect(job.linesAdded).toBe(12);
+    expect(job.linesRemoved).toBe(0);
+    expect(JSON.parse(job.modifiedFiles ?? '[]')).toEqual([
+      { path: 'docs/new.md', status: '??', confidence: 'high' },
+    ]);
+    expect(execMock).toHaveBeenCalledWith(
+      'git',
+      ['-C', '/repo', 'diff', '--numstat', '--no-index', '--', '/dev/null', 'docs/new.md'],
+      expect.anything(),
+    );
+  });
+
+  it('does not double-count an untracked file that was already dirty at baseline', async () => {
+    // The new file was present in the baseline porcelain (pre-existing dirt), so
+    // it is low-confidence and must be excluded from the --no-index recovery.
+    execMock
+      .mockResolvedValueOnce({ exitCode: 0, stdout: '', stderr: '' })                  // 1. name-status BASE..HEAD
+      .mockResolvedValueOnce({ exitCode: 0, stdout: '', stderr: '' })                  // 2. numstat BASE..HEAD
+      .mockResolvedValueOnce({ exitCode: 0, stdout: '?? stale.md\n', stderr: '' })     // 3. status --porcelain
+      .mockResolvedValueOnce({ exitCode: 0, stdout: '', stderr: '' });                 // 4. numstat HEAD
+    const { finalizeAgentRunReport } = await import('@/lib/agents/agent-run-report');
+    const job = makeJob({
+      contextMeta: JSON.stringify({
+        agent: { id: 'agent-1', name: 'tests', schedule: '2h', triggeredBy: 'schedule' },
+        baseline: { head: 'abc123', status: '?? stale.md\n', dirty: true },
+      }),
+    });
+
+    await finalizeAgentRunReport(job, log('TamTam Run Report\nSummary: Nothing new.\nFiles changed: none\nActionable work: no\n'));
+
+    expect(job.linesAdded).toBe(0);
+    // No --no-index recovery call for the pre-existing untracked path.
+    expect(execMock).not.toHaveBeenCalledWith(
+      'git',
+      expect.arrayContaining(['--no-index', '--', '/dev/null', 'stale.md']),
+      expect.anything(),
+    );
+  });
+
   it('creates a schedule recommendation for successful no-op runs', async () => {
     execMock
       .mockResolvedValueOnce({ exitCode: 0, stdout: '', stderr: '' })
