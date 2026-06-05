@@ -11,6 +11,7 @@
 
 import type { JobData } from '@/lib/jobs/types';
 import { getJobKind, isAgentJobKind } from '@/lib/jobs/kinds';
+import { logWorkflowTrigger } from '@/lib/workflows/triggers/logging';
 
 async function getReleaseAfterRunFlag(projectName: string): Promise<boolean> {
   const { getProjectTestConfig } = await import('@/lib/scheduling/scheduling');
@@ -155,10 +156,10 @@ export async function dispatchReleaseAfterRun(job: JobData): Promise<DispatchRel
   const r = await dispatchReleaseWorkflow(job.project, { queueIfBlocked: true, sourceJobId: job.id });
   if (r.ok) {
     if ('status' in r && r.status === 'queued') {
-      console.log(`[release-after-run] queued release for ${job.project} after run ${job.id}`);
+      logWorkflowTrigger(`[release-after-run] queued release for ${job.project} after run ${job.id}`);
       return { dispatched: false, reason: 'queued (lock held)' };
     }
-    console.log(`[release-after-run] triggered release ${r.jobId} for ${job.project} after run ${job.id}`);
+    logWorkflowTrigger(`[release-after-run] triggered release ${r.jobId} for ${job.project} after run ${job.id}`);
     return { dispatched: true, reason: `release ${r.jobId}` };
   }
 
@@ -170,9 +171,9 @@ export async function dispatchReleaseAfterRun(job: JobData): Promise<DispatchRel
   const { shouldKeepPendingRelease, setPendingRelease } = await import('@/lib/pipeline/pending-release');
   if (shouldKeepPendingRelease(r)) {
     setPendingRelease(job.project);
-    console.log(`[release-after-run] queued for ${job.project} (will drain when pipeline lock releases): ${r.detail}`);
+    logWorkflowTrigger(`[release-after-run] queued for ${job.project} (will drain when pipeline lock releases): ${r.detail}`);
     return { dispatched: false, reason: `pending: ${r.detail}` };
   }
-  console.log(`[release-after-run] no release for ${job.project}: ${r.detail}`);
+  logWorkflowTrigger(`[release-after-run] no release for ${job.project}: ${r.detail}`);
   return { dispatched: false, reason: r.detail };
 }

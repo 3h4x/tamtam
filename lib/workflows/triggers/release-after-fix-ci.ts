@@ -8,6 +8,7 @@
 // and the durable job-completion router.
 
 import type { JobData } from '@/lib/jobs/types';
+import { logWorkflowTrigger } from '@/lib/workflows/triggers/logging';
 
 export interface DispatchReleaseAfterFixCiOutcome {
   dispatched: boolean;
@@ -22,18 +23,18 @@ export async function dispatchReleaseAfterFixCi(job: JobData): Promise<DispatchR
   const r = await dispatchReleaseWorkflow(job.project, { queueIfBlocked: true, sourceJobId: job.id });
   if (r.ok) {
     if ('status' in r && r.status === 'queued') {
-      console.log(`[release-after-fix-ci] queued release for ${job.project} after fix-ci ${job.id}`);
+      logWorkflowTrigger(`[release-after-fix-ci] queued release for ${job.project} after fix-ci ${job.id}`);
       return { dispatched: false, reason: 'queued (lock held)' };
     }
-    console.log(`[release-after-fix-ci] triggered release ${r.jobId} for ${job.project} after fix-ci ${job.id}`);
+    logWorkflowTrigger(`[release-after-fix-ci] triggered release ${r.jobId} for ${job.project} after fix-ci ${job.id}`);
     return { dispatched: true, reason: `release ${r.jobId}` };
   }
   const { shouldKeepPendingRelease, setPendingRelease } = await import('@/lib/pipeline/pending-release');
   if (shouldKeepPendingRelease(r)) {
     setPendingRelease(job.project);
-    console.log(`[release-after-fix-ci] queued for ${job.project} (will drain when lock releases): ${r.detail}`);
+    logWorkflowTrigger(`[release-after-fix-ci] queued for ${job.project} (will drain when lock releases): ${r.detail}`);
     return { dispatched: false, reason: `pending: ${r.detail}` };
   }
-  console.log(`[release-after-fix-ci] no release for ${job.project}: ${r.detail}`);
+  logWorkflowTrigger(`[release-after-fix-ci] no release for ${job.project}: ${r.detail}`);
   return { dispatched: false, reason: r.detail };
 }

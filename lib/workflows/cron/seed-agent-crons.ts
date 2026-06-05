@@ -170,6 +170,7 @@ async function loadExistingRunAtsFromPg(
   connectionString: string,
 ): Promise<Map<string, ExistingAgentCronJob>> {
   const pool = new Pool({ connectionString, max: 1 });
+  pool.on('error', (err) => console.error('[seed-agent-crons] preserve pool idle client error:', err));
   try {
     const { rows } = await pool.query<{
       key: string;
@@ -206,6 +207,7 @@ async function loadExistingRunAtsFromPg(
 
 async function sweepDeadOrphansFromPg(connectionString: string): Promise<void> {
   const pool = new Pool({ connectionString, max: 1 });
+  pool.on('error', (err) => console.error('[seed-agent-crons] sweep pool idle client error:', err));
   try {
     // (1) Unkeyed retry copies that graphile-worker has already given up on
     // (max_attempts reached, not currently locked). These never re-fire on
