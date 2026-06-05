@@ -295,7 +295,7 @@ export function PipelinePage() {
             >
               verdict rules
             </Button>{' '}
-            in Settings → Behavior
+            in Settings → Pipeline
           </p>
         </div>
         <div className="px-4 py-4">
@@ -489,11 +489,11 @@ export function PipelinePage() {
             <p className="text-xs text-text-tertiary mt-0.5">
               Verdict rules and commit style applied during this period — edit in{' '}
               <Link
-                href="/settings"
+                href="/settings/pipeline"
                 className={buttonVariants({ variant: 'link', size: 'sm' })}
                 onClick={(e) => e.stopPropagation()}
               >
-                Settings → Behavior
+                Settings → Pipeline
               </Link>
             </p>
           </div>
