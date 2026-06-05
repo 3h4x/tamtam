@@ -13,7 +13,7 @@ import {
   cancelAutomationQueueItem,
 } from '@/lib/client-api'
 import type { AutomationQueueItem, JobInfo } from '@/lib/client-api'
-import { Button } from '@/components/ui/Button'
+import { Button, buttonVariants } from '@/components/ui/Button'
 import { PillButton } from '@/components/ui/Pill'
 import { SearchField } from '@/components/ui/SearchField'
 import {
@@ -689,7 +689,11 @@ export function ProjectRunsTab({ projectName, jobsPaused = false }: ProjectRunsT
             </div>
             <Link
               href={`/pipeline?project=${encodeURIComponent(projectName)}`}
-              className="text-[11px] text-accent hover:text-accent-hover"
+              className={buttonVariants({
+                variant: 'link',
+                size: 'sm',
+                className: 'text-[11px] hover:text-accent-hover hover:no-underline',
+              })}
             >
               Pipeline
             </Link>
