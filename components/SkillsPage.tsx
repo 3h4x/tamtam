@@ -296,8 +296,14 @@ export function SkillsPage() {
   const agentItems = filterItems(dbAgentItems)
   const customItems = filterItems([...dbCustomItems, ...customPersonaItems])
   const visibleLibraryItems = filterItems(libraryItems)
-  const libraryGroups = Array.from(new Set(visibleLibraryItems.map(item => item.category))).sort()
-    .map(category => ({ category, items: visibleLibraryItems.filter(item => item.category === category) }))
+  const libraryGroupsByCategory = new Map<string, SkillListItem[]>()
+  for (const item of visibleLibraryItems) {
+    const items = libraryGroupsByCategory.get(item.category) ?? []
+    items.push(item)
+    libraryGroupsByCategory.set(item.category, items)
+  }
+  const libraryGroups = Array.from(libraryGroupsByCategory, ([category, items]) => ({ category, items }))
+    .sort((a, b) => a.category.localeCompare(b.category))
   const visibleItems = [...agentItems, ...customItems, ...visibleLibraryItems]
   const selectedVisibleCount = visibleItems.filter(item => selected.has(item.id)).length
   const filteredOutSelected = selected.size - selectedVisibleCount
