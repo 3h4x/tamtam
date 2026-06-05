@@ -116,6 +116,7 @@ interface SettingsMap {
   retrieval_reindex_interval_hours: string
   browser_broker_enabled: string
   browser_broker_image: string
+  browser_broker_mode: string
   tamtam_network_policy_strict: string
   orchestrator_enabled: string
   orchestrator_boost_margin_pct: string
@@ -165,6 +166,7 @@ const SETTINGS_DEFAULTS: SettingsMap = {
   retrieval_reindex_interval_hours: '16',
   browser_broker_enabled: 'false',
   browser_broker_image: 'mcr.microsoft.com/playwright/mcp:v0.0.30',
+  browser_broker_mode: 'docker',
   tamtam_network_policy_strict: 'false',
   orchestrator_enabled: 'false',
   orchestrator_boost_margin_pct: '5',

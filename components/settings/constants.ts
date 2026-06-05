@@ -52,6 +52,7 @@ export type SettingsFieldKey =
   | 'incremental_review_enabled'
   | 'browser_broker_enabled'
   | 'browser_broker_image'
+  | 'browser_broker_mode'
   | 'tamtam_network_policy_strict'
   | 'orchestrator_enabled'
   | 'orchestrator_boost_margin_pct'
@@ -244,6 +245,14 @@ export const FIELDS: Record<SettingsFieldKey, FieldDef> = {
     group: 'general',
     subsection: 'browser_broker',
     span: 2,
+    advanced: true,
+  },
+  browser_broker_mode: {
+    label: 'Broker Mode',
+    help: 'docker (default) runs Playwright MCP in a sandboxed container. host spawns it directly on the host — avoids Docker memory pressure but forgoes the container sandbox.',
+    group: 'general',
+    subsection: 'browser_broker',
+    span: 1,
     advanced: true,
   },
 
@@ -610,6 +619,7 @@ export const DEFAULTS: Record<SettingsFieldKey, string> = {
   incremental_review_enabled: 'true',
   browser_broker_enabled: 'false',
   browser_broker_image: 'mcr.microsoft.com/playwright/mcp:v0.0.30',
+  browser_broker_mode: 'docker',
   tamtam_network_policy_strict: 'false',
   orchestrator_enabled: 'false',
   orchestrator_boost_margin_pct: '5',

@@ -138,6 +138,11 @@ export function SettingsField({
           onChange={(e) => onChange(fieldKey, e.target.value)}
           placeholder={DEFAULTS[fieldKey]}
         />
+      ) : fieldKey === 'browser_broker_mode' ? (
+        <Select value={value || 'docker'} onChange={(e) => onChange(fieldKey, e.target.value)}>
+          <option value="docker">docker (sandboxed container)</option>
+          <option value="host">host (direct, no container sandbox)</option>
+        </Select>
       ) : fieldKey === 'review_do_not_ship_action' ? (
         <Select value={value || 'pass'} onChange={(e) => onChange(fieldKey, e.target.value)}>
           <option value="pass">Pass with follow-up issue (default)</option>

@@ -1,7 +1,7 @@
 ---
 id: agent-improve
 name: agent:improve
-description: "Walks up to 5 oldest unaudited source files (oldest commit first), applies fixes by family rubric (F1–F4), flags credential/dead/oversized files (F5/F6) for humans, continues scanning after small/F3/F4 fixes and stops after substantial F1/F2 ones, and records every audited file in a content-hash ledger. When every file is audited at its current content the ledger rotates and the agent re-verifies from the oldest file again (prompt/model improve over time), so it never goes idle while source exists."
+description: "Walks the oldest unaudited source files (oldest commit first, a size-budgeted batch per run), applies fixes by family rubric (F1–F4), flags credential/dead/oversized files (F5/F6) for humans, continues scanning after small/F3/F4 fixes and stops after substantial F1/F2 ones, and records every audited file in a content-hash ledger. When every file is audited at its current content the ledger rotates and the agent re-verifies from the oldest file again (prompt/model improve over time), so it never goes idle while source exists."
 version: "2026-06-05"
 agent:
   defaultSchedule: 12h
@@ -30,6 +30,17 @@ prerequisite: |
   # flagged for refactor (Family 6). Override per project by exporting
   # IMPROVE_OVERSIZE_LINES before the run.
   OVERSIZE_LINES="${IMPROVE_OVERSIZE_LINES:-1000}"
+  # Per-run candidate budget. Auditing only a handful of files per run amortizes
+  # the fixed cost (fresh CLI session + the large skill prompt) poorly — most of
+  # all on re-verification passes, where each file is a cheap "still clean?"
+  # re-confirm. So we walk MORE files per run, budgeted by cumulative SIZE rather
+  # than a flat count: many small files OR a few large ones, so context stays
+  # roughly constant (a huge candidate list degrades per-file attention the same
+  # way a huge single file does). The 3-fix cap in the skill body is unchanged —
+  # that, not the audit count, is what bounds review burden and risky edits.
+  # Override per project via IMPROVE_MAX_FILES / IMPROVE_LINE_BUDGET.
+  MAX_FILES="${IMPROVE_MAX_FILES:-25}"
+  LINE_BUDGET="${IMPROVE_LINE_BUDGET:-3000}"
   mkdir -p .tamtam/cache/audits; : >> "$LEDGER"
 
   # path -> latest commit epoch (single history pass; first-seen line = newest commit)
@@ -88,27 +99,35 @@ prerequisite: |
 
   pass=$(cat "$PASSFILE" 2>/dev/null || echo 1)
   if [ "$ROTATED" = 1 ]; then
-    echo "## Re-verification pass #$pass — queue rotated, re-auditing from the oldest file"
+    echo "## Re-verification pass #$pass — queue rotated, re-auditing from the oldest files"
     echo "(every file was already audited at current content; re-validate each prior verdict against the note below — the prompt/model may catch something new this pass — do not rubber-stamp)"
   else
-    echo "## Next 5 unaudited candidates (oldest commit first, current content) — pass #$pass"
+    echo "## Unaudited candidates (oldest commit first, current content) — pass #$pass"
   fi
 
   if [ ! -s "$CAND" ]; then
     echo '(no source files to audit — idle)'
   else
-    # join age (missing = 0 = oldest), oldest-first, take 5, then enrich each
-    # with its line count (flag oversized → F6) and its most recent audit note.
+    # Select oldest-first, accumulating until the file count or cumulative line
+    # budget is hit (always at least one file). Enrich each with its line count
+    # (flag oversized → F6) and its most recent audit note. The line budget keeps
+    # the batch's total size bounded so 5 huge files and 25 tiny files both fit a
+    # comparable context window.
     awk -F'\t' 'FILENAME==ARGV[1]{age[$2]=$1;next}{a=age[$2];if(a=="")a=0;print a"\t"$2"\t"$1}' \
-        "$AGE" "$CAND" | sort -n | head -5 \
-      | while IFS="$(printf '\t')" read -r age path blob; do
-          lines=$(wc -l < "$path" 2>/dev/null | tr -d ' '); [ -n "$lines" ] || lines=0
-          flag=""
-          [ "$lines" -ge "$OVERSIZE_LINES" ] 2>/dev/null && flag=" ⚠ OVERSIZED (>=${OVERSIZE_LINES} lines — Family 6: flag for refactor)"
-          printf -- '- %s  (blob %s, %s lines)%s\n' "$path" "$blob" "$lines" "$flag"
-          note=$(grep -F "| $path |" "$AUDITLOG" 2>/dev/null | tail -1)
-          [ -n "$note" ] && printf '    last audit: %s\n' "$note"
-        done
+        "$AGE" "$CAND" | sort -n \
+      | { count=0; total=0
+          while IFS="$(printf '\t')" read -r age path blob; do
+            lines=$(wc -l < "$path" 2>/dev/null | tr -d ' '); [ -n "$lines" ] || lines=0
+            [ "$count" -ge "$MAX_FILES" ] && break
+            if [ "$count" -gt 0 ] && [ $((total + lines)) -gt "$LINE_BUDGET" ]; then break; fi
+            count=$((count + 1)); total=$((total + lines))
+            flag=""
+            [ "$lines" -ge "$OVERSIZE_LINES" ] 2>/dev/null && flag=" ⚠ OVERSIZED (>=${OVERSIZE_LINES} lines — Family 6: flag for refactor)"
+            printf -- '- %s  (blob %s, %s lines)%s\n' "$path" "$blob" "$lines" "$flag"
+            note=$(grep -F "| $path |" "$AUDITLOG" 2>/dev/null | tail -1)
+            [ -n "$note" ] && printf '    last audit: %s\n' "$note"
+          done
+          echo "(batch: $count file(s), ~$total lines — budget ${MAX_FILES} files / ${LINE_BUDGET} lines)"; }
   fi
   rm -f "$AGE" "$CAND"
 

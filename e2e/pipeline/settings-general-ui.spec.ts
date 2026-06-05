@@ -270,4 +270,59 @@ test.describe('Settings general page save flow', () => {
     await expect(page.getByText('Unsaved changes')).not.toBeVisible({ timeout: 3_000 });
     await expect(page.getByRole('button', { name: 'Save Settings' })).toBeDisabled();
   });
+
+  // ---------------------------------------------------------------------------
+  // Test 7: browser_broker_mode select — shows docker by default, switches to host
+  // ---------------------------------------------------------------------------
+  test('browser_broker_mode select is visible under advanced and saves correct value', async ({ page }) => {
+    let patchedMode: string | undefined;
+
+    await page.route('**/api/settings', async (route: Route) => {
+      if (route.request().method() === 'GET') {
+        await route.fulfill({
+          json: { settings: makeSettings({ browser_broker_mode: 'docker' }) },
+        });
+        return;
+      }
+      if (route.request().method() === 'PATCH') {
+        const body = route.request().postDataJSON() as Record<string, string>;
+        patchedMode = body.browser_broker_mode;
+        await route.fulfill({
+          json: { settings: makeSettings({ ...body }) },
+        });
+        return;
+      }
+      route.continue();
+    });
+    await page.route('**/api/projects', (route: Route) =>
+      route.fulfill({ json: { tasks: [], priorities: [], issueCounts: {} } }),
+    );
+    await page.route('**/api/jobs/notifications', (route: Route) =>
+      route.fulfill({ json: { notifications: [] } }),
+    );
+    await page.route('**/api/agents**', (route: Route) =>
+      route.fulfill({ json: { agents: [] } }),
+    );
+
+    await page.goto('/settings/general');
+    await expect(page.getByRole('button', { name: 'Save Settings' })).toBeVisible({ timeout: 10_000 });
+
+    // The field is advanced — click "Show advanced" to reveal it.
+    await page.getByLabel('Show advanced').check();
+
+    // The Broker Mode select should be visible and default to "docker".
+    const modeSelect = page.getByRole('combobox').filter({ hasText: /docker/i });
+    await expect(modeSelect).toBeVisible({ timeout: 5_000 });
+    await expect(modeSelect).toHaveValue('docker');
+
+    // Change to host — should mark form dirty.
+    await modeSelect.selectOption('host');
+    await expect(page.getByText('Unsaved changes')).toBeVisible({ timeout: 3_000 });
+    await expect(page.getByRole('button', { name: 'Save Settings' })).toBeEnabled();
+
+    // Save and verify the PATCH body contains the new value.
+    await page.getByRole('button', { name: 'Save Settings' }).click();
+    await expect(page.getByText(/saved!/i)).toBeVisible({ timeout: 5_000 });
+    expect(patchedMode).toBe('host');
+  });
 });
