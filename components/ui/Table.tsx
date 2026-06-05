@@ -71,7 +71,7 @@ export function Table<T>({
     }
   }
 
-  // Resolve the sort column ONCE — previously the comparator did a
+  // Resolve the sort column once to avoid doing a
   // columns.find() on every pair (O(N log N × M) where M is columns.length).
   // Also short-circuit the array copy when there's nothing to sort.
   const sortCol = sortKey ? columns.find(c => c.key === sortKey) : undefined

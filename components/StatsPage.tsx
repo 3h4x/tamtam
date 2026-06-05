@@ -91,9 +91,8 @@ export function StatsPage() {
   )
 
   const load = useCallback(async (w: Window) => {
-    // Fetch in parallel — the two endpoints are independent and the
-    // sequential `await` chain was forcing each 60s refresh to pay
-    // usage_latency + ollama_latency instead of max(usage, ollama).
+    // Fetch in parallel because the two endpoints are independent; each
+    // refresh pays max(usage, ollama) latency instead of serial latency.
     // Ollama panel is supplementary, so its failure must never block
     // the primary usage panel from rendering.
     const [usageResult, ollamaResult] = await Promise.allSettled([
