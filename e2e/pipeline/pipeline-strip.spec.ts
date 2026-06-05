@@ -1270,4 +1270,106 @@ test.describe('PipelineStrip visibility', () => {
     await expect(page.getByTitle('View unified release trace')).toBeVisible()
     await expect(page.getByRole('button', { name: 'abort' })).toBeVisible()
   })
+
+  test('terminal tab clears the strip after soak phase completes successfully via poll', async ({ page }) => {
+    let phase: 'soak-running' | 'done' = 'soak-running'
+
+    await mockProjectShell(page, () => (phase === 'soak-running' ? releaseSoakRunningJobs() : []))
+
+    await page.goto(`/project/${PROJECT}/terminal`)
+
+    await expect(page.getByLabel(/pipeline summary: soak running/i)).toBeVisible({ timeout: 8_000 })
+    await expect(page.getByLabel(/soak: running\./i)).toBeVisible()
+    await expect(page.getByTitle('watching default-branch CI on the merge commit — click to open terminal')).toBeVisible()
+    await expect(page.getByTitle('View unified release trace')).toBeVisible()
+    await expect(page.getByRole('button', { name: 'abort' })).toBeVisible()
+
+    phase = 'done'
+
+    await expect(page.getByLabel(/pipeline summary:/i)).toHaveCount(0, { timeout: 12_000 })
+    await expect(page.getByTitle('View unified release trace')).toHaveCount(0, { timeout: 12_000 })
+    await expect(page.getByRole('button', { name: 'abort' })).toHaveCount(0, { timeout: 12_000 })
+  })
+
+  test('terminal tab transitions from pr-wait to soak running via poll', async ({ page }) => {
+    let phase: 'pr-wait' | 'soak' = 'pr-wait'
+    const releaseId = 'strip-prwait-soak-release'
+
+    function prWaitJobs(): MockJob[] {
+      const base = (id: string, kind: string, startOffset: number, endOffset: number | null, extra: Partial<MockJob> = {}): MockJob => ({
+        id,
+        project: PROJECT,
+        kind,
+        status: endOffset !== null ? 'done' : 'running',
+        exit_code: endOffset !== null ? 0 : null,
+        started_at: now() - startOffset,
+        finished_at: endOffset !== null ? now() - endOffset : null,
+        pid: 0,
+        log_path: '',
+        seen: true,
+        session_id: null,
+        release_id: releaseId,
+        context_meta: null,
+        provider: 'claude',
+        work_summary: '',
+        ...extra,
+      })
+      return [
+        { ...base(releaseId, 'release', 120, null), release_id: null },
+        base('strip-prwait-soak-test', 'test', 110, 100),
+        { ...base('strip-prwait-soak-review', 'review', 90, 80), verdict: 'LGTM', session_id: 'strip-prwait-soak-review-session' },
+        base('strip-prwait-soak-commit', 'commit', 70, 60),
+        base('strip-prwait-soak-push', 'push', 50, 40),
+        base('strip-prwait-soak-dod', 'mark-dod', 35, 25),
+        base('strip-prwait-soak-prwait', 'pr-wait', 10, null),
+      ]
+    }
+
+    function soakJobs(): MockJob[] {
+      const base = (id: string, kind: string, startOffset: number, endOffset: number | null, extra: Partial<MockJob> = {}): MockJob => ({
+        id,
+        project: PROJECT,
+        kind,
+        status: endOffset !== null ? 'done' : 'running',
+        exit_code: endOffset !== null ? 0 : null,
+        started_at: now() - startOffset,
+        finished_at: endOffset !== null ? now() - endOffset : null,
+        pid: 0,
+        log_path: '',
+        seen: true,
+        session_id: null,
+        release_id: releaseId,
+        context_meta: null,
+        provider: 'claude',
+        work_summary: '',
+        ...extra,
+      })
+      return [
+        { ...base(releaseId, 'release', 120, null), release_id: null },
+        base('strip-prwait-soak-test', 'test', 110, 100),
+        { ...base('strip-prwait-soak-review', 'review', 90, 80), verdict: 'LGTM', session_id: 'strip-prwait-soak-review-session' },
+        base('strip-prwait-soak-commit', 'commit', 70, 60),
+        base('strip-prwait-soak-push', 'push', 50, 40),
+        base('strip-prwait-soak-dod', 'mark-dod', 35, 25),
+        base('strip-prwait-soak-prwait', 'pr-wait', 15, 5),
+        { ...base('strip-prwait-soak-soak', 'soak', 3, null), session_id: 'strip-prwait-soak-session' },
+      ]
+    }
+
+    await mockProjectShell(page, () => (phase === 'pr-wait' ? prWaitJobs() : soakJobs()))
+
+    await page.goto(`/project/${PROJECT}/terminal`)
+
+    await expect(page.getByLabel(/pipeline summary: merge running/i)).toBeVisible({ timeout: 8_000 })
+    await expect(page.getByTitle('waiting for CI checks and auto-merge — click to open terminal')).toBeVisible()
+    await expect(page.getByLabel(/merge: running\./i)).toBeVisible()
+    await expect(page.getByTitle('watching default-branch CI on the merge commit')).toHaveCount(0)
+
+    phase = 'soak'
+
+    await expect(page.getByLabel(/pipeline summary: soak running/i)).toBeVisible({ timeout: 12_000 })
+    await expect(page.getByTitle('watching default-branch CI on the merge commit — click to open terminal')).toBeVisible({ timeout: 12_000 })
+    await expect(page.getByLabel(/soak: running\./i)).toBeVisible()
+    await expect(page.getByLabel(/merge: running\./i)).toHaveCount(0)
+  })
 })
