@@ -17,7 +17,7 @@
 import type { WaitForJobResult } from '@/lib/workflows/wait-for-job';
 import type { NextPhase } from '@/lib/workflows/decide-next-phase';
 import type { DispatchContext, DispatchPhaseOutcome } from '@/lib/workflows/dispatch-phase';
-import { statusHasNonTamtamPath } from '@/lib/pipeline/review-scope';
+import { statusHasNonTamtamPath, statusHasOnlyCommittedTamtamMetadataPaths } from '@/lib/pipeline/review-scope';
 
 export interface OrchestratorTickResult {
   waited: WaitForJobResult;
@@ -255,18 +255,21 @@ async function decideStep(jobId: string): Promise<NextPhase> {
           const { hasLocalCommitsAhead } = await import('@/lib/pipeline/release-state');
           hasUnpushedCommits = await hasLocalCommitsAhead(projPath);
         }
-        // Route past `review` when the reviewer would have nothing to look
-        // at. `start-review.ts` filters `.tamtam/` paths out of review scope
-        // by design (per-project agent config isn't reviewable work) and
+        // Route past `review` when the reviewer would have only committed
+        // TamTam metadata to look at. `start-review.ts` filters `.tamtam/`
+        // paths out of review scope by design (per-project agent config isn't
+        // reviewable work) and
         // aborts the release with "No uncommitted changes or unpushed
         // commits to review" if filtering leaves the scope empty — that
         // halts the chain at `test` even though `commit`/`push`/`pr-wait`
-        // still have work to do (e.g. shipping a `.tamtam/` rename, or
+        // still have work to do (e.g. shipping a `.tamtam/agents/` rename, or
         // pushing onto a branch whose PR is blocked on a merge conflict).
-        // Treat that as functionally equivalent to `reviewDisabled` for
-        // routing purposes — the project hasn't opted out of review, the
-        // reviewer simply has nothing to evaluate this round.
-        const nothingForReviewerToSee = !hasReviewablePath && !hasUnpushedCommits;
+        // Treat only committed metadata as functionally equivalent to
+        // `reviewDisabled` for routing purposes. Local scratch under
+        // `.tamtam/cache/**` must not be committed by this bypass.
+        const onlyCommittedTamtamMetadata = changes.exitCode === 0
+          && statusHasOnlyCommittedTamtamMetadataPaths(changes.stdout);
+        const nothingForReviewerToSee = onlyCommittedTamtamMetadata && !hasUnpushedCommits;
         const hasShippableState = hasUncommittedChanges || hasUnpushedCommits;
         if (!isReviewRetest) {
           reviewDisabled = reviewDisabled || (nothingForReviewerToSee && hasShippableState);

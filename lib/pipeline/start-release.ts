@@ -14,7 +14,7 @@ import { findIssueContext, isIssueContextCompatibleWithCurrentBranch } from './s
 import { checkCliStartGate } from '@/lib/usage/resolve-provider';
 import { getReleaseReadinessFailure } from '@/lib/shared/readiness';
 import { hasFreshLgtm, hasLocalCommitsAhead } from './release-state';
-import { statusHasAnyPath, statusHasNonTamtamPath } from '@/lib/pipeline/review-scope';
+import { statusHasAnyPath, statusHasOnlyCommittedTamtamMetadataPaths } from '@/lib/pipeline/review-scope';
 import { findBlockingRunningJob } from '@/lib/jobs/project-active-job';
 import type { IssueContext } from './release-context';
 import { appendRedactedFileSync } from '@/lib/jobs/redacted-log-writer';
@@ -133,7 +133,7 @@ async function readWorkingTreeStatus(projPath: string): Promise<string> {
  *  1. If no changes and no unpushed commits → nothing to release
  *  2. If a test command is configured/detected → start tests
  *  3. If there are changes or unpushed commits → start review, unless
- *     review is disabled or dirty paths are only `.tamtam/`
+ *     review is disabled or dirty paths are only committed TamTam metadata
  */
 async function queueRelease(projectName: string, blockingJobId?: string): Promise<ReleaseResult> {
   const { setPendingRelease } = await import('./pending-release');
@@ -201,7 +201,7 @@ export async function startRelease(projectName: string, options: StartReleaseOpt
   const status = await readWorkingTreeStatus(projPath);
   const changes = statusHasAnyPath(status);
   const unpushed = await hasLocalCommitsAhead(projPath);
-  const hasOnlyTamtamChanges = changes && !statusHasNonTamtamPath(status) && !unpushed;
+  const hasOnlyCommittedTamtamMetadataChanges = changes && statusHasOnlyCommittedTamtamMetadataPaths(status) && !unpushed;
   if (!changes && !unpushed) {
     return { ok: false, status: 400, detail: 'Nothing to release — no changes and no unpushed commits' };
   }
@@ -323,13 +323,14 @@ export async function startRelease(projectName: string, options: StartReleaseOpt
     }
 
     // If review is disabled per-project, short-circuit to commit — treat the
-    // agent's own prompt as the review step. `.tamtam/`-only working-tree dirt
-    // also skips review because start-review excludes those paths from scope.
+    // agent's own prompt as the review step. Committed TamTam metadata also
+    // skips review because start-review excludes those paths from scope.
+    // Local scratch under `.tamtam/cache/**` is not committed metadata.
     // No autoCommit gating needed: we're already inside an explicit release,
     // which implies commit intent (same reason job-storage.ts's completion hook
     // lets `inRelease` bypass autoCommitEnabled). reviewDisabled was read once
     // above from the shared releaseConfig snapshot.
-    if (reviewDisabled || hasOnlyTamtamChanges) {
+    if (reviewDisabled || hasOnlyCommittedTamtamMetadataChanges) {
       const r = await startProjectCommit(projectName);
       if (!r.ok) return { ok: false, status: r.status, detail: r.detail };
       return { ok: true, step: 'commit' as const, releaseJobId, message: r.message };

@@ -600,7 +600,7 @@ describe('startRelease — release pipeline entry decision tree', () => {
     expect(startProjectTestMock).not.toHaveBeenCalled();
   });
 
-  it('commits directly when only `.tamtam/` paths are dirty and no test command is detected', async () => {
+  it('commits directly when only committed TamTam metadata paths are dirty and no test command is detected', async () => {
     detectTestCommandMock.mockReturnValue(null);
     getProjectTestConfigMock.mockReturnValue({ reviewDisabled: false });
     execMock
@@ -615,6 +615,40 @@ describe('startRelease — release pipeline entry decision tree', () => {
     expect(startProjectCommitMock).toHaveBeenCalledWith('proj');
     expect(startProjectReviewMock).not.toHaveBeenCalled();
     expect(startProjectTestMock).not.toHaveBeenCalled();
+  });
+
+  it('starts review when only `.tamtam/cache/` paths are dirty and no test command is detected', async () => {
+    detectTestCommandMock.mockReturnValue(null);
+    getProjectTestConfigMock.mockReturnValue({ reviewDisabled: false });
+    execMock
+      .mockImplementationOnce(() => gitStatus('?? .tamtam/cache/agent-memory/review.md\n'))
+      .mockImplementationOnce(() => gitAhead('0'))
+      .mockImplementation(defaultExec);
+    startProjectReviewMock.mockResolvedValue({ ok: false, status: 400, detail: 'No non-.tamtam changes to review' });
+
+    const r = await startRelease('proj');
+
+    expect(r.ok).toBe(false);
+    if (!r.ok) expect(r.detail).toContain('No non-.tamtam changes to review');
+    expect(startProjectReviewMock).toHaveBeenCalledWith('proj');
+    expect(startProjectCommitMock).not.toHaveBeenCalled();
+  });
+
+  it('starts review when committed TamTam metadata is mixed with `.tamtam/cache/` dirt', async () => {
+    detectTestCommandMock.mockReturnValue(null);
+    getProjectTestConfigMock.mockReturnValue({ reviewDisabled: false });
+    execMock
+      .mockImplementationOnce(() => gitStatus(' M .tamtam/config.yml\n?? .tamtam/cache/audits/improve.md\n'))
+      .mockImplementationOnce(() => gitAhead('0'))
+      .mockImplementation(defaultExec);
+    startProjectReviewMock.mockResolvedValue({ ok: false, status: 400, detail: 'No non-.tamtam changes to review' });
+
+    const r = await startRelease('proj');
+
+    expect(r.ok).toBe(false);
+    if (!r.ok) expect(r.detail).toContain('No non-.tamtam changes to review');
+    expect(startProjectReviewMock).toHaveBeenCalledWith('proj');
+    expect(startProjectCommitMock).not.toHaveBeenCalled();
   });
 
   it('starts review when only `.tamtam/` paths are dirty but unpushed commits exist', async () => {

@@ -74,10 +74,10 @@ describe('findStrandedBranches', () => {
   afterEach(() => { vi.resetModules(); vi.restoreAllMocks(); });
 
   it('classifies as fix-branch when only `.tamtam/` paths are dirty and all commits are pushed', async () => {
-    // `startRelease` now commits `.tamtam/`-only work directly because review
-    // intentionally excludes those paths. The reconciler should therefore
-    // treat `.tamtam/` dirt as recoverable work instead of mistaking this for
-    // a clean PR-wait branch.
+    // `startRelease` now commits committed TamTam metadata directly because
+    // review intentionally excludes those paths. The reconciler should
+    // therefore treat this dirt as recoverable work instead of mistaking this
+    // for a clean PR-wait branch.
     withCommonStubs({
       'branch --show-current': { exitCode: 0, stdout: 'fix/issue-27-add-smoke-tests' },
       'symbolic-ref refs/remotes/origin/HEAD': { exitCode: 0, stdout: 'refs/remotes/origin/main' },
@@ -115,7 +115,7 @@ describe('findStrandedBranches', () => {
   });
 
   it('classifies as fix-branch when only `.tamtam/` paths are dirty and branch has no commits ahead', async () => {
-    // `.tamtam/`-only config drift is shippable by the release router now.
+    // Committed `.tamtam/` config drift is shippable by the release router now.
     // Do not classify it as empty or skip it; startRelease can commit it.
     withCommonStubs({
       'branch --show-current': { exitCode: 0, stdout: 'fix/issue-5-old-branch' },
@@ -205,6 +205,104 @@ describe('findStrandedBranches', () => {
     expect(candidates).toHaveLength(1);
     expect(candidates[0].kind).toBe('default-dirty');
     expect(candidates[0].branch).toBe('main');
+  });
+
+  it('classifies a behind default branch dirty with committed TamTam metadata as default-dirty → release (unstrands it)', async () => {
+    // Behind origin with an uncommitted `.tamtam/` override edit. No pending
+    // release / recovery marker, but the dirt is committed TamTam metadata, so
+    // it can be committed via release rather than left stranded forever.
+    withCommonStubs({
+      'branch --show-current': { exitCode: 0, stdout: 'main' },
+      'symbolic-ref refs/remotes/origin/HEAD': { exitCode: 0, stdout: 'refs/remotes/origin/main' },
+      'status --porcelain': { exitCode: 0, stdout: ' M .tamtam/agents/improve.md' },
+      'status --porcelain=v2 --branch': { exitCode: 0, stdout: '# branch.ab +0 -1' },
+    });
+    const { findStrandedBranches } = await import('@/lib/jobs/stranded-branch-reconcile');
+    const candidates = await findStrandedBranches(Date.now());
+    expect(candidates).toHaveLength(1);
+    expect(candidates[0].kind).toBe('default-dirty');
+    expect(candidates[0].behind).toBe(1);
+    expect(candidates[0].reason).toContain('committed metadata');
+  });
+
+  it('classifies a behind default branch dirty with a `.tamtam/`-to-`.tamtam/` rename as default-dirty → release', async () => {
+    withCommonStubs({
+      'branch --show-current': { exitCode: 0, stdout: 'main' },
+      'symbolic-ref refs/remotes/origin/HEAD': { exitCode: 0, stdout: 'refs/remotes/origin/main' },
+      'status --porcelain': { exitCode: 0, stdout: 'R  .tamtam/agents/old.md -> .tamtam/agents/new.md' },
+      'status --porcelain=v2 --branch': { exitCode: 0, stdout: '# branch.ab +0 -1' },
+    });
+    const { findStrandedBranches } = await import('@/lib/jobs/stranded-branch-reconcile');
+    const candidates = await findStrandedBranches(Date.now());
+    expect(candidates).toHaveLength(1);
+    expect(candidates[0].kind).toBe('default-dirty');
+    expect(candidates[0].behind).toBe(1);
+  });
+
+  it('leaves a behind default branch with a non-`.tamtam/` source renamed into `.tamtam/` stranded (user WIP protected)', async () => {
+    withCommonStubs({
+      'branch --show-current': { exitCode: 0, stdout: 'main' },
+      'symbolic-ref refs/remotes/origin/HEAD': { exitCode: 0, stdout: 'refs/remotes/origin/main' },
+      'status --porcelain': { exitCode: 0, stdout: 'R  src/app.ts -> .tamtam/agents/app.md' },
+      'status --porcelain=v2 --branch': { exitCode: 0, stdout: '# branch.ab +0 -1' },
+    });
+    const { findStrandedBranches } = await import('@/lib/jobs/stranded-branch-reconcile');
+    const candidates = await findStrandedBranches(Date.now());
+    expect(candidates).toEqual([]);
+  });
+
+  it('leaves a behind default branch with non-`.tamtam/` dirt stranded (user WIP protected)', async () => {
+    withCommonStubs({
+      'branch --show-current': { exitCode: 0, stdout: 'main' },
+      'symbolic-ref refs/remotes/origin/HEAD': { exitCode: 0, stdout: 'refs/remotes/origin/main' },
+      'status --porcelain': { exitCode: 0, stdout: ' M src/app.ts\n M .tamtam/agents/improve.md' },
+      'status --porcelain=v2 --branch': { exitCode: 0, stdout: '# branch.ab +0 -1' },
+    });
+    const { findStrandedBranches } = await import('@/lib/jobs/stranded-branch-reconcile');
+    const candidates = await findStrandedBranches(Date.now());
+    expect(candidates).toEqual([]);
+  });
+
+  it('leaves a behind default branch with only `.tamtam/cache/` dirt stranded (local scratch protected)', async () => {
+    withCommonStubs({
+      'branch --show-current': { exitCode: 0, stdout: 'main' },
+      'symbolic-ref refs/remotes/origin/HEAD': { exitCode: 0, stdout: 'refs/remotes/origin/main' },
+      'status --porcelain': { exitCode: 0, stdout: '?? .tamtam/cache/agent-memory/review.md' },
+      'status --porcelain=v2 --branch': { exitCode: 0, stdout: '# branch.ab +0 -1' },
+    });
+    const { findStrandedBranches } = await import('@/lib/jobs/stranded-branch-reconcile');
+    const candidates = await findStrandedBranches(Date.now());
+    expect(candidates).toEqual([]);
+  });
+
+  it('leaves a behind default branch with committed TamTam metadata plus `.tamtam/cache/` dirt stranded', async () => {
+    withCommonStubs({
+      'branch --show-current': { exitCode: 0, stdout: 'main' },
+      'symbolic-ref refs/remotes/origin/HEAD': { exitCode: 0, stdout: 'refs/remotes/origin/main' },
+      'status --porcelain': {
+        exitCode: 0,
+        stdout: ' M .tamtam/config.yml\n?? .tamtam/cache/audits/improve.md',
+      },
+      'status --porcelain=v2 --branch': { exitCode: 0, stdout: '# branch.ab +0 -1' },
+    });
+    const { findStrandedBranches } = await import('@/lib/jobs/stranded-branch-reconcile');
+    const candidates = await findStrandedBranches(Date.now());
+    expect(candidates).toEqual([]);
+  });
+
+  it('leaves a behind default branch with a `.tamtam/` rename plus ordinary dirt stranded (user WIP protected)', async () => {
+    withCommonStubs({
+      'branch --show-current': { exitCode: 0, stdout: 'main' },
+      'symbolic-ref refs/remotes/origin/HEAD': { exitCode: 0, stdout: 'refs/remotes/origin/main' },
+      'status --porcelain': {
+        exitCode: 0,
+        stdout: 'R  .tamtam/agents/old.md -> .tamtam/agents/new.md\n M src/app.ts',
+      },
+      'status --porcelain=v2 --branch': { exitCode: 0, stdout: '# branch.ab +0 -1' },
+    });
+    const { findStrandedBranches } = await import('@/lib/jobs/stranded-branch-reconcile');
+    const candidates = await findStrandedBranches(Date.now());
+    expect(candidates).toEqual([]);
   });
 
   it('does not classify a dirty default branch solely from stale failed commit release history', async () => {

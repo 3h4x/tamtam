@@ -321,9 +321,13 @@ describe('startProjectCommit', () => {
     const commitCall = execMock.mock.calls.find(
       ([cmd, args]) => cmd === 'git' && Array.isArray(args) && args[0] === '-C' && args[2] === 'commit',
     );
+    const addCall = execMock.mock.calls.find(
+      ([cmd, args]) => cmd === 'git' && Array.isArray(args) && args[0] === '-C' && args[2] === 'add',
+    );
     const generatorCall = execMock.mock.calls.find(
       ([cmd, args]) => cmd === 'codex' && Array.isArray(args) && args.includes('--print'),
     );
+    expect(addCall?.[1]).toEqual(expect.arrayContaining([':(exclude).tamtam/cache/**']));
     expect(generatorCall?.[1]).toEqual(expect.arrayContaining(['--permission-mode', 'acceptEdits']));
     expect(commitCall?.[2]).toMatchObject({
       timeout: 30000,

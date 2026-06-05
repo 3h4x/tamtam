@@ -34,6 +34,7 @@ import { resolveProjectPath } from '@/lib/shared/project-data';
 import { getLock, isLockOwnedByActiveRelease } from '@/lib/pipeline/pipeline-lock';
 import { listJobs } from '@/lib/jobs/job-storage';
 import { isAgentJobKind } from '@/lib/jobs/kinds';
+import { statusHasOnlyCommittedTamtamMetadataPaths } from '@/lib/pipeline/review-scope';
 
 // Per-project cooldown so a release that keeps failing doesn't get
 // re-triggered every probe tick (probe = 30s; this is 10 min).
@@ -253,9 +254,9 @@ export async function findStrandedBranches(nowMs: number = Date.now()): Promise<
       // clean is the only state where "checkout default" is safe.
       //
       // Dirty worktree includes `.tamtam/` config files. The release router
-      // knows how to commit `.tamtam/`-only dirt by bypassing review, so any
-      // dirty worktree is recoverable work here. Fully clean empty branches
-      // are the only state where "checkout default" is safe.
+      // knows how to commit committed TamTam metadata by bypassing review, so
+      // any dirty worktree is recoverable work here. Fully clean empty
+      // branches are the only state where "checkout default" is safe.
       const status = await gitStatusPorcelain(path);
       const isDirty = !!(status && status.trim().length > 0);
       // PR-open-awaiting-merge state: branch has commits ahead of default
@@ -317,6 +318,22 @@ export async function findStrandedBranches(nowMs: number = Date.now()): Promise<
           ahead: 0,
           behind: 0,
           reason: `default ${state.def} has uncommitted changes (orphaned by an interrupted release)`,
+        });
+      } else if (statusHasOnlyCommittedTamtamMetadataPaths(dirtyStatus)) {
+        // Dirt confined to committed TamTam metadata (`.tamtam/config.yml`,
+        // `.tamtam/agents/**`, or `.tamtam/.gitignore`) blocks the
+        // branch-freshness gate's rebase and strands the project with no user
+        // WIP at risk. Local scratch such as `.tamtam/cache/**` is excluded.
+        const ab = await readAheadBehind(path);
+        out.push({
+          project: p.name,
+          path,
+          branch: state.current,
+          defaultBranch: state.def,
+          kind: 'default-dirty',
+          ahead: ab?.ahead ?? 0,
+          behind: ab?.behind ?? 0,
+          reason: `default ${state.def} dirty with TamTam-owned committed metadata only${ab && ab.behind > 0 ? ` (behind ${ab.behind})` : ''} — committing via release to unstrand`,
         });
       }
       // No release evidence means the dirty default branch is human WIP.

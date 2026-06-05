@@ -140,13 +140,13 @@ startRelease()
   └─ Otherwise:
       ├─ testCommand configured → start TEST
       └─ No testCommand:
-          ├─ Has uncommitted changes → start REVIEW, or COMMIT when review_disabled is on / only `.tamtam/` paths changed and no unpushed commits exist
+          ├─ Has uncommitted changes → start REVIEW, or COMMIT when review_disabled is on / only committed TamTam metadata changed and no unpushed commits exist
           └─ Only unpushed commits → start REVIEW against @{u}..HEAD, or PUSH when review_disabled is on
 
 TEST
   ├─ exit 0  → completion hook → start REVIEW when uncommitted changes or unpushed commits exist
   │                              → when review_disabled is on: COMMIT for uncommitted changes, PUSH for unpushed commits
-  │                              → when only dirty working-tree paths are under `.tamtam/` and no unpushed commits exist: COMMIT (review has no scope)
+  │                              → when only dirty working-tree paths are committed TamTam metadata and no unpushed commits exist: COMMIT (review has no scope)
   │                              → otherwise start PUSH/no-op
   └─ exit ≠0 → completion hook → start FIX → re-run TEST (`fix_max_iterations`; default 0 = unlimited)
                                  → otherwise finalize release (exit 1)
@@ -287,9 +287,15 @@ recoverable release work when current durable state proves release intent,
 either a `pending_release:<project>` flag or a
 `default_dirty_commit_recovery:<project>` marker written by a failed commit on
 the default branch. The marker expires after 24 hours and must still match the
-current dirty status with no dirty file newer than the failed commit. A bare
-dirty default branch, or one backed only by stale release history, is assumed to
-be human WIP and is left alone.
+current dirty status with no dirty file newer than the failed commit. The one
+bare-dirty exception is when every dirty path is committed TamTam metadata:
+`.tamtam/config.yml`, `.tamtam/agents/**`, or `.tamtam/.gitignore`.
+Rename/copy entries only qualify when both the source and destination paths are
+in that allowlist. Local scratch under `.tamtam/cache/**` never qualifies and is
+excluded from commit staging even if a project's ignore rule is missing. Any
+dirty default branch with ordinary work, mixed committed metadata and local
+scratch, or only stale release history is assumed to be human WIP and is left
+alone.
 
 When reconciliation detects a chain that ended at a non-terminal success step
 (`test`, `fix`, `review`, `commit`) without a successor, it re-fires that
@@ -329,7 +335,7 @@ Called by `markDone()` after every job finishes. Hooks run in order:
 2. **Review mark**: If a working-tree `review` exits 0, call `markReviewed(project, path)` to store a commit-aware review fingerprint (`git status` + `HEAD` + upstream) used by the fresh-LGTM skip. PR-diff reviews (`sourceType: 'pr_review'`) do not update that local fingerprint or the incremental reviewed ref. On `LGTM` verdict from a working-tree review, also pin `refs/tamtam/reviewed/<branch>` to `HEAD` — the next pipeline review narrows its scope from `@{u}..HEAD` to `<ref>..HEAD` so already-approved commits aren't re-reviewed (gated by `incremental_review_enabled`, default on; falls back to full scope when the ref isn't an ancestor of HEAD, e.g. after a rebase).
 3. **Review chaining**: If `review` exits 0 AND (in-release OR `auto_push_enabled`): LGTM → start PUSH; NEEDS ATTENTION → start FIX (within iteration cap); DO NOT SHIP follows `review_do_not_ship_action` in the workflow-driven release orchestrator (`fix` (default) starts FIX, `pass` files a follow-up issue and continues to commit, `abort` stops). Non-converging review loops still stop when the new review repeats the previous findings or contradicts the most recent fix's `Status: fixed` claims for the same `Finding ID`s.
 4. **Fix chaining**: If `fix` exits 0 AND (in-release OR `auto_push_enabled`): start REVIEW.
-5. **Test chaining**: If `test` exits 0 AND (in-release OR `auto_push_enabled`): start REVIEW, except when `review_disabled` is on or the only dirty working-tree paths are under `.tamtam/` with no unpushed commits (the reviewer excludes `.tamtam/` from working-tree scope). With review disabled, uncommitted changes go to COMMIT and existing unpushed commits go to PUSH. With `.tamtam/`-only dirty paths and no unpushed commits, the workflow-driven release routes to COMMIT because review has no non-`.tamtam` scope.
+5. **Test chaining**: If `test` exits 0 AND (in-release OR `auto_push_enabled`): start REVIEW, except when `review_disabled` is on or the only dirty working-tree paths are committed TamTam metadata with no unpushed commits (the reviewer excludes `.tamtam/` from working-tree scope). With review disabled, uncommitted changes go to COMMIT and existing unpushed commits go to PUSH. With committed TamTam metadata only and no unpushed commits, the workflow-driven release routes to COMMIT because review has no non-`.tamtam` scope.
 6. **Push cancellation abort**: If `push` exits `-2` or `-3`, abort the release with `push cancelled` or `push cancelled by release abort or timeout` instead of entering a fix loop.
 7. **Push hook fix**: If `push` exits with any other non-zero code and log matches hook rejection patterns: start a generic `fix` job whose `parentJobId` points at the failed push (within `getPushFixAttemptCap()=2`). The fix prompt reads the hook error from the parent push's log.
 8. **Fix→push re-push**: When that `fix` (parent.kind === `push`) exits 0: re-run PUSH.

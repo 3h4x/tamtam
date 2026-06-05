@@ -448,13 +448,12 @@ Verdict: NEEDS ATTENTION
     expect(r.decision).toEqual({ next: 'push', from: 'test' });
   });
 
-  it('routes test → commit when only `.tamtam/` paths are dirty (review would have nothing to review)', async () => {
-    // Review filter excludes `.tamtam/` (start-review.ts), so a release
-    // with only `.tamtam/` dirt would halt at "No uncommitted changes or
+  it('routes test → commit when only committed TamTam metadata paths are dirty (review would have nothing to review)', async () => {
+    // Review filter excludes `.tamtam/` (start-review.ts), so a release with
+    // only committed TamTam metadata would halt at "No uncommitted changes or
     // unpushed commits to review" even though commit/push still have work.
-    // Orchestrator should treat this as functionally review-disabled and
-    // route to commit so the chain advances through commit → push →
-    // mark-dod → pr-wait.
+    // Orchestrator should treat this as functionally review-disabled and route
+    // to commit so the chain advances through commit → push → mark-dod → pr-wait.
     const testJob = { id: 'test-1', kind: 'test', exitCode: 0, finishedAt: 100, project: 'test-tt' };
     waitForJobCompletionMock.mockResolvedValue({ job: testJob, finished: true, reason: 'finished' });
     getJobMock.mockReturnValue(testJob);
@@ -475,7 +474,7 @@ Verdict: NEEDS ATTENTION
     expect(r.decision).toEqual({ next: 'commit', from: 'test' });
   });
 
-  it('routes test → review when only `.tamtam/` paths are dirty but unpushed commits exist', async () => {
+  it('routes test → review when only committed TamTam metadata paths are dirty but unpushed commits exist', async () => {
     const testJob = { id: 'test-1', kind: 'test', exitCode: 0, finishedAt: 100, project: 'test-tt' };
     waitForJobCompletionMock.mockResolvedValue({ job: testJob, finished: true, reason: 'finished' });
     getJobMock.mockReturnValue(testJob);
@@ -490,6 +489,48 @@ Verdict: NEEDS ATTENTION
     const r = await releaseOrchestratorWorkflow('test-1', { projectName: 'test-tt', parentJobId: 'release-1' });
 
     expect(hasLocalCommitsAheadMock).toHaveBeenCalledWith('/repo/project');
+    expect(dispatchPhaseMock).toHaveBeenCalledWith(
+      { next: 'review', from: 'test' },
+      expect.objectContaining({ projectName: 'test-tt' }),
+    );
+    expect(r.decision).toEqual({ next: 'review', from: 'test' });
+  });
+
+  it('routes test → review when only `.tamtam/cache/` paths are dirty', async () => {
+    const testJob = { id: 'test-1', kind: 'test', exitCode: 0, finishedAt: 100, project: 'test-tt' };
+    waitForJobCompletionMock.mockResolvedValue({ job: testJob, finished: true, reason: 'finished' });
+    getJobMock.mockReturnValue(testJob);
+    getProjectTestConfigMock.mockResolvedValue({ reviewDisabled: false });
+    execMock.mockResolvedValue({
+      exitCode: 0,
+      stdout: '?? .tamtam/cache/agent-memory/review.md\n',
+    });
+    hasLocalCommitsAheadMock.mockResolvedValue(false);
+    dispatchPhaseMock.mockResolvedValue({ dispatched: true, phase: 'review', childRunId: 'wrun_review' });
+
+    const r = await releaseOrchestratorWorkflow('test-1', { projectName: 'test-tt', parentJobId: 'release-1' });
+
+    expect(dispatchPhaseMock).toHaveBeenCalledWith(
+      { next: 'review', from: 'test' },
+      expect.objectContaining({ projectName: 'test-tt' }),
+    );
+    expect(r.decision).toEqual({ next: 'review', from: 'test' });
+  });
+
+  it('routes test → review when committed TamTam metadata is mixed with `.tamtam/cache/` dirt', async () => {
+    const testJob = { id: 'test-1', kind: 'test', exitCode: 0, finishedAt: 100, project: 'test-tt' };
+    waitForJobCompletionMock.mockResolvedValue({ job: testJob, finished: true, reason: 'finished' });
+    getJobMock.mockReturnValue(testJob);
+    getProjectTestConfigMock.mockResolvedValue({ reviewDisabled: false });
+    execMock.mockResolvedValue({
+      exitCode: 0,
+      stdout: ' M .tamtam/config.yml\n?? .tamtam/cache/audits/improve.md\n',
+    });
+    hasLocalCommitsAheadMock.mockResolvedValue(false);
+    dispatchPhaseMock.mockResolvedValue({ dispatched: true, phase: 'review', childRunId: 'wrun_review' });
+
+    const r = await releaseOrchestratorWorkflow('test-1', { projectName: 'test-tt', parentJobId: 'release-1' });
+
     expect(dispatchPhaseMock).toHaveBeenCalledWith(
       { next: 'review', from: 'test' },
       expect.objectContaining({ projectName: 'test-tt' }),

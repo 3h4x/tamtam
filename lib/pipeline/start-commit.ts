@@ -460,8 +460,8 @@ async function runCommit(
     }
   }
 
-  // Stage all changes including new (untracked) files. .gitignore is expected
-  // to exclude secrets — auto-push trusts it.
+  // Stage all changes including new (untracked) files. Keep TamTam's local
+  // scratch cache out even if a project's ignore rule is missing or stale.
   //
   // `git add -A` can transiently fail when another git process holds
   // `.git/index.lock` (a prior step's pre-push hook, a concurrent
@@ -475,8 +475,9 @@ async function runCommit(
   // Remove a stale lock left by a previously crashed/killed git before staging,
   // so a single dead lock doesn't permanently brick this project's commits.
   await clearStaleIndexLock(projPath, log);
-  log(`\n$ git add -A\n`);
-  let addR = await execStep('git', ['-C', projPath, 'add', '-A'], { timeout: 10000 });
+  const addArgs = ['-C', projPath, 'add', '-A', '--', '.', ':(exclude).tamtam/cache', ':(exclude).tamtam/cache/**'];
+  log(`\n$ git add -A -- . ':(exclude).tamtam/cache' ':(exclude).tamtam/cache/**'\n`);
+  let addR = await execStep('git', addArgs, { timeout: 10000 });
   if (addR.stdout) log(addR.stdout);
   if (addR.stderr) log(addR.stderr);
   if (addR.exitCode !== 0 && /index\.lock|unable to create.*lock/i.test(addR.stderr)) {
@@ -486,7 +487,7 @@ async function runCommit(
       // After waiting, retry the conservative stale-lock cleanup; it only
       // unlinks old locks that have no path-specific git process.
       await clearStaleIndexLock(projPath, log);
-      addR = await execStep('git', ['-C', projPath, 'add', '-A'], { timeout: 10000 });
+      addR = await execStep('git', addArgs, { timeout: 10000 });
       if (addR.stdout) log(addR.stdout);
       if (addR.stderr) log(addR.stderr);
     }
@@ -512,7 +513,7 @@ async function runCommit(
       const hookChangesR = await execStep('git', ['-C', projPath, 'status', '--porcelain'], { timeout: 5000 });
       if (hookChangesR.stdout.trim()) {
         log(`\n# pre-commit hook modified files — staging and retrying commit\n`);
-        await execStep('git', ['-C', projPath, 'add', '-A'], { timeout: 10000 });
+        await execStep('git', addArgs, { timeout: 10000 });
         commitR = await execStep('git', ['-C', projPath, 'commit', '-m', message], { timeout: 30000 });
         if (commitR.stdout) log(commitR.stdout);
         if (commitR.stderr) log(commitR.stderr);
