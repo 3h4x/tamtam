@@ -694,17 +694,25 @@ export async function registerNode(): Promise<void> {
     } catch (err) {
       console.error('[retention] nightly cleanup error:', err);
     }
-    // Also trim the workflow runtime's own tables (workflow_runs,
-    // workflow_events, workflow_steps, …) — the runtime never prunes
-    // its own rows, so they grow unbounded without this sweep.
+    // Also trim the workflow runtime's own traces — the runtime never prunes
+    // them, so they grow unbounded without this sweep. The local file-backed
+    // world and the Postgres world store traces differently, so prune the
+    // one that's actually in use (mutually exclusive by WORKFLOW_TARGET_WORLD).
     try {
-      const { pruneOldWorkflowRuns } = await import('@/lib/workflows/cron/workflow-retention');
       const { getSettings } = await import('@/lib/shared/config');
-      const summary = await pruneOldWorkflowRuns({
-        retentionDays: getSettings().workflow_run_retention_days,
-      });
-      if (summary.runsDeleted > 0 || summary.errorCount > 0) {
-        console.log(`[retention] workflow trim: runs=${summary.runsDeleted} events=${summary.eventsDeleted} steps=${summary.stepsDeleted} status=${summary.status}${summary.lastError ? ` err=${summary.lastError}` : ''}`);
+      const retentionDays = getSettings().workflow_run_retention_days;
+      if (process.env.WORKFLOW_TARGET_WORLD === 'local') {
+        const { pruneLocalWorldRuns } = await import('@/lib/workflows/local-world-retention');
+        const summary = pruneLocalWorldRuns({ retentionDays });
+        if (summary.runsDeleted > 0 || summary.errorCount > 0) {
+          console.log(`[retention] local workflow trim: runs=${summary.runsDeleted} steps=${summary.stepsDeleted} status=${summary.status}${summary.lastError ? ` err=${summary.lastError}` : ''}`);
+        }
+      } else {
+        const { pruneOldWorkflowRuns } = await import('@/lib/workflows/cron/workflow-retention');
+        const summary = await pruneOldWorkflowRuns({ retentionDays });
+        if (summary.runsDeleted > 0 || summary.errorCount > 0) {
+          console.log(`[retention] workflow trim: runs=${summary.runsDeleted} events=${summary.eventsDeleted} steps=${summary.stepsDeleted} status=${summary.status}${summary.lastError ? ` err=${summary.lastError}` : ''}`);
+        }
       }
     } catch (err) {
       console.error('[retention] workflow trim error:', err);
