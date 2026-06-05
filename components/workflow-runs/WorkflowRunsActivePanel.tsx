@@ -1,6 +1,7 @@
 'use client';
 
 import Link from 'next/link';
+import { buttonVariants } from '@/components/ui/Button';
 import { WorkflowStatusBadge } from '@/components/workflow-runs/workflow-run-status';
 
 export interface WorkflowRunsActiveItem {
@@ -32,7 +33,10 @@ export function WorkflowRunsActivePanel({ items }: { items: WorkflowRunsActiveIt
           <Link
             key={item.id}
             href={`/workflow-runs/${encodeURIComponent(item.id)}`}
-            className="min-w-0 rounded-md border border-border bg-bg-primary px-3 py-2 text-xs transition-colors hover:bg-bg-tertiary"
+            className={buttonVariants({
+              surface: 'primary',
+              className: '!block min-w-0 !rounded-md !px-3 !py-2 !text-xs !font-normal',
+            })}
           >
             <div className="flex items-start justify-between gap-3">
               <div className="min-w-0">

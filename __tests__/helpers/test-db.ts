@@ -38,11 +38,13 @@ export interface TestDbHandle {
 // handle before returning a test handle instead.
 const MIGRATIONS_DIR = join(process.cwd(), 'lib/db/migrations');
 const CACHE_DIR = join(tmpdir(), 'tamtam-pglite-cache-v3');
-const CACHE_LOCK_DIR = join(CACHE_DIR, '.snapshot-build.lock');
 const CACHE_LOCK_STALE_MS = 2 * 60 * 1000;
+const CACHE_LOCK_WAIT_MS = 5_000;
 
 let cachedMigrationsHash: string | null = null;
 let cachedRequiredPublicTables: string[] | null = null;
+
+type SnapshotKind = 'empty' | 'migrated';
 
 function getMigrationsHash(): string {
   if (cachedMigrationsHash !== null) return cachedMigrationsHash;
@@ -82,8 +84,12 @@ function getRequiredPublicTables(): string[] {
   return cachedRequiredPublicTables;
 }
 
-function cachePath(kind: 'empty' | 'migrated'): string {
+function cachePath(kind: SnapshotKind): string {
   return join(CACHE_DIR, `${kind}-${getMigrationsHash()}.tar`);
+}
+
+function cacheLockDir(kind: SnapshotKind): string {
+  return join(CACHE_DIR, `.${kind}-snapshot-build.lock`);
 }
 
 function readSnapshot(file: string): Blob | null {
@@ -114,11 +120,19 @@ async function writeSnapshotAsync(file: string, dump: Blob | File): Promise<void
 
 function makeHandle(raw: PGlite): TestDbHandle {
   const db = drizzle(raw, { schema });
+  let closed = false;
   return {
     db,
     raw,
     async [Symbol.asyncDispose]() {
-      await raw.close();
+      if (closed) return;
+      closed = true;
+      try {
+        await raw.close();
+      } catch (e) {
+        if (e instanceof Error && /PGlite is closed/i.test(e.message)) return;
+        throw e;
+      }
     },
   };
 }
@@ -173,21 +187,27 @@ function sleep(ms: number): Promise<void> {
   return new Promise((resolve) => setTimeout(resolve, ms));
 }
 
-async function withSnapshotBuildLock<T>(work: () => Promise<T>): Promise<T> {
+async function withSnapshotBuildLock<T>(kind: SnapshotKind, work: () => Promise<T>, onLockTimeout: () => Promise<T>): Promise<T> {
+  const lockDir = cacheLockDir(kind);
+  const startedAt = Date.now();
+
   while (true) {
     try {
       if (!existsSync(CACHE_DIR)) mkdirSync(CACHE_DIR, { recursive: true });
-      mkdirSync(CACHE_LOCK_DIR);
+      mkdirSync(lockDir);
       break;
     } catch {
       try {
-        const st = statSync(CACHE_LOCK_DIR);
+        const st = statSync(lockDir);
         if (Date.now() - st.mtimeMs > CACHE_LOCK_STALE_MS) {
-          rmSync(CACHE_LOCK_DIR, { recursive: true, force: true });
+          rmSync(lockDir, { recursive: true, force: true });
           continue;
         }
       } catch {
         continue;
+      }
+      if (Date.now() - startedAt > CACHE_LOCK_WAIT_MS) {
+        return onLockTimeout();
       }
       await sleep(50);
     }
@@ -196,11 +216,11 @@ async function withSnapshotBuildLock<T>(work: () => Promise<T>): Promise<T> {
   try {
     return await work();
   } finally {
-    rmSync(CACHE_LOCK_DIR, { recursive: true, force: true });
+    rmSync(lockDir, { recursive: true, force: true });
   }
 }
 
-async function buildSnapshot(kind: 'empty' | 'migrated', file: string): Promise<void> {
+async function buildSnapshot(kind: SnapshotKind, file: string): Promise<void> {
   const handle = await bootPGlite();
   try {
     if (kind === 'migrated') {
@@ -213,14 +233,15 @@ async function buildSnapshot(kind: 'empty' | 'migrated', file: string): Promise<
   }
 }
 
-async function ensureSnapshot(kind: 'empty' | 'migrated'): Promise<string> {
+async function ensureSnapshot(kind: SnapshotKind): Promise<string | null> {
   const file = cachePath(kind);
   if (readSnapshot(file)) return file;
 
-  await withSnapshotBuildLock(async () => {
+  const built = await withSnapshotBuildLock(kind, async () => {
     if (readSnapshot(file)) return;
     await buildSnapshot(kind, file);
-  });
+  }, async () => null);
+  if (built === null) return null;
   return file;
 }
 
@@ -234,8 +255,8 @@ async function ensureSnapshot(kind: 'empty' | 'migrated'): Promise<string> {
  */
 export async function createTestPgDb(): Promise<TestDbHandle> {
   const file = await ensureSnapshot('migrated');
-  const cached = readSnapshot(file);
-  if (cached) {
+  const cached = file ? readSnapshot(file) : null;
+  if (file && cached) {
     const handle = await bootPGliteFromSnapshot(cached);
     if (await isMigratedSnapshotCurrent(handle)) return handle;
     await handle[Symbol.asyncDispose]();
@@ -261,8 +282,8 @@ export async function createTestPgDb(): Promise<TestDbHandle> {
  */
 export async function createTestPgDbEmpty(): Promise<TestDbHandle> {
   const file = await ensureSnapshot('empty');
-  const cached = readSnapshot(file);
-  if (cached) {
+  const cached = file ? readSnapshot(file) : null;
+  if (file && cached) {
     const handle = await bootPGliteFromSnapshot(cached);
     if (await isEmptySnapshotCurrent(handle)) return handle;
     await handle[Symbol.asyncDispose]();
@@ -271,4 +292,11 @@ export async function createTestPgDbEmpty(): Promise<TestDbHandle> {
 
   const handle = await bootPGlite();
   return handle;
+}
+
+export async function prewarmTestPgDbSnapshots(): Promise<void> {
+  await Promise.all([
+    ensureSnapshot('empty'),
+    ensureSnapshot('migrated'),
+  ]);
 }
