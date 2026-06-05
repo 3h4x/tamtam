@@ -18,6 +18,7 @@ import {
   outcomePillTone,
   summarizeInput,
   summarizeOutcome,
+  summarizeWorkflowDisplayStatus,
   summarizeTrigger,
 } from '@/components/workflow-runs/summarize';
 import { Button } from '@/components/ui/Button';
@@ -134,7 +135,8 @@ function workflowEventTime(run: WorkflowRunSummary): string | null {
 }
 
 function workflowRunNeedsAttention(run: WorkflowRunSummary): boolean {
-  if (run.status === 'failed' || run.status === 'cancelled') return true;
+  const displayStatus = summarizeWorkflowDisplayStatus(run);
+  if (displayStatus === 'failed' || displayStatus === 'cancelled') return true;
   const outcome = summarizeOutcome(run);
   return outcome.tone === 'err' || outcome.tone === 'warn';
 }
@@ -222,7 +224,7 @@ export function WorkflowRunsPage() {
   const statusCounts = data.runs.reduce<Record<StatusFilter, number>>(
     (counts, run) => {
       counts.all += 1;
-      const status = STATUS_FILTERS.find((s) => s !== 'all' && s === run.status);
+      const status = STATUS_FILTERS.find((s) => s !== 'all' && s === summarizeWorkflowDisplayStatus(run));
       if (status) counts[status] += 1;
       return counts;
     },
@@ -239,7 +241,7 @@ export function WorkflowRunsPage() {
     (counts, run) => {
       if (!workflowRunNeedsAttention(run)) return counts;
       counts.all += 1;
-      const status = STATUS_FILTERS.find((s) => s !== 'all' && s === run.status);
+      const status = STATUS_FILTERS.find((s) => s !== 'all' && s === summarizeWorkflowDisplayStatus(run));
       if (status) counts[status] += 1;
       return counts;
     },
@@ -253,7 +255,8 @@ export function WorkflowRunsPage() {
     },
   );
   const filtered = data.runs.filter((r) => {
-    if (statusFilter !== 'all' && r.status !== statusFilter) return false;
+    const displayStatus = summarizeWorkflowDisplayStatus(r);
+    if (statusFilter !== 'all' && displayStatus !== statusFilter) return false;
     if (!nameNeedle) return true;
     // Three summarize* calls below are non-trivial; only build the haystack
     // when there's actually a search needle to match against.
@@ -262,7 +265,7 @@ export function WorkflowRunsPage() {
       humanizeWorkflowLabel(r.name),
       r.name,
       r.rawName,
-      r.status,
+      displayStatus,
       summarizeInput(r.input),
       summarizeTrigger(r.input),
       outcome.label,
@@ -279,7 +282,7 @@ export function WorkflowRunsPage() {
       id: run.id,
       name: humanizeWorkflowLabel(run.name),
       rawName: run.rawName,
-      status: run.status,
+      status: summarizeWorkflowDisplayStatus(run),
       inputLabel: summarizeInput(run.input),
       inputTitle: formatTitle(run.input),
       triggerLabel: summarizeTrigger(run.input),
@@ -295,7 +298,7 @@ export function WorkflowRunsPage() {
         id: run.id,
         name: humanizeWorkflowLabel(run.name),
         rawName: run.rawName,
-        status: run.status,
+        status: summarizeWorkflowDisplayStatus(run),
         inputLabel: summarizeInput(run.input),
         inputTitle: formatTitle(run.input),
         triggerLabel: summarizeTrigger(run.input),
@@ -313,7 +316,7 @@ export function WorkflowRunsPage() {
       cellTitle: (r) => r.rawName,
       render: (r) => (
         <div className="flex min-w-0 items-center gap-2">
-          <WorkflowStatusBadge status={r.status} />
+          <WorkflowStatusBadge status={summarizeWorkflowDisplayStatus(r)} />
           <Link
             href={`/workflow-runs/${encodeURIComponent(r.id)}`}
             className="min-w-0 truncate font-medium hover:underline"
@@ -464,6 +467,7 @@ export function WorkflowRunsPage() {
         <div className="overflow-hidden rounded-md border border-border sm:hidden">
           {filtered.map((r) => {
             const outcome = summarizeOutcome(r);
+            const displayStatus = summarizeWorkflowDisplayStatus(r);
             const inputSummary = summarizeInput(r.input);
             const triggerSummary = summarizeTrigger(r.input);
             return (
@@ -478,7 +482,7 @@ export function WorkflowRunsPage() {
                       {humanizeWorkflowLabel(r.name)}
                     </div>
                     <div className="mt-1 flex min-w-0 items-center gap-2">
-                      <WorkflowStatusBadge status={r.status} />
+                      <WorkflowStatusBadge status={displayStatus} />
                       <div className="min-w-0 truncate text-xs text-text-secondary" title={formatTitle(r.input)}>
                         {inputSummary}
                       </div>

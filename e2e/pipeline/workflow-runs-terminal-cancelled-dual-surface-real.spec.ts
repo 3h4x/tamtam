@@ -113,6 +113,9 @@ test.describe('Real workflow-runs and terminal dual-surface abort lifecycle', ()
     await expect(cancelledRow).toBeVisible({ timeout: 15_000 });
     await expect(cancelledRow.getByLabel('status completed')).toBeVisible({ timeout: 15_000 });
     await expect(cancelledRow.getByText('exit -3')).toBeVisible({ timeout: 15_000 });
+    await expect(page.getByRole('button', { name: /completed 1/i })).toBeVisible({
+      timeout: 15_000,
+    });
     await expect(page.getByText('1 running')).toHaveCount(0, { timeout: 15_000 });
     await expect(page).toHaveURL(stableWorkflowRunsUrl);
 

@@ -134,6 +134,10 @@ export function summarizeOutcome(run: OutcomeInput): { label: string; tone: Outc
   return { label: 'completed', tone: 'ok' };
 }
 
+export function summarizeWorkflowDisplayStatus(run: OutcomeInput): string {
+  return run.status;
+}
+
 export function outcomePillTone(tone: OutcomeTone): PillTone {
   switch (tone) {
     case 'ok': return 'success';
