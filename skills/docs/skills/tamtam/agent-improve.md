@@ -169,7 +169,7 @@ These rules are non-negotiable — they govern every step that follows.
 
 **Re-verification passes (header says "## Re-verification pass #N").** This means every file was already audited at its current content and the queue rotated. The prompt and model improve over time, so a prior `clean` is a *hypothesis to re-test*, not a settled fact. For each candidate the prerequisite prints its most recent audit row under `last audit:`. Read that note first, then re-audit the file under the current rubric: confirm the prior verdict still holds, or find what it missed. Do not rubber-stamp ("it was clean last time") and do not skip — re-validate against the file in front of you. A re-verification pass that finds nothing new is still productive: record each file clean in the ledger as usual so the pass advances.
 
-The candidate queue is the **5 oldest candidates** (oldest commit first) the prerequisite gave you — on a fresh pass these are unaudited at their present bytes; on a re-verification pass they are the oldest files being re-checked. You walk them **in order**, and per file you do exactly ONE of:
+The candidate queue is the **size-budgeted batch of oldest candidates** (oldest commit first) the prerequisite gave you — the prerequisite walks oldest-first and stops at a file-count or cumulative-line budget, so a batch is many small files or a few large ones (it prints `(batch: N file(s), ~M lines …)` at the end of the list). On a fresh pass these are unaudited at their present bytes; on a re-verification pass they are the oldest files being re-checked. You walk them **in order**, and per file you do exactly ONE of:
 
 - **Found a real instance in Families 1–4** → apply ONE fix to that file, verify per §5, then **record it in the ledger** (below). Whether you continue scanning the remaining candidates depends on whether the fix was *small* or *substantial* (see §3).
 - **Clean (no real instance)** → append one clean row to `.tamtam/cache/audits/improve.md`, **record it in the ledger**, and continue to the next candidate. Do NOT modify the file.
@@ -185,13 +185,13 @@ git hash-object -- "<path>" >> .tamtam/cache/audits/improve-ledger.txt
 This appends the file's current blob SHA — the content-addressed "audited" marker that replaces the old `touch`. It changes no file content (`git status` stays clean) and demotes the file from the queue until its bytes actually change, at which point the SHA differs and the file re-surfaces automatically. Never `touch` files for rotation, and never write an "audited" marker into the source file itself.
 
 Caps and order:
-- Walk **at most 5 candidates** per run (the prerequisite list size).
+- Walk **every candidate the prerequisite listed** (the size-budgeted batch — typically more than a handful of small files, fewer large ones). Auditing the whole batch is the point: it amortizes the per-run cost. The fix caps below — not the audit count — are what keep the run bounded.
 - **At most 3 fixes per run** total. After the third fix, stop regardless of remaining small-fix candidates. (Still record the files you actually audited; unwalked candidates are simply left for the next run.)
 - **At most 1 fix per file.** Don't pile patterns onto the same file in one run.
 - Skip a candidate without auditing only if it is a tiny barrel/re-export with nothing meaningful inside (one-line type re-export). "It's just config" / "it's just an SVG" is laziness — audit it against the rubric and record it in the ledger as clean if no instance.
 - A candidate should never be one you audited at this same content in a recent run — the prerequisite filters those via the ledger. If you see an obvious repeat, the previous run failed to record it; audit it once, record it, and continue.
 
-If the prerequisite output is absent (custom agent without the standard prereq), reproduce its selection from the repo root: list tracked source files via `git ls-files -- '*.ts' '*.tsx' '*.js' '*.jsx' '*.sol' '*.py' '*.rs' '*.go' '*.md' '*.sh'`, list non-ignored untracked source files via `git ls-files --others --exclude-standard -- ...`, hash every candidate's current content with `git hash-object -- "<path>"`, drop any candidate whose blob SHA already appears in `.tamtam/cache/audits/improve-ledger.txt`, prefer the oldest by latest commit time with untracked files first, and take the first 5. Skip generated/vendored paths (`*.d.ts`, `node_modules`, `dist`, `build`, `out`, `coverage`, `.tamtam/`).
+If the prerequisite output is absent (custom agent without the standard prereq), reproduce its selection from the repo root: list tracked source files via `git ls-files -- '*.ts' '*.tsx' '*.js' '*.jsx' '*.sol' '*.py' '*.rs' '*.go' '*.md' '*.sh'`, list non-ignored untracked source files via `git ls-files --others --exclude-standard -- ...`, hash every candidate's current content with `git hash-object -- "<path>"`, drop any candidate whose blob SHA already appears in `.tamtam/cache/audits/improve-ledger.txt`, prefer the oldest by latest commit time with untracked files first, and take the oldest until you reach ~25 files or ~3000 cumulative lines (whichever first; always at least one). Skip generated/vendored paths (`*.d.ts`, `node_modules`, `dist`, `build`, `out`, `coverage`, `.tamtam/`).
 
 ## 2. Audit by family, not by checklist
 
@@ -352,7 +352,7 @@ Print a summary at the end of the run. Pick the shape that matches what happened
 **Shape A — at least one fix applied:**
 - **Fixes applied** (1–3): per fix, list path · family · class (small | substantial) · one-sentence change.
 - **Clean rotations** (0–4): paths that were walked, found clean, and recorded in the ledger before/between the fixes.
-- **Why the walk ended** (`substantial fix — stopped`, `3-fix cap reached`, `5-candidate cap reached`, `queue exhausted`).
+- **Why the walk ended** (`substantial fix — stopped`, `3-fix cap reached`, `candidate batch exhausted`, `queue exhausted`).
 - **Verification** (type-check pass; for substantial fixes also test-file: N/N passing).
 - If this was a **re-verification pass**, say so and note whether the re-check confirmed prior verdicts or overturned one.
 
@@ -413,6 +413,6 @@ Both the audit log and the ledger live under `.tamtam/cache/` (gitignored), so t
 - Mutate state outside the candidate files you audited (no schema changes, no settings writes, no DB queries). The only exceptions are the ledger append in §1/§4 (`git hash-object -- "<path>" >> .tamtam/cache/audits/improve-ledger.txt` — a gitignored cache file; source content unchanged, `git status` stays clean) and the audit-log append in §7.
 - Modify a candidate file's CONTENT on a clean run. Record the file in the ledger instead. No `touch`, no comments, no blank lines, no "audited YYYY-MM-DD" markers in the source — that would dirty git and is forbidden.
 - Touch security-sensitive code (auth, payments, crypto, command construction) without a real, named, single-pattern reason — `gh` argument refactors don't count.
-- Apply more than 1 fix to the same file in one run, or more than 3 fixes total per run, or audit more than 5 candidates per run. The caps exist to bound token cost and review burden.
+- Apply more than 1 fix to the same file in one run, or more than 3 fixes total per run, or audit more candidates than the prerequisite's size-budgeted batch. The fix caps bound review burden; the batch budget bounds context size.
 - Add comments to "document the fix" — the diff itself is the documentation. Brief WHY comments are fine when the pattern's not self-evident; past-tense "Was previously …" comments are not.
 - Search for alternative work, "coverage gaps", "lifecycle issues", or any other improvements when the queue is empty. If the queue is empty, output `IMPROVE_QUEUE_ROTATED 0` and stop. No file reads, no code inspection, no edits. Full stop.
