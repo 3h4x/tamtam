@@ -255,10 +255,11 @@ export function NotificationBell() {
                       ? job.parent_kind
                       : job.kind
                     return (
-                    <button
+                    <Button
                       key={job.id}
+                      variant="ghost"
                       onClick={() => handleJobClick(job)}
-                      className="w-full flex items-center gap-3 px-4 py-2 border-b border-border/50 hover:bg-bg-secondary transition-colors bg-transparent cursor-pointer text-left"
+                      className="w-full !justify-start !gap-3 !rounded-none !border-x-0 !border-t-0 border-b border-border/50 bg-transparent !px-4 !py-2 text-left hover:bg-bg-secondary"
                     >
                       <RunningIcon />
                       <div className="flex-1 min-w-0">
@@ -271,7 +272,7 @@ export function NotificationBell() {
                           {displayKind !== job.kind && <span className="ml-1.5 text-text-tertiary/70">· release in progress</span>}
                         </p>
                       </div>
-                    </button>
+                    </Button>
                     )
                   })}
                 </div>
@@ -293,10 +294,11 @@ export function NotificationBell() {
                     const ago = job.finished_at ? timeAgo(new Date(job.finished_at * 1000)) : null
 
                     return (
-                      <button
+                      <Button
                         key={job.id}
+                        variant="ghost"
                         onClick={() => handleJobClick(job)}
-                        className="w-full flex items-center gap-3 px-4 py-3 border-b border-border/50 last:border-0 hover:bg-bg-secondary transition-colors bg-transparent cursor-pointer text-left"
+                        className="w-full !justify-start !gap-3 !rounded-none !border-x-0 !border-t-0 border-b border-border/50 bg-transparent !px-4 !py-3 text-left last:border-0 hover:bg-bg-secondary"
                       >
                         <StatusIcon ok={state.success} />
                         <div className="flex-1 min-w-0">
@@ -313,7 +315,7 @@ export function NotificationBell() {
                             )}
                           </div>
                         </div>
-                      </button>
+                      </Button>
                     )
                   })}
                 </div>
