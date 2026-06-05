@@ -69,6 +69,7 @@ const PROJECTS = [
   'workflow-runs-live-start-failure',
   'workflow-runs-terminal-dual-surface',
   'workflow-runs-terminal-failure-dual-surface',
+  'workflow-runs-terminal-cancelled-dual-surface',
   'workflow-runs-real-success',
   'workflow-runs-real-failure',
   'workflow-runs-real-cancelled',
