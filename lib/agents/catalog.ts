@@ -240,7 +240,7 @@ export const AGENT_CATALOG: AgentCatalogEntry[] = [
     // Metadata source of truth lives in skills/docs/skills/tamtam/agent-improve.md.
     // The fields below are inline fallbacks; the .md `agent:` block overrides them at API serialize time.
     name: 'improve',
-    description: 'Walks up to 5 least-recently-modified source files, applies ONE safe family-rubric fix to the first one with a real instance (resource lifecycle, hot-path waste, defensive-code-that-doesn\'t-defend, drift), or `touch`es clean files to rotate them out of the queue. Verifies edits with type-check + the relevant vitest file.',
+    description: 'Walks the oldest size-budgeted source candidates, applies up to three safe family-rubric fixes per run, and records clean files in the audit ledger to rotate the queue. Verifies edits with type-check plus a targeted test for substantial fixes.',
     dispatch: 'cli',
     defaultSchedule: '12h',
     defaultModel: 'normal',
