@@ -11,6 +11,18 @@ function websiteField(page: Page) {
   return page.getByRole('textbox', { name: 'Website', exact: true });
 }
 
+function watchMinutesField(page: Page) {
+  return page.getByRole('spinbutton', { name: 'Watch minutes' });
+}
+
+function waitForCiCheckbox(page: Page) {
+  return page.getByRole('checkbox', { name: /Wait for CI on default branch after merge/i });
+}
+
+function autoRevertCheckbox(page: Page) {
+  return page.getByRole('checkbox', { name: /Auto-merge revert PR/i });
+}
+
 function makeTask() {
   return {
     id: `${PROJECT}-1`,
@@ -219,6 +231,56 @@ test.describe('ConfigTab save flow', () => {
     // Verify the PATCH was called and included the website value.
     expect(patchCallCount).toBe(1);
     expect((patchBody as Record<string, unknown> | null)?.website).toBe('https://example.com');
+  });
+
+  test('soak settings render from config and save updated minutes + auto-revert', async ({ page }) => {
+    let savedWatchMinutes: unknown = null;
+    let savedAutoRevert: unknown = null;
+    let serverConfig = makeProjectConfig({
+      post_merge_watch_minutes: 15,
+      auto_revert_enabled: false,
+    });
+
+    await stubShell(page);
+
+    await page.route(`**/api/projects/by-project/${PROJECT}/config`, async (route: Route) => {
+      if (route.request().method() === 'PATCH') {
+        const patchBody = route.request().postDataJSON() as Record<string, unknown>;
+        savedWatchMinutes = patchBody.post_merge_watch_minutes;
+        savedAutoRevert = patchBody.auto_revert_enabled;
+        serverConfig = makeProjectConfig({
+          post_merge_watch_minutes: patchBody.post_merge_watch_minutes,
+          auto_revert_enabled: patchBody.auto_revert_enabled,
+        });
+        await route.fulfill({ json: { status: 'ok' } });
+        return;
+      }
+      if (route.request().method() === 'GET') {
+        await route.fulfill({ json: serverConfig });
+        return;
+      }
+      route.continue();
+    });
+
+    await page.goto(`/project/${PROJECT}/config`);
+
+    await expect(waitForCiCheckbox(page)).toBeChecked({ timeout: 8_000 });
+    await expect(watchMinutesField(page)).toHaveValue('15');
+    await expect(autoRevertCheckbox(page)).not.toBeChecked();
+
+    await watchMinutesField(page).fill('30');
+    await autoRevertCheckbox(page).check();
+    await expect(page.getByText('Unsaved changes')).toBeVisible({ timeout: 3_000 });
+
+    await page.getByRole('button', { name: /^Save$/ }).click();
+
+    await expect(page.getByRole('button', { name: /^Save$/ })).toBeDisabled({ timeout: 5_000 });
+    expect(savedWatchMinutes).toBe('30');
+    expect(savedAutoRevert).toBe(true);
+
+    await expect(waitForCiCheckbox(page)).toBeChecked();
+    await expect(watchMinutesField(page)).toHaveValue('30');
+    await expect(autoRevertCheckbox(page)).toBeChecked();
   });
 
   // ---------------------------------------------------------------------------

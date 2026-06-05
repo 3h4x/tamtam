@@ -516,6 +516,24 @@ export function ConfigTab({
               </div>
             </div>
           </label>
+          <div>
+            <label className="block font-medium text-xs text-text-secondary mb-1" htmlFor="post-merge-watch-minutes">
+              Watch minutes
+            </label>
+            <Input
+              id="post-merge-watch-minutes"
+              inputSize="compact"
+              fontFamily="sans"
+              paddingX="compact"
+              className="max-w-28"
+              type="number"
+              min="0"
+              step="1"
+              value={postMergeWatchMinutesInput}
+              onChange={(e) => setPostMergeWatchMinutesInput(e.target.value)}
+            />
+            <p className="text-xs text-text-tertiary mt-1">0 disables the watcher. Positive integers keep the release locked until default-branch CI on the merge commit finishes.</p>
+          </div>
           <label className="flex items-start gap-2 cursor-pointer select-none">
             <Checkbox
               variant="native"
