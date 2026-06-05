@@ -128,8 +128,7 @@ export function Pm2LogPanel({ pm2Logs, onRefresh }: { pm2Logs: Pm2LogData | null
     : counts.error > 0 ? 'issue'
     : 'ok'
 
-  // Single-pass partition over pm2Logs.files — previously filtered the same
-  // array twice with opposite predicates.
+  // Single-pass partition over pm2Logs.files into error vs available.
   const fileErrors: NonNullable<typeof pm2Logs>['files'] = []
   const availableFiles: NonNullable<typeof pm2Logs>['files'] = []
   for (const file of pm2Logs?.files ?? []) {

@@ -20,68 +20,95 @@ agent:
 # untracked files have no commit time and sort as oldest so new source gets audited
 # promptly.
 prerequisite: |
-  echo '## Next 5 unaudited candidates (oldest commit first, current content)'
-
   LEDGER=.tamtam/cache/audits/improve-ledger.txt
+  PASSFILE=.tamtam/cache/audits/improve-pass.txt
+  AUDITLOG=.tamtam/cache/audits/improve.md
+  AGE=.tamtam/cache/audits/.improve-age.tmp
+  CAND=.tamtam/cache/audits/.improve-cand.tmp
+  # Files at or above this many lines are too big to hold in context comfortably
+  # (the middle of a long file gets less attention than its ends), so they are
+  # flagged for refactor (Family 6). Override per project by exporting
+  # IMPROVE_OVERSIZE_LINES before the run.
+  OVERSIZE_LINES="${IMPROVE_OVERSIZE_LINES:-1000}"
   mkdir -p .tamtam/cache/audits; : >> "$LEDGER"
 
   # path -> latest commit epoch (single history pass; first-seen line = newest commit)
   git log --format='@%ct' --name-only --no-renames 2>/dev/null \
     | awk '/^@/{t=substr($0,2);next} NF&&!seen[$0]++{age[$0]=t} END{for(p in age)print age[p]"\t"p}' \
-    > .tamtam/cache/audits/.improve-age.tmp
+    > "$AGE"
 
-  # tracked candidates + current blob SHA, minus generated/vendored/archive paths and ledger hits
-  git ls-files 2>/dev/null \
-    | while IFS= read -r path; do
-        case "$path" in
-          *.ts|*.tsx|*.js|*.jsx|*.sol|*.py|*.rs|*.go|*.md|*.sh) ;;
-          *) continue;;
-        esac
-        case "$path" in
-          *.d.ts|*.gen.*|*.generated.*) continue;;
-          .tamtam/*|*/.tamtam/*|node_modules/*|*/node_modules/*) continue;;
-          *__snapshots__/*|*__fixtures__/*|*/fixtures/*|*/test-results/*|*/playwright-report/*|*/coverage/*|*/dist/*|*/build/*|*/out/*) continue;;
-          docs/superpowers/plans/*|docs/superpowers/specs/*) continue;;
-          skills/docs/*) continue;;
-          CHANGELOG.md|LICENSE|LICENSE.md|LICENCE|LICENCE.md) continue;;
-        esac
-        sha=$(git hash-object -- "$path" 2>/dev/null) || continue
-        [ -n "$sha" ] || continue
-        grep -qxF "$sha" "$LEDGER" 2>/dev/null && continue
-        printf '%s\t%s\n' "$sha" "$path"
-      done > .tamtam/cache/audits/.improve-cand.tmp
+  is_source() {
+    case "$1" in
+      *.ts|*.tsx|*.js|*.jsx|*.sol|*.py|*.rs|*.go|*.md|*.sh) ;;
+      *) return 1;;
+    esac
+    case "$1" in
+      *.d.ts|*.gen.*|*.generated.*) return 1;;
+      .tamtam/*|*/.tamtam/*|node_modules/*|*/node_modules/*) return 1;;
+      *__snapshots__/*|*__fixtures__/*|*/fixtures/*|*/test-results/*|*/playwright-report/*|*/coverage/*|*/dist/*|*/build/*|*/out/*) return 1;;
+      docs/superpowers/plans/*|docs/superpowers/specs/*) return 1;;
+      skills/docs/*) return 1;;
+      CHANGELOG.md|LICENSE|LICENSE.md|LICENCE|LICENCE.md) return 1;;
+    esac
+    return 0
+  }
 
-  # non-ignored untracked candidates get the same git-blob hash shape
-  git ls-files --others --exclude-standard 2>/dev/null \
-    | while IFS= read -r path; do
-        case "$path" in
-          *.ts|*.tsx|*.js|*.jsx|*.sol|*.py|*.rs|*.go|*.md|*.sh) ;;
-          *) continue;;
-        esac
-        case "$path" in
-          *.d.ts|*.gen.*|*.generated.*) continue;;
-          .tamtam/*|*/.tamtam/*|node_modules/*|*/node_modules/*) continue;;
-          *__snapshots__/*|*__fixtures__/*|*/fixtures/*|*/test-results/*|*/playwright-report/*|*/coverage/*|*/dist/*|*/build/*|*/out/*) continue;;
-          docs/superpowers/plans/*|docs/superpowers/specs/*) continue;;
-          skills/docs/*) continue;;
-          CHANGELOG.md|LICENSE|LICENSE.md|LICENCE|LICENCE.md) continue;;
-        esac
-        sha=$(git hash-object -- "$path" 2>/dev/null) || continue
-        [ -n "$sha" ] || continue
-        grep -qxF "$sha" "$LEDGER" 2>/dev/null && continue
-        printf '%s\t%s\n' "$sha" "$path"
-      done >> .tamtam/cache/audits/.improve-cand.tmp
+  # sha<TAB>path for every source file (tracked + non-ignored untracked) whose
+  # current blob SHA is NOT already in the ledger.
+  gen_candidates() {
+    : > "$CAND"
+    { git ls-files 2>/dev/null; git ls-files --others --exclude-standard 2>/dev/null; } \
+      | while IFS= read -r path; do
+          is_source "$path" || continue
+          sha=$(git hash-object -- "$path" 2>/dev/null) || continue
+          [ -n "$sha" ] || continue
+          grep -qxF "$sha" "$LEDGER" 2>/dev/null && continue
+          printf '%s\t%s\n' "$sha" "$path"
+        done >> "$CAND"
+  }
 
-  # join age onto candidates (missing age = 0 = oldest), oldest-first, take 5
-  out=$(awk -F'\t' 'BEGIN{first=ARGV[1]} FILENAME==first{age[$2]=$1;next}{a=age[$2];if(a=="")a=0;print a"\t"$2"\t"$1}' \
-          .tamtam/cache/audits/.improve-age.tmp .tamtam/cache/audits/.improve-cand.tmp \
-        | sort -n | head -5 | awk -F'\t' '{printf "%s  (blob %s)\n",$2,$3}')
-  rm -f .tamtam/cache/audits/.improve-age.tmp .tamtam/cache/audits/.improve-cand.tmp
-  if [ -n "$out" ]; then
-    printf '%s\n' "$out"
-  else
-    echo '(all tracked and non-ignored untracked files audited at current content — idle until a file changes)'
+  gen_candidates
+
+  # Loop-around (re-verification): when every current file is already audited at
+  # its present content, do NOT go idle. Rotate the ledger (archive it aside) and
+  # re-audit from the oldest file again. The prompt and model improve over time,
+  # so a prior `clean` verdict is re-checked each pass rather than trusted forever.
+  ROTATED=0
+  if [ ! -s "$CAND" ] && [ -s "$LEDGER" ]; then
+    ts=$(date -u +%Y%m%dT%H%M%SZ)
+    mv "$LEDGER" "$LEDGER.$ts.pass" 2>/dev/null || true
+    : > "$LEDGER"
+    pass=$(( $(cat "$PASSFILE" 2>/dev/null || echo 0) + 1 ))
+    echo "$pass" > "$PASSFILE"
+    ROTATED=1
+    gen_candidates
   fi
+
+  pass=$(cat "$PASSFILE" 2>/dev/null || echo 1)
+  if [ "$ROTATED" = 1 ]; then
+    echo "## Re-verification pass #$pass — queue rotated, re-auditing from the oldest file"
+    echo "(every file was already audited at current content; re-validate each prior verdict against the note below — the prompt/model may catch something new this pass — do not rubber-stamp)"
+  else
+    echo "## Next 5 unaudited candidates (oldest commit first, current content) — pass #$pass"
+  fi
+
+  if [ ! -s "$CAND" ]; then
+    echo '(no source files to audit — idle)'
+  else
+    # join age (missing = 0 = oldest), oldest-first, take 5, then enrich each
+    # with its line count (flag oversized → F6) and its most recent audit note.
+    awk -F'\t' 'FILENAME==ARGV[1]{age[$2]=$1;next}{a=age[$2];if(a=="")a=0;print a"\t"$2"\t"$1}' \
+        "$AGE" "$CAND" | sort -n | head -5 \
+      | while IFS="$(printf '\t')" read -r age path blob; do
+          lines=$(wc -l < "$path" 2>/dev/null | tr -d ' '); [ -n "$lines" ] || lines=0
+          flag=""
+          [ "$lines" -ge "$OVERSIZE_LINES" ] 2>/dev/null && flag=" ⚠ OVERSIZED (>=${OVERSIZE_LINES} lines — Family 6: flag for refactor)"
+          printf -- '- %s  (blob %s, %s lines)%s\n' "$path" "$blob" "$lines" "$flag"
+          note=$(grep -F "| $path |" "$AUDITLOG" 2>/dev/null | tail -1)
+          [ -n "$note" ] && printf '    last audit: %s\n' "$note"
+        done
+  fi
+  rm -f "$AGE" "$CAND"
 
   echo
   echo '## Recent improve runs (tail of .tamtam/cache/audits/improve.md)'
@@ -117,9 +144,11 @@ These rules are non-negotiable — they govern every step that follows.
 
 ## 1. Walk the candidate queue (do not stop at the first file)
 
-**If the prerequisite output says the queue is empty** (the line "(all tracked and non-ignored untracked files audited at current content — idle until a file changes)" appears, or the candidate list is blank), output `IMPROVE_QUEUE_ROTATED 0` and **stop immediately**. This means output that one line and do nothing else — no file reads, no code inspection, no search for "alternative improvements", no "coverage gaps", no "lifecycle issues", no "regression tests", no source edits of any kind. The queue is the only source of work. There is no separate pool of "other improvements" to look for. Idle is the correct, expected, productive outcome when the queue is empty. The queue will refill automatically when source files change.
+**The queue almost never empties.** The prerequisite loops around: once every file's current content is in the ledger, it *rotates* — archives the ledger and re-selects the oldest files for a **re-verification pass**. Only when the project has literally **zero source files** does it print "(no source files to audit — idle)"; in that one case, output `IMPROVE_QUEUE_ROTATED 0` and **stop immediately** (no file reads, no code inspection, no edits). Otherwise there is always work: either fresh files or a re-verification pass.
 
-The candidate queue is the **5 oldest unaudited source files** (oldest commit first) the prerequisite gave you. The prerequisite has already excluded every file whose current content is in the ledger, so each candidate is genuinely unaudited at its present bytes. You walk them **in order**, and per file you do exactly ONE of:
+**Re-verification passes (header says "## Re-verification pass #N").** This means every file was already audited at its current content and the queue rotated. The prompt and model improve over time, so a prior `clean` is a *hypothesis to re-test*, not a settled fact. For each candidate the prerequisite prints its most recent audit row under `last audit:`. Read that note first, then re-audit the file under the current rubric: confirm the prior verdict still holds, or find what it missed. Do not rubber-stamp ("it was clean last time") and do not skip — re-validate against the file in front of you. A re-verification pass that finds nothing new is still productive: record each file clean in the ledger as usual so the pass advances.
+
+The candidate queue is the **5 oldest candidates** (oldest commit first) the prerequisite gave you — on a fresh pass these are unaudited at their present bytes; on a re-verification pass they are the oldest files being re-checked. You walk them **in order**, and per file you do exactly ONE of:
 
 - **Found a real instance in Families 1–4** → apply ONE fix to that file, verify per §5, then **record it in the ledger** (below). Whether you continue scanning the remaining candidates depends on whether the fix was *small* or *substantial* (see §3).
 - **Clean (no real instance)** → append one clean row to `.tamtam/cache/audits/improve.md`, **record it in the ledger**, and continue to the next candidate. Do NOT modify the file.

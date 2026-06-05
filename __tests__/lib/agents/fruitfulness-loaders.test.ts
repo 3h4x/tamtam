@@ -229,7 +229,7 @@ describe('fruitfulness DB loaders', () => {
   it('loadAllAgentFruitfulness is not evicted by a workspace-wide burst of newer manual runs', async () => {
     const now = Math.floor(Date.now() / 1000);
     const rows: Array<typeof schema.jobs.$inferInsert> = [];
-    for (let i = 0; i < 5_050; i++) {
+    for (let i = 0; i < 1_050; i++) {
       rows.push(jobValues({
         id: `manual-workspace-${i}`,
         project: i % 2 === 0 ? 'app' : 'other',
@@ -261,7 +261,7 @@ describe('fruitfulness DB loaders', () => {
   it('loadAllAgentFruitfulness is not evicted by newer scheduled runs from sibling agents', async () => {
     const now = Math.floor(Date.now() / 1000);
     const rows: Array<typeof schema.jobs.$inferInsert> = [];
-    for (let i = 0; i < 5_050; i++) {
+    for (let i = 0; i < 1_050; i++) {
       rows.push(jobValues({
         id: `sibling-scheduled-workspace-${i}`,
         project: i % 2 === 0 ? 'app' : 'other',

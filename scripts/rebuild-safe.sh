@@ -133,6 +133,66 @@ clear_rebuild_flag() {
     -d '{"rebuild_in_progress":false}' >/dev/null 2>&1 || true
 }
 
+# --- Build-time placeholder page -------------------------------------------
+# While the server is STOPPED to build, the TamTam port is dead and a browser
+# refresh looks like a crash. Bind a tiny HTTP server (scripts/rebuild-
+# placeholder.mjs) to that port for the build window so a refresh shows a
+# "rebuilding" page with start time + ETA instead of a connection error.
+# Best-effort and always torn down before the real server is brought up.
+PLACEHOLDER_PID=""
+PLACEHOLDER_PORT="$(printf '%s' "$BASE_URL" | sed -nE 's#.*:([0-9]+).*#\1#p')"
+[ -n "$PLACEHOLDER_PORT" ] || PLACEHOLDER_PORT=1337
+
+# Average wall time of the last few successful builds, in ms (0 if unknown).
+avg_build_ms() {
+  python3 - <<'PY' 2>/dev/null || echo 0
+import json, os
+vals = []
+try:
+    with open(os.path.join('data', 'build-metrics.jsonl')) as f:
+        for line in f:
+            line = line.strip()
+            if not line:
+                continue
+            try:
+                d = json.loads(line)
+            except Exception:
+                continue
+            if d.get('exit_code') == 0 and isinstance(d.get('wall_ms'), (int, float)):
+                vals.append(d['wall_ms'])
+except FileNotFoundError:
+    pass
+vals = vals[-5:]
+print(int(sum(vals) / len(vals)) if vals else 0)
+PY
+}
+
+start_placeholder() {
+  [ "${SERVER_STOPPED:-0}" = 1 ] || return 0
+  command -v node >/dev/null 2>&1 || return 0
+  local avg
+  avg="$(avg_build_ms)"
+  REBUILD_STARTED_MS="$(( $(date +%s) * 1000 ))" \
+  REBUILD_AVG_MS="$avg" \
+  PLACEHOLDER_PORT="$PLACEHOLDER_PORT" \
+    node "$SCRIPT_DIR/rebuild-placeholder.mjs" >/dev/null 2>&1 &
+  PLACEHOLDER_PID=$!
+  disown "$PLACEHOLDER_PID" 2>/dev/null || true
+  if [ "$avg" -gt 0 ] 2>/dev/null; then
+    log "serving rebuild page on :$PLACEHOLDER_PORT (typical build ~$(( avg / 1000 ))s)"
+  else
+    log "serving rebuild page on :$PLACEHOLDER_PORT"
+  fi
+}
+
+# Kill the placeholder and free the port before the real server binds it.
+stop_placeholder() {
+  [ -n "$PLACEHOLDER_PID" ] || return 0
+  kill "$PLACEHOLDER_PID" 2>/dev/null || true
+  PLACEHOLDER_PID=""
+  sleep 1
+}
+
 # Count in-flight jobs whose mid-flight termination would lose work.
 # pr-wait is excluded because the runtime resumes it on boot from
 # contextMeta; killing it mid-poll is recoverable.
@@ -195,6 +255,7 @@ except Exception:
 PAUSED=0
 trap '
   cleanup_watchdog
+  stop_placeholder
   release_lock
   if [ "$PAUSED" = 1 ] && [ "${KEEP_PAUSED:-0}" != 1 ]; then
     unpause_jobs >/dev/null 2>&1 || true
@@ -301,6 +362,7 @@ stop_server() {
   SERVER_STOPPED=1
 }
 stop_server
+start_placeholder
 
 log "building..."
 if ! pnpm build; then
@@ -328,6 +390,7 @@ if ! pnpm db:migrate; then
 fi
 
 log "restarting via pm2..."
+stop_placeholder
 if ! bash "$SCRIPT_DIR/pm2-start.sh"; then
   log "ERROR: pm2 restart failed — leaving jobs PAUSED so half-restarted server doesn't pick up work"
   KEEP_PAUSED=1
