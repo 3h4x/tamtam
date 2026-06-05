@@ -206,9 +206,8 @@ export function decideBoosts(input: BoostInput): BoostDecision[] {
   const allowedStatuses = severelyUnderPace ? SEVERELY_UNDER_STATUSES : BOOSTABLE_PROJECT_STATUSES;
   for (const project of input.projects) {
     if (project.paused) continue;
-    // releaseRunning USED to exclude — removed so agents can run in parallel
-    // with active releases (per-project agent serialization still applies via
-    // pending-agent-run, which queues or 409s as appropriate).
+    // Agents can run in parallel with active releases; per-project agent
+    // serialization still applies via pending-agent-run.
     if (!allowedStatuses.has(project.status)) continue;
 
     const recent = (input.history.byProject.get(project.project) ?? []).filter(

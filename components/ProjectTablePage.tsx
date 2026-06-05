@@ -168,9 +168,8 @@ export function ProjectTablePage({ fleet, issueCounts = {}, loading = false }: P
       } catch { /* ignore */ }
     }
     load()
-    // Poll scheduler health every 45s (was 15s). Reduced frequency to cut server load;
-    // next-fire predictions may be stale for up to 45s, but this is acceptable since
-    // scheduler state changes infrequently.
+    // Poll scheduler health every 45s to keep server load low; next-fire
+    // predictions may be stale for up to 45s since scheduler state changes infrequently.
     const interval = setInterval(load, 45000)
     return () => { active = false; clearInterval(interval) }
   }, [])

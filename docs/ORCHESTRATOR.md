@@ -52,7 +52,7 @@ surfacing things worth attention. They live in the `recommendations` table
 
 | Type | Source | Meaning |
 |------|--------|---------|
-| `orchestrator_boost` | tick loop | The orchestrator already fired an extra run. Informational. |
+| `orchestrator_boost` | tick loop | The orchestrator already fired an extra run. Informational — created with status `resolved` so it lands directly in **History**, not the Unresolved queue (the action is already done at write time). |
 | `agent_unfruitful` | agent finalizer (`lib/agents/agent-run-report.ts`) | Scheduled runs aren't producing changes. Payload `cause` disambiguates: `unproductive` (last run found work but landed nothing → improve the prompt) vs `unknown`. The `idle` case (last run reported no actionable work — incl. the improve agent's `IMPROVE_QUEUE_ROTATED` sentinel) does **not** raise this recommendation at all: idle-by-design is not a failure, so it's owned by `agent_schedule_backoff` and any stale unfruitful row is auto-retired. Boost deprioritization still happens live off the fruitfulness stats, independent of this row. The `/recommendations` card offers "Improve prompt" for `unproductive`/`unknown`. |
 | `orchestrator_agent_health` | health analysis | An LLM flagged a loop/noise trend over recent runs. |
 | `agent_schedule_backoff` | agent finalizer | A scheduled run found no actionable work; consider a slower cadence. |
@@ -88,7 +88,9 @@ re-detection upserts the same row rather than piling up duplicates. Status:
   condition cleared (`resolveRecommendationIfOpen`): the unfruitful agent
   recovered, the schedule-backoff agent did real work, or the health verdict
   came back clean. Detectors call this on the same branch where they used to
-  just return.
+  just return. AUTO `orchestrator_boost` rows are also written `resolved`
+  **at creation** (via `upsertRecommendation`'s optional `status`) because the
+  boosted run already fired — there is no open phase to clear.
 - `dismissed` / `applied` — operator actions via the per-project PATCH route.
 
 `resolved` / `dismissed` / `applied` are non-open and appear in the **History**

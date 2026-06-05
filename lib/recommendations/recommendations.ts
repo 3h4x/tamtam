@@ -21,6 +21,12 @@ export interface RecommendationInput {
   title: string;
   detail: string;
   payload?: RecommendationPayload | null;
+  // Initial status for the row. Defaults to `open` (needs attention). AUTO
+  // recommendations whose action is *already complete at creation* (e.g.
+  // `orchestrator_boost` — the extra run was already fired) pass `resolved` so
+  // they archive straight into the History tab instead of cluttering the
+  // Unresolved queue, while staying inspectable.
+  status?: RecommendationStatus;
 }
 
 export interface RecommendationRow {
@@ -75,6 +81,7 @@ export function recommendationId(project: string, type: string, agentKey: string
 
 export async function upsertRecommendation(input: RecommendationInput): Promise<RecommendationRow | null> {
   const now = Date.now() / 1000;
+  const status: RecommendationStatus = input.status ?? 'open';
   const id = recommendationId(input.project, input.type, input.agentId || input.agentName || 'project');
   try {
     await db.insert(schema.recommendations)
@@ -88,7 +95,7 @@ export async function upsertRecommendation(input: RecommendationInput): Promise<
         type: input.type,
         title: input.title,
         detail: input.detail,
-        status: 'open',
+        status,
         payload: input.payload ? JSON.stringify(input.payload) : null,
         createdAt: now,
         updatedAt: now,
@@ -100,7 +107,7 @@ export async function upsertRecommendation(input: RecommendationInput): Promise<
           sourceId: input.sourceId ?? null,
           title: input.title,
           detail: input.detail,
-          status: 'open',
+          status,
           payload: input.payload ? JSON.stringify(input.payload) : null,
           updatedAt: now,
         },

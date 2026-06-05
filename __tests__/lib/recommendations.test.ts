@@ -122,6 +122,38 @@ describe('recommendations storage', () => {
     expect(second!.updated_at).toBeGreaterThanOrEqual(first!.updated_at);
   });
 
+  it('creates an AUTO recommendation pre-resolved so it lands in History, not Unresolved', async () => {
+    const created = await upsertRecommendation({
+      project: 'portal',
+      sourceKind: 'orchestrator',
+      agentId: 'agent-boost',
+      type: 'orchestrator_boost',
+      title: 'Boosted improve',
+      detail: 'Queued an extra run.',
+      status: 'resolved',
+    });
+    expect(created?.status).toBe('resolved');
+
+    // It must not appear in the Unresolved queue...
+    expect((await listAllOpenRecommendations()).map((r) => r.id)).not.toContain(created!.id);
+    // ...but it is inspectable in History.
+    expect((await listAllResolvedRecommendations()).map((r) => r.id)).toContain(created!.id);
+
+    // Re-boosting the same agent keeps the row archived (no reopen to Unresolved).
+    const reboost = await upsertRecommendation({
+      project: 'portal',
+      sourceKind: 'orchestrator',
+      agentId: 'agent-boost',
+      type: 'orchestrator_boost',
+      title: 'Boosted improve in smart mode',
+      detail: 'Queued another extra run.',
+      status: 'resolved',
+    });
+    expect(reboost!.id).toBe(created!.id);
+    expect(reboost!.status).toBe('resolved');
+    expect((await listAllOpenRecommendations()).map((r) => r.id)).not.toContain(created!.id);
+  });
+
   it('lists newest recommendations first and drops invalid JSON payloads to null', async () => {
     await handle.db.insert(schema.recommendations).values([
       {

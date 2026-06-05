@@ -1022,6 +1022,10 @@ export async function registerNode(): Promise<void> {
                       ? `Boosted ${d.agentName} in smart mode`
                       : `Boosted ${d.agentName}`,
                     detail: d.reason,
+                    // The extra run was already fired by the time we record it —
+                    // this is a done-on-arrival AUTO note, so archive it straight
+                    // into History rather than the Unresolved queue.
+                    status: 'resolved',
                     payload: {
                       reason: d.reason,
                       modelOverride: d.modelOverride ?? null,

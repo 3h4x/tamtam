@@ -1,7 +1,7 @@
 import { mkdtempSync, rmSync } from 'fs';
 import { tmpdir } from 'os';
 import { join } from 'path';
-import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { JobData } from '@/lib/jobs/types';
 
 describe('startInProcessAgentJob', () => {
@@ -12,25 +12,6 @@ describe('startInProcessAgentJob', () => {
   let markDone: ReturnType<typeof vi.fn>;
   let runSubprocess: ReturnType<typeof vi.fn>;
 
-  // Under vitest `silent: 'passed-only'`, console output from passing tests is
-  // buffered and flushed to the parent over RPC at worker close. The real
-  // (un-mocked) wrapForSandbox/checkPromptSize paths can emit console.warn, and
-  // a buffered onUserConsoleLog flushing as the forked worker tears down
-  // surfaces as an "EnvironmentTeardownError: Closing rpc while
-  // onUserConsoleLog was pending" unhandled rejection. Silence console for the
-  // entire file lifetime via plain assignment (not vi.spyOn) so per-test
-  // `restoreAllMocks` can't re-enable it in the inter-test / teardown windows
-  // where buffered async work would otherwise log.
-  const originalConsole = { warn: console.warn, log: console.log, error: console.error };
-  beforeAll(() => {
-    console.warn = () => {};
-    console.log = () => {};
-    console.error = () => {};
-  });
-  afterAll(() => {
-    Object.assign(console, originalConsole);
-  });
-
   beforeEach(() => {
     vi.resetModules();
     tempDir = mkdtempSync(join(tmpdir(), 'tamtam-inline-agent-'));
@@ -38,11 +19,11 @@ describe('startInProcessAgentJob', () => {
     saveToDb = vi.fn((job: JobData) => {
       savedPids.push(job.pid);
     });
-    markDone = vi.fn();
     runSubprocess = vi.fn(async (params: { onSpawn?: (pid: number) => void }) => {
       params.onSpawn?.(2468);
       return { pid: 2468, exitCode: 0, signal: null };
     });
+    markDone = vi.fn().mockResolvedValue(undefined);
     jobsCache = new Map<string, JobData>([
       ['job-1', {
         id: 'job-1',
@@ -69,6 +50,17 @@ describe('startInProcessAgentJob', () => {
     vi.doMock('@/lib/jobs/cancellation', () => ({
       registerJobCancellation: vi.fn(() => new AbortController().signal),
       finishJobCancellation: vi.fn(),
+    }));
+    vi.doMock('@/lib/shared/sandbox-wrap', () => ({
+      wrapForSandbox: (opts: { bin: string; args: string[]; cwd: string; runDir?: string }) => ({
+        bin: opts.bin,
+        args: opts.args,
+        env: {},
+      }),
+    }));
+    vi.doMock('@/lib/jobs/prompt-size', () => ({
+      measurePrompt: (prompt: string) => Buffer.byteLength(prompt, 'utf8'),
+      checkPromptSize: vi.fn(),
     }));
     vi.doMock('@/lib/jobs/spawn-cli', () => ({ runSubprocess }));
   });

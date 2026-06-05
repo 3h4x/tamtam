@@ -98,7 +98,7 @@ function HostMetric({ label, value, tone, title }: { label: string; value: strin
 
 // Compact host-resource strip: CPU · load-per-core · memory · disk · disk IO.
 // Driven by the in-process system-metrics sampler (one sample/min). Mirrors
-// the goro Grafana signals but for whatever host TamTam itself runs on.
+// external host metrics for whatever host TamTam itself runs on.
 function HostMetrics({ s }: { s: SystemSample }) {
   return (
     <div className="flex items-center gap-x-3 gap-y-1 flex-wrap text-[11px] border-t border-border/60 pt-2">
