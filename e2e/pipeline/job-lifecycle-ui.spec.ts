@@ -775,63 +775,64 @@ test.describe('Job lifecycle UI badges', () => {
   test('history tab keeps two concurrent jobs independent as each settles via poll', async ({
     page,
   }) => {
-    let phase: 'both-running' | 'test-failed' | 'all-done' = 'both-running';
+    // Use non-pipeline kinds (agent + run) so the two orphaned jobs are NOT
+    // clustered into a virtual "Pipeline steps" group by the history util.
+    let phase: 'both-running' | 'first-failed' | 'all-done' = 'both-running';
     await mockJobScenario(page, () => {
-      const testRunning = phase === 'both-running';
-      const reviewRunning = phase !== 'all-done';
+      const firstRunning = phase === 'both-running';
+      const secondRunning = phase !== 'all-done';
 
       return [
         makeJob({
-          id: 'job-concurrent-test',
-          kind: 'test',
-          status: testRunning ? 'running' : 'done',
-          exit_code: testRunning ? null : 1,
+          id: 'job-concurrent-a',
+          kind: 'agent',
+          status: firstRunning ? 'running' : 'done',
+          exit_code: firstRunning ? null : 1,
           started_at: now() - 40,
-          finished_at: testRunning ? null : now() - 6,
-          session_id: 'sess-concurrent-test',
+          finished_at: firstRunning ? null : now() - 6,
+          session_id: 'sess-concurrent-a',
         }),
         makeJob({
-          id: 'job-concurrent-review',
-          kind: 'review',
-          status: reviewRunning ? 'running' : 'done',
-          exit_code: reviewRunning ? null : 0,
+          id: 'job-concurrent-b',
+          kind: 'run',
+          status: secondRunning ? 'running' : 'done',
+          exit_code: secondRunning ? null : 0,
           started_at: now() - 35,
-          finished_at: reviewRunning ? null : now() - 3,
-          verdict: reviewRunning ? undefined : 'LGTM',
-          session_id: 'sess-concurrent-review',
+          finished_at: secondRunning ? null : now() - 3,
+          session_id: 'sess-concurrent-b',
         }),
       ];
     });
 
     await page.goto(`/project/${PROJECT}/history`);
 
-    const testRow = page.getByRole('button')
-      .filter({ hasText: 'test' })
+    const agentRow = page.getByRole('button')
+      .filter({ hasText: 'agent' })
       .filter({ hasText: 'started' })
       .first();
-    const reviewRow = page.getByRole('button')
-      .filter({ hasText: 'review' })
+    const runRow = page.getByRole('button')
+      .filter({ hasText: 'run' })
       .filter({ hasText: 'started' })
       .first();
 
     // Both jobs start out running, each with its own running badge.
-    await expect(testRow.getByLabel('running')).toBeVisible();
-    await expect(reviewRow.getByLabel('running')).toBeVisible();
+    await expect(agentRow.getByLabel('running')).toBeVisible();
+    await expect(runRow.getByLabel('running')).toBeVisible();
 
-    // The test job fails while review keeps running — the review row must not
-    // pick up the failure state.
-    phase = 'test-failed';
+    // The agent job fails while the run job keeps running — the run row must
+    // not pick up the failure state.
+    phase = 'first-failed';
 
-    await expect(testRow.getByText('exit 1', { exact: true })).toBeVisible({ timeout: 12_000 });
-    await expect(testRow.getByLabel('running')).toHaveCount(0, { timeout: 12_000 });
-    await expect(reviewRow.getByLabel('running')).toBeVisible();
-    await expect(reviewRow.getByText('exit 1')).toHaveCount(0);
+    await expect(agentRow.getByText('exit 1', { exact: true })).toBeVisible({ timeout: 12_000 });
+    await expect(agentRow.getByLabel('running')).toHaveCount(0, { timeout: 12_000 });
+    await expect(runRow.getByLabel('running')).toBeVisible();
+    await expect(runRow.getByText('exit 1')).toHaveCount(0);
 
-    // Review then completes with its own LGTM verdict; the test row stays failed.
+    // Run job then completes successfully; the agent row stays failed.
     phase = 'all-done';
 
-    await expect(reviewRow.getByText('✓ LGTM')).toBeVisible({ timeout: 12_000 });
-    await expect(reviewRow.getByLabel('running')).toHaveCount(0, { timeout: 12_000 });
-    await expect(testRow.getByText('exit 1', { exact: true })).toBeVisible();
+    await expect(runRow.getByLabel('done')).toBeVisible({ timeout: 12_000 });
+    await expect(runRow.getByLabel('running')).toHaveCount(0, { timeout: 12_000 });
+    await expect(agentRow.getByText('exit 1', { exact: true })).toBeVisible();
   });
 });
