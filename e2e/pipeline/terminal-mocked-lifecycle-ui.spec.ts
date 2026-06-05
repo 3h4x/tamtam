@@ -212,6 +212,35 @@ async function stubProjectShell(
         json: { jobs: jobsForProject(), pendingReleaseProjects: [] },
       }),
   )
+  await page.route(
+    (url) => url.pathname === '/api/jobs/counts' && url.searchParams.get('project') === PROJECT,
+    (route: Route) => {
+      const jobs = jobsForProject() as Array<{ kind?: string; status?: string; exit_code?: number | null }>
+      const byKind = jobs.reduce<Record<string, number>>((acc, job) => {
+        const kind = job.kind ?? 'unknown'
+        acc[kind] = (acc[kind] ?? 0) + 1
+        return acc
+      }, {})
+      const running = jobs.filter((job) => job.status === 'running').length
+      const done = jobs.filter((job) => job.status === 'done').length
+      const failed = jobs.filter(
+        (job) => typeof job.exit_code === 'number' && job.exit_code !== 0,
+      ).length
+      route.fulfill({
+        json: {
+          total: jobs.length,
+          byKind,
+          byStatus: { running, done, aborted: 0, failed },
+          tokens: { input: 0, output: 0, cacheRead: 0, cacheCreate: 0, total: 0 },
+          cost: { total: 0, monthToDate: 0 },
+        },
+      })
+    },
+  )
+  await page.route(
+    (url) => url.pathname === '/api/automation-queue' && url.searchParams.get('project') === PROJECT,
+    (route: Route) => route.fulfill({ json: { items: [] } }),
+  )
 }
 
 test.describe('Mocked terminal lifecycle UI', () => {
@@ -705,5 +734,91 @@ test.describe('Mocked terminal lifecycle UI', () => {
     await expect(page.getByTitle('View unified release trace').first()).toBeVisible({
       timeout: 8_000,
     })
+  })
+
+  test('history list and terminal landing page stay in sync across a mocked release start and finish', async ({
+    page,
+  }) => {
+    let phase: 'idle' | 'running' | 'done' = 'idle'
+    let finishStream!: () => void
+    const streamDone = new Promise<void>((resolve) => {
+      finishStream = resolve
+    })
+
+    const historyPage = await page.context().newPage()
+    const jobsForProject = () => {
+      if (phase === 'running') return [runningReleaseJob()]
+      if (phase === 'done') {
+        return [finishedReleaseJob(0, 'Release output reached both surfaces.\n')]
+      }
+      return []
+    }
+
+    await stubProjectShell(page, jobsForProject)
+    await stubProjectShell(historyPage, jobsForProject)
+    await page.route(`**/api/jobs/${RELEASE_JOB_ID}`, (route: Route) =>
+      route.fulfill({
+        json:
+          phase === 'running'
+            ? runningReleaseJob()
+            : finishedReleaseJob(0, 'Release output reached both surfaces.\n'),
+      }),
+    )
+    await page.route(`**/api/streaming/${RELEASE_JOB_ID}`, async (route: Route) => {
+      await streamDone
+      await route.fulfill({
+        status: 200,
+        headers: {
+          'content-type': 'text/event-stream',
+          'cache-control': 'no-cache',
+        },
+        body: [
+          'data: Release output reached both surfaces.',
+          '',
+          'event: done',
+          `data: ${JSON.stringify({
+            exitCode: 0,
+            provider: 'claude',
+            duration: 1500,
+          })}`,
+          '',
+        ].join('\n'),
+      })
+    })
+
+    await Promise.all([
+      page.goto(`/project/${PROJECT}/terminal`),
+      historyPage.goto(`/project/${PROJECT}/history`),
+    ])
+
+    await expect(page.getByRole('button', { name: 'new' })).toBeVisible({ timeout: 8_000 })
+    await expect(page.getByText('live run')).toHaveCount(0)
+    await expect(historyPage.getByText('No runs yet')).toBeVisible({ timeout: 8_000 })
+
+    phase = 'running'
+
+    const releaseRow = historyPage.getByRole('button').filter({ hasText: 'Release pipeline' }).first()
+    await expect(releaseRow).toBeVisible({ timeout: 12_000 })
+    await expect(releaseRow.getByLabel('running')).toBeVisible({ timeout: 12_000 })
+
+    await expect(page).toHaveURL(
+      new RegExp(`/project/${PROJECT}/terminal\\?job=${encodeURIComponent(RELEASE_JOB_ID)}`),
+      { timeout: 12_000 },
+    )
+    await expect(page.getByText('live run')).toBeVisible({ timeout: 8_000 })
+    await expect(page.getByTitle('View unified release trace')).toBeVisible({ timeout: 8_000 })
+
+    phase = 'done'
+    finishStream()
+
+    await expect(page.getByText('Release output reached both surfaces.')).toBeVisible({
+      timeout: 8_000,
+    })
+    await expect(page.getByText('exit 0 — ok').first()).toBeVisible({ timeout: 8_000 })
+    await expect(page.getByText('live run')).toHaveCount(0, { timeout: 8_000 })
+
+    await expect(releaseRow.getByLabel('done')).toBeVisible({ timeout: 12_000 })
+    await expect(releaseRow.getByLabel('running')).toHaveCount(0, { timeout: 12_000 })
+    await expect(historyPage.getByText('No runs yet')).toHaveCount(0)
   })
 })
