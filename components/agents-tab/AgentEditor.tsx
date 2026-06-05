@@ -483,11 +483,12 @@ export function AgentEditor({
                 filteredItems.slice(0, 60).map(item => {
                   const isSelected = selectedSkills.includes(item.id)
                   return (
-                    <button
+                    <Button
                       key={item.id}
                       type="button"
-                      className={`w-full px-3 py-2 text-left border-none cursor-pointer transition-colors flex items-center gap-3 disabled:cursor-not-allowed disabled:opacity-70 ${
-                        isSelected ? 'bg-accent/8 text-text-primary' : 'bg-transparent text-text-primary hover:bg-bg-secondary'
+                      variant="ghost"
+                      className={`w-full !justify-start !gap-3 !rounded-none !border-0 !px-3 !py-2 text-left !font-normal disabled:!opacity-70 ${
+                        isSelected ? '!bg-accent/8 !text-text-primary hover:!bg-accent/8 hover:!text-text-primary' : '!bg-transparent !text-text-primary hover:!bg-bg-secondary hover:!text-text-primary'
                       }`}
                       onClick={() => toggleSkill(item.id)}
                       disabled={isSystemAgent}
@@ -512,7 +513,7 @@ export function AgentEditor({
                           <div className="text-xs text-text-tertiary truncate mt-0.5">{item.description}</div>
                         )}
                       </div>
-                    </button>
+                    </Button>
                   )
                 })
               )}
@@ -528,11 +529,12 @@ export function AgentEditor({
               availableDocs.map(doc => {
                 const isSelected = selectedDocPaths.includes(doc.path)
                 return (
-                  <button
+                  <Button
                     key={doc.path}
                     type="button"
-                    className={`w-full px-3 py-2 text-left border-none cursor-pointer transition-colors flex items-center gap-3 disabled:cursor-not-allowed disabled:opacity-70 ${
-                      isSelected ? 'bg-status-success/8 text-text-primary' : 'bg-transparent text-text-primary hover:bg-bg-secondary'
+                    variant="ghost"
+                    className={`w-full !justify-start !gap-3 !rounded-none !border-0 !px-3 !py-2 text-left !font-normal disabled:!opacity-70 ${
+                      isSelected ? '!bg-status-success/8 !text-text-primary hover:!bg-status-success/8 hover:!text-text-primary' : '!bg-transparent !text-text-primary hover:!bg-bg-secondary hover:!text-text-primary'
                     }`}
                     onClick={() => toggleDoc(doc.path)}
                     disabled={isSystemAgent}
@@ -550,7 +552,7 @@ export function AgentEditor({
                       <div className="text-sm font-medium">{doc.name}</div>
                       <div className="text-xs text-text-tertiary truncate">{doc.path}</div>
                     </div>
-                  </button>
+                  </Button>
                 )
               })
             )}
