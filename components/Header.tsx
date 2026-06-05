@@ -7,6 +7,7 @@ import { ThemeToggle } from './ThemeToggle'
 import { NotificationBell } from './NotificationBell'
 import { PrivacyToggle } from './PrivacyToggle'
 import { JobsPauseToggle } from './JobsPauseToggle'
+import { buttonVariants } from '@/components/ui/Button'
 import { Spinner } from '@/components/ui/Spinner'
 import { fetchRecommendationsSummary } from '@/lib/client-api'
 import { useTheme } from '@/hooks/useTheme'
@@ -75,11 +76,12 @@ export function Header({ loading, lastRefresh: _lastRefresh }: HeaderProps) {
             <Link
               key={item.to}
               href={item.to}
-              className={`px-2.5 sm:px-3 py-1.5 rounded-md text-sm no-underline transition-colors whitespace-nowrap focus:outline-none focus-visible:ring-2 focus-visible:ring-accent/50 inline-flex items-center gap-1.5 ${
-                isActive
-                  ? 'bg-accent-light text-accent font-medium'
-                  : 'text-text-secondary hover:text-text-primary hover:bg-bg-tertiary'
-              }`}
+              className={buttonVariants({
+                variant: isActive ? 'primary' : 'ghost',
+                className: `!px-2.5 sm:!px-3 whitespace-nowrap focus:outline-none focus-visible:ring-2 focus-visible:ring-accent/50 ${
+                  isActive ? '!border-transparent bg-accent-light !font-medium hover:!bg-accent-light' : ''
+                }`,
+              })}
             >
               {item.label}
               {item.countKey && count > 0 && (
