@@ -9,6 +9,7 @@ import {
   tryClaimAgentStartSlot,
   releaseAgentStartSlot,
   hasAgentStartSlot,
+  getAgentStartSlotJob,
 } from '@/lib/agents/pending-agent-run';
 
 describe('pending-agent-run queue', () => {
@@ -95,6 +96,26 @@ describe('agent start slot', () => {
     expect(hasAgentStartSlot('p1')).toBe(true);
     clearAllQueues();
     expect(hasAgentStartSlot('p1')).toBe(false);
+  });
+
+  it('evicts a leaked start slot once it ages past the TTL', () => {
+    vi.useFakeTimers();
+    try {
+      expect(tryClaimAgentStartSlot('p1', 'qa')).toEqual({ ok: true });
+      // Holder never released (route hung after the underlying process was
+      // killed). Just under the TTL it still blocks.
+      vi.advanceTimersByTime(4 * 60 * 1000);
+      expect(hasAgentStartSlot('p1')).toBe(true);
+      expect(getAgentStartSlotJob('p1')).not.toBeNull();
+      // Past the TTL the leaked claim is evicted so the deadlock self-heals.
+      vi.advanceTimersByTime(2 * 60 * 1000);
+      expect(getAgentStartSlotJob('p1')).toBeNull();
+      expect(hasAgentStartSlot('p1')).toBe(false);
+      expect(tryClaimAgentStartSlot('p1', 'improve')).toEqual({ ok: true });
+      releaseAgentStartSlot('p1');
+    } finally {
+      vi.useRealTimers();
+    }
   });
 
   it('keeps start slots visible across module reloads', async () => {

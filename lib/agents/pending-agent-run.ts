@@ -75,9 +75,33 @@ declare global {
 const startingAgents = globalThis.__tamtamStartingAgents ?? new Map<string, StartingAgent>();
 globalThis.__tamtamStartingAgents = startingAgents;
 
+// A claim is held only for the duration of a single agent-start route call
+// (dirty-worktree + branch-freshness checks, which may run a git fetch, then
+// the detached spawn). That window is seconds in the normal case; a generous
+// upper bound covers a slow fetch. Anything older than this is a *leaked*
+// claim — the holding route threw without reaching its `finally`, or an await
+// inside it hung after the underlying agent process was killed (e.g. SIGKILL).
+// Without eviction a leaked claim deadlocks the project forever: the synthetic
+// `<project>-agent-starting` job blocks both pending-release drains and every
+// queued agent run. Evicting on read/claim lets the deadlock self-heal on the
+// next drain cycle instead of waiting for a server restart.
+const START_SLOT_TTL_S = 5 * 60;
+
+function evictIfStale(project: string): void {
+  const existing = startingAgents.get(project);
+  if (existing && Date.now() / 1000 - existing.startedAt > START_SLOT_TTL_S) {
+    console.warn(
+      `[pending-agent-run] evicting stale start slot for ${project} ` +
+        `(agent '${existing.agentName}', age ${Math.round(Date.now() / 1000 - existing.startedAt)}s)`,
+    );
+    startingAgents.delete(project);
+  }
+}
+
 export function tryClaimAgentStartSlot(project: string, agentName: string):
   | { ok: true }
   | { ok: false; runningAgent: string } {
+  evictIfStale(project);
   const existing = startingAgents.get(project);
   if (existing) return { ok: false, runningAgent: existing.agentName };
   startingAgents.set(project, { agentName, startedAt: Date.now() / 1000 });
@@ -89,10 +113,12 @@ export function releaseAgentStartSlot(project: string): void {
 }
 
 export function hasAgentStartSlot(project: string): boolean {
+  evictIfStale(project);
   return startingAgents.has(project);
 }
 
 export function getAgentStartSlotJob(project: string): JobData | null {
+  evictIfStale(project);
   const slot = startingAgents.get(project);
   if (!slot) return null;
   return {
