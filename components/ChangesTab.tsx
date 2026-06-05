@@ -47,7 +47,17 @@ interface DiffEntry {
 // expanded entry. The `diff` string is immutable once loaded so the
 // default shallow-equal of React.memo is exactly the right check.
 const DiffView = memo(function DiffView({ diff }: { diff: string }) {
-  if (!diff.trim()) return <div className="p-3 text-xs text-text-secondary italic">No diff content.</div>
+  if (!diff.trim()) {
+    return (
+      <EmptyState
+        align="start"
+        paddingX="none"
+        paddingY="none"
+        className="p-3"
+        title={<span className="text-xs font-normal italic text-text-secondary">No diff content.</span>}
+      />
+    )
+  }
   const lines = diff.split('\n')
   return (
     <pre className="text-xs font-mono overflow-x-auto m-0 p-0 leading-relaxed">
