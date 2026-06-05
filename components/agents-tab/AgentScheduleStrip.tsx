@@ -1,6 +1,7 @@
 'use client'
 
 import { Select } from '@/components/ui/Select'
+import { ToggleSwitch } from '@/components/ui/ToggleSwitch'
 
 const SCHEDULES = ['15m', '30m', '1h', '2h', '4h', '8h', '12h', '24h', '3d', '7d', '30d']
 
@@ -44,33 +45,15 @@ export function AgentScheduleStrip({
         </Select>
       </div>
       <div className="w-px h-4 bg-border shrink-0" />
-      <button
-        type="button"
-        role="switch"
-        aria-checked={enabled}
-        onClick={() => setEnabled(!enabled)}
-        className="flex items-center gap-2 cursor-pointer shrink-0"
-      >
-        <div className={`relative w-9 h-5 rounded-full transition-colors ${enabled ? 'bg-accent' : 'bg-bg-tertiary border border-border'}`}>
-          <div className={`absolute top-0.5 w-4 h-4 rounded-full bg-white shadow-sm transition-all duration-150 ${enabled ? 'left-[18px]' : 'left-0.5'}`} />
-        </div>
-        <span className="text-xs text-text-secondary font-medium">Enabled</span>
-      </button>
+      <ToggleSwitch checked={enabled} onChange={setEnabled} label="Enabled" />
       <div className="w-px h-4 bg-border shrink-0" />
-      <button
-        type="button"
-        role="switch"
-        aria-checked={boostable}
-        onClick={() => setBoostable(!boostable)}
+      <ToggleSwitch
+        checked={boostable}
+        onChange={setBoostable}
+        label="Boostable"
         disabled={isSystemAgent}
-        className="flex items-center gap-2 cursor-pointer shrink-0 disabled:opacity-50 disabled:cursor-not-allowed"
         title="When off, the orchestrator never picks this agent for catch-up boost fires — it only runs on its own schedule. Use for blog/social-post style agents."
-      >
-        <div className={`relative w-9 h-5 rounded-full transition-colors ${boostable ? 'bg-accent' : 'bg-bg-tertiary border border-border'}`}>
-          <div className={`absolute top-0.5 w-4 h-4 rounded-full bg-white shadow-sm transition-all duration-150 ${boostable ? 'left-[18px]' : 'left-0.5'}`} />
-        </div>
-        <span className="text-xs text-text-secondary font-medium">Boostable</span>
-      </button>
+      />
     </div>
   )
 }

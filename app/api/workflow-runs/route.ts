@@ -142,7 +142,7 @@ function buildMeta() {
 
 function readLocalWorldRuns(limit: number): NextResponse {
   const dir = localWorldRunsDir();
-  let slice: Array<{ name: string; mtime: number }>;
+  let slice: Array<{ name: string }>;
   try {
     slice = listLocalRunFilesNewestFirst(limit);
   } catch (err) {

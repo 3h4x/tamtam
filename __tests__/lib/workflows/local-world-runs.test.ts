@@ -79,23 +79,18 @@ describe('listLocalRunFilesNewestFirst', () => {
     delete process.env.WORKFLOW_LOCAL_DATA_DIR;
   });
 
-  it('keeps only the newest run files while scanning', async () => {
+  it('selects the newest run files by ULID filename without statting', async () => {
+    // Run IDs are ULIDs — leading chars are time-ordered, so a descending
+    // filename sort is chronological. Names below are intentionally out of
+    // order on disk to prove the function sorts rather than trusting order.
     const readdirSyncMock = vi.fn(() => [
-      'old.json',
+      'wrun_01A.json', // oldest
       'ignore.txt',
-      'newest.json',
-      'middle.json',
-      'newer.json',
+      'wrun_01D.json', // newest
+      'wrun_01B.json',
+      'wrun_01C.json',
     ]);
-    const mtimes = new Map([
-      ['old.json', 10],
-      ['newest.json', 40],
-      ['middle.json', 20],
-      ['newer.json', 30],
-    ]);
-    const statSyncMock = vi.fn((path: string) => ({
-      mtimeMs: mtimes.get(path.split('/').pop() ?? '') ?? 0,
-    }));
+    const statSyncMock = vi.fn();
 
     vi.doMock('fs', async () => {
       const actual = await vi.importActual<typeof import('fs')>('fs');
@@ -111,9 +106,10 @@ describe('listLocalRunFilesNewestFirst', () => {
     const { listLocalRunFilesNewestFirst } = await import('@/lib/workflows/local-world-runs');
 
     expect(listLocalRunFilesNewestFirst(2)).toEqual([
-      { name: 'newest.json', mtime: 40 },
-      { name: 'newer.json', mtime: 30 },
+      { name: 'wrun_01D.json' },
+      { name: 'wrun_01C.json' },
     ]);
-    expect(statSyncMock).toHaveBeenCalledTimes(4);
+    // The selection must not stat any file — that was the slow path.
+    expect(statSyncMock).not.toHaveBeenCalled();
   });
 });

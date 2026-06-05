@@ -1,4 +1,4 @@
-import { readdirSync, readFileSync, statSync } from 'fs';
+import { readdirSync, readFileSync } from 'fs';
 import { isAbsolute, join } from 'path';
 import { parse as devalueParse } from 'devalue';
 
@@ -218,28 +218,21 @@ export function readLocalStepFiles(runId: string): LocalStepFile[] {
     });
 }
 
-export function listLocalRunFilesNewestFirst(limit: number): Array<{ name: string; mtime: number }> {
+export function listLocalRunFilesNewestFirst(limit: number): Array<{ name: string }> {
   const dir = localWorldRunsDir();
-  const newest: Array<{ name: string; mtime: number }> = [];
+  const names: string[] = [];
 
   for (const name of readdirSync(/*turbopackIgnore: true*/ dir)) {
-    if (!name.endsWith('.json')) continue;
-
-    let mtime = 0;
-    try { mtime = statSync(/*turbopackIgnore: true*/ join(dir, name)).mtimeMs; } catch {}
-    const entry = { name, mtime };
-    let inserted = false;
-    for (let i = 0; i < newest.length; i++) {
-      const current = newest[i];
-      if (current && entry.mtime > current.mtime) {
-        newest.splice(i, 0, entry);
-        inserted = true;
-        break;
-      }
-    }
-    if (!inserted && newest.length < limit) newest.push(entry);
-    if (newest.length > limit) newest.pop();
+    if (name.endsWith('.json')) names.push(name);
   }
 
-  return newest;
+  // Run IDs are ULIDs (`wrun_01K…`), whose leading characters encode the
+  // creation timestamp — so a lexicographic filename sort is chronological.
+  // Selecting the newest `limit` by name avoids a statSync() per file, which
+  // is what made this O(tens-of-thousands) syscalls and pinned the route at
+  // multiple seconds once the runs dir grew large. The caller re-sorts the
+  // chosen slice by each run's own createdAt for exact display order.
+  names.sort((a, b) => (a < b ? 1 : a > b ? -1 : 0));
+
+  return names.slice(0, limit).map((name) => ({ name }));
 }
