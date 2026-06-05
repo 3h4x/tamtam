@@ -34,7 +34,7 @@ describe('GET /api/agent-catalog', () => {
     const improve = data.entries.find((entry: { name: string }) => entry.name === 'improve');
 
     expect(qa?.prerequisiteCommand).toContain('{{project}}/config');
-    expect(improve?.prerequisiteCommand).toContain('## Next 5 unaudited candidates');
+    expect(improve?.prerequisiteCommand).toContain('## Unaudited candidates');
   });
 
   it('describes system-agent schedule ownership as Settings-managed', async () => {

@@ -62,6 +62,16 @@ function transformArgs(argv, env) {
   const mcpPath = e.TAMTAM_MCP_CONFIG_PATH;
   if (mcpPath && !out.includes('--mcp-config') && !out.some((x) => x.startsWith('--mcp-config='))) {
     out.push('--mcp-config', mcpPath);
+    // Isolate the agent run to ONLY the broker MCP. Without --strict-mcp-config,
+    // the CLI also loads the user's global/project/plugin MCP servers — most
+    // damagingly the Claude Code `playwright` plugin, which starts
+    // `@playwright/mcp@latest` *headed* (no --headless) and pops a visible
+    // browser window during a headless agent run. TamTam's broker
+    // (`tamtam_browser`) is already headless; strict mode makes the agent use
+    // that and nothing else.
+    if (!out.includes('--strict-mcp-config')) {
+      out.push('--strict-mcp-config');
+    }
     // Claude requires explicit --allowedTools entries for headless MCP calls;
     // without it the model is told the tool exists but is denied. Match the
     // server name written by mcp-config-writer.ts: `tamtam_browser`.
@@ -69,7 +79,7 @@ function transformArgs(argv, env) {
     if (allowedFlag === -1) {
       out.push('--allowedTools', 'mcp__tamtam_browser');
     }
-    process.stderr.write(`[claude-shim] injecting --mcp-config ${mcpPath}\n`);
+    process.stderr.write(`[claude-shim] injecting --mcp-config ${mcpPath} (strict)\n`);
   }
   return out;
 }

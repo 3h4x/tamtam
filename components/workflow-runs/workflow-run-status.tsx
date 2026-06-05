@@ -11,9 +11,8 @@ interface WorkflowStatusPresentation {
 }
 
 // Pre-allocate one object per status. Every workflow-runs list row calls
-// this helper; previously each call returned a fresh object literal with
-// the same content. Module-load allocates 6 objects once; subsequent calls
-// just return the cached reference.
+// this helper, so module-load builds these once and each call returns the
+// cached reference instead of a fresh object literal.
 const STATUS_PRESENTATIONS: Record<string, WorkflowStatusPresentation> = {
   completed: { glyph: '✓', tone: 'success', className: 'bg-status-success/15 text-status-success border-status-success/30' },
   failed: { glyph: '✗', tone: 'error', className: 'bg-status-error/15 text-status-error border-status-error/30' },

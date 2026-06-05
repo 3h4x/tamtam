@@ -75,6 +75,26 @@ describe('claude-shim model resolution', () => {
   });
 });
 
+describe('claude-shim broker MCP injection', () => {
+  it('injects --mcp-config, --strict-mcp-config, and broker allowedTools when TAMTAM_MCP_CONFIG_PATH is set', () => {
+    const args = shim.transformArgs(['--print'], { TAMTAM_MCP_CONFIG_PATH: '/tmp/run/mcp.json' });
+    expect(args).toContain('--mcp-config');
+    expect(args).toContain('/tmp/run/mcp.json');
+    // Strict mode keeps the user's global/plugin MCP servers (e.g. the headed
+    // playwright plugin) out of the headless agent run.
+    expect(args).toContain('--strict-mcp-config');
+    const i = args.indexOf('--allowedTools');
+    expect(i).toBeGreaterThan(-1);
+    expect(args[i + 1]).toBe('mcp__tamtam_browser');
+  });
+
+  it('adds nothing when TAMTAM_MCP_CONFIG_PATH is unset', () => {
+    const args = shim.transformArgs(['--print'], {});
+    expect(args).not.toContain('--mcp-config');
+    expect(args).not.toContain('--strict-mcp-config');
+  });
+});
+
 describe('claude-shim signal forwarding', () => {
   it('forwards SIGTERM to the child process', async () => {
     const dir = await mkdtemp(join(tmpdir(), 'tamtam-claude-shim-sig-'));
