@@ -4,7 +4,7 @@ import { useState, useEffect } from 'react'
 import Link from 'next/link'
 import { ErrorState } from './ErrorState'
 import { resolveGithubBoardUrl } from '@/lib/client/resolve-github-board-url'
-import { buttonVariants } from '@/components/ui/Button'
+import { Button, buttonVariants } from '@/components/ui/Button'
 import { EmptyState } from '@/components/ui/EmptyState'
 import { Pill, type PillTone } from '@/components/ui/Pill'
 import { Spinner } from '@/components/ui/Spinner'
@@ -325,9 +325,10 @@ export function ReleaseTraceView({ projectName, releaseId }: Props) {
                   </div>
 
                   <div className="rounded-md border border-border bg-bg-secondary overflow-hidden">
-                    <button
+                    <Button
                       type="button"
-                      className="w-full flex items-center gap-3 px-4 py-3 text-left hover:bg-bg-tertiary transition-colors"
+                      variant="ghost"
+                      className="w-full !justify-start !gap-3 !rounded-none !border-0 bg-transparent !px-4 !py-3 text-left !font-normal text-text-primary hover:!bg-bg-tertiary"
                       onClick={() => setExpandedStep(isOpen ? null : step.job_id)}
                     >
                       <span className={`font-mono text-sm font-semibold w-20 shrink-0 ${
@@ -364,7 +365,7 @@ export function ReleaseTraceView({ projectName, releaseId }: Props) {
                       <span className={`text-text-tertiary text-xs transition-transform ${isOpen ? 'rotate-180' : ''}`}>
                         ▾
                       </span>
-                    </button>
+                    </Button>
 
                     {isOpen && step.log_excerpt && (
                       <div className="px-4 pb-3 border-t border-border">
