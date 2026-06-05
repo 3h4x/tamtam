@@ -160,6 +160,29 @@ describe('durable-agent-run-slot', () => {
     expect(next.ok).toBe(true);
   });
 
+  it('evicts an attached slot whose job row never finalizes (zombie backstop)', async () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date('2026-06-02T12:00:00Z'));
+    const claim = await tryClaimDurableAgentRunSlot({ project: 'p1', agentId: 'a1', agentName: 'qa' });
+    expect(claim.ok).toBe(true);
+    if (!claim.ok) return;
+
+    // Zombie: job row exists but finished_at stays NULL forever (killed mid-run
+    // during a DB outage, never finalized).
+    await insertJob('job-1', 'p1', null);
+    await attachJobToDurableAgentRunSlot('p1', claim.token, 'job-1');
+
+    // Within the hard ceiling the zombie still blocks new runs.
+    vi.setSystemTime(new Date('2026-06-02T12:30:00Z'));
+    const stillBlocked = await tryClaimDurableAgentRunSlot({ project: 'p1', agentId: 'a2', agentName: 'qa' });
+    expect(stillBlocked.ok).toBe(false);
+
+    // Past the ceiling the pinned slot self-heals so the project isn't blocked forever.
+    vi.setSystemTime(new Date('2026-06-02T13:01:00Z'));
+    const freed = await tryClaimDurableAgentRunSlot({ project: 'p1', agentId: 'a2', agentName: 'qa' });
+    expect(freed.ok).toBe(true);
+  });
+
   it('does not release a slot owned by a different job', async () => {
     const claim = await tryClaimDurableAgentRunSlot({ project: 'p1', agentId: 'a1', agentName: 'test-e2e' });
     expect(claim.ok).toBe(true);

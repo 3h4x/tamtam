@@ -5,6 +5,17 @@ import type { JobData } from '@/lib/jobs/types';
 
 const KEY_PREFIX = 'agent_run_slot:';
 const UNATTACHED_SLOT_STALE_SECONDS = 5 * 60;
+// Backstop for an *attached* slot whose job row never finalizes. Normally an
+// attached slot is released when its job finishes (`finished_at`/`aborted_at`
+// set). But a job killed mid-run while the DB is unreachable (e.g. a Postgres
+// outage) can leave a zombie row — `finished_at` and `aborted_at` both NULL —
+// that `activeJobExists` reads as "still running" forever. Nothing reconciles
+// it after the DB recovers, so the slot stays pinned and every new agent run
+// for the project is rejected with 409 `already_running` indefinitely. This
+// ceiling lets the slot self-heal: it sits well above the 30-min abandoned-job
+// bound (`lib/jobs/auto-resume.ts`), so a genuinely long-running agent is never
+// evicted, but a never-finalized zombie clears within the hour.
+const ATTACHED_SLOT_HARD_STALE_SECONDS = 60 * 60;
 
 type SlotValue = {
   token: string;
@@ -74,7 +85,16 @@ async function clearStaleSlot(project: string, existing: SlotValue | null, nowSe
   if (!existing) return;
 
   if (existing.jobId) {
-    if (await activeJobExists(existing.jobId)) return;
+    if (await activeJobExists(existing.jobId)) {
+      // Zombie backstop: the job row still reads active (finished_at NULL), but
+      // if the slot was claimed longer ago than any real agent run could last,
+      // the row never finalized (DB-outage casualty) — evict so the project
+      // isn't blocked forever.
+      if (nowSeconds - existing.claimedAt > ATTACHED_SLOT_HARD_STALE_SECONDS) {
+        await db.delete(schema.maintenanceStatus).where(eq(schema.maintenanceStatus.key, slotKey(project))).execute();
+      }
+      return;
+    }
     await db.delete(schema.maintenanceStatus).where(eq(schema.maintenanceStatus.key, slotKey(project))).execute();
     return;
   }
