@@ -4,8 +4,8 @@
 // be re-driven from a workflow trigger / replay path without duplicating
 // the policy (releaseAfterRun gate, pending-release queue, issue-work PR handoff).
 //
-// The current caller is still the completion hook; future iterations will
-// also call this from a workflow that consumes durable
+// Callers include the completion hook and durable workflow trigger paths;
+// replay can also consume durable
 // job_completion_events rows. Either entry point yields the same behavior,
 // which is the whole point of extracting it.
 
