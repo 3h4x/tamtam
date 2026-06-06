@@ -14,6 +14,7 @@ import {
 } from '@/lib/client-api'
 import type { AutomationQueueItem, JobInfo } from '@/lib/client-api'
 import { Button, buttonVariants } from '@/components/ui/Button'
+import { ErrorCallout } from '@/components/ui/ErrorCallout'
 import { PillButton } from '@/components/ui/Pill'
 import { SearchField } from '@/components/ui/SearchField'
 import {
@@ -698,7 +699,7 @@ export function ProjectRunsTab({ projectName, jobsPaused = false }: ProjectRunsT
         </Link>
       )}
       {queueItems.length > 0 && (
-        <div className="mb-3 rounded-lg border border-status-warning/30 bg-status-warning/5">
+        <ErrorCallout tone="warning" padding="none" radius="lg" preWrap={false} className="mb-3 !bg-status-warning/5">
           <div className="flex items-center justify-between gap-3 border-b border-status-warning/20 px-3 py-2">
             <div>
               <div className="text-xs font-medium text-text-primary">Queued automation</div>
@@ -761,7 +762,7 @@ export function ProjectRunsTab({ projectName, jobsPaused = false }: ProjectRunsT
               )
             })}
           </div>
-        </div>
+        </ErrorCallout>
       )}
       {/* Search + summary */}
       <div className="mb-3 rounded-lg border border-border bg-bg-secondary">
