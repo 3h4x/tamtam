@@ -7,6 +7,7 @@ import { computePromptInsights } from '@/lib/jobs/prompt-insights';
 // hide regressions inside the noise.
 const DEFAULT_WINDOW_DAYS = 7;
 const MAX_WINDOW_DAYS = 90;
+const DECIMAL_DAYS_RE = /^\d+$/;
 
 export async function GET(
   request: NextRequest,
@@ -17,7 +18,7 @@ export async function GET(
   const rawDays = url.searchParams.get('days');
   let days = DEFAULT_WINDOW_DAYS;
   if (rawDays !== null) {
-    if (!/^\d+$/.test(rawDays)) {
+    if (!DECIMAL_DAYS_RE.test(rawDays)) {
       return NextResponse.json(
         { error: `days must be an integer between 1 and ${MAX_WINDOW_DAYS}` },
         { status: 400 },
