@@ -298,8 +298,8 @@ export function ProjectDetailPage({
     return (
       <div className="py-2">
         <Button
-          variant="ghost"
-          className="mb-4 px-0 py-0 text-accent hover:bg-transparent hover:text-accent hover:underline font-normal"
+          variant="link"
+          className="mb-4 font-normal"
           onClick={() => router.push('/')}
         >
           &larr; Back to projects
