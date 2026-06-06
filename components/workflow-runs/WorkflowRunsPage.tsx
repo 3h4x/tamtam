@@ -23,6 +23,7 @@ import {
   summarizeTrigger,
 } from '@/components/workflow-runs/summarize';
 import { Button } from '@/components/ui/Button';
+import { ErrorCallout } from '@/components/ui/ErrorCallout';
 import { Pill, type PillTone } from '@/components/ui/Pill';
 import { StandardTabs } from '@/components/ui/StandardTabs';
 import { Table, type Column } from '@/components/ui/Table';
@@ -413,8 +414,12 @@ export function WorkflowRunsPage() {
         Everything TamTam is doing across your projects — releases, scheduled agents, and pipeline checks — as it happens.
       </p>
       {error ? (
-        <div
-          className="mb-3 flex flex-wrap items-start justify-between gap-3 rounded-md border border-status-warning/30 bg-status-warning/10 px-3 py-2 text-sm text-text-primary"
+        <ErrorCallout
+          tone="warning"
+          padding="none"
+          radius="md"
+          preWrap={false}
+          className="mb-3 flex flex-wrap items-start justify-between gap-3 px-3 py-2 text-sm text-text-primary"
           role="status"
           aria-live="polite"
         >
@@ -433,7 +438,7 @@ export function WorkflowRunsPage() {
           >
             Retry now
           </Button>
-        </div>
+        </ErrorCallout>
       ) : null}
       {view === 'graph' && <WorkflowGraph />}
       {view === 'runs' && (

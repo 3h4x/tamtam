@@ -1,11 +1,11 @@
 'use client'
 
-import type { ReactNode } from 'react'
+import type { ComponentPropsWithoutRef, ReactNode } from 'react'
 
-interface ErrorCalloutProps {
+interface ErrorCalloutProps extends ComponentPropsWithoutRef<'div'> {
   children: ReactNode
   className?: string
-  padding?: 'sm' | 'md'
+  padding?: 'none' | 'sm' | 'md'
   radius?: 'default' | 'md' | 'lg'
   tone?: 'error' | 'warning'
   preWrap?: boolean
@@ -16,6 +16,7 @@ const TONE = {
   warning: 'border border-status-warning/30 bg-status-warning/10 text-status-warning',
 }
 const PADDING = {
+  none: '',
   sm: 'p-2',
   md: 'p-3',
 }
@@ -37,6 +38,7 @@ export function ErrorCallout({
   radius = 'default',
   tone = 'error',
   preWrap = true,
+  ...props
 }: ErrorCalloutProps) {
   return (
     <div className={[
@@ -46,6 +48,7 @@ export function ErrorCallout({
       preWrap ? 'whitespace-pre-wrap' : undefined,
       className,
     ].filter(Boolean).join(' ')}
+      {...props}
     >
       {children}
     </div>
