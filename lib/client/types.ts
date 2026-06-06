@@ -188,6 +188,7 @@ export interface JobInfo {
   release_id?: string | null
   parent_job_id?: string | null
   work_summary?: string | null
+  detail?: string | null
   modified_files?: string | null
   provider?: string | null
   prompt_bytes?: number | null

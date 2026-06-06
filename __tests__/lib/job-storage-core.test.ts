@@ -1177,6 +1177,33 @@ describe('job-storage', () => {
       const dict = jobToDict(job);
       expect(dict.verdict).toBe('LGTM');
     });
+
+    it('does not include plain-text failure detail in the full dict', () => {
+      const logFile = join(tempDir, 'plain-failure.log');
+      writeFileSync(logFile, 'fatal: auth expired\n');
+      const job: JobData = {
+        id: 'job-plain-failure',
+        project: 'proj-c',
+        kind: 'run',
+        prompt: null,
+        pid: 1111,
+        logPath: logFile,
+        startedAt: 1000,
+        finishedAt: 2000,
+        exitCode: 1,
+        seen: false,
+        durationMs: null,
+        inputTokens: null,
+        outputTokens: null,
+        cacheReadTokens: null,
+        cacheCreateTokens: null,
+        sessionId: null,
+      };
+
+      const dict = jobToDict(job);
+
+      expect(dict).not.toHaveProperty('detail');
+    });
   });
 
   describe('jobToListDict', () => {
@@ -1236,6 +1263,63 @@ describe('job-storage', () => {
 
       expect(dict.prompt).toBeNull();
       expect(dict.user_prompt).toBeNull();
+    });
+
+    it('includes compact failure detail for failed list rows', () => {
+      const logFile = join(tempDir, 'list-plain-failure.log');
+      writeFileSync(logFile, 'fatal: auth expired\n');
+      const job: JobData = {
+        id: 'job-list-failure',
+        project: 'proj-list',
+        kind: 'run',
+        prompt: null,
+        pid: 1234,
+        logPath: logFile,
+        startedAt: 1000,
+        finishedAt: 2000,
+        exitCode: 1,
+        seen: false,
+        durationMs: null,
+        inputTokens: null,
+        outputTokens: null,
+        cacheReadTokens: null,
+        cacheCreateTokens: null,
+        sessionId: null,
+      };
+
+      const dict = jobToListDict(job);
+
+      expect(dict.detail).toBe('fatal: auth expired');
+      expect(dict).not.toHaveProperty('log_path');
+    });
+
+    it('caps list failure detail extracted from log tails', () => {
+      const logFile = join(tempDir, 'list-long-failure.log');
+      writeFileSync(logFile, `${'x'.repeat(2500)}\n`);
+      const job: JobData = {
+        id: 'job-list-long-failure',
+        project: 'proj-list',
+        kind: 'run',
+        prompt: null,
+        pid: 1234,
+        logPath: logFile,
+        startedAt: 1000,
+        finishedAt: 2000,
+        exitCode: 1,
+        seen: false,
+        durationMs: null,
+        inputTokens: null,
+        outputTokens: null,
+        cacheReadTokens: null,
+        cacheCreateTokens: null,
+        sessionId: null,
+      };
+
+      const dict = jobToListDict(job);
+
+      expect(typeof dict.detail).toBe('string');
+      expect((dict.detail as string).length).toBe(2000);
+      expect(dict.detail).toMatch(/…$/);
     });
   });
 

@@ -5,6 +5,8 @@ const PROJECT = 'run-dual-surface-mocked'
 const SESSION_ID = 'run-dual-surface-session-1'
 const PREVIOUS_JOB_ID = 'run-dual-surface-prev-1'
 const CURRENT_JOB_ID = 'run-dual-surface-current-1'
+const PREVIOUS_RUN_PROMPT = 'Earlier checkpoint for the same run session.'
+const CURRENT_RUN_PROMPT = 'Continue the final pass across both UI surfaces.'
 
 const now = () => Math.floor(Date.now() / 1000)
 
@@ -67,8 +69,8 @@ function previousSessionJob() {
     log_path: '',
     seen: true,
     session_id: SESSION_ID,
-    user_prompt: 'Earlier checkpoint for the same run session.',
-    prompt: 'Earlier checkpoint for the same run session.',
+    user_prompt: PREVIOUS_RUN_PROMPT,
+    prompt: PREVIOUS_RUN_PROMPT,
     context_meta: null,
     provider: 'claude',
     work_summary: null,
@@ -89,7 +91,7 @@ function runningSessionJob() {
     seen: true,
     session_id: SESSION_ID,
     user_prompt: 'Continue the final pass across both UI surfaces.',
-    prompt: 'Continue the final pass across both UI surfaces.',
+    prompt: CURRENT_RUN_PROMPT,
     context_meta: null,
     provider: 'claude',
     work_summary: 'Streaming on the terminal while history polls.',
@@ -279,7 +281,7 @@ test.describe('Mocked ordinary run dual-surface lifecycle', () => {
     const { historyPage, terminalPage } = await openDualSurfacePages(page)
 
     const runRow = historyPage.getByRole('button')
-      .filter({ hasText: 'Streaming on the terminal while history polls.' })
+      .filter({ hasText: PREVIOUS_RUN_PROMPT })
       .first()
 
     await expect(runRow).toBeVisible({ timeout: 8_000 })
@@ -367,7 +369,7 @@ test.describe('Mocked ordinary run dual-surface lifecycle', () => {
     const { historyPage, terminalPage } = await openDualSurfacePages(page)
 
     const runRow = historyPage.getByRole('button')
-      .filter({ hasText: 'Streaming on the terminal while history polls.' })
+      .filter({ hasText: PREVIOUS_RUN_PROMPT })
       .first()
 
     await expect(runRow).toBeVisible({ timeout: 8_000 })
@@ -387,6 +389,9 @@ test.describe('Mocked ordinary run dual-surface lifecycle', () => {
     await expect(terminalPage.getByText('live run')).toHaveCount(0, { timeout: 8_000 })
 
     await expect(runRow.getByText('exit 2').first()).toBeVisible({ timeout: 12_000 })
+    await expect(runRow.getByText('Mock provider failed after the final pass')).toBeVisible({
+      timeout: 12_000,
+    })
     await expect(runRow.getByLabel('running')).toHaveCount(0, { timeout: 12_000 })
   })
 
@@ -444,7 +449,7 @@ test.describe('Mocked ordinary run dual-surface lifecycle', () => {
     const { historyPage, terminalPage } = await openDualSurfacePages(page)
 
     const runRow = historyPage.getByRole('button')
-      .filter({ hasText: 'Streaming on the terminal while history polls.' })
+      .filter({ hasText: PREVIOUS_RUN_PROMPT })
       .first()
 
     await expect(runRow).toBeVisible({ timeout: 8_000 })

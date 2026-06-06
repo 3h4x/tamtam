@@ -3,6 +3,8 @@ import { db, schema } from '@/lib/db';
 import { getVerdict } from './verdict';
 import { currentParent } from './parent-context';
 import { getSettings } from '@/lib/shared/config';
+import { extractFailureLogDetailFromTail } from '@/lib/jobs/failure-log-detail';
+import { isCancelledExitCode } from '@/lib/shared/job-exit-codes';
 import type { JobData } from './types';
 
 export { runWithParent } from './parent-context';
@@ -361,6 +363,8 @@ export function updateJob(job: JobData): void {
 }
 
 const LIST_PROMPT_PREVIEW_BYTES = 200;
+const LIST_FAILURE_DETAIL_TAIL_BYTES = 64 * 1024;
+const LIST_FAILURE_DETAIL_MAX_CHARS = 2000;
 
 function truncatePromptForList(text: string | null | undefined): string | null {
   if (!text) return text ?? null;
@@ -370,12 +374,29 @@ function truncatePromptForList(text: string | null | undefined): string | null {
   return text.slice(0, LIST_PROMPT_PREVIEW_BYTES - 1) + '…';
 }
 
+function truncateFailureDetailForList(text: string): string {
+  if (text.length <= LIST_FAILURE_DETAIL_MAX_CHARS) return text;
+  return text.slice(0, LIST_FAILURE_DETAIL_MAX_CHARS - 1) + '…';
+}
+
+function failureDetailForList(job: JobData): string | null {
+  if (job.exitCode == null || job.exitCode === 0 || isCancelledExitCode(job.exitCode) || !job.logPath) {
+    return null;
+  }
+  const detail = extractFailureLogDetailFromTail(job.logPath, LIST_FAILURE_DETAIL_TAIL_BYTES, {
+    includeNonJsonDetail: true,
+  });
+  return detail ? truncateFailureDetailForList(detail) : null;
+}
+
 // Slim variant for the list endpoint. Drops fields no list consumer reads
 // (log_path, full prompts) and trims preview text to the first 200 bytes.
 // `/api/jobs/[jobId]` continues to serve the full payload for terminal
 // restore and detail views.
 export function jobToListDict(job: JobData): Record<string, unknown> {
   const d = jobToDict(job);
+  const detail = failureDetailForList(job);
+  if (detail) d.detail = detail;
   d.prompt = truncatePromptForList(job.prompt);
   d.user_prompt = truncatePromptForList(job.userPrompt);
   delete d.log_path;

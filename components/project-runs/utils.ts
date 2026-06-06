@@ -272,6 +272,7 @@ export interface Entry {
   bucket: KindBucket
   title: string
   subtitle: string | null
+  detail?: string | null
   startedAt: number
   lastActivityAt: number
   finishedAt: number | null
@@ -671,6 +672,7 @@ export function buildEntries(jobs: JobInfo[]): Entry[] {
         existing.costUsd += jobCost(j)
         existing.navJobId = j.id
         existing.workSummary = j.work_summary ?? existing.workSummary
+        existing.detail = j.detail ?? existing.detail
         if (!isConversational) {
           existing.title = titleForJob({ ...j, work_summary: existing.workSummary }, bucket)
           existing.subtitle = subtitleForJob(j, bucket)
@@ -708,6 +710,7 @@ export function buildEntries(jobs: JobInfo[]): Entry[] {
       bucket,
       title: titleForJob(j, bucket),
       subtitle: subtitleForJob(j, bucket),
+      detail: j.detail ?? null,
       startedAt: j.started_at,
       lastActivityAt: j.started_at,
       finishedAt: j.finished_at,
@@ -768,6 +771,7 @@ function makeTurnEntry(j: JobInfo, bucket: KindBucket, byId: Map<string, JobInfo
     bucket,
     title: titleForJob(j, bucket),
     subtitle: subtitleForJob(j, bucket),
+    detail: j.detail ?? null,
     startedAt: j.started_at,
     lastActivityAt: j.started_at,
     finishedAt: j.finished_at,
