@@ -299,4 +299,42 @@ test.describe('Home status badge live transitions', () => {
     await expect(page.getByText('2 agents running')).toHaveCount(0);
     await expect(page.getByText('releasing')).toHaveCount(0);
   });
+
+  test('falls back from "releasing" to "agent running" when the release finishes but an agent keeps running', async ({
+    page,
+  }) => {
+    test.setTimeout(TRANSITION_TIMEOUT);
+    let phase: 'release-and-agent' | 'agent-only' = 'release-and-agent';
+
+    await stubCommonRoutes(page);
+    await page.route('**/api/projects/runtime', (route: Route) => {
+      const body =
+        phase === 'release-and-agent'
+          ? makeRuntime(PROJECT, {
+              hasRunningRelease: true,
+              runningCount: 2,
+              runningKinds: ['release', 'agent:improve'],
+              runningAgentNames: ['improve'],
+              releaseStartedAt: now() - 60,
+            })
+          : makeRuntime(PROJECT, {
+              hasRunningRelease: false,
+              runningCount: 1,
+              runningKinds: ['agent:improve'],
+              runningAgentNames: ['improve'],
+            });
+      route.fulfill({ json: { projects: body } });
+    });
+
+    await page.goto('/');
+    await expect(page.getByText(PROJECT)).toBeVisible({ timeout: 8_000 });
+    await expect(page.getByText('releasing')).toBeVisible({ timeout: 8_000 });
+    await expect(page.getByText('agent running')).toHaveCount(0);
+
+    phase = 'agent-only';
+
+    await expect(page.getByText('agent running')).toBeVisible({ timeout: 40_000 });
+    await expect(page.getByText('releasing')).toHaveCount(0, { timeout: 40_000 });
+    await expect(page.locator('span.animate-pulse').filter({ hasText: 'stuck' })).toHaveCount(0);
+  });
 });
