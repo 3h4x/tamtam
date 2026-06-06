@@ -330,9 +330,10 @@ export function TerminalTab({ projectName, initialSessionId }: TerminalTabProps)
     }
   }
 
+  const normalizedDocsSearch = docsSearch.toLowerCase()
   const filteredDocs = allDocs.filter(doc =>
     !selectedDocs.some(d => d.name === doc.name) &&
-    (docsSearch === '' || doc.name.toLowerCase().includes(docsSearch.toLowerCase()))
+    (normalizedDocsSearch === '' || doc.name.toLowerCase().includes(normalizedDocsSearch))
   )
 
   const toggleDoc = (doc: DocItem) => {
