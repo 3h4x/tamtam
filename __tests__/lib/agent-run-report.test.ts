@@ -412,7 +412,7 @@ describe('finalizeAgentRunReport', () => {
     // Baseline has src/lib/pre-existing.ts dirty (poisoning the prior model).
     // Agent then creates src/lib/new.ts. Under the old "global confidence"
     // model the new file would be marked low and the gate would skip — that
-    // was the bug that made bonker stop releasing. Per-file attribution
+    // was the bug that made one project stop releasing. Per-file attribution
     // correctly marks the pre-existing path low and the new path high, so
     // the gate accepts and the release fires.
     execMock
