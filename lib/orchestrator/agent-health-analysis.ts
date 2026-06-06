@@ -251,7 +251,7 @@ async function defaultRunPrint(prompt: string): Promise<string | null> {
 
   return new Promise<string | null>((resolve) => {
     const child = spawn(bin, args, { env: buildChildEnv(env), stdio: ['pipe', 'pipe', 'pipe'] });
-    let stdout = '';
+    const stdoutChunks: Buffer[] = [];
     let settled = false;
     let killTimer: ReturnType<typeof setTimeout> | null = null;
     const finish = (value: string | null, clearKill = true) => {
@@ -277,10 +277,10 @@ async function defaultRunPrint(prompt: string): Promise<string | null> {
       finish(null);
       return;
     }
-    out.on('data', (chunk) => { stdout += chunk.toString('utf8'); });
+    out.on('data', (chunk: Buffer) => { stdoutChunks.push(chunk); });
     stderr.on('data', () => { /* drain so the pipe never blocks */ });
     child.on('error', () => finish(null));
-    child.on('close', (code) => finish(code === 0 ? stdout : null));
+    child.on('close', (code) => finish(code === 0 ? Buffer.concat(stdoutChunks).toString('utf8') : null));
     try {
       stdin.write(prompt);
       stdin.end();
