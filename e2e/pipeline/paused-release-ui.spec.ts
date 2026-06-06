@@ -704,3 +704,81 @@ test('Release button re-enables without page reload when the running pipeline jo
   await expect(idleBtn).toBeEnabled();
   await expect(busyBtn).not.toBeVisible();
 });
+
+// ---------------------------------------------------------------------------
+// Test 9: busy + jobs_paused overlap — label stays busy, title follows pause
+// The button text is driven by busy state, while the tooltip prioritizes the
+// global pause message. As the backend clears pause first and running second,
+// the control should move through those states without a reload.
+// ---------------------------------------------------------------------------
+test('Release button keeps the busy label but adopts the pause tooltip when jobs are paused mid-release, then unwinds in order', async ({
+  page,
+}) => {
+  const ts = Math.floor(Date.now() / 1000);
+  let jobRunning = true;
+  let jobsPaused = false;
+
+  await stubCommonRoutes(page);
+  await page.route('**/api/settings', (route: Route) =>
+    route.fulfill({
+      json: {
+        settings: { jobs_paused: jobsPaused ? 'true' : 'false' },
+        github_owner: '',
+      },
+    }),
+  );
+  await page.route(
+    (url) => url.pathname === '/api/jobs' && url.searchParams.get('project') === PROJECT,
+    (route: Route) =>
+      route.fulfill({
+        json: {
+          jobs: jobRunning
+            ? [
+                {
+                  id: 'running-review-pause-overlap',
+                  project: PROJECT,
+                  kind: 'review',
+                  status: 'running',
+                  exit_code: null,
+                  started_at: ts - 30,
+                  finished_at: null,
+                  pid: 0,
+                  log_path: '',
+                  seen: true,
+                },
+              ]
+            : [],
+          pendingReleaseProjects: [],
+        },
+      }),
+  );
+
+  await page.goto(`/project/${PROJECT}/issues`);
+
+  const busyBtn = page.getByRole('button', { name: 'Releasing…', exact: true });
+  await expect(busyBtn).toBeVisible({ timeout: 8_000 });
+  await expect(busyBtn).toBeDisabled();
+  await expect(busyBtn).toHaveAttribute('title', /release pipeline already running/i);
+
+  jobsPaused = true;
+
+  await expect(busyBtn).toHaveAttribute('title', /jobs are paused globally/i, {
+    timeout: 12_000,
+  });
+  await expect(busyBtn).toBeDisabled();
+
+  jobsPaused = false;
+
+  await expect(busyBtn).toHaveAttribute('title', /release pipeline already running/i, {
+    timeout: 12_000,
+  });
+  await expect(busyBtn).toBeDisabled();
+
+  jobRunning = false;
+
+  const idleBtn = releaseButton(page);
+  await expect(idleBtn).toBeVisible({ timeout: 15_000 });
+  await expect(idleBtn).toBeEnabled();
+  await expect(idleBtn).not.toHaveAttribute('title', /jobs are paused globally|release pipeline already running/i);
+  await expect(busyBtn).not.toBeVisible();
+});
