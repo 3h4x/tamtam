@@ -81,6 +81,7 @@ const PROJECTS = [
   'run-dual-surface-real-success',
   'run-dual-surface-real-cancelled',
   'run-dual-surface-real-failure',
+  'concurrent-runs-real-failure',
   'concurrent-runs-real-success',
   'concurrent-runs-real-cancelled',
   'runs-same-project-real',
