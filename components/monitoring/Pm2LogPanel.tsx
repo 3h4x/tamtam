@@ -208,7 +208,8 @@ export function Pm2LogPanel({ pm2Logs, onRefresh }: { pm2Logs: Pm2LogData | null
       {!pm2Logs ? (
         <EmptyState
           align="start"
-          paddingY="xs"
+          paddingX="none"
+          paddingY="none"
           title="PM2 logs are unavailable right now. Refresh to retry after the monitoring API responds."
           className="rounded-lg border border-border bg-bg-secondary px-4 py-3"
         />
@@ -248,7 +249,8 @@ export function Pm2LogPanel({ pm2Logs, onRefresh }: { pm2Logs: Pm2LogData | null
           {filtered.length === 0 ? (
             <EmptyState
               align="start"
-              paddingY="xs"
+              paddingX="none"
+              paddingY="none"
               title={allEntries.length === 0
                 ? 'No recent PM2 log lines in the available files.'
                 : levelFilter === 'warn+'
