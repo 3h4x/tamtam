@@ -10,7 +10,7 @@ import {
 const PROJECT = 'runs-same-project-real';
 
 test.describe('Real same-project run blocks release lifecycle cleanly', () => {
-  test('ordinary run stays live on its terminal while the same project rejects a release attempt', async ({
+  test('ordinary run keeps the overview and terminal live while the same project rejects a release attempt', async ({
     page,
     request,
   }) => {
@@ -38,13 +38,27 @@ test.describe('Real same-project run blocks release lifecycle cleanly', () => {
     await page.goto(`/project/${PROJECT}`);
 
     const releaseButton = page.getByRole('button', { name: /release/i }).first();
+    const stableUrl = page.url();
     await expect(releaseButton).toBeVisible({ timeout: 8_000 });
     await expect(releaseButton).toBeEnabled();
+    await expect(page.getByText('1 running now')).toBeVisible({ timeout: 8_000 });
+    await expect(page.getByRole('button', { name: /Terminal, 1 running/i })).toBeVisible({
+      timeout: 8_000,
+    });
 
     const blockedRelease = await request.post(`/api/projects/by-project/${PROJECT}/release`);
-    expect(blockedRelease.status(), `release should be blocked while the run is live: ${await blockedRelease.text()}`).toBe(409);
+    expect(
+      blockedRelease.status(),
+      `release should be blocked while the run is live: ${await blockedRelease.text()}`,
+    ).toBe(409);
     await expect(releaseButton).toBeVisible({ timeout: 8_000 });
     await expect(releaseButton).toBeEnabled();
+    await expect(page.getByRole('button', { name: 'Releasing…', exact: true })).toHaveCount(0);
+    await expect(page).toHaveURL(stableUrl);
+    await expect(page.getByText('1 running now')).toBeVisible({ timeout: 8_000 });
+    await expect(page.getByRole('button', { name: /Terminal, 1 running/i })).toBeVisible({
+      timeout: 8_000,
+    });
 
     await page.goto(`/project/${PROJECT}/terminal?job=${encodeURIComponent(runBody.job_id)}`);
 
@@ -60,6 +74,8 @@ test.describe('Real same-project run blocks release lifecycle cleanly', () => {
     expect(runJob?.['exit_code'], 'ordinary run exit code').toBe(0);
 
     await expect(page.getByText('live run')).not.toBeVisible({ timeout: 15_000 });
-    await expect(page.getByText('exit 0 — ok').first()).toBeVisible({ timeout: 15_000 });
+    await expect(page.getByText('Ordinary run finished after the blocked release attempt.')).toBeVisible({
+      timeout: 15_000,
+    });
   });
 });
