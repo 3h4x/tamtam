@@ -37,7 +37,7 @@ test.describe('Real release controls lifecycle', () => {
 
     await page.goto(`/project/${PAUSED_PROJECT}`)
 
-    const releaseButton = page.getByRole('button', { name: /release/i }).first()
+    const releaseButton = page.getByRole('button', { name: 'Release', exact: true })
 
     await expect(releaseButton).toBeVisible({ timeout: 8_000 })
     await expect(releaseButton).toBeEnabled()
@@ -62,7 +62,7 @@ test.describe('Real release controls lifecycle', () => {
 
     await page.goto(`/project/${PAUSED_PROJECT}`)
 
-    const releaseButton = page.getByRole('button', { name: /release/i }).first()
+    const releaseButton = page.getByRole('button', { name: 'Release', exact: true })
     const pauseToggle = page.getByRole('switch', { name: /jobs paused/i })
 
     await expect(releaseButton).toBeVisible({ timeout: 8_000 })
@@ -99,7 +99,7 @@ test.describe('Real release controls lifecycle', () => {
 
     await page.goto(`/project/${BUSY_PROJECT}`)
 
-    const busyButton = page.getByRole('button', { name: /releasing/i })
+    const busyButton = page.getByRole('button', { name: 'Releasing…', exact: true })
     await expect(busyButton).toBeVisible({ timeout: 8_000 })
     await expect(busyButton).toBeDisabled()
     await expect(busyButton).toHaveAttribute('title', /release pipeline already running/i)
@@ -111,10 +111,68 @@ test.describe('Real release controls lifecycle', () => {
     expect(finishedRelease, 'release job should finish after abort').not.toBeNull()
     expect(finishedRelease?.['exit_code'], 'release exit code after abort').toBe(-3)
 
-    const idleButton = page.getByRole('button', { name: '🚀 Release' })
+    const idleButton = page.getByRole('button', { name: 'Release', exact: true })
     await expect(idleButton).toBeVisible({ timeout: 15_000 })
     await expect(idleButton).toBeEnabled()
     await expect(idleButton).not.toHaveAttribute('title', /release pipeline already running/i)
+    await expect(busyButton).not.toBeVisible()
+  })
+
+  test('release button keeps the busy label but adopts the real pause tooltip when jobs are paused mid-release', async ({
+    page,
+    request,
+  }) => {
+    writeScenario(BUSY_PROJECT, ABORT_SCENARIO.steps)
+    resetShimState(BUSY_PROJECT)
+    await enableProject(request, BUSY_PROJECT, { testsDisabled: true })
+
+    const releaseResponse = await request.post(`/api/projects/by-project/${BUSY_PROJECT}/release`)
+    expect(
+      releaseResponse.status(),
+      `release POST failed: ${await releaseResponse.text()}`,
+    ).toBe(200)
+
+    const releaseBody = await releaseResponse.json() as { release_job_id: string }
+    expect(releaseBody.release_job_id, 'release_job_id in response').toBeTruthy()
+
+    const runningReview = await waitForJobRunning(request, BUSY_PROJECT, 'review', 20_000)
+    expect(runningReview, 'review job should be running').not.toBeNull()
+
+    await page.goto(`/project/${BUSY_PROJECT}`)
+
+    const busyButton = page.getByRole('button', { name: 'Releasing…', exact: true })
+    await expect(busyButton).toBeVisible({ timeout: 8_000 })
+    await expect(busyButton).toBeDisabled()
+    await expect(busyButton).toHaveAttribute('title', /release pipeline already running/i)
+
+    await request.patch('/api/settings', { data: { jobs_paused: true } })
+
+    await expect(busyButton).toBeVisible()
+    await expect(busyButton).toBeDisabled()
+    await expect(busyButton).toHaveAttribute('title', /jobs are paused globally/i, {
+      timeout: 15_000,
+    })
+
+    await request.patch('/api/settings', { data: { jobs_paused: false } })
+
+    await expect(busyButton).toHaveAttribute('title', /release pipeline already running/i, {
+      timeout: 15_000,
+    })
+
+    const abortResponse = await request.post(`/api/projects/by-project/${BUSY_PROJECT}/release/abort`)
+    expect(abortResponse.status()).toBe(200)
+
+    const finishedRelease = await waitForJobCompletion(request, releaseBody.release_job_id, 10_000)
+    expect(finishedRelease, 'release job should finish after abort').not.toBeNull()
+    expect(finishedRelease?.['exit_code'], 'release exit code after abort').toBe(-3)
+
+    const idleButton = page.getByRole('button', { name: 'Release', exact: true })
+    await expect(idleButton).toBeVisible({ timeout: 15_000 })
+    await expect(idleButton).toBeEnabled()
+    await expect(idleButton).not.toHaveAttribute(
+      'title',
+      /jobs are paused globally|release pipeline already running/i,
+    )
     await expect(busyButton).not.toBeVisible()
   })
 
@@ -129,7 +187,7 @@ test.describe('Real release controls lifecycle', () => {
 
     await page.goto(`/project/${EXTERNAL_START_PROJECT}`)
 
-    const idleButton = page.getByRole('button', { name: '🚀 Release' })
+    const idleButton = page.getByRole('button', { name: 'Release', exact: true })
     await expect(idleButton).toBeVisible({ timeout: 8_000 })
     await expect(idleButton).toBeEnabled()
 
@@ -142,7 +200,7 @@ test.describe('Real release controls lifecycle', () => {
     const runningReview = await waitForJobRunning(request, EXTERNAL_START_PROJECT, 'review', 20_000)
     expect(runningReview, 'review job should be running').not.toBeNull()
 
-    const busyButton = page.getByRole('button', { name: /releasing/i })
+    const busyButton = page.getByRole('button', { name: 'Releasing…', exact: true })
     await expect(busyButton).toBeVisible({ timeout: 15_000 })
     await expect(busyButton).toBeDisabled()
     await expect(busyButton).toHaveAttribute('title', /release pipeline already running/i)
@@ -152,13 +210,13 @@ test.describe('Real release controls lifecycle', () => {
     expect(result.releaseJob?.['exit_code'], 'release exit code').toBe(0)
 
     await expect(busyButton).not.toBeVisible()
-    await expect(page.getByRole('button', { name: /🚀 Release|🚢 Ship \(LGTM\)/ }).first()).toBeVisible({
+    await expect(page.getByRole('button', { name: /Release|Ship \(LGTM\)/ }).first()).toBeVisible({
       timeout: 15_000,
     })
-    await expect(page.getByRole('button', { name: /🚀 Release|🚢 Ship \(LGTM\)/ }).first()).toBeEnabled()
+    await expect(page.getByRole('button', { name: /Release|Ship \(LGTM\)/ }).first()).toBeEnabled()
   })
 
-  test('release button resets to the Ship state after a successful live release without reload', async ({
+  test('release controls reset to idle after a successful live release while keeping the fresh LGTM review cue', async ({
     page,
     request,
   }) => {
@@ -177,7 +235,7 @@ test.describe('Real release controls lifecycle', () => {
 
     await page.goto(`/project/${SUCCESS_PROJECT}`)
 
-    const busyButton = page.getByRole('button', { name: /releasing/i })
+    const busyButton = page.getByRole('button', { name: 'Releasing…', exact: true })
     await expect(busyButton).toBeVisible({ timeout: 8_000 })
     await expect(busyButton).toBeDisabled()
     await expect(busyButton).toHaveAttribute('title', /release pipeline already running/i)
@@ -186,11 +244,11 @@ test.describe('Real release controls lifecycle', () => {
     expect(result.status, 'pipeline should complete').toBe('done')
     expect(result.releaseJob?.['exit_code'], 'release exit code').toBe(0)
 
-    const idleButton = page.getByRole('button', { name: '🚢 Ship (LGTM)' })
+    const idleButton = page.getByRole('button', { name: 'Release', exact: true })
     await expect(idleButton).toBeVisible({ timeout: 15_000 })
     await expect(idleButton).toBeEnabled()
-    await expect(idleButton).toHaveAttribute('title', /ship it/i)
-    await expect(page.getByRole('button', { name: /Review LGTM just now .* awaiting push/i })).toBeVisible({
+    await expect(idleButton).toHaveAttribute('title', /release:/i)
+    await expect(page.getByRole('button', { name: /Review .*last: LGTM/i })).toBeVisible({
       timeout: 15_000,
     })
     await expect(busyButton).not.toBeVisible()
