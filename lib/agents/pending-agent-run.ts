@@ -351,12 +351,8 @@ export async function drainNextAgentRun(project: string): Promise<void> {
     }
 
     if (!r.ok) {
-      // 5xx (and any other unhandled non-success). Previously this branch
-      // logged and returned without rescheduling, so the next lifecycle
-      // drain re-fired the same head instantly — a route that fails fast
-      // (EBADF, OOM-spawn, transient handler crash) would churn ~50/sec.
-      // Now: count the failure, trip the breaker after the cap, and back
-      // off via the retry timer otherwise.
+      // 5xx (and any other unhandled non-success): count the failure, trip
+      // the breaker after the cap, and back off via the retry timer otherwise.
       const body = await r.text().catch(() => '');
       const failures = noteFailure(project, next);
       if (tripBreakerIfExhausted(failures, `HTTP ${r.status}`)) return;
