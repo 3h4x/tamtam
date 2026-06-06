@@ -8,7 +8,7 @@ import { FleetHealth } from '@/hooks/useProjectHealth'
 import { formatDuration } from '@/lib/shared/statusConstants'
 import { isCancelledExitCode } from '@/lib/shared/job-exit-codes'
 import { ErrorState } from '@/components/ErrorState'
-import { Button } from '@/components/ui/Button'
+import { Button, buttonVariants } from '@/components/ui/Button'
 import { EmptyState } from '@/components/ui/EmptyState'
 import { Pill } from '@/components/ui/Pill'
 import { Select } from '@/components/ui/Select'
@@ -166,7 +166,14 @@ export function TaskDetailPage({
             {task.ci === 'success' && <span className="text-status-success">CI ✓</span>}
             {task.ci === 'failure' && (
               task.ci_failed_url ? (
-                <a href={task.ci_failed_url} target="_blank" rel="noopener noreferrer" className="text-status-error hover:underline">CI ✗</a>
+                <a
+                  href={task.ci_failed_url}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  className={buttonVariants({ variant: 'link', size: 'sm', className: 'text-status-error' })}
+                >
+                  CI ✗
+                </a>
               ) : (
                 <span className="text-status-error">CI ✗</span>
               )
