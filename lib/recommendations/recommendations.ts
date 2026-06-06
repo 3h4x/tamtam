@@ -144,10 +144,8 @@ export async function getRecommendation(project: string, id: string): Promise<Re
  */
 export async function summarizeOpenRecommendations(): Promise<{ openCount: number; byProject: Record<string, number> }> {
   // GROUP BY pushes counting to the DB instead of fetching every column of
-  // every open recommendation just to count them in JS. With a large
-  // backlog the prior `SELECT * + count-in-loop` form transferred
-  // ~hundreds of bytes per row across the wire on every poll of the
-  // global header chip; this form returns one row per project.
+  // every open recommendation just to count them in JS. Returning one row per
+  // project keeps the global header chip poll cheap as the backlog grows.
   const rows = await db
     .select({
       project: schema.recommendations.project,
