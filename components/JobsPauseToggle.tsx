@@ -2,7 +2,7 @@
 
 import { useCallback, useEffect, useState } from 'react'
 import { usePolling } from '@/hooks/usePolling'
-import { Button } from '@/components/ui/Button'
+import { Button, type ButtonVariant } from '@/components/ui/Button'
 import { InlineLoading } from '@/components/ui/InlineLoading'
 import { errMsg } from '@/lib/shared/types'
 import { fmtAbsolute } from '@/lib/shared/format-date'
@@ -174,10 +174,18 @@ export function JobsPauseToggle() {
       : showThrottle
         ? `Scheduled agents paused — every enabled provider over weekly budget (worst: ${autoThrottle!.worstProvider} at ${autoThrottle!.projectedPct.toFixed(0)}%${autoThrottle!.resumesAtMs ? `, resume ${fmtAbsolute(autoThrottle!.resumesAtMs)}` : ''}). Click to also pause manual runs.`
         : 'Pause jobs'
+  const buttonVariant: ButtonVariant = showRebuild
+    ? 'primary'
+    : jobsPaused
+      ? 'danger'
+      : showThrottle
+        ? 'warning'
+        : 'secondary'
 
   return (
     <Button
       type="button"
+      variant={buttonVariant}
       role="switch"
       aria-checked={jobsPaused}
       onClick={showRebuild ? undefined : toggle}
@@ -185,15 +193,13 @@ export function JobsPauseToggle() {
       aria-label={title}
       disabled={loading || saving || showRebuild}
       disabledCursor="wait"
-      className={`h-9 px-3 flex items-center justify-center gap-1.5 rounded-lg border transition-colors text-xs font-medium whitespace-nowrap ${
-        showRebuild
-          ? 'border-accent/60 bg-accent/10 text-accent cursor-wait'
-          : jobsPaused
-            ? 'border-status-error/60 bg-status-error/10 text-status-error hover:bg-status-error/20 cursor-pointer'
-            : showThrottle
-              ? 'border-status-warning/60 bg-status-warning/10 text-status-warning hover:bg-status-warning/20 cursor-pointer'
-              : 'border-border bg-bg-secondary text-text-secondary hover:bg-bg-tertiary hover:text-text-primary cursor-pointer'
-      } ${(loading || saving) && !showRebuild ? 'opacity-70 cursor-wait' : ''}`}
+      className={[
+        'h-9 justify-center rounded-lg text-xs whitespace-nowrap',
+        showRebuild ? 'cursor-wait hover:bg-accent/10' : '',
+        jobsPaused ? 'bg-status-error/10' : '',
+        !jobsPaused && !showThrottle && !showRebuild ? 'text-text-secondary hover:text-text-primary' : '',
+        (loading || saving) && !showRebuild ? 'opacity-70 cursor-wait' : '',
+      ].filter(Boolean).join(' ')}
     >
       {showRebuild ? (
         <InlineLoading
