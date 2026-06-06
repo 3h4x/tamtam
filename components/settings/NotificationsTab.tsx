@@ -4,6 +4,7 @@ import { useState } from 'react'
 import { errMsg } from '@/lib/shared/types'
 import { Button } from '@/components/ui/Button'
 import { Checkbox } from '@/components/ui/Checkbox'
+import { ErrorCallout } from '@/components/ui/ErrorCallout'
 import { Input } from '@/components/ui/Input'
 
 export interface NotificationsSettings {
@@ -123,7 +124,9 @@ export function NotificationsTab({
               {testSending ? 'Sending…' : testSuccess ? 'Sent!' : 'Send Test'}
             </Button>
             {testError && (
-              <span className="text-sm text-status-error">{testError}</span>
+              <ErrorCallout padding="sm" radius="md" className="text-sm">
+                {testError}
+              </ErrorCallout>
             )}
           </div>
         </form>
