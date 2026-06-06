@@ -50,7 +50,14 @@ function getWorkflowPool(): Pool | null {
   const url = process.env.WORKFLOW_POSTGRES_URL ?? process.env.DATABASE_URL;
   if (!url) return null;
   if (!globalThis.__tamtamWorkflowRunsPool) {
-    globalThis.__tamtamWorkflowRunsPool = new Pool({ connectionString: url, max: 2 });
+    globalThis.__tamtamWorkflowRunsPool = new Pool({
+      connectionString: url,
+      max: 2,
+      idleTimeoutMillis: 10_000,
+      connectionTimeoutMillis: 5_000,
+      query_timeout: 15_000,
+      statement_timeout: 15_000,
+    });
   }
   if (globalThis.__tamtamWorkflowRunsPool.listenerCount('error') === 0) {
     globalThis.__tamtamWorkflowRunsPool.on('error', (err) => console.error('[workflow-runs] idle pg client error', err));
