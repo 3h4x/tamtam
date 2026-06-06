@@ -5,6 +5,7 @@ import { getPipelineSteps, type StepToggleContext } from '@/lib/pipeline/pipelin
 import { ErrorState } from '@/components/ErrorState'
 import { Button } from '@/components/ui/Button'
 import { Checkbox } from '@/components/ui/Checkbox'
+import { ColorInput } from '@/components/ui/ColorInput'
 import { EmptyState } from '@/components/ui/EmptyState'
 import { Input } from '@/components/ui/Input'
 import { Pill, PillButton } from '@/components/ui/Pill'
@@ -625,9 +626,7 @@ export function ConfigTab({
                     }}
                     placeholder="./deploy.sh"
                   />
-                  <input
-                    type="color"
-                    className="w-10 h-8 p-0.5 bg-bg-primary border border-border rounded-md cursor-pointer"
+                  <ColorInput
                     value={normalizeActionColorForPicker(action.color)}
                     onChange={(e) => {
                       const next = [...editActions]

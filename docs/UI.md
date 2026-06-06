@@ -180,6 +180,10 @@ Use the default tone for neutral panels. Use `tone="current"` only inside alread
 
 Use `Input` for text form fields. `inputSize="default"` (the default) is the fixed-height (`h-10`), `rounded-lg` settings field; `inputSize="compact"` is the shorter, `rounded-md` config-form field used in dense forms like the project Config tab. It deliberately uses `inputSize` (not the native `size` attribute). Inputs are mono by default; pass `fontFamily="sans"` only when preserving an existing sans label-style field. Inputs are full-width by default; pass `fullWidth={false}` when a fixed-width field like `className="w-32"` is intentional. Use `paddingX="compact"` for dense fields that need `px-2.5`. Extend with `className` for non-conflicting utilities (e.g. `placeholder:text-text-tertiary`); there is no tailwind-merge, so don't override a conflicting base utility.
 
+### Color input (`components/ui/ColorInput.tsx`)
+
+Use `ColorInput` for compact native color swatches, such as project custom-action button colors. It preserves the browser-native picker while applying the standard swatch dimensions, border, radius, and background tokens.
+
 ### Search input (`components/ui/SearchInput.tsx`)
 
 Use `SearchInput` for search/filter fields in page and panel headers (skills list, agent catalog). It renders the canonical secondary-surface, sans-font field with the softer accent focus ring. It is intentionally distinct from `Input` (the mono, fixed-height form field) — don't swap one for the other. Defaults `type="search"`; extend with `className` for one-off width tweaks.
