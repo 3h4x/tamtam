@@ -77,7 +77,7 @@ export function RetrievalReindexPanel({ projectName }: { projectName: string }) 
           variant="solid"
           onClick={handleReindex}
           disabled={running || enabled === false}
-          className="px-4 py-2 rounded-lg border-0 hover:bg-accent/90 disabled:opacity-100 disabled:bg-bg-tertiary disabled:text-text-tertiary shrink-0"
+          className="shrink-0"
           title={enabled === false ? 'Enable retrieval in Settings → General' : undefined}
         >
           {running ? 'Reindexing…' : 'Reindex now'}
