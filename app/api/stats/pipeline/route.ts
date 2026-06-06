@@ -87,6 +87,7 @@ function serializeMaxStepIterations(): number | null {
 }
 const FIX_WINDOW_SECONDS = getStepWindowSeconds();
 const RECOVERY_STEP_KINDS = new Set<JobData['kind']>(['fix']);
+const STEP_KINDS = ['release', 'test', 'review', 'fix', 'commit', 'push', 'pr-wait', 'mark-dod'];
 
 function parseJsonObject(value: string | null | undefined): Record<string, unknown> {
   if (!value) return {};
@@ -228,7 +229,6 @@ function buildDurationStats(durations: number[], costs: number[]): DurationStats
 }
 
 function computeStepDurations(jobs: JobData[]): Record<string, DurationStats> {
-  const STEP_KINDS = ['release', 'test', 'review', 'fix', 'commit', 'push', 'pr-wait', 'mark-dod'];
   const result: Record<string, DurationStats> = {};
 
   // For the `release` step, "cost" is the total of all jobs sharing the release_id —
