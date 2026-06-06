@@ -9,6 +9,7 @@ import {
 
 const SUCCESS_PROJECT = 'run-dual-surface-real-success';
 const CANCELLED_PROJECT = 'run-dual-surface-real-cancelled';
+const FAILURE_PROJECT = 'run-dual-surface-real-failure';
 
 test.describe('Real ordinary run dual-surface lifecycle', () => {
   test('history and terminal both reflect a live ordinary run, then settle to success without reload', async ({
@@ -123,6 +124,70 @@ test.describe('Real ordinary run dual-surface lifecycle', () => {
     await expect(terminalPage.getByText('live run')).not.toBeVisible({ timeout: 15_000 });
     await expect(terminalPage.getByText('cancelled').first()).toBeVisible({ timeout: 15_000 });
     await expect(terminalPage.getByText('exit 0 — ok')).toHaveCount(0);
+    await expect(page.locator('span.animate-pulse')).toHaveCount(0, { timeout: 15_000 });
+  });
+
+  test('history and terminal both surface an ordinary run failure after the live state clears', async ({
+    page,
+    request,
+  }) => {
+    resetShimState(FAILURE_PROJECT);
+    writeScenario(FAILURE_PROJECT, [
+      {
+        label: 'run',
+        sleep_ms: 3000,
+        text: 'The provider failed before finishing the dual-surface run.',
+        prompt_assert_contains: ['this text is intentionally absent from the prompt'],
+      },
+    ]);
+    await enableProject(request, FAILURE_PROJECT, { testsDisabled: true });
+
+    await page.goto(`/project/${FAILURE_PROJECT}/history`);
+    await expect(page.getByText('No runs yet').first()).toBeVisible({ timeout: 8_000 });
+
+    const runResp = await request.post(`/api/projects/by-project/${FAILURE_PROJECT}/run`, {
+      data: { prompt: 'Trigger a failing ordinary dual-surface run.' },
+    });
+    expect(runResp.status(), `run POST failed: ${await runResp.text()}`).toBe(200);
+
+    const runBody = await runResp.json() as { job_id: string };
+    expect(runBody.job_id, 'run job_id in response').toBeTruthy();
+
+    const runningRun = await waitForJobByIdRunning(request, runBody.job_id, 20_000);
+    expect(runningRun, 'ordinary run should be running before failure').not.toBeNull();
+
+    const runRow = page.getByRole('button').filter({
+      hasText: 'Trigger a failing ordinary dual-surface run.',
+    }).first();
+
+    await expect(runRow).toBeVisible({ timeout: 20_000 });
+    await expect(runRow.getByLabel('running')).toBeVisible({ timeout: 20_000 });
+    await expect(page.getByText('No runs yet')).toHaveCount(0, { timeout: 20_000 });
+
+    const terminalPage = await page.context().newPage();
+    await terminalPage.goto(
+      `/project/${FAILURE_PROJECT}/terminal?job=${encodeURIComponent(runBody.job_id)}`,
+    );
+    await expect(terminalPage.getByText('live run')).toBeVisible({ timeout: 20_000 });
+    await expect(
+      terminalPage.getByText('Trigger a failing ordinary dual-surface run.'),
+    ).toBeVisible({ timeout: 20_000 });
+
+    const runJob = await waitForJobCompletion(request, runBody.job_id, 60_000);
+    expect(runJob?.['exit_code'], 'failed run exit code').toBe(1);
+
+    await expect(runRow.getByText('exit 1').first()).toBeVisible({ timeout: 15_000 });
+    await expect(
+      runRow.getByText('CLI streamed partial output but never emitted a final result.'),
+    ).toBeVisible({ timeout: 15_000 });
+    await expect(runRow.getByLabel('running')).toHaveCount(0, { timeout: 15_000 });
+    await expect(terminalPage.getByText('live run')).not.toBeVisible({ timeout: 15_000 });
+    await expect(terminalPage.getByText('PROMPT ASSERTION FAILED').first()).toBeVisible({
+      timeout: 15_000,
+    });
+    await expect(
+      terminalPage.getByText('The provider failed before finishing the dual-surface run.'),
+    ).toBeVisible({ timeout: 15_000 });
     await expect(page.locator('span.animate-pulse')).toHaveCount(0, { timeout: 15_000 });
   });
 });

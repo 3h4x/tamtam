@@ -79,6 +79,7 @@ const PROJECTS = [
   'dual-surface-release-cancelled',
   'run-dual-surface-real-success',
   'run-dual-surface-real-cancelled',
+  'run-dual-surface-real-failure',
   'runs-same-project-real',
   'agent-prereq-terminal',
   'issue-cruncher-prereq',
