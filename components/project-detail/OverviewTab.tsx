@@ -14,6 +14,7 @@ import { AgentsStats } from '@/components/project-detail/AgentsStats'
 import { PipelineStatsPanel } from '@/components/project-detail/PipelineStatsPanel'
 import { Pill } from '@/components/ui/Pill'
 import { PromptInsightsPanel } from '@/components/project-detail/PromptInsightsPanel'
+import { Button } from '@/components/ui/Button'
 import { Spinner } from '@/components/ui/Spinner'
 import { formatAgo } from '@/lib/shared/format'
 import type { JobInfo, ProjectConfig } from '@/lib/client-api'
@@ -135,37 +136,38 @@ export function OverviewTab({
               const display = anchor ?? j
               const displayKind = anchor ? anchor.kind : j.kind
               return (
-              <button
-                key={j.id}
-                type="button"
-                onClick={() => router.push(`/project/${encodeURIComponent(projectName)}/terminal?job=${encodeURIComponent(j.id)}`)}
-                className={`min-w-0 rounded-md border border-border border-l-2 ${activeWorkAccentClass(displayKind)} bg-bg-primary px-3 py-2 text-left transition-colors hover:bg-bg-tertiary cursor-pointer`}
-                title={`Open ${j.kind} started ${formatAgo(j.started_at)}`}
-              >
-                <div className="flex items-start justify-between gap-3">
-                  <div className="min-w-0">
-                    <div className="flex items-center gap-2">
-                      <Spinner size="sm" shrink className="!h-3 !w-3 !border-[1.5px]" aria-hidden />
-                      <span className="truncate text-sm font-medium text-text-primary">{activeWorkTitle(display)}</span>
+                <Button
+                  key={j.id}
+                  type="button"
+                  onClick={() => router.push(`/project/${encodeURIComponent(projectName)}/terminal?job=${encodeURIComponent(j.id)}`)}
+                  surface="primary"
+                  className={`min-w-0 !justify-start !gap-0 border-l-2 ${activeWorkAccentClass(displayKind)} !bg-bg-primary !px-3 !py-2 text-left !font-normal hover:!bg-bg-tertiary`}
+                  title={`Open ${j.kind} started ${formatAgo(j.started_at)}`}
+                >
+                  <div className="flex w-full min-w-0 items-start justify-between gap-3">
+                    <div className="min-w-0">
+                      <div className="flex items-center gap-2">
+                        <Spinner size="sm" shrink className="!h-3 !w-3 !border-[1.5px]" aria-hidden />
+                        <span className="truncate text-sm font-medium text-text-primary">{activeWorkTitle(display)}</span>
+                      </div>
+                      <div className="mt-1 flex flex-wrap items-center gap-x-2 gap-y-1 text-xs text-text-secondary">
+                        {runMeta(display).map((item) => (
+                          <span key={item} className="font-mono tabular-nums">
+                            {item}
+                          </span>
+                        ))}
+                        {anchor && (
+                          <span className="font-mono tabular-nums text-text-tertiary">
+                            · release in progress
+                          </span>
+                        )}
+                      </div>
                     </div>
-                    <div className="mt-1 flex flex-wrap items-center gap-x-2 gap-y-1 text-xs text-text-secondary">
-                      {runMeta(display).map((item) => (
-                        <span key={item} className="font-mono tabular-nums">
-                          {item}
-                        </span>
-                      ))}
-                      {anchor && (
-                        <span className="font-mono tabular-nums text-text-tertiary">
-                          · release in progress
-                        </span>
-                      )}
-                    </div>
+                    <Pill size="xs" className="shrink-0 rounded-full bg-bg-secondary px-1.5 py-0.5 text-[10px] uppercase tracking-wider text-text-tertiary">
+                      {activeWorkBadgeLabel(displayKind)}
+                    </Pill>
                   </div>
-                  <Pill size="xs" className="shrink-0 rounded-full bg-bg-secondary px-1.5 py-0.5 text-[10px] uppercase tracking-wider text-text-tertiary">
-                    {activeWorkBadgeLabel(displayKind)}
-                  </Pill>
-                </div>
-              </button>
+                </Button>
               )
             })}
           </div>
