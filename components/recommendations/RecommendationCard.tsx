@@ -273,7 +273,11 @@ export function RecommendationCard({
           {showFixMenu && (
             <details className="relative group">
               <summary
-                className="list-none cursor-pointer select-none rounded bg-accent px-2.5 py-1 text-xs font-medium text-bg-primary hover:bg-accent/90 [&::-webkit-details-marker]:hidden"
+                className={buttonVariants({
+                  variant: 'solid',
+                  size: 'sm',
+                  className: 'list-none select-none text-bg-primary hover:bg-accent/90 [&::-webkit-details-marker]:hidden',
+                })}
                 aria-label={`Fix recommendation: ${actionLabel} (${item.project})`}
               >
                 {busy ? 'working…' : 'Fix ▾'}
