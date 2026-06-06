@@ -345,6 +345,67 @@ export function useTerminalBootstrap({
     loadJob()
   }, [jobParam, initialSessionId, projectName])
 
+  // Session routes should also notice when a later turn in the same session
+  // starts after the page is already open, then attach to that live job.
+  useEffect(() => {
+    if (!initialSessionId || jobParam) return
+    let cancelled = false
+
+    const poll = async () => {
+      const cur = terminalStore.get(projectName)
+      if (cur.streaming || cur.currentJobId) return
+
+      try {
+        const jobs = await fetchSessionJobs(projectName, initialSessionId)
+        if (cancelled) return
+
+        const matches = jobs
+          .filter((job) => isRestorableSessionKind(job.kind))
+          .sort((a, b) => a.started_at - b.started_at)
+        if (matches.length === 0) return
+
+        const lastMatch = matches[matches.length - 1]
+        const lastIsRunning = lastMatch.status !== 'done' && lastMatch.finished_at === null
+        if (!lastIsRunning) return
+
+        const completedMatches = matches.slice(0, -1)
+        const entries = await buildEntriesForCompletedJobs(completedMatches)
+        if (cancelled) return
+
+        const { skills: loadedSkills, docs: loadedDocs } = contextItemsFromMeta(matches[0].context_meta)
+        const retrievedContextEntry = retrievedContextEntryFromMeta(lastMatch.context_meta)
+        if (retrievedContextEntry) entries.push(retrievedContextEntry)
+        const prompt = restoredPrompt(lastMatch)
+        if (prompt) entries.push({ role: 'user', text: prompt })
+
+        const sessionProvider = matches.find((match) => match.provider)?.provider ?? null
+        terminalStore.update(projectName, () => ({
+          history: entries,
+          claudeSessionId: initialSessionId,
+          sessionKey: initialSessionId,
+          sessionProvider,
+          selectedItems: loadedSkills,
+          selectedDocs: loadedDocs,
+          restoredFor: initialSessionId,
+        }))
+        terminalStore.startStream(
+          projectName,
+          lastMatch.id,
+          false,
+          hasPrerequisiteContext(lastMatch.context_meta),
+        )
+      } catch {}
+    }
+
+    const id = setInterval(() => {
+      if (!cancelled) void poll()
+    }, 1000)
+    return () => {
+      cancelled = true
+      clearInterval(id)
+    }
+  }, [initialSessionId, jobParam, projectName])
+
   // Fresh terminal landing pages should attach to newly-started release jobs
   // so the operator sees the live pipeline without manually refreshing.
   // Do not hijack the interactive terminal for unrelated `run` / `agent:*`

@@ -227,6 +227,110 @@ async function openDualSurfacePages(page: Page) {
 }
 
 test.describe('Mocked ordinary run dual-surface lifecycle', () => {
+  test('history and terminal both pick up a newly-started run in the same session, then settle to success without reload', async ({
+    page,
+  }) => {
+    let phase: 'idle' | 'running' | 'success' = 'idle'
+    let finishStream!: () => void
+    const streamDone = new Promise<void>((resolve) => {
+      finishStream = resolve
+    })
+
+    await stubSharedRoutes(page.context(), () => {
+      if (phase === 'idle') return [previousSessionJob()]
+      if (phase === 'running') return [previousSessionJob(), runningSessionJob()]
+      return [previousSessionJob(), finishedSessionJob(0)]
+    })
+    await page.context().route(`**/api/jobs/${PREVIOUS_JOB_ID}`, (route: Route) =>
+      route.fulfill({
+        json: {
+          ...previousSessionJob(),
+          log: 'Earlier terminal output is restored.\n',
+        },
+      }),
+    )
+    await page.context().route(`**/api/jobs/${CURRENT_JOB_ID}`, (route: Route) =>
+      route.fulfill({
+        json: phase === 'running'
+          ? runningSessionJob()
+          : {
+              ...finishedSessionJob(0),
+              log: 'Final streamed output finished successfully.\n',
+            },
+      }),
+    )
+    await page.context().route(`**/api/streaming/${CURRENT_JOB_ID}`, async (route: Route) => {
+      await streamDone
+      await route.fulfill({
+        status: 200,
+        headers: {
+          'content-type': 'text/event-stream',
+          'cache-control': 'no-cache',
+        },
+        body: [
+          'data: Final streamed output finished successfully.',
+          '',
+          'event: done',
+          `data: ${JSON.stringify({
+            exitCode: 0,
+            sessionId: SESSION_ID,
+            provider: 'claude',
+            duration: 1200,
+          })}`,
+          '',
+        ].join('\n'),
+      })
+    })
+
+    const { historyPage, terminalPage } = await openDualSurfacePages(page)
+
+    const runRow = historyPage.getByRole('button')
+      .filter({ hasText: PREVIOUS_RUN_PROMPT })
+      .first()
+
+    await expect(runRow).toBeVisible({ timeout: 8_000 })
+    await expect(runRow.getByLabel('running')).toHaveCount(0)
+    await expect(historyPage.getByText('1 running')).toHaveCount(0)
+    await expect(terminalPage.getByText('Earlier terminal output is restored.')).toBeVisible({
+      timeout: 8_000,
+    })
+    await expect(terminalPage.getByText('live run')).toHaveCount(0)
+
+    const stableHistoryUrl = historyPage.url()
+    const stableTerminalUrl = terminalPage.url()
+
+    phase = 'running'
+
+    await expect(runRow.getByLabel('running')).toBeVisible({ timeout: 12_000 })
+    await expect(historyPage.getByText('1 running')).toBeVisible({ timeout: 12_000 })
+    await expect(
+      historyPage.getByText('Streaming on the terminal while history polls.'),
+    ).toBeVisible({ timeout: 12_000 })
+
+    await expect(terminalPage.getByText(CURRENT_RUN_PROMPT)).toBeVisible({ timeout: 12_000 })
+    await expect(terminalPage.getByText('live run')).toBeVisible({ timeout: 12_000 })
+    await expect(terminalPage.getByText(/receiving output|waiting for output/)).toBeVisible({
+      timeout: 12_000,
+    })
+    await expect(historyPage).toHaveURL(stableHistoryUrl)
+    await expect(terminalPage).toHaveURL(stableTerminalUrl)
+
+    phase = 'success'
+    finishStream()
+
+    await expect(
+      terminalPage.getByText('Final streamed output finished successfully.'),
+    ).toBeVisible({ timeout: 8_000 })
+    await expect(terminalPage.getByText('exit 0 — ok').first()).toBeVisible({ timeout: 8_000 })
+    await expect(terminalPage.getByText('live run')).toHaveCount(0, { timeout: 8_000 })
+
+    await expect(runRow.getByLabel('done')).toBeVisible({ timeout: 12_000 })
+    await expect(runRow.getByLabel('running')).toHaveCount(0, { timeout: 12_000 })
+    await expect(historyPage.getByText('1 running')).toHaveCount(0, { timeout: 12_000 })
+    await expect(historyPage).toHaveURL(stableHistoryUrl)
+    await expect(terminalPage).toHaveURL(stableTerminalUrl)
+  })
+
   test('history and terminal both show a live run, then settle to success without reload', async ({
     page,
   }) => {
