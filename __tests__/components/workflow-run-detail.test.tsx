@@ -191,6 +191,49 @@ describe('WorkflowRunDetail', () => {
     unmount()
   })
 
+  it('shows a warning callout when a live refresh fails after data loaded', async () => {
+    const fetchMock = vi.fn()
+      .mockResolvedValueOnce({
+        ok: true,
+        status: 200,
+        json: async () => ({
+          run: {
+            id: 'run-live',
+            name: 'release',
+            rawName: 'workflow.release',
+            status: 'running',
+            createdAt: '2026-05-21T11:57:00Z',
+            startedAt: '2026-05-21T11:58:00Z',
+            completedAt: null,
+            durationMs: null,
+            output: null,
+            error: null,
+          },
+          steps: [],
+        }),
+      })
+      .mockRejectedValueOnce(new Error('refresh down'))
+    vi.stubGlobal('fetch', fetchMock)
+
+    const { container, unmount } = renderWorkflowRunDetail('run-live')
+
+    await vi.waitFor(() => {
+      expect(container.textContent).toContain('release')
+    })
+
+    await vi.advanceTimersByTimeAsync(5000)
+
+    await vi.waitFor(() => {
+      expect(container.textContent).toContain('Failed to refresh: refresh down')
+    })
+
+    const warning = Array.from(container.querySelectorAll<HTMLElement>('.text-status-warning'))
+      .find((element) => element.textContent?.includes('Failed to refresh: refresh down'))
+    expect(warning?.className).toContain('bg-status-warning/10')
+
+    unmount()
+  })
+
   it('orders step status rollups by severity then alphabetical unknown statuses', async () => {
     vi.stubGlobal('fetch', vi.fn().mockResolvedValue({
       ok: true,

@@ -7,10 +7,14 @@ interface ErrorCalloutProps {
   className?: string
   padding?: 'sm' | 'md'
   radius?: 'default' | 'md' | 'lg'
+  tone?: 'error' | 'warning'
   preWrap?: boolean
 }
 
-const BASE = 'border border-status-error/30 bg-status-error/10 text-status-error'
+const TONE = {
+  error: 'border border-status-error/30 bg-status-error/10 text-status-error',
+  warning: 'border border-status-warning/30 bg-status-warning/10 text-status-warning',
+}
 const PADDING = {
   sm: 'p-2',
   md: 'p-3',
@@ -31,11 +35,12 @@ export function ErrorCallout({
   className,
   padding = 'sm',
   radius = 'default',
+  tone = 'error',
   preWrap = true,
 }: ErrorCalloutProps) {
   return (
     <div className={[
-      BASE,
+      TONE[tone],
       RADIUS[radius],
       PADDING[padding],
       preWrap ? 'whitespace-pre-wrap' : undefined,

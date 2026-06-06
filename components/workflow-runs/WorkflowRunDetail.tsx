@@ -430,9 +430,9 @@ export function WorkflowRunDetail({ runId }: { runId: string }) {
       </div>
 
       {error ? (
-        <div className="rounded-md border border-status-warning/30 bg-status-warning/10 px-3 py-2 text-xs text-status-warning">
+        <ErrorCallout tone="warning" radius="md" className="px-3 py-2 text-xs" preWrap={false}>
           Failed to refresh: {error}
-        </div>
+        </ErrorCallout>
       ) : null}
 
       <WorkflowStepAttentionPanel steps={attentionSteps} />
