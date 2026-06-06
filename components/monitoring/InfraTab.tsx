@@ -3,6 +3,7 @@
 import { useState } from 'react'
 import { Button } from '@/components/ui/Button'
 import { EmptyState } from '@/components/ui/EmptyState'
+import { ErrorCallout } from '@/components/ui/ErrorCallout'
 import { SectionHeader, StatusDot } from './shared'
 import type { MonitoringData, TimeWindow } from './types'
 import { WINDOW_LABELS } from './types'
@@ -177,7 +178,12 @@ export function InfraTab({ data, window_ }: { data: MonitoringData; window_: Tim
                 </h3>
                 <div className="space-y-1">
                   {data.prometheus.alerts.map((a, i) => (
-                    <div key={i} className="flex items-center gap-2 px-3 py-2 rounded-md bg-status-error/5 border border-status-error/30 text-sm">
+                    <ErrorCallout
+                      key={i}
+                      radius="md"
+                      preWrap={false}
+                      className="flex items-center gap-2 px-3 py-2 !bg-status-error/5 text-sm"
+                    >
                       <span className="text-status-error font-medium" data-private>{a.metric.alertname ?? 'Alert'}</span>
                       {a.metric.severity && (
                         <span className="text-xs px-1.5 py-0.5 rounded bg-status-error/10 text-status-error">
@@ -187,7 +193,7 @@ export function InfraTab({ data, window_ }: { data: MonitoringData; window_: Tim
                       {a.metric.instance && (
                         <span className="text-text-tertiary text-xs ml-auto" data-private>{a.metric.instance}</span>
                       )}
-                    </div>
+                    </ErrorCallout>
                   ))}
                 </div>
               </div>
