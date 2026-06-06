@@ -687,7 +687,11 @@ export function ProjectRunsTab({ projectName, jobsPaused = false }: ProjectRunsT
       {pendingReleaseQueued && (
         <Link
           href={`/pipeline?project=${encodeURIComponent(projectName)}`}
-          className="mb-3 px-3 py-2 rounded-md border border-accent/30 bg-accent/5 text-xs text-accent flex items-center gap-2 hover:bg-accent/10 transition-colors"
+          className={buttonVariants({
+            variant: 'primary',
+            size: 'sm',
+            className: 'mb-3 flex rounded-md border-accent/30 bg-accent/5 px-3 py-2 hover:bg-accent/10',
+          })}
         >
           <span className="font-mono">↦</span>
           <span>Release queued — will fire automatically when the running pipeline finishes (or jobs resume).</span>
