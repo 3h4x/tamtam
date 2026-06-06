@@ -560,6 +560,39 @@ test('header pause toggle updates Release and PR Review without reloading', asyn
   await expect(dodBtn).not.toHaveAttribute('title', /jobs are paused globally/i);
 });
 
+test('issues page picks up external jobs_paused changes and disables release controls without reload', async ({
+  page,
+}) => {
+  let jobsPaused = false;
+
+  await stubCommonRoutes(page);
+  await page.route('**/api/settings', (route: Route) =>
+    route.fulfill({
+      json: {
+        settings: { jobs_paused: jobsPaused ? 'true' : 'false' },
+        github_owner: '',
+      },
+    }),
+  );
+
+  await page.goto(`/project/${PROJECT}/issues`);
+
+  const releaseBtn = releaseButton(page);
+
+  await expect(releaseBtn).toBeVisible({ timeout: 8_000 });
+  await expect(releaseBtn).toBeEnabled();
+
+  jobsPaused = true;
+
+  await expect(releaseBtn).toBeDisabled({ timeout: 12_000 });
+  await expect(releaseBtn).toHaveAttribute('title', /jobs are paused globally/i);
+
+  jobsPaused = false;
+
+  await expect(releaseBtn).toBeEnabled({ timeout: 12_000 });
+  await expect(releaseBtn).not.toHaveAttribute('title', /jobs are paused globally/i);
+});
+
 // ---------------------------------------------------------------------------
 // Test 7: isPipelineRunning → button pre-disabled with "Releasing…" label
 // Covers the isPipelineBusy() path: when a pipeline-kind job is actively
