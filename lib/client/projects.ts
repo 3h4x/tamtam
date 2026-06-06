@@ -304,7 +304,7 @@ export async function fetchProjectLogs(projectName: string): Promise<{ logs: Log
 
 // pushProject(name) — push existing commits only (legacy "Push" button).
 // pushProject(name, { commit: true }) — stage everything, generate the
-// commit message via Claude, commit, then auto-chain to push (used by
+// commit message via the agent, commit, then auto-chain to push (used by
 // the "Push to PR" button when the branch already has an open PR).
 export async function pushProject(
   projectName: string,
