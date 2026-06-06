@@ -78,7 +78,6 @@ export function SchedulerHealthPanel() {
             variant="ghost"
             size="sm"
             onClick={load}
-            className="border-border bg-transparent text-[11px] font-normal text-text-tertiary hover:bg-transparent hover:text-text-secondary"
           >
             Refresh
           </Button>
@@ -87,7 +86,6 @@ export function SchedulerHealthPanel() {
             size="sm"
             onClick={reconcile}
             disabled={reconciling || !health || health.ok}
-            className="border-border bg-transparent text-[11px] font-normal text-text-tertiary hover:bg-transparent hover:text-text-secondary disabled:opacity-40"
           >
             {reconciling ? 'Reconciling…' : 'Reconcile'}
           </Button>
