@@ -8,6 +8,7 @@ import { formatAgo } from '@/lib/shared/format'
 import { Labels, CheckIcon, GateBadge } from '@/components/issues-tab/shared'
 import type { MergeMethod, PrGates } from '@/components/issues-tab/shared'
 import { Button, buttonVariants } from '@/components/ui/Button'
+import { ErrorCallout } from '@/components/ui/ErrorCallout'
 import { Pill, PillButton, type PillTone } from '@/components/ui/Pill'
 import { SegmentedControl } from '@/components/ui/SegmentedControl'
 import { Spinner } from '@/components/ui/Spinner'
@@ -312,10 +313,22 @@ export function PRRow({
             </div>
           )}
           {mergeError && (
-            <div className="mt-1 text-[11px] text-status-error">{mergeError}</div>
+            <ErrorCallout
+              padding="none"
+              preWrap={false}
+              className="mt-1 !border-0 !bg-transparent text-[11px]"
+            >
+              {mergeError}
+            </ErrorCallout>
           )}
           {dodError && (
-            <div className="mt-1 text-[11px] text-status-error">DoD: {dodError}</div>
+            <ErrorCallout
+              padding="none"
+              preWrap={false}
+              className="mt-1 !border-0 !bg-transparent text-[11px]"
+            >
+              DoD: {dodError}
+            </ErrorCallout>
           )}
         </div>
         <div className="col-start-2 flex flex-wrap items-center justify-start gap-1 border-t border-border/60 pt-1.5 xl:col-start-auto xl:max-w-[420px] xl:justify-end xl:border-t-0 xl:pt-0 shrink-0">
