@@ -254,11 +254,12 @@ export function UsageHistoryChart({ hours = 24 }: { hours?: number } = {}) {
   const allTs = new Set<number>()
   for (const s of sevenDay) for (const b of s.buckets) allTs.add(b.bucketTs)
   const sortedTs = Array.from(allTs).sort((a, b) => a - b)
+  const bucketsByProvider = sevenDay.map((s) => new Map(s.buckets.map((b) => [b.bucketTs, b])))
   const aggregateBuckets: UsageHistoryBucket[] = sortedTs.map((ts) => {
     const tokenVals: number[] = []
     const catchVals: number[] = []
-    for (const s of sevenDay) {
-      const match = s.buckets.find((b) => b.bucketTs === ts)
+    for (const buckets of bucketsByProvider) {
+      const match = buckets.get(ts)
       if (!match) continue
       if (match.totalTokens !== null) tokenVals.push(match.totalTokens)
       if (match.catchUpTokensPerHour !== null) catchVals.push(match.catchUpTokensPerHour)

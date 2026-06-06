@@ -47,9 +47,6 @@ function workflowFilterPresentation(status: Exclude<StatusFilter, 'all'>): Filte
   };
 }
 
-// Pre-compute all 6 presentations at module load. The prior `switch (status)`
-// had four redundant cases all returning the same `workflowFilterPresentation`
-// call; now the lookup is O(1) and the substring-class scans run once each.
 const STATUS_FILTER_PRESENTATIONS: Record<StatusFilter, FilterPresentation> = {
   all: {
     glyph: null,
