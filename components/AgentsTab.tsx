@@ -14,6 +14,7 @@ import { RECOMMENDED_AGENTS, recommendedAgentMatchesName } from '@/lib/agents/re
 import { normalizeModelInput } from '@/lib/agents/model-aliases'
 import { useSchedulerHealth, type SchedulerEntry } from '@/hooks/useSchedulerHealth'
 import { Button } from '@/components/ui/Button'
+import { ErrorCallout } from '@/components/ui/ErrorCallout'
 import { Pill } from '@/components/ui/Pill'
 import { Table, type Column } from '@/components/ui/Table'
 import { Textarea } from '@/components/ui/Textarea'
@@ -524,9 +525,9 @@ export function AgentsTab({ projectName, projectJobs = [] }: AgentsTabProps) {
       </div>
 
       {agentRunsBlocked && (
-        <div className="px-3 py-2 rounded-md border border-status-warning/40 bg-status-warning/5 text-xs text-status-warning">
+        <ErrorCallout tone="warning" padding="none" radius="md" className="px-3 py-2 text-xs" preWrap={false}>
           {blockedReason}
-        </div>
+        </ErrorCallout>
       )}
 
       <Table<EnrichedAgent>
