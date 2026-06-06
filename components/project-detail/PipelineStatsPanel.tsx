@@ -3,6 +3,7 @@
 import { useEffect, useState } from 'react'
 import { Pill } from '@/components/ui/Pill'
 import { SegmentedControl } from '@/components/ui/SegmentedControl'
+import { ErrorCallout } from '@/components/ui/ErrorCallout'
 import { fetchProjectPipelineStats } from '@/lib/client-api'
 import type { PipelineDurationStats, ProjectPipelineStats } from '@/lib/client-api'
 
@@ -202,7 +203,7 @@ export function PipelineStatsPanel({ projectName }: { projectName: string }) {
       </header>
 
       {error && !data ? (
-        <div className="px-3 py-3 text-sm text-status-error">{error}</div>
+        <ErrorCallout radius="md" padding="md" className="m-3 text-sm">{error}</ErrorCallout>
       ) : (
         <>
           {refreshError && (
