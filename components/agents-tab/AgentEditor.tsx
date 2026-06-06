@@ -111,12 +111,12 @@ export function AgentEditor({
   const itemById = useMemo(() => new Map(allItems.map(i => [i.id, i])), [allItems])
   const docByPath = useMemo(() => new Map(availableDocs.map(d => [d.path, d])), [availableDocs])
 
-  const filteredItems = skillSearch
+  const normalizedSkillSearch = skillSearch.toLowerCase()
+  const filteredItems = normalizedSkillSearch
     ? allItems.filter(item => {
-        const q = skillSearch.toLowerCase()
-        return item.name.toLowerCase().includes(q) ||
-          item.description.toLowerCase().includes(q) ||
-          item.id.toLowerCase().includes(q)
+        return item.name.toLowerCase().includes(normalizedSkillSearch) ||
+          item.description.toLowerCase().includes(normalizedSkillSearch) ||
+          item.id.toLowerCase().includes(normalizedSkillSearch)
       })
     : allItems
 
