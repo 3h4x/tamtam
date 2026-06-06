@@ -2,6 +2,7 @@
 
 import Link from 'next/link'
 import { Button, buttonVariants } from '@/components/ui/Button'
+import { ErrorCallout } from '@/components/ui/ErrorCallout'
 import { Pill } from '@/components/ui/Pill'
 import type { Recommendation } from '@/lib/client-api'
 import { AUTO_APPLICABLE_RECOMMENDATION_TYPES, isAutoRecommendation, isManualRecommendation } from '@/lib/client-api'
@@ -257,7 +258,7 @@ export function RecommendationCard({
             </div>
           )}
           {errorMessage && (
-            <div className="mt-2 text-xs text-status-error">{errorMessage}</div>
+            <ErrorCallout className="mt-2 text-xs">{errorMessage}</ErrorCallout>
           )}
         </div>
         <div className="flex items-start gap-2 shrink-0">
