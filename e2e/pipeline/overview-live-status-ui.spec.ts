@@ -771,4 +771,78 @@ test.describe('Overview tab live status polling', () => {
     );
     await expect(releaseButton).toHaveText('Release');
   });
+
+  test('jobs_paused disables release without clearing a live ordinary run banner', async ({
+    page,
+  }) => {
+    let serveRunning = true;
+    let jobsPaused = false;
+
+    await stubOverviewRoutes(page, {
+      taskOverrides: { changes: 3, reviewed: true },
+      settings: () => ({
+        settings: { jobs_paused: jobsPaused ? 'true' : 'false' },
+        github_owner: '',
+      }),
+    });
+    await page.route(
+      (url) => url.pathname === '/api/jobs' && url.searchParams.get('project') === PROJECT,
+      (route: Route) =>
+        route.fulfill({
+          json: {
+            jobs: serveRunning
+              ? [
+                  makeJob('run-live-pause', 'run', 'running', null, {
+                    provider: 'claude',
+                    user_prompt: 'Keep working while new jobs are paused.',
+                    prompt: 'Keep working while new jobs are paused.',
+                    work_summary: 'Still processing despite the global pause.',
+                  }),
+                ]
+              : [
+                  makeJob('run-live-pause', 'run', 'done', 0, {
+                    provider: 'claude',
+                    user_prompt: 'Keep working while new jobs are paused.',
+                    prompt: 'Keep working while new jobs are paused.',
+                    work_summary: 'Finished after the global pause engaged.',
+                  }),
+                ],
+            pendingReleaseProjects: [],
+          },
+        }),
+    );
+
+    await page.goto(`/project/${PROJECT}`);
+
+    const activeWork = page.locator('section').filter({ hasText: 'active work' }).first();
+    const releaseButton = page.getByRole('button', { name: 'Release', exact: true });
+
+    await expect(page.getByText('active work')).toBeVisible({ timeout: 8_000 });
+    await expect(page.getByText('1 running now')).toBeVisible({ timeout: 8_000 });
+    await expect(activeWork.getByRole('button', { name: /chat/i }).first()).toBeVisible({
+      timeout: 8_000,
+    });
+    await expect(releaseButton).toBeEnabled();
+
+    jobsPaused = true;
+
+    await expect(page.getByText('active work')).toBeVisible();
+    await expect(page.getByText('1 running now')).toBeVisible();
+    await expect(releaseButton).toBeDisabled({ timeout: 12_000 });
+    await expect(releaseButton).toHaveAttribute(
+      'title',
+      /jobs are paused globally\. resume jobs to start a release\./i,
+      { timeout: 12_000 },
+    );
+
+    serveRunning = false;
+
+    await expect(page.getByText('active work')).toHaveCount(0, { timeout: 12_000 });
+    await expect(page.getByText('1 running now')).toHaveCount(0, { timeout: 12_000 });
+    await expect(releaseButton).toBeDisabled();
+    await expect(releaseButton).toHaveAttribute(
+      'title',
+      /jobs are paused globally\. resume jobs to start a release\./i,
+    );
+  });
 });
