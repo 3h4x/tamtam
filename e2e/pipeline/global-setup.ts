@@ -78,6 +78,7 @@ const PROJECTS = [
   'workflow-runs-real-abort',
   'dual-surface-release',
   'dual-surface-release-cancelled',
+  'dual-surface-release-failure',
   'run-dual-surface-real-success',
   'run-dual-surface-real-cancelled',
   'run-dual-surface-real-failure',
