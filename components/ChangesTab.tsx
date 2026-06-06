@@ -103,6 +103,18 @@ function StatBar({ additions, deletions }: { additions: number; deletions: numbe
   )
 }
 
+function OperationError({ message, className }: { message: string; className?: string }) {
+  return (
+    <ErrorCallout
+      padding="none"
+      preWrap={false}
+      className={['border-0 bg-transparent p-0 text-xs leading-snug', className].filter(Boolean).join(' ')}
+    >
+      {message}
+    </ErrorCallout>
+  )
+}
+
 export function ChangesTab({ projectName, jobsPaused = false }: ChangesTabProps) {
   const router = useRouter()
   const [data, setData] = useState<ChangesResponse | null>(null)
@@ -292,7 +304,7 @@ export function ChangesTab({ projectName, jobsPaused = false }: ChangesTabProps)
                 {data?.branchMerged && (
                   <p className="text-xs text-text-tertiary">Feature branch is already merged into <code className="font-mono">{data.defaultBranch}</code>.</p>
                 )}
-                {switchError && <p className="text-xs text-status-error">{switchError}</p>}
+                {switchError && <OperationError message={switchError} />}
               </div>
             )}
             {(data?.ahead ?? 0) > 0 && (
@@ -308,7 +320,7 @@ export function ChangesTab({ projectName, jobsPaused = false }: ChangesTabProps)
                 >
                   {pushing ? 'Pushing…' : `Push ${data!.ahead} commit${data!.ahead !== 1 ? 's' : ''}`}
                 </Button>
-                {pushError && <p className="text-xs text-status-error">{pushError}</p>}
+                {pushError && <OperationError message={pushError} />}
               </div>
             )}
             {(data?.behind ?? 0) > 0 && !diverged && (
@@ -324,7 +336,7 @@ export function ChangesTab({ projectName, jobsPaused = false }: ChangesTabProps)
                 >
                   {pulling ? 'Pulling…' : 'Pull'}
                 </Button>
-                {pullError && <p className="text-xs text-status-error">{pullError}</p>}
+                {pullError && <OperationError message={pullError} />}
               </div>
             )}
             {diverged && (
@@ -350,7 +362,7 @@ export function ChangesTab({ projectName, jobsPaused = false }: ChangesTabProps)
                     ✕
                   </Button>
                 </div>
-                {pullError && <p className="text-xs text-status-error">{pullError}</p>}
+                {pullError && <OperationError message={pullError} />}
               </div>
             )}
           </div>
@@ -384,7 +396,7 @@ export function ChangesTab({ projectName, jobsPaused = false }: ChangesTabProps)
               change{data.totalFiles !== 1 ? 's' : ''} to <code className="font-mono">{data.defaultBranch}</code>{' '}
               and delete the dead local branch.
             </p>
-            {switchError && <p className="text-xs text-status-error mt-1">{switchError}</p>}
+            {switchError && <OperationError message={switchError} className="mt-1" />}
           </div>
           <Button
             variant="warning"
@@ -438,7 +450,7 @@ export function ChangesTab({ projectName, jobsPaused = false }: ChangesTabProps)
                 )}
               </>
             )}
-            {switchError && <span className="text-xs text-status-error">{switchError}</span>}
+            {switchError && <OperationError message={switchError} />}
           </div>
         )}
         {data.ahead > 0 && (
@@ -507,10 +519,10 @@ export function ChangesTab({ projectName, jobsPaused = false }: ChangesTabProps)
           </div>
         )}
         {pushError && (
-          <span className="text-xs text-status-error">{pushError}</span>
+          <OperationError message={pushError} />
         )}
         {pullError && (
-          <span className="text-xs text-status-error">{pullError}</span>
+          <OperationError message={pullError} />
         )}
         <Button
           size="sm"
