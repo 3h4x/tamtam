@@ -372,10 +372,8 @@ At the end of your run, include a short final section exactly named "TamTam Run 
         embeddingModel: settings.retrieval_embedding_model,
       });
       retrievedContext = retrieval.block;
-      // Persist full diagnostics every run (not just on hit) so the operator can
-      // see why retrieval did or didn't contribute. Previously diagnostics were
-      // only stored when sources existed, hiding empty_corpus / below_threshold
-      // / embed_failed reasons from after-the-fact triage.
+      // Persist full diagnostics every run so the operator can see why
+      // retrieval did or didn't contribute after-the-fact.
       contextMetaObj.retrieval = retrieval.diagnostics;
       retrievalStatusLabel = formatRetrievalStatus(retrieval.diagnostics);
     } catch (e) {
