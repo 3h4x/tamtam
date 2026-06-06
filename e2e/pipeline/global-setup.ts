@@ -71,6 +71,8 @@ const PROJECTS = [
   'workflow-runs-terminal-dual-surface',
   'workflow-runs-terminal-failure-dual-surface',
   'workflow-runs-terminal-cancelled-dual-surface',
+  'workflow-runs-terminal-concurrent-success',
+  'workflow-runs-terminal-concurrent-failure',
   'workflow-runs-real-success',
   'workflow-runs-real-failure',
   'workflow-runs-real-cancelled',
