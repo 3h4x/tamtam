@@ -6,6 +6,7 @@ import { fetchChanges, fetchChangeDiff, pullProject, pushProject, PullDivergedEr
 import type { ChangeFile, ChangeStatus, ChangesResponse } from '@/lib/client-api'
 import { Button, buttonVariants } from '@/components/ui/Button'
 import { EmptyState } from '@/components/ui/EmptyState'
+import { ErrorCallout } from '@/components/ui/ErrorCallout'
 import { ErrorState } from '@/components/ErrorState'
 
 const STATUS_LABEL: Record<ChangeStatus, string> = {
@@ -366,7 +367,13 @@ export function ChangesTab({ projectName, jobsPaused = false }: ChangesTabProps)
   return (
     <div className="mt-2">
       {data.branchMerged && data.branch && data.defaultBranch && data.branch !== data.defaultBranch && (
-        <div className="bg-status-warning/10 border border-status-warning/40 rounded-lg p-4 mb-3 flex items-start gap-3 flex-wrap">
+        <ErrorCallout
+          tone="warning"
+          padding="none"
+          radius="lg"
+          preWrap={false}
+          className="mb-3 flex flex-wrap items-start gap-3 border-status-warning/40 p-4"
+        >
           <div className="flex-1 min-w-0">
             <p className="text-sm font-medium text-status-warning">
               Stranded on a merged branch
@@ -388,7 +395,7 @@ export function ChangesTab({ projectName, jobsPaused = false }: ChangesTabProps)
           >
             {switching ? 'Moving…' : `Move to ${data.defaultBranch}`}
           </Button>
-        </div>
+        </ErrorCallout>
       )}
       <div className="bg-bg-secondary rounded-lg p-4 mb-3 flex items-center gap-4 flex-wrap">
         <div className="flex items-center gap-2">
