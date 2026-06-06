@@ -1,10 +1,7 @@
 'use client'
 
 /**
- * Sliding on/off switch with an inline label. A small reusable primitive for
- * the boolean controls that previously inlined identical `role="switch"`
- * markup (the agent editor's Enabled / Boostable toggles). Visuals are frozen
- * to match those call sites — do not restyle without updating every consumer.
+ * Sliding on/off switch with an inline label.
  */
 export function ToggleSwitch({
   checked,

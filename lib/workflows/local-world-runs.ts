@@ -228,10 +228,9 @@ export function listLocalRunFilesNewestFirst(limit: number): Array<{ name: strin
 
   // Run IDs are ULIDs (`wrun_01K…`), whose leading characters encode the
   // creation timestamp — so a lexicographic filename sort is chronological.
-  // Selecting the newest `limit` by name avoids a statSync() per file, which
-  // is what made this O(tens-of-thousands) syscalls and pinned the route at
-  // multiple seconds once the runs dir grew large. The caller re-sorts the
-  // chosen slice by each run's own createdAt for exact display order.
+  // Selecting the newest `limit` by name avoids a statSync() per file. The
+  // caller re-sorts the chosen slice by each run's own createdAt for exact
+  // display order.
   names.sort((a, b) => (a < b ? 1 : a > b ? -1 : 0));
 
   return names.slice(0, limit).map((name) => ({ name }));

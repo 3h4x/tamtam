@@ -6,8 +6,7 @@ import { ToggleSwitch } from '@/components/ui/ToggleSwitch'
 const SCHEDULES = ['15m', '30m', '1h', '2h', '4h', '8h', '12h', '24h', '3d', '7d', '30d']
 
 /**
- * Schedule / Enabled / Boostable control strip for the agent editor. Extracted
- * from AgentEditor to keep that file under the component size cap.
+ * Schedule / Enabled / Boostable control strip for the agent editor.
  */
 export function AgentScheduleStrip({
   schedule,
