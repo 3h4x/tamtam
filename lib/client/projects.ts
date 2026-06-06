@@ -124,11 +124,21 @@ export async function releaseProject(
   })
   if (!response.ok) {
     const data = await response.json().catch(() => ({}))
+    const detail = data.detail as string | undefined
+    const blockingJobId = typeof data.blocking_job_id === 'string' ? data.blocking_job_id : undefined
+    const isPipelineLocked =
+      response.status === 409
+      && typeof detail === 'string'
+      && (
+        /\bpipeline\s+(?:is\s+)?running\b/i.test(detail)
+        || /\bpipeline\s+already\s+running\b/i.test(detail)
+        || /\brelease(?:\s+pipeline)?\s+already\s+running\b/i.test(detail)
+      )
     const err = Object.assign(
-      new Error(data.detail || `Failed to start release: ${response.statusText}`),
+      new Error(detail || `Failed to start release: ${response.statusText}`),
       {
-        blockingJobId: data.blocking_job_id as string | undefined,
-        isPipelineLocked: response.status === 409,
+        blockingJobId,
+        isPipelineLocked,
       }
     )
     throw err

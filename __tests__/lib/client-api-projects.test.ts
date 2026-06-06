@@ -70,6 +70,57 @@ describe('releaseProject', () => {
     });
   });
 
+  it('does not mark ordinary running job blockers as pipeline locks', async () => {
+    stubFetch(
+      false,
+      {
+        detail: "Job 'run' is already running for myproj (job ordinary-run-123)",
+        blocking_job_id: 'ordinary-run-123',
+      },
+      409,
+      'Conflict',
+    );
+    const releaseProject = await getReleaseProject();
+
+    await expect(releaseProject('myproj')).rejects.toMatchObject({
+      message: "Job 'run' is already running for myproj (job ordinary-run-123)",
+      blockingJobId: 'ordinary-run-123',
+      isPipelineLocked: false,
+    });
+  });
+
+  it('marks explicit pipeline-running conflicts as pipeline locks', async () => {
+    stubFetch(
+      false,
+      { detail: 'Pipeline is running for myproj', blocking_job_id: 'pipeline-job-1' },
+      409,
+      'Conflict',
+    );
+    const releaseProject = await getReleaseProject();
+
+    await expect(releaseProject('myproj')).rejects.toMatchObject({
+      message: 'Pipeline is running for myproj',
+      blockingJobId: 'pipeline-job-1',
+      isPipelineLocked: true,
+    });
+  });
+
+  it('marks pipeline-already-running release conflicts as pipeline locks', async () => {
+    stubFetch(
+      false,
+      { detail: 'Pipeline already running for myproj', blocking_job_id: 'pipeline-job-2' },
+      409,
+      'Conflict',
+    );
+    const releaseProject = await getReleaseProject();
+
+    await expect(releaseProject('myproj')).rejects.toMatchObject({
+      message: 'Pipeline already running for myproj',
+      blockingJobId: 'pipeline-job-2',
+      isPipelineLocked: true,
+    });
+  });
+
   it('does not mark non-409 failures as pipeline locks', async () => {
     stubFetch(false, { detail: 'budget blocked' }, 429, 'Too Many Requests');
     const releaseProject = await getReleaseProject();

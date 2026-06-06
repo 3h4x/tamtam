@@ -223,6 +223,100 @@ test('clicking Release when pipeline is already running shows a "Pipeline is run
   ).toBeVisible({ timeout: 5_000 });
 });
 
+test('release click blocked by an ordinary run restores the idle button and shows the blocker detail', async ({
+  page,
+}) => {
+  await stubCommonRoutes(page);
+
+  let releaseResponse!: () => void;
+  const releasePending = new Promise<void>((resolve) => {
+    releaseResponse = resolve;
+  });
+
+  await page.route(`**/api/projects/by-project/${PROJECT}/release`, async (route: Route) => {
+    if (route.request().method() !== 'POST') {
+      await route.continue();
+      return;
+    }
+
+    await releasePending;
+    await route.fulfill({
+      status: 409,
+      json: {
+        detail: `Job 'run' is already running for ${PROJECT} (job ordinary-run-123)`,
+        blocking_job_id: 'ordinary-run-123',
+      },
+    });
+  });
+
+  await page.goto(`/project/${PROJECT}/issues`);
+
+  const idleBtn = releaseButton(page);
+  await expect(idleBtn).toBeVisible({ timeout: 8_000 });
+  await expect(idleBtn).toBeEnabled();
+
+  await idleBtn.click();
+
+  const busyBtn = page.getByRole('button', { name: 'Releasing…', exact: true });
+  await expect(busyBtn).toBeVisible({ timeout: 5_000 });
+  await expect(busyBtn).toBeDisabled();
+
+  releaseResponse();
+
+  await expect(idleBtn).toBeVisible({ timeout: 8_000 });
+  await expect(idleBtn).toBeEnabled();
+  await expect(busyBtn).toHaveCount(0, { timeout: 8_000 });
+  await expect(page.getByText(/Job 'run' is already running/i)).toBeVisible({ timeout: 5_000 });
+  await expect(page.getByText(/Pipeline is running/i)).toHaveCount(0);
+});
+
+test('release click blocked by another release still restores the idle button and keeps the pipeline-running guidance', async ({
+  page,
+}) => {
+  await stubCommonRoutes(page);
+
+  let releaseResponse!: () => void;
+  const releasePending = new Promise<void>((resolve) => {
+    releaseResponse = resolve;
+  });
+
+  const blockingJobId = 'release-blocking-456';
+
+  await page.route(`**/api/projects/by-project/${PROJECT}/release`, async (route: Route) => {
+    if (route.request().method() !== 'POST') {
+      await route.continue();
+      return;
+    }
+
+    await releasePending;
+    await route.fulfill({
+      status: 409,
+      json: {
+        detail: `Release pipeline already running for ${PROJECT}`,
+        blocking_job_id: blockingJobId,
+      },
+    });
+  });
+
+  await page.goto(`/project/${PROJECT}/issues`);
+
+  const idleBtn = releaseButton(page);
+  await expect(idleBtn).toBeVisible({ timeout: 8_000 });
+
+  await idleBtn.click();
+
+  const busyBtn = page.getByRole('button', { name: 'Releasing…', exact: true });
+  await expect(busyBtn).toBeVisible({ timeout: 5_000 });
+  await expect(busyBtn).toBeDisabled();
+
+  releaseResponse();
+
+  await expect(idleBtn).toBeVisible({ timeout: 8_000 });
+  await expect(idleBtn).toBeEnabled();
+  await expect(busyBtn).toHaveCount(0, { timeout: 8_000 });
+  await expect(page.getByText(new RegExp(blockingJobId))).toBeVisible({ timeout: 5_000 });
+});
+
 // ---------------------------------------------------------------------------
 // Test 3: successful release — toast shows success and navigates to terminal
 // ---------------------------------------------------------------------------
