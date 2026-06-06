@@ -4,7 +4,7 @@ import type { Page, Route } from '@playwright/test';
 const PROJECT = 'overview-live-ui';
 const now = () => Math.floor(Date.now() / 1000);
 
-function makeTask(project: string) {
+function makeTask(project: string, overrides: Record<string, unknown> = {}) {
   return {
     id: `${project}-1`,
     project,
@@ -25,6 +25,7 @@ function makeTask(project: string) {
     ci: null,
     ci_failed_url: null,
     github: null,
+    ...overrides,
   };
 }
 
@@ -50,10 +51,20 @@ function makeJob(
   };
 }
 
-async function stubOverviewRoutes(page: Page): Promise<void> {
+async function stubOverviewRoutes(
+  page: Page,
+  opts: {
+    taskOverrides?: Record<string, unknown>;
+    settings?: () => { settings: { jobs_paused: string }; github_owner: string };
+  } = {},
+): Promise<void> {
   await page.route('**/api/projects', (route: Route) =>
     route.fulfill({
-      json: { tasks: [makeTask(PROJECT)], priorities: [], issueCounts: {} },
+      json: {
+        tasks: [makeTask(PROJECT, opts.taskOverrides)],
+        priorities: [],
+        issueCounts: {},
+      },
     }),
   );
   await page.route(
@@ -109,7 +120,11 @@ async function stubOverviewRoutes(page: Page): Promise<void> {
     (route: Route) => route.fulfill({ json: { behind: 0, ahead: 0 } }),
   );
   await page.route('**/api/settings', (route: Route) =>
-    route.fulfill({ json: { settings: { jobs_paused: 'false' }, github_owner: '' } }),
+    route.fulfill({
+      json: opts.settings
+        ? opts.settings()
+        : { settings: { jobs_paused: 'false' }, github_owner: '' },
+    }),
   );
   await page.route('**/api/jobs/notifications', (route: Route) =>
     route.fulfill({ json: { notifications: [] } }),
@@ -720,5 +735,40 @@ test.describe('Overview tab live status polling', () => {
       timeout: 12_000,
     });
     await expect(activeWork.getByRole('button', { name: /push/i })).toHaveCount(0);
+  });
+
+  test('project root release button disables without reload when jobs_paused flips on', async ({
+    page,
+  }) => {
+    let jobsPaused = false;
+
+    await stubOverviewRoutes(page, {
+      taskOverrides: { changes: 4, reviewed: false },
+      settings: () => ({
+        settings: { jobs_paused: jobsPaused ? 'true' : 'false' },
+        github_owner: '',
+      }),
+    });
+    await page.route(
+      (url) => url.pathname === '/api/jobs' && url.searchParams.get('project') === PROJECT,
+      (route: Route) => route.fulfill({ json: { jobs: [], pendingReleaseProjects: [] } }),
+    );
+
+    await page.goto(`/project/${PROJECT}`);
+
+    const releaseButton = page.getByRole('button', { name: 'Release', exact: true });
+    await expect(releaseButton).toBeVisible({ timeout: 8_000 });
+    await expect(releaseButton).toBeEnabled();
+    await expect(releaseButton).toHaveAttribute('title', /release: review → commit → push/i);
+
+    jobsPaused = true;
+
+    await expect(releaseButton).toBeDisabled({ timeout: 12_000 });
+    await expect(releaseButton).toHaveAttribute(
+      'title',
+      /jobs are paused globally\. resume jobs to start a release\./i,
+      { timeout: 12_000 },
+    );
+    await expect(releaseButton).toHaveText('Release');
   });
 });
