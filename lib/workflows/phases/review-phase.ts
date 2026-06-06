@@ -49,8 +49,7 @@ export async function releaseReviewPhaseWorkflow(
     // was already running. If the blocker is itself a review of THIS
     // project, attach to it and continue the release from its result instead
     // of aborting: the in-flight review covers the same working tree, so its
-    // verdict is exactly what this phase needs. Aborting here stranded
-    // releases that were otherwise fine (the racing review completed cleanly).
+    // verdict is exactly what this phase needs.
     const attachJobId = started.status === 409 && started.blockingJobId
       ? await resolveAttachableInflightStep(started.blockingJobId, projectName, 'review')
       : null;
