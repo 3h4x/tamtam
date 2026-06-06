@@ -1,4 +1,5 @@
 import { defineConfig } from 'vitest/config';
+import { existsSync, readdirSync, readFileSync, statSync } from 'fs';
 import path from 'path';
 
 const isCi = process.env.CI === 'true';
@@ -61,6 +62,30 @@ const SLOW_FILES = [
   '__tests__/lib/agents/retrieval/pgvector-backend.test.ts',
 ];
 
+function collectTestFiles(dir: string): string[] {
+  if (!existsSync(dir)) return [];
+  const files: string[] = [];
+  for (const name of readdirSync(dir)) {
+    const full = path.join(dir, name);
+    const stat = statSync(full);
+    if (stat.isDirectory()) {
+      files.push(...collectTestFiles(full));
+      continue;
+    }
+    if (/\.test\.tsx?$/.test(name)) {
+      files.push(full.split(path.sep).join('/'));
+    }
+  }
+  return files;
+}
+
+const DB_TEST_FILES = collectTestFiles('__tests__').filter((file) => {
+  const source = readFileSync(file, 'utf8');
+  return source.includes('/helpers/test-db') || source.includes('@/__tests__/helpers/test-db');
+});
+const DB_TEST_FILE_SET = new Set(DB_TEST_FILES);
+const SLOW_NON_DB_FILES = SLOW_FILES.filter((file) => !DB_TEST_FILE_SET.has(file));
+
 export default defineConfig({
   resolve: {
     alias: {
@@ -74,7 +99,7 @@ export default defineConfig({
         test: {
           name: 'fast',
           include: ['__tests__/**/*.test.ts', '__tests__/**/*.test.tsx'],
-          exclude: SLOW_FILES,
+          exclude: [...SLOW_FILES, ...DB_TEST_FILES],
           environment: 'node',
           globalSetup: ['./__tests__/global-setup.ts'],
           setupFiles: ['./__tests__/setup-db-guard.ts'],
@@ -87,7 +112,7 @@ export default defineConfig({
         extends: true,
         test: {
           name: 'slow',
-          include: SLOW_FILES,
+          include: SLOW_NON_DB_FILES,
           environment: 'node',
           globalSetup: ['./__tests__/global-setup.ts'],
           setupFiles: ['./__tests__/setup-db-guard.ts'],
@@ -96,10 +121,23 @@ export default defineConfig({
           sequence: { groupOrder: 1 },
         },
       },
+      {
+        extends: true,
+        test: {
+          name: 'db',
+          include: DB_TEST_FILES,
+          environment: 'node',
+          globalSetup: ['./__tests__/global-setup.ts'],
+          setupFiles: ['./__tests__/setup-db-guard.ts'],
+          pool: 'forks',
+          maxWorkers: projectMaxWorkers(4),
+          sequence: { groupOrder: 2 },
+        },
+      },
     ],
     silent: 'passed-only',
     testTimeout: 30000,
-    hookTimeout: isNode25OrNewer ? 60000 : 30000,
+    hookTimeout: 60000,
     teardownTimeout: 10000,
   },
 });

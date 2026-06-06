@@ -39,7 +39,7 @@ export interface TestDbHandle {
 const MIGRATIONS_DIR = join(process.cwd(), 'lib/db/migrations');
 const CACHE_DIR = join(tmpdir(), 'tamtam-pglite-cache-v3');
 const CACHE_LOCK_STALE_MS = 2 * 60 * 1000;
-const CACHE_LOCK_WAIT_MS = 5_000;
+const CACHE_LOCK_WAIT_MS = 60_000;
 
 let cachedMigrationsHash: string | null = null;
 let cachedRequiredPublicTables: string[] | null = null;

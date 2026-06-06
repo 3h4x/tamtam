@@ -207,8 +207,14 @@ export function PipelineStatsPanel({ projectName }: { projectName: string }) {
       ) : (
         <>
           {refreshError && (
-            <div className="border-b border-status-warning/30 bg-status-warning/10 px-3 py-2 text-sm text-status-warning" role="alert">
-              {refreshError}
+            <div role="alert">
+              <ErrorCallout
+                tone="warning"
+                className="rounded-none border-x-0 border-t-0 px-3 py-2 text-sm"
+                preWrap={false}
+              >
+                {refreshError}
+              </ErrorCallout>
             </div>
           )}
           <div className="grid gap-3 p-3 sm:grid-cols-2 xl:grid-cols-5">
