@@ -51,6 +51,34 @@ describe('terminal completed job restore helpers', () => {
     vi.unstubAllGlobals()
   })
 
+  it('restores successful completed logs without adding a synthetic exit status', async () => {
+    vi.stubGlobal('fetch', vi.fn().mockResolvedValue({
+      json: async () => ({
+        exit_code: 0,
+        log: 'assistant reply',
+        log_pruned: false,
+      }),
+    }))
+
+    const jobs: RestorableJob[] = [{
+      id: 'successful-job',
+      kind: 'run',
+      status: 'done',
+      session_id: 'sess-ok',
+      started_at: 100,
+      finished_at: 120,
+      exit_code: 0,
+      user_prompt: 'run successful task',
+      prompt: null,
+      context_meta: null,
+    }]
+
+    await expect(buildEntriesForCompletedJobs(jobs)).resolves.toEqual([
+      { role: 'user', text: 'run successful task' },
+      { role: 'assistant', text: 'assistant reply' },
+    ])
+  })
+
   it('does not duplicate detail text already present in a failed plain-text log', async () => {
     vi.stubGlobal('fetch', vi.fn().mockResolvedValue({
       json: async () => ({

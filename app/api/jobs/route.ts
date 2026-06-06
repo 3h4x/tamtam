@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { listJobs, jobToListDict, probeJobStatus } from '@/lib/jobs/job-storage';
+import { listJobs, jobToListDict, probeJobStatus, updateJob } from '@/lib/jobs/job-storage';
 import { listPendingReleaseProjects } from '@/lib/pipeline/pending-release';
+import { recoverJobSessionId } from '@/lib/jobs/recover-session-id';
 
 const DEFAULT_LIMIT = 30;
 const MAX_LIMIT = 200;
@@ -15,6 +16,14 @@ function parseLimit(raw: string | null): number {
   return Math.min(n, MAX_LIMIT);
 }
 
+function recoverSessionIdForFilter(job: ReturnType<typeof listJobs>[number]): void {
+  if (job.sessionId) return;
+  const sessionId = recoverJobSessionId(job);
+  if (!sessionId) return;
+  job.sessionId = sessionId;
+  updateJob(job);
+}
+
 export async function GET(request: NextRequest) {
   const sp = request.nextUrl.searchParams;
   const project = sp.get('project');
@@ -22,17 +31,19 @@ export async function GET(request: NextRequest) {
   const status = sp.get('status'); // 'running' | 'done' | 'aborted'
   const sessionId = sp.get('session_id');
   const hasSession = sp.get('has_session') === '1';
+  const needsSessionFilterRecovery = Boolean(sessionId || hasSession);
   const offset = Math.max(0, parseInt(sp.get('offset') ?? '0', 10) || 0);
   const limit = parseLimit(sp.get('limit'));
 
   const jobs = listJobs().filter((j) => {
     if (project && j.project !== project) return false;
     if (kind && j.kind !== kind) return false;
-    if (sessionId && j.sessionId !== sessionId) return false;
-    if (hasSession && !j.sessionId) return false;
     if (status === 'running' && !(j.finishedAt === null && j.abortedAt == null)) return false;
     if (status === 'done' && !(j.finishedAt !== null && j.abortedAt == null)) return false;
     if (status === 'aborted' && j.abortedAt == null) return false;
+    if (needsSessionFilterRecovery) recoverSessionIdForFilter(j);
+    if (sessionId && j.sessionId !== sessionId) return false;
+    if (hasSession && !j.sessionId) return false;
     return true;
   });
   jobs.sort((a, b) => b.startedAt - a.startedAt);
@@ -44,6 +55,9 @@ export async function GET(request: NextRequest) {
   // row for nothing.
   const toProbe = page.filter((j) => j.finishedAt === null && j.abortedAt == null);
   await Promise.all(toProbe.map((j) => probeJobStatus(j)));
+  for (const job of page) {
+    recoverSessionIdForFilter(job);
+  }
 
   // Merge agent run + downstream release into one visual workflow: if a
   // release in the page points at a parent agent that's been paginated out,

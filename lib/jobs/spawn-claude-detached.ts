@@ -76,7 +76,6 @@ export async function startJobInProcess(
     mkdirSync(/*turbopackIgnore: true*/ LOG_DIR, { recursive: true });
 
     promptPath = join(/*turbopackIgnore: true*/ LOG_DIR, `${jobId}.prompt`);
-    logPath = join(/*turbopackIgnore: true*/ LOG_DIR, `${jobId}.log`);
 
     writeFileSync(/*turbopackIgnore: true*/ promptPath, prompt);
 
@@ -85,7 +84,9 @@ export async function startJobInProcess(
     jobsCache = jobStorage.jobsCache;
     markDone = jobStorage.markDone;
     const job = jobsCache.get(jobId);
+    logPath = job?.logPath || join(/*turbopackIgnore: true*/ LOG_DIR, `${jobId}.log`);
     if (job) {
+      job.logPath = logPath;
       job.promptBytes = promptBytes;
       checkPromptSize(jobId, job.kind, promptBytes);
       jobStorage.saveToDb(job);

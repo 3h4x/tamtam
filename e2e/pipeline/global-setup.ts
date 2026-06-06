@@ -45,6 +45,7 @@ const PROJECTS = [
   'terminal-run-success',
   'terminal-run-cancel',
   'terminal-run-failure',
+  'terminal-run-session-finished',
   'start-detect-terminal',
   'start-detect-terminal-cancelled',
   'start-detect-terminal-failure-idle',

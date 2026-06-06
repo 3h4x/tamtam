@@ -169,6 +169,109 @@ describe('GET /api/jobs', () => {
     expect(data.jobs[0].id).toBe('job-1');
   });
 
+  it('recovers session ids before applying has_session filter', async () => {
+    const recoveredSessionId = 'sess-recovered';
+    const recoverable = makeJob({
+      id: 'job-recoverable',
+      project: 'proj1',
+      logPath: '/tmp/job-recoverable.log',
+      sessionId: null,
+      finishedAt: 2000,
+    });
+    const withoutSession = makeJob({
+      id: 'job-without-session',
+      project: 'proj1',
+      logPath: null,
+      sessionId: null,
+      finishedAt: 1900,
+    });
+    mocks.listJobs.mockReturnValue([recoverable, withoutSession]);
+    mocks.readLogHead.mockReturnValue('raw log head content');
+    mocks.readLog.mockReturnValue(
+      `{"type":"result","subtype":"success","is_error":false,"duration_ms":1,"session_id":"${recoveredSessionId}","result":"ok"}`,
+    );
+    mocks.parseStreamLines.mockReturnValue([{
+      type: 'done',
+      result: {
+        duration: 1,
+        sessionId: recoveredSessionId,
+        error: false,
+        inputTokens: 0,
+        outputTokens: 0,
+        cacheReadTokens: 0,
+        cacheCreateTokens: 0,
+        model: null,
+      },
+    }]);
+    mocks.jobToListDict.mockImplementation((j: JobData) => ({
+      id: j.id,
+      session_id: j.sessionId,
+    }));
+
+    const req = new NextRequest('http://localhost/api/jobs?project=proj1&has_session=1');
+    const res = await jobsGET(req);
+    const data = await res.json();
+
+    expect(data.jobs).toEqual([{ id: 'job-recoverable', session_id: recoveredSessionId }]);
+    expect(data.total).toBe(1);
+    expect(mocks.updateJob).toHaveBeenCalledWith(expect.objectContaining({
+      id: 'job-recoverable',
+      sessionId: recoveredSessionId,
+    }));
+  });
+
+  it('recovers session ids before applying session_id filter', async () => {
+    const recoveredSessionId = 'sess-filtered';
+    const matching = makeJob({
+      id: 'job-matching-session',
+      project: 'proj1',
+      logPath: '/tmp/job-matching-session.log',
+      sessionId: null,
+      finishedAt: 2000,
+    });
+    const other = makeJob({
+      id: 'job-other-session',
+      project: 'proj1',
+      sessionId: 'sess-other',
+      finishedAt: 1900,
+    });
+    mocks.listJobs.mockReturnValue([matching, other]);
+    mocks.readLogHead.mockReturnValue('raw log head content');
+    mocks.readLog.mockReturnValue(
+      `{"type":"result","subtype":"success","is_error":false,"duration_ms":1,"session_id":"${recoveredSessionId}","result":"ok"}`,
+    );
+    mocks.parseStreamLines.mockReturnValue([{
+      type: 'done',
+      result: {
+        duration: 1,
+        sessionId: recoveredSessionId,
+        error: false,
+        inputTokens: 0,
+        outputTokens: 0,
+        cacheReadTokens: 0,
+        cacheCreateTokens: 0,
+        model: null,
+      },
+    }]);
+    mocks.jobToListDict.mockImplementation((j: JobData) => ({
+      id: j.id,
+      session_id: j.sessionId,
+    }));
+
+    const req = new NextRequest(
+      `http://localhost/api/jobs?project=proj1&session_id=${encodeURIComponent(recoveredSessionId)}`,
+    );
+    const res = await jobsGET(req);
+    const data = await res.json();
+
+    expect(data.jobs).toEqual([{ id: 'job-matching-session', session_id: recoveredSessionId }]);
+    expect(data.total).toBe(1);
+    expect(mocks.updateJob).toHaveBeenCalledWith(expect.objectContaining({
+      id: 'job-matching-session',
+      sessionId: recoveredSessionId,
+    }));
+  });
+
   it('calls probeJobStatus for each job', async () => {
     const job1 = makeJob({ id: 'job-1' });
     const job2 = makeJob({ id: 'job-2' });
