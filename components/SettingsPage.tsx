@@ -23,6 +23,7 @@ import { EmptyState } from '@/components/ui/EmptyState'
 import { Input } from '@/components/ui/Input'
 import { Checkbox } from '@/components/ui/Checkbox'
 import { Select } from '@/components/ui/Select'
+import { ErrorCallout } from '@/components/ui/ErrorCallout'
 import { ErrorBanner } from '@/components/ErrorBanner'
 
 interface SettingsMap {
@@ -1030,7 +1031,7 @@ export function SettingsPage({ initialTab }: { initialTab?: TabId } = {}) {
                 <span className="font-mono text-xs text-text-secondary">{backupResult.filename}</span>
               )}
               {backupError && (
-                <span className="text-sm text-status-error">{backupError}</span>
+                <ErrorCallout padding="sm" radius="md" className="text-sm">{backupError}</ErrorCallout>
               )}
             </div>
           </section>
