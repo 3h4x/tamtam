@@ -61,7 +61,8 @@ export function TrustedGithubUsersField({
           type="button"
           onClick={() => updateUsers([...users, ''])}
           size="sm"
-          className="rounded-lg bg-bg-primary px-2.5 text-text-secondary hover:bg-bg-tertiary hover:text-text-primary"
+          surface="primary"
+          className="rounded-lg px-2.5"
         >
           + Add user
         </Button>
@@ -98,7 +99,8 @@ export function TrustedGithubUsersField({
                   type="button"
                   onClick={() => updateUsers(users.filter((_, itemIndex) => itemIndex !== index))}
                   size="sm"
-                  className="rounded-lg bg-bg-primary px-2.5 py-2 text-text-secondary hover:bg-bg-tertiary hover:text-text-primary"
+                  surface="primary"
+                  className="rounded-lg px-2.5 py-2"
                   aria-label={`Remove trusted GitHub user ${user || index + 1}`}
                 >
                   Remove
