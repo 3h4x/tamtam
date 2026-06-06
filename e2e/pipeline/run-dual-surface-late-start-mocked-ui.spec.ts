@@ -216,6 +216,96 @@ async function openDualSurfacePages(page: Page) {
 }
 
 test.describe('Mocked ordinary run late-start dual-surface lifecycle', () => {
+  test('history and terminal both pick up a late-start same-session run, then settle to success without reload', async ({
+    page,
+  }) => {
+    let phase: 'idle' | 'running' | 'success' = 'idle'
+    let finishStream!: () => void
+    const streamDone = new Promise<void>((resolve) => {
+      finishStream = resolve
+    })
+
+    await stubSharedRoutes(page.context(), () => {
+      if (phase === 'idle') return [previousSessionJob()]
+      if (phase === 'running') return [previousSessionJob(), runningSessionJob()]
+      return [previousSessionJob(), finishedSessionJob(0)]
+    })
+    await page.context().route(`**/api/jobs/${PREVIOUS_JOB_ID}`, (route: Route) =>
+      route.fulfill({
+        json: {
+          ...previousSessionJob(),
+          log: 'Earlier terminal output is restored.\n',
+        },
+      }),
+    )
+    await page.context().route(`**/api/jobs/${CURRENT_JOB_ID}`, (route: Route) =>
+      route.fulfill({
+        json: phase === 'running'
+          ? runningSessionJob()
+          : {
+              ...finishedSessionJob(0),
+              log: 'Final streamed output finished successfully after the late start.\n',
+            },
+      }),
+    )
+    await page.context().route(`**/api/streaming/${CURRENT_JOB_ID}`, async (route: Route) => {
+      await streamDone
+      await route.fulfill({
+        status: 200,
+        headers: {
+          'content-type': 'text/event-stream',
+          'cache-control': 'no-cache',
+        },
+        body: [
+          'data: Final streamed output finished successfully after the late start.',
+          '',
+          'event: done',
+          `data: ${JSON.stringify({
+            exitCode: 0,
+            sessionId: SESSION_ID,
+            provider: 'claude',
+            duration: 850,
+          })}`,
+          '',
+        ].join('\n'),
+      })
+    })
+
+    const { historyPage, terminalPage } = await openDualSurfacePages(page)
+
+    const runRow = historyPage.getByRole('button')
+      .filter({ hasText: PREVIOUS_RUN_PROMPT })
+      .first()
+
+    await expect(runRow).toBeVisible({ timeout: 8_000 })
+    await expect(runRow.getByLabel('running')).toHaveCount(0)
+    await expect(historyPage.getByText('1 running')).toHaveCount(0)
+    await expect(terminalPage.getByText('Earlier terminal output is restored.')).toBeVisible({
+      timeout: 8_000,
+    })
+    await expect(terminalPage.getByText('live run')).toHaveCount(0)
+
+    phase = 'running'
+
+    await expect(runRow.getByLabel('running')).toBeVisible({ timeout: 12_000 })
+    await expect(historyPage.getByText('1 running')).toBeVisible({ timeout: 12_000 })
+    await expect(terminalPage.getByText(CURRENT_RUN_PROMPT)).toBeVisible({ timeout: 12_000 })
+    await expect(terminalPage.getByText('live run')).toBeVisible({ timeout: 12_000 })
+
+    phase = 'success'
+    finishStream()
+
+    await expect(
+      terminalPage.getByText('Final streamed output finished successfully after the late start.'),
+    ).toBeVisible({ timeout: 8_000 })
+    await expect(terminalPage.getByText('exit 0 — ok').first()).toBeVisible({ timeout: 8_000 })
+    await expect(terminalPage.getByText('live run')).toHaveCount(0, { timeout: 8_000 })
+
+    await expect(runRow.getByLabel('done')).toBeVisible({ timeout: 12_000 })
+    await expect(runRow.getByLabel('running')).toHaveCount(0, { timeout: 12_000 })
+    await expect(historyPage.getByText('1 running')).toHaveCount(0, { timeout: 12_000 })
+  })
+
   test('history and terminal both pick up a late-start same-session run, then settle to failure without reload', async ({
     page,
   }) => {
