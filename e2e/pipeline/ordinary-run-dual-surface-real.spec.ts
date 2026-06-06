@@ -178,7 +178,10 @@ test.describe('Real ordinary run dual-surface lifecycle', () => {
 
     await expect(runRow.getByText('exit 1').first()).toBeVisible({ timeout: 15_000 });
     await expect(
-      runRow.getByText('CLI streamed partial output but never emitted a final result.'),
+      runRow.getByText('PROMPT ASSERTION FAILED').first(),
+    ).toBeVisible({ timeout: 15_000 });
+    await expect(
+      runRow.getByText('The provider failed before finishing the dual-surface run.'),
     ).toBeVisible({ timeout: 15_000 });
     await expect(runRow.getByLabel('running')).toHaveCount(0, { timeout: 15_000 });
     await expect(terminalPage.getByText('live run')).not.toBeVisible({ timeout: 15_000 });

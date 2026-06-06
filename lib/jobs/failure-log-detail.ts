@@ -13,6 +13,41 @@ interface FailureLogDetailOptions {
   includeNonJsonDetail?: boolean;
 }
 
+function extractResultTextDetail(content: string): string | null {
+  const collected: string[] = [];
+
+  for (const rawLine of content.split('\n')) {
+    const line = rawLine.trim();
+    if (!line || line.startsWith('[tamtam]')) continue;
+    const tsMatch = line.match(TS_PREFIX_RE);
+    const body = tsMatch ? line.slice(tsMatch[0].length) : line;
+
+    try {
+      const parsed = JSON.parse(body) as {
+        type?: string;
+        result?: unknown;
+      };
+      const candidate = typeof parsed.result === 'string'
+        ? parsed.result
+        : null;
+      if (candidate && candidate.trim()) collected.push(candidate.trim());
+    } catch {
+      continue;
+    }
+  }
+
+  if (collected.length === 0) return null;
+
+  const lines = collected
+    .join('\n')
+    .split('\n')
+    .map((line) => line.trim())
+    .filter(Boolean);
+  if (lines.length === 0) return null;
+
+  return lines.slice(-20).join('\n');
+}
+
 export function extractFailureLogDetail(
   logPath: string,
   options: FailureLogDetailOptions = {},
@@ -72,6 +107,9 @@ export function extractFailureLogDetailFromContent(
   if (nonJson.length > 0) {
     return options.includeNonJsonDetail ? nonJson.slice(-20).join('\n') : null;
   }
+
+  const resultTextDetail = extractResultTextDetail(content);
+  if (resultTextDetail) return resultTextDetail;
 
   if (content.includes('"stream_event"')) {
     return options.partialStreamDetail ?? 'CLI streamed partial output but never emitted a final result.';
