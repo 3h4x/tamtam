@@ -17,7 +17,6 @@ import { InlineLoading } from '@/components/ui/InlineLoading'
 import { Pill } from '@/components/ui/Pill'
 import { Textarea } from '@/components/ui/Textarea'
 
-// Re-export types consumed by subcomponents so callers don't need to change
 export type { GhPullRequest, GhIssue, ProjectConfig }
 
 interface IssuesTabProps {

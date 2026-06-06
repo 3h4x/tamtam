@@ -73,7 +73,15 @@ export async function pruneOldWorkflowRuns(opts: PruneOptions): Promise<Workflow
   const cutoffMs = Date.now() - opts.retentionDays * 86400_000;
   summary.cutoffIso = new Date(cutoffMs).toISOString();
 
-  const pool = new Pool({ connectionString: url, max: 2 });
+  const pool = new Pool({
+    connectionString: url,
+    max: 2,
+    connectionTimeoutMillis: 5_000,
+    idleTimeoutMillis: 30_000,
+    keepAlive: true,
+    statement_timeout: 30_000,
+    query_timeout: 30_000,
+  });
   // Guard `.on` so test doubles that only stub `connect`/`end` don't trip on a
   // missing listener API.
   if (typeof pool.on === 'function') {
