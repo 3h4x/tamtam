@@ -154,9 +154,9 @@ export function AgentTemplatesTab({ value, onChange }: { value: string; onChange
         {editing === null && (
           <Button
             variant="solid"
-            size="sm"
+            size="md"
             onClick={openNew}
-            className="px-3 py-1.5 rounded-md"
+            className="text-xs"
           >
             + Add Template
           </Button>
