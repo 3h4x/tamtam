@@ -20,7 +20,7 @@ export function recoverJobSessionId(job: JobData): string | null {
   const rawLog = readLog(job, 50_000);
   const events = parseStreamLines(rawLog);
   const doneEvent = events.find((event) => event.type === 'done');
-  if (doneEvent?.type === 'done' && doneEvent.result.sessionId) {
+  if (doneEvent?.result.sessionId) {
     return doneEvent.result.sessionId;
   }
 
