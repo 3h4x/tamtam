@@ -144,9 +144,9 @@ export function SettingsField({
           <option value="host">host (direct, no container sandbox)</option>
         </Select>
       ) : fieldKey === 'review_do_not_ship_action' ? (
-        <Select value={value || 'pass'} onChange={(e) => onChange(fieldKey, e.target.value)}>
-          <option value="pass">Pass with follow-up issue (default)</option>
-          <option value="fix">Try fix loop</option>
+        <Select value={value || 'fix'} onChange={(e) => onChange(fieldKey, e.target.value)}>
+          <option value="pass">Pass with follow-up issue</option>
+          <option value="fix">Try fix loop (default)</option>
           <option value="abort">Abort release</option>
         </Select>
       ) : BOOLEAN_SELECT_FIELD_KEYS.has(fieldKey) ? (
