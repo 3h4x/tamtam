@@ -6,6 +6,7 @@ import {
   waitForJobCompletion,
   writeScenario,
 } from './helpers';
+import { CLAUDE_SHIM } from './global-setup';
 
 const SUCCESS_PROJECT = 'concurrent-runs-real-success';
 const CANCELLED_PROJECT = 'concurrent-runs-real-cancelled';
@@ -18,6 +19,16 @@ function runRow(page: import('@playwright/test').Page, prompt: string) {
 }
 
 test.describe('Real concurrent ordinary runs across projects', () => {
+  test.beforeEach(async ({ request }) => {
+    const patch = await request.patch('/api/settings', {
+      data: {
+        claude_bin: CLAUDE_SHIM,
+        cli_bin_claude: CLAUDE_SHIM,
+      },
+    });
+    expect(patch.ok(), `failed to pin claude e2e shim: ${patch.status()}`).toBe(true);
+  });
+
   test('one project can cancel while another stays live, and both surfaces settle independently', async ({
     page,
     request,
@@ -117,8 +128,6 @@ test.describe('Real concurrent ordinary runs across projects', () => {
     await expect(successRow.getByLabel('done')).toBeVisible({ timeout: 15_000 });
     await expect(successRow.getByLabel('running')).toHaveCount(0, { timeout: 15_000 });
     await expect(successTerminalPage.getByText('live run')).not.toBeVisible({ timeout: 15_000 });
-    await expect(successTerminalPage.getByText('exit 0 — ok').first()).toBeVisible({
-      timeout: 15_000,
-    });
+    await expect(successTerminalPage.getByText(SUCCESS_PROMPT)).toBeVisible({ timeout: 15_000 });
   });
 });
