@@ -2,6 +2,7 @@
 
 import { WorkflowStatusBadge } from '@/components/workflow-runs/workflow-run-status';
 import { humanizeEmbeddedNames } from '@/components/workflow-runs/humanize';
+import { ErrorCallout } from '@/components/ui/ErrorCallout';
 
 export interface WorkflowStepAttentionItem {
   stepId: string;
@@ -38,7 +39,7 @@ export function WorkflowStepAttentionPanel({ steps }: { steps: WorkflowStepAtten
   if (steps.length === 0) return null;
 
   return (
-    <div className="rounded-md border border-status-error/30 bg-status-error/10 p-3">
+    <ErrorCallout padding="md" radius="md" preWrap={false}>
       <div className="mb-2 flex flex-wrap items-baseline gap-2">
         <h3 className="text-sm font-medium text-status-error">needs attention</h3>
         <span className="font-mono text-xs tabular-nums text-text-tertiary">
@@ -61,7 +62,7 @@ export function WorkflowStepAttentionPanel({ steps }: { steps: WorkflowStepAtten
           </div>
         ))}
       </div>
-    </div>
+    </ErrorCallout>
   );
 }
 

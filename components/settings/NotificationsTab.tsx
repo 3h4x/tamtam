@@ -20,6 +20,16 @@ export interface NotificationsSettings {
   [key: string]: string
 }
 
+const EVENT_TOGGLES = [
+  { key: 'notification_on_release_success' as const, label: 'Release Success', description: 'When a release pipeline completes successfully' },
+  { key: 'notification_on_release_fail' as const, label: 'Release Failure', description: 'When a release pipeline fails' },
+  { key: 'notification_on_release_aborted' as const, label: 'Release Aborted', description: 'When a release pipeline is aborted mid-run' },
+  { key: 'notification_on_fix_loop_exhausted' as const, label: 'Fix Loop Exhausted', description: 'When automated recovery budget is exhausted (review/test/commit/push fix attempts)' },
+  { key: 'notification_on_review_do_not_ship' as const, label: 'Review: Do Not Ship', description: 'When a review verdict is "DO NOT SHIP"' },
+  { key: 'notification_on_agent_run_fail' as const, label: 'Agent Run Failure', description: 'When an agent run fails' },
+  { key: 'notification_on_budget_blocked' as const, label: 'Budget Blocked', description: 'When a run is refused because the active provider crosses the configured subscription budget threshold' },
+]
+
 export function NotificationsTab({
   settings,
   onChange,
@@ -63,16 +73,6 @@ export function NotificationsTab({
       setTestSending(false)
     }
   }
-
-  const eventToggles = [
-    { key: 'notification_on_release_success' as const, label: 'Release Success', description: 'When a release pipeline completes successfully' },
-    { key: 'notification_on_release_fail' as const, label: 'Release Failure', description: 'When a release pipeline fails' },
-    { key: 'notification_on_release_aborted' as const, label: 'Release Aborted', description: 'When a release pipeline is aborted mid-run' },
-    { key: 'notification_on_fix_loop_exhausted' as const, label: 'Fix Loop Exhausted', description: 'When automated recovery budget is exhausted (review/test/commit/push fix attempts)' },
-    { key: 'notification_on_review_do_not_ship' as const, label: 'Review: Do Not Ship', description: 'When a review verdict is "DO NOT SHIP"' },
-    { key: 'notification_on_agent_run_fail' as const, label: 'Agent Run Failure', description: 'When an agent run fails' },
-    { key: 'notification_on_budget_blocked' as const, label: 'Budget Blocked', description: 'When a run is refused because the active provider crosses the configured subscription budget threshold' },
-  ]
 
   return (
     <section className="space-y-4">
@@ -166,7 +166,7 @@ export function NotificationsTab({
           <p className="text-xs text-text-tertiary">Choose which events trigger notifications</p>
         </div>
         <div className="px-4 py-1 divide-y divide-border/40">
-          {eventToggles.map(({ key, label, description }) => (
+          {EVENT_TOGGLES.map(({ key, label, description }) => (
             <label
               key={key}
               className="flex items-center gap-2.5 py-2 px-1 -mx-1 rounded hover:bg-bg-tertiary/40 cursor-pointer transition-colors"
