@@ -3,6 +3,7 @@
 import { useEffect, useState } from 'react'
 
 import { Button } from '@/components/ui/Button'
+import { ErrorCallout } from '@/components/ui/ErrorCallout'
 
 type ReindexResult = {
   ok?: boolean
@@ -99,19 +100,15 @@ export function RetrievalReindexPanel({ projectName }: { projectName: string }) 
           <div className="mt-1 font-medium text-text-primary">{chunkCount ?? '—'}</div>
         </div>
       </div>
-      {result && (
-        <div
-          className={`mt-4 rounded-lg border p-3 text-sm ${
-            result.ok
-              ? 'border-status-success/40 bg-status-success/10 text-status-success'
-              : 'border-status-error/40 bg-status-error/10 text-status-error'
-          }`}
-        >
-          {result.ok
-            ? `Reindex complete — ${result.chunks ?? 0} chunks, ${result.indexedSources ?? 0} indexed, ${result.skippedSources ?? 0} skipped.`
-            : `Reindex failed: ${result.error ?? 'unknown error'}`}
+      {result && (result.ok ? (
+        <div className="mt-4 rounded-lg border border-status-success/40 bg-status-success/10 p-3 text-sm text-status-success">
+          {`Reindex complete — ${result.chunks ?? 0} chunks, ${result.indexedSources ?? 0} indexed, ${result.skippedSources ?? 0} skipped.`}
         </div>
-      )}
+      ) : (
+        <ErrorCallout radius="lg" padding="md" className="mt-4 text-sm">
+          {`Reindex failed: ${result.error ?? 'unknown error'}`}
+        </ErrorCallout>
+      ))}
     </div>
   )
 }

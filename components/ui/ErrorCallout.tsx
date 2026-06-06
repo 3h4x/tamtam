@@ -6,7 +6,7 @@ interface ErrorCalloutProps {
   children: ReactNode
   className?: string
   padding?: 'sm' | 'md'
-  radius?: 'default' | 'md'
+  radius?: 'default' | 'md' | 'lg'
   preWrap?: boolean
 }
 
@@ -18,6 +18,7 @@ const PADDING = {
 const RADIUS = {
   default: 'rounded',
   md: 'rounded-md',
+  lg: 'rounded-lg',
 }
 
 /**
