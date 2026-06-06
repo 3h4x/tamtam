@@ -17,6 +17,17 @@ export interface OutcomeInput {
   output?: unknown;
 }
 
+function firstMeaningfulLine(value: string | null): string | null {
+  if (!value) return null;
+  const line = humanizeEmbeddedNames(
+    value
+      .split('\n')
+      .map((part) => part.trim())
+      .find(Boolean) ?? '',
+  ).trim();
+  return line.length > 0 ? line : null;
+}
+
 export function pickString(obj: Record<string, unknown>, keys: string[]): string | null {
   for (const k of keys) {
     const v = obj[k];
@@ -86,7 +97,7 @@ export function summarizeOutcome(run: OutcomeInput): { label: string; tone: Outc
   }
   if (run.status === 'cancelled') return { label: 'cancelled', tone: 'err' };
   if (run.status === 'failed') {
-    const tail = run.error ? humanizeEmbeddedNames(run.error.split('\n')[0]).slice(0, 60) : 'failed';
+    const tail = firstMeaningfulLine(run.error)?.slice(0, 60) ?? 'failed';
     return { label: tail, tone: 'err' };
   }
   // Completed: dig into output for verdict / exit code.
@@ -132,6 +143,33 @@ export function summarizeOutcome(run: OutcomeInput): { label: string; tone: Outc
     }
   }
   return { label: 'completed', tone: 'ok' };
+}
+
+export function summarizeOutcomeDetail(run: OutcomeInput): string | null {
+  const out = run.output;
+  if (out && typeof out === 'object' && !Array.isArray(out)) {
+    const o = out as Record<string, unknown>;
+    const waited = o.waited;
+    if (waited && typeof waited === 'object' && !Array.isArray(waited)) {
+      const waitedObj = waited as Record<string, unknown>;
+      const waitedJob = waitedObj.job;
+      if (waitedJob && typeof waitedJob === 'object' && !Array.isArray(waitedJob)) {
+        const jobSummary = firstMeaningfulLine(
+          pickString(waitedJob as Record<string, unknown>, ['workSummary', 'detail', 'summary']),
+        );
+        if (jobSummary) return jobSummary;
+      }
+    }
+    const decision = o.decision;
+    if (decision && typeof decision === 'object' && !Array.isArray(decision)) {
+      const summary = pickString(decision as Record<string, unknown>, ['summary', 'detail', 'reason']);
+      const line = firstMeaningfulLine(summary);
+      if (line) return line;
+    }
+    const summary = firstMeaningfulLine(pickString(o, ['summary', 'detail', 'reason', 'message']));
+    if (summary) return summary;
+  }
+  return firstMeaningfulLine(run.error);
 }
 
 export function summarizeWorkflowDisplayStatus(run: OutcomeInput): string {

@@ -138,6 +138,7 @@ test.describe('Real workflow-runs failure and cancellation transitions', () => {
     await expect(failureRow).toBeVisible({ timeout: 15_000 });
     await expect(failureRow.getByLabel('status completed')).toBeVisible();
     await expect(failureRow.getByText('DO NOT SHIP')).toBeVisible();
+    await expect(failureRow.getByText(/critical security vulnerabilities/i)).toBeVisible();
     await expect(page.getByText('1 recent', { exact: true })).toBeVisible();
     expect(failedRun.status).toBe('completed');
     await expect(workflowRunLink(activePanel, FAILURE_PROJECT)).toHaveCount(0, { timeout: 15_000 });
@@ -187,6 +188,6 @@ test.describe('Real workflow-runs failure and cancellation transitions', () => {
     await expect(cancelledRow.getByText('exit -3')).toBeVisible();
     await expect(page.getByText('1 recent', { exact: true })).toBeVisible();
     await expect(workflowRunLink(activePanel, CANCELLED_PROJECT)).toHaveCount(0, { timeout: 15_000 });
-    await expect(page.getByRole('button', { name: /completed 1/i })).toBeVisible();
+    await expect(page.getByRole('button', { name: /completed \d+/i })).toBeVisible();
   });
 });

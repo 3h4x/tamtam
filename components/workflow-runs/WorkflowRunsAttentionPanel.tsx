@@ -13,6 +13,8 @@ export interface WorkflowRunsAttentionItem {
   triggerLabel: string;
   outcomeLabel: string;
   outcomeTitle: string;
+  outcomeDetailLabel?: string;
+  outcomeDetailTitle?: string;
   finishedLabel: string;
   finishedTitle: string;
 }
@@ -67,6 +69,11 @@ export function WorkflowRunsAttentionPanel({ items }: { items: WorkflowRunsAtten
               <div className="truncate font-mono text-status-error" title={item.outcomeTitle}>
                 {item.outcomeLabel}
               </div>
+              {item.outcomeDetailLabel ? (
+                <div className="mt-1 truncate text-text-secondary" title={item.outcomeDetailTitle ?? item.outcomeDetailLabel}>
+                  {item.outcomeDetailLabel}
+                </div>
+              ) : null}
             </div>
             <div className="min-w-0 sm:text-right">
               <div className="uppercase tracking-wide text-text-tertiary">finished</div>

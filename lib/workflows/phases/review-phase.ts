@@ -23,6 +23,7 @@ export type ReviewPhaseResult =
       reason: WaitForJobResult['reason'];
       exitCode: number | null;
       verdict: ReviewVerdict;
+      summary: string | null;
     }
   | {
       ok: false;
@@ -76,6 +77,7 @@ export async function releaseReviewPhaseWorkflow(
   }
   const waited = await awaitReviewCompletionStep(reviewJobId);
   const verdict = waited.finished ? await readReviewVerdictStep(reviewJobId) : null;
+  const summary = waited.finished ? await readReviewSummaryStep(reviewJobId) : null;
   // Close the loop: re-dispatch the orchestrator for this sub-step so the
   // chain continues fully through workflow runs. Without this the legacy
   // reconciler's hook re-fire is the only thing that moves the chain past
@@ -91,6 +93,7 @@ export async function releaseReviewPhaseWorkflow(
     reason: waited.reason,
     exitCode: waited.job?.exitCode ?? null,
     verdict,
+    summary,
   };
 }
 
@@ -125,6 +128,14 @@ async function readReviewVerdictStep(jobId: string): Promise<ReviewVerdict> {
   const v = getVerdict(job);
   if (v === 'LGTM' || v === 'NEEDS ATTENTION' || v === 'DO NOT SHIP') return v;
   return null;
+}
+
+async function readReviewSummaryStep(jobId: string): Promise<string | null> {
+  'use step';
+  const { getJob } = await import('@/lib/jobs/job-storage');
+  const job = getJob(jobId);
+  const summary = job?.workSummary?.trim();
+  return summary && summary.length > 0 ? summary : null;
 }
 
 async function dispatchOrchestratorTickStep(

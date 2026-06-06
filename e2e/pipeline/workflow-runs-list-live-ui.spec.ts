@@ -193,6 +193,35 @@ test.describe('Workflow runs list live polling', () => {
     await expect(page.getByText('1 running')).toHaveCount(0, { timeout: 12_000 });
   });
 
+  test('attention panel keeps the review summary visible when a completed run ends with DO NOT SHIP', async ({
+    page,
+  }) => {
+    await stubWorkflowRunsShell(page);
+    await stubWorkflowRuns(page, () => [
+      makeRun('completed', {
+        id: 'workflow-run-review-dns',
+        input: ['workflow-review-dns', { triggeredBy: 'agent-review' }],
+        output: {
+          decision: {
+            verdict: 'DO NOT SHIP',
+            summary: 'Critical security vulnerabilities remain in the release candidate.',
+          },
+        },
+      }),
+    ]);
+
+    await page.goto('/workflow-runs');
+
+    const attentionPanel = page.getByLabel('Workflow runs needing attention');
+    const attentionRow = attentionPanel.getByRole('link', { name: /workflow-review-dns/i }).first();
+    await expect(attentionPanel).toBeVisible({ timeout: 8_000 });
+    await expect(attentionRow.getByLabel('status completed')).toBeVisible({ timeout: 8_000 });
+    await expect(attentionRow.getByText('DO NOT SHIP')).toBeVisible({ timeout: 8_000 });
+    await expect(
+      attentionRow.getByText('Critical security vulnerabilities remain in the release candidate.'),
+    ).toBeVisible({ timeout: 8_000 });
+  });
+
   test('page already open moves a newly-started run into attention when it fails', async ({
     page,
   }) => {
@@ -680,7 +709,7 @@ test.describe('Workflow runs list live polling', () => {
     ).toBeVisible();
     await expect(cancelledRow).toBeVisible({ timeout: 12_000 });
     await expect(cancelledRow.getByLabel('status cancelled')).toBeVisible({ timeout: 12_000 });
-    await expect(attentionPanel.getByTitle('release was cancelled before completion')).toBeVisible({
+    await expect(cancelledRow.getByText('release was cancelled before completion')).toBeVisible({
       timeout: 12_000,
     });
     await expect(page.getByRole('button', { name: /cancelled 1/i })).toBeVisible({

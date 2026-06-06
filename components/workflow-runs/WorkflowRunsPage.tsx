@@ -17,6 +17,7 @@ import {
   formatTitle,
   outcomePillTone,
   summarizeInput,
+  summarizeOutcomeDetail,
   summarizeOutcome,
   summarizeWorkflowDisplayStatus,
   summarizeTrigger,
@@ -294,6 +295,7 @@ export function WorkflowRunsPage() {
     .filter(workflowRunNeedsAttention)
     .map((run) => {
       const outcome = summarizeOutcome(run);
+      const outcomeDetail = summarizeOutcomeDetail(run);
       return {
         id: run.id,
         name: humanizeWorkflowLabel(run.name),
@@ -304,6 +306,8 @@ export function WorkflowRunsPage() {
         triggerLabel: summarizeTrigger(run.input),
         outcomeLabel: outcome.label,
         outcomeTitle: run.error ?? outcome.label,
+        outcomeDetailLabel: outcomeDetail && outcomeDetail !== outcome.label ? outcomeDetail : undefined,
+        outcomeDetailTitle: outcomeDetail ?? undefined,
         finishedLabel: formatRelativeTime(run.completedAt ?? run.startedAt ?? run.createdAt, now),
         finishedTitle: formatTime(run.completedAt ?? run.startedAt ?? run.createdAt),
       };

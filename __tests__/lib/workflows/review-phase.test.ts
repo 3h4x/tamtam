@@ -80,7 +80,29 @@ describe('releaseReviewPhaseWorkflow', () => {
       reason: 'finished',
       exitCode: 0,
       verdict: 'LGTM',
+      summary: null,
     });
+  });
+
+  it('returns a trimmed review work summary when present', async () => {
+    startOk();
+    waitForJobCompletionMock.mockResolvedValue({
+      job: { id: 'review-job-1', kind: 'review', exitCode: 0, finishedAt: 100, verdict: 'LGTM' },
+      finished: true,
+      reason: 'finished',
+    });
+    getJobMock.mockReturnValue({
+      id: 'review-job-1',
+      kind: 'review',
+      exitCode: 0,
+      verdict: 'LGTM',
+      workSummary: '  Review found no blocking issues.  ',
+    });
+    getVerdictMock.mockReturnValue('LGTM');
+
+    const r = await releaseReviewPhaseWorkflow('test-tt');
+    expect(r.ok).toBe(true);
+    if (r.ok) expect(r.summary).toBe('Review found no blocking issues.');
   });
 
   it('returns NEEDS ATTENTION verdict', async () => {
@@ -268,6 +290,7 @@ describe('review-phase source guards', () => {
     'async function spawnReviewStep',
     'async function awaitReviewCompletionStep',
     'async function readReviewVerdictStep',
+    'async function readReviewSummaryStep',
   ])("'%s' body has the right directive", (sig) => {
     const fnIndex = SRC.indexOf(sig);
     expect(fnIndex).toBeGreaterThan(-1);
