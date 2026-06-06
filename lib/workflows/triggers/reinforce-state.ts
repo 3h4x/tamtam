@@ -69,6 +69,7 @@ export async function redispatchAgentForReinforce(
       method: 'POST',
       headers: { 'content-type': 'application/json', 'x-tamtam-trigger': 'schedule' },
       body: JSON.stringify({ prompt: augmentedPrompt }),
+      signal: AbortSignal.timeout(30000),
     });
     if (res.status === 202) {
       console.log(`[reinforce] re-dispatch queued for ${project} (agent ${agentId})`);
