@@ -319,4 +319,89 @@ test.describe('Canonical terminal session route lifecycle', () => {
     await expect(page.getByText('live run')).toHaveCount(0, { timeout: 8_000 })
     await expect(page).toHaveURL(new RegExp(`/project/${PROJECT}/terminal/${SESSION_ID}$`))
   })
+
+  test('session route clears its live badge and shows cancelled after operator abort', async ({
+    page,
+  }) => {
+    let serveRunningJob = true
+    let finishStream!: () => void
+    const streamDone = new Promise<void>((resolve) => {
+      finishStream = resolve
+    })
+
+    await stubTerminalShell(page, () => [
+      previousSessionJob(),
+      serveRunningJob ? runningSessionJob() : finishedSessionJob(-2),
+    ])
+    await page.route(`**/api/jobs/${PREVIOUS_JOB_ID}`, (route: Route) =>
+      route.fulfill({
+        json: {
+          ...previousSessionJob(),
+          log: 'Earlier terminal output is restored.\n',
+        },
+      }),
+    )
+    await page.route(`**/api/jobs/${CURRENT_JOB_ID}`, (route: Route) =>
+      route.fulfill({
+        json: serveRunningJob
+          ? runningSessionJob()
+          : {
+              ...finishedSessionJob(-2),
+              log: 'Final streamed output was interrupted by cancellation.\n',
+              detail: 'Operator cancelled the resumed session',
+            },
+      }),
+    )
+    await page.route(`**/api/streaming/${CURRENT_JOB_ID}`, async (route: Route) => {
+      await streamDone
+      await route.fulfill({
+        status: 200,
+        headers: {
+          'content-type': 'text/event-stream',
+          'cache-control': 'no-cache',
+        },
+        body: [
+          'data: Final streamed output was interrupted by cancellation.',
+          '',
+          'event: done',
+          `data: ${JSON.stringify({
+            exitCode: -2,
+            sessionId: SESSION_ID,
+            provider: 'claude',
+            detail: 'Operator cancelled the resumed session',
+            duration: 700,
+          })}`,
+          '',
+        ].join('\n'),
+      })
+    })
+
+    await page.goto(`/project/${PROJECT}/terminal/${SESSION_ID}`)
+
+    await expect(page.getByText('Earlier terminal output is restored.')).toBeVisible({
+      timeout: 8_000,
+    })
+    await expect(page.getByText('Continue with the final terminal pass.')).toBeVisible({
+      timeout: 8_000,
+    })
+    await expect(page.getByText('live run')).toBeVisible({ timeout: 8_000 })
+
+    serveRunningJob = false
+    finishStream()
+
+    await expect(
+      page.getByText('Final streamed output was interrupted by cancellation.'),
+    ).toBeVisible({
+      timeout: 8_000,
+    })
+    await expect(page.getByText('cancelled', { exact: true }).first()).toBeVisible({
+      timeout: 8_000,
+    })
+    await expect(page.getByText('Operator cancelled the resumed session')).toBeVisible({
+      timeout: 8_000,
+    })
+    await expect(page.getByText('exit -2')).toHaveCount(0)
+    await expect(page.getByText('live run')).toHaveCount(0, { timeout: 8_000 })
+    await expect(page).toHaveURL(new RegExp(`/project/${PROJECT}/terminal/${SESSION_ID}$`))
+  })
 })
