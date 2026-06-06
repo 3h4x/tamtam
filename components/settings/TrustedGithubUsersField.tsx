@@ -4,6 +4,7 @@ import { useEffect, useId, useRef, useState } from 'react'
 import { Button } from '@/components/ui/Button'
 import { Input } from '@/components/ui/Input'
 import { EmptyState } from '@/components/ui/EmptyState'
+import { ErrorCallout } from '@/components/ui/ErrorCallout'
 import {
   parseTrustedGithubUsers,
   serializeTrustedGithubUsers,
@@ -115,7 +116,7 @@ export function TrustedGithubUsersField({
         Global allowlist for issue and PR authors whose GitHub content TamTam may treat as trusted. Unioned with each project&apos;s <code className="font-mono">.tamtam/config.yml</code> <code className="font-mono">security.safe_users</code>.
       </p>
       {validationError && (
-        <p className="mt-2 text-xs text-status-error">{validationError}</p>
+        <ErrorCallout className="mt-2 text-xs">{validationError}</ErrorCallout>
       )}
     </div>
   )
