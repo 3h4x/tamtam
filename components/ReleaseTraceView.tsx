@@ -8,6 +8,7 @@ import { Button, buttonVariants } from '@/components/ui/Button'
 import { EmptyState } from '@/components/ui/EmptyState'
 import { Pill, type PillTone } from '@/components/ui/Pill'
 import { Spinner } from '@/components/ui/Spinner'
+import { StatusIcon } from '@/components/ui/StatusIcon'
 
 interface ReleaseStep {
   job_id: string
@@ -68,18 +69,18 @@ function StepGlyph({ step }: { step: ReleaseStep }) {
     )
   }
   if (step.status === 'aborted') {
-    return <span className="text-status-error font-bold">✗</span>
+    return <StatusIcon ok={false} size="sm" ariaLabel="aborted" />
   }
   if (step.exit_code === 0) {
-    return <span className="text-status-success font-bold">✓</span>
+    return <StatusIcon ok={true} size="sm" ariaLabel="done" />
   }
   if (step.verdict === 'NEEDS ATTENTION') {
     return <span className="text-status-warning font-bold">!</span>
   }
   if (step.verdict === 'LGTM') {
-    return <span className="text-status-success font-bold">✓</span>
+    return <StatusIcon ok={true} size="sm" ariaLabel="LGTM" />
   }
-  return <span className="text-status-error font-bold">✗</span>
+  return <StatusIcon ok={false} size="sm" ariaLabel="failed" />
 }
 
 function verdictBadge(verdict: string | null) {
