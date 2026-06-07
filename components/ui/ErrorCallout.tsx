@@ -27,7 +27,7 @@ const RADIUS = {
 }
 
 /**
- * Inline error-message block: renders error text inside a small red, pre-wrapped
+ * Inline error-message block: renders error text inside a small tone-colored, pre-wrapped
  * callout box. For full-panel load failures use ErrorState; for dismissible
  * banners use ErrorBanner.
  */
