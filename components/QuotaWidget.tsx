@@ -7,6 +7,7 @@ import {
   type BudgetSubscriptionProvider,
 } from '@/lib/usage/subscription-providers'
 import { loadQuotaSnapshot } from '@/lib/client/quota'
+import { ErrorCallout } from '@/components/ui/ErrorCallout'
 import { Pill } from '@/components/ui/Pill'
 
 interface QuotaWindow {
@@ -283,7 +284,7 @@ function ScheduledAgentsRow({ sevenDay }: { sevenDay: QuotaWindow }) {
   const resetMs = sevenDay.resetsAt ? new Date(sevenDay.resetsAt).getTime() : null
   const effectiveResumeMs = resetMs && resumeAtMs > resetMs ? resetMs : resumeAtMs
   return (
-    <div className="flex items-baseline justify-between gap-2 text-xs px-3 py-2 rounded bg-status-error/10 border border-status-error/20">
+    <ErrorCallout padding="none" preWrap={false} className="flex items-baseline justify-between gap-2 !border-status-error/20 px-3 py-2 text-xs">
       <span className="font-medium text-status-error">Scheduled agents</span>
       <span className="tabular-nums text-right">
         <span className="font-semibold text-status-error">paused</span>
@@ -293,7 +294,7 @@ function ScheduledAgentsRow({ sevenDay }: { sevenDay: QuotaWindow }) {
           <span className="text-text-tertiary"> (in {fmtCountdown(msUntilResume)})</span>
         </span>
       </span>
-    </div>
+    </ErrorCallout>
   )
 }
 
@@ -343,9 +344,20 @@ function ExtraCreditsRow({
   const title = isCodex ? 'Model credit gate' : 'Extra usage'
   const label = exhausted ? (isCodex ? 'blocked' : 'exhausted') : `${extra.utilization.toFixed(0)}% used`
   const resetText = isCodex ? 'no reset reported' : 'no reset timestamp'
+  if (exhausted) {
+    return (
+      <ErrorCallout padding="none" preWrap={false} className="flex items-baseline justify-between gap-2 !border-status-error/20 px-3 py-2 text-xs">
+        <span className="font-medium text-status-error">{title}</span>
+        <span className="tabular-nums">
+          <span className={`font-semibold ${tone}`}>{label}</span>
+          <span className="text-text-tertiary"> · {resetText}</span>
+        </span>
+      </ErrorCallout>
+    )
+  }
   return (
-    <div className={`flex items-baseline justify-between gap-2 text-xs px-3 py-2 rounded ${exhausted ? 'bg-status-error/10 border border-status-error/20' : 'bg-bg-tertiary/50'}`}>
-      <span className={`font-medium ${exhausted ? 'text-status-error' : 'text-text-secondary'}`}>{title}</span>
+    <div className="flex items-baseline justify-between gap-2 rounded bg-bg-tertiary/50 px-3 py-2 text-xs">
+      <span className="font-medium text-text-secondary">{title}</span>
       <span className="tabular-nums">
         <span className={`font-semibold ${tone}`}>{label}</span>
         <span className="text-text-tertiary"> · {resetText}</span>
