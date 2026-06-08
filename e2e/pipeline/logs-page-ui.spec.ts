@@ -82,6 +82,48 @@ async function mockLogsScenario(
 }
 
 test.describe('Logs page UI', () => {
+  test('a failed project list fetch shows an error state and retry recovers', async ({ page }) => {
+    let failProjects = true;
+
+    await page.route('**/api/settings', (route: Route) =>
+      route.fulfill({ json: { jobs_paused: false, github_owner: '' } }),
+    );
+    await page.route('**/api/jobs/notifications', (route: Route) =>
+      route.fulfill({ json: { notifications: [] } }),
+    );
+    await page.route(
+      (url) => url.pathname === '/api/projects',
+      (route: Route) => {
+        if (failProjects) {
+          failProjects = false;
+          route.fulfill({ status: 500, body: 'temporary project scan failure' });
+          return;
+        }
+
+        route.fulfill({
+          json: {
+            tasks: [makeTask(PROJECT_A), makeTask(PROJECT_B)],
+            priorities: [],
+            issueCounts: {},
+          },
+        });
+      },
+    );
+
+    await page.goto('/logs');
+
+    await expect(page.getByText('Failed to load projects.')).toBeVisible({ timeout: 8_000 });
+    await expect(page.getByRole('button', { name: PROJECT_A })).toHaveCount(0);
+
+    await page.getByRole('button', { name: /retry/i }).click();
+
+    await expect(page.getByRole('button', { name: PROJECT_A })).toBeVisible({
+      timeout: 8_000,
+    });
+    await expect(page.getByRole('button', { name: PROJECT_B })).toBeVisible();
+    await expect(page.getByText('Failed to load projects.')).toHaveCount(0);
+  });
+
   test('selecting a project loads its logs and expanding reveals content', async ({ page }) => {
     await mockLogsScenario(page, {
       logHandler: (project, route) =>
