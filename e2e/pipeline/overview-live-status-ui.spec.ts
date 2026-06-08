@@ -175,6 +175,7 @@ test.describe('Overview tab live status polling', () => {
 
     await expect(page.getByText('active work')).toBeVisible({ timeout: 8_000 });
     await expect(page.getByText('1 running now')).toBeVisible({ timeout: 8_000 });
+    await expect(page.getByLabel('active job spinner')).toHaveCount(1, { timeout: 8_000 });
     await expect(page.getByRole('button', { name: /research/i }).first()).toBeVisible({
       timeout: 8_000,
     });
@@ -183,6 +184,7 @@ test.describe('Overview tab live status polling', () => {
 
     await expect(page.getByText('active work')).toHaveCount(0, { timeout: 12_000 });
     await expect(page.getByText('1 running now')).toHaveCount(0, { timeout: 12_000 });
+    await expect(page.getByLabel('active job spinner')).toHaveCount(0);
   });
 
   test('release active-work card uses its parent agent identity while the release is running', async ({
