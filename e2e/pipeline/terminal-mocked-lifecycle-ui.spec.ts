@@ -320,6 +320,7 @@ test.describe('Mocked terminal lifecycle UI', () => {
       timeout: 8_000,
     })
     await expect(page.getByText('live run')).toBeVisible({ timeout: 8_000 })
+    await expect(page.getByLabel('live run spinner')).toBeVisible({ timeout: 8_000 })
     await expect(page.getByText(/receiving output|waiting for output/)).toBeVisible()
 
     serveRunningJob = false
@@ -330,6 +331,7 @@ test.describe('Mocked terminal lifecycle UI', () => {
     })
     await expect(page.getByText('exit 0 — ok').first()).toBeVisible({ timeout: 8_000 })
     await expect(page.getByText('live run')).toHaveCount(0, { timeout: 8_000 })
+    await expect(page.getByLabel('live run spinner')).toHaveCount(0, { timeout: 8_000 })
     await expect(page).toHaveURL(new RegExp(`/project/${PROJECT}/terminal/${SESSION_ID}`))
   })
 
@@ -378,6 +380,7 @@ test.describe('Mocked terminal lifecycle UI', () => {
       timeout: 8_000,
     })
     await expect(page.getByText('live run')).toBeVisible({ timeout: 8_000 })
+    await expect(page.getByLabel('live run spinner')).toBeVisible({ timeout: 8_000 })
     await expect(page.getByText(/receiving output|waiting for output/)).toBeVisible()
 
     serveRunningJob = false
@@ -389,6 +392,7 @@ test.describe('Mocked terminal lifecycle UI', () => {
     await expect(page.getByText('exit 2').first()).toBeVisible({ timeout: 8_000 })
     await expect(page.getByText('Mock provider failed hard')).toBeVisible({ timeout: 8_000 })
     await expect(page.getByText('live run')).toHaveCount(0, { timeout: 8_000 })
+    await expect(page.getByLabel('live run spinner')).toHaveCount(0, { timeout: 8_000 })
     await expect(page.getByText(/receiving output|waiting for output/)).toHaveCount(0)
     await expect(page).toHaveURL(new RegExp(`/project/${PROJECT}/terminal/${SESSION_ID}`))
   })
@@ -437,6 +441,7 @@ test.describe('Mocked terminal lifecycle UI', () => {
       timeout: 8_000,
     })
     await expect(page.getByText('live run')).toBeVisible({ timeout: 8_000 })
+    await expect(page.getByLabel('live run spinner')).toBeVisible({ timeout: 8_000 })
     await expect(page.getByText(/receiving output|waiting for output/)).toBeVisible()
 
     serveRunningJob = false
@@ -449,6 +454,7 @@ test.describe('Mocked terminal lifecycle UI', () => {
       timeout: 8_000,
     })
     await expect(page.getByText('live run')).toHaveCount(0, { timeout: 8_000 })
+    await expect(page.getByLabel('live run spinner')).toHaveCount(0, { timeout: 8_000 })
     await expect(page.getByText(/receiving output|waiting for output/)).toHaveCount(0)
     await expect(page).toHaveURL(new RegExp(`/project/${PROJECT}/terminal/${SESSION_ID}`))
   })
