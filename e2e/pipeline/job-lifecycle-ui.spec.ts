@@ -863,6 +863,86 @@ test.describe('Job lifecycle UI badges', () => {
   });
 
   // -------------------------------------------------------------------------
+  // History tab — running review job flips to a verdict badge via poll.
+  //
+  // VerdictBadge renders null while a review job is running (isRunning short-
+  // circuits before the verdict text). Only once the job settles to done with
+  // a verdict does the "⚠ ATTN" / "✗ DNS" / "✓ LGTM" pill appear. Existing live
+  // transition tests use kind='test' (raw exit codes) or the overview banner;
+  // none assert the review-specific verdict badge appearing live in a row.
+  // -------------------------------------------------------------------------
+  test('history tab review row gains the ⚠ ATTN verdict badge when it settles via poll', async ({
+    page,
+  }) => {
+    let serveRunning = true;
+    await mockJobScenario(page, () => [
+      makeJob({
+        id: 'job-live-review-attn',
+        kind: 'review',
+        status: serveRunning ? 'running' : 'done',
+        exit_code: serveRunning ? null : 0,
+        started_at: now() - 30,
+        finished_at: serveRunning ? null : now() - 4,
+        // Verdict is only known once the review finishes; absent while running.
+        verdict: serveRunning ? undefined : 'NEEDS ATTENTION',
+        session_id: 'sess-live-review-attn',
+      }),
+    ]);
+
+    await page.goto(`/project/${PROJECT}/history`);
+
+    const row = page.getByRole('button')
+      .filter({ hasText: 'review' })
+      .filter({ hasText: 'started' })
+      .first();
+    await expect(row).toBeVisible();
+    await expect(row.getByLabel('running')).toBeVisible();
+    // While running, no verdict pill is rendered yet.
+    await expect(row.getByText('⚠ ATTN')).toHaveCount(0);
+
+    serveRunning = false;
+
+    // The verdict badge appears on the next poll cycle without a reload.
+    await expect(row.getByText('⚠ ATTN')).toBeVisible({ timeout: 12_000 });
+    await expect(row.getByLabel('running')).toHaveCount(0, { timeout: 12_000 });
+    await expect(row.getByText('running', { exact: true })).toHaveCount(0, { timeout: 12_000 });
+  });
+
+  test('history tab review row gains the ✗ DNS verdict badge when it settles via poll', async ({
+    page,
+  }) => {
+    let serveRunning = true;
+    await mockJobScenario(page, () => [
+      makeJob({
+        id: 'job-live-review-dns',
+        kind: 'review',
+        status: serveRunning ? 'running' : 'done',
+        exit_code: serveRunning ? null : 0,
+        started_at: now() - 30,
+        finished_at: serveRunning ? null : now() - 4,
+        verdict: serveRunning ? undefined : 'DO NOT SHIP',
+        session_id: 'sess-live-review-dns',
+      }),
+    ]);
+
+    await page.goto(`/project/${PROJECT}/history`);
+
+    const row = page.getByRole('button')
+      .filter({ hasText: 'review' })
+      .filter({ hasText: 'started' })
+      .first();
+    await expect(row).toBeVisible();
+    await expect(row.getByLabel('running')).toBeVisible();
+    await expect(row.getByText('✗ DNS')).toHaveCount(0);
+
+    serveRunning = false;
+
+    await expect(row.getByText('✗ DNS')).toBeVisible({ timeout: 12_000 });
+    await expect(row.getByLabel('running')).toHaveCount(0, { timeout: 12_000 });
+    await expect(row.getByText('running', { exact: true })).toHaveCount(0, { timeout: 12_000 });
+  });
+
+  // -------------------------------------------------------------------------
   // History tab — two concurrent jobs hold independent state
   // Both a test and a review job run at once; when the test job fails the
   // review job must keep its running badge (no cross-row contamination), then
