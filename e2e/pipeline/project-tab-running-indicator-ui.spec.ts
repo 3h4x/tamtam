@@ -186,4 +186,41 @@ test.describe('Project tab running indicator', () => {
     await expect(oneRunningTab.locator('span.animate-pulse[title="1 running"]')).toBeVisible();
     await expect(page.getByRole('button', { name: 'Terminal, 2 running' })).toHaveCount(0);
   });
+
+  test('Terminal tab indicator clears when the running job fails', async ({ page }) => {
+    let phase: 'running' | 'failed' = 'running';
+
+    await stubProjectShellRoutes(page);
+    await page.route(
+      (url) => url.pathname === '/api/jobs' && url.searchParams.get('project') === PROJECT,
+      (route: Route) =>
+        route.fulfill({
+          json: {
+            jobs: [
+              makeJob(
+                'tab-review-failed',
+                'review',
+                phase === 'running' ? 'running' : 'done',
+                phase === 'running' ? null : 1,
+              ),
+            ],
+            pendingReleaseProjects: [],
+          },
+        }),
+    );
+
+    await page.goto(`/project/${PROJECT}`);
+
+    const runningTab = page.getByRole('button', { name: 'Terminal, 1 running' });
+    await expect(runningTab).toBeVisible({ timeout: 8_000 });
+    await expect(runningTab.locator('span.animate-pulse[title="1 running"]')).toBeVisible();
+
+    phase = 'failed';
+
+    await expect(page.getByRole('button', { name: 'Terminal', exact: true })).toBeVisible({
+      timeout: 12_000,
+    });
+    await expect(page.getByRole('button', { name: 'Terminal, 1 running' })).toHaveCount(0);
+    await expect(page.locator('button[aria-label^="Terminal,"] span.animate-pulse')).toHaveCount(0);
+  });
 });
