@@ -46,6 +46,7 @@ const PROJECTS = [
   'terminal-run-cancel',
   'terminal-run-failure',
   'terminal-run-session-finished',
+  'terminal-run-session-finished-failure',
   'start-detect-terminal',
   'start-detect-terminal-cancelled',
   'start-detect-terminal-failure-idle',
@@ -145,13 +146,15 @@ export default async function globalSetup(): Promise<void> {
   } catch { /* already executable */ }
 
   // Configure the test server: point workspace_path at our temp workspace,
-  // set claude_bin to the shim, set log_dir inside the temp tree.
+  // set Claude's legacy and per-provider binary settings to the shim, set
+  // log_dir inside the temp tree.
   const context = await request.newContext({ baseURL: 'http://localhost:1338' });
   try {
     await context.patch('/api/settings', {
       data: {
         workspace_path: WORKSPACE_DIR,
         claude_bin: CLAUDE_SHIM,
+        cli_bin_claude: CLAUDE_SHIM,
         log_dir: join(E2E_BASE, 'data', 'logs'),
       },
     });

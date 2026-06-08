@@ -99,13 +99,29 @@ if (require.main === module) {
   signalForwarding.forwardPending();
 
   const watchdog = installInactivityWatchdog(child, { shimName: 'claude-shim' });
+  let childClosed = false;
+  let stdoutEnded = false;
+  let stderrEnded = false;
+  let exitCode = 0;
+  const maybeExit = () => {
+    if (!childClosed || !stdoutEnded || !stderrEnded) return;
+    process.exit(exitCode);
+  };
   child.stdout.on('data', (chunk) => {
     watchdog.markActivity();
     process.stdout.write(chunk);
   });
+  child.stdout.on('end', () => {
+    stdoutEnded = true;
+    maybeExit();
+  });
   child.stderr.on('data', (chunk) => {
     watchdog.markActivity();
     process.stderr.write(chunk);
+  });
+  child.stderr.on('end', () => {
+    stderrEnded = true;
+    maybeExit();
   });
 
   child.on('error', (err) => {
@@ -119,13 +135,21 @@ if (require.main === module) {
     watchdog.dispose();
     if (watchdog.timedOut()) {
       process.stderr.write(`[claude-shim] killed by inactivity watchdog\n`);
-      process.exit(124);
+      exitCode = 124;
+      childClosed = true;
+      maybeExit();
+      return;
     }
     if (signal) {
       const sigCode = require('os').constants.signals[signal] || 0;
-      process.exit(128 + sigCode);
+      exitCode = 128 + sigCode;
+      childClosed = true;
+      maybeExit();
+      return;
     }
-    process.exit(code ?? 0);
+    exitCode = code ?? 0;
+    childClosed = true;
+    maybeExit();
   });
 }
 
