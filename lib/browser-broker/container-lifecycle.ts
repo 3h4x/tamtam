@@ -23,6 +23,7 @@ interface BrokerHandle {
 declare global {
   var __tamtamBrowserBroker: BrokerHandle | undefined;
   var __tamtamBrowserBrokerStarting: Promise<BrokerHandle> | undefined;
+  var __tamtamBrowserBrokerShutdownHookInstalled: boolean | undefined;
 }
 
 // First-run is slow: docker may need to pull the Playwright image. Cached
@@ -32,11 +33,10 @@ const HEALTH_PROBE_TIMEOUT_MS = 120_000;
 const HEALTH_PROBE_INTERVAL_MS = 500;
 const LOG_TAIL_LINES = 80;
 const SHUTDOWN_SIGNALS = ['SIGINT', 'SIGTERM'] as const;
-let brokerShutdownHookInstalled = false;
 
 function installBrokerShutdownHook(): void {
-  if (brokerShutdownHookInstalled) return;
-  brokerShutdownHookInstalled = true;
+  if (globalThis.__tamtamBrowserBrokerShutdownHookInstalled) return;
+  globalThis.__tamtamBrowserBrokerShutdownHookInstalled = true;
   for (const signal of SHUTDOWN_SIGNALS) {
     process.once(signal, () => {
       void stopBroker().catch((err) => console.error('[browser-broker] shutdown cleanup failed', err));
