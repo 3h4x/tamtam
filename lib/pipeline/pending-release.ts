@@ -4,7 +4,7 @@ import { eq, like } from 'drizzle-orm';
 // Pending-release queue. When a post-agent or post-run hook tries to trigger
 // a release but the project's pipeline lock is already held (or jobs are
 // globally paused), we set a flag here instead of dropping the request. The
-// flag is drained on two events:
+// flag is drained on three events:
 //
 //   1. The holding pipeline finishes (releaseLock fires drainPendingRelease).
 //   2. The user resumes jobs from the header switch (syncJobsPauseState
