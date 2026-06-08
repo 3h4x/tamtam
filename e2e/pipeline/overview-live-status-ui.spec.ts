@@ -241,6 +241,108 @@ test.describe('Overview tab live status polling', () => {
     await expect(page.getByText('release in progress')).toHaveCount(0, { timeout: 12_000 });
   });
 
+  test('release child steps stay hidden while an independent run remains active', async ({
+    page,
+  }) => {
+    let phase: 'running' | 'release-done' | 'all-done' = 'running';
+
+    await stubOverviewRoutes(page);
+    await page.route(
+      (url) => url.pathname === '/api/jobs' && url.searchParams.get('project') === PROJECT,
+      (route: Route) => {
+        const releaseRunning = phase === 'running';
+        const runRunning = phase !== 'all-done';
+
+        route.fulfill({
+          json: {
+            jobs: [
+              makeJob(
+                'release-with-children-live',
+                'release',
+                releaseRunning ? 'running' : 'done',
+                releaseRunning ? null : 0,
+                {
+                  parent_job_id: 'agent-parent-with-children',
+                  finished_at: releaseRunning ? null : now() - 3,
+                },
+              ),
+              makeJob('agent-parent-with-children', 'agent:shipper', 'done', 0, {
+                provider: 'claude',
+                finished_at: now() - 20,
+                user_prompt: 'Ship the queued release',
+                prompt: 'Ship the queued release',
+              }),
+              makeJob(
+                'release-review-child-live',
+                'review',
+                releaseRunning ? 'running' : 'done',
+                releaseRunning ? null : 0,
+                {
+                  parent_job_id: 'release-with-children-live',
+                  finished_at: releaseRunning ? null : now() - 2,
+                },
+              ),
+              makeJob(
+                'release-fix-child-live',
+                'fix',
+                releaseRunning ? 'running' : 'done',
+                releaseRunning ? null : 0,
+                {
+                  parent_job_id: 'release-with-children-live',
+                  finished_at: releaseRunning ? null : now() - 1,
+                },
+              ),
+              makeJob(
+                'independent-run-live',
+                'run',
+                runRunning ? 'running' : 'done',
+                runRunning ? null : 0,
+                {
+                  user_prompt: 'Investigate unrelated terminal work',
+                  prompt: 'Investigate unrelated terminal work',
+                  finished_at: runRunning ? null : now() - 1,
+                },
+              ),
+            ],
+            pendingReleaseProjects: [],
+          },
+        });
+      },
+    );
+
+    await page.goto(`/project/${PROJECT}`);
+
+    const activeWork = page.locator('section').filter({ hasText: 'active work' }).first();
+
+    await expect(page.getByText('2 running now')).toBeVisible({ timeout: 8_000 });
+    await expect(page.getByLabel('active job spinner')).toHaveCount(2, { timeout: 8_000 });
+    await expect(activeWork.getByRole('button', { name: /shipper/i }).first()).toBeVisible({
+      timeout: 8_000,
+    });
+    await expect(activeWork.getByText('release in progress')).toBeVisible({ timeout: 8_000 });
+    await expect(activeWork.getByRole('button', { name: /chat/i }).first()).toBeVisible({
+      timeout: 8_000,
+    });
+    await expect(activeWork.getByRole('button', { name: /code review/i })).toHaveCount(0);
+    await expect(activeWork.getByRole('button', { name: /fix/i })).toHaveCount(0);
+    await expect(activeWork.getByText('4 running now')).toHaveCount(0);
+
+    phase = 'release-done';
+
+    await expect(page.getByText('1 running now')).toBeVisible({ timeout: 12_000 });
+    await expect(page.getByLabel('active job spinner')).toHaveCount(1, { timeout: 12_000 });
+    await expect(activeWork.getByText('release in progress')).toHaveCount(0, { timeout: 12_000 });
+    await expect(activeWork.getByRole('button', { name: /chat/i }).first()).toBeVisible({
+      timeout: 12_000,
+    });
+    await expect(activeWork.getByRole('button', { name: /shipper/i })).toHaveCount(0);
+
+    phase = 'all-done';
+
+    await expect(page.getByText('active work')).toHaveCount(0, { timeout: 12_000 });
+    await expect(page.getByLabel('active job spinner')).toHaveCount(0);
+  });
+
   test('review card flips from running to LGTM and clears the active-work banner without reload', async ({
     page,
   }) => {
