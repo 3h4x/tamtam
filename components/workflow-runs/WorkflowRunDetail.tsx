@@ -11,8 +11,8 @@ import {
 import { WorkflowStatusBadge, workflowStatusPresentation } from '@/components/workflow-runs/workflow-run-status';
 import { humanizeWorkflowLabel, humanizeEmbeddedNames } from '@/components/workflow-runs/humanize';
 import { summarizeInput, summarizeTrigger } from '@/components/workflow-runs/summarize';
-import { ErrorState } from '@/components/ErrorState';
 import { buttonVariants } from '@/components/ui/Button';
+import { EmptyState } from '@/components/ui/EmptyState';
 import { ErrorCallout } from '@/components/ui/ErrorCallout';
 import { Pill } from '@/components/ui/Pill';
 import { Spinner } from '@/components/ui/Spinner';
@@ -202,6 +202,32 @@ function StepDiagnostics({
   );
 }
 
+function WorkflowRunLoadErrorState({ message }: { message: string }) {
+  return (
+    <EmptyState
+      paddingY="none"
+      paddingX="none"
+      className="px-4 py-16"
+      icon={(
+        <svg
+          className="w-10 h-10 text-status-error/70"
+          fill="none"
+          viewBox="0 0 24 24"
+          stroke="currentColor"
+          strokeWidth="1.4"
+        >
+          <path
+            strokeLinecap="round"
+            strokeLinejoin="round"
+            d="M12 9v3.75m0 3.75h.008v.008H12v-.008zM21 12a9 9 0 11-18 0 9 9 0 0118 0z"
+          />
+        </svg>
+      )}
+      title={<span className="font-normal">{message}</span>}
+    />
+  );
+}
+
 export function WorkflowRunDetail({ runId }: { runId: string }) {
   const [data, setData] = useState<RunDetail | null>(null);
   const [error, setError] = useState<string | null>(null);
@@ -295,7 +321,7 @@ export function WorkflowRunDetail({ runId }: { runId: string }) {
     return (
       <div className="p-6">
         <Link href="/workflow-runs" className={buttonVariants({ variant: 'link' })}>← Back to workflow runs</Link>
-        <ErrorState message={`Failed to load workflow run: ${error}`} />
+        <WorkflowRunLoadErrorState message={`Failed to load workflow run: ${error}`} />
       </div>
     );
   }
