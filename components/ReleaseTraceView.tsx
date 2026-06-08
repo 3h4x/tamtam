@@ -108,6 +108,7 @@ export function ReleaseTraceView({ projectName, releaseId }: Props) {
   const [error, setError] = useState<string | null>(null)
   const [expandedStep, setExpandedStep] = useState<string | null>(null)
   const [boardUrl, setBoardUrl] = useState<string>('')
+  const [reloadNonce, setReloadNonce] = useState(0)
 
   useEffect(() => {
     fetch('/api/settings')
@@ -132,6 +133,7 @@ export function ReleaseTraceView({ projectName, releaseId }: Props) {
           setError(res.status === 404 ? 'Release not found' : `Error ${res.status}`)
           return
         }
+        setError(null)
         setTrace(await res.json())
       } catch {
         shouldPoll = false
@@ -156,7 +158,7 @@ export function ReleaseTraceView({ projectName, releaseId }: Props) {
       } catch {}
     }, 4000)
     return () => clearInterval(id)
-  }, [projectName, releaseId])
+  }, [projectName, releaseId, reloadNonce])
 
   if (error) {
     return (
@@ -164,6 +166,10 @@ export function ReleaseTraceView({ projectName, releaseId }: Props) {
         <ErrorState
           message={error}
           hint={`Release id ${releaseId}`}
+          onRetry={() => {
+            setError(null)
+            setReloadNonce((n) => n + 1)
+          }}
         />
       </div>
     )
