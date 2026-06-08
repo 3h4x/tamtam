@@ -7,6 +7,7 @@ import { canonicalAgentNameKey } from '@/lib/agents/agent-name'
 import { Button } from '@/components/ui/Button'
 import { Pill } from '@/components/ui/Pill'
 import { EmptyState } from '@/components/ui/EmptyState'
+import { ErrorCallout } from '@/components/ui/ErrorCallout'
 import { Checkbox } from '@/components/ui/Checkbox'
 import { Select } from '@/components/ui/Select'
 import { SearchInput } from '@/components/ui/SearchInput'
@@ -574,7 +575,9 @@ export function SkillsPage() {
           </span>
           <div className="flex-1" />
           {projectsError && (
-            <span className="text-xs text-status-error font-medium">{projectsError}</span>
+            <ErrorCallout padding="sm" radius="md" className="shrink-0 text-xs font-medium" preWrap={false}>
+              {projectsError}
+            </ErrorCallout>
           )}
           <label className="text-xs text-text-secondary shrink-0">Create agents for</label>
           <Select
