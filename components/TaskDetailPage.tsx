@@ -78,6 +78,7 @@ export function TaskDetailPage({
   const [detail, setDetail] = useState<TaskDetail | null>(null)
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
+  const [reloadNonce, setReloadNonce] = useState(0)
   const requestTokenRef = useRef(0)
 
   const project = fleet.projects.find(p => p.project === name)
@@ -93,6 +94,7 @@ export function TaskDetailPage({
       const token = ++requestTokenRef.current
       if (mode === 'initial') {
         setLoading(true)
+        setError(null)
       }
       try {
         const nextDetail = await fetchTaskDetail(schedId)
@@ -119,7 +121,7 @@ export function TaskDetailPage({
       requestTokenRef.current += 1
       clearInterval(interval)
     }
-  }, [schedId])
+  }, [schedId, reloadNonce])
 
   return (
     <div className="p-6">
@@ -202,7 +204,12 @@ export function TaskDetailPage({
           ))}
         </div>
       )}
-      {error && <ErrorState message={`Error: ${error}`} />}
+      {error && (
+        <ErrorState
+          message={`Error: ${error}`}
+          onRetry={() => setReloadNonce((nonce) => nonce + 1)}
+        />
+      )}
 
       {detail && (
         <div className="flex flex-col gap-6">

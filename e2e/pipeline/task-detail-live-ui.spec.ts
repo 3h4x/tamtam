@@ -100,6 +100,40 @@ async function stubTaskPage(page: Page): Promise<void> {
 }
 
 test.describe('Task detail live polling', () => {
+  test('transient task detail load failure can be retried without navigation', async ({ page }) => {
+    let shouldFail = true
+
+    await stubTaskPage(page)
+    await page.route(`**/api/projects/${encodeURIComponent(TASK_ID)}/detail`, (route: Route) => {
+      if (shouldFail) {
+        route.fulfill({
+          status: 500,
+          json: { detail: 'temporary backend failure' },
+        })
+        return
+      }
+      route.fulfill({ json: finishedDetail(0) })
+    })
+
+    await page.goto(`/project/${PROJECT}/task/review`)
+
+    await expect(page.getByText(/Error: Failed to fetch task detail/i)).toBeVisible({
+      timeout: 8_000,
+    })
+    const stableUrl = page.url()
+
+    shouldFail = false
+    await page.getByRole('button', { name: 'Retry' }).click()
+
+    await expect(page.getByRole('heading', { name: `${PROJECT} / review` })).toBeVisible({
+      timeout: 8_000,
+    })
+    await expect(page.getByText('12s').first()).toBeVisible({ timeout: 8_000 })
+    await expect(page.getByText('0').first()).toBeVisible({ timeout: 8_000 })
+    await expect(page.getByText(/Error: Failed to fetch task detail/i)).toHaveCount(0)
+    await expect(page).toHaveURL(stableUrl)
+  })
+
   test('run history flips from running to success without reload', async ({ page }) => {
     let serveRunning = true
 
