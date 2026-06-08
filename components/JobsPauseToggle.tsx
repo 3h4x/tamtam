@@ -4,6 +4,7 @@ import { useCallback, useEffect, useState } from 'react'
 import { usePolling } from '@/hooks/usePolling'
 import { Button, type ButtonVariant } from '@/components/ui/Button'
 import { InlineLoading } from '@/components/ui/InlineLoading'
+import { useToast } from '@/components/Toast'
 import { errMsg } from '@/lib/shared/types'
 import { fmtAbsolute } from '@/lib/shared/format-date'
 import { dispatchJobsPausedChanged } from '@/lib/shared/jobs-paused-events'
@@ -24,6 +25,7 @@ interface QuotaSnapshot {
 }
 
 export function JobsPauseToggle() {
+  const { toast } = useToast()
   const [jobsPaused, setJobsPaused] = useState(false)
   const [rebuildInProgress, setRebuildInProgress] = useState(false)
   const [budgetGateEnabled, setBudgetGateEnabled] = useState(false)
@@ -144,12 +146,14 @@ export function JobsPauseToggle() {
       })
       dispatchJobsPausedChanged(next)
     } catch (e: unknown) {
+      const message = errMsg(e)
       setJobsPaused(!next)
-      console.error('[jobs-pause-toggle]', errMsg(e))
+      toast(message || 'Failed to update jobs pause state', 'error')
+      console.error('[jobs-pause-toggle]', message)
     } finally {
       setSaving(false)
     }
-  }, [budgetGateEnabled, jobsPaused, saving])
+  }, [budgetGateEnabled, jobsPaused, saving, toast])
 
   // Four visible states (rebuild takes precedence over manual pause —
   // when the rebuild script has set both flags, the user needs to know

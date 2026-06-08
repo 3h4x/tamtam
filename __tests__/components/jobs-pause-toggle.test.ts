@@ -5,6 +5,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { createRoot } from 'react-dom/client'
 import { flushSync } from 'react-dom'
 import { JobsPauseToggle } from '@/components/JobsPauseToggle'
+import { ToastProvider } from '@/components/Toast'
 import { JOBS_PAUSED_CHANGED_EVENT } from '@/lib/shared/jobs-paused-events'
 import { dispatchSettingsChanged } from '@/lib/shared/settings-events'
 
@@ -30,7 +31,7 @@ function renderToggle() {
   const root = createRoot(container)
 
   flushSync(() => {
-    root.render(React.createElement(JobsPauseToggle))
+    root.render(React.createElement(ToastProvider, null, React.createElement(JobsPauseToggle)))
   })
 
   return {

@@ -198,6 +198,44 @@ test.describe('JobsPauseToggle chip states', () => {
     await expect(toggle).toHaveAttribute('aria-checked', 'true');
   });
 
+  test('failed pause PATCH rolls the chip back and shows an error alert', async ({ page }) => {
+    let patchAttempts = 0;
+
+    await stubShellRoutes(page);
+    await page.route('**/api/settings', async (route: Route) => {
+      if (route.request().method() === 'PATCH') {
+        patchAttempts += 1;
+        await route.fulfill({
+          status: 500,
+          json: { detail: 'settings database unavailable' },
+        });
+        return;
+      }
+      await route.fulfill({
+        json: {
+          settings: { jobs_paused: 'false', rebuild_in_progress: 'false' },
+          github_owner: '',
+        },
+      });
+    });
+
+    await page.goto('/workflow-runs');
+
+    const toggle = page.getByRole('switch');
+    await expect(toggle).toBeVisible({ timeout: 8_000 });
+    await expect(toggle).toHaveText('jobs running');
+    await expect(toggle).toHaveAttribute('aria-checked', 'false');
+
+    await toggle.click();
+
+    await expect(
+      page.getByRole('alert').filter({ hasText: 'settings database unavailable' }),
+    ).toBeVisible({ timeout: 3_000 });
+    await expect(toggle).toHaveText('jobs running');
+    await expect(toggle).toHaveAttribute('aria-checked', 'false');
+    expect(patchAttempts).toBe(1);
+  });
+
   // -----------------------------------------------------------------------
   // State 7: both rebuild_in_progress=true AND jobs_paused=true
   //   rebuild_in_progress takes precedence — shows "rebuilding…", not "jobs paused"
