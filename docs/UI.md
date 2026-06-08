@@ -199,6 +199,10 @@ Use `Pill` for compact read-only filter/status chips and `PillButton` for clicka
 - `.toolbar-tab` — inner selectable tab inside a `.toolbar-group`; 20px tall, no border, transparent background
 - `.toolbar-pill` — selected-item capsule (e.g. active skill/doc name); 20px tall, accent-tinted border + fill, max-width 180px
 
+### Pulse dot (`components/ui/PulseDot.tsx`)
+
+Use `PulseDot` for the pulsing "live" activity indicator — a solid `status-info` dot with an `animate-ping` halo behind it (active-work header, running run rows). `size="sm"` (2.5px dot) for headers, `size="xs"` (1.5px) inside compact pills. For a static success/attention glyph use `StatusIcon` instead.
+
 Cards, tables, pills, toasts, status dots — compose with Tailwind utilities directly using the tokens above. See `docs/ui-preview/*.html` for canonical recipes.
 
 ---

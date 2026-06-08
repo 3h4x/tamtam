@@ -8,6 +8,7 @@ import { Button } from '@/components/ui/Button'
 import { Pill } from '@/components/ui/Pill'
 import { StatusIcon as UiStatusIcon } from '@/components/ui/StatusIcon'
 import type { PillTone } from '@/components/ui/Pill'
+import { PulseDot } from '@/components/ui/PulseDot'
 
 export const RUN_ROW_GRID_CLASS = 'lg:grid-cols-[minmax(360px,1.2fr)_minmax(360px,1fr)_96px_120px_minmax(84px,auto)]'
 
@@ -250,10 +251,7 @@ function RowStateBadge({
   if (isRunning) {
     return (
       <Pill tone="info" size="xs" className="h-5 gap-1.5 rounded px-1.5 text-[10px]">
-        <span className="relative flex h-1.5 w-1.5">
-          <span className="absolute inline-flex h-full w-full animate-ping rounded-full bg-status-info opacity-60" />
-          <span className="relative inline-flex h-1.5 w-1.5 rounded-full bg-status-info" />
-        </span>
+        <PulseDot size="xs" />
         running
       </Pill>
     )

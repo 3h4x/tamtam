@@ -16,6 +16,7 @@ import { Pill } from '@/components/ui/Pill'
 import { PromptInsightsPanel } from '@/components/project-detail/PromptInsightsPanel'
 import { Button } from '@/components/ui/Button'
 import { Spinner } from '@/components/ui/Spinner'
+import { PulseDot } from '@/components/ui/PulseDot'
 import { formatAgo } from '@/lib/shared/format'
 import type { JobInfo, ProjectConfig } from '@/lib/client-api'
 
@@ -103,10 +104,7 @@ export function OverviewTab({
           <div className="flex flex-wrap items-center justify-between gap-3 border-b border-border px-3 py-2">
             <div className="min-w-0">
               <div className="inline-flex items-center gap-2 text-sm font-medium text-text-primary">
-                <span className="relative flex h-2.5 w-2.5">
-                  <span className="absolute inline-flex h-full w-full animate-ping rounded-full bg-status-info opacity-60" />
-                  <span className="relative inline-flex h-2.5 w-2.5 rounded-full bg-status-info" />
-                </span>
+                <PulseDot size="sm" />
                 active work
               </div>
               <div className="mt-0.5 text-xs text-text-secondary tabular-nums">
