@@ -48,13 +48,23 @@ function makeChanges(overrides: Record<string, unknown> = {}) {
 
 // Stub every endpoint the project detail shell hits, leaving /changes and the
 // git-action routes for each test to override as needed.
-async function stubShell(page: Page): Promise<void> {
+async function stubShell(
+  page: Page,
+  opts: { jobsPaused?: () => boolean } = {},
+): Promise<void> {
   await page.route('**/api/projects', (route: Route) =>
     route.fulfill({ json: { tasks: [makeTask()], priorities: [], issueCounts: {} } }),
   );
   await page.route('**/api/settings', (route: Route) => {
     if (route.request().method() !== 'GET') { route.continue(); return; }
-    route.fulfill({ json: { settings: { jobs_paused: 'false', retrieval_enabled: 'false' } } });
+    route.fulfill({
+      json: {
+        settings: {
+          jobs_paused: opts.jobsPaused?.() ? 'true' : 'false',
+          retrieval_enabled: 'false',
+        },
+      },
+    });
   });
   await page.route(`**/api/projects/by-project/${PROJECT}/action`, (route: Route) =>
     route.fulfill({ json: { actions: [] } }),
@@ -136,7 +146,48 @@ test.describe('ChangesTab git actions', () => {
   });
 
   // -------------------------------------------------------------------------
-  // Test 3: Pull (behind>0, clean tree) succeeds and clears the behind banner
+  // Test 3: Global pause disables push from the changes surface and re-enables
+  // on the settings poll without navigating away.
+  // -------------------------------------------------------------------------
+  test('jobs_paused disables ChangesTab push without calling the push endpoint', async ({ page }) => {
+    let jobsPaused = true;
+    let pushCalls = 0;
+
+    await stubShell(page, { jobsPaused: () => jobsPaused });
+    await page.route(`**/api/projects/by-project/${PROJECT}/changes`, (route: Route) => {
+      if (route.request().method() !== 'GET') { route.continue(); return; }
+      route.fulfill({ json: makeChanges({ ahead: 1 }) });
+    });
+    await page.route(`**/api/projects/by-project/${PROJECT}/push`, (route: Route) => {
+      pushCalls += 1;
+      route.fulfill({ json: { status: 'started', job_id: 'push-job-paused' } });
+    });
+
+    await page.goto(`/project/${PROJECT}/changes`);
+
+    const pushBtn = page.getByRole('button', { name: 'Push' }).nth(1);
+    await expect(pushBtn).toBeVisible({ timeout: 8_000 });
+    await expect(pushBtn).toBeDisabled();
+    await expect(pushBtn).toHaveAttribute(
+      'title',
+      /Jobs are paused globally\. Resume jobs to start a push\./,
+    );
+    expect(pushCalls).toBe(0);
+
+    jobsPaused = false;
+
+    await expect(pushBtn).toHaveAttribute('title', /Push 1 commit to origin\/master/, {
+      timeout: 12_000,
+    });
+    await expect(pushBtn).toBeEnabled();
+    await pushBtn.click();
+
+    await expect(page).toHaveURL(/\/terminal\?job=push-job-paused/, { timeout: 8_000 });
+    expect(pushCalls).toBe(1);
+  });
+
+  // -------------------------------------------------------------------------
+  // Test 4: Pull (behind>0, clean tree) succeeds and clears the behind banner
   // -------------------------------------------------------------------------
   test('pulling behind commits clears the behind indicator', async ({ page }) => {
     await stubShell(page);
@@ -167,7 +218,7 @@ test.describe('ChangesTab git actions', () => {
   });
 
   // -------------------------------------------------------------------------
-  // Test 4: Diverged pull surfaces the strategy picker; Rebase recovers
+  // Test 5: Diverged pull surfaces the strategy picker; Rebase recovers
   // -------------------------------------------------------------------------
   test('a diverged pull shows the strategy picker and rebase recovers', async ({ page }) => {
     await stubShell(page);
@@ -212,7 +263,7 @@ test.describe('ChangesTab git actions', () => {
   });
 
   // -------------------------------------------------------------------------
-  // Test 5: Diverged pull surfaces the strategy picker; Merge recovers
+  // Test 6: Diverged pull surfaces the strategy picker; Merge recovers
   // -------------------------------------------------------------------------
   test('a diverged pull shows the strategy picker and merge recovers', async ({ page }) => {
     await stubShell(page);
@@ -250,7 +301,7 @@ test.describe('ChangesTab git actions', () => {
   });
 
   // -------------------------------------------------------------------------
-  // Test 6: Switch to default branch from a clean non-default branch
+  // Test 7: Switch to default branch from a clean non-default branch
   // -------------------------------------------------------------------------
   test('switching to the default branch from a feature branch refreshes', async ({ page }) => {
     await stubShell(page);
