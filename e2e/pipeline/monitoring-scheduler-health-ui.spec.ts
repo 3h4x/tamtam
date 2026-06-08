@@ -128,23 +128,78 @@ async function stubMonitoringShell(page: Page): Promise<void> {
 }
 
 test.describe('Monitoring scheduler health UI', () => {
+  test('overview load failure shows Retry and recovers in place when monitoring responds again', async ({
+    page,
+  }) => {
+    let monitoringHealthy = false;
+
+    await page.route(
+      (url) => url.pathname === '/api/monitoring',
+      (route: Route) => {
+        if (!monitoringHealthy) {
+          return route.fulfill({
+            status: 500,
+            json: { detail: 'metrics backend unavailable' },
+          });
+        }
+        return route.fulfill({ json: MONITORING_DATA });
+      },
+    );
+    await page.route(
+      (url) => url.pathname === '/api/monitoring/pm2-logs',
+      (route: Route) => route.fulfill({ json: PM2_LOGS }),
+    );
+    await page.route(
+      (url) => url.pathname === '/api/health',
+      (route: Route) =>
+        route.fulfill({
+          json: {
+            status: 'ok',
+            ok: true,
+            checks: [{ name: 'database', ok: true, severity: 'info', message: 'reachable' }],
+          },
+        }),
+    );
+    await page.route('**/api/jobs/notifications', (route: Route) =>
+      route.fulfill({ json: { count: 0, jobs: [], runningCount: 0, runningJobs: [] } }),
+    );
+    await page.route('**/api/settings', (route: Route) =>
+      route.fulfill({ json: { settings: { jobs_paused: 'false' }, github_owner: '' } }),
+    );
+
+    await page.goto('/monitoring');
+
+    await expect(page.getByText('Failed to fetch monitoring data')).toBeVisible({
+      timeout: 8_000,
+    });
+    const retry = page.getByRole('button', { name: 'Retry' });
+    await expect(retry).toBeVisible();
+
+    const stableUrl = page.url();
+    monitoringHealthy = true;
+    await retry.click();
+
+    await expect(page.getByText('All systems OK')).toBeVisible({ timeout: 8_000 });
+    await expect(page.getByText('Readiness checks')).toBeVisible({ timeout: 8_000 });
+    await expect(page.getByText('Failed to fetch monitoring data')).toHaveCount(0);
+    await expect(page).toHaveURL(stableUrl);
+  });
+
   test('Agents tab refreshes scheduler health entries on the 30s poll without reload', async ({
     page,
   }) => {
     await page.clock.install({ time: BASE_TIME });
     await stubMonitoringShell(page);
 
-    let schedulerCalls = 0;
+    let schedulerHealthy = true;
     await page.route('**/api/agents/scheduler-health', (route: Route) => {
-      schedulerCalls += 1;
-      const hasDrift = schedulerCalls > 1;
       return route.fulfill({
         json: schedulerHealth(
-          !hasDrift,
+          schedulerHealthy,
           schedulerEntry({
-            fireCount: hasDrift ? 2 : 1,
-            errorCount: hasDrift ? 1 : 0,
-            lastError: hasDrift ? 'queue job is missing' : null,
+            fireCount: schedulerHealthy ? 1 : 2,
+            errorCount: schedulerHealthy ? 0 : 1,
+            lastError: schedulerHealthy ? null : 'queue job is missing',
           }),
         ),
       });
@@ -159,12 +214,13 @@ test.describe('Monitoring scheduler health UI', () => {
     await expect(page.getByText('monitoring-project/health-check')).toBeVisible();
     await expect(page.getByText('1/1!')).toHaveCount(0);
 
+    schedulerHealthy = false;
     await page.clock.fastForward(30_000);
 
     await expect(page.getByText('queue job is missing for monitoring-project/health-check')).toBeVisible({
       timeout: 5_000,
     });
-    await expect(page.getByText('1/1!')).toBeVisible();
+    await expect(page.getByText('2/1!')).toBeVisible();
     await expect(page.getByRole('button', { name: 'Reconcile' })).toBeEnabled();
   });
 });
