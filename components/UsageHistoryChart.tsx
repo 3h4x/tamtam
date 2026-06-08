@@ -208,6 +208,7 @@ function ProviderChart({
 export function UsageHistoryChart({ hours = 24 }: { hours?: number } = {}) {
   const [data, setData] = useState<UsageHistoryResponse | null>(null)
   const [error, setError] = useState<string | null>(null)
+  const [reloadNonce, setReloadNonce] = useState(0)
   // Single-chart view: tab selector. Default shows the aggregate; clicking a
   // provider chip switches the view to that provider's chart.
   const [selected, setSelected] = useState<string>('avg')
@@ -219,7 +220,10 @@ export function UsageHistoryChart({ hours = 24 }: { hours?: number } = {}) {
         const res = await fetch(`/api/stats/usage-history?hours=${hours}`)
         if (!res.ok) throw new Error(`HTTP ${res.status}`)
         const json = (await res.json()) as UsageHistoryResponse
-        if (!cancelled) setData(json)
+        if (!cancelled) {
+          setData(json)
+          setError(null)
+        }
       } catch (e) {
         if (!cancelled) setError(e instanceof Error ? e.message : String(e))
       }
@@ -230,10 +234,18 @@ export function UsageHistoryChart({ hours = 24 }: { hours?: number } = {}) {
       cancelled = true
       clearInterval(id)
     }
-  }, [hours])
+  }, [hours, reloadNonce])
 
   if (error) {
-    return <ErrorState message={`usage-history: ${error}`} />
+    return (
+      <ErrorState
+        message={`usage-history: ${error}`}
+        onRetry={() => {
+          setError(null)
+          setReloadNonce((n) => n + 1)
+        }}
+      />
+    )
   }
   if (!data) {
     return <InlineLoading label="Loading usage history…" />

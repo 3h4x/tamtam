@@ -126,6 +126,46 @@ test.describe('UsageHistoryChart', () => {
   });
 
   // -------------------------------------------------------------------------
+  // Error state — Retry button recovers when the API starts succeeding
+  // -------------------------------------------------------------------------
+  test('Retry button reloads usage history after a transient failure', async ({ page }) => {
+    await stubPageRoutes(page);
+
+    // Fail the first usage-history fetch persistently, then flip to success on
+    // a later route registration. The interval poll is 60s, so the only way the
+    // chart recovers within the test window is the manual Retry button.
+    await page.route('**/api/stats/usage-history*', (route: Route) =>
+      route.fulfill({ status: 500, body: 'Internal Server Error' }),
+    );
+
+    await page.goto('/stats');
+
+    // Error state with a Retry action is shown.
+    await expect(page.getByText(/usage-history:/i)).toBeVisible({ timeout: 8_000 });
+    const retry = page.getByRole('button', { name: 'Retry' });
+    await expect(retry).toBeVisible();
+
+    // Flip the route to success before clicking Retry.
+    await page.unroute('**/api/stats/usage-history*');
+    await page.route('**/api/stats/usage-history*', (route: Route) =>
+      route.fulfill({
+        json: {
+          generatedAt: Date.now(),
+          hours: 48,
+          series: [makeSeries('claude')],
+        },
+      }),
+    );
+
+    await retry.click();
+
+    // Chart recovers: provider tabs render and the error is gone.
+    await expect(page.getByRole('button', { name: 'all providers' })).toBeVisible({ timeout: 8_000 });
+    await expect(page.getByRole('button', { name: 'claude' })).toBeVisible({ timeout: 5_000 });
+    await expect(page.getByText(/usage-history:/i)).toHaveCount(0);
+  });
+
+  // -------------------------------------------------------------------------
   // Single provider — "all providers" tab + provider tab both visible
   // -------------------------------------------------------------------------
   test('renders "all providers" and per-provider tabs when data is present', async ({ page }) => {
