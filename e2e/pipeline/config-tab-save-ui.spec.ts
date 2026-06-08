@@ -386,6 +386,51 @@ test.describe('ConfigTab save flow', () => {
   });
 
   // ---------------------------------------------------------------------------
+  // Test 9: Config load failure shows ErrorState with a working Retry
+  // ---------------------------------------------------------------------------
+  test('a failed config load shows Retry, and retrying recovers the form', async ({ page }) => {
+    const configPattern = `**/api/projects/by-project/${PROJECT}/config`;
+
+    await stubShell(page);
+
+    // Persistently fail the config GET so the error state is deterministic even
+    // under React StrictMode's double-invoked mount effect in dev.
+    await page.route(configPattern, async (route: Route) => {
+      if (route.request().method() !== 'GET') {
+        route.continue();
+        return;
+      }
+      await route.fulfill({ status: 500, json: { detail: 'config unavailable' } });
+    });
+
+    await page.goto(`/project/${PROJECT}/config`);
+
+    // The error state should render with a Retry button; the form is absent.
+    await expect(page.getByText('Failed to load configuration')).toBeVisible({ timeout: 8_000 });
+    const retryBtn = page.getByRole('button', { name: /^Retry$/ });
+    await expect(retryBtn).toBeVisible();
+    await expect(websiteField(page)).not.toBeVisible();
+
+    // Recover the endpoint, then retry: the refetch should populate the form.
+    await page.unroute(configPattern);
+    let retriedGet = false;
+    await page.route(configPattern, async (route: Route) => {
+      if (route.request().method() !== 'GET') {
+        route.continue();
+        return;
+      }
+      retriedGet = true;
+      await route.fulfill({ json: makeProjectConfig() });
+    });
+
+    await retryBtn.click();
+
+    await expect(websiteField(page)).toBeVisible({ timeout: 8_000 });
+    await expect(page.getByText('Failed to load configuration')).not.toBeVisible();
+    expect(retriedGet).toBe(true);
+  });
+
+  // ---------------------------------------------------------------------------
   // Test 8: Pipeline step toggle (clicking "review" chip) marks form dirty
   // ---------------------------------------------------------------------------
   test('toggling the review pipeline step marks the form dirty', async ({ page }) => {

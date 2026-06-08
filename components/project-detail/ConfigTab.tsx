@@ -37,6 +37,7 @@ export function normalizeActionColorForPicker(color?: string): string {
 export interface ConfigTabProps {
   config: ProjectConfig | null
   configLoading: boolean
+  onRetry?: () => void
 
   testCommandInput: string
   setTestCommandInput: (v: string) => void
@@ -90,6 +91,7 @@ export interface ConfigTabProps {
 export function ConfigTab({
   config,
   configLoading,
+  onRetry,
   testCommandInput,
   setTestCommandInput,
   releaseTimeoutMinutesInput,
@@ -156,7 +158,7 @@ export function ConfigTab({
   }
 
   if (!config) {
-    return <ErrorState message="Failed to load configuration" />
+    return <ErrorState message="Failed to load configuration" onRetry={onRetry} />
   }
 
   return (

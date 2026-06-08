@@ -90,6 +90,7 @@ export function ProjectDetailPage({
   // Config state
   const [config, setConfig] = useState<ProjectConfig | null>(null)
   const [configLoading, setConfigLoading] = useState(false)
+  const [configReloadNonce, setConfigReloadNonce] = useState(0)
   const [testCommandInput, setTestCommandInput] = useState('')
   const [releaseTimeoutMinutesInput, setReleaseTimeoutMinutesInput] = useState('')
   const [testCronEnabledInput, setTestCronEnabledInput] = useState(false)
@@ -281,7 +282,7 @@ export function ProjectDetailPage({
       .catch(() => { /* ignore */ })
       .finally(() => { if (active) setConfigLoading(false) })
     return () => { active = false }
-  }, [name, projectId])
+  }, [name, projectId, configReloadNonce])
 
   useEffect(() => {
     if (!name || !projectId) return
@@ -822,6 +823,7 @@ export function ProjectDetailPage({
                 <ConfigTab
                   config={config}
                   configLoading={configLoading}
+                  onRetry={() => setConfigReloadNonce((n) => n + 1)}
                   testCommandInput={testCommandInput}
                   setTestCommandInput={setTestCommandInput}
                   releaseTimeoutMinutesInput={releaseTimeoutMinutesInput}
