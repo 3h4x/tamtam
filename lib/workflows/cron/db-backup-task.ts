@@ -1,6 +1,6 @@
 // graphile-worker task: db-backup
 //
-// Fires every 15 minutes. Snapshots the live Postgres DB to a custom-format
+// Fires at the configured interval. Snapshots the live Postgres DB to a custom-format
 // pg_dump under `data/db/`, then prunes old backups per
 // `backup_retention_count` / `backup_retention_weekly_count` settings.
 //
