@@ -2,7 +2,7 @@ import { test, expect } from '@playwright/test';
 import type { Route } from '@playwright/test';
 
 // Mocked-API UI tests for the Release button behaviour when jobs are globally
-// paused or when the pipeline is already running.  These tests hit port 1338
+// paused or when the pipeline is already running.  These tests hit the configured baseURL
 // but intercept every API call — no real pipeline execution involved.
 
 const PROJECT = 'paused-release-ui';

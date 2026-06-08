@@ -1,5 +1,5 @@
 import { spawn } from 'child_process';
-import { mkdirSync, openSync } from 'fs';
+import { closeSync, mkdirSync, openSync } from 'fs';
 import { tmpdir } from 'os';
 import { join } from 'path';
 import { exec as runShell } from '@/lib/shared/shell';
@@ -191,10 +191,16 @@ function spawnHostBroker(hostPort: number): number {
     '--headless',
     '--isolated',
   ];
-  const child = spawn('npx', args, {
-    detached: true,
-    stdio: ['ignore', logFd, logFd],
-  });
+  const child = (() => {
+    try {
+      return spawn('npx', args, {
+        detached: true,
+        stdio: ['ignore', logFd, logFd],
+      });
+    } finally {
+      closeSync(logFd);
+    }
+  })();
   child.unref();
   if (!child.pid) {
     throw new Error('browser-broker: failed to spawn host Playwright MCP process');
