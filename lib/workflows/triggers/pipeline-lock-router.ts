@@ -70,7 +70,7 @@ export async function consumePipelineLockEvents(opts: { limit?: number } = {}): 
 async function shouldDrainForEvent(_project: string): Promise<boolean> {
   // Gated on a kill switch so the inline `drainPendingReleaseAsync` in
   // pipeline-lock.ts remains the primary path until the operator flips
-  // this on. Once flipped, this consumer is the durable backup.
+  // the inline drain off. Once flipped, this consumer is the durable backup.
   const { getSettings } = await import('@/lib/shared/config');
   return !getSettings().legacy_pipeline_lock_inline_drain_enabled;
 }
