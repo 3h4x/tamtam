@@ -33,6 +33,7 @@ export function WorkflowRunsActivePanel({ items }: { items: WorkflowRunsActiveIt
           <Link
             key={item.id}
             href={`/workflow-runs/${encodeURIComponent(item.id)}`}
+            aria-label={`Workflow run ${item.name} for ${item.inputLabel} state ${item.status}`}
             className={buttonVariants({
               surface: 'primary',
               className: '!block min-w-0 !rounded-md !px-3 !py-2 !text-xs !font-normal',

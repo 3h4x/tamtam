@@ -130,6 +130,11 @@ test.describe('Workflow runs list live polling', () => {
     await expect(
       activePanel.getByRole('link', { name: /workflow-start-steady/i }),
     ).toBeVisible({ timeout: 12_000 });
+    await expect(
+      activePanel.getByRole('link', {
+        name: /workflow run release orchestrator for workflow-start-steady.* state running/i,
+      }),
+    ).toBeVisible({ timeout: 12_000 });
     await expect(page.getByText('2 running')).toBeVisible({ timeout: 12_000 });
 
     phase = 'one-failed';
@@ -146,6 +151,11 @@ test.describe('Workflow runs list live polling', () => {
       activePanel.getByRole('link', { name: /workflow-start-steady/i }),
     ).toBeVisible({ timeout: 12_000 });
     await expect(failedRow).toBeVisible({ timeout: 12_000 });
+    await expect(
+      attentionPanel.getByRole('link', {
+        name: /workflow run release orchestrator for workflow-start-failing.* state failed/i,
+      }).first(),
+    ).toBeVisible({ timeout: 12_000 });
     await expect(failedRow.getByLabel('status failed')).toBeVisible({ timeout: 12_000 });
     await expect(attentionPanel.getByText('release orchestration failed after review')).toBeVisible({
       timeout: 12_000,
@@ -394,7 +404,7 @@ test.describe('Workflow runs list live polling', () => {
     const attentionPanel = page.getByLabel('Workflow runs needing attention');
     await expect(attentionPanel).toBeVisible({ timeout: 12_000 });
     await expect(attentionPanel.getByText('needs attention')).toBeVisible();
-    const cancelledRow = attentionPanel.getByRole('link', { name: /status cancelled/i }).first();
+    const cancelledRow = attentionPanel.getByRole('link', { name: /state cancelled/i }).first();
     await expect(cancelledRow.getByLabel('status cancelled')).toBeVisible();
     await expect(cancelledRow).toContainText('cancelled');
     await expect(page.getByLabel('Active workflow runs')).toHaveCount(0);

@@ -47,6 +47,7 @@ export function WorkflowRunsAttentionPanel({ items }: { items: WorkflowRunsAtten
             <Link
               key={item.id}
               href={`/workflow-runs/${encodeURIComponent(item.id)}`}
+              aria-label={`Workflow run ${item.name} for ${item.inputLabel} state ${item.status}`}
               className="grid gap-2 px-3 py-2 text-xs transition-colors hover:bg-bg-tertiary sm:grid-cols-[minmax(0,1.2fr)_minmax(0,1fr)_minmax(0,1.1fr)_auto]"
             >
               <div className="min-w-0">
