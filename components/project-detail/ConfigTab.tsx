@@ -6,6 +6,7 @@ import { Button } from '@/components/ui/Button'
 import { Checkbox } from '@/components/ui/Checkbox'
 import { ColorInput } from '@/components/ui/ColorInput'
 import { EmptyState } from '@/components/ui/EmptyState'
+import { ErrorState } from '@/components/ErrorState'
 import { Input } from '@/components/ui/Input'
 import { Pill, PillButton } from '@/components/ui/Pill'
 import { Spinner } from '@/components/ui/Spinner'
@@ -155,29 +156,7 @@ export function ConfigTab({
   }
 
   if (!config) {
-    return (
-      <EmptyState
-        paddingY="none"
-        paddingX="none"
-        className="px-4 py-16"
-        icon={(
-          <svg
-            className="w-10 h-10 text-status-error/70"
-            fill="none"
-            viewBox="0 0 24 24"
-            stroke="currentColor"
-            strokeWidth="1.4"
-          >
-            <path
-              strokeLinecap="round"
-              strokeLinejoin="round"
-              d="M12 9v3.75m0 3.75h.008v.008H12v-.008zM21 12a9 9 0 11-18 0 9 9 0 0118 0z"
-            />
-          </svg>
-        )}
-        title={<span className="font-normal">Failed to load configuration</span>}
-      />
-    )
+    return <ErrorState message="Failed to load configuration" />
   }
 
   return (
