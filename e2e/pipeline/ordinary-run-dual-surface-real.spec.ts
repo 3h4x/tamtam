@@ -55,6 +55,9 @@ test.describe('Real ordinary run dual-surface lifecycle', () => {
     );
 
     await expect(terminalPage.getByText('live run')).toBeVisible({ timeout: 20_000 });
+    await expect(terminalPage.getByLabel('live run spinner')).toBeVisible({
+      timeout: 20_000,
+    });
     await expect(
       terminalPage.getByText('Watch this ordinary run on history and terminal together.'),
     ).toBeVisible({ timeout: 20_000 });
@@ -66,6 +69,9 @@ test.describe('Real ordinary run dual-surface lifecycle', () => {
     await expect(runRow.getByLabel('running')).toHaveCount(0, { timeout: 15_000 });
 
     await expect(terminalPage.getByText('live run')).not.toBeVisible({ timeout: 15_000 });
+    await expect(terminalPage.getByLabel('live run spinner')).toHaveCount(0, {
+      timeout: 15_000,
+    });
     await expect(page.locator('span.animate-pulse')).toHaveCount(0, { timeout: 15_000 });
   });
 
@@ -110,6 +116,9 @@ test.describe('Real ordinary run dual-surface lifecycle', () => {
       `/project/${CANCELLED_PROJECT}/terminal?job=${encodeURIComponent(runBody.job_id)}`,
     );
     await expect(terminalPage.getByText('live run')).toBeVisible({ timeout: 20_000 });
+    await expect(terminalPage.getByLabel('live run spinner')).toBeVisible({
+      timeout: 20_000,
+    });
 
     const cancelResp = await request.delete(`/api/jobs/${encodeURIComponent(runBody.job_id)}`);
     expect(cancelResp.status(), `cancel DELETE failed: ${await cancelResp.text()}`).toBe(200);
@@ -122,6 +131,9 @@ test.describe('Real ordinary run dual-surface lifecycle', () => {
     });
     await expect(runRow.getByLabel('running')).toHaveCount(0, { timeout: 15_000 });
     await expect(terminalPage.getByText('live run')).not.toBeVisible({ timeout: 15_000 });
+    await expect(terminalPage.getByLabel('live run spinner')).toHaveCount(0, {
+      timeout: 15_000,
+    });
     await expect(terminalPage.getByText('cancelled').first()).toBeVisible({ timeout: 15_000 });
     await expect(terminalPage.getByText('exit 0 — ok')).toHaveCount(0);
     await expect(page.locator('span.animate-pulse')).toHaveCount(0, { timeout: 15_000 });
@@ -169,6 +181,9 @@ test.describe('Real ordinary run dual-surface lifecycle', () => {
       `/project/${FAILURE_PROJECT}/terminal?job=${encodeURIComponent(runBody.job_id)}`,
     );
     await expect(terminalPage.getByText('live run')).toBeVisible({ timeout: 20_000 });
+    await expect(terminalPage.getByLabel('live run spinner')).toBeVisible({
+      timeout: 20_000,
+    });
     await expect(
       terminalPage.getByText('Trigger a failing ordinary dual-surface run.'),
     ).toBeVisible({ timeout: 20_000 });
@@ -185,6 +200,9 @@ test.describe('Real ordinary run dual-surface lifecycle', () => {
     ).toBeVisible({ timeout: 15_000 });
     await expect(runRow.getByLabel('running')).toHaveCount(0, { timeout: 15_000 });
     await expect(terminalPage.getByText('live run')).not.toBeVisible({ timeout: 15_000 });
+    await expect(terminalPage.getByLabel('live run spinner')).toHaveCount(0, {
+      timeout: 15_000,
+    });
     await expect(terminalPage.getByText('PROMPT ASSERTION FAILED').first()).toBeVisible({
       timeout: 15_000,
     });

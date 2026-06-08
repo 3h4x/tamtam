@@ -154,6 +154,82 @@ test.describe('Project tab running indicator', () => {
     await expect(page.locator('button[aria-label^="Terminal,"] span.animate-pulse')).toHaveCount(0);
   });
 
+  test('Terminal tab indicator clears when the finished job remains in the jobs list', async ({
+    page,
+  }) => {
+    let phase: 'running' | 'done' = 'running';
+
+    await stubProjectShellRoutes(page);
+    await page.route(
+      (url) => url.pathname === '/api/jobs' && url.searchParams.get('project') === PROJECT,
+      (route: Route) =>
+        route.fulfill({
+          json: {
+            jobs: [
+              makeJob(
+                'tab-review-success',
+                'review',
+                phase === 'running' ? 'running' : 'done',
+                phase === 'running' ? null : 0,
+              ),
+            ],
+            pendingReleaseProjects: [],
+          },
+        }),
+    );
+
+    await page.goto(`/project/${PROJECT}`);
+
+    const runningTab = page.getByRole('button', { name: 'Terminal, 1 running' });
+    await expect(runningTab).toBeVisible({ timeout: 8_000 });
+    await expect(runningTab.locator('span.animate-pulse[title="1 running"]')).toBeVisible();
+
+    phase = 'done';
+
+    await expect(page.getByRole('button', { name: 'Terminal', exact: true })).toBeVisible({
+      timeout: 12_000,
+    });
+    await expect(page.getByRole('button', { name: 'Terminal, 1 running' })).toHaveCount(0);
+    await expect(page.locator('button[aria-label^="Terminal,"] span.animate-pulse')).toHaveCount(0);
+  });
+
+  test('Terminal tab indicator clears when the running job is cancelled', async ({ page }) => {
+    let phase: 'running' | 'cancelled' = 'running';
+
+    await stubProjectShellRoutes(page);
+    await page.route(
+      (url) => url.pathname === '/api/jobs' && url.searchParams.get('project') === PROJECT,
+      (route: Route) =>
+        route.fulfill({
+          json: {
+            jobs: [
+              makeJob(
+                'tab-review-cancelled',
+                'review',
+                phase === 'running' ? 'running' : 'done',
+                phase === 'running' ? null : -2,
+              ),
+            ],
+            pendingReleaseProjects: [],
+          },
+        }),
+    );
+
+    await page.goto(`/project/${PROJECT}`);
+
+    const runningTab = page.getByRole('button', { name: 'Terminal, 1 running' });
+    await expect(runningTab).toBeVisible({ timeout: 8_000 });
+    await expect(runningTab.locator('span.animate-pulse[title="1 running"]')).toBeVisible();
+
+    phase = 'cancelled';
+
+    await expect(page.getByRole('button', { name: 'Terminal', exact: true })).toBeVisible({
+      timeout: 12_000,
+    });
+    await expect(page.getByRole('button', { name: 'Terminal, 1 running' })).toHaveCount(0);
+    await expect(page.locator('button[aria-label^="Terminal,"] span.animate-pulse')).toHaveCount(0);
+  });
+
   test('Terminal tab indicator count updates while another job keeps running', async ({ page }) => {
     let phase: 'two-running' | 'one-running' = 'two-running';
 
