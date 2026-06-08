@@ -767,6 +767,102 @@ test.describe('Job lifecycle UI badges', () => {
   });
 
   // -------------------------------------------------------------------------
+  // History tab — running agent job with non-null work_summary shows
+  // liveDetail text, then transitions to completed work_summary on done.
+  //
+  // Agent and run jobs are "conversational rows" (isConversationalRow=true)
+  // and render their work_summary as live progress text while running. This
+  // path is distinct from the default subtitle/null path tested elsewhere.
+  // -------------------------------------------------------------------------
+  test('running agent job shows live work_summary text in history row, then updates on completion', async ({
+    page,
+  }) => {
+    let serveRunning = true;
+    const liveText = 'Analyzing 12 TypeScript files for type errors...';
+    const doneText = 'Completed. Found 0 errors across 12 files.';
+
+    // Agent jobs use kind='agent:<name>' — the 'agent:' prefix maps the kind
+    // to bucket='agent' (isConversationalRow=true). Bare 'agent' maps to
+    // bucket='other' which suppresses the liveDetail work_summary path.
+    await mockJobScenario(page, () => [
+      makeJob({
+        id: 'job-agent-live-summary',
+        kind: 'agent:lint',
+        status: serveRunning ? 'running' : 'done',
+        exit_code: serveRunning ? null : 0,
+        started_at: now() - 30,
+        finished_at: serveRunning ? null : now() - 5,
+        session_id: 'sess-agent-live-summary',
+        work_summary: serveRunning ? liveText : doneText,
+      }),
+    ]);
+
+    await page.goto(`/project/${PROJECT}/history`);
+
+    // 'agent:lint' → bucket='agent' → KIND_LABEL chip shows 'agent'; title shows 'lint'
+    const row = page.getByRole('button')
+      .filter({ hasText: 'agent' })
+      .filter({ hasText: 'started' })
+      .first();
+    await expect(row).toBeVisible();
+    await expect(row.getByLabel('running')).toBeVisible();
+    // liveDetail path: agent is a conversational row (bucket='agent'), so non-null
+    // work_summary renders as the in-progress detail text below the row heading.
+    await expect(row.getByText(liveText, { exact: false })).toBeVisible();
+
+    serveRunning = false;
+
+    // After completion the row flips to done and the final work_summary replaces
+    // the live progress text. No page reload should be needed.
+    await expect(row.getByLabel('done')).toBeVisible({ timeout: 12_000 });
+    await expect(row.getByText(doneText, { exact: false })).toBeVisible({ timeout: 12_000 });
+    await expect(row.getByText(liveText, { exact: false })).toHaveCount(0, { timeout: 12_000 });
+    await expect(row.getByLabel('running')).toHaveCount(0);
+  });
+
+  // -------------------------------------------------------------------------
+  // History tab — running run job shows live work_summary text (same
+  // conversational-row code path as agent, but with kind='run').
+  // -------------------------------------------------------------------------
+  test('running chat run shows live work_summary text and clears it on cancellation', async ({
+    page,
+  }) => {
+    let serveRunning = true;
+    const liveText = 'Refactoring the auth module...';
+
+    await mockJobScenario(page, () => [
+      makeJob({
+        id: 'job-run-live-summary-cancel',
+        kind: 'run',
+        status: serveRunning ? 'running' : 'done',
+        exit_code: serveRunning ? null : -3,
+        started_at: now() - 20,
+        finished_at: serveRunning ? null : now() - 3,
+        session_id: 'sess-run-live-cancel',
+        work_summary: serveRunning ? liveText : null,
+      }),
+    ]);
+
+    await page.goto(`/project/${PROJECT}/history`);
+
+    // 'run' kind displays as 'Chat' in KIND_LABEL, not 'run'. Filter by the
+    // session or a unique attribute. Use the session row label pattern instead.
+    const row = page.getByRole('button')
+      .filter({ hasText: 'started' })
+      .first();
+    await expect(row).toBeVisible();
+    await expect(row.getByLabel('running')).toBeVisible();
+    await expect(row.getByText(liveText, { exact: false })).toBeVisible();
+
+    serveRunning = false;
+
+    await expect(row.getByText('cancelled', { exact: true })).toBeVisible({ timeout: 12_000 });
+    // Live progress text clears after cancellation — no orphaned progress message.
+    await expect(row.getByText(liveText, { exact: false })).toHaveCount(0, { timeout: 12_000 });
+    await expect(row.getByLabel('running')).toHaveCount(0);
+  });
+
+  // -------------------------------------------------------------------------
   // History tab — two concurrent jobs hold independent state
   // Both a test and a review job run at once; when the test job fails the
   // review job must keep its running badge (no cross-row contamination), then
