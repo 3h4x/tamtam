@@ -1373,6 +1373,131 @@ test.describe('PipelineStrip visibility', () => {
     await expect(page.getByLabel(/merge: running\./i)).toHaveCount(0)
   })
 
+  test('terminal tab surfaces a failed test as the pipeline summary in the gap before fix starts, then flips to fix running', async ({
+    page,
+  }) => {
+    // Covers the attentionStep fallback in the summary: while a release is
+    // running but no pipeline child is running (the transient gap right after a
+    // test fails and before the fix job is dispatched), the strip must promote
+    // the failed test to the summary line — "pipeline summary: test failed" —
+    // rather than falling back to the bare release row. The real harness can't
+    // hold this state because the backend dispatches the fix immediately; only a
+    // deterministic mock can pin the in-between frame.
+    let phase: 'test-running' | 'test-failed' | 'fix-running' = 'test-running'
+    const releaseId = 'strip-test-fail-gap-release'
+
+    const releaseRow: MockJob = {
+      id: releaseId,
+      project: PROJECT,
+      kind: 'release',
+      status: 'running',
+      exit_code: null,
+      started_at: now() - 60,
+      finished_at: null,
+      pid: 0,
+      log_path: '',
+      seen: true,
+      session_id: null,
+      context_meta: null,
+      provider: 'claude',
+      work_summary: 'Release is recovering from a test failure.',
+    }
+
+    await mockProjectShell(page, () => {
+      if (phase === 'test-running') {
+        return [
+          releaseRow,
+          {
+            id: 'strip-test-fail-gap-test',
+            project: PROJECT,
+            kind: 'test',
+            status: 'running',
+            exit_code: null,
+            started_at: now() - 10,
+            finished_at: null,
+            pid: 0,
+            log_path: '',
+            seen: true,
+            session_id: 'strip-test-fail-gap-test-session',
+            release_id: releaseId,
+            context_meta: null,
+            provider: 'claude',
+            work_summary: 'Tests are running.',
+          },
+        ]
+      }
+
+      const failedTest: MockJob = {
+        id: 'strip-test-fail-gap-test',
+        project: PROJECT,
+        kind: 'test',
+        status: 'done',
+        exit_code: 1,
+        started_at: now() - 30,
+        finished_at: now() - 20,
+        pid: 0,
+        log_path: '',
+        seen: true,
+        session_id: 'strip-test-fail-gap-test-session',
+        release_id: releaseId,
+        context_meta: null,
+        provider: 'claude',
+        work_summary: 'Tests failed.',
+      }
+
+      if (phase === 'test-failed') {
+        // No fix job yet — only the release (running) and the failed test exist.
+        return [releaseRow, failedTest]
+      }
+
+      return [
+        releaseRow,
+        failedTest,
+        {
+          id: 'strip-test-fail-gap-fix',
+          project: PROJECT,
+          kind: 'fix',
+          status: 'running',
+          exit_code: null,
+          started_at: now() - 5,
+          finished_at: null,
+          pid: 0,
+          log_path: '',
+          seen: true,
+          session_id: 'strip-test-fail-gap-fix-session',
+          release_id: releaseId,
+          context_meta: null,
+          provider: 'claude',
+          work_summary: 'Fix is running.',
+        },
+      ]
+    })
+
+    await page.goto(`/project/${PROJECT}/terminal`)
+
+    await expect(page.getByLabel(/pipeline summary: test running/i)).toBeVisible({ timeout: 8_000 })
+    await expect(page.getByTitle('tests running — click to open terminal')).toBeVisible()
+
+    phase = 'test-failed'
+
+    // The failed test is promoted to the summary even though it is no longer
+    // running and no other child is running.
+    await expect(page.getByLabel(/pipeline summary: test failed/i)).toBeVisible({ timeout: 12_000 })
+    await expect(page.getByTitle('test failed — click to view log')).toBeVisible()
+    await expect(page.getByLabel(/test: failed\. test failed/i)).toBeVisible()
+    // Release controls stay available while the release is still running.
+    await expect(page.getByTitle('View unified release trace')).toBeVisible()
+    await expect(page.getByRole('button', { name: 'abort' })).toBeVisible()
+
+    phase = 'fix-running'
+
+    // Once the fix starts it becomes the running summary; the test row stays failed.
+    await expect(page.getByLabel(/pipeline summary: fix running/i)).toBeVisible({ timeout: 12_000 })
+    await expect(page.getByTitle('fix in progress — click to open terminal')).toBeVisible()
+    await expect(page.getByLabel(/test: failed\./i)).toBeVisible()
+    await expect(page.getByLabel(/pipeline summary: test failed/i)).toHaveCount(0)
+  })
+
   test('retry push affordance is disabled with a paused hint while jobs are globally paused', async ({
     page,
   }) => {
