@@ -2,7 +2,7 @@
 
 import Link from 'next/link'
 import { useRouter } from 'next/navigation'
-import { useState } from 'react'
+import { useState, useEffect, useRef } from 'react'
 import { pushProject } from '@/lib/client-api'
 import type { JobInfo, ProjectConfig } from '@/lib/client-api'
 import { useToast } from '@/components/Toast'
@@ -169,6 +169,18 @@ export function PipelineStrip({
 
   const activeRelease = latestJob(projectJobs, (job) => job.kind === 'release' && job.status === 'running')
   const activeReleaseId = activeRelease?.id ?? null
+
+  // The abort confirm prompt is per-release. When the strip switches to a
+  // different release (the prior one finished and a new one started) while still
+  // mounted, drop any pending confirm so the new release never inherits a stale
+  // "abort?" prompt the operator never opened.
+  const prevReleaseIdRef = useRef<string | null>(activeReleaseId)
+  useEffect(() => {
+    if (prevReleaseIdRef.current !== activeReleaseId) {
+      prevReleaseIdRef.current = activeReleaseId
+      setConfirmAbort(false)
+    }
+  }, [activeReleaseId])
   const releaseScopedJobs = activeReleaseId
     ? projectJobs.filter((job) => PIPELINE_KINDS.has(job.kind) && belongsToRelease(job, activeReleaseId, jobsById))
     : []
