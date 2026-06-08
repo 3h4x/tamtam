@@ -342,6 +342,60 @@ test.describe('WorkflowRunDetail UI', () => {
   });
 
   // ---------------------------------------------------------------------------
+  // Load failure (non-404) — error state with manual retry + auto-retry hint
+  // ---------------------------------------------------------------------------
+  test('500 response renders error state with a Retry button and auto-retry hint', async ({ page }) => {
+    await stubShellRoutes(page);
+    await page.route(`**/api/workflow-runs/${RUN_ID}`, (route: Route) =>
+      route.fulfill({ status: 500, json: { error: 'database unavailable' } }),
+    );
+
+    await page.goto(`/workflow-runs/${RUN_ID}`);
+
+    await expect(page.getByText(/Failed to load workflow run: database unavailable/i)).toBeVisible({
+      timeout: 8_000,
+    });
+    await expect(page.getByText(/Retrying automatically/i)).toBeVisible({ timeout: 8_000 });
+    await expect(page.getByRole('button', { name: 'Retry' })).toBeVisible({ timeout: 8_000 });
+    // The "not found" empty state must NOT be shown for a non-404 failure.
+    await expect(page.getByText('Workflow run not found')).toHaveCount(0);
+  });
+
+  test('clicking Retry after a transient load failure recovers and shows the run detail', async ({ page }) => {
+    await stubShellRoutes(page);
+    // First request fails; every subsequent request (manual retry) succeeds.
+    let served = 0;
+    await page.route(`**/api/workflow-runs/${RUN_ID}`, (route: Route) => {
+      served += 1;
+      if (served === 1) {
+        route.fulfill({ status: 500, json: { error: 'transient blip' } });
+        return;
+      }
+      route.fulfill({
+        json: {
+          run: makeRun('completed'),
+          steps: [makeStep('s1', 'fetch-context', 'completed')],
+        } satisfies RunDetail,
+      });
+    });
+
+    await page.goto(`/workflow-runs/${RUN_ID}`);
+
+    // Error state appears for the first failed load.
+    await expect(page.getByText(/Failed to load workflow run: transient blip/i)).toBeVisible({
+      timeout: 8_000,
+    });
+
+    // Manual Retry re-fetches and the now-successful response renders the detail.
+    await page.getByRole('button', { name: 'Retry' }).click();
+
+    await expect(page.locator('[aria-label="status completed"]').first()).toBeVisible({ timeout: 8_000 });
+    await expect(page.getByText('final snapshot')).toBeVisible({ timeout: 8_000 });
+    // Error state is gone once data loads.
+    await expect(page.getByText(/Failed to load workflow run/i)).toHaveCount(0);
+  });
+
+  // ---------------------------------------------------------------------------
   // Cancelled run
   // ---------------------------------------------------------------------------
   test('cancelled run shows cancelled badge and "final snapshot" label', async ({ page }) => {

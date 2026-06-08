@@ -207,6 +207,7 @@ export function WorkflowRunDetail({ runId }: { runId: string }) {
   const [error, setError] = useState<string | null>(null);
   const [notFound, setNotFound] = useState(false);
   const [lastLoadedAt, setLastLoadedAt] = useState<number | null>(null);
+  const [reloadNonce, setReloadNonce] = useState(0);
   const latestRunStatusRef = useRef<string | null>(null);
 
   useEffect(() => {
@@ -276,7 +277,7 @@ export function WorkflowRunDetail({ runId }: { runId: string }) {
         clearTimeout(refreshTimeout);
       }
     };
-  }, [runId]);
+  }, [runId, reloadNonce]);
 
   if (notFound) {
     return (
@@ -295,7 +296,11 @@ export function WorkflowRunDetail({ runId }: { runId: string }) {
     return (
       <div className="p-6">
         <Link href="/workflow-runs" className={buttonVariants({ variant: 'link' })}>← Back to workflow runs</Link>
-        <ErrorState message={`Failed to load workflow run: ${error}`} />
+        <ErrorState
+          message={`Failed to load workflow run: ${error}`}
+          hint="Retrying automatically every few seconds."
+          onRetry={() => setReloadNonce((n) => n + 1)}
+        />
       </div>
     );
   }
