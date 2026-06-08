@@ -537,4 +537,59 @@ test.describe('NotificationBell', () => {
     await expect(page.getByText('idle-project')).toHaveCount(0);
     await expect(page.getByText('All caught up')).toBeVisible({ timeout: 5_000 });
   });
+
+  test('finished failure and running job stay independent across notification polls', async ({
+    page,
+  }) => {
+    let count = 1;
+    let jobs: NotifJob[] = [
+      makeNotifJob({
+        id: 'mixed-failed-test',
+        project: 'mixed-transition-project',
+        kind: 'test',
+        status: 'done',
+        exit_code: 2,
+        finished_at: now() - 10,
+      }),
+    ];
+    let runningCount = 1;
+    let runningJobs: NotifJob[] = [
+      makeNotifJob({
+        id: 'mixed-running-review',
+        project: 'mixed-transition-project',
+        kind: 'review',
+        status: 'running',
+        exit_code: null,
+        finished_at: null,
+      }),
+    ];
+
+    await stubShellRoutes(page);
+    await page.route('**/api/jobs/notifications', (route: Route) =>
+      route.fulfill({ json: { count, jobs, runningCount, runningJobs } }),
+    );
+
+    await page.goto('/workflow-runs');
+
+    const mixedBell = page.getByTitle('1 running, 1 unread');
+    await expect(mixedBell).toBeVisible({ timeout: 8_000 });
+    await expect(mixedBell.locator('span.bg-status-error')).toHaveText('1');
+    await expect(mixedBell.locator('span.animate-pulse')).toHaveCount(0);
+
+    await mixedBell.click();
+    await expect(page.getByText(/running.*1 project/i)).toBeVisible({ timeout: 5_000 });
+    await expect(page.getByText('mixed-transition-project')).toHaveCount(2);
+    await expect(page.locator('[aria-label="attention"]').first()).toBeVisible();
+    await expect(page.getByText('exit 2').first()).toBeVisible();
+
+    count = 0;
+    jobs = [];
+
+    const runningOnlyBell = page.getByTitle('1 running');
+    await expect(runningOnlyBell).toBeVisible({ timeout: 12_000 });
+    await expect(runningOnlyBell.locator('span.bg-status-error')).toHaveCount(0);
+    await expect(runningOnlyBell.locator('span.animate-pulse')).toBeVisible();
+    await expect(page.getByText(/running.*1 project/i)).toBeVisible({ timeout: 5_000 });
+    await expect(page.getByText('exit 2')).toHaveCount(0);
+  });
 });
