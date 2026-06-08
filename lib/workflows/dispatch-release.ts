@@ -3,7 +3,7 @@
 // Anywhere outside the release workflow body itself (HTTP route, completion
 // hook, pending-release drain, on-demand resume route) should call this
 // instead of `startRelease` directly so every release gets a `workflow_runs`
-// row and the orchestrator (or observation fallback) gets a chance to drive.
+// row and the orchestrator gets a chance to drive.
 //
 // The release workflow's body still calls `startRelease` inline inside its
 // kickoffReleaseStep — that's the one allowed direct caller. Everywhere else
