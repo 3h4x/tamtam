@@ -1,10 +1,12 @@
 import { defineConfig } from 'vitest/config';
 import { existsSync, readdirSync, readFileSync, statSync } from 'fs';
+import { availableParallelism } from 'os';
 import path from 'path';
 
 const isCi = process.env.CI === 'true';
 const nodeMajor = Number.parseInt(process.versions.node.split('.')[0] ?? '0', 10);
 const isNode25OrNewer = Number.isFinite(nodeMajor) && nodeMajor >= 25;
+const hostParallelism = Math.max(1, availableParallelism());
 
 function projectMaxWorkers(localDefault: number): number {
   if (isCi) return 4;
@@ -14,7 +16,11 @@ function projectMaxWorkers(localDefault: number): number {
   // enough to hit the 30s hook timeout even though each suite passes alone.
   if (isNode25OrNewer) return 4;
 
-  return localDefault;
+  // Vitest's fork pool can briefly overlap worker teardown/startup between
+  // projects. Keep one CPU free on local/agent hosts so a full `pnpm test`
+  // doesn't exit nonzero after otherwise-passing files due to process-level
+  // contention.
+  return Math.min(localDefault, Math.max(1, hostParallelism - 1));
 }
 
 // The 29 test files below each take >=500ms wall-clock (DB boots, heavy mocks,
