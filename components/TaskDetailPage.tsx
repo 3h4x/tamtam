@@ -149,10 +149,10 @@ export function TaskDetailPage({
               <Select
                 surface="secondary"
                 size="compact"
-                value={task.priority || ''}
+                value={task.priority}
                 onChange={async (e) => {
                   const val = e.target.value
-                  if (val !== (task.priority || '')) {
+                  if (val !== task.priority) {
                     await onPriorityChange(task.id, val)
                   }
                 }}
