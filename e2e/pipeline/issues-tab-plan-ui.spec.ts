@@ -233,4 +233,48 @@ test.describe('IssuesTab plan-a-GitHub-issue flow', () => {
     await expect(page.getByText('Inbox zero')).toBeVisible({ timeout: 8_000 });
     await expect(page.getByText('GitHub shows no open PRs or issues for this project.')).toBeVisible();
   });
+
+  // -------------------------------------------------------------------------
+  // Test 7: A transient issues load failure recovers through ErrorState retry
+  // -------------------------------------------------------------------------
+  test('a failed issues load shows Retry and recovers without reload', async ({ page }) => {
+    await stubShell(page);
+
+    let issuesLoadCount = 0;
+    await page.route(`**/api/projects/by-project/${PROJECT}/issues?full=1`, (route: Route) => {
+      issuesLoadCount += 1;
+      if (issuesLoadCount === 1) {
+        route.fulfill({ status: 500, json: { detail: 'gh api temporary failure' } });
+        return;
+      }
+      route.fulfill({
+        json: makeIssuesResponse({
+          issues: [{
+            number: 42,
+            title: 'Recovered issue after retry',
+            url: 'https://github.com/example/repo/issues/42',
+            state: 'OPEN',
+            labels: [{ name: 'bug', color: 'd73a4a' }],
+            author: { login: 'octocat' },
+            createdAt: '2026-06-08T00:00:00Z',
+            updatedAt: '2026-06-08T00:00:00Z',
+            assignees: [],
+            body: '',
+          }],
+        }),
+      });
+    });
+
+    await page.goto(`/project/${PROJECT}/issues`);
+
+    await expect(page.getByText(/failed to fetch issues/i)).toBeVisible({ timeout: 8_000 });
+    const retry = page.getByRole('button', { name: 'Retry' });
+    await expect(retry).toBeVisible();
+
+    await retry.click();
+
+    await expect(page.getByText('Recovered issue after retry')).toBeVisible({ timeout: 8_000 });
+    await expect(page.getByText(/failed to fetch issues/i)).not.toBeVisible();
+    expect(issuesLoadCount).toBeGreaterThanOrEqual(2);
+  });
 });
