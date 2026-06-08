@@ -302,6 +302,7 @@ test.describe('Mocked ordinary run dual-surface lifecycle', () => {
     phase = 'running'
 
     await expect(runRow.getByLabel('running')).toBeVisible({ timeout: 12_000 })
+    await expect(runRow.locator('.animate-ping')).toHaveCount(2, { timeout: 12_000 })
     await expect(historyPage.getByText('1 running')).toBeVisible({ timeout: 12_000 })
     await expect(
       historyPage.getByText('Streaming on the terminal while history polls.'),
@@ -309,6 +310,7 @@ test.describe('Mocked ordinary run dual-surface lifecycle', () => {
 
     await expect(terminalPage.getByText(CURRENT_RUN_PROMPT)).toBeVisible({ timeout: 12_000 })
     await expect(terminalPage.getByText('live run')).toBeVisible({ timeout: 12_000 })
+    await expect(terminalPage.getByLabel('live run spinner')).toBeVisible({ timeout: 12_000 })
     await expect(terminalPage.getByText(/receiving output|waiting for output/)).toBeVisible({
       timeout: 12_000,
     })
@@ -323,9 +325,11 @@ test.describe('Mocked ordinary run dual-surface lifecycle', () => {
     ).toBeVisible({ timeout: 8_000 })
     await expect(terminalPage.getByText('exit 0 — ok').first()).toBeVisible({ timeout: 8_000 })
     await expect(terminalPage.getByText('live run')).toHaveCount(0, { timeout: 8_000 })
+    await expect(terminalPage.getByLabel('live run spinner')).toHaveCount(0, { timeout: 8_000 })
 
     await expect(runRow.getByLabel('done')).toBeVisible({ timeout: 12_000 })
     await expect(runRow.getByLabel('running')).toHaveCount(0, { timeout: 12_000 })
+    await expect(runRow.locator('.animate-ping')).toHaveCount(0, { timeout: 12_000 })
     await expect(historyPage.getByText('1 running')).toHaveCount(0, { timeout: 12_000 })
     await expect(historyPage).toHaveURL(stableHistoryUrl)
     await expect(terminalPage).toHaveURL(stableTerminalUrl)
