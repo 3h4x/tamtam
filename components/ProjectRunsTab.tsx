@@ -255,6 +255,17 @@ export function ProjectRunsTab({ projectName, jobsPaused = false }: ProjectRunsT
   useEffect(() => {
     let active = true
     let timer: ReturnType<typeof setTimeout> | null = null
+    setJobs([])
+    setPendingReleaseQueued(false)
+    setLoading(true)
+    setTotalJobs(0)
+    setSummary(null)
+    setExpanded(new Set())
+    setReleaseActionState(null)
+    setStepRetryState(null)
+    setStopState(null)
+    setContinueState(null)
+    setRerunState(null)
     const scheduleNext = () => {
       if (!active) return
       const hasRunningJob = jobsRef.current.some((job) => job.status === 'running')
@@ -288,6 +299,8 @@ export function ProjectRunsTab({ projectName, jobsPaused = false }: ProjectRunsT
 
   useEffect(() => {
     let active = true
+    setQueueItems([])
+    setQueueActionState(null)
     const poll = async () => {
       try {
         const data = await fetchAutomationQueue(projectName)

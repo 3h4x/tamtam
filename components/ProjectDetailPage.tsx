@@ -129,6 +129,8 @@ export function ProjectDetailPage({
   useEffect(() => {
     if (!name || !projectId) return
     let active = true
+    setProjectJobs([])
+    setJobsLoaded(false)
     const poll = async () => {
       try {
         const data = await fetchJobs(name)
