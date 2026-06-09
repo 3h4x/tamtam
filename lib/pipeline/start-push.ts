@@ -121,6 +121,77 @@ export async function validateReleaseLinkedRetry(
 }
 
 /**
+ * Validator for push retries from two UI paths:
+ *   - active release push retry while the release lock is still held
+ *   - History "Retry push" on the latest finished release whose last step was push
+ */
+export async function validateReleaseLinkedPushRetry(
+  projectName: string,
+  parentJobId?: string | null,
+): Promise<ReleaseRetryValidation> {
+  const normalizedParentJobId = parentJobId ?? null;
+  if (!normalizedParentJobId) {
+    return { ok: true, parentJobId: null, releaseLinkedRetry: false };
+  }
+
+  const release = getJob(normalizedParentJobId);
+  if (!release || release.project !== projectName || release.kind !== 'release') {
+    return { ok: false, status: 404, detail: `Release ${normalizedParentJobId} not found for ${projectName}` };
+  }
+
+  const lock = await getLock(projectName);
+  if (lock && release.finishedAt === null && lock.lockedByJobId === normalizedParentJobId) {
+    return validateReleaseLinkedRetry(projectName, normalizedParentJobId);
+  }
+  if (lock) {
+    return {
+      ok: false,
+      status: 409,
+      detail: `Pipeline is running for ${projectName} — wait for it to finish before retrying the push`,
+    };
+  }
+  if (release.finishedAt === null) {
+    return {
+      ok: false,
+      status: 409,
+      detail: `Retry push is only available for the active release or latest finished release on ${projectName}`,
+    };
+  }
+
+  const jobs = listJobs();
+  const latestRelease = latestStartedJob(jobs, (j) => j.project === projectName && j.kind === 'release');
+  if (!latestRelease || latestRelease.id !== normalizedParentJobId) {
+    return {
+      ok: false,
+      status: 409,
+      detail: `Retry push is only available for the latest release on ${projectName}`,
+    };
+  }
+
+  const latestStep = latestStartedJob(
+    jobs,
+    (j) =>
+      j.project === projectName
+      && j.releaseId === normalizedParentJobId
+      && RETRIABLE_RELEASE_STEP_KINDS.has(j.kind),
+  );
+  if (
+    !latestStep
+    || latestStep.kind !== 'push'
+    || latestStep.finishedAt === null
+    || latestStep.exitCode === null
+    || latestStep.exitCode === 0
+  ) {
+    return {
+      ok: false,
+      status: 409,
+      detail: `Retry push is only allowed when the latest step on the release is a failed push for ${projectName}`,
+    };
+  }
+  return { ok: true, parentJobId: normalizedParentJobId, releaseLinkedRetry: true };
+}
+
+/**
  * Looser validator for the History "Retry commit" button on a finished
  * release whose last pipeline step was a failed commit. The strict
  * `validateReleaseLinkedRetry` rejects this case (lock released, release
@@ -300,7 +371,7 @@ export async function launchProjectPush(
   const requestedParentJobId = options.parentJobId ?? currentParent();
   const projPath = resolveProjectPath(projectName);
   if (!projPath) return { error: 'project not found' };
-  const retryValidation = await validateReleaseLinkedRetry(projectName, requestedParentJobId);
+  const retryValidation = await validateReleaseLinkedPushRetry(projectName, requestedParentJobId);
   if (!retryValidation.ok) {
     return { error: retryValidation.detail, status: retryValidation.status };
   }

@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import {
   launchProjectPush,
-  validateReleaseLinkedRetry,
+  validateReleaseLinkedPushRetry,
   validateReleaseLinkedCommitRetry,
 } from '@/lib/pipeline/start-push';
 import { startProjectCommit } from '@/lib/pipeline/start-commit';
@@ -26,13 +26,11 @@ export async function POST(
       releaseId = typeof body.release_id === 'string' && body.release_id ? body.release_id : null;
     }
   } catch { /* no body or invalid JSON — default push-only */ }
-  // Commit-with-release retries (History "Retry commit") use a looser validator
-  // that allows the targeted release to be finished — the strict push-retry
-  // path requires an active release lock, which doesn't exist after the prior
-  // commit failed and the pipeline ended.
+  // History retries allow the latest finished release to re-run its failed
+  // terminal commit/push step while preserving release trace linkage.
   const retryValidation = await (commit
     ? validateReleaseLinkedCommitRetry(projectName, releaseId)
-    : validateReleaseLinkedRetry(projectName, releaseId));
+    : validateReleaseLinkedPushRetry(projectName, releaseId));
   if (!retryValidation.ok) {
     return NextResponse.json({ detail: retryValidation.detail }, { status: retryValidation.status });
   }

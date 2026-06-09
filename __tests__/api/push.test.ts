@@ -4,7 +4,7 @@ import { NextRequest } from 'next/server';
 describe('POST /api/projects/by-project/[projectName]/push', () => {
   let POST: typeof import('@/app/api/projects/by-project/[projectName]/push/route').POST;
   let launchProjectPushMock: ReturnType<typeof vi.fn>;
-  let validateReleaseLinkedRetryMock: ReturnType<typeof vi.fn>;
+  let validateReleaseLinkedPushRetryMock: ReturnType<typeof vi.fn>;
   let validateReleaseLinkedCommitRetryMock: ReturnType<typeof vi.fn>;
   let startProjectCommitMock: ReturnType<typeof vi.fn>;
 
@@ -16,12 +16,12 @@ describe('POST /api/projects/by-project/[projectName]/push', () => {
       parentJobId: parentJobId ?? null,
       releaseLinkedRetry: !!parentJobId,
     });
-    validateReleaseLinkedRetryMock = vi.fn().mockImplementation(okValidator);
+    validateReleaseLinkedPushRetryMock = vi.fn().mockImplementation(okValidator);
     validateReleaseLinkedCommitRetryMock = vi.fn().mockImplementation(okValidator);
     startProjectCommitMock = vi.fn().mockResolvedValue({ ok: true, commitSha: 'abc1234', message: 'committed', jobId: 'commit-job-id' });
     vi.doMock('@/lib/pipeline/start-push', () => ({
       launchProjectPush: launchProjectPushMock,
-      validateReleaseLinkedRetry: validateReleaseLinkedRetryMock,
+      validateReleaseLinkedPushRetry: validateReleaseLinkedPushRetryMock,
       validateReleaseLinkedCommitRetry: validateReleaseLinkedCommitRetryMock,
     }));
     vi.doMock('@/lib/pipeline/start-commit', () => ({ startProjectCommit: startProjectCommitMock }));
@@ -64,7 +64,7 @@ describe('POST /api/projects/by-project/[projectName]/push', () => {
   it('default (no body) routes to push-only via launchProjectPush', async () => {
     const req = new NextRequest('http://localhost/api/projects/by-project/my-repo/push', { method: 'POST' });
     await POST(req, { params: Promise.resolve({ projectName: 'my-repo' }) });
-    expect(validateReleaseLinkedRetryMock).toHaveBeenCalledWith('my-repo', null);
+    expect(validateReleaseLinkedPushRetryMock).toHaveBeenCalledWith('my-repo', null);
     expect(launchProjectPushMock).toHaveBeenCalledWith('my-repo', { parentJobId: null });
     expect(startProjectCommitMock).not.toHaveBeenCalled();
   });
@@ -77,7 +77,7 @@ describe('POST /api/projects/by-project/[projectName]/push', () => {
     });
     const res = await POST(req, { params: Promise.resolve({ projectName: 'my-repo' }) });
     expect(validateReleaseLinkedCommitRetryMock).toHaveBeenCalledWith('my-repo', null);
-    expect(validateReleaseLinkedRetryMock).not.toHaveBeenCalled();
+    expect(validateReleaseLinkedPushRetryMock).not.toHaveBeenCalled();
     expect(startProjectCommitMock).toHaveBeenCalledWith('my-repo', { parentJobId: null });
     expect(launchProjectPushMock).not.toHaveBeenCalled();
     const data = await res.json();
@@ -91,7 +91,7 @@ describe('POST /api/projects/by-project/[projectName]/push', () => {
       body: JSON.stringify({ release_id: 'release-123' }),
     });
     await POST(req, { params: Promise.resolve({ projectName: 'my-repo' }) });
-    expect(validateReleaseLinkedRetryMock).toHaveBeenCalledWith('my-repo', 'release-123');
+    expect(validateReleaseLinkedPushRetryMock).toHaveBeenCalledWith('my-repo', 'release-123');
     expect(launchProjectPushMock).toHaveBeenCalledWith('my-repo', { parentJobId: 'release-123' });
     expect(startProjectCommitMock).not.toHaveBeenCalled();
   });
@@ -104,16 +104,16 @@ describe('POST /api/projects/by-project/[projectName]/push', () => {
     });
     await POST(req, { params: Promise.resolve({ projectName: 'my-repo' }) });
     expect(validateReleaseLinkedCommitRetryMock).toHaveBeenCalledWith('my-repo', 'release-456');
-    expect(validateReleaseLinkedRetryMock).not.toHaveBeenCalled();
+    expect(validateReleaseLinkedPushRetryMock).not.toHaveBeenCalled();
     expect(startProjectCommitMock).toHaveBeenCalledWith('my-repo', { parentJobId: 'release-456' });
     expect(launchProjectPushMock).not.toHaveBeenCalled();
   });
 
   it('rejects an invalid release-linked retry before launchProjectPush runs', async () => {
-    validateReleaseLinkedRetryMock.mockReturnValue({
+    validateReleaseLinkedPushRetryMock.mockReturnValue({
       ok: false,
       status: 409,
-      detail: 'Release-linked push retry is only allowed for the active release on my-repo',
+      detail: 'Retry push is only allowed when the latest step on the release is a failed push for my-repo',
     });
     const req = new NextRequest('http://localhost/api/projects/by-project/my-repo/push', {
       method: 'POST',
@@ -157,26 +157,49 @@ describe('POST /api/projects/by-project/[projectName]/push', () => {
   });
 
   it('the History "Retry commit" round-trip: { commit: true, release_id } returns 200 even when the release is finished', async () => {
-    // Realistic case from seo-tools: failed commit on a finished release.
+    // Realistic case: failed commit on a finished release.
     // The looser commit-retry validator accepts this and the route launches a
     // standalone commit job linked to the same release_id for trace continuity.
     validateReleaseLinkedCommitRetryMock.mockReturnValue({
       ok: true,
-      parentJobId: 'seo-tools-release-1778189108547000',
+      parentJobId: 'release-commit-failed',
       releaseLinkedRetry: true,
     });
-    startProjectCommitMock.mockResolvedValue({ ok: true, jobId: 'seo-tools-commit-retry-1' });
-    const req = new NextRequest('http://localhost/api/projects/by-project/seo-tools/push', {
+    startProjectCommitMock.mockResolvedValue({ ok: true, jobId: 'commit-retry-1' });
+    const req = new NextRequest('http://localhost/api/projects/by-project/my-repo/push', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ commit: true, release_id: 'seo-tools-release-1778189108547000' }),
+      body: JSON.stringify({ commit: true, release_id: 'release-commit-failed' }),
     });
-    const res = await POST(req, { params: Promise.resolve({ projectName: 'seo-tools' }) });
+    const res = await POST(req, { params: Promise.resolve({ projectName: 'my-repo' }) });
     expect(res.status).toBe(200);
     const data = await res.json();
     expect(data.status).toBe('started');
-    expect(data.job_id).toBe('seo-tools-commit-retry-1');
-    expect(startProjectCommitMock).toHaveBeenCalledWith('seo-tools', { parentJobId: 'seo-tools-release-1778189108547000' });
+    expect(data.job_id).toBe('commit-retry-1');
+    expect(startProjectCommitMock).toHaveBeenCalledWith('my-repo', { parentJobId: 'release-commit-failed' });
+  });
+
+  it('the History "Retry push" round-trip: { release_id } returns 200 without commit mode for a finished release', async () => {
+    validateReleaseLinkedPushRetryMock.mockReturnValue({
+      ok: true,
+      parentJobId: 'release-push-failed',
+      releaseLinkedRetry: true,
+    });
+    launchProjectPushMock.mockReturnValue({ jobId: 'push-retry-1' });
+    const req = new NextRequest('http://localhost/api/projects/by-project/my-repo/push', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ release_id: 'release-push-failed' }),
+    });
+    const res = await POST(req, { params: Promise.resolve({ projectName: 'my-repo' }) });
+    expect(res.status).toBe(200);
+    const data = await res.json();
+    expect(data.status).toBe('started');
+    expect(data.job_id).toBe('push-retry-1');
+    expect(validateReleaseLinkedPushRetryMock).toHaveBeenCalledWith('my-repo', 'release-push-failed');
+    expect(validateReleaseLinkedCommitRetryMock).not.toHaveBeenCalled();
+    expect(startProjectCommitMock).not.toHaveBeenCalled();
+    expect(launchProjectPushMock).toHaveBeenCalledWith('my-repo', { parentJobId: 'release-push-failed' });
   });
 
   it('treats invalid JSON body as default push-only', async () => {
@@ -186,7 +209,7 @@ describe('POST /api/projects/by-project/[projectName]/push', () => {
       body: 'not-json',
     });
     await POST(req, { params: Promise.resolve({ projectName: 'my-repo' }) });
-    expect(validateReleaseLinkedRetryMock).toHaveBeenCalledWith('my-repo', null);
+    expect(validateReleaseLinkedPushRetryMock).toHaveBeenCalledWith('my-repo', null);
     expect(launchProjectPushMock).toHaveBeenCalledWith('my-repo', { parentJobId: null });
     expect(startProjectCommitMock).not.toHaveBeenCalled();
   });

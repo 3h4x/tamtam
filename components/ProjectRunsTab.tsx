@@ -530,7 +530,7 @@ export function ProjectRunsTab({ projectName, jobsPaused = false }: ProjectRunsT
     const failed = (release.children ?? [])
       .filter((child) => child.status === 'done' && child.exitCode !== null && child.exitCode !== 0)
       .sort((a, b) => b.startedAt - a.startedAt)[0]
-    return failed?.kind === 'commit' ? failed : null
+    return failed && (failed.kind === 'commit' || failed.kind === 'push') ? failed : null
   }
 
   const retryPipelineStep = async (release: Entry, step: Entry) => {
@@ -539,6 +539,8 @@ export function ProjectRunsTab({ projectName, jobsPaused = false }: ProjectRunsT
     try {
       if (step.kind === 'commit') {
         await pushProject(projectName, { commit: true, releaseId: release.navJobId ?? null })
+      } else if (step.kind === 'push') {
+        await pushProject(projectName, { releaseId: release.navJobId ?? null })
       }
       await loadJobs()
       setExpanded((prev) => new Set(prev).add(release.key))
@@ -574,6 +576,7 @@ export function ProjectRunsTab({ projectName, jobsPaused = false }: ProjectRunsT
     const stepRetryButton = retryableStep ? (
       (() => {
         const active = stepRetryState?.jobId === retryableStep.navJobId
+        const label = retryableStep.kind === 'push' ? 'Retry push' : 'Retry commit'
         return (
           <Button
             type="button"
@@ -584,9 +587,9 @@ export function ProjectRunsTab({ projectName, jobsPaused = false }: ProjectRunsT
             onClick={() => retryPipelineStep(releaseTarget, retryableStep)}
             title={jobsPaused
               ? 'Jobs are paused globally. Resume jobs to retry this step.'
-              : 'Retry the failed commit step for this release'}
+              : `Retry the failed ${retryableStep.kind} step for this release`}
           >
-            {active ? stepRetryState?.label : 'Retry commit'}
+            {active ? stepRetryState?.label : label}
           </Button>
         )
       })()
@@ -678,7 +681,7 @@ export function ProjectRunsTab({ projectName, jobsPaused = false }: ProjectRunsT
       stopButton ? { key: 'stop', node: stopButton } : null,
       continueButton ? { key: 'continue', node: continueButton } : null,
       rerunButton ? { key: 'rerun', node: rerunButton } : null,
-      stepRetryButton ? { key: 'retry-commit', node: stepRetryButton } : null,
+      stepRetryButton ? { key: `retry-${retryableStep?.kind ?? 'step'}`, node: stepRetryButton } : null,
       releaseButton ? { key: 'release', node: releaseButton } : null,
     ]
     const buttons = buttonItems.filter((button): button is { key: string; node: React.ReactNode } => button !== null)

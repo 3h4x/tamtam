@@ -106,6 +106,7 @@ import {
   startProjectPush,
   launchProjectPush,
   pushCurrentBranch,
+  validateReleaseLinkedPushRetry,
   validateReleaseLinkedCommitRetry,
 } from '@/lib/pipeline/start-push';
 
@@ -283,11 +284,34 @@ describe('startProjectPush — push result tracking', () => {
     const result = await launchProjectPush('proj', { parentJobId: 'release-stale' });
 
     expect(result).toEqual({
-      error: 'Release-linked push retry is only allowed for the active release on proj',
+      error: 'Pipeline is running for proj — wait for it to finish before retrying the push',
       status: 409,
     });
     expect(createJobMock).not.toHaveBeenCalled();
     expect(checkCliStartGateMock).not.toHaveBeenCalled();
+  });
+
+  it('launchProjectPush accepts a failed push on the latest finished release', async () => {
+    const release = { id: 'release-123', project: 'proj', kind: 'release', startedAt: 100, finishedAt: 300, exitCode: 1 };
+    getJobMock.mockReturnValue(release);
+    listJobsMock.mockReturnValue([
+      release,
+      { id: 'review-ok', project: 'proj', kind: 'review', startedAt: 150, finishedAt: 160, exitCode: 0, releaseId: 'release-123' },
+      { id: 'push-failed-1', project: 'proj', kind: 'push', startedAt: 250, finishedAt: 260, exitCode: 1, releaseId: 'release-123' },
+    ]);
+    execMock
+      .mockImplementationOnce(() => resp(0, '1\n'))
+      .mockImplementationOnce(() => resp(0, '# branch.head master\n# branch.ab +0 -0\n'))
+      .mockImplementationOnce(() => resp(0))
+      .mockImplementationOnce(() => resp(0, 'abc1234'));
+
+    const result = await launchProjectPush('proj', { parentJobId: 'release-123' });
+
+    expect(result).toEqual({ jobId: 'proj-push-test-id' });
+    await vi.waitFor(() => {
+      expect(checkCliStartGateMock).toHaveBeenCalledWith('start a push', { parentJobId: 'release-123' });
+      expect(markDoneMock).toHaveBeenCalledWith(createJobMock.mock.results[0].value, 0);
+    });
   });
 
   it('rejects a release-linked retry when the latest linked step is not a failed push', async () => {
@@ -1776,6 +1800,93 @@ describe('validateReleaseLinkedCommitRetry', () => {
     listJobsMock.mockReturnValue([release]);
     getLockMock.mockReturnValue({ lockedByJobId: 'other-release-job' });
     const r = await validateReleaseLinkedCommitRetry('proj', 'rel');
+    expect(r.ok).toBe(false);
+    if (!r.ok) expect(r.detail).toContain('Pipeline is running');
+  });
+});
+
+describe('validateReleaseLinkedPushRetry', () => {
+  const { getJobMock, listJobsMock, getLockMock, isLockOwnedByActiveReleaseMock } = mocks;
+
+  function makeRelease(id: string, project: string, opts: { startedAt?: number; finishedAt?: number | null } = {}) {
+    return {
+      id,
+      project,
+      kind: 'release' as const,
+      startedAt: opts.startedAt ?? 1000,
+      finishedAt: Object.prototype.hasOwnProperty.call(opts, 'finishedAt') ? opts.finishedAt ?? null : 2000,
+      exitCode: 1,
+    };
+  }
+  function makeStep(kind: string, opts: { releaseId: string; project?: string; startedAt?: number; finishedAt?: number | null; exitCode?: number | null }) {
+    return {
+      id: `${opts.project ?? 'proj'}-${kind}-${opts.startedAt ?? 1500}`,
+      project: opts.project ?? 'proj', kind, releaseId: opts.releaseId,
+      startedAt: opts.startedAt ?? 1500, finishedAt: opts.finishedAt ?? 1800, exitCode: opts.exitCode ?? 0,
+    };
+  }
+
+  beforeEach(() => {
+    resetSharedMocks();
+  });
+
+  it('returns ok with null parent when no releaseId is given', async () => {
+    expect(await validateReleaseLinkedPushRetry('proj', null)).toEqual({ ok: true, parentJobId: null, releaseLinkedRetry: false });
+  });
+
+  it('keeps active release retries on the strict active-lock path', async () => {
+    getLockMock.mockReturnValue({ project: 'proj', lockedByJobId: 'rel', acquiredAt: Date.now() / 1000 });
+    isLockOwnedByActiveReleaseMock.mockReturnValue(true);
+    getJobMock.mockReturnValue(makeRelease('rel', 'proj', { finishedAt: null }));
+    listJobsMock.mockReturnValue([
+      makeStep('push', { releaseId: 'rel', startedAt: 2500, finishedAt: 2700, exitCode: 1 }),
+    ]);
+    const r = await validateReleaseLinkedPushRetry('proj', 'rel');
+    expect(r).toEqual({ ok: true, parentJobId: 'rel', releaseLinkedRetry: true });
+  });
+
+  it('accepts a failed push on the latest finished release', async () => {
+    const release = makeRelease('rel', 'proj', { finishedAt: 3000 });
+    const failedPush = makeStep('push', { releaseId: 'rel', startedAt: 2500, finishedAt: 2700, exitCode: 1 });
+    getJobMock.mockReturnValue(release);
+    listJobsMock.mockReturnValue([
+      release,
+      makeStep('test', { releaseId: 'rel', startedAt: 1100, exitCode: 0 }),
+      makeStep('commit', { releaseId: 'rel', startedAt: 2100, exitCode: 0 }),
+      failedPush,
+    ]);
+    const r = await validateReleaseLinkedPushRetry('proj', 'rel');
+    expect(r).toEqual({ ok: true, parentJobId: 'rel', releaseLinkedRetry: true });
+  });
+
+  it('rejects when the release is not the latest for the project', async () => {
+    const older = makeRelease('older', 'proj', { startedAt: 1000 });
+    const newer = makeRelease('newer', 'proj', { startedAt: 2000 });
+    getJobMock.mockReturnValue(older);
+    listJobsMock.mockReturnValue([older, newer]);
+    const r = await validateReleaseLinkedPushRetry('proj', 'older');
+    expect(r.ok).toBe(false);
+    if (!r.ok) { expect(r.status).toBe(409); expect(r.detail).toContain('latest release'); }
+  });
+
+  it('rejects when the latest step on the release is not a failed push', async () => {
+    const release = makeRelease('rel', 'proj');
+    getJobMock.mockReturnValue(release);
+    listJobsMock.mockReturnValue([
+      release,
+      makeStep('commit', { releaseId: 'rel', startedAt: 1500, exitCode: 1 }),
+    ]);
+    const r = await validateReleaseLinkedPushRetry('proj', 'rel');
+    expect(r.ok).toBe(false);
+    if (!r.ok) expect(r.detail).toContain('failed push');
+  });
+
+  it('rejects when another pipeline holds the project lock', async () => {
+    const release = makeRelease('rel', 'proj', { finishedAt: 3000 });
+    getJobMock.mockReturnValue(release);
+    listJobsMock.mockReturnValue([release]);
+    getLockMock.mockReturnValue({ lockedByJobId: 'other-release-job' });
+    const r = await validateReleaseLinkedPushRetry('proj', 'rel');
     expect(r.ok).toBe(false);
     if (!r.ok) expect(r.detail).toContain('Pipeline is running');
   });
