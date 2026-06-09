@@ -855,6 +855,37 @@ test.describe('Job lifecycle UI badges', () => {
     await expect(page.getByText('active work')).toHaveCount(0, { timeout: 12_000 });
   });
 
+  test('overview tab clears active-work banner when running job transitions to failed via poll', async ({
+    page,
+  }) => {
+    let serveRunning = true;
+    await mockJobScenario(page, () => [
+      makeJob({
+        id: 'job-live-overview-failure',
+        kind: 'test',
+        status: serveRunning ? 'running' : 'done',
+        exit_code: serveRunning ? null : 1,
+        started_at: now() - 30,
+        finished_at: serveRunning ? null : now() - 5,
+        session_id: 'sess-live-overview-failure',
+        work_summary: serveRunning
+          ? 'Tests are still running before failure'
+          : 'Tests failed after the smoke check timed out.',
+      }),
+    ]);
+
+    await page.goto(`/project/${PROJECT}`);
+
+    await expect(page.getByText('1 running').first()).toBeVisible({ timeout: 8_000 });
+    await expect(page.getByText('test').first()).toBeVisible();
+
+    serveRunning = false;
+
+    await expect(page.getByText('1 running now')).toHaveCount(0, { timeout: 12_000 });
+    await expect(page.getByText('active work')).toHaveCount(0, { timeout: 12_000 });
+    await expect(page.getByText('Tests are still running before failure')).toHaveCount(0);
+  });
+
   // -------------------------------------------------------------------------
   // History tab — running agent job with non-null work_summary shows
   // liveDetail text, then transitions to completed work_summary on done.

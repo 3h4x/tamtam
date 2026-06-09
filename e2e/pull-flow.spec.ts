@@ -153,7 +153,7 @@ test.describe('Header Pull button', () => {
     await expect(pullBtn).toBeDisabled();
     // Clicking a disabled button should be a no-op
     await pullBtn.dispatchEvent('click');
-    await page.waitForTimeout(300);
+    await page.evaluate(() => new Promise<void>((resolve) => queueMicrotask(() => resolve())));
     expect(postFired).toBe(false);
   });
 
