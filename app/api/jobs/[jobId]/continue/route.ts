@@ -13,7 +13,7 @@ import { resolveCliBin, resolveCliDefaultModel, resolveCliEnv } from '@/lib/shar
 import { checkCliStartGate } from '@/lib/usage/resolve-provider';
 import { isCliProvider } from '@/lib/usage/cli-providers';
 import { findBlockingRunningJob } from '@/lib/jobs/project-active-job';
-import { buildResumePrompt } from '@/lib/jobs/auto-resume';
+import { buildResumePrompt, findSessionIdInLog } from '@/lib/jobs/auto-resume';
 import { prepareBrokerRun } from '@/lib/browser-broker/prepare-run';
 
 // How recently the source job must have finished to allow a --resume.
@@ -56,7 +56,6 @@ export async function POST(
         const len = Math.min(size, 8192);
         const buf = Buffer.allocUnsafe(len);
         readSync(fd, buf, 0, len, size - len);
-        const { findSessionIdInLog } = await import('@/lib/jobs/auto-resume');
         sessionId = findSessionIdInLog(buf.toString('utf-8'));
       } finally {
         closeSync(fd);
