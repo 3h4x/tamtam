@@ -455,6 +455,56 @@ test.describe('WorkflowRunDetail UI', () => {
   });
 
   // ---------------------------------------------------------------------------
+  // Transient refresh failure — prior snapshot stays, warning callout appears,
+  // then clears on recovery. Distinct from the full-page load-error state which
+  // only renders when there is no data yet.
+  // ---------------------------------------------------------------------------
+  test('live run keeps the prior snapshot and surfaces a "Failed to refresh" warning when a poll fails, then clears it on recovery', async ({
+    page,
+  }) => {
+    await stubShellRoutes(page);
+    // Poll 1: running. Poll 2: transient 503 (data already loaded). Poll 3+: completed.
+    let served = 0;
+    await page.route(`**/api/workflow-runs/${RUN_ID}`, (route: Route) => {
+      served += 1;
+      if (served === 2) {
+        route.fulfill({ status: 503, json: { error: 'database hiccup' } });
+        return;
+      }
+      route.fulfill({
+        json:
+          served === 1
+            ? ({
+                run: makeRun('running'),
+                steps: [makeStep('s1', 'run-review', 'running')],
+              } satisfies RunDetail)
+            : ({
+                run: makeRun('completed'),
+                steps: [makeStep('s1', 'run-review', 'completed')],
+              } satisfies RunDetail),
+      });
+    });
+
+    await page.goto(`/workflow-runs/${RUN_ID}`);
+
+    // Initial running snapshot loads cleanly.
+    await expect(page.locator('[aria-label="status running"]').first()).toBeVisible({ timeout: 8_000 });
+    await expect(page.getByText('live · refreshes every 5s')).toBeVisible({ timeout: 8_000 });
+
+    // Poll 2 (~5s) fails: the inline warning appears while the prior snapshot stays put.
+    await expect(page.getByText(/Failed to refresh: database hiccup/i)).toBeVisible({ timeout: 12_000 });
+    // The full-page load-error state must NOT replace the detail — stale data is still shown.
+    await expect(page.getByText(/Failed to load workflow run/i)).toHaveCount(0);
+    await expect(page.locator('[aria-label="status running"]').first()).toBeVisible();
+    await expect(page.getByText('live · refreshes every 5s')).toBeVisible();
+
+    // Poll 3 recovers: the warning clears and the run reaches its final snapshot.
+    await expect(page.getByText('final snapshot')).toBeVisible({ timeout: 12_000 });
+    await expect(page.locator('[aria-label="status completed"]').first()).toBeVisible({ timeout: 12_000 });
+    await expect(page.getByText(/Failed to refresh/i)).toHaveCount(0);
+  });
+
+  // ---------------------------------------------------------------------------
   // Cancelled run
   // ---------------------------------------------------------------------------
   test('cancelled run shows cancelled badge and "final snapshot" label', async ({ page }) => {
