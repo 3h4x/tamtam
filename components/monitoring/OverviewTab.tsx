@@ -201,13 +201,19 @@ export function OverviewTab({
           <h3 className="text-xs font-medium text-text-secondary mb-2 uppercase tracking-wide">Down services</h3>
           <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-1.5">
             {downServices.map((s, i) => (
-              <div key={i} className="flex items-center gap-2 px-3 py-2 rounded-md border bg-status-error/5 border-status-error/30 text-sm">
+              <ErrorCallout
+                key={i}
+                radius="md"
+                padding="none"
+                preWrap={false}
+                className="flex items-center gap-2 px-3 py-2 !bg-status-error/5 text-sm"
+              >
                 <StatusDot ok={false} />
                 <span className="font-medium text-text-primary truncate" data-private>{s.metric.job ?? s.metric.instance ?? 'unknown'}</span>
                 {s.metric.instance && s.metric.job && (
                   <span className="text-text-tertiary text-xs ml-auto truncate" data-private>{s.metric.instance}</span>
                 )}
-              </div>
+              </ErrorCallout>
             ))}
           </div>
         </div>
