@@ -8,6 +8,7 @@
 
 import type { PillTone } from '@/components/ui/Pill';
 import { humanizeEmbeddedNames } from '@/components/workflow-runs/humanize';
+import { isCancelledExitCode } from '@/lib/shared/job-exit-codes';
 
 export type OutcomeTone = 'ok' | 'warn' | 'err' | 'info';
 
@@ -15,6 +16,24 @@ export interface OutcomeInput {
   status: string;
   error: string | null;
   output?: unknown;
+}
+
+function extractDirectWorkflowExitCode(output: unknown): number | null {
+  if (!output || typeof output !== 'object' || Array.isArray(output)) return null;
+  const obj = output as Record<string, unknown>;
+  const directExitCode = obj.exitCode;
+  return typeof directExitCode === 'number' ? directExitCode : null;
+}
+
+function extractWaitedJobExitCode(output: unknown): number | null {
+  if (!output || typeof output !== 'object' || Array.isArray(output)) return null;
+  const obj = output as Record<string, unknown>;
+  const waited = obj.waited;
+  if (!waited || typeof waited !== 'object' || Array.isArray(waited)) return null;
+  const waitedJob = (waited as Record<string, unknown>).job;
+  if (!waitedJob || typeof waitedJob !== 'object' || Array.isArray(waitedJob)) return null;
+  const waitedExitCode = (waitedJob as Record<string, unknown>).exitCode;
+  return typeof waitedExitCode === 'number' ? waitedExitCode : null;
 }
 
 function firstMeaningfulLine(value: string | null): string | null {
@@ -96,6 +115,10 @@ export function summarizeOutcome(run: OutcomeInput): { label: string; tone: Outc
     return { label: run.status, tone: 'info' };
   }
   if (run.status === 'cancelled') return { label: 'cancelled', tone: 'err' };
+  const workflowExitCode = extractDirectWorkflowExitCode(run.output);
+  if (isCancelledExitCode(workflowExitCode)) {
+    return { label: 'cancelled', tone: 'err' };
+  }
   if (run.status === 'failed') {
     const tail = firstMeaningfulLine(run.error)?.slice(0, 60) ?? 'failed';
     return { label: tail, tone: 'err' };
@@ -112,15 +135,9 @@ export function summarizeOutcome(run: OutcomeInput): { label: string; tone: Outc
         return { label: verdict, tone };
       }
     }
-    const waited = o.waited;
-    if (waited && typeof waited === 'object' && !Array.isArray(waited)) {
-      const job = (waited as Record<string, unknown>).job;
-      if (job && typeof job === 'object' && !Array.isArray(job)) {
-        const exitCode = (job as Record<string, unknown>).exitCode;
-        if (typeof exitCode === 'number' && exitCode !== 0) {
-          return { label: `exit ${exitCode}`, tone: 'err' };
-        }
-      }
+    const waitedExitCode = extractWaitedJobExitCode(out);
+    if (waitedExitCode != null && waitedExitCode !== 0) {
+      return { label: `exit ${waitedExitCode}`, tone: 'err' };
     }
     const verdict = pickString(o, ['verdict']);
     if (verdict) {
@@ -173,6 +190,9 @@ export function summarizeOutcomeDetail(run: OutcomeInput): string | null {
 }
 
 export function summarizeWorkflowDisplayStatus(run: OutcomeInput): string {
+  if (isCancelledExitCode(extractDirectWorkflowExitCode(run.output))) {
+    return 'cancelled';
+  }
   return run.status;
 }
 

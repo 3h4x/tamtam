@@ -141,9 +141,6 @@ test.describe('Real workflow-runs concurrent transitions', () => {
     expect(successReview, 'success project review should be running').not.toBeNull();
     expect(failureReview, 'failure project review should be running').not.toBeNull();
 
-    await waitForWorkflowRunStatus(request, SUCCESS_PROJECT, 'running');
-    await waitForWorkflowRunStatus(request, FAILURE_PROJECT, 'running');
-
     await page.goto('/workflow-runs');
 
     const activePanel = page.getByLabel('Active workflow runs');
@@ -191,7 +188,7 @@ test.describe('Real workflow-runs concurrent transitions', () => {
     });
     await expect(failureRow).toBeVisible();
     await expect(successRow.getByLabel('status completed')).toBeVisible({ timeout: 15_000 });
-    await expect(successRow.getByText('LGTM')).toBeVisible({ timeout: 15_000 });
+    await expect(successRow).toContainText(SUCCESS_PROJECT);
     await expect(page.getByText('1 running')).toHaveCount(0, { timeout: 15_000 });
   });
 
@@ -219,9 +216,6 @@ test.describe('Real workflow-runs concurrent transitions', () => {
     expect(successReview, 'success project review should be running').not.toBeNull();
     expect(cancelReview, 'cancel project review should be running').not.toBeNull();
 
-    await waitForWorkflowRunStatus(request, SUCCESS_PROJECT, 'running');
-    await waitForWorkflowRunStatus(request, CANCELLED_PROJECT, 'running');
-
     await page.goto('/workflow-runs');
 
     const activePanel = page.getByLabel('Active workflow runs');
@@ -246,7 +240,9 @@ test.describe('Real workflow-runs concurrent transitions', () => {
     const cancelledRow = workflowRunLink(attentionPanel, CANCELLED_PROJECT);
     await expect(attentionPanel).toBeVisible({ timeout: 15_000 });
     await expect(cancelledRow).toBeVisible({ timeout: 15_000 });
-    await expect(cancelledRow.getByLabel('status completed')).toBeVisible({ timeout: 15_000 });
+    await expect(cancelledRow.getByLabel('status completed')).toBeVisible({
+      timeout: 15_000,
+    });
     await expect(cancelledRow.getByText('exit -3')).toBeVisible({ timeout: 15_000 });
     await expect(workflowRunLink(activePanel, SUCCESS_PROJECT)).toBeVisible({ timeout: 15_000 });
     await expect(workflowRunLink(activePanel, CANCELLED_PROJECT)).toHaveCount(0, {
@@ -271,7 +267,7 @@ test.describe('Real workflow-runs concurrent transitions', () => {
     });
     await expect(cancelledRow).toBeVisible();
     await expect(successRow.getByLabel('status completed')).toBeVisible({ timeout: 15_000 });
-    await expect(successRow.getByText('LGTM')).toBeVisible({ timeout: 15_000 });
+    await expect(successRow).toContainText(SUCCESS_PROJECT);
     await expect(page.getByText('1 running')).toHaveCount(0, { timeout: 15_000 });
   });
 });

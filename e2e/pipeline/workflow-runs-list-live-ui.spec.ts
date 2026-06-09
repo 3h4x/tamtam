@@ -232,6 +232,68 @@ test.describe('Workflow runs list live polling', () => {
     ).toBeVisible({ timeout: 8_000 });
   });
 
+  test('completed workflow with a cancelled waited job remains completed with exit -3', async ({
+    page,
+  }) => {
+    await stubWorkflowRunsShell(page);
+    await stubWorkflowRuns(page, () => [
+      makeRun('completed', {
+        id: 'workflow-run-cancelled-waited',
+        input: ['workflow-cancelled-waited', { triggeredBy: 'agent-cancelled' }],
+        output: {
+          waited: {
+            job: {
+              exitCode: -3,
+              detail: 'release was cancelled before completion',
+            },
+          },
+        },
+      }),
+    ]);
+
+    await page.goto('/workflow-runs');
+
+    const attentionPanel = page.getByLabel('Workflow runs needing attention');
+    const cancelledRow = attentionPanel.getByRole('link', { name: /workflow-cancelled-waited/i }).first();
+    await expect(attentionPanel).toBeVisible({ timeout: 8_000 });
+    await expect(cancelledRow.getByLabel('status completed')).toBeVisible({ timeout: 8_000 });
+    await expect(cancelledRow.getByText('exit -3')).toBeVisible({ timeout: 8_000 });
+    await expect(cancelledRow.getByText('release was cancelled before completion')).toBeVisible({
+      timeout: 8_000,
+    });
+    await expect(page.getByRole('button', { name: /^cancelled 0$/i })).toBeVisible();
+    await expect(page.getByRole('button', { name: /^completed 1$/i })).toBeVisible();
+  });
+
+  test('completed workflow with a direct cancelled exit code is normalized to cancelled', async ({
+    page,
+  }) => {
+    await stubWorkflowRunsShell(page);
+    await stubWorkflowRuns(page, () => [
+      makeRun('completed', {
+        id: 'workflow-run-direct-cancelled',
+        input: ['workflow-direct-cancelled', { triggeredBy: 'agent-cancelled' }],
+        output: {
+          exitCode: -3,
+          detail: 'release was cancelled by the workflow',
+        },
+      }),
+    ]);
+
+    await page.goto('/workflow-runs');
+
+    const attentionPanel = page.getByLabel('Workflow runs needing attention');
+    const cancelledRow = attentionPanel.getByRole('link', { name: /workflow-direct-cancelled/i }).first();
+    await expect(attentionPanel).toBeVisible({ timeout: 8_000 });
+    await expect(cancelledRow.getByLabel('status cancelled')).toBeVisible({ timeout: 8_000 });
+    await expect(cancelledRow.getByText('exit -3')).toHaveCount(0);
+    await expect(cancelledRow.getByText('release was cancelled by the workflow')).toBeVisible({
+      timeout: 8_000,
+    });
+    await expect(page.getByRole('button', { name: /^cancelled 1$/i })).toBeVisible();
+    await expect(page.getByRole('button', { name: /^completed 0$/i })).toBeVisible();
+  });
+
   test('page already open moves a newly-started run into attention when it fails', async ({
     page,
   }) => {
