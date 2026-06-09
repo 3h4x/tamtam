@@ -1,6 +1,6 @@
 // graphile-worker task: orchestrator-tick
 //
-// Fires every 5 minutes (self-reenqueue). Reads the stats/bridge snapshot,
+// Fires every 60 seconds (self-reenqueue). Reads the stats/bridge snapshot,
 // asks `decideBoosts` for projects that deserve an extra agent fire given
 // current pace headroom, and enqueues those bonus fires via the existing
 // `agent-cron` task. Settings-gated end-to-end — when
