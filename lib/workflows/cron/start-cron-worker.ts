@@ -1,7 +1,7 @@
 // Start a graphile-worker pool inside the Next.js process to actually run
 // the queued `agent-cron` jobs that `seedAgentCrons` enqueues. Runs against
-// the same Postgres as the Vercel Workflow runtime — they share the
-// `graphile_worker.jobs` table but have non-overlapping `task_identifier`
+// the application Postgres database. They share the `graphile_worker.jobs`
+// table but have non-overlapping `task_identifier`
 // names so they don't trip over each other.
 //
 // One pool per process. `globalThis.__tamtamCronWorker` pins the runner so
