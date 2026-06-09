@@ -150,16 +150,23 @@ function formatRunSummaryText(value: string | null | undefined): string | null {
 }
 
 function latestFailureSummary(entry: Entry): string | null {
-  const children = [...(entry.children ?? []), ...(entry.chainedChildren ?? [])]
+  const children: Entry[] = []
   const seen = new Set<string>()
-  const uniqueChildren = children.filter((child) => {
-    if (seen.has(child.key)) return false
-    seen.add(child.key)
-    return true
-  })
-  const latestFailure = uniqueChildren
+  const collect = (nodes: Entry[]) => {
+    for (const node of nodes) {
+      if (seen.has(node.key)) continue
+      seen.add(node.key)
+      children.push(node)
+      collect(node.children ?? [])
+      collect(node.chainedChildren ?? [])
+    }
+  }
+  collect([...(entry.children ?? []), ...(entry.chainedChildren ?? [])])
+  const failedChildren = children
     .filter((child) => entryNeedsAttention(child))
-    .sort((a, b) => b.lastActivityAt - a.lastActivityAt)[0]
+    .sort((a, b) => b.lastActivityAt - a.lastActivityAt)
+  const latestFailure = failedChildren.find((child) => child.workSummary || child.subtitle || child.detail)
+    ?? failedChildren[0]
   // Fall back to `detail` (the error extracted from the failed step's log tail,
   // see lib/jobs/storage.ts failureDetailForList) so a step that failed without
   // a work_summary still surfaces its reason instead of a bare "exit 1".
