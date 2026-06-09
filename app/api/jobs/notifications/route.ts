@@ -65,9 +65,8 @@ function insertNewestBy<T>(items: T[], item: T, limit: number, valueOf: (item: T
 export async function GET() {
   // The 30 s background probe sweep (`runProbeSweep` in
   // instrumentation-node.ts) keeps `finishedAt` fresh on every running row,
-  // so we no longer fork PM2 from this 5 s-polled endpoint. Before this, the
-  // bell route was the slowest call on the dashboard (300+ ms) — one PM2
-  // jlist per running job times five polls per project page.
+  // so this 5 s-polled endpoint avoids a PM2 jlist per running job times five
+  // polls per project page.
   //
   // Per-project superseding: if a project's most recent finished job
   // succeeded in a terminal way, hide older unseen failures for that project

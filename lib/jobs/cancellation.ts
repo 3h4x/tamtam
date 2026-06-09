@@ -77,9 +77,9 @@ export function shouldSignalJobPid(job: Pick<JobData, 'pid' | 'kind'>): boolean 
   // PID equality is the authoritative safety check: any job whose pid IS the
   // server's own process.pid must NEVER be signaled. Multiple kinds use that
   // convention (push, commit, release meta, inline-agent before/around child
-  // capture) and the kind list has drifted out of sync before, causing
-  // TamTam to SIGKILL itself on its own job completion. Keep the kind check
-  // as belt-and-suspenders for older code paths that compare against constants.
+  // capture), and the kind list is easier to drift than this invariant. Keep
+  // the kind check as belt-and-suspenders for older code paths that compare
+  // against constants.
   if (job.pid === process.pid) return false;
   return job.pid > SAFE_PID_FLOOR && !isInlineServerKind(job.kind);
 }

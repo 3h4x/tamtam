@@ -1,5 +1,4 @@
-// Barrel file: re-exports everything from the split modules so all existing
-// `import ... from '@/lib/jobs/job-storage'` imports continue to work unchanged.
+// Compatibility barrel for callers that import the job-storage facade.
 
 export type { JobData } from './types';
 
