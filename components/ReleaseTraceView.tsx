@@ -140,6 +140,9 @@ export function ReleaseTraceView({ projectName, releaseId }: Props) {
         setError('Failed to load release trace')
       }
     }
+    setTrace(null)
+    setError(null)
+    setExpandedStep(null)
     load()
     // Poll while running
     const id = setInterval(async () => {

@@ -7,6 +7,7 @@ import type { Route } from '@playwright/test';
 
 const PROJECT = 'trace-ui';
 const RELEASE_ID = 'rel-trace-001';
+const RELEASE_ID_NEXT = 'rel-trace-002';
 const now = () => Math.floor(Date.now() / 1000);
 
 interface MockStep {
@@ -86,6 +87,17 @@ async function stubTrace(page: import('@playwright/test').Page, trace: MockTrace
     `**/api/projects/by-project/${PROJECT}/release/${RELEASE_ID}`,
     (route: Route) => route.fulfill({ json: trace }),
   );
+}
+
+async function clickClientRoute(page: import('@playwright/test').Page, href: string): Promise<void> {
+  await page.evaluate((targetHref) => {
+    const anchor = document.createElement('a');
+    anchor.href = targetHref;
+    anchor.textContent = 'switch release';
+    document.body.appendChild(anchor);
+    anchor.click();
+    anchor.remove();
+  }, href);
 }
 
 // ─── Test 1: success badge ────────────────────────────────────────────────────
@@ -471,6 +483,88 @@ test('clicking a step row expands and shows its log excerpt', async ({ page }) =
   // Clicking again collapses it
   await page.getByRole('button').filter({ hasText: 'push' }).first().click();
   await expect(page.getByText(EXCERPT)).not.toBeVisible();
+});
+
+test('release trace clears stale release content while navigating to another release', async ({
+  page,
+}) => {
+  const oldExcerpt = 'Old release log excerpt must not survive release navigation.';
+  const nextExcerpt = 'Next release log excerpt after the route change.';
+  let nextTraceRequested = false;
+  let resolveNextTrace!: () => void;
+  const nextTraceReady = new Promise<void>((resolve) => {
+    resolveNextTrace = resolve;
+  });
+
+  const firstTrace = makeTrace({
+    release_id: RELEASE_ID,
+    status: 'done',
+    exit_code: 0,
+    finished_at: now() - 5,
+    steps: [
+      makeStep({
+        job_id: 'step-old-release',
+        kind: 'review',
+        status: 'done',
+        exit_code: 0,
+        started_at: now() - 30,
+        finished_at: now() - 5,
+        log_excerpt: oldExcerpt,
+      }),
+    ],
+  });
+  const nextTrace = makeTrace({
+    release_id: RELEASE_ID_NEXT,
+    status: 'running',
+    exit_code: null,
+    finished_at: null,
+    steps: [
+      makeStep({
+        job_id: 'step-next-release',
+        kind: 'push',
+        status: 'running',
+        exit_code: null,
+        started_at: now() - 10,
+        finished_at: null,
+        log_excerpt: nextExcerpt,
+      }),
+    ],
+  });
+
+  await stubShellRoutes(page);
+  await stubSettings(page);
+  await page.route(
+    `**/api/projects/by-project/${PROJECT}/release/${RELEASE_ID}`,
+    (route: Route) => route.fulfill({ json: firstTrace }),
+  );
+  await page.route(
+    `**/api/projects/by-project/${PROJECT}/release/${RELEASE_ID_NEXT}`,
+    async (route: Route) => {
+      nextTraceRequested = true;
+      await nextTraceReady;
+      await route.fulfill({ json: nextTrace });
+    },
+  );
+
+  await page.goto(`/project/${PROJECT}/release/${RELEASE_ID}`);
+  const oldRow = page.getByRole('button').filter({ hasText: 'review' }).first();
+  await expect(oldRow).toBeVisible({ timeout: 8_000 });
+  await oldRow.click();
+  await expect(page.getByText(oldExcerpt)).toBeVisible({ timeout: 8_000 });
+
+  await clickClientRoute(page, `/project/${PROJECT}/release/${RELEASE_ID_NEXT}`);
+  await expect(page).toHaveURL(new RegExp(`/project/${PROJECT}/release/${RELEASE_ID_NEXT}$`), {
+    timeout: 8_000,
+  });
+  await expect.poll(() => nextTraceRequested, { timeout: 8_000 }).toBe(true);
+
+  await expect(page.getByText(oldExcerpt)).toHaveCount(0, { timeout: 8_000 });
+  await expect(page.getByText(`Release · ${RELEASE_ID.slice(-12)}`)).toHaveCount(0);
+
+  resolveNextTrace();
+  await expect(page.getByText('running').first()).toBeVisible({ timeout: 8_000 });
+  await expect(page.getByText('push').first()).toBeVisible();
+  await expect(page.getByText(nextExcerpt)).not.toBeVisible();
 });
 
 test('release trace shows the trigger job link with a truncated prompt preview', async ({
