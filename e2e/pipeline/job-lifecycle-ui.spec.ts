@@ -1101,6 +1101,75 @@ test.describe('Job lifecycle UI badges', () => {
     await expect(agentRow.getByText('exit 1', { exact: true })).toBeVisible();
   });
 
+  test('failed filter count increments when a running job fails beside an existing failure', async ({
+    page,
+  }) => {
+    let serveRunning = true;
+    const existingFailure = 'Existing failed run kept for comparison';
+    const newFailure = 'Second provider run failed after initial streaming output';
+
+    await mockJobScenario(page, () => [
+      makeJob({
+        id: 'job-existing-failure-peer',
+        kind: 'run',
+        status: 'done',
+        exit_code: 1,
+        started_at: now() - 90,
+        finished_at: now() - 70,
+        session_id: 'sess-existing-failure-peer',
+        work_summary: existingFailure,
+      }),
+      makeJob({
+        id: 'job-running-failure-peer',
+        kind: 'run',
+        status: serveRunning ? 'running' : 'done',
+        exit_code: serveRunning ? null : 2,
+        started_at: now() - 30,
+        finished_at: serveRunning ? null : now() - 4,
+        session_id: 'sess-running-failure-peer',
+        work_summary: serveRunning
+          ? 'Streaming output before the second run fails'
+          : newFailure,
+      }),
+    ]);
+
+    await page.goto(`/project/${PROJECT}/history`);
+
+    const existingRow = page.getByRole('button')
+      .filter({ hasText: existingFailure })
+      .first();
+    const liveRow = page.getByRole('button')
+      .filter({ hasText: 'Streaming output before the second run fails' })
+      .first();
+
+    await expect(existingRow.getByText('exit 1', { exact: true })).toBeVisible({
+      timeout: 8_000,
+    });
+    await expect(liveRow.getByLabel('running')).toBeVisible({ timeout: 8_000 });
+    await expect(page.getByRole('button', { name: /^running 1$/i })).toBeVisible();
+    await expect(page.getByRole('button', { name: /^failed 1$/i })).toBeVisible();
+
+    serveRunning = false;
+
+    await expect(page.getByRole('button', { name: /^running 1$/i })).toHaveCount(0, {
+      timeout: 12_000,
+    });
+    await expect(page.getByRole('button', { name: /^failed 2$/i })).toBeVisible({
+      timeout: 12_000,
+    });
+
+    await page.getByRole('button', { name: /^failed 2$/i }).click();
+
+    await expect(existingRow).toBeVisible();
+    const failedPeerRow = page.getByRole('button')
+      .filter({ hasText: newFailure })
+      .first();
+    await expect(failedPeerRow).toBeVisible({ timeout: 12_000 });
+    await expect(failedPeerRow.getByText('exit 2', { exact: true })).toBeVisible();
+    await expect(failedPeerRow.getByLabel('running')).toHaveCount(0);
+    await expect(page.getByText('Streaming output before the second run fails')).toHaveCount(0);
+  });
+
   // -------------------------------------------------------------------------
   // History tab — failed run job surfaces workSummary via ownSummary path.
   //
