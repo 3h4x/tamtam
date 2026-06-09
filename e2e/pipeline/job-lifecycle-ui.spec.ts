@@ -1011,4 +1011,131 @@ test.describe('Job lifecycle UI badges', () => {
     await expect(runRow.getByLabel('running')).toHaveCount(0, { timeout: 12_000 });
     await expect(agentRow.getByText('exit 1', { exact: true })).toBeVisible();
   });
+
+  // -------------------------------------------------------------------------
+  // History tab — failed run job surfaces workSummary via ownSummary path.
+  //
+  // RunRow.ownSummary = isConversationalRow ? formatRunSummaryText(e.workSummary) : null
+  // runSummary = effectiveRunning ? null : (ownFailureDetail ?? ownSummary ?? ...)
+  //
+  // For a failed run job with no detail but a workSummary, runSummary = ownSummary
+  // = workSummary. Existing tests cover the cancelled path (work_summary → null)
+  // and the successful path — this test covers the failure path where workSummary
+  // carries the failure reason and must survive the running→failed transition.
+  // -------------------------------------------------------------------------
+  test('failed chat run surfaces workSummary text via poll without leaving a running badge', async ({
+    page,
+  }) => {
+    let serveRunning = true;
+    const liveText = 'Scaffolding the new auth middleware...';
+    const failureText = 'Run failed: auth provider rejected the connection.';
+
+    await mockJobScenario(page, () => [
+      makeJob({
+        id: 'job-run-fail-summary',
+        kind: 'run',
+        status: serveRunning ? 'running' : 'done',
+        exit_code: serveRunning ? null : 1,
+        started_at: now() - 25,
+        finished_at: serveRunning ? null : now() - 4,
+        session_id: 'sess-run-fail-summary',
+        work_summary: serveRunning ? liveText : failureText,
+      }),
+    ]);
+
+    await page.goto(`/project/${PROJECT}/history`);
+
+    const row = page.getByRole('button')
+      .filter({ hasText: 'started' })
+      .first();
+    await expect(row).toBeVisible();
+    await expect(row.getByLabel('running')).toBeVisible();
+    // While running, liveDetail shows the in-progress workSummary.
+    await expect(row.getByText(liveText, { exact: false })).toBeVisible();
+
+    serveRunning = false;
+
+    // After failure: exit 1 badge appears, live liveText replaced by failureText
+    // via runSummary (ownSummary path), running badge clears.
+    await expect(row.getByText('exit 1', { exact: true })).toBeVisible({ timeout: 12_000 });
+    await expect(row.getByText(failureText, { exact: false })).toBeVisible({ timeout: 12_000 });
+    await expect(row.getByText(liveText, { exact: false })).toHaveCount(0, { timeout: 12_000 });
+    await expect(row.getByLabel('running')).toHaveCount(0, { timeout: 12_000 });
+  });
+
+  // -------------------------------------------------------------------------
+  // History tab — failed run job surfaces detail over workSummary.
+  //
+  // RunRow.ownFailureDetail = !running && effectiveNeedsAttention && isConversationalRow
+  //   ? formatRunSummaryText(e.detail) : null
+  // runSummary = ownFailureDetail ?? ownSummary ?? ...
+  //
+  // When a run job fails with both detail and workSummary, detail takes
+  // precedence (ownFailureDetail ?? ownSummary). Neither path is tested for
+  // the conversational failure case without explicit test coverage.
+  // -------------------------------------------------------------------------
+  test('failed chat run shows detail text (not workSummary) when both are present', async ({
+    page,
+  }) => {
+    const detailText = 'Provider error: token limit exceeded on attempt 3.';
+    const workSummaryText = 'Refactored the token cache layer.';
+
+    await mockJobScenario(page, () => [
+      makeJob({
+        id: 'job-run-detail-precedence',
+        kind: 'run',
+        status: 'done',
+        exit_code: 1,
+        started_at: now() - 60,
+        finished_at: now() - 10,
+        session_id: 'sess-run-detail-precedence',
+        work_summary: workSummaryText,
+      }),
+    ]);
+
+    // The makeJob helper does not support the detail field — add it via a
+    // separate route override by extending the base mock. We use a fresh
+    // page.route after mockJobScenario to inject the extra field.
+    // Playwright matches later-registered routes first, so this overrides
+    // the job list returned by mockJobScenario.
+    await page.route(
+      (url) => url.pathname === '/api/jobs' && url.searchParams.get('project') === PROJECT,
+      (route) => {
+        route.fulfill({
+          json: {
+            jobs: [
+              {
+                id: 'job-run-detail-precedence',
+                project: PROJECT,
+                kind: 'run',
+                status: 'done',
+                exit_code: 1,
+                started_at: now() - 60,
+                finished_at: now() - 10,
+                pid: 0,
+                log_path: '',
+                seen: true,
+                session_id: 'sess-run-detail-precedence',
+                work_summary: workSummaryText,
+                detail: detailText,
+              },
+            ],
+            pendingReleaseProjects: [],
+          },
+        });
+      },
+    );
+
+    await page.goto(`/project/${PROJECT}/history`);
+
+    const row = page.getByRole('button')
+      .filter({ hasText: 'started' })
+      .first();
+    await expect(row).toBeVisible({ timeout: 8_000 });
+    // detail takes precedence over workSummary via ownFailureDetail ?? ownSummary.
+    await expect(row.getByText(detailText, { exact: false })).toBeVisible({ timeout: 8_000 });
+    // workSummary must NOT be shown when detail is present for a failed run row.
+    await expect(row.getByText(workSummaryText, { exact: false })).toHaveCount(0);
+    await expect(row.getByLabel('running')).toHaveCount(0);
+  });
 });
