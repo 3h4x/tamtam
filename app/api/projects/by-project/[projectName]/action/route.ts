@@ -148,6 +148,13 @@ export async function POST(
 
   job.pid = proc.pid ?? 0;
 
+  proc.on('error', (err: Error) => {
+    console.error(`[custom-action] failed to start '${actionName}' for ${projectName}:`, err);
+    job.exitCode = -1;
+    job.finishedAt = Date.now() / 1000;
+    updateJob(job);
+  });
+
   proc.on('close', (code: number | null) => {
     job.exitCode = code ?? -1;
     job.finishedAt = Date.now() / 1000;
