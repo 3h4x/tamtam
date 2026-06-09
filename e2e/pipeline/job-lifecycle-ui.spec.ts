@@ -44,6 +44,8 @@ type MockJob = {
   seen?: boolean;
   parent_job_id?: string | null;
   work_summary?: string | null;
+  context_meta?: string | null;
+  prompt_bytes?: number | null;
 };
 
 async function mockJobScenario(
@@ -1137,5 +1139,100 @@ test.describe('Job lifecycle UI badges', () => {
     // workSummary must NOT be shown when detail is present for a failed run row.
     await expect(row.getByText(workSummaryText, { exact: false })).toHaveCount(0);
     await expect(row.getByLabel('running')).toHaveCount(0);
+  });
+
+  test('history chat row gains unfinished outcome badge when it settles via poll', async ({
+    page,
+  }) => {
+    let serveRunning = true;
+    await mockJobScenario(page, () => [
+      makeJob({
+        id: 'job-run-outcome-needs-continue',
+        kind: 'run',
+        status: serveRunning ? 'running' : 'done',
+        exit_code: serveRunning ? null : 0,
+        started_at: now() - 30,
+        finished_at: serveRunning ? null : now() - 4,
+        session_id: 'sess-run-outcome-needs-continue',
+        context_meta: serveRunning
+          ? null
+          : JSON.stringify({ outcomeClassification: { verdict: 'needs_continue' } }),
+      }),
+    ]);
+
+    await page.goto(`/project/${PROJECT}/history`);
+
+    const row = page.getByRole('button')
+      .filter({ hasText: 'started' })
+      .first();
+    await expect(row).toBeVisible();
+    await expect(row.getByLabel('running')).toBeVisible();
+    await expect(row.getByText('↻ unfinished')).toHaveCount(0);
+
+    serveRunning = false;
+
+    const outcomeBadge = row.getByText('↻ unfinished', { exact: true });
+    await expect(outcomeBadge).toBeVisible({ timeout: 12_000 });
+    await expect(outcomeBadge).toHaveAttribute(
+      'title',
+      'Local-LLM outcome verdict: needs continue',
+    );
+    await expect(row.getByLabel('running')).toHaveCount(0, { timeout: 12_000 });
+  });
+
+  test('history review row shows follow-up issue link and alert prompt-size chip', async ({
+    page,
+  }) => {
+    const followupUrl = 'https://github.com/example/repo/issues/42';
+    const jobs: MockJob[] = [
+      makeJob({
+        id: 'job-review-followup-prompt-alert',
+        kind: 'review',
+        status: 'done',
+        exit_code: 0,
+        started_at: now() - 80,
+        finished_at: now() - 20,
+        verdict: 'DO NOT SHIP',
+        session_id: 'sess-review-followup-prompt-alert',
+        prompt_bytes: 52_224,
+        context_meta: JSON.stringify({
+          followupIssueUrl: followupUrl,
+          followupIssueNumber: 42,
+        }),
+      }),
+      makeJob({
+        id: 'job-run-prompt-below-threshold',
+        kind: 'run',
+        status: 'done',
+        exit_code: 0,
+        started_at: now() - 120,
+        finished_at: now() - 90,
+        session_id: 'sess-run-prompt-below-threshold',
+        prompt_bytes: 19_456,
+      }),
+    ];
+    await mockJobScenario(page, jobs);
+
+    await page.goto(`/project/${PROJECT}/history`);
+
+    const reviewRow = page.getByRole('button')
+      .filter({ hasText: 'review' })
+      .filter({ hasText: 'started' })
+      .first();
+    await expect(reviewRow).toBeVisible();
+
+    const followupLink = reviewRow.getByRole('link', { name: '↗ filed #42' });
+    await expect(followupLink).toBeVisible();
+    await expect(followupLink).toHaveAttribute('href', followupUrl);
+
+    const promptChip = reviewRow.getByText('prompt 51KB', { exact: true });
+    await expect(promptChip).toBeVisible();
+    await expect(promptChip).toHaveClass(/text-status-error/);
+    await expect(promptChip).toHaveAttribute(
+      'title',
+      /Prompt piped to provider: 52,224 bytes/,
+    );
+
+    await expect(page.getByText('prompt 19KB', { exact: true })).toHaveCount(0);
   });
 });
