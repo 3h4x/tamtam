@@ -612,6 +612,45 @@ test.describe('Job lifecycle UI badges', () => {
     await expect(row.getByText('running', { exact: true })).toHaveCount(0);
   });
 
+  test('history release row surfaces stop reason when it settles without child steps', async ({
+    page,
+  }) => {
+    let serveRunning = true;
+    const stopReason = 'review startup failed: prerequisite command exited 1';
+    await mockJobScenario(page, () => [
+      makeJob({
+        id: 'job-release-blocked-stop-reason',
+        kind: 'release',
+        status: serveRunning ? 'running' : 'done',
+        exit_code: serveRunning ? null : 1,
+        started_at: now() - 45,
+        finished_at: serveRunning ? null : now() - 4,
+        context_meta: serveRunning
+          ? null
+          : JSON.stringify({ releaseStopReason: stopReason }),
+      }),
+    ]);
+
+    await page.goto(`/project/${PROJECT}/history`);
+
+    const row = page.getByRole('button')
+      .filter({ hasText: 'release' })
+      .filter({ hasText: 'started' })
+      .first();
+    await expect(row).toBeVisible();
+    await expect(row.getByLabel('running')).toBeVisible();
+    await expect(row.getByText(stopReason)).toHaveCount(0);
+
+    serveRunning = false;
+
+    await expect(row.getByText('release blocked', { exact: true })).toBeVisible({
+      timeout: 12_000,
+    });
+    await expect(row.getByText(stopReason, { exact: false })).toBeVisible({ timeout: 12_000 });
+    await expect(row.getByLabel('running')).toHaveCount(0, { timeout: 12_000 });
+    await expect(row.getByText('running', { exact: true })).toHaveCount(0);
+  });
+
   test('overview tab clears active-work banner after the last running job completes', async ({
     page,
   }) => {
