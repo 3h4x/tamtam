@@ -1170,6 +1170,75 @@ test.describe('Job lifecycle UI badges', () => {
     await expect(page.getByText('Streaming output before the second run fails')).toHaveCount(0);
   });
 
+  test('running filter keeps the remaining active row when one concurrent job completes', async ({
+    page,
+  }) => {
+    let phase: 'both-running' | 'first-done' = 'both-running';
+    const firstLive = 'First agent is still preparing the workspace';
+    const firstDone = 'First agent completed its handoff';
+    const secondLive = 'Second agent keeps running after the first completes';
+
+    await mockJobScenario(page, () => {
+      const firstRunning = phase === 'both-running';
+
+      return [
+        makeJob({
+          id: 'job-running-filter-agent-first',
+          kind: 'agent:first',
+          status: firstRunning ? 'running' : 'done',
+          exit_code: firstRunning ? null : 0,
+          started_at: now() - 45,
+          finished_at: firstRunning ? null : now() - 6,
+          session_id: 'sess-running-filter-agent-first',
+          work_summary: firstRunning ? firstLive : firstDone,
+        }),
+        makeJob({
+          id: 'job-running-filter-agent-second',
+          kind: 'agent:second',
+          status: 'running',
+          exit_code: null,
+          started_at: now() - 35,
+          finished_at: null,
+          session_id: 'sess-running-filter-agent-second',
+          work_summary: secondLive,
+        }),
+      ];
+    });
+
+    await page.goto(`/project/${PROJECT}/history`);
+
+    const firstRow = page.getByRole('button')
+      .filter({ hasText: firstLive })
+      .first();
+    const secondRow = page.getByRole('button')
+      .filter({ hasText: secondLive })
+      .first();
+
+    await expect(firstRow.getByLabel('running')).toBeVisible({ timeout: 8_000 });
+    await expect(secondRow.getByLabel('running')).toBeVisible({ timeout: 8_000 });
+
+    await page.getByRole('button', { name: /^running 2$/i }).click();
+    await expect(firstRow).toBeVisible();
+    await expect(secondRow).toBeVisible();
+
+    phase = 'first-done';
+
+    await expect(page.getByRole('button', { name: /^running 1$/i })).toBeVisible({
+      timeout: 12_000,
+    });
+    await expect(page.getByText(firstLive)).toHaveCount(0, { timeout: 12_000 });
+    await expect(page.getByText(firstDone)).toHaveCount(0);
+    await expect(secondRow).toBeVisible({ timeout: 12_000 });
+    await expect(secondRow.getByLabel('running')).toBeVisible();
+
+    await page.getByRole('button', { name: /^all 2$/i }).click();
+    const finishedFirstRow = page.getByRole('button')
+      .filter({ hasText: firstDone })
+      .first();
+    await expect(finishedFirstRow).toBeVisible({ timeout: 12_000 });
+    await expect(finishedFirstRow.getByLabel('running')).toHaveCount(0);
+  });
+
   // -------------------------------------------------------------------------
   // History tab — failed run job surfaces workSummary via ownSummary path.
   //
