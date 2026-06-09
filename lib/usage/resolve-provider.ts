@@ -87,7 +87,7 @@ function enabledProvidersFromSettings(settings: ReturnType<typeof getSettings>):
  *   1. parent's stored provider — pipeline children inherit while it is runnable
  *   2. caller-supplied `preferred`, if it's still in the enabled set and
  *      survives the current budget gate
- *   3. policy pick: most-remaining-quota among enabled, gated by budget
+ *   3. policy pick: pace-aware provider choice among enabled, gated by budget
  *
  * Returns `{ provider: null, reason }` if every enabled provider is over
  * budget; callers should surface that as HTTP 429. If no providers are
