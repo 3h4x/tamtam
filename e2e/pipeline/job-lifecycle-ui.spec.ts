@@ -1235,4 +1235,89 @@ test.describe('Job lifecycle UI badges', () => {
 
     await expect(page.getByText('prompt 19KB', { exact: true })).toHaveCount(0);
   });
+
+  test('history chat rows show done and asked outcome chips with their tones', async ({
+    page,
+  }) => {
+    const jobs: MockJob[] = [
+      makeJob({
+        id: 'job-run-outcome-done',
+        kind: 'run',
+        status: 'done',
+        exit_code: 0,
+        started_at: now() - 40,
+        finished_at: now() - 10,
+        session_id: 'sess-run-outcome-done',
+        context_meta: JSON.stringify({ outcomeClassification: { verdict: 'done' } }),
+      }),
+      makeJob({
+        id: 'job-run-outcome-asked',
+        kind: 'run',
+        status: 'done',
+        exit_code: 0,
+        started_at: now() - 120,
+        finished_at: now() - 90,
+        session_id: 'sess-run-outcome-asked',
+        context_meta: JSON.stringify({ outcomeClassification: { verdict: 'asked_question' } }),
+      }),
+    ];
+    await mockJobScenario(page, jobs);
+
+    await page.goto(`/project/${PROJECT}/history`);
+
+    // `done` → "✓ done", success tone.
+    const doneChip = page.getByText('✓ done', { exact: true });
+    await expect(doneChip).toBeVisible();
+    await expect(doneChip).toHaveClass(/text-status-success/);
+    await expect(doneChip).toHaveAttribute(
+      'title',
+      'Local-LLM outcome verdict: done',
+    );
+
+    // `asked_question` → "? asked", info tone.
+    const askedChip = page.getByText('? asked', { exact: true });
+    await expect(askedChip).toBeVisible();
+    await expect(askedChip).toHaveClass(/text-status-info/);
+    await expect(askedChip).toHaveAttribute(
+      'title',
+      'Local-LLM outcome verdict: asked question',
+    );
+  });
+
+  test('history row shows warn-tone prompt chip at the 20KB boundary', async ({
+    page,
+  }) => {
+    const jobs: MockJob[] = [
+      makeJob({
+        id: 'job-run-prompt-warn-boundary',
+        kind: 'run',
+        status: 'done',
+        exit_code: 0,
+        started_at: now() - 60,
+        finished_at: now() - 20,
+        session_id: 'sess-run-prompt-warn-boundary',
+        // Exactly the warn threshold (PROMPT_BYTES_WARN = 20_000), below the
+        // alert threshold (50_000) — chip shows in warning tone, not error.
+        prompt_bytes: 20_000,
+      }),
+    ];
+    await mockJobScenario(page, jobs);
+
+    await page.goto(`/project/${PROJECT}/history`);
+
+    const row = page.getByRole('button')
+      .filter({ hasText: 'started' })
+      .first();
+    await expect(row).toBeVisible();
+
+    const promptChip = row.getByText('prompt 20KB', { exact: true });
+    await expect(promptChip).toBeVisible();
+    await expect(promptChip).toHaveClass(/text-status-warning/);
+    // Must NOT escalate to the alert (error) styling at the warn boundary.
+    await expect(promptChip).not.toHaveClass(/text-status-error/);
+    await expect(promptChip).toHaveAttribute(
+      'title',
+      /Prompt piped to provider: 20,000 bytes/,
+    );
+  });
 });
