@@ -60,13 +60,27 @@ describe('<LogsPage />', () => {
     throw lastError;
   }
 
-  function clickButtonByText(text: string) {
+  function findButtonByText(text: string) {
     const buttons = Array.from(container.querySelectorAll('button'));
-    const button = buttons.find((b) => b.textContent?.includes(text));
+    return buttons.find((b) => b.textContent?.includes(text));
+  }
+
+  function clickButtonByText(text: string) {
+    const button = findButtonByText(text);
     if (!button) throw new Error(`button with text "${text}" not found`);
     flushSync(() => {
       button.dispatchEvent(new MouseEvent('click', { bubbles: true }));
     });
+  }
+
+  // The mount-time loadProjects chain (.then → .finally) crosses several
+  // microtask hops, so a single settle may not have rendered the project
+  // buttons yet. Wait for the button before clicking to avoid a race.
+  async function clickButtonByTextWhenReady(text: string) {
+    await waitFor(() => {
+      if (!findButtonByText(text)) throw new Error(`button with text "${text}" not found`);
+    });
+    clickButtonByText(text);
   }
 
   it('renders project buttons after fetchProjects resolves', async () => {
@@ -84,7 +98,7 @@ describe('<LogsPage />', () => {
     fetchProjectsMock.mockResolvedValue({ tasks: [{ project: 'alpha' }] });
     fetchProjectLogsMock.mockRejectedValue(new Error('500 internal'));
     await render();
-    clickButtonByText('alpha');
+    await clickButtonByTextWhenReady('alpha');
     // Resolve the rejected fetchProjectLogs and the resulting re-render. The
     // rejection + catch + setState chain crosses multiple microtask hops in
     // React 19, so retry the assertion rather than relying on a single tick.
@@ -105,7 +119,7 @@ describe('<LogsPage />', () => {
       ],
     });
     await render();
-    clickButtonByText('alpha');
+    await clickButtonByTextWhenReady('alpha');
     await waitFor(() => {
       expect(container.querySelector('input[type="search"]')).toBeTruthy();
     });
