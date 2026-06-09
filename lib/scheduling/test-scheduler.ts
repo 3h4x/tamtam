@@ -80,7 +80,11 @@ const state = (g.__tamtamTestScheduler ??= {
 async function fire(projectName: string): Promise<void> {
   try {
     const url = `${state.baseUrl}/api/projects/by-project/${encodeURIComponent(projectName)}/test`;
-    const res = await fetch(url, { method: 'POST', headers: { 'X-Tamtam-Trigger': 'test-cron' } });
+    const res = await fetch(url, {
+      method: 'POST',
+      headers: { 'X-Tamtam-Trigger': 'test-cron' },
+      signal: AbortSignal.timeout(30_000),
+    });
     if (!res.ok) {
       console.warn(`[test-scheduler] ${projectName} fire returned HTTP ${res.status}`);
     }
