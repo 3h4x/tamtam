@@ -306,6 +306,35 @@ test.describe('Workflow runs list live polling', () => {
     await expect(page).toHaveURL(stableUrl);
   });
 
+  test('active run disappearing from the backend clears active state without an orphaned spinner', async ({
+    page,
+  }) => {
+    let includeRun = true;
+
+    await stubWorkflowRunsShell(page);
+    await stubWorkflowRuns(page, () => (includeRun ? [makeRun('running')] : []));
+
+    await page.goto('/workflow-runs');
+
+    const activePanel = page.getByLabel('Active workflow runs');
+    await expect(activePanel).toBeVisible({ timeout: 8_000 });
+    await expect(activePanel.getByLabel('status running').first()).toBeVisible();
+    await expect(activePanel.getByRole('link', { name: /release orchestrator/i })).toBeVisible();
+    await expect(page.getByRole('button', { name: /^running 1$/i })).toBeVisible();
+    await expect(page.getByText('1 running')).toBeVisible();
+
+    const stableUrl = page.url();
+    includeRun = false;
+
+    await expect(activePanel).toHaveCount(0, { timeout: 12_000 });
+    await expect(page.getByRole('button', { name: /^running 0$/i })).toBeVisible({
+      timeout: 12_000,
+    });
+    await expect(page.getByText('1 running')).toHaveCount(0, { timeout: 12_000 });
+    await expect(page.getByRole('link', { name: /release orchestrator/i })).toHaveCount(0);
+    await expect(page).toHaveURL(stableUrl);
+  });
+
   test('pending workflow becomes running and then completed without stale status counts', async ({
     page,
   }) => {
