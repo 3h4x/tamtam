@@ -10,6 +10,7 @@ const WINDOWS = {
 } as const;
 
 type Window = keyof typeof WINDOWS;
+const VALID_WINDOWS = new Set<Window>(Object.keys(WINDOWS) as Window[]);
 
 const CACHE_TTL_MS = 60_000;
 const cache = new Map<Window, { body: OllamaStatsResponse; expiresAt: number }>();
@@ -51,7 +52,7 @@ export interface OllamaStatsResponse {
 
 export async function GET(request: NextRequest): Promise<NextResponse> {
   const param = request.nextUrl.searchParams.get('window') ?? '24h';
-  const window: Window = (Object.keys(WINDOWS) as Window[]).includes(param as Window)
+  const window: Window = VALID_WINDOWS.has(param as Window)
     ? (param as Window)
     : '24h';
 
