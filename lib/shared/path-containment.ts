@@ -39,5 +39,5 @@ export function realPathStaysInsideProject(projectPath: string, requestedAbsolut
 
   const root = projectRealPath ?? resolve(projectPath);
   const realRelativePath = relative(root, requestedRealPath);
-  return !!realRelativePath && !escapesRoot(realRelativePath);
+  return !escapesRoot(realRelativePath);
 }
