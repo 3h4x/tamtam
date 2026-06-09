@@ -198,8 +198,8 @@ export async function resumeStuckRelease(
 // Detect agent / terminal runs that finished successfully on projects with
 // auto_commit / auto_push / release_after_run enabled, but never spawned a
 // release pipeline. The release-after-run completion hook is supposed to do
-// this but it can be skipped on server restart, mid-hook crash, or before
-// this fix added the auto_commit/auto_push fallback. Returns one entry per
+// this but it can be skipped on server restart, mid-hook crash, or fallback
+// paths that bypass hook dispatch. Returns one entry per
 // stuck terminal run for the most recent run per project (older ones are
 // superseded by newer activity and shouldn't trigger their own release).
 export interface OrphanedRun {

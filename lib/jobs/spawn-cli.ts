@@ -13,8 +13,7 @@ import { constants as osConstants } from 'os';
 import { redactSecrets } from '@/lib/shared/log-redaction';
 import { buildChildEnv } from '@/lib/shared/child-env';
 
-// Canonical signal-name → signum table. Hoisted from the per-exit
-// `require('os').constants.signals` lookup inside the exit handler.
+// Canonical signal-name → signum table used by the exit handler.
 const OS_SIGNAL_NUMS = osConstants.signals as Record<string, number>;
 
 export interface RunSubprocessParams {
