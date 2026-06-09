@@ -205,6 +205,13 @@ export function PipelineStrip({
         (job) => PIPELINE_KINDS.has(job.kind) && (standaloneChainIds?.has(job.id) ?? false),
       )
   const visibleJobs = latestPipelineJobsByKind(chainJobs)
+  // A review→fix loop can run a kind more than once; the strip collapses each
+  // kind to its latest job, so surface the run count per kind to keep the
+  // iteration visible instead of silently hiding the prior attempts.
+  const runsByKind = new Map<string, number>()
+  for (const job of chainJobs) {
+    runsByKind.set(job.kind, (runsByKind.get(job.kind) ?? 0) + 1)
+  }
   const runningStep = traceReleaseId
     ? visibleJobs.find((job) => job.status === 'running') ?? null
     : visibleJobs.find((job) => job.status === 'running') ?? activePipelineJob
@@ -300,6 +307,7 @@ export function PipelineStrip({
           const state = stateOf(job)
           const label = kindLabel(job.kind)
           const hint = hintFor(job, pushError)
+          const runs = runsByKind.get(job.kind) ?? 1
           const canRetryPush = !!traceReleaseId && job.kind === 'push' && state === 'failed'
           return (
             <span key={job.id} className="inline-flex items-center gap-1">
@@ -309,12 +317,15 @@ export function PipelineStrip({
                 size="sm"
                 className={`min-h-[36px] gap-2 rounded-md px-2.5 py-1.5 text-[11px] hover:brightness-110 ${stateClass(state)}`}
                 onClick={() => openJob(job)}
-                aria-label={`${label}: ${state}. ${hint}`}
-                title={hint}
+                aria-label={`${label}: ${state}${runs > 1 ? `, ${runs} runs` : ''}. ${hint}`}
+                title={runs > 1 ? `${hint} (${label} ran ${runs}×)` : hint}
               >
                 {state === 'running' ? <Spinner size="sm" shrink /> : <span className="text-[10px]">{state === 'done' ? '✓' : '!'}</span>}
                 <span className="font-medium text-text-primary">{label}</span>
                 <span className="font-mono text-[9px] uppercase tracking-[0.12em]">{state}</span>
+                {runs > 1 && (
+                  <span className="font-mono text-[9px] tabular-nums text-current/70">·{runs}</span>
+                )}
               </Button>
               {canRetryPush && (
                 <Button

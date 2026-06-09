@@ -258,8 +258,9 @@ describe('PipelineStrip', () => {
     const reviewButtons = container.querySelectorAll('[aria-label^="review:"]')
     expect(reviewButtons).toHaveLength(1)
     expect(container.querySelector('[aria-label="pipeline summary: review running"]')).not.toBeNull()
-    expect(container.querySelector('[aria-label^="review: running."]')).not.toBeNull()
-    expect(container.querySelector('[aria-label^="review: attention."]')).toBeNull()
+    // The review→fix loop cycled, so the collapsed review pill surfaces its run count.
+    expect(container.querySelector('[aria-label^="review: running, 2 runs."]')).not.toBeNull()
+    expect(container.querySelector('[aria-label^="review: attention"]')).toBeNull()
     expect(container.textContent).toContain('2/3')
 
     const reviewButton = reviewButtons[0]
