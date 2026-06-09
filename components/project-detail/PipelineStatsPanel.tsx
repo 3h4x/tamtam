@@ -207,15 +207,14 @@ export function PipelineStatsPanel({ projectName }: { projectName: string }) {
       ) : (
         <>
           {refreshError && (
-            <div role="alert">
-              <ErrorCallout
-                tone="warning"
-                className="rounded-none border-x-0 border-t-0 px-3 py-2 text-sm"
-                preWrap={false}
-              >
-                {refreshError}
-              </ErrorCallout>
-            </div>
+            <ErrorCallout
+              role="alert"
+              tone="warning"
+              className="rounded-none border-x-0 border-t-0 px-3 py-2 text-sm"
+              preWrap={false}
+            >
+              {refreshError}
+            </ErrorCallout>
           )}
           <div className="grid gap-3 p-3 sm:grid-cols-2 xl:grid-cols-5">
             <MetricCard
