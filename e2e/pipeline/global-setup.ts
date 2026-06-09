@@ -47,6 +47,7 @@ const PROJECTS = [
   'terminal-run-failure',
   'terminal-run-session-finished',
   'terminal-run-session-finished-failure',
+  'terminal-run-session-continue-dual-surface',
   'start-detect-terminal',
   'start-detect-terminal-cancelled',
   'start-detect-terminal-failure-idle',

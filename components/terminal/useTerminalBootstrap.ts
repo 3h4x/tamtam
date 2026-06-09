@@ -64,6 +64,7 @@ export function useTerminalBootstrap({
   const router = useRouter()
   const [currentReleaseId, setCurrentReleaseId] = useState<string | null>(null)
   const attachedExternalJobRef = useRef<string | null>(null)
+  const attachedSessionJobRef = useRef<string | null>(null)
   // One-shot redirect to the currently-running session on initial mount.
   // If you bookmark / open a stale session URL while another session is
   // live, you almost always want the live one. We only do this once per
@@ -203,10 +204,12 @@ export function useTerminalBootstrap({
 
         const sessionProvider = matches.find(m => m.provider)?.provider ?? null
         if (lastIsRunning) {
+          if (attachedSessionJobRef.current === lastMatch.id) return
           const retrievedContextEntry = retrievedContextEntryFromMeta(lastMatch.context_meta)
           if (retrievedContextEntry) entries.push(retrievedContextEntry)
           const prompt = restoredPrompt(lastMatch)
           if (prompt) entries.push({ role: 'user', text: prompt })
+          attachedSessionJobRef.current = lastMatch.id
           terminalStore.update(projectName, () => ({
             history: entries,
             claudeSessionId: initialSessionId,
@@ -350,14 +353,20 @@ export function useTerminalBootstrap({
   useEffect(() => {
     if (!initialSessionId || jobParam) return
     let cancelled = false
+    let inFlight = false
 
     const poll = async () => {
+      if (inFlight) return
       const cur = terminalStore.get(projectName)
       if (cur.streaming || cur.currentJobId) return
 
+      inFlight = true
       try {
         const jobs = await fetchSessionJobs(projectName, initialSessionId)
         if (cancelled) return
+
+        const latest = terminalStore.get(projectName)
+        if (latest.streaming || latest.currentJobId) return
 
         const matches = jobs
           .filter((job) => isRestorableSessionKind(job.kind))
@@ -367,10 +376,19 @@ export function useTerminalBootstrap({
         const lastMatch = matches[matches.length - 1]
         const lastIsRunning = lastMatch.status !== 'done' && lastMatch.finished_at === null
         if (!lastIsRunning) return
+        if (attachedSessionJobRef.current === lastMatch.id) return
 
-        const completedMatches = matches.slice(0, -1)
-        const entries = await buildEntriesForCompletedJobs(completedMatches)
+        let entries = latest.restoredFor === initialSessionId && latest.history.length > 0
+          ? [...latest.history]
+          : await buildEntriesForCompletedJobs(matches.slice(0, -1))
         if (cancelled) return
+
+        const beforeAttach = terminalStore.get(projectName)
+        if (beforeAttach.streaming || beforeAttach.currentJobId) return
+        if (attachedSessionJobRef.current === lastMatch.id) return
+        if (beforeAttach.restoredFor === initialSessionId && beforeAttach.history.length > 0) {
+          entries = [...beforeAttach.history]
+        }
 
         const { skills: loadedSkills, docs: loadedDocs } = contextItemsFromMeta(matches[0].context_meta)
         const retrievedContextEntry = retrievedContextEntryFromMeta(lastMatch.context_meta)
@@ -379,6 +397,7 @@ export function useTerminalBootstrap({
         if (prompt) entries.push({ role: 'user', text: prompt })
 
         const sessionProvider = matches.find((match) => match.provider)?.provider ?? null
+        attachedSessionJobRef.current = lastMatch.id
         terminalStore.update(projectName, () => ({
           history: entries,
           claudeSessionId: initialSessionId,
@@ -394,12 +413,16 @@ export function useTerminalBootstrap({
           false,
           hasPrerequisiteContext(lastMatch.context_meta),
         )
-      } catch {}
+      } catch {
+      } finally {
+        inFlight = false
+      }
     }
 
+    void poll()
     const id = setInterval(() => {
       if (!cancelled) void poll()
-    }, 1000)
+    }, 250)
     return () => {
       cancelled = true
       clearInterval(id)

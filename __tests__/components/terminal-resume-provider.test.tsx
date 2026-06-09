@@ -631,6 +631,64 @@ describe('pending continue-issue resume provider', () => {
     unmount()
   })
 
+  it('does not attach the same live session job twice when polling overlaps', async () => {
+    vi.useFakeTimers()
+
+    let resolveJobs: (response: { json: () => Promise<{ jobs: unknown[] }> }) => void = () => {}
+    const delayedJobs = new Promise<{ json: () => Promise<{ jobs: unknown[] }> }>((resolve) => {
+      resolveJobs = resolve
+    })
+    vi.stubGlobal('fetch', vi.fn().mockImplementation(async (input: RequestInfo | URL) => {
+      const url = String(input)
+      if (url.startsWith('/api/jobs?project=proj')) {
+        return delayedJobs
+      }
+      throw new Error(`unexpected fetch: ${url}`)
+    }))
+    startStreamMock.mockImplementationOnce((projectName: string, jobId: string) => {
+      terminalStore.update(projectName, () => ({
+        currentJobId: jobId,
+        streaming: true,
+      }))
+    })
+
+    const { unmount } = renderElement(<SessionBootstrapHarness sessionId="sess-overlap" />)
+
+    await flushMicrotasks()
+    await vi.advanceTimersByTimeAsync(750)
+    expect(startStreamMock).not.toHaveBeenCalled()
+
+    resolveJobs({
+      json: async () => ({
+        jobs: [
+          {
+            id: 'run-live',
+            kind: 'run',
+            status: 'running',
+            session_id: 'sess-overlap',
+            started_at: 200,
+            finished_at: null,
+            exit_code: null,
+            user_prompt: 'live prompt',
+            prompt: null,
+            context_meta: null,
+            provider: 'claude',
+          },
+        ],
+      }),
+    })
+
+    await waitFor(() => {
+      expect(startStreamMock).toHaveBeenCalledTimes(1)
+      expect(startStreamMock).toHaveBeenCalledWith('proj', 'run-live', false, false)
+    })
+
+    await vi.advanceTimersByTimeAsync(750)
+    expect(startStreamMock).toHaveBeenCalledTimes(1)
+
+    unmount()
+  })
+
   it('passes the prerequisite flag when opening a claude job from a job param', async () => {
     vi.stubGlobal('fetch', vi.fn().mockImplementation(async (input: RequestInfo | URL) => {
       const url = String(input)
