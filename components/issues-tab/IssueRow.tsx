@@ -29,7 +29,7 @@ function workOnChainSummary(cfg: ProjectConfig | null): string {
 export function IssueRow({ issue, projectName, projectCfg }: { issue: GhIssue; projectName: string; projectCfg: ProjectConfig | null }) {
   const router = useRouter()
   const [expanded, setExpanded] = useState(false)
-  // Whether a previous Claude session for this issue exists (run/fix with
+  // Whether a previous provider session for this issue exists (run/fix with
   // gh_issue_number stamped + a session_id). When true we offer a "Continue"
   // button that resumes that session and prompts only for unverified DoD items.
   const [hasContext, setHasContext] = useState(false)
@@ -161,7 +161,7 @@ export function IssueRow({ issue, projectName, projectCfg }: { issue: GhIssue; p
               className="gap-1 rounded-md border-accent/40 text-[10px] font-normal"
               onClick={continueWork}
               disabled={continuing}
-              title="Resume the last Claude session for this issue. Auto-prompts only the acceptance criteria still unverified."
+              title="Resume the last provider session for this issue. Auto-prompts only the acceptance criteria still unverified."
             >
               {continuing && <Spinner size="sm" shrink />}
               Continue
