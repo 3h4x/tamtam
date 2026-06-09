@@ -612,6 +612,54 @@ test.describe('Job lifecycle UI badges', () => {
     await expect(row.getByText('running', { exact: true })).toHaveCount(0);
   });
 
+  test('running filter clears when a job is cancelled via poll', async ({
+    page,
+  }) => {
+    let serveRunning = true;
+    await mockJobScenario(page, () => [
+      makeJob({
+        id: 'job-live-history-filter-cancelled',
+        kind: 'test',
+        status: serveRunning ? 'running' : 'done',
+        exit_code: serveRunning ? null : -3,
+        started_at: now() - 45,
+        finished_at: serveRunning ? null : now() - 5,
+        session_id: 'sess-live-history-filter-cancelled',
+        work_summary: serveRunning ? 'Tests are still running' : 'Cancelled by operator',
+      }),
+    ]);
+
+    await page.goto(`/project/${PROJECT}/history`);
+
+    const row = page.getByRole('button')
+      .filter({ hasText: 'test' })
+      .filter({ hasText: 'started' })
+      .first();
+    await expect(row).toBeVisible();
+    await expect(row.getByLabel('running')).toBeVisible();
+
+    await page.getByRole('button', { name: /^running \d+$/i }).click();
+    await expect(page.getByRole('button', { name: /^running 1$/i })).toBeVisible();
+    await expect(row.getByText('Running tests…')).toBeVisible();
+
+    serveRunning = false;
+
+    await expect(page.getByText('Nothing is running right now')).toBeVisible({
+      timeout: 12_000,
+    });
+    await expect(row).toHaveCount(0);
+
+    await page.getByRole('button', { name: /^all \d+$/i }).click();
+
+    const cancelledRow = page.getByRole('button')
+      .filter({ hasText: 'test' })
+      .filter({ hasText: 'Cancelled by operator' })
+      .first();
+    await expect(cancelledRow).toBeVisible({ timeout: 12_000 });
+    await expect(cancelledRow.getByText('cancelled', { exact: true })).toBeVisible();
+    await expect(cancelledRow.getByLabel('running')).toHaveCount(0);
+  });
+
   test('history release row surfaces stop reason when it settles without child steps', async ({
     page,
   }) => {
