@@ -5,6 +5,7 @@ import Link from 'next/link'
 import type { BridgeResponse, BridgeProject, BridgeProjectStatus } from '@/app/api/stats/bridge/route'
 import type { SystemSample } from '@/lib/shared/system-metrics'
 import { buttonVariants } from '@/components/ui/Button'
+import { ErrorCallout } from '@/components/ui/ErrorCallout'
 import { Pill } from '@/components/ui/Pill'
 import type { GlobalPace, WindowPace, PaceStatus } from '@/lib/usage/quota-pace'
 
@@ -251,14 +252,14 @@ export function BridgeOverview() {
         )
         if (attention.length === 0) return null
         return (
-          <div className="flex items-center gap-2 flex-wrap rounded-md border border-status-error/40 bg-status-error/[0.06] px-2 py-1.5">
+          <ErrorCallout padding="none" radius="md" preWrap={false} className="flex items-center gap-2 flex-wrap !border-status-error/40 !bg-status-error/[0.06] px-2 py-1.5">
             <span className="text-[10px] uppercase tracking-wider font-mono text-status-error font-semibold">
               needs attention
             </span>
             {attention.map((p) => (
               <ProjectChip key={`att-${p.project}`} p={p} />
             ))}
-          </div>
+          </ErrorCallout>
         )
       })()}
 
