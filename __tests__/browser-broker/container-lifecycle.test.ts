@@ -137,4 +137,20 @@ describe('ensureBrokerRunning', () => {
 
     await expect(ensureBrokerRunning({ healthTimeoutMs: 10 })).rejects.toThrow(/container exited with code 1[\s\S]*startup failed/);
   });
+
+  // Verify that the VITEST guard in installBrokerShutdownHook prevents signal
+  // handler installation in test environments. If the guard is removed, the
+  // SIGTERM/SIGINT handlers leak into vitest's fork worker and cause an
+  // unhandled rejection ("Closing rpc while onUserConsoleLog was pending").
+  it('does not install process signal handlers when running under vitest', async () => {
+    const onceSpy = vi.spyOn(process, 'once');
+    const { ensureBrokerRunning } = await import('@/lib/browser-broker/container-lifecycle');
+
+    await ensureBrokerRunning();
+
+    const signalCalls = onceSpy.mock.calls.filter(
+      ([signal]) => signal === 'SIGTERM' || signal === 'SIGINT',
+    );
+    expect(signalCalls).toHaveLength(0);
+  });
 });
