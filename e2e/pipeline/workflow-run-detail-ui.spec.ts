@@ -161,6 +161,65 @@ test.describe('WorkflowRunDetail UI', () => {
     await expect(page.getByText('live · refreshes every 5s')).toHaveCount(0);
   });
 
+  test('pending run becomes running and then completed without stale detail badges', async ({ page }) => {
+    let phase: 'pending' | 'running' | 'completed' = 'pending';
+
+    await stubShellRoutes(page);
+    await page.route(`**/api/workflow-runs/${RUN_ID}`, (route: Route) =>
+      route.fulfill({
+        json: phase === 'pending'
+          ? ({
+              run: makeRun('pending', { startedAt: null }),
+              steps: [
+                makeStep('s1', 'prepare-release', 'pending', {
+                  startedAt: null,
+                  completedAt: null,
+                  durationMs: null,
+                }),
+              ],
+            } satisfies RunDetail)
+          : phase === 'running'
+            ? ({
+                run: makeRun('running'),
+                steps: [makeStep('s1', 'prepare-release', 'running')],
+              } satisfies RunDetail)
+            : ({
+                run: makeRun('completed'),
+                steps: [makeStep('s1', 'prepare-release', 'completed')],
+              } satisfies RunDetail),
+      }),
+    );
+
+    await page.goto(`/workflow-runs/${RUN_ID}`);
+
+    const stableUrl = page.url();
+    const stepRowLocator = stepRow(page, 's1');
+
+    await expect(page.locator('[aria-label="status pending"]').first()).toBeVisible({ timeout: 8_000 });
+    await expect(page.getByText('live · refreshes every 5s')).toBeVisible({ timeout: 8_000 });
+    await expect(stepRowLocator).toContainText('prepare release');
+    await expect(stepRowLocator.getByLabel('status pending')).toBeVisible({ timeout: 8_000 });
+    await expect(page.getByText(/pending\s*1/i).first()).toBeVisible({ timeout: 8_000 });
+
+    phase = 'running';
+
+    await expect(page.locator('[aria-label="status running"]').first()).toBeVisible({ timeout: 12_000 });
+    await expect(stepRowLocator.getByLabel('status running')).toBeVisible({ timeout: 12_000 });
+    await expect(page.locator('[aria-label="status pending"]')).toHaveCount(0, { timeout: 12_000 });
+    await expect(page.getByText(/running\s*1/i).first()).toBeVisible({ timeout: 12_000 });
+    await expect(page.getByText('live · refreshes every 5s')).toBeVisible({ timeout: 12_000 });
+
+    phase = 'completed';
+
+    await expect(page.locator('[aria-label="status completed"]').first()).toBeVisible({ timeout: 12_000 });
+    await expect(stepRowLocator.getByLabel('status completed')).toBeVisible({ timeout: 12_000 });
+    await expect(page.locator('[aria-label="status running"]')).toHaveCount(0, { timeout: 12_000 });
+    await expect(page.getByText(/completed\s*1/i).first()).toBeVisible({ timeout: 12_000 });
+    await expect(page.getByText('final snapshot')).toBeVisible({ timeout: 12_000 });
+    await expect(page.getByText('live · refreshes every 5s')).toHaveCount(0);
+    await expect(page).toHaveURL(stableUrl);
+  });
+
   test('live run keeps prior completed steps stable while the active step flips to completed after poll', async ({
     page,
   }) => {
