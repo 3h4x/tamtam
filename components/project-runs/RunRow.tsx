@@ -160,7 +160,10 @@ function latestFailureSummary(entry: Entry): string | null {
   const latestFailure = uniqueChildren
     .filter((child) => entryNeedsAttention(child))
     .sort((a, b) => b.lastActivityAt - a.lastActivityAt)[0]
-  return latestFailure?.workSummary ?? latestFailure?.subtitle ?? null
+  // Fall back to `detail` (the error extracted from the failed step's log tail,
+  // see lib/jobs/storage.ts failureDetailForList) so a step that failed without
+  // a work_summary still surfaces its reason instead of a bare "exit 1".
+  return latestFailure?.workSummary ?? latestFailure?.subtitle ?? latestFailure?.detail ?? null
 }
 
 export interface RunRowProps {
