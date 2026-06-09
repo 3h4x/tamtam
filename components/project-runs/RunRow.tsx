@@ -267,9 +267,16 @@ function RowStateBadge({
     )
   }
 
+  // A -1 exit code is TamTam's sentinel for "the process never exited normally"
+  // — a spawn error (proc.on('error')) or a signal kill that left no real exit
+  // status (the `code ?? -1` fallback in job close handlers). Rendering it as a
+  // literal "exit -1" reads like a real exit status and confuses operators, so
+  // surface the actual condition. Cancellations (-2/-3) arrive as a 'cancelled'
+  // failureLabel from upstream and never reach this fallback.
+  const failedText = failureLabel ?? (exitCode === -1 ? 'failed to start' : `exit ${exitCode}`)
   return (
     <Pill tone={isFailed ? 'error' : 'success'} size="xs" className="h-5 gap-1 rounded px-1.5 text-[10px]">
-      {isFailed ? (failureLabel ?? `exit ${exitCode}`) : 'done'}
+      {isFailed ? failedText : 'done'}
     </Pill>
   )
 }

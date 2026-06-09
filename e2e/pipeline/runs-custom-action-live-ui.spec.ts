@@ -234,4 +234,44 @@ test.describe('History tab custom action live polling', () => {
     await expect(filterChip(page, 'running')).toHaveCount(0, { timeout: 12_000 })
     await expect(filterChip(page, 'failed')).toHaveText('failed 1', { timeout: 12_000 })
   })
+
+  test('custom action that fails to spawn (exit -1) shows "failed to start", not a bare "exit -1"', async ({
+    page,
+  }) => {
+    // The action route's proc.on('error') handler records exit_code === -1 when
+    // the command can't be launched at all. -1 is a sentinel for abnormal
+    // termination, so the runs list must label it "failed to start" rather than
+    // surfacing the meaningless literal "exit -1" (RunRow RowStateBadge).
+    let serveRunning = true
+
+    await stubHistoryShell(page, () => [
+      makeJob({
+        id: 'custom-action-spawn-fail-1',
+        project: PROJECT,
+        kind: ACTION_NAME,
+        prompt: null,
+        user_prompt: null,
+        work_summary: null,
+        session_id: null,
+        status: serveRunning ? 'running' : 'done',
+        exit_code: serveRunning ? null : -1,
+        started_at: now() - 4,
+        finished_at: serveRunning ? null : now() - 1,
+      }),
+    ])
+
+    await page.goto(`/project/${PROJECT}/history`)
+
+    const row = runRow(page, ACTION_NAME)
+    await expect(row).toBeVisible({ timeout: 8_000 })
+    await expect(row.getByLabel('running')).toBeVisible({ timeout: 8_000 })
+
+    serveRunning = false
+
+    await expect(row.getByText('failed to start', { exact: true })).toBeVisible({ timeout: 12_000 })
+    // The confusing literal must never appear.
+    await expect(row.getByText('exit -1', { exact: true })).toHaveCount(0, { timeout: 12_000 })
+    await expect(row.getByLabel('running')).toHaveCount(0, { timeout: 12_000 })
+    await expect(filterChip(page, 'failed')).toHaveText('failed 1', { timeout: 12_000 })
+  })
 })
