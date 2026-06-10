@@ -7,6 +7,7 @@ import { usePolling } from '@/hooks/usePolling'
 import { fetchNotifications, markNotificationsSeen, markJobSeen } from '@/lib/client-api'
 import type { JobInfo } from '@/lib/client-api'
 import { jobIsFinished } from '@/lib/client/job-status'
+import { isCancelledExitCode } from '@/lib/shared/job-exit-codes'
 import { Button, buttonVariants } from '@/components/ui/Button'
 import { EmptyState } from '@/components/ui/EmptyState'
 import { Pill } from '@/components/ui/Pill'
@@ -73,6 +74,10 @@ function finishedJobState(job: JobInfo): { success: boolean; detailLabel: string
       return { success: false, detailLabel: null }
     }
     return { success: false, detailLabel: 'review verdict missing' }
+  }
+
+  if (isCancelledExitCode(job.exit_code)) {
+    return { success: false, detailLabel: 'cancelled' }
   }
 
   const success = job.exit_code === 0 || job.exit_code === null

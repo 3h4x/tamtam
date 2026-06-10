@@ -496,6 +496,66 @@ test.describe('NotificationBell', () => {
     await expect(page.getByText('exit 1').first()).toBeVisible();
   });
 
+  test('running dot changes to cancelled badge when a running job is cancelled on auto-poll', async ({
+    page,
+  }) => {
+    let count = 0;
+    let jobs: NotifJob[] = [];
+    let runningCount = 1;
+    let runningJobs: NotifJob[] = [
+      makeNotifJob({
+        id: 'running-to-cancelled',
+        project: 'cancelled-transition-project',
+        kind: 'run',
+        status: 'running',
+        exit_code: null,
+        finished_at: null,
+        session_id: 'cancelled-transition-session',
+      }),
+    ];
+
+    await stubShellRoutes(page);
+    await page.route('**/api/jobs/notifications', (route: Route) =>
+      route.fulfill({ json: { count, jobs, runningCount, runningJobs } }),
+    );
+
+    await page.goto('/workflow-runs');
+
+    const runningBell = page.getByTitle('1 running');
+    await expect(runningBell).toBeVisible({ timeout: 8_000 });
+    await expect(runningBell.locator('span.animate-pulse')).toBeVisible();
+    await expect(runningBell.locator('span.bg-status-error')).toHaveCount(0);
+
+    count = 1;
+    jobs = [
+      makeNotifJob({
+        id: 'running-to-cancelled',
+        project: 'cancelled-transition-project',
+        kind: 'run',
+        status: 'done',
+        exit_code: -2,
+        finished_at: now() - 5,
+        session_id: 'cancelled-transition-session',
+      }),
+    ];
+    runningCount = 0;
+    runningJobs = [];
+
+    const cancelledBell = page.getByTitle('1 unread');
+    await expect(cancelledBell).toBeVisible({ timeout: 12_000 });
+    await expect(cancelledBell.locator('span.bg-status-error')).toHaveText('1');
+    await expect(cancelledBell.locator('span.animate-pulse')).toHaveCount(0);
+
+    await cancelledBell.click();
+    await expect(page.getByText(/running.*1 project/i)).toHaveCount(0);
+    await expect(page.getByText('cancelled-transition-project')).toBeVisible({
+      timeout: 5_000,
+    });
+    await expect(page.locator('[aria-label="attention"]').first()).toBeVisible();
+    await expect(page.getByText('cancelled').first()).toBeVisible();
+    await expect(page.getByText('exit -2')).toHaveCount(0);
+  });
+
   test('running dot clears when the only running job disappears on auto-poll', async ({
     page,
   }) => {
