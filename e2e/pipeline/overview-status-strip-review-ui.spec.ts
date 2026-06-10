@@ -221,4 +221,138 @@ test.describe('Overview StatusStrip Review card lifecycle', () => {
     ).toBeVisible({ timeout: 12_000 });
     await expect(page.getByRole('button', { name: /Review\s+LGTM/i })).toHaveCount(0);
   });
+
+  // -------------------------------------------------------------------------
+  // Re-review scenario: prior LGTM overridden by a new running review, then
+  // resolves to DO NOT SHIP. This is a common production sequence: you review,
+  // push a fix, review again, and the new verdict supersedes the old one.
+  //
+  // Three-phase transition:
+  //   1. prior LGTM (no running review)     -> "✓ LGTM" card
+  //   2. new review starts running           -> "running" overrides LGTM
+  //   3. new review finishes with DNS        -> "DO NOT SHIP" replaces running
+  // -------------------------------------------------------------------------
+  test('re-review: LGTM card flips to running when a new review starts, then shows DO NOT SHIP', async ({
+    page,
+  }) => {
+    // Phase enum: 'lgtm' = prior review done, 'running' = new review running,
+    // 'dns' = new review finished with DO NOT SHIP verdict.
+    let phase: 'lgtm' | 'running' | 'dns' = 'lgtm';
+
+    const priorReview = makeReviewJob('done', 'LGTM', {
+      id: 're-review-prior-1',
+      started_at: now() - 600,
+      finished_at: now() - 540,
+    });
+    const newRunningReview = makeReviewJob('running', null, {
+      id: 're-review-new-1',
+      started_at: now() - 10,
+      finished_at: null,
+    });
+    const newDoneReview = makeReviewJob('done', 'DO NOT SHIP', {
+      id: 're-review-new-1',
+      started_at: now() - 10,
+      finished_at: now() - 2,
+    });
+
+    await stubOverviewRoutes(page, {
+      jobs: () => {
+        if (phase === 'lgtm') return [priorReview];
+        if (phase === 'running') return [newRunningReview, priorReview];
+        return [newDoneReview, priorReview];
+      },
+    });
+
+    await page.goto(`/project/${PROJECT}`);
+
+    // Phase 1: prior LGTM verdict is visible, no running indicator.
+    const lgtmCard = page.getByRole('button', { name: /Review\s+LGTM/i });
+    await expect(lgtmCard).toBeVisible({ timeout: 8_000 });
+    await expect(lgtmCard).toBeEnabled();
+    await expect(page.getByRole('button', { name: /Review\s+running/i })).toHaveCount(0);
+
+    // Phase 2: new review starts — card must switch to "running", not LGTM.
+    phase = 'running';
+
+    const runningCard = page.getByRole('button', { name: /Review\s+running/i });
+    await expect(runningCard).toBeVisible({ timeout: 12_000 });
+    await expect(page.getByRole('button', { name: /Review\s+LGTM/i })).toHaveCount(0, {
+      timeout: 12_000,
+    });
+    await expect(page.getByRole('button', { name: /Review\s+DO NOT SHIP/i })).toHaveCount(0);
+
+    // Phase 3: new review finishes with DO NOT SHIP — LGTM must not reappear.
+    phase = 'dns';
+
+    const dnsCard = page.getByRole('button', { name: /Review\s+DO NOT SHIP/i });
+    await expect(dnsCard).toBeVisible({ timeout: 12_000 });
+    await expect(dnsCard).toBeEnabled();
+    await expect(page.getByRole('button', { name: /Review\s+running/i })).toHaveCount(0, {
+      timeout: 12_000,
+    });
+    // The prior LGTM verdict must not resurface now that the new review is done.
+    await expect(page.getByRole('button', { name: /Review\s+LGTM/i })).toHaveCount(0);
+  });
+
+  // -------------------------------------------------------------------------
+  // Re-review scenario: LGTM stays when a new review starts LGTM again.
+  // Verifies the card updates to the fresh LGTM (not stuck on the prior one)
+  // and that the "running" transient disappears cleanly.
+  // -------------------------------------------------------------------------
+  test('re-review: card advances from prior LGTM through running to fresh LGTM', async ({
+    page,
+  }) => {
+    let phase: 'lgtm' | 'running' | 'lgtm2' = 'lgtm';
+
+    const priorReview = makeReviewJob('done', 'LGTM', {
+      id: 're-review-lgtm-prior-1',
+      started_at: now() - 400,
+      finished_at: now() - 350,
+    });
+    const newRunningReview = makeReviewJob('running', null, {
+      id: 're-review-lgtm-new-1',
+      started_at: now() - 8,
+      finished_at: null,
+    });
+    const newDoneLgtm = makeReviewJob('done', 'LGTM', {
+      id: 're-review-lgtm-new-1',
+      started_at: now() - 8,
+      finished_at: now() - 1,
+    });
+
+    await stubOverviewRoutes(page, {
+      jobs: () => {
+        if (phase === 'lgtm') return [priorReview];
+        if (phase === 'running') return [newRunningReview, priorReview];
+        return [newDoneLgtm, priorReview];
+      },
+    });
+
+    await page.goto(`/project/${PROJECT}`);
+
+    // Phase 1: prior LGTM.
+    await expect(page.getByRole('button', { name: /Review\s+LGTM/i })).toBeVisible({
+      timeout: 8_000,
+    });
+
+    // Phase 2: new review is running — card switches to running.
+    phase = 'running';
+
+    await expect(
+      page.getByRole('button', { name: /Review\s+running/i }),
+    ).toBeVisible({ timeout: 12_000 });
+    await expect(page.getByRole('button', { name: /Review\s+LGTM/i })).toHaveCount(0, {
+      timeout: 12_000,
+    });
+
+    // Phase 3: new review finishes LGTM again — running badge clears.
+    phase = 'lgtm2';
+
+    await expect(page.getByRole('button', { name: /Review\s+LGTM/i })).toBeVisible({
+      timeout: 12_000,
+    });
+    await expect(
+      page.getByRole('button', { name: /Review\s+running/i }),
+    ).toHaveCount(0, { timeout: 12_000 });
+  });
 });
