@@ -15,8 +15,10 @@ export interface StatusStripProps {
   verdict: Verdict | undefined
   isReviewRunning: boolean
   latestReview: JobInfo | undefined
+  runningReview: JobInfo | undefined
   isTestRunning: boolean
   latestTest: JobInfo | undefined
+  runningTest: JobInfo | undefined
   testCronSchedule: string | null
   ciStatus: 'success' | 'failure' | 'in_progress' | null
   ciFailedUrl: string | null
@@ -93,8 +95,10 @@ export function StatusStrip({
   verdict,
   isReviewRunning,
   latestReview,
+  runningReview,
   isTestRunning,
   latestTest,
+  runningTest,
   testCronSchedule,
   ciStatus,
   ciFailedUrl,
@@ -132,14 +136,19 @@ export function StatusStrip({
   // REVIEW card
   let reviewCard: React.ReactNode
   if (isReviewRunning) {
+    // Prefer the live running job (not the latest *finished* one) so the detail
+    // timestamp and click target reference the review that is actually running.
+    // `latestReview` only gates whether any review job has surfaced timing yet:
+    // until one has, keep the transient "starting" placeholder.
+    const activeReview = runningReview ?? latestReview
     reviewCard = (
       <StatusCard
         label="Review"
         primary="running"
-        detail={latestReview ? `started ${formatAgo(latestReview.started_at)}` : <StartingDetail />}
+        detail={latestReview ? `started ${formatAgo(activeReview!.started_at)}` : <StartingDetail />}
         tone="warning"
         running
-        onClick={latestReview ? () => onOpenJob(latestReview.id) : undefined}
+        onClick={activeReview ? () => onOpenJob(activeReview.id) : undefined}
       />
     )
   } else if (hasUnreviewed) {
@@ -178,13 +187,16 @@ export function StatusStrip({
   const cronSuffix = testCronSchedule ? ` · auto every ${testCronSchedule}` : ''
   let testsCard: React.ReactNode
   if (isTestRunning) {
+    // Prefer the live running job over the latest *finished* test run. `latestTest`
+    // gates the "starting" placeholder until a test job has surfaced timing.
+    const activeTest = runningTest ?? latestTest
     testsCard = (
       <StatusCard
         label="Tests"
         primary="running"
         detail={
           latestTest
-            ? `started ${formatAgo(latestTest.started_at)}${cronSuffix}`
+            ? `started ${formatAgo(activeTest!.started_at)}${cronSuffix}`
             : (
               <>
                 <StartingDetail />
@@ -194,7 +206,7 @@ export function StatusStrip({
         }
         tone="warning"
         running
-        onClick={latestTest ? () => onOpenJob(latestTest.id) : undefined}
+        onClick={activeTest ? () => onOpenJob(activeTest.id) : undefined}
       />
     )
   } else if (latestTest) {

@@ -37,8 +37,10 @@ export interface OverviewTabProps {
   verdict: Verdict | undefined
   isReviewRunning: boolean
   latestReview: JobInfo | undefined
+  runningReview: JobInfo | undefined
   isTestRunning: boolean
   latestTest: JobInfo | undefined
+  runningTest: JobInfo | undefined
   ciStatus: 'success' | 'failure' | 'in_progress' | null
   ciFailedUrl: string | null
   releaseTag: string | null
@@ -62,8 +64,10 @@ export function OverviewTab({
   verdict,
   isReviewRunning,
   latestReview,
+  runningReview,
   isTestRunning,
   latestTest,
+  runningTest,
   ciStatus,
   ciFailedUrl,
   releaseTag,
@@ -190,8 +194,10 @@ export function OverviewTab({
         verdict={verdict}
         isReviewRunning={isReviewRunning}
         latestReview={latestReview}
+        runningReview={runningReview}
         isTestRunning={isTestRunning}
         latestTest={latestTest}
+        runningTest={runningTest}
         testCronSchedule={config?.test_cron_enabled ? config.test_cron_schedule : null}
         ciStatus={ciStatus}
         ciFailedUrl={ciFailedUrl}

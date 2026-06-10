@@ -320,9 +320,11 @@ export function ProjectDetailPage({
   const releaseTag = project.tasks.find(t => t.task.release_tag)?.task.release_tag || null
   const githubUrl = project.tasks.find(t => t.task.github)?.task.github || null
   const hasUnreviewed = project.unreviewedCount > 0
-  const isReviewRunning = projectJobs.some(j => j.kind === 'review' && j.status === 'running')
+  const runningReview = projectJobs.find(j => j.kind === 'review' && j.status === 'running')
+  const isReviewRunning = !!runningReview
   const isCiFixRunning = projectJobs.some(j => j.kind === 'fix-ci' && j.status === 'running')
-  const isTestRunning = projectJobs.some(j => j.kind === 'test' && j.status === 'running')
+  const runningTest = projectJobs.find(j => j.kind === 'test' && j.status === 'running')
+  const isTestRunning = !!runningTest
   const isPipelineRunning = isPipelineBusy(projectJobs)
 
   // Get latest review verdict
@@ -805,8 +807,10 @@ export function ProjectDetailPage({
           verdict={verdict}
           isReviewRunning={isReviewRunning}
           latestReview={latestReview}
+          runningReview={runningReview}
           isTestRunning={isTestRunning}
           latestTest={latestTest}
+          runningTest={runningTest}
           ciStatus={aggregateCi === 'success' || aggregateCi === 'failure' || aggregateCi === 'in_progress' ? aggregateCi : null}
           ciFailedUrl={ciFailedUrl}
           releaseTag={releaseTag}
