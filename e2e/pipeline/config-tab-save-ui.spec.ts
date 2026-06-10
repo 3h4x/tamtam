@@ -84,7 +84,10 @@ function makeProjectConfig(overrides: Record<string, unknown> = {}) {
   };
 }
 
-async function stubShell(page: Page): Promise<void> {
+async function stubShell(
+  page: Page,
+  opts: { settings?: () => { settings: Record<string, string>; github_owner?: string } } = {},
+): Promise<void> {
   await page.route('**/api/projects', (route: Route) =>
     route.fulfill({
       json: { tasks: [makeTask()], priorities: [], issueCounts: {} },
@@ -96,9 +99,9 @@ async function stubShell(page: Page): Promise<void> {
       return;
     }
     route.fulfill({
-      json: {
-        settings: { jobs_paused: 'false', retrieval_enabled: 'false' },
-      },
+      json: opts.settings
+        ? opts.settings()
+        : { settings: { jobs_paused: 'false', retrieval_enabled: 'false' } },
     });
   });
   await page.route(
@@ -383,6 +386,40 @@ test.describe('ConfigTab save flow', () => {
 
     await expect(page.getByText('Unsaved changes')).toBeVisible({ timeout: 3_000 });
     await expect(page.getByRole('button', { name: /^Save$/ })).toBeEnabled();
+  });
+
+  test('jobs_paused transition disables and restores Release on config tab', async ({ page }) => {
+    let jobsPaused = true;
+
+    await stubShell(page, {
+      settings: () => ({
+        settings: {
+          jobs_paused: jobsPaused ? 'true' : 'false',
+          retrieval_enabled: 'false',
+        },
+        github_owner: '',
+      }),
+    });
+
+    await page.goto(`/project/${PROJECT}/config`);
+
+    const stableUrl = page.url();
+    const releaseButton = page.getByRole('button', { name: 'Release', exact: true });
+    const pauseSwitch = page.getByRole('switch');
+
+    await expect(websiteField(page)).toBeVisible({ timeout: 8_000 });
+    await expect(releaseButton).toBeDisabled();
+    await expect(releaseButton).toHaveAttribute('title', /jobs are paused globally/i);
+    await expect(pauseSwitch).toHaveText('jobs paused');
+    await expect(pauseSwitch).toBeChecked();
+
+    jobsPaused = false;
+
+    await expect(releaseButton).toBeEnabled({ timeout: 12_000 });
+    await expect(releaseButton).toHaveAttribute('title', /Release: review/i);
+    await expect(pauseSwitch).toHaveText('jobs running', { timeout: 12_000 });
+    await expect(pauseSwitch).not.toBeChecked();
+    await expect(page).toHaveURL(stableUrl);
   });
 
   // ---------------------------------------------------------------------------
