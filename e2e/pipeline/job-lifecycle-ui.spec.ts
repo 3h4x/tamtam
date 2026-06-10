@@ -1576,4 +1576,99 @@ test.describe('Job lifecycle UI badges', () => {
       /Prompt piped to provider: 20,000 bytes/,
     );
   });
+
+  // -------------------------------------------------------------------------
+  // History tab — exit_code = -1 shows "failed to start" not "exit -1"
+  //
+  // RunRow: failedText = failureLabel ?? (exitCode === -1 ? 'failed to start' : `exit ${exitCode}`)
+  //
+  // exit_code=-1 is the sentinel for spawn/exec failure (the process could not
+  // be launched at all). Displaying the raw "exit -1" is meaningless to the
+  // user — "failed to start" is the expected label. This path is already
+  // covered for custom-action jobs but was untested for standard job kinds
+  // (test, run, agent) where failureLabel is null by default.
+  // -------------------------------------------------------------------------
+  test('test job with exit_code -1 shows "failed to start" not "exit -1"', async ({ page }) => {
+    const jobs: MockJob[] = [
+      makeJob({
+        id: 'job-test-spawn-fail',
+        kind: 'test',
+        status: 'done',
+        exit_code: -1,
+        started_at: now() - 60,
+        finished_at: now() - 30,
+      }),
+    ];
+    await mockJobScenario(page, jobs);
+    await page.goto(`/project/${PROJECT}/history`);
+
+    const row = page.getByRole('button')
+      .filter({ hasText: 'test' })
+      .filter({ hasText: 'started' })
+      .first();
+    await expect(row).toBeVisible();
+    await expect(row.getByText('failed to start', { exact: true })).toBeVisible();
+    // The meaningless sentinel value must never appear.
+    await expect(row.getByText('exit -1', { exact: true })).toHaveCount(0);
+  });
+
+  test('history tab flips a running test job to "failed to start" via poll when exit_code is -1', async ({ page }) => {
+    let serveRunning = true;
+    await mockJobScenario(page, () => [
+      makeJob({
+        id: 'job-test-spawn-fail-live',
+        kind: 'test',
+        status: serveRunning ? 'running' : 'done',
+        exit_code: serveRunning ? null : -1,
+        started_at: now() - 30,
+        finished_at: serveRunning ? null : now() - 4,
+        session_id: 'sess-test-spawn-fail-live',
+      }),
+    ]);
+
+    await page.goto(`/project/${PROJECT}/history`);
+
+    const row = page.getByRole('button')
+      .filter({ hasText: 'test' })
+      .filter({ hasText: 'started' })
+      .first();
+    await expect(row).toBeVisible();
+    await expect(row.getByLabel('running')).toBeVisible();
+    await expect(row.getByText('running', { exact: true })).toBeVisible();
+
+    serveRunning = false;
+
+    await expect(row.getByText('failed to start', { exact: true })).toBeVisible({ timeout: 12_000 });
+    // Must never show the raw sentinel.
+    await expect(row.getByText('exit -1', { exact: true })).toHaveCount(0, { timeout: 12_000 });
+    await expect(row.getByLabel('running')).toHaveCount(0, { timeout: 12_000 });
+    await expect(row.getByText('running', { exact: true })).toHaveCount(0);
+  });
+
+  test('agent job with exit_code -1 shows "failed to start" not "exit -1"', async ({ page }) => {
+    const jobs: MockJob[] = [
+      makeJob({
+        id: 'job-agent-spawn-fail',
+        kind: 'agent:deploy',
+        status: 'done',
+        exit_code: -1,
+        started_at: now() - 120,
+        finished_at: now() - 90,
+        session_id: 'sess-agent-spawn-fail',
+        work_summary: 'Agent process could not be launched.',
+      }),
+    ];
+    await mockJobScenario(page, jobs);
+    await page.goto(`/project/${PROJECT}/history`);
+
+    const row = page.getByRole('button')
+      .filter({ hasText: 'agent' })
+      .filter({ hasText: 'started' })
+      .first();
+    await expect(row).toBeVisible();
+    await expect(row.getByText('failed to start', { exact: true })).toBeVisible();
+    await expect(row.getByText('exit -1', { exact: true })).toHaveCount(0);
+    // work_summary is present and should also be visible as the failure detail.
+    await expect(row.getByText('Agent process could not be launched.', { exact: false })).toBeVisible();
+  });
 });
