@@ -178,6 +178,49 @@ test.describe('Overview StatusStrip CI lifecycle', () => {
     await expect.poll(() => new URL(page.url()).pathname).toBe(stablePath);
   });
 
+  test('CI card shows neutral "no status" when CI state is absent', async ({ page }) => {
+    await stubOverviewRoutes(page, {
+      task: () => makeTask(null),
+    });
+
+    await page.goto(`/project/${PROJECT}`);
+
+    const card = page.getByRole('button', { name: /CI no status/i });
+    await expect(card).toBeVisible({ timeout: 8_000 });
+    // Neutral card has no run URL, so it is rendered non-interactive (disabled).
+    await expect(card).toBeDisabled();
+    await expect(page.getByRole('button', { name: /CI passing/i })).toHaveCount(0);
+    await expect(page.getByRole('button', { name: /CI failing/i })).toHaveCount(0);
+  });
+
+  test('CI passing falls back to "latest commit" detail when no release tag', async ({ page }) => {
+    await stubOverviewRoutes(page, {
+      task: () => makeTask('success', { release_tag: null }),
+    });
+
+    await page.goto(`/project/${PROJECT}`);
+
+    await expect(
+      page.getByRole('button', { name: /CI passing latest commit/i }),
+    ).toBeVisible({ timeout: 8_000 });
+    // With no release tag the CI detail must not render a "release <tag>" label.
+    await expect(page.getByRole('button', { name: /CI passing release/i })).toHaveCount(0);
+  });
+
+  test('CI failing without a run URL shows "no run url" and is not clickable', async ({ page }) => {
+    await stubOverviewRoutes(page, {
+      task: () => makeTask('failure', { ci_failed_url: null }),
+    });
+
+    await page.goto(`/project/${PROJECT}`);
+
+    const card = page.getByRole('button', { name: /CI failing no run url/i });
+    await expect(card).toBeVisible({ timeout: 8_000 });
+    // No URL means openCi is undefined, so the card is non-interactive.
+    await expect(card).toBeDisabled();
+    await expect(page.getByRole('button', { name: /open on GitHub/i })).toHaveCount(0);
+  });
+
   test('CI failure opens the configured run URL from the card', async ({ page }) => {
     const openedUrls: string[] = [];
     await page.exposeFunction('recordOpenedUrl', (url: string) => {
