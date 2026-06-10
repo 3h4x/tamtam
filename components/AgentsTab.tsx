@@ -5,6 +5,7 @@ import { useRouter, useSearchParams, usePathname } from 'next/navigation'
 import { fetchAgents, createAgent, updateAgent, deleteAgent, runAgent, fetchSkills, fetchPersonas } from '@/lib/client-api'
 import type { Agent, Skill, Persona, JobInfo } from '@/lib/client-api'
 import { formatAgo } from '@/lib/shared/format'
+import { isCancelledExitCode } from '@/lib/shared/job-exit-codes'
 import { AgentsEmptyState, AgentsLoadingState } from '@/components/agents/AgentStates'
 import type { AgentTemplateRecord } from '@/components/SettingsPage'
 import { useToast } from '@/components/Toast'
@@ -28,7 +29,7 @@ interface AgentsTabProps {
 interface EnrichedAgent {
   agent: Agent
   skills: Skill[]
-  lastRun: { ts: number; exitCode: number | null } | undefined
+  lastRun: { ts: number; exitCode: number | null; status: string } | undefined
   schedulerEntry: SchedulerEntry | undefined
 }
 
@@ -212,13 +213,13 @@ export function AgentsTab({ projectName, projectJobs = [] }: AgentsTabProps) {
     closeEditor()
   }
 
-  const lastRunByAgent = new Map<string, { ts: number; exitCode: number | null }>()
+  const lastRunByAgent = new Map<string, { ts: number; exitCode: number | null; status: string }>()
   for (const job of projectJobs) {
     if (!job.kind.startsWith('agent:')) continue
     const name = job.kind.slice('agent:'.length)
     const ts = job.finished_at ?? job.started_at ?? 0
     const prev = lastRunByAgent.get(name)
-    if (!prev || ts > prev.ts) lastRunByAgent.set(name, { ts, exitCode: job.exit_code })
+    if (!prev || ts > prev.ts) lastRunByAgent.set(name, { ts, exitCode: job.exit_code, status: job.status })
   }
 
   const schedulerByAgentId = new Map(schedulerEntries.map(e => [e.agentId, e]))
@@ -331,13 +332,22 @@ export function AgentsTab({ projectName, projectJobs = [] }: AgentsTabProps) {
       render: r => {
         if (!r.lastRun) return <span className="text-text-tertiary text-xs">never</span>
         const ago = formatAgo(r.lastRun.ts)
-        const failed = r.lastRun.exitCode !== null && r.lastRun.exitCode !== 0
+        const running = r.lastRun.status === 'running'
+        const cancelled = isCancelledExitCode(r.lastRun.exitCode)
+        const failed = !cancelled && r.lastRun.exitCode !== null && r.lastRun.exitCode !== 0
+        const title = running ? `Running · started ${ago}` : cancelled ? `Cancelled · ${ago}` : failed ? `Failed · ${ago}` : `Ran ${ago}`
         return (
           <span
-            className={`text-xs font-mono ${failed ? 'text-status-error/70' : 'text-text-tertiary'}`}
-            title={failed ? `Failed · ${ago}` : `Ran ${ago}`}
+            className={`text-xs font-mono ${
+              running
+                ? 'text-status-info/80'
+                : failed || cancelled
+                  ? 'text-status-error/70'
+                  : 'text-text-tertiary'
+            }`}
+            title={title}
           >
-            {failed ? `✗ ${ago}` : ago}
+            {running ? 'running' : failed || cancelled ? `✗ ${ago}` : ago}
           </span>
         )
       },

@@ -73,14 +73,18 @@ function makeAgent() {
 }
 
 function makeFinishedAgentJob(exitCode: number): MockJob {
+  return makeAgentJob('done', exitCode);
+}
+
+function makeAgentJob(status: 'running' | 'done', exitCode: number | null): MockJob {
   return {
-    id: `job-agent-${exitCode}`,
+    id: `job-agent-${status}-${exitCode ?? 'live'}`,
     project: PROJECT,
     kind: `agent:${AGENT_NAME}`,
-    status: 'done',
+    status,
     exit_code: exitCode,
     started_at: now() - 45,
-    finished_at: now() - 5,
+    finished_at: status === 'done' ? now() - 5 : null,
     pid: 0,
     log_path: '',
     seen: true,
@@ -188,5 +192,37 @@ test.describe('Agents tab last-run lifecycle UI', () => {
     await expect(row.getByText('just now')).toBeVisible({ timeout: 12_000 });
     await expect(row.locator('span[title^="Failed"]')).toBeVisible();
     await expect(row.getByText('never', { exact: true })).toHaveCount(0);
+  });
+
+  test('last-run cell clears running state when an agent run is cancelled without reload', async ({
+    page,
+  }) => {
+    let phase: 'running' | 'cancelled' = 'running';
+
+    await stubProjectShellRoutes(page);
+    await page.route(
+      (url) => url.pathname === '/api/jobs' && url.searchParams.get('project') === PROJECT,
+      (route: Route) => {
+        const jobs = [
+          phase === 'running'
+            ? makeAgentJob('running', null)
+            : makeAgentJob('done', -2),
+        ];
+        route.fulfill({ json: { jobs, total: jobs.length, pendingReleaseProjects: [] } });
+      },
+    );
+
+    await page.goto(`/project/${PROJECT}/agents`);
+
+    const row = agentRow(page);
+    await expect(row).toBeVisible({ timeout: 8_000 });
+    await expect(row.getByText('running', { exact: true })).toBeVisible();
+    await expect(row.locator('span[title^="Running"]')).toBeVisible();
+
+    phase = 'cancelled';
+
+    await expect(row.locator('span[title^="Cancelled"]')).toBeVisible({ timeout: 12_000 });
+    await expect(row.getByText('running', { exact: true })).toHaveCount(0);
+    await expect(row.locator('span[title^="Failed"]')).toHaveCount(0);
   });
 });
