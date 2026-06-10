@@ -276,6 +276,36 @@ test('issues Release button re-enables in place when jobs_paused clears while th
   await expect(page).toHaveURL(stableUrl);
 });
 
+test('history Release button disables in place when jobs_paused flips on while the page stays open', async ({
+  page,
+}) => {
+  let jobsPaused = false;
+
+  await stubCommonRoutes(page);
+  await page.route('**/api/settings', (route: Route) =>
+    route.fulfill({
+      json: {
+        settings: { jobs_paused: jobsPaused ? 'true' : 'false' },
+        github_owner: '',
+      },
+    }),
+  );
+
+  await page.goto(`/project/${PROJECT}/history`);
+
+  const releaseBtn = releaseButton(page);
+  const stableUrl = page.url();
+  await expect(releaseBtn).toBeVisible({ timeout: 8_000 });
+  await expect(releaseBtn).toBeEnabled();
+
+  jobsPaused = true;
+
+  await expect(releaseBtn).toBeDisabled({ timeout: 12_000 });
+  await expect(releaseBtn).toHaveAttribute('title', /jobs are paused globally/i);
+  await expect(page.getByRole('switch', { name: /jobs paused/i })).toBeChecked();
+  await expect(page).toHaveURL(stableUrl);
+});
+
 // ---------------------------------------------------------------------------
 // Test 1: jobs paused — toast must show server's "paused" detail message
 // ---------------------------------------------------------------------------

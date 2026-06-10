@@ -34,18 +34,33 @@ const HEALTH_PROBE_INTERVAL_MS = 500;
 const LOG_TAIL_LINES = 80;
 const SHUTDOWN_SIGNALS = ['SIGINT', 'SIGTERM'] as const;
 
+function isVitestRuntime(): boolean {
+  return (
+    process.env.VITEST !== undefined ||
+    process.env.VITEST_WORKER_ID !== undefined ||
+    process.env.VITEST_POOL_ID !== undefined ||
+    process.env.NODE_ENV === 'test' ||
+    Boolean((globalThis as typeof globalThis & { __vitest_worker__?: unknown }).__vitest_worker__)
+  );
+}
+
+function handleBrokerShutdownSignal(): void {
+  // Signal handlers can fire while test runners or process managers are closing
+  // stdout/stderr. Cleanup is best-effort here; reporting startup/runtime
+  // failures happens at the call sites that can still surface errors safely.
+  void stopBroker().catch(() => {});
+}
+
 function installBrokerShutdownHook(): void {
   // Under vitest, process-level signal handlers leak into the fork worker and
   // fire when vitest SIGTERMs the worker at teardown — the handler's
   // console.error then races the closing RPC channel and surfaces as an
   // unhandled rejection ("Closing rpc while onUserConsoleLog was pending").
-  if (process.env.VITEST || process.env.VITEST_WORKER_ID || process.env.NODE_ENV === 'test') return;
+  if (isVitestRuntime()) return;
   if (globalThis.__tamtamBrowserBrokerShutdownHookInstalled) return;
   globalThis.__tamtamBrowserBrokerShutdownHookInstalled = true;
   for (const signal of SHUTDOWN_SIGNALS) {
-    process.once(signal, () => {
-      void stopBroker().catch((err) => console.error('[browser-broker] shutdown cleanup failed', err));
-    });
+    process.once(signal, handleBrokerShutdownSignal);
   }
 }
 
