@@ -50,13 +50,20 @@ function makeChanges(overrides: Record<string, unknown> = {}) {
 
 // Stub every endpoint the project detail shell hits, leaving the /changes and
 // /changes/diff routes for each test to override as needed.
-async function stubShell(page: Page): Promise<void> {
+async function stubShell(
+  page: Page,
+  opts: { settings?: () => { settings: Record<string, string>; github_owner?: string } } = {},
+): Promise<void> {
   await page.route('**/api/projects', (route: Route) =>
     route.fulfill({ json: { tasks: [makeTask()], priorities: [], issueCounts: {} } }),
   );
   await page.route('**/api/settings', (route: Route) => {
     if (route.request().method() !== 'GET') { route.continue(); return; }
-    route.fulfill({ json: { settings: { jobs_paused: 'false', retrieval_enabled: 'false' } } });
+    route.fulfill({
+      json: opts.settings
+        ? opts.settings()
+        : { settings: { jobs_paused: 'false', retrieval_enabled: 'false' } },
+    });
   });
   await page.route(`**/api/projects/by-project/${PROJECT}/action`, (route: Route) =>
     route.fulfill({ json: { actions: [] } }),
@@ -203,11 +210,10 @@ test.describe('ChangesTab states', () => {
   // -------------------------------------------------------------------------
   test('a failed changes load shows an error state and retry recovers', async ({ page }) => {
     await stubShell(page);
-    let failNext = true;
+    let recover = false;
     await page.route(`**/api/projects/by-project/${PROJECT}/changes`, (route: Route) => {
       if (route.request().method() !== 'GET') { route.continue(); return; }
-      if (failNext) {
-        failNext = false;
+      if (!recover) {
         route.fulfill({ status: 500, json: { detail: 'failed to read git status' } });
         return;
       }
@@ -219,7 +225,51 @@ test.describe('ChangesTab states', () => {
     await expect(page.getByText('failed to read git status')).toBeVisible({ timeout: 8_000 });
 
     // Clicking retry re-fetches; second response succeeds and shows the file list.
+    recover = true;
     await page.getByRole('button', { name: /retry/i }).click();
     await expect(page.getByText('lib/foo.ts')).toBeVisible({ timeout: 5_000 });
+  });
+
+  test('jobs_paused transition disables and restores Release and Push controls on changes tab', async ({
+    page,
+  }) => {
+    let jobsPaused = true;
+
+    await stubShell(page, {
+      settings: () => ({
+        settings: {
+          jobs_paused: jobsPaused ? 'true' : 'false',
+          retrieval_enabled: 'false',
+        },
+        github_owner: '',
+      }),
+    });
+    await page.route(`**/api/projects/by-project/${PROJECT}/changes`, (route: Route) => {
+      if (route.request().method() !== 'GET') { route.continue(); return; }
+      route.fulfill({ json: makeChanges({ ahead: 2 }) });
+    });
+
+    await page.goto(`/project/${PROJECT}/changes`);
+
+    const stableUrl = page.url();
+    const releaseButton = page.getByRole('button', { name: 'Release', exact: true });
+    const pushButton = page.getByRole('button', { name: 'Push', exact: true }).nth(1);
+    const pauseSwitch = page.getByRole('switch');
+
+    await expect(page.getByText('lib/foo.ts')).toBeVisible({ timeout: 8_000 });
+    await expect(releaseButton).toBeDisabled();
+    await expect(releaseButton).toHaveAttribute('title', /jobs are paused globally/i);
+    await expect(pushButton).toBeDisabled();
+    await expect(pushButton).toHaveAttribute('title', /jobs are paused globally/i);
+    await expect(pauseSwitch).toHaveText('jobs paused');
+
+    jobsPaused = false;
+
+    await expect(releaseButton).toBeEnabled({ timeout: 12_000 });
+    await expect(releaseButton).toHaveAttribute('title', /Release:/);
+    await expect(pushButton).toBeEnabled({ timeout: 12_000 });
+    await expect(pushButton).toHaveAttribute('title', /Push 2 commits to origin\/master/i);
+    await expect(pauseSwitch).toHaveText('jobs running', { timeout: 12_000 });
+    await expect(page).toHaveURL(stableUrl);
   });
 });
