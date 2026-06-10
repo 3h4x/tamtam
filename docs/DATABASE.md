@@ -120,7 +120,7 @@ Audit trail for every run, review, fix, test, push, agent execution.
 | `push` | Git push step |
 | `release` | Meta-job wrapping the full pipeline |
 | `action` | Custom action (user-defined bash) |
-| `agent:{agentId}` | Scheduled agent execution |
+| `agent:{agentName}` | Scheduled agent execution |
 
 ---
 
