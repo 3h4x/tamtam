@@ -111,6 +111,19 @@ async function stubCommonRoutes(
   await page.route(projectIssuesMatcher, (route: Route) =>
     route.fulfill({ json: { prs: [], issues: [] } }),
   );
+  await page.route(`**/api/projects/by-project/${PROJECT}/docs`, (route: Route) =>
+    route.fulfill({
+      json: {
+        docs: [
+          {
+            name: 'README.md',
+            path: 'README.md',
+            content: 'Project lifecycle docs fixture.\nRelease controls stay shared across tabs.',
+          },
+        ],
+      },
+    }),
+  );
   await page.route('**/api/streaming/**', (route: Route) =>
     route.fulfill({ status: 204, body: '' }),
   );
@@ -303,6 +316,38 @@ test('history Release button disables in place when jobs_paused flips on while t
   await expect(releaseBtn).toBeDisabled({ timeout: 12_000 });
   await expect(releaseBtn).toHaveAttribute('title', /jobs are paused globally/i);
   await expect(page.getByRole('switch', { name: /jobs paused/i })).toBeChecked();
+  await expect(page).toHaveURL(stableUrl);
+});
+
+test('docs Release button disables in place when jobs_paused flips on while the page stays open', async ({
+  page,
+}) => {
+  let jobsPaused = false;
+
+  await stubCommonRoutes(page);
+  await page.route('**/api/settings', (route: Route) =>
+    route.fulfill({
+      json: {
+        settings: { jobs_paused: jobsPaused ? 'true' : 'false' },
+        github_owner: '',
+      },
+    }),
+  );
+
+  await page.goto(`/project/${PROJECT}/docs`);
+
+  const releaseBtn = releaseButton(page);
+  const stableUrl = page.url();
+  await expect(page.getByText('Project lifecycle docs fixture.')).toBeVisible({ timeout: 8_000 });
+  await expect(releaseBtn).toBeVisible({ timeout: 8_000 });
+  await expect(releaseBtn).toBeEnabled();
+
+  jobsPaused = true;
+
+  await expect(releaseBtn).toBeDisabled({ timeout: 12_000 });
+  await expect(releaseBtn).toHaveAttribute('title', /jobs are paused globally/i);
+  await expect(page.getByRole('switch', { name: /jobs paused/i })).toBeChecked();
+  await expect(page.getByText('Project lifecycle docs fixture.')).toBeVisible();
   await expect(page).toHaveURL(stableUrl);
 });
 
