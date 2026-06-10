@@ -55,11 +55,35 @@ describe('handleAgentCron', () => {
     expect(deps.enqueueNextFire).not.toHaveBeenCalled();
   });
 
-  it('terminates the cron chain when agent has been removed', async () => {
+  it('retries a not-found agent on a short window instead of terminating the chain', async () => {
     const deps = makeDeps({
       loadAgent: vi.fn(async () => null),
     });
     const r = await handleAgentCron({ agentId: 'a1' }, deps, () => NOW);
+    expect(r.status).toBe('skipped');
+    expect(deps.startAgentRun).not.toHaveBeenCalled();
+    expect(deps.enqueueNextFire).toHaveBeenCalledTimes(1);
+    const [agentId, runAt, payloadOverride] = (deps.enqueueNextFire as ReturnType<typeof vi.fn>).mock.calls[0];
+    expect(agentId).toBe('a1');
+    expect((runAt as Date).getTime()).toBe(NOW + 60_000);
+    expect(payloadOverride).toMatchObject({ agentId: 'a1', notFoundRetries: 1 });
+  });
+
+  it('increments the not-found retry counter across consecutive misses', async () => {
+    const deps = makeDeps({
+      loadAgent: vi.fn(async () => null),
+    });
+    const r = await handleAgentCron({ agentId: 'a1', notFoundRetries: 1 }, deps, () => NOW);
+    expect(r.status).toBe('skipped');
+    const [, , payloadOverride] = (deps.enqueueNextFire as ReturnType<typeof vi.fn>).mock.calls[0];
+    expect(payloadOverride).toMatchObject({ agentId: 'a1', notFoundRetries: 2 });
+  });
+
+  it('terminates the cron chain when agent stays missing after retries are exhausted', async () => {
+    const deps = makeDeps({
+      loadAgent: vi.fn(async () => null),
+    });
+    const r = await handleAgentCron({ agentId: 'a1', notFoundRetries: 3 }, deps, () => NOW);
     expect(r).toMatchObject({ status: 'disabled', reason: 'not found' });
     expect(deps.enqueueNextFire).not.toHaveBeenCalled();
   });

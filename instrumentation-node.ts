@@ -895,11 +895,11 @@ export async function registerNode(): Promise<void> {
               } catch { /* telemetry-only */ }
               return jobId;
             },
-            enqueueNextFire: async (agentId, runAt) => {
+            enqueueNextFire: async (agentId, runAt, payloadOverride) => {
               await quickAddJob(
                 { connectionString },
                 'agent-cron',
-                { agentId },
+                payloadOverride ?? { agentId },
                 { jobKey: `agent-cron-${agentId}`, jobKeyMode: 'replace', runAt, maxAttempts: 5 },
               );
             },

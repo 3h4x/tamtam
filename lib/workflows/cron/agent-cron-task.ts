@@ -27,6 +27,14 @@ export interface AgentCronPayload {
    *  scheduled re-enqueues do NOT propagate this — only the boost fire it
    *  was attached to runs at the elevated tier. */
   modelOverride?: 'fast' | 'normal' | 'smart';
+  /** Consecutive fires where `loadAgent` returned null. A single null read
+   *  is indistinguishable from a transient listing miss (file-agent cache
+   *  rebuild, fs hiccup), and terminating the chain on a false negative
+   *  silently kills the agent's schedule forever. The chain retries on a
+   *  short window and only terminates once the agent stays missing across
+   *  `NOT_FOUND_MAX_RETRIES` consecutive fires. Reset implicitly: any
+   *  successful load re-enqueues without this field. */
+  notFoundRetries?: number;
 }
 
 export interface AgentCronDeps {
@@ -49,8 +57,11 @@ export interface AgentCronDeps {
    *  registered for the given name — caller will fall back to skipping. */
   runSystemAgent?: (agent: AgentInput) => Promise<void>;
   /** Re-enqueue this same task with the per-agent jobKey at the next
-   *  fire time (idempotent — replaces any already-queued one). */
-  enqueueNextFire: (agentId: string, runAt: Date) => Promise<void>;
+   *  fire time (idempotent — replaces any already-queued one). When
+   *  `payloadOverride` is set the re-enqueued job carries it instead of
+   *  the default `{ agentId }` (used by the not-found retry path to
+   *  thread its counter through the chain). */
+  enqueueNextFire: (agentId: string, runAt: Date, payloadOverride?: AgentCronPayload) => Promise<void>;
 }
 
 // Re-check window when a fire is skipped due to a transient blocker.
@@ -61,6 +72,12 @@ export interface AgentCronDeps {
 // UI while nothing is queued. Short retry window catches the blocker
 // clearing without piling on real work.
 const TRANSIENT_RETRY_MS = 60_000;
+
+// Consecutive null `loadAgent` reads tolerated before the chain terminates.
+// Three 60s retries comfortably outlast a file-agent cache rebuild or a
+// momentary fs/listing failure while still cleaning up genuinely deleted
+// agents within minutes.
+const NOT_FOUND_MAX_RETRIES = 3;
 
 // Reasons that resolve on their own within seconds-to-minutes.
 // `prereqSkipReason` returns free-form strings; substring matching here
@@ -82,9 +99,28 @@ export async function handleAgentCron(
   now: () => number = Date.now,
 ): Promise<{ status: 'dispatched' | 'skipped' | 'disabled'; runId?: string | null; reason?: string }> {
   const agent = await deps.loadAgent(payload.agentId);
-  if (!agent || !agent.enabled) {
-    // Don't re-enqueue — caller will get nothing and the chain terminates.
-    return { status: 'disabled', reason: agent ? 'disabled' : 'not found' };
+  if (!agent) {
+    // Null can mean "deleted" OR a transient listing miss — retry on the
+    // short window before terminating, else a false negative silently
+    // kills the schedule forever.
+    const retries = payload.notFoundRetries ?? 0;
+    if (retries < NOT_FOUND_MAX_RETRIES) {
+      await deps.enqueueNextFire(payload.agentId, new Date(now() + TRANSIENT_RETRY_MS), {
+        agentId: payload.agentId,
+        notFoundRetries: retries + 1,
+      });
+      return {
+        status: 'skipped',
+        reason: `agent not found (retry ${retries + 1}/${NOT_FOUND_MAX_RETRIES})`,
+      };
+    }
+    // Stayed missing across every retry — treat the deletion as real.
+    return { status: 'disabled', reason: 'not found' };
+  }
+  if (!agent.enabled) {
+    // Definitive read of a disabled agent — don't re-enqueue; the chain
+    // terminates and a re-enable reinstalls the schedule.
+    return { status: 'disabled', reason: 'disabled' };
   }
   const skipReason = await deps.prereqSkipReason(agent);
   // Re-enqueue regardless of dispatch outcome — the schedule keeps ticking

@@ -463,6 +463,7 @@ Current behavior:
 
 - `instrumentation-node.ts` starts the cron worker and calls `seedAgentCrons()` on boot to upsert enabled scheduled agents from the DB and file-agent layer.
 - `lib/workflows/cron/agent-cron-task.ts` handles each fire, checks pause/budget/branch/release gates, records the latest skipped/queued/dispatched attempt for the Agents UI, starts the agent intake workflow, and re-enqueues the next fire. Transient blockers such as global pause, an in-flight PR wait, non-default branch state, release locks, or stale origin state retry in about one minute; other outcomes advance to the next scheduled tick.
+- A fire whose `loadAgent` lookup returns null retries on the same one-minute window up to 3 consecutive times (a `notFoundRetries` counter rides the job payload) before the chain terminates. A single null read can be a transient agent-listing miss rather than a real deletion, and terminating immediately silently kills the schedule until an operator reinstalls it via `/api/agents/scheduler-health`. A definitive read of a disabled agent still terminates immediately.
 - Agent CRUD routes call `installAgentSchedule()` / `uninstallAgentSchedule()` so schedule changes apply immediately without restarting the server.
 - `/api/agents` reads the graphile-worker `agent-cron-<agentId>` row to expose the actual queued `run_at` as `agent.cron.nextFireMs`, so schedule displays use queue state rather than estimating from the previous run.
 - Actual agent work still runs as one-shot in-process jobs after the agent intake workflow accepts the request.
