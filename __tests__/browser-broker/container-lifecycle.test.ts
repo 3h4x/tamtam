@@ -33,7 +33,14 @@ describe('ensureBrokerRunning', () => {
     delete (globalThis as typeof globalThis & {
       __tamtamBrowserBroker?: unknown;
       __tamtamBrowserBrokerStarting?: unknown;
+      __tamtamBrowserBrokerShutdownHookInstalled?: unknown;
     }).__tamtamBrowserBrokerStarting;
+    delete (globalThis as typeof globalThis & {
+      __tamtamBrowserBroker?: unknown;
+      __tamtamBrowserBrokerStarting?: unknown;
+      __tamtamBrowserBrokerShutdownHookInstalled?: unknown;
+    }).__tamtamBrowserBrokerShutdownHookInstalled;
+    vi.unstubAllEnvs();
     vi.unstubAllGlobals();
     vi.restoreAllMocks();
   });
@@ -142,8 +149,12 @@ describe('ensureBrokerRunning', () => {
   // handler installation in test environments. If the guard is removed, the
   // SIGTERM/SIGINT handlers leak into vitest's fork worker and cause an
   // unhandled rejection ("Closing rpc while onUserConsoleLog was pending").
-  it('does not install process signal handlers when running under vitest', async () => {
+  it('does not install process signal handlers when running under a vitest worker', async () => {
+    vi.stubEnv('VITEST', '');
+    vi.stubEnv('VITEST_WORKER_ID', '1');
+    vi.stubEnv('NODE_ENV', 'development');
     const onceSpy = vi.spyOn(process, 'once');
+
     const { ensureBrokerRunning } = await import('@/lib/browser-broker/container-lifecycle');
 
     await ensureBrokerRunning();

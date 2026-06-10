@@ -39,7 +39,7 @@ function installBrokerShutdownHook(): void {
   // fire when vitest SIGTERMs the worker at teardown — the handler's
   // console.error then races the closing RPC channel and surfaces as an
   // unhandled rejection ("Closing rpc while onUserConsoleLog was pending").
-  if (process.env.VITEST || process.env.NODE_ENV === 'test') return;
+  if (process.env.VITEST || process.env.VITEST_WORKER_ID || process.env.NODE_ENV === 'test') return;
   if (globalThis.__tamtamBrowserBrokerShutdownHookInstalled) return;
   globalThis.__tamtamBrowserBrokerShutdownHookInstalled = true;
   for (const signal of SHUTDOWN_SIGNALS) {
