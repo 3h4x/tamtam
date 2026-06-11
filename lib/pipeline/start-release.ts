@@ -124,8 +124,8 @@ async function readWorkingTreeStatus(projPath: string): Promise<string> {
 /**
  * Pluggable release pipeline entry point.
  *
- * Flow: tests (if configured) → review → commit → push. Subsequent steps are chained via
- * completion hooks in `job-storage.runCompletionHooks` — this helper only
+ * Flow: tests (if configured) → review → commit → push. Subsequent steps are driven by
+ * the release orchestrator (`lib/workflows/release-orchestrator.ts`) — this helper only
  * starts the first step. Caller must ensure `auto_push_enabled` is set for the
  * chaining to continue automatically.
  *
