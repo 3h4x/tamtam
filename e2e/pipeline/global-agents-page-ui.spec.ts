@@ -244,4 +244,83 @@ test.describe('Global agents page UI', () => {
     await expect(errorCell).toBeVisible();
     await expect(errorCell.locator('span')).toHaveClass(/text-status-warning/);
   });
+
+  // ---------------------------------------------------------------------------
+  // Test 6: An enabled scheduled agent with no scheduler entry shows the
+  // "unscheduled" warning state — it has a schedule but is not registered in
+  // the internal scheduler, which is the operator's signal that the cron did
+  // not take effect. This is a distinct state from active/on-demand/disabled.
+  // ---------------------------------------------------------------------------
+  test('shows "unscheduled" warning state when a scheduled agent is not registered', async ({ page }) => {
+    const UNREG_ID = 'agent-unscheduled';
+
+    // Enabled + has a schedule, but the scheduler-health entries list is empty,
+    // so agentState() resolves to "unscheduled".
+    const agents = [makeAgent({ id: UNREG_ID, name: 'Unregistered Agent', schedule: '0 * * * *' })];
+
+    await stubShellRoutes(page);
+    await page.route('**/api/agents/scheduler-health', (route: Route) =>
+      route.fulfill({ json: { internal: { entries: [] } } }),
+    );
+    await page.route(
+      (url) => url.pathname === '/api/agents',
+      (route: Route) => route.fulfill({ json: { agents } }),
+    );
+
+    await page.goto('/agents');
+
+    const row = page.locator('tr', { hasText: 'Unregistered Agent' });
+    const pill = row.getByText('unscheduled', { exact: true });
+    await expect(pill).toBeVisible({ timeout: 8_000 });
+    // The pill carries a diagnostic title explaining the mismatch.
+    await expect(pill).toHaveAttribute('title', /not registered in internal scheduler/i);
+
+    // Filtering to "Active" excludes it (it is not active) and the empty-state
+    // meta surfaces the count of enabled-but-unregistered agents.
+    await page.getByRole('navigation', { name: 'Agent filters' })
+      .getByRole('button', { name: /Active/i }).click();
+    await expect(page.getByText('No active scheduled agents')).toBeVisible({ timeout: 3_000 });
+    await expect(page.getByText(/not registered in the scheduler yet/i)).toBeVisible();
+  });
+
+  // ---------------------------------------------------------------------------
+  // Test 7: Scheduler-derived columns reflect entry state — an overdue next
+  // fire renders "overdue" in warning tone, and an agent that has never fired
+  // shows the "never fired" placeholder rather than a relative timestamp.
+  // ---------------------------------------------------------------------------
+  test('renders overdue next-fire and never-fired last-fire from scheduler entry', async ({ page }) => {
+    const OVERDUE_ID = 'agent-overdue';
+
+    const agents = [makeAgent({ id: OVERDUE_ID, name: 'Overdue Agent', schedule: '0 * * * *' })];
+    const schedulerEntries = [
+      makeSchedulerEntry(OVERDUE_ID, {
+        // Well past the 30s overdue grace window, and never fired.
+        nextFireMs: Date.now() - 120_000,
+        lastFireMs: null,
+        fireCount: 0,
+      }),
+    ];
+
+    await stubShellRoutes(page);
+    await page.route('**/api/agents/scheduler-health', (route: Route) =>
+      route.fulfill({ json: { internal: { entries: schedulerEntries } } }),
+    );
+    await page.route(
+      (url) => url.pathname === '/api/agents',
+      (route: Route) => route.fulfill({ json: { agents } }),
+    );
+
+    await page.goto('/agents');
+
+    const row = page.locator('tr', { hasText: 'Overdue Agent' });
+    await expect(row).toBeVisible({ timeout: 8_000 });
+
+    // Next Fire cell shows "overdue" in warning tone.
+    const overdue = row.getByText('overdue', { exact: true });
+    await expect(overdue).toBeVisible();
+    await expect(overdue).toHaveClass(/text-status-warning/);
+
+    // Last Fire cell shows the never-fired placeholder.
+    await expect(row.getByText('never fired', { exact: true })).toBeVisible();
+  });
 });
