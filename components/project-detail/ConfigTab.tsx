@@ -78,6 +78,12 @@ export interface ConfigTabProps {
   setWebsiteInput: (v: string) => void
   qaUrlInput: string
   setQaUrlInput: (v: string) => void
+  devServerStartCommandInput: string
+  setDevServerStartCommandInput: (v: string) => void
+  devServerStopCommandInput: string
+  setDevServerStopCommandInput: (v: string) => void
+  devServerReadyUrlInput: string
+  setDevServerReadyUrlInput: (v: string) => void
 
   editActions: CustomAction[]
   setEditActions: (v: CustomAction[]) => void
@@ -130,6 +136,12 @@ export function ConfigTab({
   setWebsiteInput,
   qaUrlInput,
   setQaUrlInput,
+  devServerStartCommandInput,
+  setDevServerStartCommandInput,
+  devServerStopCommandInput,
+  setDevServerStopCommandInput,
+  devServerReadyUrlInput,
+  setDevServerReadyUrlInput,
   editActions,
   setEditActions,
   anyDirty,
@@ -234,6 +246,61 @@ export function ConfigTab({
             <p className="text-xs text-text-tertiary mt-1">
               Explicit target for the QA agent. Use a local URL (e.g. a docker-compose stack started by the agent's prerequisite) when you don't want to QA the live site.
             </p>
+          </div>
+        </div>
+      </div>
+
+      {/* Dev server lifecycle */}
+      <div className="bg-bg-secondary rounded-md border border-border">
+        <div className="px-4 py-2 border-b border-border flex items-baseline gap-3">
+          <h3 className="text-sm font-semibold text-text-primary">Dev Server</h3>
+          <p className="text-xs text-text-tertiary">Local app lifecycle around agent runs</p>
+        </div>
+        <div className="px-4 py-3 space-y-3">
+          <div>
+            <label className="block font-medium text-xs text-text-secondary mb-1" htmlFor="dev-server-start-command">
+              Start command
+            </label>
+            <Input
+              inputSize="compact"
+              className="placeholder:text-text-tertiary"
+              id="dev-server-start-command"
+              type="text"
+              value={devServerStartCommandInput}
+              onChange={(e) => setDevServerStartCommandInput(e.target.value)}
+              placeholder="pnpm dev --port 3000"
+            />
+            <p className="text-xs text-text-tertiary mt-1">Run from the project root before an agent starts. Empty = do not manage a dev server.</p>
+          </div>
+          <div>
+            <label className="block font-medium text-xs text-text-secondary mb-1" htmlFor="dev-server-ready-url">
+              Ready URL
+            </label>
+            <Input
+              inputSize="compact"
+              className="placeholder:text-text-tertiary"
+              id="dev-server-ready-url"
+              type="text"
+              value={devServerReadyUrlInput}
+              onChange={(e) => setDevServerReadyUrlInput(e.target.value)}
+              placeholder="http://localhost:3000"
+            />
+            <p className="text-xs text-text-tertiary mt-1">Polled until it returns a non-5xx response. Use http(s) URLs only.</p>
+          </div>
+          <div>
+            <label className="block font-medium text-xs text-text-secondary mb-1" htmlFor="dev-server-stop-command">
+              Stop command
+            </label>
+            <Input
+              inputSize="compact"
+              className="placeholder:text-text-tertiary"
+              id="dev-server-stop-command"
+              type="text"
+              value={devServerStopCommandInput}
+              onChange={(e) => setDevServerStopCommandInput(e.target.value)}
+              placeholder="pnpm dev:stop"
+            />
+            <p className="text-xs text-text-tertiary mt-1">Optional cleanup command. Empty = TamTam stops the process group it started.</p>
           </div>
         </div>
       </div>

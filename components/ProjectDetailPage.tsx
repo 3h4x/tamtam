@@ -110,6 +110,9 @@ export function ProjectDetailPage({
   const [commitStyleInput, setCommitStyleInput] = useState('')
   const [websiteInput, setWebsiteInput] = useState('')
   const [qaUrlInput, setQaUrlInput] = useState('')
+  const [devServerStartCommandInput, setDevServerStartCommandInput] = useState('')
+  const [devServerStopCommandInput, setDevServerStopCommandInput] = useState('')
+  const [devServerReadyUrlInput, setDevServerReadyUrlInput] = useState('')
   const [configSaving, setConfigSaving] = useState(false)
   const [configSaved, setConfigSaved] = useState(false)
 
@@ -236,6 +239,9 @@ export function ProjectDetailPage({
     setCommitStyleInput(data.commit_style ?? '')
     setWebsiteInput(data.website ?? '')
     setQaUrlInput(data.qa_url ?? '')
+    setDevServerStartCommandInput(data.dev_server_start_command ?? '')
+    setDevServerStopCommandInput(data.dev_server_stop_command ?? '')
+    setDevServerReadyUrlInput(data.dev_server_ready_url ?? '')
   }
 
   const handleCustomAction = async (actionName: string) => {
@@ -532,6 +538,9 @@ export function ProjectDetailPage({
     commit_style: commitStyleInput,
     website: websiteInput,
     qa_url: qaUrlInput,
+    dev_server_start_command: devServerStartCommandInput,
+    dev_server_stop_command: devServerStopCommandInput,
+    dev_server_ready_url: devServerReadyUrlInput,
   }
 
   const handleSaveConfig = async () => {
@@ -569,7 +578,10 @@ export function ProjectDetailPage({
     configInputs.fix_prompt_addendum !== (config.fix_prompt_addendum ?? '') ||
     configInputs.commit_style !== (config.commit_style ?? '') ||
     configInputs.website !== (config.website ?? '') ||
-    configInputs.qa_url !== (config.qa_url ?? '')
+    configInputs.qa_url !== (config.qa_url ?? '') ||
+    configInputs.dev_server_start_command !== (config.dev_server_start_command ?? '') ||
+    configInputs.dev_server_stop_command !== (config.dev_server_stop_command ?? '') ||
+    configInputs.dev_server_ready_url !== (config.dev_server_ready_url ?? '')
   )
 
   const actionsDirty = JSON.stringify(editActions) !== JSON.stringify(customActions)
@@ -868,6 +880,12 @@ export function ProjectDetailPage({
             setWebsiteInput={setWebsiteInput}
             qaUrlInput={qaUrlInput}
             setQaUrlInput={setQaUrlInput}
+            devServerStartCommandInput={devServerStartCommandInput}
+            setDevServerStartCommandInput={setDevServerStartCommandInput}
+            devServerStopCommandInput={devServerStopCommandInput}
+            setDevServerStopCommandInput={setDevServerStopCommandInput}
+            devServerReadyUrlInput={devServerReadyUrlInput}
+            setDevServerReadyUrlInput={setDevServerReadyUrlInput}
             editActions={editActions}
             setEditActions={setEditActions}
             anyDirty={anyDirty}

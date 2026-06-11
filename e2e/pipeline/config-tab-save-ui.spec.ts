@@ -19,6 +19,18 @@ function waitForCiCheckbox(page: Page) {
   return page.getByRole('checkbox', { name: /Wait for CI on default branch after merge/i });
 }
 
+function devServerStartField(page: Page) {
+  return page.getByRole('textbox', { name: 'Start command' });
+}
+
+function devServerReadyUrlField(page: Page) {
+  return page.getByRole('textbox', { name: 'Ready URL' });
+}
+
+function devServerStopField(page: Page) {
+  return page.getByRole('textbox', { name: 'Stop command' });
+}
+
 function autoRevertCheckbox(page: Page) {
   return page.getByRole('checkbox', { name: /Auto-merge revert PR/i });
 }
@@ -284,6 +296,68 @@ test.describe('ConfigTab save flow', () => {
     await expect(waitForCiCheckbox(page)).toBeChecked();
     await expect(watchMinutesField(page)).toHaveValue('30');
     await expect(autoRevertCheckbox(page)).toBeChecked();
+  });
+
+  test('dev server lifecycle fields render from config and save updated values', async ({ page }) => {
+    let savedBody: Record<string, unknown> | null = null;
+    let finishPatch!: () => void;
+    const patchGate = new Promise<void>((resolve) => {
+      finishPatch = resolve;
+    });
+    let serverConfig = makeProjectConfig({
+      dev_server_start_command: 'pnpm dev --port 3000',
+      dev_server_ready_url: 'http://localhost:3000',
+      dev_server_stop_command: 'pnpm dev:stop',
+    });
+
+    await stubShell(page);
+
+    await page.route(`**/api/projects/by-project/${PROJECT}/config`, async (route: Route) => {
+      if (route.request().method() === 'PATCH') {
+        savedBody = route.request().postDataJSON() as Record<string, unknown>;
+        serverConfig = makeProjectConfig({
+          dev_server_start_command: savedBody.dev_server_start_command,
+          dev_server_ready_url: savedBody.dev_server_ready_url,
+          dev_server_stop_command: savedBody.dev_server_stop_command,
+        });
+        await patchGate;
+        await route.fulfill({ json: { status: 'ok' } });
+        return;
+      }
+      if (route.request().method() === 'GET') {
+        await route.fulfill({ json: serverConfig });
+        return;
+      }
+      route.continue();
+    });
+
+    await page.goto(`/project/${PROJECT}/config`);
+
+    await expect(devServerStartField(page)).toHaveValue('pnpm dev --port 3000', { timeout: 8_000 });
+    await expect(devServerReadyUrlField(page)).toHaveValue('http://localhost:3000');
+    await expect(devServerStopField(page)).toHaveValue('pnpm dev:stop');
+
+    await devServerStartField(page).fill('pnpm dev --port 4173');
+    await devServerReadyUrlField(page).fill('http://127.0.0.1:4173/health');
+    await devServerStopField(page).fill('pnpm dev:stop --force');
+    await expect(page.getByText('Unsaved changes')).toBeVisible({ timeout: 3_000 });
+
+    await page.getByRole('button', { name: /^Save$/ }).click();
+    await expect(page.getByRole('button', { name: /Saving/i })).toBeVisible({ timeout: 3_000 });
+
+    expect(savedBody).toMatchObject({
+      dev_server_start_command: 'pnpm dev --port 4173',
+      dev_server_ready_url: 'http://127.0.0.1:4173/health',
+      dev_server_stop_command: 'pnpm dev:stop --force',
+    });
+
+    finishPatch();
+
+    await expect(page.getByRole('button', { name: /^Save$/ })).toBeDisabled({ timeout: 5_000 });
+    await expect(page.getByText('Unsaved changes')).toHaveCount(0, { timeout: 5_000 });
+    await expect(devServerStartField(page)).toHaveValue('pnpm dev --port 4173');
+    await expect(devServerReadyUrlField(page)).toHaveValue('http://127.0.0.1:4173/health');
+    await expect(devServerStopField(page)).toHaveValue('pnpm dev:stop --force');
   });
 
   // ---------------------------------------------------------------------------

@@ -470,6 +470,9 @@ export async function updateProjectConfig(
     commit_style?: string
     website?: string
     qa_url?: string
+    dev_server_start_command?: string
+    dev_server_stop_command?: string
+    dev_server_ready_url?: string
   }
 ): Promise<{ status: string }> {
   const response = await fetch(`${API_BASE}/by-project/${encodeURIComponent(projectName)}/config`, {

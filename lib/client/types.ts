@@ -151,6 +151,9 @@ export interface ProjectConfig {
   commit_style?: string
   website?: string
   qa_url?: string
+  dev_server_start_command?: string
+  dev_server_stop_command?: string
+  dev_server_ready_url?: string
   paused?: boolean
   last_push_error?: string | null
   last_push_at?: number | null
