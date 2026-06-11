@@ -200,4 +200,54 @@ describe('ensureBrokerRunning', () => {
     expect((globalThis as typeof globalThis & { __tamtamBrowserBrokerShutdownHookInstalled?: unknown }).__tamtamBrowserBrokerShutdownHookInstalled).toBeUndefined();
     expect((globalThis as typeof globalThis & { __tamtamBrowserBrokerShutdownHooks?: unknown }).__tamtamBrowserBrokerShutdownHooks).toBeUndefined();
   });
+
+  it('uses silent detached cleanup from installed process signal handlers', async () => {
+    vi.stubEnv('NODE_ENV', 'production');
+    vi.stubEnv('VITEST', undefined);
+    vi.stubEnv('VITEST_WORKER_ID', undefined);
+    vi.stubEnv('VITEST_POOL_ID', undefined);
+
+    const vitestGlobal = (globalThis as typeof globalThis & { __vitest_worker__?: unknown }).__vitest_worker__;
+    delete (globalThis as typeof globalThis & { __vitest_worker__?: unknown }).__vitest_worker__;
+
+    const unrefMock = vi.fn();
+    const spawnMock = vi.fn(() => ({ unref: unrefMock }));
+    vi.doMock('child_process', async (importOriginal) => ({
+      ...await importOriginal<typeof import('child_process')>(),
+      spawn: spawnMock,
+    }));
+
+    const hooks: Partial<Record<'SIGINT' | 'SIGTERM', () => void>> = {};
+    const onceSpy = vi.spyOn(process, 'once').mockImplementation(((signal: NodeJS.Signals, listener: NodeJS.SignalsListener) => {
+      if (signal === 'SIGINT' || signal === 'SIGTERM') {
+        hooks[signal] = listener as () => void;
+      }
+      return process;
+    }) as typeof process.once);
+
+    try {
+      const { ensureBrokerRunning } = await import('@/lib/browser-broker/container-lifecycle');
+
+      await ensureBrokerRunning();
+      const rmCallsBeforeSignal = runShellMock.mock.calls.filter(([, args]) => args[0] === 'rm' && args[1] === '-f').length;
+
+      expect(onceSpy).toHaveBeenCalledWith('SIGINT', expect.any(Function));
+      expect(onceSpy).toHaveBeenCalledWith('SIGTERM', expect.any(Function));
+
+      hooks.SIGTERM?.();
+
+      expect(spawnMock).toHaveBeenCalledWith('docker', ['rm', '-f', 'tamtam-playwright-broker-4321'], {
+        detached: true,
+        stdio: 'ignore',
+      });
+      expect(unrefMock).toHaveBeenCalled();
+      expect(runShellMock.mock.calls.filter(([, args]) => args[0] === 'rm' && args[1] === '-f')).toHaveLength(rmCallsBeforeSignal);
+      expect((globalThis as typeof globalThis & { __tamtamBrowserBroker?: unknown }).__tamtamBrowserBroker).toBeUndefined();
+      expect((globalThis as typeof globalThis & { __tamtamBrowserBrokerStarting?: unknown }).__tamtamBrowserBrokerStarting).toBeUndefined();
+    } finally {
+      if (vitestGlobal !== undefined) {
+        (globalThis as typeof globalThis & { __vitest_worker__?: unknown }).__vitest_worker__ = vitestGlobal;
+      }
+    }
+  });
 });

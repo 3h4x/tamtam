@@ -48,10 +48,10 @@ function isVitestRuntime(): boolean {
 
 function handleBrokerShutdownSignal(): void {
   // Signal handlers can fire while test runners or process managers are closing
-  // stdout/stderr. Cleanup is best-effort here; reporting startup/runtime
-  // failures happens at the call sites that can still surface errors safely.
+  // stdout/stderr. Keep this path synchronous and silent so it cannot leave a
+  // pending promise that races Vitest's worker RPC teardown.
   uninstallBrokerShutdownHook();
-  void stopBroker().catch(() => {});
+  stopBrokerFromSignal();
 }
 
 function installBrokerShutdownHook(): void {
@@ -66,6 +66,34 @@ function installBrokerShutdownHook(): void {
   for (const signal of SHUTDOWN_SIGNALS) {
     globalThis.__tamtamBrowserBrokerShutdownHooks[signal] = handleBrokerShutdownSignal;
     process.once(signal, handleBrokerShutdownSignal);
+  }
+}
+
+function stopBrokerFromSignal(): void {
+  const handle = globalThis.__tamtamBrowserBroker;
+  globalThis.__tamtamBrowserBroker = undefined;
+  globalThis.__tamtamBrowserBrokerStarting = undefined;
+  uninstallBrokerShutdownHook();
+
+  if (!handle) return;
+
+  if (handle.mode === 'host') {
+    if (handle.pid) {
+      try { process.kill(-handle.pid, 'SIGTERM'); } catch { /* already gone */ }
+    }
+    return;
+  }
+
+  if (!handle.containerName) return;
+  try {
+    const child = spawn('docker', ['rm', '-f', handle.containerName], {
+      detached: true,
+      stdio: 'ignore',
+    });
+    child.unref();
+  } catch {
+    // Best-effort signal cleanup only. Startup/runtime errors are reported by
+    // the call sites that can still surface them safely.
   }
 }
 

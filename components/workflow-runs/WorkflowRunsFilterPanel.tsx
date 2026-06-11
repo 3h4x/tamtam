@@ -2,7 +2,7 @@
 
 import { Button } from '@/components/ui/Button';
 import { Pill, PillButton, type PillTone } from '@/components/ui/Pill';
-import { SearchField } from '@/components/ui/SearchField';
+import { SearchInput } from '@/components/ui/SearchInput';
 import { workflowStatusPresentation } from '@/components/workflow-runs/workflow-run-status';
 
 export const STATUS_FILTERS = ['all', 'completed', 'running', 'pending', 'failed', 'cancelled'] as const;
@@ -87,13 +87,27 @@ export function WorkflowRunsFilterPanel({
       <div className="border-b border-border p-3">
         <div className="flex flex-col gap-3 lg:flex-row lg:items-start lg:justify-between">
           <div className="min-w-0 flex-1">
-            <SearchField
-              value={nameFilter}
-              onChange={onNameFilterChange}
-              placeholder="Filter workflow, project, trigger, outcome…"
-              wrapperClassName="max-w-md"
-              inputClassName="focus-ring w-full rounded-md border border-border bg-bg-primary px-3 py-1.5 pr-8 text-sm text-text-primary placeholder:text-text-tertiary focus:border-accent focus:outline-none"
-            />
+            <div className="relative max-w-md">
+              <SearchInput
+                value={nameFilter}
+                onChange={(event) => onNameFilterChange(event.target.value)}
+                placeholder="Filter workflow, project, trigger, outcome…"
+                style={{ paddingRight: '2rem' }}
+              />
+              {nameFilter ? (
+                <Button
+                  type="button"
+                  onClick={() => onNameFilterChange('')}
+                  variant="ghost"
+                  size="icon-sm"
+                  className="absolute right-1.5 top-1/2 -translate-y-1/2"
+                  aria-label="Clear search"
+                  title="Clear search"
+                >
+                  ×
+                </Button>
+              ) : null}
+            </div>
             <div className="mt-2 flex flex-wrap items-center gap-x-3 gap-y-1 text-[11px] text-text-tertiary">
               <span className="font-mono">{resultsSummary}</span>
               {statusCounts.running > 0 ? (
