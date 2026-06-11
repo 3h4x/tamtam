@@ -5,10 +5,9 @@ import { test, expect, Route } from '@playwright/test';
 // branch). Create PR pushes commits to origin and runs `gh pr create` — an
 // outbound action of exactly the kind the global `jobs_paused` gate exists to
 // stop. Every sibling action button (Release / Test / Push / Push-to-PR /
-// Fix CI / custom actions) disables itself when jobs are paused; Create PR did
-// not, which let a paused operator fire an un-gated push. This spec pins the
-// fixed behavior: the button is disabled with the standard paused tooltip when
-// jobs are paused, and enabled when they are not.
+// Fix CI / custom actions) disables itself when jobs are paused. This spec pins
+// the same behavior for Create PR: the button is disabled with the standard
+// paused tooltip when jobs are paused, and enabled when they are not.
 //
 // All HTTP calls are mocked — no real git/gh invocations and no global-setup
 // project registration.
