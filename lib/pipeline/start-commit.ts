@@ -431,25 +431,14 @@ async function runCommit(
   // the subsequent PR attempt produces an empty diff, and GH rejects it.
   if (issueCtx === undefined) issueCtx = await findIssueContext(projectName, projPath);
 
-  // Determine if we need to switch off the default branch before committing.
-  // This is only required for issue-linked runs so the subsequent issue PR
-  // has a real branch diff instead of an empty main-vs-main comparison.
-  const needsBranch = !!issueCtx;
-
-  if (needsBranch) {
+  if (issueCtx) {
     const [branchR, mainBranch] = await Promise.all([
       execStep('git', ['-C', projPath, 'branch', '--show-current'], { timeout: 5000 }),
       detectMainBranch(projPath, signal),
     ]);
     const currentBranch = branchR.stdout.trim();
     if (!currentBranch || currentBranch === mainBranch) {
-      const featureBranch = issueCtx
-        ? issueBranchName(issueCtx)
-        : (() => {
-            const ts = new Date();
-            const d = `${ts.getFullYear()}${String(ts.getMonth() + 1).padStart(2, '0')}${String(ts.getDate()).padStart(2, '0')}-${String(ts.getHours()).padStart(2, '0')}${String(ts.getMinutes()).padStart(2, '0')}`;
-            return `feat/release-${d}`;
-          })();
+      const featureBranch = issueBranchName(issueCtx);
       log(`\n# on ${currentBranch || '(detached)'} — switching to ${featureBranch} before commit\n`);
       const coR = await execStep('git', ['-C', projPath, 'checkout', '-b', featureBranch], { timeout: 10000 });
       if (coR.stdout) log(coR.stdout);
