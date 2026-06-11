@@ -458,6 +458,94 @@ test.describe('NotificationBell', () => {
   });
 
   // -------------------------------------------------------------------------
+  // Dropdown — a review that finishes WITHOUT a verdict (status=done,
+  // verdict=null) is treated as attention and surfaces "review verdict
+  // missing". Exercises finishedJobState's verdict-missing branch
+  // (NotificationBell.tsx:76); all other review tests carry an explicit
+  // verdict so this path was uncovered.
+  // -------------------------------------------------------------------------
+  test('dropdown shows "review verdict missing" for a done review with no verdict', async ({
+    page,
+  }) => {
+    await stubShellRoutes(page);
+    await page.route('**/api/jobs/notifications', (route: Route) =>
+      route.fulfill({
+        json: {
+          count: 1,
+          jobs: [
+            makeNotifJob({
+              id: 'verdictless-review',
+              project: 'verdictless-project',
+              kind: 'review',
+              status: 'done',
+              exit_code: 0,
+              finished_at: now() - 60,
+              verdict: null,
+            }),
+          ],
+          runningCount: 0,
+          runningJobs: [],
+        },
+      }),
+    );
+
+    await page.goto('/workflow-runs');
+
+    await page.getByTitle('1 unread').click();
+
+    const dropdown = page.locator('div.absolute.right-0.top-full');
+    await expect(dropdown.getByText('verdictless-project')).toBeVisible({ timeout: 5_000 });
+    // Verdict-missing reviews are NOT success — attention icon, no verdict badge.
+    await expect(dropdown.locator('[aria-label="attention"]')).toHaveCount(1);
+    await expect(dropdown.locator('[aria-label="success"]')).toHaveCount(0);
+    await expect(dropdown.getByText('review verdict missing')).toBeVisible();
+    // No verdict badge text leaks in (LGTM / needs attention / do not ship).
+    await expect(dropdown.getByText(/LGTM|needs attention|do not ship/i)).toHaveCount(0);
+  });
+
+  // -------------------------------------------------------------------------
+  // Dropdown — exit -1 (TamTam's "failed to start" sentinel) renders the
+  // operator-friendly "failed to start" label, NOT a literal "exit -1" that
+  // reads like a real exit status. Matches RunRow's mapping; previously the
+  // bell showed the bare sentinel. No other notification test uses -1.
+  // -------------------------------------------------------------------------
+  test('dropdown shows "failed to start" for an exit -1 job instead of a literal "exit -1"', async ({
+    page,
+  }) => {
+    await stubShellRoutes(page);
+    await page.route('**/api/jobs/notifications', (route: Route) =>
+      route.fulfill({
+        json: {
+          count: 1,
+          jobs: [
+            makeNotifJob({
+              id: 'failed-to-start',
+              project: 'spawn-fail-project',
+              kind: 'test',
+              status: 'done',
+              exit_code: -1,
+              finished_at: now() - 60,
+            }),
+          ],
+          runningCount: 0,
+          runningJobs: [],
+        },
+      }),
+    );
+
+    await page.goto('/workflow-runs');
+
+    await page.getByTitle('1 unread').click();
+
+    const dropdown = page.locator('div.absolute.right-0.top-full');
+    await expect(dropdown.getByText('spawn-fail-project')).toBeVisible({ timeout: 5_000 });
+    await expect(dropdown.locator('[aria-label="attention"]')).toHaveCount(1);
+    await expect(dropdown.getByText('failed to start')).toBeVisible();
+    // The bare sentinel must never reach the operator.
+    await expect(dropdown.getByText('exit -1')).toHaveCount(0);
+  });
+
+  // -------------------------------------------------------------------------
   // "Clear all" immediately removes badge and switches to "All caught up"
   // -------------------------------------------------------------------------
   test('"Clear all" removes the unread badge and shows "All caught up" without reload', async ({

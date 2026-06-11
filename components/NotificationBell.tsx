@@ -81,7 +81,11 @@ function finishedJobState(job: JobInfo): { success: boolean; detailLabel: string
   }
 
   const success = job.exit_code === 0 || job.exit_code === null
-  return { success, detailLabel: success ? null : `exit ${job.exit_code}` }
+  if (success) return { success, detailLabel: null }
+  // -1 is TamTam's "never exited normally" sentinel; a literal "exit -1" reads
+  // like a real status and confuses operators, so match RunRow's friendlier
+  // "failed to start" label.
+  return { success, detailLabel: job.exit_code === -1 ? 'failed to start' : `exit ${job.exit_code}` }
 }
 
 function collapseFinishedJobs(jobs: JobInfo[]): JobInfo[] {
