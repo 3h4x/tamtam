@@ -50,7 +50,7 @@ The `rebuild` script is now graceful by default (`scripts/rebuild-safe.sh`): it 
 - `components/`: target < 400, hard cap 600. Past 600, extract into `components/<page-name>/`.
 
 **Server vs Client Components:**
-- Files in `components/` that render React must start with `'use client'` (single quotes, first line). Co-located type/constant/utility/hook modules may omit it.
+- Files in `components/` that use hooks, event handlers, or browser-only APIs must start with `'use client'` (single quotes, first line). Pure presentational, Server-compatible components and co-located type/constant/utility modules may omit it.
 - Pages in `app/` are Server Components by default; don't add `'use client'` unless the page needs hooks directly.
 - Never use browser-only APIs (`window`, `document`, `localStorage`) in `app/` page/layout files.
 
