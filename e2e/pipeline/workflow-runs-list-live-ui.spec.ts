@@ -368,6 +368,58 @@ test.describe('Workflow runs list live polling', () => {
     await expect(page).toHaveURL(stableUrl);
   });
 
+  test('active run completing with not-ok output moves to attention without a stale running badge', async ({
+    page,
+  }) => {
+    let serveRunning = true;
+
+    await stubWorkflowRunsShell(page);
+    await stubWorkflowRuns(page, () => [
+      serveRunning
+        ? makeRun('running', {
+            id: 'workflow-run-completed-not-ok',
+            input: ['workflow-completed-not-ok', { triggeredBy: 'agent-warning' }],
+          })
+        : makeRun('completed', {
+            id: 'workflow-run-completed-not-ok',
+            input: ['workflow-completed-not-ok', { triggeredBy: 'agent-warning' }],
+            output: {
+              ok: false,
+              message: 'release finished but post-checks still need operator review',
+            },
+          }),
+    ]);
+
+    await page.goto('/workflow-runs');
+
+    const activePanel = page.getByLabel('Active workflow runs');
+    await expect(activePanel).toBeVisible({ timeout: 8_000 });
+    await expect(
+      activePanel.getByRole('link', { name: /workflow-completed-not-ok/i }),
+    ).toBeVisible();
+    await expect(activePanel.getByLabel('status running')).toBeVisible();
+    await expect(page.getByRole('button', { name: /^running 1$/i })).toBeVisible();
+
+    const stableUrl = page.url();
+    serveRunning = false;
+
+    await expect(activePanel).toHaveCount(0, { timeout: 12_000 });
+    const attentionPanel = page.getByLabel('Workflow runs needing attention');
+    const warningRow = attentionPanel
+      .getByRole('link', { name: /workflow-completed-not-ok/i })
+      .first();
+    await expect(attentionPanel).toBeVisible({ timeout: 12_000 });
+    await expect(warningRow.getByLabel('status completed')).toBeVisible({ timeout: 12_000 });
+    await expect(warningRow.getByText('not ok')).toBeVisible({ timeout: 12_000 });
+    await expect(
+      warningRow.getByText('release finished but post-checks still need operator review'),
+    ).toBeVisible({ timeout: 12_000 });
+    await expect(page.getByRole('button', { name: /^running 0$/i })).toBeVisible();
+    await expect(page.getByText('1 running')).toHaveCount(0);
+    await expect(page.getByRole('button', { name: /^completed 1$/i })).toBeVisible();
+    await expect(page).toHaveURL(stableUrl);
+  });
+
   test('active run disappearing from the backend clears active state without an orphaned spinner', async ({
     page,
   }) => {
