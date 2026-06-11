@@ -90,11 +90,10 @@ export async function GET(request: Request) {
   let lastNightlyCleanup: NightlySummary = null as NightlySummary;
 
   // Run all four independent fan-outs (prometheus, loki, throttled-notifications
-  // DB query, retention summaries) in a single Promise.allSettled. Previously
-  // the throttled-notifications DB query and the retention helpers were
-  // sequential `await`s AFTER the prom/loki block resolved, so the route's wall
-  // time was `max(prom, loki) + db_throttled + retention_helpers` instead of
-  // `max(...all four...)`. Closure-captured state matches the existing pattern.
+  // DB query, retention summaries) in a single Promise.allSettled. Keeping
+  // them in the same fan-out keeps the route's wall time to the slowest
+  // dependency instead of adding independent dependency latencies together
+  // (`max(...all four...)`). Closure-captured state matches the existing pattern.
   await Promise.allSettled([
     (async () => {
       const [alerts, services] = await Promise.all([
