@@ -1,4 +1,4 @@
-import { afterEach, vi } from 'vitest';
+import { afterAll, afterEach, vi } from 'vitest';
 import { enforceTestDatabaseUrl } from '@/__tests__/helpers/guard-database-url';
 
 // Per-worker belt-and-suspenders: re-assert the test DATABASE_URL inside each
@@ -9,5 +9,9 @@ enforceTestDatabaseUrl();
 // Leaked fake timers can break Vitest's own throttled task-update timers during
 // worker teardown, producing an unhandled "failed to access internal state".
 afterEach(() => {
+  vi.useRealTimers();
+});
+
+afterAll(() => {
   vi.useRealTimers();
 });

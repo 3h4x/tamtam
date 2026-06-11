@@ -145,5 +145,8 @@ export default defineConfig({
     testTimeout: 30000,
     hookTimeout: 60000,
     teardownTimeout: 10000,
+    fakeTimers: {
+      shouldClearNativeTimers: true,
+    },
   },
 });
