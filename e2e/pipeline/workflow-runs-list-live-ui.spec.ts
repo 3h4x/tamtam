@@ -543,6 +543,108 @@ test.describe('Workflow runs list live polling', () => {
     await expect(page).toHaveURL(stableUrl);
   });
 
+  test('pending workflow keeps the stale active row when a refresh returns 404, then recovers to cancelled without an orphaned pending badge', async ({
+    page,
+  }) => {
+    let pollCount = 0;
+
+    await stubWorkflowRunsShell(page);
+    await page.route(
+      (url) => url.pathname === '/api/workflow-runs' && url.searchParams.get('limit') === '100',
+      (route: Route) => {
+        pollCount += 1;
+
+        if (pollCount === 1) {
+          return route.fulfill({
+            json: {
+              runs: [
+                makeRun('pending', {
+                  id: 'workflow-run-pending-404-recovery',
+                  input: ['workflow-pending-404-recovery', { triggeredBy: 'agent-pending' }],
+                  startedAt: null,
+                  durationMs: null,
+                }),
+              ],
+              meta: {
+                workflowEnabled: true,
+                releaseWorkflow: true,
+                releaseWorkflowDrive: true,
+                mode: 'drive',
+              },
+            },
+          });
+        }
+
+        if (pollCount === 2) {
+          return route.fulfill({
+            status: 404,
+            json: { detail: 'workflow run not found' },
+          });
+        }
+
+        return route.fulfill({
+          json: {
+            runs: [
+              makeRun('cancelled', {
+                id: 'workflow-run-pending-404-recovery',
+                input: ['workflow-pending-404-recovery', { triggeredBy: 'agent-pending' }],
+                startedAt: null,
+                error: 'release was cancelled before a worker resumed the pending run',
+              }),
+            ],
+            meta: {
+              workflowEnabled: true,
+              releaseWorkflow: true,
+              releaseWorkflowDrive: true,
+              mode: 'drive',
+            },
+          },
+        });
+      },
+    );
+
+    await page.goto('/workflow-runs');
+
+    const activePanel = page.getByLabel('Active workflow runs');
+    const pendingRow = activePanel
+      .getByRole('link', { name: /workflow-pending-404-recovery/i })
+      .first();
+
+    await expect(activePanel).toBeVisible({ timeout: 8_000 });
+    await expect(pendingRow.getByLabel('status pending')).toBeVisible({ timeout: 8_000 });
+    await expect(page.getByRole('button', { name: /^pending 1$/i })).toBeVisible({ timeout: 8_000 });
+
+    await expect(page.getByText('Refresh failed. Showing last successful results.')).toBeVisible({
+      timeout: 12_000,
+    });
+    await expect(page.getByText('workflow run not found')).toBeVisible({ timeout: 12_000 });
+    await expect(activePanel).toBeVisible({ timeout: 12_000 });
+    await expect(pendingRow.getByLabel('status pending')).toBeVisible({ timeout: 12_000 });
+    await expect(page.getByRole('button', { name: /^pending 1$/i })).toBeVisible({ timeout: 12_000 });
+
+    const attentionPanel = page.getByLabel('Workflow runs needing attention');
+    const cancelledRow = attentionPanel
+      .getByRole('link', { name: /workflow-pending-404-recovery/i })
+      .first();
+
+    await expect(page.getByText('Refresh failed. Showing last successful results.')).toHaveCount(0, {
+      timeout: 12_000,
+    });
+    await expect(page.getByText('workflow run not found')).toHaveCount(0, { timeout: 12_000 });
+    await expect(activePanel).toHaveCount(0, { timeout: 12_000 });
+    await expect(attentionPanel).toBeVisible({ timeout: 12_000 });
+    await expect(cancelledRow.getByLabel('status cancelled')).toBeVisible({ timeout: 12_000 });
+    await expect(
+      cancelledRow.getByText('release was cancelled before a worker resumed the pending run'),
+    ).toBeVisible({ timeout: 12_000 });
+    await expect(page.getByRole('button', { name: /^pending 0$/i })).toBeVisible({
+      timeout: 12_000,
+    });
+    await expect(page.getByRole('button', { name: /^cancelled 1$/i })).toBeVisible({
+      timeout: 12_000,
+    });
+  });
+
   test('pending workflow failed before start moves to attention without stale pending state', async ({
     page,
   }) => {
