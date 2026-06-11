@@ -129,11 +129,8 @@ function recoveryChildrenOf(release: JobData, recoveryJobs: JobData[]): JobData[
 
 function readReleaseLogTail(release: JobData, tailBytes = 50_000): string {
   if (!release.logPath) return '';
-  // Open first, then fstatSync the fd. Previously we statSync'd the path
-  // and openSync'd it separately — if PM2 rotated the log between the
-  // two syscalls, the open fd pointed at the new file but `start` was
-  // computed from the old file's size. Now the size + read both operate
-  // on the same open fd.
+  // Open first, then fstatSync the fd so size + read operate on the same file
+  // even if PM2 rotates the log concurrently.
   let fd: number;
   try {
     fd = openSync(/*turbopackIgnore: true*/ release.logPath, 'r');
