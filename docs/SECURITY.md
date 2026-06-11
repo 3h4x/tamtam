@@ -33,7 +33,7 @@ The working-tree files on the feature branch are **never read** for config or ag
 
 #### Fail-open on non-git directories
 
-Branch detection (`lib/git-branch.ts`) catches all `execFileSync` errors and falls back to treating the working tree as "on the default branch" (`isDefaultBranch: true`). This means TamTam continues to work for projects that are not tracked with git — it just can't enforce branch pinning.
+Branch detection (`lib/git/git-branch.ts`) catches all `execFileSync` errors and falls back to treating the working tree as "on the default branch" (`isDefaultBranch: true`). This means TamTam continues to work for projects that are not tracked with git — it just can't enforce branch pinning.
 
 #### Writes still go to the working tree
 
