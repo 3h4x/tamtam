@@ -43,7 +43,6 @@ export async function closeIssue(input: CloseIssueInput): Promise<CloseIssueResu
   }
 
   // Invalidate both detail (for this number) and list (closing changes the open set).
-  // Same pattern as the original route — see route handler comment for rationale.
   await Promise.all([
     db.delete(schema.ghIssueDetailCache)
       .where(and(
