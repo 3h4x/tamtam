@@ -709,7 +709,7 @@ async function runPush(
   // non-zero exit when @{u} is unresolvable — which happens on a fresh
   // branch that was never pushed, OR when the remote ref was deleted after
   // a squash-merge (classic zombie branch). Silently treating that as
-  // "No changes to push" marooned commit ee3b5a5 on seo-tools. Distinguish:
+  // "No changes to push" can maroon real commits on the branch. Distinguish:
   //   - exit 0, count > 0 → push
   //   - exit 0, count 0   → genuinely no changes
   //   - exit != 0         → no upstream; fall through to tryPush, which
