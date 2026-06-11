@@ -287,6 +287,74 @@ test.describe('WorkflowRunDetail UI', () => {
     await expect(page).toHaveURL(stableUrl);
   });
 
+  test('pending run failed before start clears pending badges and surfaces the failure without a stale live state', async ({
+    page,
+  }) => {
+    let servePending = true;
+
+    await stubShellRoutes(page);
+    await page.route(`**/api/workflow-runs/${RUN_ID}`, (route: Route) =>
+      route.fulfill({
+        json: servePending
+          ? ({
+              run: makeRun('pending', { startedAt: null }),
+              steps: [
+                makeStep('s1', 'wait-for-release-slot', 'pending', {
+                  startedAt: null,
+                  completedAt: null,
+                  durationMs: null,
+                }),
+              ],
+            } satisfies RunDetail)
+          : ({
+              run: makeRun('failed', {
+                startedAt: null,
+                error: 'worker crashed before the workflow started running',
+              }),
+              steps: [
+                makeStep('s1', 'wait-for-release-slot', 'failed', {
+                  startedAt: null,
+                  completedAt: null,
+                  durationMs: null,
+                  error: 'worker crashed before the workflow started running',
+                }),
+              ],
+            } satisfies RunDetail),
+      }),
+    );
+
+    await page.goto(`/workflow-runs/${RUN_ID}`);
+
+    const stableUrl = page.url();
+    const stepRowLocator = stepRow(page, 's1');
+
+    await expect(page.locator('[aria-label="status pending"]').first()).toBeVisible({ timeout: 8_000 });
+    await expect(stepRowLocator).toContainText('wait for release slot');
+    await expect(stepRowLocator.getByLabel('status pending')).toBeVisible({ timeout: 8_000 });
+    await expect(page.getByText(/pending\s*1/i).first()).toBeVisible({ timeout: 8_000 });
+    await expect(page.getByText('live · refreshes every 5s')).toBeVisible({ timeout: 8_000 });
+
+    servePending = false;
+
+    await expect(page.locator('[aria-label="status failed"]').first()).toBeVisible({
+      timeout: 12_000,
+    });
+    await expect(stepRowLocator.getByLabel('status failed')).toBeVisible({ timeout: 12_000 });
+    await expect(page.locator('[aria-label="status pending"]')).toHaveCount(0, {
+      timeout: 12_000,
+    });
+    await expect(page.getByText(/failed\s*1/i).first()).toBeVisible({ timeout: 12_000 });
+    await expect(page.getByText('final snapshot')).toBeVisible({ timeout: 12_000 });
+    await expect(page.getByText('live · refreshes every 5s')).toHaveCount(0);
+    await expect(
+      page.getByText('worker crashed before the workflow started running').first(),
+    ).toBeVisible({
+      timeout: 12_000,
+    });
+    await expect(page.getByText('needs attention')).toBeVisible({ timeout: 12_000 });
+    await expect(page).toHaveURL(stableUrl);
+  });
+
   test('live run keeps prior completed steps stable while the active step flips to completed after poll', async ({
     page,
   }) => {
