@@ -124,8 +124,10 @@ export function ProjectActions({
   const hasOpenPr = openPrBranches.includes(currentBranch ?? '')
   const showCreatePr = isOnFeatureBranch && !hasOpenPr
   const noCommitsToPr = isOnFeatureBranch && branchCommitsAhead === 0
-  const createPrDisabled = creatingPr || noCommitsToPr
-  const createPrTitle = noCommitsToPr
+  const createPrDisabled = jobsPaused || creatingPr || noCommitsToPr
+  const createPrTitle = jobsPaused
+    ? 'Jobs are paused globally. Resume jobs to create a PR.'
+    : noCommitsToPr
     ? `Branch ${currentBranch} has no commits ahead of origin/${defaultBranch}. Commit your changes (use Release) or move them to ${defaultBranch} first.`
     : `Create pull request for branch ${currentBranch}`
 
