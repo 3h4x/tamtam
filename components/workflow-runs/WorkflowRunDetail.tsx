@@ -342,6 +342,7 @@ export function WorkflowRunDetail({ runId }: { runId: string }) {
       durationLabel: formatDurationCell(step.status, step.durationMs, step.startedAt, now),
       completedLabel: formatRelativeTime(step.completedAt ?? step.startedAt, now),
       error: step.error,
+      output: step.output,
     }));
   const stepColumns: Column<Step>[] = [
     {

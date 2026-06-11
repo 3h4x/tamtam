@@ -13,14 +13,43 @@ export interface WorkflowStepAttentionItem {
   durationLabel: string;
   completedLabel: string;
   error: string | null;
+  output?: unknown;
 }
 
 export function workflowStepAnchorId(stepId: string, surface: 'mobile' | 'desktop'): string {
   return `workflow-step-${surface}-${encodeURIComponent(stepId)}`;
 }
 
-export function workflowStepNeedsAttention(step: { status: string; error: string | null }): boolean {
-  return step.status === 'failed' || step.status === 'cancelled' || step.error != null;
+function stepOutputExitCode(output: unknown): number | null {
+  if (!output || typeof output !== 'object' || Array.isArray(output)) return null;
+  const exitCode = (output as Record<string, unknown>).exitCode;
+  return typeof exitCode === 'number' ? exitCode : null;
+}
+
+function stepOutputDetail(output: unknown): string | null {
+  if (!output || typeof output !== 'object' || Array.isArray(output)) return null;
+  const obj = output as Record<string, unknown>;
+  for (const key of ['detail', 'summary', 'message']) {
+    const value = obj[key];
+    if (typeof value === 'string' && value.trim().length > 0) {
+      return humanizeEmbeddedNames(value.trim()).slice(0, 96);
+    }
+  }
+  return null;
+}
+
+export function workflowStepNeedsAttention(step: {
+  status: string;
+  error: string | null;
+  output?: unknown;
+}): boolean {
+  const exitCode = stepOutputExitCode(step.output);
+  return (
+    step.status === 'failed' ||
+    step.status === 'cancelled' ||
+    step.error != null ||
+    (exitCode != null && exitCode !== 0)
+  );
 }
 
 function summarizeStepIssue(step: WorkflowStepAttentionItem): string {
@@ -32,6 +61,11 @@ function summarizeStepIssue(step: WorkflowStepAttentionItem): string {
     return humanizeEmbeddedNames(firstLine).slice(0, 96);
   }
   if (step.status === 'cancelled') return 'cancelled before completion';
+  const exitCode = stepOutputExitCode(step.output);
+  if (exitCode != null && exitCode !== 0) {
+    const detail = stepOutputDetail(step.output);
+    return detail ? `exit ${exitCode}: ${detail}` : `exit ${exitCode}`;
+  }
   return `status ${step.status}`;
 }
 

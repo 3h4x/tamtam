@@ -635,6 +635,67 @@ test.describe('WorkflowRunDetail UI', () => {
     await expect(page.getByText('live · refreshes every 5s')).toHaveCount(0);
   });
 
+  test('live run ending with a completed parent and non-zero step output clears running badges and surfaces the step issue', async ({
+    page,
+  }) => {
+    let serveRunning = true;
+
+    await stubShellRoutes(page);
+    await page.route(`**/api/workflow-runs/${RUN_ID}`, (route: Route) =>
+      route.fulfill({
+        json: serveRunning
+          ? ({
+              run: makeRun('running'),
+              steps: [makeStep('s1', 'run-push', 'running')],
+            } satisfies RunDetail)
+          : ({
+              run: makeRun('completed', {
+                output: {
+                  waited: {
+                    job: {
+                      exitCode: 1,
+                      detail: 'Push failed: remote rejected the update',
+                    },
+                  },
+                },
+              }),
+              steps: [
+                makeStep('s1', 'run-push', 'completed', {
+                  output: {
+                    exitCode: 1,
+                    detail: 'Push failed: remote rejected the update',
+                  },
+                }),
+              ],
+            } satisfies RunDetail),
+      }),
+    );
+
+    await page.goto(`/workflow-runs/${RUN_ID}`);
+
+    const stepRowLocator = stepRow(page, 's1');
+    await expect(page.locator('[aria-label="status running"]').first()).toBeVisible({ timeout: 8_000 });
+    await expect(stepRowLocator.getByLabel('status running')).toBeVisible({ timeout: 8_000 });
+    await expect(page.getByText('live · refreshes every 5s')).toBeVisible({ timeout: 8_000 });
+
+    serveRunning = false;
+
+    await expect(page.locator('[aria-label="status completed"]').first()).toBeVisible({
+      timeout: 12_000,
+    });
+    await expect(stepRowLocator.getByLabel('status completed')).toBeVisible({ timeout: 12_000 });
+    await expect(page.locator('[aria-label="status running"]')).toHaveCount(0, { timeout: 12_000 });
+    await expect(page.getByText('final snapshot')).toBeVisible({ timeout: 12_000 });
+    await expect(page.getByText('live · refreshes every 5s')).toHaveCount(0);
+    await expect(page.getByText('Push failed: remote rejected the update').first()).toBeVisible({
+      timeout: 12_000,
+    });
+    await expect(visibleStepAttentionLink(page, /run push/i)).toBeVisible({ timeout: 12_000 });
+    await expect(visibleStepAttentionLink(page, /exit 1: Push failed: remote rejected the update/i)).toBeVisible({
+      timeout: 12_000,
+    });
+  });
+
   // ---------------------------------------------------------------------------
   // Attention panel — failed step with error string
   // ---------------------------------------------------------------------------
