@@ -199,7 +199,7 @@ export function NotificationBell() {
         {finishedJobs.length > 0 && (
           <span
             className="absolute -top-1.5 -right-1.5 min-w-[18px] h-[18px] px-1 bg-status-error text-white text-[10px] font-semibold rounded-full flex items-center justify-center leading-none"
-            title={unseenCount > finishedJobs.length ? `${finishedJobs.length} project${finishedJobs.length === 1 ? '' : 's'} need attention (${unseenCount} unseen items in total)` : undefined}
+            title={unseenCount > finishedJobs.length ? `${finishedJobs.length} project${finishedJobs.length === 1 ? ' needs' : 's need'} attention (${unseenCount} unseen items in total)` : undefined}
           >
             {finishedJobs.length > 99 ? '99+' : finishedJobs.length}
           </span>

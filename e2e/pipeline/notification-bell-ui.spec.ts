@@ -302,6 +302,96 @@ test.describe('NotificationBell', () => {
   });
 
   // -------------------------------------------------------------------------
+  // Sky-view collapse (FINISHED): one project with both an older attention
+  // failure and a NEWER green remediation step collapses to a single entry,
+  // and the attention job stays sticky — it wins over the newer success so an
+  // unsuperseded failure remains visible. Exercises collapseFinishedJobs's
+  // `attentionJob` branch (NotificationBell.tsx). Previously only unit-tested.
+  // -------------------------------------------------------------------------
+  test('keeps the older attention job visible over a newer green step for the same project', async ({
+    page,
+  }) => {
+    await stubShellRoutes(page);
+    await page.route('**/api/jobs/notifications', (route: Route) =>
+      route.fulfill({
+        json: {
+          // Server still counts both unseen jobs; the bell collapses them.
+          count: 2,
+          jobs: [
+            // Newer green remediation push (exit 0) lands AFTER the failure...
+            makeNotifJob({ id: 'f-green', project: 'sticky-project', kind: 'push', status: 'done', exit_code: 0, finished_at: now() - 5 }),
+            // ...but the older failed test (exit 1) must stay sticky.
+            makeNotifJob({ id: 'f-fail', project: 'sticky-project', kind: 'test', status: 'done', exit_code: 1, finished_at: now() - 60 }),
+          ],
+          runningCount: 0,
+          runningJobs: [],
+        },
+      }),
+    );
+
+    await page.goto('/workflow-runs');
+
+    // Badge shows the COLLAPSED count (1 project), not the raw 2 unseen jobs.
+    const bellBtn = page.getByTitle('2 unread');
+    await expect(bellBtn).toBeVisible({ timeout: 8_000 });
+    const badge = bellBtn.locator('span.bg-status-error');
+    await expect(badge).toHaveText('1');
+    // Badge tooltip explains the gap between collapsed entries and raw count.
+    await expect(badge).toHaveAttribute('title', '1 project needs attention (2 unseen items in total)');
+
+    await bellBtn.click();
+
+    const dropdown = page.locator('div.absolute.right-0.top-full');
+    // One entry for the project despite two finished jobs.
+    await expect(dropdown.getByText('sticky-project')).toHaveCount(1);
+    // The attention (test/exit 1) job wins; the green push is hidden.
+    await expect(dropdown.getByText('test', { exact: true })).toBeVisible();
+    await expect(dropdown.getByText('exit 1')).toBeVisible();
+    await expect(dropdown.getByText('push', { exact: true })).toHaveCount(0);
+    await expect(dropdown.locator('[aria-label="attention"]')).toHaveCount(1);
+    await expect(dropdown.locator('[aria-label="success"]')).toHaveCount(0);
+  });
+
+  // -------------------------------------------------------------------------
+  // Sky-view collapse (FINISHED), all-green: with no attention job the newest
+  // finished job wins (the `?? sorted[0]` fallback). Two successful jobs for
+  // one project collapse to the newer one.
+  // -------------------------------------------------------------------------
+  test('collapses two successful jobs for one project to the newest entry', async ({ page }) => {
+    await stubShellRoutes(page);
+    await page.route('**/api/jobs/notifications', (route: Route) =>
+      route.fulfill({
+        json: {
+          count: 2,
+          jobs: [
+            // Newer push (exit 0) must win over the older commit.
+            makeNotifJob({ id: 'g-new', project: 'allgreen-project', kind: 'push', status: 'done', exit_code: 0, finished_at: now() - 5 }),
+            makeNotifJob({ id: 'g-old', project: 'allgreen-project', kind: 'commit', status: 'done', exit_code: 0, finished_at: now() - 60 }),
+          ],
+          runningCount: 0,
+          runningJobs: [],
+        },
+      }),
+    );
+
+    await page.goto('/workflow-runs');
+
+    const bellBtn = page.getByTitle('2 unread');
+    await expect(bellBtn).toBeVisible({ timeout: 8_000 });
+    await expect(bellBtn.locator('span.bg-status-error')).toHaveText('1');
+
+    await bellBtn.click();
+
+    const dropdown = page.locator('div.absolute.right-0.top-full');
+    await expect(dropdown.getByText('allgreen-project')).toHaveCount(1);
+    // Newest job (push) is surfaced; the older commit is collapsed away.
+    await expect(dropdown.getByText('push', { exact: true })).toBeVisible();
+    await expect(dropdown.getByText('commit', { exact: true })).toHaveCount(0);
+    await expect(dropdown.locator('[aria-label="success"]')).toHaveCount(1);
+    await expect(dropdown.locator('[aria-label="attention"]')).toHaveCount(0);
+  });
+
+  // -------------------------------------------------------------------------
   // Dropdown — success icon for a passing push job
   // -------------------------------------------------------------------------
   test('dropdown shows success icon for a finished push job with exit_code=0', async ({ page }) => {
