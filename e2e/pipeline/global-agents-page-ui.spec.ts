@@ -323,4 +323,81 @@ test.describe('Global agents page UI', () => {
     // Last Fire cell shows the never-fired placeholder.
     await expect(row.getByText('never fired', { exact: true })).toBeVisible();
   });
+
+  // ---------------------------------------------------------------------------
+  // Test 8: Source/kind badges — a file-backed agent renders a "file" tag and a
+  // built-in system agent renders a "system" tag with a diagnostic title. These
+  // origin badges are distinct from the lifecycle state pill.
+  // ---------------------------------------------------------------------------
+  test('renders file and system origin badges next to the agent name', async ({ page }) => {
+    const FILE_ID = 'agent-file';
+    const SYSTEM_ID = 'agent-system';
+
+    const agents = [
+      makeAgent({ id: FILE_ID, name: 'File Agent', source: 'file', schedule: null }),
+      makeAgent({ id: SYSTEM_ID, name: 'System Agent', kind: 'system', schedule: null }),
+    ];
+
+    await stubShellRoutes(page);
+    await page.route('**/api/agents/scheduler-health', (route: Route) =>
+      route.fulfill({ json: { internal: { entries: [] } } }),
+    );
+    await page.route(
+      (url) => url.pathname === '/api/agents',
+      (route: Route) => route.fulfill({ json: { agents } }),
+    );
+
+    await page.goto('/agents');
+
+    const fileRow = page.locator('tr', { hasText: 'File Agent' });
+    await expect(fileRow.getByText('file', { exact: true })).toBeVisible({ timeout: 8_000 });
+
+    const systemRow = page.locator('tr', { hasText: 'System Agent' });
+    const systemBadge = systemRow.getByText('system', { exact: true });
+    await expect(systemBadge).toBeVisible();
+    await expect(systemBadge).toHaveAttribute('title', /built-in system agent/i);
+  });
+
+  // ---------------------------------------------------------------------------
+  // Test 9: A scheduled agent whose next fire is still in the future but has
+  // accumulated scheduler errors shows the upcoming "in <time>" label in the
+  // warning tone — the error count promotes the tone even though it is not
+  // overdue, and the title surfaces the last error. This is a separate branch
+  // from the overdue path covered in test 7.
+  // ---------------------------------------------------------------------------
+  test('shows future next-fire in warning tone when the agent has scheduler errors', async ({ page }) => {
+    const ERR_ID = 'agent-future-errors';
+
+    const agents = [makeAgent({ id: ERR_ID, name: 'Future Errors Agent', schedule: '0 * * * *' })];
+    const schedulerEntries = [
+      makeSchedulerEntry(ERR_ID, {
+        // Comfortably in the future (not overdue) but carrying errors.
+        nextFireMs: Date.now() + 1_800_000,
+        errorCount: 2,
+        lastError: 'boom',
+      }),
+    ];
+
+    await stubShellRoutes(page);
+    await page.route('**/api/agents/scheduler-health', (route: Route) =>
+      route.fulfill({ json: { internal: { entries: schedulerEntries } } }),
+    );
+    await page.route(
+      (url) => url.pathname === '/api/agents',
+      (route: Route) => route.fulfill({ json: { agents } }),
+    );
+
+    await page.goto('/agents');
+
+    const row = page.locator('tr', { hasText: 'Future Errors Agent' });
+    await expect(row).toBeVisible({ timeout: 8_000 });
+
+    // Next Fire shows an upcoming "in ..." label (not "overdue") in warning tone.
+    const nextFire = row.getByText(/^in /);
+    await expect(nextFire).toBeVisible();
+    await expect(nextFire).toHaveClass(/text-status-warning/);
+    await expect(row.getByText('overdue', { exact: true })).toHaveCount(0);
+    // The hint surfaces the error detail rather than the fire schedule.
+    await expect(nextFire).toHaveAttribute('title', /error\(s\): boom/i);
+  });
 });
