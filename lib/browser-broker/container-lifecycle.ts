@@ -24,6 +24,7 @@ declare global {
   var __tamtamBrowserBroker: BrokerHandle | undefined;
   var __tamtamBrowserBrokerStarting: Promise<BrokerHandle> | undefined;
   var __tamtamBrowserBrokerShutdownHookInstalled: boolean | undefined;
+  var __tamtamBrowserBrokerShutdownHooks: Partial<Record<ShutdownSignal, () => void>> | undefined;
 }
 
 // First-run is slow: docker may need to pull the Playwright image. Cached
@@ -33,6 +34,7 @@ const HEALTH_PROBE_TIMEOUT_MS = 120_000;
 const HEALTH_PROBE_INTERVAL_MS = 500;
 const LOG_TAIL_LINES = 80;
 const SHUTDOWN_SIGNALS = ['SIGINT', 'SIGTERM'] as const;
+type ShutdownSignal = typeof SHUTDOWN_SIGNALS[number];
 
 function isVitestRuntime(): boolean {
   return (
@@ -48,6 +50,7 @@ function handleBrokerShutdownSignal(): void {
   // Signal handlers can fire while test runners or process managers are closing
   // stdout/stderr. Cleanup is best-effort here; reporting startup/runtime
   // failures happens at the call sites that can still surface errors safely.
+  uninstallBrokerShutdownHook();
   void stopBroker().catch(() => {});
 }
 
@@ -59,9 +62,23 @@ function installBrokerShutdownHook(): void {
   if (isVitestRuntime()) return;
   if (globalThis.__tamtamBrowserBrokerShutdownHookInstalled) return;
   globalThis.__tamtamBrowserBrokerShutdownHookInstalled = true;
+  globalThis.__tamtamBrowserBrokerShutdownHooks = {};
   for (const signal of SHUTDOWN_SIGNALS) {
+    globalThis.__tamtamBrowserBrokerShutdownHooks[signal] = handleBrokerShutdownSignal;
     process.once(signal, handleBrokerShutdownSignal);
   }
+}
+
+function uninstallBrokerShutdownHook(): void {
+  const hooks = globalThis.__tamtamBrowserBrokerShutdownHooks;
+  if (hooks) {
+    for (const signal of SHUTDOWN_SIGNALS) {
+      const hook = hooks[signal];
+      if (hook) process.removeListener(signal, hook);
+    }
+  }
+  globalThis.__tamtamBrowserBrokerShutdownHooks = undefined;
+  globalThis.__tamtamBrowserBrokerShutdownHookInstalled = undefined;
 }
 
 async function dockerAvailable(): Promise<boolean> {
@@ -314,9 +331,25 @@ export async function ensureBrokerRunning(_opts?: EnsureOptions): Promise<Broker
 }
 
 export async function stopBroker(): Promise<void> {
+  const starting = globalThis.__tamtamBrowserBrokerStarting;
+  if (starting && !globalThis.__tamtamBrowserBroker) {
+    try {
+      await starting;
+    } catch {
+      globalThis.__tamtamBrowserBrokerStarting = undefined;
+      uninstallBrokerShutdownHook();
+      return;
+    }
+  }
+
   const handle = globalThis.__tamtamBrowserBroker;
-  if (!handle) return;
+  if (!handle) {
+    uninstallBrokerShutdownHook();
+    return;
+  }
   globalThis.__tamtamBrowserBroker = undefined;
+  globalThis.__tamtamBrowserBrokerStarting = undefined;
+  uninstallBrokerShutdownHook();
   if (handle.mode === 'host') {
     if (handle.pid) {
       // Kill the whole process group (detached spawn) so chromium children die too.

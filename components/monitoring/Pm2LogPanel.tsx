@@ -214,16 +214,22 @@ export function Pm2LogPanel({ pm2Logs, onRefresh }: { pm2Logs: Pm2LogData | null
           className="rounded-lg border border-border bg-bg-secondary px-4 py-3"
         />
       ) : missingAllFiles ? (
-        <div className="rounded-lg border border-border bg-bg-secondary px-4 py-3 space-y-2">
-          <p className="text-sm text-text-primary">PM2 log files were not found on this host.</p>
-          <div className="space-y-1 text-xs text-text-tertiary">
-            {fileErrors.map((file) => (
-              <div key={file.path} className="font-mono" data-private>
-                {file.path}
-              </div>
-            ))}
-          </div>
-        </div>
+        <EmptyState
+          align="start"
+          paddingX="none"
+          paddingY="none"
+          title={<span className="text-text-primary">PM2 log files were not found on this host.</span>}
+          description={(
+            <span className="block space-y-1 text-xs text-text-tertiary">
+              {fileErrors.map((file) => (
+                <span key={file.path} className="block font-mono" data-private>
+                  {file.path}
+                </span>
+              ))}
+            </span>
+          )}
+          className="rounded-lg border border-border bg-bg-secondary px-4 py-3"
+        />
       ) : (
         <div className="space-y-2">
           <div className="flex items-center gap-4 text-xs text-text-tertiary flex-wrap">

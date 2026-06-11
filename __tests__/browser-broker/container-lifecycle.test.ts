@@ -25,7 +25,14 @@ describe('ensureBrokerRunning', () => {
     vi.stubGlobal('fetch', vi.fn(async () => ({ status: 200 })));
   });
 
-  afterEach(() => {
+  afterEach(async () => {
+    try {
+      const { stopBroker } = await import('@/lib/browser-broker/container-lifecycle');
+      await stopBroker();
+    } catch {
+      // Individual tests reset and mock modules aggressively; if import failed,
+      // the globals below still prevent broker state from leaking to the worker.
+    }
     delete (globalThis as typeof globalThis & {
       __tamtamBrowserBroker?: unknown;
       __tamtamBrowserBrokerStarting?: unknown;
@@ -40,6 +47,9 @@ describe('ensureBrokerRunning', () => {
       __tamtamBrowserBrokerStarting?: unknown;
       __tamtamBrowserBrokerShutdownHookInstalled?: unknown;
     }).__tamtamBrowserBrokerShutdownHookInstalled;
+    delete (globalThis as typeof globalThis & {
+      __tamtamBrowserBrokerShutdownHooks?: unknown;
+    }).__tamtamBrowserBrokerShutdownHooks;
     vi.unstubAllEnvs();
     vi.unstubAllGlobals();
     vi.restoreAllMocks();
@@ -163,5 +173,31 @@ describe('ensureBrokerRunning', () => {
       ([signal]) => signal === 'SIGTERM' || signal === 'SIGINT',
     );
     expect(signalCalls).toHaveLength(0);
+  });
+
+  it('removes installed process signal handlers when the broker stops', async () => {
+    const removeListenerSpy = vi.spyOn(process, 'removeListener');
+    const sigintHook = vi.fn();
+    const sigtermHook = vi.fn();
+    (globalThis as typeof globalThis & {
+      __tamtamBrowserBrokerShutdownHookInstalled?: boolean;
+      __tamtamBrowserBrokerShutdownHooks?: Partial<Record<'SIGINT' | 'SIGTERM', () => void>>;
+    }).__tamtamBrowserBrokerShutdownHookInstalled = true;
+    (globalThis as typeof globalThis & {
+      __tamtamBrowserBrokerShutdownHooks?: Partial<Record<'SIGINT' | 'SIGTERM', () => void>>;
+    }).__tamtamBrowserBrokerShutdownHooks = {
+      SIGINT: sigintHook,
+      SIGTERM: sigtermHook,
+    };
+
+    const { ensureBrokerRunning, stopBroker } = await import('@/lib/browser-broker/container-lifecycle');
+
+    await ensureBrokerRunning();
+    await stopBroker();
+
+    expect(removeListenerSpy).toHaveBeenCalledWith('SIGINT', sigintHook);
+    expect(removeListenerSpy).toHaveBeenCalledWith('SIGTERM', sigtermHook);
+    expect((globalThis as typeof globalThis & { __tamtamBrowserBrokerShutdownHookInstalled?: unknown }).__tamtamBrowserBrokerShutdownHookInstalled).toBeUndefined();
+    expect((globalThis as typeof globalThis & { __tamtamBrowserBrokerShutdownHooks?: unknown }).__tamtamBrowserBrokerShutdownHooks).toBeUndefined();
   });
 });
