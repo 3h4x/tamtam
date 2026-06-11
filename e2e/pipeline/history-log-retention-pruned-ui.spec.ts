@@ -67,7 +67,16 @@ function prunedJob(): MockJob {
   }
 }
 
-async function stubHistoryShell(page: Page): Promise<void> {
+function retainedLogJob(): MockJob {
+  return {
+    ...prunedJob(),
+    work_summary: 'Finished cleanly while the log file is still retained.',
+    log_path: '/tmp/tamtam-e2e-pipeline/data/logs/run-log-pruned-1.log',
+    log_pruned: false,
+  }
+}
+
+async function stubHistoryShell(page: Page, getJobs: () => MockJob[] = () => [prunedJob()]): Promise<void> {
   await page.route('**/api/projects', (route: Route) =>
     route.fulfill({
       json: {
@@ -127,7 +136,7 @@ async function stubHistoryShell(page: Page): Promise<void> {
   await page.route(
     (url) => url.pathname === '/api/jobs' && url.searchParams.get('project') === PROJECT,
     (route: Route) => {
-      const jobs = [prunedJob()]
+      const jobs = getJobs()
       route.fulfill({
         json: {
           jobs,
@@ -139,16 +148,30 @@ async function stubHistoryShell(page: Page): Promise<void> {
   )
   await page.route(
     (url) => url.pathname === '/api/jobs/counts' && url.searchParams.get('project') === PROJECT,
-    (route: Route) =>
+    (route: Route) => {
+      const jobs = getJobs()
+      const running = jobs.filter((job) => job.status === 'running').length
+      const failed = jobs.filter((job) => job.exit_code !== null && job.exit_code !== 0).length
+      const byKind = jobs.reduce<Record<string, number>>((acc, job) => {
+        acc[job.kind] = (acc[job.kind] ?? 0) + 1
+        return acc
+      }, {})
+
       route.fulfill({
         json: {
-          total: 1,
-          byKind: { run: 1 },
-          byStatus: { running: 0, done: 1, aborted: 0, failed: 0 },
+          total: jobs.length,
+          byKind,
+          byStatus: {
+            running,
+            done: jobs.filter((job) => job.status === 'done').length,
+            aborted: 0,
+            failed,
+          },
           tokens: { input: 0, output: 0, cacheRead: 0, cacheCreate: 0, total: 0 },
           cost: { total: 0, monthToDate: 0 },
         },
-      }),
+      })
+    },
   )
   await page.route('**/api/jobs/notifications', (route: Route) =>
     route.fulfill({ json: { notifications: [] } }),
@@ -176,6 +199,33 @@ test.describe('History tab log-retention state', () => {
     const prunedBadge = row.getByText('pruned', { exact: true })
     await expect(prunedBadge).toBeVisible()
     await expect(prunedBadge).toHaveAttribute('title', 'Log file deleted by retention policy')
+    await expect(row.getByText('Finished cleanly before log retention removed the file.')).toBeVisible()
+  })
+
+  test('retained completed row transitions to pruned without losing the done state', async ({
+    page,
+  }) => {
+    let logPruned = false
+
+    await stubHistoryShell(page, () => [logPruned ? prunedJob() : retainedLogJob()])
+
+    await page.goto(`/project/${PROJECT}/history`)
+
+    const row = page.getByRole('button').filter({
+      hasText: 'Completed run with a retained history row but pruned log',
+    }).first()
+    await expect(row).toBeVisible({ timeout: 8_000 })
+    await expect(row.getByText('done', { exact: true }).first()).toBeVisible()
+    await expect(row.getByText('pruned', { exact: true })).toHaveCount(0)
+    await expect(row.getByText('Finished cleanly while the log file is still retained.')).toBeVisible()
+
+    logPruned = true
+
+    const prunedBadge = row.getByText('pruned', { exact: true })
+    await expect(prunedBadge).toBeVisible({ timeout: 12_000 })
+    await expect(prunedBadge).toHaveAttribute('title', 'Log file deleted by retention policy')
+    await expect(row.getByText('done', { exact: true }).first()).toBeVisible()
+    await expect(row.getByLabel('running')).toHaveCount(0)
     await expect(row.getByText('Finished cleanly before log retention removed the file.')).toBeVisible()
   })
 })
