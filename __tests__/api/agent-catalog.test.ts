@@ -32,9 +32,29 @@ describe('GET /api/agent-catalog', () => {
     const data = await res.json();
     const qa = data.entries.find((entry: { name: string }) => entry.name === 'qa');
     const improve = data.entries.find((entry: { name: string }) => entry.name === 'improve');
+    const refactorSplit = data.entries.find((entry: { name: string }) => entry.name === 'refactor-split');
 
     expect(qa?.prerequisiteCommand).toContain('{{project}}/config');
     expect(improve?.prerequisiteCommand).toContain('## Unaudited candidates');
+    expect(refactorSplit?.prerequisiteCommand).toContain('## Split target');
+    expect(refactorSplit?.prerequisiteCommand).toContain('F6: oversized');
+  });
+
+  it('exposes refactor-split as a featured file-backed agent template', async () => {
+    const res = await GET();
+    const data = await res.json();
+    const refactorSplit = data.entries.find((entry: { name: string }) => entry.name === 'refactor-split');
+
+    expect(refactorSplit).toMatchObject({
+      dispatch: 'cli',
+      defaultSchedule: '48h',
+      defaultModel: 'smart',
+      skillIds: ['agent-refactor-split'],
+      tier: 'featured',
+      fallbackEnabled: true,
+    });
+    expect(refactorSplit?.description).toContain("Consumes the improve agent's F6");
+    expect(refactorSplit?.outputs).toContain('One oversized file carved into focused modules (or a clean skip)');
   });
 
   it('describes system-agent schedule ownership as Settings-managed', async () => {

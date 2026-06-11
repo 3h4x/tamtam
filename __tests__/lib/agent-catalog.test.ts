@@ -95,6 +95,14 @@ describe('legacy recommended-agents facade', () => {
     expect(qa?.featured).toBe(true);
     const improve = RECOMMENDED_AGENTS.find((a) => a.name === 'improve');
     expect(improve?.featured).toBe(true);
+    const refactorSplit = RECOMMENDED_AGENTS.find((a) => a.name === 'refactor-split');
+    expect(refactorSplit?.featured).toBe(true);
+    expect(refactorSplit).toMatchObject({
+      model: 'smart',
+      schedule: '48h',
+      skillIds: ['agent-refactor-split'],
+      fallbackEnabled: true,
+    });
   });
 });
 

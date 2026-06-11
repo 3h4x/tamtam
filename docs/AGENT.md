@@ -115,6 +115,7 @@ Current notable entries:
 - `cto` is the strategic issue-planning agent. Its shipped skill reads `CLAUDE.md`, `README.md`, and project docs before proposing work, checks open issues and implementation evidence before filing, and marks issues that need external account/vendor setup with `human-needed` so autonomous implementers do not pick them as code-ready.
 - `issue-cruncher` is marked `featured` and manual-only because it is a high-leverage entry point into TamTam's core issue-to-release workflow: pick a ready GitHub issue, close stale or unverifiable ones by default during validation, implement actionable work on an issue branch, then hand off to the existing release pipeline.
 - `qa` is marked `featured` because it browses the project's configured `qa_url` when present, otherwise the configured `website`, using the host-side `/api/projects/by-project/<name>/config` prerequisite output as its target source. It uses Playwright MCP tools in the `mcp__tamtam_browser__*` namespace to look for UI bugs, fixes at most 1-2 small safe findings directly, and reports anything larger, risky, or unclear. It stops early with `QA_NO_TARGET` when the project has neither URL configured; it does not hand off to other agents or create GitHub issues.
+- `refactor-split` is marked `featured` because it consumes the improve agent's `F6: oversized` audit rows and performs the supervised follow-up split improve intentionally defers: one eligible file per run, with type-check and targeted tests before it records the split ledger.
 
 When changing this catalog:
 

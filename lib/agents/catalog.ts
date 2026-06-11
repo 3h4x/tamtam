@@ -237,6 +237,19 @@ export const AGENT_CATALOG: AgentCatalogEntry[] = [
     fallbackEnabled: true,
   },
   {
+    // Metadata source of truth lives in skills/docs/skills/tamtam/agent-refactor-split.md.
+    // The fields below are inline fallbacks; the .md `agent:` block overrides them at API serialize time.
+    name: 'refactor-split',
+    description: "Consumes the improve agent's F6 oversized-file flags and safely splits one eligible file per run into focused modules.",
+    dispatch: 'cli',
+    defaultSchedule: '48h',
+    defaultModel: 'smart',
+    prompt: '',
+    skillIds: ['agent-refactor-split'],
+    tier: 'featured',
+    fallbackEnabled: true,
+  },
+  {
     name: 'manage-agents',
     description: 'Audits TamTam agents for this project and creates, updates, or removes them to match current project needs.',
     dispatch: 'cli',

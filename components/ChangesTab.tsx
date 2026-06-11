@@ -581,7 +581,7 @@ export function ChangesTab({ projectName, jobsPaused = false }: ChangesTabProps)
                       <div className="skeleton h-3.5 w-3/4 rounded" />
                     </div>
                   ) : entry?.error ? (
-                    <div className="p-3 text-xs text-status-error">{entry.error}</div>
+                    <OperationError message={entry.error} className="p-3" />
                   ) : entry?.content !== undefined ? (
                     <DiffView diff={entry.content} />
                   ) : null}

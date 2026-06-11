@@ -49,4 +49,17 @@ describe('RECOMMENDED_AGENTS', () => {
     expect(agent?.description).toMatch(/reports the rest/i)
     expect(agent?.description).not.toMatch(/cto|hand.?off|GitHub issue/i)
   })
+
+  it('keeps refactor-split as a featured scheduled template backed by agent-refactor-split', () => {
+    const agent = RECOMMENDED_AGENTS.find(entry => entry.name === 'refactor-split')
+    expect(agent).toMatchObject({
+      model: 'smart',
+      schedule: '48h',
+      featured: true,
+      fallbackEnabled: true,
+      skillIds: ['agent-refactor-split'],
+    })
+    expect(isBuiltInRecommendedAgent('refactor-split')).toBe(true)
+    expect(agent?.description).toMatch(/F6 oversized-file flags/i)
+  })
 })

@@ -92,7 +92,7 @@ async function findAgent(id: string) {
 // Total number of default skills in lib/agents/default-agent-skills.ts.
 // Used as the strict drain target so we know every fire-and-forget seed write
 // has landed without needing a wall-clock sleep tail.
-const DEFAULT_SKILL_COUNT = 16;
+const DEFAULT_SKILL_COUNT = 17;
 
 // seedDefaultSkills() is sync but kicks off `void db.select().then(insert|update)`
 // fire-and-forget chains for every default skill. Wait until exactly
@@ -333,6 +333,17 @@ describe('seedDefaultSkills seeded defaults snapshot', () => {
     expect(skill!.content).toMatch(/Fix up to 2/);
     expect(skill!.content).toMatch(/Hard stop conditions/);
     expect(skill!.content).not.toMatch(/cto agent|QA_NO_CTO/);
+  });
+
+  it('inserts agent-refactor-split with correct fields', () => {
+    const skill = getSeededSkill('agent-refactor-split');
+    expect(skill).toBeDefined();
+    expect(skill!.name).toBe('agent:refactor-split');
+    expect(skill!.description).toContain("Consumes the improve agent's F6");
+    expect(skill!.content).toContain('REFACTOR_SPLIT_DONE');
+    expect(skill!.content).toContain('REFACTOR_SPLIT_SKIPPED');
+    expect(skill!.content).toContain('REFACTOR_SPLIT_BLOCKED');
+    expect(skill!.content).toContain('Read the ENTIRE target file first');
   });
 
   it('inserts agent-readme-sync with correct fields', () => {
