@@ -127,7 +127,7 @@ Bare `/settings` redirects to `/settings/general`, and job history lives at `/wo
 | Workspace path | `/settings/general` |
 | GitHub owner and board sync | `/settings/general` |
 | CLI provider routing, binaries, model tiers, and subscription budget controls | `/settings/cli` |
-| Global base prompt | `/settings/cli` |
+| Global base prompt | `/settings/general` |
 | Pipeline behavior, commit/review rules, and model overrides | `/settings/pipeline` |
 | Project enablement | `/settings/projects` |
 | Agent templates | `/settings/templates` |
