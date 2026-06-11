@@ -77,9 +77,15 @@ export function RetrievalReindexPanel({ projectName }: { projectName: string }) 
         <Button
           variant="solid"
           onClick={handleReindex}
-          disabled={running || enabled === false}
+          disabled={running || enabled !== true}
           className="shrink-0"
-          title={enabled === false ? 'Enable retrieval in Settings → General' : undefined}
+          title={
+            enabled === false
+              ? 'Enable retrieval in Settings → General'
+              : enabled === null
+                ? 'Checking retrieval status…'
+                : undefined
+          }
         >
           {running ? 'Reindexing…' : 'Reindex now'}
         </Button>

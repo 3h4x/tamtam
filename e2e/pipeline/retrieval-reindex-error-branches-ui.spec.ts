@@ -110,8 +110,49 @@ test.describe('RetrievalReindexPanel — error branches', () => {
     });
     // enabled === null → Status cell renders the loading placeholder "…"
     await expect(page.getByText('…', { exact: true })).toBeVisible({ timeout: 8_000 });
-    // Button is NOT disabled when enabled is null (only disabled when enabled === false)
-    await expect(page.getByRole('button', { name: 'Reindex now' })).toBeEnabled({ timeout: 8_000 });
+    // Retrieval status is unconfirmed (settings fetch failed → enabled stays null), so the
+    // button is disabled to avoid firing a reindex POST that cannot be confirmed.
+    const button = page.getByRole('button', { name: 'Reindex now' });
+    await expect(button).toBeDisabled({ timeout: 8_000 });
+    await expect(button).toHaveAttribute('title', 'Checking retrieval status…');
+  });
+
+  test('keeps the button disabled while settings is loading, then enables it once retrieval is confirmed', async ({
+    page,
+  }) => {
+    await stubBaseShell(page);
+    await page.route(`**/api/projects/${PROJECT}/retrieval/stats`, (route: Route) =>
+      route.fulfill({ json: { records: 0, chunks: 0 } }),
+    );
+    // Hold every /api/settings request (shell + panel) until we release them, so the
+    // panel sits in the unconfirmed `enabled === null` state deterministically.
+    const held: Route[] = [];
+    let release: () => void = () => {};
+    const released = new Promise<void>((resolve) => {
+      release = resolve;
+    });
+    await page.route('**/api/settings', async (route: Route) => {
+      held.push(route);
+      await released;
+      await route.fulfill({
+        json: { settings: { jobs_paused: 'false', retrieval_enabled: 'true' } },
+      });
+    });
+
+    await page.goto(`/project/${PROJECT}/config`);
+
+    await expect(page.getByRole('heading', { name: 'Retrieval (Embeddings)' })).toBeVisible({
+      timeout: 8_000,
+    });
+    // Status unknown while settings is in-flight → button disabled with the checking tooltip.
+    const button = page.getByRole('button', { name: 'Reindex now' });
+    await expect(button).toBeDisabled({ timeout: 8_000 });
+    await expect(button).toHaveAttribute('title', 'Checking retrieval status…');
+
+    // Release the held settings responses → retrieval confirmed enabled → button enables.
+    release();
+    await expect(button).toBeEnabled({ timeout: 8_000 });
+    await expect(button).not.toHaveAttribute('title', 'Checking retrieval status…');
   });
 
   test('shows "—" for records and chunks when stats endpoint returns non-ok', async ({ page }) => {
