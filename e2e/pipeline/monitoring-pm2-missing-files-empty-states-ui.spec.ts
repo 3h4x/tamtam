@@ -130,4 +130,17 @@ test.describe('Monitoring PM2 missing-files and filtered-empty states', () => {
     // allEntries.length === 0 -> the generic empty message regardless of the level filter.
     await expect(page.getByText('No recent PM2 log lines in the available files.')).toBeVisible();
   });
+
+  test('an available file with unknown size renders neutral size copy instead of a blank detail', async ({ page }) => {
+    const files: Pm2File[] = [
+      { path: OUT_PATH, size: null, mtime: new Date(BASE_TIME).toISOString() },
+    ];
+    await stubMonitoring(page, pm2Logs(files, []));
+    await openLogsTab(page);
+
+    await expect(page.getByText('tamtam-out.log')).toBeVisible();
+    await expect(page.getByText('· size unknown')).toBeVisible();
+    await expect(page.getByText('PM2 log files were not found on this host.')).toHaveCount(0);
+    await expect(page.getByText('No recent PM2 log lines in the available files.')).toBeVisible();
+  });
 });

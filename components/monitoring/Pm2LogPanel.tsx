@@ -232,7 +232,9 @@ export function Pm2LogPanel({ pm2Logs, onRefresh }: { pm2Logs: Pm2LogData | null
                 <span className="font-mono">{f.path.split('/').pop()}</span>
                 {f.size != null
                   ? <span className="opacity-70">· {(f.size / 1024 / 1024).toFixed(1)} MB</span>
-                  : <span className="text-status-error">{f.error}</span>}
+                  : f.error
+                  ? <span className="text-status-error">· {f.error}</span>
+                  : <span className="opacity-70">· size unknown</span>}
                 {f.mtime && <span className="opacity-50">· {new Date(f.mtime).toLocaleString(undefined, { month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' })}</span>}
               </span>
             ))}
