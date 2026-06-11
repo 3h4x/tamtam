@@ -81,7 +81,7 @@ function emptyIssuesSummary() {
   }
 }
 
-function makeReleaseChain(phase: 'idle' | 'test' | 'review' | 'fix' | 'commit' | 'push' | 'push-failed' | 'done'): MockJob[] {
+function makeReleaseChain(phase: 'idle' | 'test' | 'review' | 'fix' | 'commit' | 'push' | 'push-failed' | 'cancelled' | 'done'): MockJob[] {
   if (phase === 'idle' || phase === 'done') return []
 
   const releaseId = 'strip-live-release-1'
@@ -197,6 +197,19 @@ function makeReleaseChain(phase: 'idle' | 'test' | 'review' | 'fix' | 'commit' |
     provider: 'claude',
     work_summary: status === 'running' ? 'Tests are running.' : 'Tests completed.',
   })
+
+  if (phase === 'cancelled') {
+    return [
+      {
+        ...releaseJob,
+        status: 'done',
+        exit_code: -3,
+        finished_at: now() - 5,
+        work_summary: 'Release was cancelled.',
+      },
+      testStep('done', -3),
+    ]
+  }
 
   if (phase === 'test') return [...steps, testStep('running', null)]
   if (phase === 'review') return [...steps, testStep('done', 0), reviewStep('running', null)]
@@ -408,6 +421,33 @@ test.describe('Pipeline strip live polling', () => {
     })
     await expect(page.getByTitle('View unified release trace')).toBeVisible({ timeout: 12_000 })
     await expect(page.getByLabel(/push: running\./i)).toHaveCount(0, { timeout: 12_000 })
+    await expect.poll(() => new URL(page.url()).pathname).toBe(stablePath)
+  })
+
+  test('running test step clears the strip when the release is cancelled mid-poll', async ({
+    page,
+  }) => {
+    let phase: 'test' | 'cancelled' = 'test'
+
+    await stubProjectShell(page, () => makeReleaseChain(phase))
+    await page.goto(`/project/${PROJECT}/terminal`)
+
+    const stablePath = new URL(page.url()).pathname
+    const pipelineSummary = page.getByLabel(/pipeline summary:/i)
+
+    await expect(pipelineSummary).toBeVisible({ timeout: 12_000 })
+    await expect(page.getByLabel(/pipeline summary: test running/i)).toBeVisible({
+      timeout: 12_000,
+    })
+    await expect(page.getByLabel(/test: running\./i)).toBeVisible({ timeout: 12_000 })
+    await expect(page.getByRole('button', { name: 'abort' })).toBeVisible({ timeout: 12_000 })
+
+    phase = 'cancelled'
+
+    await expect(pipelineSummary).toHaveCount(0, { timeout: 12_000 })
+    await expect(page.getByLabel(/test: running\./i)).toHaveCount(0)
+    await expect(page.getByRole('button', { name: 'abort' })).toHaveCount(0)
+    await expect(page.getByTitle('View unified release trace')).toHaveCount(0)
     await expect.poll(() => new URL(page.url()).pathname).toBe(stablePath)
   })
 })
