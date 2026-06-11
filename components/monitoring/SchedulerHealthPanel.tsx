@@ -93,9 +93,10 @@ export function SchedulerHealthPanel() {
         </div>
       </div>
       {loading && !health ? (
-        <div className="rounded-md border border-border bg-bg-secondary p-3">
-          <InlineLoading label="Loading scheduler health..." />
-        </div>
+        <InlineLoading
+          label="Loading scheduler health..."
+          className="rounded-md border border-border bg-bg-secondary p-3"
+        />
       ) : error && !health ? (
         <ErrorCallout className="text-sm">{error}</ErrorCallout>
       ) : health ? (
