@@ -728,6 +728,77 @@ test.describe('WorkflowRunDetail UI', () => {
     });
   });
 
+  test('attention panel keeps multiple terminal step issues independently navigable after live run finishes', async ({
+    page,
+  }) => {
+    let serveRunning = true;
+
+    await stubShellRoutes(page);
+    await page.route(`**/api/workflow-runs/${RUN_ID}`, (route: Route) =>
+      route.fulfill({
+        json: serveRunning
+          ? ({
+              run: makeRun('running'),
+              steps: [
+                makeStep('s1', 'prepare-env', 'completed'),
+                makeStep('s2', 'deploy-contracts', 'running'),
+                makeStep('s3', 'push-release', 'pending', {
+                  startedAt: null,
+                  completedAt: null,
+                  durationMs: null,
+                }),
+              ],
+            } satisfies RunDetail)
+          : ({
+              run: makeRun('failed', { error: 'release stopped after multiple terminal step issues' }),
+              steps: [
+                makeStep('s1', 'prepare-env', 'completed'),
+                makeStep('s2', 'deploy-contracts', 'failed', {
+                  error: 'deployment error: missing API token\n  at deploy.ts:42',
+                }),
+                makeStep('s3', 'push-release', 'cancelled', {
+                  completedAt: null,
+                  durationMs: null,
+                  error: null,
+                }),
+              ],
+            } satisfies RunDetail),
+      }),
+    );
+
+    await page.goto(`/workflow-runs/${RUN_ID}`);
+
+    const failedRow = stepRow(page, 's2');
+    const cancelledRow = stepRow(page, 's3');
+    await expect(page.locator('[aria-label="status running"]').first()).toBeVisible({ timeout: 8_000 });
+    await expect(failedRow.getByLabel('status running')).toBeVisible({ timeout: 8_000 });
+    await expect(page.getByText('needs attention')).toHaveCount(0);
+
+    serveRunning = false;
+
+    await expect(page.locator('[aria-label="status failed"]').first()).toBeVisible({ timeout: 12_000 });
+    await expect(page.getByText('final snapshot')).toBeVisible({ timeout: 12_000 });
+    await expect(page.locator('[aria-label="status running"]')).toHaveCount(0, { timeout: 12_000 });
+    await expect(page.getByText('needs attention')).toBeVisible({ timeout: 12_000 });
+    await expect(page.getByText('2 steps')).toBeVisible({ timeout: 12_000 });
+    await expect(page.getByText(/failed\s*1/i).first()).toBeVisible({ timeout: 12_000 });
+    await expect(page.getByText(/cancelled\s*1/i).first()).toBeVisible({ timeout: 12_000 });
+
+    const failedAttention = visibleStepAttentionLink(page, /deployment error: missing API token/i);
+    const cancelledAttention = visibleStepAttentionLink(page, /cancelled before completion/i);
+    await expect(failedAttention.getByLabel('status failed')).toBeVisible({ timeout: 12_000 });
+    await expect(cancelledAttention.getByLabel('status cancelled')).toBeVisible({ timeout: 12_000 });
+    await expect(failedRow).toHaveClass(/bg-status-error\/10/);
+    await expect(cancelledRow).toHaveClass(/bg-status-error\/10/);
+
+    await cancelledAttention.click();
+
+    await expect.poll(() => new URL(page.url()).hash, { timeout: 8_000 }).toBe(
+      '#workflow-step-desktop-s3',
+    );
+    await expect(cancelledRow.getByLabel('status cancelled')).toBeVisible();
+  });
+
   // ---------------------------------------------------------------------------
   // No steps — shows empty steps section
   // ---------------------------------------------------------------------------
