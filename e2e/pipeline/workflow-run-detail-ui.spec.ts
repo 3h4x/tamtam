@@ -220,6 +220,73 @@ test.describe('WorkflowRunDetail UI', () => {
     await expect(page).toHaveURL(stableUrl);
   });
 
+  test('pending run cancelled before start clears pending badges and shows a final snapshot', async ({
+    page,
+  }) => {
+    let servePending = true;
+
+    await stubShellRoutes(page);
+    await page.route(`**/api/workflow-runs/${RUN_ID}`, (route: Route) =>
+      route.fulfill({
+        json: servePending
+          ? ({
+              run: makeRun('pending', { startedAt: null }),
+              steps: [
+                makeStep('s1', 'wait-for-release-slot', 'pending', {
+                  startedAt: null,
+                  completedAt: null,
+                  durationMs: null,
+                }),
+              ],
+            } satisfies RunDetail)
+          : ({
+              run: makeRun('cancelled', {
+                startedAt: null,
+                error: 'release was cancelled before a worker picked it up',
+              }),
+              steps: [
+                makeStep('s1', 'wait-for-release-slot', 'cancelled', {
+                  startedAt: null,
+                  completedAt: null,
+                  durationMs: null,
+                  error: 'release was cancelled before a worker picked it up',
+                }),
+              ],
+            } satisfies RunDetail),
+      }),
+    );
+
+    await page.goto(`/workflow-runs/${RUN_ID}`);
+
+    const stableUrl = page.url();
+    const stepRowLocator = stepRow(page, 's1');
+
+    await expect(page.locator('[aria-label="status pending"]').first()).toBeVisible({ timeout: 8_000 });
+    await expect(stepRowLocator).toContainText('wait for release slot');
+    await expect(stepRowLocator.getByLabel('status pending')).toBeVisible({ timeout: 8_000 });
+    await expect(page.getByText(/pending\s*1/i).first()).toBeVisible({ timeout: 8_000 });
+    await expect(page.getByText('live · refreshes every 5s')).toBeVisible({ timeout: 8_000 });
+
+    servePending = false;
+
+    await expect(page.locator('[aria-label="status cancelled"]').first()).toBeVisible({
+      timeout: 12_000,
+    });
+    await expect(stepRowLocator.getByLabel('status cancelled')).toBeVisible({ timeout: 12_000 });
+    await expect(page.locator('[aria-label="status pending"]')).toHaveCount(0, {
+      timeout: 12_000,
+    });
+    await expect(page.getByText(/cancelled\s*1/i).first()).toBeVisible({ timeout: 12_000 });
+    await expect(page.getByText('final snapshot')).toBeVisible({ timeout: 12_000 });
+    await expect(page.getByText('live · refreshes every 5s')).toHaveCount(0);
+    await expect(
+      page.getByText('release was cancelled before a worker picked it up').first(),
+    ).toBeVisible({
+      timeout: 12_000,
+    });
+    await expect(page).toHaveURL(stableUrl);
+  });
+
   test('live run keeps prior completed steps stable while the active step flips to completed after poll', async ({
     page,
   }) => {
