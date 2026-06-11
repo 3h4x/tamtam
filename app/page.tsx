@@ -26,8 +26,9 @@ export default function Home() {
           <Link
             href="/settings"
             className={buttonVariants({
-              variant: 'ghost',
-              className: 'mt-2 border-border text-text-primary text-xs hover:bg-bg-tertiary',
+              variant: 'secondary',
+              size: 'sm',
+              className: 'mt-2',
             })}
           >
             Open Settings

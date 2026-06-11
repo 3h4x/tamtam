@@ -37,6 +37,7 @@ import {
 import type { Entry, JobCountsResponse, KindBucket } from '@/components/project-runs/utils'
 import { RUN_ROW_GRID_CLASS, RunRow } from '@/components/project-runs/RunRow'
 import { ProjectRunsEmptyState, ProjectRunsLoadingState } from '@/components/project-runs/RunStates'
+import { mergeJobs, reconcileRefreshJobs } from '@/components/project-runs/refresh'
 
 interface ProjectRunsTabProps {
   projectName: string
@@ -109,15 +110,6 @@ const PAGE_SIZE = 50
 const MAX_REFRESH_PAGE_SIZE = 200
 const ACTIVE_POLL_MS = 5000
 const IDLE_POLL_MS = 1000
-
-function mergeJobs(newer: JobInfo[], older: JobInfo[], maxRows: number): JobInfo[] {
-  const byId = new Map<string, JobInfo>()
-  for (const job of older) byId.set(job.id, job)
-  for (const job of newer) byId.set(job.id, job)
-  return Array.from(byId.values())
-    .sort((a, b) => b.started_at - a.started_at)
-    .slice(0, maxRows)
-}
 
 export function ProjectRunsTab({ projectName, jobsPaused = false }: ProjectRunsTabProps) {
   const router = useRouter()
@@ -278,9 +270,10 @@ export function ProjectRunsTab({ projectName, jobsPaused = false }: ProjectRunsT
         // Refresh only the rows already on screen so 5s polling doesn't
         // re-download the full history each tick.
         const windowSize = windowSizeRef.current
-        const data = await fetchJobs(projectName, { limit: Math.min(windowSize, MAX_REFRESH_PAGE_SIZE) })
+        const refreshLimit = Math.min(windowSize, MAX_REFRESH_PAGE_SIZE)
+        const data = await fetchJobs(projectName, { limit: refreshLimit })
         if (active) {
-          setJobs((prev) => mergeJobs(data.jobs, prev, windowSize))
+          setJobs((prev) => reconcileRefreshJobs(data.jobs, prev, windowSize, data.total, refreshLimit))
           setTotalJobs(data.total ?? data.jobs.length)
           setPendingReleaseQueued(!!data.pendingReleaseProjects?.includes(projectName))
           setLoading(false)
@@ -362,8 +355,9 @@ export function ProjectRunsTab({ projectName, jobsPaused = false }: ProjectRunsT
   const latestTopLevelReleaseKey = useMemo(() => latestReleaseKey(groupedEntries), [groupedEntries])
   const loadJobs = async () => {
     const windowSize = Math.max(PAGE_SIZE, jobs.length)
-    const data = await fetchJobs(projectName, { limit: Math.min(windowSize, MAX_REFRESH_PAGE_SIZE) })
-    setJobs((prev) => mergeJobs(data.jobs, prev, windowSize))
+    const refreshLimit = Math.min(windowSize, MAX_REFRESH_PAGE_SIZE)
+    const data = await fetchJobs(projectName, { limit: refreshLimit })
+    setJobs((prev) => reconcileRefreshJobs(data.jobs, prev, windowSize, data.total, refreshLimit))
     setTotalJobs(data.total ?? data.jobs.length)
     setPendingReleaseQueued(!!data.pendingReleaseProjects?.includes(projectName))
     await loadQueue()
