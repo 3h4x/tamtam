@@ -515,6 +515,8 @@ test.describe('Workflow runs list live polling', () => {
     await expect(attentionPanel.getByLabel('status failed')).toBeVisible();
     await expect(attentionPanel.getByText('release orchestration failed after review')).toBeVisible();
     await expect(page.getByLabel('Active workflow runs')).toHaveCount(0);
+    await expect(page.locator('[aria-label="status running"]')).toHaveCount(0);
+    await expect(page.getByText('1 running')).toHaveCount(0);
     await expect(page.getByRole('button', { name: /failed 1/i })).toBeVisible();
   });
 
