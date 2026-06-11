@@ -400,4 +400,83 @@ test.describe('Global agents page UI', () => {
     // The hint surfaces the error detail rather than the fire schedule.
     await expect(nextFire).toHaveAttribute('title', /error\(s\): boom/i);
   });
+
+  // ---------------------------------------------------------------------------
+  // Test 10: A healthy active agent that has already fired renders the populated
+  // scheduler columns — a relative "ago" last-fire timestamp (formatAgoMs) and
+  // the numeric fire count — and the row carries the success accent border. This
+  // covers the populated-lastFire / fires-count / active-rowClassName branches,
+  // which are distinct from the never-fired path in test 7.
+  // ---------------------------------------------------------------------------
+  test('renders populated last-fire, fire count, and active accent border for a fired agent', async ({ page }) => {
+    const FIRED_ID = 'agent-fired';
+
+    const agents = [makeAgent({ id: FIRED_ID, name: 'Fired Agent', schedule: '0 * * * *' })];
+    const schedulerEntries = [
+      makeSchedulerEntry(FIRED_ID, {
+        nextFireMs: Date.now() + 1_800_000,
+        lastFireMs: Date.now() - 300_000, // 5 minutes ago
+        fireCount: 42,
+      }),
+    ];
+
+    await stubShellRoutes(page);
+    await page.route('**/api/agents/scheduler-health', (route: Route) =>
+      route.fulfill({ json: { internal: { entries: schedulerEntries } } }),
+    );
+    await page.route(
+      (url) => url.pathname === '/api/agents',
+      (route: Route) => route.fulfill({ json: { agents } }),
+    );
+
+    await page.goto('/agents');
+
+    const row = page.locator('tr', { hasText: 'Fired Agent' });
+    await expect(row).toBeVisible({ timeout: 8_000 });
+
+    // Last Fire shows a relative "ago" label (not the never-fired placeholder).
+    await expect(row.getByText(/\bago\b/)).toBeVisible();
+    await expect(row.getByText('never fired', { exact: true })).toHaveCount(0);
+
+    // Fires cell shows the numeric count.
+    await expect(row.getByText('42', { exact: true })).toBeVisible();
+
+    // The active row carries the success-tone left accent border.
+    await expect(row).toHaveClass(/border-l-status-success\/40/);
+  });
+
+  // ---------------------------------------------------------------------------
+  // Test 11: Clicking an agent row navigates to that agent's project page. The
+  // table wires onRowClick → router.push(`/project/<project>`), so a click is
+  // the operator's path from the global roster into a single project. This is
+  // the only interactive navigation on the page and is otherwise uncovered.
+  // ---------------------------------------------------------------------------
+  test('clicking an agent row navigates to its project page', async ({ page }) => {
+    const NAV_ID = 'agent-nav';
+    const PROJECT = 'nav-target-project';
+
+    const agents = [
+      makeAgent({ id: NAV_ID, name: 'Nav Agent', project: PROJECT, schedule: null }),
+    ];
+
+    await stubShellRoutes(page);
+    await page.route('**/api/agents/scheduler-health', (route: Route) =>
+      route.fulfill({ json: { internal: { entries: [] } } }),
+    );
+    await page.route(
+      (url) => url.pathname === '/api/agents',
+      (route: Route) => route.fulfill({ json: { agents } }),
+    );
+
+    await page.goto('/agents');
+
+    const row = page.locator('tr', { hasText: 'Nav Agent' });
+    await expect(row).toBeVisible({ timeout: 8_000 });
+
+    await row.click();
+
+    // router.push performs a client-side navigation to the project route.
+    await page.waitForURL(`**/project/${PROJECT}`, { timeout: 8_000 });
+    expect(new URL(page.url()).pathname).toBe(`/project/${PROJECT}`);
+  });
 });
