@@ -10,7 +10,12 @@ import {
 } from '@/components/workflow-runs/WorkflowStepAttentionPanel';
 import { WorkflowStatusBadge, workflowStatusPresentation } from '@/components/workflow-runs/workflow-run-status';
 import { humanizeWorkflowLabel, humanizeEmbeddedNames } from '@/components/workflow-runs/humanize';
-import { summarizeInput, summarizeTrigger } from '@/components/workflow-runs/summarize';
+import {
+  summarizeInput,
+  summarizeOutcomeDetail,
+  summarizeTrigger,
+  summarizeWorkflowDisplayStatus,
+} from '@/components/workflow-runs/summarize';
 import { buttonVariants } from '@/components/ui/Button';
 import { ErrorState } from '@/components/ErrorState';
 import { ErrorCallout } from '@/components/ui/ErrorCallout';
@@ -318,10 +323,12 @@ export function WorkflowRunDetail({ runId }: { runId: string }) {
   if (!data) return <WorkflowRunDetailLoadingState />;
 
   const now = Date.now();
-  const isLiveRun = !isTerminalWorkflowStatus(data.run.status);
+  const runDisplayStatus = summarizeWorkflowDisplayStatus(data.run);
+  const isLiveRun = !isTerminalWorkflowStatus(runDisplayStatus);
   const runLabel = humanizeWorkflowLabel(data.run.name);
   const projectLabel = summarizeInput(data.run.input);
   const triggerLabel = summarizeTrigger(data.run.input);
+  const runOutcomeDetail = summarizeOutcomeDetail(data.run);
   const stepStatusCounts = countStepStatuses(data.steps);
   const runDuration = formatDurationCell(data.run.status, data.run.durationMs, data.run.startedAt, now);
   const attentionSteps = data.steps
@@ -387,7 +394,7 @@ export function WorkflowRunDetail({ runId }: { runId: string }) {
           <h2 className="text-lg font-semibold text-text-primary" title={data.run.rawName}>
             {runLabel}
           </h2>
-          <WorkflowStatusBadge status={data.run.status} />
+          <WorkflowStatusBadge status={runDisplayStatus} />
           <Pill size="xs" tone="neutral" className="bg-bg-tertiary px-1.5 font-mono text-[11px] font-normal">
             {isLiveRun ? 'live · refreshes every 5s' : 'final snapshot'}
           </Pill>
@@ -435,6 +442,9 @@ export function WorkflowRunDetail({ runId }: { runId: string }) {
         {data.run.error != null && (
           <ErrorCallout className="mt-3 text-xs">{humanizeEmbeddedNames(data.run.error)}</ErrorCallout>
         )}
+        {data.run.error == null && runOutcomeDetail != null ? (
+          <p className="mt-3 text-xs text-text-secondary">{humanizeEmbeddedNames(runOutcomeDetail)}</p>
+        ) : null}
         {data.run.output != null && (
           <details className="mt-3 text-xs">
             <summary className="cursor-pointer text-text-secondary">Output</summary>

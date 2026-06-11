@@ -602,6 +602,63 @@ test.describe('Workflow runs list live polling', () => {
     await expect(page).toHaveURL(stableUrl);
   });
 
+  test('active run completing with a direct cancelled exit code normalizes to cancelled without a stale completed state', async ({
+    page,
+  }) => {
+    let serveRunning = true;
+
+    await stubWorkflowRunsShell(page);
+    await stubWorkflowRuns(page, () => [
+      serveRunning
+        ? makeRun('running', {
+            id: 'workflow-run-live-direct-cancelled',
+            input: ['workflow-live-direct-cancelled', { triggeredBy: 'agent-cancelled' }],
+          })
+        : makeRun('completed', {
+            id: 'workflow-run-live-direct-cancelled',
+            input: ['workflow-live-direct-cancelled', { triggeredBy: 'agent-cancelled' }],
+            output: {
+              exitCode: -3,
+              detail: 'release was cancelled by the workflow after it started',
+            },
+          }),
+    ]);
+
+    await page.goto('/workflow-runs');
+
+    const activePanel = page.getByLabel('Active workflow runs');
+    await expect(activePanel).toBeVisible({ timeout: 8_000 });
+    await expect(
+      activePanel.getByRole('link', { name: /workflow-live-direct-cancelled/i }),
+    ).toBeVisible();
+    await expect(activePanel.getByLabel('status running')).toBeVisible();
+    await expect(page.getByRole('button', { name: /^running 1$/i })).toBeVisible();
+
+    const stableUrl = page.url();
+    serveRunning = false;
+
+    await expect(activePanel).toHaveCount(0, { timeout: 12_000 });
+    const attentionPanel = page.getByLabel('Workflow runs needing attention');
+    const cancelledRow = attentionPanel
+      .getByRole('link', { name: /workflow-live-direct-cancelled/i })
+      .first();
+    await expect(attentionPanel).toBeVisible({ timeout: 12_000 });
+    await expect(cancelledRow.getByLabel('status cancelled')).toBeVisible({ timeout: 12_000 });
+    await expect(
+      cancelledRow.getByText('release was cancelled by the workflow after it started'),
+    ).toBeVisible({
+      timeout: 12_000,
+    });
+    await expect(cancelledRow.getByText('exit -3')).toHaveCount(0);
+    await expect(cancelledRow.getByLabel('status completed')).toHaveCount(0);
+    await expect(page.getByRole('button', { name: /^running 0$/i })).toBeVisible({
+      timeout: 12_000,
+    });
+    await expect(page.getByRole('button', { name: /^cancelled 1$/i })).toBeVisible();
+    await expect(page.getByRole('button', { name: /^completed 0$/i })).toBeVisible();
+    await expect(page).toHaveURL(stableUrl);
+  });
+
   test('two active runs stay isolated when one completes and the other keeps running', async ({
     page,
   }) => {

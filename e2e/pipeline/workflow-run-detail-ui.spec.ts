@@ -581,6 +581,60 @@ test.describe('WorkflowRunDetail UI', () => {
     });
   });
 
+  test('live run that finishes with a direct cancelled exit code shows a cancelled final snapshot after poll', async ({
+    page,
+  }) => {
+    let serveRunning = true;
+
+    await stubShellRoutes(page);
+    await page.route(`**/api/workflow-runs/${RUN_ID}`, (route: Route) =>
+      route.fulfill({
+        json: serveRunning
+          ? ({
+              run: makeRun('running'),
+              steps: [makeStep('s1', 'run-release', 'running')],
+            } satisfies RunDetail)
+          : ({
+              run: makeRun('completed', {
+                output: {
+                  exitCode: -3,
+                  detail: 'release was cancelled by the workflow after it started',
+                },
+              }),
+              steps: [
+                makeStep('s1', 'run-release', 'completed', {
+                  output: {
+                    exitCode: -3,
+                    detail: 'release was cancelled by the workflow after it started',
+                  },
+                }),
+              ],
+            } satisfies RunDetail),
+      }),
+    );
+
+    await page.goto(`/workflow-runs/${RUN_ID}`);
+
+    await expect(page.locator('[aria-label="status running"]').first()).toBeVisible({ timeout: 8_000 });
+    await expect(page.getByText('live · refreshes every 5s')).toBeVisible({ timeout: 8_000 });
+    await expect(page.getByText('final snapshot')).toHaveCount(0);
+
+    serveRunning = false;
+
+    const stepRowLocator = stepRow(page, 's1');
+    await expect(page.locator('[aria-label="status cancelled"]').first()).toBeVisible({
+      timeout: 12_000,
+    });
+    await expect(stepRowLocator.getByLabel('status completed')).toBeVisible({ timeout: 12_000 });
+    await expect(
+      page.getByText('release was cancelled by the workflow after it started').first(),
+    ).toBeVisible({
+      timeout: 12_000,
+    });
+    await expect(page.getByText('final snapshot')).toBeVisible({ timeout: 12_000 });
+    await expect(page.getByText('live · refreshes every 5s')).toHaveCount(0);
+  });
+
   // ---------------------------------------------------------------------------
   // Attention panel — failed step with error string
   // ---------------------------------------------------------------------------
