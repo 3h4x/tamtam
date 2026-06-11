@@ -216,9 +216,12 @@ test.describe('History stop action lifecycle', () => {
     await stubHistoryShellRoutes(page)
     await stubHistoryJobs(page, () => [
       makeJob({
+        // A finalized abort sets abortedAt, which the storage layer maps to
+        // status 'aborted' (lib/jobs/storage.ts) — not a plain 'done'. Mocking
+        // 'done' here misclassifies the release as failed instead of cancelled.
         id: RELEASE_JOB_ID,
         kind: 'release',
-        status: aborted ? 'done' : 'running',
+        status: aborted ? 'aborted' : 'running',
         exit_code: aborted ? -3 : null,
         work_summary: aborted ? 'Release aborted by operator' : 'Review running',
       }),
@@ -252,9 +255,82 @@ test.describe('History stop action lifecycle', () => {
     await row.getByRole('button', { name: 'Stop' }).click()
 
     await expect.poll(() => abortCalls).toBe(1)
-    await expect(row.getByText('cancelled', { exact: true })).toBeVisible({ timeout: 8_000 })
+    await expect(row.getByText(/cancelled at review/i)).toBeVisible({ timeout: 8_000 })
     await expect(row.getByLabel('running')).toHaveCount(0)
     await expect(row.getByText(/now: review/i)).toHaveCount(0)
+  })
+
+  // -------------------------------------------------------------------------
+  // Deferred abort — the abort endpoint returns 409 `abort_pending` because a
+  // push/commit step is still draining. The button must surface "abort pending"
+  // (not "stopped") and the release spinner must persist: the run is not yet
+  // terminal, so clearing it would orphan the UI. After the reset timeout the
+  // button returns to "Stop" with the release still running.
+  // -------------------------------------------------------------------------
+  test('release Stop shows "abort pending" and keeps the spinner when abort is deferred', async ({
+    page,
+  }) => {
+    let abortCalls = 0
+
+    await stubHistoryShellRoutes(page)
+    // The release never finishes — the draining push step keeps it running.
+    await stubHistoryJobs(page, () => [
+      makeJob({
+        id: RELEASE_JOB_ID,
+        kind: 'release',
+        status: 'running',
+        exit_code: null,
+        work_summary: 'Push running',
+      }),
+      makeJob({
+        id: REVIEW_JOB_ID,
+        kind: 'push',
+        status: 'running',
+        exit_code: null,
+        release_id: RELEASE_JOB_ID,
+        parent_job_id: RELEASE_JOB_ID,
+        work_summary: 'Pushing changes',
+      }),
+    ])
+    await page.route(`**/api/projects/by-project/${PROJECT}/release/abort`, (route: Route) => {
+      if (route.request().method() === 'POST') {
+        abortCalls += 1
+        route.fulfill({
+          status: 409,
+          json: {
+            status: 'abort_pending',
+            detail: 'Timed out waiting for push to stop cleanly',
+            release_id: RELEASE_JOB_ID,
+            killed_job_id: null,
+          },
+        })
+        return
+      }
+      route.continue()
+    })
+
+    await page.goto(`/project/${PROJECT}/history`)
+
+    const row = releaseRow(page)
+    await expect(row).toBeVisible({ timeout: 8_000 })
+    await expect(row.getByLabel('running')).toBeVisible()
+
+    await row.getByRole('button', { name: 'Stop' }).click()
+
+    await expect.poll(() => abortCalls).toBe(1)
+
+    // Button reflects the deferred abort and is disabled while it persists.
+    const abortPendingBtn = row.getByRole('button', { name: 'abort pending' })
+    await expect(abortPendingBtn).toBeVisible({ timeout: 8_000 })
+    await expect(abortPendingBtn).toBeDisabled()
+
+    // The release is still draining — the spinner must NOT be cleared.
+    await expect(row.getByLabel('running')).toBeVisible()
+
+    // After the ~2.5 s reset the button returns to "Stop", still actionable.
+    await expect(row.getByRole('button', { name: 'Stop' })).toBeVisible({ timeout: 5_000 })
+    await expect(row.getByRole('button', { name: 'Stop' })).toBeEnabled()
+    await expect(row.getByLabel('running')).toBeVisible()
   })
 
   // -------------------------------------------------------------------------
