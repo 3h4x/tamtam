@@ -479,4 +479,81 @@ test.describe('Global agents page UI', () => {
     await page.waitForURL(`**/project/${PROJECT}`, { timeout: 8_000 });
     expect(new URL(page.url()).pathname).toBe(`/project/${PROJECT}`);
   });
+
+  // ---------------------------------------------------------------------------
+  // Test 12: Filtering to a category with zero matches (but agents exist in
+  // other categories) renders the category-specific empty copy with the
+  // total-in-view count, and the "Show all agents" primary action resets the
+  // filter back to All. This covers the non-"all" empty-state description and
+  // the onClick reset action — distinct from the empty-list copy in test 2.
+  // ---------------------------------------------------------------------------
+  test('non-all empty state shows total-in-view count and "Show all agents" resets the filter', async ({ page }) => {
+    // Only an on-demand agent exists, so the Disabled filter yields zero matches.
+    const agents = [
+      makeAgent({ id: 'agent-only-on-demand', name: 'Only On-Demand', schedule: null }),
+    ];
+
+    await stubShellRoutes(page);
+    await page.route('**/api/agents/scheduler-health', (route: Route) =>
+      route.fulfill({ json: { internal: { entries: [] } } }),
+    );
+    await page.route(
+      (url) => url.pathname === '/api/agents',
+      (route: Route) => route.fulfill({ json: { agents } }),
+    );
+
+    await page.goto('/agents');
+
+    await expect(page.getByText('Only On-Demand')).toBeVisible({ timeout: 8_000 });
+
+    const filterNav = page.getByRole('navigation', { name: 'Agent filters' });
+    await filterNav.getByRole('button', { name: /Disabled/i }).click();
+
+    // Category-specific empty title + the "N total agents in view" description.
+    await expect(page.getByText('No disabled agents')).toBeVisible({ timeout: 3_000 });
+    await expect(
+      page.getByText(/There are 1 total agents in view, but none match the disabled filter/i),
+    ).toBeVisible();
+
+    // The primary action resets the filter rather than navigating away.
+    await page.getByRole('button', { name: 'Show all agents' }).click();
+    await expect(page.getByText('Only On-Demand')).toBeVisible({ timeout: 3_000 });
+  });
+
+  // ---------------------------------------------------------------------------
+  // Test 13: The left accent border encodes lifecycle state per row. Test 10
+  // asserts the active (success) border; this covers the remaining three
+  // branches in one render — unscheduled (warning/60), on-demand (accent/30),
+  // and disabled (transparent) — so a regression in any one branch is caught.
+  // ---------------------------------------------------------------------------
+  test('row accent borders encode unscheduled, on-demand, and disabled states', async ({ page }) => {
+    const agents = [
+      // Enabled + scheduled but no scheduler entry → unscheduled (warning/60).
+      makeAgent({ id: 'agent-unsched-border', name: 'Border Unscheduled', schedule: '0 * * * *' }),
+      // Enabled, no schedule → on-demand (accent/30).
+      makeAgent({ id: 'agent-ondemand-border', name: 'Border On-Demand', schedule: null }),
+      // Disabled → transparent.
+      makeAgent({ id: 'agent-disabled-border', name: 'Border Disabled', enabled: false }),
+    ];
+
+    await stubShellRoutes(page);
+    await page.route('**/api/agents/scheduler-health', (route: Route) =>
+      route.fulfill({ json: { internal: { entries: [] } } }),
+    );
+    await page.route(
+      (url) => url.pathname === '/api/agents',
+      (route: Route) => route.fulfill({ json: { agents } }),
+    );
+
+    await page.goto('/agents');
+
+    const unscheduledRow = page.locator('tr', { hasText: 'Border Unscheduled' });
+    const onDemandRow = page.locator('tr', { hasText: 'Border On-Demand' });
+    const disabledRow = page.locator('tr', { hasText: 'Border Disabled' });
+
+    await expect(unscheduledRow).toBeVisible({ timeout: 8_000 });
+    await expect(unscheduledRow).toHaveClass(/border-l-status-warning\/60/);
+    await expect(onDemandRow).toHaveClass(/border-l-accent\/30/);
+    await expect(disabledRow).toHaveClass(/border-l-transparent/);
+  });
 });
