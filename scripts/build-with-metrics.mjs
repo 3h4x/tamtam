@@ -353,6 +353,13 @@ async function main() {
     // Only export the dist override when it differs from the default so a
     // normal turbopack build's invocation stays byte-identical to before.
     ...(distDir !== '.next' ? { TAMTAM_DIST_DIR: distDir } : {}),
+    // The webpack build worker's JS heap exceeds V8's default ~4 GB cap and
+    // dies with SIGABRT ("Ineffective mark-compacts near heap limit"),
+    // taking the previous `.next` production build with it. Give every node
+    // child headroom unless the caller already tuned NODE_OPTIONS.
+    ...(process.env.NODE_OPTIONS?.includes('--max-old-space-size')
+      ? {}
+      : { NODE_OPTIONS: `${process.env.NODE_OPTIONS ?? ''} --max-old-space-size=8192`.trim() }),
   };
   const buildArgs = bundler === 'webpack' ? ['build', '--webpack'] : ['build'];
   const buildResult = await runPhase('next-build', nextBin, buildArgs, buildEnv);
