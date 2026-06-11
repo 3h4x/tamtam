@@ -4,7 +4,7 @@ import type { Page, Route } from '@playwright/test';
 const PROJECT = 'workflow-runs-filter-transition-ui';
 const RUN_ID = 'workflow-runs-filter-transition-ui-run-1';
 
-type WorkflowStatus = 'running' | 'completed';
+type WorkflowStatus = 'running' | 'completed' | 'failed';
 
 type WorkflowRunSummary = {
   id: string;
@@ -26,6 +26,7 @@ function iso(secondsAgo: number): string {
 
 function workflowRun(status: WorkflowStatus): WorkflowRunSummary {
   const completed = status === 'completed';
+  const terminal = completed || status === 'failed';
   return {
     id: RUN_ID,
     name: 'release-orchestrator',
@@ -33,11 +34,11 @@ function workflowRun(status: WorkflowStatus): WorkflowRunSummary {
     status,
     createdAt: iso(90),
     startedAt: iso(80),
-    completedAt: completed ? iso(3) : null,
-    durationMs: completed ? 77_000 : null,
+    completedAt: terminal ? iso(3) : null,
+    durationMs: terminal ? 77_000 : null,
     input: [PROJECT, { triggeredBy: 'release button' }],
     output: completed ? { verdict: 'LGTM' } : null,
-    error: null,
+    error: status === 'failed' ? 'review failed before retry completed' : null,
   };
 }
 
@@ -165,5 +166,54 @@ test.describe('Workflow-runs filter lifecycle transitions', () => {
     });
     await expect(page.getByText('status=running · query=—')).toBeVisible();
     await expect(page).toHaveURL(stableUrl);
+  });
+
+  test('failed attention filter becomes empty when a failed run is retried and completes', async ({
+    page,
+  }) => {
+    let status: WorkflowStatus = 'failed';
+
+    await stubWorkflowRunsShell(page, () => status);
+    await page.goto('/workflow-runs');
+
+    const attentionPanel = page.getByLabel('Workflow runs needing attention');
+    await expect(attentionPanel).toBeVisible({ timeout: 8_000 });
+    await expect(attentionPanel.getByLabel('status failed')).toBeVisible();
+    await expect(attentionPanel.getByText('review failed before retry completed')).toBeVisible();
+
+    const failedAttentionFilter = page.getByRole('button', {
+      name: /^Show failed workflow runs$/i,
+    });
+    await expect(failedAttentionFilter).toBeVisible({ timeout: 8_000 });
+    await failedAttentionFilter.click();
+    await expect(page.getByRole('button', { name: /^failed 1$/i })).toHaveAttribute(
+      'aria-pressed',
+      'true',
+    );
+    await expect(page.getByText('1 recent · refresh every 5s')).toBeVisible();
+
+    const stableUrl = page.url();
+    status = 'completed';
+
+    await expect(attentionPanel).toHaveCount(0, { timeout: 12_000 });
+    await expect(page.getByRole('button', { name: /^failed 0$/i })).toBeVisible({
+      timeout: 12_000,
+    });
+    await expect(page.getByRole('button', { name: /^completed 1$/i })).toBeVisible();
+    await expect(page.getByText('0 of 1 recent · refresh every 5s')).toBeVisible({
+      timeout: 12_000,
+    });
+    await expect(page.getByText('No runs match current filters')).toBeVisible();
+    await expect(page.getByText('status=failed · query=—')).toBeVisible();
+    await expect(page.getByRole('row').filter({ hasText: PROJECT })).toHaveCount(0);
+    await expect(page).toHaveURL(stableUrl);
+
+    await page.getByRole('button', { name: 'Clear filters', exact: true }).click();
+
+    const completedRow = page.getByRole('row').filter({ hasText: PROJECT }).first();
+    await expect(completedRow).toBeVisible({ timeout: 8_000 });
+    await expect(completedRow.getByLabel('status completed')).toBeVisible();
+    await expect(completedRow.getByText('LGTM')).toBeVisible();
+    await expect(page.getByText('No runs match current filters')).toHaveCount(0);
   });
 });

@@ -49,11 +49,14 @@ describe('hasFinalResult', () => {
 });
 
 describe('isAutoResumeEligible', () => {
-  beforeAll();
-  function beforeAll() {
+  beforeEach(() => {
     vi.useFakeTimers();
     vi.setSystemTime(NOW);
-  }
+  });
+
+  afterEach(() => {
+    vi.useRealTimers();
+  });
 
   const partialTail = `{"type":"stream_event","event":{"type":"content_block_delta"}}`;
   const completeTail = `{"type":"result","duration_ms":100,"is_error":false}`;
