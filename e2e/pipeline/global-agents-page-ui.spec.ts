@@ -556,4 +556,44 @@ test.describe('Global agents page UI', () => {
     await expect(onDemandRow).toHaveClass(/border-l-accent\/30/);
     await expect(disabledRow).toHaveClass(/border-l-transparent/);
   });
+
+  // ---------------------------------------------------------------------------
+  // Test 14: The empty-list ("all" filter, zero agents) state offers onboarding
+  // guidance and two navigation links. Test 2 only asserts the title and
+  // description; this covers the remaining branches of that same state — the
+  // meta hint line, the zero-valued stats row, and the "Open skills" /
+  // "View projects" actions, which are real <a href> links (not onClick
+  // resets like the non-"all" empty state in test 12).
+  // ---------------------------------------------------------------------------
+  test('empty-list state shows onboarding meta, zero stats, and skills/projects links', async ({ page }) => {
+    await stubShellRoutes(page);
+    await page.route('**/api/agents/scheduler-health', (route: Route) =>
+      route.fulfill({ json: { internal: { entries: [] } } }),
+    );
+    await page.route(
+      (url) => url.pathname === '/api/agents',
+      (route: Route) => route.fulfill({ json: { agents: [] } }),
+    );
+
+    await page.goto('/agents');
+
+    await expect(page.getByText('No agents configured yet')).toBeVisible({ timeout: 8_000 });
+
+    // Meta hint line points at the project Agents tab + skills as building blocks.
+    await expect(
+      page.getByText(/Create agents from a project Agents tab, then use skills as building blocks/i),
+    ).toBeVisible();
+
+    // The stats row renders all four counters at zero (no agents in any category).
+    const totalStat = page.locator('div', { hasText: /^total$/i }).locator('..');
+    await expect(totalStat).toContainText('0');
+
+    // Primary action is a real link to the skills library, not a filter reset.
+    const skillsLink = page.getByRole('link', { name: 'Open skills' });
+    await expect(skillsLink).toHaveAttribute('href', '/skills');
+
+    // Secondary action links to the projects home.
+    const projectsLink = page.getByRole('link', { name: 'View projects' });
+    await expect(projectsLink).toHaveAttribute('href', '/');
+  });
 });
