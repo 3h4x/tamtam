@@ -595,6 +595,51 @@ test.describe('Workflow runs list live polling', () => {
     await expect(page).toHaveURL(stableUrl);
   });
 
+  test('pending workflow disappearing from the backend clears the active panel without a stale pending count', async ({
+    page,
+  }) => {
+    let includeRun = true;
+
+    await stubWorkflowRunsShell(page);
+    await stubWorkflowRuns(page, () => (
+      includeRun
+        ? [
+            makeRun('pending', {
+              id: 'workflow-run-pending-disappeared',
+              input: ['workflow-pending-disappeared', { triggeredBy: 'queue-worker' }],
+              startedAt: null,
+              durationMs: null,
+            }),
+          ]
+        : []
+    ));
+
+    await page.goto('/workflow-runs');
+
+    const activePanel = page.getByLabel('Active workflow runs');
+    await expect(activePanel).toBeVisible({ timeout: 8_000 });
+    await expect(
+      activePanel.getByRole('link', { name: /workflow-pending-disappeared/i }),
+    ).toBeVisible();
+    await expect(activePanel.getByLabel('status pending')).toBeVisible();
+    await expect(page.getByRole('button', { name: /^pending 1$/i })).toBeVisible();
+    await expect(page.getByRole('button', { name: /^running 0$/i })).toBeVisible();
+    await expect(page.getByLabel('Workflow runs needing attention')).toHaveCount(0);
+
+    const stableUrl = page.url();
+    includeRun = false;
+
+    await expect(activePanel).toHaveCount(0, { timeout: 12_000 });
+    await expect(page.getByRole('button', { name: /^pending 0$/i })).toBeVisible({
+      timeout: 12_000,
+    });
+    await expect(page.getByText('1 running')).toHaveCount(0, { timeout: 12_000 });
+    await expect(
+      page.getByRole('link', { name: /workflow-pending-disappeared/i }),
+    ).toHaveCount(0);
+    await expect(page).toHaveURL(stableUrl);
+  });
+
   test('active run moves to attention panel when the workflow fails', async ({ page }) => {
     let serveRunning = true;
 

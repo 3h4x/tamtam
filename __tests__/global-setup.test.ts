@@ -17,7 +17,7 @@ describe('__tests__/global-setup.ts', () => {
     delete process.env.DATABASE_URL;
 
     const { default: globalSetup } = await import('@/__tests__/global-setup');
-    globalSetup();
+    await globalSetup();
 
     expect(process.env.DATABASE_URL).toBeTruthy();
     expect(process.env.DATABASE_URL).toMatch(/tamtam_test/);
@@ -32,7 +32,7 @@ describe('__tests__/global-setup.ts', () => {
 
     const { default: globalSetup } = await import('@/__tests__/global-setup');
     const { SAFE_TEST_DATABASE_URL } = await import('@/__tests__/helpers/guard-database-url');
-    globalSetup();
+    await globalSetup();
 
     expect(process.env.DATABASE_URL).toBe(SAFE_TEST_DATABASE_URL);
   });
@@ -41,7 +41,7 @@ describe('__tests__/global-setup.ts', () => {
     process.env.DATABASE_URL = 'postgres://ci@localhost:5432/myapp_test';
 
     const { default: globalSetup } = await import('@/__tests__/global-setup');
-    globalSetup();
+    await globalSetup();
 
     expect(process.env.DATABASE_URL).toBe('postgres://ci@localhost:5432/myapp_test');
   });
