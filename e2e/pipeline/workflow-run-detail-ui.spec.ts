@@ -2,7 +2,7 @@ import { test, expect } from '@playwright/test';
 import type { Locator, Page, Route } from '@playwright/test';
 
 // WorkflowRunDetail UI tests — verify running/completed/failed/cancelled/404
-// edge cases using mocked API. All tests use the port 1338 test server; no
+// edge cases using mocked API. All tests use the configured baseURL; no
 // real pipeline execution.
 
 const RUN_ID = 'wfr-test-001';
