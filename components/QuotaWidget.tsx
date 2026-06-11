@@ -490,7 +490,9 @@ export function QuotaWidget({
     return (
       <div className="rounded-lg border border-border bg-bg-secondary p-4">
         <div className="text-xs uppercase tracking-wide text-text-tertiary">Agent subscription quota</div>
-        <div className="text-sm text-status-error mt-1">{error ?? 'Quota unavailable'}</div>
+        <ErrorCallout padding="sm" radius="md" className="mt-2 text-sm" preWrap={false}>
+          {error ?? 'Quota unavailable'}
+        </ErrorCallout>
       </div>
     )
   }
@@ -553,7 +555,9 @@ export function QuotaWidget({
               <div className="text-xs uppercase tracking-wide text-text-tertiary">
                 {card.provider === 'codex' ? 'Codex subscription quota' : 'Claude subscription quota'}
               </div>
-              <div className="text-sm text-status-error">{card.error ?? 'Quota unavailable'}</div>
+              <ErrorCallout padding="sm" radius="md" className="text-sm" preWrap={false}>
+                {card.error ?? 'Quota unavailable'}
+              </ErrorCallout>
             </div>
           )
         }
