@@ -3,7 +3,7 @@ import type { Route } from '@playwright/test';
 
 // NotificationBell UI tests — verify unread badge count, running pulse dot,
 // dropdown sections, "Clear all", and auto-poll updates using mocked API.
-// All tests use the port 1338 test server; no real pipeline execution.
+// All tests use the configured baseURL; no real pipeline execution.
 
 const now = () => Math.floor(Date.now() / 1000);
 

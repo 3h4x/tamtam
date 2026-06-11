@@ -1,7 +1,7 @@
 import { test, expect } from '@playwright/test';
 import type { Page, Route } from '@playwright/test';
 
-// History tab search empty-state UI — uses the 1338 test server with mocked
+// History tab search empty-state UI — uses the configured baseURL with mocked
 // API responses. Covers the previously-untested `search` empty-state mode
 // (a non-matching query) and the "Clear filters" button reset that restores
 // the full runs list. Only the `empty` and `running` empty modes had coverage;
