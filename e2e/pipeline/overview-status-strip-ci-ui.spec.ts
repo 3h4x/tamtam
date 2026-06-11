@@ -221,6 +221,21 @@ test.describe('Overview StatusStrip CI lifecycle', () => {
     await expect(page.getByRole('button', { name: /open on GitHub/i })).toHaveCount(0);
   });
 
+  test('CI running without a run URL shows no detail and is not clickable', async ({ page }) => {
+    await stubOverviewRoutes(page, {
+      task: () => makeTask('in_progress', { ci_failed_url: null }),
+    });
+
+    await page.goto(`/project/${PROJECT}`);
+
+    const card = page.getByRole('button', { name: /CI running/i });
+    await expect(card).toBeVisible({ timeout: 8_000 });
+    // in_progress with no URL leaves openCi undefined, so the card stays
+    // non-interactive and must not surface the "open on GitHub" affordance.
+    await expect(card).toBeDisabled();
+    await expect(page.getByRole('button', { name: /open on GitHub/i })).toHaveCount(0);
+  });
+
   test('CI failure opens the configured run URL from the card', async ({ page }) => {
     const openedUrls: string[] = [];
     await page.exposeFunction('recordOpenedUrl', (url: string) => {
