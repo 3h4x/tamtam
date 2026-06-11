@@ -160,4 +160,40 @@ test.describe('Retrieval reindex UI', () => {
     await expect(reindexButton).toBeDisabled();
     await expect(reindexButton).toHaveAttribute('title', 'Enable retrieval in Settings → General');
   });
+
+  test('shows running state and server error when reindex fails', async ({ page }) => {
+    let release!: () => void;
+    const gate = new Promise<void>((resolve) => {
+      release = resolve;
+    });
+
+    await stubProjectConfigShell(page, true);
+    await page.route(`**/api/projects/${PROJECT}/retrieval/stats`, (route: Route) =>
+      route.fulfill({ json: { records: 2, chunks: 12 } }),
+    );
+    await page.route(`**/api/projects/${PROJECT}/retrieval/reindex`, async (route: Route) => {
+      await gate;
+      await route.fulfill({
+        status: 500,
+        json: { error: 'embedding service unavailable' },
+      });
+    });
+
+    await page.goto(`/project/${PROJECT}/config`);
+
+    const reindexButton = page.getByRole('button', { name: 'Reindex now' });
+    await expect(reindexButton).toBeEnabled({ timeout: 8_000 });
+    await reindexButton.click();
+
+    const runningButton = page.getByRole('button', { name: 'Reindexing…' });
+    await expect(runningButton).toBeVisible({ timeout: 8_000 });
+    await expect(runningButton).toBeDisabled();
+
+    release();
+
+    await expect(page.getByText('Reindex failed: embedding service unavailable')).toBeVisible({
+      timeout: 8_000,
+    });
+    await expect(page.getByRole('button', { name: 'Reindex now' })).toBeEnabled({ timeout: 8_000 });
+  });
 });
