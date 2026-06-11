@@ -504,6 +504,55 @@ test.describe('WorkflowRunDetail UI', () => {
     await expect(page.getByText(/Failed to refresh/i)).toHaveCount(0);
   });
 
+  test('live run keeps the prior snapshot when a refresh returns 404, then recovers to the final snapshot', async ({
+    page,
+  }) => {
+    await stubShellRoutes(page);
+    let served = 0;
+    await page.route(`**/api/workflow-runs/${RUN_ID}`, (route: Route) => {
+      served += 1;
+      if (served === 2) {
+        route.fulfill({ status: 404, json: { error: 'not found' } });
+        return;
+      }
+      route.fulfill({
+        json:
+          served === 1
+            ? ({
+                run: makeRun('running'),
+                steps: [makeStep('s1', 'run-review', 'running')],
+              } satisfies RunDetail)
+            : served === 3
+              ? ({
+                  run: makeRun('running'),
+                  steps: [makeStep('s1', 'run-review', 'running')],
+                } satisfies RunDetail)
+              : ({
+                run: makeRun('completed'),
+                steps: [makeStep('s1', 'run-review', 'completed')],
+              } satisfies RunDetail),
+      });
+    });
+
+    await page.goto(`/workflow-runs/${RUN_ID}`);
+
+    await expect(page.locator('[aria-label="status running"]').first()).toBeVisible({ timeout: 8_000 });
+    await expect(page.getByText('live · refreshes every 5s')).toBeVisible({ timeout: 8_000 });
+
+    await expect(page.getByText(/Failed to refresh: workflow run not found/i)).toBeVisible({
+      timeout: 12_000,
+    });
+    await expect(page.getByText(/Workflow run not found/i)).toHaveCount(0);
+    await expect(page.locator('[aria-label="status running"]').first()).toBeVisible();
+    await expect(page.getByText('live · refreshes every 5s')).toBeVisible();
+
+    await expect(page.getByText('final snapshot')).toBeVisible({ timeout: 18_000 });
+    await expect(page.locator('[aria-label="status completed"]').first()).toBeVisible({
+      timeout: 18_000,
+    });
+    await expect(page.getByText(/Failed to refresh/i)).toHaveCount(0);
+  });
+
   // ---------------------------------------------------------------------------
   // Cancelled run
   // ---------------------------------------------------------------------------

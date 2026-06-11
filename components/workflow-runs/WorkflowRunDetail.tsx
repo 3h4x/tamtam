@@ -209,6 +209,7 @@ export function WorkflowRunDetail({ runId }: { runId: string }) {
   const [lastLoadedAt, setLastLoadedAt] = useState<number | null>(null);
   const [reloadNonce, setReloadNonce] = useState(0);
   const latestRunStatusRef = useRef<string | null>(null);
+  const hasLoadedDataRef = useRef(false);
 
   useEffect(() => {
     let cancelled = false;
@@ -219,6 +220,7 @@ export function WorkflowRunDetail({ runId }: { runId: string }) {
     setNotFound(false);
     setLastLoadedAt(null);
     latestRunStatusRef.current = null;
+    hasLoadedDataRef.current = false;
 
     function scheduleRefresh() {
       refreshTimeout = setTimeout(load, 5000);
@@ -233,9 +235,17 @@ export function WorkflowRunDetail({ runId }: { runId: string }) {
         const res = await fetch(`/api/workflow-runs/${encodeURIComponent(runId)}`);
         if (res.status === 404) {
           if (!cancelled) {
-            setNotFound(true);
-            setData(null);
-            setError(null);
+            if (hasLoadedDataRef.current) {
+              setNotFound(false);
+              setError('workflow run not found');
+              if (shouldRetryAfterFailure()) {
+                scheduleRefresh();
+              }
+            } else {
+              setNotFound(true);
+              setData(null);
+              setError(null);
+            }
           }
           return;
         }
@@ -257,6 +267,7 @@ export function WorkflowRunDetail({ runId }: { runId: string }) {
           setError(null);
           setLastLoadedAt(Date.now());
           latestRunStatusRef.current = body.run.status;
+          hasLoadedDataRef.current = true;
           if (!isTerminalWorkflowStatus(body.run.status)) {
             scheduleRefresh();
           }
