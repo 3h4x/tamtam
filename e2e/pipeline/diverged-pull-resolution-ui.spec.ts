@@ -3,7 +3,7 @@ import { test, expect, Route } from '@playwright/test';
 // E2E coverage for the *exit paths* of the diverged-pull warning in the project
 // header (components/project-detail/ProjectActions.tsx, the `pullDiverged`
 // branch). pull-flow.spec.ts already verifies the warning APPEARS with
-// Rebase/Merge buttons after a 409 diverged response; the gaps here are the two
+// Rebase/Merge buttons after a 409 diverged response. These tests cover the two
 // ways the warning is dismissed:
 //
 //   1. Dismiss (✕) — onDismissDiverged clears pullDiverged, the Diverged strip

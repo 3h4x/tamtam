@@ -4,7 +4,7 @@ import type { Page, Route } from '@playwright/test';
 // Release-button state UI tests — verify that the primary action button in the
 // project header (components/project-detail/ProjectActions.tsx) renders the
 // correct label / title / disabled state for verdict- and branch-driven
-// branches that no existing spec covers:
+// branches:
 //
 //   1. freshLgtm  -> button reads "Ship (LGTM)" and its title explains it will
 //      commit & push directly, skipping test + review.

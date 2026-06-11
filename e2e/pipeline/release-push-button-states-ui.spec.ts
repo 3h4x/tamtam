@@ -5,8 +5,7 @@ import type { Page, Route } from '@playwright/test';
 // project header (components/project-detail/ProjectActions.tsx, the unpushed /
 // totalChanges-driven button at the end of the action row). The header Pull
 // button is covered by e2e/pull-flow.spec.ts and the ChangesTab push by
-// changes-tab-actions-ui.spec.ts, but the header Push button's three render
-// states had no spec:
+// changes-tab-actions-ui.spec.ts. These render states stay isolated here:
 //
 //   1. unpushed>0 + no local changes -> "Push (N)" warning variant, enabled,
 //      title "Push N commits to origin".
