@@ -199,5 +199,10 @@ function isTransientProviderFailure(output: string): boolean {
     'service unavailable',
     'aborted_streaming',
     'error_during_execution',
+    // Provider CLI crashed mid-stream after emitting assistant output with no
+    // stderr — the shim's own terminal classification for a transient backend
+    // hiccup (it retries once internally before surfacing this line). A second
+    // crash should hop to the fallback provider, not fail the run.
+    'after assistant output with no stderr',
   ].some((needle) => text.includes(needle));
 }
