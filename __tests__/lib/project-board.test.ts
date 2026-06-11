@@ -1,352 +1,17 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
-import type { JobData } from '@/lib/jobs/types';
-
-function makeJob(overrides: Partial<JobData> = {}): JobData {
-  return {
-    id: 'job-1',
-    project: 'proj',
-    kind: 'run',
-    prompt: 'Ship it',
-    pid: 1,
-    logPath: '/tmp/job.log',
-    startedAt: 1,
-    finishedAt: 2,
-    exitCode: 0,
-    seen: false,
-    verdict: null,
-    contextMeta: null,
-    userPrompt: null,
-    parentJobId: null,
-    ghIssueNumber: null,
-    ghIssueRepo: null,
-    ghIssueTitle: null,
-    releaseId: null,
-    abortedAt: null,
-    ...overrides,
-  };
-}
-
-const DISABLED_SETTINGS = {
-  github_owner: '',
-  github_board_sync_enabled: false,
-  github_board_project_owner: '',
-  github_board_project_title: 'TamTam',
-  github_board_project_number: '',
-  github_board_project_url: '',
-  github_board_project_id: '',
-  github_board_status_field_id: '',
-  github_board_status_option_ids: {},
-  github_board_custom_field_ids: {},
-};
-
-const ENABLED_SETTINGS = {
-  github_owner: 'octocat',
-  github_board_sync_enabled: true,
-  github_board_project_owner: 'octocat',
-  github_board_project_title: 'TamTam',
-  github_board_project_number: '7',
-  github_board_project_url: 'https://github.com/users/octocat/projects/7',
-  github_board_project_id: 'PVT_1',
-  github_board_status_field_id: 'FIELD_1',
-  github_board_status_option_ids: {
-    'Todo': 'Q',
-    'In Progress': 'R',
-    'Review': 'REV',
-    'Fixing': 'F',
-    'Blocked': 'B',
-    'Done': 'D',
-  },
-  github_board_custom_field_ids: {
-    project: 'F_PROJECT',
-    agent: 'F_AGENT',
-    kind: 'F_KIND',
-    branch: 'F_BRANCH',
-  },
-};
+import { DISABLED_SETTINGS, ENABLED_SETTINGS, makeJob, setupProjectBoardTest } from './project-board-fixtures';
 
 describe('project board integration', () => {
-  const execMock = vi.fn();
-  const updateJobMock = vi.fn();
-  const getJobMock = vi.fn();
-  const listJobsMock = vi.fn(() => [] as unknown[]);
-  const resolveProjectPathMock = vi.fn();
-  const dbRunMock = vi.fn();
-  const dbExecuteMock = vi.fn(() => Promise.resolve());
-  const dbOnConflictMock = vi.fn(() => ({ run: dbRunMock, execute: dbExecuteMock }));
-  const dbValuesMock = vi.fn(() => ({ onConflictDoUpdate: dbOnConflictMock }));
-  const dbInsertMock = vi.fn(() => ({ values: dbValuesMock }));
-  const reloadConfigMock = vi.fn();
-
-  // Mutable settings pointer: all vi.doMock factories for @/lib/shared/config
-  // delegate here, so per-test overrides work regardless of which stacked
-  // factory Vitest resolves — avoiding the "beforeEach factory wins" flake.
-  let mockGetSettings: () => object;
-
-  beforeEach(() => {
-    vi.resetModules();
-    execMock.mockReset();
-    updateJobMock.mockReset();
-    getJobMock.mockReset();
-    listJobsMock.mockReset();
-    listJobsMock.mockReturnValue([]);
-    resolveProjectPathMock.mockReset();
-    dbRunMock.mockReset();
-    dbExecuteMock.mockReset();
-    dbExecuteMock.mockImplementation(() => Promise.resolve());
-    dbOnConflictMock.mockClear();
-    dbValuesMock.mockClear();
-    dbInsertMock.mockClear();
-    reloadConfigMock.mockReset();
-    mockGetSettings = () => ({ ...DISABLED_SETTINGS });
-
-    vi.doMock('@/lib/shared/shell', () => ({
-      exec: execMock,
-    }));
-    vi.doMock('@/lib/jobs/storage', () => ({
-      getJob: getJobMock,
-      updateJob: updateJobMock,
-      listJobs: listJobsMock,
-    }));
-    vi.doMock('@/lib/shared/project-data', () => ({
-      resolveProjectPath: resolveProjectPathMock,
-    }));
-    vi.doMock('@/lib/db', () => ({
-      db: { insert: dbInsertMock },
-      schema: { settings: { key: 'key' } },
-    }));
-    // Factory always delegates to mockGetSettings() so that any stacked
-    // registration from a previous beforeEach still returns the current
-    // per-test settings without needing to override the factory itself.
-    vi.doMock('@/lib/shared/config', () => ({
-      getSettings: () => mockGetSettings(),
-      reloadConfig: reloadConfigMock,
-    }));
-  });
-
-  it('reuses an existing GitHub project and built-in Status field when all options are already present', async () => {
-    execMock.mockImplementation(async (_cmd: string, args: string[]) => {
-      if (args[0] === 'project' && args[1] === 'list') {
-        return { exitCode: 0, stdout: JSON.stringify({ projects: [{ id: 'PVT_1', number: 7, title: 'TamTam' }] }), stderr: '' };
-      }
-      if (args[0] === 'project' && args[1] === 'field-list') {
-        return {
-          exitCode: 0,
-          stdout: JSON.stringify({
-            fields: [
-              {
-                id: 'FIELD_1',
-                name: 'Status',
-                options: [
-                  { id: 'Q', name: 'Todo' },
-                  { id: 'R', name: 'In Progress' },
-                  { id: 'REV', name: 'Review' },
-                  { id: 'F', name: 'Fixing' },
-                  { id: 'B', name: 'Blocked' },
-                  { id: 'D', name: 'Done' },
-                ],
-              },
-              { id: 'F_PROJECT', name: 'Project' },
-              { id: 'F_AGENT', name: 'Agent' },
-              { id: 'F_KIND', name: 'Run kind' },
-              { id: 'F_BRANCH', name: 'Branch' },
-            ],
-          }),
-          stderr: '',
-        };
-      }
-      throw new Error(`Unexpected command: ${args.join(' ')}`);
-    });
-
-    const { ensureProjectBoard } = await import('@/lib/github/project-board');
-    const result = await ensureProjectBoard({ enabled: true, owner: 'octocat', title: 'TamTam' });
-
-    expect(result).toEqual({
-      owner: 'octocat',
-      title: 'TamTam',
-      projectNumber: '7',
-      projectUrl: 'https://github.com/users/octocat/projects/7',
-      projectId: 'PVT_1',
-      statusFieldId: 'FIELD_1',
-      optionIds: {
-        'Todo': 'Q',
-        'In Progress': 'R',
-        'Review': 'REV',
-        'Fixing': 'F',
-        'Blocked': 'B',
-        'Done': 'D',
-      },
-      customFieldIds: {
-        project: 'F_PROJECT',
-        agent: 'F_AGENT',
-        kind: 'F_KIND',
-        branch: 'F_BRANCH',
-      },
-    });
-    expect(execMock).toHaveBeenCalledTimes(2);
-  });
-
-  it('creates the project and adds missing options to the built-in Status field via graphql', async () => {
-    let fieldListCall = 0;
-    execMock.mockImplementation(async (_cmd: string, args: string[]) => {
-      if (args[0] === 'project' && args[1] === 'list') {
-        return { exitCode: 0, stdout: JSON.stringify({ projects: [] }), stderr: '' };
-      }
-      if (args[0] === 'project' && args[1] === 'create') {
-        return { exitCode: 0, stdout: JSON.stringify({ id: 'PVT_NEW', number: 9, title: 'TamTam Ops' }), stderr: '' };
-      }
-      if (args[0] === 'project' && args[1] === 'field-list') {
-        fieldListCall++;
-        if (fieldListCall === 1) {
-          // Newly created GitHub project ships with default Todo / In Progress / Done.
-          return {
-            exitCode: 0,
-            stdout: JSON.stringify({
-              fields: [{
-                id: 'FIELD_NEW',
-                name: 'Status',
-                options: [
-                  { id: 'OT', name: 'Todo' },
-                  { id: 'OP', name: 'In Progress' },
-                  { id: 'OD', name: 'Done' },
-                ],
-              }],
-            }),
-            stderr: '',
-          };
-        }
-        // After our graphql update, all 6 options are present.
-        return {
-          exitCode: 0,
-          stdout: JSON.stringify({
-            fields: [{
-              id: 'FIELD_NEW',
-              name: 'Status',
-              options: [
-                { id: 'OT', name: 'Todo' },
-                { id: 'OP', name: 'In Progress' },
-                { id: 'NREV', name: 'Review' },
-                { id: 'NFIX', name: 'Fixing' },
-                { id: 'NBLK', name: 'Blocked' },
-                { id: 'OD', name: 'Done' },
-              ],
-            }],
-          }),
-          stderr: '',
-        };
-      }
-      if (args[0] === 'api' && args[1] === 'graphql') {
-        return { exitCode: 0, stdout: JSON.stringify({ data: { updateProjectV2Field: { projectV2Field: { id: 'FIELD_NEW' } } } }), stderr: '' };
-      }
-      if (args[0] === 'project' && args[1] === 'field-create') {
-        const nameIdx = args.indexOf('--name');
-        const name = nameIdx >= 0 ? args[nameIdx + 1] : '';
-        const id = `F_${name.replace(/\s+/g, '_').toUpperCase()}`;
-        return { exitCode: 0, stdout: JSON.stringify({ id, name }), stderr: '' };
-      }
-      throw new Error(`Unexpected command: ${args.join(' ')}`);
-    });
-
-    const { ensureProjectBoard } = await import('@/lib/github/project-board');
-    const result = await ensureProjectBoard({ enabled: true, owner: 'octocat', title: 'TamTam Ops' });
-
-    expect(result.projectNumber).toBe('9');
-    expect(result.projectId).toBe('PVT_NEW');
-    expect(result.statusFieldId).toBe('FIELD_NEW');
-    expect(result.projectUrl).toBe('https://github.com/users/octocat/projects/9');
-    expect(result.optionIds).toEqual({
-      'Todo': 'OT',
-      'In Progress': 'OP',
-      'Review': 'NREV',
-      'Fixing': 'NFIX',
-      'Blocked': 'NBLK',
-      'Done': 'OD',
-    });
-    expect(result.customFieldIds).toEqual({
-      project: 'F_PROJECT',
-      agent: 'F_AGENT',
-      kind: 'F_RUN_KIND',
-      branch: 'F_BRANCH',
-    });
-    // list, create, field-list, graphql, field-list (re-read), 4× field-create
-    expect(execMock).toHaveBeenCalledTimes(9);
-    const graphqlCall = execMock.mock.calls.find(([, args]) => Array.isArray(args) && args[0] === 'api' && args[1] === 'graphql');
-    expect(graphqlCall).toBeDefined();
-    const queryArg = String(graphqlCall![1][3] ?? '');
-    expect(queryArg).toContain('updateProjectV2Field');
-    expect(queryArg).toContain('"Review"');
-    expect(queryArg).toContain('"Fixing"');
-    expect(queryArg).toContain('"Blocked"');
-  });
-
-  it('fails clearly when gh project create returns an unparseable payload', async () => {
-    execMock.mockImplementation(async (_cmd: string, args: string[]) => {
-      if (args[0] === 'project' && args[1] === 'list') {
-        return { exitCode: 0, stdout: JSON.stringify({ projects: [] }), stderr: '' };
-      }
-      if (args[0] === 'project' && args[1] === 'create') {
-        return { exitCode: 0, stdout: JSON.stringify({ project: null }), stderr: '' };
-      }
-      throw new Error(`Unexpected command: ${args.join(' ')}`);
-    });
-
-    const { ensureProjectBoard } = await import('@/lib/github/project-board');
-    await expect(ensureProjectBoard({ enabled: true, owner: 'octocat', title: 'TamTam' })).rejects.toThrow(
-      'Failed to parse gh project create response',
-    );
-  });
-
-  it('fails clearly when the built-in Status field is missing from the board', async () => {
-    execMock.mockImplementation(async (_cmd: string, args: string[]) => {
-      if (args[0] === 'project' && args[1] === 'list') {
-        return { exitCode: 0, stdout: JSON.stringify({ projects: [{ id: 'PVT_1', number: 7, title: 'TamTam' }] }), stderr: '' };
-      }
-      if (args[0] === 'project' && args[1] === 'field-list') {
-        return {
-          exitCode: 0,
-          stdout: JSON.stringify({
-            fields: [{ id: 'F_PROJECT', name: 'Project' }],
-          }),
-          stderr: '',
-        };
-      }
-      throw new Error(`Unexpected command: ${args.join(' ')}`);
-    });
-
-    const { ensureProjectBoard } = await import('@/lib/github/project-board');
-    await expect(ensureProjectBoard({ enabled: true, owner: 'octocat', title: 'TamTam' })).rejects.toThrow(
-      'Built-in Status field not found on project',
-    );
-  });
-
-  it('fails clearly when the built-in Status field has no id and needs option upgrades', async () => {
-    execMock.mockImplementation(async (_cmd: string, args: string[]) => {
-      if (args[0] === 'project' && args[1] === 'list') {
-        return { exitCode: 0, stdout: JSON.stringify({ projects: [{ id: 'PVT_1', number: 7, title: 'TamTam' }] }), stderr: '' };
-      }
-      if (args[0] === 'project' && args[1] === 'field-list') {
-        return {
-          exitCode: 0,
-          stdout: JSON.stringify({
-            fields: [{
-              name: 'Status',
-              options: [
-                { id: 'Q', name: 'Todo' },
-                { id: 'R', name: 'In Progress' },
-                { id: 'D', name: 'Done' },
-              ],
-            }],
-          }),
-          stderr: '',
-        };
-      }
-      throw new Error(`Unexpected command: ${args.join(' ')}`);
-    });
-
-    const { ensureProjectBoard } = await import('@/lib/github/project-board');
-    await expect(ensureProjectBoard({ enabled: true, owner: 'octocat', title: 'TamTam' })).rejects.toThrow(
-      'Built-in Status field has no ID',
-    );
-  });
+  const {
+    execMock,
+    updateJobMock,
+    getJobMock,
+    resolveProjectPathMock,
+    dbValuesMock,
+    dbInsertMock,
+    reloadConfigMock,
+    setMockGetSettings,
+  } = setupProjectBoardTest();
 
   it('syncs pipeline child jobs onto the release root item and dedupes activities', async () => {
     const releaseJob = makeJob({
@@ -368,7 +33,7 @@ describe('project board integration', () => {
     // Update the shared settings pointer — the beforeEach factory delegates
     // to mockGetSettings(), so this applies regardless of which stacked
     // factory Vitest picks for @/lib/shared/config.
-    mockGetSettings = () => ({ ...ENABLED_SETTINGS });
+    setMockGetSettings(() => ({ ...ENABLED_SETTINGS }));
     resolveProjectPathMock.mockReturnValue('/tmp/repo');
     getJobMock.mockImplementation((jobId: string) => (jobId === 'release-1' ? releaseJob : null));
 
@@ -408,7 +73,7 @@ describe('project board integration', () => {
   it('engages a rate-limit cooldown after a 403 secondary-rate-limit response', async () => {
     const job = makeJob({ id: 'run-rl', kind: 'run', prompt: 'rate limit me' });
 
-    mockGetSettings = () => ({ ...ENABLED_SETTINGS });
+    setMockGetSettings(() => ({ ...ENABLED_SETTINGS }));
     resolveProjectPathMock.mockReturnValue('/tmp/repo');
     getJobMock.mockReturnValue(null);
 
@@ -429,7 +94,7 @@ describe('project board integration', () => {
   it('throws a clear error when manual sync is required but board sync is disabled', async () => {
     const job = makeJob({ id: 'disabled-sync-job', kind: 'run' });
 
-    mockGetSettings = () => ({ ...DISABLED_SETTINGS });
+    setMockGetSettings(() => ({ ...DISABLED_SETTINGS }));
 
     const { syncJobToProjectBoard } = await import('@/lib/github/project-board');
     await expect(syncJobToProjectBoard(job, 'manual', { requireConfigured: true })).rejects.toThrow(
@@ -440,11 +105,11 @@ describe('project board integration', () => {
   it('throws a clear error when board sync is enabled without a GitHub owner', async () => {
     const job = makeJob({ id: 'missing-owner-job', kind: 'run' });
 
-    mockGetSettings = () => ({
+    setMockGetSettings(() => ({
       ...ENABLED_SETTINGS,
       github_owner: '',
       github_board_project_owner: '',
-    });
+    }));
 
     const { syncJobToProjectBoard } = await import('@/lib/github/project-board');
     await expect(syncJobToProjectBoard(job, 'manual', { requireConfigured: true })).rejects.toThrow(
@@ -455,7 +120,7 @@ describe('project board integration', () => {
   it('no-ops when board sync is unavailable and configuration is not required', async () => {
     const job = makeJob({ id: 'optional-sync-job', kind: 'run' });
 
-    mockGetSettings = () => ({ ...DISABLED_SETTINGS });
+    setMockGetSettings(() => ({ ...DISABLED_SETTINGS }));
 
     const { syncJobToProjectBoard } = await import('@/lib/github/project-board');
     await expect(syncJobToProjectBoard(job, 'manual')).resolves.toBeUndefined();
@@ -470,7 +135,7 @@ describe('project board integration', () => {
       contextMeta: JSON.stringify({ githubBoard: { title: '--format=json' } }),
     });
 
-    mockGetSettings = () => ({ ...ENABLED_SETTINGS });
+    setMockGetSettings(() => ({ ...ENABLED_SETTINGS }));
     resolveProjectPathMock.mockReturnValue('/tmp/repo');
     getJobMock.mockImplementation((id: string) => (id === 'run-inj' ? job : null));
 
@@ -527,7 +192,7 @@ describe('project board integration', () => {
   it('reuses an existing board item discovered by marker lookup', async () => {
     const job = makeJob({ id: 'run-1', kind: 'run', prompt: 'Audit logs' });
 
-    mockGetSettings = () => ({ ...ENABLED_SETTINGS });
+    setMockGetSettings(() => ({ ...ENABLED_SETTINGS }));
     resolveProjectPathMock.mockReturnValue('/tmp/repo');
     getJobMock.mockReturnValue(null);
 
@@ -566,7 +231,7 @@ describe('project board integration', () => {
       contextMeta: JSON.stringify({ githubBoard: { itemId: 'PVTI_STORED' } }),
     });
 
-    mockGetSettings = () => ({ ...ENABLED_SETTINGS });
+    setMockGetSettings(() => ({ ...ENABLED_SETTINGS }));
     resolveProjectPathMock.mockReturnValue('/tmp/repo');
     getJobMock.mockImplementation((id: string) => (id === 'run-existing-pvti' ? job : null));
 
@@ -601,7 +266,7 @@ describe('project board integration', () => {
       exitCode: 0,
     });
 
-    mockGetSettings = () => ({ ...ENABLED_SETTINGS });
+    setMockGetSettings(() => ({ ...ENABLED_SETTINGS }));
     resolveProjectPathMock.mockReturnValue('/tmp/repo');
     getJobMock.mockImplementation((id: string) => (id === 'agent-cf-1' ? job : null));
 
@@ -676,7 +341,7 @@ describe('project board integration', () => {
       exitCode: 0,
     });
 
-    mockGetSettings = () => ({ ...ENABLED_SETTINGS });
+    setMockGetSettings(() => ({ ...ENABLED_SETTINGS }));
     resolveProjectPathMock.mockReturnValue('/tmp/repo');
     getJobMock.mockImplementation((id: string) => (id === 'run-clear-agent' ? job : null));
 
@@ -716,7 +381,7 @@ describe('project board integration', () => {
       kind: 'run',
       prompt: 'upgrade legacy board settings',
     });
-    mockGetSettings = () => ({
+    setMockGetSettings(() => ({
       ...ENABLED_SETTINGS,
       github_board_project_url: '',
       github_board_status_option_ids: {
@@ -730,7 +395,7 @@ describe('project board integration', () => {
         Failed: 'OLD_X',
       },
       github_board_custom_field_ids: {},
-    });
+    }));
     resolveProjectPathMock.mockReturnValue('/tmp/repo');
     getJobMock.mockImplementation((id: string) => (id === 'legacy-sync-1' ? job : null));
 
@@ -821,7 +486,7 @@ describe('project board integration', () => {
       ghIssueTitle: 'Investigate the thing',
     });
 
-    mockGetSettings = () => ({ ...ENABLED_SETTINGS });
+    setMockGetSettings(() => ({ ...ENABLED_SETTINGS }));
     resolveProjectPathMock.mockReturnValue('/tmp/repo');
     getJobMock.mockImplementation((id: string) => (id === 'run-issue-1' ? job : null));
 
@@ -871,7 +536,7 @@ describe('project board integration', () => {
       ghIssueRepo: '3h4x/tamtam',
     });
 
-    mockGetSettings = () => ({ ...ENABLED_SETTINGS });
+    setMockGetSettings(() => ({ ...ENABLED_SETTINGS }));
     resolveProjectPathMock.mockReturnValue('/tmp/repo');
     getJobMock.mockImplementation((id: string) => (id === 'run-issue-4' ? job : null));
 
@@ -921,7 +586,7 @@ describe('project board integration', () => {
       ghIssueRepo: '3h4x/tamtam',
     });
 
-    mockGetSettings = () => ({ ...ENABLED_SETTINGS });
+    setMockGetSettings(() => ({ ...ENABLED_SETTINGS }));
     resolveProjectPathMock.mockReturnValue('/tmp/repo');
     getJobMock.mockImplementation((id: string) => (id === 'run-pr-7' ? job : null));
 
@@ -971,7 +636,7 @@ describe('project board integration', () => {
       ghIssueRepo: '3h4x/tamtam',
     });
 
-    mockGetSettings = () => ({ ...ENABLED_SETTINGS });
+    setMockGetSettings(() => ({ ...ENABLED_SETTINGS }));
     resolveProjectPathMock.mockReturnValue('/tmp/repo');
     getJobMock.mockImplementation((id: string) => (id === 'run-issue-99' ? job : null));
 
@@ -1011,7 +676,7 @@ describe('project board integration', () => {
       ghIssueRepo: '3h4x/tamtam',
     });
 
-    mockGetSettings = () => ({ ...ENABLED_SETTINGS });
+    setMockGetSettings(() => ({ ...ENABLED_SETTINGS }));
     resolveProjectPathMock.mockReturnValue('/tmp/repo');
     getJobMock.mockImplementation((id: string) => (id === 'run-pr-fallback' ? job : null));
 
@@ -1054,7 +719,7 @@ describe('project board integration', () => {
       ghIssueRepo: '3h4x/tamtam',
     });
 
-    mockGetSettings = () => ({ ...ENABLED_SETTINGS });
+    setMockGetSettings(() => ({ ...ENABLED_SETTINGS }));
     resolveProjectPathMock.mockReturnValue('/tmp/repo');
     getJobMock.mockImplementation((id: string) => (id === 'run-issue-unparseable-add' ? job : null));
 
@@ -1096,7 +761,7 @@ describe('project board integration', () => {
       contextMeta: JSON.stringify({ githubBoard: { itemId: 'PVTI_GONE' } }),
     });
 
-    mockGetSettings = () => ({ ...ENABLED_SETTINGS });
+    setMockGetSettings(() => ({ ...ENABLED_SETTINGS }));
     resolveProjectPathMock.mockReturnValue('/tmp/repo');
     getJobMock.mockImplementation((id: string) => (id === 'run-deleted-card' ? job : null));
 
@@ -1142,7 +807,7 @@ describe('project board integration', () => {
       contextMeta: JSON.stringify({ githubBoard: { itemId: 'DI_STALE' } }),
     });
 
-    mockGetSettings = () => ({ ...ENABLED_SETTINGS });
+    setMockGetSettings(() => ({ ...ENABLED_SETTINGS }));
     resolveProjectPathMock.mockReturnValue('/tmp/repo');
     getJobMock.mockImplementation((id: string) => (id === 'run-stale-draft' ? job : null));
 
@@ -1202,7 +867,7 @@ describe('project board integration', () => {
       contextMeta: JSON.stringify({ githubBoard: { itemId: 'INVALID_ITEM_ID' } }),
     });
 
-    mockGetSettings = () => ({ ...ENABLED_SETTINGS });
+    setMockGetSettings(() => ({ ...ENABLED_SETTINGS }));
     resolveProjectPathMock.mockReturnValue('/tmp/repo');
     getJobMock.mockImplementation((id: string) => (id === 'run-invalid-id' ? job : null));
 
