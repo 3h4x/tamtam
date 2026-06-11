@@ -497,7 +497,7 @@ test.describe('ConfigTab save flow', () => {
   });
 
   // ---------------------------------------------------------------------------
-  // Test 9: Config load failure shows ErrorState with a working Retry
+  // Config load failure shows ErrorState with a working Retry
   // ---------------------------------------------------------------------------
   test('a failed config load shows Retry, and retrying recovers the form', async ({ page }) => {
     const configPattern = `**/api/projects/by-project/${PROJECT}/config`;
@@ -542,7 +542,7 @@ test.describe('ConfigTab save flow', () => {
   });
 
   // ---------------------------------------------------------------------------
-  // Test 8: Pipeline step toggle (clicking "review" chip) marks form dirty
+  // Pipeline step toggle (clicking "review" chip) marks form dirty
   // ---------------------------------------------------------------------------
   test('toggling the review pipeline step marks the form dirty', async ({ page }) => {
     await stubShell(page);
