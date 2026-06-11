@@ -111,5 +111,5 @@ psql "$DATABASE_URL" -c \
 | `lib/shared/config.ts` | 5s TTL cache for all settings |
 | `lib/agents/agents-cache.ts` | 10s TTL cache for agents list + `clearAgentsCache()` |
 | `lib/jobs/job-storage.ts` | In-memory jobs Map + DB persistence |
-| `app/api/projects/by-project/[name]/issues/route.ts` | 5-min DB caches via `gh_issues_cache` and `gh_issue_detail_cache` |
+| `app/api/projects/by-project/[projectName]/issues/route.ts` | 5-min DB caches via `gh_issues_cache` and `gh_issue_detail_cache` |
 | `app/api/jobs/notifications/route.ts` | Serves running jobs from in-memory Map (no extra DB query) |
