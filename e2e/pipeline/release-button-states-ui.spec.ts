@@ -206,3 +206,49 @@ test('Create PR button appears on a feature branch that has commits ahead and no
   await expect(createPrBtn).not.toBeDisabled();
   await expect(createPrBtn).toHaveAttribute('title', /Create pull request for branch feature\/widget/i);
 });
+
+// ---------------------------------------------------------------------------
+// Test 4: feature branch with open PR + local changes — "Push to PR #N" appears
+// ---------------------------------------------------------------------------
+test('Push to PR button appears with PR number when feature branch has an open PR and local changes', async ({
+  page,
+}) => {
+  await stubRoutes(page, {
+    task: { changes: 3, unpushed: 0 },
+    branch: { branch: 'feature/widget', defaultBranch: 'master', commitsAhead: 3 },
+    openPrBranches: [{ branch: 'feature/widget', number: 42 }],
+  });
+
+  await page.goto(`/project/${PROJECT}/issues`);
+
+  const pushToPrBtn = page.getByRole('button', { name: 'Push to PR #42' });
+  await expect(pushToPrBtn).toBeVisible({ timeout: 8_000 });
+  await expect(pushToPrBtn).not.toBeDisabled();
+  // Title explains what the push does and references the PR number implicitly via changes count.
+  await expect(pushToPrBtn).toHaveAttribute('title', /Stage 3 change/i);
+  await expect(pushToPrBtn).toHaveAttribute('title', /Skips test \+ review/i);
+
+  // "Create PR" must NOT appear — the branch already has an open PR.
+  await expect(page.getByRole('button', { name: 'Create PR' })).toHaveCount(0);
+});
+
+// ---------------------------------------------------------------------------
+// Test 5: feature branch w/ no commits ahead — "Create PR" disabled w/ explanation
+// ---------------------------------------------------------------------------
+test('Create PR button is disabled with an explanatory title when feature branch has no commits ahead', async ({
+  page,
+}) => {
+  await stubRoutes(page, {
+    task: { changes: 0, unpushed: 0 },
+    branch: { branch: 'feature/empty', defaultBranch: 'master', commitsAhead: 0 },
+    openPrBranches: [],
+  });
+
+  await page.goto(`/project/${PROJECT}/issues`);
+
+  const createPrBtn = page.getByRole('button', { name: 'Create PR' });
+  await expect(createPrBtn).toBeVisible({ timeout: 8_000 });
+  await expect(createPrBtn).toBeDisabled();
+  await expect(createPrBtn).toHaveAttribute('title', /no commits ahead/i);
+  await expect(createPrBtn).toHaveAttribute('title', /feature\/empty/i);
+});
