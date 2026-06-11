@@ -543,6 +543,58 @@ test.describe('Workflow runs list live polling', () => {
     await expect(page).toHaveURL(stableUrl);
   });
 
+  test('pending workflow failed before start moves to attention without stale pending state', async ({
+    page,
+  }) => {
+    let phase: 'pending' | 'failed' = 'pending';
+
+    await stubWorkflowRunsShell(page);
+    await stubWorkflowRuns(page, () => [
+      phase === 'pending'
+        ? makeRun('pending', {
+            id: 'workflow-run-pending-start-failed',
+            input: ['workflow-pending-start-failed', { triggeredBy: 'worker-start' }],
+            startedAt: null,
+            durationMs: null,
+          })
+        : makeRun('failed', {
+            id: 'workflow-run-pending-start-failed',
+            input: ['workflow-pending-start-failed', { triggeredBy: 'worker-start' }],
+            startedAt: null,
+            error: 'workflow worker failed before starting release execution',
+          }),
+    ]);
+
+    await page.goto('/workflow-runs');
+
+    const activePanel = page.getByLabel('Active workflow runs');
+    await expect(activePanel).toBeVisible({ timeout: 8_000 });
+    await expect(
+      activePanel.getByRole('link', { name: /workflow-pending-start-failed/i }),
+    ).toBeVisible();
+    await expect(activePanel.getByLabel('status pending')).toBeVisible();
+    await expect(page.getByRole('button', { name: /^pending 1$/i })).toBeVisible();
+    await expect(page.getByLabel('Workflow runs needing attention')).toHaveCount(0);
+
+    const stableUrl = page.url();
+    phase = 'failed';
+
+    await expect(activePanel).toHaveCount(0, { timeout: 12_000 });
+    const attentionPanel = page.getByLabel('Workflow runs needing attention');
+    await expect(attentionPanel).toBeVisible({ timeout: 12_000 });
+    const failedRow = attentionPanel.getByRole('link', { name: /state failed/i }).first();
+    await expect(failedRow.getByLabel('status failed')).toBeVisible({ timeout: 12_000 });
+    await expect(
+      failedRow.getByText('workflow worker failed before starting release execution'),
+    ).toBeVisible({ timeout: 12_000 });
+    await expect(page.getByRole('button', { name: /^pending 0$/i })).toBeVisible({
+      timeout: 12_000,
+    });
+    await expect(page.getByRole('button', { name: /^failed 1$/i })).toBeVisible();
+    await expect(page.getByText('1 running')).toHaveCount(0);
+    await expect(page).toHaveURL(stableUrl);
+  });
+
   test('active run moves to attention panel when the workflow fails', async ({ page }) => {
     let serveRunning = true;
 
