@@ -61,6 +61,7 @@ export function SchedulerHealthPanel() {
       if (r.ok) {
         const body = await r.json()
         setHealth(body.after)
+        setError(null)
       }
     } finally {
       setReconciling(false)
@@ -95,10 +96,17 @@ export function SchedulerHealthPanel() {
         <div className="rounded-md border border-border bg-bg-secondary p-3">
           <InlineLoading label="Loading scheduler health..." />
         </div>
-      ) : error ? (
+      ) : error && !health ? (
         <ErrorCallout className="text-sm">{error}</ErrorCallout>
       ) : health ? (
         <div className="space-y-3 text-sm">
+          {error && (
+            <ErrorCallout tone="warning" className="text-sm">
+              <div className="font-medium">Scheduler health refresh failed. Showing last successful results.</div>
+              <div className="mt-1 text-xs">{error}</div>
+            </ErrorCallout>
+          )}
+
           <div className="flex flex-wrap gap-x-6 gap-y-1 text-text-tertiary">
             <span>Expected: <span className="text-text-primary font-medium">{health.expected.length}</span></span>
             <span>Queued: <span className="text-text-primary font-medium">{health.actual.graphile.length}</span></span>

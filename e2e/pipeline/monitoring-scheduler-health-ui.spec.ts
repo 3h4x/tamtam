@@ -223,4 +223,130 @@ test.describe('Monitoring scheduler health UI', () => {
     await expect(page.getByText('2/1!')).toBeVisible();
     await expect(page.getByRole('button', { name: 'Reconcile' })).toBeEnabled();
   });
+
+  test('failed scheduler health refresh keeps the last entries visible, then clears on recovery', async ({
+    page,
+  }) => {
+    await stubMonitoringShell(page);
+
+    let phase: 'healthy' | 'failed' = 'healthy';
+    await page.route('**/api/agents/scheduler-health', (route: Route) => {
+      if (phase === 'failed') {
+        return route.fulfill({
+          status: 503,
+          json: { detail: 'scheduler health temporarily unavailable' },
+        });
+      }
+
+      return route.fulfill({
+        json: schedulerHealth(
+          true,
+          schedulerEntry({
+            fireCount: 3,
+            lastError: null,
+          }),
+        ),
+      });
+    });
+
+    await page.goto('/monitoring');
+    await page.getByRole('button', { name: 'Agents' }).click();
+
+    await expect(page.getByText('All scheduled agents have prompt files and Graphile queue jobs ready.')).toBeVisible({
+      timeout: 8_000,
+    });
+    const schedulerRow = page.getByRole('row').filter({ hasText: 'monitoring-project/health-check' });
+    await expect(schedulerRow).toBeVisible();
+    await expect(schedulerRow.getByRole('cell').last()).toHaveText('3');
+
+    phase = 'failed';
+    await page.getByRole('button', { name: 'Refresh' }).last().click();
+
+    await expect(page.getByText('Scheduler health refresh failed. Showing last successful results.')).toBeVisible({
+      timeout: 8_000,
+    });
+    await expect(page.getByText('fetch failed: 503')).toBeVisible();
+    await expect(schedulerRow).toBeVisible();
+    await expect(schedulerRow.getByRole('cell').last()).toHaveText('3');
+    await expect(page.getByText('All scheduled agents have prompt files and Graphile queue jobs ready.')).toBeVisible();
+
+    phase = 'healthy';
+    await page.getByRole('button', { name: 'Refresh' }).last().click();
+
+    await expect(page.getByText('Scheduler health refresh failed. Showing last successful results.')).toHaveCount(0, {
+      timeout: 8_000,
+    });
+    await expect(page.getByText('fetch failed: 503')).toHaveCount(0);
+    await expect(schedulerRow).toBeVisible();
+    await expect(schedulerRow.getByRole('cell').last()).toHaveText('3');
+  });
+
+  test('successful reconcile clears a stale scheduler health refresh warning', async ({
+    page,
+  }) => {
+    await stubMonitoringShell(page);
+
+    let phase: 'missing' | 'failed' = 'missing';
+    await page.route('**/api/agents/scheduler-health', (route: Route) => {
+      if (route.request().method() === 'POST') {
+        return route.fulfill({
+          json: {
+            before: schedulerHealth(false),
+            after: schedulerHealth(
+              true,
+              schedulerEntry({
+                fireCount: 4,
+                lastError: null,
+              }),
+            ),
+            installed: ['agent:monitoring-project:health-check'],
+            installFailures: [],
+          },
+        });
+      }
+
+      if (phase === 'failed') {
+        return route.fulfill({
+          status: 503,
+          json: { detail: 'scheduler health temporarily unavailable' },
+        });
+      }
+
+      return route.fulfill({
+        json: schedulerHealth(
+          false,
+          schedulerEntry({
+            fireCount: 3,
+            lastError: 'queue job is missing',
+          }),
+        ),
+      });
+    });
+
+    await page.goto('/monitoring');
+    await page.getByRole('button', { name: 'Agents' }).click();
+
+    await expect(page.getByText('queue job is missing for monitoring-project/health-check')).toBeVisible({
+      timeout: 8_000,
+    });
+    const schedulerRow = page.getByRole('row').filter({ hasText: 'monitoring-project/health-check' });
+    await expect(schedulerRow.getByRole('cell').last()).toHaveText('3/1!');
+
+    phase = 'failed';
+    await page.getByRole('button', { name: 'Refresh' }).last().click();
+
+    await expect(page.getByText('Scheduler health refresh failed. Showing last successful results.')).toBeVisible({
+      timeout: 8_000,
+    });
+
+    await page.getByRole('button', { name: 'Reconcile' }).click();
+
+    await expect(page.getByText('Scheduler health refresh failed. Showing last successful results.')).toHaveCount(0, {
+      timeout: 8_000,
+    });
+    await expect(page.getByText('fetch failed: 503')).toHaveCount(0);
+    await expect(page.getByText('All scheduled agents have prompt files and Graphile queue jobs ready.')).toBeVisible();
+    await expect(schedulerRow.getByRole('cell').last()).toHaveText('4');
+    await expect(page.getByRole('button', { name: 'Reconcile' })).toBeDisabled();
+  });
 });
