@@ -212,6 +212,34 @@ describe('probeJobStatus', () => {
       expect(markDoneMock).toHaveBeenCalledWith(job, 0);
     });
 
+    it('error result followed by a provider-fallback retry banner stays running', async () => {
+      const logPath = join(tempDir, 'job-fallback.log');
+      writeFileSync(logPath, [
+        '{"type":"result","subtype":"error","is_error":true,"result":"provider crashed"}',
+        '[tamtam] exited with code 1',
+        '[tamtam] transient provider failure detected; retrying once with claude',
+        '[tamtam] launching: claude-shim.js --print',
+      ].join('\n') + '\n');
+      // pid = this test process → liveness check sees the retry leg alive.
+      const job = makeJob({ kind: 'agent:tests', pid: process.pid, logPath });
+      const result = await probeJobStatus(job);
+      expect(result).toBe('running');
+      expect(markDoneMock).not.toHaveBeenCalled();
+    });
+
+    it('result line written by the fallback retry leg → marks done with its code', async () => {
+      const logPath = join(tempDir, 'job-fallback-done.log');
+      writeFileSync(logPath, [
+        '{"type":"result","subtype":"error","is_error":true,"result":"provider crashed"}',
+        '[tamtam] transient provider failure detected; retrying once with claude',
+        '{"type":"result","is_error":false}',
+      ].join('\n') + '\n');
+      const job = makeJob({ kind: 'agent:tests', pid: 1234, logPath });
+      const result = await probeJobStatus(job);
+      expect(result).toBe('done');
+      expect(markDoneMock).toHaveBeenCalledWith(job, 0);
+    });
+
     it('claude kind with timestamp-prefixed result line → parses correctly', async () => {
       const logPath = join(tempDir, 'job4.log');
       writeFileSync(logPath, `2024-01-15T10:00:00Z: {"type":"result","is_error":false}\n`);

@@ -52,6 +52,14 @@ function getClaudeResultExitCode(job: JobData): number | null {
     const marker = '"type":"result"';
     const lastIdx = content.lastIndexOf(marker);
     if (lastIdx === -1) return null;
+    // A provider-fallback retry appends its banner after the failed leg's
+    // result line and relaunches under the same job id (lib/jobs/inline-agent).
+    // That result is not terminal — the retry leg writes its own result line
+    // when it finishes. Declaring the job done here would force-kill the
+    // in-flight retry process via markDone's child sweep.
+    if (content.indexOf('transient provider failure detected; retrying once with', lastIdx) !== -1) {
+      return null;
+    }
     const lineStart = content.lastIndexOf('\n', lastIdx) + 1;
     const lineEnd = content.indexOf('\n', lastIdx);
     const raw = content.slice(lineStart, lineEnd !== -1 ? lineEnd : undefined).trim();
