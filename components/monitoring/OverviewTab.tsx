@@ -157,13 +157,23 @@ export function OverviewTab({
         <div>
           <h3 className="text-xs font-medium text-text-secondary mb-2 uppercase tracking-wide">Notification throttle</h3>
           <div className="space-y-1">
-            {throttle.entries.map((entry) => (
-              <div key={entry.key} className="flex items-center gap-2 px-3 py-2 rounded-md border border-border bg-bg-secondary text-sm">
-                <span className="font-mono text-xs text-text-primary truncate" data-private>{entry.key}</span>
-                <span className="ml-auto text-xs text-text-tertiary">{entry.suppressedCount} suppressed</span>
-                <span className="text-xs text-text-tertiary">{new Date(entry.lastSentAt).toLocaleString()}</span>
-              </div>
-            ))}
+            {throttle.entries.map((entry) => {
+              const lastSentDate = new Date(entry.lastSentAt)
+              const lastSentLabel = lastSentDate.toLocaleString()
+              return (
+                <div key={entry.key} className="flex items-center gap-2 px-3 py-2 rounded-md border border-border bg-bg-secondary text-sm">
+                  <span className="font-mono text-xs text-text-primary truncate" data-private>{entry.key}</span>
+                  <span className="ml-auto text-xs text-text-tertiary">{entry.suppressedCount} suppressed</span>
+                  <time
+                    className="text-xs text-text-tertiary"
+                    dateTime={lastSentDate.toISOString()}
+                    aria-label={`Last sent ${lastSentLabel}`}
+                  >
+                    {lastSentLabel}
+                  </time>
+                </div>
+              )
+            })}
           </div>
         </div>
       )}

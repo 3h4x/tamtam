@@ -81,6 +81,9 @@ test.describe('Monitoring Overview cards UI', () => {
     // Throttle entries panel lists the throttled key.
     await expect(page.getByRole('heading', { name: 'Notification throttle' })).toBeVisible();
     await expect(page.getByText('release_fail:demo-project')).toBeVisible();
+    const lastSentAt = page.getByLabel(/Last sent .*2026/);
+    await expect(lastSentAt).toBeVisible();
+    await expect(lastSentAt).toHaveAttribute('datetime', new Date(BASE_TIME).toISOString());
   });
 
   test('a failed nightly retention cleanup marks the Retention card as an issue with the error line', async ({ page }) => {
