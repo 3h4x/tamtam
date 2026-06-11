@@ -24,6 +24,7 @@ interface AgentsTabProps {
   projectName: string
   currentBranch?: string | null
   projectJobs?: JobInfo[]
+  jobsPaused?: boolean
 }
 
 interface EnrichedAgent {
@@ -63,9 +64,14 @@ function formatAgoCompact(epochMs: number): string {
   return `${Math.floor(d / 86400)}d ago`
 }
 
-export function AgentsTab({ projectName, projectJobs = [] }: AgentsTabProps) {
-  const agentRunsBlocked = false
-  const blockedReason = ''
+export function AgentsTab({ projectName, projectJobs = [], jobsPaused = false }: AgentsTabProps) {
+  // Mirror the server-side global pause gate (POST /api/agents/[agentId]/run
+  // returns 409 jobs_paused) so the Run buttons reflect reality instead of
+  // letting the user fire a request that the server will reject.
+  const agentRunsBlocked = jobsPaused
+  const blockedReason = jobsPaused
+    ? 'Jobs are paused globally. Resume jobs in Settings to run agents.'
+    : ''
   const router = useRouter()
   const pathname = usePathname()
   const searchParams = useSearchParams()

@@ -922,6 +922,7 @@ export function ProjectDetailPage({
           projectName={name}
           currentBranch={currentBranch}
           projectJobs={projectJobs}
+          jobsPaused={jobsPaused}
         />
       )}
 
