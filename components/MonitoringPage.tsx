@@ -151,6 +151,11 @@ export function MonitoringPage() {
     fetch_(w)
   }
 
+  const handleRefresh = () => {
+    fetch_(window_)
+    fetchReadiness()
+  }
+
   if (loading && !data) {
     return (
       <div className="max-w-5xl mx-auto space-y-8">
@@ -242,7 +247,7 @@ export function MonitoringPage() {
         <Button
           variant="ghost"
           size="sm"
-          onClick={() => fetch_(window_)}
+          onClick={handleRefresh}
           className="border-current bg-transparent px-2 py-0.5 text-xs !text-current opacity-60 hover:bg-transparent hover:text-current hover:opacity-100"
         >
           Refresh
