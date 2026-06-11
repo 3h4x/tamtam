@@ -6,8 +6,6 @@ import type { Page, Route } from '@playwright/test'
 // run row (chainedChildren), and the run row carries the release's actions
 // (releaseActionsFor → ownedRelease branch in ProjectRunsTab). A blocked
 // release (exit !== 0, NO children) renders "Retry release" on that run row.
-// The top-level release-row variant is covered by
-// history-retry-release-blocked-ui.spec.ts.
 
 const PROJECT = 'history-retry-release-owned-blocked-ui'
 const RUN_ID = 'owned-blocked-run'

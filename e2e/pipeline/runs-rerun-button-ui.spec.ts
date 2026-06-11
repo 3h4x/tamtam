@@ -2,8 +2,8 @@ import { test, expect } from '@playwright/test'
 import type { BrowserContext, Route } from '@playwright/test'
 
 // Exercises the per-run "Rerun" button gating + click flow in
-// components/ProjectRunsTab.tsx (rerunTargetFor / rerunRun), which had no e2e
-// coverage. Rerun starts a fresh run from a finished entry's saved prompt. It
+// components/ProjectRunsTab.tsx (rerunTargetFor / rerunRun). Rerun starts a
+// fresh run from a finished entry's saved prompt. It
 // is offered on any non-running run|agent|other row that still has a job id —
 // crucially regardless of exit code, so a CLEAN done run shows Rerun even
 // though it shows no Continue. The gate hides Rerun entirely (not just

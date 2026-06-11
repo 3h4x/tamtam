@@ -3,8 +3,6 @@ import type { Page, Route } from '@playwright/test'
 
 // Covers the "Retry release" button label on a release that failed with no
 // children (outcomeStatus === 'blocked' branch in releaseActionsFor).
-// A release with children that failed shows "Continue release" — that path is
-// covered by push-failure-runs-expand-real.spec.ts.
 
 const PROJECT = 'history-retry-release-blocked-ui'
 const RELEASE_ID = 'history-retry-blocked-release'
