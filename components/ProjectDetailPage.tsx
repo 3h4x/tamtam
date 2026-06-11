@@ -598,13 +598,9 @@ export function ProjectDetailPage({
 
   return (
     <div className="px-0 py-1">
-      {/* Header is split into two stacked rows: project identity on top, the
-          action toolbar on its own row below. Previous layout used
-          `justify-between flex-wrap` which made the toolbar bounce between
-          row 1 (right side) and row 2 (left, wrapped) depending on how long
-          the branch chip was — so the toolbar shifted between tabs whose
-          branch state differed. Stacking gives a single, predictable
-          left-aligned toolbar regardless of branch length or active tab. */}
+      {/* Header is split into two stacked rows: project identity on top and the
+          action toolbar below. This keeps the toolbar left-aligned and stable
+          regardless of branch-chip length or active tab. */}
       <div className="mb-4 flex flex-col gap-3">
         <div className="flex items-center gap-2 min-w-0 flex-wrap">
           <ProjectLogo projectName={project.project} size={24} />

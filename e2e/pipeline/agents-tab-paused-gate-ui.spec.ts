@@ -5,11 +5,8 @@ import type { Page, Route } from '@playwright/test';
 // (components/AgentsTab.tsx). Starting an agent run is exactly the kind of
 // job-start the global `jobs_paused` gate exists to stop — the server's
 // POST /api/agents/[agentId]/run returns 409 jobs_paused when paused. Every
-// sibling job-start surface (ChangesTab push, IssuesTab plan, PRRow
-// review/DoD, the project-header action buttons) disables itself when jobs
-// are paused; the Agents tab Run button did not, because the gate state was
-// stubbed to a hardcoded `false` after the Direct-Branch logic that once fed
-// it was removed. This spec pins the revived behavior: the Run button is
+// sibling job-start surface disables itself when jobs are paused; the Agents
+// tab follows the same contract. This spec pins that the Run button is
 // disabled with the paused reason and a paused banner is shown when jobs are
 // paused, and enabled (no banner) when they are not.
 //
