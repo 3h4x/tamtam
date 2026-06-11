@@ -65,6 +65,7 @@ function makeProjectConfig() {
     tests_disabled: false,
     review_disabled: false,
     issue_auto_branch: false,
+    last_push_error: 'Push failed: remote rejected: protected branch',
   }
 }
 
@@ -80,7 +81,7 @@ function emptyIssuesSummary() {
   }
 }
 
-function makeReleaseChain(phase: 'idle' | 'test' | 'review' | 'fix' | 'commit' | 'push' | 'done'): MockJob[] {
+function makeReleaseChain(phase: 'idle' | 'test' | 'review' | 'fix' | 'commit' | 'push' | 'push-failed' | 'done'): MockJob[] {
   if (phase === 'idle' || phase === 'done') return []
 
   const releaseId = 'strip-live-release-1'
@@ -214,6 +215,16 @@ function makeReleaseChain(phase: 'idle' | 'test' | 'review' | 'fix' | 'commit' |
       reviewStep('done', 0, 'LGTM'),
       fixStep('done', 0),
       commitStep('running', null),
+    ]
+  }
+  if (phase === 'push-failed') {
+    return [
+      ...steps,
+      testStep('done', 0),
+      reviewStep('done', 0, 'LGTM'),
+      fixStep('done', 0),
+      commitStep('done', 0),
+      pushStep('done', 1),
     ]
   }
   return [
@@ -356,6 +367,47 @@ test.describe('Pipeline strip live polling', () => {
     phase = 'done'
     await expect(page.getByLabel(/pipeline summary:/i)).toHaveCount(0, { timeout: 12_000 })
     await expect(page.getByRole('button', { name: 'abort' })).toHaveCount(0, { timeout: 12_000 })
+    await expect.poll(() => new URL(page.url()).pathname).toBe(stablePath)
+  })
+
+  test('push step failure updates the strip from running to failed without hiding recovery controls', async ({
+    page,
+  }) => {
+    let phase: 'push' | 'push-failed' = 'push'
+
+    await stubProjectShell(page, () => makeReleaseChain(phase))
+    await page.goto(`/project/${PROJECT}/terminal`)
+
+    const stablePath = new URL(page.url()).pathname
+
+    await expect(page.getByLabel(/pipeline summary: push running/i)).toBeVisible({
+      timeout: 12_000,
+    })
+    await expect(page.getByLabel(/push: running\./i)).toBeVisible({ timeout: 12_000 })
+    await expect(page.getByTitle('push in progress — click to open terminal')).toBeVisible({
+      timeout: 12_000,
+    })
+
+    phase = 'push-failed'
+
+    await expect(page.getByLabel(/pipeline summary: push failed/i)).toBeVisible({
+      timeout: 12_000,
+    })
+    await expect(page.getByLabel(/push: failed\. Push failed: remote rejected: protected branch/i)).toBeVisible({
+      timeout: 12_000,
+    })
+    await expect(page.getByLabel(/pipeline summary: push failed/i)).toHaveAttribute(
+      'title',
+      'Push failed: remote rejected: protected branch',
+    )
+    await expect(page.getByRole('button', {
+      name: /push: failed\. Push failed: remote rejected: protected branch/i,
+    })).toHaveAttribute('title', 'Push failed: remote rejected: protected branch')
+    await expect(page.getByRole('button', { name: 'retry push' })).toBeVisible({
+      timeout: 12_000,
+    })
+    await expect(page.getByTitle('View unified release trace')).toBeVisible({ timeout: 12_000 })
+    await expect(page.getByLabel(/push: running\./i)).toHaveCount(0, { timeout: 12_000 })
     await expect.poll(() => new URL(page.url()).pathname).toBe(stablePath)
   })
 })
