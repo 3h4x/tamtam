@@ -5,7 +5,7 @@ import type { BrowserContext, Route } from '@playwright/test'
 // showPromptChip / promptIsAlert). The chip is a recurring-cost signal: a fat
 // prompt prefix is billed on every cache-read. Thresholds are WARN >= 20 KB
 // (status-warning tone) and ALERT >= 50 KB (status-error tone); below 20 KB no
-// chip renders. None of these branches had coverage before this spec.
+// chip renders.
 
 const PROJECT = 'run-prompt-bloat-chip'
 

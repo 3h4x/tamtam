@@ -2,8 +2,8 @@ import { test, expect } from '@playwright/test'
 import type { BrowserContext, Route } from '@playwright/test'
 
 // Exercises the per-run "Continue" button gating + click flow in
-// components/ProjectRunsTab.tsx (continueTargetFor / continueRun), which had
-// no e2e coverage. Continue is offered only on a done/aborted run|agent row
+// components/ProjectRunsTab.tsx (continueTargetFor / continueRun). Continue is
+// offered only on a done/aborted run|agent row
 // that still has a resumable session, finished within CONTINUE_MAX_AGE_MS
 // (30 min), AND either exited non-zero OR the local-LLM outcome classifier
 // flagged it needs_continue / asked_question. Clicking POSTs to

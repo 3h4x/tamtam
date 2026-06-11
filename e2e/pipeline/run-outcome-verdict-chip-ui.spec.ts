@@ -1,8 +1,7 @@
 import { test, expect } from '@playwright/test'
 import type { BrowserContext, Route } from '@playwright/test'
 
-// Exercises two RunRow context_meta-driven chips that previously had zero e2e
-// coverage (components/project-runs/RunRow.tsx):
+// Exercises two RunRow context_meta-driven chips (components/project-runs/RunRow.tsx):
 //
 //  1. gemmaVerdictBadge — the local-LLM outcome classification chip. It only
 //     renders on completed run/agent rows. The three verdicts map to:
