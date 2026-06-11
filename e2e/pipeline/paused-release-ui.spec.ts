@@ -100,6 +100,12 @@ async function stubCommonRoutes(
   await page.route(`**/api/agents?project=${PROJECT}`, (route: Route) =>
     route.fulfill({ json: { agents: [] } }),
   );
+  await page.route('**/api/skills', (route: Route) =>
+    route.fulfill({ json: { skills: [] } }),
+  );
+  await page.route('**/api/projects/personas', (route: Route) =>
+    route.fulfill({ json: { personas: [] } }),
+  );
   await page.route(`**/api/projects/by-project/${PROJECT}/branch`, (route: Route) =>
     route.fulfill({
       json: { branch: 'master', defaultBranch: 'master', commitsAhead: null },
@@ -348,6 +354,36 @@ test('docs Release button disables in place when jobs_paused flips on while the 
   await expect(releaseBtn).toHaveAttribute('title', /jobs are paused globally/i);
   await expect(page.getByRole('switch', { name: /jobs paused/i })).toBeChecked();
   await expect(page.getByText('Project lifecycle docs fixture.')).toBeVisible();
+  await expect(page).toHaveURL(stableUrl);
+});
+
+test('terminal Release button disables in place when jobs_paused flips on while the page stays open', async ({
+  page,
+}) => {
+  let jobsPaused = false;
+
+  await stubCommonRoutes(page);
+  await page.route('**/api/settings', (route: Route) =>
+    route.fulfill({
+      json: {
+        settings: { jobs_paused: jobsPaused ? 'true' : 'false' },
+        github_owner: '',
+      },
+    }),
+  );
+
+  await page.goto(`/project/${PROJECT}/terminal`);
+
+  const releaseBtn = releaseButton(page);
+  const stableUrl = page.url();
+  await expect(releaseBtn).toBeVisible({ timeout: 8_000 });
+  await expect(releaseBtn).toBeEnabled();
+
+  jobsPaused = true;
+
+  await expect(releaseBtn).toBeDisabled({ timeout: 12_000 });
+  await expect(releaseBtn).toHaveAttribute('title', /jobs are paused globally/i);
+  await expect(page.getByRole('switch', { name: /jobs paused/i })).toBeChecked();
   await expect(page).toHaveURL(stableUrl);
 });
 
