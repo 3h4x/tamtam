@@ -1,19 +1,6 @@
 // The agent catalog — a single source of truth for every built-in agent
-// definition TamTam ships with.
-//
-// Before this file, agents lived in three places with three shapes:
-//
-//   - `lib/agents/system/index.ts` exposed `SYSTEM_AGENTS`, a registry of
-//     auto-seeded internal-handler agents (e.g. `documentation-reindex-vectors`).
-//   - `lib/agents/recommended-agents.ts` exposed `RECOMMENDED_AGENTS`, a
-//     static template list rendered as "Suggested Templates" tiles.
-//   - File-based `.tamtam/agents/*.md` were the third source, scanned at
-//     request time and project-scoped by location.
-//
-// The split made "where do I add a new agent?" confusing and made it hard
-// to express agents that share traits across categories (e.g. an internal
-// agent that's not auto-seeded). This file unifies the built-in surface
-// into one shape with explicit axes:
+// definition TamTam ships with. One shape describes the whole built-in
+// surface via explicit axes:
 //
 //   - `dispatch: 'internal' | 'cli'` — how the agent runs.
 //   - `autoSeed: boolean` — whether the seeder materializes the entry into
@@ -21,9 +8,9 @@
 //   - `tier?` — optional UI prioritization for the suggested-templates
 //     panel.
 //
-// The legacy `SYSTEM_AGENTS` and `RECOMMENDED_AGENTS` exports are now thin
-// adapters that derive from the catalog so existing call sites keep
-// working unchanged.
+// `SYSTEM_AGENTS` (lib/agents/system) and `RECOMMENDED_AGENTS`
+// (lib/agents/recommended-agents) are thin adapters that derive from this
+// catalog, so those call sites stay in sync automatically.
 
 import { ISSUE_CRUNCHER_SKILL_ID } from '@/lib/agents/skill-ids';
 import { DOCUMENTATION_REINDEX_VECTORS_AGENT_NAME } from '@/lib/agents/system/constants';
