@@ -457,14 +457,18 @@ export function WorkflowRunsPage() {
           />
           {filtered.length === 0 ? (
             <WorkflowRunsEmptyState
-              title={data.runs.length === 0 ? 'No workflow runs yet' : 'No runs match current filters'}
+              title={
+                data.runs.length === 0 && !hasActiveFilters
+                  ? 'No workflow runs yet'
+                  : 'No runs match current filters'
+              }
               description={
-                data.runs.length === 0
+                data.runs.length === 0 && !hasActiveFilters
                   ? 'Runs appear here after a workflow starts from a release, scheduler, or another background trigger.'
                   : 'Adjust the name or status filter to bring workflow activity back into view.'
               }
               meta={
-                data.runs.length === 0
+                data.runs.length === 0 && !hasActiveFilters
                   ? 'refreshes every 5s'
                   : `status=${statusFilter} · query=${nameFilter.trim() || '—'}`
               }

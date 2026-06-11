@@ -117,4 +117,53 @@ test.describe('Workflow-runs filter lifecycle transitions', () => {
     await expect(page.getByText('No runs match current filters')).toHaveCount(0);
     await expect(page.getByText('1 recent · refresh every 5s')).toBeVisible();
   });
+
+  test('active running filter clears cleanly when the backend drops the run from the recent window', async ({
+    page,
+  }) => {
+    let includeRun = true;
+
+    await stubWorkflowRunsShell(page, () => 'running');
+    await page.route(
+      (url) => url.pathname === '/api/workflow-runs' && url.searchParams.get('limit') === '100',
+      (route: Route) =>
+        route.fulfill({
+          json: {
+            runs: includeRun ? [workflowRun('running')] : [],
+            meta: {
+              workflowEnabled: true,
+              releaseWorkflow: true,
+              releaseWorkflowDrive: true,
+              mode: 'drive',
+            },
+          },
+        }),
+    );
+
+    await page.goto('/workflow-runs');
+
+    const activePanel = page.getByLabel('Active workflow runs');
+    await expect(activePanel).toBeVisible({ timeout: 8_000 });
+    await expect(activePanel.getByLabel('status running')).toBeVisible();
+
+    const runningFilter = page.getByRole('button', { name: /^running 1$/i });
+    await expect(runningFilter).toBeVisible({ timeout: 8_000 });
+    await runningFilter.click();
+    await expect(runningFilter).toHaveAttribute('aria-pressed', 'true');
+
+    const stableUrl = page.url();
+    includeRun = false;
+
+    await expect(activePanel).toHaveCount(0, { timeout: 12_000 });
+    await expect(page.getByRole('button', { name: /^running 0$/i })).toBeVisible({
+      timeout: 12_000,
+    });
+    await expect(page.getByText('1 running')).toHaveCount(0, { timeout: 12_000 });
+    await expect(page.getByRole('row').filter({ hasText: PROJECT })).toHaveCount(0);
+    await expect(page.getByText('No runs match current filters')).toBeVisible({
+      timeout: 12_000,
+    });
+    await expect(page.getByText('status=running · query=—')).toBeVisible();
+    await expect(page).toHaveURL(stableUrl);
+  });
 });
