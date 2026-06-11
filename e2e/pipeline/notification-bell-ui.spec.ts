@@ -225,6 +225,83 @@ test.describe('NotificationBell', () => {
   });
 
   // -------------------------------------------------------------------------
+  // Sky-view collapse: two running jobs for the SAME project collapse into a
+  // single entry, and the highest-priority kind wins the badge. Exercises the
+  // runningByProject + kindPriority merge in the poll callback — previously
+  // only single-running-job scenarios were covered.
+  // -------------------------------------------------------------------------
+  test('collapses two running jobs for one project into a single highest-priority entry', async ({
+    page,
+  }) => {
+    await stubShellRoutes(page);
+    await page.route('**/api/jobs/notifications', (route: Route) =>
+      route.fulfill({
+        json: {
+          count: 0,
+          jobs: [],
+          runningCount: 2,
+          runningJobs: [
+            // Lower priority (commit:60) arrives first...
+            makeNotifJob({ id: 'r-commit', project: 'collapse-project', kind: 'commit', status: 'running', exit_code: null, finished_at: null }),
+            // ...higher priority (review:75) must win the collapsed badge.
+            makeNotifJob({ id: 'r-review', project: 'collapse-project', kind: 'review', status: 'running', exit_code: null, finished_at: null }),
+          ],
+        },
+      }),
+    );
+
+    await page.goto('/workflow-runs');
+
+    // Title reflects the COLLAPSED count — two same-project jobs become one entry.
+    const bellBtn = page.getByTitle('1 running');
+    await expect(bellBtn).toBeVisible({ timeout: 8_000 });
+    await bellBtn.click();
+
+    // Collapsed to ONE project entry despite two running jobs.
+    await expect(page.getByText(/running.*1 project/i)).toBeVisible({ timeout: 5_000 });
+    const dropdown = page.locator('div.absolute.right-0.top-full');
+    await expect(dropdown.getByText('collapse-project')).toHaveCount(1);
+    // Highest-priority kind (review) wins the badge; the commit job is hidden.
+    await expect(dropdown.getByText('review', { exact: true })).toBeVisible();
+    await expect(dropdown.getByText('commit', { exact: true })).toHaveCount(0);
+  });
+
+  // -------------------------------------------------------------------------
+  // Two running jobs in DISTINCT projects render as two independent entries
+  // under a "Running · 2 projects" header — concurrent-job independence.
+  // -------------------------------------------------------------------------
+  test('shows two distinct projects as independent running entries', async ({ page }) => {
+    await stubShellRoutes(page);
+    await page.route('**/api/jobs/notifications', (route: Route) =>
+      route.fulfill({
+        json: {
+          count: 0,
+          jobs: [],
+          runningCount: 2,
+          runningJobs: [
+            makeNotifJob({ id: 'r-a', project: 'project-aaa', kind: 'review', status: 'running', exit_code: null, finished_at: null }),
+            makeNotifJob({ id: 'r-b', project: 'project-bbb', kind: 'test', status: 'running', exit_code: null, finished_at: null }),
+          ],
+        },
+      }),
+    );
+
+    await page.goto('/workflow-runs');
+
+    const bellBtn = page.getByTitle('2 running');
+    await expect(bellBtn).toBeVisible({ timeout: 8_000 });
+    await bellBtn.click();
+
+    // Plural header and both projects independently visible.
+    await expect(page.getByText(/running.*2 projects/i)).toBeVisible({ timeout: 5_000 });
+    const dropdown = page.locator('div.absolute.right-0.top-full');
+    await expect(dropdown.getByText('project-aaa')).toBeVisible();
+    await expect(dropdown.getByText('project-bbb')).toBeVisible();
+    await expect(dropdown.getByText('review', { exact: true })).toBeVisible();
+    await expect(dropdown.getByText('test', { exact: true })).toBeVisible();
+  });
+
+  // -------------------------------------------------------------------------
   // Dropdown — success icon for a passing push job
   // -------------------------------------------------------------------------
   test('dropdown shows success icon for a finished push job with exit_code=0', async ({ page }) => {
