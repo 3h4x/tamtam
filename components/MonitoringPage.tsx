@@ -83,6 +83,7 @@ function ReadinessPanel({ readiness }: { readiness: ReadinessData | null }) {
 export function MonitoringPage() {
   const [data, setData] = useState<MonitoringData | null>(null)
   const [pm2Logs, setPm2Logs] = useState<Pm2LogData | null>(null)
+  const [pm2Error, setPm2Error] = useState<string | null>(null)
   const [readiness, setReadiness] = useState<ReadinessData | null>(null)
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
@@ -92,8 +93,12 @@ export function MonitoringPage() {
   const fetchPm2Logs = useCallback(async () => {
     try {
       const res = await fetch('/api/monitoring/pm2-logs?limit=200')
-      if (res.ok) setPm2Logs(await res.json())
-    } catch { /* non-fatal */ }
+      if (!res.ok) throw new Error(`PM2 logs fetch failed (${res.status})`)
+      setPm2Logs(await res.json())
+      setPm2Error(null)
+    } catch (e) {
+      setPm2Error(e instanceof Error ? e.message : 'PM2 logs fetch failed')
+    }
   }, [])
 
   const fetch_ = useCallback(async (w: TimeWindow) => {
@@ -104,7 +109,12 @@ export function MonitoringPage() {
       ])
       if (!monRes.ok) throw new Error('fetch failed')
       setData(await monRes.json())
-      if (pm2Res.ok) setPm2Logs(await pm2Res.json())
+      if (pm2Res.ok) {
+        setPm2Logs(await pm2Res.json())
+        setPm2Error(null)
+      } else {
+        setPm2Error(`PM2 logs fetch failed (${pm2Res.status})`)
+      }
       setError(null)
     } catch {
       setError('Failed to fetch monitoring data')
@@ -259,7 +269,7 @@ export function MonitoringPage() {
           <SchedulerHealthPanel />
         )}
         {activeTab === 'logs' && (
-          <Pm2LogPanel pm2Logs={pm2Logs} onRefresh={fetchPm2Logs} />
+          <Pm2LogPanel pm2Logs={pm2Logs} pm2Error={pm2Error} onRefresh={fetchPm2Logs} />
         )}
         {activeTab === 'infra' && (
           <InfraTab data={data} window_={window_} />

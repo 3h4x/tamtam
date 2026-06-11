@@ -4,6 +4,7 @@ import { useState, useMemo } from 'react'
 import { SectionHeader } from './shared'
 import { Button } from '@/components/ui/Button'
 import { EmptyState } from '@/components/ui/EmptyState'
+import { ErrorCallout } from '@/components/ui/ErrorCallout'
 import { SegmentedControl } from '@/components/ui/SegmentedControl'
 
 export interface Pm2LogEntry {
@@ -102,7 +103,15 @@ function Pm2LogRow({ entry }: { entry: Pm2LogEntry }) {
   )
 }
 
-export function Pm2LogPanel({ pm2Logs, onRefresh }: { pm2Logs: Pm2LogData | null; onRefresh: () => void }) {
+export function Pm2LogPanel({
+  pm2Logs,
+  pm2Error,
+  onRefresh,
+}: {
+  pm2Logs: Pm2LogData | null
+  pm2Error: string | null
+  onRefresh: () => void
+}) {
   const [levelFilter, setLevelFilter] = useState<LogLevelFilter>('warn+')
   const [hideStdout, setHideStdout] = useState(false)
 
@@ -204,6 +213,13 @@ export function Pm2LogPanel({ pm2Logs, onRefresh }: { pm2Logs: Pm2LogData | null
           )}
         </div>
       </div>
+
+      {pm2Error && (
+        <ErrorCallout tone="warning" className="text-sm">
+          PM2 log refresh failed. Showing last successful results.
+          <span className="block text-xs text-text-tertiary">{pm2Error}</span>
+        </ErrorCallout>
+      )}
 
       {!pm2Logs ? (
         <EmptyState

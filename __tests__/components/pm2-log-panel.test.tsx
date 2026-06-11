@@ -29,7 +29,7 @@ function renderPanel(pm2Logs: Pm2LogData | null = buildPm2Logs()) {
   const root = createRoot(container)
 
   flushSync(() => {
-    root.render(<Pm2LogPanel pm2Logs={pm2Logs} onRefresh={vi.fn()} />)
+    root.render(<Pm2LogPanel pm2Logs={pm2Logs} pm2Error={null} onRefresh={vi.fn()} />)
   })
 
   return {
