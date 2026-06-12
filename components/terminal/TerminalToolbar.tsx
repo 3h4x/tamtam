@@ -5,6 +5,7 @@ import Link from 'next/link'
 import type { SkillItem, DocItem } from '@/lib/terminal/terminal-session-store'
 import { MODEL_TIERS, MODEL_LABELS, MODEL_DESCRIPTIONS, type ModelTier } from '@/lib/agents/model-aliases'
 import { dispatchSettingsChanged } from '@/lib/shared/settings-events'
+import type { PermissionMode } from '@/lib/shared/permission-modes'
 import { CLI_PROVIDERS, type CliProvider } from '@/lib/usage/cli-providers'
 import { SearchField } from '@/components/ui/SearchField'
 import { ToolbarDropdown, type ToolbarDropdownOption } from './ToolbarDropdown'
@@ -24,6 +25,15 @@ const PROVIDER_DESCRIPTIONS: Record<CliProvider, string> = {
   lmstudio: 'Local LM Studio',
   deepagents: 'Deep Agents local loop',
 }
+
+const PERMISSION_MODE_OPTIONS: ToolbarDropdownOption<PermissionMode>[] = [
+  { value: 'auto', label: 'Auto', description: 'Auto-approve everything non-interactively (headless default)' },
+  { value: 'acceptEdits', label: 'Accept edits', description: 'Auto-approve file edits; risky shell commands still gated' },
+  { value: 'dontAsk', label: "Don't ask", description: 'Skip prompts; deny anything that would need to ask' },
+  { value: 'bypassPermissions', label: 'Bypass', description: 'No permission checks at all — full trust' },
+  { value: 'plan', label: 'Plan', description: 'Read-only planning mode; no writes or commands' },
+  { value: 'default', label: 'Default', description: 'Provider-default interactive prompting behavior' },
+]
 
 function CountBadge({ count }: { count: number }) {
   return (
@@ -52,6 +62,7 @@ interface TerminalToolbarProps {
   model: ModelTier
   provider: CliProvider | null
   providerLocked: boolean
+  permissionMode: PermissionMode
   filteredItems: SkillItem[]
   filteredDocs: DocItem[]
   onNewSession: () => void
@@ -65,6 +76,7 @@ interface TerminalToolbarProps {
   onToggleDocsPicker: () => void
   onModelChange: (m: ModelTier) => void
   onProviderChange: (provider: CliProvider | null) => void
+  onPermissionModeChange: (mode: PermissionMode) => void
 }
 
 export function TerminalToolbar({
@@ -86,6 +98,7 @@ export function TerminalToolbar({
   model,
   provider,
   providerLocked,
+  permissionMode,
   filteredItems,
   filteredDocs,
   onNewSession,
@@ -99,6 +112,7 @@ export function TerminalToolbar({
   onToggleDocsPicker,
   onModelChange,
   onProviderChange,
+  onPermissionModeChange,
 }: TerminalToolbarProps) {
   const skillSearchRef = useRef<HTMLInputElement>(null)
   const docsSearchRef = useRef<HTMLInputElement>(null)
@@ -333,6 +347,14 @@ export function TerminalToolbar({
                 })),
               ]}
               onChange={(v) => onProviderChange(v === 'any' ? null : v)}
+            />
+
+            {/* PERMS dropdown — per-session permission mode for new runs */}
+            <ToolbarDropdown<PermissionMode>
+              label="perms"
+              value={permissionMode}
+              options={PERMISSION_MODE_OPTIONS}
+              onChange={onPermissionModeChange}
             />
           </div>
 

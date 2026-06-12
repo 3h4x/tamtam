@@ -45,6 +45,15 @@ async function runProjectRecoveryWork(
     console.log(`${logPrefix} release still pending for ${project}; leaving queued agents deferred`);
     return;
   }
+  // Queued terminal runs (user input) replay before agents. Self-guards: it
+  // no-ops if a blocking job (e.g. a release that just reacquired its lock) is
+  // running, and re-fires from the finish-seam once that clears.
+  try {
+    const { drainNextTerminalRun } = await import('@/lib/terminal/pending-terminal-run');
+    await drainNextTerminalRun(project);
+  } catch (err) {
+    console.error(`${logPrefix} terminal-run drain failed for ${project}:`, err);
+  }
   await drainQueuedAgentsForProjectIfClear(project, logPrefix);
 }
 
@@ -72,12 +81,14 @@ export async function drainProjectRecoveryWork(
 export async function drainAllRecoveryWork(logPrefix = '[recovery]'): Promise<void> {
   const { listPendingReleaseProjects } = await import('./pending-release');
   const { listQueuedAgentRunProjects } = await import('@/lib/agents/queued-agent-runs');
-  // Two independent DB list queries — read them in parallel.
-  const [pending, queued] = await Promise.all([
+  const { listQueuedTerminalRunProjects } = await import('@/lib/terminal/pending-terminal-run');
+  // Independent DB list queries — read them in parallel.
+  const [pending, queued, queuedTerminal] = await Promise.all([
     listPendingReleaseProjects(),
     listQueuedAgentRunProjects(),
+    listQueuedTerminalRunProjects(),
   ]);
-  const projects = uniqueProjects([...pending, ...queued]);
+  const projects = uniqueProjects([...pending, ...queued, ...queuedTerminal]);
   // Tests assert strict per-project call ordering on the mocked drain
   // helpers, so iterate sequentially. Resume-edge latency is small enough
   // (N projects × short awaits) that parallelism isn't a worthwhile change

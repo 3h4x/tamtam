@@ -337,6 +337,23 @@ export const ollamaUsage = pgTable('ollama_usage', {
   tsIdx: index('ollama_usage_ts').on(t.ts),
 }));
 
+// Queue of terminal `run` requests that arrived while a blocking job was
+// running for the project. Instead of rejecting the user's typed prompt with
+// a 409, the run route persists it here and drains it FIFO when the blocker
+// clears — ahead of any queued agent (user input has priority). DB-backed so a
+// queued run survives a TamTam restart. `payload` holds the raw run inputs
+// (JSON) captured before prompt composition so a replay recomposes identically.
+export const queuedTerminalRuns = pgTable('queued_terminal_runs', {
+  id: text('id').primaryKey(),
+  project: text('project').notNull(),
+  enqueuedAt: doublePrecision('enqueued_at').notNull(),
+  payload: text('payload').notNull(),
+  status: text('status').notNull().default('pending'),
+  startedJobId: text('started_job_id'),
+}, (t) => ({
+  projectEnqueuedIdx: index('queued_terminal_runs_project_enqueued').on(t.project, t.enqueuedAt),
+}));
+
 // Hourly snapshot of per-provider pace metrics so /stats can render an
 // hour-by-hour utilization chart and the orchestrator can boost based on
 // trend (not just the current point-in-time snapshot). The cron task writes

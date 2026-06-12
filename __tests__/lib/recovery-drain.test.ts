@@ -1,5 +1,13 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
+// Recovery now also sweeps queued terminal runs (user input). Default to a
+// no-op queue so the existing release/agent ordering assertions are unaffected;
+// the terminal-run drain has its own dedicated coverage.
+vi.mock('@/lib/terminal/pending-terminal-run', () => ({
+  drainNextTerminalRun: vi.fn().mockResolvedValue(undefined),
+  listQueuedTerminalRunProjects: vi.fn().mockResolvedValue([]),
+}));
+
 describe('recovery-drain', () => {
   beforeEach(() => {
     vi.resetModules();

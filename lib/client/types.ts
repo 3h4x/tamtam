@@ -93,6 +93,7 @@ export interface RunProjectOptions {
   ghIssueRepo?: string
   ghIssueTitle?: string
   provider?: string
+  permissionMode?: string
 }
 
 export interface LogEntry {

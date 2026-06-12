@@ -245,8 +245,16 @@ export async function fetchPersonas(): Promise<{ personas: Persona[] }> {
   return response.json()
 }
 
-export async function runProject(projectName: string, prompt: string, opts: RunProjectOptions = {}): Promise<{ status: string; job_id: string; pid: number }> {
-  const { files, persona, personas, model, resumeSessionId, contextMeta, userPrompt, ghIssueNumber, ghIssueRepo, ghIssueTitle, provider } = opts
+export interface RunStartedResult { status: string; job_id: string; pid: number }
+export interface RunQueuedResult { status: 'queued'; queueId: string; position: number; blockingKind: string }
+export type RunProjectResult = RunStartedResult | RunQueuedResult
+
+export function isQueuedRunResult(r: RunProjectResult): r is RunQueuedResult {
+  return r.status === 'queued'
+}
+
+export async function runProject(projectName: string, prompt: string, opts: RunProjectOptions = {}): Promise<RunProjectResult> {
+  const { files, persona, personas, model, resumeSessionId, contextMeta, userPrompt, ghIssueNumber, ghIssueRepo, ghIssueTitle, provider, permissionMode } = opts
   let response: Response
   if ((files && files.length > 0) || persona) {
     const formData = new FormData()
@@ -261,6 +269,7 @@ export async function runProject(projectName: string, prompt: string, opts: RunP
     if (ghIssueRepo) formData.append('ghIssueRepo', ghIssueRepo)
     if (ghIssueTitle) formData.append('ghIssueTitle', ghIssueTitle)
     if (provider) formData.append('provider', provider)
+    if (permissionMode) formData.append('permissionMode', permissionMode)
     if (files) {
       for (const file of files) {
         formData.append('files', file, file.name)
@@ -281,6 +290,7 @@ export async function runProject(projectName: string, prompt: string, opts: RunP
     if (ghIssueRepo) body.ghIssueRepo = ghIssueRepo
     if (ghIssueTitle) body.ghIssueTitle = ghIssueTitle
     if (provider) body.provider = provider
+    if (permissionMode) body.permissionMode = permissionMode
     response = await fetch(`${API_BASE}/by-project/${encodeURIComponent(projectName)}/run`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },

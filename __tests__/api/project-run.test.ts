@@ -39,6 +39,8 @@ const state = vi.hoisted(() => {
     getImproveConfig: vi.fn(),
     getQuotaSnapshots: vi.fn().mockResolvedValue(new Map()),
     prepareBrokerRun: vi.fn(),
+    enqueueTerminalRun: vi.fn().mockResolvedValue({ queueId: 'q-1', position: 1 }),
+    drainNextTerminalRun: vi.fn().mockResolvedValue(undefined),
     projectRows: [] as Array<Record<string, unknown>>,
   };
   return {
@@ -65,6 +67,11 @@ vi.mock('@/lib/jobs/job-storage', () => ({
 vi.mock('@/lib/jobs/project-active-job', () => ({
   findBlockingRunningJob: (...args: unknown[]) => state.fns.findBlockingRunningJob(...args),
 }));
+vi.mock('@/lib/terminal/pending-terminal-run', () => ({
+  TERMINAL_DRAIN_HEADER: 'x-tamtam-terminal-drain',
+  enqueueTerminalRun: (...args: unknown[]) => state.fns.enqueueTerminalRun(...args),
+  drainNextTerminalRun: (...args: unknown[]) => state.fns.drainNextTerminalRun(...args),
+}));
 vi.mock('@/lib/browser-broker/prepare-run', () => ({
   prepareBrokerRun: (...args: unknown[]) => state.fns.prepareBrokerRun(...args),
 }));
@@ -89,8 +96,9 @@ vi.mock('@/lib/skills/skills', () => ({
 }));
 vi.mock('@/lib/shared/config', () => ({
   withBasePrompt: (p: string, ...rest: unknown[]) => state.withBasePrompt(p, ...(rest as [])),
-  getPermissionModeFlag: () => '--permission-mode bypassPermissions',
+  getPermissionModeFlag: (override?: string | null) => `--permission-mode ${override || 'bypassPermissions'}`,
   getSettings: (...args: unknown[]) => state.fns.getSettings(...args),
+  VALID_PERMISSION_MODES: ['acceptEdits', 'auto', 'bypassPermissions', 'default', 'dontAsk', 'plan'],
 }));
 vi.mock('@/lib/shared/job-control', () => ({
   runGates: () => null,
@@ -153,6 +161,8 @@ describe('POST /api/projects/by-project/{projectName}/run', () => {
       logDir: join(tempDir, 'logs'),
     });
     state.fns.prepareBrokerRun.mockReset().mockResolvedValue(null);
+    state.fns.enqueueTerminalRun.mockReset().mockResolvedValue({ queueId: 'q-1', position: 1 });
+    state.fns.drainNextTerminalRun.mockReset().mockResolvedValue(undefined);
     state.fns.projectRows = [];
 
     POST = (await routeModulePromise).POST;
@@ -259,7 +269,7 @@ describe('POST /api/projects/by-project/{projectName}/run', () => {
     expect(state.fns.startJob).not.toHaveBeenCalled();
   });
 
-  it('returns 409 with blocking_job_id when another project job is already running', async () => {
+  it('queues the run (202) instead of rejecting when another project job is already running', async () => {
     state.fns.findBlockingRunningJob.mockResolvedValue(makeJob({ id: 'run-123', kind: 'review' }));
     const req = new NextRequest('http://localhost/api/projects/by-project/proj1/run', {
       method: 'POST',
@@ -269,10 +279,67 @@ describe('POST /api/projects/by-project/{projectName}/run', () => {
     const res = await POST(req, { params: Promise.resolve({ projectName: 'proj1' }) });
     const data = await res.json();
 
-    expect(res.status).toBe(409);
-    expect(data.detail).toContain("Job 'review' is already running");
+    expect(res.status).toBe(202);
+    expect(data.status).toBe('queued');
+    expect(data.queueId).toBe('q-1');
+    expect(data.position).toBe(1);
+    expect(data.blockingKind).toBe('review');
     expect(data.blocking_job_id).toBe('run-123');
+    expect(state.fns.enqueueTerminalRun).toHaveBeenCalledOnce();
+    const [enqProject, payload] = state.fns.enqueueTerminalRun.mock.calls[0];
+    expect(enqProject).toBe('proj1');
+    expect((payload as { prompt: string }).prompt).toBe('run my agent');
     expect(state.fns.checkCliStartGate).not.toHaveBeenCalled();
+    expect(state.fns.startJob).not.toHaveBeenCalled();
+  });
+
+  it('kicks the terminal-run drain when the blocker clears between the check and the enqueue', async () => {
+    // First call (the gate) sees the blocker; the post-enqueue re-check sees it
+    // cleared, so the route must fire drainNextTerminalRun to avoid stranding
+    // the just-queued row until the next finish-seam.
+    state.fns.findBlockingRunningJob
+      .mockResolvedValueOnce(makeJob({ id: 'run-789', kind: 'review' }))
+      .mockResolvedValueOnce(null);
+    const req = new NextRequest('http://localhost/api/projects/by-project/proj1/run', {
+      method: 'POST',
+      body: JSON.stringify({ prompt: 'run my agent' }),
+    });
+
+    const res = await POST(req, { params: Promise.resolve({ projectName: 'proj1' }) });
+    expect(res.status).toBe(202);
+    // The drain kick is fire-and-forget; flush microtasks before asserting.
+    for (let i = 0; i < 10; i++) await Promise.resolve();
+    expect(state.fns.drainNextTerminalRun).toHaveBeenCalledWith('proj1');
+  });
+
+  it('does NOT kick the drain when the project is still blocked after enqueue', async () => {
+    // Both the gate and the re-check see the blocker — nothing to drain yet.
+    state.fns.findBlockingRunningJob.mockResolvedValue(makeJob({ id: 'run-790', kind: 'release' }));
+    const req = new NextRequest('http://localhost/api/projects/by-project/proj1/run', {
+      method: 'POST',
+      body: JSON.stringify({ prompt: 'run my agent' }),
+    });
+
+    const res = await POST(req, { params: Promise.resolve({ projectName: 'proj1' }) });
+    expect(res.status).toBe(202);
+    for (let i = 0; i < 10; i++) await Promise.resolve();
+    expect(state.fns.drainNextTerminalRun).not.toHaveBeenCalled();
+  });
+
+  it('does NOT re-enqueue on a drain replay (header set) — returns 409 so the queue row stays', async () => {
+    state.fns.findBlockingRunningJob.mockResolvedValue(makeJob({ id: 'run-456', kind: 'release' }));
+    const req = new NextRequest('http://localhost/api/projects/by-project/proj1/run', {
+      method: 'POST',
+      headers: { 'content-type': 'application/json', 'x-tamtam-terminal-drain': 'q-1' },
+      body: JSON.stringify({ prompt: 'run my agent' }),
+    });
+
+    const res = await POST(req, { params: Promise.resolve({ projectName: 'proj1' }) });
+    const data = await res.json();
+
+    expect(res.status).toBe(409);
+    expect(data.blocking_job_id).toBe('run-456');
+    expect(state.fns.enqueueTerminalRun).not.toHaveBeenCalled();
     expect(state.fns.startJob).not.toHaveBeenCalled();
   });
 
@@ -330,6 +397,39 @@ describe('POST /api/projects/by-project/{projectName}/run', () => {
     const [, cmd] = state.fns.startJob.mock.calls[0];
     expect(cmd).toContain('--model normal');
     expect(cmd).not.toContain('--model sonnet');
+  });
+
+  it('forwards a valid permissionMode override into the CLI command', async () => {
+    const req = new NextRequest('http://localhost/api/projects/by-project/proj1/run', {
+      method: 'POST',
+      body: JSON.stringify({ prompt: 'test prompt', permissionMode: 'plan' }),
+    });
+    await POST(req, { params: Promise.resolve({ projectName: 'proj1' }) });
+
+    const [, cmd] = state.fns.startJob.mock.calls[0];
+    expect(cmd).toContain('--permission-mode plan');
+  });
+
+  it('falls back to the settings permission mode when no override is sent', async () => {
+    const req = new NextRequest('http://localhost/api/projects/by-project/proj1/run', {
+      method: 'POST',
+      body: JSON.stringify({ prompt: 'test prompt' }),
+    });
+    await POST(req, { params: Promise.resolve({ projectName: 'proj1' }) });
+
+    const [, cmd] = state.fns.startJob.mock.calls[0];
+    expect(cmd).toContain('--permission-mode bypassPermissions');
+  });
+
+  it('rejects an unknown permissionMode with 400 and does not start a job', async () => {
+    const req = new NextRequest('http://localhost/api/projects/by-project/proj1/run', {
+      method: 'POST',
+      body: JSON.stringify({ prompt: 'test prompt', permissionMode: 'yolo' }),
+    });
+    const res = await POST(req, { params: Promise.resolve({ projectName: 'proj1' }) });
+
+    expect(res.status).toBe(400);
+    expect(state.fns.startJob).not.toHaveBeenCalled();
   });
 
   it('rejects invalid JSON models and does not start a job', async () => {

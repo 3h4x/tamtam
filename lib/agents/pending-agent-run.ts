@@ -10,6 +10,7 @@
 // tick, and manually-queued runs are a transient signal anyway.
 
 import type { JobData } from '@/lib/jobs/types';
+import { hasPendingTerminalRun, drainNextTerminalRun } from '@/lib/terminal/pending-terminal-run';
 
 export type QueueEntry = {
   agentId: string;
@@ -256,6 +257,21 @@ export async function drainNextAgentRun(project: string): Promise<void> {
   };
   inFlight.add(project);
   try {
+    // User input outranks queued agents. If a terminal run is queued for this
+    // project, drain that first and yield — starting an agent now would take
+    // the worktree ahead of the user's prompt. The terminal run, once started,
+    // is a blocking job, so this agent drain re-fires (and proceeds, since the
+    // queue head is untouched) when it finishes. The `inFlight` claim above
+    // guards re-entrance; `finally` releases it on this early return.
+    try {
+      if (await hasPendingTerminalRun(project)) {
+        await drainNextTerminalRun(project);
+        return;
+      }
+    } catch (e) {
+      console.error(`[pending-agent-run] terminal-run priority check failed for ${project}:`, e);
+    }
+
     const body: { prompt: string; model?: 'fast' | 'normal' | 'smart' } = { prompt: next.prompt };
     if (next.modelOverride) body.model = next.modelOverride;
     const r = await fetch(url, {

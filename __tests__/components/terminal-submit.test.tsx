@@ -15,6 +15,7 @@ const startStreamMock = vi.spyOn(terminalStore, 'startStream').mockImplementatio
 
 vi.mock('@/lib/client-api', () => ({
   runProject: runProjectMock,
+  isQueuedRunResult: (r: { status?: string }) => r?.status === 'queued',
 }))
 
 type SetInput = (v: string) => void
@@ -52,6 +53,7 @@ function SubmitHarnessInner({
   setPromptHistory = vi.fn<SetPromptHistory>(),
   setHistoryIdx = vi.fn<SetHistoryIdx>(),
   setMessageQueue = vi.fn<SetMessageQueue>(),
+  onQueued = vi.fn<(queueId: string) => void>(),
 }: {
   onReady: (submit: (text?: string) => Promise<void>) => void
   streaming?: boolean
@@ -70,6 +72,7 @@ function SubmitHarnessInner({
   setPromptHistory?: SetPromptHistory
   setHistoryIdx?: SetHistoryIdx
   setMessageQueue?: SetMessageQueue
+  onQueued?: (queueId: string) => void
 }) {
   const { handleSubmit } = useHandleSubmit({
     projectName: 'proj',
@@ -78,6 +81,7 @@ function SubmitHarnessInner({
     pendingImages,
     pendingImageUrls,
     selectedItems,
+    permissionMode: 'auto',
     selectedDocs,
     model,
     selectedProvider,
@@ -89,6 +93,7 @@ function SubmitHarnessInner({
     setPromptHistory,
     setHistoryIdx,
     setMessageQueue,
+    onQueued,
   })
 
   useEffect(() => {
@@ -160,6 +165,38 @@ describe('useHandleSubmit', () => {
     expect(queueUpdater(['first'])).toEqual(['first', 'queued follow-up'])
     expect(setInput).toHaveBeenCalledWith('')
     expect(runProjectMock).not.toHaveBeenCalled()
+
+    unmount()
+  })
+
+  it('shows a queued notice and does not start a stream when the run is queued behind a blocking job', async () => {
+    runProjectMock.mockResolvedValue({ status: 'queued', queueId: 'q-7', position: 2, blockingKind: 'release' })
+    const onQueued = vi.fn<(queueId: string) => void>()
+
+    let submit: ((text?: string) => Promise<void>) | undefined
+    const { unmount } = renderElement(
+      <SubmitHarness
+        onReady={(handler) => { submit = handler }}
+        overrides={{ input: 'increase xp for all actions', onQueued }}
+      />,
+    )
+
+    await vi.waitFor(() => { expect(submit).toBeTypeOf('function') })
+    const submitFn = submit
+    if (typeof submitFn !== 'function') throw new Error('submit handler not ready')
+    await submitFn()
+
+    // Stream is NOT attached (no job started yet); the queueId is handed off
+    // for polling, and a muted status line explains the wait.
+    expect(startStreamMock).not.toHaveBeenCalled()
+    expect(onQueued).toHaveBeenCalledWith('q-7')
+    const state = terminalStore.get('proj')
+    const last = state.history[state.history.length - 1]
+    expect(last.role).toBe('status')
+    expect(last.text).toContain('Queued (#2)')
+    expect(last.text).toContain('release')
+    // The user's typed message is still recorded (not lost).
+    expect(state.history.some((h) => h.role === 'user' && h.text === 'increase xp for all actions')).toBe(true)
 
     unmount()
   })

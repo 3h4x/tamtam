@@ -354,6 +354,21 @@ Per-embedding telemetry for local Ollama `/api/embed` calls. Populated best-effo
 
 Index: `ollama_usage_ts` on `ts` for windowed stats queries.
 
+### `queued_terminal_runs`
+
+Terminal `run` requests that arrived while a blocking job (release/fix/run/agent) was running for the project. Instead of rejecting the user's prompt, the run route persists it here and drains it FIFO when the blocker clears — ahead of queued agents (user input has priority). DB-backed so a queued run survives a restart; boot recovery replays the head. Managed by `lib/terminal/pending-terminal-run.ts`.
+
+| Column | Type | Default | Notes |
+|--------|------|---------|-------|
+| `id` | TEXT | — | PRIMARY KEY; the queueId (uuid) the originating terminal polls |
+| `project` | TEXT | — | NOT NULL |
+| `enqueued_at` | REAL | — | NOT NULL; Unix timestamp (seconds), FIFO order |
+| `payload` | TEXT | — | NOT NULL; JSON of the raw run inputs captured before prompt composition (`prompt`, `userPrompt`, `model`, `provider`, `permissionMode`, `resumeSessionId`, `personas`, `contextMeta`, `ghIssue*`, `attachmentPaths`) so a replay recomposes identically |
+| `status` | TEXT | `pending` | NOT NULL; `pending` or `started` |
+| `started_job_id` | TEXT | — | nullable; the spawned `run` job id, set when drained |
+
+Index: `queued_terminal_runs_project_enqueued` on `(project, enqueued_at)` for per-project FIFO reads.
+
 ---
 
 ## Key Patterns

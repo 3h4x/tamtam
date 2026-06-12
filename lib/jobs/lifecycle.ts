@@ -1158,6 +1158,17 @@ async function runCompletionHooksInner(job: JobData): Promise<void> {
     }
   }
 
+  // Drain any queued terminal run (user input) FIRST, for every job kind —
+  // a release, fix, run, or agent finishing all unblock a waiting user prompt,
+  // which outranks queued agents. drainNextTerminalRun no-ops when the project
+  // is still blocked or nothing is queued.
+  try {
+    const { drainNextTerminalRun } = await import('@/lib/terminal/pending-terminal-run');
+    await drainNextTerminalRun(job.project);
+  } catch (e) {
+    console.error(`[pending-terminal-run] drain hook error for ${job.project}:`, e);
+  }
+
   // Drain the pending-agent-run queue AFTER release-after-run so a release
   // pipeline that's about to be triggered has a chance to acquire the project
   // lock first. Without this ordering the drain fires the next queued agent

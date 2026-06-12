@@ -22,6 +22,7 @@ vi.mock('next/navigation', () => ({
 
 vi.mock('@/lib/client-api', () => ({
   runProject: runProjectMock,
+  isQueuedRunResult: (r: { status?: string }) => r?.status === 'queued',
   fetchSkills: vi.fn().mockResolvedValue({ skills: [] }),
   fetchPersonas: vi.fn().mockResolvedValue({ personas: [] }),
 }))
@@ -122,6 +123,7 @@ function SubmitHarness({ onReady }: { onReady: (submit: (text?: string) => Promi
     selectedDocs: [],
     model: 'fast',
     selectedProvider: 'claude',
+    permissionMode: 'auto',
     issueContextRef: { current: null },
     draftBeforeHistoryRef: { current: '' },
     setInput: vi.fn(),
@@ -130,6 +132,7 @@ function SubmitHarness({ onReady }: { onReady: (submit: (text?: string) => Promi
     setPromptHistory: vi.fn(),
     setHistoryIdx: vi.fn(),
     setMessageQueue: vi.fn(),
+    onQueued: vi.fn(),
   })
 
   useEffect(() => {

@@ -1,4 +1,17 @@
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
+
+// The agent drain yields to queued terminal runs (user input has priority).
+// Default both to "nothing queued" so the existing drain tests exercise the
+// agent path; individual tests override the mocks to assert the yield.
+const terminalQueue = vi.hoisted(() => ({
+  hasPendingTerminalRun: vi.fn().mockResolvedValue(false),
+  drainNextTerminalRun: vi.fn().mockResolvedValue(undefined),
+}));
+vi.mock('@/lib/terminal/pending-terminal-run', () => ({
+  hasPendingTerminalRun: (...args: unknown[]) => terminalQueue.hasPendingTerminalRun(...args),
+  drainNextTerminalRun: (...args: unknown[]) => terminalQueue.drainNextTerminalRun(...args),
+}));
+
 import {
   enqueueAgentRun,
   dequeueNextAgentRun,
@@ -149,6 +162,8 @@ describe('drainNextAgentRun', () => {
     vi.useFakeTimers();
     fetchSpy = vi.fn().mockResolvedValue(textResponse('', 200));
     vi.stubGlobal('fetch', fetchSpy);
+    terminalQueue.hasPendingTerminalRun.mockReset().mockResolvedValue(false);
+    terminalQueue.drainNextTerminalRun.mockReset().mockResolvedValue(undefined);
   });
 
   afterEach(() => {
@@ -176,6 +191,24 @@ describe('drainNextAgentRun', () => {
     expect(fetchSpy).not.toHaveBeenCalled();
     expect(listQueuedAgents('p1').map((e) => e.agentId)).toEqual(['a']);
     releaseAgentStartSlot('p1');
+  });
+
+  it('yields to a queued terminal run (user input has priority) instead of starting an agent', async () => {
+    terminalQueue.hasPendingTerminalRun.mockResolvedValue(true);
+    enqueueAgentRun('p1', {
+      agentId: 'a',
+      agentName: 'A',
+      triggeredBy: 'schedule',
+      prompt: 'do the thing',
+      enqueuedAt: 1,
+    });
+
+    await drainNextAgentRun('p1');
+
+    expect(terminalQueue.drainNextTerminalRun).toHaveBeenCalledWith('p1');
+    // The agent was not dispatched and stays queued behind the user's run.
+    expect(fetchSpy).not.toHaveBeenCalled();
+    expect(listQueuedAgents('p1').map((e) => e.agentId)).toEqual(['a']);
   });
 
   it('POSTs to the agent run endpoint with original triggeredBy and prompt', async () => {
@@ -493,8 +526,12 @@ describe('drainNextAgentRun', () => {
     enqueueAgentRun('p1', { agentId: 'a', agentName: 'A', triggeredBy: 'schedule', prompt: '', enqueuedAt: 1 });
 
     const outer = drainNextAgentRun('p1');
-    // Re-entrant call while outer's fetch is still pending.
+    // Re-entrant call while outer's fetch is still pending. The re-entrant call
+    // bails immediately via the inFlight guard; the outer reaches its fetch a
+    // few microtasks later (it first awaits the terminal-priority DB check), so
+    // flush microtasks before asserting the single POST.
     await drainNextAgentRun('p1');
+    for (let i = 0; i < 10; i++) await Promise.resolve();
     expect(fetchSpy).toHaveBeenCalledTimes(1);
     expect(listQueuedAgents('p1').map((e) => e.agentId)).toEqual(['a']);
 

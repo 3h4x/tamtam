@@ -250,6 +250,19 @@ export const AGENT_CATALOG: AgentCatalogEntry[] = [
     fallbackEnabled: true,
   },
   {
+    // Metadata source of truth lives in skills/docs/skills/tamtam/agent-dedupe.md.
+    // The fields below are inline fallbacks; the .md `agent:` block overrides them at API serialize time.
+    name: 'dedupe',
+    description: 'Hunts byte-identical files, parallel implementations, and reimplemented helpers; consolidates one small safe case per run and flags the rest.',
+    dispatch: 'cli',
+    defaultSchedule: '7d',
+    defaultModel: 'smart',
+    prompt: '',
+    skillIds: ['agent-dedupe'],
+    tier: 'featured',
+    fallbackEnabled: true,
+  },
+  {
     name: 'manage-agents',
     description: 'Audits TamTam agents for this project and creates, updates, or removes them to match current project needs.',
     dispatch: 'cli',

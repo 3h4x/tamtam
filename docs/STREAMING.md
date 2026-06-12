@@ -116,6 +116,8 @@ User types → handleSubmit()
                         → URL updated to /project/[name]/terminal/[sessionId] via router.replace()
 ```
 
+If a blocking job (release/fix/etc.) is running, the run route returns `202 { status: 'queued', queueId, ... }` instead of a `job_id`. `useHandleSubmit` then shows a muted `status` line and hands the `queueId` to `TerminalTab`, which polls `GET /api/projects/by-project/[name]/queued-runs/[queueId]` until `status: 'started'` and calls `terminalStore.startStream(project, jobId)` — the same attach path as a fresh run. The queue is DB-backed and drains FIFO ahead of queued agents; see `lib/terminal/pending-terminal-run.ts` and the `queued_terminal_runs` table.
+
 ### Session URLs
 
 Each session gets a stable URL: `/project/[name]/terminal/[sessionId]`

@@ -633,14 +633,11 @@ function parseJsonStringArray(v: string | undefined): string[] {
   }
 }
 
-export const VALID_PERMISSION_MODES = ['acceptEdits', 'auto', 'bypassPermissions', 'default', 'dontAsk', 'plan'] as const;
-export type PermissionMode = (typeof VALID_PERMISSION_MODES)[number];
-
-export function normalizePermissionMode(value: string | undefined): PermissionMode {
-  return (VALID_PERMISSION_MODES as readonly string[]).includes(value ?? '')
-    ? value as PermissionMode
-    : DEFAULTS.permission_mode as PermissionMode;
-}
+// Definitions live in the client-safe `lib/shared/permission-modes.ts`
+// (client components import them there); re-exported here so existing
+// server-side imports keep working.
+import { VALID_PERMISSION_MODES, normalizePermissionMode, type PermissionMode } from '@/lib/shared/permission-modes';
+export { VALID_PERMISSION_MODES, normalizePermissionMode, type PermissionMode };
 
 /**
  * Parse a per-agent permission-mode override coming from an API body.

@@ -1,8 +1,9 @@
 import { useCallback } from 'react'
-import { runProject } from '@/lib/client-api'
+import { runProject, isQueuedRunResult } from '@/lib/client-api'
 import { terminalStore, type SkillItem, type DocItem } from '@/lib/terminal/terminal-session-store'
 import type { ModelTier } from '@/lib/agents/model-aliases'
 import type { CliProvider } from '@/lib/usage/cli-providers'
+import type { PermissionMode } from '@/lib/shared/permission-modes'
 import { writeBrowserStorage } from '@/lib/client/browser-storage'
 
 interface SubmitDeps {
@@ -15,6 +16,7 @@ interface SubmitDeps {
   selectedDocs: DocItem[]
   model: ModelTier
   selectedProvider: CliProvider | null
+  permissionMode: PermissionMode
   issueContextRef: React.RefObject<{ number: number; repo: string; title: string } | null>
   draftBeforeHistoryRef: React.MutableRefObject<string>
   setInput: (v: string) => void
@@ -23,14 +25,18 @@ interface SubmitDeps {
   setPromptHistory: React.Dispatch<React.SetStateAction<string[]>>
   setHistoryIdx: React.Dispatch<React.SetStateAction<number | null>>
   setMessageQueue: (v: string[] | ((prev: string[]) => string[])) => void
+  // Called when a submit is queued behind a blocking job (release/fix/etc.).
+  // TerminalTab polls the queued-run status and attaches the live stream once
+  // it starts.
+  onQueued: (queueId: string) => void
 }
 
 export function useHandleSubmit(deps: SubmitDeps) {
   const {
     projectName, streaming, input, pendingImages, pendingImageUrls,
-    selectedItems, selectedDocs, model, selectedProvider, issueContextRef, draftBeforeHistoryRef,
+    selectedItems, selectedDocs, model, selectedProvider, permissionMode, issueContextRef, draftBeforeHistoryRef,
     setInput, setPendingImages, setPendingImageUrls, setPromptHistory,
-    setHistoryIdx, setMessageQueue,
+    setHistoryIdx, setMessageQueue, onQueued,
   } = deps
 
   const handleSubmit = useCallback(async (autoText?: string) => {
@@ -133,7 +139,21 @@ export function useHandleSubmit(deps: SubmitDeps) {
         ghIssueNumber: issueCtx?.number ?? undefined,
         ghIssueRepo: issueCtx?.repo ?? undefined,
         ghIssueTitle: issueCtx?.title ?? undefined,
+        permissionMode,
       })
+      if (isQueuedRunResult(result)) {
+        // A blocking job (release/fix/etc.) is running — the run was queued
+        // instead of rejected. Show a muted notice and let TerminalTab poll
+        // for it to start, then auto-attach the live stream.
+        terminalStore.update(projectName, (s) => ({
+          history: [...s.history, {
+            role: 'status',
+            text: `⏳ Queued (#${result.position}) — will run after ${result.blockingKind} finishes`,
+          }],
+        }))
+        onQueued(result.queueId)
+        return
+      }
       terminalStore.startStream(projectName, result.job_id)
     } catch (err) {
       terminalStore.update(projectName, (s) => ({
@@ -143,9 +163,9 @@ export function useHandleSubmit(deps: SubmitDeps) {
     }
   }, [
     projectName, streaming, input, pendingImages, pendingImageUrls,
-    selectedItems, selectedDocs, model, selectedProvider, issueContextRef, draftBeforeHistoryRef,
+    selectedItems, selectedDocs, model, selectedProvider, permissionMode, issueContextRef, draftBeforeHistoryRef,
     setInput, setPendingImages, setPendingImageUrls, setPromptHistory,
-    setHistoryIdx, setMessageQueue,
+    setHistoryIdx, setMessageQueue, onQueued,
   ])
 
   return { handleSubmit }

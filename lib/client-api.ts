@@ -50,6 +50,7 @@ export {
   reviewPR,
   fetchPersonas,
   runProject,
+  isQueuedRunResult,
   fetchProjectLogs,
   pushProject,
   checkoutDefaultBranch,
@@ -79,7 +80,7 @@ export {
   isAutoRecommendation,
   isManualRecommendation,
 } from './client/projects'
-export type { RecommendationsSummary } from './client/projects'
+export type { RecommendationsSummary, RunProjectResult, RunQueuedResult, RunStartedResult } from './client/projects'
 
 export {
   fetchJobs,

@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { readFileSync, mkdirSync, writeFileSync } from 'fs';
-import { join } from 'path';
+import { readFileSync, mkdirSync, writeFileSync, realpathSync } from 'fs';
+import { join, sep } from 'path';
 import { randomUUID } from 'crypto';
 import { extname } from 'path';
 import { getImproveConfig } from '@/lib/scheduling/scheduling';
@@ -8,7 +8,7 @@ import { SKILLS_DIR, DATA_SKILLS_DIR } from '@/lib/skills/skills';
 import { resolveProjectPath } from '@/lib/shared/project-data';
 import { createJob, updateJob } from '@/lib/jobs/job-storage';
 import { startJobInProcess as startJob } from '@/lib/jobs/spawn-claude-detached';
-import { withBasePrompt, getPermissionModeFlag } from '@/lib/shared/config';
+import { withBasePrompt, getPermissionModeFlag, VALID_PERMISSION_MODES } from '@/lib/shared/config';
 import { errMsg } from '@/lib/shared/types';
 import { parseOptionalKnownModelInput, type ModelTier } from '@/lib/agents/model-aliases';
 import { getSettings } from '@/lib/shared/config';
@@ -16,6 +16,7 @@ import { resolveCliBin, resolveCliEnv } from '@/lib/shared/cli-bin';
 import { checkCliStartGate } from '@/lib/usage/resolve-provider';
 import { isCliProvider } from '@/lib/usage/cli-providers';
 import { findBlockingRunningJob } from '@/lib/jobs/project-active-job';
+import { enqueueTerminalRun, drainNextTerminalRun, TERMINAL_DRAIN_HEADER } from '@/lib/terminal/pending-terminal-run';
 import { loadFileConfig } from '@/lib/skills/tamtam-file-config';
 import { resolveAutoAttachedDocs, formatAutoAttachedDocsBlock } from '@/lib/skills/auto-attach-docs';
 
@@ -40,6 +41,7 @@ export async function POST(
   let ghIssueRepo = '';
   let ghIssueTitle = '';
   let pinnedProvider = '';
+  let permissionModeOverride = '';
 
   const contentType = request.headers.get('content-type') ?? '';
   if (contentType.includes('multipart/form-data')) {
@@ -66,6 +68,8 @@ export async function POST(
     if (formIssueTitle) ghIssueTitle = formIssueTitle;
     const formProvider = form.get('provider') as string;
     if (formProvider) pinnedProvider = formProvider;
+    const formPermissionMode = form.get('permissionMode') as string;
+    if (formPermissionMode) permissionModeOverride = formPermissionMode;
 
     const attachDir = join(process.cwd(), 'data', 'attachments');
     mkdirSync(/*turbopackIgnore: true*/ attachDir, { recursive: true });
@@ -95,8 +99,38 @@ export async function POST(
     if (body.ghIssueRepo) ghIssueRepo = body.ghIssueRepo;
     if (body.ghIssueTitle) ghIssueTitle = body.ghIssueTitle;
     if (body.provider) pinnedProvider = String(body.provider);
+    if (body.permissionMode) permissionModeOverride = String(body.permissionMode);
+    // Internal replay only: a queued-terminal-run drain re-POSTs with the
+    // attachment files already saved to disk, passing their paths directly
+    // (the original multipart upload happened on the first, blocked request).
+    // These paths land in the prompt as "read them", so honor them ONLY on a
+    // drain replay (header set) AND only when each path resolves *inside* the
+    // attachments dir. Without this, a client could set the header and pass
+    // arbitrary filesystem paths to exfiltrate any file the server can read.
+    // The header is client-settable, so the realpath containment check — not
+    // the header alone — is the actual security boundary.
+    if (request.headers.get(TERMINAL_DRAIN_HEADER) && Array.isArray(body.attachmentPaths)) {
+      const attachRoot = join(process.cwd(), 'data', 'attachments');
+      let realRoot: string | null = null;
+      try { realRoot = realpathSync(/*turbopackIgnore: true*/ attachRoot); } catch { realRoot = null; }
+      if (realRoot) {
+        for (const p of body.attachmentPaths) {
+          if (typeof p !== 'string' || !p) continue;
+          let real: string;
+          try { real = realpathSync(/*turbopackIgnore: true*/ p); } catch { continue; }
+          if (real === realRoot || real.startsWith(realRoot + sep)) {
+            attachmentPaths.push(real);
+          }
+        }
+      }
+    }
   }
 
+  if (permissionModeOverride && !(VALID_PERMISSION_MODES as readonly string[]).includes(permissionModeOverride)) {
+    return NextResponse.json({
+      detail: `Invalid permissionMode. Allowed values: ${VALID_PERMISSION_MODES.join(', ')}`,
+    }, { status: 400 });
+  }
   if (!prompt.trim() && attachmentPaths.length === 0) {
     return NextResponse.json({ detail: 'Prompt is required' }, { status: 400 });
   }
@@ -120,10 +154,51 @@ export async function POST(
 
   const blockingJob = await findBlockingRunningJob(projectName);
   if (blockingJob) {
+    // A drain replay (header set) must NOT re-enqueue — it lost the race to a
+    // job that started between the drain's blocking-check and this point. Keep
+    // the existing queue row by returning 409; the next finish-seam retries.
+    const isDrainReplay = !!request.headers.get(TERMINAL_DRAIN_HEADER);
+    if (isDrainReplay) {
+      return NextResponse.json({
+        detail: `Job '${blockingJob.kind}' is already running for ${projectName} (job ${blockingJob.id})`,
+        blocking_job_id: blockingJob.id,
+      }, { status: 409 });
+    }
+    // Normal request: queue the user's prompt instead of rejecting it. Captured
+    // raw, before prompt composition, so a later replay recomposes identically.
+    const { queueId, position } = await enqueueTerminalRun(projectName, {
+      prompt,
+      userPrompt: userPrompt || undefined,
+      model,
+      provider: pinnedProvider || undefined,
+      permissionMode: permissionModeOverride || undefined,
+      resumeSessionId: resumeSessionId || undefined,
+      personas: personaPaths.length > 0 ? personaPaths : undefined,
+      contextMeta: contextMeta || undefined,
+      ghIssueNumber,
+      ghIssueRepo: ghIssueRepo || undefined,
+      ghIssueTitle: ghIssueTitle || undefined,
+      attachmentPaths: attachmentPaths.length > 0 ? attachmentPaths : undefined,
+    });
+    // Close the enqueue-after-blocker-finish race: if the blocker cleared in
+    // the window between the check above and this insert, its completion-hook
+    // drain already ran (and no-op'd on an empty queue), so nothing would
+    // replay this row until the next finish-seam or a restart. Re-check and
+    // kick the drain ourselves — the in-flight guard makes a redundant kick
+    // safe, and a still-blocked project no-ops. Fire-and-forget so the 202
+    // isn't delayed by the replay.
+    void findBlockingRunningJob(projectName).then((stillBlocking) => {
+      if (!stillBlocking) return drainNextTerminalRun(projectName);
+    }).catch((e) => {
+      console.error(`[pending-terminal-run] post-enqueue drain kick failed for ${projectName}:`, e);
+    });
     return NextResponse.json({
-      detail: `Job '${blockingJob.kind}' is already running for ${projectName} (job ${blockingJob.id})`,
+      status: 'queued',
+      queueId,
+      position,
+      blockingKind: blockingJob.kind,
       blocking_job_id: blockingJob.id,
-    }, { status: 409 });
+    }, { status: 202 });
   }
 
   // When resuming, pin to the originating provider — session IDs are stored
@@ -211,7 +286,7 @@ export async function POST(
     job.sessionId = resumeSessionId;
   }
 
-  let cmd = `${claudeBin} --print --output-format stream-json --include-partial-messages --verbose --model ${model} ${getPermissionModeFlag()}`;
+  let cmd = `${claudeBin} --print --output-format stream-json --include-partial-messages --verbose --model ${model} ${getPermissionModeFlag(permissionModeOverride || null)}`;
   if (resumeSessionId) {
     cmd += ` --resume ${resumeSessionId}`;
   }

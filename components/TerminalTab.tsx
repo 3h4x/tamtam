@@ -21,6 +21,7 @@ import { Button } from '@/components/ui/Button'
 import { Select } from '@/components/ui/Select'
 import { Textarea } from '@/components/ui/Textarea'
 import { MODEL_TIERS, normalizeModelInput, type ModelTier } from '@/lib/agents/model-aliases'
+import { normalizePermissionMode, type PermissionMode } from '@/lib/shared/permission-modes'
 import { type CliProvider } from '@/lib/usage/cli-providers'
 import { readBrowserStorageJson, writeBrowserStorage } from '@/lib/client/browser-storage'
 
@@ -127,6 +128,7 @@ export function TerminalTab({ projectName, initialSessionId }: TerminalTabProps)
   const [input, setInput] = useState('')
   const [model, setModel] = useState<ModelTier>('fast')
   const [selectedProvider, setSelectedProvider] = useState<CliProvider | null>(null)
+  const [permissionMode, setPermissionMode] = useState<PermissionMode>('auto')
   const [spinnerFrame, setSpinnerFrame] = useState(0)
   const [showThinking, setShowThinking] = useState(false)
   const [pendingImages, setPendingImages] = useState<File[]>([])
@@ -218,6 +220,9 @@ export function TerminalTab({ projectName, initialSessionId }: TerminalTabProps)
         const m = data.settings?.default_model
         if (m && MODEL_TIERS.includes(normalizeModelInput(m, 'fast') as ModelTier)) {
           setModel(normalizeModelInput(m, 'fast') as ModelTier)
+        }
+        if (data.settings?.permission_mode) {
+          setPermissionMode(normalizePermissionMode(String(data.settings.permission_mode)))
         }
       })
       .catch(() => {})
@@ -449,11 +454,42 @@ export function TerminalTab({ projectName, initialSessionId }: TerminalTabProps)
     }
   }, [addImages])
 
+  // A submit that hit a blocking job (release/fix/etc.) is queued server-side
+  // rather than rejected. We poll its status and attach the live stream once
+  // the queued run starts. Survives navigation only within this mounted tab;
+  // the queue row itself is DB-backed, so a refresh re-attaches via history.
+  const [queuedRunId, setQueuedRunId] = useState<string | null>(null)
+  useEffect(() => {
+    if (!queuedRunId) return
+    let cancelled = false
+    const poll = async () => {
+      while (!cancelled) {
+        try {
+          const res = await fetch(`/api/projects/by-project/${encodeURIComponent(projectName)}/queued-runs/${encodeURIComponent(queuedRunId)}`)
+          if (res.ok) {
+            const data = await res.json() as { status: string; jobId: string | null }
+            if (data.status === 'started' && data.jobId) {
+              if (!cancelled) {
+                terminalStore.startStream(projectName, data.jobId)
+                setQueuedRunId(null)
+              }
+              return
+            }
+            if (data.status === 'gone') { if (!cancelled) setQueuedRunId(null); return }
+          }
+        } catch { /* transient — keep polling */ }
+        await new Promise(r => setTimeout(r, 2000))
+      }
+    }
+    poll()
+    return () => { cancelled = true }
+  }, [queuedRunId, projectName])
+
   const { handleSubmit } = useHandleSubmit({
     projectName, streaming, input, pendingImages, pendingImageUrls,
-    selectedItems, selectedDocs, model, selectedProvider, issueContextRef, draftBeforeHistoryRef,
+    selectedItems, selectedDocs, model, selectedProvider, permissionMode, issueContextRef, draftBeforeHistoryRef,
     setInput, setPendingImages, setPendingImageUrls, setPromptHistory,
-    setHistoryIdx, setMessageQueue,
+    setHistoryIdx, setMessageQueue, onQueued: setQueuedRunId,
   })
 
   // Auto-submit dequeued message after streaming ends.
@@ -623,6 +659,7 @@ export function TerminalTab({ projectName, initialSessionId }: TerminalTabProps)
           model={model}
           provider={claudeSessionId && state.sessionProvider ? (state.sessionProvider as CliProvider) : selectedProvider}
           providerLocked={!!(claudeSessionId && state.sessionProvider)}
+          permissionMode={permissionMode}
           filteredItems={filteredItems}
           filteredDocs={filteredDocs}
           onNewSession={handleNewSession}
@@ -635,6 +672,7 @@ export function TerminalTab({ projectName, initialSessionId }: TerminalTabProps)
           onDocsSearchChange={setDocsSearch}
           onToggleDocsPicker={() => setShowDocsPicker(s => !s)}
           onModelChange={setModel}
+          onPermissionModeChange={setPermissionMode}
           onProviderChange={setSelectedProvider}
         />
 
