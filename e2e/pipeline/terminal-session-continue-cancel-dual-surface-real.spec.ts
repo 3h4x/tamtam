@@ -1,0 +1,117 @@
+import { test, expect } from '@playwright/test';
+import {
+  enableProject,
+  resetShimState,
+  waitForJobByIdRunning,
+  waitForJobCompletion,
+  writeScenario,
+} from './helpers';
+
+const PROJECT = 'terminal-run-session-continue-dual-surface-cancel';
+const INITIAL_PROMPT =
+  'Finish the first ordinary run so the canonical session route can be resumed later.';
+
+test.describe('Real resumed ordinary run cancellation across history and terminal session route', () => {
+  test('history and the canonical terminal session route both clear live state when a continued run is cancelled', async ({
+    page,
+    request,
+  }) => {
+    resetShimState(PROJECT);
+    writeScenario(PROJECT, [
+      {
+        label: 'run',
+        sleep_ms: 2000,
+        text: 'Initial session output is available before the cancelled continuation starts.',
+      },
+    ]);
+    await enableProject(request, PROJECT, { testsDisabled: true });
+
+    const initialRunResp = await request.post(`/api/projects/by-project/${PROJECT}/run`, {
+      data: { prompt: INITIAL_PROMPT },
+    });
+    expect(initialRunResp.status(), `initial run POST failed: ${await initialRunResp.text()}`).toBe(200);
+
+    const initialRunBody = await initialRunResp.json() as { job_id: string };
+    expect(initialRunBody.job_id, 'initial run job_id in response').toBeTruthy();
+
+    const initialRunJob = await waitForJobCompletion(request, initialRunBody.job_id, 60_000);
+    expect(initialRunJob?.['exit_code'], 'initial run exit code').toBe(0);
+
+    const initialJobResp = await request.get(`/api/jobs/${encodeURIComponent(initialRunBody.job_id)}`);
+    expect(initialJobResp.status(), `initial job GET failed: ${await initialJobResp.text()}`).toBe(200);
+    const initialJobDetail = await initialJobResp.json() as { session_id: string | null };
+    expect(initialJobDetail.session_id, 'finished run should keep a session_id for continue').toBeTruthy();
+
+    writeScenario(PROJECT, [
+      {
+        label: 'run',
+        sleep_ms: 10000,
+        text: 'This continuation should be cancelled before its final output matters.',
+      },
+    ]);
+
+    const terminalPage = await page.context().newPage();
+    await Promise.all([
+      page.goto(`/project/${PROJECT}/history`),
+      terminalPage.goto(
+        `/project/${PROJECT}/terminal/${encodeURIComponent(initialJobDetail.session_id as string)}`,
+      ),
+    ]);
+
+    await expect(page.getByText(INITIAL_PROMPT)).toBeVisible({ timeout: 20_000 });
+    await expect(page.getByText('1 running')).toHaveCount(0);
+    await expect(terminalPage.getByText(INITIAL_PROMPT)).toBeVisible({ timeout: 20_000 });
+    await expect(
+      terminalPage.getByText('Initial session output is available before the cancelled continuation starts.'),
+    ).toBeVisible({ timeout: 20_000 });
+    await expect(terminalPage.getByText('live run')).toHaveCount(0);
+
+    const continueResp = await request.post(
+      `/api/jobs/${encodeURIComponent(initialRunBody.job_id)}/continue`,
+    );
+    expect(continueResp.status(), `continue POST failed: ${await continueResp.text()}`).toBe(200);
+
+    const continueBody = await continueResp.json() as { job_id: string; resumed_session_id: string };
+    expect(continueBody.job_id, 'continued run job_id in response').toBeTruthy();
+    expect(
+      continueBody.resumed_session_id,
+      'continued run should target the original session',
+    ).toBe(initialJobDetail.session_id);
+
+    const runningContinuation = await waitForJobByIdRunning(request, continueBody.job_id, 20_000);
+    expect(runningContinuation, 'continued run should be running').not.toBeNull();
+
+    await expect(page.getByText('1 running')).toBeVisible({ timeout: 20_000 });
+    await expect(page.locator('span.animate-pulse')).toHaveCount(1, { timeout: 20_000 });
+    await expect(terminalPage.getByText('live run')).toBeVisible({ timeout: 20_000 });
+    await expect(terminalPage.getByLabel('live run spinner')).toBeVisible({ timeout: 20_000 });
+    await expect(terminalPage).toHaveURL(
+      new RegExp(`/project/${PROJECT}/terminal/${encodeURIComponent(initialJobDetail.session_id as string)}$`),
+    );
+
+    const cancelResp = await request.delete(`/api/jobs/${encodeURIComponent(continueBody.job_id)}`);
+    expect(cancelResp.status(), `cancel DELETE failed: ${await cancelResp.text()}`).toBe(200);
+
+    const continuedJob = await waitForJobCompletion(request, continueBody.job_id, 20_000);
+    expect(continuedJob?.['exit_code'], 'continued run exit code after cancellation').toBe(-2);
+
+    const continuedRow = page.getByRole('button').filter({
+      hasText: INITIAL_PROMPT,
+    }).first();
+    await expect(page.getByText('1 running')).toHaveCount(0, { timeout: 15_000 });
+    await expect(page.locator('span.animate-pulse')).toHaveCount(0, { timeout: 15_000 });
+    await expect(continuedRow.getByText('cancelled', { exact: true })).toBeVisible({
+      timeout: 15_000,
+    });
+    await expect(continuedRow.getByLabel('running')).toHaveCount(0, { timeout: 15_000 });
+    await expect(terminalPage.getByText('live run')).toHaveCount(0, { timeout: 15_000 });
+    await expect(terminalPage.getByLabel('live run spinner')).toHaveCount(0, {
+      timeout: 15_000,
+    });
+    await expect(terminalPage.getByText('cancelled').first()).toBeVisible({ timeout: 15_000 });
+    await expect(terminalPage.getByText('exit 0 — ok')).toHaveCount(0);
+    await expect(terminalPage).toHaveURL(
+      new RegExp(`/project/${PROJECT}/terminal/e2e-session-${PROJECT}-\\d+$`),
+    );
+  });
+});
