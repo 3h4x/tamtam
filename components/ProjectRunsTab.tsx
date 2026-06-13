@@ -12,18 +12,25 @@ import { ErrorCallout } from '@/components/ui/ErrorCallout'
 import {
   dayKey,
   dayLabel,
+  parseJobCountsResponse,
+} from '@/components/project-runs/formatting'
+import {
   buildEntries,
-  groupReleaseChildren,
-  buildReleaseSummary,
-  buildReleaseProgressLabel,
-  flattenReleaseChildren,
-  KIND_LABEL,
   entryIsRunning,
   entryNeedsAttention,
   latestReleaseKey,
-  parseJobCountsResponse,
-} from '@/components/project-runs/utils'
-import type { Entry, JobCountsResponse } from '@/components/project-runs/utils'
+} from '@/components/project-runs/entries'
+import { groupReleaseChildren } from '@/components/project-runs/release-groups'
+import {
+  buildReleaseSummary,
+  buildReleaseProgressLabel,
+  flattenReleaseChildren,
+} from '@/components/project-runs/release-progress'
+import {
+  KIND_LABEL,
+} from '@/components/project-runs/kinds'
+import type { JobCountsResponse } from '@/components/project-runs/formatting'
+import type { Entry } from '@/components/project-runs/types'
 import { RUN_ROW_GRID_CLASS, RunRow } from '@/components/project-runs/RunRow'
 import { ProjectRunsEmptyState, ProjectRunsLoadingState } from '@/components/project-runs/RunStates'
 import { mergeJobs, reconcileRefreshJobs } from '@/components/project-runs/refresh'

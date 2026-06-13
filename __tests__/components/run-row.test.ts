@@ -5,7 +5,7 @@ import { afterEach, describe, expect, it, vi } from 'vitest'
 import { createRoot } from 'react-dom/client'
 import { flushSync } from 'react-dom'
 import { RunRow } from '@/components/project-runs/RunRow'
-import type { Entry } from '@/components/project-runs/utils'
+import type { Entry } from '@/components/project-runs/types'
 
 vi.mock('@/lib/shared/format', () => ({
   formatAgo: (ts: number) => `ago:${ts}`,

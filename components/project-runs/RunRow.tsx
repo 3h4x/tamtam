@@ -2,8 +2,10 @@
 
 import { formatAgo } from '@/lib/shared/format'
 import { isCancelledExitCode } from '@/lib/shared/job-exit-codes'
-import { formatDuration, formatTokens, formatCost, KIND_LABEL, KIND_COLOR, entryIsRunning, entryNeedsAttention, runKindDisplayName, shouldShowStableKindTitle } from '@/components/project-runs/utils'
-import type { Entry } from '@/components/project-runs/utils'
+import { formatDuration, formatTokens, formatCost } from '@/components/project-runs/formatting'
+import { entryIsRunning, entryNeedsAttention, shouldShowStableKindTitle } from '@/components/project-runs/entries'
+import { KIND_LABEL, KIND_COLOR, runKindDisplayName } from '@/components/project-runs/kinds'
+import type { Entry } from '@/components/project-runs/types'
 import { Button } from '@/components/ui/Button'
 import { Pill } from '@/components/ui/Pill'
 import { StatusIcon as UiStatusIcon } from '@/components/ui/StatusIcon'

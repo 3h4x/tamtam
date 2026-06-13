@@ -1,4 +1,4 @@
-import type { KindBucket } from '@/components/project-runs/utils'
+import type { KindBucket } from '@/components/project-runs/kinds'
 
 // One-axis filter: either a kind bucket, or a status shortcut.
 export type Filter =

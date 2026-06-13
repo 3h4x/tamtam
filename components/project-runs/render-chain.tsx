@@ -3,8 +3,8 @@ import {
   buildReleaseSummary,
   buildReleaseProgressLabel,
   flattenReleaseChildren,
-} from '@/components/project-runs/utils'
-import type { Entry } from '@/components/project-runs/utils'
+} from '@/components/project-runs/release-progress'
+import type { Entry } from '@/components/project-runs/types'
 import { RunRow } from '@/components/project-runs/RunRow'
 
 // Render a chained-child node (e.g. a release nested under an agent run).

@@ -12,8 +12,8 @@ import {
 } from '@/lib/client-api'
 import type { AutomationQueueItem } from '@/lib/client-api'
 import { Button } from '@/components/ui/Button'
-import { PIPELINE_CHILD_KINDS } from '@/components/project-runs/utils'
-import type { Entry } from '@/components/project-runs/utils'
+import { PIPELINE_CHILD_KINDS } from '@/components/project-runs/release-groups'
+import type { Entry } from '@/components/project-runs/types'
 
 interface UseRunActionsArgs {
   projectName: string

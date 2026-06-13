@@ -6,7 +6,8 @@
 // The component rendering is React — we only import the pure helpers so
 // Node-only vitest can run this.
 import { describe, it, expect } from 'vitest';
-import { groupReleaseChildren, buildEntries } from '@/components/project-runs/utils';
+import { buildEntries } from '@/components/project-runs/entries';
+import { groupReleaseChildren } from '@/components/project-runs/release-groups';
 import type { JobInfo } from '@/lib/client-api';
 
 // Loose entry shape — the real Entry interface lives in ProjectRunsTab but

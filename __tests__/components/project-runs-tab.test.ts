@@ -1,5 +1,7 @@
 import { describe, it, expect } from 'vitest'
-import { buildEntries, buildReleaseProgressLabel, entryNeedsAttention, groupReleaseChildren } from '../../components/project-runs/utils'
+import { buildEntries, entryNeedsAttention } from '../../components/project-runs/entries'
+import { groupReleaseChildren } from '../../components/project-runs/release-groups'
+import { buildReleaseProgressLabel } from '../../components/project-runs/release-progress'
 import type { JobInfo } from '../../lib/client-api'
 
 function job({

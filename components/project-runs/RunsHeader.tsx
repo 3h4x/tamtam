@@ -3,8 +3,9 @@
 import { Button } from '@/components/ui/Button'
 import { PillButton } from '@/components/ui/Pill'
 import { SearchField } from '@/components/ui/SearchField'
-import { formatTokens, formatCost, KIND_LABEL } from '@/components/project-runs/utils'
-import type { JobCountsResponse } from '@/components/project-runs/utils'
+import { formatTokens, formatCost } from '@/components/project-runs/formatting'
+import { KIND_LABEL } from '@/components/project-runs/kinds'
+import type { JobCountsResponse } from '@/components/project-runs/formatting'
 import { filterKey } from '@/components/project-runs/filters'
 import type { Filter } from '@/components/project-runs/filters'
 

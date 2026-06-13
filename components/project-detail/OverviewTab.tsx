@@ -5,10 +5,10 @@ import {
   ACTIVE_WORK_BUCKET_ORDER,
   activeWorkAccentClass,
   activeWorkBadgeLabel,
-  activeWorkTitle,
   bucketOf,
   type KindBucket,
-} from '@/components/project-runs/utils'
+} from '@/components/project-runs/kinds'
+import { activeWorkTitle } from '@/components/project-runs/entries'
 import { StatusStrip } from '@/components/project-detail/StatusStrip'
 import { AgentsStats } from '@/components/project-detail/AgentsStats'
 import { PipelineStatsPanel } from '@/components/project-detail/PipelineStatsPanel'

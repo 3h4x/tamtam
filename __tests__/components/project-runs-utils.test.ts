@@ -5,18 +5,24 @@ import {
   formatDuration,
   formatTokens,
   formatCost,
-  bucketOf,
-  buildReleaseSummary,
   dayLabel,
+  parseJobCountsResponse,
+} from '@/components/project-runs/formatting';
+import {
+  bucketOf,
+} from '@/components/project-runs/kinds';
+import {
+  buildEntries,
   entryNeedsAttention,
-  groupReleaseChildren,
+  shouldShowStableKindTitle,
+} from '@/components/project-runs/entries';
+import { groupReleaseChildren } from '@/components/project-runs/release-groups';
+import {
+  buildReleaseSummary,
   flattenReleaseChildren,
   flattenPipelineSteps,
-  parseJobCountsResponse,
-  buildEntries,
-  shouldShowStableKindTitle,
-} from '@/components/project-runs/utils';
-import type { Entry } from '@/components/project-runs/utils';
+} from '@/components/project-runs/release-progress';
+import type { Entry } from '@/components/project-runs/types';
 import type { JobInfo } from '@/lib/client-api';
 
 // ---------------------------------------------------------------------------
