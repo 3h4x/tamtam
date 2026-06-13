@@ -64,10 +64,8 @@ export interface StalledRelease {
 export function findStalledReleases(now: number = Date.now()): StalledRelease[] {
   const jobs = listJobs();
   // Single-pass index: collect in-flight releases and bucket pipeline-step
-  // children by releaseId. The previous form did `jobs.filter(...)` ONCE
-  // PER RELEASE, so on a workspace with many in-flight releases the per-
-  // release O(N) scans compounded into O(R × N) per probe sweep. One pass
-  // yields O(N), then each release just reads its bucket.
+  // children by releaseId. One pass yields O(N), then each release just
+  // reads its bucket instead of scanning all jobs per release.
   const releases: JobData[] = [];
   const childrenByRelease = new Map<string, JobData[]>();
   for (const j of jobs) {
