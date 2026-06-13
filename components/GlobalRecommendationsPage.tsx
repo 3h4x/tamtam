@@ -74,10 +74,12 @@ export function GlobalRecommendationsPage() {
     }
   }
 
-  // Lazily load history the first time the tab is opened.
+  // Lazily load history the first time the tab is opened. The historyError
+  // guard prevents an immediate auto-retry after a failed fetch — manual Retry
+  // calls loadHistory() directly and clears the error on success.
   useEffect(() => {
-    if (tab === 'history' && !historyLoaded && !historyLoading) void loadHistory()
-  }, [tab, historyLoaded, historyLoading])
+    if (tab === 'history' && !historyLoaded && !historyLoading && !historyError) void loadHistory()
+  }, [tab, historyLoaded, historyLoading, historyError])
 
   // An action that resolved/dismissed/applied a card invalidates the cached
   // history so it reloads (lazily on next open, or immediately if visible).
