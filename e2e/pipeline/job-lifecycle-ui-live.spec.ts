@@ -845,4 +845,129 @@ test.describe('Job lifecycle UI badges', () => {
     await expect(doneRow.getByLabel('running')).toHaveCount(0);
     await expect(doneRow.getByText('running', { exact: true })).toHaveCount(0);
   });
+
+  // -------------------------------------------------------------------------
+  // History tab — new running job appears via poll from empty state
+  //
+  // Complements the transition tests above (which always start with a running
+  // job already present). This test verifies that the history tab picks up a
+  // brand-new running job row via polling when the page was already open and
+  // showing the empty state — the row with spinner must appear without reload.
+  // -------------------------------------------------------------------------
+  test('history tab shows new running job row with spinner when it appears via poll from empty state', async ({
+    page,
+  }) => {
+    let serveRunning = false;
+    await mockJobScenario(page, () =>
+      serveRunning
+        ? [
+            makeJob({
+              id: 'job-live-history-appear',
+              kind: 'run',
+              status: 'running',
+              exit_code: null,
+              started_at: now() - 3,
+              finished_at: null,
+              session_id: 'sess-live-history-appear',
+              work_summary: 'Running task just started.',
+            }),
+          ]
+        : [],
+    );
+    // mockJobScenario does not stub /api/jobs/counts; add it here so the
+    // RunsHeader subtitle ("1 running") reflects the mocked jobs state.
+    await page.route(
+      (url) => url.pathname === '/api/jobs/counts' && url.searchParams.get('project') === PROJECT,
+      (route) => {
+        const running = serveRunning ? 1 : 0;
+        route.fulfill({
+          json: {
+            total: running,
+            byKind: running ? { run: 1 } : {},
+            byStatus: { running, done: 0, aborted: 0, failed: 0 },
+            tokens: { input: 0, output: 0, cacheRead: 0, cacheCreate: 0, total: 0 },
+            cost: { total: 0, monthToDate: 0 },
+          },
+        });
+      },
+    );
+
+    await page.goto(`/project/${PROJECT}/history`);
+
+    // Empty state must be visible before the job starts.
+    await expect(page.getByText('No runs yet')).toBeVisible({ timeout: 8_000 });
+
+    // New running job starts — flip the mock.
+    serveRunning = true;
+
+    // History tab picks up the new running job on the next poll cycle.
+    const row = page.getByRole('button')
+      .filter({ hasText: 'run' })
+      .filter({ hasText: 'started' })
+      .first();
+    await expect(row).toBeVisible({ timeout: 12_000 });
+    await expect(row.getByLabel('running')).toBeVisible({ timeout: 8_000 });
+    await expect(row.getByText('running', { exact: true })).toBeVisible({ timeout: 8_000 });
+    // RunsHeader subtitle should show the live running count.
+    await expect(page.getByText('1 running')).toBeVisible({ timeout: 8_000 });
+    await expect(page.getByText('No runs yet')).toHaveCount(0);
+  });
+
+  // -------------------------------------------------------------------------
+  // RunsHeader subtitle clears when the last running job completes
+  //
+  // Existing transition tests verify the row-level badge clears, but not the
+  // "N running" subtitle text in RunsHeader. This test specifically pins that
+  // the subtitle disappears when the running count drops to 0 via polling.
+  // -------------------------------------------------------------------------
+  test('history tab RunsHeader subtitle clears after the last running job completes via poll', async ({
+    page,
+  }) => {
+    let serveRunning = true;
+    await mockJobScenario(page, () => [
+      makeJob({
+        id: 'job-header-subtitle-clear',
+        kind: 'run',
+        status: serveRunning ? 'running' : 'done',
+        exit_code: serveRunning ? null : 0,
+        started_at: now() - 20,
+        finished_at: serveRunning ? null : now() - 2,
+        session_id: 'sess-header-subtitle-clear',
+      }),
+    ]);
+    await page.route(
+      (url) =>
+        url.pathname === '/api/jobs/counts' && url.searchParams.get('project') === PROJECT,
+      (route) => {
+        const running = serveRunning ? 1 : 0;
+        route.fulfill({
+          json: {
+            total: 1,
+            byKind: { run: 1 },
+            byStatus: { running, done: serveRunning ? 0 : 1, aborted: 0, failed: 0 },
+            tokens: { input: 0, output: 0, cacheRead: 0, cacheCreate: 0, total: 0 },
+            cost: { total: 0, monthToDate: 0 },
+          },
+        });
+      },
+    );
+
+    await page.goto(`/project/${PROJECT}/history`);
+
+    // Subtitle must be visible while the job is running.
+    await expect(page.getByText('1 running')).toBeVisible({ timeout: 8_000 });
+
+    // Job completes — flip the mock.
+    serveRunning = false;
+
+    // RunsHeader subtitle must disappear once running count is 0.
+    await expect(page.getByText('1 running')).toHaveCount(0, { timeout: 12_000 });
+    // The row itself must still be visible (now done, not gone).
+    const row = page.getByRole('button')
+      .filter({ hasText: 'run' })
+      .filter({ hasText: 'started' })
+      .first();
+    await expect(row).toBeVisible({ timeout: 8_000 });
+    await expect(row.getByLabel('running')).toHaveCount(0);
+  });
 });
