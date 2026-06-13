@@ -434,6 +434,48 @@ test.describe('WorkflowRunDetail UI', () => {
     await expect(page).toHaveURL(stableUrl);
   });
 
+  test('live run keeps the prior snapshot when refreshes keep returning 404', async ({ page }) => {
+    let pollCount = 0;
+
+    await stubShellRoutes(page);
+    await page.route(`**/api/workflow-runs/${RUN_ID}`, (route: Route) => {
+      pollCount += 1;
+
+      if (pollCount === 1) {
+        return route.fulfill({
+          json: {
+            run: makeRun('running'),
+            steps: [makeStep('s1', 'run-review', 'running')],
+          } satisfies RunDetail,
+        });
+      }
+
+      return route.fulfill({
+        status: 404,
+        json: { error: 'workflow run not found' },
+      });
+    });
+
+    await page.goto(`/workflow-runs/${RUN_ID}`);
+
+    const stableUrl = page.url();
+    const stepRowLocator = stepRow(page, 's1');
+
+    await expect(page.locator('[aria-label="status running"]').first()).toBeVisible({ timeout: 8_000 });
+    await expect(stepRowLocator.getByLabel('status running')).toBeVisible({ timeout: 8_000 });
+    await expect(page.getByText('live · refreshes every 5s')).toBeVisible({ timeout: 8_000 });
+
+    await expect(page.getByText(/Failed to refresh: workflow run not found/i)).toBeVisible({
+      timeout: 12_000,
+    });
+    await expect(page.getByText('Workflow run not found')).toHaveCount(0);
+    await expect(page.locator('[aria-label="status running"]').first()).toBeVisible({ timeout: 12_000 });
+    await expect(stepRowLocator.getByLabel('status running')).toBeVisible({ timeout: 12_000 });
+    await expect(page.getByText('live · refreshes every 5s')).toBeVisible({ timeout: 12_000 });
+    await expect(page.getByText('final snapshot')).toHaveCount(0);
+    await expect(page).toHaveURL(stableUrl);
+  });
+
   test('live run keeps prior completed steps stable while the active step flips to completed after poll', async ({
     page,
   }) => {
