@@ -225,4 +225,54 @@ test.describe('Agents tab last-run lifecycle UI', () => {
     await expect(row.getByText('running', { exact: true })).toHaveCount(0);
     await expect(row.locator('span[title^="Failed"]')).toHaveCount(0);
   });
+
+  // -------------------------------------------------------------------------
+  // Agents tab — running → succeeded
+  //
+  // The component computes the last-run span title as:
+  //   running → "Running · started X ago"
+  //   cancelled → "Cancelled · X ago"
+  //   failed → "Failed · X ago"
+  //   succeeded → "Ran X ago"
+  //
+  // The existing tests cover never→failed and running→cancelled. This test
+  // covers the success path (exit_code 0): the running badge must clear and the
+  // span title must change to "Ran …" — neither "Failed" nor "Cancelled" should
+  // appear, and the row must not require a page reload to reflect the change.
+  // -------------------------------------------------------------------------
+  test('last-run cell clears running state and shows "Ran" when an agent run succeeds without reload', async ({
+    page,
+  }) => {
+    let phase: 'running' | 'succeeded' = 'running';
+
+    await stubProjectShellRoutes(page);
+    await page.route(
+      (url) => url.pathname === '/api/jobs' && url.searchParams.get('project') === PROJECT,
+      (route: Route) => {
+        const jobs = [
+          phase === 'running'
+            ? makeAgentJob('running', null)
+            : makeAgentJob('done', 0),
+        ];
+        route.fulfill({ json: { jobs, total: jobs.length, pendingReleaseProjects: [] } });
+      },
+    );
+
+    await page.goto(`/project/${PROJECT}/agents`);
+
+    const row = agentRow(page);
+    await expect(row).toBeVisible({ timeout: 8_000 });
+    await expect(row.getByText('running', { exact: true })).toBeVisible();
+    await expect(row.locator('span[title^="Running"]')).toBeVisible();
+
+    phase = 'succeeded';
+
+    // Title flips from "Running · …" to "Ran X ago"; "just now" is the
+    // relative-time label shown inside the span (job finished ~5 s ago).
+    await expect(row.locator('span[title^="Ran"]')).toBeVisible({ timeout: 12_000 });
+    await expect(row.getByText('just now')).toBeVisible({ timeout: 12_000 });
+    await expect(row.getByText('running', { exact: true })).toHaveCount(0);
+    await expect(row.locator('span[title^="Failed"]')).toHaveCount(0);
+    await expect(row.locator('span[title^="Cancelled"]')).toHaveCount(0);
+  });
 });
