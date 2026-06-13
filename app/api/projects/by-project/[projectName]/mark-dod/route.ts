@@ -3,7 +3,7 @@ import { startMarkDod } from '@/lib/pipeline/start-mark-dod';
 
 // Manually run DoD verification for the project's latest issue-linked run.
 // Used for debugging and as a "re-check now" button — the release pipeline
-// also invokes startMarkDod automatically after review→LGTM.
+// also invokes startMarkDod automatically after push when DoD applies.
 export async function POST(
   req: Request,
   { params }: { params: Promise<{ projectName: string }> },

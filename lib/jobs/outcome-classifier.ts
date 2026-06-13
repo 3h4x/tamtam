@@ -13,8 +13,8 @@
 // - Best-effort: must NEVER throw out of markDone. Errors are swallowed and
 //   logged. A job that finished cleanly should not appear "stuck" because
 //   the classifier hiccuped.
-// - Fire-and-forget: caller awaits but the result is written to the job
-//   row's contextMeta, never blocks chaining.
+// - Fire-and-forget: the call site does not await; the result is written
+//   to the job row's contextMeta and never blocks chaining.
 
 import { openSync, fstatSync, readSync, closeSync } from 'fs';
 import { getSettings } from '@/lib/shared/config';
