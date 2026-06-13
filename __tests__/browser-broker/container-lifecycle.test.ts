@@ -19,6 +19,14 @@ describe('ensureBrokerRunning', () => {
     vi.doMock('@/lib/shared/shell', () => ({
       exec: runShellMock,
     }));
+    // getSettings() fires a fire-and-forget DB-backed background refresh whose
+    // failure path logs via console.error. With no DB reachable in the worker it
+    // rejects asynchronously after these fast tests finish, racing vitest's RPC
+    // teardown ("Closing rpc while onUserConsoleLog was pending"). Mock it so no
+    // floating promise is created.
+    vi.doMock('@/lib/shared/config', () => ({
+      getSettings: () => ({ browser_broker_mode: 'docker' }),
+    }));
     vi.doMock('@/lib/browser-broker/port-allocator', () => ({
       allocatePort: allocatePortMock,
     }));

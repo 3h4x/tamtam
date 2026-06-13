@@ -2,24 +2,14 @@
 
 import { Fragment, useState, useEffect, useMemo, useRef } from 'react'
 import Link from 'next/link'
-import { useRouter } from 'next/navigation'
 import {
   fetchJobs,
-  releaseProject,
-  pushProject,
-  continueJob,
   fetchAutomationQueue,
-  retryAutomationQueue,
-  cancelAutomationQueueItem,
 } from '@/lib/client-api'
 import type { AutomationQueueItem, JobInfo } from '@/lib/client-api'
 import { Button, buttonVariants } from '@/components/ui/Button'
 import { ErrorCallout } from '@/components/ui/ErrorCallout'
-import { PillButton } from '@/components/ui/Pill'
-import { SearchField } from '@/components/ui/SearchField'
 import {
-  formatTokens,
-  formatCost,
   dayKey,
   dayLabel,
   buildEntries,
@@ -31,79 +21,20 @@ import {
   entryIsRunning,
   entryNeedsAttention,
   latestReleaseKey,
-  PIPELINE_CHILD_KINDS,
   parseJobCountsResponse,
 } from '@/components/project-runs/utils'
-import type { Entry, JobCountsResponse, KindBucket } from '@/components/project-runs/utils'
+import type { Entry, JobCountsResponse } from '@/components/project-runs/utils'
 import { RUN_ROW_GRID_CLASS, RunRow } from '@/components/project-runs/RunRow'
 import { ProjectRunsEmptyState, ProjectRunsLoadingState } from '@/components/project-runs/RunStates'
 import { mergeJobs, reconcileRefreshJobs } from '@/components/project-runs/refresh'
+import { renderChain } from '@/components/project-runs/render-chain'
+import { RunsHeader } from '@/components/project-runs/RunsHeader'
+import type { Filter } from '@/components/project-runs/filters'
+import { useRunActions } from '@/hooks/useRunActions'
 
 interface ProjectRunsTabProps {
   projectName: string
   jobsPaused?: boolean
-}
-
-// One-axis filter: either a kind bucket, or a status shortcut.
-type Filter =
-  | { kind: 'all' }
-  | { kind: 'running' }
-  | { kind: 'failed' }
-  | { kind: 'bucket'; bucket: KindBucket }
-
-function filterKey(f: Filter): string {
-  return f.kind === 'bucket' ? `b:${f.bucket}` : f.kind
-}
-
-// Render a chained-child node (e.g. a release nested under an agent run).
-// For release nodes the pipeline steps are flattened so test/review/commit/push
-// all appear at the same depth; fix is one level deeper.
-function renderChain(
-  node: Entry,
-  depth: number,
-  navigate: (e: Entry) => void,
-  actionsFor: (e: Entry) => React.ReactNode,
-): React.ReactNode {
-  const summary = node.kind === 'release'
-    ? buildReleaseSummary(node.children ?? [], node)
-    : null
-  const progressLabel = node.kind === 'release'
-    ? buildReleaseProgressLabel(node.children ?? [], node)
-    : null
-  const pipelineFlat = node.kind === 'release'
-    ? flattenReleaseChildren(node.children ?? [], depth + 1)
-    : []
-  return (
-    <Fragment key={node.key}>
-      <RunRow
-        entry={node}
-        onClick={() => navigate(node)}
-        depth={depth}
-        summary={summary}
-        progressLabel={progressLabel}
-        actions={actionsFor(node)}
-      />
-      {node.kind === 'release'
-        ? pipelineFlat.map(({ entry, depth: d }) => (
-            <RunRow key={entry.key} entry={entry} onClick={() => navigate(entry)} depth={d} />
-          ))
-        : node.chainedChildren?.map((c) =>
-            c.kind === 'release'
-              // Skip the release wrapper row even when nested deeper than the
-              // top-level expansion site — its phases attach directly to its
-              // owner so the workflow reads as one continuous chain.
-              ? (
-                  <Fragment key={c.key}>
-                    {flattenReleaseChildren(c.children ?? [], depth + 1).map(({ entry, depth: d }) => (
-                      <RunRow key={entry.key} entry={entry} onClick={() => navigate(entry)} depth={d} />
-                    ))}
-                  </Fragment>
-                )
-              : renderChain(c, depth + 1, navigate, actionsFor)
-          )
-      }
-    </Fragment>
-  )
 }
 
 const PAGE_SIZE = 50
@@ -112,7 +43,6 @@ const ACTIVE_POLL_MS = 5000
 const IDLE_POLL_MS = 1000
 
 export function ProjectRunsTab({ projectName, jobsPaused = false }: ProjectRunsTabProps) {
-  const router = useRouter()
   const [jobs, setJobs] = useState<JobInfo[]>([])
   const [pendingReleaseQueued, setPendingReleaseQueued] = useState(false)
   const [queueItems, setQueueItems] = useState<AutomationQueueItem[]>([])
@@ -123,111 +53,7 @@ export function ProjectRunsTab({ projectName, jobsPaused = false }: ProjectRunsT
   const [filter, setFilter] = useState<Filter>({ kind: 'all' })
   const [search, setSearch] = useState('')
   const [expanded, setExpanded] = useState<Set<string>>(new Set())
-  const [releaseActionState, setReleaseActionState] = useState<{ jobId: string; label: string } | null>(null)
-  const [stepRetryState, setStepRetryState] = useState<{ jobId: string; label: string } | null>(null)
-  const [stopState, setStopState] = useState<{ jobId: string; label: string } | null>(null)
-  const [continueState, setContinueState] = useState<{ jobId: string; label: string } | null>(null)
-  const [rerunState, setRerunState] = useState<{ jobId: string; label: string } | null>(null)
-  const [queueActionState, setQueueActionState] = useState<{ itemId: string; label: string } | null>(null)
 
-  // Window after which a --resume against the source job's session is
-  // unsafe — model context gets compacted and the system/skills/docs that
-  // were only injected on first invocation aren't re-attached. Mirrors
-  // MAX_AGE_MS in app/api/jobs/[jobId]/continue/route.ts.
-  const CONTINUE_MAX_AGE_MS = 30 * 60 * 1000
-
-  const continueTargetFor = (e: Entry): string | null => {
-    if (e.status !== 'done' && e.status !== 'aborted') return null
-    if (!e.navSessionId) return null
-    if (!(e.kind === 'run' || e.kind.startsWith('agent:'))) return null
-    if (e.finishedAt === null) return null
-    if (Date.now() - e.finishedAt * 1000 > CONTINUE_MAX_AGE_MS) return null
-    // Surface Continue on non-zero exits, OR on clean exits when the outcome
-    // classifier flagged the run as unfinished / blocked on a clarifying
-    // question (those stop without an error code but still need a prod).
-    const failed = e.exitCode === null || e.exitCode !== 0
-    const classifierWantsContinue =
-      e.outcomeVerdict === 'needs_continue' || e.outcomeVerdict === 'asked_question'
-    if (!failed && !classifierWantsContinue) return null
-    return e.navJobId
-  }
-
-  const continueRun = async (e: Entry) => {
-    const targetJobId = continueTargetFor(e)
-    if (!targetJobId || jobsPaused) return
-    setContinueState({ jobId: targetJobId, label: 'continuing' })
-    try {
-      await continueJob(targetJobId)
-      await loadJobs()
-    } catch (error) {
-      console.error('[history] continue failed', error)
-      setContinueState({ jobId: targetJobId, label: 'failed' })
-      setTimeout(() => setContinueState((prev) => (prev?.jobId === targetJobId ? null : prev)), 2500)
-      return
-    }
-    setContinueState(null)
-  }
-
-  const rerunTargetFor = (e: Entry): string | null => {
-    if (jobsPaused || e.status === 'running' || e.key.startsWith('vgroup:')) return null
-    if (!(e.bucket === 'run' || e.bucket === 'agent' || e.bucket === 'other')) return null
-    return e.navJobId || null
-  }
-
-  const rerunRun = async (e: Entry) => {
-    const targetJobId = rerunTargetFor(e)
-    if (!targetJobId) return
-    setRerunState({ jobId: targetJobId, label: 'rerunning' })
-    try {
-      const res = await fetch(`/api/jobs/${encodeURIComponent(targetJobId)}/rerun`, { method: 'POST' })
-      const body = await res.json().catch(() => ({})) as { detail?: string }
-      if (!res.ok) throw new Error(body.detail || `HTTP ${res.status}`)
-      await loadJobs()
-    } catch (error) {
-      console.error('[history] rerun failed', error)
-      setRerunState({ jobId: targetJobId, label: 'failed' })
-      setTimeout(() => setRerunState((prev) => (prev?.jobId === targetJobId ? null : prev)), 2500)
-      return
-    }
-    setRerunState(null)
-  }
-
-  const stopTargetFor = (e: Entry): { jobId: string; mode: 'job' | 'release' } | null => {
-    if (e.key.startsWith('vgroup:')) return null
-    if (e.kind === 'release' && e.status === 'running') return { jobId: e.navJobId, mode: 'release' }
-    if (e.releaseOutcome?.status === 'running') {
-      return { jobId: e.releaseOutcome.releaseJobId, mode: 'release' }
-    }
-    if (e.status === 'running' && e.releaseId && PIPELINE_CHILD_KINDS.has(e.kind)) {
-      return { jobId: e.releaseId, mode: 'release' }
-    }
-    if (e.status === 'running') return { jobId: e.navJobId, mode: 'job' }
-    return null
-  }
-
-  const stopRun = async (e: Entry) => {
-    const target = stopTargetFor(e)
-    if (!target) return
-    const { jobId } = target
-    setStopState({ jobId, label: 'stopping' })
-    try {
-      const res = target.mode === 'release'
-        ? await fetch(`/api/projects/by-project/${encodeURIComponent(projectName)}/release/abort`, { method: 'POST' })
-        : await fetch(`/api/jobs/${encodeURIComponent(jobId)}`, { method: 'DELETE' })
-      const body = await res.json().catch(() => ({})) as { status?: string; detail?: string }
-      const abortPending = target.mode === 'release' && body.status === 'abort_pending'
-      if (!res.ok && !abortPending) {
-        throw new Error(body?.detail || `HTTP ${res.status}`)
-      }
-      setStopState({ jobId, label: abortPending ? 'abort pending' : 'stopped' })
-      setTimeout(() => setStopState((prev) => (prev?.jobId === jobId ? null : prev)), abortPending ? 2500 : 1500)
-      await loadJobs()
-    } catch (error) {
-      console.error('[history] stop failed', error)
-      setStopState({ jobId, label: 'failed' })
-      setTimeout(() => setStopState((prev) => (prev?.jobId === jobId ? null : prev)), 2500)
-    }
-  }
   const toggleExpanded = (key: string) => {
     setExpanded((prev) => {
       const next = new Set(prev)
@@ -253,11 +79,6 @@ export function ProjectRunsTab({ projectName, jobsPaused = false }: ProjectRunsT
     setTotalJobs(0)
     setSummary(null)
     setExpanded(new Set())
-    setReleaseActionState(null)
-    setStepRetryState(null)
-    setStopState(null)
-    setContinueState(null)
-    setRerunState(null)
     const scheduleNext = () => {
       if (!active) return
       const hasRunningJob = jobsRef.current.some((job) => job.status === 'running')
@@ -293,7 +114,6 @@ export function ProjectRunsTab({ projectName, jobsPaused = false }: ProjectRunsT
   useEffect(() => {
     let active = true
     setQueueItems([])
-    setQueueActionState(null)
     const poll = async () => {
       try {
         const data = await fetchAutomationQueue(projectName)
@@ -371,34 +191,15 @@ export function ProjectRunsTab({ projectName, jobsPaused = false }: ProjectRunsT
     return data
   }
 
-  const retryQueuedWork = async (item: AutomationQueueItem) => {
-    if (!item.retryAllowed) return
-    setQueueActionState({ itemId: item.id, label: 'retrying' })
-    try {
-      const result = await retryAutomationQueue(item.project)
-      setQueueItems(result.items)
-      await loadJobs()
-      setQueueActionState(null)
-    } catch (error) {
-      console.error('[history] queue retry failed', error)
-      setQueueActionState({ itemId: item.id, label: 'failed' })
-      setTimeout(() => setQueueActionState((prev) => (prev?.itemId === item.id ? null : prev)), 2500)
-    }
-  }
-
-  const cancelQueuedWork = async (item: AutomationQueueItem) => {
-    if (!item.cancelAllowed) return
-    setQueueActionState({ itemId: item.id, label: 'cancelling' })
-    try {
-      await cancelAutomationQueueItem(item)
-      await loadQueue()
-      setQueueActionState(null)
-    } catch (error) {
-      console.error('[history] queue cancel failed', error)
-      setQueueActionState({ itemId: item.id, label: 'failed' })
-      setTimeout(() => setQueueActionState((prev) => (prev?.itemId === item.id ? null : prev)), 2500)
-    }
-  }
+  const { navigate, releaseActionsFor, queueActionState, retryQueuedWork, cancelQueuedWork } = useRunActions({
+    projectName,
+    jobsPaused,
+    latestTopLevelReleaseKey,
+    loadJobs,
+    loadQueue,
+    setQueueItems,
+    setExpanded,
+  })
 
   // Counts reflect the flat entry list (pre-grouping) so the chip numbers
   // match what you'd see if you clicked into that filter.
@@ -486,210 +287,6 @@ export function ProjectRunsTab({ projectName, jobsPaused = false }: ProjectRunsT
     ? 'failed'
     : 'filtered'
 
-  const navigate = (e: Entry) => {
-    if (e.bucket === 'run' && e.navSessionId && e.kind !== 'release') {
-      router.push(`/project/${encodeURIComponent(projectName)}/terminal/${encodeURIComponent(e.navSessionId)}`)
-    } else {
-      router.push(`/project/${encodeURIComponent(projectName)}/terminal?job=${encodeURIComponent(e.navJobId)}`)
-    }
-  }
-
-  const retryRelease = async (source: Entry) => {
-    if (jobsPaused) return
-    setReleaseActionState({ jobId: source.navJobId, label: 'starting' })
-    try {
-      const result = await releaseProject(projectName, { queueIfBlocked: true, sourceJobId: source.navJobId })
-      await loadJobs()
-      if (result.release_job_id) {
-        setExpanded((prev) => new Set(prev).add(source.key))
-      }
-    } catch (error) {
-      console.error('[history] release retry failed', error)
-      setReleaseActionState({ jobId: source.navJobId, label: 'failed' })
-      setTimeout(() => setReleaseActionState(null), 2500)
-      return
-    }
-    setReleaseActionState(null)
-  }
-
-  const failedRetryableStep = (release: Entry): Entry | null => {
-    if (
-      release.status === 'running'
-      || release.finishedAt === null
-      || release.exitCode === null
-      || release.exitCode === 0
-    ) {
-      return null
-    }
-    const failed = (release.children ?? [])
-      .filter((child) => child.status === 'done' && child.exitCode !== null && child.exitCode !== 0)
-      .sort((a, b) => b.startedAt - a.startedAt)[0]
-    return failed && (failed.kind === 'commit' || failed.kind === 'push') ? failed : null
-  }
-
-  const retryPipelineStep = async (release: Entry, step: Entry) => {
-    if (jobsPaused) return
-    setStepRetryState({ jobId: step.navJobId, label: 'retrying' })
-    try {
-      if (step.kind === 'commit') {
-        await pushProject(projectName, { commit: true, releaseId: release.navJobId ?? null })
-      } else if (step.kind === 'push') {
-        await pushProject(projectName, { releaseId: release.navJobId ?? null })
-      }
-      await loadJobs()
-      setExpanded((prev) => new Set(prev).add(release.key))
-    } catch (error) {
-      console.error('[history] step retry failed', error)
-      setStepRetryState({ jobId: step.navJobId, label: 'failed' })
-      setTimeout(() => setStepRetryState(null), 2500)
-      return
-    }
-    setStepRetryState(null)
-  }
-
-  const releaseActionsFor = (e: Entry): React.ReactNode => {
-    // The "release" is no longer a separate row: an agent that triggered a
-    // release carries that release's actions on its own row. `releaseTarget`
-    // is the entry whose navJobId / failed-step we attribute buttons to —
-    // the release itself when `e` is a release row, otherwise the agent's
-    // owned release (so the agent row gets Retry/Continue release).
-    const ownedRelease = e.kind !== 'release'
-      ? e.chainedChildren?.find((c) => c.kind === 'release') ?? null
-      : null
-    const releaseTarget: Entry = e.kind === 'release' ? e : (ownedRelease ?? e)
-    const outcomeStatus = e.releaseOutcome?.status
-      ?? (releaseTarget.kind === 'release' && (releaseTarget.status === 'done' || releaseTarget.status === 'aborted') && releaseTarget.exitCode !== null && releaseTarget.exitCode !== 0
-        ? (releaseTarget.children?.length ?? 0) === 0 ? 'blocked' : 'failed'
-        : null)
-    // Only the latest release for the project should offer continue/retry —
-    // older failed releases reflect a past project state, and retrying them
-    // would silently rerun on whatever's currently checked out.
-    const isLatestRelease = releaseTarget.kind === 'release' && releaseTarget.key === latestTopLevelReleaseKey
-    const isRealRelease = releaseTarget.kind === 'release' && !releaseTarget.key.startsWith('vgroup:')
-    const retryableStep = isLatestRelease && isRealRelease ? failedRetryableStep(releaseTarget) : null
-    const stepRetryButton = retryableStep ? (
-      (() => {
-        const active = stepRetryState?.jobId === retryableStep.navJobId
-        const label = retryableStep.kind === 'push' ? 'Retry push' : 'Retry commit'
-        return (
-          <Button
-            type="button"
-            variant="warning"
-            size="sm"
-            className="h-7 px-2 text-[11px]"
-            disabled={jobsPaused || active}
-            onClick={() => retryPipelineStep(releaseTarget, retryableStep)}
-            title={jobsPaused
-              ? 'Jobs are paused globally. Resume jobs to retry this step.'
-              : `Retry the failed ${retryableStep.kind} step for this release`}
-          >
-            {active ? stepRetryState?.label : label}
-          </Button>
-        )
-      })()
-    ) : null
-    const releaseButton = isLatestRelease && (outcomeStatus === 'blocked' || outcomeStatus === 'failed') ? (
-      (() => {
-        const active = releaseActionState?.jobId === releaseTarget.navJobId
-        const label = active ? releaseActionState.label : outcomeStatus === 'blocked' ? 'Retry release' : 'Continue release'
-        const releaseBlocked = jobsPaused || active
-        return (
-          <Button
-            type="button"
-            variant="primary"
-            size="sm"
-            className="h-7 px-2 text-[11px]"
-            disabled={releaseBlocked}
-            onClick={() => retryRelease(releaseTarget)}
-            title={jobsPaused
-              ? 'Jobs are paused globally. Resume jobs to start a release.'
-              : 'Start a new release attempt from the current project state'}
-          >
-            {label}
-          </Button>
-        )
-      })()
-    ) : null
-    // Ordinary running jobs are cancelled through the job endpoint. Running
-    // releases use the pipeline abort route so the active step is stopped and
-    // the pipeline lock is finalized. Agent/run rows may look running only
-    // because an attached release is still active; in that case target the
-    // release, not the already-finished parent job.
-    const stopTarget = stopTargetFor(e)
-    const showStop = stopTarget != null
-    const stopActive = stopTarget != null && stopState?.jobId === stopTarget.jobId
-    const stopButton = showStop ? (
-      <Button
-        type="button"
-        variant="danger"
-        size="sm"
-        className="h-7 px-2 text-[11px]"
-        disabled={stopActive}
-        onClick={() => stopRun(e)}
-        title="Send SIGTERM and mark this run cancelled"
-      >
-        {stopActive ? stopState?.label : 'Stop'}
-      </Button>
-    ) : null
-    const continueTargetJobId = continueTargetFor(e)
-    const continueButton = continueTargetJobId ? (
-      (() => {
-        const active = continueState?.jobId === continueTargetJobId
-        return (
-          <Button
-            type="button"
-            variant="primary"
-            size="sm"
-            className="h-7 px-2 text-[11px]"
-            disabled={jobsPaused || active}
-            onClick={() => continueRun(e)}
-            title={jobsPaused
-              ? 'Jobs are paused globally. Resume jobs to continue this run.'
-              : 'Resume the previous CLI session and prod the agent to keep going'}
-          >
-            {active ? continueState?.label : 'Continue'}
-          </Button>
-        )
-      })()
-    ) : null
-    const rerunTargetJobId = rerunTargetFor(e)
-    const rerunButton = rerunTargetJobId ? (
-      (() => {
-        const active = rerunState?.jobId === rerunTargetJobId
-        return (
-          <Button
-            type="button"
-            variant="secondary"
-            size="sm"
-            className="h-7 px-2 text-[11px]"
-            disabled={active}
-            onClick={() => rerunRun(e)}
-            title={jobsPaused ? 'Jobs are paused globally. Resume jobs to rerun this entry.' : 'Start a new run from this entry’s saved prompt'}
-          >
-            {active ? rerunState?.label : 'Rerun'}
-          </Button>
-        )
-      })()
-    ) : null
-    const buttonItems: Array<{ key: string; node: React.ReactNode } | null> = [
-      stopButton ? { key: 'stop', node: stopButton } : null,
-      continueButton ? { key: 'continue', node: continueButton } : null,
-      rerunButton ? { key: 'rerun', node: rerunButton } : null,
-      stepRetryButton ? { key: `retry-${retryableStep?.kind ?? 'step'}`, node: stepRetryButton } : null,
-      releaseButton ? { key: 'release', node: releaseButton } : null,
-    ]
-    const buttons = buttonItems.filter((button): button is { key: string; node: React.ReactNode } => button !== null)
-    if (buttons.length === 0) return null
-    if (buttons.length === 1) return buttons[0].node
-    return (
-      <div className="flex flex-wrap items-center justify-end gap-1.5">
-        {buttons.map((button) => (
-          <Fragment key={button.key}>{button.node}</Fragment>
-        ))}
-      </div>
-    )
-  }
-
   return (
     <div className="mt-4">
       {/* Release-queued banner: an agent/run finished and tried to trigger
@@ -774,107 +371,20 @@ export function ProjectRunsTab({ projectName, jobsPaused = false }: ProjectRunsT
           </div>
         </ErrorCallout>
       )}
-      {/* Search + summary */}
-      <div className="mb-3 rounded-lg border border-border bg-bg-secondary">
-        <div className="grid gap-3 border-b border-border p-3 lg:grid-cols-[minmax(280px,1fr)_auto] lg:items-start">
-        <div>
-          <SearchField
-            value={search}
-            onChange={setSearch}
-            placeholder="Search prompts, models, session ids…"
-            leadingGlyph="⌕"
-            inputClassName="w-full pl-8 pr-8 py-1.5 text-sm bg-bg-primary border border-border rounded-md text-text-primary placeholder:text-text-tertiary focus:outline-none focus:ring-2 focus:ring-accent/20 focus:border-accent transition-colors"
-          />
-          <div className="mt-2 flex items-center gap-2 text-[11px] text-text-tertiary">
-            <span className="font-mono">
-              showing {filtered.length} of {summary?.total ?? (totalJobs || entries.length)}
-            </span>
-            {(summary?.byStatus.running ?? loadedTotals.running) > 0 && (
-              <span className="font-mono text-status-info">
-                {summary?.byStatus.running ?? loadedTotals.running} running
-              </span>
-            )}
-            {(search.trim() || filter.kind !== 'all') && (
-              <Button
-                type="button"
-                variant="link"
-                size="sm"
-                className="font-mono text-[11px]"
-                onClick={() => { setSearch(''); setFilter({ kind: 'all' }) }}
-              >
-                clear filters
-              </Button>
-            )}
-          </div>
-        </div>
-
-        <div className="grid grid-cols-2 gap-2 sm:grid-cols-4 lg:min-w-[520px]">
-          <div className="rounded-md border border-border bg-bg-primary px-3 py-2">
-            <div className="text-[10px] uppercase tracking-wider text-text-tertiary">entries</div>
-            <div className="mt-0.5 font-mono text-base font-semibold text-text-primary tabular-nums">{summary?.total ?? entries.length}</div>
-          </div>
-          <div className="rounded-md border border-border bg-bg-primary px-3 py-2">
-            <div className="text-[10px] uppercase tracking-wider text-text-tertiary">running</div>
-            <div className="mt-0.5 font-mono text-base font-semibold text-status-info tabular-nums">{summary?.byStatus.running ?? loadedTotals.running}</div>
-          </div>
-          <div className="rounded-md border border-border bg-bg-primary px-3 py-2">
-            <div className="text-[10px] uppercase tracking-wider text-text-tertiary">tokens</div>
-            <div className="mt-0.5 font-mono text-base font-semibold text-text-primary tabular-nums">{formatTokens(summary?.tokens.total ?? loadedTotals.tokens)}</div>
-          </div>
-          <div className="rounded-md border border-border bg-bg-primary px-3 py-2" title="Total cost for all runs this calendar month">
-            <div className="text-[10px] uppercase tracking-wider text-text-tertiary">month cost</div>
-            <div className="mt-0.5 font-mono text-base font-semibold text-accent tabular-nums">{formatCost(thisMonthCost)}</div>
-          </div>
-        </div>
-        </div>
-        <div className="flex items-center gap-1.5 overflow-x-auto p-1 scrollbar-thin scrollbar-thumb-border scrollbar-track-transparent" style={{ scrollbarWidth: 'thin' }}>
-          {([
-            { f: { kind: 'all' } as Filter, label: 'all', tone: 'accent' },
-            { f: { kind: 'running' } as Filter, label: 'running', tone: 'info' },
-            { f: { kind: 'failed' } as Filter, label: 'failed', tone: 'error' },
-          ] as const).map(({ f, label, tone }) => {
-            const count = counts[f.kind] ?? 0
-            if ((f.kind === 'running' || f.kind === 'failed') && count === 0 && filterKey(filter) !== filterKey(f)) return null
-            const active = filterKey(filter) === filterKey(f)
-            return (
-              <PillButton
-                key={label}
-                type="button"
-                tone={tone}
-                size="sm"
-                active={active}
-                className={[
-                  'shrink-0 px-2.5 font-mono',
-                  !active && tone === 'info' ? 'hover:text-status-info' : undefined,
-                  !active && tone === 'error' ? 'hover:text-status-error' : undefined,
-                ].filter(Boolean).join(' ')}
-                onClick={() => setFilter(f)}
-              >
-                {label} <span className="opacity-70">{count}</span>
-              </PillButton>
-            )
-          })}
-          <span className="shrink-0 h-5 w-px bg-border mx-1" aria-hidden />
-          {(['run', 'release', 'review', 'test', 'fix', 'fix-ci', 'commit', 'push', 'mark-dod', 'pr-wait', 'agent', 'other'] as const).map((b) => {
-            const count = counts[b] ?? 0
-            const active = filter.kind === 'bucket' && filter.bucket === b
-            if (count === 0 && !active) return null
-            return (
-              <PillButton
-                key={b}
-                type="button"
-                tone="accent"
-                size="sm"
-                active={active}
-                className="shrink-0 px-2.5 font-mono"
-                onClick={() => setFilter({ kind: 'bucket', bucket: b })}
-              >
-                {KIND_LABEL[b]} <span className="opacity-70">{count}</span>
-              </PillButton>
-            )
-          })}
-        </div>
-      </div>
+      <RunsHeader
+        search={search}
+        onSearchChange={setSearch}
+        filter={filter}
+        onFilterChange={setFilter}
+        onClearFilters={() => { setSearch(''); setFilter({ kind: 'all' }) }}
+        filteredCount={filtered.length}
+        entriesCount={entries.length}
+        totalJobs={totalJobs}
+        summary={summary}
+        loadedTotals={loadedTotals}
+        thisMonthCost={thisMonthCost}
+        counts={counts}
+      />
 
       {loading ? (
         <ProjectRunsLoadingState />
