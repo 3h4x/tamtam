@@ -227,6 +227,47 @@ test.describe('Agents tab last-run lifecycle UI', () => {
   });
 
   // -------------------------------------------------------------------------
+  // Agents tab — never-run → succeeded
+  //
+  // The cell must transition directly from "never" to "Ran X ago" when a
+  // completed job (exit_code 0) first appears — without an intermediate
+  // "running" state being visible. This differs from the running→succeeded
+  // path in that the UI polls from an empty job list straight to a finished
+  // one, exercising the branch where lastRunJob is initially null.
+  // -------------------------------------------------------------------------
+  test('last-run cell goes from "never" to "Ran" when a succeeded job first appears without reload', async ({
+    page,
+  }) => {
+    let phase: 'never-run' | 'succeeded' = 'never-run';
+
+    await stubProjectShellRoutes(page);
+    await page.route(
+      (url) => url.pathname === '/api/jobs' && url.searchParams.get('project') === PROJECT,
+      (route: Route) => {
+        const jobs = phase === 'succeeded' ? [makeAgentJob('done', 0)] : [];
+        route.fulfill({ json: { jobs, total: jobs.length, pendingReleaseProjects: [] } });
+      },
+    );
+
+    await page.goto(`/project/${PROJECT}/agents`);
+
+    const row = agentRow(page);
+    await expect(row).toBeVisible({ timeout: 8_000 });
+    await expect(row.getByText('never', { exact: true })).toBeVisible();
+    // No running badge in the initial state.
+    await expect(row.locator('span[title^="Running"]')).toHaveCount(0);
+
+    phase = 'succeeded';
+
+    // Cell must flip to "Ran X ago" without any intermediate running state.
+    await expect(row.locator('span[title^="Ran"]')).toBeVisible({ timeout: 12_000 });
+    await expect(row.getByText('just now')).toBeVisible({ timeout: 12_000 });
+    await expect(row.getByText('never', { exact: true })).toHaveCount(0);
+    await expect(row.locator('span[title^="Failed"]')).toHaveCount(0);
+    await expect(row.locator('span[title^="Cancelled"]')).toHaveCount(0);
+  });
+
+  // -------------------------------------------------------------------------
   // Agents tab — running → succeeded
   //
   // The component computes the last-run span title as:
