@@ -89,6 +89,43 @@ async function stubWorkflowRunsShell(
 }
 
 test.describe('Workflow-runs paused lifecycle transition', () => {
+  test('pause switch flips to paused while an active run keeps rendering until it actually completes', async ({
+    page,
+  }) => {
+    let status: WorkflowStatus = 'running';
+    let jobsPaused = false;
+
+    await stubWorkflowRunsShell(page, () => status, () => jobsPaused);
+
+    await page.goto('/workflow-runs');
+
+    const pauseSwitch = page.getByRole('switch');
+    const activePanel = page.getByLabel('Active workflow runs');
+    const runningRow = activePanel.getByRole('link', {
+      name: new RegExp(`Workflow run release for ${PROJECT} state running`),
+    });
+
+    await expect(pauseSwitch).toHaveText('jobs running', { timeout: 8_000 });
+    await expect(pauseSwitch).toHaveAttribute('aria-checked', 'false');
+    await expect(runningRow).toBeVisible({ timeout: 8_000 });
+    await expect(page.getByText('1 running')).toBeVisible({ timeout: 8_000 });
+
+    jobsPaused = true;
+
+    await expect(pauseSwitch).toHaveText('jobs paused', { timeout: 12_000 });
+    await expect(pauseSwitch).toHaveAttribute('aria-checked', 'true');
+    await expect(runningRow).toBeVisible({ timeout: 12_000 });
+    await expect(activePanel).toBeVisible({ timeout: 12_000 });
+    await expect(page.getByText('1 running')).toBeVisible({ timeout: 12_000 });
+
+    status = 'completed';
+
+    await expect(activePanel).toHaveCount(0, { timeout: 12_000 });
+    const completedRow = page.getByRole('row').filter({ hasText: PROJECT }).filter({ hasText: 'exit 0' });
+    await expect(completedRow).toBeVisible({ timeout: 12_000 });
+    await expect(page.getByText('1 running')).toHaveCount(0, { timeout: 12_000 });
+  });
+
   test('active run completes while jobs are paused without leaving an orphan active panel', async ({
     page,
   }) => {
