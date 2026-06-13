@@ -1671,4 +1671,71 @@ test.describe('Job lifecycle UI badges', () => {
     // work_summary is present and should also be visible as the failure detail.
     await expect(row.getByText('Agent process could not be launched.', { exact: false })).toBeVisible();
   });
+
+  // -------------------------------------------------------------------------
+  // History tab — running filter clears and job appears in all filter on success
+  //
+  // The filter-transition tests for failure (exit 4) and cancellation (exit -3)
+  // are already covered. This test pins the success path: the running filter
+  // empties when the job finishes with exit_code=0, and switching back to "all"
+  // shows the settled row with a "done" badge — no orphaned running badge.
+  // -------------------------------------------------------------------------
+  test('running filter clears and all-filter shows done badge when a running job succeeds via poll', async ({
+    page,
+  }) => {
+    let serveRunning = true;
+    const liveText = 'Linting all modified TypeScript files...';
+    const doneText = 'Lint completed. No issues found.';
+
+    await mockJobScenario(page, () => [
+      makeJob({
+        id: 'job-live-history-filter-success',
+        kind: 'test',
+        status: serveRunning ? 'running' : 'done',
+        exit_code: serveRunning ? null : 0,
+        started_at: now() - 40,
+        finished_at: serveRunning ? null : now() - 5,
+        session_id: 'sess-live-history-filter-success',
+        work_summary: serveRunning ? liveText : doneText,
+      }),
+    ]);
+
+    await page.goto(`/project/${PROJECT}/history`);
+
+    const row = page.getByRole('button')
+      .filter({ hasText: 'test' })
+      .filter({ hasText: 'started' })
+      .first();
+    await expect(row).toBeVisible();
+    await expect(row.getByLabel('running')).toBeVisible();
+
+    await page.getByRole('button', { name: /^running \d+$/i }).click();
+    await expect(page.getByRole('button', { name: /^running 1$/i })).toBeVisible();
+    await expect(row.getByText('Running tests…')).toBeVisible();
+
+    serveRunning = false;
+
+    // Running filter empties — no stale row left under the running view.
+    await expect(page.getByText('Nothing is running right now')).toBeVisible({
+      timeout: 12_000,
+    });
+    await expect(row).toHaveCount(0);
+
+    // The "failed" filter chip must NOT appear for a successful completion.
+    await expect(page.getByRole('button', { name: /^failed \d+$/i })).toHaveCount(0, {
+      timeout: 12_000,
+    });
+
+    // Switch to "all" and verify the settled row shows "done" — no running badge.
+    await page.getByRole('button', { name: /^all \d+$/i }).click();
+
+    const doneRow = page.getByRole('button')
+      .filter({ hasText: 'test' })
+      .filter({ hasText: doneText })
+      .first();
+    await expect(doneRow).toBeVisible({ timeout: 12_000 });
+    await expect(doneRow.getByLabel('done')).toBeVisible();
+    await expect(doneRow.getByLabel('running')).toHaveCount(0);
+    await expect(doneRow.getByText('running', { exact: true })).toHaveCount(0);
+  });
 });
