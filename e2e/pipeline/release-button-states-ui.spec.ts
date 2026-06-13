@@ -55,6 +55,7 @@ interface ScenarioOpts {
   jobs?: Array<Record<string, unknown>>;
   branch?: { branch: string; defaultBranch: string; commitsAhead: number | null };
   openPrBranches?: Array<{ branch: string; number: number }>;
+  jobsPaused?: boolean;
 }
 
 async function stubRoutes(page: Page, opts: ScenarioOpts = {}): Promise<void> {
@@ -120,7 +121,7 @@ async function stubRoutes(page: Page, opts: ScenarioOpts = {}): Promise<void> {
     route.fulfill({ json: { notifications: [] } }),
   );
   await page.route('**/api/settings', (route: Route) =>
-    route.fulfill({ json: { settings: { jobs_paused: 'false' }, github_owner: '' } }),
+    route.fulfill({ json: { settings: { jobs_paused: opts.jobsPaused ? 'true' : 'false' }, github_owner: '' } }),
   );
   await page.route(
     (url) => url.pathname === '/api/jobs' && url.searchParams.get('project') === PROJECT,
@@ -251,4 +252,46 @@ test('Create PR button is disabled with an explanatory title when feature branch
   await expect(createPrBtn).toBeDisabled();
   await expect(createPrBtn).toHaveAttribute('title', /no commits ahead/i);
   await expect(createPrBtn).toHaveAttribute('title', /feature\/empty/i);
+});
+
+// ---------------------------------------------------------------------------
+// Test 6: jobs_paused — Release button is disabled with global-pause title
+// ---------------------------------------------------------------------------
+test('Release button is disabled with a global-pause title when jobs_paused is true', async ({
+  page,
+}) => {
+  await stubRoutes(page, {
+    task: { changes: 3, unpushed: 0 },
+    jobsPaused: true,
+  });
+
+  await page.goto(`/project/${PROJECT}/issues`);
+
+  const releaseBtn = page.getByRole('button', { name: /^Release$/ });
+  await expect(releaseBtn).toBeVisible({ timeout: 8_000 });
+  await expect(releaseBtn).toBeDisabled();
+  await expect(releaseBtn).toHaveAttribute('title', /jobs are paused globally/i);
+  await expect(releaseBtn).toHaveAttribute('title', /resume jobs to start a release/i);
+});
+
+// ---------------------------------------------------------------------------
+// Test 7: jobs_paused on feature branch — Create PR button shows paused title
+// ---------------------------------------------------------------------------
+test('Create PR button is disabled with a global-pause title when jobs_paused is true', async ({
+  page,
+}) => {
+  await stubRoutes(page, {
+    task: { changes: 0, unpushed: 2 },
+    branch: { branch: 'feature/paused-branch', defaultBranch: 'master', commitsAhead: 2 },
+    openPrBranches: [],
+    jobsPaused: true,
+  });
+
+  await page.goto(`/project/${PROJECT}/issues`);
+
+  const createPrBtn = page.getByRole('button', { name: 'Create PR' });
+  await expect(createPrBtn).toBeVisible({ timeout: 8_000 });
+  await expect(createPrBtn).toBeDisabled();
+  await expect(createPrBtn).toHaveAttribute('title', /jobs are paused globally/i);
+  await expect(createPrBtn).toHaveAttribute('title', /resume jobs to create a pr/i);
 });
