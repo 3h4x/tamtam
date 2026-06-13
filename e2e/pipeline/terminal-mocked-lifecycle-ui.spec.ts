@@ -657,16 +657,47 @@ test.describe('Mocked terminal lifecycle UI', () => {
     await expect(page.getByText(/receiving output|waiting for output/)).toHaveCount(0)
   })
 
-  test('terminal landing page stays idle when a non-release run starts elsewhere', async ({
+  test('terminal landing page auto-attaches when an ordinary run starts elsewhere', async ({
     page,
   }) => {
     let serveRunningRun = false
     let runningRunPolls = 0
+    let finishStream!: () => void
+    const streamDone = new Promise<void>((resolve) => {
+      finishStream = resolve
+    })
 
     await stubProjectShell(page, () => {
       if (!serveRunningRun) return []
       runningRunPolls += 1
       return [runningTerminalRunJob()]
+    })
+    await page.route(`**/api/jobs/${RUN_JOB_ID}`, (route: Route) =>
+      route.fulfill({
+        json: runningTerminalRunJob(),
+      }),
+    )
+    await page.route(`**/api/streaming/${RUN_JOB_ID}`, async (route: Route) => {
+      await streamDone
+      await route.fulfill({
+        status: 200,
+        headers: {
+          'content-type': 'text/event-stream',
+          'cache-control': 'no-cache',
+        },
+        body: [
+          'data: Ordinary run output reached the landing page after auto-attach.',
+          '',
+          'event: done',
+          `data: ${JSON.stringify({
+            exitCode: 0,
+            sessionId: RUN_SESSION_ID,
+            provider: 'claude',
+            duration: 900,
+          })}`,
+          '',
+        ].join('\n'),
+      })
     })
 
     await page.goto(`/project/${PROJECT}/terminal`)
@@ -677,13 +708,25 @@ test.describe('Mocked terminal lifecycle UI', () => {
     serveRunningRun = true
 
     await expect.poll(() => runningRunPolls, { timeout: 4_000 }).toBeGreaterThan(0)
-    await expect(page).toHaveURL(`/project/${PROJECT}/terminal`)
-    await expect(page.getByRole('button', { name: 'new' })).toBeVisible()
-    await expect(page.getByText('live run')).toHaveCount(0)
+    await expect(page).toHaveURL(new RegExp(`/project/${PROJECT}/terminal/${RUN_SESSION_ID}$`), {
+      timeout: 12_000,
+    })
+    await expect(page.getByText('live run')).toBeVisible({ timeout: 8_000 })
+    await expect(page.getByLabel('live run spinner')).toBeVisible({ timeout: 8_000 })
+    await expect(page.getByText('Keep the landing page idle.')).toBeVisible({ timeout: 8_000 })
     await expect(page.getByTitle('View unified release trace')).toHaveCount(0)
+
+    serveRunningRun = false
+    finishStream()
+
+    await expect(
+      page.getByText('Ordinary run output reached the landing page after auto-attach.'),
+    ).toBeVisible({
+      timeout: 8_000,
+    })
   })
 
-  test('terminal landing page ignores a live run until a release starts, then auto-attaches to the release', async ({
+  test('terminal landing page stays on an attached ordinary run when a release starts later', async ({
     page,
   }) => {
     let phase: 'idle' | 'run-only' | 'run-and-release' = 'idle'
@@ -714,21 +757,19 @@ test.describe('Mocked terminal lifecycle UI', () => {
     phase = 'run-only'
 
     await expect.poll(() => runOnlyPolls, { timeout: 4_000 }).toBeGreaterThan(0)
-    await expect(page).toHaveURL(`/project/${PROJECT}/terminal`)
-    await expect(page.getByRole('button', { name: 'new' })).toBeVisible()
-    await expect(page.getByText('live run')).toHaveCount(0)
+    await expect(page).toHaveURL(new RegExp(`/project/${PROJECT}/terminal/${RUN_SESSION_ID}$`), {
+      timeout: 12_000,
+    })
+    await expect(page.getByText('live run')).toBeVisible({ timeout: 8_000 })
     await expect(page.getByTitle('View unified release trace')).toHaveCount(0)
 
     phase = 'run-and-release'
 
-    await expect(page).toHaveURL(
-      new RegExp(`/project/${PROJECT}/terminal\\?job=${encodeURIComponent(RELEASE_JOB_ID)}`),
-      { timeout: 12_000 },
-    )
-    await expect(page.getByText('live run')).toBeVisible({ timeout: 8_000 })
-    await expect(page.getByTitle('View unified release trace').first()).toBeVisible({
-      timeout: 8_000,
+    await expect(page).toHaveURL(new RegExp(`/project/${PROJECT}/terminal/${RUN_SESSION_ID}$`), {
+      timeout: 12_000,
     })
+    await expect(page.getByText('live run')).toBeVisible({ timeout: 8_000 })
+    await expect(page.getByTitle('View unified release trace')).toHaveCount(0)
   })
 
   test('terminal landing page auto-attaches to the newest running release when multiple releases are live', async ({

@@ -32,6 +32,20 @@ interface JobDict {
   work_summary: string | null
 }
 
+function landingAutoAttachHref(projectName: string, job: JobDict): string | null {
+  if (job.status !== 'running') return null
+  if (job.kind === 'release') {
+    return `/project/${encodeURIComponent(projectName)}/terminal?job=${encodeURIComponent(job.id)}`
+  }
+  if (job.kind === 'run') {
+    if (job.session_id) {
+      return `/project/${encodeURIComponent(projectName)}/terminal/${encodeURIComponent(job.session_id)}`
+    }
+    return `/project/${encodeURIComponent(projectName)}/terminal?job=${encodeURIComponent(job.id)}`
+  }
+  return null
+}
+
 function shouldRedirectJobParamToSession(data: Partial<JobDict>): data is Partial<JobDict> & { session_id: string } {
   if (!data.session_id || !isRestorableSessionKind(data.kind ?? '')) return false
   if (data.kind === 'run') return true
@@ -430,9 +444,8 @@ export function useTerminalBootstrap({
   }, [initialSessionId, jobParam, projectName])
 
   // Fresh terminal landing pages should attach to newly-started release jobs
-  // so the operator sees the live pipeline without manually refreshing.
-  // Do not hijack the interactive terminal for unrelated `run` / `agent:*`
-  // jobs that started elsewhere.
+  // and ordinary runs so the operator sees live work without manually
+  // refreshing. Agent jobs still stay out of the interactive terminal.
   useEffect(() => {
     if (initialSessionId || jobParam) return
     let cancelled = false
@@ -446,19 +459,18 @@ export function useTerminalBootstrap({
         cur.pendingAutoSubmit
       ) return
       try {
-        // Polled every 1s on the terminal page — pull only running release
-        // rows to keep this cheap. Client-side filter remains so tests with
-        // generic /api/jobs mocks behave the same as before.
-        const res = await fetch(`/api/jobs?project=${encodeURIComponent(projectName)}&kind=release&status=running&limit=5`)
+        const res = await fetch(`/api/jobs?project=${encodeURIComponent(projectName)}&status=running&limit=10`)
         if (!res.ok) return
         const data = await res.json()
         const runningJobs: JobDict[] = (data.jobs ?? [])
-          .filter((job: JobDict) => job.kind === 'release' && job.status === 'running')
+          .filter((job: JobDict) => job.status === 'running' && (job.kind === 'release' || job.kind === 'run'))
           .sort((a: JobDict, b: JobDict) => b.started_at - a.started_at)
         const target = runningJobs[0]
         if (!target || attachedExternalJobRef.current === target.id) return
+        const href = landingAutoAttachHref(projectName, target)
+        if (!href) return
         attachedExternalJobRef.current = target.id
-        router.replace(`/project/${encodeURIComponent(projectName)}/terminal?job=${encodeURIComponent(target.id)}`)
+        router.replace(href)
       } catch {}
     }
 

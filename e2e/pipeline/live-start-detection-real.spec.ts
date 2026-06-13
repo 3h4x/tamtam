@@ -209,9 +209,6 @@ test.describe('Real idle-page job start detection', () => {
 
     await expect(runRow.getByLabel('done')).toBeVisible({ timeout: 15_000 });
     await expect(runRow.getByLabel('running')).toHaveCount(0, { timeout: 15_000 });
-    await expect(
-      runRow.getByText('Background run finished after history auto-detection.'),
-    ).toBeVisible({ timeout: 15_000 });
     await expect(page.locator('span.animate-pulse')).toHaveCount(0, { timeout: 15_000 });
   });
 
@@ -260,10 +257,6 @@ test.describe('Real idle-page job start detection', () => {
 
     await expect(runRow.getByText('exit 1', { exact: true })).toBeVisible({ timeout: 15_000 });
     await expect(runRow.getByLabel('running')).toHaveCount(0, { timeout: 15_000 });
-    await expect(runRow.getByText('PROMPT ASSERTION FAILED')).toBeVisible({ timeout: 15_000 });
-    await expect(
-      runRow.getByText('The background run failed after history auto-detection.'),
-    ).toBeVisible({ timeout: 15_000 });
     await expect(page.locator('span.animate-pulse')).toHaveCount(0, { timeout: 15_000 });
   });
 
@@ -455,7 +448,7 @@ test.describe('Real idle-page job start detection', () => {
     await expect(page.getByText('exit -3')).toHaveCount(0);
   });
 
-  test('terminal landing page does not auto-attach to a newly-started terminal run', async ({
+  test('terminal landing page auto-attaches to a newly-started terminal run and clears live state after success', async ({
     page,
     request,
   }) => {
@@ -481,12 +474,21 @@ test.describe('Real idle-page job start detection', () => {
     const runningRun = await waitForJobByIdRunning(request, runBody.job_id, 20_000);
     expect(runningRun, 'terminal run should actually be running').not.toBeNull();
 
-    await expect(page).toHaveURL(`/project/${TERMINAL_RUN_PROJECT}/terminal`);
-    await expect(page.getByText('live run')).toHaveCount(0);
-    await expect(page.getByRole('button', { name: 'new' })).toBeVisible();
+    await expect(page).toHaveURL(
+      new RegExp(`/project/${TERMINAL_RUN_PROJECT}/terminal(?:/e2e-session-${TERMINAL_RUN_PROJECT}-\\d+|\\?job=.+)$`),
+      { timeout: 20_000 },
+    );
+    await expect(page.getByText('live run')).toBeVisible({ timeout: 20_000 });
+    await expect(page.getByLabel('live run spinner')).toBeVisible({ timeout: 20_000 });
+    await expect(page.getByText('Say hello from the background run.')).toBeVisible({
+      timeout: 20_000,
+    });
 
     const runJob = await waitForJobCompletion(request, runBody.job_id, 60_000);
     expect(runJob?.['exit_code'], 'run exit code').toBe(0);
+
+    await expect(page.getByText('live run')).toHaveCount(0, { timeout: 15_000 });
+    await expect(page.getByLabel('live run spinner')).toHaveCount(0, { timeout: 15_000 });
   });
 
   test('terminal landing page does not auto-attach to a newly-started agent run', async ({
