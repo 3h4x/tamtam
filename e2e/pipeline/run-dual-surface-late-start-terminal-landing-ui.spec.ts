@@ -319,4 +319,98 @@ test.describe('Mocked ordinary run late-start lifecycle from idle history and te
       timeout: 12_000,
     })
   })
+
+  test('both surfaces detect a newly-started run and settle to cancelled without reload', async ({
+    page,
+  }) => {
+    let serveRunningRun = false
+    let runFinished = false
+    let runningRunPolls = 0
+    let finishStream!: () => void
+    const streamDone = new Promise<void>((resolve) => {
+      finishStream = resolve
+    })
+
+    await stubSharedRoutes(page.context(), () => {
+      if (!serveRunningRun) return []
+      runningRunPolls += 1
+      return runFinished
+        ? [finishedTerminalRunJob(-3, 'Late-start dual-surface run was cancelled.')]
+        : [runningTerminalRunJob()]
+    })
+    await page.context().route(`**/api/jobs/${RUN_JOB_ID}`, (route: Route) =>
+      route.fulfill({
+        json: runFinished
+          ? finishedTerminalRunJob(-3, 'Late-start dual-surface run was cancelled.')
+          : runningTerminalRunJob(),
+      }),
+    )
+    await page.context().route(`**/api/streaming/${RUN_JOB_ID}`, async (route: Route) => {
+      await streamDone
+      await route.fulfill({
+        status: 200,
+        headers: { 'content-type': 'text/event-stream', 'cache-control': 'no-cache' },
+        body: [
+          'data: Late-start dual-surface run was cancelled.',
+          '',
+          'event: done',
+          `data: ${JSON.stringify({ exitCode: -3, sessionId: RUN_SESSION_ID, provider: 'claude', duration: 450 })}`,
+          '',
+        ].join('\n'),
+      })
+    })
+
+    const terminalPage = await page.context().newPage()
+    await Promise.all([
+      page.goto(`/project/${PROJECT}/history`),
+      terminalPage.goto(`/project/${PROJECT}/terminal`),
+    ])
+
+    await expect(page.getByText('No runs yet').first()).toBeVisible({ timeout: 8_000 })
+    await expect(terminalPage.getByRole('button', { name: 'new' })).toBeVisible({
+      timeout: 8_000,
+    })
+    await expect(terminalPage.getByText('live run')).toHaveCount(0)
+
+    serveRunningRun = true
+
+    await expect.poll(() => runningRunPolls, { timeout: 4_000 }).toBeGreaterThan(0)
+
+    const runRow = page.getByRole('button').filter({
+      hasText: 'Keep the landing page idle.',
+    }).first()
+    await expect(runRow).toBeVisible({ timeout: 12_000 })
+    await expect(runRow.getByLabel('running')).toBeVisible({ timeout: 12_000 })
+    await expect(page.getByText('No runs yet')).toHaveCount(0, { timeout: 12_000 })
+
+    await expect(terminalPage).toHaveURL(new RegExp(`/project/${PROJECT}/terminal/${RUN_SESSION_ID}$`), {
+      timeout: 12_000,
+    })
+    await expect(terminalPage.getByText('live run')).toBeVisible({ timeout: 12_000 })
+    await expect(terminalPage.getByLabel('live run spinner')).toBeVisible({
+      timeout: 12_000,
+    })
+    await expect(terminalPage.getByText('Keep the landing page idle.')).toBeVisible({
+      timeout: 12_000,
+    })
+
+    runFinished = true
+    finishStream()
+
+    await expect(runRow.getByText('cancelled', { exact: true }).first()).toBeVisible({
+      timeout: 12_000,
+    })
+    await expect(runRow.getByLabel('running')).toHaveCount(0, { timeout: 12_000 })
+
+    await expect(
+      terminalPage.getByText('Late-start dual-surface run was cancelled.'),
+    ).toBeVisible({ timeout: 12_000 })
+    await expect(terminalPage.getByText('cancelled', { exact: true }).first()).toBeVisible({
+      timeout: 12_000,
+    })
+    await expect(terminalPage.getByText('live run')).toHaveCount(0, { timeout: 12_000 })
+    await expect(terminalPage.getByLabel('live run spinner')).toHaveCount(0, {
+      timeout: 12_000,
+    })
+  })
 })
