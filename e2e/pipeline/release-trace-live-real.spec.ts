@@ -29,7 +29,7 @@ test.describe('Real release trace lifecycle', () => {
   }) => {
     writeScenario(SUCCESS_PROJECT, FULL_TRACE_SCENARIO.steps);
     resetShimState(SUCCESS_PROJECT);
-    writeGitTiming(SUCCESS_PROJECT, { push: STEP_DELAY_MS });
+    writeGitTiming(SUCCESS_PROJECT, { commit: STEP_DELAY_MS, push: STEP_DELAY_MS });
     await enableProject(request, SUCCESS_PROJECT, { testsDisabled: false });
 
     const configResp = await request.patch(
@@ -77,7 +77,7 @@ test.describe('Real release trace lifecycle', () => {
     expect(result.releaseJob?.['exit_code'], 'release exit code').toBe(0);
 
     await expect(page.getByText('success').first()).toBeVisible({ timeout: 15_000 });
-    await expect(page.getByText('6 steps')).toBeVisible({ timeout: 15_000 });
+    await expect(page.getByText('7 steps')).toBeVisible({ timeout: 15_000 });
     await expect(page.getByText('LGTM').first()).toBeVisible({ timeout: 15_000 });
     await expect(page.getByText('running', { exact: true })).not.toBeVisible({
       timeout: 15_000,

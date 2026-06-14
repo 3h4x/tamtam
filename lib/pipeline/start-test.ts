@@ -6,6 +6,7 @@ import { currentParent } from '@/lib/jobs/parent-context';
 import { resolveProjectPath } from '@/lib/shared/project-data';
 import { buildChildEnv } from '@/lib/shared/child-env';
 import { shellQuote } from '@/lib/shared/shell';
+import { loadFileConfig } from '@/lib/skills/tamtam-file-config';
 import { createJob, listJobs, probeJobStatus, updateJob, markDone } from '@/lib/jobs/job-storage';
 import { getLock, acquireLock, releaseLock, isLockOwnedByActiveRelease } from './pipeline-lock';
 import { tryClaimPipelineStartSlot, setPipelineStartSlotJob, releasePipelineStartSlot } from './pipeline-start-slot';
@@ -40,6 +41,8 @@ export async function detectTestCommand(projPath: string, projectName?: string):
       if ((await getProjectTestConfig(projectName))?.testsDisabled) return null;
     } catch { /* ignore — test env without DB */ }
   }
+  const fileTestCommand = loadFileConfig(projPath)?.test_command?.trim();
+  if (fileTestCommand) return fileTestCommand;
   if (projectName) {
     const { projects } = getImproveConfig();
     for (const cfg of Object.values(projects)) {

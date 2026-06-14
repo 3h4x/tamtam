@@ -6,7 +6,6 @@ import {
   resetShimState,
   writeGitTiming,
   enableProject,
-  waitForJobRunning,
   waitForPipelineCompletion,
 } from './helpers';
 
@@ -24,7 +23,7 @@ test.describe('Real full pipeline strip lifecycle', () => {
   }) => {
     writeScenario(PROJECT, SCENARIO.steps);
     resetShimState(PROJECT);
-    writeGitTiming(PROJECT, { push: STEP_DELAY_MS });
+    writeGitTiming(PROJECT, { commit: STEP_DELAY_MS, push: STEP_DELAY_MS });
     await enableProject(request, PROJECT, { testsDisabled: false });
 
     const configResp = await request.patch(
@@ -36,10 +35,13 @@ test.describe('Real full pipeline strip lifecycle', () => {
         },
       },
     );
-    expect(
+   expect(
       configResp.status(),
       `config PATCH failed: ${await configResp.text()}`,
     ).toBe(200);
+
+    await page.goto(`/project/${PROJECT}/terminal`);
+    await expect(page.getByRole('button', { name: 'new' })).toBeVisible({ timeout: 8_000 });
 
     const releaseResp = await request.post(`/api/projects/by-project/${PROJECT}/release`);
     expect(
@@ -49,11 +51,10 @@ test.describe('Real full pipeline strip lifecycle', () => {
 
     const releaseBody = await releaseResp.json() as { release_job_id: string };
     expect(releaseBody.release_job_id, 'release_job_id in response').toBeTruthy();
-
-    const runningTest = await waitForJobRunning(request, PROJECT, 'test', 20_000);
-    expect(runningTest, 'test job should be running').not.toBeNull();
-
-    await page.goto(`/project/${PROJECT}/terminal?job=${encodeURIComponent(releaseBody.release_job_id)}`);
+    await expect(page).toHaveURL(
+      new RegExp(`/project/${PROJECT}/terminal\\?job=${encodeURIComponent(releaseBody.release_job_id)}`),
+      { timeout: 20_000 },
+    );
 
     await expect(page.getByLabel(/pipeline summary: test running/i)).toBeVisible({
       timeout: 8_000,
@@ -69,6 +70,16 @@ test.describe('Real full pipeline strip lifecycle', () => {
       timeout: 20_000,
     });
     await expect(page.getByLabel(/fix: running\./i)).toBeVisible({ timeout: 20_000 });
+
+    await expect(page.getByLabel(/pipeline summary: test running/i)).toBeVisible({
+      timeout: 20_000,
+    });
+    await expect(page.getByLabel(/test: running, 2 runs\./i)).toBeVisible({ timeout: 20_000 });
+
+    await expect(page.getByLabel(/pipeline summary: review running/i)).toBeVisible({
+      timeout: 20_000,
+    });
+    await expect(page.getByLabel(/review: running, 2 runs\./i)).toBeVisible({ timeout: 20_000 });
 
     await expect(page.getByLabel(/pipeline summary: commit running/i)).toBeVisible({
       timeout: 20_000,
