@@ -497,15 +497,30 @@ export function TerminalMessages({
               }
             } catch { /* ignore */ }
           }
+          // Deterministic (non-LLM) job kinds run a fixed shell command, not an
+          // agent. The job row still carries a `provider` (stamped only for the
+          // budget/quota start gate), but nothing is "thinking" — so for these
+          // we drop the provider chip and use a process-oriented idle label
+          // instead of "thinking…", which otherwise reads as an LLM run.
+          const deterministicIdleLabel: Record<string, string> = {
+            test: 'running tests…',
+            'mark-dod': 'recording DoD…',
+            'pr-wait': 'waiting on PR…',
+            soak: 'soaking…',
+          }
+          const isDeterministicKind = !!runMeta?.kind && runMeta.kind in deterministicIdleLabel
           // When streamBuffer is non-empty, the live agent block above already
           // renders that text — repeating its last line here would be a visible
           // duplicate. Fall back to a generic state label instead.
           const hasVisibleStream = !!streamBuffer && !streamIsRaw
+          const fallbackLabel = isDeterministicKind
+            ? deterministicIdleLabel[runMeta!.kind]
+            : (lastStreamLine || 'thinking…')
           const label = pendingTool
             ? `${pendingTool.name}${pendingToolContext}…`
             : hasVisibleStream
               ? (idleSec >= 5 ? 'waiting for next event…' : 'streaming…')
-              : (lastStreamLine || 'thinking…')
+              : fallbackLabel
           const isIdle = idleSec >= 5
           const isVeryIdle = idleSec >= 10
           const idleLabel = isIdle ? ` · idle ${idleSec}s` : ''
@@ -518,8 +533,10 @@ export function TerminalMessages({
             : runMeta?.kind
               ? runMeta.kind
               : ''
-          const runProvider = runMeta?.provider ?? null
-          const runModel = runMeta?.model ?? null
+          // Hide the provider/model chip for deterministic kinds — they don't
+          // run that provider, the field is only a budget-gate artifact.
+          const runProvider = isDeterministicKind ? null : (runMeta?.provider ?? null)
+          const runModel = isDeterministicKind ? null : (runMeta?.model ?? null)
           return (
             <div className="mx-3 mt-1 rounded-r-md border-l-2 border-accent/30 bg-accent/[0.03] px-4 py-2">
               <div className="mb-1 flex items-center justify-between gap-2 flex-wrap">

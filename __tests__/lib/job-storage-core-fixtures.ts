@@ -50,6 +50,19 @@ export async function applyJobStorageDdl(handle: TestDbHandle): Promise<void> {
     )
   `));
   await handle.db.execute(sql.raw(`
+    CREATE TABLE IF NOT EXISTS settings (
+      key text PRIMARY KEY,
+      value text NOT NULL
+    )
+  `));
+  await handle.db.execute(sql.raw(`
+    CREATE TABLE IF NOT EXISTS maintenance_status (
+      key text PRIMARY KEY,
+      value text NOT NULL,
+      updated_at double precision NOT NULL
+    )
+  `));
+  await handle.db.execute(sql.raw(`
     CREATE TABLE IF NOT EXISTS recommendations (
       id text PRIMARY KEY,
       project text NOT NULL,
@@ -107,7 +120,7 @@ export async function truncateJobStorageTables(handle: TestDbHandle): Promise<vo
   // no extension reload). Single execute() with multi-statement is rejected by
   // PGlite, so issue them via a single CTE-style query.
   await handle.db.execute(sql.raw(
-    'WITH a AS (DELETE FROM jobs RETURNING 1), b AS (DELETE FROM recommendations RETURNING 1), c AS (DELETE FROM job_completion_events RETURNING 1) DELETE FROM gh_issues_cache'
+    'WITH a AS (DELETE FROM jobs RETURNING 1), b AS (DELETE FROM recommendations RETURNING 1), c AS (DELETE FROM settings RETURNING 1), d AS (DELETE FROM maintenance_status RETURNING 1), e AS (DELETE FROM job_completion_events RETURNING 1) DELETE FROM gh_issues_cache'
   ));
 }
 
