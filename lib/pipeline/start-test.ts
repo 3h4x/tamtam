@@ -12,6 +12,7 @@ import { tryClaimPipelineStartSlot, setPipelineStartSlotJob, releasePipelineStar
 import { checkCliStartGate } from '@/lib/usage/resolve-provider';
 import { findBlockingRunningJob } from '@/lib/jobs/project-active-job';
 import { markCloseHandlerPending, clearCloseHandlerPending } from '@/lib/jobs/spawned-close-pending';
+import { killJobProcessGroup, TEST_JOB_TIMEOUT_MS } from '@/lib/jobs/test-timeout-reaper';
 import type { JobData } from '@/lib/jobs/types';
 
 const REVIEW_RETEST_REASON = 'review-retest';
@@ -218,6 +219,21 @@ export async function startProjectTest(
   proc.unref();
   updateJob(job);
 
+  // Wall-clock guard: if the run hangs (e.g. a forked Vitest worker libuv
+  // busy-loops on an unclosed IPC fd), `pnpm test` never exits and the
+  // `proc.on('close')` below never fires. Kill the whole process group after
+  // the cap. `job.pid` is the detached group leader, so killing `-job.pid`
+  // reaps the bash wrapper + node + every Vitest worker. The probe-sweep
+  // reaper is the cross-restart backstop; this timer is the prompt path while
+  // this server instance is alive.
+  const testDeadlineTimer = setTimeout(() => {
+    console.log(
+      `[start-test] job ${job.id} exceeded ${TEST_JOB_TIMEOUT_MS / 60000}min wall-clock; killing process group pid=${job.pid}`,
+    );
+    killJobProcessGroup(job.pid);
+  }, TEST_JOB_TIMEOUT_MS);
+  testDeadlineTimer.unref?.();
+
   // Acquire pipeline lock — skip if we're running under a parent release lock
   // (the release meta-job owns the lock for the full pipeline duration).
   if (!underRelease) {
@@ -233,6 +249,7 @@ export async function startProjectTest(
   }
 
   proc.on('close', (code) => {
+    clearTimeout(testDeadlineTimer);
     if (spawnError) return;
     clearCloseHandlerPending(job.id);
     // Prefer the sentinel file's exit code over the proc 'close' code when the
