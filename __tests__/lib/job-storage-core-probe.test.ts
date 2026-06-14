@@ -32,12 +32,16 @@ async function truncateAll(): Promise<void> {
 describe('job-storage core probe', () => {
   let storageCache: Map<string, JobData>;
   let probeJobStatus: typeof import('@/lib/jobs/job-storage').probeJobStatus;
+  const resolveProjectPathMock = vi.fn();
 
   beforeAll(async () => {
     vi.resetModules();
     vi.doMock('@/lib/db', () => ({
       db: sharedHandle.db,
       schema,
+    }));
+    vi.doMock('@/lib/shared/project-data', () => ({
+      resolveProjectPath: resolveProjectPathMock,
     }));
     const jobStorage = await import('@/lib/jobs/job-storage');
     probeJobStatus = jobStorage.probeJobStatus;
@@ -46,11 +50,13 @@ describe('job-storage core probe', () => {
 
   beforeEach(async () => {
     storageCache.clear();
+    resolveProjectPathMock.mockReset().mockReturnValue(null);
     await truncateAll();
   });
 
   afterAll(() => {
     vi.doUnmock('@/lib/db');
+    vi.doUnmock('@/lib/shared/project-data');
     vi.resetModules();
   });
 
@@ -79,17 +85,19 @@ describe('job-storage core probe', () => {
       expect(status).toBe('done');
     });
 
-    it('marks job as done if pid is invalid', async () => {
+    it('marks job as done if pid no longer exists', async () => {
+      const missingProcess = new Error('ESRCH') as NodeJS.ErrnoException;
+      missingProcess.code = 'ESRCH';
+      const killSpy = vi.spyOn(process, 'kill').mockImplementation(() => {
+        throw missingProcess;
+      });
       const job: JobData = {
         id: 'job-bad-pid',
         project: 'proj',
         kind: 'run',
         prompt: null,
-        pid: -1,
+        pid: 99999,
         logPath: null,
-        // Past the spawn-grace window so pid<=0 is treated as dead, not
-        // still-spawning. A freshly-created pid=0 job (ageSec < 30) is
-        // covered by the spawn-grace tests in `probeJobStatus`.
         startedAt: Date.now() / 1000 - 60,
         finishedAt: null,
         exitCode: null,
@@ -102,10 +110,14 @@ describe('job-storage core probe', () => {
         sessionId: null,
       };
 
-      const status = await probeJobStatus(job);
-      expect(status).toBe('done');
-      expect(job.finishedAt).not.toBeNull();
-      expect(job.exitCode).toBe(-1);
+      try {
+        const status = await probeJobStatus(job);
+        expect(status).toBe('done');
+        expect(job.finishedAt).not.toBeNull();
+        expect(job.exitCode).toBe(-1);
+      } finally {
+        killSpy.mockRestore();
+      }
     });
 
   });

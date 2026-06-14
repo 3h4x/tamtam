@@ -33,7 +33,7 @@
     "start": "bash scripts/pm2-start.sh",
     "restart": "pnpm build && bash scripts/pm2-start.sh",
     "type-check": "tsc --noEmit",
-    "test": "vitest run --no-color",
+    "test": "node scripts/run-vitest-shards.mjs",
     "test:watch": "vitest --no-color",
     "test:e2e": "playwright test",
     "test:e2e:pipeline": "playwright test --config playwright.pipeline.config.ts",

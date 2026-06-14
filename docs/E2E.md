@@ -271,7 +271,7 @@ pnpm test:e2e:pipeline
 This uses `playwright.pipeline.config.ts`, which:
 - Starts a fresh Next.js dev server on **port 1338** (not 1337)
 - Uses a Postgres database created, migrated, and dropped by the harness; `DATABASE_URL` is injected into the dev server
-- Sets `TAMTAM_PROBE_INTERVAL_MS=500` for fast PM2 job detection
+- Sets `TAMTAM_PROBE_INTERVAL_MS=500` for fast job probing
 - Prepends `e2e/pipeline/mocks/bin` to PATH
 
 **Prerequisites**: PM2 must be installed and the daemon must be startable
@@ -298,8 +298,8 @@ container watcher without a production rebuild.
 
 ## Debugging a failing run
 
-1. **PM2 logs for the job**: after the pipeline runs, look for the review/fix
-   job in `pm2 list` and tail its output log (shown in the TamTam UI under
+1. **Job logs**: after the pipeline runs, open the review/fix output log
+   shown in the TamTam UI under
    `/project/<name>/history`).
 
 2. **Shim call log**: read

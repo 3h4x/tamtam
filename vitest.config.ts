@@ -88,10 +88,48 @@ function collectTestFiles(dir: string): string[] {
   return files;
 }
 
-const DB_TEST_FILES = collectTestFiles('__tests__').filter((file) => {
+// Files that import the PGlite test-db helper boot Postgres-in-WASM. They MUST
+// run in the throttled `db` project (low maxWorkers): PGlite's Emscripten
+// ASYNCIFY machinery faults if its worker is starved of CPU mid-operation, and
+// on macOS arm64 under Node 24 that fault lands in V8's signal-based WASM trap
+// handler, which spins forever instead of returning — pegging the worker at
+// 100% CPU with its event loop blocked, so no test/hook timeout can fire and
+// `pnpm test` hangs. Follow relative imports through shared test fixtures too:
+// job-storage-core/probe tests reach PGlite through fixture modules, not by
+// importing `test-db` directly.
+const IMPORTS_TEST_DB_HELPER = /\bfrom\s+['"][^'"]*\btest-db['"]/;
+
+function resolveRelativeImport(fromFile: string, specifier: string): string | null {
+  if (!specifier.startsWith('.')) return null;
+  const base = path.posix.normalize(path.posix.join(path.posix.dirname(fromFile), specifier));
+  const candidates = [
+    base,
+    `${base}.ts`,
+    `${base}.tsx`,
+    path.posix.join(base, 'index.ts'),
+    path.posix.join(base, 'index.tsx'),
+  ];
+  return candidates.find((candidate) => existsSync(candidate)) ?? null;
+}
+
+function fileUsesTestDb(file: string, seen = new Set<string>()): boolean {
+  if (seen.has(file)) return false;
+  seen.add(file);
+
   const source = readFileSync(file, 'utf8');
-  return source.includes('/helpers/test-db') || source.includes('@/__tests__/helpers/test-db');
-});
+  if (IMPORTS_TEST_DB_HELPER.test(source)) return true;
+
+  for (const match of source.matchAll(/\bimport\s+(?:type\s+)?(?:[^'"]+\s+from\s+)?['"]([^'"]+)['"]/g)) {
+    const resolved = resolveRelativeImport(file, match[1]);
+    if (resolved?.startsWith('__tests__/') && fileUsesTestDb(resolved, seen)) {
+      return true;
+    }
+  }
+
+  return false;
+}
+
+const DB_TEST_FILES = collectTestFiles('__tests__').filter((file) => fileUsesTestDb(file));
 const DB_TEST_FILE_SET = new Set(DB_TEST_FILES);
 const SLOW_NON_DB_FILES = SLOW_FILES.filter((file) => !DB_TEST_FILE_SET.has(file));
 
@@ -139,7 +177,14 @@ export default defineConfig({
           globalSetup: ['./__tests__/global-setup.ts'],
           setupFiles: ['./__tests__/setup-db-guard.ts'],
           pool: 'forks',
-          maxWorkers: projectMaxWorkers(4),
+          // Serialize the PGlite pool: every file here boots Postgres-in-WASM,
+          // and ≥2 concurrent PGlite workers under CPU contention can wedge V8's
+          // signal-based WASM trap handler into an unrecoverable 100%-CPU spin
+          // (see IMPORTS_TEST_DB_HELPER above). One worker keeps PGlite strictly
+          // sequential — the only configuration proven not to hang on Node 24 /
+          // macOS arm64. The fast and slow pools stay parallel; they no longer
+          // contain any PGlite file, so they cannot trigger the spin.
+          maxWorkers: 1,
           sequence: { groupOrder: 2 },
         },
       },
