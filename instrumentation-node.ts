@@ -519,6 +519,10 @@ export async function registerNode(): Promise<void> {
               const { analyzeAgentHealth } = await import('@/lib/orchestrator/agent-health-analysis');
               return analyzeAgentHealth(candidates);
             },
+            runAutopilot: async (outcomes) => {
+              const { applyAutopilot } = await import('@/lib/orchestrator/apply-autopilot');
+              return applyAutopilot(outcomes);
+            },
             loadLatestFinishedRunStartedAt: async (candidate) => {
               const { loadLatestFinishedScheduledRunStartedAt } = await import('@/lib/orchestrator/agent-health-analysis');
               return loadLatestFinishedScheduledRunStartedAt(candidate);

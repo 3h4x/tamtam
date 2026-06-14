@@ -60,6 +60,8 @@ async function applyDdl(handle: TestDbHandle): Promise<void> {
       prerequisite_command text,
       permission_mode text,
       kind text NOT NULL DEFAULT 'user',
+      role text NOT NULL DEFAULT 'producer',
+      autopilot_state text,
       timeout_seconds integer,
       template_id text,
       created_at double precision,

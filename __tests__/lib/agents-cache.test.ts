@@ -23,6 +23,8 @@ async function applyDdl(h: TestDbHandle): Promise<void> {
       prerequisite_command text,
       permission_mode text,
       kind text NOT NULL DEFAULT 'user',
+      role text NOT NULL DEFAULT 'producer',
+      autopilot_state text,
       created_at double precision NOT NULL,
       updated_at double precision NOT NULL
     )
@@ -60,6 +62,8 @@ function makeAgentRow(overrides: Partial<typeof schema.agents.$inferSelect> = {}
     prerequisiteCommand: null,
     permissionMode: null,
     kind: 'user',
+    role: 'producer',
+    autopilotState: null,
     createdAt: 1000,
     updatedAt: 1000,
     ...overrides,

@@ -76,6 +76,11 @@ export interface OrchestratorTickDeps {
    *  completed analysis). Gated on safe pace and tracked on globalThis.
    *  Fire-and-forget; errors are swallowed. */
   analyzeAgentHealth?: (candidates: AnalysisCandidate[]) => Promise<HealthAnalysisOutcome[]>;
+  /** Optional — applies the role-based autopilot (cadence throttle / model
+   *  downgrade + restores) for the agents analyzed this tick. Fire-and-forget;
+   *  runs off the same health outcomes so it inherits the per-tick cap. Errors
+   *  swallowed so a bad apply never blocks the tick. */
+  runAutopilot?: (outcomes: HealthAnalysisOutcome[]) => Promise<unknown>;
   /** Optional — returns the newest finished scheduled run for an agent. Used
    *  to avoid re-analyzing old finished samples while a newer dispatch is
    *  still queued or running. */
@@ -319,7 +324,16 @@ export async function handleOrchestratorTick(
         if (candidates.length > 0) {
           markHealthAnalysisInFlight(candidates);
           deps.analyzeAgentHealth(candidates)
-            .then((outcomes) => recordHealthAnalysisOutcomes(outcomes, nowMs))
+            .then((outcomes) => {
+              recordHealthAnalysisOutcomes(outcomes, nowMs);
+              // Feed the same outcomes to the autopilot — it throttles churning
+              // producers and downgrades idle monitors off this signal. Fire-
+              // and-forget so it doesn't lengthen the analysis chain (and never
+              // blocks the in-flight clear below).
+              if (deps.runAutopilot) {
+                void deps.runAutopilot(outcomes).catch(() => {});
+              }
+            })
             .catch(() => {})
             .finally(() => clearHealthAnalysisInFlight(candidates));
         }

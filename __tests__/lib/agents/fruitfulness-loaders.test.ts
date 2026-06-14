@@ -290,7 +290,7 @@ describe('fruitfulness DB loaders', () => {
     const stats = await loadAllAgentFruitfulness({ limit: 5 });
     const agents = await loadBoostAgents({
       listAgents: vi.fn(async () => [
-        { id: 'agent-1', name: 'improve', project: 'app', schedule: '15m', prompt: '', enabled: true, kind: 'user' as const, boostable: true },
+        { id: 'agent-1', name: 'improve', project: 'app', schedule: '15m', prompt: '', enabled: true, kind: 'user' as const, boostable: true, model: 'normal' as const, role: 'producer' as const, autopilot: {} },
       ]),
       getDispatches: vi.fn(() => new Map<string, number>()),
       loadFruitfulness: vi.fn(async () => stats),

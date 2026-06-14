@@ -133,6 +133,7 @@ describe('AgentEditor', () => {
         fallbackEnabled: false,
         prerequisiteCommand: null,
         permissionMode: null,
+        role: 'producer',
       })
     })
 
@@ -336,6 +337,7 @@ describe('AgentEditor', () => {
         fallbackEnabled: false,
         prerequisiteCommand: null,
         permissionMode: null,
+        role: 'producer',
       })
     })
 

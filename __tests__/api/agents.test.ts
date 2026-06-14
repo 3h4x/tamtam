@@ -22,6 +22,7 @@ const mocks = vi.hoisted(() => ({
   writeFileAgent: vi.fn().mockReturnValue(null),
   deleteFileAgent: vi.fn(),
   getFileAgentOverride: vi.fn().mockReturnValue(null),
+  getFileAgentOverrideSync: vi.fn().mockReturnValue(null),
   setFileAgentOverride: vi.fn().mockImplementation((_p: string, _n: string, patch) => patch),
   deleteFileAgentOverride: vi.fn(),
 }));
@@ -58,6 +59,7 @@ vi.mock('@/lib/agents/tamtam-file-agents', () => ({
 
 vi.mock('@/lib/agents/file-agent-overrides', () => ({
   getFileAgentOverride: mocks.getFileAgentOverride,
+  getFileAgentOverrideSync: mocks.getFileAgentOverrideSync,
   setFileAgentOverride: mocks.setFileAgentOverride,
   deleteFileAgentOverride: mocks.deleteFileAgentOverride,
 }));
@@ -95,6 +97,8 @@ async function applyDdl(handle: TestDbHandle): Promise<void> {
       prerequisite_command text,
       permission_mode text,
       kind text NOT NULL DEFAULT 'user',
+      role text NOT NULL DEFAULT 'producer',
+      autopilot_state text,
       created_at double precision NOT NULL,
       updated_at double precision NOT NULL
     )

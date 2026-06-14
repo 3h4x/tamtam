@@ -458,6 +458,9 @@ async function runSystemAgentStart(
     enabled: agent.enabled,
     kind: 'system',
     boostable: true,
+    model: 'normal',
+    role: 'producer',
+    autopilot: {},
   });
   return {
     response: NextResponse.json({
@@ -527,7 +530,15 @@ async function runAgentStart(
   // contextMeta (skills/docs/baseline/etc); seed an empty object so it has
   // a parseable starting point.
   const initialContextMeta = JSON.stringify({
-    agent: { id: agent.id, name: agent.name, schedule: agent.schedule, triggeredBy },
+    agent: {
+      id: agent.id,
+      name: agent.name,
+      schedule: agent.schedule,
+      triggeredBy,
+      // Carry role so the finalizer can interpret value per role (only
+      // producers get diff-based unfruitful/backoff recommendations).
+      role: (agent as { role?: string }).role ?? 'producer',
+    },
   });
   const job = createJob(agent.project, `agent:${agent.name}`, 0, '', taskPrompt, initialContextMeta, taskPrompt);
   job.provider = provider;

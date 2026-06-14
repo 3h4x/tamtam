@@ -129,12 +129,16 @@ export async function handleAgentCron(
     // Agent was just disabled (schedule cleared) — terminate the chain.
     return { status: 'disabled', reason: 'no schedule' };
   }
+  // Autopilot overrides resolve at dispatch so the operator's configured
+  // schedule/model stay pristine. A throttled producer's slower cadence and a
+  // downgraded monitor's cheaper tier both take effect from here on.
+  const effectiveSchedule = agent.autopilot?.scheduleOverride ?? agent.schedule;
   // Transient skip → retry in ~60s so the system catches up the moment
   // the blocker clears. Anything else (including a successful dispatch
   // or an unknown skip reason) advances to the next scheduled tick.
   const nextFireMs = skipReason && isTransientSkip(skipReason)
     ? now() + TRANSIENT_RETRY_MS
-    : computeNextFire(agent.schedule, agent.id, now());
+    : computeNextFire(effectiveSchedule, agent.id, now());
   await deps.enqueueNextFire(agent.id, new Date(nextFireMs));
   if (skipReason) {
     return { status: 'skipped', reason: skipReason };
@@ -146,7 +150,11 @@ export async function handleAgentCron(
     await deps.runSystemAgent(agent);
     return { status: 'dispatched', runId: null, reason: 'system' };
   }
-  const runId = await deps.startAgentRun(agent, payload.modelOverride);
+  // A boost's explicit per-fire override wins; otherwise apply the autopilot
+  // model downgrade (if any). Either replaces the agent's stored tier for this
+  // fire — startAgentRun reads it fresh.
+  const modelOverride = payload.modelOverride ?? agent.autopilot?.modelOverride;
+  const runId = await deps.startAgentRun(agent, modelOverride);
   return { status: 'dispatched', runId };
 }
 

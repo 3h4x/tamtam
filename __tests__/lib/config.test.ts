@@ -188,6 +188,11 @@ describe('config', () => {
         orchestrator_enabled: false,
         orchestrator_boost_margin_pct: 5,
         orchestrator_max_boosts_per_hour: 2,
+        agent_autopilot_enabled: true,
+        agent_autopilot_cadence_floor: '4h',
+        agent_autopilot_tier_floor: 'fast',
+        agent_autopilot_idle_streak: 4,
+        agent_autopilot_concern_streak: 2,
       });
     });
 

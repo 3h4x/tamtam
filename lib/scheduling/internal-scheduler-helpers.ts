@@ -6,7 +6,10 @@
 
 import { db, schema } from '@/lib/db';
 import { listEnabledProjects, refreshProjectsCacheSync } from '@/lib/shared/enabled-projects';
-import { warmFileAgentOverrideCache } from '@/lib/agents/file-agent-overrides';
+import { warmFileAgentOverrideCache, getFileAgentOverrideSync } from '@/lib/agents/file-agent-overrides';
+import { parseAgentRole } from '@/lib/agents/roles';
+import { normalizeModelInput } from '@/lib/agents/model-aliases';
+import { parseAutopilotState } from '@/lib/orchestrator/agent-autopilot';
 import type { AgentInput } from '@/lib/scheduling/agent-types';
 
 export async function listEnabledScheduledAgents(): Promise<AgentInput[]> {
@@ -35,6 +38,9 @@ export async function listEnabledScheduledAgents(): Promise<AgentInput[]> {
       enabled: !!a.enabled,
       kind: (a.kind === 'system' ? 'system' : 'user') as 'user' | 'system',
       boostable: a.boostable ?? true,
+      model: normalizeModelInput(a.model, 'normal'),
+      role: parseAgentRole(a.role),
+      autopilot: parseAutopilotState(a.autopilotState),
     });
     dbAgentKeys.add(`${a.project}:${a.name}`);
   }
@@ -50,6 +56,10 @@ export async function listEnabledScheduledAgents(): Promise<AgentInput[]> {
         for (const fa of fileAgents) {
           if (!fa.enabled || !fa.schedule) continue;
           if (dbAgentKeys.has(`${fa.project}:${fa.name}`)) continue;
+          // File agents have no DB row, so their role + autopilot state live in
+          // the file-agent override (settings table). buildFileAgent already
+          // resolved role onto `fa`; read the autopilot blob here.
+          const override = getFileAgentOverrideSync(fa.project, fa.name);
           fileEnabled.push({
             id: fa.id,
             project: fa.project,
@@ -60,6 +70,9 @@ export async function listEnabledScheduledAgents(): Promise<AgentInput[]> {
             kind: 'user',
             // File-agent override file may flip this off; default true.
             boostable: (fa as { boostable?: boolean }).boostable ?? true,
+            model: normalizeModelInput(fa.model, 'normal'),
+            role: parseAgentRole(fa.role),
+            autopilot: parseAutopilotState(override?.autopilotState),
           });
         }
       } catch (err) {

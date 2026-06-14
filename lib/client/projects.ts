@@ -589,6 +589,8 @@ export const AUTO_APPLICABLE_RECOMMENDATION_TYPES = new Set([
 // its own — it already took the action and there is nothing for the operator to
 // do, so it carries the green AUTO pill and offers no Fix actions (dismiss only).
 //   - orchestrator_boost : the orchestrator already fired the extra run; done.
+//   - agent_autopilot    : the orchestrator already throttled cadence / down-
+//                          graded the model (or restored either); done.
 //
 // Everything else is "manual": the orchestrator can DETECT it (and will
 // auto-close the card if the situation later recovers — see
@@ -599,6 +601,7 @@ export const AUTO_APPLICABLE_RECOMMENDATION_TYPES = new Set([
 //   - agent_schedule_backoff    : apply (or not) the slower cadence
 export const AUTO_RECOMMENDATION_TYPES = new Set([
   'orchestrator_boost',
+  'agent_autopilot',
 ])
 
 // Types that flag operator-actionable work. They show the MANUAL pill and a Fix

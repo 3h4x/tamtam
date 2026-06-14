@@ -5,7 +5,9 @@ import { errMsg } from '@/lib/shared/types';
 import { getAllAgentsCached, clearAgentsCache, normalizeAgent } from '@/lib/agents/agents-cache';
 import { findAgentNameConflict } from '@/lib/agents/agent-conflicts';
 import { canonicalAgentNameKey, normalizeAgentNameInput } from '@/lib/agents/agent-name';
+import { parseAgentRole, inferAgentRole } from '@/lib/agents/roles';
 import { scanFileAgents, writeFileAgent, type FileAgent } from '@/lib/agents/tamtam-file-agents';
+import { getFileAgentOverrideSync } from '@/lib/agents/file-agent-overrides';
 import { resolveProjectPath } from '@/lib/shared/project-data';
 import { listEnabledProjects } from '@/lib/shared/enabled-projects';
 import { parseOptionalKnownModelInput } from '@/lib/agents/model-aliases';
@@ -38,6 +40,15 @@ function withEffectivePrerequisite<T extends { project: string; skillIds: string
       prerequisiteCommand: agent.prerequisiteCommand,
     }),
   };
+}
+
+// File agents have no DB row, so their runtime autopilot state lives in the
+// file-agent override. Surface it (as a JSON string, matching the DB column's
+// shape) so the editor can show an active throttle/downgrade instead of the
+// stale base schedule/model.
+function fileAgentAutopilotJson(fa: FileAgent): string | null {
+  const ap = getFileAgentOverrideSync(fa.project, fa.name)?.autopilotState;
+  return ap ? JSON.stringify(ap) : null;
 }
 
 function getAllFileAgentsCached(): FileAgent[] {
@@ -79,7 +90,7 @@ export async function GET(request: NextRequest) {
     if (projPath) {
       for (const fa of scanFileAgents(projPath, project)) {
         if (name && fa.name !== name) continue;
-        if (!dbKeys.has(`${fa.project}:${canonicalAgentNameKey(fa.name)}`)) normalized.push({ ...withEffectivePrerequisite(fa), fallbackEnabled: false });
+        if (!dbKeys.has(`${fa.project}:${canonicalAgentNameKey(fa.name)}`)) normalized.push({ ...withEffectivePrerequisite(fa), autopilotState: fileAgentAutopilotJson(fa), fallbackEnabled: false });
       }
     }
   } else {
@@ -88,7 +99,7 @@ export async function GET(request: NextRequest) {
     // for 10 s to avoid filesystem hits on every request.
     for (const fa of getAllFileAgentsCached()) {
       if (name && fa.name !== name) continue;
-      if (!dbKeys.has(`${fa.project}:${canonicalAgentNameKey(fa.name)}`)) normalized.push({ ...withEffectivePrerequisite(fa), fallbackEnabled: false });
+      if (!dbKeys.has(`${fa.project}:${canonicalAgentNameKey(fa.name)}`)) normalized.push({ ...withEffectivePrerequisite(fa), autopilotState: fileAgentAutopilotJson(fa), fallbackEnabled: false });
     }
   }
 
@@ -203,6 +214,12 @@ export async function POST(request: NextRequest) {
     prerequisiteCommand,
     permissionMode,
     kind: 'user',
+    // Role: explicit choice wins; otherwise infer from name/skills/prompt
+    // (token-free heuristic). Operator can override later in the editor.
+    role: typeof body.role === 'string'
+      ? parseAgentRole(body.role)
+      : inferAgentRole({ name: agentName, skillIds: skillIdsList, prompt: prompt || '' }),
+    autopilotState: null,
     createdAt: now,
     updatedAt: now,
   };

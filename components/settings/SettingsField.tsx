@@ -21,6 +21,7 @@ const BOOLEAN_SELECT_FIELD_KEYS = new Set<SettingsFieldKey>([
   'browser_broker_enabled',
   'tamtam_network_policy_strict',
   'orchestrator_enabled',
+  'agent_autopilot_enabled',
 ])
 
 const LONG_TEXT_KEYS = new Set<SettingsFieldKey>(['base_prompt', 'commit_style', 'review_verdict_rules'])

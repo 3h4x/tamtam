@@ -94,7 +94,7 @@ describe('analyzeAgentHealth', () => {
     expect(prompt).toContain('improve')
     expect(prompt).toContain('Refactored auth module')
     expect(prompt).toContain('score: 80/100')
-    expect(outcomes).toEqual([{ agentId: 'agent-001', analyzed: true, latestRunStartedAt: 1000000 }])
+    expect(outcomes).toMatchObject([{ agentId: 'agent-001', analyzed: true, latestRunStartedAt: 1000000 }])
   })
 
   it('excludes manual runs before building the prompt', async () => {
@@ -117,7 +117,7 @@ describe('analyzeAgentHealth', () => {
     const prompt = runPrint.mock.calls[0][0]
     expect(prompt).toContain('Scheduled run that should be analyzed.')
     expect(prompt).not.toContain('Manual cleanup that should not be analyzed.')
-    expect(outcomes).toEqual([{ agentId: 'agent-001', analyzed: true, latestRunStartedAt: 1000000 }])
+    expect(outcomes).toMatchObject([{ agentId: 'agent-001', analyzed: true, latestRunStartedAt: 1000000 }])
   })
 
   it('does not call the runner when rows only contain manual runs', async () => {
@@ -168,7 +168,7 @@ describe('analyzeAgentHealth', () => {
     expect(runPrint).not.toHaveBeenCalled()
     expect(upsertRecommendationMock).not.toHaveBeenCalled()
     expect(resolveRecommendationIfOpenMock).toHaveBeenCalledWith('alpha', 'orchestrator_agent_health', { agentId: 'agent-001', agentName: 'improve' })
-    expect(outcomes).toEqual([{ agentId: 'agent-001', analyzed: true, latestRunStartedAt: 3000000 }])
+    expect(outcomes).toMatchObject([{ agentId: 'agent-001', analyzed: true, latestRunStartedAt: 3000000 }])
   })
 
   it('still analyzes (and annotates idle runs) when only some runs are idle', async () => {
@@ -206,7 +206,7 @@ describe('analyzeAgentHealth', () => {
     expect(call.payload.severity).toBe('high')
     expect(call.payload.avgRunScore).toBe(80)
     expect(call.payload.runsAnalyzed).toBe(3)
-    expect(outcomes).toEqual([{ agentId: 'agent-001', analyzed: true, latestRunStartedAt: 1000000 }])
+    expect(outcomes).toMatchObject([{ agentId: 'agent-001', analyzed: true, latestRunStartedAt: 1000000 }])
   })
 
   it('retires any open health recommendation when concern=false', async () => {
@@ -215,7 +215,7 @@ describe('analyzeAgentHealth', () => {
     expect(upsertRecommendationMock).not.toHaveBeenCalled()
     // Healthy now → auto-retire a stale loop/noise recommendation if one is open.
     expect(resolveRecommendationIfOpenMock).toHaveBeenCalledWith('alpha', 'orchestrator_agent_health', { agentId: 'agent-001', agentName: 'improve' })
-    expect(outcomes).toEqual([{ agentId: 'agent-001', analyzed: true, latestRunStartedAt: 1000000 }])
+    expect(outcomes).toMatchObject([{ agentId: 'agent-001', analyzed: true, latestRunStartedAt: 1000000 }])
   })
 
   it('does not resolve when the runner returns null (gated/failed) — no verdict', async () => {
@@ -238,7 +238,7 @@ describe('analyzeAgentHealth', () => {
     const outcomes = await analyzeAgentHealth([candidateA], { runPrint })
     expect(upsertRecommendationMock).toHaveBeenCalledOnce()
     expect(upsertRecommendationMock.mock.calls[0][0].payload.concernType).toBe('noise')
-    expect(outcomes).toEqual([{ agentId: 'agent-001', analyzed: true, latestRunStartedAt: 1000000 }])
+    expect(outcomes).toMatchObject([{ agentId: 'agent-001', analyzed: true, latestRunStartedAt: 1000000 }])
   })
 
   it('swallows malformed JSON from the runner', async () => {

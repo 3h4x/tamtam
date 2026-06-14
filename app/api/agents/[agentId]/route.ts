@@ -6,6 +6,7 @@ import { errMsg } from '@/lib/shared/types';
 import { clearAgentsCache, normalizeAgent } from '@/lib/agents/agents-cache';
 import { findAgentNameConflict } from '@/lib/agents/agent-conflicts';
 import { normalizeAgentNameInput } from '@/lib/agents/agent-name';
+import { parseAgentRole } from '@/lib/agents/roles';
 import { parseFileAgentId, loadFileAgent, writeFileAgent, deleteFileAgent } from '@/lib/agents/tamtam-file-agents';
 import { setFileAgentOverride, deleteFileAgentOverride } from '@/lib/agents/file-agent-overrides';
 import { resolveProjectPath } from '@/lib/shared/project-data';
@@ -86,7 +87,8 @@ export async function PATCH(
         body.schedule !== undefined ||
         body.model !== undefined ||
         body.skillIds !== undefined ||
-        body.permissionMode !== undefined
+        body.permissionMode !== undefined ||
+        body.role !== undefined
       ) {
         await setFileAgentOverride(parsedFile.project, parsedFile.name, {
           enabled: body.enabled,
@@ -95,6 +97,8 @@ export async function PATCH(
           model: parsedModel ?? undefined,
           skillIds: body.skillIds,
           permissionMode: body.permissionMode !== undefined ? parsedPermissionMode : undefined,
+          // Role is operational config (drives autopilot) → lives in the override.
+          role: body.role !== undefined ? parseAgentRole(body.role) : undefined,
         });
       }
       // Prompt edits always flow to the file. Provider frontmatter and the
@@ -169,6 +173,7 @@ export async function PATCH(
     updates.prerequisiteCommand = parsePrerequisiteCommandInput(body.prerequisiteCommand) ?? '';
   }
   if (!isSystemAgent && body.permissionMode !== undefined) updates.permissionMode = parsedPermissionMode;
+  if (!isSystemAgent && body.role !== undefined) updates.role = parseAgentRole(body.role);
 
   await db.update(schema.agents).set(updates).where(eq(schema.agents.id, agentId)).execute();
   clearAgentsCache();

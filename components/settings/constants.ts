@@ -57,6 +57,7 @@ export type SettingsFieldKey =
   | 'orchestrator_enabled'
   | 'orchestrator_boost_margin_pct'
   | 'orchestrator_max_boosts_per_hour'
+  | 'agent_autopilot_enabled'
 
 // `subsection` groups fields into named cards within their tab. The
 // SUBSECTIONS registry below maps each id → display metadata (title, grid
@@ -235,6 +236,13 @@ export const FIELDS: Record<SettingsFieldKey, FieldDef> = {
   orchestrator_max_boosts_per_hour: {
     label: 'Max boosts / project / hour',
     help: 'Rolling-hour cap on bonus fires for any single project. Default 2 is two extra runs per hour over the existing schedule.',
+    group: 'pipeline',
+    subsection: 'orchestrator',
+    span: 1,
+  },
+  agent_autopilot_enabled: {
+    label: 'Agent autopilot',
+    help: 'When on (default), the orchestrator reclaims wasted budget by role: it cadence-throttles churning producers (sustained loop/noise) and downgrades the model tier of idle monitors/reviewers/planners. All actions are floor-bounded and reversible; monitors are never cadence-throttled. Also requires Orchestrator on. Tuning params are API-only.',
     group: 'pipeline',
     subsection: 'orchestrator',
     span: 1,
@@ -624,6 +632,7 @@ export const DEFAULTS: Record<SettingsFieldKey, string> = {
   orchestrator_enabled: 'false',
   orchestrator_boost_margin_pct: '5',
   orchestrator_max_boosts_per_hour: '2',
+  agent_autopilot_enabled: 'true',
 }
 
 export const COL_SPAN: Record<number, string> = { 1: 'col-span-1', 2: 'col-span-2', 3: 'col-span-3', 4: 'col-span-4' }

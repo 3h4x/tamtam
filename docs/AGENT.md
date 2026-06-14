@@ -39,8 +39,33 @@ Agents are reusable automation units that combine skills, optional attached proj
 | `fallbackEnabled` | boolean | `false` | Opts the agent into one transient provider fallback retry using `provider_fallback_chain`. Built-in recommended agents are created with this enabled. |
 | `prerequisiteCommand` | string \| null | `null` | Optional `bash -c` command run in the project directory before the agent CLI starts. Output is captured to a prerequisite artifact and prepended to the agent prompt. |
 | `kind` | `"user"` \| `"system"` | `"user"` | `user` agents run through the normal CLI intake workflow. `system` agents are auto-seeded, DB-only built-ins that dispatch to internal handlers. |
+| `role` | enum | `producer` | Drives the autopilot policy (see Roles below). Inferred at create-time from name/skills/prompt; operator-overridable. |
 | `createdAt` | number | — | Unix timestamp (seconds) |
 | `updatedAt` | number | — | Unix timestamp (seconds) |
+
+## Roles
+
+Every agent has a **role** that tells the orchestrator how to judge its value and
+which lever may reclaim its budget (the **autopilot** — see `docs/ORCHESTRATOR.md`).
+Diff-count is a fair value proxy for a producer but not for a watchdog, so the
+behavior is role-specific:
+
+| Role | Value signal | Autopilot lever | Diff-based recs (`agent_unfruitful` / `agent_schedule_backoff`)? |
+|------|--------------|-----------------|---------------------------------|
+| `producer` (improve, refactor, dedupe, docs-gen) | shipped diffs | cadence-throttle on sustained loop/noise | yes |
+| `monitor` (audit-logs, log/health scanners) | coverage; finding nothing = success | model-downgrade when idle; **cadence never touched** | no |
+| `reviewer` / QA (review, qa, test-e2e, security) | issues caught / verdicts | model-downgrade when idle | no |
+| `planner` (research, recommend, plan) | artifacts (issues, plans) | model-downgrade when idle | no |
+| `publisher` (blog, social) | published output | none — untouched | no |
+
+Role is inferred at create-time by a token-free keyword heuristic
+(`inferAgentRole` in `lib/agents/roles.ts`) and can be overridden explicitly via
+the agent editor or `PATCH /api/agents/{id}` `{ role }`. For DB agents it's the
+`agents.role` column; for file agents it lives in the file-agent override (it's
+operational config, like `enabled`/`schedule`). Defaulting an un-tagged monitor to
+`producer` is safe: a quiet watchdog never produces the loop/noise verdict that
+cadence-throttling requires, so it is never throttled — tagging it `monitor` only
+unlocks the model-downgrade saving and silences the diff-based recommendations.
 
 ## Creating an Agent
 

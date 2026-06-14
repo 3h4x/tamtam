@@ -175,6 +175,17 @@ The orchestrator budget allocator runs as a graphile-worker cron task (`orchestr
 | `orchestrator_enabled` | boolean | `false` | Master switch for the budget allocator cron |
 | `orchestrator_boost_margin_pct` | number | `5` | Minimum global pace headroom, in percentage points, required before the allocator can boost a project |
 | `orchestrator_max_boosts_per_hour` | number | `2` | Per-project rolling-hour cap on bonus fires |
+| `agent_autopilot_enabled` | boolean | `true` | Master switch for the role-based autopilot (throttle churning producers / downgrade idle monitors). Also gated on `orchestrator_enabled`. |
+| `agent_autopilot_cadence_floor` | string | `'4h'` | Producers are never cadence-throttled past this rung |
+| `agent_autopilot_tier_floor` | `fast`/`normal`/`smart` | `'fast'` | Model downgrades never go below this tier |
+| `agent_autopilot_idle_streak` | number | `4` | All-clear analyses before a monitor/reviewer/planner model downgrade |
+| `agent_autopilot_concern_streak` | number | `2` | Sustained loop/noise analyses before a producer cadence throttle |
+
+The autopilot interprets each run's value by the agent's **role** (`producer` /
+`monitor` / `reviewer` / `planner` / `publisher`) and picks a role-appropriate
+lever — cadence for producers, model tier for monitors/reviewers/planners,
+nothing for publishers. See `docs/ORCHESTRATOR.md` → Autopilot and `docs/AGENT.md`
+→ Roles.
 
 **Decision logic** (`lib/orchestrator/budget-allocator.ts → decideBoosts`):
 

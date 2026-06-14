@@ -4,6 +4,7 @@ import { getBranchContext, gitLsTreeSync, gitShowSync } from '@/lib/git/git-bran
 import { getFileAgentOverrideSync } from '@/lib/agents/file-agent-overrides';
 import { canonicalAgentNameKey, canonicalizeAgentName, getAgentNameValidationError } from '@/lib/agents/agent-name';
 import { normalizeModelInput } from '@/lib/agents/model-aliases';
+import { parseAgentRole } from '@/lib/agents/roles';
 import { normalizeStoredPrerequisiteCommand } from '@/lib/agents/prerequisites';
 import { parseOptionalAgentScheduleInput } from '@/lib/scheduling/agent-schedule';
 import { isCliProvider } from '@/lib/usage/cli-providers';
@@ -23,6 +24,8 @@ export interface FileAgent {
   prerequisiteCommand: string | null;
   permissionMode: string | null;
   kind: string;
+  // Agent role (frontmatter `role:` or override), default 'producer'.
+  role: string;
   createdAt: number;
   updatedAt: number;
   source: 'file';
@@ -140,6 +143,8 @@ function buildFileAgent(
     // committed frontmatter. null → inherit the global `permission_mode`.
     permissionMode: override?.permissionMode ?? null,
     kind: 'user',
+    // Role: operator override wins, else frontmatter `role:`, else 'producer'.
+    role: parseAgentRole(override?.role ?? meta.role),
     createdAt: now,
     updatedAt: now,
     source: 'file',

@@ -280,11 +280,13 @@ async function composePromptStep(
   // correct "run less often" recommendation.
   const baseAgentSchedule =
     (baseCtx.agent as { schedule?: string | null } | undefined)?.schedule ?? null;
+  const baseAgentRole =
+    (baseCtx.agent as { role?: string } | undefined)?.role ?? 'producer';
   const contextMetaObj: Record<string, unknown> = {
     ...baseCtx,
     skills: composed.metaSkills,
     docs: composed.metaDocs,
-    agent: { id: agentId, name: agentName, triggeredBy, schedule: baseAgentSchedule },
+    agent: { id: agentId, name: agentName, triggeredBy, schedule: baseAgentSchedule, role: baseAgentRole },
     baseline: {
       head: headR.exitCode === 0 ? headR.stdout.trim() : null,
       status: statusR.exitCode === 0 ? statusR.stdout : null,

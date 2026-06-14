@@ -23,6 +23,33 @@ interval. Each tick:
    deprioritized here — see Fruitfulness below.
 4. Runs agent **health analysis** (`lib/orchestrator/agent-health-analysis.ts`)
    over a few candidates, gated + throttled per agent.
+5. Runs the **autopilot** (`lib/orchestrator/agent-autopilot.ts` decision +
+   `apply-autopilot.ts` IO) over the same health outcomes — see below.
+
+## Autopilot — role-based waste reclaim
+
+The orchestrator detects low-value agents well but historically only *recommended*
+action, so a churning agent burned tokens until an operator intervened. The
+autopilot closes that loop, interpreting value by **agent role** (`lib/agents/roles.ts`).
+Diff-count is a fine value proxy for a *producer* but a terrible one for a
+*monitor* (a watchdog is most valuable when it finds nothing), so the lever is a
+function of role:
+
+| Role | Autopilot policy |
+|------|------------------|
+| `producer` | **Cadence-throttle** one ladder rung on a *sustained* `loop`/`noise` health verdict (`agent_autopilot_concern_streak`). Restored in full on a clean verdict or a fruitful run. Floor-bounded (`agent_autopilot_cadence_floor`), never disabled. |
+| `monitor` / `reviewer` / `planner` | **Model-downgrade** one tier (smart→normal→fast) after a sustained all-clear streak (`agent_autopilot_idle_streak`). Cadence is never touched (freshness). Tier restored the moment the agent finds something. Floor `agent_autopilot_tier_floor`. |
+| `publisher` (and `kind=system`) | Untouched. |
+
+It is driven off the health-analysis outcomes (so it inherits the ≤3-agents/tick
+cap) and is **not** pace-gated — throttling/downgrading only *saves* budget.
+Overrides live in `agents.autopilot_state` (DB agents) or the file-agent override
+(file agents), kept separate from the operator's configured `model`/`schedule`;
+the cron handler resolves the effective values at each fire
+(`agent-cron-task.ts`). Gated on `agent_autopilot_enabled` (default on) +
+`orchestrator_enabled`. The monitor-safety guarantee is structural: the health
+prompt classifies a quiet watchdog as healthy (idle-is-healthy), so it never
+produces the `loop`/`noise` verdict that throttling requires.
 
 ## Signals the orchestrator computes
 
@@ -53,6 +80,7 @@ surfacing things worth attention. They live in the `recommendations` table
 | Type | Source | Meaning |
 |------|--------|---------|
 | `orchestrator_boost` | tick loop | The orchestrator already fired an extra run. Informational — created with status `resolved` so it lands directly in **History**, not the Unresolved queue (the action is already done at write time). |
+| `agent_autopilot` | tick loop (autopilot) | The orchestrator already throttled a churning producer's cadence, downgraded an idle monitor's model tier, or restored either. AUTO + `resolved` at creation (same as boost). Payload `{ action, role, from, to, reason }`. |
 | `agent_unfruitful` | agent finalizer (`lib/agents/agent-run-report.ts`) | Scheduled runs aren't producing changes. Payload `cause` disambiguates: `unproductive` (last run found work but landed nothing → improve the prompt) vs `unknown`. The `idle` case (last run reported no actionable work — incl. the improve agent's `IMPROVE_QUEUE_ROTATED` sentinel) does **not** raise this recommendation at all: idle-by-design is not a failure, so it's owned by `agent_schedule_backoff` and any stale unfruitful row is auto-retired. Boost deprioritization still happens live off the fruitfulness stats, independent of this row. The `/recommendations` card offers "Improve prompt" for `unproductive`/`unknown`. |
 | `orchestrator_agent_health` | health analysis | An LLM flagged a loop/noise trend over recent runs. |
 | `agent_schedule_backoff` | agent finalizer | A scheduled run found no actionable work; consider a slower cadence. |
@@ -65,8 +93,8 @@ question the badge answers is whether the **orchestrator can resolve it on its
 own** or whether the **operator must act**.
 
 - **AUTO** (green pill, no Fix menu): the orchestrator handles it end-to-end and
-  there is nothing for you to do. Only **`orchestrator_boost`** — the extra run
-  already fired.
+  there is nothing for you to do. **`orchestrator_boost`** (the extra run already
+  fired) and **`agent_autopilot`** (cadence/model lever already moved, reversibly).
 - **MANUAL** (amber pill, Fix menu): the orchestrator can *detect* it and will
   *auto-close the card* if the situation later recovers, but it cannot drive the
   fix itself. The operator (or a prompt/schedule change) must act:

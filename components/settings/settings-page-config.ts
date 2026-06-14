@@ -96,6 +96,7 @@ export interface SettingsMap {
   orchestrator_enabled: string
   orchestrator_boost_margin_pct: string
   orchestrator_max_boosts_per_hour: string
+  agent_autopilot_enabled: string
 }
 
 export const SETTINGS_DEFAULTS: SettingsMap = {
@@ -146,6 +147,7 @@ export const SETTINGS_DEFAULTS: SettingsMap = {
   orchestrator_enabled: 'false',
   orchestrator_boost_margin_pct: '5',
   orchestrator_max_boosts_per_hour: '2',
+  agent_autopilot_enabled: 'true',
 }
 
 export type TabId = 'general' | 'cli' | 'pipeline' | 'projects' | 'database' | 'templates' | 'notifications'

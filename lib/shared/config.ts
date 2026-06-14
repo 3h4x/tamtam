@@ -156,6 +156,12 @@ export interface TamTamConfig {
   orchestrator_enabled: boolean;
   orchestrator_boost_margin_pct: number;
   orchestrator_max_boosts_per_hour: number;
+  // --- Agent autopilot (role-based waste reclaim) ---
+  agent_autopilot_enabled: boolean;
+  agent_autopilot_cadence_floor: string;
+  agent_autopilot_tier_floor: 'fast' | 'normal' | 'smart';
+  agent_autopilot_idle_streak: number;
+  agent_autopilot_concern_streak: number;
 }
 
 const DEFAULTS: TamTamConfig = {
@@ -282,6 +288,18 @@ const DEFAULTS: TamTamConfig = {
   // Per-project rolling-hour cap. Two extra fires/hour over the existing
   // schedule is meaningful but not a token furnace.
   orchestrator_max_boosts_per_hour: 2,
+  // On by default (conservative): role-aware autopilot that throttles churning
+  // producers and downgrades the model of idle monitors/reviewers/planners.
+  // Also gated on orchestrator_enabled. All actions floor-bounded + reversible.
+  agent_autopilot_enabled: true,
+  // Producers are never cadence-throttled past this rung.
+  agent_autopilot_cadence_floor: '4h',
+  // Model downgrades never go below this tier.
+  agent_autopilot_tier_floor: 'fast',
+  // All-clear analyses before a monitor/reviewer/planner model downgrade.
+  agent_autopilot_idle_streak: 4,
+  // Sustained loop/noise analyses before a producer cadence throttle.
+  agent_autopilot_concern_streak: 2,
 };
 
 let _cache: { config: TamTamConfig; time: number } | null = null;
@@ -568,6 +586,24 @@ export function buildConfigFromSettingsMap(map: Record<string, string>): TamTamC
     orchestrator_max_boosts_per_hour: parseIntOr(
       map.orchestrator_max_boosts_per_hour,
       DEFAULTS.orchestrator_max_boosts_per_hour,
+    ),
+    agent_autopilot_enabled:
+      map.agent_autopilot_enabled === undefined
+        ? DEFAULTS.agent_autopilot_enabled
+        : map.agent_autopilot_enabled === 'true',
+    agent_autopilot_cadence_floor:
+      map.agent_autopilot_cadence_floor?.trim() || DEFAULTS.agent_autopilot_cadence_floor,
+    agent_autopilot_tier_floor:
+      map.agent_autopilot_tier_floor === 'normal' || map.agent_autopilot_tier_floor === 'smart'
+        ? map.agent_autopilot_tier_floor
+        : 'fast',
+    agent_autopilot_idle_streak: parseIntOr(
+      map.agent_autopilot_idle_streak,
+      DEFAULTS.agent_autopilot_idle_streak,
+    ),
+    agent_autopilot_concern_streak: parseIntOr(
+      map.agent_autopilot_concern_streak,
+      DEFAULTS.agent_autopilot_concern_streak,
     ),
   };
   return config;

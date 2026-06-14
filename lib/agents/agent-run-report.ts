@@ -16,9 +16,10 @@ import {
   loadRecentAgentSamples,
   type FruitfulnessSample,
 } from '@/lib/agents/fruitfulness';
+import { parseAgentRole, valueIsDiffBased } from '@/lib/agents/roles';
 
 interface AgentContextMeta {
-  agent?: { id?: string; name?: string; schedule?: string | null; triggeredBy?: string };
+  agent?: { id?: string; name?: string; schedule?: string | null; triggeredBy?: string; role?: string };
   baseline?: { head?: string | null; status?: string | null; dirty?: boolean | null };
 }
 
@@ -291,6 +292,11 @@ async function maybeRecommendFruitfulness(
   // an operator firing an agent on demand is a different signal than a
   // scheduled run that found nothing.
   if (ctx.agent?.triggeredBy !== 'schedule') return;
+  // Fruitfulness (files/lines changed) is only a valid value proxy for a
+  // producer. A monitor / reviewer / planner reporting no diff is doing its
+  // job, so don't flag it as unfruitful — that's the noise this whole change
+  // removes. See lib/agents/roles.ts.
+  if (!valueIsDiffBased(parseAgentRole(ctx.agent?.role))) return;
 
   // Include this just-finished run in the window so the recommendation reacts
   // immediately to a streak of empties (otherwise the Nth empty run would
@@ -385,7 +391,10 @@ function maybeRecommendSchedule(job: JobData, ctx: AgentContextMeta, files: Modi
     actionable !== false ||
     files.length > 0 ||
     hours == null ||
-    hours >= 8
+    hours >= 8 ||
+    // Never suggest a slower cadence for non-producers — a monitor/reviewer
+    // reporting "nothing to do" is a successful pass, not idleness to throttle.
+    !valueIsDiffBased(parseAgentRole(ctx.agent?.role))
   ) return;
 
   const confidence = actionable === false ? 'high' : 'medium';

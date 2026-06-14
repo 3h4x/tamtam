@@ -248,6 +248,11 @@ const SETTING_KEYS = [
   'orchestrator_enabled',
   'orchestrator_boost_margin_pct',
   'orchestrator_max_boosts_per_hour',
+  'agent_autopilot_enabled',
+  'agent_autopilot_cadence_floor',
+  'agent_autopilot_tier_floor',
+  'agent_autopilot_idle_streak',
+  'agent_autopilot_concern_streak',
 ] as const;
 
 function serializeSettingValue(key: string, value: unknown): string {

@@ -177,6 +177,18 @@ export const agents = pgTable('agents', {
   // scheduled-agent cron pipeline but do not go through the intake
   // workflow.
   kind: text('kind').notNull().default('user'),
+  // Agent role — how this agent's value is judged and which autopilot lever
+  // (cadence-throttle vs model-downgrade vs none) applies. One of
+  // 'producer' | 'monitor' | 'reviewer' | 'planner' | 'publisher'. Defaults
+  // to 'producer' (the diff-judged, cadence-throttleable common case).
+  // Inferred at intake, operator-overridable. See lib/agents/roles.ts.
+  role: text('role').notNull().default('producer'),
+  // Runtime autopilot overrides + streak counters, kept SEPARATE from the
+  // operator-configured `model`/`schedule` so those stay pristine for restore.
+  // Nullable JSON: { scheduleOverride?, modelOverride?, idleStreak?,
+  // concernStreak?, originalSchedule?, originalModel?, lastActionAt? }.
+  // See lib/orchestrator/agent-autopilot.ts.
+  autopilotState: text('autopilot_state'),
   createdAt: doublePrecision('created_at').notNull(),
   updatedAt: doublePrecision('updated_at').notNull(),
 });

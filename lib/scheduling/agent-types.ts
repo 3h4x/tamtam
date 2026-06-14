@@ -1,3 +1,7 @@
+import type { AgentRole } from '@/lib/agents/roles';
+import type { ModelTier } from '@/lib/agents/model-aliases';
+import type { AutopilotState } from '@/lib/orchestrator/agent-autopilot';
+
 export type AgentInput = {
   id: string;
   project: string;
@@ -12,4 +16,11 @@ export type AgentInput = {
   // it still runs on its own `schedule`. Use for blog-writer / social-poster
   // style agents where boosting would over-publish.
   boostable: boolean;
+  // Operator-configured base model tier (autopilot may override at dispatch).
+  model: ModelTier;
+  // Agent role — drives the autopilot policy (see lib/agents/roles.ts).
+  role: AgentRole;
+  // Runtime autopilot overrides + streak counters ({} when none). The cron
+  // handler resolves the effective schedule/model from here at each fire.
+  autopilot: AutopilotState;
 };

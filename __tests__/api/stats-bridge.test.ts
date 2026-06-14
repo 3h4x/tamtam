@@ -60,6 +60,7 @@ function makeFileAgent(name: string, project: string, overrides: { enabled?: boo
     prerequisiteCommand: null,
     permissionMode: null,
     kind: overrides.kind ?? 'user',
+    role: 'producer',
     createdAt: Date.now() / 1000,
     updatedAt: Date.now() / 1000,
     source: 'file',

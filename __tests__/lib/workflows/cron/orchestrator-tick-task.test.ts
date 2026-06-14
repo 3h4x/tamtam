@@ -31,7 +31,7 @@ function makeDeps(overrides: Partial<OrchestratorTickDeps> = {}): OrchestratorTi
     loadConfig: vi.fn(async () => ({ marginPct: 5, maxBoostsPerHour: 2 })),
     loadBridge: vi.fn(async () => makeBridge()),
     loadAgents: vi.fn(async () => [
-      { id: 'a1', name: 'improve', project: 'borged', enabled: true, schedule: '15m', lastDispatchMs: null, kind: 'user' as const, boostable: true },
+      { id: 'a1', name: 'improve', project: 'borged', enabled: true, schedule: '15m', lastDispatchMs: null, kind: 'user' as const, boostable: true, model: 'normal' as const, role: 'producer' as const, autopilot: {} },
     ]),
     enqueueAgentFire: vi.fn(async () => {}),
     enqueueNextFire: vi.fn(async () => {}),
@@ -97,7 +97,7 @@ describe('handleOrchestratorTick', () => {
       ),
       loadAgents: vi.fn(async () => loadBoostAgents({
         listAgents: vi.fn(async () => [
-          { id: 'a1', name: 'improve', project: 'borged', schedule: '15m', prompt: '', enabled: true, kind: 'user' as const, boostable: true },
+          { id: 'a1', name: 'improve', project: 'borged', schedule: '15m', prompt: '', enabled: true, kind: 'user' as const, boostable: true, model: 'normal' as const, role: 'producer' as const, autopilot: {} },
         ]),
         getDispatches: vi.fn(() => new Map<string, number>()),
         loadFruitfulness: vi.fn(async () => {
@@ -235,7 +235,7 @@ describe('handleOrchestratorTick — health analysis phase', () => {
       analyzeAgentHealth,
       loadLatestFinishedRunStartedAt,
       loadAgents: vi.fn(async () => [
-        { id: 'a1', name: 'improve', project: 'borged', enabled: true, schedule: '15m', lastDispatchMs: NOW - 10 * 60 * 1000, kind: 'user' as const, boostable: true },
+        { id: 'a1', name: 'improve', project: 'borged', enabled: true, schedule: '15m', lastDispatchMs: NOW - 10 * 60 * 1000, kind: 'user' as const, boostable: true, model: 'normal' as const, role: 'producer' as const, autopilot: {} },
       ]),
     }));
     expect(analyzeAgentHealth).not.toHaveBeenCalled();
@@ -252,7 +252,7 @@ describe('handleOrchestratorTick — health analysis phase', () => {
       analyzeAgentHealth,
       loadLatestFinishedRunStartedAt,
       loadAgents: vi.fn(async () => [
-        { id: 'a1', name: 'improve', project: 'borged', enabled: true, schedule: '15m', lastDispatchMs: NOW - 60 * 1000, kind: 'user' as const, boostable: true },
+        { id: 'a1', name: 'improve', project: 'borged', enabled: true, schedule: '15m', lastDispatchMs: NOW - 60 * 1000, kind: 'user' as const, boostable: true, model: 'normal' as const, role: 'producer' as const, autopilot: {} },
       ]),
     }));
     expect(analyzeAgentHealth).not.toHaveBeenCalled();
@@ -268,7 +268,7 @@ describe('handleOrchestratorTick — health analysis phase', () => {
       analyzeAgentHealth,
       loadLatestFinishedRunStartedAt: vi.fn(async () => NOW - 60 * 1000),
       loadAgents: vi.fn(async () => [
-        { id: 'a1', name: 'improve', project: 'borged', enabled: true, schedule: '15m', lastDispatchMs: NOW - 60 * 1000, kind: 'user' as const, boostable: true },
+        { id: 'a1', name: 'improve', project: 'borged', enabled: true, schedule: '15m', lastDispatchMs: NOW - 60 * 1000, kind: 'user' as const, boostable: true, model: 'normal' as const, role: 'producer' as const, autopilot: {} },
       ]),
     }));
     expect(analyzeAgentHealth).toHaveBeenCalledTimes(1);
@@ -284,7 +284,7 @@ describe('handleOrchestratorTick — health analysis phase', () => {
       analyzeAgentHealth,
       loadLatestFinishedRunStartedAt,
       loadAgents: vi.fn(async () => [
-        { id: 'a1', name: 'improve', project: 'borged', enabled: true, schedule: '15m', lastDispatchMs: NOW - 60 * 1000, kind: 'user' as const, boostable: true },
+        { id: 'a1', name: 'improve', project: 'borged', enabled: true, schedule: '15m', lastDispatchMs: NOW - 60 * 1000, kind: 'user' as const, boostable: true, model: 'normal' as const, role: 'producer' as const, autopilot: {} },
       ]),
     });
 
@@ -423,10 +423,10 @@ describe('handleOrchestratorTick — health analysis phase', () => {
       ['fresh-1', { analyzedAtMs: NOW - 6 * 60 * 1000, latestRunStartedAt: coveredRunStartedAt }],
     ]);
     const agents = [
-      { id: 'stale-0', name: 'stale0', project: 'borged', enabled: true, schedule: '15m', lastDispatchMs: coveredRunStartedAt, kind: 'user' as const, boostable: true },
-      { id: 'stale-1', name: 'stale1', project: 'borged', enabled: true, schedule: '15m', lastDispatchMs: null, kind: 'user' as const, boostable: true },
-      { id: 'fresh-0', name: 'fresh0', project: 'borged', enabled: true, schedule: '15m', lastDispatchMs: NOW - 60 * 1000, kind: 'user' as const, boostable: true },
-      { id: 'fresh-1', name: 'fresh1', project: 'borged', enabled: true, schedule: '15m', lastDispatchMs: NOW - 30 * 1000, kind: 'user' as const, boostable: true },
+      { id: 'stale-0', name: 'stale0', project: 'borged', enabled: true, schedule: '15m', lastDispatchMs: coveredRunStartedAt, kind: 'user' as const, boostable: true, model: 'normal' as const, role: 'producer' as const, autopilot: {} },
+      { id: 'stale-1', name: 'stale1', project: 'borged', enabled: true, schedule: '15m', lastDispatchMs: null, kind: 'user' as const, boostable: true, model: 'normal' as const, role: 'producer' as const, autopilot: {} },
+      { id: 'fresh-0', name: 'fresh0', project: 'borged', enabled: true, schedule: '15m', lastDispatchMs: NOW - 60 * 1000, kind: 'user' as const, boostable: true, model: 'normal' as const, role: 'producer' as const, autopilot: {} },
+      { id: 'fresh-1', name: 'fresh1', project: 'borged', enabled: true, schedule: '15m', lastDispatchMs: NOW - 30 * 1000, kind: 'user' as const, boostable: true, model: 'normal' as const, role: 'producer' as const, autopilot: {} },
     ];
     const loadLatestFinishedRunStartedAt = vi.fn(async (_candidate: AnalysisCandidate) => NOW - 30 * 1000);
     const analyzeAgentHealth = vi.fn(async (_c: AnalysisCandidate[]) => []);
@@ -442,8 +442,8 @@ describe('handleOrchestratorTick — health analysis phase', () => {
   it('skips system-kind and unscheduled agents', async () => {
     const mixedAgents = [
       { id: 'sys', name: 'reindex', project: 'borged', enabled: true, schedule: '15m', lastDispatchMs: null, kind: 'system' as const, boostable: true },
-      { id: 'noSched', name: 'manual', project: 'borged', enabled: true, schedule: null, lastDispatchMs: null, kind: 'user' as const, boostable: true },
-      { id: 'good', name: 'improve', project: 'borged', enabled: true, schedule: '15m', lastDispatchMs: null, kind: 'user' as const, boostable: true },
+      { id: 'noSched', name: 'manual', project: 'borged', enabled: true, schedule: null, lastDispatchMs: null, kind: 'user' as const, boostable: true, model: 'normal' as const, role: 'producer' as const, autopilot: {} },
+      { id: 'good', name: 'improve', project: 'borged', enabled: true, schedule: '15m', lastDispatchMs: null, kind: 'user' as const, boostable: true, model: 'normal' as const, role: 'producer' as const, autopilot: {} },
     ];
     const analyzeAgentHealth = vi.fn(async (_c: AnalysisCandidate[]) => []);
     const deps = makeDeps({ analyzeAgentHealth, loadAgents: vi.fn(async () => mixedAgents) });

@@ -14,6 +14,7 @@ import { Textarea } from '@/components/ui/Textarea'
 import { useToast } from '@/components/Toast'
 import type { AgentTemplateRecord } from '@/components/SettingsPage'
 import { MODEL_TIERS, MODEL_LABELS, MODEL_DESCRIPTIONS, normalizeModelInput } from '@/lib/agents/model-aliases'
+import { ALL_AGENT_ROLES, parseAgentRole } from '@/lib/agents/roles'
 import { resolveAgentPrerequisiteCommand, substitutePrerequisiteProjectPlaceholder } from '@/lib/agents/prerequisites'
 import { CLI_PROVIDERS, type CliProvider } from '@/lib/usage/cli-providers'
 import { AgentScheduleStrip } from '@/components/agents-tab/AgentScheduleStrip'
@@ -37,6 +38,7 @@ export interface AgentEditorSavePayload {
   fallbackEnabled?: boolean
   prerequisiteCommand: string | null
   permissionMode: string | null
+  role: string
 }
 
 export function AgentEditor({
@@ -87,6 +89,21 @@ export function AgentEditor({
   const [schedule, setSchedule] = useState(agent?.schedule || template?.schedule || '')
   const [enabled, setEnabled] = useState<boolean>(agent ? agent.enabled : true)
   const [boostable, setBoostable] = useState<boolean>(agent ? (agent.boostable ?? true) : true)
+  const [role, setRole] = useState<string>(parseAgentRole((agent as { role?: string } | null)?.role))
+  // Active autopilot override (cadence throttle / model downgrade). The cron
+  // resolves these at dispatch in place of the operator's base schedule/model,
+  // so surface them here — otherwise the editor shows the base value while the
+  // agent actually runs on the override. Auto-restores on recovery.
+  const autopilotOverride = useMemo<string | null>(() => {
+    const raw = (agent as { autopilotState?: string | null } | null)?.autopilotState
+    if (!raw) return null
+    let st: { scheduleOverride?: string; modelOverride?: string }
+    try { st = typeof raw === 'string' ? JSON.parse(raw) : raw } catch { return null }
+    const parts: string[] = []
+    if (st?.scheduleOverride) parts.push(`cadence → every ${st.scheduleOverride}`)
+    if (st?.modelOverride) parts.push(`model → ${st.modelOverride}`)
+    return parts.length ? parts.join(' · ') : null
+  }, [agent])
   const [prerequisiteCommand, setPrerequisiteCommand] = useState<string>(initialPrerequisite)
   const [permissionMode, setPermissionMode] = useState<string>(agent?.permissionMode ?? '')
   const [saving, setSaving] = useState(false)
@@ -132,6 +149,7 @@ export function AgentEditor({
     setSelectedSkills(src.skillIds || [])
     setSelectedDocPaths((agent?.docPaths) || [])
     setModel(normalizeModelInput(src.model, 'normal'))
+    setRole(parseAgentRole((src as { role?: string }).role))
     setProvider((agent?.provider as CliProvider | null | undefined) ?? null)
     setFallbackEnabled(agent?.fallbackEnabled ?? template?.fallbackEnabled ?? false)
     setPermissionMode(agent?.permissionMode ?? '')
@@ -170,7 +188,7 @@ export function AgentEditor({
     if (!name.trim() || saving) return
     setSaving(true)
     try {
-      await onSave({ name, prompt: agentPrompt, skillIds: selectedSkills, docPaths: selectedDocPaths, model, schedule: schedule || null, enabled, boostable, provider, fallbackEnabled, prerequisiteCommand: prerequisiteCommand.trim() || null, permissionMode: permissionMode || null })
+      await onSave({ name, prompt: agentPrompt, skillIds: selectedSkills, docPaths: selectedDocPaths, model, schedule: schedule || null, enabled, boostable, provider, fallbackEnabled, prerequisiteCommand: prerequisiteCommand.trim() || null, permissionMode: permissionMode || null, role })
     } catch (err) {
       toast(err instanceof Error ? err.message : 'Failed to save agent', 'error')
     }
@@ -265,6 +283,14 @@ export function AgentEditor({
             />
           </div>
 
+          {autopilotOverride && (
+            <div className="rounded-md border border-status-warning/40 bg-status-warning/10 px-3 py-2 text-xs text-status-warning">
+              ⚙ Autopilot is currently overriding this agent: {autopilotOverride}. The
+              base values below stay as configured; the override auto-restores when the
+              agent recovers.
+            </div>
+          )}
+
           <div>
             <div className="mb-1.5 text-xs font-semibold text-text-tertiary uppercase tracking-wider">Model</div>
             <SegmentedControl
@@ -276,6 +302,30 @@ export function AgentEditor({
                 value: m,
                 label: MODEL_LABELS[m],
                 title: isSystemAgent ? 'Built-in agent model is fixed' : MODEL_DESCRIPTIONS[m],
+              }))}
+            />
+          </div>
+
+          <div>
+            <div className="mb-1.5 text-xs font-semibold text-text-tertiary uppercase tracking-wider">Role</div>
+            <SegmentedControl
+              ariaLabel="Agent role"
+              value={role}
+              onChange={(r) => setRole(r)}
+              disabled={isSystemAgent}
+              options={ALL_AGENT_ROLES.map((r) => ({
+                value: r,
+                label: r,
+                title:
+                  r === 'producer'
+                    ? 'Judged by code changes; cadence-throttled by autopilot when it churns (loop/noise).'
+                    : r === 'monitor'
+                      ? 'Watchdog; value = coverage. Cadence never throttled; model downgraded when idle.'
+                      : r === 'reviewer'
+                        ? 'Reviews/QA; value = verdicts. Cadence never throttled; model downgraded when idle.'
+                        : r === 'planner'
+                          ? 'Plans/research; value = artifacts. Cadence never throttled; model downgraded when idle.'
+                          : 'Published output (blog/social); never auto-managed.',
               }))}
             />
           </div>

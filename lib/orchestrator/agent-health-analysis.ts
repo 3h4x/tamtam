@@ -37,6 +37,15 @@ export interface HealthAnalysisOutcome {
   agentId: string;
   analyzed: boolean;
   latestRunStartedAt: number | null;
+  /** LLM verdict signals, surfaced so the autopilot can act on the same
+   *  analysis pass without re-reading runs. `concern`/`concernType` drive
+   *  producer cadence-throttle; `allIdle` (every analyzed run was idle-by-
+   *  design) drives monitor model-downgrade; `anyFruitful` (a run changed
+   *  files/lines) drives restore. Absent fields default to "no signal". */
+  concern?: boolean;
+  concernType?: HealthVerdict['concernType'];
+  allIdle?: boolean;
+  anyFruitful?: boolean;
 }
 
 /** Injectable LLM runner: takes a prompt, returns the model's raw text output
@@ -317,10 +326,19 @@ export async function analyzeAgentHealth(
           agentId: candidate.id,
           agentName: candidate.name,
         });
-        outcomes.push({ agentId: candidate.id, analyzed: true, latestRunStartedAt });
+        outcomes.push({
+          agentId: candidate.id,
+          analyzed: true,
+          latestRunStartedAt,
+          concern: false,
+          concernType: 'none',
+          allIdle: true,
+          anyFruitful: false,
+        });
         continue;
       }
 
+      const anyFruitful = runs.some((r) => r.modifiedFilesCount > 0 || r.linesChanged > 0);
       const text = await runPrint(buildPrompt(candidate, runs));
       if (!text) continue;
       const verdict = parseVerdict(text);
@@ -363,7 +381,15 @@ export async function analyzeAgentHealth(
           agentName: candidate.name,
         });
       }
-      outcomes.push({ agentId: candidate.id, analyzed: true, latestRunStartedAt });
+      outcomes.push({
+        agentId: candidate.id,
+        analyzed: true,
+        latestRunStartedAt,
+        concern: verdict.concern,
+        concernType: verdict.concernType,
+        allIdle: false,
+        anyFruitful,
+      });
     } catch {
       // Swallow per spec — analysis failure must not block the tick.
     }

@@ -1,6 +1,7 @@
 import { db, schema } from '@/lib/db';
 import { eq, like } from 'drizzle-orm';
 import { normalizeModelInput } from '@/lib/agents/model-aliases';
+import type { AutopilotState } from '@/lib/orchestrator/agent-autopilot';
 
 // Per-file-agent runtime overrides. The .md file in `.tamtam/agents/<name>.md`
 // owns the agent's existence and its prompt body — anything that's part of
@@ -19,6 +20,12 @@ export interface FileAgentOverride {
   model?: string;
   skillIds?: string[];
   permissionMode?: string | null;
+  // Agent role (operator override / inferred). Drives autopilot policy.
+  role?: string;
+  // Runtime autopilot overrides + streak counters. File agents have no DB row,
+  // so their autopilot state rides here in the override (JSON) instead of the
+  // `agents.autopilot_state` column used for DB agents.
+  autopilotState?: AutopilotState;
 }
 
 function keyFor(project: string, name: string): string {
@@ -142,6 +149,8 @@ export async function setFileAgentOverride(project: string, name: string, patch:
   if (patch.model !== undefined) next.model = normalizeModelInput(patch.model, 'normal');
   if (patch.skillIds !== undefined) next.skillIds = patch.skillIds;
   if (patch.permissionMode !== undefined) next.permissionMode = patch.permissionMode;
+  if (patch.role !== undefined) next.role = patch.role;
+  if (patch.autopilotState !== undefined) next.autopilotState = patch.autopilotState;
   const value = JSON.stringify(next);
   await db.insert(schema.settings)
     .values({ key: keyFor(project, name), value })
