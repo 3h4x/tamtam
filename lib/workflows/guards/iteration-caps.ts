@@ -10,8 +10,8 @@
 //
 // Two caps are tracked:
 //   review / test / commit / push (step verification loops)
-//     → `fix_max_iterations` setting via getFixIterationCap() (default 3,
-//       settings-driven, `0` ⇒ unlimited until LGTM or release wall-clock
+//     → `fix_max_iterations` setting via getFixIterationCap() (default 0,
+//       falling back to 3 before settings load; `0` ⇒ unlimited until LGTM or release wall-clock
 //       timeout). One number governs every step. See
 //       `lib/pipeline/recovery-budget.ts`.
 //   push-hook rejection retries
@@ -158,7 +158,7 @@ export function checkIterationCap(
   if (decision.next === 'commit' && decision.from === 'fix') {
     const count = countSiblingSteps(job.project, 'commit', job.releaseId, deps);
     const cap = deps.fixIterationCap();
-    if (count >= cap) {
+    if (cap > 0 && count >= cap) {
       return {
         rewritten: {
           next: 'abort',
@@ -191,7 +191,7 @@ export function checkIterationCap(
     } else {
       const count = countSiblingSteps(job.project, 'push', job.releaseId, deps);
       const cap = deps.fixIterationCap();
-      if (count >= cap) {
+      if (cap > 0 && count >= cap) {
         return {
           rewritten: {
             next: 'abort',
