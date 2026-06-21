@@ -3,6 +3,8 @@
 import { useState } from 'react'
 import type { InitiativePreviewResponse } from '@/app/api/projects/by-project/[projectName]/initiatives/preview/route'
 import { Button } from '@/components/ui/Button'
+import { ErrorCallout } from '@/components/ui/ErrorCallout'
+import { Spinner } from '@/components/ui/Spinner'
 
 interface ProjectPreviewRowProps {
   projectName: string
@@ -48,7 +50,7 @@ export function ProjectPreviewRow({ projectName }: ProjectPreviewRowProps) {
         >
           {state.kind === 'loading' ? (
             <>
-              <span className="spinner-sm" />
+              <Spinner size="sm" shrink aria-hidden="true" />
               Probing…
             </>
           ) : (
@@ -86,9 +88,9 @@ export function ProjectPreviewRow({ projectName }: ProjectPreviewRowProps) {
       )}
 
       {state.kind === 'error' && (
-        <p className="px-3 py-2.5 text-xs text-status-error">
+        <ErrorCallout padding="none" radius="md" className="m-3 px-2 py-1.5 text-xs" preWrap={false}>
           Failed to preview: {state.message}
-        </p>
+        </ErrorCallout>
       )}
     </div>
   )
