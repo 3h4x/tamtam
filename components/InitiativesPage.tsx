@@ -9,6 +9,7 @@ import { patchInitiative, type InitiativeAction } from '@/lib/client-api'
 import { Table } from '@/components/ui/Table'
 import type { Column } from '@/components/ui/Table'
 import { EmptyState } from '@/components/ui/EmptyState'
+import { ErrorCallout } from '@/components/ui/ErrorCallout'
 import { ProjectPreviewRow } from '@/components/initiatives/ProjectPreviewRow'
 
 // epoch-milliseconds → "Xm ago" / "Xh ago" / "Xd ago"
@@ -178,7 +179,9 @@ export function InitiativesPage({ embedded = false }: { embedded?: boolean } = {
   if (failed && !initiatives) {
     return (
       <div className="p-6">
-        <p className="text-sm text-status-error">Failed to load initiatives.</p>
+        <ErrorCallout className="text-sm" preWrap={false}>
+          Failed to load initiatives.
+        </ErrorCallout>
       </div>
     )
   }
