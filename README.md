@@ -22,10 +22,10 @@ The agent management dashboard built for Claude-compatible CLIs. Define skills, 
 | **CI repair** | Failed CI run? One click sends the selected provider to fix it |
 | **Scheduling** | Graphile-worker-backed interval scheduler — daily reviews, nightly audits, whatever you need, running unattended |
 | **Release pipeline** | Quality-gated, branch-context-driven flow: test → review → fix loop → commit → push → DoD (`mark-dod`) → pr-wait/merge → soak. Default-branch releases push directly; non-default branches open or reuse a PR. The unified `fix_max_iterations` cap (default `0`, unlimited until LGTM or release timeout) governs review/test/commit/non-hook push verification; push-hook rejection fixes are capped at 2 attempts. Optional `release_min_lines` reinforces sub-threshold auto-release work by re-dispatching the same agent before the pipeline fires, and `release_reinforce_max_iterations` (default `3`) bounds those reinforce reruns |
-| **Cross-project recommendations** | Open agent and scheduler suggestions across every project in `/recommendations` |
+| **Cross-project recommendations** | Open agent and scheduler suggestions, mined initiatives, and resolved history across every project in `/recommendations` |
 | **Semantic retrieval** | Optional local context injection from committed project docs, DB-backed skills, project config guidance, and completed agent run reports via `pgvector` + Ollama |
-| **Orchestrator** | Autonomous boost/health tick that scores agent runs, surfaces fruitfulness/health signals, and creates/auto-resolves recommendations |
-| **Pipeline health** | Live release pipeline metrics in `/pipeline` |
+| **Orchestrator** | Autonomous boost/health tick that scores agent runs, surfaces fruitfulness/health signals, creates/auto-resolves recommendations, and can mine initiatives |
+| **Pipeline health** | Live release pipeline metrics in `/stats?tab=pipeline` (`/pipeline` redirects there) |
 | **Monitoring** | `/monitoring` dashboards backed by Prometheus + Loki (Grafana-compatible) |
 | **Stats & logs** | Usage/cost stats in `/stats` and a cross-run log viewer in `/logs` |
 | **QA browser broker** | Sandboxed Playwright (containerized) so QA agents can drive a real browser under `auto`/`acceptEdits` without host access |
@@ -60,7 +60,8 @@ TamTam is a single Next.js 16 (App Router) application backed by Postgres. The N
         │ Postgres 18 + pgvector      │   │ Ollama (local, opt.)   │
         │ (Drizzle ORM, node-postgres)│   │ embeddings for         │
         │  · jobs, agents, skills,    │   │ pgvector retrieval     │
-        │    projects, settings…      │   └────────────────────────┘
+        │    initiatives, projects,   │   └────────────────────────┘
+        │    settings, usage…         │
         │  · workflow state (durable, │
         │    local-world files in     │
         │    `data/workflow-data`     │
@@ -72,7 +73,7 @@ TamTam is a single Next.js 16 (App Router) application backed by Postgres. The N
 ## Stack
 
 - **Next.js 16** (App Router) — frontend, API routes, and SSE streaming in one process
-- **Postgres 18 + pgvector** via Drizzle ORM + `pg` — main source of truth for jobs, agents, skills, settings, and retrieval embeddings
+- **Postgres 18 + pgvector** via Drizzle ORM + `pg` — main source of truth for jobs, agents, skills, initiatives, settings, usage snapshots, and retrieval embeddings
 - **`workflow` runtime** — `"use workflow"` / `"use step"` orchestration for agent intake (`runAgentIntakeWorkflow()`) and the release pipeline (`releaseOrchestratorWorkflow()` plus phase workflows); TamTam pins the local world by default (`WORKFLOW_TARGET_WORLD=local`, `WORKFLOW_LOCAL_DATA_DIR=data/workflow-data`) and keeps workflow data under `data/workflow-data`. A Postgres-backed workflow world is an explicit operator override, not the default.
 - **graphile-worker** — durable cron queue for scheduled agents and system maintenance
 - **PM2** — supervises the long-running TamTam server; one-shot CLI jobs are spawned in-process by workflow steps and route handlers
@@ -120,7 +121,7 @@ Runtime config, including notification throttle state, lives in the Postgres dat
 Per-project dev-server lifecycle fields (`dev_server_start_command`, `dev_server_stop_command`, `dev_server_ready_url`) live in `/project/[name]/config` as DB-only project metadata and let TamTam start, gate, and tear down a project's own app during agent runs.
 
 The Settings area is split across `/settings/general`, `/settings/cli`, `/settings/pipeline`, `/settings/notifications`, `/settings/projects`, `/settings/templates`, and `/settings/database`.
-Bare `/settings` redirects to `/settings/general`, and job history lives at `/workflow-runs` while per-project history stays under `/project/[name]/history`.
+Bare `/settings` redirects to `/settings/general`, job history lives at `/workflow-runs`, and the initiative backlog lives in the Initiatives tab at `/recommendations?tab=initiatives` (`/initiatives` redirects there). Per-project history stays under `/project/[name]/history`.
 
 | Setting | Where |
 |---|---|
@@ -185,6 +186,9 @@ API routes are covered by vitest tests in `__tests__/api/`, often with combined 
 
 ## Routes
 
+- Main surfaces: `/`, `/agents`, `/agent`, `/library`, `/monitoring`, `/recommendations`, `/stats`, `/workflow-runs`, `/logs`, `/settings/[tab]`
+- Legacy redirects: `/pipeline` → `/stats?tab=pipeline`, `/skills` → `/library?tab=skills`, `/initiatives` → `/recommendations?tab=initiatives`, `/settings` → `/settings/general`
+- Hub deep links: `/recommendations?tab=initiatives`, `/recommendations?tab=history`, `/stats?tab=pipeline`
 - Project detail tabs: `/project/[name]` and `/project/[name]/[tab]` (`overview`, `config`, `history`, `terminal`, `changes`, `issues`, `docs`, `agents`)
 - Release traces and task detail: `/project/[name]/release/[releaseId]` and `/project/[name]/task/[task]`
 
