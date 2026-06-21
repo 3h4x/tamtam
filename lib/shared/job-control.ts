@@ -1,8 +1,6 @@
-// internal-scheduler.ts was retired with the in-memory cron path. Pause
-// state is now read by the agent-cron task handler's `prereqSkipReason`
-// callback (see lib/workflows/cron/agent-cron-task.ts) — no scheduler-
-// side toggle needed because graphile-worker fires per-job and the
-// handler can decide to skip in flight.
+// Pause state is read by the agent-cron task handler's `prereqSkipReason`
+// callback, so graphile-worker can decide whether to skip each scheduled
+// agent run in flight.
 import { getActiveCliProvider, getSettings, reloadConfig } from '@/lib/shared/config';
 import {
   getQuotaSnapshots,

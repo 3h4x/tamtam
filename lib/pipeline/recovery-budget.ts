@@ -8,11 +8,8 @@ import { getSettings, type ReviewDoNotShipAction } from '@/lib/shared/config';
 // and the review-driven push→fix→push leg. Default `0` means "loop
 // until success or the release wall-clock timeout."
 //
-// `getFixIterationCap()` is the only export for this knob. There used
-// to be two parallel exports (`getMaxStepIterations`,
-// `getReviewFixMaxIterations`) but they always returned the same
-// value, which falsely suggested to readers that the two could diverge
-// at runtime. They never did. One function, one setting.
+// `getFixIterationCap()` is the only export for this knob: one function,
+// one setting, one runtime value.
 //
 // Two failure-recovery caps stay deliberately separate and finite even
 // when `fix_max_iterations = 0`, so a permanently broken environment

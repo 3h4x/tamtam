@@ -3,7 +3,7 @@
 // Decision rules:
 //   test pass  → review (or commit/push when review is disabled)
 //   test fail  → fix
-//   review LGTM           → push
+//   review LGTM           → commit
 //   review NEEDS ATTENTION → fix
 //   review DO NOT SHIP     → abort
 //   review null verdict    → fix  (treat as NEEDS ATTENTION per review-contract)
