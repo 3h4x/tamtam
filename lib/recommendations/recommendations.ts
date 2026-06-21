@@ -1,4 +1,4 @@
-import { and, desc, eq, sql } from 'drizzle-orm';
+import { and, desc, eq, gte, inArray, sql } from 'drizzle-orm';
 import { db, schema } from '@/lib/db';
 
 // `resolved` is a terminal status set automatically by the detectors when the
@@ -43,6 +43,23 @@ export interface RecommendationRow {
   payload: RecommendationPayload | null;
   created_at: number;
   updated_at: number;
+}
+
+export const ORCHESTRATOR_RECOMMENDATION_TYPES = [
+  'orchestrator_boost',
+  'agent_autopilot',
+  'orchestrator_agent_health',
+] as const;
+
+export type OrchestratorRecommendationType = typeof ORCHESTRATOR_RECOMMENDATION_TYPES[number];
+
+export interface OrchestratorRecommendationActivityRow {
+  project: string;
+  type: OrchestratorRecommendationType;
+  title: string;
+  status: RecommendationStatus;
+  agentName: string | null;
+  updatedAt: number;
 }
 
 function rowToDict(row: typeof schema.recommendations.$inferSelect): RecommendationRow {
@@ -190,6 +207,69 @@ export async function listAllResolvedRecommendations(): Promise<RecommendationRo
     .where(sql`${schema.recommendations.status} <> 'open'`)
     .orderBy(desc(schema.recommendations.updatedAt));
   return rows.map(rowToDict);
+}
+
+export async function countRecentOrchestratorRecommendations(
+  cutoffSec: number,
+): Promise<Record<OrchestratorRecommendationType, number>> {
+  const rows = await db
+    .select({
+      type: schema.recommendations.type,
+      count: sql<number>`count(*)`,
+    })
+    .from(schema.recommendations)
+    .where(and(
+      inArray(schema.recommendations.type, [...ORCHESTRATOR_RECOMMENDATION_TYPES]),
+      gte(schema.recommendations.updatedAt, cutoffSec),
+    ))
+    .groupBy(schema.recommendations.type);
+
+  const counts: Record<OrchestratorRecommendationType, number> = {
+    orchestrator_boost: 0,
+    agent_autopilot: 0,
+    orchestrator_agent_health: 0,
+  };
+  for (const row of rows) {
+    if (isOrchestratorRecommendationType(row.type)) {
+      counts[row.type] = Number(row.count);
+    }
+  }
+  return counts;
+}
+
+export async function listRecentOrchestratorRecommendations(
+  limit: number,
+): Promise<OrchestratorRecommendationActivityRow[]> {
+  const rows = await db
+    .select({
+      project: schema.recommendations.project,
+      type: schema.recommendations.type,
+      title: schema.recommendations.title,
+      status: schema.recommendations.status,
+      agentName: schema.recommendations.agentName,
+      updatedAt: schema.recommendations.updatedAt,
+    })
+    .from(schema.recommendations)
+    .where(inArray(schema.recommendations.type, [...ORCHESTRATOR_RECOMMENDATION_TYPES]))
+    .orderBy(desc(schema.recommendations.updatedAt))
+    .limit(limit);
+
+  return rows
+    .filter((row): row is typeof row & { type: OrchestratorRecommendationType } =>
+      isOrchestratorRecommendationType(row.type),
+    )
+    .map((row) => ({
+      project: row.project,
+      type: row.type,
+      title: row.title,
+      status: row.status as RecommendationStatus,
+      agentName: row.agentName,
+      updatedAt: row.updatedAt,
+    }));
+}
+
+function isOrchestratorRecommendationType(type: string): type is OrchestratorRecommendationType {
+  return (ORCHESTRATOR_RECOMMENDATION_TYPES as readonly string[]).includes(type);
 }
 
 export async function updateRecommendationStatus(project: string, id: string, status: RecommendationStatus): Promise<RecommendationRow | null> {

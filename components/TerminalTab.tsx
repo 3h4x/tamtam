@@ -59,10 +59,11 @@ interface TerminalTabProps {
 }
 
 const IMG_EXT = /\.(png|jpe?g|gif|webp|bmp|tiff?|svg|heic|heif|avif)$/i
+const EMPTY_SEARCH_PARAMS = new URLSearchParams()
 
 export function TerminalTab({ projectName, initialSessionId }: TerminalTabProps) {
   const router = useRouter()
-  const searchParams = useSearchParams()
+  const searchParams = useSearchParams() ?? EMPTY_SEARCH_PARAMS
   const jobParam = searchParams.get('job')
 
   // Large prompts (e.g. issue bodies) are stashed in sessionStorage to avoid

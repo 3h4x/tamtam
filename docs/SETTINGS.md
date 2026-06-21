@@ -180,6 +180,12 @@ The orchestrator budget allocator runs as a graphile-worker cron task (`orchestr
 | `agent_autopilot_tier_floor` | `fast`/`normal`/`smart` | `'fast'` | Model downgrades never go below this tier |
 | `agent_autopilot_idle_streak` | number | `4` | All-clear analyses before a monitor/reviewer/planner model downgrade |
 | `agent_autopilot_concern_streak` | number | `2` | Sustained loop/noise analyses before a producer cadence throttle |
+| `initiative_engine_enabled` | boolean | `false` | Master switch for the autonomous initiative engine. OFF by default — autonomy is opt-in per deployment, enabled with this one toggle |
+| `initiative_mining_enabled` | boolean | `true` | Whether the mining phase probes projects for chores (lint, TODOs, etc.) on each orchestrator tick. Requires `initiative_engine_enabled` |
+| `initiative_dispatch_enabled` | boolean | `true` | Whether the dispatch phase starts queued initiatives through the release pipeline. Set to `false` for mine-only mode: discover and curate backlog items without auto-merge |
+| `initiative_max_ships_per_day` | number | `3` | Per-project cap on autonomous merges/day so a bad streak can't flood main |
+| `initiative_max_backlog_per_project` | number | `50` | Admission cap on queued backlog items per project; oldest-first promotion stops here |
+| `initiative_mining_interval_minutes` | number | `60` | Minimum minutes between mining runs for the same project |
 
 The autopilot interprets each run's value by the agent's **role** (`producer` /
 `monitor` / `reviewer` / `planner` / `publisher`) and picks a role-appropriate

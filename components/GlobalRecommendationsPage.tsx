@@ -1,6 +1,7 @@
 'use client'
 
 import { useEffect, useState } from 'react'
+import { useSearchParams } from 'next/navigation'
 import { fetchAllOpenRecommendations, fetchRecommendationsHistory, updateRecommendation, applyRecommendation, runAgent, updateAgent } from '@/lib/client-api'
 import type { Recommendation } from '@/lib/client-api'
 import { ErrorState } from '@/components/ErrorState'
@@ -10,16 +11,25 @@ import { StandardTabs } from '@/components/ui/StandardTabs'
 import { RecommendationCard } from '@/components/recommendations/RecommendationCard'
 import { RecommendationHistoryRow } from '@/components/recommendations/RecommendationHistoryRow'
 import { recommendationBackoffSchedule } from '@/components/recommendations/schedule-backoff'
+import { InitiativesPage } from '@/components/InitiativesPage'
 
-type RecommendationsTab = 'unresolved' | 'history'
+type RecommendationsTab = 'unresolved' | 'initiatives' | 'history'
 
-// Cross-project Recommendations page. Two tabs: "Unresolved" (open work that
-// needs attention) and "History" (what was already done — auto-resolved by the
-// orchestrator, or dismissed/applied by the operator).
+const EMPTY_SEARCH_PARAMS = new URLSearchParams()
+
+// Cross-project operator hub. Three tabs: "Unresolved" (open recommendations that
+// need attention), "Initiatives" (the mined backlog, with promote/reject steering),
+// and "History" (what was already done — auto-resolved by the orchestrator, or
+// dismissed/applied by the operator).
 export function GlobalRecommendationsPage() {
+  const search = useSearchParams() ?? EMPTY_SEARCH_PARAMS
+  const initialTab: RecommendationsTab =
+    search.get('tab') === 'initiatives' ? 'initiatives'
+    : search.get('tab') === 'history' ? 'history'
+    : 'unresolved'
   const [items, setItems] = useState<Recommendation[]>([])
   const [loading, setLoading] = useState(true)
-  const [tab, setTab] = useState<RecommendationsTab>('unresolved')
+  const [tab, setTab] = useState<RecommendationsTab>(initialTab)
   // History is loaded lazily the first time the tab is opened, then refreshed
   // whenever an action resolves a card (so it stays in sync without polling).
   const [history, setHistory] = useState<Recommendation[]>([])
@@ -268,6 +278,7 @@ export function GlobalRecommendationsPage() {
 
   const tabs = [
     { id: 'unresolved' as const, label: `Unresolved (${items.length})` },
+    { id: 'initiatives' as const, label: 'Initiatives' },
     { id: 'history' as const, label: `History${historyLoaded ? ` (${history.length})` : ''}` },
   ]
 
@@ -353,6 +364,8 @@ export function GlobalRecommendationsPage() {
           ) : null}
         </>
       )}
+
+      {tab === 'initiatives' && <InitiativesPage embedded />}
 
       {tab === 'history' && (
         <>

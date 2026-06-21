@@ -51,6 +51,63 @@ the cron handler resolves the effective values at each fire
 prompt classifies a quiet watchdog as healthy (idle-is-healthy), so it never
 produces the `loop`/`noise` verdict that throttling requires.
 
+## Initiative Engine — default-off autonomous chore discovery and dispatch
+
+The orchestrator runs two additional phases (`mine`, `dispatch`) when
+`initiative_engine_enabled` is true (default off). These phases add a
+**grounded, autonomous layer** that discovers code-verifiable work (lint
+errors, failing tests, TODOs, etc.) per project, maintains a backlog, and
+automatically dispatches the top-priority item through the existing release
+pipeline.
+
+### Architecture
+
+The **Miner** probes each project (Phase 1 ships lint + TODO scan;
+type-check/tests/deps/docs probes are added incrementally) and upserts
+findings as `proposed` candidates to the `initiatives` backlog. A promotion
+pass then admits them to `queued` status, respecting the
+`initiative_max_backlog_per_project` cap.
+
+The **Dispatcher** runs per-project, checks gates (`gatesClear`, `projectBusy`,
+`maxShipsPerDay`), picks the top-scored queued initiative, and starts an
+inline agent run carrying its prompt. The produced diff flows into the
+existing release-after-run trigger, merging automatically if the release
+succeeds. The initiative keeps the agent job as a temporary association until
+release-after-run starts the release, then tracks the release meta-job; it is
+marked `shipped` only after that release succeeds. Agent or release failure
+marks it `failed` with a 6-hour cooldown to prevent thrashing.
+
+**Scoring:** Each chore kind (lint, type-error, failing-test, todo, dep-bump,
+docs-gap, etc.) has a base severity. Repeated failures decay the score by
+`0.5^attempts` so stuck items naturally deprioritize.
+
+**Per-project serialization** — only one initiative dispatches per project
+per tick, reusing the existing `hasAgentStartSlot` gate. **Global gates** —
+budgets and job-pause gates are respected; the dispatch phase skips when
+gates do not clear.
+
+**Operator steering** — each backlog initiative carries manual controls
+(`PATCH /api/initiatives/[id]`): **promote** (👍) sets `pinned_at` on
+`proposed`/`queued` rows, which sorts the row ahead of all unpinned queued rows
+in both `listQueued` and the dispatcher's pick (pinned-first, then
+`decayedScore`); **reject** (👎) moves a `proposed`/`queued` row to
+`status='rejected'`, which the Miner never reopens (`'rejected'` is not a
+refreshable status), with an **undo** that restores only rejected rows to
+`queued` and clears the pin plus stale release/cooldown association fields.
+Curation is independent of the global `initiative_dispatch_enabled` gate — it
+orders what *would* ship once dispatch is on. Running and terminal rows are not
+steerable from the UI/API, so manual curation cannot hide active release
+tracking or requeue already shipped work. The controls live on the
+**Initiatives** tab of the Recommendations page
+(`/recommendations?tab=initiatives`); there is no separate top-level nav entry.
+
+**Charter and PM layer** (per-project priority overrides, manual initiative
+creation, SLA tracking) are deferred to Phase 2.
+
+See `docs/PIPELINE.md` for how dispatched initiatives integrate into the
+release pipeline, and `docs/superpowers/specs/2026-06-20-initiative-engine-design.md`
+for the full Phase 1 design.
+
 ## Signals the orchestrator computes
 
 - **Fruitfulness** (`lib/agents/fruitfulness.ts`): over the last N *scheduled*

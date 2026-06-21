@@ -253,6 +253,12 @@ const SETTING_KEYS = [
   'agent_autopilot_tier_floor',
   'agent_autopilot_idle_streak',
   'agent_autopilot_concern_streak',
+  'initiative_engine_enabled',
+  'initiative_mining_enabled',
+  'initiative_dispatch_enabled',
+  'initiative_max_ships_per_day',
+  'initiative_max_backlog_per_project',
+  'initiative_mining_interval_minutes',
 ] as const;
 
 function serializeSettingValue(key: string, value: unknown): string {
@@ -428,11 +434,20 @@ function validateAndSerializeSettingValue(
     key === 'plain_test_phase_enabled' ||
     key === 'browser_broker_enabled' ||
     key === 'tamtam_network_policy_strict' ||
-    key === 'orchestrator_enabled'
+    key === 'orchestrator_enabled' ||
+    key === 'initiative_engine_enabled' ||
+    key === 'initiative_mining_enabled' ||
+    key === 'initiative_dispatch_enabled'
   ) {
     return parseBooleanSetting(value, key);
   }
-  if (key === 'orchestrator_boost_margin_pct' || key === 'orchestrator_max_boosts_per_hour') {
+  if (
+    key === 'orchestrator_boost_margin_pct' ||
+    key === 'orchestrator_max_boosts_per_hour' ||
+    key === 'initiative_max_ships_per_day' ||
+    key === 'initiative_max_backlog_per_project' ||
+    key === 'initiative_mining_interval_minutes'
+  ) {
     return parseNonNegativeIntegerSetting(value, key);
   }
 

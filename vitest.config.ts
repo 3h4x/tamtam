@@ -196,16 +196,18 @@ export default defineConfig({
     fakeTimers: {
       shouldClearNativeTimers: true,
     },
-    // Under fork-pool contention, Vitest's throttled task-update flush (a real
-    // timer inside @vitest/runner) can fire after the worker's RPC channel is
-    // torn down. `getWorkerState()` then throws "Vitest failed to access its
-    // internal state" from that timer, surfacing as an unhandled error that
-    // fails an otherwise-green run. That string originates solely from Vitest
-    // internals reaching for a closed worker, so ignoring exactly it can never
-    // mask an application bug. Returning `false` drops only this benign error;
-    // every other unhandled error still fails the run normally.
+    // Under fork-pool contention, Vitest's throttled task-update/console-log
+    // flushes can fire after the worker's RPC channel is torn down, surfacing
+    // as unhandled errors that fail otherwise-green runs. These strings
+    // originate solely from Vitest internals reaching for a closed worker, so
+    // ignoring them exactly cannot mask an application bug. Returning `false`
+    // drops only these benign teardown errors; every other unhandled error
+    // still fails the run normally.
     onUnhandledError(error) {
       if (error?.message?.includes('Vitest failed to access its internal state')) {
+        return false;
+      }
+      if (error?.message?.includes('Closing rpc while "onUserConsoleLog" was pending')) {
         return false;
       }
     },

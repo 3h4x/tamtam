@@ -133,17 +133,18 @@ describe('GlobalRecommendationsPage', () => {
     })
 
     const tabs = Array.from(container.querySelectorAll<HTMLButtonElement>('[role="tab"]'))
-    expect(tabs.map((tab) => tab.textContent)).toEqual(['Unresolved (1)', 'History'])
+    expect(tabs.map((tab) => tab.textContent)).toEqual(['Unresolved (1)', 'Initiatives', 'History'])
     expect(tabs[0]?.getAttribute('aria-selected')).toBe('true')
     expect(tabs[1]?.getAttribute('aria-selected')).toBe('false')
+    expect(tabs[2]?.getAttribute('aria-selected')).toBe('false')
 
     flushSync(() => {
-      tabs[1]?.dispatchEvent(new MouseEvent('click', { bubbles: true }))
+      tabs[2]?.dispatchEvent(new MouseEvent('click', { bubbles: true }))
     })
 
     await fastWaitFor(() => {
       expect(tabs[0]?.getAttribute('aria-selected')).toBe('false')
-      expect(tabs[1]?.getAttribute('aria-selected')).toBe('true')
+      expect(tabs[2]?.getAttribute('aria-selected')).toBe('true')
     })
 
     unmount()

@@ -91,6 +91,16 @@ export interface OrchestratorTickDeps {
    *  the queue drain naturally and prevents high-frequency agents from starving
    *  lower-frequency ones. */
   getProjectQueueCounts?: () => Promise<Map<string, number>> | Map<string, number>;
+  /** Optional — master switch read for the initiative engine. May be async so
+   *  the wiring can load settings via `await import` (the sync `require('@/…')`
+   *  alias does not resolve in the bundled instrumentation runtime). */
+  initiativeEngineEnabled?: () => boolean | Promise<boolean>;
+  /** Optional — probe projects, upsert + admit candidates to the backlog.
+   *  Fire-and-forget; errors swallowed so a bad probe never breaks the tick. */
+  mineInitiatives?: () => Promise<void>;
+  /** Optional — dispatch the top queued initiative per project through the
+   *  release pipeline. Fire-and-forget; errors swallowed. */
+  dispatchInitiatives?: () => Promise<void>;
 }
 
 /** Minimal agent identity passed to the health analysis phase. The analysis
@@ -260,7 +270,10 @@ export async function handleOrchestratorTick(
   let enabled = false;
   try {
     const cfg = await deps.loadConfig();
-    enabled = cfg !== null;
+    const initiativeEngineOn = deps.initiativeEngineEnabled
+      ? await deps.initiativeEngineEnabled()
+      : false;
+    enabled = cfg !== null || initiativeEngineOn;
     if (cfg) {
       const [bridge, agents] = await Promise.all([
         deps.loadBridge(),
@@ -337,6 +350,14 @@ export async function handleOrchestratorTick(
             .catch(() => {})
             .finally(() => clearHealthAnalysisInFlight(candidates));
         }
+      }
+    }
+    if (initiativeEngineOn) {
+      if (deps.mineInitiatives) {
+        await deps.mineInitiatives().catch(() => {});
+      }
+      if (deps.dispatchInitiatives) {
+        await deps.dispatchInitiatives().catch(() => {});
       }
     }
   } catch (err) {

@@ -8,6 +8,7 @@ import { ErrorState } from './ErrorState'
 import { OllamaUsageCard } from './OllamaUsageCard'
 import { QuotaWidget } from './QuotaWidget'
 import { BridgeOverview } from './BridgeOverview'
+import { OrchestratorActivity } from './stats/OrchestratorActivity'
 import { UsageHistoryChart } from './UsageHistoryChart'
 import { EmptyState } from '@/components/ui/EmptyState'
 import { SegmentedControl } from '@/components/ui/SegmentedControl'
@@ -290,6 +291,9 @@ export function StatsPage() {
 
       {/* Bridge — fleet command center, top-of-page */}
       <BridgeOverview />
+
+      {/* Orchestrator — initiative engine activity */}
+      <OrchestratorActivity />
 
       {/* Totals */}
       <div className="grid grid-cols-2 lg:grid-cols-4 gap-3">

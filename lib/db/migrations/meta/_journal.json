@@ -176,6 +176,20 @@
       "when": 1780500000000,
       "tag": "0024_agent_role_autopilot",
       "breakpoints": true
+    },
+    {
+      "idx": 25,
+      "version": "7",
+      "when": 1780600000000,
+      "tag": "0025_add_initiatives",
+      "breakpoints": true
+    },
+    {
+      "idx": 26,
+      "version": "7",
+      "when": 1782030000000,
+      "tag": "0026_add_initiative_pin",
+      "breakpoints": true
     }
   ]
 }

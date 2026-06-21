@@ -22,6 +22,9 @@ const BOOLEAN_SELECT_FIELD_KEYS = new Set<SettingsFieldKey>([
   'tamtam_network_policy_strict',
   'orchestrator_enabled',
   'agent_autopilot_enabled',
+  'initiative_engine_enabled',
+  'initiative_mining_enabled',
+  'initiative_dispatch_enabled',
 ])
 
 const LONG_TEXT_KEYS = new Set<SettingsFieldKey>(['base_prompt', 'commit_style', 'review_verdict_rules'])
@@ -130,7 +133,10 @@ export function SettingsField({
           || fieldKey === 'release_min_lines'
           || fieldKey === 'release_reinforce_max_iterations'
           || fieldKey === 'orchestrator_boost_margin_pct'
-          || fieldKey === 'orchestrator_max_boosts_per_hour' ? (
+          || fieldKey === 'orchestrator_max_boosts_per_hour'
+          || fieldKey === 'initiative_max_ships_per_day'
+          || fieldKey === 'initiative_max_backlog_per_project'
+          || fieldKey === 'initiative_mining_interval_minutes' ? (
         <Input
           type="number"
           min={0}

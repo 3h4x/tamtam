@@ -12,6 +12,8 @@ import { ErrorState } from './ErrorState'
 
 type Window = '24h' | '7d' | '30d' | 'all'
 
+const EMPTY_SEARCH_PARAMS = new URLSearchParams()
+
 function fmtDuration(ms: number | null | undefined): string {
   if (ms == null) return '—'
   const s = ms / 1000
@@ -114,7 +116,7 @@ function VerdictBar({ verdicts }: { verdicts: VerdictDistribution }) {
 const STEP_KINDS = ['release', 'test', 'review', 'fix', 'commit', 'push', 'pr-wait', 'mark-dod'] as const
 
 export function PipelinePage() {
-  const searchParams = useSearchParams()
+  const searchParams = useSearchParams() ?? EMPTY_SEARCH_PARAMS
   const projectFilter = searchParams.get('project')
 
   const [data, setData] = useState<PipelineResponse | null>(null)
@@ -212,7 +214,7 @@ export function PipelinePage() {
             {projectFilter && (
               <span className="ml-2 text-sm font-normal text-text-tertiary">
                 — {projectFilter}{' '}
-                <Link href="/pipeline" className={buttonVariants({ variant: 'link', size: 'sm', className: 'ml-1' })}>
+                <Link href="/stats?tab=pipeline" className={buttonVariants({ variant: 'link', size: 'sm', className: 'ml-1' })}>
                   show all
                 </Link>
               </span>

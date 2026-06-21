@@ -371,6 +371,42 @@ Index: `queued_terminal_runs_project_enqueued` on `(project, enqueued_at)` for p
 
 ---
 
+### `initiatives`
+
+DB-backed backlog for the autonomous initiative engine (orchestrator-driven chore discovery and dispatch). Rows track code-verifiable work candidates (lint errors, TODOs, failing tests, type errors, etc.) and their pipeline progress.
+
+| Column | Type | Default | Notes |
+|--------|------|---------|-------|
+| `id` | SERIAL | — | PRIMARY KEY |
+| `project` | TEXT | — | NOT NULL; owning project |
+| `source` | TEXT | — | NOT NULL; `'mining'` (probe-driven, Phase 1) or `'pm'` (charter/manual, Phase 2) |
+| `kind` | TEXT | — | NOT NULL; chore type: `'lint'`, `'type-error'`, `'failing-test'`, `'missing-test'`, `'todo'`, `'dep-bump'`, `'docs-gap'`, `'gh-issue'`, etc. |
+| `title` | TEXT | — | NOT NULL; operator-facing one-liner |
+| `rationale` | TEXT | — | NOT NULL; why this chore is being tracked |
+| `prompt` | TEXT | — | NOT NULL; agent task prompt for this chore |
+| `score` | DOUBLE PRECISION | `0` | NOT NULL; severity + decay; higher = higher priority |
+| `status` | TEXT | `'proposed'` | NOT NULL; status lifecycle: `'proposed'` (just found) → `'queued'` (admitted to backlog) → `'running'` (dispatched, agent/release running) → `'shipped'` (released successfully) or `'failed'` (error + cooldown). Operators may move `proposed`/`queued` rows to `'rejected'` and restore rejected rows to `queued`; `superseded` is reserved. |
+| `dedup_key` | TEXT | — | NOT NULL; unique `(project, dedup_key)` for de-duplication so re-detection of the same issue does not create duplicates |
+| `release_id` | TEXT | — | nullable; associated job id while running. Initially the agent job id; replaced with the parent release job id once release-after-run starts the pipeline. |
+| `attempts` | INTEGER | `0` | NOT NULL; dispatch attempt count; used to decay score on failure |
+| `cooldown_until` | DOUBLE PRECISION | — | nullable; Unix timestamp (ms) when a failed chore's cooldown expires and it may be retried |
+| `pinned_at` | DOUBLE PRECISION | — | nullable; Unix timestamp (ms) when an operator pinned the initiative ahead of unpinned queue items |
+| `created_at` | DOUBLE PRECISION | — | NOT NULL; Unix timestamp (ms) when the chore was first detected |
+| `updated_at` | DOUBLE PRECISION | — | NOT NULL; Unix timestamp (ms) of the last status/score update |
+
+**Status Lifecycle:**
+- `proposed` — newly detected by probes; awaiting admission to the backlog.
+- `queued` — admitted to the backlog; eligible for dispatch when gates clear.
+- `running` — dispatched; agent run or release pipeline is in progress.
+- `shipped` — release merged successfully; cooldown cleared.
+- `failed` — agent run or release failed; entry is in cooldown (`cooldown_until > now`).
+- `rejected` — operator rejected the backlog item; the Miner will not reopen it. Restore moves it back to `queued` and clears pin/release/cooldown association fields.
+- `superseded` — reserved for Phase 2 (charter/PM features).
+
+**Constraints:** Unique index on `(project, dedup_key)` prevents duplicate backlog entries for the same work.
+
+---
+
 ## Key Patterns
 
 **Upsert** (used throughout `job-storage.ts`):

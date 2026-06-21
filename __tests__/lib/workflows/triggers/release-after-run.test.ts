@@ -40,12 +40,13 @@ function mockDeps({
   shouldKeep = false,
 }: {
   releaseAfterRun: boolean;
-  dispatchResult?: { ok: boolean; jobId?: string; status?: string; detail?: string };
+  dispatchResult?: { ok: boolean; jobId?: string; releaseJobId?: string; status?: string; detail?: string };
   shouldKeep?: boolean;
 }) {
   const dispatchReleaseWorkflow = vi.fn().mockResolvedValue(dispatchResult ?? { ok: true, jobId: 'release-1' });
   const setPendingRelease = vi.fn();
   const shouldKeepPendingRelease = vi.fn().mockReturnValue(shouldKeep);
+  const linkRunningInitiativeToRelease = vi.fn().mockResolvedValue(undefined);
 
   vi.doMock('@/lib/scheduling/scheduling', () => ({
     getProjectTestConfig: vi.fn().mockResolvedValue({
@@ -56,8 +57,9 @@ function mockDeps({
   }));
   vi.doMock('@/lib/workflows/dispatch-release', () => ({ dispatchReleaseWorkflow }));
   vi.doMock('@/lib/pipeline/pending-release', () => ({ setPendingRelease, shouldKeepPendingRelease }));
+  vi.doMock('@/lib/orchestrator/initiatives-store', () => ({ linkRunningInitiativeToRelease }));
 
-  return { dispatchReleaseWorkflow, setPendingRelease, shouldKeepPendingRelease };
+  return { dispatchReleaseWorkflow, setPendingRelease, shouldKeepPendingRelease, linkRunningInitiativeToRelease };
 }
 
 describe('dispatchReleaseAfterRun', () => {
@@ -196,6 +198,23 @@ describe('dispatchReleaseAfterRun', () => {
       }));
       expect(out.dispatched).toBe(true);
       expect(dispatchReleaseWorkflow).toHaveBeenCalled();
+    });
+
+    it('links a running initiative from agent job id to release job id when release starts', async () => {
+      const { linkRunningInitiativeToRelease } = mockDeps({
+        releaseAfterRun: true,
+        dispatchResult: { ok: true, jobId: 'review-1', releaseJobId: 'release-1' },
+      });
+      const { dispatchReleaseAfterRun } = await import('@/lib/workflows/triggers/release-after-run');
+
+      const out = await dispatchReleaseAfterRun(baseJob({
+        id: 'agent-job-1',
+        kind: 'agent:improve',
+        modifiedFiles: JSON.stringify([{ path: 'a.ts', status: 'M' }]),
+      }));
+
+      expect(out.dispatched).toBe(true);
+      expect(linkRunningInitiativeToRelease).toHaveBeenCalledWith('agent-job-1', 'release-1');
     });
 
     it('skips dispatch when only low-confidence dirty-baseline files are present', async () => {

@@ -162,9 +162,18 @@ export interface TamTamConfig {
   agent_autopilot_tier_floor: 'fast' | 'normal' | 'smart';
   agent_autopilot_idle_streak: number;
   agent_autopilot_concern_streak: number;
+  // --- Initiative engine (autonomous chore dispatch) ---
+  initiative_engine_enabled: boolean;
+  initiative_mining_enabled: boolean;
+  /** when false, engine still mines + fills backlog but does NOT dispatch/merge (mine-only) */
+  initiative_dispatch_enabled: boolean;
+  initiative_max_ships_per_day: number;
+  initiative_max_backlog_per_project: number;
+  /** minimum minutes between mining the same project */
+  initiative_mining_interval_minutes: number;
 }
 
-const DEFAULTS: TamTamConfig = {
+export const DEFAULTS: TamTamConfig = {
   workspace_path: '',
   github_owner: '',
   trusted_github_users: [],
@@ -300,6 +309,18 @@ const DEFAULTS: TamTamConfig = {
   agent_autopilot_idle_streak: 4,
   // Sustained loop/noise analyses before a producer cadence throttle.
   agent_autopilot_concern_streak: 2,
+  // Master switch for the autonomous initiative engine. OFF by default —
+  // autonomy is opt-in per deployment, enabled with this one toggle.
+  initiative_engine_enabled: false,
+  initiative_mining_enabled: true,
+  // when false, engine still mines + fills backlog but does NOT dispatch/merge (mine-only)
+  initiative_dispatch_enabled: true,
+  // Per-project cap on autonomous merges/day so a bad streak can't flood main.
+  initiative_max_ships_per_day: 3,
+  // Admission cap on queued backlog items per project.
+  initiative_max_backlog_per_project: 50,
+  // minimum minutes between mining the same project
+  initiative_mining_interval_minutes: 60,
 };
 
 let _cache: { config: TamTamConfig; time: number } | null = null;
@@ -605,6 +626,16 @@ export function buildConfigFromSettingsMap(map: Record<string, string>): TamTamC
       map.agent_autopilot_concern_streak,
       DEFAULTS.agent_autopilot_concern_streak,
     ),
+    initiative_engine_enabled: map.initiative_engine_enabled === 'true',
+    initiative_mining_enabled: map.initiative_mining_enabled !== 'false', // default true
+    // when false, engine still mines + fills backlog but does NOT dispatch/merge (mine-only)
+    initiative_dispatch_enabled: map.initiative_dispatch_enabled !== 'false', // default true
+    initiative_max_ships_per_day: parseNonNegativeIntOr(
+      map.initiative_max_ships_per_day, DEFAULTS.initiative_max_ships_per_day),
+    initiative_max_backlog_per_project: parseNonNegativeIntOr(
+      map.initiative_max_backlog_per_project, DEFAULTS.initiative_max_backlog_per_project),
+    initiative_mining_interval_minutes: parseNonNegativeIntOr(
+      map.initiative_mining_interval_minutes, DEFAULTS.initiative_mining_interval_minutes),
   };
   return config;
 }

@@ -1,11 +1,6 @@
-import { Suspense } from 'react'
-import { PipelinePage } from '@/components/PipelinePage'
-import { LoadingState } from '@/components/LoadingState'
+import { redirect } from 'next/navigation'
 
-export default function Pipeline() {
-  return (
-    <Suspense fallback={<LoadingState />}>
-      <PipelinePage />
-    </Suspense>
-  )
+// Pipeline metrics merged into the Stats hub — keep the old path working.
+export default function PipelineRedirect() {
+  redirect('/stats?tab=pipeline')
 }

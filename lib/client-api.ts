@@ -82,6 +82,9 @@ export {
 } from './client/projects'
 export type { RecommendationsSummary, RunProjectResult, RunQueuedResult, RunStartedResult } from './client/projects'
 
+export { patchInitiative } from './client/initiatives'
+export type { InitiativeAction } from './client/initiatives'
+
 export {
   fetchJobs,
   fetchNotifications,

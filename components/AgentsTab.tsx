@@ -34,6 +34,8 @@ interface EnrichedAgent {
   schedulerEntry: SchedulerEntry | undefined
 }
 
+const EMPTY_SEARCH_PARAMS = new URLSearchParams()
+
 function scheduleToMinutes(schedule: string | null | undefined): number {
   if (!schedule) return Number.MAX_SAFE_INTEGER
   const s = schedule.trim()
@@ -74,7 +76,7 @@ export function AgentsTab({ projectName, projectJobs = [], jobsPaused = false }:
     : ''
   const router = useRouter()
   const pathname = usePathname()
-  const searchParams = useSearchParams()
+  const searchParams = useSearchParams() ?? EMPTY_SEARCH_PARAMS
   const { toast } = useToast()
   const [agents, setAgents] = useState<Agent[]>([])
   const [skills, setSkills] = useState<Skill[]>([])

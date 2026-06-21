@@ -97,6 +97,12 @@ export interface SettingsMap {
   orchestrator_boost_margin_pct: string
   orchestrator_max_boosts_per_hour: string
   agent_autopilot_enabled: string
+  initiative_engine_enabled: string
+  initiative_mining_enabled: string
+  initiative_dispatch_enabled: string
+  initiative_max_ships_per_day: string
+  initiative_max_backlog_per_project: string
+  initiative_mining_interval_minutes: string
 }
 
 export const SETTINGS_DEFAULTS: SettingsMap = {
@@ -148,6 +154,12 @@ export const SETTINGS_DEFAULTS: SettingsMap = {
   orchestrator_boost_margin_pct: '5',
   orchestrator_max_boosts_per_hour: '2',
   agent_autopilot_enabled: 'true',
+  initiative_engine_enabled: 'false',
+  initiative_mining_enabled: 'true',
+  initiative_dispatch_enabled: 'true',
+  initiative_max_ships_per_day: '3',
+  initiative_max_backlog_per_project: '50',
+  initiative_mining_interval_minutes: '60',
 }
 
 export type TabId = 'general' | 'cli' | 'pipeline' | 'projects' | 'database' | 'templates' | 'notifications'
@@ -174,6 +186,7 @@ export const TAB_LAYOUT: Partial<Record<TabId, TabLayoutEntry[]>> = {
     { kind: 'subsection', id: 'pipeline_models' },
     { kind: 'subsection', id: 'release_ops' },
     { kind: 'subsection', id: 'orchestrator' },
+    { kind: 'subsection', id: 'initiatives' },
     { kind: 'subsection', id: 'retention' },
     { kind: 'subsection', id: 'legacy' },
   ],

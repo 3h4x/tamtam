@@ -1,0 +1,234 @@
+- generic [active] [ref=e1]:
+  - generic [ref=e2]:
+    - banner [ref=e3]:
+      - img "tamtam" [ref=e5]
+      - navigation "Global sections" [ref=e6]:
+        - link "Projects" [ref=e7] [cursor=pointer]:
+          - /url: /
+        - link "Monitoring" [ref=e8] [cursor=pointer]:
+          - /url: /monitoring
+        - link "Workflows" [ref=e9] [cursor=pointer]:
+          - /url: /workflow-runs
+        - link "Pipeline" [ref=e10] [cursor=pointer]:
+          - /url: /pipeline
+        - link "Stats" [ref=e11] [cursor=pointer]:
+          - /url: /stats
+        - link "Library" [ref=e12] [cursor=pointer]:
+          - /url: /library
+        - link "Recommendations 25 open recommendations" [ref=e50] [cursor=pointer]:
+          - /url: /recommendations
+          - text: Recommendations
+          - generic "25 open recommendations" [ref=e51]: "25"
+        - link "Initiatives" [ref=e14] [cursor=pointer]:
+          - /url: /initiatives
+        - link "Agent" [ref=e15] [cursor=pointer]:
+          - /url: /agent
+        - link "Settings" [ref=e16] [cursor=pointer]:
+          - /url: /settings
+      - generic [ref=e17]:
+        - status "Loading" [ref=e18]
+        - button "Enable privacy mode" [ref=e19] [cursor=pointer]:
+          - img [ref=e20]
+        - switch "Pause jobs" [ref=e23] [cursor=pointer]: jobs running
+        - button "6" [ref=e52] [cursor=pointer]:
+          - img [ref=e26]
+          - generic "6 projects need attention (6769 unseen items in total)" [ref=e53]: "6"
+        - button "Switch to dark mode" [ref=e29] [cursor=pointer]:
+          - img [ref=e30]
+    - main [ref=e32]:
+      - generic [ref=e33]:
+        - button "Save Settings" [disabled] [ref=e36]
+        - generic [ref=e37]:
+          - navigation "Settings navigation" [ref=e54]:
+            - button "General" [ref=e55] [cursor=pointer]
+            - button "CLI" [ref=e56] [cursor=pointer]
+            - button "Pipeline" [ref=e57] [cursor=pointer]
+            - button "Notifications" [ref=e58] [cursor=pointer]
+            - button "Projects" [ref=e59] [cursor=pointer]
+            - button "Templates" [ref=e60] [cursor=pointer]
+            - button "Database" [ref=e61] [cursor=pointer]
+          - generic [ref=e63] [cursor=pointer]:
+            - checkbox "Show advanced" [ref=e64]
+            - text: Show advanced
+          - generic [ref=e65]:
+            - generic [ref=e67]:
+              - heading "Review & Verdict" [level=3] [ref=e68]
+              - paragraph [ref=e69]: Verdict rules and the review→fix loop
+            - generic [ref=e71]:
+              - group [ref=e72]:
+                - generic "Review Verdict Rules STRICT verdict rules — the user cares about code quality, not speed:" [ref=e73] [cursor=pointer]:
+                  - generic [ref=e74]:
+                    - img [ref=e75]
+                    - generic [ref=e77]: Review Verdict Rules
+                    - generic [ref=e78]: "STRICT verdict rules — the user cares about code quality, not speed:"
+              - generic [ref=e79]:
+                - generic [ref=e80]: Fix Loop Iterations
+                - spinbutton [ref=e81]: "0"
+                - paragraph [ref=e82]: "Single global cap on per-release fix→step→fix retries — applied uniformly to review, test, commit, and review-driven push loops. ∞ (default) lets each loop run until success (LGTM / green test / clean commit / successful push) or the release wall-clock timeout aborts. With a finite cap, exhaustion is NOT symmetric across step kinds: review exhaustion on a NEEDS ATTENTION verdict files a follow-up issue with unresolved findings and ships the partial work (review with a DO NOT SHIP verdict still aborts); test, commit, and push exhaustion abort the release immediately without filing an issue. The push pre-push-hook rejection retry is a separate hardcoded cap (2) so a permanently failing hook can't loop forever when this is 0."
+              - generic [ref=e83]:
+                - generic [ref=e84]: Do Not Ship Action
+                - combobox [ref=e85] [cursor=pointer]:
+                  - option "Pass with follow-up issue"
+                  - option "Try fix loop (default)" [selected]
+                  - option "Abort release"
+                - paragraph [ref=e86]: Policy for DO NOT SHIP review verdicts. fix (default) routes back through the review fix loop; pass files a follow-up issue and continues to commit; abort stops the release.
+              - generic [ref=e87]:
+                - generic [ref=e88]: Incremental Review
+                - combobox [ref=e89] [cursor=pointer]:
+                  - option "Enabled" [selected]
+                  - option "Disabled"
+                - paragraph [ref=e90]: After an LGTM verdict, narrow the next review diff to commits since the last LGTM (uses a refs/tamtam/reviewed/<branch> ref).
+          - generic [ref=e91]:
+            - generic [ref=e93]:
+              - heading "Commit" [level=3] [ref=e94]
+              - paragraph [ref=e95]: Commit message style and dirty-worktree gating
+            - generic [ref=e97]:
+              - group [ref=e98]:
+                - generic "Commit Message Style Use conventional commits. One line only, present tense, ≤50 chars, no trailing period. Typ…" [ref=e99] [cursor=pointer]:
+                  - generic [ref=e100]:
+                    - img [ref=e101]
+                    - generic [ref=e103]: Commit Message Style
+                    - generic [ref=e104]: Use conventional commits. One line only, present tense, ≤50 chars, no trailing period. Typ…
+              - generic [ref=e105]:
+                - generic [ref=e106]: Dirty Worktree Block Threshold
+                - textbox "1" [ref=e107]: "11"
+                - paragraph [ref=e108]: Block agent runs when the project has at least this many uncommitted files (incl. untracked). Default 1 blocks on any dirty worktree; set higher to allow small WIP, 0 to disable.
+          - generic [ref=e109]:
+            - generic [ref=e111]:
+              - heading "Per-Phase Model Tiers" [level=3] [ref=e112]
+              - paragraph [ref=e113]: Override the default tier per pipeline phase
+            - generic [ref=e115]:
+              - generic [ref=e116]:
+                - generic [ref=e117]: Review Tier
+                - combobox [ref=e118] [cursor=pointer]:
+                  - option "Default (workspace)" [selected]
+                  - option "Fast"
+                  - option "Normal"
+                  - option "Smart"
+                - paragraph [ref=e119]: Capability tier used for code review. "Default" uses the workspace Default Model Tier.
+              - generic [ref=e120]:
+                - generic [ref=e121]: Fix Tier
+                - combobox [ref=e122] [cursor=pointer]:
+                  - option "Default (Smart)" [selected]
+                  - option "Fast"
+                  - option "Normal"
+                  - option "Smart"
+                - paragraph [ref=e123]: Capability tier used for the fix step. "Default" uses Smart because fixes edit code.
+              - generic [ref=e124]:
+                - generic [ref=e125]: DoD Tier
+                - combobox [ref=e126] [cursor=pointer]:
+                  - option "Default (Fast)" [selected]
+                  - option "Fast"
+                  - option "Normal"
+                  - option "Smart"
+                - paragraph [ref=e127]: Capability tier used for DoD verification. Empty defaults to Fast — verification is read-only and cheap.
+              - generic [ref=e128]:
+                - generic [ref=e129]: Commit Message Tier
+                - combobox [ref=e130] [cursor=pointer]:
+                  - option "Default (Fast)" [selected]
+                  - option "Fast"
+                  - option "Normal"
+                  - option "Smart"
+                - paragraph [ref=e131]: Capability tier used to generate commit messages. Empty defaults to Fast — short well-scoped task.
+          - generic [ref=e132]:
+            - generic [ref=e134]:
+              - heading "Release Limits" [level=3] [ref=e135]
+              - paragraph [ref=e136]: Timeouts and background workers around release runs
+            - generic [ref=e138]:
+              - generic [ref=e139]:
+                - generic [ref=e140]: Release Timeout (minutes)
+                - textbox "60" [ref=e141]
+                - paragraph [ref=e142]: Overall wall-clock budget for a Release run before the recovery sweep aborts it as timed out. Default 60.
+              - generic [ref=e143]:
+                - generic [ref=e144]: Release Min Lines Changed
+                - spinbutton [ref=e145]: "0"
+                - paragraph [ref=e146]: Minimum cumulative working-tree lines changed (added + removed) before an auto-triggered release fires. 0 (default) disables the gate. When set, a sub-threshold agent run is reinforced — the same agent is re-dispatched to do more — instead of running the pipeline on a trivial diff. Only applies to the auto-release path (Release After Run) for working-tree-dirty agent runs.
+              - generic [ref=e147]:
+                - generic [ref=e148]: Project Sweep
+                - combobox [ref=e149] [cursor=pointer]:
+                  - option "Enabled"
+                  - option "Disabled" [selected]
+                - paragraph [ref=e150]: Run the background project sweep worker when TamTam starts.
+              - generic [ref=e151]:
+                - generic [ref=e152]: Plain Test Phase
+                - combobox [ref=e153] [cursor=pointer]:
+                  - option "Enabled"
+                  - option "Disabled" [selected]
+                - paragraph [ref=e154]: Run the release test phase as the detected shell test command instead of launching a Claude-driven test agent. Keep disabled while the deterministic path bakes.
+          - generic [ref=e155]:
+            - generic [ref=e157]:
+              - heading "Orchestrator (Budget Allocator)" [level=3] [ref=e158]
+              - paragraph [ref=e159]: When pace is under, push bonus agent fires at shipping projects every 5 min so spare token budget converts into shipped work instead of going unused. Off by default — opt-in.
+            - generic [ref=e161]:
+              - generic [ref=e162]:
+                - generic [ref=e163]: Orchestrator
+                - combobox [ref=e164] [cursor=pointer]:
+                  - option "Enabled" [selected]
+                  - option "Disabled"
+                - paragraph [ref=e165]: Master switch. When on, the orchestrator-tick graphile cron fires every 5 min, looks at stats/bridge, and enqueues bonus agent runs on shipping projects whenever pace is under by at least the margin below. Skips paused, releasing, or stuck projects automatically.
+              - generic [ref=e166]:
+                - generic [ref=e167]: Boost margin (pp)
+                - spinbutton [ref=e168]: "2"
+                - paragraph [ref=e169]: Only push bonus fires when the binding provider has at least this many percentage points of headroom vs. the on-pace line. Smaller = more aggressive; larger = more conservative.
+              - generic [ref=e170]:
+                - generic [ref=e171]: Max boosts / project / hour
+                - spinbutton [ref=e172]: "6"
+                - paragraph [ref=e173]: Rolling-hour cap on bonus fires for any single project. Default 2 is two extra runs per hour over the existing schedule.
+              - generic [ref=e174]:
+                - generic [ref=e175]: Agent autopilot
+                - combobox [ref=e176] [cursor=pointer]:
+                  - option "Enabled" [selected]
+                  - option "Disabled"
+                - paragraph [ref=e177]: "When on (default), the orchestrator reclaims wasted budget by role: it cadence-throttles churning producers (sustained loop/noise) and downgrades the model tier of idle monitors/reviewers/planners. All actions are floor-bounded and reversible; monitors are never cadence-throttled. Also requires Orchestrator on. Tuning params are API-only."
+          - generic [ref=e178]:
+            - generic [ref=e180]:
+              - heading "Initiative Engine (Autonomous Backlog)" [level=3] [ref=e181]
+              - paragraph [ref=e182]: Mines each project for grounded work (lint, TODO/FIXME, API routes shipped without UI) and — unless mine-only — drives the top item through the release pipeline. Off by default. Mine-only = discover + fill backlog without auto-merge.
+            - generic [ref=e184]:
+              - generic [ref=e185]:
+                - generic [ref=e186]: Initiative engine
+                - textbox "false" [ref=e187]
+                - paragraph [ref=e188]: Master switch. Off by default — opt-in per deployment. When on, TamTam scans each project for grounded chore items (lint findings, TODO/FIXME comments, unmatched API routes) and — unless mine-only mode is active — drives the top backlog item through the release pipeline automatically.
+              - generic [ref=e189]:
+                - generic [ref=e190]: Mining
+                - textbox "true" [ref=e191]
+                - paragraph [ref=e192]: When on (default), the engine actively mines each project for grounded work items and fills the backlog. Turn off to pause discovery while leaving dispatch intact.
+              - generic [ref=e193]:
+                - generic [ref=e194]: Dispatch (auto-merge)
+                - textbox "true" [ref=e195]
+                - paragraph [ref=e196]: "When off, the engine runs in mine-only mode: it discovers work and fills the backlog but never dispatches a release or merges anything. Useful to audit what the engine finds before enabling full autonomy."
+              - generic [ref=e197]:
+                - generic [ref=e198]: Max ships / project / day
+                - textbox "3" [ref=e199]
+                - paragraph [ref=e200]: Per-project cap on autonomous merges per calendar day. Prevents a runaway initiative from flooding the default branch. Default 3.
+              - generic [ref=e201]:
+                - generic [ref=e202]: Max backlog / project
+                - textbox "50" [ref=e203]
+                - paragraph [ref=e204]: Admission cap on queued backlog items per project. Mining stops adding new items once this limit is reached. Default 50.
+              - generic [ref=e205]:
+                - generic [ref=e206]: Mining interval (min)
+                - textbox "60" [ref=e207]
+                - paragraph [ref=e208]: Minimum minutes between mining runs for the same project. Prevents hammering a project on every tick. Default 60.
+          - group [ref=e210]:
+            - generic "Retention How long log files and run history are kept" [ref=e211] [cursor=pointer]:
+              - img [ref=e212]
+              - generic [ref=e214]:
+                - heading "Retention" [level=3] [ref=e215]
+                - paragraph [ref=e216]: How long log files and run history are kept
+          - group [ref=e218]:
+            - generic "Legacy Migration Switches Runtime kill switches for the workflow-event migration. Disable while routing the matching events through the durable path. Leave on unless you know what you are doing." [ref=e219] [cursor=pointer]:
+              - img [ref=e220]
+              - generic [ref=e222]:
+                - heading "Legacy Migration Switches" [level=3] [ref=e223]
+                - paragraph [ref=e224]: Runtime kill switches for the workflow-event migration. Disable while routing the matching events through the durable path. Leave on unless you know what you are doing.
+            - option "Enabled" [selected]
+            - option "Disabled"
+            - option "Enabled" [selected]
+            - option "Disabled"
+            - option "Enabled" [selected]
+            - option "Disabled"
+            - option "Enabled" [selected]
+            - option "Disabled"
+            - option "Enabled" [selected]
+            - option "Disabled"
+  - alert [ref=e49]

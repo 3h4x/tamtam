@@ -535,6 +535,116 @@ export async function registerNode(): Promise<void> {
               }
               return counts;
             },
+            initiativeEngineEnabled: async () => {
+              const { getSettings } = await import('@/lib/shared/config');
+              return getSettings().initiative_engine_enabled === true;
+            },
+            mineInitiatives: async () => {
+              const { getSettings } = await import('@/lib/shared/config');
+              const s = getSettings();
+              if (!s.initiative_mining_enabled) return;
+              const { listEnabledProjects } = await import('@/lib/shared/enabled-projects');
+              const { resolveProjectPath } = await import('@/lib/shared/project-data');
+              const { runProbes } = await import('@/lib/orchestrator/initiative-probes');
+              const { admitProject } = await import('@/lib/orchestrator/initiative-admit');
+              const { shouldMineProject, markProjectMined, getLastMineMap } =
+                await import('@/lib/orchestrator/mining-throttle');
+              const lastMine = getLastMineMap();
+              const intervalMs = Math.max(0, s.initiative_mining_interval_minutes) * 60_000;
+              const now = Date.now();
+              const projects = listEnabledProjects();
+              for (const p of projects) {
+                // Throttle: don't re-mine a project more often than the configured
+                // interval — mining runs lint/git per project and would otherwise
+                // hammer the host every 60s tick.
+                if (!shouldMineProject(p.name, now, lastMine, intervalMs)) continue;
+                try {
+                  const projectPath = resolveProjectPath(p.name);
+                  if (!projectPath) continue;
+                  const results = await runProbes(p.name, projectPath);
+                  await admitProject(p.name, results, getSettings().initiative_max_backlog_per_project);
+                  markProjectMined(p.name, now, lastMine);
+                } catch (err) {
+                  console.warn(`[initiative-engine] mineInitiatives: project ${p.name} failed:`, err);
+                }
+              }
+            },
+            dispatchInitiatives: async () => {
+              const { getSettings } = await import('@/lib/shared/config');
+              // Mine-only mode: discover + fill the backlog, but do not dispatch
+              // or auto-merge. The loop still runs; this gate just holds the
+              // release leg.
+              if (!getSettings().initiative_dispatch_enabled) return;
+              const { listEnabledProjects } = await import('@/lib/shared/enabled-projects');
+              const store = await import('@/lib/orchestrator/initiatives-store');
+              const { runGates } = await import('@/lib/shared/job-control');
+              const { hasAgentStartSlot } = await import('@/lib/agents/pending-agent-run');
+              const { isLockOwnedByActiveRelease } = await import('@/lib/pipeline/pipeline-lock');
+              const { getPendingRelease } = await import('@/lib/pipeline/pending-release');
+              const { reconcileRunningInitiatives } = await import('@/lib/orchestrator/initiative-reconcile');
+              const { dispatchTopInitiative } = await import('@/lib/orchestrator/initiative-dispatch');
+              const { markInitiativeOutcome, shipsTodayCount } = await import('@/lib/orchestrator/initiative-outcome');
+              const { startInitiativeRun } = await import('@/lib/orchestrator/run-initiative');
+              const { getJob, listJobs } = await import('@/lib/jobs/storage');
+              const { probeJobStatus } = await import('@/lib/jobs/probe');
+              const { isAgentJobKind } = await import('@/lib/jobs/kinds');
+              const projects = listEnabledProjects();
+              for (const p of projects) {
+                try {
+                  await reconcileRunningInitiatives(p.name, {
+                    listRunning: (proj) => store.listByStatus(proj, 'running'),
+                    jobStatus: async (jobId) => {
+                      const job = getJob(jobId);
+                      if (!job) return 'unknown';
+                      if (job.finishedAt !== null) {
+                        return (job.exitCode === 0) ? 'success' : 'failed';
+                      }
+                      const probed = await probeJobStatus(job);
+                      return probed === 'done'
+                        ? (job.exitCode === 0 ? 'success' : 'failed')
+                        : 'running';
+                    },
+                    jobKind: (jobId) => {
+                      const job = getJob(jobId);
+                      if (!job) return 'unknown';
+                      if (job.kind === 'release') return 'release';
+                      if (isAgentJobKind(job.kind)) return 'agent';
+                      return 'other';
+                    },
+                    markOutcome: (id, outcome, jobId) =>
+                      markInitiativeOutcome(id, outcome, jobId),
+                    now: () => Date.now(),
+                    staleMs: 2 * 60 * 60 * 1000,
+                  });
+                  const ships = await shipsTodayCount(p.name);
+                  await dispatchTopInitiative(p.name, {
+                    listQueued: store.listQueued,
+                    setStatus: store.setStatus,
+                    gatesClear: () => runGates() === null,
+                    projectBusy: async (proj) => {
+                      if (hasAgentStartSlot(proj)) return true;
+                      if (await isLockOwnedByActiveRelease(proj)) return true;
+                      if (await getPendingRelease(proj)) return true;
+                      return listJobs().some((job) => job.project === proj && job.finishedAt === null);
+                    },
+                    shipsToday: () => ships,
+                    maxShipsPerDay: getSettings().initiative_max_ships_per_day,
+                    runInitiative: async (row) => {
+                      const result = await startInitiativeRun(p.name, row);
+                      if (result.status === 'started') {
+                        // Temporary association: this is the agent job id.
+                        // release-after-run replaces it with the release meta
+                        // job id once the pipeline actually starts.
+                        await store.setStatus(row.id, 'running', { releaseId: result.jobId });
+                      }
+                      return result;
+                    },
+                  });
+                } catch (err) {
+                  console.warn(`[initiative-engine] dispatchInitiatives: project ${p.name} failed:`, err);
+                }
+              }
+            },
           },
           usageSnapshotDeps: {
             loadBridge: async () => {

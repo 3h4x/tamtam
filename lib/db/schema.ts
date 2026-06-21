@@ -140,6 +140,27 @@ export const recommendations = pgTable('recommendations', {
   updatedAt: doublePrecision('updated_at').notNull(),
 });
 
+export const initiatives = pgTable('initiatives', {
+  id: serial('id').primaryKey(),
+  project: text('project').notNull(),
+  source: text('source').notNull(), // 'mining' | 'pm'
+  kind: text('kind').notNull(),
+  title: text('title').notNull(),
+  rationale: text('rationale').notNull(),
+  prompt: text('prompt').notNull(),
+  score: doublePrecision('score').notNull().default(0),
+  status: text('status').notNull().default('proposed'),
+  dedupKey: text('dedup_key').notNull(),
+  releaseId: text('release_id'),
+  attempts: integer('attempts').notNull().default(0),
+  cooldownUntil: doublePrecision('cooldown_until'),
+  pinnedAt: doublePrecision('pinned_at'),
+  createdAt: doublePrecision('created_at').notNull(),
+  updatedAt: doublePrecision('updated_at').notNull(),
+}, (t) => ({
+  projectDedup: uniqueIndex('initiatives_project_dedup_key').on(t.project, t.dedupKey),
+}));
+
 export const skills = pgTable('skills', {
   id: text('id').primaryKey(),
   name: text('name').notNull(),

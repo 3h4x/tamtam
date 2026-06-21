@@ -125,4 +125,42 @@ describe('SettingsField', () => {
 
     unmount()
   })
+
+  it('renders initiative boolean settings as enabled/disabled selectors', () => {
+    for (const fieldKey of [
+      'initiative_engine_enabled',
+      'initiative_mining_enabled',
+      'initiative_dispatch_enabled',
+    ] as const) {
+      const { container, unmount } = renderSettingsField({
+        fieldKey,
+        value: 'true',
+      })
+      const select = container.querySelector('select')
+      if (!(select instanceof HTMLSelectElement)) throw new Error(`${fieldKey} select not found`)
+      expect(Array.from(select.options).map((option) => option.value)).toEqual(['true', 'false'])
+      expect(select.value).toBe('true')
+      expect(container.querySelector('input')).toBeNull()
+      unmount()
+    }
+  })
+
+  it('renders initiative numeric settings as non-negative number inputs', () => {
+    for (const fieldKey of [
+      'initiative_max_ships_per_day',
+      'initiative_max_backlog_per_project',
+      'initiative_mining_interval_minutes',
+    ] as const) {
+      const { container, unmount } = renderSettingsField({
+        fieldKey,
+        value: '3',
+      })
+      const input = container.querySelector('input')
+      if (!(input instanceof HTMLInputElement)) throw new Error(`${fieldKey} input not found`)
+      expect(input.type).toBe('number')
+      expect(input.min).toBe('0')
+      expect(input.step).toBe('1')
+      unmount()
+    }
+  })
 })

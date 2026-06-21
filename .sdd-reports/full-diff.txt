@@ -1,0 +1,1498 @@
+## Untracked new files
+__tests__/db/initiatives-schema.test.ts
+__tests__/orchestrator/initiative-admit.test.ts
+__tests__/orchestrator/initiative-dispatch.test.ts
+__tests__/orchestrator/initiative-miner.test.ts
+__tests__/orchestrator/initiative-outcome.test.ts
+__tests__/orchestrator/initiative-reconcile.test.ts
+__tests__/orchestrator/initiative-score.test.ts
+__tests__/orchestrator/initiatives-store.test.ts
+__tests__/orchestrator/orchestrator-tick-initiatives.test.ts
+__tests__/orchestrator/run-initiative.test.ts
+__tests__/shared/initiative-settings.test.ts
+lib/db/migrations/0025_add_initiatives.sql
+lib/orchestrator/initiative-admit.ts
+lib/orchestrator/initiative-dispatch.ts
+lib/orchestrator/initiative-miner.ts
+lib/orchestrator/initiative-outcome.ts
+lib/orchestrator/initiative-probes.ts
+lib/orchestrator/initiative-reconcile.ts
+lib/orchestrator/initiative-score.ts
+lib/orchestrator/initiatives-store.ts
+lib/orchestrator/run-initiative.ts
+
+## Diff (tracked) + new file contents
+diff --git a/docs/SETTINGS.md b/docs/SETTINGS.md
+index 99bb6709..c3e47e1b 100644
+--- a/docs/SETTINGS.md
++++ b/docs/SETTINGS.md
+@@ -173,20 +173,24 @@ The orchestrator budget allocator runs as a graphile-worker cron task (`orchestr
+ | Key | Type | Default | Effect |
+ |-----|------|---------|--------|
+ | `orchestrator_enabled` | boolean | `false` | Master switch for the budget allocator cron |
+ | `orchestrator_boost_margin_pct` | number | `5` | Minimum global pace headroom, in percentage points, required before the allocator can boost a project |
+ | `orchestrator_max_boosts_per_hour` | number | `2` | Per-project rolling-hour cap on bonus fires |
+ | `agent_autopilot_enabled` | boolean | `true` | Master switch for the role-based autopilot (throttle churning producers / downgrade idle monitors). Also gated on `orchestrator_enabled`. |
+ | `agent_autopilot_cadence_floor` | string | `'4h'` | Producers are never cadence-throttled past this rung |
+ | `agent_autopilot_tier_floor` | `fast`/`normal`/`smart` | `'fast'` | Model downgrades never go below this tier |
+ | `agent_autopilot_idle_streak` | number | `4` | All-clear analyses before a monitor/reviewer/planner model downgrade |
+ | `agent_autopilot_concern_streak` | number | `2` | Sustained loop/noise analyses before a producer cadence throttle |
++| `initiative_engine_enabled` | boolean | `false` | Master switch for the autonomous initiative engine. OFF by default — autonomy is opt-in per deployment, enabled with this one toggle |
++| `initiative_mining_enabled` | boolean | `true` | Whether the mining phase probes projects for chores (lint, TODOs, etc.) on each orchestrator tick. Requires `initiative_engine_enabled` |
++| `initiative_max_ships_per_day` | number | `3` | Per-project cap on autonomous merges/day so a bad streak can't flood main |
++| `initiative_max_backlog_per_project` | number | `50` | Admission cap on queued backlog items per project; oldest-first promotion stops here |
+ 
+ The autopilot interprets each run's value by the agent's **role** (`producer` /
+ `monitor` / `reviewer` / `planner` / `publisher`) and picks a role-appropriate
+ lever — cadence for producers, model tier for monitors/reviewers/planners,
+ nothing for publishers. See `docs/ORCHESTRATOR.md` → Autopilot and `docs/AGENT.md`
+ → Roles.
+ 
+ **Decision logic** (`lib/orchestrator/budget-allocator.ts → decideBoosts`):
+ 
+ - **Effective margin = max(short-window margin, weekly margin).** The short window catches up first; the 7-day weekly window lags. The orchestrator keeps firing while *either* signal shows headroom above `orchestrator_boost_margin_pct`, so the weekly deficit closes even when the short window is already on pace. This is what lets the fleet "exceed flat-rate pace" to recover an underspent week — without it, boosts would stop once the 5h window caught up, leaving the weekly gap permanently open.
+diff --git a/instrumentation-node.ts b/instrumentation-node.ts
+index ac1febf0..e25c3226 100644
+--- a/instrumentation-node.ts
++++ b/instrumentation-node.ts
+@@ -528,20 +528,93 @@ export async function registerNode(): Promise<void> {
+               return loadLatestFinishedScheduledRunStartedAt(candidate);
+             },
+             getProjectQueueCounts: async () => {
+               const { listQueuedProjects, listQueuedAgents } = await import('@/lib/agents/pending-agent-run');
+               const counts = new Map<string, number>();
+               for (const project of listQueuedProjects()) {
+                 counts.set(project, listQueuedAgents(project).length);
+               }
+               return counts;
+             },
++            initiativeEngineEnabled: () => {
++              const { getSettings } = require('@/lib/shared/config') as typeof import('@/lib/shared/config');
++              return getSettings().initiative_engine_enabled === true;
++            },
++            mineInitiatives: async () => {
++              const { getSettings } = await import('@/lib/shared/config');
++              const s = getSettings();
++              if (!s.initiative_mining_enabled) return;
++              const { listEnabledProjects } = await import('@/lib/shared/enabled-projects');
++              const { resolveProjectPath } = await import('@/lib/shared/project-data');
++              const { runProbes } = await import('@/lib/orchestrator/initiative-probes');
++              const { admitProject } = await import('@/lib/orchestrator/initiative-admit');
++              const projects = listEnabledProjects();
++              for (const p of projects) {
++                try {
++                  const projectPath = resolveProjectPath(p.name);
++                  if (!projectPath) continue;
++                  const results = await runProbes(p.name, projectPath);
++                  await admitProject(p.name, results, getSettings().initiative_max_backlog_per_project);
++                } catch (err) {
++                  console.warn(`[initiative-engine] mineInitiatives: project ${p.name} failed:`, err);
++                }
++              }
++            },
++            dispatchInitiatives: async () => {
++              const { getSettings } = await import('@/lib/shared/config');
++              const { listEnabledProjects } = await import('@/lib/shared/enabled-projects');
++              const store = await import('@/lib/orchestrator/initiatives-store');
++              const { runGates } = await import('@/lib/shared/job-control');
++              const { hasAgentStartSlot } = await import('@/lib/agents/pending-agent-run');
++              const { reconcileRunningInitiatives } = await import('@/lib/orchestrator/initiative-reconcile');
++              const { dispatchTopInitiative } = await import('@/lib/orchestrator/initiative-dispatch');
++              const { markInitiativeOutcome, shipsTodayCount } = await import('@/lib/orchestrator/initiative-outcome');
++              const { startInitiativeRun } = await import('@/lib/orchestrator/run-initiative');
++              const { getJob } = await import('@/lib/jobs/storage');
++              const { probeJobStatus } = await import('@/lib/jobs/probe');
++              const projects = listEnabledProjects();
++              for (const p of projects) {
++                try {
++                  await reconcileRunningInitiatives(p.name, {
++                    listRunning: (proj) => store.listByStatus(proj, 'running'),
++                    jobStatus: async (jobId) => {
++                      const job = getJob(jobId);
++                      if (!job) return 'unknown';
++                      if (job.finishedAt !== null) {
++                        return (job.exitCode === 0) ? 'success' : 'failed';
++                      }
++                      const probed = await probeJobStatus(job);
++                      return probed === 'done'
++                        ? (job.exitCode === 0 ? 'success' : 'failed')
++                        : 'running';
++                    },
++                    markOutcome: (id, outcome, jobId) =>
++                      markInitiativeOutcome(id, outcome, jobId),
++                  });
++                  const ships = await shipsTodayCount(p.name);
++                  await dispatchTopInitiative(p.name, {
++                    listQueued: store.listQueued,
++                    setStatus: store.setStatus,
++                    gatesClear: () => runGates() === null,
++                    projectBusy: (proj) => hasAgentStartSlot(proj),
++                    shipsToday: () => ships,
++                    maxShipsPerDay: getSettings().initiative_max_ships_per_day,
++                    runInitiative: async (row) => {
++                      const jobId = await startInitiativeRun(p.name, row);
++                      await store.setStatus(row.id, 'running', { releaseId: jobId });
++                    },
++                  });
++                } catch (err) {
++                  console.warn(`[initiative-engine] dispatchInitiatives: project ${p.name} failed:`, err);
++                }
++              }
++            },
+           },
+           usageSnapshotDeps: {
+             loadBridge: async () => {
+               const baseUrl = process.env.TAMTAM_BASE_URL ?? 'http://localhost:1337';
+               const res = await fetch(`${baseUrl}/api/stats/bridge`);
+               if (!res.ok) throw new Error(`stats/bridge HTTP ${res.status}`);
+               return res.json();
+             },
+             upsertSnapshots: async (rows) => {
+               const { db, schema } = await import('@/lib/db');
+diff --git a/lib/db/migrations/meta/_journal.json b/lib/db/migrations/meta/_journal.json
+index fa48597f..95bf44b7 100644
+--- a/lib/db/migrations/meta/_journal.json
++++ b/lib/db/migrations/meta/_journal.json
+@@ -169,13 +169,20 @@
+       "when": 1780400000000,
+       "tag": "0023_queued_terminal_runs",
+       "breakpoints": true
+     },
+     {
+       "idx": 24,
+       "version": "7",
+       "when": 1780500000000,
+       "tag": "0024_agent_role_autopilot",
+       "breakpoints": true
++    },
++    {
++      "idx": 25,
++      "version": "7",
++      "when": 1780600000000,
++      "tag": "0025_add_initiatives",
++      "breakpoints": true
+     }
+   ]
+ }
+diff --git a/lib/db/schema.ts b/lib/db/schema.ts
+index db74cb09..ac5e46b0 100644
+--- a/lib/db/schema.ts
++++ b/lib/db/schema.ts
+@@ -133,20 +133,40 @@ export const recommendations = pgTable('recommendations', {
+   agentName: text('agent_name'),
+   type: text('type').notNull(),
+   title: text('title').notNull(),
+   detail: text('detail').notNull(),
+   status: text('status').notNull().default('open'),
+   payload: text('payload'),
+   createdAt: doublePrecision('created_at').notNull(),
+   updatedAt: doublePrecision('updated_at').notNull(),
+ });
+ 
++export const initiatives = pgTable('initiatives', {
++  id: serial('id').primaryKey(),
++  project: text('project').notNull(),
++  source: text('source').notNull(), // 'mining' | 'pm'
++  kind: text('kind').notNull(),
++  title: text('title').notNull(),
++  rationale: text('rationale').notNull(),
++  prompt: text('prompt').notNull(),
++  score: doublePrecision('score').notNull().default(0),
++  status: text('status').notNull().default('proposed'),
++  dedupKey: text('dedup_key').notNull(),
++  releaseId: text('release_id'),
++  attempts: integer('attempts').notNull().default(0),
++  cooldownUntil: doublePrecision('cooldown_until'),
++  createdAt: doublePrecision('created_at').notNull(),
++  updatedAt: doublePrecision('updated_at').notNull(),
++}, (t) => ({
++  projectDedup: uniqueIndex('initiatives_project_dedup_key').on(t.project, t.dedupKey),
++}));
++
+ export const skills = pgTable('skills', {
+   id: text('id').primaryKey(),
+   name: text('name').notNull(),
+   description: text('description').notNull().default(''),
+   content: text('content').notNull().default(''),
+   createdAt: doublePrecision('created_at').notNull(),
+   updatedAt: doublePrecision('updated_at').notNull(),
+ });
+ 
+ export const agents = pgTable('agents', {
+diff --git a/lib/shared/config.ts b/lib/shared/config.ts
+index dc3c94be..7f2f51e7 100644
+--- a/lib/shared/config.ts
++++ b/lib/shared/config.ts
+@@ -155,23 +155,28 @@ export interface TamTamConfig {
+   // --- Orchestrator (budget allocator) ---
+   orchestrator_enabled: boolean;
+   orchestrator_boost_margin_pct: number;
+   orchestrator_max_boosts_per_hour: number;
+   // --- Agent autopilot (role-based waste reclaim) ---
+   agent_autopilot_enabled: boolean;
+   agent_autopilot_cadence_floor: string;
+   agent_autopilot_tier_floor: 'fast' | 'normal' | 'smart';
+   agent_autopilot_idle_streak: number;
+   agent_autopilot_concern_streak: number;
++  // --- Initiative engine (autonomous chore dispatch) ---
++  initiative_engine_enabled: boolean;
++  initiative_mining_enabled: boolean;
++  initiative_max_ships_per_day: number;
++  initiative_max_backlog_per_project: number;
+ }
+ 
+-const DEFAULTS: TamTamConfig = {
++export const DEFAULTS: TamTamConfig = {
+   workspace_path: '',
+   github_owner: '',
+   trusted_github_users: [],
+   github_board_sync_enabled: false,
+   github_board_project_owner: '',
+   github_board_project_title: 'TamTam',
+   github_board_project_number: '',
+   github_board_project_url: '',
+   github_board_view_url: '',
+   github_board_project_id: '',
+@@ -293,20 +298,28 @@ const DEFAULTS: TamTamConfig = {
+   // Also gated on orchestrator_enabled. All actions floor-bounded + reversible.
+   agent_autopilot_enabled: true,
+   // Producers are never cadence-throttled past this rung.
+   agent_autopilot_cadence_floor: '4h',
+   // Model downgrades never go below this tier.
+   agent_autopilot_tier_floor: 'fast',
+   // All-clear analyses before a monitor/reviewer/planner model downgrade.
+   agent_autopilot_idle_streak: 4,
+   // Sustained loop/noise analyses before a producer cadence throttle.
+   agent_autopilot_concern_streak: 2,
++  // Master switch for the autonomous initiative engine. OFF by default —
++  // autonomy is opt-in per deployment, enabled with this one toggle.
++  initiative_engine_enabled: false,
++  initiative_mining_enabled: true,
++  // Per-project cap on autonomous merges/day so a bad streak can't flood main.
++  initiative_max_ships_per_day: 3,
++  // Admission cap on queued backlog items per project.
++  initiative_max_backlog_per_project: 50,
+ };
+ 
+ let _cache: { config: TamTamConfig; time: number } | null = null;
+ let _refreshing = false;
+ const CACHE_TTL = 5; // seconds
+ 
+ /** Pre-warm the settings cache at startup. Call once before serving requests. */
+ export async function initSettings(): Promise<void> {
+   await _doSettingsRefresh();
+ }
+@@ -598,20 +611,26 @@ export function buildConfigFromSettingsMap(map: Record<string, string>): TamTamC
+         ? map.agent_autopilot_tier_floor
+         : 'fast',
+     agent_autopilot_idle_streak: parseIntOr(
+       map.agent_autopilot_idle_streak,
+       DEFAULTS.agent_autopilot_idle_streak,
+     ),
+     agent_autopilot_concern_streak: parseIntOr(
+       map.agent_autopilot_concern_streak,
+       DEFAULTS.agent_autopilot_concern_streak,
+     ),
++    initiative_engine_enabled: map.initiative_engine_enabled === 'true',
++    initiative_mining_enabled: map.initiative_mining_enabled !== 'false', // default true
++    initiative_max_ships_per_day: parseNonNegativeIntOr(
++      map.initiative_max_ships_per_day, DEFAULTS.initiative_max_ships_per_day),
++    initiative_max_backlog_per_project: parseNonNegativeIntOr(
++      map.initiative_max_backlog_per_project, DEFAULTS.initiative_max_backlog_per_project),
+   };
+   return config;
+ }
+ 
+ export function reloadConfig(): void {
+   _cache = null;
+ }
+ 
+ function parseIntOr(v: string | undefined, fallback: number): number {
+   if (v === undefined || v === '') return fallback;
+diff --git a/lib/workflows/cron/orchestrator-tick-task.ts b/lib/workflows/cron/orchestrator-tick-task.ts
+index 5a49aac5..167a7b48 100644
+--- a/lib/workflows/cron/orchestrator-tick-task.ts
++++ b/lib/workflows/cron/orchestrator-tick-task.ts
+@@ -84,20 +84,28 @@ export interface OrchestratorTickDeps {
+   /** Optional — returns the newest finished scheduled run for an agent. Used
+    *  to avoid re-analyzing old finished samples while a newer dispatch is
+    *  still queued or running. */
+   loadLatestFinishedRunStartedAt?: (candidate: AnalysisCandidate) => Promise<number | null>;
+   /** Optional — returns pending in-memory queue depth per project. When a
+    *  project has agents already waiting in the queue, a new boost would only
+    *  lengthen the queue behind those waiting agents; skipping the boost lets
+    *  the queue drain naturally and prevents high-frequency agents from starving
+    *  lower-frequency ones. */
+   getProjectQueueCounts?: () => Promise<Map<string, number>> | Map<string, number>;
++  /** Optional — master switch read for the initiative engine. */
++  initiativeEngineEnabled?: () => boolean;
++  /** Optional — probe projects, upsert + admit candidates to the backlog.
++   *  Fire-and-forget; errors swallowed so a bad probe never breaks the tick. */
++  mineInitiatives?: () => Promise<void>;
++  /** Optional — dispatch the top queued initiative per project through the
++   *  release pipeline. Fire-and-forget; errors swallowed. */
++  dispatchInitiatives?: () => Promise<void>;
+ }
+ 
+ /** Minimal agent identity passed to the health analysis phase. The analysis
+  *  function loads the agent's own recent runs from the DB; the tick only needs
+  *  to tell it *which* agents to look at. */
+ export interface AnalysisCandidate {
+   id: string;
+   name: string;
+   project: string;
+ }
+@@ -331,20 +339,29 @@ export async function handleOrchestratorTick(
+               // and-forget so it doesn't lengthen the analysis chain (and never
+               // blocks the in-flight clear below).
+               if (deps.runAutopilot) {
+                 void deps.runAutopilot(outcomes).catch(() => {});
+               }
+             })
+             .catch(() => {})
+             .finally(() => clearHealthAnalysisInFlight(candidates));
+         }
+       }
++
++      if (deps.initiativeEngineEnabled?.()) {
++        if (deps.mineInitiatives) {
++          await deps.mineInitiatives().catch(() => {});
++        }
++        if (deps.dispatchInitiatives) {
++          await deps.dispatchInitiatives().catch(() => {});
++        }
++      }
+     }
+   } catch (err) {
+     error = err instanceof Error ? err.message : String(err);
+   }
+ 
+   const nextFireAt = new Date(nowMs + ORCHESTRATOR_TICK_INTERVAL_MS);
+   await deps.enqueueNextFire(nextFireAt);
+   return { enabled, decisions, error, nextFireAt };
+ }
+ 
+=== NEW FILE: __tests__/db/initiatives-schema.test.ts ===
+import { describe, it, expect } from 'vitest';
+import { sql } from 'drizzle-orm';
+import { createTestPgDbEmpty } from '@/__tests__/helpers/test-db';
+import { schema } from '@/lib/db';
+
+async function applyDdl(handle: Awaited<ReturnType<typeof createTestPgDbEmpty>>): Promise<void> {
+  await handle.db.execute(sql.raw(`
+    CREATE TABLE IF NOT EXISTS "initiatives" (
+      "id" serial PRIMARY KEY NOT NULL,
+      "project" text NOT NULL,
+      "source" text NOT NULL,
+      "kind" text NOT NULL,
+      "title" text NOT NULL,
+      "rationale" text NOT NULL,
+      "prompt" text NOT NULL,
+      "score" double precision DEFAULT 0 NOT NULL,
+      "status" text DEFAULT 'proposed' NOT NULL,
+      "dedup_key" text NOT NULL,
+      "release_id" text,
+      "attempts" integer DEFAULT 0 NOT NULL,
+      "cooldown_until" double precision,
+      "created_at" double precision NOT NULL,
+      "updated_at" double precision NOT NULL
+    )
+  `));
+  await handle.db.execute(sql.raw(`
+    CREATE UNIQUE INDEX IF NOT EXISTS "initiatives_project_dedup_key"
+      ON "initiatives" ("project", "dedup_key")
+  `));
+}
+
+describe('initiatives schema', () => {
+  it('inserts and reads back an initiative row with defaults', async () => {
+    const handle = await createTestPgDbEmpty();
+    try {
+      await applyDdl(handle);
+      const now = Date.now();
+      await handle.db.insert(schema.initiatives).values({
+        project: 'proj', source: 'mining', kind: 'lint',
+        title: 'Fix lint errors', rationale: 'eslint reported 3 errors',
+        prompt: 'Fix all eslint errors in the project.', dedupKey: 'lint:global',
+        createdAt: now, updatedAt: now,
+      });
+      const rows = await handle.db.select().from(schema.initiatives);
+      expect(rows).toHaveLength(1);
+      expect(rows[0].status).toBe('proposed');
+      expect(rows[0].score).toBe(0);
+      expect(rows[0].attempts).toBe(0);
+    } finally {
+      await handle[Symbol.asyncDispose]();
+    }
+  });
+
+  it('enforces unique (project, dedup_key)', async () => {
+    const handle = await createTestPgDbEmpty();
+    try {
+      await applyDdl(handle);
+      const now = Date.now();
+      const row = {
+        project: 'proj', source: 'mining' as const, kind: 'lint',
+        title: 't', rationale: 'r', prompt: 'p', dedupKey: 'lint:global',
+        createdAt: now, updatedAt: now,
+      };
+      await handle.db.insert(schema.initiatives).values(row);
+      await expect(handle.db.insert(schema.initiatives).values(row)).rejects.toThrow();
+    } finally {
+      await handle[Symbol.asyncDispose]();
+    }
+  });
+});
+=== NEW FILE: __tests__/orchestrator/initiative-admit.test.ts ===
+import { describe, it, expect, vi, beforeAll, beforeEach, afterEach, afterAll } from 'vitest';
+import { sql } from 'drizzle-orm';
+import { createTestPgDbEmpty, type TestDbHandle } from '@/__tests__/helpers/test-db';
+import * as schema from '@/lib/db/schema';
+
+async function applyDdl(handle: TestDbHandle): Promise<void> {
+  await handle.db.execute(sql.raw(`
+    CREATE TABLE IF NOT EXISTS "initiatives" (
+      "id" serial PRIMARY KEY NOT NULL,
+      "project" text NOT NULL,
+      "source" text NOT NULL,
+      "kind" text NOT NULL,
+      "title" text NOT NULL,
+      "rationale" text NOT NULL,
+      "prompt" text NOT NULL,
+      "score" double precision DEFAULT 0 NOT NULL,
+      "status" text DEFAULT 'proposed' NOT NULL,
+      "dedup_key" text NOT NULL,
+      "release_id" text,
+      "attempts" integer DEFAULT 0 NOT NULL,
+      "cooldown_until" double precision,
+      "created_at" double precision NOT NULL,
+      "updated_at" double precision NOT NULL
+    )
+  `));
+  await handle.db.execute(sql.raw(`
+    CREATE UNIQUE INDEX IF NOT EXISTS "initiatives_project_dedup_key"
+      ON "initiatives" ("project", "dedup_key")
+  `));
+}
+
+describe('admitProject', () => {
+  let sharedHandle: TestDbHandle;
+  let admitProject: typeof import('@/lib/orchestrator/initiative-admit').admitProject;
+  let store: typeof import('@/lib/orchestrator/initiatives-store');
+
+  beforeAll(async () => {
+    sharedHandle = await createTestPgDbEmpty();
+    await applyDdl(sharedHandle);
+  });
+
+  afterAll(async () => {
+    try {
+      await sharedHandle[Symbol.asyncDispose]();
+    } catch {
+      // ignore
+    }
+  });
+
+  beforeEach(async () => {
+    await sharedHandle.db.execute(sql.raw('TRUNCATE initiatives RESTART IDENTITY'));
+    vi.resetModules();
+    vi.doMock('@/lib/db', () => ({ db: sharedHandle.db, schema }));
+    store = await import('@/lib/orchestrator/initiatives-store');
+    ({ admitProject } = await import('@/lib/orchestrator/initiative-admit'));
+  });
+
+  afterEach(() => {
+    vi.resetModules();
+    vi.clearAllMocks();
+  });
+
+  it('upserts findings and promotes up to the backlog cap', async () => {
+    await admitProject('proj', {
+      project: 'proj',
+      findings: [
+        { kind: 'lint', title: 'a', rationale: 'r', prompt: 'p', dedupKey: 'a' },
+        { kind: 'todo', title: 'b', rationale: 'r', prompt: 'p', dedupKey: 'b' },
+        { kind: 'todo', title: 'c', rationale: 'r', prompt: 'p', dedupKey: 'c' },
+      ],
+    }, 2, 1000);
+    expect(await store.listByStatus('proj', 'queued')).toHaveLength(2);
+    expect(await store.listByStatus('proj', 'proposed')).toHaveLength(1);
+  });
+
+  it('respects existing queued count when computing room', async () => {
+    // Pre-seed one queued row so the cap of 2 only admits 1 more proposed
+    await store.upsertCandidate(
+      { project: 'proj', source: 'mining', kind: 'lint', title: 'pre', rationale: 'r', prompt: 'p', dedupKey: 'pre' },
+      500,
+    );
+    await store.setStatus(1, 'queued', undefined, 500);
+
+    await admitProject('proj', {
+      project: 'proj',
+      findings: [
+        { kind: 'todo', title: 'x', rationale: 'r', prompt: 'p', dedupKey: 'x' },
+        { kind: 'todo', title: 'y', rationale: 'r', prompt: 'p', dedupKey: 'y' },
+      ],
+    }, 2, 1000);
+
+    expect(await store.listByStatus('proj', 'queued')).toHaveLength(2);
+    expect(await store.listByStatus('proj', 'proposed')).toHaveLength(1);
+  });
+
+  it('does nothing when the backlog is already full', async () => {
+    await admitProject('proj', {
+      project: 'proj',
+      findings: [
+        { kind: 'lint', title: 'a', rationale: 'r', prompt: 'p', dedupKey: 'a' },
+        { kind: 'todo', title: 'b', rationale: 'r', prompt: 'p', dedupKey: 'b' },
+      ],
+    }, 0, 1000);
+    // cap=0: everything stays proposed (upserted but none promoted)
+    expect(await store.listByStatus('proj', 'queued')).toHaveLength(0);
+  });
+});
+=== NEW FILE: __tests__/orchestrator/initiative-dispatch.test.ts ===
+// __tests__/orchestrator/initiative-dispatch.test.ts
+import { describe, it, expect, vi } from 'vitest';
+import { dispatchTopInitiative } from '@/lib/orchestrator/initiative-dispatch';
+import type { InitiativeRow } from '@/lib/orchestrator/initiatives-store';
+
+function row(over: Partial<InitiativeRow> = {}): InitiativeRow {
+  return {
+    id: 1, project: 'proj', source: 'mining', kind: 'lint', title: 't', rationale: 'r',
+    prompt: 'p', score: 100, status: 'queued', dedupKey: 'd', releaseId: null,
+    attempts: 0, cooldownUntil: null, createdAt: 0, updatedAt: 0, ...over,
+  };
+}
+
+function baseDeps(over: Partial<Parameters<typeof dispatchTopInitiative>[1]> = {}) {
+  return {
+    listQueued: vi.fn(async () => [row()]),
+    setStatus: vi.fn(async () => {}),
+    gatesClear: () => true,
+    projectBusy: () => false,
+    shipsToday: () => 0,
+    maxShipsPerDay: 3,
+    runInitiative: vi.fn(async () => {}),
+    now: () => 1000,
+    ...over,
+  };
+}
+
+describe('dispatchTopInitiative', () => {
+  it('dispatches the top-scored queued initiative', async () => {
+    const deps = baseDeps({
+      listQueued: vi.fn(async () => [row({ id: 1, score: 10 }), row({ id: 2, score: 90 })]),
+    });
+    const res = await dispatchTopInitiative('proj', deps);
+    expect(res.dispatched?.id).toBe(2);
+    expect(deps.setStatus).toHaveBeenCalledWith(2, 'running', { bumpAttempts: true }, 1000);
+    expect(deps.runInitiative).toHaveBeenCalledTimes(1);
+  });
+
+  it('skips when gates are not clear', async () => {
+    const deps = baseDeps({ gatesClear: () => false });
+    const res = await dispatchTopInitiative('proj', deps);
+    expect(res).toEqual({ dispatched: null, skipped: 'gates' });
+    expect(deps.runInitiative).not.toHaveBeenCalled();
+  });
+
+  it('skips when ships/day cap reached', async () => {
+    const deps = baseDeps({ shipsToday: () => 3, maxShipsPerDay: 3 });
+    const res = await dispatchTopInitiative('proj', deps);
+    expect(res.skipped).toBe('ships-cap');
+  });
+
+  it('skips when the project is busy', async () => {
+    const deps = baseDeps({ projectBusy: () => true });
+    const res = await dispatchTopInitiative('proj', deps);
+    expect(res.skipped).toBe('busy');
+  });
+
+  it('skips when the backlog is empty', async () => {
+    const deps = baseDeps({ listQueued: vi.fn(async () => []) });
+    const res = await dispatchTopInitiative('proj', deps);
+    expect(res.skipped).toBe('empty');
+  });
+
+  it('marks failed with cooldown when runInitiative throws', async () => {
+    const deps = baseDeps({ runInitiative: vi.fn(async () => { throw new Error('boom'); }) });
+    const res = await dispatchTopInitiative('proj', deps);
+    expect(res).toEqual({ dispatched: null, skipped: null });
+    expect(deps.setStatus).toHaveBeenLastCalledWith(
+      1, 'failed', { cooldownUntil: 1000 + 6 * 3600 * 1000 }, 1000,
+    );
+  });
+});
+=== NEW FILE: __tests__/orchestrator/initiative-miner.test.ts ===
+import { describe, it, expect } from 'vitest';
+import { mineCandidates } from '@/lib/orchestrator/initiative-miner';
+
+describe('mineCandidates', () => {
+  it('maps findings to mining candidates with severity scores', () => {
+    const out = mineCandidates({
+      project: 'proj',
+      findings: [
+        { kind: 'lint', title: 'Fix lint', rationale: '3 errors', prompt: 'fix lint', dedupKey: 'lint:global' },
+        { kind: 'todo', title: 'Resolve TODO', rationale: 'in foo.ts', prompt: 'do todo', dedupKey: 'todo:foo.ts:12' },
+      ],
+    });
+    expect(out).toHaveLength(2);
+    expect(out[0]).toMatchObject({ project: 'proj', source: 'mining', kind: 'lint', score: 100 });
+    expect(out[1]).toMatchObject({ kind: 'todo', score: 40 });
+  });
+
+  it('drops malformed findings and de-dupes within the batch (last wins)', () => {
+    const out = mineCandidates({
+      project: 'proj',
+      findings: [
+        { kind: '', title: 't', rationale: 'r', prompt: 'p', dedupKey: 'd' },
+        { kind: 'lint', title: 'old', rationale: 'r', prompt: 'p', dedupKey: 'lint:global' },
+        { kind: 'lint', title: 'new', rationale: 'r', prompt: 'p', dedupKey: 'lint:global' },
+      ],
+    });
+    expect(out).toHaveLength(1);
+    expect(out[0].title).toBe('new');
+  });
+});
+=== NEW FILE: __tests__/orchestrator/initiative-outcome.test.ts ===
+import { describe, it, expect, vi, beforeAll, beforeEach, afterAll, afterEach } from 'vitest';
+import { sql } from 'drizzle-orm';
+import { createTestPgDbEmpty, type TestDbHandle } from '@/__tests__/helpers/test-db';
+import * as schema from '@/lib/db/schema';
+
+async function applyDdl(handle: TestDbHandle): Promise<void> {
+  await handle.db.execute(sql.raw(`
+    CREATE TABLE IF NOT EXISTS "initiatives" (
+      "id" serial PRIMARY KEY NOT NULL,
+      "project" text NOT NULL,
+      "source" text NOT NULL,
+      "kind" text NOT NULL,
+      "title" text NOT NULL,
+      "rationale" text NOT NULL,
+      "prompt" text NOT NULL,
+      "score" double precision DEFAULT 0 NOT NULL,
+      "status" text DEFAULT 'proposed' NOT NULL,
+      "dedup_key" text NOT NULL,
+      "release_id" text,
+      "attempts" integer DEFAULT 0 NOT NULL,
+      "cooldown_until" double precision,
+      "created_at" double precision NOT NULL,
+      "updated_at" double precision NOT NULL
+    )
+  `));
+  await handle.db.execute(sql.raw(`
+    CREATE UNIQUE INDEX IF NOT EXISTS "initiatives_project_dedup_key"
+      ON "initiatives" ("project", "dedup_key")
+  `));
+}
+
+describe('initiative-outcome', () => {
+  let sharedHandle: TestDbHandle;
+  let store: typeof import('@/lib/orchestrator/initiatives-store');
+  let outcome: typeof import('@/lib/orchestrator/initiative-outcome');
+
+  beforeAll(async () => {
+    sharedHandle = await createTestPgDbEmpty();
+    await applyDdl(sharedHandle);
+  });
+
+  afterAll(async () => {
+    try {
+      await sharedHandle[Symbol.asyncDispose]();
+    } catch {
+      // ignore
+    }
+  });
+
+  beforeEach(async () => {
+    await sharedHandle.db.execute(sql.raw('TRUNCATE initiatives RESTART IDENTITY'));
+    vi.resetModules();
+    vi.doMock('@/lib/db', () => ({ db: sharedHandle.db, schema }));
+    store = await import('@/lib/orchestrator/initiatives-store');
+    outcome = await import('@/lib/orchestrator/initiative-outcome');
+  });
+
+  afterEach(() => {
+    vi.resetModules();
+    vi.clearAllMocks();
+  });
+
+  it('counts ships today and excludes yesterday', async () => {
+    const day = 24 * 3600 * 1000;
+    const today = 10 * day + 5 * 3600 * 1000; // mid-day
+    const a = await store.upsertCandidate(
+      { project: 'p', source: 'mining', kind: 'lint', title: 't', rationale: 'r', prompt: 'p', dedupKey: 'a' }, today);
+    const b = await store.upsertCandidate(
+      { project: 'p', source: 'mining', kind: 'lint', title: 't', rationale: 'r', prompt: 'p', dedupKey: 'b' }, today);
+    await outcome.markInitiativeOutcome(a.id, 'shipped', 'rel-1', today);
+    await outcome.markInitiativeOutcome(b.id, 'shipped', 'rel-2', today - day); // yesterday
+    expect(await outcome.shipsTodayCount('p', today)).toBe(1);
+  });
+
+  it('failed sets a cooldown', async () => {
+    const row = await store.upsertCandidate(
+      { project: 'p', source: 'mining', kind: 'lint', title: 't', rationale: 'r', prompt: 'p', dedupKey: 'a' }, 1000);
+    await outcome.markInitiativeOutcome(row.id, 'failed', null, 1000);
+    const failed = (await store.listByStatus('p', 'failed'))[0];
+    expect(failed.cooldownUntil).toBe(1000 + 6 * 3600 * 1000);
+  });
+});
+=== NEW FILE: __tests__/orchestrator/initiative-reconcile.test.ts ===
+import { describe, it, expect, vi } from 'vitest';
+import { reconcileRunningInitiatives } from '@/lib/orchestrator/initiative-reconcile';
+import type { ReconcileDeps, RunOutcome } from '@/lib/orchestrator/initiative-reconcile';
+import type { InitiativeRow } from '@/lib/orchestrator/initiatives-store';
+
+function makeRow(overrides: Partial<InitiativeRow> = {}): InitiativeRow {
+  return {
+    id: 1,
+    project: 'proj',
+    source: 'mining',
+    kind: 'lint',
+    title: 't',
+    rationale: 'r',
+    prompt: 'Fix lint.',
+    score: 100,
+    status: 'running',
+    dedupKey: 'd',
+    releaseId: 'job-1',
+    attempts: 1,
+    cooldownUntil: null,
+    createdAt: 0,
+    updatedAt: 0,
+    ...overrides,
+  };
+}
+
+function makeDeps(
+  rows: InitiativeRow[],
+  outcomes: Record<string, RunOutcome>,
+): { deps: ReconcileDeps; markOutcome: ReturnType<typeof vi.fn> } {
+  const markOutcome = vi.fn(async () => undefined);
+  const deps: ReconcileDeps = {
+    listRunning: vi.fn(async () => rows),
+    jobStatus: vi.fn(async (jobId: string) => outcomes[jobId] ?? 'unknown'),
+    markOutcome,
+  };
+  return { deps, markOutcome };
+}
+
+describe('reconcileRunningInitiatives', () => {
+  it('marks shipped when job outcome is success', async () => {
+    const row = makeRow({ releaseId: 'job-success' });
+    const { deps, markOutcome } = makeDeps([row], { 'job-success': 'success' });
+
+    await reconcileRunningInitiatives('proj', deps);
+
+    expect(markOutcome).toHaveBeenCalledOnce();
+    expect(markOutcome).toHaveBeenCalledWith(1, 'shipped', 'job-success');
+  });
+
+  it('marks failed when job outcome is failed', async () => {
+    const row = makeRow({ releaseId: 'job-fail' });
+    const { deps, markOutcome } = makeDeps([row], { 'job-fail': 'failed' });
+
+    await reconcileRunningInitiatives('proj', deps);
+
+    expect(markOutcome).toHaveBeenCalledOnce();
+    expect(markOutcome).toHaveBeenCalledWith(1, 'failed', 'job-fail');
+  });
+
+  it('leaves initiative untouched when job is still running', async () => {
+    const row = makeRow({ releaseId: 'job-running' });
+    const { deps, markOutcome } = makeDeps([row], { 'job-running': 'running' });
+
+    await reconcileRunningInitiatives('proj', deps);
+
+    expect(markOutcome).not.toHaveBeenCalled();
+  });
+
+  it('leaves initiative untouched when job outcome is unknown', async () => {
+    const row = makeRow({ releaseId: 'job-x' });
+    const { deps, markOutcome } = makeDeps([row], { 'job-x': 'unknown' });
+
+    await reconcileRunningInitiatives('proj', deps);
+
+    expect(markOutcome).not.toHaveBeenCalled();
+  });
+
+  it('leaves initiative untouched when releaseId is null', async () => {
+    const row = makeRow({ releaseId: null });
+    const { deps, markOutcome } = makeDeps([row], {});
+
+    await reconcileRunningInitiatives('proj', deps);
+
+    expect(markOutcome).not.toHaveBeenCalled();
+  });
+
+  it('continues reconciling other initiatives when one throws', async () => {
+    const rowA = makeRow({ id: 1, releaseId: 'job-a' });
+    const rowB = makeRow({ id: 2, releaseId: 'job-b' });
+    const markOutcome = vi.fn(async () => undefined);
+    const deps: ReconcileDeps = {
+      listRunning: vi.fn(async () => [rowA, rowB]),
+      jobStatus: vi.fn(async (jobId: string): Promise<RunOutcome> => {
+        if (jobId === 'job-a') throw new Error('status lookup failed');
+        return 'success';
+      }),
+      markOutcome,
+    };
+
+    await reconcileRunningInitiatives('proj', deps);
+
+    // rowA threw — rowB should still be marked shipped
+    expect(markOutcome).toHaveBeenCalledOnce();
+    expect(markOutcome).toHaveBeenCalledWith(2, 'shipped', 'job-b');
+  });
+});
+=== NEW FILE: __tests__/orchestrator/initiative-score.test.ts ===
+import { describe, it, expect } from 'vitest';
+import { choreBaseScore, decayedScore, CHORE_SEVERITY } from '@/lib/orchestrator/initiative-score';
+
+describe('initiative-score', () => {
+  it('orders chore severities: build/type > failing-test > missing-test > todo > dep-bump > docs', () => {
+    expect(CHORE_SEVERITY['type-error']).toBeGreaterThan(CHORE_SEVERITY['failing-test']);
+    expect(CHORE_SEVERITY['failing-test']).toBeGreaterThan(CHORE_SEVERITY['missing-test']);
+    expect(CHORE_SEVERITY['missing-test']).toBeGreaterThan(CHORE_SEVERITY['todo']);
+    expect(CHORE_SEVERITY['todo']).toBeGreaterThan(CHORE_SEVERITY['dep-bump']);
+    expect(CHORE_SEVERITY['dep-bump']).toBeGreaterThan(CHORE_SEVERITY['docs-gap']);
+  });
+
+  it('choreBaseScore returns 0 for unknown kinds', () => {
+    expect(choreBaseScore('totally-unknown')).toBe(0);
+  });
+
+  it('decayedScore halves per attempt', () => {
+    expect(decayedScore({ score: 100, attempts: 0 })).toBe(100);
+    expect(decayedScore({ score: 100, attempts: 1 })).toBe(50);
+    expect(decayedScore({ score: 100, attempts: 2 })).toBe(25);
+  });
+});
+=== NEW FILE: __tests__/orchestrator/initiatives-store.test.ts ===
+import { describe, it, expect, vi, beforeEach, afterEach, afterAll, beforeAll } from 'vitest';
+import { sql } from 'drizzle-orm';
+import { createTestPgDbEmpty, type TestDbHandle } from '@/__tests__/helpers/test-db';
+import * as schema from '@/lib/db/schema';
+
+const base = {
+  project: 'proj', source: 'mining' as const, kind: 'lint',
+  title: 'Fix lint', rationale: '3 errors', prompt: 'fix lint', dedupKey: 'lint:global',
+};
+
+async function applyDdl(handle: TestDbHandle): Promise<void> {
+  await handle.db.execute(sql.raw(`
+    CREATE TABLE IF NOT EXISTS "initiatives" (
+      "id" serial PRIMARY KEY NOT NULL,
+      "project" text NOT NULL,
+      "source" text NOT NULL,
+      "kind" text NOT NULL,
+      "title" text NOT NULL,
+      "rationale" text NOT NULL,
+      "prompt" text NOT NULL,
+      "score" double precision DEFAULT 0 NOT NULL,
+      "status" text DEFAULT 'proposed' NOT NULL,
+      "dedup_key" text NOT NULL,
+      "release_id" text,
+      "attempts" integer DEFAULT 0 NOT NULL,
+      "cooldown_until" double precision,
+      "created_at" double precision NOT NULL,
+      "updated_at" double precision NOT NULL
+    )
+  `));
+  await handle.db.execute(sql.raw(`
+    CREATE UNIQUE INDEX IF NOT EXISTS "initiatives_project_dedup_key"
+      ON "initiatives" ("project", "dedup_key")
+  `));
+}
+
+describe('initiatives-store', () => {
+  let sharedHandle: TestDbHandle;
+  let store: typeof import('@/lib/orchestrator/initiatives-store');
+
+  beforeAll(async () => {
+    sharedHandle = await createTestPgDbEmpty();
+    await applyDdl(sharedHandle);
+  });
+
+  afterAll(async () => {
+    try {
+      await sharedHandle[Symbol.asyncDispose]();
+    } catch {
+      // ignore
+    }
+  });
+
+  beforeEach(async () => {
+    await sharedHandle.db.execute(sql.raw('TRUNCATE initiatives RESTART IDENTITY'));
+    vi.resetModules();
+    vi.doMock('@/lib/db', () => ({ db: sharedHandle.db, schema }));
+    store = await import('@/lib/orchestrator/initiatives-store');
+  });
+
+  afterEach(() => {
+    vi.resetModules();
+    vi.clearAllMocks();
+  });
+
+  it('upserts a new candidate as proposed', async () => {
+    const row = await store.upsertCandidate(base, 1000);
+    expect(row.status).toBe('proposed');
+    expect(row.id).toBeGreaterThan(0);
+  });
+
+  it('upsert refreshes a proposed row without duplicating', async () => {
+    await store.upsertCandidate(base, 1000);
+    const again = await store.upsertCandidate({ ...base, title: 'Fix lint (5)', score: 9 }, 2000);
+    expect(again.title).toBe('Fix lint (5)');
+    const all = await store.listByStatus('proj', 'proposed');
+    expect(all).toHaveLength(1);
+  });
+
+  it('does not resurrect a shipped row on re-detection', async () => {
+    const row = await store.upsertCandidate(base, 1000);
+    await store.setStatus(row.id, 'shipped', undefined, 1500);
+    await store.upsertCandidate({ ...base, title: 'changed' }, 2000);
+    expect(await store.listByStatus('proj', 'proposed')).toHaveLength(0);
+    expect(await store.listByStatus('proj', 'shipped')).toHaveLength(1);
+  });
+
+  it('listQueued respects cooldown and orders by score desc', async () => {
+    const a = await store.upsertCandidate({ ...base, dedupKey: 'a', score: 1 }, 1000);
+    const b = await store.upsertCandidate({ ...base, dedupKey: 'b', score: 5 }, 1000);
+    const c = await store.upsertCandidate({ ...base, dedupKey: 'c', score: 9 }, 1000);
+    await store.setStatus(a.id, 'queued', undefined, 1000);
+    await store.setStatus(b.id, 'queued', undefined, 1000);
+    await store.setStatus(c.id, 'queued', { cooldownUntil: 9999 }, 1000);
+    const q = await store.listQueued('proj', 5000);
+    expect(q.map((r) => r.dedupKey)).toEqual(['b', 'a']); // c is in cooldown
+  });
+});
+=== NEW FILE: __tests__/orchestrator/orchestrator-tick-initiatives.test.ts ===
+import { describe, it, expect, vi } from 'vitest';
+import { handleOrchestratorTick, type OrchestratorTickDeps } from '@/lib/workflows/cron/orchestrator-tick-task';
+
+function baseDeps(over: Partial<OrchestratorTickDeps>): OrchestratorTickDeps {
+  return {
+    loadConfig: async () => ({ marginPct: 5, maxBoostsPerHour: 2 }),
+    loadBridge: async () => ({
+      globalPace: { status: 'on_pace', marginPct: 10, providers: [] },
+      projects: [],
+    }),
+    loadAgents: async () => [],
+    enqueueAgentFire: async () => {},
+    enqueueNextFire: async () => {},
+    now: () => 1000,
+    ...over,
+  };
+}
+
+describe('orchestrator tick — initiative phases', () => {
+  it('runs mine + dispatch when the engine is enabled', async () => {
+    const mineInitiatives = vi.fn(async () => {});
+    const dispatchInitiatives = vi.fn(async () => {});
+    await handleOrchestratorTick(baseDeps({
+      initiativeEngineEnabled: () => true, mineInitiatives, dispatchInitiatives,
+    }));
+    expect(mineInitiatives).toHaveBeenCalledTimes(1);
+    expect(dispatchInitiatives).toHaveBeenCalledTimes(1);
+  });
+
+  it('skips initiative phases when the engine is disabled', async () => {
+    const mineInitiatives = vi.fn(async () => {});
+    const dispatchInitiatives = vi.fn(async () => {});
+    await handleOrchestratorTick(baseDeps({
+      initiativeEngineEnabled: () => false, mineInitiatives, dispatchInitiatives,
+    }));
+    expect(mineInitiatives).not.toHaveBeenCalled();
+    expect(dispatchInitiatives).not.toHaveBeenCalled();
+  });
+
+  it('a throwing mine phase does not break the tick', async () => {
+    const res = await handleOrchestratorTick(baseDeps({
+      initiativeEngineEnabled: () => true,
+      mineInitiatives: async () => { throw new Error('boom'); },
+      dispatchInitiatives: vi.fn(async () => {}),
+    }));
+    expect(res.enabled).toBe(true);
+  });
+});
+=== NEW FILE: __tests__/orchestrator/run-initiative.test.ts ===
+import { describe, it, expect, vi } from 'vitest';
+import { startInitiativeRun } from '@/lib/orchestrator/run-initiative';
+import type { InitiativeRow } from '@/lib/orchestrator/initiatives-store';
+
+const row: InitiativeRow = {
+  id: 1, project: 'proj', source: 'mining', kind: 'lint', title: 't', rationale: 'r',
+  prompt: 'Fix all lint errors.', score: 100, status: 'running', dedupKey: 'd',
+  releaseId: null, attempts: 1, cooldownUntil: null, createdAt: 0, updatedAt: 0,
+};
+
+describe('startInitiativeRun', () => {
+  it('starts an agent run carrying the initiative prompt', async () => {
+    const startRun = vi.fn(async () => ({ jobId: 'job-1' }));
+    const jobId = await startInitiativeRun('proj', row, { startRun });
+    expect(startRun).toHaveBeenCalledWith({ project: 'proj', prompt: 'Fix all lint errors.' });
+    expect(jobId).toBe('job-1');
+  });
+
+  it('propagates a start failure', async () => {
+    const startRun = vi.fn(async () => { throw new Error('cannot start'); });
+    await expect(startInitiativeRun('proj', row, { startRun })).rejects.toThrow('cannot start');
+  });
+});
+=== NEW FILE: __tests__/shared/initiative-settings.test.ts ===
+import { describe, it, expect } from 'vitest';
+import { DEFAULTS } from '@/lib/shared/config';
+
+describe('initiative settings defaults', () => {
+  it('engine is off by default; mining on; caps sane', () => {
+    expect(DEFAULTS.initiative_engine_enabled).toBe(false);
+    expect(DEFAULTS.initiative_mining_enabled).toBe(true);
+    expect(DEFAULTS.initiative_max_ships_per_day).toBe(3);
+    expect(DEFAULTS.initiative_max_backlog_per_project).toBe(50);
+  });
+});
+=== NEW FILE: lib/db/migrations/0025_add_initiatives.sql ===
+CREATE TABLE IF NOT EXISTS "initiatives" (
+  "id" serial PRIMARY KEY NOT NULL,
+  "project" text NOT NULL,
+  "source" text NOT NULL,
+  "kind" text NOT NULL,
+  "title" text NOT NULL,
+  "rationale" text NOT NULL,
+  "prompt" text NOT NULL,
+  "score" double precision DEFAULT 0 NOT NULL,
+  "status" text DEFAULT 'proposed' NOT NULL,
+  "dedup_key" text NOT NULL,
+  "release_id" text,
+  "attempts" integer DEFAULT 0 NOT NULL,
+  "cooldown_until" double precision,
+  "created_at" double precision NOT NULL,
+  "updated_at" double precision NOT NULL
+);
+--> statement-breakpoint
+CREATE UNIQUE INDEX IF NOT EXISTS "initiatives_project_dedup_key" ON "initiatives" ("project","dedup_key");
+=== NEW FILE: lib/orchestrator/initiative-admit.ts ===
+import { mineCandidates, type ProbeResults } from '@/lib/orchestrator/initiative-miner';
+import * as store from '@/lib/orchestrator/initiatives-store';
+
+export async function admitProject(
+  project: string, results: ProbeResults, maxBacklog: number, nowMs: number = Date.now(),
+): Promise<void> {
+  const candidates = mineCandidates(results);
+  for (const c of candidates) {
+    await store.upsertCandidate(c, nowMs);
+  }
+  const queued = await store.listByStatus(project, 'queued');
+  let room = Math.max(0, maxBacklog - queued.length);
+  if (room === 0) return;
+  const proposed = (await store.listByStatus(project, 'proposed'))
+    .sort((a, b) => a.createdAt - b.createdAt);
+  for (const row of proposed) {
+    if (room === 0) break;
+    await store.setStatus(row.id, 'queued', undefined, nowMs);
+    room--;
+  }
+}
+=== NEW FILE: lib/orchestrator/initiative-dispatch.ts ===
+// lib/orchestrator/initiative-dispatch.ts
+import type { InitiativeRow, setStatus as SetStatus } from '@/lib/orchestrator/initiatives-store';
+import { decayedScore } from '@/lib/orchestrator/initiative-score';
+
+const FAILURE_COOLDOWN_MS = 6 * 3600 * 1000;
+
+export interface DispatchDeps {
+  listQueued: (project: string, nowMs: number) => Promise<InitiativeRow[]>;
+  setStatus: typeof SetStatus;
+  gatesClear: () => boolean;
+  projectBusy: (project: string) => boolean;
+  shipsToday: (project: string) => number;
+  maxShipsPerDay: number;
+  runInitiative: (row: InitiativeRow) => Promise<void>;
+  now?: () => number;
+}
+
+export interface DispatchResult {
+  dispatched: InitiativeRow | null;
+  skipped: 'gates' | 'busy' | 'ships-cap' | 'empty' | null;
+}
+
+export async function dispatchTopInitiative(project: string, deps: DispatchDeps): Promise<DispatchResult> {
+  const now = deps.now ?? Date.now;
+  const nowMs = now();
+
+  if (!deps.gatesClear()) return { dispatched: null, skipped: 'gates' };
+  if (deps.maxShipsPerDay > 0 && deps.shipsToday(project) >= deps.maxShipsPerDay) {
+    return { dispatched: null, skipped: 'ships-cap' };
+  }
+  if (deps.projectBusy(project)) return { dispatched: null, skipped: 'busy' };
+
+  const queued = await deps.listQueued(project, nowMs);
+  if (queued.length === 0) return { dispatched: null, skipped: 'empty' };
+
+  const top = [...queued].sort((a, b) => decayedScore(b) - decayedScore(a))[0];
+
+  await deps.setStatus(top.id, 'running', { bumpAttempts: true }, nowMs);
+  try {
+    await deps.runInitiative(top);
+    return { dispatched: top, skipped: null };
+  } catch {
+    await deps.setStatus(top.id, 'failed', { cooldownUntil: nowMs + FAILURE_COOLDOWN_MS }, nowMs);
+    return { dispatched: null, skipped: null };
+  }
+}
+=== NEW FILE: lib/orchestrator/initiative-miner.ts ===
+import type { InitiativeCandidate } from '@/lib/orchestrator/initiatives-store';
+import { choreBaseScore } from '@/lib/orchestrator/initiative-score';
+
+export interface ProbeFinding {
+  kind: string; title: string; rationale: string; prompt: string; dedupKey: string;
+}
+export interface ProbeResults {
+  project: string; findings: ProbeFinding[];
+}
+
+export function mineCandidates(results: ProbeResults): InitiativeCandidate[] {
+  const byKey = new Map<string, InitiativeCandidate>();
+  for (const f of results.findings) {
+    if (!f.kind || !f.prompt || !f.dedupKey) continue;
+    byKey.set(f.dedupKey, {
+      project: results.project,
+      source: 'mining',
+      kind: f.kind,
+      title: f.title,
+      rationale: f.rationale,
+      prompt: f.prompt,
+      dedupKey: f.dedupKey,
+      score: choreBaseScore(f.kind),
+    });
+  }
+  return [...byKey.values()];
+}
+=== NEW FILE: lib/orchestrator/initiative-outcome.ts ===
+import { and, eq, gte } from 'drizzle-orm';
+import { db, schema } from '@/lib/db';
+import * as store from '@/lib/orchestrator/initiatives-store';
+
+const FAILURE_COOLDOWN_MS = 6 * 3600 * 1000;
+
+function startOfUtcDay(ms: number): number {
+  return Math.floor(ms / (24 * 3600 * 1000)) * (24 * 3600 * 1000);
+}
+
+export async function markInitiativeOutcome(
+  id: number,
+  outcome: 'shipped' | 'failed',
+  releaseId: string | null,
+  nowMs: number = Date.now(),
+): Promise<void> {
+  if (outcome === 'shipped') {
+    await store.setStatus(id, 'shipped', { releaseId, cooldownUntil: null }, nowMs);
+  } else {
+    await store.setStatus(id, 'failed', { releaseId, cooldownUntil: nowMs + FAILURE_COOLDOWN_MS }, nowMs);
+  }
+}
+
+export async function shipsTodayCount(project: string, nowMs: number = Date.now()): Promise<number> {
+  const rows = await db.select().from(schema.initiatives).where(and(
+    eq(schema.initiatives.project, project),
+    eq(schema.initiatives.status, 'shipped'),
+    gte(schema.initiatives.updatedAt, startOfUtcDay(nowMs)),
+  ));
+  return rows.length;
+}
+=== NEW FILE: lib/orchestrator/initiative-probes.ts ===
+import { exec } from '@/lib/shared/shell';
+import type { ProbeResults, ProbeFinding } from '@/lib/orchestrator/initiative-miner';
+
+// exec(cmd, args, options) returns Promise<{ stdout, stderr, exitCode }>
+// — it never throws on non-zero exit; the try/catch guards only unexpected errors.
+
+async function probeLint(projectPath: string): Promise<ProbeFinding[]> {
+  try {
+    const res = await exec('pnpm', ['lint'], { cwd: projectPath, timeout: 60000 });
+    if (res.exitCode === 0) return [];
+    return [{
+      kind: 'lint',
+      title: 'Fix lint errors',
+      rationale: 'pnpm lint exited non-zero',
+      prompt: 'Run `pnpm lint` and fix every reported error and warning. Do not disable rules to silence them.',
+      dedupKey: 'lint:global',
+    }];
+  } catch {
+    return [];
+  }
+}
+
+async function probeTodos(projectPath: string): Promise<ProbeFinding[]> {
+  try {
+    const res = await exec(
+      'grep',
+      ['-rIl', '-E', 'TODO|FIXME', '--include=*.ts', '--include=*.tsx',
+        'lib', 'components', 'app'],
+      { cwd: projectPath, timeout: 30000 },
+    );
+    // grep exits 1 when no matches — treat that as empty, not an error
+    const files = res.stdout.split('\n').map((s) => s.trim()).filter(Boolean).slice(0, 20);
+    return files.map((file): ProbeFinding => ({
+      kind: 'todo',
+      title: `Resolve TODO/FIXME markers in ${file}`,
+      rationale: `${file} contains TODO/FIXME markers`,
+      prompt: `Review the TODO and FIXME comments in ${file}. Resolve each one by implementing it or, if obsolete, removing it. Do not leave the markers in place.`,
+      dedupKey: `todo:${file}`,
+    }));
+  } catch {
+    return [];
+  }
+}
+
+export async function runProbes(project: string, projectPath: string): Promise<ProbeResults> {
+  const [lint, todos] = await Promise.all([probeLint(projectPath), probeTodos(projectPath)]);
+  return { project, findings: [...lint, ...todos] };
+}
+=== NEW FILE: lib/orchestrator/initiative-reconcile.ts ===
+// Pure reconcile pass: for each running initiative that has a stored jobId,
+// look up the job outcome and mark the initiative shipped or failed.
+// Injected deps keep this testable without a real DB or job store.
+
+import type { InitiativeRow } from '@/lib/orchestrator/initiatives-store';
+
+export type RunOutcome = 'running' | 'success' | 'failed' | 'unknown';
+
+export interface ReconcileDeps {
+  listRunning: (project: string) => Promise<InitiativeRow[]>;
+  jobStatus: (jobId: string) => Promise<RunOutcome>;
+  markOutcome: (id: number, outcome: 'shipped' | 'failed', jobId: string | null) => Promise<void>;
+}
+
+export async function reconcileRunningInitiatives(project: string, deps: ReconcileDeps): Promise<void> {
+  const rows = await deps.listRunning(project);
+
+  for (const row of rows) {
+    try {
+      if (row.releaseId === null) {
+        // No jobId captured yet — cannot reconcile
+        continue;
+      }
+
+      const outcome = await deps.jobStatus(row.releaseId);
+
+      if (outcome === 'success') {
+        await deps.markOutcome(row.id, 'shipped', row.releaseId);
+      } else if (outcome === 'failed') {
+        await deps.markOutcome(row.id, 'failed', row.releaseId);
+      }
+      // 'running' | 'unknown' → leave untouched
+    } catch {
+      // Isolate: one initiative failure must not abort the rest
+    }
+  }
+}
+=== NEW FILE: lib/orchestrator/initiative-score.ts ===
+import type { InitiativeRow } from '@/lib/orchestrator/initiatives-store';
+
+// Higher = more urgent. Gaps left between tiers so PM features (Phase 2) can
+// slot in without renumbering. lint/type-error share the top tier (broken build).
+export const CHORE_SEVERITY: Record<string, number> = {
+  'type-error': 100,
+  'lint': 100,
+  'failing-test': 80,
+  'gh-issue': 70,
+  'missing-test': 60,
+  'todo': 40,
+  'dep-bump': 20,
+  'docs-gap': 10,
+};
+
+export function choreBaseScore(kind: string): number {
+  return CHORE_SEVERITY[kind] ?? 0;
+}
+
+export function decayedScore(row: Pick<InitiativeRow, 'score' | 'attempts'>): number {
+  return row.score * Math.pow(0.5, row.attempts);
+}
+=== NEW FILE: lib/orchestrator/initiatives-store.ts ===
+import { and, eq, desc, or, isNull, lte } from 'drizzle-orm';
+import { sql } from 'drizzle-orm';
+import { db, schema } from '@/lib/db';
+
+export type InitiativeSource = 'mining' | 'pm';
+export type InitiativeStatus =
+  | 'proposed' | 'queued' | 'running' | 'shipped' | 'failed' | 'rejected' | 'superseded';
+
+export interface InitiativeCandidate {
+  project: string; source: InitiativeSource; kind: string;
+  title: string; rationale: string; prompt: string; dedupKey: string; score?: number;
+}
+
+export interface InitiativeRow {
+  id: number; project: string; source: InitiativeSource; kind: string;
+  title: string; rationale: string; prompt: string; score: number;
+  status: InitiativeStatus; dedupKey: string; releaseId: string | null;
+  attempts: number; cooldownUntil: number | null; createdAt: number; updatedAt: number;
+}
+
+// Statuses whose copy may be refreshed by re-detection. Closed/in-flight rows
+// are never downgraded by a fresh probe.
+const REFRESHABLE: InitiativeStatus[] = ['proposed', 'queued'];
+
+function toRow(r: typeof schema.initiatives.$inferSelect): InitiativeRow {
+  return {
+    id: r.id,
+    project: r.project,
+    source: r.source as InitiativeSource,
+    kind: r.kind,
+    title: r.title,
+    rationale: r.rationale,
+    prompt: r.prompt,
+    score: r.score,
+    status: r.status as InitiativeStatus,
+    dedupKey: r.dedupKey,
+    releaseId: r.releaseId,
+    attempts: r.attempts,
+    cooldownUntil: r.cooldownUntil,
+    createdAt: r.createdAt,
+    updatedAt: r.updatedAt,
+  };
+}
+
+export async function upsertCandidate(c: InitiativeCandidate, nowMs: number = Date.now()): Promise<InitiativeRow> {
+  const existing = (await db.select().from(schema.initiatives)
+    .where(and(eq(schema.initiatives.project, c.project), eq(schema.initiatives.dedupKey, c.dedupKey)))
+    .limit(1))[0];
+
+  if (!existing) {
+    const inserted = (await db.insert(schema.initiatives).values({
+      project: c.project,
+      source: c.source,
+      kind: c.kind,
+      title: c.title,
+      rationale: c.rationale,
+      prompt: c.prompt,
+      score: c.score ?? 0,
+      dedupKey: c.dedupKey,
+      createdAt: nowMs,
+      updatedAt: nowMs,
+    }).returning())[0];
+    return toRow(inserted);
+  }
+
+  if (!REFRESHABLE.includes(existing.status as InitiativeStatus)) {
+    return toRow(existing); // closed/in-flight — leave untouched
+  }
+
+  const updated = (await db.update(schema.initiatives).set({
+    title: c.title,
+    rationale: c.rationale,
+    prompt: c.prompt,
+    score: c.score ?? existing.score,
+    updatedAt: nowMs,
+  }).where(eq(schema.initiatives.id, existing.id)).returning())[0];
+  return toRow(updated);
+}
+
+export async function listByStatus(project: string, status: InitiativeStatus): Promise<InitiativeRow[]> {
+  const rows = await db.select().from(schema.initiatives)
+    .where(and(eq(schema.initiatives.project, project), eq(schema.initiatives.status, status)));
+  return rows.map(toRow);
+}
+
+export async function listQueued(project: string, nowMs: number = Date.now()): Promise<InitiativeRow[]> {
+  const rows = await db.select().from(schema.initiatives)
+    .where(and(
+      eq(schema.initiatives.project, project),
+      eq(schema.initiatives.status, 'queued'),
+      or(isNull(schema.initiatives.cooldownUntil), lte(schema.initiatives.cooldownUntil, nowMs)),
+    ))
+    .orderBy(desc(schema.initiatives.score));
+  return rows.map(toRow);
+}
+
+export async function setStatus(
+  id: number,
+  status: InitiativeStatus,
+  patch: { releaseId?: string | null; cooldownUntil?: number | null; bumpAttempts?: boolean } = {},
+  nowMs: number = Date.now(),
+): Promise<void> {
+  const set: Partial<typeof schema.initiatives.$inferInsert> = { status, updatedAt: nowMs };
+  if ('releaseId' in patch) set.releaseId = patch.releaseId ?? null;
+  if ('cooldownUntil' in patch) set.cooldownUntil = patch.cooldownUntil ?? null;
+  if (patch.bumpAttempts) set.attempts = sql`${schema.initiatives.attempts} + 1` as unknown as number;
+  await db.update(schema.initiatives).set(set).where(eq(schema.initiatives.id, id));
+}
+=== NEW FILE: lib/orchestrator/run-initiative.ts ===
+// Starts a one-shot in-process agent run carrying an initiative's prompt so
+// the produced diff flows into the existing release-after-run / auto-push
+// pipeline. The real wiring (defaultStartRun) finds the project's first
+// enabled user-role agent and fires it via the internal /run endpoint — the
+// same path the cron scheduler and reinforce loop use.
+//
+// The injected `deps.startRun` seam exists purely for unit tests: tests inject
+// a fake so no agent or HTTP server is needed.
+
+import type { InitiativeRow } from '@/lib/orchestrator/initiatives-store';
+
+export interface RunInitiativeDeps {
+  startRun: (args: { project: string; prompt: string }) => Promise<{ jobId: string }>;
+}
+
+async function defaultStartRun(args: { project: string; prompt: string }): Promise<{ jobId: string }> {
+  const { db, schema } = await import('@/lib/db');
+  const { eq, and } = await import('drizzle-orm');
+
+  // Find the first enabled, non-system agent for this project. System agents
+  // dispatch to internal handlers — only user agents spawn a CLI run whose diff
+  // flows into the release pipeline.
+  const agents = await db
+    .select({ id: schema.agents.id })
+    .from(schema.agents)
+    .where(
+      and(
+        eq(schema.agents.project, args.project),
+        eq(schema.agents.enabled, true),
+        eq(schema.agents.kind, 'user'),
+      ),
+    )
+    .limit(1);
+
+  if (agents.length === 0) {
+    throw new Error(
+      `[run-initiative] no enabled user agent found for project "${args.project}" — ` +
+      `add at least one agent before enabling the initiative engine`,
+    );
+  }
+
+  const agentId = agents[0].id;
+  const port = process.env.PORT ?? '1337';
+  const baseUrl = process.env.TAMTAM_BASE_URL ?? `http://localhost:${port}`;
+  const url = `${baseUrl}/api/agents/${encodeURIComponent(agentId)}/run`;
+
+  const res = await fetch(url, {
+    method: 'POST',
+    headers: { 'content-type': 'application/json', 'x-tamtam-trigger': 'schedule' },
+    body: JSON.stringify({ prompt: args.prompt }),
+    signal: AbortSignal.timeout(30_000),
+  });
+
+  if (!res.ok) {
+    const body = await res.text().catch(() => '');
+    throw new Error(
+      `[run-initiative] agent run request for project "${args.project}" failed: ` +
+      `HTTP ${res.status} — ${body.slice(0, 200)}`,
+    );
+  }
+
+  const json = (await res.json()) as Record<string, unknown>;
+  const jobId = typeof json.jobId === 'string' ? json.jobId : String(json.jobId ?? 'unknown');
+  return { jobId };
+}
+
+export async function startInitiativeRun(
+  project: string,
+  row: InitiativeRow,
+  deps: RunInitiativeDeps = { startRun: defaultStartRun },
+): Promise<string> {
+  const { jobId } = await deps.startRun({ project, prompt: row.prompt });
+  return jobId;
+}

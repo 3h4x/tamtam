@@ -58,6 +58,12 @@ export type SettingsFieldKey =
   | 'orchestrator_boost_margin_pct'
   | 'orchestrator_max_boosts_per_hour'
   | 'agent_autopilot_enabled'
+  | 'initiative_engine_enabled'
+  | 'initiative_mining_enabled'
+  | 'initiative_dispatch_enabled'
+  | 'initiative_max_ships_per_day'
+  | 'initiative_max_backlog_per_project'
+  | 'initiative_mining_interval_minutes'
 
 // `subsection` groups fields into named cards within their tab. The
 // SUBSECTIONS registry below maps each id → display metadata (title, grid
@@ -143,6 +149,11 @@ export const SUBSECTIONS: Record<string, SubsectionDef> = {
   orchestrator: {
     title: 'Orchestrator (Budget Allocator)',
     description: 'When pace is under, push bonus agent fires at shipping projects every 5 min so spare token budget converts into shipped work instead of going unused. Off by default — opt-in.',
+    cols: 3,
+  },
+  initiatives: {
+    title: 'Initiative Engine (Autonomous Backlog)',
+    description: 'Mines each project for grounded work (lint, TODO/FIXME, API routes shipped without UI) and — unless mine-only — drives the top item through the release pipeline. Off by default. Mine-only = discover + fill backlog without auto-merge.',
     cols: 3,
   },
 }
@@ -245,6 +256,48 @@ export const FIELDS: Record<SettingsFieldKey, FieldDef> = {
     help: 'When on (default), the orchestrator reclaims wasted budget by role: it cadence-throttles churning producers (sustained loop/noise) and downgrades the model tier of idle monitors/reviewers/planners. All actions are floor-bounded and reversible; monitors are never cadence-throttled. Also requires Orchestrator on. Tuning params are API-only.',
     group: 'pipeline',
     subsection: 'orchestrator',
+    span: 1,
+  },
+  initiative_engine_enabled: {
+    label: 'Initiative engine',
+    help: 'Master switch. Off by default — opt-in per deployment. When on, TamTam scans each project for grounded chore items (lint findings, TODO/FIXME comments, unmatched API routes) and — unless mine-only mode is active — drives the top backlog item through the release pipeline automatically.',
+    group: 'pipeline',
+    subsection: 'initiatives',
+    span: 1,
+  },
+  initiative_mining_enabled: {
+    label: 'Mining',
+    help: 'When on (default), the engine actively mines each project for grounded work items and fills the backlog. Turn off to pause discovery while leaving dispatch intact.',
+    group: 'pipeline',
+    subsection: 'initiatives',
+    span: 1,
+  },
+  initiative_dispatch_enabled: {
+    label: 'Dispatch (auto-merge)',
+    help: 'When off, the engine runs in mine-only mode: it discovers work and fills the backlog but never dispatches a release or merges anything. Useful to audit what the engine finds before enabling full autonomy.',
+    group: 'pipeline',
+    subsection: 'initiatives',
+    span: 1,
+  },
+  initiative_max_ships_per_day: {
+    label: 'Max ships / project / day',
+    help: 'Per-project cap on autonomous merges per calendar day. Prevents a runaway initiative from flooding the default branch. Default 3.',
+    group: 'pipeline',
+    subsection: 'initiatives',
+    span: 1,
+  },
+  initiative_max_backlog_per_project: {
+    label: 'Max backlog / project',
+    help: 'Admission cap on queued backlog items per project. Mining stops adding new items once this limit is reached. Default 50.',
+    group: 'pipeline',
+    subsection: 'initiatives',
+    span: 1,
+  },
+  initiative_mining_interval_minutes: {
+    label: 'Mining interval (min)',
+    help: 'Minimum minutes between mining runs for the same project. Prevents hammering a project on every tick. Default 60.',
+    group: 'pipeline',
+    subsection: 'initiatives',
     span: 1,
   },
   browser_broker_image: {
@@ -633,6 +686,12 @@ export const DEFAULTS: Record<SettingsFieldKey, string> = {
   orchestrator_boost_margin_pct: '5',
   orchestrator_max_boosts_per_hour: '2',
   agent_autopilot_enabled: 'true',
+  initiative_engine_enabled: 'false',
+  initiative_mining_enabled: 'true',
+  initiative_dispatch_enabled: 'true',
+  initiative_max_ships_per_day: '3',
+  initiative_max_backlog_per_project: '50',
+  initiative_mining_interval_minutes: '60',
 }
 
 export const COL_SPAN: Record<number, string> = { 1: 'col-span-1', 2: 'col-span-2', 3: 'col-span-3', 4: 'col-span-4' }

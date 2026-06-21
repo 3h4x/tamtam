@@ -776,6 +776,22 @@ Use the QA agent.
     expect(mocks.startJob).not.toHaveBeenCalled();
   });
 
+  it('allows initiative-triggered runs for manual-only agents', async () => {
+    await insertAgent({ schedule: null });
+    const req = new NextRequest('http://localhost/api/agents/agent-123/run', {
+      method: 'POST',
+      headers: { 'x-tamtam-trigger': 'initiative' },
+      body: JSON.stringify({ prompt: 'fix the mined chore' }),
+    });
+
+    const res = await POST(req, { params: Promise.resolve({ agentId: 'agent-123' }) });
+    const data = await res.json();
+
+    expect(res.status).toBe(200);
+    expect(data.status).toBe('started');
+    expect(mocks.startJob).toHaveBeenCalledOnce();
+  });
+
   it('rejects scheduled triggers when the agent is already running', async () => {
     await insertAgent({ schedule: '1h' });
     mocks.listJobs.mockReturnValue([makeJob({ id: 'job-1', finishedAt: null })]);

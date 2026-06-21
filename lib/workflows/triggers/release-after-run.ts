@@ -155,6 +155,14 @@ export async function dispatchReleaseAfterRun(job: JobData): Promise<DispatchRel
       logWorkflowTrigger(`[release-after-run] queued release for ${job.project} after run ${job.id}`);
       return { dispatched: false, reason: 'queued (lock held)' };
     }
+    if (r.releaseJobId && isAgentJobKind(job.kind)) {
+      try {
+        const { linkRunningInitiativeToRelease } = await import('@/lib/orchestrator/initiatives-store');
+        await linkRunningInitiativeToRelease(job.id, r.releaseJobId);
+      } catch (err) {
+        console.warn(`[release-after-run] failed to link initiative for ${job.id} → ${r.releaseJobId}:`, err);
+      }
+    }
     logWorkflowTrigger(`[release-after-run] triggered release ${r.jobId} for ${job.project} after run ${job.id}`);
     return { dispatched: true, reason: `release ${r.jobId}` };
   }

@@ -696,4 +696,31 @@ describe('PATCH /settings persistence', () => {
         }),
       });
     });
+
+
+    it('persists initiative-engine settings (enable + mine-only + tuning)', async () => {
+      const request = new NextRequest('http://localhost/api/settings', {
+        method: 'PATCH',
+        body: JSON.stringify({
+          initiative_engine_enabled: true,
+          initiative_dispatch_enabled: false,
+          initiative_mining_interval_minutes: '30',
+          initiative_max_ships_per_day: '2',
+        }),
+      });
+      const response = await ctx.PATCH(request);
+      expect(response.status).toBe(200);
+
+      const rows = await ctx.sharedHandle.db.select().from(schema.settings);
+      const map = Object.fromEntries(rows.map((r) => [r.key, r.value]));
+      expect(map.initiative_engine_enabled).toBe('true');
+      expect(map.initiative_dispatch_enabled).toBe('false');
+      expect(map.initiative_mining_interval_minutes).toBe('30');
+      expect(map.initiative_max_ships_per_day).toBe('2');
+
+      const { initSettings, getSettings } = await import('@/lib/shared/config');
+      await initSettings();
+      expect(getSettings().initiative_engine_enabled).toBe(true);
+      expect(getSettings().initiative_dispatch_enabled).toBe(false);
+    });
 });
