@@ -365,6 +365,41 @@ describe('dev-server lifecycle', () => {
     }
   });
 
+  it('sweepOrphanDevServers stops an orphan whose pidfile name is sanitized', async () => {
+    const project = 'lifecycle orphan project';
+    const path = pidfilePath(project);
+    const dbWhereMock = vi.fn().mockResolvedValue([]);
+    const dbFromMock = vi.fn(() => ({ where: dbWhereMock }));
+    const selectMock = vi.fn(() => ({ from: dbFromMock }));
+    const eqMock = vi.fn(() => 'predicate');
+
+    vi.doMock('@/lib/db', () => ({
+      db: { select: selectMock },
+      schema: { projects: { name: 'projects.name' } },
+    }));
+    vi.doMock('drizzle-orm', () => ({ eq: eqMock }));
+
+    try {
+      const result = await ensureWithGrace(project, baseConfig);
+      expect(result.status).toBe('started');
+
+      const sweep = await sweepOrphanDevServers();
+      expect(activeWorkMock).toHaveBeenCalledWith(project);
+      expect(eqMock).toHaveBeenCalledWith('projects.name', project);
+      expect(sweep.stopped).toContain(project);
+      expect(sweep.kept).not.toContain(project);
+      expect(existsSync(path)).toBe(false);
+      expect(isDevServerRunning(project)).toBe(false);
+    } finally {
+      vi.doUnmock('@/lib/db');
+      vi.doUnmock('drizzle-orm');
+      await stopDevServer(project, { stopCommand: null, cwd: process.cwd() });
+      if (existsSync(path)) {
+        try { unlinkSync(path); } catch {}
+      }
+    }
+  });
+
   it('sweepOrphanDevServers stops an orphan using the persisted project config', async () => {
     const project = 'lifecycle-sweep-orphan';
     const dbPath = '/tmp/dev-server-from-db';

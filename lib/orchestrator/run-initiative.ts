@@ -36,6 +36,17 @@ export function extractRunStartResult(json: unknown): InitiativeRunStartResult |
   return null;
 }
 
+/** Pure: pick the best file agent to carry an initiative's prompt — an enabled,
+ *  non-system, producer-role agent, preferring one named `improve` (the canonical
+ *  code agent). Returns its `file:project:name` id, or null if none qualifies. */
+export function pickFileAgentForInitiative(
+  fileAgents: Array<{ id: string; name: string; enabled: boolean; kind: string; role: string }>,
+): string | null {
+  const eligible = fileAgents.filter((a) => a.enabled && a.kind !== 'system' && a.role === 'producer');
+  if (eligible.length === 0) return null;
+  return (eligible.find((a) => a.name === 'improve') ?? eligible[0]).id;
+}
+
 export interface RunInitiativeDeps {
   startRun: (args: { project: string; prompt: string }) => Promise<InitiativeRunStartResult>;
 }
@@ -59,14 +70,24 @@ async function defaultStartRun(args: { project: string; prompt: string }): Promi
     )
     .limit(1);
 
-  if (agents.length === 0) {
+  // Prefer a DB user agent; fall back to a file agent (most projects define
+  // their agents in `.tamtam/agents/*.md`, not the DB — without this fallback
+  // those projects' initiatives all hard-fail at dispatch with "no agent").
+  let agentId: string | null = agents[0]?.id ?? null;
+  if (!agentId) {
+    const { scanFileAgents } = await import('@/lib/agents/tamtam-file-agents');
+    const { resolveProjectPath } = await import('@/lib/shared/project-data');
+    const projPath = resolveProjectPath(args.project);
+    const fileAgents = projPath ? scanFileAgents(projPath, args.project) : [];
+    agentId = pickFileAgentForInitiative(fileAgents);
+  }
+  if (!agentId) {
     throw new Error(
-      `[run-initiative] no enabled user agent found for project "${args.project}" — ` +
-      `add at least one agent before enabling the initiative engine`,
+      `[run-initiative] no enabled producer agent (DB or file) found for project "${args.project}" — ` +
+      `add at least one agent before dispatching initiatives`,
     );
   }
 
-  const agentId = agents[0].id;
   const port = process.env.PORT ?? '1337';
   const baseUrl = process.env.TAMTAM_BASE_URL ?? `http://localhost:${port}`;
   const url = `${baseUrl}/api/agents/${encodeURIComponent(agentId)}/run`;

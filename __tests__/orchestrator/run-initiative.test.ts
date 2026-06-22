@@ -1,6 +1,34 @@
 import { describe, it, expect, vi } from 'vitest';
-import { startInitiativeRun, extractJobId, extractRunStartResult } from '@/lib/orchestrator/run-initiative';
+import { startInitiativeRun, extractJobId, extractRunStartResult, pickFileAgentForInitiative } from '@/lib/orchestrator/run-initiative';
 import type { InitiativeRow } from '@/lib/orchestrator/initiatives-store';
+
+const fa = (over: Partial<{ id: string; name: string; enabled: boolean; kind: string; role: string }> = {}) =>
+  ({ id: `file:p:${over.name ?? 'x'}`, name: 'x', enabled: true, kind: 'user', role: 'producer', ...over });
+
+describe('pickFileAgentForInitiative', () => {
+  it('returns null when there is no eligible producer file agent', () => {
+    expect(pickFileAgentForInitiative([])).toBeNull();
+    expect(pickFileAgentForInitiative([fa({ name: 'blog', role: 'publisher' })])).toBeNull();
+    expect(pickFileAgentForInitiative([fa({ name: 'improve', enabled: false })])).toBeNull();
+    expect(pickFileAgentForInitiative([fa({ name: 'docs', kind: 'system' })])).toBeNull();
+  });
+
+  it('prefers an enabled producer named "improve"', () => {
+    const id = pickFileAgentForInitiative([
+      fa({ name: 'cto', id: 'file:p:cto' }),
+      fa({ name: 'improve', id: 'file:p:improve' }),
+    ]);
+    expect(id).toBe('file:p:improve');
+  });
+
+  it('falls back to the first enabled producer when no "improve"', () => {
+    const id = pickFileAgentForInitiative([
+      fa({ name: 'blog', role: 'publisher' }),
+      fa({ name: 'refactor', id: 'file:p:refactor' }),
+    ]);
+    expect(id).toBe('file:p:refactor');
+  });
+});
 
 const row: InitiativeRow = {
   id: 1, project: 'proj', source: 'mining', kind: 'lint', title: 't', rationale: 'r',

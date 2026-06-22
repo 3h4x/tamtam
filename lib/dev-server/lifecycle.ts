@@ -383,17 +383,27 @@ export async function stopDevServer(
   project: string,
   config: Pick<DevServerConfig, 'stopCommand' | 'cwd'>,
 ): Promise<StopResult> {
-  const pidfile = readPidfile(project);
+  const pidPath = pidfilePathFor(project);
+  const pidfile = readPidfileAtPath(pidPath);
   if (!pidfile) return { status: 'not_running' };
 
+  return stopDevServerPidfile(project, pidPath, pidfile, config);
+}
+
+async function stopDevServerPidfile(
+  project: string,
+  pidPath: string,
+  pidfile: DevServerPidFile,
+  config: Pick<DevServerConfig, 'stopCommand' | 'cwd'>,
+): Promise<StopResult> {
   // External dev servers (pid: -1) — we never owned them, never stop them.
   if (pidfile.pid < 0) {
-    removePidfile(project);
+    removePidfileAtPath(pidPath);
     return { status: 'not_running' };
   }
 
   if (!ownsLivePidfile(pidfile)) {
-    removePidfile(project);
+    removePidfileAtPath(pidPath);
     spawnedThisProcess.delete(pidfile.pid);
     return { status: 'not_running' };
   }
@@ -439,11 +449,11 @@ export async function stopDevServer(
       await waitForTrackedChildExit(pidfile.pid, 1_000);
     }
   } catch (e) {
-    removePidfile(project);
+    removePidfileAtPath(pidPath);
     return { status: 'error', error: (e as Error).message };
   }
 
-  removePidfile(project);
+  removePidfileAtPath(pidPath);
   spawnedThisProcess.delete(pidfile.pid);
   return { status: 'stopped', pid: pidfile.pid };
 }
@@ -510,7 +520,7 @@ export async function sweepOrphanDevServers(): Promise<{ stopped: string[]; kept
       readyUrl: rows[0]?.devServerReadyUrl ?? null,
       cwd: rows[0]?.path ?? pidfile.cwd,
     };
-    await stopDevServer(project, config);
+    await stopDevServerPidfile(project, pidPath, pidfile, config);
     stopped.push(project);
   }
 
