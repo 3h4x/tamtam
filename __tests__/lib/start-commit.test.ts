@@ -6,7 +6,9 @@ import {
   issueBranchName,
   deriveIssueContextFromBranch,
   clearStaleIndexLock,
+  isGitIndexLockError,
   processTableHasPotentialGitIndexOwner,
+  runGitIndexLockRetry,
   stageProjectChanges,
 } from '@/lib/pipeline/start-commit';
 
@@ -41,41 +43,41 @@ describe('issueBranchName', () => {
 
 describe('clearStaleIndexLock', () => {
   let dir: string;
-  beforeEach(() => { dir = mkdtempSync(join(tmpdir(), 'tamtam-lock-')); mkdirSync(join(dir, '.git'), { recursive: true }); });
-  afterEach(() => { rmSync(dir, { recursive: true, force: true }); });
+  beforeEach(() => { dir = mkdtempSync(join(tmpdir(), 'tamtam-lock-')); mkdirSync(/*turbopackIgnore: true*/ join(dir, '.git'), { recursive: true }); });
+  afterEach(() => { rmSync(/*turbopackIgnore: true*/ dir, { recursive: true, force: true }); });
 
   const lockPath = () => join(dir, '.git', 'index.lock');
 
   it('removes an old orphaned lock so commits can proceed', async () => {
-    writeFileSync(lockPath(), '');
+    writeFileSync(/*turbopackIgnore: true*/ lockPath(), '');
     // Backdate the lock well past the conservative stale threshold.
     const old = Date.now() / 1000 - 15 * 60;
     utimesSync(lockPath(), old, old);
     expect(await clearStaleIndexLock(dir, () => {}, {
       isGitProcessActive: async () => false,
     })).toBe(true);
-    expect(existsSync(lockPath())).toBe(false);
+    expect(existsSync(/*turbopackIgnore: true*/ lockPath())).toBe(false);
   });
 
   it('keeps a fresh lock (a live git op may still own it)', async () => {
-    writeFileSync(lockPath(), '');
+    writeFileSync(/*turbopackIgnore: true*/ lockPath(), '');
     expect(await clearStaleIndexLock(dir)).toBe(false);
-    expect(existsSync(lockPath())).toBe(true);
+    expect(existsSync(/*turbopackIgnore: true*/ lockPath())).toBe(true);
   });
 
   it('keeps an old lock when a git process for the project is still active', async () => {
-    writeFileSync(lockPath(), '');
+    writeFileSync(/*turbopackIgnore: true*/ lockPath(), '');
     const old = Date.now() / 1000 - 15 * 60;
     utimesSync(lockPath(), old, old);
     expect(await clearStaleIndexLock(dir, () => {}, {
       isGitProcessActive: async () => true,
     })).toBe(false);
-    expect(existsSync(lockPath())).toBe(true);
+    expect(existsSync(/*turbopackIgnore: true*/ lockPath())).toBe(true);
   });
 
   it('is a no-op when no lock exists', async () => {
     expect(await clearStaleIndexLock(dir)).toBe(false);
-    expect(existsSync(lockPath())).toBe(false);
+    expect(existsSync(/*turbopackIgnore: true*/ lockPath())).toBe(false);
   });
 });
 
@@ -103,6 +105,65 @@ describe('processTableHasPotentialGitIndexOwner', () => {
     const ps = '123 /usr/bin/git commit -m update';
 
     expect(processTableHasPotentialGitIndexOwner(ps, projPath, lockPath)).toBe(true);
+  });
+});
+
+describe('runGitIndexLockRetry', () => {
+  it('detects git index lock failures from stderr or stdout', () => {
+    expect(isGitIndexLockError({
+      exitCode: 128,
+      stdout: '',
+      stderr: "fatal: Unable to create './.git/index.lock': File exists.",
+    })).toBe(true);
+    expect(isGitIndexLockError({
+      exitCode: 1,
+      stdout: 'Another git process seems to be running in this repository',
+      stderr: '',
+    })).toBe(true);
+    expect(isGitIndexLockError({ exitCode: 1, stdout: '', stderr: 'fatal: pathspec did not match' })).toBe(false);
+  });
+
+  it('clears stale locks and retries mutating git steps that hit index.lock', async () => {
+    const run = vi.fn()
+      .mockResolvedValueOnce({
+        exitCode: 128,
+        stdout: '',
+        stderr: "fatal: Unable to create './.git/index.lock': File exists.",
+      })
+      .mockResolvedValueOnce({ exitCode: 0, stdout: 'ok', stderr: '' });
+    const clearStale = vi.fn().mockResolvedValue(false);
+    const wait = vi.fn().mockResolvedValue(undefined);
+    const log = vi.fn();
+
+    const result = await runGitIndexLockRetry('/repo/project', 'git commit', run, log, {
+      retries: 2,
+      wait,
+      clearStaleIndexLock: clearStale,
+    });
+
+    expect(result).toEqual({ exitCode: 0, stdout: 'ok', stderr: '' });
+    expect(run).toHaveBeenCalledTimes(2);
+    expect(clearStale).toHaveBeenCalledTimes(2);
+    expect(wait).toHaveBeenCalledWith(1000);
+    expect(log).toHaveBeenCalledWith(expect.stringContaining('git commit blocked by .git/index.lock'));
+  });
+
+  it('returns the final lock failure after retry exhaustion', async () => {
+    const locked = {
+      exitCode: 128,
+      stdout: '',
+      stderr: "fatal: Unable to create './.git/index.lock': File exists.",
+    };
+    const run = vi.fn().mockResolvedValue(locked);
+
+    const result = await runGitIndexLockRetry('/repo/project', 'git add', run, vi.fn(), {
+      retries: 1,
+      wait: vi.fn().mockResolvedValue(undefined),
+      clearStaleIndexLock: vi.fn().mockResolvedValue(false),
+    });
+
+    expect(result).toBe(locked);
+    expect(run).toHaveBeenCalledTimes(2);
   });
 });
 

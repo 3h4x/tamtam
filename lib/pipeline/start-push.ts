@@ -13,7 +13,14 @@ import {
   throwIfJobCancelled,
 } from '@/lib/jobs/cancellation';
 import { getLock, acquireLock, isLockOwnedByActiveRelease } from './pipeline-lock';
-import { generateCommitMessage, findIssueContext, deriveIssueContextFromBranch, stageProjectChanges } from './start-commit';
+import {
+  generateCommitMessage,
+  findIssueContext,
+  deriveIssueContextFromBranch,
+  isGitIndexLockError,
+  runGitIndexLockRetry,
+  stageProjectChangesWithIndexLockRetry,
+} from './start-commit';
 import { checkCliStartGate } from '@/lib/usage/resolve-provider';
 import { createGenericPR, createIssuePR } from './pr-create';
 import { decidePrContext } from './pr-context';
@@ -828,19 +835,27 @@ async function runPush(
     const hookHasChanges = !!hookChangesR.stdout.trim();
     if (hookHasChanges) {
       log(`\n# pre-push hook left new changes — committing delta\n`);
-      const stageR = await stageProjectChanges(projPath, execStep, log);
+      const stageR = await stageProjectChangesWithIndexLockRetry(projPath, execStep, log);
       if (stageR.exitCode !== 0) {
         const detail = (stageR.stderr.trim() || stageR.stdout.trim() || `git add exited ${stageR.exitCode}`).slice(0, 2000);
         return { ok: false, status: 500, detail: `Stage failed after pre-push hook changes: ${detail}` };
       }
       const fixMsg = await generateCommitMessage(projPath, projectName, provider, signal);
       log(`# fix commit message: ${fixMsg}\n\n$ git commit -m "${fixMsg}"\n`);
-      const fixCommitR = await execStep('git', ['-C', projPath, 'commit', '-m', fixMsg], { timeout: 30000 });
+      const fixCommitR = await runGitIndexLockRetry(
+        projPath,
+        'git commit',
+        () => execStep('git', ['-C', projPath, 'commit', '-m', fixMsg], { timeout: 30000 }),
+        log,
+      );
       if (fixCommitR.stdout) log(fixCommitR.stdout);
       if (fixCommitR.stderr) log(fixCommitR.stderr);
       if (fixCommitR.exitCode === 0 || fixCommitR.stdout.includes('nothing to commit')) {
         log(`\n# retrying push after hook fix commit\n`);
         pushR = await tryPush();
+      } else if (isGitIndexLockError(fixCommitR)) {
+        const detail = (fixCommitR.stderr.trim() || fixCommitR.stdout.trim() || `git commit exited ${fixCommitR.exitCode}`).slice(0, 2000);
+        return { ok: false, status: 500, detail: `Commit failed after pre-push hook changes: ${detail}` };
       }
     }
   }
