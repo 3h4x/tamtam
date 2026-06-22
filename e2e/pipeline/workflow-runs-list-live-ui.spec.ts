@@ -187,10 +187,10 @@ test.describe('Workflow runs list live polling', () => {
     phase = 'running';
 
     const activePanel = page.getByLabel('Active workflow runs');
+    const runningBadge = activePanel.getByLabel('status running').first();
     await expect(activePanel).toBeVisible({ timeout: 12_000 });
-    await expect(activePanel.getByLabel('status running').first()).toBeVisible({
-      timeout: 12_000,
-    });
+    await expect(runningBadge).toBeVisible({ timeout: 12_000 });
+    await expect(runningBadge.locator('.animate-spin')).toBeVisible({ timeout: 12_000 });
     await expect(activePanel.getByText(PROJECT)).toBeVisible({ timeout: 12_000 });
     await expect(page.getByText('1 running')).toBeVisible({ timeout: 12_000 });
 
@@ -199,6 +199,7 @@ test.describe('Workflow runs list live polling', () => {
     await expect(activePanel).toHaveCount(0, { timeout: 12_000 });
     const completedRow = page.getByRole('row').filter({ hasText: PROJECT }).first();
     await expect(completedRow.getByLabel('status completed')).toBeVisible({ timeout: 12_000 });
+    await expect(completedRow.locator('.animate-spin')).toHaveCount(0);
     await expect(completedRow.getByText('LGTM')).toBeVisible({ timeout: 12_000 });
     await expect(page.getByText('1 running')).toHaveCount(0, { timeout: 12_000 });
   });
