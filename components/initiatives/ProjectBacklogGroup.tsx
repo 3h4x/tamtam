@@ -3,6 +3,7 @@
 import { useState } from 'react'
 import type { InitiativesListResponse } from '@/app/api/initiatives/route'
 import type { InitiativeAction } from '@/lib/client-api'
+import { Button } from '@/components/ui/Button'
 
 type Row = InitiativesListResponse['initiatives'][number]
 
@@ -62,27 +63,33 @@ function BacklogItem({ r, act }: { r: Row; act: (id: number, action: InitiativeA
       <span className="text-[11px] tabular-nums text-text-tertiary shrink-0 w-8 text-right">{ago(r.updatedAt)}</span>
       <span className="flex items-center gap-1 justify-end shrink-0 w-12">
         {rejected ? (
-          <button
+          <Button
             type="button"
-            className="text-[11px] text-text-tertiary hover:text-text-primary transition-colors"
+            variant="link"
+            size="sm"
+            className="text-[11px] !text-text-tertiary hover:!text-text-primary hover:no-underline"
             onClick={() => act(r.id, 'restore')}
-          >undo</button>
+          >undo</Button>
         ) : curatable ? (
           <>
-            <button
+            <Button
               type="button"
+              variant="ghost"
+              size="icon-sm"
               aria-label={pinned ? 'Un-pin' : 'Promote'}
               title={pinned ? 'Un-pin' : 'Promote to top'}
-              className={`text-sm transition-opacity ${pinned ? 'opacity-100' : 'opacity-40 hover:opacity-100'}`}
+              className={`h-auto w-auto rounded p-0 text-sm hover:bg-transparent ${pinned ? 'opacity-100' : 'opacity-40 hover:opacity-100'}`}
               onClick={() => act(r.id, pinned ? 'unpromote' : 'promote')}
-            >👍</button>
-            <button
+            >👍</Button>
+            <Button
               type="button"
+              variant="ghost"
+              size="icon-sm"
               aria-label="Reject"
               title="Reject"
-              className="text-sm opacity-40 hover:opacity-100 transition-opacity"
+              className="h-auto w-auto rounded p-0 text-sm opacity-40 hover:bg-transparent hover:opacity-100"
               onClick={() => act(r.id, 'reject')}
-            >👎</button>
+            >👎</Button>
           </>
         ) : null}
       </span>
@@ -117,13 +124,15 @@ export function ProjectBacklogGroup({
         {visible.map((r) => <BacklogItem key={r.id} r={r} act={act} />)}
       </ul>
       {showExpander && (
-        <button
+        <Button
           type="button"
-          className="w-full px-3 py-1.5 text-[11px] text-text-tertiary hover:text-text-primary hover:bg-bg-secondary transition-colors border-t border-border"
+          variant="ghost"
+          size="sm"
+          className="w-full justify-center rounded-none border-t border-border px-3 py-1.5 text-[11px] text-text-tertiary hover:bg-bg-secondary hover:text-text-primary"
           onClick={() => setExpanded((e) => !e)}
         >
           {expanded ? 'show less' : `show ${hidden} more`}
-        </button>
+        </Button>
       )}
     </div>
   )
