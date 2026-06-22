@@ -170,7 +170,7 @@ test.describe('History tab: running job transitions to failed via poll', () => {
     await expect(page).toHaveURL(stableUrl);
   });
 
-  test('running filter clears when the only running job fails via poll', async ({ page }) => {
+  test('running filter clears and failed row is recoverable when the only running job fails via poll', async ({ page }) => {
     let phase: 'running' | 'failed' = 'running';
 
     await stubHistoryShell(page, () => phase);
@@ -181,7 +181,7 @@ test.describe('History tab: running job transitions to failed via poll', () => {
     await expect(row.getByLabel('running')).toBeVisible();
 
     // Activate the "running" filter so only running rows are shown.
-    const runningFilter = page.getByRole('button', { name: /running/i }).first();
+    const runningFilter = page.getByRole('button', { name: /^running 1$/ });
     await expect(runningFilter).toBeVisible();
     await runningFilter.click();
 
@@ -190,7 +190,21 @@ test.describe('History tab: running job transitions to failed via poll', () => {
 
     phase = 'failed';
 
-    // After the poll, the running filter should show no rows (the job is done).
+    // After the poll, the running filter should show no rows (the job is done)
+    // and the running count should drop without leaving a stale spinner behind.
     await expect(row.getByLabel('running')).toHaveCount(0, { timeout: 15_000 });
+    await expect(row).toHaveCount(0, { timeout: 15_000 });
+    await expect(page.getByRole('button', { name: /^running 0$/ })).toBeVisible({
+      timeout: 8_000,
+    });
+    await expect(page.getByText('Nothing is running right now')).toBeVisible({ timeout: 8_000 });
+
+    await page.getByRole('button', { name: 'Clear filters', exact: true }).click();
+
+    const failedRow = page.getByRole('button').filter({ hasText: RUN_PROMPT }).first();
+    await expect(failedRow).toBeVisible({ timeout: 8_000 });
+    await expect(failedRow.getByText('exit 1', { exact: true })).toBeVisible();
+    await expect(failedRow.getByText(RUN_SUMMARY, { exact: false })).toBeVisible();
+    await expect(failedRow.getByLabel('running')).toHaveCount(0);
   });
 });
