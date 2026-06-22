@@ -25,6 +25,7 @@ const STEPS = BASE_SCENARIO.steps.map(
 const DEFAULT_DO_NOT_SHIP_ACTION = 'fix';
 const ACTIVE_PIPELINE_SUMMARY =
   /pipeline summary: (release|test|review|fix|commit|push|dod|merge|soak) running/i;
+const FAILURE_DETAIL = 'This code has critical security vulnerabilities that must not be merged.';
 
 let sharedStateLock: PipelineSharedStateLock | null = null;
 
@@ -134,6 +135,7 @@ test.describe('Real workflow-runs and terminal dual-surface failure lifecycle', 
     await expect(failedRow).toBeVisible({ timeout: 15_000 });
     await expect(failedRow.getByLabel('status completed')).toBeVisible({ timeout: 15_000 });
     await expect(failedRow.getByText('DO NOT SHIP')).toBeVisible({ timeout: 15_000 });
+    await expect(failedRow.getByText(FAILURE_DETAIL)).toBeVisible({ timeout: 15_000 });
     await expect(page.getByText('1 running')).toHaveCount(0, { timeout: 15_000 });
     await expect(page).toHaveURL(stableWorkflowRunsUrl);
 
@@ -141,6 +143,7 @@ test.describe('Real workflow-runs and terminal dual-surface failure lifecycle', 
     await expect(terminalPage.getByLabel(/pipeline summary:/i)).toHaveCount(0, {
       timeout: 15_000,
     });
+    await expect(terminalPage.getByText(FAILURE_DETAIL)).toBeVisible({ timeout: 15_000 });
     await expect(terminalPage.getByText(/DO NOT SHIP/).first()).toBeVisible({
       timeout: 15_000,
     });
