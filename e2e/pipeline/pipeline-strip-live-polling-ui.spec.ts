@@ -81,7 +81,7 @@ function emptyIssuesSummary() {
   }
 }
 
-function makeReleaseChain(phase: 'idle' | 'test' | 'review' | 'review-dns' | 'fix' | 'commit' | 'push' | 'push-failed' | 'cancelled' | 'done'): MockJob[] {
+function makeReleaseChain(phase: 'idle' | 'test' | 'test-failed' | 'fix-after-test-failed' | 'review' | 'review-dns' | 'fix' | 'commit' | 'push' | 'push-failed' | 'cancelled' | 'done'): MockJob[] {
   if (phase === 'idle' || phase === 'done') return []
 
   const releaseId = 'strip-live-release-1'
@@ -212,6 +212,14 @@ function makeReleaseChain(phase: 'idle' | 'test' | 'review' | 'review-dns' | 'fi
   }
 
   if (phase === 'test') return [...steps, testStep('running', null)]
+  if (phase === 'test-failed') return [...steps, testStep('done', 1)]
+  if (phase === 'fix-after-test-failed') {
+    return [
+      ...steps,
+      testStep('done', 1),
+      fixStep('running', null),
+    ]
+  }
   if (phase === 'review') return [...steps, testStep('done', 0), reviewStep('running', null)]
   if (phase === 'review-dns') {
     // Review completed but returned a DO NOT SHIP verdict: the job exited
@@ -386,6 +394,52 @@ test.describe('Pipeline strip live polling', () => {
     phase = 'done'
     await expect(page.getByLabel(/pipeline summary:/i)).toHaveCount(0, { timeout: 12_000 })
     await expect(page.getByRole('button', { name: 'abort' })).toHaveCount(0, { timeout: 12_000 })
+    await expect.poll(() => new URL(page.url()).pathname).toBe(stablePath)
+  })
+
+  test('test step failure is promoted to the pipeline summary until fix starts', async ({
+    page,
+  }) => {
+    let phase: 'test' | 'test-failed' | 'fix-after-test-failed' = 'test'
+
+    await stubProjectShell(page, () => makeReleaseChain(phase))
+    await page.goto(`/project/${PROJECT}/terminal`)
+
+    const stablePath = new URL(page.url()).pathname
+
+    await expect(page.getByLabel(/pipeline summary: test running/i)).toBeVisible({
+      timeout: 12_000,
+    })
+    await expect(page.getByTitle('tests running — click to open terminal')).toBeVisible({
+      timeout: 12_000,
+    })
+    await expect(page.getByLabel(/test: running\./i)).toBeVisible({ timeout: 12_000 })
+
+    phase = 'test-failed'
+
+    await expect(page.getByLabel(/pipeline summary: test failed/i)).toBeVisible({
+      timeout: 12_000,
+    })
+    await expect(page.getByTitle('test failed — click to view log')).toBeVisible({
+      timeout: 12_000,
+    })
+    await expect(page.getByLabel(/test: failed\. test failed/i)).toBeVisible({
+      timeout: 12_000,
+    })
+    await expect(page.getByRole('button', { name: 'abort' })).toBeVisible({ timeout: 12_000 })
+    await expect(page.getByTitle('View unified release trace')).toBeVisible({ timeout: 12_000 })
+    await expect(page.getByLabel(/test: running\./i)).toHaveCount(0, { timeout: 12_000 })
+
+    phase = 'fix-after-test-failed'
+
+    await expect(page.getByLabel(/pipeline summary: fix running/i)).toBeVisible({
+      timeout: 12_000,
+    })
+    await expect(page.getByTitle('fix in progress — click to open terminal')).toBeVisible({
+      timeout: 12_000,
+    })
+    await expect(page.getByLabel(/test: failed\./i)).toBeVisible({ timeout: 12_000 })
+    await expect(page.getByLabel(/pipeline summary: test failed/i)).toHaveCount(0)
     await expect.poll(() => new URL(page.url()).pathname).toBe(stablePath)
   })
 
