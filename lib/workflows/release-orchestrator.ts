@@ -278,8 +278,8 @@ async function decideStep(jobId: string): Promise<NextPhase> {
     } catch {}
   }
   if (job.kind === 'mark-dod' && job.releaseId) {
-    // Single-pass "find most recent successful push for this release" — was
-    // filter().sort()[0]; this avoids allocating the filtered array and the sort.
+    // Single-pass "find most recent successful push for this release"; this
+    // avoids allocating the filtered array and the sort.
     let pushJob: ReturnType<typeof getJob> | null = null;
     let maxStartedAt = -Infinity;
     for (const j of listJobs()) {
