@@ -495,6 +495,102 @@ test.describe('Canonical terminal session route lifecycle', () => {
     await expect(page).toHaveURL(new RegExp(`/project/${PROJECT}/terminal/${SESSION_ID}$`))
   })
 
+  test('session route picks up a newly-started continuation after load and settles to cancelled in place', async ({
+    page,
+  }) => {
+    let phase: 'idle' | 'running' | 'cancelled' = 'idle'
+    let finishStream!: () => void
+    const streamDone = new Promise<void>((resolve) => {
+      finishStream = resolve
+    })
+
+    await stubTerminalShell(page, () => [
+      previousSessionJob(),
+      ...(phase === 'idle'
+        ? []
+        : [phase === 'running' ? runningSessionJob() : finishedSessionJob(-2)]),
+    ])
+    await page.route(`**/api/jobs/${PREVIOUS_JOB_ID}`, (route: Route) =>
+      route.fulfill({
+        json: {
+          ...previousSessionJob(),
+          log: 'Earlier terminal output is restored.\n',
+        },
+      }),
+    )
+    await page.route(`**/api/jobs/${CURRENT_JOB_ID}`, (route: Route) =>
+      route.fulfill({
+        json: phase === 'running'
+          ? runningSessionJob()
+          : {
+              ...finishedSessionJob(-2),
+              log: 'Late-start session was interrupted by cancellation.\n',
+              detail: 'Operator cancelled before the late-start continuation completed',
+            },
+      }),
+    )
+    await page.route(`**/api/streaming/${CURRENT_JOB_ID}`, async (route: Route) => {
+      await streamDone
+      await route.fulfill({
+        status: 200,
+        headers: {
+          'content-type': 'text/event-stream',
+          'cache-control': 'no-cache',
+        },
+        body: [
+          'data: Late-start session was interrupted by cancellation.',
+          '',
+          'event: done',
+          `data: ${JSON.stringify({
+            exitCode: -2,
+            sessionId: SESSION_ID,
+            provider: 'claude',
+            detail: 'Operator cancelled before the late-start continuation completed',
+            duration: 600,
+          })}`,
+          '',
+        ].join('\n'),
+      })
+    })
+
+    await page.goto(`/project/${PROJECT}/terminal/${SESSION_ID}`)
+
+    await expect(page.getByText('Earlier terminal output is restored.')).toBeVisible({
+      timeout: 8_000,
+    })
+    await expect(page.getByText('Continue with the final terminal pass.')).toHaveCount(0)
+    await expect(page.getByText('live run')).toHaveCount(0)
+
+    phase = 'running'
+
+    await expect(page.getByText('Continue with the final terminal pass.')).toBeVisible({
+      timeout: 12_000,
+    })
+    await expect(page.getByText('live run')).toBeVisible({ timeout: 12_000 })
+    await expect(page.getByLabel('live run spinner')).toBeVisible({ timeout: 12_000 })
+
+    phase = 'cancelled'
+    finishStream()
+
+    await expect(
+      page.getByText('Late-start session was interrupted by cancellation.'),
+    ).toBeVisible({
+      timeout: 8_000,
+    })
+    await expect(page.getByText('cancelled', { exact: true }).first()).toBeVisible({
+      timeout: 8_000,
+    })
+    await expect(
+      page.getByText('Operator cancelled before the late-start continuation completed'),
+    ).toBeVisible({
+      timeout: 8_000,
+    })
+    await expect(page.getByText('exit -2')).toHaveCount(0)
+    await expect(page.getByText('live run')).toHaveCount(0, { timeout: 8_000 })
+    await expect(page.getByLabel('live run spinner')).toHaveCount(0, { timeout: 8_000 })
+    await expect(page).toHaveURL(new RegExp(`/project/${PROJECT}/terminal/${SESSION_ID}$`))
+  })
+
   test('session route clears its live badge and shows cancelled after operator abort', async ({
     page,
   }) => {
