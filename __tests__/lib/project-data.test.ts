@@ -66,6 +66,16 @@ async function primeEnabledProjectsCache(): Promise<void> {
   await refreshProjectsCacheSync();
 }
 
+function deferred<T>() {
+  let resolve!: (value: T | PromiseLike<T>) => void;
+  let reject!: (reason?: unknown) => void;
+  const promise = new Promise<T>((res, rej) => {
+    resolve = res;
+    reject = rej;
+  });
+  return { promise, resolve, reject };
+}
+
 beforeAll(async () => {
   sharedHandle = await createTestPgDbEmpty();
   await applyDdl(sharedHandle);
@@ -436,6 +446,32 @@ describe('fetchProjectData — project selection and metadata', () => {
     const result = await fetchProjectData();
 
     expect(result.projects['enabled-proj']?.[0]?.paused).toBe(false);
+  });
+
+  it('does not let a refresh started before clearProjectDataCache repopulate the cache', async () => {
+    const firstGitChanges = deferred<number | null>();
+    let gitChangesCalls = 0;
+    const gitChangesMock = vi.fn().mockImplementation(() => {
+      gitChangesCalls += 1;
+      if (gitChangesCalls === 1) return firstGitChanges.promise;
+      return Promise.resolve(2);
+    });
+    vi.doMock('@/lib/git/git-utils', () => ({
+      gitChanges: gitChangesMock,
+      isReviewed: vi.fn().mockResolvedValue(null),
+    }));
+
+    const { fetchProjectData, clearProjectDataCache } = await import('@/lib/shared/project-data');
+    const firstFetch = fetchProjectData();
+    expect(gitChangesMock).toHaveBeenCalledTimes(1);
+
+    clearProjectDataCache();
+    firstGitChanges.resolve(1);
+    await firstFetch;
+
+    const second = await fetchProjectData();
+    expect(second.projects['enabled-proj']?.[0]?.changes).toBe(2);
+    expect(gitChangesMock).toHaveBeenCalledTimes(2);
   });
 });
 

@@ -6,6 +6,16 @@ import { tmpdir } from 'os';
 import * as schema from '@/lib/db/schema';
 import { createTestPgDbEmpty, type TestDbHandle } from '@/__tests__/helpers/test-db';
 
+function deferred<T>() {
+  let resolve!: (value: T | PromiseLike<T>) => void;
+  let reject!: (reason?: unknown) => void;
+  const promise = new Promise<T>((res, rej) => {
+    resolve = res;
+    reject = rej;
+  });
+  return { promise, resolve, reject };
+}
+
 async function applyDdl(handle: TestDbHandle): Promise<void> {
   // PGlite rejects multi-statement prepared queries, so issue each DDL separately.
   await handle.db.execute(sql.raw(`
@@ -417,5 +427,53 @@ describe('GET /api/agents/scheduler-health', () => {
     expect(body.installed).toEqual(['tamtam-projA-agent-My Agent']);
     expect(body.after.ok).toBe(true);
     expect(quickAddJobMock).toHaveBeenCalledTimes(1);
+  });
+
+  it('does not let a GET refresh started before POST repopulate the health cache', async () => {
+    await insertAgent({ id: 'agent-1', project: 'projA', name: 'My Agent', schedule: '1h' });
+
+    vi.resetModules();
+    const firstQuery = deferred<{ rows: ReturnType<typeof queueRows> }>();
+    let queryCalls = 0;
+
+    vi.doMock('graphile-worker', () => ({ quickAddJob: quickAddJobMock }));
+    vi.doMock('pg', () => ({
+      Pool: vi.fn(function PoolMock() {
+        return {
+          query: vi.fn(async () => {
+            queryCalls += 1;
+            if (queryCalls === 1) return firstQuery.promise;
+            return { rows: queueRows() };
+          }),
+          on: vi.fn(),
+          end: vi.fn(async () => undefined),
+        };
+      }),
+    }));
+    vi.doMock('@/lib/db', () => ({ db: sharedHandle.db, schema }));
+    vi.doMock('@/lib/shared/shell', () => ({ exec: vi.fn().mockResolvedValue({ exitCode: 0, stdout: '', stderr: '' }) }));
+    vi.doMock('@/lib/shared/config', () => ({ getSettings: () => ({ launchagent_prefix: 'com.tamtam' }) }));
+    vi.doMock('@/lib/scheduling/scheduling', () => ({ getImproveConfig: () => ({ logDir, claudeBin: 'claude' }) }));
+    vi.doMock('@/lib/agents/tamtam-file-agents', () => ({ scanFileAgents: vi.fn().mockReturnValue([]) }));
+
+    const enabledProjects = await import('@/lib/shared/enabled-projects');
+    enabledProjects.clearProjectsCache();
+    await enabledProjects.refreshProjectsCacheSync();
+
+    const { GET: raceGET, POST: racePOST } = await import('@/app/api/agents/scheduler-health/route');
+    const oldGet = raceGET();
+    await vi.waitFor(() => expect(queryCalls).toBeGreaterThan(0));
+
+    const postRes = await racePOST();
+    const postBody = await postRes.json();
+    expect(postBody.after.ok).toBe(true);
+
+    firstQuery.resolve({ rows: [] });
+    await oldGet;
+
+    const finalRes = await raceGET();
+    const finalBody = await finalRes.json();
+    expect(finalBody.ok).toBe(true);
+    expect(finalBody.missing).toEqual([]);
   });
 });

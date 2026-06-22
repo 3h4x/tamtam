@@ -216,21 +216,52 @@ async function assembleProject(
   };
 }
 
-// TTL cache
-let _cache: { data: { projects: Record<string, Task[]>; priorities: readonly string[] } | null; time: number } = { data: null, time: 0 };
+// TTL cache + single-flight refresh. The git+gh sweep is normally ~500ms but
+// balloons under host/git contention (every agent run does git ops on the same
+// repos). Without a single-flight guard, every concurrent request that finds the
+// cache expired launches its OWN full sweep (dozens of git shell-outs) — a
+// thundering herd that saturates CPU and the DB pool and turns slow requests
+// into 500s. We dedup the refresh and serve stale-while-revalidate so a request
+// never blocks on (or fails from) a slow rebuild.
+type ProjectData = { projects: Record<string, Task[]>; priorities: readonly string[] };
+let _cache: { data: ProjectData | null; time: number } = { data: null, time: 0 };
+let _inflight: { promise: Promise<ProjectData | null>; generation: number } | null = null;
+let _cacheGeneration = 0;
 const CACHE_TTL = 10;
 
 export function clearProjectDataCache(): void {
   _cache = { data: null, time: 0 };
+  _cacheGeneration += 1;
+  _inflight = null;
 }
 
-export async function fetchProjectData(): Promise<{
-  projects: Record<string, Task[]>;
-  priorities: readonly string[];
-}> {
+export async function fetchProjectData(): Promise<ProjectData> {
   const now = Date.now() / 1000;
   if (_cache.data && now - _cache.time < CACHE_TTL) return _cache.data;
 
+  // At most one background refresh in flight (single-flight). On failure, keep
+  // the stale cache rather than propagating the error to callers.
+  if (!_inflight || _inflight.generation !== _cacheGeneration) {
+    const generation = _cacheGeneration;
+    const promise = _computeProjectData()
+      .then((result) => {
+        if (generation === _cacheGeneration) {
+          _cache = { data: result, time: Date.now() / 1000 };
+        }
+        return result;
+      })
+      .catch((err) => { console.error('[project-data] refresh failed:', err); return _cache.data; })
+      .finally(() => {
+        if (_inflight?.promise === promise) _inflight = null;
+      });
+    _inflight = { promise, generation };
+  }
+  // Serve stale immediately if we have anything; only the cold first call awaits.
+  if (_cache.data) return _cache.data;
+  return (await _inflight.promise) ?? { projects: {}, priorities: PRIORITY_ORDER };
+}
+
+async function _computeProjectData(): Promise<ProjectData> {
   const projects = getEnabledProjects();
   const { freqMin: baseFreqMin } = getImproveConfig();
   const tierCounters: Record<string, number> = {};
@@ -284,7 +315,5 @@ export async function fetchProjectData(): Promise<{
     Object.entries(projectTasks).sort(([a], [b]) => a.localeCompare(b))
   );
 
-  const result = { projects: sorted, priorities: PRIORITY_ORDER };
-  _cache = { data: result, time: now };
-  return result;
+  return { projects: sorted, priorities: PRIORITY_ORDER };
 }

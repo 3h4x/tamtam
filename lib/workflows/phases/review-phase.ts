@@ -1,4 +1,4 @@
-// Second per-phase workflow. Same shape as test-phase: kickoff →
+// Review phase workflow: kickoff →
 // await → return. Difference: the result also carries the parsed verdict
 // (LGTM / NEEDS ATTENTION / DO NOT SHIP / null) so the orchestrator can
 // branch without re-parsing the log.

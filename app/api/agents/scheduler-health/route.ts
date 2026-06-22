@@ -101,19 +101,62 @@ async function buildInternalSchedulerDump(
   };
 }
 
+async function computeSchedulerHealth(): Promise<Record<string, unknown>> {
+  const agents = await loadAgentsForCheck();
+  const [health, internal] = await Promise.all([
+    getSchedulerHealth(agents),
+    buildInternalSchedulerDump(agents),
+  ]);
+  const lastJobMap = await buildLastJobMap(internal.entries);
+  const enrichedEntries = internal.entries.map(e => ({
+    ...e,
+    lastJobMs: lastJobMap.get(e.agentId) ?? null,
+  }));
+  return { ...health, internal: { ...internal, entries: enrichedEntries } };
+}
+
+// TTL + single-flight cache for the read-only GET. Computing health scans every
+// project's filesystem for file-agents and fires one DB query per agent (~30),
+// which saturates the pg pool; without this each poll re-ran the whole thing and
+// head-of-line-blocked every other request on the single-process server (logos,
+// RSC prefetches all queued behind it).
+let _healthCache: { data: Record<string, unknown> | null; time: number } = { data: null, time: 0 };
+let _healthInflight: { promise: Promise<Record<string, unknown> | null>; generation: number } | null = null;
+let _healthCacheGeneration = 0;
+const HEALTH_TTL = 20; // seconds
+
+function clearSchedulerHealthCache(): void {
+  _healthCache = { data: null, time: 0 };
+  _healthCacheGeneration += 1;
+  _healthInflight = null;
+}
+
 export async function GET() {
   try {
-    const agents = await loadAgentsForCheck();
-    const [health, internal] = await Promise.all([
-      getSchedulerHealth(agents),
-      buildInternalSchedulerDump(agents),
-    ]);
-    const lastJobMap = await buildLastJobMap(internal.entries);
-    const enrichedEntries = internal.entries.map(e => ({
-      ...e,
-      lastJobMs: lastJobMap.get(e.agentId) ?? null,
-    }));
-    return NextResponse.json({ ...health, internal: { ...internal, entries: enrichedEntries } });
+    const now = Date.now() / 1000;
+    if (_healthCache.data && now - _healthCache.time < HEALTH_TTL) {
+      return NextResponse.json(_healthCache.data);
+    }
+    if (!_healthInflight || _healthInflight.generation !== _healthCacheGeneration) {
+      const generation = _healthCacheGeneration;
+      const promise = computeSchedulerHealth()
+        .then((d) => {
+          if (generation === _healthCacheGeneration) {
+            _healthCache = { data: d, time: Date.now() / 1000 };
+          }
+          return d;
+        })
+        .catch((err) => { console.error('[scheduler-health] refresh failed:', err); return _healthCache.data; })
+        .finally(() => {
+          if (_healthInflight?.promise === promise) _healthInflight = null;
+        });
+      _healthInflight = { promise, generation };
+    }
+    // Serve stale immediately if we have anything; only the cold first call awaits.
+    if (_healthCache.data) return NextResponse.json(_healthCache.data);
+    const fresh = await _healthInflight.promise;
+    if (fresh == null) return NextResponse.json({ error: 'scheduler health unavailable' }, { status: 503 });
+    return NextResponse.json(fresh);
   } catch (err) {
     return NextResponse.json({ error: errMsg(err) }, { status: 500 });
   }
@@ -146,6 +189,8 @@ export async function POST() {
       ...e,
       lastJobMs: lastJobMap.get(e.agentId) ?? null,
     }));
+    // Schedules may have changed — drop the GET cache so the next poll recomputes.
+    clearSchedulerHealthCache();
     return NextResponse.json({ before, after: { ...after, internal: { ...internal, entries: enrichedEntries } }, installed, installFailures });
   } catch (err) {
     return NextResponse.json({ error: errMsg(err) }, { status: 500 });
