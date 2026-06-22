@@ -8,6 +8,7 @@ import { fetchProjects } from '@/lib/client/projects'
 import { patchInitiative, type InitiativeAction } from '@/lib/client-api'
 import { Table } from '@/components/ui/Table'
 import type { Column } from '@/components/ui/Table'
+import { Button } from '@/components/ui/Button'
 import { EmptyState } from '@/components/ui/EmptyState'
 import { ErrorCallout } from '@/components/ui/ErrorCallout'
 import { ProjectPreviewRow } from '@/components/initiatives/ProjectPreviewRow'
@@ -213,11 +214,15 @@ export function InitiativesPage({ embedded = false }: { embedded?: boolean } = {
       return (
         <div className="flex items-center gap-1 justify-end">
           {rejected ? (
-            <button
+            <Button
               type="button"
-              className="text-xs text-text-tertiary hover:text-text-primary transition-colors"
+              variant="link"
+              size="sm"
+              className="text-text-tertiary hover:text-text-primary"
               onClick={() => act(r.id, 'restore')}
-            >undo</button>
+            >
+              undo
+            </Button>
           ) : curatable ? (
             <>
               <button
