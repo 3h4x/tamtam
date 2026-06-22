@@ -6,10 +6,9 @@
 // on the server, and nothing here imports React, so it is safe to unit-test in
 // a Node-only vitest context.
 //
-// Forward-compatibility: `PipelineStep.id` is intentionally the same string as
-// the server-side job `kind` (see `lib/jobs/job-storage.ts`). When a later PR adds a
-// parallel server-side `registerStepRunner()` for execution logic, plugins will
-// not have to coordinate two naming systems.
+// `PipelineStep.id` intentionally matches the server-side job `kind` (see
+// `lib/jobs/job-storage.ts`) so UI toggles and release jobs share one naming
+// system.
 
 // The chip registry does not depend on the full ProjectConfig — it only needs
 // the handful of fields the built-in steps inspect. Keeping the shape narrow
