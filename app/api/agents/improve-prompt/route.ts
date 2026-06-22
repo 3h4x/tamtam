@@ -54,10 +54,14 @@ async function runClaudePrint(
       env: buildChildEnv(env),
       stdio: ['pipe', 'pipe', 'pipe'],
     });
-    let stdout = '';
-    let stderr = '';
+    const stdoutChunks: Buffer[] = [];
+    const stderrChunks: Buffer[] = [];
     let settled = false;
     let killTimer: ReturnType<typeof setTimeout> | null = null;
+    const readOutput = () => ({
+      stdout: Buffer.concat(stdoutChunks).toString('utf8'),
+      stderr: Buffer.concat(stderrChunks).toString('utf8'),
+    });
     const finish = (result: { stdout: string; stderr: string; exitCode: number }, clearKillTimer = true) => {
       if (settled) return;
       settled = true;
@@ -72,6 +76,7 @@ async function runClaudePrint(
         try { child.kill('SIGKILL'); } catch {}
       }, IMPROVE_KILL_GRACE_MS);
       if (typeof killTimer.unref === 'function') killTimer.unref();
+      const { stdout, stderr } = readOutput();
       finish({
         stdout,
         stderr: `${stderr}${stderr ? '\n' : ''}claude timed out after ${IMPROVE_TIMEOUT_MS}ms`,
@@ -83,6 +88,7 @@ async function runClaudePrint(
     const stdoutStream = child.stdout;
     const stderrStream = child.stderr;
     if (!stdin || !stdoutStream || !stderrStream) {
+      const { stdout } = readOutput();
       finish({
         stdout,
         stderr: 'failed to open claude stdio pipes',
@@ -90,12 +96,14 @@ async function runClaudePrint(
       });
       return;
     }
-    stdoutStream.on('data', (chunk) => { stdout += chunk.toString('utf8'); });
-    stderrStream.on('data', (chunk) => { stderr += chunk.toString('utf8'); });
+    stdoutStream.on('data', (chunk) => { stdoutChunks.push(Buffer.from(chunk)); });
+    stderrStream.on('data', (chunk) => { stderrChunks.push(Buffer.from(chunk)); });
     child.on('error', (err) => {
+      const { stdout, stderr } = readOutput();
       finish({ stdout, stderr: stderr + '\n' + (err?.message ?? String(err)), exitCode: -1 });
     });
     child.on('close', (code) => {
+      const { stdout, stderr } = readOutput();
       finish({ stdout, stderr, exitCode: code ?? -1 });
     });
     try {
