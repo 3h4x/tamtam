@@ -13,14 +13,45 @@ const { replaceMock, pushMock, searchParamsMock } = vi.hoisted(() => ({
   searchParamsMock: vi.fn(() => new URLSearchParams()),
 }))
 
+const {
+  fetchAgentsMock,
+  fetchCustomActionsMock,
+  fetchIssuesAndPRsMock,
+  fetchProjectDocsMock,
+  fetchSkillsMock,
+  fetchPersonasMock,
+  releaseProjectMock,
+  runCustomActionMock,
+  testProjectMock,
+  terminalInputMock,
+} = vi.hoisted(() => ({
+  fetchAgentsMock: vi.fn().mockResolvedValue({ agents: [] }),
+  fetchCustomActionsMock: vi.fn().mockResolvedValue({ actions: [] }),
+  fetchIssuesAndPRsMock: vi.fn().mockResolvedValue({ issues: [] }),
+  fetchProjectDocsMock: vi.fn().mockResolvedValue({ docs: [] }),
+  fetchSkillsMock: vi.fn().mockResolvedValue({ skills: [] }),
+  fetchPersonasMock: vi.fn().mockResolvedValue({ personas: [] }),
+  releaseProjectMock: vi.fn(),
+  runCustomActionMock: vi.fn(),
+  testProjectMock: vi.fn(),
+  terminalInputMock: vi.fn(),
+}))
+
 vi.mock('next/navigation', () => ({
   useRouter: () => ({ replace: replaceMock, push: pushMock }),
   useSearchParams: () => searchParamsMock(),
 }))
 
 vi.mock('@/lib/client-api', () => ({
-  fetchSkills: vi.fn().mockResolvedValue({ skills: [] }),
-  fetchPersonas: vi.fn().mockResolvedValue({ personas: [] }),
+  fetchAgents: fetchAgentsMock,
+  fetchCustomActions: fetchCustomActionsMock,
+  fetchIssuesAndPRs: fetchIssuesAndPRsMock,
+  fetchProjectDocs: fetchProjectDocsMock,
+  fetchSkills: fetchSkillsMock,
+  fetchPersonas: fetchPersonasMock,
+  releaseProject: releaseProjectMock,
+  runCustomAction: runCustomActionMock,
+  testProject: testProjectMock,
 }))
 
 vi.mock('@/hooks/useDocumentVisible', () => ({
@@ -49,7 +80,10 @@ vi.mock('@/components/terminal/TerminalToolbar', () => ({
 }))
 
 vi.mock('@/components/terminal/TerminalInput', () => ({
-  TerminalInput: () => <div data-testid="terminal-input" />,
+  TerminalInput: (props: unknown) => {
+    terminalInputMock(props)
+    return <div data-testid="terminal-input" />
+  },
 }))
 
 vi.mock('@/components/terminal/SessionsPanel', () => ({
@@ -82,6 +116,22 @@ describe('TerminalTab live-run metadata', () => {
     pushMock.mockReset()
     searchParamsMock.mockReset()
     searchParamsMock.mockReturnValue(new URLSearchParams())
+    fetchAgentsMock.mockReset()
+    fetchAgentsMock.mockResolvedValue({ agents: [] })
+    fetchCustomActionsMock.mockReset()
+    fetchCustomActionsMock.mockResolvedValue({ actions: [] })
+    fetchIssuesAndPRsMock.mockReset()
+    fetchIssuesAndPRsMock.mockResolvedValue({ issues: [] })
+    fetchProjectDocsMock.mockReset()
+    fetchProjectDocsMock.mockResolvedValue({ docs: [] })
+    fetchSkillsMock.mockReset()
+    fetchSkillsMock.mockResolvedValue({ skills: [] })
+    fetchPersonasMock.mockReset()
+    fetchPersonasMock.mockResolvedValue({ personas: [] })
+    releaseProjectMock.mockReset()
+    runCustomActionMock.mockReset()
+    testProjectMock.mockReset()
+    terminalInputMock.mockReset()
     terminalStore.reset('proj')
   })
 
@@ -145,6 +195,110 @@ describe('TerminalTab live-run metadata', () => {
       expect(container.textContent).not.toContain('codex · smart')
       expect(container.textContent).toContain('live run')
     })
+
+    unmount()
+  })
+
+  it('streams slash-started non-Claude jobs in passthrough mode', async () => {
+    vi.stubGlobal('fetch', vi.fn(async (input: RequestInfo | URL) => {
+      const url = String(input)
+      if (url === '/api/settings') {
+        return {
+          ok: true,
+          json: async () => ({ settings: {} }),
+        }
+      }
+      throw new Error(`Unexpected fetch: ${url}`)
+    }))
+    fetchCustomActionsMock.mockResolvedValue({
+      actions: [{ name: 'Deploy', command: 'pnpm deploy' }],
+    })
+    runCustomActionMock.mockResolvedValue({ status: 'started', job_id: 'action-job', pid: 1 })
+    testProjectMock.mockResolvedValue({ status: 'started', job_id: 'test-job', pid: 2, log_path: '/tmp/test.log' })
+    releaseProjectMock.mockResolvedValue({ status: 'started', release_job_id: 'release-job', message: 'started' })
+    const startStreamMock = vi.spyOn(terminalStore, 'startStream').mockImplementation(() => {})
+
+    const { unmount } = renderTerminalTab()
+
+    await waitFor(() => {
+      const latestProps = terminalInputMock.mock.calls.at(-1)?.[0] as {
+        slashCommands?: Array<{ id: string }>
+      }
+      expect(latestProps.slashCommands).toEqual(expect.arrayContaining([
+        expect.objectContaining({ id: 'builtin:test' }),
+        expect.objectContaining({ id: 'builtin:release' }),
+        expect.objectContaining({ id: 'action:Deploy' }),
+      ]))
+    })
+
+    const latestProps = terminalInputMock.mock.calls.at(-1)?.[0] as {
+      slashCommands: Array<{ id: string }>
+      onSlashCommandSelect: (command: { id: string }) => Promise<void>
+    }
+    const testCommand = latestProps.slashCommands.find((command) => command.id === 'builtin:test')
+    const releaseCommand = latestProps.slashCommands.find((command) => command.id === 'builtin:release')
+    const actionCommand = latestProps.slashCommands.find((command) => command.id === 'action:Deploy')
+
+    await latestProps.onSlashCommandSelect(actionCommand!)
+    await latestProps.onSlashCommandSelect(testCommand!)
+    await latestProps.onSlashCommandSelect(releaseCommand!)
+
+    expect(startStreamMock).toHaveBeenCalledWith('proj', 'action-job', false, true)
+    expect(startStreamMock).toHaveBeenCalledWith('proj', 'test-job', false, true)
+    expect(startStreamMock).toHaveBeenCalledWith('proj', 'release-job', false, true)
+
+    startStreamMock.mockRestore()
+    unmount()
+  })
+
+  it('toggles slash-selected skills and docs without duplicating attachments', async () => {
+    vi.stubGlobal('fetch', vi.fn(async (input: RequestInfo | URL) => {
+      const url = String(input)
+      if (url === '/api/settings') {
+        return {
+          ok: true,
+          json: async () => ({ settings: {} }),
+        }
+      }
+      throw new Error(`Unexpected fetch: ${url}`)
+    }))
+    fetchSkillsMock.mockResolvedValue({
+      skills: [{ id: 'reviewer', name: 'reviewer', description: 'review code', content: 'review instructions' }],
+    })
+    fetchProjectDocsMock.mockResolvedValue({
+      docs: [{ name: 'README.md', content: '# readme' }],
+    })
+
+    const { unmount } = renderTerminalTab()
+
+    await waitFor(() => {
+      const latestProps = terminalInputMock.mock.calls.at(-1)?.[0] as {
+        slashCommands?: Array<{ id: string }>
+      }
+      expect(latestProps.slashCommands).toEqual(expect.arrayContaining([
+        expect.objectContaining({ id: 'skill:reviewer' }),
+        expect.objectContaining({ id: 'doc:README.md' }),
+      ]))
+    })
+
+    const latestProps = terminalInputMock.mock.calls.at(-1)?.[0] as {
+      slashCommands: Array<{ id: string }>
+      onSlashCommandSelect: (command: { id: string }) => Promise<void>
+    }
+    const skillCommand = latestProps.slashCommands.find((command) => command.id === 'skill:reviewer')
+    const docCommand = latestProps.slashCommands.find((command) => command.id === 'doc:README.md')
+
+    await latestProps.onSlashCommandSelect(skillCommand!)
+    expect(terminalStore.get('proj').selectedItems.map((item) => item.id)).toEqual(['reviewer'])
+
+    await latestProps.onSlashCommandSelect(skillCommand!)
+    expect(terminalStore.get('proj').selectedItems).toEqual([])
+
+    await latestProps.onSlashCommandSelect(docCommand!)
+    expect(terminalStore.get('proj').selectedDocs.map((doc) => doc.name)).toEqual(['README.md'])
+
+    await latestProps.onSlashCommandSelect(docCommand!)
+    expect(terminalStore.get('proj').selectedDocs).toEqual([])
 
     unmount()
   })

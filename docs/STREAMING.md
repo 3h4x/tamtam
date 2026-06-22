@@ -275,7 +275,7 @@ The `?job=` param is used during live streaming because the session ID isn't kno
 ### Switching sessions
 
 **Via the "recent" panel (Terminal tab):**
-1. Click **recent** button — dropdown appears with up to 5 most recent sessions (green dots = done, orange = still running)
+1. The panel opens with up to 10 most recent sessions (green dots = done, orange = still running); click **recent** to hide or show it again
 2. Click any entry → session loads; URL changes to `/terminal/[sessionId]` or `?job=[jobId]`
 3. Click **close** to dismiss the panel without switching
 

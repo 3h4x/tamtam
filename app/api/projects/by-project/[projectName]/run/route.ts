@@ -274,6 +274,7 @@ export async function POST(
 
   const job = createJob(projectName, 'run', 0, '', prompt, contextMeta || undefined, userPrompt || undefined, ghIssueNumber, ghIssueRepo || null, ghIssueTitle || null);
   job.provider = provider;
+  job.model = model;
   const logPath = join(logDir, `${job.id}.log`);
   job.logPath = logPath;
   // When resuming an existing session, pin the session id on the row upfront.

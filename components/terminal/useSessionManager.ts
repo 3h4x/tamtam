@@ -32,6 +32,7 @@ interface JobDict {
   prompt: string | null
   context_meta: string | null
   provider?: string | null
+  model?: string | null
 }
 
 interface JobDetail {
@@ -48,13 +49,13 @@ export function useSessionManager(projectName: string) {
   const [sessions, setSessions] = useState<SessionItem[]>([])
   const [loadingSessions, setLoadingSessions] = useState(false)
 
-  const loadSessions = async () => {
+  const loadSessions = useCallback(async () => {
     setLoadingSessions(true)
     try {
-      // Ask the server for session-bearing rows only and cap to 50 — enough
-      // to surface the 5 most-recent distinct sessions even when many rows
+      // Ask the server for session-bearing rows only and cap to 100 — enough
+      // to surface the 10 most-recent distinct sessions even when many rows
       // share a session_id (e.g. multi-step chats).
-      const res = await fetch(`/api/jobs?project=${encodeURIComponent(projectName)}&has_session=1&limit=50`)
+      const res = await fetch(`/api/jobs?project=${encodeURIComponent(projectName)}&has_session=1&limit=100`)
       const data = await res.json()
       const jobs: JobDict[] = (data.jobs ?? [])
         .filter((j: JobDict) => isRestorableSessionKind(j.kind) && j.session_id)
@@ -76,13 +77,15 @@ export function useSessionManager(projectName: string) {
           finishedAt: latest.finished_at,
           sessionId: latest.session_id,
           exitCode: latest.exit_code,
+          ...(latest.model ? { model: latest.model } : {}),
+          ...(latest.provider ? { provider: latest.provider } : {}),
         })
-        if (grouped.length >= 5) break
+        if (grouped.length >= 10) break
       }
       setSessions(grouped)
     } catch {}
     setLoadingSessions(false)
-  }
+  }, [projectName])
 
   const restoreSession = useCallback(async (session: SessionItem) => {
     if (session.sessionId) {

@@ -2,6 +2,7 @@
 
 import React from 'react'
 import { Button } from '@/components/ui/Button'
+import type { SlashCommand } from '@/lib/terminal/slash-command-palette'
 
 function fmtTokens(n: number): string {
   if (n < 1000) return `${n}`
@@ -43,6 +44,13 @@ interface TerminalInputProps {
   onCancel: () => void
   onClearQueue: () => void
   onPaste: (e: React.ClipboardEvent) => void
+  model?: string
+  provider?: string | null
+  selectedSkillCount?: number
+  selectedDocCount?: number
+  imageCount?: number
+  slashCommands?: SlashCommand[]
+  onSlashCommandSelect?: (command: SlashCommand) => void
 }
 
 interface StatusItemProps {
@@ -78,11 +86,42 @@ export function TerminalInput({
   onCancel,
   onClearQueue,
   onPaste,
+  model = 'fast',
+  provider = null,
+  selectedSkillCount = 0,
+  selectedDocCount = 0,
+  imageCount = 0,
+  slashCommands = [],
+  onSlashCommandSelect = () => {},
 }: TerminalInputProps) {
+  const showPalette = !streaming && input.startsWith('/') && slashCommands.length > 0
   return (
     <>
       {/* Input row — pinned below the scrollable body */}
-      <div className="border-t border-border flex items-start px-4 py-2 bg-bg-primary shrink-0">
+      <div className="relative border-t border-border flex items-start px-4 py-2 bg-bg-primary shrink-0">
+        {showPalette && (
+          <div className="absolute left-8 right-4 bottom-full mb-2 z-40 rounded-md border border-border bg-bg-secondary overflow-hidden">
+            <div className="px-3 py-1.5 text-[10px] uppercase tracking-wider text-text-tertiary font-mono border-b border-border">
+              commands
+            </div>
+            {slashCommands.map((command) => (
+              <button
+                key={command.id}
+                type="button"
+                className="w-full border-0 border-b border-border/50 last:border-b-0 bg-transparent px-3 py-2 text-left hover:bg-bg-tertiary cursor-pointer flex items-center gap-3"
+                onMouseDown={(e) => e.preventDefault()}
+                onClick={() => onSlashCommandSelect(command)}
+              >
+                <span className="w-20 shrink-0 text-xs font-mono text-accent truncate">{command.command}</span>
+                <span className="min-w-0 flex-1">
+                  <span className="block text-xs font-mono text-text-primary truncate">{command.title}</span>
+                  <span className="block text-[11px] font-mono text-text-tertiary truncate">{command.detail}</span>
+                </span>
+                <span className="text-[10px] font-mono text-text-tertiary">{command.kind}</span>
+              </button>
+            ))}
+          </div>
+        )}
         <span className={`shrink-0 mr-1 mt-0.5 ${streaming ? 'text-text-tertiary' : 'text-accent'}`}>{streaming ? '>' : '#'}</span>
         <textarea
           ref={inputRef}
@@ -175,7 +214,13 @@ export function TerminalInput({
       <div className="px-4 py-1.5 border-t border-border shrink-0 text-xs text-text-tertiary font-mono bg-bg-primary">
         <dl className="flex flex-wrap items-center gap-x-4 gap-y-1">
           <StatusItem label="session" valueClassName="text-text-secondary">
-            {claudeSessionId ? `${claudeSessionId.slice(0, 8)}…` : 'starts on send'}
+            {claudeSessionId ? `continuing ${claudeSessionId.slice(0, 8)}…` : 'new · starts on send'}
+          </StatusItem>
+          <StatusItem label="model" valueClassName="text-text-secondary">
+            {provider ? `${provider} · ${model}` : model}
+          </StatusItem>
+          <StatusItem label="attach" valueClassName="text-text-secondary">
+            {selectedSkillCount} skills / {selectedDocCount} docs / {imageCount} images
           </StatusItem>
           {currentJobId && streaming && (
             <StatusItem label="status" valueClassName="text-status-warning">

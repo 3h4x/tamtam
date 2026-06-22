@@ -2,8 +2,18 @@
 
 import { useState, useEffect, useRef, useCallback, useSyncExternalStore } from 'react'
 import { useRouter, useSearchParams } from 'next/navigation'
-import { fetchSkills, fetchPersonas } from '@/lib/client-api'
-import type { Skill, Persona } from '@/lib/client-api'
+import {
+  fetchAgents,
+  fetchCustomActions,
+  fetchIssuesAndPRs,
+  fetchProjectDocs,
+  fetchSkills,
+  fetchPersonas,
+  releaseProject,
+  runCustomAction,
+  testProject,
+} from '@/lib/client-api'
+import type { Agent, CustomAction, Skill, Persona } from '@/lib/client-api'
 import {
   terminalStore,
   type SkillItem,
@@ -24,6 +34,12 @@ import { MODEL_TIERS, normalizeModelInput, type ModelTier } from '@/lib/agents/m
 import { normalizePermissionMode, type PermissionMode } from '@/lib/shared/permission-modes'
 import { type CliProvider } from '@/lib/usage/cli-providers'
 import { readBrowserStorageJson, writeBrowserStorage } from '@/lib/client/browser-storage'
+import {
+  resolveSlashCommands,
+  suggestedPromptsFromIssues,
+  type SlashCommand,
+  type SuggestedPrompt,
+} from '@/lib/terminal/slash-command-palette'
 
 // Exported for unit testing — determines whether a job kind uses Claude's
 // stream-json output format (parsed path) vs raw log output.
@@ -135,7 +151,7 @@ export function TerminalTab({ projectName, initialSessionId }: TerminalTabProps)
   const [pendingImages, setPendingImages] = useState<File[]>([])
   const [pendingImageUrls, setPendingImageUrls] = useState<string[]>([])
   const [dragOver, setDragOver] = useState(false)
-  const [showSessions, setShowSessions] = useState(false)
+  const [showSessions, setShowSessions] = useState(true)
   const { sessions, loadingSessions, loadSessions, restoreSession: restoreSessionBase } = useSessionManager(projectName)
   const restoreSession = useCallback(async (session: Parameters<typeof restoreSessionBase>[0]) => {
     setShowSessions(false)
@@ -213,6 +229,9 @@ export function TerminalTab({ projectName, initialSessionId }: TerminalTabProps)
   const [allDocs, setAllDocs] = useState<DocItem[]>([])
   const [showDocsPicker, setShowDocsPicker] = useState(false)
   const [docsSearch, setDocsSearch] = useState('')
+  const [customActions, setCustomActions] = useState<CustomAction[]>([])
+  const [agents, setAgents] = useState<Agent[]>([])
+  const [suggestedPrompts, setSuggestedPrompts] = useState<SuggestedPrompt[]>([])
 
   useEffect(() => {
     fetch('/api/settings')
@@ -240,6 +259,10 @@ export function TerminalTab({ projectName, initialSessionId }: TerminalTabProps)
     resumeProviderParam,
     onLoadSessions: loadSessions,
   })
+
+  useEffect(() => {
+    loadSessions()
+  }, [loadSessions])
 
   // Track the job ID while streaming so we can look it up after completion.
   const lastJobIdRef = useRef<string | null>(null)
@@ -305,6 +328,20 @@ export function TerminalTab({ projectName, initialSessionId }: TerminalTabProps)
     }
   }, [showDocsPicker, projectName, allDocs.length])
 
+  useEffect(() => {
+    Promise.all([
+      fetchProjectDocs(projectName).catch(() => ({ docs: [] })),
+      fetchCustomActions(projectName).catch(() => ({ actions: [] })),
+      fetchAgents(projectName, { fields: 'summary' }).catch(() => ({ agents: [] })),
+      fetchIssuesAndPRs(projectName).catch(() => ({ issues: [] })),
+    ]).then(([docsData, actionsData, agentsData, issuesData]) => {
+      setAllDocs(docsData.docs.map((doc) => ({ name: doc.name, content: doc.content })))
+      setCustomActions(actionsData.actions)
+      setAgents(agentsData.agents)
+      setSuggestedPrompts(suggestedPromptsFromIssues(issuesData.issues ?? []))
+    }).catch(() => {})
+  }, [projectName])
+
   const filteredItems = (() => {
     const q = skillSearch.toLowerCase()
     const matchesSearch = (item: SkillItem) =>
@@ -320,12 +357,13 @@ export function TerminalTab({ projectName, initialSessionId }: TerminalTabProps)
     return [...selected, ...rest]
   })()
 
-  const toggleItem = (item: SkillItem) => {
-    if (selectedItems.some(s => s.id === item.id)) {
+  const toggleItem = useCallback((item: SkillItem) => {
+    const isSelected = terminalStore.get(projectName).selectedItems.some(s => s.id === item.id)
+    if (isSelected) {
       setSelectedItems(prev => prev.filter(s => s.id !== item.id))
       // keep picker open so the user can see the deselection and pick another
     } else {
-      setSelectedItems(prev => [...prev, item])
+      setSelectedItems(prev => prev.some(s => s.id === item.id) ? prev : [...prev, item])
       setSkillSearch('')
       setShowSkillPicker(false)
       setSkillUsage(prev => {
@@ -334,7 +372,7 @@ export function TerminalTab({ projectName, initialSessionId }: TerminalTabProps)
         return updated
       })
     }
-  }
+  }, [projectName])
 
   const normalizedDocsSearch = docsSearch.toLowerCase()
   const filteredDocs = allDocs.filter(doc =>
@@ -342,15 +380,16 @@ export function TerminalTab({ projectName, initialSessionId }: TerminalTabProps)
     (normalizedDocsSearch === '' || doc.name.toLowerCase().includes(normalizedDocsSearch))
   )
 
-  const toggleDoc = (doc: DocItem) => {
-    if (selectedDocs.some(d => d.name === doc.name)) {
+  const toggleDoc = useCallback((doc: DocItem) => {
+    const isSelected = terminalStore.get(projectName).selectedDocs.some(d => d.name === doc.name)
+    if (isSelected) {
       setSelectedDocs(prev => prev.filter(d => d.name !== doc.name))
     } else {
-      setSelectedDocs(prev => [...prev, doc])
+      setSelectedDocs(prev => prev.some(d => d.name === doc.name) ? prev : [...prev, doc])
       setDocsSearch('')
       setShowDocsPicker(false)
     }
-  }
+  }, [projectName])
 
   // Spinner animation during streaming.
   const documentVisible = useDocumentVisible()
@@ -517,6 +556,90 @@ export function TerminalTab({ projectName, initialSessionId }: TerminalTabProps)
     } catch {}
     setTimeout(() => inputRef.current?.focus(), 50)
   }
+
+  const slashQuery = input.startsWith('/') ? input.slice(1).trim() : ''
+  const slashCommands = resolveSlashCommands({
+    skills: allItems,
+    docs: allDocs,
+    agents,
+    customActions,
+  }, slashQuery)
+
+  const replaceComposer = useCallback((text: string) => {
+    setInput(text)
+    requestAnimationFrame(() => {
+      inputRef.current?.focus()
+      inputRef.current?.setSelectionRange(text.length, text.length)
+    })
+  }, [])
+
+  const appendStatus = useCallback((text: string) => {
+    terminalStore.update(projectName, (s) => ({
+      history: [...s.history, { role: 'status', text }],
+    }))
+  }, [projectName])
+
+  const handleSlashCommandSelect = useCallback(async (command: SlashCommand) => {
+    if (command.kind === 'skill') {
+      const item = allItems.find((candidate) => `skill:${candidate.id}` === command.id)
+      if (item) toggleItem(item)
+      replaceComposer('')
+      return
+    }
+    if (command.kind === 'doc') {
+      const doc = allDocs.find((candidate) => `doc:${candidate.name}` === command.id)
+      if (doc) toggleDoc(doc)
+      replaceComposer('')
+      return
+    }
+    if (command.kind === 'action') {
+      const actionName = command.id.slice('action:'.length)
+      replaceComposer('')
+      appendStatus(`starting custom action: ${actionName}`)
+      try {
+        const result = await runCustomAction(projectName, actionName)
+        terminalStore.startStream(projectName, result.job_id, false, true)
+      } catch (err) {
+        terminalStore.update(projectName, (s) => ({
+          history: [...s.history, { role: 'error', text: err instanceof Error ? err.message : 'Failed to start action' }],
+        }))
+      }
+      return
+    }
+    if (command.kind === 'builtin') {
+      replaceComposer('')
+      if (command.id === 'builtin:clear') {
+        handleNewSession()
+        return
+      }
+      if (command.id === 'builtin:test') {
+        appendStatus('starting test job')
+        try {
+          const result = await testProject(projectName)
+          terminalStore.startStream(projectName, result.job_id, false, true)
+        } catch (err) {
+          terminalStore.update(projectName, (s) => ({
+            history: [...s.history, { role: 'error', text: err instanceof Error ? err.message : 'Failed to start tests' }],
+          }))
+        }
+        return
+      }
+      if (command.id === 'builtin:release') {
+        appendStatus('starting release pipeline')
+        try {
+          const result = await releaseProject(projectName)
+          const jobId = result.release_job_id ?? result.job_id
+          if (jobId) terminalStore.startStream(projectName, jobId, false, true)
+        } catch (err) {
+          terminalStore.update(projectName, (s) => ({
+            history: [...s.history, { role: 'error', text: err instanceof Error ? err.message : 'Failed to start release' }],
+          }))
+        }
+        return
+      }
+    }
+    replaceComposer(command.insertText ?? '')
+  }, [allDocs, allItems, appendStatus, projectName, replaceComposer, toggleDoc, toggleItem])
 
   // Resume the most recent user prompt against the existing session. Used by
   // the error banner; safe to call regardless of `lastError.kind` (manual
@@ -704,9 +827,11 @@ export function TerminalTab({ projectName, initialSessionId }: TerminalTabProps)
           runMeta={runMeta}
           autoScroll={autoScroll}
           allItems={allItems}
+          suggestedPrompts={suggestedPrompts}
           onScroll={handleScroll}
           onScrollToBottom={scrollToBottom}
           onToggleItem={toggleItem}
+          onSuggestedPrompt={replaceComposer}
           onRemoveImage={(idx) => {
             setPendingImages(prev => prev.filter((_, i) => i !== idx))
             setPendingImageUrls(prev => prev.filter((_, i) => i !== idx))
@@ -738,6 +863,13 @@ export function TerminalTab({ projectName, initialSessionId }: TerminalTabProps)
           onCancel={handleCancel}
           onClearQueue={() => setMessageQueue([])}
           onPaste={handlePaste}
+          model={model}
+          provider={claudeSessionId && state.sessionProvider ? (state.sessionProvider as CliProvider) : selectedProvider}
+          selectedSkillCount={selectedItems.length}
+          selectedDocCount={selectedDocs.length}
+          imageCount={pendingImages.length}
+          slashCommands={slashCommands}
+          onSlashCommandSelect={handleSlashCommandSelect}
         />
       </div>
     </div>

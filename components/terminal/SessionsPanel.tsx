@@ -9,6 +9,8 @@ export interface SessionItem {
   finishedAt: number | null
   sessionId: string | null
   exitCode: number | null
+  model?: string | null
+  provider?: string | null
 }
 
 interface SessionsPanelProps {
@@ -48,6 +50,7 @@ export function SessionsPanel({ sessions, loadingSessions, onRestore }: Sessions
           const timeAgo = secs < 60 ? `${secs}s ago` : secs < 3600 ? `${Math.floor(secs / 60)}m ago` : `${Math.floor(secs / 3600)}h ago`
           const dotClass = isRunning ? 'bg-status-warning animate-pulse' : isSuccess ? 'bg-status-success' : isFailed ? 'bg-status-error' : 'bg-text-tertiary'
           const dotTitle = isRunning ? 'running' : isSuccess ? 'done' : isFailed ? `exit ${session.exitCode}` : 'unknown'
+          const model = session.model ?? session.provider ?? 'model'
           return (
             <Button
               key={session.id}
@@ -57,6 +60,9 @@ export function SessionsPanel({ sessions, loadingSessions, onRestore }: Sessions
             >
               <span className={`w-1.5 h-1.5 rounded-full shrink-0 ${dotClass}`} title={dotTitle} />
               <span className="text-xs text-text-primary font-mono truncate flex-1">{prompt}</span>
+              <span className="text-[10px] text-text-tertiary font-mono shrink-0 rounded border border-border bg-bg-primary px-1.5 py-0.5">
+                {model}
+              </span>
               <span className="text-xs text-text-tertiary font-mono shrink-0">{timeAgo}</span>
             </Button>
           )
