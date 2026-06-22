@@ -84,6 +84,26 @@ function finishedRunJob() {
   };
 }
 
+function finishedSuccessRunJob() {
+  return {
+    ...runningRunJob(),
+    status: 'done',
+    exit_code: 0,
+    finished_at: now() - 1,
+    detail: 'Mock ordinary run completed successfully after streaming output',
+  };
+}
+
+function cancelledRunJob() {
+  return {
+    ...runningRunJob(),
+    status: 'done',
+    exit_code: -2,
+    finished_at: now() - 1,
+    detail: 'Operator cancelled the ordinary run before completion',
+  };
+}
+
 async function stubSharedRoutes(
   context: BrowserContext,
   jobsForProject: () => Array<ReturnType<typeof runningRunJob> | ReturnType<typeof finishedRunJob>>,
@@ -199,6 +219,91 @@ async function stubSharedRoutes(
 }
 
 test.describe('Workflow-runs ignores ordinary-run lifecycle', () => {
+  test('ordinary run success clears only the terminal spinner while workflow-runs stays empty', async ({
+    page,
+  }) => {
+    let serveRunningJob = true;
+    let finishStream!: () => void;
+    const streamDone = new Promise<void>((resolve) => {
+      finishStream = resolve;
+    });
+
+    await stubSharedRoutes(page.context(), () =>
+      serveRunningJob ? [runningRunJob()] : [finishedSuccessRunJob()],
+    );
+    await page.context().route(`**/api/jobs/${JOB_ID}`, (route: Route) =>
+      route.fulfill({
+        json: serveRunningJob
+          ? runningRunJob()
+          : {
+              ...finishedSuccessRunJob(),
+              log: 'Mock ordinary run completed after the workflow-runs page stayed idle.\n',
+            },
+      }),
+    );
+    await page.context().route(`**/api/streaming/${JOB_ID}`, async (route: Route) => {
+      await streamDone;
+      await route.fulfill({
+        status: 200,
+        headers: {
+          'content-type': 'text/event-stream',
+          'cache-control': 'no-cache',
+        },
+        body: [
+          'data: Mock ordinary run completed after the workflow-runs page stayed idle.',
+          '',
+          'event: done',
+          `data: ${JSON.stringify({
+            exitCode: 0,
+            sessionId: SESSION_ID,
+            provider: 'claude',
+            detail: 'Mock ordinary run completed successfully after streaming output',
+            duration: 900,
+          })}`,
+          '',
+        ].join('\n'),
+      });
+    });
+
+    const terminalPage = await page.context().newPage();
+
+    await Promise.all([
+      page.goto('/workflow-runs'),
+      terminalPage.goto(`/project/${PROJECT}/terminal?job=${JOB_ID}`),
+    ]);
+
+    await expect(page.getByRole('heading', { name: 'Activity' })).toBeVisible({
+      timeout: 8_000,
+    });
+    await expect(page.getByText('No workflow runs yet')).toBeVisible({ timeout: 8_000 });
+    await expect(page.getByLabel('Active workflow runs')).toHaveCount(0);
+    await expect(page.getByLabel('Workflow runs needing attention')).toHaveCount(0);
+
+    await expect(
+      terminalPage.getByText('Keep this ordinary run isolated from workflow-runs.'),
+    ).toBeVisible({ timeout: 8_000 });
+    await expect(terminalPage.getByText('live run')).toBeVisible({ timeout: 8_000 });
+
+    const stableWorkflowRunsUrl = page.url();
+
+    serveRunningJob = false;
+    finishStream();
+
+    await expect(
+      terminalPage.getByText('Mock ordinary run completed after the workflow-runs page stayed idle.'),
+    ).toBeVisible({ timeout: 8_000 });
+    await expect(terminalPage.getByText('exit 0').first()).toBeVisible({ timeout: 8_000 });
+    await expect(
+      terminalPage.getByText('Mock ordinary run completed successfully after streaming output'),
+    ).toBeVisible({ timeout: 8_000 });
+    await expect(terminalPage.getByText('live run')).toHaveCount(0, { timeout: 8_000 });
+
+    await expect(page.getByText('No workflow runs yet')).toBeVisible({ timeout: 12_000 });
+    await expect(page.getByLabel('Active workflow runs')).toHaveCount(0);
+    await expect(page.getByLabel('Workflow runs needing attention')).toHaveCount(0);
+    await expect(page).toHaveURL(stableWorkflowRunsUrl);
+  });
+
   test('ordinary run failure clears only the terminal spinner while workflow-runs stays empty', async ({
     page,
   }) => {
@@ -275,6 +380,92 @@ test.describe('Workflow-runs ignores ordinary-run lifecycle', () => {
     await expect(
       terminalPage.getByText('Mock provider failed after the terminal run started'),
     ).toBeVisible({ timeout: 8_000 });
+    await expect(terminalPage.getByText('live run')).toHaveCount(0, { timeout: 8_000 });
+
+    await expect(page.getByText('No workflow runs yet')).toBeVisible({ timeout: 12_000 });
+    await expect(page.getByLabel('Active workflow runs')).toHaveCount(0);
+    await expect(page.getByLabel('Workflow runs needing attention')).toHaveCount(0);
+    await expect(page).toHaveURL(stableWorkflowRunsUrl);
+  });
+
+  test('ordinary run cancellation clears only the terminal spinner while workflow-runs stays empty', async ({
+    page,
+  }) => {
+    let serveRunningJob = true;
+    let finishStream!: () => void;
+    const streamDone = new Promise<void>((resolve) => {
+      finishStream = resolve;
+    });
+
+    await stubSharedRoutes(page.context(), () =>
+      serveRunningJob ? [runningRunJob()] : [cancelledRunJob()],
+    );
+    await page.context().route(`**/api/jobs/${JOB_ID}`, (route: Route) =>
+      route.fulfill({
+        json: serveRunningJob
+          ? runningRunJob()
+          : {
+              ...cancelledRunJob(),
+              log: 'Mock ordinary run was cancelled after the workflow-runs page stayed idle.\n',
+            },
+      }),
+    );
+    await page.context().route(`**/api/streaming/${JOB_ID}`, async (route: Route) => {
+      await streamDone;
+      await route.fulfill({
+        status: 200,
+        headers: {
+          'content-type': 'text/event-stream',
+          'cache-control': 'no-cache',
+        },
+        body: [
+          'data: Mock ordinary run was cancelled after the workflow-runs page stayed idle.',
+          '',
+          'event: done',
+          `data: ${JSON.stringify({
+            exitCode: -2,
+            sessionId: SESSION_ID,
+            provider: 'claude',
+            detail: 'Operator cancelled the ordinary run before completion',
+            duration: 900,
+          })}`,
+          '',
+        ].join('\n'),
+      });
+    });
+
+    const terminalPage = await page.context().newPage();
+
+    await Promise.all([
+      page.goto('/workflow-runs'),
+      terminalPage.goto(`/project/${PROJECT}/terminal?job=${JOB_ID}`),
+    ]);
+
+    await expect(page.getByRole('heading', { name: 'Activity' })).toBeVisible({
+      timeout: 8_000,
+    });
+    await expect(page.getByText('No workflow runs yet')).toBeVisible({ timeout: 8_000 });
+    await expect(page.getByLabel('Active workflow runs')).toHaveCount(0);
+    await expect(page.getByLabel('Workflow runs needing attention')).toHaveCount(0);
+
+    await expect(
+      terminalPage.getByText('Keep this ordinary run isolated from workflow-runs.'),
+    ).toBeVisible({ timeout: 8_000 });
+    await expect(terminalPage.getByText('live run')).toBeVisible({ timeout: 8_000 });
+
+    const stableWorkflowRunsUrl = page.url();
+
+    serveRunningJob = false;
+    finishStream();
+
+    await expect(
+      terminalPage.getByText('Mock ordinary run was cancelled after the workflow-runs page stayed idle.'),
+    ).toBeVisible({ timeout: 8_000 });
+    await expect(terminalPage.getByText('cancelled').first()).toBeVisible({ timeout: 8_000 });
+    await expect(
+      terminalPage.getByText('Operator cancelled the ordinary run before completion'),
+    ).toBeVisible({ timeout: 8_000 });
+    await expect(terminalPage.getByText('exit -2')).toHaveCount(0);
     await expect(terminalPage.getByText('live run')).toHaveCount(0, { timeout: 8_000 });
 
     await expect(page.getByText('No workflow runs yet')).toBeVisible({ timeout: 12_000 });
