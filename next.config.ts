@@ -38,7 +38,7 @@ const nextConfig: NextConfig = {
   ...(process.env.TAMTAM_DIST_DIR ? { distDir: process.env.TAMTAM_DIST_DIR } : {}),
   // `pg` and `graphile-worker` rely on native bindings / dynamic
   // require, so they have to stay external. Tried extending this list
-  // to workflow/drizzle/cbor/etc., but it made `check-page` and
+  // to workflow/drizzle/cbor/etc. makes `check-page` and
   // `is-page-static` ~5× slower (sub-second → 4-5s per route) for a
   // net-slower build. Turbopack already tree-shakes these packages well
   // enough that bundling them is cheaper than the external indirection.
