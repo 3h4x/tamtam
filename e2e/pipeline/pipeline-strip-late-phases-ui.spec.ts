@@ -25,7 +25,7 @@ type MockJob = {
   verdict?: string
 }
 
-type LatePhase = 'idle' | 'mark-dod' | 'pr-wait' | 'soak' | 'done'
+type LatePhase = 'idle' | 'mark-dod' | 'mark-dod-failed' | 'pr-wait' | 'pr-wait-failed' | 'soak' | 'done'
 
 function makeTask() {
   return {
@@ -153,12 +153,31 @@ function makeLatePhaseJobs(phase: LatePhase): MockJob[] {
     ]
   }
 
+  if (phase === 'mark-dod-failed') {
+    return [
+      release,
+      ...completedEarlySteps,
+      job('mark-dod', 'done', 1, 40, {
+        context_meta: JSON.stringify({ verified: 1, total: 3 }),
+      }),
+    ]
+  }
+
   if (phase === 'pr-wait') {
     return [
       release,
       ...completedEarlySteps,
       markDodDone,
       job('pr-wait', 'running', null, 35),
+    ]
+  }
+
+  if (phase === 'pr-wait-failed') {
+    return [
+      release,
+      ...completedEarlySteps,
+      markDodDone,
+      job('pr-wait', 'done', 1, 35),
     ]
   }
 
@@ -295,6 +314,73 @@ test.describe('Pipeline strip late PR workflow phases', () => {
     phase = 'done'
     await expect(page.getByLabel(/pipeline summary:/i)).toHaveCount(0, { timeout: 12_000 })
     await expect(page.getByRole('button', { name: 'abort' })).toHaveCount(0, { timeout: 12_000 })
+    await expect.poll(() => new URL(page.url()).pathname).toBe(stablePath)
+  })
+
+  test('DoD failure stays visible in the strip with release controls', async ({ page }) => {
+    let phase: LatePhase = 'mark-dod'
+
+    await stubProjectShell(page, () => makeLatePhaseJobs(phase))
+    await page.goto(`/project/${PROJECT}/terminal`)
+
+    const stablePath = new URL(page.url()).pathname
+
+    await expect(page.getByLabel(/pipeline summary: dod running/i)).toBeVisible({
+      timeout: 12_000,
+    })
+    await expect(page.getByTitle('DoD verification in progress — click to open terminal')).toBeVisible({
+      timeout: 12_000,
+    })
+
+    phase = 'mark-dod-failed'
+
+    await expect(page.getByLabel(/pipeline summary: dod needs attention/i)).toBeVisible({
+      timeout: 12_000,
+    })
+    await expect(page.getByTitle('DoD: 1 / 3 verified — 2 unticked — click to view log')).toBeVisible({
+      timeout: 12_000,
+    })
+    await expect(
+      page.getByLabel(/dod: attention\. DoD: 1 \/ 3 verified — 2 unticked/i),
+    ).toBeVisible({ timeout: 12_000 })
+    await expect(page.getByLabel(/dod: running\./i)).toHaveCount(0, { timeout: 12_000 })
+    await expect(page.getByTitle('View unified release trace')).toBeVisible({ timeout: 12_000 })
+    await expect(page.getByRole('button', { name: 'abort' })).toBeVisible({ timeout: 12_000 })
+    await expect.poll(() => new URL(page.url()).pathname).toBe(stablePath)
+  })
+
+  test('merge failure replaces the running merge state without orphaning a spinner', async ({
+    page,
+  }) => {
+    let phase: LatePhase = 'pr-wait'
+
+    await stubProjectShell(page, () => makeLatePhaseJobs(phase))
+    await page.goto(`/project/${PROJECT}/terminal`)
+
+    const stablePath = new URL(page.url()).pathname
+
+    await expect(page.getByLabel(/pipeline summary: merge running/i)).toBeVisible({
+      timeout: 12_000,
+    })
+    await expect(
+      page.getByTitle('waiting for CI checks and auto-merge — click to open terminal'),
+    ).toBeVisible({ timeout: 12_000 })
+    await expect(page.getByLabel(/merge: running\./i)).toBeVisible({ timeout: 12_000 })
+
+    phase = 'pr-wait-failed'
+
+    await expect(page.getByLabel(/pipeline summary: merge failed/i)).toBeVisible({
+      timeout: 12_000,
+    })
+    await expect(page.getByTitle('merge failed — click to view log')).toBeVisible({
+      timeout: 12_000,
+    })
+    await expect(page.getByLabel(/merge: failed\. merge failed/i)).toBeVisible({
+      timeout: 12_000,
+    })
+    await expect(page.getByLabel(/merge: running\./i)).toHaveCount(0, { timeout: 12_000 })
+    await expect(page.getByTitle('View unified release trace')).toBeVisible({ timeout: 12_000 })
+    await expect(page.getByRole('button', { name: 'abort' })).toBeVisible({ timeout: 12_000 })
     await expect.poll(() => new URL(page.url()).pathname).toBe(stablePath)
   })
 })
