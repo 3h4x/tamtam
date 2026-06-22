@@ -168,7 +168,10 @@ test.describe('Real workflow-runs live start transitions', () => {
     const cancelledRow = workflowRunLink(attentionPanel, CANCELLED_PROJECT);
     await expect(cancelledRow).toBeVisible({ timeout: 15_000 });
     await expect(cancelledRow.getByLabel('status completed')).toBeVisible({ timeout: 15_000 });
-    await expect(cancelledRow.getByText('exit -3')).toBeVisible({ timeout: 15_000 });
+    await expect(cancelledRow.locator('[title="cancelled"]').first()).toBeVisible({
+      timeout: 15_000,
+    });
+    await expect(cancelledRow.getByText('exit -3')).toHaveCount(0);
     await expect(page.getByRole('button', { name: /completed 1/i })).toBeVisible({
       timeout: 15_000,
     });

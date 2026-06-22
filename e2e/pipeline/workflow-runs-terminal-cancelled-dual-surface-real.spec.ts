@@ -46,7 +46,7 @@ test.describe('Real workflow-runs and terminal dual-surface abort lifecycle', ()
     sharedStateLock = null;
   });
 
-  test('externally-started release appears live on workflow-runs and terminal, then settles to attention/exit -3 on workflow-runs and cancelled on terminal without reload', async ({
+  test('externally-started release appears live on workflow-runs and terminal, then settles to attention/cancelled on both surfaces without reload', async ({
     page,
     request,
   }) => {
@@ -112,7 +112,10 @@ test.describe('Real workflow-runs and terminal dual-surface abort lifecycle', ()
     await expect(activeRun).toHaveCount(0, { timeout: 15_000 });
     await expect(cancelledRow).toBeVisible({ timeout: 15_000 });
     await expect(cancelledRow.getByLabel('status completed')).toBeVisible({ timeout: 15_000 });
-    await expect(cancelledRow.getByText('exit -3')).toBeVisible({ timeout: 15_000 });
+    await expect(cancelledRow.locator('[title="cancelled"]').first()).toBeVisible({
+      timeout: 15_000,
+    });
+    await expect(cancelledRow.getByText('exit -3')).toHaveCount(0);
     await expect(page.getByRole('button', { name: /completed 1/i })).toBeVisible({
       timeout: 15_000,
     });

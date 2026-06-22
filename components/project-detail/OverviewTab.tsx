@@ -9,6 +9,7 @@ import {
   type KindBucket,
 } from '@/components/project-runs/kinds'
 import { activeWorkTitle } from '@/components/project-runs/entries'
+import { PipelineStrip } from '@/components/project-detail/PipelineStrip'
 import { StatusStrip } from '@/components/project-detail/StatusStrip'
 import { AgentsStats } from '@/components/project-detail/AgentsStats'
 import { PipelineStatsPanel } from '@/components/project-detail/PipelineStatsPanel'
@@ -46,6 +47,7 @@ export interface OverviewTabProps {
   releaseTag: string | null
   aggregateCi: string | null
   config: ProjectConfig | null
+  projectJobs: JobInfo[]
   runningJobs: JobInfo[]
   // Lookup: running-release-id → originating agent job. When present, the
   // active-work card for a running release renders with the agent's title
@@ -53,7 +55,9 @@ export interface OverviewTabProps {
   // the workflow visually unified.
   runningParentLookup?: Map<string, JobInfo>
   jobsLoaded: boolean
+  jobsPaused: boolean
   onOpenChanges: () => void
+  onRefresh: () => Promise<void>
 }
 
 export function OverviewTab({
@@ -72,10 +76,13 @@ export function OverviewTab({
   ciFailedUrl,
   releaseTag,
   config,
+  projectJobs,
   runningJobs,
   runningParentLookup,
   jobsLoaded,
+  jobsPaused,
   onOpenChanges,
+  onRefresh,
 }: OverviewTabProps) {
   const router = useRouter()
   const activeCounts = runningJobs.reduce(
@@ -185,6 +192,18 @@ export function OverviewTab({
           )}
         </section>
       )}
+
+      <PipelineStrip
+        projectName={projectName}
+        projectJobs={projectJobs}
+        config={config}
+        totalChanges={totalChanges}
+        unpushed={unpushed}
+        hasUnreviewed={hasUnreviewed}
+        verdict={verdict}
+        jobsPaused={jobsPaused}
+        onRefresh={onRefresh}
+      />
 
       <StatusStrip
         projectName={projectName}

@@ -232,7 +232,7 @@ test.describe('Workflow runs list live polling', () => {
     ).toBeVisible({ timeout: 8_000 });
   });
 
-  test('completed workflow with a cancelled waited job remains completed with exit -3', async ({
+  test('completed workflow with a cancelled waited job remains completed with a cancelled outcome label', async ({
     page,
   }) => {
     await stubWorkflowRunsShell(page);
@@ -257,7 +257,10 @@ test.describe('Workflow runs list live polling', () => {
     const cancelledRow = attentionPanel.getByRole('link', { name: /workflow-cancelled-waited/i }).first();
     await expect(attentionPanel).toBeVisible({ timeout: 8_000 });
     await expect(cancelledRow.getByLabel('status completed')).toBeVisible({ timeout: 8_000 });
-    await expect(cancelledRow.getByText('exit -3')).toBeVisible({ timeout: 8_000 });
+    await expect(cancelledRow.locator('[title="cancelled"]').first()).toBeVisible({
+      timeout: 8_000,
+    });
+    await expect(cancelledRow.getByText('exit -3')).toHaveCount(0);
     await expect(cancelledRow.getByText('release was cancelled before completion')).toBeVisible({
       timeout: 8_000,
     });

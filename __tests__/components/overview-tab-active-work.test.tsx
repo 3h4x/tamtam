@@ -23,6 +23,10 @@ vi.mock('@/components/project-detail/StatusStrip', () => ({
   StatusStrip: () => <div data-testid="status-strip" />,
 }))
 
+vi.mock('@/components/project-detail/PipelineStrip', () => ({
+  PipelineStrip: () => <div data-testid="pipeline-strip" />,
+}))
+
 vi.mock('@/components/project-detail/PipelineStatsPanel', () => ({
   PipelineStatsPanel: ({ projectName }: { projectName: string }) => <div data-testid="pipeline-stats">{projectName}</div>,
 }))
@@ -102,10 +106,13 @@ function renderOverview(runningJobs: JobInfo[], runningParentLookup?: Map<string
         releaseTag: null,
         aggregateCi: null,
         config: buildConfig(),
+        projectJobs: runningJobs,
         runningJobs,
         runningParentLookup,
         jobsLoaded: true,
+        jobsPaused: false,
         onOpenChanges: vi.fn(),
+        onRefresh: vi.fn(async () => {}),
       }),
     )
   })

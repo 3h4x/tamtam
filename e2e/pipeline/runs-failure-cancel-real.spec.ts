@@ -185,7 +185,8 @@ test.describe('Real workflow-runs failure and cancellation transitions', () => {
     await expect(attentionPanel).toBeVisible({ timeout: 15_000 });
     await expect(cancelledRow).toBeVisible({ timeout: 15_000 });
     await expect(cancelledRow.getByLabel('status completed')).toBeVisible();
-    await expect(cancelledRow.getByText('exit -3')).toBeVisible();
+    await expect(cancelledRow.locator('[title="cancelled"]').first()).toBeVisible();
+    await expect(cancelledRow.getByText('exit -3')).toHaveCount(0);
     await expect(page.getByText('1 recent', { exact: true })).toBeVisible();
     await expect(workflowRunLink(activePanel, CANCELLED_PROJECT)).toHaveCount(0, { timeout: 15_000 });
     await expect(page.getByRole('button', { name: /completed \d+/i })).toBeVisible();

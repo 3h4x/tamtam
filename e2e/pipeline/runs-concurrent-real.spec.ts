@@ -243,7 +243,10 @@ test.describe('Real workflow-runs concurrent transitions', () => {
     await expect(cancelledRow.getByLabel('status completed')).toBeVisible({
       timeout: 15_000,
     });
-    await expect(cancelledRow.getByText('exit -3')).toBeVisible({ timeout: 15_000 });
+    await expect(cancelledRow.locator('[title="cancelled"]').first()).toBeVisible({
+      timeout: 15_000,
+    });
+    await expect(cancelledRow.getByText('exit -3')).toHaveCount(0);
     await expect(workflowRunLink(activePanel, SUCCESS_PROJECT)).toBeVisible({ timeout: 15_000 });
     await expect(workflowRunLink(activePanel, CANCELLED_PROJECT)).toHaveCount(0, {
       timeout: 15_000,

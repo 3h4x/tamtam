@@ -824,10 +824,13 @@ export function ProjectDetailPage({
           releaseTag={releaseTag}
           aggregateCi={aggregateCi}
           config={config}
+          projectJobs={projectJobs}
           runningJobs={runningJobs}
           runningParentLookup={runningParentLookup}
           jobsLoaded={jobsLoaded}
+          jobsPaused={jobsPaused}
           onOpenChanges={() => setActiveTab('changes')}
+          onRefresh={onRefresh}
         />
       )}
 

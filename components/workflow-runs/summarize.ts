@@ -137,7 +137,9 @@ export function summarizeOutcome(run: OutcomeInput): { label: string; tone: Outc
     }
     const waitedExitCode = extractWaitedJobExitCode(out);
     if (waitedExitCode != null && waitedExitCode !== 0) {
-      return { label: `exit ${waitedExitCode}`, tone: 'err' };
+      return isCancelledExitCode(waitedExitCode)
+        ? { label: 'cancelled', tone: 'err' }
+        : { label: `exit ${waitedExitCode}`, tone: 'err' };
     }
     const verdict = pickString(o, ['verdict']);
     if (verdict) {
@@ -171,10 +173,13 @@ export function summarizeOutcomeDetail(run: OutcomeInput): string | null {
       const waitedObj = waited as Record<string, unknown>;
       const waitedJob = waitedObj.job;
       if (waitedJob && typeof waitedJob === 'object' && !Array.isArray(waitedJob)) {
-        const jobSummary = firstMeaningfulLine(
-          pickString(waitedJob as Record<string, unknown>, ['workSummary', 'detail', 'summary']),
-        );
+        const waitedJobObj = waitedJob as Record<string, unknown>;
+        const jobSummary = firstMeaningfulLine(pickString(waitedJobObj, ['workSummary', 'detail', 'summary']));
         if (jobSummary) return jobSummary;
+        const exitCode = waitedJobObj.exitCode;
+        if (typeof exitCode === 'number' && exitCode !== 0) {
+          return isCancelledExitCode(exitCode) ? 'cancelled' : `exit ${exitCode}`;
+        }
       }
     }
     const decision = o.decision;

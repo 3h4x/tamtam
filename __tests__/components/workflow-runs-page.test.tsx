@@ -649,7 +649,8 @@ describe('WorkflowRunsPage', () => {
     const attentionPanel = container.querySelector('section[aria-label="Workflow runs needing attention"]')
     expect(attentionPanel?.textContent).toContain('2 runs')
     expect(attentionPanel?.textContent).toContain('DO NOT SHIP')
-    expect(attentionPanel?.textContent).toContain('exit -3')
+    expect(attentionPanel?.textContent).toContain('cancelled')
+    expect(attentionPanel?.textContent).not.toContain('exit -3')
     expect(attentionPanel?.textContent).not.toContain('gamma')
 
     const completedShortcut = container.querySelector<HTMLButtonElement>('button[aria-label="Show completed workflow runs"]')
