@@ -163,6 +163,181 @@ async function stubTerminalShell(
 }
 
 test.describe('Canonical terminal session route lifecycle', () => {
+  test('session route picks up a newly-started continuation after load and settles to success in place', async ({
+    page,
+  }) => {
+    let phase: 'idle' | 'running' | 'done' = 'idle'
+    let finishStream!: () => void
+    const streamDone = new Promise<void>((resolve) => {
+      finishStream = resolve
+    })
+
+    await stubTerminalShell(page, () => [
+      previousSessionJob(),
+      ...(phase === 'idle'
+        ? []
+        : [phase === 'running' ? runningSessionJob() : finishedSessionJob(0)]),
+    ])
+    await page.route(`**/api/jobs/${PREVIOUS_JOB_ID}`, (route: Route) =>
+      route.fulfill({
+        json: {
+          ...previousSessionJob(),
+          log: 'Earlier terminal output is restored.\n',
+        },
+      }),
+    )
+    await page.route(`**/api/jobs/${CURRENT_JOB_ID}`, (route: Route) =>
+      route.fulfill({
+        json: phase === 'running'
+          ? runningSessionJob()
+          : {
+              ...finishedSessionJob(0),
+              log: 'Late-start session output finished successfully.\n',
+            },
+      }),
+    )
+    await page.route(`**/api/streaming/${CURRENT_JOB_ID}`, async (route: Route) => {
+      await streamDone
+      await route.fulfill({
+        status: 200,
+        headers: {
+          'content-type': 'text/event-stream',
+          'cache-control': 'no-cache',
+        },
+        body: [
+          'data: Late-start session output finished successfully.',
+          '',
+          'event: done',
+          `data: ${JSON.stringify({
+            exitCode: 0,
+            sessionId: SESSION_ID,
+            provider: 'claude',
+            duration: 1100,
+          })}`,
+          '',
+        ].join('\n'),
+      })
+    })
+
+    await page.goto(`/project/${PROJECT}/terminal/${SESSION_ID}`)
+
+    await expect(page.getByText('Earlier terminal output is restored.')).toBeVisible({
+      timeout: 8_000,
+    })
+    await expect(page.getByText('Continue with the final terminal pass.')).toHaveCount(0)
+    await expect(page.getByText('live run')).toHaveCount(0)
+
+    phase = 'running'
+
+    await expect(page.getByText('Continue with the final terminal pass.')).toBeVisible({
+      timeout: 12_000,
+    })
+    await expect(page.getByText('live run')).toBeVisible({ timeout: 12_000 })
+    await expect(page.getByLabel('live run spinner')).toBeVisible({ timeout: 12_000 })
+
+    phase = 'done'
+    finishStream()
+
+    await expect(page.getByText('Late-start session output finished successfully.')).toBeVisible({
+      timeout: 8_000,
+    })
+    await expect(page.getByText('exit 0 — ok').first()).toBeVisible({ timeout: 8_000 })
+    await expect(page.getByText('live run')).toHaveCount(0, { timeout: 8_000 })
+    await expect(page.getByLabel('live run spinner')).toHaveCount(0, { timeout: 8_000 })
+    await expect(page).toHaveURL(new RegExp(`/project/${PROJECT}/terminal/${SESSION_ID}$`))
+  })
+
+  test('session route picks up a newly-started continuation after load and settles to failure details in place', async ({
+    page,
+  }) => {
+    let phase: 'idle' | 'running' | 'failed' = 'idle'
+    let finishStream!: () => void
+    const streamDone = new Promise<void>((resolve) => {
+      finishStream = resolve
+    })
+
+    await stubTerminalShell(page, () => [
+      previousSessionJob(),
+      ...(phase === 'idle'
+        ? []
+        : [phase === 'running' ? runningSessionJob() : finishedSessionJob(2)]),
+    ])
+    await page.route(`**/api/jobs/${PREVIOUS_JOB_ID}`, (route: Route) =>
+      route.fulfill({
+        json: {
+          ...previousSessionJob(),
+          log: 'Earlier terminal output is restored.\n',
+        },
+      }),
+    )
+    await page.route(`**/api/jobs/${CURRENT_JOB_ID}`, (route: Route) =>
+      route.fulfill({
+        json: phase === 'running'
+          ? runningSessionJob()
+          : {
+              ...finishedSessionJob(2),
+              log: 'Late-start session output failed after resuming.\n',
+              detail: 'Mock provider failed after the late-start continuation',
+            },
+      }),
+    )
+    await page.route(`**/api/streaming/${CURRENT_JOB_ID}`, async (route: Route) => {
+      await streamDone
+      await route.fulfill({
+        status: 200,
+        headers: {
+          'content-type': 'text/event-stream',
+          'cache-control': 'no-cache',
+        },
+        body: [
+          'data: Late-start session output failed after resuming.',
+          '',
+          'event: done',
+          `data: ${JSON.stringify({
+            exitCode: 2,
+            sessionId: SESSION_ID,
+            provider: 'claude',
+            detail: 'Mock provider failed after the late-start continuation',
+            duration: 950,
+          })}`,
+          '',
+        ].join('\n'),
+      })
+    })
+
+    await page.goto(`/project/${PROJECT}/terminal/${SESSION_ID}`)
+
+    await expect(page.getByText('Earlier terminal output is restored.')).toBeVisible({
+      timeout: 8_000,
+    })
+    await expect(page.getByText('Continue with the final terminal pass.')).toHaveCount(0)
+    await expect(page.getByText('live run')).toHaveCount(0)
+
+    phase = 'running'
+
+    await expect(page.getByText('Continue with the final terminal pass.')).toBeVisible({
+      timeout: 12_000,
+    })
+    await expect(page.getByText('live run')).toBeVisible({ timeout: 12_000 })
+    await expect(page.getByLabel('live run spinner')).toBeVisible({ timeout: 12_000 })
+
+    phase = 'failed'
+    finishStream()
+
+    await expect(page.getByText('Late-start session output failed after resuming.')).toBeVisible({
+      timeout: 8_000,
+    })
+    await expect(page.getByText('exit 2').first()).toBeVisible({ timeout: 8_000 })
+    await expect(
+      page.getByText('Mock provider failed after the late-start continuation'),
+    ).toBeVisible({
+      timeout: 8_000,
+    })
+    await expect(page.getByText('live run')).toHaveCount(0, { timeout: 8_000 })
+    await expect(page.getByLabel('live run spinner')).toHaveCount(0, { timeout: 8_000 })
+    await expect(page).toHaveURL(new RegExp(`/project/${PROJECT}/terminal/${SESSION_ID}$`))
+  })
+
   test('session route restores prior entries, streams the running step, and settles in place after success', async ({
     page,
   }) => {
