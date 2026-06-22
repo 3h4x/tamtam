@@ -81,7 +81,7 @@ function emptyIssuesSummary() {
   }
 }
 
-function makeReleaseChain(phase: 'idle' | 'test' | 'review' | 'fix' | 'commit' | 'push' | 'push-failed' | 'cancelled' | 'done'): MockJob[] {
+function makeReleaseChain(phase: 'idle' | 'test' | 'review' | 'review-dns' | 'fix' | 'commit' | 'push' | 'push-failed' | 'cancelled' | 'done'): MockJob[] {
   if (phase === 'idle' || phase === 'done') return []
 
   const releaseId = 'strip-live-release-1'
@@ -213,6 +213,12 @@ function makeReleaseChain(phase: 'idle' | 'test' | 'review' | 'fix' | 'commit' |
 
   if (phase === 'test') return [...steps, testStep('running', null)]
   if (phase === 'review') return [...steps, testStep('done', 0), reviewStep('running', null)]
+  if (phase === 'review-dns') {
+    // Review completed but returned a DO NOT SHIP verdict: the job exited
+    // cleanly (exit 0) yet the verdict blocks the release, so no fix/commit
+    // step ever runs. The strip must surface this as a review failure.
+    return [...steps, testStep('done', 0), reviewStep('done', 0, 'DO NOT SHIP')]
+  }
   if (phase === 'fix') {
     return [
       ...steps,
@@ -448,6 +454,47 @@ test.describe('Pipeline strip live polling', () => {
     await expect(page.getByLabel(/test: running\./i)).toHaveCount(0)
     await expect(page.getByRole('button', { name: 'abort' })).toHaveCount(0)
     await expect(page.getByTitle('View unified release trace')).toHaveCount(0)
+    await expect.poll(() => new URL(page.url()).pathname).toBe(stablePath)
+  })
+
+  test('review DO NOT SHIP verdict flips the strip from running to failed and halts before fix without hiding recovery controls', async ({
+    page,
+  }) => {
+    let phase: 'review' | 'review-dns' | 'done' = 'review'
+
+    await stubProjectShell(page, () => makeReleaseChain(phase))
+    await page.goto(`/project/${PROJECT}/terminal`)
+
+    const stablePath = new URL(page.url()).pathname
+
+    await expect(page.getByLabel(/pipeline summary: review running/i)).toBeVisible({
+      timeout: 12_000,
+    })
+    await expect(page.getByLabel(/test: done\./i)).toBeVisible({ timeout: 12_000 })
+    await expect(page.getByLabel(/review: running\./i)).toBeVisible({ timeout: 12_000 })
+
+    phase = 'review-dns'
+
+    // The verdict blocks the release: the review step turns failed, the summary
+    // reflects it, and the verdict hint names DO NOT SHIP explicitly.
+    await expect(page.getByLabel(/pipeline summary: review failed/i)).toBeVisible({
+      timeout: 12_000,
+    })
+    await expect(page.getByLabel(/review: failed\. verdict: DO NOT SHIP/i)).toBeVisible({
+      timeout: 12_000,
+    })
+    await expect(page.getByLabel(/review: running\./i)).toHaveCount(0, { timeout: 12_000 })
+
+    // No fix step is ever spawned for a DO NOT SHIP verdict, but the release is
+    // still live so abort and the trace link remain available.
+    await expect(page.getByLabel(/fix:/i)).toHaveCount(0)
+    await expect(page.getByRole('button', { name: 'abort' })).toBeVisible({ timeout: 12_000 })
+    await expect(page.getByTitle('View unified release trace')).toBeVisible({ timeout: 12_000 })
+
+    phase = 'done'
+
+    await expect(page.getByLabel(/pipeline summary:/i)).toHaveCount(0, { timeout: 12_000 })
+    await expect(page.getByRole('button', { name: 'abort' })).toHaveCount(0, { timeout: 12_000 })
     await expect.poll(() => new URL(page.url()).pathname).toBe(stablePath)
   })
 })
