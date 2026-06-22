@@ -83,11 +83,11 @@ describe('InitiativesPage', () => {
               project: 'alpha',
               source: 'mining',
               kind: 'lint',
-              title: 'Running item',
+              title: 'Second queued item',
               rationale: 'r',
-              score: 100,
-              status: 'running',
-              releaseId: 'agent-1',
+              score: 99,
+              status: 'queued',
+              releaseId: null,
               pinnedAt: null,
               updatedAt: now,
             },
@@ -96,11 +96,11 @@ describe('InitiativesPage', () => {
               project: 'alpha',
               source: 'mining',
               kind: 'lint',
-              title: 'Shipped item',
+              title: 'Third queued item',
               rationale: 'r',
-              score: 100,
-              status: 'shipped',
-              releaseId: 'release-1',
+              score: 98,
+              status: 'queued',
+              releaseId: null,
               pinnedAt: null,
               updatedAt: now,
             },
@@ -109,11 +109,50 @@ describe('InitiativesPage', () => {
               project: 'alpha',
               source: 'mining',
               kind: 'lint',
+              title: 'Fourth queued item',
+              rationale: 'r',
+              score: 97,
+              status: 'queued',
+              releaseId: null,
+              pinnedAt: null,
+              updatedAt: now,
+            },
+            {
+              id: 5,
+              project: 'alpha',
+              source: 'mining',
+              kind: 'lint',
               title: 'Rejected item',
               rationale: 'r',
-              score: 100,
+              score: 96,
               status: 'rejected',
               releaseId: null,
+              pinnedAt: null,
+              updatedAt: now,
+            },
+            {
+              id: 6,
+              project: 'alpha',
+              source: 'mining',
+              kind: 'lint',
+              title: 'Running item',
+              rationale: 'r',
+              score: 50,
+              status: 'running',
+              releaseId: 'agent-1',
+              pinnedAt: null,
+              updatedAt: now,
+            },
+            {
+              id: 7,
+              project: 'alpha',
+              source: 'mining',
+              kind: 'lint',
+              title: 'Shipped item',
+              rationale: 'r',
+              score: 40,
+              status: 'shipped',
+              releaseId: 'release-1',
               pinnedAt: null,
               updatedAt: now,
             },
@@ -137,13 +176,32 @@ describe('InitiativesPage', () => {
 
     await fastWaitFor(() => {
       expect(container.textContent).toContain('Queued item')
-      expect(container.textContent).toContain('Running item')
-      expect(container.textContent).toContain('Shipped item')
-      expect(container.textContent).toContain('Rejected item')
+      expect(container.textContent).toContain('Second queued item')
+      expect(container.textContent).toContain('Third queued item')
+      expect(container.textContent).toContain('show 4 more')
     })
 
-    expect(container.querySelectorAll('button[aria-label="Promote"]')).toHaveLength(1)
-    expect(container.querySelectorAll('button[aria-label="Reject"]')).toHaveLength(1)
+    expect(container.textContent).not.toContain('Fourth queued item')
+    expect(container.textContent).not.toContain('Rejected item')
+    expect(container.textContent).not.toContain('Running item')
+    expect(container.textContent).not.toContain('Shipped item')
+    expect(container.querySelectorAll('button[aria-label="Promote"]')).toHaveLength(3)
+    expect(container.querySelectorAll('button[aria-label="Reject"]')).toHaveLength(3)
+    expect(Array.from(container.querySelectorAll('button')).filter((button) => button.textContent === 'undo')).toHaveLength(0)
+
+    const showMore = Array.from(container.querySelectorAll('button')).find((button) => button.textContent === 'show 4 more')
+    expect(showMore).toBeTruthy()
+    showMore?.click()
+
+    await fastWaitFor(() => {
+      expect(container.textContent).toContain('Fourth queued item')
+      expect(container.textContent).toContain('Rejected item')
+      expect(container.textContent).toContain('Running item')
+      expect(container.textContent).toContain('Shipped item')
+    })
+
+    expect(container.querySelectorAll('button[aria-label="Promote"]')).toHaveLength(4)
+    expect(container.querySelectorAll('button[aria-label="Reject"]')).toHaveLength(4)
     expect(Array.from(container.querySelectorAll('button')).filter((button) => button.textContent === 'undo')).toHaveLength(1)
 
     unmount()

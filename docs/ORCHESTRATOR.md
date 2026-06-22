@@ -62,11 +62,22 @@ pipeline.
 
 ### Architecture
 
-The **Miner** probes each project (Phase 1 ships lint + TODO scan;
-type-check/tests/deps/docs probes are added incrementally) and upserts
-findings as `proposed` candidates to the `initiatives` backlog. A promotion
-pass then admits them to `queued` status, respecting the
-`initiative_max_backlog_per_project` cap.
+The **Miner** probes each project (`lib/orchestrator/initiative-probes.ts`):
+`lint` (`pnpm lint`), `todo` (`git grep` of `lib|components|app|src` for
+`.ts/.tsx` markers), `ui-coverage` (recently-added Next `app/api/**/route.ts`
+with no client reference), `type-error` (`pnpm type-check`), `dep-bump`
+(`pnpm outdated --format json`, aggregated into one finding), and `gh-issue`
+(language-agnostic). The first five are TS/pnpm/Next-shaped, so non-Next/non-TS
+repos surface little from them. `gh-issue` sources work through the **trusted
+issue-ingestion gate only** — it calls
+`GET /api/projects/by-project/[project]/issues?trusted_only=1`
+(`filterTrustedIssues → isUserTrusted`), never raw `gh issue list`, and emits only
+the **trusted-author** issue number + title (bodies/comments never enter the
+prompt — "drop > wrap"; see `docs/SECURITY.md`). It is safe-by-default: with no
+`trusted_github_users`/`safe_users` configured the gate returns nothing. Remaining
+scored-but-unimplemented kinds (`failing-test`, `missing-test`, `docs-gap`) are
+added incrementally. Findings upsert as `proposed` candidates; a promotion pass
+admits them to `queued`, respecting the `initiative_max_backlog_per_project` cap.
 
 The **Dispatcher** runs per-project, checks gates (`gatesClear`, `projectBusy`,
 `maxShipsPerDay`), picks the top-scored queued initiative, and starts an

@@ -44,6 +44,7 @@ pm2() {
         env: {
           ...process.env,
           BASH_ENV: bashEnvPath,
+          TMPDIR: dir,
           TAMTAM_BASE_URL: 'http://localhost:1337',
           TAMTAM_REBUILD_DRAIN_TIMEOUT: '0',
           TAMTAM_REBUILD_FORCE: '0',

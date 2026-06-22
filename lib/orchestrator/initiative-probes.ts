@@ -80,6 +80,109 @@ export function lintFindings(exitCode: number, output: string): ProbeFinding[] {
   }];
 }
 
+// ── type-error probe ───────────────────────────────────────────────────────
+// `pnpm type-check` (tsc --noEmit) for any TS project. Same preflight discipline
+// as lint: a missing script / missing deps is a setup problem, not type debt.
+const TYPE_PREFLIGHT_RE =
+  /(ERR_PNPM|is not up to date|runDepsStatusCheck|Cannot find module|Missing script|command "?type-check"? not found|No such file|No projects matched)/i;
+
+// Positive evidence tsc actually ran and found type errors.
+const TYPE_EVIDENCE_RE = /(error TS\d+|Found \d+ error)/i;
+
+/** Pure: decide whether a type-check run is real type debt vs a toolchain failure. */
+export function typeErrorFindings(exitCode: number, output: string): ProbeFinding[] {
+  if (exitCode === 0) return [];
+  if (TYPE_PREFLIGHT_RE.test(output)) return [];
+  if (!TYPE_EVIDENCE_RE.test(output)) return [];
+  return [{
+    kind: 'type-error',
+    title: 'Fix TypeScript type errors',
+    rationale: 'pnpm type-check reported type errors',
+    prompt: 'Run `pnpm type-check` and fix every reported type error. Do not use `any` or `@ts-ignore` to silence them — fix the underlying type.',
+    dedupKey: 'type-error:global',
+  }];
+}
+
+// ── dep-bump probe ─────────────────────────────────────────────────────────
+// `pnpm outdated --format json` → one aggregate finding (never one-per-package,
+// to avoid flooding). pnpm exits non-zero when anything is outdated but still
+// prints the JSON map on stdout, so we parse stdout regardless of exit code.
+/** Pure: map `pnpm outdated --format json` output to a single dep-bump finding. */
+export function depBumpFindings(jsonStdout: string): ProbeFinding[] {
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(jsonStdout);
+  } catch {
+    return [];
+  }
+  if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) return [];
+  const count = Object.keys(parsed as Record<string, unknown>).length;
+  if (count === 0) return [];
+  return [{
+    kind: 'dep-bump',
+    title: `Update ${count} outdated ${count === 1 ? 'dependency' : 'dependencies'}`,
+    rationale: `pnpm outdated reports ${count} package(s) behind latest`,
+    prompt: 'Run `pnpm outdated` and update the outdated dependencies — patch/minor freely, majors with care (check changelogs for breaking changes). After updating, verify the build and tests still pass. Do not bump a major that breaks the build.',
+    dedupKey: 'dep-bump:global',
+  }];
+}
+
+// ── gh-issue probe (TRUSTED gate only) ─────────────────────────────────────
+// Open GitHub issues are language-agnostic "what's to be done", but raw issue
+// text is untrusted input. This probe NEVER calls `gh issue list` directly — it
+// sources issues through the server-side trusted gate
+// (`GET /api/projects/by-project/[project]/issues?trusted_only=1`, which applies
+// `filterTrustedIssues → isUserTrusted`). Only **trusted-author** issue numbers
+// and titles become initiatives; bodies/comments never enter the prompt
+// ("drop > wrap"). The agent reads full context via TamTam's safe issue flow.
+// See docs/SECURITY.md (trusted issue-ingestion). Safe-by-default: with no
+// `trusted_github_users` / `safe_users` configured, the gate returns nothing.
+const GH_ISSUE_CAP = 15;
+const GH_ISSUE_FETCH_TIMEOUT_MS = 30_000;
+const GH_BLOCKER_LABELS = new Set([
+  'blocked', 'needs-info', 'needs-design', 'needs-refinement',
+  'discussion', 'question', 'wontfix', 'duplicate', 'human-needed',
+]);
+
+/** Pure: shape already-trust-filtered slim issues into gh-issue findings (title only, blocker-labeled dropped, capped). */
+export function trustedIssueFindings(trustedIssues: unknown): ProbeFinding[] {
+  if (!Array.isArray(trustedIssues)) return [];
+  const out: ProbeFinding[] = [];
+  for (const raw of trustedIssues) {
+    if (!raw || typeof raw !== 'object') continue;
+    const it = raw as { number?: unknown; title?: unknown; labels?: unknown };
+    if (typeof it.number !== 'number') continue;
+    const labels = Array.isArray(it.labels) ? it.labels.map((l) => String(l).toLowerCase()) : [];
+    if (labels.some((l) => GH_BLOCKER_LABELS.has(l))) continue;
+    const title = typeof it.title === 'string' ? it.title : '';
+    out.push({
+      kind: 'gh-issue',
+      title: `Resolve issue #${it.number}: ${title}`,
+      rationale: `Open GitHub issue #${it.number} from a trusted author`,
+      prompt: `Resolve trusted GitHub issue #${it.number} ("${title}") in this repo. Read the full issue context through TamTam's safe issue flow (do not run \`gh issue view/list\` directly). Implement what it asks; if it is already done or not actionable, close it with a short comment explaining why.`,
+      dedupKey: `gh-issue:${it.number}`,
+    });
+    if (out.length >= GH_ISSUE_CAP) break;
+  }
+  return out;
+}
+
+async function probeGhIssues(project: string): Promise<ProbeFinding[]> {
+  try {
+    const base = process.env.TAMTAM_BASE_URL ?? 'http://localhost:1337';
+    const res = await fetch(
+      `${base}/api/projects/by-project/${encodeURIComponent(project)}/issues?trusted_only=1`,
+      { signal: AbortSignal.timeout(GH_ISSUE_FETCH_TIMEOUT_MS) },
+    );
+    if (!res.ok) return [];
+    const data = (await res.json()) as { issues?: unknown; error?: unknown };
+    if (data.error) return [];
+    return trustedIssueFindings(data.issues);
+  } catch {
+    return [];
+  }
+}
+
 // ── ui-coverage probe ──────────────────────────────────────────────────────
 // Detects *recently-added* backend API routes shipped with no UI/client surface
 // — the exact "feature added without UI" gap, turned into something the Miner
@@ -198,6 +301,24 @@ async function probeLint(projectPath: string): Promise<ProbeFinding[]> {
   }
 }
 
+async function probeTypeError(projectPath: string): Promise<ProbeFinding[]> {
+  try {
+    const res = await exec('pnpm', ['type-check'], { cwd: projectPath, timeout: 120000 });
+    return typeErrorFindings(res.exitCode, `${res.stdout}\n${res.stderr}`);
+  } catch {
+    return [];
+  }
+}
+
+async function probeDepBump(projectPath: string): Promise<ProbeFinding[]> {
+  try {
+    const res = await exec('pnpm', ['outdated', '--format', 'json'], { cwd: projectPath, timeout: 60000 });
+    return depBumpFindings(res.stdout);
+  } catch {
+    return [];
+  }
+}
+
 async function probeTodos(projectPath: string): Promise<ProbeFinding[]> {
   try {
     // `git grep` only searches tracked files and does NOT descend into
@@ -216,10 +337,13 @@ async function probeTodos(projectPath: string): Promise<ProbeFinding[]> {
 }
 
 export async function runProbes(project: string, projectPath: string): Promise<ProbeResults> {
-  const [lint, todos, uiCoverage] = await Promise.all([
+  const [lint, todos, uiCoverage, typeErrors, depBumps, ghIssues] = await Promise.all([
     probeLint(projectPath),
     probeTodos(projectPath),
     probeUiCoverage(projectPath),
+    probeTypeError(projectPath),
+    probeDepBump(projectPath),
+    probeGhIssues(project),
   ]);
-  return { project, findings: [...lint, ...todos, ...uiCoverage] };
+  return { project, findings: [...lint, ...todos, ...uiCoverage, ...typeErrors, ...depBumps, ...ghIssues] };
 }

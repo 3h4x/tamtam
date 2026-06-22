@@ -6,35 +6,10 @@ import type { InitiativesListResponse } from '@/app/api/initiatives/route'
 import type { ProjectsResponse } from '@/lib/shared/types'
 import { fetchProjects } from '@/lib/client/projects'
 import { patchInitiative, type InitiativeAction } from '@/lib/client-api'
-import { Table } from '@/components/ui/Table'
-import type { Column } from '@/components/ui/Table'
-import { Button } from '@/components/ui/Button'
 import { EmptyState } from '@/components/ui/EmptyState'
 import { ErrorCallout } from '@/components/ui/ErrorCallout'
 import { ProjectPreviewRow } from '@/components/initiatives/ProjectPreviewRow'
-
-// epoch-milliseconds → "Xm ago" / "Xh ago" / "Xd ago"
-function fmtAgo(epochMs: number): string {
-  if (!epochMs) return '—'
-  const m = Math.floor((Date.now() - epochMs) / 60_000)
-  if (m < 1) return 'just now'
-  if (m < 60) return `${m}m ago`
-  const h = Math.floor(m / 60)
-  if (h < 24) return `${h}h ago`
-  return `${Math.floor(h / 24)}d ago`
-}
-
-const STATUS_TONE: Record<string, string> = {
-  proposed: 'text-text-secondary',
-  queued: 'text-accent',
-  running: 'text-status-warning',
-  shipped: 'text-status-success',
-  failed: 'text-status-error',
-  rejected: 'text-text-tertiary',
-  superseded: 'text-text-tertiary',
-}
-
-const CURATABLE_STATUSES = new Set(['proposed', 'queued'])
+import { ProjectBacklogGroup } from '@/components/initiatives/ProjectBacklogGroup'
 
 function FlagBadge({ label, on }: { label: string; on: boolean }) {
   return (
@@ -75,76 +50,6 @@ function StatCard({
 
 type InitiativeRow = InitiativesListResponse['initiatives'][number]
 
-const TABLE_COLUMNS: Column<InitiativeRow>[] = [
-  {
-    key: 'project',
-    label: 'Project',
-    sortable: true,
-    sortValue: (r) => r.project,
-    render: (r) => (
-      <span className="font-medium text-text-primary text-xs" data-private>
-        {r.project}
-      </span>
-    ),
-  },
-  {
-    key: 'kind',
-    label: 'Kind',
-    render: (r) => (
-      <span className="rounded px-1.5 py-0.5 text-[10px] font-mono font-semibold bg-bg-tertiary text-text-secondary">
-        {r.kind}
-      </span>
-    ),
-  },
-  {
-    key: 'title',
-    label: 'Title',
-    render: (r) => (
-      <span className="text-xs text-text-primary line-clamp-2" title={r.title}>
-        {r.pinnedAt != null && <span className="mr-1 text-accent" aria-label="pinned">📌</span>}
-        {r.title}
-      </span>
-    ),
-    cellClass: 'max-w-xs',
-  },
-  {
-    key: 'status',
-    label: 'Status',
-    sortable: true,
-    sortValue: (r) => r.status,
-    render: (r) => (
-      <span className={`text-xs ${STATUS_TONE[r.status] ?? 'text-text-secondary'}`}>
-        {r.status}
-      </span>
-    ),
-  },
-  {
-    key: 'score',
-    label: 'Score',
-    sortable: true,
-    sortValue: (r) => r.score,
-    initialSortDir: 'desc',
-    render: (r) => (
-      <span className="tabular-nums text-xs text-text-secondary font-mono">
-        {r.score > 0 ? r.score.toFixed(1) : '—'}
-      </span>
-    ),
-    cellClass: 'text-right',
-    headerClass: 'text-right',
-  },
-  {
-    key: 'updatedAt',
-    label: 'Updated',
-    sortable: true,
-    sortValue: (r) => r.updatedAt,
-    initialSortDir: 'desc',
-    render: (r) => (
-      <span className="tabular-nums text-xs text-text-tertiary whitespace-nowrap">
-        {fmtAgo(r.updatedAt)}
-      </span>
-    ),
-  },
-]
 
 export function InitiativesPage({ embedded = false }: { embedded?: boolean } = {}) {
   const [initiatives, setInitiatives] = useState<InitiativesListResponse | null>(null)
@@ -200,53 +105,18 @@ export function InitiativesPage({ embedded = false }: { embedded?: boolean } = {
   const { flags, counts, initiatives: rows } = initiatives
   const projectNames = projects?.tasks.map((t) => t.project) ?? []
 
-  // Pinned (operator-promoted) rows lead; the Table's column sort can still re-sort.
-  const sortedRows = [...rows].sort((a, b) => (b.pinnedAt ? 1 : 0) - (a.pinnedAt ? 1 : 0))
-
-  // Operator-steering column: 👍 promote / un-pin, 👎 reject, undo for rejected rows.
-  const actionsColumn: Column<InitiativeRow> = {
-    key: 'actions',
-    label: '',
-    render: (r) => {
-      const pinned = r.pinnedAt != null
-      const rejected = r.status === 'rejected'
-      const curatable = CURATABLE_STATUSES.has(r.status)
-      return (
-        <div className="flex items-center gap-1 justify-end">
-          {rejected ? (
-            <Button
-              type="button"
-              variant="link"
-              size="sm"
-              className="text-text-tertiary hover:text-text-primary"
-              onClick={() => act(r.id, 'restore')}
-            >
-              undo
-            </Button>
-          ) : curatable ? (
-            <>
-              <button
-                type="button"
-                aria-label={pinned ? 'Un-pin' : 'Promote'}
-                title={pinned ? 'Un-pin' : 'Promote to top'}
-                className={`text-sm transition-opacity ${pinned ? 'opacity-100' : 'opacity-40 hover:opacity-100'}`}
-                onClick={() => act(r.id, pinned ? 'unpromote' : 'promote')}
-              >👍</button>
-              <button
-                type="button"
-                aria-label="Reject"
-                title="Reject"
-                className="text-sm opacity-40 hover:opacity-100 transition-opacity"
-                onClick={() => act(r.id, 'reject')}
-              >👎</button>
-            </>
-          ) : null}
-        </div>
-      )
-    },
-    cellClass: 'text-right',
+  // Group the backlog by project. Each group sorts + caps internally
+  // (ProjectBacklogGroup), and projects are ordered by their best score so the
+  // most-relevant work surfaces first.
+  const byProject = new Map<string, InitiativeRow[]>()
+  for (const r of rows) {
+    const list = byProject.get(r.project)
+    if (list) list.push(r)
+    else byProject.set(r.project, [r])
   }
-  const columns = [...TABLE_COLUMNS, actionsColumn]
+  const groups = [...byProject.entries()].sort(
+    (a, b) => Math.max(...b[1].map((r) => r.score)) - Math.max(...a[1].map((r) => r.score)),
+  )
 
   return (
     <div className={embedded ? 'space-y-6' : 'p-6 space-y-6 max-w-6xl'}>
@@ -325,22 +195,24 @@ export function InitiativesPage({ embedded = false }: { embedded?: boolean } = {
         </div>
       </section>
 
-      {/* ── Backlog table ───────────────────────────────────────── */}
+      {/* ── Backlog — grouped per project, top 3 each ────────────── */}
       <section className="space-y-2">
-        <h2 className="text-sm font-medium text-text-primary">Backlog</h2>
-        <Table<InitiativeRow>
-          columns={columns}
-          rows={sortedRows}
-          getRowKey={(r) => String(r.id)}
-          defaultSortKey="updatedAt"
-          defaultSortDir="desc"
-          emptyState={
-            <EmptyState
-              paddingY="sm"
-              title="Nothing in the backlog yet — the engine is off or nothing mined."
-            />
-          }
-        />
+        <div className="flex items-baseline justify-between">
+          <h2 className="text-sm font-medium text-text-primary">Backlog</h2>
+          <span className="text-[11px] text-text-tertiary">top 3 per project · 👍 promote · 👎 reject</span>
+        </div>
+        {groups.length === 0 ? (
+          <EmptyState
+            paddingY="sm"
+            title="Nothing in the backlog yet — the engine is off or nothing mined."
+          />
+        ) : (
+          <div className="grid grid-cols-1 lg:grid-cols-2 gap-3">
+            {groups.map(([project, projRows]) => (
+              <ProjectBacklogGroup key={project} project={project} rows={projRows} act={act} />
+            ))}
+          </div>
+        )}
       </section>
     </div>
   )
