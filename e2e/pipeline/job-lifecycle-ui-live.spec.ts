@@ -233,6 +233,42 @@ test.describe('Job lifecycle UI badges', () => {
     await expect(cancelledRow.getByLabel('running')).toHaveCount(0);
   });
 
+  test('history tab normalizes an ordinary run exit -2 to cancelled without showing a raw exit badge', async ({
+    page,
+  }) => {
+    let serveRunning = true;
+    const cancelledDetail = 'Operator cancelled the ordinary run before it completed';
+    await mockJobScenario(page, () => [
+      makeJob({
+        id: 'job-live-history-run-cancelled-exit-2',
+        kind: 'run',
+        status: serveRunning ? 'running' : 'done',
+        exit_code: serveRunning ? null : -2,
+        started_at: now() - 45,
+        finished_at: serveRunning ? null : now() - 5,
+        session_id: 'sess-live-history-run-cancelled-exit-2',
+        user_prompt: 'Cancel this ordinary run after it starts.',
+        work_summary: serveRunning ? 'Streaming ordinary run output' : cancelledDetail,
+      }),
+    ]);
+
+    await page.goto(`/project/${PROJECT}/history`);
+
+    const row = page.getByRole('button')
+      .filter({ hasText: 'Cancel this ordinary run after it starts.' })
+      .first();
+    await expect(row).toBeVisible();
+    await expect(row.getByLabel('running')).toBeVisible();
+    await expect(row.getByText('Streaming ordinary run output')).toBeVisible();
+
+    serveRunning = false;
+
+    await expect(row.getByText('cancelled', { exact: true })).toBeVisible({ timeout: 12_000 });
+    await expect(row.getByText(cancelledDetail)).toBeVisible({ timeout: 12_000 });
+    await expect(row.getByText('exit -2')).toHaveCount(0);
+    await expect(row.getByLabel('running')).toHaveCount(0, { timeout: 12_000 });
+  });
+
   test('history release row surfaces stop reason when it settles without child steps', async ({
     page,
   }) => {

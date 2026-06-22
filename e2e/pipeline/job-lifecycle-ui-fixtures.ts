@@ -43,6 +43,8 @@ export type MockJob = {
   pid?: number;
   log_path?: string;
   seen?: boolean;
+  prompt?: string | null;
+  user_prompt?: string | null;
   parent_job_id?: string | null;
   work_summary?: string | null;
   context_meta?: string | null;
