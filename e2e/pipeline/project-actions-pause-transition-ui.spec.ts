@@ -4,14 +4,14 @@ import type { Page, Route } from '@playwright/test'
 const PROJECT = 'project-actions-pause-transition-ui'
 const FEATURE_BRANCH = 'feature/live-pause-transition'
 
-type Scenario = 'create-pr' | 'push-to-pr'
+type Scenario = 'create-pr' | 'push-to-pr' | 'ship-lgtm'
 
 function now() {
   return Math.floor(Date.now() / 1000)
 }
 
 function makeTask(scenario: Scenario) {
-  const changes = scenario === 'push-to-pr' ? 3 : 0
+  const changes = scenario === 'push-to-pr' ? 3 : scenario === 'ship-lgtm' ? 4 : 0
   const unpushed = scenario === 'create-pr' ? 0 : 0
 
   return {
@@ -25,7 +25,7 @@ function makeTask(scenario: Scenario) {
     sync: true,
     changes,
     unpushed,
-    reviewed: true,
+    reviewed: scenario === 'ship-lgtm',
     last_run: null,
     last_run_ago: null,
     last_run_duration_s: null,
@@ -142,7 +142,33 @@ async function stubProjectRoutes(
   )
   await page.route(
     (url) => url.pathname === '/api/jobs' && url.searchParams.get('project') === PROJECT,
-    (route: Route) => route.fulfill({ json: { jobs: [], total: 0, pendingReleaseProjects: [] } }),
+    (route: Route) =>
+      route.fulfill({
+        json: {
+          jobs:
+            opts.scenario === 'ship-lgtm'
+              ? [
+                  {
+                    id: `${PROJECT}-review-lgtm`,
+                    project: PROJECT,
+                    kind: 'review',
+                    prompt: null,
+                    pid: 0,
+                    log_path: '',
+                    status: 'done',
+                    exit_code: 0,
+                    started_at: now() - 120,
+                    finished_at: now() - 60,
+                    seen: true,
+                    verdict: 'LGTM',
+                    work_summary: 'Latest review already passed.',
+                  },
+                ]
+              : [],
+          total: opts.scenario === 'ship-lgtm' ? 1 : 0,
+          pendingReleaseProjects: [],
+        },
+      }),
   )
   await page.route(
     (url) => url.pathname === '/api/automation-queue' && url.searchParams.get('project') === PROJECT,
@@ -223,5 +249,44 @@ test.describe('Project header action buttons respond to live jobs_paused transit
       { timeout: 12_000 },
     )
     await expect(pushToPrButton).toHaveText('Push to PR #42')
+  })
+
+  test('Ship (LGTM) disables and re-enables in place across jobs_paused transitions', async ({
+    page,
+  }) => {
+    let jobsPaused = false
+
+    await stubProjectRoutes(page, {
+      scenario: 'ship-lgtm',
+      getJobsPaused: () => jobsPaused,
+    })
+
+    await page.goto(`/project/${PROJECT}/issues`)
+
+    const shipButton = page.getByRole('button', { name: 'Ship (LGTM)' })
+    const stableUrl = page.url()
+
+    await expect(shipButton).toBeVisible({ timeout: 8_000 })
+    await expect(shipButton).toBeEnabled()
+    await expect(shipButton).toHaveAttribute('title', /review already LGTM/i)
+    await expect(shipButton).toHaveAttribute('title', /skips test \+ review/i)
+
+    jobsPaused = true
+
+    await expect(shipButton).toBeDisabled({ timeout: 12_000 })
+    await expect(shipButton).toHaveAttribute(
+      'title',
+      'Jobs are paused globally. Resume jobs to start a release.',
+      { timeout: 12_000 },
+    )
+    await expect(shipButton).toHaveText('Ship (LGTM)')
+
+    jobsPaused = false
+
+    await expect(shipButton).toBeEnabled({ timeout: 12_000 })
+    await expect(shipButton).toHaveAttribute('title', /review already LGTM/i)
+    await expect(shipButton).toHaveAttribute('title', /skips test \+ review/i)
+    await expect(shipButton).toHaveText('Ship (LGTM)')
+    await expect(page).toHaveURL(stableUrl)
   })
 })
