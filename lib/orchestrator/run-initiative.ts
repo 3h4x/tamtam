@@ -47,6 +47,21 @@ export function pickFileAgentForInitiative(
   return (eligible.find((a) => a.name === 'improve') ?? eligible[0]).id;
 }
 
+// A busy/locked agent-run response is transient — the project (or the chosen
+// agent) is already running something. Mapping it to a re-queue lets the
+// dispatcher retry on a short cooldown instead of burning the initiative on a
+// 6-hour hard-failure. 409 = agent already running / duplicate; 423 = locked;
+// 429 = rate/budget; 503 = unavailable.
+const BUSY_RUN_STATUSES = new Set([409, 423, 429, 503]);
+
+/** Pure: classify an agent-run HTTP status — busy ⇒ transient re-queue, else null (caller throws). */
+export function busyRunResult(status: number, bodyText: string): InitiativeRunStartResult | null {
+  if (BUSY_RUN_STATUSES.has(status)) {
+    return { status: 'queued', detail: bodyText.slice(0, 200) || `HTTP ${status} busy` };
+  }
+  return null;
+}
+
 export interface RunInitiativeDeps {
   startRun: (args: { project: string; prompt: string }) => Promise<InitiativeRunStartResult>;
 }
@@ -101,6 +116,10 @@ async function defaultStartRun(args: { project: string; prompt: string }): Promi
 
   if (!res.ok) {
     const body = await res.text().catch(() => '');
+    // A busy/locked project is transient — re-queue (short cooldown) instead of
+    // burning the initiative on a 6h hard-failure.
+    const busy = busyRunResult(res.status, body);
+    if (busy) return busy;
     throw new Error(
       `[run-initiative] agent run request for project "${args.project}" failed: ` +
       `HTTP ${res.status} — ${body.slice(0, 200)}`,
