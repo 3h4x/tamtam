@@ -372,8 +372,10 @@ export async function ghStatusLookup(
       continue;
     }
 
-    try {
-      const fetchedAt = new Date(entry.fetchedAt.replace('Z', '+00:00')).getTime();
+    const fetchedAt = new Date(entry.fetchedAt.replace('Z', '+00:00')).getTime();
+    if (!Number.isFinite(fetchedAt)) {
+      stale.push([projName, repo]);
+    } else {
       const ttl =
       entry.ci === 'in_progress' ? GH_CACHE_TTL_PENDING :
       entry.ci === 'failure' ? GH_CACHE_TTL_FAILURE :
@@ -381,8 +383,6 @@ export async function ghStatusLookup(
       if ((now - fetchedAt) / 1000 > ttl) {
         stale.push([projName, repo]);
       }
-    } catch {
-      stale.push([projName, repo]);
     }
   }
 
