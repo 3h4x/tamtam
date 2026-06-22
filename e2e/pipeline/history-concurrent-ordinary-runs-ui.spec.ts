@@ -178,6 +178,112 @@ async function stubHistoryShell(page: Page, jobs: () => MockJob[]): Promise<void
 }
 
 test.describe('History tab concurrent ordinary runs', () => {
+  test('two live runs stay isolated when one succeeds and the other keeps running', async ({
+    page,
+  }) => {
+    let phase: 'both-running' | 'one-succeeded' | 'all-settled' = 'both-running'
+
+    await stubHistoryShell(page, () => {
+      if (phase === 'both-running') {
+        return [
+          makeRunJob(
+            'ordinary-run-succeeded-peer',
+            'Finish this peer run while the other keeps going.',
+            'Preparing the final successful response.',
+          ),
+          makeRunJob(
+            'ordinary-run-steady-success-peer',
+            'Keep this peer run alive while the other finishes.',
+            'Continuing useful work after the peer settles.',
+            { started_at: now() - 20 },
+          ),
+        ]
+      }
+
+      if (phase === 'one-succeeded') {
+        return [
+          makeRunJob(
+            'ordinary-run-succeeded-peer',
+            'Finish this peer run while the other keeps going.',
+            'Completed successfully before its peer finished.',
+            {
+              status: 'done',
+              exit_code: 0,
+              finished_at: now() - 2,
+            },
+          ),
+          makeRunJob(
+            'ordinary-run-steady-success-peer',
+            'Keep this peer run alive while the other finishes.',
+            'Still processing after the peer completed successfully.',
+            { started_at: now() - 20 },
+          ),
+        ]
+      }
+
+      return [
+        makeRunJob(
+          'ordinary-run-succeeded-peer',
+          'Finish this peer run while the other keeps going.',
+          'Completed successfully before its peer finished.',
+          {
+            status: 'done',
+            exit_code: 0,
+            finished_at: now() - 5,
+          },
+        ),
+        makeRunJob(
+          'ordinary-run-steady-success-peer',
+          'Keep this peer run alive while the other finishes.',
+          'Completed after its peer already succeeded.',
+          {
+            status: 'done',
+            exit_code: 0,
+            finished_at: now() - 1,
+          },
+        ),
+      ]
+    })
+
+    await page.goto(`/project/${PROJECT}/history`)
+
+    const finishedRow = runRow(page, 'Finish this peer run while the other keeps going.')
+    const steadyRow = runRow(page, 'Keep this peer run alive while the other finishes.')
+
+    await expect(finishedRow).toBeVisible({ timeout: 8_000 })
+    await expect(steadyRow).toBeVisible({ timeout: 8_000 })
+    await expect(finishedRow.getByLabel('running')).toBeVisible()
+    await expect(steadyRow.getByLabel('running')).toBeVisible()
+    await expect(page.getByText('2 running')).toBeVisible()
+    await expect(runningRows(page)).toHaveCount(2)
+
+    phase = 'one-succeeded'
+
+    await expect(finishedRow.getByLabel('done')).toBeVisible({ timeout: 12_000 })
+    await expect(finishedRow.getByText('Completed successfully before its peer finished.')).toBeVisible({
+      timeout: 12_000,
+    })
+    await expect(finishedRow.getByLabel('running')).toHaveCount(0, { timeout: 12_000 })
+    await expect(steadyRow.getByLabel('running')).toBeVisible({ timeout: 12_000 })
+    await expect(
+      steadyRow.getByText('Still processing after the peer completed successfully.'),
+    ).toBeVisible({
+      timeout: 12_000,
+    })
+    await expect(page.getByText('1 running')).toBeVisible({ timeout: 12_000 })
+    await expect(runningRows(page)).toHaveCount(1, { timeout: 12_000 })
+
+    phase = 'all-settled'
+
+    await expect(steadyRow.getByLabel('done')).toBeVisible({ timeout: 12_000 })
+    await expect(steadyRow.getByText('Completed after its peer already succeeded.')).toBeVisible({
+      timeout: 12_000,
+    })
+    await expect(steadyRow.getByLabel('running')).toHaveCount(0, { timeout: 12_000 })
+    await expect(page.getByText('1 running')).toHaveCount(0, { timeout: 12_000 })
+    await expect(runningRows(page)).toHaveCount(0, { timeout: 12_000 })
+  })
+
   test('two live runs stay isolated when one is cancelled and the other keeps running', async ({
     page,
   }) => {
