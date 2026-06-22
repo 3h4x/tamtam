@@ -298,7 +298,7 @@ async function finalizePrWaitStep(
 
   // Auto-dispatch fix-ci when remote CI checks fail on an open PR. Without
   // this the release ends at a broken PR and no further work happens until
-  // a human clicks "Fix CI"; the user's stated goal is "go till merge".
+  // a human clicks "Fix CI"; release automation keeps driving toward merge.
   // fix-ci's existing release-after-fix-ci hook chains a new release on
   // success, closing the loop.
   if (reason === 'checks_failed' && job) {

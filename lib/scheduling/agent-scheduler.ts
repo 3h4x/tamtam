@@ -3,8 +3,8 @@
 // retired (see `lib/workflows/cron/seed-agent-crons.ts` + `agent-cron-task.ts`
 // for the actual cron-tick handler).
 //
-// The same prompt-file persistence pattern from the in-memory era is kept
-// here: each agent's prompt is written to `<logDir>/agent-scripts/<agentId>.prompt.json`
+// Prompt-file persistence keeps each agent's prompt available at
+// `<logDir>/agent-scripts/<agentId>.prompt.json`
 // so out-of-band reruns can recover it after a server restart.
 
 import { writeFileSync, unlinkSync, existsSync, mkdirSync } from 'fs';
