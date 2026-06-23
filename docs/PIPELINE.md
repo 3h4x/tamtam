@@ -278,8 +278,13 @@ owns the project lock.
 The 30-second probe sweep also reconciles git state that is stranded outside an
 active release. Non-default `fix/issue-*` branches with unshipped work trigger a
 new release, empty local fix branches are checked back out to the default
-branch, and clean default branches that are ahead/behind their upstream trigger
-a push. Clean detached HEADs are reattached to the default branch; if the
+branch, and clean `fix/issue-*` branches whose commits are fully pushed but
+whose open PR fell behind `origin/<default>` are revalidated, rebased onto the
+fetched default, force-pushed with lease, and handed back to `pr-wait`. That
+stale-PR recovery only mutates when the branch, clean worktree, upstream
+freshness, behind count, and exact open PR identity still match immediately
+before the rebase. Clean default branches that are ahead/behind their upstream
+trigger a push. Clean detached HEADs are reattached to the default branch; if the
 detached commit is ahead of `origin/<default>`, TamTam first pins it to a local
 `recover/detached-<sha>` branch so the checkout cannot orphan unpushed work.
 Dirty default branches are more dangerous: TamTam only treats them as
