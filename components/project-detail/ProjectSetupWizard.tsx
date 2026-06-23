@@ -15,6 +15,7 @@ import {
 import { buildProjectPath, buildProjectTerminalPath } from '@/lib/client/project-routes'
 import { Button } from '@/components/ui/Button'
 import { Checkbox } from '@/components/ui/Checkbox'
+import { ErrorCallout } from '@/components/ui/ErrorCallout'
 import { Input } from '@/components/ui/Input'
 import { Spinner } from '@/components/ui/Spinner'
 
@@ -242,9 +243,9 @@ export function ProjectSetupWizard() {
       </div>
 
       {error && (
-        <div className="rounded-md border border-status-error/30 bg-status-error/10 px-3 py-2 text-sm text-status-error">
+        <ErrorCallout radius="md" padding="none" preWrap={false} className="px-3 py-2 text-sm">
           {error}
-        </div>
+        </ErrorCallout>
       )}
 
       <div className="flex flex-wrap gap-1.5">
