@@ -87,6 +87,7 @@ describe('config', () => {
       const config = getSettings();
 
       expect(config).toEqual({
+        user_name: '',
         workspace_path: '',
         github_owner: '',
         trusted_github_users: [],
@@ -137,6 +138,7 @@ describe('config', () => {
         log_retention_days: 30,
         job_row_retention_days: 180,
         workflow_run_retention_days: 30,
+        skill_revision_retention_count: 50,
         backup_retention_count: 14,
         backup_retention_weekly_count: 8,
         db_backup_enabled: true,

@@ -30,6 +30,7 @@ interface NavItem {
 const NAV_ITEMS: NavItem[] = [
   { to: '/', label: 'Projects' },
   { to: '/monitoring', label: 'Monitoring' },
+  { to: '/runs', label: 'Runs' },
   { to: '/workflow-runs', label: 'Workflows' },
   { to: '/stats', label: 'Stats' },
   { to: '/library', label: 'Library' },

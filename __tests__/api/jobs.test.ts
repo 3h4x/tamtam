@@ -169,6 +169,21 @@ describe('GET /api/jobs', () => {
     expect(data.jobs[0].id).toBe('job-1');
   });
 
+  it('filters by kind prefix and started_at bounds', async () => {
+    const oldAgent = makeJob({ id: 'old-agent', kind: 'agent:docs', startedAt: 100, finishedAt: 110 });
+    const matchingAgent = makeJob({ id: 'matching-agent', kind: 'agent:docs', startedAt: 500, finishedAt: 510 });
+    const terminalRun = makeJob({ id: 'terminal-run', kind: 'run', startedAt: 600, finishedAt: 610 });
+    const futureAgent = makeJob({ id: 'future-agent', kind: 'agent:docs', startedAt: 900, finishedAt: 910 });
+    mocks.listJobs.mockReturnValue([oldAgent, matchingAgent, terminalRun, futureAgent]);
+
+    const req = new NextRequest('http://localhost/api/jobs?kind_prefix=agent:&from=400&to=800');
+    const res = await jobsGET(req);
+    const data = await res.json();
+
+    expect(data.jobs.map((j: any) => j.id)).toEqual(['matching-agent']);
+    expect(data.total).toBe(1);
+  });
+
   it('recovers session ids before applying has_session filter', async () => {
     const recoveredSessionId = 'sess-recovered';
     const recoverable = makeJob({
@@ -471,6 +486,24 @@ describe('GET /api/jobs/counts', () => {
       failed: 4,
       aborted: 1,
     });
+  });
+
+  it('applies project, date, and kind-prefix filters to aggregate spend', async () => {
+    mocks.listJobs.mockReturnValue([
+      makeJob({ id: 'a', project: 'proj1', kind: 'agent:docs', startedAt: 500, finishedAt: 510, costUsd: 1.25, inputTokens: 10 }),
+      makeJob({ id: 'b', project: 'proj1', kind: 'run', startedAt: 600, finishedAt: 610, costUsd: 2.5, inputTokens: 20 }),
+      makeJob({ id: 'c', project: 'proj2', kind: 'agent:docs', startedAt: 700, finishedAt: 710, costUsd: 4, inputTokens: 40 }),
+      makeJob({ id: 'd', project: 'proj1', kind: 'agent:docs', startedAt: 100, finishedAt: 110, costUsd: 8, inputTokens: 80 }),
+    ]);
+
+    const req = new NextRequest('http://localhost/api/jobs/counts?project=proj1&kind_prefix=agent:&from=400');
+    const res = await jobCountsGET(req);
+    const data = await res.json();
+
+    expect(data.total).toBe(1);
+    expect(data.byKind).toEqual({ 'agent:docs': 1 });
+    expect(data.tokens.input).toBe(10);
+    expect(data.cost.total).toBe(1.25);
   });
 });
 

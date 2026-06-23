@@ -270,6 +270,16 @@ export interface Skill {
   updatedAt: number
 }
 
+export interface SkillRevision {
+  id: number
+  entityId: string
+  snapshot: string
+  parsedSnapshot: Skill | null
+  author: string
+  note: string | null
+  createdAt: number
+}
+
 export interface Agent {
   id: string
   name: string
@@ -314,6 +324,16 @@ export interface Agent {
     reason: string
     status: 'skipped' | 'dispatched' | 'queued' | string
   } | null
+}
+
+export interface AgentRevision {
+  id: number
+  entityId: string
+  snapshot: string
+  parsedSnapshot: Agent | null
+  author: string
+  note: string | null
+  createdAt: number
 }
 
 export interface ProjectDoc {

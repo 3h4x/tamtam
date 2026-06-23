@@ -1,5 +1,5 @@
 import { unlinkSync, statSync } from 'fs';
-import { lt, and, isNotNull, eq, isNull } from 'drizzle-orm';
+import { desc, lt, and, isNotNull, eq, isNull, inArray } from 'drizzle-orm';
 import { db, schema } from '@/lib/db';
 import { isUndefinedTableError } from '@/lib/db/errors';
 import { getSettings } from '@/lib/shared/config';
@@ -8,6 +8,7 @@ export interface RetentionConfig {
   log_retention_count: number;
   log_retention_days: number;
   job_row_retention_days: number;
+  skill_revision_retention_count?: number;
 }
 
 type CleanupStatus = 'completed' | 'disabled' | 'failed';
@@ -35,6 +36,7 @@ export interface NightlyRetentionSummary {
   finishedAt: number;
   rowsScanned: number;
   rowsDeleted: number;
+  revisionRowsDeleted?: number;
   skippedRunningRows: number;
   errorCount: number;
   lastError: string | null;
@@ -215,6 +217,7 @@ export async function runNightlyCleanup(cfg?: RetentionConfig): Promise<NightlyR
     finishedAt: startedAt,
     rowsScanned: 0,
     rowsDeleted: 0,
+    revisionRowsDeleted: 0,
     skippedRunningRows: 0,
     errorCount: 0,
     lastError: null,
@@ -223,7 +226,10 @@ export async function runNightlyCleanup(cfg?: RetentionConfig): Promise<NightlyR
   const { job_row_retention_days } = settings;
 
   if (job_row_retention_days <= 0) {
-    summary.status = 'disabled';
+    summary.revisionRowsDeleted = await pruneRevisionTables(
+      settings.skill_revision_retention_count ?? getSettings().skill_revision_retention_count ?? 50,
+    );
+    summary.status = summary.revisionRowsDeleted > 0 ? 'completed' : 'disabled';
     summary.finishedAt = nowSeconds();
     persistRetentionSummary(summary);
     return summary;
@@ -257,6 +263,9 @@ export async function runNightlyCleanup(cfg?: RetentionConfig): Promise<NightlyR
     } catch (e) {
       console.error('[retention] resource-samples prune failed:', e);
     }
+    summary.revisionRowsDeleted = await pruneRevisionTables(
+      settings.skill_revision_retention_count ?? getSettings().skill_revision_retention_count ?? 50,
+    );
   } catch (e) {
     summary.status = 'failed';
     summary.errorCount += 1;
@@ -267,4 +276,34 @@ export async function runNightlyCleanup(cfg?: RetentionConfig): Promise<NightlyR
   summary.finishedAt = nowSeconds();
   persistRetentionSummary(summary);
   return summary;
+}
+
+async function pruneRevisionTables(retentionCount: number): Promise<number> {
+  if (retentionCount <= 0) return 0;
+  const skillDeleted = await pruneRevisionTable('skill', retentionCount);
+  const agentDeleted = await pruneRevisionTable('agent', retentionCount);
+  return skillDeleted + agentDeleted;
+}
+
+async function pruneRevisionTable(kind: 'skill' | 'agent', retentionCount: number): Promise<number> {
+  const table = kind === 'skill' ? schema.skillRevisions : schema.agentRevisions;
+  const rows = await db
+    .select({ id: table.id, entityId: table.entityId })
+    .from(table)
+    .orderBy(table.entityId, desc(table.createdAt), desc(table.id));
+  const keepCounts = new Map<string, number>();
+  const deleteIds: number[] = [];
+  for (const row of rows) {
+    const seen = keepCounts.get(row.entityId) ?? 0;
+    if (seen >= retentionCount) {
+      deleteIds.push(row.id);
+    } else {
+      keepCounts.set(row.entityId, seen + 1);
+    }
+  }
+  if (deleteIds.length === 0) return 0;
+  const result = await db.delete(table)
+    .where(inArray(table.id, deleteIds))
+    .execute();
+  return result.rowCount ?? deleteIds.length;
 }

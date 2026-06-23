@@ -1,7 +1,8 @@
 'use client'
 
 import { useEffect, useRef, useState } from 'react'
-import type { Skill } from '@/lib/client-api'
+import { fetchSkillRevisions, revertSkill } from '@/lib/client-api'
+import type { Skill, SkillRevision } from '@/lib/client-api'
 import { Button } from '@/components/ui/Button'
 import { Input } from '@/components/ui/Input'
 import { Textarea } from '@/components/ui/Textarea'
@@ -13,18 +14,24 @@ export function SkillEditor({
   onDelete,
   onCancel,
   onDirtyChange,
+  onReverted,
 }: {
   skill?: Skill
   onSave: (data: { name: string; description: string; content: string }) => Promise<void>
   onDelete?: () => void
   onCancel: () => void
   onDirtyChange?: (dirty: boolean) => void
+  onReverted?: (skill: Skill) => void
 }) {
   const [name, setName] = useState(skill?.name || '')
   const [description, setDescription] = useState(skill?.description || '')
   const [content, setContent] = useState(skill?.content || '')
   const [saving, setSaving] = useState(false)
   const [saved, setSaved] = useState(false)
+  const [mode, setMode] = useState<'edit' | 'history'>('edit')
+  const [revisions, setRevisions] = useState<SkillRevision[]>([])
+  const [historyLoading, setHistoryLoading] = useState(false)
+  const [revertingId, setRevertingId] = useState<number | null>(null)
   const nameRef = useRef<HTMLInputElement>(null)
 
   const baselineRef = useRef({ name: skill?.name || '', description: skill?.description || '', content: skill?.content || '' })
@@ -43,6 +50,8 @@ export function SkillEditor({
     setDescription(baselineRef.current.description)
     setContent(baselineRef.current.content)
     setSaved(false)
+    setMode('edit')
+    setRevisions([])
     onDirtyChangeRef.current?.(false)
   }, [skill?.id])
 
@@ -74,6 +83,45 @@ export function SkillEditor({
     setSaving(false)
   }
 
+  const loadHistory = async () => {
+    if (!skill || historyLoading) return
+    setHistoryLoading(true)
+    try {
+      const result = await fetchSkillRevisions(skill.id)
+      setRevisions(result.revisions)
+    } finally {
+      setHistoryLoading(false)
+    }
+  }
+
+  const openHistory = () => {
+    setMode('history')
+    void loadHistory()
+  }
+
+  const handleRevert = async (revisionId: number) => {
+    if (!skill || revertingId !== null) return
+    setRevertingId(revisionId)
+    try {
+      const result = await revertSkill(skill.id, revisionId)
+      setName(result.skill.name)
+      setDescription(result.skill.description)
+      setContent(result.skill.content)
+      baselineRef.current = {
+        name: result.skill.name,
+        description: result.skill.description,
+        content: result.skill.content,
+      }
+      onDirtyChangeRef.current?.(false)
+      onReverted?.(result.skill)
+      const history = await fetchSkillRevisions(skill.id)
+      setRevisions(history.revisions)
+      setMode('edit')
+    } finally {
+      setRevertingId(null)
+    }
+  }
+
   return (
     <div className="bg-bg-secondary rounded-lg p-4 flex flex-col gap-4 border border-border">
       <div className="flex items-center justify-between">
@@ -81,6 +129,24 @@ export function SkillEditor({
           {skill ? 'Edit Skill' : 'New Skill'}
         </h3>
         <div className="flex items-center gap-2">
+          {skill && (
+            <div className="flex rounded-md border border-border overflow-hidden">
+              <button
+                type="button"
+                className={`px-3 py-1.5 text-xs ${mode === 'edit' ? 'bg-bg-tertiary text-text-primary' : 'text-text-secondary'}`}
+                onClick={() => setMode('edit')}
+              >
+                Edit
+              </button>
+              <button
+                type="button"
+                className={`px-3 py-1.5 text-xs border-l border-border ${mode === 'history' ? 'bg-bg-tertiary text-text-primary' : 'text-text-secondary'}`}
+                onClick={openHistory}
+              >
+                History
+              </button>
+            </div>
+          )}
           {onDelete && (
             <Button
               type="button"
@@ -109,46 +175,96 @@ export function SkillEditor({
         </div>
       </div>
 
-      <div>
-        <label htmlFor="skill-name" className="block mb-1 text-sm font-medium text-text-primary">Name</label>
-        <Input
-          id="skill-name"
-          ref={nameRef}
-          type="text"
-          inputSize="compact"
-          paddingX="default"
-          fontFamily="sans"
-          value={name}
-          onChange={(e) => setName(e.target.value)}
-          placeholder="e.g. security-reviewer"
-        />
-      </div>
+      {mode === 'edit' ? (
+        <>
+          <div>
+            <label htmlFor="skill-name" className="block mb-1 text-sm font-medium text-text-primary">Name</label>
+            <Input
+              id="skill-name"
+              ref={nameRef}
+              type="text"
+              inputSize="compact"
+              paddingX="default"
+              fontFamily="sans"
+              value={name}
+              onChange={(e) => setName(e.target.value)}
+              placeholder="e.g. security-reviewer"
+            />
+          </div>
 
-      <div>
-        <label htmlFor="skill-description" className="block mb-1 text-sm font-medium text-text-primary">Description</label>
-        <Input
-          id="skill-description"
-          type="text"
-          inputSize="compact"
-          paddingX="default"
-          fontFamily="sans"
-          value={description}
-          onChange={(e) => setDescription(e.target.value)}
-          placeholder="Short description of what this skill does"
-        />
-      </div>
+          <div>
+            <label htmlFor="skill-description" className="block mb-1 text-sm font-medium text-text-primary">Description</label>
+            <Input
+              id="skill-description"
+              type="text"
+              inputSize="compact"
+              paddingX="default"
+              fontFamily="sans"
+              value={description}
+              onChange={(e) => setDescription(e.target.value)}
+              placeholder="Short description of what this skill does"
+            />
+          </div>
 
-      <div className="flex flex-col min-h-0">
-        <label htmlFor="skill-content" className="block mb-1 text-sm font-medium text-text-primary">Prompt Content</label>
-        <Textarea
-          id="skill-content"
-          appearance="muted"
-          className="h-[60vh] min-h-[240px]"
-          value={content}
-          onChange={(e) => setContent(e.target.value)}
-          placeholder="The system prompt / instructions for this skill..."
-        />
-      </div>
+          <div className="flex flex-col min-h-0">
+            <label htmlFor="skill-content" className="block mb-1 text-sm font-medium text-text-primary">Prompt Content</label>
+            <Textarea
+              id="skill-content"
+              appearance="muted"
+              className="h-[60vh] min-h-[240px]"
+              value={content}
+              onChange={(e) => setContent(e.target.value)}
+              placeholder="The system prompt / instructions for this skill..."
+            />
+          </div>
+        </>
+      ) : (
+        <div className="flex flex-col gap-3">
+          {historyLoading ? (
+            <div className="text-sm text-text-secondary">Loading history…</div>
+          ) : revisions.length === 0 ? (
+            <div className="text-sm text-text-secondary">No revisions recorded yet.</div>
+          ) : revisions.map((revision) => {
+            const snap = revision.parsedSnapshot
+            return (
+              <div key={revision.id} className="rounded-md border border-border bg-bg-primary p-3">
+                <div className="flex items-center justify-between gap-3">
+                  <div className="min-w-0">
+                    <div className="text-sm font-medium text-text-primary">
+                      Revision {revision.id}
+                    </div>
+                    <div className="text-xs text-text-tertiary">
+                      {new Date(revision.createdAt * 1000).toLocaleString()} · {revision.author}
+                      {revision.note ? ` · ${revision.note}` : ''}
+                    </div>
+                  </div>
+                  <Button
+                    type="button"
+                    variant="secondary"
+                    size="sm"
+                    disabled={!snap || revertingId !== null}
+                    onClick={() => handleRevert(revision.id)}
+                  >
+                    {revertingId === revision.id ? 'Reverting…' : 'Revert'}
+                  </Button>
+                </div>
+                {snap && (
+                  <div className="mt-3 grid grid-cols-1 md:grid-cols-2 gap-3">
+                    <div>
+                      <div className="mb-1 text-xs font-semibold text-text-tertiary uppercase">Then</div>
+                      <pre className="max-h-64 overflow-auto rounded-md bg-bg-secondary p-2 text-xs text-text-secondary whitespace-pre-wrap">{snap.content}</pre>
+                    </div>
+                    <div>
+                      <div className="mb-1 text-xs font-semibold text-text-tertiary uppercase">Now</div>
+                      <pre className="max-h-64 overflow-auto rounded-md bg-bg-secondary p-2 text-xs text-text-secondary whitespace-pre-wrap">{content}</pre>
+                    </div>
+                  </div>
+                )}
+              </div>
+            )
+          })}
+        </div>
+      )}
     </div>
   )
 }

@@ -1,4 +1,4 @@
-import type { Agent } from './types'
+import type { Agent, AgentRevision } from './types'
 
 export type RunAgentResult =
   | { status: 'started'; job_id: string; pid: number; agent?: string; via?: 'workflow' | 'system' }
@@ -41,7 +41,7 @@ export async function createAgent(agent: { name: string; project: string; skillI
   return response.json()
 }
 
-export async function updateAgent(agentId: string, updates: Partial<{ name: string; skillIds: string[]; docPaths: string[]; model: string; prompt: string; schedule: string | null; enabled: boolean; boostable: boolean; provider: string | null; prerequisiteCommand: string | null; permissionMode: string | null }>): Promise<{ agent: Agent }> {
+export async function updateAgent(agentId: string, updates: Partial<{ name: string; skillIds: string[]; docPaths: string[]; model: string; prompt: string; schedule: string | null; enabled: boolean; boostable: boolean; provider: string | null; prerequisiteCommand: string | null; permissionMode: string | null; note: string | null }>): Promise<{ agent: Agent }> {
   const response = await fetch(`/api/agents/${encodeURIComponent(agentId)}`, {
     method: 'PATCH',
     headers: { 'Content-Type': 'application/json' },
@@ -57,6 +57,25 @@ export async function updateAgent(agentId: string, updates: Partial<{ name: stri
 export async function deleteAgent(agentId: string): Promise<void> {
   const response = await fetch(`/api/agents/${encodeURIComponent(agentId)}`, { method: 'DELETE' })
   if (!response.ok) throw new Error('Failed to delete agent')
+}
+
+export async function fetchAgentRevisions(agentId: string): Promise<{ revisions: AgentRevision[] }> {
+  const response = await fetch(`/api/agents/${encodeURIComponent(agentId)}/revisions`)
+  if (!response.ok) return { revisions: [] }
+  return response.json()
+}
+
+export async function revertAgent(agentId: string, revisionId: number): Promise<{ agent: Agent }> {
+  const response = await fetch(`/api/agents/${encodeURIComponent(agentId)}/revert`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ revisionId }),
+  })
+  if (!response.ok) {
+    const data = await response.json().catch(() => ({}))
+    throw new Error(data.detail || 'Failed to revert agent')
+  }
+  return response.json()
 }
 
 export interface ImprovePromptInput {

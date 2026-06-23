@@ -15,6 +15,7 @@ import { parseOptionalPermissionModeInput } from '@/lib/shared/config';
 import { isCliProvider } from '@/lib/usage/cli-providers';
 import { parsePrerequisiteCommandInput } from '@/lib/agents/prerequisites';
 import { resolveAgentPrerequisiteCommandWithFileSkills } from '@/lib/agents/file-skill-prerequisites';
+import { recordAgentRevision } from '@/lib/agents/revisions';
 
 function withEffectivePrerequisite<T extends { project: string; skillIds: string[]; prerequisiteCommand?: string | null }>(
   agent: T,
@@ -104,6 +105,7 @@ export async function PATCH(request: NextRequest) {
     if (!isSystemAgent && fields.prerequisiteCommand !== undefined) updates.prerequisiteCommand = prerequisiteCommand ?? '';
     if (!isSystemAgent && fields.permissionMode !== undefined) updates.permissionMode = parsedPermissionMode;
 
+    await recordAgentRevision(existing, fields.note);
     await db.update(schema.agents).set(updates).where(eq(schema.agents.id, existing.id)).execute();
     clearAgentsCache();
 

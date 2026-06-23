@@ -40,6 +40,26 @@ async function applyDdl(handle: TestDbHandle): Promise<void> {
       updated_at double precision NOT NULL
     )
   `));
+  await handle.db.execute(sql.raw(`
+    CREATE TABLE IF NOT EXISTS skill_revisions (
+      id serial PRIMARY KEY,
+      entity_id text NOT NULL,
+      snapshot text NOT NULL,
+      author text NOT NULL,
+      note text,
+      created_at double precision NOT NULL
+    )
+  `));
+  await handle.db.execute(sql.raw(`
+    CREATE TABLE IF NOT EXISTS agent_revisions (
+      id serial PRIMARY KEY,
+      entity_id text NOT NULL,
+      snapshot text NOT NULL,
+      author text NOT NULL,
+      note text,
+      created_at double precision NOT NULL
+    )
+  `));
 }
 
 describe('skills API', () => {
@@ -48,6 +68,8 @@ describe('skills API', () => {
   let skillDetailGET: typeof import('@/app/api/skills/[skillId]/route').GET;
   let skillDetailPATCH: typeof import('@/app/api/skills/[skillId]/route').PATCH;
   let skillDetailDELETE: typeof import('@/app/api/skills/[skillId]/route').DELETE;
+  let skillRevisionsGET: typeof import('@/app/api/skills/[skillId]/revisions/route').GET;
+  let skillRevertPOST: typeof import('@/app/api/skills/[skillId]/revert/route').POST;
 
   beforeAll(async () => {
     sharedHandle = await createTestPgDbEmpty();
@@ -66,6 +88,12 @@ describe('skills API', () => {
     skillDetailGET = skillDetailRoute.GET;
     skillDetailPATCH = skillDetailRoute.PATCH;
     skillDetailDELETE = skillDetailRoute.DELETE;
+
+    const skillRevisionsRoute = await import('@/app/api/skills/[skillId]/revisions/route');
+    skillRevisionsGET = skillRevisionsRoute.GET;
+
+    const skillRevertRoute = await import('@/app/api/skills/[skillId]/revert/route');
+    skillRevertPOST = skillRevertRoute.POST;
   });
 
   afterAll(async () => {
@@ -74,7 +102,7 @@ describe('skills API', () => {
 
   beforeEach(async () => {
     await sharedHandle.db.execute(sql.raw(
-      'WITH a AS (DELETE FROM skills RETURNING 1) DELETE FROM agents'
+      'TRUNCATE skills, agents, skill_revisions, agent_revisions RESTART IDENTITY'
     ));
   });
 
@@ -353,6 +381,9 @@ describe('skills API', () => {
 
       const data = await response.json();
       expect(data.skill.content).toBe('New content');
+      const revisions = await sharedHandle.db.select().from(schema.skillRevisions);
+      expect(revisions).toHaveLength(1);
+      expect(JSON.parse(revisions[0].snapshot).content).toBe('Old content');
     });
 
     it('preserves content whitespace when updating content', async () => {
@@ -467,6 +498,64 @@ describe('skills API', () => {
       expect(response.status).toBe(400);
       const data = await response.json();
       expect(data.detail).toMatch(/content must be a string/i);
+    });
+  });
+
+  describe('skill revisions', () => {
+    it('lists revisions for a skill', async () => {
+      const now = Date.now() / 1000;
+      await sharedHandle.db.insert(schema.skills).values({
+        id: 'skill-123',
+        name: 'Name',
+        description: 'Description',
+        content: 'Old content',
+        createdAt: now,
+        updatedAt: now,
+      });
+      await skillDetailPATCH(new NextRequest('http://localhost/api/skills/skill-123', {
+        method: 'PATCH',
+        body: JSON.stringify({ content: 'New content', note: 'tighten prompt' }),
+      }), { params: Promise.resolve({ skillId: 'skill-123' }) });
+
+      const response = await skillRevisionsGET(
+        new NextRequest('http://localhost/api/skills/skill-123/revisions'),
+        { params: Promise.resolve({ skillId: 'skill-123' }) },
+      );
+      const data = await response.json();
+
+      expect(response.status).toBe(200);
+      expect(data.revisions).toHaveLength(1);
+      expect(data.revisions[0].note).toBe('tighten prompt');
+      expect(data.revisions[0].parsedSnapshot.content).toBe('Old content');
+    });
+
+    it('reverts to a prior revision and writes an audit revision for the revert', async () => {
+      const now = Date.now() / 1000;
+      await sharedHandle.db.insert(schema.skills).values({
+        id: 'skill-123',
+        name: 'Name',
+        description: 'Description',
+        content: 'Old content',
+        createdAt: now,
+        updatedAt: now,
+      });
+      await skillDetailPATCH(new NextRequest('http://localhost/api/skills/skill-123', {
+        method: 'PATCH',
+        body: JSON.stringify({ content: 'New content' }),
+      }), { params: Promise.resolve({ skillId: 'skill-123' }) });
+      const [revision] = await sharedHandle.db.select().from(schema.skillRevisions);
+
+      const response = await skillRevertPOST(new NextRequest('http://localhost/api/skills/skill-123/revert', {
+        method: 'POST',
+        body: JSON.stringify({ revisionId: revision.id }),
+      }), { params: Promise.resolve({ skillId: 'skill-123' }) });
+      const data = await response.json();
+
+      expect(response.status).toBe(200);
+      expect(data.skill.content).toBe('Old content');
+      const revisions = await sharedHandle.db.select().from(schema.skillRevisions);
+      expect(revisions).toHaveLength(2);
+      expect(JSON.parse(revisions[1].snapshot).content).toBe('New content');
     });
   });
 

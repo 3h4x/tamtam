@@ -373,6 +373,11 @@ export function SkillsPage() {
                 }
                 setEditorDirty(false)
               }}
+              onReverted={(skill) => {
+                setSkills(prev => prev.map(s => s.id === skill.id ? skill : s))
+                setEditing(skill)
+                setEditorDirty(false)
+              }}
               onDelete={editing ? () => handleDelete(editing.id) : undefined}
               onCancel={closeEditor}
             />

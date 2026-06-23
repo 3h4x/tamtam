@@ -40,6 +40,7 @@ export function normalizeBrowserBrokerImage(raw: string | undefined): string {
 }
 
 export interface TamTamConfig {
+  user_name?: string;
   workspace_path: string;
   github_owner: string;
   trusted_github_users: string[];
@@ -103,6 +104,7 @@ export interface TamTamConfig {
   workflow_run_retention_days: number;
   backup_retention_count: number;
   backup_retention_weekly_count: number;
+  skill_revision_retention_count?: number;
   db_backup_enabled: boolean;
   db_backup_interval_minutes: number;
   notification_webhook_url: string;
@@ -174,6 +176,7 @@ export interface TamTamConfig {
 }
 
 export const DEFAULTS: TamTamConfig = {
+  user_name: '',
   workspace_path: '',
   github_owner: '',
   trusted_github_users: [],
@@ -238,6 +241,7 @@ export const DEFAULTS: TamTamConfig = {
   workflow_run_retention_days: 30,
   backup_retention_count: 14,
   backup_retention_weekly_count: 8,
+  skill_revision_retention_count: 50,
   db_backup_enabled: true,
   db_backup_interval_minutes: 15,
   notification_webhook_url: '',
@@ -445,6 +449,7 @@ export function buildConfigFromSettingsMap(map: Record<string, string>): TamTamC
 
   const config: TamTamConfig = {
     workspace_path: map.workspace_path ?? DEFAULTS.workspace_path,
+    user_name: map.user_name ?? DEFAULTS.user_name,
     github_owner: map.github_owner ?? DEFAULTS.github_owner,
     trusted_github_users: parseJsonStringArray(map.trusted_github_users),
     github_board_sync_enabled: map.github_board_sync_enabled === 'true',
@@ -512,6 +517,10 @@ export function buildConfigFromSettingsMap(map: Record<string, string>): TamTamC
     workflow_run_retention_days: parseIntOr(map.workflow_run_retention_days, DEFAULTS.workflow_run_retention_days),
     backup_retention_count: parseIntOr(map.backup_retention_count, DEFAULTS.backup_retention_count),
     backup_retention_weekly_count: parseIntOr(map.backup_retention_weekly_count, DEFAULTS.backup_retention_weekly_count),
+    skill_revision_retention_count: parseNonNegativeIntOr(
+      map.skill_revision_retention_count,
+      DEFAULTS.skill_revision_retention_count ?? 50,
+    ),
     db_backup_enabled: map.db_backup_enabled === undefined
       ? DEFAULTS.db_backup_enabled
       : map.db_backup_enabled === 'true',

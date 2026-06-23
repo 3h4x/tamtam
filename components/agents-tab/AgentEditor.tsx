@@ -1,8 +1,8 @@
 'use client'
 
 import { useState, useEffect, useMemo, useRef } from 'react'
-import { fetchProjectDocs, improveAgentPrompt } from '@/lib/client-api'
-import type { Agent, Skill, Persona, ProjectDoc } from '@/lib/client-api'
+import { fetchAgentRevisions, fetchProjectDocs, improveAgentPrompt, revertAgent } from '@/lib/client-api'
+import type { Agent, AgentRevision, Skill, Persona, ProjectDoc } from '@/lib/client-api'
 import { Button } from '@/components/ui/Button'
 import { EmptyState } from '@/components/ui/EmptyState'
 import { Input } from '@/components/ui/Input'
@@ -50,6 +50,7 @@ export function AgentEditor({
   onSave,
   onDelete,
   onBack,
+  onReverted,
   autoImprove,
   onAutoImproveConsumed,
 }: {
@@ -61,6 +62,7 @@ export function AgentEditor({
   onSave: (data: AgentEditorSavePayload) => Promise<void>
   onDelete?: () => void
   onBack: () => void
+  onReverted?: (agent: Agent) => void
   // When true (e.g. arriving from a recommendation's "Improve prompt" action),
   // run the failure-aware improve flow once on mount so the operator lands on a
   // proposed rewrite ready to review and save.
@@ -108,6 +110,10 @@ export function AgentEditor({
   const [permissionMode, setPermissionMode] = useState<string>(agent?.permissionMode ?? '')
   const [saving, setSaving] = useState(false)
   const [improving, setImproving] = useState(false)
+  const [mode, setMode] = useState<'edit' | 'history'>('edit')
+  const [revisions, setRevisions] = useState<AgentRevision[]>([])
+  const [historyLoading, setHistoryLoading] = useState(false)
+  const [revertingId, setRevertingId] = useState<number | null>(null)
   const autoImproveFiredRef = useRef(false)
   const [confirmDelete, setConfirmDelete] = useState(false)
   const [skillSearch, setSkillSearch] = useState('')
@@ -164,6 +170,8 @@ export function AgentEditor({
           skillIds: src.skillIds || [],
           prerequisiteCommand: null,
         }) ?? ''))
+    setMode('edit')
+    setRevisions([])
   }, [agent?.id, project, template?.name, template?.prerequisiteCommand])
 
   useEffect(() => {
@@ -217,6 +225,55 @@ export function AgentEditor({
     }
   }
 
+  const loadHistory = async () => {
+    if (!agent || historyLoading) return
+    setHistoryLoading(true)
+    try {
+      const result = await fetchAgentRevisions(agent.id)
+      setRevisions(result.revisions)
+    } finally {
+      setHistoryLoading(false)
+    }
+  }
+
+  const openHistory = () => {
+    setMode('history')
+    void loadHistory()
+  }
+
+  const applyAgentState = (updated: Agent) => {
+    setName(updated.name)
+    setAgentPrompt(updated.prompt)
+    setSelectedSkills(updated.skillIds || [])
+    setSelectedDocPaths(updated.docPaths || [])
+    setModel(normalizeModelInput(updated.model, 'normal'))
+    setRole(parseAgentRole((updated as { role?: string }).role))
+    setProvider((updated.provider as CliProvider | null | undefined) ?? null)
+    setFallbackEnabled(updated.fallbackEnabled ?? false)
+    setPermissionMode(updated.permissionMode ?? '')
+    setSchedule(updated.schedule || '')
+    setEnabled(updated.enabled)
+    setBoostable(updated.boostable ?? true)
+    setPrerequisiteCommand(updated.prerequisiteCommand ?? '')
+  }
+
+  const handleRevert = async (revisionId: number) => {
+    if (!agent || revertingId !== null) return
+    setRevertingId(revisionId)
+    try {
+      const result = await revertAgent(agent.id, revisionId)
+      applyAgentState(result.agent)
+      onReverted?.(result.agent)
+      const history = await fetchAgentRevisions(agent.id)
+      setRevisions(history.revisions)
+      setMode('edit')
+    } catch (err) {
+      toast(err instanceof Error ? err.message : 'Failed to revert agent', 'error')
+    } finally {
+      setRevertingId(null)
+    }
+  }
+
   // One-shot: when launched with autoImprove (the recommendation "Improve
   // prompt" action), run the failure-aware improve once the existing agent's
   // prompt has loaded. Guarded by a ref so it never re-fires on re-render.
@@ -250,6 +307,24 @@ export function AgentEditor({
             {isNew ? 'New agent' : `Edit — ${agent.name}`}
           </h2>
         </div>
+        {agent?.source !== 'file' && !isNew && (
+          <div className="flex rounded-md border border-border overflow-hidden">
+            <button
+              type="button"
+              className={`px-3 py-1.5 text-xs ${mode === 'edit' ? 'bg-bg-tertiary text-text-primary' : 'text-text-secondary'}`}
+              onClick={() => setMode('edit')}
+            >
+              Edit
+            </button>
+            <button
+              type="button"
+              className={`px-3 py-1.5 text-xs border-l border-border ${mode === 'history' ? 'bg-bg-tertiary text-text-primary' : 'text-text-secondary'}`}
+              onClick={openHistory}
+            >
+              History
+            </button>
+          </div>
+        )}
       </div>
 
       {isSystemAgent && (
@@ -262,6 +337,55 @@ export function AgentEditor({
         </div>
       )}
 
+      {mode === 'history' && agent && (
+        <div className="flex flex-col gap-3">
+          {historyLoading ? (
+            <div className="text-sm text-text-secondary">Loading history…</div>
+          ) : revisions.length === 0 ? (
+            <div className="text-sm text-text-secondary">No revisions recorded yet.</div>
+          ) : revisions.map((revision) => {
+            const snap = revision.parsedSnapshot
+            return (
+              <div key={revision.id} className="rounded-md border border-border bg-bg-secondary p-3">
+                <div className="flex items-center justify-between gap-3">
+                  <div className="min-w-0">
+                    <div className="text-sm font-medium text-text-primary">
+                      Revision {revision.id}
+                    </div>
+                    <div className="text-xs text-text-tertiary">
+                      {new Date(revision.createdAt * 1000).toLocaleString()} · {revision.author}
+                      {revision.note ? ` · ${revision.note}` : ''}
+                    </div>
+                  </div>
+                  <Button
+                    type="button"
+                    variant="secondary"
+                    size="sm"
+                    disabled={!snap || revertingId !== null}
+                    onClick={() => handleRevert(revision.id)}
+                  >
+                    {revertingId === revision.id ? 'Reverting…' : 'Revert'}
+                  </Button>
+                </div>
+                {snap && (
+                  <div className="mt-3 grid grid-cols-1 lg:grid-cols-2 gap-3">
+                    <div>
+                      <div className="mb-1 text-xs font-semibold text-text-tertiary uppercase">Then</div>
+                      <pre className="max-h-72 overflow-auto rounded-md bg-bg-primary p-2 text-xs text-text-secondary whitespace-pre-wrap">{snap.prompt}</pre>
+                    </div>
+                    <div>
+                      <div className="mb-1 text-xs font-semibold text-text-tertiary uppercase">Now</div>
+                      <pre className="max-h-72 overflow-auto rounded-md bg-bg-primary p-2 text-xs text-text-secondary whitespace-pre-wrap">{agentPrompt}</pre>
+                    </div>
+                  </div>
+                )}
+              </div>
+            )
+          })}
+        </div>
+      )}
+
+      {mode === 'edit' && <>
       {/* Main 2-column layout: settings (left) + prompt (right) */}
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-4 items-start">
         {/* Left column — identity + run settings */}
@@ -649,6 +773,7 @@ export function AgentEditor({
           </Button>
         </div>
       </div>
+      </>}
     </div>
   )
 }

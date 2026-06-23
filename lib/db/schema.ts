@@ -170,6 +170,17 @@ export const skills = pgTable('skills', {
   updatedAt: doublePrecision('updated_at').notNull(),
 });
 
+export const skillRevisions = pgTable('skill_revisions', {
+  id: serial('id').primaryKey(),
+  entityId: text('entity_id').notNull(),
+  snapshot: text('snapshot').notNull(),
+  author: text('author').notNull(),
+  note: text('note'),
+  createdAt: doublePrecision('created_at').notNull(),
+}, (t) => ({
+  entityCreatedIdx: index('skill_revisions_entity_created').on(t.entityId, t.createdAt),
+}));
+
 export const agents = pgTable('agents', {
   id: text('id').primaryKey(),
   name: text('name').notNull(),
@@ -213,6 +224,17 @@ export const agents = pgTable('agents', {
   createdAt: doublePrecision('created_at').notNull(),
   updatedAt: doublePrecision('updated_at').notNull(),
 });
+
+export const agentRevisions = pgTable('agent_revisions', {
+  id: serial('id').primaryKey(),
+  entityId: text('entity_id').notNull(),
+  snapshot: text('snapshot').notNull(),
+  author: text('author').notNull(),
+  note: text('note'),
+  createdAt: doublePrecision('created_at').notNull(),
+}, (t) => ({
+  entityCreatedIdx: index('agent_revisions_entity_created').on(t.entityId, t.createdAt),
+}));
 
 export const ghStatus = pgTable('gh_status', {
   project: text('project').primaryKey(),

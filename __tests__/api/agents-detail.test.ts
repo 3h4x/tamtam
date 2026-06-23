@@ -117,4 +117,48 @@ describeAgentsApi((ctx) => {
         expect(data.agent.prerequisiteCommand).toBeNull();
       });
     });
+
+  describe('agent revisions', () => {
+    it('reverts a DB agent to a prior revision and records the revert', async () => {
+      const { GET: revisionsGET } = await import('@/app/api/agents/[agentId]/revisions/route');
+      const { POST: revertPOST } = await import('@/app/api/agents/[agentId]/revert/route');
+      const now = Date.now() / 1000;
+      await testDb.db.insert(schema.agents).values({
+        id: 'agent-123',
+        name: 'Test Agent',
+        project: 'proj1',
+        skillIds: '[]',
+        model: 'sonnet',
+        prompt: 'old prompt',
+        schedule: null,
+        createdAt: now,
+        updatedAt: now,
+      });
+
+      const patchResponse = await PATCH(new NextRequest('http://localhost/api/agents/agent-123', {
+        method: 'PATCH',
+        body: JSON.stringify({ prompt: 'new prompt' }),
+      }), { params: Promise.resolve({ agentId: 'agent-123' }) });
+      expect(patchResponse.status).toBe(200);
+
+      const listResponse = await revisionsGET(
+        new NextRequest('http://localhost/api/agents/agent-123/revisions'),
+        { params: Promise.resolve({ agentId: 'agent-123' }) },
+      );
+      const listData = await listResponse.json();
+      expect(listData.revisions[0].parsedSnapshot.prompt).toBe('old prompt');
+
+      const revertResponse = await revertPOST(new NextRequest('http://localhost/api/agents/agent-123/revert', {
+        method: 'POST',
+        body: JSON.stringify({ revisionId: listData.revisions[0].id }),
+      }), { params: Promise.resolve({ agentId: 'agent-123' }) });
+      const revertData = await revertResponse.json();
+
+      expect(revertResponse.status).toBe(200);
+      expect(revertData.agent.prompt).toBe('old prompt');
+      const revisions = await testDb.db.select().from(schema.agentRevisions);
+      expect(revisions).toHaveLength(2);
+      expect(JSON.parse(revisions[1].snapshot).prompt).toBe('new prompt');
+    });
+  });
 });

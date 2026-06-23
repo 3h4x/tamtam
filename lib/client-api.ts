@@ -108,6 +108,8 @@ export {
   deleteAgent,
   runAgent,
   improveAgentPrompt,
+  fetchAgentRevisions,
+  revertAgent,
 } from './client/agents'
 
 export type { RunAgentResult, ImprovePromptInput } from './client/agents'
@@ -117,4 +119,8 @@ export {
   createSkill,
   updateSkill,
   deleteSkill,
+  fetchSkillRevisions,
+  revertSkill,
 } from './client/skills'
+
+export type { SkillRevision, AgentRevision } from './client/types'

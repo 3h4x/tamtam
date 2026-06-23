@@ -6,17 +6,21 @@ import { createRoot } from 'react-dom/client'
 import { flushSync } from 'react-dom'
 import { AgentEditor } from '@/components/agents-tab/AgentEditor'
 
-const { fetchProjectDocsMock, improveAgentPromptMock, onSaveMock, onBackMock, toastMock } = vi.hoisted(() => ({
+const { fetchAgentRevisionsMock, fetchProjectDocsMock, improveAgentPromptMock, revertAgentMock, onSaveMock, onBackMock, toastMock } = vi.hoisted(() => ({
+  fetchAgentRevisionsMock: vi.fn(),
   fetchProjectDocsMock: vi.fn(),
   improveAgentPromptMock: vi.fn(),
+  revertAgentMock: vi.fn(),
   onSaveMock: vi.fn(),
   onBackMock: vi.fn(),
   toastMock: vi.fn(),
 }))
 
 vi.mock('@/lib/client-api', () => ({
+  fetchAgentRevisions: fetchAgentRevisionsMock,
   fetchProjectDocs: fetchProjectDocsMock,
   improveAgentPrompt: improveAgentPromptMock,
+  revertAgent: revertAgentMock,
 }))
 
 vi.mock('@/components/Toast', () => ({
@@ -77,10 +81,13 @@ function buttonByText(container: HTMLElement, text: string): HTMLButtonElement {
 
 describe('AgentEditor', () => {
   beforeEach(() => {
+    fetchAgentRevisionsMock.mockReset()
     fetchProjectDocsMock.mockReset()
     improveAgentPromptMock.mockReset()
+    revertAgentMock.mockReset()
     onSaveMock.mockReset()
     onBackMock.mockReset()
+    fetchAgentRevisionsMock.mockResolvedValue({ revisions: [] })
     fetchProjectDocsMock.mockResolvedValue({
       docs: [
         { name: 'Runbook', path: 'docs/runbook.md', content: 'Operational notes' },
@@ -340,6 +347,63 @@ describe('AgentEditor', () => {
         role: 'producer',
       })
     })
+
+    unmount()
+  })
+
+  it('shows only revision history controls in history mode', async () => {
+    fetchAgentRevisionsMock.mockResolvedValueOnce({
+      revisions: [{
+        id: 7,
+        entityId: 'agent-1',
+        snapshot: JSON.stringify({ prompt: 'Previous prompt' }),
+        parsedSnapshot: {
+          id: 'agent-1',
+          name: 'reviewer',
+          project: 'alpha',
+          skillIds: ['skill-1'],
+          docPaths: [],
+          model: 'normal',
+          prompt: 'Previous prompt',
+          schedule: null,
+          enabled: true,
+          prerequisiteCommand: 'pnpm old',
+          createdAt: 0,
+          updatedAt: 0,
+        },
+        author: 'tester',
+        note: null,
+        createdAt: 10,
+      }],
+    })
+    const { container, unmount } = renderEditor({
+      agent: {
+        id: 'agent-1',
+        name: 'reviewer',
+        project: 'alpha',
+        skillIds: ['skill-1'],
+        docPaths: [],
+        model: 'normal',
+        prompt: 'Current prompt',
+        schedule: null,
+        enabled: true,
+        prerequisiteCommand: 'pnpm current',
+        createdAt: 0,
+        updatedAt: 0,
+      },
+      template: undefined,
+    })
+
+    buttonByText(container, 'History').dispatchEvent(new MouseEvent('click', { bubbles: true }))
+
+    await vi.waitFor(() => {
+      expect(container.textContent).toContain('Revision 7')
+      expect(container.textContent).toContain('Previous prompt')
+    })
+    expect(container.querySelector('#agent-prerequisite')).toBeNull()
+    expect(container.querySelector('#agent-prompt')).toBeNull()
+    expect(container.textContent).not.toContain('Context')
+    expect(Array.from(container.querySelectorAll('button')).some((button) => button.textContent?.trim() === 'Save changes')).toBe(false)
 
     unmount()
   })

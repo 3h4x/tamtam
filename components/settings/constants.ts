@@ -31,6 +31,7 @@ export type SettingsFieldKey =
   | 'log_retention_days'
   | 'job_row_retention_days'
   | 'workflow_run_retention_days'
+  | 'skill_revision_retention_count'
   | 'backup_retention_count'
   | 'backup_retention_weekly_count'
   | 'notification_webhook_url'
@@ -502,6 +503,13 @@ export const FIELDS: Record<SettingsFieldKey, FieldDef> = {
     subsection: 'retention',
     span: 1,
   },
+  skill_revision_retention_count: {
+    label: 'Revision Retention (per item)',
+    help: 'Nightly cleanup: keep this many newest skill and agent edit revisions per skill or agent. Set to 0 to disable.',
+    group: 'pipeline',
+    subsection: 'retention',
+    span: 1,
+  },
 
   // Pipeline: legacy migration switches
   legacy_completion_hook_release_after_run_enabled: {
@@ -659,6 +667,7 @@ export const DEFAULTS: Record<SettingsFieldKey, string> = {
   log_retention_days: '30',
   job_row_retention_days: '180',
   workflow_run_retention_days: '30',
+  skill_revision_retention_count: '50',
   backup_retention_count: '14',
   backup_retention_weekly_count: '8',
   notification_webhook_url: '',

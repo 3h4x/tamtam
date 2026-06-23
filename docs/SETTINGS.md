@@ -221,6 +221,7 @@ nothing for publishers. See `docs/ORCHESTRATOR.md` → Autopilot and `docs/AGENT
 | `log_retention_days` | number | `30` | Delete log files older than this many days (per project, evaluated on each run completion). Set to `0` to disable age-based pruning. |
 | `job_row_retention_days` | number | `180` | Nightly cleanup: delete finished `jobs` DB rows older than this many days. Set to `0` to disable. Run rows older than this threshold are permanently removed. |
 | `workflow_run_retention_days` | number | `30` | Nightly cleanup: delete completed workflow runtime traces older than this many days. With `WORKFLOW_TARGET_WORLD=local` (the default), this prunes files under `WORKFLOW_LOCAL_DATA_DIR` / `data/workflow-data`; with a Postgres workflow world, this prunes the workflow runtime tables. Set to `0` to disable. |
+| `skill_revision_retention_count` | number | `50` | Nightly cleanup: keep this many newest `skill_revisions` and `agent_revisions` rows per skill/agent. Set to `0` to disable revision pruning. |
 | `backup_retention_count` | number | `14` | Keep this many newest Postgres `tamtam-*.pgdump` backup files after each successful backup. Set to `0` to prune all older backups after each run while still keeping the newly created backup. |
 | `backup_retention_weekly_count` | number | `8` | Keep one additional older Postgres backup per week for this many weeks after the newest backups. The just-created backup is preserved separately and does not consume one of these weekly slots. Set to `0` to disable weekly retention. |
 
@@ -435,7 +436,7 @@ legacy_completion_hook_agent_drain_enabled,
 plain_test_phase_enabled,
 agent_templates, log_retention_count, log_retention_days,
 job_row_retention_days, workflow_run_retention_days,
-backup_retention_count, backup_retention_weekly_count,
+skill_revision_retention_count, backup_retention_count, backup_retention_weekly_count,
 notification_webhook_url,
 notification_webhook_secret, notification_on_release_success,
 notification_on_release_fail, notification_on_release_aborted,

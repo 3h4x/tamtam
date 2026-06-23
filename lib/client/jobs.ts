@@ -6,9 +6,12 @@ export interface FetchJobsOptions {
   limit?: number
   offset?: number
   kind?: string
+  kindPrefix?: string
   status?: 'running' | 'done' | 'aborted'
   sessionId?: string
   hasSession?: boolean
+  from?: number
+  to?: number
 }
 
 export async function fetchJobs(
@@ -20,9 +23,12 @@ export async function fetchJobs(
   if (typeof opts.limit === 'number') params.set('limit', String(opts.limit))
   if (typeof opts.offset === 'number') params.set('offset', String(opts.offset))
   if (opts.kind) params.set('kind', opts.kind)
+  if (opts.kindPrefix) params.set('kind_prefix', opts.kindPrefix)
   if (opts.status) params.set('status', opts.status)
   if (opts.sessionId) params.set('session_id', opts.sessionId)
   if (opts.hasSession) params.set('has_session', '1')
+  if (typeof opts.from === 'number') params.set('from', String(opts.from))
+  if (typeof opts.to === 'number') params.set('to', String(opts.to))
   const qs = params.toString()
   const url = qs ? `${JOBS_BASE}?${qs}` : JOBS_BASE
   const response = await fetch(url)

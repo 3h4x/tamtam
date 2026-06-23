@@ -57,6 +57,26 @@ async function applyDdl(handle: TestDbHandle): Promise<void> {
       updated_at double precision NOT NULL
     )
   `));
+  await handle.db.execute(sql.raw(`
+    CREATE TABLE IF NOT EXISTS skill_revisions (
+      id serial PRIMARY KEY,
+      entity_id text NOT NULL,
+      snapshot text NOT NULL,
+      author text NOT NULL,
+      note text,
+      created_at double precision NOT NULL
+    )
+  `));
+  await handle.db.execute(sql.raw(`
+    CREATE TABLE IF NOT EXISTS agent_revisions (
+      id serial PRIMARY KEY,
+      entity_id text NOT NULL,
+      snapshot text NOT NULL,
+      author text NOT NULL,
+      note text,
+      created_at double precision NOT NULL
+    )
+  `));
 }
 
 let sharedHandle: TestDbHandle;
@@ -106,7 +126,7 @@ describe('pruneProjectLogs', () => {
   beforeEach(async () => {
     tempDir = mkdtempSync(join(tmpdir(), 'tamtam-retention-'));
     vi.resetModules();
-    await sharedHandle.db.execute(sql.raw('TRUNCATE jobs, maintenance_status'));
+    await sharedHandle.db.execute(sql.raw('TRUNCATE jobs, maintenance_status, skill_revisions, agent_revisions RESTART IDENTITY'));
     vi.doMock('@/lib/db', () => ({ db: sharedHandle.db, schema }));
     const mod = await import('@/lib/jobs/retention');
     pruneProjectLogs = mod.pruneProjectLogs;
@@ -324,7 +344,7 @@ describe('runNightlyCleanup', () => {
 
   beforeEach(async () => {
     vi.resetModules();
-    await sharedHandle.db.execute(sql.raw('TRUNCATE jobs, maintenance_status'));
+    await sharedHandle.db.execute(sql.raw('TRUNCATE jobs, maintenance_status, skill_revisions, agent_revisions RESTART IDENTITY'));
     vi.doMock('@/lib/db', () => ({ db: sharedHandle.db, schema }));
     const mod = await import('@/lib/jobs/retention');
     runNightlyCleanup = mod.runNightlyCleanup;
@@ -390,6 +410,39 @@ describe('runNightlyCleanup', () => {
     const rows = await handle.db.select({ id: schema.jobs.id }).from(schema.jobs);
     expect(rows.map((r) => r.id).sort()).toEqual(['old', 'very-old']);
     expect(summary.status).toBe('disabled');
+  });
+
+  it('prunes skill and agent revisions beyond the per-entity retention count', async () => {
+    const now = Date.now() / 1000;
+    for (let i = 0; i < 4; i++) {
+      await handle.db.insert(schema.skillRevisions).values({
+        entityId: 'skill-1',
+        snapshot: JSON.stringify({ id: 'skill-1', content: `skill-${i}` }),
+        author: 'tester',
+        note: null,
+        createdAt: now + i,
+      });
+      await handle.db.insert(schema.agentRevisions).values({
+        entityId: 'agent-1',
+        snapshot: JSON.stringify({ id: 'agent-1', prompt: `agent-${i}` }),
+        author: 'tester',
+        note: null,
+        createdAt: now + i,
+      });
+    }
+
+    const summary = await runNightlyCleanup({
+      log_retention_count: 200,
+      log_retention_days: 30,
+      job_row_retention_days: 0,
+      skill_revision_retention_count: 2,
+    });
+
+    const skillRows = await handle.db.select().from(schema.skillRevisions);
+    const agentRows = await handle.db.select().from(schema.agentRevisions);
+    expect(summary.revisionRowsDeleted).toBe(4);
+    expect(skillRows.map((row) => JSON.parse(row.snapshot).content).sort()).toEqual(['skill-2', 'skill-3']);
+    expect(agentRows.map((row) => JSON.parse(row.snapshot).prompt).sort()).toEqual(['agent-2', 'agent-3']);
   });
 
   it('does not delete rows within retention window', async () => {

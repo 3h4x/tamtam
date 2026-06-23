@@ -184,6 +184,7 @@ export interface RunRowProps {
   summary?: string | null
   progressLabel?: string | null
   actions?: React.ReactNode
+  showProject?: boolean
   // Depth in the chain tree. 0 = top-level row, 1 = direct child of release,
   // 2 = grandchild (e.g. review under test), etc. Drives left padding and
   // the connector tree on the row's left edge.
@@ -283,7 +284,7 @@ function RowStateBadge({
   )
 }
 
-export function RunRow({ entry: e, onClick, expandable, expanded, onToggleExpand, summary, progressLabel, actions, depth = 0, children }: RunRowProps) {
+export function RunRow({ entry: e, onClick, expandable, expanded, onToggleExpand, summary, progressLabel, actions, showProject = false, depth = 0, children }: RunRowProps) {
   const isRunning = e.status === 'running'
   const effectiveRunning = entryIsRunning(e)
   const effectiveNeedsAttention = entryNeedsAttention(e)
@@ -484,6 +485,9 @@ export function RunRow({ entry: e, onClick, expandable, expanded, onToggleExpand
                   <span className="min-w-0 truncate">
                     ← <span className="font-mono text-accent">{e.parentLabel}</span>
                   </span>
+                )}
+                {showProject && (
+                  <span className="font-mono shrink-0 text-text-secondary">{e.project}</span>
                 )}
                 {e.subtitle && !summary && <span className="min-w-0 truncate italic">{e.subtitle}</span>}
                 {e.navSessionId && <span className="font-mono shrink-0">#{e.navSessionId.slice(0, 8)}</span>}

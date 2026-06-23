@@ -15,6 +15,7 @@ export function renderChain(
   depth: number,
   navigate: (e: Entry) => void,
   actionsFor: (e: Entry) => React.ReactNode,
+  showProject = false,
 ): React.ReactNode {
   const summary = node.kind === 'release'
     ? buildReleaseSummary(node.children ?? [], node)
@@ -31,13 +32,14 @@ export function renderChain(
         entry={node}
         onClick={() => navigate(node)}
         depth={depth}
+        showProject={showProject}
         summary={summary}
         progressLabel={progressLabel}
         actions={actionsFor(node)}
       />
       {node.kind === 'release'
         ? pipelineFlat.map(({ entry, depth: d }) => (
-            <RunRow key={entry.key} entry={entry} onClick={() => navigate(entry)} depth={d} />
+            <RunRow key={entry.key} entry={entry} onClick={() => navigate(entry)} depth={d} showProject={showProject} />
           ))
         : node.chainedChildren?.map((c) =>
             c.kind === 'release'
@@ -47,11 +49,11 @@ export function renderChain(
               ? (
                   <Fragment key={c.key}>
                     {flattenReleaseChildren(c.children ?? [], depth + 1).map(({ entry, depth: d }) => (
-                      <RunRow key={entry.key} entry={entry} onClick={() => navigate(entry)} depth={d} />
+                      <RunRow key={entry.key} entry={entry} onClick={() => navigate(entry)} depth={d} showProject={showProject} />
                     ))}
                   </Fragment>
                 )
-              : renderChain(c, depth + 1, navigate, actionsFor)
+              : renderChain(c, depth + 1, navigate, actionsFor, showProject)
           )
       }
     </Fragment>

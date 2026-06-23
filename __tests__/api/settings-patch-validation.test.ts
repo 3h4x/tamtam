@@ -140,6 +140,21 @@ describe('PATCH /settings validation', () => {
     });
 
 
+    it('rejects negative revision retention settings', async () => {
+      const request = new NextRequest('http://localhost/api/settings', {
+        method: 'PATCH',
+        body: JSON.stringify({ skill_revision_retention_count: '-1' }),
+      });
+      const response = await ctx.PATCH(request);
+
+      expect(response.status).toBe(400);
+      await expect(response.json()).resolves.toMatchObject({
+        detail: expect.stringContaining('skill_revision_retention_count must be a non-negative integer'),
+      });
+      expect(await ctx.sharedHandle.db.select().from(schema.settings)).toEqual([]);
+    });
+
+
     it('rejects non-numeric fix_max_iterations values', async () => {
       const request = new NextRequest('http://localhost/api/settings', {
         method: 'PATCH',

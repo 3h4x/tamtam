@@ -207,6 +207,7 @@ const SETTING_KEYS = [
   'log_retention_days',
   'job_row_retention_days',
   'workflow_run_retention_days',
+  'skill_revision_retention_count',
   'backup_retention_count',
   'backup_retention_weekly_count',
   'db_backup_enabled',
@@ -457,6 +458,7 @@ function validateAndSerializeSettingValue(
 
   if (
     key === 'workflow_run_retention_days' ||
+    key === 'skill_revision_retention_count' ||
     key === 'backup_retention_count' ||
     key === 'backup_retention_weekly_count'
   ) {

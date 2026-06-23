@@ -204,13 +204,14 @@ export function AgentsTab({ projectName, projectJobs = [], jobsPaused = false }:
     setEditorParam(null)
   }
 
+  const parseAgent = (a: Agent & { skillIds: string | string[]; docPaths?: string | string[] }): Agent => ({
+    ...a,
+    model: normalizeModelInput(a.model, 'normal'),
+    skillIds: typeof a.skillIds === 'string' ? JSON.parse(a.skillIds) : a.skillIds,
+    docPaths: typeof a.docPaths === 'string' ? JSON.parse(a.docPaths) : (a.docPaths ?? []),
+  })
+
   const handleSaveAgent = async (data: AgentEditorSavePayload) => {
-    const parseAgent = (a: Agent & { skillIds: string | string[]; docPaths?: string | string[] }): Agent => ({
-      ...a,
-      model: normalizeModelInput(a.model, 'normal'),
-      skillIds: typeof a.skillIds === 'string' ? JSON.parse(a.skillIds) : a.skillIds,
-      docPaths: typeof a.docPaths === 'string' ? JSON.parse(a.docPaths) : (a.docPaths ?? []),
-    })
     if (editing) {
       const result = await updateAgent(editing.id, data)
       setAgents(prev => prev.map(a => a.id === editing.id ? parseAgent(result.agent) : a))
@@ -498,6 +499,10 @@ export function AgentsTab({ projectName, projectJobs = [], jobsPaused = false }:
         onSave={handleSaveAgent}
         onDelete={editing ? () => handleDelete(editing.id) : undefined}
         onBack={closeEditor}
+        onReverted={(agent) => {
+          const parsed = parseAgent(agent)
+          setAgents(prev => prev.map(a => a.id === parsed.id ? parsed : a))
+        }}
         autoImprove={Boolean(editing) && searchParams.get('improve') === '1'}
         onAutoImproveConsumed={clearImproveParam}
       />

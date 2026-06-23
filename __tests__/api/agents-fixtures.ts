@@ -139,6 +139,26 @@ async function applyDdl(handle: TestDbHandle): Promise<void> {
       paused boolean NOT NULL DEFAULT false
     )
   `));
+  await handle.db.execute(sql.raw(`
+    CREATE TABLE IF NOT EXISTS agent_revisions (
+      id serial PRIMARY KEY,
+      entity_id text NOT NULL,
+      snapshot text NOT NULL,
+      author text NOT NULL,
+      note text,
+      created_at double precision NOT NULL
+    )
+  `));
+  await handle.db.execute(sql.raw(`
+    CREATE TABLE IF NOT EXISTS skill_revisions (
+      id serial PRIMARY KEY,
+      entity_id text NOT NULL,
+      snapshot text NOT NULL,
+      author text NOT NULL,
+      note text,
+      created_at double precision NOT NULL
+    )
+  `));
 }
 
 export type AgentsApiContext = {
@@ -210,7 +230,7 @@ export function describeAgentsApi(register: (ctx: AgentsApiContext) => void): vo
     // and the test read the same mocked clock.
     let clockBase = Date.now();
     beforeEach(async () => {
-      await sharedHandle.db.execute(sql.raw('TRUNCATE agents, projects'));
+      await sharedHandle.db.execute(sql.raw('TRUNCATE agents, projects, agent_revisions, skill_revisions RESTART IDENTITY'));
       clockBase += 60_000;
       vi.spyOn(Date, 'now').mockImplementation(() => clockBase);
 

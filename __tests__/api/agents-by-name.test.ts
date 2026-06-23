@@ -100,6 +100,9 @@ describeAgentsApi((ctx) => {
         expect(res.status).toBe(200);
         const data = await res.json();
         expect(data.agent.prompt).toBe('improved prompt');
+        const revisions = await testDb.db.select().from(schema.agentRevisions);
+        expect(revisions).toHaveLength(1);
+        expect(JSON.parse(revisions[0].snapshot).prompt).toBe('original prompt');
       });
   
       it('looks up DB agents by project+name case-insensitively', async () => {

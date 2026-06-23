@@ -55,6 +55,7 @@ export interface SettingsMap {
   log_retention_days: string
   job_row_retention_days: string
   workflow_run_retention_days: string
+  skill_revision_retention_count: string
   backup_retention_count: string
   backup_retention_weekly_count: string
   db_backup_enabled: string

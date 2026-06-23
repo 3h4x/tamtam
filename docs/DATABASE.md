@@ -139,6 +139,23 @@ User-defined reusable prompt blocks.
 
 ---
 
+### `skillRevisions`
+
+Append-only audit history for DB-backed skill edits. Each PATCH/revert stores the previous `skills` row as JSON before mutating the live row. Nightly retention keeps the newest `skill_revision_retention_count` rows per skill.
+
+| Column | Type | Default | Notes |
+|--------|------|---------|-------|
+| `id` | SERIAL | — | PRIMARY KEY |
+| `entityId` | TEXT | — | `skills.id` at edit time |
+| `snapshot` | TEXT | — | JSON snapshot of the prior skill row |
+| `author` | TEXT | — | `settings.user_name` or environment fallback |
+| `note` | TEXT | — | nullable operator note |
+| `createdAt` | REAL | — | Unix timestamp |
+
+Index: `skill_revisions_entity_created` on `(entity_id, created_at)`.
+
+---
+
 ### `notification_throttle`
 
 Persisted dedupe state for outbound webhook throttling.
@@ -265,6 +282,23 @@ Configuration for scheduled automated agents.
 | `updatedAt` | REAL | — | NOT NULL |
 
 System-agent rows are seeded by TamTam for enabled projects and are DB-only. They are not mirrored to `.tamtam/agents/*.md`; deletion writes a `settings` dismissal marker keyed as `system_agent_dismissed:<project>:<agentName>`. Seeding checks project-local agent-name conflicts with the same case-insensitive DB/file-agent rule used by the public create route.
+
+---
+
+### `agentRevisions`
+
+Append-only audit history for DB-backed agent edits. Each DB-backed PATCH/revert stores the previous `agents` row as JSON before mutating the live row. File-backed agents remain versioned by the project git history for `.tamtam/agents/*.md`. Nightly retention keeps the newest `skill_revision_retention_count` rows per agent.
+
+| Column | Type | Default | Notes |
+|--------|------|---------|-------|
+| `id` | SERIAL | — | PRIMARY KEY |
+| `entityId` | TEXT | — | `agents.id` at edit time |
+| `snapshot` | TEXT | — | JSON snapshot of the prior agent row |
+| `author` | TEXT | — | `settings.user_name` or environment fallback |
+| `note` | TEXT | — | nullable operator note |
+| `createdAt` | REAL | — | Unix timestamp |
+
+Index: `agent_revisions_entity_created` on `(entity_id, created_at)`.
 
 ---
 
@@ -440,6 +474,7 @@ db.select().from(schema.jobs).where(eq(schema.jobs.project, name)).all()
 | Project recommendations from agent/scheduler signals | `recommendations` | `id` |
 | Reusable prompt blocks | `skills` | `id` |
 | Scheduled automation configs | `agents` | `id` |
+| Skill and agent edit audit history | `skillRevisions`, `agentRevisions` | `entityId` |
 | GitHub CI status + release tag cache | `ghStatus` | `project` |
 | GitHub PRs + issues cache (5 min TTL) | `ghIssuesCache` | `project` |
 | Filtered issue-cruncher detail cache (5 min TTL) | `ghIssueDetailCache` | `project`, `number` |

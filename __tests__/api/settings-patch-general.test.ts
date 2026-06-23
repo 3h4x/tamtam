@@ -553,6 +553,7 @@ describe('PATCH /settings persistence', () => {
         method: 'PATCH',
         body: JSON.stringify({
           workflow_run_retention_days: '00',
+          skill_revision_retention_count: '000',
           backup_retention_count: '0',
           backup_retention_weekly_count: '00',
         }),
@@ -564,6 +565,7 @@ describe('PATCH /settings persistence', () => {
         status: 'ok',
         settings: expect.objectContaining({
           workflow_run_retention_days: '0',
+          skill_revision_retention_count: '0',
           backup_retention_count: '0',
           backup_retention_weekly_count: '0',
         }),
@@ -572,8 +574,29 @@ describe('PATCH /settings persistence', () => {
       const allRows = await ctx.sharedHandle.db.select().from(schema.settings);
       const rows = Object.fromEntries(allRows.map((row) => [row.key, row.value]));
       expect(rows.workflow_run_retention_days).toBe('0');
+      expect(rows.skill_revision_retention_count).toBe('0');
       expect(rows.backup_retention_count).toBe('0');
       expect(rows.backup_retention_weekly_count).toBe('0');
+    });
+
+
+    it('saves skill and agent revision retention count', async () => {
+      const request = new NextRequest('http://localhost/api/settings', {
+        method: 'PATCH',
+        body: JSON.stringify({ skill_revision_retention_count: '25' }),
+      });
+      const response = await ctx.PATCH(request);
+
+      expect(response.status).toBe(200);
+      await expect(response.json()).resolves.toMatchObject({
+        status: 'ok',
+        settings: expect.objectContaining({
+          skill_revision_retention_count: '25',
+        }),
+      });
+
+      const rows = await ctx.sharedHandle.db.select().from(schema.settings);
+      expect(rows.find((row) => row.key === 'skill_revision_retention_count')?.value).toBe('25');
     });
 
 

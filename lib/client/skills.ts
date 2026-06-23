@@ -1,4 +1,4 @@
-import type { Skill } from './types'
+import type { Skill, SkillRevision } from './types'
 
 export async function fetchSkills(): Promise<{ skills: Skill[] }> {
   const response = await fetch('/api/skills')
@@ -19,7 +19,7 @@ export async function createSkill(skill: { name: string; description: string; co
   return response.json()
 }
 
-export async function updateSkill(skillId: string, updates: Partial<{ name: string; description: string; content: string }>): Promise<{ skill: Skill }> {
+export async function updateSkill(skillId: string, updates: Partial<{ name: string; description: string; content: string; note: string | null }>): Promise<{ skill: Skill }> {
   const response = await fetch(`/api/skills/${encodeURIComponent(skillId)}`, {
     method: 'PATCH',
     headers: { 'Content-Type': 'application/json' },
@@ -38,4 +38,23 @@ export async function deleteSkill(skillId: string): Promise<void> {
     const data = await response.json().catch(() => ({}))
     throw new Error(data.detail || 'Failed to delete skill')
   }
+}
+
+export async function fetchSkillRevisions(skillId: string): Promise<{ revisions: SkillRevision[] }> {
+  const response = await fetch(`/api/skills/${encodeURIComponent(skillId)}/revisions`)
+  if (!response.ok) return { revisions: [] }
+  return response.json()
+}
+
+export async function revertSkill(skillId: string, revisionId: number): Promise<{ skill: Skill }> {
+  const response = await fetch(`/api/skills/${encodeURIComponent(skillId)}/revert`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ revisionId }),
+  })
+  if (!response.ok) {
+    const data = await response.json().catch(() => ({}))
+    throw new Error(data.detail || 'Failed to revert skill')
+  }
+  return response.json()
 }
