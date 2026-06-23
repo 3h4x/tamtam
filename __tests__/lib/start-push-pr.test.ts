@@ -32,6 +32,11 @@ vi.mock('@/lib/pipeline/pipeline-lock', () => ({
 vi.mock('@/lib/pipeline/start-commit', () => ({
   generateCommitMessage: mocks.generateCommitMessageMock,
   stageProjectChanges: mocks.stageProjectChangesMock,
+  stageProjectChangesWithIndexLockRetry: mocks.stageProjectChangesMock,
+  runGitIndexLockRetry: async (_projPath: string, _label: string, run: () => Promise<unknown>) => run(),
+  isGitIndexLockError: (result: { exitCode: number; stdout: string; stderr: string }) => (
+    result.exitCode !== 0 && /index\.lock|unable to create.*lock|another git process/i.test(`${result.stderr}\n${result.stdout}`)
+  ),
   findIssueContext: mocks.findIssueContextMock,
   detectMainBranch: mocks.detectMainBranchMock,
   issueBranchName: mocks.issueBranchNameMock,
