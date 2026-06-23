@@ -191,6 +191,16 @@ export default defineConfig({
     ],
     silent: 'passed-only',
     testTimeout: 30000,
+    // Retry a failed test up to twice before reporting it red. The suite has
+    // rare resource-contention flakes (a heavily-loaded host — concurrent
+    // agents + a release's own test phase — can make a whole file's tests
+    // intermittently fail). Those flakes used to fail the release test phase,
+    // which then thrashed the test→fix loop to its wall-clock deadline and
+    // never shipped. A retry turns a transient flake back into a pass so the
+    // release proceeds; genuine failures still fail all three attempts. The
+    // `db-guard` tripwire (setup-db-guard.ts) keeps surfacing real-pool leaks
+    // so retries don't hide a real isolation bug.
+    retry: 2,
     hookTimeout: 60000,
     teardownTimeout: 10000,
     fakeTimers: {

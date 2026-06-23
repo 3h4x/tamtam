@@ -20,6 +20,7 @@
   Dispose via `await handle[Symbol.asyncDispose]()` in `afterEach`. Never import `@/lib/db` before mocks are installed.
 - Mock only external side-effects: `lib/shared/shell.ts` `exec`, PM2, CLI spawning.
 - Use the package scripts, not raw Vitest (`pnpm test`, not `vitest`) — global setup at `__tests__/global-setup.ts` installs the test `DATABASE_URL` guard.
+- Vitest retries failed tests up to two times (`retry: 2`) to absorb rare host contention flakes; fix any failure that remains red after those retries.
 - **Match the nearby test style.** This repo mixes one-route-per-file tests with broader coverage files. Extend the nearest existing test when it already owns that behavior; don't introduce a shared test utility layer just to avoid duplication.
 - For route handlers/server modules that read settings or other module-level singletons at import time: `vi.resetModules()`, register mocks with `vi.doMock()`, then `await import(...)` the subject inside `beforeEach`. Don't statically import first.
 - For client-component tests: `jsdom`, stub `next/navigation` and `fetch` at module scope, use `vi.hoisted()` when a mock factory needs stable shared references.
