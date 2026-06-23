@@ -259,6 +259,7 @@ async function captureInitialStamp() {
 }
 
 async function useCommittedSvg() {
+  await captureInitialStamp();
   // Defensive: restore the stamp to its pre-script content. Guarantees this
   // path leaves the on-disk cache stamp byte-identical to entry.
   if (initialStamp === null) {
