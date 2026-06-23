@@ -13,6 +13,7 @@ import type { Task } from '@/lib/shared/types'
 const {
   paramsState,
   pushMock,
+  replaceMock,
   toastMock,
   fetchJobsMock,
   fetchProjectConfigMock,
@@ -38,6 +39,7 @@ const {
     sessionId: undefined as string | undefined,
   },
   pushMock: vi.fn(),
+  replaceMock: vi.fn(),
   toastMock: vi.fn(),
   fetchJobsMock: vi.fn(),
   fetchProjectConfigMock: vi.fn(),
@@ -60,7 +62,7 @@ const {
 
 vi.mock('next/navigation', () => ({
   useParams: () => paramsState,
-  useRouter: () => ({ push: pushMock }),
+  useRouter: () => ({ push: pushMock, replace: replaceMock }),
 }))
 
 vi.mock('@/components/Toast', () => ({
@@ -306,6 +308,7 @@ describe('ProjectDetailPage', () => {
     paramsState.sessionId = undefined
 
     pushMock.mockReset()
+    replaceMock.mockReset()
     toastMock.mockReset()
     fetchJobsMock.mockReset()
     fetchProjectConfigMock.mockReset()
@@ -372,6 +375,18 @@ describe('ProjectDetailPage', () => {
     await vi.waitFor(() => {
       expect(tabNavPropsMock).toHaveBeenLastCalledWith(expect.objectContaining({ activeTab: 'overview' }))
       expect(container.querySelector('[data-testid="overview-tab"]')?.textContent).toBe('acme/widgets')
+    })
+
+    unmount()
+  })
+
+  it('routes incomplete project overview visits into setup', async () => {
+    fetchProjectConfigMock.mockResolvedValue(buildConfig({ setup_complete: false }))
+
+    const { unmount } = renderPage()
+
+    await vi.waitFor(() => {
+      expect(replaceMock).toHaveBeenCalledWith('/project/acme%2Fwidgets/setup')
     })
 
     unmount()

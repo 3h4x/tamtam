@@ -19,3 +19,7 @@ export function buildProjectTerminalPath(
 
   return terminalPath
 }
+
+export function buildProjectSetupPath(projectName: string): string {
+  return `${buildProjectPath(projectName)}/setup`
+}

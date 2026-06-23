@@ -76,6 +76,8 @@ export const projects = pgTable('projects', {
   devServerStartCommand: text('dev_server_start_command'),
   devServerStopCommand: text('dev_server_stop_command'),
   devServerReadyUrl: text('dev_server_ready_url'),
+  setupComplete: boolean('setup_complete').notNull().default(false),
+  setupState: text('setup_state').notNull().default('{}'),
   archived: boolean('archived').notNull().default(false),
   paused: boolean('paused').notNull().default(false),
 });

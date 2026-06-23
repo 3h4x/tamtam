@@ -73,6 +73,8 @@ Project metadata and per-project pipeline config.
 | `devServerStartCommand` | TEXT | — | nullable; DB-only `bash -c` command TamTam runs from the project root at agent kickoff |
 | `devServerStopCommand` | TEXT | — | nullable; DB-only command run before TamTam falls back to terminating the owned dev-server process group |
 | `devServerReadyUrl` | TEXT | — | nullable; DB-only HTTP(S) readiness URL polled after starting the dev server |
+| `setupComplete` | BOOLEAN | `false` | Whether the new-project setup wizard is finished |
+| `setupState` | TEXT | `'{}'` | JSON object recording setup wizard step statuses (`completed` / `skipped`) |
 
 ---
 

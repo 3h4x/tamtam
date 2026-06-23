@@ -8,6 +8,9 @@ import type {
   ChangesResponse,
   ChangeDiffResponse,
   ProjectConfig,
+  ProjectSetupStatus,
+  ProjectSetupState,
+  ProjectSetupStep,
   MarkDodResult,
   Recommendation,
   ProjectPipelineStats,
@@ -454,6 +457,37 @@ export async function fetchProjectConfig(projectName: string): Promise<ProjectCo
   const response = await fetch(`${API_BASE}/by-project/${encodeURIComponent(projectName)}/config`)
   if (!response.ok) {
     throw new Error(`Failed to fetch project config: ${response.statusText}`)
+  }
+  return response.json()
+}
+
+export async function fetchProjectSetup(projectName: string): Promise<ProjectSetupStatus> {
+  const response = await fetch(`${API_BASE}/by-project/${encodeURIComponent(projectName)}/setup`)
+  if (!response.ok) {
+    throw new Error(`Failed to fetch project setup: ${response.statusText}`)
+  }
+  return response.json()
+}
+
+export async function updateProjectSetup(
+  projectName: string,
+  patch: {
+    step?: ProjectSetupStep
+    status?: 'completed' | 'skipped'
+    setup_complete?: boolean
+    write_file_config?: boolean
+    test_command?: string
+    safe_users?: string[]
+  },
+): Promise<{ status: string; setup_complete: boolean; setup_state: ProjectSetupState }> {
+  const response = await fetch(`${API_BASE}/by-project/${encodeURIComponent(projectName)}/setup`, {
+    method: 'PATCH',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(patch),
+  })
+  if (!response.ok) {
+    const data = await response.json().catch(() => ({}))
+    throw new Error(data.detail || `Failed to update setup: ${response.statusText}`)
   }
   return response.json()
 }

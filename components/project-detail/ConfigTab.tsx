@@ -92,6 +92,7 @@ export interface ConfigTabProps {
   anySaving: boolean
   allSaved: boolean
   onSaveAll: () => void
+  onRunSetup?: () => void
 }
 
 export function ConfigTab({
@@ -148,6 +149,7 @@ export function ConfigTab({
   anySaving,
   allSaved,
   onSaveAll,
+  onRunSetup = () => {},
 }: ConfigTabProps) {
   const postMergeWatchMinutes = Number.parseInt(postMergeWatchMinutesInput, 10) || 0
   if (configLoading) {
@@ -191,6 +193,13 @@ export function ConfigTab({
           </div>
         )}
         <div className="flex items-center gap-3 ml-auto">
+          <Button
+            variant="secondary"
+            size="sm"
+            onClick={onRunSetup}
+          >
+            Run setup wizard
+          </Button>
           {anyDirty && !anySaving && (
             <span className="text-xs text-text-tertiary">Unsaved changes</span>
           )}

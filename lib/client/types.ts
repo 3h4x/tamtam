@@ -155,6 +155,8 @@ export interface ProjectConfig {
   dev_server_start_command?: string
   dev_server_stop_command?: string
   dev_server_ready_url?: string
+  setup_complete?: boolean
+  setup_state?: ProjectSetupState
   paused?: boolean
   last_push_error?: string | null
   last_push_at?: number | null
@@ -162,6 +164,30 @@ export interface ProjectConfig {
   file_config_branch?: string
   file_config_is_default_branch?: boolean
   current_branch?: string
+}
+
+export type ProjectSetupStep =
+  | 'detect'
+  | 'pipeline'
+  | 'automation'
+  | 'notifications'
+  | 'file_config'
+  | 'smoke_test'
+
+export type ProjectSetupState = Partial<Record<ProjectSetupStep, 'completed' | 'skipped'>>
+
+export interface ProjectSetupStatus {
+  project: string
+  setup_complete: boolean
+  setup_state: ProjectSetupState
+  detection: {
+    test_command: string
+    default_branch: string
+    github_remote: string | null
+    github_repo: string | null
+    gh_auth: { available: boolean; detail: string | null }
+    ci_workflow: boolean
+  }
 }
 
 export interface JobInfo {

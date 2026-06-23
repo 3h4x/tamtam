@@ -21,7 +21,7 @@ import { ProjectActions } from '@/components/project-detail/ProjectActions'
 import { TabNav } from '@/components/project-detail/TabNav'
 import { OverviewTab } from '@/components/project-detail/OverviewTab'
 import { AgentsTab } from '@/components/AgentsTab'
-import { buildProjectPath, buildProjectTerminalPath } from '@/lib/client/project-routes'
+import { buildProjectPath, buildProjectSetupPath, buildProjectTerminalPath } from '@/lib/client/project-routes'
 import { resolveGithubBoardUrl } from '@/lib/client/resolve-github-board-url'
 import { ProjectLogo } from '@/components/ProjectLogo'
 import { Button } from '@/components/ui/Button'
@@ -291,6 +291,11 @@ export function ProjectDetailPage({
       .finally(() => { if (active) setConfigLoading(false) })
     return () => { active = false }
   }, [name, projectId, configReloadNonce])
+
+  useEffect(() => {
+    if (!name || activeTab !== 'overview' || configLoading || !config || config.setup_complete !== false) return
+    router.replace(buildProjectSetupPath(name))
+  }, [activeTab, config, configLoading, name, router])
 
   useEffect(() => {
     if (!name || !projectId) return
@@ -891,6 +896,7 @@ export function ProjectDetailPage({
             anySaving={anySaving}
             allSaved={allSaved}
             onSaveAll={handleSaveAll}
+            onRunSetup={() => router.push(buildProjectSetupPath(name))}
           />
           {name && (
             <div className="mt-6">

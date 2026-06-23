@@ -127,6 +127,8 @@ async function applyDdl(handle: TestDbHandle): Promise<void> {
       enabled boolean DEFAULT true,
       website text,
       qa_url text,
+      setup_complete boolean NOT NULL DEFAULT false,
+      setup_state text NOT NULL DEFAULT '{}',
       archived boolean NOT NULL DEFAULT false,
       paused boolean NOT NULL DEFAULT false
     )

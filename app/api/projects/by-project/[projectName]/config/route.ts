@@ -92,6 +92,14 @@ export async function GET(
     dev_server_start_command: projectRow?.devServerStartCommand ?? '',
     dev_server_stop_command: projectRow?.devServerStopCommand ?? '',
     dev_server_ready_url: projectRow?.devServerReadyUrl ?? '',
+    setup_complete: !!projectRow?.setupComplete,
+    setup_state: (() => {
+      try {
+        return projectRow?.setupState ? JSON.parse(projectRow.setupState) : {};
+      } catch {
+        return {};
+      }
+    })(),
     paused: !!projectRow?.paused,
     // Per-project commit style. File-only (team contract); empty string means
     // fall back to the global `commit_style` setting at commit-generation time.
