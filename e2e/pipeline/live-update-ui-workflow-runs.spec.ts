@@ -120,4 +120,66 @@ test.describe('Workflow runs page live polling', () => {
     await expect(doneRow).toHaveCount(0);
     await expect(cancelledRow).toHaveCount(0);
   });
+
+  test('/workflow-runs clears only the cancelled run spinner while another run stays active', async ({
+    page,
+  }) => {
+    const cancelledProject = 'workflow-runs-concurrent-cancelled';
+    const activeProject = 'workflow-runs-concurrent-active';
+    let cancelled = false;
+
+    await stubWorkflowRunsShell(page);
+    await stubWorkflowRuns(page, () => [
+      cancelled
+        ? makeWorkflowRun(cancelledProject, 'cancelled', {
+            error: 'release was cancelled before commit',
+          })
+        : makeWorkflowRun(cancelledProject, 'running'),
+      makeWorkflowRun(activeProject, 'running'),
+    ]);
+
+    await page.goto('/workflow-runs');
+
+    const activePanel = page.getByLabel('Active workflow runs');
+    const cancelledActiveRow = activePanel
+      .getByRole('link', { name: new RegExp(cancelledProject, 'i') })
+      .first();
+    const stillActiveRow = activePanel
+      .getByRole('link', { name: new RegExp(activeProject, 'i') })
+      .first();
+
+    await expect(activePanel).toBeVisible({ timeout: 8_000 });
+    await expect(activePanel.getByText('2 runs')).toBeVisible({ timeout: 8_000 });
+    await expect(cancelledActiveRow.getByLabel('status running')).toBeVisible({ timeout: 8_000 });
+    await expect(cancelledActiveRow.locator('.animate-spin')).toBeVisible({ timeout: 8_000 });
+    await expect(stillActiveRow.getByLabel('status running')).toBeVisible({ timeout: 8_000 });
+    await expect(stillActiveRow.locator('.animate-spin')).toBeVisible({ timeout: 8_000 });
+    await expect(page.getByText('2 running')).toBeVisible({ timeout: 8_000 });
+
+    cancelled = true;
+
+    const attentionPanel = page.getByLabel('Workflow runs needing attention');
+    const cancelledAttentionRow = attentionPanel
+      .getByRole('link', { name: new RegExp(cancelledProject, 'i') })
+      .first();
+
+    await expect(activePanel.getByText('1 run')).toBeVisible({ timeout: 12_000 });
+    await expect(
+      activePanel.getByRole('link', { name: new RegExp(cancelledProject, 'i') }),
+    ).toHaveCount(0, { timeout: 12_000 });
+    await expect(stillActiveRow.getByLabel('status running')).toBeVisible({ timeout: 12_000 });
+    await expect(stillActiveRow.locator('.animate-spin')).toBeVisible({ timeout: 12_000 });
+    await expect(cancelledAttentionRow.getByLabel('status cancelled')).toBeVisible({
+      timeout: 12_000,
+    });
+    await expect(cancelledAttentionRow.locator('.animate-spin')).toHaveCount(0);
+    await expect(cancelledAttentionRow.getByText('release was cancelled before commit')).toBeVisible({
+      timeout: 12_000,
+    });
+    await expect(page.getByText('1 running')).toBeVisible({ timeout: 12_000 });
+
+    await page.getByRole('button', { name: /cancelled 1/i }).click();
+    await expect(cancelledAttentionRow).toBeVisible();
+    await expect(page.getByRole('row').filter({ hasText: activeProject })).toHaveCount(0);
+  });
 });
