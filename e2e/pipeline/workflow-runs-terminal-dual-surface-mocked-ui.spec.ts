@@ -3,10 +3,11 @@ import type { BrowserContext, Route } from '@playwright/test';
 
 const PROJECT = 'workflow-runs-terminal-mocked-single';
 const RELEASE_ID = 'workflow-runs-terminal-mocked-single-release';
+const SUCCESS_OUTPUT = 'Mocked release completed successfully on both surfaces.';
 const FAILURE_DETAIL = 'Release failed after the mocked push step rejected the branch.';
 const CANCELLED_DETAIL = 'Release was cancelled from the mocked workflow run.';
 
-type Phase = 'idle' | 'running' | 'failed' | 'cancelled';
+type Phase = 'idle' | 'running' | 'success' | 'failed' | 'cancelled';
 type WorkflowStatus = 'running' | 'failed' | 'completed';
 
 const now = () => Math.floor(Date.now() / 1000);
@@ -90,7 +91,11 @@ function finishedReleaseJob(exitCode: number, log: string, detail?: string) {
   };
 }
 
-function workflowRun(status: WorkflowStatus, detail?: string) {
+function workflowRun(
+  status: WorkflowStatus,
+  detail?: string,
+  opts?: { output?: Record<string, unknown> | null },
+) {
   if (status === 'running') {
     return {
       id: `workflow-run-${PROJECT}`,
@@ -131,9 +136,9 @@ function workflowRun(status: WorkflowStatus, detail?: string) {
     createdAt: '2026-06-23T10:00:00.000Z',
     startedAt: '2026-06-23T10:00:05.000Z',
     completedAt: '2026-06-23T10:00:20.000Z',
-    durationMs: 15_000,
-    input: [PROJECT, { triggeredBy: 'agent-mocked' }],
-    output: { exitCode: -3, detail: detail ?? CANCELLED_DETAIL },
+      durationMs: 15_000,
+      input: [PROJECT, { triggeredBy: 'agent-mocked' }],
+    output: opts?.output ?? { exitCode: -3, detail: detail ?? CANCELLED_DETAIL },
     error: null,
   };
 }
@@ -162,7 +167,13 @@ async function stubSharedRoutes(
     (route: Route) => {
       const phase = getPhase();
       const runs =
-        phase === 'idle' ? [] : [workflowRun(phase === 'running' ? 'running' : phase === 'failed' ? 'failed' : 'completed')];
+        phase === 'idle'
+          ? []
+          : [workflowRun(
+              phase === 'running' ? 'running' : phase === 'failed' ? 'failed' : 'completed',
+              phase === 'cancelled' ? CANCELLED_DETAIL : undefined,
+              phase === 'success' ? { output: { verdict: 'LGTM' } } : undefined,
+            )];
       route.fulfill({
         json: {
           runs,
@@ -328,6 +339,81 @@ test.describe('Mocked workflow-runs and terminal dual-surface lifecycle', () => 
     });
     await expect(terminalPage.getByText('exit 2').first()).toBeVisible({ timeout: 12_000 });
     await expect(terminalPage.getByText(FAILURE_DETAIL)).toBeVisible({ timeout: 12_000 });
+    await expect(terminalPage.getByText('live run')).toHaveCount(0, { timeout: 12_000 });
+    await expect(terminalPage.getByLabel('live run spinner')).toHaveCount(0, { timeout: 12_000 });
+    await expect(terminalPage.getByLabel(/pipeline summary:/i)).toHaveCount(0, { timeout: 12_000 });
+    await expect(terminalPage).toHaveURL(stableTerminalUrl);
+  });
+
+  test('single mocked release success clears the live spinner and settles to completed on both surfaces', async ({
+    page,
+  }) => {
+    let phase: Phase = 'idle';
+    let finishStream!: () => void;
+    const streamDone = new Promise<void>((resolve) => {
+      finishStream = resolve;
+    });
+
+    await stubSharedRoutes(page.context(), () => phase);
+    await page.context().route(`**/api/jobs/${RELEASE_ID}`, (route: Route) =>
+      route.fulfill({
+        json: phase === 'success'
+          ? finishedReleaseJob(0, `${SUCCESS_OUTPUT}\n`)
+          : runningReleaseJob(),
+      }),
+    );
+    await page.context().route(`**/api/streaming/${RELEASE_ID}`, async (route: Route) => {
+      await streamDone;
+      await route.fulfill({
+        status: 200,
+        headers: { 'content-type': 'text/event-stream', 'cache-control': 'no-cache' },
+        body: [
+          `data: ${SUCCESS_OUTPUT}`,
+          '',
+          'event: done',
+          `data: ${JSON.stringify({ exitCode: 0, provider: 'claude', duration: 1200 })}`,
+          '',
+        ].join('\n'),
+      });
+    });
+
+    const terminalPage = await page.context().newPage();
+    await Promise.all([page.goto('/workflow-runs'), terminalPage.goto(`/project/${PROJECT}/terminal`)]);
+
+    await expect(page.getByText('No workflow runs yet')).toBeVisible({ timeout: 8_000 });
+    await expect(terminalPage.getByRole('button', { name: 'new' })).toBeVisible({ timeout: 8_000 });
+    await expect(terminalPage.getByText('live run')).toHaveCount(0);
+
+    phase = 'running';
+
+    const activePanel = page.getByLabel('Active workflow runs');
+    const activeRow = activePanel.getByRole('link', { name: new RegExp(PROJECT, 'i') }).first();
+    await expect(activeRow.getByLabel('status running')).toBeVisible({ timeout: 12_000 });
+    await expect(activeRow.locator('.animate-spin')).toBeVisible({ timeout: 12_000 });
+    await expect(page.getByText('1 running')).toBeVisible({ timeout: 12_000 });
+    await expect(terminalPage).toHaveURL(
+      new RegExp(`/project/${PROJECT}/terminal\\?job=${encodeURIComponent(RELEASE_ID)}`),
+      { timeout: 12_000 },
+    );
+    await expect(terminalPage.getByText('live run')).toBeVisible({ timeout: 12_000 });
+    await expect(terminalPage.getByLabel('live run spinner')).toBeVisible({ timeout: 12_000 });
+
+    const stableWorkflowRunsUrl = page.url();
+    const stableTerminalUrl = terminalPage.url();
+    phase = 'success';
+    finishStream();
+
+    const completedRow = page.getByRole('row').filter({ hasText: PROJECT }).first();
+    await expect(activePanel).toHaveCount(0, { timeout: 12_000 });
+    await expect(completedRow.getByLabel('status completed')).toBeVisible({ timeout: 12_000 });
+    await expect(completedRow.getByText('LGTM')).toBeVisible({ timeout: 12_000 });
+    await expect(completedRow.locator('.animate-spin')).toHaveCount(0);
+    await expect(page.getByRole('button', { name: /completed 1/i })).toBeVisible({ timeout: 12_000 });
+    await expect(page.getByText('1 running')).toHaveCount(0, { timeout: 12_000 });
+    await expect(page).toHaveURL(stableWorkflowRunsUrl);
+
+    await expect(terminalPage.getByText(SUCCESS_OUTPUT)).toBeVisible({ timeout: 12_000 });
+    await expect(terminalPage.getByText('exit 0 — ok').first()).toBeVisible({ timeout: 12_000 });
     await expect(terminalPage.getByText('live run')).toHaveCount(0, { timeout: 12_000 });
     await expect(terminalPage.getByLabel('live run spinner')).toHaveCount(0, { timeout: 12_000 });
     await expect(terminalPage.getByLabel(/pipeline summary:/i)).toHaveCount(0, { timeout: 12_000 });
