@@ -5,6 +5,7 @@ import { fetchSkillRevisions, revertSkill } from '@/lib/client-api'
 import type { Skill, SkillRevision } from '@/lib/client-api'
 import { Button } from '@/components/ui/Button'
 import { Input } from '@/components/ui/Input'
+import { SegmentedControl } from '@/components/ui/SegmentedControl'
 import { Textarea } from '@/components/ui/Textarea'
 import { Spinner } from '@/components/ui/Spinner'
 
@@ -99,6 +100,14 @@ export function SkillEditor({
     void loadHistory()
   }
 
+  const handleModeChange = (nextMode: 'edit' | 'history') => {
+    if (nextMode === 'history') {
+      openHistory()
+    } else {
+      setMode('edit')
+    }
+  }
+
   const handleRevert = async (revisionId: number) => {
     if (!skill || revertingId !== null) return
     setRevertingId(revisionId)
@@ -130,22 +139,15 @@ export function SkillEditor({
         </h3>
         <div className="flex items-center gap-2">
           {skill && (
-            <div className="flex rounded-md border border-border overflow-hidden">
-              <button
-                type="button"
-                className={`px-3 py-1.5 text-xs ${mode === 'edit' ? 'bg-bg-tertiary text-text-primary' : 'text-text-secondary'}`}
-                onClick={() => setMode('edit')}
-              >
-                Edit
-              </button>
-              <button
-                type="button"
-                className={`px-3 py-1.5 text-xs border-l border-border ${mode === 'history' ? 'bg-bg-tertiary text-text-primary' : 'text-text-secondary'}`}
-                onClick={openHistory}
-              >
-                History
-              </button>
-            </div>
+            <SegmentedControl
+              ariaLabel="Skill editor mode"
+              value={mode}
+              onChange={handleModeChange}
+              options={[
+                { value: 'edit', label: 'Edit' },
+                { value: 'history', label: 'History' },
+              ]}
+            />
           )}
           {onDelete && (
             <Button
