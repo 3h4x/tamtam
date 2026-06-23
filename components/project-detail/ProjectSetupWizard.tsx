@@ -219,7 +219,9 @@ export function ProjectSetupWizard() {
     return (
       <div className="p-6">
         <Button variant="link" onClick={() => router.push(buildProjectPath(projectName))}>&larr; Back to project</Button>
-        <p className="mt-3 text-sm text-status-error">{error || 'Setup unavailable'}</p>
+        <ErrorCallout radius="md" className="mt-3 text-sm" preWrap={false}>
+          {error || 'Setup unavailable'}
+        </ErrorCallout>
       </div>
     )
   }
