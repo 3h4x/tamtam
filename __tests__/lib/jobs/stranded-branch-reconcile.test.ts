@@ -181,6 +181,53 @@ describe('findStrandedBranches', () => {
     expect(candidates).toEqual([]);
   });
 
+  it('emits pr-behind for a fully-pushed open-PR branch that fell behind the default', async () => {
+    // The PR was fresh when opened, but the default branch has since advanced
+    // (concurrent releases merged) and pr-wait already exited. Nobody rebases
+    // the branch, so it sits stale/CONFLICTING forever. The reconciler must
+    // pick it up and rebase it instead of skipping it as "pr-wait's lane".
+    withCommonStubs({
+      'branch --show-current': { exitCode: 0, stdout: 'fix/issue-198-stale-pr' },
+      'symbolic-ref refs/remotes/origin/HEAD': { exitCode: 0, stdout: 'refs/remotes/origin/main' },
+      'rev-list --count main..HEAD': { exitCode: 0, stdout: '4' },
+      'rev-list --count origin/main..HEAD': { exitCode: 0, stdout: '4' },
+      'status --porcelain': { exitCode: 0, stdout: '' },
+      'rev-list --count @{u}..HEAD': { exitCode: 0, stdout: '0' },
+      'rev-list --count HEAD..origin/main': { exitCode: 0, stdout: '8' },
+    });
+
+    const { findStrandedBranches } = await import('@/lib/jobs/stranded-branch-reconcile');
+    const candidates = await findStrandedBranches(Date.now());
+
+    expect(candidates).toHaveLength(1);
+    expect(candidates[0].kind).toBe('pr-behind');
+    expect(candidates[0].behind).toBe(8);
+    expect(candidates[0].ahead).toBe(4);
+    expect(candidates[0].branch).toBe('fix/issue-198-stale-pr');
+  });
+
+  it('does not emit pr-behind while a pr-wait job is still actively polling the PR', async () => {
+    // While pr-wait owns the merge drive, the reconciler must stay out of its
+    // lane even if the branch is briefly behind — pr-wait will re-evaluate.
+    withCommonStubs(
+      {
+        'branch --show-current': { exitCode: 0, stdout: 'fix/issue-198-stale-pr' },
+        'symbolic-ref refs/remotes/origin/HEAD': { exitCode: 0, stdout: 'refs/remotes/origin/main' },
+        'rev-list --count main..HEAD': { exitCode: 0, stdout: '4' },
+        'rev-list --count origin/main..HEAD': { exitCode: 0, stdout: '4' },
+        'status --porcelain': { exitCode: 0, stdout: '' },
+        'rev-list --count @{u}..HEAD': { exitCode: 0, stdout: '0' },
+        'rev-list --count HEAD..origin/main': { exitCode: 0, stdout: '8' },
+      },
+      { jobs: [makeJob({ id: 'pw1', kind: 'pr-wait', project: 'proj', finishedAt: null })] },
+    );
+
+    const { findStrandedBranches } = await import('@/lib/jobs/stranded-branch-reconcile');
+    const candidates = await findStrandedBranches(Date.now());
+
+    expect(candidates).toEqual([]);
+  });
+
   it('emits no candidate for a dirty default branch without release evidence', async () => {
     withCommonStubs({
       'branch --show-current': { exitCode: 0, stdout: 'main' },

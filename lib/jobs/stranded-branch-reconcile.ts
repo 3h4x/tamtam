@@ -54,7 +54,7 @@ const TAMTAM_BRANCH_PATTERN = /^fix\/issue-\d+/;
 const lastAttemptAt = new Map<string, number>();
 const attemptCount = new Map<string, number>();
 
-export type StrandedKind = 'fix-branch' | 'empty-fix-branch' | 'default-out-of-sync' | 'default-dirty' | 'detached-reattach';
+export type StrandedKind = 'fix-branch' | 'empty-fix-branch' | 'default-out-of-sync' | 'default-dirty' | 'detached-reattach' | 'pr-behind';
 
 export interface StrandedCandidate {
   project: string;
@@ -132,6 +132,10 @@ async function readDetachedHead(path: string, def: string): Promise<DetachedHead
 interface ActivityIndex {
   runningAgentProjects: ReadonlySet<string>;
   recentlyActiveProjects: ReadonlySet<string>;
+  // Projects with an in-flight pr-wait job. While pr-wait actively polls a
+  // PR toward merge, the reconciler must stay out of its lane — only act on a
+  // behind/stale PR branch once pr-wait has exited (timeout / checks_failed).
+  prWaitActiveProjects: ReadonlySet<string>;
 }
 
 // Build the per-sweep activity index in one pass over `listJobs()` instead of
@@ -141,15 +145,19 @@ function buildActivityIndex(nowMs: number): ActivityIndex {
   const cutoffSec = (nowMs - QUIET_PERIOD_MS) / 1000;
   const runningAgentProjects = new Set<string>();
   const recentlyActiveProjects = new Set<string>();
+  const prWaitActiveProjects = new Set<string>();
   for (const j of listJobs()) {
     if (j.finishedAt === null && isAgentJobKind(j.kind)) {
       runningAgentProjects.add(j.project);
+    }
+    if (j.finishedAt === null && j.kind === 'pr-wait') {
+      prWaitActiveProjects.add(j.project);
     }
     if (typeof j.startedAt === 'number' && j.startedAt > cutoffSec) {
       recentlyActiveProjects.add(j.project);
     }
   }
-  return { runningAgentProjects, recentlyActiveProjects };
+  return { runningAgentProjects, recentlyActiveProjects, prWaitActiveProjects };
 }
 
 async function readAheadBehind(path: string): Promise<{ ahead: number; behind: number } | null> {
@@ -200,7 +208,7 @@ async function hasDirtyDefaultReleaseEvidence(
  */
 export async function findStrandedBranches(nowMs: number = Date.now()): Promise<StrandedCandidate[]> {
   const out: StrandedCandidate[] = [];
-  const { runningAgentProjects, recentlyActiveProjects } = buildActivityIndex(nowMs);
+  const { runningAgentProjects, recentlyActiveProjects, prWaitActiveProjects } = buildActivityIndex(nowMs);
   for (const p of listEnabledProjects()) {
     if (isProjectArchived(p.name) || isProjectPaused(p.name)) continue;
     const path = resolveProjectPath(p.name);
@@ -271,7 +279,28 @@ export async function findStrandedBranches(nowMs: number = Date.now()): Promise<
         const aheadUpstream = await gitOutput(path, ['rev-list', '--count', '@{u}..HEAD']);
         const upstreamAhead = parseInt(aheadUpstream ?? '0', 10) || 0;
         if (aheadUpstream != null && upstreamAhead === 0) {
-          // Fully pushed; PR is open. Reconciler stays out of pr-wait's lane.
+          // Fully pushed; an open PR is waiting for merge. While pr-wait is
+          // actively polling, stay out of its lane. But pr-wait has a finite
+          // timeout — once it exits (timeout / checks_failed) and the default
+          // branch advances past this PR (a concurrent release merged), the
+          // branch is left behind origin/<default> with nobody to rebase it.
+          // It then sits CONFLICTING/stale forever. Detect "behind + no active
+          // pr-wait" and emit a pr-behind candidate so the handler rebases it
+          // onto the default and force-pushes, clearing the stale state.
+          const behindRaw = await gitOutput(path, ['rev-list', '--count', `HEAD..origin/${state.def}`]);
+          const behind = parseInt(behindRaw ?? '0', 10) || 0;
+          if (behind > 0 && !prWaitActiveProjects.has(p.name)) {
+            out.push({
+              project: p.name,
+              path,
+              branch: state.current,
+              defaultBranch: state.def,
+              kind: 'pr-behind',
+              ahead: localAhead,
+              behind,
+              reason: `open PR on ${state.current} is ${behind} commit(s) behind origin/${state.def} — rebasing to clear stale/conflicting state`,
+            });
+          }
           continue;
         }
       }
@@ -458,6 +487,16 @@ export async function reconcileStrandedBranches(
             console.log(`[stranded-branch] ${c.project}: ${detail}`);
           }
         }
+      } else if (c.kind === 'pr-behind') {
+        // Open-PR branch that fell behind the default branch (pr-wait exited,
+        // a concurrent release advanced the default). Rebase onto the default
+        // and force-push to clear the stale/conflicting state, then resume
+        // pr-wait. A real conflict aborts cleanly and reports — the sweep
+        // never force-pushes a half-resolved merge.
+        const { rebasePrBehindBranch } = await import('@/lib/jobs/pr-behind-rebase');
+        const r = await rebasePrBehindBranch({ project: c.project, path: c.path, branch: c.branch, defaultBranch: c.defaultBranch });
+        summary.triggered.push({ project: c.project, kind: c.kind, reason: c.reason, outcome: r.outcome, detail: r.detail });
+        console.log(`[stranded-branch] ${c.project}: pr-behind ${r.outcome} — ${r.detail}`);
       } else {
         // default-out-of-sync: skip the full test→review pipeline and run a
         // push (which auto-rebases when behind > 0). Falls back to release
