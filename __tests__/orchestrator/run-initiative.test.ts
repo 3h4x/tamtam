@@ -1,5 +1,5 @@
 import { describe, it, expect, vi } from 'vitest';
-import { startInitiativeRun, extractJobId, extractRunStartResult, pickFileAgentForInitiative } from '@/lib/orchestrator/run-initiative';
+import { startInitiativeRun, extractJobId, extractRunStartResult, pickFileAgentForInitiative, busyRunResult } from '@/lib/orchestrator/run-initiative';
 import type { InitiativeRow } from '@/lib/orchestrator/initiatives-store';
 
 const fa = (over: Partial<{ id: string; name: string; enabled: boolean; kind: string; role: string }> = {}) =>
@@ -35,6 +35,21 @@ const row: InitiativeRow = {
   prompt: 'Fix all lint errors.', score: 100, status: 'running', dedupKey: 'd',
   releaseId: null, attempts: 1, cooldownUntil: null, pinnedAt: null, createdAt: 0, updatedAt: 0,
 };
+
+describe('busyRunResult', () => {
+  it('maps a busy/locked agent-run status to a transient re-queue (not a hard failure)', () => {
+    expect(busyRunResult(409, 'already_running')).toEqual({ status: 'queued', detail: 'already_running' });
+    expect(busyRunResult(423, '')?.status).toBe('queued');
+    expect(busyRunResult(429, '')?.status).toBe('queued');
+    expect(busyRunResult(503, '')?.status).toBe('queued');
+  });
+
+  it('returns null for non-busy statuses so the caller still throws on real errors', () => {
+    expect(busyRunResult(500, 'boom')).toBeNull();
+    expect(busyRunResult(404, 'not found')).toBeNull();
+    expect(busyRunResult(400, 'bad')).toBeNull();
+  });
+});
 
 describe('extractJobId', () => {
   it('returns job_id from snake_case response', () => {

@@ -23,6 +23,7 @@ import {
   type IssueContext,
 } from './release-context';
 import { appendRedactedFileSync } from '@/lib/jobs/redacted-log-writer';
+import { loadFileConfig } from '@/lib/skills/tamtam-file-config';
 
 export type CommitResult =
   | { ok: true; commitSha: string; message: string; jobId?: string }
@@ -48,7 +49,6 @@ export async function generateCommitMessage(
   // Per-project .tamtam/config.yml `commit_style` overrides the global
   // `commit_style` setting. Lets repos pin their own voice without
   // affecting other projects.
-  const { loadFileConfig } = await import('@/lib/skills/tamtam-file-config');
   const fileStyle = (loadFileConfig(projPath)?.commit_style ?? '').trim();
   const styleGuide = (fileStyle || (getSettings().commit_style ?? '')).trim();
 
@@ -302,6 +302,14 @@ interface ClearStaleIndexLockOptions {
   isGitProcessActive?: (projPath: string, lockPath: string) => Promise<boolean>;
 }
 
+type GitStepResult = { exitCode: number; stdout: string; stderr: string };
+
+interface GitIndexLockRetryOptions {
+  retries?: number;
+  wait?: (ms: number) => Promise<void>;
+  clearStaleIndexLock?: typeof clearStaleIndexLock;
+}
+
 function shellQuoteForDisplay(value: string): string {
   return `'${value.replace(/'/g, `'"'"'`)}'`;
 }
@@ -368,6 +376,35 @@ export async function clearStaleIndexLock(
   }
 }
 
+export function isGitIndexLockError(result: GitStepResult): boolean {
+  if (result.exitCode === 0) return false;
+  return /index\.lock|unable to create.*lock|another git process/i.test(`${result.stderr}\n${result.stdout}`);
+}
+
+export async function runGitIndexLockRetry<T extends GitStepResult>(
+  projPath: string,
+  label: string,
+  run: () => Promise<T>,
+  log: (s: string) => void,
+  options: GitIndexLockRetryOptions = {},
+): Promise<T> {
+  const retries = options.retries ?? 6;
+  const wait = options.wait ?? ((ms: number) => new Promise<void>(r => setTimeout(r, ms)));
+  const clearLock = options.clearStaleIndexLock ?? clearStaleIndexLock;
+
+  await clearLock(projPath, log);
+  let result = await run();
+  for (let attempt = 1; attempt <= retries && isGitIndexLockError(result); attempt++) {
+    log(`\n# ${label} blocked by .git/index.lock — retry ${attempt}/${retries} in ${attempt}s\n`);
+    await wait(attempt * 1000);
+    // After waiting, retry the conservative stale-lock cleanup; it only
+    // unlinks old locks that have no path-specific git process.
+    await clearLock(projPath, log);
+    result = await run();
+  }
+  return result;
+}
+
 function splitNulPaths(stdout: string): string[] {
   return stdout.split('\0').filter(Boolean);
 }
@@ -400,6 +437,14 @@ export async function stageProjectChanges(
   if (addR.stdout) log(addR.stdout);
   if (addR.stderr) log(addR.stderr);
   return addR;
+}
+
+export async function stageProjectChangesWithIndexLockRetry(
+  projPath: string,
+  execStep: typeof exec,
+  log: (s: string) => void,
+): Promise<{ exitCode: number; stdout: string; stderr: string }> {
+  return runGitIndexLockRetry(projPath, 'git add', () => stageProjectChanges(projPath, execStep, log), log);
 }
 
 async function runCommit(
@@ -495,20 +540,9 @@ async function runCommit(
   // creation. Retry on lock contention; fail-fast on any other non-zero
   // exit so the orchestrator records a real commit failure instead of
   // silently shipping nothing.
-  // Remove a stale lock left by a previously crashed/killed git before staging,
-  // so a single dead lock doesn't permanently brick this project's commits.
-  await clearStaleIndexLock(projPath, log);
-  let addR = await stageProjectChanges(projPath, execStep, log);
-  if (addR.exitCode !== 0 && /index\.lock|unable to create.*lock/i.test(addR.stderr)) {
-    for (let attempt = 1; attempt <= 6 && addR.exitCode !== 0; attempt++) {
-      log(`\n# index.lock held by another git process — retry ${attempt}/6 in ${attempt}s\n`);
-      await new Promise(r => setTimeout(r, attempt * 1000));
-      // After waiting, retry the conservative stale-lock cleanup; it only
-      // unlinks old locks that have no path-specific git process.
-      await clearStaleIndexLock(projPath, log);
-      addR = await stageProjectChanges(projPath, execStep, log);
-    }
-  }
+  // Remove stale locks before each mutating git step and retry live lock races.
+  // This covers both the initial staging pass and later commit/pre-hook passes.
+  const addR = await stageProjectChangesWithIndexLockRetry(projPath, execStep, log);
   if (addR.exitCode !== 0) {
     const detail = (addR.stderr.trim() || addR.stdout.trim() || `git add exited ${addR.exitCode}`).slice(0, 2000);
     return { ok: false, status: 500, detail: `Stage failed: ${detail}` };
@@ -521,21 +555,31 @@ async function runCommit(
     log(`\n# generating commit message via Claude...\n`);
     const message = await generateCommitMessage(projPath, projectName, provider, signal);
     log(`# commit message: ${message}\n\n$ git commit -m "${message}"\n`);
-    let commitR = await execStep('git', ['-C', projPath, 'commit', '-m', message], { timeout: 30000 });
+    let commitR = await runGitIndexLockRetry(
+      projPath,
+      'git commit',
+      () => execStep('git', ['-C', projPath, 'commit', '-m', message], { timeout: 30000 }),
+      log,
+    );
     if (commitR.stdout) log(commitR.stdout);
     if (commitR.stderr) log(commitR.stderr);
     // Pre-commit hook may have modified files, causing the commit to abort.
     // Stage the hook's changes and retry once so the hook's work is included.
-    if (commitR.exitCode !== 0 && !commitR.stdout.includes('nothing to commit')) {
+    if (commitR.exitCode !== 0 && !isGitIndexLockError(commitR) && !commitR.stdout.includes('nothing to commit')) {
       const hookChangesR = await execStep('git', ['-C', projPath, 'status', '--porcelain'], { timeout: 5000 });
       if (hookChangesR.stdout.trim()) {
         log(`\n# pre-commit hook modified files — staging and retrying commit\n`);
-        const hookStageR = await stageProjectChanges(projPath, execStep, log);
+        const hookStageR = await stageProjectChangesWithIndexLockRetry(projPath, execStep, log);
         if (hookStageR.exitCode !== 0) {
           const detail = (hookStageR.stderr.trim() || hookStageR.stdout.trim() || `git add exited ${hookStageR.exitCode}`).slice(0, 2000);
           return { ok: false, status: 500, detail: `Stage failed after pre-commit hook changes: ${detail}` };
         }
-        commitR = await execStep('git', ['-C', projPath, 'commit', '-m', message], { timeout: 30000 });
+        commitR = await runGitIndexLockRetry(
+          projPath,
+          'git commit',
+          () => execStep('git', ['-C', projPath, 'commit', '-m', message], { timeout: 30000 }),
+          log,
+        );
         if (commitR.stdout) log(commitR.stdout);
         if (commitR.stderr) log(commitR.stderr);
       }
