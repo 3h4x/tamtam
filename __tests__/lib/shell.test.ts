@@ -20,6 +20,21 @@ describe('exec — killProcessGroup mode', () => {
     expect(r.stderr.trim()).toBe('err');
   });
 
+  it('waits for stdio close before resolving command output', async () => {
+    const chunk = 'x'.repeat(4096);
+    const chunks = 256;
+    const script = [
+      `const chunk = ${JSON.stringify(chunk)};`,
+      `for (let i = 0; i < ${chunks}; i += 1) process.stdout.write(chunk);`,
+    ].join('');
+
+    const r = await exec(process.execPath, ['-e', script], { killProcessGroup: true });
+
+    expect(r.exitCode).toBe(0);
+    expect(r.stdout.length).toBe(chunk.length * chunks);
+    expect(r.stderr).toBe('');
+  });
+
   it('propagates non-zero exit code', async () => {
     const r = await exec('sh', ['-c', 'exit 42'], { killProcessGroup: true });
     expect(r.exitCode).toBe(42);

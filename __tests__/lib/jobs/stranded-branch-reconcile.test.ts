@@ -165,15 +165,18 @@ describe('findStrandedBranches', () => {
     expect(candidates[0].ahead).toBe(3);
   });
 
-  it('skips fully pushed clean fix branches that are already waiting on PR merge', async () => {
-    withCommonStubs({
-      'branch --show-current': { exitCode: 0, stdout: 'fix/issue-42-awaiting-merge' },
-      'symbolic-ref refs/remotes/origin/HEAD': { exitCode: 0, stdout: 'refs/remotes/origin/main' },
-      'rev-list --count main..HEAD': { exitCode: 0, stdout: '2' },
-      'rev-list --count origin/main..HEAD': { exitCode: 0, stdout: '2' },
-      'status --porcelain': { exitCode: 0, stdout: '' },
-      'rev-list --count @{u}..HEAD': { exitCode: 0, stdout: '0' },
-    });
+  it('skips fully pushed clean fix branches while a pr-wait job is actively driving the merge', async () => {
+    withCommonStubs(
+      {
+        'branch --show-current': { exitCode: 0, stdout: 'fix/issue-42-awaiting-merge' },
+        'symbolic-ref refs/remotes/origin/HEAD': { exitCode: 0, stdout: 'refs/remotes/origin/main' },
+        'rev-list --count main..HEAD': { exitCode: 0, stdout: '2' },
+        'rev-list --count origin/main..HEAD': { exitCode: 0, stdout: '2' },
+        'status --porcelain': { exitCode: 0, stdout: '' },
+        'rev-list --count @{u}..HEAD': { exitCode: 0, stdout: '0' },
+      },
+      { jobs: [makeJob({ id: 'pw1', kind: 'pr-wait', project: 'proj', finishedAt: null })] },
+    );
 
     const { findStrandedBranches } = await import('@/lib/jobs/stranded-branch-reconcile');
     const candidates = await findStrandedBranches(Date.now());
@@ -204,6 +207,50 @@ describe('findStrandedBranches', () => {
     expect(candidates[0].behind).toBe(8);
     expect(candidates[0].ahead).toBe(4);
     expect(candidates[0].branch).toBe('fix/issue-198-stale-pr');
+  });
+
+  it('emits pr-resume for an up-to-date open-PR branch whose pr-wait has exited (green-orphan)', async () => {
+    // Fully pushed, up to date, clean — but the release/pr-wait that owned the
+    // merge drive died (crash, timeout, or a reused-branch false-merge). No
+    // pr-wait is running, so nobody merges it. The reconciler must resume it
+    // instead of skipping it as "pr-wait's lane".
+    withCommonStubs({
+      'branch --show-current': { exitCode: 0, stdout: 'fix/issue-77-green-orphan' },
+      'symbolic-ref refs/remotes/origin/HEAD': { exitCode: 0, stdout: 'refs/remotes/origin/main' },
+      'rev-list --count main..HEAD': { exitCode: 0, stdout: '2' },
+      'rev-list --count origin/main..HEAD': { exitCode: 0, stdout: '2' },
+      'status --porcelain': { exitCode: 0, stdout: '' },
+      'rev-list --count @{u}..HEAD': { exitCode: 0, stdout: '0' },
+      'rev-list --count HEAD..origin/main': { exitCode: 0, stdout: '0' },
+    });
+
+    const { findStrandedBranches } = await import('@/lib/jobs/stranded-branch-reconcile');
+    const candidates = await findStrandedBranches(Date.now());
+
+    expect(candidates).toHaveLength(1);
+    expect(candidates[0].kind).toBe('pr-resume');
+    expect(candidates[0].behind).toBe(0);
+    expect(candidates[0].branch).toBe('fix/issue-77-green-orphan');
+  });
+
+  it('does not emit pr-resume while a pr-wait job is still actively driving an up-to-date PR', async () => {
+    withCommonStubs(
+      {
+        'branch --show-current': { exitCode: 0, stdout: 'fix/issue-77-green-orphan' },
+        'symbolic-ref refs/remotes/origin/HEAD': { exitCode: 0, stdout: 'refs/remotes/origin/main' },
+        'rev-list --count main..HEAD': { exitCode: 0, stdout: '2' },
+        'rev-list --count origin/main..HEAD': { exitCode: 0, stdout: '2' },
+        'status --porcelain': { exitCode: 0, stdout: '' },
+        'rev-list --count @{u}..HEAD': { exitCode: 0, stdout: '0' },
+        'rev-list --count HEAD..origin/main': { exitCode: 0, stdout: '0' },
+      },
+      { jobs: [makeJob({ id: 'pw1', kind: 'pr-wait', project: 'proj', finishedAt: null })] },
+    );
+
+    const { findStrandedBranches } = await import('@/lib/jobs/stranded-branch-reconcile');
+    const candidates = await findStrandedBranches(Date.now());
+
+    expect(candidates).toEqual([]);
   });
 
   it('does not emit pr-behind while a pr-wait job is still actively polling the PR', async () => {

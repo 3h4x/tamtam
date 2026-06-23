@@ -40,14 +40,28 @@ describe('createGenericPR', () => {
     expect(result).toBe(false);
   });
 
-  it('returns existing PR url and repo when a PR already exists', async () => {
+  it('returns existing PR url and repo when an OPEN PR already exists', async () => {
     execMock
       .mockResolvedValueOnce(resp(0, 'feat/my-feature\n'))              // git branch --show-current
-      .mockResolvedValueOnce(resp(0, JSON.stringify({ url: 'https://github.com/org/repo/pull/5' })))  // gh pr view
+      .mockResolvedValueOnce(resp(0, JSON.stringify({ url: 'https://github.com/org/repo/pull/5', state: 'OPEN' })))  // gh pr view
       .mockResolvedValueOnce(resp(0, 'org/repo\n'));                    // gh repo view
 
     const result = await createGenericPR('/repo', log);
     expect(result).toEqual({ prUrl: 'https://github.com/org/repo/pull/5', prRepo: 'org/repo' });
+  });
+
+  it('creates a new PR when the branch\'s existing PR is MERGED (reused branch name)', async () => {
+    // A reused `fix/issue-*` branch whose earlier PR merged: `gh pr view`
+    // returns that MERGED PR. Reusing it would make pr-wait falsely report the
+    // release shipped, so createGenericPR must open a fresh PR instead.
+    execMock
+      .mockResolvedValueOnce(resp(0, 'fix/issue-1-reused\n'))           // git branch --show-current
+      .mockResolvedValueOnce(resp(0, JSON.stringify({ url: 'https://github.com/org/repo/pull/5', state: 'MERGED' })))  // gh pr view → merged
+      .mockResolvedValueOnce(resp(0, 'https://github.com/org/repo/pull/12\n'))  // gh pr create
+      .mockResolvedValueOnce(resp(0, 'org/repo\n'));                    // gh repo view
+
+    const result = await createGenericPR('/repo', log);
+    expect(result).toEqual({ prUrl: 'https://github.com/org/repo/pull/12', prRepo: 'org/repo' });
   });
 
   it('creates a new PR when none exists and returns url + repo', async () => {

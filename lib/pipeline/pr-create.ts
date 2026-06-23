@@ -84,11 +84,17 @@ export async function createGenericPR(
     return false;
   }
 
-  const existingR = normalizeExecResult(await exec('gh', ['pr', 'view', '--json', 'url'], { cwd: projPath, timeout: 10000, signal }));
+  const existingR = normalizeExecResult(await exec('gh', ['pr', 'view', '--json', 'url,state'], { cwd: projPath, timeout: 10000, signal }));
   if (existingR.exitCode === 0 && existingR.stdout.trim()) {
     try {
-      const existing = JSON.parse(existingR.stdout.trim()) as { url?: string };
-      if (existing.url) {
+      const existing = JSON.parse(existingR.stdout.trim()) as { url?: string; state?: string };
+      // Only reuse an OPEN PR. `gh pr view` returns the most recent PR for the
+      // current branch REGARDLESS of state; when a `fix/issue-*` branch name is
+      // reused after its earlier PR merged, that is a MERGED PR. Reusing it
+      // makes pr-wait observe state=MERGED and falsely report the release
+      // shipped while the freshly-pushed commits sit unmerged. A non-OPEN
+      // result falls through to `gh pr create`, which opens a new PR.
+      if (existing.url && existing.state === 'OPEN') {
         log(`\n# PR already exists: ${existing.url}\n`);
         const repoR = normalizeExecResult(await exec('gh', ['repo', 'view', '--json', 'nameWithOwner', '--jq', '.nameWithOwner'], { cwd: projPath, timeout: 10000, signal }));
         return { prUrl: existing.url, prRepo: repoR.stdout.trim() };

@@ -33,6 +33,7 @@ import { spawn, spawnSync } from 'node:child_process';
 import { mkdirSync, readFileSync, readdirSync, unlinkSync, writeFileSync, openSync, closeSync } from 'node:fs';
 import { join } from 'node:path';
 import { buildChildEnv } from '@/lib/shared/child-env';
+import { checkPrBranchExecutionGate } from '@/lib/security/pr-branch-execution';
 
 const DEFAULT_READY_TIMEOUT_MS = 60_000;
 const READY_PROBE_INTERVAL_MS = 500;
@@ -293,6 +294,11 @@ export async function ensureDevServerRunning(
   }
 
   // 2. Spawn detached so we can kill the whole tree later via PGID.
+  const executionGate = checkPrBranchExecutionGate(config.cwd, 'start dev server');
+  if (!executionGate.ok) {
+    return { status: 'spawn_failed', error: executionGate.detail };
+  }
+
   ensureDir();
   const logPath = logFilePathFor(project);
   let logFd: number;
@@ -308,7 +314,7 @@ export async function ensureDevServerRunning(
       cwd: config.cwd,
       detached: true,
       stdio: ['ignore', logFd, logFd],
-      env: buildChildEnv(),
+      env: buildChildEnv(undefined, { scrubSecrets: true }),
     });
     child.once('error', (e) => console.error(`[dev-server] spawn error for ${project}:`, e));
   } catch (e) {
@@ -323,11 +329,6 @@ export async function ensureDevServerRunning(
     return { status: 'spawn_failed', error: 'spawn returned no pid' };
   }
 
-  // Detach from parent — child must survive a Next.js / PM2 restart.
-  child.unref();
-
-  const processStart = readProcessStart(child.pid);
-  spawnedThisProcess.set(child.pid, { pgid: child.pid, child });
   let exited = false;
   const exitPromise = new Promise<void>((resolve) => {
     child.once('exit', () => {
@@ -336,6 +337,12 @@ export async function ensureDevServerRunning(
       resolve();
     });
   });
+
+  // Detach from parent — child must survive a Next.js / PM2 restart.
+  child.unref();
+
+  const processStart = readProcessStart(child.pid);
+  spawnedThisProcess.set(child.pid, { pgid: child.pid, child });
 
   const pidfile: DevServerPidFile = {
     project,

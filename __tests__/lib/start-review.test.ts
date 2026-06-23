@@ -20,6 +20,7 @@ const mocks = vi.hoisted(() => ({
   getProjectPipelinePrompts: vi.fn(),
   getProjectQaTarget: vi.fn(),
   getSettings: vi.fn(),
+  checkPrBranchExecutionGate: vi.fn(),
   existsSync: vi.fn(),
   lstatSync: vi.fn(),
   readFileSync: vi.fn(),
@@ -101,6 +102,10 @@ vi.mock('@/lib/skills/auto-attach-docs', () => ({
   formatAutoAttachedDocsBlock: (...args: unknown[]) => mocks.formatAutoAttachedDocsBlock(...args),
 }));
 
+vi.mock('@/lib/security/pr-branch-execution', () => ({
+  checkPrBranchExecutionGate: (...args: unknown[]) => mocks.checkPrBranchExecutionGate(...args),
+}));
+
 import { startProjectReview } from '@/lib/pipeline/start-review';
 
 function resp(exitCode: number, stdout = '', stderr = '') {
@@ -148,6 +153,7 @@ beforeEach(() => {
   mocks.getSettings.mockReset().mockReturnValue({
     review_verdict_rules: 'Use LGTM / NEEDS ATTENTION / DO NOT SHIP.',
   });
+  mocks.checkPrBranchExecutionGate.mockReset().mockReturnValue({ ok: true, reason: 'default_branch' });
   mocks.existsSync.mockReset().mockReturnValue(false);
   mocks.lstatSync.mockReset();
   mocks.readFileSync.mockReset();
@@ -744,12 +750,35 @@ describe('startProjectReview', () => {
     expect(mocks.exec.mock.calls[0]).toEqual([
       'bash',
       ['-lc', 'pnpm db:types'],
-      { cwd: '/path/to/proj', timeout: 20 * 60 * 1000, killProcessGroup: true },
+      { cwd: '/path/to/proj', timeout: 20 * 60 * 1000, killProcessGroup: true, scrubSecrets: true },
     ]);
     expect(mocks.exec.mock.calls[1][1]).toEqual(['-C', '/path/to/proj', 'status', '--porcelain', '--ignore-submodules']);
     const prompt: string = mocks.startJob.mock.calls[0][2];
     expect(prompt).toContain('# review prerequisite (`pnpm db:types`)');
     expect(prompt).toContain('generated types');
+  });
+
+  it('blocks reviewPrerequisiteCommand on an untrusted non-default branch before executing it', async () => {
+    mocks.getProjectPipelinePrompts.mockResolvedValue({
+      reviewPromptAddendum: null,
+      reviewPrerequisiteCommand: 'pnpm db:types',
+      fixPromptAddendum: null,
+    });
+    mocks.checkPrBranchExecutionGate.mockReturnValue({
+      ok: false,
+      detail: 'Refusing to run review prerequisite on non-default branch feature: untrusted author.',
+    });
+
+    const r = await startProjectReview('proj');
+
+    expect(r).toEqual({
+      ok: false,
+      status: 409,
+      detail: 'Refusing to run review prerequisite on non-default branch feature: untrusted author.',
+    });
+    expect(mocks.checkPrBranchExecutionGate).toHaveBeenCalledWith('/path/to/proj', 'run review prerequisite');
+    expect(mocks.exec).not.toHaveBeenCalled();
+    expect(mocks.startJob).not.toHaveBeenCalled();
   });
 
   it('does not inject acceptance criteria into the review prompt — DoD verification is mark-dod\'s job', async () => {

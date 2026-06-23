@@ -14,6 +14,7 @@ import { CODE_REVIEWER_SKILL } from '@/lib/skills/skills';
 import { withBasePrompt, getPermissionModeFlag, getSettings, getPipelineModel } from '@/lib/shared/config';
 import { loadFileConfig } from '@/lib/skills/tamtam-file-config';
 import { resolveAutoAttachedDocs, formatAutoAttachedDocsBlock } from '@/lib/skills/auto-attach-docs';
+import { checkPrBranchExecutionGate } from '@/lib/security/pr-branch-execution';
 import { getLock, acquireLock, isLockOwnedByActiveRelease } from './pipeline-lock';
 import { tryClaimPipelineStartSlot, setPipelineStartSlotJob, releasePipelineStartSlot } from './pipeline-start-slot';
 import { extractFindingIds, REVIEW_OUTPUT_CONTRACT, stripFinalVerdict } from './review-contract';
@@ -359,11 +360,15 @@ export async function startProjectReview(
   } catch { /* test env without DB */ }
   let prereqBlock = '';
   if (reviewPrerequisiteCommand?.trim()) {
+    const prereqGate = checkPrBranchExecutionGate(projPath, 'run review prerequisite');
+    if (!prereqGate.ok) return { ok: false, status: 409, detail: prereqGate.detail };
+
     const command = reviewPrerequisiteCommand.trim();
     const r = await exec('bash', ['-lc', command], {
       cwd: projPath,
       timeout: 20 * 60 * 1000,
       killProcessGroup: true,
+      scrubSecrets: true,
     });
     if (r.exitCode !== 0) {
       const output = [r.stderr.trim(), r.stdout.trim()].filter(Boolean).join('\n').trim();

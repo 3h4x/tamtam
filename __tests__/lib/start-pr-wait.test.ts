@@ -30,10 +30,11 @@ const mocks = vi.hoisted(() => {
   const startMarkDodMock = vi.fn();
   const resolveProjectPathMock = vi.fn();
   const isJobsPausedMock = vi.fn().mockReturnValue(false);
+  const riskyPrDiffFilesMock = vi.fn();
   return {
     execMock, createJobMock, markDoneMock, updateJobMock,
     getJobMock, startMarkDodMock, resolveProjectPathMock,
-    isJobsPausedMock,
+    isJobsPausedMock, riskyPrDiffFilesMock,
   };
 });
 
@@ -63,6 +64,9 @@ vi.mock('@/lib/skills/tamtam-file-config', () => ({
 // affected. The awaiting_pr_merge tests below override this.
 vi.mock('@/lib/shared/job-control', () => ({
   isJobsPaused: mocks.isJobsPausedMock,
+}));
+vi.mock('@/lib/security/pr-branch-execution', () => ({
+  riskyPrDiffFiles: mocks.riskyPrDiffFilesMock,
 }));
 
 // Import once at module scope; mocks above are hoisted before this resolves.
@@ -98,6 +102,7 @@ describe('launchPrWait', () => {
     startMarkDodMock.mockReset();
     resolveProjectPathMock.mockReset();
     mocks.isJobsPausedMock.mockReset().mockReturnValue(false);
+    mocks.riskyPrDiffFilesMock.mockReset().mockReturnValue([]);
 
     resolveProjectPathMock.mockReturnValue('/path/to/proj');
     createJobMock.mockImplementation(defaultCreateJob);
@@ -287,6 +292,24 @@ describe('launchPrWait', () => {
     launchPrWait('myproj', 9, 'owner/repo', 'https://github.com/owner/repo/pull/9');
 
     await vi.waitFor(() => {
+      expect(markDoneMock).toHaveBeenCalledWith(expect.objectContaining({ kind: 'pr-wait' }), 1);
+    }, { timeout: 3000, interval: 5 });
+  });
+
+  it('refuses auto-merge when PR diff touches high-risk execution files', async () => {
+    mocks.riskyPrDiffFilesMock.mockReturnValueOnce(['package.json']);
+    execMock.mockResolvedValueOnce(resp(0, JSON.stringify({
+      state: 'OPEN',
+      mergeable: 'MERGEABLE',
+      statusCheckRollup: [{ name: 'ci', status: 'COMPLETED', conclusion: 'SUCCESS' }],
+    })));
+
+    launchPrWait('myproj', 10, 'owner/repo', 'https://github.com/owner/repo/pull/10');
+
+    await vi.waitFor(() => {
+      const mergeCalls = execMock.mock.calls.filter(([cmd, args]: any) => cmd === 'gh' && args.includes('merge'));
+      expect(mergeCalls).toHaveLength(0);
+      expect(mocks.riskyPrDiffFilesMock).toHaveBeenCalledWith('/path/to/proj', 10, 'owner/repo');
       expect(markDoneMock).toHaveBeenCalledWith(expect.objectContaining({ kind: 'pr-wait' }), 1);
     }, { timeout: 3000, interval: 5 });
   });

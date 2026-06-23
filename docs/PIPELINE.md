@@ -232,9 +232,11 @@ landed. If auto-merge is enabled and the push produced or reused a PR, TamTam
 still continues into `pr-wait` even when `mark-dod` exits nonzero.
 
 pr-wait
-  ├─ CI passes → merge PR → switch to default branch
+  ├─ CI passes + PR diff has no high-risk execution files
+  │            → merge PR → switch to default branch
   │              ├─ project has post_merge_watch_minutes > 0 → start soak
   │              └─ otherwise                                 → finalize release (exit 0)
+  ├─ CI passes + PR diff touches high-risk execution files → finalize release (exit 1)
   └─ CI fails  → seed failed CI URL → dispatch fix-ci → finalize release (exit 1)
 
 soak
@@ -252,6 +254,12 @@ CI configured" right away: it preserves a 90-second grace window before merging
 so a freshly opened PR has time to register workflow runs. The PR must also be
 `mergeable=MERGEABLE`; `mergeable=UNKNOWN` keeps waiting because GitHub can
 still flip that state to `CONFLICTING` on a later poll.
+
+Before auto-merge, `pr-wait` inspects the actual GitHub PR diff and refuses to
+merge when it touches high-risk host-execution files such as dependency
+manifests, package-manager lockfiles, workflow files, Dockerfiles, Makefiles, or
+JS/TS config files. Failure to inspect the PR diff is treated as risky and stops
+the merge.
 
 `pr-wait` is resumable across server restarts. The job row persists
 `{ prNumber, prRepo, prUrl }` in `contextMeta`; on boot, unfinished `pr-wait`
@@ -279,9 +287,12 @@ The 30-second probe sweep also reconciles git state that is stranded outside an
 active release. Non-default `fix/issue-*` branches with unshipped work trigger a
 new release, empty local fix branches are checked back out to the default
 branch, and clean `fix/issue-*` branches whose commits are fully pushed but
-whose open PR fell behind `origin/<default>` are revalidated, rebased onto the
-fetched default, force-pushed with lease, and handed back to `pr-wait`. That
-stale-PR recovery only mutates when the branch, clean worktree, upstream
+whose open PR is no longer owned by an active `pr-wait` are recovered. If the
+PR branch fell behind `origin/<default>`, TamTam revalidates, rebases onto the
+fetched default, force-pushes with lease, and hands it back to `pr-wait`. If the
+branch is already up to date, TamTam revalidates the clean, fully-pushed branch
+and exact open PR identity, then resumes `pr-wait` without rebasing or pushing.
+The stale-PR rebase path only mutates when the branch, clean worktree, upstream
 freshness, behind count, and exact open PR identity still match immediately
 before the rebase. Clean default branches that are ahead/behind their upstream
 trigger a push. Clean detached HEADs are reattached to the default branch; if the

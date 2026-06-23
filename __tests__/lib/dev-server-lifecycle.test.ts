@@ -14,6 +14,7 @@ import {
 
 const activeWorkMock = vi.hoisted(() => vi.fn());
 const shellExecMock = vi.hoisted(() => vi.fn());
+const checkPrBranchExecutionGateMock = vi.hoisted(() => vi.fn());
 const DEV_DIR = mkdtempSync(join(tmpdir(), 'tamtam-dev-servers-'));
 const realSetImmediate = setImmediate;
 
@@ -25,6 +26,10 @@ vi.mock('@/lib/dev-server/active-work', () => ({
 
 vi.mock('@/lib/shared/shell', () => ({
   exec: shellExecMock,
+}));
+
+vi.mock('@/lib/security/pr-branch-execution', () => ({
+  checkPrBranchExecutionGate: (...args: unknown[]) => checkPrBranchExecutionGateMock(...args),
 }));
 
 const PROJECT = 'lifecycle-test-project';
@@ -167,6 +172,7 @@ describe('dev-server lifecycle', () => {
   beforeEach(async () => {
     activeWorkMock.mockReset().mockResolvedValue(false);
     shellExecMock.mockReset().mockResolvedValue({ exitCode: 0, stdout: '', stderr: '' });
+    checkPrBranchExecutionGateMock.mockReset().mockReturnValue({ ok: true, reason: 'default_branch' });
     await fullStop();
   });
 
@@ -212,6 +218,22 @@ describe('dev-server lifecycle', () => {
     expect(pidfile!.startedByJobId).toBe('job-abc');
     expect(pidfile!.command).toBe('sleep 30');
     expect(isDevServerRunning(PROJECT)).toBe(true);
+  });
+
+  it('refuses to spawn a configured dev server on an untrusted non-default branch', async () => {
+    checkPrBranchExecutionGateMock.mockReturnValueOnce({
+      ok: false,
+      detail: 'Refusing to start dev server on non-default branch feature: untrusted author.',
+    });
+
+    const result = await ensureDevServerRunning(PROJECT, baseConfig);
+
+    expect(result).toEqual({
+      status: 'spawn_failed',
+      error: 'Refusing to start dev server on non-default branch feature: untrusted author.',
+    });
+    expect(checkPrBranchExecutionGateMock).toHaveBeenCalledWith(process.cwd(), 'start dev server');
+    expect(existsSync(PIDFILE)).toBe(false);
   });
 
   it('is idempotent: second ensure returns already_running with same pid', async () => {

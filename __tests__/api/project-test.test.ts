@@ -44,6 +44,7 @@ describe('POST /api/projects/by-project/{projectName}/test', () => {
   let createJobMock: ReturnType<typeof vi.fn>;
   let updateJobMock: ReturnType<typeof vi.fn>;
   let spawnMock: ReturnType<typeof vi.fn>;
+  let checkPrBranchExecutionGateMock: ReturnType<typeof vi.fn>;
   let tempDir: string;
   let projDir: string;
   let previousCodexSandboxNetworkDisabled: string | undefined;
@@ -74,6 +75,7 @@ describe('POST /api/projects/by-project/{projectName}/test', () => {
     probeJobStatusMock = vi.fn().mockResolvedValue('done');
     createJobMock = vi.fn().mockImplementation(() => makeJob());
     updateJobMock = vi.fn();
+    checkPrBranchExecutionGateMock = vi.fn().mockReturnValue({ ok: true, reason: 'default_branch' });
 
     const mockProc = makeMockProcess();
     spawnMock = vi.fn().mockReturnValue(mockProc);
@@ -120,6 +122,9 @@ describe('POST /api/projects/by-project/{projectName}/test', () => {
     }));
     vi.doMock('@/lib/usage/resolve-provider', () => ({
       checkCliStartGate: vi.fn().mockResolvedValue({ ok: true, provider: 'claude' }),
+    }));
+    vi.doMock('@/lib/security/pr-branch-execution', () => ({
+      checkPrBranchExecutionGate: checkPrBranchExecutionGateMock,
     }));
 
     const mod = await import('@/app/api/projects/by-project/[projectName]/test/route');
@@ -303,6 +308,9 @@ describe('POST /api/projects/by-project/{projectName}/test', () => {
         getLock: vi.fn().mockReturnValue({ project: 'proj1', lockedByJobId: 'blocker-123', acquiredAt: Date.now() / 1000 }),
         acquireLock: vi.fn().mockResolvedValue({ acquired: false, lock: {}, blockingJobId: 'blocker-123' }),
         isLockOwnedByActiveRelease: vi.fn().mockReturnValue(false),
+      }));
+      vi.doMock('@/lib/security/pr-branch-execution', () => ({
+        checkPrBranchExecutionGate: vi.fn().mockReturnValue({ ok: true, reason: 'default_branch' }),
       }));
 
       const mod = await import('@/app/api/projects/by-project/[projectName]/test/route');

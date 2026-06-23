@@ -34,7 +34,7 @@ export type PrWaitPhaseResult =
       jobId: string;
       finished: boolean;
       merged: boolean;
-      reason: 'merged' | 'pr_closed' | 'checks_failed' | 'conflict' | 'merge_permanent' | 'switch_failed' | 'timeout';
+      reason: 'merged' | 'pr_closed' | 'checks_failed' | 'conflict' | 'merge_permanent' | 'risky_diff' | 'switch_failed' | 'timeout';
       exitCode: number | null;
     }
   | {
@@ -79,7 +79,7 @@ export async function releasePrWaitPhaseWorkflow(
 
   let merged = false;
   let consecutiveNoChecks = 0;
-  let terminalReason: 'merged' | 'pr_closed' | 'checks_failed' | 'conflict' | 'merge_permanent' | 'switch_failed' | 'timeout' = 'timeout';
+  let terminalReason: 'merged' | 'pr_closed' | 'checks_failed' | 'conflict' | 'merge_permanent' | 'risky_diff' | 'switch_failed' | 'timeout' = 'timeout';
 
   while (true) {
     const status = await pollPrStatusStep(jobId, prep.projPath, prNumber, prRepo, prep.deadlineAt);
@@ -114,6 +114,9 @@ export async function releasePrWaitPhaseWorkflow(
         consecutiveNoChecks = 0;
       }
 
+      const risky = await riskyDiffStep(jobId, prep.projPath, prNumber, prRepo);
+      if (risky) { terminalReason = 'risky_diff'; break; }
+
       const mergeResult = await attemptMergeStep(jobId, prep.projPath, prNumber, prRepo);
       if (mergeResult.ok) { merged = true; terminalReason = 'merged'; break; }
       if (mergeResult.permanent) { terminalReason = 'merge_permanent'; break; }
@@ -138,6 +141,19 @@ export async function releasePrWaitPhaseWorkflow(
 
   await finalizePrWaitStep(jobId, 0, 'merged', prNumber, prRepo);
   return { ok: true, jobId, finished: true, merged: true, reason: 'merged', exitCode: 0 };
+}
+
+async function riskyDiffStep(jobId: string, projPath: string, prNumber: number, prRepo: string): Promise<boolean> {
+  'use step';
+  const { riskyPrDiffFiles } = await import('@/lib/security/pr-branch-execution');
+  const { appendLogForJob } = await import('@/lib/workflows/phases/pr-wait-log');
+  const files = riskyPrDiffFiles(projPath, prNumber, prRepo);
+  if (files.length === 0) return false;
+  appendLogForJob(
+    jobId,
+    `\n# refusing auto-merge: PR diff touches high-risk execution files\n${files.map((f) => `- ${f}`).join('\n')}\n`,
+  );
+  return true;
 }
 
 // ── Steps ────────────────────────────────────────────────────────────────────

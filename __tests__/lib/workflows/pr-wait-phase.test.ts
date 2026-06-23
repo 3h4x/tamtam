@@ -19,6 +19,7 @@ const checksConclusionMock = vi.fn();
 const doMergeMock = vi.fn();
 const switchToDefaultMock = vi.fn();
 const startMarkDodMock = vi.fn();
+const riskyPrDiffFilesMock = vi.fn();
 const mkdirSyncMock = vi.fn();
 const execMock = vi.fn();
 const dbInsertMock = vi.fn();
@@ -49,6 +50,9 @@ vi.mock('@/lib/pipeline/start-pr-wait', () => ({
 }));
 vi.mock('@/lib/pipeline/start-mark-dod', () => ({
   startMarkDod: (...args: unknown[]) => startMarkDodMock(...args),
+}));
+vi.mock('@/lib/security/pr-branch-execution', () => ({
+  riskyPrDiffFiles: (...args: unknown[]) => riskyPrDiffFilesMock(...args),
 }));
 vi.mock('@/lib/shared/shell', () => ({
   exec: (...args: unknown[]) => execMock(...args),
@@ -93,6 +97,7 @@ describe('releasePrWaitPhaseWorkflow', () => {
     doMergeMock.mockReset();
     switchToDefaultMock.mockReset();
     startMarkDodMock.mockReset();
+    riskyPrDiffFilesMock.mockReset().mockReturnValue([]);
     mkdirSyncMock.mockReset();
     execMock.mockReset();
     dbInsertMock.mockReset().mockReturnValue({ values: dbValuesMock });
@@ -253,6 +258,19 @@ describe('releasePrWaitPhaseWorkflow', () => {
     const r = await releasePrWaitPhaseWorkflow('proj', PR.number, PR.repo, PR.url);
 
     expect(r).toMatchObject({ ok: true, merged: false, reason: 'merge_permanent' });
+  });
+
+  it('reports risky_diff before merge when the actual PR diff touches high-risk files', async () => {
+    setupJob('prw-risky');
+    getPrStatusMock.mockResolvedValueOnce({ state: 'OPEN', mergeable: 'MERGEABLE', checks: [{ status: 'COMPLETED', conclusion: 'SUCCESS' }] });
+    checksConclusionMock.mockReturnValue('pass');
+    riskyPrDiffFilesMock.mockReturnValueOnce(['package.json']);
+
+    const r = await releasePrWaitPhaseWorkflow('proj', PR.number, PR.repo, PR.url);
+
+    expect(r).toMatchObject({ ok: true, merged: false, reason: 'risky_diff', exitCode: 1 });
+    expect(riskyPrDiffFilesMock).toHaveBeenCalledWith('/tmp/proj', PR.number, PR.repo);
+    expect(doMergeMock).not.toHaveBeenCalled();
   });
 
   it('reports switch_failed when post-merge branch switch fails', async () => {

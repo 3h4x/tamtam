@@ -54,7 +54,7 @@ const TAMTAM_BRANCH_PATTERN = /^fix\/issue-\d+/;
 const lastAttemptAt = new Map<string, number>();
 const attemptCount = new Map<string, number>();
 
-export type StrandedKind = 'fix-branch' | 'empty-fix-branch' | 'default-out-of-sync' | 'default-dirty' | 'detached-reattach' | 'pr-behind';
+export type StrandedKind = 'fix-branch' | 'empty-fix-branch' | 'default-out-of-sync' | 'default-dirty' | 'detached-reattach' | 'pr-behind' | 'pr-resume';
 
 export interface StrandedCandidate {
   project: string;
@@ -289,17 +289,34 @@ export async function findStrandedBranches(nowMs: number = Date.now()): Promise<
           // onto the default and force-pushes, clearing the stale state.
           const behindRaw = await gitOutput(path, ['rev-list', '--count', `HEAD..origin/${state.def}`]);
           const behind = parseInt(behindRaw ?? '0', 10) || 0;
-          if (behind > 0 && !prWaitActiveProjects.has(p.name)) {
-            out.push({
-              project: p.name,
-              path,
-              branch: state.current,
-              defaultBranch: state.def,
-              kind: 'pr-behind',
-              ahead: localAhead,
-              behind,
-              reason: `open PR on ${state.current} is ${behind} commit(s) behind origin/${state.def} — rebasing to clear stale/conflicting state`,
-            });
+          if (!prWaitActiveProjects.has(p.name)) {
+            if (behind > 0) {
+              out.push({
+                project: p.name,
+                path,
+                branch: state.current,
+                defaultBranch: state.def,
+                kind: 'pr-behind',
+                ahead: localAhead,
+                behind,
+                reason: `open PR on ${state.current} is ${behind} commit(s) behind origin/${state.def} — rebasing to clear stale/conflicting state`,
+              });
+            } else {
+              // Green-orphan: fully pushed, up to date, clean — but the release
+              // / pr-wait that owned the merge drive died (crash, timeout, or a
+              // reused-branch false-merge). Nobody polls CI or merges it, so the
+              // PR sits OPEN forever. Resume pr-wait to finish the merge.
+              out.push({
+                project: p.name,
+                path,
+                branch: state.current,
+                defaultBranch: state.def,
+                kind: 'pr-resume',
+                ahead: localAhead,
+                behind: 0,
+                reason: `open PR on ${state.current} is up to date but unowned (pr-wait exited) — resuming merge`,
+              });
+            }
           }
           continue;
         }
@@ -497,6 +514,14 @@ export async function reconcileStrandedBranches(
         const r = await rebasePrBehindBranch({ project: c.project, path: c.path, branch: c.branch, defaultBranch: c.defaultBranch });
         summary.triggered.push({ project: c.project, kind: c.kind, reason: c.reason, outcome: r.outcome, detail: r.detail });
         console.log(`[stranded-branch] ${c.project}: pr-behind ${r.outcome} — ${r.detail}`);
+      } else if (c.kind === 'pr-resume') {
+        // Up-to-date open-PR branch whose owning release/pr-wait died. No rebase
+        // needed — just re-dispatch pr-wait to poll CI and merge once green so
+        // the PR doesn't sit OPEN forever.
+        const { resumePrWaitForBranch } = await import('@/lib/jobs/pr-behind-rebase');
+        const r = await resumePrWaitForBranch({ project: c.project, path: c.path, branch: c.branch, defaultBranch: c.defaultBranch });
+        summary.triggered.push({ project: c.project, kind: c.kind, reason: c.reason, outcome: r.outcome, detail: r.detail });
+        console.log(`[stranded-branch] ${c.project}: pr-resume ${r.outcome} — ${r.detail}`);
       } else {
         // default-out-of-sync: skip the full test→review pipeline and run a
         // push (which auto-rebases when behind > 0). Falls back to release

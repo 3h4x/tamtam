@@ -6,6 +6,7 @@ import { exec } from '@/lib/shared/shell';
 import { createJob, getJob, markDone, updateJob } from '@/lib/jobs/job-storage';
 import { appendRedactedFileSync } from '@/lib/jobs/redacted-log-writer';
 import { isJobsPaused } from '@/lib/shared/job-control';
+import { riskyPrDiffFiles } from '@/lib/security/pr-branch-execution';
 import type { JobData } from '@/lib/jobs/types';
 
 export type PrWaitResult =
@@ -97,6 +98,11 @@ export function checksConclusion(checks: PrStatus['checks']): 'pass' | 'fail' | 
 type MergeOutcome = { ok: true } | { ok: false; permanent: boolean };
 
 export async function doMerge(projPath: string, prNumber: number, repo: string, log: (s: string) => void): Promise<MergeOutcome> {
+  const riskyFiles = riskyPrDiffFiles(projPath, prNumber, repo);
+  if (riskyFiles.length > 0) {
+    log(`\n# refusing auto-merge: PR diff touches high-risk execution files\n${riskyFiles.map((f) => `- ${f}`).join('\n')}\n`);
+    return { ok: false, permanent: true };
+  }
   log(`\n# merging PR #${prNumber} with squash\n`);
   const args = ['pr', 'merge', String(prNumber), '--repo', repo, '--squash', '--delete-branch'];
   const r = await exec('gh', args, { cwd: projPath, timeout: 60000 });

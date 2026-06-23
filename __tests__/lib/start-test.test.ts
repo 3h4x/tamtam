@@ -25,6 +25,7 @@ const mocks = vi.hoisted(() => ({
   acquireLockMock: vi.fn(),
   releaseLockMock: vi.fn(),
   isLockOwnedByActiveReleaseMock: vi.fn(),
+  checkPrBranchExecutionGateMock: vi.fn(),
 }));
 
 vi.mock('@/lib/scheduling/scheduling', () => ({
@@ -59,6 +60,9 @@ vi.mock('@/lib/pipeline/pipeline-lock', () => ({
   acquireLock: (...args: unknown[]) => mocks.acquireLockMock(...args),
   releaseLock: (...args: unknown[]) => mocks.releaseLockMock(...args),
   isLockOwnedByActiveRelease: (...args: unknown[]) => mocks.isLockOwnedByActiveReleaseMock(...args),
+}));
+vi.mock('@/lib/security/pr-branch-execution', () => ({
+  checkPrBranchExecutionGate: (...args: unknown[]) => mocks.checkPrBranchExecutionGateMock(...args),
 }));
 // Stub out the file-config loader so anything reaching wrapIfUntrusted /
 // getBranchContext does not shell out to `git` (via execFileSync).
@@ -107,6 +111,7 @@ describe('detectTestCommand', () => {
     mocks.acquireLockMock.mockReset().mockResolvedValue({ acquired: true, lock: null });
     mocks.releaseLockMock.mockReset().mockResolvedValue(undefined);
     mocks.isLockOwnedByActiveReleaseMock.mockReset().mockResolvedValue(false);
+    mocks.checkPrBranchExecutionGateMock.mockReset().mockReturnValue({ ok: true, reason: 'default_branch' });
   });
 
   afterEach(() => {
@@ -250,5 +255,39 @@ describe('detectTestCommand', () => {
     expect(result.ok).toBe(true);
     expect(mocks.markDoneMock).toHaveBeenCalledWith(expect.objectContaining({ id: 'myproj-test-id' }), -1);
     expect(mocks.releaseLockMock).toHaveBeenCalledWith('myproj', 'myproj-test-id');
+  });
+
+  it('blocks tests on an untrusted non-default branch before spawning', async () => {
+    writeFileSync(join(projDir, 'package.json'), JSON.stringify({ scripts: { test: 'vitest' } }));
+    writeFileSync(join(projDir, 'pnpm-lock.yaml'), '');
+    mocks.checkPrBranchExecutionGateMock.mockReturnValue({
+      ok: false,
+      detail: 'Refusing to run tests on non-default branch feature: commit author attacker is not in safe_users.',
+    });
+
+    const result = await startProjectTest('myproj');
+
+    expect(result).toEqual({
+      ok: false,
+      status: 409,
+      detail: 'Refusing to run tests on non-default branch feature: commit author attacker is not in safe_users.',
+    });
+    expect(mocks.spawnMock).not.toHaveBeenCalled();
+  });
+
+  it('allows explicitly approved untrusted branch tests', async () => {
+    writeFileSync(join(projDir, 'package.json'), JSON.stringify({ scripts: { test: 'vitest' } }));
+    writeFileSync(join(projDir, 'pnpm-lock.yaml'), '');
+    const child = new EventEmitter() as EventEmitter & { pid: number; unref: () => void };
+    child.pid = 12345;
+    child.unref = vi.fn();
+    mocks.spawnMock.mockReturnValue(child);
+    mocks.checkPrBranchExecutionGateMock.mockReturnValue({ ok: false, detail: 'blocked' });
+
+    const result = await startProjectTest('myproj', { approveUntrustedPrBranch: true });
+
+    expect(result.ok).toBe(true);
+    expect(mocks.checkPrBranchExecutionGateMock).not.toHaveBeenCalled();
+    expect(mocks.spawnMock).toHaveBeenCalledOnce();
   });
 });

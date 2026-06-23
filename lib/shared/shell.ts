@@ -18,12 +18,13 @@ export function exec(
     cwd?: string;
     timeout?: number;
     env?: Record<string, string>;
+    scrubSecrets?: boolean;
     killProcessGroup?: boolean;
     signal?: AbortSignal;
     abortProcessTree?: boolean;
   }
 ): Promise<ShellResult> {
-  const mergedEnv = buildChildEnv(options?.env);
+  const mergedEnv = buildChildEnv(options?.env, { scrubSecrets: options?.scrubSecrets });
 
   // killProcessGroup=true: spawn detached so we can kill(-pid) the entire tree
   // (git → hook → check.ts → vitest workers) on timeout or parent exit.
@@ -45,6 +46,9 @@ export function exec(
 
       let child: ReturnType<typeof spawn> | null = null;
       let aborted = false;
+      let exitResult: { code: number | null; signal: NodeJS.Signals | null } | null = null;
+      let stdoutEnded = true;
+      let stderrEnded = true;
 
       const killTree = !!options?.killProcessGroup || !!options?.abortProcessTree;
 
@@ -95,6 +99,8 @@ export function exec(
           detached: killTree,
           stdio: ['ignore', 'pipe', 'pipe'],
         });
+        stdoutEnded = !child.stdout;
+        stderrEnded = !child.stderr;
       } catch (error) {
         stderrChunks.push(Buffer.from(error instanceof Error ? error.message : String(error)));
         settle(1);
@@ -114,14 +120,33 @@ export function exec(
         }
       }
 
-      child.stdout?.on('data', (d: Buffer) => { stdoutChunks.push(d); });
-      child.stderr?.on('data', (d: Buffer) => { stderrChunks.push(d); });
-      child.on('close', (code, signal) => {
+      const settleFromChildResult = (code: number | null, signal: NodeJS.Signals | null) => {
         if (aborted || signal) {
           settle(130);
           return;
         }
         settle(code ?? 1);
+      };
+      const maybeSettleAfterStdio = () => {
+        if (!exitResult || !stdoutEnded || !stderrEnded) return;
+        settleFromChildResult(exitResult.code, exitResult.signal);
+      };
+      child.stdout?.on('data', (d: Buffer) => { stdoutChunks.push(d); });
+      child.stdout?.on('end', () => {
+        stdoutEnded = true;
+        maybeSettleAfterStdio();
+      });
+      child.stderr?.on('data', (d: Buffer) => { stderrChunks.push(d); });
+      child.stderr?.on('end', () => {
+        stderrEnded = true;
+        maybeSettleAfterStdio();
+      });
+      child.on('exit', (code, signal) => {
+        exitResult = { code, signal };
+        maybeSettleAfterStdio();
+      });
+      child.on('close', (code, signal) => {
+        settleFromChildResult(code, signal);
       });
       child.on('error', (error) => {
         if (stderrChunks.length === 0) {
@@ -130,8 +155,9 @@ export function exec(
         settle(1);
       });
 
-      // Don't keep the Node event loop alive just for this child
-      if (killTree) child.unref();
+      // Keep the child referenced until it closes. This helper returns the
+      // command result, so unref() would let short-lived detached children exit
+      // before Node flushes the stdio pipes and close event reliably.
     });
   }
 

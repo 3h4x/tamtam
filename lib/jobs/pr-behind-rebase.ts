@@ -52,19 +52,27 @@ async function discoverOpenPr(
   try {
     const r = await exec(
       'gh',
-      ['pr', 'view', branch, '--json', 'number,url,headRefName,headRepository,headRepositoryOwner'],
+      ['pr', 'view', branch, '--json', 'number,url,state,headRefName,headRepository,headRepositoryOwner'],
       { cwd: projPath, timeout: 15_000 },
     );
     if (r.exitCode !== 0 || !r.stdout) return null;
     const parsed = JSON.parse(r.stdout) as {
       number?: number;
       url?: string;
+      state?: string;
       headRefName?: string;
       headRepository?: { name?: string };
       headRepositoryOwner?: { login?: string };
     };
     const owner = parsed.headRepositoryOwner?.login;
     const name = parsed.headRepository?.name;
+    // `gh pr view <branch>` returns the most recent PR for the branch
+    // REGARDLESS of state. On a branch whose name was reused after an earlier
+    // PR merged (TamTam's `fix/issue-*` branches recur), that is a MERGED PR.
+    // Resuming pr-wait on it would observe state=MERGED and falsely report the
+    // release shipped while the new commits sit unmerged. Only ever act on an
+    // OPEN PR for this exact branch.
+    if (parsed.state !== 'OPEN') return null;
     if (parsed.headRefName && parsed.headRefName !== branch) return null;
     if (!parsed.number || !parsed.url || !owner || !name) return null;
     return { number: parsed.number, repo: `${owner}/${name}`, url: parsed.url };
@@ -148,4 +156,57 @@ export async function rebasePrBehindBranch(candidate: {
     return { outcome: 'started', detail: `rebased + force-pushed; pr-wait not started: ${launched.error}` };
   }
   return { outcome: 'started', detail: `rebased ${branch} onto origin/${defaultBranch}, force-pushed, resumed pr-wait #${pr.number}` };
+}
+
+/**
+ * Resume pr-wait for an up-to-date (behind == 0) open-PR branch whose owning
+ * release / pr-wait died. No rebase or push — the branch is already mergeable;
+ * it just needs someone to poll CI and merge it. Without this, a green PR whose
+ * release crashed after `push` sits OPEN forever (the reconciler used to skip
+ * it as "pr-wait's lane" even after pr-wait had exited). Revalidates clean +
+ * fully-pushed + not-behind + open-PR identity before dispatching, so a stale
+ * scan can never start a wait against the wrong branch state.
+ */
+export async function resumePrWaitForBranch(candidate: {
+  project: string;
+  path: string;
+  branch: string;
+  defaultBranch: string;
+}): Promise<PrBehindRebaseResult> {
+  const { project, path, branch, defaultBranch } = candidate;
+
+  const currentBranch = await gitOutput(path, ['branch', '--show-current']);
+  if (currentBranch !== branch) {
+    return { outcome: 'rejected', detail: `branch changed after scan (expected ${branch}, found ${currentBranch || 'detached/unknown'}) — skipping pr-wait resume` };
+  }
+
+  const status = await gitOutput(path, ['status', '--porcelain']);
+  if (status == null || status.length > 0) {
+    return { outcome: 'rejected', detail: status == null ? 'could not verify clean worktree — skipping pr-wait resume' : 'worktree changed after scan — skipping pr-wait resume' };
+  }
+
+  const upstreamAhead = parseCount(await gitOutput(path, ['rev-list', '--count', '@{u}..HEAD']));
+  if (upstreamAhead == null || upstreamAhead > 0) {
+    return { outcome: 'rejected', detail: upstreamAhead == null ? 'could not verify upstream freshness — skipping pr-wait resume' : `${branch} has ${upstreamAhead} unpushed commit(s) after scan — skipping pr-wait resume` };
+  }
+
+  const behind = parseCount(await gitOutput(path, ['rev-list', '--count', `HEAD..origin/${defaultBranch}`]));
+  if (behind == null) {
+    return { outcome: 'rejected', detail: `could not verify behind count against origin/${defaultBranch} — skipping pr-wait resume` };
+  }
+  if (behind > 0) {
+    // Fell behind between scan and now — the rebase path owns this case.
+    return { outcome: 'rejected', detail: `${branch} is now ${behind} behind origin/${defaultBranch} — deferring to rebase path` };
+  }
+
+  const pr = await discoverOpenPr(path, branch);
+  if (!pr) {
+    return { outcome: 'rejected', detail: `no open PR found for ${branch} — nothing to resume` };
+  }
+
+  const launched = launchPrWait(project, pr.number, pr.repo, pr.url);
+  if ('error' in launched) {
+    return { outcome: 'rejected', detail: `pr-wait not started: ${launched.error}` };
+  }
+  return { outcome: 'started', detail: `resumed pr-wait #${pr.number} for up-to-date open PR on ${branch}` };
 }

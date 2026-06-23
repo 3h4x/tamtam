@@ -54,4 +54,29 @@ describe('buildChildEnv', () => {
     const env = buildChildEnv({ HOME: '/tmp/not-the-real-home' });
     expect(env.HOME).toBe(homedir());
   });
+
+  it('strips credential-like values when scrubSecrets is enabled', () => {
+    vi.stubEnv('GITHUB_TOKEN', 'ghp_secret');
+    vi.stubEnv('AWS_ACCESS_KEY_ID', 'aws-secret');
+    vi.stubEnv('ANTHROPIC_API_KEY', 'anthropic-secret');
+    vi.stubEnv('SSH_AUTH_SOCK', '/tmp/agent.sock');
+    vi.stubEnv('NPM_CONFIG_USERCONFIG', '/Users/me/.npmrc');
+    vi.stubEnv('KEEP_ME', 'safe');
+
+    const env = buildChildEnv({
+      NODE_AUTH_TOKEN: 'npm-secret',
+      CUSTOM_PASSWORD: 'pw',
+      KEEP_OVERRIDE: 'safe-too',
+    }, { scrubSecrets: true });
+
+    expect(env.GITHUB_TOKEN).toBeUndefined();
+    expect(env.AWS_ACCESS_KEY_ID).toBeUndefined();
+    expect(env.ANTHROPIC_API_KEY).toBeUndefined();
+    expect(env.SSH_AUTH_SOCK).toBeUndefined();
+    expect(env.NPM_CONFIG_USERCONFIG).toBeUndefined();
+    expect(env.NODE_AUTH_TOKEN).toBeUndefined();
+    expect(env.CUSTOM_PASSWORD).toBeUndefined();
+    expect(env.KEEP_ME).toBe('safe');
+    expect(env.KEEP_OVERRIDE).toBe('safe-too');
+  });
 });

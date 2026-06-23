@@ -33,6 +33,16 @@ const candidate = { project: 'proj', path: '/tmp/proj', branch: 'fix/issue-1-x',
 const prJson = JSON.stringify({
   number: 200,
   url: 'https://github.com/o/r/pull/200',
+  state: 'OPEN',
+  headRefName: 'fix/issue-1-x',
+  headRepository: { name: 'r' },
+  headRepositoryOwner: { login: 'o' },
+});
+
+const mergedPrJson = JSON.stringify({
+  number: 200,
+  url: 'https://github.com/o/r/pull/200',
+  state: 'MERGED',
   headRefName: 'fix/issue-1-x',
   headRepository: { name: 'r' },
   headRepositoryOwner: { login: 'o' },
@@ -166,6 +176,72 @@ describe('rebasePrBehindBranch', () => {
     expect(r.detail).toMatch(/no open PR/i);
     expect(calls.some((c) => c.startsWith('git rebase'))).toBe(false);
     expect(calls.some((c) => c.includes('push') && c.includes('--force-with-lease'))).toBe(false);
+    expect(launchPrWait).not.toHaveBeenCalled();
+  });
+
+  it('treats a MERGED PR on a reused branch as "no open PR" and never mutates the repo', async () => {
+    // The branch name was reused after an earlier PR merged. `gh pr view`
+    // returns that MERGED PR; resuming it would falsely report a ship.
+    const { calls, launchPrWait } = setup(
+      validPreflight({ 'gh pr view': { exitCode: 0, stdout: mergedPrJson } }),
+      { jobId: 'pw1' },
+    );
+    const { rebasePrBehindBranch } = await import('@/lib/jobs/pr-behind-rebase');
+    const r = await rebasePrBehindBranch(candidate);
+
+    expect(r.outcome).toBe('rejected');
+    expect(r.detail).toMatch(/no open PR/i);
+    expect(calls.some((c) => c.startsWith('git rebase'))).toBe(false);
+    expect(calls.some((c) => c.includes('push') && c.includes('--force-with-lease'))).toBe(false);
+    expect(launchPrWait).not.toHaveBeenCalled();
+  });
+});
+
+describe('resumePrWaitForBranch', () => {
+  beforeEach(() => vi.resetModules());
+  afterEach(() => { vi.resetModules(); vi.restoreAllMocks(); });
+
+  it('resumes pr-wait for an up-to-date clean open-PR branch without rebasing or pushing', async () => {
+    const { calls, launchPrWait } = setup(
+      validPreflight({ 'git rev-list --count HEAD..origin/main': { exitCode: 0, stdout: '0' } }),
+      { jobId: 'pw1' },
+    );
+    const { resumePrWaitForBranch } = await import('@/lib/jobs/pr-behind-rebase');
+    const r = await resumePrWaitForBranch(candidate);
+
+    expect(r.outcome).toBe('started');
+    expect(launchPrWait).toHaveBeenCalledWith('proj', 200, 'o/r', 'https://github.com/o/r/pull/200');
+    // No repo mutation — it is already mergeable.
+    expect(calls.some((c) => c.startsWith('git rebase'))).toBe(false);
+    expect(calls.some((c) => c.includes('push'))).toBe(false);
+  });
+
+  it('defers to the rebase path when the branch fell behind after the scan', async () => {
+    const { launchPrWait } = setup(
+      validPreflight({ 'git rev-list --count HEAD..origin/main': { exitCode: 0, stdout: '3' } }),
+      { jobId: 'pw1' },
+    );
+    const { resumePrWaitForBranch } = await import('@/lib/jobs/pr-behind-rebase');
+    const r = await resumePrWaitForBranch(candidate);
+
+    expect(r.outcome).toBe('rejected');
+    expect(r.detail).toMatch(/behind/i);
+    expect(launchPrWait).not.toHaveBeenCalled();
+  });
+
+  it('does not resume a MERGED PR on a reused branch', async () => {
+    const { launchPrWait } = setup(
+      validPreflight({
+        'git rev-list --count HEAD..origin/main': { exitCode: 0, stdout: '0' },
+        'gh pr view': { exitCode: 0, stdout: mergedPrJson },
+      }),
+      { jobId: 'pw1' },
+    );
+    const { resumePrWaitForBranch } = await import('@/lib/jobs/pr-behind-rebase');
+    const r = await resumePrWaitForBranch(candidate);
+
+    expect(r.outcome).toBe('rejected');
+    expect(r.detail).toMatch(/no open PR/i);
     expect(launchPrWait).not.toHaveBeenCalled();
   });
 });

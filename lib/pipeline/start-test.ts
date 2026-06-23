@@ -7,6 +7,7 @@ import { resolveProjectPath } from '@/lib/shared/project-data';
 import { buildChildEnv } from '@/lib/shared/child-env';
 import { shellQuote } from '@/lib/shared/shell';
 import { loadFileConfig } from '@/lib/skills/tamtam-file-config';
+import { checkPrBranchExecutionGate } from '@/lib/security/pr-branch-execution';
 import { createJob, listJobs, probeJobStatus, updateJob, markDone } from '@/lib/jobs/job-storage';
 import { getLock, acquireLock, releaseLock, isLockOwnedByActiveRelease } from './pipeline-lock';
 import { tryClaimPipelineStartSlot, setPipelineStartSlotJob, releasePipelineStartSlot } from './pipeline-start-slot';
@@ -20,6 +21,7 @@ const REVIEW_RETEST_REASON = 'review-retest';
 
 export interface StartTestOptions {
   reviewRetest?: boolean;
+  approveUntrustedPrBranch?: boolean;
 }
 
 export function isReviewRetestJob(job: Pick<JobData, 'kind' | 'contextMeta'>): boolean {
@@ -160,6 +162,10 @@ export async function startProjectTest(
   if (!testCmd) {
     return { ok: false, status: 400, detail: `Could not detect test command for ${projectName}` };
   }
+  if (!options.approveUntrustedPrBranch) {
+    const prGate = checkPrBranchExecutionGate(projPath, 'run tests');
+    if (!prGate.ok) return { ok: false, status: 409, detail: prGate.detail };
+  }
 
   mkdirSync(/*turbopackIgnore: true*/ logDir, { recursive: true });
 
@@ -184,7 +190,7 @@ export async function startProjectTest(
   // firing doesn't lose the real exit code (otherwise the probe's ESRCH path
   // wins and the job gets recorded as exit=-1 despite tests passing).
   const exitCodePath = `${logPath}.exitcode`;
-  const childEnv = buildChildEnv();
+  const childEnv = buildChildEnv(undefined, { scrubSecrets: true });
   const bashCommand = [
     'set -o pipefail',
     `export PATH=${shellQuote(childEnv.PATH || '')}`,

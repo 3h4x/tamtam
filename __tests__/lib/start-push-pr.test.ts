@@ -307,7 +307,7 @@ describe('startProjectPush — PR creation', () => {
       .mockImplementationOnce(() => resp(0, 'abc1234'))                            // git rev-parse
       .mockImplementationOnce(() => resp(0, 'feat/my-feature'))                    // git branch --show-current (decidePrContext)
       .mockImplementationOnce(() => resp(0, 'feat/my-feature'))                    // git branch --show-current (createGenericPR)
-      .mockImplementationOnce(() => resp(0, JSON.stringify({ url: existingUrl }))) // gh pr view (existing PR)
+      .mockImplementationOnce(() => resp(0, JSON.stringify({ url: existingUrl, state: 'OPEN' }))) // gh pr view (existing PR)
       .mockImplementationOnce(() => resp(0, 'owner/repo'));                        // gh repo view
 
     const r = await startProjectPush('proj');
