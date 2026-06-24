@@ -109,6 +109,7 @@ export async function PATCH(
         const prerequisiteCommand = parsePrerequisiteCommandInput(body.prerequisiteCommand);
         writeFileAgent(projPath, parsedFile.project, parsedFile.name, { prompt: body.prompt, provider, prerequisiteCommand });
       }
+      clearAgentsCache();
       const updated = loadFileAgent(projPath, parsedFile.project, parsedFile.name);
       if (!updated) return NextResponse.json({ detail: 'not found after write' }, { status: 500 });
       try {
@@ -248,6 +249,7 @@ export async function DELETE(
     // Drop the DB override too — otherwise re-creating the agent later
     // would silently inherit a stale enabled/schedule.
     deleteFileAgentOverride(parsedFileDel.project, parsedFileDel.name);
+    clearAgentsCache();
     return NextResponse.json({ status: 'deleted' });
   }
 

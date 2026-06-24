@@ -117,6 +117,16 @@ export async function runProbeSweep(): Promise<void> {
   } catch (err) {
     console.error('[probe-sweep] stranded-branch reconcile error:', err);
   }
+  // Auto-pause caught-up / unfruitful projects: ones whose recent scheduled
+  // agent runs all produced no diff AND at least one reported nothing to do.
+  // Stops a project churning agents (and the git/syspolicyd process storm) for
+  // no value until a human resumes it. No-op when the setting is off.
+  try {
+    const { runUnfruitfulPauseSweep } = await import('@/lib/orchestrator/unfruitful-pause');
+    await runUnfruitfulPauseSweep();
+  } catch (err) {
+    console.error('[probe-sweep] unfruitful-pause error:', err);
+  }
   // Safety net: drain in-memory agent queues for projects where nothing is
   // currently running. The primary drain path is the lifecycle hook that fires
   // drainNextAgentRun on every agent finish. But a race between the drain and

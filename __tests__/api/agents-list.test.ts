@@ -302,5 +302,169 @@ describeAgentsApi((ctx) => {
           prerequisiteCommand: 'echo ready',
         });
       });
+
+      it('refreshes warmed per-project file-agent cache after a file-agent update', async () => {
+        const db = testDb.db;
+        await db.insert(schema.projects).values({ name: 'proj1', path: '/p1', enabled: true });
+        resolveProjectPathMock.mockReturnValue('/p1');
+
+        let currentAgent = {
+          id: 'file:proj1:writer',
+          name: 'writer',
+          project: 'proj1',
+          skillIds: [] as string[],
+          docPaths: [] as string[],
+          model: 'sonnet',
+          prompt: 'old prompt',
+          schedule: null,
+          enabled: true,
+          boostable: true,
+          provider: null,
+          prerequisiteCommand: null,
+          permissionMode: null,
+          kind: 'user',
+          role: 'producer',
+          createdAt: 0,
+          updatedAt: 0,
+          source: 'file' as const,
+          filePath: '/p1/.tamtam/agents/writer.md',
+        };
+        scanFileAgentsMock.mockImplementation(() => [currentAgent]);
+        writeFileAgentMock.mockImplementation((_path, _project, _name, updates) => {
+          currentAgent = {
+            ...currentAgent,
+            prompt: updates.prompt ?? currentAgent.prompt,
+            enabled: updates.enabled ?? currentAgent.enabled,
+          };
+          return currentAgent;
+        });
+        await warmAgentsCache();
+
+        const first = await GET(new NextRequest('http://localhost/api/agents?project=proj1'));
+        expect((await first.json()).agents[0]).toMatchObject({ name: 'writer', prompt: 'old prompt', enabled: true });
+
+        const patch = await PATCH_BY_NAME(new NextRequest('http://localhost/api/agents/by-name', {
+          method: 'PATCH',
+          body: JSON.stringify({ project: 'proj1', name: 'writer', prompt: 'new prompt', enabled: false }),
+        }));
+        expect(patch.status).toBe(200);
+
+        const second = await GET(new NextRequest('http://localhost/api/agents?project=proj1'));
+        expect((await second.json()).agents[0]).toMatchObject({ name: 'writer', prompt: 'new prompt', enabled: false });
+      });
+
+      it('refreshes warmed per-project file-agent cache after an override-only file-agent update', async () => {
+        const db = testDb.db;
+        await db.insert(schema.projects).values({ name: 'proj1', path: '/p1', enabled: true });
+        resolveProjectPathMock.mockReturnValue('/p1');
+        parseFileAgentIdMock.mockReturnValue({ project: 'proj1', name: 'writer' });
+
+        const currentAgent = {
+          id: 'file:proj1:writer',
+          name: 'writer',
+          project: 'proj1',
+          skillIds: [] as string[],
+          docPaths: [] as string[],
+          model: 'sonnet',
+          prompt: 'old prompt',
+          schedule: null,
+          enabled: true,
+          boostable: true,
+          provider: null,
+          prerequisiteCommand: null,
+          permissionMode: null,
+          kind: 'user',
+          role: 'producer',
+          createdAt: 0,
+          updatedAt: 0,
+          source: 'file' as const,
+          filePath: '/p1/.tamtam/agents/writer.md',
+        };
+        scanFileAgentsMock.mockImplementation(() => [currentAgent]);
+        loadFileAgentMock.mockImplementation(() => currentAgent);
+        setFileAgentOverrideMock.mockImplementation((_project, _name, patch) => {
+          if (patch.enabled !== undefined) currentAgent.enabled = patch.enabled;
+          return patch;
+        });
+        await warmAgentsCache();
+
+        const first = await GET(new NextRequest('http://localhost/api/agents?project=proj1'));
+        expect((await first.json()).agents[0]).toMatchObject({ name: 'writer', enabled: true });
+
+        const patch = await PATCH(new NextRequest('http://localhost/api/agents/file%3Aproj1%3Awriter', {
+          method: 'PATCH',
+          body: JSON.stringify({ enabled: false }),
+        }), { params: Promise.resolve({ agentId: 'file:proj1:writer' }) });
+        expect(patch.status).toBe(200);
+        expect(writeFileAgentMock).not.toHaveBeenCalled();
+
+        const second = await GET(new NextRequest('http://localhost/api/agents?project=proj1'));
+        expect((await second.json()).agents[0]).toMatchObject({ name: 'writer', enabled: false });
+      });
+
+      it('refreshes warmed per-project file-agent cache after a file-agent delete', async () => {
+        const db = testDb.db;
+        await db.insert(schema.projects).values({ name: 'proj1', path: '/p1', enabled: true });
+        resolveProjectPathMock.mockReturnValue('/p1');
+        parseFileAgentIdMock.mockReturnValue({ project: 'proj1', name: 'writer' });
+
+        let currentAgent: {
+          id: string;
+          name: string;
+          project: string;
+          skillIds: string[];
+          docPaths: string[];
+          model: string;
+          prompt: string;
+          schedule: string | null;
+          enabled: boolean;
+          boostable: boolean;
+          provider: string | null;
+          prerequisiteCommand: string | null;
+          permissionMode: string | null;
+          kind: string;
+          role: string;
+          createdAt: number;
+          updatedAt: number;
+          source: 'file';
+          filePath: string;
+        } | null = {
+          id: 'file:proj1:writer',
+          name: 'writer',
+          project: 'proj1',
+          skillIds: [],
+          docPaths: [],
+          model: 'sonnet',
+          prompt: 'old prompt',
+          schedule: null,
+          enabled: true,
+          boostable: true,
+          provider: null,
+          prerequisiteCommand: null,
+          permissionMode: null,
+          kind: 'user',
+          role: 'producer',
+          createdAt: 0,
+          updatedAt: 0,
+          source: 'file',
+          filePath: '/p1/.tamtam/agents/writer.md',
+        };
+        scanFileAgentsMock.mockImplementation(() => currentAgent ? [currentAgent] : []);
+        deleteFileAgentMock.mockImplementation(() => {
+          currentAgent = null;
+        });
+        await warmAgentsCache();
+
+        const first = await GET(new NextRequest('http://localhost/api/agents?project=proj1'));
+        expect((await first.json()).agents).toHaveLength(1);
+
+        const del = await DELETE(new NextRequest('http://localhost/api/agents/file%3Aproj1%3Awriter', {
+          method: 'DELETE',
+        }), { params: Promise.resolve({ agentId: 'file:proj1:writer' }) });
+        expect(del.status).toBe(200);
+
+        const second = await GET(new NextRequest('http://localhost/api/agents?project=proj1'));
+        expect((await second.json()).agents).toEqual([]);
+      });
     });
 });

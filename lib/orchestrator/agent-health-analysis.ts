@@ -90,7 +90,9 @@ const PRINT_KILL_GRACE_MS = 5_000;
 // phrasings plus the improve agent's empty-queue sentinel. Used to (a) skip the
 // LLM entirely when every analyzed run is idle and (b) annotate idle runs in the
 // prompt so the model doesn't mistake a caught-up agent for loop/noise.
-const IDLE_SUMMARY_RE =
+// Exported so the unfruitful-project auto-pause can reuse the exact same
+// "caught up / nothing to do" detection the health analysis uses.
+export const IDLE_SUMMARY_RE =
   /no actionable|nothing to (do|change|fix|consolidate)|already (clean|audited)|queue (is )?empty|IMPROVE_QUEUE_ROTATED|idle until|no .{0,30}target|no (coverage |edits )?(gaps?|required)/i;
 
 function runIndicatesIdle(run: RunRow): boolean {

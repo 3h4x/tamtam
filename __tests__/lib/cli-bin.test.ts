@@ -46,6 +46,8 @@ function makeSettings(overrides: Partial<TamTamConfig> = {}): TamTamConfig {
     jobs_paused: false,
     fix_max_iterations: 3,
     release_min_lines: 0,
+    auto_pause_unfruitful_enabled: true,
+    auto_pause_unfruitful_runs: 6,
     release_reinforce_max_iterations: 3,
     review_fix_backoff_seconds: 0,
     review_do_not_ship_action: 'pass',

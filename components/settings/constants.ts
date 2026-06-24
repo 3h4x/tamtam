@@ -16,6 +16,8 @@ export type SettingsFieldKey =
   | 'review_verdict_rules'
   | 'fix_max_iterations'
   | 'release_min_lines'
+  | 'auto_pause_unfruitful_enabled'
+  | 'auto_pause_unfruitful_runs'
   | 'release_reinforce_max_iterations'
   | 'review_fix_backoff_seconds'
   | 'review_do_not_ship_action'
@@ -451,6 +453,21 @@ export const FIELDS: Record<SettingsFieldKey, FieldDef> = {
     subsection: 'release_ops',
     span: 1,
   },
+  auto_pause_unfruitful_enabled: {
+    label: 'Auto-pause Unfruitful Projects',
+    help: 'When on, scheduled agent runs that repeatedly produce no diff and report nothing to do can pause the project automatically until it is resumed from Settings.',
+    group: 'pipeline',
+    subsection: 'release_ops',
+    span: 1,
+  },
+  auto_pause_unfruitful_runs: {
+    label: 'Auto-pause Runs',
+    help: 'Consecutive caught-up no-diff scheduled runs required before auto-pausing a project.',
+    group: 'pipeline',
+    subsection: 'release_ops',
+    advanced: true,
+    span: 1,
+  },
   release_reinforce_max_iterations: {
     label: 'Reinforce Max Iterations',
     help: 'Max consecutive reinforce re-runs per project before releasing whatever exists. 0 = unlimited (stops only when a re-run adds no new lines). Only used when Release Min Lines Changed is set.',
@@ -652,6 +669,8 @@ export const DEFAULTS: Record<SettingsFieldKey, string> = {
 - If LGTM, just confirm the changes look good and add nothing else.`,
   fix_max_iterations: '0',
   release_min_lines: '0',
+  auto_pause_unfruitful_enabled: 'true',
+  auto_pause_unfruitful_runs: '6',
   release_reinforce_max_iterations: '3',
   review_fix_backoff_seconds: '30',
   review_do_not_ship_action: 'fix',

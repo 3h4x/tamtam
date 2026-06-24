@@ -213,6 +213,7 @@ export async function PATCH(request: NextRequest) {
         if (fileAgent.name !== nextName) {
           deleteFileAgentOverride(projectName, fileAgent.name);
         }
+        clearAgentsCache();
         try {
           if (updated.schedule && updated.enabled && (updated.prompt || updated.skillIds.length > 0)) {
             await installAgentSchedule(updated.id, updated.schedule, updated.prompt, updated.project, updated.name);
