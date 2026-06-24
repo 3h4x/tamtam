@@ -477,6 +477,91 @@ describe('fetchProjectData — project selection and metadata', () => {
   });
 });
 
+describe('fetchProjectData — cache invalidation', () => {
+  const handle = { get db() { return sharedHandle.db; } } as { db: TestDbHandle['db'] };
+  let execMock: ReturnType<typeof vi.fn>;
+  let gitChangesMock: ReturnType<typeof vi.fn>;
+
+  beforeEach(async () => {
+    await truncateTables();
+    vi.resetModules();
+    vi.useFakeTimers({ toFake: ['Date'] });
+    vi.setSystemTime(new Date('2026-06-24T12:00:00Z'));
+
+    await handle.db.insert(schema.projects).values({
+      name: 'enabled-proj',
+      path: '/workspace/enabled',
+      enabled: true,
+    });
+
+    execMock = vi.fn().mockResolvedValue({ exitCode: 0, stdout: '', stderr: '' });
+    gitChangesMock = vi.fn();
+
+    vi.doMock('@/lib/db', () => ({ db: sharedHandle.db, schema }));
+    vi.doMock('@/lib/shared/shell', () => ({ exec: execMock }));
+    vi.doMock('@/lib/git/git-utils', () => ({
+      gitChanges: gitChangesMock,
+      isReviewed: vi.fn().mockResolvedValue(null),
+    }));
+    vi.doMock('@/lib/shared/gh-status', () => ({
+      ghStatusLookup: vi.fn().mockResolvedValue({}),
+    }));
+    vi.doMock('@/lib/jobs/storage', () => ({
+      listJobs: vi.fn().mockReturnValue([]),
+    }));
+    vi.doMock('@/lib/scheduling/scheduling', () => ({
+      getImproveConfig: vi.fn().mockReturnValue({ logDir: '/tmp/logs', claudeBin: 'claude', projects: {}, freqMin: 60 }),
+      getPriorityMultipliers: vi.fn().mockReturnValue({}),
+      effectiveFreqMin: vi.fn().mockReturnValue(60),
+      computeSchedule: vi.fn().mockReturnValue({ minute: 15, cycleHours: 4, hourPhase: 1 }),
+      parseCronTime: vi.fn(),
+      cronFiresStr: vi.fn().mockReturnValue('every 4h'),
+      PRIORITY_ORDER: ['critical', 'high', 'medium', 'low', 'none'],
+    }));
+    vi.doMock('@/lib/scheduling/fire-times', () => ({
+      fireTimesStr: vi.fn().mockReturnValue('every 4h'),
+    }));
+    await primeEnabledProjectsCache();
+  });
+
+  afterEach(() => {
+    vi.useRealTimers();
+    vi.resetModules();
+  });
+
+  it('does not let a pre-clear in-flight refresh republish stale data', async () => {
+    const slowRefresh: { resolve?: (value: number) => void } = {};
+    gitChangesMock
+      .mockResolvedValueOnce(1)
+      .mockImplementationOnce(() => new Promise<number>((resolve) => {
+        slowRefresh.resolve = resolve;
+      }))
+      .mockResolvedValue(3);
+
+    const { clearProjectDataCache, fetchProjectData } = await import('@/lib/shared/project-data');
+
+    const initial = await fetchProjectData();
+    expect(initial.projects['enabled-proj']?.[0]?.changes).toBe(1);
+
+    vi.setSystemTime(new Date('2026-06-24T12:00:11Z'));
+    const stale = await fetchProjectData();
+    expect(stale.projects['enabled-proj']?.[0]?.changes).toBe(1);
+    expect(slowRefresh.resolve).toBeDefined();
+    const finishSlowRefresh = slowRefresh.resolve;
+    if (!finishSlowRefresh) throw new Error('expected slow refresh to be pending');
+
+    clearProjectDataCache();
+    const postClear = fetchProjectData();
+    finishSlowRefresh(2);
+
+    const fresh = await postClear;
+    expect(fresh.projects['enabled-proj']?.[0]?.changes).toBe(3);
+
+    const cached = await fetchProjectData();
+    expect(cached.projects['enabled-proj']?.[0]?.changes).toBe(3);
+  });
+});
+
 describe('clearProjectDataCache', () => {
   let clearProjectDataCache: typeof import('@/lib/shared/project-data').clearProjectDataCache;
 

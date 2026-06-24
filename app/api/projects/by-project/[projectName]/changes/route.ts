@@ -17,6 +17,20 @@ interface ChangeFile {
 // Skip running `git diff --no-index` on huge untracked files; mark binary instead.
 const UNTRACKED_SIZE_LIMIT_BYTES = 2 * 1024 * 1024;
 
+// The merge-check `git fetch` is network-bound (~0.5–3s) and previously ran on
+// every changes poll for a non-default branch, making the tab feel frozen.
+// Cache the merge result per project+default+branch for a short window so rapid
+// polls reuse it; the default-branch case still does zero network. Open-PR
+// detection stays live because stale PR URLs change the available user action.
+// Pinned to globalThis per the codebase singleton pattern (route modules can be
+// duplicated across Next.js bundle realms).
+const BRANCH_INFO_TTL_MS = 30_000;
+declare global {
+  var __tamtamChangesBranchInfoCache:
+    | Map<string, { branchMerged: boolean; time: number }>
+    | undefined;
+}
+
 // For renames, numstat writes the path as `dir/{old => new}.ext` or `old => new`.
 // Resolve to the new path so lookups against `--name-status` entries succeed.
 function canonicalizeRenamePath(p: string): string {
@@ -158,35 +172,46 @@ export async function GET(
   // so the local origin/<default> ref reflects GitHub's current HEAD.
   // Gated behind ahead === 0: if the branch has unpushed commits it can't be
   // fully merged, so skip the 500ms–2s git fetch on the common case.
+  // Merge-check is cached per project+branch so rapid changes-tab polls don't
+  // re-run a `git fetch` every time. Open-PR detection intentionally remains
+  // live per request: a stale cached PR URL can make the UI offer "View PR"
+  // after the PR disappeared, or hide a newly-created PR.
   let branchMerged = false;
-  if (branchName && branchName !== defaultBranch && ahead === 0) {
-    await exec(
-      'git',
-      ['-C', projPath, 'fetch', '--quiet', 'origin', defaultBranch],
-      { timeout: 10000 },
-    );
-    const aheadR = await exec(
-      'git',
-      ['-C', projPath, 'rev-list', '--count', `origin/${defaultBranch}..HEAD`],
-      { timeout: 5000 },
-    );
-    if (aheadR.exitCode === 0) {
-      const commitsAhead = parseInt(aheadR.stdout.trim(), 10);
-      branchMerged = Number.isFinite(commitsAhead) && commitsAhead === 0;
-    }
-  }
-
-  // Detect an existing open PR for the current branch so the UI can hide
-  // "Create PR" (gh would refuse anyway with a confusing error) and show a
-  // "View PR ↗" link instead. Only checked for non-default branches — the
-  // button isn't shown on main/master in any case, so the `gh pr list` call
-  // would be wasted. Network-bound, so wrapped in try/catch: a `gh` failure
-  // shouldn't break the changes page.
   let openPrUrl: string | null = null;
-  if (branchName && branchName !== defaultBranch) {
+  const onFeatureBranch = !!branchName && branchName !== defaultBranch;
+  const branchInfoCache = (globalThis.__tamtamChangesBranchInfoCache ??= new Map());
+  const branchInfoKey = `${projPath}::${defaultBranch}::${branchName}`;
+  if (onFeatureBranch) {
+    // Gated on ahead === 0: a branch with unpushed commits can't be fully
+    // merged, so skip the 500ms–2s fetch on the common case.
+    if (ahead === 0) {
+      const cachedBranchInfo = branchInfoCache.get(branchInfoKey);
+      if (cachedBranchInfo && Date.now() - cachedBranchInfo.time < BRANCH_INFO_TTL_MS) {
+        branchMerged = cachedBranchInfo.branchMerged;
+      } else {
+        await exec(
+          'git',
+          ['-C', projPath, 'fetch', '--quiet', 'origin', defaultBranch],
+          { timeout: 10000 },
+        );
+        const aheadR = await exec(
+          'git',
+          ['-C', projPath, 'rev-list', '--count', `origin/${defaultBranch}..HEAD`],
+          { timeout: 5000 },
+        );
+        if (aheadR.exitCode === 0) {
+          const commitsAhead = parseInt(aheadR.stdout.trim(), 10);
+          branchMerged = Number.isFinite(commitsAhead) && commitsAhead === 0;
+        }
+        branchInfoCache.set(branchInfoKey, { branchMerged, time: Date.now() });
+      }
+    }
+    // Detect an existing open PR so the UI shows "View PR ↗" instead of
+    // "Create PR". Network-bound, wrapped in try/catch so a `gh` failure
+    // doesn't break the page.
     try {
       const prR = await exec(
-        'gh', ['pr', 'list', '--head', branchName, '--state', 'open', '--json', 'url', '--limit', '1'],
+        'gh', ['pr', 'list', '--head', branchName as string, '--state', 'open', '--json', 'url', '--limit', '1'],
         { cwd: projPath, timeout: 5000 },
       );
       if (prR.exitCode === 0 && prR.stdout.trim()) {

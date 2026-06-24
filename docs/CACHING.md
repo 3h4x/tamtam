@@ -19,9 +19,9 @@ Live in the Next.js server process. Lost on restart — clients see a cold miss 
 
 | Cache | File | TTL | Covers | Invalidated by |
 |-------|------|-----|--------|----------------|
-| Project data | `lib/shared/project-data.ts` | 10s | `/api/projects` response (tasks, priorities) | `clearProjectDataCache()` — called on project CRUD |
+| Project data | `lib/shared/project-data.ts` | 10s | `/api/projects` response (tasks, priorities) | `clearProjectDataCache()` — called on project CRUD; invalidates any older in-flight refresh generation |
 | Settings | `lib/shared/config.ts` | 5s | All settings reads via `getSettings()` | `reloadConfig()` — called by `PATCH /api/settings` |
-| Agents list | `lib/agents/agents-cache.ts` | 10s | `GET /api/agents` (all agents, filtered by project) | `clearAgentsCache()` — called on agent create/update/delete |
+| Agents list | `lib/agents/agents-cache.ts`, `lib/agents/file-agents-cache.ts` | 10s | `GET /api/agents` (DB agents plus file agents, filtered by project) | `clearAgentsCache()` — called on agent create/update/delete and clears both DB-agent and file-agent list caches |
 
 ### 2. In-memory jobs Map (no TTL)
 
@@ -60,11 +60,13 @@ Persist across restarts. Stale data is served until TTL expires or a force-refre
 mutation → DB write → clearXxxCache() → next GET rebuilds cache
 ```
 
+`project-data` additionally uses single-flight stale-while-revalidate for expired reads: concurrent cache misses share one rebuild, and an expired cached value can be returned while a background refresh runs. A later `clearProjectDataCache()` bumps the cache generation and detaches any older in-flight refresh, so a pre-mutation refresh cannot republish stale project data after the mutation.
+
 | What changed | Clear function |
 |--------------|---------------|
 | Project enabled/disabled | `clearProjectDataCache()` in `lib/shared/project-data.ts` |
 | Settings updated | `reloadConfig()` in `lib/shared/config.ts` |
-| Agent created/updated/deleted | `clearAgentsCache()` in `lib/agents/agents-cache.ts` |
+| Agent created/updated/deleted | `clearAgentsCache()` in `lib/agents/agents-cache.ts` (also clears `lib/agents/file-agents-cache.ts`) |
 | Issues refreshed | Row upserted in `gh_issues_cache`; `?refresh=1` bypasses TTL check |
 | Issue detail refreshed | Row upserted in `gh_issue_detail_cache`; `?refresh=1` bypasses TTL check; current trust allowlists are applied again on every cache hit |
 
@@ -109,7 +111,7 @@ psql "$DATABASE_URL" -c \
 |------|------|
 | `lib/shared/project-data.ts` | 10s TTL cache for project task data |
 | `lib/shared/config.ts` | 5s TTL cache for all settings |
-| `lib/agents/agents-cache.ts` | 10s TTL cache for agents list + `clearAgentsCache()` |
+| `lib/agents/agents-cache.ts` / `lib/agents/file-agents-cache.ts` | 10s TTL caches for DB agents and file agents; `clearAgentsCache()` clears both |
 | `lib/jobs/job-storage.ts` | In-memory jobs Map + DB persistence |
 | `app/api/projects/by-project/[projectName]/issues/route.ts` | 5-min DB caches via `gh_issues_cache` and `gh_issue_detail_cache` |
 | `app/api/jobs/notifications/route.ts` | Serves running jobs from in-memory Map (no extra DB query) |

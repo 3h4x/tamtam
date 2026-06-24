@@ -21,6 +21,7 @@ const BOOLEAN_SELECT_FIELD_KEYS = new Set<SettingsFieldKey>([
   'browser_broker_enabled',
   'tamtam_network_policy_strict',
   'orchestrator_enabled',
+  'auto_pause_unfruitful_enabled',
   'agent_autopilot_enabled',
   'initiative_engine_enabled',
   'initiative_mining_enabled',
@@ -131,6 +132,7 @@ export function SettingsField({
         </Select>
       ) : fieldKey === 'fix_max_iterations'
           || fieldKey === 'release_min_lines'
+          || fieldKey === 'auto_pause_unfruitful_runs'
           || fieldKey === 'release_reinforce_max_iterations'
           || fieldKey === 'orchestrator_boost_margin_pct'
           || fieldKey === 'orchestrator_max_boosts_per_hour'

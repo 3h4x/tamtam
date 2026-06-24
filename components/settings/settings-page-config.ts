@@ -40,6 +40,8 @@ export interface SettingsMap {
   rebuild_in_progress: string
   fix_max_iterations: string
   release_min_lines: string
+  auto_pause_unfruitful_enabled: string
+  auto_pause_unfruitful_runs: string
   release_reinforce_max_iterations: string
   review_fix_backoff_seconds: string
   review_do_not_ship_action: string
@@ -155,6 +157,8 @@ export const SETTINGS_DEFAULTS: SettingsMap = {
   orchestrator_boost_margin_pct: '5',
   orchestrator_max_boosts_per_hour: '2',
   agent_autopilot_enabled: 'true',
+  auto_pause_unfruitful_enabled: 'true',
+  auto_pause_unfruitful_runs: '6',
   initiative_engine_enabled: 'false',
   initiative_mining_enabled: 'true',
   initiative_dispatch_enabled: 'true',

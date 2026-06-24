@@ -82,6 +82,10 @@ function invalidateOverrideCache(project: string, name: string): void {
   _overrideCache.delete(keyFor(project, name));
 }
 
+function clearFileAgentListCache(): void {
+  globalThis.__tamtamAllFileAgentsCache = null;
+}
+
 /**
  * Bulk-load every override row from the DB into the sync cache. Async callers
  * (e.g. the cron-task agent loader) can `await` this before scanning file
@@ -159,11 +163,13 @@ export async function setFileAgentOverride(project: string, name: string, patch:
   // Update the sync cache so callers that use getFileAgentOverrideSync see the
   // new value on the next call without waiting for the background refresh.
   _overrideCache.set(keyFor(project, name), next);
+  clearFileAgentListCache();
   return next;
 }
 
 export function deleteFileAgentOverride(project: string, name: string): void {
   invalidateOverrideCache(project, name);
+  clearFileAgentListCache();
   void db.delete(schema.settings)
     .where(eq(schema.settings.key, keyFor(project, name)))
     .execute()

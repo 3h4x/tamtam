@@ -92,6 +92,14 @@ export interface TamTamConfig {
    *  set, sub-threshold agent runs are reinforced (the agent is re-dispatched
    *  to do more) instead of releasing. */
   release_min_lines: number;
+  /** Auto-pause a project when its recent scheduled agent runs are all no-diff
+   *  AND at least one reports nothing to do (caught up) — stops it churning
+   *  agents (and the git/syspolicyd process storm) for no value. Resume from
+   *  Settings when there is new work. */
+  auto_pause_unfruitful_enabled: boolean;
+  /** Consecutive no-diff scheduled runs required before auto-pausing a caught-up
+   *  project. */
+  auto_pause_unfruitful_runs: number;
   /** Max consecutive reinforce re-runs per project before releasing whatever
    *  exists. 0 = unlimited (relies on the no-progress exit). */
   release_reinforce_max_iterations: number;
@@ -228,6 +236,8 @@ export const DEFAULTS: TamTamConfig = {
   // a forced partial ship when the loops are making progress.
   fix_max_iterations: 0,
   release_min_lines: 0,
+  auto_pause_unfruitful_enabled: true,
+  auto_pause_unfruitful_runs: 6,
   release_reinforce_max_iterations: 3,
   // Base for exponential backoff between fix dispatches (review→fix and
   // push→fix). 30s base means iteration 4 waits 30s, iter 5 60s, iter 6 120s,
@@ -498,6 +508,10 @@ export function buildConfigFromSettingsMap(map: Record<string, string>): TamTamC
     jobs_paused: map.jobs_paused === 'true',
     fix_max_iterations: parseNonNegativeIntOr(map.fix_max_iterations, DEFAULTS.fix_max_iterations),
     release_min_lines: parseNonNegativeIntOr(map.release_min_lines, DEFAULTS.release_min_lines),
+    auto_pause_unfruitful_enabled: map.auto_pause_unfruitful_enabled === undefined
+      ? DEFAULTS.auto_pause_unfruitful_enabled
+      : map.auto_pause_unfruitful_enabled === 'true',
+    auto_pause_unfruitful_runs: parseNonNegativeIntOr(map.auto_pause_unfruitful_runs, DEFAULTS.auto_pause_unfruitful_runs),
     release_reinforce_max_iterations: parseNonNegativeIntOr(
       map.release_reinforce_max_iterations,
       DEFAULTS.release_reinforce_max_iterations,

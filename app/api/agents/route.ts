@@ -18,16 +18,7 @@ import { parseOptionalPermissionModeInput } from '@/lib/shared/config';
 import { resolveAgentPrerequisiteCommandWithFileSkills } from '@/lib/agents/file-skill-prerequisites';
 import { isBuiltInRecommendedAgent } from '@/lib/agents/recommended-agents';
 import { loadAgentCronStates, getAllAgentLastAttempts } from '@/lib/scheduling/agent-cron-state';
-
-const ALL_FILE_AGENTS_TTL_MS = 10_000;
-
-// Pin to globalThis: Next.js can duplicate this module across route bundle
-// realms (per CLAUDE.md singleton pattern), so a module-level TTL cache would
-// fragment into multiple per-realm copies and the 10s coalescing wouldn't
-// hold across HTTP routes that all hit this handler.
-declare global {
-  var __tamtamAllFileAgentsCache: { agents: FileAgent[]; time: number } | null | undefined;
-}
+import { getAllFileAgentsCached } from '@/lib/agents/file-agents-cache';
 
 function withEffectivePrerequisite<T extends { project: string; skillIds: string[]; prerequisiteCommand?: string | null }>(
   agent: T,
@@ -51,22 +42,6 @@ function fileAgentAutopilotJson(fa: FileAgent): string | null {
   return ap ? JSON.stringify(ap) : null;
 }
 
-function getAllFileAgentsCached(): FileAgent[] {
-  const now = Date.now();
-  const cached = globalThis.__tamtamAllFileAgentsCache;
-  if (cached && now - cached.time < ALL_FILE_AGENTS_TTL_MS) {
-    return cached.agents;
-  }
-  const out: FileAgent[] = [];
-  for (const p of listEnabledProjects()) {
-    try {
-      for (const fa of scanFileAgents(p.path, p.name)) out.push(fa);
-    } catch { /* skip */ }
-  }
-  globalThis.__tamtamAllFileAgentsCache = { agents: out, time: now };
-  return out;
-}
-
 export async function GET(request: NextRequest) {
   const project = request.nextUrl.searchParams.get('project');
   const name = request.nextUrl.searchParams.get('name');
@@ -88,7 +63,17 @@ export async function GET(request: NextRequest) {
   if (project) {
     const projPath = resolveProjectPath(project);
     if (projPath) {
-      for (const fa of scanFileAgents(projPath, project)) {
+      // Reuse the 10s all-projects file-agent cache for enabled projects
+      // instead of an uncached per-request filesystem walk of `.tamtam/agents`.
+      // The per-project path was ~1.5s vs ~15ms for the unfiltered (cached)
+      // list because every `?project=X` request (per-project agents tab, agent
+      // picker) re-scanned the filesystem. Disabled/archived projects aren't in
+      // the cache, so fall back to a direct scan only for them.
+      const isEnabled = listEnabledProjects().some(p => p.name === project);
+      const fileAgentsForProject = isEnabled
+        ? getAllFileAgentsCached().filter(fa => fa.project === project)
+        : scanFileAgents(projPath, project);
+      for (const fa of fileAgentsForProject) {
         if (name && fa.name !== name) continue;
         if (!dbKeys.has(`${fa.project}:${canonicalAgentNameKey(fa.name)}`)) normalized.push({ ...withEffectivePrerequisite(fa), autopilotState: fileAgentAutopilotJson(fa), fallbackEnabled: false });
       }
