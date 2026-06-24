@@ -7,7 +7,6 @@ import { getImproveConfig, setProjectPushResult } from '@/lib/scheduling/schedul
 import { resolveCliBin, resolveCliEnv } from '@/lib/shared/cli-bin';
 import { isCliProvider } from '@/lib/usage/cli-providers';
 import { checkCliStartGate } from '@/lib/usage/resolve-provider';
-import { loadFileConfig } from '@/lib/skills/tamtam-file-config';
 import { currentParent } from '@/lib/jobs/parent-context';
 import { buildDiffContext } from '@/lib/git/diff-context';
 import { createJob, markDone, updateJob, listJobs, findActiveReleaseJob } from '@/lib/jobs/job-storage';
