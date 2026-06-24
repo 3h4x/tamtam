@@ -127,6 +127,25 @@ export async function runProbeSweep(): Promise<void> {
   } catch (err) {
     console.error('[probe-sweep] unfruitful-pause error:', err);
   }
+  // Safety net: re-fire orphaned pending releases. A pending release normally
+  // drains on a pipeline-lock-release event or at boot. If neither fires — the
+  // holding pipeline emitted no release event, or the release was queued after
+  // the last event already drained — it strands with a free lock and nothing to
+  // retrigger it (observed stranded 50+ min). This mirrors the queued-agent
+  // safety net below, which was already added for the same class of missed-event
+  // stall but never extended to pending releases. drainProjectRecoveryWork is
+  // single-flight and drainPendingRelease self-guards (no-op when a release is
+  // already running, re-queue on benign conflicts), so it is cheap, idempotent,
+  // and preserves the release-before-agents invariant per project.
+  try {
+    const { listPendingReleaseProjects } = await import('@/lib/pipeline/pending-release');
+    const { drainProjectRecoveryWork } = await import('@/lib/pipeline/recovery-drain');
+    for (const project of await listPendingReleaseProjects()) {
+      void drainProjectRecoveryWork(project, '[probe-sweep recovery]');
+    }
+  } catch (err) {
+    console.error('[probe-sweep] pending-release recovery error:', err);
+  }
   // Safety net: drain in-memory agent queues for projects where nothing is
   // currently running. The primary drain path is the lifecycle hook that fires
   // drainNextAgentRun on every agent finish. But a race between the drain and

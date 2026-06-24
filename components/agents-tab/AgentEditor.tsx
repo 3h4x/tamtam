@@ -308,22 +308,22 @@ export function AgentEditor({
           </h2>
         </div>
         {agent?.source !== 'file' && !isNew && (
-          <div className="flex rounded-md border border-border overflow-hidden">
-            <button
-              type="button"
-              className={`px-3 py-1.5 text-xs ${mode === 'edit' ? 'bg-bg-tertiary text-text-primary' : 'text-text-secondary'}`}
-              onClick={() => setMode('edit')}
-            >
-              Edit
-            </button>
-            <button
-              type="button"
-              className={`px-3 py-1.5 text-xs border-l border-border ${mode === 'history' ? 'bg-bg-tertiary text-text-primary' : 'text-text-secondary'}`}
-              onClick={openHistory}
-            >
-              History
-            </button>
-          </div>
+          <SegmentedControl
+            ariaLabel="Agent editor mode"
+            value={mode}
+            size="sm"
+            options={[
+              { value: 'edit', label: 'Edit' },
+              { value: 'history', label: 'History' },
+            ]}
+            onChange={(nextMode) => {
+              if (nextMode === 'history') {
+                openHistory()
+                return
+              }
+              setMode(nextMode)
+            }}
+          />
         )}
       </div>
 
