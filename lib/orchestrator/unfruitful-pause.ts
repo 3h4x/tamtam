@@ -50,15 +50,23 @@ export function runIsCaughtUp(run: JobData): boolean {
   return IDLE_SUMMARY_RE.test(run.workSummary ?? '');
 }
 
+/** A run that completed without producing value: it succeeded (exit 0) or
+ *  explicitly reported nothing to do. Used inside an all-no-diff window to tell
+ *  a genuinely caught-up project (agents finish fine but produce nothing — e.g.
+ *  blog-writer "found no material", refactor-split "no eligible target") from a
+ *  streak of host-load CRASHES (all exit ≠ 0, empty summaries) which needs
+ *  attention, not silencing. */
+function runIsCaughtUpOrCleanNoop(run: JobData): boolean {
+  return runIsCaughtUp(run) || run.exitCode === 0;
+}
+
 /**
  * True when a project is caught up / unfruitful: its most recent `threshold`
  * finished scheduled agent runs ALL produced no diff AND at least one of them
- * explicitly reported nothing to do.
- *
- * The nothing-to-do requirement is what distinguishes a genuinely caught-up
- * project (agents run fine but find no work) from one merely failing transiently
- * — e.g. host-load killing agents with empty summaries. We pause the former, not
- * the latter: a crashing project needs attention, not silencing.
+ * completed cleanly with nothing to produce (an explicit nothing-to-do summary,
+ * or a successful exit-0 run that changed nothing). The clean-completion
+ * requirement excludes a project that is merely crashing transiently (e.g.
+ * host-load killing every agent) — that needs attention, not silencing.
  */
 export function isProjectCaughtUpUnfruitful(
   recentRunsNewestFirst: JobData[],
@@ -68,7 +76,7 @@ export function isProjectCaughtUpUnfruitful(
   const window = recentRunsNewestFirst.slice(0, requiredRuns);
   if (window.length < requiredRuns) return false; // not enough history yet
   if (window.some((r) => !runProducedNoDiff(r))) return false; // a fruitful run → still has work
-  return window.some(runIsCaughtUp); // ≥1 explicit nothing-to-do
+  return window.some(runIsCaughtUpOrCleanNoop); // ≥1 clean no-op (caught up, not crashing)
 }
 
 /** Finished scheduled agent runs for one project, newest-first. */

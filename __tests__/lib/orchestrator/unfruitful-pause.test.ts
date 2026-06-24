@@ -67,6 +67,15 @@ describe('isProjectCaughtUpUnfruitful', () => {
     const runs = [noDiffFail, noDiffFail, noDiffFail, noDiffFail, noDiffFail];
     expect(isProjectCaughtUpUnfruitful(runs, 5)).toBe(false);
   });
+  it('true for clean exit-0 no-diff runs whose summary is not a known nothing-to-do phrase (blog-writer "found no material")', () => {
+    const cleanNoop = run({
+      linesAdded: 0,
+      linesRemoved: 0,
+      exitCode: 0,
+      workSummary: 'Fetched live stats/trending data, found no material',
+    });
+    expect(isProjectCaughtUpUnfruitful([cleanNoop, cleanNoop, cleanNoop, cleanNoop, cleanNoop], 5)).toBe(true);
+  });
   it('treats threshold 0 as one qualifying run', () => {
     expect(isProjectCaughtUpUnfruitful([noDiffCaughtUp], 0)).toBe(true);
     expect(isProjectCaughtUpUnfruitful([fruitful], 0)).toBe(false);

@@ -486,7 +486,27 @@ async function runCommit(
     if (!currentBranch || currentBranch === mainBranch) {
       const featureBranch = issueBranchName(issueCtx);
       log(`\n# on ${currentBranch || '(detached)'} — switching to ${featureBranch} before commit\n`);
-      const coR = await execStep('git', ['-C', projPath, 'checkout', '-b', featureBranch], { timeout: 10000 });
+      // Base the feature branch on the LATEST origin/<default>, not the local
+      // (possibly stale) default branch. Cutting from a stale local default is
+      // the root cause of "PRs suddenly conflict even though only we touch the
+      // repo": the branch is born behind origin, and every overlapping change on
+      // the advancing default piles up into a merge conflict by PR time (e.g. a
+      // branch cut 35 h / 19 commits ago). Fetch first and branch off
+      // origin/<default> so it starts on top of current master; fall back to the
+      // local HEAD when origin is unavailable (offline) or the working-tree
+      // changes can't be carried cleanly onto fresh origin — the push/pr-behind
+      // path rebases later in that case.
+      await execStep('git', ['-C', projPath, 'fetch', '--quiet', 'origin', mainBranch], { timeout: 30000 }).catch(() => {});
+      const originDefaultRef = `origin/${mainBranch}`;
+      const haveOriginDefault =
+        (await execStep('git', ['-C', projPath, 'rev-parse', '--verify', '--quiet', originDefaultRef], { timeout: 5000 })).exitCode === 0;
+      let coR = haveOriginDefault
+        ? await execStep('git', ['-C', projPath, 'checkout', '-b', featureBranch, originDefaultRef], { timeout: 15000 })
+        : await execStep('git', ['-C', projPath, 'checkout', '-b', featureBranch], { timeout: 10000 });
+      if (coR.exitCode !== 0 && haveOriginDefault) {
+        log(`# could not base ${featureBranch} on ${originDefaultRef} (${(coR.stderr || coR.stdout || '').trim().slice(0, 120)}) — using local HEAD\n`);
+        coR = await execStep('git', ['-C', projPath, 'checkout', '-b', featureBranch], { timeout: 10000 });
+      }
       if (coR.stdout) log(coR.stdout);
       if (coR.stderr) log(coR.stderr);
       if (coR.exitCode !== 0) {
