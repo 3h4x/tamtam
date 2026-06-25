@@ -13,6 +13,7 @@ type Settings = {
   notification_on_agent_run_fail: boolean;
   notification_on_release_aborted: boolean;
   notification_on_budget_blocked: boolean;
+  notification_on_budget_exceeded: boolean;
   notification_throttle_window_seconds: number;
   notification_throttle_overrides: Record<string, number>;
 };
@@ -28,6 +29,7 @@ function defaultSettings(overrides: Partial<Settings> = {}): Settings {
     notification_on_agent_run_fail: false,
     notification_on_release_aborted: false,
     notification_on_budget_blocked: false,
+    notification_on_budget_exceeded: false,
     notification_throttle_window_seconds: 900,
     notification_throttle_overrides: { release_fail: 0, release_aborted: 0 },
     ...overrides,
@@ -301,6 +303,33 @@ describe('lib/notifications', () => {
       const body = JSON.parse(opts.body);
       expect(body.throttleKeySuffix).toBeUndefined();
       expect(body.event).toBe('budget_blocked');
+    });
+
+    it('sends project budget-exceeded alerts when enabled', async () => {
+      mocks.getSettings.mockReturnValue(
+        defaultSettings({
+          notification_webhook_url: GENERIC_URL,
+          notification_on_budget_exceeded: true,
+        }),
+      );
+
+      await notify({
+        event: 'budget_exceeded',
+        project: 'tamtam',
+        job_id: 'release-1',
+        status: 'failed',
+        reason: 'release_spend_cap',
+        cost_usd: 5.25,
+        message: 'Release spend cap exceeded',
+        timestamp: 1000,
+      });
+      await flush();
+
+      const [, opts] = mockFetch.mock.calls[0];
+      const body = JSON.parse(opts.body);
+      expect(body.event).toBe('budget_exceeded');
+      expect(body.reason).toBe('release_spend_cap');
+      expect(body.cost_usd).toBe(5.25);
     });
 
     it('sends budget-blocked alerts for different throttle identities inside the same window', async () => {

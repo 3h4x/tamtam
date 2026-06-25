@@ -135,6 +135,8 @@ async function applyDdl(handle: TestDbHandle): Promise<void> {
       dev_server_start_command text,
       dev_server_stop_command text,
       dev_server_ready_url text,
+      daily_spend_cap_usd double precision,
+      release_spend_cap_usd double precision,
       setup_complete boolean NOT NULL DEFAULT false,
       setup_state text NOT NULL DEFAULT '{}',
       archived boolean NOT NULL DEFAULT false,

@@ -76,11 +76,20 @@ describe('POST /api/agents/{agentId}/run runtime DB bootstrap', () => {
       isLockOwnedByActiveRelease: vi.fn().mockResolvedValue(true),
       getLock: vi.fn().mockResolvedValue({ project: 'proj1', lockedByJobId: 'release-1' }),
     }));
+    vi.doMock('@/lib/pipeline/spend-guard', () => ({
+      checkDailySpendCap: vi.fn().mockResolvedValue({
+        ok: true,
+        project: 'proj1',
+        actualUsd: 0,
+        capUsd: null,
+      }),
+    }));
   });
 
   afterEach(async () => {
     await new Promise((r) => setTimeout(r, 10));
     vi.doUnmock('@/lib/pipeline/pipeline-lock');
+    vi.doUnmock('@/lib/pipeline/spend-guard');
     vi.doUnmock('@/lib/db');
     vi.resetModules();
     vi.clearAllMocks();

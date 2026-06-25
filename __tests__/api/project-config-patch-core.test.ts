@@ -184,6 +184,50 @@ describe('PATCH /api/projects/by-project/{projectName}/config', () => {
     expect(mocks.writeProjectFieldYaml).toHaveBeenCalledWith('proj1', 'website', 'https://example.com/app');
   });
 
+  it('persists project spend caps to DB-only project config', async () => {
+    const req = new NextRequest('http://localhost/api/projects/by-project/proj1/config', {
+      method: 'PATCH',
+      body: JSON.stringify({
+        daily_spend_cap_usd: ' 12.50 ',
+        release_spend_cap_usd: 4.25,
+      }),
+    });
+
+    const res = await PATCH(req, { params: Promise.resolve({ projectName: 'proj1' }) });
+
+    expect(res.status).toBe(200);
+    expect(mocks.writeProjectFieldYaml).toHaveBeenCalledWith('proj1', 'daily_spend_cap_usd', '12.5');
+    expect(mocks.writeProjectFieldYaml).toHaveBeenCalledWith('proj1', 'release_spend_cap_usd', '4.25');
+  });
+
+  it('clears project spend caps when empty or zero', async () => {
+    const req = new NextRequest('http://localhost/api/projects/by-project/proj1/config', {
+      method: 'PATCH',
+      body: JSON.stringify({
+        daily_spend_cap_usd: '',
+        release_spend_cap_usd: '0',
+      }),
+    });
+
+    const res = await PATCH(req, { params: Promise.resolve({ projectName: 'proj1' }) });
+
+    expect(res.status).toBe(200);
+    expect(mocks.writeProjectFieldYaml).toHaveBeenCalledWith('proj1', 'daily_spend_cap_usd', null);
+    expect(mocks.writeProjectFieldYaml).toHaveBeenCalledWith('proj1', 'release_spend_cap_usd', null);
+  });
+
+  it('rejects invalid project spend caps', async () => {
+    const req = new NextRequest('http://localhost/api/projects/by-project/proj1/config', {
+      method: 'PATCH',
+      body: JSON.stringify({ daily_spend_cap_usd: '-1' }),
+    });
+
+    const res = await PATCH(req, { params: Promise.resolve({ projectName: 'proj1' }) });
+
+    expect(res.status).toBe(400);
+    expect(mocks.writeProjectFieldYaml).not.toHaveBeenCalled();
+  });
+
   it('clears website when whitespace-only', async () => {
     const req = new NextRequest('http://localhost/api/projects/by-project/proj1/config', {
       method: 'PATCH',

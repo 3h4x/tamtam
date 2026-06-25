@@ -73,6 +73,8 @@ Project metadata and per-project pipeline config.
 | `devServerStartCommand` | TEXT | — | nullable; DB-only `bash -c` command TamTam runs from the project root at agent kickoff |
 | `devServerStopCommand` | TEXT | — | nullable; DB-only command run before TamTam falls back to terminating the owned dev-server process group |
 | `devServerReadyUrl` | TEXT | — | nullable; DB-only HTTP(S) readiness URL polled after starting the dev server |
+| `dailySpendCapUsd` | DOUBLE PRECISION | — | nullable; rolling 24h project spend cap for new agent runs and Release starts |
+| `releaseSpendCapUsd` | DOUBLE PRECISION | — | nullable; per-release child-job spend cap checked between pipeline phases |
 | `setupComplete` | BOOLEAN | `false` | Whether the new-project setup wizard is finished |
 | `setupState` | TEXT | `'{}'` | JSON object recording setup wizard step statuses (`completed` / `skipped`) |
 

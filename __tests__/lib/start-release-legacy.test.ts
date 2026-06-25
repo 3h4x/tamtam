@@ -113,6 +113,12 @@ describe('startRelease — legacy review stamp compatibility', () => {
       getLock: vi.fn().mockReturnValue(null),
     }));
     vi.doMock('@/lib/usage/resolve-provider', () => ({ checkCliStartGate: vi.fn().mockResolvedValue({ ok: true, provider: 'claude' }) }));
+    vi.doMock('@/lib/pipeline/spend-guard', () => ({
+      checkDailySpendCap: vi.fn().mockResolvedValue({ ok: true }),
+    }));
+    vi.doMock('@/lib/shared/notifications', () => ({
+      notify: vi.fn().mockResolvedValue(undefined),
+    }));
     vi.doMock('@/lib/skills/tamtam-file-config', () => ({
       loadFileConfig: () => null,
     }));

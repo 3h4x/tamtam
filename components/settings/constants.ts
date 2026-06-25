@@ -44,6 +44,8 @@ export type SettingsFieldKey =
   | 'notification_on_fix_loop_exhausted'
   | 'notification_on_review_do_not_ship'
   | 'notification_on_agent_run_fail'
+  | 'notification_on_budget_blocked'
+  | 'notification_on_budget_exceeded'
   | 'notification_throttle_window_seconds'
   | 'notification_throttle_overrides'
   | 'pipeline_model_review'
@@ -633,6 +635,18 @@ export const FIELDS: Record<SettingsFieldKey, FieldDef> = {
     group: 'notifications' as never,
     span: 1,
   },
+  notification_on_budget_blocked: {
+    label: 'Notification on Budget Blocked',
+    help: 'Not used in FIELDS; handled by NotificationsTab',
+    group: 'notifications' as never,
+    span: 1,
+  },
+  notification_on_budget_exceeded: {
+    label: 'Notification on Project Budget Exceeded',
+    help: 'Not used in FIELDS; handled by NotificationsTab',
+    group: 'notifications' as never,
+    span: 1,
+  },
   notification_throttle_window_seconds: {
     label: 'Notification Throttle Window',
     help: 'Not used in FIELDS; handled by NotificationsTab',
@@ -697,6 +711,8 @@ export const DEFAULTS: Record<SettingsFieldKey, string> = {
   notification_on_fix_loop_exhausted: 'false',
   notification_on_review_do_not_ship: 'false',
   notification_on_agent_run_fail: 'false',
+  notification_on_budget_blocked: 'false',
+  notification_on_budget_exceeded: 'false',
   notification_throttle_window_seconds: '900',
   notification_throttle_overrides: '{"release_fail":0,"release_aborted":0}',
   pipeline_model_review: '',

@@ -218,6 +218,13 @@
       "when": 1782384065128,
       "tag": "0030_job_skill_ids",
       "breakpoints": true
+    },
+    {
+      "idx": 31,
+      "version": "7",
+      "when": 1782388800000,
+      "tag": "0031_project_spend_caps",
+      "breakpoints": true
     }
   ]
 }

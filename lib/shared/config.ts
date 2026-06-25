@@ -150,6 +150,7 @@ export interface TamTamConfig {
   budget_block_at_pct: number;
   budget_warn_at_pct: number;
   notification_on_budget_blocked: boolean;
+  notification_on_budget_exceeded: boolean;
   dirty_worktree_block_threshold: number;
   incremental_review_enabled: boolean;
   retrieval_enabled: boolean;
@@ -293,6 +294,7 @@ export const DEFAULTS: TamTamConfig = {
   budget_block_at_pct: 95,
   budget_warn_at_pct: 80,
   notification_on_budget_blocked: false,
+  notification_on_budget_exceeded: false,
   dirty_worktree_block_threshold: 1,
   incremental_review_enabled: true,
   retrieval_enabled: true,
@@ -611,6 +613,7 @@ export function buildConfigFromSettingsMap(map: Record<string, string>): TamTamC
     budget_block_at_pct: parseIntOr(map.budget_block_at_pct, DEFAULTS.budget_block_at_pct),
     budget_warn_at_pct: parseIntOr(map.budget_warn_at_pct, DEFAULTS.budget_warn_at_pct),
     notification_on_budget_blocked: map.notification_on_budget_blocked === 'true',
+    notification_on_budget_exceeded: map.notification_on_budget_exceeded === 'true',
     dirty_worktree_block_threshold: parseIntOr(map.dirty_worktree_block_threshold, DEFAULTS.dirty_worktree_block_threshold),
     incremental_review_enabled:
       map.incremental_review_enabled === undefined

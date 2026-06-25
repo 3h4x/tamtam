@@ -128,6 +128,8 @@ async function applyDdl(handle: TestDbHandle): Promise<void> {
       enabled boolean DEFAULT true,
       website text,
       qa_url text,
+      daily_spend_cap_usd double precision,
+      release_spend_cap_usd double precision,
       setup_complete boolean NOT NULL DEFAULT false,
       setup_state text NOT NULL DEFAULT '{}',
       archived boolean NOT NULL DEFAULT false,

@@ -155,6 +155,9 @@ export interface ProjectConfig {
   dev_server_start_command?: string
   dev_server_stop_command?: string
   dev_server_ready_url?: string
+  daily_spend_cap_usd?: number | null
+  release_spend_cap_usd?: number | null
+  last_24h_spend_usd?: number
   setup_complete?: boolean
   setup_state?: ProjectSetupState
   paused?: boolean

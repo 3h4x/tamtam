@@ -137,6 +137,7 @@ Outbound webhooks for release pipeline events. Never blocks pipeline progress �
 | `notification_on_review_do_not_ship` | boolean | `false` | Notify when a code review verdict is "DO NOT SHIP". |
 | `notification_on_agent_run_fail` | boolean | `false` | Notify when an agent run fails. |
 | `notification_on_budget_blocked` | boolean | `false` | Notify when a run is refused because the selected agent subscription budget threshold is exceeded. |
+| `notification_on_budget_exceeded` | boolean | `false` | Notify when a per-project daily or per-release spend cap blocks agent or release automation. |
 | `notification_on_flaky_test_detected` | boolean | `false` | Notify when the release test step fails, retries the parsed failing vitest/pytest tests once, and the retry passes so the pipeline continues. |
 | `notification_throttle_window_seconds` | number | `900` | Suppress repeated webhook notifications with the same event/project/agent key for this many seconds. |
 | `notification_throttle_overrides` | JSON object | `{ "release_fail": 0, "release_aborted": 0 }` | Per-event throttle windows in seconds. Set an event to `0` to always send. |
@@ -211,6 +212,17 @@ nothing for publishers. See `docs/ORCHESTRATOR.md` → Autopilot and `docs/AGENT
 **Weekly catch-up routing.** `lib/usage/cli-picker.ts` normally tapers a provider's score when its 5h window is projected above 80% utilization — the goal being to shift traffic away before the hard budget block triggers. That penalty is suppressed when the provider is materially behind on weekly pace (`paceMargin ≥ 15pp`). Rationale: when claude/7d is the under-pace window we need to burn down, shifting traffic to a different provider as claude/5h fills up is counterproductive — we *want* the 5h headroom consumed.
 
 ### Worktree & Review Gates
+
+### Per-Project Spend Budgets
+
+Project Config → Budget stores two optional DB-only USD caps on each project row:
+
+| Field | Default | Effect |
+|-------|---------|--------|
+| `daily_spend_cap_usd` | `null` | Rolling 24h project spend cap. When current project spend is at or above the cap, new agent runs and Release starts are refused, blocked agent/release rows record `budget_exceeded`, and the `budget_exceeded` webhook event is emitted when enabled. Manual Terminal runs remain operator-driven and are not blocked by this project cap. |
+| `release_spend_cap_usd` | `null` | Per-release cap. After each release child step finishes and records cost, the orchestrator sums jobs with the release id. When spend is at or above the cap, the Release stops at that phase boundary with `budget_exceeded` and emits the same webhook event. |
+
+`0` and empty values clear the cap. The Config tab also shows read-only rolling 24h spend for the project.
 
 | Key | Type | Default | Effect |
 |-----|------|---------|--------|
@@ -357,9 +369,10 @@ The `/api/stats/bridge` endpoint must be running for TamTam's observability feat
     | 'review_do_not_ship'
     | 'agent_run_fail'
     | 'budget_blocked'
+    | 'budget_exceeded'
     | 'post_merge_revert';
   project: string;
-  agent?: string;         // set for agent_run_fail events
+  agent?: string;         // set for agent_run_fail and agent budget_exceeded events
   job_id: string;
   status: 'success' | 'failed';
   verdict?: string;       // set for review events
@@ -447,6 +460,7 @@ notification_webhook_secret, notification_on_release_success,
 notification_on_release_fail, notification_on_release_aborted,
 notification_on_fix_loop_exhausted, notification_on_review_do_not_ship,
 notification_on_agent_run_fail, notification_on_budget_blocked,
+notification_on_budget_exceeded,
 notification_throttle_window_seconds, notification_throttle_overrides,
 budget_block_runs_enabled, budget_subscription_providers,
 budget_block_at_pct, budget_warn_at_pct, pipeline_model_review,

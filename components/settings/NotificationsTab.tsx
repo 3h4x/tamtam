@@ -16,6 +16,8 @@ export interface NotificationsSettings {
   notification_on_fix_loop_exhausted: string
   notification_on_review_do_not_ship: string
   notification_on_agent_run_fail: string
+  notification_on_budget_blocked: string
+  notification_on_budget_exceeded: string
   notification_throttle_window_seconds: string
   notification_throttle_overrides: string
   [key: string]: string
@@ -29,6 +31,7 @@ const EVENT_TOGGLES = [
   { key: 'notification_on_review_do_not_ship' as const, label: 'Review: Do Not Ship', description: 'When a review verdict is "DO NOT SHIP"' },
   { key: 'notification_on_agent_run_fail' as const, label: 'Agent Run Failure', description: 'When an agent run fails' },
   { key: 'notification_on_budget_blocked' as const, label: 'Budget Blocked', description: 'When a run is refused because the active provider crosses the configured subscription budget threshold' },
+  { key: 'notification_on_budget_exceeded' as const, label: 'Project Budget Exceeded', description: 'When a project daily or per-release spend cap blocks agent or release automation' },
 ]
 
 export function NotificationsTab({

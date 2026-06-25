@@ -17,8 +17,11 @@ import { hasFreshLgtm, hasLocalCommitsAhead } from './release-state';
 import { statusHasAnyPath, statusHasOnlyCommittedTamtamMetadataPaths } from '@/lib/pipeline/review-scope';
 import { findBlockingRunningJob } from '@/lib/jobs/project-active-job';
 import type { IssueContext } from './release-context';
+import type { JobData } from '@/lib/jobs/types';
 import { appendRedactedFileSync } from '@/lib/jobs/redacted-log-writer';
 import { computeReleaseDeadlineAt } from './release-timeout';
+import { checkDailySpendCap, type SpendCapExceeded } from './spend-guard';
+import { notify } from '@/lib/shared/notifications';
 
 const RELEASE_PIPELINE_KINDS = new Set(['test', 'review', 'fix', 'commit', 'push', 'pr-wait', 'mark-dod', 'release']);
 
@@ -30,6 +33,32 @@ async function isReleasePipelineRunning(projectName: string): Promise<boolean> {
     if ((await probeJobStatus(j)) === 'running') return true;
   }
   return false;
+}
+
+// A pr-wait phase runs with an inline sentinel pid (0), so `probeJobStatus`
+// can't recognize it as 'running' — which is why `isReleasePipelineRunning`
+// misses it and a second release can start while a PR is already open. Two
+// concurrent PRs then race the same base and the loser conflicts (the recurring
+// "kurwa konflikty"). Treat any non-finished pr-wait as an open PR holding the
+// branch and block new releases until it clears, so master stays frozen from
+// issue-work start through merge. Probe-independent (the inline pid defeats
+// probing). Bounded by a wall-clock backstop so a permanently-stuck pr-wait
+// can't freeze the project forever — the release-timeout watchdog also aborts a
+// hung release, which sets `finishedAt` and clears this guard on its own.
+const PR_WAIT_SERIALIZE_BACKSTOP_MS = 120 * 60 * 1000;
+
+export function findActivePrWait(
+  jobs: JobData[],
+  projectName: string,
+  nowMs: number = Date.now(),
+): JobData | null {
+  for (const j of jobs) {
+    if (j.project !== projectName || j.kind !== 'pr-wait' || j.finishedAt !== null) continue;
+    const startedMs = j.startedAt > 1e12 ? j.startedAt : (j.startedAt ?? 0) * 1000;
+    if (startedMs > 0 && nowMs - startedMs > PR_WAIT_SERIALIZE_BACKSTOP_MS) continue;
+    return j;
+  }
+  return null;
 }
 
 export type ReleaseResult =
@@ -146,6 +175,40 @@ async function queueRelease(projectName: string, blockingJobId?: string): Promis
   };
 }
 
+async function notifySpendExceeded(block: SpendCapExceeded, jobId: string): Promise<void> {
+  await notify({
+    event: 'budget_exceeded',
+    project: block.project,
+    job_id: jobId,
+    status: 'failed',
+    reason: `${block.kind}_spend_cap`,
+    cost_usd: block.actualUsd,
+    message: `${block.detail}. Cap ${block.capUsd.toFixed(4)}, actual ${block.actualUsd.toFixed(4)}.`,
+    throttleKeySuffix: `${block.kind}:${block.releaseId ?? 'project'}`,
+    timestamp: Date.now(),
+  });
+}
+
+async function createBlockedReleaseJob(projectName: string, reason: string): Promise<string | null> {
+  try {
+    const { logDir } = getImproveConfig();
+    mkdirSync(/*turbopackIgnore: true*/ logDir, { recursive: true });
+    const job = createJob(projectName, 'release', process.pid, '', undefined, undefined, undefined, undefined, undefined, undefined, null);
+    job.releaseId = job.id;
+    const logPath = join(/*turbopackIgnore: true*/ logDir, `${job.id}.log`);
+    job.logPath = logPath;
+    job.contextMeta = JSON.stringify({ releaseStopReason: reason });
+    appendRedactedFileSync(logPath, `# release blocked — ${new Date().toISOString()}\n# project: ${projectName}\n# reason: ${reason}\n`);
+    updateJob(job);
+    const { finalizeAbortedRelease } = await import('@/lib/jobs/lifecycle');
+    await finalizeAbortedRelease(job);
+    return job.id;
+  } catch (err) {
+    console.warn(`[release] failed to create blocked release row for ${projectName}:`, err);
+    return null;
+  }
+}
+
 export async function startRelease(projectName: string, options: StartReleaseOptions = {}): Promise<ReleaseResult> {
   let projPath = resolveProjectPath(projectName);
   // First-lookup miss can happen when startRelease runs inside the workflow
@@ -167,6 +230,12 @@ export async function startRelease(projectName: string, options: StartReleaseOpt
   }
   if (isProjectPaused(projectName)) {
     return { ok: false, status: 409, detail: 'project paused' };
+  }
+  const dailySpendCap = await checkDailySpendCap(projectName);
+  if (!dailySpendCap.ok) {
+    const jobId = await createBlockedReleaseJob(projectName, dailySpendCap.detail);
+    await notifySpendExceeded(dailySpendCap, jobId ?? `${projectName}-release-budget-exceeded`);
+    return { ok: false, status: 429, detail: dailySpendCap.detail };
   }
   const sourceJob = options.sourceJobId ? getJob(options.sourceJobId) : null;
   const parentJobId = sourceJob?.project === projectName ? sourceJob.id : null;
@@ -223,6 +292,23 @@ export async function startRelease(projectName: string, options: StartReleaseOpt
   if (await isReleasePipelineRunning(projectName)) {
     if (options.queueIfBlocked) return queueRelease(projectName);
     return { ok: false, status: 409, detail: `Release pipeline already running for ${projectName}` };
+  }
+
+  // Serialize across the pr-wait window: don't start a new release (which would
+  // open a second PR or push to master) while a PR is already awaiting merge.
+  // Concurrent PRs race the same base and the loser conflicts; holding here
+  // keeps master frozen from issue-work start until merge. The queued release
+  // drains when the pr-wait clears (PR merged → lock/completion event fires the
+  // pending-release sweep).
+  const activePrWait = findActivePrWait(listJobs(), projectName);
+  if (activePrWait) {
+    if (options.queueIfBlocked) return queueRelease(projectName, activePrWait.id);
+    return {
+      ok: false,
+      status: 409,
+      detail: `Release deferred: a PR is awaiting merge for ${projectName} (pr-wait ${activePrWait.id}); holding master to avoid concurrent-PR conflicts`,
+      blockingJobId: activePrWait.id,
+    };
   }
 
   const issueContext = await resolveReleaseIssueContext(projectName, projPath, sourceJob);

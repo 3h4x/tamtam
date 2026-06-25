@@ -12,6 +12,8 @@ const execMock = vi.fn();
 const hasLocalCommitsAheadMock = vi.fn();
 const hasRunnableTestCommandMock = vi.fn();
 const isReviewRetestJobMock = vi.fn();
+const checkReleaseSpendCapMock = vi.fn();
+const notifyMock = vi.fn();
 
 vi.mock('@/lib/workflows/wait-for-job', () => ({
   waitForJobCompletion: waitForJobCompletionMock,
@@ -66,6 +68,14 @@ vi.mock('@/lib/pipeline/start-test', () => ({
   isReviewRetestJob: isReviewRetestJobMock,
 }));
 
+vi.mock('@/lib/pipeline/spend-guard', () => ({
+  checkReleaseSpendCap: checkReleaseSpendCapMock,
+}));
+
+vi.mock('@/lib/shared/notifications', () => ({
+  notify: notifyMock,
+}));
+
 import { releaseOrchestratorWorkflow } from '@/lib/workflows/release-orchestrator';
 
 describe('releaseOrchestratorWorkflow', () => {
@@ -80,6 +90,8 @@ describe('releaseOrchestratorWorkflow', () => {
     hasLocalCommitsAheadMock.mockReset().mockResolvedValue(false);
     hasRunnableTestCommandMock.mockReset().mockResolvedValue(true);
     isReviewRetestJobMock.mockReset().mockReturnValue(false);
+    checkReleaseSpendCapMock.mockReset().mockResolvedValue({ ok: true });
+    notifyMock.mockReset().mockResolvedValue(undefined);
     listJobsMock.mockReset().mockReturnValue([]);
     readParsedLogMock.mockReset().mockReturnValue('');
     finalizeReleaseJobMock.mockReset();
@@ -240,6 +252,63 @@ Verdict: NEEDS ATTENTION
 
       expect(r.decision).toMatchObject({ next: 'fix', from: 'review' });
     });
+  });
+
+  it('finalizes the release when the per-release spend cap is reached after a step', async () => {
+    const testJob = {
+      id: 'test-1',
+      kind: 'test',
+      exitCode: 0,
+      finishedAt: 200,
+      releaseId: 'rel-budget',
+      project: 'p',
+      startedAt: 100,
+    };
+    const releaseJob = {
+      id: 'rel-budget',
+      kind: 'release',
+      exitCode: null,
+      finishedAt: null,
+      releaseId: 'rel-budget',
+      project: 'p',
+      startedAt: 50,
+      contextMeta: null,
+      logPath: '/tmp/rel-budget.log',
+    };
+    waitForJobCompletionMock.mockResolvedValue({
+      job: testJob,
+      finished: true,
+      reason: 'finished',
+    });
+    getJobMock.mockImplementation((id: string) => {
+      if (id === 'rel-budget') return releaseJob;
+      if (id === 'test-1') return testJob;
+      return null;
+    });
+    checkReleaseSpendCapMock.mockResolvedValue({
+      ok: false,
+      kind: 'release',
+      project: 'p',
+      releaseId: 'rel-budget',
+      capUsd: 5,
+      actualUsd: 5.5,
+      detail: 'Release spend cap exceeded',
+    });
+
+    const r = await releaseOrchestratorWorkflow('test-1', {
+      projectName: 'p',
+      parentJobId: 'rel-budget',
+    });
+
+    expect(r.decision).toBeNull();
+    expect(dispatchPhaseMock).not.toHaveBeenCalled();
+    expect(finalizeAbortedReleaseMock).toHaveBeenCalledWith(releaseJob);
+    expect(notifyMock).toHaveBeenCalledWith(expect.objectContaining({
+      event: 'budget_exceeded',
+      project: 'p',
+      job_id: 'rel-budget',
+      reason: 'release_spend_cap',
+    }));
   });
 
   it('wait → decide → dispatch on a successful test step (next=review)', async () => {

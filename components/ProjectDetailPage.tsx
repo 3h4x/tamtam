@@ -113,6 +113,8 @@ export function ProjectDetailPage({
   const [devServerStartCommandInput, setDevServerStartCommandInput] = useState('')
   const [devServerStopCommandInput, setDevServerStopCommandInput] = useState('')
   const [devServerReadyUrlInput, setDevServerReadyUrlInput] = useState('')
+  const [dailySpendCapUsdInput, setDailySpendCapUsdInput] = useState('')
+  const [releaseSpendCapUsdInput, setReleaseSpendCapUsdInput] = useState('')
   const [configSaving, setConfigSaving] = useState(false)
   const [configSaved, setConfigSaved] = useState(false)
 
@@ -242,6 +244,8 @@ export function ProjectDetailPage({
     setDevServerStartCommandInput(data.dev_server_start_command ?? '')
     setDevServerStopCommandInput(data.dev_server_stop_command ?? '')
     setDevServerReadyUrlInput(data.dev_server_ready_url ?? '')
+    setDailySpendCapUsdInput(data.daily_spend_cap_usd != null ? String(data.daily_spend_cap_usd) : '')
+    setReleaseSpendCapUsdInput(data.release_spend_cap_usd != null ? String(data.release_spend_cap_usd) : '')
   }
 
   const handleCustomAction = async (actionName: string) => {
@@ -546,6 +550,8 @@ export function ProjectDetailPage({
     dev_server_start_command: devServerStartCommandInput,
     dev_server_stop_command: devServerStopCommandInput,
     dev_server_ready_url: devServerReadyUrlInput,
+    daily_spend_cap_usd: dailySpendCapUsdInput,
+    release_spend_cap_usd: releaseSpendCapUsdInput,
   }
 
   const handleSaveConfig = async () => {
@@ -586,7 +592,9 @@ export function ProjectDetailPage({
     configInputs.qa_url !== (config.qa_url ?? '') ||
     configInputs.dev_server_start_command !== (config.dev_server_start_command ?? '') ||
     configInputs.dev_server_stop_command !== (config.dev_server_stop_command ?? '') ||
-    configInputs.dev_server_ready_url !== (config.dev_server_ready_url ?? '')
+    configInputs.dev_server_ready_url !== (config.dev_server_ready_url ?? '') ||
+    configInputs.daily_spend_cap_usd !== String(config.daily_spend_cap_usd ?? '') ||
+    configInputs.release_spend_cap_usd !== String(config.release_spend_cap_usd ?? '')
   )
 
   const actionsDirty = JSON.stringify(editActions) !== JSON.stringify(customActions)
@@ -890,6 +898,10 @@ export function ProjectDetailPage({
             setDevServerStopCommandInput={setDevServerStopCommandInput}
             devServerReadyUrlInput={devServerReadyUrlInput}
             setDevServerReadyUrlInput={setDevServerReadyUrlInput}
+            dailySpendCapUsdInput={dailySpendCapUsdInput}
+            setDailySpendCapUsdInput={setDailySpendCapUsdInput}
+            releaseSpendCapUsdInput={releaseSpendCapUsdInput}
+            setReleaseSpendCapUsdInput={setReleaseSpendCapUsdInput}
             editActions={editActions}
             setEditActions={setEditActions}
             anyDirty={anyDirty}

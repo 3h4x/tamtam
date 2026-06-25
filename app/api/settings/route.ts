@@ -227,6 +227,7 @@ const SETTING_KEYS = [
   'notification_on_review_do_not_ship',
   'notification_on_agent_run_fail',
   'notification_on_budget_blocked',
+  'notification_on_budget_exceeded',
   'notification_on_flaky_test_detected',
   'notification_throttle_window_seconds',
   'notification_throttle_overrides',

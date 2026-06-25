@@ -28,6 +28,52 @@ import { checkCliStartGate } from '@/lib/usage/resolve-provider';
 import { resolveAgentPrerequisiteCommandWithFileSkills } from '@/lib/agents/file-skill-prerequisites';
 import { appendRedactedFileSync } from '@/lib/jobs/redacted-log-writer';
 import { runAgentIntakeWorkflow } from '@/lib/agents/intake-workflow';
+import { checkDailySpendCap, type SpendCapExceeded } from '@/lib/pipeline/spend-guard';
+import { notify } from '@/lib/shared/notifications';
+
+type RunnableAgent = {
+  id: string;
+  name: string;
+  project: string;
+  skillIds: string;
+  docPaths: string;
+  model: string;
+  prompt: string;
+  schedule: string | null;
+  enabled: boolean;
+  provider?: string | null;
+  fallbackEnabled?: boolean;
+  prerequisiteCommand?: string | null;
+  kind?: string;
+};
+
+async function createBlockedAgentJob(agent: RunnableAgent, block: SpendCapExceeded): Promise<string | null> {
+  try {
+    const { logDir } = getImproveConfig();
+    mkdirSync(/*turbopackIgnore: true*/ logDir, { recursive: true });
+    const job = createJob(agent.project, `agent:${agent.name}`, process.pid, '');
+    const logPath = join(/*turbopackIgnore: true*/ logDir, `${job.id}.log`);
+    job.logPath = logPath;
+    job.contextMeta = JSON.stringify({
+      releaseStopReason: block.detail,
+      budgetExceeded: {
+        kind: block.kind,
+        capUsd: block.capUsd,
+        actualUsd: block.actualUsd,
+      },
+    });
+    appendRedactedFileSync(
+      logPath,
+      `# agent run blocked — ${new Date().toISOString()}\n# project: ${agent.project}\n# agent: ${agent.name}\n# reason: ${block.detail}\n`,
+    );
+    updateJob(job);
+    await markDone(job, -3);
+    return job.id;
+  } catch (err) {
+    console.warn(`[agent-run-route] failed to create blocked agent row for ${agent.project}/${agent.name}:`, err);
+    return null;
+  }
+}
 
 /**
  * `readOnly: true` is for agents whose declared task does not edit the local
@@ -48,7 +94,7 @@ export async function POST(
   const { agentId } = await params;
 
   // Resolve agent — either a DB row or a file-based agent
-  let agent: { id: string; name: string; project: string; skillIds: string; docPaths: string; model: string; prompt: string; schedule: string | null; enabled: boolean; provider?: string | null; fallbackEnabled?: boolean; prerequisiteCommand?: string | null; kind?: string } | null = null;
+  let agent: RunnableAgent | null = null;
 
   const parsedFileId = parseFileAgentId(agentId);
   if (parsedFileId) {
@@ -98,6 +144,26 @@ export async function POST(
   if (agent.kind === 'system') {
     const result = await runSystemAgentStart(agent);
     return result.response;
+  }
+  const dailySpendCap = await checkDailySpendCap(agent.project);
+  if (!dailySpendCap.ok) {
+    const jobId = await createBlockedAgentJob(agent, dailySpendCap);
+    await notify({
+      event: 'budget_exceeded',
+      project: dailySpendCap.project,
+      agent: agent.name,
+      job_id: jobId ?? `${agent.project}-agent-budget-exceeded`,
+      status: 'failed',
+      reason: 'daily_spend_cap',
+      cost_usd: dailySpendCap.actualUsd,
+      message: `${dailySpendCap.detail}. Cap ${dailySpendCap.capUsd.toFixed(4)}, actual ${dailySpendCap.actualUsd.toFixed(4)}.`,
+      throttleKeySuffix: `daily:${agent.name}`,
+      timestamp: Date.now(),
+    });
+    return NextResponse.json(
+      { code: 'budget_exceeded', detail: dailySpendCap.detail, agent: agent.name },
+      { status: 429 },
+    );
   }
   const agentSkillIds: string[] = JSON.parse(agent.skillIds || '[]');
   const hasSkills = agentSkillIds.length > 0;

@@ -35,6 +35,18 @@ export async function releaseOrchestratorWorkflow(
   if (ctx.parentJobId && await releaseAlreadyFinalizedStep(ctx.parentJobId)) {
     return { waited, decision: null, dispatch: null };
   }
+  if (ctx.parentJobId) {
+    const budgetStop = await checkReleaseBudgetStep(waited.job.project, ctx.parentJobId);
+    if (budgetStop.exceeded) {
+      await finalizeReleaseStep(
+        ctx.parentJobId,
+        'abort',
+        1,
+        budgetStop.detail,
+      );
+      return { waited, decision: null, dispatch: null };
+    }
+  }
   const decision = await decideStep(waited.job.id);
   // When the guard rewrote a DO NOT SHIP / NEEDS ATTENTION abort into a
   // "ship anyway with follow-up issue" decision, file the GitHub issue with
@@ -201,6 +213,33 @@ async function releaseAlreadyFinalizedStep(releaseJobId: string): Promise<boolea
   const { getJob } = await import('@/lib/jobs/job-storage');
   const release = getJob(releaseJobId);
   return release?.kind === 'release' && release.finishedAt !== null;
+}
+
+async function checkReleaseBudgetStep(
+  projectName: string,
+  releaseJobId: string,
+): Promise<{ exceeded: false } | { exceeded: true; detail: string }> {
+  'use step';
+  const { checkReleaseSpendCap } = await import('@/lib/pipeline/spend-guard');
+  const block = await checkReleaseSpendCap(projectName, releaseJobId);
+  if (block.ok) return { exceeded: false };
+  try {
+    const { notify } = await import('@/lib/shared/notifications');
+    await notify({
+      event: 'budget_exceeded',
+      project: projectName,
+      job_id: releaseJobId,
+      status: 'failed',
+      reason: 'release_spend_cap',
+      cost_usd: block.actualUsd,
+      message: `${block.detail}. Cap ${block.capUsd.toFixed(4)}, actual ${block.actualUsd.toFixed(4)}.`,
+      throttleKeySuffix: `release:${releaseJobId}`,
+      timestamp: Date.now(),
+    });
+  } catch (err) {
+    console.warn('[release-orchestrator] budget-exceeded notification failed:', err);
+  }
+  return { exceeded: true, detail: block.detail };
 }
 
 async function decideStep(jobId: string): Promise<NextPhase> {

@@ -37,7 +37,10 @@ const mocks = vi.hoisted(() => {
     findActiveReleaseJobMock: vi.fn(),
     getProjectTestConfigMock: vi.fn(),
     finalizeReleaseJobMock: vi.fn(),
+    finalizeAbortedReleaseMock: vi.fn(),
     getReleaseReadinessFailureMock: vi.fn(),
+    checkDailySpendCapMock: vi.fn(),
+    notifyMock: vi.fn(),
   };
 });
 
@@ -108,6 +111,13 @@ vi.mock('@/lib/pipeline/pending-release', () => ({
 }));
 vi.mock('@/lib/jobs/lifecycle', () => ({
   finalizeReleaseJob: mocks.finalizeReleaseJobMock,
+  finalizeAbortedRelease: mocks.finalizeAbortedReleaseMock,
+}));
+vi.mock('@/lib/pipeline/spend-guard', () => ({
+  checkDailySpendCap: mocks.checkDailySpendCapMock,
+}));
+vi.mock('@/lib/shared/notifications', () => ({
+  notify: mocks.notifyMock,
 }));
 // Stub out the file-config loader so anything reaching wrapIfUntrusted /
 // getBranchContext does not shell out to `git` (via execFileSync) — each
@@ -160,6 +170,8 @@ export function resetSharedMocks() {
   mocks.getLockMock.mockReturnValue(null);
   mocks.findActiveReleaseJobMock.mockReturnValue(null);
   mocks.getProjectTestConfigMock.mockReturnValue(null);
+  mocks.checkDailySpendCapMock.mockResolvedValue({ ok: true });
+  mocks.notifyMock.mockResolvedValue(undefined);
   mocks.finalizeReleaseJobMock.mockResolvedValue(undefined);
 }
 

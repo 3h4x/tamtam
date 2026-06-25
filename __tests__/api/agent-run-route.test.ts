@@ -180,6 +180,8 @@ describe('POST /api/agents/{agentId}/run', () => {
     mocks.getSettings.mockReset().mockImplementation(() => settingsMock);
     mocks.getImproveConfig.mockReset().mockImplementation(() => ({ claudeBin: 'claude', logDir: logDirMock }));
     mocks.getProjectTestConfig.mockReset().mockReturnValue(null);
+    mocks.checkDailySpendCap.mockReset().mockResolvedValue({ ok: true });
+    mocks.notify.mockReset().mockResolvedValue(undefined);
   });
 
   afterEach(() => {
@@ -229,6 +231,39 @@ Use the QA agent.
     expect(res.status).toBe(404);
     const data = await res.json();
     expect(data.detail).toContain('agent not found');
+  });
+
+  it('blocks user agent runs when the project daily spend cap is exceeded', async () => {
+    await insertAgent({ prompt: 'Do work' });
+    const blockedJob = makeJob({ id: 'blocked-agent-1' });
+    mocks.createJob.mockReturnValueOnce(blockedJob);
+    mocks.checkDailySpendCap.mockResolvedValueOnce({
+      ok: false,
+      kind: 'daily',
+      project: 'proj1',
+      capUsd: 1,
+      actualUsd: 1.25,
+      detail: 'Project daily spend cap exceeded',
+    } as unknown as { ok: true });
+
+    const req = new NextRequest('http://localhost/api/agents/agent-123/run', {
+      method: 'POST',
+      body: JSON.stringify({ prompt: 'hello' }),
+    });
+    const res = await POST(req, { params: Promise.resolve({ agentId: 'agent-123' }) });
+    const data = await res.json();
+
+    expect(res.status).toBe(429);
+    expect(data.code).toBe('budget_exceeded');
+    expect(mocks.createJob).toHaveBeenCalledWith('proj1', 'agent:Test Agent', expect.any(Number), '');
+    expect(mocks.markDone).toHaveBeenCalledWith(blockedJob, -3);
+    expect(mocks.notify).toHaveBeenCalledWith(expect.objectContaining({
+      event: 'budget_exceeded',
+      project: 'proj1',
+      agent: 'Test Agent',
+      reason: 'daily_spend_cap',
+    }));
+    expect(mocks.startJob).not.toHaveBeenCalled();
   });
 
   it('returns 400 if prompt is missing', async () => {

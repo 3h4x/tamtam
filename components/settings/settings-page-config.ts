@@ -72,6 +72,7 @@ export interface SettingsMap {
   notification_on_review_do_not_ship: string
   notification_on_agent_run_fail: string
   notification_on_budget_blocked: string
+  notification_on_budget_exceeded: string
   notification_throttle_window_seconds: string
   notification_throttle_overrides: string
   budget_block_runs_enabled: string
@@ -134,6 +135,7 @@ export const SETTINGS_DEFAULTS: SettingsMap = {
   jobs_paused: 'false',
   rebuild_in_progress: 'false',
   notification_on_budget_blocked: 'false',
+  notification_on_budget_exceeded: 'false',
   notification_throttle_window_seconds: '900',
   notification_throttle_overrides: '{"release_fail":0,"release_aborted":0}',
   db_backup_enabled: 'true',

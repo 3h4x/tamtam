@@ -173,6 +173,14 @@ const FIELD_BUILDERS: Record<string, FieldBuilder> = {
   dev_server_start_command: (v) => ({ devServerStartCommand: v }),
   dev_server_stop_command: (v) => ({ devServerStopCommand: v }),
   dev_server_ready_url: (v) => ({ devServerReadyUrl: v }),
+  daily_spend_cap_usd: (v) => {
+    const parsed = v === null ? null : Number.parseFloat(v);
+    return { dailySpendCapUsd: parsed != null && Number.isFinite(parsed) ? parsed : null };
+  },
+  release_spend_cap_usd: (v) => {
+    const parsed = v === null ? null : Number.parseFloat(v);
+    return { releaseSpendCapUsd: parsed != null && Number.isFinite(parsed) ? parsed : null };
+  },
 };
 
 export async function writeProjectFieldYaml(

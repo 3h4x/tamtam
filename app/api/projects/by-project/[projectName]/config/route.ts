@@ -7,6 +7,7 @@ import { reloadConfig } from '@/lib/shared/config';
 import { installTestSchedule, uninstallTestSchedule, parseTestScheduleToCron } from '@/lib/scheduling/test-scheduler';
 import { detectTestCommand } from '@/lib/pipeline/start-test';
 import { loadFileConfig, writeFileConfig, getBranchContext } from '@/lib/skills/tamtam-file-config';
+import { getProjectDailySpendUsd } from '@/lib/pipeline/spend-guard';
 
 function badRequest(detail: string) {
   return NextResponse.json({ detail }, { status: 400 });
@@ -39,6 +40,26 @@ function readOptionalPositiveInteger(
   const parsed = Number.parseInt(value, 10);
   if (!Number.isFinite(parsed) || parsed <= 0) {
     return badRequest(`${field} must be a positive integer`);
+  }
+  return parsed;
+}
+
+function readOptionalNonNegativeUsd(
+  body: Record<string, unknown>,
+  field: string,
+): number | null | Response {
+  const raw = body[field];
+  if (typeof raw !== 'string' && typeof raw !== 'number') {
+    return badRequest(`${field} must be a non-negative number`);
+  }
+  const value = typeof raw === 'number' ? String(raw) : raw.trim();
+  if (!value) return null;
+  if (!/^\d+(?:\.\d{1,4})?$/.test(value)) {
+    return badRequest(`${field} must be a non-negative number`);
+  }
+  const parsed = Number.parseFloat(value);
+  if (!Number.isFinite(parsed) || parsed < 0) {
+    return badRequest(`${field} must be a non-negative number`);
   }
   return parsed;
 }
@@ -93,6 +114,9 @@ export async function GET(
     dev_server_start_command: projectRow?.devServerStartCommand ?? '',
     dev_server_stop_command: projectRow?.devServerStopCommand ?? '',
     dev_server_ready_url: projectRow?.devServerReadyUrl ?? '',
+    daily_spend_cap_usd: projectRow?.dailySpendCapUsd ?? null,
+    release_spend_cap_usd: projectRow?.releaseSpendCapUsd ?? null,
+    last_24h_spend_usd: await getProjectDailySpendUsd(projectName),
     setup_complete: !!projectRow?.setupComplete,
     setup_state: (() => {
       try {
@@ -292,6 +316,14 @@ export async function PATCH(
     }
     touched = true;
     dbUpdates.push({ field: 'dev_server_ready_url', value: raw || null });
+  }
+
+  for (const field of ['daily_spend_cap_usd', 'release_spend_cap_usd'] as const) {
+    if (body[field] === undefined) continue;
+    const value = readOptionalNonNegativeUsd(body, field);
+    if (value instanceof Response) return value;
+    touched = true;
+    dbUpdates.push({ field, value: value == null || value === 0 ? null : String(value) });
   }
 
   // Write file-backed fields before DB-backed fields so a .tamtam/config.yml

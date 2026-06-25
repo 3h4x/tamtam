@@ -121,6 +121,8 @@ describe('POST /api/agents/{agentId}/run weekly quota gating', () => {
     }));
     mocks.getImproveConfig.mockReset().mockImplementation(() => ({ claudeBin: 'claude', logDir: '/tmp/logs' }));
     mocks.getProjectTestConfig.mockReset().mockReturnValue(null);
+    mocks.checkDailySpendCap.mockReset().mockResolvedValue({ ok: true });
+    mocks.notify.mockReset().mockResolvedValue(undefined);
   });
 
   afterEach(() => {

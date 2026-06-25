@@ -24,6 +24,7 @@ function baseSettings(): NotificationsSettings {
     notification_on_review_do_not_ship: 'false',
     notification_on_agent_run_fail: 'false',
     notification_on_budget_blocked: 'false',
+    notification_on_budget_exceeded: 'false',
     notification_throttle_window_seconds: '900',
     notification_throttle_overrides: '{"release_fail":0,"release_aborted":0}',
   }

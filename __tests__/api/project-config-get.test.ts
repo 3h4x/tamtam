@@ -126,6 +126,22 @@ describe('GET /api/projects/by-project/{projectName}/config', () => {
     expect(data.website).toBe('');
   });
 
+  it('returns project spend caps and rolling 24h spend', async () => {
+    state.projectRow = {
+      dailySpendCapUsd: 12.5,
+      releaseSpendCapUsd: 4.25,
+    };
+    mocks.getProjectDailySpendUsd.mockResolvedValue(3.75);
+
+    const req = new NextRequest('http://localhost/api/projects/by-project/proj1/config');
+    const res = await GET(req, { params: Promise.resolve({ projectName: 'proj1' }) });
+    const data = await res.json();
+
+    expect(data.daily_spend_cap_usd).toBe(12.5);
+    expect(data.release_spend_cap_usd).toBe(4.25);
+    expect(data.last_24h_spend_usd).toBe(3.75);
+  });
+
   it('surfaces review/fix prompt addenda when set', async () => {
     mocks.getProjectPipelinePrompts.mockReturnValue({
       reviewPromptAddendum: 'Be lenient.',

@@ -12,6 +12,8 @@ const state = vi.hoisted(() => ({
     devServerStartCommand?: string | null;
     devServerStopCommand?: string | null;
     devServerReadyUrl?: string | null;
+    dailySpendCapUsd?: number | null;
+    releaseSpendCapUsd?: number | null;
   } | undefined,
   testCfg: null as Record<string, unknown> | null,
   pushResult: null as Record<string, unknown> | null,
@@ -42,6 +44,7 @@ const mocks = vi.hoisted(() => ({
   loadFileConfig: vi.fn(),
   writeFileConfig: vi.fn(),
   getBranchContext: vi.fn(),
+  getProjectDailySpendUsd: vi.fn(),
 }));
 
 vi.mock('@/lib/shared/project-data', () => ({
@@ -93,6 +96,10 @@ vi.mock('@/lib/skills/tamtam-file-config', () => ({
   getBranchContext: mocks.getBranchContext,
 }));
 
+vi.mock('@/lib/pipeline/spend-guard', () => ({
+  getProjectDailySpendUsd: mocks.getProjectDailySpendUsd,
+}));
+
 const routeModulePromise = import('@/app/api/projects/by-project/[projectName]/config/route');
 
 function resetMocks() {
@@ -108,6 +115,7 @@ function resetMocks() {
   mocks.loadFileConfig.mockReset();
   mocks.writeFileConfig.mockReset();
   mocks.getBranchContext.mockReset();
+  mocks.getProjectDailySpendUsd.mockReset().mockResolvedValue(0);
   state.projectRow = undefined;
   state.improveProjects = {};
   state.parseTestScheduleToCronImpl = (s: string) => {

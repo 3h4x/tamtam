@@ -11,6 +11,7 @@ export type NotificationEvent =
   | 'review_do_not_ship'
   | 'agent_run_fail'
   | 'budget_blocked'
+  | 'budget_exceeded'
   | 'flaky_test_detected'
   | 'post_merge_revert';
 
@@ -67,6 +68,9 @@ function getNotificationConfig(event: NotificationEvent): NotificationConfig {
     case 'budget_blocked':
       enabled = settings.notification_on_budget_blocked || false;
       break;
+    case 'budget_exceeded':
+      enabled = settings.notification_on_budget_exceeded || false;
+      break;
     case 'flaky_test_detected':
       enabled = settings.notification_on_flaky_test_detected || false;
       break;
@@ -95,6 +99,7 @@ function throttleSubject(payload: NotificationPayload): string {
     case 'review_do_not_ship': return 'review';
     case 'fix_loop_exhausted': return 'fix';
     case 'budget_blocked': return 'budget';
+    case 'budget_exceeded': return 'spend';
     case 'flaky_test_detected': return 'test';
     case 'post_merge_revert': return 'soak';
     default: return 'release';

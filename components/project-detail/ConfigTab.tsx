@@ -84,6 +84,10 @@ export interface ConfigTabProps {
   setDevServerStopCommandInput: (v: string) => void
   devServerReadyUrlInput: string
   setDevServerReadyUrlInput: (v: string) => void
+  dailySpendCapUsdInput: string
+  setDailySpendCapUsdInput: (v: string) => void
+  releaseSpendCapUsdInput: string
+  setReleaseSpendCapUsdInput: (v: string) => void
 
   editActions: CustomAction[]
   setEditActions: (v: CustomAction[]) => void
@@ -143,6 +147,10 @@ export function ConfigTab({
   setDevServerStopCommandInput,
   devServerReadyUrlInput,
   setDevServerReadyUrlInput,
+  dailySpendCapUsdInput,
+  setDailySpendCapUsdInput,
+  releaseSpendCapUsdInput,
+  setReleaseSpendCapUsdInput,
   editActions,
   setEditActions,
   anyDirty,
@@ -152,6 +160,7 @@ export function ConfigTab({
   onRunSetup = () => {},
 }: ConfigTabProps) {
   const postMergeWatchMinutes = Number.parseInt(postMergeWatchMinutesInput, 10) || 0
+  const last24hSpend = config?.last_24h_spend_usd ?? 0
   if (configLoading) {
     return (
       <div className="space-y-3">
@@ -215,6 +224,49 @@ export function ConfigTab({
             {anySaving && <Spinner color="white" shrink />}
             {anySaving ? 'Saving…' : allSaved ? 'Saved!' : 'Save'}
           </Button>
+        </div>
+      </div>
+
+      {/* Spend budgets */}
+      <div className="bg-bg-secondary rounded-md border border-border">
+        <div className="px-4 py-2 border-b border-border flex items-baseline gap-3">
+          <h3 className="text-sm font-semibold text-text-primary">Budget</h3>
+          <p className="text-xs text-text-tertiary">Per-project spend caps for unattended agent and release automation</p>
+          <span className="ml-auto text-xs text-text-secondary tabular-nums">
+            Last 24h: ${last24hSpend.toFixed(2)}
+          </span>
+        </div>
+        <div className="px-4 py-3 grid grid-cols-1 md:grid-cols-2 gap-3">
+          <div>
+            <label className="block font-medium text-xs text-text-secondary mb-1" htmlFor="daily-spend-cap-usd">
+              Daily spend cap (USD)
+            </label>
+            <Input
+              inputSize="compact"
+              id="daily-spend-cap-usd"
+              type="text"
+              inputMode="decimal"
+              value={dailySpendCapUsdInput}
+              onChange={(e) => setDailySpendCapUsdInput(e.target.value)}
+              placeholder="No cap"
+            />
+            <p className="text-xs text-text-tertiary mt-1">Blocks new agent runs and Release starts after rolling 24h project spend reaches this amount. Empty = no cap.</p>
+          </div>
+          <div>
+            <label className="block font-medium text-xs text-text-secondary mb-1" htmlFor="release-spend-cap-usd">
+              Per-release cap (USD)
+            </label>
+            <Input
+              inputSize="compact"
+              id="release-spend-cap-usd"
+              type="text"
+              inputMode="decimal"
+              value={releaseSpendCapUsdInput}
+              onChange={(e) => setReleaseSpendCapUsdInput(e.target.value)}
+              placeholder="No cap"
+            />
+            <p className="text-xs text-text-tertiary mt-1">Stops an active Release at the next phase boundary once its child jobs reach this amount.</p>
+          </div>
         </div>
       </div>
 

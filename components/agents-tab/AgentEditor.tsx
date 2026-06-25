@@ -5,6 +5,7 @@ import { fetchAgentRevisions, fetchProjectDocs, improveAgentPrompt, revertAgent 
 import type { Agent, AgentRevision, Skill, Persona, ProjectDoc } from '@/lib/client-api'
 import { Button } from '@/components/ui/Button'
 import { EmptyState } from '@/components/ui/EmptyState'
+import { InlineLoading } from '@/components/ui/InlineLoading'
 import { Input } from '@/components/ui/Input'
 import { Pill } from '@/components/ui/Pill'
 import { SegmentedControl } from '@/components/ui/SegmentedControl'
@@ -340,7 +341,7 @@ export function AgentEditor({
       {mode === 'history' && agent && (
         <div className="flex flex-col gap-3">
           {historyLoading ? (
-            <div className="text-sm text-text-secondary">Loading history…</div>
+            <InlineLoading label="Loading history…" />
           ) : revisions.length === 0 ? (
             <div className="text-sm text-text-secondary">No revisions recorded yet.</div>
           ) : revisions.map((revision) => {

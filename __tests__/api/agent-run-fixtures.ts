@@ -44,6 +44,8 @@ const mocks = vi.hoisted(() => {
     getSettings: vi.fn(),
     getImproveConfig: vi.fn(),
     getProjectTestConfig: vi.fn(),
+    checkDailySpendCap: vi.fn(async (_projectName?: string) => ({ ok: true })),
+    notify: vi.fn(async (_payload?: unknown) => undefined),
     skillsDir: '',
     dataSkillsDir: '',
     // The first describe block fully mocks `checkCliStartGate`, but the
@@ -210,6 +212,14 @@ vi.mock('@/lib/usage/quota', () => ({
   getQuotaSnapshots: (...a: unknown[]) => mocks.getQuotaSnapshots(...a),
 }));
 
+vi.mock('@/lib/pipeline/spend-guard', () => ({
+  checkDailySpendCap: (projectName: string) => mocks.checkDailySpendCap(projectName),
+}));
+
+vi.mock('@/lib/shared/notifications', () => ({
+  notify: (payload: unknown) => mocks.notify(payload),
+}));
+
 // Top-level imports are safe now that mocks are module-scope.
 export let POST: typeof import('@/app/api/agents/[agentId]/run/route').POST;
 
@@ -275,6 +285,8 @@ export async function applyDdl(handle: TestDbHandle): Promise<void> {
       dev_server_start_command text,
       dev_server_stop_command text,
       dev_server_ready_url text,
+      daily_spend_cap_usd double precision,
+      release_spend_cap_usd double precision,
       setup_complete boolean NOT NULL DEFAULT false,
       setup_state text NOT NULL DEFAULT '{}',
       archived boolean NOT NULL DEFAULT false,
@@ -323,4 +335,3 @@ export function makeJob(overrides: Record<string, unknown> = {}) {
     ...overrides,
   };
 }
-

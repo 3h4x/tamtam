@@ -142,6 +142,16 @@ describe('startRelease weekly quota gating', () => {
     vi.doMock('@/lib/skills/tamtam-file-config', () => ({
       loadFileConfig: () => null,
     }));
+    vi.doMock('@/lib/pipeline/spend-guard', () => ({
+      checkDailySpendCap: vi.fn().mockResolvedValue({ ok: true }),
+    }));
+    vi.doMock('@/lib/shared/notifications', () => ({
+      notify: vi.fn().mockResolvedValue(undefined),
+    }));
+    vi.doMock('@/lib/jobs/lifecycle', () => ({
+      finalizeAbortedRelease: vi.fn(),
+      finalizeReleaseJob: vi.fn(),
+    }));
 
     ({ startRelease: startReleaseQuota } = await import('@/lib/pipeline/start-release'));
   });

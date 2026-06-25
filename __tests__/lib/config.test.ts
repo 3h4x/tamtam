@@ -155,6 +155,7 @@ describe('config', () => {
         notification_on_review_do_not_ship: false,
         notification_on_agent_run_fail: false,
         notification_on_budget_blocked: false,
+        notification_on_budget_exceeded: false,
         notification_on_flaky_test_detected: false,
         notification_on_post_merge_revert: false,
         notification_throttle_window_seconds: 900,
