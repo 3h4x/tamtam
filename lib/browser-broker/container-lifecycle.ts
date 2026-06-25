@@ -266,6 +266,9 @@ function spawnHostBroker(hostPort: number): number {
       closeSync(logFd);
     }
   })();
+  child.once('error', (err) => {
+    console.error('[browser-broker] host MCP process error', err);
+  });
   child.unref();
   if (!child.pid) {
     throw new Error('browser-broker: failed to spawn host Playwright MCP process');
