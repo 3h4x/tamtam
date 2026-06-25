@@ -114,6 +114,7 @@ async function stubSharedRoutes(
   context: BrowserContext,
   getWorkflowRuns: () => ReturnType<typeof workflowRun>[],
   getSuccessJobs: () => Array<ReturnType<typeof runningReleaseJob> | ReturnType<typeof finishedReleaseJob>>,
+  getFailureJobs: () => Array<ReturnType<typeof runningReleaseJob> | ReturnType<typeof finishedReleaseJob>> = () => [],
 ): Promise<void> {
   await context.route('**/api/settings', (route: Route) =>
     route.fulfill({ json: { settings: { jobs_paused: 'false' }, github_owner: '' } }),
@@ -156,78 +157,86 @@ async function stubSharedRoutes(
     (route: Route) =>
       route.fulfill({ json: { jobs: [], total: 0, pendingReleaseProjects: [] } }),
   );
-  await context.route(
-    (url) => url.pathname === '/api/jobs' && url.searchParams.get('project') === SUCCESS_PROJECT,
-    (route: Route) =>
-      route.fulfill({
-        json: {
-          jobs: getSuccessJobs(),
-          total: getSuccessJobs().length,
-          pendingReleaseProjects: [],
-        },
-      }),
-  );
-  await context.route(
-    (url) => url.pathname === '/api/jobs/counts' && url.searchParams.get('project') === SUCCESS_PROJECT,
-    (route: Route) => {
-      const jobs = getSuccessJobs();
-      const running = jobs.filter((job) => job.status === 'running').length;
-      const done = jobs.filter((job) => job.status === 'done').length;
-      route.fulfill({
-        json: {
-          total: jobs.length,
-          byKind: { release: jobs.length },
-          byStatus: { running, done, aborted: 0, failed: 0 },
-          tokens: { input: 0, output: 0, cacheRead: 0, cacheCreate: 0, total: 0 },
-          cost: { total: 0, monthToDate: 0 },
-        },
-      });
-    },
-  );
-  await context.route(
-    `**/api/projects/by-project/${SUCCESS_PROJECT}/config`,
-    (route: Route) => route.fulfill({ json: makeProjectConfig(SUCCESS_PROJECT) }),
-  );
-  await context.route(
-    `**/api/projects/by-project/${SUCCESS_PROJECT}/action`,
-    (route: Route) => route.fulfill({ json: { actions: [] } }),
-  );
-  await context.route(
-    `**/api/agents?project=${SUCCESS_PROJECT}`,
-    (route: Route) => route.fulfill({ json: { agents: [] } }),
-  );
-  await context.route(
-    `**/api/projects/by-project/${SUCCESS_PROJECT}/behind`,
-    (route: Route) => route.fulfill({ json: { behind: 0, ahead: 0 } }),
-  );
-  await context.route(
-    `**/api/projects/by-project/${SUCCESS_PROJECT}/branch`,
-    (route: Route) =>
-      route.fulfill({ json: { branch: 'master', defaultBranch: 'master', commitsAhead: null } }),
-  );
-  await context.route(
-    (url) =>
-      url.pathname === `/api/projects/by-project/${SUCCESS_PROJECT}/issues` &&
-      url.searchParams.get('summary') === '1',
-    (route: Route) =>
-      route.fulfill({
-        json: {
-          repo: '',
-          prCount: 0,
-          issueCount: 0,
-          openPrBranches: [],
-          error: null,
-          cached: false,
-          cachedAt: now(),
-        },
-      }),
-  );
-  await context.route(
-    (url) =>
-      url.pathname === `/api/projects/by-project/${SUCCESS_PROJECT}/issues` &&
-      url.searchParams.get('summary') !== '1',
-    (route: Route) => route.fulfill({ json: { prs: [], issues: [] } }),
-  );
+  const stubProjectRoutes = async (
+    project: string,
+    getJobs: () => Array<ReturnType<typeof runningReleaseJob> | ReturnType<typeof finishedReleaseJob>>,
+  ) => {
+    await context.route(
+      (url) => url.pathname === '/api/jobs' && url.searchParams.get('project') === project,
+      (route: Route) =>
+        route.fulfill({
+          json: {
+            jobs: getJobs(),
+            total: getJobs().length,
+            pendingReleaseProjects: [],
+          },
+        }),
+    );
+    await context.route(
+      (url) => url.pathname === '/api/jobs/counts' && url.searchParams.get('project') === project,
+      (route: Route) => {
+        const jobs = getJobs();
+        const running = jobs.filter((job) => job.status === 'running').length;
+        const done = jobs.filter((job) => job.status === 'done').length;
+        route.fulfill({
+          json: {
+            total: jobs.length,
+            byKind: { release: jobs.length },
+            byStatus: { running, done, aborted: 0, failed: 0 },
+            tokens: { input: 0, output: 0, cacheRead: 0, cacheCreate: 0, total: 0 },
+            cost: { total: 0, monthToDate: 0 },
+          },
+        });
+      },
+    );
+    await context.route(
+      `**/api/projects/by-project/${project}/config`,
+      (route: Route) => route.fulfill({ json: makeProjectConfig(project) }),
+    );
+    await context.route(
+      `**/api/projects/by-project/${project}/action`,
+      (route: Route) => route.fulfill({ json: { actions: [] } }),
+    );
+    await context.route(
+      `**/api/agents?project=${project}`,
+      (route: Route) => route.fulfill({ json: { agents: [] } }),
+    );
+    await context.route(
+      `**/api/projects/by-project/${project}/behind`,
+      (route: Route) => route.fulfill({ json: { behind: 0, ahead: 0 } }),
+    );
+    await context.route(
+      `**/api/projects/by-project/${project}/branch`,
+      (route: Route) =>
+        route.fulfill({ json: { branch: 'master', defaultBranch: 'master', commitsAhead: null } }),
+    );
+    await context.route(
+      (url) =>
+        url.pathname === `/api/projects/by-project/${project}/issues` &&
+        url.searchParams.get('summary') === '1',
+      (route: Route) =>
+        route.fulfill({
+          json: {
+            repo: '',
+            prCount: 0,
+            issueCount: 0,
+            openPrBranches: [],
+            error: null,
+            cached: false,
+            cachedAt: now(),
+          },
+        }),
+    );
+    await context.route(
+      (url) =>
+        url.pathname === `/api/projects/by-project/${project}/issues` &&
+        url.searchParams.get('summary') !== '1',
+      (route: Route) => route.fulfill({ json: { prs: [], issues: [] } }),
+    );
+  };
+
+  await stubProjectRoutes(SUCCESS_PROJECT, getSuccessJobs);
+  await stubProjectRoutes(FAILURE_PROJECT, getFailureJobs);
 }
 
 test.describe('Mocked workflow-runs and terminal concurrent lifecycle', () => {
@@ -386,5 +395,186 @@ test.describe('Mocked workflow-runs and terminal concurrent lifecycle', () => {
     await expect(successCompletedRow.getByText('LGTM')).toBeVisible({ timeout: 12_000 });
     await expect(failureAttentionRow).toBeVisible();
     await expect(page.getByText('1 running')).toHaveCount(0, { timeout: 12_000 });
+  });
+
+  test('one terminal can settle to failure while the unrelated terminal keeps its live spinner until success', async ({
+    page,
+  }) => {
+    let phase: 'idle' | 'both-running' | 'failure-isolated' | 'all-done' = 'idle';
+    let finishSuccessStream!: () => void;
+    let finishFailureStream!: () => void;
+    const successStreamDone = new Promise<void>((resolve) => {
+      finishSuccessStream = resolve;
+    });
+    const failureStreamDone = new Promise<void>((resolve) => {
+      finishFailureStream = resolve;
+    });
+
+    await stubSharedRoutes(
+      page.context(),
+      () => {
+        if (phase === 'idle') return [];
+        if (phase === 'both-running') {
+          return [
+            workflowRun(SUCCESS_PROJECT, 'running'),
+            workflowRun(FAILURE_PROJECT, 'running'),
+          ];
+        }
+        if (phase === 'failure-isolated') {
+          return [
+            workflowRun(SUCCESS_PROJECT, 'running'),
+            workflowRun(FAILURE_PROJECT, 'failed', { error: FAILURE_REASON }),
+          ];
+        }
+        return [
+          workflowRun(SUCCESS_PROJECT, 'completed', { output: { verdict: 'LGTM' } }),
+          workflowRun(FAILURE_PROJECT, 'failed', { error: FAILURE_REASON }),
+        ];
+      },
+      () => {
+        if (phase === 'both-running' || phase === 'failure-isolated') {
+          return [runningReleaseJob(SUCCESS_PROJECT, SUCCESS_RELEASE_ID, now() - 8)];
+        }
+        if (phase === 'all-done') {
+          return [finishedReleaseJob(SUCCESS_PROJECT, SUCCESS_RELEASE_ID)];
+        }
+        return [];
+      },
+      () => (
+        phase === 'both-running'
+          ? [runningReleaseJob(FAILURE_PROJECT, FAILURE_RELEASE_ID, now() - 9)]
+          : []
+      ),
+    );
+
+    await page.context().route(`**/api/jobs/${SUCCESS_RELEASE_ID}`, (route: Route) =>
+      route.fulfill({
+        json:
+          phase === 'all-done'
+            ? finishedReleaseJob(SUCCESS_PROJECT, SUCCESS_RELEASE_ID)
+            : runningReleaseJob(SUCCESS_PROJECT, SUCCESS_RELEASE_ID, now() - 8),
+      }),
+    );
+    await page.context().route(`**/api/jobs/${FAILURE_RELEASE_ID}`, (route: Route) =>
+      route.fulfill({
+        json:
+          phase === 'both-running'
+            ? runningReleaseJob(FAILURE_PROJECT, FAILURE_RELEASE_ID, now() - 9)
+            : {
+                ...runningReleaseJob(FAILURE_PROJECT, FAILURE_RELEASE_ID, now() - 9),
+                status: 'done',
+                exit_code: 2,
+                finished_at: now() - 1,
+                log: 'Mocked failure release stopped after the push hook rejected the branch.\n',
+                detail: FAILURE_REASON,
+              },
+      }),
+    );
+    await page.context().route(`**/api/streaming/${SUCCESS_RELEASE_ID}`, async (route: Route) => {
+      await successStreamDone;
+      await route.fulfill({
+        status: 200,
+        headers: {
+          'content-type': 'text/event-stream',
+          'cache-control': 'no-cache',
+        },
+        body: [
+          `data: ${SUCCESS_RELEASE_OUTPUT}`,
+          '',
+          'event: done',
+          `data: ${JSON.stringify({
+            exitCode: 0,
+            provider: 'claude',
+            duration: 1600,
+          })}`,
+          '',
+        ].join('\n'),
+      });
+    });
+    await page.context().route(`**/api/streaming/${FAILURE_RELEASE_ID}`, async (route: Route) => {
+      await failureStreamDone;
+      await route.fulfill({
+        status: 200,
+        headers: {
+          'content-type': 'text/event-stream',
+          'cache-control': 'no-cache',
+        },
+        body: [
+          'data: Mocked failure release stopped after the push hook rejected the branch.',
+          '',
+          'event: done',
+          `data: ${JSON.stringify({
+            exitCode: 2,
+            provider: 'claude',
+            detail: FAILURE_REASON,
+            duration: 1400,
+          })}`,
+          '',
+        ].join('\n'),
+      });
+    });
+
+    const successTerminalPage = await page.context().newPage();
+    const failureTerminalPage = await page.context().newPage();
+    await Promise.all([
+      successTerminalPage.goto(`/project/${SUCCESS_PROJECT}/terminal`),
+      failureTerminalPage.goto(`/project/${FAILURE_PROJECT}/terminal`),
+    ]);
+
+    await expect(successTerminalPage.getByRole('button', { name: 'new' })).toBeVisible({
+      timeout: 8_000,
+    });
+    await expect(failureTerminalPage.getByRole('button', { name: 'new' })).toBeVisible({
+      timeout: 8_000,
+    });
+    await expect(successTerminalPage.getByText('live run')).toHaveCount(0);
+    await expect(failureTerminalPage.getByText('live run')).toHaveCount(0);
+
+    phase = 'both-running';
+
+    await expect(successTerminalPage).toHaveURL(
+      new RegExp(`/project/${SUCCESS_PROJECT}/terminal\\?job=${encodeURIComponent(SUCCESS_RELEASE_ID)}`),
+      { timeout: 12_000 },
+    );
+    await expect(failureTerminalPage).toHaveURL(
+      new RegExp(`/project/${FAILURE_PROJECT}/terminal\\?job=${encodeURIComponent(FAILURE_RELEASE_ID)}`),
+      { timeout: 12_000 },
+    );
+    await expect(successTerminalPage.getByText('live run')).toBeVisible({ timeout: 12_000 });
+    await expect(failureTerminalPage.getByText('live run')).toBeVisible({ timeout: 12_000 });
+    await expect(successTerminalPage.getByLabel('live run spinner')).toBeVisible({
+      timeout: 12_000,
+    });
+    await expect(failureTerminalPage.getByLabel('live run spinner')).toBeVisible({
+      timeout: 12_000,
+    });
+
+    phase = 'failure-isolated';
+    finishFailureStream();
+
+    await expect(failureTerminalPage.getByText(FAILURE_REASON)).toBeVisible({ timeout: 12_000 });
+    await expect(failureTerminalPage.getByText('exit 2').first()).toBeVisible({ timeout: 12_000 });
+    await expect(failureTerminalPage.getByText('live run')).toHaveCount(0, { timeout: 12_000 });
+    await expect(failureTerminalPage.getByLabel('live run spinner')).toHaveCount(0, {
+      timeout: 12_000,
+    });
+    await expect(successTerminalPage.getByText('live run')).toBeVisible({ timeout: 12_000 });
+    await expect(successTerminalPage.getByLabel('live run spinner')).toBeVisible({
+      timeout: 12_000,
+    });
+
+    phase = 'all-done';
+    finishSuccessStream();
+
+    await expect(successTerminalPage.getByText(SUCCESS_RELEASE_OUTPUT)).toBeVisible({
+      timeout: 12_000,
+    });
+    await expect(successTerminalPage.getByText('exit 0 — ok').first()).toBeVisible({
+      timeout: 12_000,
+    });
+    await expect(successTerminalPage.getByText('live run')).toHaveCount(0, { timeout: 12_000 });
+    await expect(successTerminalPage.getByLabel('live run spinner')).toHaveCount(0, {
+      timeout: 12_000,
+    });
   });
 });
