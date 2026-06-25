@@ -19,7 +19,7 @@ import { renderChain } from '@/components/project-runs/render-chain'
 import { Select } from '@/components/ui/Select'
 import { Button } from '@/components/ui/Button'
 import { EmptyState } from '@/components/ui/EmptyState'
-import { Spinner } from '@/components/ui/Spinner'
+import { InlineLoading } from '@/components/ui/InlineLoading'
 
 const PAGE_SIZE = 100
 const ROW_HEIGHT = 92
@@ -322,10 +322,10 @@ export function RunsPage() {
       </div>
 
       {loading ? (
-        <div className="flex items-center justify-center gap-2 rounded-lg border border-border bg-bg-secondary py-12 text-sm text-text-secondary">
-          <Spinner size="sm" />
-          Loading runs
-        </div>
+        <InlineLoading
+          label="Loading runs"
+          className="justify-center rounded-lg border border-border bg-bg-secondary py-12 text-text-secondary"
+        />
       ) : entries.length === 0 ? (
         <EmptyState title="No runs match these filters" description="Adjust the project, date, or kind filter." />
       ) : (
