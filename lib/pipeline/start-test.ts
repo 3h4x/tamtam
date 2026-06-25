@@ -5,10 +5,13 @@ import { getImproveConfig, getProjectTestConfig } from '@/lib/scheduling/schedul
 import { currentParent } from '@/lib/jobs/parent-context';
 import { resolveProjectPath } from '@/lib/shared/project-data';
 import { buildChildEnv } from '@/lib/shared/child-env';
-import { shellQuote } from '@/lib/shared/shell';
+import { exec, shellQuote } from '@/lib/shared/shell';
+import { db, schema } from '@/lib/db';
+import { appendRedactedFileSync } from '@/lib/jobs/redacted-log-writer';
 import { loadFileConfig } from '@/lib/skills/tamtam-file-config';
 import { checkPrBranchExecutionGate } from '@/lib/security/pr-branch-execution';
 import { createJob, listJobs, probeJobStatus, updateJob, markDone } from '@/lib/jobs/job-storage';
+import { parseFailingTests, retryCommandForFailure, allFailuresQuarantined, type ParsedTestFailure, type TestOutcome } from './flaky-tests';
 import { getLock, acquireLock, releaseLock, isLockOwnedByActiveRelease } from './pipeline-lock';
 import { tryClaimPipelineStartSlot, setPipelineStartSlotJob, releasePipelineStartSlot } from './pipeline-start-slot';
 import { checkCliStartGate } from '@/lib/usage/resolve-provider';
@@ -32,6 +35,143 @@ export function isReviewRetestJob(job: Pick<JobData, 'kind' | 'contextMeta'>): b
   } catch {
     return false;
   }
+}
+
+async function currentCommitSha(projPath: string): Promise<string | null> {
+  try {
+    const r = await exec('git', ['-C', projPath, 'rev-parse', 'HEAD'], { timeout: 5000 });
+    return r.exitCode === 0 ? r.stdout.trim() || null : null;
+  } catch {
+    return null;
+  }
+}
+
+async function recordTestOutcomes(args: {
+  projectName: string;
+  jobId: string;
+  failures: ParsedTestFailure[];
+  commitSha: string | null;
+  outcome: TestOutcome;
+  startedAt: number;
+}): Promise<void> {
+  if (!args.failures.length) return;
+  const finishedAt = Date.now() / 1000;
+  // Best-effort: recording flaky/quarantine history must never break the test
+  // phase. A transient DB error (e.g. pool-acquire timeout under load) while
+  // logging an outcome should not turn a passing/flaky run into a release
+  // failure — the gating decision is already made by the caller's return value.
+  try {
+    await db.insert(schema.testRuns).values(args.failures.map((failure) => ({
+      project: args.projectName,
+      jobId: args.jobId,
+      testId: failure.testId,
+      framework: failure.framework,
+      commitSha: args.commitSha,
+      status: args.outcome,
+      firstSeenAt: args.startedAt,
+      finishedAt,
+    }))).execute();
+  } catch (error) {
+    console.error('[start-test] failed to record test outcomes:', error);
+  }
+}
+
+async function notifyFlakyTest(projectName: string, jobId: string, failures: ParsedTestFailure[]): Promise<void> {
+  if (!failures.length) return;
+  try {
+    const { notify } = await import('@/lib/shared/notifications');
+    await notify({
+      event: 'flaky_test_detected',
+      project: projectName,
+      job_id: jobId,
+      status: 'success',
+      message: `Flaky test detected: ${failures.map((failure) => failure.testId).join(', ')}`,
+      timestamp: Date.now(),
+      throttleKeySuffix: failures.map((failure) => failure.testId).sort().join('|'),
+    });
+  } catch (error) {
+    console.error('[start-test] flaky test notification failed:', error);
+  }
+}
+
+async function classifyFailedTestRun(args: {
+  projectName: string;
+  projPath: string;
+  testCmd: string;
+  logPath: string;
+  job: JobData;
+  childEnv: NodeJS.ProcessEnv;
+}): Promise<number> {
+  let output = '';
+  try {
+    output = readFileSync(/*turbopackIgnore: true*/ args.logPath, 'utf-8');
+  } catch {
+    return 1;
+  }
+
+  const failures = parseFailingTests(output);
+  if (!failures.length) return 1;
+
+  let testCfg: Awaited<ReturnType<typeof getProjectTestConfig>> | null = null;
+  try {
+    testCfg = await getProjectTestConfig(args.projectName);
+  } catch {
+    testCfg = null;
+  }
+  const quarantinedTests = testCfg?.quarantinedTests ?? [];
+  const commitSha = await currentCommitSha(args.projPath);
+  if (allFailuresQuarantined(failures, quarantinedTests)) {
+    appendRedactedFileSync(args.logPath, `\n# test outcome: quarantined (${failures.length} known flaky test${failures.length === 1 ? '' : 's'} skipped for release gating)\n`);
+    await recordTestOutcomes({
+      projectName: args.projectName,
+      jobId: args.job.id,
+      failures,
+      commitSha,
+      outcome: 'quarantined',
+      startedAt: args.job.startedAt,
+    });
+    return 0;
+  }
+
+  const retryFailures = failures
+    .map((failure) => ({ failure, command: retryCommandForFailure(failure, args.testCmd) }))
+    .filter((item): item is { failure: ParsedTestFailure; command: string } => !!item.command);
+  if (!retryFailures.length) return 1;
+
+  appendRedactedFileSync(args.logPath, `\n# flaky-test retry start — ${new Date().toISOString()}\n`);
+  const stillFailing: ParsedTestFailure[] = [];
+  for (const item of retryFailures) {
+    appendRedactedFileSync(args.logPath, `\n# retrying: ${item.failure.testId}\n$ ${item.command}\n`);
+    const retry = await exec('bash', ['-lc', item.command], {
+      cwd: args.projPath,
+      env: Object.fromEntries(
+        Object.entries(args.childEnv).filter((entry): entry is [string, string] => typeof entry[1] === 'string'),
+      ),
+      timeout: TEST_JOB_TIMEOUT_MS,
+      scrubSecrets: true,
+      killProcessGroup: true,
+    });
+    appendRedactedFileSync(args.logPath, retry.stdout);
+    appendRedactedFileSync(args.logPath, retry.stderr);
+    appendRedactedFileSync(args.logPath, `\n# retry exit ${retry.exitCode}\n`);
+    if (retry.exitCode !== 0) stillFailing.push(item.failure);
+  }
+
+  const outcome: TestOutcome = stillFailing.length === 0 ? 'flaky' : 'fail';
+  await recordTestOutcomes({
+    projectName: args.projectName,
+    jobId: args.job.id,
+    failures,
+    commitSha,
+    outcome,
+    startedAt: args.job.startedAt,
+  });
+  appendRedactedFileSync(args.logPath, `\n# test outcome: ${outcome}\n`);
+  if (outcome === 'flaky') {
+    await notifyFlakyTest(args.projectName, args.job.id, failures);
+    return 0;
+  }
+  return 1;
 }
 
 export async function detectTestCommand(projPath: string, projectName?: string): Promise<string | null> {
@@ -275,7 +415,24 @@ export async function startProjectTest(
         if (Number.isFinite(n)) finalCode = n;
       } catch { /* fall back to -1 */ }
     }
-    markDone(job, finalCode).catch((e) => {
+    const finalize = async () => {
+      if (finalCode !== 0) {
+        finalCode = await classifyFailedTestRun({
+          projectName,
+          projPath,
+          testCmd,
+          logPath,
+          job,
+          childEnv,
+        }).catch((error) => {
+          console.error(`[start-test] flaky classification failed for ${job.id}:`, error);
+          return finalCode;
+        });
+        try { writeFileSync(/*turbopackIgnore: true*/ exitCodePath, String(finalCode)); } catch {}
+      }
+      await markDone(job, finalCode);
+    };
+    finalize().catch((e) => {
       console.log(`[start-test] markDone failed for ${job.id}:`, e);
     });
   });

@@ -62,6 +62,13 @@ export interface AutopilotAgentInput {
   model: ModelTier;
   /** Parsed current autopilot state ({} when none). */
   autopilot: AutopilotState;
+  /** Per-agent fruitfulness over the recent run window — the same signal the
+   *  boost allocator uses to demote unproductive agents. When present and
+   *  `runs >= settings.unfruitfulMinSample` with `rate < settings.unfruitfulRate`,
+   *  a producer is throttled even without a loop/noise LLM verdict, and a single
+   *  fruitful run no longer fully exempts it from throttling. Null/absent ⇒ no
+   *  fruitfulness signal yet (treated as not-unfruitful — no penalty). */
+  fruitfulness?: { rate: number; runs: number } | null;
 }
 
 export interface AutopilotSettings {
@@ -73,6 +80,12 @@ export interface AutopilotSettings {
   idleStreak: number;
   /** Sustained loop/noise analyses required before a producer throttle step. */
   concernStreak: number;
+  /** A producer whose recent fruitfulness rate is below this — over at least
+   *  `unfruitfulMinSample` runs — is throttled directly (no loop/noise verdict
+   *  needed): the rate is itself a sustained signal. Mirrors the boost
+   *  allocator's demotion threshold so the two decisions agree. */
+  unfruitfulRate: number;
+  unfruitfulMinSample: number;
 }
 
 export interface AutopilotInput {
@@ -145,7 +158,19 @@ function decideProducer(
     persistState: { ...state },
   };
 
-  const recovered = outcome.concern === false || outcome.anyFruitful === true;
+  // Persistent low fruitfulness (rate below threshold over a meaningful sample)
+  // is its own sustained waste signal — independent of the LLM loop/noise
+  // verdict. A producer can do varied-but-useless work that never reads as
+  // "looping" yet still burns tokens every fire; the rate catches that.
+  const f = agent.fruitfulness;
+  const persistentlyUnfruitful =
+    !!f && f.runs >= settings.unfruitfulMinSample && f.rate < settings.unfruitfulRate;
+
+  // A single fruitful run no longer rescues a chronically-unfruitful producer:
+  // recovery now requires the LLM all-clear (or a fresh fruitful run) AND the
+  // rolling rate back at/above the threshold (or too few samples to judge).
+  const recovered =
+    !persistentlyUnfruitful && (outcome.concern === false || outcome.anyFruitful === true);
   if (recovered) {
     // Reset the streak; if currently throttled, restore the configured cadence
     // in full — a producing agent earns back its cadence immediately.
@@ -170,25 +195,33 @@ function decideProducer(
     return { ...base, persistState: next };
   }
 
-  const churning = outcome.concern === true && THROTTLE_CONCERN_TYPES.has(outcome.concernType ?? '');
-  if (!churning) {
+  const llmChurn = outcome.concern === true && THROTTLE_CONCERN_TYPES.has(outcome.concernType ?? '');
+  if (!persistentlyUnfruitful && !llmChurn) {
     // drift/quality concern or no signal — leave state untouched (operator-owned).
     return base;
   }
 
-  const streak = (state.concernStreak ?? 0) + 1;
-  if (streak < settings.concernStreak) {
-    return { ...base, persistState: { ...state, concernStreak: streak } };
+  // The LLM loop/noise verdict can be a transient blip, so it must persist for
+  // `concernStreak` analyses. Persistent unfruitfulness is already measured over
+  // >= unfruitfulMinSample runs, so it throttles on the first pass.
+  if (!persistentlyUnfruitful) {
+    const streak = (state.concernStreak ?? 0) + 1;
+    if (streak < settings.concernStreak) {
+      return { ...base, persistState: { ...state, concernStreak: streak } };
+    }
   }
 
-  // Sustained churn — step one rung slower, bounded by the floor.
+  // Step one rung slower, bounded by the floor.
   const current = state.scheduleOverride ?? agent.schedule;
   const next = nextSlowerSchedule(current, settings.cadenceFloor);
   if (!next) {
     // Already at/over the floor (or unparseable cadence). Hold; don't reset the
     // streak so a clean verdict still recovers it.
-    return { ...base, persistState: { ...state, concernStreak: streak } };
+    return { ...base, persistState: { ...state, concernStreak: state.concernStreak ?? 0 } };
   }
+  const reason = persistentlyUnfruitful
+    ? `${agent.name} unfruitful (${Math.round(f!.rate * 100)}% over ${f!.runs} runs) — throttled cadence ${current} → ${next}.`
+    : `${agent.name} flagged ${outcome.concernType} on ${settings.concernStreak} analyses — throttled cadence ${current} → ${next}.`;
   return {
     ...base,
     persistState: {
@@ -202,7 +235,7 @@ function decideProducer(
       kind: 'throttle',
       from: String(current ?? '?'),
       to: next,
-      reason: `${agent.name} flagged ${outcome.concernType} on ${settings.concernStreak} analyses — throttled cadence ${current} → ${next}.`,
+      reason,
     },
   };
 }

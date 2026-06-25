@@ -271,6 +271,7 @@ export async function getProjectSoakConfig(projName: string): Promise<{
 
 export async function getProjectTestConfig(projName: string): Promise<{
   testCommand: string | null;
+  quarantinedTests: string[];
   testCronEnabled: boolean;
   testCronSchedule: string | null;
   autoCommitEnabled: boolean;
@@ -292,6 +293,7 @@ export async function getProjectTestConfig(projName: string): Promise<{
   if (!row) return null;
   return {
     testCommand: row.testCommand ?? null,
+    quarantinedTests: await getProjectQuarantinedTests(projName),
     testCronEnabled: !!row.testCronEnabled,
     testCronSchedule: row.testCronSchedule ?? null,
     autoCommitEnabled: row.autoCommitEnabled ?? false,
@@ -304,6 +306,38 @@ export async function getProjectTestConfig(projName: string): Promise<{
     postMergeWatchMinutes: row.postMergeWatchMinutes ?? 0,
     autoRevertEnabled: !!row.autoRevertEnabled,
   };
+}
+
+function parseQuarantinedTests(raw: string | null | undefined): string[] {
+  if (!raw) return [];
+  try {
+    const parsed = JSON.parse(raw) as unknown;
+    if (!Array.isArray(parsed)) return [];
+    return parsed.filter((value): value is string => typeof value === 'string' && value.trim().length > 0);
+  } catch {
+    return raw.split('\n').map((line) => line.trim()).filter(Boolean);
+  }
+}
+
+export async function getProjectQuarantinedTests(projName: string): Promise<string[]> {
+  const rows = await db
+    .select({ value: schema.settings.value })
+    .from(schema.settings)
+    .where(eq(schema.settings.key, `project:${projName}:quarantined_tests`))
+    .limit(1);
+  return parseQuarantinedTests(rows[0]?.value);
+}
+
+export async function setProjectQuarantinedTests(projName: string, tests: string[]): Promise<void> {
+  const key = `project:${projName}:quarantined_tests`;
+  const value = JSON.stringify(tests);
+  await db.insert(schema.settings)
+    .values({ key, value })
+    .onConflictDoUpdate({
+      target: schema.settings.key,
+      set: { value },
+    })
+    .execute();
 }
 
 export function parseCronTime(cron: string): {

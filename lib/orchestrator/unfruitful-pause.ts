@@ -45,6 +45,18 @@ export function runProducedNoDiff(run: JobData): boolean {
   return lines === 0 && !hasFiles;
 }
 
+/** A run that produced a real line-level change. Stricter than `runProducedNoDiff`:
+ *  a run that "touches" files but moves zero lines (an agent rewriting a file to
+ *  identical content — a 0-line no-op edit) counts as unproductive here, because
+ *  it lands nothing committable. This is the right signal for the rate-based
+ *  waste check, which exists precisely to catch projects that keep re-touching
+ *  files for no net change. (The caught-up path keeps `runProducedNoDiff`'s
+ *  files-or-lines semantics so it never silences a project doing legitimate
+ *  binary/rename changes.) */
+export function runChangedLines(run: JobData): boolean {
+  return ((run.linesAdded ?? 0) + (run.linesRemoved ?? 0)) > 0;
+}
+
 /** A run whose work summary explicitly reports nothing to do (caught up). */
 export function runIsCaughtUp(run: JobData): boolean {
   return IDLE_SUMMARY_RE.test(run.workSummary ?? '');
@@ -79,6 +91,42 @@ export function isProjectCaughtUpUnfruitful(
   return window.some(runIsCaughtUpOrCleanNoop); // ≥1 clean no-op (caught up, not crashing)
 }
 
+/**
+ * True when a project is *persistently* unfruitful: over its most recent
+ * `sample` finished scheduled runs, the fruitful rate (runs that changed code /
+ * total) is below `rateThreshold`, and at least one of them completed cleanly
+ * (so a streak of host-load crashes — which needs attention — does not silence
+ * the project). This complements `isProjectCaughtUpUnfruitful`: that one needs
+ * an unbroken all-no-diff window, so a project that lands a diff once every few
+ * runs slips through even while grinding tokens for almost nothing. The rate
+ * check catches that interspersed-churn case. Mirrors the per-agent autopilot
+ * threshold so project- and agent-level "unfruitful" agree. Disabled when
+ * `rateThreshold <= 0`.
+ */
+export function isProjectPersistentlyUnfruitful(
+  recentRunsNewestFirst: JobData[],
+  sample: number,
+  rateThreshold: number,
+): boolean {
+  if (rateThreshold <= 0) return false;
+  if (sample <= 0) return false;
+  const window = recentRunsNewestFirst.slice(0, sample);
+  if (window.length < sample) return false; // not enough history to judge a rate
+  // Line-level fruitfulness: a run that re-touches files but moves zero lines is
+  // unproductive churn, not real work (see runChangedLines).
+  const fruitful = window.filter(runChangedLines).length;
+  const rate = fruitful / window.length;
+  if (rate >= rateThreshold) return false; // still productive enough
+  return window.some(runIsCaughtUpOrCleanNoop); // ≥1 clean run (not all crashing)
+}
+
+/** The sample size for the rate-based check: wider than the strict caught-up
+ *  window so the rate is stable, but bounded so it reacts within a reasonable
+ *  number of runs. */
+export function unfruitfulRateSample(threshold: number): number {
+  return Math.max(effectiveThreshold(threshold) * 2, 10);
+}
+
 /** Finished scheduled agent runs for one project, newest-first. */
 export function recentScheduledAgentRuns(
   allJobs: JobData[],
@@ -97,6 +145,10 @@ export interface UnfruitfulPauseDeps {
   enabled: boolean;
   /** `auto_pause_unfruitful_runs` — consecutive no-diff runs before pausing. */
   threshold: number;
+  /** `auto_pause_unfruitful_rate` — fruitful-rate floor for the rate-based
+   *  trigger (over `unfruitfulRateSample(threshold)` runs). 0 disables it,
+   *  leaving only the strict all-no-diff caught-up path. */
+  rateThreshold: number;
   listJobs: () => JobData[];
   isAgentJobKind: (kind: unknown) => boolean;
   /** Enabled (non-archived) projects with their current paused flag. */
@@ -123,26 +175,37 @@ export async function autoPauseUnfruitfulProjects(
   if (!deps.enabled) return { paused };
 
   const requiredRuns = effectiveThreshold(deps.threshold);
+  const sample = unfruitfulRateSample(deps.threshold);
+  const fetchLimit = Math.max(requiredRuns, sample);
   const jobs = deps.listJobs();
   for (const p of deps.listProjects()) {
     if (p.paused) continue;
-    const runs = recentScheduledAgentRuns(jobs, p.name, deps.isAgentJobKind, requiredRuns);
-    if (!isProjectCaughtUpUnfruitful(runs, deps.threshold)) continue;
+    const runs = recentScheduledAgentRuns(jobs, p.name, deps.isAgentJobKind, fetchLimit);
+    const caughtUp = isProjectCaughtUpUnfruitful(runs, deps.threshold);
+    const lowRate = !caughtUp && isProjectPersistentlyUnfruitful(runs, sample, deps.rateThreshold);
+    if (!caughtUp && !lowRate) continue;
 
     const ok = await deps.pauseProject(p.name);
     if (!ok) continue;
     paused.push(p.name);
 
+    const ratePct = sample > 0
+      ? Math.round((runs.slice(0, sample).filter(runChangedLines).length / sample) * 100)
+      : 0;
+    const title = caughtUp
+      ? `${p.name} auto-paused — caught up (nothing to do)`
+      : `${p.name} auto-paused — persistently unfruitful (${ratePct}% of runs produce changes)`;
+    const detail = caughtUp
+      ? `The last ${requiredRuns} scheduled agent runs produced no changes and at least one ` +
+        `reported nothing to do. TamTam paused the project to stop it churning agents (and the ` +
+        `process/syspolicyd load that comes with them) for no value. Resume it from Settings when ` +
+        `there is new work, or lower its cadence.`
+      : `Only ${ratePct}% of the last ${sample} scheduled agent runs produced any change — below the ` +
+        `${Math.round(deps.rateThreshold * 100)}% auto-pause floor. The project keeps firing agents that ` +
+        `mostly produce nothing, burning budget and process/syspolicyd load. TamTam paused it; resume ` +
+        `from Settings, lower its cadence, or fix the agents that aren't landing work.`;
     try {
-      await deps.recommend({
-        project: p.name,
-        title: `${p.name} auto-paused — caught up (nothing to do)`,
-        detail:
-          `The last ${requiredRuns} scheduled agent runs produced no changes and at least one ` +
-          `reported nothing to do. TamTam paused the project to stop it churning agents (and the ` +
-          `process/syspolicyd load that comes with them) for no value. Resume it from Settings when ` +
-          `there is new work, or lower its cadence.`,
-      });
+      await deps.recommend({ project: p.name, title, detail });
     } catch (e) {
       deps.log?.(`[unfruitful-pause] recommendation failed for ${p.name}: ${e instanceof Error ? e.message : String(e)}`);
     }
@@ -152,7 +215,7 @@ export async function autoPauseUnfruitfulProjects(
         await deps.notify(p.name, requiredRuns);
       } catch { /* notification failure is non-fatal */ }
     }
-    deps.log?.(`[unfruitful-pause] auto-paused ${p.name} (${requiredRuns} caught-up/no-diff runs)`);
+    deps.log?.(`[unfruitful-pause] auto-paused ${p.name} (${caughtUp ? `${requiredRuns} caught-up/no-diff runs` : `low fruitful rate ${ratePct}% over ${sample} runs`})`);
   }
   return { paused };
 }
@@ -179,6 +242,7 @@ export async function runUnfruitfulPauseSweep(): Promise<UnfruitfulPauseResult> 
   return autoPauseUnfruitfulProjects({
     enabled: s.auto_pause_unfruitful_enabled,
     threshold: s.auto_pause_unfruitful_runs,
+    rateThreshold: s.auto_pause_unfruitful_rate,
     listJobs,
     isAgentJobKind,
     listProjects: () => listEnabledProjects().map((p) => ({ name: p.name, paused: !!p.paused })),

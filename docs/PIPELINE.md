@@ -24,6 +24,8 @@ not fixable failures. This is the contract:
 | `push` exit ≠ 0, except cancellation exits | `fix` (reads hook log; bails if pre-push tests failed, branch protection blocks the direct push, or the remote moved and the push step could not recover) | re-run `push` | `getPushFixAttemptCap()=2` for hook-rejection fix; `fix_max_iterations` for review-driven push recovery |
 | `push` exit `-2` / `-3` | abort (`push cancelled` / `push cancelled by release abort or timeout`) | none | release abort / wall-clock timeout |
 
+Before the `test` row is marked failed, TamTam parses vitest/pytest output for failing test IDs and retries those tests once. If every targeted retry passes, the job is marked successful with a `# test outcome: flaky` log marker, `test_runs` records the flaky outcome, the pipeline continues to review/commit, and the optional `flaky_test_detected` webhook fires. If all parsed failures are listed in the project `quarantined_tests` config, the job is marked successful with a `quarantined` outcome without retrying. Unparsed failures and retry failures continue through the normal `test → fix → test` loop.
+
 Rules that hold for every recovery loop:
 
 - **Fixes are unbounded.** The cap lives on the verification side: bail

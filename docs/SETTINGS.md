@@ -137,6 +137,7 @@ Outbound webhooks for release pipeline events. Never blocks pipeline progress �
 | `notification_on_review_do_not_ship` | boolean | `false` | Notify when a code review verdict is "DO NOT SHIP". |
 | `notification_on_agent_run_fail` | boolean | `false` | Notify when an agent run fails. |
 | `notification_on_budget_blocked` | boolean | `false` | Notify when a run is refused because the selected agent subscription budget threshold is exceeded. |
+| `notification_on_flaky_test_detected` | boolean | `false` | Notify when the release test step fails, retries the parsed failing vitest/pytest tests once, and the retry passes so the pipeline continues. |
 | `notification_throttle_window_seconds` | number | `900` | Suppress repeated webhook notifications with the same event/project/agent key for this many seconds. |
 | `notification_throttle_overrides` | JSON object | `{ "release_fail": 0, "release_aborted": 0 }` | Per-event throttle windows in seconds. Set an event to `0` to always send. |
 
@@ -159,6 +160,7 @@ All three are read live on each job (not cached), so changing them takes effect 
 | `release_min_lines` | number | `0` | Minimum cumulative working-tree lines changed (added + removed) required before an auto-triggered release fires. `0` disables the gate (current behavior). When set, a sub-threshold agent run is **reinforced** — the same agent is re-dispatched (with a nudge prompt) to accumulate more change in the dirty working tree — instead of triggering the release pipeline. Only applies to the auto-release path (`release_after_run`), to working-tree-dirty agent jobs (not issue/PR work, not plain `run` jobs). The release fires once cumulative LOC crosses the threshold, the reinforce cap is hit, or the agent stops making progress. |
 | `auto_pause_unfruitful_enabled` | boolean | `true` | When enabled, scheduled agent runs that repeatedly produce no diff and either report nothing to do or finish cleanly with exit code 0 can automatically pause the project until it is resumed from Settings. |
 | `auto_pause_unfruitful_runs` | number | `6` | Consecutive no-diff scheduled runs required before auto-pausing a project, with at least one clean or explicit nothing-to-do run in the window. `0` pauses after the first qualifying run. |
+| `auto_pause_unfruitful_rate` | number | `0.2` | Fruitful-rate floor (0–1) for the rate-based auto-pause trigger. A project whose recent scheduled runs change code in less than this fraction — over a wider sample (`max(auto_pause_unfruitful_runs × 2, 10)` runs, with ≥1 clean run) — is paused even without an unbroken all-no-diff window. Catches projects that grind tokens but land a diff only occasionally, which the strict consecutive-no-diff check misses. `0` disables the rate trigger, leaving only the caught-up path. |
 | `release_reinforce_max_iterations` | number | `3` | Max consecutive reinforce re-runs per project before releasing whatever exists. `0` = unlimited (terminates only via the no-progress exit, where a re-run adds no new lines). Reinforce state is ephemeral (`globalThis.__tamtamReinforceState`); a restart resets the loop. |
 | `review_fix_backoff_seconds` | number | `30` | Base delay, in seconds, before each review→fix iteration after the third completed review in the same release. The delay doubles on each additional round (30 → 60 → 120 → 240, capped at 300) so a slow-converging review loop does not burn tokens or CI at full speed. Set to `0` to disable the backoff entirely. |
 | `review_do_not_ship_action` | enum `pass` \| `fix` \| `abort` | `fix` | What to do when a code review returns **DO NOT SHIP**. `fix` (default) routes through the same fix loop NEEDS ATTENTION uses (subject to `fix_max_iterations`). `pass` files a follow-up GitHub issue with the findings and continues to commit → push → mark-dod so the partial work still ships. `abort` keeps the legacy behavior of stopping the release immediately. |
@@ -429,7 +431,7 @@ frequency, daytime, weekends, launchagent_prefix, workspace_path,
 base_prompt, default_model, permission_mode, commit_style,
 review_verdict_rules, jobs_paused,
 fix_max_iterations, release_min_lines, auto_pause_unfruitful_enabled,
-auto_pause_unfruitful_runs, release_reinforce_max_iterations,
+auto_pause_unfruitful_runs, auto_pause_unfruitful_rate, release_reinforce_max_iterations,
 release_wall_clock_timeout_minutes,
 legacy_completion_hook_release_after_run_enabled,
 legacy_completion_hook_release_after_fix_ci_enabled,

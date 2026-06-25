@@ -160,8 +160,8 @@ const AGGRESSIVE_CATCHUP_PP = 10;
 // enough to distinguish "agent is just doing maintenance and finding nothing
 // today" (acceptable noise) from "agent never produces anything" (a stuck
 // loop the orchestrator should stop feeding tokens).
-const UNFRUITFUL_MIN_SAMPLE = 5;
-const UNFRUITFUL_RATE_THRESHOLD = 0.2;
+export const UNFRUITFUL_MIN_SAMPLE = 5;
+export const UNFRUITFUL_RATE_THRESHOLD = 0.2;
 
 function isUnfruitful(agent: BoostAgentInput): boolean {
   const f = agent.fruitfulness;
@@ -218,13 +218,14 @@ export function decideBoosts(input: BoostInput): BoostDecision[] {
     const candidates = agentsByProject.get(project.project) ?? [];
     if (candidates.length === 0) continue;
 
-    // Spread the boost across the roster, but rank in two tiers:
-    //   1. agents that are still considered fruitful (or have no signal yet)
-    //   2. agents that have run repeatedly without producing anything
-    // Within each tier, oldest-dispatch-first. The orchestrator only falls to
-    // tier 2 when tier 1 is exhausted, so a project full of stuck agents
-    // still gets *some* boost (better than nothing while the user fixes
-    // them), but a healthy agent always wins the slot.
+    // Unfruitful agents are excluded from boosts entirely: an extra fire of an
+    // agent that has run repeatedly without producing anything is pure token
+    // waste. They keep their own scheduled cadence (which the autopilot
+    // separately throttles via the same fruitfulness signal) — the orchestrator
+    // just never spends a *bonus* fire on them. A project whose only eligible
+    // agents are unfruitful therefore gets no boost, which is correct: there is
+    // nothing productive to accelerate. Remaining agents are ranked
+    // oldest-dispatch-first so the boost spreads across the healthy roster.
     const eligible = candidates.filter((a) =>
       a.lastDispatchMs === null
       || now - a.lastDispatchMs > AGENT_RECENT_DISPATCH_COOLDOWN_MS,
@@ -234,9 +235,7 @@ export function decideBoosts(input: BoostInput): BoostDecision[] {
       const bm = b.lastDispatchMs ?? 0;
       return am - bm;
     };
-    const fruitfulTier = eligible.filter((a) => !isUnfruitful(a)).sort(byStaleness);
-    const unfruitfulTier = eligible.filter((a) => isUnfruitful(a)).sort(byStaleness);
-    const ranked = [...fruitfulTier, ...unfruitfulTier];
+    const ranked = eligible.filter((a) => !isUnfruitful(a)).sort(byStaleness);
     if (ranked.length === 0) continue;
 
     // When pace is severely under (margin far above the configured floor),

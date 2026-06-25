@@ -26,6 +26,11 @@ const mocks = vi.hoisted(() => ({
   releaseLockMock: vi.fn(),
   isLockOwnedByActiveReleaseMock: vi.fn(),
   checkPrBranchExecutionGateMock: vi.fn(),
+  execMock: vi.fn(),
+  dbValuesMock: vi.fn(),
+  dbInsertMock: vi.fn(),
+  appendRedactedFileSyncMock: vi.fn(),
+  notifyMock: vi.fn(),
 }));
 
 vi.mock('@/lib/scheduling/scheduling', () => ({
@@ -48,7 +53,20 @@ vi.mock('@/lib/jobs/job-storage', () => ({
 // Stub heavy transitive deps that detectTestCommand doesn't need, so the
 // module graph for start-test.ts is small and module init stays cheap.
 vi.mock('@/lib/jobs/parent-context', () => ({ currentParent: () => null }));
-vi.mock('@/lib/shared/shell', () => ({ exec: vi.fn(), shellQuote: (s: string) => s }));
+vi.mock('@/lib/shared/shell', () => ({
+  exec: (...args: unknown[]) => mocks.execMock(...args),
+  shellQuote: (s: string) => `'${s.replace(/'/g, `'\\''`)}'`,
+}));
+vi.mock('@/lib/db', () => ({
+  db: { insert: (...args: unknown[]) => mocks.dbInsertMock(...args) },
+  schema: { testRuns: {} },
+}));
+vi.mock('@/lib/jobs/redacted-log-writer', () => ({
+  appendRedactedFileSync: (...args: unknown[]) => mocks.appendRedactedFileSyncMock(...args),
+}));
+vi.mock('@/lib/shared/notifications', () => ({
+  notify: (...args: unknown[]) => mocks.notifyMock(...args),
+}));
 vi.mock('@/lib/usage/resolve-provider', () => ({
   checkCliStartGate: vi.fn().mockResolvedValue({ ok: true, provider: 'claude' }),
 }));
@@ -112,6 +130,11 @@ describe('detectTestCommand', () => {
     mocks.releaseLockMock.mockReset().mockResolvedValue(undefined);
     mocks.isLockOwnedByActiveReleaseMock.mockReset().mockResolvedValue(false);
     mocks.checkPrBranchExecutionGateMock.mockReset().mockReturnValue({ ok: true, reason: 'default_branch' });
+    mocks.execMock.mockReset().mockResolvedValue({ stdout: 'abc123\n', stderr: '', exitCode: 0 });
+    mocks.dbValuesMock.mockReset().mockReturnValue({ execute: vi.fn().mockResolvedValue(undefined) });
+    mocks.dbInsertMock.mockReset().mockReturnValue({ values: mocks.dbValuesMock });
+    mocks.appendRedactedFileSyncMock.mockReset();
+    mocks.notifyMock.mockReset().mockResolvedValue(undefined);
   });
 
   afterEach(() => {
@@ -289,5 +312,65 @@ describe('detectTestCommand', () => {
     expect(result.ok).toBe(true);
     expect(mocks.checkPrBranchExecutionGateMock).not.toHaveBeenCalled();
     expect(mocks.spawnMock).toHaveBeenCalledOnce();
+  });
+
+  it('marks a failed test job successful when targeted flaky retries pass', async () => {
+    writeFileSync(join(projDir, 'package.json'), JSON.stringify({ scripts: { test: 'vitest' } }));
+    writeFileSync(join(projDir, 'pnpm-lock.yaml'), '');
+    const child = new EventEmitter() as EventEmitter & { pid: number; unref: () => void };
+    child.pid = 12345;
+    child.unref = vi.fn();
+    mocks.spawnMock.mockReturnValue(child);
+    mocks.execMock
+      .mockResolvedValueOnce({ stdout: 'abc123\n', stderr: '', exitCode: 0 })
+      .mockResolvedValueOnce({ stdout: 'retry passed\n', stderr: '', exitCode: 0 });
+
+    const result = await startProjectTest('myproj');
+    expect(result.ok).toBe(true);
+    if (!result.ok) return;
+    writeFileSync(result.logPath, ' FAIL  src/foo.test.ts > widget > renders\n');
+    child.emit('close', 1);
+
+    await vi.waitFor(() => {
+      expect(mocks.markDoneMock).toHaveBeenCalledWith(expect.objectContaining({ id: 'myproj-test-id' }), 0);
+    });
+    expect(mocks.dbValuesMock).toHaveBeenCalledWith([
+      expect.objectContaining({
+        project: 'myproj',
+        jobId: 'myproj-test-id',
+        testId: 'src/foo.test.ts > widget > renders',
+        framework: 'vitest',
+        status: 'flaky',
+      }),
+    ]);
+    expect(mocks.notifyMock).toHaveBeenCalledWith(expect.objectContaining({
+      event: 'flaky_test_detected',
+      project: 'myproj',
+      job_id: 'myproj-test-id',
+    }));
+  });
+
+  it('marks quarantined failures successful without retrying', async () => {
+    writeFileSync(join(projDir, 'package.json'), JSON.stringify({ scripts: { test: 'vitest' } }));
+    writeFileSync(join(projDir, 'pnpm-lock.yaml'), '');
+    mocks.getProjectTestConfigMock.mockReturnValue({ quarantinedTests: ['src/foo.test.ts > widget > renders'] });
+    const child = new EventEmitter() as EventEmitter & { pid: number; unref: () => void };
+    child.pid = 12345;
+    child.unref = vi.fn();
+    mocks.spawnMock.mockReturnValue(child);
+
+    const result = await startProjectTest('myproj');
+    expect(result.ok).toBe(true);
+    if (!result.ok) return;
+    writeFileSync(result.logPath, ' FAIL  src/foo.test.ts > widget > renders\n');
+    child.emit('close', 1);
+
+    await vi.waitFor(() => {
+      expect(mocks.markDoneMock).toHaveBeenCalledWith(expect.objectContaining({ id: 'myproj-test-id' }), 0);
+    });
+    expect(mocks.execMock).toHaveBeenCalledTimes(1);
+    expect(mocks.dbValuesMock).toHaveBeenCalledWith([
+      expect.objectContaining({ status: 'quarantined' }),
+    ]);
   });
 });

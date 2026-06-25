@@ -16,6 +16,8 @@ const SETTINGS: AutopilotSettings = {
   tierFloor: 'fast',
   idleStreak: 4,
   concernStreak: 2,
+  unfruitfulRate: 0.2,
+  unfruitfulMinSample: 5,
 };
 
 function makeAgent(overrides: Partial<AutopilotAgentInput> = {}): AutopilotAgentInput {
@@ -105,6 +107,40 @@ describe('decideAutopilot — producer cadence throttle', () => {
     });
     const [d] = run([agent], [outcome({ concern: true, concernType: 'loop', anyFruitful: true })]);
     expect(d.action?.kind).toBe('restore-cadence');
+  });
+
+  it('throttles a persistently unfruitful producer on the first pass — no loop/noise verdict needed', () => {
+    const agent = makeAgent({ fruitfulness: { rate: 0.07, runs: 43 } });
+    // Clean LLM verdict, but the rolling rate (7% over 43 runs) is below floor.
+    const [d] = run([agent], [outcome({ concern: false, concernType: 'none' })]);
+    expect(d.action?.kind).toBe('throttle');
+    expect(d.action?.to).toBe('1h');
+    expect(d.action?.reason).toMatch(/unfruitful/i);
+    expect(d.persistState.scheduleOverride).toBe('1h');
+  });
+
+  it('a single fruitful run does NOT rescue a chronically unfruitful producer', () => {
+    const agent = makeAgent({
+      fruitfulness: { rate: 0.1, runs: 30 },
+      autopilot: { scheduleOverride: '1h', originalSchedule: '30m' },
+    });
+    const [d] = run([agent], [outcome({ concern: true, concernType: 'loop', anyFruitful: true })]);
+    // anyFruitful is true, but the rate is still below floor → no restore; it
+    // throttles further instead.
+    expect(d.action?.kind).not.toBe('restore-cadence');
+    expect(d.action?.kind).toBe('throttle');
+  });
+
+  it('does not throttle on a healthy fruitfulness rate', () => {
+    const agent = makeAgent({ fruitfulness: { rate: 0.5, runs: 40 } });
+    const [d] = run([agent], [outcome({ concern: false, concernType: 'none' })]);
+    expect(d.action).toBeUndefined();
+  });
+
+  it('does not throttle on a low rate below the minimum sample', () => {
+    const agent = makeAgent({ fruitfulness: { rate: 0.0, runs: 3 } });
+    const [d] = run([agent], [outcome({ concern: false, concernType: 'none' })]);
+    expect(d.action).toBeUndefined();
   });
 });
 

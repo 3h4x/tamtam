@@ -109,6 +109,24 @@ Audit trail for every run, review, fix, test, push, agent execution.
 | `workSummary` | TEXT | — | nullable; concise agent-reported outcome summary |
 | `modifiedFiles` | TEXT | — | nullable; JSON array of files changed by an agent run |
 
+---
+
+### `test_runs`
+
+Per-test outcomes recorded by the release test step when it can parse failing tests.
+
+| Column | Type | Default | Notes |
+|--------|------|---------|-------|
+| `id` | SERIAL | — | PRIMARY KEY |
+| `project` | TEXT | — | NOT NULL; project name |
+| `jobId` | TEXT | — | NOT NULL; owning `test` job |
+| `testId` | TEXT | — | NOT NULL; framework-specific test identifier |
+| `framework` | TEXT | — | NOT NULL; currently `vitest` or `pytest` |
+| `commitSha` | TEXT | — | nullable; project HEAD when the outcome was recorded |
+| `status` | TEXT | — | NOT NULL; `flaky`, `fail`, or `quarantined` |
+| `firstSeenAt` | REAL | — | NOT NULL; owning test job start timestamp |
+| `finishedAt` | REAL | — | NOT NULL; outcome timestamp |
+
 #### Job Kinds
 
 | Kind | Description |
