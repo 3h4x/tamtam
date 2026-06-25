@@ -43,6 +43,7 @@ describe('GET /api/stats/usage', () => {
     const data = await res.json();
     expect(data.projects).toEqual([]);
     expect(data.agents).toEqual([]);
+    expect(data.skills).toEqual([]);
     expect(data.totals.runs).toBe(0);
     expect(data.totals.costUsd).toBe(0);
     expect(data.window).toBe('24h');
@@ -135,6 +136,46 @@ describe('GET /api/stats/usage', () => {
     const reviewRow = data.agents.find((r: any) => r.kind === 'review');
     expect(reviewRow.runs).toBe(2);
     expect(reviewRow.outputTokens).toBe(600_000);
+  });
+
+  it('returns by-skill token and spend attribution weighted by prompt length', async () => {
+    listJobsMock.mockReturnValue([
+      makeJob({
+        id: 'a',
+        inputTokens: 900,
+        cacheReadTokens: 90,
+        skillIds: JSON.stringify([
+          { id: 'skill-short', name: 'Short', promptChars: 100, source: 'db' },
+          { id: 'skill-long', name: 'Long', promptChars: 200, source: 'file' },
+        ]),
+      }),
+      makeJob({
+        id: 'b',
+        inputTokens: 300,
+        cacheReadTokens: 30,
+        skillIds: JSON.stringify([
+          { id: 'skill-long', name: 'Long', promptChars: 50, source: 'file' },
+        ]),
+      }),
+      makeJob({ id: 'c', inputTokens: 1000, cacheReadTokens: 100, skillIds: '[]' }),
+    ]);
+
+    const res = await GET(new NextRequest('http://localhost/api/stats/usage?window=all'));
+    const data = await res.json();
+
+    expect(data.skills).toHaveLength(2);
+    const short = data.skills.find((r: any) => r.skillId === 'skill-short');
+    const long = data.skills.find((r: any) => r.skillId === 'skill-long');
+    expect(short).toMatchObject({ skill: 'Short', runs: 1, promptTokens: 300, cacheReadTokens: 30 });
+    expect(long).toMatchObject({ skill: 'Long', runs: 2, promptTokens: 900, cacheReadTokens: 90 });
+    expect(short.costUsd).toBeCloseTo(
+      costUsd({ inputTokens: 300, outputTokens: 0, cacheReadTokens: 30, cacheCreateTokens: 0 }),
+      8
+    );
+    expect(long.costUsd).toBeCloseTo(
+      costUsd({ inputTokens: 900, outputTokens: 0, cacheReadTokens: 90, cacheCreateTokens: 0 }),
+      8
+    );
   });
 
   it('aggregates avgPromptBytes / avgPromptTokens per agent kind', async () => {

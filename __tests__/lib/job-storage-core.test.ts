@@ -43,6 +43,7 @@ describe('job-storage', () => {
   let markAllUnseenFinished: typeof import('@/lib/jobs/job-storage').markAllUnseenFinished;
   let unseenFinished: typeof import('@/lib/jobs/job-storage').unseenFinished;
   let updateJob: typeof import('@/lib/jobs/job-storage').updateJob;
+  let awaitInFlightSave: typeof import('@/lib/jobs/storage').awaitInFlightSave;
   let runWithParent: typeof import('@/lib/jobs/job-storage').runWithParent;
   let storageCache: Map<string, JobData>;
 
@@ -66,7 +67,9 @@ describe('job-storage', () => {
     unseenFinished = jobStorage.unseenFinished;
     updateJob = jobStorage.updateJob;
     runWithParent = jobStorage.runWithParent;
-    storageCache = (await import('@/lib/jobs/storage')).jobsCache;
+    const storage = await import('@/lib/jobs/storage');
+    awaitInFlightSave = storage.awaitInFlightSave;
+    storageCache = storage.jobsCache;
   });
 
   beforeEach(async () => {
@@ -105,6 +108,16 @@ describe('job-storage', () => {
       const job = createJob('proj', 'run', 555, '/log');
       const retrieved = getJob(job.id);
       expect(retrieved).toEqual(job);
+    });
+
+    it('persists run skill attribution on the jobs row', async () => {
+      const job = createJob('proj', 'agent:runner', 555, '/log');
+      job.skillIds = JSON.stringify([{ id: 'skill-a', name: 'Skill A', promptChars: 120, source: 'db' }]);
+      updateJob(job);
+      await awaitInFlightSave(job.id);
+
+      const rows = await testDb.db.select().from(schema.jobs).where(eq(schema.jobs.id, job.id));
+      expect(rows[0]?.skillIds).toBe(job.skillIds);
     });
 
     it('creates job with prompt when provided', () => {

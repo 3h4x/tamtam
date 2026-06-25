@@ -877,6 +877,13 @@ File-backed prompt.`);
     expect(dbChip?.name).toBe('DB One');
     expect(fileChip?.id).toBe('persona:engineering/fullstack');
     expect(fileChip?.name).toBe('Fullstack');
+
+    const runSkills = JSON.parse(createdJob.skillIds);
+    expect(runSkills).toHaveLength(2);
+    expect(runSkills[0]).toMatchObject({ id: 'skill-db', name: 'DB One', source: 'db' });
+    expect(runSkills[0].promptChars).toBeGreaterThan(0);
+    expect(runSkills[1]).toMatchObject({ id: 'persona:engineering/fullstack', name: 'Fullstack', source: 'file' });
+    expect(runSkills[1].promptChars).toBeGreaterThan(0);
   });
 
   it('records the trigger source in contextMeta for the report finalizer', async () => {

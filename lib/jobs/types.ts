@@ -36,4 +36,5 @@ export interface JobData {
   provider?: string | null;
   cancelRequestedExitCode?: number | null;
   runScore?: number | null;
+  skillIds?: string | null;
 }

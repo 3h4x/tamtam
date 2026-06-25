@@ -111,7 +111,8 @@ async function applyDdl(handle: TestDbHandle): Promise<void> {
       lines_added integer,
       lines_removed integer,
       provider text,
-      run_score integer
+      run_score integer,
+      skill_ids text NOT NULL DEFAULT '[]'
     )
   `));
   await handle.db.execute(sql.raw(`

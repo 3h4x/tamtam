@@ -108,6 +108,7 @@ Audit trail for every run, review, fix, test, push, agent execution.
 | `releaseDeadlineAt` | BIGINT | — | nullable; Unix timestamp (milliseconds) when a release meta-job should be auto-aborted |
 | `workSummary` | TEXT | — | nullable; concise agent-reported outcome summary |
 | `modifiedFiles` | TEXT | — | nullable; JSON array of files changed by an agent run |
+| `skillIds` | TEXT | `'[]'` | JSON array of resolved run skill records `{ id, name, promptChars, source }`; used by `/stats` to estimate per-skill prompt/cache-read spend |
 
 ---
 
