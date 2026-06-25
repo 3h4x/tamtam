@@ -361,7 +361,7 @@ test.describe('ConfigTab save flow', () => {
   });
 
   // ---------------------------------------------------------------------------
-  // Test 4: Failed save shows error toast
+  // Failed save shows error toast
   // ---------------------------------------------------------------------------
   test('a failed PATCH shows an error toast', async ({ page }) => {
     await stubShell(page);
