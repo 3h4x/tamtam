@@ -120,6 +120,9 @@ describe('POST /api/projects/by-project/[projectName]/issue-branch', () => {
       .mockResolvedValueOnce(makeExecResult({ stdout: 'master\n' }))                       // branch --show-current
       .mockResolvedValueOnce(makeExecResult({ stdout: 'refs/remotes/origin/master\n' }))   // symbolic-ref
       .mockResolvedValueOnce(makeExecResult({ stdout: '  master\n  other\n' }))            // branch --merged (no match)
+      .mockResolvedValueOnce(makeExecResult())                                             // fetch origin/default
+      .mockResolvedValueOnce(makeExecResult({ stdout: 'abc123\n' }))                       // rev-parse origin/default
+      .mockResolvedValueOnce(makeExecResult({ exitCode: 128, stderr: 'cannot carry changes' })) // checkout -b from origin
       .mockResolvedValueOnce(makeExecResult({ exitCode: 128, stderr: 'branch already exists' })) // checkout -b
       .mockResolvedValueOnce(makeExecResult({ exitCode: 0 }));                             // checkout
     const res = await POST(makeRequest({ issue_number: 3, issue_title: 'fix bug' }), {
@@ -136,6 +139,9 @@ describe('POST /api/projects/by-project/[projectName]/issue-branch', () => {
       .mockResolvedValueOnce(makeExecResult({ stdout: 'master\n' }))
       .mockResolvedValueOnce(makeExecResult({ stdout: 'refs/remotes/origin/master\n' }))
       .mockResolvedValueOnce(makeExecResult({ stdout: '  master\n' }))
+      .mockResolvedValueOnce(makeExecResult())
+      .mockResolvedValueOnce(makeExecResult({ stdout: 'abc123\n' }))
+      .mockResolvedValueOnce(makeExecResult({ exitCode: 128, stderr: 'cannot carry changes' }))
       .mockResolvedValueOnce(makeExecResult({ exitCode: 128, stderr: 'branch exists' }))
       .mockResolvedValueOnce(makeExecResult({ exitCode: 1, stderr: 'error' }));
     const res = await POST(makeRequest({ issue_number: 5 }), {

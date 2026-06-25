@@ -80,7 +80,26 @@ export async function ensureIssueBranch(opts: {
     };
   }
 
-  const createR = await exec('git', ['-C', projPath, 'checkout', '-b', branch], { timeout: 10000 });
+  // Base the new branch on the LATEST origin/<default>, not the local (possibly
+  // stale) default — cutting from a stale local default is the root cause of
+  // "PRs suddenly conflict even though only we touch the repo": the branch is
+  // born behind origin and overlapping changes on the advancing default pile up
+  // into a merge conflict by PR time. Fetch first and branch off origin/<default>;
+  // fall back to local HEAD when origin is unavailable (offline) or the working
+  // tree can't be carried cleanly onto fresh origin (the push/pr-behind path
+  // rebases later in that case).
+  await exec('git', ['-C', projPath, 'fetch', '--quiet', 'origin', defaultBranch], { timeout: 30000 }).catch(() => {});
+  const originDefaultRef = `origin/${defaultBranch}`;
+  const haveOriginDefault =
+    (await exec('git', ['-C', projPath, 'rev-parse', '--verify', '--quiet', originDefaultRef], { timeout: 5000 })).exitCode === 0;
+  let createR = haveOriginDefault
+    ? await exec('git', ['-C', projPath, 'checkout', '-b', branch, originDefaultRef], { timeout: 15000 })
+    : await exec('git', ['-C', projPath, 'checkout', '-b', branch], { timeout: 10000 });
+  if (createR.exitCode !== 0 && haveOriginDefault) {
+    // Couldn't base on fresh origin (e.g. local tree changes can't carry) — fall
+    // back to a plain create from local HEAD.
+    createR = await exec('git', ['-C', projPath, 'checkout', '-b', branch], { timeout: 10000 });
+  }
   if (createR.exitCode === 0) {
     clearProjectDataCache();
     return { status: 'created', branch };

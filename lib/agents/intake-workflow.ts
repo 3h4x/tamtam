@@ -606,6 +606,35 @@ async function startAgentStep(
     return;
   }
 
+  // Issue runs work on their OWN branch from the start, not on the default
+  // branch. Switch to fix/issue-<n> (cut fresh from origin/<default>) BEFORE the
+  // agent process spawns — otherwise the agent edits the default branch's working
+  // tree for the whole run and a concurrent release / another agent can sweep up
+  // its half-finished changes (the branch switch used to happen only at commit
+  // time, leaving issue work exposed on master mid-run). ensureIssueBranch is
+  // idempotent (already-on-branch → no-op, e.g. the issue-cruncher path that
+  // already checked out via pick_top), honours the project's issue_auto_branch
+  // opt-out, and on any failure we log and let the agent run on the current
+  // branch (the commit-time switch remains as the backstop).
+  if (job.ghIssueNumber != null) {
+    try {
+      const { ensureIssueBranch } = await import('@/lib/github/issue-branch');
+      const r = await ensureIssueBranch({
+        projectName: job.project,
+        projPath,
+        issueNumber: job.ghIssueNumber,
+        issueTitle: job.ghIssueTitle ?? '',
+      });
+      if (r.status === 'created' || r.status === 'reused') {
+        console.log(`[intake-workflow] ${jobId}: issue run isolated on branch ${r.branch} (${r.status}) before spawn`);
+      } else if (r.status === 'error' || r.status === 'pipeline-running') {
+        console.warn(`[intake-workflow] ${jobId}: issue-branch checkout not applied (${r.status}); agent runs on current branch`);
+      }
+    } catch (err) {
+      console.warn(`[intake-workflow] ${jobId}: ensureIssueBranch threw; agent runs on current branch:`, err);
+    }
+  }
+
   // Ensure the project's dev server is running for the duration of this
   // agent run (and any downstream release it triggers). Best-effort — log
   // and continue on failure so a flaky dev server start never blocks the

@@ -285,6 +285,31 @@ export async function POST(
     }, { status: 413 });
   }
 
+  // Issue runs work on their OWN branch from the start, not the default branch.
+  // Check out fix/issue-<n> (cut fresh from origin/<default>) BEFORE creating the
+  // job / spawning the agent, so its in-progress changes never sit exposed on the
+  // default branch mid-run where a concurrent release/agent could sweep them up
+  // (the commit-phase switch used to be the only branch point). ensureIssueBranch
+  // is idempotent, honours the project's issue_auto_branch opt-out, and on failure
+  // we log and let the run proceed on the current branch (commit-time switch is
+  // the backstop).
+  if (ghIssueNumber != null) {
+    try {
+      const { ensureIssueBranch } = await import('@/lib/github/issue-branch');
+      const branchResult = await ensureIssueBranch({
+        projectName,
+        projPath,
+        issueNumber: ghIssueNumber,
+        issueTitle: ghIssueTitle ?? '',
+      });
+      if (branchResult.status === 'error' || branchResult.status === 'pipeline-running') {
+        console.warn(`[run] ${projectName} issue-branch checkout not applied (${branchResult.status}); run proceeds on current branch`);
+      }
+    } catch (err) {
+      console.error('[run] ensureIssueBranch threw; run proceeds on current branch:', err);
+    }
+  }
+
   const job = createJob(projectName, 'run', 0, '', prompt, contextMeta || undefined, userPrompt || undefined, ghIssueNumber, ghIssueRepo || null, ghIssueTitle || null);
   job.provider = provider;
   job.model = model;

@@ -17,9 +17,7 @@ export function ErrorBanner({ message, onDismiss }: ErrorBannerProps) {
         preWrap={false}
         className="mb-4 flex items-center gap-3 !rounded-lg !border-status-error !p-4"
       >
-        {/* Plain U+26A0 (no VS16) renders as a text-style glyph, matching the
-            codebase's monochrome style instead of the colour-emoji default. */}
-        <span className="text-lg leading-none">⚠</span>
+        <span aria-hidden="true" className="shrink-0 font-semibold leading-none">⚠</span>
         <span>{message}</span>
         <Button
           variant="ghost"
