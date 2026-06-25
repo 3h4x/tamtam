@@ -4,6 +4,7 @@ import { useEffect, useRef, useState } from 'react'
 import { fetchSkillRevisions, revertSkill } from '@/lib/client-api'
 import type { Skill, SkillRevision } from '@/lib/client-api'
 import { Button } from '@/components/ui/Button'
+import { InlineLoading } from '@/components/ui/InlineLoading'
 import { Input } from '@/components/ui/Input'
 import { SegmentedControl } from '@/components/ui/SegmentedControl'
 import { Textarea } from '@/components/ui/Textarea'
@@ -223,7 +224,7 @@ export function SkillEditor({
       ) : (
         <div className="flex flex-col gap-3">
           {historyLoading ? (
-            <div className="text-sm text-text-secondary">Loading history…</div>
+            <InlineLoading label="Loading history…" />
           ) : revisions.length === 0 ? (
             <div className="text-sm text-text-secondary">No revisions recorded yet.</div>
           ) : revisions.map((revision) => {
