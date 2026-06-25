@@ -148,7 +148,6 @@ export function MonitoringPage() {
   const handleWindowChange = (w: TimeWindow) => {
     setWindow(w)
     setLoading(true)
-    fetch_(w)
   }
 
   const handleRefresh = () => {
