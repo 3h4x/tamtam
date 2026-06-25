@@ -4,6 +4,7 @@ import type { BrowserContext, Route } from '@playwright/test';
 const FIRST_PROJECT = 'workflow-runs-terminal-concurrent-success-mocked-first';
 const SECOND_PROJECT = 'workflow-runs-terminal-concurrent-success-mocked-second';
 const FIRST_RELEASE_ID = 'workflow-runs-terminal-concurrent-success-mocked-first-release';
+const SECOND_RELEASE_ID = 'workflow-runs-terminal-concurrent-success-mocked-second-release';
 const FIRST_RELEASE_OUTPUT = 'First mocked release finished while the second release kept running.';
 const SECOND_RELEASE_SUMMARY = 'Second mocked release finished after the first one already settled.';
 
@@ -112,6 +113,7 @@ async function stubSharedRoutes(
   context: BrowserContext,
   getWorkflowRuns: () => ReturnType<typeof workflowRun>[],
   getFirstJobs: () => Array<ReturnType<typeof runningReleaseJob> | ReturnType<typeof finishedReleaseJob>>,
+  getSecondJobs: () => Array<ReturnType<typeof runningReleaseJob> | ReturnType<typeof finishedReleaseJob>> = () => [],
 ): Promise<void> {
   await context.route('**/api/settings', (route: Route) =>
     route.fulfill({ json: { settings: { jobs_paused: 'false' }, github_owner: '' } }),
@@ -154,78 +156,86 @@ async function stubSharedRoutes(
     (route: Route) =>
       route.fulfill({ json: { jobs: [], total: 0, pendingReleaseProjects: [] } }),
   );
-  await context.route(
-    (url) => url.pathname === '/api/jobs' && url.searchParams.get('project') === FIRST_PROJECT,
-    (route: Route) =>
-      route.fulfill({
-        json: {
-          jobs: getFirstJobs(),
-          total: getFirstJobs().length,
-          pendingReleaseProjects: [],
-        },
-      }),
-  );
-  await context.route(
-    (url) => url.pathname === '/api/jobs/counts' && url.searchParams.get('project') === FIRST_PROJECT,
-    (route: Route) => {
-      const jobs = getFirstJobs();
-      const running = jobs.filter((job) => job.status === 'running').length;
-      const done = jobs.filter((job) => job.status === 'done').length;
-      route.fulfill({
-        json: {
-          total: jobs.length,
-          byKind: { release: jobs.length },
-          byStatus: { running, done, aborted: 0, failed: 0 },
-          tokens: { input: 0, output: 0, cacheRead: 0, cacheCreate: 0, total: 0 },
-          cost: { total: 0, monthToDate: 0 },
-        },
-      });
-    },
-  );
-  await context.route(
-    `**/api/projects/by-project/${FIRST_PROJECT}/config`,
-    (route: Route) => route.fulfill({ json: makeProjectConfig(FIRST_PROJECT) }),
-  );
-  await context.route(
-    `**/api/projects/by-project/${FIRST_PROJECT}/action`,
-    (route: Route) => route.fulfill({ json: { actions: [] } }),
-  );
-  await context.route(
-    `**/api/agents?project=${FIRST_PROJECT}`,
-    (route: Route) => route.fulfill({ json: { agents: [] } }),
-  );
-  await context.route(
-    `**/api/projects/by-project/${FIRST_PROJECT}/behind`,
-    (route: Route) => route.fulfill({ json: { behind: 0, ahead: 0 } }),
-  );
-  await context.route(
-    `**/api/projects/by-project/${FIRST_PROJECT}/branch`,
-    (route: Route) =>
-      route.fulfill({ json: { branch: 'master', defaultBranch: 'master', commitsAhead: null } }),
-  );
-  await context.route(
-    (url) =>
-      url.pathname === `/api/projects/by-project/${FIRST_PROJECT}/issues` &&
-      url.searchParams.get('summary') === '1',
-    (route: Route) =>
-      route.fulfill({
-        json: {
-          repo: '',
-          prCount: 0,
-          issueCount: 0,
-          openPrBranches: [],
-          error: null,
-          cached: false,
-          cachedAt: now(),
-        },
-      }),
-  );
-  await context.route(
-    (url) =>
-      url.pathname === `/api/projects/by-project/${FIRST_PROJECT}/issues` &&
-      url.searchParams.get('summary') !== '1',
-    (route: Route) => route.fulfill({ json: { prs: [], issues: [] } }),
-  );
+  const stubProjectRoutes = async (
+    project: string,
+    getJobs: () => Array<ReturnType<typeof runningReleaseJob> | ReturnType<typeof finishedReleaseJob>>,
+  ) => {
+    await context.route(
+      (url) => url.pathname === '/api/jobs' && url.searchParams.get('project') === project,
+      (route: Route) =>
+        route.fulfill({
+          json: {
+            jobs: getJobs(),
+            total: getJobs().length,
+            pendingReleaseProjects: [],
+          },
+        }),
+    );
+    await context.route(
+      (url) => url.pathname === '/api/jobs/counts' && url.searchParams.get('project') === project,
+      (route: Route) => {
+        const jobs = getJobs();
+        const running = jobs.filter((job) => job.status === 'running').length;
+        const done = jobs.filter((job) => job.status === 'done').length;
+        route.fulfill({
+          json: {
+            total: jobs.length,
+            byKind: { release: jobs.length },
+            byStatus: { running, done, aborted: 0, failed: 0 },
+            tokens: { input: 0, output: 0, cacheRead: 0, cacheCreate: 0, total: 0 },
+            cost: { total: 0, monthToDate: 0 },
+          },
+        });
+      },
+    );
+    await context.route(
+      `**/api/projects/by-project/${project}/config`,
+      (route: Route) => route.fulfill({ json: makeProjectConfig(project) }),
+    );
+    await context.route(
+      `**/api/projects/by-project/${project}/action`,
+      (route: Route) => route.fulfill({ json: { actions: [] } }),
+    );
+    await context.route(
+      `**/api/agents?project=${project}`,
+      (route: Route) => route.fulfill({ json: { agents: [] } }),
+    );
+    await context.route(
+      `**/api/projects/by-project/${project}/behind`,
+      (route: Route) => route.fulfill({ json: { behind: 0, ahead: 0 } }),
+    );
+    await context.route(
+      `**/api/projects/by-project/${project}/branch`,
+      (route: Route) =>
+        route.fulfill({ json: { branch: 'master', defaultBranch: 'master', commitsAhead: null } }),
+    );
+    await context.route(
+      (url) =>
+        url.pathname === `/api/projects/by-project/${project}/issues` &&
+        url.searchParams.get('summary') === '1',
+      (route: Route) =>
+        route.fulfill({
+          json: {
+            repo: '',
+            prCount: 0,
+            issueCount: 0,
+            openPrBranches: [],
+            error: null,
+            cached: false,
+            cachedAt: now(),
+          },
+        }),
+    );
+    await context.route(
+      (url) =>
+        url.pathname === `/api/projects/by-project/${project}/issues` &&
+        url.searchParams.get('summary') !== '1',
+      (route: Route) => route.fulfill({ json: { prs: [], issues: [] } }),
+    );
+  };
+
+  await stubProjectRoutes(FIRST_PROJECT, getFirstJobs);
+  await stubProjectRoutes(SECOND_PROJECT, getSecondJobs);
 }
 
 test.describe('Mocked workflow-runs and terminal concurrent success lifecycle', () => {
@@ -368,5 +378,172 @@ test.describe('Mocked workflow-runs and terminal concurrent success lifecycle', 
     });
     await expect(completedSecondRow.getByText('LGTM')).toBeVisible({ timeout: 12_000 });
     await expect(page.getByText('1 running')).toHaveCount(0, { timeout: 12_000 });
+  });
+
+  test('separate terminal pages keep concurrent releases isolated until each one settles', async ({
+    page,
+  }) => {
+    let phase: 'idle' | 'both-running' | 'first-done' | 'all-done' = 'idle';
+    let finishFirstStream!: () => void;
+    let finishSecondStream!: () => void;
+    const firstStreamDone = new Promise<void>((resolve) => {
+      finishFirstStream = resolve;
+    });
+    const secondStreamDone = new Promise<void>((resolve) => {
+      finishSecondStream = resolve;
+    });
+
+    await stubSharedRoutes(
+      page.context(),
+      () => {
+        if (phase === 'idle') return [];
+        if (phase === 'both-running') {
+          return [
+            workflowRun(FIRST_PROJECT, 'running'),
+            workflowRun(SECOND_PROJECT, 'running'),
+          ];
+        }
+        if (phase === 'first-done') {
+          return [
+            workflowRun(FIRST_PROJECT, 'completed', { verdict: 'LGTM' }),
+            workflowRun(SECOND_PROJECT, 'running'),
+          ];
+        }
+        return [
+          workflowRun(FIRST_PROJECT, 'completed', { verdict: 'LGTM' }),
+          workflowRun(SECOND_PROJECT, 'completed', {
+            verdict: 'LGTM',
+            summary: SECOND_RELEASE_SUMMARY,
+          }),
+        ];
+      },
+      () => {
+        if (phase === 'both-running') {
+          return [
+            runningReleaseJob(FIRST_PROJECT, FIRST_RELEASE_ID, now() - 10, 'First release still running.'),
+          ];
+        }
+        if (phase === 'first-done' || phase === 'all-done') {
+          return [finishedReleaseJob(FIRST_PROJECT, FIRST_RELEASE_ID, `${FIRST_RELEASE_OUTPUT}\n`)];
+        }
+        return [];
+      },
+      () => {
+        if (phase === 'both-running' || phase === 'first-done') {
+          return [
+            runningReleaseJob(SECOND_PROJECT, SECOND_RELEASE_ID, now() - 12, 'Second release still running.'),
+          ];
+        }
+        if (phase === 'all-done') {
+          return [finishedReleaseJob(SECOND_PROJECT, SECOND_RELEASE_ID, `${SECOND_RELEASE_SUMMARY}\n`)];
+        }
+        return [];
+      },
+    );
+
+    await page.context().route(`**/api/jobs/${FIRST_RELEASE_ID}`, (route: Route) =>
+      route.fulfill({
+        json:
+          phase === 'both-running'
+            ? runningReleaseJob(FIRST_PROJECT, FIRST_RELEASE_ID, now() - 10, 'First release still running.')
+            : finishedReleaseJob(FIRST_PROJECT, FIRST_RELEASE_ID, `${FIRST_RELEASE_OUTPUT}\n`),
+      }),
+    );
+    await page.context().route(`**/api/jobs/${SECOND_RELEASE_ID}`, (route: Route) =>
+      route.fulfill({
+        json:
+          phase === 'all-done'
+            ? finishedReleaseJob(SECOND_PROJECT, SECOND_RELEASE_ID, `${SECOND_RELEASE_SUMMARY}\n`)
+            : runningReleaseJob(SECOND_PROJECT, SECOND_RELEASE_ID, now() - 12, 'Second release still running.'),
+      }),
+    );
+    await page.context().route(`**/api/streaming/${FIRST_RELEASE_ID}`, async (route: Route) => {
+      await firstStreamDone;
+      await route.fulfill({
+        status: 200,
+        headers: {
+          'content-type': 'text/event-stream',
+          'cache-control': 'no-cache',
+        },
+        body: [
+          `data: ${FIRST_RELEASE_OUTPUT}`,
+          '',
+          'event: done',
+          `data: ${JSON.stringify({
+            exitCode: 0,
+            provider: 'claude',
+            duration: 1200,
+          })}`,
+          '',
+        ].join('\n'),
+      });
+    });
+    await page.context().route(`**/api/streaming/${SECOND_RELEASE_ID}`, async (route: Route) => {
+      await secondStreamDone;
+      await route.fulfill({
+        status: 200,
+        headers: {
+          'content-type': 'text/event-stream',
+          'cache-control': 'no-cache',
+        },
+        body: [
+          `data: ${SECOND_RELEASE_SUMMARY}`,
+          '',
+          'event: done',
+          `data: ${JSON.stringify({
+            exitCode: 0,
+            provider: 'claude',
+            duration: 1500,
+          })}`,
+          '',
+        ].join('\n'),
+      });
+    });
+
+    const firstTerminalPage = await page.context().newPage();
+    const secondTerminalPage = await page.context().newPage();
+    await Promise.all([
+      page.goto('/workflow-runs'),
+      firstTerminalPage.goto(`/project/${FIRST_PROJECT}/terminal`),
+      secondTerminalPage.goto(`/project/${SECOND_PROJECT}/terminal`),
+    ]);
+
+    phase = 'both-running';
+
+    await expect(page.getByText('2 running')).toBeVisible({ timeout: 12_000 });
+    await expect(firstTerminalPage.getByLabel('live run spinner')).toBeVisible({ timeout: 12_000 });
+    await expect(secondTerminalPage.getByLabel('live run spinner')).toBeVisible({ timeout: 12_000 });
+
+    phase = 'first-done';
+    finishFirstStream();
+
+    await expect(firstTerminalPage.getByText(FIRST_RELEASE_OUTPUT)).toBeVisible({ timeout: 12_000 });
+    await expect(firstTerminalPage.getByText('exit 0 — ok').first()).toBeVisible({ timeout: 12_000 });
+    await expect(firstTerminalPage.getByLabel('live run spinner')).toHaveCount(0, {
+      timeout: 12_000,
+    });
+    await expect(secondTerminalPage.getByLabel('live run spinner')).toBeVisible({ timeout: 12_000 });
+    await expect(secondTerminalPage.getByText('live run')).toBeVisible({ timeout: 12_000 });
+    await expect(page.getByText('1 running')).toBeVisible({ timeout: 12_000 });
+    await expect(page.getByRole('button', { name: /completed 1/i })).toBeVisible({
+      timeout: 12_000,
+    });
+
+    phase = 'all-done';
+    finishSecondStream();
+
+    await expect(secondTerminalPage.getByText(SECOND_RELEASE_SUMMARY)).toBeVisible({
+      timeout: 12_000,
+    });
+    await expect(secondTerminalPage.getByText('exit 0 — ok').first()).toBeVisible({
+      timeout: 12_000,
+    });
+    await expect(secondTerminalPage.getByLabel('live run spinner')).toHaveCount(0, {
+      timeout: 12_000,
+    });
+    await expect(page.getByText('1 running')).toHaveCount(0, { timeout: 12_000 });
+    await expect(page.getByRole('button', { name: /completed 2/i })).toBeVisible({
+      timeout: 12_000,
+    });
   });
 });
