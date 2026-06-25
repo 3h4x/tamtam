@@ -100,6 +100,12 @@ export interface TamTamConfig {
   /** Consecutive no-diff scheduled runs required before auto-pausing a caught-up
    *  project. */
   auto_pause_unfruitful_runs: number;
+  /** Fruitful-rate floor (0–1) for the rate-based auto-pause trigger: a project
+   *  whose recent scheduled runs change code in less than this fraction (over a
+   *  wider sample) is paused even without an unbroken all-no-diff window. Catches
+   *  "grinds mostly nothing" projects the strict caught-up check misses. 0
+   *  disables the rate trigger, leaving only the caught-up path. */
+  auto_pause_unfruitful_rate: number;
   /** Max consecutive reinforce re-runs per project before releasing whatever
    *  exists. 0 = unlimited (relies on the no-progress exit). */
   release_reinforce_max_iterations: number;
@@ -124,6 +130,7 @@ export interface TamTamConfig {
   notification_on_review_do_not_ship: boolean;
   notification_on_agent_run_fail: boolean;
   notification_on_post_merge_revert: boolean;
+  notification_on_flaky_test_detected: boolean;
   notification_throttle_window_seconds: number;
   notification_throttle_overrides: Record<string, number>;
   pipeline_model_review: string;
@@ -238,6 +245,7 @@ export const DEFAULTS: TamTamConfig = {
   release_min_lines: 0,
   auto_pause_unfruitful_enabled: true,
   auto_pause_unfruitful_runs: 6,
+  auto_pause_unfruitful_rate: 0.2,
   release_reinforce_max_iterations: 3,
   // Base for exponential backoff between fix dispatches (review→fix and
   // push→fix). 30s base means iteration 4 waits 30s, iter 5 60s, iter 6 120s,
@@ -263,6 +271,7 @@ export const DEFAULTS: TamTamConfig = {
   notification_on_review_do_not_ship: false,
   notification_on_agent_run_fail: false,
   notification_on_post_merge_revert: false,
+  notification_on_flaky_test_detected: false,
   notification_throttle_window_seconds: 900,
   notification_throttle_overrides: { release_fail: 0, release_aborted: 0 },
   // Empty string = use the per-step sensible default (review → workspace
@@ -512,6 +521,10 @@ export function buildConfigFromSettingsMap(map: Record<string, string>): TamTamC
       ? DEFAULTS.auto_pause_unfruitful_enabled
       : map.auto_pause_unfruitful_enabled === 'true',
     auto_pause_unfruitful_runs: parseNonNegativeIntOr(map.auto_pause_unfruitful_runs, DEFAULTS.auto_pause_unfruitful_runs),
+    auto_pause_unfruitful_rate: (() => {
+      const v = parseFloat(map.auto_pause_unfruitful_rate ?? '');
+      return Number.isFinite(v) && v >= 0 && v <= 1 ? v : DEFAULTS.auto_pause_unfruitful_rate;
+    })(),
     release_reinforce_max_iterations: parseNonNegativeIntOr(
       map.release_reinforce_max_iterations,
       DEFAULTS.release_reinforce_max_iterations,
@@ -548,6 +561,7 @@ export function buildConfigFromSettingsMap(map: Record<string, string>): TamTamC
     notification_on_review_do_not_ship: map.notification_on_review_do_not_ship === 'true',
     notification_on_agent_run_fail: map.notification_on_agent_run_fail === 'true',
     notification_on_post_merge_revert: map.notification_on_post_merge_revert === 'true',
+    notification_on_flaky_test_detected: map.notification_on_flaky_test_detected === 'true',
     notification_throttle_window_seconds: parseIntOr(
       map.notification_throttle_window_seconds,
       DEFAULTS.notification_throttle_window_seconds

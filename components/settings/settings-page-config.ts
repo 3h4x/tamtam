@@ -42,6 +42,7 @@ export interface SettingsMap {
   release_min_lines: string
   auto_pause_unfruitful_enabled: string
   auto_pause_unfruitful_runs: string
+  auto_pause_unfruitful_rate: string
   release_reinforce_max_iterations: string
   review_fix_backoff_seconds: string
   review_do_not_ship_action: string
@@ -159,6 +160,7 @@ export const SETTINGS_DEFAULTS: SettingsMap = {
   agent_autopilot_enabled: 'true',
   auto_pause_unfruitful_enabled: 'true',
   auto_pause_unfruitful_runs: '6',
+  auto_pause_unfruitful_rate: '0.2',
   initiative_engine_enabled: 'false',
   initiative_mining_enabled: 'true',
   initiative_dispatch_enabled: 'true',

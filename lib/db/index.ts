@@ -11,7 +11,13 @@ if (!connectionString) {
 // instead of handing out dead sockets and hanging every query forever.
 export const pool = new Pool({
   connectionString,
-  max: 10,
+  // Concurrent DB pressure (orchestrator tick + health-analysis + fruitfulness
+  // queries + agent runs + releases + probe sweep) can saturate a small pool and
+  // surface as "timeout exceeded when trying to connect" — which intermittently
+  // breaks the tick and release dispatch. Postgres allows 100 connections and
+  // steady-state usage sits near ~20 across realms, so 20 per pool leaves ample
+  // headroom while absorbing load spikes.
+  max: 20,
   connectionTimeoutMillis: 5_000, // cap the wait for a connection; don't block requests indefinitely
   idleTimeoutMillis: 30_000, // recycle idle clients so stale/dead sockets get dropped
   keepAlive: true, // TCP keepalive surfaces a dropped peer quickly

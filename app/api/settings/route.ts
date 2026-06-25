@@ -139,6 +139,7 @@ async function buildSettingsResponse(): Promise<Record<string, string>> {
   settings.release_min_lines = serializeSettingValue('release_min_lines', effective.release_min_lines);
   settings.auto_pause_unfruitful_enabled = serializeSettingValue('auto_pause_unfruitful_enabled', effective.auto_pause_unfruitful_enabled);
   settings.auto_pause_unfruitful_runs = serializeSettingValue('auto_pause_unfruitful_runs', effective.auto_pause_unfruitful_runs);
+  settings.auto_pause_unfruitful_rate = serializeSettingValue('auto_pause_unfruitful_rate', effective.auto_pause_unfruitful_rate);
   settings.release_reinforce_max_iterations = serializeSettingValue('release_reinforce_max_iterations', effective.release_reinforce_max_iterations);
   settings.review_do_not_ship_action = serializeSettingValue('review_do_not_ship_action', effective.review_do_not_ship_action);
   settings.release_wall_clock_timeout_minutes = serializeSettingValue('release_wall_clock_timeout_minutes', effective.release_wall_clock_timeout_minutes);
@@ -196,6 +197,7 @@ const SETTING_KEYS = [
   'release_min_lines',
   'auto_pause_unfruitful_enabled',
   'auto_pause_unfruitful_runs',
+  'auto_pause_unfruitful_rate',
   'release_reinforce_max_iterations',
   'review_fix_backoff_seconds',
   'review_do_not_ship_action',
@@ -225,6 +227,7 @@ const SETTING_KEYS = [
   'notification_on_review_do_not_ship',
   'notification_on_agent_run_fail',
   'notification_on_budget_blocked',
+  'notification_on_flaky_test_detected',
   'notification_throttle_window_seconds',
   'notification_throttle_overrides',
   'budget_block_runs_enabled',
@@ -392,6 +395,10 @@ function validateAndSerializeSettingValue(
   if (key === 'auto_pause_unfruitful_runs') {
     // 0 pauses immediately on the first caught-up no-diff scheduled run.
     return parseNonNegativeIntegerSetting(value, key);
+  }
+  if (key === 'auto_pause_unfruitful_rate') {
+    // Fruitful-rate floor (0–1) for the rate-based auto-pause; 0 disables it.
+    return parseUnitFloatSetting(value, key);
   }
   if (key === 'release_reinforce_max_iterations') {
     // 0 = unlimited (no-progress exit terminates); otherwise the max

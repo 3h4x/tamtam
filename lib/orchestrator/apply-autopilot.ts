@@ -18,6 +18,11 @@ import { resolveProjectPath } from '@/lib/shared/project-data';
 import { parseAgentRole } from '@/lib/agents/roles';
 import { normalizeModelInput } from '@/lib/agents/model-aliases';
 import { upsertRecommendation } from '@/lib/recommendations/recommendations';
+import { loadAllAgentFruitfulness } from '@/lib/agents/fruitfulness';
+import {
+  UNFRUITFUL_MIN_SAMPLE,
+  UNFRUITFUL_RATE_THRESHOLD,
+} from '@/lib/orchestrator/budget-allocator';
 import type { HealthAnalysisOutcome } from '@/lib/orchestrator/agent-health-analysis';
 import {
   decideAutopilot,
@@ -140,14 +145,32 @@ export async function applyAutopilot(
 
   const agents = await loadAnalyzedAgents(outcomes.map((o) => o.agentId));
 
+  // Attach the same per-agent fruitfulness signal the boost allocator uses, so a
+  // persistently unproductive producer is cadence-throttled even when the LLM
+  // never raises a loop/noise verdict. Best-effort: on a load failure the
+  // autopilot just falls back to the verdict-only behavior.
+  let fruitfulness = new Map<string, { rate: number; runs: number }>();
+  try {
+    const stats = await loadAllAgentFruitfulness({});
+    for (const [id, s] of stats) fruitfulness.set(id, { rate: s.rate, runs: s.runs });
+  } catch (err) {
+    console.warn('[autopilot] fruitfulness load failed; verdict-only this tick:', err);
+  }
+  const agentsWithFruitfulness = agents.map((a) => ({
+    ...a,
+    fruitfulness: fruitfulness.get(a.id) ?? null,
+  }));
+
   const decisions = decideAutopilot({
-    agents,
+    agents: agentsWithFruitfulness,
     outcomes,
     settings: {
       cadenceFloor: settings.agent_autopilot_cadence_floor,
       tierFloor: settings.agent_autopilot_tier_floor,
       idleStreak: settings.agent_autopilot_idle_streak,
       concernStreak: settings.agent_autopilot_concern_streak,
+      unfruitfulRate: UNFRUITFUL_RATE_THRESHOLD,
+      unfruitfulMinSample: UNFRUITFUL_MIN_SAMPLE,
     },
   });
 

@@ -16,6 +16,7 @@ describe('GET /settings', () => {
         release_min_lines: '0',
         auto_pause_unfruitful_enabled: 'true',
         auto_pause_unfruitful_runs: '6',
+        auto_pause_unfruitful_rate: '0.2',
         release_reinforce_max_iterations: '3',
         review_do_not_ship_action: 'fix',
         release_wall_clock_timeout_minutes: '60',

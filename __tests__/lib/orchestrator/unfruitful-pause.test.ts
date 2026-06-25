@@ -4,6 +4,8 @@ import {
   runProducedNoDiff,
   runIsCaughtUp,
   isProjectCaughtUpUnfruitful,
+  isProjectPersistentlyUnfruitful,
+  unfruitfulRateSample,
   recentScheduledAgentRuns,
   autoPauseUnfruitfulProjects,
 } from '@/lib/orchestrator/unfruitful-pause';
@@ -82,6 +84,53 @@ describe('isProjectCaughtUpUnfruitful', () => {
   });
 });
 
+describe('isProjectPersistentlyUnfruitful', () => {
+  const noDiffCaughtUp = run({ linesAdded: 0, linesRemoved: 0, workSummary: CAUGHT_UP });
+  const noDiffFail = run({ linesAdded: 0, linesRemoved: 0, exitCode: -1, workSummary: null });
+  const fruitful = run({ linesAdded: 10, workSummary: 'did work' });
+  // 10-run window: 1 fruitful, 9 no-diff (one caught up) = 10% < 20% floor.
+  const lowRateWindow = [fruitful, ...Array(9).fill(noDiffCaughtUp)] as JobData[];
+
+  it('pauses on a low fruitful rate over the sample even without an all-no-diff window', () => {
+    expect(isProjectPersistentlyUnfruitful(lowRateWindow, 10, 0.2)).toBe(true);
+    // The strict caught-up check rejects it (a fruitful run is in the window).
+    expect(isProjectCaughtUpUnfruitful(lowRateWindow, 10)).toBe(false);
+  });
+  it('does not pause when the rate is at/above the floor', () => {
+    // 3 fruitful of 10 = 30% >= 20%.
+    const ok = [fruitful, fruitful, fruitful, ...Array(7).fill(noDiffCaughtUp)] as JobData[];
+    expect(isProjectPersistentlyUnfruitful(ok, 10, 0.2)).toBe(false);
+  });
+  it('does not pause with fewer runs than the sample', () => {
+    expect(isProjectPersistentlyUnfruitful([noDiffCaughtUp, noDiffCaughtUp], 10, 0.2)).toBe(false);
+  });
+  it('does not pause a low-rate window that is only crashing (no clean run)', () => {
+    const allFail = Array(10).fill(noDiffFail) as JobData[];
+    expect(isProjectPersistentlyUnfruitful(allFail, 10, 0.2)).toBe(false);
+  });
+  it('rateThreshold 0 disables the rate trigger', () => {
+    expect(isProjectPersistentlyUnfruitful(lowRateWindow, 10, 0)).toBe(false);
+  });
+  it('counts a run that touches files but moves zero lines as unproductive (0-line no-op churn)', () => {
+    // Agent re-touches the same file every run but the net line delta is 0 —
+    // looks "fruitful" to runProducedNoDiff (files set) but lands nothing.
+    const fileTouchNoLines = run({
+      linesAdded: 0,
+      linesRemoved: 0,
+      modifiedFiles: '[{"path":"app/x/page.tsx"}]',
+      exitCode: 0,
+      workSummary: 'rewrote page',
+    });
+    const realChange = run({ linesAdded: 12, modifiedFiles: '[{"path":"app/y.ts"}]' });
+    const window = [realChange, ...Array(11).fill(fileTouchNoLines)] as JobData[]; // 1/12 line-fruitful
+    expect(isProjectPersistentlyUnfruitful(window, 12, 0.2)).toBe(true);
+  });
+  it('unfruitfulRateSample widens the window past the strict threshold', () => {
+    expect(unfruitfulRateSample(3)).toBe(10);
+    expect(unfruitfulRateSample(8)).toBe(16);
+  });
+});
+
 describe('recentScheduledAgentRuns', () => {
   it('filters to finished scheduled agent runs for the project, newest-first', () => {
     const jobs = [
@@ -105,6 +154,7 @@ describe('autoPauseUnfruitfulProjects', () => {
   const baseDeps = (over: Record<string, unknown> = {}) => ({
     enabled: true,
     threshold: 3,
+    rateThreshold: 0.2,
     listJobs: () => [caughtUp, caughtUp, caughtUp] as JobData[],
     isAgentJobKind: (k: unknown) => String(k).startsWith('agent:'),
     listProjects: () => [{ name: 'bonker', paused: false }],
@@ -120,6 +170,26 @@ describe('autoPauseUnfruitfulProjects', () => {
     expect(res.paused).toEqual(['bonker']);
     expect(deps.pauseProject).toHaveBeenCalledWith('bonker');
     expect(deps.recommend).toHaveBeenCalledTimes(1);
+  });
+
+  it('pauses a persistently-unfruitful project (low rate, interspersed diffs) with a rate-reason recommendation', async () => {
+    const oneFruitful = run({ linesAdded: 8, workSummary: 'did a thing' });
+    // 10 scheduled runs, 1 fruitful = 10% < 20% floor; no all-no-diff window.
+    const jobs = [oneFruitful, ...Array(9).fill(caughtUp)] as JobData[];
+    const recommend = vi.fn().mockResolvedValue(undefined);
+    const deps = baseDeps({ listJobs: () => jobs, recommend });
+    const res = await autoPauseUnfruitfulProjects(deps as never);
+    expect(res.paused).toEqual(['bonker']);
+    expect(recommend).toHaveBeenCalledTimes(1);
+    expect(recommend.mock.calls[0][0].title).toMatch(/persistently unfruitful/i);
+  });
+
+  it('does not pause a project at/above the rate floor', async () => {
+    const fruitful = run({ linesAdded: 8 });
+    const jobs = [fruitful, fruitful, fruitful, ...Array(7).fill(caughtUp)] as JobData[]; // 30%
+    const deps = baseDeps({ listJobs: () => jobs });
+    const res = await autoPauseUnfruitfulProjects(deps as never);
+    expect(res.paused).toEqual([]);
   });
 
   it('does not count manual agent runs toward the auto-pause threshold', async () => {

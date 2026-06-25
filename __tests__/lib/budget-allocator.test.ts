@@ -304,7 +304,7 @@ describe('decideBoosts', () => {
       expect(r[0].agentId).toBe('a-good');
     });
 
-    it('still picks an unfruitful agent when it is the only candidate', () => {
+    it('does NOT boost an unfruitful agent even when it is the only candidate', () => {
       const r = decideBoosts(makeInput({
         pace: { status: 'under_pace', marginPct: 5 },
         agents: [
@@ -316,10 +316,10 @@ describe('decideBoosts', () => {
           }),
         ],
       }));
-      // Tier-2 fallback fires when tier-1 is empty — better to keep some
-      // forward progress than waste pace headroom entirely.
-      expect(r).toHaveLength(1);
-      expect(r[0].agentId).toBe('a-stuck');
+      // Unfruitful agents are excluded from boosts entirely — a bonus fire of an
+      // agent that never produces anything is pure token waste. A project whose
+      // only candidate is unfruitful simply gets no boost.
+      expect(r).toHaveLength(0);
     });
 
     it('does not demote agents below the minimum sample size', () => {
@@ -393,7 +393,7 @@ describe('decideBoosts', () => {
       expect(r[0].agentId).toBe('a-borderline');
     });
 
-    it('still demotes when slack lets multiple picks fire', () => {
+    it('excludes the unfruitful agent even when slack lets multiple picks fire', () => {
       const r = decideBoosts(makeInput({
         pace: { status: 'under_pace', marginPct: 25 },
         settings: { marginPct: 5, maxBoostsPerHour: 5 },
@@ -403,8 +403,9 @@ describe('decideBoosts', () => {
           makeAgent({ id: 'a-good-2', name: 'g2', lastDispatchMs: NOW - 30 * 60 * 1000, fruitfulness: { rate: 0.5, runs: 10 } }),
         ],
       }));
-      // slack=20 → desiredPicks=3; tier order is g1, g2, then stuck.
-      expect(r.map((d) => d.agentId)).toEqual(['a-good-1', 'a-good-2', 'a-stuck']);
+      // slack=20 → desiredPicks=3, but the unfruitful agent is never boosted, so
+      // only the two healthy agents fire.
+      expect(r.map((d) => d.agentId)).toEqual(['a-good-1', 'a-good-2']);
     });
   });
 });

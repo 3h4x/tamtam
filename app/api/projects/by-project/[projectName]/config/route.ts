@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { writeProjectFieldYaml, getProjectTestConfig, getProjectPushResult, getProjectPipelinePrompts } from '@/lib/scheduling/scheduling';
+import { writeProjectFieldYaml, getProjectTestConfig, getProjectPushResult, getProjectPipelinePrompts, setProjectQuarantinedTests } from '@/lib/scheduling/scheduling';
 import { db, schema } from '@/lib/db';
 import { eq } from 'drizzle-orm';
 import { resolveProjectPath, clearProjectDataCache } from '@/lib/shared/project-data';
@@ -75,6 +75,7 @@ export async function GET(
     effective_test_command: fileConfig?.test_command ?? testCfg?.testCommand ?? detectedTestCmd ?? '',
     test_cron_enabled: testCfg?.testCronEnabled ?? false,
     test_cron_schedule: testCfg?.testCronSchedule ?? '',
+    quarantined_tests: testCfg?.quarantinedTests ?? [],
     auto_commit_enabled: testCfg?.autoCommitEnabled ?? false,
     auto_push_enabled: testCfg?.autoPushEnabled ?? false,
     auto_pr_merge_enabled: testCfg?.autoPrMergeEnabled ?? false,
@@ -176,6 +177,17 @@ export async function PATCH(
       }
     }
     dbUpdates.push({ field: 'test_cron_schedule', value });
+  }
+
+  if (body.quarantined_tests !== undefined) {
+    if (!Array.isArray(body.quarantined_tests) || body.quarantined_tests.some((value) => typeof value !== 'string')) {
+      return badRequest('quarantined_tests must be an array of strings');
+    }
+    touched = true;
+    const normalized = body.quarantined_tests
+      .map((value) => value.trim())
+      .filter(Boolean);
+    await setProjectQuarantinedTests(projectName, normalized);
   }
 
   // Workflow flags are intentionally DB-only — each developer opts in

@@ -324,6 +324,21 @@ export const jobResourceSamples = pgTable('job_resource_samples', {
   jobIdSampledAtIdx: index('job_resource_samples_job_sampled').on(t.jobId, t.sampledAt),
 }));
 
+export const testRuns = pgTable('test_runs', {
+  id: serial('id').primaryKey(),
+  project: text('project').notNull(),
+  jobId: text('job_id').notNull(),
+  testId: text('test_id').notNull(),
+  framework: text('framework').notNull(),
+  commitSha: text('commit_sha'),
+  status: text('status').notNull(),
+  firstSeenAt: doublePrecision('first_seen_at').notNull(),
+  finishedAt: doublePrecision('finished_at').notNull(),
+}, (t) => ({
+  projectTestIdx: index('test_runs_project_test').on(t.project, t.testId, t.finishedAt),
+  jobIdx: index('test_runs_job').on(t.jobId),
+}));
+
 // Durable pipeline-lock-released log. Written from releaseLock /
 // selfHealStaleLock when a project's lock is dropped. A consumer
 // (probe-sweep / workflow) reads unconsumed rows and drains
