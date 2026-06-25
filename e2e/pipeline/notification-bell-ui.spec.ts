@@ -306,7 +306,7 @@ test.describe('NotificationBell', () => {
   // failure and a NEWER green remediation step collapses to a single entry,
   // and the attention job stays sticky — it wins over the newer success so an
   // unsuperseded failure remains visible. Exercises collapseFinishedJobs's
-  // `attentionJob` branch (NotificationBell.tsx). Previously only unit-tested.
+  // `attentionJob` branch (NotificationBell.tsx).
   // -------------------------------------------------------------------------
   test('keeps the older attention job visible over a newer green step for the same project', async ({
     page,
