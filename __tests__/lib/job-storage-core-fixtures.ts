@@ -46,7 +46,8 @@ export async function applyJobStorageDdl(handle: TestDbHandle): Promise<void> {
       lines_added integer,
       lines_removed integer,
       provider text,
-      run_score integer
+      run_score integer,
+      skill_ids text NOT NULL DEFAULT '[]'
     )
   `));
   await handle.db.execute(sql.raw(`
@@ -178,6 +179,7 @@ export async function syncCacheFromDb(handle: TestDbHandle): Promise<void> {
       linesRemoved: row.linesRemoved ?? null,
       provider: row.provider ?? null,
       runScore: row.runScore ?? null,
+      skillIds: row.skillIds ?? '[]',
     });
   }
 }
@@ -200,6 +202,7 @@ export function makeJobData(overrides: Partial<JobData> = {}): JobData {
     cacheReadTokens: null,
     cacheCreateTokens: null,
     sessionId: null,
+    skillIds: '[]',
     ...overrides,
   };
 }

@@ -1,0 +1,1 @@
+ALTER TABLE "jobs" ADD COLUMN IF NOT EXISTS "skill_ids" text NOT NULL DEFAULT '[]';

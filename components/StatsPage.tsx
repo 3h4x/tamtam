@@ -2,7 +2,7 @@
 
 import { useEffect, useState, useCallback, useMemo } from 'react'
 import Link from 'next/link'
-import type { UsageResponse, ProjectUsageRow, AgentUsageRow } from '@/app/api/stats/usage/route'
+import type { UsageResponse, ProjectUsageRow, AgentUsageRow, SkillUsageRow } from '@/app/api/stats/usage/route'
 import type { OllamaStatsResponse } from '@/app/api/stats/ollama/route'
 import { ErrorState } from './ErrorState'
 import { OllamaUsageCard } from './OllamaUsageCard'
@@ -261,6 +261,7 @@ export function StatsPage() {
 
   const topAgents = data.agents.slice(0, 5)
   const topAgentMaxCost = data.agents[0]?.costUsd ?? 1
+  const skillRows = data.skills ?? []
 
   return (
     <div className="w-full space-y-5">
@@ -448,6 +449,85 @@ export function StatsPage() {
           />
         </div>
       )}
+
+      <div className="rounded-lg border border-border bg-bg-secondary overflow-hidden">
+        <div className="px-4 py-3 border-b border-border bg-bg-tertiary">
+          <h2 className="text-sm font-medium text-text-primary">By skill</h2>
+          <p className="text-xs text-text-tertiary mt-0.5">Estimated prompt and cache-read cost attributed by skill prompt length</p>
+        </div>
+        <Table<SkillUsageRow>
+          className="rounded-none border-0"
+          defaultSortKey="cost"
+          defaultSortDir="desc"
+          columns={[
+            {
+              key: 'skill',
+              label: 'Skill',
+              sortable: true,
+              sortValue: (r) => r.skill,
+              initialSortDir: 'asc',
+              render: (r) => (
+                <span className="font-medium text-text-primary" title={r.skillId}>
+                  {r.skill}
+                </span>
+              ),
+            },
+            {
+              key: 'runs',
+              label: 'Runs',
+              sortable: true,
+              sortValue: (r) => r.runs,
+              initialSortDir: 'desc',
+              headerClass: 'text-right',
+              cellClass: 'text-right tabular-nums text-text-secondary',
+              render: (r) => r.runs.toLocaleString(),
+            },
+            {
+              key: 'prompt',
+              label: 'Est. prompt tokens',
+              sortable: true,
+              sortValue: (r) => r.promptTokens,
+              initialSortDir: 'desc',
+              headerClass: 'text-right',
+              cellClass: 'text-right tabular-nums text-text-secondary',
+              render: (r) => fmtTokens(r.promptTokens),
+            },
+            {
+              key: 'cache',
+              label: 'Est. cache-read tokens',
+              sortable: true,
+              sortValue: (r) => r.cacheReadTokens,
+              initialSortDir: 'desc',
+              headerClass: 'text-right',
+              cellClass: 'text-right tabular-nums text-text-secondary',
+              render: (r) => fmtTokens(r.cacheReadTokens),
+            },
+            {
+              key: 'cost',
+              label: 'Total spend',
+              sortable: true,
+              sortValue: (r) => r.costUsd,
+              initialSortDir: 'desc',
+              headerClass: 'text-right',
+              cellClass: 'text-right tabular-nums font-semibold text-accent',
+              render: (r) => fmtUsd(r.costUsd),
+            },
+          ]}
+          rows={skillRows}
+          getRowKey={(r) => r.skillId}
+          rowClassName={() => 'hover:bg-bg-tertiary/40'}
+          emptyState={(
+            <EmptyState
+              paddingY="md"
+              title={(
+                <span className="font-normal text-text-tertiary">
+                  No skill attribution data in the last {WINDOW_LABELS[window_].toLowerCase()}.
+                </span>
+              )}
+            />
+          )}
+        />
+      </div>
 
       {ollama && <OllamaUsageCard data={ollama} windowLabel={WINDOW_LABELS[window_]} />}
 

@@ -43,6 +43,15 @@ export interface AgentUsageRow {
   promptSamples: number;
 }
 
+export interface SkillUsageRow {
+  skillId: string;
+  skill: string;
+  runs: number;
+  promptTokens: number;
+  cacheReadTokens: number;
+  costUsd: number;
+}
+
 export interface UsageResponse {
   window: Window;
   generatedAt: number;
@@ -58,6 +67,42 @@ export interface UsageResponse {
   };
   projects: ProjectUsageRow[];
   agents: AgentUsageRow[];
+  skills: SkillUsageRow[];
+}
+
+interface RunSkillAttribution {
+  id: string;
+  name: string;
+  promptChars: number;
+}
+
+function parseRunSkills(raw: string | null | undefined): RunSkillAttribution[] {
+  if (!raw) return [];
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(raw);
+  } catch {
+    return [];
+  }
+  if (!Array.isArray(parsed)) return [];
+  const skills: RunSkillAttribution[] = [];
+  for (const item of parsed) {
+    if (typeof item === 'string') {
+      skills.push({ id: item, name: item, promptChars: 0 });
+      continue;
+    }
+    if (!item || typeof item !== 'object') continue;
+    const record = item as Record<string, unknown>;
+    if (typeof record.id !== 'string' || record.id.length === 0) continue;
+    skills.push({
+      id: record.id,
+      name: typeof record.name === 'string' && record.name.length > 0 ? record.name : record.id,
+      promptChars: typeof record.promptChars === 'number' && Number.isFinite(record.promptChars)
+        ? Math.max(0, record.promptChars)
+        : 0,
+    });
+  }
+  return skills;
 }
 
 export async function GET(request: NextRequest) {
@@ -76,6 +121,7 @@ export async function GET(request: NextRequest) {
 
   const byProject = new Map<string, ProjectUsageRow>();
   const byKind = new Map<string, AgentUsageRow>();
+  const bySkill = new Map<string, SkillUsageRow>();
   const promptByKind = new Map<string, { totalBytes: number; samples: number }>();
 
   for (const j of jobs) {
@@ -128,6 +174,28 @@ export async function GET(request: NextRequest) {
       p.samples += 1;
       promptByKind.set(j.kind, p);
     }
+
+    const runSkills = parseRunSkills(j.skillIds);
+    if (runSkills.length > 0) {
+      const totalPromptChars = runSkills.reduce((sum, s) => sum + s.promptChars, 0);
+      const fallbackShare = 1 / runSkills.length;
+      for (const s of runSkills) {
+        const share = totalPromptChars > 0 ? s.promptChars / totalPromptChars : fallbackShare;
+        const skillRow = bySkill.get(s.id) ?? {
+          skillId: s.id,
+          skill: s.name,
+          runs: 0,
+          promptTokens: 0,
+          cacheReadTokens: 0,
+          costUsd: 0,
+        };
+        skillRow.runs += 1;
+        skillRow.skill = s.name;
+        skillRow.promptTokens += Math.round((j.inputTokens ?? 0) * share);
+        skillRow.cacheReadTokens += Math.round((j.cacheReadTokens ?? 0) * share);
+        bySkill.set(s.id, skillRow);
+      }
+    }
   }
 
   const projects = Array.from(byProject.values()).map((r) => {
@@ -150,6 +218,17 @@ export async function GET(request: NextRequest) {
   });
   agents.sort((a, b) => b.costUsd - a.costUsd);
 
+  const skills = Array.from(bySkill.values()).map((r) => {
+    r.costUsd = costUsd({
+      inputTokens: r.promptTokens,
+      outputTokens: 0,
+      cacheReadTokens: r.cacheReadTokens,
+      cacheCreateTokens: 0,
+    });
+    return r;
+  });
+  skills.sort((a, b) => b.costUsd - a.costUsd);
+
   const totals = projects.reduce(
     (acc, r) => ({
       runs: acc.runs + r.runs,
@@ -170,6 +249,7 @@ export async function GET(request: NextRequest) {
     totals,
     projects,
     agents,
+    skills,
   };
   cache.set(window, { body, expiresAt: Date.now() + CACHE_TTL_MS });
   return NextResponse.json(body);

@@ -71,6 +71,7 @@ interface ComposeResult {
     cliEnv: Record<string, string>;
   } | null;
   contextMeta: string;
+  skillIds: string;
   prereqArtifact: { path: string; body: string } | null;
 }
 
@@ -203,7 +204,7 @@ async function composePromptStep(
         console.error('[intake-workflow] failed to persist post-prereq release-lock queue entry:', err);
         const j = getJob(jobId);
         if (j) { j.exitCode = 1; await markDone(j, 1); }
-        return { skipped: true, fullPrompt: '', cmd: '', cliEnv: {}, provider: 'claude', fallback: null, contextMeta: baseContextMeta, prereqArtifact: null };
+        return { skipped: true, fullPrompt: '', cmd: '', cliEnv: {}, provider: 'claude', fallback: null, contextMeta: baseContextMeta, skillIds: '[]', prereqArtifact: null };
       }
       appendRedactedFileSync(
         /*turbopackIgnore: true*/ logPath,
@@ -211,7 +212,7 @@ async function composePromptStep(
       );
       const j = getJob(jobId);
       if (j) { j.finishedAt = Date.now() / 1000; j.exitCode = 0; updateJob(j); await markDone(j, 0); }
-      return { skipped: true, fullPrompt: '', cmd: '', cliEnv: {}, provider: 'claude', fallback: null, contextMeta: baseContextMeta, prereqArtifact: null };
+      return { skipped: true, fullPrompt: '', cmd: '', cliEnv: {}, provider: 'claude', fallback: null, contextMeta: baseContextMeta, skillIds: '[]', prereqArtifact: null };
     }
 
     // Post-prereq worktree blocker for non-readOnly runs.
@@ -227,7 +228,7 @@ async function composePromptStep(
         );
         const j = getJob(jobId);
         if (j) { j.finishedAt = Date.now() / 1000; j.exitCode = 1; updateJob(j); await markDone(j, 1); }
-        return { skipped: true, fullPrompt: '', cmd: '', cliEnv: {}, provider: 'claude', fallback: null, contextMeta: baseContextMeta, prereqArtifact: null };
+        return { skipped: true, fullPrompt: '', cmd: '', cliEnv: {}, provider: 'claude', fallback: null, contextMeta: baseContextMeta, skillIds: '[]', prereqArtifact: null };
       }
     }
   }
@@ -489,6 +490,12 @@ At the end of your run, include a short final section exactly named "TamTam Run 
     provider: safeProvider,
     fallback,
     contextMeta: JSON.stringify(contextMetaObj),
+    skillIds: JSON.stringify(composed.metaSkills.map((s) => ({
+      id: s.id,
+      name: s.name,
+      promptChars: s.promptChars,
+      source: s.source,
+    }))),
     prereqArtifact,
   };
 }
@@ -581,7 +588,7 @@ async function startAgentStep(
 ): Promise<void> {
   'use step';
 
-  const { fullPrompt, cmd, cliEnv, contextMeta, prereqArtifact, fallback } = composed;
+  const { fullPrompt, cmd, cliEnv, contextMeta, skillIds, prereqArtifact, fallback } = composed;
 
   const { getJob, markDone } = await import('@/lib/jobs/job-storage');
   const job = getJob(jobId);
@@ -685,6 +692,7 @@ async function startAgentStep(
     } catch {
       job.contextMeta = contextMeta;
     }
+    job.skillIds = skillIds;
     updateJob(job);
 
     const mergedEnv: Record<string, string> = { ...cliEnv, ...(broker?.env ?? {}) };

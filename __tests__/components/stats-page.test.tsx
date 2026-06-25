@@ -97,6 +97,7 @@ function makeUsageResponse(overrides: Partial<UsageResponse> = {}): UsageRespons
         promptSamples: 4,
       },
     ],
+    skills: [],
     ...overrides,
   }
 }

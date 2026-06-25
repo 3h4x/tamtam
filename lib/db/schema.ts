@@ -124,6 +124,7 @@ export const jobs = pgTable('jobs', {
   linesRemoved: integer('lines_removed'),
   provider: text('provider'),
   runScore: integer('run_score'),
+  skillIds: text('skill_ids').notNull().default('[]'),
 });
 
 export const recommendations = pgTable('recommendations', {

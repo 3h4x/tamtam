@@ -11,6 +11,7 @@ export interface ComposedSkillMeta {
   name: string
   description: string
   content?: string
+  promptChars: number
   source: 'db' | 'file'
 }
 
@@ -71,8 +72,9 @@ export async function composeAgentSkills(
   if (dbSkillIds.length > 0) {
     const rows = await db.select().from(schema.skills).where(inArray(schema.skills.id, dbSkillIds))
     for (const s of rows) {
-      parts.push(`## ${s.name}\n${s.content}`)
-      metaSkills.push({ id: s.id, name: s.name, description: s.description ?? '', content: s.content, source: 'db' })
+      const part = `## ${s.name}\n${s.content}`
+      parts.push(part)
+      metaSkills.push({ id: s.id, name: s.name, description: s.description ?? '', content: s.content, promptChars: part.length, source: 'db' })
     }
   }
 
@@ -90,7 +92,7 @@ export async function composeAgentSkills(
     // ship `.hidden.md`-style entries.
     const segments = p.split('/')
     if (p.startsWith('/') || segments.some((s) => s === '..' || s === '')) {
-      metaSkills.push({ id: `persona:${p}`, name: p, description: p, source: 'file' })
+      metaSkills.push({ id: `persona:${p}`, name: p, description: p, promptChars: 0, source: 'file' })
       continue
     }
     const fallbackName = p.split('/').pop() ?? p
@@ -102,13 +104,13 @@ export async function composeAgentSkills(
     const inDocs = docsFile.startsWith(DOCS_BASE + '/')
     const inData = dataFile.startsWith(DATA_SKILLS_DIR + '/')
     if (!inDocs && !inData) {
-      metaSkills.push({ id: `persona:${p}`, name: fallbackName, description: p, source: 'file' })
+      metaSkills.push({ id: `persona:${p}`, name: fallbackName, description: p, promptChars: 0, source: 'file' })
       continue
     }
     const body = (inDocs ? readSkillFile(docsFile) : null)
       ?? (inData ? readSkillFile(dataFile) : null)
     if (body === null) {
-      metaSkills.push({ id: `persona:${p}`, name: fallbackName, description: p, source: 'file' })
+      metaSkills.push({ id: `persona:${p}`, name: fallbackName, description: p, promptChars: 0, source: 'file' })
       continue
     }
 
@@ -120,7 +122,7 @@ export async function composeAgentSkills(
       const h = body.match(/^#\s+(.+)$/m)
       if (h) display = h[1].trim()
     }
-    metaSkills.push({ id: `persona:${p}`, name: display, description: p, source: 'file' })
+    metaSkills.push({ id: `persona:${p}`, name: display, description: p, promptChars: body.length, source: 'file' })
   }
 
   return { parts, docParts, metaSkills, metaDocs }

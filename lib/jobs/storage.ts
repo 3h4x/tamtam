@@ -68,6 +68,7 @@ export async function loadFromDb(): Promise<void> {
         linesRemoved: row.linesRemoved ?? null,
         provider: row.provider ?? null,
         runScore: row.runScore ?? null,
+        skillIds: row.skillIds ?? '[]',
       });
     }
     if (isTestEnv) loaded = true;
@@ -158,6 +159,7 @@ function doSaveToDb(job: JobData): Promise<void> {
         linesRemoved: job.linesRemoved ?? null,
         provider: job.provider ?? null,
         runScore: job.runScore ?? null,
+        skillIds: job.skillIds ?? '[]',
       })
       .onConflictDoUpdate({
         target: schema.jobs.id,
@@ -193,6 +195,7 @@ function doSaveToDb(job: JobData): Promise<void> {
           linesRemoved: job.linesRemoved ?? null,
           provider: job.provider ?? null,
           runScore: job.runScore ?? null,
+          skillIds: job.skillIds ?? '[]',
         },
       })
       .execute()
@@ -278,6 +281,7 @@ export function createJob(
     linesRemoved: null,
     provider: provider ?? null,
     runScore: null,
+    skillIds: '[]',
   };
   jobsCache.set(jobId, job);
   saveToDb(job);
@@ -442,6 +446,7 @@ export function jobToDict(job: JobData): Record<string, unknown> {
   d.lines_removed = job.linesRemoved ?? null;
   d.provider = job.provider ?? null;
   d.run_score = job.runScore ?? null;
+  d.skill_ids = job.skillIds ?? '[]';
   const verdict = getVerdict(job);
   if (verdict !== null) d.verdict = verdict;
   return d;
