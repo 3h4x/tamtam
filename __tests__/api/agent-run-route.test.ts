@@ -176,6 +176,8 @@ describe('POST /api/agents/{agentId}/run', () => {
       base_prompt: '',
       permission_mode: 'bypassPermissions',
       dirty_worktree_block_threshold: 0,
+      prompt_estimate_warn_tokens: 50_000,
+      prompt_estimate_block_tokens: 180_000,
     };
     mocks.getSettings.mockReset().mockImplementation(() => settingsMock);
     mocks.getImproveConfig.mockReset().mockImplementation(() => ({ claudeBin: 'claude', logDir: logDirMock }));
@@ -220,6 +222,57 @@ Use the QA agent.
     const [, , fullPrompt] = mocks.startJob.mock.calls[0];
     expect(fullPrompt).toContain('## Prerequisite Output');
     expect(fullPrompt).toContain('Command: `echo frontmatter proj1`');
+  });
+
+  it('returns prompt estimate metadata when an agent run is accepted', async () => {
+    await insertAgent({ prompt: 'Default task' });
+    const req = new NextRequest('http://localhost/api/agents/agent-123/run', {
+      method: 'POST',
+      body: JSON.stringify({ prompt: 'verify the target' }),
+    });
+
+    const res = await POST(req, { params: Promise.resolve({ agentId: 'agent-123' }) });
+    const data = await res.json();
+
+    expect(res.status).toBe(200);
+    expect(data.prompt_estimate).toMatchObject({
+      blocked: false,
+      modelTier: 'sonnet',
+    });
+    expect(data.prompt_estimate.estimatedInputTokens).toBeGreaterThan(0);
+    expect(mocks.createJob).toHaveBeenCalledOnce();
+    expect(mocks.startJob).toHaveBeenCalledOnce();
+  });
+
+  it('blocks oversized agent prompts before creating a job', async () => {
+    await insertAgent({
+      skillIds: '["skill-big"]',
+      prompt: 'Default task',
+    });
+    await sharedHandle.db.insert(schema.skills).values({
+      id: 'skill-big',
+      name: 'Large Skill',
+      description: '',
+      content: 'x'.repeat(80),
+      createdAt: now,
+      updatedAt: now,
+    });
+    settingsMock.prompt_estimate_warn_tokens = 1;
+    settingsMock.prompt_estimate_block_tokens = 10;
+
+    const req = new NextRequest('http://localhost/api/agents/agent-123/run', {
+      method: 'POST',
+      body: JSON.stringify({ prompt: 'verify the target' }),
+    });
+
+    const res = await POST(req, { params: Promise.resolve({ agentId: 'agent-123' }) });
+    const data = await res.json();
+
+    expect(res.status).toBe(413);
+    expect(data.code).toBe('prompt_estimate_blocked');
+    expect(data.prompt_estimate.estimatedInputTokens).toBeGreaterThan(10);
+    expect(mocks.createJob).not.toHaveBeenCalled();
+    expect(mocks.startJob).not.toHaveBeenCalled();
   });
 
   it('returns 404 if agent not found', async () => {

@@ -131,6 +131,8 @@ export function SettingsField({
           {MODEL_TIERS.map((model) => <option key={model} value={model}>{MODEL_LABELS[model]}</option>)}
         </Select>
       ) : fieldKey === 'fix_max_iterations'
+          || fieldKey === 'prompt_estimate_warn_tokens'
+          || fieldKey === 'prompt_estimate_block_tokens'
           || fieldKey === 'release_min_lines'
           || fieldKey === 'auto_pause_unfruitful_runs'
           || fieldKey === 'release_reinforce_max_iterations'

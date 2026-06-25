@@ -12,6 +12,8 @@ describe('GET /settings', () => {
       expect(data.settings).toEqual({
         claude_provider: 'claude',
         cli_enabled_providers: 'claude',
+        prompt_estimate_warn_tokens: '50000',
+        prompt_estimate_block_tokens: '180000',
         fix_max_iterations: '0',
         release_min_lines: '0',
         auto_pause_unfruitful_enabled: 'true',

@@ -38,6 +38,8 @@ export interface SettingsMap {
   review_verdict_rules: string
   jobs_paused: string
   rebuild_in_progress: string
+  prompt_estimate_warn_tokens: string
+  prompt_estimate_block_tokens: string
   fix_max_iterations: string
   release_min_lines: string
   auto_pause_unfruitful_enabled: string

@@ -43,6 +43,8 @@ function makeSettings(overrides: Partial<TamTamConfig> = {}): TamTamConfig {
     permission_mode: 'bypassPermissions',
     commit_style: '',
     review_verdict_rules: '',
+    prompt_estimate_warn_tokens: 50_000,
+    prompt_estimate_block_tokens: 180_000,
     jobs_paused: false,
     fix_max_iterations: 3,
     release_min_lines: 0,

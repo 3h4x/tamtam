@@ -23,7 +23,7 @@ import { getImproveConfig } from '@/lib/scheduling/scheduling';
 import { splitCommand } from '@/lib/shared/split-command';
 import { wrapForSandbox } from '@/lib/shared/sandbox-wrap';
 import { runSubprocess } from './spawn-cli';
-import { measurePrompt, checkPromptSize } from './prompt-size';
+import { assertPromptEstimateAllowed, measurePrompt, checkPromptSize } from './prompt-size';
 import type { CliProvider } from '@/lib/usage/cli-providers';
 import type { JobData } from '@/lib/jobs/types';
 
@@ -82,6 +82,7 @@ export async function startInProcessAgentJob(
 
     job = jobsCache.get(jobId) ?? null;
     if (job) {
+      assertPromptEstimateAllowed(prompt, { modelTier: job.model });
       job.promptBytes = promptBytes;
       checkPromptSize(jobId, job.kind, promptBytes);
       // Idempotency: workflow replay re-enters the step body. If the previous

@@ -24,6 +24,8 @@ For **pipeline jobs** (review/fix/commit/dod/push), each `lib/pipeline/start-*.t
 `lib/jobs/prompt-size.ts` exports:
 - `measurePrompt(prompt)` — UTF-8 byte length.
 - `estimateTokens(bytes)` — rough `bytes / 4` approximation.
+- `estimatePromptCost(prompt)` — shared pre-run estimate for composed prompts; reports bytes, estimated input tokens, thresholds, warning/block flags, model tier, and a rough input-token cost.
+- `assertPromptEstimateAllowed(prompt)` — throws before provider spawn when the estimate exceeds `prompt_estimate_block_tokens`.
 - `checkPromptSize(jobId, kind, bytes)` — `console.warn` when bytes exceed `TAMTAM_PROMPT_WARN_BYTES` (default 50 000 bytes ≈ 12.5k tokens).
 
 The current spawn paths measure and persist `promptBytes` on the job row:
@@ -31,6 +33,12 @@ The current spawn paths measure and persist `promptBytes` on the job row:
 - `lib/jobs/inline-agent.ts startInProcessAgentJob` for agent intake workflow jobs.
 
 `/api/stats/usage` aggregates `avgPromptBytes` / `avgPromptTokens` per `kind`.
+
+## Pre-spawn guardrail
+
+Before creating manual terminal and agent job rows, TamTam estimates the composed prompt it is about to send. Accepted start responses include `prompt_estimate`. If the estimate exceeds `prompt_estimate_block_tokens`, the route returns HTTP 413 with `code: "prompt_estimate_blocked"` and does not create a job or spawn a provider process. The spawn adapters also assert the same threshold as a final guard for pipeline prompts (`review`, `fix`, `mark-dod`, and related steps) and future callers.
+
+The estimator uses provider-aware tokenization only when a caller adds it; the current fallback is conservative and local: UTF-8 bytes divided by 4. It includes whatever has already been composed into the prompt at that start path: base prompt/project memory, selected skills/docs/personas, auto-attached docs, issue/PR text, diff/context payloads, and attachment path instructions.
 
 ## Identified bloat sources
 
@@ -48,3 +56,7 @@ Watch `/stats` for kinds where `avgPromptTokens > 12 500`. The `[prompt-size] �
 ## Threshold tuning
 
 `TAMTAM_PROMPT_WARN_BYTES=300000 pnpm run rebuild` raises the warn threshold to ~75k tokens. Default is 50 000 bytes (≈ 12.5k tokens).
+
+DB settings:
+- `prompt_estimate_warn_tokens` defaults to `50000`; `0` disables warning state.
+- `prompt_estimate_block_tokens` defaults to `180000`; `0` disables hard blocking.

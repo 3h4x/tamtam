@@ -19,6 +19,10 @@ import { findBlockingRunningJob } from '@/lib/jobs/project-active-job';
 import { enqueueTerminalRun, drainNextTerminalRun, TERMINAL_DRAIN_HEADER } from '@/lib/terminal/pending-terminal-run';
 import { loadFileConfig } from '@/lib/skills/tamtam-file-config';
 import { resolveAutoAttachedDocs, formatAutoAttachedDocsBlock } from '@/lib/skills/auto-attach-docs';
+import {
+  estimatePromptCost,
+  promptEstimateResponseDetail,
+} from '@/lib/jobs/prompt-size';
 
 export async function POST(
   request: NextRequest,
@@ -272,6 +276,15 @@ export async function POST(
     for (const p of attachmentPaths) prompt += `- ${p}\n`;
   }
 
+  const promptEstimate = estimatePromptCost(prompt, { modelTier: model });
+  if (promptEstimate.blocked) {
+    return NextResponse.json({
+      code: 'prompt_estimate_blocked',
+      detail: promptEstimateResponseDetail(promptEstimate),
+      prompt_estimate: promptEstimate,
+    }, { status: 413 });
+  }
+
   const job = createJob(projectName, 'run', 0, '', prompt, contextMeta || undefined, userPrompt || undefined, ghIssueNumber, ghIssueRepo || null, ghIssueTitle || null);
   job.provider = provider;
   job.model = model;
@@ -343,5 +356,6 @@ export async function POST(
     job_id: job.id,
     pid: job.pid,
     log_path: logPath,
+    prompt_estimate: promptEstimate,
   });
 }

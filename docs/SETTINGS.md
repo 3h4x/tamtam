@@ -113,6 +113,8 @@ Manual sync behavior:
 | Key | Type | Default | Effect |
 |-----|------|---------|--------|
 | `base_prompt` | string | Long system prompt | Prepended to every Claude invocation — reviews, fixes, runs, agents |
+| `prompt_estimate_warn_tokens` | number | `50000` | Estimated composed-prompt input-token threshold where TamTam marks a start as oversized. `0` disables warning state. Estimates use provider-aware tokenization when a caller supplies it, otherwise UTF-8 bytes / 4. |
+| `prompt_estimate_block_tokens` | number | `180000` | Estimated composed-prompt input-token threshold where TamTam rejects a run before creating a job row or spawning a provider process. `0` disables hard blocking. HTTP APIs return 413 with `code: "prompt_estimate_blocked"` and `prompt_estimate`. |
 | `commit_style` | string | Conventional commits guide | Injected into the push commit-message generation prompt; overridden per project by `.tamtam/config.yml` `commits.commit_style` when present |
 | `review_verdict_rules` | string | Pragmatic rules | Injected into review prompts; drives LGTM / NEEDS ATTENTION / DO NOT SHIP decisions |
 | `legacy_completion_hook_release_after_run_enabled` | boolean | `true` | Runtime kill switch for the legacy job-completion release-after-run hook while release triggering migrates to the workflow event router. Set to `false` to stop the completion hook without redeploying |

@@ -248,7 +248,18 @@ export async function fetchPersonas(): Promise<{ personas: Persona[] }> {
   return response.json()
 }
 
-export interface RunStartedResult { status: string; job_id: string; pid: number }
+export interface PromptEstimateResult {
+  bytes: number
+  estimatedInputTokens: number
+  warnTokens: number
+  blockTokens: number
+  warning: boolean
+  blocked: boolean
+  modelTier: string | null
+  estimatedCostUsd: number
+}
+
+export interface RunStartedResult { status: string; job_id: string; pid: number; prompt_estimate?: PromptEstimateResult }
 export interface RunQueuedResult { status: 'queued'; queueId: string; position: number; blockingKind: string }
 export type RunProjectResult = RunStartedResult | RunQueuedResult
 

@@ -1,7 +1,6 @@
 /**
- * Prompt-size telemetry: records the byte length of the prompt string passed
- * to `startJob` (i.e. whatever is piped to the Claude CLI's stdin) and warns
- * when it crosses a configurable threshold.
+ * Prompt-size telemetry and pre-spawn guardrails for the prompt string passed
+ * to `startJob` (i.e. whatever is piped to the provider CLI's stdin).
  *
  * Caveat — the measured value depends on the caller. Agent runs
  * (`/api/agents/[agentId]/run`) pass the fully composed prompt (system +
@@ -17,11 +16,38 @@
  * site. ~4 bytes/token is a stable approximation for English-heavy prompts.
  */
 
-// 50 KB ≈ 12.5k tokens — about the floor where the cache-read cost of an
+import { getSettings } from '@/lib/shared/config';
+import { costUsd } from '@/lib/shared/usage-pricing';
+
+// 50 KB ~= 12.5k tokens — about the floor where the cache-read cost of an
 // always-injected prefix (CLAUDE.md + skills) starts to matter. Override with
 // TAMTAM_PROMPT_WARN_BYTES.
 const DEFAULT_WARN_BYTES = 50_000;
 export const BYTES_PER_TOKEN = 4;
+
+export interface PromptEstimate {
+  bytes: number;
+  estimatedInputTokens: number;
+  warnTokens: number;
+  blockTokens: number;
+  warning: boolean;
+  blocked: boolean;
+  modelTier: string | null;
+  estimatedCostUsd: number;
+}
+
+export class PromptEstimateBlockedError extends Error {
+  readonly estimate: PromptEstimate;
+
+  constructor(estimate: PromptEstimate) {
+    super(
+      `Prompt estimate ${estimate.estimatedInputTokens.toLocaleString()} tokens exceeds block threshold ` +
+      `${estimate.blockTokens.toLocaleString()} tokens. Reduce attached docs, skills, or diff/context payload before starting this run.`,
+    );
+    this.name = 'PromptEstimateBlockedError';
+    this.estimate = estimate;
+  }
+}
 
 function warnThreshold(): number {
   const env = process.env.TAMTAM_PROMPT_WARN_BYTES;
@@ -36,6 +62,53 @@ export function measurePrompt(prompt: string): number {
 
 export function estimateTokens(bytes: number): number {
   return Math.round(bytes / BYTES_PER_TOKEN);
+}
+
+export function estimatePromptCost(
+  prompt: string,
+  options: { modelTier?: string | null; warnTokens?: number; blockTokens?: number } = {},
+): PromptEstimate {
+  const settings = getSettings();
+  const bytes = measurePrompt(prompt);
+  const estimatedInputTokens = estimateTokens(bytes);
+  const warnTokens = Math.max(0, options.warnTokens ?? settings.prompt_estimate_warn_tokens);
+  const blockTokens = Math.max(0, options.blockTokens ?? settings.prompt_estimate_block_tokens);
+  const warning = warnTokens > 0 && estimatedInputTokens >= warnTokens;
+  const blocked = blockTokens > 0 && estimatedInputTokens > blockTokens;
+  return {
+    bytes,
+    estimatedInputTokens,
+    warnTokens,
+    blockTokens,
+    warning,
+    blocked,
+    modelTier: options.modelTier ?? null,
+    estimatedCostUsd: costUsd({
+      inputTokens: estimatedInputTokens,
+      outputTokens: 0,
+      cacheReadTokens: 0,
+      cacheCreateTokens: 0,
+    }),
+  };
+}
+
+export function assertPromptEstimateAllowed(
+  prompt: string,
+  options: { modelTier?: string | null; warnTokens?: number; blockTokens?: number } = {},
+): PromptEstimate {
+  const estimate = estimatePromptCost(prompt, options);
+  if (estimate.blocked) {
+    throw new PromptEstimateBlockedError(estimate);
+  }
+  return estimate;
+}
+
+export function promptEstimateResponseDetail(estimate: PromptEstimate): string {
+  return (
+    `Prompt estimate is ${estimate.estimatedInputTokens.toLocaleString()} input tokens ` +
+    `(${estimate.bytes.toLocaleString()} bytes), above the configured block threshold of ` +
+    `${estimate.blockTokens.toLocaleString()} tokens. Reduce attached docs, skills, or diff/context payload.`
+  );
 }
 
 export function checkPromptSize(jobId: string, kind: string, bytes: number): void {

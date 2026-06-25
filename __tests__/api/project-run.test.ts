@@ -155,6 +155,8 @@ describe('POST /api/projects/by-project/{projectName}/run', () => {
       cli_enabled_providers: ['claude'],
       cli_bin_claude: '/legacy/claude',
       browser_broker_enabled: false,
+      prompt_estimate_warn_tokens: 50_000,
+      prompt_estimate_block_tokens: 180_000,
     }));
     state.fns.getImproveConfig.mockReset().mockReturnValue({
       claudeBin: 'claude',
@@ -517,6 +519,49 @@ describe('POST /api/projects/by-project/{projectName}/run', () => {
       requestedModel: 'fast',
       respectJobsPaused: false,
     });
+  });
+
+  it('returns prompt estimate metadata when a terminal run is accepted', async () => {
+    const req = new NextRequest('http://localhost/api/projects/by-project/proj1/run', {
+      method: 'POST',
+      body: JSON.stringify({ prompt: 'hello' }),
+    });
+
+    const res = await POST(req, { params: Promise.resolve({ projectName: 'proj1' }) });
+    const data = await res.json();
+
+    expect(res.status).toBe(200);
+    expect(data.prompt_estimate).toMatchObject({
+      bytes: 5,
+      estimatedInputTokens: 1,
+      blocked: false,
+      modelTier: 'fast',
+    });
+    expect(state.fns.createJob).toHaveBeenCalledOnce();
+    expect(state.fns.startJob).toHaveBeenCalledOnce();
+  });
+
+  it('blocks oversized terminal prompts before creating a job', async () => {
+    state.fns.getSettings.mockImplementation(() => ({
+      cli_enabled_providers: ['claude'],
+      cli_bin_claude: '/legacy/claude',
+      browser_broker_enabled: false,
+      prompt_estimate_warn_tokens: 1,
+      prompt_estimate_block_tokens: 2,
+    }));
+    const req = new NextRequest('http://localhost/api/projects/by-project/proj1/run', {
+      method: 'POST',
+      body: JSON.stringify({ prompt: 'x'.repeat(12) }),
+    });
+
+    const res = await POST(req, { params: Promise.resolve({ projectName: 'proj1' }) });
+    const data = await res.json();
+
+    expect(res.status).toBe(413);
+    expect(data.code).toBe('prompt_estimate_blocked');
+    expect(data.prompt_estimate.estimatedInputTokens).toBe(3);
+    expect(state.fns.createJob).not.toHaveBeenCalled();
+    expect(state.fns.startJob).not.toHaveBeenCalled();
   });
 
   it('prepends persona content when persona file exists', async () => {

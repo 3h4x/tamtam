@@ -64,6 +64,11 @@ describe('startJobInProcess', () => {
       saveToDb,
       markDone,
     }));
+    vi.doMock('@/lib/jobs/prompt-size', () => ({
+      measurePrompt: (prompt: string) => Buffer.byteLength(prompt, 'utf8'),
+      checkPromptSize: vi.fn(),
+      assertPromptEstimateAllowed: vi.fn(),
+    }));
     vi.doMock('@/lib/shared/split-command', () => ({
       splitCommand: () => ['claude', '--flag'],
     }));

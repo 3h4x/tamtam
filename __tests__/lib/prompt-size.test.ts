@@ -1,54 +1,47 @@
-import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
-import { measurePrompt, estimateTokens, checkPromptSize } from '@/lib/jobs/prompt-size';
+import { beforeEach, describe, expect, it, vi } from 'vitest';
 
-describe('measurePrompt', () => {
-  it('returns UTF-8 byte length', () => {
-    expect(measurePrompt('hello')).toBe(5);
-    expect(measurePrompt('')).toBe(0);
-    expect(measurePrompt('café')).toBe(5); // é is 2 bytes
-  });
-});
+vi.mock('@/lib/shared/config', () => ({
+  getSettings: () => ({
+    prompt_estimate_warn_tokens: 5,
+    prompt_estimate_block_tokens: 10,
+  }),
+}));
 
-describe('estimateTokens', () => {
-  it('approximates bytes / 4', () => {
-    expect(estimateTokens(0)).toBe(0);
-    expect(estimateTokens(40)).toBe(10);
-    expect(estimateTokens(200_000)).toBe(50_000);
-  });
-});
+vi.mock('@/lib/shared/usage-pricing', () => ({
+  costUsd: ({ inputTokens }: { inputTokens: number }) => inputTokens / 1_000_000 * 3,
+}));
 
-describe('checkPromptSize', () => {
-  let warnSpy: ReturnType<typeof vi.spyOn>;
-  const origEnv = process.env.TAMTAM_PROMPT_WARN_BYTES;
-
+describe('prompt cost estimator', () => {
   beforeEach(() => {
-    warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => {});
-  });
-  afterEach(() => {
-    warnSpy.mockRestore();
-    if (origEnv === undefined) delete process.env.TAMTAM_PROMPT_WARN_BYTES;
-    else process.env.TAMTAM_PROMPT_WARN_BYTES = origEnv;
+    vi.resetModules();
   });
 
-  it('does not warn under default threshold', () => {
-    delete process.env.TAMTAM_PROMPT_WARN_BYTES;
-    checkPromptSize('job1', 'review', 1000);
-    expect(warnSpy).not.toHaveBeenCalled();
+  it('estimates input tokens from utf8 bytes', async () => {
+    const { estimatePromptCost } = await import('@/lib/jobs/prompt-size');
+
+    const estimate = estimatePromptCost('12345678', { modelTier: 'fast' });
+
+    expect(estimate.bytes).toBe(8);
+    expect(estimate.estimatedInputTokens).toBe(2);
+    expect(estimate.warning).toBe(false);
+    expect(estimate.blocked).toBe(false);
+    expect(estimate.modelTier).toBe('fast');
+    expect(estimate.estimatedCostUsd).toBeCloseTo(0.000006);
   });
 
-  it('warns when prompt exceeds threshold', () => {
-    process.env.TAMTAM_PROMPT_WARN_BYTES = '500';
-    checkPromptSize('job2', 'agent:tests', 5000);
-    expect(warnSpy).toHaveBeenCalledOnce();
-    const msg = warnSpy.mock.calls[0][0] as string;
-    expect(msg).toContain('job2');
-    expect(msg).toContain('agent:tests');
-    expect(msg).toContain('5000');
+  it('warns below the hard block threshold', async () => {
+    const { estimatePromptCost } = await import('@/lib/jobs/prompt-size');
+
+    const estimate = estimatePromptCost('x'.repeat(24));
+
+    expect(estimate.estimatedInputTokens).toBe(6);
+    expect(estimate.warning).toBe(true);
+    expect(estimate.blocked).toBe(false);
   });
 
-  it('falls back to default when env var is invalid', () => {
-    process.env.TAMTAM_PROMPT_WARN_BYTES = 'not-a-number';
-    checkPromptSize('job3', 'review', 1000);
-    expect(warnSpy).not.toHaveBeenCalled(); // 1000 < default 200000
+  it('throws when the hard block threshold is exceeded', async () => {
+    const { assertPromptEstimateAllowed, PromptEstimateBlockedError } = await import('@/lib/jobs/prompt-size');
+
+    expect(() => assertPromptEstimateAllowed('x'.repeat(44))).toThrow(PromptEstimateBlockedError);
   });
 });

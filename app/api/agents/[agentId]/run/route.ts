@@ -15,7 +15,7 @@ import { errMsg } from '@/lib/shared/types';
 import { getDirtyFileCount } from '@/lib/git/dirty-worktree';
 import { parseFileAgentId, loadFileAgent } from '@/lib/agents/tamtam-file-agents';
 import { isProjectPaused } from '@/lib/shared/enabled-projects';
-import { getSettings } from '@/lib/shared/config';
+import { getSettings, withBasePrompt } from '@/lib/shared/config';
 import { normalizeModelInput, parseOptionalKnownModelInput, type ModelTier } from '@/lib/agents/model-aliases';
 import { enqueueAgentRun, tryClaimAgentStartSlot, releaseAgentStartSlot, drainNextAgentRun } from '@/lib/agents/pending-agent-run';
 import {
@@ -30,6 +30,8 @@ import { appendRedactedFileSync } from '@/lib/jobs/redacted-log-writer';
 import { runAgentIntakeWorkflow } from '@/lib/agents/intake-workflow';
 import { checkDailySpendCap, type SpendCapExceeded } from '@/lib/pipeline/spend-guard';
 import { notify } from '@/lib/shared/notifications';
+import { composeAgentSkills } from '@/lib/agents/compose-skills';
+import { estimatePromptCost, promptEstimateResponseDetail } from '@/lib/jobs/prompt-size';
 
 type RunnableAgent = {
   id: string;
@@ -591,6 +593,27 @@ async function runAgentStart(
   }
   const provider = gate.provider;
 
+  const estimatedAgentContext = await composeAgentSkills(projPath, allSkillIds, docPathsParsed);
+  const promptEstimatePayload = withBasePrompt(
+    [
+      ...estimatedAgentContext.docParts,
+      ...estimatedAgentContext.parts,
+      taskPrompt,
+    ].filter(Boolean).join('\n\n---\n\n'),
+    { projectPath: projPath, provider },
+  );
+  const promptEstimate = estimatePromptCost(promptEstimatePayload, { modelTier: effectiveModel });
+  if (promptEstimate.blocked) {
+    return {
+      response: NextResponse.json({
+        code: 'prompt_estimate_blocked',
+        detail: promptEstimateResponseDetail(promptEstimate),
+        prompt_estimate: promptEstimate,
+      }, { status: 413 }),
+      startedJob: false,
+    };
+  }
+
   // Create the job row BEFORE handing off to the workflow so the run is
   // visible in the UI immediately. The workflow's compose step fills in
   // contextMeta (skills/docs/baseline/etc); seed an empty object so it has
@@ -692,6 +715,7 @@ async function runAgentStart(
       pid: 0,
       agent: agent.name,
       via: 'workflow',
+      prompt_estimate: promptEstimate,
     }),
     startedJob: true,
     jobId: job.id,

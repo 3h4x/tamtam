@@ -29,7 +29,7 @@ import { constants as osConstants, homedir, tmpdir } from 'os';
 import { getImproveConfig } from '@/lib/scheduling/scheduling';
 import { splitCommand } from '@/lib/shared/split-command';
 import { wrapForSandbox } from '@/lib/shared/sandbox-wrap';
-import { measurePrompt, checkPromptSize } from './prompt-size';
+import { assertPromptEstimateAllowed, measurePrompt, checkPromptSize } from './prompt-size';
 import { redactSecrets } from '@/lib/shared/log-redaction';
 import { buildChildEnv } from '@/lib/shared/child-env';
 import type { JobData } from '@/lib/jobs/types';
@@ -86,6 +86,7 @@ export async function startJobInProcess(
     const job = jobsCache.get(jobId);
     logPath = job?.logPath || join(/*turbopackIgnore: true*/ LOG_DIR, `${jobId}.log`);
     if (job) {
+      assertPromptEstimateAllowed(prompt, { modelTier: job.model });
       job.logPath = logPath;
       job.promptBytes = promptBytes;
       checkPromptSize(jobId, job.kind, promptBytes);

@@ -81,6 +81,8 @@ export interface TamTamConfig {
   commit_style: string;
   review_verdict_rules: string;
   jobs_paused: boolean;
+  prompt_estimate_warn_tokens: number;
+  prompt_estimate_block_tokens: number;
   /** Single global cap on per-release step-verification retries. Covers
    *  review→fix→test→review, test→fix→test, commit→fix→commit, and the
    *  review-driven push→fix→push leg uniformly. `0` ⇒ unlimited (run
@@ -238,6 +240,10 @@ export const DEFAULTS: TamTamConfig = {
 - Prefer LGTM over NEEDS ATTENTION when in doubt. Do not list every stylistic opinion. Aim for fewer than 3 findings — if you have more, the review has drifted into nitpicking.
 - Keep LGTM responses short: one sentence confirmation is enough.`,
   jobs_paused: false,
+  // Warn/block thresholds for the composed prompt TamTam is about to send to
+  // the provider CLI. 0 disables the respective guardrail.
+  prompt_estimate_warn_tokens: 50_000,
+  prompt_estimate_block_tokens: 180_000,
   // 0 = unlimited step-verification rounds across review, test, commit,
   // and review-driven push retries (default). Bound the pipeline via the
   // wall-clock timeout instead; an honest green build is preferred over
@@ -517,6 +523,14 @@ export function buildConfigFromSettingsMap(map: Record<string, string>): TamTamC
     commit_style: map.commit_style ?? DEFAULTS.commit_style,
     review_verdict_rules: map.review_verdict_rules ?? DEFAULTS.review_verdict_rules,
     jobs_paused: map.jobs_paused === 'true',
+    prompt_estimate_warn_tokens: parseNonNegativeIntOr(
+      map.prompt_estimate_warn_tokens,
+      DEFAULTS.prompt_estimate_warn_tokens,
+    ),
+    prompt_estimate_block_tokens: parseNonNegativeIntOr(
+      map.prompt_estimate_block_tokens,
+      DEFAULTS.prompt_estimate_block_tokens,
+    ),
     fix_max_iterations: parseNonNegativeIntOr(map.fix_max_iterations, DEFAULTS.fix_max_iterations),
     release_min_lines: parseNonNegativeIntOr(map.release_min_lines, DEFAULTS.release_min_lines),
     auto_pause_unfruitful_enabled: map.auto_pause_unfruitful_enabled === undefined

@@ -118,6 +118,8 @@ describe('config', () => {
         cli_default_model_lmstudio: 'normal',
         cli_default_model_deepagents: 'normal',
         provider_fallback_chain: [],
+        prompt_estimate_warn_tokens: 50_000,
+        prompt_estimate_block_tokens: 180_000,
         log_dir: './data/logs',
         frequency: '1h',
         daytime: false,

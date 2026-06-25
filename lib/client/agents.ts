@@ -1,7 +1,8 @@
 import type { Agent, AgentRevision } from './types'
+import type { PromptEstimateResult } from './projects'
 
 export type RunAgentResult =
-  | { status: 'started'; job_id: string; pid: number; agent?: string; via?: 'workflow' | 'system' }
+  | { status: 'started'; job_id: string; pid: number; agent?: string; via?: 'workflow' | 'system'; prompt_estimate?: PromptEstimateResult }
   | { status: 'queued'; detail?: string; agent?: string; blockingJobId?: string; code?: string }
 
 export interface FetchAgentsOptions {

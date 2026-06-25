@@ -12,6 +12,8 @@ export type SettingsFieldKey =
   | 'base_prompt'
   | 'default_model'
   | 'permission_mode'
+  | 'prompt_estimate_warn_tokens'
+  | 'prompt_estimate_block_tokens'
   | 'commit_style'
   | 'review_verdict_rules'
   | 'fix_max_iterations'
@@ -353,6 +355,18 @@ export const FIELDS: Record<SettingsFieldKey, FieldDef> = {
     group: 'agent',
     span: 1,
   },
+  prompt_estimate_warn_tokens: {
+    label: 'Prompt Estimate Warn Tokens',
+    help: 'Estimated input-token threshold where run starts are marked as oversized. 0 disables warnings.',
+    group: 'agent',
+    span: 1,
+  },
+  prompt_estimate_block_tokens: {
+    label: 'Prompt Estimate Block Tokens',
+    help: 'Estimated input-token threshold where TamTam rejects a run before creating a job or spawning a provider process. 0 disables blocking.',
+    group: 'agent',
+    span: 1,
+  },
 
   // Pipeline: review
   review_verdict_rules: {
@@ -675,6 +689,8 @@ export const DEFAULTS: Record<SettingsFieldKey, string> = {
   base_prompt: 'Never ask clarifying questions. Make decisions yourself based on what you see in the codebase. If multiple approaches work, pick the simplest one and go.',
   default_model: 'fast',
   permission_mode: 'auto',
+  prompt_estimate_warn_tokens: '50000',
+  prompt_estimate_block_tokens: '180000',
   commit_style: 'Use conventional commits. One line only, present tense, ≤50 chars, no trailing period. Types: feat|fix|docs|style|refactor|test|chore|ci|build|perf|revert.',
   review_verdict_rules: `STRICT verdict rules — the user cares about code quality, not speed:
 - LGTM ONLY when there are zero findings at any severity. Not "LGTM with minor notes", not "LGTM aside from a nit". If you list any "minor" / "non-blocking" / "cosmetic" / "consider..." / "nice-to-have" issue, that is NEEDS ATTENTION, not LGTM.

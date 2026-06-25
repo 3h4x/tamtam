@@ -135,6 +135,8 @@ async function buildSettingsResponse(): Promise<Record<string, string>> {
   settings.claude_provider = serializeSettingValue('claude_provider', effective.claude_provider);
   settings.cli_enabled_providers = serializeSettingValue('cli_enabled_providers', effective.cli_enabled_providers);
   settings.provider_fallback_chain = serializeSettingValue('provider_fallback_chain', effective.provider_fallback_chain);
+  settings.prompt_estimate_warn_tokens = serializeSettingValue('prompt_estimate_warn_tokens', effective.prompt_estimate_warn_tokens);
+  settings.prompt_estimate_block_tokens = serializeSettingValue('prompt_estimate_block_tokens', effective.prompt_estimate_block_tokens);
   settings.fix_max_iterations = serializeSettingValue('fix_max_iterations', effective.fix_max_iterations);
   settings.release_min_lines = serializeSettingValue('release_min_lines', effective.release_min_lines);
   settings.auto_pause_unfruitful_enabled = serializeSettingValue('auto_pause_unfruitful_enabled', effective.auto_pause_unfruitful_enabled);
@@ -193,6 +195,8 @@ const SETTING_KEYS = [
   'review_verdict_rules',
   'jobs_paused',
   'rebuild_in_progress',
+  'prompt_estimate_warn_tokens',
+  'prompt_estimate_block_tokens',
   'fix_max_iterations',
   'release_min_lines',
   'auto_pause_unfruitful_enabled',
@@ -386,6 +390,9 @@ function validateAndSerializeSettingValue(
   if (key === 'fix_max_iterations') {
     // Default is unlimited (0), but any positive integer caps review
     // verification rounds until LGTM or the release wall clock aborts.
+    return parseNonNegativeIntegerSetting(value, key);
+  }
+  if (key === 'prompt_estimate_warn_tokens' || key === 'prompt_estimate_block_tokens') {
     return parseNonNegativeIntegerSetting(value, key);
   }
   if (key === 'release_min_lines') {
