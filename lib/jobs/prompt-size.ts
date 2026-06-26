@@ -2,15 +2,10 @@
  * Prompt-size telemetry and pre-spawn guardrails for the prompt string passed
  * to `startJob` (i.e. whatever is piped to the provider CLI's stdin).
  *
- * Caveat — the measured value depends on the caller. Agent runs
- * (`/api/agents/[agentId]/run`) pass the fully composed prompt (system +
- * skills + task), so `prompt_bytes` reflects the cached prefix. Other callers
- * (`projects/.../run`, `.../fix-ci`, `jobs/.../rerun`) pass only the user
- * task, so their `prompt_bytes` undercounts the real cached prefix that
- * Claude bills against. When comparing across job kinds on /stats, treat the
- * per-kind average as the lower bound, not the true cache size. The exact
- * billed count comes from `cacheReadTokens` / `inputTokens` on the Claude
- * usage event after the run.
+ * The start routes and pipeline builders pass the prompt they are about to
+ * send to the provider CLI, after local skill/doc/base-prompt composition.
+ * The exact billed count still comes from `cacheReadTokens` / `inputTokens`
+ * on the provider usage event after the run.
  *
  * Why bytes (not tokens): we don't want to pay for a tokenizer at every call
  * site. ~4 bytes/token is a stable approximation for English-heavy prompts.

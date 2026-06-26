@@ -25,6 +25,32 @@
 - For route handlers/server modules that read settings or other module-level singletons at import time: `vi.resetModules()`, register mocks with `vi.doMock()`, then `await import(...)` the subject inside `beforeEach`. Don't statically import first.
 - For client-component tests: `jsdom`, stub `next/navigation` and `fetch` at module scope, use `vi.hoisted()` when a mock factory needs stable shared references.
 
+## How `pnpm test` runs
+
+`pnpm test` → `scripts/run-vitest-shards.mjs`, which runs the three Vitest
+projects (`vitest.config.ts`): `fast`, `slow`, and `db`.
+
+- `fast` and `slow` each run as **one `vitest` invocation** (parallelism comes
+  from each project's own `maxWorkers`, not external sharding — sharding them only
+  multiplied the per-process cold-start tax).
+- `db` (every file that boots PGlite) uses **load-adaptive process concurrency**
+  (`defaultDbConcurrency`): it fans out across processes only when the host has
+  CPU headroom (`floor((cores − load1)/2)`, capped at `min(4, floor(cores/3))`),
+  and falls back to a single sequential process under contention. This is the
+  only configuration proven not to wedge V8's WASM trap handler on Node 24 /
+  macOS arm64 when PGlite workers are CPU-starved (see `vitest.config.ts` and the
+  `db` project's `maxWorkers: 1`).
+- Result on a 12-core host: ~210s → ~87s idle / ~165s under load, all green.
+- Knobs: `TAMTAM_VITEST_DB_CONCURRENCY` pins the db concurrency (`1` forces the
+  proven-safe sequential path); `TAMTAM_VITEST_DB_SHARDS` controls the file split.
+  An explicit argv (`pnpm test <file>`) bypasses the project plan for single-file
+  runs.
+
+A single failing test still fails the whole suite; the flaky-test detection in
+the **release pipeline** (`lib/pipeline/flaky-tests.ts`) is separate — it retries
+a specific failing test during a release's test phase and only treats a
+fail-then-pass as flaky (operator-quarantined tests are skipped for gating).
+
 ## Pipeline e2e
 
 - `pnpm test:e2e:pipeline` uses port 1338, temp DB at `/tmp/tamtam-e2e-pipeline/`, intercepts `git`/`gh` via shims in `e2e/pipeline/mocks/bin/`. Sequential workers.

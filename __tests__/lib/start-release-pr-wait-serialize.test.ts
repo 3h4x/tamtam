@@ -54,4 +54,11 @@ describe('findActivePrWait — serialize releases across the pr-wait window', ()
     const jobs = [job({ id: 'pw', startedAt: NOW - 60_000 })]; // > 1e12 → treated as ms
     expect(findActivePrWait(jobs, 'tamtam', NOW)?.id).toBe('pw');
   });
+
+  it('does NOT block on a pr-wait with an unparseable start time (0/null) — would otherwise freeze releases forever', () => {
+    // A pr-wait whose start time can't be aged out must fall to the safe side
+    // (release allowed), not block indefinitely past the backstop's reach.
+    expect(findActivePrWait([job({ id: 'pw', startedAt: 0 })], 'tamtam', NOW)).toBeNull();
+    expect(findActivePrWait([job({ id: 'pw', startedAt: null as unknown as number })], 'tamtam', NOW)).toBeNull();
+  });
 });

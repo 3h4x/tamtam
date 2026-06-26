@@ -59,6 +59,24 @@ export async function ensureIssueBranch(opts: {
     return { status: 'already-on-branch', branch };
   }
 
+  // Dirty-tree guard: we are about to switch to a DIFFERENT branch (the
+  // already-on-branch fast path above handles the same-branch case, where dirt
+  // is this issue's own in-progress work). `git checkout` / `checkout -b`
+  // *carries uncommitted changes across* — so a tree left dirty by a prior
+  // stalled run (whose release never committed/shipped) would drag that stranded
+  // work onto this issue's fresh branch, entangling unrelated issues on one
+  // branch (the recurring "splątanie"). Refuse and leave the dirt on the current
+  // branch for the stranded-branch reconciler to recover; the caller proceeds on
+  // the current branch rather than spreading the mess.
+  const dirtyR = await exec('git', ['-C', projPath, 'status', '--porcelain'], { timeout: 5000 });
+  if (dirtyR.exitCode === 0 && dirtyR.stdout.trim().length > 0) {
+    return {
+      status: 'skipped',
+      reason: `working tree has uncommitted changes — refusing to switch to ${branch} and carry stranded work across`,
+      branch,
+    };
+  }
+
   // Zombie-branch guard: if the issue branch already exists locally and is
   // fully merged into the default branch, re-checking it out would resurrect
   // dead work. Skip with a clear reason so the caller can surface it.

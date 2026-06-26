@@ -30,6 +30,7 @@ import { wrapIfUntrusted, withUntrustedPreamble } from '@/lib/shared/untrusted';
 import { splitCommand } from '@/lib/shared/split-command';
 import { runSubprocess } from '@/lib/jobs/spawn-cli';
 import { appendRedactedFileSync } from '@/lib/jobs/redacted-log-writer';
+import { estimatePromptCost, promptEstimateResponseDetail } from '@/lib/jobs/prompt-size';
 import { ensureBranchForCtx, type EnsureBranchResult } from '@/lib/pipeline/mark-dod-branch';
 import type { CliProvider } from '@/lib/usage/cli-providers';
 import {
@@ -336,7 +337,28 @@ JSON schema:
   const basePreamble =
     'You verify whether acceptance criteria are implemented in a codebase. Use tools to inspect real code. Output strict JSON only.';
   const fullPrompt = withUntrustedPreamble(`${basePreamble}\n\n---\n\n${prompt}`);
-  const claudeCommand = `${claudeBin} --print ${getPermissionModeFlag()} --model ${getPipelineModel('dod')} --allowed-tools Read,Grep,Glob`;
+  const dodModel = getPipelineModel('dod');
+  const promptEstimate = estimatePromptCost(fullPrompt, { modelTier: dodModel });
+  if (promptEstimate.blocked) {
+    const detail = promptEstimateResponseDetail(promptEstimate);
+    appendLog(job, `# DoD verification blocked: ${detail}\n`);
+    if (job) {
+      job.promptBytes = promptEstimate.bytes;
+      await markDone(job, 1);
+    }
+    return {
+      verifiedTexts: [],
+      rawOutput: detail,
+      exitCode: 1,
+      timedOut: false,
+      terminal: { ok: false, status: 413, detail },
+    };
+  }
+  if (job) {
+    job.promptBytes = promptEstimate.bytes;
+    updateJob(job);
+  }
+  const claudeCommand = `${claudeBin} --print ${getPermissionModeFlag()} --model ${dodModel} --allowed-tools Read,Grep,Glob`;
 
   let rawOutput = '';
   let exitCode = 1;

@@ -119,6 +119,7 @@ describe('POST /api/projects/by-project/[projectName]/issue-branch', () => {
     mocks.exec
       .mockResolvedValueOnce(makeExecResult({ stdout: 'master\n' }))                       // branch --show-current
       .mockResolvedValueOnce(makeExecResult({ stdout: 'refs/remotes/origin/master\n' }))   // symbolic-ref
+      .mockResolvedValueOnce(makeExecResult())                                             // status --porcelain (clean)
       .mockResolvedValueOnce(makeExecResult({ stdout: '  master\n  other\n' }))            // branch --merged (no match)
       .mockResolvedValueOnce(makeExecResult())                                             // fetch origin/default
       .mockResolvedValueOnce(makeExecResult({ stdout: 'abc123\n' }))                       // rev-parse origin/default
@@ -138,6 +139,7 @@ describe('POST /api/projects/by-project/[projectName]/issue-branch', () => {
     mocks.exec
       .mockResolvedValueOnce(makeExecResult({ stdout: 'master\n' }))
       .mockResolvedValueOnce(makeExecResult({ stdout: 'refs/remotes/origin/master\n' }))
+      .mockResolvedValueOnce(makeExecResult())                                             // status --porcelain (clean)
       .mockResolvedValueOnce(makeExecResult({ stdout: '  master\n' }))
       .mockResolvedValueOnce(makeExecResult())
       .mockResolvedValueOnce(makeExecResult({ stdout: 'abc123\n' }))
@@ -156,6 +158,7 @@ describe('POST /api/projects/by-project/[projectName]/issue-branch', () => {
     mocks.exec
       .mockResolvedValueOnce(makeExecResult({ stdout: 'master\n' }))                                  // branch --show-current
       .mockResolvedValueOnce(makeExecResult({ stdout: 'refs/remotes/origin/master\n' }))              // symbolic-ref
+      .mockResolvedValueOnce(makeExecResult())                                                        // status --porcelain (clean)
       .mockResolvedValueOnce(makeExecResult({ stdout: '  master\n  fix/issue-9-already-merged\n' })); // branch --merged
     const res = await POST(
       makeRequest({ issue_number: 9, issue_title: 'already merged' }),

@@ -36,9 +36,11 @@ The current spawn paths measure and persist `promptBytes` on the job row:
 
 ## Pre-spawn guardrail
 
-Before creating manual terminal and agent job rows, TamTam estimates the composed prompt it is about to send. Accepted start responses include `prompt_estimate`. If the estimate exceeds `prompt_estimate_block_tokens`, the route returns HTTP 413 with `code: "prompt_estimate_blocked"` and does not create a job or spawn a provider process. The spawn adapters also assert the same threshold as a final guard for pipeline prompts (`review`, `fix`, `mark-dod`, and related steps) and future callers.
+Before creating manual terminal and agent job rows, TamTam estimates the composed prompt it is about to send. Accepted start responses include `prompt_estimate`. If the estimate exceeds `prompt_estimate_block_tokens`, the route returns HTTP 413 with `code: "prompt_estimate_blocked"` and does not create a job or spawn a provider process. The terminal input footer also shows a warning state before submit when the local draft plus selected DB skills/docs crosses `prompt_estimate_warn_tokens`; the server estimate remains authoritative because it also includes file personas, auto-attached docs, base prompt, provider choice, and attachment path instructions.
 
-The estimator uses provider-aware tokenization only when a caller adds it; the current fallback is conservative and local: UTF-8 bytes divided by 4. It includes whatever has already been composed into the prompt at that start path: base prompt/project memory, selected skills/docs/personas, auto-attached docs, issue/PR text, diff/context payloads, and attachment path instructions.
+Release pipeline builders estimate their composed provider prompt before launch. `review` and `fix` reject before creating their phase job when the estimate exceeds `prompt_estimate_block_tokens`; `mark-dod` can only know the verification prompt after the issue/PR criteria have been fetched, so it records the blocked DoD row and stops before starting the provider verification subprocess. The spawn adapters still assert the same threshold as a final guard for all pipeline prompts and future callers.
+
+The estimator uses provider-aware tokenization only when a caller adds it; the current fallback is conservative and local: UTF-8 bytes divided by 4. It includes whatever has already been composed into the prompt at that start path: base prompt/project memory, selected skills/docs/personas, auto-attached docs, issue/PR text, diff/context payloads, DoD criteria, and attachment path instructions.
 
 ## Identified bloat sources
 

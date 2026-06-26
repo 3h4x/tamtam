@@ -55,7 +55,12 @@ export function findActivePrWait(
   for (const j of jobs) {
     if (j.project !== projectName || j.kind !== 'pr-wait' || j.finishedAt !== null) continue;
     const startedMs = j.startedAt > 1e12 ? j.startedAt : (j.startedAt ?? 0) * 1000;
-    if (startedMs > 0 && nowMs - startedMs > PR_WAIT_SERIALIZE_BACKSTOP_MS) continue;
+    // Skip (don't block) when the pr-wait is past the backstop OR its start time
+    // is unparseable (<= 0). A pr-wait we cannot age out must not be allowed to
+    // freeze the project's releases forever — that's the exact failure the
+    // backstop exists to prevent, so an unknown/zero timestamp falls to the safe
+    // side (release allowed) rather than blocking indefinitely.
+    if (startedMs <= 0 || nowMs - startedMs > PR_WAIT_SERIALIZE_BACKSTOP_MS) continue;
     return j;
   }
   return null;

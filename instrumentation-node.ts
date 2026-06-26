@@ -14,6 +14,15 @@ export { drainStalePendingReleases, reapOrphanReleases, waitForWorkflowReady } f
 export { runProbeSweep } from '@/instrumentation-node/probe-sweep';
 
 export async function registerNode(): Promise<void> {
+  try {
+    const { getSettings, initSettings } = await import('@/lib/shared/config');
+    await initSettings();
+    if (!getSettings().auth_token_configured) {
+      console.warn('[auth] TamTam is running without auth — only safe on localhost');
+    }
+  } catch (err) {
+    console.warn('[auth] startup auth check failed:', err);
+  }
   await migrateLegacyFileWorkflowFlags();
   try {
     const { loadFromDb } = await import('@/lib/jobs/storage');

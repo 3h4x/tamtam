@@ -10,6 +10,7 @@ describe('GET /settings', () => {
       expect(response.status).toBe(200);
       const data = await response.json();
       expect(data.settings).toEqual({
+        auth_token_configured: 'false',
         claude_provider: 'claude',
         cli_enabled_providers: 'claude',
         prompt_estimate_warn_tokens: '50000',
@@ -32,11 +33,14 @@ describe('GET /settings', () => {
     it('returns all stored settings', async () => {
       await ctx.sharedHandle.db.insert(schema.settings).values({ key: 'workspace_path', value: '/projects' });
       await ctx.sharedHandle.db.insert(schema.settings).values({ key: 'github_owner', value: 'octocat' });
+      await ctx.sharedHandle.db.insert(schema.settings).values({ key: 'auth_token', value: 'scrypt:v1:salt:hash' });
 
       const response = await ctx.GET();
       const data = await response.json();
       expect(data.settings.workspace_path).toBe('/projects');
       expect(data.settings.github_owner).toBe('octocat');
+      expect(data.settings.auth_token_configured).toBe('true');
+      expect(data.settings).not.toHaveProperty('auth_token');
     });
 
 

@@ -43,6 +43,7 @@ export interface TamTamConfig {
   user_name?: string;
   workspace_path: string;
   github_owner: string;
+  auth_token_configured: boolean;
   trusted_github_users: string[];
   github_board_sync_enabled: boolean;
   github_board_project_owner: string;
@@ -197,6 +198,7 @@ export const DEFAULTS: TamTamConfig = {
   user_name: '',
   workspace_path: '',
   github_owner: '',
+  auth_token_configured: false,
   trusted_github_users: [],
   github_board_sync_enabled: false,
   github_board_project_owner: '',
@@ -476,6 +478,7 @@ export function buildConfigFromSettingsMap(map: Record<string, string>): TamTamC
 
   const config: TamTamConfig = {
     workspace_path: map.workspace_path ?? DEFAULTS.workspace_path,
+    auth_token_configured: !!map.auth_token,
     user_name: map.user_name ?? DEFAULTS.user_name,
     github_owner: map.github_owner ?? DEFAULTS.github_owner,
     trusted_github_users: parseJsonStringArray(map.trusted_github_users),

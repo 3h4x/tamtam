@@ -2,6 +2,7 @@ import { describe, it, expect } from 'vitest';
 import { NextRequest } from 'next/server';
 import * as schema from '@/lib/db/schema';
 import { setupSettingsApiTest } from '@/__tests__/api/settings-fixtures';
+import { verifyAuthToken } from '@/lib/auth/token';
 
 const ctx = setupSettingsApiTest();
 
@@ -18,6 +19,32 @@ describe('PATCH /settings validation', () => {
         detail: 'plain_test_phase_enabled must be true or false.',
       });
       expect(await ctx.sharedHandle.db.select().from(schema.settings)).toEqual([]);
+    });
+
+    it('hashes auth_token and rejects short tokens', async () => {
+      const bad = await ctx.PATCH(new NextRequest('http://localhost/api/settings', {
+        method: 'PATCH',
+        body: JSON.stringify({ auth_token: 'short' }),
+      }));
+      expect(bad.status).toBe(400);
+      await expect(bad.json()).resolves.toMatchObject({
+        detail: 'auth_token must be at least 32 characters.',
+      });
+
+      const token = '0123456789abcdef0123456789abcdef';
+      const good = await ctx.PATCH(new NextRequest('http://localhost/api/settings', {
+        method: 'PATCH',
+        body: JSON.stringify({ auth_token: token }),
+      }));
+      expect(good.status).toBe(200);
+      const rows = await ctx.sharedHandle.db.select().from(schema.settings);
+      const stored = rows.find((row) => row.key === 'auth_token')?.value ?? '';
+      expect(stored).toMatch(/^scrypt:v1:/);
+      expect(stored).not.toContain(token);
+      expect(verifyAuthToken(token, stored)).toBe(true);
+      await expect(good.json()).resolves.toMatchObject({
+        settings: { auth_token_configured: 'true' },
+      });
     });
 
 
