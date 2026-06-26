@@ -101,6 +101,21 @@ describe('ensureIssueBranch — cuts the issue branch from fresh origin/<default
     expect(r.status).toBe('already-on-branch');
   });
 
+  it('refuses to switch branches when the working tree is dirty (would carry stranded work across)', async () => {
+    mocks.exec.mockImplementation(async (...call: unknown[]) => {
+      const a = (Array.isArray(call[1]) ? (call[1] as string[]) : []).join(' ');
+      if (a.includes('branch --show-current')) return resp('master'); // not on the issue branch
+      if (a.includes('symbolic-ref')) return resp('origin/master');
+      if (a.includes('status --porcelain')) return resp(' M lib/auth/token.ts\n?? app/api/auth/'); // dirty
+      return resp('');
+    });
+    const r = await ensureIssueBranch({ projectName: 'p', projPath: '/p', issueNumber: 81, issueTitle: 'dry run' });
+    expect(r.status).toBe('skipped');
+    if (r.status === 'skipped') expect(r.reason).toMatch(/uncommitted|stranded|dirty/i);
+    const calls = mocks.exec.mock.calls.map((c) => (c[1] as string[]).join(' '));
+    expect(calls.some((c) => c.includes('checkout -b'))).toBe(false); // never reached the checkout
+  });
+
   it('skips when issue_auto_branch is disabled for the project', async () => {
     const { getProjectTestConfig } = await import('@/lib/scheduling/scheduling');
     (getProjectTestConfig as ReturnType<typeof vi.fn>).mockResolvedValueOnce({ issueAutoBranch: false });

@@ -11,6 +11,7 @@ import { CliTab } from '@/components/settings/CliTab'
 import type { CliTabSettings } from '@/components/settings/CliTab'
 import { GeneralPipelineTab } from '@/components/settings/GeneralPipelineTab'
 import { DatabaseTab } from '@/components/settings/DatabaseTab'
+import { AuthTab } from '@/components/settings/AuthTab'
 import {
   SETTINGS_DEFAULTS,
   TABS,
@@ -265,6 +266,16 @@ export function SettingsPage({ initialTab }: { initialTab?: TabId } = {}) {
             setShowAdvanced={setShowAdvanced}
             setTrustedGithubUsersError={setTrustedGithubUsersError}
           />
+
+          {activeTab === 'auth' && (
+            <AuthTab
+              configured={settings.auth_token_configured === 'true'}
+              onConfiguredChange={(value) => {
+                setSettings((prev) => ({ ...prev, auth_token_configured: value }))
+                setSavedSettings((prev) => ({ ...prev, auth_token_configured: value }))
+              }}
+            />
+          )}
 
           {/* Projects */}
           {activeTab === 'projects' && settings.workspace_path && (

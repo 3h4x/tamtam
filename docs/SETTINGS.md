@@ -14,6 +14,12 @@ All settings stored in the `settings` table (key-value, both TEXT). Accessed via
 
 ## All Keys
 
+### Auth
+
+| Key | Type | Default | Effect |
+|-----|------|---------|--------|
+| `auth_token` | write-only string | unset | Optional shared HTTP auth token. Stored as a scrypt hash in `settings`; `GET /api/settings` exposes only `auth_token_configured`. When set, every UI/API route except `/login`, `/api/health`, and `/api/auth/*` requires `Authorization: Bearer <token>` or the httpOnly `tamtam_auth` cookie. |
+
 ### Workspace
 
 | Key | Type | Default | Effect |

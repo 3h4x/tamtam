@@ -20,7 +20,7 @@ interval. Each tick:
    over-spend.
 3. Picks boost candidates and allocates extra runs (`lib/orchestrator/`:
    `boost-agent-loader.ts`, `budget-allocator.ts`). Unfruitful agents are
-   deprioritized here — see Fruitfulness below.
+   **hard-excluded** from boosts here — see Fruitfulness below.
 4. Runs agent **health analysis** (`lib/orchestrator/agent-health-analysis.ts`)
    over a few candidates, gated + throttled per agent.
 5. Runs the **autopilot** (`lib/orchestrator/agent-autopilot.ts` decision +
@@ -37,7 +37,7 @@ function of role:
 
 | Role | Autopilot policy |
 |------|------------------|
-| `producer` | **Cadence-throttle** one ladder rung on a *sustained* `loop`/`noise` health verdict (`agent_autopilot_concern_streak`). Restored in full on a clean verdict or a fruitful run. Floor-bounded (`agent_autopilot_cadence_floor`), never disabled. |
+| `producer` | **Cadence-throttle** one ladder rung on either (a) a *sustained* `loop`/`noise` health verdict (`agent_autopilot_concern_streak`), or (b) **persistent low fruitfulness** — recent fruitful rate `< UNFRUITFUL_RATE_THRESHOLD` over `≥ UNFRUITFUL_MIN_SAMPLE` runs, which throttles on the first pass (the rate is already a sustained signal). A single fruitful run no longer rescues a chronically-unfruitful producer — recovery (and full cadence restore) requires the rate back at/above threshold *and* a clean verdict / fresh fruitful run. Floor-bounded (`agent_autopilot_cadence_floor`), never disabled. |
 | `monitor` / `reviewer` / `planner` | **Model-downgrade** one tier (smart→normal→fast) after a sustained all-clear streak (`agent_autopilot_idle_streak`). Cadence is never touched (freshness). Tier restored the moment the agent finds something. Floor `agent_autopilot_tier_floor`. |
 | `publisher` (and `kind=system`) | Untouched. |
 
@@ -124,8 +124,18 @@ for the full Phase 1 design.
 - **Fruitfulness** (`lib/agents/fruitfulness.ts`): over the last N *scheduled*
   runs (manual/boost runs are excluded), did the agent change files / move
   lines? Below `UNFRUITFUL_RATE_THRESHOLD` over `UNFRUITFUL_MIN_SAMPLE` runs,
-  the agent is deprioritized for boosts (`budget-allocator.ts`) and an
-  `agent_unfruitful` recommendation is written.
+  the agent is **hard-excluded from boosts** (`budget-allocator.ts` — a bonus
+  fire of an agent that produces nothing is pure waste; a project whose only
+  eligible agents are unfruitful gets no boost), the autopilot **cadence-throttles
+  it** (see the producer policy above), and an `agent_unfruitful` recommendation
+  is written.
+- **Project auto-pause** (`lib/orchestrator/unfruitful-pause.ts`, probe sweep):
+  pauses a whole project when it is **caught up** (last `auto_pause_unfruitful_runs`
+  scheduled runs all no-diff with ≥1 clean nothing-to-do run) **or** **persistently
+  unfruitful** (line-level fruitful rate `< auto_pause_unfruitful_rate` over a wider
+  sample — catches projects that re-touch files for *zero net line change*, which a
+  files-or-lines metric counts as "fruitful" but produces nothing committable).
+  Reversible from Settings; writes an `auto_pause_unfruitful` recommendation.
 - **Health** (`agent-health-analysis.ts`): an LLM reviews the agent's last 3
   runs and returns a verdict (`concern` + `concernType` like loop/noise). On a
   concern it writes an `orchestrator_agent_health` recommendation; on a clean

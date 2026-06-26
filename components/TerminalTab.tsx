@@ -1,6 +1,6 @@
 'use client'
 
-import { useState, useEffect, useRef, useCallback, useSyncExternalStore } from 'react'
+import { useState, useEffect, useRef, useCallback, useMemo, useSyncExternalStore } from 'react'
 import { useRouter, useSearchParams } from 'next/navigation'
 import {
   fetchAgents,
@@ -76,6 +76,7 @@ interface TerminalTabProps {
 
 const IMG_EXT = /\.(png|jpe?g|gif|webp|bmp|tiff?|svg|heic|heif|avif)$/i
 const EMPTY_SEARCH_PARAMS = new URLSearchParams()
+const BYTES_PER_TOKEN_ESTIMATE = 4
 
 export function TerminalTab({ projectName, initialSessionId }: TerminalTabProps) {
   const router = useRouter()
@@ -232,6 +233,7 @@ export function TerminalTab({ projectName, initialSessionId }: TerminalTabProps)
   const [customActions, setCustomActions] = useState<CustomAction[]>([])
   const [agents, setAgents] = useState<Agent[]>([])
   const [suggestedPrompts, setSuggestedPrompts] = useState<SuggestedPrompt[]>([])
+  const [promptEstimateWarnTokens, setPromptEstimateWarnTokens] = useState(50000)
 
   useEffect(() => {
     fetch('/api/settings')
@@ -244,9 +246,31 @@ export function TerminalTab({ projectName, initialSessionId }: TerminalTabProps)
         if (data.settings?.permission_mode) {
           setPermissionMode(normalizePermissionMode(String(data.settings.permission_mode)))
         }
+        const warnTokens = Number(data.settings?.prompt_estimate_warn_tokens)
+        if (Number.isFinite(warnTokens) && warnTokens >= 0) {
+          setPromptEstimateWarnTokens(warnTokens)
+        }
       })
       .catch(() => {})
   }, [])
+
+  const promptEstimateWarning = useMemo(() => {
+    if (promptEstimateWarnTokens <= 0 || claudeSessionId || streaming) return null
+    const promptParts = [
+      ...selectedItems
+        .filter((item) => item.source === 'db' && item.content)
+        .map((item) => `## ${item.name}\n${item.content}`),
+      ...selectedDocs.map((doc) => `## ${doc.name}\n${doc.content}`),
+      input,
+    ].filter(Boolean)
+    const bytes = new TextEncoder().encode(promptParts.join('\n\n---\n\n')).length
+    const estimatedInputTokens = Math.round(bytes / BYTES_PER_TOKEN_ESTIMATE)
+    if (estimatedInputTokens < promptEstimateWarnTokens) return null
+    return {
+      estimatedInputTokens,
+      warnTokens: promptEstimateWarnTokens,
+    }
+  }, [claudeSessionId, input, promptEstimateWarnTokens, selectedDocs, selectedItems, streaming])
 
   const { currentReleaseId: bootstrapReleaseId } = useTerminalBootstrap({
     projectName,
@@ -868,6 +892,7 @@ export function TerminalTab({ projectName, initialSessionId }: TerminalTabProps)
           selectedSkillCount={selectedItems.length}
           selectedDocCount={selectedDocs.length}
           imageCount={pendingImages.length}
+          promptEstimateWarning={promptEstimateWarning}
           slashCommands={slashCommands}
           onSlashCommandSelect={handleSlashCommandSelect}
         />

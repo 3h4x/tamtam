@@ -10,6 +10,7 @@ import { acquireLock, isLockOwnedByActiveRelease } from './pipeline-lock';
 import { tryClaimPipelineStartSlot, setPipelineStartSlotJob, releasePipelineStartSlot } from './pipeline-start-slot';
 import { FIX_OUTPUT_CONTRACT, stripFinalVerdict, stripShimErrors, isReviewContentTooThin } from './review-contract';
 import { isCliProvider } from '@/lib/usage/cli-providers';
+import { estimatePromptCost, promptEstimateResponseDetail } from '@/lib/jobs/prompt-size';
 
 export type StartFixResult =
   | { ok: true; jobId: string; pid: number }
@@ -168,6 +169,16 @@ Do not commit — just make the code changes.${fixAddendum}
 `;
   }
 
+  const fixModel = getPipelineModel('fix');
+  const promptEstimate = estimatePromptCost(prompt, { modelTier: fixModel });
+  if (promptEstimate.blocked) {
+    return {
+      ok: false,
+      status: 413,
+      detail: promptEstimateResponseDetail(promptEstimate),
+    };
+  }
+
   const job = createJob(projectName, 'fix', 0, '', undefined, undefined, undefined, undefined, undefined, undefined, sourceJob.id);
   setPipelineStartSlotJob(releaseId, 'fix', job.id);
   job.provider = provider;
@@ -179,7 +190,7 @@ Do not commit — just make the code changes.${fixAddendum}
   try {
     const pid = await startJobInProcess(
       job.id,
-      `${cliBin} --print --output-format stream-json --include-partial-messages --verbose --model ${getPipelineModel('fix')} ${getPermissionModeFlag()}${resumeSessionId ? ` --resume ${resumeSessionId}` : ''}`,
+      `${cliBin} --print --output-format stream-json --include-partial-messages --verbose --model ${fixModel} ${getPermissionModeFlag()}${resumeSessionId ? ` --resume ${resumeSessionId}` : ''}`,
       prompt,
       projPath,
       { env: cliEnv }

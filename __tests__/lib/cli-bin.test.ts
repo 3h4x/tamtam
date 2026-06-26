@@ -6,6 +6,7 @@ function makeSettings(overrides: Partial<TamTamConfig> = {}): TamTamConfig {
   const base: TamTamConfig = {
     workspace_path: '',
     github_owner: '',
+    auth_token_configured: false,
     trusted_github_users: [],
     github_board_sync_enabled: false,
     github_board_project_owner: '',

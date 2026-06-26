@@ -2,12 +2,12 @@
 
 import { useEffect, useState } from 'react'
 import Link from 'next/link'
-import { usePathname } from 'next/navigation'
+import { usePathname, useRouter } from 'next/navigation'
 import { ThemeToggle } from './ThemeToggle'
 import { NotificationBell } from './NotificationBell'
 import { PrivacyToggle } from './PrivacyToggle'
 import { JobsPauseToggle } from './JobsPauseToggle'
-import { buttonVariants } from '@/components/ui/Button'
+import { Button, buttonVariants } from '@/components/ui/Button'
 import { Pill } from '@/components/ui/Pill'
 import { Spinner } from '@/components/ui/Spinner'
 import { fetchRecommendationsSummary } from '@/lib/client-api'
@@ -41,6 +41,7 @@ const NAV_ITEMS: NavItem[] = [
 
 export function Header({ loading, lastRefresh: _lastRefresh }: HeaderProps) {
   const pathname = usePathname()
+  const router = useRouter()
   const { theme } = useTheme()
   const logoSrc = theme === 'dark' ? '/logo-light.png' : '/logo.png'
 
@@ -61,6 +62,32 @@ export function Header({ loading, lastRefresh: _lastRefresh }: HeaderProps) {
     return () => { live = false; clearInterval(id); window.removeEventListener('tamtam:recommendations-changed', load) }
   }, [])
   const counts: Record<string, number> = { recommendations: recCount }
+  const [authConfigured, setAuthConfigured] = useState(false)
+  const [loggingOut, setLoggingOut] = useState(false)
+
+  useEffect(() => {
+    let live = true
+    fetch('/api/auth/check')
+      .then((res) => res.json().catch(() => ({})))
+      .then((body) => {
+        if (live) setAuthConfigured(body.configured === true)
+      })
+      .catch(() => {
+        if (live) setAuthConfigured(false)
+      })
+    return () => { live = false }
+  }, [])
+
+  async function logout() {
+    if (loggingOut) return
+    setLoggingOut(true)
+    try {
+      await fetch('/api/auth/logout', { method: 'POST' })
+    } finally {
+      router.replace('/login')
+      router.refresh()
+    }
+  }
 
   return (
     <header className="sticky top-0 z-50 flex flex-wrap sm:flex-nowrap items-center px-3 sm:px-6 py-2 border-b border-border bg-bg-primary gap-x-2 gap-y-1 min-w-0">
@@ -105,6 +132,25 @@ export function Header({ loading, lastRefresh: _lastRefresh }: HeaderProps) {
         <JobsPauseToggle />
         <NotificationBell />
         <ThemeToggle />
+        {authConfigured && (
+          <Button
+            type="button"
+            variant="secondary"
+            size="icon-sm"
+            className="h-8 w-8 bg-transparent text-text-secondary hover:border-text-tertiary hover:text-text-primary"
+            onClick={logout}
+            disabled={loggingOut}
+            disabledCursor="wait"
+            title="Sign out"
+            aria-label="Sign out"
+          >
+            <svg width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round">
+              <path d="M6.5 2.5h-3a1 1 0 0 0-1 1v9a1 1 0 0 0 1 1h3" />
+              <path d="M10.5 11.5 14 8l-3.5-3.5" />
+              <path d="M14 8H6" />
+            </svg>
+          </Button>
+        )}
       </div>
     </header>
   )

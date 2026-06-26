@@ -26,6 +26,11 @@ interface LastStats {
   cacheCreateTokens: number
 }
 
+interface PromptEstimateWarning {
+  estimatedInputTokens: number
+  warnTokens: number
+}
+
 interface TerminalInputProps {
   input: string
   streaming: boolean
@@ -49,6 +54,7 @@ interface TerminalInputProps {
   selectedSkillCount?: number
   selectedDocCount?: number
   imageCount?: number
+  promptEstimateWarning?: PromptEstimateWarning | null
   slashCommands?: SlashCommand[]
   onSlashCommandSelect?: (command: SlashCommand) => void
 }
@@ -91,6 +97,7 @@ export function TerminalInput({
   selectedSkillCount = 0,
   selectedDocCount = 0,
   imageCount = 0,
+  promptEstimateWarning = null,
   slashCommands = [],
   onSlashCommandSelect = () => {},
 }: TerminalInputProps) {
@@ -225,6 +232,11 @@ export function TerminalInput({
           {currentJobId && streaming && (
             <StatusItem label="status" valueClassName="text-status-warning">
               streaming
+            </StatusItem>
+          )}
+          {promptEstimateWarning && (
+            <StatusItem label="prompt" valueClassName="text-status-warning tabular-nums">
+              {fmtTokens(promptEstimateWarning.estimatedInputTokens)} est / {fmtTokens(promptEstimateWarning.warnTokens)} warn
             </StatusItem>
           )}
           {lastStats && (

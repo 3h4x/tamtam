@@ -66,6 +66,7 @@ The following fields are automatically protected by default-branch pinning:
 | **`<untrusted>` wrapping** (`lib/shared/untrusted.ts`) | Wraps GitHub issue/PR text so Claude treats it as data, not instructions |
 | **Sandbox** (issue #51) | Runtime: limits filesystem/network access of agent processes |
 | **PR-branch execution gate** (`lib/security/pr-branch-execution.ts`) | Refuses host-side project-code execution on non-default branches unless the checkout is clean, the current branch is known, and every branch commit SHA can be resolved through GitHub to an `author.login` in `safe_users` / `trusted_github_users`, or the caller explicitly approves the supported test-run override; also blocks auto-merge when the GitHub PR diff touches dependency manifests, build scripts, workflow files, Dockerfiles, Makefiles, or JS/TS config files |
+| **Shared-token HTTP auth** (`middleware.ts`, `app/api/auth/*`) | When `auth_token` is configured, every UI/API request except `/login`, `/api/health`, and `/api/auth/*` must carry a valid bearer token or the httpOnly `tamtam_auth` cookie |
 
 These layers are independent and complementary. Pinning stops the _registration_ of malicious agents; sandboxing limits what registered agents can do; untrusted wrapping stops prompt injection from issue/PR bodies.
 
@@ -78,6 +79,23 @@ For issue-driven automation, TamTam gates the full issue context server-side bef
 5. Creates, reuses, or checks out the issue branch server-side before returning success, so the agent receives branch metadata instead of running branch-switching git commands itself.
 
 The issue-cruncher skill prompt forbids the agent from calling `gh issue view`, `gh issue list`, `gh issue read`, or `gh api repos/*/issues/*` directly — those are the read paths that bring raw external text into context. It also forbids `git checkout` and `git switch` because branch movement is owned by TamTam's server-side prerequisite. The run command passes Claude `--disallowed-tools` rules for `gh issue:*`, the issue-reading `gh api` paths, and the git branch-switch primitives as defense-in-depth. Issue write actions use TamTam's `issue-comment`, `issue-close`, and `issue-label` API routes instead of direct `gh issue` commands so repo resolution, allowed input shape, and cache invalidation stay server-side. This is "drop > wrap": when filtering at the source is feasible, untrusted content never reaches the LLM, which is strictly stronger than wrapping it in `<untrusted>` and relying on the model to honor the system preamble (the wrap pattern stays in use for PR-review flows where the diff itself is the work). Drop-at-source is implemented in `app/api/projects/by-project/[projectName]/issues/route.ts` (`handlePickTop` + `filterTrustedComments`).
+
+### HTTP Authentication
+
+TamTam defaults to localhost-only dev mode. In that mode `auth_token` is unset and startup logs:
+
+```text
+[auth] TamTam is running without auth — only safe on localhost
+```
+
+For any LAN, tunnel, reverse-proxy, or hosted deployment, enable Settings → Auth → Generate token. The generated token is shown once, hashed with scrypt in the existing `settings` table, and never returned by `GET /api/settings`. Middleware checks every non-public request before route execution:
+
+- API clients use `Authorization: Bearer <token>`.
+- Browser users sign in at `/login`; `/api/auth/login` verifies the token and sets the httpOnly `tamtam_auth` cookie.
+- `/api/streaming/[jobId]` works through the cookie path because EventSource cannot attach custom headers.
+- `/api/health` remains public for load balancers and smoke probes.
+
+Rotating the token invalidates future bearer/cookie checks that use the old token. Existing browser cookies contain the old token and must log in again.
 
 ### Host Command Execution on PR Branches
 

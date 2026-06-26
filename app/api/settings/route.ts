@@ -27,6 +27,7 @@ import {
   canonicalizeTrustedGithubUsers,
   validateTrustedGithubUsersInput,
 } from '@/lib/shared/trusted-github-users';
+import { hashAuthToken } from '@/lib/auth/token';
 
 function firstEnabledProvider(value: string | null | undefined): string {
   const enabled = parseEnabledProviders(value);
@@ -128,8 +129,10 @@ async function buildSettingsResponse(): Promise<Record<string, string>> {
   const settings: Record<string, string> = {};
   for (const row of rows) {
     if (!SETTING_KEYS.includes(row.key as (typeof SETTING_KEYS)[number])) continue;
+    if (row.key === 'auth_token') continue;
     settings[row.key] = serializeSettingValue(row.key, row.value);
   }
+  settings.auth_token_configured = rowMap.auth_token ? 'true' : 'false';
 
   const effective = buildConfigFromSettingsMap(rowMap);
   settings.claude_provider = serializeSettingValue('claude_provider', effective.claude_provider);
@@ -188,6 +191,7 @@ const SETTING_KEYS = [
   'daytime',
   'weekends',
   'workspace_path',
+  'auth_token',
   'base_prompt',
   'default_model',
   'permission_mode',
@@ -275,6 +279,7 @@ const SETTING_KEYS = [
 ] as const;
 
 function serializeSettingValue(key: string, value: unknown): string {
+  if (key === 'auth_token') return '';
   if (key === 'trusted_github_users') {
     if (Array.isArray(value)) return canonicalizeTrustedGithubUsers(value).join(', ');
     try { return canonicalizeTrustedGithubUsers(JSON.parse(String(value))).join(', '); } catch {}
@@ -355,6 +360,15 @@ function validateAndSerializeSettingValue(
 ): { value: string | null; error: string | null } {
   if (key === 'trusted_github_users' && typeof value === 'string' && value.trim() === '') {
     return { value: null, error: null };
+  }
+
+  if (key === 'auth_token') {
+    if (value === null || value === '') return { value: null, error: null };
+    const token = String(value).trim();
+    if (token.length < 32) {
+      return { value: null, error: 'auth_token must be at least 32 characters.' };
+    }
+    return { value: hashAuthToken(token), error: null };
   }
 
   if (value === null || value === '') {

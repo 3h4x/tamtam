@@ -15,6 +15,7 @@ import { withBasePrompt, getPermissionModeFlag, getSettings, getPipelineModel } 
 import { loadFileConfig } from '@/lib/skills/tamtam-file-config';
 import { resolveAutoAttachedDocs, formatAutoAttachedDocsBlock } from '@/lib/skills/auto-attach-docs';
 import { checkPrBranchExecutionGate } from '@/lib/security/pr-branch-execution';
+import { estimatePromptCost, promptEstimateResponseDetail } from '@/lib/jobs/prompt-size';
 import { getLock, acquireLock, isLockOwnedByActiveRelease } from './pipeline-lock';
 import { tryClaimPipelineStartSlot, setPipelineStartSlotJob, releasePipelineStartSlot } from './pipeline-start-slot';
 import { extractFindingIds, REVIEW_OUTPUT_CONTRACT, stripFinalVerdict } from './review-contract';
@@ -403,6 +404,14 @@ export async function startProjectReview(
     : renderedReviewPrompt;
 
   const prompt = withBasePrompt(promptWithDocs, { projectPath: projPath, provider });
+  const promptEstimate = estimatePromptCost(prompt, { modelTier: reviewModel });
+  if (promptEstimate.blocked) {
+    return {
+      ok: false,
+      status: 413,
+      detail: promptEstimateResponseDetail(promptEstimate),
+    };
+  }
 
   const contextMeta = autoDocs.length > 0
     ? JSON.stringify({ autoAttachedDocs: autoDocs.map((d) => d.rulePath) })

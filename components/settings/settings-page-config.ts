@@ -3,6 +3,7 @@ import { DEFAULTS } from '@/components/settings/constants'
 export interface SettingsMap {
   workspace_path: string
   github_owner: string
+  auth_token_configured: string
   trusted_github_users: string
   github_board_sync_enabled: string
   github_board_project_owner: string
@@ -115,6 +116,7 @@ export interface SettingsMap {
 export const SETTINGS_DEFAULTS: SettingsMap = {
   ...DEFAULTS,
   github_board_sync_enabled: 'false',
+  auth_token_configured: 'false',
   github_board_project_owner: '',
   github_board_project_title: 'TamTam',
   github_board_project_number: '',
@@ -173,7 +175,7 @@ export const SETTINGS_DEFAULTS: SettingsMap = {
   initiative_mining_interval_minutes: '60',
 }
 
-export type TabId = 'general' | 'cli' | 'pipeline' | 'projects' | 'database' | 'templates' | 'notifications'
+export type TabId = 'general' | 'auth' | 'cli' | 'pipeline' | 'projects' | 'database' | 'templates' | 'notifications'
 
 export type TabLayoutEntry =
   | { kind: 'subsection'; id: string }
@@ -205,6 +207,7 @@ export const TAB_LAYOUT: Partial<Record<TabId, TabLayoutEntry[]>> = {
 
 export const TABS: { id: TabId; label: string }[] = [
   { id: 'general',       label: 'General' },
+  { id: 'auth',          label: 'Auth' },
   { id: 'cli',           label: 'CLI' },
   { id: 'pipeline',      label: 'Pipeline' },
   { id: 'notifications', label: 'Notifications' },

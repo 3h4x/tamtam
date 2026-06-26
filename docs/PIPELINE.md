@@ -119,6 +119,38 @@ There is no longer a per-project pipeline mode selector. Push behavior is decide
 
 `start-push.ts` uses this helper for non-issue releases. Issue-linked pushes still always create an issue PR.
 
+### Issue runs branch at run start, not at commit time
+
+An issue-context run (any agent run with a `ghIssueNumber`, dispatched via the
+issue-cruncher `pick_top` path **or** `POST /api/projects/by-project/[name]/run`)
+checks out its `fix/issue-<n>-<slug>` branch **before the agent process spawns**,
+via `ensureIssueBranch` (`lib/github/issue-branch.ts`), wired into both
+`lib/agents/intake-workflow.ts` (`startAgentStep`) and the run route. Previously
+the switch happened only in the commit phase, so an issue's half-finished changes
+sat exposed on the default branch for the whole run — where a concurrent release
+or scheduled agent could sweep them into an unrelated commit. `ensureIssueBranch`
+cuts the branch from **fresh `origin/<default>`** (fetch first, fall back to local
+HEAD), is idempotent (`already-on-branch` → no-op), honours the project's
+`issue_auto_branch` opt-out, and on any failure logs and lets the run proceed on
+the current branch (the commit-phase switch remains the backstop). The branch is
+born on top of current `origin/<default>`, which is the root fix for "PRs suddenly
+conflict even though only we touch the repo."
+
+### Releases serialize across the `pr-wait` window
+
+A release that opened a PR sits in `pr-wait` with the pipeline lock **released**
+(so it can poll without holding it). `pr-wait` runs with an inline sentinel
+pid (0), which `probeJobStatus` cannot recognize as `running`, so
+`isReleasePipelineRunning` misses it. Without a guard a second release would
+start, open a second PR, and the two would race the same base — the loser
+conflicts on merge. `findActivePrWait` (`start-release.ts`) is a
+probe-independent check: any non-finished `pr-wait` job blocks/queues a new
+release until it clears, so the default branch stays frozen from issue-work start
+through merge. Bounded by a 120-minute wall-clock backstop (the release-timeout
+watchdog also aborts a hung release, which sets `finishedAt` and clears the
+guard). Scheduled agents are already serialized here via `agent-cron`'s
+`pr-wait in flight` / `release pipeline is running` skip reasons.
+
 ---
 
 ## When to read this
