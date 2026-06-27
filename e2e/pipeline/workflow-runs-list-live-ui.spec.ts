@@ -321,22 +321,30 @@ test.describe('Workflow runs list live polling', () => {
     phase = 'running';
 
     const activePanel = page.getByLabel('Active workflow runs');
+    const runningRow = activePanel.getByRole('link', { name: /state running/i }).first();
     await expect(activePanel).toBeVisible({ timeout: 12_000 });
-    await expect(activePanel.getByLabel('status running').first()).toBeVisible({
+    await expect(runningRow).toBeVisible({ timeout: 12_000 });
+    await expect(runningRow.getByLabel('status running')).toBeVisible({
       timeout: 12_000,
     });
+    await expect(runningRow.locator('.animate-spin')).toBeVisible({ timeout: 12_000 });
     await expect(activePanel.getByText(PROJECT)).toBeVisible({ timeout: 12_000 });
+    await expect(page.getByText('1 running')).toBeVisible({ timeout: 12_000 });
 
     phase = 'failed';
 
     const attentionPanel = page.getByLabel('Workflow runs needing attention');
+    const failedRow = attentionPanel.getByRole('link', { name: /state failed/i }).first();
     await expect(attentionPanel).toBeVisible({ timeout: 12_000 });
-    await expect(attentionPanel.getByLabel('status failed')).toBeVisible({ timeout: 12_000 });
-    await expect(attentionPanel.getByText('release orchestration failed after push')).toBeVisible({
+    await expect(failedRow).toBeVisible({ timeout: 12_000 });
+    await expect(failedRow.getByLabel('status failed')).toBeVisible({ timeout: 12_000 });
+    await expect(failedRow.locator('.animate-spin')).toHaveCount(0);
+    await expect(failedRow.getByText('release orchestration failed after push')).toBeVisible({
       timeout: 12_000,
     });
     await expect(activePanel).toHaveCount(0, { timeout: 12_000 });
     await expect(page.getByRole('button', { name: /failed 1/i })).toBeVisible({ timeout: 12_000 });
+    await expect(page.getByText('1 running')).toHaveCount(0, { timeout: 12_000 });
   });
 
   test('page already open picks up a newly-started run, then settles to cancelled without leaving a spinner', async ({
