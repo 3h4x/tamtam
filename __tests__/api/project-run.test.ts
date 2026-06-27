@@ -41,6 +41,8 @@ const state = vi.hoisted(() => {
     prepareBrokerRun: vi.fn(),
     enqueueTerminalRun: vi.fn().mockResolvedValue({ queueId: 'q-1', position: 1 }),
     drainNextTerminalRun: vi.fn().mockResolvedValue(undefined),
+    getQueuedTerminalRun: vi.fn(),
+    markQueuedTerminalRunStarted: vi.fn().mockResolvedValue(true),
     projectRows: [] as Array<Record<string, unknown>>,
   };
   return {
@@ -71,6 +73,8 @@ vi.mock('@/lib/terminal/pending-terminal-run', () => ({
   TERMINAL_DRAIN_HEADER: 'x-tamtam-terminal-drain',
   enqueueTerminalRun: (...args: unknown[]) => state.fns.enqueueTerminalRun(...args),
   drainNextTerminalRun: (...args: unknown[]) => state.fns.drainNextTerminalRun(...args),
+  getQueuedTerminalRun: (...args: unknown[]) => state.fns.getQueuedTerminalRun(...args),
+  markQueuedTerminalRunStarted: (...args: unknown[]) => state.fns.markQueuedTerminalRunStarted(...args),
 }));
 vi.mock('@/lib/browser-broker/prepare-run', () => ({
   prepareBrokerRun: (...args: unknown[]) => state.fns.prepareBrokerRun(...args),
@@ -165,6 +169,15 @@ describe('POST /api/projects/by-project/{projectName}/run', () => {
     state.fns.prepareBrokerRun.mockReset().mockResolvedValue(null);
     state.fns.enqueueTerminalRun.mockReset().mockResolvedValue({ queueId: 'q-1', position: 1 });
     state.fns.drainNextTerminalRun.mockReset().mockResolvedValue(undefined);
+    state.fns.getQueuedTerminalRun.mockReset().mockResolvedValue({
+      id: 'q-1',
+      project: 'proj1',
+      enqueuedAt: 1,
+      payload: { prompt: 'run my agent' },
+      status: 'pending',
+      startedJobId: null,
+    });
+    state.fns.markQueuedTerminalRunStarted.mockReset().mockResolvedValue(true);
     state.fns.projectRows = [];
 
     POST = (await routeModulePromise).POST;
@@ -343,6 +356,55 @@ describe('POST /api/projects/by-project/{projectName}/run', () => {
     expect(data.blocking_job_id).toBe('run-456');
     expect(state.fns.enqueueTerminalRun).not.toHaveBeenCalled();
     expect(state.fns.startJob).not.toHaveBeenCalled();
+  });
+
+  it('returns an already-started job id for a repeated drain replay', async () => {
+    state.fns.getQueuedTerminalRun.mockResolvedValue({
+      id: 'q-1',
+      project: 'proj1',
+      enqueuedAt: 1,
+      payload: { prompt: 'run my agent' },
+      status: 'started',
+      startedJobId: 'job-existing',
+    });
+    const req = new NextRequest('http://localhost/api/projects/by-project/proj1/run', {
+      method: 'POST',
+      headers: { 'content-type': 'application/json', 'x-tamtam-terminal-drain': 'q-1' },
+      body: JSON.stringify({ prompt: 'run my agent' }),
+    });
+
+    const res = await POST(req, { params: Promise.resolve({ projectName: 'proj1' }) });
+    const data = await res.json();
+
+    expect(res.status).toBe(200);
+    expect(data).toMatchObject({ status: 'started', job_id: 'job-existing' });
+    expect(state.fns.createJob).not.toHaveBeenCalled();
+    expect(state.fns.startJob).not.toHaveBeenCalled();
+  });
+
+  it('claims a drain replay queue row with the job id before spawning the job', async () => {
+    const order: string[] = [];
+    state.fns.markQueuedTerminalRunStarted.mockImplementation(async () => {
+      order.push('claim');
+      return true;
+    });
+    state.fns.startJob.mockImplementation(async () => {
+      order.push('start');
+      return 99999;
+    });
+    const req = new NextRequest('http://localhost/api/projects/by-project/proj1/run', {
+      method: 'POST',
+      headers: { 'content-type': 'application/json', 'x-tamtam-terminal-drain': 'q-1' },
+      body: JSON.stringify({ prompt: 'run my agent' }),
+    });
+
+    const res = await POST(req, { params: Promise.resolve({ projectName: 'proj1' }) });
+    const data = await res.json();
+
+    expect(res.status).toBe(200);
+    expect(data.job_id).toBe('test-job-id');
+    expect(state.fns.markQueuedTerminalRunStarted).toHaveBeenCalledWith('q-1', 'proj1', 'test-job-id');
+    expect(order).toEqual(['claim', 'start']);
   });
 
   it('calls startJob with correct project path', async () => {

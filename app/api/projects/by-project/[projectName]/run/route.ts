@@ -16,7 +16,13 @@ import { resolveCliBin, resolveCliEnv } from '@/lib/shared/cli-bin';
 import { checkCliStartGate } from '@/lib/usage/resolve-provider';
 import { isCliProvider } from '@/lib/usage/cli-providers';
 import { findBlockingRunningJob } from '@/lib/jobs/project-active-job';
-import { enqueueTerminalRun, drainNextTerminalRun, TERMINAL_DRAIN_HEADER } from '@/lib/terminal/pending-terminal-run';
+import {
+  enqueueTerminalRun,
+  drainNextTerminalRun,
+  getQueuedTerminalRun,
+  markQueuedTerminalRunStarted,
+  TERMINAL_DRAIN_HEADER,
+} from '@/lib/terminal/pending-terminal-run';
 import { loadFileConfig } from '@/lib/skills/tamtam-file-config';
 import { resolveAutoAttachedDocs, formatAutoAttachedDocsBlock } from '@/lib/skills/auto-attach-docs';
 import {
@@ -32,6 +38,19 @@ export async function POST(
 
   const projPath = resolveProjectPath(projectName);
   if (!projPath) return NextResponse.json({ detail: 'project not found' }, { status: 404 });
+  const drainQueueId = request.headers.get(TERMINAL_DRAIN_HEADER)?.trim() || null;
+  if (drainQueueId) {
+    const existingQueuedRun = await getQueuedTerminalRun(drainQueueId);
+    if (!existingQueuedRun || existingQueuedRun.project !== projectName) {
+      return NextResponse.json({ detail: 'queued terminal run not found' }, { status: 404 });
+    }
+    if (existingQueuedRun.status === 'started' && existingQueuedRun.startedJobId) {
+      return NextResponse.json({
+        status: 'started',
+        job_id: existingQueuedRun.startedJobId,
+      });
+    }
+  }
   const { logDir } = getImproveConfig();
 
   let prompt = '';
@@ -113,7 +132,7 @@ export async function POST(
     // arbitrary filesystem paths to exfiltrate any file the server can read.
     // The header is client-settable, so the realpath containment check — not
     // the header alone — is the actual security boundary.
-    if (request.headers.get(TERMINAL_DRAIN_HEADER) && Array.isArray(body.attachmentPaths)) {
+    if (drainQueueId && Array.isArray(body.attachmentPaths)) {
       const attachRoot = join(process.cwd(), 'data', 'attachments');
       let realRoot: string | null = null;
       try { realRoot = realpathSync(/*turbopackIgnore: true*/ attachRoot); } catch { realRoot = null; }
@@ -161,7 +180,7 @@ export async function POST(
     // A drain replay (header set) must NOT re-enqueue — it lost the race to a
     // job that started between the drain's blocking-check and this point. Keep
     // the existing queue row by returning 409; the next finish-seam retries.
-    const isDrainReplay = !!request.headers.get(TERMINAL_DRAIN_HEADER);
+    const isDrainReplay = !!drainQueueId;
     if (isDrainReplay) {
       return NextResponse.json({
         detail: `Job '${blockingJob.kind}' is already running for ${projectName} (job ${blockingJob.id})`,
@@ -323,6 +342,25 @@ export async function POST(
   // success and a recovery aid on failure.
   if (resumeSessionId) {
     job.sessionId = resumeSessionId;
+  }
+  if (drainQueueId) {
+    const claimed = await markQueuedTerminalRunStarted(drainQueueId, projectName, job.id);
+    if (!claimed) {
+      const existingQueuedRun = await getQueuedTerminalRun(drainQueueId);
+      if (existingQueuedRun?.project === projectName && existingQueuedRun.status === 'started' && existingQueuedRun.startedJobId) {
+        job.finishedAt = Date.now() / 1000;
+        job.exitCode = -1;
+        updateJob(job);
+        return NextResponse.json({
+          status: 'started',
+          job_id: existingQueuedRun.startedJobId,
+        });
+      }
+      job.finishedAt = Date.now() / 1000;
+      job.exitCode = -1;
+      updateJob(job);
+      return NextResponse.json({ detail: 'queued terminal run not found' }, { status: 404 });
+    }
   }
 
   let cmd = `${claudeBin} --print --output-format stream-json --include-partial-messages --verbose --model ${model} ${getPermissionModeFlag(permissionModeOverride || null)}`;

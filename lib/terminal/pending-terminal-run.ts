@@ -110,6 +110,23 @@ export async function getQueuedTerminalRun(queueId: string): Promise<QueuedTermi
   return rows[0] ? rowToEntry(rows[0]) : null;
 }
 
+export async function markQueuedTerminalRunStarted(
+  queueId: string,
+  project: string,
+  jobId: string,
+): Promise<boolean> {
+  const rows = await db
+    .update(schema.queuedTerminalRuns)
+    .set({ status: 'started', startedJobId: jobId })
+    .where(and(
+      eq(schema.queuedTerminalRuns.id, queueId),
+      eq(schema.queuedTerminalRuns.project, project),
+      eq(schema.queuedTerminalRuns.status, 'pending'),
+    ))
+    .returning({ id: schema.queuedTerminalRuns.id });
+  return rows.length > 0;
+}
+
 export async function cancelQueuedTerminalRun(queueId: string): Promise<boolean> {
   const rows = await db
     .delete(schema.queuedTerminalRuns)
@@ -181,10 +198,6 @@ export async function drainNextTerminalRun(project: string): Promise<void> {
     if (r.ok) {
       const data = await r.json().catch(() => ({} as { job_id?: string }));
       const jobId = (data as { job_id?: string }).job_id ?? null;
-      await db.update(schema.queuedTerminalRuns)
-        .set({ status: 'started', startedJobId: jobId })
-        .where(eq(schema.queuedTerminalRuns.id, head.id))
-        .execute();
       console.log(`[pending-terminal-run] drained ${head.id} for ${project} → job ${jobId}`);
       // More may be queued behind this one; they remain blocked by the run we
       // just started and drain when it finishes.

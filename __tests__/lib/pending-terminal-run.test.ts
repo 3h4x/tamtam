@@ -29,6 +29,7 @@ import {
   listQueuedTerminalRuns,
   hasPendingTerminalRun,
   getQueuedTerminalRun,
+  markQueuedTerminalRunStarted,
   cancelQueuedTerminalRun,
   listQueuedTerminalRunProjects,
   drainNextTerminalRun,
@@ -130,9 +131,29 @@ describe('drainNextTerminalRun', () => {
 
   it('marks the head started with the returned job id on a successful replay', async () => {
     const { queueId } = await enqueueTerminalRun('proj', { prompt: 'go' });
-    const fetchSpy = vi.fn().mockResolvedValue(fakeResponse({ ok: true, status: 200, jobId: 'job-42' }));
+    const fetchSpy = vi.fn().mockImplementation(async () => {
+      await markQueuedTerminalRunStarted(queueId, 'proj', 'job-42');
+      return fakeResponse({ ok: true, status: 200, jobId: 'job-42' });
+    });
     vi.stubGlobal('fetch', fetchSpy);
 
+    await drainNextTerminalRun('proj');
+
+    expect(fetchSpy).toHaveBeenCalledOnce();
+    const entry = await getQueuedTerminalRun(queueId);
+    expect(entry?.status).toBe('started');
+    expect(entry?.startedJobId).toBe('job-42');
+  });
+
+  it('does not leave the head pending when the replay times out after the route claimed it', async () => {
+    const { queueId } = await enqueueTerminalRun('proj', { prompt: 'go' });
+    const fetchSpy = vi.fn().mockImplementation(async () => {
+      await markQueuedTerminalRunStarted(queueId, 'proj', 'job-42');
+      throw new DOMException('The operation was aborted.', 'TimeoutError');
+    });
+    vi.stubGlobal('fetch', fetchSpy);
+
+    await drainNextTerminalRun('proj');
     await drainNextTerminalRun('proj');
 
     expect(fetchSpy).toHaveBeenCalledOnce();
