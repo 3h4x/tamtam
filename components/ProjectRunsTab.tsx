@@ -9,6 +9,7 @@ import {
 import type { AutomationQueueItem, JobInfo } from '@/lib/client-api'
 import { Button, buttonVariants } from '@/components/ui/Button'
 import { ErrorCallout } from '@/components/ui/ErrorCallout'
+import { Spinner } from '@/components/ui/Spinner'
 import {
   dayKey,
   dayLabel,
@@ -511,7 +512,14 @@ export function ProjectRunsTab({ projectName, jobsPaused = false }: ProjectRunsT
                 variant="secondary"
                 size="md"
               >
-                {loadingMore ? 'Loading…' : `Load older (${totalJobs - jobs.length} remaining)`}
+                {loadingMore ? (
+                  <>
+                    <Spinner size="sm" shrink aria-label="Loading" role="status" />
+                    <span>Loading...</span>
+                  </>
+                ) : (
+                  `Load older (${totalJobs - jobs.length} remaining)`
+                )}
               </Button>
             </div>
           )}
