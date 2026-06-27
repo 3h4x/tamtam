@@ -2,6 +2,7 @@
 
 import { useMemo, useState } from 'react'
 import { useAgentCatalog, type AgentCatalogClientEntry } from '@/hooks/useAgentCatalog'
+import { buttonVariants } from '@/components/ui/Button'
 import { EmptyState } from '@/components/ui/EmptyState'
 import { Pill } from '@/components/ui/Pill'
 import { InlineLoading } from '@/components/ui/InlineLoading'
@@ -163,7 +164,10 @@ function AgentCatalogRow({ entry }: { entry: AgentCatalogClientEntry }) {
                 href={ref.url}
                 target="_blank"
                 rel="noreferrer noopener"
-                className="underline decoration-text-tertiary/40 hover:text-accent hover:decoration-accent"
+                className={buttonVariants({
+                  variant: 'link',
+                  className: 'text-[10px] text-text-tertiary underline decoration-text-tertiary/40 hover:text-accent hover:decoration-accent',
+                })}
               >
                 {ref.label}
               </a>
