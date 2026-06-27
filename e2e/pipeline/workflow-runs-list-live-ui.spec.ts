@@ -339,6 +339,54 @@ test.describe('Workflow runs list live polling', () => {
     await expect(page.getByRole('button', { name: /failed 1/i })).toBeVisible({ timeout: 12_000 });
   });
 
+  test('page already open picks up a newly-started run, then settles to cancelled without leaving a spinner', async ({
+    page,
+  }) => {
+    let phase: 'idle' | 'running' | 'cancelled' = 'idle';
+
+    await stubWorkflowRunsShell(page);
+    await stubWorkflowRuns(page, () => {
+      if (phase === 'idle') return [];
+      if (phase === 'running') return [makeRun('running')];
+      return [makeRun('cancelled', { error: 'release was cancelled before completion' })];
+    });
+
+    await page.goto('/workflow-runs');
+
+    await expect(page.getByRole('heading', { name: 'Activity' })).toBeVisible({
+      timeout: 8_000,
+    });
+    await expect(page.getByLabel('Active workflow runs')).toHaveCount(0);
+    await expect(page.getByLabel('Workflow runs needing attention')).toHaveCount(0);
+
+    phase = 'running';
+
+    const activePanel = page.getByLabel('Active workflow runs');
+    const runningRow = activePanel.getByRole('link', { name: /state running/i }).first();
+    await expect(activePanel).toBeVisible({ timeout: 12_000 });
+    await expect(runningRow).toBeVisible({ timeout: 12_000 });
+    await expect(runningRow.getByLabel('status running')).toBeVisible({ timeout: 12_000 });
+    await expect(runningRow.locator('.animate-spin')).toBeVisible({ timeout: 12_000 });
+    await expect(page.getByText('1 running')).toBeVisible({ timeout: 12_000 });
+
+    phase = 'cancelled';
+
+    const attentionPanel = page.getByLabel('Workflow runs needing attention');
+    const cancelledRow = attentionPanel.getByRole('link', { name: /state cancelled/i }).first();
+    await expect(activePanel).toHaveCount(0, { timeout: 12_000 });
+    await expect(cancelledRow).toBeVisible({ timeout: 12_000 });
+    await expect(cancelledRow.getByLabel('status cancelled')).toBeVisible({ timeout: 12_000 });
+    await expect(cancelledRow.locator('.animate-spin')).toHaveCount(0);
+    await expect(cancelledRow.getByText('release was cancelled before completion')).toBeVisible({
+      timeout: 12_000,
+    });
+    await expect(cancelledRow.getByText('exit -3')).toHaveCount(0);
+    await expect(page.getByRole('button', { name: /^cancelled 1$/i })).toBeVisible({
+      timeout: 12_000,
+    });
+    await expect(page.getByText('1 running')).toHaveCount(0, { timeout: 12_000 });
+  });
+
   test('active run moves to completed outcome without reload', async ({ page }) => {
     let serveRunning = true;
 
