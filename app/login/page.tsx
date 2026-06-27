@@ -3,6 +3,7 @@
 import { Suspense, useState } from 'react'
 import { useRouter, useSearchParams } from 'next/navigation'
 import { Button } from '@/components/ui/Button'
+import { ErrorCallout } from '@/components/ui/ErrorCallout'
 import { Input } from '@/components/ui/Input'
 
 function LoginForm() {
@@ -47,7 +48,11 @@ function LoginForm() {
           autoFocus
           onChange={(e) => setToken(e.target.value)}
         />
-        {error && <p className="mt-3 text-sm text-status-error">{error}</p>}
+        {error && (
+          <ErrorCallout padding="none" preWrap={false} className="mt-3 border-0 bg-transparent text-sm">
+            {error}
+          </ErrorCallout>
+        )}
         <Button type="submit" className="mt-5 w-full justify-center" disabled={submitting || !token.trim()}>
           {submitting ? 'Signing in...' : 'Sign in'}
         </Button>
