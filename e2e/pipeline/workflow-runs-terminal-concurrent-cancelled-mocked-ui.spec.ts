@@ -654,4 +654,194 @@ test.describe('Mocked workflow-runs and terminal concurrent cancellation lifecyc
       timeout: 12_000,
     });
   });
+
+  test('both terminals and workflow-runs settle independently when one concurrent release completes and the other is cancelled in the same poll', async ({
+    page,
+  }) => {
+    let phase: 'idle' | 'both-running' | 'settled' = 'idle';
+    let finishSuccessStream!: () => void;
+    let finishCancelledStream!: () => void;
+    const successStreamDone = new Promise<void>((resolve) => {
+      finishSuccessStream = resolve;
+    });
+    const cancelledStreamDone = new Promise<void>((resolve) => {
+      finishCancelledStream = resolve;
+    });
+
+    await stubSharedRoutes(
+      page.context(),
+      () => {
+        if (phase === 'idle') return [];
+        if (phase === 'both-running') {
+          return [
+            workflowRun(SUCCESS_PROJECT, 'running'),
+            workflowRun(CANCELLED_PROJECT, 'running'),
+          ];
+        }
+        return [
+          workflowRun(SUCCESS_PROJECT, 'completed', { output: { verdict: 'LGTM' } }),
+          workflowRun(CANCELLED_PROJECT, 'cancelled'),
+        ];
+      },
+      () => {
+        if (phase === 'idle') return [];
+        if (phase === 'both-running') {
+          return [runningReleaseJob(SUCCESS_PROJECT, SUCCESS_RELEASE_ID, now() - 8)];
+        }
+        return [finishedReleaseJob(SUCCESS_PROJECT, SUCCESS_RELEASE_ID)];
+      },
+      () => (
+        phase === 'both-running'
+          ? [runningReleaseJob(CANCELLED_PROJECT, CANCELLED_RELEASE_ID, now() - 9)]
+          : []
+      ),
+    );
+
+    await page.context().route(`**/api/jobs/${SUCCESS_RELEASE_ID}`, (route: Route) => {
+      if (phase === 'idle') {
+        return route.fulfill({ status: 404, json: { error: 'Job not found' } });
+      }
+      return route.fulfill({
+        json:
+          phase === 'both-running'
+            ? runningReleaseJob(SUCCESS_PROJECT, SUCCESS_RELEASE_ID, now() - 8)
+            : finishedReleaseJob(SUCCESS_PROJECT, SUCCESS_RELEASE_ID),
+      });
+    });
+    await page.context().route(`**/api/jobs/${CANCELLED_RELEASE_ID}`, (route: Route) => {
+      if (phase === 'idle') {
+        return route.fulfill({ status: 404, json: { error: 'Job not found' } });
+      }
+      return route.fulfill({
+        json:
+          phase === 'both-running'
+            ? runningReleaseJob(CANCELLED_PROJECT, CANCELLED_RELEASE_ID, now() - 9)
+            : {
+                ...runningReleaseJob(CANCELLED_PROJECT, CANCELLED_RELEASE_ID, now() - 9),
+                status: 'done',
+                exit_code: -3,
+                finished_at: now() - 1,
+                log: 'Mocked cancelled release stopped before the commit step completed.\n',
+                detail: CANCELLED_DETAIL,
+              },
+      });
+    });
+    await page.context().route(`**/api/streaming/${SUCCESS_RELEASE_ID}`, async (route: Route) => {
+      await successStreamDone;
+      await route.fulfill({
+        status: 200,
+        headers: {
+          'content-type': 'text/event-stream',
+          'cache-control': 'no-cache',
+        },
+        body: [
+          `data: ${SUCCESS_RELEASE_OUTPUT}`,
+          '',
+          'event: done',
+          `data: ${JSON.stringify({
+            exitCode: 0,
+            provider: 'claude',
+            duration: 1600,
+          })}`,
+          '',
+        ].join('\n'),
+      });
+    });
+    await page.context().route(`**/api/streaming/${CANCELLED_RELEASE_ID}`, async (route: Route) => {
+      await cancelledStreamDone;
+      await route.fulfill({
+        status: 200,
+        headers: {
+          'content-type': 'text/event-stream',
+          'cache-control': 'no-cache',
+        },
+        body: [
+          'data: Mocked cancelled release stopped before the commit step completed.',
+          '',
+          'event: done',
+          `data: ${JSON.stringify({
+            exitCode: -3,
+            provider: 'claude',
+            detail: CANCELLED_DETAIL,
+            duration: 900,
+          })}`,
+          '',
+        ].join('\n'),
+      });
+    });
+
+    const successTerminalPage = await page.context().newPage();
+    const cancelledTerminalPage = await page.context().newPage();
+    await Promise.all([
+      page.goto('/workflow-runs'),
+      successTerminalPage.goto(`/project/${SUCCESS_PROJECT}/terminal`),
+      cancelledTerminalPage.goto(`/project/${CANCELLED_PROJECT}/terminal`),
+    ]);
+
+    await expect(page.getByText('No workflow runs yet')).toBeVisible({ timeout: 8_000 });
+    await expect(successTerminalPage.getByRole('button', { name: 'new' })).toBeVisible({
+      timeout: 8_000,
+    });
+    await expect(cancelledTerminalPage.getByRole('button', { name: 'new' })).toBeVisible({
+      timeout: 8_000,
+    });
+
+    phase = 'both-running';
+
+    const activePanel = page.getByLabel('Active workflow runs');
+    await expect(activePanel).toBeVisible({ timeout: 12_000 });
+    await expect(activePanel.getByText('2 runs')).toBeVisible({ timeout: 12_000 });
+    await expect(page.getByText('2 running')).toBeVisible({ timeout: 12_000 });
+    await expect(successTerminalPage.getByLabel('live run spinner')).toBeVisible({
+      timeout: 12_000,
+    });
+    await expect(cancelledTerminalPage.getByLabel('live run spinner')).toBeVisible({
+      timeout: 12_000,
+    });
+
+    phase = 'settled';
+    finishSuccessStream();
+    finishCancelledStream();
+
+    const attentionPanel = page.getByLabel('Workflow runs needing attention');
+    const successCompletedRow = page.getByRole('row').filter({ hasText: SUCCESS_PROJECT }).first();
+    const cancelledAttentionRow = attentionPanel.getByRole('link', {
+      name: new RegExp(CANCELLED_PROJECT, 'i'),
+    }).first();
+
+    await expect(activePanel).toHaveCount(0, { timeout: 12_000 });
+    await expect(successCompletedRow.getByLabel('status completed')).toBeVisible({
+      timeout: 12_000,
+    });
+    await expect(successCompletedRow.locator('.animate-spin')).toHaveCount(0);
+    await expect(successCompletedRow.getByText('LGTM')).toBeVisible({ timeout: 12_000 });
+    await expect(cancelledAttentionRow.getByLabel('status cancelled')).toBeVisible({
+      timeout: 12_000,
+    });
+    await expect(cancelledAttentionRow.locator('.animate-spin')).toHaveCount(0);
+    await expect(cancelledAttentionRow.getByText(CANCELLED_DETAIL)).toBeVisible({
+      timeout: 12_000,
+    });
+    await expect(page.getByText('2 running')).toHaveCount(0, { timeout: 12_000 });
+
+    await expect(successTerminalPage.getByText(SUCCESS_RELEASE_OUTPUT)).toBeVisible({
+      timeout: 12_000,
+    });
+    await expect(successTerminalPage.getByText('exit 0 — ok').first()).toBeVisible({
+      timeout: 12_000,
+    });
+    await expect(successTerminalPage.getByLabel('live run spinner')).toHaveCount(0, {
+      timeout: 12_000,
+    });
+
+    await expect(cancelledTerminalPage.getByText(CANCELLED_DETAIL)).toBeVisible({
+      timeout: 12_000,
+    });
+    await expect(cancelledTerminalPage.getByText(/cancelled/i).first()).toBeVisible({
+      timeout: 12_000,
+    });
+    await expect(cancelledTerminalPage.getByLabel('live run spinner')).toHaveCount(0, {
+      timeout: 12_000,
+    });
+  });
 });
