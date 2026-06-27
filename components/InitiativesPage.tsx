@@ -6,6 +6,7 @@ import type { InitiativesListResponse } from '@/app/api/initiatives/route'
 import type { ProjectsResponse } from '@/lib/shared/types'
 import { fetchProjects } from '@/lib/client/projects'
 import { patchInitiative, type InitiativeAction } from '@/lib/client-api'
+import { buttonVariants } from '@/components/ui/Button'
 import { EmptyState } from '@/components/ui/EmptyState'
 import { ErrorCallout } from '@/components/ui/ErrorCallout'
 import { ProjectPreviewRow } from '@/components/initiatives/ProjectPreviewRow'
@@ -138,7 +139,7 @@ export function InitiativesPage({ embedded = false }: { embedded?: boolean } = {
         {!flags.engineEnabled && (
           <p className="text-xs text-text-tertiary">
             Engine is off — you can still preview what the Miner would find below. Enable in{' '}
-            <Link href="/settings" className="text-accent hover:underline transition-colors">
+            <Link href="/settings" className={buttonVariants({ variant: 'link', size: 'sm' })}>
               Settings
             </Link>
             .
