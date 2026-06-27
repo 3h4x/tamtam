@@ -20,6 +20,7 @@ import { Select } from '@/components/ui/Select'
 import { Button } from '@/components/ui/Button'
 import { EmptyState } from '@/components/ui/EmptyState'
 import { InlineLoading } from '@/components/ui/InlineLoading'
+import { Spinner } from '@/components/ui/Spinner'
 
 const PAGE_SIZE = 100
 const ROW_HEIGHT = 92
@@ -412,7 +413,14 @@ export function RunsPage() {
           {hasMore && (
             <div className="flex justify-center py-4">
               <Button type="button" variant="secondary" size="md" onClick={loadMore} disabled={loadingMore}>
-                {loadingMore ? 'Loading...' : `Load older (${total - jobs.length} remaining)`}
+                {loadingMore ? (
+                  <>
+                    <Spinner size="sm" shrink aria-label="Loading" role="status" />
+                    <span>Loading...</span>
+                  </>
+                ) : (
+                  `Load older (${total - jobs.length} remaining)`
+                )}
               </Button>
             </div>
           )}
