@@ -3,6 +3,7 @@
 import { useEffect, useState } from 'react'
 import Link from 'next/link'
 import type { OrchestratorStatsResponse } from '@/app/api/stats/orchestrator/route'
+import { buttonVariants } from '@/components/ui/Button'
 
 // epoch-seconds → "Xm ago" / "Xh ago" / "Xd ago"
 function fmtAgo(epochSec: number): string {
@@ -83,7 +84,14 @@ export function OrchestratorActivity() {
       {/* Header */}
       <div className="flex items-center gap-2 flex-wrap">
         <h2 className="text-sm font-medium text-text-primary">Orchestrator</h2>
-        <Link href="/initiatives" className="text-[11px] text-text-tertiary hover:text-accent transition-colors ml-1">
+        <Link
+          href="/initiatives"
+          className={buttonVariants({
+            variant: 'link',
+            size: 'sm',
+            className: 'ml-1 text-[11px] text-text-tertiary hover:text-accent hover:no-underline',
+          })}
+        >
           View backlog →
         </Link>
         <div className="flex items-center gap-1.5 flex-wrap">
