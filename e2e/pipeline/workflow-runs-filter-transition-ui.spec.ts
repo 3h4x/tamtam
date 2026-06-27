@@ -216,4 +216,56 @@ test.describe('Workflow-runs filter lifecycle transitions', () => {
     await expect(completedRow.getByText('LGTM')).toBeVisible();
     await expect(page.getByText('No runs match current filters')).toHaveCount(0);
   });
+
+  test('failed attention filter becomes empty while a failed run is retried and running', async ({
+    page,
+  }) => {
+    let status: WorkflowStatus = 'failed';
+
+    await stubWorkflowRunsShell(page, () => status);
+    await page.goto('/workflow-runs');
+
+    const attentionPanel = page.getByLabel('Workflow runs needing attention');
+    await expect(attentionPanel).toBeVisible({ timeout: 8_000 });
+    await expect(attentionPanel.getByLabel('status failed')).toBeVisible();
+    await expect(attentionPanel.getByText('review failed before retry completed')).toBeVisible();
+
+    const failedAttentionFilter = page.getByRole('button', {
+      name: /^Show failed workflow runs$/i,
+    });
+    await failedAttentionFilter.click();
+    await expect(page.getByRole('button', { name: /^failed 1$/i })).toHaveAttribute(
+      'aria-pressed',
+      'true',
+    );
+
+    const stableUrl = page.url();
+    status = 'running';
+
+    await expect(attentionPanel).toHaveCount(0, { timeout: 12_000 });
+    await expect(page.getByRole('button', { name: /^failed 0$/i })).toBeVisible({
+      timeout: 12_000,
+    });
+    await expect(page.getByRole('button', { name: /^running 1$/i })).toBeVisible();
+    await expect(page.getByText('0 of 1 recent · refresh every 5s')).toBeVisible({
+      timeout: 12_000,
+    });
+    await expect(page.getByText('No runs match current filters')).toBeVisible();
+    await expect(page.getByText('review failed before retry completed')).toHaveCount(0, {
+      timeout: 12_000,
+    });
+    await expect(page.getByRole('row').filter({ hasText: PROJECT })).toHaveCount(0);
+    await expect(page).toHaveURL(stableUrl);
+
+    await page.getByRole('button', { name: 'Clear filters', exact: true }).click();
+
+    const activePanel = page.getByLabel('Active workflow runs');
+    const runningRow = activePanel.getByRole('link', { name: /state running/i }).first();
+    await expect(activePanel).toBeVisible({ timeout: 8_000 });
+    await expect(runningRow).toBeVisible();
+    await expect(runningRow.getByLabel('status running')).toBeVisible();
+    await expect(runningRow.locator('.animate-spin')).toBeVisible();
+    await expect(runningRow.getByText('review failed before retry completed')).toHaveCount(0);
+    await expect(page.getByText('No runs match current filters')).toHaveCount(0);
+  });
 });
