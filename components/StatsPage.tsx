@@ -10,6 +10,7 @@ import { QuotaWidget } from './QuotaWidget'
 import { BridgeOverview } from './BridgeOverview'
 import { OrchestratorActivity } from './stats/OrchestratorActivity'
 import { UsageHistoryChart } from './UsageHistoryChart'
+import { buttonVariants } from '@/components/ui/Button'
 import { EmptyState } from '@/components/ui/EmptyState'
 import { SegmentedControl } from '@/components/ui/SegmentedControl'
 import { Table, type Column } from '@/components/ui/Table'
@@ -158,7 +159,7 @@ export function StatsPage() {
       render: (r) => (
         <Link
           href={`/project/${encodeURIComponent(r.project)}`}
-          className="font-medium text-text-primary hover:text-accent no-underline"
+          className={buttonVariants({ variant: 'link', className: 'font-medium text-text-primary no-underline hover:text-accent' })}
           {...priv(r.project)}
         >
           {r.project}

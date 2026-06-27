@@ -4,7 +4,7 @@ import type { Page, Route } from '@playwright/test';
 const PROJECT = 'workflow-runs-filter-transition-ui';
 const RUN_ID = 'workflow-runs-filter-transition-ui-run-1';
 
-type WorkflowStatus = 'running' | 'completed' | 'failed';
+type WorkflowStatus = 'running' | 'completed' | 'failed' | 'cancelled';
 
 type WorkflowRunSummary = {
   id: string;
@@ -26,7 +26,8 @@ function iso(secondsAgo: number): string {
 
 function workflowRun(status: WorkflowStatus): WorkflowRunSummary {
   const completed = status === 'completed';
-  const terminal = completed || status === 'failed';
+  const cancelled = status === 'cancelled';
+  const terminal = completed || status === 'failed' || cancelled;
   return {
     id: RUN_ID,
     name: 'release-orchestrator',
@@ -38,7 +39,11 @@ function workflowRun(status: WorkflowStatus): WorkflowRunSummary {
     durationMs: terminal ? 77_000 : null,
     input: [PROJECT, { triggeredBy: 'release button' }],
     output: completed ? { verdict: 'LGTM' } : null,
-    error: status === 'failed' ? 'review failed before retry completed' : null,
+    error: status === 'failed'
+      ? 'review failed before retry completed'
+      : cancelled
+        ? 'release was cancelled while the running filter was active'
+        : null,
   };
 }
 
@@ -166,6 +171,55 @@ test.describe('Workflow-runs filter lifecycle transitions', () => {
     });
     await expect(page.getByText('status=running · query=—')).toBeVisible();
     await expect(page).toHaveURL(stableUrl);
+  });
+
+  test('active running filter becomes empty when its run is cancelled, then clear filters reveals the cancelled row', async ({
+    page,
+  }) => {
+    let status: WorkflowStatus = 'running';
+
+    await stubWorkflowRunsShell(page, () => status);
+    await page.goto('/workflow-runs');
+
+    const activePanel = page.getByLabel('Active workflow runs');
+    await expect(activePanel).toBeVisible({ timeout: 8_000 });
+    await expect(activePanel.getByLabel('status running')).toBeVisible();
+
+    const runningFilter = page.getByRole('button', { name: /^running 1$/i });
+    await expect(runningFilter).toBeVisible({ timeout: 8_000 });
+    await runningFilter.click();
+    await expect(runningFilter).toHaveAttribute('aria-pressed', 'true');
+
+    const stableUrl = page.url();
+    status = 'cancelled';
+
+    await expect(activePanel).toHaveCount(0, { timeout: 12_000 });
+    await expect(page.getByRole('button', { name: /^running 0$/i })).toBeVisible({
+      timeout: 12_000,
+    });
+    await expect(page.getByRole('button', { name: /^cancelled 1$/i })).toBeVisible();
+    await expect(page.getByText('0 of 1 recent · refresh every 5s')).toBeVisible({
+      timeout: 12_000,
+    });
+    await expect(page.getByText('No runs match current filters')).toBeVisible();
+    await expect(page.getByText('status=running · query=—')).toBeVisible();
+    await expect(
+      page.getByText('release was cancelled while the running filter was active'),
+    ).toHaveCount(0);
+    await expect(page.getByRole('row').filter({ hasText: PROJECT })).toHaveCount(0);
+    await expect(page).toHaveURL(stableUrl);
+
+    await page.getByRole('button', { name: 'Clear filters', exact: true }).click();
+
+    const attentionPanel = page.getByLabel('Workflow runs needing attention');
+    const cancelledRow = attentionPanel.getByRole('link', { name: /state cancelled/i }).first();
+    await expect(cancelledRow).toBeVisible({ timeout: 8_000 });
+    await expect(cancelledRow.getByLabel('status cancelled')).toBeVisible();
+    await expect(cancelledRow.locator('.animate-spin')).toHaveCount(0);
+    await expect(
+      cancelledRow.getByText('release was cancelled while the running filter was active'),
+    ).toBeVisible();
+    await expect(page.getByText('No runs match current filters')).toHaveCount(0);
   });
 
   test('failed attention filter becomes empty when a failed run is retried and completes', async ({
