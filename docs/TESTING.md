@@ -19,6 +19,7 @@
   - `createTestPgDbEmpty()` — raw per-test DDL (preferred for unit/API tests; build only the tables the test needs).
   Dispose via `await handle[Symbol.asyncDispose]()` in `afterEach`. Never import `@/lib/db` before mocks are installed.
 - Mock only external side-effects: `lib/shared/shell.ts` `exec`, PM2, CLI spawning.
+- **Don't rebuild identical subprocess fixtures per test.** When several cases share a base git repo (or similar process-built fixture), build it once in `beforeAll` and give each test an isolated copy via in-process `fs.cpSync` instead of re-running `git init/add/commit` (5 spawns) in `beforeEach` — see `__tests__/lib/incremental-review.test.ts`. Real `fork+exec` is the dominant cost in these files (~halved `worktree-line-delta.test.ts`). Files that shell out for real auto-route to the `slow` pool (see below) — you don't need to add them to `SLOW_FILES`.
 - Use the package scripts, not raw Vitest (`pnpm test`, not `vitest`) — global setup at `__tests__/global-setup.ts` installs the test `DATABASE_URL` guard.
 - Vitest retries failed tests up to two times (`retry: 2`) to absorb rare host contention flakes; fix any failure that remains red after those retries.
 - **Match the nearby test style.** This repo mixes one-route-per-file tests with broader coverage files. Extend the nearest existing test when it already owns that behavior; don't introduce a shared test utility layer just to avoid duplication.
@@ -45,6 +46,33 @@ projects (`vitest.config.ts`): `fast`, `slow`, and `db`.
   proven-safe sequential path); `TAMTAM_VITEST_DB_SHARDS` controls the file split.
   An explicit argv (`pnpm test <file>`) bypasses the project plan for single-file
   runs.
+
+### How a file is assigned to a project
+
+Membership is computed in `vitest.config.ts` — mostly **structurally**, so new
+tests land in the right pool without hand-editing lists:
+
+- **`db`** — any file that (transitively) imports the PGlite `test-db` helper
+  (`fileUsesTestDb` follows relative imports through shared fixtures). These
+  **must** run in the serialized/low-concurrency `db` pool; PGlite's WASM trap
+  handler wedges under CPU starvation otherwise.
+- **`slow`** — the union of two sets, minus anything already in `db`:
+  1. `SLOW_FILES`, a hand-curated list of files that are slow for reasons a
+     static scan can't see (heavy module mocks, large prompt assembly). Re-measure
+     periodically with `npx vitest run --reporter=json --outputFile=/tmp/v.json`
+     and sort by `endTime − startTime`.
+  2. **Auto-detected subprocess spawners** (`fileSpawnsSubprocess`): files that
+     really fork OS processes — they import `child_process` and call
+     `execFileSync`/`spawnSync`/`execSync`/`spawn`, **or** import
+     `@/lib/shared/shell` (whose `exec` forks git/bash) — and do **not** mock
+     that module. At the `fast` pool's high `maxWorkers`, dozens of concurrent
+     `fork+exec` calls thrash the host scheduler and inflate wall time far beyond
+     the work itself (a git-heavy file measured ~2s isolated but ~18s under
+     `fast`-pool contention). Routing them to the lower-parallelism `slow` pool
+     removes that thrash. **A test that shells out for real does not need a
+     `SLOW_FILES` entry — it routes automatically.** A test that *mocks* its
+     subprocess calls stays in `fast` (no real spawn).
+- **`fast`** — everything not in `slow` or `db`.
 
 A single failing test still fails the whole suite; the flaky-test detection in
 the **release pipeline** (`lib/pipeline/flaky-tests.ts`) is separate — it retries

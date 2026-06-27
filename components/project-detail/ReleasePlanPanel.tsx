@@ -50,16 +50,18 @@ export function ReleasePlanPanel({ projectName, refreshKey }: ReleasePlanPanelPr
 
   return (
     <div className="w-full">
-      <button
+      <Button
         type="button"
         onClick={() => setOpen((v) => !v)}
-        className="inline-flex items-center gap-1.5 text-xs font-medium text-text-secondary hover:text-text-primary"
+        variant="ghost"
+        size="sm"
+        className="rounded-none border-0 bg-transparent px-0 py-0 hover:bg-transparent"
         aria-expanded={open}
         title="Preview the release pipeline plan without running anything"
       >
         <span aria-hidden="true" className="text-text-tertiary">{open ? '▾' : '▸'}</span>
         Release plan {open ? '(dry-run)' : '— preview'}
-      </button>
+      </Button>
 
       {open && (
         <div className="mt-2 rounded-md border border-border bg-bg-secondary p-3 text-sm">

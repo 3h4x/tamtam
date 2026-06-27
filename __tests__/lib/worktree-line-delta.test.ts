@@ -1,7 +1,7 @@
-import { mkdtempSync, writeFileSync, rmSync } from 'fs';
+import { mkdtempSync, writeFileSync, rmSync, cpSync } from 'fs';
 import { tmpdir } from 'os';
 import { join } from 'path';
-import { describe, it, expect, beforeEach, afterEach } from 'vitest';
+import { describe, it, expect, beforeAll, afterAll, beforeEach, afterEach } from 'vitest';
 import { exec } from '@/lib/shared/shell';
 import { worktreeLineDelta } from '@/lib/git/worktree-line-delta';
 
@@ -12,15 +12,25 @@ async function git(cwd: string, ...args: string[]) {
 }
 
 describe('worktreeLineDelta', () => {
+  // Build the committed base repo once (5 git spawns total), then give each
+  // test its own isolated copy via an in-process fs copy instead of re-running
+  // init/config/add/commit per test (which dominated this file's runtime).
+  let baseDir: string;
   let dir: string;
-  beforeEach(async () => {
+  beforeAll(async () => {
+    baseDir = mkdtempSync(join(tmpdir(), 'wld-base-'));
+    await git(baseDir, 'init', '-q');
+    await git(baseDir, 'config', 'user.email', 't@t.t');
+    await git(baseDir, 'config', 'user.name', 'T');
+    writeFileSync(join(baseDir, 'a.txt'), 'one\ntwo\nthree\n');
+    await git(baseDir, 'add', '.');
+    await git(baseDir, 'commit', '-q', '-m', 'init');
+  });
+  afterAll(() => rmSync(baseDir, { recursive: true, force: true }));
+
+  beforeEach(() => {
     dir = mkdtempSync(join(tmpdir(), 'wld-'));
-    await git(dir, 'init', '-q');
-    await git(dir, 'config', 'user.email', 't@t.t');
-    await git(dir, 'config', 'user.name', 'T');
-    writeFileSync(join(dir, 'a.txt'), 'one\ntwo\nthree\n');
-    await git(dir, 'add', '.');
-    await git(dir, 'commit', '-q', '-m', 'init');
+    cpSync(baseDir, dir, { recursive: true });
   });
   afterEach(() => rmSync(dir, { recursive: true, force: true }));
 

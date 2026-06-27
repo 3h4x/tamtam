@@ -23,7 +23,7 @@ function projectMaxWorkers(localDefault: number): number {
   return Math.min(localDefault, Math.max(1, hostParallelism - 1));
 }
 
-// The 29 test files below each take >=500ms wall-clock (DB boots, heavy mocks,
+// The test files below each take >=500ms wall-clock (DB boots, heavy mocks,
 // or large prompt assembly). Routing them into their own worker pool keeps a
 // few slow files from blocking the long tail of small fast files, and lets
 // each project right-size its `maxWorkers` for its own contention profile.
@@ -131,7 +131,43 @@ function fileUsesTestDb(file: string, seen = new Set<string>()): boolean {
 
 const DB_TEST_FILES = collectTestFiles('__tests__').filter((file) => fileUsesTestDb(file));
 const DB_TEST_FILE_SET = new Set(DB_TEST_FILES);
-const SLOW_NON_DB_FILES = SLOW_FILES.filter((file) => !DB_TEST_FILE_SET.has(file));
+
+// A test file that spawns REAL OS subprocesses (git, bash, the provider shims,
+// dev servers) belongs in the lower-parallelism `slow` pool. At the `fast`
+// pool's high `maxWorkers`, dozens of concurrent fork+exec calls thrash the
+// host scheduler and inflate wall time far beyond the work itself — a
+// git-heavy file measured ~2s in isolation but ~18s under `fast`-pool
+// contention. Detect these structurally (mirroring DB_TEST_FILES) so new
+// subprocess-heavy tests auto-route to `slow` instead of silently landing in
+// `fast` until someone hand-edits SLOW_FILES (which repeatedly drifted stale).
+//
+// Signals, each excluding the mocked case (mocked spawns never touch the OS):
+//   1. imports `child_process` AND calls execFileSync/spawnSync/execSync/spawn,
+//      without `vi.mock('child_process')`.
+//   2. imports `@/lib/shared/shell` (whose `exec` forks git/bash) without
+//      mocking it.
+function fileSpawnsSubprocess(file: string): boolean {
+  const src = readFileSync(file, 'utf8');
+  const importsChildProcess = /from\s+['"](?:node:)?child_process['"]/.test(src);
+  const usesSpawnApi = /\b(?:execFileSync|spawnSync|execSync)\b|\bspawn\s*\(/.test(src);
+  const mocksChildProcess = /vi\.(?:mock|doMock)\(\s*['"](?:node:)?child_process['"]/.test(src);
+  if (importsChildProcess && usesSpawnApi && !mocksChildProcess) return true;
+
+  const importsShell = /from\s+['"]@\/lib\/shared\/shell['"]/.test(src);
+  const mocksShell = /vi\.(?:mock|doMock)\(\s*['"]@\/lib\/shared\/shell['"]/.test(src);
+  if (importsShell && !mocksShell) return true;
+
+  return false;
+}
+
+const SUBPROCESS_TEST_FILES = collectTestFiles('__tests__').filter(fileSpawnsSubprocess);
+
+// `slow` = hand-curated slow files (heavy mocks / prompt assembly) ∪
+// auto-detected subprocess spawners, minus anything that must run serialized in
+// the `db` pool (PGlite). A db file that also spawns subprocesses stays in `db`:
+// its WASM-serialization constraint is stricter than the contention concern.
+const SLOW_NON_DB_FILES = [...new Set([...SLOW_FILES, ...SUBPROCESS_TEST_FILES])]
+  .filter((file) => !DB_TEST_FILE_SET.has(file));
 
 export default defineConfig({
   resolve: {
@@ -146,7 +182,7 @@ export default defineConfig({
         test: {
           name: 'fast',
           include: ['__tests__/**/*.test.ts', '__tests__/**/*.test.tsx'],
-          exclude: [...SLOW_FILES, ...DB_TEST_FILES],
+          exclude: [...SLOW_NON_DB_FILES, ...DB_TEST_FILES],
           environment: 'node',
           globalSetup: ['./__tests__/global-setup.ts'],
           setupFiles: ['./__tests__/setup-db-guard.ts'],
