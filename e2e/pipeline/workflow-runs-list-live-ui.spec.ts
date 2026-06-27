@@ -558,6 +558,115 @@ test.describe('Workflow runs list live polling', () => {
     await expect(page.getByRole('button', { name: /^pending 0$/i })).toBeVisible();
   });
 
+  test('pending and running active runs swap states on the same poll without stale counters', async ({
+    page,
+  }) => {
+    let phase: 'pending-and-running' | 'started-and-completed' | 'all-completed' =
+      'pending-and-running';
+
+    await stubWorkflowRunsShell(page);
+    await stubWorkflowRuns(page, () => {
+      if (phase === 'pending-and-running') {
+        return [
+          makeRun('pending', {
+            id: 'workflow-run-swap-pending',
+            input: ['workflow-swap-pending', { triggeredBy: 'queue-worker' }],
+            startedAt: null,
+            durationMs: null,
+          }),
+          makeRun('running', {
+            id: 'workflow-run-swap-running',
+            input: ['workflow-swap-running', { triggeredBy: 'agent-running' }],
+          }),
+        ];
+      }
+
+      if (phase === 'started-and-completed') {
+        return [
+          makeRun('running', {
+            id: 'workflow-run-swap-pending',
+            input: ['workflow-swap-pending', { triggeredBy: 'queue-worker' }],
+          }),
+          makeRun('completed', {
+            id: 'workflow-run-swap-running',
+            input: ['workflow-swap-running', { triggeredBy: 'agent-running' }],
+            output: { verdict: 'LGTM' },
+          }),
+        ];
+      }
+
+      return [
+        makeRun('completed', {
+          id: 'workflow-run-swap-pending',
+          input: ['workflow-swap-pending', { triggeredBy: 'queue-worker' }],
+          output: { verdict: 'LGTM' },
+        }),
+        makeRun('completed', {
+          id: 'workflow-run-swap-running',
+          input: ['workflow-swap-running', { triggeredBy: 'agent-running' }],
+          output: { verdict: 'LGTM' },
+        }),
+      ];
+    });
+
+    await page.goto('/workflow-runs');
+
+    const activePanel = page.getByLabel('Active workflow runs');
+    const pendingRun = activePanel.getByRole('link', { name: /workflow-swap-pending/i });
+    const runningRun = activePanel.getByRole('link', { name: /workflow-swap-running/i });
+
+    await expect(activePanel).toBeVisible({ timeout: 8_000 });
+    await expect(activePanel.getByText('2 runs')).toBeVisible();
+    await expect(pendingRun.getByLabel('status pending')).toBeVisible();
+    await expect(runningRun.getByLabel('status running')).toBeVisible();
+    await expect(runningRun.locator('.animate-spin')).toBeVisible();
+    await expect(page.getByRole('button', { name: /^pending 1$/i })).toBeVisible();
+    await expect(page.getByRole('button', { name: /^running 1$/i })).toBeVisible();
+    await expect(page.getByText('1 running')).toBeVisible();
+
+    phase = 'started-and-completed';
+
+    await expect(activePanel.getByText('1 run')).toBeVisible({ timeout: 12_000 });
+    await expect(pendingRun.getByLabel('status running')).toBeVisible({ timeout: 12_000 });
+    await expect(pendingRun.locator('.animate-spin')).toBeVisible({ timeout: 12_000 });
+    await expect(activePanel.getByRole('link', { name: /workflow-swap-running/i })).toHaveCount(0, {
+      timeout: 12_000,
+    });
+
+    const completedRunningRow = page
+      .getByRole('row')
+      .filter({ hasText: 'workflow-swap-running' })
+      .first();
+    await expect(completedRunningRow.getByLabel('status completed')).toBeVisible({
+      timeout: 12_000,
+    });
+    await expect(completedRunningRow.locator('.animate-spin')).toHaveCount(0);
+    await expect(completedRunningRow.getByText('LGTM')).toBeVisible({ timeout: 12_000 });
+    await expect(page.getByRole('button', { name: /^pending 0$/i })).toBeVisible({
+      timeout: 12_000,
+    });
+    await expect(page.getByRole('button', { name: /^running 1$/i })).toBeVisible();
+    await expect(page.getByRole('button', { name: /^completed 1$/i })).toBeVisible();
+    await expect(page.getByText('1 running')).toBeVisible();
+
+    phase = 'all-completed';
+
+    await expect(activePanel).toHaveCount(0, { timeout: 12_000 });
+    const completedPendingRow = page
+      .getByRole('row')
+      .filter({ hasText: 'workflow-swap-pending' })
+      .first();
+    await expect(completedPendingRow.getByLabel('status completed')).toBeVisible({
+      timeout: 12_000,
+    });
+    await expect(completedPendingRow.locator('.animate-spin')).toHaveCount(0);
+    await expect(page.getByRole('button', { name: /^running 0$/i })).toBeVisible({
+      timeout: 12_000,
+    });
+    await expect(page.getByRole('button', { name: /^completed 2$/i })).toBeVisible();
+    await expect(page.getByText('1 running')).toHaveCount(0, { timeout: 12_000 });
+  });
+
   test('pending workflow cancelled before start moves to attention without stale active state', async ({
     page,
   }) => {
