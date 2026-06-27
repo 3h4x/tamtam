@@ -25,7 +25,7 @@ import { AgentsTab } from '@/components/AgentsTab'
 import { buildProjectPath, buildProjectSetupPath, buildProjectTerminalPath } from '@/lib/client/project-routes'
 import { resolveGithubBoardUrl } from '@/lib/client/resolve-github-board-url'
 import { ProjectLogo } from '@/components/ProjectLogo'
-import { Button } from '@/components/ui/Button'
+import { Button, buttonVariants } from '@/components/ui/Button'
 import { Pill, PillButton } from '@/components/ui/Pill'
 
 type Tab = 'overview' | 'config' | 'history' | 'terminal' | 'changes' | 'issues' | 'docs' | 'agents'
@@ -662,14 +662,18 @@ export function ProjectDetailPage({
                 href={`${githubUrl}/issues/${issueNumber}`}
                 target="_blank"
                 rel="noopener noreferrer"
-                className="inline-flex items-center gap-1 rounded-full border border-status-info/30 bg-status-info/10 px-2 py-0.5 text-xs text-status-info hover:bg-status-info/20 transition-colors"
+                className={buttonVariants({
+                  variant: 'info',
+                  size: 'sm',
+                  className: 'rounded-full py-0.5 font-mono',
+                })}
                 title={`Open linked GitHub issue #${issueNumber}`}
               >
                 <svg viewBox="0 0 16 16" width="12" height="12" fill="currentColor" aria-hidden="true" className="shrink-0">
                   <path d="M8 9.5a1.5 1.5 0 100-3 1.5 1.5 0 000 3z"/>
                   <path d="M8 0a8 8 0 100 16A8 8 0 008 0zM1.5 8a6.5 6.5 0 1113 0 6.5 6.5 0 01-13 0z"/>
                 </svg>
-                <span className="font-mono">#{issueNumber}</span>
+                <span>#{issueNumber}</span>
               </a>
             )
           })()}
@@ -691,7 +695,11 @@ export function ProjectDetailPage({
               href={`${boardUrl}?filterQuery=${encodeURIComponent(name)}`}
               target="_blank"
               rel="noopener noreferrer"
-              className="inline-flex items-center gap-1 rounded-full border border-border bg-bg-secondary px-2 py-0.5 text-xs text-text-secondary hover:text-accent hover:border-accent/40 transition-colors"
+              className={buttonVariants({
+                variant: 'secondary',
+                size: 'sm',
+                className: 'rounded-full py-0.5 font-normal text-text-secondary hover:border-accent/40 hover:text-accent',
+              })}
               title="Open this project on the TamTam GitHub board"
             >
               Board ↗
