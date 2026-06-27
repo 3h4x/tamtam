@@ -3,6 +3,7 @@
 import { useState } from 'react'
 import type { SettingsMap } from '@/components/settings/settings-page-config'
 import { Button } from '@/components/ui/Button'
+import { ErrorCallout } from '@/components/ui/ErrorCallout'
 import { Input } from '@/components/ui/Input'
 
 function randomToken(): string {
@@ -87,7 +88,11 @@ export function AuthTab({
           </div>
         )}
         {message && <p className="text-sm text-status-success">{message}</p>}
-        {error && <p className="text-sm text-status-error">{error}</p>}
+        {error && (
+          <ErrorCallout padding="none" preWrap={false} className="border-0 bg-transparent text-sm">
+            {error}
+          </ErrorCallout>
+        )}
       </div>
     </section>
   )
