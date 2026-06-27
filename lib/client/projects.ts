@@ -149,6 +149,17 @@ export async function releaseProject(
   return response.json()
 }
 
+export async function fetchReleasePlan(
+  projectName: string,
+): Promise<import('@/lib/pipeline/release-plan').ReleasePlan> {
+  const response = await fetch(`${API_BASE}/by-project/${encodeURIComponent(projectName)}/release/plan`)
+  if (!response.ok) {
+    const data = await response.json().catch(() => ({}))
+    throw new Error((data.detail as string | undefined) || `Failed to fetch release plan: ${response.statusText}`)
+  }
+  return response.json()
+}
+
 export async function testProject(projectName: string): Promise<{ status: string; job_id: string; pid: number; log_path: string }> {
   const response = await fetch(`${API_BASE}/by-project/${encodeURIComponent(projectName)}/test`, {
     method: 'POST',

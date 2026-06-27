@@ -1,11 +1,11 @@
 'use client'
 
-import { useState } from 'react'
+import { Suspense, useState } from 'react'
 import { useRouter, useSearchParams } from 'next/navigation'
 import { Button } from '@/components/ui/Button'
 import { Input } from '@/components/ui/Input'
 
-export default function LoginPage() {
+function LoginForm() {
   const router = useRouter()
   const searchParams = useSearchParams()
   const [token, setToken] = useState('')
@@ -53,5 +53,15 @@ export default function LoginPage() {
         </Button>
       </form>
     </main>
+  )
+}
+
+// useSearchParams() requires a Suspense boundary during static prerender
+// (Next.js CSR bailout). Wrap the form so `/login` can be statically exported.
+export default function LoginPage() {
+  return (
+    <Suspense>
+      <LoginForm />
+    </Suspense>
   )
 }

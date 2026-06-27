@@ -6,13 +6,15 @@ import { createRoot } from 'react-dom/client'
 import { flushSync } from 'react-dom'
 import { Header } from '@/components/Header'
 
-const { fetchRecommendationsSummaryMock, usePathnameMock } = vi.hoisted(() => ({
+const { fetchRecommendationsSummaryMock, usePathnameMock, useRouterMock } = vi.hoisted(() => ({
   fetchRecommendationsSummaryMock: vi.fn(),
   usePathnameMock: vi.fn(),
+  useRouterMock: vi.fn(),
 }))
 
 vi.mock('next/navigation', () => ({
   usePathname: usePathnameMock,
+  useRouter: useRouterMock,
 }))
 
 vi.mock('next/link', () => ({
@@ -68,7 +70,9 @@ describe('Header', () => {
     vi.useFakeTimers()
     fetchRecommendationsSummaryMock.mockReset()
     usePathnameMock.mockReset()
+    useRouterMock.mockReset()
     usePathnameMock.mockReturnValue('/recommendations')
+    useRouterMock.mockReturnValue({ replace: vi.fn(), refresh: vi.fn() })
   })
 
   afterEach(() => {

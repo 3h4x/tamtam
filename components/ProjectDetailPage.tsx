@@ -18,6 +18,7 @@ import { ConfigTab } from '@/components/project-detail/ConfigTab'
 import { RetrievalReindexPanel } from '@/components/project-detail/RetrievalReindexPanel'
 import { PipelineStrip } from '@/components/project-detail/PipelineStrip'
 import { ProjectActions } from '@/components/project-detail/ProjectActions'
+import { ReleasePlanPanel } from '@/components/project-detail/ReleasePlanPanel'
 import { TabNav } from '@/components/project-detail/TabNav'
 import { OverviewTab } from '@/components/project-detail/OverviewTab'
 import { AgentsTab } from '@/components/AgentsTab'
@@ -807,6 +808,23 @@ export function ProjectDetailPage({
             onDismissDiverged={() => setPullDiverged(false)}
           />
         </div>
+      </div>
+
+      <div className="mb-3 flex justify-end">
+        <ReleasePlanPanel
+          projectName={name}
+          refreshKey={[
+            currentBranch ?? '',
+            defaultBranch ?? '',
+            project.totalChanges,
+            project.unpushed ?? 0,
+            verdict ?? '',
+            config?.review_disabled ? 1 : 0,
+            config?.tests_disabled ? 1 : 0,
+            config?.auto_pr_merge_enabled ? 1 : 0,
+            config?.post_merge_watch_minutes ?? '',
+          ].join('|')}
+        />
       </div>
 
       <TabNav

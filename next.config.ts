@@ -59,6 +59,29 @@ const nextConfig: NextConfig = {
     parallelServerCompiles: true,
     parallelServerBuildTraces: true,
   },
+  // The auth middleware introduces an Edge runtime. With an Edge runtime
+  // present, Next compiles `instrumentation.ts` for Edge too — and its
+  // `await import('./instrumentation-node')` subgraph (probe-sweep, cron,
+  // boot recovery, retrieval) pulls Node built-ins (`path`, `crypto`,
+  // `fs/promises`) that don't exist on Edge, breaking the webpack build with
+  // `Module not found`. That import is runtime-guarded
+  // (`process.env.NEXT_RUNTIME === 'nodejs'`) and never executes on Edge, but
+  // webpack still statically traces it into the Edge bundle. Drop the whole
+  // Node-only subgraph from the Edge compile only; the Node server build is
+  // untouched and still bundles it normally. Turbopack already handles the
+  // guard correctly, so this only affects the webpack path. Scoped to
+  // `nextRuntime === 'edge'` so nothing else changes.
+  webpack(config, { nextRuntime, webpack }) {
+    if (nextRuntime === 'edge') {
+      // Anchored to the single `instrumentation-node` module (optionally with
+      // an extension) so a future sibling like `instrumentation-node-foo` that
+      // legitimately needs the Edge runtime isn't silently dropped too.
+      config.plugins.push(
+        new webpack.IgnorePlugin({ resourceRegExp: /(^|[\\/])instrumentation-node(\.[jt]sx?)?$/ }),
+      );
+    }
+    return config;
+  },
   // Turbopack's persistent filesystem cache for `next build` is OFF by
   // default. We tried enabling `experimental.turbopackFileSystemCacheForBuild`
   // hoping for fast warm rebuilds, but in practice the cache accumulated

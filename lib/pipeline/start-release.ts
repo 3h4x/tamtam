@@ -23,7 +23,7 @@ import { computeReleaseDeadlineAt } from './release-timeout';
 import { checkDailySpendCap, type SpendCapExceeded } from './spend-guard';
 import { notify } from '@/lib/shared/notifications';
 
-const RELEASE_PIPELINE_KINDS = new Set(['test', 'review', 'fix', 'commit', 'push', 'pr-wait', 'mark-dod', 'release']);
+export const RELEASE_PIPELINE_KINDS = new Set(['test', 'review', 'fix', 'commit', 'push', 'pr-wait', 'mark-dod', 'release']);
 
 async function isReleasePipelineRunning(projectName: string): Promise<boolean> {
   const candidates = listJobs().filter(

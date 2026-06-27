@@ -45,6 +45,7 @@ export {
   fixCi,
   reviewProject,
   releaseProject,
+  fetchReleasePlan,
   testProject,
   fetchIssuesAndPRs,
   fetchIssuesSummary,

@@ -566,7 +566,58 @@ Checks the push job log for explicit local hook-failure markers from husky, lint
 | `lib/pipeline/push-rejection.ts` | `isHookRejection`, `isTestFailureRejection` | Classifies push failure kind |
 | `lib/pipeline/start-mark-dod.ts` | `startMarkDod(project)` | DoD verification against the linked issue or PR, with checkbox updates when issue criteria exist |
 | `lib/pipeline/start-soak.ts` | `launchSoak`, `classifyDefaultBranchCi`, `openRevertPr`, `notifyPostMergeRevert` | Post-merge CI watcher + revert-PR opener. Pure helpers are unit-tested; the side-effectful loop is driven by `lib/workflows/phases/soak-phase.ts` |
+| `lib/pipeline/release-plan.ts` | `computeReleasePlan(project)` | **Side-effect-free** dry-run planner; returns the ordered steps a release would run without running them |
 | `lib/jobs/job-storage.ts` | `markDone(jobId, exitCode)` | Called by the child-process exit handler; triggers all completion hooks |
+
+---
+
+## Release plan (dry-run)
+
+`computeReleasePlan(project)` in `lib/pipeline/release-plan.ts` returns the
+release pipeline's projected happy path **without executing any of it**. It
+backs `GET /api/projects/by-project/[name]/release/plan` and the "Release plan"
+preview in the project header.
+
+### Side-effect guarantee
+
+The planner performs **only read-only git and DB reads**. It does **no** git
+writes, **no** job creation, **no** PM2 start, **no** GitHub mutation, and
+**no** webhook send. Runtime-only gates that *can* have side effects — the CLI
+start gate, the provider budget gate, and the readiness `prerequisiteCommand`
+— are intentionally **not** evaluated by the planner; they are enforced at
+launch by `startRelease`. The planner therefore tells you *what would run*
+given the current branch/state/config, not whether a runtime gate will admit
+the release.
+
+### How it stays in sync with `startRelease`
+
+1. **Entry step** mirrors `startRelease`'s first-step decision (the only place
+   that understands the fresh-LGTM fast path): it reuses `hasFreshLgtm`,
+   `hasLocalCommitsAhead`, `detectTestCommand`, `getProjectTestConfig`,
+   `decidePrContext`, and the `review-scope` helpers.
+2. **Downstream** is simulated by feeding success inputs (test exit 0, review
+   `LGTM`, commit/push exit 0) through the **same** pure `decideNextPhase`
+   transition matcher (`lib/workflows/decide-next-phase.ts`) the orchestrator
+   uses between steps — so the planned chain can't drift from the real one.
+
+### Contract
+
+`ReleasePlan` fields:
+
+| Field | Meaning |
+|-------|---------|
+| `canRelease` | `true` when `blockers` is empty |
+| `blockers[]` | Read-only preconditions in the way (`archived`, `paused`, `nothing_to_release`, `job_running`, `pipeline_running`, `pr_wait_open`, `not_found`) |
+| `mode` | `'pr'` (non-default branch → open/reuse PR) or `'direct'` (default branch → push direct), from `decidePrContext` |
+| `currentBranch` / `targetBranch` | Working branch and the default branch work lands on |
+| `comparisonRange` | The `@{u}..HEAD` (or `<default>..HEAD`) range review/push compare |
+| `entryStep` | The step `startRelease` would launch first (`null` when nothing to release) |
+| `steps[]` | Canonical-order steps (`test → review → commit → push → mark-dod → pr-wait → soak`), each with `willRun`, `reason`, `sideEffects`, and `comparisonRange` where relevant |
+
+`mark-dod` runs after a successful push in **both** modes (it marks
+Definition-of-Done on the linked issue/PR); only `pr-wait`/merge is gated on
+PR mode **and** `auto_pr_merge_enabled`, and `soak` on a positive
+`post_merge_watch_minutes`.
 
 ---
 
