@@ -6,7 +6,7 @@ import { useState, useEffect, useRef } from 'react'
 import { pushProject } from '@/lib/client-api'
 import type { JobInfo, ProjectConfig } from '@/lib/client-api'
 import { useToast } from '@/components/Toast'
-import { Button } from '@/components/ui/Button'
+import { Button, buttonVariants } from '@/components/ui/Button'
 import { Spinner } from '@/components/ui/Spinner'
 import { buildProjectTerminalPath } from '@/lib/client/project-routes'
 
@@ -348,7 +348,7 @@ export function PipelineStrip({
         {traceReleaseId && (
           <Link
             href={`/project/${encodeURIComponent(projectName)}/release/${encodeURIComponent(traceReleaseId)}`}
-            className="ml-auto text-[10px] text-accent hover:underline font-mono shrink-0"
+            className={buttonVariants({ variant: 'link', className: 'ml-auto shrink-0 font-mono text-[10px]' })}
             title="View unified release trace"
           >
             trace -&gt;
