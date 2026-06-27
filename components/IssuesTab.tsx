@@ -10,7 +10,7 @@ import { ErrorState } from './ErrorState'
 import { PRRow } from '@/components/issues-tab/PRRow'
 import { IssueRow } from '@/components/issues-tab/IssueRow'
 import { useToast } from '@/components/Toast'
-import { Button } from '@/components/ui/Button'
+import { Button, buttonVariants } from '@/components/ui/Button'
 import { Spinner } from '@/components/ui/Spinner'
 import { EmptyState } from '@/components/ui/EmptyState'
 import { InlineLoading } from '@/components/ui/InlineLoading'
@@ -260,7 +260,7 @@ ${idea}`
                 Describe the outcome. The{' '}
                 <a
                   href={`/project/${encodeURIComponent(projectName)}/agents${ctoAgent ? `?agent=${encodeURIComponent(ctoAgent.id)}` : '?agent=new&template=cto'}`}
-                  className="text-accent hover:text-accent-hover"
+                  className={buttonVariants({ variant: 'link', size: 'sm' })}
                 >
                   cto
                 </a>{' '}
@@ -273,7 +273,7 @@ ${idea}`
                 Add the{' '}
                 <a
                   href={`/project/${encodeURIComponent(projectName)}/agents?agent=new&template=cto`}
-                  className="font-medium text-accent hover:text-accent-hover"
+                  className={buttonVariants({ variant: 'link', size: 'sm', className: 'font-medium' })}
                 >
                   cto agent
                 </a>{' '}
@@ -385,7 +385,7 @@ ${idea}`
                 href={`https://github.com/${repo}`}
                 target="_blank"
                 rel="noopener noreferrer"
-                className="font-mono hover:text-accent transition-colors"
+                className={buttonVariants({ variant: 'link', size: 'sm', className: 'font-mono' })}
               >
                 {repo} ↗
               </a>
