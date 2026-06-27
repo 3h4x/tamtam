@@ -402,7 +402,7 @@ export function PipelinePage() {
                 render: (r) => (
                   <Link
                     href={`/pipeline?project=${encodeURIComponent(r.project)}`}
-                    className="font-medium text-text-primary hover:text-accent no-underline"
+                    className={buttonVariants({ variant: 'link', className: 'font-medium text-text-primary no-underline hover:text-accent hover:no-underline' })}
                     data-private
                   >
                     {r.project}
