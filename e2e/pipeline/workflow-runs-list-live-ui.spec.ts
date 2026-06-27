@@ -1245,4 +1245,81 @@ test.describe('Workflow runs list live polling', () => {
     await expect(completedRow.getByLabel('status completed')).toBeVisible({ timeout: 12_000 });
     await expect(completedRow.getByText('LGTM')).toBeVisible({ timeout: 12_000 });
   });
+
+  test('two active runs can diverge to failed and cancelled on the same poll without stale running state', async ({
+    page,
+  }) => {
+    let phase: 'both-running' | 'both-attention' = 'both-running';
+
+    await stubWorkflowRunsShell(page);
+    await stubWorkflowRuns(page, () => {
+      if (phase === 'both-running') {
+        return [
+          makeRun('running', {
+            id: 'workflow-run-same-poll-failed',
+            input: ['workflow-same-poll-failed', { triggeredBy: 'agent-failed' }],
+          }),
+          makeRun('running', {
+            id: 'workflow-run-same-poll-cancelled',
+            input: ['workflow-same-poll-cancelled', { triggeredBy: 'agent-cancelled' }],
+          }),
+        ];
+      }
+
+      return [
+        makeRun('failed', {
+          id: 'workflow-run-same-poll-failed',
+          input: ['workflow-same-poll-failed', { triggeredBy: 'agent-failed' }],
+          error: 'release orchestration failed after review',
+        }),
+        makeRun('cancelled', {
+          id: 'workflow-run-same-poll-cancelled',
+          input: ['workflow-same-poll-cancelled', { triggeredBy: 'agent-cancelled' }],
+          error: 'release was cancelled before completion',
+        }),
+      ];
+    });
+
+    await page.goto('/workflow-runs');
+
+    const activePanel = page.getByLabel('Active workflow runs');
+    const attentionPanel = page.getByLabel('Workflow runs needing attention');
+    await expect(activePanel).toBeVisible({ timeout: 8_000 });
+    await expect(activePanel.getByText('2 runs')).toBeVisible();
+    await expect(activePanel.getByRole('link', { name: /workflow-same-poll-failed/i })).toBeVisible();
+    await expect(
+      activePanel.getByRole('link', { name: /workflow-same-poll-cancelled/i }),
+    ).toBeVisible();
+    await expect(page.getByText('2 running')).toBeVisible();
+
+    phase = 'both-attention';
+
+    const failedRow = attentionPanel
+      .getByRole('link', { name: /workflow-same-poll-failed/i })
+      .first();
+    const cancelledRow = attentionPanel
+      .getByRole('link', { name: /workflow-same-poll-cancelled/i })
+      .first();
+
+    await expect(activePanel).toHaveCount(0, { timeout: 12_000 });
+    await expect(failedRow).toBeVisible({ timeout: 12_000 });
+    await expect(cancelledRow).toBeVisible({ timeout: 12_000 });
+    await expect(failedRow.getByLabel('status failed')).toBeVisible({ timeout: 12_000 });
+    await expect(cancelledRow.getByLabel('status cancelled')).toBeVisible({ timeout: 12_000 });
+    await expect(failedRow.locator('.animate-spin')).toHaveCount(0);
+    await expect(cancelledRow.locator('.animate-spin')).toHaveCount(0);
+    await expect(failedRow.getByText('release orchestration failed after review')).toBeVisible({
+      timeout: 12_000,
+    });
+    await expect(cancelledRow.getByText('release was cancelled before completion')).toBeVisible({
+      timeout: 12_000,
+    });
+    await expect(page.getByRole('button', { name: /^failed 1$/i })).toBeVisible({
+      timeout: 12_000,
+    });
+    await expect(page.getByRole('button', { name: /^cancelled 1$/i })).toBeVisible({
+      timeout: 12_000,
+    });
+    await expect(page.getByText('2 running')).toHaveCount(0, { timeout: 12_000 });
+  });
 });
