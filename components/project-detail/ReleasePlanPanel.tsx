@@ -2,7 +2,7 @@
 
 import { useCallback, useEffect, useState } from 'react'
 import { Button } from '@/components/ui/Button'
-import { Spinner } from '@/components/ui/Spinner'
+import { InlineLoading } from '@/components/ui/InlineLoading'
 import { Pill } from '@/components/ui/Pill'
 import { fetchReleasePlan } from '@/lib/client-api'
 import type { ReleasePlan } from '@/lib/pipeline/release-plan'
@@ -66,9 +66,7 @@ export function ReleasePlanPanel({ projectName, refreshKey }: ReleasePlanPanelPr
       {open && (
         <div className="mt-2 rounded-md border border-border bg-bg-secondary p-3 text-sm">
           {loading && (
-            <div className="flex items-center gap-2 text-text-secondary">
-              <Spinner size="sm" aria-label="loading plan" /> Computing plan…
-            </div>
+            <InlineLoading label="Computing plan…" className="text-text-secondary" />
           )}
           {error && !loading && (
             <div className="flex items-center justify-between gap-2 text-status-error">
