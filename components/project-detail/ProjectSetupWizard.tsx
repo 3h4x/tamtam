@@ -16,6 +16,7 @@ import { buildProjectPath, buildProjectTerminalPath } from '@/lib/client/project
 import { Button } from '@/components/ui/Button'
 import { Checkbox } from '@/components/ui/Checkbox'
 import { ErrorCallout } from '@/components/ui/ErrorCallout'
+import { InlineLoading } from '@/components/ui/InlineLoading'
 import { Input } from '@/components/ui/Input'
 import { Spinner } from '@/components/ui/Spinner'
 
@@ -210,7 +211,7 @@ export function ProjectSetupWizard() {
   if (loading) {
     return (
       <div className="p-6 text-sm text-text-secondary">
-        <Spinner shrink /> Loading setup…
+        <InlineLoading label="Loading setup…" />
       </div>
     )
   }
