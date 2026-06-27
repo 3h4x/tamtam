@@ -11,6 +11,7 @@ import type { Route } from '@playwright/test';
 //   3. The "Add Template" submit button is disabled when the name field is blank.
 //   4. Filling name + saving adds the template card to the list.
 //   5. Deleting the only template restores the empty state.
+//   6. Editing a template updates the rendered card.
 //
 // All API calls are mocked — no pipeline execution.
 
