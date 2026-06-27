@@ -48,6 +48,7 @@ export const TERMINAL_DRAIN_HEADER = 'x-tamtam-terminal-drain';
 // Serialize per-project so two finish-seam drains don't both re-POST the same
 // head. In-memory is fine — a restart drops the lock and boot recovery resumes.
 const inFlight = new Set<string>();
+const DRAIN_FETCH_TIMEOUT_MS = 30_000;
 
 function parsePayload(raw: string): TerminalRunPayload {
   try {
@@ -169,6 +170,7 @@ export async function drainNextTerminalRun(project: string): Promise<void> {
           'content-type': 'application/json',
           [TERMINAL_DRAIN_HEADER]: head.id,
         },
+        signal: AbortSignal.timeout(DRAIN_FETCH_TIMEOUT_MS),
         body: JSON.stringify(head.payload),
       });
     } catch (e) {
