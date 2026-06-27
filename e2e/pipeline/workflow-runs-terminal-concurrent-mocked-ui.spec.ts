@@ -7,6 +7,7 @@ const SUCCESS_RELEASE_ID = 'workflow-runs-terminal-concurrent-mocked-success-rel
 const FAILURE_RELEASE_ID = 'workflow-runs-terminal-concurrent-mocked-failure-release';
 const SUCCESS_RELEASE_OUTPUT = 'Mocked success release finished after the other release failed.';
 const FAILURE_REASON = 'Push failed because the remote hook rejected the branch.';
+const CANCELLED_DETAIL = 'Release was cancelled before the mocked push step completed.';
 
 const now = () => Math.floor(Date.now() / 1000);
 
@@ -88,9 +89,20 @@ function finishedReleaseJob(project: string, id: string) {
   };
 }
 
+function finishedCancelledReleaseJob(project: string, id: string) {
+  return {
+    ...runningReleaseJob(project, id, now() - 30),
+    status: 'done',
+    exit_code: -3,
+    finished_at: now() - 1,
+    log: 'Mocked cancelled release stopped before the final push step.\n',
+    detail: CANCELLED_DETAIL,
+  };
+}
+
 function workflowRun(
   project: string,
-  status: 'running' | 'completed' | 'failed',
+  status: 'running' | 'completed' | 'failed' | 'cancelled',
   overrides: Partial<Record<'output' | 'error', unknown>> = {},
 ) {
   const terminal = status !== 'running';
@@ -173,19 +185,23 @@ async function stubSharedRoutes(
         }),
     );
     await context.route(
-      (url) => url.pathname === '/api/jobs/counts' && url.searchParams.get('project') === project,
-      (route: Route) => {
-        const jobs = getJobs();
-        const running = jobs.filter((job) => job.status === 'running').length;
-        const done = jobs.filter((job) => job.status === 'done').length;
-        route.fulfill({
-          json: {
-            total: jobs.length,
-            byKind: { release: jobs.length },
-            byStatus: { running, done, aborted: 0, failed: 0 },
-            tokens: { input: 0, output: 0, cacheRead: 0, cacheCreate: 0, total: 0 },
-            cost: { total: 0, monthToDate: 0 },
-          },
+    (url) => url.pathname === '/api/jobs/counts' && url.searchParams.get('project') === project,
+    (route: Route) => {
+      const jobs = getJobs();
+      const running = jobs.filter((job) => job.status === 'running').length;
+      const done = jobs.filter((job) => job.status === 'done').length;
+      const aborted = jobs.filter((job) => job.exit_code === -3).length;
+      const failed = jobs.filter(
+        (job) => typeof job.exit_code === 'number' && job.exit_code !== 0 && job.exit_code !== -3,
+      ).length;
+      route.fulfill({
+        json: {
+          total: jobs.length,
+          byKind: { release: jobs.length },
+          byStatus: { running, done, aborted, failed },
+          tokens: { input: 0, output: 0, cacheRead: 0, cacheCreate: 0, total: 0 },
+          cost: { total: 0, monthToDate: 0 },
+        },
         });
       },
     );
@@ -574,6 +590,219 @@ test.describe('Mocked workflow-runs and terminal concurrent lifecycle', () => {
     });
     await expect(successTerminalPage.getByText('live run')).toHaveCount(0, { timeout: 12_000 });
     await expect(successTerminalPage.getByLabel('live run spinner')).toHaveCount(0, {
+      timeout: 12_000,
+    });
+  });
+
+  test('two live releases can diverge to cancelled and failed on the same poll without leaving stale spinners on either surface', async ({
+    page,
+  }) => {
+    let phase: 'idle' | 'both-running' | 'both-attention' = 'idle';
+    let finishCancelledStream!: () => void;
+    let finishFailureStream!: () => void;
+    const cancelledStreamDone = new Promise<void>((resolve) => {
+      finishCancelledStream = resolve;
+    });
+    const failureStreamDone = new Promise<void>((resolve) => {
+      finishFailureStream = resolve;
+    });
+
+    await stubSharedRoutes(
+      page.context(),
+      () => {
+        if (phase === 'idle') return [];
+        if (phase === 'both-running') {
+          return [
+            workflowRun(SUCCESS_PROJECT, 'running'),
+            workflowRun(FAILURE_PROJECT, 'running'),
+          ];
+        }
+        return [
+          workflowRun(SUCCESS_PROJECT, 'cancelled', { error: CANCELLED_DETAIL }),
+          workflowRun(FAILURE_PROJECT, 'failed', { error: FAILURE_REASON }),
+        ];
+      },
+      () => (
+        phase === 'both-running'
+          ? [runningReleaseJob(SUCCESS_PROJECT, SUCCESS_RELEASE_ID, now() - 8)]
+          : [finishedCancelledReleaseJob(SUCCESS_PROJECT, SUCCESS_RELEASE_ID)]
+      ),
+      () => (
+        phase === 'both-running'
+          ? [runningReleaseJob(FAILURE_PROJECT, FAILURE_RELEASE_ID, now() - 9)]
+          : [{
+              ...runningReleaseJob(FAILURE_PROJECT, FAILURE_RELEASE_ID, now() - 9),
+              status: 'done',
+              exit_code: 2,
+              finished_at: now() - 1,
+              log: 'Mocked failure release stopped after the push hook rejected the branch.\n',
+              detail: FAILURE_REASON,
+            }]
+      ),
+    );
+
+    await page.context().route(`**/api/jobs/${SUCCESS_RELEASE_ID}`, (route: Route) =>
+      route.fulfill({
+        json:
+          phase === 'both-running'
+            ? runningReleaseJob(SUCCESS_PROJECT, SUCCESS_RELEASE_ID, now() - 8)
+            : finishedCancelledReleaseJob(SUCCESS_PROJECT, SUCCESS_RELEASE_ID),
+      }),
+    );
+    await page.context().route(`**/api/jobs/${FAILURE_RELEASE_ID}`, (route: Route) =>
+      route.fulfill({
+        json:
+          phase === 'both-running'
+            ? runningReleaseJob(FAILURE_PROJECT, FAILURE_RELEASE_ID, now() - 9)
+            : {
+                ...runningReleaseJob(FAILURE_PROJECT, FAILURE_RELEASE_ID, now() - 9),
+                status: 'done',
+                exit_code: 2,
+                finished_at: now() - 1,
+                log: 'Mocked failure release stopped after the push hook rejected the branch.\n',
+                detail: FAILURE_REASON,
+              },
+      }),
+    );
+    await page.context().route(`**/api/streaming/${SUCCESS_RELEASE_ID}`, async (route: Route) => {
+      await cancelledStreamDone;
+      await route.fulfill({
+        status: 200,
+        headers: {
+          'content-type': 'text/event-stream',
+          'cache-control': 'no-cache',
+        },
+        body: [
+          'data: Mocked cancelled release stopped before the final push step.',
+          '',
+          'event: done',
+          `data: ${JSON.stringify({
+            exitCode: -3,
+            provider: 'claude',
+            detail: CANCELLED_DETAIL,
+            duration: 1400,
+          })}`,
+          '',
+        ].join('\n'),
+      });
+    });
+    await page.context().route(`**/api/streaming/${FAILURE_RELEASE_ID}`, async (route: Route) => {
+      await failureStreamDone;
+      await route.fulfill({
+        status: 200,
+        headers: {
+          'content-type': 'text/event-stream',
+          'cache-control': 'no-cache',
+        },
+        body: [
+          'data: Mocked failure release stopped after the push hook rejected the branch.',
+          '',
+          'event: done',
+          `data: ${JSON.stringify({
+            exitCode: 2,
+            provider: 'claude',
+            detail: FAILURE_REASON,
+            duration: 1400,
+          })}`,
+          '',
+        ].join('\n'),
+      });
+    });
+
+    const cancelledTerminalPage = await page.context().newPage();
+    const failureTerminalPage = await page.context().newPage();
+    await Promise.all([
+      page.goto('/workflow-runs'),
+      cancelledTerminalPage.goto(`/project/${SUCCESS_PROJECT}/terminal`),
+      failureTerminalPage.goto(`/project/${FAILURE_PROJECT}/terminal`),
+    ]);
+
+    await expect(page.getByRole('heading', { name: 'Activity' })).toBeVisible({
+      timeout: 8_000,
+    });
+    await expect(cancelledTerminalPage.getByRole('button', { name: 'new' })).toBeVisible({
+      timeout: 8_000,
+    });
+    await expect(failureTerminalPage.getByRole('button', { name: 'new' })).toBeVisible({
+      timeout: 8_000,
+    });
+
+    phase = 'both-running';
+
+    const activePanel = page.getByLabel('Active workflow runs');
+    await expect(activePanel).toBeVisible({ timeout: 12_000 });
+    await expect(activePanel.getByText('2 runs')).toBeVisible({ timeout: 12_000 });
+    await expect(page.getByText('2 running')).toBeVisible({ timeout: 12_000 });
+    await expect(cancelledTerminalPage).toHaveURL(
+      new RegExp(`/project/${SUCCESS_PROJECT}/terminal\\?job=${encodeURIComponent(SUCCESS_RELEASE_ID)}`),
+      { timeout: 12_000 },
+    );
+    await expect(failureTerminalPage).toHaveURL(
+      new RegExp(`/project/${FAILURE_PROJECT}/terminal\\?job=${encodeURIComponent(FAILURE_RELEASE_ID)}`),
+      { timeout: 12_000 },
+    );
+    await expect(cancelledTerminalPage.getByText('live run')).toBeVisible({ timeout: 12_000 });
+    await expect(failureTerminalPage.getByText('live run')).toBeVisible({ timeout: 12_000 });
+    await expect(cancelledTerminalPage.getByLabel('live run spinner')).toBeVisible({
+      timeout: 12_000,
+    });
+    await expect(failureTerminalPage.getByLabel('live run spinner')).toBeVisible({
+      timeout: 12_000,
+    });
+
+    phase = 'both-attention';
+    finishCancelledStream();
+    finishFailureStream();
+
+    const attentionPanel = page.getByLabel('Workflow runs needing attention');
+    const cancelledAttentionRow = attentionPanel
+      .getByRole('link', { name: new RegExp(SUCCESS_PROJECT, 'i') })
+      .first();
+    const failureAttentionRow = attentionPanel
+      .getByRole('link', { name: new RegExp(FAILURE_PROJECT, 'i') })
+      .first();
+
+    await expect(activePanel).toHaveCount(0, { timeout: 12_000 });
+    await expect(cancelledAttentionRow.getByLabel('status cancelled')).toBeVisible({
+      timeout: 12_000,
+    });
+    await expect(failureAttentionRow.getByLabel('status failed')).toBeVisible({
+      timeout: 12_000,
+    });
+    await expect(cancelledAttentionRow.locator('.animate-spin')).toHaveCount(0);
+    await expect(failureAttentionRow.locator('.animate-spin')).toHaveCount(0);
+    await expect(cancelledAttentionRow.getByText(CANCELLED_DETAIL)).toBeVisible({
+      timeout: 12_000,
+    });
+    await expect(failureAttentionRow.getByText(FAILURE_REASON)).toBeVisible({
+      timeout: 12_000,
+    });
+    await expect(page.getByRole('button', { name: /^cancelled 1$/i })).toBeVisible({
+      timeout: 12_000,
+    });
+    await expect(page.getByRole('button', { name: /^failed 1$/i })).toBeVisible({
+      timeout: 12_000,
+    });
+    await expect(page.getByText('2 running')).toHaveCount(0, { timeout: 12_000 });
+
+    await expect(cancelledTerminalPage.getByText('Mocked cancelled release stopped before the final push step.')).toBeVisible({
+      timeout: 12_000,
+    });
+    await expect(cancelledTerminalPage.getByText('cancelled', { exact: true }).first()).toBeVisible({
+      timeout: 12_000,
+    });
+    await expect(cancelledTerminalPage.getByText('exit -3')).toHaveCount(0);
+    await expect(cancelledTerminalPage.getByText('live run')).toHaveCount(0, {
+      timeout: 12_000,
+    });
+    await expect(cancelledTerminalPage.getByLabel('live run spinner')).toHaveCount(0, {
+      timeout: 12_000,
+    });
+
+    await expect(failureTerminalPage.getByText(FAILURE_REASON)).toBeVisible({ timeout: 12_000 });
+    await expect(failureTerminalPage.getByText('exit 2').first()).toBeVisible({ timeout: 12_000 });
+    await expect(failureTerminalPage.getByText('live run')).toHaveCount(0, { timeout: 12_000 });
+    await expect(failureTerminalPage.getByLabel('live run spinner')).toHaveCount(0, {
       timeout: 12_000,
     });
   });
