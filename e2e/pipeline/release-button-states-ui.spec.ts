@@ -295,3 +295,48 @@ test('Create PR button is disabled with a global-pause title when jobs_paused is
   await expect(createPrBtn).toHaveAttribute('title', /jobs are paused globally/i);
   await expect(createPrBtn).toHaveAttribute('title', /resume jobs to create a pr/i);
 });
+
+// ---------------------------------------------------------------------------
+// Test 8: jobs_paused on feature branch with open PR + local changes —
+// the "Push to PR #N" button is disabled with a global-pause title.
+// ---------------------------------------------------------------------------
+test('Push to PR button is disabled with a global-pause title when jobs_paused is true', async ({
+  page,
+}) => {
+  await stubRoutes(page, {
+    task: { changes: 3, unpushed: 0 },
+    branch: { branch: 'feature/widget', defaultBranch: 'master', commitsAhead: 3 },
+    openPrBranches: [{ branch: 'feature/widget', number: 42 }],
+    jobsPaused: true,
+  });
+
+  await page.goto(`/project/${PROJECT}/issues`);
+
+  const pushToPrBtn = page.getByRole('button', { name: 'Push to PR #42' });
+  await expect(pushToPrBtn).toBeVisible({ timeout: 8_000 });
+  await expect(pushToPrBtn).toBeDisabled();
+  await expect(pushToPrBtn).toHaveAttribute('title', /jobs are paused globally/i);
+  await expect(pushToPrBtn).toHaveAttribute('title', /resume jobs to start a push/i);
+});
+
+// ---------------------------------------------------------------------------
+// Test 9: jobs_paused with unpushed commits and no local changes — the
+// standalone "Push" button is disabled with a global-pause title (the paused
+// reason wins over the "Push N commits" enabled title).
+// ---------------------------------------------------------------------------
+test('Push button is disabled with a global-pause title when jobs_paused is true and there are unpushed commits', async ({
+  page,
+}) => {
+  await stubRoutes(page, {
+    task: { changes: 0, unpushed: 2 },
+    jobsPaused: true,
+  });
+
+  await page.goto(`/project/${PROJECT}/issues`);
+
+  const pushBtn = page.getByRole('button', { name: 'Push (2)' });
+  await expect(pushBtn).toBeVisible({ timeout: 8_000 });
+  await expect(pushBtn).toBeDisabled();
+  await expect(pushBtn).toHaveAttribute('title', /jobs are paused globally/i);
+  await expect(pushBtn).toHaveAttribute('title', /resume jobs to start a push/i);
+});
