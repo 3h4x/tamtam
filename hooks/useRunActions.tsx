@@ -35,8 +35,7 @@ interface UseRunActionsResult {
 
 // Owns every per-run action: the Stop / Continue / Rerun / Retry-step /
 // Retry-release buttons plus the queued-automation retry/cancel controls.
-// Lifted out of ProjectRunsTab so the component file stays under the size cap;
-// the data-loading callbacks it depends on are passed in by the owner.
+// The data-loading callbacks it depends on are passed in by the caller.
 export function useRunActions({
   projectName,
   jobsPaused,
