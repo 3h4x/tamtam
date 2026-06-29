@@ -145,6 +145,25 @@ async function runPrerequisiteStep(params: AgentIntakeParams): Promise<PrereqRes
     return { cancelled: true, command: prereqCmd!, exitCode: 130, durationMs, stdout: '', stderr: '' };
   }
 
+  // Bridge the post-prerequisite window. composePromptStep runs next (skill
+  // compose, git reads, retrieval) with the main child not yet spawned, so the
+  // job row still has pid=0. The prereq's cancellation signal was just cleared
+  // (finishJobCancellation above), and a non-trivial prereq always leaves the
+  // job older than probeJobStatus's PID_SPAWN_GRACE — so without a guard the
+  // 30s probe sweep sees pid<=0, past grace, no inline signal and markDone(-1)s
+  // the job mid-composition (the dominant cause of prereq-bearing agents dying
+  // at ~prereq-length with no model output). Adopt the inline-server pid
+  // convention (see lib/jobs/inline-agent.ts): point pid at the server process
+  // so the probe treats this as a self-finalizing inline step until the real
+  // child pid lands. startInProcessAgentJob overwrites pid on spawn, and every
+  // composePromptStep skip path finalizes the row explicitly, so this cannot
+  // strand the job.
+  const bridgeJob = getJob(jobId);
+  if (bridgeJob && bridgeJob.finishedAt === null) {
+    bridgeJob.pid = process.pid;
+    updateJob(bridgeJob);
+  }
+
   return {
     cancelled: false,
     command: prereqCmd!,

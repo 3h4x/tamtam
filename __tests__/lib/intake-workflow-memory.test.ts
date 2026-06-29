@@ -122,6 +122,17 @@ describe('runAgentIntakeWorkflow memory composition', () => {
     vi.doMock('@/lib/jobs/inline-agent', () => ({
       startInProcessAgentJob: startInProcessAgentJobMock,
     }));
+    vi.doMock('@/lib/jobs/redacted-log-writer', () => ({
+      appendRedactedFileSync: vi.fn(),
+    }));
+    // Post-prerequisite re-checks (only reached when a prereqCmd runs).
+    vi.doMock('@/lib/pipeline/pipeline-lock', () => ({
+      isLockOwnedByActiveRelease: vi.fn().mockResolvedValue(false),
+      getLock: vi.fn().mockResolvedValue(null),
+    }));
+    vi.doMock('@/lib/jobs/project-active-job', () => ({
+      findBlockingRunningJob: vi.fn().mockResolvedValue(null),
+    }));
     vi.doMock('@/lib/db', () => ({
       db: {
         select: vi.fn().mockReturnValue({
@@ -224,5 +235,32 @@ describe('runAgentIntakeWorkflow memory composition', () => {
     // Without preservation the compose step rebuilds `agent` from id/name/triggeredBy
     // only, dropping schedule and rendering the schedule-backoff detector inert.
     expect(meta.agent?.schedule).toBe('15m');
+  });
+
+  it('bridges the post-prerequisite window by pointing pid at the server process', async () => {
+    // Regression: with a prerequisite, the job runs long enough that the probe
+    // spawn-grace expires; once the prereq's cancellation signal is cleared and
+    // before the main child spawns, the job sits at pid=0 with no signal and the
+    // 30s probe sweep markDone(-1)s it mid-composition. The fix adopts the
+    // inline-server pid convention so the probe treats it as a live inline step.
+    // getJob returns a shared mutable object that startAgentStep later
+    // overwrites with the child pid, so snapshot the pid at each updateJob call.
+    const seenPids: Array<number | undefined> = [];
+    updateJobMock.mockImplementation((j: { pid?: number }) => {
+      seenPids.push(j.pid);
+    });
+
+    const runAgentIntakeWorkflow = await importWorkflow();
+
+    await runAgentIntakeWorkflow({
+      ...makeParams(false),
+      prereqCmd: 'echo selecting files',
+    });
+
+    // The post-prereq bridge must persist pid=process.pid so probeJobStatus
+    // returns 'running' through composePromptStep instead of declaring -1.
+    expect(seenPids).toContain(process.pid);
+    // And the run still proceeds to spawn the real agent child.
+    expect(startInProcessAgentJobMock).toHaveBeenCalledOnce();
   });
 });

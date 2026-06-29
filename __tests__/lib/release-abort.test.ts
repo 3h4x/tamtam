@@ -104,7 +104,12 @@ describe('abortActiveRelease', () => {
     }));
   });
 
-  it('wall_clock_timeout does not finalize a wedged inline push step without a safe pid', async () => {
+  it('wall_clock_timeout force-finalizes a wedged inline push step whose pid is the server pid', async () => {
+    // Regression: an inline push whose async handler died WITHOUT a server
+    // restart leaves pid === process.pid and finishedAt === null. We can't
+    // process.kill the server's own pid, but past the wall-clock deadline the
+    // row must still be finalized so the pipeline lock frees — otherwise the
+    // release stays `running` forever and strands every queued run behind it.
     const release = makeJob();
     const runningPush = makeJob({
       id: 'push-1',
@@ -113,6 +118,7 @@ describe('abortActiveRelease', () => {
       releaseId: 'release-1',
       startedAt: 1500,
     });
+    const killSpy = vi.spyOn(process, 'kill').mockImplementation(() => true);
     getJobMock.mockReturnValue(release);
     listJobsMock.mockReturnValue([release, runningPush]);
     requestJobCancellationMock.mockResolvedValue(false);
@@ -120,16 +126,25 @@ describe('abortActiveRelease', () => {
     const { abortActiveRelease } = await import('@/lib/pipeline/release-abort');
     const result = await abortActiveRelease('proj1', { reason: 'wall_clock_timeout' });
 
-    expect(result).toEqual({
-      status: 'abort_pending',
-      detail: 'Timed out waiting for push to stop cleanly',
+    expect(result).toMatchObject({
+      status: 'aborted',
       release_id: 'release-1',
-      killed_job_id: null,
-      httpStatus: 409,
+      killed_job_id: 'push-1',
+      httpStatus: 200,
     });
-    expect(updateJobMock).not.toHaveBeenCalled();
-    expect(finalizeAbortedReleaseMock).not.toHaveBeenCalled();
-    expect(notifyMock).not.toHaveBeenCalled();
+    // Must NOT signal the server's own pid.
+    expect(killSpy).not.toHaveBeenCalled();
+    expect(updateJobMock).toHaveBeenCalledWith(expect.objectContaining({
+      id: 'push-1',
+      abortedAt: expect.any(Number),
+      finishedAt: expect.any(Number),
+      exitCode: -3,
+    }));
+    expect(finalizeAbortedReleaseMock).toHaveBeenCalledWith(release);
+    expect(notifyMock).toHaveBeenCalledWith(expect.objectContaining({
+      event: 'release_aborted',
+      reason: 'wall_clock_timeout',
+    }));
   });
 
   it('aborts the targeted expired release instead of the currently locked one', async () => {
@@ -254,7 +269,7 @@ describe('abortActiveRelease', () => {
     expect(notifyMock).not.toHaveBeenCalled();
   });
 
-  it('wall_clock_timeout does not finalize a wedged inline commit step without a safe pid', async () => {
+  it('wall_clock_timeout force-finalizes a wedged inline commit step whose pid is the server pid', async () => {
     const release = makeJob();
     const runningCommit = makeJob({
       id: 'commit-1',
@@ -263,6 +278,7 @@ describe('abortActiveRelease', () => {
       releaseId: 'release-1',
       startedAt: 1500,
     });
+    const killSpy = vi.spyOn(process, 'kill').mockImplementation(() => true);
     getJobMock.mockReturnValue(release);
     listJobsMock.mockReturnValue([release, runningCommit]);
     requestJobCancellationMock.mockResolvedValue(false);
@@ -270,15 +286,20 @@ describe('abortActiveRelease', () => {
     const { abortActiveRelease } = await import('@/lib/pipeline/release-abort');
     const result = await abortActiveRelease('proj1', { reason: 'wall_clock_timeout' });
 
-    expect(result).toEqual({
-      status: 'abort_pending',
-      detail: 'Timed out waiting for commit to stop cleanly',
+    expect(result).toMatchObject({
+      status: 'aborted',
       release_id: 'release-1',
-      killed_job_id: null,
-      httpStatus: 409,
+      killed_job_id: 'commit-1',
+      httpStatus: 200,
     });
-    expect(updateJobMock).not.toHaveBeenCalled();
-    expect(finalizeAbortedReleaseMock).not.toHaveBeenCalled();
+    expect(killSpy).not.toHaveBeenCalled();
+    expect(updateJobMock).toHaveBeenCalledWith(expect.objectContaining({
+      id: 'commit-1',
+      abortedAt: expect.any(Number),
+      finishedAt: expect.any(Number),
+      exitCode: -3,
+    }));
+    expect(finalizeAbortedReleaseMock).toHaveBeenCalledWith(release);
   });
 
   it('signals a non-inline running step and force-kills it on the timer', async () => {

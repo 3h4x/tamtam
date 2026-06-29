@@ -100,25 +100,29 @@ export async function abortActiveRelease(
             httpStatus: 409,
           };
         }
-        if (!shouldSignalJobPidForWallClockTimeout(runningStep)) {
+        if (shouldSignalJobPidForWallClockTimeout(runningStep)) {
+          // The inline push/commit handed off to a detached child pid we can
+          // safely signal — terminate it, then finalize the row below.
           console.warn(
-            `[release-abort] wall-clock timeout: refusing to finalize ${runningStep.kind} ${runningStep.id} without a safe signal target (pid=${runningStep.pid})`,
+            `[release-abort] wall-clock timeout: push/commit ${runningStep.id} did not cancel within 20s; SIGTERM+SIGKILL pid=${runningStep.pid}`,
           );
-          return {
-            status: 'abort_pending',
-            detail: `Timed out waiting for ${runningStep.kind} to stop cleanly`,
-            release_id: releaseJob.id,
-            killed_job_id: null,
-            httpStatus: 409,
-          };
+          try { process.kill(runningStep.pid, 'SIGTERM'); } catch {}
+          setTimeout(() => {
+            try { process.kill(runningStep.pid, 'SIGKILL'); } catch {}
+          }, 2000);
+        } else {
+          // pid is the server's own pid (an inline handler that never handed
+          // off to a child) or a suspicious low pid — we must NOT process.kill
+          // it. But the handler is provably unresponsive: we aborted its
+          // cancellation signal and waited 20s with no completion. Past the
+          // wall-clock deadline, finalize the row anyway so the pipeline lock
+          // frees. Leaving it `running` forever (the previous behavior) strands
+          // the release and every queued run behind its lock — a worse failure
+          // than force-resolving a dead inline step.
+          console.warn(
+            `[release-abort] wall-clock timeout: inline ${runningStep.kind} ${runningStep.id} unresponsive after 20s and pid not signalable (pid=${runningStep.pid}); finalizing row without signal`,
+          );
         }
-        console.warn(
-          `[release-abort] wall-clock timeout: push/commit ${runningStep.id} did not cancel within 20s; SIGTERM+SIGKILL pid=${runningStep.pid}`,
-        );
-        try { process.kill(runningStep.pid, 'SIGTERM'); } catch {}
-        setTimeout(() => {
-          try { process.kill(runningStep.pid, 'SIGKILL'); } catch {}
-        }, 2000);
       }
     } else if (shouldSignalJobPid(runningStep)) {
       try { process.kill(runningStep.pid, 'SIGTERM'); } catch {}
