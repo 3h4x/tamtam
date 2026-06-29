@@ -182,6 +182,12 @@ export function readShimState(project: string): ShimState {
   }
 }
 
+export function writeGitState(project: string, state: ShimState): void {
+  const dir = join(SHIM_DIR, project);
+  mkdirSync(dir, { recursive: true });
+  writeFileSync(join(dir, 'git-state.json'), JSON.stringify(state));
+}
+
 // ---------------------------------------------------------------------------
 // Project configuration
 // ---------------------------------------------------------------------------

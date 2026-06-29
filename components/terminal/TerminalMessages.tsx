@@ -80,7 +80,7 @@ interface TerminalMessagesProps {
 const spinnerChars = ['⠋', '⠙', '⠹', '⠸', '⠼', '⠴', '⠦', '⠧', '⠇', '⠏']
 
 type LogTone = 'default' | 'info' | 'success' | 'warning' | 'error'
-type RawLineKind = 'ambient' | 'meta' | 'command' | 'divider'
+type RawLineKind = 'ambient' | 'meta' | 'command' | 'divider' | 'heading'
 
 const LOG_TONE_STYLES: Record<LogTone, { line: string; text: string; block: string }> = {
   default: {
@@ -141,6 +141,10 @@ function classifyRawLine(text: string): { kind: RawLineKind; tone: LogTone } {
   if (!trimmed) return { kind: 'ambient', tone: 'default' }
   const tone = classifyLogLine(trimmed)
   if (/^[=-]{3,}$/.test(trimmed) || /^#{2,}\s/.test(trimmed)) return { kind: 'divider', tone: 'info' }
+  // Single-hash comment lines (e.g. `# prerequisite: <cmd>`, `# cwd: ...`) are
+  // section headings in TamTam log files — render them as semantic <h3> elements
+  // so the terminal page has accessible structure and tests can assert via getByRole.
+  if (/^# [A-Za-z]/.test(trimmed)) return { kind: 'heading', tone: 'default' }
   if ((/^\$ /.test(trimmed) || /^(pnpm|npm|node|git|gh|bash|sh)\b/.test(trimmed)) && tone === 'default') {
     return { kind: 'command', tone: 'info' }
   }
@@ -201,6 +205,14 @@ function LogBlock({
           const { kind, tone } = classifyRawLine(plainLine)
           const style = LOG_TONE_STYLES[tone]
           const renderedLine = ansiLines?.[index] ?? null
+
+          if (kind === 'heading') {
+            return (
+              <h3 key={`${index}:${line}`} className="font-mono text-xs font-medium text-text-secondary py-0.5 pl-2">
+                {plainLine.replace(/^#\s+/, '')}
+              </h3>
+            )
+          }
 
           if (kind === 'divider') {
             return (

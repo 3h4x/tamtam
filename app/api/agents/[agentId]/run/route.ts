@@ -614,10 +614,24 @@ async function runAgentStart(
     };
   }
 
+  // Resolve prereqCmd early so initialContextMeta can advertise the prerequisite
+  // before the workflow starts. This lets the terminal page bootstrap in passthrough
+  // streaming mode immediately (hasPrerequisiteContext=true), so raw shell output
+  // from the prereq is rendered instead of silently dropped as non-NDJSON.
+  const prereqCmd = resolveAgentPrerequisiteCommandWithFileSkills({
+    project: agent.project,
+    skillIds: allSkillIds,
+    prerequisiteCommand: agent.prerequisiteCommand,
+  });
+
   // Create the job row BEFORE handing off to the workflow so the run is
   // visible in the UI immediately. The workflow's compose step fills in
   // contextMeta (skills/docs/baseline/etc); seed an empty object so it has
-  // a parseable starting point.
+  // a parseable starting point. Include a pending prerequisite marker when
+  // the agent has a prereq command so the terminal bootstrap can start the
+  // stream in passthrough mode immediately — otherwise the terminal loads the
+  // job, sees no prerequisite, starts in non-passthrough mode, and raw prereq
+  // output is silently dropped as unparseable NDJSON.
   const initialContextMeta = JSON.stringify({
     agent: {
       id: agent.id,
@@ -628,6 +642,7 @@ async function runAgentStart(
       // producers get diff-based unfruitful/backoff recommendations).
       role: (agent as { role?: string }).role ?? 'producer',
     },
+    ...(prereqCmd ? { prerequisite: { pending: true } } : {}),
   });
   const job = createJob(agent.project, `agent:${agent.name}`, 0, '', taskPrompt, initialContextMeta, taskPrompt);
   job.provider = provider;
@@ -652,12 +667,6 @@ async function runAgentStart(
       };
     }
   }
-
-  const prereqCmd = resolveAgentPrerequisiteCommandWithFileSkills({
-    project: agent.project,
-    skillIds: allSkillIds,
-    prerequisiteCommand: agent.prerequisiteCommand,
-  });
 
   // Durable workflow path is the only agent intake path. The workflow owns
   // prompt composition, optional prereq execution, retrieval, memory, and

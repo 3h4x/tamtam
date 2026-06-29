@@ -1,11 +1,14 @@
 import { test, expect } from '@playwright/test';
-import { enableProject, resetShimState, writeScenario, waitForJobCompletion } from './helpers';
+import { enableProject, resetShimState, writeGitState, writeScenario, waitForJobCompletion } from './helpers';
 
 const PROJECT = 'agent-prereq-terminal';
 
 test.describe('Agent prerequisite terminal flow', () => {
   test.beforeEach(async ({ request }) => {
     resetShimState(PROJECT);
+    // Mark worktree as committed so the dirty-worktree gate (threshold=1) doesn't
+    // block the agent run. The git shim returns clean status when committed=true.
+    writeGitState(PROJECT, { committed: true, pushed: false });
     await enableProject(request, PROJECT, { testsDisabled: true });
   });
 
