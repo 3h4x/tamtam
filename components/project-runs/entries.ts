@@ -270,6 +270,7 @@ export function buildEntries(jobs: JobInfo[]): Entry[] {
       }
     }
 
+    const followupIssue = followupIssueFromContext(j.context_meta)
     const entry: Entry = {
       // Conversational sessions get a stable `sess:<id>` key so the same
       // entry is reused across turns. Pipeline-step jobs sharing a session
@@ -309,8 +310,8 @@ export function buildEntries(jobs: JobInfo[]): Entry[] {
       parentJobId: j.parent_job_id ?? null,
       parentLabel: j.parent_job_id ? parentLabelFor(byId.get(j.parent_job_id)) : null,
       outcomeVerdict: outcomeVerdictFromContext(j.context_meta),
-      followupIssueUrl: followupIssueFromContext(j.context_meta)?.url ?? null,
-      followupIssueNumber: followupIssueFromContext(j.context_meta)?.number ?? null,
+      followupIssueUrl: followupIssue?.url ?? null,
+      followupIssueNumber: followupIssue?.number ?? null,
       releaseStopReason: releaseStopReasonFromContext(j.context_meta),
       _jobIds: [j.id],
     }
@@ -337,6 +338,7 @@ export function buildEntries(jobs: JobInfo[]): Entry[] {
 // row can expose per-turn cost when expanded. The shape mirrors a regular
 // Entry but is never re-grouped — it's a display-only artifact.
 function makeTurnEntry(j: JobInfo, bucket: KindBucket, byId: Map<string, JobInfo>): Entry {
+  const followupIssue = followupIssueFromContext(j.context_meta)
   return {
     key: `turn:${j.id}`,
     project: j.project,
@@ -370,8 +372,8 @@ function makeTurnEntry(j: JobInfo, bucket: KindBucket, byId: Map<string, JobInfo
     parentJobId: j.parent_job_id ?? null,
     parentLabel: j.parent_job_id ? parentLabelFor(byId.get(j.parent_job_id)) : null,
     outcomeVerdict: outcomeVerdictFromContext(j.context_meta),
-    followupIssueUrl: followupIssueFromContext(j.context_meta)?.url ?? null,
-    followupIssueNumber: followupIssueFromContext(j.context_meta)?.number ?? null,
+    followupIssueUrl: followupIssue?.url ?? null,
+    followupIssueNumber: followupIssue?.number ?? null,
     _jobIds: [j.id],
   }
 }
