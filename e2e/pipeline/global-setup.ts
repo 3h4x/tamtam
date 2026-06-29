@@ -93,6 +93,7 @@ const PROJECTS = [
   'concurrent-runs-real-cancelled',
   'runs-same-project-real',
   'agent-prereq-terminal',
+  'agent-prereq-dual-surface',
   'issue-cruncher-prereq',
   'pr-workflow-auto-merge',
   'pr-workflow-reuse-existing-pr',

@@ -160,6 +160,14 @@ if (sub === 'status') {
 }
 
 if (sub === 'rev-list' && cmd.includes('--count')) {
+  // Branch-freshness query (`rev-list --count HEAD..origin/<default>`): the
+  // fake workspace is never genuinely behind its origin, so report 0. Without
+  // this the generic committed-count below returns 1 and the agent-run
+  // freshness gate wrongly blocks every committed worktree as "1 behind".
+  if (cmd.some(a => a.includes('HEAD..origin/'))) {
+    out('0\n');
+    exit(0);
+  }
   const st = readState();
   if (st.committed && !st.pushed) {
     out('1\n');
