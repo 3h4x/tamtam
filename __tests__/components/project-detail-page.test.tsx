@@ -392,13 +392,45 @@ describe('ProjectDetailPage', () => {
     unmount()
   })
 
-  it('does not start project-specific polling when the project is missing', async () => {
+  // A non-empty fleet that simply doesn't contain the requested project is the
+  // GENUINELY-missing case (typo'd URL, deleted project) → render "not found".
+  // An EMPTY fleet means the list hasn't loaded yet → render a loading state
+  // (covered by its own test below) — not "not found".
+  function fleetMissingTarget(): FleetHealth {
+    return {
+      ...buildFleet(),
+      projects: [{
+        project: 'other/repo',
+        status: 'healthy',
+        tasks: [],
+        totalChanges: 0,
+        unpushed: 0,
+        unreviewedCount: 0,
+        lastRunAgo: null,
+      }],
+      healthyCount: 1,
+      totalChanges: 0,
+    }
+  }
+
+  it('shows a loading state (not "not found") while the projects list is empty', async () => {
     const { container, unmount } = renderPage({
       ...buildFleet(),
       projects: [],
       healthyCount: 0,
       totalChanges: 0,
     })
+    // Cold /api/projects can take many seconds; until the list arrives we must
+    // NOT claim the project doesn't exist.
+    await vi.waitFor(() => {
+      expect(container.textContent).not.toContain('not found')
+    })
+    expect(fetchJobsMock).not.toHaveBeenCalled()
+    unmount()
+  })
+
+  it('does not start project-specific polling when the project is missing', async () => {
+    const { container, unmount } = renderPage(fleetMissingTarget())
 
     await vi.waitFor(() => {
       expect(container.textContent).toContain('Project "acme/widgets" not found.')
@@ -416,12 +448,7 @@ describe('ProjectDetailPage', () => {
   })
 
   it('starts project-specific polling when a missing project appears later', async () => {
-    const { container, rerender, unmount } = renderPage({
-      ...buildFleet(),
-      projects: [],
-      healthyCount: 0,
-      totalChanges: 0,
-    })
+    const { container, rerender, unmount } = renderPage(fleetMissingTarget())
 
     await vi.waitFor(() => {
       expect(container.textContent).toContain('Project "acme/widgets" not found.')

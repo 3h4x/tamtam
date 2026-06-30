@@ -12,6 +12,10 @@ describe('GET /api/projects/by-project/[projectName]/behind', () => {
 
   beforeEach(async () => {
     vi.resetModules();
+    // The route caches results per project on globalThis (survives
+    // resetModules); reset it so each case sees its own mocked git output.
+    (globalThis as Record<string, unknown>).__tamtamBehindCache = undefined;
+    (globalThis as Record<string, unknown>).__tamtamBehindInflight = undefined;
 
     resolveProjectPathMock = vi.fn().mockReturnValue('/path/to/project');
     execMock = vi.fn();
@@ -91,6 +95,40 @@ describe('GET /api/projects/by-project/[projectName]/behind', () => {
     const res = await GET(req, { params: Promise.resolve({ projectName: 'myproj' }) });
     const data = await res.json();
     expect(data).toEqual({ ahead: 0, behind: 0 });
+  });
+
+  it('caches the result within the TTL — a second call does no git (avoids per-tab git fetch)', async () => {
+    execMock
+      .mockResolvedValueOnce(makeExecResult({ stdout: 'origin/main\n' }))
+      .mockResolvedValueOnce(makeExecResult()) // fetch (network)
+      .mockResolvedValueOnce(makeExecResult({ stdout: '2\t4\n' }));
+    const req = () => new NextRequest('http://localhost/api/projects/by-project/myproj/behind');
+    const first = await (await GET(req(), { params: Promise.resolve({ projectName: 'myproj' }) })).json();
+    expect(first).toEqual({ ahead: 2, behind: 4 });
+    const callsAfterFirst = execMock.mock.calls.length;
+    // Second call within the TTL must serve from cache — zero new git spawns,
+    // crucially no `git fetch`.
+    const second = await (await GET(req(), { params: Promise.resolve({ projectName: 'myproj' }) })).json();
+    expect(second).toEqual({ ahead: 2, behind: 4 });
+    expect(execMock.mock.calls.length).toBe(callsAfterFirst);
+  });
+
+  it('single-flights concurrent cold misses into one git fetch', async () => {
+    let resolveFetch: (v: { exitCode: number; stdout: string; stderr: string }) => void = () => {};
+    execMock
+      .mockResolvedValueOnce(makeExecResult({ stdout: 'origin/main\n' }))
+      .mockImplementationOnce(() => new Promise((r) => { resolveFetch = r; })) // fetch hangs until released
+      .mockResolvedValueOnce(makeExecResult({ stdout: '1\t1\n' }));
+    const req = () => new NextRequest('http://localhost/api/projects/by-project/myproj/behind');
+    const p1 = GET(req(), { params: Promise.resolve({ projectName: 'myproj' }) });
+    const p2 = GET(req(), { params: Promise.resolve({ projectName: 'myproj' }) });
+    await new Promise((r) => setTimeout(r, 0));
+    resolveFetch(makeExecResult());
+    const [d1, d2] = await Promise.all([p1.then((r) => r.json()), p2.then((r) => r.json())]);
+    expect(d1).toEqual({ ahead: 1, behind: 1 });
+    expect(d2).toEqual({ ahead: 1, behind: 1 });
+    // Both requests shared ONE fetch — exactly 3 git calls total, not 6.
+    expect(execMock).toHaveBeenCalledTimes(3);
   });
 
   it('targets the upstream branch for fetch even with nested ref names', async () => {

@@ -20,6 +20,7 @@ import { PipelineStrip } from '@/components/project-detail/PipelineStrip'
 import { ProjectActions } from '@/components/project-detail/ProjectActions'
 import { ReleasePlanPanel } from '@/components/project-detail/ReleasePlanPanel'
 import { TabNav } from '@/components/project-detail/TabNav'
+import { ProjectPageLoadingState } from '@/components/project-detail/ProjectPageLoadingState'
 import { OverviewTab } from '@/components/project-detail/OverviewTab'
 import { AgentsTab } from '@/components/AgentsTab'
 import { buildProjectPath, buildProjectSetupPath, buildProjectTerminalPath } from '@/lib/client/project-routes'
@@ -50,6 +51,23 @@ function latestFinishedJob(
     }
   }
   return latest
+}
+
+// Per-project UI cache for state that drives always-visible header controls
+// (custom-action buttons, Test/Release buttons). Changing tab does a
+// `router.push` to a sibling `[tab]` segment, which REMOUNTS this page (there is
+// no shared `[name]/layout.tsx`), resetting all useState. Without this cache the
+// buttons flashed empty (customActions=[], config=null) on every tab switch
+// until their fetches re-resolved. Seeding the initial state from the last known
+// values keeps the buttons stable across remounts; the background re-fetch still
+// refreshes them. Module-level (one browser realm) is enough — no need to pin to
+// globalThis.
+const projectUiCache = new Map<string, { actions?: CustomAction[]; config?: ProjectConfig }>()
+function readUiCache(project: string): { actions?: CustomAction[]; config?: ProjectConfig } {
+  return projectUiCache.get(project) ?? {}
+}
+function writeUiCache(project: string, patch: { actions?: CustomAction[]; config?: ProjectConfig }): void {
+  projectUiCache.set(project, { ...readUiCache(project), ...patch })
 }
 
 export function ProjectDetailPage({
@@ -85,11 +103,11 @@ export function ProjectDetailPage({
   const jobsPausedEventSeqRef = useRef(0)
 
   // Custom actions
-  const [customActions, setCustomActions] = useState<CustomAction[]>([])
+  const [customActions, setCustomActions] = useState<CustomAction[]>(() => readUiCache(name).actions ?? [])
   const [runningActions, setRunningActions] = useState<Set<string>>(new Set())
 
   // Config state
-  const [config, setConfig] = useState<ProjectConfig | null>(null)
+  const [config, setConfig] = useState<ProjectConfig | null>(() => readUiCache(name).config ?? null)
   const [configLoading, setConfigLoading] = useState(false)
   const [configReloadNonce, setConfigReloadNonce] = useState(0)
   const [testCommandInput, setTestCommandInput] = useState('')
@@ -154,7 +172,7 @@ export function ProjectDetailPage({
   // Load custom actions
   useEffect(() => {
     if (!name || !projectId) return
-    fetchCustomActions(name).then((data) => setCustomActions(data.actions)).catch(() => {})
+    fetchCustomActions(name).then((data) => { setCustomActions(data.actions); writeUiCache(name, { actions: data.actions }) }).catch(() => {})
   }, [name, projectId])
 
   // Load board URL for the optional "Board ↗" header chip
@@ -221,6 +239,7 @@ export function ProjectDetailPage({
 
   const applyConfigData = (data: ProjectConfig) => {
     setConfig(data)
+    writeUiCache(name, { config: data })
     setTestCommandInput(data.test_command)
     setReleaseTimeoutMinutesInput(data.release_timeout_minutes != null ? String(data.release_timeout_minutes) : '')
     setTestCronEnabledInput(data.test_cron_enabled)
@@ -314,6 +333,15 @@ export function ProjectDetailPage({
   }, [name, projectId])
 
   if (!project) {
+    // An empty fleet means the projects list hasn't loaded yet — the cold
+    // `/api/projects` sweep does git ops across every tracked repo and can take
+    // many seconds under host/git contention (e.g. right after a restart, while
+    // agents hammer the same repos). Rendering "not found" during that window is
+    // wrong and alarming. Only treat the project as genuinely absent once OTHER
+    // projects have loaded; until then show the same loading state as the shell.
+    if (fleet.projects.length === 0) {
+      return <ProjectPageLoadingState />
+    }
     return (
       <div className="py-2">
         <Button
@@ -519,6 +547,7 @@ export function ProjectDetailPage({
       const result = await saveCustomActions(name, valid)
       setEditActions(result.actions)
       setCustomActions(result.actions)
+      writeUiCache(name, { actions: result.actions })
       setActionsSaved(true)
       setTimeout(() => setActionsSaved(false), 3000)
     } catch (err) {
