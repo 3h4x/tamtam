@@ -6,10 +6,9 @@ import { getAllAgentsCached, clearAgentsCache, normalizeAgent } from '@/lib/agen
 import { findAgentNameConflict } from '@/lib/agents/agent-conflicts';
 import { canonicalAgentNameKey, normalizeAgentNameInput } from '@/lib/agents/agent-name';
 import { parseAgentRole, inferAgentRole } from '@/lib/agents/roles';
-import { scanFileAgents, writeFileAgent, type FileAgent } from '@/lib/agents/tamtam-file-agents';
+import { writeFileAgent, type FileAgent } from '@/lib/agents/tamtam-file-agents';
 import { getFileAgentOverrideSync } from '@/lib/agents/file-agent-overrides';
 import { resolveProjectPath } from '@/lib/shared/project-data';
-import { listEnabledProjects } from '@/lib/shared/enabled-projects';
 import { parseOptionalKnownModelInput } from '@/lib/agents/model-aliases';
 import { parseOptionalAgentScheduleInput } from '@/lib/scheduling/agent-schedule';
 import { isCliProvider } from '@/lib/usage/cli-providers';
@@ -18,7 +17,7 @@ import { parseOptionalPermissionModeInput } from '@/lib/shared/config';
 import { resolveAgentPrerequisiteCommandWithFileSkills } from '@/lib/agents/file-skill-prerequisites';
 import { isBuiltInRecommendedAgent } from '@/lib/agents/recommended-agents';
 import { loadAgentCronStates, getAllAgentLastAttempts } from '@/lib/scheduling/agent-cron-state';
-import { getAllFileAgentsCached } from '@/lib/agents/file-agents-cache';
+import { getAllFileAgentsCached, getFileAgentsForProjectCached } from '@/lib/agents/file-agents-cache';
 
 function withEffectivePrerequisite<T extends { project: string; skillIds: string[]; prerequisiteCommand?: string | null }>(
   agent: T,
@@ -63,16 +62,13 @@ export async function GET(request: NextRequest) {
   if (project) {
     const projPath = resolveProjectPath(project);
     if (projPath) {
-      // Reuse the 10s all-projects file-agent cache for enabled projects
-      // instead of an uncached per-request filesystem walk of `.tamtam/agents`.
-      // The per-project path was ~1.5s vs ~15ms for the unfiltered (cached)
-      // list because every `?project=X` request (per-project agents tab, agent
-      // picker) re-scanned the filesystem. Disabled/archived projects aren't in
-      // the cache, so fall back to a direct scan only for them.
-      const isEnabled = listEnabledProjects().some(p => p.name === project);
-      const fileAgentsForProject = isEnabled
-        ? getAllFileAgentsCached().filter(fa => fa.project === project)
-        : scanFileAgents(projPath, project);
+      // Scan ONLY the requested project (cached 10s per project). Reusing the
+      // all-projects cache here forced every `?project=X` cold miss to re-scan
+      // ALL enabled projects' filesystems just to filter down to one — a
+      // synchronous walk that blocks the event loop and, on a project-tab poll,
+      // starves the ~12 sibling mount requests (6–9s tab loads). A per-project
+      // scan is far cheaper now that getBranchContext is cached.
+      const fileAgentsForProject = getFileAgentsForProjectCached(projPath, project);
       for (const fa of fileAgentsForProject) {
         if (name && fa.name !== name) continue;
         if (!dbKeys.has(`${fa.project}:${canonicalAgentNameKey(fa.name)}`)) normalized.push({ ...withEffectivePrerequisite(fa), autopilotState: fileAgentAutopilotJson(fa), fallbackEnabled: false });

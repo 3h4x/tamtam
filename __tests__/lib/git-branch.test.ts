@@ -9,12 +9,18 @@ import {
   gitShowSync,
   gitLsTreeSync,
   getBranchContext,
+  clearBranchCache,
 } from '@/lib/git/git-branch';
 
 const mockExec = vi.mocked(execFileSync);
 
 describe('git-branch', () => {
-  beforeEach(() => vi.clearAllMocks());
+  beforeEach(() => {
+    vi.clearAllMocks();
+    // Branch primitives are now cached per process; reset between cases so each
+    // test sees its own mocked git output rather than a prior case's cached value.
+    clearBranchCache();
+  });
 
   describe('getDefaultBranchSync', () => {
     it('parses branch name from symbolic-ref output', () => {
@@ -118,6 +124,40 @@ describe('git-branch', () => {
       expect(ctx.isDefaultBranch).toBe(true);
       expect(ctx.currentBranch).toBe('');
       expect(ctx.defaultBranch).toBe('master');
+    });
+  });
+
+  describe('caching', () => {
+    it('caches the default branch for the whole process (no repeat git spawn)', () => {
+      mockExec.mockReturnValue(Buffer.from('refs/remotes/origin/main\n') as unknown as string);
+      expect(getDefaultBranchSync('/repo')).toBe('main');
+      const callsAfterFirst = mockExec.mock.calls.length;
+      // Second + third calls must hit the cache — zero additional git spawns.
+      expect(getDefaultBranchSync('/repo')).toBe('main');
+      expect(getDefaultBranchSync('/repo')).toBe('main');
+      expect(mockExec.mock.calls.length).toBe(callsAfterFirst);
+    });
+
+    it('caches the current branch within the TTL and re-resolves after clearBranchCache', () => {
+      mockExec.mockReturnValue(Buffer.from('feature-x\n') as unknown as string);
+      expect(getCurrentBranchSync('/repo')).toBe('feature-x');
+      const afterFirst = mockExec.mock.calls.length;
+      expect(getCurrentBranchSync('/repo')).toBe('feature-x'); // cached — no new spawn
+      expect(mockExec.mock.calls.length).toBe(afterFirst);
+      // After a checkout, the caller busts the cache → next read re-spawns git.
+      clearBranchCache('/repo');
+      mockExec.mockReturnValue(Buffer.from('main\n') as unknown as string);
+      expect(getCurrentBranchSync('/repo')).toBe('main');
+      expect(mockExec.mock.calls.length).toBeGreaterThan(afterFirst);
+    });
+
+    it('caches per project path independently', () => {
+      mockExec.mockReturnValue(Buffer.from('refs/remotes/origin/main\n') as unknown as string);
+      getDefaultBranchSync('/repo-a');
+      const afterA = mockExec.mock.calls.length;
+      // A different path is a separate cache key → it must resolve afresh.
+      getDefaultBranchSync('/repo-b');
+      expect(mockExec.mock.calls.length).toBeGreaterThan(afterA);
     });
   });
 });
