@@ -11,6 +11,7 @@ import { isCanonicalModelTier, normalizeModelInput } from '@/lib/agents/model-al
 import { resolveCliBin, resolveCliEnv } from '@/lib/shared/cli-bin';
 import { isCliProvider, type CliProvider } from '@/lib/usage/cli-providers';
 import { hasIssueCruncherSkill } from '@/lib/agents/prerequisites';
+import { parseIssueStamp } from '@/lib/agents/issue-stamp';
 import { updateJob } from '@/lib/jobs/job-storage';
 import { startInProcessAgentJob } from '@/lib/jobs/inline-agent';
 import { errMsg } from '@/lib/shared/types';
@@ -199,6 +200,28 @@ async function composePromptStep(
     readOnly,
     permissionMode,
   } = params;
+
+  // Stamp the issue-cruncher's pick_top-chosen issue onto the job row. The
+  // scheduled issue-cruncher SELECTS its issue at runtime (the prereq), so the
+  // job is never pre-stamped — without this it stays ghIssueNumber=null and the
+  // action orchestrator (lib/agents/action-eligibility) skips EVERY issue-close/
+  // comment/label it emits as "missing-issue-context" (an already-resolved issue
+  // gets a correct close decision that silently never executes). Stamping makes
+  // those actions dispatch, binds them to the chosen issue (issue-mismatch
+  // guard), and lets the commit-time fix-branch backstop fire.
+  if (prereqResult && hasIssueCruncherSkill(skillIds)) {
+    const stamp = parseIssueStamp(prereqResult.stdout);
+    if (stamp) {
+      const { getJob } = await import('@/lib/jobs/job-storage');
+      const j = getJob(jobId);
+      if (j && j.finishedAt === null) {
+        j.ghIssueNumber = stamp.number;
+        if (stamp.title) j.ghIssueTitle = stamp.title;
+        if (stamp.repo) j.ghIssueRepo = stamp.repo;
+        updateJob(j);
+      }
+    }
+  }
 
   // Post-prereq release-lock re-check (prereq can run for minutes).
   if (prereqResult) {
