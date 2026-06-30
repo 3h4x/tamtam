@@ -304,8 +304,17 @@ async function checkoutForPickTop(
     return { ok: false, reason: `branch_creation_failed: ${branchResult.detail}` };
   }
   if (branchResult.status === 'skipped') {
-    // Legitimate opt-out (issueAutoBranch=false) or zombie-merged branch.
-    // The agent stays on whatever branch the working tree was on.
+    // A dirty/stranded working tree means the issue work CANNOT be isolated onto
+    // its own branch. Proceeding would run the issue agent — and let a
+    // release-after-run push its work — directly on the default branch, entangled
+    // with the stranded changes and bypassing the PR flow. Abort the pick so the
+    // issue-cruncher stops (its skill treats a non-null `reason` as a hard stop)
+    // instead of working exposed on the default branch.
+    if (branchResult.cause === 'dirty-tree') {
+      return { ok: false, reason: `branch_dirty_tree: ${branchResult.reason}` };
+    }
+    // Legitimate skip — project opted out of auto-branching, or the branch is
+    // already merged (issue is done). The agent stays on the current branch.
     return { ok: true, branch: branchResult.branch ? { name: branchResult.branch, status: 'skipped' } : null };
   }
   return { ok: true, branch: { name: branchResult.branch, status: branchResult.status } };

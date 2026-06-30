@@ -418,7 +418,7 @@ describe('GET /api/projects/by-project/[projectName]/issues?pick_top=1', () => {
 
   it('returns chosen issue with branch=null when issueAutoBranch is disabled (skipped)', async () => {
     setupTrustedUsers(['trusted-user']);
-    mocks.ensureIssueBranch.mockResolvedValueOnce({ status: 'skipped', reason: 'issue_auto_branch is disabled for this project' });
+    mocks.ensureIssueBranch.mockResolvedValueOnce({ status: 'skipped', reason: 'issue_auto_branch is disabled for this project', cause: 'opt-out' });
     mockListFetch([
       { number: 15, title: 'Opt out', author: { login: 'trusted-user' }, labels: [], assignees: [], updatedAt: '2026-05-18T00:00:00Z' },
     ]);
@@ -432,6 +432,34 @@ describe('GET /api/projects/by-project/[projectName]/issues?pick_top=1', () => {
     expect(data.chosenIssue).toBe(15);
     expect(data.branch).toBeNull();
     expect(data.reason).toBeNull();
+  });
+
+  it('fails closed with branch_dirty_tree when the tree is too dirty to isolate the issue', async () => {
+    // Regression: a dirty/stranded working tree makes ensureIssueBranch skip the
+    // checkout. The pick must fail closed (non-null reason) so the issue-cruncher
+    // STOPS instead of running issue work exposed on the default branch and
+    // letting a release-after-run push it straight to the default branch.
+    setupTrustedUsers(['trusted-user']);
+    mocks.ensureIssueBranch.mockResolvedValueOnce({
+      status: 'skipped',
+      reason: 'working tree has uncommitted changes — refusing to switch to fix/issue-16 and carry stranded work across',
+      branch: 'fix/issue-16',
+      cause: 'dirty-tree',
+    });
+    mockListFetch([
+      { number: 16, title: 'Dirty', author: { login: 'trusted-user' }, labels: [], assignees: [], updatedAt: '2026-05-18T00:00:00Z' },
+    ]);
+    mockIssueView({
+      number: 16, title: 'Dirty', body: '', author: { login: 'trusted-user' },
+      labels: [], state: 'OPEN', url: '', comments: [],
+    });
+
+    const res = await GET(makeReq(), { params: Promise.resolve({ projectName: 'myproj' }) });
+    const data = await res.json();
+    expect(data.chosenIssue).toBeNull();
+    expect(data.issue).toBeNull();
+    expect(data.branch).toBeNull();
+    expect(data.reason).toMatch(/^branch_dirty_tree:.*uncommitted changes/);
   });
 
   it('keeps comments from project safe_users when global allowlist is empty', async () => {

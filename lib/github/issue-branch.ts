@@ -6,7 +6,11 @@ import { clearProjectDataCache } from '@/lib/shared/project-data';
 
 export type EnsureIssueBranchResult =
   | { status: 'created' | 'reused' | 'already-on-branch'; branch: string }
-  | { status: 'skipped'; reason: string; branch?: string }
+  // `cause` lets callers distinguish a *legitimate* skip (the project opted out
+  // of auto-branching, or the branch is already merged so the issue is done)
+  // from `dirty-tree`, where the work simply could not be isolated and the
+  // caller must NOT proceed to run/ship issue work on the current branch.
+  | { status: 'skipped'; reason: string; branch?: string; cause: 'opt-out' | 'dirty-tree' | 'merged' }
   | { status: 'pipeline-running'; blockingJobId: string }
   | { status: 'error'; detail: string };
 
@@ -43,7 +47,7 @@ export async function ensureIssueBranch(opts: {
 
   const cfg = await getProjectTestConfig(projectName);
   if (cfg && cfg.issueAutoBranch === false) {
-    return { status: 'skipped', reason: 'issue_auto_branch is disabled for this project' };
+    return { status: 'skipped', reason: 'issue_auto_branch is disabled for this project', cause: 'opt-out' };
   }
 
   const branch = issueBranchName(issueNumber, issueTitle);
@@ -74,6 +78,7 @@ export async function ensureIssueBranch(opts: {
       status: 'skipped',
       reason: `working tree has uncommitted changes — refusing to switch to ${branch} and carry stranded work across`,
       branch,
+      cause: 'dirty-tree',
     };
   }
 
@@ -95,6 +100,7 @@ export async function ensureIssueBranch(opts: {
       status: 'skipped',
       reason: `branch ${branch} already merged into ${defaultBranch}`,
       branch,
+      cause: 'merged',
     };
   }
 
