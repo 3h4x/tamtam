@@ -136,6 +136,20 @@ for the full Phase 1 design.
   sample — catches projects that re-touch files for *zero net line change*, which a
   files-or-lines metric counts as "fruitful" but produces nothing committable).
   Reversible from Settings; writes an `auto_pause_unfruitful` recommendation.
+- **Per-agent saturation skip** (`lib/orchestrator/agent-saturation.ts`, agent-cron
+  `prereqSkipReason`): the project auto-pause above only fires when the *whole*
+  project is unfruitful, so a single agent whose target work is exhausted (e.g. a
+  `refactor-ui` agent landing 0-line no-ops every run) keeps firing while the
+  project stays active on its *other* still-fruitful agents. This gate skips that
+  agent's scheduled fire when **this agent** is persistently unfruitful (line-level
+  fruitful rate `< auto_pause_unfruitful_rate` over `unfruitfulRateSample(auto_pause_unfruitful_runs)`
+  of its own scheduled runs) **and** HEAD is unchanged since it last ran. The HEAD
+  gate is the release valve — any new commit re-enables one run, so it is never
+  silenced permanently, just stops re-scanning an unchanged tree. Complements (not
+  replaces) the autopilot **cadence-throttle** (which only *slows*, floor-bounded,
+  never stops) and the operator-facing `agent_schedule_backoff` recommendation.
+  Gated by `auto_pause_unfruitful_enabled`; system agents are exempt; the skip
+  re-enqueues at the normal schedule interval so it re-checks next tick.
 - **Health** (`agent-health-analysis.ts`): an LLM reviews the agent's last 3
   runs and returns a verdict (`concern` + `concernType` like loop/noise). On a
   concern it writes an `orchestrator_agent_health` recommendation; on a clean

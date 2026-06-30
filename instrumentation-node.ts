@@ -328,6 +328,37 @@ export async function registerNode(): Promise<void> {
                   const { checkBranchFresh } = await import('@/lib/git/branch-freshness');
                   const freshness = await checkBranchFresh(projPath);
                   if (!freshness.fresh) return skip(freshness.reason);
+                  // Per-agent saturation backoff: a single agent whose target
+                  // work is exhausted keeps landing 0-line no-ops while the
+                  // project stays active on its OTHER (still-fruitful) agents,
+                  // so the project-level auto-pause never fires for it. Skip the
+                  // fire while THIS agent is persistently unfruitful AND no new
+                  // commit has landed since it last ran (a HEAD move re-enables
+                  // it). Reuses the auto-pause-unfruitful settings; system
+                  // agents (no diff-producing runs) are exempt.
+                  if (agent.kind !== 'system') {
+                    const { getSettings } = await import('@/lib/shared/config');
+                    const s = getSettings();
+                    if (s.auto_pause_unfruitful_enabled && s.auto_pause_unfruitful_rate > 0) {
+                      const { isAgentSaturated, recentScheduledRunsForAgent } = await import('@/lib/orchestrator/agent-saturation');
+                      const { unfruitfulRateSample } = await import('@/lib/orchestrator/unfruitful-pause');
+                      const { isAgentJobKind, getJobKind } = await import('@/lib/jobs/kinds');
+                      const sample = unfruitfulRateSample(s.auto_pause_unfruitful_runs);
+                      const agentRuns = recentScheduledRunsForAgent(
+                        projectJobs, agent.project, `agent:${agent.name}`, isAgentJobKind, getJobKind, sample,
+                      );
+                      // Only pay for a rev-parse once there is enough history to
+                      // possibly be saturated.
+                      if (agentRuns.length >= sample) {
+                        const { exec } = await import('@/lib/shared/shell');
+                        const headR = await exec('git', ['-C', projPath, 'rev-parse', 'HEAD'], { timeout: 5000 });
+                        const currentHead = headR.exitCode === 0 ? headR.stdout.trim() : null;
+                        if (isAgentSaturated(agentRuns, currentHead, sample, s.auto_pause_unfruitful_rate)) {
+                          return skip(`agent saturated (no diff over last ${sample} scheduled runs; HEAD unchanged)`);
+                        }
+                      }
+                    }
+                  }
                 }
               } catch (err) {
                 console.warn(`[cron] branch-state prereq check failed for ${agent.id}:`, err);
