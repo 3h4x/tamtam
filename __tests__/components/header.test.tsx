@@ -6,8 +6,9 @@ import { createRoot } from 'react-dom/client'
 import { flushSync } from 'react-dom'
 import { Header } from '@/components/Header'
 
-const { fetchRecommendationsSummaryMock, usePathnameMock, useRouterMock } = vi.hoisted(() => ({
+const { fetchRecommendationsSummaryMock, fetchInboxMock, usePathnameMock, useRouterMock } = vi.hoisted(() => ({
   fetchRecommendationsSummaryMock: vi.fn(),
+  fetchInboxMock: vi.fn(),
   usePathnameMock: vi.fn(),
   useRouterMock: vi.fn(),
 }))
@@ -25,6 +26,7 @@ vi.mock('next/link', () => ({
 
 vi.mock('@/lib/client-api', () => ({
   fetchRecommendationsSummary: fetchRecommendationsSummaryMock,
+  fetchInbox: fetchInboxMock,
 }))
 
 vi.mock('@/hooks/useTheme', () => ({
@@ -69,6 +71,8 @@ describe('Header', () => {
   beforeEach(() => {
     vi.useFakeTimers()
     fetchRecommendationsSummaryMock.mockReset()
+    fetchInboxMock.mockReset()
+    fetchInboxMock.mockResolvedValue({ signals: [], counts: { red: 0, yellow: 0, green: 0, total: 0 } })
     usePathnameMock.mockReset()
     useRouterMock.mockReset()
     usePathnameMock.mockReturnValue('/recommendations')

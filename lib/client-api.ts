@@ -107,6 +107,17 @@ export {
 } from './client/automation-queue'
 export type { AutomationQueueItem, RetryAutomationQueueResult } from './client/automation-queue'
 
+export { fetchInbox } from './client/inbox'
+export type {
+  InboxSignal,
+  InboxSignalType,
+  InboxSeverity,
+  InboxAction,
+  InboxActionKind,
+  InboxCounts,
+  InboxResponse,
+} from './client/inbox'
+
 export {
   fetchAgents,
   createAgent,
