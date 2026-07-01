@@ -130,6 +130,18 @@ Implications:
 - Once a release starts, the chosen provider is stamped onto the release/test/push jobs so downstream review/fix/commit steps inherit the same provider instead of repicking mid-pipeline. If the inherited provider's immediate quota/session window is already hard-limited and another enabled provider is runnable, a child step that starts a fresh CLI session repicks instead of launching a known-doomed run with the exhausted provider. Steps that resume an existing provider session with `--resume` stay pinned to that provider and fail the start gate if it cannot run, because session IDs are provider-specific.
 - Per-phase model overrides are configured in Settings. With no override, `review` uses the workspace default tier, `fix` uses `smart` because it edits code, and `dod`/`commit` use `fast` for their narrow verification/message-generation tasks.
 
+## Runaway Guards (per-run caps + circuit breaker)
+
+The budget gate is a macro control checked *before* a run starts. It cannot stop a single Claude session that is already running from burning tens of dollars (Opus + a long fix loop) before the next budget check fires. Two DB-driven guards, both restart-safe, cover the gap:
+
+- **Per-run caps** (`reapRunCapExceededJobs`, wired into the 30s probe sweep — `lib/jobs/run-cap-reaper.ts`). For each running Claude-backed run/agent (`run`, `review`, `fix`, `fix-ci`, `pr-comment-fix`, `agent:*`; excludes `test` / `mark-dod-verify`, which keep their own hang-caps, and the `release` meta-job):
+  - `run_wall_time_cap_minutes` — kill once the job's wall-clock age exceeds the cap (`markDone(124)`). Checked first so a hung run with no new tokens is still reaped.
+  - `run_token_cap` — accumulate the run log's per-turn `message.usage` (`accumulateRunTokens`) and kill once cumulative input+output+cache tokens exceed the cap (`markDone(125)`). Only the log-read cost is paid when a token cap is armed.
+  - On a violation the process group is SIGTERM/SIGKILLed (reusing `killJobProcessGroup`) and a `# run killed — <reason>` line is appended to the run log. `0` disables either cap.
+- **Project circuit breaker** (`maybeTripCircuitBreaker`, called from `runPostCompletionHooks` — `lib/pipeline/circuit-breaker.ts`). After a failed top-level run finalizes, count failed `run` / `release` / `agent:*` jobs (non-zero, non-cancelled exit) that finished within `project_failure_window_minutes`. Once that reaches `project_failure_threshold`, flip `projects.paused = true` (same pause an operator toggles) and fire `circuit_breaker_tripped`. It trips at most once per pause window (skips when the project is already paused) and is best-effort. Operators resume from Settings once the root cause is fixed. `project_failure_threshold = 0` disables it.
+
+Note: a cap kill counts as a failed run, so a project whose runs repeatedly hit the token/wall-time cap will also trip the circuit breaker.
+
 ## Branch-derived PR behavior
 
 There is no longer a per-project pipeline mode selector. Push behavior is decided at runtime:

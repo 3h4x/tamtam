@@ -27,6 +27,10 @@ describe('GET /settings', () => {
         plain_test_phase_enabled: 'false',
         browser_broker_image: 'mcr.microsoft.com/playwright/mcp:v0.0.30',
         provider_fallback_chain: '',
+        run_token_cap: '2000000',
+        run_wall_time_cap_minutes: '30',
+        project_failure_threshold: '3',
+        project_failure_window_minutes: '60',
       });
     });
 

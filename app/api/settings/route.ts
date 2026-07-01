@@ -149,6 +149,10 @@ async function buildSettingsResponse(): Promise<Record<string, string>> {
   settings.review_do_not_ship_action = serializeSettingValue('review_do_not_ship_action', effective.review_do_not_ship_action);
   settings.release_wall_clock_timeout_minutes = serializeSettingValue('release_wall_clock_timeout_minutes', effective.release_wall_clock_timeout_minutes);
   settings.mark_dod_verify_timeout_ms = serializeSettingValue('mark_dod_verify_timeout_ms', effective.mark_dod_verify_timeout_ms);
+  settings.run_token_cap = serializeSettingValue('run_token_cap', effective.run_token_cap);
+  settings.run_wall_time_cap_minutes = serializeSettingValue('run_wall_time_cap_minutes', effective.run_wall_time_cap_minutes);
+  settings.project_failure_threshold = serializeSettingValue('project_failure_threshold', effective.project_failure_threshold);
+  settings.project_failure_window_minutes = serializeSettingValue('project_failure_window_minutes', effective.project_failure_window_minutes);
   settings.plain_test_phase_enabled = serializeSettingValue('plain_test_phase_enabled', effective.plain_test_phase_enabled);
   settings.browser_broker_image = serializeSettingValue('browser_broker_image', effective.browser_broker_image);
   if (effective.cli_bin_claude) {
@@ -212,6 +216,10 @@ const SETTING_KEYS = [
   'review_do_not_ship_action',
   'release_wall_clock_timeout_minutes',
   'mark_dod_verify_timeout_ms',
+  'run_token_cap',
+  'run_wall_time_cap_minutes',
+  'project_failure_threshold',
+  'project_failure_window_minutes',
   'legacy_completion_hook_release_after_run_enabled',
   'legacy_completion_hook_release_after_fix_ci_enabled',
   'legacy_completion_hook_auto_resume_enabled',
@@ -239,6 +247,7 @@ const SETTING_KEYS = [
   'notification_on_budget_blocked',
   'notification_on_budget_exceeded',
   'notification_on_flaky_test_detected',
+  'notification_on_circuit_breaker_tripped',
   'notification_throttle_window_seconds',
   'notification_throttle_overrides',
   'budget_block_runs_enabled',
@@ -438,6 +447,17 @@ function validateAndSerializeSettingValue(
     return parsePositiveIntegerSetting(value, key);
   }
   if (key === 'mark_dod_verify_timeout_ms') {
+    return parsePositiveIntegerSetting(value, key);
+  }
+  if (
+    key === 'run_token_cap' ||
+    key === 'run_wall_time_cap_minutes' ||
+    key === 'project_failure_threshold'
+  ) {
+    // 0 disables the respective guard.
+    return parseNonNegativeIntegerSetting(value, key);
+  }
+  if (key === 'project_failure_window_minutes') {
     return parsePositiveIntegerSetting(value, key);
   }
 

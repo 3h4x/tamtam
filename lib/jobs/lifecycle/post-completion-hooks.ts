@@ -48,6 +48,17 @@ export async function runPostCompletionHooks(
     }
   }
 
+  // Project circuit breaker: after K failed runs inside the window, pause the
+  // project's scheduling so it stops burning tokens on doomed work. Self-
+  // guarding (no-op unless this job failed, threshold armed, project not
+  // already paused) and best-effort — never blocks the rest of the hooks.
+  try {
+    const { maybeTripCircuitBreaker } = await import('@/lib/pipeline/circuit-breaker');
+    await maybeTripCircuitBreaker(job);
+  } catch (e) {
+    console.error(`[circuit-breaker] hook error for ${job.project}:`, e);
+  }
+
   // fix-ci auto-retry: if the job crashed fast (pm2/claude boot failure) and
   // we haven't exhausted retries, kick off another attempt so the user sees
   // a spinner instead of a red exit -1.

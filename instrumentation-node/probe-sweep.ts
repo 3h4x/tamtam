@@ -85,6 +85,15 @@ export async function runProbeSweep(): Promise<void> {
   } catch (err) {
     console.error('[probe-sweep] job timeout reap error:', err);
   }
+  // Per-run runaway guard: kill Claude runs/agents that blew past the token or
+  // wall-time cap before a project-level budget check would ever fire. No-op
+  // when both caps are disabled. Reads log rows so it survives a restart.
+  try {
+    const { reapRunCapExceededJobs } = await import('@/lib/jobs/run-cap-reaper');
+    await reapRunCapExceededJobs();
+  } catch (err) {
+    console.error('[probe-sweep] run-cap reap error:', err);
+  }
   try {
     const { runReleaseReconcileSweep } = await import('@/lib/jobs/release-reconcile');
     await runReleaseReconcileSweep();

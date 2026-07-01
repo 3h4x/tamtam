@@ -147,6 +147,7 @@ Outbound webhooks for release pipeline events. Never blocks pipeline progress �
 | `notification_on_budget_blocked` | boolean | `false` | Notify when a run is refused because the selected agent subscription budget threshold is exceeded. |
 | `notification_on_budget_exceeded` | boolean | `false` | Notify when a per-project daily or per-release spend cap blocks agent or release automation. |
 | `notification_on_flaky_test_detected` | boolean | `false` | Notify when the release test step fails, retries the parsed failing vitest/pytest tests once, and the retry passes so the pipeline continues. |
+| `notification_on_circuit_breaker_tripped` | boolean | `false` | Notify when the project circuit breaker auto-pauses a project after `project_failure_threshold` failed runs in the window. |
 | `notification_throttle_window_seconds` | number | `900` | Suppress repeated webhook notifications with the same event/project/agent key for this many seconds. |
 | `notification_throttle_overrides` | JSON object | `{ "release_fail": 0, "release_aborted": 0 }` | Per-event throttle windows in seconds. Set an event to `0` to always send. |
 
@@ -175,6 +176,17 @@ All three are read live on each job (not cached), so changing them takes effect 
 | `review_do_not_ship_action` | enum `pass` \| `fix` \| `abort` | `fix` | What to do when a code review returns **DO NOT SHIP**. `fix` (default) routes through the same fix loop NEEDS ATTENTION uses (subject to `fix_max_iterations`). `pass` files a follow-up GitHub issue with the findings and continues to commit → push → mark-dod so the partial work still ships. `abort` keeps the legacy behavior of stopping the release immediately. |
 | `release_wall_clock_timeout_minutes` | number | `60` | Overall wall-clock budget for an active Release run. Each release meta-job stores `release_deadline_at`; the 30s probe sweep aborts expired releases with reason `wall_clock_timeout`. Per-project `.tamtam/config.yml` can override this with `pipeline.release_timeout_minutes`. |
 | `mark_dod_verify_timeout_ms` | number | `600000` | Wall-clock cap for the mark-dod acceptance-criteria verification job (`mark-dod-verify`). Enforced by the shared job-timeout reaper (the same one that reaps `test`), so it survives a server restart — unlike the old inline 5-min `setTimeout` it replaces. A verify job past this cap is killed (`markDone(124)`); mark-dod stays non-gating and the unchecked criteria are re-verified on a later run. |
+
+### Runaway Guards (per-run caps + circuit breaker)
+
+Complement the project spend budget (`daily_spend_cap_usd` / `release_spend_cap_usd`). A macro budget check can't stop a single Claude session burning tens of dollars before it fires; these caps kill the individual run, and the circuit breaker pauses a project that keeps failing. Enforced by `reapRunCapExceededJobs` / `maybeTripCircuitBreaker`, both driven off DB job rows so they survive a restart.
+
+| Setting | Type | Default | Effect |
+|---|---|---|---|
+| `run_token_cap` | number | `2000000` | Kill a single run once its cumulative input+output+cache tokens exceed this. The 30s probe sweep accumulates `message.usage` from the run log (`accumulateRunTokens`) and, on a violation, kills the process group and marks the job `markDone(125)` with reason `token cap exceeded` in the log. Applies to Claude-backed runs/agents (`run`, `review`, `fix`, `fix-ci`, `pr-comment-fix`, `agent:*`); excludes `test` / `mark-dod-verify` (own hang-caps) and the `release` meta-job. `0` disables. |
+| `run_wall_time_cap_minutes` | number | `30` | Kill an eligible run once its wall-clock age exceeds this, `markDone(124)` with reason `wall-time cap exceeded`. Wall-time is checked before tokens (a hung run with no new tokens still gets reaped). `0` disables. The `release` meta-job keeps its own `release_wall_clock_timeout_minutes`. |
+| `project_failure_threshold` | number | `3` | After this many failed top-level runs (`run` / `release` / `agent:*` with a non-zero, non-cancelled exit) inside the window, pause the project's scheduling (`projects.paused = true`) and fire `circuit_breaker_tripped`. Trips at most once per pause window (skips if already paused). Resume from Settings once the underlying issue is fixed. `0` disables. |
+| `project_failure_window_minutes` | number | `60` | Trailing window over which failed runs are counted toward `project_failure_threshold`. |
 
 ### Pipeline Model Tiers
 
@@ -455,6 +467,8 @@ review_verdict_rules, jobs_paused,
 fix_max_iterations, release_min_lines, auto_pause_unfruitful_enabled,
 auto_pause_unfruitful_runs, auto_pause_unfruitful_rate, release_reinforce_max_iterations,
 release_wall_clock_timeout_minutes, mark_dod_verify_timeout_ms,
+run_token_cap, run_wall_time_cap_minutes,
+project_failure_threshold, project_failure_window_minutes,
 legacy_completion_hook_release_after_run_enabled,
 legacy_completion_hook_release_after_fix_ci_enabled,
 legacy_completion_hook_auto_resume_enabled,
@@ -469,7 +483,7 @@ notification_webhook_secret, notification_on_release_success,
 notification_on_release_fail, notification_on_release_aborted,
 notification_on_fix_loop_exhausted, notification_on_review_do_not_ship,
 notification_on_agent_run_fail, notification_on_budget_blocked,
-notification_on_budget_exceeded,
+notification_on_budget_exceeded, notification_on_circuit_breaker_tripped,
 notification_throttle_window_seconds, notification_throttle_overrides,
 budget_block_runs_enabled, budget_subscription_providers,
 budget_block_at_pct, budget_warn_at_pct, pipeline_model_review,

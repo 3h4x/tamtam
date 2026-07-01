@@ -25,6 +25,10 @@ export type SettingsFieldKey =
   | 'review_do_not_ship_action'
   | 'release_wall_clock_timeout_minutes'
   | 'mark_dod_verify_timeout_ms'
+  | 'run_token_cap'
+  | 'run_wall_time_cap_minutes'
+  | 'project_failure_threshold'
+  | 'project_failure_window_minutes'
   | 'legacy_completion_hook_release_after_run_enabled'
   | 'legacy_completion_hook_release_after_fix_ci_enabled'
   | 'legacy_completion_hook_auto_resume_enabled'
@@ -140,6 +144,11 @@ export const SUBSECTIONS: Record<string, SubsectionDef> = {
   release_ops: {
     title: 'Release Limits',
     description: 'Timeouts and background workers around release runs',
+    cols: 2,
+  },
+  run_caps: {
+    title: 'Runaway Guards',
+    description: 'Per-run token/wall-time caps and the project failure circuit breaker. Complements the project spend budget by killing a single runaway session and pausing a project that keeps failing.',
     cols: 2,
   },
   retention: {
@@ -516,6 +525,36 @@ export const FIELDS: Record<SettingsFieldKey, FieldDef> = {
     span: 1,
   },
 
+  // Pipeline: runaway guards
+  run_token_cap: {
+    label: 'Run Token Cap',
+    help: 'Kill a single run once its cumulative input+output tokens exceed this. Checked every ~30s against the run log. 0 disables. Default 2,000,000 — a macro spend budget can\'t catch a runaway Opus + fix-loop session before it burns tens of dollars; this can.',
+    group: 'pipeline',
+    subsection: 'run_caps',
+    span: 1,
+  },
+  run_wall_time_cap_minutes: {
+    label: 'Run Wall-time Cap (minutes)',
+    help: 'Kill a single Claude run/agent once its wall-clock age exceeds this. 0 disables. Applies to runs and agents, not the test / mark-dod-verify hang-guards (which keep their own caps) or the release meta-job (governed by Release Timeout). Default 30.',
+    group: 'pipeline',
+    subsection: 'run_caps',
+    span: 1,
+  },
+  project_failure_threshold: {
+    label: 'Circuit Breaker Threshold',
+    help: 'After this many failed runs inside the window below, pause the project\'s scheduling automatically and fire the circuit_breaker_tripped webhook. Resume from Settings once fixed. 0 disables. Default 3.',
+    group: 'pipeline',
+    subsection: 'run_caps',
+    span: 1,
+  },
+  project_failure_window_minutes: {
+    label: 'Circuit Breaker Window (minutes)',
+    help: 'Trailing window over which failed runs are counted toward the threshold. Default 60.',
+    group: 'pipeline',
+    subsection: 'run_caps',
+    span: 1,
+  },
+
   // Pipeline: retention
   log_retention_count: {
     label: 'Log Retention (runs)',
@@ -715,6 +754,10 @@ export const DEFAULTS: Record<SettingsFieldKey, string> = {
   review_do_not_ship_action: 'fix',
   release_wall_clock_timeout_minutes: '60',
   mark_dod_verify_timeout_ms: '600000',
+  run_token_cap: '2000000',
+  run_wall_time_cap_minutes: '30',
+  project_failure_threshold: '3',
+  project_failure_window_minutes: '60',
   legacy_completion_hook_release_after_run_enabled: 'true',
   legacy_completion_hook_release_after_fix_ci_enabled: 'true',
   legacy_completion_hook_auto_resume_enabled: 'true',

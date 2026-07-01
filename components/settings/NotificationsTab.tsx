@@ -32,6 +32,7 @@ const EVENT_TOGGLES = [
   { key: 'notification_on_agent_run_fail' as const, label: 'Agent Run Failure', description: 'When an agent run fails' },
   { key: 'notification_on_budget_blocked' as const, label: 'Budget Blocked', description: 'When a run is refused because the active provider crosses the configured subscription budget threshold' },
   { key: 'notification_on_budget_exceeded' as const, label: 'Project Budget Exceeded', description: 'When a project daily or per-release spend cap blocks agent or release automation' },
+  { key: 'notification_on_circuit_breaker_tripped' as const, label: 'Circuit Breaker Tripped', description: 'When repeated run failures auto-pause a project (see Pipeline → Runaway Guards)' },
 ]
 
 export function NotificationsTab({
