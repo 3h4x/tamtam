@@ -51,6 +51,10 @@ export interface SettingsMap {
   review_do_not_ship_action: string
   release_wall_clock_timeout_minutes: string
   mark_dod_verify_timeout_ms: string
+  run_token_cap: string
+  run_wall_time_cap_minutes: string
+  project_failure_threshold: string
+  project_failure_window_minutes: string
   legacy_completion_hook_release_after_run_enabled: string
   legacy_completion_hook_release_after_fix_ci_enabled: string
   legacy_completion_hook_auto_resume_enabled: string
@@ -199,6 +203,7 @@ export const TAB_LAYOUT: Partial<Record<TabId, TabLayoutEntry[]>> = {
     { kind: 'subsection', id: 'commit' },
     { kind: 'subsection', id: 'pipeline_models' },
     { kind: 'subsection', id: 'release_ops' },
+    { kind: 'subsection', id: 'run_caps' },
     { kind: 'subsection', id: 'orchestrator' },
     { kind: 'subsection', id: 'initiatives' },
     { kind: 'subsection', id: 'retention' },

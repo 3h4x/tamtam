@@ -13,6 +13,7 @@ export type NotificationEvent =
   | 'budget_blocked'
   | 'budget_exceeded'
   | 'flaky_test_detected'
+  | 'circuit_breaker_tripped'
   | 'post_merge_revert';
 
 export interface NotificationPayload {
@@ -74,6 +75,9 @@ function getNotificationConfig(event: NotificationEvent): NotificationConfig {
     case 'flaky_test_detected':
       enabled = settings.notification_on_flaky_test_detected || false;
       break;
+    case 'circuit_breaker_tripped':
+      enabled = settings.notification_on_circuit_breaker_tripped || false;
+      break;
     case 'post_merge_revert':
       enabled = settings.notification_on_post_merge_revert || false;
       break;
@@ -101,6 +105,7 @@ function throttleSubject(payload: NotificationPayload): string {
     case 'budget_blocked': return 'budget';
     case 'budget_exceeded': return 'spend';
     case 'flaky_test_detected': return 'test';
+    case 'circuit_breaker_tripped': return 'circuit-breaker';
     case 'post_merge_revert': return 'soak';
     default: return 'release';
   }

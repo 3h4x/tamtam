@@ -125,6 +125,15 @@ export interface TamTamConfig {
   db_backup_enabled: boolean;
   db_backup_interval_minutes: number;
   mark_dod_verify_timeout_ms: number;
+  // Per-run runaway guards. A project budget (macro control) can't stop a
+  // single Claude session burning tens of dollars before the next budget check
+  // fires — these caps kill the individual run. 0 = disabled.
+  run_token_cap: number;
+  run_wall_time_cap_minutes: number;
+  // Project circuit breaker: after this many failed runs inside the window,
+  // pause the project's scheduling. threshold 0 = disabled.
+  project_failure_threshold: number;
+  project_failure_window_minutes: number;
   notification_webhook_url: string;
   notification_webhook_secret: string;
   notification_on_release_success: boolean;
@@ -135,6 +144,7 @@ export interface TamTamConfig {
   notification_on_agent_run_fail: boolean;
   notification_on_post_merge_revert: boolean;
   notification_on_flaky_test_detected: boolean;
+  notification_on_circuit_breaker_tripped: boolean;
   notification_throttle_window_seconds: number;
   notification_throttle_overrides: Record<string, number>;
   pipeline_model_review: string;
@@ -273,6 +283,10 @@ export const DEFAULTS: TamTamConfig = {
   db_backup_enabled: true,
   db_backup_interval_minutes: 15,
   mark_dod_verify_timeout_ms: 600_000,
+  run_token_cap: 2_000_000,
+  run_wall_time_cap_minutes: 30,
+  project_failure_threshold: 3,
+  project_failure_window_minutes: 60,
   notification_webhook_url: '',
   notification_webhook_secret: '',
   notification_on_release_success: false,
@@ -283,6 +297,7 @@ export const DEFAULTS: TamTamConfig = {
   notification_on_agent_run_fail: false,
   notification_on_post_merge_revert: false,
   notification_on_flaky_test_detected: false,
+  notification_on_circuit_breaker_tripped: false,
   notification_throttle_window_seconds: 900,
   notification_throttle_overrides: { release_fail: 0, release_aborted: 0 },
   // Empty string = use the per-step sensible default (review → workspace
@@ -574,6 +589,10 @@ export function buildConfigFromSettingsMap(map: Record<string, string>): TamTamC
       : map.db_backup_enabled === 'true',
     db_backup_interval_minutes: parsePositiveIntOr(map.db_backup_interval_minutes, DEFAULTS.db_backup_interval_minutes),
     mark_dod_verify_timeout_ms: parsePositiveIntOr(map.mark_dod_verify_timeout_ms, DEFAULTS.mark_dod_verify_timeout_ms),
+    run_token_cap: parseNonNegativeIntOr(map.run_token_cap, DEFAULTS.run_token_cap),
+    run_wall_time_cap_minutes: parseNonNegativeIntOr(map.run_wall_time_cap_minutes, DEFAULTS.run_wall_time_cap_minutes),
+    project_failure_threshold: parseNonNegativeIntOr(map.project_failure_threshold, DEFAULTS.project_failure_threshold),
+    project_failure_window_minutes: parsePositiveIntOr(map.project_failure_window_minutes, DEFAULTS.project_failure_window_minutes),
     notification_webhook_url: map.notification_webhook_url ?? DEFAULTS.notification_webhook_url,
     notification_webhook_secret: map.notification_webhook_secret ?? DEFAULTS.notification_webhook_secret,
     notification_on_release_success: map.notification_on_release_success === 'true',
@@ -584,6 +603,7 @@ export function buildConfigFromSettingsMap(map: Record<string, string>): TamTamC
     notification_on_agent_run_fail: map.notification_on_agent_run_fail === 'true',
     notification_on_post_merge_revert: map.notification_on_post_merge_revert === 'true',
     notification_on_flaky_test_detected: map.notification_on_flaky_test_detected === 'true',
+    notification_on_circuit_breaker_tripped: map.notification_on_circuit_breaker_tripped === 'true',
     notification_throttle_window_seconds: parseIntOr(
       map.notification_throttle_window_seconds,
       DEFAULTS.notification_throttle_window_seconds
