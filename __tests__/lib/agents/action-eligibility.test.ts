@@ -59,4 +59,22 @@ describe('canExecuteAgentActions', () => {
       [{ type: 'checkout-default' }],
     )).toEqual({ ok: true });
   });
+
+  it('bounds merge-pr on its issue field, not the PR number', () => {
+    // PR number (77) differs from the issue (42) — expected, and must not trip
+    // the mismatch guard, which keys on `issue`.
+    expect(canExecuteAgentActions(
+      { kind: 'agent:issue-cruncher', exitCode: 0, ghIssueNumber: 42 },
+      [{ type: 'merge-pr', prNumber: 77, issue: 42 }],
+    )).toEqual({ ok: true });
+  });
+
+  it('rejects merge-pr whose issue does not match the job issue', () => {
+    const result = canExecuteAgentActions(
+      { kind: 'agent:issue-cruncher', exitCode: 0, ghIssueNumber: 42 },
+      [{ type: 'merge-pr', prNumber: 77, issue: 99 }],
+    );
+    expect(result).toMatchObject({ ok: false, reason: 'issue-mismatch' });
+    if (!result.ok) expect(result.detail).toContain('#99');
+  });
 });

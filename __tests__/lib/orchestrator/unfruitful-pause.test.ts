@@ -184,6 +184,33 @@ describe('autoPauseUnfruitfulProjects', () => {
     expect(recommend.mock.calls[0][0].title).toMatch(/persistently unfruitful/i);
   });
 
+  it('does not pause when the unfruitful runs came from now-disabled agents', async () => {
+    // 10 no-diff scheduled runs, all from a disabled agent. With the
+    // enabled-agent filter dropping them, there is no enabled-agent history to
+    // judge → the project must NOT be paused.
+    const jobs = Array(10).fill(run({ kind: 'agent:refactor-split', linesAdded: 0, linesRemoved: 0, workSummary: CAUGHT_UP })) as JobData[];
+    const pauseProject = vi.fn().mockResolvedValue(true);
+    const deps = baseDeps({
+      listJobs: () => jobs,
+      pauseProject,
+      // refactor-split is disabled; only issue-cruncher is enabled.
+      isEnabledAgentRun: (_p: string, kind: string) => kind === 'agent:issue-cruncher',
+    });
+    const res = await autoPauseUnfruitfulProjects(deps as never);
+    expect(res.paused).toEqual([]);
+    expect(pauseProject).not.toHaveBeenCalled();
+  });
+
+  it('still pauses when the unfruitful runs came from a STILL-enabled agent', async () => {
+    const jobs = Array(10).fill(run({ kind: 'agent:refactor-split', linesAdded: 0, linesRemoved: 0, workSummary: CAUGHT_UP })) as JobData[];
+    const deps = baseDeps({
+      listJobs: () => jobs,
+      isEnabledAgentRun: (_p: string, kind: string) => kind === 'agent:refactor-split',
+    });
+    const res = await autoPauseUnfruitfulProjects(deps as never);
+    expect(res.paused).toEqual(['bonker']);
+  });
+
   it('does not pause a project at/above the rate floor', async () => {
     const fruitful = run({ linesAdded: 8 });
     const jobs = [fruitful, fruitful, fruitful, ...Array(7).fill(caughtUp)] as JobData[]; // 30%

@@ -14,6 +14,7 @@ import { labelIssue } from '@/lib/github/label-issue';
 import { writeIssueBody } from '@/lib/github/edit-issue-body';
 import { checkoutDefault } from '@/lib/git/checkout-default';
 import { resolveGhRepo } from '@/lib/github/repo';
+import { mergePullRequest } from '@/lib/github/merge-pr';
 
 export interface OrchestratorInput {
   project: string;
@@ -119,6 +120,21 @@ export async function runAgentActions(input: OrchestratorInput): Promise<Orchest
           } else {
             errors.push({ index: i, type: action.type, detail: r.detail });
             console.warn(`[agent-actions] ${jobId} #${action.number} issue-edit-body error: ${r.detail}`);
+          }
+          break;
+        }
+        case 'merge-pr': {
+          const r = await mergePullRequest({
+            project, projPath,
+            prNumber: action.prNumber,
+            mergeMethod: action.mergeMethod,
+          });
+          if (r.ok) {
+            executed += 1;
+            console.log(`[agent-actions] ${jobId} PR#${action.prNumber} merge-pr ok (issue #${action.issue})`);
+          } else {
+            errors.push({ index: i, type: action.type, detail: r.detail });
+            console.warn(`[agent-actions] ${jobId} PR#${action.prNumber} merge-pr error (${r.status}): ${r.detail}`);
           }
           break;
         }

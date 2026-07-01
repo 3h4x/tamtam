@@ -14,6 +14,61 @@ export type EnsureIssueBranchResult =
   | { status: 'pipeline-running'; blockingJobId: string }
   | { status: 'error'; detail: string };
 
+/**
+ * Check out an EXISTING PR head branch (used when an open PR already implements
+ * the picked issue). Honours the same pipeline-lock + dirty-tree guards as
+ * `ensureIssueBranch`, then fetches and checks out the remote branch so the
+ * agent verifies against the PR's actual implementation. Does not create a new
+ * branch — the branch must already exist on origin.
+ */
+export async function checkoutPrBranch(opts: {
+  projectName: string;
+  projPath: string;
+  branch: string;
+}): Promise<EnsureIssueBranchResult> {
+  const { projectName, projPath, branch } = opts;
+
+  const activeLock = await getLock(projectName);
+  if (activeLock) {
+    const holder = listJobs().find((j) => j.id === activeLock.lockedByJobId);
+    if (holder && holder.finishedAt === null) {
+      return { status: 'pipeline-running', blockingJobId: activeLock.lockedByJobId };
+    }
+  }
+
+  const currentR = await exec('git', ['-C', projPath, 'branch', '--show-current'], { timeout: 5000 });
+  if (currentR.stdout.trim() === branch) {
+    return { status: 'already-on-branch', branch };
+  }
+
+  const dirtyR = await exec('git', ['-C', projPath, 'status', '--porcelain'], { timeout: 5000 });
+  if (dirtyR.exitCode === 0 && dirtyR.stdout.trim().length > 0) {
+    return {
+      status: 'skipped',
+      reason: `working tree has uncommitted changes — refusing to switch to PR branch ${branch}`,
+      branch,
+      cause: 'dirty-tree',
+    };
+  }
+
+  await exec('git', ['-C', projPath, 'fetch', '--quiet', 'origin', branch], { timeout: 30000 }).catch(() => {});
+  // Point a local branch at the freshly-fetched remote head (create or reset).
+  const coR = await exec(
+    'git',
+    ['-C', projPath, 'checkout', '-B', branch, `origin/${branch}`],
+    { timeout: 15000 },
+  );
+  if (coR.exitCode !== 0) {
+    // Fall back to a plain checkout (e.g. the local branch already tracks it).
+    const plain = await exec('git', ['-C', projPath, 'checkout', branch], { timeout: 10000 });
+    if (plain.exitCode !== 0) {
+      return { status: 'error', detail: `Failed to checkout PR branch ${branch}: ${coR.stderr || plain.stderr}` };
+    }
+  }
+  clearProjectDataCache();
+  return { status: 'reused', branch };
+}
+
 export function issueBranchName(issueNumber: number, issueTitle: string): string {
   const slug = issueTitle
     .toLowerCase()

@@ -47,12 +47,24 @@ export type CheckoutDefaultAction = {
   type: 'checkout-default';
 };
 
+// Merge an existing open PR that already implements the picked issue. `issue`
+// bounds the action to the cruncher's chosen issue (eligibility check); the
+// merge itself is gated by GitHub branch protection / required checks — a red
+// or unmergeable PR is refused, never force-merged.
+export type MergePrAction = {
+  type: 'merge-pr';
+  prNumber: number;
+  issue: number;
+  mergeMethod?: 'merge' | 'squash' | 'rebase';
+};
+
 export type AgentAction =
   | IssueCloseAction
   | IssueCommentAction
   | IssueLabelAction
   | IssueEditBodyAction
-  | CheckoutDefaultAction;
+  | CheckoutDefaultAction
+  | MergePrAction;
 
 export type AgentActions = { actions: AgentAction[] };
 export type AgentActionList = AgentActions['actions'];
@@ -150,6 +162,25 @@ function validateOneAction(raw: unknown, idx: number): { ok: true; value: AgentA
     case 'checkout-default': {
       return { ok: true, value: { type: 'checkout-default' } };
     }
+    case 'merge-pr': {
+      const prNumber = numberOrError(obj.prNumber, idx, 'prNumber');
+      if ('error' in prNumber) return { ok: false, detail: prNumber.error };
+      const issue = numberOrError(obj.issue, idx, 'issue');
+      if ('error' in issue) return { ok: false, detail: issue.error };
+      const method = obj.mergeMethod;
+      if (method !== undefined && method !== 'merge' && method !== 'squash' && method !== 'rebase') {
+        return { ok: false, detail: `actions[${idx}].mergeMethod must be "merge", "squash", or "rebase"` };
+      }
+      return {
+        ok: true,
+        value: {
+          type: 'merge-pr',
+          prNumber: prNumber.value,
+          issue: issue.value,
+          ...(typeof method === 'string' ? { mergeMethod: method } : {}),
+        },
+      };
+    }
     default:
       return { ok: false, detail: `actions[${idx}].type unknown: ${type}` };
   }
@@ -190,5 +221,6 @@ type AgentAction =
   | { type: "issue-comment";   number: number; body: string }
   | { type: "issue-label";     number: number; addLabels?: string[]; removeLabels?: string[] }
   | { type: "issue-edit-body"; kind: "issue" | "pr"; number: number; body: string }
-  | { type: "checkout-default" };
+  | { type: "checkout-default" }
+  | { type: "merge-pr"; prNumber: number; issue: number; mergeMethod?: "merge" | "squash" | "rebase" };
 `.trim();

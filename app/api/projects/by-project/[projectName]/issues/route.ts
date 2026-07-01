@@ -6,7 +6,8 @@ import { getSettings } from '@/lib/shared/config';
 import { db, schema } from '@/lib/db';
 import { homedir } from 'os';
 import { isUserTrusted } from '@/lib/shared/untrusted';
-import { ensureIssueBranch } from '@/lib/github/issue-branch';
+import { ensureIssueBranch, checkoutPrBranch, issueBranchName } from '@/lib/github/issue-branch';
+import { findOpenPrForIssue, type IssuePrMatch } from '@/lib/github/find-issue-pr';
 
 const CACHE_TTL_S = 300; // 5 minutes
 
@@ -280,6 +281,10 @@ type PickTopResponse = {
     droppedCommentCount: number;
   } | null;
   branch: { name: string; status: 'created' | 'reused' | 'already-on-branch' | 'skipped' } | null;
+  // When an OPEN PR already implements the chosen issue, TamTam checks out that
+  // PR's branch (instead of a fresh fix branch) and surfaces it here so the
+  // issue-cruncher verifies-and-merges the existing work instead of redoing it.
+  openPr?: { number: number; branch: string; url: string } | null;
   reason: string | null;
   cached: boolean;
   cachedAt: number;
@@ -290,7 +295,27 @@ async function checkoutForPickTop(
   projPath: string,
   chosenNumber: number,
   title: string,
-): Promise<{ ok: true; branch: PickTopResponse['branch'] } | { ok: false; reason: string }> {
+): Promise<{ ok: true; branch: PickTopResponse['branch']; openPr?: IssuePrMatch | null } | { ok: false; reason: string }> {
+  // If an open PR already implements this issue, check out THAT branch (not a
+  // fresh fix branch) so the cruncher can verify-and-merge existing work
+  // instead of re-implementing it. Best-effort: on any detection failure we
+  // fall through to the normal fresh-branch path.
+  try {
+    const issueBranch = issueBranchName(chosenNumber, title);
+    const openPr = await findOpenPrForIssue({ project: projectName, projPath, issueNumber: chosenNumber, issueBranch });
+    if (openPr) {
+      const co = await checkoutPrBranch({ projectName, projPath, branch: openPr.branch });
+      if (co.status === 'pipeline-running') return { ok: false, reason: `branch_pipeline_running: ${co.blockingJobId}` };
+      if (co.status === 'error') return { ok: false, reason: `pr_branch_checkout_failed: ${co.detail}` };
+      if (co.status === 'skipped' && co.cause === 'dirty-tree') return { ok: false, reason: `branch_dirty_tree: ${co.reason}` };
+      if (co.status === 'created' || co.status === 'reused' || co.status === 'already-on-branch') {
+        return { ok: true, branch: { name: co.branch, status: co.status }, openPr };
+      }
+    }
+  } catch {
+    // fall through to fresh-branch path
+  }
+
   const branchResult = await ensureIssueBranch({
     projectName,
     projPath,
@@ -404,6 +429,7 @@ async function handlePickTop(
           chosenIssue: chosenNumber,
           issue: revalidatedPayload,
           branch: co.branch,
+          openPr: co.openPr ?? null,
           reason: null,
           cached: true,
           cachedAt: cached.fetchedAt,
@@ -500,6 +526,7 @@ async function handlePickTop(
     chosenIssue: chosenNumber,
     issue: issuePayload,
     branch: co.branch,
+    openPr: co.openPr ?? null,
     reason: null,
     cached: false,
     cachedAt: fetchedAt,

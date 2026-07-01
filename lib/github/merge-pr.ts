@@ -1,0 +1,56 @@
+// Gated PR merge helper, shared by the HTTP merge route and the agent-action
+// orchestrator (the issue-cruncher's `merge-pr` action). Merging goes through
+// `gh pr merge`, so GitHub branch protection / required checks still gate it:
+// a red or unmergeable PR is refused here, never force-merged. When checks are
+// still pending we fall back to `--auto` so the merge lands once they pass.
+
+import { exec } from '@/lib/shared/shell';
+import { homedir } from 'os';
+import { resolveGhRepo } from '@/lib/github/repo';
+import { checkoutDefault } from '@/lib/git/checkout-default';
+
+export type MergePrResult =
+  | { ok: true; pr: number; repo: string }
+  | { ok: false; status: number; detail: string };
+
+export async function mergePullRequest(opts: {
+  project: string;
+  projPath: string;
+  prNumber: number;
+  mergeMethod?: 'merge' | 'squash' | 'rebase';
+}): Promise<MergePrResult> {
+  const { project, projPath, prNumber } = opts;
+  const mergeMethod = opts.mergeMethod ?? 'merge';
+  if (!['merge', 'squash', 'rebase'].includes(mergeMethod)) {
+    return { ok: false, status: 400, detail: `invalid mergeMethod: ${mergeMethod}` };
+  }
+  const expanded = projPath.startsWith('~') ? projPath.replace('~', homedir()) : projPath;
+  const repo = await resolveGhRepo(project, expanded);
+  if (!repo) return { ok: false, status: 422, detail: 'could not determine GitHub repo' };
+
+  const tryMerge = (autoFlag: boolean) => {
+    const args = ['pr', 'merge', String(prNumber), '--repo', repo, `--${mergeMethod}`];
+    if (autoFlag) args.push('--auto');
+    return exec('gh', args, { timeout: 30000 });
+  };
+
+  let result = await tryMerge(false);
+  // Only fall back to --auto when checks are still pending — not when auto-merge
+  // is disabled on the repo (that error also contains "auto merge" but means
+  // something different).
+  if (
+    result.exitCode !== 0 &&
+    /required status checks|mergeable|pending/i.test(result.stderr) &&
+    !/not allowed/i.test(result.stderr)
+  ) {
+    result = await tryMerge(true);
+  }
+  if (result.exitCode !== 0) {
+    return { ok: false, status: 422, detail: result.stderr.trim() || 'merge failed' };
+  }
+  // Return the working tree to the default branch so a follow-on release
+  // (release_after_run) starts clean on default rather than on the just-merged
+  // branch. Best-effort — a failure here doesn't undo the merge.
+  await checkoutDefault({ project }).catch(() => {});
+  return { ok: true, pr: prNumber, repo };
+}

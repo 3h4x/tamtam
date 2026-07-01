@@ -11,6 +11,9 @@ export type AgentActionEligibility =
   | { ok: false; reason: 'non-zero-exit' | 'unsupported-job-kind' | 'missing-issue-context' | 'issue-mismatch'; detail?: string };
 
 function actionIssueNumber(action: AgentActionList[number]): number | null {
+  // `merge-pr` carries the PR number in `prNumber`; its issue linkage (the
+  // field that must match the job's chosen issue) is `issue`.
+  if (action.type === 'merge-pr') return action.issue;
   return 'number' in action ? action.number : null;
 }
 

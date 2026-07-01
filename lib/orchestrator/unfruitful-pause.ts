@@ -151,6 +151,14 @@ export interface UnfruitfulPauseDeps {
   rateThreshold: number;
   listJobs: () => JobData[];
   isAgentJobKind: (kind: unknown) => boolean;
+  /** Optional: keep only runs from agents that are STILL enabled for the
+   *  project. When an operator disables the unfruitful agents (curating a
+   *  project down to, say, only issue-cruncher), those stopped agents' past
+   *  no-diff runs must not keep the project paused — the auto-pause should
+   *  judge only the currently-enabled agent set. Runs whose `agent:<name>`
+   *  kind maps to no enabled agent are dropped before the rate/caught-up
+   *  checks. Absent → count all runs (legacy behavior). */
+  isEnabledAgentRun?: (project: string, kind: string) => boolean;
   /** Enabled (non-archived) projects with their current paused flag. */
   listProjects: () => Array<{ name: string; paused?: boolean }>;
   pauseProject: (name: string) => Promise<boolean>;
@@ -176,11 +184,16 @@ export async function autoPauseUnfruitfulProjects(
 
   const requiredRuns = effectiveThreshold(deps.threshold);
   const sample = unfruitfulRateSample(deps.threshold);
-  const fetchLimit = Math.max(requiredRuns, sample);
+  // Fetch wider than the sample so that, after dropping runs from now-disabled
+  // agents, enough enabled-agent history usually remains to judge a rate.
+  const fetchLimit = Math.max(requiredRuns, sample) * 4;
   const jobs = deps.listJobs();
   for (const p of deps.listProjects()) {
     if (p.paused) continue;
-    const runs = recentScheduledAgentRuns(jobs, p.name, deps.isAgentJobKind, fetchLimit);
+    let runs = recentScheduledAgentRuns(jobs, p.name, deps.isAgentJobKind, fetchLimit);
+    if (deps.isEnabledAgentRun) {
+      runs = runs.filter((r) => deps.isEnabledAgentRun!(p.name, String(r.kind)));
+    }
     const caughtUp = isProjectCaughtUpUnfruitful(runs, deps.threshold);
     const lowRate = !caughtUp && isProjectPersistentlyUnfruitful(runs, sample, deps.rateThreshold);
     if (!caughtUp && !lowRate) continue;
@@ -230,14 +243,23 @@ export async function runUnfruitfulPauseSweep(): Promise<UnfruitfulPauseResult> 
   const s = getSettings();
   if (!s.auto_pause_unfruitful_enabled) return { paused: [] };
 
-  const [{ listJobs }, { isAgentJobKind }, { listEnabledProjects }, { pauseProject }, { upsertRecommendation }] =
+  const [{ listJobs }, { isAgentJobKind }, { listEnabledProjects }, { pauseProject }, { upsertRecommendation }, { getAllAgentsCached }] =
     await Promise.all([
       import('@/lib/jobs/job-storage'),
       import('@/lib/jobs/kinds'),
       import('@/lib/shared/enabled-projects'),
       import('@/lib/pipeline/pause-project'),
       import('@/lib/recommendations/recommendations'),
+      import('@/lib/agents/agents-cache'),
     ]);
+
+  // Set of currently-enabled `<project>\0agent:<name>` kinds, so the auto-pause
+  // judges a project only by agents the operator still has enabled — a disabled
+  // agent's past no-diff runs no longer keep the project paused.
+  const enabledAgentKinds = new Set<string>();
+  for (const a of getAllAgentsCached()) {
+    if (a.enabled) enabledAgentKinds.add(`${a.project} agent:${a.name}`);
+  }
 
   return autoPauseUnfruitfulProjects({
     enabled: s.auto_pause_unfruitful_enabled,
@@ -245,6 +267,7 @@ export async function runUnfruitfulPauseSweep(): Promise<UnfruitfulPauseResult> 
     rateThreshold: s.auto_pause_unfruitful_rate,
     listJobs,
     isAgentJobKind,
+    isEnabledAgentRun: (project, kind) => enabledAgentKinds.has(`${project} ${kind}`),
     listProjects: () => listEnabledProjects().map((p) => ({ name: p.name, paused: !!p.paused })),
     pauseProject,
     recommend: (input) =>
