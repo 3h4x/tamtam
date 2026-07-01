@@ -1,5 +1,6 @@
 import { describe, it, expect, beforeAll, beforeEach, afterEach, vi } from 'vitest';
 import { defaultExec, getStartReleaseMocks, gitAhead, gitStatus, resetSharedMocks } from './start-release-fixtures';
+import { tryClaimPipelineStartSlot, _resetPipelineStartSlots } from '@/lib/pipeline/pipeline-start-slot';
 
 const mocks = getStartReleaseMocks();
 
@@ -245,11 +246,13 @@ describe('startRelease — release routing decisions', () => {
     }
   });
 
-  it('does NOT write a stop reason or finalize on a 409 first-step (release bows out healthy)', async () => {
-    // A 409 means another driver already started this phase for the release.
-    // The release is still healthy — the in-flight holder drives the chain — so
-    // the cleanup path must bow out BEFORE persisting `releaseStopReason` or
-    // appending a "failed" log line, and must not finalize the release row.
+  it('does NOT write a stop reason or finalize on a CONCURRENCY 409 first-step (release bows out healthy)', async () => {
+    // A concurrency 409 means another driver already started this phase for the
+    // release (it holds the start-slot / has an in-flight child). The release is
+    // still healthy — the in-flight holder drives the chain — so the cleanup
+    // path must bow out BEFORE persisting `releaseStopReason` or appending a
+    // "failed" log line, and must not finalize the release row.
+    _resetPipelineStartSlots();
     detectTestCommandMock.mockReturnValue('pnpm test');
     execMock
       .mockImplementationOnce(() => gitStatus(' M foo.ts\n'))
@@ -260,6 +263,8 @@ describe('startRelease — release routing decisions', () => {
       id: 'proj-release-rel-id', project: 'proj', kind: 'release', finishedAt: null, logPath: '/tmp/x.log', contextMeta: null,
     };
     getJobMock.mockImplementation((id: string) => (id === 'proj-release-rel-id' ? releaseRow : null));
+    // Another driver holds the test start-slot for this release.
+    tryClaimPipelineStartSlot('proj-release-rel-id', 'test');
 
     const r = await startRelease('proj');
 
@@ -267,6 +272,31 @@ describe('startRelease — release routing decisions', () => {
     if (!r.ok) expect(r.status).toBe(409);
     expect(releaseRow.contextMeta).toBeNull();
     expect(mocks.finalizeReleaseJobMock).not.toHaveBeenCalled();
+    _resetPipelineStartSlots();
+  });
+
+  it('finalizes a PERMANENT-REFUSAL 409 first-step (no driver active) so the lock frees now', async () => {
+    // A gate refusal (e.g. PR-branch execution gate) returns 409 but nothing is
+    // running — no held slot, no in-flight child. The release must be finalized
+    // here, not left `running` for the 120s childless-release reaper.
+    _resetPipelineStartSlots();
+    detectTestCommandMock.mockReturnValue('pnpm test');
+    execMock
+      .mockImplementationOnce(() => gitStatus(' M foo.ts\n'))
+      .mockImplementationOnce(() => gitAhead('0'))
+      .mockImplementation(defaultExec);
+    startProjectTestMock.mockResolvedValue({ ok: false, status: 409, detail: 'Refusing to run tests on non-default branch feature: uncommitted changes.' });
+    const releaseRow = { id: 'proj-release-rel-id', project: 'proj', kind: 'release', finishedAt: null as number | null, logPath: '/tmp/x.log', contextMeta: null as string | null };
+    getJobMock.mockImplementation((id: string) => (id === 'proj-release-rel-id' ? releaseRow : null));
+
+    const r = await startRelease('proj');
+
+    expect(r.ok).toBe(false);
+    if (!r.ok) expect(r.status).toBe(409);
+    expect(mocks.finalizeReleaseJobMock).toHaveBeenCalledWith(
+      expect.objectContaining({ id: 'proj-release-rel-id' }),
+      1,
+    );
   });
 
   it('propagates failure from startProjectReview', async () => {

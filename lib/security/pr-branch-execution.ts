@@ -79,7 +79,23 @@ function githubAuthorLoginForCommit(projectPath: string, repo: string, sha: stri
   }
 }
 
-export function checkPrBranchExecutionGate(projectPath: string, actionLabel: string): PrBranchExecutionGate {
+export interface PrBranchExecutionGateOptions {
+  // Set ONLY for releases whose working-tree delta was produced by TamTam's own
+  // in-process agent run (issue-cruncher and friends). Those uncommitted
+  // changes are as trusted as a run on the default branch — which the gate
+  // already allows unconditionally — so this bypasses the uncommitted-changes
+  // refusal while STILL verifying every committed branch commit against
+  // safe_users (catching a reused branch carrying untrusted attacker commits).
+  // It does NOT skip the gate; it narrows it to the same trust posture the
+  // default branch already gets.
+  allowTrustedLocalChanges?: boolean;
+}
+
+export function checkPrBranchExecutionGate(
+  projectPath: string,
+  actionLabel: string,
+  options: PrBranchExecutionGateOptions = {},
+): PrBranchExecutionGate {
   const branch = getBranchContext(projectPath);
   if (!branch.currentBranch) {
     return {
@@ -96,7 +112,7 @@ export function checkPrBranchExecutionGate(projectPath: string, actionLabel: str
       detail: `Refusing to ${actionLabel} on non-default branch ${branch.currentBranch}: could not verify that the working tree matches GitHub-verified commits. Approve the run explicitly or use an isolated runner.`,
     };
   }
-  if (status.length > 0) {
+  if (status.length > 0 && !options.allowTrustedLocalChanges) {
     return {
       ok: false,
       detail: `Refusing to ${actionLabel} on non-default branch ${branch.currentBranch}: working tree has uncommitted or untracked changes that cannot be verified through GitHub commit authors. Approve the run explicitly or use an isolated runner.`,

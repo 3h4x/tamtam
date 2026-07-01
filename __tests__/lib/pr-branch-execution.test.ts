@@ -159,6 +159,54 @@ describe('checkPrBranchExecutionGate', () => {
       detail: expect.stringContaining('uncommitted or untracked changes'),
     }));
   });
+
+  it('allowTrustedLocalChanges: permits uncommitted changes on a fresh branch (no commits ahead)', () => {
+    mocks.execFileSync.mockImplementation((command: string, args: string[]) => {
+      const key = commandKey(command, args);
+      if (key === 'git -C /repo status --porcelain --untracked-files=all') return output(' M docs/PIPELINE.md\n');
+      if (key === 'git -C /repo rev-parse --verify origin/main') return output('origin/main\n');
+      if (key === 'git -C /repo log --format=%H origin/main..HEAD') return output('');
+      throw new Error(`unexpected command: ${key}`);
+    });
+
+    const result = checkPrBranchExecutionGate('/repo', 'run tests', { allowTrustedLocalChanges: true });
+    expect(result).toEqual({ ok: true, reason: 'no_branch_commits' });
+  });
+
+  it('allowTrustedLocalChanges: STILL verifies committed branch commits against safe_users', () => {
+    // The agent's branch was reused and carries an attacker commit ahead of base.
+    // Allowing the uncommitted delta must NOT skip commit-author verification.
+    mocks.execFileSync.mockImplementation((command: string, args: string[]) => {
+      const key = commandKey(command, args);
+      if (key === 'git -C /repo status --porcelain --untracked-files=all') return output(' M docs/PIPELINE.md\n');
+      if (key === 'git -C /repo rev-parse --verify origin/main') return output('origin/main\n');
+      if (key === 'git -C /repo log --format=%H origin/main..HEAD') return output('deadbeef\n');
+      if (key === 'gh repo view --json nameWithOwner --jq .nameWithOwner') return output('owner/repo\n');
+      if (key === 'gh api repos/owner/repo/commits/deadbeef --jq .author.login') return output('attacker\n');
+      throw new Error(`unexpected command: ${key}`);
+    });
+    mocks.isUserTrusted.mockImplementation((login: string) => login === 'trusted-user');
+
+    const result = checkPrBranchExecutionGate('/repo', 'run tests', { allowTrustedLocalChanges: true });
+    expect(result.ok).toBe(false);
+    expect(result).toEqual(expect.objectContaining({
+      detail: expect.stringContaining('GitHub author attacker'),
+    }));
+  });
+
+  it('allowTrustedLocalChanges: still fails closed when git status itself cannot be read', () => {
+    mocks.execFileSync.mockImplementation((command: string, args: string[]) => {
+      const key = commandKey(command, args);
+      if (key === 'git -C /repo status --porcelain --untracked-files=all') throw new Error('git boom');
+      throw new Error(`unexpected command: ${key}`);
+    });
+
+    const result = checkPrBranchExecutionGate('/repo', 'run tests', { allowTrustedLocalChanges: true });
+    expect(result.ok).toBe(false);
+    expect(result).toEqual(expect.objectContaining({
+      detail: expect.stringContaining('could not verify that the working tree matches'),
+    }));
+  });
 });
 
 describe('riskyPrDiffFiles', () => {

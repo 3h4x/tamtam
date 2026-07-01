@@ -25,6 +25,10 @@ const REVIEW_RETEST_REASON = 'review-retest';
 export interface StartTestOptions {
   reviewRetest?: boolean;
   approveUntrustedPrBranch?: boolean;
+  // Allow uncommitted working-tree changes through the PR-branch gate because
+  // they are TamTam's own in-process agent output. Defaults to reading the
+  // active release's persisted flag when omitted.
+  allowTrustedLocalChanges?: boolean;
 }
 
 export function isReviewRetestJob(job: Pick<JobData, 'kind' | 'contextMeta'>): boolean {
@@ -303,7 +307,9 @@ export async function startProjectTest(
     return { ok: false, status: 400, detail: `Could not detect test command for ${projectName}` };
   }
   if (!options.approveUntrustedPrBranch) {
-    const prGate = checkPrBranchExecutionGate(projPath, 'run tests');
+    const { activeReleaseAllowsTrustedLocalChanges } = await import('./trusted-local-release');
+    const allowTrustedLocalChanges = options.allowTrustedLocalChanges ?? activeReleaseAllowsTrustedLocalChanges();
+    const prGate = checkPrBranchExecutionGate(projPath, 'run tests', { allowTrustedLocalChanges });
     if (!prGate.ok) return { ok: false, status: 409, detail: prGate.detail };
   }
 

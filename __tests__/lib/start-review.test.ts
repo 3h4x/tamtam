@@ -776,7 +776,11 @@ describe('startProjectReview', () => {
       status: 409,
       detail: 'Refusing to run review prerequisite on non-default branch feature: untrusted author.',
     });
-    expect(mocks.checkPrBranchExecutionGate).toHaveBeenCalledWith('/path/to/proj', 'run review prerequisite');
+    expect(mocks.checkPrBranchExecutionGate).toHaveBeenCalledWith(
+      '/path/to/proj',
+      'run review prerequisite',
+      { allowTrustedLocalChanges: false },
+    );
     expect(mocks.exec).not.toHaveBeenCalled();
     expect(mocks.startJob).not.toHaveBeenCalled();
   });

@@ -64,6 +64,7 @@ vi.mock('@/lib/jobs/job-storage', () => ({
   getVerdict: mocks.getVerdictMock,
   markDone: mocks.markDoneMock,
   runWithParent: <T,>(_p: string, fn: () => T | Promise<T>) => fn(),
+  PIPELINE_STEP_KINDS: new Set(['test', 'review', 'fix', 'commit', 'push', 'mark-dod']),
 }));
 vi.mock('@/lib/jobs/storage', () => ({
   listJobs: mocks.listJobsMock,

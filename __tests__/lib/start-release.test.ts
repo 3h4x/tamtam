@@ -1,5 +1,6 @@
 import { describe, it, expect, beforeAll, beforeEach, afterEach, vi } from 'vitest';
 import { defaultExec, getStartReleaseMocks, gitAhead, gitStatus, resetSharedMocks } from './start-release-fixtures';
+import { tryClaimPipelineStartSlot, _resetPipelineStartSlots } from '@/lib/pipeline/pipeline-start-slot';
 
 const mocks = getStartReleaseMocks();
 
@@ -133,6 +134,61 @@ describe('startRelease — release pipeline entry decision tree', () => {
     );
   });
 
+  it('finalizes immediately on a permanent-refusal 409 (gate) when no driver is active', async () => {
+    _resetPipelineStartSlots();
+    detectTestCommandMock.mockReturnValue('pnpm test');
+    execMock
+      .mockImplementationOnce(() => gitStatus(' M foo.ts\n'))
+      .mockImplementationOnce(() => gitAhead('0'))
+      .mockImplementation(defaultExec);
+    // PR-branch gate refusal: 409, but nothing is actually running.
+    startProjectTestMock.mockResolvedValue({
+      ok: false,
+      status: 409,
+      detail: 'Refusing to run tests on non-default branch feature: working tree has uncommitted or untracked changes that cannot be verified through GitHub commit authors.',
+    });
+    getJobMock.mockImplementation((id: string) =>
+      id === 'proj-release-rel-id'
+        ? { id, project: 'proj', kind: 'release', finishedAt: null, logPath: '/tmp/x.log', contextMeta: null }
+        : null,
+    );
+
+    const r = await startRelease('proj');
+
+    expect(r.ok).toBe(false);
+    if (!r.ok) expect(r.status).toBe(409);
+    // Finalized now (exit 1) so the lock frees immediately, not 120s later.
+    expect(mocks.finalizeReleaseJobMock).toHaveBeenCalledWith(
+      expect.objectContaining({ id: 'proj-release-rel-id', kind: 'release' }),
+      1,
+    );
+  });
+
+  it('bows out without finalizing on a concurrency 409 when another driver holds the start-slot', async () => {
+    _resetPipelineStartSlots();
+    detectTestCommandMock.mockReturnValue('pnpm test');
+    execMock
+      .mockImplementationOnce(() => gitStatus(' M foo.ts\n'))
+      .mockImplementationOnce(() => gitAhead('0'))
+      .mockImplementation(defaultExec);
+    startProjectTestMock.mockResolvedValue({ ok: false, status: 409, detail: 'Tests already running for proj' });
+    getJobMock.mockImplementation((id: string) =>
+      id === 'proj-release-rel-id'
+        ? { id, project: 'proj', kind: 'release', finishedAt: null, logPath: '/tmp/x.log', contextMeta: null }
+        : null,
+    );
+    // Simulate another driver (e.g. boot-recovery resume) holding the test slot.
+    tryClaimPipelineStartSlot('proj-release-rel-id', 'test');
+
+    const r = await startRelease('proj');
+
+    expect(r.ok).toBe(false);
+    if (!r.ok) expect(r.status).toBe(409);
+    // Healthy concurrency: leave the release running for the in-flight driver.
+    expect(mocks.finalizeReleaseJobMock).not.toHaveBeenCalled();
+    _resetPipelineStartSlots();
+  });
+
   it('uses sourceJobId as the parent for a new release when it belongs to the project', async () => {
     getJobMock.mockReturnValue({ id: 'agent-123', project: 'proj' });
     detectTestCommandMock.mockReturnValue(null);
@@ -185,6 +241,57 @@ describe('startRelease — release pipeline entry decision tree', () => {
       job.ghIssueRepo === 'owner/repo' &&
       job.ghIssueTitle === 'Fix login bug'
     )).toBe(true);
+  });
+
+  it('marks the release as trusted-local-changes when triggered by an in-process agent run', async () => {
+    getJobMock.mockReturnValue({ id: 'agent-ic', project: 'proj', kind: 'agent:issue-cruncher' });
+    detectTestCommandMock.mockReturnValue(null);
+    execMock
+      .mockImplementationOnce(() => gitStatus(' M foo.ts\n'))
+      .mockImplementationOnce(() => gitAhead('0'))
+      .mockImplementation(defaultExec);
+    startProjectReviewMock.mockResolvedValue({ ok: true, jobId: 'r1' });
+
+    const r = await startRelease('proj', { sourceJobId: 'agent-ic' });
+
+    expect(r.ok).toBe(true);
+    const releaseUpdate = updateJobMock.mock.calls.find(([job]) => job.kind === 'release');
+    expect(releaseUpdate).toBeDefined();
+    expect(JSON.parse(releaseUpdate![0].contextMeta)).toMatchObject({ trustedLocalChanges: true });
+  });
+
+  it('marks the release as trusted-local-changes for an operator-initiated release (UI Release button)', async () => {
+    getJobMock.mockReturnValue(null);
+    detectTestCommandMock.mockReturnValue(null);
+    execMock
+      .mockImplementationOnce(() => gitStatus(' M foo.ts\n'))
+      .mockImplementationOnce(() => gitAhead('0'))
+      .mockImplementation(defaultExec);
+    startProjectReviewMock.mockResolvedValue({ ok: true, jobId: 'r1' });
+
+    const r = await startRelease('proj', { operatorInitiated: true });
+
+    expect(r.ok).toBe(true);
+    const releaseUpdate = updateJobMock.mock.calls.find(([job]) => job.kind === 'release');
+    expect(releaseUpdate).toBeDefined();
+    expect(JSON.parse(releaseUpdate![0].contextMeta)).toMatchObject({ trustedLocalChanges: true });
+  });
+
+  it('does NOT mark trusted-local-changes for a non-agent, non-issue source job', async () => {
+    getJobMock.mockReturnValue({ id: 'commit-1', project: 'proj', kind: 'commit' });
+    detectTestCommandMock.mockReturnValue(null);
+    execMock
+      .mockImplementationOnce(() => gitStatus(' M foo.ts\n'))
+      .mockImplementationOnce(() => gitAhead('0'))
+      .mockImplementation(defaultExec);
+    startProjectReviewMock.mockResolvedValue({ ok: true, jobId: 'r1' });
+
+    const r = await startRelease('proj', { sourceJobId: 'commit-1' });
+
+    expect(r.ok).toBe(true);
+    const releaseUpdate = updateJobMock.mock.calls.find(([job]) => job.kind === 'release');
+    const meta = releaseUpdate?.[0].contextMeta ? JSON.parse(releaseUpdate[0].contextMeta) : {};
+    expect(meta.trustedLocalChanges).toBeUndefined();
   });
 
   it('does not stamp stale source-job issue context when the current branch is an unrelated feature branch', async () => {
