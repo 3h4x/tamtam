@@ -43,8 +43,8 @@ function of role:
 
 It is driven off the health-analysis outcomes (so it inherits the ≤3-agents/tick
 cap) and is **not** pace-gated — throttling/downgrading only *saves* budget.
-Overrides live in `agents.autopilot_state` (DB agents) or the file-agent override
-(file agents), kept separate from the operator's configured `model`/`schedule`;
+Overrides live in `agents.autopilot_state`, kept separate from the operator's
+configured `model`/`schedule`;
 the cron handler resolves the effective values at each fire
 (`agent-cron-task.ts`). Gated on `agent_autopilot_enabled` (default on) +
 `orchestrator_enabled`. The monitor-safety guarantee is structural: the health

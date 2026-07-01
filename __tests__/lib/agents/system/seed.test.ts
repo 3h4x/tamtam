@@ -3,7 +3,6 @@ import { sql } from 'drizzle-orm';
 import { createTestPgDbEmpty, type TestDbHandle } from '@/__tests__/helpers/test-db';
 import * as schema from '@/lib/db/schema';
 
-const scanFileAgentsMock = vi.fn();
 const SYSTEM_AGENT_NAME = 'documentation-reindex-vectors';
 
 async function applyDdl(handle: TestDbHandle): Promise<void> {
@@ -91,11 +90,6 @@ describe('system-agent seed', () => {
   beforeEach(async () => {
     await sharedHandle.db.execute(sql.raw('TRUNCATE agents, projects, settings RESTART IDENTITY CASCADE'));
     vi.resetModules();
-    scanFileAgentsMock.mockReset();
-    scanFileAgentsMock.mockReturnValue([]);
-    vi.doMock('@/lib/agents/tamtam-file-agents', () => ({
-      scanFileAgents: scanFileAgentsMock,
-    }));
   });
 
   it('seeds one documentation-reindex-vectors row per enabled project', async () => {
@@ -188,10 +182,25 @@ describe('system-agent seed', () => {
     expect(rows[0].id).toBe('user-agent');
   });
 
-  it('skips seeding when a file agent has the same canonical name', async () => {
+  it('skips seeding when a user agent has the same canonical name', async () => {
     await sharedHandle.db.insert(schema.projects).values([
       { name: 'proj-a', path: '/tmp/a', enabled: true },
     ]);
+    const now = Date.now() / 1000;
+    await sharedHandle.db.insert(schema.agents).values({
+      id: 'agent-user',
+      name: 'Documentation-Reindex-Vectors',
+      project: 'proj-a',
+      skillIds: '[]',
+      docPaths: '[]',
+      model: 'normal',
+      prompt: 'user-owned',
+      schedule: null,
+      enabled: true,
+      kind: 'user',
+      createdAt: now,
+      updatedAt: now,
+    });
 
     vi.doMock('@/lib/db', () => ({ db: sharedHandle.db, schema }));
     vi.doMock('@/lib/shared/enabled-projects', () => ({
@@ -200,32 +209,16 @@ describe('system-agent seed', () => {
       ],
       refreshProjectsCacheSync: async () => undefined,
     }));
-    scanFileAgentsMock.mockReturnValue([
-      {
-        id: 'file:proj-a:Documentation-Reindex-Vectors',
-        name: 'Documentation-Reindex-Vectors',
-        project: 'proj-a',
-        skillIds: [],
-        docPaths: [],
-        model: 'normal',
-        prompt: 'file-owned',
-        schedule: null,
-        enabled: true,
-        kind: 'user',
-        createdAt: 0,
-        updatedAt: 0,
-        source: 'file',
-        filePath: '/tmp/a/.tamtam/agents/Documentation-Reindex-Vectors.md',
-      },
-    ]);
 
     const { seedSystemAgents } = await import('@/lib/agents/system/seed');
     const result = await seedSystemAgents();
 
     expect(result.seeded).toBe(0);
     expect(result.skipped).toBe(1);
+    // Only the pre-existing user agent remains; no system row was seeded.
     const rows = await sharedHandle.db.select().from(schema.agents);
-    expect(rows).toHaveLength(0);
+    expect(rows).toHaveLength(1);
+    expect(rows[0].id).toBe('agent-user');
   });
 
   it('honors the dismissal marker — skips seeding for that project/agent', async () => {

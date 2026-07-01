@@ -133,33 +133,28 @@ describe('collectProjectRetrievalSources', () => {
       gitLsTreeSync: gitLsTreeSyncMock,
       gitShowSync: vi.fn(),
     }));
-    // The real getFileAgentOverrideSync is a stale-while-revalidate cache that
-    // returns null on the first call for a fresh DB row, so warm it up before
-    // collectProjectRetrievalSources reads it via scanFileAgents.
-    const overrides = await import('@/lib/agents/file-agent-overrides');
-    // First sync call kicks off a background refresh; await it via a fresh async read.
-    overrides.getFileAgentOverrideSync('myproject', 'qa');
-    await overrides.getFileAgentOverride('myproject', 'qa');
-    // Trigger a second sync read so the cache is populated for the eventual
-    // scanFileAgents path. The background-refresh promise from the first sync
-    // call has had a microtask to resolve by now.
-    await new Promise((resolve) => setTimeout(resolve, 20));
     return import('@/lib/agents/retrieval/project-corpus');
   }
 
-  it('indexes DB skills referenced by file agents after file-agent overrides are applied', async () => {
+  it('indexes DB skills referenced by a project agent', async () => {
     const now = 1_700_000_000;
-    writeFileSync(
-      join(projectPath, '.tamtam', 'agents', 'qa.md'),
-      `---\nskillIds: ["skill-from-file"]\n---\n\nRun checks.\n`
-    );
     await sharedHandle.db.insert(schema.skills).values([
-      { id: 'skill-from-file', name: 'File Skill', description: '', content: 'from file', createdAt: now, updatedAt: now },
-      { id: 'skill-from-override', name: 'Override Skill', description: '', content: 'from override', createdAt: now, updatedAt: now },
+      { id: 'skill-a', name: 'A', description: '', content: 'skill a', createdAt: now, updatedAt: now },
     ]).execute();
-    await sharedHandle.db.insert(schema.settings).values({
-      key: 'agent_override:myproject:qa',
-      value: JSON.stringify({ skillIds: ['skill-from-override'] }),
+    await sharedHandle.db.insert(schema.agents).values({
+      id: 'agent-qa',
+      name: 'qa',
+      project: 'myproject',
+      skillIds: JSON.stringify(['skill-a']),
+      model: 'normal',
+      prompt: '',
+      schedule: null,
+      enabled: true,
+      docPaths: JSON.stringify([]),
+      provider: null,
+      prerequisiteCommand: null,
+      createdAt: now,
+      updatedAt: now,
     }).execute();
     await sharedHandle.db.insert(schema.projects).values({ name: 'myproject', path: projectPath, enabled: true }).execute();
 
@@ -167,11 +162,11 @@ describe('collectProjectRetrievalSources', () => {
     const sources = await collectProjectRetrievalSources('myproject', projectPath);
 
     expect(sources.filter((source) => source.sourceKind === 'skill').map((source) => source.sourceId)).toEqual([
-      'skill-from-override',
+      'skill-a',
     ]);
   });
 
-  it('excludes file-agent skills when a DB agent with the same name takes precedence', async () => {
+  it('ignores .tamtam/agents markdown files — agents are DB-only', async () => {
     const now = 1_700_000_000;
     writeFileSync(
       join(projectPath, '.tamtam', 'agents', 'qa.md'),
@@ -180,7 +175,6 @@ describe('collectProjectRetrievalSources', () => {
     await sharedHandle.db.insert(schema.skills).values([
       { id: 'skill-from-db', name: 'DB Skill', description: '', content: 'from db', createdAt: now, updatedAt: now },
       { id: 'skill-from-file', name: 'File Skill', description: '', content: 'from file', createdAt: now, updatedAt: now },
-      { id: 'skill-from-other-file-agent', name: 'Other File Skill', description: '', content: 'from other file agent', createdAt: now, updatedAt: now },
     ]).execute();
     await sharedHandle.db.insert(schema.agents).values({
       id: 'agent-1',
@@ -197,10 +191,6 @@ describe('collectProjectRetrievalSources', () => {
       createdAt: now,
       updatedAt: now,
     }).execute();
-    writeFileSync(
-      join(projectPath, '.tamtam', 'agents', 'docs.md'),
-      `---\nskillIds: ["skill-from-other-file-agent"]\n---\n\nSync docs.\n`
-    );
     await sharedHandle.db.insert(schema.projects).values({ name: 'myproject', path: projectPath, enabled: true }).execute();
 
     const { collectProjectRetrievalSources } = await importSubject();
@@ -208,7 +198,6 @@ describe('collectProjectRetrievalSources', () => {
 
     expect(sources.filter((source) => source.sourceKind === 'skill').map((source) => source.sourceId).sort()).toEqual([
       'skill-from-db',
-      'skill-from-other-file-agent',
     ]);
   });
 

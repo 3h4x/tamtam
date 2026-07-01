@@ -335,7 +335,7 @@ Budget gate semantics:
 - A single enabled provider is still blocked once its own 5-hour/credits quota crosses `budget_block_at_pct`; when `budget_block_on_weekly_pace_enabled` is true, the same threshold also applies to 7-day utilization.
 - With multiple enabled providers, TamTam skips blocked providers and uses the enabled provider with the most remaining headroom.
 - Exhausted quota is a transient start-gate rejection, not a manual pause. It does not write `jobs_paused=true`; queued work retries through the normal recovery paths once provider headroom returns.
-- Agent/file-agent `provider` preferences are soft: TamTam uses them when they are enabled and healthy, otherwise it falls back to the normal chooser.
+- Agent `provider` preferences are soft: TamTam uses them when they are enabled and healthy, otherwise it falls back to the normal chooser.
 - Release/test/push entrypoints use the same chooser up front, so a full legacy `claude_provider` snapshot does not block work when another enabled provider is still healthy.
 - The weekly burn-rate throttle is enforced only for scheduled agent fires via `scheduledBurnRateBlocked()` in the internal scheduler; manual buttons and root pipeline starts do not 429 on projected 7-day pace alone. The separate `budget_block_on_weekly_pace_enabled` setting controls whether actual 7-day utilization is part of the hard start gate.
 

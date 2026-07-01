@@ -422,7 +422,7 @@ either a `pending_release:<project>` flag or a
 the default branch. The marker expires after 24 hours and must still match the
 current dirty status with no dirty file newer than the failed commit. The one
 bare-dirty exception is when every dirty path is committed TamTam metadata:
-`.tamtam/config.yml`, `.tamtam/agents/**`, or `.tamtam/.gitignore`.
+`.tamtam/config.yml` or `.tamtam/.gitignore`.
 Rename/copy entries only qualify when both the source and destination paths are
 in that allowlist. Local scratch under `.tamtam/cache/**` never qualifies and is
 excluded from commit staging even if a project's ignore rule is missing. Any

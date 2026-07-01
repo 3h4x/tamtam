@@ -63,12 +63,6 @@ describe('applyRecommendation', () => {
   let uninstallAgentScheduleMock: ReturnType<typeof vi.fn>;
   let clearAgentsCacheMock: ReturnType<typeof vi.fn>;
   let normalizeAgentMock: ReturnType<typeof vi.fn>;
-  let resolveProjectPathMock: ReturnType<typeof vi.fn>;
-  let parseFileAgentIdMock: ReturnType<typeof vi.fn>;
-  let loadFileAgentMock: ReturnType<typeof vi.fn>;
-  let writeFileAgentMock: ReturnType<typeof vi.fn>;
-  let setFileAgentOverrideMock: ReturnType<typeof vi.fn>;
-  let fileAgentState: Record<string, unknown> | null;
 
   beforeAll(async () => {
     sharedHandle = await createTestPgDbEmpty();
@@ -92,35 +86,15 @@ describe('applyRecommendation', () => {
     uninstallAgentScheduleMock = vi.fn().mockResolvedValue(undefined);
     clearAgentsCacheMock = vi.fn();
     normalizeAgentMock = vi.fn((agent) => ({ ...agent, source: 'db' }));
-    resolveProjectPathMock = vi.fn().mockReturnValue(null);
-    parseFileAgentIdMock = vi.fn().mockReturnValue(null);
-    fileAgentState = null;
-    loadFileAgentMock = vi.fn().mockImplementation(() => (fileAgentState ? { ...fileAgentState } : null));
-    writeFileAgentMock = vi.fn();
-    setFileAgentOverrideMock = vi.fn().mockImplementation((_project: string, _name: string, patch: { schedule?: string | null }) => {
-      if (!fileAgentState || patch.schedule === undefined) return;
-      fileAgentState = { ...fileAgentState, schedule: patch.schedule };
-    });
 
     vi.doMock('@/lib/db', () => ({ db: sharedHandle.db, schema }));
     vi.doMock('@/lib/scheduling/agent-scheduler', () => ({
       installAgentSchedule: installAgentScheduleMock,
       uninstallAgentSchedule: uninstallAgentScheduleMock,
     }));
-    vi.doMock('@/lib/shared/project-data', () => ({
-      resolveProjectPath: resolveProjectPathMock,
-    }));
     vi.doMock('@/lib/agents/agents-cache', () => ({
       clearAgentsCache: clearAgentsCacheMock,
       normalizeAgent: normalizeAgentMock,
-    }));
-    vi.doMock('@/lib/agents/tamtam-file-agents', () => ({
-      loadFileAgent: loadFileAgentMock,
-      parseFileAgentId: parseFileAgentIdMock,
-      writeFileAgent: writeFileAgentMock,
-    }));
-    vi.doMock('@/lib/agents/file-agent-overrides', () => ({
-      setFileAgentOverride: setFileAgentOverrideMock,
     }));
 
     ({ applyRecommendation, ApplyRecommendationError } = await import('@/lib/recommendations/apply-recommendation'));
@@ -341,58 +315,6 @@ describe('applyRecommendation', () => {
     expect(recommendation?.status).toBe('open');
     expect(installAgentScheduleMock).not.toHaveBeenCalled();
     expect(uninstallAgentScheduleMock).not.toHaveBeenCalled();
-  });
-
-  it('applies a file-backed schedule backoff through file overrides', async () => {
-    parseFileAgentIdMock.mockReturnValue({ project: 'portal', name: 'tests' });
-    resolveProjectPathMock.mockReturnValue('/tmp/portal');
-    fileAgentState = {
-      id: 'file:portal:tests',
-      name: 'tests',
-      project: 'portal',
-      skillIds: [],
-      docPaths: [],
-      model: 'normal',
-      prompt: 'run tests',
-      schedule: '1h',
-      enabled: true,
-      provider: null,
-      createdAt: 100,
-      updatedAt: 100,
-      source: 'file',
-      filePath: '/tmp/portal/.tamtam/agents/tests.md',
-    };
-    await handle.db.insert(schema.recommendations).values({
-      id: 'rec-file-success',
-      project: 'portal',
-      sourceKind: 'agent:tests',
-      agentId: 'file:portal:tests',
-      agentName: 'tests',
-      type: 'agent_schedule_backoff',
-      title: 'Run tests less often',
-      detail: 'No actionable work.',
-      status: 'open',
-      payload: JSON.stringify({ recommendedSchedule: '8h' }),
-      createdAt: 100,
-      updatedAt: 100,
-    });
-
-    const result = await applyRecommendation('portal', 'rec-file-success');
-
-    expect(result.recommendation.status).toBe('applied');
-    expect(result.agent).toMatchObject({
-      id: 'file:portal:tests',
-      project: 'portal',
-      schedule: '8h',
-      source: 'file',
-    });
-    const recRows = await handle.db.select().from(schema.recommendations).where(eq(schema.recommendations.id, 'rec-file-success'));
-    expect(recRows[0]?.status).toBe('applied');
-    expect(setFileAgentOverrideMock).toHaveBeenCalledWith('portal', 'tests', { schedule: '8h' });
-    expect(installAgentScheduleMock).toHaveBeenCalledWith('file:portal:tests', '8h', 'run tests', 'portal', 'tests');
-    expect(uninstallAgentScheduleMock).not.toHaveBeenCalled();
-    expect(clearAgentsCacheMock).not.toHaveBeenCalled();
-    expect(normalizeAgentMock).not.toHaveBeenCalled();
   });
 
   it('surfaces rollback failure when live scheduler sync fails twice for a DB agent', async () => {

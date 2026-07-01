@@ -13,7 +13,6 @@ import { createJob, updateJob, listJobs, probeJobStatus, markDone } from '@/lib/
 import { getJobKind, isAgentJobKind } from '@/lib/jobs/kinds';
 import { errMsg } from '@/lib/shared/types';
 import { getDirtyFileCount } from '@/lib/git/dirty-worktree';
-import { parseFileAgentId, loadFileAgent } from '@/lib/agents/tamtam-file-agents';
 import { isProjectPaused } from '@/lib/shared/enabled-projects';
 import { getSettings, withBasePrompt } from '@/lib/shared/config';
 import { normalizeModelInput, parseOptionalKnownModelInput, type ModelTier } from '@/lib/agents/model-aliases';
@@ -95,20 +94,10 @@ export async function POST(
 ) {
   const { agentId } = await params;
 
-  // Resolve agent — either a DB row or a file-based agent
+  // Resolve agent from the DB (the single source of truth).
   let agent: RunnableAgent | null = null;
-
-  const parsedFileId = parseFileAgentId(agentId);
-  if (parsedFileId) {
-    const projPath = resolveProjectPath(parsedFileId.project);
-    if (!projPath) return NextResponse.json({ detail: 'agent not found' }, { status: 404 });
-    const fa = loadFileAgent(projPath, parsedFileId.project, parsedFileId.name);
-    if (!fa) return NextResponse.json({ detail: 'agent not found' }, { status: 404 });
-    agent = { ...fa, skillIds: JSON.stringify(fa.skillIds), docPaths: JSON.stringify(fa.docPaths) };
-  } else {
-    const rows = await db.select().from(schema.agents).where(eq(schema.agents.id, agentId)).limit(1);
-    if (rows[0]) agent = rows[0];
-  }
+  const rows = await db.select().from(schema.agents).where(eq(schema.agents.id, agentId)).limit(1);
+  if (rows[0]) agent = rows[0];
 
   if (!agent) return NextResponse.json({ detail: 'agent not found' }, { status: 404 });
 

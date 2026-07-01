@@ -70,11 +70,18 @@ async function defaultStartRun(args: { project: string; prompt: string }): Promi
   const { db, schema } = await import('@/lib/db');
   const { eq, and } = await import('drizzle-orm');
 
-  // Find the first enabled, non-system agent for this project. System agents
-  // dispatch to internal handlers — only user agents spawn a CLI run whose diff
-  // flows into the release pipeline.
+  // Find enabled, non-system agents for this project. System agents dispatch
+  // to internal handlers — only user agents spawn a CLI run whose diff flows
+  // into the release pipeline. Prefer a producer-role agent (named `improve`
+  // when present) via pickFileAgentForInitiative.
   const agents = await db
-    .select({ id: schema.agents.id })
+    .select({
+      id: schema.agents.id,
+      name: schema.agents.name,
+      enabled: schema.agents.enabled,
+      kind: schema.agents.kind,
+      role: schema.agents.role,
+    })
     .from(schema.agents)
     .where(
       and(
@@ -82,23 +89,14 @@ async function defaultStartRun(args: { project: string; prompt: string }): Promi
         eq(schema.agents.enabled, true),
         eq(schema.agents.kind, 'user'),
       ),
-    )
-    .limit(1);
+    );
 
-  // Prefer a DB user agent; fall back to a file agent (most projects define
-  // their agents in `.tamtam/agents/*.md`, not the DB — without this fallback
-  // those projects' initiatives all hard-fail at dispatch with "no agent").
-  let agentId: string | null = agents[0]?.id ?? null;
-  if (!agentId) {
-    const { scanFileAgents } = await import('@/lib/agents/tamtam-file-agents');
-    const { resolveProjectPath } = await import('@/lib/shared/project-data');
-    const projPath = resolveProjectPath(args.project);
-    const fileAgents = projPath ? scanFileAgents(projPath, args.project) : [];
-    agentId = pickFileAgentForInitiative(fileAgents);
-  }
+  const agentId: string | null =
+    pickFileAgentForInitiative(agents.map((a) => ({ ...a, enabled: !!a.enabled }))) ??
+    (agents[0]?.id ?? null);
   if (!agentId) {
     throw new Error(
-      `[run-initiative] no enabled producer agent (DB or file) found for project "${args.project}" — ` +
+      `[run-initiative] no enabled producer agent found for project "${args.project}" — ` +
       `add at least one agent before dispatching initiatives`,
     );
   }

@@ -85,7 +85,7 @@ export function resolveSlashCommands(catalog: SlashCommandCatalog, query: string
       kind: 'agent' as const,
       command: `/agent ${agent.name}`,
       title: agent.name,
-      detail: `${agent.source === 'file' ? 'file agent' : 'agent'}${agent.model ? ` · ${agent.model}` : ''}`,
+      detail: `agent${agent.model ? ` · ${agent.model}` : ''}`,
       insertText: `Run the ${agent.name} agent for this project and summarize the result.`,
     })),
     ...catalog.customActions.map((action) => ({

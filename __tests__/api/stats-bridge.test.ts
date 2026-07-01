@@ -4,7 +4,6 @@ import type { JobData } from '@/lib/jobs/job-storage';
 import * as schema from '@/lib/db/schema';
 import { createTestPgDb, type TestDbHandle } from '@/__tests__/helpers/test-db';
 import type { BridgeResponse } from '@/app/api/stats/bridge/route';
-import type { FileAgent } from '@/lib/agents/tamtam-file-agents';
 
 let sharedHandle: TestDbHandle;
 
@@ -44,34 +43,9 @@ function makeAgent(id: string, project: string, overrides: { enabled?: boolean; 
   };
 }
 
-function makeFileAgent(name: string, project: string, overrides: { enabled?: boolean; kind?: string } = {}): FileAgent {
-  return {
-    id: `file:${project}:${name}`,
-    name,
-    project,
-    skillIds: [],
-    docPaths: [],
-    model: 'normal',
-    prompt: '',
-    schedule: null,
-    enabled: overrides.enabled ?? true,
-    boostable: true,
-    provider: null,
-    prerequisiteCommand: null,
-    permissionMode: null,
-    kind: overrides.kind ?? 'user',
-    role: 'producer',
-    createdAt: Date.now() / 1000,
-    updatedAt: Date.now() / 1000,
-    source: 'file',
-    filePath: `/tmp/${project}/.tamtam/agents/${name}.md`,
-  };
-}
-
 describe('GET /api/stats/bridge', () => {
   let GET: typeof import('@/app/api/stats/bridge/route').GET;
   let listJobsMock: ReturnType<typeof vi.fn>;
-  let scanFileAgentsMock: ReturnType<typeof vi.fn>;
   let readEnabledProviderSnapshotsMock: ReturnType<typeof vi.fn>;
   let scheduledBurnRateBlockedAcrossProvidersMock: ReturnType<typeof vi.fn>;
 
@@ -90,13 +64,11 @@ describe('GET /api/stats/bridge', () => {
     await sharedHandle.db.execute(sql`TRUNCATE agents, projects`);
 
     listJobsMock = vi.fn().mockReturnValue([]);
-    scanFileAgentsMock = vi.fn().mockReturnValue([]);
     readEnabledProviderSnapshotsMock = vi.fn().mockResolvedValue([]);
     scheduledBurnRateBlockedAcrossProvidersMock = vi.fn().mockReturnValue(null);
 
     vi.doMock('@/lib/db', () => ({ db: sharedHandle.db, schema }));
     vi.doMock('@/lib/jobs/job-storage', () => ({ listJobs: listJobsMock }));
-    vi.doMock('@/lib/agents/tamtam-file-agents', () => ({ scanFileAgents: scanFileAgentsMock }));
     vi.doMock('@/lib/shared/job-control', () => ({
       readEnabledProviderSnapshots: readEnabledProviderSnapshotsMock,
       scheduledBurnRateBlockedAcrossProviders: scheduledBurnRateBlockedAcrossProvidersMock,
@@ -191,36 +163,27 @@ describe('GET /api/stats/bridge', () => {
     expect(body.summary.agentsEnabled).toBe(1);
   });
 
-  it('includes file-backed agents with DB precedence', async () => {
+  it('counts only enabled, non-system DB agents per project', async () => {
     await sharedHandle.db.insert(schema.projects).values([
-      { name: 'file-only', path: '/tmp/file-only', enabled: true, paused: false },
-      { name: 'mixed', path: '/tmp/mixed', enabled: true, paused: false },
+      { name: 'one', path: '/tmp/one', enabled: true, paused: false },
+      { name: 'two', path: '/tmp/two', enabled: true, paused: false },
     ]);
     await sharedHandle.db.insert(schema.agents).values([
-      makeAgent('same-agent', 'mixed', { enabled: false }),
+      makeAgent('one-a', 'one'),
+      makeAgent('one-disabled', 'one', { enabled: false }),
+      makeAgent('one-system', 'one', { kind: 'system' }),
+      makeAgent('two-a', 'two'),
+      makeAgent('two-b', 'two'),
     ]);
-    scanFileAgentsMock.mockImplementation((projectPath: string, projectName: string) => {
-      if (projectName === 'file-only') return [makeFileAgent('file-agent', projectName)];
-      if (projectName === 'mixed') {
-        return [
-          makeFileAgent('same-agent', projectName),
-          makeFileAgent('extra-file-agent', projectName),
-          makeFileAgent('disabled-file-agent', projectName, { enabled: false }),
-        ];
-      }
-      throw new Error(`unexpected scan path ${projectPath}`);
-    });
 
     const res = await GET();
     const body = await res.json() as BridgeResponse;
     const counts = new Map(body.projects.map((project) => [project.project, project.agents]));
 
     expect(body.projects).toHaveLength(2);
-    expect(counts.get('file-only')).toBe(1);
-    expect(counts.get('mixed')).toBe(1);
-    expect(body.summary.agentsEnabled).toBe(2);
-    expect(scanFileAgentsMock).toHaveBeenCalledWith('/tmp/file-only', 'file-only');
-    expect(scanFileAgentsMock).toHaveBeenCalledWith('/tmp/mixed', 'mixed');
+    expect(counts.get('one')).toBe(1);
+    expect(counts.get('two')).toBe(2);
+    expect(body.summary.agentsEnabled).toBe(3);
   });
 
   it('returns global pace and scheduler throttle payloads', async () => {

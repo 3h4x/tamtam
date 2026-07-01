@@ -1,11 +1,9 @@
 import { eq } from 'drizzle-orm';
 import { db, schema } from '@/lib/db';
 import { canonicalAgentNameKey } from '@/lib/agents/agent-name';
-import { scanFileAgents } from '@/lib/agents/tamtam-file-agents';
-import { resolveProjectPath } from '@/lib/shared/project-data';
 
 export interface AgentNameConflict {
-  kind: 'db' | 'file';
+  kind: 'db';
   name: string;
   agentId?: string;
 }
@@ -15,8 +13,6 @@ export async function findAgentNameConflict(
   name: string,
   options: {
     excludeDbAgentId?: string;
-    excludeFileAgentName?: string;
-    projectPath?: string | null;
   } = {},
 ): Promise<AgentNameConflict | null> {
   const targetKey = canonicalAgentNameKey(name);
@@ -26,22 +22,6 @@ export async function findAgentNameConflict(
     if (options.excludeDbAgentId && agent.id === options.excludeDbAgentId) continue;
     if (canonicalAgentNameKey(agent.name) === targetKey) {
       return { kind: 'db', name: agent.name, agentId: agent.id };
-    }
-  }
-
-  const projectPath = options.projectPath ?? resolveProjectPath(project);
-  if (!projectPath) return null;
-
-  // Hoist the exclude key out of the loop and compute each agent's
-  // canonical key once per iteration.
-  const excludeFileKey = options.excludeFileAgentName
-    ? canonicalAgentNameKey(options.excludeFileAgentName)
-    : null;
-  for (const agent of scanFileAgents(projectPath, project)) {
-    const key = canonicalAgentNameKey(agent.name);
-    if (excludeFileKey !== null && key === excludeFileKey) continue;
-    if (key === targetKey) {
-      return { kind: 'file', name: agent.name, agentId: agent.id };
     }
   }
 

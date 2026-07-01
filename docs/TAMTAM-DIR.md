@@ -51,28 +51,9 @@ Because pipeline phases share a CLI session via `--resume`, the attached doc car
 
 Each match records the attached doc paths under `contextMeta.autoAttachedDocs` for trace visibility.
 
-## `.tamtam/agents/*.md`
+## Agents are DB-only
 
-Each `.md` file defines one agent scoped to the project. Filename (minus `.md`) is the agent name. YAML frontmatter sets default metadata; body is the prompt.
-
-```markdown
----
-provider: codex        # optional: claude | codex | gemini | lmstudio
-model: normal          # fast | normal | smart (legacy haiku | sonnet | opus still read)
-schedule: 4h           # optional: 15m 30m 1h 2h 4h 8h 12h 24h
-skillIds: ["agent-tests"]   # JSON array or space-separated skill IDs
-runner: pm2            # compatibility metadata; graphile-worker handles schedules
-enabled: true
----
-
-Prompt content here. Sent verbatim as the agent's task instructions.
-```
-
-File agents appear in the Agents tab with a `file` badge. Prompt edits are written back to `.tamtam/agents/<name>.md`; committed frontmatter such as `provider` is preserved on write. Operational settings (`enabled`, `schedule`, `model`, `runner`, `skillIds`) are stored as DB overrides under `agent_override:<project>:<name>` so UI toggles do not dirty tracked files. `runner` is retained for compatibility with older metadata; current recurring schedules use graphile-worker.
-
-A DB agent with the same project+name takes precedence over the file agent.
-
-Reader: `lib/agents/tamtam-file-agents.ts` → `scanFileAgents(projectPath, projectName)` / `loadFileAgent(...)`. File agent IDs use the format `file:<project>:<name>` and are handled transparently in all agent API routes.
+Agents are **not** sourced from repo files. There is no `.tamtam/agents/` directory and no file-based agent definition. All agents live in the `agents` DB table and are created, edited, renamed, and deleted only through the authenticated app (API/UI); every agent ID is `agent-<ts>`. Because agent definitions never come from committed files, a PR cannot introduce or alter an agent. (File-based **skills/personas** under `skills/docs/skills/` are a separate feature and still exist — see `docs/AGENT.md`.)
 
 ## `.tamtam/cache/` (per-project, **not** committed)
 

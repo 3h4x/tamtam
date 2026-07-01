@@ -1,7 +1,6 @@
 import { db, schema } from '@/lib/db';
 import { normalizeModelInput } from '@/lib/agents/model-aliases';
 import { resolveAgentPrerequisiteCommandWithFileSkills } from '@/lib/agents/file-skill-prerequisites';
-import { clearFileAgentsCache } from '@/lib/agents/file-agents-cache';
 
 export type AgentRow = typeof schema.agents.$inferSelect;
 export type NormalizedAgent = Omit<AgentRow, 'skillIds' | 'docPaths'> & { skillIds: string[]; docPaths: string[] };
@@ -62,5 +61,4 @@ export async function getAllAgentsCachedAsync(): Promise<AgentRow[]> {
 
 export function clearAgentsCache() {
   _agentsCache = null;
-  clearFileAgentsCache();
 }

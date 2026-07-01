@@ -2,8 +2,6 @@ import { open } from 'fs/promises';
 import { relative } from 'path';
 import { inArray, eq } from 'drizzle-orm';
 import { db, schema } from '@/lib/db';
-import { canonicalAgentNameKey } from '@/lib/agents/agent-name';
-import { scanFileAgents } from '@/lib/agents/tamtam-file-agents';
 import { listProjectDocuments } from '@/lib/shared/project-documents';
 import { getBranchContext } from '@/lib/git/git-branch';
 import { loadFileConfig } from '@/lib/skills/tamtam-file-config';
@@ -105,17 +103,11 @@ async function readProjectDocument(filePath: string): Promise<{ text: string; up
   }
 }
 
-async function collectEffectiveProjectSkillIds(project: string, projectPath: string): Promise<string[]> {
+async function collectEffectiveProjectSkillIds(project: string): Promise<string[]> {
   const agentRows = await db.select({ name: schema.agents.name, skillIds: schema.agents.skillIds })
     .from(schema.agents)
     .where(eq(schema.agents.project, project));
-  const dbAgentKeys = new Set(agentRows.map((row) => canonicalAgentNameKey(row.name)));
   const skillIds = agentRows.flatMap((row) => safeJsonArray(row.skillIds));
-
-  for (const agent of scanFileAgents(projectPath, project)) {
-    if (dbAgentKeys.has(canonicalAgentNameKey(agent.name))) continue;
-    skillIds.push(...agent.skillIds);
-  }
 
   return Array.from(new Set(skillIds.filter((id) => !id.startsWith('persona:'))));
 }
@@ -146,7 +138,7 @@ export async function collectProjectRetrievalSources(project: string, projectPat
     });
   }
 
-  const dbSkillIds = await collectEffectiveProjectSkillIds(project, projectPath);
+  const dbSkillIds = await collectEffectiveProjectSkillIds(project);
   if (dbSkillIds.length > 0) {
     const skills = await db.select().from(schema.skills).where(inArray(schema.skills.id, dbSkillIds));
     for (const skill of skills) {

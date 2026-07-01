@@ -304,13 +304,13 @@ Configuration for scheduled automated agents.
 | `createdAt` | REAL | — | NOT NULL |
 | `updatedAt` | REAL | — | NOT NULL |
 
-System-agent rows are seeded by TamTam for enabled projects and are DB-only. They are not mirrored to `.tamtam/agents/*.md`; deletion writes a `settings` dismissal marker keyed as `system_agent_dismissed:<project>:<agentName>`. Seeding checks project-local agent-name conflicts with the same case-insensitive DB/file-agent rule used by the public create route.
+Agents are DB-only — there is no file-based agent definition. System-agent rows are seeded by TamTam for enabled projects; deletion writes a `settings` dismissal marker keyed as `system_agent_dismissed:<project>:<agentName>`. Seeding checks project-local agent-name conflicts with the same case-insensitive rule used by the public create route.
 
 ---
 
 ### `agentRevisions`
 
-Append-only audit history for DB-backed agent edits. Each DB-backed PATCH/revert stores the previous `agents` row as JSON before mutating the live row. File-backed agents remain versioned by the project git history for `.tamtam/agents/*.md`. Nightly retention keeps the newest `skill_revision_retention_count` rows per agent.
+Append-only audit history for agent edits. Each PATCH/revert stores the previous `agents` row as JSON before mutating the live row. Nightly retention keeps the newest `skill_revision_retention_count` rows per agent.
 
 | Column | Type | Default | Notes |
 |--------|------|---------|-------|

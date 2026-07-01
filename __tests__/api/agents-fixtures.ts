@@ -47,21 +47,9 @@ vi.mock('@/lib/shared/project-data', () => ({
   getEnabledProjects: mocks.getEnabledProjects,
 }));
 
-vi.mock('@/lib/agents/tamtam-file-agents', () => ({
-  scanFileAgents: mocks.scanFileAgents,
-  renameFileAgent: mocks.renameFileAgent,
-  loadFileAgent: mocks.loadFileAgent,
-  parseFileAgentId: mocks.parseFileAgentId,
-  writeFileAgent: mocks.writeFileAgent,
-  deleteFileAgent: mocks.deleteFileAgent,
-}));
-
-vi.mock('@/lib/agents/file-agent-overrides', () => ({
-  getFileAgentOverride: mocks.getFileAgentOverride,
-  getFileAgentOverrideSync: mocks.getFileAgentOverrideSync,
-  setFileAgentOverride: mocks.setFileAgentOverride,
-  deleteFileAgentOverride: mocks.deleteFileAgentOverride,
-}));
+// The file-agent feature was removed — agents live only in the DB. The mock
+// holders above remain as inert vi.fn()s so existing test callers still
+// compile, but no module is wired to them anymore.
 
 vi.mock('@/lib/scheduling/agent-cron-state', () => ({
   loadAgentCronStates: cronStateMocks.loadAgentCronStates,

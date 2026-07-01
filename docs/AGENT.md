@@ -60,9 +60,8 @@ behavior is role-specific:
 
 Role is inferred at create-time by a token-free keyword heuristic
 (`inferAgentRole` in `lib/agents/roles.ts`) and can be overridden explicitly via
-the agent editor or `PATCH /api/agents/{id}` `{ role }`. For DB agents it's the
-`agents.role` column; for file agents it lives in the file-agent override (it's
-operational config, like `enabled`/`schedule`). Defaulting an un-tagged monitor to
+the agent editor or `PATCH /api/agents/{id}` `{ role }`. It is stored in the
+`agents.role` column. Defaulting an un-tagged monitor to
 `producer` is safe: a quiet watchdog never produces the loop/noise verdict that
 cadence-throttling requires, so it is never throttled — tagging it `monitor` only
 unlocks the model-downgrade saving and silences the diff-based recommendations.
@@ -151,12 +150,12 @@ When changing this catalog:
 
 ## Built-in System Agents
 
-The `agents` table has a `kind` column with two values: `'user'` (default — everything created via UI/API/file) and `'system'` (built-in, auto-seeded per project, dispatched to an internal handler instead of the LLM-CLI intake workflow). System agents share the agents table, the scheduled-agent cron pipeline, and the `/workflow-runs` UI; they differ only at the cron-task dispatch point in `lib/workflows/cron/agent-cron-task.ts`, which routes `kind='system'` to `runSystemAgent()` (registered in `lib/agents/system/index.ts`) instead of `startAgentRun()`.
+The `agents` table has a `kind` column with two values: `'user'` (default — everything created via UI/API) and `'system'` (built-in, auto-seeded per project, dispatched to an internal handler instead of the LLM-CLI intake workflow). System agents share the agents table, the scheduled-agent cron pipeline, and the `/workflow-runs` UI; they differ only at the cron-task dispatch point in `lib/workflows/cron/agent-cron-task.ts`, which routes `kind='system'` to `runSystemAgent()` (registered in `lib/agents/system/index.ts`) instead of `startAgentRun()`.
 
 Lifecycle:
 
-- **Seeded** at TamTam boot via `seedSystemAgents()` (`lib/agents/system/seed.ts`) for every enabled project, before `seedAgentCrons()` runs. The seeder is also called per-project after a PATCH on `/api/config/projects` flips a project to `enabled: true`. Idempotent: a project that already has a row, or that has a `system_agent_dismissed:<project>:<name>` settings marker, is skipped. Name conflicts with existing DB or file agents (case-insensitive) are also skipped — user-owned names take precedence.
-- **Locked at the API:** POST `/api/agents` rejects `kind=system` (400). PATCH `/api/agents/[agentId]` strips mutating fields for `kind=system` rows, rejects `schedule`, and honors only `enabled`. DELETE writes a dismissal marker so the seeder does not recreate the row on next boot. System agents are also excluded from `.tamtam/agents/*.md` file sync (DB-only).
+- **Seeded** at TamTam boot via `seedSystemAgents()` (`lib/agents/system/seed.ts`) for every enabled project, before `seedAgentCrons()` runs. The seeder is also called per-project after a PATCH on `/api/config/projects` flips a project to `enabled: true`. Idempotent: a project that already has a row, or that has a `system_agent_dismissed:<project>:<name>` settings marker, is skipped. Name conflicts with existing DB agents (case-insensitive) are also skipped — user-owned names take precedence.
+- **Locked at the API:** POST `/api/agents` rejects `kind=system` (400). PATCH `/api/agents/[agentId]` strips mutating fields for `kind=system` rows, rejects `schedule`, and honors only `enabled`. DELETE writes a dismissal marker so the seeder does not recreate the row on next boot.
 - **Dispatched** by the cron task with no CLI spawn. The handler writes its own job row (`createJob`), performs the work in-process, fills in `workSummary` + `contextMeta.retrievalHealth`, and persists via `updateJob` — bypassing `markDone` because the post-processing chain (stream-json parsing, outcome-classifier hooks, release chain) assumes a CLI session that system agents don't produce.
 
 Current entries:
@@ -283,8 +282,8 @@ That issue-planning flow now uses one shared body contract so downstream DoD aut
 The section order matters, and each acceptance criterion must use an unchecked `- [ ]` checkbox. `mark-dod` parses those boxes from the GitHub issue body and ticks verified items in place.
 
 Read-only runs bypass per-project worktree serialization so they can start while unrelated agents or terminal jobs are running. Specifically, they skip the non-agent busy gate, different-agent queueing, the project start slot, pending-release re-acquire, and dirty-worktree checks. They still reject duplicate runs of the same agent, still queue behind an active release pipeline lock, and still honor the CLI start gate for pause and quota policy.
-Agent metadata does not grant that bypass. Names, skill IDs, file-vs-DB storage, and schedule source must not affect concurrency; only the explicit `readOnly: true` run request opts into the lighter path.
-Agent names are trimmed before persistence, must be non-empty, and may not contain slashes, backslashes, or control characters because TamTam mirrors them to `.tamtam/agents/<name>.md`. Create and rename operations reject project-local duplicates across both DB agents and file agents, using a case-insensitive uniqueness key so `Agent` and `agent` cannot coexist.
+Agent metadata does not grant that bypass. Names, skill IDs, and schedule source must not affect concurrency; only the explicit `readOnly: true` run request opts into the lighter path.
+Agent names are trimmed before persistence, must be non-empty, and may not contain slashes, backslashes, or control characters. Create and rename operations reject project-local duplicates among DB agents, using a case-insensitive uniqueness key so `Agent` and `agent` cannot coexist.
 
 Issue-branch behavior is now split by trigger type:
 
@@ -325,8 +324,6 @@ The final prompt sent to the selected provider is:
 [Base prompt from settings] + [Composed skills/docs] + [Task prompt]
 ```
 
-For file-backed agents in `.tamtam/agents/*.md`, `provider:` is committed frontmatter and is preserved on prompt-only writes. TamTam treats it as part of the shared agent contract, not as an ephemeral UI-only override.
-
 ## Prerequisite Command
 
 An agent may declare an optional `prerequisiteCommand` — a shell command that runs before the agent CLI is spawned. Its stdout/stderr are captured to `<logDir>/<jobId>.prereq.txt` (alongside the run's `.log`/`.prompt` files) and a summary block is prepended to the system prompt the agent receives:
@@ -353,7 +350,7 @@ Behaviour:
 - Timeout is 10 minutes (hardcoded for now).
 - The command runs with `bash -c <cmd>` in the project's working directory.
 - The job row is created with `pid: 0` **before** the prerequisite runs, so the run is immediately visible in the UI and the log file streams in real time. The per-project agent start slot remains held while the prerequisite runs, so another agent for the same project queues instead of starting concurrently, and project-wide starters such as terminal runs, tests, CI fixes, reruns, and releases see the project as busy. Because the job exists early, mid-prerequisite cancellation via the cancel-job endpoint works: the endpoint aborts the prereq process tree, and the route reaps the placeholder cleanly (exitCode 130). The `pid: 0` placeholder sits inside the probe sweep's spawn-grace window, so probes never falsely finalize a running prereq.
-- For file-backed agents, the field is committed frontmatter (`prerequisiteCommand: "pnpm test"`); for DB agents it's stored on the `agents` row.
+- The field is stored on the `agents` row.
 
 ## Per-agent statistics
 
@@ -487,7 +484,7 @@ Each enabled scheduled agent has one graphile-worker `agent-cron` row keyed as `
 
 Current behavior:
 
-- `instrumentation-node.ts` starts the cron worker and calls `seedAgentCrons()` on boot to upsert enabled scheduled agents from the DB and file-agent layer.
+- `instrumentation-node.ts` starts the cron worker and calls `seedAgentCrons()` on boot to upsert enabled scheduled agents from the DB.
 - `lib/workflows/cron/agent-cron-task.ts` handles each fire, checks pause/budget/branch/release gates, records the latest skipped/queued/dispatched attempt for the Agents UI, starts the agent intake workflow, and re-enqueues the next fire. Transient blockers such as global pause, an in-flight PR wait, non-default branch state, release locks, or stale origin state retry in about one minute; other outcomes advance to the next scheduled tick.
 - A fire whose `loadAgent` lookup returns null retries on the same one-minute window up to 3 consecutive times (a `notFoundRetries` counter rides the job payload) before the chain terminates. A single null read can be a transient agent-listing miss rather than a real deletion, and terminating immediately silently kills the schedule until an operator reinstalls it via `/api/agents/scheduler-health`. A definitive read of a disabled agent still terminates immediately.
 - Agent CRUD routes call `installAgentSchedule()` / `uninstallAgentSchedule()` so schedule changes apply immediately without restarting the server.

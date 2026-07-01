@@ -52,7 +52,7 @@ The estimator uses provider-aware tokenization only when a caller adds it; the c
 
 Watch `/stats` for kinds where `avgPromptTokens > 12 500`. The `[prompt-size] …` warning lines appear in the TamTam server log. If a kind suddenly grows, check:
 - A new skill was attached to an agent.
-- A `.tamtam/agents/*.md` file gained boilerplate.
+- An agent's prompt gained boilerplate.
 - A docPath was added that pulls in a large file.
 
 ## Threshold tuning

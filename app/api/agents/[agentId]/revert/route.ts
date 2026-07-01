@@ -3,9 +3,7 @@ import { and, eq } from 'drizzle-orm';
 import { db, schema } from '@/lib/db';
 import { clearAgentsCache, normalizeAgent } from '@/lib/agents/agents-cache';
 import { findAgentNameConflict } from '@/lib/agents/agent-conflicts';
-import { parseFileAgentId, writeFileAgent, deleteFileAgent } from '@/lib/agents/tamtam-file-agents';
 import { recordAgentRevision } from '@/lib/agents/revisions';
-import { resolveProjectPath } from '@/lib/shared/project-data';
 import { installAgentSchedule, uninstallAgentSchedule } from '@/lib/scheduling/agent-scheduler';
 import { errMsg } from '@/lib/shared/types';
 
@@ -42,29 +40,6 @@ function parseSkillIds(raw: string | null | undefined): string[] {
 
 async function syncAgentSideEffects(existing: AgentSnapshot, agent: AgentSnapshot): Promise<void> {
   const skillIds = parseSkillIds(agent.skillIds);
-  if (agent.kind !== 'system') {
-    const projPath = resolveProjectPath(agent.project);
-    if (projPath) {
-      try {
-        if (existing.name !== agent.name) {
-          deleteFileAgent(projPath, existing.name);
-        }
-        writeFileAgent(projPath, agent.project, agent.name, {
-          prompt: agent.prompt,
-          model: agent.model,
-          schedule: agent.schedule,
-          skillIds,
-          enabled: agent.enabled,
-          boostable: agent.boostable,
-          provider: agent.provider,
-          prerequisiteCommand: agent.prerequisiteCommand,
-        });
-      } catch {
-        // File sync is best-effort, matching the normal edit route.
-      }
-    }
-  }
-
   try {
     const identityChanged = existing.name !== agent.name || existing.project !== agent.project;
     if (identityChanged) {
@@ -85,9 +60,6 @@ export async function POST(
   { params }: { params: Promise<{ agentId: string }> },
 ) {
   const { agentId } = await params;
-  if (parseFileAgentId(agentId)) {
-    return NextResponse.json({ detail: 'file agents are versioned in git, not DB revisions' }, { status: 400 });
-  }
 
   const body = await request.json().catch(() => ({})) as { revisionId?: unknown; note?: unknown };
   const revisionId = Number(body.revisionId);
@@ -124,7 +96,6 @@ export async function POST(
   } else {
     const conflict = await findAgentNameConflict(snapshot.project, snapshot.name, {
       excludeDbAgentId: existing.id,
-      excludeFileAgentName: existing.name,
     });
     if (conflict) {
       return NextResponse.json({ detail: `agent '${snapshot.name}' already exists for ${snapshot.project}` }, { status: 409 });

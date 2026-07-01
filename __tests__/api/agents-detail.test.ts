@@ -4,23 +4,7 @@ import * as schema from '@/lib/db/schema';
 import { GET, POST, agentGET, PATCH, DELETE, PATCH_BY_NAME, describeAgentsApi } from './agents-fixtures';
 
 describeAgentsApi((ctx) => {
-  const {
-    testDb,
-    mocks,
-    installAgentScheduleMock,
-    uninstallAgentScheduleMock,
-    scanFileAgentsMock,
-    renameFileAgentMock,
-    parseFileAgentIdMock,
-    loadFileAgentMock,
-    writeFileAgentMock,
-    deleteFileAgentMock,
-    setFileAgentOverrideMock,
-    resolveProjectPathMock,
-    loadAgentCronStatesMock,
-    getAllAgentLastAttemptsMock,
-    warmAgentsCache,
-  } = ctx;
+  const { testDb } = ctx;
 
   describe('GET /agents/{agentId}', () => {
       it('returns 404 for nonexistent agent', async () => {

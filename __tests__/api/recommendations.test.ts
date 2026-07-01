@@ -62,12 +62,6 @@ describe('/api/projects/by-project/[projectName]/recommendations', () => {
   let APPLY: typeof import('@/app/api/projects/by-project/[projectName]/recommendations/apply/route').POST;
   let installAgentScheduleMock: ReturnType<typeof vi.fn>;
   let uninstallAgentScheduleMock: ReturnType<typeof vi.fn>;
-  let resolveProjectPathMock: ReturnType<typeof vi.fn>;
-  let parseFileAgentIdMock: ReturnType<typeof vi.fn>;
-  let loadFileAgentMock: ReturnType<typeof vi.fn>;
-  let writeFileAgentMock: ReturnType<typeof vi.fn>;
-  let setFileAgentOverrideMock: ReturnType<typeof vi.fn>;
-  let fileAgentState: Record<string, unknown> | null;
 
   beforeAll(async () => {
     sharedHandle = await createTestPgDbEmpty();
@@ -91,29 +85,9 @@ describe('/api/projects/by-project/[projectName]/recommendations', () => {
     vi.doMock('@/lib/db', () => ({ db: sharedHandle.db, schema }));
     installAgentScheduleMock = vi.fn().mockResolvedValue(undefined);
     uninstallAgentScheduleMock = vi.fn().mockResolvedValue(undefined);
-    resolveProjectPathMock = vi.fn().mockReturnValue(null);
-    parseFileAgentIdMock = vi.fn().mockReturnValue(null);
-    fileAgentState = null;
-    loadFileAgentMock = vi.fn().mockImplementation(() => (fileAgentState ? { ...fileAgentState } : null));
-    writeFileAgentMock = vi.fn().mockImplementation(() => (fileAgentState ? { ...fileAgentState } : null));
-    setFileAgentOverrideMock = vi.fn().mockImplementation((_project: string, _name: string, patch: { schedule?: string | null }) => {
-      if (!fileAgentState || patch.schedule === undefined) return;
-      fileAgentState = { ...fileAgentState, schedule: patch.schedule };
-    });
     vi.doMock('@/lib/scheduling/agent-scheduler', () => ({
       installAgentSchedule: installAgentScheduleMock,
       uninstallAgentSchedule: uninstallAgentScheduleMock,
-    }));
-    vi.doMock('@/lib/shared/project-data', () => ({
-      resolveProjectPath: resolveProjectPathMock,
-    }));
-    vi.doMock('@/lib/agents/tamtam-file-agents', () => ({
-      parseFileAgentId: parseFileAgentIdMock,
-      loadFileAgent: loadFileAgentMock,
-      writeFileAgent: writeFileAgentMock,
-    }));
-    vi.doMock('@/lib/agents/file-agent-overrides', () => ({
-      setFileAgentOverride: setFileAgentOverrideMock,
     }));
     ({ GET, PATCH } = await import('@/app/api/projects/by-project/[projectName]/recommendations/route'));
     ({ POST: APPLY } = await import('@/app/api/projects/by-project/[projectName]/recommendations/apply/route'));
@@ -430,59 +404,6 @@ describe('/api/projects/by-project/[projectName]/recommendations', () => {
     expect(recRows[0]?.status).toBe('open');
     expect(installAgentScheduleMock).not.toHaveBeenCalled();
     expect(uninstallAgentScheduleMock).not.toHaveBeenCalled();
-  });
-
-  it('fails closed and rolls a file agent schedule back when scheduler sync throws', async () => {
-    parseFileAgentIdMock.mockReturnValue({ project: 'portal', name: 'tests' });
-    resolveProjectPathMock.mockReturnValue('/tmp/portal');
-    fileAgentState = {
-      id: 'file:portal:tests',
-      name: 'tests',
-      project: 'portal',
-      skillIds: [],
-      docPaths: [],
-      model: 'normal',
-      prompt: 'run tests',
-      schedule: '1h',
-      enabled: true,
-      provider: null,
-      createdAt: 100,
-      updatedAt: 100,
-      source: 'file',
-      filePath: '/tmp/portal/.tamtam/agents/tests.md',
-    };
-    await sharedHandle.db.insert(schema.recommendations).values({
-      id: 'rec-scheduler-file-fail',
-      project: 'portal',
-      sourceKind: 'agent:tests',
-      sourceId: 'job-1',
-      agentId: 'file:portal:tests',
-      agentName: 'tests',
-      type: 'agent_schedule_backoff',
-      title: 'Run tests less often',
-      detail: 'No actionable work.',
-      status: 'open',
-      payload: JSON.stringify({ recommendedSchedule: '8h' }),
-      createdAt: 100,
-      updatedAt: 100,
-    });
-    installAgentScheduleMock.mockRejectedValueOnce(new Error('scheduler boom'));
-
-    const req = new NextRequest('http://test', {
-      method: 'POST',
-      body: JSON.stringify({ id: 'rec-scheduler-file-fail' }),
-    });
-    const res = await APPLY(req, { params: Promise.resolve({ projectName: 'portal' }) });
-    const data = await res.json();
-
-    expect(res.status).toBe(500);
-    expect(data.detail).toContain('Failed to update live agent schedule');
-    expect(fileAgentState?.schedule).toBe('1h');
-    const recRows = await sharedHandle.db.select().from(schema.recommendations).where(eq(schema.recommendations.id, 'rec-scheduler-file-fail'));
-    expect(recRows[0]?.status).toBe('open');
-    expect(setFileAgentOverrideMock).toHaveBeenNthCalledWith(1, 'portal', 'tests', { schedule: '8h' });
-    expect(setFileAgentOverrideMock).toHaveBeenNthCalledWith(2, 'portal', 'tests', { schedule: '1h' });
-    expect(installAgentScheduleMock).toHaveBeenCalledTimes(2);
   });
 
   it('rejects recommendations whose target agent belongs to a different project', async () => {

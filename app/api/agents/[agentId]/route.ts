@@ -7,44 +7,18 @@ import { clearAgentsCache, normalizeAgent } from '@/lib/agents/agents-cache';
 import { findAgentNameConflict } from '@/lib/agents/agent-conflicts';
 import { normalizeAgentNameInput } from '@/lib/agents/agent-name';
 import { parseAgentRole } from '@/lib/agents/roles';
-import { parseFileAgentId, loadFileAgent, writeFileAgent, deleteFileAgent } from '@/lib/agents/tamtam-file-agents';
-import { setFileAgentOverride, deleteFileAgentOverride } from '@/lib/agents/file-agent-overrides';
-import { resolveProjectPath } from '@/lib/shared/project-data';
 import { parseOptionalKnownModelInput } from '@/lib/agents/model-aliases';
 import { parseOptionalAgentScheduleInput } from '@/lib/scheduling/agent-schedule';
 import { isCliProvider } from '@/lib/usage/cli-providers';
 import { parsePrerequisiteCommandInput } from '@/lib/agents/prerequisites';
-import { resolveAgentPrerequisiteCommandWithFileSkills } from '@/lib/agents/file-skill-prerequisites';
 import { parseOptionalPermissionModeInput } from '@/lib/shared/config';
 import { recordAgentRevision } from '@/lib/agents/revisions';
-
-function withEffectivePrerequisite<T extends { project: string; skillIds: string[]; prerequisiteCommand?: string | null }>(
-  agent: T,
-): T {
-  return {
-    ...agent,
-    prerequisiteCommand: resolveAgentPrerequisiteCommandWithFileSkills({
-      project: agent.project,
-      skillIds: agent.skillIds,
-      prerequisiteCommand: agent.prerequisiteCommand,
-    }),
-  };
-}
 
 export async function GET(
   _request: NextRequest,
   { params }: { params: Promise<{ agentId: string }> }
 ) {
   const { agentId } = await params;
-
-  const parsed = parseFileAgentId(agentId);
-  if (parsed) {
-    const projPath = resolveProjectPath(parsed.project);
-    if (!projPath) return NextResponse.json({ detail: 'not found' }, { status: 404 });
-    const agent = loadFileAgent(projPath, parsed.project, parsed.name);
-    if (!agent) return NextResponse.json({ detail: 'not found' }, { status: 404 });
-    return NextResponse.json({ agent: withEffectivePrerequisite(agent) });
-  }
 
   const agentRows = await db.select().from(schema.agents).where(eq(schema.agents.id, agentId)).limit(1);
   const agent = agentRows[0] ?? null;
@@ -58,7 +32,6 @@ export async function PATCH(
 ) {
   const { agentId } = await params;
 
-  const parsedFile = parseFileAgentId(agentId);
   const body = await request.json();
   const provider = body.provider === null ? null : (isCliProvider(body.provider) ? body.provider : undefined);
   const { model: parsedModel, error: modelError } = parseOptionalKnownModelInput(body.model, 'normal');
@@ -70,61 +43,6 @@ export async function PATCH(
   const { mode: parsedPermissionMode, error: permissionModeError } = parseOptionalPermissionModeInput(body.permissionMode);
   if (body.permissionMode !== undefined && permissionModeError) {
     return NextResponse.json({ detail: permissionModeError }, { status: 400 });
-  }
-
-  if (parsedFile) {
-    const projPath = resolveProjectPath(parsedFile.project);
-    if (!projPath) return NextResponse.json({ detail: 'not found' }, { status: 404 });
-    if (!loadFileAgent(projPath, parsedFile.project, parsedFile.name)) {
-      return NextResponse.json({ detail: 'not found' }, { status: 404 });
-    }
-    try {
-      // Operational config goes to the DB override so the toggle/edit UI
-      // doesn't dirty a tracked .md file. Only the prompt belongs in the
-      // file (the agent's "identity"); everything else is per-environment.
-      if (
-        body.enabled !== undefined ||
-        body.boostable !== undefined ||
-        body.schedule !== undefined ||
-        body.model !== undefined ||
-        body.skillIds !== undefined ||
-        body.permissionMode !== undefined ||
-        body.role !== undefined
-      ) {
-        await setFileAgentOverride(parsedFile.project, parsedFile.name, {
-          enabled: body.enabled,
-          boostable: body.boostable,
-          schedule: body.schedule !== undefined ? parsedSchedule.schedule : undefined,
-          model: parsedModel ?? undefined,
-          skillIds: body.skillIds,
-          permissionMode: body.permissionMode !== undefined ? parsedPermissionMode : undefined,
-          // Role is operational config (drives autopilot) → lives in the override.
-          role: body.role !== undefined ? parseAgentRole(body.role) : undefined,
-        });
-      }
-      // Prompt edits always flow to the file. Provider frontmatter and the
-      // prerequisite shell command are also committed state, so updates to
-      // either must write the file too.
-      if (body.prompt !== undefined || provider !== undefined || body.prerequisiteCommand !== undefined) {
-        const prerequisiteCommand = parsePrerequisiteCommandInput(body.prerequisiteCommand);
-        writeFileAgent(projPath, parsedFile.project, parsedFile.name, { prompt: body.prompt, provider, prerequisiteCommand });
-      }
-      clearAgentsCache();
-      const updated = loadFileAgent(projPath, parsedFile.project, parsedFile.name);
-      if (!updated) return NextResponse.json({ detail: 'not found after write' }, { status: 500 });
-      try {
-        if (updated.schedule && updated.enabled && (updated.prompt || updated.skillIds.length > 0)) {
-          await installAgentSchedule(updated.id, updated.schedule, updated.prompt, updated.project, updated.name);
-        } else {
-          await uninstallAgentSchedule(updated.id, updated.project, updated.name);
-        }
-      } catch (e: unknown) {
-        console.error(`Failed to update schedule for file agent ${updated.id}:`, errMsg(e));
-      }
-      return NextResponse.json({ agent: withEffectivePrerequisite(updated) });
-    } catch (e: unknown) {
-      return NextResponse.json({ detail: `Failed to write agent file: ${errMsg(e)}` }, { status: 500 });
-    }
   }
 
   const existingRows = await db.select().from(schema.agents).where(eq(schema.agents.id, agentId)).limit(1);
@@ -145,7 +63,6 @@ export async function PATCH(
     nextName = parsedName.name!;
     const conflict = await findAgentNameConflict(existing.project, nextName, {
       excludeDbAgentId: existing.id,
-      excludeFileAgentName: existing.name,
     });
     if (conflict) {
       return NextResponse.json({ detail: `agent '${nextName}' already exists for ${existing.project}` }, { status: 409 });
@@ -183,34 +100,11 @@ export async function PATCH(
   const updatedRows = await db.select().from(schema.agents).where(eq(schema.agents.id, agentId)).limit(1);
   const agent = updatedRows[0] ?? null;
 
-  // Parse skillIds once — both the file-sync write and the schedule decision
-  // below consume it. Defaults to [] on missing/malformed JSON.
+  // Parse skillIds once — the schedule decision below consumes it.
+  // Defaults to [] on missing/malformed JSON.
   let skillIds: string[] = [];
   if (agent) {
     try { skillIds = JSON.parse(agent.skillIds || '[]'); } catch { /* keep [] */ }
-  }
-
-  // Sync to .tamtam/agents/<name>.md for version control. System agents
-  // are DB-only — never persisted to .tamtam/.
-  if (agent && agent.kind !== 'system') {
-    const projPath = resolveProjectPath(agent.project);
-    if (projPath) {
-      try {
-        if (oldName !== agent.name) {
-          deleteFileAgent(projPath, oldName);
-        }
-        writeFileAgent(projPath, agent.project, agent.name, {
-          prompt: agent.prompt,
-          model: agent.model,
-          schedule: agent.schedule,
-          skillIds,
-          enabled: agent.enabled,
-          boostable: agent.boostable,
-          provider: agent.provider,
-          prerequisiteCommand: agent.prerequisiteCommand,
-        });
-      } catch { /* non-fatal */ }
-    }
   }
 
   // Update schedule (fired by graphile-worker cron pool)
@@ -241,18 +135,6 @@ export async function DELETE(
 ) {
   const { agentId } = await params;
 
-  const parsedFileDel = parseFileAgentId(agentId);
-  if (parsedFileDel) {
-    const projPath = resolveProjectPath(parsedFileDel.project);
-    if (!projPath) return NextResponse.json({ detail: 'not found' }, { status: 404 });
-    deleteFileAgent(projPath, parsedFileDel.name);
-    // Drop the DB override too — otherwise re-creating the agent later
-    // would silently inherit a stale enabled/schedule.
-    deleteFileAgentOverride(parsedFileDel.project, parsedFileDel.name);
-    clearAgentsCache();
-    return NextResponse.json({ status: 'deleted' });
-  }
-
   // Uninstall schedule before deleting
   const deleteRows = await db.select().from(schema.agents).where(eq(schema.agents.id, agentId)).limit(1);
   const agent = deleteRows[0] ?? null;
@@ -264,8 +146,6 @@ export async function DELETE(
 
   // For system (built-in) agents, record a dismissal marker so the auto
   // seeder doesn't recreate the row on next boot or on project changes.
-  // We do NOT touch .tamtam/agents/<name>.md for system agents — they
-  // live only in the DB.
   if (agent && agent.kind === 'system') {
     try {
       const { markSystemAgentDismissed } = await import('@/lib/agents/system/seed');
@@ -273,10 +153,6 @@ export async function DELETE(
     } catch (e: unknown) {
       console.error(`Failed to mark system agent dismissed for ${agentId}:`, errMsg(e));
     }
-  } else if (agent) {
-    // Also remove .tamtam/agents/<name>.md for user agents
-    const projPath = resolveProjectPath(agent.project);
-    if (projPath) deleteFileAgent(projPath, agent.name);
   }
 
   await db.delete(schema.agents).where(eq(schema.agents.id, agentId)).execute();

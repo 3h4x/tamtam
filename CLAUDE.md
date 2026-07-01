@@ -91,7 +91,7 @@ The `rebuild` script is now graceful by default (`scripts/rebuild-safe.sh`): it 
 
 ## Key Patterns
 
-- **Runtime state lives in DB.** Shared per-project config and file-agent prompts also live in committed `.tamtam/` files (see `docs/TAMTAM-DIR.md`).
+- **Runtime state lives in DB.** Agents are DB-only. Shared per-project config also lives in committed `.tamtam/config.yml` (see `docs/TAMTAM-DIR.md`).
 - **DB access** imports `db` / `schema` from `@/lib/db` for TamTam-owned tables. Direct `pg.Pool`/`pg.Client` is reserved for explicit special cases such as workflow-world inspection or graphile-worker helpers; don't add ad-hoc pools for ordinary app data in `app/`, `components/`, or general `lib/` code.
 - **CLI calls go through `lib/shared/shell.ts`.** Direct `child_process` is the exception, allowed only in runner/shim/streaming paths that already need it.
 - **Client-side fetches** live under `lib/client/` and are surfaced through `lib/client-api.ts`. Extend existing helpers instead of duplicating request/response handling in components.
@@ -168,6 +168,6 @@ Read the relevant file before touching the subsystem it covers.
 | `docs/superpowers/specs/2026-06-12-queued-terminal-runs-design.md` | Approved design for queued terminal run durability and priority ordering | Changing blocked terminal-run behavior, queued terminal-run persistence/drain order, or user-run-vs-agent queue priority |
 | `docs/superpowers/specs/2026-06-20-initiative-engine-design.md` | Approved design for the initiative engine | Changing initiative mining, scoring, dispatch, or release linkage |
 | `docs/superpowers/specs/2026-06-21-initiative-operator-steering-design.md` | Approved design for initiative operator steering | Changing initiative promote/reject semantics, pinned ordering, or the initiatives tab UI/API |
-| `docs/TAMTAM-DIR.md` | `.tamtam/config.yml` and file-agent contract | Changing committed per-project config, agent files, or auto-attached docs behavior |
+| `docs/TAMTAM-DIR.md` | `.tamtam/config.yml` contract (agents are DB-only) | Changing committed per-project config or auto-attached docs behavior |
 | `docs/TESTING.md` | Vitest/PGlite patterns and mock rules | Adding tests, especially API tests, or debugging test harness setup |
 | `docs/UI.md` | Design tokens, component patterns, and visual rules | Changing UI styling, layout patterns, or deciding whether a visual choice fits TamTam |

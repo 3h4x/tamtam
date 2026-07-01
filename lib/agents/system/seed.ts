@@ -67,7 +67,7 @@ async function loadAllDismissedKeys(): Promise<Set<string>> {
 async function seedOneAgentForOneProject(
   project: string,
   seed: SystemAgentSeedConfig,
-  options: { projectPath?: string | null; dismissedSet?: ReadonlySet<string> } = {},
+  options: { dismissedSet?: ReadonlySet<string> } = {},
 ): Promise<'seeded' | 'skipped' | 'dismissed'> {
   // Parallelize the two independent pre-checks (dismissal lookup + conflict
   // lookup). When the caller bulk-loaded the dismissal set, the dismissal
@@ -75,7 +75,7 @@ async function seedOneAgentForOneProject(
   const dismissedPromise = options.dismissedSet
     ? Promise.resolve(options.dismissedSet.has(dismissalKey(project, seed.name)))
     : isDismissed(project, seed.name);
-  const conflictPromise = findAgentNameConflict(project, seed.name, { projectPath: options.projectPath });
+  const conflictPromise = findAgentNameConflict(project, seed.name);
   const [dismissed, conflict] = await Promise.all([dismissedPromise, conflictPromise]);
   if (dismissed) return 'dismissed';
   if (conflict) return 'skipped';
@@ -124,7 +124,6 @@ export async function seedSystemAgents(): Promise<SeedSystemAgentsResult> {
     for (const seed of seeds) {
       try {
         const outcome = await seedOneAgentForOneProject(project.name, seed, {
-          projectPath: project.path,
           dismissedSet,
         });
         if (outcome === 'seeded') seeded += 1;

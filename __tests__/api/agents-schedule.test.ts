@@ -6,20 +6,8 @@ import { GET, POST, agentGET, PATCH, DELETE, PATCH_BY_NAME, describeAgentsApi } 
 describeAgentsApi((ctx) => {
   const {
     testDb,
-    mocks,
     installAgentScheduleMock,
     uninstallAgentScheduleMock,
-    scanFileAgentsMock,
-    renameFileAgentMock,
-    parseFileAgentIdMock,
-    loadFileAgentMock,
-    writeFileAgentMock,
-    deleteFileAgentMock,
-    setFileAgentOverrideMock,
-    resolveProjectPathMock,
-    loadAgentCronStatesMock,
-    getAllAgentLastAttemptsMock,
-    warmAgentsCache,
   } = ctx;
 
   describe('schedule installation', () => {

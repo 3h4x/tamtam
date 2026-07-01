@@ -1,21 +1,22 @@
 # TamTam Security Model
 
-## File-Agent Trust Model
+## File-Config Trust Model
+
+> **Agents are DB-only.** Agent definitions are never sourced from repo files — there is no `.tamtam/agents/` directory. Agents are mutated only through the authenticated app (API/UI), so a PR cannot introduce or alter a scheduled agent, its prompt, or its `prerequisiteCommand`. The trust model below therefore covers only the committed `.tamtam/config.yml`.
 
 ### The Problem
 
-`.tamtam/config.yml` and `.tamtam/agents/*.md` are committed files that control TamTam's behaviour for a project: which agents run on a schedule, which test command and custom actions are shared, which users are trusted, and which project-specific prompt guidance is injected.
+`.tamtam/config.yml` is a committed file that controls TamTam's behaviour for a project: which test command and custom actions are shared, which users are trusted, and which project-specific prompt guidance is injected.
 
 When TamTam checks out a PR head branch (via any non-default-branch release or the "Work on" issue flow), the working tree switches to the attacker-controlled branch. Without protection, any file in `.tamtam/` would be silently honoured — allowing:
 
-1. **New scheduled agents** — a PR adds `.tamtam/agents/pwn.md` with `schedule: 15m`, a malicious prompt, or a malicious `prerequisiteCommand`; TamTam registers and runs it automatically.
-2. **Verification weakening** — changing `pipeline.test_command`, `pipeline.release_timeout_minutes`, or `pipeline.review_prerequisite_command` in `.tamtam/config.yml` changes what TamTam executes or injects around release checks.
-3. **Trust escalation** — adding their own login to `safe_users` marks their content as trusted, enabling follow-on prompt injection via issue/PR bodies.
-4. **Prompt steering** — changing `commits.commit_style` injects attacker-controlled guidance into generated commit-message prompts.
+1. **Verification weakening** — changing `pipeline.test_command`, `pipeline.release_timeout_minutes`, or `pipeline.review_prerequisite_command` in `.tamtam/config.yml` changes what TamTam executes or injects around release checks.
+2. **Trust escalation** — adding their own login to `safe_users` marks their content as trusted, enabling follow-on prompt injection via issue/PR bodies.
+3. **Prompt steering** — changing `commits.commit_style` injects attacker-controlled guidance into generated commit-message prompts.
 
 ### The Defence: Default-Branch Pinning
 
-`lib/skills/tamtam-file-config.ts` and `lib/agents/tamtam-file-agents.ts` detect the current branch at read time and, when on a **non-default branch**, read `.tamtam/` content from `origin/<defaultBranch>` via `git show` instead of the working tree.
+`lib/skills/tamtam-file-config.ts` detects the current branch at read time and, when on a **non-default branch**, reads `.tamtam/` content from `origin/<defaultBranch>` via `git show` instead of the working tree.
 
 #### How it works
 
@@ -25,11 +26,9 @@ On default branch (main/master):
 
 On feature/PR branch (fix/issue-42, attacker/pwn, …):
   loadFileConfig(path) → git show origin/main:.tamtam/config.yml     ✓
-  scanFileAgents(path) → git ls-tree origin/main:.tamtam/agents/
-                       + git show origin/main:.tamtam/agents/*.md     ✓
 ```
 
-The working-tree files on the feature branch are **never read** for config or agent discovery. Only files that exist on the pinned default branch are used.
+The working-tree file on the feature branch is **never read** for config. Only the version that exists on the pinned default branch is used.
 
 #### Fail-open on non-git directories
 
@@ -37,7 +36,7 @@ Branch detection (`lib/git/git-branch.ts`) catches all `execFileSync` errors and
 
 #### Writes still go to the working tree
 
-`writeFileConfig` and `writeFileAgent` always write to the working tree regardless of branch. This is intentional: edits made via the Config UI on a feature branch will be staged as part of that branch's commit and take effect after merge to the default branch.
+`writeFileConfig` always writes to the working tree regardless of branch. This is intentional: edits made via the Config UI on a feature branch will be staged as part of that branch's commit and take effect after merge to the default branch.
 
 The Config tab shows a banner when the displayed config comes from the default branch rather than the current branch:
 
@@ -56,7 +55,6 @@ The following fields are automatically protected by default-branch pinning:
 | `custom_actions` | New project-page buttons run attacker-chosen shell commands |
 | `commit_style` | Commit-message generation prompt is steered by untrusted branch content |
 | `auto_attach_docs` | Keyword→doc rules are read from the trusted default branch; the **content** of the referenced docs is also fetched from `origin/<defaultBranch>` (not the working tree) so a feature branch cannot rewrite an already-trusted doc and have it injected into terminal, agent, or review prompts |
-| Any `.tamtam/agents/*.md` | New scheduled agent runs arbitrary prompts or committed prerequisite shell commands |
 
 ### Relationship to Other Defences
 
@@ -68,7 +66,7 @@ The following fields are automatically protected by default-branch pinning:
 | **PR-branch execution gate** (`lib/security/pr-branch-execution.ts`) | Refuses host-side project-code execution on non-default branches unless the checkout is clean, the current branch is known, and every branch commit SHA can be resolved through GitHub to an `author.login` in `safe_users` / `trusted_github_users`, or the caller explicitly approves the supported test-run override; also blocks auto-merge when the GitHub PR diff touches dependency manifests, build scripts, workflow files, Dockerfiles, Makefiles, or JS/TS config files |
 | **Shared-token HTTP auth** (`middleware.ts`, `app/api/auth/*`) | When `auth_token` is configured, every UI/API request except `/login`, `/api/health`, and `/api/auth/*` must carry a valid bearer token or the httpOnly `tamtam_auth` cookie |
 
-These layers are independent and complementary. Pinning stops the _registration_ of malicious agents; sandboxing limits what registered agents can do; untrusted wrapping stops prompt injection from issue/PR bodies.
+These layers are independent and complementary. Pinning stops an untrusted branch from changing shared release config; sandboxing limits what agent processes can do; untrusted wrapping stops prompt injection from issue/PR bodies. (Agents cannot be registered from repo content at all — they are DB-only.)
 
 For issue-driven automation, TamTam gates the full issue context server-side before the LLM sees anything. The default issue-cruncher prerequisite calls `GET /api/projects/by-project/[project]/issues?pick_top=1`, which:
 
@@ -154,8 +152,6 @@ This is a defensive last-mile filter, not a complete secret-management system. I
 
 - `lib/git/git-branch.ts` — synchronous git helpers (`getBranchContext`, `gitShowSync`, `gitLsTreeSync`)
 - `lib/skills/tamtam-file-config.ts` — `loadFileConfig` (branch-aware), `writeFileConfig`
-- `lib/agents/tamtam-file-agents.ts` — `scanFileAgents`, `loadFileAgent` (both branch-aware)
 - `lib/skills/auto-attach-docs.ts` — `resolveAutoAttachedDocs` (branch-aware: reads doc content via `gitShowSync` on non-default branches to match the trust ref used by `loadFileConfig`)
 - `lib/shared/log-redaction.ts` — shared log redaction patterns and environment-value masking
 - `__tests__/lib/tamtam-file-config-branch.test.ts` — unit tests for config branch-pinning
-- `__tests__/lib/tamtam-file-agents-branch.test.ts` — unit tests for agent branch-pinning

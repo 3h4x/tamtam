@@ -1,8 +1,6 @@
 import { NextResponse } from 'next/server';
 import { listJobs } from '@/lib/jobs/job-storage';
 import { getAllAgentsCachedAsync } from '@/lib/agents/agents-cache';
-import { canonicalAgentNameKey } from '@/lib/agents/agent-name';
-import { scanFileAgents } from '@/lib/agents/tamtam-file-agents';
 import { listEnabledProjects, refreshProjectsCacheSync } from '@/lib/shared/enabled-projects';
 import {
   readEnabledProviderSnapshots,
@@ -158,28 +156,11 @@ export async function GET() {
   // fleet and skew every "all projects shipped" / pace / orchestrator signal.
   const enabledProjectNames = new Set(enabledProjects.map((p) => p.name));
   const agentCount = new Map<string, number>();
-  const dbAgentKeys = new Set<string>();
   for (const a of agents) {
-    dbAgentKeys.add(`${a.project}:${canonicalAgentNameKey(a.name)}`);
     if (a.enabled === false) continue;
     if (a.kind === 'system') continue;
     if (!enabledProjectNames.has(a.project)) continue;
     incrementAgentCount(agentCount, a.project);
-  }
-  for (const project of enabledProjects) {
-    let fileAgents: ReturnType<typeof scanFileAgents>;
-    try {
-      fileAgents = scanFileAgents(project.path, project.name);
-    } catch (err) {
-      console.error(`[stats-bridge] file-agent scan failed for ${project.name}:`, err);
-      continue;
-    }
-    for (const fa of fileAgents) {
-      if (dbAgentKeys.has(`${fa.project}:${canonicalAgentNameKey(fa.name)}`)) continue;
-      if (fa.enabled === false) continue;
-      if (fa.kind === 'system') continue;
-      incrementAgentCount(agentCount, fa.project);
-    }
   }
 
   // 2) Per-project push/release/agent activity — one pass over all jobs,

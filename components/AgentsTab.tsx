@@ -262,11 +262,6 @@ export function AgentsTab({ projectName, projectJobs = [], jobsPaused = false }:
               {r.agent.provider}
             </Pill>
           )}
-          {r.agent.source === 'file' && (
-            <Pill tone="neutral" size="xs" className="rounded-full bg-bg-tertiary px-1.5 py-0.5 text-[10px] text-text-tertiary" title=".tamtam/agents/">
-              file
-            </Pill>
-          )}
           {r.agent.kind === 'system' && (
             <Pill
               tone="accent"

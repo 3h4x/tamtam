@@ -227,7 +227,6 @@ describe('GET /api/agents/scheduler-health', () => {
     vi.doMock('@/lib/scheduling/scheduling', () => ({
       getImproveConfig: () => ({ logDir, claudeBin: 'claude' }),
     }));
-    vi.doMock('@/lib/agents/tamtam-file-agents', () => ({ scanFileAgents: vi.fn().mockReturnValue([]) }));
 
     const enabledProjects = await import('@/lib/shared/enabled-projects');
     enabledProjects.clearProjectsCache();
@@ -322,105 +321,6 @@ describe('GET /api/agents/scheduler-health', () => {
     expect(quickAddJobMock).toHaveBeenCalledTimes(1);
   });
 
-  it('includes file-based agents from enabled projects in the expected set', async () => {
-    const fileAgent = {
-      id: 'file:proj1:auto-check',
-      project: 'proj1',
-      name: 'auto-check',
-      schedule: '2h',
-      prompt: 'run checks',
-      enabled: true,
-
-    };
-
-    vi.resetModules();
-    await insertProject('proj1', '/w/proj1', true);
-    seedPromptFile('file:proj1:auto-check');
-    seedQueueJob('file:proj1:auto-check');
-
-    vi.doMock('graphile-worker', () => ({ quickAddJob: quickAddJobMock }));
-    vi.doMock('pg', () => ({
-      Pool: vi.fn(function PoolMock() {
-        return {
-          query: vi.fn(async () => ({
-            rows: queueRows(),
-          })),
-          on: vi.fn(),
-          end: vi.fn(async () => undefined),
-        };
-      }),
-    }));
-    vi.doMock('@/lib/db', () => ({ db: sharedHandle.db, schema }));
-    vi.doMock('@/lib/shared/shell', () => ({ exec: vi.fn().mockResolvedValue({ exitCode: 0, stdout: '', stderr: '' }) }));
-    vi.doMock('@/lib/shared/config', () => ({ getSettings: () => ({ launchagent_prefix: 'com.tamtam' }) }));
-    vi.doMock('@/lib/scheduling/scheduling', () => ({ getImproveConfig: () => ({ logDir, claudeBin: 'claude' }) }));
-    vi.doMock('@/lib/agents/tamtam-file-agents', () => ({ scanFileAgents: vi.fn().mockReturnValue([fileAgent]) }));
-
-    const enabledProjects = await import('@/lib/shared/enabled-projects');
-    enabledProjects.clearProjectsCache();
-    await enabledProjects.refreshProjectsCacheSync();
-
-    const { GET: GET2 } = await import('@/app/api/agents/scheduler-health/route');
-    const res = await GET2();
-    const body = await res.json();
-
-    expect(body.expected).toHaveLength(1);
-    expect(body.expected[0].id).toBe('file:proj1:auto-check');
-    expect(body.ok).toBe(true);
-  });
-
-  it('DB agent takes precedence over file agent with same project+name', async () => {
-    const fileAgent = {
-      id: 'file:proj1:shared',
-      project: 'proj1',
-      name: 'shared',
-      schedule: '1h',
-      prompt: 'file version',
-      enabled: true,
-
-    };
-
-    vi.resetModules();
-    await insertProject('proj1', '/w/proj1', true);
-    await sharedHandle.db.insert(schema.agents).values({
-      id: 'agent-db', name: 'shared', project: 'proj1', skillIds: '[]', model: 'sonnet',
-      prompt: 'db version', schedule: '1h', enabled: true,
-      createdAt: now, updatedAt: now,
-    });
-    seedPromptFile('agent-db');
-    seedQueueJob('agent-db');
-
-    vi.doMock('graphile-worker', () => ({ quickAddJob: quickAddJobMock }));
-    vi.doMock('pg', () => ({
-      Pool: vi.fn(function PoolMock() {
-        return {
-          query: vi.fn(async () => ({
-            rows: queueRows(),
-          })),
-          on: vi.fn(),
-          end: vi.fn(async () => undefined),
-        };
-      }),
-    }));
-    vi.doMock('@/lib/db', () => ({ db: sharedHandle.db, schema }));
-    vi.doMock('@/lib/shared/shell', () => ({ exec: vi.fn().mockResolvedValue({ exitCode: 0, stdout: '', stderr: '' }) }));
-    vi.doMock('@/lib/shared/config', () => ({ getSettings: () => ({ launchagent_prefix: 'com.tamtam' }) }));
-    vi.doMock('@/lib/scheduling/scheduling', () => ({ getImproveConfig: () => ({ logDir, claudeBin: 'claude' }) }));
-    vi.doMock('@/lib/agents/tamtam-file-agents', () => ({ scanFileAgents: vi.fn().mockReturnValue([fileAgent]) }));
-
-    const enabledProjects = await import('@/lib/shared/enabled-projects');
-    enabledProjects.clearProjectsCache();
-    await enabledProjects.refreshProjectsCacheSync();
-
-    const { GET: GET3 } = await import('@/app/api/agents/scheduler-health/route');
-    const res = await GET3();
-    const body = await res.json();
-
-    expect(body.expected).toHaveLength(1);
-    expect(body.expected[0].id).toBe('agent-db');
-    expect(body.ok).toBe(true);
-  });
-
   it('POST reinstalls a schedule when only the Graphile queue job is missing', async () => {
     await insertAgent({ id: 'agent-1', project: 'projA', name: 'My Agent', schedule: '1h' });
     seedPromptFile('agent-1');
@@ -459,7 +359,6 @@ describe('GET /api/agents/scheduler-health', () => {
     vi.doMock('@/lib/shared/shell', () => ({ exec: vi.fn().mockResolvedValue({ exitCode: 0, stdout: '', stderr: '' }) }));
     vi.doMock('@/lib/shared/config', () => ({ getSettings: () => ({ launchagent_prefix: 'com.tamtam' }) }));
     vi.doMock('@/lib/scheduling/scheduling', () => ({ getImproveConfig: () => ({ logDir, claudeBin: 'claude' }) }));
-    vi.doMock('@/lib/agents/tamtam-file-agents', () => ({ scanFileAgents: vi.fn().mockReturnValue([]) }));
 
     const enabledProjects = await import('@/lib/shared/enabled-projects');
     enabledProjects.clearProjectsCache();

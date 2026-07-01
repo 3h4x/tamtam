@@ -2,8 +2,6 @@ import { NextResponse } from 'next/server';
 import { and, desc, eq, isNotNull } from 'drizzle-orm';
 import { db, schema } from '@/lib/db';
 import { getSchedulerHealth, installAgentSchedule, type InternalSchedulerDump, type SchedulerEntryDump } from '@/lib/scheduling/agent-scheduler';
-import { scanFileAgents } from '@/lib/agents/tamtam-file-agents';
-import { listEnabledProjects } from '@/lib/shared/enabled-projects';
 import { errMsg } from '@/lib/shared/types';
 
 async function loadAgentsForCheck() {
@@ -16,24 +14,7 @@ async function loadAgentsForCheck() {
     enabled: !!a.enabled,
     prompt: a.prompt ?? '',
   }));
-  const dbKeys = new Set(dbAgents.map(a => `${a.project}:${a.name}`));
-  const fileAgents: typeof dbAgents = [];
-  for (const p of listEnabledProjects()) {
-    try {
-      for (const fa of scanFileAgents(p.path, p.name)) {
-        if (dbKeys.has(`${fa.project}:${fa.name}`)) continue;
-        fileAgents.push({
-          id: fa.id,
-          project: fa.project,
-          name: fa.name,
-          schedule: fa.schedule,
-          enabled: fa.enabled,
-          prompt: fa.prompt,
-        });
-      }
-    } catch { /* skip */ }
-  }
-  return [...dbAgents, ...fileAgents];
+  return dbAgents;
 }
 
 async function buildLastJobMap(entries: { agentId: string; project: string; name: string }[]): Promise<Map<string, number>> {

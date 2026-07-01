@@ -174,11 +174,6 @@ export function AgentsPage() {
       render: (agent) => (
         <span data-private>
           {agent.name}
-          {agent.source === 'file' && (
-            <Pill className="ml-1.5 rounded bg-bg-tertiary px-1 py-0.5 text-[10px] font-normal text-text-tertiary">
-              file
-            </Pill>
-          )}
           {agent.kind === 'system' && (
             <Pill
               className="ml-1.5 rounded border-accent/30 px-1 py-0.5 text-[10px] font-normal"

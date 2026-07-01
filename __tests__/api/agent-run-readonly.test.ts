@@ -174,10 +174,6 @@ describe('POST /api/agents/{agentId}/run readOnly', () => {
     vi.doMock('@/lib/shared/shell', () => ({
       exec: vi.fn().mockResolvedValue({ stdout: '', stderr: '', exitCode: 0 }),
     }));
-    vi.doMock('@/lib/agents/tamtam-file-agents', () => ({
-      parseFileAgentId: vi.fn().mockReturnValue(null),
-      loadFileAgent: vi.fn(),
-    }));
     vi.doMock('@/lib/agents/agent-memory', () => ({
       getAgentMemoryDir: vi.fn().mockReturnValue('/tmp/memory'),
       getAgentMemoryPath: vi.fn().mockReturnValue('/tmp/memory/proj1/cto.md'),

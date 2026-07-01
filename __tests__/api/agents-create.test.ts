@@ -9,13 +9,6 @@ describeAgentsApi((ctx) => {
     mocks,
     installAgentScheduleMock,
     uninstallAgentScheduleMock,
-    scanFileAgentsMock,
-    renameFileAgentMock,
-    parseFileAgentIdMock,
-    loadFileAgentMock,
-    writeFileAgentMock,
-    deleteFileAgentMock,
-    setFileAgentOverrideMock,
     resolveProjectPathMock,
     loadAgentCronStatesMock,
     getAllAgentLastAttemptsMock,
@@ -156,74 +149,6 @@ describeAgentsApi((ctx) => {
           createdAt: now,
           updatedAt: now,
         });
-  
-        const request = new NextRequest('http://localhost/api/agents', {
-          method: 'POST',
-          body: JSON.stringify({ name: 'agent', project: 'proj1' }),
-        });
-  
-        const response = await POST(request);
-  
-        expect(response.status).toBe(409);
-        await expect(response.json()).resolves.toMatchObject({
-          detail: expect.stringContaining('already exists'),
-        });
-      });
-  
-      it('rejects duplicate names when a file agent already exists for the project', async () => {
-        resolveProjectPathMock.mockReturnValueOnce('/path/to/proj1');
-        scanFileAgentsMock.mockReturnValueOnce([{
-          id: 'file:proj1:Agent',
-          name: 'Agent',
-          project: 'proj1',
-          skillIds: [],
-          docPaths: [],
-          model: 'normal',
-          prompt: '',
-          schedule: null,
-  
-          enabled: true,
-          provider: null,
-          prerequisiteCommand: null,
-          createdAt: 0,
-          updatedAt: 0,
-          source: 'file' as const,
-          filePath: '/path/to/proj1/.tamtam/agents/Agent.md',
-        }]);
-  
-        const request = new NextRequest('http://localhost/api/agents', {
-          method: 'POST',
-          body: JSON.stringify({ name: 'Agent', project: 'proj1' }),
-        });
-  
-        const response = await POST(request);
-  
-        expect(response.status).toBe(409);
-        await expect(response.json()).resolves.toMatchObject({
-          detail: expect.stringContaining('already exists'),
-        });
-      });
-  
-      it('rejects case-only duplicates when a file agent already exists for the project', async () => {
-        resolveProjectPathMock.mockReturnValueOnce('/path/to/proj1');
-        scanFileAgentsMock.mockReturnValueOnce([{
-          id: 'file:proj1:Agent',
-          name: 'Agent',
-          project: 'proj1',
-          skillIds: [],
-          docPaths: [],
-          model: 'normal',
-          prompt: '',
-          schedule: null,
-  
-          enabled: true,
-          provider: null,
-          prerequisiteCommand: null,
-          createdAt: 0,
-          updatedAt: 0,
-          source: 'file' as const,
-          filePath: '/path/to/proj1/.tamtam/agents/Agent.md',
-        }]);
   
         const request = new NextRequest('http://localhost/api/agents', {
           method: 'POST',
