@@ -1,5 +1,5 @@
 ---
-model: sonnet
+model: normal
 skillIds: ["persona:product/ux-researcher"]
 ---
 

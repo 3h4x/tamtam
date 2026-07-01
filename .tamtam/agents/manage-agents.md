@@ -1,4 +1,7 @@
 ---
-model: sonnet
+model: normal
 skillIds: ["agent-manage-agents"]
+boostable: false
 ---
+
+

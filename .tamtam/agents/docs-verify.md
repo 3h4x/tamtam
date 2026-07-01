@@ -1,5 +1,5 @@
 ---
-model: haiku
+model: fast
 schedule: 4h
 ---
 
