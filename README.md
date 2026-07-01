@@ -190,7 +190,7 @@ API routes are covered by vitest tests in `__tests__/api/`, often with combined 
 - Legacy redirects: `/pipeline` → `/stats?tab=pipeline`, `/skills` → `/library?tab=skills`, `/initiatives` → `/recommendations?tab=initiatives`, `/settings` → `/settings/general`
 - Hub deep links: `/recommendations?tab=initiatives`, `/recommendations?tab=history`, `/stats?tab=pipeline`
 - Project detail tabs: `/project/[name]` and `/project/[name]/[tab]` (`overview`, `config`, `history`, `terminal`, `changes`, `issues`, `docs`, `agents`)
-- Release traces, task detail, and terminal sessions: `/project/[name]/release/[releaseId]`, `/project/[name]/task/[task]`, and `/project/[name]/terminal/[sessionId]`
+- Setup wizard, release traces, task detail, and terminal sessions: `/project/[name]/setup`, `/project/[name]/release/[releaseId]`, `/project/[name]/task/[task]`, and `/project/[name]/terminal/[sessionId]`
 
 ## Internals
 
