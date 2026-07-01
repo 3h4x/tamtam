@@ -22,6 +22,7 @@ import type {
   MarkDodFetchBundle,
   MarkDodBranchSwitch,
   MarkDodClaudeVerifyResult,
+  MarkDodVerifyDispatch,
   MarkDodResult,
 } from '@/lib/workflows/phases/mark-dod-impl';
 import { safeStartOrchestrator } from '@/lib/workflows/safe-start-orchestrator';
@@ -89,7 +90,19 @@ export async function releaseMarkDodPhaseWorkflow(
     return toPhaseResult(prep.result);
   }
 
-  const verify = await claudeVerifyStep(prep.bundle, projectName, prep.fetched);
+  // Dispatch the supervised verify job, wait for it, then read its result. The
+  // three-step split is load-bearing: a single combined step would, on workflow
+  // replay after a mid-verify restart, re-run createJob + startJobInProcess and
+  // spawn a DUPLICATE token-burning verify job. Splitting caches the verifyJobId
+  // so a replay only re-waits/re-reads (both idempotent).
+  const dispatch = await dispatchVerifyStep(prep.bundle, projectName, prep.fetched);
+  let verify: MarkDodClaudeVerifyResult;
+  if ('terminal' in dispatch) {
+    verify = { verifiedTexts: [], rawOutput: '', exitCode: 1, timedOut: false, terminal: dispatch.terminal };
+  } else {
+    await awaitVerifyStep(dispatch.verifyJobId);
+    verify = await readVerifyResultStep(dispatch.verifyJobId, prep.bundle, prep.fetched);
+  }
 
   const final = await applyAndFinalizeStep(prep.bundle, prep.fetched, verify, prep.branchSwitch);
   // mark-dod is a terminal phase. Re-dispatch the orchestrator so it sees
@@ -158,16 +171,34 @@ async function prepareAndFetchStep(
   return { stage: 'continue', bundle, fetched, branchSwitch };
 }
 
-async function claudeVerifyStep(
+async function dispatchVerifyStep(
   bundle: MarkDodPrepBundle,
   projectName: string,
+  fetched: MarkDodFetchBundle,
+): Promise<MarkDodVerifyDispatch> {
+  'use step';
+  const impl = await import('@/lib/workflows/phases/mark-dod-impl');
+  const { getJob } = await import('@/lib/jobs/job-storage');
+  const job = getJob(bundle.jobId);
+  return impl.startMarkDodVerification(bundle, job, projectName, fetched);
+}
+
+async function awaitVerifyStep(verifyJobId: string): Promise<void> {
+  'use step';
+  const { waitForJobCompletion } = await import('@/lib/workflows/wait-for-job');
+  await waitForJobCompletion(verifyJobId);
+}
+
+async function readVerifyResultStep(
+  verifyJobId: string,
+  bundle: MarkDodPrepBundle,
   fetched: MarkDodFetchBundle,
 ): Promise<MarkDodClaudeVerifyResult> {
   'use step';
   const impl = await import('@/lib/workflows/phases/mark-dod-impl');
   const { getJob } = await import('@/lib/jobs/job-storage');
   const job = getJob(bundle.jobId);
-  return impl.runMarkDodClaudeVerification(bundle, job, projectName, fetched);
+  return impl.readMarkDodVerificationResult(verifyJobId, bundle, job, fetched);
 }
 
 async function applyAndFinalizeStep(

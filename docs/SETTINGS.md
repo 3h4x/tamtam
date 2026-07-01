@@ -174,6 +174,7 @@ All three are read live on each job (not cached), so changing them takes effect 
 | `review_fix_backoff_seconds` | number | `30` | Base delay, in seconds, before each review→fix iteration after the third completed review in the same release. The delay doubles on each additional round (30 → 60 → 120 → 240, capped at 300) so a slow-converging review loop does not burn tokens or CI at full speed. Set to `0` to disable the backoff entirely. |
 | `review_do_not_ship_action` | enum `pass` \| `fix` \| `abort` | `fix` | What to do when a code review returns **DO NOT SHIP**. `fix` (default) routes through the same fix loop NEEDS ATTENTION uses (subject to `fix_max_iterations`). `pass` files a follow-up GitHub issue with the findings and continues to commit → push → mark-dod so the partial work still ships. `abort` keeps the legacy behavior of stopping the release immediately. |
 | `release_wall_clock_timeout_minutes` | number | `60` | Overall wall-clock budget for an active Release run. Each release meta-job stores `release_deadline_at`; the 30s probe sweep aborts expired releases with reason `wall_clock_timeout`. Per-project `.tamtam/config.yml` can override this with `pipeline.release_timeout_minutes`. |
+| `mark_dod_verify_timeout_ms` | number | `600000` | Wall-clock cap for the mark-dod acceptance-criteria verification job (`mark-dod-verify`). Enforced by the shared job-timeout reaper (the same one that reaps `test`), so it survives a server restart — unlike the old inline 5-min `setTimeout` it replaces. A verify job past this cap is killed (`markDone(124)`); mark-dod stays non-gating and the unchecked criteria are re-verified on a later run. |
 
 ### Pipeline Model Tiers
 
@@ -453,7 +454,7 @@ base_prompt, default_model, permission_mode, commit_style,
 review_verdict_rules, jobs_paused,
 fix_max_iterations, release_min_lines, auto_pause_unfruitful_enabled,
 auto_pause_unfruitful_runs, auto_pause_unfruitful_rate, release_reinforce_max_iterations,
-release_wall_clock_timeout_minutes,
+release_wall_clock_timeout_minutes, mark_dod_verify_timeout_ms,
 legacy_completion_hook_release_after_run_enabled,
 legacy_completion_hook_release_after_fix_ci_enabled,
 legacy_completion_hook_auto_resume_enabled,

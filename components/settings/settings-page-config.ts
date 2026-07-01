@@ -50,6 +50,7 @@ export interface SettingsMap {
   review_fix_backoff_seconds: string
   review_do_not_ship_action: string
   release_wall_clock_timeout_minutes: string
+  mark_dod_verify_timeout_ms: string
   legacy_completion_hook_release_after_run_enabled: string
   legacy_completion_hook_release_after_fix_ci_enabled: string
   legacy_completion_hook_auto_resume_enabled: string

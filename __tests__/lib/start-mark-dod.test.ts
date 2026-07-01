@@ -129,12 +129,17 @@ const mocks = vi.hoisted(() => {
   const deleteJobMock = vi.fn();
   const ensureBranchForCtxMock = vi.fn();
   const checkCliStartGateMock = vi.fn();
+  // Finished `mark-dod-verify` job rows, keyed by id. The startJobInProcess mock
+  // populates this (with the exit code from getJobStatusMock); waitForJobCompletion
+  // and getJob read from it so readMarkDodVerificationResult sees a finished job.
+  const verifyStore = new Map<string, { id: string; logPath: string; exitCode: number; finishedAt: number }>();
   return {
     execMock, listJobsMock, createJobMock, markDoneMock, updateJobMock,
     findActiveReleaseJobMock, getJobMock, resolveProjectPathMock,
     appendFileSyncMock, existsSyncMock, mkdirSyncMock, readFileSyncMock,
     writeFileSyncMock, unlinkSyncMock, readParsedLogMock, startJobMock,
     getJobStatusMock, deleteJobMock, ensureBranchForCtxMock, checkCliStartGateMock,
+    verifyStore,
   };
 });
 
@@ -171,20 +176,27 @@ vi.mock('@/lib/jobs/storage', () => ({
 vi.mock('@/lib/pipeline/mark-dod-branch', () => ({
   ensureBranchForCtx: mocks.ensureBranchForCtxMock,
 }));
-// start-mark-dod now spawns Claude via runSubprocess (awaiting variant).
-// The mock simulates "exited with code N + log file already on disk" and
-// preserves the old startJob call shape (jobId, command, prompt, cwd) so
-// existing assertions on startJobMock.mock.calls keep working.
-vi.mock('@/lib/jobs/spawn-cli', () => ({
-  runSubprocess: vi.fn().mockImplementation(async (opts: { jobId: string; cmd: string; cmdArgs: string[]; promptPath: string; cwd?: string }) => {
-    const command = [opts.cmd, ...(opts.cmdArgs ?? [])].join(' ');
-    const writes = mocks.writeFileSyncMock.mock.calls;
-    const promptWrite = writes.find((c: unknown[]) => c[0] === opts.promptPath);
-    const prompt = (promptWrite?.[1] as string | undefined) ?? '';
-    const status = await mocks.getJobStatusMock();
-    await mocks.startJobMock(opts.jobId, command, prompt, opts.cwd);
-    return { exitCode: status?.exitCode ?? 0, signal: null, pid: 12345 };
-  }),
+// start-mark-dod now spawns the verify Claude via the shared supervised-job
+// path (startJobInProcess) and waits for it (waitForJobCompletion), rather than
+// the old inline runSubprocess. The mock records a finished verify job (exit
+// code from getJobStatusMock) into verifyStore and preserves the startJob call
+// shape (jobId, command, prompt, cwd) so existing assertions keep working.
+vi.mock('@/lib/jobs/spawn-claude-detached', () => ({
+  startJobInProcess: vi.fn().mockImplementation(
+    async (jobId: string, command: string, prompt: string, cwd: string) => {
+      const status = await mocks.getJobStatusMock();
+      await mocks.startJobMock(jobId, command, prompt, cwd);
+      mocks.verifyStore.set(jobId, { id: jobId, logPath: `/tmp/tamtam-logs/${jobId}.log`, exitCode: status?.exitCode ?? 0, finishedAt: 1 });
+      return 12345;
+    },
+  ),
+}));
+vi.mock('@/lib/workflows/wait-for-job', () => ({
+  waitForJobCompletion: vi.fn().mockImplementation(async (jobId: string) => ({
+    job: mocks.verifyStore.get(jobId) ?? null,
+    finished: true,
+    reason: 'finished',
+  })),
 }));
 vi.mock('fs', () => ({
   appendFileSync: mocks.appendFileSyncMock,
@@ -278,7 +290,10 @@ describe('startMarkDod', () => {
     }));
     markDoneMock.mockResolvedValue(undefined);
     findActiveReleaseJobMock.mockReturnValue(null);
-    getJobMock.mockReturnValue(null);
+    mocks.verifyStore.clear();
+    // getJob resolves the finished verify job from the store (for the read
+    // step); unknown ids return null as before.
+    getJobMock.mockImplementation((id: string) => mocks.verifyStore.get(id) ?? null);
     resolveProjectPathMock.mockReturnValue('/path/to/proj');
     existsSyncMock.mockReturnValue(true);
     readFileSyncMock.mockReturnValue(JSON.stringify({
@@ -538,7 +553,7 @@ describe('startMarkDod', () => {
       expect(r.changed).toBe(true);
       expect(r.verified).toBe(1);
     }
-    expect(readFileSyncMock).toHaveBeenCalledWith('/tmp/tamtam-logs/mark-dod-job-id-verify.log', 'utf-8');
+    expect(readFileSyncMock).toHaveBeenCalledWith('/tmp/tamtam-logs/mark-dod-verify-job-id.log', 'utf-8');
   });
 
   it('happy path: writes updated body to temp file for gh issue edit', async () => {
@@ -921,5 +936,22 @@ describe('startMarkDod', () => {
 
     expect(r.ok).toBe(true);
     expect(startJobMock).toHaveBeenCalled();
+  });
+
+  it('creates a supervised mark-dod-verify job parented to the mark-dod job', async () => {
+    execMock
+      .mockResolvedValueOnce(resp(0, ISSUE_JSON))
+      .mockResolvedValueOnce(resp(0, ''));
+
+    const r = await startMarkDod('myproj', undefined);
+
+    expect(r.ok).toBe(true);
+    const verifyCreate = createJobMock.mock.calls.find((c: unknown[]) => c[1] === 'mark-dod-verify');
+    expect(verifyCreate).toBeTruthy();
+    // parentJobId is positional arg #11 (index 10) — the mark-dod phase job.
+    expect(verifyCreate?.[10]).toBe('mark-dod-job-id');
+    // Spawned via the shared supervised-job path, not an inline subprocess.
+    const startCall = startJobMock.mock.calls.find((c: unknown[]) => c[0] === 'mark-dod-verify-job-id');
+    expect(startCall).toBeTruthy();
   });
 });

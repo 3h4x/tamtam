@@ -5,20 +5,27 @@ import { resolve } from 'path';
 const prepareMarkDodMock = vi.fn();
 const fetchAndExtractMarkDodCriteriaMock = vi.fn();
 const switchBranchForMarkDodVerificationMock = vi.fn();
-const runMarkDodClaudeVerificationMock = vi.fn();
+const startMarkDodVerificationMock = vi.fn();
+const readMarkDodVerificationResultMock = vi.fn();
 const applyAndFinalizeMarkDodMock = vi.fn();
 const getJobMock = vi.fn();
+const waitForJobCompletionMock = vi.fn();
 
 vi.mock('@/lib/workflows/phases/mark-dod-impl', () => ({
   prepareMarkDod: (...a: unknown[]) => prepareMarkDodMock(...a),
   fetchAndExtractMarkDodCriteria: (...a: unknown[]) => fetchAndExtractMarkDodCriteriaMock(...a),
   switchBranchForMarkDodVerification: (...a: unknown[]) => switchBranchForMarkDodVerificationMock(...a),
-  runMarkDodClaudeVerification: (...a: unknown[]) => runMarkDodClaudeVerificationMock(...a),
+  startMarkDodVerification: (...a: unknown[]) => startMarkDodVerificationMock(...a),
+  readMarkDodVerificationResult: (...a: unknown[]) => readMarkDodVerificationResultMock(...a),
   applyAndFinalizeMarkDod: (...a: unknown[]) => applyAndFinalizeMarkDodMock(...a),
 }));
 
 vi.mock('@/lib/jobs/job-storage', () => ({
   getJob: (...a: unknown[]) => getJobMock(...a),
+}));
+
+vi.mock('@/lib/workflows/wait-for-job', () => ({
+  waitForJobCompletion: (...a: unknown[]) => waitForJobCompletionMock(...a),
 }));
 
 import { releaseMarkDodPhaseWorkflow } from '@/lib/workflows/phases/mark-dod-phase';
@@ -37,8 +44,10 @@ describe('releaseMarkDodPhaseWorkflow', () => {
     prepareMarkDodMock.mockReset();
     fetchAndExtractMarkDodCriteriaMock.mockReset();
     switchBranchForMarkDodVerificationMock.mockReset();
-    runMarkDodClaudeVerificationMock.mockReset();
+    startMarkDodVerificationMock.mockReset();
+    readMarkDodVerificationResultMock.mockReset();
     applyAndFinalizeMarkDodMock.mockReset();
+    waitForJobCompletionMock.mockReset().mockResolvedValue({ finished: true, reason: 'finished' });
     getJobMock.mockReset().mockReturnValue(JOB);
   });
 
@@ -60,10 +69,10 @@ describe('releaseMarkDodPhaseWorkflow', () => {
     });
     const r = await releaseMarkDodPhaseWorkflow('test-tt');
     expect(r).toEqual({ ok: true, jobId: 'dod-job-1', issueNumber: 42, verified: 0, total: 0, changed: false });
-    expect(runMarkDodClaudeVerificationMock).not.toHaveBeenCalled();
+    expect(startMarkDodVerificationMock).not.toHaveBeenCalled();
   });
 
-  it('runs the full chain (prep → fetch → switch → verify → apply) on the happy path', async () => {
+  it('runs the full chain (prep → fetch → switch → dispatch → wait → read → apply) on the happy path', async () => {
     prepareMarkDodMock.mockResolvedValue({ bundle: BUNDLE, job: JOB });
     const fetched = {
       body: '- [ ] First',
@@ -74,8 +83,9 @@ describe('releaseMarkDodPhaseWorkflow', () => {
     fetchAndExtractMarkDodCriteriaMock.mockResolvedValue(fetched);
     const branchSwitch = { switched: true, targetBranch: 'feat', originalBranch: 'master' };
     switchBranchForMarkDodVerificationMock.mockResolvedValue(branchSwitch);
+    startMarkDodVerificationMock.mockResolvedValue({ verifyJobId: 'dod-job-1-verify' });
     const verify = { verifiedTexts: ['First'], rawOutput: '{}', exitCode: 0, timedOut: false };
-    runMarkDodClaudeVerificationMock.mockResolvedValue(verify);
+    readMarkDodVerificationResultMock.mockResolvedValue(verify);
     applyAndFinalizeMarkDodMock.mockResolvedValue({
       ok: true,
       jobId: 'dod-job-1',
@@ -90,12 +100,14 @@ describe('releaseMarkDodPhaseWorkflow', () => {
     expect(prepareMarkDodMock).toHaveBeenCalledWith('test-tt', undefined);
     expect(fetchAndExtractMarkDodCriteriaMock).toHaveBeenCalledWith(BUNDLE, JOB);
     expect(switchBranchForMarkDodVerificationMock).toHaveBeenCalledWith(BUNDLE, JOB);
-    expect(runMarkDodClaudeVerificationMock).toHaveBeenCalledWith(BUNDLE, JOB, 'test-tt', fetched);
+    expect(startMarkDodVerificationMock).toHaveBeenCalledWith(BUNDLE, JOB, 'test-tt', fetched);
+    expect(waitForJobCompletionMock).toHaveBeenCalledWith('dod-job-1-verify');
+    expect(readMarkDodVerificationResultMock).toHaveBeenCalledWith('dod-job-1-verify', BUNDLE, JOB, fetched);
     expect(applyAndFinalizeMarkDodMock).toHaveBeenCalledWith(BUNDLE, JOB, fetched, verify, branchSwitch);
     expect(r).toEqual({ ok: true, jobId: 'dod-job-1', issueNumber: 42, verified: 1, total: 1, changed: true });
   });
 
-  it('returns verify.terminal when Claude verification fails', async () => {
+  it('short-circuits on a dispatch terminal (prompt-cost blocked) without waiting/reading', async () => {
     prepareMarkDodMock.mockResolvedValue({ bundle: BUNDLE, job: JOB });
     fetchAndExtractMarkDodCriteriaMock.mockResolvedValue({
       body: '- [ ] First',
@@ -104,7 +116,29 @@ describe('releaseMarkDodPhaseWorkflow', () => {
       criteria: [{ text: 'First', raw: '- [ ] First' }],
     });
     switchBranchForMarkDodVerificationMock.mockResolvedValue({ switched: false, skipped: 'detached' });
-    runMarkDodClaudeVerificationMock.mockResolvedValue({
+    startMarkDodVerificationMock.mockResolvedValue({
+      terminal: { ok: false, status: 413, detail: 'prompt too large' },
+    });
+
+    const r = await releaseMarkDodPhaseWorkflow('test-tt');
+
+    expect(waitForJobCompletionMock).not.toHaveBeenCalled();
+    expect(readMarkDodVerificationResultMock).not.toHaveBeenCalled();
+    expect(applyAndFinalizeMarkDodMock).not.toHaveBeenCalled();
+    expect(r).toEqual({ ok: false, reason: 'mark_dod_failed', status: 413, detail: 'prompt too large' });
+  });
+
+  it('returns verify.terminal when the read step reports verification failure', async () => {
+    prepareMarkDodMock.mockResolvedValue({ bundle: BUNDLE, job: JOB });
+    fetchAndExtractMarkDodCriteriaMock.mockResolvedValue({
+      body: '- [ ] First',
+      title: 'Issue',
+      authorLogin: undefined,
+      criteria: [{ text: 'First', raw: '- [ ] First' }],
+    });
+    switchBranchForMarkDodVerificationMock.mockResolvedValue({ switched: false, skipped: 'detached' });
+    startMarkDodVerificationMock.mockResolvedValue({ verifyJobId: 'dod-job-1-verify' });
+    readMarkDodVerificationResultMock.mockResolvedValue({
       verifiedTexts: [],
       rawOutput: '',
       exitCode: 1,
@@ -127,7 +161,8 @@ describe('releaseMarkDodPhaseWorkflow', () => {
       criteria: [{ text: 'First', raw: '- [ ] First' }],
     });
     switchBranchForMarkDodVerificationMock.mockResolvedValue({ switched: false, skipped: 'detached' });
-    runMarkDodClaudeVerificationMock.mockResolvedValue({
+    startMarkDodVerificationMock.mockResolvedValue({ verifyJobId: 'dod-job-1-verify' });
+    readMarkDodVerificationResultMock.mockResolvedValue({
       verifiedTexts: ['First'],
       rawOutput: '{}',
       exitCode: 0,
@@ -157,7 +192,9 @@ describe('mark-dod-phase source guards', () => {
   it.each([
     'export async function releaseMarkDodPhaseWorkflow',
     'async function prepareAndFetchStep',
-    'async function claudeVerifyStep',
+    'async function dispatchVerifyStep',
+    'async function awaitVerifyStep',
+    'async function readVerifyResultStep',
     'async function applyAndFinalizeStep',
   ])("'%s' body has the right directive", (sig) => {
     const fnIndex = SRC.indexOf(sig);

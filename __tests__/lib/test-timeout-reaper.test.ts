@@ -2,12 +2,20 @@ import { spawn, type ChildProcess } from 'node:child_process';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 
 import type { JobData } from '@/lib/jobs/types';
+
+// The kind-agnostic reaper reads the mark-dod-verify cap from settings.
+vi.mock('@/lib/shared/config', () => ({
+  getSettings: () => ({ mark_dod_verify_timeout_ms: 600_000 }),
+}));
+
 import {
   TEST_JOB_TIMEOUT_MS,
   TEST_TIMEOUT_EXIT_CODE,
   findTimedOutTestJobs,
+  findTimedOutJobs,
   killJobProcessGroup,
   reapTimedOutTestJobs,
+  reapTimedOutClaudeJobs,
 } from '@/lib/jobs/test-timeout-reaper';
 
 // reapTimedOutTestJobs reads jobs and finalizes them through job-storage; stub
@@ -67,6 +75,29 @@ describe('findTimedOutTestJobs', () => {
   it('excludes jobs without a real pid (pid <= 0)', () => {
     const job = mkJob({ id: 'nopid', kind: 'test', pid: 0, startedAt: OVER, finishedAt: null });
     expect(findTimedOutTestJobs([job], NOW_MS)).toEqual([]);
+  });
+});
+
+describe('findTimedOutJobs (kind-agnostic)', () => {
+  it('reaps a mark-dod-verify job past its configured cap', () => {
+    const job = mkJob({ id: 'verify-old', kind: 'mark-dod-verify', pid: 4242, startedAt: OVER, finishedAt: null });
+    expect(findTimedOutJobs([job], NOW_MS).map((j) => j.id)).toEqual(['verify-old']);
+  });
+
+  it('excludes a mark-dod-verify job still within its cap', () => {
+    const job = mkJob({ id: 'verify-young', kind: 'mark-dod-verify', pid: 4242, startedAt: RECENT, finishedAt: null });
+    expect(findTimedOutJobs([job], NOW_MS)).toEqual([]);
+  });
+
+  it('excludes uncapped kinds (e.g. review) even when old', () => {
+    const job = mkJob({ id: 'rev', kind: 'review', pid: 4242, startedAt: OVER, finishedAt: null });
+    expect(findTimedOutJobs([job], NOW_MS)).toEqual([]);
+  });
+
+  it('picks up both a test and a mark-dod-verify job in one pass', () => {
+    const test = mkJob({ id: 't', kind: 'test', pid: 11, startedAt: OVER, finishedAt: null });
+    const verify = mkJob({ id: 'v', kind: 'mark-dod-verify', pid: 22, startedAt: OVER, finishedAt: null });
+    expect(findTimedOutJobs([test, verify], NOW_MS).map((j) => j.id).sort()).toEqual(['t', 'v']);
   });
 });
 
@@ -137,5 +168,17 @@ describe('reapTimedOutTestJobs (end-to-end)', () => {
       await new Promise((r) => setTimeout(r, 25));
     }
     expect(dead).toBe(true);
+  });
+
+  it('reaps a hung mark-dod-verify job through the generalized reaper', async () => {
+    const child = spawn('sleep', ['30'], { detached: true, stdio: 'ignore' });
+    spawned.push(child);
+    const job = mkJob({ id: 'verify-hung', kind: 'mark-dod-verify', pid: child.pid!, startedAt: OVER, finishedAt: null });
+    reapState.jobs = [job];
+
+    const reaped = await reapTimedOutClaudeJobs(NOW_MS);
+
+    expect(reaped.map((j) => j.id)).toEqual(['verify-hung']);
+    expect(reapState.done).toEqual([{ id: 'verify-hung', code: TEST_TIMEOUT_EXIT_CODE }]);
   });
 });

@@ -148,6 +148,7 @@ async function buildSettingsResponse(): Promise<Record<string, string>> {
   settings.release_reinforce_max_iterations = serializeSettingValue('release_reinforce_max_iterations', effective.release_reinforce_max_iterations);
   settings.review_do_not_ship_action = serializeSettingValue('review_do_not_ship_action', effective.review_do_not_ship_action);
   settings.release_wall_clock_timeout_minutes = serializeSettingValue('release_wall_clock_timeout_minutes', effective.release_wall_clock_timeout_minutes);
+  settings.mark_dod_verify_timeout_ms = serializeSettingValue('mark_dod_verify_timeout_ms', effective.mark_dod_verify_timeout_ms);
   settings.plain_test_phase_enabled = serializeSettingValue('plain_test_phase_enabled', effective.plain_test_phase_enabled);
   settings.browser_broker_image = serializeSettingValue('browser_broker_image', effective.browser_broker_image);
   if (effective.cli_bin_claude) {
@@ -210,6 +211,7 @@ const SETTING_KEYS = [
   'review_fix_backoff_seconds',
   'review_do_not_ship_action',
   'release_wall_clock_timeout_minutes',
+  'mark_dod_verify_timeout_ms',
   'legacy_completion_hook_release_after_run_enabled',
   'legacy_completion_hook_release_after_fix_ci_enabled',
   'legacy_completion_hook_auto_resume_enabled',
@@ -433,6 +435,9 @@ function validateAndSerializeSettingValue(
     return parseNonNegativeIntegerSetting(value, key);
   }
   if (key === 'release_wall_clock_timeout_minutes') {
+    return parsePositiveIntegerSetting(value, key);
+  }
+  if (key === 'mark_dod_verify_timeout_ms') {
     return parsePositiveIntegerSetting(value, key);
   }
 
