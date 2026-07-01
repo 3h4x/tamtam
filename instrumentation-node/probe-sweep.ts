@@ -72,16 +72,18 @@ export async function runProbeSweep(): Promise<void> {
   } catch (err) {
     console.error('[probe-sweep] release timeout sweep error:', err);
   }
-  // Reap test jobs that blew past the wall-clock cap. A forked Vitest worker
-  // can libuv-busy-loop forever (unclosed IPC fd), so `pnpm test` never exits
-  // and start-test's `proc.on('close')` never fires — and a restart orphans the
+  // Reap detached jobs (test + mark-dod-verify) that blew past their wall-clock
+  // cap. A forked Vitest worker can libuv-busy-loop forever (unclosed IPC fd),
+  // so `pnpm test` never exits and start-test's `proc.on('close')` never fires;
+  // a hung Claude verify never emits a result line. A restart orphans the
   // detached group to PID 1, where it burns a core indefinitely. Reading job
-  // rows (not an in-process timer) means this still fires after a restart.
+  // rows (not an in-process timer) means this still fires after a restart — the
+  // single, restart-safe liveness guard for all detached job kinds.
   try {
-    const { reapTimedOutTestJobs } = await import('@/lib/jobs/test-timeout-reaper');
-    await reapTimedOutTestJobs();
+    const { reapTimedOutClaudeJobs } = await import('@/lib/jobs/test-timeout-reaper');
+    await reapTimedOutClaudeJobs();
   } catch (err) {
-    console.error('[probe-sweep] test timeout reap error:', err);
+    console.error('[probe-sweep] job timeout reap error:', err);
   }
   try {
     const { runReleaseReconcileSweep } = await import('@/lib/jobs/release-reconcile');

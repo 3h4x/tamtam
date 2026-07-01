@@ -124,6 +124,7 @@ export interface TamTamConfig {
   skill_revision_retention_count?: number;
   db_backup_enabled: boolean;
   db_backup_interval_minutes: number;
+  mark_dod_verify_timeout_ms: number;
   notification_webhook_url: string;
   notification_webhook_secret: string;
   notification_on_release_success: boolean;
@@ -271,6 +272,7 @@ export const DEFAULTS: TamTamConfig = {
   skill_revision_retention_count: 50,
   db_backup_enabled: true,
   db_backup_interval_minutes: 15,
+  mark_dod_verify_timeout_ms: 600_000,
   notification_webhook_url: '',
   notification_webhook_secret: '',
   notification_on_release_success: false,
@@ -571,6 +573,7 @@ export function buildConfigFromSettingsMap(map: Record<string, string>): TamTamC
       ? DEFAULTS.db_backup_enabled
       : map.db_backup_enabled === 'true',
     db_backup_interval_minutes: parsePositiveIntOr(map.db_backup_interval_minutes, DEFAULTS.db_backup_interval_minutes),
+    mark_dod_verify_timeout_ms: parsePositiveIntOr(map.mark_dod_verify_timeout_ms, DEFAULTS.mark_dod_verify_timeout_ms),
     notification_webhook_url: map.notification_webhook_url ?? DEFAULTS.notification_webhook_url,
     notification_webhook_secret: map.notification_webhook_secret ?? DEFAULTS.notification_webhook_secret,
     notification_on_release_success: map.notification_on_release_success === 'true',

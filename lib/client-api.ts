@@ -52,6 +52,7 @@ export {
   mergePR,
   approvePR,
   reviewPR,
+  addressPrComments,
   fetchPersonas,
   runProject,
   isQueuedRunResult,

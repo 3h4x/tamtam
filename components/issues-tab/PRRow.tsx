@@ -2,7 +2,7 @@
 
 import { useState, useEffect } from 'react'
 import { useRouter } from 'next/navigation'
-import { mergePR, approvePR, reviewPR, runMarkDod } from '@/lib/client-api'
+import { mergePR, approvePR, reviewPR, runMarkDod, addressPrComments } from '@/lib/client-api'
 import type { GhPullRequest } from '@/lib/client-api'
 import { formatAgo } from '@/lib/shared/format'
 import { Labels, CheckIcon, GateBadge } from '@/components/issues-tab/shared'
@@ -47,6 +47,7 @@ export function PRRow({
   const [approving, setApproving] = useState(false)
   const [approved, setApproved] = useState(pr.reviewDecision === 'APPROVED')
   const [reviewing, setReviewing] = useState(false)
+  const [addressing, setAddressing] = useState(false)
   const [gates, setGates] = useState<PrGates | null>(null)
   const [dodRunning, setDodRunning] = useState(false)
   const [dodError, setDodError] = useState<string | null>(null)
@@ -147,6 +148,19 @@ export function PRRow({
       setMergeError(err instanceof Error ? err.message : 'Review failed')
     } finally {
       setReviewing(false)
+    }
+  }
+
+  const doAddressComments = async () => {
+    setAddressing(true)
+    setMergeError(null)
+    try {
+      const res = await addressPrComments(projectName, pr.number)
+      router.push(`/project/${encodeURIComponent(projectName)}/terminal?job=${encodeURIComponent(res.job_id)}`)
+    } catch (err) {
+      setMergeError(err instanceof Error ? err.message : 'Address review comments failed')
+    } finally {
+      setAddressing(false)
     }
   }
 
@@ -404,6 +418,26 @@ export function PRRow({
             >
               {reviewing && <Spinner size="sm" shrink />}
               Review
+            </Button>
+          )}
+          {!merged && (
+            <Button
+              type="button"
+              variant="secondary"
+              size="sm"
+              className="rounded-md text-[10px]"
+              onClick={doAddressComments}
+              disabled={addressing || jobsPaused || pr.reviewDecision !== 'CHANGES_REQUESTED'}
+              title={
+                pr.reviewDecision !== 'CHANGES_REQUESTED'
+                  ? 'No unresolved review comments (reviewer has not requested changes)'
+                  : jobsPaused
+                    ? 'Jobs are paused globally. Resume jobs to address review comments.'
+                    : 'Have Claude address the reviewer\'s comments, push a fix, and reply on each thread'
+              }
+            >
+              {addressing && <Spinner size="sm" shrink />}
+              Address comments
             </Button>
           )}
           <Button

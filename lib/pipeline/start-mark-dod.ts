@@ -16,7 +16,7 @@ import {
   prepareMarkDod,
   fetchAndExtractMarkDodCriteria,
   switchBranchForMarkDodVerification,
-  runMarkDodClaudeVerification,
+  runMarkDodVerificationSupervised,
   applyAndFinalizeMarkDod,
   type MarkDodResult,
 } from '@/lib/workflows/phases/mark-dod-impl';
@@ -45,7 +45,7 @@ export async function startMarkDod(
     if (fetched.terminal) return fetched.terminal;
 
     const branchSwitch = await switchBranchForMarkDodVerification(bundle, job);
-    const verify = await runMarkDodClaudeVerification(bundle, job, projectName, fetched);
+    const verify = await runMarkDodVerificationSupervised(bundle, job, projectName, fetched);
     if (verify.terminal) return verify.terminal;
 
     return await applyAndFinalizeMarkDod(bundle, job, fetched, verify, branchSwitch);

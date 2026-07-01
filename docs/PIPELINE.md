@@ -185,6 +185,40 @@ guard). Scheduled agents are already serialized here via `agent-cron`'s
 
 ---
 
+## Addressing human PR review comments (`respond-to-review`)
+
+The core pipeline only reasons about TamTam's own AI review verdict. When a
+human opens a PR on GitHub and leaves review comments, the **Address comments**
+button on the PR card (`/project/[name]/issues`) dispatches an out-of-band
+`pr-comment-fix` job so a human reviewer can drive the fix loop without copying
+comments into a terminal by hand.
+
+- **Trigger** — `POST /api/projects/by-project/[name]/address-pr-comments` with
+  `{ pr: <number> }`. The button is disabled unless the PR's `reviewDecision`
+  is `CHANGES_REQUESTED` (the available signal that unresolved feedback exists);
+  the server-side helper does the authoritative "any unresolved comment" check
+  and returns `400` when there is nothing to address.
+- **Fetch + group** — `lib/github/pr-comments.ts` fetches inline review comments
+  via `gh api repos/:owner/:repo/pulls/:n/comments` (carries `diff_hunk`) and
+  top-level review bodies via `gh pr view --json reviews`. Comments are grouped
+  by file and ordered by line so Claude gets the same spatial context the
+  reviewer had; reply comments (`in_reply_to_id`) are dropped so an already
+  answered thread is not re-addressed. External comment text is wrapped as
+  untrusted input.
+- **Fix + reply** — `lib/pipeline/start-pr-comment-fix.ts` spawns a Claude job
+  that edits the code, commits, pushes to the PR branch, and replies under each
+  thread referencing the fix commit SHA (or a short justification when it chose
+  not to change anything).
+- **Fix-loop cap** — counts against a `3 / 30 min` per-project cap (returns
+  `429` when exceeded) so a confused or hostile reviewer cannot burn unlimited
+  tokens. One address-run runs at a time per project (`409` otherwise).
+
+This step is **not** part of the automatic `test → … → soak` chain; it is
+operator/reviewer-triggered and lands its fix commit on the existing PR branch,
+which `pr-wait` (if running) then re-observes.
+
+---
+
 ## When to read this
 
 - Pipeline is stuck or not chaining to the next step
@@ -297,6 +331,21 @@ its job is to tick acceptance-criteria checkboxes after the push has already
 landed. If auto-merge is enabled and the push produced or reused a PR, TamTam
 still continues into `pr-wait` even when `mark-dod` exits nonzero.
 
+The `mark-dod` phase job is a thin self-finalizing wrapper (prepare → dispatch
+→ wait → apply). The Claude verification itself runs as a **separate supervised
+`mark-dod-verify` job** spawned through the shared detached-job path
+(`startJobInProcess`), exactly like `test`/`review` — the phase workflow
+`dispatch → waitForJobCompletion → read`s its result. There is **no bespoke
+per-phase kill-switch**: a hung verify is bounded by the shared wall-clock
+reaper (`lib/jobs/test-timeout-reaper.ts`, per-kind cap map), which reads job
+rows (not an in-process timer) so it survives a restart. The cap is
+`mark_dod_verify_timeout_ms` (default 600 000 ms). Verification is split into
+its own job so partial credit resumes across runs: `extractCriteria` returns
+only unchecked criteria and `tickCriteria` only flips `[ ]`→`[x]`, so a verify
+that is reaped (exit 124) or fails leaves the remaining boxes unticked for a
+later run to finish. The `mark-dod-verify` kind is deliberately absent from
+`PIPELINE_STEP_KINDS`, so it never gates the release.
+
 pr-wait
   ├─ CI passes + PR diff has no high-risk execution files
   │            → merge PR → switch to default branch
@@ -330,8 +379,10 @@ the merge.
 `pr-wait` is resumable across server restarts. The job row persists
 `{ prNumber, prRepo, prUrl }` in `contextMeta`; on boot, unfinished `pr-wait`
 rows are resumed against the existing job/log instead of being reaped like
-other abandoned inline jobs. `mark-dod` remains non-resumable and is still
-marked failed if a restart interrupts it.
+other abandoned inline jobs. The `mark-dod` phase wrapper is still non-resumable
+(a restart mid-phase marks it failed), but its `mark-dod-verify` sub-job is
+detached + unref'd, so the verification process itself survives a restart and is
+governed by the DB-age-based reaper rather than an in-process timer.
 
 When `pr-wait` observes failed PR checks, it stores the failed check URL in
 `gh_status.ci_failed_url` and dispatches `fix-ci` for the project before

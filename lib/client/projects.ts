@@ -251,6 +251,22 @@ export async function reviewPR(
   return response.json()
 }
 
+export async function addressPrComments(
+  projectName: string,
+  pr: number,
+): Promise<{ status: string; job_id: string; pid: number; log_path: string }> {
+  const response = await fetch(`${API_BASE}/by-project/${encodeURIComponent(projectName)}/address-pr-comments`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ pr }),
+  })
+  if (!response.ok) {
+    const data = await response.json().catch(() => ({}))
+    throw new Error((data as { detail?: string }).detail || `Address review comments failed: ${response.statusText}`)
+  }
+  return response.json()
+}
+
 export async function fetchPersonas(): Promise<{ personas: Persona[] }> {
   const response = await fetch(`${API_BASE}/personas`)
   if (!response.ok) {

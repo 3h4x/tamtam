@@ -23,6 +23,7 @@ describe('GET /settings', () => {
         release_reinforce_max_iterations: '3',
         review_do_not_ship_action: 'fix',
         release_wall_clock_timeout_minutes: '60',
+        mark_dod_verify_timeout_ms: '600000',
         plain_test_phase_enabled: 'false',
         browser_broker_image: 'mcr.microsoft.com/playwright/mcp:v0.0.30',
         provider_fallback_chain: '',

@@ -10,7 +10,7 @@
 // composes these same helpers in sequence, so its observable behavior is
 // unchanged.
 
-import { mkdirSync, readFileSync, writeFileSync } from 'fs';
+import { mkdirSync, readFileSync } from 'fs';
 import { join } from 'path';
 import { resolveProjectPath } from '@/lib/shared/project-data';
 import { getImproveConfig } from '@/lib/scheduling/scheduling';
@@ -22,13 +22,14 @@ import { readIssueBody, writeIssueBody } from '@/lib/github/edit-issue-body';
 import { getPermissionModeFlag, getPipelineModel, getSettings } from '@/lib/shared/config';
 import {
   createJob,
+  getJob,
   markDone,
   updateJob,
 } from '@/lib/jobs/job-storage';
+import { startJobInProcess } from '@/lib/jobs/spawn-claude-detached';
+import { waitForJobCompletion } from '@/lib/workflows/wait-for-job';
 import type { JobData } from '@/lib/jobs/types';
 import { wrapIfUntrusted, withUntrustedPreamble } from '@/lib/shared/untrusted';
-import { splitCommand } from '@/lib/shared/split-command';
-import { runSubprocess } from '@/lib/jobs/spawn-cli';
 import { appendRedactedFileSync } from '@/lib/jobs/redacted-log-writer';
 import { estimatePromptCost, promptEstimateResponseDetail } from '@/lib/jobs/prompt-size';
 import { ensureBranchForCtx, type EnsureBranchResult } from '@/lib/pipeline/mark-dod-branch';
@@ -74,6 +75,11 @@ export interface MarkDodClaudeVerifyResult {
   /** Set when verification failed irrecoverably (no usable output). */
   terminal?: MarkDodResult;
 }
+
+/** Result of dispatching the supervised `mark-dod-verify` job. */
+export type MarkDodVerifyDispatch =
+  | { verifyJobId: string }
+  | { terminal: MarkDodResult };
 
 function buildMarkDodContextMeta(
   ctx: { number: number; repo: string; title?: string },
@@ -280,13 +286,19 @@ export async function switchBranchForMarkDodVerification(
   return branchSwitch;
 }
 
-/** Spawn Claude to verify criteria against the codebase. The expensive cached step. */
-export async function runMarkDodClaudeVerification(
+/**
+ * Dispatch the supervised `mark-dod-verify` job: build the prompt, apply the
+ * prompt-cost gate, create the job row (child of the mark-dod phase job), and
+ * spawn Claude via the shared detached-job path (`startJobInProcess`) — the same
+ * mechanism test/review use. No inline kill-switch: the shared wall-clock reaper
+ * (`mark_dod_verify_timeout_ms`) bounds a hung verify and survives a restart.
+ */
+export async function startMarkDodVerification(
   bundle: MarkDodPrepBundle,
   job: JobData | null,
   projectName: string,
   fetched: MarkDodFetchBundle,
-): Promise<MarkDodClaudeVerifyResult> {
+): Promise<MarkDodVerifyDispatch> {
   const { jobId, projPath, ctx, isPr } = bundle;
 
   appendLog(job, `# asking claude to verify each criterion against the codebase...\n`);
@@ -332,8 +344,6 @@ JSON schema:
   ]
 }`;
 
-  const claudeJobId = `${jobId}-verify`;
-  const claudeLogPath = join(/*turbopackIgnore: true*/ logDir, `${claudeJobId}.log`);
   const basePreamble =
     'You verify whether acceptance criteria are implemented in a codebase. Use tools to inspect real code. Output strict JSON only.';
   const fullPrompt = withUntrustedPreamble(`${basePreamble}\n\n---\n\n${prompt}`);
@@ -346,62 +356,82 @@ JSON schema:
       job.promptBytes = promptEstimate.bytes;
       await markDone(job, 1);
     }
-    return {
-      verifiedTexts: [],
-      rawOutput: detail,
-      exitCode: 1,
-      timedOut: false,
-      terminal: { ok: false, status: 413, detail },
-    };
-  }
-  if (job) {
-    job.promptBytes = promptEstimate.bytes;
-    updateJob(job);
+    return { terminal: { ok: false, status: 413, detail } };
   }
   const claudeCommand = `${claudeBin} --print ${getPermissionModeFlag()} --model ${dodModel} --allowed-tools Read,Grep,Glob`;
 
-  let rawOutput = '';
-  let exitCode = 1;
-  let timedOut = false;
-  try {
-    const claudePromptPath = join(/*turbopackIgnore: true*/ logDir, `${claudeJobId}.prompt`);
-    writeFileSync(/*turbopackIgnore: true*/ claudePromptPath, fullPrompt);
-    const argv = splitCommand(claudeCommand);
-    if (argv.length === 0) throw new Error(`empty claude command for ${claudeJobId}`);
-    const [bin, ...args] = argv;
+  // Supervised verify job — child of the mark-dod phase job (inherits release
+  // scope for trace grouping). Deliberately absent from PIPELINE_STEP_KINDS so
+  // it never gates the release; the shared wall-clock reaper bounds its runtime.
+  const verify = createJob(
+    projectName,
+    'mark-dod-verify',
+    0,
+    '',
+    undefined,
+    undefined,
+    undefined,
+    null,
+    null,
+    null,
+    job?.id ?? null,
+    provider,
+  );
+  verify.logPath = join(/*turbopackIgnore: true*/ logDir, `${verify.id}.log`);
+  verify.model = dodModel;
+  verify.promptBytes = promptEstimate.bytes;
+  updateJob(verify);
 
-    const ac = new AbortController();
-    const timer = setTimeout(() => {
-      timedOut = true;
-      ac.abort();
-    }, 300_000);
-    try {
-      const result = await runSubprocess({
-        jobId: claudeJobId,
-        cmd: bin,
-        cmdArgs: args,
-        promptPath: claudePromptPath,
-        logPath: claudeLogPath,
-        env: cliEnv,
-        cwd: projPath,
-        abortSignal: ac.signal,
-      });
-      exitCode = result.exitCode;
-    } finally {
-      clearTimeout(timer);
+  try {
+    const pid = await startJobInProcess(verify.id, claudeCommand, fullPrompt, projPath, { env: cliEnv });
+    verify.pid = pid;
+    updateJob(verify);
+  } catch (e) {
+    appendLog(job, `# failed to start claude verification: ${e instanceof Error ? e.message : String(e)}\n`);
+    await markDone(verify, -1);
+    if (job) {
+      job.contextMeta = buildMarkDodContextMeta({ ...ctx, title: fetched.title }, isPr, 0, fetched.criteria.length);
+      updateJob(job);
+      await markDone(job, 1);
     }
+    return {
+      terminal: { ok: true, jobId, issueNumber: ctx.number, verified: 0, total: fetched.criteria.length, changed: false },
+    };
+  }
+
+  appendLog(job, `# dispatched verify job ${verify.id}\n`);
+  return { verifyJobId: verify.id };
+}
+
+/**
+ * Read a finished `mark-dod-verify` job's log and parse the verification JSON.
+ * The exit code + timeout come from the supervised job row (124 = reaped by the
+ * shared wall-clock reaper). Failures return a non-gating terminal (0 verified);
+ * the unchecked criteria are re-verified on a later run (idempotent resume).
+ */
+export async function readMarkDodVerificationResult(
+  verifyJobId: string,
+  bundle: MarkDodPrepBundle,
+  job: JobData | null,
+  fetched: MarkDodFetchBundle,
+): Promise<MarkDodClaudeVerifyResult> {
+  const { jobId, ctx, isPr } = bundle;
+  const vjob = getJob(verifyJobId);
+  const exitCode = vjob?.exitCode ?? 1;
+  const timedOut = vjob?.exitCode === 124 || vjob?.finishedAt == null;
+
+  let rawOutput = '';
+  if (vjob?.logPath) {
     try {
-      rawOutput = readFileSync(/*turbopackIgnore: true*/ claudeLogPath, 'utf-8');
+      rawOutput = readFileSync(/*turbopackIgnore: true*/ vjob.logPath, 'utf-8');
     } catch (e) {
       if (!(e instanceof Error && 'code' in e && e.code === 'ENOENT')) throw e;
     }
-  } catch (e) {
-    appendLog(job, `# failed to start claude verification: ${e instanceof Error ? e.message : String(e)}\n`);
   }
 
   const stripped = rawOutput
     .split('\n')
-    .filter((l) => !l.match(/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}: \[tamtam\]/))
+    .filter((l) => !l.match(/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}: \[tamtam\]/) && !l.startsWith('[tamtam]'))
     .join('\n')
     .trim();
 
@@ -495,6 +525,27 @@ JSON schema:
   appendLog(job, `# summary: ${verifiedTexts.length} / ${fetched.criteria.length} verified\n`);
 
   return { verifiedTexts, rawOutput, exitCode, timedOut };
+}
+
+/**
+ * Blocking composite: dispatch the supervised verify job, wait for it, read the
+ * result. Used by the legacy inline entry point (`startMarkDod`) so pr-wait's
+ * post-merge call and the IssuesTab DoD badge keep working without becoming
+ * workflow-aware. The phase workflow instead splits these across `'use step'`s
+ * so a replay reuses the cached verify job id.
+ */
+export async function runMarkDodVerificationSupervised(
+  bundle: MarkDodPrepBundle,
+  job: JobData | null,
+  projectName: string,
+  fetched: MarkDodFetchBundle,
+): Promise<MarkDodClaudeVerifyResult> {
+  const dispatch = await startMarkDodVerification(bundle, job, projectName, fetched);
+  if ('terminal' in dispatch) {
+    return { verifiedTexts: [], rawOutput: '', exitCode: 1, timedOut: false, terminal: dispatch.terminal };
+  }
+  await waitForJobCompletion(dispatch.verifyJobId);
+  return readMarkDodVerificationResult(dispatch.verifyJobId, bundle, job, fetched);
 }
 
 /** Apply the verified ticks via gh edit + restore branch + finalize. */

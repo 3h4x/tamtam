@@ -242,6 +242,34 @@ describe('PATCH /settings validation', () => {
     });
 
 
+    it('rejects a non-positive-integer mark_dod_verify_timeout_ms', async () => {
+      const request = new NextRequest('http://localhost/api/settings', {
+        method: 'PATCH',
+        body: JSON.stringify({ mark_dod_verify_timeout_ms: 'soon' }),
+      });
+      const response = await ctx.PATCH(request);
+
+      expect(response.status).toBe(400);
+      await expect(response.json()).resolves.toMatchObject({
+        detail: expect.stringContaining('mark_dod_verify_timeout_ms must be a positive integer'),
+      });
+      expect(await ctx.sharedHandle.db.select().from(schema.settings)).toEqual([]);
+    });
+
+
+    it('persists a valid mark_dod_verify_timeout_ms', async () => {
+      const request = new NextRequest('http://localhost/api/settings', {
+        method: 'PATCH',
+        body: JSON.stringify({ mark_dod_verify_timeout_ms: '300000' }),
+      });
+      const response = await ctx.PATCH(request);
+
+      expect(response.status).toBe(200);
+      const rows = await ctx.sharedHandle.db.select().from(schema.settings);
+      expect(rows.find((r) => r.key === 'mark_dod_verify_timeout_ms')?.value).toBe('300000');
+    });
+
+
     it('rejects agent_templates with invalid model values', async () => {
       const templates = [
         { name: 'security-review', description: 'Scans for OWASP issues', model: 'smart --resume injected', schedule: '24h', prompt: 'Review the diff for security issues.' },

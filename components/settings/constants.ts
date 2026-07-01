@@ -24,6 +24,7 @@ export type SettingsFieldKey =
   | 'review_fix_backoff_seconds'
   | 'review_do_not_ship_action'
   | 'release_wall_clock_timeout_minutes'
+  | 'mark_dod_verify_timeout_ms'
   | 'legacy_completion_hook_release_after_run_enabled'
   | 'legacy_completion_hook_release_after_fix_ci_enabled'
   | 'legacy_completion_hook_auto_resume_enabled'
@@ -462,6 +463,14 @@ export const FIELDS: Record<SettingsFieldKey, FieldDef> = {
     subsection: 'release_ops',
     span: 1,
   },
+  mark_dod_verify_timeout_ms: {
+    label: 'Mark-DoD Verify Timeout (ms)',
+    help: 'Wall-clock cap for the mark-dod acceptance-criteria verification job (mark-dod-verify), enforced by the shared job-timeout reaper so it survives a restart. A verify past this cap is killed; mark-dod stays non-gating and the unchecked criteria are re-verified on a later run. Default 600000 (10 min).',
+    group: 'pipeline',
+    subsection: 'release_ops',
+    advanced: true,
+    span: 1,
+  },
   release_min_lines: {
     label: 'Release Min Lines Changed',
     help: 'Minimum cumulative working-tree lines changed (added + removed) before an auto-triggered release fires. 0 (default) disables the gate. When set, a sub-threshold agent run is reinforced — the same agent is re-dispatched to do more — instead of running the pipeline on a trivial diff. Only applies to the auto-release path (Release After Run) for working-tree-dirty agent runs.',
@@ -705,6 +714,7 @@ export const DEFAULTS: Record<SettingsFieldKey, string> = {
   review_fix_backoff_seconds: '30',
   review_do_not_ship_action: 'fix',
   release_wall_clock_timeout_minutes: '60',
+  mark_dod_verify_timeout_ms: '600000',
   legacy_completion_hook_release_after_run_enabled: 'true',
   legacy_completion_hook_release_after_fix_ci_enabled: 'true',
   legacy_completion_hook_auto_resume_enabled: 'true',

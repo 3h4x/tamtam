@@ -64,6 +64,7 @@ function makeSettings(overrides: Partial<TamTamConfig> = {}): TamTamConfig {
     backup_retention_weekly_count: 8,
     db_backup_enabled: true,
     db_backup_interval_minutes: 15,
+    mark_dod_verify_timeout_ms: 600_000,
     notification_webhook_url: '',
     notification_webhook_secret: '',
     notification_on_release_success: false,
