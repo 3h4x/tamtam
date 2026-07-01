@@ -186,7 +186,7 @@ API routes are covered by vitest tests in `__tests__/api/`, often with combined 
 
 ## Routes
 
-- Main surfaces: `/`, `/agents`, `/agent`, `/library`, `/monitoring`, `/recommendations`, `/stats`, `/workflow-runs`, `/logs`, `/settings/[tab]`
+- Main surfaces: `/`, `/agents`, `/agent`, `/inbox`, `/runs`, `/library`, `/monitoring`, `/recommendations`, `/stats`, `/workflow-runs`, `/logs`, `/login`, `/settings/[tab]`
 - Legacy redirects: `/pipeline` → `/stats?tab=pipeline`, `/skills` → `/library?tab=skills`, `/initiatives` → `/recommendations?tab=initiatives`, `/settings` → `/settings/general`
 - Hub deep links: `/recommendations?tab=initiatives`, `/recommendations?tab=history`, `/stats?tab=pipeline`
 - Project detail tabs: `/project/[name]` and `/project/[name]/[tab]` (`overview`, `config`, `history`, `terminal`, `changes`, `issues`, `docs`, `agents`)
