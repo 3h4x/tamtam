@@ -22,10 +22,25 @@ vi.mock('@/lib/jobs/job-storage', () => ({
   PIPELINE_STEP_KINDS: new Set(['test', 'review', 'fix', 'commit', 'push', 'mark-dod']),
 }));
 
+const finalizeReleaseJobMock = vi.fn(async (job: import('@/lib/jobs/types').JobData, exit: number) => {
+  job.finishedAt = 1;
+  job.exitCode = exit;
+});
+vi.mock('@/lib/jobs/lifecycle', () => ({
+  finalizeReleaseJob: (...args: [import('@/lib/jobs/types').JobData, number]) => finalizeReleaseJobMock(...args),
+}));
+
+vi.mock('@/lib/jobs/redacted-log-writer', () => ({
+  appendRedactedFileSync: vi.fn(),
+}));
+
 import {
   MAX_RECONCILE_ATTEMPTS,
   RECONCILE_REARM_COOLDOWN_MS,
+  CHILDLESS_RELEASE_QUIET_MS,
   findStalledReleases,
+  findChildlessStalledReleases,
+  reapChildlessStalledRelease,
   reconcileStalledRelease,
   runReleaseReconcileSweep,
   _resetReconcileAttemptsForTest,
@@ -275,5 +290,139 @@ describe('runReleaseReconcileSweep', () => {
     expect(out).toEqual([]);
     expect(startMock).not.toHaveBeenCalled();
     expect(_getReconcileAttemptForTest('rel-a')).toBe(0);
+  });
+});
+
+const CHILDLESS_QUIET = CHILDLESS_RELEASE_QUIET_MS + 1_000;
+
+describe('findChildlessStalledReleases', () => {
+  beforeEach(() => {
+    jobs.length = 0;
+  });
+
+  it('flags a running release that never started any phase past the quiet period', () => {
+    jobs.push(
+      makeJob({
+        id: 'rel',
+        kind: 'release',
+        releaseId: 'rel',
+        startedAt: (NOW - CHILDLESS_QUIET) / 1000,
+        finishedAt: null,
+      }),
+    );
+    const found = findChildlessStalledReleases(NOW);
+    expect(found).toHaveLength(1);
+    expect(found[0].release.id).toBe('rel');
+    expect(found[0].idleMs).toBeGreaterThanOrEqual(CHILDLESS_RELEASE_QUIET_MS);
+  });
+
+  it('does NOT flag a childless release still inside the quiet period', () => {
+    jobs.push(
+      makeJob({
+        id: 'rel',
+        kind: 'release',
+        releaseId: 'rel',
+        startedAt: (NOW - 30_000) / 1000,
+        finishedAt: null,
+      }),
+    );
+    expect(findChildlessStalledReleases(NOW)).toHaveLength(0);
+  });
+
+  it('does NOT flag a release that has any pipeline-step child', () => {
+    jobs.push(
+      makeJob({
+        id: 'rel',
+        kind: 'release',
+        releaseId: 'rel',
+        startedAt: (NOW - CHILDLESS_QUIET) / 1000,
+        finishedAt: null,
+      }),
+      makeJob({ id: 'test-1', kind: 'test', releaseId: 'rel', finishedAt: null }),
+    );
+    expect(findChildlessStalledReleases(NOW)).toHaveLength(0);
+  });
+
+  it('does NOT flag a finished release (e.g. a blocked/queued release row)', () => {
+    jobs.push(
+      makeJob({
+        id: 'rel',
+        kind: 'release',
+        releaseId: 'rel',
+        startedAt: (NOW - CHILDLESS_QUIET) / 1000,
+        finishedAt: (NOW - CHILDLESS_QUIET) / 1000,
+        exitCode: -3,
+      }),
+    );
+    expect(findChildlessStalledReleases(NOW)).toHaveLength(0);
+  });
+});
+
+describe('reapChildlessStalledRelease', () => {
+  beforeEach(() => {
+    jobs.length = 0;
+    finalizeReleaseJobMock.mockClear();
+  });
+
+  it('finalizes the zombie with exit 1 and stamps a stop reason', async () => {
+    const release = makeJob({
+      id: 'rel',
+      kind: 'release',
+      releaseId: 'rel',
+      startedAt: (NOW - CHILDLESS_QUIET) / 1000,
+      finishedAt: null,
+    });
+    const out = await reapChildlessStalledRelease({ release, idleMs: CHILDLESS_QUIET });
+    expect(out.status).toBe('finalized');
+    expect(finalizeReleaseJobMock).toHaveBeenCalledWith(release, 1);
+    const meta = JSON.parse(release.contextMeta as string);
+    expect(meta.releaseStopReason).toMatch(/no pipeline phase started/);
+  });
+
+  it('reports finalize_failed when finalization throws', async () => {
+    finalizeReleaseJobMock.mockRejectedValueOnce(new Error('db down'));
+    const release = makeJob({ id: 'rel', kind: 'release', releaseId: 'rel', finishedAt: null });
+    const out = await reapChildlessStalledRelease({ release, idleMs: CHILDLESS_QUIET });
+    expect(out.status).toBe('finalize_failed');
+    expect(out.error).toContain('db down');
+  });
+});
+
+describe('runReleaseReconcileSweep — childless zombie reap', () => {
+  beforeEach(() => {
+    jobs.length = 0;
+    _resetReconcileAttemptsForTest();
+    finalizeReleaseJobMock.mockClear();
+    startMock.mockReset().mockResolvedValue({ runId: 'wrun_recover' });
+  });
+
+  it('finalizes a childless zombie release during the sweep', async () => {
+    jobs.push(
+      makeJob({
+        id: 'rel',
+        kind: 'release',
+        releaseId: 'rel',
+        startedAt: (NOW - CHILDLESS_QUIET) / 1000,
+        finishedAt: null,
+      }),
+    );
+    await runReleaseReconcileSweep(NOW);
+    expect(finalizeReleaseJobMock).toHaveBeenCalledWith(expect.objectContaining({ id: 'rel' }), 1);
+  });
+
+  it('reaps the childless zombie even when jobs are paused', async () => {
+    jobs.push(
+      makeJob({
+        id: 'rel',
+        kind: 'release',
+        releaseId: 'rel',
+        startedAt: (NOW - CHILDLESS_QUIET) / 1000,
+        finishedAt: null,
+      }),
+    );
+    jobsPausedMock.mockReturnValueOnce(true);
+    const out = await runReleaseReconcileSweep(NOW);
+    expect(out).toEqual([]);
+    expect(finalizeReleaseJobMock).toHaveBeenCalledWith(expect.objectContaining({ id: 'rel' }), 1);
   });
 });

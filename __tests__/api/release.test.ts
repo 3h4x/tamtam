@@ -93,13 +93,13 @@ describe('POST /api/projects/by-project/{projectName}/release', () => {
   it('passes projectName through to startRelease', async () => {
     startReleaseMock.mockResolvedValue({ ok: true, step: 'push', message: 'No changes to push' });
     await POST(req('my-proj'), { params: Promise.resolve({ projectName: 'my-proj' }) });
-    expect(startReleaseMock).toHaveBeenCalledWith('my-proj', { queueIfBlocked: false, sourceJobId: undefined });
+    expect(startReleaseMock).toHaveBeenCalledWith('my-proj', { queueIfBlocked: false, sourceJobId: undefined, operatorInitiated: true });
   });
 
   it('passes source_job_id through to startRelease', async () => {
     startReleaseMock.mockResolvedValue({ ok: true, step: 'review', jobId: 'r1', message: 'Running review' });
     await POST(req('proj1', { source_job_id: 'job-123' }), { params: Promise.resolve({ projectName: 'proj1' }) });
-    expect(startReleaseMock).toHaveBeenCalledWith('proj1', { queueIfBlocked: false, sourceJobId: 'job-123' });
+    expect(startReleaseMock).toHaveBeenCalledWith('proj1', { queueIfBlocked: false, sourceJobId: 'job-123', operatorInitiated: true });
   });
 
   it('queues instead of failing when queue_if_blocked is true', async () => {
@@ -110,7 +110,7 @@ describe('POST /api/projects/by-project/{projectName}/release', () => {
       blockingJobId: 'blocker-job-42',
     });
     const res = await POST(req('proj1', { queue_if_blocked: true }), { params: Promise.resolve({ projectName: 'proj1' }) });
-    expect(startReleaseMock).toHaveBeenCalledWith('proj1', { queueIfBlocked: true, sourceJobId: undefined });
+    expect(startReleaseMock).toHaveBeenCalledWith('proj1', { queueIfBlocked: true, sourceJobId: undefined, operatorInitiated: true });
     expect(res.status).toBe(202);
     const data = await res.json();
     expect(data).toEqual({

@@ -17,6 +17,7 @@
 // guards run from job state, so re-running is safe.
 
 import { listJobs, PIPELINE_STEP_KINDS } from '@/lib/jobs/job-storage';
+import { appendRedactedFileSync } from '@/lib/jobs/redacted-log-writer';
 import type { JobData } from '@/lib/jobs/types';
 
 // How long the latest terminal child must have been idle before we
@@ -102,6 +103,91 @@ export function findStalledReleases(now: number = Date.now()): StalledRelease[] 
   return stalled;
 }
 
+// A release that acquired the pipeline lock but never started a single phase.
+// This happens when the first phase's start helper refuses synchronously and
+// `start-release` misclassifies the refusal as a transient "another driver
+// already started this phase" 409, bowing out without finalizing — e.g. the
+// PR-branch-execution gate refuses `test`/`review` on a non-default branch
+// with an unverifiable dirty tree (the issue-cruncher's normal output). The
+// release row then sits `running`, holds the lock, and blocks every cron until
+// the 60-minute wall-clock reaper. `selfHealStaleLock` can't help: the holder
+// is alive and unfinished. We detect the zombie by the total absence of any
+// pipeline-step child after a quiet period measured from the release's own
+// start, then finalize it (which releases the lock via `finalizeReleaseJob`).
+//
+// Quiet period is generous: the first phase is dispatched synchronously inside
+// `startRelease` (a child row appears within milliseconds of the release row),
+// so a healthy release is never childless this long. Queued releases never
+// create a row and blocked releases are finalized on creation, so neither can
+// be mistaken for a zombie here.
+export const CHILDLESS_RELEASE_QUIET_MS = 120 * 1000;
+
+export interface ChildlessStalledRelease {
+  release: JobData;
+  idleMs: number;
+}
+
+/** Snapshot of `running` releases that hold the pipeline lock but never
+ *  started any phase. Used by the reconcile sweep and exposed for unit tests. */
+export function findChildlessStalledReleases(now: number = Date.now()): ChildlessStalledRelease[] {
+  const jobs = listJobs();
+  const releases: JobData[] = [];
+  const releaseHasChild = new Set<string>();
+  for (const j of jobs) {
+    if (j.kind === 'release' && j.finishedAt === null) {
+      releases.push(j);
+      continue;
+    }
+    if (j.releaseId && PIPELINE_STEP_KINDS.has(j.kind)) releaseHasChild.add(j.releaseId);
+  }
+  const out: ChildlessStalledRelease[] = [];
+  for (const release of releases) {
+    if (releaseHasChild.has(release.id)) continue;
+    const idleMs = now - release.startedAt * 1000;
+    if (idleMs < CHILDLESS_RELEASE_QUIET_MS) continue;
+    out.push({ release, idleMs });
+  }
+  return out;
+}
+
+export interface ChildlessReapOutcome {
+  releaseId: string;
+  status: 'finalized' | 'finalize_failed';
+  idleMs: number;
+  error?: string;
+}
+
+/** Finalize a childless zombie release: records why on the row, marks it done
+ *  (exit 1), and releases the pipeline lock. Idempotent — `finalizeReleaseJob`
+ *  no-ops once `finishedAt` is set. */
+export async function reapChildlessStalledRelease(
+  stalled: ChildlessStalledRelease,
+): Promise<ChildlessReapOutcome> {
+  const { release, idleMs } = stalled;
+  const reason = `release stalled: no pipeline phase started within ${Math.round(idleMs / 1000)}s — finalizing and releasing the lock`;
+  try {
+    try {
+      const meta = release.contextMeta ? JSON.parse(release.contextMeta) : {};
+      const merged = (meta && typeof meta === 'object' && !Array.isArray(meta)) ? meta as Record<string, unknown> : {};
+      merged.releaseStopReason = reason;
+      release.contextMeta = JSON.stringify(merged);
+    } catch { /* best-effort — finalize regardless */ }
+    if (release.logPath) {
+      try { appendRedactedFileSync(release.logPath, `\n# ${reason}\n`); } catch {}
+    }
+    const { finalizeReleaseJob } = await import('@/lib/jobs/lifecycle');
+    await finalizeReleaseJob(release, 1);
+    console.log(
+      `[release-reconcile] finalized childless stalled release ${release.id} (idle ${Math.round(idleMs / 1000)}s) — lock released`,
+    );
+    return { releaseId: release.id, status: 'finalized', idleMs };
+  } catch (err) {
+    const error = err instanceof Error ? err.message : String(err);
+    console.warn(`[release-reconcile] finalize failed for childless release ${release.id}:`, error);
+    return { releaseId: release.id, status: 'finalize_failed', idleMs, error };
+  }
+}
+
 export interface ReconcileOutcome {
   releaseId: string;
   childId: string;
@@ -161,6 +247,13 @@ export async function reconcileStalledRelease(
 export async function runReleaseReconcileSweep(
   now: number = Date.now(),
 ): Promise<ReconcileOutcome[]> {
+  // Reap childless zombie releases FIRST and unconditionally — finalizing one
+  // releases the lock without starting any work, so it is safe under a global
+  // pause and actively unblocks the rebuild drain (which waits for in-flight
+  // pipeline jobs and would otherwise hang on the stuck `running` release).
+  for (const childless of findChildlessStalledReleases(now)) {
+    await reapChildlessStalledRelease(childless);
+  }
   try {
     const { isJobsPaused } = await import('@/lib/shared/job-control');
     if (isJobsPaused()) return [];

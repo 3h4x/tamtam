@@ -12,6 +12,11 @@ export async function POST(
   const opts = {
     queueIfBlocked: body.queue_if_blocked === true,
     sourceJobId: typeof body.source_job_id === 'string' ? body.source_job_id : undefined,
+    // An explicit POST to this route is an operator-initiated release (the UI
+    // Release button). Trust the operator's own uncommitted working tree the
+    // same way an agent-triggered release does — committed commits are still
+    // author-verified by the PR-branch gate.
+    operatorInitiated: true,
   };
   // Every release routes through the Vercel Workflow scaffold. The workflow
   // body delegates to startRelease for pre-flight + first-step kickoff,

@@ -85,6 +85,19 @@ export function releasePipelineStartSlot(
   startingSteps.delete(keyFor(releaseId, kind));
 }
 
+/** True when any phase start-slot is currently held for this release — i.e.
+ *  another driver has claimed a phase start (and will create its child job).
+ *  Lets a caller tell a concurrency 409 (slot held by another driver) from a
+ *  permanent-refusal 409 (e.g. an execution gate), which holds no slot. */
+export function hasHeldStartSlotForRelease(releaseId: string | null | undefined): boolean {
+  if (!releaseId) return false;
+  const prefix = `${releaseId}:`;
+  for (const key of startingSteps.keys()) {
+    if (key.startsWith(prefix)) return true;
+  }
+  return false;
+}
+
 /** Test/diagnostic helper — clears all held slots. */
 export function _resetPipelineStartSlots(): void {
   startingSteps.clear();

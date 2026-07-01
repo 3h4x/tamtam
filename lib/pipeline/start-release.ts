@@ -6,7 +6,7 @@ import { startProjectTest, detectTestCommand } from './start-test';
 import { startProjectReview } from './start-review';
 import { startProjectPush } from './start-push';
 import { startProjectCommit } from './start-commit';
-import { listJobs, probeJobStatus, createJob, updateJob, getJob, runWithParent } from '@/lib/jobs/job-storage';
+import { listJobs, probeJobStatus, createJob, updateJob, getJob, runWithParent, PIPELINE_STEP_KINDS } from '@/lib/jobs/job-storage';
 import { exec } from '@/lib/shared/shell';
 import { getImproveConfig, getProjectTestConfig } from '@/lib/scheduling/scheduling';
 import { acquireLock, releaseLock, reassignLock } from './pipeline-lock';
@@ -16,6 +16,7 @@ import { getReleaseReadinessFailure } from '@/lib/shared/readiness';
 import { hasFreshLgtm, hasLocalCommitsAhead } from './release-state';
 import { statusHasAnyPath, statusHasOnlyCommittedTamtamMetadataPaths } from '@/lib/pipeline/review-scope';
 import { findBlockingRunningJob } from '@/lib/jobs/project-active-job';
+import { isAgentJobKind } from '@/lib/jobs/kinds';
 import type { IssueContext } from './release-context';
 import type { JobData } from '@/lib/jobs/types';
 import { appendRedactedFileSync } from '@/lib/jobs/redacted-log-writer';
@@ -74,6 +75,13 @@ export type ReleaseResult =
 export interface StartReleaseOptions {
   queueIfBlocked?: boolean;
   sourceJobId?: string;
+  // Set by an explicit operator-initiated release (the UI Release button). Like
+  // an agent-triggered release, the operator's own uncommitted working tree is
+  // trusted — clicking Release authorizes running the pipeline on it. This only
+  // relaxes the uncommitted-changes refusal in the PR-branch gate; every
+  // *committed* branch commit is still verified against safe_users, so a clean
+  // checkout of an untrusted external PR is unaffected.
+  operatorInitiated?: boolean;
 }
 
 async function resolveReleaseIssueContext(
@@ -113,6 +121,7 @@ async function createReleaseJob(
   projectPath: string,
   parentJobId?: string | null,
   issueContext?: IssueContext | null,
+  trustedLocalChanges?: boolean,
 ): Promise<{ id: string; releaseId: string; logPath: string } | null> {
   try {
     const { logDir } = getImproveConfig();
@@ -122,6 +131,13 @@ async function createReleaseJob(
     job.releaseDeadlineAt = computeReleaseDeadlineAt(projectPath);
     const logPath = join(/*turbopackIgnore: true*/ logDir, `${job.id}.log`);
     job.logPath = logPath;
+    // Persist the trusted-local-changes signal so every phase (including
+    // orchestrator-driven re-runs) can read it off the release row when
+    // deciding whether the PR-branch execution gate may run on an uncommitted
+    // working tree. See lib/pipeline/trusted-local-release.ts.
+    if (trustedLocalChanges) {
+      job.contextMeta = JSON.stringify({ trustedLocalChanges: true });
+    }
     if (issueContext) {
       job.ghIssueNumber = issueContext.number;
       job.ghIssueRepo = issueContext.repo;
@@ -244,6 +260,17 @@ export async function startRelease(projectName: string, options: StartReleaseOpt
   }
   const sourceJob = options.sourceJobId ? getJob(options.sourceJobId) : null;
   const parentJobId = sourceJob?.project === projectName ? sourceJob.id : null;
+  // A release whose working-tree delta was produced by TamTam's own in-process
+  // agent run (issue-cruncher, or a manual issue-linked `run`) carries trusted
+  // local changes: the same trust posture the default branch already gets. This
+  // lets the PR-branch execution gate run test/review on the agent's uncommitted
+  // edits while still verifying any committed branch commits against safe_users.
+  const trustedLocalChanges =
+    options.operatorInitiated === true ||
+    (!!sourceJob && sourceJob.project === projectName && (
+      isAgentJobKind(sourceJob.kind) ||
+      (sourceJob.kind === 'run' && sourceJob.ghIssueNumber != null)
+    ));
   const gate = await checkCliStartGate('start a release', { parentJobId });
   if (!gate.ok) {
     // For budget-blocked releases, enqueue so the periodic drain picks it up
@@ -333,7 +360,7 @@ export async function startRelease(projectName: string, options: StartReleaseOpt
     return { ok: false, status: 409, detail: `Pipeline already running for ${projectName}`, blockingJobId: earlyLock.blockingJobId };
   }
 
-  const release = await createReleaseJob(projectName, projPath, parentJobId, issueContext);
+  const release = await createReleaseJob(projectName, projPath, parentJobId, issueContext, trustedLocalChanges);
   if (!release) {
     await releaseLock(projectName, placeholderId);
     return { ok: false, status: 500, detail: 'Failed to create release job', retryable: true };
@@ -444,16 +471,26 @@ export async function startRelease(projectName: string, options: StartReleaseOpt
     // done, and release the lock — mirroring boot recovery.
     try {
       const releaseJob = getJob(releaseJobId);
-      // A 409 is transient: another driver already started this phase for the
-      // release (e.g. a boot-recovery resume that won the atomic start claim).
-      // Don't finalize — the in-flight step + orchestrator will drive the
-      // chain. Leaving the release running (and the lock held by the in-flight
-      // holder) is correct; the probe sweep reaps it if the holder vanished.
-      // Bow out silently BEFORE writing any failure state: the release is
-      // healthy, so persisting a `releaseStopReason` or appending a "failed"
-      // log line would make a running release read as failed to the operator.
+      // Not every 409 is the same. A *concurrency* 409 is transient — another
+      // driver already started this phase for the release (e.g. a boot-recovery
+      // resume that won the atomic start claim). There we must NOT finalize: the
+      // in-flight step + orchestrator drive the chain, and the lock is held by
+      // that holder. But a *permanent-refusal* 409 (e.g. the PR-branch execution
+      // gate rejecting an untrusted dirty tree) leaves nothing running — no child
+      // phase, no held start-slot — so bowing out would strand the release in
+      // `running` with the lock held until the childless-release reaper finally
+      // frees it 120s later. Distinguish them by whether any driver is actually
+      // active for this release; only then bow out silently (healthy release, no
+      // failure state written). Otherwise fall through and finalize now so the
+      // lock frees immediately.
       if (result.status === 409) {
-        return result;
+        const { hasHeldStartSlotForRelease } = await import('./pipeline-start-slot');
+        const anotherDriverActive =
+          hasHeldStartSlotForRelease(releaseJobId) ||
+          listJobs().some((j) => j.releaseId === releaseJobId && PIPELINE_STEP_KINDS.has(j.kind) && j.finishedAt === null);
+        if (anotherDriverActive) {
+          return result;
+        }
       }
       // Persist + log the failure reason. Previously the release row was
       // finalized exit 1 with NO recorded detail, so a blocked release showed
