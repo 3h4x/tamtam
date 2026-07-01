@@ -267,10 +267,14 @@ describe('detectTestCommand', () => {
     }));
 
     const start = startProjectTest('myproj');
-    for (let i = 0; i < 10 && child.listenerCount('error') === 0; i += 1) {
-      await new Promise((resolve) => setTimeout(resolve, 0));
-    }
-    expect(child.listenerCount('error')).toBeGreaterThan(0);
+    // Wait until startProjectTest's async prelude (which includes a dynamic
+    // import) reaches the synchronous spawn + proc.on('error') registration.
+    // A fixed tick budget flakes under CPU contention, so poll on the actual
+    // condition with a generous wall-clock bound instead.
+    await vi.waitFor(() => expect(child.listenerCount('error')).toBeGreaterThan(0), {
+      timeout: 5000,
+      interval: 5,
+    });
     child.emit('error', new Error('spawn failed'));
     resolveAcquireLock();
     const result = await start;

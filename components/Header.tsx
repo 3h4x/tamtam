@@ -10,7 +10,7 @@ import { JobsPauseToggle } from './JobsPauseToggle'
 import { Button, buttonVariants } from '@/components/ui/Button'
 import { Pill } from '@/components/ui/Pill'
 import { Spinner } from '@/components/ui/Spinner'
-import { fetchRecommendationsSummary } from '@/lib/client-api'
+import { fetchRecommendationsSummary, fetchInbox } from '@/lib/client-api'
 import { useTheme } from '@/hooks/useTheme'
 
 interface HeaderProps {
@@ -24,11 +24,12 @@ interface NavItem {
   // When set, the nav item shows this Map's value as a count chip — same
   // pattern as `Issues / PRs 10` on the project tab nav. The chip is hidden
   // when the count is 0 to avoid noise.
-  countKey?: 'recommendations'
+  countKey?: 'recommendations' | 'inbox'
 }
 
 const NAV_ITEMS: NavItem[] = [
   { to: '/', label: 'Projects' },
+  { to: '/inbox', label: 'Inbox', countKey: 'inbox' },
   { to: '/monitoring', label: 'Monitoring' },
   { to: '/runs', label: 'Runs' },
   { to: '/workflow-runs', label: 'Workflows' },
@@ -61,7 +62,23 @@ export function Header({ loading, lastRefresh: _lastRefresh }: HeaderProps) {
     window.addEventListener('tamtam:recommendations-changed', load)
     return () => { live = false; clearInterval(id); window.removeEventListener('tamtam:recommendations-changed', load) }
   }, [])
-  const counts: Record<string, number> = { recommendations: recCount }
+
+  // Count of red (urgent) inbox signals, polled on a 60s cadence and refreshed
+  // immediately when an inbox action fires. Chip hidden when 0; fail-open on error.
+  const [inboxRed, setInboxRed] = useState<number>(0)
+  useEffect(() => {
+    let live = true
+    const load = () => {
+      fetchInbox()
+        .then((r) => { if (live) setInboxRed(r.counts.red) })
+        .catch(() => { if (live) setInboxRed(0) })
+    }
+    load()
+    const id = setInterval(load, 60_000)
+    window.addEventListener('tamtam:inbox-changed', load)
+    return () => { live = false; clearInterval(id); window.removeEventListener('tamtam:inbox-changed', load) }
+  }, [])
+  const counts: Record<string, number> = { recommendations: recCount, inbox: inboxRed }
   const [authConfigured, setAuthConfigured] = useState(false)
   const [loggingOut, setLoggingOut] = useState(false)
 
@@ -114,10 +131,14 @@ export function Header({ loading, lastRefresh: _lastRefresh }: HeaderProps) {
               {item.label}
               {item.countKey && count > 0 && (
                 <Pill
-                  tone="accent"
+                  tone={item.countKey === 'inbox' ? 'error' : 'accent'}
                   size="xs"
                   className="min-w-[1.25rem] justify-center rounded-full border-transparent px-1.5 py-0 text-[10px] font-mono font-normal tabular-nums leading-4"
-                  aria-label={`${count} open recommendation${count === 1 ? '' : 's'}`}
+                  aria-label={
+                    item.countKey === 'inbox'
+                      ? `${count} urgent inbox signal${count === 1 ? '' : 's'}`
+                      : `${count} open recommendation${count === 1 ? '' : 's'}`
+                  }
                 >
                   {count}
                 </Pill>
