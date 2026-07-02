@@ -2,7 +2,6 @@
 
 import { Fragment, useEffect, useState } from 'react'
 import type { Dispatch, SetStateAction } from 'react'
-import { useRouter } from 'next/navigation'
 import {
   releaseProject,
   pushProject,
@@ -26,7 +25,6 @@ interface UseRunActionsArgs {
 }
 
 interface UseRunActionsResult {
-  navigate: (e: Entry) => void
   releaseActionsFor: (e: Entry) => React.ReactNode
   queueActionState: { itemId: string; label: string } | null
   retryQueuedWork: (item: AutomationQueueItem) => Promise<void>
@@ -45,7 +43,6 @@ export function useRunActions({
   setQueueItems,
   setExpanded,
 }: UseRunActionsArgs): UseRunActionsResult {
-  const router = useRouter()
   const [releaseActionState, setReleaseActionState] = useState<{ jobId: string; label: string } | null>(null)
   const [stepRetryState, setStepRetryState] = useState<{ jobId: string; label: string } | null>(null)
   const [stopState, setStopState] = useState<{ jobId: string; label: string } | null>(null)
@@ -188,14 +185,6 @@ export function useRunActions({
       console.error('[history] queue cancel failed', error)
       setQueueActionState({ itemId: item.id, label: 'failed' })
       setTimeout(() => setQueueActionState((prev) => (prev?.itemId === item.id ? null : prev)), 2500)
-    }
-  }
-
-  const navigate = (e: Entry) => {
-    if (e.bucket === 'run' && e.navSessionId && e.kind !== 'release') {
-      router.push(`/project/${encodeURIComponent(projectName)}/terminal/${encodeURIComponent(e.navSessionId)}`)
-    } else {
-      router.push(`/project/${encodeURIComponent(projectName)}/terminal?job=${encodeURIComponent(e.navJobId)}`)
     }
   }
 
@@ -395,5 +384,5 @@ export function useRunActions({
     )
   }
 
-  return { navigate, releaseActionsFor, queueActionState, retryQueuedWork, cancelQueuedWork }
+  return { releaseActionsFor, queueActionState, retryQueuedWork, cancelQueuedWork }
 }

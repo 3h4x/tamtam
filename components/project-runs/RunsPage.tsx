@@ -5,12 +5,12 @@ import { useRouter } from 'next/navigation'
 import { fetchJobs } from '@/lib/client-api'
 import type { JobInfo } from '@/lib/client-api'
 import { buildEntries } from '@/components/project-runs/entries'
-import { groupReleaseChildren } from '@/components/project-runs/release-groups'
 import {
   buildReleaseProgressLabel,
   buildReleaseSummary,
   flattenReleaseChildren,
 } from '@/components/project-runs/release-progress'
+import { groupWorkUnits } from '@/components/project-runs/work-units'
 import { RUN_ROW_GRID_CLASS, RunRow } from '@/components/project-runs/RunRow'
 import { formatCost, formatTokens, parseJobCountsResponse } from '@/components/project-runs/formatting'
 import type { JobCountsResponse } from '@/components/project-runs/formatting'
@@ -239,8 +239,8 @@ export function RunsPage() {
   }, [])
 
   const entries = useMemo(() => buildEntries(jobs), [jobs])
-  const groupedEntries = useMemo(() => groupReleaseChildren(entries), [entries])
-  const displayEntries = kind === 'all' ? groupedEntries : entries
+  const groupedWorkUnits = useMemo(() => groupWorkUnits(entries), [entries])
+  const displayEntries = kind === 'all' ? groupedWorkUnits.roots : entries
   const items = useMemo(() => buildVirtualItems(displayEntries, expanded), [displayEntries, expanded])
   const totalHeight = items.reduce((sum, item) => sum + item.height, 0)
   const range = visibleRange(items, scrollTop, viewportHeight)

@@ -13,6 +13,8 @@ vi.mock('next/link', () => ({
 
 vi.mock('next/navigation', () => ({
   useRouter: () => ({ push: vi.fn(), replace: vi.fn(), prefetch: vi.fn() }),
+  usePathname: () => '/project/acme/history',
+  useSearchParams: () => new URLSearchParams(''),
 }))
 
 const fetchJobsMock = vi.fn<() => Promise<{ jobs: JobInfo[] }>>()
@@ -62,13 +64,13 @@ async function flush() {
   await Promise.resolve()
 }
 
-describe('ProjectRunsTab expanded children layout', () => {
+describe('ProjectRunsTab flat work-unit layout', () => {
   afterEach(() => {
     fetchJobsMock.mockReset()
     document.body.innerHTML = ''
   })
 
-  it('renders the expanded children wrapper inside the subgrid so columns align', async () => {
+  it('renders release steps as a flat row recap instead of inline expandable children', async () => {
     const now = Date.now()
     fetchJobsMock.mockResolvedValue({
       jobs: [
@@ -81,25 +83,13 @@ describe('ProjectRunsTab expanded children layout', () => {
     const { container, root } = mount()
     await flush()
 
-    const toggle = await vi.waitFor(() => {
-      const t = container.querySelector<HTMLButtonElement>('button[aria-expanded="false"]')
-      expect(t).not.toBeNull()
-      return t!
+    await vi.waitFor(() => {
+      expect(container.textContent).toContain('Release pipeline')
+      expect(container.textContent).toContain('test ✓')
+      expect(container.textContent).toContain('review LGTM')
     })
-    flushSync(() => {
-      toggle.dispatchEvent(new MouseEvent('click', { bubbles: true }))
-    })
-
-    const expandedToggle = container.querySelector<HTMLButtonElement>('button[aria-expanded="true"]')
-    expect(expandedToggle).not.toBeNull()
-
-    // The wrapper directly under the expanded RunRow must extend the subgrid
-    // so each child RunRow's columns line up under the parent header.
-    const wrapper = container.querySelector('.bg-bg-primary\\/40') as HTMLElement | null
-    expect(wrapper).not.toBeNull()
-    expect(wrapper!.className).toContain('lg:col-span-full')
-    expect(wrapper!.className).toContain('lg:grid')
-    expect(wrapper!.className).toContain('lg:grid-cols-subgrid')
+    expect(container.querySelector('button[aria-expanded]')).toBeNull()
+    expect(container.querySelector('.bg-bg-primary\\/40')).toBeNull()
 
     root.unmount()
   })

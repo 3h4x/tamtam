@@ -22,6 +22,13 @@ interface RunsHeaderProps {
   loadedTotals: { tokens: number; running: number; costUsd: number }
   thisMonthCost: number
   counts: Record<string, number>
+  // Grouped-view "show all jobs" toggle: reveals internal plumbing rows
+  // (mark-dod-verify) that are hidden by default. Only meaningful while the
+  // feed is grouped by work unit.
+  groupingActive: boolean
+  showAllJobs: boolean
+  onToggleShowAll: () => void
+  hiddenInternalCount: number
 }
 
 export function RunsHeader({
@@ -37,6 +44,10 @@ export function RunsHeader({
   loadedTotals,
   thisMonthCost,
   counts,
+  groupingActive,
+  showAllJobs,
+  onToggleShowAll,
+  hiddenInternalCount,
 }: RunsHeaderProps) {
   return (
     <div className="mb-3 rounded-lg border border-border bg-bg-secondary">
@@ -137,6 +148,25 @@ export function RunsHeader({
             </PillButton>
           )
         })}
+        {groupingActive && (hiddenInternalCount > 0 || showAllJobs) && (
+          <>
+            <span className="mx-1 h-5 w-px shrink-0 bg-border" aria-hidden />
+            <PillButton
+              type="button"
+              tone="neutral"
+              size="sm"
+              active={showAllJobs}
+              className="shrink-0 px-2.5 font-mono"
+              onClick={onToggleShowAll}
+              title={showAllJobs
+                ? 'Hide internal plumbing jobs (mark-dod-verify) and group by work unit'
+                : `Show ${hiddenInternalCount} hidden internal job${hiddenInternalCount === 1 ? '' : 's'} (mark-dod-verify) at the top level`}
+            >
+              {showAllJobs ? 'showing all' : 'show all jobs'}
+              {!showAllJobs && hiddenInternalCount > 0 && <span className="opacity-70"> +{hiddenInternalCount}</span>}
+            </PillButton>
+          </>
+        )}
       </div>
     </div>
   )

@@ -7,16 +7,28 @@ import { flushSync } from 'react-dom'
 import { ProjectRunsTab } from '@/components/ProjectRunsTab'
 import type { JobInfo } from '@/lib/client-api'
 
-const { pushMock, fetchJobsMock, releaseProjectMock, pushProjectMock, fetchAutomationQueueMock } = vi.hoisted(() => ({
+const {
+  pushMock,
+  fetchJobsMock,
+  releaseProjectMock,
+  pushProjectMock,
+  fetchAutomationQueueMock,
+  searchParamsMock,
+  pathnameMock,
+} = vi.hoisted(() => ({
   pushMock: vi.fn(),
   fetchJobsMock: vi.fn(),
   releaseProjectMock: vi.fn(),
   pushProjectMock: vi.fn(),
   fetchAutomationQueueMock: vi.fn(),
+  searchParamsMock: vi.fn(() => new URLSearchParams('')),
+  pathnameMock: vi.fn(() => '/project/alpha/history'),
 }))
 
 vi.mock('next/navigation', () => ({
   useRouter: () => ({ push: pushMock }),
+  usePathname: () => pathnameMock(),
+  useSearchParams: () => searchParamsMock(),
 }))
 
 vi.mock('next/link', () => ({
@@ -30,6 +42,24 @@ vi.mock('@/lib/client-api', () => ({
   releaseProject: releaseProjectMock,
   pushProject: pushProjectMock,
   fetchAutomationQueue: fetchAutomationQueueMock,
+}))
+
+vi.mock('@/components/project-runs/RunDetailDrawer', () => ({
+  RunDetailDrawer: ({
+    jobId,
+    onClose,
+  }: {
+    projectName: string
+    jobId: string | null
+    onClose: () => void
+  }) => jobId
+    ? (
+        <div role="dialog" aria-label="Run detail">
+          <span>drawer job {jobId}</span>
+          <button type="button" onClick={onClose}>Close drawer</button>
+        </div>
+      )
+    : null,
 }))
 
 function makeJob({
@@ -126,8 +156,57 @@ describe('ProjectRunsTab release actions', () => {
     fetchJobsMock.mockReset()
     releaseProjectMock.mockReset()
     pushProjectMock.mockReset()
+    searchParamsMock.mockReset()
+    searchParamsMock.mockReturnValue(new URLSearchParams(''))
+    pathnameMock.mockReset()
+    pathnameMock.mockReturnValue('/project/alpha/history')
     vi.unstubAllGlobals()
     document.body.innerHTML = ''
+  })
+
+  it('opens the run detail drawer from the history job query and clears it on close', async () => {
+    searchParamsMock.mockReturnValue(new URLSearchParams('job=run-1&kind=all'))
+    fetchJobsMock.mockResolvedValue({
+      jobs: [
+        makeJob({ id: 'run-1', kind: 'run', started_at: 100, prompt: 'inspect this' }),
+      ],
+      pendingReleaseProjects: [],
+    })
+
+    const { container, unmount } = renderTab()
+
+    await waitFor(() => {
+      expect(container.textContent).toContain('drawer job run-1')
+    })
+
+    buttonByText(container, 'Close drawer').dispatchEvent(new MouseEvent('click', { bubbles: true }))
+
+    expect(pushMock).toHaveBeenCalledWith('/project/alpha/history?kind=all')
+
+    unmount()
+  })
+
+  it('opens the run detail drawer URL when a history row is clicked', async () => {
+    fetchJobsMock.mockResolvedValue({
+      jobs: [
+        makeJob({ id: 'run-1', kind: 'run', started_at: 100, prompt: 'inspect this' }),
+      ],
+      pendingReleaseProjects: [],
+    })
+
+    const { container, unmount } = renderTab()
+
+    await waitFor(() => {
+      expect(container.textContent).toContain('inspect this')
+    })
+
+    const rowButton = Array.from(container.querySelectorAll<HTMLElement>('[role="button"]')).find((node) => node.textContent?.includes('inspect this'))
+    if (!(rowButton instanceof HTMLElement)) throw new Error('run row not found')
+    rowButton.dispatchEvent(new MouseEvent('click', { bubbles: true }))
+
+    expect(pushMock).toHaveBeenCalledWith('/project/alpha/history?job=run-1')
+
+    unmount()
   })
 
   it('shows continue release only for the newest virtual grouped pipeline in failed and release filters', async () => {
@@ -256,7 +335,7 @@ describe('ProjectRunsTab release actions', () => {
     unmount()
   })
 
-  it('expands resumed release steps in latest-activity order', async () => {
+  it('summarizes resumed release steps on the flat release row', async () => {
     fetchJobsMock.mockResolvedValue({
       jobs: [
         makeJob({ id: 'release-1', kind: 'release', started_at: 100, finished_at: 250, exit_code: 0 }),
@@ -275,19 +354,10 @@ describe('ProjectRunsTab release actions', () => {
       expect(container.textContent).toContain('Release pipeline')
     })
 
-    const expandButton = Array.from(container.querySelectorAll('button')).find((node) => node.getAttribute('title') === 'Expand steps')
-    if (!(expandButton instanceof HTMLButtonElement)) throw new Error('expand button not found')
-    expandButton.dispatchEvent(new MouseEvent('click', { bubbles: true }))
-
-    await waitFor(() => {
-      const text = container.textContent ?? ''
-      const testIndex = text.indexOf('Test run')
-      const fixIndex = text.indexOf('Auto-fix')
-      const reviewIndex = text.lastIndexOf('Code review')
-      expect(testIndex).toBeGreaterThanOrEqual(0)
-      expect(fixIndex).toBeGreaterThan(testIndex)
-      expect(reviewIndex).toBeGreaterThan(fixIndex)
-    })
+    const text = container.textContent ?? ''
+    expect(text).toContain('test ✓')
+    expect(text).toContain('review LGTM')
+    expect(Array.from(container.querySelectorAll('button')).some((node) => node.getAttribute('title') === 'Expand steps')).toBe(false)
 
     unmount()
   })
@@ -515,26 +585,12 @@ describe('ProjectRunsTab release actions', () => {
       expect(container.textContent).toContain('ship')
     })
 
-    // Post-merge: the agent row that owns the latest release carries its
-    // actions directly — the release row no longer appears as a separate
-    // node. So Continue release shows up on the collapsed agent row,
-    // and clicking expand surfaces the pipeline phases (not a duplicate
-    // release row), keeping the button count at exactly 1.
+    // The agent row that owns the latest release carries its actions directly
+    // in the flat work-unit feed; the nested release is not a duplicate row.
     const collapsedContinue = Array.from(container.querySelectorAll('button')).filter((node) => node.textContent?.trim() === 'Continue release')
     const collapsedRetry = Array.from(container.querySelectorAll('button')).filter((node) => node.textContent?.trim() === 'Retry release')
     expect(collapsedContinue).toHaveLength(1)
     expect(collapsedRetry).toHaveLength(0)
-
-    const expandButton = Array.from(container.querySelectorAll('button')).find((node) => node.getAttribute('title') === 'Expand steps')
-    if (!(expandButton instanceof HTMLButtonElement)) throw new Error('expand button not found')
-    expandButton.dispatchEvent(new MouseEvent('click', { bubbles: true }))
-
-    await waitFor(() => {
-      const continueButtons = Array.from(container.querySelectorAll('button')).filter((node) => node.textContent?.trim() === 'Continue release')
-      const retryButtons = Array.from(container.querySelectorAll('button')).filter((node) => node.textContent?.trim() === 'Retry release')
-      expect(continueButtons).toHaveLength(1)
-      expect(retryButtons).toHaveLength(0)
-    })
 
     buttonByText(container, 'Continue release').dispatchEvent(new MouseEvent('click', { bubbles: true }))
 

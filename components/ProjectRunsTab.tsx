@@ -1,7 +1,8 @@
 'use client'
 
-import { Fragment, useState, useEffect, useMemo, useRef } from 'react'
+import { useState, useEffect, useMemo, useRef, useCallback } from 'react'
 import Link from 'next/link'
+import { usePathname, useRouter, useSearchParams } from 'next/navigation'
 import {
   fetchJobs,
   fetchAutomationQueue,
@@ -21,21 +22,20 @@ import {
   entryNeedsAttention,
   latestReleaseKey,
 } from '@/components/project-runs/entries'
-import { groupReleaseChildren } from '@/components/project-runs/release-groups'
 import {
   buildReleaseSummary,
   buildReleaseProgressLabel,
-  flattenReleaseChildren,
 } from '@/components/project-runs/release-progress'
+import { groupWorkUnits, mergeWorkUnits } from '@/components/project-runs/work-units'
 import {
   KIND_LABEL,
 } from '@/components/project-runs/kinds'
 import type { JobCountsResponse } from '@/components/project-runs/formatting'
 import type { Entry } from '@/components/project-runs/types'
-import { RUN_ROW_GRID_CLASS, RunRow } from '@/components/project-runs/RunRow'
+import { RunUnitRow } from '@/components/project-runs/RunUnitRow'
+import { RunDetailDrawer } from '@/components/project-runs/RunDetailDrawer'
 import { ProjectRunsEmptyState, ProjectRunsLoadingState } from '@/components/project-runs/RunStates'
 import { mergeJobs, reconcileRefreshJobs } from '@/components/project-runs/refresh'
-import { renderChain } from '@/components/project-runs/render-chain'
 import { RunsHeader } from '@/components/project-runs/RunsHeader'
 import type { Filter } from '@/components/project-runs/filters'
 import { useRunActions } from '@/hooks/useRunActions'
@@ -51,6 +51,9 @@ const ACTIVE_POLL_MS = 5000
 const IDLE_POLL_MS = 1000
 
 export function ProjectRunsTab({ projectName, jobsPaused = false }: ProjectRunsTabProps) {
+  const router = useRouter()
+  const pathname = usePathname()
+  const searchParams = useSearchParams()
   const [jobs, setJobs] = useState<JobInfo[]>([])
   const [pendingReleaseQueued, setPendingReleaseQueued] = useState(false)
   const [queueItems, setQueueItems] = useState<AutomationQueueItem[]>([])
@@ -60,16 +63,10 @@ export function ProjectRunsTab({ projectName, jobsPaused = false }: ProjectRunsT
   const [summary, setSummary] = useState<JobCountsResponse | null>(null)
   const [filter, setFilter] = useState<Filter>({ kind: 'all' })
   const [search, setSearch] = useState('')
-  const [expanded, setExpanded] = useState<Set<string>>(new Set())
-
-  const toggleExpanded = (key: string) => {
-    setExpanded((prev) => {
-      const next = new Set(prev)
-      if (next.has(key)) next.delete(key)
-      else next.add(key)
-      return next
-    })
-  }
+  const [showAllJobs, setShowAllJobs] = useState(false)
+  // Retained only so useRunActions can auto-expand a release after a retry.
+  // The flat feed has no inline expansion, so this is otherwise inert.
+  const [, setExpanded] = useState<Set<string>>(new Set())
 
   // Track the current window size in a ref so the polling closure can read
   // it without forcing a re-mounted interval on every state change.
@@ -175,7 +172,8 @@ export function ProjectRunsTab({ projectName, jobsPaused = false }: ProjectRunsT
   }
 
   const entries = useMemo(() => buildEntries(jobs), [jobs])
-  const groupedEntries = useMemo(() => groupReleaseChildren(entries), [entries])
+  const groupedWorkUnits = useMemo(() => groupWorkUnits(entries), [entries])
+  const groupedEntries = groupedWorkUnits.roots
   // Latest release per project — used to gate the "Continue release" /
   // "Retry release" actions so they only appear on the most recent release
   // entry. Once a newer release ran, retrying an older failed one is
@@ -199,7 +197,19 @@ export function ProjectRunsTab({ projectName, jobsPaused = false }: ProjectRunsT
     return data
   }
 
-  const { navigate, releaseActionsFor, queueActionState, retryQueuedWork, cancelQueuedWork } = useRunActions({
+  const selectedJobId = searchParams?.get('job') ?? null
+  const updateSelectedJob = useCallback((jobId: string | null) => {
+    const next = new URLSearchParams(searchParams?.toString() ?? '')
+    if (jobId) next.set('job', jobId)
+    else next.delete('job')
+    const qs = next.toString()
+    router.push(qs ? `${pathname}?${qs}` : pathname)
+  }, [pathname, router, searchParams])
+  const openRunDetail = useCallback((e: Entry) => {
+    updateSelectedJob(e.navJobId)
+  }, [updateSelectedJob])
+
+  const { releaseActionsFor, queueActionState, retryQueuedWork, cancelQueuedWork } = useRunActions({
     projectName,
     jobsPaused,
     latestTopLevelReleaseKey,
@@ -241,16 +251,24 @@ export function ProjectRunsTab({ projectName, jobsPaused = false }: ProjectRunsT
     return false
   }
 
+  const groupingActive = shouldGroup(filter)
+  const hiddenInternalCount = groupedWorkUnits.internal.length
+
   const filtered = useMemo(() => {
     const q = search.trim().toLowerCase()
-    const source = shouldGroup(filter) ? groupedEntries : entries
+    // Grouped views hide internal plumbing (mark-dod-verify) unless "show all
+    // jobs" is on. Kind-specific filters show the flat entry list so the picked
+    // kind is exhaustive (including release children and internal jobs).
+    const source = shouldGroup(filter)
+      ? (showAllJobs ? mergeWorkUnits(groupedWorkUnits) : groupedWorkUnits.roots)
+      : entries
     return source.filter((e) => {
       if (!matches(e, filter)) return false
       if (!q) return true
       const hay = `${e.title} ${e.subtitle ?? ''} ${e.releaseOutcome?.label ?? ''} ${e.model ?? ''} ${e.navSessionId ?? ''} ${e.kind}`.toLowerCase()
       return hay.includes(q)
     })
-  }, [entries, filter, groupedEntries, search])
+  }, [entries, filter, groupedWorkUnits, showAllJobs, search])
 
   // Group filtered entries by day for scannability.
   const groups = useMemo(() => {
@@ -392,6 +410,10 @@ export function ProjectRunsTab({ projectName, jobsPaused = false }: ProjectRunsT
         loadedTotals={loadedTotals}
         thisMonthCost={thisMonthCost}
         counts={counts}
+        groupingActive={groupingActive}
+        showAllJobs={showAllJobs}
+        onToggleShowAll={() => setShowAllJobs((v) => !v)}
+        hiddenInternalCount={hiddenInternalCount}
       />
 
       {loading ? (
@@ -416,88 +438,30 @@ export function ProjectRunsTab({ projectName, jobsPaused = false }: ProjectRunsT
                 <span className="text-[11px] text-text-tertiary font-mono">· {g.items.length}</span>
                 <div className="flex-1 h-px bg-border/60" />
               </div>
-              <div className={`border border-border rounded-lg overflow-hidden bg-bg-primary lg:grid ${RUN_ROW_GRID_CLASS} lg:gap-x-3`}>
-                <div className="hidden border-b border-border bg-bg-secondary pl-4 pr-3 py-1.5 text-[10px] font-medium uppercase tracking-wider text-text-tertiary lg:col-span-full lg:grid lg:grid-cols-subgrid lg:gap-x-3">
-                  <span>wanted</span>
-                  <span>done / progress</span>
-                  <span className="text-right">duration</span>
-                  <span className="text-right">usage</span>
-                  <span className="text-right">actions</span>
-                </div>
+              <div className="overflow-hidden rounded-lg border border-border bg-bg-primary">
                 {g.items.map((e) => {
-                  // A row is expandable if it has any chainable children:
-                  //   - releases with their pipeline children
-                  //   - agent/run rows that own a release (release nests under agent)
-                  const hasChainedKids = (e.chainedChildren?.length ?? 0) > 0
-                  const hasTurnBreakdown = (e.turnEntries?.length ?? 0) > 1
-                  const isReleaseParent = e.kind === 'release' && (e.children?.length ?? 0) > 0
-                  const isExpandable = isReleaseParent || hasChainedKids || hasTurnBreakdown
-                  const isExpanded = expanded.has(e.key)
-                  // For an agent/run row that owns a nested release, surface that
-                  // release's pipeline summary so it's visible while collapsed.
-                  const ownedRelease = hasChainedKids && !isReleaseParent
-                    ? e.chainedChildren?.find(c => c.kind === 'release')
+                  // A release row (or an agent/run row that owns a release)
+                  // surfaces the pipeline recap + progress inline; the full
+                  // step timeline lives in the detail drawer.
+                  const ownedRelease = e.kind !== 'release'
+                    ? e.chainedChildren?.find((c) => c.kind === 'release') ?? null
                     : null
-                  const rowSummary = isReleaseParent
-                    ? buildReleaseSummary(e.children ?? [], e)
-                    : ownedRelease
-                      ? buildReleaseSummary(ownedRelease.children ?? [], ownedRelease)
-                      : null
-                  const rowProgressLabel = isReleaseParent
-                    ? buildReleaseProgressLabel(e.children ?? [], e)
-                    : ownedRelease
-                      ? buildReleaseProgressLabel(ownedRelease.children ?? [], ownedRelease)
-                      : null
+                  const releaseSource = e.kind === 'release' ? e : ownedRelease
+                  const rowSummary = releaseSource
+                    ? buildReleaseSummary(releaseSource.children ?? [], releaseSource)
+                    : null
+                  const rowProgressLabel = releaseSource
+                    ? buildReleaseProgressLabel(releaseSource.children ?? [], releaseSource)
+                    : null
                   return (
-                    <RunRow
+                    <RunUnitRow
                       key={e.key}
                       entry={e}
-                      onClick={() => navigate(e)}
-                      expandable={isExpandable}
-                      expanded={isExpanded}
-                      onToggleExpand={() => toggleExpanded(e.key)}
+                      onClick={() => openRunDetail(e)}
                       summary={rowSummary}
                       progressLabel={rowProgressLabel}
                       actions={releaseActionsFor(e)}
-                    >
-                      {isExpandable && isExpanded && (
-                        <div className="bg-bg-primary/40 lg:col-span-full lg:grid lg:grid-cols-subgrid lg:gap-x-3">
-                          {/* For release/vgroup rows: flatten the chain so test/review/commit/push
-                              all appear at depth 1 and fix appears at depth 2.
-                              For agent/run rows that own a nested release: fold the release's
-                              pipeline phases directly under the agent — the release is a
-                              wrapper concept, not a user-visible step, so its row would be
-                              redundant noise. Non-release chained children still use renderChain. */}
-                          {isReleaseParent
-                            ? flattenReleaseChildren(e.children ?? [], 1).map(({ entry, depth: d }) => (
-                                <RunRow key={entry.key} entry={entry} onClick={() => navigate(entry)} depth={d} />
-                              ))
-                            : (
-                              <>
-                                {(e.chainedChildren ?? []).map((root) =>
-                                  root.kind === 'release'
-                                    ? (
-                                        <Fragment key={root.key}>
-                                          {flattenReleaseChildren(root.children ?? [], 1).map(({ entry, depth: d }) => (
-                                            <RunRow key={entry.key} entry={entry} onClick={() => navigate(entry)} depth={d} />
-                                          ))}
-                                        </Fragment>
-                                      )
-                                    : renderChain(root, 1, navigate, releaseActionsFor)
-                                )}
-                                {/* Per-turn cost breakdown for multi-turn chat/agent rows.
-                                    Sorted newest-first to match parent ordering. */}
-                                {hasTurnBreakdown && [...e.turnEntries!]
-                                  .sort((a, b) => b.lastActivityAt - a.lastActivityAt)
-                                  .map((turn) => (
-                                    <RunRow key={turn.key} entry={turn} onClick={() => navigate(turn)} depth={1} />
-                                  ))}
-                              </>
-                            )
-                          }
-                        </div>
-                      )}
-                    </RunRow>
+                    />
                   )
                 })}
               </div>
@@ -525,6 +489,11 @@ export function ProjectRunsTab({ projectName, jobsPaused = false }: ProjectRunsT
           )}
         </div>
       )}
+      <RunDetailDrawer
+        projectName={projectName}
+        jobId={selectedJobId}
+        onClose={() => updateSelectedJob(null)}
+      />
     </div>
   )
 }

@@ -5,43 +5,29 @@ import { isCancelledExitCode } from '@/lib/shared/job-exit-codes'
 import { formatDuration, formatTokens, formatCost } from '@/components/project-runs/formatting'
 import { entryIsRunning, entryNeedsAttention, shouldShowStableKindTitle } from '@/components/project-runs/entries'
 import { KIND_LABEL, KIND_COLOR, runKindDisplayName } from '@/components/project-runs/kinds'
+import {
+  gemmaOutcomeInfo,
+  modifiedFileCount,
+  progressToneClass,
+  promptBloat,
+  releaseOutcomeInfo,
+  rowStateInfo,
+  stepChipTone,
+  verdictBadgeInfo,
+} from '@/components/project-runs/presentation'
+import {
+  formatRunSummaryText,
+  lastFailedSummaryPart,
+  latestFailureSummary,
+  splitSummary,
+} from '@/components/project-runs/run-summary'
 import type { Entry } from '@/components/project-runs/types'
 import { Button } from '@/components/ui/Button'
 import { Pill } from '@/components/ui/Pill'
 import { StatusIcon as UiStatusIcon } from '@/components/ui/StatusIcon'
-import type { PillTone } from '@/components/ui/Pill'
 import { PulseDot } from '@/components/ui/PulseDot'
 
 export const RUN_ROW_GRID_CLASS = 'lg:grid-cols-[minmax(360px,1.2fr)_minmax(360px,1fr)_96px_120px_minmax(84px,auto)]'
-
-function modifiedFileCount(raw: string | null): number {
-  if (!raw) return 0
-  try {
-    const parsed = JSON.parse(raw)
-    return Array.isArray(parsed) ? parsed.length : 0
-  } catch {
-    return 0
-  }
-}
-
-function splitSummary(summary: string | null | undefined): string[] {
-  if (!summary) return []
-  return summary
-    .split('·')
-    .map((part) => part.trim())
-    .filter(Boolean)
-}
-
-function lastFailedSummaryPart(parts: string[]): string | null {
-  for (let i = parts.length - 1; i >= 0; i -= 1) {
-    const part = parts[i]
-    const lower = part.toLowerCase()
-    if (part.includes('✗') || lower.includes('fail') || lower.includes('attention') || lower.includes('blocked') || lower.includes('pending')) {
-      return part
-    }
-  }
-  return null
-}
 
 function StatusIcon({
   running,
@@ -67,112 +53,11 @@ function StatusIcon({
 }
 
 function StepChip({ value }: { value: string }) {
-  const lower = value.toLowerCase()
-  const failed = value.includes('✗') || lower.includes('fail') || lower.includes('attention') || lower.includes('ship') || lower.includes('blocked')
-  const pending = lower.includes('pending') || lower.includes('queued') || lower.includes('running')
-  const done = lower.includes('✓') || lower.includes('lgtm') || lower.includes('done') || lower.includes('completed')
-  const tone: PillTone = failed
-    ? 'error'
-    : pending
-    ? 'info'
-    : done
-    ? 'success'
-    : 'neutral'
   return (
-    <Pill tone={tone} size="xs" className="h-5 rounded px-1.5 text-[10px] font-mono">
+    <Pill tone={stepChipTone(value)} size="xs" className="h-5 rounded px-1.5 text-[10px] font-mono">
       {value}
     </Pill>
   )
-}
-
-const SUMMARY_SECTION_LABELS = [
-  'Summary:',
-  'Files changed:',
-  'Actionable work:',
-  'Fixes applied:',
-  'Findings NOT fixed:',
-  'Verification completed:',
-  'UX verdict per flow:',
-]
-
-const SUMMARY_SECTION_PATTERN = SUMMARY_SECTION_LABELS
-  .map((label) => label.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'))
-  .join('|')
-
-const STRUCTURED_SUMMARY_RE = new RegExp(
-  `(?:^|\\n)\\s*(?:[-*]\\s+)?(?:\\*\\*)?(?:${SUMMARY_SECTION_PATTERN})(?:\\*\\*)?\\s*`,
-  'i',
-)
-
-const INLINE_SECTION_RE = new RegExp(`\\s+(?=(?:${SUMMARY_SECTION_PATTERN}))`, 'g')
-
-// Compile per-label "label \s*" regexes ONCE at module load. Without this,
-// `formatRunSummaryText` allocated len(SUMMARY_SECTION_LABELS) regex
-// objects on every call, plus one more for the leading-bullet strip — and
-// the function is invoked once per visible run row's summary. For a 50-row
-// list × 8 regexes each, that's 400 RegExp allocations per render cycle.
-const LEADING_BULLET_BEFORE_SECTION_RE = new RegExp(
-  `^\\s*[-*]\\s+(?=(?:${SUMMARY_SECTION_PATTERN}))`,
-  'gm',
-)
-const SECTION_BREAK_RES: ReadonlyArray<{ label: string; re: RegExp }> = SUMMARY_SECTION_LABELS.map((label) => ({
-  label,
-  re: new RegExp(`${label.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}\\s*`, 'g'),
-}))
-
-function formatRunSummaryText(value: string | null | undefined): string | null {
-  if (!value) return null
-
-  const trimmed = value.trim()
-  if (!trimmed) return null
-  if (!STRUCTURED_SUMMARY_RE.test(trimmed)) return trimmed
-
-  let text = value
-    .replace(/\r\n?/g, '\n')
-    .replace(/^\s*---+\s*$/gm, '')
-    .replace(/\*\*([^*]+)\*\*/g, '$1')
-    .replace(/`([^`]+)`/g, '$1')
-    .replace(/^#{1,6}\s+/gm, '')
-    .replace(LEADING_BULLET_BEFORE_SECTION_RE, '')
-
-  text = text.replace(INLINE_SECTION_RE, '\n')
-
-  for (const { label, re } of SECTION_BREAK_RES) {
-    text = text.replace(re, `${label}\n`)
-  }
-
-  text = text
-    .split('\n')
-    .map((line) => line.trim())
-    .filter(Boolean)
-    .join('\n')
-    .replace(/\n{3,}/g, '\n\n')
-
-  return text || null
-}
-
-function latestFailureSummary(entry: Entry): string | null {
-  const children: Entry[] = []
-  const seen = new Set<string>()
-  const collect = (nodes: Entry[]) => {
-    for (const node of nodes) {
-      if (seen.has(node.key)) continue
-      seen.add(node.key)
-      children.push(node)
-      collect(node.children ?? [])
-      collect(node.chainedChildren ?? [])
-    }
-  }
-  collect([...(entry.children ?? []), ...(entry.chainedChildren ?? [])])
-  const failedChildren = children
-    .filter((child) => entryNeedsAttention(child))
-    .sort((a, b) => b.lastActivityAt - a.lastActivityAt)
-  const latestFailure = failedChildren.find((child) => child.workSummary || child.subtitle || child.detail)
-    ?? failedChildren[0]
-  // Fall back to `detail` (the error extracted from the failed step's log tail,
-  // see lib/jobs/storage.ts failureDetailForList) so a step that failed without
-  // a work_summary still surfaces its reason instead of a bare "exit 1".
-  return latestFailure?.workSummary ?? latestFailure?.subtitle ?? latestFailure?.detail ?? null
 }
 
 export interface RunRowProps {
@@ -221,31 +106,21 @@ function VerdictBadge({
   // states are already shown by RowStateBadge — emitting a second "done" or
   // "exit X" badge here just duplicates that without adding information.
   if (!verdict || isRunning || isFailed) return null
-  const tone: PillTone = verdict === 'LGTM'
-    ? 'success'
-    : verdict === 'DO NOT SHIP'
-    ? 'error'
-    : 'warning'
-  const label = verdict === 'LGTM' ? '✓ LGTM' : verdict === 'DO NOT SHIP' ? '✗ DNS' : '⚠ ATTN'
+  const badge = verdictBadgeInfo(verdict)
+  if (!badge) return null
   return (
-    <Pill tone={tone} size="xs" className="h-5 rounded px-1.5 text-[10px] font-mono" title={`Review verdict: ${verdict}`}>
-      {label}
+    <Pill tone={badge.tone} size="xs" className="h-5 rounded px-1.5 text-[10px] font-mono" title={`Review verdict: ${verdict}`}>
+      {badge.label}
     </Pill>
   )
 }
 
 function ReleaseOutcomeBadge({ entry }: { entry: Entry }) {
-  const outcome = entry.releaseOutcome
-  if (!outcome) return null
-  const tone: PillTone =
-    outcome.status === 'running' ? 'info' :
-    outcome.status === 'done' ? 'success' :
-    outcome.status === 'blocked' ? 'warning' :
-    'error'
-  const label = outcome.status === 'done' ? '✓ release done' : outcome.label
+  const badge = releaseOutcomeInfo(entry.releaseOutcome)
+  if (!badge) return null
   return (
-    <Pill tone={tone} size="xs" className="h-5 gap-1 rounded px-1.5 text-[10px]">
-      {label}
+    <Pill tone={badge.tone} size="xs" className="h-5 gap-1 rounded px-1.5 text-[10px]">
+      {badge.label}
     </Pill>
   )
 }
@@ -276,10 +151,10 @@ function RowStateBadge({
   // literal "exit -1" reads like a real exit status and confuses operators, so
   // surface the actual condition. Cancellations (-2/-3) arrive as a 'cancelled'
   // failureLabel from upstream and never reach this fallback.
-  const failedText = failureLabel ?? (exitCode === -1 ? 'failed to start' : `exit ${exitCode}`)
+  const state = rowStateInfo({ isRunning, isFailed, exitCode, failureLabel })
   return (
-    <Pill tone={isFailed ? 'error' : 'success'} size="xs" className="h-5 gap-1 rounded px-1.5 text-[10px]">
-      {isFailed ? failedText : 'done'}
+    <Pill tone={state.tone} size="xs" className="h-5 gap-1 rounded px-1.5 text-[10px]">
+      {state.label}
     </Pill>
   )
 }
@@ -305,16 +180,7 @@ export function RunRow({ entry: e, onClick, expandable, expanded, onToggleExpand
       ? 'review needs attention'
       : null)
   const totalTokens = e.inputTokens + e.outputTokens
-  // Prompt-bloat indicator. Every cache-read of an oversized prefix is billed,
-  // so a fat prompt is real recurring cost. Show the chip from 20 KB and turn
-  // it red at 50 KB — these are heuristic, picked from the typical
-  // CLAUDE.md (~30 KB) + skills + diff envelope observed on tamtam runs.
-  const PROMPT_BYTES_WARN = 20_000
-  const PROMPT_BYTES_ALERT = 50_000
-  const promptBytes = e.promptBytes ?? 0
-  const showPromptChip = promptBytes >= PROMPT_BYTES_WARN
-  const promptIsAlert = promptBytes >= PROMPT_BYTES_ALERT
-  const promptKbLabel = promptBytes >= 1024 ? `${Math.round(promptBytes / 1024)}KB` : `${promptBytes}B`
+  const prompt = promptBloat(e.promptBytes)
   const fileCount = modifiedFileCount(e.modifiedFiles)
   const durationLabel = formatDuration(e.startedAt, e.finishedAt)
   const startedLabel = formatAgo(e.startedAt)
@@ -355,24 +221,18 @@ export function RunRow({ entry: e, onClick, expandable, expanded, onToggleExpand
   // turn ended. Only useful on completed run/agent rows; review/test/
   // commit/etc. have their own verdict signals (VerdictBadge above).
   const gemmaVerdictBadge = (() => {
-    const v = e.outcomeVerdict
-    if (!v) return null
+    const badge = gemmaOutcomeInfo(e.outcomeVerdict)
+    if (!badge) return null
     if (e.bucket !== 'run' && e.bucket !== 'agent') return null
     if (isRunning) return null
-    const label = v === 'done' ? '✓ done' : v === 'asked_question' ? '? asked' : '↻ unfinished'
-    const tone: PillTone = v === 'done'
-      ? 'success'
-      : v === 'asked_question'
-      ? 'info'
-      : 'warning'
     return (
       <Pill
-        tone={tone}
+        tone={badge.tone}
         size="xs"
         className="h-5 rounded px-1.5 text-[10px] font-mono"
-        title={`Local-LLM outcome verdict: ${v.replace('_', ' ')}`}
+        title={`Local-LLM outcome verdict: ${e.outcomeVerdict?.replace('_', ' ')}`}
       >
-        {label}
+        {badge.label}
       </Pill>
     )
   })()
@@ -411,11 +271,7 @@ export function RunRow({ entry: e, onClick, expandable, expanded, onToggleExpand
     : effectiveNeedsAttention
     ? 'bg-status-error/5'
     : 'bg-bg-primary'
-  const progressTone = progressLabel?.includes('now:')
-    ? 'border-status-info/30 bg-status-info/10 text-status-info'
-    : progressLabel?.includes('failed') || progressLabel?.includes('stopped') || progressLabel?.includes('cancelled') || progressLabel?.includes('blocked')
-      ? 'border-status-error/30 bg-status-error/10 text-status-error'
-      : 'border-accent/25 bg-accent/10 text-accent'
+  const progressTone = progressToneClass(progressLabel)
   const showProgressBadge = !!progressLabel && effectiveRunning
   const visibleSummaryParts = effectiveNeedsAttention && !failedStepLabel
     ? summaryParts.slice(-1)
@@ -508,17 +364,17 @@ export function RunRow({ entry: e, onClick, expandable, expanded, onToggleExpand
                   {progressLabel}
                 </Pill>
               )}
-              {showPromptChip && (
+              {prompt.show && (
                 <Pill
                   size="xs"
                   className={`h-5 rounded px-1.5 text-[10px] font-mono ${
-                    promptIsAlert
+                    prompt.alert
                       ? 'bg-status-error/15 text-status-error border-status-error/30'
                       : 'bg-status-warning/15 text-status-warning border-status-warning/30'
                   }`}
-                  title={`Prompt piped to provider: ${promptBytes.toLocaleString()} bytes (~${Math.round(promptBytes / 4).toLocaleString()} tokens). Every cache-read of this prefix is billed.`}
+                  title={`Prompt piped to provider: ${prompt.bytes.toLocaleString()} bytes (~${Math.round(prompt.bytes / 4).toLocaleString()} tokens). Every cache-read of this prefix is billed.`}
                 >
-                  prompt {promptKbLabel}
+                  prompt {prompt.label}
                 </Pill>
               )}
               {e.logPruned && (

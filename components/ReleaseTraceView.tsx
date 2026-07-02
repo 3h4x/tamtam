@@ -4,23 +4,12 @@ import { useState, useEffect } from 'react'
 import Link from 'next/link'
 import { ErrorState } from './ErrorState'
 import { resolveGithubBoardUrl } from '@/lib/client/resolve-github-board-url'
-import { Button, buttonVariants } from '@/components/ui/Button'
-import { EmptyState } from '@/components/ui/EmptyState'
-import { Pill, type PillTone } from '@/components/ui/Pill'
-import { Spinner } from '@/components/ui/Spinner'
-import { StatusIcon } from '@/components/ui/StatusIcon'
+import { buttonVariants } from '@/components/ui/Button'
+import { Pill } from '@/components/ui/Pill'
+import { PipelineTimeline } from '@/components/project-runs/PipelineTimeline'
+import type { JobTraceStep } from '@/lib/jobs/job-trace-types'
 
-interface ReleaseStep {
-  job_id: string
-  kind: string
-  status: 'running' | 'done' | 'aborted'
-  exit_code: number | null
-  started_at: number
-  finished_at: number | null
-  duration_ms: number | null
-  verdict: string | null
-  log_excerpt: string
-}
+type ReleaseStep = JobTraceStep
 
 interface ReleaseTrigger {
   job_id: string
@@ -62,42 +51,6 @@ function formatTs(secs: number): string {
   })
 }
 
-function StepGlyph({ step }: { step: ReleaseStep }) {
-  if (step.status === 'running') {
-    return (
-      <Spinner size="xl" color="accent" />
-    )
-  }
-  if (step.status === 'aborted') {
-    return <StatusIcon ok={false} size="sm" ariaLabel="aborted" />
-  }
-  if (step.exit_code === 0) {
-    return <StatusIcon ok={true} size="sm" ariaLabel="done" />
-  }
-  if (step.verdict === 'NEEDS ATTENTION') {
-    return <span className="text-status-warning font-bold">!</span>
-  }
-  if (step.verdict === 'LGTM') {
-    return <StatusIcon ok={true} size="sm" ariaLabel="LGTM" />
-  }
-  return <StatusIcon ok={false} size="sm" ariaLabel="failed" />
-}
-
-function verdictBadge(verdict: string | null) {
-  if (!verdict) return null
-  const tone: PillTone =
-    verdict === 'LGTM'
-      ? 'success'
-      : verdict === 'NEEDS ATTENTION'
-        ? 'warning'
-        : 'error'
-  return (
-    <Pill tone={tone} size="xs" className="text-[10px] px-1.5 rounded font-mono">
-      {verdict}
-    </Pill>
-  )
-}
-
 interface Props {
   projectName: string
   releaseId: string
@@ -106,7 +59,6 @@ interface Props {
 export function ReleaseTraceView({ projectName, releaseId }: Props) {
   const [trace, setTrace] = useState<ReleaseTrace | null>(null)
   const [error, setError] = useState<string | null>(null)
-  const [expandedStep, setExpandedStep] = useState<string | null>(null)
   const [boardUrl, setBoardUrl] = useState<string>('')
   const [reloadNonce, setReloadNonce] = useState(0)
 
@@ -142,7 +94,6 @@ export function ReleaseTraceView({ projectName, releaseId }: Props) {
     }
     setTrace(null)
     setError(null)
-    setExpandedStep(null)
     load()
     // Poll while running
     const id = setInterval(async () => {
@@ -311,91 +262,7 @@ export function ReleaseTraceView({ projectName, releaseId }: Props) {
       </div>
 
       {/* Timeline */}
-      {trace.steps.length === 0 ? (
-        <EmptyState title="No pipeline steps recorded yet" paddingY="xs" align="start" className="px-2" />
-      ) : (
-        <div className="relative">
-          {/* Vertical line */}
-          <div className="absolute left-[19px] top-4 bottom-4 w-px bg-border" />
-
-          <div className="space-y-3">
-            {trace.steps.map((step) => {
-              const isOpen = expandedStep === step.job_id
-              const dur = step.duration_ms
-                ? formatDuration(step.duration_ms)
-                : step.finished_at
-                  ? formatDuration(Math.round((step.finished_at - step.started_at) * 1000))
-                  : null
-
-              return (
-                <div key={step.job_id} className="relative pl-10">
-                  {/* Node */}
-                  <div className="absolute left-[11px] top-3 w-[18px] h-[18px] flex items-center justify-center bg-bg-primary border border-border rounded-full text-[11px]">
-                    <StepGlyph step={step} />
-                  </div>
-
-                  <div className="rounded-md border border-border bg-bg-secondary overflow-hidden">
-                    <Button
-                      type="button"
-                      variant="ghost"
-                      className="w-full !justify-start !gap-3 !rounded-none !border-0 bg-transparent !px-4 !py-3 text-left !font-normal text-text-primary hover:!bg-bg-tertiary"
-                      onClick={() => setExpandedStep(isOpen ? null : step.job_id)}
-                    >
-                      <span className={`font-mono text-sm font-semibold w-20 shrink-0 ${
-                        step.status === 'running' ? 'text-accent' :
-                        step.status === 'aborted' ? 'text-status-error' :
-                        step.exit_code === 0 || step.verdict === 'LGTM' ? 'text-text-primary' :
-                        step.verdict === 'NEEDS ATTENTION' ? 'text-status-warning' :
-                        step.exit_code !== null ? 'text-status-error' : 'text-text-secondary'
-                      }`}>
-                        {step.kind}
-                      </span>
-                      <div className="flex items-center gap-2 flex-1 min-w-0">
-                        {verdictBadge(step.verdict)}
-                        {dur && (
-                          <span className="text-[10px] text-text-tertiary font-mono">{dur}</span>
-                        )}
-                        {step.status === 'running' && (
-                          <span className="text-[10px] text-accent font-mono">running…</span>
-                        )}
-                        {step.status === 'aborted' && (
-                          <span className="text-[10px] text-status-error font-mono">cancelled</span>
-                        )}
-                      </div>
-                      <span className="text-[10px] text-text-tertiary font-mono shrink-0">
-                        {formatTs(step.started_at)}
-                      </span>
-                      <Link
-                        href={`/project/${encodeURIComponent(projectName)}/terminal?job=${encodeURIComponent(step.job_id)}`}
-                        className={buttonVariants({ variant: 'link', className: 'text-[10px] font-mono shrink-0 z-10' })}
-                        onClick={(e) => e.stopPropagation()}
-                      >
-                        full log →
-                      </Link>
-                      <span className={`text-text-tertiary text-xs transition-transform ${isOpen ? 'rotate-180' : ''}`}>
-                        ▾
-                      </span>
-                    </Button>
-
-                    {isOpen && step.log_excerpt && (
-                      <div className="px-4 pb-3 border-t border-border">
-                        <pre className="text-[11px] text-text-secondary font-mono whitespace-pre-wrap break-words mt-2 max-h-48 overflow-y-auto leading-relaxed">
-                          {step.log_excerpt}
-                        </pre>
-                      </div>
-                    )}
-                    {isOpen && !step.log_excerpt && (
-                      <div className="px-4 pb-3 border-t border-border">
-                        <p className="text-xs text-text-tertiary font-mono mt-2">no log excerpt available</p>
-                      </div>
-                    )}
-                  </div>
-                </div>
-              )
-            })}
-          </div>
-        </div>
-      )}
+      <PipelineTimeline steps={trace.steps} projectName={projectName} />
     </div>
   )
 }

@@ -28,8 +28,9 @@ export function dayLabel(ts: number): string {
 
 export function formatTokens(n: number): string {
   if (n < 1000) return `${n}`
-  if (n < 1000000) return `${(n / 1000).toFixed(1)}k`
-  return `${(n / 1000000).toFixed(1)}M`
+  if (n < 1_000_000) return `${(n / 1000).toFixed(1)}k`
+  if (n < 1_000_000_000) return `${(n / 1_000_000).toFixed(1)}M`
+  return `${(n / 1_000_000_000).toFixed(1)}B`
 }
 
 export function formatCost(usd: number): string {

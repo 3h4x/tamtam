@@ -1,7 +1,6 @@
 'use client'
 
 import Link from 'next/link'
-import { RUN_ROW_GRID_CLASS } from '@/components/project-runs/RunRow'
 import { Button, buttonVariants } from '@/components/ui/Button'
 
 type EmptyMode = 'empty' | 'search' | 'running' | 'failed' | 'filtered'
@@ -19,51 +18,25 @@ interface ProjectRunsEmptyStateProps {
 
 function LoadingRow({ compact = false }: { compact?: boolean }) {
   return (
-    <div className="border-b border-border last:border-b-0 lg:col-span-full lg:grid lg:grid-cols-subgrid lg:gap-x-3 lg:items-center">
-      <div className={`grid gap-3 px-4 py-2.5 lg:contents ${RUN_ROW_GRID_CLASS} lg:items-center`} style={{ opacity: compact ? 0.68 : 1 }}>
-        <div className="flex min-w-0 items-start gap-2">
-          <div className="skeleton mt-0.5 h-6 w-6 shrink-0 rounded" />
-          <div className="skeleton mt-0.5 h-5 w-5 shrink-0 rounded-full" />
-          <div className="min-w-0 flex-1">
-            <div className="flex min-w-0 items-center gap-2">
-              <div className="skeleton h-5 w-14 shrink-0 rounded" />
-              <div className="skeleton h-4 w-40 max-w-[75%] rounded" />
-            </div>
-            <div className="mt-1 flex flex-wrap items-center gap-2">
-              <div className="skeleton h-3 w-[4.5rem] rounded" />
-              <div className="skeleton h-3 w-14 rounded" />
-              <div className="skeleton h-3 w-20 rounded" />
-            </div>
-          </div>
+    <div className="flex items-start gap-3 border-b border-border px-4 py-2.5 last:border-b-0" style={{ opacity: compact ? 0.68 : 1 }}>
+      <div className="skeleton mt-0.5 h-5 w-5 shrink-0 rounded-full" />
+      <div className="min-w-0 flex-1">
+        <div className="flex items-center gap-2">
+          <div className="skeleton h-5 w-14 shrink-0 rounded" />
+          <div className="skeleton h-4 w-48 max-w-[70%] rounded" />
         </div>
-
-        <div className="min-w-0">
-          <div className="flex flex-wrap items-center gap-1.5">
-            <div className="skeleton h-5 w-16 rounded-full" />
-            <div className="skeleton h-5 w-20 rounded-full" />
-            {!compact && <div className="skeleton h-5 w-14 rounded-full" />}
-          </div>
-          <div className="mt-1.5 flex items-center gap-2">
-            <div className="skeleton h-3 w-10 rounded" />
-            <div className="skeleton h-3 w-44 max-w-[80%] rounded" />
-          </div>
+        <div className="mt-1.5 flex flex-wrap items-center gap-2">
+          <div className="skeleton h-3 w-24 rounded" />
+          <div className="skeleton h-3 w-16 rounded" />
         </div>
-
-        <div className="flex items-center gap-2 lg:justify-end">
-          <div className="skeleton h-4 w-14 rounded" />
+        <div className="mt-1.5 flex flex-wrap items-center gap-1.5">
+          <div className="skeleton h-5 w-16 rounded" />
+          {!compact && <div className="skeleton h-5 w-20 rounded" />}
         </div>
-
-        <div className="min-w-0">
-          <div className="flex flex-wrap items-center gap-2 lg:justify-end">
-            <div className="skeleton h-3 w-20 rounded" />
-            <div className="skeleton h-3 w-16 rounded" />
-            {!compact && <div className="skeleton h-3 w-12 rounded" />}
-          </div>
-        </div>
-
-        <div className="flex items-center justify-start lg:justify-end">
-          <div className="skeleton h-7 w-[4.5rem] rounded-md" />
-        </div>
+      </div>
+      <div className="flex shrink-0 items-center gap-4">
+        <div className="skeleton h-4 w-12 rounded" />
+        <div className="skeleton h-3 w-24 rounded" />
       </div>
     </div>
   )
@@ -82,7 +55,6 @@ export function ProjectRunsLoadingState() {
               <div className="skeleton h-3 w-24 rounded" />
             </div>
           </div>
-
           <div className="grid grid-cols-2 gap-2 sm:grid-cols-4 lg:min-w-[520px]">
             {Array.from({ length: 4 }).map((_, index) => (
               <div key={index} className="rounded-md border border-border bg-bg-primary px-3 py-2">
@@ -92,7 +64,6 @@ export function ProjectRunsLoadingState() {
             ))}
           </div>
         </div>
-
         <div className="flex items-center gap-1.5 overflow-hidden p-1">
           {Array.from({ length: 7 }).map((_, index) => (
             <div
@@ -114,16 +85,7 @@ export function ProjectRunsLoadingState() {
             <div className="skeleton h-3 w-6 rounded" />
             <div className="h-px flex-1 bg-border/60" />
           </div>
-
-          <div className={`rounded-lg border border-border bg-bg-primary lg:grid ${RUN_ROW_GRID_CLASS} lg:gap-x-3`}>
-            <div className="hidden border-b border-border bg-bg-secondary pl-4 pr-3 py-1.5 text-[10px] font-medium uppercase tracking-wider text-text-tertiary lg:col-span-full lg:grid lg:grid-cols-subgrid lg:gap-x-3">
-              <span>wanted</span>
-              <span>done / progress</span>
-              <span className="text-right">duration</span>
-              <span className="text-right">usage</span>
-              <span className="text-right">actions</span>
-            </div>
-
+          <div className="overflow-hidden rounded-lg border border-border bg-bg-primary">
             {Array.from({ length: group.rows }).map((_, rowIndex) => (
               <LoadingRow key={`${group.label}:${rowIndex}`} compact={groupIndex === 1 && rowIndex > 0} />
             ))}
