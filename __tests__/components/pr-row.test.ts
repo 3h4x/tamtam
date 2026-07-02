@@ -104,21 +104,12 @@ describe('PRRow', () => {
   })
 
   it('loads gate badges and runs DoD against the linked issue when one is present', async () => {
-    const fetchMock = vi.fn().mockResolvedValue({
-      ok: true,
-      json: async () => ({
-        issueNumber: 77,
-        tests: 'pass',
-        review: 'warn',
-        dod: 'warn',
-        dodSummary: '2/3',
-      }),
-    })
-    vi.stubGlobal('fetch', fetchMock)
+    // Gates are now folded into the PR payload (no per-row pr-gates fetch).
+    vi.stubGlobal('fetch', vi.fn())
     runMarkDod.mockResolvedValue({ jobId: 'job-123' })
 
     const { container, unmount } = renderPrRow({
-      pr: buildPr(),
+      pr: buildPr({ gates: { issueNumber: 77, tests: 'pass', review: 'warn', dod: 'warn', dodSummary: '2/3' } }),
       projectName: 'acme/widgets',
       onMerged: vi.fn(),
     })
@@ -135,21 +126,11 @@ describe('PRRow', () => {
   })
 
   it('falls back to pr_number when DoD has no linked issue context', async () => {
-    const fetchMock = vi.fn().mockResolvedValue({
-      ok: true,
-      json: async () => ({
-        issueNumber: null,
-        tests: 'pass',
-        review: 'pass',
-        dod: 'warn',
-        dodSummary: '1/1',
-      }),
-    })
-    vi.stubGlobal('fetch', fetchMock)
+    vi.stubGlobal('fetch', vi.fn())
     runMarkDod.mockResolvedValue({ jobId: 'job-456' })
 
     const { container, unmount } = renderPrRow({
-      pr: buildPr(),
+      pr: buildPr({ gates: { issueNumber: null, tests: 'pass', review: 'pass', dod: 'warn', dodSummary: '1/1' } }),
       projectName: 'acme/widgets',
       onMerged: vi.fn(),
     })
@@ -210,17 +191,7 @@ describe('PRRow', () => {
   })
 
   it('keeps the fourth PR label visible before collapsing into overflow', async () => {
-    const fetchMock = vi.fn().mockResolvedValue({
-      ok: true,
-      json: async () => ({
-        issueNumber: null,
-        tests: 'pass',
-        review: 'warn',
-        dod: 'none',
-        dodSummary: null,
-      }),
-    })
-    vi.stubGlobal('fetch', fetchMock)
+    vi.stubGlobal('fetch', vi.fn())
 
     const { container, unmount } = renderPrRow({
       pr: buildPr({
@@ -236,7 +207,6 @@ describe('PRRow', () => {
       onMerged: vi.fn(),
     })
 
-    await vi.waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(1))
     expect(container.textContent).toContain('release')
     expect(container.textContent).toContain('security')
     expect(container.textContent).toContain('backend')
@@ -247,17 +217,7 @@ describe('PRRow', () => {
   })
 
   it('disables PR review while jobs are paused and re-enables it live', async () => {
-    const fetchMock = vi.fn().mockResolvedValue({
-      ok: true,
-      json: async () => ({
-        issueNumber: null,
-        tests: 'pass',
-        review: 'warn',
-        dod: 'none',
-        dodSummary: null,
-      }),
-    })
-    vi.stubGlobal('fetch', fetchMock)
+    vi.stubGlobal('fetch', vi.fn())
 
     const { container, rerender, unmount } = renderPrRow({
       pr: buildPr(),
@@ -266,7 +226,6 @@ describe('PRRow', () => {
       onMerged: vi.fn(),
     })
 
-    await vi.waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(1))
     const reviewButton = Array.from(container.querySelectorAll('button')).find(node => node.textContent?.trim() === 'Review')
     expect(reviewButton).toBeInstanceOf(HTMLButtonElement)
     expect((reviewButton as HTMLButtonElement).disabled).toBe(true)
@@ -289,21 +248,12 @@ describe('PRRow', () => {
   })
 
   it('disables DoD verification while jobs are paused and re-enables it live', async () => {
-    const fetchMock = vi.fn().mockResolvedValue({
-      ok: true,
-      json: async () => ({
-        issueNumber: 77,
-        tests: 'pass',
-        review: 'warn',
-        dod: 'warn',
-        dodSummary: '2/3',
-      }),
-    })
-    vi.stubGlobal('fetch', fetchMock)
+    vi.stubGlobal('fetch', vi.fn())
     runMarkDod.mockResolvedValue({ jobId: 'job-789' })
+    const gates = { issueNumber: 77, tests: 'pass' as const, review: 'warn' as const, dod: 'warn' as const, dodSummary: '2/3' }
 
     const { container, rerender, unmount } = renderPrRow({
-      pr: buildPr(),
+      pr: buildPr({ gates }),
       projectName: 'acme/widgets',
       jobsPaused: true,
       onMerged: vi.fn(),
@@ -318,7 +268,7 @@ describe('PRRow', () => {
     expect(runMarkDod).not.toHaveBeenCalled()
 
     rerender({
-      pr: buildPr(),
+      pr: buildPr({ gates }),
       projectName: 'acme/widgets',
       jobsPaused: false,
       onMerged: vi.fn(),

@@ -80,10 +80,9 @@ describe('IssueRow', () => {
   })
 
   it('opens a new work-on session and stashes the issue metadata when no prior context exists', async () => {
-    const fetchMock = vi.fn().mockResolvedValue({
-      ok: true,
-      json: async () => ({ hasContext: false }),
-    })
+    // hasContext is now folded into the issue payload (no per-row fetch on
+    // mount), so an unset flag means "Work on", not "Continue".
+    const fetchMock = vi.fn()
     vi.stubGlobal('fetch', fetchMock)
 
     const { container, unmount } = renderIssueRow({
@@ -92,7 +91,6 @@ describe('IssueRow', () => {
       projectCfg: buildConfig(),
     })
 
-    await vi.waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(1))
     const workOn = Array.from(container.querySelectorAll('button')).find(button => button.textContent === 'Work on')
     expect(workOn?.getAttribute('title')).toContain('auto-push + PR (off)')
 
@@ -111,20 +109,16 @@ describe('IssueRow', () => {
   })
 
   it('shows Continue when prior context exists and resumes the saved session payload', async () => {
-    const fetchMock = vi
-      .fn()
-      .mockResolvedValueOnce({
-        ok: true,
-        json: async () => ({ hasContext: true }),
-      })
-      .mockResolvedValueOnce({
-        ok: true,
-        json: async () => ({ sessionId: 'sess-123', provider: 'codex', prompt: 'resume prompt', unverifiedCount: 2 }),
-      })
+    // The Continue affordance now comes from issue.hasContext; the only fetch
+    // is the continue-issue lookup fired on click.
+    const fetchMock = vi.fn().mockResolvedValue({
+      ok: true,
+      json: async () => ({ sessionId: 'sess-123', provider: 'codex', prompt: 'resume prompt', unverifiedCount: 2 }),
+    })
     vi.stubGlobal('fetch', fetchMock)
 
     const { container, unmount } = renderIssueRow({
-      issue: buildIssue(),
+      issue: buildIssue({ hasContext: true }),
       projectName: 'acme/widgets',
       projectCfg: buildConfig(),
     })
@@ -149,17 +143,11 @@ describe('IssueRow', () => {
   })
 
   it('falls back to a plain work-on payload when continue lookup fails', async () => {
-    const fetchMock = vi
-      .fn()
-      .mockResolvedValueOnce({
-        ok: true,
-        json: async () => ({ hasContext: true }),
-      })
-      .mockRejectedValueOnce(new Error('boom'))
+    const fetchMock = vi.fn().mockRejectedValue(new Error('boom'))
     vi.stubGlobal('fetch', fetchMock)
 
     const { container, unmount } = renderIssueRow({
-      issue: buildIssue(),
+      issue: buildIssue({ hasContext: true }),
       projectName: 'acme/widgets',
       projectCfg: buildConfig(),
     })
@@ -182,11 +170,7 @@ describe('IssueRow', () => {
   })
 
   it('keeps the fourth label visible before collapsing into overflow', async () => {
-    const fetchMock = vi.fn().mockResolvedValue({
-      ok: true,
-      json: async () => ({ hasContext: false }),
-    })
-    vi.stubGlobal('fetch', fetchMock)
+    vi.stubGlobal('fetch', vi.fn())
 
     const { container, unmount } = renderIssueRow({
       issue: buildIssue({
@@ -202,7 +186,6 @@ describe('IssueRow', () => {
       projectCfg: buildConfig(),
     })
 
-    await vi.waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(1))
     expect(container.textContent).toContain('bug')
     expect(container.textContent).toContain('urgent')
     expect(container.textContent).toContain('backend')
