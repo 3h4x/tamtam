@@ -5,12 +5,14 @@ import {
   runIsCaughtUp,
   runDispatchedAction,
   runWasProductive,
+  runIsExternallyGated,
   isProjectCaughtUpUnfruitful,
   isProjectPersistentlyUnfruitful,
   unfruitfulRateSample,
   recentScheduledAgentRuns,
-  autoPauseUnfruitfulProjects,
+  autoDisableUnfruitfulAgents,
 } from '@/lib/orchestrator/unfruitful-pause';
+import type { AgentRole } from '@/lib/agents/roles';
 
 function run(over: Partial<JobData> = {}): JobData {
   return {
@@ -214,125 +216,163 @@ describe('recentScheduledAgentRuns', () => {
   });
 });
 
-describe('autoPauseUnfruitfulProjects', () => {
+describe('runIsExternallyGated', () => {
+  it('true when the run targeted a GitHub issue/PR', () => {
+    expect(runIsExternallyGated(run({ ghIssueNumber: 42 }))).toBe(true);
+  });
+  it('true when the run dispatched a server-side triage action (merge/close)', () => {
+    expect(runIsExternallyGated(triage(1))).toBe(true);
+  });
+  it('false for a plain no-diff run with no issue link and no action', () => {
+    expect(runIsExternallyGated(run({ ghIssueNumber: null, workSummary: CAUGHT_UP }))).toBe(false);
+  });
+});
+
+describe('autoDisableUnfruitfulAgents', () => {
+  // Default fixture runs carry kind `agent:refactor-split`, matching the
+  // producer agent below so recentScheduled lookups resolve to it.
   const caughtUp = run({ linesAdded: 0, linesRemoved: 0, workSummary: CAUGHT_UP });
+  const producer = (over: Record<string, unknown> = {}) => ({
+    id: 'a-refactor',
+    name: 'refactor-split',
+    project: 'proj',
+    role: 'producer' as AgentRole,
+    kind: 'user' as const,
+    enabled: true,
+    ...over,
+  });
   const baseDeps = (over: Record<string, unknown> = {}) => ({
     enabled: true,
     threshold: 3,
     rateThreshold: 0.2,
     listJobs: () => [caughtUp, caughtUp, caughtUp] as JobData[],
     isAgentJobKind: (k: unknown) => String(k).startsWith('agent:'),
-    listProjects: () => [{ name: 'bonker', paused: false }],
-    pauseProject: vi.fn().mockResolvedValue(true),
+    getJobKind: (k: unknown) => (typeof k === 'string' ? k : ''),
+    listAgents: () => [producer()],
+    disableAgent: vi.fn().mockResolvedValue(true),
     recommend: vi.fn().mockResolvedValue(undefined),
     log: vi.fn(),
     ...over,
   });
 
-  it('pauses a caught-up project and records a recommendation', async () => {
+  it('disables a caught-up producer agent and records a per-agent recommendation', async () => {
     const deps = baseDeps();
-    const res = await autoPauseUnfruitfulProjects(deps as never);
-    expect(res.paused).toEqual(['bonker']);
-    expect(deps.pauseProject).toHaveBeenCalledWith('bonker');
+    const res = await autoDisableUnfruitfulAgents(deps as never);
+    expect(res.disabled).toEqual(['refactor-split']);
+    expect(deps.disableAgent).toHaveBeenCalledWith(
+      expect.objectContaining({ id: 'a-refactor', name: 'refactor-split', project: 'proj' }),
+    );
     expect(deps.recommend).toHaveBeenCalledTimes(1);
+    expect(deps.recommend.mock.calls[0][0].agentName).toBe('refactor-split');
   });
 
-  it('pauses a persistently-unfruitful project (low rate, interspersed diffs) with a rate-reason recommendation', async () => {
+  it('disables a persistently-unfruitful producer with a rate-reason recommendation', async () => {
     const oneFruitful = run({ linesAdded: 8, workSummary: 'did a thing' });
     // 10 scheduled runs, 1 fruitful = 10% < 20% floor; no all-no-diff window.
     const jobs = [oneFruitful, ...Array(9).fill(caughtUp)] as JobData[];
     const recommend = vi.fn().mockResolvedValue(undefined);
     const deps = baseDeps({ listJobs: () => jobs, recommend });
-    const res = await autoPauseUnfruitfulProjects(deps as never);
-    expect(res.paused).toEqual(['bonker']);
-    expect(recommend).toHaveBeenCalledTimes(1);
+    const res = await autoDisableUnfruitfulAgents(deps as never);
+    expect(res.disabled).toEqual(['refactor-split']);
     expect(recommend.mock.calls[0][0].title).toMatch(/persistently unfruitful/i);
   });
 
-  it('does not pause when the unfruitful runs came from now-disabled agents', async () => {
-    // 10 no-diff scheduled runs, all from a disabled agent. With the
-    // enabled-agent filter dropping them, there is no enabled-agent history to
-    // judge → the project must NOT be paused.
-    const jobs = Array(10).fill(run({ kind: 'agent:refactor-split', linesAdded: 0, linesRemoved: 0, workSummary: CAUGHT_UP })) as JobData[];
-    const pauseProject = vi.fn().mockResolvedValue(true);
-    const deps = baseDeps({
-      listJobs: () => jobs,
-      pauseProject,
-      // refactor-split is disabled; only issue-cruncher is enabled.
-      isEnabledAgentRun: (_p: string, kind: string) => kind === 'agent:issue-cruncher',
-    });
-    const res = await autoPauseUnfruitfulProjects(deps as never);
-    expect(res.paused).toEqual([]);
-    expect(pauseProject).not.toHaveBeenCalled();
+  it('never disables a non-producer agent (idle is by-design for publisher/monitor/reviewer/planner)', async () => {
+    const deps = baseDeps({ listAgents: () => [producer({ role: 'publisher' })] });
+    const res = await autoDisableUnfruitfulAgents(deps as never);
+    expect(res.disabled).toEqual([]);
+    expect(deps.disableAgent).not.toHaveBeenCalled();
   });
 
-  it('still pauses when the unfruitful runs came from a STILL-enabled agent', async () => {
-    const jobs = Array(10).fill(run({ kind: 'agent:refactor-split', linesAdded: 0, linesRemoved: 0, workSummary: CAUGHT_UP })) as JobData[];
-    const deps = baseDeps({
-      listJobs: () => jobs,
-      isEnabledAgentRun: (_p: string, kind: string) => kind === 'agent:refactor-split',
-    });
-    const res = await autoPauseUnfruitfulProjects(deps as never);
-    expect(res.paused).toEqual(['bonker']);
+  it('never disables a system agent', async () => {
+    const deps = baseDeps({ listAgents: () => [producer({ kind: 'system' })] });
+    const res = await autoDisableUnfruitfulAgents(deps as never);
+    expect(res.disabled).toEqual([]);
   });
 
-  it('does not pause a project at/above the rate floor', async () => {
+  it('never disables an externally-gated producer (issue-cruncher waiting on a GitHub backlog)', async () => {
+    // A producer-role cruncher whose recent runs target issues: a no-diff
+    // stretch means "no open work right now", not waste.
+    const issueRuns = Array(6).fill(
+      run({ kind: 'agent:issue-cruncher', ghIssueNumber: 7, linesAdded: 0, linesRemoved: 0, workSummary: CAUGHT_UP }),
+    ) as JobData[];
+    const deps = baseDeps({
+      listJobs: () => issueRuns,
+      listAgents: () => [producer({ id: 'a-ic', name: 'issue-cruncher' })],
+    });
+    const res = await autoDisableUnfruitfulAgents(deps as never);
+    expect(res.disabled).toEqual([]);
+    expect(deps.disableAgent).not.toHaveBeenCalled();
+  });
+
+  it('does not disable a producer with fewer scheduled runs than the threshold', async () => {
+    const deps = baseDeps({ listJobs: () => [caughtUp, caughtUp] as JobData[] }); // 2 < threshold 3
+    const res = await autoDisableUnfruitfulAgents(deps as never);
+    expect(res.disabled).toEqual([]);
+  });
+
+  it('does not disable a producer still producing diffs above the rate floor', async () => {
     const fruitful = run({ linesAdded: 8 });
     const jobs = [fruitful, fruitful, fruitful, ...Array(7).fill(caughtUp)] as JobData[]; // 30%
     const deps = baseDeps({ listJobs: () => jobs });
-    const res = await autoPauseUnfruitfulProjects(deps as never);
-    expect(res.paused).toEqual([]);
+    const res = await autoDisableUnfruitfulAgents(deps as never);
+    expect(res.disabled).toEqual([]);
   });
 
-  it('does not count manual agent runs toward the auto-pause threshold', async () => {
-    const manualCaughtUp = run({
-      linesAdded: 0,
-      linesRemoved: 0,
+  it('ignores manual (non-scheduled) runs when judging an agent', async () => {
+    const manual = run({
       workSummary: CAUGHT_UP,
       contextMeta: JSON.stringify({ agent: { triggeredBy: 'manual' } }),
     });
-    const deps = baseDeps({ listJobs: () => [manualCaughtUp, manualCaughtUp, caughtUp] as JobData[] });
-    const res = await autoPauseUnfruitfulProjects(deps as never);
-    expect(res.paused).toEqual([]);
-    expect(deps.pauseProject).not.toHaveBeenCalled();
-  });
-
-  it('uses one qualifying scheduled run when threshold is 0', async () => {
-    const deps = baseDeps({ threshold: 0, listJobs: () => [caughtUp] as JobData[] });
-    const res = await autoPauseUnfruitfulProjects(deps as never);
-    expect(res.paused).toEqual(['bonker']);
-    expect(deps.pauseProject).toHaveBeenCalledWith('bonker');
+    const deps = baseDeps({ listJobs: () => [manual, manual, manual] as JobData[] });
+    const res = await autoDisableUnfruitfulAgents(deps as never);
+    expect(res.disabled).toEqual([]);
   });
 
   it('no-ops when disabled', async () => {
     const deps = baseDeps({ enabled: false });
-    const res = await autoPauseUnfruitfulProjects(deps as never);
-    expect(res.paused).toEqual([]);
-    expect(deps.pauseProject).not.toHaveBeenCalled();
+    const res = await autoDisableUnfruitfulAgents(deps as never);
+    expect(res.disabled).toEqual([]);
+    expect(deps.disableAgent).not.toHaveBeenCalled();
   });
 
-  it('skips already-paused projects', async () => {
-    const deps = baseDeps({ listProjects: () => [{ name: 'bonker', paused: true }] });
-    const res = await autoPauseUnfruitfulProjects(deps as never);
-    expect(res.paused).toEqual([]);
-    expect(deps.pauseProject).not.toHaveBeenCalled();
+  it('skips agents whose project is not active (paused or archived)', async () => {
+    const deps = baseDeps({ isProjectActive: () => false });
+    const res = await autoDisableUnfruitfulAgents(deps as never);
+    expect(res.disabled).toEqual([]);
+    expect(deps.disableAgent).not.toHaveBeenCalled();
   });
 
-  it('does not pause when the project still produces diffs', async () => {
-    const fruitful = run({ linesAdded: 5, workSummary: 'work' });
-    const deps = baseDeps({ listJobs: () => [fruitful, caughtUp, caughtUp] as JobData[] });
-    const res = await autoPauseUnfruitfulProjects(deps as never);
-    expect(res.paused).toEqual([]);
-    expect(deps.pauseProject).not.toHaveBeenCalled();
+  it('skips an already-disabled agent', async () => {
+    const deps = baseDeps({ listAgents: () => [producer({ enabled: false })] });
+    const res = await autoDisableUnfruitfulAgents(deps as never);
+    expect(res.disabled).toEqual([]);
   });
 
-  it('does not pause an issue-cruncher whose runs merge/close with zero code diff', async () => {
-    // Regression: a cruncher draining a PR/issue backlog lands no lines but
-    // dispatches merge/close actions every run. It must stay unpaused.
-    const merged = triage(1, { kind: 'agent:issue-cruncher' });
-    const deps = baseDeps({ listJobs: () => [merged, merged, merged] as JobData[] });
-    const res = await autoPauseUnfruitfulProjects(deps as never);
-    expect(res.paused).toEqual([]);
-    expect(deps.pauseProject).not.toHaveBeenCalled();
+  it('does not record a recommendation when the disable write fails', async () => {
+    const deps = baseDeps({ disableAgent: vi.fn().mockResolvedValue(false) });
+    const res = await autoDisableUnfruitfulAgents(deps as never);
+    expect(res.disabled).toEqual([]);
+    expect(deps.recommend).not.toHaveBeenCalled();
+  });
+
+  it('only disables the unfruitful producer, leaving a fruitful sibling agent enabled', async () => {
+    // Two producers in one project: one caught up, one shipping diffs. Only the
+    // caught-up one is disabled — the project itself is never touched.
+    const idleRuns = Array(3).fill(run({ kind: 'agent:refactor-split', workSummary: CAUGHT_UP })) as JobData[];
+    const busyRuns = Array(3).fill(run({ kind: 'agent:feature-builder', linesAdded: 20 })) as JobData[];
+    const disableAgent = vi.fn().mockResolvedValue(true);
+    const deps = baseDeps({
+      listJobs: () => [...idleRuns, ...busyRuns] as JobData[],
+      listAgents: () => [
+        producer(),
+        producer({ id: 'a-feat', name: 'feature-builder' }),
+      ],
+      disableAgent,
+    });
+    const res = await autoDisableUnfruitfulAgents(deps as never);
+    expect(res.disabled).toEqual(['refactor-split']);
+    expect(disableAgent).toHaveBeenCalledTimes(1);
+    expect(disableAgent).toHaveBeenCalledWith(expect.objectContaining({ name: 'refactor-split' }));
   });
 });

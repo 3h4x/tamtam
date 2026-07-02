@@ -129,19 +129,17 @@ for the full Phase 1 design.
   eligible agents are unfruitful gets no boost), the autopilot **cadence-throttles
   it** (see the producer policy above), and an `agent_unfruitful` recommendation
   is written.
-- **Project auto-pause** (`lib/orchestrator/unfruitful-pause.ts`, probe sweep):
-  pauses a whole project when it is **caught up** (last `auto_pause_unfruitful_runs`
-  scheduled runs all no-diff with ≥1 clean nothing-to-do run) **or** **persistently
-  unfruitful** (line-level fruitful rate `< auto_pause_unfruitful_rate` over a wider
-  sample — catches projects that re-touch files for *zero net line change*, which a
-  files-or-lines metric counts as "fruitful" but produces nothing committable).
-  Reversible from Settings; writes an `auto_pause_unfruitful` recommendation.
+- **Per-agent auto-disable** (`lib/orchestrator/unfruitful-pause.ts`, probe sweep):
+  disables only an unfruitful enabled user producer when that agent is **caught up**
+  (last `auto_pause_unfruitful_runs` scheduled runs all no-diff with ≥1 clean
+  nothing-to-do run) **or** **persistently unfruitful** (line-level fruitful rate
+  `< auto_pause_unfruitful_rate` over a wider sample). The project and healthy
+  sibling agents keep running. System agents, non-producer roles, and externally
+  gated issue/PR producers are exempt. Reversible from the agent page; writes an
+  `agent_unfruitful` recommendation.
 - **Per-agent saturation skip** (`lib/orchestrator/agent-saturation.ts`, agent-cron
-  `prereqSkipReason`): the project auto-pause above only fires when the *whole*
-  project is unfruitful, so a single agent whose target work is exhausted (e.g. a
-  `refactor-ui` agent landing 0-line no-ops every run) keeps firing while the
-  project stays active on its *other* still-fruitful agents. This gate skips that
-  agent's scheduled fire when **this agent** is persistently unfruitful (line-level
+  `prereqSkipReason`): the auto-disable sweep runs periodically, so this fast path
+  skips a scheduled fire as soon as **this agent** is persistently unfruitful (line-level
   fruitful rate `< auto_pause_unfruitful_rate` over `unfruitfulRateSample(auto_pause_unfruitful_runs)`
   of its own scheduled runs) **and** HEAD is unchanged since it last ran. The HEAD
   gate is the release valve — any new commit re-enables one run, so it is never

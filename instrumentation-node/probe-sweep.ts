@@ -128,10 +128,9 @@ export async function runProbeSweep(): Promise<void> {
   } catch (err) {
     console.error('[probe-sweep] stranded-branch reconcile error:', err);
   }
-  // Auto-pause caught-up / unfruitful projects: ones whose recent scheduled
-  // agent runs all produced no diff AND at least one reported nothing to do.
-  // Stops a project churning agents (and the git/syspolicyd process storm) for
-  // no value until a human resumes it. No-op when the setting is off.
+  // Auto-disable caught-up / unfruitful producer agents: agents whose own
+  // recent scheduled runs produce no value while the project and healthy
+  // sibling agents keep running. No-op when the setting is off.
   try {
     const { runUnfruitfulPauseSweep } = await import('@/lib/orchestrator/unfruitful-pause');
     await runUnfruitfulPauseSweep();

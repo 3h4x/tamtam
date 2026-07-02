@@ -1,17 +1,26 @@
-// Auto-pause "caught up / unfruitful" projects.
+// Auto-disable "caught up / unfruitful" AGENTS (never whole projects).
 //
-// Some projects keep firing scheduled agents that have nothing left to do —
-// e.g. a `refactor-split` agent whose prerequisite repeatedly reports "no
-// eligible oversized split target", producing zero diffs run after run. That
-// burns budget and (on macOS) hammers syspolicyd/git with a process storm for
-// no value. When a project's recent scheduled runs are ALL no-diff AND at least
-// one explicitly reports nothing-to-do, we pause the project so it stops
-// churning until a human resumes it (or new work appears).
+// Some agents keep firing on their schedule with nothing left to do — e.g. a
+// `refactor-split` producer whose prerequisite repeatedly reports "no eligible
+// oversized split target", producing zero diffs run after run. That burns
+// budget and (on macOS) hammers syspolicyd/git with a process storm for no
+// value. Rather than pause the whole project (which also silences its healthy
+// agents, issue/PR work, manual runs, and releases), we disable only the
+// specific offending agent and record a recommendation. The project stays
+// alive; the operator re-enables the agent from its page when there is new work.
+//
+// Scope guards keep this from silencing agents that are idle by design:
+//   - Only `producer`-role agents are judged by diffs; a no-diff run is the
+//     expected outcome for a monitor/reviewer/planner/publisher (see roles.ts).
+//   - System agents are exempt.
+//   - Externally-gated producers (issue/PR triage such as issue-cruncher) are
+//     exempt: a no-diff stretch means "no open work right now", not waste.
 //
 // Pure functions for the detection (unit-tested); the action takes injected
 // deps so it stays DB-free and testable.
 
 import type { JobData } from '@/lib/jobs/types';
+import type { AgentRole } from '@/lib/agents/roles';
 import { IDLE_SUMMARY_RE } from '@/lib/orchestrator/agent-health-analysis';
 
 interface AgentContextMeta {
@@ -84,6 +93,15 @@ export function runDispatchedAction(run: JobData): boolean {
  *  so triage-only work (merge/close with no diff) counts as productive. */
 export function runWasProductive(run: JobData): boolean {
   return runChangedLines(run) || runDispatchedAction(run);
+}
+
+/** A scheduled run that is externally-gated triage/queue work: it targeted a
+ *  GitHub issue/PR, or it dispatched a server-side action (merge/close/label).
+ *  An agent with ANY such run in its recent window is waiting on an external
+ *  backlog — its no-diff "nothing to do" stretches are expected, not waste — so
+ *  it must never be auto-disabled (that would stop it picking up new issues). */
+export function runIsExternallyGated(run: JobData): boolean {
+  return run.ghIssueNumber != null || runDispatchedAction(run);
 }
 
 /** A run whose work summary explicitly reports nothing to do (caught up). */
@@ -173,141 +191,210 @@ export function recentScheduledAgentRuns(
     .slice(0, limit);
 }
 
-export interface UnfruitfulPauseDeps {
-  /** `auto_pause_unfruitful_enabled` */
+export interface UnfruitfulAgentInput {
+  id: string;
+  name: string;
+  project: string;
+  role: AgentRole;
+  kind: 'user' | 'system';
   enabled: boolean;
-  /** `auto_pause_unfruitful_runs` — consecutive no-diff runs before pausing. */
+}
+
+export interface UnfruitfulAgentDisableDeps {
+  enabled: boolean;
   threshold: number;
-  /** `auto_pause_unfruitful_rate` — fruitful-rate floor for the rate-based
-   *  trigger (over `unfruitfulRateSample(threshold)` runs). 0 disables it,
-   *  leaving only the strict all-no-diff caught-up path. */
   rateThreshold: number;
   listJobs: () => JobData[];
   isAgentJobKind: (kind: unknown) => boolean;
-  /** Optional: keep only runs from agents that are STILL enabled for the
-   *  project. When an operator disables the unfruitful agents (curating a
-   *  project down to, say, only issue-cruncher), those stopped agents' past
-   *  no-diff runs must not keep the project paused — the auto-pause should
-   *  judge only the currently-enabled agent set. Runs whose `agent:<name>`
-   *  kind maps to no enabled agent are dropped before the rate/caught-up
-   *  checks. Absent → count all runs (legacy behavior). */
-  isEnabledAgentRun?: (project: string, kind: string) => boolean;
-  /** Enabled (non-archived) projects with their current paused flag. */
-  listProjects: () => Array<{ name: string; paused?: boolean }>;
-  pauseProject: (name: string) => Promise<boolean>;
-  recommend: (input: { project: string; title: string; detail: string }) => Promise<unknown>;
-  notify?: (project: string, threshold: number) => Promise<void> | void;
+  getJobKind?: (kind: unknown) => string;
+  listAgents: () => UnfruitfulAgentInput[];
+  isProjectActive?: (project: string) => boolean;
+  disableAgent: (agent: UnfruitfulAgentInput) => Promise<boolean>;
+  recommend: (input: {
+    project: string;
+    agentId: string;
+    agentName: string;
+    title: string;
+    detail: string;
+  }) => Promise<unknown>;
   log?: (msg: string) => void;
 }
 
-export interface UnfruitfulPauseResult {
-  paused: string[];
+export interface UnfruitfulAgentDisableResult {
+  disabled: string[];
+}
+
+function jobKindMatchesAgent(
+  run: JobData,
+  agent: Pick<UnfruitfulAgentInput, 'id' | 'name'>,
+  getJobKind: (kind: unknown) => string,
+): boolean {
+  const kind = getJobKind(run.kind);
+  if (kind === `agent:${agent.name}`) return true;
+  const meta = parseAgentMeta(run.contextMeta)?.agent as { id?: string; name?: string } | undefined;
+  return meta?.id === agent.id || meta?.name === agent.name;
+}
+
+function recentScheduledRunsForAgent(
+  allJobs: JobData[],
+  agent: UnfruitfulAgentInput,
+  deps: Pick<UnfruitfulAgentDisableDeps, 'isAgentJobKind' | 'getJobKind'>,
+  limit: number,
+): JobData[] {
+  const getJobKind = deps.getJobKind ?? ((kind: unknown) => (typeof kind === 'string' ? kind : String(kind ?? '')));
+  const scheduledForAgent = allJobs
+    .filter((j) => j.finishedAt != null && deps.isAgentJobKind(j.kind) && isScheduledAgentRun(j))
+    .filter((j) => jobKindMatchesAgent(j, agent, getJobKind))
+    .sort((a, b) => (b.startedAt ?? 0) - (a.startedAt ?? 0));
+
+  const sameProject = scheduledForAgent.filter((j) => j.project === agent.project);
+  return (sameProject.length > 0 ? sameProject : scheduledForAgent).slice(0, limit);
 }
 
 /**
- * Scan enabled, non-paused projects; pause any that are caught-up/unfruitful and
- * record a recommendation explaining why. Idempotent: a paused project is
- * skipped, so it only fires once per caught-up streak.
+ * Scan enabled user producer agents and disable only the agent whose own recent
+ * scheduled runs are caught-up/unfruitful. This intentionally does not pause
+ * the containing project: healthy sibling agents, manual runs, issue/PR work
+ * and release automation must keep running.
  */
-export async function autoPauseUnfruitfulProjects(
-  deps: UnfruitfulPauseDeps,
-): Promise<UnfruitfulPauseResult> {
-  const paused: string[] = [];
-  if (!deps.enabled) return { paused };
+export async function autoDisableUnfruitfulAgents(
+  deps: UnfruitfulAgentDisableDeps,
+): Promise<UnfruitfulAgentDisableResult> {
+  const disabled: string[] = [];
+  if (!deps.enabled) return { disabled };
 
   const requiredRuns = effectiveThreshold(deps.threshold);
   const sample = unfruitfulRateSample(deps.threshold);
-  // Fetch wider than the sample so that, after dropping runs from now-disabled
-  // agents, enough enabled-agent history usually remains to judge a rate.
   const fetchLimit = Math.max(requiredRuns, sample) * 4;
   const jobs = deps.listJobs();
-  for (const p of deps.listProjects()) {
-    if (p.paused) continue;
-    let runs = recentScheduledAgentRuns(jobs, p.name, deps.isAgentJobKind, fetchLimit);
-    if (deps.isEnabledAgentRun) {
-      runs = runs.filter((r) => deps.isEnabledAgentRun!(p.name, String(r.kind)));
-    }
+
+  for (const agent of deps.listAgents()) {
+    if (!agent.enabled) continue;
+    if (agent.kind === 'system') continue;
+    if (agent.role !== 'producer') continue;
+    if (deps.isProjectActive && !deps.isProjectActive(agent.project)) continue;
+
+    const runs = recentScheduledRunsForAgent(jobs, agent, deps, fetchLimit);
+    if (runs.some(runIsExternallyGated)) continue;
+
     const caughtUp = isProjectCaughtUpUnfruitful(runs, deps.threshold);
     const lowRate = !caughtUp && isProjectPersistentlyUnfruitful(runs, sample, deps.rateThreshold);
     if (!caughtUp && !lowRate) continue;
 
-    const ok = await deps.pauseProject(p.name);
+    const ok = await deps.disableAgent(agent);
     if (!ok) continue;
-    paused.push(p.name);
+    disabled.push(agent.name);
 
-    const ratePct = sample > 0
-      ? Math.round((runs.slice(0, sample).filter(runWasProductive).length / sample) * 100)
+    const window = runs.slice(0, sample);
+    const ratePct = sample > 0 && window.length >= sample
+      ? Math.round((window.filter(runWasProductive).length / sample) * 100)
       : 0;
     const title = caughtUp
-      ? `${p.name} auto-paused — caught up (nothing to do)`
-      : `${p.name} auto-paused — persistently unfruitful (${ratePct}% of runs produce changes)`;
+      ? `${agent.name} auto-disabled - caught up (nothing to do)`
+      : `${agent.name} auto-disabled - persistently unfruitful (${ratePct}% of runs produce changes)`;
     const detail = caughtUp
-      ? `The last ${requiredRuns} scheduled agent runs produced no changes and at least one ` +
-        `reported nothing to do. TamTam paused the project to stop it churning agents (and the ` +
-        `process/syspolicyd load that comes with them) for no value. Resume it from Settings when ` +
-        `there is new work, or lower its cadence.`
-      : `Only ${ratePct}% of the last ${sample} scheduled agent runs produced any change — below the ` +
-        `${Math.round(deps.rateThreshold * 100)}% auto-pause floor. The project keeps firing agents that ` +
-        `mostly produce nothing, burning budget and process/syspolicyd load. TamTam paused it; resume ` +
-        `from Settings, lower its cadence, or fix the agents that aren't landing work.`;
+      ? `The last ${requiredRuns} scheduled runs for ${agent.name} produced no changes and at least one ` +
+        `reported nothing to do. TamTam disabled only this agent to stop it churning for no value; ` +
+        `the project and sibling agents remain active. Re-enable the agent when there is new work.`
+      : `Only ${ratePct}% of the last ${sample} scheduled runs for ${agent.name} produced value - below the ` +
+        `${Math.round(deps.rateThreshold * 100)}% auto-disable floor. TamTam disabled only this agent; ` +
+        `re-enable it after adjusting its prompt, cadence, or backlog source.`;
+
     try {
-      await deps.recommend({ project: p.name, title, detail });
+      await deps.recommend({
+        project: agent.project,
+        agentId: agent.id,
+        agentName: agent.name,
+        title,
+        detail,
+      });
     } catch (e) {
-      deps.log?.(`[unfruitful-pause] recommendation failed for ${p.name}: ${e instanceof Error ? e.message : String(e)}`);
+      deps.log?.(`[unfruitful-pause] recommendation failed for ${agent.project}/${agent.name}: ${e instanceof Error ? e.message : String(e)}`);
     }
 
-    if (deps.notify) {
-      try {
-        await deps.notify(p.name, requiredRuns);
-      } catch { /* notification failure is non-fatal */ }
-    }
-    deps.log?.(`[unfruitful-pause] auto-paused ${p.name} (${caughtUp ? `${requiredRuns} caught-up/no-diff runs` : `low fruitful rate ${ratePct}% over ${sample} runs`})`);
+    deps.log?.(`[unfruitful-pause] auto-disabled ${agent.project}/${agent.name} (${caughtUp ? `${requiredRuns} caught-up/no-diff runs` : `low fruitful rate ${ratePct}% over ${sample} runs`})`);
   }
-  return { paused };
+
+  return { disabled };
 }
 
 /**
- * Runtime entry: wire `autoPauseUnfruitfulProjects` with real deps. Lazy imports
- * keep the pure functions above (and their tests) free of the DB/job layer.
- * Safe to call from a background sweep — no-ops when the setting is off.
+ * Runtime entry: wire `autoDisableUnfruitfulAgents` with real deps. Lazy
+ * imports keep the pure functions above (and their tests) free of the DB/job
+ * layer. Safe to call from a background sweep - no-ops when the setting is off.
  */
-export async function runUnfruitfulPauseSweep(): Promise<UnfruitfulPauseResult> {
+export async function runUnfruitfulPauseSweep(): Promise<UnfruitfulAgentDisableResult> {
   const { getSettings } = await import('@/lib/shared/config');
   const s = getSettings();
-  if (!s.auto_pause_unfruitful_enabled) return { paused: [] };
+  if (!s.auto_pause_unfruitful_enabled) return { disabled: [] };
 
-  const [{ listJobs }, { isAgentJobKind }, { listEnabledProjects }, { pauseProject }, { upsertRecommendation }, { getAllAgentsCached }] =
+  const [
+    { listJobs },
+    { isAgentJobKind },
+    { listEnabledProjects },
+    { upsertRecommendation },
+    { getAllAgentsCachedAsync, clearAgentsCache },
+    { parseAgentRole },
+    { db, schema },
+    { eq },
+    { uninstallAgentSchedule },
+  ] =
     await Promise.all([
       import('@/lib/jobs/job-storage'),
       import('@/lib/jobs/kinds'),
       import('@/lib/shared/enabled-projects'),
-      import('@/lib/pipeline/pause-project'),
       import('@/lib/recommendations/recommendations'),
       import('@/lib/agents/agents-cache'),
+      import('@/lib/agents/roles'),
+      import('@/lib/db'),
+      import('drizzle-orm'),
+      import('@/lib/scheduling/agent-scheduler'),
     ]);
 
-  // Set of currently-enabled `<project>\0agent:<name>` kinds, so the auto-pause
-  // judges a project only by agents the operator still has enabled — a disabled
-  // agent's past no-diff runs no longer keep the project paused.
-  const enabledAgentKinds = new Set<string>();
-  for (const a of getAllAgentsCached()) {
-    if (a.enabled) enabledAgentKinds.add(`${a.project} agent:${a.name}`);
-  }
+  const activeProjects = new Set(
+    listEnabledProjects()
+      .filter((p) => !p.paused)
+      .map((p) => p.name),
+  );
+  const agents = await getAllAgentsCachedAsync();
 
-  return autoPauseUnfruitfulProjects({
+  return autoDisableUnfruitfulAgents({
     enabled: s.auto_pause_unfruitful_enabled,
     threshold: s.auto_pause_unfruitful_runs,
     rateThreshold: s.auto_pause_unfruitful_rate,
     listJobs,
     isAgentJobKind,
-    isEnabledAgentRun: (project, kind) => enabledAgentKinds.has(`${project} ${kind}`),
-    listProjects: () => listEnabledProjects().map((p) => ({ name: p.name, paused: !!p.paused })),
-    pauseProject,
+    getJobKind: (kind) => (typeof kind === 'string' ? kind : String(kind ?? '')),
+    listAgents: () => agents.map((a) => ({
+      id: a.id,
+      name: a.name,
+      project: a.project,
+      role: parseAgentRole(a.role),
+      kind: a.kind === 'system' ? 'system' : 'user',
+      enabled: !!a.enabled,
+    })),
+    isProjectActive: (project) => activeProjects.has(project),
+    disableAgent: async (agent) => {
+      await db
+        .update(schema.agents)
+        .set({ enabled: false, updatedAt: Date.now() / 1000 })
+        .where(eq(schema.agents.id, agent.id))
+        .execute();
+      clearAgentsCache();
+      try {
+        await uninstallAgentSchedule(agent.id, agent.project, agent.name);
+      } catch (e) {
+        console.error(`[unfruitful-pause] failed to uninstall schedule for ${agent.project}/${agent.name}:`, e);
+      }
+      return true;
+    },
     recommend: (input) =>
       upsertRecommendation({
         project: input.project,
         sourceKind: 'orchestrator',
-        type: 'auto_pause_unfruitful',
+        agentId: input.agentId,
+        agentName: input.agentName,
+        type: 'agent_unfruitful',
         title: input.title,
         detail: input.detail,
       }),
