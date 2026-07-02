@@ -1,6 +1,6 @@
 'use client'
 
-import { useState, useEffect, useCallback, useRef } from 'react'
+import { useState, useEffect, useCallback, useRef, useMemo } from 'react'
 import { useRouter } from 'next/navigation'
 import { ISSUE_FORMAT_INSTRUCTION } from '@/lib/agents/issue-template'
 import { fetchAgents, fetchIssuesAndPRs, fetchProjectConfig, runAgent } from '@/lib/client-api'
@@ -14,10 +14,36 @@ import { Button, buttonVariants } from '@/components/ui/Button'
 import { Spinner } from '@/components/ui/Spinner'
 import { EmptyState } from '@/components/ui/EmptyState'
 import { InlineLoading } from '@/components/ui/InlineLoading'
-import { Pill } from '@/components/ui/Pill'
+import { Pill, PillButton } from '@/components/ui/Pill'
+import { SegmentedControl } from '@/components/ui/SegmentedControl'
 import { Textarea } from '@/components/ui/Textarea'
 
 export type { GhPullRequest, GhIssue, ProjectConfig }
+
+type IssueSort = 'priority' | 'newest' | 'oldest'
+type IssueFacet = 'all' | 'high' | 'medium' | 'enhancement' | 'tech-debt'
+
+function issueLabelNames(issue: GhIssue): string[] {
+  return issue.labels.map((l) => l.name.toLowerCase())
+}
+
+// 0 = highest priority. Mirrors the label→tone mapping used for the label dots.
+function issuePriorityRank(issue: GhIssue): number {
+  const names = issueLabelNames(issue)
+  if (names.some((x) => /priority:\s*high|(^|[^a-z])(high|critical|urgent|blocker|p0)([^a-z]|$)/.test(x))) return 0
+  if (names.some((x) => /priority:\s*medium|(^|[^a-z])(medium|p1)([^a-z]|$)/.test(x))) return 1
+  if (names.some((x) => /priority:\s*low|(^|[^a-z])(low|p2)([^a-z]|$)/.test(x))) return 2
+  return 3
+}
+
+function issueMatchesFacet(issue: GhIssue, facet: IssueFacet): boolean {
+  if (facet === 'all') return true
+  if (facet === 'high') return issuePriorityRank(issue) === 0
+  if (facet === 'medium') return issuePriorityRank(issue) === 1
+  const names = issueLabelNames(issue)
+  if (facet === 'enhancement') return names.some((x) => x.includes('enhancement') || x.includes('feature'))
+  return names.some((x) => x.includes('tech-debt') || x.includes('tech debt') || x.includes('chore') || x.includes('refactor'))
+}
 
 interface IssuesTabProps {
   projectName: string
@@ -42,6 +68,23 @@ export function IssuesTab({ projectName, onCountChange, jobsPaused = false }: Is
   const [ctoAgent, setCtoAgent] = useState<Agent | null>(null)
   const [issueDraft, setIssueDraft] = useState('')
   const [planning, setPlanning] = useState(false)
+  const [issueSearch, setIssueSearch] = useState('')
+  const [issueSort, setIssueSort] = useState<IssueSort>('priority')
+  const [issueFacet, setIssueFacet] = useState<IssueFacet>('all')
+
+  const visibleIssues = useMemo(() => {
+    const q = issueSearch.trim().toLowerCase()
+    const filtered = issues.filter((i) => {
+      if (!issueMatchesFacet(i, issueFacet)) return false
+      if (!q) return true
+      return i.title.toLowerCase().includes(q) || String(i.number).includes(q)
+    })
+    const sorted = [...filtered]
+    if (issueSort === 'priority') sorted.sort((a, b) => issuePriorityRank(a) - issuePriorityRank(b) || b.number - a.number)
+    else if (issueSort === 'newest') sorted.sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime())
+    else sorted.sort((a, b) => new Date(a.createdAt).getTime() - new Date(b.createdAt).getTime())
+    return sorted
+  }, [issues, issueSearch, issueSort, issueFacet])
   const onCountChangeRef = useRef(onCountChange)
   const trimmedIssueDraft = issueDraft.trim()
   const issuePlanningBlocked = jobsPaused || agentsLoading || planning || !ctoAgent || trimmedIssueDraft.length < 10
@@ -362,12 +405,53 @@ ${idea}`
               <path d="M8 9.5a1.5 1.5 0 100-3 1.5 1.5 0 000 3z" />
               <path fillRule="evenodd" d="M8 0a8 8 0 100 16A8 8 0 008 0zM1.5 8a6.5 6.5 0 1113 0 6.5 6.5 0 01-13 0z" />
             </svg>
-            Issues · {issues.length}
+            Issues · {visibleIssues.length === issues.length ? issues.length : `${visibleIssues.length} / ${issues.length}`}
           </div>
+
+          {/* Toolbar: search + priority-first facets + sort. A flat 29-issue
+              wall was unscannable; high-priority work now floats to the top. */}
+          <div className="mb-2 mt-1 flex flex-wrap items-center gap-2">
+            <input
+              value={issueSearch}
+              onChange={(e) => setIssueSearch(e.target.value)}
+              placeholder="Search issues by title or #number…"
+              className="h-7 min-w-[180px] flex-1 rounded-md border border-border bg-bg-primary px-2.5 text-xs text-text-primary placeholder:text-text-tertiary focus:border-accent focus:outline-none"
+            />
+            <div className="flex items-center gap-1">
+              {([['all', 'all', 'accent'], ['high', 'high', 'error'], ['medium', 'medium', 'warning'], ['enhancement', 'enhancement', 'accent'], ['tech-debt', 'tech-debt', 'accent']] as [IssueFacet, string, 'accent' | 'error' | 'warning'][]).map(([f, label, tone]) => (
+                <PillButton
+                  key={f}
+                  type="button"
+                  size="sm"
+                  tone={tone}
+                  active={issueFacet === f}
+                  className="shrink-0 px-2 font-mono text-[10px]"
+                  onClick={() => setIssueFacet(f)}
+                >
+                  {label}
+                </PillButton>
+              ))}
+            </div>
+            <SegmentedControl<IssueSort>
+              size="xs"
+              ariaLabel="Sort issues"
+              options={[{ value: 'priority', label: 'priority' }, { value: 'newest', label: 'newest' }, { value: 'oldest', label: 'oldest' }]}
+              value={issueSort}
+              onChange={setIssueSort}
+            />
+          </div>
+
           <div className="border border-border rounded-md overflow-hidden bg-bg-secondary">
-            {issues.map((issue) => (
-              <IssueRow key={issue.number} issue={issue} projectName={projectName} projectCfg={projectCfg} />
-            ))}
+            {visibleIssues.length === 0 ? (
+              <div className="px-3 py-4 text-center text-xs text-text-tertiary">
+                No issues match this filter.
+                <button type="button" className="ml-1.5 text-accent hover:underline" onClick={() => { setIssueSearch(''); setIssueFacet('all') }}>Clear</button>
+              </div>
+            ) : (
+              visibleIssues.map((issue) => (
+                <IssueRow key={issue.number} issue={issue} projectName={projectName} projectCfg={projectCfg} />
+              ))
+            )}
           </div>
         </div>
       )}

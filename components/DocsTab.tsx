@@ -1,6 +1,8 @@
 'use client'
 
 import { useState, useEffect, useMemo } from 'react'
+import Markdown from 'react-markdown'
+import remarkGfm from 'remark-gfm'
 import { fetchProjectDocs } from '@/lib/client-api'
 import type { ProjectDoc } from '@/lib/client-api'
 import { Button } from '@/components/ui/Button'
@@ -95,6 +97,7 @@ export function DocsTab({ projectName }: DocsTabProps) {
 
   const current = docs.find((d) => d.name === active) ?? docs[0]
   const currentLineCount = lineCounts.get(current.name) ?? 0
+  const isMarkdown = /\.mdx?$/i.test(current.name)
 
   return (
     <div className="mt-2 flex gap-3 min-h-0">
@@ -135,9 +138,15 @@ export function DocsTab({ projectName }: DocsTabProps) {
           </div>
           <span className="shrink-0 text-xs tabular-nums text-text-secondary">{currentLineCount} lines</span>
         </div>
-        <pre className="max-h-[70vh] overflow-y-auto p-4 font-mono text-xs leading-relaxed whitespace-pre-wrap text-text-primary">
-          {current.content}
-        </pre>
+        {isMarkdown ? (
+          <div className="doc-markdown max-h-[70vh] overflow-y-auto p-4">
+            <Markdown remarkPlugins={[remarkGfm]}>{current.content}</Markdown>
+          </div>
+        ) : (
+          <pre className="max-h-[70vh] overflow-y-auto p-4 font-mono text-xs leading-relaxed whitespace-pre-wrap text-text-primary">
+            {current.content}
+          </pre>
+        )}
       </div>
     </div>
   )

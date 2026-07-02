@@ -96,12 +96,16 @@ export function ProjectActions({
   onPull,
   onDismissDiverged,
 }: ProjectActionsProps) {
+  // When a release pipeline is in flight it performs its own commit/push git
+  // ops. Every OTHER mutating action is gated on `busy` too so an operator
+  // can't fire a manual Test/Push/Pull/Create-PR mid-release and race it.
   const busy = releasing || isPipelineRunning
+  const BUSY_MSG = 'Release pipeline is running — manual git actions are paused to avoid racing it.'
   const releaseBlocked = jobsPaused || busy
   const fixCiBlocked = jobsPaused || fixingCi || isCiFixRunning
-  const pushToPrBlocked = jobsPaused || pushingToPr
-  const testBlocked = jobsPaused || testing || isTestRunning
-  const pushBlocked = jobsPaused || pushing
+  const pushToPrBlocked = jobsPaused || busy || pushingToPr
+  const testBlocked = jobsPaused || busy || testing || isTestRunning
+  const pushBlocked = jobsPaused || busy || pushing
   const nothingToRelease = totalChanges === 0 && (unpushed ?? 0) === 0
   const hasTestCommand = !!(config?.effective_test_command || config?.detected_test_command)
   const freshLgtm = verdict === 'LGTM' && !hasUnreviewed && totalChanges > 0
@@ -124,14 +128,16 @@ export function ProjectActions({
   const hasOpenPr = openPrBranches.includes(currentBranch ?? '')
   const showCreatePr = isOnFeatureBranch && !hasOpenPr
   const noCommitsToPr = isOnFeatureBranch && branchCommitsAhead === 0
-  const createPrDisabled = jobsPaused || creatingPr || noCommitsToPr
+  const createPrDisabled = jobsPaused || busy || creatingPr || noCommitsToPr
   const createPrTitle = jobsPaused
     ? 'Jobs are paused globally. Resume jobs to create a PR.'
+    : busy
+    ? BUSY_MSG
     : noCommitsToPr
     ? `Branch ${currentBranch} has no commits ahead of origin/${defaultBranch}. Commit your changes (use Release) or move them to ${defaultBranch} first.`
     : `Create pull request for branch ${currentBranch}`
 
-  const pullPrimaryDisabled = pulling || totalChanges > 0 || behindCount === 0
+  const pullPrimaryDisabled = jobsPaused || busy || pulling || totalChanges > 0 || behindCount === 0
   const pullVariant = totalChanges > 0 ? 'secondary' : behindCount > 0 ? 'warning' : 'secondary'
 
   return (
@@ -191,6 +197,8 @@ export function ProjectActions({
           title={
             jobsPaused
               ? 'Jobs are paused globally. Resume jobs to start a push.'
+              : busy
+              ? BUSY_MSG
               : `Stage ${totalChanges} change${totalChanges === 1 ? '' : 's'}, commit (Claude-generated message), push — attaches to existing PR. Skips test + review (use Release for the full pipeline).`
           }
         >
@@ -204,6 +212,8 @@ export function ProjectActions({
           title={
             jobsPaused
               ? 'Jobs are paused globally. Resume jobs to start tests.'
+              : busy
+              ? BUSY_MSG
               : isTestRunning
                 ? 'Tests already running'
                 : `Run: ${config?.effective_test_command || config?.detected_test_command}`
@@ -218,10 +228,12 @@ export function ProjectActions({
           className="btn-custom"
           style={{ '--btn-color': action.color || 'var(--color-accent)' } as React.CSSProperties}
           onClick={() => onCustomAction(action.name)}
-          disabled={jobsPaused || runningActions.has(action.name)}
+          disabled={jobsPaused || busy || runningActions.has(action.name)}
           title={
             jobsPaused
               ? 'Jobs are paused globally. Resume jobs to run this custom action.'
+              : busy
+              ? BUSY_MSG
               : `Run: ${action.command}`
           }
         >
@@ -235,6 +247,8 @@ export function ProjectActions({
         title={
           jobsPaused
             ? 'Jobs are paused globally. Resume jobs to start a push.'
+            : busy
+            ? BUSY_MSG
             : totalChanges > 0
               ? `Commit your ${totalChanges} local change${totalChanges !== 1 ? 's' : ''} first (use Release)`
               : (unpushed ?? 0) === 0
@@ -250,15 +264,15 @@ export function ProjectActions({
           <Button
             variant="info"
             onClick={() => onPull('rebase')}
-            disabled={pulling}
-            title="git pull --rebase"
+            disabled={busy || pulling}
+            title={busy ? BUSY_MSG : 'git pull --rebase'}
           >
             {pulling ? 'Working…' : 'Rebase'}
           </Button>
           <Button
             onClick={() => onPull('merge')}
-            disabled={pulling}
-            title="git pull --no-ff"
+            disabled={busy || pulling}
+            title={busy ? BUSY_MSG : 'git pull --no-ff'}
           >
             {pulling ? 'Working…' : 'Merge'}
           </Button>
@@ -279,7 +293,11 @@ export function ProjectActions({
           onClick={() => onPull('ff-only')}
           disabled={pullPrimaryDisabled}
           title={
-            totalChanges > 0
+            jobsPaused
+              ? 'Jobs are paused globally. Resume jobs to pull.'
+              : busy
+              ? BUSY_MSG
+              : totalChanges > 0
               ? `Commit or stash your ${totalChanges} local change${totalChanges !== 1 ? 's' : ''} before pulling`
               : behindCount > 0
               ? `${behindCount} commit${behindCount !== 1 ? 's' : ''} behind origin — git pull --ff-only`

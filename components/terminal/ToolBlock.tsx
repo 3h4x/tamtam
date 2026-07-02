@@ -3,18 +3,6 @@
 import { useMemo, useState } from 'react'
 import type { ToolEntry } from '@/lib/terminal/terminal-session-store'
 
-const TOOL_COLORS: Record<string, string> = {
-  Bash: 'text-[#f0b070]',
-  Read: 'text-[#8fcfff]',
-  Edit: 'text-[#c9b4ff]',
-  Write: 'text-[#c9b4ff]',
-  Glob: 'text-[#8fdfb0]',
-  Grep: 'text-[#8fdfb0]',
-  Task: 'text-[#ffb0c0]',
-  WebFetch: 'text-[#ffd080]',
-  WebSearch: 'text-[#ffd080]',
-}
-
 export function ToolBlock({ tool, executing }: { tool: ToolEntry; executing?: boolean }) {
   const [collapsed, setCollapsed] = useState(true)
 
@@ -46,7 +34,9 @@ export function ToolBlock({ tool, executing }: { tool: ToolEntry; executing?: bo
     return tool.result.length > 600 ? tool.result.slice(0, 600) + '...' : tool.result
   }, [tool.result])
 
-  const nameColor = TOOL_COLORS[tool.name] ?? 'text-[#9cc7ff]'
+  // One accent for every tool name — the tool identity is already the text;
+  // a per-tool color rainbow broke the single-accent token system.
+  const nameColor = 'text-accent'
   const clickable = hasResult
 
   return (

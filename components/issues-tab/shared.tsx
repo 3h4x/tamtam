@@ -5,21 +5,36 @@ import { Pill, PillButton } from '@/components/ui/Pill'
 import type { GhLabel } from '@/lib/client-api'
 import type { GateState, PrGates } from '@/lib/github/issue-row-enrichment'
 
+// Map a GitHub label to a token-based status dot by priority, instead of
+// rendering its arbitrary repo-defined hex (which breaks the one-accent /
+// 4-status color system). The label text itself stays a neutral pill; the dot
+// carries the operator-actionable priority signal (status color + icon).
+function priorityDot(name: string): string | null {
+  const n = name.toLowerCase()
+  if (/priority:\s*high|(^|[^a-z])(high|critical|urgent|blocker|p0|security)([^a-z]|$)/.test(n)) return 'bg-status-error'
+  if (/priority:\s*medium|(^|[^a-z])(medium|human-needed|p1)([^a-z]|$)/.test(n)) return 'bg-status-warning'
+  if (/priority:\s*low|(^|[^a-z])(low|p2)([^a-z]|$)/.test(n)) return 'bg-status-info'
+  return null
+}
+
 export function Labels({ labels, limit }: { labels: GhLabel[]; limit?: number }) {
   if (!labels.length) return null
   const visible = typeof limit === 'number' ? labels.slice(0, limit) : labels
   const hidden = labels.length - visible.length
   return (
     <span className="flex flex-wrap items-center gap-1">
-      {visible.map((l) => (
-        <span
-          key={l.name}
-          className="rounded-full px-1.5 py-0.5 text-[9px] font-medium"
-          style={{ background: `#${l.color}22`, color: `#${l.color}`, border: `1px solid #${l.color}44` }}
-        >
-          {l.name}
-        </span>
-      ))}
+      {visible.map((l) => {
+        const dot = priorityDot(l.name)
+        return (
+          <span
+            key={l.name}
+            className="inline-flex items-center gap-1 rounded-full border border-border bg-bg-tertiary px-1.5 py-0.5 text-[9px] font-medium text-text-secondary"
+          >
+            {dot && <span className={`h-1.5 w-1.5 rounded-full ${dot}`} aria-hidden />}
+            {l.name}
+          </span>
+        )
+      })}
       {hidden > 0 && (
         <Pill
           size="xs"

@@ -764,6 +764,7 @@ export function ProjectDetailPage({
               ? 'Project is paused — scheduled agents, agent API runs, and releases are blocked. Manual terminal sessions still work. Click to resume.'
               : 'Pause this project: blocks scheduled agents, agent API runs, and releases without affecting other projects.'}
           >
+            <span className={`h-1.5 w-1.5 shrink-0 rounded-full ${config?.paused ? 'bg-status-warning' : 'border border-text-tertiary'}`} aria-hidden />
             {config?.paused ? 'Paused' : 'Pause'}
           </PillButton>
           <PillButton
@@ -796,6 +797,7 @@ export function ProjectDetailPage({
               ? 'Auto release is ON — release pipeline triggers after each terminal or agent run finishes. Click to disable.'
               : 'Auto release is OFF — click to auto-trigger the release pipeline after each terminal or agent run.'}
           >
+            <span className={`h-1.5 w-1.5 shrink-0 rounded-full ${config?.release_after_run ? 'bg-status-success' : 'border border-text-tertiary'}`} aria-hidden />
             {config?.release_after_run ? 'Auto release ON' : 'Auto release'}
           </PillButton>
         </div>

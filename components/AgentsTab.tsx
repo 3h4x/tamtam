@@ -14,6 +14,8 @@ import { RecommendedAgents } from '@/components/agents-tab/RecommendedAgents'
 import { RECOMMENDED_AGENTS, recommendedAgentMatchesName } from '@/lib/agents/recommended-agents'
 import { normalizeModelInput } from '@/lib/agents/model-aliases'
 import { useSchedulerHealth, type SchedulerEntry } from '@/hooks/useSchedulerHealth'
+import { useAgentStats } from '@/hooks/useAgentStats'
+import { formatCost } from '@/components/project-runs/formatting'
 import { Button } from '@/components/ui/Button'
 import { ErrorCallout } from '@/components/ui/ErrorCallout'
 import { Pill } from '@/components/ui/Pill'
@@ -88,6 +90,7 @@ export function AgentsTab({ projectName, projectJobs = [], jobsPaused = false }:
   const [customRunInput, setCustomRunInput] = useState<Record<string, string>>({})
 
   const { entries: schedulerEntries } = useSchedulerHealth(projectName)
+  const { byName: agentStats } = useAgentStats(projectName)
 
   const editorParam = searchParams.get('agent')
   const templateParam = searchParams.get('template')
@@ -353,6 +356,42 @@ export function AgentsTab({ projectName, projectJobs = [], jobsPaused = false }:
           >
             {running ? 'running' : failed || cancelled ? `✗ ${ago}` : ago}
           </span>
+        )
+      },
+    },
+    {
+      key: 'health',
+      label: 'Health',
+      title: 'Run success rate, files touched and cost over the stats window — is this agent productive?',
+      sortable: true,
+      sortValue: r => {
+        const s = agentStats.get(r.agent.name)
+        if (!s || s.finishedRuns === 0) return -1
+        return Math.round((s.successfulRuns / s.finishedRuns) * 100)
+      },
+      render: r => {
+        const s = agentStats.get(r.agent.name)
+        if (!s || s.finishedRuns === 0) return <span className="text-text-tertiary text-xs">—</span>
+        const rate = Math.round((s.successfulRuns / s.finishedRuns) * 100)
+        const tone = rate >= 70 ? 'success' : rate >= 40 ? 'warning' : 'error'
+        return (
+          <div className="flex flex-col gap-0.5">
+            <Pill
+              tone={tone}
+              size="xs"
+              className="w-fit rounded-full px-1.5 py-0.5 font-mono text-[10px] tabular-nums"
+              title={`${s.successfulRuns}/${s.finishedRuns} runs succeeded${s.reviewFixesTriggered > 0 ? ` · ${s.reviewFixesTriggered} fixes triggered` : ''}`}
+            >
+              {rate}%
+            </Pill>
+            {(s.modifiedFilesCount > 0 || s.costUsd > 0) && (
+              <span className="text-[10px] text-text-tertiary tabular-nums">
+                {s.modifiedFilesCount > 0 ? `${s.modifiedFilesCount}f` : ''}
+                {s.modifiedFilesCount > 0 && s.costUsd > 0 ? ' · ' : ''}
+                {s.costUsd > 0 ? formatCost(s.costUsd) : ''}
+              </span>
+            )}
+          </div>
         )
       },
     },

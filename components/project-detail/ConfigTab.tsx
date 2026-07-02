@@ -209,21 +209,6 @@ export function ConfigTab({
           >
             Run setup wizard
           </Button>
-          {anyDirty && !anySaving && (
-            <span className="text-xs text-text-tertiary">Unsaved changes</span>
-          )}
-          <Button
-            variant={allSaved ? 'success-solid' : 'solid'}
-            disabledCursor={anySaving ? 'wait' : 'default'}
-            className={`px-4 py-1.5 border-none rounded-md font-semibold text-white ${
-              !allSaved && !anyDirty ? 'bg-accent/40 hover:bg-accent/40' : ''
-            } ${anySaving ? 'opacity-70 cursor-wait disabled:cursor-wait disabled:opacity-70' : 'disabled:opacity-100'}`}
-            onClick={onSaveAll}
-            disabled={anySaving || !anyDirty}
-          >
-            {anySaving && <Spinner color="white" shrink />}
-            {anySaving ? 'Saving…' : allSaved ? 'Saved!' : 'Save'}
-          </Button>
         </div>
       </div>
 
@@ -678,9 +663,11 @@ export function ConfigTab({
               <div className="text-xs text-text-tertiary">When the watcher opens a revert PR, also enable squash auto-merge. Off = the revert PR stays open for human review.</div>
             </div>
           </label>
+        </div>
 
-        {/* Trigger cadence */}
-        <div className="px-4 py-2.5">
+        {/* Trigger cadence — a distinct concern from post-merge soak, so it
+            gets its own section rather than being nested under it. */}
+        <div className="px-4 py-3 border-t border-border">
           <label className="flex items-start gap-2 cursor-pointer select-none">
             <Checkbox
               variant="native"
@@ -694,7 +681,6 @@ export function ConfigTab({
               <div className="text-xs text-text-tertiary">Auto-start release when a terminal or agent run finishes successfully.</div>
             </div>
           </label>
-        </div>
         </div>
       </div>
 
@@ -780,6 +766,31 @@ export function ConfigTab({
           )}
 
         </div>
+      </div>
+
+      {/* Sticky save bar — always reachable on this long form (Save lived only
+          at the top before). Discard/reset is deferred to the config
+          form-model refactor. */}
+      <div className="sticky bottom-0 z-10 flex items-center gap-3 rounded-md border border-border bg-bg-secondary px-4 py-2.5">
+        {allSaved ? (
+          <span className="text-xs text-status-success">Saved</span>
+        ) : anyDirty ? (
+          <span className="text-xs text-text-secondary">Unsaved changes</span>
+        ) : (
+          <span className="text-xs text-text-tertiary">All changes saved</span>
+        )}
+        <Button
+          variant={allSaved ? 'success-solid' : 'solid'}
+          disabledCursor={anySaving ? 'wait' : 'default'}
+          className={`ml-auto px-4 py-1.5 border-none rounded-md font-semibold text-white ${
+            !allSaved && !anyDirty ? 'bg-accent/40 hover:bg-accent/40' : ''
+          } ${anySaving ? 'opacity-70 cursor-wait disabled:cursor-wait disabled:opacity-70' : 'disabled:opacity-100'}`}
+          onClick={onSaveAll}
+          disabled={anySaving || !anyDirty}
+        >
+          {anySaving && <Spinner color="white" shrink />}
+          {anySaving ? 'Saving…' : allSaved ? 'Saved!' : 'Save'}
+        </Button>
       </div>
 
     </div>

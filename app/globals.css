@@ -347,3 +347,29 @@ html.privacy-mode [data-private] {
 .terminal-markdown hr { border: none; border-top: 1px solid #333; margin: 0.75em 0; }
 .terminal-markdown a { color: #3b82f6; text-decoration: none; }
 .terminal-markdown a:hover { text-decoration: underline; }
+
+/* Token-based markdown for the project Docs tab (themes light/dark, unlike
+   the hardcoded-dark .terminal-markdown above). */
+.doc-markdown { color: var(--color-text-primary); font-size: 0.8125rem; line-height: 1.65; }
+.doc-markdown > :first-child { margin-top: 0; }
+.doc-markdown h1 { font-size: 1.35em; font-weight: 700; margin: 1em 0 0.4em; color: var(--color-text-primary); }
+.doc-markdown h2 { font-size: 1.15em; font-weight: 700; margin: 1em 0 0.35em; color: var(--color-text-primary); }
+.doc-markdown h3 { font-size: 1em; font-weight: 600; margin: 0.8em 0 0.3em; color: var(--color-text-primary); }
+.doc-markdown h4, .doc-markdown h5, .doc-markdown h6 { font-weight: 600; margin: 0.7em 0 0.3em; color: var(--color-text-secondary); }
+.doc-markdown p { margin: 0.55em 0; }
+.doc-markdown strong { color: var(--color-text-primary); font-weight: 600; }
+.doc-markdown em { font-style: italic; }
+.doc-markdown code { background: var(--color-bg-tertiary); padding: 0.1em 0.4em; border-radius: 3px; color: var(--color-accent); font-family: var(--font-mono); font-size: 0.9em; }
+.doc-markdown pre { background: var(--color-bg-primary); border: 1px solid var(--color-border); border-radius: 6px; padding: 0.75em 1em; margin: 0.6em 0; overflow-x: auto; }
+.doc-markdown pre code { background: transparent; padding: 0; color: var(--color-text-primary); }
+.doc-markdown ul, .doc-markdown ol { padding-left: 1.5em; margin: 0.5em 0; }
+.doc-markdown li { margin: 0.2em 0; }
+.doc-markdown ul { list-style-type: disc; }
+.doc-markdown ol { list-style-type: decimal; }
+.doc-markdown blockquote { border-left: 3px solid var(--color-border); padding-left: 0.75em; margin: 0.6em 0; color: var(--color-text-secondary); }
+.doc-markdown table { border-collapse: collapse; margin: 0.6em 0; width: 100%; font-size: 0.95em; }
+.doc-markdown th, .doc-markdown td { border: 1px solid var(--color-border); padding: 0.35em 0.6em; text-align: left; }
+.doc-markdown th { background: var(--color-bg-tertiary); font-weight: 600; }
+.doc-markdown hr { border: none; border-top: 1px solid var(--color-border); margin: 0.9em 0; }
+.doc-markdown a { color: var(--color-accent); text-decoration: none; }
+.doc-markdown a:hover { text-decoration: underline; }

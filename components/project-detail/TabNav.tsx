@@ -71,11 +71,13 @@ export function TabNav({ projectName, activeTab, totalChanges, issueCount, runni
       label: 'Issues / PRs',
       mobileLabel: 'Issues',
       ariaLabel: issueBadgeCount > 0 ? `Issues and pull requests, ${issueBadgeCount} open` : 'Issues and pull requests',
+      // Neutral count, not accent: the issue/PR backlog is passive reference,
+      // unlike Changes (accent) which flags pending work to act on.
       badge: issueBadgeCount > 0 ? (
         <Pill
-          tone="accent"
+          tone="neutral"
           size="xs"
-          className="ml-1.5 rounded-full border-transparent bg-accent-light px-1.5 py-0.5 text-[10px] text-accent tabular-nums"
+          className="ml-1.5 rounded-full border-transparent bg-bg-tertiary px-1.5 py-0.5 text-[10px] text-text-secondary tabular-nums"
           aria-hidden="true"
         >
           {issueBadgeCount}

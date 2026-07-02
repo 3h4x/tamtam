@@ -9,8 +9,7 @@ import { useToast } from '@/components/Toast'
 import { Button, buttonVariants } from '@/components/ui/Button'
 import { Spinner } from '@/components/ui/Spinner'
 import { buildProjectTerminalPath } from '@/lib/client/project-routes'
-
-type StepState = 'running' | 'done' | 'failed' | 'attention'
+import { derivePipelineState, type StepState } from '@/lib/pipeline/pipeline-state'
 
 interface PipelineStripProps {
   projectName: string
@@ -24,133 +23,11 @@ interface PipelineStripProps {
   onRefresh: () => Promise<void>
 }
 
-const PIPELINE_KIND_ORDER = ['test', 'review', 'fix', 'commit', 'push', 'mark-dod', 'pr-wait', 'soak'] as const
-const PIPELINE_KINDS = new Set<string>(PIPELINE_KIND_ORDER)
-
-function kindLabel(kind: string): string {
-  if (kind === 'mark-dod') return 'dod'
-  if (kind === 'pr-wait') return 'merge'
-  return kind
-}
-
-function readDodCounts(job: JobInfo): { verified: number; total: number } | null {
-  if (job.kind !== 'mark-dod' || !job.context_meta) return null
-  try {
-    const meta = JSON.parse(job.context_meta) as { verified?: unknown; total?: unknown }
-    if (typeof meta.verified === 'number' && typeof meta.total === 'number') {
-      return { verified: meta.verified, total: meta.total }
-    }
-  } catch {
-    return null
-  }
-  return null
-}
-
-function stateOf(job: JobInfo): StepState {
-  if (job.status === 'running') return 'running'
-  if (job.kind === 'review') {
-    if (job.verdict === 'LGTM') return 'done'
-    if (job.verdict === 'NEEDS ATTENTION') return 'attention'
-    if (job.verdict === 'DO NOT SHIP') return 'failed'
-    return 'failed'
-  }
-  const dodCounts = readDodCounts(job)
-  if (dodCounts && dodCounts.total > 0 && dodCounts.verified < dodCounts.total) return 'attention'
-  if (job.exit_code === 0) return 'done'
-  return 'failed'
-}
-
 function stateClass(state: StepState): string {
   if (state === 'running') return 'border-accent/55 bg-accent/15 text-accent ring-2 ring-accent/35'
   if (state === 'done') return 'border-status-success/40 bg-status-success/12 text-status-success'
   if (state === 'attention') return 'border-status-warning/55 bg-status-warning/15 text-status-warning'
   return 'border-status-error/55 bg-status-error/15 text-status-error'
-}
-
-function hintFor(job: JobInfo, pushError: string | null = null): string {
-  if (job.kind === 'test' && job.status === 'running') return 'tests running — click to open terminal'
-  if (job.kind === 'review' && job.status === 'running') return 'review in progress — click to open terminal'
-  if (job.kind === 'fix' && job.status === 'running') return 'fix in progress — click to open terminal'
-  if (job.kind === 'commit' && job.status === 'running') return 'commit in progress — click to open terminal'
-  if (job.kind === 'push' && job.status === 'running') return 'push in progress — click to open terminal'
-  if (job.kind === 'mark-dod' && job.status === 'running') return 'DoD verification in progress — click to open terminal'
-  if (job.kind === 'pr-wait' && job.status === 'running') return 'waiting for CI checks and auto-merge — click to open terminal'
-  if (job.kind === 'soak' && job.status === 'running') return 'watching default-branch CI on the merge commit — click to open terminal'
-  if (job.kind === 'review') {
-    if (job.verdict) return `verdict: ${job.verdict} — click to view findings`
-    if (job.exit_code !== 0) return `review job failed${job.exit_code != null ? ` (exit ${job.exit_code})` : ''} — click to view log`
-    return 'verdict: unknown — click to view log'
-  }
-  if (job.kind === 'mark-dod') {
-    const counts = readDodCounts(job)
-    if (counts && counts.total > 0) {
-      const unticked = counts.total - counts.verified
-      return `DoD: ${counts.verified} / ${counts.total} verified${unticked > 0 ? ` — ${unticked} unticked` : ''} — click to view log`
-    }
-    if (job.exit_code === 0) return 'DoD verified — click to view log'
-    return 'DoD verification failed — click to view log'
-  }
-  if (job.kind === 'push' && job.exit_code !== 0 && pushError) return pushError
-  if (job.exit_code === 0) return `${kindLabel(job.kind)} completed — click to view log`
-  return `${kindLabel(job.kind)} failed — click to view log`
-}
-
-function latestJob(jobs: JobInfo[], matches: (job: JobInfo) => boolean): JobInfo | null {
-  let latest: JobInfo | null = null
-  for (const job of jobs) {
-    if (!matches(job)) continue
-    if (!latest || (job.started_at ?? 0) > (latest.started_at ?? 0)) {
-      latest = job
-    }
-  }
-  return latest
-}
-
-function releaseIdFor(job: JobInfo, jobsById: Map<string, JobInfo>): string | null {
-  if (job.release_id) return job.release_id
-  let cursor: JobInfo | undefined = job
-  const seen = new Set<string>()
-  while (cursor?.parent_job_id && !seen.has(cursor.id)) {
-    seen.add(cursor.id)
-    const parent = jobsById.get(cursor.parent_job_id)
-    if (!parent) return null
-    if (parent.kind === 'release') return parent.id
-    cursor = parent
-  }
-  return null
-}
-
-function belongsToRelease(job: JobInfo, releaseId: string, jobsById: Map<string, JobInfo>): boolean {
-  return releaseIdFor(job, jobsById) === releaseId
-}
-
-function standaloneParentChainIds(job: JobInfo | null, jobsById: Map<string, JobInfo>): Set<string> {
-  const ids = new Set<string>()
-  let cursor: JobInfo | undefined = job ?? undefined
-  const seen = new Set<string>()
-  while (cursor && !seen.has(cursor.id)) {
-    seen.add(cursor.id)
-    if (!PIPELINE_KINDS.has(cursor.kind)) break
-    ids.add(cursor.id)
-    if (!cursor.parent_job_id) break
-    const parent = jobsById.get(cursor.parent_job_id)
-    if (!parent || parent.kind === 'release') break
-    cursor = parent
-  }
-  return ids
-}
-
-function latestPipelineJobsByKind(jobs: JobInfo[]): JobInfo[] {
-  const latestByKind = new Map<string, JobInfo>()
-  for (const job of jobs) {
-    const existing = latestByKind.get(job.kind)
-    if (!existing || (job.started_at ?? 0) > (existing.started_at ?? 0)) {
-      latestByKind.set(job.kind, job)
-    }
-  }
-  return PIPELINE_KIND_ORDER
-    .map((kind) => latestByKind.get(kind))
-    .filter((job): job is JobInfo => !!job)
 }
 
 export function PipelineStrip({
@@ -165,15 +42,14 @@ export function PipelineStrip({
   const [confirmAbort, setConfirmAbort] = useState(false)
   const [aborting, setAborting] = useState(false)
   const [retryingPush, setRetryingPush] = useState(false)
-  const jobsById = new Map(projectJobs.map((job) => [job.id, job]))
 
-  const activeRelease = latestJob(projectJobs, (job) => job.kind === 'release' && job.status === 'running')
-  const activeReleaseId = activeRelease?.id ?? null
+  const pushError = config?.last_push_error?.trim() || null
+  const ps = derivePipelineState(projectJobs, { pushError })
+  const { traceReleaseId, activeReleaseId, hasActiveRelease, displayJob, steps, summary, doneCount, totalCount } = ps
 
   // The abort confirm prompt is per-release. When the strip switches to a
-  // different release (the prior one finished and a new one started) while still
-  // mounted, drop any pending confirm so the new release never inherits a stale
-  // "abort?" prompt the operator never opened.
+  // different release while still mounted, drop any pending confirm so the new
+  // release never inherits a stale "abort?" prompt the operator never opened.
   const prevReleaseIdRef = useRef<string | null>(activeReleaseId)
   useEffect(() => {
     if (prevReleaseIdRef.current !== activeReleaseId) {
@@ -181,52 +57,10 @@ export function PipelineStrip({
       setConfirmAbort(false)
     }
   }, [activeReleaseId])
-  const releaseScopedJobs = activeReleaseId
-    ? projectJobs.filter((job) => PIPELINE_KINDS.has(job.kind) && belongsToRelease(job, activeReleaseId, jobsById))
-    : []
-  const activeReleasePipelineJob = activeReleaseId
-    ? latestJob(releaseScopedJobs, (job) => job.status === 'running')
-    : null
-  const activeStandalonePipelineJob = activeReleaseId
-    ? null
-    : latestJob(
-        projectJobs,
-        (job) => PIPELINE_KINDS.has(job.kind) && job.status === 'running',
-      )
-  const activePipelineJob = activeReleasePipelineJob ?? activeStandalonePipelineJob
-  const traceReleaseId = activeReleaseId ?? (activePipelineJob ? releaseIdFor(activePipelineJob, jobsById) : null)
-  const displayJob = activeReleasePipelineJob ?? activeRelease ?? activeStandalonePipelineJob
-  if (!displayJob) return null
 
-  const standaloneChainIds = traceReleaseId ? null : standaloneParentChainIds(activePipelineJob, jobsById)
-  const chainJobs = traceReleaseId
-    ? releaseScopedJobs
-    : projectJobs.filter(
-        (job) => PIPELINE_KINDS.has(job.kind) && (standaloneChainIds?.has(job.id) ?? false),
-      )
-  const visibleJobs = latestPipelineJobsByKind(chainJobs)
-  // A review→fix loop can run a kind more than once; the strip collapses each
-  // kind to its latest job, so surface the run count per kind to keep the
-  // iteration visible instead of silently hiding the prior attempts.
-  const runsByKind = new Map<string, number>()
-  for (const job of chainJobs) {
-    runsByKind.set(job.kind, (runsByKind.get(job.kind) ?? 0) + 1)
-  }
-  const runningStep = traceReleaseId
-    ? visibleJobs.find((job) => job.status === 'running') ?? null
-    : visibleJobs.find((job) => job.status === 'running') ?? activePipelineJob
-  const attentionStep = visibleJobs.find((job) => {
-    const state = stateOf(job)
-    return state === 'failed' || state === 'attention'
-  }) ?? null
-  const summaryJob = runningStep ?? attentionStep ?? displayJob
-  const summaryLabel = kindLabel(summaryJob.kind)
-  const summaryState = stateOf(summaryJob)
-  const summaryText = `${summaryLabel} ${summaryState === 'attention' ? 'needs attention' : summaryState}`
-  const pushError = config?.last_push_error?.trim() || null
-  const summaryHint = hintFor(summaryJob, pushError).replace(/\s+—\s+click to .*$/i, '')
-  const doneCount = visibleJobs.filter((job) => stateOf(job) === 'done').length
-  const totalCount = Math.max(visibleJobs.length, 1)
+  if (!displayJob || !summary) return null
+
+  const summaryState = summary.state
 
   const openJob = (job: JobInfo) => {
     router.push(buildProjectTerminalPath(projectName, {
@@ -287,15 +121,15 @@ export function PipelineStrip({
       <div className="flex flex-wrap items-center gap-2">
         <div
           className={`flex min-w-[170px] items-center gap-2 rounded-md border px-2.5 py-2 ${stateClass(summaryState)}`}
-          aria-label={`pipeline summary: ${summaryText}`}
-          title={summaryHint}
+          aria-label={`pipeline summary: ${summary.text}`}
+          title={summary.hint}
         >
           {summaryState === 'running' ? <Spinner size="md" shrink /> : <span className="text-[10px]">{summaryState === 'done' ? '✓' : '!'}</span>}
           <div className="min-w-0 leading-none">
             <span className="text-[9px] uppercase tracking-[0.18em]">pipeline</span>
             <div className="mt-1 flex items-center gap-2">
-              <span className="truncate text-[11px] font-medium text-text-primary">{summaryText}</span>
-              <span className="truncate text-[10px]">{summaryHint}</span>
+              <span className="truncate text-[11px] font-medium text-text-primary">{summary.text}</span>
+              <span className="truncate text-[10px]">{summary.hint}</span>
             </div>
           </div>
           <span className="ml-1 rounded-sm bg-bg-tertiary px-1.5 py-0.5 text-[10px] font-mono tabular-nums text-current/85">
@@ -303,28 +137,24 @@ export function PipelineStrip({
           </span>
         </div>
 
-        {visibleJobs.map((job) => {
-          const state = stateOf(job)
-          const label = kindLabel(job.kind)
-          const hint = hintFor(job, pushError)
-          const runs = runsByKind.get(job.kind) ?? 1
-          const canRetryPush = !!traceReleaseId && job.kind === 'push' && state === 'failed'
+        {steps.map((s) => {
+          const canRetryPush = !!traceReleaseId && s.kind === 'push' && s.state === 'failed'
           return (
-            <span key={job.id} className="inline-flex items-center gap-1">
+            <span key={s.job.id} className="inline-flex items-center gap-1">
               <Button
                 type="button"
                 variant="ghost"
                 size="sm"
-                className={`min-h-[36px] gap-2 rounded-md px-2.5 py-1.5 text-[11px] hover:brightness-110 ${stateClass(state)}`}
-                onClick={() => openJob(job)}
-                aria-label={`${label}: ${state}${runs > 1 ? `, ${runs} runs` : ''}. ${hint}`}
-                title={runs > 1 ? `${hint} (${label} ran ${runs}×)` : hint}
+                className={`min-h-[36px] gap-2 rounded-md px-2.5 py-1.5 text-[11px] hover:brightness-110 ${stateClass(s.state)}`}
+                onClick={() => openJob(s.job)}
+                aria-label={`${s.label}: ${s.state}${s.runs > 1 ? `, ${s.runs} runs` : ''}. ${s.hint}`}
+                title={s.runs > 1 ? `${s.hint} (${s.label} ran ${s.runs}×)` : s.hint}
               >
-                {state === 'running' ? <Spinner size="sm" shrink /> : <span className="text-[10px]">{state === 'done' ? '✓' : '!'}</span>}
-                <span className="font-medium text-text-primary">{label}</span>
-                <span className="font-mono text-[9px] uppercase tracking-[0.12em]">{state}</span>
-                {runs > 1 && (
-                  <span className="font-mono text-[9px] tabular-nums text-current/70">·{runs}</span>
+                {s.state === 'running' ? <Spinner size="sm" shrink /> : <span className="text-[10px]">{s.state === 'done' ? '✓' : '!'}</span>}
+                <span className="font-medium text-text-primary">{s.label}</span>
+                <span className="font-mono text-[9px] uppercase tracking-[0.12em]">{s.state}</span>
+                {s.runs > 1 && (
+                  <span className="font-mono text-[9px] tabular-nums text-current/70">·{s.runs}</span>
                 )}
               </Button>
               {canRetryPush && (
@@ -355,7 +185,7 @@ export function PipelineStrip({
           </Link>
         )}
 
-        {activeRelease && (
+        {hasActiveRelease && (
           confirmAbort ? (
             <div className="flex items-center gap-1 shrink-0">
               <span className="text-[10px] font-mono text-text-tertiary">abort?</span>
