@@ -3,6 +3,7 @@ import { readdirSync, type Dirent } from 'fs';
 import { readFile } from 'fs/promises';
 import { join } from 'path';
 import { resolveProjectPath } from '@/lib/shared/project-data';
+import { loadFileConfigWithSource } from '@/lib/skills/tamtam-file-config';
 
 type ProjectDoc = { name: string; path: string; content: string };
 
@@ -67,5 +68,28 @@ export async function GET(
     docs.sort((a, b) => a.name.localeCompare(b.name));
   }
 
-  return NextResponse.json({ docs });
+  // Cross-reference each doc against the project's .tamtam auto-attach rules so
+  // the Docs tab can show which docs an agent will actually see (and on which
+  // keywords) — the tab's reason to exist. Best-effort; never fails the list.
+  let attachRules: { doc: string; keywords: string[] }[] = [];
+  try {
+    attachRules = loadFileConfigWithSource(projPath).config?.auto_attach_docs ?? [];
+  } catch {
+    attachRules = [];
+  }
+  const keywordsForDoc = (doc: ProjectDoc): string[] => {
+    const kws = new Set<string>();
+    for (const rule of attachRules) {
+      if (!rule || typeof rule.doc !== 'string' || !Array.isArray(rule.keywords)) continue;
+      const target = rule.doc.replace(/^\.?\//, '');
+      if (target === doc.path || target === doc.name || doc.path.endsWith(target)) {
+        for (const k of rule.keywords) if (typeof k === 'string') kws.add(k);
+      }
+    }
+    return [...kws];
+  };
+
+  return NextResponse.json({
+    docs: docs.map((d) => ({ ...d, autoAttachKeywords: keywordsForDoc(d) })),
+  });
 }

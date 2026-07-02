@@ -22,3 +22,21 @@ export function formatTimeAgo(isoDate: string): string {
   if (d < 86400) return `${Math.floor(d / 3600)}h`;
   return `${Math.floor(d / 86400)}d`;
 }
+
+/**
+ * Format a millisecond duration as `230ms` / `45s` / `3m 12s` / `1h 4m`.
+ * Canonical replacement for the near-identical ms-duration formatters that
+ * were reimplemented in PipelineTimeline, RunDetailDrawer, and ReleaseTraceView.
+ * `empty` is returned for null / non-positive input (callers pass '' or '—').
+ */
+export function formatDurationMs(ms: number | null | undefined, empty = ''): string {
+  if (ms == null || ms <= 0) return empty;
+  if (ms < 1000) return `${ms}ms`;
+  const s = Math.round(ms / 1000);
+  if (s < 60) return `${s}s`;
+  const m = Math.floor(s / 60);
+  const rem = s % 60;
+  if (m < 60) return rem > 0 ? `${m}m ${rem}s` : `${m}m`;
+  const h = Math.floor(m / 60);
+  return `${h}h ${m % 60}m`;
+}

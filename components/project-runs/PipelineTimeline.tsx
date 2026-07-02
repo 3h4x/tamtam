@@ -8,17 +8,8 @@ import { Pill, type PillTone } from '@/components/ui/Pill'
 import { Spinner } from '@/components/ui/Spinner'
 import { StatusIcon } from '@/components/ui/StatusIcon'
 import { runKindDisplayName } from '@/components/project-runs/kinds'
+import { formatDurationMs } from '@/lib/shared/format'
 import type { JobTraceStep } from '@/lib/jobs/job-trace-types'
-
-function formatStepDuration(ms: number | null): string {
-  if (ms === null || ms <= 0) return ''
-  if (ms < 1000) return `${ms}ms`
-  const s = Math.round(ms / 1000)
-  if (s < 60) return `${s}s`
-  const m = Math.floor(s / 60)
-  const rem = s % 60
-  return rem > 0 ? `${m}m ${rem}s` : `${m}m`
-}
 
 function formatTs(secs: number): string {
   return new Date(secs * 1000).toLocaleString(undefined, {
@@ -76,7 +67,7 @@ export function PipelineTimeline({ steps, projectName, emptyLabel = 'No pipeline
       <div className="space-y-3">
         {steps.map((step) => {
           const isOpen = openStep === step.job_id
-          const dur = formatStepDuration(stepDurationMs(step))
+          const dur = formatDurationMs(stepDurationMs(step))
           const phaseTone =
             step.status === 'running' ? 'text-accent' :
             step.status === 'aborted' ? 'text-status-error' :

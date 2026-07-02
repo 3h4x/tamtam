@@ -378,6 +378,9 @@ export interface ProjectDoc {
   name: string
   path: string
   content: string
+  /** Keywords from .tamtam auto_attach_docs rules that inject this doc into
+      agent prompts. Empty when the doc isn't wired into auto-attach. */
+  autoAttachKeywords?: string[]
 }
 
 export interface MarkDodResult {

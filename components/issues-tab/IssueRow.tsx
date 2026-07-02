@@ -2,6 +2,8 @@
 
 import { useState, useMemo } from 'react'
 import { useRouter } from 'next/navigation'
+import Markdown from 'react-markdown'
+import remarkGfm from 'remark-gfm'
 import type { GhIssue, ProjectConfig } from '@/lib/client-api'
 import { formatAgo } from '@/lib/shared/format'
 import { Labels } from '@/components/issues-tab/shared'
@@ -188,8 +190,8 @@ export function IssueRow({ issue, projectName, projectCfg }: { issue: GhIssue; p
         </div>
       </div>
       {expanded && issue.body && (
-        <div className="px-10 pb-3 pt-2 text-xs text-text-secondary whitespace-pre-wrap max-h-48 overflow-y-auto border-t border-border/50 bg-bg-primary">
-          {issue.body}
+        <div className="doc-markdown max-h-72 overflow-y-auto border-t border-border/50 bg-bg-primary px-10 pb-3 pt-2 text-xs">
+          <Markdown remarkPlugins={[remarkGfm]}>{issue.body}</Markdown>
         </div>
       )}
     </div>

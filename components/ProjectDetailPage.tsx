@@ -964,6 +964,7 @@ export function ProjectDetailPage({
             anySaving={anySaving}
             allSaved={allSaved}
             onSaveAll={handleSaveAll}
+            onDiscard={config ? () => applyConfigData(config) : undefined}
             onRunSetup={() => router.push(buildProjectSetupPath(name))}
           />
           {name && (
@@ -975,7 +976,7 @@ export function ProjectDetailPage({
       )}
 
       {activeTab === 'changes' && name && (
-        <ChangesTab projectName={name} jobsPaused={jobsPaused} />
+        <ChangesTab projectName={name} jobsPaused={jobsPaused} isPipelineRunning={isPipelineRunning} />
       )}
 
       {activeTab === 'issues' && name && (

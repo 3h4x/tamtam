@@ -113,7 +113,7 @@ describe('ToolBlock', () => {
     unmount()
   })
 
-  it('renders an unknown tool name with the default color class (no crash on missing map entry)', () => {
+  it('renders an unknown tool name with the accent token (no crash on missing map entry)', () => {
     const { container, unmount } = renderToolBlock({
       tool: {
         name: 'mcp__playwright__browser_click',
@@ -122,8 +122,9 @@ describe('ToolBlock', () => {
       },
     })
 
-    // Default color is `text-[#9cc7ff]` — applied to the tool-name span.
-    const nameSpan = container.querySelector('.text-\\[\\#9cc7ff\\]')
+    // Every tool name uses the single design-system accent token (`text-accent`);
+    // there is no per-tool color map to miss, so an unknown tool renders fine.
+    const nameSpan = container.querySelector('.text-accent')
     expect(nameSpan).not.toBeNull()
     expect(nameSpan?.textContent).toBe('mcp__playwright__browser_click')
 

@@ -34,6 +34,10 @@ const STAT_BAR_BOXES = 5
 interface ChangesTabProps {
   projectName: string
   jobsPaused?: boolean
+  /** True while a release pipeline runs — gates the tab's own Push/Pull so a
+      manual git action here can't race the pipeline's commit/push (mirrors the
+      header ProjectActions gate). */
+  isPipelineRunning?: boolean
 }
 
 interface DiffEntry {
@@ -115,7 +119,7 @@ function OperationError({ message, className }: { message: string; className?: s
   )
 }
 
-export function ChangesTab({ projectName, jobsPaused = false }: ChangesTabProps) {
+export function ChangesTab({ projectName, jobsPaused = false, isPipelineRunning = false }: ChangesTabProps) {
   const router = useRouter()
   const [data, setData] = useState<ChangesResponse | null>(null)
   const [loading, setLoading] = useState(true)
@@ -265,7 +269,7 @@ export function ChangesTab({ projectName, jobsPaused = false }: ChangesTabProps)
 
   if (!data || data.files.length === 0) {
     const onNonDefault = !!(data?.branch && data.defaultBranch && data.branch !== data.defaultBranch)
-    const pushBlocked = jobsPaused || pushing
+    const pushBlocked = jobsPaused || isPipelineRunning || pushing
     const pushTitle = jobsPaused
       ? 'Jobs are paused globally. Resume jobs to start a push.'
       : `Push ${data?.ahead ?? 0} commit${data?.ahead === 1 ? '' : 's'} to origin`
@@ -331,7 +335,7 @@ export function ChangesTab({ projectName, jobsPaused = false }: ChangesTabProps)
                 <Button
                   variant="warning"
                   onClick={() => doPull('ff-only')}
-                  disabled={pulling}
+                  disabled={pulling || isPipelineRunning}
                   title={`git pull --ff-only on ${data?.branch ?? 'branch'}`}
                 >
                   {pulling ? 'Pulling…' : 'Pull'}
@@ -346,14 +350,14 @@ export function ChangesTab({ projectName, jobsPaused = false }: ChangesTabProps)
                   <Button
                     variant="info"
                     onClick={() => doPull('rebase')}
-                    disabled={pulling}
+                    disabled={pulling || isPipelineRunning}
                     title="git pull --rebase (replay your commits on top of remote)"
                   >
                     {pulling ? 'Working…' : 'Rebase'}
                   </Button>
                   <Button
                     onClick={() => doPull('merge')}
-                    disabled={pulling}
+                    disabled={pulling || isPipelineRunning}
                     title="git pull --no-ff (create a merge commit)"
                   >
                     {pulling ? 'Working…' : 'Merge'}
@@ -371,7 +375,7 @@ export function ChangesTab({ projectName, jobsPaused = false }: ChangesTabProps)
     )
   }
 
-  const pushBlocked = jobsPaused || pushing
+  const pushBlocked = jobsPaused || isPipelineRunning || pushing
   const pushTitle = jobsPaused
     ? 'Jobs are paused globally. Resume jobs to start a push.'
     : `Push ${data.ahead} commit${data.ahead !== 1 ? 's' : ''} to origin/${data.branch}`
@@ -478,7 +482,7 @@ export function ChangesTab({ projectName, jobsPaused = false }: ChangesTabProps)
               variant={data.totalFiles > 0 ? 'secondary' : 'warning'}
               size="sm"
               onClick={() => doPull('ff-only')}
-              disabled={pulling || data.totalFiles > 0}
+              disabled={pulling || isPipelineRunning || data.totalFiles > 0}
               title={
                 data.totalFiles > 0
                   ? `Commit or stash your ${data.totalFiles} local change${data.totalFiles !== 1 ? 's' : ''} before pulling`
@@ -496,7 +500,7 @@ export function ChangesTab({ projectName, jobsPaused = false }: ChangesTabProps)
               variant="info"
               size="sm"
               onClick={() => doPull('rebase')}
-              disabled={pulling}
+              disabled={pulling || isPipelineRunning}
               title="git pull --rebase (replay your commits on top of remote)"
             >
               {pulling ? 'Working…' : 'Rebase'}
@@ -504,7 +508,7 @@ export function ChangesTab({ projectName, jobsPaused = false }: ChangesTabProps)
             <Button
               size="sm"
               onClick={() => doPull('merge')}
-              disabled={pulling}
+              disabled={pulling || isPipelineRunning}
               title="git pull --no-ff (create a merge commit)"
             >
               {pulling ? 'Working…' : 'Merge'}

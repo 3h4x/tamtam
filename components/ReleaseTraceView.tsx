@@ -7,6 +7,7 @@ import { resolveGithubBoardUrl } from '@/lib/client/resolve-github-board-url'
 import { buttonVariants } from '@/components/ui/Button'
 import { Pill } from '@/components/ui/Pill'
 import { PipelineTimeline } from '@/components/project-runs/PipelineTimeline'
+import { formatDurationMs } from '@/lib/shared/format'
 import type { JobTraceStep } from '@/lib/jobs/job-trace-types'
 
 type ReleaseStep = JobTraceStep
@@ -33,15 +34,6 @@ interface ReleaseTrace {
   steps: ReleaseStep[]
 }
 
-function formatDuration(ms: number | null): string {
-  if (ms === null || ms <= 0) return ''
-  if (ms < 1000) return `${ms}ms`
-  const s = Math.round(ms / 1000)
-  if (s < 60) return `${s}s`
-  const m = Math.floor(s / 60)
-  const rem = s % 60
-  return rem > 0 ? `${m}m ${rem}s` : `${m}m`
-}
 
 function formatTs(secs: number): string {
   return new Date(secs * 1000).toLocaleString(undefined, {
@@ -255,7 +247,7 @@ export function ReleaseTraceView({ projectName, releaseId }: Props) {
             <span>finished {formatTs(trace.finished_at)}</span>
           )}
           {totalDurationMs !== null && (
-            <span>total {formatDuration(totalDurationMs)}</span>
+            <span>total {formatDurationMs(totalDurationMs)}</span>
           )}
           <span>{trace.steps.length} step{trace.steps.length !== 1 ? 's' : ''}</span>
         </div>

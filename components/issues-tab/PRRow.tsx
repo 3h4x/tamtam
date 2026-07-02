@@ -2,6 +2,8 @@
 
 import { useState } from 'react'
 import { useRouter } from 'next/navigation'
+import Markdown from 'react-markdown'
+import remarkGfm from 'remark-gfm'
 import { mergePR, approvePR, reviewPR, runMarkDod, addressPrComments } from '@/lib/client-api'
 import type { GhPullRequest } from '@/lib/client-api'
 import { formatAgo } from '@/lib/shared/format'
@@ -453,8 +455,8 @@ export function PRRow({
         </div>
       </div>
       {expanded && pr.body && (
-        <div className="px-10 pb-3 pt-2 text-xs text-text-secondary whitespace-pre-wrap max-h-48 overflow-y-auto border-t border-border/50 bg-bg-primary">
-          {pr.body}
+        <div className="doc-markdown max-h-72 overflow-y-auto border-t border-border/50 bg-bg-primary px-10 pb-3 pt-2 text-xs">
+          <Markdown remarkPlugins={[remarkGfm]}>{pr.body}</Markdown>
         </div>
       )}
     </div>

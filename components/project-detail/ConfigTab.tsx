@@ -96,6 +96,7 @@ export interface ConfigTabProps {
   anySaving: boolean
   allSaved: boolean
   onSaveAll: () => void
+  onDiscard?: () => void
   onRunSetup?: () => void
 }
 
@@ -157,6 +158,7 @@ export function ConfigTab({
   anySaving,
   allSaved,
   onSaveAll,
+  onDiscard,
   onRunSetup = () => {},
 }: ConfigTabProps) {
   const postMergeWatchMinutes = Number.parseInt(postMergeWatchMinutesInput, 10) || 0
@@ -212,10 +214,35 @@ export function ConfigTab({
         </div>
       </div>
 
+      {/* Section jump-nav — the form is long; this lets you jump to a section
+          instead of scrolling the whole ~2800px page. Anchors carry scroll-mt
+          so the sticky app header doesn't cover the target heading. */}
+      <div className="flex flex-wrap items-center gap-1 rounded-md border border-border bg-bg-secondary px-2 py-1.5">
+        <span className="mr-1 font-mono text-[10px] uppercase tracking-wider text-text-tertiary">jump</span>
+        {([
+          ['cfg-budget', 'Budget'],
+          ['cfg-website', 'Targets'],
+          ['cfg-dev-server', 'Dev server'],
+          ['cfg-testing', 'Testing'],
+          ['cfg-work-on-issue', 'Issues'],
+          ['cfg-release-pipeline', 'Pipeline'],
+          ['cfg-custom-actions', 'Actions'],
+        ] as [string, string][]).map(([id, label]) => (
+          <button
+            key={id}
+            type="button"
+            onClick={() => document.getElementById(id)?.scrollIntoView({ behavior: 'smooth', block: 'start' })}
+            className="rounded px-2 py-0.5 font-mono text-[11px] text-text-secondary transition-colors hover:bg-bg-tertiary hover:text-text-primary"
+          >
+            {label}
+          </button>
+        ))}
+      </div>
+
       {/* Spend budgets */}
       <div className="bg-bg-secondary rounded-md border border-border">
         <div className="px-4 py-2 border-b border-border flex items-baseline gap-3">
-          <h3 className="text-sm font-semibold text-text-primary">Budget</h3>
+          <h3 id="cfg-budget" className="scroll-mt-20 text-sm font-semibold text-text-primary">Budget</h3>
           <p className="text-xs text-text-tertiary">Per-project spend caps for unattended agent and release automation</p>
           <span className="ml-auto text-xs text-text-secondary tabular-nums">
             Last 24h: ${last24hSpend.toFixed(2)}
@@ -258,7 +285,7 @@ export function ConfigTab({
       {/* Website + QA target */}
       <div className="bg-bg-secondary rounded-md border border-border">
         <div className="px-4 py-2 border-b border-border flex items-baseline gap-3">
-          <h3 className="text-sm font-semibold text-text-primary">Website</h3>
+          <h3 id="cfg-website" className="scroll-mt-20 text-sm font-semibold text-text-primary">Website</h3>
           <p className="text-xs text-text-tertiary">Public/production URL — used by the QA agent when no explicit QA target is set</p>
         </div>
         <div className="px-4 py-3 space-y-3">
@@ -299,7 +326,7 @@ export function ConfigTab({
       {/* Dev server lifecycle */}
       <div className="bg-bg-secondary rounded-md border border-border">
         <div className="px-4 py-2 border-b border-border flex items-baseline gap-3">
-          <h3 className="text-sm font-semibold text-text-primary">Dev Server</h3>
+          <h3 id="cfg-dev-server" className="scroll-mt-20 text-sm font-semibold text-text-primary">Dev Server</h3>
           <p className="text-xs text-text-tertiary">Local app lifecycle around agent runs</p>
         </div>
         <div className="px-4 py-3 space-y-3">
@@ -354,7 +381,7 @@ export function ConfigTab({
       {/* Testing */}
       <div className="bg-bg-secondary rounded-md border border-border">
         <div className="px-4 py-2 border-b border-border flex items-baseline gap-3">
-          <h3 className="text-sm font-semibold text-text-primary">Testing</h3>
+          <h3 id="cfg-testing" className="scroll-mt-20 text-sm font-semibold text-text-primary">Testing</h3>
           <p className="text-xs text-text-tertiary">Test command run before every release</p>
         </div>
         <div className="px-4 py-3 space-y-3">
@@ -432,7 +459,7 @@ export function ConfigTab({
       {/* "Work on" issue */}
       <div className="bg-bg-secondary rounded-md border border-border">
         <div className="px-4 py-2 border-b border-border flex items-baseline gap-3">
-          <h3 className="text-sm font-semibold text-text-primary">Work on issue</h3>
+          <h3 id="cfg-work-on-issue" className="scroll-mt-20 text-sm font-semibold text-text-primary">Work on issue</h3>
           <p className="text-xs text-text-tertiary">What fires when you click <span className="font-mono">Work on</span> on a GitHub issue</p>
         </div>
         <div className="px-4 py-3">
@@ -457,7 +484,7 @@ export function ConfigTab({
       {/* Release Pipeline */}
       <div className="bg-bg-secondary rounded-md border border-border">
         <div className="px-4 py-2 border-b border-border flex items-baseline justify-between gap-3 flex-wrap">
-          <h3 className="text-sm font-semibold text-text-primary">Release Pipeline</h3>
+          <h3 id="cfg-release-pipeline" className="scroll-mt-20 text-sm font-semibold text-text-primary">Release Pipeline</h3>
           <p className="text-xs text-text-tertiary">Click a step to toggle. `fix` runs automatically as part of review. On non-default branches, push opens a PR, then PR wait/merge and DoD handling complete the release automatically.</p>
         </div>
 
@@ -688,7 +715,7 @@ export function ConfigTab({
       <div className="bg-bg-secondary rounded-md border border-border">
         <div className="px-4 py-2 border-b border-border flex items-center justify-between gap-3">
           <div className="flex items-baseline gap-3">
-            <h3 className="text-sm font-semibold text-text-primary">Custom Actions</h3>
+            <h3 id="cfg-custom-actions" className="scroll-mt-20 text-sm font-semibold text-text-primary">Custom Actions</h3>
             <p className="text-xs text-text-tertiary">Bash commands shown as buttons on the project page</p>
           </div>
           <Button
@@ -779,10 +806,22 @@ export function ConfigTab({
         ) : (
           <span className="text-xs text-text-tertiary">All changes saved</span>
         )}
+        <div className="flex-1" />
+        {onDiscard && anyDirty && !anySaving && (
+          <Button
+            variant="ghost"
+            size="sm"
+            className="text-text-tertiary hover:text-text-primary"
+            onClick={onDiscard}
+            title="Reset all fields to the last saved values"
+          >
+            Discard
+          </Button>
+        )}
         <Button
           variant={allSaved ? 'success-solid' : 'solid'}
           disabledCursor={anySaving ? 'wait' : 'default'}
-          className={`ml-auto px-4 py-1.5 border-none rounded-md font-semibold text-white ${
+          className={`px-4 py-1.5 border-none rounded-md font-semibold text-white ${
             !allSaved && !anyDirty ? 'bg-accent/40 hover:bg-accent/40' : ''
           } ${anySaving ? 'opacity-70 cursor-wait disabled:cursor-wait disabled:opacity-70' : 'disabled:opacity-100'}`}
           onClick={onSaveAll}

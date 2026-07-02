@@ -10,6 +10,7 @@ import { buttonVariants } from '@/components/ui/Button'
 import { ErrorState } from '@/components/ErrorState'
 import { PipelineTimeline } from '@/components/project-runs/PipelineTimeline'
 import { formatCost, formatTokens } from '@/components/project-runs/formatting'
+import { formatDurationMs } from '@/lib/shared/format'
 import { formatRunSummaryText } from '@/components/project-runs/run-summary'
 import { rowStateInfo, gemmaOutcomeInfo, promptBloat } from '@/components/project-runs/presentation'
 import { bucketOf, KIND_COLOR, KIND_LABEL, runKindDisplayName } from '@/components/project-runs/kinds'
@@ -32,13 +33,6 @@ function headingFor(t: JobTrace): string {
   return runKindDisplayName(t.kind)
 }
 
-function fmtDurationMs(ms: number | null): string {
-  if (ms === null || ms <= 0) return '—'
-  const s = Math.round(ms / 1000)
-  if (s < 60) return `${s}s`
-  if (s < 3600) return `${Math.floor(s / 60)}m ${s % 60}s`
-  return `${Math.floor(s / 3600)}h ${Math.floor((s % 3600) / 60)}m`
-}
 
 function Section({ label, children }: { label: string; children: React.ReactNode }) {
   return (
@@ -153,7 +147,7 @@ export function RunDetailDrawer({ projectName, jobId, onClose }: RunDetailDrawer
         <div>
           {/* Meta strip */}
           <div className="grid grid-cols-2 gap-3 px-4 py-3 sm:grid-cols-4">
-            <Meta label="duration" value={fmtDurationMs(trace.duration_ms ?? (trace.finished_at ? Math.round((trace.finished_at - trace.started_at) * 1000) : null))} />
+            <Meta label="duration" value={formatDurationMs(trace.duration_ms ?? (trace.finished_at ? Math.round((trace.finished_at - trace.started_at) * 1000) : null), '—')} />
             <Meta label="cost" value={trace.usage.costUsd > 0 ? formatCost(trace.usage.costUsd) : '—'} tone="text-accent" />
             <Meta label="model" value={trace.usage.model ?? '—'} tone="text-accent" />
             <Meta
