@@ -195,6 +195,23 @@ watchdog also aborts a hung release, which sets `finishedAt` and clears the
 guard). Scheduled agents are already serialized here via `agent-cron`'s
 `pr-wait in flight` / `release pipeline is running` skip reasons.
 
+### `pr-wait` outcomes and human-in-the-loop deferrals
+
+`pr-wait` polls the PR until one terminal reason resolves: `merged` (success),
+`checks_failed` (auto-dispatches `fix-ci`, which chains a fresh release),
+`pr_closed`, `conflict`, `timeout`, or a **human-in-the-loop deferral** —
+`risky_diff` (the PR diff touches high-risk execution files: dependency
+manifests / lockfiles / `.github/workflows` / `Dockerfile` / `Makefile` / JS·TS
+config) or `merge_permanent` (merge blocked, e.g. branch protection). For every
+non-`merged` reason the release chain still routes `pr-wait → done`, so the
+reason is persisted as `prWaitReason` on the `pr-wait` job's `contextMeta`.
+`risky_diff` / `merge_permanent` on a still-open PR then surface in the inbox as
+`pr_needs_manual_merge` (a yellow **Merge** action; see `docs/API.md`), so a diff
+the auto-merge guard deliberately refuses becomes a one-click operator decision
+instead of a silent stall. Clicking Merge uses the operator-explicit merge path,
+which bypasses the `risky_diff` guard (the guard exists to defer to exactly that
+human decision).
+
 ---
 
 ## Addressing human PR review comments (`respond-to-review`)

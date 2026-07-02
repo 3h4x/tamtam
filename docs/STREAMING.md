@@ -139,12 +139,16 @@ Follow-up messages pass `resumeSessionId` → server adds `--resume <sessionId>`
 
 ### Previous sessions panel
 
-1. `GET /api/jobs?project=<name>` → filter `kind==='run'`, sorted newest-first, max 100
-2. `restoreSession()`: still running → reconnect SSE; finished → read log, reconstruct history, set `claudeSessionId`
+Opt-in: the panel is **closed by default** (the toolbar `recent` toggle opens it), so the terminal lands directly on the "start a terminal chat" empty state instead of a wall of past runs.
+
+1. `GET /api/jobs?project=<name>&has_session=1` → keep restorable-kind rows (`run` / `review` / `fix` / `fix-ci` / `agent:*`) **that have an actual prompt**, grouped by `session_id`, newest-first, max 10. Rows with no user-facing prompt (pipeline steps, composed agent turns) are dropped — restoring them shows an empty conversation and they buried the real sessions.
+2. `restoreSession()`: still running → reconnect SSE; finished → read log, reconstruct history, set `claudeSessionId`. Restore still accepts the broad restorable-kind set so a deep-linked review/fix session rebuilds its full transcript.
 
 ### Typewriter animation
 
 Streamed text → `streamBuffer`. `requestAnimationFrame` loop advances `displayedLength` at ~800 chars/sec. On completion: full buffer committed to `history`, stream state cleared.
+
+The finalized stream buffer is committed with the `assistant` role **regardless of exit code** (`finalizeStream` in `lib/terminal/terminal-session-store.ts`). A non-zero exit does not colour the content as an error, because Claude CLI is frequently SIGKILLed by pm2's timeout *after* emitting its final result — a clean finish that `markDone` rewrites to exit 0. Run status is conveyed by a separate `terminalExitEntry`, and that marker itself mirrors the `markDone` is-error heuristic client-side: a non-zero exit that follows a clean stream-json result renders as "exit 0 — ok", not a red "exit -1". Only a genuine failure (plain-text fallback / cancellation) keeps the error styling.
 
 ### Transport recovery during rebuilds
 
@@ -176,10 +180,11 @@ Verdict detection (`getVerdict`) reads the **last 2000 chars** of the parsed log
 
 ## Job storage
 
-- All runs in `jobs` table; `kind` distinguishes `run` / `review` / `fix` / `test` / `push` / `release`
+- All runs in `jobs` table; `kind` distinguishes `run` / `review` / `fix` / `test` / `push` / `release` / `pr-wait` / …
 - `markDone(jobId, exitCode)`: sets `finishedAt`, `exitCode`; for `kind='run'` also extracts `sessionId` + token counts from the `result` NDJSON line
-- `contextMeta` (text column): written once at job creation with selected skills/docs; never updated
+- `contextMeta` (text column): written at job creation with selected skills/docs; a few phases update it afterwards (e.g. `pr-wait` stamps `prWaitReason` so the inbox can explain a deferred merge)
 - `saveToDb()` uses `INSERT ... ON CONFLICT DO UPDATE`
+- **`markDone` and `updateJob` both `jobsCache.set(job.id, job)`** so the in-memory cache stays in sync with the DB write. Without it, a phase that finalizes inside the workflow runtime on a job object that is *not* the cached reference (e.g. `pr-wait`) persists to Postgres but leaves `listJobs()` serving a stale row with `finishedAt: null` — which silently broke inbox signals derived from finished state.
 
 ---
 
