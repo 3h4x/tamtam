@@ -363,6 +363,13 @@ export async function markAllUnseenFinished(): Promise<number> {
 }
 
 export function updateJob(job: JobData): void {
+  // Keep the in-memory cache in sync with the DB write. Without this, an
+  // `updateJob` that ran on a job object which is NOT the cached reference
+  // (e.g. a pipeline phase finalizing inside the workflow runtime) persists to
+  // Postgres but leaves `listJobs()` serving a stale row — reads like the inbox
+  // then see `finishedAt: null` / missing `contextMeta` for a job the DB has
+  // already finalized, so signals derived from finished state silently misfire.
+  jobsCache.set(job.id, job);
   saveToDb(job);
 }
 

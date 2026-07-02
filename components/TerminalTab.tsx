@@ -1,6 +1,6 @@
 'use client'
 
-import { useState, useEffect, useRef, useCallback, useMemo, useSyncExternalStore } from 'react'
+import { useState, useEffect, useRef, useCallback, useMemo, useReducer, useSyncExternalStore } from 'react'
 import { useRouter, useSearchParams } from 'next/navigation'
 import {
   fetchAgents,
@@ -12,6 +12,7 @@ import {
   releaseProject,
   runCustomAction,
   testProject,
+  fetchSettings,
 } from '@/lib/client-api'
 import type { Agent, CustomAction, Skill, Persona } from '@/lib/client-api'
 import {
@@ -27,9 +28,7 @@ import { TerminalToolbar } from '@/components/terminal/TerminalToolbar'
 import { useSessionManager } from '@/components/terminal/useSessionManager'
 import { useHandleSubmit } from '@/components/terminal/useHandleSubmit'
 import { useTerminalBootstrap } from '@/components/terminal/useTerminalBootstrap'
-import { Button } from '@/components/ui/Button'
-import { Select } from '@/components/ui/Select'
-import { Textarea } from '@/components/ui/Textarea'
+import { TerminalIssueBanner } from '@/components/terminal/TerminalIssueBanner'
 import { MODEL_TIERS, normalizeModelInput, type ModelTier } from '@/lib/agents/model-aliases'
 import { normalizePermissionMode, type PermissionMode } from '@/lib/shared/permission-modes'
 import { type CliProvider } from '@/lib/usage/cli-providers'
@@ -152,7 +151,10 @@ export function TerminalTab({ projectName, initialSessionId }: TerminalTabProps)
   const [pendingImages, setPendingImages] = useState<File[]>([])
   const [pendingImageUrls, setPendingImageUrls] = useState<string[]>([])
   const [dragOver, setDragOver] = useState(false)
-  const [showSessions, setShowSessions] = useState(true)
+  // Land directly in the usable terminal — the recent-sessions panel is opt-in
+  // via the toolbar toggle. It used to default open, so every visit forced a
+  // "close" click past a list of past runs before you could type.
+  const [showSessions, setShowSessions] = useState(false)
   const { sessions, loadingSessions, loadSessions, restoreSession: restoreSessionBase } = useSessionManager(projectName)
   const restoreSession = useCallback(async (session: Parameters<typeof restoreSessionBase>[0]) => {
     setShowSessions(false)
@@ -169,6 +171,25 @@ export function TerminalTab({ projectName, initialSessionId }: TerminalTabProps)
   const issueContextRef = useRef<{ number: number; repo: string; title: string } | null>(
     issueNumberParam ? { number: Number(issueNumberParam), repo: issueRepoParam ?? '', title: issueTitleParam ?? '' } : null
   )
+  // When this session is linked to a GitHub issue, resolve the open PR that
+  // implements it (branch `fix/issue-N-…` or a `Closes #N` reference) so the
+  // issue banner can link straight to the PR, not just name the issue.
+  const [issuePr, setIssuePr] = useState<{ number: number; url: string } | null>(null)
+  useEffect(() => {
+    const ic = issueContextRef.current
+    if (!ic?.number) return
+    let cancelled = false
+    const n = ic.number
+    const closes = new RegExp(`\\b(?:close[sd]?|fixe?[sd]?|resolve[sd]?)\\s+#${n}\\b`, 'i')
+    fetchIssuesAndPRs(projectName)
+      .then(({ prs }) => {
+        if (cancelled) return
+        const match = prs.find((p) => p.headRefName?.startsWith(`fix/issue-${n}-`) || closes.test(p.body ?? ''))
+        if (match) setIssuePr({ number: match.number, url: match.url })
+      })
+      .catch(() => {})
+    return () => { cancelled = true }
+  }, [projectName, issueNumberParam])
   const [autoScroll, setAutoScroll] = useState(true)
   const [elapsedMs, setElapsedMs] = useState(0)
   const [idleSec, setIdleSec] = useState(0)
@@ -236,8 +257,7 @@ export function TerminalTab({ projectName, initialSessionId }: TerminalTabProps)
   const [promptEstimateWarnTokens, setPromptEstimateWarnTokens] = useState(50000)
 
   useEffect(() => {
-    fetch('/api/settings')
-      .then((r) => r.json())
+    fetchSettings()
       .then((data) => {
         const m = data.settings?.default_model
         if (m && MODEL_TIERS.includes(normalizeModelInput(m, 'fast') as ModelTier)) {
@@ -680,32 +700,9 @@ export function TerminalTab({ projectName, initialSessionId }: TerminalTabProps)
     terminalStore.update(projectName, () => ({ lastError: null }))
   }, [projectName])
 
-  const [showCloseStale, setShowCloseStale] = useState(false)
-  const [closeStaleFindings, setCloseStaleFindings] = useState('')
-  const [closeStaleReason, setCloseStaleReason] = useState<'stale' | 'duplicate' | 'wontfix' | 'fixed'>('stale')
-  const [closingStale, setClosingStale] = useState(false)
-  const handleCloseStale = async () => {
-    const issue = issueContextRef.current
-    if (!issue || !issue.number || !closeStaleFindings.trim()) return
-    setClosingStale(true)
-    try {
-      const r = await fetch(`/api/projects/by-project/${encodeURIComponent(projectName)}/issues/${issue.number}/close-stale`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ findings: closeStaleFindings.trim(), reason: closeStaleReason }),
-      })
-      if (!r.ok) {
-        const data = await r.json().catch(() => ({}))
-        alert(`Close failed: ${data.detail ?? r.statusText}`)
-        return
-      }
-      setShowCloseStale(false)
-      setCloseStaleFindings('')
-      issueContextRef.current = null
-    } finally {
-      setClosingStale(false)
-    }
-  }
+  // The issue banner reads `issueContextRef` (a ref, not state); bump this to
+  // re-render and drop the banner once the linked issue is closed.
+  const [, forceIssueBannerRerender] = useReducer((n: number) => n + 1, 0)
 
   return (
     <div
@@ -724,67 +721,12 @@ export function TerminalTab({ projectName, initialSessionId }: TerminalTabProps)
 
         {/* Issue actions banner — visible when this session is linked to a GitHub issue */}
         {issueContextRef.current?.number ? (
-          <div className="px-3 py-2 border-b border-border bg-bg-secondary text-xs flex items-center gap-2 flex-wrap">
-            <span className="text-text-secondary">
-              Issue #{issueContextRef.current.number}
-              {issueContextRef.current.title ? ` — ${issueContextRef.current.title}` : ''}
-            </span>
-            {!showCloseStale ? (
-              <Button
-                type="button"
-                size="sm"
-                onClick={() => setShowCloseStale(true)}
-                className="ml-auto"
-                title="Close this issue with a verdict comment"
-              >
-                Close with verdict
-              </Button>
-            ) : (
-              <div className="ml-auto flex items-start gap-2 w-full mt-2">
-                <Select
-                  surface="tertiary"
-                  size="compact"
-                  value={closeStaleReason}
-                  onChange={(e) => setCloseStaleReason(e.target.value as typeof closeStaleReason)}
-                >
-                  <option value="stale">stale</option>
-                  <option value="duplicate">duplicate</option>
-                  <option value="wontfix">wontfix</option>
-                  <option value="fixed">fixed</option>
-                </Select>
-                <Textarea
-                  value={closeStaleFindings}
-                  onChange={(e) => setCloseStaleFindings(e.target.value)}
-                  placeholder="Findings to post as a comment before closing…"
-                  rows={3}
-                  appearance="muted"
-                  inputSize="compact"
-                  fontSize="xs"
-                  resize="both"
-                  className="flex-1 !px-2 !py-1"
-                />
-                <div className="flex flex-col gap-1">
-                  <Button
-                    type="button"
-                    size="sm"
-                    variant="primary"
-                    disabled={!closeStaleFindings.trim() || closingStale}
-                    onClick={handleCloseStale}
-                  >
-                    {closingStale ? 'closing…' : 'Comment + Close'}
-                  </Button>
-                  <Button
-                    type="button"
-                    size="sm"
-                    variant="ghost"
-                    onClick={() => { setShowCloseStale(false); setCloseStaleFindings('') }}
-                  >
-                    cancel
-                  </Button>
-                </div>
-              </div>
-            )}
-          </div>
+          <TerminalIssueBanner
+            projectName={projectName}
+            issue={issueContextRef.current}
+            issuePr={issuePr}
+            onClosed={() => { issueContextRef.current = null; setIssuePr(null); forceIssueBannerRerender() }}
+          />
         ) : null}
 
         {/* Terminal header */}

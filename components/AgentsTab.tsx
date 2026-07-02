@@ -2,7 +2,7 @@
 
 import { useState, useEffect } from 'react'
 import { useRouter, useSearchParams, usePathname } from 'next/navigation'
-import { fetchAgents, createAgent, updateAgent, deleteAgent, runAgent, fetchSkills, fetchPersonas } from '@/lib/client-api'
+import { fetchAgents, createAgent, updateAgent, deleteAgent, runAgent, fetchSkills, fetchPersonas, fetchSettings } from '@/lib/client-api'
 import type { Agent, Skill, Persona, JobInfo } from '@/lib/client-api'
 import { formatAgo } from '@/lib/shared/format'
 import { isCancelledExitCode } from '@/lib/shared/job-exit-codes'
@@ -123,7 +123,7 @@ export function AgentsTab({ projectName, projectJobs = [], jobsPaused = false }:
       fetchAgents(projectName),
       fetchSkills(),
       fetchPersonas(),
-      fetch('/api/settings').then(r => r.json()).catch(() => ({ settings: {} })),
+      fetchSettings().catch(() => ({ settings: {} as Record<string, string | undefined> })),
     ])
     setAgents(agentsData.agents)
     setSkills(skillsData.skills)

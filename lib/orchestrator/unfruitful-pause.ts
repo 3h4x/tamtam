@@ -18,6 +18,12 @@ interface AgentContextMeta {
   agent?: {
     triggeredBy?: string;
   };
+  // Persisted by the agent-completion hook after it dispatches the run's
+  // `tamtam-actions` block server-side (issue close, PR merge, label/comment).
+  // `executed` is the count of actions that ran successfully.
+  agentActions?: {
+    executed?: number;
+  };
 }
 
 function parseAgentMeta(rawMeta: string | null | undefined): AgentContextMeta | null {
@@ -57,6 +63,29 @@ export function runChangedLines(run: JobData): boolean {
   return ((run.linesAdded ?? 0) + (run.linesRemoved ?? 0)) > 0;
 }
 
+/** A run that dispatched at least one server-side agent action (issue close,
+ *  PR merge, needs-info label/comment). These are the productive outcomes of
+ *  issue/PR-triage agents that legitimately change ZERO code lines — merging a
+ *  ready PR or closing a done/stale issue drains the backlog without a diff.
+ *  Without this credit, a working issue-cruncher looks identical to a
+ *  do-nothing agent (both land no lines) and gets auto-paused precisely when it
+ *  is succeeding. The `agentActions.executed` count is persisted by the
+ *  agent-completion hook after it dispatches the run's `tamtam-actions` block,
+ *  so this signal is available retroactively on past runs. Runs that found
+ *  nothing to do (no eligible issue) dispatch no actions and are correctly NOT
+ *  credited here. */
+export function runDispatchedAction(run: JobData): boolean {
+  const executed = parseAgentMeta(run.contextMeta)?.agentActions?.executed;
+  return typeof executed === 'number' && executed > 0;
+}
+
+/** A run that produced value: a real line-level change OR a dispatched agent
+ *  action. This is the fruitfulness signal the rate-based unfruitful checks use,
+ *  so triage-only work (merge/close with no diff) counts as productive. */
+export function runWasProductive(run: JobData): boolean {
+  return runChangedLines(run) || runDispatchedAction(run);
+}
+
 /** A run whose work summary explicitly reports nothing to do (caught up). */
 export function runIsCaughtUp(run: JobData): boolean {
   return IDLE_SUMMARY_RE.test(run.workSummary ?? '');
@@ -87,7 +116,9 @@ export function isProjectCaughtUpUnfruitful(
   const requiredRuns = effectiveThreshold(threshold);
   const window = recentRunsNewestFirst.slice(0, requiredRuns);
   if (window.length < requiredRuns) return false; // not enough history yet
-  if (window.some((r) => !runProducedNoDiff(r))) return false; // a fruitful run → still has work
+  // A run that landed a diff OR dispatched a triage action (merge/close) is
+  // productive → the project still has work and is not caught up.
+  if (window.some((r) => !runProducedNoDiff(r) || runDispatchedAction(r))) return false;
   return window.some(runIsCaughtUpOrCleanNoop); // ≥1 clean no-op (caught up, not crashing)
 }
 
@@ -112,9 +143,11 @@ export function isProjectPersistentlyUnfruitful(
   if (sample <= 0) return false;
   const window = recentRunsNewestFirst.slice(0, sample);
   if (window.length < sample) return false; // not enough history to judge a rate
-  // Line-level fruitfulness: a run that re-touches files but moves zero lines is
-  // unproductive churn, not real work (see runChangedLines).
-  const fruitful = window.filter(runChangedLines).length;
+  // Fruitfulness: a run that moved lines OR dispatched a triage action (merge a
+  // ready PR, close a done/stale issue) counts as productive. A run that
+  // re-touches files but moves zero lines and dispatched nothing is unproductive
+  // churn, not real work (see runWasProductive / runChangedLines).
+  const fruitful = window.filter(runWasProductive).length;
   const rate = fruitful / window.length;
   if (rate >= rateThreshold) return false; // still productive enough
   return window.some(runIsCaughtUpOrCleanNoop); // ≥1 clean run (not all crashing)
@@ -203,7 +236,7 @@ export async function autoPauseUnfruitfulProjects(
     paused.push(p.name);
 
     const ratePct = sample > 0
-      ? Math.round((runs.slice(0, sample).filter(runChangedLines).length / sample) * 100)
+      ? Math.round((runs.slice(0, sample).filter(runWasProductive).length / sample) * 100)
       : 0;
     const title = caughtUp
       ? `${p.name} auto-paused — caught up (nothing to do)`

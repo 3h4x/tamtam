@@ -35,6 +35,20 @@ if [ "$WORKFLOW_TARGET_WORLD" = "local" ]; then
   export WORKFLOW_LOCAL_DATA_DIR="${WORKFLOW_LOCAL_DATA_DIR:-data/workflow-data}"
 fi
 
+# Guarantee HOME/USER in PM2's env snapshot. The PM2 daemon may have been
+# launched from a context with a stripped env, and `pm2 start`/`--update-env`
+# fork the app from *that* env — so without pinning here the server runs with
+# no HOME. That silently breaks every git/gh call that resolves config from ~:
+# global `.gitignore` (core.excludesFile), commit identity, and gh auth/hosts.
+# The visible symptom was the PR-branch execution gate refusing a clean tree
+# ("uncommitted or untracked changes") because globally-ignored files
+# (.playwright-mcp/, .DS_Store) showed as untracked when git couldn't read the
+# global excludesfile. Derive HOME from the passwd db when the env lacks it.
+if [ -z "${HOME:-}" ]; then
+  export HOME="$(eval echo "~$(id -un)")"
+fi
+export USER="${USER:-$(id -un)}"
+
 if [ ! -x "$NEXT_BIN" ] && [ ! -f "$NEXT_BIN" ]; then
   echo "[pm2-start] next binary not found at $NEXT_BIN — run pnpm install first" >&2
   exit 1

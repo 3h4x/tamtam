@@ -16,8 +16,21 @@
 // hardcoded low (2 attempts) so a genuinely broken agent doesn't loop.
 
 import type { JobData } from '@/lib/jobs/job-storage';
+import { RUN_WALL_TIME_EXIT_CODE, RUN_TOKEN_CAP_EXIT_CODE } from '@/lib/jobs/run-cap-reaper';
 
 export const MAX_AUTO_RESUME_ATTEMPTS = 2;
+
+/** Exit codes that mean a reaper DELIBERATELY killed the run for exceeding a
+ *  resource limit (cumulative token cap or wall-clock cap). These are NOT the
+ *  mid-stream deaths auto-resume exists for: `--resume` reloads the SAME session
+ *  the reaper just killed for being too big/slow, so the very first resumed turn
+ *  re-sends that oversized context and re-trips the same cap. The resume is
+ *  therefore doomed — and worse, each doomed attempt is a fresh countable
+ *  failure, so a single runaway becomes 1 + MAX_AUTO_RESUME_ATTEMPTS failures,
+ *  enough on its own to trip the project circuit breaker (see
+ *  lib/pipeline/circuit-breaker.ts). Resource-limit kills must fail once, not
+ *  loop. (124 covers both the run wall-time and test-timeout reapers.) */
+const RESOURCE_LIMIT_KILL_CODES = new Set<number>([RUN_WALL_TIME_EXIT_CODE, RUN_TOKEN_CAP_EXIT_CODE]);
 
 /** Maximum age (ms since finishedAt) for an auto-resume to make sense.
  *  Beyond this, the provider's session cache has likely been compacted
@@ -98,10 +111,15 @@ export function isAutoResumeEligible(job: JobData, _tail: string): boolean {
   if (job.exitCode === 0) return false;
   if (!(job.kind === 'run' || job.kind.startsWith('agent:'))) return false;
   if (Date.now() - job.finishedAt * 1000 > MAX_AGE_MS) return false;
-  // Any non-zero exit on a run/agent is treated as resumable, including
-  // Claude `{"type":"result","is_error":true}` errors. The user can still
-  // intervene manually — but the default for "✗ ERROR / ERR / exit -1"
-  // is to relaunch with --resume rather than burn the partial session.
+  // Resource-limit kills (token cap / wall-clock cap) are NOT resumable: the
+  // resumed session reloads the same oversized/slow work and re-trips the cap,
+  // turning one runaway into a breaker-tripping streak of failures. Fail once.
+  if (job.exitCode !== null && RESOURCE_LIMIT_KILL_CODES.has(job.exitCode)) return false;
+  // Any OTHER non-zero exit on a run/agent is treated as resumable, including
+  // Claude `{"type":"result","is_error":true}` errors and mid-stream deaths
+  // (PM2 restart, V8 fatal, exit -1). The user can still intervene manually —
+  // but the default is to relaunch with --resume rather than burn the partial
+  // session.
   if (autoResumeCountOf(job) >= MAX_AUTO_RESUME_ATTEMPTS) return false;
   return true;
 }

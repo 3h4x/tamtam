@@ -45,6 +45,8 @@ function makeJob(overrides: Partial<InboxJob> & { project: string; kind: string 
     exitCode: 0,
     verdict: null,
     releaseStopReason: null,
+    prWaitReason: null,
+    prNumber: null,
     ...overrides,
   };
 }
@@ -55,12 +57,80 @@ function baseInput(overrides: Partial<InboxInput> = {}): InboxInput {
     jobs: [],
     automationQueue: [],
     openPrByProject: {},
+    openPrNumbersByProject: {},
     nowSeconds: 10_000,
     ...overrides,
   };
 }
 
 describe('deriveInboxSignals', () => {
+  it('flags a pr-wait that deferred auto-merge to a human (risky_diff) as needing manual merge', () => {
+    const signals = deriveInboxSignals(
+      baseInput({
+        tasks: [makeTask({ project: 'alpha' })],
+        jobs: [makeJob({ project: 'alpha', kind: 'pr-wait', exitCode: 1, prWaitReason: 'risky_diff', prNumber: 76 })],
+        openPrByProject: { alpha: { number: 76, ciGreen: false, reviewDecision: null } },
+        openPrNumbersByProject: { alpha: [76] },
+      }),
+    );
+    const s = signals.find((x) => x.type === 'pr_needs_manual_merge');
+    expect(s).toMatchObject({
+      type: 'pr_needs_manual_merge',
+      severity: 'yellow',
+      project: 'alpha',
+      title: 'PR #76 needs manual merge',
+      action: { kind: 'merge', label: 'Merge', prNumber: 76 },
+    });
+  });
+
+  it('clears the manual-merge signal once the deferred PR is no longer among the open PRs', () => {
+    // Cache has other open PRs but not #76 → it was merged/closed → clear.
+    const signals = deriveInboxSignals(
+      baseInput({
+        tasks: [makeTask({ project: 'alpha' })],
+        jobs: [makeJob({ project: 'alpha', kind: 'pr-wait', exitCode: 1, prWaitReason: 'risky_diff', prNumber: 76 })],
+        openPrNumbersByProject: { alpha: [55] },
+      }),
+    );
+    expect(signals.find((x) => x.type === 'pr_needs_manual_merge')).toBeUndefined();
+  });
+
+  it('still surfaces the manual-merge signal when the open-PR cache is empty (cannot confirm closure)', () => {
+    const signals = deriveInboxSignals(
+      baseInput({
+        tasks: [makeTask({ project: 'alpha' })],
+        jobs: [makeJob({ project: 'alpha', kind: 'pr-wait', exitCode: 1, prWaitReason: 'risky_diff', prNumber: 76 })],
+        openPrNumbersByProject: {},
+      }),
+    );
+    expect(signals.find((x) => x.type === 'pr_needs_manual_merge')).toMatchObject({ action: { prNumber: 76 } });
+  });
+
+  it('does not raise manual-merge for a self-healing pr-wait reason (checks_failed)', () => {
+    const signals = deriveInboxSignals(
+      baseInput({
+        tasks: [makeTask({ project: 'alpha' })],
+        jobs: [makeJob({ project: 'alpha', kind: 'pr-wait', exitCode: 1, prWaitReason: 'checks_failed', prNumber: 76 })],
+        openPrNumbersByProject: { alpha: [76] },
+      }),
+    );
+    expect(signals.find((x) => x.type === 'pr_needs_manual_merge')).toBeUndefined();
+  });
+
+  it('surfaces manual-merge even while another pipeline is running (defer is permanent, not pipeline-resolvable)', () => {
+    const signals = deriveInboxSignals(
+      baseInput({
+        tasks: [makeTask({ project: 'alpha' })],
+        jobs: [
+          makeJob({ project: 'alpha', kind: 'pr-wait', exitCode: 1, prWaitReason: 'risky_diff', prNumber: 76 }),
+          makeJob({ project: 'alpha', kind: 'release', finishedAt: null }),
+        ],
+        openPrNumbersByProject: { alpha: [76] },
+      }),
+    );
+    expect(signals.find((x) => x.type === 'pr_needs_manual_merge')).toMatchObject({ action: { prNumber: 76 } });
+  });
+
   it('flags CI red on the default branch with a fix-ci action', () => {
     const signals = deriveInboxSignals(
       baseInput({ tasks: [makeTask({ project: 'alpha', ci: 'failure', ci_failed_url: 'https://ci/1' })] }),

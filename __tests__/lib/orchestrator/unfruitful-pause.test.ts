@@ -3,6 +3,8 @@ import type { JobData } from '@/lib/jobs/types';
 import {
   runProducedNoDiff,
   runIsCaughtUp,
+  runDispatchedAction,
+  runWasProductive,
   isProjectCaughtUpUnfruitful,
   isProjectPersistentlyUnfruitful,
   unfruitfulRateSample,
@@ -28,6 +30,19 @@ function run(over: Partial<JobData> = {}): JobData {
 
 const CAUGHT_UP = 'Prerequisite found no eligible oversized split target';
 
+/** A 0-diff scheduled run that dispatched `executed` server-side agent actions
+ *  (e.g. merged a PR / closed an issue) — productive triage with no code diff. */
+function triage(executed = 1, over: Partial<JobData> = {}): JobData {
+  return run({
+    linesAdded: 0,
+    linesRemoved: 0,
+    exitCode: 0,
+    workSummary: 'Verified acceptance criteria and merged the open PR',
+    contextMeta: JSON.stringify({ agent: { triggeredBy: 'schedule' }, agentActions: { executed } }),
+    ...over,
+  });
+}
+
 describe('runProducedNoDiff', () => {
   it('true when zero lines and no modified files', () => {
     expect(runProducedNoDiff(run({ linesAdded: 0, linesRemoved: 0, modifiedFiles: null }))).toBe(true);
@@ -46,6 +61,31 @@ describe('runIsCaughtUp', () => {
     expect(runIsCaughtUp(run({ workSummary: 'nothing to do' }))).toBe(true);
     expect(runIsCaughtUp(run({ workSummary: 'refactored 4 files' }))).toBe(false);
     expect(runIsCaughtUp(run({ workSummary: null }))).toBe(false);
+  });
+});
+
+describe('runDispatchedAction', () => {
+  it('true when the run dispatched ≥1 server-side agent action', () => {
+    expect(runDispatchedAction(triage(1))).toBe(true);
+    expect(runDispatchedAction(triage(3))).toBe(true);
+  });
+  it('false when no action was dispatched (0, absent, or no agentActions meta)', () => {
+    expect(runDispatchedAction(triage(0))).toBe(false);
+    expect(runDispatchedAction(run({ workSummary: CAUGHT_UP }))).toBe(false); // no agentActions key
+    expect(runDispatchedAction(run({ contextMeta: null }))).toBe(false);
+    expect(runDispatchedAction(run({ contextMeta: '{' }))).toBe(false); // malformed
+  });
+});
+
+describe('runWasProductive', () => {
+  it('true for a line-level change', () => {
+    expect(runWasProductive(run({ linesAdded: 5 }))).toBe(true);
+  });
+  it('true for a 0-diff run that dispatched a triage action (merge/close)', () => {
+    expect(runWasProductive(triage(1))).toBe(true);
+  });
+  it('false when neither lines changed nor an action dispatched', () => {
+    expect(runWasProductive(run({ linesAdded: 0, linesRemoved: 0, workSummary: CAUGHT_UP }))).toBe(false);
   });
 });
 
@@ -81,6 +121,12 @@ describe('isProjectCaughtUpUnfruitful', () => {
   it('treats threshold 0 as one qualifying run', () => {
     expect(isProjectCaughtUpUnfruitful([noDiffCaughtUp], 0)).toBe(true);
     expect(isProjectCaughtUpUnfruitful([fruitful], 0)).toBe(false);
+  });
+  it('false when a 0-diff run in the window dispatched a triage action (merged/closed → not caught up)', () => {
+    // A backlog-draining issue-cruncher merges/closes with zero code diff.
+    // Those runs must NOT read as "caught up / nothing to do".
+    const runs = [triage(1), noDiffCaughtUp, noDiffCaughtUp, noDiffCaughtUp, noDiffCaughtUp];
+    expect(isProjectCaughtUpUnfruitful(runs, 5)).toBe(false);
   });
 });
 
@@ -123,6 +169,25 @@ describe('isProjectPersistentlyUnfruitful', () => {
     });
     const realChange = run({ linesAdded: 12, modifiedFiles: '[{"path":"app/y.ts"}]' });
     const window = [realChange, ...Array(11).fill(fileTouchNoLines)] as JobData[]; // 1/12 line-fruitful
+    expect(isProjectPersistentlyUnfruitful(window, 12, 0.2)).toBe(true);
+  });
+  it('credits 0-diff triage runs (merge/close) as fruitful so a backlog-draining cruncher is not paused', () => {
+    // A cruncher that merges ready PRs / closes done issues lands ZERO code
+    // lines but is doing exactly its job. Every run dispatched an action, so
+    // the fruitful rate is 100% and the project must NOT be flagged.
+    const window = Array(12).fill(triage(1)) as JobData[];
+    expect(isProjectPersistentlyUnfruitful(window, 12, 0.2)).toBe(false);
+  });
+  it('clears the floor when diffless-but-productive triage runs push the rate above 20%', () => {
+    // 12 runs: 3 triage merges (0 diff, action dispatched) + 9 genuine no-ops.
+    // By lines alone that is 0% fruitful (would pause); crediting the merges
+    // makes it 25% ≥ 20% floor → not paused.
+    const window = [triage(1), triage(2), triage(1), ...Array(9).fill(noDiffCaughtUp)] as JobData[];
+    expect(isProjectPersistentlyUnfruitful(window, 12, 0.2)).toBe(false);
+  });
+  it('still pauses a genuinely idle project whose diffless runs dispatched NO actions', () => {
+    // No agentActions on any run (found nothing to do) → not credited → paused.
+    const window = Array(12).fill(noDiffCaughtUp) as JobData[];
     expect(isProjectPersistentlyUnfruitful(window, 12, 0.2)).toBe(true);
   });
   it('unfruitfulRateSample widens the window past the strict threshold', () => {
@@ -256,6 +321,16 @@ describe('autoPauseUnfruitfulProjects', () => {
   it('does not pause when the project still produces diffs', async () => {
     const fruitful = run({ linesAdded: 5, workSummary: 'work' });
     const deps = baseDeps({ listJobs: () => [fruitful, caughtUp, caughtUp] as JobData[] });
+    const res = await autoPauseUnfruitfulProjects(deps as never);
+    expect(res.paused).toEqual([]);
+    expect(deps.pauseProject).not.toHaveBeenCalled();
+  });
+
+  it('does not pause an issue-cruncher whose runs merge/close with zero code diff', async () => {
+    // Regression: a cruncher draining a PR/issue backlog lands no lines but
+    // dispatches merge/close actions every run. It must stay unpaused.
+    const merged = triage(1, { kind: 'agent:issue-cruncher' });
+    const deps = baseDeps({ listJobs: () => [merged, merged, merged] as JobData[] });
     const res = await autoPauseUnfruitfulProjects(deps as never);
     expect(res.paused).toEqual([]);
     expect(deps.pauseProject).not.toHaveBeenCalled();

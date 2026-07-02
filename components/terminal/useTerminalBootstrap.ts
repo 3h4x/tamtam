@@ -371,6 +371,11 @@ export function useTerminalBootstrap({
 
     const poll = async () => {
       if (inFlight) return
+      // Don't poll while the tab is hidden — this effect otherwise re-fetches
+      // the session's job list + every job's detail on a fixed interval even
+      // for a fully-finished session (it never attaches, so it never
+      // self-suspends). Resumes via the visibilitychange listener below.
+      if (typeof document !== 'undefined' && document.visibilityState === 'hidden') return
       const cur = terminalStore.get(projectName)
       if (cur.streaming || cur.currentJobId) return
 
@@ -434,12 +439,20 @@ export function useTerminalBootstrap({
     }
 
     void poll()
+    // 2s (was 250ms): this only needs to *notice* a new turn in the session,
+    // not tail it in real time — the SSE stream does the live rendering once
+    // attached. 250ms meant ~4 job-list + per-job-detail refetches/sec for the
+    // whole time a finished session was open. Poll once immediately on refocus
+    // so returning to the tab catches a new turn without waiting a full tick.
     const id = setInterval(() => {
       if (!cancelled) void poll()
-    }, 250)
+    }, 2000)
+    const onVisible = () => { if (!cancelled && document.visibilityState === 'visible') void poll() }
+    document.addEventListener('visibilitychange', onVisible)
     return () => {
       cancelled = true
       clearInterval(id)
+      document.removeEventListener('visibilitychange', onVisible)
     }
   }, [initialSessionId, jobParam, projectName])
 
@@ -451,6 +464,7 @@ export function useTerminalBootstrap({
     let cancelled = false
 
     const poll = async () => {
+      if (typeof document !== 'undefined' && document.visibilityState === 'hidden') return
       const cur = terminalStore.get(projectName)
       if (
         cur.streaming ||
@@ -477,9 +491,12 @@ export function useTerminalBootstrap({
     const id = setInterval(() => {
       if (!cancelled) void poll()
     }, 1000)
+    const onVisible = () => { if (!cancelled && document.visibilityState === 'visible') void poll() }
+    document.addEventListener('visibilitychange', onVisible)
     return () => {
       cancelled = true
       clearInterval(id)
+      document.removeEventListener('visibilitychange', onVisible)
     }
   }, [initialSessionId, jobParam, projectName, router])
 

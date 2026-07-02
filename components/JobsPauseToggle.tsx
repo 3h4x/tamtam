@@ -9,6 +9,7 @@ import { errMsg } from '@/lib/shared/types'
 import { fmtAbsolute } from '@/lib/shared/format-date'
 import { dispatchJobsPausedChanged } from '@/lib/shared/jobs-paused-events'
 import { dispatchSettingsChanged, subscribeToSettingsChanged } from '@/lib/shared/settings-events'
+import { fetchSettings, invalidateSettings } from '@/lib/client-api'
 
 interface QuotaWindow { utilization: number; resetsAt: string | null; msUntilReset: number | null }
 interface SchedulerThrottle {
@@ -57,8 +58,7 @@ export function JobsPauseToggle() {
     let live = true
     const fetchInitial = async () => {
       try {
-        const res = await fetch('/api/settings')
-        const data = await res.json()
+        const data = await fetchSettings()
         if (!live) return
         applySettings(data.settings ?? {}, { merge: false })
       } catch {
@@ -87,9 +87,10 @@ export function JobsPauseToggle() {
   // lets usePolling back off (instead of hammering) when the server is wedged;
   // transient failures leave the chip state untouched so it doesn't flicker.
   const pollSettings = useCallback(async () => {
-    const res = await fetch('/api/settings')
-    if (!res.ok) throw new Error(`settings poll failed: ${res.status}`)
-    const data = await res.json()
+    // force: always fetch fresh — this poll exists to catch out-of-band changes
+    // (e.g. rebuild-safe.sh flipping rebuild_in_progress server-side), which a
+    // cached read would miss. Throws on non-ok so usePolling backs off.
+    const data = await fetchSettings({ force: true })
     applySettings(data.settings ?? {}, { merge: false })
   }, [applySettings])
 
@@ -140,6 +141,7 @@ export function JobsPauseToggle() {
         throw new Error(data.detail || res.statusText)
       }
       const data = await res.json().catch(() => ({}))
+      invalidateSettings()
       dispatchSettingsChanged(data.settings ?? {
         jobs_paused: next ? 'true' : 'false',
         budget_block_runs_enabled: budgetGateEnabled ? 'true' : 'false',

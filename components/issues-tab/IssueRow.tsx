@@ -1,6 +1,6 @@
 'use client'
 
-import { useState, useEffect, useMemo } from 'react'
+import { useState, useMemo } from 'react'
 import { useRouter } from 'next/navigation'
 import type { GhIssue, ProjectConfig } from '@/lib/client-api'
 import { formatAgo } from '@/lib/shared/format'
@@ -32,19 +32,10 @@ export function IssueRow({ issue, projectName, projectCfg }: { issue: GhIssue; p
   // Whether a previous provider session for this issue exists (run/fix with
   // gh_issue_number stamped + a session_id). When true we offer a "Continue"
   // button that resumes that session and prompts only for unverified DoD items.
-  const [hasContext, setHasContext] = useState(false)
+  // Folded into the issues payload server-side — no per-row lookup. The
+  // action-triggered `continueWork` fetch below stays a raw, always-fresh call.
+  const hasContext = issue.hasContext === true
   const [continuing, setContinuing] = useState(false)
-
-  useEffect(() => {
-    let cancelled = false
-    fetch(`/api/projects/by-project/${encodeURIComponent(projectName)}/continue-issue?issue_number=${issue.number}`)
-      .then(r => r.ok ? r.json() : null)
-      .then((data: { hasContext?: boolean } | null) => {
-        if (!cancelled && data?.hasContext) setHasContext(true)
-      })
-      .catch(() => {})
-    return () => { cancelled = true }
-  }, [projectName, issue.number])
 
   // Issue bodies can be many KB. Stuffing them into the URL trips Node's
   // 8KB header limit (HTTP 431) before the terminal page even renders, so

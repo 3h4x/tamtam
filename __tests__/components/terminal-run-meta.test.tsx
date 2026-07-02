@@ -52,6 +52,7 @@ vi.mock('@/lib/client-api', () => ({
   releaseProject: releaseProjectMock,
   runCustomAction: runCustomActionMock,
   testProject: testProjectMock,
+  fetchSettings: vi.fn().mockResolvedValue({ settings: {} }),
 }))
 
 vi.mock('@/hooks/useDocumentVisible', () => ({

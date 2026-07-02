@@ -1,12 +1,12 @@
 'use client'
 
-import { useState, useEffect } from 'react'
+import { useState } from 'react'
 import { useRouter } from 'next/navigation'
 import { mergePR, approvePR, reviewPR, runMarkDod, addressPrComments } from '@/lib/client-api'
 import type { GhPullRequest } from '@/lib/client-api'
 import { formatAgo } from '@/lib/shared/format'
 import { Labels, CheckIcon, GateBadge } from '@/components/issues-tab/shared'
-import type { MergeMethod, PrGates } from '@/components/issues-tab/shared'
+import type { MergeMethod } from '@/components/issues-tab/shared'
 import { Button, buttonVariants } from '@/components/ui/Button'
 import { ErrorCallout } from '@/components/ui/ErrorCallout'
 import { Pill, PillButton, type PillTone } from '@/components/ui/Pill'
@@ -18,12 +18,6 @@ const MERGE_METHOD_OPTIONS: Array<{ value: MergeMethod; label: string }> = [
   { value: 'merge', label: 'merge' },
   { value: 'rebase', label: 'rebase' },
 ]
-
-function parseLinkedIssueNumber(body: string | null | undefined): string | null {
-  if (!body) return null
-  const match = body.match(/\b(?:close[sd]?|fixe?[sd]?|resolve[sd]?)\s+#(\d+)/i)
-  return match?.[1] ?? null
-}
 
 export function PRRow({
   pr,
@@ -48,29 +42,11 @@ export function PRRow({
   const [approved, setApproved] = useState(pr.reviewDecision === 'APPROVED')
   const [reviewing, setReviewing] = useState(false)
   const [addressing, setAddressing] = useState(false)
-  const [gates, setGates] = useState<PrGates | null>(null)
+  // Gate state (tests / review / DoD) is folded into the issues payload
+  // server-side — no per-row `pr-gates` request on mount.
+  const gates = pr.gates ?? null
   const [dodRunning, setDodRunning] = useState(false)
   const [dodError, setDodError] = useState<string | null>(null)
-
-  // Fetch TamTam-side gate state (tests / review / DoD) for this PR.
-  useEffect(() => {
-    let cancelled = false
-    const load = async () => {
-      try {
-        const repoMatch = pr.url.match(/github\.com\/([^/]+\/[^/]+)\//)
-        const repo = repoMatch?.[1] ?? ''
-        const linkedIssue = parseLinkedIssueNumber(pr.body)
-        const qs = new URLSearchParams({ repo })
-        if (linkedIssue) qs.set('issue', linkedIssue)
-        const res = await fetch(`/api/projects/by-project/${encodeURIComponent(projectName)}/pr-gates?${qs.toString()}`)
-        if (!res.ok) return
-        const data: PrGates = await res.json()
-        if (!cancelled) setGates(data)
-      } catch {}
-    }
-    load()
-    return () => { cancelled = true }
-  }, [projectName, pr.number, pr.url, pr.body])
 
   const reviewLabel =
     pr.reviewDecision === 'APPROVED'

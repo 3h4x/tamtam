@@ -57,8 +57,13 @@ export function useSessionManager(projectName: string) {
       // share a session_id (e.g. multi-step chats).
       const res = await fetch(`/api/jobs?project=${encodeURIComponent(projectName)}&has_session=1&limit=100`)
       const data = await res.json()
+      // Drop the "(no prompt)" noise that used to bury the list: pipeline steps
+      // and composed agent turns carry a session_id but no user-facing prompt,
+      // so restoring them shows an empty conversation. Keep every restorable
+      // session that has an actual prompt (user chats AND meaningful agent/issue
+      // runs), which is what a "recent sessions" list should offer.
       const jobs: JobDict[] = (data.jobs ?? [])
-        .filter((j: JobDict) => isRestorableSessionKind(j.kind) && j.session_id)
+        .filter((j: JobDict) => isRestorableSessionKind(j.kind) && j.session_id && !!restoredPrompt(j))
         .sort((a: JobDict, b: JobDict) => b.started_at - a.started_at)
 
       const seen = new Set<string>()
@@ -70,9 +75,12 @@ export function useSessionManager(projectName: string) {
         const sameSession = jobs.filter(o => o.session_id === key)
         const earliest = sameSession[sameSession.length - 1]
         const latest = sameSession[0]
+        // Prefer the first turn that actually carries a prompt so the row label
+        // reflects what the conversation was about, not an empty follow-up.
+        const promptJob = [...sameSession].reverse().find(o => restoredPrompt(o)) ?? earliest
         grouped.push({
           id: latest.id,
-          prompt: restoredPrompt(earliest),
+          prompt: restoredPrompt(promptJob),
           startedAt: latest.started_at,
           finishedAt: latest.finished_at,
           sessionId: latest.session_id,

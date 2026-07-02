@@ -2,7 +2,7 @@
 
 import { useState, useEffect, useRef, Suspense } from 'react'
 import { useParams, useRouter } from 'next/navigation'
-import { fixCi, releaseProject, fetchJobs, fetchProjectConfig, updateProjectConfig, fetchCustomActions, runCustomAction, saveCustomActions, pullProject, fetchBehind, PullDivergedError, testProject, fetchIssuesAndPRs, fetchIssuesSummary, pushProject, fetchBranch, createProjectPR, CreatePRPrePushHookError } from '@/lib/client-api'
+import { fixCi, releaseProject, fetchJobs, fetchProjectConfig, updateProjectConfig, fetchCustomActions, runCustomAction, saveCustomActions, pullProject, fetchBehind, PullDivergedError, testProject, fetchIssuesAndPRs, fetchIssuesSummary, pushProject, fetchBranch, createProjectPR, CreatePRPrePushHookError, fetchSettings } from '@/lib/client-api'
 import type { JobInfo, ProjectConfig, CustomAction } from '@/lib/client-api'
 import { FleetHealth } from '@/hooks/useProjectHealth'
 import { getAggregateCi } from '@/lib/shared/statusConstants'
@@ -184,8 +184,7 @@ export function ProjectDetailPage({
     })
     const loadSettings = () => {
       const fetchSeq = jobsPausedEventSeqRef.current
-      fetch('/api/settings')
-        .then((r) => r.json())
+      fetchSettings()
         .then((data) => {
           if (cancelled) return
           const s = data?.settings ?? data
@@ -591,7 +590,7 @@ export function ProjectDetailPage({
     try {
       await updateProjectConfig(name, configInputs)
       setConfigSaved(true)
-      applyConfigData(await fetchProjectConfig(name))
+      applyConfigData(await fetchProjectConfig(name, { force: true }))
       setTimeout(() => setConfigSaved(false), 3000)
     } catch (err) {
       toast(err instanceof Error ? err.message : 'Failed to save config', 'error')
@@ -750,7 +749,7 @@ export function ProjectDetailPage({
                   body: JSON.stringify({ paused: next }),
                 })
                 if (!res.ok) throw new Error(`HTTP ${res.status}`)
-                applyConfigData(await fetchProjectConfig(name))
+                applyConfigData(await fetchProjectConfig(name, { force: true }))
                 toast(next ? `${name} paused — automated runs blocked` : `${name} resumed`, 'success')
               } catch (err) {
                 toast(err instanceof Error ? err.message : 'Failed to toggle pause', 'error')
@@ -782,7 +781,7 @@ export function ProjectDetailPage({
                   body: JSON.stringify({ release_after_run: next }),
                 })
                 if (!res.ok) throw new Error(`HTTP ${res.status}`)
-                applyConfigData(await fetchProjectConfig(name))
+                applyConfigData(await fetchProjectConfig(name, { force: true }))
                 toast(next ? `Auto release enabled for ${name}` : `Auto release disabled for ${name}`, 'success')
               } catch (err) {
                 toast(err instanceof Error ? err.message : 'Failed to toggle auto release', 'error')

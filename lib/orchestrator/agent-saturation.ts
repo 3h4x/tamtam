@@ -17,7 +17,7 @@
 // injects the live job list + current HEAD.
 
 import type { JobData } from '@/lib/jobs/types';
-import { runChangedLines, runIsCaughtUp } from '@/lib/orchestrator/unfruitful-pause';
+import { runWasProductive, runIsCaughtUp } from '@/lib/orchestrator/unfruitful-pause';
 
 /** The HEAD sha a scheduled run executed against, recorded by the intake
  *  workflow in `contextMeta.baseline.head`. Null when absent/unparseable. */
@@ -69,7 +69,8 @@ export function recentScheduledRunsForAgent(
  * True when a single agent is "saturated" and should skip this scheduled fire:
  *   - its most recent `sample` finished scheduled runs all exist (enough
  *     history), and
- *   - the fruitful rate (runs that changed code lines / total) is below
+ *   - the fruitful rate (runs that changed code lines OR dispatched a triage
+ *     action such as merging a PR / closing an issue, over total) is below
  *     `rateThreshold`, and
  *   - the most recent run executed against the CURRENT HEAD — i.e. no new
  *     commit has landed since it last looked (the release valve: a HEAD move
@@ -94,7 +95,7 @@ export function isAgentSaturated(
   // exist and the agent deserves a fresh look.
   const lastHead = agentRunBaselineHead(window[0]);
   if (!lastHead || lastHead !== currentHead) return false;
-  const fruitful = window.filter(runChangedLines).length;
+  const fruitful = window.filter(runWasProductive).length;
   if (fruitful / window.length >= rateThreshold) return false; // still productive enough
   return window.some((r) => r.exitCode === 0 || runIsCaughtUp(r)); // ≥1 clean run
 }

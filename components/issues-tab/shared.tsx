@@ -3,6 +3,7 @@
 import { Spinner } from '@/components/ui/Spinner'
 import { Pill, PillButton } from '@/components/ui/Pill'
 import type { GhLabel } from '@/lib/client-api'
+import type { GateState, PrGates } from '@/lib/github/issue-row-enrichment'
 
 export function Labels({ labels, limit }: { labels: GhLabel[]; limit?: number }) {
   if (!labels.length) return null
@@ -52,8 +53,7 @@ export function CheckIcon({ conclusion, status }: { conclusion: string | null; s
   )
 }
 
-export type GateState = 'pass' | 'fail' | 'warn' | 'none'
-export type PrGates = { issueNumber: number | null; tests: GateState; review: GateState; dod: GateState; dodSummary: string | null }
+export type { GateState, PrGates }
 
 export const GATE_CLASS: Record<GateState, string> = {
   pass: 'bg-status-success/10 text-status-success border-status-success/30',

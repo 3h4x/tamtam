@@ -8,6 +8,7 @@ import {
   isAutoResumeEligible,
   MAX_AUTO_RESUME_ATTEMPTS,
 } from '@/lib/jobs/auto-resume';
+import { RUN_WALL_TIME_EXIT_CODE, RUN_TOKEN_CAP_EXIT_CODE } from '@/lib/jobs/run-cap-reaper';
 import type { JobData } from '@/lib/jobs/job-storage';
 
 const NOW = 2_000_000_000_000;
@@ -88,6 +89,16 @@ describe('isAutoResumeEligible', () => {
   });
   it('accepts run kind', () => {
     expect(isAutoResumeEligible(jobOf({ kind: 'run' }), partialTail)).toBe(true);
+  });
+  it('rejects a run killed by the token cap (resuming reloads the same oversized session)', () => {
+    expect(isAutoResumeEligible(jobOf({ exitCode: RUN_TOKEN_CAP_EXIT_CODE }), partialTail)).toBe(false);
+  });
+  it('rejects a run killed by the wall-clock cap (resuming re-runs the same slow work)', () => {
+    expect(isAutoResumeEligible(jobOf({ exitCode: RUN_WALL_TIME_EXIT_CODE }), partialTail)).toBe(false);
+  });
+  it('still accepts ordinary non-zero exits that are NOT resource-limit kills (transient crash)', () => {
+    expect(isAutoResumeEligible(jobOf({ exitCode: 1 }), partialTail)).toBe(true);
+    expect(isAutoResumeEligible(jobOf({ exitCode: -1 }), partialTail)).toBe(true);
   });
 });
 

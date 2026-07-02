@@ -3,7 +3,7 @@ import { db, schema } from '@/lib/db';
 import { parseStreamLines } from '@/lib/jobs/claude-stream-parser';
 import { costUsd } from '@/lib/shared/usage-pricing';
 import { readLog } from '@/lib/jobs/verdict';
-import { saveToDbAsync, awaitInFlightSave } from '@/lib/jobs/storage';
+import { saveToDbAsync, awaitInFlightSave, jobsCache } from '@/lib/jobs/storage';
 import type { JobData } from '@/lib/jobs/types';
 import { isAgentJobKind, isClaudeBackedJobKind } from '@/lib/jobs/kinds';
 import { computeRunScore } from '@/lib/agents/run-score';
@@ -209,6 +209,13 @@ export async function markDone(job: JobData, exitCode: number): Promise<void> {
     }
   }
   if (shouldAutoMarkSeen(job)) job.seen = true;
+  // Sync the in-memory cache with the finalized state. Pipeline phases (e.g.
+  // pr-wait) finalize inside the workflow runtime on a job object that may not
+  // be the cached reference, so without this `listJobs()` keeps serving a row
+  // with `finishedAt: null` and stale `contextMeta` even though the DB is done
+  // — which made the inbox's HITL "PR needs manual merge" signal silently
+  // never fire for a deferred (risky_diff) PR.
+  jobsCache.set(job.id, job);
   await saveToDbAsync(job);
   void db.delete(schema.ghIssuesCache).where(eq(schema.ghIssuesCache.project, job.project)).execute().catch(() => {});
   // Wrap completion hooks so a thrown handler can't strand the release

@@ -1,11 +1,19 @@
 import { execFileSync, type ExecFileSyncOptionsWithStringEncoding } from 'child_process';
+import { homedir } from 'os';
 import { getBranchContext } from '@/lib/git/git-branch';
 import { isUserTrusted } from '@/lib/shared/untrusted';
 
+// Pin HOME so git and gh resolve their user config even when the server
+// process was launched with a stripped env (e.g. a PM2 daemon started without
+// HOME). Without a reachable HOME, git ignores the global `.gitignore`
+// (core.excludesFile) and globally-ignored files (.playwright-mcp/, .DS_Store)
+// surface as untracked — making this gate refuse a tree the operator's own
+// `git status` reports clean. gh likewise needs HOME for its auth/hosts config.
 const GIT_OPTS: ExecFileSyncOptionsWithStringEncoding = {
   encoding: 'utf-8',
   stdio: ['ignore', 'pipe', 'ignore'],
   timeout: 5000,
+  env: { ...process.env, HOME: process.env.HOME || homedir() },
 };
 
 const RISKY_DIFF_PATTERNS = [

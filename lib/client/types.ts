@@ -1,4 +1,6 @@
 export type { Task, ProjectsResponse } from '@/lib/shared/types'
+export type { PrGates, GateState } from '@/lib/github/issue-row-enrichment'
+import type { PrGates } from '@/lib/github/issue-row-enrichment'
 
 export interface RunHistoryEntry {
   started: string | null
@@ -49,6 +51,9 @@ export interface GhPullRequest {
     workflowName: string
     detailsUrl: string
   }> | null
+  // Folded in by the issues route so the Issues tab renders PR gate badges
+  // without a per-row `pr-gates` request. Absent on payloads from older callers.
+  gates?: PrGates | null
 }
 
 export interface GhIssue {
@@ -62,6 +67,10 @@ export interface GhIssue {
   assignees: GhAuthor[]
   labels: GhLabel[]
   body: string
+  // Folded in by the issues route: whether a resumable provider session exists
+  // for this issue, driving the "Continue" vs "Work on" badge without a per-row
+  // `continue-issue` request. Absent on payloads from older callers.
+  hasContext?: boolean
 }
 
 export interface IssuesResponse {

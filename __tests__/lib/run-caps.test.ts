@@ -12,13 +12,23 @@ function assistantLine(usage: Record<string, number>): string {
 }
 
 describe('accumulateRunTokens', () => {
-  it('sums input + output + cache tokens across assistant turns', () => {
+  it('sums input + output + cache-creation across turns, EXCLUDING cache reads', () => {
     const log = [
       assistantLine({ input_tokens: 100, output_tokens: 50, cache_read_input_tokens: 10, cache_creation_input_tokens: 5 }),
       assistantLine({ input_tokens: 200, output_tokens: 80 }),
     ].join('\n');
-    // (100+50+10+5) + (200+80) = 165 + 280 = 445
-    expect(accumulateRunTokens(log)).toBe(445);
+    // (100+50+5) + (200+80) = 155 + 280 = 435 — cache_read (10) is NOT counted.
+    expect(accumulateRunTokens(log)).toBe(435);
+  });
+
+  it('does not let re-read cached context inflate the total (the false-runaway bug)', () => {
+    // A cheap multi-turn run: tiny real spend, huge cache_read from re-reading
+    // the same cached system prompt every turn. The cap must see the real spend
+    // (30), not the 3,000,000 cache-read sum that used to trip the 2M cap.
+    const log = Array.from({ length: 3 }, () =>
+      assistantLine({ input_tokens: 5, output_tokens: 5, cache_read_input_tokens: 1_000_000 }),
+    ).join('\n');
+    expect(accumulateRunTokens(log)).toBe(30);
   });
 
   it('ignores non-assistant lines and unparseable garbage', () => {

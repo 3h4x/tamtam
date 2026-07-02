@@ -33,7 +33,7 @@ The agent management dashboard built for Claude-compatible CLIs. Define skills, 
 | **Backup & restore** | Hot `pg_dump` backups with retention from `/settings/database`, plus a restore runbook |
 | **Auto-attach docs** | Keyword-matched project docs injected into the prompt on first use per session |
 | **Custom actions** | Per-project bash commands (deploy, migrate, seed) as colored buttons |
-| **Notifications** | Unseen run alerts with bell badge; outbound webhooks (Slack, Discord, ntfy, generic) for release success/fail/aborted, fix-loop-exhausted, review-do-not-ship, post-merge-revert, agent-run-fail, and budget-blocked events |
+| **Notifications** | Unseen run alerts with bell badge; outbound webhooks (Slack, Discord, ntfy, generic) for release success/fail/aborted, fix-loop-exhausted, review-do-not-ship, post-merge-revert, agent-run-fail, budget-blocked, budget-exceeded, flaky-test, and circuit-breaker events |
 
 ## Architecture
 
@@ -120,12 +120,13 @@ pnpm mcp:http <tool> [json_args]  # call local TamTam HTTP endpoints via .tamtam
 Runtime config, including notification throttle state, lives in the Postgres database referenced by `DATABASE_URL`. Shared per-project settings can also be committed in `.tamtam/config.yml`, and file-agent prompts can live in `.tamtam/agents/*.md`.
 Per-project dev-server lifecycle fields (`dev_server_start_command`, `dev_server_stop_command`, `dev_server_ready_url`) live in `/project/[name]/config` as DB-only project metadata and let TamTam start, gate, and tear down a project's own app during agent runs.
 
-The Settings area is split across `/settings/general`, `/settings/cli`, `/settings/pipeline`, `/settings/notifications`, `/settings/projects`, `/settings/templates`, and `/settings/database`.
+The Settings area is split across `/settings/general`, `/settings/auth`, `/settings/cli`, `/settings/pipeline`, `/settings/notifications`, `/settings/projects`, `/settings/templates`, and `/settings/database`.
 Bare `/settings` redirects to `/settings/general`, job history lives at `/workflow-runs`, and the initiative backlog lives in the Initiatives tab at `/recommendations?tab=initiatives` (`/initiatives` redirects there). Per-project history stays under `/project/[name]/history`.
 
 | Setting | Where |
 |---|---|
 | Workspace path | `/settings/general` |
+| Auth token | `/settings/auth` |
 | GitHub owner and board sync | `/settings/general` |
 | CLI provider routing, binaries, model tiers, and subscription budget controls | `/settings/cli` |
 | Global base prompt | `/settings/general` |

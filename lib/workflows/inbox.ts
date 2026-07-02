@@ -15,6 +15,7 @@ export type InboxSignalType =
   | 'ci_red'
   | 'review_needs_decision'
   | 'pr_ready_to_merge'
+  | 'pr_needs_manual_merge'
   | 'stale_changes'
   | 'fix_loop_exhausted'
   | 'orphan_release';
@@ -70,6 +71,11 @@ export interface InboxJob {
   exitCode: number | null;
   verdict: string | null;
   releaseStopReason: string | null;
+  /** For pr-wait jobs: the terminal reason (merged / risky_diff /
+   *  merge_permanent / …). Null for every other kind. */
+  prWaitReason: string | null;
+  /** For pr-wait jobs: the PR number it was waiting on. Null otherwise. */
+  prNumber: number | null;
 }
 
 export interface InboxOpenPr {
@@ -83,8 +89,22 @@ export interface InboxInput {
   jobs: InboxJob[];
   automationQueue: AutomationQueueItem[];
   openPrByProject: Record<string, InboxOpenPr | undefined>;
+  /** All open (non-draft) PR numbers per project — used to confirm a
+   *  human-deferred PR is still open before surfacing a manual-merge signal. */
+  openPrNumbersByProject: Record<string, number[]>;
   nowSeconds: number;
 }
+
+// pr-wait terminal reasons that mean auto-merge was deliberately deferred to a
+// human (HITL): the diff hit the high-risk-file guard, or the merge is
+// permanently blocked (e.g. branch protection). These leave an open PR that a
+// human must decide on — everything else either merged, self-heals (checks_failed
+// → fix-ci), or is transient (timeout).
+const HITL_MERGE_REASONS = new Set(['risky_diff', 'merge_permanent']);
+const MERGE_REASON_DETAIL: Record<string, string> = {
+  risky_diff: 'Auto-merge deferred — PR diff touches high-risk execution files. Needs a human merge decision.',
+  merge_permanent: 'Auto-merge blocked — manual merge required.',
+};
 
 // Kinds that mean a pipeline is actively working the project. When one is
 // in-flight we suppress the "needs a decision" signals for that project — the
@@ -116,7 +136,7 @@ function projectHref(project: string): string {
  * severity, oldest-first (most urgent). Exported for unit testing.
  */
 export function deriveInboxSignals(input: InboxInput): InboxSignal[] {
-  const { tasks, jobs, automationQueue, openPrByProject, nowSeconds } = input;
+  const { tasks, jobs, automationQueue, openPrByProject, openPrNumbersByProject, nowSeconds } = input;
   const signals: InboxSignal[] = [];
 
   for (const task of tasks) {
@@ -139,6 +159,53 @@ export function deriveInboxSignals(input: InboxInput): InboxSignal[] {
         externalUrl: task.ci_failed_url,
         ageSeconds: null,
         action: { kind: 'fix-ci', label: 'Start fix-ci' },
+      });
+    }
+
+    // 1b. pr-wait deferred auto-merge to a human (HITL). A `risky_diff` /
+    //     `merge_permanent` defer is PERMANENT — the pipeline will never
+    //     resolve it on its own — so this is NOT gated on `!active`: the
+    //     project may (and for a busy repo, always does) have another pipeline
+    //     running, but the deferred PR still needs a human merge decision now.
+    //     Open-PR check is lenient: when the gh issues cache has entries for
+    //     the project we require membership (self-clears once merged/closed);
+    //     when the cache is empty/absent (markDone wipes it on every finalize)
+    //     we still surface it rather than hide a real HITL decision.
+    // Group pr-wait jobs by PR and keep the latest per PR. A busy repo fires a
+    // fresh release (and pr-wait) every cycle, so keying off the project's
+    // single most-recent pr-wait would let a newer pr-wait for a *different*
+    // PR shadow an older PR's still-unresolved HITL defer. One signal per PR.
+    const latestPrWaitByPr = new Map<number, InboxJob>();
+    for (const j of jobs) {
+      if (j.project !== project || j.kind !== 'pr-wait' || j.prNumber == null) continue;
+      const cur = latestPrWaitByPr.get(j.prNumber);
+      if (!cur || j.startedAt > cur.startedAt) latestPrWaitByPr.set(j.prNumber, j);
+    }
+    const openNums = openPrNumbersByProject[project];
+    for (const [prNumber, prWait] of latestPrWaitByPr) {
+      if (
+        prWait.finishedAt === null ||
+        (prWait.exitCode ?? 0) === 0 ||
+        !prWait.prWaitReason ||
+        !HITL_MERGE_REASONS.has(prWait.prWaitReason)
+      ) {
+        continue;
+      }
+      // Lenient open check: require membership only when the cache lists PRs;
+      // an empty/absent cache (markDone wipes it per finalize) still surfaces.
+      const stillOpen = !openNums || openNums.length === 0 || openNums.includes(prNumber);
+      if (!stillOpen) continue;
+      signals.push({
+        id: `pr_needs_manual_merge:${project}:${prNumber}`,
+        type: 'pr_needs_manual_merge',
+        severity: 'yellow',
+        project,
+        title: `PR #${prNumber} needs manual merge`,
+        detail: MERGE_REASON_DETAIL[prWait.prWaitReason] ?? 'Auto-merge deferred to a human.',
+        href: `${projectHref(project)}/issues`,
+        externalUrl: null,
+        ageSeconds: null,
+        action: { kind: 'merge', label: 'Merge', prNumber },
       });
     }
 
@@ -270,6 +337,22 @@ function safeReleaseStopReason(contextMeta: string | null | undefined): string |
   }
 }
 
+// Read a pr-wait job's persisted terminal reason + PR number from contextMeta.
+// finalizePrWaitStep stamps `prWaitReason` alongside the {prNumber, prRepo,
+// prUrl} the phase was dispatched with.
+function safePrWaitInfo(contextMeta: string | null | undefined): { reason: string | null; prNumber: number | null } {
+  if (!contextMeta) return { reason: null, prNumber: null };
+  try {
+    const parsed = JSON.parse(contextMeta) as { prWaitReason?: unknown; prNumber?: unknown };
+    return {
+      reason: typeof parsed.prWaitReason === 'string' && parsed.prWaitReason ? parsed.prWaitReason : null,
+      prNumber: typeof parsed.prNumber === 'number' ? parsed.prNumber : null,
+    };
+  } catch {
+    return { reason: null, prNumber: null };
+  }
+}
+
 interface CachedPr {
   number?: number;
   state?: string;
@@ -287,12 +370,17 @@ function rollupIsGreen(rollup: CachedPr['statusCheckRollup'], fallbackCi: Task['
 }
 
 // Read the cached open PRs (from the gh issues cache) for every project in one
-// query. Returns the first open, non-draft PR per project so the merge signal
-// can carry a PR number. Fails open (empty map) if the cache table is absent.
-async function loadOpenPrs(tasks: Task[]): Promise<Record<string, InboxOpenPr | undefined>> {
+// query. Returns the first open, non-draft PR per project (so the merge signal
+// can carry a PR number) plus the full set of open non-draft PR numbers per
+// project (so the manual-merge signal can confirm a specific PR is still open).
+// Fails open (empty maps) if the cache table is absent.
+async function loadOpenPrs(
+  tasks: Task[],
+): Promise<{ byProject: Record<string, InboxOpenPr | undefined>; numbersByProject: Record<string, number[]> }> {
   const ciByProject: Record<string, Task['ci']> = {};
   for (const t of tasks) ciByProject[t.project] = t.ci;
-  const result: Record<string, InboxOpenPr | undefined> = {};
+  const byProject: Record<string, InboxOpenPr | undefined> = {};
+  const numbersByProject: Record<string, number[]> = {};
   try {
     const rows = await db.select().from(schema.ghIssuesCache);
     for (const row of rows) {
@@ -302,20 +390,22 @@ async function loadOpenPrs(tasks: Task[]): Promise<Record<string, InboxOpenPr | 
       } catch {
         continue;
       }
-      const open = prs.find(
+      const openPrs = prs.filter(
         (p) => typeof p.number === 'number' && (p.state ?? '').toUpperCase() === 'OPEN' && !p.isDraft,
       );
+      numbersByProject[row.project] = openPrs.map((p) => p.number as number);
+      const open = openPrs[0];
       if (!open || typeof open.number !== 'number') continue;
-      result[row.project] = {
+      byProject[row.project] = {
         number: open.number,
         ciGreen: rollupIsGreen(open.statusCheckRollup, ciByProject[row.project] ?? null),
         reviewDecision: open.reviewDecision ?? null,
       };
     }
   } catch {
-    return {};
+    return { byProject: {}, numbersByProject: {} };
   }
-  return result;
+  return { byProject, numbersByProject };
 }
 
 /**
@@ -329,23 +419,29 @@ export async function listInboxSignals(): Promise<{ signals: InboxSignal[]; coun
   ]);
   const tasks: Task[] = Object.values(projects).flat();
 
-  const jobs: InboxJob[] = listJobs().map((j) => ({
-    project: j.project,
-    kind: j.kind,
-    startedAt: j.startedAt,
-    finishedAt: j.finishedAt,
-    exitCode: j.exitCode,
-    verdict: j.kind === 'review' && j.finishedAt !== null ? getVerdict(j) : null,
-    releaseStopReason: j.kind === 'release' ? safeReleaseStopReason(j.contextMeta) : null,
-  }));
+  const jobs: InboxJob[] = listJobs().map((j) => {
+    const prWait = j.kind === 'pr-wait' ? safePrWaitInfo(j.contextMeta) : null;
+    return {
+      project: j.project,
+      kind: j.kind,
+      startedAt: j.startedAt,
+      finishedAt: j.finishedAt,
+      exitCode: j.exitCode,
+      verdict: j.kind === 'review' && j.finishedAt !== null ? getVerdict(j) : null,
+      releaseStopReason: j.kind === 'release' ? safeReleaseStopReason(j.contextMeta) : null,
+      prWaitReason: prWait?.reason ?? null,
+      prNumber: prWait?.prNumber ?? null,
+    };
+  });
 
-  const openPrByProject = await loadOpenPrs(tasks);
+  const { byProject: openPrByProject, numbersByProject: openPrNumbersByProject } = await loadOpenPrs(tasks);
 
   const signals = deriveInboxSignals({
     tasks,
     jobs,
     automationQueue,
     openPrByProject,
+    openPrNumbersByProject,
     nowSeconds: Date.now() / 1000,
   });
   return { signals, counts: countInboxSignals(signals) };

@@ -72,6 +72,9 @@ vi.mock('@/components/Toast', () => ({
 vi.mock('@/lib/client-api', () => ({
   fixCi: vi.fn(),
   releaseProject: vi.fn(),
+  // Delegate to global fetch so tests that stub `/api/settings` responses
+  // (stale-resolve, board-url) keep controlling the settings payload.
+  fetchSettings: vi.fn(() => fetch('/api/settings').then((r: Response) => r.json())),
   fetchJobs: fetchJobsMock,
   fetchProjectConfig: fetchProjectConfigMock,
   updateProjectConfig: updateProjectConfigMock,

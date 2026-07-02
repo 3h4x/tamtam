@@ -470,14 +470,26 @@ class TerminalStore {
       for (const tool of recovered.streamTools) newEntries.push({ role: 'tool', text: '', tool })
       const exitCode = typeof payload.exit_code === 'number' ? payload.exit_code : null
       if (recovered.streamBuffer) {
-        const role = exitCode !== null && exitCode !== 0
-          ? resolvedFallbackRole(recovered, 'error')
-          : resolvedFallbackRole(recovered, 'assistant')
-        newEntries.push({ role, text: recovered.streamBuffer })
+        // The stream buffer is the assistant's output — render it as assistant,
+        // not as an error, even when the exit code is non-zero. Claude CLI is
+        // frequently SIGKILLed by pm2's timeout AFTER emitting its final result
+        // (a clean finish that markDone later rewrites to exit 0), so keying the
+        // content's role off the raw exit code painted normal replies red. Run
+        // status is already conveyed by the separate `terminalExitEntry` below.
+        newEntries.push({ role: resolvedFallbackRole(recovered, 'assistant'), text: recovered.streamBuffer })
       }
       if (exitCode !== null) {
-        newEntries.push(terminalExitEntry(exitCode))
-        appendUniqueErrorDetail(newEntries, typeof payload.detail === 'string' ? payload.detail : null, baseHistory.length)
+        // Mirror markDone's is_error override client-side: a non-zero exit that
+        // follows a clean stream-json result is pm2's post-result SIGKILL, not a
+        // failure — so don't render a red "exit -1" marker or an error detail for
+        // what was logically a successful run. Genuine failures (plain-text
+        // fallback / cancellation) keep their error marker.
+        const cleanFinish = !!recovered.streamBuffer && !recovered.usedPlainTextFallback
+        const effectiveExit = exitCode !== 0 && !isCancelledExitCode(exitCode) && cleanFinish ? 0 : exitCode
+        newEntries.push(terminalExitEntry(effectiveExit))
+        if (effectiveExit !== 0) {
+          appendUniqueErrorDetail(newEntries, typeof payload.detail === 'string' ? payload.detail : null, baseHistory.length)
+        }
       }
       let pendingAutoSubmit = s.pendingAutoSubmit
       let messageQueue = s.messageQueue

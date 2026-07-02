@@ -3,6 +3,7 @@
 import { useState, useEffect, useCallback, useMemo, useRef } from 'react'
 import { useRouter } from 'next/navigation'
 import { errMsg } from '@/lib/shared/types'
+import { invalidateSettings } from '@/lib/client-api'
 import { AgentTemplatesTab } from '@/components/settings/AgentTemplatesTab'
 export type { AgentTemplateRecord } from '@/components/settings/AgentTemplatesTab'
 import { NotificationsTab } from '@/components/settings/NotificationsTab'
@@ -108,6 +109,7 @@ export function SettingsPage({ initialTab }: { initialTab?: TabId } = {}) {
         throw new Error(data.detail || res.statusText)
       }
       const data = await res.json().catch(() => ({}))
+      invalidateSettings()
       const canonical = mergeLoadedSettings(data.settings)
       setSettings(canonical)
       setSavedSettings(canonical)

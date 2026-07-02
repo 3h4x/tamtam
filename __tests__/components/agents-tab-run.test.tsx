@@ -42,6 +42,7 @@ vi.mock('@/lib/client-api', () => ({
   fetchAgents: fetchAgentsMock,
   fetchSkills: fetchSkillsMock,
   fetchPersonas: fetchPersonasMock,
+  fetchSettings: vi.fn().mockResolvedValue({ settings: {} }),
   createAgent: vi.fn(),
   updateAgent: vi.fn(),
   deleteAgent: vi.fn(),

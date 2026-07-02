@@ -4,6 +4,7 @@ import { useEffect, useState } from 'react'
 
 import { Button } from '@/components/ui/Button'
 import { ErrorCallout } from '@/components/ui/ErrorCallout'
+import { fetchSettings } from '@/lib/client-api'
 
 type ReindexResult = {
   ok?: boolean
@@ -32,7 +33,7 @@ export function RetrievalReindexPanel({ projectName }: { projectName: string }) 
   async function refreshStatus() {
     try {
       const [settingsRes, statsRes] = await Promise.all([
-        fetch('/api/settings').then((r) => r.json()),
+        fetchSettings(),
         fetch(`/api/projects/${encodeURIComponent(projectName)}/retrieval/stats`).then((r) => (r.ok ? r.json() : null)).catch(() => null),
       ])
       const retrievalEnabled = settingsValue(settingsRes, 'retrieval_enabled')

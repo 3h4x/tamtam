@@ -651,6 +651,23 @@ function launchCodex({ prompt, model, streamJson, attempt = 0, retryState = null
   });
 }
 
+// Exit only after stdout has drained. `console.log`/`emitResult` write to a
+// pipe (TamTam captures the shim's stdout to a log file), and `process.exit`
+// discards any bytes still buffered in that pipe — which silently truncates the
+// terminal `{"type":"result",…}` line the log watcher needs. Without it,
+// probe.getClaudeResultExitCode reads null and the job is reaped as exit -1
+// ("CLI wrote JSON to the log but never emitted a final result line") 30 min
+// later. claude-shim.js gates its exit the same way via maybeExit(). A short
+// safety timeout guarantees we never hang waiting on a stuck pipe.
+function flushThenExit(code) {
+  let done = false;
+  const finish = () => { if (done) return; done = true; process.exit(code); };
+  const timer = setTimeout(finish, 2000);
+  if (timer.unref) timer.unref();
+  if (process.stdout.writableLength === 0) { finish(); return; }
+  process.stdout.write('', finish);
+}
+
 if (require.main === module) (async () => {
   const stdinPrompt = await readStdin();
   const prompt = promptArg || stdinPrompt;
@@ -660,17 +677,18 @@ if (require.main === module) (async () => {
   if (!prompt.trim()) {
     if (streamJson) emitResult({ model, durationMs: 0, error: true, result: '[codex-shim] prompt is empty' });
     else console.error('[codex-shim] prompt is empty');
-    process.exit(1);
+    flushThenExit(1);
+    return;
   }
 
   try {
     const code = await launchCodex({ prompt, model, streamJson });
-    process.exit(code);
+    flushThenExit(code);
   } catch (err) {
     const message = err instanceof Error ? err.message : String(err);
     if (streamJson) emitResult({ model, durationMs: 0, error: true, result: `[codex-shim] ${message}` });
     else console.error(`[codex-shim] ${message}`);
-    process.exit(1);
+    flushThenExit(1);
   }
 })();
 

@@ -179,6 +179,32 @@ describe('GET /api/projects/by-project/[projectName]/issues', () => {
     expect(data.issues[0].title).toBe('Fresh Issue');
   });
 
+  it('folds per-row context/gates into the full payload (no per-row fetch)', async () => {
+    mocks.getSettings.mockReturnValue({ trusted_github_users: [], github_owner: '' });
+    // Issue #3 carries an acceptance-criteria checklist in its body; the PR
+    // links to it. DoD must be derived from that already-fetched body — no
+    // extra `gh issue view` round-trip (only 3 exec calls: remote + pr/issue list).
+    mocks.exec
+      .mockImplementationOnce(() => resp(0, 'https://github.com/owner/myproj.git'))
+      .mockImplementationOnce(() => resp(0, JSON.stringify([
+        { number: 9, title: 'Fix it', body: 'Closes #3', headRefName: 'feat/x' },
+      ])))
+      .mockImplementationOnce(() => resp(0, JSON.stringify([
+        { number: 3, title: 'Issue three', body: '- [x] done\n- [ ] todo' },
+      ])));
+
+    const req = new NextRequest('http://localhost/api/projects/by-project/myproj/issues?full=1');
+    const res = await GET(req, { params: Promise.resolve({ projectName: 'myproj' }) });
+    expect(res.status).toBe(200);
+    const data = await res.json();
+    // hasContext folded onto every issue (false — no jobs in the test cache).
+    expect(data.issues[0].hasContext).toBe(false);
+    // gates folded onto the PR, DoD sourced from issue #3's body.
+    expect(data.prs[0].gates).toMatchObject({ issueNumber: 3, dod: 'warn', dodSummary: '1/2 DoD' });
+    // Exactly 3 exec calls — no per-PR gh issue view fan-out.
+    expect(mocks.exec).toHaveBeenCalledTimes(3);
+  });
+
   it('returns live summary data with trusted issue filtering', async () => {
     mocks.getSettings.mockReturnValue({ trusted_github_users: ['trusted-user'], github_owner: '' });
     mocks.exec

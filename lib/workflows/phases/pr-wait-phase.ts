@@ -306,11 +306,25 @@ async function finalizePrWaitStep(
   prRepo: string,
 ): Promise<void> {
   'use step';
-  const { getJob, markDone } = await import('@/lib/jobs/job-storage');
+  const { getJob, markDone, updateJob } = await import('@/lib/jobs/job-storage');
   const { appendLogForJob } = await import('@/lib/workflows/phases/pr-wait-log');
   appendLogForJob(jobId, `\n# pr-wait done — ${reason}\n`);
   const job = getJob(jobId);
-  if (job) await markDone(job, exitCode);
+  if (job) {
+    // Stamp the terminal reason on the job so the inbox can explain why an
+    // unmerged PR is still open (e.g. `risky_diff` deferred to a human)
+    // without parsing the log. Merged into the existing {prNumber,…} context.
+    if (exitCode !== 0) {
+      try {
+        const meta = job.contextMeta ? JSON.parse(job.contextMeta) : {};
+        const merged = (meta && typeof meta === 'object' && !Array.isArray(meta)) ? meta as Record<string, unknown> : {};
+        merged.prWaitReason = reason;
+        job.contextMeta = JSON.stringify(merged);
+        updateJob(job);
+      } catch { /* non-fatal — reason still lands in the log */ }
+    }
+    await markDone(job, exitCode);
+  }
 
   // Auto-dispatch fix-ci when remote CI checks fail on an open PR. Without
   // this the release ends at a broken PR and no further work happens until

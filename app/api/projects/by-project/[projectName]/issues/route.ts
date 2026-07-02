@@ -8,6 +8,14 @@ import { homedir } from 'os';
 import { isUserTrusted } from '@/lib/shared/untrusted';
 import { ensureIssueBranch, checkoutPrBranch, issueBranchName } from '@/lib/github/issue-branch';
 import { findOpenPrForIssue, type IssuePrMatch } from '@/lib/github/find-issue-pr';
+import { listJobs } from '@/lib/jobs/job-storage';
+import {
+  parseLinkedIssue,
+  computeDodFromBody,
+  computePrGates,
+  issueHasContext,
+  type PrGates,
+} from '@/lib/github/issue-row-enrichment';
 
 const CACHE_TTL_S = 300; // 5 minutes
 
@@ -34,13 +42,53 @@ function slimAuthor(raw: unknown): string | null {
 function slimIssue(issue: unknown): unknown {
   if (!issue || typeof issue !== 'object') return issue;
   const o = issue as Record<string, unknown>;
-  return { number: o.number, title: o.title, labels: slimLabels(o.labels), author: slimAuthor(o.author), url: o.url };
+  return { number: o.number, title: o.title, labels: slimLabels(o.labels), author: slimAuthor(o.author), url: o.url, hasContext: o.hasContext === true };
 }
 
 function slimPR(pr: unknown): unknown {
   if (!pr || typeof pr !== 'object') return pr;
   const o = pr as Record<string, unknown>;
-  return { number: o.number, title: o.title, labels: slimLabels(o.labels), author: slimAuthor(o.author), url: o.url, branch: o.headRefName, isDraft: o.isDraft };
+  return { number: o.number, title: o.title, labels: slimLabels(o.labels), author: slimAuthor(o.author), url: o.url, branch: o.headRefName, isDraft: o.isDraft, gates: o.gates ?? null };
+}
+
+// Fold per-row context/gate data into the issue and PR objects in a single
+// pass over the in-memory jobs cache. This replaces the per-row
+// `continue-issue` / `pr-gates` request fan-out (one HTTP call per open issue
+// and PR) that made the Issues tab fire 40+ requests on every open.
+function enrichRows(
+  projectName: string,
+  issues: unknown[],
+  prs: unknown[],
+): { issues: unknown[]; prs: unknown[] } {
+  const projectJobs = listJobs().filter((j) => j.project === projectName);
+  const bodyByNumber = new Map<number, string>();
+  for (const i of issues) {
+    if (!i || typeof i !== 'object') continue;
+    const o = i as Record<string, unknown>;
+    if (typeof o.number === 'number') bodyByNumber.set(o.number, typeof o.body === 'string' ? o.body : '');
+  }
+
+  const enrichedIssues = issues.map((i) => {
+    if (!i || typeof i !== 'object') return i;
+    const o = i as Record<string, unknown>;
+    const num = typeof o.number === 'number' ? o.number : Number(o.number);
+    return { ...o, hasContext: Number.isFinite(num) ? issueHasContext(projectJobs, num) : false };
+  });
+
+  const enrichedPrs = prs.map((pr) => {
+    if (!pr || typeof pr !== 'object') return pr;
+    const o = pr as Record<string, unknown>;
+    const issueNumber = parseLinkedIssue(typeof o.body === 'string' ? o.body : null);
+    // DoD comes from the linked issue's body, which the issue-list fetch
+    // already returns — no per-PR `gh issue view` round-trip. A PR linked to
+    // an issue outside the open set (e.g. already closed) has no local body,
+    // so its DoD reads as none.
+    const dod = computeDodFromBody(issueNumber != null ? bodyByNumber.get(issueNumber) ?? null : null);
+    const gates: PrGates = computePrGates(projectJobs, issueNumber, dod);
+    return { ...o, gates };
+  });
+
+  return { issues: enrichedIssues, prs: enrichedPrs };
 }
 
 function isMissingRelationError(error: unknown, relationName: string): boolean {
@@ -575,10 +623,11 @@ export async function GET(
       cachedAt: fetchedAt,
     });
   }
+  const enriched = enrichRows(projectName, filteredIssues, prs);
   return NextResponse.json({
     repo,
-    prs: slim ? prs.map(slimPR) : prs,
-    issues: slim ? filteredIssues.map(slimIssue) : filteredIssues,
+    prs: slim ? enriched.prs.map(slimPR) : enriched.prs,
+    issues: slim ? enriched.issues.map(slimIssue) : enriched.issues,
     error: ghError,
     cached,
     cachedAt: fetchedAt,

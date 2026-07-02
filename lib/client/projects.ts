@@ -15,6 +15,7 @@ import type {
   Recommendation,
   ProjectPipelineStats,
 } from './types'
+import { cachedGet, invalidateGet, CachedGetError } from './request-cache'
 
 export const API_BASE = '/api/projects'
 
@@ -192,11 +193,7 @@ export interface IssuesSummaryResponse {
 
 export async function fetchIssuesSummary(projectName: string): Promise<IssuesSummaryResponse> {
   const url = `${API_BASE}/by-project/${encodeURIComponent(projectName)}/issues?summary=1`
-  const response = await fetch(url)
-  if (!response.ok) {
-    throw new Error(`Failed to fetch issues summary: ${response.statusText}`)
-  }
-  return response.json()
+  return cachedGet(url, { ttlMs: 5000 })
 }
 
 export async function mergePR(
@@ -402,15 +399,21 @@ export async function fetchChanges(projectName: string, opts?: { signal?: AbortS
 }
 
 export async function fetchBehind(projectName: string): Promise<{ behind: number; ahead: number }> {
-  const response = await fetch(`${API_BASE}/by-project/${encodeURIComponent(projectName)}/behind`)
-  if (!response.ok) return { behind: 0, ahead: 0 }
-  return response.json()
+  // Cached+deduped: refetched on every project-tab switch; server already has a
+  // 60s TTL, so a 5s client memo just avoids the redundant round-trip.
+  try {
+    return await cachedGet(`${API_BASE}/by-project/${encodeURIComponent(projectName)}/behind`, { ttlMs: 5000 })
+  } catch {
+    return { behind: 0, ahead: 0 }
+  }
 }
 
 export async function fetchBranch(projectName: string): Promise<{ branch: string | null; defaultBranch: string; commitsAhead: number | null }> {
-  const response = await fetch(`${API_BASE}/by-project/${encodeURIComponent(projectName)}/branch`)
-  if (!response.ok) throw new Error('Failed to fetch branch')
-  return response.json()
+  try {
+    return await cachedGet(`${API_BASE}/by-project/${encodeURIComponent(projectName)}/branch`, { ttlMs: 5000 })
+  } catch {
+    throw new Error('Failed to fetch branch')
+  }
 }
 
 // Custom error for pre-push hook failures so the UI can offer a force-retry.
@@ -491,12 +494,15 @@ export async function fetchChangeDiff(projectName: string, filename: string): Pr
   return response.json()
 }
 
-export async function fetchProjectConfig(projectName: string): Promise<ProjectConfig> {
-  const response = await fetch(`${API_BASE}/by-project/${encodeURIComponent(projectName)}/config`)
-  if (!response.ok) {
-    throw new Error(`Failed to fetch project config: ${response.statusText}`)
+export async function fetchProjectConfig(projectName: string, opts: { force?: boolean } = {}): Promise<ProjectConfig> {
+  // Cached+deduped across tab switches. Pass `{ force: true }` for the reload
+  // right after a config write so a save is never followed by a stale read.
+  try {
+    return await cachedGet(`${API_BASE}/by-project/${encodeURIComponent(projectName)}/config`, { ttlMs: 5000, force: opts.force })
+  } catch (e) {
+    if (e instanceof CachedGetError) throw new Error(`Failed to fetch project config: ${e.statusText}`, { cause: e })
+    throw e
   }
-  return response.json()
 }
 
 export async function fetchProjectSetup(projectName: string): Promise<ProjectSetupStatus> {
@@ -566,13 +572,17 @@ export async function updateProjectConfig(
     const data = await response.json().catch(() => ({}))
     throw new Error(data.detail || `Failed to update config: ${response.statusText}`)
   }
+  // Bust the cached config/action reads for this project so the next fetch is fresh.
+  invalidateGet(`/by-project/${encodeURIComponent(projectName)}/config`)
   return response.json()
 }
 
 export async function fetchCustomActions(projectName: string): Promise<{ actions: import('./types').CustomAction[] }> {
-  const response = await fetch(`${API_BASE}/by-project/${encodeURIComponent(projectName)}/action`)
-  if (!response.ok) return { actions: [] }
-  return response.json()
+  try {
+    return await cachedGet(`${API_BASE}/by-project/${encodeURIComponent(projectName)}/action`, { ttlMs: 5000 })
+  } catch {
+    return { actions: [] }
+  }
 }
 
 export async function saveCustomActions(projectName: string, actions: import('./types').CustomAction[]): Promise<{ status: string; actions: import('./types').CustomAction[] }> {
@@ -585,6 +595,7 @@ export async function saveCustomActions(projectName: string, actions: import('./
     const data = await response.json().catch(() => ({}))
     throw new Error(data.detail || `Failed to save actions: ${response.statusText}`)
   }
+  invalidateGet(`/by-project/${encodeURIComponent(projectName)}/action`)
   return response.json()
 }
 
