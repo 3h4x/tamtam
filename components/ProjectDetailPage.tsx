@@ -328,7 +328,6 @@ export function ProjectDetailPage({
   const isTestRunning = !!runningTest
   const projectActions = useProjectActions(name, {
     isTestRunning,
-    onBehindReset: () => setBehindCount(0),
     onPrCreated: refreshIssuesAfterPr,
   })
 

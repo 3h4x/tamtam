@@ -7,10 +7,13 @@ import { flushSync } from 'react-dom'
 import { ChangesTab } from '@/components/ChangesTab'
 import type { ChangesResponse } from '@/lib/client-api'
 
-const { pushMock, fetchChangesMock, pushProjectMock } = vi.hoisted(() => ({
+// Manual push/pull are gone from ChangesTab — unpushed commits ship through the
+// automatic Release pipeline, so the "ahead of origin" state offers Release, not
+// a raw git push.
+const { pushMock, fetchChangesMock, releaseProjectMock } = vi.hoisted(() => ({
   pushMock: vi.fn(),
   fetchChangesMock: vi.fn(),
-  pushProjectMock: vi.fn(),
+  releaseProjectMock: vi.fn(),
 }))
 
 vi.mock('next/navigation', () => ({
@@ -20,9 +23,7 @@ vi.mock('next/navigation', () => ({
 vi.mock('@/lib/client-api', () => ({
   fetchChanges: fetchChangesMock,
   fetchChangeDiff: vi.fn(),
-  pullProject: vi.fn(),
-  pushProject: pushProjectMock,
-  PullDivergedError: class PullDivergedError extends Error {},
+  releaseProject: releaseProjectMock,
   checkoutDefaultBranch: vi.fn(),
 }))
 
@@ -75,7 +76,8 @@ describe('ChangesTab', () => {
   beforeEach(() => {
     pushMock.mockReset()
     fetchChangesMock.mockReset()
-    pushProjectMock.mockReset()
+    releaseProjectMock.mockReset()
+    releaseProjectMock.mockResolvedValue({ status: 'started', release_job_id: 'rel-1', message: 'ok' })
     fetchChangesMock.mockResolvedValue(buildChangesResponse())
   })
 
@@ -83,7 +85,7 @@ describe('ChangesTab', () => {
     document.body.innerHTML = ''
   })
 
-  it('disables ahead-of-origin push while jobs are paused and re-enables it live', async () => {
+  it('ahead-of-origin offers Release (not a manual push) and gates it on jobs pause', async () => {
     const { container, rerender, unmount } = renderChangesTab({
       projectName: 'acme/widgets',
       jobsPaused: true,
@@ -91,12 +93,15 @@ describe('ChangesTab', () => {
 
     await vi.waitFor(() => {
       expect(fetchChangesMock).toHaveBeenCalledWith('acme/widgets', expect.anything())
-      expect(buttonByText(container, 'Push 3 commits').disabled).toBe(true)
-      expect(buttonByText(container, 'Push 3 commits').title).toContain('Jobs are paused globally')
+      // The old "Push N commits" button is gone; the ahead state now ships via Release.
+      expect(Array.from(container.querySelectorAll('button')).some((b) => /Push/i.test(b.textContent ?? ''))).toBe(false)
+      expect(container.textContent).toContain('will ship on release')
+      expect(buttonByText(container, 'Release').disabled).toBe(true)
+      expect(buttonByText(container, 'Release').title).toContain('Jobs are paused globally')
     })
 
-    buttonByText(container, 'Push 3 commits').dispatchEvent(new MouseEvent('click', { bubbles: true }))
-    expect(pushProjectMock).not.toHaveBeenCalled()
+    buttonByText(container, 'Release').dispatchEvent(new MouseEvent('click', { bubbles: true }))
+    expect(releaseProjectMock).not.toHaveBeenCalled()
 
     rerender({
       projectName: 'acme/widgets',
@@ -104,8 +109,24 @@ describe('ChangesTab', () => {
     })
 
     await vi.waitFor(() => {
-      expect(buttonByText(container, 'Push 3 commits').disabled).toBe(false)
-      expect(buttonByText(container, 'Push 3 commits').title).toContain('Push 3 commits to origin')
+      expect(buttonByText(container, 'Release').disabled).toBe(false)
+      expect(buttonByText(container, 'Release').title).toContain('release pipeline')
+    })
+
+    unmount()
+  })
+
+  it('a branch behind origin is informational — no manual Pull button', async () => {
+    fetchChangesMock.mockResolvedValue(buildChangesResponse({ ahead: 0, behind: 2 }))
+    const { container, unmount } = renderChangesTab({
+      projectName: 'acme/widgets',
+      jobsPaused: false,
+    })
+
+    await vi.waitFor(() => {
+      expect(container.textContent).toContain('behind origin')
+      expect(container.textContent).toContain('rebases onto origin automatically')
+      expect(Array.from(container.querySelectorAll('button')).some((b) => /Pull|Rebase|Merge/i.test(b.textContent ?? ''))).toBe(false)
     })
 
     unmount()

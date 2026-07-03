@@ -142,6 +142,32 @@ The budget gate is a macro control checked *before* a run starts. It cannot stop
 
 Note: a cap kill counts as a failed run, so a project whose runs repeatedly hit the token/wall-time cap will also trip the circuit breaker.
 
+## No manual git — ship through Release, escalate via HITL
+
+Git push/pull is the pipeline's job, not the operator's. The project UI no longer
+exposes manual **Push**, **Pull**, or **Push to PR** buttons (removed from the
+project header `ProjectActions` and the `Changes` tab). The model is:
+
+- **Unpushed commits ship through Release.** The `Changes` tab's "N commits
+  ahead of origin — will ship on release" state links to the Release action; the
+  release pipeline commits, reviews, and pushes automatically. There is no raw
+  "push my commits" button.
+- **A branch behind origin is reconciled automatically.** The `push` phase
+  rebases onto `origin/<default>` (auto `pull --rebase` + retry) when the remote
+  moved, and the stranded-branch reconciler rebases behind PR branches. "Behind"
+  is shown as informational text, not an actionable Pull button.
+- **Anything a human must decide is a HITL, not a button.** When automation
+  cannot reconcile (diverged history, a merge conflict, branch protection, a
+  push blocked by the remote), the release stops with a recorded reason and
+  surfaces in `/inbox` as a `pr_needs_manual_merge` / `fix_loop_exhausted` /
+  `ci_red` signal — the merge-or-HITL invariant (see CLAUDE.md → Vision and
+  `lib/workflows/inbox.ts`). The operator acts from the inbox, not from a
+  per-project git button they have to remember to click.
+
+The underlying `push` and `changes` (pull) API routes still exist for
+release-scoped internal use (e.g. a failed-`push`-step retry inside a release
+trace); they are simply no longer surfaced as manual UI affordances.
+
 ## Branch-derived PR behavior
 
 There is no longer a per-project pipeline mode selector. Push behavior is decided at runtime:

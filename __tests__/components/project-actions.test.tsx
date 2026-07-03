@@ -54,29 +54,18 @@ function buildProps(overrides: Partial<React.ComponentProps<typeof ProjectAction
     fixCiResult: null,
     releasing: false,
     testing: false,
-    pushing: false,
-    pulling: false,
-    pullResult: null,
-    pullDiverged: false,
-    behindCount: 0,
     creatingPr: false,
-    pushingToPr: false,
     currentBranch: 'fix/issue-77-gates',
     defaultBranch: 'master',
     branchCommitsAhead: 1,
     openPrBranches: ['fix/issue-77-gates'],
-    openPrByBranch: { 'fix/issue-77-gates': 77 },
     customActions: [],
     runningActions: new Set(),
     onFixCi: vi.fn(),
     onRelease: vi.fn(),
     onCreatePr: vi.fn(),
-    onPushToPr: vi.fn(),
     onTest: vi.fn(),
     onCustomAction: vi.fn(),
-    onPush: vi.fn(),
-    onPull: vi.fn(),
-    onDismissDiverged: vi.fn(),
     ...overrides,
   }
 }
@@ -115,7 +104,7 @@ describe('ProjectActions', () => {
     document.body.innerHTML = ''
   })
 
-  it('disables fix-ci, release, push-to-pr, and test while jobs are paused', () => {
+  it('disables fix-ci, release, and test while jobs are paused', () => {
     const { container, rerender, unmount } = renderProjectActions(buildProps({
       jobsPaused: true,
       aggregateCi: 'failure',
@@ -124,11 +113,9 @@ describe('ProjectActions', () => {
 
     expect(buttonByText(container, 'Fix CI').disabled).toBe(true)
     expect(buttonByText(container, 'Release').disabled).toBe(true)
-    expect(buttonByText(container, 'Push to PR #77').disabled).toBe(true)
     expect(buttonByText(container, 'Test').disabled).toBe(true)
     expect(buttonByText(container, 'Fix CI').title).toContain('Jobs are paused globally')
     expect(buttonByText(container, 'Release').title).toContain('Jobs are paused globally')
-    expect(buttonByText(container, 'Push to PR #77').title).toContain('Jobs are paused globally')
     expect(buttonByText(container, 'Test').title).toContain('Jobs are paused globally')
 
     rerender(buildProps({
@@ -139,36 +126,26 @@ describe('ProjectActions', () => {
 
     expect(buttonByText(container, 'Fix CI').disabled).toBe(false)
     expect(buttonByText(container, 'Release').disabled).toBe(false)
-    expect(buttonByText(container, 'Push to PR #77').disabled).toBe(false)
     expect(buttonByText(container, 'Test').disabled).toBe(false)
 
     unmount()
   })
 
-  it('disables push while jobs are paused and re-enables it live', () => {
-    const { container, rerender, unmount } = renderProjectActions(buildProps({
-      jobsPaused: true,
+  it('renders no manual git push/pull/push-to-pr buttons — shipping goes through Release', () => {
+    const { container, unmount } = renderProjectActions(buildProps({
       totalChanges: 0,
       unpushed: 3,
       currentBranch: 'master',
       openPrBranches: [],
-      openPrByBranch: {},
     }))
 
-    expect(buttonByText(container, 'Push (3)').disabled).toBe(true)
-    expect(buttonByText(container, 'Push (3)').title).toContain('Jobs are paused globally')
-
-    rerender(buildProps({
-      jobsPaused: false,
-      totalChanges: 0,
-      unpushed: 3,
-      currentBranch: 'master',
-      openPrBranches: [],
-      openPrByBranch: {},
-    }))
-
-    expect(buttonByText(container, 'Push (3)').disabled).toBe(false)
-    expect(buttonByText(container, 'Push (3)').title).toContain('Push 3 commits to origin')
+    const labels = Array.from(container.querySelectorAll('button')).map((b) => b.textContent?.trim() ?? '')
+    expect(labels.some((l) => /^Push/i.test(l))).toBe(false)
+    expect(labels.some((l) => /^Pull/i.test(l))).toBe(false)
+    expect(labels.some((l) => /Push to PR/i.test(l))).toBe(false)
+    expect(labels.some((l) => l === 'Rebase' || l === 'Merge')).toBe(false)
+    // Release remains and is enabled (there are unpushed commits to ship).
+    expect(buttonByText(container, 'Release').disabled).toBe(false)
 
     unmount()
   })
@@ -252,44 +229,11 @@ describe('ProjectActions', () => {
       unpushed: 0,
       currentBranch: 'master',
       openPrBranches: [],
-      openPrByBranch: {},
     }))
 
     const releaseBtn = buttonByText(container, 'Release')
     expect(releaseBtn.disabled).toBe(true)
     expect(releaseBtn.title).toContain('Nothing to release')
-
-    unmount()
-  })
-
-  it('renders diverged pull controls and fires correct handlers', () => {
-    const onPull = vi.fn()
-    const onDismissDiverged = vi.fn()
-    const { container, unmount } = renderProjectActions(buildProps({
-      pullDiverged: true,
-      totalChanges: 0,
-      onPull,
-      onDismissDiverged,
-      currentBranch: 'master',
-      openPrBranches: [],
-      openPrByBranch: {},
-    }))
-
-    const rebaseBtn = buttonByText(container, 'Rebase')
-    const mergeBtn = buttonByText(container, 'Merge')
-    expect(rebaseBtn.disabled).toBe(false)
-    expect(mergeBtn.disabled).toBe(false)
-
-    rebaseBtn.click()
-    expect(onPull).toHaveBeenCalledWith('rebase')
-
-    mergeBtn.click()
-    expect(onPull).toHaveBeenCalledWith('merge')
-
-    const dismissBtn = container.querySelector('[aria-label="Dismiss diverged warning"]') as HTMLButtonElement
-    expect(dismissBtn).toBeTruthy()
-    dismissBtn.click()
-    expect(onDismissDiverged).toHaveBeenCalledOnce()
 
     unmount()
   })
