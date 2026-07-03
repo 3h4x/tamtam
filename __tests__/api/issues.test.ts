@@ -4,6 +4,7 @@ import { sql, eq } from 'drizzle-orm';
 import * as schema from '@/lib/db/schema';
 import { createTestPgDbEmpty, type TestDbHandle } from '@/__tests__/helpers/test-db';
 import { clearTrustedUsersCache } from '@/lib/shared/untrusted';
+import { createJob, getJob, updateJob } from '@/lib/jobs/job-storage';
 
 let sharedHandle: TestDbHandle;
 
@@ -542,6 +543,74 @@ describe('POST /api/projects/by-project/[projectName]/issues', () => {
     const data = await res.json();
     expect(data.status).toBe('merged');
     expect(data.pr).toBe(42);
+  });
+
+  it('resolves an outstanding pr-wait HITL when the PR is merged (stamps prWaitReason=merged)', async () => {
+    // A pr-wait that deferred auto-merge to a human (risky_diff) raises a
+    // `pr_needs_manual_merge` inbox card. Merging that PR here IS the
+    // resolution, so it must clear the HITL. Without stamping the job, the
+    // card lingers forever: this handler wipes the gh-issues cache on merge,
+    // and the inbox derivation fails open (surfaces) when it can't confirm the
+    // PR is closed — so the merge that resolves the HITL is the one action
+    // that can never clear it.
+    const seeded = createJob(
+      'myproj',
+      'pr-wait',
+      0,
+      '/tmp/pr-wait.log',
+      undefined,
+      JSON.stringify({ prNumber: 4242, prWaitReason: 'risky_diff', riskyFiles: ['ecosystem.config.cjs'] }),
+    );
+    seeded.finishedAt = seeded.startedAt + 1;
+    seeded.exitCode = 1;
+    updateJob(seeded);
+
+    mocks.exec
+      .mockImplementationOnce(() => resp(0, 'https://github.com/owner/myproj.git')) // git remote get-url
+      .mockImplementationOnce(() => resp(0, '')) // gh pr merge
+      .mockImplementationOnce(() => resp(0, 'refs/remotes/origin/main\n')) // symbolic-ref
+      .mockImplementationOnce(() => resp(0, 'main\n')) // branch --show-current (already on main)
+      .mockImplementationOnce(() => resp(0, '')); // pull --ff-only
+
+    const res = await POST(makeReq({ prNumber: 4242, action: 'merge' }), { params: Promise.resolve({ projectName: 'myproj' }) });
+    expect(res.status).toBe(200);
+
+    const after = getJob(seeded.id);
+    expect(after).not.toBeNull();
+    const meta = JSON.parse(after!.contextMeta!);
+    expect(meta.prWaitReason).toBe('merged');
+  });
+
+  it('does NOT resolve the pr-wait HITL when the merge only enabled auto-merge (checks pending)', async () => {
+    // `gh pr merge --auto` exits 0 by merely ENABLING auto-merge — the PR is
+    // not merged yet and may never merge if a required check later fails.
+    // Clearing the HITL here would strand an unmerged PR with no inbox card
+    // (a silent stop). The card must survive until the PR actually lands.
+    const seeded = createJob(
+      'myproj',
+      'pr-wait',
+      0,
+      '/tmp/pr-wait-auto.log',
+      undefined,
+      JSON.stringify({ prNumber: 4343, prWaitReason: 'risky_diff' }),
+    );
+    seeded.finishedAt = seeded.startedAt + 1;
+    seeded.exitCode = 1;
+    updateJob(seeded);
+
+    mocks.exec
+      .mockImplementationOnce(() => resp(0, 'https://github.com/owner/myproj.git')) // git remote get-url
+      .mockImplementationOnce(() => resp(1, '', 'required status checks have not passed')) // direct merge fails
+      .mockImplementationOnce(() => resp(0, '')) // --auto enable succeeds (NOT merged)
+      .mockImplementationOnce(() => resp(0, 'refs/remotes/origin/main\n')) // symbolic-ref
+      .mockImplementationOnce(() => resp(0, 'main\n')) // branch --show-current
+      .mockImplementationOnce(() => resp(0, '')); // pull --ff-only
+
+    const res = await POST(makeReq({ prNumber: 4343, action: 'merge' }), { params: Promise.resolve({ projectName: 'myproj' }) });
+    expect(res.status).toBe(200);
+
+    const after = getJob(seeded.id);
+    expect(JSON.parse(after!.contextMeta!).prWaitReason).toBe('risky_diff');
   });
 
   it('calls gh pr merge with correct --squash flag', async () => {

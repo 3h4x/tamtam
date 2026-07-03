@@ -122,6 +122,23 @@ describe('deriveInboxSignals', () => {
     expect(signals.find((x) => x.type === 'pr_needs_manual_merge')).toMatchObject({ action: { prNumber: 76 } });
   });
 
+  it('does not surface manual-merge once the pr-wait was stamped merged, even with an empty cache', () => {
+    // An operator-driven merge (inbox / Issues-tab) stamps the outstanding
+    // pr-wait `merged`. That must clear the HITL regardless of the open-PR
+    // cache, which the merge path deletes — otherwise the resolving merge can
+    // never clear the card it resolved. This is the escape hatch the merge
+    // handler relies on; it must NOT be gated on the open-PR cache like the
+    // fail-open case above.
+    const signals = deriveInboxSignals(
+      baseInput({
+        tasks: [makeTask({ project: 'alpha' })],
+        jobs: [makeJob({ project: 'alpha', kind: 'pr-wait', exitCode: 1, prWaitReason: 'merged', prNumber: 76 })],
+        openPrNumbersByProject: {},
+      }),
+    );
+    expect(signals.find((x) => x.type === 'pr_needs_manual_merge')).toBeUndefined();
+  });
+
   it('does not raise manual-merge for a self-healing pr-wait reason (checks_failed)', () => {
     const signals = deriveInboxSignals(
       baseInput({

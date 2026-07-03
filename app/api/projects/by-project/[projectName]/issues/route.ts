@@ -9,6 +9,7 @@ import { isUserTrusted } from '@/lib/shared/untrusted';
 import { ensureIssueBranch, checkoutPrBranch, issueBranchName } from '@/lib/github/issue-branch';
 import { findOpenPrForIssue, type IssuePrMatch } from '@/lib/github/find-issue-pr';
 import { listJobs } from '@/lib/jobs/job-storage';
+import { resolvePrWaitHitlForMergedPr } from '@/lib/jobs/resolve-pr-wait-hitl';
 import {
   parseLinkedIssue,
   computeDodFromBody,
@@ -690,17 +691,29 @@ export async function POST(
   let result = await tryMerge(false);
   // Only fall back to --auto when checks are still pending — not when auto-merge
   // is disabled on the repo (that error also contains "auto merge" but means something different).
+  let autoEnabled = false;
   if (
     result.exitCode !== 0 &&
     /required status checks|mergeable|pending/i.test(result.stderr) &&
     !/not allowed/i.test(result.stderr)
   ) {
     result = await tryMerge(true);
+    autoEnabled = true;
   }
 
   if (result.exitCode !== 0) {
     const errMsg = result.stderr.trim() || 'merge failed';
     return NextResponse.json({ detail: errMsg }, { status: 422 });
+  }
+
+  // Resolve any outstanding pr-wait HITL for this PR — the merge is its
+  // resolution — so the inbox manual-merge card clears deterministically
+  // instead of lingering once the cache is deleted below. Skip when we only
+  // ENABLED auto-merge (checks still pending): the PR has NOT landed yet, so
+  // its manual-merge card must stay until it actually merges (never a silent
+  // stop for a PR that could still fail its checks and never ship).
+  if (!autoEnabled) {
+    resolvePrWaitHitlForMergedPr(projectName, prNumber);
   }
 
   // Invalidate cache so next GET fetches fresh data

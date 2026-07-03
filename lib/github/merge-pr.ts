@@ -10,7 +10,12 @@ import { resolveGhRepo } from '@/lib/github/repo';
 import { checkoutDefault } from '@/lib/git/checkout-default';
 
 export type MergePrResult =
-  | { ok: true; pr: number; repo: string }
+  // `merged` is true only when the PR actually landed. When required checks are
+  // still pending we fall back to `gh pr merge --auto`, which exits 0 by merely
+  // ENABLING auto-merge — the PR is not merged yet and may never merge if a
+  // check later fails. Callers that resolve a merge-gated HITL must gate on
+  // `merged`, not just `ok`, or they'd clear a signal for an unmerged PR.
+  | { ok: true; pr: number; repo: string; merged: boolean }
   | { ok: false; status: number; detail: string };
 
 export async function mergePullRequest(opts: {
@@ -38,12 +43,14 @@ export async function mergePullRequest(opts: {
   // Only fall back to --auto when checks are still pending — not when auto-merge
   // is disabled on the repo (that error also contains "auto merge" but means
   // something different).
+  let autoEnabled = false;
   if (
     result.exitCode !== 0 &&
     /required status checks|mergeable|pending/i.test(result.stderr) &&
     !/not allowed/i.test(result.stderr)
   ) {
     result = await tryMerge(true);
+    autoEnabled = true;
   }
   if (result.exitCode !== 0) {
     return { ok: false, status: 422, detail: result.stderr.trim() || 'merge failed' };
@@ -52,5 +59,7 @@ export async function mergePullRequest(opts: {
   // (release_after_run) starts clean on default rather than on the just-merged
   // branch. Best-effort — a failure here doesn't undo the merge.
   await checkoutDefault({ project }).catch(() => {});
-  return { ok: true, pr: prNumber, repo };
+  // `merged` is false when we only enabled auto-merge (checks pending) — the PR
+  // has NOT landed yet, so a HITL for it must stay until it actually merges.
+  return { ok: true, pr: prNumber, repo, merged: !autoEnabled };
 }

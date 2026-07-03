@@ -1,5 +1,6 @@
 import { isCancelledExitCode } from '@/lib/shared/job-exit-codes'
 import { reviewNeedsAttention } from '@/components/project-runs/entries'
+import { latestFailureSummary } from '@/components/project-runs/run-summary'
 import { sortPipelineEntriesByActivity } from '@/components/project-runs/release-progress'
 import type { Entry, ReleaseOutcome } from '@/components/project-runs/types'
 
@@ -81,16 +82,24 @@ function releaseOutcomeFor(rel: Entry): ReleaseOutcome {
   if (rel.status === 'running') {
     return { status: 'running', label: 'release running', releaseJobId: rel.navJobId }
   }
-  if (rel.status === 'aborted') {
-    return { status: 'failed', label: 'release cancelled', releaseJobId: rel.navJobId }
-  }
   if (rel.exitCode === 0) {
     return { status: 'done', label: 'release done', releaseJobId: rel.navJobId }
   }
-  if ((rel.children?.length ?? 0) === 0) {
-    return { status: 'blocked', label: 'release blocked', releaseJobId: rel.navJobId }
+  // Why the release stopped: the orchestrator's recorded stop reason (e.g.
+  // "review startup failed: Jobs are paused globally …") or, absent that, the
+  // latest failed child's summary. Carried on the outcome so the owning
+  // agent/run row explains a failed release-after-run instead of just showing
+  // "failed" with no cause. Only attached when known, so a reason-less outcome
+  // stays minimal ({status,label,releaseJobId}).
+  const reason = rel.releaseStopReason ?? latestFailureSummary(rel)
+  const reasonField = reason ? { reason } : {}
+  if (rel.status === 'aborted') {
+    return { status: 'failed', label: 'release cancelled', releaseJobId: rel.navJobId, ...reasonField }
   }
-  return { status: 'failed', label: 'release failed', releaseJobId: rel.navJobId }
+  if ((rel.children?.length ?? 0) === 0) {
+    return { status: 'blocked', label: 'release blocked', releaseJobId: rel.navJobId, ...reasonField }
+  }
+  return { status: 'failed', label: 'release failed', releaseJobId: rel.navJobId, ...reasonField }
 }
 
 function nonTerminalRecoveryStep(e: Entry): boolean {

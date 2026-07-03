@@ -15,6 +15,7 @@ import { writeIssueBody } from '@/lib/github/edit-issue-body';
 import { checkoutDefault } from '@/lib/git/checkout-default';
 import { resolveGhRepo } from '@/lib/github/repo';
 import { mergePullRequest } from '@/lib/github/merge-pr';
+import { resolvePrWaitHitlForMergedPr } from '@/lib/jobs/resolve-pr-wait-hitl';
 
 export interface OrchestratorInput {
   project: string;
@@ -131,6 +132,12 @@ export async function runAgentActions(input: OrchestratorInput): Promise<Orchest
           });
           if (r.ok) {
             executed += 1;
+            // A completed merge resolves any outstanding pr-wait HITL for this
+            // PR, so the inbox manual-merge card clears instead of lingering
+            // (same fix as the operator inbox/Issues-tab merge path). Skip when
+            // we only ENABLED auto-merge (checks pending) — the PR has not
+            // landed, so its HITL must stay until it actually merges.
+            if (r.merged) resolvePrWaitHitlForMergedPr(project, action.prNumber);
             console.log(`[agent-actions] ${jobId} PR#${action.prNumber} merge-pr ok (issue #${action.issue})`);
           } else {
             errors.push({ index: i, type: action.type, detail: r.detail });

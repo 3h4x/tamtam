@@ -338,6 +338,48 @@ describe('groupReleaseChildren', () => {
     expect(out[0].chainedChildren![0].children!.map((c: AnyEntry) => c.kind)).toEqual(['review', 'commit']);
   });
 
+  it('surfaces a failed owned release\'s stop reason on the parent agent outcome', () => {
+    // Continue-release from an agent row: the agent succeeds (exit 0) but the
+    // release-after-run it owns fails. The row goes red because of that owned
+    // release, so its stop reason must ride along on the outcome — otherwise
+    // the operator sees "failed" with no cause (the reported bug).
+    const reason = 'review startup failed: Jobs are paused globally. Turn the switch back on in Settings to start a review.';
+    const entries = [
+      { ...makeEntry({ id: 'agent1', kind: 'agent:issue-cruncher', startedAt: 100, finishedAt: 500, exitCode: 0 }), parentJobId: null, _jobIds: ['agent1'] },
+      { ...makeEntry({ id: 'rel', kind: 'release', startedAt: 120, finishedAt: 480, exitCode: 1 }), parentJobId: 'agent1', _jobIds: ['rel'], releaseStopReason: reason },
+      makeEntry({ id: 'r', kind: 'review', startedAt: 130, finishedAt: 200, exitCode: 1 }),
+    ];
+    const out = groupReleaseChildren(entries);
+    expect(out).toHaveLength(1);
+    const agent = out[0];
+    expect(agent.kind).toBe('agent:issue-cruncher');
+    expect(agent.releaseOutcome!.status).toBe('failed');
+    expect(agent.releaseOutcome!.reason).toBe(reason);
+  });
+
+  it('surfaces a blocked owned release\'s stop reason (no children ran) on the parent agent outcome', () => {
+    const reason = 'review startup failed: Jobs are paused globally. Turn the switch back on in Settings to start a review.';
+    const entries = [
+      { ...makeEntry({ id: 'agent1', kind: 'agent:issue-cruncher', startedAt: 100, finishedAt: 500, exitCode: 0 }), parentJobId: null, _jobIds: ['agent1'] },
+      { ...makeEntry({ id: 'rel', kind: 'release', startedAt: 120, finishedAt: 480, exitCode: 1 }), parentJobId: 'agent1', _jobIds: ['rel'], releaseStopReason: reason },
+    ];
+    const out = groupReleaseChildren(entries);
+    const agent = out[0];
+    expect(agent.releaseOutcome!.status).toBe('blocked');
+    expect(agent.releaseOutcome!.reason).toBe(reason);
+  });
+
+  it('does not attach a reason to a successful owned release outcome', () => {
+    const entries = [
+      { ...makeEntry({ id: 'agent1', kind: 'agent:issue-cruncher', startedAt: 100, finishedAt: 500, exitCode: 0 }), parentJobId: null, _jobIds: ['agent1'] },
+      { ...makeEntry({ id: 'rel', kind: 'release', startedAt: 120, finishedAt: 480, exitCode: 0 }), parentJobId: 'agent1', _jobIds: ['rel'] },
+      makeEntry({ id: 'r', kind: 'review', startedAt: 130, finishedAt: 200, exitCode: 0 }),
+    ];
+    const out = groupReleaseChildren(entries);
+    expect(out[0].releaseOutcome!.status).toBe('done');
+    expect(out[0].releaseOutcome!.reason ?? null).toBeNull();
+  });
+
   it('keeps a release top-level when its parentJobId does not match any agent/run', () => {
     const entries = [
       { ...makeEntry({ id: 'rel', kind: 'release', startedAt: 100, finishedAt: 200 }), parentJobId: 'unknown-id', _jobIds: ['rel'] },

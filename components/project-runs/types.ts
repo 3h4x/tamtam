@@ -87,4 +87,9 @@ export interface ReleaseOutcome {
   label: string
   releaseJobId: string
   blockingJobId?: string | null
+  // Human-readable reason a non-done release stopped (the orchestrator's
+  // recorded stop reason, or the latest failed child's summary). Set on
+  // failed/blocked outcomes so the owning agent/run row can explain WHY the
+  // release-after-run failed instead of just flipping to a bare "failed".
+  reason?: string | null
 }

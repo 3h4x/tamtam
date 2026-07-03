@@ -200,7 +200,15 @@ export function RunRow({ entry: e, onClick, expandable, expanded, onToggleExpand
     effectiveNeedsAttention && e.bucket === 'release' && e.releaseStopReason
       ? formatRunSummaryText(e.releaseStopReason)
       : null
-  const runSummary = effectiveRunning ? null : (ownFailureDetail ?? ownSummary ?? childFailureSummary ?? releaseStopSummary)
+  // When an agent/run row OWNS a failed release-after-run, the reason the row
+  // went red lives on that owned release, not this row — surface it (highest
+  // priority) so a "Continue release" that later fails explains itself instead
+  // of showing this row's own work summary under a "reason" label.
+  const releaseOutcomeReason =
+    effectiveNeedsAttention && e.bucket !== 'release' && e.releaseOutcome?.reason
+      ? formatRunSummaryText(e.releaseOutcome.reason)
+      : null
+  const runSummary = effectiveRunning ? null : (releaseOutcomeReason ?? ownFailureDetail ?? ownSummary ?? childFailureSummary ?? releaseStopSummary)
   const liveDetail = effectiveRunning
     ? (isConversationalRow && e.workSummary ? formatRunSummaryText(e.workSummary) : e.subtitle?.trim() || null)
     : null

@@ -92,7 +92,11 @@ export function RunUnitRow({ entry: e, onClick, summary, progressLabel, actions,
   const ownSummary = isConversationalRow ? formatRunSummaryText(e.workSummary) : null
   const childFailureSummary = effectiveNeedsAttention ? formatRunSummaryText(latestFailureSummary(e)) : null
   const releaseStopSummary = effectiveNeedsAttention && e.bucket === 'release' && e.releaseStopReason ? formatRunSummaryText(e.releaseStopReason) : null
-  const runSummary = effectiveRunning ? null : (ownFailureDetail ?? ownSummary ?? childFailureSummary ?? releaseStopSummary)
+  // An agent/run row that owns a failed release-after-run went red because of
+  // that release — surface its reason (highest priority) so the failure is
+  // explained instead of falling back to this row's own work summary.
+  const releaseOutcomeReason = effectiveNeedsAttention && e.bucket !== 'release' && e.releaseOutcome?.reason ? formatRunSummaryText(e.releaseOutcome.reason) : null
+  const runSummary = effectiveRunning ? null : (releaseOutcomeReason ?? ownFailureDetail ?? ownSummary ?? childFailureSummary ?? releaseStopSummary)
   const liveDetail = effectiveRunning
     ? (isConversationalRow && e.workSummary ? formatRunSummaryText(e.workSummary) : e.subtitle?.trim() || null)
     : null

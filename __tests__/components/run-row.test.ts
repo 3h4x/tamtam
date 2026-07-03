@@ -97,6 +97,36 @@ describe('RunRow', () => {
     unmount()
   })
 
+  it('surfaces the reason a failed owned release stopped, over the agent\'s own summary', () => {
+    // Reported bug: "Continue release" from an agent row later flips to
+    // "failed" with no cause. The row goes red because of the owned release,
+    // so its stop reason must show — not the agent's own (success) work summary.
+    const reason = 'review startup failed: Jobs are paused globally. Turn the switch back on in Settings to start a review.'
+    const entry = makeEntry({
+      kind: 'agent:issue-cruncher',
+      bucket: 'agent',
+      title: 'issue-cruncher',
+      exitCode: 0,
+      workSummary: 'Merged the follow-up PR and tidied the branch.',
+      subtitle: null,
+      navSessionId: null,
+      model: null,
+      inputTokens: 0,
+      outputTokens: 0,
+      costUsd: 0,
+      releaseOutcome: { status: 'failed', label: 'release failed', releaseJobId: 'rel-1', reason },
+    })
+
+    const { container, unmount } = renderRow({ entry, onClick: vi.fn() })
+
+    expect(container.textContent).toContain('review startup failed')
+    expect(container.textContent).toContain('Jobs are paused globally')
+    expect(container.textContent?.toLowerCase()).toContain('reason')
+    // The release failure reason wins over the agent's own work summary.
+    expect(container.textContent).not.toContain('Merged the follow-up PR')
+    unmount()
+  })
+
   it('renders finished run summaries in the main row body', () => {
     const entry = makeEntry({
       bucket: 'run',
