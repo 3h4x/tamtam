@@ -221,6 +221,13 @@ export default defineConfig({
           // macOS arm64. The fast and slow pools stay parallel; they no longer
           // contain any PGlite file, so they cannot trigger the spin.
           maxWorkers: 1,
+          // NOTE: isolate:false was evaluated to skip the ~100s of per-file
+          // module re-import (PGlite WASM re-instantiation etc.) that dominates
+          // this pool's wall time. It is NOT safe here: dozens of db files each
+          // `vi.mock('@/lib/db', () => ({ get db() {…} }))`, and with the module
+          // registry shared across files those getters leak between files (e.g.
+          // pipeline-lock's acquireLock resolving automation-queue's db ref),
+          // producing order-dependent failures. Keep per-file module isolation.
           sequence: { groupOrder: 2 },
         },
       },

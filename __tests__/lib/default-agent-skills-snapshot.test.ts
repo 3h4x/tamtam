@@ -111,7 +111,9 @@ describe('seedDefaultSkills seeded defaults snapshot', () => {
     expect(skill!.name).toBe('agent:issue-cruncher');
     expect(skill!.description).toContain('ready-to-go issue');
     expect(skill!.content).toContain('current repo directory name');
-    expect(skill!.content).toContain('If either disagrees with the repo directory name');
+    // v2026-05-29 reworded §1: only package.json-vs-directory disagreement stops;
+    // the CLAUDE.md heading is informational and must NOT trigger a stop.
+    expect(skill!.content).toContain('do NOT stop on a heading-vs-directory mismatch');
     expect(skill!.content).toContain('ISSUE_PROJECT_UNKNOWN');
     expect(skill!.content).toContain('tamtam-actions');
     expect(skill!.content).toContain('{type: "checkout-default"}');

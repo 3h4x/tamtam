@@ -118,6 +118,67 @@ async function writeSnapshotAsync(file: string, dump: Blob | File): Promise<void
   }
 }
 
+// Instance reuse. Booting PGlite from the snapshot is ~250-400ms; resetting an
+// already-booted instance (truncate / drop-schema) is ~10ms. The `db` vitest
+// project runs single-worker with `isolate:false` (one fork for all db files),
+// so these module-level pools persist across the whole db suite and turn ~N
+// boots into a handful of reused instances. Empty and migrated are distinct
+// states, so pool them separately. Reuse is safe because the migration set
+// seeds no data (a fresh migrated DB == an all-tables-truncated one) and the
+// pool is strictly sequential (no concurrency added — the WASM-spin risk that
+// forces maxWorkers:1 is unchanged). Kill-switch: TAMTAM_TEST_DB_NO_REUSE=1.
+type PoolKind = 'empty' | 'migrated';
+const REUSE_ENABLED = process.env.TAMTAM_TEST_DB_NO_REUSE !== '1';
+const POOL_CAP = 8;
+const idlePools: Record<PoolKind, PGlite[]> = { empty: [], migrated: [] };
+
+async function resetForReuse(raw: PGlite, kind: PoolKind): Promise<void> {
+  // Best-effort clear of session-level residue (temp tables, prepared
+  // statements, SET vars, cursors) a table reset alone would leave behind.
+  // Non-fatal: the structural reset below is the part that actually matters, so
+  // a PGlite that rejects DISCARD ALL still reuses correctly.
+  try {
+    await raw.exec('DISCARD ALL;');
+  } catch {
+    /* best effort */
+  }
+  if (kind === 'empty') {
+    // Empty tests build their own schema; drop everything back to a bare
+    // public schema (matches a freshly-booted no-migrations instance).
+    await raw.exec('DROP SCHEMA public CASCADE; CREATE SCHEMA public;');
+    return;
+  }
+  // Migrated: truncate every public table + reset identity sequences. Migrations
+  // seed no rows, so this reproduces the fresh-migrated snapshot exactly. Listed
+  // then truncated in one statement to avoid depending on plpgsql (`DO`).
+  const res = await raw.query<{ tablename: string }>(
+    `SELECT tablename FROM pg_tables WHERE schemaname = 'public'`,
+  );
+  const names = res.rows.map((r) => `public."${r.tablename}"`);
+  if (names.length > 0) {
+    await raw.exec(`TRUNCATE TABLE ${names.join(', ')} RESTART IDENTITY CASCADE;`);
+  }
+}
+
+async function acquireFromPool(kind: PoolKind): Promise<PGlite | null> {
+  while (REUSE_ENABLED && idlePools[kind].length > 0) {
+    const raw = idlePools[kind].pop()!;
+    try {
+      await resetForReuse(raw, kind);
+      return raw;
+    } catch {
+      // A wedged instance can't be reset cleanly — discard it and try the next
+      // (or fall back to a fresh boot). Reuse must never leak dirty state.
+      try { await raw.close(); } catch { /* already gone */ }
+    }
+  }
+  return null;
+}
+
+// Non-pooling handle: closes the instance on dispose. Used for internal
+// lifecycles that must NOT be reused — the snapshot builder's private handle
+// and the stale-snapshot verification path (a wrong-schema instance must be
+// discarded, never pooled).
 function makeHandle(raw: PGlite): TestDbHandle {
   const db = drizzle(raw, { schema });
   let closed = false;
@@ -127,6 +188,34 @@ function makeHandle(raw: PGlite): TestDbHandle {
     async [Symbol.asyncDispose]() {
       if (closed) return;
       closed = true;
+      try {
+        await raw.close();
+      } catch (e) {
+        if (e instanceof Error && /PGlite is closed/i.test(e.message)) return;
+        throw e;
+      }
+    },
+  };
+}
+
+// Pooling handle returned to tests: on dispose it returns the instance to its
+// kind's idle pool for the next test instead of closing (a fresh boot). Reset
+// happens lazily on the next acquire (kept out of dispose so a reset failure
+// can't surface as a teardown error). Falls back to a real close when reuse is
+// disabled or the pool is already at capacity (bounds a per-`beforeEach` burst).
+function makePooledHandle(raw: PGlite, kind: PoolKind): TestDbHandle {
+  const db = drizzle(raw, { schema });
+  let closed = false;
+  return {
+    db,
+    raw,
+    async [Symbol.asyncDispose]() {
+      if (closed) return;
+      closed = true;
+      if (REUSE_ENABLED && idlePools[kind].length < POOL_CAP) {
+        idlePools[kind].push(raw);
+        return;
+      }
       try {
         await raw.close();
       } catch (e) {
@@ -254,18 +343,21 @@ async function ensureSnapshot(kind: SnapshotKind): Promise<string | null> {
  * subsequent calls restore from the snapshot (~250-400ms vs ~1000ms cold).
  */
 export async function createTestPgDb(): Promise<TestDbHandle> {
+  const reused = await acquireFromPool('migrated');
+  if (reused) return makePooledHandle(reused, 'migrated');
+
   const file = await ensureSnapshot('migrated');
   const cached = file ? readSnapshot(file) : null;
   if (file && cached) {
     const handle = await bootPGliteFromSnapshot(cached);
-    if (await isMigratedSnapshotCurrent(handle)) return handle;
+    if (await isMigratedSnapshotCurrent(handle)) return makePooledHandle(handle.raw, 'migrated');
     await handle[Symbol.asyncDispose]();
     await removeSnapshot(file);
   }
 
   const handle = await bootPGlite();
   await migrate(handle.db, { migrationsFolder: MIGRATIONS_DIR });
-  return handle;
+  return makePooledHandle(handle.raw, 'migrated');
 }
 
 /**
@@ -281,17 +373,20 @@ export async function createTestPgDb(): Promise<TestDbHandle> {
  * cache file for the no-migrations variant.
  */
 export async function createTestPgDbEmpty(): Promise<TestDbHandle> {
+  const reused = await acquireFromPool('empty');
+  if (reused) return makePooledHandle(reused, 'empty');
+
   const file = await ensureSnapshot('empty');
   const cached = file ? readSnapshot(file) : null;
   if (file && cached) {
     const handle = await bootPGliteFromSnapshot(cached);
-    if (await isEmptySnapshotCurrent(handle)) return handle;
+    if (await isEmptySnapshotCurrent(handle)) return makePooledHandle(handle.raw, 'empty');
     await handle[Symbol.asyncDispose]();
     await removeSnapshot(file);
   }
 
   const handle = await bootPGlite();
-  return handle;
+  return makePooledHandle(handle.raw, 'empty');
 }
 
 export async function prewarmTestPgDbSnapshots(): Promise<void> {

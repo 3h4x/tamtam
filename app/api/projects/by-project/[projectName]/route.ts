@@ -43,6 +43,13 @@ export async function PATCH(
     .set(updates)
     .where(eq(schema.projects.name, projectName));
 
+  // Resuming clears any auto-pause reason so the inbox `project_paused` HITL
+  // self-resolves (it only fires for a paused project WITH a recorded reason).
+  if (hasPaused && body.paused === false) {
+    const { clearPauseReason } = await import('@/lib/pipeline/pause-project');
+    await clearPauseReason(projectName);
+  }
+
   clearProjectDataCache();
   // isProjectPaused/isProjectArchived read from a separate 10s TTL cache. Prime
   // it synchronously so admission gates see the new state as soon as PATCH

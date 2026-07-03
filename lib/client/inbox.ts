@@ -9,7 +9,8 @@ export type InboxSignalType =
   | 'pr_needs_manual_merge'
   | 'stale_changes'
   | 'fix_loop_exhausted'
-  | 'orphan_release';
+  | 'orphan_release'
+  | 'project_paused';
 
 export type InboxSeverity = 'red' | 'yellow' | 'green';
 
@@ -19,7 +20,8 @@ export type InboxActionKind =
   | 'review'
   | 'merge'
   | 'retry-automation'
-  | 'open-terminal';
+  | 'open-terminal'
+  | 'resume';
 
 export interface InboxAction {
   kind: InboxActionKind;

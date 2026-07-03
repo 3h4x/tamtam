@@ -66,7 +66,10 @@ export async function maybeTripCircuitBreaker(job: JobData): Promise<boolean> {
     if (failures < threshold) return false;
 
     const { pauseProject } = await import('@/lib/pipeline/pause-project');
-    const paused = await pauseProject(job.project);
+    const paused = await pauseProject(
+      job.project,
+      `Circuit breaker: ${failures} failed runs in ${settings.project_failure_window_minutes}min (threshold ${threshold}). Fix the underlying failures, then resume.`,
+    );
     if (!paused) return false;
     console.log(
       `[circuit-breaker] ${job.project} paused — ${failures} failed runs in ${settings.project_failure_window_minutes}min (threshold ${threshold})`,

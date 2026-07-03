@@ -15,6 +15,7 @@ import {
   releaseProject,
   reviewProject,
   mergePR,
+  resumeProject,
   retryAutomationQueue,
   type InboxSignal,
   type InboxCounts,
@@ -71,6 +72,9 @@ async function runSignalAction(signal: InboxSignal): Promise<string> {
     case 'retry-automation':
       await retryAutomationQueue(project)
       return `Retried automation queue for ${project}`
+    case 'resume':
+      await resumeProject(project)
+      return `Resumed ${project}`
     default:
       throw new Error(`Unsupported action: ${action.kind}`)
   }

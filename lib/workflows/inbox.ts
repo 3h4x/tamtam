@@ -18,7 +18,8 @@ export type InboxSignalType =
   | 'pr_needs_manual_merge'
   | 'stale_changes'
   | 'fix_loop_exhausted'
-  | 'orphan_release';
+  | 'orphan_release'
+  | 'project_paused';
 
 export type InboxSeverity = 'red' | 'yellow' | 'green';
 
@@ -28,7 +29,8 @@ export type InboxActionKind =
   | 'review'
   | 'merge'
   | 'retry-automation'
-  | 'open-terminal';
+  | 'open-terminal'
+  | 'resume';
 
 export interface InboxAction {
   kind: InboxActionKind;
@@ -95,6 +97,10 @@ export interface InboxInput {
   /** All open (non-draft) PR numbers per project — used to confirm a
    *  human-deferred PR is still open before surfacing a manual-merge signal. */
   openPrNumbersByProject: Record<string, number[]>;
+  /** Reason a project was AUTO-paused (circuit-breaker, push-hook, soak), keyed
+   *  by project. Presence marks a system pause that must surface as a HITL;
+   *  absence means either not paused or a deliberate manual pause (no nag). */
+  pausedReasonByProject: Record<string, string>;
   nowSeconds: number;
 }
 
@@ -143,7 +149,7 @@ function projectHref(project: string): string {
  * severity, oldest-first (most urgent). Exported for unit testing.
  */
 export function deriveInboxSignals(input: InboxInput): InboxSignal[] {
-  const { tasks, jobs, automationQueue, openPrByProject, openPrNumbersByProject, nowSeconds } = input;
+  const { tasks, jobs, automationQueue, openPrByProject, openPrNumbersByProject, pausedReasonByProject, nowSeconds } = input;
   const signals: InboxSignal[] = [];
 
   for (const task of tasks) {
@@ -152,6 +158,26 @@ export function deriveInboxSignals(input: InboxInput): InboxSignal[] {
     const review = latestJob(jobs, project, 'review');
     const reviewFinished = review && review.finishedAt !== null ? review : null;
     const verdict = reviewFinished?.verdict ?? null;
+
+    // 0. AUTO-paused project (circuit-breaker / push-hook / soak). A system pause
+    //    halts ALL automation for the project, so it MUST surface as a HITL —
+    //    never a silent pause (operator rule, mirrors merge-or-HITL in CLAUDE.md).
+    //    A deliberate MANUAL pause records no reason and does NOT nag here.
+    const pausedReason = pausedReasonByProject[project];
+    if (task.paused && pausedReason) {
+      signals.push({
+        id: `project_paused:${project}`,
+        type: 'project_paused',
+        severity: 'red',
+        project,
+        title: 'Project auto-paused — automation halted',
+        detail: pausedReason,
+        href: projectHref(project),
+        externalUrl: null,
+        ageSeconds: null,
+        action: { kind: 'resume', label: 'Resume' },
+      });
+    }
 
     // 1. CI red on the default branch → start a CI fix.
     if (task.ci === 'failure' && !active) {
@@ -470,6 +496,8 @@ export async function listInboxSignals(): Promise<{ signals: InboxSignal[]; coun
   });
 
   const { byProject: openPrByProject, numbersByProject: openPrNumbersByProject } = await loadOpenPrs(tasks);
+  const { listPauseReasons } = await import('@/lib/pipeline/pause-project');
+  const pausedReasonByProject = await listPauseReasons().catch(() => ({}));
 
   const signals = deriveInboxSignals({
     tasks,
@@ -477,6 +505,7 @@ export async function listInboxSignals(): Promise<{ signals: InboxSignal[]; coun
     automationQueue,
     openPrByProject,
     openPrNumbersByProject,
+    pausedReasonByProject,
     nowSeconds: Date.now() / 1000,
   });
   return { signals, counts: countInboxSignals(signals) };

@@ -476,7 +476,7 @@ describe('pushCurrentBranch', () => {
       ([cmd, args]) => cmd === 'git' && args.includes('rebase') && args.includes('--abort'),
     );
     expect(abortCall).toBeTruthy();
-    expect(mocks.pauseProjectMock).toHaveBeenCalledWith('proj');
+    expect(mocks.pauseProjectMock).toHaveBeenCalledWith('proj', expect.stringContaining('locally, then resume.'));
   });
 
   it('classifies pre-push hook test failures as hookFailure: pre-push-tests', async () => {

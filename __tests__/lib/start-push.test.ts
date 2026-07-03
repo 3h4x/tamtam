@@ -539,8 +539,9 @@ describe('startProjectPush — push mechanics', () => {
       ([cmd, args]: any) => cmd === 'git' && args.includes('rebase') && args.includes('--abort'),
     );
     expect(abortCall).toBeTruthy();
-    // Paused the project so the scheduler stops retrying a doomed push.
-    expect(pauseProjectMock).toHaveBeenCalledWith('proj');
+    // Paused the project so the scheduler stops retrying a doomed push, with a
+    // HITL reason telling the operator to resolve the conflict locally.
+    expect(pauseProjectMock).toHaveBeenCalledWith('proj', expect.stringContaining('locally, then resume.'));
   });
 
   it('pauses the project when the pre-push behind-rebase hits a merge conflict', async () => {
@@ -557,7 +558,7 @@ describe('startProjectPush — push mechanics', () => {
       expect(r.detail).toContain('Merge conflict');
       expect(r.detail).toContain('paused');
     }
-    expect(pauseProjectMock).toHaveBeenCalledWith('proj');
+    expect(pauseProjectMock).toHaveBeenCalledWith('proj', expect.stringContaining('locally, then resume.'));
     // No push should be attempted once the pull/rebase conflicts.
     const pushCall = execMock.mock.calls.find(
       ([cmd, args]: any) => cmd === 'git' && args.includes('push'),

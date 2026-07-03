@@ -553,7 +553,10 @@ export async function pushCurrentBranch(
         if (abortR.stderr) log(abortR.stderr);
         let pauseNote = '';
         if (options.projectName) {
-          const paused = await pauseProject(options.projectName);
+          const paused = await pauseProject(
+            options.projectName,
+            'Push blocked — pull --rebase hit a merge conflict on the default branch. Resolve the conflict locally, then resume.',
+          );
           pauseNote = paused
             ? ` ${options.projectName} paused for manual resolution.`
             : ` Failed to pause ${options.projectName}; manual resolution is still required.`;
@@ -681,7 +684,10 @@ async function runPush(
       const abortR = await execStep('git', ['-C', projPath, 'rebase', '--abort'], { timeout: 30000 });
       if (abortR.stdout) log(abortR.stdout);
       if (abortR.stderr) log(abortR.stderr);
-      const paused = await pauseProject(projectName);
+      const paused = await pauseProject(
+        projectName,
+        `Push blocked — a merge conflict during ${label} on the default branch needs manual resolution. Resolve locally, then resume.`,
+      );
       log(paused
         ? `# ${projectName} paused — resolve the conflict locally, then resume from Settings\n`
         : `# WARNING: failed to pause ${projectName} after merge conflict\n`);

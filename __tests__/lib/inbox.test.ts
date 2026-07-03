@@ -59,6 +59,7 @@ function baseInput(overrides: Partial<InboxInput> = {}): InboxInput {
     automationQueue: [],
     openPrByProject: {},
     openPrNumbersByProject: {},
+    pausedReasonByProject: {},
     nowSeconds: 10_000,
     ...overrides,
   };
@@ -299,6 +300,25 @@ describe('deriveInboxSignals', () => {
     expect(s).toMatchObject({ severity: 'yellow', action: { kind: 'review' } });
     expect(s?.title).toContain('3 uncommitted changes');
   });
+
+  it('surfaces an AUTO-paused project (recorded reason) as a red HITL with a Resume action', () => {
+    const signals = deriveInboxSignals(
+      baseInput({
+        tasks: [makeTask({ project: 'zeta', paused: true })],
+        pausedReasonByProject: { zeta: 'Circuit breaker: 3 failed runs in 60min' },
+      }),
+    )
+    const s = signals.find((x) => x.type === 'project_paused')
+    expect(s).toMatchObject({ severity: 'red', project: 'zeta', action: { kind: 'resume', label: 'Resume' } })
+    expect(s?.detail).toBe('Circuit breaker: 3 failed runs in 60min')
+  })
+
+  it('does not nag for a deliberate MANUAL pause (no recorded reason)', () => {
+    const signals = deriveInboxSignals(
+      baseInput({ tasks: [makeTask({ project: 'zeta', paused: true })] }),
+    )
+    expect(signals.find((x) => x.type === 'project_paused')).toBeUndefined()
+  })
 
   it('flags a mergeable PR with green CI and an LGTM verdict', () => {
     const signals = deriveInboxSignals(

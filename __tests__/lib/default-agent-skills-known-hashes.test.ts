@@ -199,7 +199,9 @@ Pick 2–3 highest-leverage gaps and file them with \`gh issue create\` — titl
       const skill = await findSkill('agent-issue-cruncher');
       expect(skill!.content).not.toBe(previousDefault);
       expect(skill!.content).toContain('current repo directory name');
-      expect(skill!.content).toContain('If either disagrees with the repo directory name');
+      // v2026-05-29 reworded §1: the CLAUDE.md heading is informational only and
+      // must NOT trigger a stop — proves the seed replaced the non-canonical body.
+      expect(skill!.content).toContain('do NOT stop on a heading-vs-directory mismatch');
     });
   });
 

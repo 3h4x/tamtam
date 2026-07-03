@@ -13,7 +13,48 @@
  *
  * Returns true on success, false on any failure (already logged).
  */
-export async function pauseProject(projectName: string): Promise<boolean> {
+// Auto-pause reason marker. Every SYSTEM pause (circuit-breaker, push-hook,
+// soak) records a human-readable reason here so the inbox can surface a
+// `project_paused` HITL explaining why — a silent pause is a bug (operator
+// rule, mirrors merge-or-HITL). A deliberate manual pause records NO reason, so
+// it does not nag. Stored in `settings` under `paused_reason:<project>` to avoid
+// a schema migration; cleared on resume.
+const PAUSE_REASON_PREFIX = 'paused_reason:';
+
+export async function setPauseReason(project: string, reason: string): Promise<void> {
+  try {
+    const { db, schema } = await import('@/lib/db');
+    await db.insert(schema.settings)
+      .values({ key: `${PAUSE_REASON_PREFIX}${project}`, value: reason })
+      .onConflictDoUpdate({ target: schema.settings.key, set: { value: reason } })
+      .execute();
+  } catch (err) {
+    console.error(`[pause-project] setPauseReason(${project}) failed:`, err);
+  }
+}
+
+export async function clearPauseReason(project: string): Promise<void> {
+  try {
+    const { db, schema } = await import('@/lib/db');
+    const { eq } = await import('drizzle-orm');
+    await db.delete(schema.settings).where(eq(schema.settings.key, `${PAUSE_REASON_PREFIX}${project}`)).execute();
+  } catch { /* non-fatal */ }
+}
+
+export async function listPauseReasons(): Promise<Record<string, string>> {
+  try {
+    const { db, schema } = await import('@/lib/db');
+    const { like } = await import('drizzle-orm');
+    const rows = await db.select().from(schema.settings).where(like(schema.settings.key, `${PAUSE_REASON_PREFIX}%`));
+    const out: Record<string, string> = {};
+    for (const r of rows) if (r.value) out[r.key.slice(PAUSE_REASON_PREFIX.length)] = r.value;
+    return out;
+  } catch {
+    return {};
+  }
+}
+
+export async function pauseProject(projectName: string, reason?: string): Promise<boolean> {
   try {
     const { db, schema } = await import('@/lib/db');
     const { eq } = await import('drizzle-orm');
@@ -22,6 +63,8 @@ export async function pauseProject(projectName: string): Promise<boolean> {
     await db.update(schema.projects)
       .set({ paused: true })
       .where(eq(schema.projects.name, projectName));
+    // Record WHY so the inbox surfaces a resumable HITL — no silent pauses.
+    if (reason) await setPauseReason(projectName, reason);
     clearProjectDataCache();
     await refreshProjectsCacheSync();
     return true;

@@ -407,6 +407,10 @@ export async function pauseProjectForSoakFailure(projectName: string): Promise<b
     await db.update(schema.projects)
       .set({ paused: true })
       .where(eq(schema.projects.name, projectName));
+    // Record WHY so the inbox surfaces a resumable `project_paused` HITL — a
+    // silent pause is a bug (operator rule).
+    const { setPauseReason } = await import('@/lib/pipeline/pause-project');
+    await setPauseReason(projectName, 'Post-merge soak failed — CI went red on the default branch after merge. Investigate the regression, then resume.');
     clearProjectDataCache();
     await refreshProjectsCacheSync();
     return true;
