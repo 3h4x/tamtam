@@ -62,4 +62,7 @@ playwright-report/
 # Workflow graph render cache; regenerated after a successful local render.
 /public/workflow-graph.svg.input-sha1
 
+# ESLint incremental cache (pnpm lint --cache); speeds up repeat pre-push runs.
+.eslintcache
+
 docs/superpowers/**/*

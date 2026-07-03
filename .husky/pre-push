@@ -9,12 +9,17 @@
 # Husky executes hooks with `sh`, so this file must stay POSIX-compatible.
 set -eu
 
+# Each step prints its own wall-clock time (whole seconds) so the slow gate is
+# visible at a glance — historically the `tests` step dominates. `date +%s` is
+# POSIX (BSD/macOS `date` has no %N), which matches the second-granularity the
+# steps run at.
 run_step() {
     label="$1"
     shift
     printf "\033[1;34m→ %s\033[0m\n" "$label"
+    step_start=$(date +%s)
     if ! "$@"; then
-        printf "\n\033[1;31m✗ %s failed.\033[0m\n" "$label"
+        printf "\n\033[1;31m✗ %s failed after %ss.\033[0m\n" "$label" "$(($(date +%s) - step_start))"
         case "$label" in
             lint) printf "  Try: \033[1mpnpm exec eslint --fix app components lib hooks\033[0m\n" ;;
             type-check) printf "  Run \033[1mpnpm type-check\033[0m to see the full list.\n" ;;
@@ -23,8 +28,11 @@ run_step() {
         printf "  To bypass in an emergency only: \033[1mgit push --no-verify\033[0m\n\n"
         exit 1
     fi
+    printf "\033[1;32m✅ [%ss] %s completed\033[0m\n" "$(($(date +%s) - step_start))" "$label"
 }
 
+hook_start=$(date +%s)
 run_step lint pnpm lint
 run_step type-check pnpm type-check
 run_step tests pnpm test
+printf "\n\033[1;32m✅ pre-push checks passed in %ss (lint + type-check + tests)\033[0m\n" "$(($(date +%s) - hook_start))"

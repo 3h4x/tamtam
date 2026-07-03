@@ -4,8 +4,8 @@
 // gating, and queueing rules apply automatically).
 
 import { exec } from '@/lib/shared/shell';
-import type { ProjectSweepView, SweepDispatchDeps, SweepReport } from '@/lib/jobs/project-sweep';
-import { runSweep } from '@/lib/jobs/project-sweep';
+import type { DefaultBranchRun, ProjectSweepView, SweepDispatchDeps, SweepReport } from '@/lib/jobs/project-sweep';
+import { runSweep, summarizeDefaultBranchCi } from '@/lib/jobs/project-sweep';
 
 async function gitOk(path: string, args: string[], timeoutMs = 5000): Promise<string | null> {
   try {
@@ -70,15 +70,16 @@ async function gatherView(name: string): Promise<ProjectSweepView | null> {
   // depends on the other's result. Per-project sweep latency drops from
   // (ci_query + pr_query) to max(ci_query, pr_query).
   //
-  //   defaultBranchCi: latest run on the default branch — treat any failure
-  //     as a hard block on default-branch releases (a release on top of
-  //     broken `main` would re-test the broken state and burn money).
+  //   defaultBranchCi: latest run PER WORKFLOW on the default branch — any
+  //     failure marks the branch red (mirrors gh-status's "any failure" rule
+  //     so a red Deploy isn't masked by a newer green Release). Used to gate
+  //     the auto fix-ci self-heal, and also captures the failing run URL.
   //   prOnBranch: open PR whose head ref matches currentBranch.
   const onFeatureBranch = !!(currentBranch && currentBranch !== defaultBranch);
   const [ciResult, prResult] = await Promise.allSettled([
     exec(
       'gh',
-      ['run', 'list', '--branch', defaultBranch, '--limit', '1', '--json', 'conclusion', '--jq', '.[0].conclusion'],
+      ['run', 'list', '--branch', defaultBranch, '--limit', '20', '--json', 'conclusion,status,workflowName,url'],
       { cwd: path, timeout: 8000 },
     ),
     onFeatureBranch
@@ -97,11 +98,24 @@ async function gatherView(name: string): Promise<ProjectSweepView | null> {
   ]);
 
   let defaultBranchCi: ProjectSweepView['defaultBranchCi'] = null;
+  let defaultBranchCiFailedUrl: string | null = null;
   if (ciResult.status === 'fulfilled' && ciResult.value.exitCode === 0) {
-    const s = ciResult.value.stdout.trim().toLowerCase();
-    if (s === 'success') defaultBranchCi = 'success';
-    else if (s === 'failure' || s === 'cancelled' || s === 'timed_out') defaultBranchCi = 'failure';
-    else if (s) defaultBranchCi = 'pending';
+    try {
+      const runs = JSON.parse(ciResult.value.stdout || '[]') as DefaultBranchRun[];
+      const summary = summarizeDefaultBranchCi(Array.isArray(runs) ? runs : []);
+      defaultBranchCi = summary.ci;
+      defaultBranchCiFailedUrl = summary.failedUrl;
+    } catch {
+      // best-effort — leave null on parse failure
+    }
+  }
+  // A green default branch resets the auto fix-ci attempt budget so a future
+  // red failure starts fresh.
+  if (defaultBranchCi === 'success') {
+    try {
+      const { clearAutoFixCiEntry } = await import('@/lib/jobs/auto-fix-ci-state');
+      clearAutoFixCiEntry(name);
+    } catch { /* best-effort */ }
   }
 
   let prOnBranch: ProjectSweepView['prOnBranch'] = null;
@@ -149,6 +163,15 @@ async function gatherView(name: string): Promise<ProjectSweepView | null> {
     // best-effort — leave autoPushEnabled false
   }
 
+  // Global opt-in for the auto fix-ci self-heal of a red default branch.
+  let autoFixCiEnabled = false;
+  try {
+    const { getSettings } = await import('@/lib/shared/config');
+    autoFixCiEnabled = !!getSettings().auto_fix_ci_on_red_default_branch;
+  } catch {
+    // best-effort — leave autoFixCiEnabled false
+  }
+
   return {
     name,
     path,
@@ -158,9 +181,11 @@ async function gatherView(name: string): Promise<ProjectSweepView | null> {
     hasUnpushedCommits,
     hasActiveJob,
     defaultBranchCi,
+    defaultBranchCiFailedUrl,
     prOnBranch,
     paused,
     autoPushEnabled,
+    autoFixCiEnabled,
   };
 }
 
@@ -194,6 +219,60 @@ async function triggerPrWait(
   }
 }
 
+async function triggerFixCi(
+  name: string,
+  reason: string,
+  failedUrl: string | null,
+): Promise<{ ok: boolean; detail: string }> {
+  try {
+    const {
+      decideAutoFixCi,
+      getAutoFixCiEntry,
+      setAutoFixCiEntry,
+      getAutoFixCiMaxAttempts,
+    } = await import('@/lib/jobs/auto-fix-ci-state');
+
+    // Bound per failing run so a permanently-broken CI can't loop. On refusal
+    // the red default branch falls back to the `ci_red` inbox HITL.
+    const decision = decideAutoFixCi(getAutoFixCiEntry(name), failedUrl, getAutoFixCiMaxAttempts());
+    if (!decision.dispatch) {
+      return { ok: false, detail: decision.reason };
+    }
+
+    // Seed gh_status.ci_failed_url so the existing fix-ci route can read the
+    // failing default-branch run (it 400s without a URL).
+    try {
+      const { db, schema } = await import('@/lib/db');
+      const fetchedAt = new Date().toISOString();
+      await db.insert(schema.ghStatus)
+        .values({ project: name, ciFailedUrl: failedUrl, fetchedAt })
+        .onConflictDoUpdate({ target: schema.ghStatus.project, set: { ciFailedUrl: failedUrl, fetchedAt } })
+        .execute();
+    } catch (e) {
+      return { ok: false, detail: `could not seed ci_failed_url: ${(e as Error).message}` };
+    }
+
+    // Reuse the fix-ci route so prompt construction, gating, and permission
+    // mode stay the single source of truth (mirrors the crash-retry hook).
+    const port = parseInt(process.env.PORT ?? '', 10) || 1337;
+    const res = await fetch(
+      `http://127.0.0.1:${port}/api/projects/by-project/${encodeURIComponent(name)}/fix-ci`,
+      { method: 'POST' },
+    );
+    const body = await res.text().catch(() => '');
+    if (res.ok) {
+      // Count the attempt so the same failing run isn't re-dispatched next pass.
+      if (decision.next) setAutoFixCiEntry(name, decision.next);
+      return { ok: true, detail: `fix-ci dispatched — ${reason}` };
+    }
+    // 409 (already running) / 429 (budget) / etc. are transient: don't burn the
+    // per-run attempt budget, let a later sweep retry.
+    return { ok: false, detail: `fix-ci route ${res.status}: ${body.slice(0, 160)} (sweep reason: ${reason})` };
+  } catch (err) {
+    return { ok: false, detail: (err as Error).message };
+  }
+}
+
 async function listProjectNames(): Promise<string[]> {
   const { listEnabledProjects } = await import('@/lib/shared/enabled-projects');
   return listEnabledProjects().map((p) => p.name);
@@ -205,10 +284,11 @@ export async function runProjectSweep(): Promise<SweepReport> {
     resolveView: gatherView,
     triggerRelease,
     triggerPrWait,
+    triggerFixCi,
   };
   const report = await runSweep(deps);
   console.log(
-    `[project-sweep] total=${report.total} release=${report.byAction.release} pr-wait=${report.byAction['pr-wait']} skip=${report.byAction.skip} (${report.finishedAt - report.startedAt}ms)`,
+    `[project-sweep] total=${report.total} release=${report.byAction.release} pr-wait=${report.byAction['pr-wait']} fix-ci=${report.byAction['fix-ci']} skip=${report.byAction.skip} (${report.finishedAt - report.startedAt}ms)`,
   );
   for (const r of report.results) {
     if (r.action !== 'skip') {

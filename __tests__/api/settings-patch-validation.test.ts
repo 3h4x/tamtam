@@ -21,6 +21,29 @@ describe('PATCH /settings validation', () => {
       expect(await ctx.sharedHandle.db.select().from(schema.settings)).toEqual([]);
     });
 
+    it('rejects invalid auto-fix-ci-on-red-default-branch flag values', async () => {
+      const response = await ctx.PATCH(new NextRequest('http://localhost/api/settings', {
+        method: 'PATCH',
+        body: JSON.stringify({ auto_fix_ci_on_red_default_branch: 'maybe' }),
+      }));
+
+      expect(response.status).toBe(400);
+      await expect(response.json()).resolves.toEqual({
+        detail: 'auto_fix_ci_on_red_default_branch must be true or false.',
+      });
+      expect(await ctx.sharedHandle.db.select().from(schema.settings)).toEqual([]);
+    });
+
+    it('persists auto-fix-ci-on-red-default-branch when set to true', async () => {
+      const response = await ctx.PATCH(new NextRequest('http://localhost/api/settings', {
+        method: 'PATCH',
+        body: JSON.stringify({ auto_fix_ci_on_red_default_branch: 'true' }),
+      }));
+      expect(response.status).toBe(200);
+      const rows = await ctx.sharedHandle.db.select().from(schema.settings);
+      expect(rows.find((r) => r.key === 'auto_fix_ci_on_red_default_branch')?.value).toBe('true');
+    });
+
     it('hashes auth_token and rejects short tokens', async () => {
       const bad = await ctx.PATCH(new NextRequest('http://localhost/api/settings', {
         method: 'PATCH',

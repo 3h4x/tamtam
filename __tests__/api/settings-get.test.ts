@@ -25,6 +25,7 @@ describe('GET /settings', () => {
         release_wall_clock_timeout_minutes: '60',
         mark_dod_verify_timeout_ms: '600000',
         plain_test_phase_enabled: 'false',
+        auto_fix_ci_on_red_default_branch: 'false',
         browser_broker_image: 'mcr.microsoft.com/playwright/mcp:v0.0.30',
         provider_fallback_chain: '',
         run_token_cap: '2000000',

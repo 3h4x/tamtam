@@ -35,6 +35,7 @@ export type SettingsFieldKey =
   | 'legacy_pipeline_lock_inline_drain_enabled'
   | 'legacy_completion_hook_agent_drain_enabled'
   | 'plain_test_phase_enabled'
+  | 'auto_fix_ci_on_red_default_branch'
   | 'agent_templates'
   | 'log_retention_count'
   | 'log_retention_days'
@@ -524,6 +525,13 @@ export const FIELDS: Record<SettingsFieldKey, FieldDef> = {
     subsection: 'release_ops',
     span: 1,
   },
+  auto_fix_ci_on_red_default_branch: {
+    label: 'Auto Fix Red Default-Branch CI',
+    help: 'When on, the project sweep auto-dispatches a bounded fix-ci for a project whose DEFAULT branch CI is red post-merge — the missing automatic trigger that makes fix-ci → release → merge self-heal a red main without a manual click. Additionally gated per-project by Auto Push (only self-heals branches the operator authorized) and bounded to a few attempts per failing run before falling back to the CI-red inbox HITL.',
+    group: 'pipeline',
+    subsection: 'release_ops',
+    span: 1,
+  },
 
   // Pipeline: runaway guards
   run_token_cap: {
@@ -764,6 +772,7 @@ export const DEFAULTS: Record<SettingsFieldKey, string> = {
   legacy_pipeline_lock_inline_drain_enabled: 'true',
   legacy_completion_hook_agent_drain_enabled: 'true',
   plain_test_phase_enabled: 'false',
+  auto_fix_ci_on_red_default_branch: 'false',
   agent_templates: '',
   log_retention_count: '200',
   log_retention_days: '30',

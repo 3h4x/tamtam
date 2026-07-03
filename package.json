@@ -38,7 +38,7 @@
     "test:e2e": "playwright test",
     "test:e2e:pipeline": "playwright test --config playwright.pipeline.config.ts",
     "check": "pnpm lint && pnpm type-check && pnpm test",
-    "lint": "eslint app components lib hooks",
+    "lint": "eslint --cache app components lib hooks",
     "db:generate": "drizzle-kit generate",
     "db:migrate": "node scripts/db-migrate.mjs",
     "db:verify": "node scripts/db-verify.js",

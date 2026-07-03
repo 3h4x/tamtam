@@ -182,6 +182,8 @@ describe('config', () => {
         legacy_pipeline_lock_inline_drain_enabled: true,
         legacy_completion_hook_agent_drain_enabled: true,
         plain_test_phase_enabled: false,
+        auto_fix_ci_on_red_default_branch: true,
+        block_release_on_red_ci: true,
         run_token_cap: 2_000_000,
         run_wall_time_cap_minutes: 30,
         project_failure_threshold: 3,

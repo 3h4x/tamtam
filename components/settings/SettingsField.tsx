@@ -18,6 +18,7 @@ const BOOLEAN_SELECT_FIELD_KEYS = new Set<SettingsFieldKey>([
   'legacy_pipeline_lock_inline_drain_enabled',
   'legacy_completion_hook_agent_drain_enabled',
   'plain_test_phase_enabled',
+  'auto_fix_ci_on_red_default_branch',
   'browser_broker_enabled',
   'tamtam_network_policy_strict',
   'orchestrator_enabled',

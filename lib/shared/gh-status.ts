@@ -39,6 +39,14 @@ async function getEntry(project: string): Promise<GhStatusEntry | null> {
   };
 }
 
+// Cheap cached read of a single project's gh status row (CI conclusion +
+// failed-run URL). No git/gh subprocess — unlike `ghStatusLookup`, which also
+// refreshes stale entries. Used by the release-start CI-red gate, which must
+// stay fast and side-effect-free.
+export async function readCachedGhStatus(project: string): Promise<GhStatusEntry | null> {
+  return getEntry(project);
+}
+
 function setEntry(project: string, data: GhStatusEntry): void {
   void db.insert(schema.ghStatus)
     .values({

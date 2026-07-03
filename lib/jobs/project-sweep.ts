@@ -13,6 +13,7 @@ import type { CliProvider } from '@/lib/usage/cli-providers';
 export type SweepAction =
   | { kind: 'release'; reason: string }
   | { kind: 'pr-wait'; prNumber: number; prRepo: string; prUrl: string; reason: string }
+  | { kind: 'fix-ci'; reason: string; failedUrl: string | null }
   | { kind: 'skip'; reason: string };
 
 export interface ProjectSweepView {
@@ -52,6 +53,66 @@ export interface ProjectSweepView {
    *  When false the sweep stays conservative and waits for an explicit
    *  trigger (manual button, agent completion via release-after-run). */
   autoPushEnabled: boolean;
+  /** Failing run URL on the default branch when `defaultBranchCi === 'failure'`.
+   *  Seeds `gh_status.ci_failed_url` for the auto fix-ci dispatch. Null when CI
+   *  is not red or the URL could not be resolved. */
+  defaultBranchCiFailedUrl: string | null;
+  /** Global `auto_fix_ci_on_red_default_branch` setting. When true AND the
+   *  per-project `autoPushEnabled` authorization is present, a red default
+   *  branch is self-healed via an auto-dispatched `fix-ci` (bounded in the
+   *  runner) instead of being silently skipped. */
+  autoFixCiEnabled: boolean;
+}
+
+export interface DefaultBranchRun {
+  workflowName?: string;
+  /** queued | in_progress | completed */
+  status?: string;
+  /** success | failure | cancelled | timed_out | skipped | neutral | … */
+  conclusion?: string | null;
+  url?: string;
+}
+
+/**
+ * Pure: fold `gh run list` runs on the default branch into a single CI verdict
+ * plus the first failing run URL. `gh` returns newest-first, so we keep the
+ * latest run per workflow (a fresh success supersedes an older failure) and
+ * ignore dependency-bot / label noise. Any latest-per-workflow failure wins →
+ * `failure` (mirrors `gh-status`'s "any failure" rule). Exported for tests.
+ */
+export function summarizeDefaultBranchCi(runs: DefaultBranchRun[]): {
+  ci: 'success' | 'failure' | 'pending' | null;
+  failedUrl: string | null;
+} {
+  const latest = new Map<string, DefaultBranchRun>();
+  for (const r of runs) {
+    const name = (r.workflowName ?? '').trim();
+    if (/^(dependabot|dependency|label)\b/i.test(name)) continue;
+    const key = name || r.url || String(latest.size);
+    if (!latest.has(key)) latest.set(key, r);
+  }
+  const items = [...latest.values()];
+  if (items.length === 0) return { ci: null, failedUrl: null };
+
+  let hasFailure = false;
+  let hasPending = false;
+  let hasSuccess = false;
+  let failedUrl: string | null = null;
+  for (const r of items) {
+    const status = (r.status ?? '').toLowerCase();
+    if (status && status !== 'completed') { hasPending = true; continue; }
+    const conc = (r.conclusion ?? '').toLowerCase();
+    if (conc === 'failure' || conc === 'cancelled' || conc === 'timed_out') {
+      hasFailure = true;
+      if (!failedUrl) failedUrl = r.url ?? null;
+    } else if (conc === 'success' || conc === 'skipped' || conc === 'neutral') {
+      hasSuccess = true;
+    }
+  }
+  if (hasFailure) return { ci: 'failure', failedUrl };
+  if (hasPending) return { ci: 'pending', failedUrl: null };
+  if (hasSuccess) return { ci: 'success', failedUrl: null };
+  return { ci: null, failedUrl: null };
 }
 
 export function decideSweepAction(view: ProjectSweepView): SweepAction {
@@ -117,6 +178,16 @@ export function decideSweepAction(view: ProjectSweepView): SweepAction {
     };
   }
 
+  // Default branch, clean. If the default-branch CI is red post-merge and the
+  // operator authorized self-healing (global auto_fix_ci_on_red_default_branch
+  // + per-project auto_push), auto-dispatch a fix-ci to repair it. The runner
+  // bounds this per failing commit so a permanently-broken CI cannot loop; on
+  // exhaustion it falls back to the `ci_red` inbox HITL. A clean tree means the
+  // only way to turn CI green is to make a NEW fix — exactly what fix-ci does.
+  if (view.defaultBranchCi === 'failure' && view.autoFixCiEnabled && view.autoPushEnabled) {
+    return { kind: 'fix-ci', reason: 'default-branch CI red — auto fix-ci', failedUrl: view.defaultBranchCiFailedUrl };
+  }
+
   // Default branch, clean — nothing to do.
   return { kind: 'skip', reason: 'already clean on default' };
 }
@@ -131,6 +202,7 @@ export interface SweepDispatchDeps {
     prUrl: string,
     reason: string,
   ) => Promise<{ ok: boolean; detail: string }>;
+  triggerFixCi: (name: string, reason: string, failedUrl: string | null) => Promise<{ ok: boolean; detail: string }>;
   listProjects: () => Promise<string[]>;
   /** Per-call timeout for resolveView; the sweep skips a project that takes
    *  too long rather than hanging the whole pass. */
@@ -141,7 +213,7 @@ export interface SweepReport {
   startedAt: number;
   finishedAt: number;
   total: number;
-  byAction: Record<'release' | 'pr-wait' | 'skip', number>;
+  byAction: Record<'release' | 'pr-wait' | 'fix-ci' | 'skip', number>;
   results: Array<{
     project: string;
     action: SweepAction['kind'];
@@ -161,7 +233,7 @@ export async function runSweep(deps: SweepDispatchDeps): Promise<SweepReport> {
         startedAt,
         finishedAt: Date.now(),
         total: 0,
-        byAction: { release: 0, 'pr-wait': 0, skip: 0 },
+        byAction: { release: 0, 'pr-wait': 0, 'fix-ci': 0, skip: 0 },
         results: [],
       };
     }
@@ -171,7 +243,7 @@ export async function runSweep(deps: SweepDispatchDeps): Promise<SweepReport> {
     startedAt,
     finishedAt: 0,
     total: names.length,
-    byAction: { release: 0, 'pr-wait': 0, skip: 0 },
+    byAction: { release: 0, 'pr-wait': 0, 'fix-ci': 0, skip: 0 },
     results: [],
   };
   // Fan out per-project work. Each project's resolveView → decide → dispatch
@@ -206,6 +278,8 @@ export async function runSweep(deps: SweepDispatchDeps): Promise<SweepReport> {
         action.prUrl,
         action.reason,
       );
+    } else if (action.kind === 'fix-ci') {
+      dispatch = await deps.triggerFixCi(name, action.reason, action.failedUrl);
     }
     return { project: name, action: action.kind, reason: action.reason, dispatch };
   });

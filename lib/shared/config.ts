@@ -158,6 +158,21 @@ export interface TamTamConfig {
   legacy_pipeline_lock_inline_drain_enabled: boolean;
   legacy_completion_hook_agent_drain_enabled: boolean;
   plain_test_phase_enabled: boolean;
+  // When on, the periodic project sweep auto-dispatches a bounded `fix-ci`
+  // for a project whose DEFAULT branch CI is red (post-merge). Off by default:
+  // enabling it lets TamTam self-heal a red default branch without a human
+  // click. Additionally gated per-project by `auto_push_enabled` (the sweep
+  // only self-heals the default branch for projects that authorized it) and
+  // bounded per failing commit so a permanently-broken CI cannot loop.
+  auto_fix_ci_on_red_default_branch: boolean;
+  // Block automatic feature releases while the project's DEFAULT branch CI is
+  // red. Breaks the "merge onto red CI" vicious cycle: without it, feature PRs
+  // keep merging (their PR check is green) while the post-merge default-branch
+  // CI stays failing, piling more work onto broken CI. When on (default), an
+  // automatic feature release is refused and a fix-ci is dispatched to repair
+  // first; the fix-ci-chained release and operator-initiated (manual) releases
+  // are exempt. See docs/PIPELINE.md → CI-red gate.
+  block_release_on_red_ci: boolean;
   budget_block_runs_enabled: boolean;
   budget_block_on_weekly_pace_enabled: boolean;
   budget_subscription_providers: BudgetSubscriptionProvider[];
@@ -313,6 +328,8 @@ export const DEFAULTS: TamTamConfig = {
   legacy_pipeline_lock_inline_drain_enabled: true,
   legacy_completion_hook_agent_drain_enabled: true,
   plain_test_phase_enabled: false,
+  auto_fix_ci_on_red_default_branch: true,
+  block_release_on_red_ci: true,
   budget_block_runs_enabled: false,
   budget_block_on_weekly_pace_enabled: true,
   budget_subscription_providers: ['claude', 'codex'],
@@ -644,6 +661,15 @@ export function buildConfigFromSettingsMap(map: Record<string, string>): TamTamC
       map.plain_test_phase_enabled === undefined
         ? DEFAULTS.plain_test_phase_enabled
         : map.plain_test_phase_enabled === 'true',
+    auto_fix_ci_on_red_default_branch:
+      map.auto_fix_ci_on_red_default_branch === undefined
+        ? DEFAULTS.auto_fix_ci_on_red_default_branch
+        : map.auto_fix_ci_on_red_default_branch === 'true',
+    // Default true — only an explicit 'false' disables the CI-red release block.
+    block_release_on_red_ci:
+      map.block_release_on_red_ci === undefined
+        ? DEFAULTS.block_release_on_red_ci
+        : map.block_release_on_red_ci === 'true',
     budget_block_runs_enabled: map.budget_block_runs_enabled === 'true',
     budget_block_on_weekly_pace_enabled:
       map.budget_block_on_weekly_pace_enabled === undefined
