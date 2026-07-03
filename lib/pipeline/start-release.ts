@@ -75,12 +75,10 @@ export type ReleaseResult =
 export interface StartReleaseOptions {
   queueIfBlocked?: boolean;
   sourceJobId?: string;
-  // Set by an explicit operator-initiated release (the UI Release button). Like
-  // an agent-triggered release, the operator's own uncommitted working tree is
-  // trusted — clicking Release authorizes running the pipeline on it. This only
-  // relaxes the uncommitted-changes refusal in the PR-branch gate; every
-  // *committed* branch commit is still verified against safe_users, so a clean
-  // checkout of an untrusted external PR is unaffected.
+  // Set by an explicit operator-initiated release (the UI Release button).
+  // Recorded as `trustedLocalChanges` provenance on the release row for
+  // trace/audit; no longer changes gate behavior (the PR-branch gate verifies
+  // committed authors and never refuses on a dirty working tree).
   operatorInitiated?: boolean;
 }
 
@@ -131,10 +129,11 @@ async function createReleaseJob(
     job.releaseDeadlineAt = computeReleaseDeadlineAt(projectPath);
     const logPath = join(/*turbopackIgnore: true*/ logDir, `${job.id}.log`);
     job.logPath = logPath;
-    // Persist the trusted-local-changes signal so every phase (including
-    // orchestrator-driven re-runs) can read it off the release row when
-    // deciding whether the PR-branch execution gate may run on an uncommitted
-    // working tree. See lib/pipeline/trusted-local-release.ts.
+    // Persist the trusted-local-changes provenance on the release row: this
+    // release's uncommitted working-tree delta is the operator's/agent's own
+    // work. It's a trace/audit marker only — the PR-branch execution gate no
+    // longer consults it (the gate verifies committed authors and never refuses
+    // on a dirty tree; see lib/security/pr-branch-execution.ts).
     if (trustedLocalChanges) {
       job.contextMeta = JSON.stringify({ trustedLocalChanges: true });
     }
@@ -260,11 +259,12 @@ export async function startRelease(projectName: string, options: StartReleaseOpt
   }
   const sourceJob = options.sourceJobId ? getJob(options.sourceJobId) : null;
   const parentJobId = sourceJob?.project === projectName ? sourceJob.id : null;
-  // A release whose working-tree delta was produced by TamTam's own in-process
-  // agent run (issue-cruncher, or a manual issue-linked `run`) carries trusted
-  // local changes: the same trust posture the default branch already gets. This
-  // lets the PR-branch execution gate run test/review on the agent's uncommitted
-  // edits while still verifying any committed branch commits against safe_users.
+  // Provenance marker recorded on the release row (see createReleaseJob): a
+  // release whose working-tree delta was produced by TamTam's own in-process
+  // agent run (issue-cruncher, or a manual issue-linked `run`) or an
+  // operator-initiated release. Retained for trace/audit only — the PR-branch
+  // execution gate no longer reads it (it verifies committed authors and never
+  // refuses on a dirty tree).
   const trustedLocalChanges =
     options.operatorInitiated === true ||
     (!!sourceJob && sourceJob.project === projectName && (

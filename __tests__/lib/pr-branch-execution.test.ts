@@ -53,10 +53,12 @@ describe('checkPrBranchExecutionGate', () => {
     expect(mocks.execFileSync).not.toHaveBeenCalled();
   });
 
-  it('allows a non-default branch only when GitHub commit authors are trusted', () => {
+  it('allows a non-default branch when GitHub commit authors are trusted', () => {
+    // Note: no `git status` command is mocked — the gate must NOT consult the
+    // working-tree state at all. If it did, the mock below throws on the
+    // unexpected command and this test fails, guarding against a regression.
     mocks.execFileSync.mockImplementation((command: string, args: string[]) => {
       const key = commandKey(command, args);
-      if (key === 'git -C /repo status --porcelain --untracked-files=all') return output('');
       if (key === 'git -C /repo rev-parse --verify origin/main') return output('origin/main\n');
       if (key === 'git -C /repo log --format=%H origin/main..HEAD') return output('abc123\n');
       if (key === 'gh repo view --json nameWithOwner --jq .nameWithOwner') return output('owner/repo\n');
@@ -72,10 +74,50 @@ describe('checkPrBranchExecutionGate', () => {
     expect(mocks.isUserTrusted).toHaveBeenCalledWith('trusted-user', '/repo');
   });
 
-  it('does not trust spoofed local git author metadata', () => {
+  it('runs even with a DIRTY working tree when committed authors are trusted', () => {
+    // The exact real-world case: a trusted-authored feature branch carrying
+    // uncommitted working-tree edits (agent/operator output). The uncommitted
+    // delta is never externally-injected, so it must not block execution — only
+    // the branch's committed history is verified.
     mocks.execFileSync.mockImplementation((command: string, args: string[]) => {
       const key = commandKey(command, args);
-      if (key === 'git -C /repo status --porcelain --untracked-files=all') return output('');
+      if (key === 'git -C /repo rev-parse --verify origin/main') return output('origin/main\n');
+      if (key === 'git -C /repo log --format=%H origin/main..HEAD') return output('abc123\n');
+      if (key === 'gh repo view --json nameWithOwner --jq .nameWithOwner') return output('owner/repo\n');
+      if (key === 'gh api repos/owner/repo/commits/abc123 --jq .author.login') return output('trusted-user\n');
+      // A `git status` call here would be a regression; leave it unmocked so it throws.
+      throw new Error(`unexpected command: ${key}`);
+    });
+    mocks.isUserTrusted.mockImplementation((login: string) => login === 'trusted-user');
+
+    expect(checkPrBranchExecutionGate('/repo', 'run tests')).toEqual({
+      ok: true,
+      reason: 'trusted_authors',
+    });
+  });
+
+  it('runs on a non-default branch with no commits ahead of base (dirty tree allowed)', () => {
+    // A branch whose committed content equals the trusted base (nothing to
+    // verify) with only local uncommitted edits on top — e.g. an
+    // already-merged issue branch. This is the release that was wrongly blocked.
+    mocks.execFileSync.mockImplementation((command: string, args: string[]) => {
+      const key = commandKey(command, args);
+      if (key === 'git -C /repo rev-parse --verify origin/main') return output('origin/main\n');
+      if (key === 'git -C /repo log --format=%H origin/main..HEAD') return output('');
+      throw new Error(`unexpected command: ${key}`);
+    });
+
+    expect(checkPrBranchExecutionGate('/repo', 'run tests')).toEqual({
+      ok: true,
+      reason: 'no_branch_commits',
+    });
+    // Zero commits ahead means no author lookups are needed.
+    expect(mocks.isUserTrusted).not.toHaveBeenCalled();
+  });
+
+  it('refuses a non-default branch carrying an untrusted committed author (even if tree is clean)', () => {
+    mocks.execFileSync.mockImplementation((command: string, args: string[]) => {
+      const key = commandKey(command, args);
       if (key === 'git -C /repo rev-parse --verify origin/main') return output('origin/main\n');
       if (key === 'git -C /repo log --format=%H origin/main..HEAD') return output('abc123\n');
       if (key === 'gh repo view --json nameWithOwner --jq .nameWithOwner') return output('owner/repo\n');
@@ -94,10 +136,46 @@ describe('checkPrBranchExecutionGate', () => {
     expect(mocks.isUserTrusted).not.toHaveBeenCalledWith('trusted-user', '/repo');
   });
 
+  it('refuses an untrusted committed author even with a dirty working tree', () => {
+    // A reused branch that carries an untrusted attacker commit must still be
+    // refused; uncommitted local edits do not launder untrusted committed code.
+    mocks.execFileSync.mockImplementation((command: string, args: string[]) => {
+      const key = commandKey(command, args);
+      if (key === 'git -C /repo rev-parse --verify origin/main') return output('origin/main\n');
+      if (key === 'git -C /repo log --format=%H origin/main..HEAD') return output('deadbeef\n');
+      if (key === 'gh repo view --json nameWithOwner --jq .nameWithOwner') return output('owner/repo\n');
+      if (key === 'gh api repos/owner/repo/commits/deadbeef --jq .author.login') return output('attacker\n');
+      throw new Error(`unexpected command: ${key}`);
+    });
+    mocks.isUserTrusted.mockImplementation((login: string) => login === 'trusted-user');
+
+    const result = checkPrBranchExecutionGate('/repo', 'run tests');
+    expect(result.ok).toBe(false);
+    expect(result).toEqual(expect.objectContaining({
+      detail: expect.stringContaining('GitHub author attacker'),
+    }));
+  });
+
+  it('does not trust spoofed local git author metadata (uses GitHub author.login only)', () => {
+    mocks.execFileSync.mockImplementation((command: string, args: string[]) => {
+      const key = commandKey(command, args);
+      if (key === 'git -C /repo rev-parse --verify origin/main') return output('origin/main\n');
+      if (key === 'git -C /repo log --format=%H origin/main..HEAD') return output('abc123\n');
+      if (key === 'gh repo view --json nameWithOwner --jq .nameWithOwner') return output('owner/repo\n');
+      if (key === 'gh api repos/owner/repo/commits/abc123 --jq .author.login') return output('attacker\n');
+      throw new Error(`unexpected command: ${key}`);
+    });
+    mocks.isUserTrusted.mockImplementation((login: string) => login === 'trusted-user');
+
+    const result = checkPrBranchExecutionGate('/repo', 'run tests');
+
+    expect(result.ok).toBe(false);
+    expect(mocks.isUserTrusted).toHaveBeenCalledWith('attacker', '/repo');
+  });
+
   it('fails closed when GitHub cannot map a commit SHA to an author login', () => {
     mocks.execFileSync.mockImplementation((command: string, args: string[]) => {
       const key = commandKey(command, args);
-      if (key === 'git -C /repo status --porcelain --untracked-files=all') return output('');
       if (key === 'git -C /repo rev-parse --verify origin/main') return output('origin/main\n');
       if (key === 'git -C /repo log --format=%H origin/main..HEAD') return output('abc123\n');
       if (key === 'gh repo view --json nameWithOwner --jq .nameWithOwner') return output('owner/repo\n');
@@ -114,6 +192,39 @@ describe('checkPrBranchExecutionGate', () => {
     expect(mocks.isUserTrusted).not.toHaveBeenCalled();
   });
 
+  it('fails closed when the GitHub repository cannot be resolved', () => {
+    mocks.execFileSync.mockImplementation((command: string, args: string[]) => {
+      const key = commandKey(command, args);
+      if (key === 'git -C /repo rev-parse --verify origin/main') return output('origin/main\n');
+      if (key === 'git -C /repo log --format=%H origin/main..HEAD') return output('abc123\n');
+      if (key === 'gh repo view --json nameWithOwner --jq .nameWithOwner') throw new Error('gh boom');
+      throw new Error(`unexpected command: ${key}`);
+    });
+
+    const result = checkPrBranchExecutionGate('/repo', 'run tests');
+    expect(result.ok).toBe(false);
+    expect(result).toEqual(expect.objectContaining({
+      detail: expect.stringContaining('could not resolve GitHub repository'),
+    }));
+  });
+
+  it('fails closed when the branch commit list cannot be read', () => {
+    // A broken repo where `git log base..HEAD` fails must refuse — the gate
+    // cannot verify committed authorship, so it must not run project code.
+    mocks.execFileSync.mockImplementation((command: string, args: string[]) => {
+      const key = commandKey(command, args);
+      if (key === 'git -C /repo rev-parse --verify origin/main') return output('origin/main\n');
+      if (key === 'git -C /repo log --format=%H origin/main..HEAD') throw new Error('git boom');
+      throw new Error(`unexpected command: ${key}`);
+    });
+
+    const result = checkPrBranchExecutionGate('/repo', 'run tests');
+    expect(result.ok).toBe(false);
+    expect(result).toEqual(expect.objectContaining({
+      detail: expect.stringContaining('could not list branch commits'),
+    }));
+  });
+
   it('fails closed when branch detection fails instead of treating it as default branch', () => {
     mocks.getBranchContext.mockReturnValue({
       currentBranch: '',
@@ -128,84 +239,6 @@ describe('checkPrBranchExecutionGate', () => {
       detail: expect.stringContaining('could not determine the current branch'),
     }));
     expect(mocks.execFileSync).not.toHaveBeenCalled();
-  });
-
-  it('fails closed on non-default dirty tracked changes before GitHub author checks', () => {
-    mocks.execFileSync.mockImplementation((command: string, args: string[]) => {
-      const key = commandKey(command, args);
-      if (key === 'git -C /repo status --porcelain --untracked-files=all') return output(' M package.json\n');
-      throw new Error(`unexpected command: ${key}`);
-    });
-
-    const result = checkPrBranchExecutionGate('/repo', 'run tests');
-
-    expect(result.ok).toBe(false);
-    expect(result).toEqual(expect.objectContaining({
-      detail: expect.stringContaining('uncommitted or untracked changes'),
-    }));
-  });
-
-  it('fails closed on non-default untracked files before GitHub author checks', () => {
-    mocks.execFileSync.mockImplementation((command: string, args: string[]) => {
-      const key = commandKey(command, args);
-      if (key === 'git -C /repo status --porcelain --untracked-files=all') return output('?? scripts/postinstall.js\n');
-      throw new Error(`unexpected command: ${key}`);
-    });
-
-    const result = checkPrBranchExecutionGate('/repo', 'run tests');
-
-    expect(result.ok).toBe(false);
-    expect(result).toEqual(expect.objectContaining({
-      detail: expect.stringContaining('uncommitted or untracked changes'),
-    }));
-  });
-
-  it('allowTrustedLocalChanges: permits uncommitted changes on a fresh branch (no commits ahead)', () => {
-    mocks.execFileSync.mockImplementation((command: string, args: string[]) => {
-      const key = commandKey(command, args);
-      if (key === 'git -C /repo status --porcelain --untracked-files=all') return output(' M docs/PIPELINE.md\n');
-      if (key === 'git -C /repo rev-parse --verify origin/main') return output('origin/main\n');
-      if (key === 'git -C /repo log --format=%H origin/main..HEAD') return output('');
-      throw new Error(`unexpected command: ${key}`);
-    });
-
-    const result = checkPrBranchExecutionGate('/repo', 'run tests', { allowTrustedLocalChanges: true });
-    expect(result).toEqual({ ok: true, reason: 'no_branch_commits' });
-  });
-
-  it('allowTrustedLocalChanges: STILL verifies committed branch commits against safe_users', () => {
-    // The agent's branch was reused and carries an attacker commit ahead of base.
-    // Allowing the uncommitted delta must NOT skip commit-author verification.
-    mocks.execFileSync.mockImplementation((command: string, args: string[]) => {
-      const key = commandKey(command, args);
-      if (key === 'git -C /repo status --porcelain --untracked-files=all') return output(' M docs/PIPELINE.md\n');
-      if (key === 'git -C /repo rev-parse --verify origin/main') return output('origin/main\n');
-      if (key === 'git -C /repo log --format=%H origin/main..HEAD') return output('deadbeef\n');
-      if (key === 'gh repo view --json nameWithOwner --jq .nameWithOwner') return output('owner/repo\n');
-      if (key === 'gh api repos/owner/repo/commits/deadbeef --jq .author.login') return output('attacker\n');
-      throw new Error(`unexpected command: ${key}`);
-    });
-    mocks.isUserTrusted.mockImplementation((login: string) => login === 'trusted-user');
-
-    const result = checkPrBranchExecutionGate('/repo', 'run tests', { allowTrustedLocalChanges: true });
-    expect(result.ok).toBe(false);
-    expect(result).toEqual(expect.objectContaining({
-      detail: expect.stringContaining('GitHub author attacker'),
-    }));
-  });
-
-  it('allowTrustedLocalChanges: still fails closed when git status itself cannot be read', () => {
-    mocks.execFileSync.mockImplementation((command: string, args: string[]) => {
-      const key = commandKey(command, args);
-      if (key === 'git -C /repo status --porcelain --untracked-files=all') throw new Error('git boom');
-      throw new Error(`unexpected command: ${key}`);
-    });
-
-    const result = checkPrBranchExecutionGate('/repo', 'run tests', { allowTrustedLocalChanges: true });
-    expect(result.ok).toBe(false);
-    expect(result).toEqual(expect.objectContaining({
-      detail: expect.stringContaining('could not verify that the working tree matches'),
-    }));
   });
 });
 

@@ -76,9 +76,17 @@ async function runSignalAction(signal: InboxSignal): Promise<string> {
   }
 }
 
+// Label for the external link, so a PR link doesn't read "View CI".
+function externalLinkLabel(signal: InboxSignal): string {
+  if (signal.action.kind === 'merge' && signal.action.prNumber != null) return `View PR #${signal.action.prNumber}`
+  if (signal.type === 'ci_red') return 'View CI'
+  return 'View details'
+}
+
 function SignalRow({ signal, onResolved }: { signal: InboxSignal; onResolved: () => void }) {
   const { toast } = useToast()
   const [busy, setBusy] = useState(false)
+  const [expanded, setExpanded] = useState(false)
   const age = formatAge(signal.ageSeconds)
 
   const onAction = useCallback(async () => {
@@ -99,64 +107,76 @@ function SignalRow({ signal, onResolved }: { signal: InboxSignal; onResolved: ()
   }, [busy, signal, toast, onResolved])
 
   return (
-    <div className="flex flex-wrap items-center gap-x-3 gap-y-2 border border-border rounded-lg bg-bg-secondary px-3 py-2.5">
-      <span
-        className={`h-2.5 w-2.5 shrink-0 rounded-full ${SEVERITY_DOT[signal.severity]}`}
-        aria-hidden="true"
-      />
-      <div className="min-w-0 flex-1">
-        <div className="flex flex-wrap items-center gap-2">
-          <Link
-            href={signal.href}
-            className="font-medium text-text-primary hover:text-accent no-underline truncate"
-          >
-            {signal.project}
-          </Link>
-          <Pill tone={SEVERITY_TONE[signal.severity]} size="xs">
-            {signal.title}
-          </Pill>
-          {age && <span className="text-xs text-text-tertiary tabular-nums">{age}</span>}
-        </div>
-        {signal.detail && (
-          <p className="mt-0.5 text-xs text-text-secondary truncate">{signal.detail}</p>
-        )}
-      </div>
-      <div className="flex items-center gap-2 shrink-0">
-        {signal.externalUrl && (
-          <a
-            href={signal.externalUrl}
-            target="_blank"
-            rel="noreferrer"
-            className={buttonVariants({ variant: 'ghost', size: 'sm' })}
-          >
-            View CI
-          </a>
-        )}
-        {signal.action.kind === 'open-terminal' ? (
-          <Link
-            href={signal.href}
-            className={buttonVariants({ variant: 'secondary', size: 'sm' })}
-          >
-            {signal.action.label}
-          </Link>
-        ) : (
-          <Button
-            variant={signal.severity === 'green' ? 'success' : 'primary'}
-            size="sm"
-            onClick={onAction}
-            disabled={busy}
-            disabledCursor="wait"
-          >
-            {busy ? '…' : signal.action.label}
-          </Button>
-        )}
-        <Link
-          href={signal.href}
-          className={buttonVariants({ variant: 'ghost', size: 'sm' })}
+    <div className="border border-border rounded-lg bg-bg-secondary">
+      <div className="flex flex-wrap items-center gap-x-3 gap-y-2 px-3 py-2.5">
+        <span
+          className={`h-2.5 w-2.5 shrink-0 rounded-full ${SEVERITY_DOT[signal.severity]}`}
+          aria-hidden="true"
+        />
+        {/* Clickable header — expand to read the full reason and reach the source. */}
+        <button
+          type="button"
+          onClick={() => setExpanded((e) => !e)}
+          aria-expanded={expanded}
+          className="min-w-0 flex-1 text-left cursor-pointer bg-transparent border-0 p-0"
         >
-          Open project
-        </Link>
+          <div className="flex flex-wrap items-center gap-2">
+            <span
+              className={`text-text-tertiary text-[10px] shrink-0 transition-transform ${expanded ? 'rotate-90' : ''}`}
+              aria-hidden="true"
+            >
+              ›
+            </span>
+            <span className="font-medium text-text-primary truncate">{signal.project}</span>
+            <Pill tone={SEVERITY_TONE[signal.severity]} size="xs">
+              {signal.title}
+            </Pill>
+            {age && <span className="text-xs text-text-tertiary tabular-nums">{age}</span>}
+          </div>
+          {signal.detail && (
+            <p className={`mt-0.5 text-xs text-text-secondary ${expanded ? 'whitespace-pre-wrap' : 'truncate'}`}>
+              {signal.detail}
+            </p>
+          )}
+        </button>
+        <div className="flex items-center gap-2 shrink-0">
+          {signal.action.kind === 'open-terminal' ? (
+            <Link
+              href={signal.href}
+              className={buttonVariants({ variant: 'secondary', size: 'sm' })}
+            >
+              {signal.action.label}
+            </Link>
+          ) : (
+            <Button
+              variant={signal.severity === 'green' ? 'success' : 'primary'}
+              size="sm"
+              onClick={onAction}
+              disabled={busy}
+              disabledCursor="wait"
+            >
+              {busy ? '…' : signal.action.label}
+            </Button>
+          )}
+        </div>
       </div>
+      {expanded && (
+        <div className="border-t border-border px-3 py-2 flex flex-wrap items-center gap-x-4 gap-y-1 text-xs">
+          {signal.externalUrl && (
+            <a
+              href={signal.externalUrl}
+              target="_blank"
+              rel="noreferrer"
+              className="text-accent hover:underline"
+            >
+              {externalLinkLabel(signal)} ↗
+            </a>
+          )}
+          <Link href={signal.href} className="text-accent hover:underline">
+            Open in {signal.project} →
+          </Link>
+        </div>
+      )}
     </div>
   )
 }

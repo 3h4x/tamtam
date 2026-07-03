@@ -47,6 +47,7 @@ function makeJob(overrides: Partial<InboxJob> & { project: string; kind: string 
     releaseStopReason: null,
     prWaitReason: null,
     prNumber: null,
+    riskyFiles: null,
     ...overrides,
   };
 }
@@ -82,6 +83,20 @@ describe('deriveInboxSignals', () => {
       action: { kind: 'merge', label: 'Merge', prNumber: 76 },
     });
   });
+
+  it('names the specific high-risk files and links the PR on a risky_diff signal', () => {
+    const signals = deriveInboxSignals(
+      baseInput({
+        tasks: [makeTask({ project: 'alpha', github: 'https://github.com/o/alpha' })],
+        jobs: [makeJob({ project: 'alpha', kind: 'pr-wait', exitCode: 1, prWaitReason: 'risky_diff', prNumber: 80, riskyFiles: ['package.json', '.github/workflows/deploy.yml'] })],
+        openPrNumbersByProject: { alpha: [80] },
+      }),
+    )
+    const s = signals.find((x) => x.type === 'pr_needs_manual_merge')
+    expect(s?.detail).toContain('package.json')
+    expect(s?.detail).toContain('.github/workflows/deploy.yml')
+    expect(s?.externalUrl).toBe('https://github.com/o/alpha/pull/80')
+  })
 
   it('clears the manual-merge signal once the deferred PR is no longer among the open PRs', () => {
     // Cache has other open PRs but not #76 → it was merged/closed → clear.
@@ -234,6 +249,46 @@ describe('deriveInboxSignals', () => {
     );
     const s = signals.find((x) => x.type === 'fix_loop_exhausted');
     expect(s).toMatchObject({ severity: 'red', detail: 'review cap reached', action: { kind: 'open-terminal' } });
+  });
+
+  it('flags a release that stopped non-zero even with NO recorded stop reason (catch-all: never a silent stop)', () => {
+    const signals = deriveInboxSignals(
+      baseInput({
+        tasks: [makeTask({ project: 'gamma' })],
+        jobs: [makeJob({ project: 'gamma', kind: 'release', startedAt: 500, finishedAt: 900, exitCode: 1, releaseStopReason: null })],
+      }),
+    );
+    const s = signals.find((x) => x.type === 'fix_loop_exhausted');
+    expect(s).toMatchObject({ severity: 'red', action: { kind: 'open-terminal' } });
+    expect(s?.detail).toMatch(/without shipping|needs a human/i);
+  });
+
+  it('does not double-signal a release already surfaced as a manual merge', () => {
+    const signals = deriveInboxSignals(
+      baseInput({
+        tasks: [makeTask({ project: 'gamma' })],
+        jobs: [
+          makeJob({ project: 'gamma', kind: 'pr-wait', startedAt: 800, finishedAt: 900, exitCode: 1, prWaitReason: 'conflict', prNumber: 91 }),
+          makeJob({ project: 'gamma', kind: 'release', startedAt: 500, finishedAt: 901, exitCode: 1, releaseStopReason: null }),
+        ],
+        openPrNumbersByProject: { gamma: [91] },
+      }),
+    );
+    expect(signals.filter((x) => x.type === 'fix_loop_exhausted').length).toBe(0);
+    expect(signals.find((x) => x.type === 'pr_needs_manual_merge')).toBeTruthy();
+  });
+
+  it('suppresses the catch-all while a newer pipeline job is re-driving the release', () => {
+    const signals = deriveInboxSignals(
+      baseInput({
+        tasks: [makeTask({ project: 'gamma' })],
+        jobs: [
+          makeJob({ project: 'gamma', kind: 'release', startedAt: 500, finishedAt: 900, exitCode: 1, releaseStopReason: null }),
+          makeJob({ project: 'gamma', kind: 'fix', startedAt: 950, finishedAt: null }),
+        ],
+      }),
+    );
+    expect(signals.find((x) => x.type === 'fix_loop_exhausted')).toBeUndefined();
   });
 
   it('flags stale uncommitted changes with a review action', () => {

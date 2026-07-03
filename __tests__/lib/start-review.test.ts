@@ -779,7 +779,6 @@ describe('startProjectReview', () => {
     expect(mocks.checkPrBranchExecutionGate).toHaveBeenCalledWith(
       '/path/to/proj',
       'run review prerequisite',
-      { allowTrustedLocalChanges: false },
     );
     expect(mocks.exec).not.toHaveBeenCalled();
     expect(mocks.startJob).not.toHaveBeenCalled();

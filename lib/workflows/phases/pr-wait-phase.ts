@@ -80,6 +80,7 @@ export async function releasePrWaitPhaseWorkflow(
   let merged = false;
   let consecutiveNoChecks = 0;
   let terminalReason: 'merged' | 'pr_closed' | 'checks_failed' | 'conflict' | 'merge_permanent' | 'risky_diff' | 'switch_failed' | 'timeout' = 'timeout';
+  let riskyDiffFiles: string[] = [];
 
   while (true) {
     const status = await pollPrStatusStep(jobId, prep.projPath, prNumber, prRepo, prep.deadlineAt);
@@ -114,8 +115,8 @@ export async function releasePrWaitPhaseWorkflow(
         consecutiveNoChecks = 0;
       }
 
-      const risky = await riskyDiffStep(jobId, prep.projPath, prNumber, prRepo);
-      if (risky) { terminalReason = 'risky_diff'; break; }
+      const riskyFiles = await riskyDiffStep(jobId, prep.projPath, prNumber, prRepo);
+      if (riskyFiles.length > 0) { terminalReason = 'risky_diff'; riskyDiffFiles = riskyFiles; break; }
 
       const mergeResult = await attemptMergeStep(jobId, prep.projPath, prNumber, prRepo);
       if (mergeResult.ok) { merged = true; terminalReason = 'merged'; break; }
@@ -127,7 +128,10 @@ export async function releasePrWaitPhaseWorkflow(
   }
 
   if (!merged) {
-    await finalizePrWaitStep(jobId, 1, terminalReason, prNumber, prRepo);
+    await finalizePrWaitStep(
+      jobId, 1, terminalReason, prNumber, prRepo,
+      riskyDiffFiles.length > 0 ? { riskyFiles: riskyDiffFiles } : undefined,
+    );
     return { ok: true, jobId, finished: true, merged: false, reason: terminalReason, exitCode: 1 };
   }
 
@@ -143,17 +147,20 @@ export async function releasePrWaitPhaseWorkflow(
   return { ok: true, jobId, finished: true, merged: true, reason: 'merged', exitCode: 0 };
 }
 
-async function riskyDiffStep(jobId: string, projPath: string, prNumber: number, prRepo: string): Promise<boolean> {
+// Returns the list of high-risk files the PR diff touches (empty = safe). The
+// list is surfaced on the inbox HITL so the operator sees WHICH files make the
+// auto-merge risky, not just that it is risky.
+async function riskyDiffStep(jobId: string, projPath: string, prNumber: number, prRepo: string): Promise<string[]> {
   'use step';
   const { riskyPrDiffFiles } = await import('@/lib/security/pr-branch-execution');
   const { appendLogForJob } = await import('@/lib/workflows/phases/pr-wait-log');
   const files = riskyPrDiffFiles(projPath, prNumber, prRepo);
-  if (files.length === 0) return false;
+  if (files.length === 0) return [];
   appendLogForJob(
     jobId,
     `\n# refusing auto-merge: PR diff touches high-risk execution files\n${files.map((f) => `- ${f}`).join('\n')}\n`,
   );
-  return true;
+  return files;
 }
 
 // ── Steps ────────────────────────────────────────────────────────────────────
@@ -304,6 +311,7 @@ async function finalizePrWaitStep(
   reason: string,
   prNumber: number,
   prRepo: string,
+  extra?: Record<string, unknown>,
 ): Promise<void> {
   'use step';
   const { getJob, markDone, updateJob } = await import('@/lib/jobs/job-storage');
@@ -311,14 +319,15 @@ async function finalizePrWaitStep(
   appendLogForJob(jobId, `\n# pr-wait done — ${reason}\n`);
   const job = getJob(jobId);
   if (job) {
-    // Stamp the terminal reason on the job so the inbox can explain why an
-    // unmerged PR is still open (e.g. `risky_diff` deferred to a human)
+    // Stamp the terminal reason (and any extra context, e.g. the risky files
+    // list) on the job so the inbox can explain WHY an unmerged PR is still open
     // without parsing the log. Merged into the existing {prNumber,…} context.
     if (exitCode !== 0) {
       try {
         const meta = job.contextMeta ? JSON.parse(job.contextMeta) : {};
         const merged = (meta && typeof meta === 'object' && !Array.isArray(meta)) ? meta as Record<string, unknown> : {};
         merged.prWaitReason = reason;
+        if (extra) Object.assign(merged, extra);
         job.contextMeta = JSON.stringify(merged);
         updateJob(job);
       } catch { /* non-fatal — reason still lands in the log */ }

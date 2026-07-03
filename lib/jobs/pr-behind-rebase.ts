@@ -18,6 +18,7 @@
 
 import { exec } from '@/lib/shared/shell';
 import { isRebaseConflict } from '@/lib/pipeline/start-push';
+import { createGenericPR } from '@/lib/pipeline/pr-create';
 import { launchPrWait } from '@/lib/pipeline/start-pr-wait';
 
 const REBASE_TIMEOUT_MS = 120_000;
@@ -139,7 +140,17 @@ export async function rebasePrBehindBranch(candidate: {
     // sweep must never leave conflict markers or a half-applied rebase behind.
     await exec('git', ['-C', path, 'rebase', '--abort'], { timeout: 30_000 }).catch(() => {});
     if (isRebaseConflict(combined)) {
-      return { outcome: 'rejected', detail: `rebase onto origin/${defaultBranch} hit a merge conflict — needs a fix agent or manual resolution` };
+      // The branch genuinely conflicts with the default branch — a background
+      // sweep can't resolve it. Instead of giving up silently, hand the (already
+      // discovered, still-open) PR to a pr-wait: it observes mergeable=CONFLICTING
+      // and finalizes with reason 'conflict', which surfaces a
+      // pr_needs_manual_merge HITL in the inbox. Merge-or-HITL invariant
+      // (CLAUDE.md): a stranded conflict must never be a silent stop.
+      const launched = launchPrWait(project, pr.number, pr.repo, pr.url);
+      if ('error' in launched) {
+        return { outcome: 'rejected', detail: `rebase onto origin/${defaultBranch} hit a merge conflict and pr-wait not started (${launched.error}) — needs a fix agent or manual resolution` };
+      }
+      return { outcome: 'started', detail: `rebase onto origin/${defaultBranch} hit a merge conflict — dispatched pr-wait #${pr.number} to surface it as a manual-merge HITL` };
     }
     return { outcome: 'rejected', detail: `rebase onto origin/${defaultBranch} failed: ${(rebase.stderr || rebase.stdout || 'unknown').trim().slice(0, 200)}` };
   }
@@ -201,7 +212,25 @@ export async function resumePrWaitForBranch(candidate: {
 
   const pr = await discoverOpenPr(path, branch);
   if (!pr) {
-    return { outcome: 'rejected', detail: `no open PR found for ${branch} — nothing to resume` };
+    // Green orphan: a clean, fully-pushed, up-to-date feature branch that carries
+    // shippable work but has NO open PR. Left alone this is a SILENT STOP —
+    // nothing merges and nothing surfaces. Open a PR so the work runs through the
+    // normal pr-wait flow (merge or a HITL inbox signal). createGenericPR is
+    // idempotent: it reuses an existing OPEN PR and only opens one when genuinely
+    // absent, so a busy sweep can't spawn duplicates.
+    const created = await createGenericPR(path, () => {});
+    if (!created) {
+      return { outcome: 'rejected', detail: `no open PR for ${branch} and could not open one — needs a manual PR/merge decision` };
+    }
+    const createdNum = /\/pull\/(\d+)/.exec(created.prUrl)?.[1];
+    if (!createdNum) {
+      return { outcome: 'rejected', detail: `opened a PR for ${branch} but could not parse its number: ${created.prUrl}` };
+    }
+    const launchedNew = launchPrWait(project, Number(createdNum), created.prRepo, created.prUrl);
+    if ('error' in launchedNew) {
+      return { outcome: 'rejected', detail: `opened PR ${created.prUrl} for ${branch} but pr-wait not started: ${launchedNew.error}` };
+    }
+    return { outcome: 'started', detail: `opened PR ${created.prUrl} for green-orphan branch ${branch} and started pr-wait` };
   }
 
   const launched = launchPrWait(project, pr.number, pr.repo, pr.url);

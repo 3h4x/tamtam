@@ -361,10 +361,7 @@ export async function startProjectReview(
   } catch { /* test env without DB */ }
   let prereqBlock = '';
   if (reviewPrerequisiteCommand?.trim()) {
-    const { activeReleaseAllowsTrustedLocalChanges } = await import('./trusted-local-release');
-    const prereqGate = checkPrBranchExecutionGate(projPath, 'run review prerequisite', {
-      allowTrustedLocalChanges: activeReleaseAllowsTrustedLocalChanges(),
-    });
+    const prereqGate = checkPrBranchExecutionGate(projPath, 'run review prerequisite');
     if (!prereqGate.ok) return { ok: false, status: 409, detail: prereqGate.detail };
 
     const command = reviewPrerequisiteCommand.trim();

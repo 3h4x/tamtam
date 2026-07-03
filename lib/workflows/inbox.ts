@@ -76,6 +76,9 @@ export interface InboxJob {
   prWaitReason: string | null;
   /** For pr-wait jobs: the PR number it was waiting on. Null otherwise. */
   prNumber: number | null;
+  /** For a `risky_diff` pr-wait: the specific high-risk files the diff touched,
+   *  so the HITL can name WHY the auto-merge was refused. Null otherwise. */
+  riskyFiles: string[] | null;
 }
 
 export interface InboxOpenPr {
@@ -204,10 +207,13 @@ export function deriveInboxSignals(input: InboxInput): InboxSignal[] {
         severity: 'yellow',
         project,
         title: `PR #${prNumber} needs manual merge`,
-        detail: (prWait.prWaitReason ? MERGE_REASON_DETAIL[prWait.prWaitReason] : undefined)
-          ?? 'Auto-merge did not complete — needs a human merge/close decision.',
+        detail: ((prWait.prWaitReason ? MERGE_REASON_DETAIL[prWait.prWaitReason] : undefined)
+          ?? 'Auto-merge did not complete — needs a human merge/close decision.')
+          + (prWait.prWaitReason === 'risky_diff' && prWait.riskyFiles && prWait.riskyFiles.length > 0
+            ? ` High-risk files: ${prWait.riskyFiles.join(', ')}.`
+            : ''),
         href: `${projectHref(project)}/issues`,
-        externalUrl: null,
+        externalUrl: task.github ? `${task.github}/pull/${prNumber}` : null,
         ageSeconds: null,
         action: { kind: 'merge', label: 'Merge', prNumber },
       });
@@ -237,21 +243,41 @@ export function deriveInboxSignals(input: InboxInput): InboxSignal[] {
       }
     }
 
-    // 3. Release aborted after exhausting a fix loop / hitting an iteration cap.
+    // 3. Catch-all for the merge-or-HITL invariant: a release that finished
+    //    non-zero is TERMINAL and must surface — never a silent stop. Fires for
+    //    ANY non-zero release, including a bare abort that stamped no
+    //    releaseStopReason (wall-clock timeout, 'unknown' terminal, or a finalize
+    //    path that forgot to stamp one). Suppressed only when it is already
+    //    surfaced as a manual-merge, or a newer pipeline job started after it
+    //    finished (something is actively re-driving it — let that run).
     const release = latestJob(jobs, project, 'release');
-    if (release && release.finishedAt !== null && release.exitCode !== 0 && release.releaseStopReason && !active) {
-      signals.push({
-        id: `fix_loop_exhausted:${project}`,
-        type: 'fix_loop_exhausted',
-        severity: 'red',
-        project,
-        title: 'Release stopped — fix loop exhausted',
-        detail: release.releaseStopReason,
-        href: `${projectHref(project)}/terminal`,
-        externalUrl: null,
-        ageSeconds: Math.max(0, Math.floor(nowSeconds - release.finishedAt)),
-        action: { kind: 'open-terminal', label: 'Open Terminal' },
-      });
+    if (release && release.finishedAt !== null && release.exitCode !== 0) {
+      const coveredByMerge = signals.some(
+        (s) => s.project === project && s.type === 'pr_needs_manual_merge',
+      );
+      const reDriving = jobs.some(
+        (j) =>
+          j.project === project &&
+          j.finishedAt === null &&
+          ACTIVE_JOB_KINDS.has(j.kind) &&
+          j.startedAt >= (release.finishedAt as number),
+      );
+      if (!coveredByMerge && !reDriving) {
+        signals.push({
+          id: `fix_loop_exhausted:${project}`,
+          type: 'fix_loop_exhausted',
+          severity: 'red',
+          project,
+          title: release.releaseStopReason ? 'Release stopped — fix loop exhausted' : 'Release stopped',
+          detail:
+            release.releaseStopReason ??
+            `Release ended without shipping (exit ${release.exitCode}) — no merge and no other signal. Needs a human check.`,
+          href: `${projectHref(project)}/terminal`,
+          externalUrl: null,
+          ageSeconds: Math.max(0, Math.floor(nowSeconds - release.finishedAt)),
+          action: { kind: 'open-terminal', label: 'Open Terminal' },
+        });
+      }
     }
 
     // 4. Uncommitted changes sitting on disk, not yet reviewed.
@@ -344,16 +370,20 @@ function safeReleaseStopReason(contextMeta: string | null | undefined): string |
 // Read a pr-wait job's persisted terminal reason + PR number from contextMeta.
 // finalizePrWaitStep stamps `prWaitReason` alongside the {prNumber, prRepo,
 // prUrl} the phase was dispatched with.
-function safePrWaitInfo(contextMeta: string | null | undefined): { reason: string | null; prNumber: number | null } {
-  if (!contextMeta) return { reason: null, prNumber: null };
+function safePrWaitInfo(contextMeta: string | null | undefined): { reason: string | null; prNumber: number | null; riskyFiles: string[] | null } {
+  if (!contextMeta) return { reason: null, prNumber: null, riskyFiles: null };
   try {
-    const parsed = JSON.parse(contextMeta) as { prWaitReason?: unknown; prNumber?: unknown };
+    const parsed = JSON.parse(contextMeta) as { prWaitReason?: unknown; prNumber?: unknown; riskyFiles?: unknown };
+    const riskyFiles = Array.isArray(parsed.riskyFiles)
+      ? parsed.riskyFiles.filter((f): f is string => typeof f === 'string')
+      : null;
     return {
       reason: typeof parsed.prWaitReason === 'string' && parsed.prWaitReason ? parsed.prWaitReason : null,
       prNumber: typeof parsed.prNumber === 'number' ? parsed.prNumber : null,
+      riskyFiles: riskyFiles && riskyFiles.length > 0 ? riskyFiles : null,
     };
   } catch {
-    return { reason: null, prNumber: null };
+    return { reason: null, prNumber: null, riskyFiles: null };
   }
 }
 
@@ -435,6 +465,7 @@ export async function listInboxSignals(): Promise<{ signals: InboxSignal[]; coun
       releaseStopReason: j.kind === 'release' ? safeReleaseStopReason(j.contextMeta) : null,
       prWaitReason: prWait?.reason ?? null,
       prNumber: prWait?.prNumber ?? null,
+      riskyFiles: prWait?.riskyFiles ?? null,
     };
   });
 

@@ -64,8 +64,8 @@ describe('rebasePrBehindBranch', () => {
   beforeEach(() => vi.resetModules());
   afterEach(() => { vi.resetModules(); vi.restoreAllMocks(); });
 
-  it('aborts and reports without force-pushing when the rebase conflicts', async () => {
-    const { calls } = setup(
+  it('aborts (never force-pushing) and dispatches a pr-wait to surface the conflict as a HITL', async () => {
+    const { calls, launchPrWait } = setup(
       validPreflight({
         'git rebase origin/main': { exitCode: 1, stdout: 'CONFLICT (content): Merge conflict in lib/x.ts', stderr: '' },
         'git rebase --abort': { exitCode: 0, stdout: '' },
@@ -75,8 +75,12 @@ describe('rebasePrBehindBranch', () => {
     const { rebasePrBehindBranch } = await import('@/lib/jobs/pr-behind-rebase');
     const r = await rebasePrBehindBranch(candidate);
 
-    expect(r.outcome).toBe('rejected');
+    // Never a silent stop: the unresolved conflict is handed to a pr-wait, which
+    // observes mergeable=CONFLICTING and finalizes 'conflict' → a
+    // pr_needs_manual_merge HITL in the inbox.
+    expect(r.outcome).toBe('started');
     expect(r.detail).toMatch(/conflict/i);
+    expect(launchPrWait).toHaveBeenCalledWith('proj', 200, 'o/r', 'https://github.com/o/r/pull/200');
     expect(calls).toContain('git rebase --abort');
     // Critical safety property: never force-push a half-resolved merge.
     expect(calls.some((c) => c.includes('push') && c.includes('--force-with-lease'))).toBe(false);

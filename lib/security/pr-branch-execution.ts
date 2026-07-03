@@ -5,10 +5,8 @@ import { isUserTrusted } from '@/lib/shared/untrusted';
 
 // Pin HOME so git and gh resolve their user config even when the server
 // process was launched with a stripped env (e.g. a PM2 daemon started without
-// HOME). Without a reachable HOME, git ignores the global `.gitignore`
-// (core.excludesFile) and globally-ignored files (.playwright-mcp/, .DS_Store)
-// surface as untracked — making this gate refuse a tree the operator's own
-// `git status` reports clean. gh likewise needs HOME for its auth/hosts config.
+// HOME). git needs it to read repo/user config for `git log`, and gh needs it
+// for its auth/hosts config when resolving commit authors through the API.
 const GIT_OPTS: ExecFileSyncOptionsWithStringEncoding = {
   encoding: 'utf-8',
   stdio: ['ignore', 'pipe', 'ignore'],
@@ -65,14 +63,6 @@ function resolveGithubRepo(projectPath: string): string | null {
   }
 }
 
-function worktreeStatus(projectPath: string): string | null {
-  try {
-    return git(projectPath, ['status', '--porcelain', '--untracked-files=all']);
-  } catch {
-    return null;
-  }
-}
-
 function githubAuthorLoginForCommit(projectPath: string, repo: string, sha: string): string | null {
   try {
     const login = execFileSync(
@@ -87,22 +77,25 @@ function githubAuthorLoginForCommit(projectPath: string, repo: string, sha: stri
   }
 }
 
-export interface PrBranchExecutionGateOptions {
-  // Set ONLY for releases whose working-tree delta was produced by TamTam's own
-  // in-process agent run (issue-cruncher and friends). Those uncommitted
-  // changes are as trusted as a run on the default branch — which the gate
-  // already allows unconditionally — so this bypasses the uncommitted-changes
-  // refusal while STILL verifying every committed branch commit against
-  // safe_users (catching a reused branch carrying untrusted attacker commits).
-  // It does NOT skip the gate; it narrows it to the same trust posture the
-  // default branch already gets.
-  allowTrustedLocalChanges?: boolean;
-}
-
+// Guards host-side execution of project code (test / review-prerequisite /
+// dev-server commands) on a non-default branch.
+//
+// The one external-code vector this gate exists to stop is a branch whose
+// COMMITS were pulled in by checking out someone's PR head — those commits
+// would execute during `pnpm test` et al. So the gate resolves every commit the
+// branch adds over the trusted base to a GitHub `author.login` and refuses
+// unless all of them are trusted (or the branch adds no commits at all).
+//
+// It deliberately does NOT gate on the working tree being clean. Uncommitted
+// working-tree changes can only be the operator's or TamTam's own agent output
+// — nothing external can write them (an external PR arrives as commits, which
+// are verified above) — so they carry the same trust the default branch is
+// granted unconditionally. Refusing on a dirty tree only ever produced false
+// positives against legitimate local work; the committed-author check is the
+// real boundary and is preserved intact.
 export function checkPrBranchExecutionGate(
   projectPath: string,
   actionLabel: string,
-  options: PrBranchExecutionGateOptions = {},
 ): PrBranchExecutionGate {
   const branch = getBranchContext(projectPath);
   if (!branch.currentBranch) {
@@ -113,20 +106,6 @@ export function checkPrBranchExecutionGate(
   }
   if (branch.isDefaultBranch) return { ok: true, reason: 'default_branch' };
 
-  const status = worktreeStatus(projectPath);
-  if (status == null) {
-    return {
-      ok: false,
-      detail: `Refusing to ${actionLabel} on non-default branch ${branch.currentBranch}: could not verify that the working tree matches GitHub-verified commits. Approve the run explicitly or use an isolated runner.`,
-    };
-  }
-  if (status.length > 0 && !options.allowTrustedLocalChanges) {
-    return {
-      ok: false,
-      detail: `Refusing to ${actionLabel} on non-default branch ${branch.currentBranch}: working tree has uncommitted or untracked changes that cannot be verified through GitHub commit authors. Approve the run explicitly or use an isolated runner.`,
-    };
-  }
-
   const baseRef = resolveBaseRef(projectPath, branch.defaultBranch);
   let raw = '';
   try {
@@ -134,7 +113,7 @@ export function checkPrBranchExecutionGate(
   } catch {
     return {
       ok: false,
-      detail: `Refusing to ${actionLabel} on non-default branch ${branch.currentBranch}: could not list branch commits for GitHub author verification.`,
+      detail: `Refusing to ${actionLabel} on non-default branch ${branch.currentBranch}: could not list branch commits for GitHub author verification. Approve the run explicitly or use an isolated runner.`,
     };
   }
 
