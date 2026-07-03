@@ -2,7 +2,7 @@
 
 import { useState, useEffect, useCallback, useRef, memo } from 'react'
 import { useRouter } from 'next/navigation'
-import { fetchChanges, fetchChangeDiff, pullProject, pushProject, PullDivergedError, checkoutDefaultBranch } from '@/lib/client-api'
+import { fetchChanges, fetchChangeDiff, releaseProject, checkoutDefaultBranch } from '@/lib/client-api'
 import type { ChangeFile, ChangesResponse } from '@/lib/client-api'
 import { Button, buttonVariants } from '@/components/ui/Button'
 import { EmptyState } from '@/components/ui/EmptyState'
@@ -13,8 +13,8 @@ import { STATUS_LABEL, STATUS_COLOR, StatBar, OperationError } from '@/component
 interface ChangesTabProps {
   projectName: string
   jobsPaused?: boolean
-  /** True while a release pipeline runs — gates the tab's own Push/Pull so a
-      manual git action here can't race the pipeline's commit/push (mirrors the
+  /** True while a release pipeline runs — disables the tab's Release button so
+      a second release can't be started on top of the running one (mirrors the
       header ProjectActions gate). */
   isPipelineRunning?: boolean
 }
@@ -69,11 +69,8 @@ export function ChangesTab({ projectName, jobsPaused = false, isPipelineRunning 
   const [refreshing, setRefreshing] = useState(false)
   const [error, setError] = useState<string | null>(null)
   const [diffs, setDiffs] = useState<Record<string, DiffEntry>>({})
-  const [pulling, setPulling] = useState(false)
-  const [pullError, setPullError] = useState<string | null>(null)
-  const [diverged, setDiverged] = useState(false)
-  const [pushing, setPushing] = useState(false)
-  const [pushError, setPushError] = useState<string | null>(null)
+  const [releasing, setReleasing] = useState(false)
+  const [releaseError, setReleaseError] = useState<string | null>(null)
   const [switching, setSwitching] = useState(false)
   const [switchError, setSwitchError] = useState<string | null>(null)
 
@@ -95,21 +92,23 @@ export function ChangesTab({ projectName, jobsPaused = false, isPipelineRunning 
     }
   }, [projectName])
 
-  const doPull = async (strategy: 'ff-only' | 'merge' | 'rebase' = 'ff-only') => {
-    setPulling(true)
-    setPullError(null)
-    setDiverged(false)
+  // Manual push/pull are gone — unpushed commits (and a behind branch, which
+  // the push phase rebases onto origin) ship through the automatic Release
+  // pipeline. A branch that genuinely needs a human (diverged history) surfaces
+  // as a HITL inbox signal, not a button here.
+  const doRelease = async () => {
+    if (releasing || isPipelineRunning || jobsPaused) return
+    setReleasing(true)
+    setReleaseError(null)
     try {
-      await pullProject(projectName, strategy)
-      await load('refresh')
+      const result = await releaseProject(projectName)
+      const jobId = result.release_job_id ?? result.job_id
+      if (jobId) router.push(`/project/${projectName}/terminal?job=${jobId}`)
+      else await load('refresh')
     } catch (err) {
-      if (err instanceof PullDivergedError) {
-        setDiverged(true)
-      } else {
-        setPullError(err instanceof Error ? err.message : 'Pull failed')
-      }
+      setReleaseError(err instanceof Error ? err.message : 'Failed to start release')
     } finally {
-      setPulling(false)
+      setReleasing(false)
     }
   }
 
@@ -126,22 +125,6 @@ export function ChangesTab({ projectName, jobsPaused = false, isPipelineRunning 
     }
   }, [projectName, load])
 
-  const doPush = async () => {
-    if (jobsPaused) {
-      setPushError('Jobs are paused globally. Resume jobs to start a push.')
-      return
-    }
-    setPushing(true)
-    setPushError(null)
-    try {
-      const result = await pushProject(projectName)
-      router.push(`/project/${projectName}/terminal?job=${result.job_id}`)
-    } catch (err) {
-      setPushError(err instanceof Error ? err.message : 'Push failed')
-    } finally {
-      setPushing(false)
-    }
-  }
 
   useEffect(() => {
     const controller = new AbortController()
@@ -212,10 +195,12 @@ export function ChangesTab({ projectName, jobsPaused = false, isPipelineRunning 
 
   if (!data || data.files.length === 0) {
     const onNonDefault = !!(data?.branch && data.defaultBranch && data.branch !== data.defaultBranch)
-    const pushBlocked = jobsPaused || isPipelineRunning || pushing
-    const pushTitle = jobsPaused
-      ? 'Jobs are paused globally. Resume jobs to start a push.'
-      : `Push ${data?.ahead ?? 0} commit${data?.ahead === 1 ? '' : 's'} to origin`
+    const releaseBlocked = jobsPaused || isPipelineRunning || releasing
+    const releaseTitle = jobsPaused
+      ? 'Jobs are paused globally. Resume jobs to release.'
+      : isPipelineRunning
+        ? 'A release pipeline is already running.'
+        : 'Run the release pipeline — it commits, reviews, and pushes automatically.'
     return (
       <EmptyState
         paddingY="xs"
@@ -257,60 +242,23 @@ export function ChangesTab({ projectName, jobsPaused = false, isPipelineRunning 
             {(data?.ahead ?? 0) > 0 && (
               <div className="mt-3 flex flex-col items-center gap-2">
                 <p className="text-xs text-status-warning font-medium">
-                  ↑ {data!.ahead} commit{data!.ahead !== 1 ? 's' : ''} ahead of origin — not yet pushed
+                  ↑ {data!.ahead} commit{data!.ahead !== 1 ? 's' : ''} ahead of origin — will ship on release
                 </p>
                 <Button
                   variant="warning"
-                  onClick={doPush}
-                  disabled={pushBlocked}
-                  title={pushTitle}
+                  onClick={doRelease}
+                  disabled={releaseBlocked}
+                  title={releaseTitle}
                 >
-                  {pushing ? 'Pushing…' : `Push ${data!.ahead} commit${data!.ahead !== 1 ? 's' : ''}`}
+                  {releasing ? 'Releasing…' : 'Release'}
                 </Button>
-                {pushError && <OperationError message={pushError} />}
+                {releaseError && <OperationError message={releaseError} />}
               </div>
             )}
-            {(data?.behind ?? 0) > 0 && !diverged && (
-              <div className="mt-3 flex flex-col items-center gap-2">
-                <p className="text-xs text-status-warning font-medium">
-                  ↓ {data!.behind} commit{data!.behind !== 1 ? 's' : ''} behind origin{data?.branch ? `/${data.branch}` : ''}
-                </p>
-                <Button
-                  variant="warning"
-                  onClick={() => doPull('ff-only')}
-                  disabled={pulling || isPipelineRunning}
-                  title={`git pull --ff-only on ${data?.branch ?? 'branch'}`}
-                >
-                  {pulling ? 'Pulling…' : 'Pull'}
-                </Button>
-                {pullError && <OperationError message={pullError} />}
-              </div>
-            )}
-            {diverged && (
-              <div className="mt-3 flex flex-col items-center gap-2">
-                <p className="text-xs text-status-error font-medium">Branches diverged — choose strategy:</p>
-                <div className="flex items-center gap-2">
-                  <Button
-                    variant="info"
-                    onClick={() => doPull('rebase')}
-                    disabled={pulling || isPipelineRunning}
-                    title="git pull --rebase (replay your commits on top of remote)"
-                  >
-                    {pulling ? 'Working…' : 'Rebase'}
-                  </Button>
-                  <Button
-                    onClick={() => doPull('merge')}
-                    disabled={pulling || isPipelineRunning}
-                    title="git pull --no-ff (create a merge commit)"
-                  >
-                    {pulling ? 'Working…' : 'Merge'}
-                  </Button>
-                  <Button variant="ghost" onClick={() => setDiverged(false)}>
-                    ✕
-                  </Button>
-                </div>
-                {pullError && <OperationError message={pullError} />}
-              </div>
+            {(data?.behind ?? 0) > 0 && (
+              <p className="mt-3 text-xs text-text-tertiary">
+                ↓ {data!.behind} commit{data!.behind !== 1 ? 's' : ''} behind origin{data?.branch ? `/${data.branch}` : ''} — the release pipeline rebases onto origin automatically.
+              </p>
             )}
           </div>
         }
@@ -318,12 +266,14 @@ export function ChangesTab({ projectName, jobsPaused = false, isPipelineRunning 
     )
   }
 
-  const pushBlocked = jobsPaused || isPipelineRunning || pushing
-  const pushTitle = jobsPaused
-    ? 'Jobs are paused globally. Resume jobs to start a push.'
-    : `Push ${data.ahead} commit${data.ahead !== 1 ? 's' : ''} to origin/${data.branch}`
+  const releaseBlocked = jobsPaused || isPipelineRunning || releasing
+  const releaseTitle = jobsPaused
+    ? 'Jobs are paused globally. Resume jobs to release.'
+    : isPipelineRunning
+      ? 'A release pipeline is already running.'
+      : 'Run the release pipeline — it commits, reviews, and pushes automatically.'
   const showBranchSwitch = !!(data.branch && data.defaultBranch && data.branch !== data.defaultBranch)
-  const hasTreeAction = showBranchSwitch || data.ahead > 0 || (data.behind > 0 && !diverged) || diverged
+  const hasTreeAction = showBranchSwitch || data.ahead > 0
 
   return (
     <div className="mt-2">
@@ -359,10 +309,9 @@ export function ChangesTab({ projectName, jobsPaused = false, isPipelineRunning 
         </ErrorCallout>
       )}
       {/* Working-tree strip: an info line (branch · files · +/- · ahead/behind)
-          over a state-resolved action line. Every git action preserves its
-          exact gate — Push/Pull/Switch stay disabled under the same conditions
-          (jobsPaused, isPipelineRunning, uncommitted files) so a manual action
-          here still cannot race the pipeline. */}
+          over a state-resolved action line. Manual push/pull are gone — the
+          only shipping affordance is Release (the automatic pipeline). Behind
+          is informational: the push phase rebases onto origin automatically. */}
       <div className="mb-3 rounded-lg border border-border bg-bg-secondary">
         <div className="flex flex-wrap items-center gap-x-3 gap-y-1.5 px-4 py-2.5">
           <span className="inline-flex items-baseline gap-1.5">
@@ -427,65 +376,20 @@ export function ChangesTab({ projectName, jobsPaused = false, isPipelineRunning 
               <Button
                 variant="warning"
                 size="sm"
-                onClick={doPush}
-                disabled={pushBlocked}
-                title={pushTitle}
+                onClick={doRelease}
+                disabled={releaseBlocked}
+                title={releaseTitle}
               >
-                {pushing ? 'Pushing…' : `Push ${data.ahead} commit${data.ahead !== 1 ? 's' : ''}`}
+                {releasing ? 'Releasing…' : 'Release'}
               </Button>
-            )}
-            {data.behind > 0 && !diverged && (
-              <Button
-                variant={data.totalFiles > 0 ? 'secondary' : 'warning'}
-                size="sm"
-                onClick={() => doPull('ff-only')}
-                disabled={pulling || isPipelineRunning || data.totalFiles > 0}
-                title={
-                  data.totalFiles > 0
-                    ? `Commit or stash your ${data.totalFiles} local change${data.totalFiles !== 1 ? 's' : ''} before pulling`
-                    : `git pull --ff-only on ${data.branch}`
-                }
-              >
-                {pulling ? 'Pulling…' : 'Pull'}
-              </Button>
-            )}
-            {diverged && (
-              <>
-                <span className="text-xs text-status-error font-medium">Branches diverged — choose strategy:</span>
-                <Button
-                  variant="info"
-                  size="sm"
-                  onClick={() => doPull('rebase')}
-                  disabled={pulling || isPipelineRunning}
-                  title="git pull --rebase (replay your commits on top of remote)"
-                >
-                  {pulling ? 'Working…' : 'Rebase'}
-                </Button>
-                <Button
-                  size="sm"
-                  onClick={() => doPull('merge')}
-                  disabled={pulling || isPipelineRunning}
-                  title="git pull --no-ff (create a merge commit)"
-                >
-                  {pulling ? 'Working…' : 'Merge'}
-                </Button>
-                <Button
-                  variant="ghost"
-                  size="sm"
-                  onClick={() => setDiverged(false)}
-                >
-                  ✕
-                </Button>
-              </>
             )}
           </div>
         )}
 
-        {(switchError || pushError || pullError) && (
+        {(switchError || releaseError) && (
           <div className="flex flex-col gap-1 border-t border-border px-4 py-2">
             {switchError && <OperationError message={switchError} />}
-            {pushError && <OperationError message={pushError} />}
-            {pullError && <OperationError message={pullError} />}
+            {releaseError && <OperationError message={releaseError} />}
           </div>
         )}
       </div>

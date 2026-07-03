@@ -92,7 +92,6 @@ export function ProjectDetailPage({
   const [defaultBranch, setDefaultBranch] = useState<string | null>(null)
   const [branchCommitsAhead, setBranchCommitsAhead] = useState<number | null>(null)
   const [openPrBranches, setOpenPrBranches] = useState<string[]>([])
-  const [openPrByBranch, setOpenPrByBranch] = useState<Record<string, number>>({})
   const [boardUrl, setBoardUrl] = useState<string>('')
   const [jobsPaused, setJobsPaused] = useState(false)
   const jobsPausedEventSeqRef = useRef(0)
@@ -212,7 +211,6 @@ export function ProjectDetailPage({
       if (issuesRes.status === 'fulfilled') {
         setIssueCount({ prs: issuesRes.value.prCount, issues: issuesRes.value.issueCount })
         setOpenPrBranches(issuesRes.value.openPrBranches.map(b => b.branch))
-        setOpenPrByBranch(Object.fromEntries(issuesRes.value.openPrBranches.map(b => [b.branch, b.number])))
       }
       if (branchRes.status === 'fulfilled') {
         setCurrentBranch(branchRes.value.branch)
@@ -324,7 +322,6 @@ export function ProjectDetailPage({
     fetchIssuesAndPRs(name, true).then((data) => {
       setIssueCount({ prs: data.prs.length, issues: data.issues.length })
       setOpenPrBranches(data.prs.map((pr) => pr.headRefName))
-      setOpenPrByBranch(Object.fromEntries(data.prs.map((pr) => [pr.headRefName, pr.number])))
     }).catch(() => {})
   }
   const runningTest = projectJobs.find(j => j.kind === 'test' && j.status === 'running')
@@ -550,18 +547,12 @@ export function ProjectDetailPage({
         fixCiResult={projectActions.fixCiResult}
         releasing={projectActions.releasing}
         testing={projectActions.testing}
-        pushing={projectActions.pushing}
-        pulling={projectActions.pulling}
-        pullResult={projectActions.pullResult}
-        pullDiverged={projectActions.pullDiverged}
         behindCount={behindCount}
         creatingPr={projectActions.creatingPr}
-        pushingToPr={projectActions.pushingToPr}
         currentBranch={currentBranch}
         defaultBranch={defaultBranch}
         branchCommitsAhead={branchCommitsAhead}
         openPrBranches={openPrBranches}
-        openPrByBranch={openPrByBranch}
         customActions={customActions}
         runningActions={runningActions}
         releaseTag={releaseTag}
@@ -569,12 +560,8 @@ export function ProjectDetailPage({
         onFixCi={projectActions.handleFixCi}
         onRelease={projectActions.handleRelease}
         onCreatePr={projectActions.handleCreatePr}
-        onPushToPr={projectActions.handlePushToPr}
         onTest={projectActions.handleTest}
         onCustomAction={handleCustomAction}
-        onPush={projectActions.handlePush}
-        onPull={projectActions.handlePull}
-        onDismissDiverged={projectActions.dismissDiverged}
         onTogglePause={handleTogglePause}
         onToggleAutoRelease={handleToggleAutoRelease}
       />
