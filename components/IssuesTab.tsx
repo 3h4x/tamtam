@@ -1,7 +1,7 @@
 'use client'
 
 import { useState, useEffect, useCallback, useRef, useMemo } from 'react'
-import { useRouter } from 'next/navigation'
+import { usePathname, useRouter, useSearchParams } from 'next/navigation'
 import { ISSUE_FORMAT_INSTRUCTION } from '@/lib/agents/issue-template'
 import { fetchAgents, fetchIssuesAndPRs, fetchProjectConfig, runAgent } from '@/lib/client-api'
 import type { Agent, GhPullRequest, GhIssue, ProjectConfig } from '@/lib/client-api'
@@ -9,6 +9,8 @@ import { formatAgo } from '@/lib/shared/format'
 import { ErrorState } from './ErrorState'
 import { PRRow } from '@/components/issues-tab/PRRow'
 import { IssueRow } from '@/components/issues-tab/IssueRow'
+import { IssueDetailDrawer } from '@/components/issues-tab/IssueDetailDrawer'
+import { PRDetailDrawer } from '@/components/issues-tab/PRDetailDrawer'
 import { useToast } from '@/components/Toast'
 import { Button, buttonVariants } from '@/components/ui/Button'
 import { Spinner } from '@/components/ui/Spinner'
@@ -53,6 +55,8 @@ interface IssuesTabProps {
 
 export function IssuesTab({ projectName, onCountChange, jobsPaused = false }: IssuesTabProps) {
   const router = useRouter()
+  const pathname = usePathname()
+  const searchParams = useSearchParams()
   const { toast } = useToast()
   const [prs, setPrs] = useState<GhPullRequest[]>([])
   const [issues, setIssues] = useState<GhIssue[]>([])
@@ -85,6 +89,32 @@ export function IssuesTab({ projectName, onCountChange, jobsPaused = false }: Is
     else sorted.sort((a, b) => new Date(a.createdAt).getTime() - new Date(b.createdAt).getTime())
     return sorted
   }, [issues, issueSearch, issueSort, issueFacet])
+  // Deep-linkable issue detail: ?issue=<number> selects an open issue and
+  // opens the slide-over. Mirrors the History tab's ?job= drawer wiring.
+  const selectedIssue = useMemo(() => {
+    const n = searchParams?.get('issue')
+    if (!n) return null
+    return issues.find((i) => String(i.number) === n) ?? null
+  }, [searchParams, issues])
+  const updateSelectedIssue = useCallback((num: number | null) => {
+    const next = new URLSearchParams(searchParams?.toString() ?? '')
+    if (num != null) next.set('issue', String(num))
+    else next.delete('issue')
+    const qs = next.toString()
+    router.push(qs ? `${pathname}?${qs}` : pathname)
+  }, [pathname, router, searchParams])
+  const selectedPr = useMemo(() => {
+    const n = searchParams?.get('pr')
+    if (!n) return null
+    return prs.find((p) => String(p.number) === n) ?? null
+  }, [searchParams, prs])
+  const updateSelectedPr = useCallback((num: number | null) => {
+    const next = new URLSearchParams(searchParams?.toString() ?? '')
+    if (num != null) next.set('pr', String(num))
+    else next.delete('pr')
+    const qs = next.toString()
+    router.push(qs ? `${pathname}?${qs}` : pathname)
+  }, [pathname, router, searchParams])
   const onCountChangeRef = useRef(onCountChange)
   const trimmedIssueDraft = issueDraft.trim()
   const issuePlanningBlocked = jobsPaused || agentsLoading || planning || !ctoAgent || trimmedIssueDraft.length < 10
@@ -392,6 +422,7 @@ ${idea}`
                 projectName={projectName}
                 jobsPaused={jobsPaused}
                 onMerged={() => load('refresh')}
+                onOpen={(p) => updateSelectedPr(p.number)}
               />
             ))}
         </div>
@@ -449,7 +480,7 @@ ${idea}`
               </div>
             ) : (
               visibleIssues.map((issue) => (
-                <IssueRow key={issue.number} issue={issue} projectName={projectName} projectCfg={projectCfg} />
+                <IssueRow key={issue.number} issue={issue} projectName={projectName} projectCfg={projectCfg} onOpen={(i) => updateSelectedIssue(i.number)} />
               ))
             )}
           </div>
@@ -477,6 +508,15 @@ ${idea}`
           )}
         />
       )}
+
+      <IssueDetailDrawer
+        issue={selectedIssue}
+        projectName={projectName}
+        projectCfg={projectCfg}
+        onClose={() => updateSelectedIssue(null)}
+      />
+
+      <PRDetailDrawer pr={selectedPr} onClose={() => updateSelectedPr(null)} />
     </div>
   )
 }

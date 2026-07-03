@@ -117,6 +117,42 @@ describe('deriveInboxSignals', () => {
     expect(signals.find((x) => x.type === 'pr_needs_manual_merge')).toBeUndefined();
   });
 
+  it('flags a pr-wait that stopped on a merge conflict as needing manual merge (no silent stop)', () => {
+    const signals = deriveInboxSignals(
+      baseInput({
+        tasks: [makeTask({ project: 'alpha' })],
+        jobs: [makeJob({ project: 'alpha', kind: 'pr-wait', exitCode: 1, prWaitReason: 'conflict', prNumber: 77 })],
+        openPrNumbersByProject: { alpha: [77] },
+      }),
+    );
+    expect(signals.find((x) => x.type === 'pr_needs_manual_merge')).toMatchObject({
+      title: 'PR #77 needs manual merge',
+      action: { kind: 'merge', prNumber: 77 },
+    });
+  });
+
+  it('flags a pr-wait that finished non-zero with no recorded reason (never a silent stop)', () => {
+    const signals = deriveInboxSignals(
+      baseInput({
+        tasks: [makeTask({ project: 'alpha' })],
+        jobs: [makeJob({ project: 'alpha', kind: 'pr-wait', exitCode: 1, prWaitReason: null, prNumber: 78 })],
+        openPrNumbersByProject: { alpha: [78] },
+      }),
+    );
+    expect(signals.find((x) => x.type === 'pr_needs_manual_merge')).toMatchObject({ action: { prNumber: 78 } });
+  });
+
+  it('does not raise manual-merge for a benign terminal (pr_closed)', () => {
+    const signals = deriveInboxSignals(
+      baseInput({
+        tasks: [makeTask({ project: 'alpha' })],
+        jobs: [makeJob({ project: 'alpha', kind: 'pr-wait', exitCode: 1, prWaitReason: 'pr_closed', prNumber: 79 })],
+        openPrNumbersByProject: { alpha: [79] },
+      }),
+    );
+    expect(signals.find((x) => x.type === 'pr_needs_manual_merge')).toBeUndefined();
+  });
+
   it('surfaces manual-merge even while another pipeline is running (defer is permanent, not pipeline-resolvable)', () => {
     const signals = deriveInboxSignals(
       baseInput({

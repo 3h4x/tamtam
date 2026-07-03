@@ -6,6 +6,12 @@ Next.js monolith (App Router) for managing Claude-compatible CLI agents across m
 
 A **quality-gated release pipeline** for each tracked repo: `test → review → (fix loop) → commit → push → DoD (mark-dod) → pr-wait/merge → soak`. The **Release** button triggers it; with `auto_push_enabled`, the chain continues automatically. PR-vs-direct is decided at runtime from branch context (default branch → push direct; non-default → open or reuse a PR). Verdicts (`LGTM` / `NEEDS ATTENTION` / `DO NOT SHIP`) drive fix loops. The single global setting `fix_max_iterations` (default `0` = unlimited; run until success or the release wall-clock timeout) caps the review-driven loops: review→fix→review, test→fix→test, commit→fix→commit, and the review-driven push→fix→push leg. The optional `release_min_lines` gate can re-dispatch the same agent before release, and `release_reinforce_max_iterations` (default `3`) bounds those reinforce reruns; a no-progress rerun still releases whatever exists. Two failure-recovery loops keep finite hardcoded caps (2 attempts each) so a permanently broken environment can't loop forever even when the setting is 0 — the pre-push-hook rejection retry (`getPushFixAttemptCap()`) and the fix-CI fast-crash recovery (`FIX_CI_MAX_RETRIES`).
 
+### ULTIMATE requirement — merge or HITL, never a silent stop
+
+**Every release MUST terminate in exactly one of two states: (1) the work is _merged/shipped_, or (2) a _HITL signal_ is raised in the inbox (`/inbox`) telling the operator precisely what to decide and do.** A release must **never** end in a third state — stopped without merging **and** without surfacing anything. A silent stop (an issue that is "not merged and not in the inbox") is a **bug**, not an acceptable outcome.
+
+Enforcement lives in `lib/workflows/inbox.ts`: every non-merge `pr-wait` terminal — `conflict`, `risky_diff`, `merge_permanent`, `switch_failed`, `timeout`, or an unrecorded/blank failure — raises a `pr_needs_manual_merge` inbox signal. Only self-healing terminals (`checks_failed` → re-dispatched fix-ci) and benign terminals (`merged`, `pr_closed`) are exempt (the `NO_HITL_REASONS` denylist — anything not on it that finishes a pr-wait non-zero surfaces). When adding any new code path that can end a release without a merge, it MUST either self-heal (and be provably bounded) or emit an inbox HITL. Do not add a terminal that leaves an operator with no merge and no signal.
+
 See `docs/PIPELINE.md` for the full state machine.
 
 ## Concepts

@@ -1,6 +1,7 @@
 'use client'
 
 import { useEffect, useState } from 'react'
+import Link from 'next/link'
 import { Pill } from '@/components/ui/Pill'
 import { SegmentedControl } from '@/components/ui/SegmentedControl'
 import { ErrorCallout } from '@/components/ui/ErrorCallout'
@@ -131,7 +132,56 @@ function PipelineStatsSkeleton() {
   )
 }
 
-export function PipelineStatsPanel({ projectName }: { projectName: string }) {
+// Compact single-line KPI for the demoted Overview summary. Small value type,
+// no detail line — the full breakdown lives at /stats?tab=pipeline.
+function CompactKpi({
+  label,
+  value,
+  tone = 'default',
+}: {
+  label: string
+  value: string
+  tone?: 'default' | 'good' | 'warn' | 'info'
+}) {
+  const valueClass =
+    tone === 'good'
+      ? 'text-status-success'
+      : tone === 'warn'
+        ? 'text-status-warning'
+        : tone === 'info'
+          ? 'text-accent'
+          : 'text-text-primary'
+  return (
+    <div>
+      <div className="text-[10px] uppercase tracking-wider text-text-tertiary">{label}</div>
+      <div className={`mt-0.5 text-lg font-semibold tabular-nums ${valueClass}`}>{value}</div>
+    </div>
+  )
+}
+
+function PipelineStatsCompactSkeleton() {
+  return (
+    <section className="mb-4 rounded-lg border border-border bg-bg-secondary">
+      <div className="border-b border-border px-3 py-2">
+        <div className="skeleton h-4 w-40 rounded" />
+      </div>
+      <div className="flex flex-wrap gap-x-6 gap-y-2 px-3 py-2.5">
+        {Array.from({ length: 5 }).map((_, index) => (
+          <div key={index} className="space-y-1">
+            <div className="skeleton h-3 w-16 rounded" />
+            <div className="skeleton h-5 w-12 rounded" />
+          </div>
+        ))}
+      </div>
+    </section>
+  )
+}
+
+// `compact` renders a demoted, single-strip summary (5 KPIs + a deep-link to the
+// full pipeline stats page) instead of the full metric/step-card grid. The
+// Overview tab uses it so current-state surfaces own the fold; the standalone
+// /stats?tab=pipeline page renders the full panel.
+export function PipelineStatsPanel({ projectName, compact = false }: { projectName: string; compact?: boolean }) {
   const [window_, setWindow] = useState<Window>('30d')
   const [data, setData] = useState<ProjectPipelineStats | null>(null)
   const [loading, setLoading] = useState(true)
@@ -164,7 +214,7 @@ export function PipelineStatsPanel({ projectName }: { projectName: string }) {
     }
   }, [projectName, window_])
 
-  if (loading && !data) return <PipelineStatsSkeleton />
+  if (loading && !data) return compact ? <PipelineStatsCompactSkeleton /> : <PipelineStatsSkeleton />
 
   const refreshError = error && data ? `${error}. Showing last successful snapshot.` : null
 
@@ -179,6 +229,33 @@ export function PipelineStatsPanel({ projectName }: { projectName: string }) {
     data?.fixLoop.total && data.fixLoop.total > 0
       ? `${data.fixLoop.converged} converged · ${data.fixLoop.hitCap} exhausted`
       : 'No recovery loops observed'
+
+  if (compact) {
+    return (
+      <section className="mb-4 rounded-lg border border-border bg-bg-secondary">
+        <header className="flex flex-wrap items-center justify-between gap-2 border-b border-border px-3 py-2">
+          <div className="text-sm font-medium text-text-primary">
+            Pipeline performance
+            <span className="ml-1.5 text-xs font-normal text-text-tertiary">30-day averages</span>
+          </div>
+          <Link href="/stats?tab=pipeline" className="text-xs text-accent hover:underline">
+            View details →
+          </Link>
+        </header>
+        {error && !data ? (
+          <ErrorCallout radius="md" padding="md" className="m-3 text-sm">{error}</ErrorCallout>
+        ) : (
+          <div className="flex flex-wrap items-center gap-x-6 gap-y-2 px-3 py-2.5">
+            <CompactKpi label="avg release" value={formatDuration(data?.mttr?.avg)} tone="info" />
+            <CompactKpi label="cost / release" value={formatCost(data?.mttr?.avgCostUsd)} tone="info" />
+            <CompactKpi label="success" value={formatPercent(successRate)} tone={successTone} />
+            <CompactKpi label="avg tests" value={formatDuration(data?.stepDurations.test?.avg)} />
+            <CompactKpi label="fix loops" value={data?.fixLoop.total ? `${data.fixLoop.avgIterations.toFixed(1)}x` : '—'} />
+          </div>
+        )}
+      </section>
+    )
+  }
 
   return (
     <section className="mb-4 rounded-lg border border-border bg-bg-secondary">

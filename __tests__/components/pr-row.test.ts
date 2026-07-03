@@ -112,6 +112,7 @@ describe('PRRow', () => {
       pr: buildPr({ gates: { issueNumber: 77, tests: 'pass', review: 'warn', dod: 'warn', dodSummary: '2/3' } }),
       projectName: 'acme/widgets',
       onMerged: vi.fn(),
+      onOpen: () => {},
     })
 
     await vi.waitFor(() => expect(container.textContent).toContain('2/3'))
@@ -133,6 +134,7 @@ describe('PRRow', () => {
       pr: buildPr({ gates: { issueNumber: null, tests: 'pass', review: 'pass', dod: 'warn', dodSummary: '1/1' } }),
       projectName: 'acme/widgets',
       onMerged: vi.fn(),
+      onOpen: () => {},
     })
 
     await vi.waitFor(() => expect(container.textContent).toContain('1/1'))
@@ -165,6 +167,7 @@ describe('PRRow', () => {
       pr: buildPr(),
       projectName: 'acme/widgets',
       onMerged: vi.fn(),
+      onOpen: () => {},
     })
 
     const checksButton = Array.from(container.querySelectorAll('button')).find(node => node.textContent?.includes('1/2 checks'))
@@ -205,6 +208,7 @@ describe('PRRow', () => {
       }),
       projectName: 'acme/widgets',
       onMerged: vi.fn(),
+      onOpen: () => {},
     })
 
     expect(container.textContent).toContain('release')
@@ -224,6 +228,7 @@ describe('PRRow', () => {
       projectName: 'acme/widgets',
       jobsPaused: true,
       onMerged: vi.fn(),
+      onOpen: () => {},
     })
 
     const reviewButton = Array.from(container.querySelectorAll('button')).find(node => node.textContent?.trim() === 'Review')
@@ -236,6 +241,7 @@ describe('PRRow', () => {
       projectName: 'acme/widgets',
       jobsPaused: false,
       onMerged: vi.fn(),
+      onOpen: () => {},
     })
 
     await vi.waitFor(() => {
@@ -257,6 +263,7 @@ describe('PRRow', () => {
       projectName: 'acme/widgets',
       jobsPaused: true,
       onMerged: vi.fn(),
+      onOpen: () => {},
     })
 
     await vi.waitFor(() => expect(container.textContent).toContain('2/3'))
@@ -272,6 +279,7 @@ describe('PRRow', () => {
       projectName: 'acme/widgets',
       jobsPaused: false,
       onMerged: vi.fn(),
+      onOpen: () => {},
     })
 
     await vi.waitFor(() => {

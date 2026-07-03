@@ -95,15 +95,19 @@ export interface InboxInput {
   nowSeconds: number;
 }
 
-// pr-wait terminal reasons that mean auto-merge was deliberately deferred to a
-// human (HITL): the diff hit the high-risk-file guard, or the merge is
-// permanently blocked (e.g. branch protection). These leave an open PR that a
-// human must decide on — everything else either merged, self-heals (checks_failed
-// → fix-ci), or is transient (timeout).
-const HITL_MERGE_REASONS = new Set(['risky_diff', 'merge_permanent']);
+// pr-wait terminal reasons that do NOT need a human: the merge landed, the PR
+// was closed/abandoned, or a CI failure self-heals via a re-dispatched fix-ci.
+// EVERYTHING ELSE that finishes a pr-wait non-zero — a merge conflict, a failed
+// branch switch, a mergeability timeout, the high-risk-diff guard, a permanent
+// merge block, or an unrecorded/blank reason — leaves a stranded PR a human must
+// act on, so it MUST surface as a HITL signal instead of stopping silently.
+const NO_HITL_REASONS = new Set(['merged', 'pr_closed', 'checks_failed']);
 const MERGE_REASON_DETAIL: Record<string, string> = {
   risky_diff: 'Auto-merge deferred — PR diff touches high-risk execution files. Needs a human merge decision.',
   merge_permanent: 'Auto-merge blocked — manual merge required.',
+  conflict: 'Auto-merge blocked — the PR has merge conflicts with the base branch. Needs a manual rebase/resolve or merge.',
+  switch_failed: 'Auto-merge could not complete — the pipeline failed to switch branches. Needs a human check.',
+  timeout: 'Auto-merge timed out waiting for the PR to become mergeable. Needs a human check.',
 };
 
 // Kinds that mean a pipeline is actively working the project. When one is
@@ -186,8 +190,7 @@ export function deriveInboxSignals(input: InboxInput): InboxSignal[] {
       if (
         prWait.finishedAt === null ||
         (prWait.exitCode ?? 0) === 0 ||
-        !prWait.prWaitReason ||
-        !HITL_MERGE_REASONS.has(prWait.prWaitReason)
+        (prWait.prWaitReason != null && NO_HITL_REASONS.has(prWait.prWaitReason))
       ) {
         continue;
       }
@@ -201,7 +204,8 @@ export function deriveInboxSignals(input: InboxInput): InboxSignal[] {
         severity: 'yellow',
         project,
         title: `PR #${prNumber} needs manual merge`,
-        detail: MERGE_REASON_DETAIL[prWait.prWaitReason] ?? 'Auto-merge deferred to a human.',
+        detail: (prWait.prWaitReason ? MERGE_REASON_DETAIL[prWait.prWaitReason] : undefined)
+          ?? 'Auto-merge did not complete — needs a human merge/close decision.',
         href: `${projectHref(project)}/issues`,
         externalUrl: null,
         ageSeconds: null,

@@ -2,8 +2,6 @@
 
 import { useState } from 'react'
 import { useRouter } from 'next/navigation'
-import Markdown from 'react-markdown'
-import remarkGfm from 'remark-gfm'
 import { mergePR, approvePR, reviewPR, runMarkDod, addressPrComments } from '@/lib/client-api'
 import type { GhPullRequest } from '@/lib/client-api'
 import { formatAgo } from '@/lib/shared/format'
@@ -26,14 +24,15 @@ export function PRRow({
   projectName,
   jobsPaused = false,
   onMerged,
+  onOpen,
 }: {
   pr: GhPullRequest
   projectName: string
   jobsPaused?: boolean
   onMerged: () => void
+  onOpen: (pr: GhPullRequest) => void
 }) {
   const router = useRouter()
-  const [expanded, setExpanded] = useState(false)
   const [checksExpanded, setChecksExpanded] = useState(false)
   const [mergeConfirm, setMergeConfirm] = useState(false)
   const [mergeMethod, setMergeMethod] = useState<MergeMethod>('squash')
@@ -192,7 +191,7 @@ export function PRRow({
               type="button"
               variant="link"
               className="min-w-0 flex-1 text-sm text-text-primary font-medium hover:text-accent hover:no-underline text-left leading-5"
-              onClick={() => setExpanded((v) => !v)}
+              onClick={() => onOpen(pr)}
               title={pr.title}
             >
               <span className="line-clamp-2">{pr.title}</span>
@@ -454,11 +453,6 @@ export function PRRow({
           </a>
         </div>
       </div>
-      {expanded && pr.body && (
-        <div className="doc-markdown max-h-72 overflow-y-auto border-t border-border/50 bg-bg-primary px-10 pb-3 pt-2 text-xs">
-          <Markdown remarkPlugins={[remarkGfm]}>{pr.body}</Markdown>
-        </div>
-      )}
     </div>
   )
 }

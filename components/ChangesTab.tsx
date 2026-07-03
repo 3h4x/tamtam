@@ -3,33 +3,12 @@
 import { useState, useEffect, useCallback, useRef, memo } from 'react'
 import { useRouter } from 'next/navigation'
 import { fetchChanges, fetchChangeDiff, pullProject, pushProject, PullDivergedError, checkoutDefaultBranch } from '@/lib/client-api'
-import type { ChangeFile, ChangeStatus, ChangesResponse } from '@/lib/client-api'
+import type { ChangeFile, ChangesResponse } from '@/lib/client-api'
 import { Button, buttonVariants } from '@/components/ui/Button'
 import { EmptyState } from '@/components/ui/EmptyState'
 import { ErrorCallout } from '@/components/ui/ErrorCallout'
 import { ErrorState } from '@/components/ErrorState'
-
-const STATUS_LABEL: Record<ChangeStatus, string> = {
-  M: 'modified',
-  A: 'added',
-  D: 'deleted',
-  R: 'renamed',
-  C: 'copied',
-  U: 'unmerged',
-  T: 'type changed',
-}
-
-const STATUS_COLOR: Record<ChangeStatus, string> = {
-  M: 'text-status-warning bg-status-warning/15',
-  A: 'text-status-success bg-status-success/15',
-  D: 'text-status-error bg-status-error/15',
-  R: 'text-status-info bg-status-info/15',
-  C: 'text-status-info bg-status-info/15',
-  U: 'text-status-error bg-status-error/15',
-  T: 'text-status-warning bg-status-warning/15',
-}
-
-const STAT_BAR_BOXES = 5
+import { STATUS_LABEL, STATUS_COLOR, StatBar, OperationError } from '@/components/changes-tab/shared'
 
 interface ChangesTabProps {
   projectName: string
@@ -82,42 +61,6 @@ const DiffView = memo(function DiffView({ diff }: { diff: string }) {
     </pre>
   )
 })
-
-function StatBar({ additions, deletions }: { additions: number; deletions: number }) {
-  const total = additions + deletions
-  if (total === 0) return null
-  const minAdd = additions > 0 ? 1 : 0
-  const minDel = deletions > 0 ? 1 : 0
-  let addBoxes = Math.round((additions / total) * STAT_BAR_BOXES)
-  addBoxes = Math.max(minAdd, Math.min(addBoxes, STAT_BAR_BOXES - minDel))
-  const delBoxes = deletions > 0 ? STAT_BAR_BOXES - addBoxes : 0
-  const emptyBoxes = STAT_BAR_BOXES - addBoxes - delBoxes
-  return (
-    <span className="inline-flex gap-0.5 items-center">
-      {Array.from({ length: addBoxes }).map((_, i) => (
-        <span key={`a${i}`} className="w-1.5 h-1.5 bg-status-success rounded-sm" />
-      ))}
-      {Array.from({ length: delBoxes }).map((_, i) => (
-        <span key={`d${i}`} className="w-1.5 h-1.5 bg-status-error rounded-sm" />
-      ))}
-      {Array.from({ length: emptyBoxes }).map((_, i) => (
-        <span key={`e${i}`} className="w-1.5 h-1.5 bg-border rounded-sm" />
-      ))}
-    </span>
-  )
-}
-
-function OperationError({ message, className }: { message: string; className?: string }) {
-  return (
-    <ErrorCallout
-      padding="none"
-      preWrap={false}
-      className={['border-0 bg-transparent p-0 text-xs leading-snug', className].filter(Boolean).join(' ')}
-    >
-      {message}
-    </ErrorCallout>
-  )
-}
 
 export function ChangesTab({ projectName, jobsPaused = false, isPipelineRunning = false }: ChangesTabProps) {
   const router = useRouter()
@@ -379,6 +322,8 @@ export function ChangesTab({ projectName, jobsPaused = false, isPipelineRunning 
   const pushTitle = jobsPaused
     ? 'Jobs are paused globally. Resume jobs to start a push.'
     : `Push ${data.ahead} commit${data.ahead !== 1 ? 's' : ''} to origin/${data.branch}`
+  const showBranchSwitch = !!(data.branch && data.defaultBranch && data.branch !== data.defaultBranch)
+  const hasTreeAction = showBranchSwitch || data.ahead > 0 || (data.behind > 0 && !diverged) || diverged
 
   return (
     <div className="mt-2">
@@ -413,22 +358,46 @@ export function ChangesTab({ projectName, jobsPaused = false, isPipelineRunning 
           </Button>
         </ErrorCallout>
       )}
-      <div className="bg-bg-secondary rounded-lg p-4 mb-3 flex items-center gap-4 flex-wrap">
-        <div className="flex items-center gap-2">
-          <span className="text-text-secondary text-xs uppercase tracking-wider font-medium">Changes</span>
-          <span className="text-text-primary text-sm font-medium">
-            {data.totalFiles} file{data.totalFiles !== 1 ? 's' : ''}
+      {/* Working-tree strip: an info line (branch · files · +/- · ahead/behind)
+          over a state-resolved action line. Every git action preserves its
+          exact gate — Push/Pull/Switch stay disabled under the same conditions
+          (jobsPaused, isPipelineRunning, uncommitted files) so a manual action
+          here still cannot race the pipeline. */}
+      <div className="mb-3 rounded-lg border border-border bg-bg-secondary">
+        <div className="flex flex-wrap items-center gap-x-3 gap-y-1.5 px-4 py-2.5">
+          <span className="inline-flex items-baseline gap-1.5">
+            <span className="text-text-secondary text-xs uppercase tracking-wider font-medium">Changes</span>
+            <span className="text-text-primary text-sm font-medium tabular-nums">{data.totalFiles} file{data.totalFiles !== 1 ? 's' : ''}</span>
           </span>
-        </div>
-        <div className="flex items-center gap-2 text-sm">
-          <span className="text-status-success font-mono">+{data.totalAdditions}</span>
-          <span className="text-status-error font-mono">-{data.totalDeletions}</span>
-        </div>
-        {data.branch && (
-          <div className="flex items-center gap-2 text-sm">
-            <span className="text-text-secondary text-xs uppercase tracking-wider font-medium">Branch</span>
+          <span className="flex items-center gap-2 text-sm font-mono tabular-nums">
+            <span className="text-status-success">+{data.totalAdditions}</span>
+            <span className="text-status-error">-{data.totalDeletions}</span>
+          </span>
+          {data.branch && (
             <code className="font-mono text-xs bg-bg-tertiary px-1.5 py-0.5 rounded text-text-primary">{data.branch}</code>
-            {data.defaultBranch && data.branch !== data.defaultBranch && (
+          )}
+          {data.ahead > 0 && (
+            <span className="text-xs font-medium text-status-warning tabular-nums">↑ {data.ahead} ahead</span>
+          )}
+          {data.behind > 0 && (
+            <span className={`text-xs font-medium tabular-nums ${data.totalFiles > 0 ? 'text-text-tertiary' : 'text-status-warning'}`}>
+              ↓ {data.behind} behind origin/{data.branch}
+            </span>
+          )}
+          <Button
+            size="sm"
+            className="ml-auto"
+            onClick={() => load('refresh')}
+            disabled={refreshing}
+            title="Refresh"
+          >
+            {refreshing ? 'Refreshing...' : 'Refresh'}
+          </Button>
+        </div>
+
+        {hasTreeAction && (
+          <div className="flex flex-wrap items-center gap-2 border-t border-border px-4 py-2.5">
+            {showBranchSwitch && (
               <>
                 <Button
                   variant="info"
@@ -454,89 +423,71 @@ export function ChangesTab({ projectName, jobsPaused = false, isPipelineRunning 
                 )}
               </>
             )}
+            {data.ahead > 0 && (
+              <Button
+                variant="warning"
+                size="sm"
+                onClick={doPush}
+                disabled={pushBlocked}
+                title={pushTitle}
+              >
+                {pushing ? 'Pushing…' : `Push ${data.ahead} commit${data.ahead !== 1 ? 's' : ''}`}
+              </Button>
+            )}
+            {data.behind > 0 && !diverged && (
+              <Button
+                variant={data.totalFiles > 0 ? 'secondary' : 'warning'}
+                size="sm"
+                onClick={() => doPull('ff-only')}
+                disabled={pulling || isPipelineRunning || data.totalFiles > 0}
+                title={
+                  data.totalFiles > 0
+                    ? `Commit or stash your ${data.totalFiles} local change${data.totalFiles !== 1 ? 's' : ''} before pulling`
+                    : `git pull --ff-only on ${data.branch}`
+                }
+              >
+                {pulling ? 'Pulling…' : 'Pull'}
+              </Button>
+            )}
+            {diverged && (
+              <>
+                <span className="text-xs text-status-error font-medium">Branches diverged — choose strategy:</span>
+                <Button
+                  variant="info"
+                  size="sm"
+                  onClick={() => doPull('rebase')}
+                  disabled={pulling || isPipelineRunning}
+                  title="git pull --rebase (replay your commits on top of remote)"
+                >
+                  {pulling ? 'Working…' : 'Rebase'}
+                </Button>
+                <Button
+                  size="sm"
+                  onClick={() => doPull('merge')}
+                  disabled={pulling || isPipelineRunning}
+                  title="git pull --no-ff (create a merge commit)"
+                >
+                  {pulling ? 'Working…' : 'Merge'}
+                </Button>
+                <Button
+                  variant="ghost"
+                  size="sm"
+                  onClick={() => setDiverged(false)}
+                >
+                  ✕
+                </Button>
+              </>
+            )}
+          </div>
+        )}
+
+        {(switchError || pushError || pullError) && (
+          <div className="flex flex-col gap-1 border-t border-border px-4 py-2">
             {switchError && <OperationError message={switchError} />}
+            {pushError && <OperationError message={pushError} />}
+            {pullError && <OperationError message={pullError} />}
           </div>
         )}
-        {data.ahead > 0 && (
-          <div className="flex items-center gap-2">
-            <span className="text-xs font-medium text-status-warning">
-              ↑ {data.ahead} commit{data.ahead !== 1 ? 's' : ''} ahead
-            </span>
-            <Button
-              variant="warning"
-              size="sm"
-              onClick={doPush}
-              disabled={pushBlocked}
-              title={pushTitle}
-            >
-              {pushing ? 'Pushing…' : 'Push'}
-            </Button>
-          </div>
-        )}
-        {data.behind > 0 && !diverged && (
-          <div className="flex items-center gap-2">
-            <span className={`text-xs font-medium ${data.totalFiles > 0 ? 'text-text-tertiary' : 'text-status-warning'}`}>
-              ↓ {data.behind} commit{data.behind !== 1 ? 's' : ''} behind origin/{data.branch}
-            </span>
-            <Button
-              variant={data.totalFiles > 0 ? 'secondary' : 'warning'}
-              size="sm"
-              onClick={() => doPull('ff-only')}
-              disabled={pulling || isPipelineRunning || data.totalFiles > 0}
-              title={
-                data.totalFiles > 0
-                  ? `Commit or stash your ${data.totalFiles} local change${data.totalFiles !== 1 ? 's' : ''} before pulling`
-                  : `git pull --ff-only on ${data.branch}`
-              }
-            >
-              {pulling ? 'Pulling…' : 'Pull'}
-            </Button>
-          </div>
-        )}
-        {diverged && (
-          <div className="flex items-center gap-2 flex-wrap">
-            <span className="text-xs text-status-error font-medium">Branches diverged — choose strategy:</span>
-            <Button
-              variant="info"
-              size="sm"
-              onClick={() => doPull('rebase')}
-              disabled={pulling || isPipelineRunning}
-              title="git pull --rebase (replay your commits on top of remote)"
-            >
-              {pulling ? 'Working…' : 'Rebase'}
-            </Button>
-            <Button
-              size="sm"
-              onClick={() => doPull('merge')}
-              disabled={pulling || isPipelineRunning}
-              title="git pull --no-ff (create a merge commit)"
-            >
-              {pulling ? 'Working…' : 'Merge'}
-            </Button>
-            <Button
-              variant="ghost"
-              size="sm"
-              onClick={() => setDiverged(false)}
-            >
-              ✕
-            </Button>
-          </div>
-        )}
-        {pushError && (
-          <OperationError message={pushError} />
-        )}
-        {pullError && (
-          <OperationError message={pullError} />
-        )}
-        <Button
-          size="sm"
-          className="ml-auto"
-          onClick={() => load('refresh')}
-          disabled={refreshing}
-          title="Refresh"
-        >
-          {refreshing ? 'Refreshing...' : 'Refresh'}
-        </Button>
       </div>
 
       <div className="border border-border rounded-lg overflow-hidden bg-bg-secondary">

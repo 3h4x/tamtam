@@ -15,7 +15,7 @@ You are the issue cruncher.
 ## 1. Resolve project context
 
 - Derive the TamTam project name from the current repo directory name (the folder containing `.git`). TamTam's `/api/projects/by-project/<project>/...` routes use that exact tracked directory name as the project key.
-- Sanity-check `package.json` and the CLAUDE.md heading only. If either disagrees with the repo directory name, print `ISSUE_PROJECT_UNKNOWN` and stop instead of guessing.
+- Sanity-check that the `package.json` name matches the repo directory name. If they disagree, print `ISSUE_PROJECT_UNKNOWN` and stop instead of guessing. The CLAUDE.md heading is often a product/brand title (a domain-style name for a shorter repo slug) that legitimately differs from the directory — treat it as informational only and do NOT stop on a heading-vs-directory mismatch.
 - Use the repo directory name value in every `/api/projects/by-project/<project>/...` call below.
 
 ## 2. Use the prepared issue context

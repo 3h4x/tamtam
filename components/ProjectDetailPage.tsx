@@ -2,9 +2,10 @@
 
 import { useState, useEffect, useRef, Suspense } from 'react'
 import { useParams, useRouter } from 'next/navigation'
-import { fixCi, releaseProject, fetchJobs, fetchProjectConfig, updateProjectConfig, fetchCustomActions, runCustomAction, saveCustomActions, pullProject, fetchBehind, PullDivergedError, testProject, fetchIssuesAndPRs, fetchIssuesSummary, pushProject, fetchBranch, createProjectPR, CreatePRPrePushHookError, fetchSettings } from '@/lib/client-api'
+import { fetchJobs, fetchProjectConfig, updateProjectConfig, fetchCustomActions, runCustomAction, saveCustomActions, fetchBehind, fetchIssuesAndPRs, fetchIssuesSummary, fetchBranch, fetchSettings } from '@/lib/client-api'
 import type { JobInfo, ProjectConfig, CustomAction } from '@/lib/client-api'
 import { FleetHealth } from '@/hooks/useProjectHealth'
+import { useProjectActions } from '@/hooks/useProjectActions'
 import { getAggregateCi } from '@/lib/shared/statusConstants'
 import { TerminalTab } from '@/components/TerminalTab'
 import { ProjectRunsTab } from '@/components/ProjectRunsTab'
@@ -17,7 +18,7 @@ import { subscribeToJobsPausedChanged } from '@/lib/shared/jobs-paused-events'
 import { ConfigTab } from '@/components/project-detail/ConfigTab'
 import { RetrievalReindexPanel } from '@/components/project-detail/RetrievalReindexPanel'
 import { PipelineStrip } from '@/components/project-detail/PipelineStrip'
-import { ProjectActions } from '@/components/project-detail/ProjectActions'
+import { ProjectHeader } from '@/components/project-detail/ProjectHeader'
 import { ReleasePlanPanel } from '@/components/project-detail/ReleasePlanPanel'
 import { TabNav } from '@/components/project-detail/TabNav'
 import { ProjectPageLoadingState } from '@/components/project-detail/ProjectPageLoadingState'
@@ -25,9 +26,7 @@ import { OverviewTab } from '@/components/project-detail/OverviewTab'
 import { AgentsTab } from '@/components/AgentsTab'
 import { buildProjectPath, buildProjectSetupPath, buildProjectTerminalPath } from '@/lib/client/project-routes'
 import { resolveGithubBoardUrl } from '@/lib/client/resolve-github-board-url'
-import { ProjectLogo } from '@/components/ProjectLogo'
-import { Button, buttonVariants } from '@/components/ui/Button'
-import { Pill, PillButton } from '@/components/ui/Pill'
+import { Button } from '@/components/ui/Button'
 
 type Tab = 'overview' | 'config' | 'history' | 'terminal' | 'changes' | 'issues' | 'docs' | 'agents'
 const VALID_TABS: readonly Tab[] = ['overview', 'config', 'history', 'terminal', 'changes', 'issues', 'docs', 'agents']
@@ -86,8 +85,6 @@ export function ProjectDetailPage({
   const setActiveTab = (tab: Tab) => {
     router.push(tab === 'overview' ? buildProjectPath(name) : buildProjectPath(name, tab))
   }
-  const [fixingCi, setFixingCi] = useState(false)
-  const [fixCiResult, setFixCiResult] = useState<string | null>(null)
   const [projectJobs, setProjectJobs] = useState<JobInfo[]>([])
   const [jobsLoaded, setJobsLoaded] = useState(false)
   const [issueCount, setIssueCount] = useState<{ prs: number; issues: number } | null>(null)
@@ -96,8 +93,6 @@ export function ProjectDetailPage({
   const [branchCommitsAhead, setBranchCommitsAhead] = useState<number | null>(null)
   const [openPrBranches, setOpenPrBranches] = useState<string[]>([])
   const [openPrByBranch, setOpenPrByBranch] = useState<Record<string, number>>({})
-  const [creatingPr, setCreatingPr] = useState(false)
-  const [pushingToPr, setPushingToPr] = useState(false)
   const [boardUrl, setBoardUrl] = useState<string>('')
   const [jobsPaused, setJobsPaused] = useState(false)
   const jobsPausedEventSeqRef = useRef(0)
@@ -142,12 +137,6 @@ export function ProjectDetailPage({
   const [actionsSaving, setActionsSaving] = useState(false)
   const [actionsSaved, setActionsSaved] = useState(false)
   const [actionsLoaded, setActionsLoaded] = useState(false)
-  const [releasing, setReleasing] = useState(false)
-  const [testing, setTesting] = useState(false)
-  const [pushing, setPushing] = useState(false)
-  const [pulling, setPulling] = useState(false)
-  const [pullResult, setPullResult] = useState<string | null>(null)
-  const [pullDiverged, setPullDiverged] = useState(false)
   const [behindCount, setBehindCount] = useState(0)
 
   useEffect(() => {
@@ -331,6 +320,21 @@ export function ProjectDetailPage({
     return () => { active = false; clearInterval(interval) }
   }, [name, projectId])
 
+  const refreshIssuesAfterPr = () => {
+    fetchIssuesAndPRs(name, true).then((data) => {
+      setIssueCount({ prs: data.prs.length, issues: data.issues.length })
+      setOpenPrBranches(data.prs.map((pr) => pr.headRefName))
+      setOpenPrByBranch(Object.fromEntries(data.prs.map((pr) => [pr.headRefName, pr.number])))
+    }).catch(() => {})
+  }
+  const runningTest = projectJobs.find(j => j.kind === 'test' && j.status === 'running')
+  const isTestRunning = !!runningTest
+  const projectActions = useProjectActions(name, {
+    isTestRunning,
+    onBehindReset: () => setBehindCount(0),
+    onPrCreated: refreshIssuesAfterPr,
+  })
+
   if (!project) {
     // An empty fleet means the projects list hasn't loaded yet — the cold
     // `/api/projects` sweep does git ops across every tracked repo and can take
@@ -366,8 +370,6 @@ export function ProjectDetailPage({
   const runningReview = projectJobs.find(j => j.kind === 'review' && j.status === 'running')
   const isReviewRunning = !!runningReview
   const isCiFixRunning = projectJobs.some(j => j.kind === 'fix-ci' && j.status === 'running')
-  const runningTest = projectJobs.find(j => j.kind === 'test' && j.status === 'running')
-  const isTestRunning = !!runningTest
   const isPipelineRunning = isPipelineBusy(projectJobs)
 
   // Get latest review verdict
@@ -391,150 +393,6 @@ export function ProjectDetailPage({
     if (j.kind !== 'release' || !j.parent_job_id) continue
     const parent = projectJobs.find(p => p.id === j.parent_job_id)
     if (parent) runningParentLookup.set(j.id, parent)
-  }
-
-  const handlePull = async (strategy: 'ff-only' | 'merge' | 'rebase' = 'ff-only') => {
-    if (!name || pulling) return
-    setPulling(true)
-    setPullResult(null)
-    setPullDiverged(false)
-    try {
-      const res = await pullProject(name, strategy)
-      const msg = res.output || 'Already up to date.'
-      const alreadyUpToDate = msg.includes('Already up to date')
-      setPullResult(alreadyUpToDate ? 'Already up to date.' : 'Pulled.')
-      if (!alreadyUpToDate) setBehindCount(0)
-      setTimeout(() => setPullResult(null), 4000)
-    } catch (err) {
-      if (err instanceof PullDivergedError) {
-        setPullDiverged(true)
-      } else {
-        setPullResult(err instanceof Error ? err.message : 'Pull failed')
-        setTimeout(() => setPullResult(null), 6000)
-      }
-    } finally {
-      setPulling(false)
-    }
-  }
-
-  const handleTest = async () => {
-    if (!name || testing || isTestRunning) return
-    setTesting(true)
-    try {
-      const result = await testProject(name)
-      router.push(buildProjectTerminalPath(name, { jobId: result.job_id }))
-    } catch (err) {
-      toast(err instanceof Error ? err.message : 'Failed to start test', 'error')
-    } finally {
-      setTesting(false)
-    }
-  }
-
-  const handlePush = async () => {
-    if (!name || pushing) return
-    setPushing(true)
-    try {
-      const result = await pushProject(name)
-      router.push(buildProjectTerminalPath(name, { jobId: result.job_id }))
-    } catch (err) {
-      toast(err instanceof Error ? err.message : 'Failed to push', 'error')
-    } finally {
-      setPushing(false)
-    }
-  }
-
-  const handleRelease = async () => {
-    if (!name || releasing) return
-    setReleasing(true)
-    try {
-      const result = await releaseProject(name)
-      toast(`${result.step}: ${result.message}`, 'info')
-      const jobIdToOpen = result.release_job_id ?? result.job_id
-      if (jobIdToOpen) {
-        router.push(buildProjectTerminalPath(name, { jobId: jobIdToOpen }))
-      }
-    } catch (err) {
-      const error = err as Error & { isPipelineLocked?: boolean; blockingJobId?: string }
-      if (error.isPipelineLocked) {
-        const msg = error.blockingJobId
-          ? `Pipeline is running (job ${error.blockingJobId}). Click the job to watch its progress.`
-          : (error.message || 'Pipeline is already running. Wait for it to complete before starting another release.')
-        toast(msg, 'info')
-      } else {
-        toast(error instanceof Error ? error.message : 'Failed to start release', 'error')
-      }
-    } finally {
-      setReleasing(false)
-    }
-  }
-
-  const handlePushToPr = async () => {
-    if (!name || pushingToPr) return
-    setPushingToPr(true)
-    try {
-      const result = await pushProject(name, { commit: true })
-      router.push(buildProjectTerminalPath(name, { jobId: result.job_id }))
-    } catch (err) {
-      toast(err instanceof Error ? err.message : 'Failed to push to PR', 'error')
-    } finally {
-      setPushingToPr(false)
-    }
-  }
-
-  const runCreatePr = async (opts: { force?: boolean } = {}) => {
-    const result = await createProjectPR(name!, opts)
-    toast(result.url ? `Pull request created: ${result.url}` : 'Pull request created', 'success')
-    fetchIssuesAndPRs(name!, true).then((data) => {
-      setIssueCount({ prs: data.prs.length, issues: data.issues.length })
-      setOpenPrBranches(data.prs.map(pr => pr.headRefName))
-      setOpenPrByBranch(Object.fromEntries(data.prs.map(pr => [pr.headRefName, pr.number])))
-    }).catch(() => {})
-  }
-
-  const handleCreatePr = async () => {
-    if (!name || creatingPr) return
-    setCreatingPr(true)
-    try {
-      await runCreatePr()
-    } catch (err) {
-      // Pre-push hook blocked the push (e.g. repo's local tests/lint failed).
-      // Offer the user a one-click force-create that pushes with --no-verify.
-      if (err instanceof CreatePRPrePushHookError) {
-        const detail = err.message.length > 800 ? err.message.slice(0, 800) + '\n\n…(truncated)' : err.message
-        const summary = err.hookFailure === 'pre-push-tests'
-          ? "The repo's pre-push tests failed."
-          : 'The repo\'s pre-push hook (lint/typecheck) failed.'
-        const confirmed = typeof window !== 'undefined' && window.confirm(
-          `${summary}\n\n${detail}\n\nForce-create the PR anyway? (pushes with --no-verify, skipping the hook).`,
-        )
-        if (confirmed) {
-          try {
-            await runCreatePr({ force: true })
-          } catch (forceErr) {
-            toast(forceErr instanceof Error ? forceErr.message : 'Failed to force-create PR', 'error')
-          }
-        } else {
-          toast('PR creation cancelled — fix the failing tests/lint, or click Create PR again to force.', 'info')
-        }
-      } else {
-        toast(err instanceof Error ? err.message : 'Failed to create PR', 'error')
-      }
-    } finally {
-      setCreatingPr(false)
-    }
-  }
-
-  const handleFixCi = async () => {
-    if (!name || fixingCi) return
-    setFixingCi(true)
-    setFixCiResult(null)
-    try {
-      const result = await fixCi(name)
-      router.push(buildProjectTerminalPath(name, { jobId: result.job_id }))
-    } catch (err) {
-      setFixCiResult(err instanceof Error ? err.message : 'Failed to start CI fix')
-      setFixingCi(false)
-    }
   }
 
   const handleSaveActions = async () => {
@@ -638,215 +496,88 @@ export function ProjectDetailPage({
     ])
   }
 
+  const handleTogglePause = async () => {
+    const next = !config?.paused
+    try {
+      const res = await fetch(`/api/projects/by-project/${encodeURIComponent(name)}`, {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ paused: next }),
+      })
+      if (!res.ok) throw new Error(`HTTP ${res.status}`)
+      applyConfigData(await fetchProjectConfig(name, { force: true }))
+      toast(next ? `${name} paused — automated runs blocked` : `${name} resumed`, 'success')
+    } catch (err) {
+      toast(err instanceof Error ? err.message : 'Failed to toggle pause', 'error')
+    }
+  }
+
+  const handleToggleAutoRelease = async () => {
+    const next = !config?.release_after_run
+    try {
+      const res = await fetch(`/api/projects/by-project/${encodeURIComponent(name)}/config`, {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ release_after_run: next }),
+      })
+      if (!res.ok) throw new Error(`HTTP ${res.status}`)
+      applyConfigData(await fetchProjectConfig(name, { force: true }))
+      toast(next ? `Auto release enabled for ${name}` : `Auto release disabled for ${name}`, 'success')
+    } catch (err) {
+      toast(err instanceof Error ? err.message : 'Failed to toggle auto release', 'error')
+    }
+  }
+
   return (
     <div className="px-0 py-1">
-      {/* Header is split into two stacked rows: project identity on top and the
-          action toolbar below. This keeps the toolbar left-aligned and stable
-          regardless of branch-chip length or active tab. */}
-      <div className="mb-4 flex flex-col gap-3">
-        <div className="flex items-center gap-2 min-w-0 flex-wrap">
-          <ProjectLogo projectName={project.project} size={24} />
-          <h2 className="text-xl font-semibold text-text-primary" data-private>{project.project}</h2>
-          {currentBranch && (() => {
-            const isDefault = !!defaultBranch && currentBranch === defaultBranch
-            // On the default branch the pill is noise — hide entirely.
-            // On a feature branch, show just the git-branch icon (+ ahead/behind
-            // counts) and put the full branch name in the tooltip. The branch
-            // name itself is usually long and redundant with the issue chip
-            // that renders next to this.
-            if (isDefault) return null
-            const ahead = branchCommitsAhead ?? 0
-            const behind = behindCount
-            return (
-              <Pill
-                tone="accent"
-                size="xs"
-                className="rounded-full border-accent/30 bg-accent-light font-mono"
-                title={`On feature branch ${currentBranch} — default is ${defaultBranch ?? 'unknown'}`}
-                data-private
-              >
-                <svg viewBox="0 0 16 16" width="12" height="12" fill="currentColor" aria-hidden="true" className="shrink-0">
-                  <path d="M11.75 2.5a.75.75 0 100 1.5.75.75 0 000-1.5zm-2.25.75a2.25 2.25 0 113 2.122V6A2.5 2.5 0 0110 8.5H6a1 1 0 00-1 1v1.128a2.251 2.251 0 11-1.5 0V5.372a2.25 2.25 0 111.5 0v1.836A2.492 2.492 0 016 7h4a1 1 0 001-1v-.628A2.25 2.25 0 019.5 3.25zM4.25 12a.75.75 0 100 1.5.75.75 0 000-1.5zM3.5 3.25a.75.75 0 111.5 0 .75.75 0 01-1.5 0z" />
-                </svg>
-                {ahead > 0 && (
-                  <span className="text-status-warning tabular-nums" title={`${ahead} commit${ahead !== 1 ? 's' : ''} ahead of origin/${defaultBranch ?? 'default'}`}>
-                    ↑{ahead}
-                  </span>
-                )}
-                {behind > 0 && (
-                  <span className="text-status-info tabular-nums" title={`${behind} commit${behind !== 1 ? 's' : ''} behind origin`}>
-                    ↓{behind}
-                  </span>
-                )}
-              </Pill>
-            )
-          })()}
-          {currentBranch && githubUrl && (() => {
-            const m = currentBranch.match(/^fix\/issue-(\d+)/)
-            if (!m) return null
-            const issueNumber = m[1]
-            return (
-              <a
-                href={`${githubUrl}/issues/${issueNumber}`}
-                target="_blank"
-                rel="noopener noreferrer"
-                className={buttonVariants({
-                  variant: 'info',
-                  size: 'sm',
-                  className: 'rounded-full py-0.5 font-mono',
-                })}
-                title={`Open linked GitHub issue #${issueNumber}`}
-              >
-                <svg viewBox="0 0 16 16" width="12" height="12" fill="currentColor" aria-hidden="true" className="shrink-0">
-                  <path d="M8 9.5a1.5 1.5 0 100-3 1.5 1.5 0 000 3z"/>
-                  <path d="M8 0a8 8 0 100 16A8 8 0 008 0zM1.5 8a6.5 6.5 0 1113 0 6.5 6.5 0 01-13 0z"/>
-                </svg>
-                <span>#{issueNumber}</span>
-              </a>
-            )
-          })()}
-          {releaseTag && (
-            <Pill
-              size="xs"
-              className="gap-1 rounded-full bg-bg-secondary font-mono tabular-nums"
-              title="Latest release"
-              data-private
-            >
-              <svg viewBox="0 0 16 16" width="12" height="12" fill="currentColor" aria-hidden="true" className="shrink-0">
-                <path d="M2.5 7.775V2.75a.25.25 0 01.25-.25h5.025a.25.25 0 01.177.073l6.25 6.25a.25.25 0 010 .354l-5.025 5.025a.25.25 0 01-.354 0l-6.25-6.25a.25.25 0 01-.073-.177zm-1.5 0V2.75C1 1.784 1.784 1 2.75 1h5.025c.464 0 .91.184 1.238.513l6.25 6.25a1.75 1.75 0 010 2.474l-5.026 5.026a1.75 1.75 0 01-2.474 0l-6.25-6.25A1.75 1.75 0 011 7.775zM6 5a1 1 0 100 2 1 1 0 000-2z" />
-              </svg>
-              {releaseTag}
-            </Pill>
-          )}
-          {boardUrl && (
-            <a
-              href={`${boardUrl}?filterQuery=${encodeURIComponent(name)}`}
-              target="_blank"
-              rel="noopener noreferrer"
-              className={buttonVariants({
-                variant: 'secondary',
-                size: 'sm',
-                className: 'rounded-full py-0.5 font-normal text-text-secondary hover:border-accent/40 hover:text-accent',
-              })}
-              title="Open this project on the TamTam GitHub board"
-            >
-              Board ↗
-            </a>
-          )}
-          <PillButton
-            type="button"
-            tone="warning"
-            active={!!config?.paused}
-            inactiveStyle="subtle"
-            aria-label={config?.paused ? 'Resume project' : 'Pause project'}
-            aria-pressed={!!config?.paused}
-            onClick={async () => {
-              const next = !config?.paused
-              try {
-                const res = await fetch(`/api/projects/by-project/${encodeURIComponent(name)}`, {
-                  method: 'PATCH',
-                  headers: { 'Content-Type': 'application/json' },
-                  body: JSON.stringify({ paused: next }),
-                })
-                if (!res.ok) throw new Error(`HTTP ${res.status}`)
-                applyConfigData(await fetchProjectConfig(name, { force: true }))
-                toast(next ? `${name} paused — automated runs blocked` : `${name} resumed`, 'success')
-              } catch (err) {
-                toast(err instanceof Error ? err.message : 'Failed to toggle pause', 'error')
-              }
-            }}
-            className={
-              config?.paused
-                ? 'gap-1 rounded-full border-status-warning/40 bg-status-warning/10 hover:bg-status-warning/20'
-                : 'gap-1 rounded-full bg-bg-secondary hover:border-accent/40 hover:bg-bg-secondary hover:text-accent'
-            }
-            title={config?.paused
-              ? 'Project is paused — scheduled agents, agent API runs, and releases are blocked. Manual terminal sessions still work. Click to resume.'
-              : 'Pause this project: blocks scheduled agents, agent API runs, and releases without affecting other projects.'}
-          >
-            <span className={`h-1.5 w-1.5 shrink-0 rounded-full ${config?.paused ? 'bg-status-warning' : 'border border-text-tertiary'}`} aria-hidden />
-            {config?.paused ? 'Paused' : 'Pause'}
-          </PillButton>
-          <PillButton
-            type="button"
-            tone="accent"
-            active={!!config?.release_after_run}
-            inactiveStyle="subtle"
-            aria-pressed={!!config?.release_after_run}
-            onClick={async () => {
-              const next = !config?.release_after_run
-              try {
-                const res = await fetch(`/api/projects/by-project/${encodeURIComponent(name)}/config`, {
-                  method: 'PATCH',
-                  headers: { 'Content-Type': 'application/json' },
-                  body: JSON.stringify({ release_after_run: next }),
-                })
-                if (!res.ok) throw new Error(`HTTP ${res.status}`)
-                applyConfigData(await fetchProjectConfig(name, { force: true }))
-                toast(next ? `Auto release enabled for ${name}` : `Auto release disabled for ${name}`, 'success')
-              } catch (err) {
-                toast(err instanceof Error ? err.message : 'Failed to toggle auto release', 'error')
-              }
-            }}
-            className={
-              config?.release_after_run
-                ? 'gap-1 rounded-full border-accent/40 hover:bg-accent/20'
-                : 'gap-1 rounded-full bg-bg-secondary hover:border-accent/40 hover:bg-bg-secondary hover:text-accent'
-            }
-            title={config?.release_after_run
-              ? 'Auto release is ON — release pipeline triggers after each terminal or agent run finishes. Click to disable.'
-              : 'Auto release is OFF — click to auto-trigger the release pipeline after each terminal or agent run.'}
-          >
-            <span className={`h-1.5 w-1.5 shrink-0 rounded-full ${config?.release_after_run ? 'bg-status-success' : 'border border-text-tertiary'}`} aria-hidden />
-            {config?.release_after_run ? 'Auto release ON' : 'Auto release'}
-          </PillButton>
-        </div>
-        <div className="flex items-center gap-2 flex-wrap justify-end">
-          <ProjectActions
-            projectName={name}
-            totalChanges={project.totalChanges}
-            unpushed={project.unpushed ?? 0}
-            aggregateCi={aggregateCi}
-            ciFailedUrl={ciFailedUrl}
-            githubUrl={githubUrl}
-            websiteUrl={config?.website ?? null}
-            jobsPaused={jobsPaused}
-            config={config}
-            verdict={verdict}
-            hasUnreviewed={hasUnreviewed}
-            isPipelineRunning={isPipelineRunning}
-            isTestRunning={isTestRunning}
-            isCiFixRunning={isCiFixRunning}
-            fixingCi={fixingCi}
-            fixCiResult={fixCiResult}
-            releasing={releasing}
-            testing={testing}
-            pushing={pushing}
-            pulling={pulling}
-            pullResult={pullResult}
-            pullDiverged={pullDiverged}
-            behindCount={behindCount}
-            creatingPr={creatingPr}
-            pushingToPr={pushingToPr}
-            currentBranch={currentBranch}
-            defaultBranch={defaultBranch}
-            branchCommitsAhead={branchCommitsAhead}
-            openPrBranches={openPrBranches}
-            openPrByBranch={openPrByBranch}
-            customActions={customActions}
-            runningActions={runningActions}
-            onFixCi={handleFixCi}
-            onRelease={handleRelease}
-            onCreatePr={handleCreatePr}
-            onPushToPr={handlePushToPr}
-            onTest={handleTest}
-            onCustomAction={handleCustomAction}
-            onPush={handlePush}
-            onPull={handlePull}
-            onDismissDiverged={() => setPullDiverged(false)}
-          />
-        </div>
-      </div>
+      <ProjectHeader
+        project={project}
+        projectName={name}
+        totalChanges={project.totalChanges}
+        unpushed={project.unpushed ?? 0}
+        aggregateCi={aggregateCi}
+        ciFailedUrl={ciFailedUrl}
+        githubUrl={githubUrl}
+        websiteUrl={config?.website ?? null}
+        jobsPaused={jobsPaused}
+        config={config}
+        verdict={verdict}
+        hasUnreviewed={hasUnreviewed}
+        isPipelineRunning={isPipelineRunning}
+        isTestRunning={isTestRunning}
+        isCiFixRunning={isCiFixRunning}
+        fixingCi={projectActions.fixingCi}
+        fixCiResult={projectActions.fixCiResult}
+        releasing={projectActions.releasing}
+        testing={projectActions.testing}
+        pushing={projectActions.pushing}
+        pulling={projectActions.pulling}
+        pullResult={projectActions.pullResult}
+        pullDiverged={projectActions.pullDiverged}
+        behindCount={behindCount}
+        creatingPr={projectActions.creatingPr}
+        pushingToPr={projectActions.pushingToPr}
+        currentBranch={currentBranch}
+        defaultBranch={defaultBranch}
+        branchCommitsAhead={branchCommitsAhead}
+        openPrBranches={openPrBranches}
+        openPrByBranch={openPrByBranch}
+        customActions={customActions}
+        runningActions={runningActions}
+        releaseTag={releaseTag}
+        boardUrl={boardUrl}
+        onFixCi={projectActions.handleFixCi}
+        onRelease={projectActions.handleRelease}
+        onCreatePr={projectActions.handleCreatePr}
+        onPushToPr={projectActions.handlePushToPr}
+        onTest={projectActions.handleTest}
+        onCustomAction={handleCustomAction}
+        onPush={projectActions.handlePush}
+        onPull={projectActions.handlePull}
+        onDismissDiverged={projectActions.dismissDiverged}
+        onTogglePause={handleTogglePause}
+        onToggleAutoRelease={handleToggleAutoRelease}
+      />
 
       <div className="mb-3 flex justify-end">
         <ReleasePlanPanel

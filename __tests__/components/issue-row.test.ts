@@ -89,6 +89,7 @@ describe('IssueRow', () => {
       issue: buildIssue(),
       projectName: 'acme/widgets',
       projectCfg: buildConfig(),
+      onOpen: () => {},
     })
 
     const workOn = Array.from(container.querySelectorAll('button')).find(button => button.textContent === 'Work on')
@@ -121,6 +122,7 @@ describe('IssueRow', () => {
       issue: buildIssue({ hasContext: true }),
       projectName: 'acme/widgets',
       projectCfg: buildConfig(),
+      onOpen: () => {},
     })
 
     await vi.waitFor(() => {
@@ -150,6 +152,7 @@ describe('IssueRow', () => {
       issue: buildIssue({ hasContext: true }),
       projectName: 'acme/widgets',
       projectCfg: buildConfig(),
+      onOpen: () => {},
     })
 
     await vi.waitFor(() => {
@@ -184,6 +187,7 @@ describe('IssueRow', () => {
       }),
       projectName: 'acme/widgets',
       projectCfg: buildConfig(),
+      onOpen: () => {},
     })
 
     expect(container.textContent).toContain('bug')

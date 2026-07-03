@@ -2,8 +2,26 @@
 
 import { Spinner } from '@/components/ui/Spinner'
 import { Pill, PillButton } from '@/components/ui/Pill'
-import type { GhLabel } from '@/lib/client-api'
+import type { GhLabel, ProjectConfig } from '@/lib/client-api'
 import type { GateState, PrGates } from '@/lib/github/issue-row-enrichment'
+
+// Build the hover tooltip / summary for the "Work on" affordance — an ordered
+// list of steps that will actually fire, with skipped ones marked "(off)".
+// Kept in sync with the Config → When you click Work on section. Shared by the
+// issue row button and the issue detail drawer.
+export function workOnChainSummary(cfg: ProjectConfig | null): string {
+  const on = (b: boolean | undefined) => b === true
+  const step = (label: string, enabled: boolean) => `${enabled ? '✓' : '○'} ${label}${enabled ? '' : ' (off)'}`
+  const parts = [
+    step('branch', cfg ? on(cfg.issue_auto_branch) : true),
+    '✓ prompt',
+    step('release chain', on(cfg?.release_after_run)),
+    step('auto-commit', on(cfg?.auto_commit_enabled)),
+    step('auto-push + PR', on(cfg?.auto_push_enabled)),
+    step('auto-merge + DoD', on(cfg?.auto_pr_merge_enabled)),
+  ]
+  return `Work-on pipeline:\n${parts.join('\n')}\n\nChange these in Config → When you click Work on.`
+}
 
 // Map a GitHub label to a token-based status dot by priority, instead of
 // rendering its arbitrary repo-defined hex (which breaks the one-accent /

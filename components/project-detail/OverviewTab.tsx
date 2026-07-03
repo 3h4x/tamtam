@@ -108,6 +108,16 @@ export function OverviewTab({
   )
   const visibleRunningJobs = runningJobs.slice(0, 4)
 
+  // Most recent finished release — surfaced as a glanceable "last shipped" line
+  // (tag + recency + outcome), which the header tag and StatusStrip don't show.
+  const lastRelease = projectJobs
+    .filter((j) => j.kind === 'release' && (j.status === 'done' || j.status === 'aborted'))
+    .reduce<JobInfo | undefined>(
+      (latest, j) => (!latest || (j.finished_at || 0) > (latest.finished_at || 0) ? j : latest),
+      undefined,
+    )
+  const lastReleaseOk = lastRelease?.status === 'done'
+
   return (
     <>
       {runningJobs.length > 0 && (
@@ -226,9 +236,20 @@ export function OverviewTab({
         onOpenJob={(jobId) => router.push(`/project/${encodeURIComponent(projectName)}/terminal?job=${encodeURIComponent(jobId)}`)}
       />
 
-      <PipelineStatsPanel projectName={projectName} />
+      {lastRelease?.finished_at != null && (
+        <div className="mb-4 flex flex-wrap items-center gap-x-2 gap-y-1 text-xs text-text-secondary">
+          <span className="uppercase tracking-wider text-text-tertiary">Last release</span>
+          {releaseTag && <span className="font-mono tabular-nums text-text-primary">{releaseTag}</span>}
+          <span className="text-text-tertiary">· shipped {formatAgo(lastRelease.finished_at)} ·</span>
+          <span className={lastReleaseOk ? 'text-status-success' : 'text-status-error'}>
+            {lastReleaseOk ? 'succeeded' : 'aborted'}
+          </span>
+        </div>
+      )}
 
       <AgentsStats projectName={projectName} />
+
+      <PipelineStatsPanel projectName={projectName} compact />
 
       <PromptInsightsPanel projectName={projectName} />
     </>

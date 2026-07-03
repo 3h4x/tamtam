@@ -18,6 +18,8 @@ const { fetchAgents, fetchIssuesAndPRs, fetchProjectConfig, pushMock, runAgent, 
 
 vi.mock('next/navigation', () => ({
   useRouter: () => ({ push: pushMock }),
+  usePathname: () => '/project/acme/issues',
+  useSearchParams: () => new URLSearchParams(),
 }))
 
 vi.mock('@/components/Toast', () => ({
