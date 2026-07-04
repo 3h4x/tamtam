@@ -161,6 +161,21 @@ export function IssuesTab({ projectName, onCountChange, jobsPaused = false }: Is
     load('initial')
   }, [load])
 
+  // Optimistically drop a just-closed issue from the list, correct the count,
+  // dismiss the drawer if it was showing that issue, then reconcile with the
+  // server (its cache was invalidated server-side by the close). This makes the
+  // Issues tab reflect the close immediately instead of stranding a stale row.
+  const handleIssueClosed = useCallback((closedNumber: number) => {
+    setIssues((prev) => {
+      const next = prev.filter((i) => i.number !== closedNumber)
+      onCountChangeRef.current?.({ prs: prs.length, issues: next.length })
+      return next
+    })
+    if (selectedIssue?.number === closedNumber) updateSelectedIssue(null)
+    toast(`Issue #${closedNumber} closed`, 'success')
+    void load('refresh')
+  }, [prs.length, selectedIssue, updateSelectedIssue, toast, load])
+
   useEffect(() => {
     let cancelled = false
     setAgentsLoading(true)
@@ -480,7 +495,7 @@ ${idea}`
               </div>
             ) : (
               visibleIssues.map((issue) => (
-                <IssueRow key={issue.number} issue={issue} projectName={projectName} projectCfg={projectCfg} onOpen={(i) => updateSelectedIssue(i.number)} />
+                <IssueRow key={issue.number} issue={issue} projectName={projectName} projectCfg={projectCfg} onOpen={(i) => updateSelectedIssue(i.number)} onClosed={handleIssueClosed} />
               ))
             )}
           </div>
@@ -514,6 +529,7 @@ ${idea}`
         projectName={projectName}
         projectCfg={projectCfg}
         onClose={() => updateSelectedIssue(null)}
+        onClosed={handleIssueClosed}
       />
 
       <PRDetailDrawer pr={selectedPr} onClose={() => updateSelectedPr(null)} />

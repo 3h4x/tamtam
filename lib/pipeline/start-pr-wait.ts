@@ -13,6 +13,27 @@ export type PrWaitResult =
   | { ok: true; jobId: string; merged: boolean; message: string }
   | { ok: false; status: number; detail: string; jobId?: string };
 
+// Stamp the terminal reason onto the inline pr-wait job's contextMeta, then
+// mark it done. The inline loop historically called markDone(job, 1) on a
+// CONFLICTING PR WITHOUT recording why, so inbox.ts (which reads
+// contextMeta.prWaitReason to choose the HITL action) fell back to a generic
+// 'Merge' button — a doomed one-click on a conflicting PR. Recording 'conflict'
+// here (mirroring the workflow path's finalizePrWaitStep) makes the inbox emit
+// the 'Resolve conflicts' action instead. Best-effort: an unparseable
+// contextMeta just leaves the generic fallback in place. 'conflict' is NOT in
+// NO_HITL_REASONS, so it still surfaces as a HITL (merge-or-HITL invariant).
+async function finalizeInlinePrWait(job: JobData, reason: string): Promise<void> {
+  try {
+    const meta = job.contextMeta ? (JSON.parse(job.contextMeta) as Record<string, unknown>) : {};
+    meta.prWaitReason = reason;
+    job.contextMeta = JSON.stringify(meta);
+    updateJob(job);
+  } catch {
+    // Leave contextMeta as-is; inbox falls back to the generic manual-merge copy.
+  }
+  await markDone(job, 1);
+}
+
 const POLL_INTERVAL_MS = parseInt(process.env.TAMTAM_PR_WAIT_POLL_MS ?? '', 10) || 30_000;
 const TIMEOUT_MS = parseInt(process.env.TAMTAM_PR_WAIT_TIMEOUT_MS ?? '', 10) || 30 * 60 * 1000; // 30 minutes
 // Grace period before treating an empty statusCheckRollup as "no CI configured".
@@ -258,7 +279,7 @@ function runPrWaitLoop(
         if (conclusion === 'pass' || conclusion === 'none') {
           if (status.mergeable === 'CONFLICTING') {
             log(`\n# PR has merge conflicts — cannot auto-merge\n`);
-            await markDone(job, 1);
+            await finalizeInlinePrWait(job, 'conflict');
             return;
           }
 

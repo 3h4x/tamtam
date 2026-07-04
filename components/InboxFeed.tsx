@@ -15,6 +15,7 @@ import {
   releaseProject,
   reviewProject,
   mergePR,
+  resolveConflicts,
   resumeProject,
   retryAutomationQueue,
   type InboxSignal,
@@ -83,6 +84,15 @@ async function runSignalAction(signal: InboxSignal): Promise<string> {
       }
       return `Merged PR #${action.prNumber} in ${project}`
     }
+    case 'resolve-conflicts': {
+      if (action.prNumber == null) throw new Error('Missing PR number')
+      await resolveConflicts(project, action.prNumber)
+      // Fire-and-forget: the server spawns an agent that rebases onto the base,
+      // resolves the hunks, force-pushes with lease, and re-drives the merge via
+      // pr-wait (or re-raises this HITL if it can't resolve). The card clears on
+      // the next poll once the PR is no longer conflicting.
+      return `Resolving conflicts on PR #${action.prNumber} in ${project} — rebasing & re-driving the merge`
+    }
     case 'retry-automation':
       await retryAutomationQueue(project)
       return `Retried automation queue for ${project}`
@@ -96,10 +106,19 @@ async function runSignalAction(signal: InboxSignal): Promise<string> {
 
 // Label for the external link, so a PR link doesn't read "View CI".
 function externalLinkLabel(signal: InboxSignal): string {
-  if (signal.action.kind === 'merge' && signal.action.prNumber != null) return `View PR #${signal.action.prNumber}`
+  if ((signal.action.kind === 'merge' || signal.action.kind === 'resolve-conflicts') && signal.action.prNumber != null) {
+    return `View PR #${signal.action.prNumber}`
+  }
   if (signal.type === 'ci_red') return 'View CI'
   return 'View details'
 }
+
+// Action kinds that navigate instead of firing a server mutation. 'merge' and
+// 'resolve-conflicts' are both explicit-consent server mutations (a conflicting
+// PR is now resolved by an operator-triggered agent that rebases + resolves +
+// force-pushes-with-lease server-side — see the resolve-conflicts route); only
+// 'open-terminal' still just navigates.
+const NAVIGATION_ACTION_KINDS = new Set<InboxSignal['action']['kind']>(['open-terminal'])
 
 export function SignalRow({
   signal,
@@ -169,7 +188,7 @@ export function SignalRow({
           )}
         </button>
         <div className="flex items-center gap-2 shrink-0">
-          {signal.action.kind === 'open-terminal' ? (
+          {NAVIGATION_ACTION_KINDS.has(signal.action.kind) ? (
             <Link
               href={signal.href}
               className={buttonVariants({ variant: 'secondary', size: 'sm' })}

@@ -3,6 +3,7 @@ import { listJobs } from '@/lib/jobs/storage';
 import { getVerdict } from '@/lib/jobs/verdict';
 import { listAutomationQueue, type AutomationQueueItem } from '@/lib/workflows/automation-queue';
 import { db, schema } from '@/lib/db';
+import { isAgentJobKind } from '@/lib/jobs/kinds';
 import type { Task } from '@/lib/shared/types';
 
 // The inbox is a cross-project triage feed: one prioritized row per actionable
@@ -15,6 +16,7 @@ export type InboxSignalType =
   | 'ci_red'
   | 'review_needs_decision'
   | 'pr_ready_to_merge'
+  | 'pr_conflicts'
   | 'pr_needs_manual_merge'
   | 'stale_changes'
   | 'fix_loop_exhausted'
@@ -28,6 +30,7 @@ export type InboxActionKind =
   | 'release'
   | 'review'
   | 'merge'
+  | 'resolve-conflicts'
   | 'retry-automation'
   | 'open-terminal'
   | 'resume';
@@ -35,7 +38,7 @@ export type InboxActionKind =
 export interface InboxAction {
   kind: InboxActionKind;
   label: string;
-  /** Only set for the `merge` action. */
+  /** Set for the `merge` and `resolve-conflicts` actions (the PR they target). */
   prNumber?: number;
 }
 
@@ -97,6 +100,12 @@ export interface InboxOpenPr {
   number: number;
   ciGreen: boolean;
   reviewDecision: string | null;
+  /** GitHub mergeability (MERGEABLE | CONFLICTING | UNKNOWN, uppercased). A
+   *  CONFLICTING PR is out of sync with its base branch and must NOT be shown
+   *  as "ready to merge" even with green CI + an LGTM. Optional so cache rows /
+   *  test fixtures without it read as "unknown" — only an explicit CONFLICTING
+   *  suppresses the ready signal. */
+  mergeable?: string | null;
 }
 
 export interface InboxInput {
@@ -147,6 +156,33 @@ function latestJob(jobs: InboxJob[], project: string, kind: string): InboxJob | 
 
 function isPipelineActive(jobs: InboxJob[], project: string): boolean {
   return jobs.some((j) => j.project === project && j.finishedAt === null && ACTIVE_JOB_KINDS.has(j.kind));
+}
+
+// Any unfinished job that is actively working the project's tree or driving its
+// release cycle — a running agent run, a terminal run, a pipeline phase, or the
+// post-run fix/merge legs. A superset of ACTIVE_JOB_KINDS (which stays
+// pipeline-only for the release-status signals). While one of these is in
+// flight the working tree is EXPECTED to be dirty: the run owns those changes
+// and commits + pushes them at the end of its release cycle, so a "dirty &
+// unreviewed" nag is premature and misleading. Derivation is stateless, so the
+// nag reappears on its own once the work settles and changes remain.
+const WORKING_JOB_KINDS = new Set([
+  ...ACTIVE_JOB_KINDS,
+  'run',
+  'fix-ci',
+  'resolve-conflicts',
+  'pr-comment-fix',
+  'mark-dod-verify',
+  'pr-wait',
+]);
+
+function isProjectWorking(jobs: InboxJob[], project: string): boolean {
+  return jobs.some(
+    (j) =>
+      j.project === project &&
+      j.finishedAt === null &&
+      (WORKING_JOB_KINDS.has(j.kind) || isAgentJobKind(j.kind)),
+  );
 }
 
 // Find the DoD (mark-dod) verification from the same release a deferred pr-wait
@@ -201,6 +237,10 @@ export function deriveInboxSignals(input: InboxInput): InboxSignal[] {
     //    A deliberate MANUAL pause records no reason and does NOT nag here.
     const pausedReason = pausedReasonByProject[project];
     if (task.paused && pausedReason) {
+      // NB: when the same project has a pr_needs_manual_merge below, this paused
+      // row is suppressed as redundant (merging that PR also resumes the project)
+      // — see the dedup pass after the loop. It only stands alone when the pause
+      // is NOT already covered by a merge blocker (e.g. paused before pr-wait).
       signals.push({
         id: `project_paused:${project}`,
         type: 'project_paused',
@@ -215,15 +255,22 @@ export function deriveInboxSignals(input: InboxInput): InboxSignal[] {
       });
     }
 
-    // 1. CI red on the default branch → start a CI fix.
+    // 1. CI red on the default branch → start a CI fix. This is about the
+    //    DEFAULT branch, not any open feature-branch PR. When the operator has an
+    //    open PR (i.e. is mid-issue), finishing that PR is the higher-priority
+    //    move, so demote this to a non-urgent yellow and say plainly that it is
+    //    separate — otherwise a red default-branch CI drowns out the finish-PR
+    //    action the operator actually needs.
     if (task.ci === 'failure' && !active) {
+      const hasOpenPr = !!openPrByProject[project];
       signals.push({
         id: `ci_red:${project}`,
         type: 'ci_red',
-        severity: 'red',
+        severity: hasOpenPr ? 'yellow' : 'red',
         project,
         title: 'CI failing on default branch',
-        detail: task.release_tag ? `Latest release ${task.release_tag}` : null,
+        detail: (task.release_tag ? `Latest release ${task.release_tag} — default branch` : 'Default branch')
+          + (hasOpenPr ? ', separate from your open PR' : ''),
         href: projectHref(project),
         externalUrl: task.ci_failed_url,
         ageSeconds: null,
@@ -270,7 +317,10 @@ export function deriveInboxSignals(input: InboxInput): InboxSignal[] {
       signals.push({
         id: `pr_needs_manual_merge:${project}:${prNumber}`,
         type: 'pr_needs_manual_merge',
-        severity: 'yellow',
+        // Red, not yellow: when you are mid-issue this deferred merge is THE thing
+        // blocking the issue from completing — it must read as the blocker and
+        // outrank secondary noise (a default-branch ci_red, the redundant pause).
+        severity: 'red',
         project,
         title: `PR #${prNumber} needs manual merge`,
         detail: ((prWait.prWaitReason ? MERGE_REASON_DETAIL[prWait.prWaitReason] : undefined)
@@ -282,7 +332,13 @@ export function deriveInboxSignals(input: InboxInput): InboxSignal[] {
         href: `${projectHref(project)}/issues`,
         externalUrl: task.github ? `${task.github}/pull/${prNumber}` : null,
         ageSeconds: null,
-        action: { kind: 'merge', label: 'Merge', prNumber },
+        // A merge-conflict terminal can't be resolved by clicking "Merge" (the
+        // merge fails), so offer the resolve-conflicts action instead. Every
+        // other manual-merge reason (risky_diff, merge_permanent, timeout, …)
+        // is a mergeable PR awaiting a human decision → keep the merge action.
+        action: prWait.prWaitReason === 'conflict'
+          ? { kind: 'resolve-conflicts', label: 'Resolve conflicts', prNumber }
+          : { kind: 'merge', label: 'Merge', prNumber },
       });
     }
 
@@ -363,8 +419,11 @@ export function deriveInboxSignals(input: InboxInput): InboxSignal[] {
       }
     }
 
-    // 4. Uncommitted changes sitting on disk, not yet reviewed.
-    if (task.changes > 0 && task.reviewed === false && !active) {
+    // 4. Uncommitted changes sitting on disk, not yet reviewed. Suppressed while
+    //    ANY job is actively working the project (agent/terminal run or pipeline
+    //    leg), not just a pipeline phase: a running agent owns those changes and
+    //    ships them via its release cycle, so nagging mid-run is premature.
+    if (task.changes > 0 && task.reviewed === false && !isProjectWorking(jobs, project)) {
       signals.push({
         id: `stale_changes:${project}`,
         type: 'stale_changes',
@@ -380,24 +439,54 @@ export function deriveInboxSignals(input: InboxInput): InboxSignal[] {
     }
 
     // 5. Open PR with green CI and a TamTam LGTM (or an upstream approval when
-    //    review is disabled) → one-click merge.
+    //    review is disabled). "Ready to merge" REQUIRES the PR to actually be
+    //    mergeable: a CONFLICTING PR has green CI + an LGTM but is out of sync
+    //    with base, so a one-click "Merge" is a lie (the merge fails). When the
+    //    PR conflicts, surface a resolve-conflicts HITL instead of a false
+    //    ready-to-merge — unless the pr-wait `conflict` terminal already raised
+    //    a manual-merge/conflict row for this PR above (one row per PR).
     const pr = openPrByProject[project];
     if (pr && pr.ciGreen && task.ci !== 'failure') {
       const lgtm = verdict === 'LGTM';
       const upstreamApproved = !reviewFinished && pr.reviewDecision === 'APPROVED';
       if (lgtm || upstreamApproved) {
-        signals.push({
-          id: `pr_ready_to_merge:${project}`,
-          type: 'pr_ready_to_merge',
-          severity: 'green',
-          project,
-          title: `PR #${pr.number} ready to merge`,
-          detail: lgtm ? 'Green CI + review LGTM' : 'Green CI + approved',
-          href: `${projectHref(project)}/issues`,
-          externalUrl: null,
-          ageSeconds: null,
-          action: { kind: 'merge', label: 'Merge', prNumber: pr.number },
-        });
+        const conflicting = (pr.mergeable ?? '').toUpperCase() === 'CONFLICTING';
+        const reviewDetail = lgtm ? 'Green CI + review LGTM' : 'Green CI + approved';
+        if (conflicting) {
+          const alreadySurfaced = signals.some(
+            (s) =>
+              s.project === project &&
+              (s.type === 'pr_needs_manual_merge' || s.type === 'pr_conflicts') &&
+              s.action.prNumber === pr.number,
+          );
+          if (!alreadySurfaced) {
+            signals.push({
+              id: `pr_conflicts:${project}:${pr.number}`,
+              type: 'pr_conflicts',
+              severity: 'yellow',
+              project,
+              title: `PR #${pr.number} has merge conflicts`,
+              detail: `${reviewDetail}, but the branch conflicts with base — needs a rebase/resolve before it can merge.`,
+              href: `${projectHref(project)}/issues`,
+              externalUrl: task.github ? `${task.github}/pull/${pr.number}` : null,
+              ageSeconds: null,
+              action: { kind: 'resolve-conflicts', label: 'Resolve conflicts', prNumber: pr.number },
+            });
+          }
+        } else {
+          signals.push({
+            id: `pr_ready_to_merge:${project}`,
+            type: 'pr_ready_to_merge',
+            severity: 'green',
+            project,
+            title: `PR #${pr.number} ready to merge`,
+            detail: reviewDetail,
+            href: `${projectHref(project)}/issues`,
+            externalUrl: null,
+            ageSeconds: null,
+            action: { kind: 'merge', label: 'Merge', prNumber: pr.number },
+          });
+        }
       }
     }
   }
@@ -422,7 +511,19 @@ export function deriveInboxSignals(input: InboxInput): InboxSignal[] {
     });
   }
 
-  signals.sort((a, b) => {
+  // Dedup: a pr_needs_manual_merge is the single finish-the-issue blocker for its
+  // project, and merging it also clears any auto-pause (the merge action resumes).
+  // So a separate project_paused row for the same project is redundant noise that
+  // would only compete with — and, being red, outrank — the actual merge blocker.
+  // Drop it, leaving the manual-merge signal to stand alone as the blocker.
+  const projectsWithManualMerge = new Set(
+    signals.filter((s) => s.type === 'pr_needs_manual_merge').map((s) => s.project),
+  );
+  const visible = signals.filter(
+    (s) => !(s.type === 'project_paused' && projectsWithManualMerge.has(s.project)),
+  );
+
+  visible.sort((a, b) => {
     const sev = SEVERITY_RANK[a.severity] - SEVERITY_RANK[b.severity];
     if (sev !== 0) return sev;
     // Oldest first within a severity; unknown age sorts last.
@@ -431,7 +532,7 @@ export function deriveInboxSignals(input: InboxInput): InboxSignal[] {
     return ageB - ageA || a.project.localeCompare(b.project);
   });
 
-  return signals;
+  return visible;
 }
 
 export function countInboxSignals(signals: InboxSignal[]): InboxCounts {
@@ -489,6 +590,7 @@ interface CachedPr {
   state?: string;
   isDraft?: boolean;
   reviewDecision?: string | null;
+  mergeable?: string | null;
   statusCheckRollup?: Array<{ conclusion?: string | null }> | null;
 }
 
@@ -531,6 +633,7 @@ async function loadOpenPrs(
         number: open.number,
         ciGreen: rollupIsGreen(open.statusCheckRollup, ciByProject[row.project] ?? null),
         reviewDecision: open.reviewDecision ?? null,
+        mergeable: open.mergeable ?? null,
       };
     }
   } catch {

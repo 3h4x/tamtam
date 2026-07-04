@@ -174,6 +174,14 @@ export interface TamTamConfig {
   // access this job fundamentally needs. Scoped to fix-ci; set false to keep
   // fix-ci under the global permission mode (fixes then ship unverified).
   fix_ci_bypass_sandbox: boolean;
+  // Conflict-resolution agent (resolve-conflicts route) escalation. Under codex
+  // `auto` the workspace-write seatbelt blocks writes to `.git/` internals
+  // (`.git/index.lock`, `.git/rebase-merge/*`), so `git rebase --continue` /
+  // `--abort` fail with "Operation not permitted" and the agent cannot complete
+  // the rebase. bypassPermissions drops that sandbox so the agent can rewrite
+  // rebase state. Scoped to resolve-conflicts; set false to keep it under the
+  // global permission mode (fresh conflicts then can't be auto-resolved).
+  resolve_conflicts_bypass_sandbox: boolean;
   budget_block_runs_enabled: boolean;
   budget_block_on_weekly_pace_enabled: boolean;
   budget_subscription_providers: BudgetSubscriptionProvider[];
@@ -331,6 +339,7 @@ export const DEFAULTS: TamTamConfig = {
   plain_test_phase_enabled: false,
   auto_fix_ci_on_red_default_branch: true,
   fix_ci_bypass_sandbox: true,
+  resolve_conflicts_bypass_sandbox: true,
   budget_block_runs_enabled: false,
   budget_block_on_weekly_pace_enabled: true,
   budget_subscription_providers: ['claude', 'codex'],
@@ -670,6 +679,10 @@ export function buildConfigFromSettingsMap(map: Record<string, string>): TamTamC
       map.fix_ci_bypass_sandbox === undefined
         ? DEFAULTS.fix_ci_bypass_sandbox
         : map.fix_ci_bypass_sandbox === 'true',
+    resolve_conflicts_bypass_sandbox:
+      map.resolve_conflicts_bypass_sandbox === undefined
+        ? DEFAULTS.resolve_conflicts_bypass_sandbox
+        : map.resolve_conflicts_bypass_sandbox === 'true',
     budget_block_runs_enabled: map.budget_block_runs_enabled === 'true',
     budget_block_on_weekly_pace_enabled:
       map.budget_block_on_weekly_pace_enabled === undefined

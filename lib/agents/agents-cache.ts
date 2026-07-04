@@ -1,4 +1,5 @@
 import { db, schema } from '@/lib/db';
+import { reportDbError, reportDbOk } from '@/lib/db/reachability';
 import { normalizeModelInput } from '@/lib/agents/model-aliases';
 import { resolveAgentPrerequisiteCommandWithFileSkills } from '@/lib/agents/file-skill-prerequisites';
 
@@ -36,8 +37,16 @@ function _doAgentsRefresh(): Promise<void> {
     try {
       const agents = await db.select().from(schema.agents);
       _agentsCache = { agents, time: Date.now() / 1000 };
+      // Clear any latched DB-down state and surface the recovery transition in
+      // this realm (the reachability probe only runs in the instrumentation realm).
+      reportDbOk();
     } catch (e) {
-      console.error('[agents-cache] refresh failed:', e);
+      // When Postgres is unreachable, keep serving the last good cache silently
+      // and let the reachability gate emit one throttled signal — don't spray a
+      // per-refresh AggregateError stack. Real query bugs still log in full.
+      if (!reportDbError('agents-cache', e)) {
+        console.error('[agents-cache] refresh failed:', e);
+      }
     } finally {
       _agentsRefreshPromise = null;
     }

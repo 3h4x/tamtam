@@ -5,6 +5,7 @@ import type { GhIssue, ProjectConfig } from '@/lib/client-api'
 import { formatAgo } from '@/lib/shared/format'
 import { Labels, workOnChainSummary } from '@/components/issues-tab/shared'
 import { useIssueActions } from '@/hooks/useIssueActions'
+import { CloseIssueControl } from '@/components/issues-tab/CloseIssueControl'
 import { Button, buttonVariants } from '@/components/ui/Button'
 import { Pill } from '@/components/ui/Pill'
 import { Spinner } from '@/components/ui/Spinner'
@@ -14,11 +15,13 @@ export function IssueRow({
   projectName,
   projectCfg,
   onOpen,
+  onClosed,
 }: {
   issue: GhIssue
   projectName: string
   projectCfg: ProjectConfig | null
   onOpen: (issue: GhIssue) => void
+  onClosed: (issueNumber: number) => void
 }) {
   const { hasContext, continuing, openInTerminal, discussInTerminal, continueWork } = useIssueActions(issue, projectName)
   const workOnTitle = useMemo(() => workOnChainSummary(projectCfg), [projectCfg])
@@ -73,6 +76,7 @@ export function IssueRow({
           >
             discuss
           </Button>
+          <CloseIssueControl projectName={projectName} issueNumber={issue.number} onClosed={onClosed} />
           {hasContext ? (
             <Button
               type="button"

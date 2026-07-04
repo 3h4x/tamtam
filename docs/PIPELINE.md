@@ -255,6 +255,23 @@ instead of a silent stall. Clicking Merge uses the operator-explicit merge path,
 which bypasses the `risky_diff` guard (the guard exists to defer to exactly that
 human decision).
 
+A `conflict` terminal (GitHub `mergeable === 'CONFLICTING'`) is special: a
+one-click Merge would fail, so the inbox offers a **Resolve conflicts** action
+instead of Merge (both the release-linked workflow `pr-wait` and the standalone
+inline loop stamp `prWaitReason='conflict'`; a green/LGTM-but-conflicting open PR
+raises the parallel `pr_conflicts` signal with the same action). Clicking it POSTs
+to the `resolve-conflicts` route — TamTam's one **operator-consented** autonomous
+conflict-resolution path: it fetches the base, checks out the branch, runs the
+author-trust gate, and spawns an agent that rebases onto the fresh `origin/<base>`
+and resolves the hunks to a clean tree without pushing; on completion
+`finalizeResolveConflicts` re-validates the rebase, `git push --force-with-lease`es,
+and re-dispatches `pr-wait` so CI re-verifies the model-authored resolution before
+any merge. Any failure aborts to a clean tree and re-raises the conflict HITL, so it
+still ends merge-or-HITL. This is deliberately *not* done by the background sweep
+(`lib/jobs/pr-behind-rebase.ts` aborts a conflicting rebase and defers to the HITL);
+only an explicit operator click crosses that git-write boundary. See
+`docs/SECURITY.md` → "Operator-initiated conflict resolution".
+
 **DoD is verified before the merge decision, not after.** In the workflow-driven
 release (the default), the orchestrator routes `push → mark-dod` unconditionally
 (`pipeline-spec.ts`), and `pr-wait` is only ever reached *through* `mark-dod`

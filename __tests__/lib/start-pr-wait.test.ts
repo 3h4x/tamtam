@@ -282,7 +282,7 @@ describe('launchPrWait', () => {
     }, { timeout: 3000, interval: 5 });
   });
 
-  it('marks job done with exit 1 when PR has merge conflicts', async () => {
+  it('marks job done exit 1 AND stamps prWaitReason=conflict when PR has merge conflicts', async () => {
     execMock.mockResolvedValueOnce(resp(0, JSON.stringify({
       state: 'OPEN',
       mergeable: 'CONFLICTING',
@@ -294,6 +294,16 @@ describe('launchPrWait', () => {
     await vi.waitFor(() => {
       expect(markDoneMock).toHaveBeenCalledWith(expect.objectContaining({ kind: 'pr-wait' }), 1);
     }, { timeout: 3000, interval: 5 });
+
+    // inbox.ts reads contextMeta.prWaitReason to offer 'Resolve conflicts'
+    // instead of a doomed one-click 'Merge'. The inline loop must persist the
+    // 'conflict' reason before markDone (previously it did not — the bug that
+    // made a conflicting PR show a Merge button).
+    const stamped = updateJobMock.mock.calls.some((call: unknown[]) => {
+      const j = call[0] as { contextMeta?: unknown };
+      return typeof j?.contextMeta === 'string' && j.contextMeta.includes('"prWaitReason":"conflict"');
+    });
+    expect(stamped).toBe(true);
   });
 
   it('refuses auto-merge when PR diff touches high-risk execution files', async () => {

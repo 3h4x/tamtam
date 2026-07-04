@@ -41,6 +41,10 @@ describe('instrumentation', () => {
     vi.doUnmock('@/lib/db');
     vi.doUnmock('@/lib/shared/shell');
     vi.doUnmock('drizzle-orm');
+    vi.doUnmock('@/lib/jobs/test-timeout-reaper');
+    vi.doUnmock('@/lib/jobs/run-cap-reaper');
+    vi.doUnmock('@/lib/pipeline/release-abort');
+    vi.doUnmock('@/lib/db/reachability');
   });
 
   function mockDeps(agents: unknown[], options: { abortActiveRelease?: ReturnType<typeof vi.fn> } = {}) {
@@ -759,6 +763,14 @@ describe('instrumentation', () => {
       currentStorageMock = { listJobs: () => [], probeJobStatus: vi.fn() };
       vi.doMock('@/lib/jobs/job-storage', () => currentStorageMock);
       vi.doMock('@/lib/jobs/storage', () => currentStorageMock);
+      // Default the reachability gate to "DB up" so the sweep runs its full body;
+      // the outage test below overrides this. Mocking here also keeps the real
+      // dedicated-connection probe (a live Postgres connect) out of unit tests.
+      vi.doMock('@/lib/db/reachability', () => ({
+        ensureDbReachable: async () => true,
+        reportDbError: () => false,
+        reportDbOk: () => {},
+      }));
     });
 
     function mockJobStorageModule(factory: () => Record<string, unknown>) {
@@ -961,6 +973,45 @@ describe('instrumentation', () => {
     // (where every child finished but `finishedAt` was still null). That
     // path was removed when the workflow runtime became the only release
     // owner — the runtime finalizes the release itself.
+
+    it('during a DB outage still runs host-protection reapers but gates DB-only recovery work', async () => {
+      // Regression guard: the reachability gate must NOT disable the CPU-core
+      // reapers. They kill a runaway process group from in-memory state; only
+      // their trailing markDone needs the DB. Skipping them during an outage
+      // would let a runaway burn a core for the whole outage.
+      const reapTimedOutClaudeJobs = vi.fn().mockResolvedValue([]);
+      const reapRunCapExceededJobs = vi.fn().mockResolvedValue([]);
+      const abortActiveRelease = vi.fn().mockResolvedValue({ status: 'aborted', httpStatus: 200 });
+
+      const expiredRelease = {
+        id: 'job-release',
+        kind: 'release',
+        finishedAt: null,
+        project: 'my-project',
+        startedAt: 1000,
+        releaseDeadlineAt: Date.now() - 1000,
+      };
+      mockJobStorage([expiredRelease], { pipelineStepKinds: new Set() });
+      mockDeps([], { abortActiveRelease });
+
+      // The reachability gate reports the DB as down for this tick.
+      vi.doMock('@/lib/db/reachability', () => ({
+        ensureDbReachable: async () => false,
+        reportDbError: () => false,
+        reportDbOk: () => {},
+      }));
+      vi.doMock('@/lib/jobs/test-timeout-reaper', () => ({ reapTimedOutClaudeJobs, killJobProcessGroup: vi.fn() }));
+      vi.doMock('@/lib/jobs/run-cap-reaper', () => ({ reapRunCapExceededJobs }));
+
+      const { runProbeSweep } = await import('@/instrumentation-node');
+      await runProbeSweep();
+
+      // Host protection ran despite the outage...
+      expect(reapTimedOutClaudeJobs).toHaveBeenCalled();
+      expect(reapRunCapExceededJobs).toHaveBeenCalled();
+      // ...but the DB-only recovery work (release wall-clock abort) was gated off.
+      expect(abortActiveRelease).not.toHaveBeenCalled();
+    });
   });
 
   describe('drainStalePendingReleases()', () => {

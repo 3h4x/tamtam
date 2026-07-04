@@ -6,6 +6,7 @@ export type InboxSignalType =
   | 'ci_red'
   | 'review_needs_decision'
   | 'pr_ready_to_merge'
+  | 'pr_conflicts'
   | 'pr_needs_manual_merge'
   | 'stale_changes'
   | 'fix_loop_exhausted'
@@ -19,6 +20,7 @@ export type InboxActionKind =
   | 'release'
   | 'review'
   | 'merge'
+  | 'resolve-conflicts'
   | 'retry-automation'
   | 'open-terminal'
   | 'resume';

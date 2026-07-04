@@ -28,6 +28,16 @@ function commandKey(command: string, args: string[]): string {
   return [command, ...args].join(' ');
 }
 
+// Mimics `gh api repos/…/commits/<sha>` for a commit GitHub has never seen:
+// exit 1 with the authoritative "No commit found for SHA" message on stderr
+// (GitHub returns HTTP 422 for an unknown SHA, not 404).
+function ghCommitAbsent(sha: string): never {
+  const err = new Error('Command failed: gh api') as Error & { stderr: Buffer; status: number };
+  err.stderr = Buffer.from(`gh: No commit found for SHA: ${sha} (HTTP 422)\n`);
+  err.status = 1;
+  throw err;
+}
+
 describe('checkPrBranchExecutionGate', () => {
   beforeEach(() => {
     mocks.execFileSync.mockReset();
@@ -188,6 +198,78 @@ describe('checkPrBranchExecutionGate', () => {
     expect(result.ok).toBe(false);
     expect(result).toEqual(expect.objectContaining({
       detail: expect.stringContaining('could not be mapped to a GitHub author'),
+    }));
+    expect(mocks.isUserTrusted).not.toHaveBeenCalled();
+  });
+
+  it('runs a non-default branch whose only commit is local (never pushed to GitHub)', () => {
+    // The real-world regression: the pipeline runs this gate at the FIRST step
+    // (test), BEFORE the push phase, so a commit the operator/agent made locally
+    // is not yet on GitHub. GitHub returns "No commit found for SHA" (HTTP 422).
+    // That commit cannot be external PR code — external contributions arrive as
+    // commits already on GitHub — so it is trusted local work and must run.
+    mocks.execFileSync.mockImplementation((command: string, args: string[]) => {
+      const key = commandKey(command, args);
+      if (key === 'git -C /repo rev-parse --verify origin/main') return output('origin/main\n');
+      if (key === 'git -C /repo log --format=%H origin/main..HEAD') return output('localsha1\n');
+      if (key === 'gh repo view --json nameWithOwner --jq .nameWithOwner') return output('owner/repo\n');
+      if (key === 'gh api repos/owner/repo/commits/localsha1 --jq .author.login') ghCommitAbsent('localsha1');
+      throw new Error(`unexpected command: ${key}`);
+    });
+
+    expect(checkPrBranchExecutionGate('/repo', 'run tests')).toEqual({
+      ok: true,
+      reason: 'trusted_authors',
+    });
+    // A never-pushed local commit needs no GitHub author trust lookup.
+    expect(mocks.isUserTrusted).not.toHaveBeenCalled();
+  });
+
+  it('still refuses when a pushed untrusted commit sits under a local-only commit', () => {
+    // A local commit on top of a pushed attacker commit must not launder the
+    // attacker code: the pushed commit still resolves through GitHub and is
+    // rejected. "Absent from GitHub" only excuses genuinely local commits.
+    mocks.execFileSync.mockImplementation((command: string, args: string[]) => {
+      const key = commandKey(command, args);
+      if (key === 'git -C /repo rev-parse --verify origin/main') return output('origin/main\n');
+      if (key === 'git -C /repo log --format=%H origin/main..HEAD') return output('localsha\npushedbad\n');
+      if (key === 'gh repo view --json nameWithOwner --jq .nameWithOwner') return output('owner/repo\n');
+      if (key === 'gh api repos/owner/repo/commits/localsha --jq .author.login') ghCommitAbsent('localsha');
+      if (key === 'gh api repos/owner/repo/commits/pushedbad --jq .author.login') return output('attacker\n');
+      throw new Error(`unexpected command: ${key}`);
+    });
+    mocks.isUserTrusted.mockImplementation((login: string) => login === 'trusted-user');
+
+    const result = checkPrBranchExecutionGate('/repo', 'run tests');
+    expect(result.ok).toBe(false);
+    expect(result).toEqual(expect.objectContaining({
+      detail: expect.stringContaining('GitHub author attacker'),
+    }));
+  });
+
+  it('fails closed when the author lookup fails transiently (not a missing-commit 422)', () => {
+    // A network / auth / rate-limit failure is indeterminate — it must NOT be
+    // mistaken for "commit absent from GitHub", or untrusted code could run
+    // whenever GitHub is briefly unreachable. Only the exact missing-commit
+    // signal is trusted; everything else fails closed.
+    mocks.execFileSync.mockImplementation((command: string, args: string[]) => {
+      const key = commandKey(command, args);
+      if (key === 'git -C /repo rev-parse --verify origin/main') return output('origin/main\n');
+      if (key === 'git -C /repo log --format=%H origin/main..HEAD') return output('abc123\n');
+      if (key === 'gh repo view --json nameWithOwner --jq .nameWithOwner') return output('owner/repo\n');
+      if (key === 'gh api repos/owner/repo/commits/abc123 --jq .author.login') {
+        const err = new Error('Command failed: gh api') as Error & { stderr: Buffer; status: number };
+        err.stderr = Buffer.from('gh: Something went wrong (HTTP 500)\n');
+        err.status = 1;
+        throw err;
+      }
+      throw new Error(`unexpected command: ${key}`);
+    });
+
+    const result = checkPrBranchExecutionGate('/repo', 'run tests');
+    expect(result.ok).toBe(false);
+    expect(result).toEqual(expect.objectContaining({
+      detail: expect.stringContaining('author lookup failed'),
     }));
     expect(mocks.isUserTrusted).not.toHaveBeenCalled();
   });

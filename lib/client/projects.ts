@@ -213,6 +213,47 @@ export async function mergePR(
   return response.json()
 }
 
+// Kick off operator-initiated automated conflict resolution for a PR branch.
+// Fire-and-forget: the server spawns an agent that rebases + resolves, then
+// force-pushes and re-drives the merge via pr-wait. Returns the job it started.
+export async function resolveConflicts(
+  projectName: string,
+  prNumber: number
+): Promise<{ status: string; job_id: string; pr_number: number; branch: string }> {
+  const response = await fetch(`${API_BASE}/by-project/${encodeURIComponent(projectName)}/resolve-conflicts`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ prNumber }),
+  })
+  if (!response.ok) {
+    const data = await response.json().catch(() => ({}))
+    throw new Error((data as { detail?: string }).detail || `Resolve conflicts failed: ${response.statusText}`)
+  }
+  return response.json()
+}
+
+// Close a GitHub issue from the Issues tab. Wraps the existing `issue-close`
+// route (which runs `gh issue close` and invalidates the issue caches so the
+// next fetch drops it from the open set). `reason` maps to GitHub's close
+// reason: 'completed' (done) or 'not planned' (won't do).
+export async function closeIssue(
+  projectName: string,
+  number: number,
+  reason: 'completed' | 'not planned',
+  comment?: string,
+): Promise<{ status: string; number: number; reason: string; repo: string }> {
+  const response = await fetch(`${API_BASE}/by-project/${encodeURIComponent(projectName)}/issue-close`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ number, reason, ...(comment ? { comment } : {}) }),
+  })
+  if (!response.ok) {
+    const data = await response.json().catch(() => ({}))
+    throw new Error((data as { detail?: string }).detail || `Close failed: ${response.statusText}`)
+  }
+  return response.json()
+}
+
 export async function approvePR(
   projectName: string,
   prNumber: number

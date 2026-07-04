@@ -90,6 +90,7 @@ describe('IssueRow', () => {
       projectName: 'acme/widgets',
       projectCfg: buildConfig(),
       onOpen: () => {},
+      onClosed: () => {},
     })
 
     const workOn = Array.from(container.querySelectorAll('button')).find(button => button.textContent === 'Work on')
@@ -123,6 +124,7 @@ describe('IssueRow', () => {
       projectName: 'acme/widgets',
       projectCfg: buildConfig(),
       onOpen: () => {},
+      onClosed: () => {},
     })
 
     await vi.waitFor(() => {
@@ -153,6 +155,7 @@ describe('IssueRow', () => {
       projectName: 'acme/widgets',
       projectCfg: buildConfig(),
       onOpen: () => {},
+      onClosed: () => {},
     })
 
     await vi.waitFor(() => {
@@ -188,6 +191,7 @@ describe('IssueRow', () => {
       projectName: 'acme/widgets',
       projectCfg: buildConfig(),
       onOpen: () => {},
+      onClosed: () => {},
     })
 
     expect(container.textContent).toContain('bug')

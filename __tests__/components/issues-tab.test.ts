@@ -7,10 +7,11 @@ import { flushSync } from 'react-dom'
 import { IssuesTab } from '@/components/IssuesTab'
 import type { GhIssue, GhPullRequest, ProjectConfig } from '@/lib/client-api'
 
-const { fetchAgents, fetchIssuesAndPRs, fetchProjectConfig, pushMock, runAgent, toastMock } = vi.hoisted(() => ({
+const { fetchAgents, fetchIssuesAndPRs, fetchProjectConfig, closeIssue, pushMock, runAgent, toastMock } = vi.hoisted(() => ({
   fetchAgents: vi.fn(),
   fetchIssuesAndPRs: vi.fn(),
   fetchProjectConfig: vi.fn(),
+  closeIssue: vi.fn(),
   pushMock: vi.fn(),
   runAgent: vi.fn(),
   toastMock: vi.fn(),
@@ -30,6 +31,7 @@ vi.mock('@/lib/client-api', () => ({
   fetchAgents,
   fetchIssuesAndPRs,
   fetchProjectConfig,
+  closeIssue,
   runAgent,
 }))
 
@@ -45,7 +47,7 @@ vi.mock('@/components/issues-tab/PRRow', () => ({
 }))
 
 vi.mock('@/components/issues-tab/IssueRow', () => ({
-  IssueRow: ({ issue, projectCfg }: { issue: GhIssue; projectCfg: ProjectConfig | null }) =>
+  IssueRow: ({ issue, projectCfg, onClosed }: { issue: GhIssue; projectCfg: ProjectConfig | null; onClosed: (n: number) => void }) =>
     React.createElement(
       'div',
       {
@@ -53,6 +55,11 @@ vi.mock('@/components/issues-tab/IssueRow', () => ({
         'data-config': projectCfg?.effective_test_command ?? 'none',
       },
       issue.title,
+      React.createElement(
+        'button',
+        { 'data-testid': `close-issue-${issue.number}`, onClick: () => onClosed(issue.number) },
+        'close',
+      ),
     ),
 }))
 
@@ -141,6 +148,7 @@ describe('IssuesTab', () => {
     fetchAgents.mockReset()
     fetchIssuesAndPRs.mockReset()
     fetchProjectConfig.mockReset()
+    closeIssue.mockReset()
     pushMock.mockReset()
     runAgent.mockReset()
     toastMock.mockReset()
@@ -335,6 +343,50 @@ describe('IssuesTab', () => {
       expect(container.querySelector('[data-testid="pr-7"]')?.getAttribute('data-jobs-paused')).toBe('true')
     })
     expect(fetchIssuesAndPRs).toHaveBeenCalledTimes(1)
+
+    unmount()
+  })
+
+  it('optimistically drops a closed issue, reports the new count, and reconciles with a refresh', async () => {
+    const onCountChange = vi.fn()
+    fetchIssuesAndPRs
+      .mockResolvedValueOnce({
+        prs: [],
+        issues: [buildIssue({ number: 42 }), buildIssue({ number: 43, title: 'Second issue' })],
+        repo: 'acme/widgets',
+        error: null,
+        cachedAt: null,
+        cached: false,
+      })
+      // reconcile fetch after the close
+      .mockResolvedValueOnce({
+        prs: [],
+        issues: [buildIssue({ number: 43, title: 'Second issue' })],
+        repo: 'acme/widgets',
+        error: null,
+        cachedAt: null,
+        cached: false,
+      })
+
+    const { container, unmount } = renderIssuesTab({ projectName: 'acme/widgets', onCountChange })
+
+    await vi.waitFor(() => {
+      expect(container.querySelector('[data-testid="issue-42"]')).toBeTruthy()
+      expect(container.querySelector('[data-testid="issue-43"]')).toBeTruthy()
+    })
+
+    const closeBtn = container.querySelector('[data-testid="close-issue-42"]') as HTMLButtonElement | null
+    closeBtn?.dispatchEvent(new MouseEvent('click', { bubbles: true }))
+
+    await vi.waitFor(() => {
+      // optimistic drop of #42, #43 stays
+      expect(container.querySelector('[data-testid="issue-42"]')).toBeFalsy()
+      expect(container.querySelector('[data-testid="issue-43"]')).toBeTruthy()
+      // count corrected to remaining issues, success toast, and a refetch to reconcile
+      expect(onCountChange).toHaveBeenCalledWith({ prs: 0, issues: 1 })
+      expect(toastMock).toHaveBeenCalledWith('Issue #42 closed', 'success')
+      expect(fetchIssuesAndPRs).toHaveBeenNthCalledWith(2, 'acme/widgets', true)
+    })
 
     unmount()
   })

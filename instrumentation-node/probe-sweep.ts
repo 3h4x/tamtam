@@ -16,6 +16,13 @@
 // drain) used to live here too. They were removed when the workflow runtime
 // became the only release path — its durability owns those concerns now.
 export async function runProbeSweep(): Promise<void> {
+  // ── Host-protection section: runs UNCONDITIONALLY, even during a DB outage ──
+  // These three find a hung/runaway process from in-memory job state and kill
+  // its process group (a pure `process.kill(-pid)`); only their trailing
+  // `markDone` touches the DB and is already best-effort. Gating them on DB
+  // reachability would let a runaway (e.g. a libuv-busy-looping Vitest worker)
+  // burn a core for the *entire* outage — the exact failure they exist to
+  // prevent — so they must precede the reachability gate below.
   try {
     const jobStorage = await import('@/lib/jobs/job-storage');
     const { isClaudeBackedJobKind, getJobKind } = await import('@/lib/jobs/kinds');
@@ -37,6 +44,42 @@ export async function runProbeSweep(): Promise<void> {
   } catch (err) {
     console.error('[probe-sweep] error:', err);
   }
+  // Reap detached jobs (test + mark-dod-verify) that blew past their wall-clock
+  // cap. A forked Vitest worker can libuv-busy-loop forever (unclosed IPC fd),
+  // so `pnpm test` never exits and start-test's `proc.on('close')` never fires;
+  // a hung Claude verify never emits a result line. A restart orphans the
+  // detached group to PID 1, where it burns a core indefinitely. Reading job
+  // rows (not an in-process timer) means this still fires after a restart — the
+  // single, restart-safe liveness guard for all detached job kinds.
+  try {
+    const { reapTimedOutClaudeJobs } = await import('@/lib/jobs/test-timeout-reaper');
+    await reapTimedOutClaudeJobs();
+  } catch (err) {
+    console.error('[probe-sweep] job timeout reap error:', err);
+  }
+  // Per-run runaway guard: kill Claude runs/agents that blew past the token or
+  // wall-time cap before a project-level budget check would ever fire. No-op
+  // when both caps are disabled. Reads log rows so it survives a restart.
+  try {
+    const { reapRunCapExceededJobs } = await import('@/lib/jobs/run-cap-reaper');
+    await reapRunCapExceededJobs();
+  } catch (err) {
+    console.error('[probe-sweep] run-cap reap error:', err);
+  }
+
+  // ── Reachability gate ──────────────────────────────────────────────────────
+  // Everything below is pure DB-recovery/reconcile/drain work: it can accomplish
+  // nothing while Postgres is unreachable and, unlike the host-protection section
+  // above, it fires DB queries every tick regardless of whether there is work to
+  // do — so on an outage it was the source of the ~14 `AggregateError` stacks per
+  // 30 s tick that buried the real "DB is down" condition. Probe once; if the DB
+  // is down, skip this section and let the gate emit a single throttled signal
+  // instead of hammering a dead pool. The gate probes a dedicated connection (not
+  // the shared app pool), so pool saturation under load can never masquerade as
+  // an outage and disable these safety nets. The next tick catches up the moment
+  // Postgres returns.
+  const { ensureDbReachable } = await import('@/lib/db/reachability');
+  if (!(await ensureDbReachable())) return;
   // Heal zombie rows: jobs the in-memory cache already marked finished but whose
   // `finished_at` DB write was dropped (DB unreachable at finalize). The probe
   // above can't catch these — it only re-probes cache-running jobs — so a stale
@@ -71,28 +114,6 @@ export async function runProbeSweep(): Promise<void> {
     }
   } catch (err) {
     console.error('[probe-sweep] release timeout sweep error:', err);
-  }
-  // Reap detached jobs (test + mark-dod-verify) that blew past their wall-clock
-  // cap. A forked Vitest worker can libuv-busy-loop forever (unclosed IPC fd),
-  // so `pnpm test` never exits and start-test's `proc.on('close')` never fires;
-  // a hung Claude verify never emits a result line. A restart orphans the
-  // detached group to PID 1, where it burns a core indefinitely. Reading job
-  // rows (not an in-process timer) means this still fires after a restart — the
-  // single, restart-safe liveness guard for all detached job kinds.
-  try {
-    const { reapTimedOutClaudeJobs } = await import('@/lib/jobs/test-timeout-reaper');
-    await reapTimedOutClaudeJobs();
-  } catch (err) {
-    console.error('[probe-sweep] job timeout reap error:', err);
-  }
-  // Per-run runaway guard: kill Claude runs/agents that blew past the token or
-  // wall-time cap before a project-level budget check would ever fire. No-op
-  // when both caps are disabled. Reads log rows so it survives a restart.
-  try {
-    const { reapRunCapExceededJobs } = await import('@/lib/jobs/run-cap-reaper');
-    await reapRunCapExceededJobs();
-  } catch (err) {
-    console.error('[probe-sweep] run-cap reap error:', err);
   }
   try {
     const { runReleaseReconcileSweep } = await import('@/lib/jobs/release-reconcile');

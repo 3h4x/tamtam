@@ -82,7 +82,7 @@ describe('deriveInboxSignals', () => {
     const s = signals.find((x) => x.type === 'pr_needs_manual_merge');
     expect(s).toMatchObject({
       type: 'pr_needs_manual_merge',
-      severity: 'yellow',
+      severity: 'red',
       project: 'alpha',
       title: 'PR #76 needs manual merge',
       action: { kind: 'merge', label: 'Merge', prNumber: 76 },
@@ -196,9 +196,11 @@ describe('deriveInboxSignals', () => {
         openPrNumbersByProject: { alpha: [77] },
       }),
     );
+    // A merge conflict can't be cleared by a one-click "Merge" (it fails), so
+    // the conflict terminal offers the resolve-conflicts action instead.
     expect(signals.find((x) => x.type === 'pr_needs_manual_merge')).toMatchObject({
       title: 'PR #77 needs manual merge',
-      action: { kind: 'merge', prNumber: 77 },
+      action: { kind: 'resolve-conflicts', prNumber: 77 },
     });
   });
 
@@ -387,6 +389,46 @@ describe('deriveInboxSignals', () => {
     expect(s?.title).toContain('3 uncommitted changes');
   });
 
+  it('suppresses stale uncommitted changes while an agent run is in flight (it will commit + push at end of its release cycle)', () => {
+    const signals = deriveInboxSignals(
+      baseInput({
+        tasks: [makeTask({ project: 'delta', changes: 2, reviewed: false })],
+        jobs: [makeJob({ project: 'delta', kind: 'agent:code-crunch', finishedAt: null })],
+      }),
+    );
+    expect(signals.find((x) => x.type === 'stale_changes')).toBeUndefined();
+  });
+
+  it('suppresses stale uncommitted changes while a terminal run is in flight', () => {
+    const signals = deriveInboxSignals(
+      baseInput({
+        tasks: [makeTask({ project: 'delta', changes: 2, reviewed: false })],
+        jobs: [makeJob({ project: 'delta', kind: 'run', finishedAt: null })],
+      }),
+    );
+    expect(signals.find((x) => x.type === 'stale_changes')).toBeUndefined();
+  });
+
+  it('still flags stale uncommitted changes once the agent run has finished', () => {
+    const signals = deriveInboxSignals(
+      baseInput({
+        tasks: [makeTask({ project: 'delta', changes: 2, reviewed: false })],
+        jobs: [makeJob({ project: 'delta', kind: 'agent:code-crunch', finishedAt: 2000 })],
+      }),
+    );
+    expect(signals.find((x) => x.type === 'stale_changes')).toBeDefined();
+  });
+
+  it('does not let another project\'s running agent suppress a stale-changes nag', () => {
+    const signals = deriveInboxSignals(
+      baseInput({
+        tasks: [makeTask({ project: 'delta', changes: 2, reviewed: false })],
+        jobs: [makeJob({ project: 'other', kind: 'agent:code-crunch', finishedAt: null })],
+      }),
+    );
+    expect(signals.find((x) => x.type === 'stale_changes')).toBeDefined();
+  });
+
   it('surfaces an AUTO-paused project (recorded reason) as a red HITL with a Resume action', () => {
     const signals = deriveInboxSignals(
       baseInput({
@@ -404,6 +446,52 @@ describe('deriveInboxSignals', () => {
       baseInput({ tasks: [makeTask({ project: 'zeta', paused: true })] }),
     )
     expect(signals.find((x) => x.type === 'project_paused')).toBeUndefined()
+  })
+
+  it('suppresses the redundant project_paused when a pr_needs_manual_merge is the blocker', () => {
+    // Mid-issue: the PR reached pr-wait and deferred (needs manual merge) AND the
+    // project auto-paused. The manual-merge is THE blocker (and merging it resumes
+    // the project), so the paused row must not also show and outrank it.
+    const signals = deriveInboxSignals(
+      baseInput({
+        tasks: [makeTask({ project: 'zeta', paused: true })],
+        pausedReasonByProject: { zeta: 'Circuit breaker: 3 failed runs in 60min' },
+        jobs: [makeJob({ project: 'zeta', kind: 'pr-wait', exitCode: 1, prWaitReason: 'risky_diff', prNumber: 141 })],
+        openPrByProject: { zeta: { number: 141, ciGreen: true, reviewDecision: null, mergeable: 'MERGEABLE' } },
+        openPrNumbersByProject: { zeta: [141] },
+      }),
+    )
+    expect(signals.find((x) => x.type === 'project_paused')).toBeUndefined()
+    const blocker = signals.find((x) => x.type === 'pr_needs_manual_merge')
+    expect(blocker).toMatchObject({ severity: 'red', action: { kind: 'merge', prNumber: 141 } })
+    // The manual-merge blocker is the top (red) row.
+    expect(signals[0]).toBe(blocker)
+  })
+
+  it('keeps the plain project_paused row when there is no manual-merge blocker', () => {
+    const signals = deriveInboxSignals(
+      baseInput({
+        tasks: [makeTask({ project: 'zeta', paused: true })],
+        pausedReasonByProject: { zeta: 'Circuit breaker' },
+        openPrByProject: { zeta: { number: 9, ciGreen: false, reviewDecision: null, mergeable: 'MERGEABLE' } },
+      }),
+    )
+    expect(signals.find((x) => x.type === 'project_paused')).toMatchObject({
+      title: 'Project auto-paused — automation halted',
+      action: { kind: 'resume', label: 'Resume' },
+    })
+  })
+
+  it('demotes the default-branch ci_red to yellow when there is an open PR to finish', () => {
+    const signals = deriveInboxSignals(
+      baseInput({
+        tasks: [makeTask({ project: 'alpha', ci: 'failure', ci_failed_url: 'https://ci/1' })],
+        openPrByProject: { alpha: { number: 12, ciGreen: true, reviewDecision: null, mergeable: 'MERGEABLE' } },
+      }),
+    )
+    const ci = signals.find((x) => x.type === 'ci_red')
+    expect(ci).toMatchObject({ severity: 'yellow', action: { kind: 'fix-ci' } })
+    expect(ci?.detail).toContain('separate from your open PR')
   })
 
   it('flags a mergeable PR with green CI and an LGTM verdict', () => {
@@ -427,6 +515,63 @@ describe('deriveInboxSignals', () => {
       }),
     );
     expect(signals.find((x) => x.type === 'pr_ready_to_merge')).toBeUndefined();
+  });
+
+  it('does NOT flag a CONFLICTING PR as ready to merge even with green CI + LGTM', () => {
+    const signals = deriveInboxSignals(
+      baseInput({
+        tasks: [makeTask({ project: 'epsilon', ci: 'success', github: 'owner/epsilon' })],
+        jobs: [makeJob({ project: 'epsilon', kind: 'review', startedAt: 500, finishedAt: 900, verdict: 'LGTM' })],
+        openPrByProject: { epsilon: { number: 7, ciGreen: true, reviewDecision: null, mergeable: 'CONFLICTING' } },
+      }),
+    );
+    // The false "ready to merge / green" card must not appear...
+    expect(signals.find((x) => x.type === 'pr_ready_to_merge')).toBeUndefined();
+    // ...instead a conflict HITL surfaces with a resolve action (not a doomed merge).
+    const conflict = signals.find((x) => x.type === 'pr_conflicts');
+    expect(conflict).toMatchObject({
+      severity: 'yellow',
+      action: { kind: 'resolve-conflicts', prNumber: 7 },
+      externalUrl: 'owner/epsilon/pull/7',
+    });
+    expect(conflict?.detail).toMatch(/conflicts with base/i);
+  });
+
+  it('still flags a PR reported MERGEABLE as ready to merge', () => {
+    const signals = deriveInboxSignals(
+      baseInput({
+        tasks: [makeTask({ project: 'epsilon', ci: 'success' })],
+        jobs: [makeJob({ project: 'epsilon', kind: 'review', startedAt: 500, finishedAt: 900, verdict: 'LGTM' })],
+        openPrByProject: { epsilon: { number: 7, ciGreen: true, reviewDecision: null, mergeable: 'MERGEABLE' } },
+      }),
+    );
+    expect(signals.find((x) => x.type === 'pr_ready_to_merge')).toMatchObject({
+      severity: 'green',
+      action: { kind: 'merge', prNumber: 7 },
+    });
+    expect(signals.find((x) => x.type === 'pr_conflicts')).toBeUndefined();
+  });
+
+  it('offers resolve-conflicts (not merge) for a pr-wait conflict terminal', () => {
+    const signals = deriveInboxSignals(
+      baseInput({
+        tasks: [makeTask({ project: 'epsilon', github: 'owner/epsilon' })],
+        jobs: [
+          makeJob({
+            project: 'epsilon',
+            kind: 'pr-wait',
+            startedAt: 500,
+            finishedAt: 900,
+            exitCode: 1,
+            prWaitReason: 'conflict',
+            prNumber: 9,
+          }),
+        ],
+        openPrNumbersByProject: { epsilon: [9] },
+      }),
+    );
+    const manual = signals.find((x) => x.type === 'pr_needs_manual_merge');
+    expect(manual).toMatchObject({ action: { kind: 'resolve-conflicts', prNumber: 9 } });
   });
 
   it('flags a stuck automation-queue entry (orphan release) once per project', () => {

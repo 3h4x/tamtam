@@ -278,7 +278,7 @@ async function ensureIssueList(
   const repo = await getGhRepo(projectName, expanded);
   if (!repo) return { detail: 'could not determine GitHub repo', status: 422 };
 
-  const prFields = 'number,title,state,author,url,createdAt,updatedAt,headRefName,baseRefName,isDraft,reviewDecision,labels,body,statusCheckRollup';
+  const prFields = 'number,title,state,author,url,createdAt,updatedAt,headRefName,baseRefName,isDraft,reviewDecision,labels,body,statusCheckRollup,mergeable';
   const issueFields = 'number,title,state,author,url,createdAt,updatedAt,assignees,labels,body';
 
   const [prsResult, issuesResult] = await Promise.all([

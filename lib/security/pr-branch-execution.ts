@@ -63,17 +63,49 @@ function resolveGithubRepo(projectPath: string): string | null {
   }
 }
 
-function githubAuthorLoginForCommit(projectPath: string, repo: string, sha: string): string | null {
+// The outcome of resolving one branch commit to a GitHub author:
+//   - `login`   → GitHub knows the commit and mapped it to an account login.
+//   - `absent`  → GitHub has never seen the commit (it was never pushed), so it
+//                 is local operator/agent work — trusted, see the gate comment.
+//   - `noAuthor`→ GitHub has the commit but could not map it to an account.
+//   - `failed`  → the lookup itself failed (network / auth / rate-limit); the
+//                 result is indeterminate and must fail closed.
+type CommitAuthorResult =
+  | { kind: 'login'; login: string }
+  | { kind: 'absent' }
+  | { kind: 'noAuthor' }
+  | { kind: 'failed' };
+
+// GitHub answers `GET /repos/{repo}/commits/{sha}` for a SHA it does not have
+// with HTTP 422 "No commit found for SHA: …". That message is the authoritative
+// signal that a commit was never pushed and exists only in the local clone. It
+// is matched narrowly — NOT on any 4xx — so an auth/rate-limit/network failure
+// still fails closed instead of laundering untrusted code as "local".
+const COMMIT_ABSENT_FROM_GITHUB = /no commit found for sha/i;
+
+function commandStderr(err: unknown): string {
+  if (err && typeof err === 'object' && 'stderr' in err) {
+    const stderr = (err as { stderr?: unknown }).stderr;
+    if (Buffer.isBuffer(stderr)) return stderr.toString();
+    if (typeof stderr === 'string') return stderr;
+  }
+  return err instanceof Error ? err.message : String(err);
+}
+
+function resolveCommitAuthor(projectPath: string, repo: string, sha: string): CommitAuthorResult {
   try {
+    // stderr is piped (GIT_OPTS discards it) so the missing-commit signal below
+    // can be distinguished from a transient failure.
     const login = execFileSync(
       'gh',
       ['api', `repos/${repo}/commits/${sha}`, '--jq', '.author.login'],
-      { ...GIT_OPTS, cwd: projectPath },
+      { ...GIT_OPTS, cwd: projectPath, stdio: ['ignore', 'pipe', 'pipe'] },
     ).toString().trim();
-    if (!login || login === 'null') return null;
-    return login;
-  } catch {
-    return null;
+    if (!login || login === 'null') return { kind: 'noAuthor' };
+    return { kind: 'login', login };
+  } catch (err) {
+    if (COMMIT_ABSENT_FROM_GITHUB.test(commandStderr(err))) return { kind: 'absent' };
+    return { kind: 'failed' };
   }
 }
 
@@ -86,13 +118,23 @@ function githubAuthorLoginForCommit(projectPath: string, repo: string, sha: stri
 // branch adds over the trusted base to a GitHub `author.login` and refuses
 // unless all of them are trusted (or the branch adds no commits at all).
 //
-// It deliberately does NOT gate on the working tree being clean. Uncommitted
-// working-tree changes can only be the operator's or TamTam's own agent output
-// — nothing external can write them (an external PR arrives as commits, which
-// are verified above) — so they carry the same trust the default branch is
-// granted unconditionally. Refusing on a dirty tree only ever produced false
-// positives against legitimate local work; the committed-author check is the
-// real boundary and is preserved intact.
+// A commit GitHub has never seen (never pushed) is NOT external code: external
+// contributions always arrive as commits already present on GitHub — a PR head,
+// which this same API resolves to the contributor's login. A commit that only
+// exists in the local clone can only be the operator's or TamTam's own agent
+// output, so it carries the same trust the working tree is granted (below), and
+// is allowed to run. This matters because the pipeline runs this gate at its
+// FIRST step (test), before the push phase — so freshly-made local commits are
+// routinely not yet on GitHub, and failing them closed wrongly blocked every
+// such release.
+//
+// It also deliberately does NOT gate on the working tree being clean.
+// Uncommitted working-tree changes can only be the operator's or TamTam's own
+// agent output — nothing external can write them (an external PR arrives as
+// commits, which are verified above) — so they carry the same trust the default
+// branch is granted unconditionally. Refusing on a dirty tree only ever produced
+// false positives against legitimate local work; the committed-author check is
+// the real boundary and is preserved intact.
 export function checkPrBranchExecutionGate(
   projectPath: string,
   actionLabel: string,
@@ -129,18 +171,29 @@ export function checkPrBranchExecutionGate(
   }
 
   for (const sha of shas) {
-    const login = githubAuthorLoginForCommit(projectPath, repo, sha);
-    if (!login) {
+    const author = resolveCommitAuthor(projectPath, repo, sha);
+
+    // Never pushed to GitHub → local operator/agent work → trusted (see above).
+    if (author.kind === 'absent') continue;
+
+    if (author.kind === 'noAuthor') {
       return {
         ok: false,
         detail: `Refusing to ${actionLabel} on non-default branch ${branch.currentBranch}: commit ${sha.slice(0, 12)} could not be mapped to a GitHub author. Approve the run explicitly or use an isolated runner.`,
       };
     }
-    const trusted = isUserTrusted(login, projectPath);
-    if (!trusted) {
+
+    if (author.kind === 'failed') {
       return {
         ok: false,
-        detail: `Refusing to ${actionLabel} on non-default branch ${branch.currentBranch}: GitHub author ${login} for commit ${sha.slice(0, 12)} is not in safe_users / trusted_github_users. Approve the run explicitly or use an isolated runner.`,
+        detail: `Refusing to ${actionLabel} on non-default branch ${branch.currentBranch}: GitHub author lookup failed for commit ${sha.slice(0, 12)}. Approve the run explicitly or use an isolated runner.`,
+      };
+    }
+
+    if (!isUserTrusted(author.login, projectPath)) {
+      return {
+        ok: false,
+        detail: `Refusing to ${actionLabel} on non-default branch ${branch.currentBranch}: GitHub author ${author.login} for commit ${sha.slice(0, 12)} is not in safe_users / trusted_github_users. Approve the run explicitly or use an isolated runner.`,
       };
     }
   }

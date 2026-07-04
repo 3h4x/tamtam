@@ -5,6 +5,7 @@ import remarkGfm from 'remark-gfm'
 import type { GhIssue, ProjectConfig } from '@/lib/client-api'
 import { formatAgo } from '@/lib/shared/format'
 import { useIssueActions } from '@/hooks/useIssueActions'
+import { CloseIssueControl } from '@/components/issues-tab/CloseIssueControl'
 import { Labels, workOnChainSummary } from '@/components/issues-tab/shared'
 import { Drawer } from '@/components/ui/Drawer'
 import { Button, buttonVariants } from '@/components/ui/Button'
@@ -15,7 +16,7 @@ function truncate(s: string, n: number): string {
   return s.length <= n ? s : s.slice(0, n - 1) + '…'
 }
 
-function IssueDrawerBody({ issue, projectName, projectCfg }: { issue: GhIssue; projectName: string; projectCfg: ProjectConfig | null }) {
+function IssueDrawerBody({ issue, projectName, projectCfg, onClosed }: { issue: GhIssue; projectName: string; projectCfg: ProjectConfig | null; onClosed: (issueNumber: number) => void }) {
   const { hasContext, continuing, openInTerminal, discussInTerminal, continueWork } = useIssueActions(issue, projectName)
 
   return (
@@ -83,6 +84,7 @@ function IssueDrawerBody({ issue, projectName, projectCfg }: { issue: GhIssue; p
         >
           discuss
         </Button>
+        <CloseIssueControl projectName={projectName} issueNumber={issue.number} onClosed={onClosed} />
         <a
           href={issue.url}
           target="_blank"
@@ -124,11 +126,13 @@ export function IssueDetailDrawer({
   projectName,
   projectCfg,
   onClose,
+  onClosed,
 }: {
   issue: GhIssue | null
   projectName: string
   projectCfg: ProjectConfig | null
   onClose: () => void
+  onClosed: (issueNumber: number) => void
 }) {
   const title = issue ? (
     <div className="flex min-w-0 items-center gap-2">
@@ -148,7 +152,7 @@ export function IssueDetailDrawer({
 
   return (
     <Drawer open={issue !== null} onClose={onClose} title={title} ariaLabel="Issue detail">
-      {issue && <IssueDrawerBody issue={issue} projectName={projectName} projectCfg={projectCfg} />}
+      {issue && <IssueDrawerBody issue={issue} projectName={projectName} projectCfg={projectCfg} onClosed={onClosed} />}
     </Drawer>
   )
 }

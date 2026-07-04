@@ -57,6 +57,23 @@ async function runCompletionHooksInner(job: JobData): Promise<void> {
 
   await runAgentCompletionHooks(job);
 
+  // Operator-initiated conflict resolution is a standalone (non-pipeline) job:
+  // on completion, verify the rebase, force-push-with-lease, and hand off to
+  // pr-wait — or re-raise the conflict HITL on failure. It never participates
+  // in release chaining, so handle it here and return (mirrors how fix-ci stays
+  // out of the chain). markDone runs this on live completion AND on probe
+  // recovery after a restart (resolve-conflicts is a Claude-backed kind), so the
+  // finalize is restart-safe.
+  if (job.kind === 'resolve-conflicts') {
+    try {
+      const { finalizeResolveConflicts } = await import('@/lib/jobs/resolve-conflicts');
+      await finalizeResolveConflicts(job);
+    } catch (err) {
+      console.error(`[resolve-conflicts] finalize failed for ${job.id}:`, err);
+    }
+    return;
+  }
+
   // If the release was aborted while this step was running, do not chain to
   // the next step. The abort handler sets finishedAt on the release job, so
   // findActiveReleaseJob (which filters finishedAt === null) won't find it.
