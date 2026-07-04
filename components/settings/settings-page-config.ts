@@ -62,6 +62,7 @@ export interface SettingsMap {
   legacy_completion_hook_agent_drain_enabled: string
   plain_test_phase_enabled: string
   auto_fix_ci_on_red_default_branch: string
+  fix_ci_bypass_sandbox: string
   agent_templates: string
   log_retention_count: string
   log_retention_days: string

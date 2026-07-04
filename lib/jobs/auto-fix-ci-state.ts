@@ -18,6 +18,36 @@
 // `__tamtamInitiativeLastMine`). A restart resets it — worst case a couple of
 // extra attempts after a restart, still bounded, never an infinite loop.
 
+/**
+ * Read the `auto_fix_ci_on_red_default_branch` setting DIRECTLY from the DB.
+ *
+ * `getSettings()` reads a MODULE-LOCAL cache that returns DEFAULTS (flag=false)
+ * whenever that realm's cache is unpopulated — which is the case in the
+ * workflow/cron module realms (orchestrator, soak phase, graphile sweep) that
+ * are separate module instances from the API realm where the flag was toggled.
+ * Those are exactly the contexts that gate the auto fix-ci self-heal, so they
+ * must not depend on the per-realm cache. A direct settings-table read is
+ * realm-independent (mirrors how `getProjectSoakConfig` reads the DB).
+ */
+export async function isAutoFixCiOnRedDefaultBranchEnabled(): Promise<boolean> {
+  try {
+    const [{ db, schema }, { eq }] = await Promise.all([
+      import('@/lib/db'),
+      import('drizzle-orm'),
+    ]);
+    const row = (
+      await db
+        .select()
+        .from(schema.settings)
+        .where(eq(schema.settings.key, 'auto_fix_ci_on_red_default_branch'))
+        .limit(1)
+    )[0];
+    return row?.value === 'true';
+  } catch {
+    return false;
+  }
+}
+
 const DEFAULT_MAX_ATTEMPTS = 3;
 
 export function getAutoFixCiMaxAttempts(): number {

@@ -34,6 +34,8 @@ describe('POST /api/projects/by-project/[projectName]/fix-ci', () => {
   let dbGetMock: ReturnType<typeof vi.fn<() => unknown>>;
   let checkCliStartGateMock: ReturnType<typeof vi.fn>;
   let findBlockingRunningJobMock: ReturnType<typeof vi.fn>;
+  let getPermissionModeFlagMock: ReturnType<typeof vi.fn>;
+  let getSettingsMock: ReturnType<typeof vi.fn>;
 
   beforeEach(async () => {
     vi.resetModules();
@@ -47,6 +49,9 @@ describe('POST /api/projects/by-project/[projectName]/fix-ci', () => {
     execMock = vi.fn().mockResolvedValue({ exitCode: 0, stdout: 'Build failed\nError: test suite failed', stderr: '' });
     checkCliStartGateMock = vi.fn().mockResolvedValue({ ok: true, provider: 'codex' });
     findBlockingRunningJobMock = vi.fn().mockResolvedValue(null);
+    getPermissionModeFlagMock = vi.fn().mockImplementation((mode?: string | null) =>
+      mode ? `--permission-mode ${mode}` : '');
+    getSettingsMock = vi.fn().mockReturnValue({ default_model: 'sonnet', fix_ci_bypass_sandbox: true });
 
     dbGetMock = vi.fn().mockReturnValue({ project: 'proj1', ciFailedUrl: CI_URL });
     const limitThenable = () => {
@@ -72,7 +77,7 @@ describe('POST /api/projects/by-project/[projectName]/fix-ci', () => {
     }));
     vi.doMock('@/lib/jobs/spawn-claude-detached', () => ({ startJobInProcess: startJobMock }));
     vi.doMock('@/lib/shared/shell', () => ({ exec: execMock }));
-    vi.doMock('@/lib/shared/config', () => ({ getPermissionModeFlag: vi.fn().mockReturnValue(''), getSettings: vi.fn().mockReturnValue({ default_model: 'sonnet' }) }));
+    vi.doMock('@/lib/shared/config', () => ({ getPermissionModeFlag: getPermissionModeFlagMock, getSettings: getSettingsMock }));
     vi.doMock('@/lib/usage/resolve-provider', () => ({
       checkCliStartGate: checkCliStartGateMock,
     }));
@@ -186,6 +191,31 @@ describe('POST /api/projects/by-project/[projectName]/fix-ci', () => {
     expect(data.status).toBe('started');
     expect(data.job_id).toBeTruthy();
     expect(data.ci_url).toBe(CI_URL);
+  });
+
+  it('launches the CI fix in bypassPermissions mode when fix_ci_bypass_sandbox is on (default)', async () => {
+    // fix-ci must reproduce the CI failure locally: install deps, build, run
+    // tests. Under the default `auto` mode the Codex sandbox (workspace-write)
+    // blocks outbound network, so `pnpm install` fails with ENOTFOUND and the
+    // fix can never be verified. bypassPermissions is the only mode that grants
+    // the network access this job fundamentally needs.
+    const req = new NextRequest('http://localhost/api/projects/by-project/proj1/fix-ci', { method: 'POST' });
+    const res = await POST(req, { params: Promise.resolve({ projectName: 'proj1' }) });
+    expect(res.status).toBe(200);
+    expect(getPermissionModeFlagMock).toHaveBeenCalledWith('bypassPermissions');
+    const [, cmd] = startJobMock.mock.calls[0];
+    expect(cmd).toContain('--permission-mode bypassPermissions');
+  });
+
+  it('keeps the global permission mode when fix_ci_bypass_sandbox is off', async () => {
+    getSettingsMock.mockReturnValue({ default_model: 'sonnet', fix_ci_bypass_sandbox: false });
+    const req = new NextRequest('http://localhost/api/projects/by-project/proj1/fix-ci', { method: 'POST' });
+    const res = await POST(req, { params: Promise.resolve({ projectName: 'proj1' }) });
+    expect(res.status).toBe(200);
+    // No forced override — fall back to the global permission_mode.
+    expect(getPermissionModeFlagMock).toHaveBeenCalledWith(undefined);
+    const [, cmd] = startJobMock.mock.calls[0];
+    expect(cmd).not.toContain('bypassPermissions');
   });
 
   it('passes the preferred provider header into the chooser', async () => {

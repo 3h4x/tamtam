@@ -127,20 +127,34 @@ export async function releaseSoakPhaseWorkflow(
   let revertPrUrl: string | null = null;
   let autoMerged = false;
   let projectPaused = false;
+  let selfHealed = false;
   if (verdict === 'fail') {
-    // Pause project BEFORE opening the revert PR so the gate is already in
-    // effect by the time the notification fires.
-    projectPaused = await pauseProjectStep(jobId, projectName);
-    const revert = await openRevertPrStep(jobId, projPath, meta, failedRuns);
-    revertPrUrl = revert.prUrl ?? null;
-    if (revert.ok && revert.prUrl && meta.autoRevert) {
-      autoMerged = await autoMergeRevertStep(jobId, projPath, meta.prRepo, revert.prUrl);
+    // Self-heal first: when auto fix-ci is enabled, dispatch a bounded fix-ci to
+    // REPAIR the red default branch (fix-ci → release-after-fix-ci ships the
+    // fix) instead of reverting. Soak's polling is what makes this reliable —
+    // it observes the failure whenever it surfaces post-merge, closing the
+    // timing gap a sweep "idle on default" trigger can't. Falls back to the
+    // revert + pause HITL only when fix-ci is bounded-out / unavailable.
+    selfHealed = await maybeAutoFixCiStep(jobId, projectName, failedRuns);
+    if (!selfHealed) {
+      // Pause project BEFORE opening the revert PR so the gate is already in
+      // effect by the time the notification fires.
+      projectPaused = await pauseProjectStep(jobId, projectName);
+      const revert = await openRevertPrStep(jobId, projPath, meta, failedRuns);
+      revertPrUrl = revert.prUrl ?? null;
+      if (revert.ok && revert.prUrl && meta.autoRevert) {
+        autoMerged = await autoMergeRevertStep(jobId, projPath, meta.prRepo, revert.prUrl);
+      }
+      await notifyRevertStep(jobId, projectName, meta, failedRuns, revertPrUrl);
     }
-    await notifyRevertStep(jobId, projectName, meta, failedRuns, revertPrUrl);
   }
 
-  const exitCode = verdict === 'fail' ? 1 : 0;
-  const verdictLabel = verdict === 'fail' ? 'fail (ci_failed)' : `pass (${passReason})`;
+  // A self-healed failure exits 0: the release "succeeded" in that the red CI
+  // is being repaired by the chained fix-ci → release, not left stranded.
+  const exitCode = verdict === 'fail' && !selfHealed ? 1 : 0;
+  const verdictLabel = verdict === 'fail'
+    ? (selfHealed ? 'fail → auto fix-ci (self-heal)' : 'fail (ci_failed)')
+    : `pass (${passReason})`;
   await finalizeSoakStep(jobId, exitCode, verdictLabel);
 
   // soak is a terminal phase — re-dispatch the orchestrator so it sees
@@ -253,6 +267,28 @@ async function pollDefaultBranchCiStep(
     return { classification: 'pass', failed: [], intervalMs };
   }
   return { classification: verdict.kind === 'pending' ? 'pending' : 'none', failed: [], intervalMs };
+}
+
+/**
+ * On a post-merge CI failure, dispatch a bounded fix-ci to self-heal the red
+ * default branch — but only when `auto_fix_ci_on_red_default_branch` is on.
+ * Returns true when a fix-ci was dispatched (caller then skips the revert +
+ * pause fallback). The bound (one attempt per failing run, capped) lives in
+ * `auto-fix-ci-state.ts` so a permanently-broken CI can't loop.
+ */
+async function maybeAutoFixCiStep(
+  jobId: string,
+  projectName: string,
+  failedRuns: CiRun[],
+): Promise<boolean> {
+  'use step';
+  const { isAutoFixCiOnRedDefaultBranchEnabled } = await import('@/lib/jobs/auto-fix-ci-state');
+  if (!(await isAutoFixCiOnRedDefaultBranchEnabled())) return false;
+  const { dispatchAutoFixCiForRedDefaultBranch } = await import('@/lib/jobs/dispatch-auto-fix-ci');
+  const { appendSoakLog } = await import('@/lib/pipeline/start-soak');
+  const failedUrl = failedRuns.find((r) => r.url)?.url ?? null;
+  const r = await dispatchAutoFixCiForRedDefaultBranch(projectName, failedUrl, (s) => appendSoakLog(jobId, s));
+  return r.dispatched;
 }
 
 /**

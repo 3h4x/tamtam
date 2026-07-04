@@ -356,8 +356,21 @@ async function decideStep(jobId: string): Promise<NextPhase> {
   if (job.kind === 'pr-wait' && job.releaseId && (job.exitCode ?? -1) === 0) {
     try {
       const { getProjectSoakConfig } = await import('@/lib/scheduling/scheduling');
+      const { isAutoFixCiOnRedDefaultBranchEnabled } = await import('@/lib/jobs/auto-fix-ci-state');
       const soakCfg = await getProjectSoakConfig(job.project);
-      if (soakCfg && soakCfg.postMergeWatchMinutes > 0) {
+      // Run the soak watcher when post-merge watch is configured, OR when auto
+      // fix-ci is enabled. Soak is the timing-gap-proof home for post-merge
+      // auto-fix: it polls the merge SHA's default-branch CI over a window, so
+      // it observes a failure whenever it surfaces — unlike the sweep's "idle
+      // on default" trigger, which a fast-cycling repo has already left by the
+      // time post-merge CI reddens. In auto-fix mode with no explicit
+      // post_merge_watch_minutes, use a default window (the poll loop runs
+      // until CI terminates regardless, so this is just the on-gate).
+      const AUTO_FIX_CI_SOAK_WATCH_MINUTES = 20;
+      const configuredWatch = soakCfg?.postMergeWatchMinutes ?? 0;
+      const autoFixCiWatch = (await isAutoFixCiOnRedDefaultBranchEnabled()) ? AUTO_FIX_CI_SOAK_WATCH_MINUTES : 0;
+      const effectiveWatchMinutes = configuredWatch > 0 ? configuredWatch : autoFixCiWatch;
+      if (effectiveWatchMinutes > 0) {
         const prMeta = job.contextMeta ? JSON.parse(job.contextMeta) as { prNumber?: number; prRepo?: string; prUrl?: string } : {};
         if (prMeta.prNumber && prMeta.prRepo && prMeta.prUrl) {
           const { resolveProjectPath } = await import('@/lib/shared/project-data');
@@ -393,8 +406,8 @@ async function decideStep(jobId: string): Promise<NextPhase> {
                 prRepo: prMeta.prRepo,
                 prUrl: prMeta.prUrl,
                 defaultBranch,
-                watchMinutes: soakCfg.postMergeWatchMinutes,
-                autoRevert: soakCfg.autoRevertEnabled,
+                watchMinutes: effectiveWatchMinutes,
+                autoRevert: soakCfg?.autoRevertEnabled ?? false,
               };
             }
           }

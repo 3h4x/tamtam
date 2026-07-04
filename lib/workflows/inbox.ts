@@ -81,6 +81,16 @@ export interface InboxJob {
   /** For a `risky_diff` pr-wait: the specific high-risk files the diff touched,
    *  so the HITL can name WHY the auto-merge was refused. Null otherwise. */
   riskyFiles: string[] | null;
+  /** The release this job belongs to, when release-linked. Lets the
+   *  manual-merge HITL find the DoD verification from the same release's
+   *  mark-dod job. Null for standalone jobs. */
+  releaseId: string | null;
+  /** For mark-dod jobs: acceptance-criteria verified / total and the issue (or
+   *  PR) number the DoD was checked against, so a deferred-merge HITL can show
+   *  the operator what claude verified before they decide. Null otherwise. */
+  dodVerified: number | null;
+  dodTotal: number | null;
+  dodIssueNumber: number | null;
 }
 
 export interface InboxOpenPr {
@@ -137,6 +147,32 @@ function latestJob(jobs: InboxJob[], project: string, kind: string): InboxJob | 
 
 function isPipelineActive(jobs: InboxJob[], project: string): boolean {
   return jobs.some((j) => j.project === project && j.finishedAt === null && ACTIVE_JOB_KINDS.has(j.kind));
+}
+
+// Find the DoD (mark-dod) verification from the same release a deferred pr-wait
+// belongs to, so the manual-merge HITL can show what claude verified against the
+// issue before the operator decides to merge. Newest per release wins.
+function latestDodForRelease(jobs: InboxJob[], project: string, releaseId: string | null): InboxJob | null {
+  if (!releaseId) return null;
+  let best: InboxJob | null = null;
+  for (const j of jobs) {
+    if (j.project !== project || j.kind !== 'mark-dod' || j.releaseId !== releaseId) continue;
+    if (!best || j.startedAt > best.startedAt) best = j;
+  }
+  return best;
+}
+
+// Render the "what claude verified" suffix for a manual-merge HITL from the
+// release's DoD job: the X/N criteria count and the issue it was checked
+// against. Empty when there are no acceptance criteria (nothing to show).
+function dodDetailSuffix(dod: InboxJob | null): string {
+  if (!dod) return '';
+  if (dod.dodTotal != null && dod.dodTotal > 0) {
+    const issueRef = dod.dodIssueNumber != null ? ` on issue #${dod.dodIssueNumber}` : '';
+    return ` DoD: ${dod.dodVerified ?? 0}/${dod.dodTotal} acceptance criteria verified${issueRef}.`;
+  }
+  if (dod.dodIssueNumber != null) return ` Linked issue #${dod.dodIssueNumber}.`;
+  return '';
 }
 
 function projectHref(project: string): string {
@@ -227,6 +263,10 @@ export function deriveInboxSignals(input: InboxInput): InboxSignal[] {
       // an empty/absent cache (markDone wipes it per finalize) still surfaces.
       const stillOpen = !openNums || openNums.length === 0 || openNums.includes(prNumber);
       if (!stillOpen) continue;
+      // Surface the release's DoD verification so the operator can see the issue
+      // and what claude verified against it BEFORE deciding to merge a risky PR
+      // — the pre-pr-wait mark-dod already ran, so this is "shown before merge".
+      const dodSuffix = dodDetailSuffix(latestDodForRelease(jobs, project, prWait.releaseId));
       signals.push({
         id: `pr_needs_manual_merge:${project}:${prNumber}`,
         type: 'pr_needs_manual_merge',
@@ -237,7 +277,8 @@ export function deriveInboxSignals(input: InboxInput): InboxSignal[] {
           ?? 'Auto-merge did not complete — needs a human merge/close decision.')
           + (prWait.prWaitReason === 'risky_diff' && prWait.riskyFiles && prWait.riskyFiles.length > 0
             ? ` High-risk files: ${prWait.riskyFiles.join(', ')}.`
-            : ''),
+            : '')
+          + dodSuffix,
         href: `${projectHref(project)}/issues`,
         externalUrl: task.github ? `${task.github}/pull/${prNumber}` : null,
         ageSeconds: null,
@@ -273,9 +314,10 @@ export function deriveInboxSignals(input: InboxInput): InboxSignal[] {
     //    non-zero is TERMINAL and must surface — never a silent stop. Fires for
     //    ANY non-zero release, including a bare abort that stamped no
     //    releaseStopReason (wall-clock timeout, 'unknown' terminal, or a finalize
-    //    path that forgot to stamp one). Suppressed only when it is already
-    //    surfaced as a manual-merge, or a newer pipeline job started after it
-    //    finished (something is actively re-driving it — let that run).
+    //    path that forgot to stamp one). Suppressed when it is already surfaced
+    //    as a manual-merge, a newer pipeline job started after it finished
+    //    (something is actively re-driving it — let that run), or the release's
+    //    PR actually shipped via a (manual) merge after the release job exited.
     const release = latestJob(jobs, project, 'release');
     if (release && release.finishedAt !== null && release.exitCode !== 0) {
       const coveredByMerge = signals.some(
@@ -288,7 +330,22 @@ export function deriveInboxSignals(input: InboxInput): InboxSignal[] {
           ACTIVE_JOB_KINDS.has(j.kind) &&
           j.startedAt >= (release.finishedAt as number),
       );
-      if (!coveredByMerge && !reDriving) {
+      // The release's PR can ship via a merge that lands AFTER the release job
+      // itself exited non-zero — a `risky_diff`/`merge_permanent` defer that the
+      // operator then merges from the inbox, or a pr-wait that merged but exited
+      // non-zero on a later step. A completed merge is the "merged" arm of the
+      // merge-or-HITL invariant (work shipped), so it is no longer a silent
+      // stop: don't nag with a stale "Release stopped — no merge". Only credit
+      // a merge from this release cycle onward (started at/after the failed
+      // release) so an unrelated older merge can't mask a genuinely failed run.
+      const shippedByMerge = jobs.some(
+        (j) =>
+          j.project === project &&
+          j.kind === 'pr-wait' &&
+          j.prWaitReason === 'merged' &&
+          j.startedAt >= release.startedAt,
+      );
+      if (!coveredByMerge && !reDriving && !shippedByMerge) {
         signals.push({
           id: `fix_loop_exhausted:${project}`,
           type: 'fix_loop_exhausted',
@@ -413,6 +470,20 @@ function safePrWaitInfo(contextMeta: string | null | undefined): { reason: strin
   }
 }
 
+// Read a mark-dod job's persisted DoD result from contextMeta. buildMarkDodContextMeta
+// stamps { verified, total, sourceNumber } (verified/total are null until the
+// verify completes). Only numeric values survive so a partial run reads as null.
+function safeMarkDodInfo(contextMeta: string | null | undefined): { verified: number | null; total: number | null; issueNumber: number | null } {
+  if (!contextMeta) return { verified: null, total: null, issueNumber: null };
+  try {
+    const parsed = JSON.parse(contextMeta) as { verified?: unknown; total?: unknown; sourceNumber?: unknown };
+    const num = (v: unknown) => (typeof v === 'number' ? v : null);
+    return { verified: num(parsed.verified), total: num(parsed.total), issueNumber: num(parsed.sourceNumber) };
+  } catch {
+    return { verified: null, total: null, issueNumber: null };
+  }
+}
+
 interface CachedPr {
   number?: number;
   state?: string;
@@ -481,6 +552,7 @@ export async function listInboxSignals(): Promise<{ signals: InboxSignal[]; coun
 
   const jobs: InboxJob[] = listJobs().map((j) => {
     const prWait = j.kind === 'pr-wait' ? safePrWaitInfo(j.contextMeta) : null;
+    const dod = j.kind === 'mark-dod' ? safeMarkDodInfo(j.contextMeta) : null;
     return {
       project: j.project,
       kind: j.kind,
@@ -492,6 +564,10 @@ export async function listInboxSignals(): Promise<{ signals: InboxSignal[]; coun
       prWaitReason: prWait?.reason ?? null,
       prNumber: prWait?.prNumber ?? null,
       riskyFiles: prWait?.riskyFiles ?? null,
+      releaseId: j.releaseId ?? null,
+      dodVerified: dod?.verified ?? null,
+      dodTotal: dod?.total ?? null,
+      dodIssueNumber: dod?.issueNumber ?? null,
     };
   });
 

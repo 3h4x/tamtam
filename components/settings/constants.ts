@@ -36,6 +36,7 @@ export type SettingsFieldKey =
   | 'legacy_completion_hook_agent_drain_enabled'
   | 'plain_test_phase_enabled'
   | 'auto_fix_ci_on_red_default_branch'
+  | 'fix_ci_bypass_sandbox'
   | 'agent_templates'
   | 'log_retention_count'
   | 'log_retention_days'
@@ -532,6 +533,13 @@ export const FIELDS: Record<SettingsFieldKey, FieldDef> = {
     subsection: 'release_ops',
     span: 1,
   },
+  fix_ci_bypass_sandbox: {
+    label: 'Fix-CI Bypasses Sandbox',
+    help: 'When on (default), fix-ci runs the CLI in bypassPermissions mode so it has network access to install deps, build, and run tests — the only way to VERIFY a CI fix. The Codex sandbox (workspace-write) blocks all outbound network (pnpm install → ENOTFOUND), so without this fix-ci edits blind and ships unverified changes, and an auto-fix-ci loop on a red default branch churns without converging. Turning this OFF keeps fix-ci under the global permission mode and its sandbox, at the cost of local verification. This escalation is scoped to fix-ci only — every other job keeps the global permission mode.',
+    group: 'pipeline',
+    subsection: 'release_ops',
+    span: 1,
+  },
 
   // Pipeline: runaway guards
   run_token_cap: {
@@ -773,6 +781,7 @@ export const DEFAULTS: Record<SettingsFieldKey, string> = {
   legacy_completion_hook_agent_drain_enabled: 'true',
   plain_test_phase_enabled: 'false',
   auto_fix_ci_on_red_default_branch: 'false',
+  fix_ci_bypass_sandbox: 'true',
   agent_templates: '',
   log_retention_count: '200',
   log_retention_days: '30',

@@ -113,9 +113,25 @@ Do not commit — just make the code changes.
   job.logPath = logPath;
 
   try {
+    // fix-ci must reproduce the CI failure locally — install deps, build, run
+    // tests/linters — to confirm the fix actually works (the prompt above asks
+    // for exactly that). Under the default `auto` mode the Codex sandbox
+    // (`workspace-write`) blocks outbound network, so `pnpm install` fails with
+    // ENOTFOUND and the agent edits blind: it ships an unverified change and,
+    // with auto-fix-ci on a red default branch, loops. `bypassPermissions` is
+    // the only permission mode that grants the network access this job
+    // fundamentally needs (Codex `--dangerously-bypass-approvals-and-sandbox`).
+    // Gated on `fix_ci_bypass_sandbox` (default on) so the operator keeps a kill
+    // switch for this scoped escalation; the global `permission_mode` still
+    // governs every other job kind. When `tamtam_network_policy_strict` is on
+    // the outer loopback seatbelt still applies by design — that lockdown is a
+    // deliberate operator choice and fix-ci must then rely on pre-installed deps.
+    const permissionMode = getPermissionModeFlag(
+      settings.fix_ci_bypass_sandbox ? 'bypassPermissions' : undefined,
+    );
     const pid = await startJob(
       job.id,
-      `${claudeBin} --print --output-format stream-json --include-partial-messages --verbose --model ${defaultModel} ${getPermissionModeFlag()}`,
+      `${claudeBin} --print --output-format stream-json --include-partial-messages --verbose --model ${defaultModel} ${permissionMode}`,
       prompt,
       projPath,
       { env: cliEnv }

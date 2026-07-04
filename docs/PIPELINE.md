@@ -2,12 +2,16 @@
 
 The pipeline is a quality-gated sequence driven by the selected provider. The registry is unified per project: `test → review → fix → commit → push → mark-dod → pr-wait → soak`.
 
-`soak` is opt-in: when the project's `post_merge_watch_minutes` is `0` (the default), the chain still ends after `pr-wait` merges the PR and the release is finalised. When it is positive (any value enables soak — the integer is no longer a duration cap), TamTam polls the default branch's CI on the merge commit until it terminates:
+`soak` runs when the project's `post_merge_watch_minutes` is positive (any value enables soak — the integer is no longer a duration cap) **OR** the global `auto_fix_ci_on_red_default_branch` is on (which runs soak with a default ~20-min window purely to gate the post-merge auto-fix; the poll loop runs until CI terminates regardless). When neither applies, the chain ends after `pr-wait` merges the PR and the release is finalised. When soak runs, TamTam polls the default branch's CI on the merge commit until it terminates:
 
 - **All checks pass** → soak exits 0, release finalises, project unlocks normally.
-- **Any check fails** → soak pauses the project (`projects.paused = true` — admission gates reject new agent runs until a human resumes from Settings) and opens a revert PR. `auto_revert_enabled` controls whether the revert PR is auto-merged or left open for review.
+- **Any check fails** → behaviour depends on `auto_fix_ci_on_red_default_branch`:
+  - **On (self-heal)** → soak dispatches a bounded `fix-ci` to *repair* the red default branch (`fix-ci → release-after-fix-ci → release` ships the fix) and exits 0. Soak's polling is what makes this reliable — it observes the failure whenever it surfaces post-merge, closing the timing gap the "idle on default" sweep can't (a fast-cycling repo has already left `main` by the time post-merge CI reddens). The bound (`lib/jobs/auto-fix-ci-state.ts`, one attempt per failing-run URL, capped) prevents looping; if fix-ci is bounded-out it falls back to the revert path below.
+  - **Off (revert)** → soak pauses the project (`projects.paused = true` — admission gates reject new agent runs until a human resumes from Settings) and opens a revert PR. `auto_revert_enabled` controls whether the revert PR is auto-merged or left open for review.
 - **No CI runs ever appear on the merge commit** → after a 90s grace period, soak treats this as "no default-branch CI configured" and passes.
 - **CI stays pending forever** → soak keeps polling. There is no upper time cap. If a workflow is genuinely stuck, operators can cancel the soak job via `DELETE /api/jobs/<soak-job-id>` and resume the project manually.
+
+`auto_fix_ci_on_red_default_branch` also has a **pre-soak** trigger: the periodic project sweep (`decideSweepAction`) dispatches the same bounded `fix-ci` when a project sits **on its default branch, clean, with red default-branch CI** — the case where the repo is idle on `main` when the failure is already visible. Both triggers share the per-failing-run bound and the `dispatchAutoFixCiForRedDefaultBranch` helper. **Realm note:** all three gate sites (orchestrator soak gate, soak-phase, sweep runner) read the flag via `isAutoFixCiOnRedDefaultBranchEnabled()` — a **direct DB read**, because `getSettings()` returns DEFAULTS in the workflow/cron module realms where these run (its cache is module-local and unpopulated there).
 
 ## Threat model
 
@@ -163,6 +167,18 @@ project header `ProjectActions` and the `Changes` tab). The model is:
   `ci_red` signal — the merge-or-HITL invariant (see CLAUDE.md → Vision and
   `lib/workflows/inbox.ts`). The operator acts from the inbox, not from a
   per-project git button they have to remember to click.
+- **The same HITL is surfaced on the project page.** Opening a blocked/paused
+  project (`/project/<name>`) renders a "Needs your decision" banner with that
+  project's own inbox signals (via `GET /api/inbox?project=<name>`, component
+  `components/project-detail/ProjectSignals.tsx`), expanded so the reason (e.g.
+  the high-risk files a `risky_diff` touched) is visible without a click — so an
+  operator who lands on a stalled project can act there instead of hunting for
+  it in the cross-project inbox.
+- **Merging a `pr_needs_manual_merge` HITL also resumes the project.** The manual
+  merge means the pipeline stalled on that decision; taking it is "ship it and
+  keep going", so the client's `merge` action clears any auto-pause after the
+  merge (`components/InboxFeed.tsx` → `runSignalAction`). Merging a normal
+  ready-to-merge PR on a healthy project does not touch pause state.
 
 The underlying `push` and `changes` (pull) API routes still exist for
 release-scoped internal use (e.g. a failed-`push`-step retry inside a release
@@ -175,7 +191,7 @@ There is no longer a per-project pipeline mode selector. Push behavior is decide
 | Working-copy branch | Push behavior | Downstream steps |
 |---------------------|---------------|------------------|
 | Default branch | Push directly to the current branch | `mark-dod` runs only when the release is issue-linked; `pr-wait` is skipped |
-| Any non-default branch | Push current branch and open or reuse a PR | `mark-dod` runs for issue-linked releases and for generic PR-backed pushes when auto-merge is off; `pr-wait` runs when auto-merge is enabled |
+| Any non-default branch | Push current branch and open or reuse a PR | `mark-dod` runs before `pr-wait` on every PR-backed push — the workflow-driven release routes `push → mark-dod` unconditionally (so DoD is verified before merge), then `mark-dod → pr-wait` when auto-merge is enabled (else it finalizes after `mark-dod`). (Legacy standalone chain only: `mark-dod` runs when auto-merge is off, else DoD defers to post-merge.) |
 
 `fix/issue-<n>-<slug>` branches are first-class release branches. They no longer auto-return to the default branch after push; the working copy returns to the default branch after PR merge.
 
@@ -225,8 +241,9 @@ guard). Scheduled agents are already serialized here via `agent-cron`'s
 
 `pr-wait` polls the PR until one terminal reason resolves: `merged` (success),
 `checks_failed` (auto-dispatches `fix-ci`, which chains a fresh release),
-`pr_closed`, `conflict`, `timeout`, or a **human-in-the-loop deferral** —
-`risky_diff` (the PR diff touches high-risk execution files: dependency
+`pr_closed`, `conflict`, `timeout`, `switch_failed` (the merge landed but the
+post-merge switch back to the default branch failed), or a **human-in-the-loop
+deferral** — `risky_diff` (the PR diff touches high-risk execution files: dependency
 manifests / lockfiles / `.github/workflows` / `Dockerfile` / `Makefile` / JS·TS
 config) or `merge_permanent` (merge blocked, e.g. branch protection). For every
 non-`merged` reason the release chain still routes `pr-wait → done`, so the
@@ -237,6 +254,27 @@ the auto-merge guard deliberately refuses becomes a one-click operator decision
 instead of a silent stall. Clicking Merge uses the operator-explicit merge path,
 which bypasses the `risky_diff` guard (the guard exists to defer to exactly that
 human decision).
+
+**DoD is verified before the merge decision, not after.** In the workflow-driven
+release (the default), the orchestrator routes `push → mark-dod` unconditionally
+(`pipeline-spec.ts`), and `pr-wait` is only ever reached *through* `mark-dod`
+(`mark-dod → pr-wait` fires when auto-merge is on and a PR exists; otherwise the
+release finalizes after `mark-dod`). So the issue's acceptance criteria are
+verified — and ticked on the issue — *before* `pr-wait` ever polls, and therefore
+before any `risky_diff` / `merge_permanent` HITL is raised. (The legacy
+completion-hook chain in `lib/jobs/lifecycle.ts`, used only for standalone
+no-`releaseId` steps, is the one that *defers* DoD until post-merge; the
+orchestrator does not withhold it that way. The orchestrator's own
+(workflow-driven) `pr-wait` does still run a second, post-merge `mark-dod`
+re-verification after a successful merge — `runPostMergeMarkDodStep` in
+`lib/workflows/phases/pr-wait-phase.ts`, idempotent because `extractCriteria`
+only returns still-unchecked boxes — to tick any criteria that became true only
+once merged.)
+The `pr_needs_manual_merge` signal carries the pre-merge DoD result — `DoD:
+X/N acceptance criteria verified on issue #I`, read from the same release's
+mark-dod `contextMeta` (`lib/workflows/inbox.ts` → `latestDodForRelease`) — so an
+operator deciding whether to merge a risky diff can see the linked issue and what
+the model verified against it, right on the HITL row.
 
 ---
 
@@ -365,8 +403,10 @@ FIX
   └─ exit ≠0 → completion hook → finalize release (exit 1)
 
 PUSH
-  ├─ exit 0  → completion hook → start mark-dod when issue-linked, or when a generic push produced a PR and auto-merge is off
-  │                              → start pr-wait when a push produced a PR and auto-merge is on
+  ├─ exit 0  → start mark-dod when issue-linked or when the push produced a PR
+  │            (workflow-driven release: push → mark-dod is unconditional; the
+  │             mark-dod block below decides pr-wait. Legacy standalone chain only: skips
+  │             mark-dod and starts pr-wait directly when auto-merge is on.)
   │                              → otherwise finalize release (exit 0)
   └─ exit ≠0 → completion hook
       ├─ isHookRejection(log) → start fix with parent push (if attempts < 2 per 30 min)
@@ -401,21 +441,31 @@ that is reaped (exit 124) or fails leaves the remaining boxes unticked for a
 later run to finish. The `mark-dod-verify` kind is deliberately absent from
 `PIPELINE_STEP_KINDS`, so it never gates the release.
 
+When reading the verify job's log, `readMarkDodVerificationResult` must tolerate
+the shared spawn path writing the `[tamtam] launching: <cmd>` banner without a
+trailing newline (`spawn-claude-detached.ts`), which glues the model's `--print`
+JSON onto the banner line. It strips only the banner prefix (keeping everything
+from the first `{`) rather than dropping the whole line — otherwise the entire
+verification JSON was discarded and every DoD reported `0/N verified`.
+
 pr-wait
   ├─ CI passes + PR diff has no high-risk execution files
-  │            → merge PR → switch to default branch
-  │              ├─ project has post_merge_watch_minutes > 0 → start soak
-  │              └─ otherwise                                 → finalize release (exit 0)
+  │            → merge PR → switch to default branch → post-merge mark-dod re-verify
+  │              (runPostMergeMarkDodStep — idempotent, ticks any newly-true boxes)
+  │              ├─ post_merge_watch_minutes > 0 OR auto_fix_ci_on_red_default_branch → start soak
+  │              └─ otherwise                                                          → finalize release (exit 0)
   ├─ CI passes + PR diff touches high-risk execution files → finalize release (exit 1)
   └─ CI fails  → seed failed CI URL → dispatch fix-ci → finalize release (exit 1)
 
 soak
   ├─ default-branch CI on merge sha passes within window → finalize release (exit 0)
-  ├─ default-branch CI on merge sha fails within window  → open revert PR
-  │     ├─ auto_revert_enabled → enable squash auto-merge on the revert PR
-  │     └─ otherwise           → leave revert PR open for review
-  │     emit `post_merge_revert` notification (success | failure)
-  │     finalize release (exit 1)
+  ├─ default-branch CI on merge sha fails within window
+  │     ├─ auto_fix_ci_on_red_default_branch (self-heal) → dispatch bounded fix-ci
+  │     │        → release-after-fix-ci ships the fix → finalize release (exit 0, self-healed)
+  │     └─ otherwise (revert) → pause project + open revert PR
+  │            ├─ auto_revert_enabled → enable squash auto-merge on the revert PR
+  │            └─ otherwise           → leave revert PR open for review
+  │            emit `post_merge_revert` notification (success | failure) → finalize release (exit 1)
   └─ window elapsed with no failures → finalize release (exit 0)
 
 `pr-wait` polls the PR immediately, then every 30 seconds by default. When
@@ -527,8 +577,8 @@ Called by `markDone()` after every job finishes. Hooks run in order:
 6. **Push cancellation abort**: If `push` exits `-2` or `-3`, abort the release with `push cancelled` or `push cancelled by release abort or timeout` instead of entering a fix loop.
 7. **Push hook fix**: If `push` exits with any other non-zero code and log matches hook rejection patterns: start a generic `fix` job whose `parentJobId` points at the failed push (within `getPushFixAttemptCap()=2`). The fix prompt reads the hook error from the parent push's log.
 8. **Fix→push re-push**: When that `fix` (parent.kind === `push`) exits 0: re-run PUSH.
-9. **DoD**: If `push` exits 0 and the release is issue-linked, or the push produced a PR without issue context: start `mark-dod` unless auto-merge defers it to post-merge.
-10. **PR merge wait**: If a push produced a PR and `auto_pr_merge_enabled`: start `pr-wait`; issue-linked DoD is deferred to post-merge on that path.
+9. **DoD**: If `push` exits 0 and the release is issue-linked, or the push produced a PR without issue context: start `mark-dod` unless auto-merge defers it to post-merge. *(Legacy `runCompletionHooks` behavior; under the workflow-driven orchestrator — the default — `push → mark-dod` is unconditional, so DoD is verified and its checkboxes ticked before `pr-wait`, never deferred.)*
+10. **PR merge wait**: If a push produced a PR and `auto_pr_merge_enabled`: start `pr-wait`; issue-linked DoD is deferred to post-merge on that path. *(Legacy chain only — under the orchestrator, `mark-dod` already ran in step 9's position, before `pr-wait`.)*
 11. **Release finalization**: If a pipeline job ran but no chaining happened, write `# release finished — exit {code}` to meta-log and mark the release job done.
 12. **Fix-CI auto-retry**: If `fix-ci` exits ≠0 within ~5 s of starting (boot crash): schedule retry after 500–3000 ms backoff. Capped at 2 retries within a 120-s window. These are hardcoded constants — not user-tunable.
 13. **Fix-CI release chaining**: If `fix-ci` exits 0, TamTam immediately tries `startRelease(project, { queueIfBlocked: true, sourceJobId: fixCiJob.id })` so the uncommitted CI fix goes through the normal quality gate (`test → review → commit → push`). This includes `fix-ci` jobs auto-dispatched by `pr-wait` after failed PR checks. If release start is temporarily blocked by the same conditions as release-after-run (active pipeline lock, pause gate, budget block, retryable pre-start failure), the hook preserves release intent by setting the pending-release flag for the project; that queued retry is project-scoped and does not retain `sourceJobId`.
@@ -544,8 +594,13 @@ local changes or unpushed commits; work on the default branch is skipped
 unless the project has `auto_push_enabled` set, in which case the sweep can
 self-heal a dirty default-branch worktree by starting Release directly. For
 clean non-default branches with a ready-to-merge PR, the sweep can start
-`pr-wait`. The sweep does not dispatch release or `pr-wait` jobs while
-`jobs_paused` is enabled.
+`pr-wait`. Separately, when the project is **clean on its default branch and the
+default-branch CI is red** (a post-merge failure), the sweep dispatches a
+bounded `fix-ci` to self-heal it — gated by `auto_fix_ci_on_red_default_branch`
+(on by default) and the per-project `auto_push_enabled`, bounded per failing run
+via `auto-fix-ci-state.ts` and falling back to the `ci_red` inbox HITL. That fix
+lands via a **direct push** on the default branch (never a PR). The sweep does
+not dispatch release or `pr-wait` jobs while `jobs_paused` is enabled.
 
 ### Orchestrator budget allocator
 

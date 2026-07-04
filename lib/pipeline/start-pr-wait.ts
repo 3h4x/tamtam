@@ -361,6 +361,20 @@ function runPrWaitLoop(
 
       log(`\n# pr-wait done — PR #${prNumber} merged\n`);
       await markDone(job, 0);
+      // A release-linked pr-wait that ran INLINE — i.e. RESUMED after a restart
+      // — must hand back to the orchestrator so the post-merge soak phase runs
+      // (post-merge CI watch / auto-fix-ci). The orchestrator awaits the pr-wait
+      // job's completion, but that await does not survive a restart, so without
+      // this an interrupted-and-resumed pr-wait ends the release here and
+      // silently skips soak. Standalone pr-waits (no releaseId) are unaffected.
+      if (job.releaseId) {
+        try {
+          const { safeStartOrchestrator } = await import('@/lib/workflows/safe-start-orchestrator');
+          await safeStartOrchestrator(job.id, job.project, job.releaseId, 'pr-wait-inline-merge');
+        } catch (e) {
+          log(`\n# post-merge orchestrator dispatch failed: ${e instanceof Error ? e.message : String(e)}\n`);
+        }
+      }
     } catch (e) {
       log(`\n# pr-wait error: ${e instanceof Error ? e.message : String(e)}\n`);
       await markDone(job, 1);

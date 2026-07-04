@@ -19,6 +19,7 @@ import { ConfigTab } from '@/components/project-detail/ConfigTab'
 import { RetrievalReindexPanel } from '@/components/project-detail/RetrievalReindexPanel'
 import { PipelineStrip } from '@/components/project-detail/PipelineStrip'
 import { ProjectHeader } from '@/components/project-detail/ProjectHeader'
+import { ProjectSignals } from '@/components/project-detail/ProjectSignals'
 import { ReleasePlanPanel } from '@/components/project-detail/ReleasePlanPanel'
 import { TabNav } from '@/components/project-detail/TabNav'
 import { ProjectPageLoadingState } from '@/components/project-detail/ProjectPageLoadingState'
@@ -564,6 +565,8 @@ export function ProjectDetailPage({
         onTogglePause={handleTogglePause}
         onToggleAutoRelease={handleToggleAutoRelease}
       />
+
+      <ProjectSignals projectName={name} />
 
       <div className="mb-3 flex justify-end">
         <ReleasePlanPanel

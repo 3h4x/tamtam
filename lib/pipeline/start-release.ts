@@ -23,9 +23,6 @@ import { appendRedactedFileSync } from '@/lib/jobs/redacted-log-writer';
 import { computeReleaseDeadlineAt } from './release-timeout';
 import { checkDailySpendCap, type SpendCapExceeded } from './spend-guard';
 import { notify } from '@/lib/shared/notifications';
-import { getSettings } from '@/lib/shared/config';
-import { readCachedGhStatus } from '@/lib/shared/gh-status';
-import { shouldBlockReleaseOnRedCi } from './red-ci-gate';
 
 export const RELEASE_PIPELINE_KINDS = new Set(['test', 'review', 'fix', 'commit', 'push', 'pr-wait', 'mark-dod', 'release']);
 
@@ -274,39 +271,6 @@ export async function startRelease(projectName: string, options: StartReleaseOpt
       isAgentJobKind(sourceJob.kind) ||
       (sourceJob.kind === 'run' && sourceJob.ghIssueNumber != null)
     ));
-  // ── CI-red gate ──────────────────────────────────────────────────────────
-  // Don't pile a new automatic feature release onto a red default-branch CI.
-  // The vicious cycle this breaks: feature PRs keep merging (their PR check is
-  // green) while the post-merge default-branch CI stays failing and nothing
-  // repairs it, so every cycle adds another merge on top of broken CI. When the
-  // default-branch CI is red, refuse the feature release; the CI stays frozen
-  // until it recovers. Refusing here also un-suppresses the `ci_red` inbox HITL
-  // (it hides while a pipeline is active) and lets the bounded auto fix-ci
-  // self-heal run (the project sweep's `decideAutoFixCi`, gated by
-  // `auto_fix_ci_on_red_default_branch`, dispatches a per-failing-run-bounded
-  // fix-ci and falls back to the ci_red HITL — merge-or-HITL preserved). The
-  // fix-ci-chained release (sourceJob.kind === 'fix-ci') CARRIES the fix — never
-  // block it, or CI could never go green — and operator-initiated releases are
-  // the human override; both are exempt below.
-  const blockOnRedCi = getSettings().block_release_on_red_ci;
-  const defaultBranchCi = blockOnRedCi
-    ? (await readCachedGhStatus(projectName).catch(() => null))?.ci ?? null
-    : null;
-  if (
-    shouldBlockReleaseOnRedCi({
-      blockEnabled: blockOnRedCi,
-      operatorInitiated: options.operatorInitiated === true,
-      sourceJobKind: sourceJob?.kind ?? null,
-      ci: defaultBranchCi,
-    })
-  ) {
-    return {
-      ok: false,
-      status: 409,
-      detail: `Release blocked: default-branch CI is failing for ${projectName}. Not merging more work onto red CI until it recovers (auto fix-ci self-heals it, or an operator is prompted in the inbox).`,
-    };
-  }
-
   const gate = await checkCliStartGate('start a release', { parentJobId });
   if (!gate.ok) {
     // For budget-blocked releases, enqueue so the periodic drain picks it up

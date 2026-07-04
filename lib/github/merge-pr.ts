@@ -8,6 +8,7 @@ import { exec } from '@/lib/shared/shell';
 import { homedir } from 'os';
 import { resolveGhRepo } from '@/lib/github/repo';
 import { checkoutDefault } from '@/lib/git/checkout-default';
+import { friendlyMergeError, isChecksPendingError } from '@/lib/github/merge-error';
 
 export type MergePrResult =
   // `merged` is true only when the PR actually landed. When required checks are
@@ -40,20 +41,17 @@ export async function mergePullRequest(opts: {
   };
 
   let result = await tryMerge(false);
-  // Only fall back to --auto when checks are still pending — not when auto-merge
-  // is disabled on the repo (that error also contains "auto merge" but means
-  // something different).
+  // Fall back to --auto (merge-when-green) ONLY for genuinely pending required
+  // checks — never for a conflict, which --auto can't resolve and which would
+  // otherwise surface a misleading "Auto merge is not allowed". See
+  // lib/github/merge-error.ts.
   let autoEnabled = false;
-  if (
-    result.exitCode !== 0 &&
-    /required status checks|mergeable|pending/i.test(result.stderr) &&
-    !/not allowed/i.test(result.stderr)
-  ) {
+  if (result.exitCode !== 0 && isChecksPendingError(result.stderr)) {
     result = await tryMerge(true);
     autoEnabled = true;
   }
   if (result.exitCode !== 0) {
-    return { ok: false, status: 422, detail: result.stderr.trim() || 'merge failed' };
+    return { ok: false, status: 422, detail: friendlyMergeError(prNumber, result.stderr) };
   }
   // Return the working tree to the default branch so a follow-on release
   // (release_after_run) starts clean on default rather than on the just-merged

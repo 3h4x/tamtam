@@ -165,14 +165,15 @@ export interface TamTamConfig {
   // only self-heals the default branch for projects that authorized it) and
   // bounded per failing commit so a permanently-broken CI cannot loop.
   auto_fix_ci_on_red_default_branch: boolean;
-  // Block automatic feature releases while the project's DEFAULT branch CI is
-  // red. Breaks the "merge onto red CI" vicious cycle: without it, feature PRs
-  // keep merging (their PR check is green) while the post-merge default-branch
-  // CI stays failing, piling more work onto broken CI. When on (default), an
-  // automatic feature release is refused and a fix-ci is dispatched to repair
-  // first; the fix-ci-chained release and operator-initiated (manual) releases
-  // are exempt. See docs/PIPELINE.md → CI-red gate.
-  block_release_on_red_ci: boolean;
+  // When on (default), the `fix-ci` job runs the CLI in `bypassPermissions`
+  // mode instead of inheriting the global `permission_mode`. fix-ci must
+  // reproduce the CI failure locally — install deps, build, run tests — to
+  // verify its fix, and the Codex sandbox (`workspace-write`) blocks all
+  // outbound network, so `pnpm install` fails with ENOTFOUND and the agent
+  // edits blind. bypassPermissions is the only mode that restores the network
+  // access this job fundamentally needs. Scoped to fix-ci; set false to keep
+  // fix-ci under the global permission mode (fixes then ship unverified).
+  fix_ci_bypass_sandbox: boolean;
   budget_block_runs_enabled: boolean;
   budget_block_on_weekly_pace_enabled: boolean;
   budget_subscription_providers: BudgetSubscriptionProvider[];
@@ -329,7 +330,7 @@ export const DEFAULTS: TamTamConfig = {
   legacy_completion_hook_agent_drain_enabled: true,
   plain_test_phase_enabled: false,
   auto_fix_ci_on_red_default_branch: true,
-  block_release_on_red_ci: true,
+  fix_ci_bypass_sandbox: true,
   budget_block_runs_enabled: false,
   budget_block_on_weekly_pace_enabled: true,
   budget_subscription_providers: ['claude', 'codex'],
@@ -665,11 +666,10 @@ export function buildConfigFromSettingsMap(map: Record<string, string>): TamTamC
       map.auto_fix_ci_on_red_default_branch === undefined
         ? DEFAULTS.auto_fix_ci_on_red_default_branch
         : map.auto_fix_ci_on_red_default_branch === 'true',
-    // Default true — only an explicit 'false' disables the CI-red release block.
-    block_release_on_red_ci:
-      map.block_release_on_red_ci === undefined
-        ? DEFAULTS.block_release_on_red_ci
-        : map.block_release_on_red_ci === 'true',
+    fix_ci_bypass_sandbox:
+      map.fix_ci_bypass_sandbox === undefined
+        ? DEFAULTS.fix_ci_bypass_sandbox
+        : map.fix_ci_bypass_sandbox === 'true',
     budget_block_runs_enabled: map.budget_block_runs_enabled === 'true',
     budget_block_on_weekly_pace_enabled:
       map.budget_block_on_weekly_pace_enabled === undefined

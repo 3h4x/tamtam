@@ -48,6 +48,10 @@ function makeJob(overrides: Partial<InboxJob> & { project: string; kind: string 
     prWaitReason: null,
     prNumber: null,
     riskyFiles: null,
+    releaseId: null,
+    dodVerified: null,
+    dodTotal: null,
+    dodIssueNumber: null,
     ...overrides,
   };
 }
@@ -98,6 +102,40 @@ describe('deriveInboxSignals', () => {
     expect(s?.detail).toContain('.github/workflows/deploy.yml')
     expect(s?.externalUrl).toBe('https://github.com/o/alpha/pull/80')
   })
+
+  it('surfaces the release DoD verification and linked issue on a manual-merge signal', () => {
+    // Before deciding to merge a risky PR, the operator wants to see the issue
+    // and what claude verified. The DoD result lives on the same release's
+    // mark-dod job (verified/total + the issue it checked).
+    const signals = deriveInboxSignals(
+      baseInput({
+        tasks: [makeTask({ project: 'alpha' })],
+        jobs: [
+          makeJob({ project: 'alpha', kind: 'pr-wait', exitCode: 1, prWaitReason: 'risky_diff', prNumber: 80, releaseId: 'rel-1' }),
+          makeJob({ project: 'alpha', kind: 'mark-dod', exitCode: 0, releaseId: 'rel-1', dodVerified: 6, dodTotal: 6, dodIssueNumber: 10 }),
+        ],
+        openPrNumbersByProject: { alpha: [80] },
+      }),
+    );
+    const s = signals.find((x) => x.type === 'pr_needs_manual_merge');
+    expect(s?.detail).toContain('6/6');
+    expect(s?.detail).toContain('#10');
+  });
+
+  it('omits the DoD detail when the release has no verified acceptance criteria', () => {
+    const signals = deriveInboxSignals(
+      baseInput({
+        tasks: [makeTask({ project: 'alpha' })],
+        jobs: [
+          makeJob({ project: 'alpha', kind: 'pr-wait', exitCode: 1, prWaitReason: 'risky_diff', prNumber: 81, releaseId: 'rel-2' }),
+          makeJob({ project: 'alpha', kind: 'mark-dod', exitCode: 0, releaseId: 'rel-2', dodVerified: 0, dodTotal: 0, dodIssueNumber: null }),
+        ],
+        openPrNumbersByProject: { alpha: [81] },
+      }),
+    );
+    const s = signals.find((x) => x.type === 'pr_needs_manual_merge');
+    expect(s?.detail).not.toContain('acceptance criteria');
+  });
 
   it('clears the manual-merge signal once the deferred PR is no longer among the open PRs', () => {
     // Cache has other open PRs but not #76 → it was merged/closed → clear.
@@ -307,6 +345,37 @@ describe('deriveInboxSignals', () => {
       }),
     );
     expect(signals.find((x) => x.type === 'fix_loop_exhausted')).toBeUndefined();
+  });
+
+  it('suppresses the catch-all when the release PR shipped via a merge after the release exited non-zero', () => {
+    // Real case: a risky_diff defer (or a pr-wait that merged but exited non-zero
+    // on a later step) is merged from the inbox after the release job already
+    // exited 1. The work SHIPPED, so it must not linger as "Release stopped — no
+    // merge" (the merged arm of the merge-or-HITL invariant).
+    const signals = deriveInboxSignals(
+      baseInput({
+        tasks: [makeTask({ project: 'gamma' })],
+        jobs: [
+          makeJob({ project: 'gamma', kind: 'release', startedAt: 500, finishedAt: 900, exitCode: 1, releaseStopReason: null }),
+          makeJob({ project: 'gamma', kind: 'pr-wait', startedAt: 950, finishedAt: 1000, exitCode: 1, prWaitReason: 'merged', prNumber: 131 }),
+        ],
+      }),
+    );
+    expect(signals.find((x) => x.type === 'fix_loop_exhausted')).toBeUndefined();
+    expect(signals.find((x) => x.type === 'pr_needs_manual_merge')).toBeUndefined();
+  });
+
+  it('still flags a failed release when the only merge predates it (an older merge cannot mask a newer failure)', () => {
+    const signals = deriveInboxSignals(
+      baseInput({
+        tasks: [makeTask({ project: 'gamma' })],
+        jobs: [
+          makeJob({ project: 'gamma', kind: 'pr-wait', startedAt: 100, finishedAt: 200, exitCode: 0, prWaitReason: 'merged', prNumber: 10 }),
+          makeJob({ project: 'gamma', kind: 'release', startedAt: 500, finishedAt: 900, exitCode: 1, releaseStopReason: null }),
+        ],
+      }),
+    );
+    expect(signals.find((x) => x.type === 'fix_loop_exhausted')).toBeTruthy();
   });
 
   it('flags stale uncommitted changes with a review action', () => {

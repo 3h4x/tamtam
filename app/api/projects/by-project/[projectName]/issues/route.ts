@@ -10,6 +10,7 @@ import { ensureIssueBranch, checkoutPrBranch, issueBranchName } from '@/lib/gith
 import { findOpenPrForIssue, type IssuePrMatch } from '@/lib/github/find-issue-pr';
 import { listJobs } from '@/lib/jobs/job-storage';
 import { resolvePrWaitHitlForMergedPr } from '@/lib/jobs/resolve-pr-wait-hitl';
+import { friendlyMergeError, isChecksPendingError } from '@/lib/github/merge-error';
 import {
   parseLinkedIssue,
   computeDodFromBody,
@@ -689,21 +690,20 @@ export async function POST(
   };
 
   let result = await tryMerge(false);
-  // Only fall back to --auto when checks are still pending — not when auto-merge
-  // is disabled on the repo (that error also contains "auto merge" but means something different).
+  // Fall back to `--auto` (merge-when-green) ONLY for genuinely pending required
+  // checks. A conflict ("not mergeable: the merge commit cannot be cleanly
+  // created") must NOT retry with --auto: --auto can't resolve a conflict, and on
+  // a repo without auto-merge enabled that retry fails with a misleading
+  // "Auto merge is not allowed for this repository" that masks the real reason.
+  // See lib/github/merge-error.ts.
   let autoEnabled = false;
-  if (
-    result.exitCode !== 0 &&
-    /required status checks|mergeable|pending/i.test(result.stderr) &&
-    !/not allowed/i.test(result.stderr)
-  ) {
+  if (result.exitCode !== 0 && isChecksPendingError(result.stderr)) {
     result = await tryMerge(true);
     autoEnabled = true;
   }
 
   if (result.exitCode !== 0) {
-    const errMsg = result.stderr.trim() || 'merge failed';
-    return NextResponse.json({ detail: errMsg }, { status: 422 });
+    return NextResponse.json({ detail: friendlyMergeError(prNumber, result.stderr) }, { status: 422 });
   }
 
   // Resolve any outstanding pr-wait HITL for this PR — the merge is its

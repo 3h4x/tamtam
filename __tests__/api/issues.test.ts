@@ -639,6 +639,27 @@ describe('POST /api/projects/by-project/[projectName]/issues', () => {
     expect(autoCalls).toHaveLength(0);
   });
 
+  it('returns 422 with an actionable rebase message and does NOT retry --auto when the PR has conflicts', async () => {
+    // Regression: gh reports a conflict as "not mergeable: the merge commit
+    // cannot be cleanly created". The old fallback regex matched the "mergeable"
+    // substring inside "not mergeable", wrongly retried --auto, and surfaced a
+    // misleading "Auto merge is not allowed" error that masked the real conflict.
+    mocks.exec
+      .mockImplementationOnce(() => resp(0, 'https://github.com/owner/myproj.git')) // git remote get-url
+      .mockImplementationOnce(() => resp(1, '', 'Pull request owner/myproj#85 is not mergeable: the merge commit cannot be cleanly created.')); // direct merge fails (conflict)
+
+    const res = await POST(makeReq({ prNumber: 85, action: 'merge' }), { params: Promise.resolve({ projectName: 'myproj' }) });
+    expect(res.status).toBe(422);
+    const data = await res.json();
+    expect(data.detail).toContain('#85');
+    expect(data.detail.toLowerCase()).toContain('conflict');
+    expect(data.detail.toLowerCase()).toContain('rebase');
+
+    // The bug was a spurious --auto retry for a conflict — must not happen.
+    const autoCalls = mocks.exec.mock.calls.filter(([cmd, args]: any) => cmd === 'gh' && args.includes('--auto'));
+    expect(autoCalls).toHaveLength(0);
+  });
+
   it('falls back to --auto when direct merge fails due to pending required checks', async () => {
     mocks.exec
       .mockImplementationOnce(() => resp(0, 'https://github.com/owner/myproj.git'))

@@ -431,7 +431,20 @@ export async function readMarkDodVerificationResult(
 
   const stripped = rawOutput
     .split('\n')
-    .filter((l) => !l.match(/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}: \[tamtam\]/) && !l.startsWith('[tamtam]'))
+    .map((l) => {
+      // Drop pure timestamped tamtam log lines outright.
+      if (/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}: \[tamtam\]/.test(l)) return '';
+      // The `[tamtam] launching: <cmd>` banner is written to the log fd with no
+      // trailing newline, and the child CLI's stdout goes to the same fd — so
+      // the verification JSON is glued onto the banner line. Dropping the whole
+      // line discarded that JSON and made every DoD report 0 verified. Keep
+      // everything from the first brace (the glued JSON); drop banner-only lines.
+      if (l.startsWith('[tamtam]')) {
+        const brace = l.indexOf('{');
+        return brace >= 0 ? l.slice(brace) : '';
+      }
+      return l;
+    })
     .join('\n')
     .trim();
 

@@ -512,6 +512,35 @@ describe('startMarkDod', () => {
     }
   });
 
+  it('parses verification JSON even when the launch banner is glued onto it (no newline)', async () => {
+    // The `[tamtam] launching: <cmd>` banner is written to the log fd without a
+    // trailing newline, and the child CLI's stdout goes to the same fd — so the
+    // verification JSON lands on the SAME line as the banner. Dropping every
+    // `[tamtam]`-prefixed line used to discard that JSON and report 0 verified
+    // even though claude verified the criteria. The parse must keep the JSON.
+    const gluedLog =
+      '[tamtam] launching: /path/to/codex-shim.js --print --model fast --allowed-tools Read,Grep,Glob' +
+      JSON.stringify({
+        results: [
+          { index: 1, text: 'First criterion', verified: true, evidence: 'found in lib/auth.ts' },
+          { index: 2, text: 'Second criterion', verified: false, evidence: 'not found' },
+        ],
+      }) +
+      '\n[tamtam] exited with code 0\n';
+    execMock
+      .mockResolvedValueOnce(resp(0, ISSUE_JSON))  // gh issue view
+      .mockResolvedValueOnce(resp(0, ''));          // gh issue edit
+    readFileSyncMock.mockReturnValue(gluedLog);
+    const r = await startMarkDod('myproj', undefined);
+    expect(r.ok).toBe(true);
+    if (r.ok) {
+      expect(r.verified).toBe(1);
+      expect(r.total).toBe(2);
+      expect(r.changed).toBe(true);
+    }
+    expect(markDoneMock).toHaveBeenCalledWith(expect.anything(), 0);
+  });
+
   it('returns ok:true changed:false when gh issue edit fails', async () => {
     execMock
       .mockResolvedValueOnce(resp(0, ISSUE_JSON))         // gh issue view

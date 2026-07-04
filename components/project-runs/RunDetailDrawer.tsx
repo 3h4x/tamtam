@@ -152,7 +152,9 @@ export function RunDetailDrawer({ projectName, jobId, onClose }: RunDetailDrawer
             <Meta label="model" value={trace.usage.model ?? '—'} tone="text-accent" />
             <Meta
               label="score"
-              value={trace.context.runScore != null ? trace.context.runScore : '—'}
+              value={trace.context.runScore != null
+                ? <>{trace.context.runScore}<span className="font-normal text-text-tertiary">/100</span></>
+                : '—'}
               tone={trace.context.runScore != null && trace.context.runScore < 40 ? 'text-status-warning' : 'text-text-primary'}
             />
           </div>

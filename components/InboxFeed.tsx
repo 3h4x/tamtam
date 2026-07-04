@@ -65,10 +65,24 @@ async function runSignalAction(signal: InboxSignal): Promise<string> {
     case 'review':
       await reviewProject(project)
       return `Started review for ${project}`
-    case 'merge':
+    case 'merge': {
       if (action.prNumber == null) throw new Error('Missing PR number')
       await mergePR(project, action.prNumber)
+      // A manual-merge HITL means the pipeline stalled waiting on this human
+      // decision. Merging it is the operator saying "ship it and keep going",
+      // so also clear any auto-pause — otherwise the project stays paused after
+      // the merge and automation never resumes. (Merging a normal ready PR on a
+      // healthy project doesn't touch pause state.)
+      if (signal.type === 'pr_needs_manual_merge') {
+        try {
+          await resumeProject(project)
+          return `Merged PR #${action.prNumber} in ${project} — automation resumed`
+        } catch {
+          return `Merged PR #${action.prNumber} in ${project} (could not auto-resume — resume manually)`
+        }
+      }
       return `Merged PR #${action.prNumber} in ${project}`
+    }
     case 'retry-automation':
       await retryAutomationQueue(project)
       return `Retried automation queue for ${project}`
@@ -87,10 +101,21 @@ function externalLinkLabel(signal: InboxSignal): string {
   return 'View details'
 }
 
-function SignalRow({ signal, onResolved }: { signal: InboxSignal; onResolved: () => void }) {
+export function SignalRow({
+  signal,
+  onResolved,
+  defaultExpanded = false,
+}: {
+  signal: InboxSignal
+  onResolved: () => void
+  /** Start expanded so the full reason (e.g. the high-risk files) is visible
+   *  without a click — used by the project-page banner where the operator has
+   *  landed specifically to understand why the project is blocked. */
+  defaultExpanded?: boolean
+}) {
   const { toast } = useToast()
   const [busy, setBusy] = useState(false)
-  const [expanded, setExpanded] = useState(false)
+  const [expanded, setExpanded] = useState(defaultExpanded)
   const age = formatAge(signal.ageSeconds)
 
   const onAction = useCallback(async () => {

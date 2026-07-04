@@ -59,8 +59,9 @@ async function parseJsonError(response: Response): Promise<Error> {
   return new Error(body.detail || `HTTP ${response.status}`);
 }
 
-export async function fetchInbox(): Promise<InboxResponse> {
-  const response = await fetch('/api/inbox');
+export async function fetchInbox(opts?: { project?: string }): Promise<InboxResponse> {
+  const qs = opts?.project ? `?project=${encodeURIComponent(opts.project)}` : '';
+  const response = await fetch(`/api/inbox${qs}`);
   if (!response.ok) throw await parseJsonError(response);
   return response.json();
 }

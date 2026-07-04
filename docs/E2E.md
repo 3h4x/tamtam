@@ -45,7 +45,7 @@ e2e/pipeline/
   review-needs-attention.spec.ts  # NEEDS ATTENTION → fix → LGTM → commit → push
   issue-release-auto-branch.spec.ts # issue-linked release creates a feature branch before commit
   issue-release-zombie-branch-recovery.spec.ts # issue-linked release deletes and recreates a merged zombie branch
-  pr-workflow-auto-merge.spec.ts  # feature branch push → PR wait → merge → DoD
+  pr-workflow-auto-merge.spec.ts  # feature branch push → mark-dod → PR wait → merge
   pr-workflow-reuse-existing-pr.spec.ts # feature branch push reuses an existing PR before auto-merge
 ```
 
@@ -137,8 +137,10 @@ reinitialize this directory before each test run.
 
 Use `writeGitBranch(project, '<feature-branch>')` to make the git shim report a
 non-default branch. Release pushes from a non-default branch exercise the PR
-Workflow path: `gh pr create`, `pr-wait`, `gh pr merge`, post-merge checkout
-back to `master`, then `mark-dod`.
+Workflow path: `gh pr create`, then `mark-dod` (the orchestrator runs DoD after
+push and *before* `pr-wait`), `pr-wait`, `gh pr merge`, and post-merge checkout
+back to `master`. `pr-wait` also re-runs a post-merge `mark-dod` (a no-op here).
+Only the legacy standalone chain defers DoD entirely to post-merge.
 
 Use `writeGhPrStatuses(project, statuses)` to script the `gh pr view --json
 state,mergeable,statusCheckRollup` responses consumed by `start-pr-wait`.
@@ -163,8 +165,9 @@ writeGhPrStatuses(project, [
 The gh shim records PR status polls with `result: "checks:<status>"` in
 `git-calls.jsonl`, so specs can prove `gh pr merge` was invoked only after a
 passing check response. PR body and issue checkbox updates remain mocked: the
-default PR body is empty, so post-merge `mark-dod` records a successful no-op
-unless the test overrides the shim behavior.
+default PR body is empty, so `mark-dod` (both the pre-`pr-wait` orchestrator DoD
+and `pr-wait`'s post-merge re-run) records a successful no-op unless the test
+overrides the shim behavior.
 
 Use `writeGhOpenPr(project, pr)` to script an already-open PR for the current
 feature branch. That drives both production reuse paths:

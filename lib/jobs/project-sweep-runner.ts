@@ -163,11 +163,15 @@ async function gatherView(name: string): Promise<ProjectSweepView | null> {
     // best-effort — leave autoPushEnabled false
   }
 
-  // Global opt-in for the auto fix-ci self-heal of a red default branch.
+  // Global opt-in for the auto fix-ci self-heal of a red default branch. Read
+  // from the DB (not the module-cached getSettings()) because the graphile-worker
+  // sweep runs in a separate module realm whose settings cache may be empty →
+  // getSettings() would return the DEFAULT (false). See
+  // isAutoFixCiOnRedDefaultBranchEnabled.
   let autoFixCiEnabled = false;
   try {
-    const { getSettings } = await import('@/lib/shared/config');
-    autoFixCiEnabled = !!getSettings().auto_fix_ci_on_red_default_branch;
+    const { isAutoFixCiOnRedDefaultBranchEnabled } = await import('@/lib/jobs/auto-fix-ci-state');
+    autoFixCiEnabled = await isAutoFixCiOnRedDefaultBranchEnabled();
   } catch {
     // best-effort — leave autoFixCiEnabled false
   }
