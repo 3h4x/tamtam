@@ -80,7 +80,7 @@ added incrementally. Findings upsert as `proposed` candidates; a promotion pass
 admits them to `queued`, respecting the `initiative_max_backlog_per_project` cap.
 
 The **Dispatcher** runs per-project, checks gates (`gatesClear`, `projectBusy`,
-`maxShipsPerDay`), picks the top-scored queued initiative, and starts an
+`ciRed`, `maxShipsPerDay`), picks the top-scored queued initiative, and starts an
 inline agent run carrying its prompt. The produced diff flows into the
 existing release-after-run trigger, merging automatically if the release
 succeeds. The initiative keeps the agent job as a temporary association until
@@ -96,6 +96,14 @@ docs-gap, etc.) has a base severity. Repeated failures decay the score by
 per tick, reusing the existing `hasAgentStartSlot` gate. **Global gates** —
 budgets and job-pause gates are respected; the dispatch phase skips when
 gates do not clear.
+
+**CI-red gate** — when the opt-in `ci_gate_block_dispatch_on_red` setting is
+enabled (default off), the dispatcher also skips a project whose **default-branch
+CI is red** (`ciRed`, `skipped: 'ci-red'`). The check runs *after* the
+empty-backlog short-circuit so the (up-to-8s) `gh run list` only fires when there
+is actually something to dispatch. Releases and the sweep's `fix-ci` self-heal are
+never gated, so CI can still be repaired and the deferred initiative resumes once
+CI goes green. Shared with the scheduled-agent gate — see `lib/jobs/ci-dispatch-gate.ts`.
 
 **Operator steering** — each backlog initiative carries manual controls
 (`PATCH /api/initiatives/[id]`): **promote** (👍) sets `pinned_at` on

@@ -289,6 +289,7 @@ Issue-branch behavior is now split by trigger type:
 
 - manual agent runs are allowed on `fix/issue-*` branches
 - scheduled mutable agent fires are skipped while the project is on any non-default branch, or while a release `pr-wait` job is awaiting merge, so background automation does not land unrelated edits on an in-progress PR branch
+- when the opt-in `ci_gate_block_dispatch_on_red` setting is enabled (default off), scheduled fires are also skipped while the project's **default-branch CI is red** (any failing workflow), deferring new scheduled work until CI goes green again. `system` agents are exempt (no diff-producing runs, mirroring the saturation backoff); `fix-ci`, releases, and manual runs are unaffected, so CI can still self-heal and ship. The flag is read realm-safe via `isCiDispatchGateEnabled()` (direct DB read, not `getSettings()`), fails open on a `gh` error, and the red state is surfaced as the `ci_red` inbox HITL. See `lib/jobs/ci-dispatch-gate.ts` and `docs/SETTINGS.md`.
 
 ### Scheduled Runs
 

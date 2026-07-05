@@ -4,6 +4,7 @@ import { getVerdict } from '@/lib/jobs/verdict';
 import { listAutomationQueue, type AutomationQueueItem } from '@/lib/workflows/automation-queue';
 import { db, schema } from '@/lib/db';
 import { isAgentJobKind } from '@/lib/jobs/kinds';
+import { isCancelledExitCode } from '@/lib/shared/job-exit-codes';
 import type { Task } from '@/lib/shared/types';
 
 // The inbox is a cross-project triage feed: one prioritized row per actionable
@@ -418,15 +419,31 @@ export function deriveInboxSignals(input: InboxInput): InboxSignal[] {
         task.changes === 0 &&
         task.unpushed === 0;
       if (!coveredByMerge && !reDriving && !shippedByMerge && !shippedByPush) {
+        // A cancelled/interrupted release (exit -2/-3: killed by a restart, the
+        // probe sweep, or a manual cancel — isCancelledExitCode) with NO recorded
+        // stop reason is not a genuine pipeline failure. The rest of the system
+        // treats these codes as non-failures (circuit breaker, push-fix chain,
+        // terminal). It must still surface — it didn't ship and nothing else
+        // covers it (merge-or-HITL) — but as a lower-urgency "interrupted, re-run"
+        // item, NOT a red "fix loop exhausted / needs a human check" failure that
+        // would inflate the urgent count. A recorded stop reason is authoritative,
+        // so a cancelled code that DID stamp one keeps the red failure treatment;
+        // wall-clock/token-cap kills use distinct codes and stay red too.
+        const interrupted = isCancelledExitCode(release.exitCode) && !release.releaseStopReason;
         signals.push({
           id: `fix_loop_exhausted:${project}`,
           type: 'fix_loop_exhausted',
-          severity: 'red',
+          severity: interrupted ? 'yellow' : 'red',
           project,
-          title: release.releaseStopReason ? 'Release stopped — fix loop exhausted' : 'Release stopped',
-          detail:
-            release.releaseStopReason ??
-            `Release ended without shipping (exit ${release.exitCode}) — no merge and no other signal. Needs a human check.`,
+          title: interrupted
+            ? 'Release interrupted — not shipped'
+            : release.releaseStopReason
+              ? 'Release stopped — fix loop exhausted'
+              : 'Release stopped',
+          detail: interrupted
+            ? `Release was cancelled/interrupted (exit ${release.exitCode}, e.g. by a restart) before shipping — re-run the release to retry.`
+            : release.releaseStopReason ??
+              `Release ended without shipping (exit ${release.exitCode}) — no merge and no other signal. Needs a human check.`,
           href: `${projectHref(project)}/terminal`,
           externalUrl: null,
           ageSeconds: Math.max(0, Math.floor(nowSeconds - release.finishedAt)),
@@ -610,12 +627,38 @@ interface CachedPr {
   statusCheckRollup?: Array<{ conclusion?: string | null }> | null;
 }
 
-function rollupIsGreen(rollup: CachedPr['statusCheckRollup'], fallbackCi: Task['ci']): boolean {
+// Check conclusions that count as PASSING (non-blocking). SUCCESS is an explicit
+// pass; SKIPPED (a conditional job that didn't need to run) and NEUTRAL are not
+// failures and don't block a merge — GitHub treats a rollup of SUCCESS+SKIPPED
+// as mergeable. Anything else — a failing conclusion (FAILURE / TIMED_OUT /
+// CANCELLED / ACTION_REQUIRED / …) or a not-yet-concluded (empty) check that is
+// still pending — is NOT green. Requiring strict all-SUCCESS wrongly suppressed
+// the pr_ready_to_merge / pr_conflicts signal for effectively-green PRs.
+const PASSING_CHECK_CONCLUSIONS = new Set(['SUCCESS', 'SKIPPED', 'NEUTRAL']);
+
+export function rollupIsGreen(rollup: CachedPr['statusCheckRollup'], fallbackCi: Task['ci']): boolean {
   if (Array.isArray(rollup) && rollup.length > 0) {
-    return rollup.every((c) => (c.conclusion ?? '').toUpperCase() === 'SUCCESS');
+    return rollup.every((c) => PASSING_CHECK_CONCLUSIONS.has((c.conclusion ?? '').toUpperCase()));
   }
   // No rollup recorded — defer to the project-data CI signal.
   return fallbackCi === 'success';
+}
+
+// Choose the single PR the inbox surfaces per project for the ready/conflict
+// signals. A project can have many open PRs, but those signals only evaluate ONE
+// representative — so it must be the most-ACTIONABLE, not merely the newest. A
+// non-green newest PR must NOT shadow an older green one that carries a real
+// action (green+conflicting → resolve; green+LGTM → merge). Preference order:
+//   1. a green CONFLICTING PR — blocked, needs a human resolve (most urgent);
+//   2. any green PR — green + an LGTM/approval becomes ready-to-merge;
+//   3. the newest open PR — no actionable signal, but preserves a PR number.
+// (The per-PR `pr_needs_manual_merge` path is separate and already handles every
+// PR via its pr-wait jobs; this only governs the single ready/conflict slot.)
+export function selectRepresentativePr(openPrs: CachedPr[], ciFallback: Task['ci']): CachedPr | undefined {
+  if (openPrs.length === 0) return undefined;
+  const green = openPrs.filter((p) => rollupIsGreen(p.statusCheckRollup, ciFallback));
+  const conflictingGreen = green.find((p) => (p.mergeable ?? '').toUpperCase() === 'CONFLICTING');
+  return conflictingGreen ?? green[0] ?? openPrs[0];
 }
 
 // Read the cached open PRs (from the gh issues cache) for every project in one
@@ -643,7 +686,7 @@ async function loadOpenPrs(
         (p) => typeof p.number === 'number' && (p.state ?? '').toUpperCase() === 'OPEN' && !p.isDraft,
       );
       numbersByProject[row.project] = openPrs.map((p) => p.number as number);
-      const open = openPrs[0];
+      const open = selectRepresentativePr(openPrs, ciByProject[row.project] ?? null);
       if (!open || typeof open.number !== 'number') continue;
       byProject[row.project] = {
         number: open.number,

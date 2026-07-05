@@ -8,6 +8,8 @@ vi.mock('@/lib/db', () => ({ db: {}, schema: {} }));
 import {
   deriveInboxSignals,
   countInboxSignals,
+  rollupIsGreen,
+  selectRepresentativePr,
   type InboxInput,
   type InboxJob,
 } from '@/lib/workflows/inbox';
@@ -466,6 +468,54 @@ describe('deriveInboxSignals', () => {
     expect(signals.find((x) => x.type === 'fix_loop_exhausted')).toBeTruthy();
   });
 
+  it('labels a cancelled/interrupted release (exit -2, no reason) as a lower-urgency "re-run" — still surfaces, but not red', () => {
+    // exit -2/-3 = cancelled (killed by a restart, probe sweep, or manual cancel).
+    // The rest of the system treats these as non-failures (isCancelledExitCode);
+    // the catch-all must still surface it (it didn't ship) but as an "interrupted
+    // — re-run" item at yellow, NOT a red "fix loop exhausted / urgent" failure.
+    const signals = deriveInboxSignals(
+      baseInput({
+        tasks: [makeTask({ project: 'gamma', changes: 4, unpushed: 0 })],
+        jobs: [
+          makeJob({ project: 'gamma', kind: 'release', startedAt: 500, finishedAt: 900, exitCode: -2, releaseStopReason: null }),
+        ],
+      }),
+    );
+    const s = signals.find((x) => x.type === 'fix_loop_exhausted');
+    expect(s).toBeTruthy();
+    expect(s?.severity).toBe('yellow');
+    expect(s?.title).toMatch(/interrupted/i);
+    expect(s?.detail).toMatch(/re-run/i);
+  });
+
+  it('keeps a genuine bare-abort failure (exit 1, no reason) red — only cancelled codes are demoted', () => {
+    const signals = deriveInboxSignals(
+      baseInput({
+        tasks: [makeTask({ project: 'gamma', changes: 4, unpushed: 0 })],
+        jobs: [
+          makeJob({ project: 'gamma', kind: 'release', startedAt: 500, finishedAt: 900, exitCode: 1, releaseStopReason: null }),
+        ],
+      }),
+    );
+    const s = signals.find((x) => x.type === 'fix_loop_exhausted');
+    expect(s?.severity).toBe('red');
+    expect(s?.title).not.toMatch(/interrupted/i);
+  });
+
+  it('a cancelled release that DID record a real stop reason keeps that reason at red (reason is authoritative)', () => {
+    const signals = deriveInboxSignals(
+      baseInput({
+        tasks: [makeTask({ project: 'gamma', changes: 4, unpushed: 0 })],
+        jobs: [
+          makeJob({ project: 'gamma', kind: 'release', startedAt: 500, finishedAt: 900, exitCode: -2, releaseStopReason: 'review cap reached for gamma (3/3)' }),
+        ],
+      }),
+    );
+    const s = signals.find((x) => x.type === 'fix_loop_exhausted');
+    expect(s?.severity).toBe('red');
+    expect(s?.detail).toBe('review cap reached for gamma (3/3)');
+  });
+
   it('flags stale uncommitted changes with a review action', () => {
     const signals = deriveInboxSignals(
       baseInput({ tasks: [makeTask({ project: 'delta', changes: 3, reviewed: false })] }),
@@ -720,5 +770,92 @@ describe('deriveInboxSignals', () => {
     );
     expect(signals.map((s) => s.severity)).toEqual(['red', 'yellow', 'green']);
     expect(countInboxSignals(signals)).toEqual({ red: 1, yellow: 1, green: 1, total: 3 });
+  });
+});
+
+describe('rollupIsGreen', () => {
+  const c = (conclusion: string | null) => ({ conclusion });
+
+  it('is green when every check SUCCEEDED', () => {
+    expect(rollupIsGreen([c('SUCCESS'), c('SUCCESS')], null)).toBe(true);
+  });
+
+  it('treats SKIPPED as non-blocking — SUCCESS + SKIPPED is green (a conditional job that did not run is not a failure)', () => {
+    // Real case: a PR with checks [SUCCESS, SUCCESS, SUCCESS, SKIPPED, SKIPPED]
+    // is mergeable on GitHub, but the old strict all-SUCCESS test suppressed its
+    // pr_ready_to_merge / pr_conflicts signal.
+    expect(rollupIsGreen([c('SUCCESS'), c('SKIPPED'), c('SKIPPED')], null)).toBe(true);
+  });
+
+  it('treats NEUTRAL as non-blocking (green)', () => {
+    expect(rollupIsGreen([c('NEUTRAL'), c('SUCCESS')], null)).toBe(true);
+  });
+
+  it('is NOT green when any check FAILED', () => {
+    expect(rollupIsGreen([c('SUCCESS'), c('FAILURE'), c('SKIPPED')], null)).toBe(false);
+  });
+
+  it('is NOT green when a check has not concluded yet (pending/empty)', () => {
+    expect(rollupIsGreen([c('SUCCESS'), c(null)], null)).toBe(false);
+  });
+
+  it('handles lowercase conclusions (case-insensitive)', () => {
+    expect(rollupIsGreen([{ conclusion: 'success' }, { conclusion: 'skipped' }], null)).toBe(true);
+  });
+
+  it('falls back to the project-data CI signal when the rollup is empty/absent', () => {
+    expect(rollupIsGreen([], 'success')).toBe(true);
+    expect(rollupIsGreen(null, 'success')).toBe(true);
+    expect(rollupIsGreen(null, 'failure')).toBe(false);
+    expect(rollupIsGreen(undefined, null)).toBe(false);
+  });
+});
+
+describe('selectRepresentativePr', () => {
+  const pr = (number: number, mergeable: string, checks: string[]) => ({
+    number,
+    state: 'OPEN',
+    mergeable,
+    statusCheckRollup: checks.map((c) => ({ conclusion: c })),
+  });
+
+  it('returns undefined for no open PRs', () => {
+    expect(selectRepresentativePr([], null)).toBeUndefined();
+  });
+
+  it('does NOT let a non-green newest PR shadow an older green+conflicting one (the filmpick #112-behind-#138 bug)', () => {
+    // Newest is mergeable but not green (a pending/failed check); older ones are
+    // green — one conflicting (needs resolve), one mergeable. The representative
+    // must be the actionable green+conflicting PR, not the newest non-green one.
+    const openPrs = [
+      pr(138, 'MERGEABLE', ['SUCCESS', 'FAILURE']),
+      pr(112, 'CONFLICTING', ['SUCCESS', 'SUCCESS']),
+      pr(110, 'MERGEABLE', ['SUCCESS', 'SUCCESS']),
+    ];
+    expect(selectRepresentativePr(openPrs, null)?.number).toBe(112);
+  });
+
+  it('prefers a green CONFLICTING PR over a green mergeable one (blocked outranks ready)', () => {
+    const openPrs = [
+      pr(50, 'MERGEABLE', ['SUCCESS']),
+      pr(49, 'CONFLICTING', ['SUCCESS']),
+    ];
+    expect(selectRepresentativePr(openPrs, null)?.number).toBe(49);
+  });
+
+  it('picks the first green PR when none conflict (ready-to-merge candidate)', () => {
+    const openPrs = [
+      pr(50, 'MERGEABLE', ['FAILURE']),
+      pr(49, 'MERGEABLE', ['SUCCESS', 'SKIPPED']),
+    ];
+    expect(selectRepresentativePr(openPrs, null)?.number).toBe(49);
+  });
+
+  it('falls back to the newest open PR when none are green (preserves prior behavior)', () => {
+    const openPrs = [
+      pr(50, 'MERGEABLE', ['FAILURE']),
+      pr(49, 'CONFLICTING', ['FAILURE']),
+    ];
+    expect(selectRepresentativePr(openPrs, null)?.number).toBe(50);
   });
 });
