@@ -102,7 +102,9 @@ export async function POST(
   const dirty = (await exec('git', ['-C', projPath, 'status', '--porcelain'], { timeout: 10_000 })).stdout.trim();
   if (dirty.length > 0) {
     return NextResponse.json(
-      { detail: `Working tree for ${projectName} is not clean — commit/stash before resolving conflicts` },
+      {
+        detail: `Working tree for ${projectName} is not clean — commit/stash before resolving conflicts, or rebase PR #${pr.number} onto ${pr.base} and merge it manually.`,
+      },
       { status: 409 },
     );
   }
@@ -128,7 +130,16 @@ export async function POST(
   // base is trusted unconditionally; only the branch's added commits are checked.
   const gate = checkPrBranchExecutionGate(projPath, 'resolve merge conflicts');
   if (!gate.ok) {
-    return NextResponse.json({ detail: gate.detail }, { status: 409 });
+    // The author-trust gate is a PERMANENT blocker for auto-resolve (cleaning
+    // the tree won't clear it), so spell out both remedies rather than leaving
+    // the operator with a bare refusal: extend trust, or take the manual merge
+    // path. Keeps the "Resolve conflicts" HITL from dead-ending silently.
+    return NextResponse.json(
+      {
+        detail: `${gate.detail} To ship PR #${pr.number} without changing trust, rebase ${pr.branch} onto ${pr.base} locally, resolve the conflicts, push, and merge it manually.`,
+      },
+      { status: 409 },
+    );
   }
 
   const preferredProviderHeader = request.headers.get('x-tamtam-provider-preferred');

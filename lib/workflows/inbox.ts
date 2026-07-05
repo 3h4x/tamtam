@@ -499,7 +499,7 @@ export function deriveInboxSignals(input: InboxInput): InboxSignal[] {
               severity: 'yellow',
               project,
               title: `PR #${pr.number} has merge conflicts`,
-              detail: `${reviewDetail}, but the branch conflicts with base — needs a rebase/resolve before it can merge.`,
+              detail: `${reviewDetail}, but the branch conflicts with base. TamTam can auto-resolve only when the branch author is a trusted user; otherwise rebase it onto the base branch, resolve the conflicts, and merge it manually.`,
               href: `${projectHref(project)}/issues`,
               externalUrl: task.github ? `${task.github}/pull/${pr.number}` : null,
               ageSeconds: null,

@@ -149,6 +149,9 @@ describe('POST /api/projects/by-project/[projectName]/resolve-conflicts', () => 
     });
     const res = await POST(reqWith({ prNumber: 85 }), { params: Promise.resolve({ projectName: 'proj1' }) });
     expect(res.status).toBe(409);
+    // A dirty tree is not the whole story, so the refusal points at the manual
+    // merge path rather than dead-ending on "commit/stash".
+    expect((await res.json()).detail).toMatch(/merge it manually/i);
     expect(startJobMock).not.toHaveBeenCalled();
   });
 
@@ -156,6 +159,9 @@ describe('POST /api/projects/by-project/[projectName]/resolve-conflicts', () => 
     gateMock.mockReturnValue({ ok: false, detail: 'commit abc could not be mapped to a GitHub author' });
     const res = await POST(reqWith({ prNumber: 85 }), { params: Promise.resolve({ projectName: 'proj1' }) });
     expect(res.status).toBe(409);
+    // The permanent author-trust blocker must offer both remedies (trust or
+    // manual merge), keeping the resolve-conflicts HITL actionable.
+    expect((await res.json()).detail).toMatch(/merge it manually/i);
     expect(startJobMock).not.toHaveBeenCalled();
   });
 

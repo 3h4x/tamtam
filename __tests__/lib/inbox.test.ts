@@ -671,6 +671,9 @@ describe('deriveInboxSignals', () => {
       externalUrl: 'owner/epsilon/pull/7',
     });
     expect(conflict?.detail).toMatch(/conflicts with base/i);
+    // The HITL must point at the manual path so it is not a dead-end when
+    // auto-resolve is unavailable (e.g. an untrusted branch author).
+    expect(conflict?.detail).toMatch(/merge it manually/i);
   });
 
   it('still flags a PR reported MERGEABLE as ready to merge', () => {
