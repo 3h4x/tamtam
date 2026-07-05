@@ -328,6 +328,20 @@ export async function registerNode(): Promise<void> {
                   const { checkBranchFresh } = await import('@/lib/git/branch-freshness');
                   const freshness = await checkBranchFresh(projPath);
                   if (!freshness.fresh) return skip(freshness.reason);
+                  // CI-red dispatch gate (opt-in via `ci_gate_block_dispatch_on_red`,
+                  // default off): don't spin a new scheduled run onto a project whose
+                  // DEFAULT-branch CI is red. `fix-ci` (sweep-dispatched) and manual UI
+                  // runs are unaffected, and releases are not gated — so the red branch
+                  // can still self-heal and ship. Fails open on a gh error, un-blocks
+                  // automatically when CI goes green, and the red state is already
+                  // surfaced as the `ci_red` inbox HITL. `system` agents are exempt
+                  // (triage/monitoring/report — no diff-producing runs, mirroring the
+                  // saturation backoff below): they add no new work to the broken build.
+                  if (agent.kind !== 'system') {
+                    const { isDefaultBranchCiRed } = await import('@/lib/jobs/ci-dispatch-gate');
+                    const ciGate = await isDefaultBranchCiRed(projPath);
+                    if (ciGate.red) return skip('default-branch CI is red — deferring scheduled runs until CI is green (see /inbox)');
+                  }
                   // Per-agent saturation backoff: a single agent whose target
                   // work is exhausted keeps landing 0-line no-ops while the
                   // project stays active on its OTHER (still-fruitful) agents,
@@ -666,6 +680,16 @@ export async function registerNode(): Promise<void> {
                       if (await isLockOwnedByActiveRelease(proj)) return true;
                       if (await getPendingRelease(proj)) return true;
                       return listJobs().some((job) => job.project === proj && job.finishedAt === null);
+                    },
+                    // Opt-in CI-red gate (default off): defer initiative dispatch
+                    // while the project's default-branch CI is red. Same helper the
+                    // scheduled-agent cron uses; fails open and un-blocks on green.
+                    ciRed: async (proj) => {
+                      const { resolveProjectPath: resolvePath } = await import('@/lib/shared/project-data');
+                      const projPath = resolvePath(proj);
+                      if (!projPath) return false;
+                      const { isDefaultBranchCiRed } = await import('@/lib/jobs/ci-dispatch-gate');
+                      return (await isDefaultBranchCiRed(projPath)).red;
                     },
                     shipsToday: () => ships,
                     maxShipsPerDay: getSettings().initiative_max_ships_per_day,

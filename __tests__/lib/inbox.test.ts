@@ -380,6 +380,92 @@ describe('deriveInboxSignals', () => {
     expect(signals.find((x) => x.type === 'fix_loop_exhausted')).toBeTruthy();
   });
 
+  it('suppresses the catch-all when a push-failure release nonetheless shipped its commits (clean tree, nothing unpushed)', () => {
+    // Real case: the pre-push hook rejected during the run and the push-fix cap
+    // was reached, so the release exited non-zero — but the commits still reached
+    // the remote (a transient/spurious hook rejection, or a manual push). The
+    // working tree is now clean with nothing unpushed, so the "push … needs
+    // recovery" reason is satisfied: nothing is left to push. This is the
+    // direct-push arm of the merge-or-HITL invariant (work shipped), so it must
+    // not linger as a red HITL — mirrors the pr-wait `merged` suppressor.
+    const signals = deriveInboxSignals(
+      baseInput({
+        tasks: [makeTask({ project: 'gamma', changes: 0, unpushed: 0 })],
+        jobs: [
+          makeJob({
+            project: 'gamma',
+            kind: 'release',
+            startedAt: 500,
+            finishedAt: 900,
+            exitCode: 1,
+            releaseStopReason: 'push fix cap reached for gamma (2/2) — push hook failures still need recovery',
+          }),
+        ],
+      }),
+    );
+    expect(signals.find((x) => x.type === 'fix_loop_exhausted')).toBeUndefined();
+  });
+
+  it('still flags a push-failure release when commits remain unpushed (genuinely stranded)', () => {
+    const signals = deriveInboxSignals(
+      baseInput({
+        tasks: [makeTask({ project: 'gamma', changes: 0, unpushed: 1 })],
+        jobs: [
+          makeJob({
+            project: 'gamma',
+            kind: 'release',
+            startedAt: 500,
+            finishedAt: 900,
+            exitCode: 1,
+            releaseStopReason: 'push fix cap reached for gamma (2/2) — push hook failures still need recovery',
+          }),
+        ],
+      }),
+    );
+    expect(signals.find((x) => x.type === 'fix_loop_exhausted')).toBeTruthy();
+  });
+
+  it('still flags a push-failure release when the working tree is dirty (unshipped work remains)', () => {
+    const signals = deriveInboxSignals(
+      baseInput({
+        tasks: [makeTask({ project: 'gamma', changes: 3, unpushed: 0 })],
+        jobs: [
+          makeJob({
+            project: 'gamma',
+            kind: 'release',
+            startedAt: 500,
+            finishedAt: 900,
+            exitCode: 1,
+            releaseStopReason: 'push fix cap reached for gamma (2/2) — push hook failures still need recovery',
+          }),
+        ],
+      }),
+    );
+    expect(signals.find((x) => x.type === 'fix_loop_exhausted')).toBeTruthy();
+  });
+
+  it('does NOT suppress a non-push failure just because the tree is clean (scoped to push recovery only)', () => {
+    // A review/test cap failure with a clean tree does not imply the work shipped
+    // — the suppressor is scoped to push-related stop reasons so a genuinely
+    // stopped release still surfaces (invariant: never a silent stop).
+    const signals = deriveInboxSignals(
+      baseInput({
+        tasks: [makeTask({ project: 'gamma', changes: 0, unpushed: 0 })],
+        jobs: [
+          makeJob({
+            project: 'gamma',
+            kind: 'release',
+            startedAt: 500,
+            finishedAt: 900,
+            exitCode: 1,
+            releaseStopReason: 'review cap reached for gamma (3/3) — review keeps surfacing new findings, stopping',
+          }),
+        ],
+      }),
+    );
+    expect(signals.find((x) => x.type === 'fix_loop_exhausted')).toBeTruthy();
+  });
+
   it('flags stale uncommitted changes with a review action', () => {
     const signals = deriveInboxSignals(
       baseInput({ tasks: [makeTask({ project: 'delta', changes: 3, reviewed: false })] }),

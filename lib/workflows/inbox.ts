@@ -401,7 +401,23 @@ export function deriveInboxSignals(input: InboxInput): InboxSignal[] {
           j.prWaitReason === 'merged' &&
           j.startedAt >= release.startedAt,
       );
-      if (!coveredByMerge && !reDriving && !shippedByMerge) {
+      // The direct-push arm of the merge-or-HITL invariant. A release whose PUSH
+      // step exited non-zero (push-fix cap / push blocked / pre-push hook) but
+      // whose commits nonetheless reached the remote is no longer stranded: the
+      // pre-push hook rejected during the run (often transient), yet the tree is
+      // now clean with nothing left unpushed, so the "push … needs recovery"
+      // reason is satisfied — there is nothing for a human to push. Direct-push
+      // releases never produce a `pr-wait merged` job, so without this they nag
+      // forever. Scoped to push stop reasons and gated on the project being
+      // genuinely shipped (clean tree AND zero unpushed commits) so a still-
+      // stranded release — unpushed commits, a dirty tree, or a non-push stop
+      // reason — keeps surfacing. Mirrors `shippedByMerge` for the PR leg.
+      const shippedByPush =
+        !!release.releaseStopReason &&
+        /push/i.test(release.releaseStopReason) &&
+        task.changes === 0 &&
+        task.unpushed === 0;
+      if (!coveredByMerge && !reDriving && !shippedByMerge && !shippedByPush) {
         signals.push({
           id: `fix_loop_exhausted:${project}`,
           type: 'fix_loop_exhausted',

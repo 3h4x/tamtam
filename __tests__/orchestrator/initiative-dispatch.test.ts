@@ -70,6 +70,34 @@ describe('dispatchTopInitiative', () => {
     expect(deps.runInitiative).not.toHaveBeenCalled();
   });
 
+  it('skips with ci-red when the default-branch CI gate reports red', async () => {
+    const deps = baseDeps({ ciRed: () => true });
+    const res = await dispatchTopInitiative('proj', deps);
+    expect(res).toEqual({ dispatched: null, skipped: 'ci-red' });
+    expect(deps.runInitiative).not.toHaveBeenCalled();
+  });
+
+  it('supports async ci-red checks', async () => {
+    const deps = baseDeps({ ciRed: vi.fn(async () => true) });
+    const res = await dispatchTopInitiative('proj', deps);
+    expect(res.skipped).toBe('ci-red');
+    expect(deps.runInitiative).not.toHaveBeenCalled();
+  });
+
+  it('returns empty without calling ciRed when the backlog is empty (gh call avoided)', async () => {
+    const ciRed = vi.fn(() => true);
+    const deps = baseDeps({ listQueued: vi.fn(async () => []), ciRed });
+    const res = await dispatchTopInitiative('proj', deps);
+    expect(res.skipped).toBe('empty');
+    expect(ciRed).not.toHaveBeenCalled();
+  });
+
+  it('dispatches normally when ciRed is not provided (backward compatible)', async () => {
+    const deps = baseDeps(); // no ciRed dep
+    const res = await dispatchTopInitiative('proj', deps);
+    expect(res.dispatched).not.toBeNull();
+  });
+
   it('skips when the backlog is empty', async () => {
     const deps = baseDeps({ listQueued: vi.fn(async () => []) });
     const res = await dispatchTopInitiative('proj', deps);

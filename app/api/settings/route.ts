@@ -155,6 +155,7 @@ async function buildSettingsResponse(): Promise<Record<string, string>> {
   settings.project_failure_window_minutes = serializeSettingValue('project_failure_window_minutes', effective.project_failure_window_minutes);
   settings.plain_test_phase_enabled = serializeSettingValue('plain_test_phase_enabled', effective.plain_test_phase_enabled);
   settings.auto_fix_ci_on_red_default_branch = serializeSettingValue('auto_fix_ci_on_red_default_branch', effective.auto_fix_ci_on_red_default_branch);
+  settings.ci_gate_block_dispatch_on_red = serializeSettingValue('ci_gate_block_dispatch_on_red', effective.ci_gate_block_dispatch_on_red);
   settings.fix_ci_bypass_sandbox = serializeSettingValue('fix_ci_bypass_sandbox', effective.fix_ci_bypass_sandbox);
   settings.browser_broker_image = serializeSettingValue('browser_broker_image', effective.browser_broker_image);
   if (effective.cli_bin_claude) {
@@ -229,6 +230,7 @@ const SETTING_KEYS = [
   'legacy_completion_hook_agent_drain_enabled',
   'plain_test_phase_enabled',
   'auto_fix_ci_on_red_default_branch',
+  'ci_gate_block_dispatch_on_red',
   'fix_ci_bypass_sandbox',
   'agent_templates',
   'log_retention_count',
@@ -500,6 +502,7 @@ function validateAndSerializeSettingValue(
     key === 'legacy_completion_hook_agent_drain_enabled' ||
     key === 'plain_test_phase_enabled' ||
     key === 'auto_fix_ci_on_red_default_branch' ||
+    key === 'ci_gate_block_dispatch_on_red' ||
     key === 'fix_ci_bypass_sandbox' ||
     key === 'browser_broker_enabled' ||
     key === 'tamtam_network_policy_strict' ||

@@ -26,6 +26,7 @@ describe('GET /settings', () => {
         mark_dod_verify_timeout_ms: '600000',
         plain_test_phase_enabled: 'false',
         auto_fix_ci_on_red_default_branch: 'true',
+        ci_gate_block_dispatch_on_red: 'false',
         fix_ci_bypass_sandbox: 'true',
         browser_broker_image: 'mcr.microsoft.com/playwright/mcp:v0.0.30',
         provider_fallback_chain: '',

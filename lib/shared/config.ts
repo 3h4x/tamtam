@@ -165,6 +165,12 @@ export interface TamTamConfig {
   // only self-heals the default branch for projects that authorized it) and
   // bounded per failing commit so a permanently-broken CI cannot loop.
   auto_fix_ci_on_red_default_branch: boolean;
+  // When on (default off), defer NEW scheduled-agent and initiative dispatch for
+  // a project whose DEFAULT-branch CI is red, until CI goes green again.
+  // Releases and the sweep's `fix-ci` self-heal are NOT gated (work still ships,
+  // CI can still be repaired). Blocked projects surface via the `ci_red` inbox
+  // HITL. Read realm-safe via `isCiDispatchGateEnabled()`.
+  ci_gate_block_dispatch_on_red: boolean;
   // When on (default), the `fix-ci` job runs the CLI in `bypassPermissions`
   // mode instead of inheriting the global `permission_mode`. fix-ci must
   // reproduce the CI failure locally — install deps, build, run tests — to
@@ -338,6 +344,7 @@ export const DEFAULTS: TamTamConfig = {
   legacy_completion_hook_agent_drain_enabled: true,
   plain_test_phase_enabled: false,
   auto_fix_ci_on_red_default_branch: true,
+  ci_gate_block_dispatch_on_red: false,
   fix_ci_bypass_sandbox: true,
   resolve_conflicts_bypass_sandbox: true,
   budget_block_runs_enabled: false,
@@ -675,6 +682,10 @@ export function buildConfigFromSettingsMap(map: Record<string, string>): TamTamC
       map.auto_fix_ci_on_red_default_branch === undefined
         ? DEFAULTS.auto_fix_ci_on_red_default_branch
         : map.auto_fix_ci_on_red_default_branch === 'true',
+    ci_gate_block_dispatch_on_red:
+      map.ci_gate_block_dispatch_on_red === undefined
+        ? DEFAULTS.ci_gate_block_dispatch_on_red
+        : map.ci_gate_block_dispatch_on_red === 'true',
     fix_ci_bypass_sandbox:
       map.fix_ci_bypass_sandbox === undefined
         ? DEFAULTS.fix_ci_bypass_sandbox

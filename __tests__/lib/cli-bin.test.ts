@@ -131,6 +131,7 @@ function makeSettings(overrides: Partial<TamTamConfig> = {}): TamTamConfig {
     legacy_completion_hook_agent_drain_enabled: true,
     plain_test_phase_enabled: false,
     auto_fix_ci_on_red_default_branch: true,
+    ci_gate_block_dispatch_on_red: false,
     fix_ci_bypass_sandbox: true,
     resolve_conflicts_bypass_sandbox: true,
   };

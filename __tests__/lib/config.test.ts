@@ -183,7 +183,11 @@ describe('config', () => {
         legacy_completion_hook_agent_drain_enabled: true,
         plain_test_phase_enabled: false,
         auto_fix_ci_on_red_default_branch: true,
+        ci_gate_block_dispatch_on_red: false,
         fix_ci_bypass_sandbox: true,
+        // Pre-existing gap: shipped in DEFAULTS by the uncommitted resolve-conflicts
+        // work but never added to this snapshot; included here so the assertion matches.
+        resolve_conflicts_bypass_sandbox: true,
         run_token_cap: 2_000_000,
         run_wall_time_cap_minutes: 30,
         project_failure_threshold: 3,

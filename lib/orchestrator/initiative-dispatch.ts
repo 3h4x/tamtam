@@ -11,6 +11,10 @@ export interface DispatchDeps {
   setStatus: typeof SetStatus;
   gatesClear: () => boolean;
   projectBusy: (project: string) => boolean | Promise<boolean>;
+  // Opt-in CI-red dispatch gate: when it resolves true, defer initiative
+  // dispatch for this project until its default-branch CI goes green. Optional
+  // so existing callers/tests that don't wire it default to "never blocked".
+  ciRed?: (project: string) => boolean | Promise<boolean>;
   shipsToday: (project: string) => number;
   maxShipsPerDay: number;
   runInitiative: (row: InitiativeRow) => Promise<void | InitiativeRunStartResult>;
@@ -19,7 +23,7 @@ export interface DispatchDeps {
 
 export interface DispatchResult {
   dispatched: InitiativeRow | null;
-  skipped: 'gates' | 'busy' | 'ships-cap' | 'empty' | 'queued' | null;
+  skipped: 'gates' | 'busy' | 'ci-red' | 'ships-cap' | 'empty' | 'queued' | null;
 }
 
 export async function dispatchTopInitiative(project: string, deps: DispatchDeps): Promise<DispatchResult> {
@@ -34,6 +38,9 @@ export async function dispatchTopInitiative(project: string, deps: DispatchDeps)
 
   const queued = await deps.listQueued(project, nowMs);
   if (queued.length === 0) return { dispatched: null, skipped: 'empty' };
+  // CI-red gate AFTER the cheap empty-backlog check so its (up-to-8s) `gh`
+  // call only fires when there is actually something to dispatch.
+  if (deps.ciRed && (await deps.ciRed(project))) return { dispatched: null, skipped: 'ci-red' };
 
   const top = [...queued].sort((a, b) => {
     const pinDelta = (b.pinnedAt != null ? 1 : 0) - (a.pinnedAt != null ? 1 : 0);
