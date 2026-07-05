@@ -74,6 +74,11 @@ describe('GET /api/agents/stats', () => {
 
   beforeEach(async () => {
     vi.resetModules();
+    // The route caches per project on globalThis (survives resetModules); both
+    // aggregation tests query project=alpha, so clear it or the second reads the
+    // first's cached stats instead of the freshly-seeded rows.
+    delete (globalThis as Record<string, unknown>).__tamtamAgentStatsCache;
+    delete (globalThis as Record<string, unknown>).__tamtamAgentStatsInflight;
     await sharedHandle.db.execute(sql.raw('TRUNCATE jobs'));
     vi.doMock('@/lib/db', () => ({ db: sharedHandle.db, schema }));
     const mod = await import('@/app/api/agents/stats/route');
@@ -175,5 +180,21 @@ describe('GET /api/agents/stats', () => {
     const review = data.agents.find((a: any) => a.name === 'review-watch');
     expect(review).toBeDefined();
     expect(review.reviewFixesTriggered).toBe(2);
+  });
+
+  it('serves a repeat request within TTL from cache (rows changed after the first call are not seen until the cache is stale)', async () => {
+    const now = Date.now() / 1000;
+    await sharedHandle.db.insert(schema.jobs).values([
+      { ...baseJob, id: 'c1', project: 'gamma', kind: 'agent:cto', startedAt: now - 10, finishedAt: now - 5, exitCode: 0 },
+    ]);
+    const first = await GET(new NextRequest('http://localhost/api/agents/stats?project=gamma'));
+    expect((await first.json()).agents.find((a: any) => a.name === 'cto').runs).toBe(1);
+
+    // Insert another run; a cached read within TTL still reports the old count.
+    await sharedHandle.db.insert(schema.jobs).values([
+      { ...baseJob, id: 'c2', project: 'gamma', kind: 'agent:cto', startedAt: now - 4, finishedAt: now - 1, exitCode: 0 },
+    ]);
+    const second = await GET(new NextRequest('http://localhost/api/agents/stats?project=gamma'));
+    expect((await second.json()).agents.find((a: any) => a.name === 'cto').runs).toBe(1);
   });
 });

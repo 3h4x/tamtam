@@ -8,6 +8,14 @@ import { installTestSchedule, uninstallTestSchedule, parseTestScheduleToCron } f
 import { detectTestCommand } from '@/lib/pipeline/start-test';
 import { loadFileConfig, writeFileConfig, getBranchContext } from '@/lib/skills/tamtam-file-config';
 import { getProjectDailySpendUsd } from '@/lib/pipeline/spend-guard';
+import {
+  type ConfigResponse,
+  CONFIG_TTL_MS,
+  configCache,
+  configInflight,
+  clearConfigCache,
+} from '@/lib/shared/project-config-cache';
+import { swrGet, swrRefresh, type SwrStore } from '@/lib/shared/swr-cache';
 
 function badRequest(detail: string) {
   return NextResponse.json({ detail }, { status: 400 });
@@ -64,14 +72,7 @@ function readOptionalNonNegativeUsd(
   return parsed;
 }
 
-export async function GET(
-  _request: NextRequest,
-  { params }: { params: Promise<{ projectName: string }> }
-) {
-  const { projectName } = await params;
-  const projPath = resolveProjectPath(projectName);
-  if (!projPath) return NextResponse.json({ detail: 'project not found' }, { status: 404 });
-
+async function computeConfig(projectName: string, projPath: string): Promise<ConfigResponse> {
   const [detectedTestCmd, testCfg, pushResult, pipelinePrompts] = await Promise.all([
     detectTestCommand(projPath),
     getProjectTestConfig(projectName),
@@ -83,7 +84,7 @@ export async function GET(
   const projectRows = await db.select().from(schema.projects).where(eq(schema.projects.name, projectName)).limit(1);
   const projectRow = projectRows[0] ?? null;
 
-  return NextResponse.json({
+  return {
     project: projectName,
     // File-backed team-contract pipeline values override the DB on read;
     // the remaining pipeline toggles are DB-only so each developer can opt in
@@ -137,7 +138,29 @@ export async function GET(
     file_config_branch: branchCtx.isDefaultBranch ? branchCtx.currentBranch : branchCtx.defaultBranch,
     file_config_is_default_branch: branchCtx.isDefaultBranch,
     current_branch: branchCtx.currentBranch,
-  });
+  };
+}
+
+export async function GET(
+  request: NextRequest,
+  { params }: { params: Promise<{ projectName: string }> }
+) {
+  const { projectName } = await params;
+  const projPath = resolveProjectPath(projectName);
+  if (!projPath) return NextResponse.json({ detail: 'project not found' }, { status: 404 });
+
+  const store: SwrStore<ConfigResponse> = { cache: configCache(), inflight: configInflight() };
+  const compute = () => computeConfig(projectName, projPath);
+
+  // A forced refresh (the client's post-mutation refetch) must reflect the
+  // just-written state, so it recomputes synchronously and rewarms. Otherwise
+  // stale-while-revalidate: return the last value immediately (only the
+  // first-ever load per project pays the fs probe + DB reads) and refresh in the
+  // background; concurrent mounts single-flight one compute.
+  const value = request.headers.get('x-tamtam-refresh') === '1'
+    ? await swrRefresh(store, projectName, compute)
+    : await swrGet(store, projectName, CONFIG_TTL_MS, compute);
+  return NextResponse.json(value);
 }
 
 export async function PATCH(
@@ -365,6 +388,7 @@ export async function PATCH(
   if (touched) {
     reloadConfig();
     clearProjectDataCache();
+    clearConfigCache(projectName);
   }
 
   return NextResponse.json({ status: 'ok' });

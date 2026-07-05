@@ -18,6 +18,10 @@ describe('GET /api/projects/by-project/[projectName]/branch', () => {
 
   beforeEach(async () => {
     vi.resetModules();
+    // The route caches its result on globalThis, which survives resetModules —
+    // clear it so each test starts cold and doesn't read another test's value.
+    delete (globalThis as Record<string, unknown>).__tamtamBranchInfoCache;
+    delete (globalThis as Record<string, unknown>).__tamtamBranchInfoInflight;
 
     resolveProjectPathMock = vi.fn().mockReturnValue('/path/to/proj');
     execMock = vi.fn().mockResolvedValue(makeExecResult());
@@ -128,6 +132,49 @@ describe('GET /api/projects/by-project/[projectName]/branch', () => {
     const res = await GET(req, { params: Promise.resolve({ projectName: 'myproj' }) });
     const data = await res.json();
     expect(data.commitsAhead).toBeNull();
+  });
+
+  it('serves a second call within TTL from cache without re-running git', async () => {
+    execMock.mockResolvedValue(makeExecResult({ stdout: 'main\n' }));
+    detectMainBranchMock.mockResolvedValue('main');
+
+    const first = await GET(new NextRequest('http://localhost/x'), {
+      params: Promise.resolve({ projectName: 'cached-proj' }),
+    });
+    expect(await first.json()).toMatchObject({ branch: 'main', defaultBranch: 'main' });
+
+    const branchCallsAfterFirst = execMock.mock.calls.filter(
+      ([cmd, args]) => cmd === 'git' && args.includes('--show-current'),
+    ).length;
+    const detectCallsAfterFirst = detectMainBranchMock.mock.calls.length;
+
+    const second = await GET(new NextRequest('http://localhost/x'), {
+      params: Promise.resolve({ projectName: 'cached-proj' }),
+    });
+    expect(await second.json()).toMatchObject({ branch: 'main', defaultBranch: 'main' });
+
+    // No additional git work on the cached read.
+    const branchCallsAfterSecond = execMock.mock.calls.filter(
+      ([cmd, args]) => cmd === 'git' && args.includes('--show-current'),
+    ).length;
+    expect(branchCallsAfterSecond).toBe(branchCallsAfterFirst);
+    expect(detectMainBranchMock.mock.calls.length).toBe(detectCallsAfterFirst);
+  });
+
+  it('single-flights concurrent cold misses into one git run', async () => {
+    execMock.mockResolvedValue(makeExecResult({ stdout: 'main\n' }));
+    detectMainBranchMock.mockResolvedValue('main');
+
+    const [a, b] = await Promise.all([
+      GET(new NextRequest('http://localhost/x'), { params: Promise.resolve({ projectName: 'race-proj' }) }),
+      GET(new NextRequest('http://localhost/x'), { params: Promise.resolve({ projectName: 'race-proj' }) }),
+    ]);
+    expect((await a.json()).branch).toBe('main');
+    expect((await b.json()).branch).toBe('main');
+
+    // Two concurrent requests for the same project must share one compute:
+    // detectMainBranch is called exactly once, not once per request.
+    expect(detectMainBranchMock).toHaveBeenCalledTimes(1);
   });
 
   it('invokes git with the resolved project path', async () => {

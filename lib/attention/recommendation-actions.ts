@@ -6,8 +6,7 @@
 
 import type { RecommendationRow } from '@/lib/recommendations/recommendations';
 import { AUTO_APPLICABLE_RECOMMENDATION_TYPES, isManualRecommendation } from '@/lib/recommendations/classification';
-// Pure helper (no client deps); TODO(cleanup, Task 11): relocate to lib/recommendations/.
-import { recommendationBackoffSchedule } from '@/components/recommendations/schedule-backoff';
+import { recommendationBackoffSchedule } from '@/lib/recommendations/backoff-schedule';
 import type { AttentionAction } from '@/lib/attention/types';
 
 function str(v: unknown): string | null {

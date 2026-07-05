@@ -17,11 +17,20 @@ Tamtam uses a layered caching strategy: in-memory TTL caches for hot read paths,
 
 Live in the Next.js server process. Lost on restart — clients see a cold miss on first request after restart, then warm on subsequent calls within TTL.
 
+Several project-page caches (Branch info, Project config, Release plan, Agent stats) use **stale-while-revalidate** via `lib/shared/swr-cache.ts` (`swrGet` / `swrRefresh`): a short TTL alone barely helps a real user, because humans revisit a project minutes apart — far past any short TTL — so every visit would miss and pay the full recompute. SWR serves the last value immediately and refreshes in the background, so **only the first-ever load per project is slow**. Concurrent misses single-flight one compute.
+
+**Why this matters — the cold-mount stampede.** The project page fires ~12 heavy requests concurrently on mount (branch, config, behind, issues-summary, release-plan, agent-stats, usage-quota, prompt-insights, …). Measured cold, they contend for git processes / DB connections / the event loop and **all** balloon to 4–7s each — even endpoints that are ~6ms in isolation. So per-endpoint timing under-reports the real cost; profile the page (browser Resource Timing), not one endpoint at a time. SWR is the lever: once a project's caches are warm, its header requests return from memory in ~ms and drop out of the stampede, so they no longer contend. The remaining cost is the first-ever cold load per project (and the first load after a server restart, when all in-memory caches are empty).
+
 | Cache | File | TTL | Covers | Invalidated by |
 |-------|------|-----|--------|----------------|
 | Project data | `lib/shared/project-data.ts` | 10s | `/api/projects` response (tasks, priorities) | `clearProjectDataCache()` — called on project CRUD; invalidates any older in-flight refresh generation |
 | Settings | `lib/shared/config.ts` | 5s | All settings reads via `getSettings()` | `reloadConfig()` — called by `PATCH /api/settings` |
 | Agents list | `lib/agents/agents-cache.ts` | 10s | `GET /api/agents` (DB agents, filtered by project) | `clearAgentsCache()` — called on agent create/update/delete |
+| Branch info | `app/api/projects/by-project/[projectName]/branch/route.ts` | 5s (SWR) | `GET …/branch` (current branch, default branch, commitsAhead) — drives header branch label + Create-PR button | Stale-while-revalidate + single-flight (`__tamtamBranchInfoCache` / `__tamtamBranchInfoInflight`). Compute spawns 2–3 git processes; SWR means only the first-ever load pays for it |
+| Project config | `lib/shared/project-config-cache.ts` (`__tamtamConfigCache` / `__tamtamConfigInflight`) | 5s (SWR) | `GET …/config` (paused, auto-release, test/dev/website config) — drives the header Paused pill + Release/Auto-release buttons | `clearConfigCache()` on `PATCH …/config`; **plus** the client sends `x-tamtam-refresh: 1` on its post-mutation refetch (`fetchProjectConfig({force:true})`) → `swrRefresh` recomputes synchronously (mutation correctness). Passive reads are SWR + single-flight. Compute does an fs test-command probe + `.tamtam/config.yml` read + several DB reads |
+| Release plan | `app/api/projects/by-project/[projectName]/release/plan/route.ts` (`__tamtamReleasePlanCache` / `__tamtamReleasePlanInflight`) | 5s (SWR) | `GET …/release/plan` (dry-run of the Release button) — drives the ReleasePlanPanel | SWR + single-flight; read-only, side-effect-free (the panel re-fetches as inputs settle and the real Release re-checks at launch). Compute does ~5–6 read-only git spawns + fs probe + DB reads; a rejected compute is not cached |
+| Agent stats | `app/api/agents/stats/route.ts` (`__tamtamAgentStatsCache` / `__tamtamAgentStatsInflight`) | 10s (SWR) | `GET /api/agents/stats?project=…` (per-agent run rollup) — drives the AgentsStats panel | SWR + single-flight; read-only. Compute pulls every `agent:*` job row for the project and aggregates in JS, so it was a heavy contributor to the cold project-page request stampede |
+| Behind/ahead | `app/api/projects/by-project/[projectName]/behind/route.ts` | 60s | `GET …/behind` ("N commits behind" badge) | TTL only; single-flighted (`__tamtamBehindCache` / `__tamtamBehindInflight`). Compute does a network `git fetch` |
 
 ### 2. In-memory jobs Map (no TTL)
 
@@ -67,6 +76,7 @@ mutation → DB write → clearXxxCache() → next GET rebuilds cache
 | Project enabled/disabled | `clearProjectDataCache()` in `lib/shared/project-data.ts` |
 | Settings updated | `reloadConfig()` in `lib/shared/config.ts` |
 | Agent created/updated/deleted | `clearAgentsCache()` in `lib/agents/agents-cache.ts` |
+| Project config updated | `clearConfigCache()` in `lib/shared/project-config-cache.ts` (called by `PATCH …/config`); the client's forced refetch also sends `x-tamtam-refresh: 1` to bypass the server cache |
 | Issues refreshed | Row upserted in `gh_issues_cache`; `?refresh=1` bypasses TTL check |
 | Issue detail refreshed | Row upserted in `gh_issue_detail_cache`; `?refresh=1` bypasses TTL check; current trust allowlists are applied again on every cache hit |
 
@@ -109,6 +119,7 @@ psql "$DATABASE_URL" -c \
 
 | File | Role |
 |------|------|
+| `lib/shared/swr-cache.ts` | Single-flight stale-while-revalidate primitive (`swrGet` / `swrRefresh` / `swrClear`); backs the branch, config, and release-plan header caches |
 | `lib/shared/project-data.ts` | 10s TTL cache for project task data |
 | `lib/shared/config.ts` | 5s TTL cache for all settings |
 | `lib/agents/agents-cache.ts` | 10s TTL cache for DB agents; cleared by `clearAgentsCache()` |

@@ -545,8 +545,15 @@ export async function fetchChangeDiff(projectName: string, filename: string): Pr
 export async function fetchProjectConfig(projectName: string, opts: { force?: boolean } = {}): Promise<ProjectConfig> {
   // Cached+deduped across tab switches. Pass `{ force: true }` for the reload
   // right after a config write so a save is never followed by a stale read.
+  // `force` also sends `x-tamtam-refresh: 1` so the server-side /config cache is
+  // bypassed and rewarmed — the URL is unchanged so the client memo entry for
+  // this project is still the one that gets refreshed.
   try {
-    return await cachedGet(`${API_BASE}/by-project/${encodeURIComponent(projectName)}/config`, { ttlMs: 5000, force: opts.force })
+    return await cachedGet(`${API_BASE}/by-project/${encodeURIComponent(projectName)}/config`, {
+      ttlMs: 5000,
+      force: opts.force,
+      init: opts.force ? { headers: { 'x-tamtam-refresh': '1' } } : undefined,
+    })
   } catch (e) {
     if (e instanceof CachedGetError) throw new Error(`Failed to fetch project config: ${e.statusText}`, { cause: e })
     throw e

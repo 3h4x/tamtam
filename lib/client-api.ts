@@ -111,6 +111,9 @@ export {
 export type { AutomationQueueItem, RetryAutomationQueueResult } from './client/automation-queue'
 
 export { fetchInbox } from './client/inbox'
+export { fetchAttention } from './client/attention'
+export type { AttentionResponse } from './client/attention'
+export type { AttentionItem, AttentionAction, AttentionCounts, AttentionSeverity, AttentionSource } from './attention/types'
 export { fetchSettings, invalidateSettings } from './client/settings'
 export type {
   InboxSignal,

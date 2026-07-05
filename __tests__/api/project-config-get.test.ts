@@ -20,6 +20,11 @@ describe('GET /api/projects/by-project/{projectName}/config', () => {
 
   beforeEach(() => {
     resetMocks();
+    // The route caches its response on globalThis (survives between tests); most
+    // tests reuse `proj1` within the 5s TTL, so clear it or they'd read the
+    // first test's cached value.
+    delete (globalThis as Record<string, unknown>).__tamtamConfigCache;
+    delete (globalThis as Record<string, unknown>).__tamtamConfigInflight;
     // Defaults sufficient for most tests; individual tests override as needed.
     mocks.resolveProjectPath.mockReturnValue(tempDir);
     mocks.writeProjectFieldYaml.mockReturnValue(true);
@@ -345,5 +350,50 @@ describe('GET /api/projects/by-project/{projectName}/config', () => {
     const data = await res.json();
     expect(data.test_command).toBe('custom test cmd');
     expect(data.effective_test_command).toBe('custom test cmd');
+  });
+
+  it('serves a second call within TTL from cache without recomputing', async () => {
+    const first = await GET(new NextRequest('http://localhost/api/projects/by-project/proj1/config'), {
+      params: Promise.resolve({ projectName: 'proj1' }),
+    });
+    expect((await first.json()).project).toBe('proj1');
+    const callsAfterFirst = mocks.getProjectTestConfig.mock.calls.length;
+
+    const second = await GET(new NextRequest('http://localhost/api/projects/by-project/proj1/config'), {
+      params: Promise.resolve({ projectName: 'proj1' }),
+    });
+    expect((await second.json()).project).toBe('proj1');
+    // Cache hit — no additional compute (DB/config reads not re-run).
+    expect(mocks.getProjectTestConfig.mock.calls.length).toBe(callsAfterFirst);
+  });
+
+  it('bypasses the cache and recomputes when x-tamtam-refresh:1 is sent', async () => {
+    await GET(new NextRequest('http://localhost/api/projects/by-project/proj1/config'), {
+      params: Promise.resolve({ projectName: 'proj1' }),
+    });
+    const callsAfterFirst = mocks.getProjectTestConfig.mock.calls.length;
+
+    const refreshed = await GET(
+      new NextRequest('http://localhost/api/projects/by-project/proj1/config', {
+        headers: { 'x-tamtam-refresh': '1' },
+      }),
+      { params: Promise.resolve({ projectName: 'proj1' }) },
+    );
+    expect((await refreshed.json()).project).toBe('proj1');
+    // Forced refresh must recompute so a post-mutation read never sees stale state.
+    expect(mocks.getProjectTestConfig.mock.calls.length).toBe(callsAfterFirst + 1);
+  });
+
+  it('single-flights concurrent cold misses into one compute', async () => {
+    const [a, b] = await Promise.all([
+      GET(new NextRequest('http://localhost/api/projects/by-project/race-proj/config'), {
+        params: Promise.resolve({ projectName: 'race-proj' }),
+      }),
+      GET(new NextRequest('http://localhost/api/projects/by-project/race-proj/config'), {
+        params: Promise.resolve({ projectName: 'race-proj' }),
+      }),
+    ]);
+    expect((await a.json()).project).toBe('race-proj');
+    expect((await b.json()).project).toBe('race-proj');
   });
 });

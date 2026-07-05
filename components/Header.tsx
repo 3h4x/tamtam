@@ -10,7 +10,7 @@ import { JobsPauseToggle } from './JobsPauseToggle'
 import { Button, buttonVariants } from '@/components/ui/Button'
 import { Pill } from '@/components/ui/Pill'
 import { Spinner } from '@/components/ui/Spinner'
-import { fetchRecommendationsSummary, fetchInbox } from '@/lib/client-api'
+import { fetchInbox } from '@/lib/client-api'
 import { useTheme } from '@/hooks/useTheme'
 
 interface HeaderProps {
@@ -24,9 +24,13 @@ interface NavItem {
   // When set, the nav item shows this Map's value as a count chip — same
   // pattern as `Issues / PRs 10` on the project tab nav. The chip is hidden
   // when the count is 0 to avoid noise.
-  countKey?: 'recommendations' | 'inbox'
+  countKey?: 'inbox'
 }
 
+// Inbox is the single cross-project triage surface: it now merges the derived
+// signals with the open recommendations (which used to be their own nav entry
+// + page) into one tabbed page (Inbox / Initiatives / History). `/recommendations`
+// redirects to `/inbox` (see next.config.ts).
 const NAV_ITEMS: NavItem[] = [
   { to: '/', label: 'Projects' },
   { to: '/inbox', label: 'Inbox', countKey: 'inbox' },
@@ -35,7 +39,6 @@ const NAV_ITEMS: NavItem[] = [
   { to: '/workflow-runs', label: 'Workflows' },
   { to: '/stats', label: 'Stats' },
   { to: '/library', label: 'Library' },
-  { to: '/recommendations', label: 'Recommendations', countKey: 'recommendations' },
   { to: '/agent', label: 'Agent' },
   { to: '/settings', label: 'Settings' },
 ]
@@ -46,25 +49,12 @@ export function Header({ loading, lastRefresh: _lastRefresh }: HeaderProps) {
   const { theme } = useTheme()
   const logoSrc = theme === 'dark' ? '/logo-light.png' : '/logo.png'
 
-  // Open-recommendation count across all projects, polled on a 60s cadence
-  // (same pattern as JobsPauseToggle). The chip is hidden when count is 0
-  // and silently absent on fetch error — fail-open.
-  const [recCount, setRecCount] = useState<number>(0)
-  useEffect(() => {
-    let live = true
-    const load = () => {
-      fetchRecommendationsSummary()
-        .then((s) => { if (live) setRecCount(s.openCount) })
-        .catch(() => { if (live) setRecCount(0) })
-    }
-    load()
-    const id = setInterval(load, 60_000)
-    window.addEventListener('tamtam:recommendations-changed', load)
-    return () => { live = false; clearInterval(id); window.removeEventListener('tamtam:recommendations-changed', load) }
-  }, [])
-
   // Count of red (urgent) inbox signals, polled on a 60s cadence and refreshed
   // immediately when an inbox action fires. Chip hidden when 0; fail-open on error.
+  // Recommendations fold into the merged feed as yellow/green, so they don't
+  // affect this red-blockers-only badge (the merged red count equals the inbox
+  // red count — recommendations are never red — so the lighter /api/inbox read
+  // still yields the right number for the badge).
   const [inboxRed, setInboxRed] = useState<number>(0)
   useEffect(() => {
     let live = true
@@ -78,7 +68,7 @@ export function Header({ loading, lastRefresh: _lastRefresh }: HeaderProps) {
     window.addEventListener('tamtam:inbox-changed', load)
     return () => { live = false; clearInterval(id); window.removeEventListener('tamtam:inbox-changed', load) }
   }, [])
-  const counts: Record<string, number> = { recommendations: recCount, inbox: inboxRed }
+  const counts: Record<string, number> = { inbox: inboxRed }
   const [authConfigured, setAuthConfigured] = useState(false)
   const [loggingOut, setLoggingOut] = useState(false)
 

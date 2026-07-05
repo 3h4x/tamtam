@@ -6,6 +6,11 @@ describe('GET /api/projects/by-project/{projectName}/release/plan', () => {
 
   beforeEach(async () => {
     vi.resetModules();
+    // The route caches its result on globalThis (survives resetModules); tests
+    // reuse `proj1` within the 5s TTL, so clear it or a later call reads an
+    // earlier test's cached plan instead of the fresh mock.
+    delete (globalThis as Record<string, unknown>).__tamtamReleasePlanCache;
+    delete (globalThis as Record<string, unknown>).__tamtamReleasePlanInflight;
     computeReleasePlanMock = vi.fn();
     vi.doMock('@/lib/pipeline/release-plan', () => ({ computeReleasePlan: computeReleasePlanMock }));
     ({ GET } = await import('@/app/api/projects/by-project/[projectName]/release/plan/route'));
@@ -58,5 +63,44 @@ describe('GET /api/projects/by-project/{projectName}/release/plan', () => {
     const res = await call();
     expect(res.status).toBe(500);
     expect((await res.json()).detail).toMatch(/boom/);
+  });
+
+  it('serves a second call within TTL from cache without recomputing', async () => {
+    const plan = {
+      project: 'proj1', canRelease: true, blockers: [], mode: 'direct',
+      currentBranch: 'main', targetBranch: 'main', comparisonRange: null,
+      entryStep: 'test', steps: [],
+    };
+    computeReleasePlanMock.mockResolvedValue(plan);
+
+    expect((await (await call()).json()).project).toBe('proj1');
+    expect((await (await call()).json()).project).toBe('proj1');
+    // Second call hit the cache — planner computed exactly once.
+    expect(computeReleasePlanMock).toHaveBeenCalledTimes(1);
+  });
+
+  it('single-flights concurrent cold misses into one compute', async () => {
+    computeReleasePlanMock.mockResolvedValue({
+      project: 'race', canRelease: true, blockers: [], mode: 'direct',
+      currentBranch: 'main', targetBranch: 'main', comparisonRange: null,
+      entryStep: 'test', steps: [],
+    });
+    const [a, b] = await Promise.all([call('race'), call('race')]);
+    expect((await a.json()).project).toBe('race');
+    expect((await b.json()).project).toBe('race');
+    expect(computeReleasePlanMock).toHaveBeenCalledTimes(1);
+  });
+
+  it('does not cache a rejected compute (next call retries)', async () => {
+    computeReleasePlanMock.mockRejectedValueOnce(new Error('transient'));
+    expect((await call()).status).toBe(500);
+    // The failed compute must not be cached — a retry recomputes.
+    computeReleasePlanMock.mockResolvedValueOnce({
+      project: 'proj1', canRelease: true, blockers: [], mode: 'direct',
+      currentBranch: 'main', targetBranch: 'main', comparisonRange: null,
+      entryStep: 'test', steps: [],
+    });
+    expect((await call()).status).toBe(200);
+    expect(computeReleasePlanMock).toHaveBeenCalledTimes(2);
   });
 });

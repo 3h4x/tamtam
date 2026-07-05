@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest'
 import type { Recommendation } from '@/lib/client-api'
-import { recommendationBackoffSchedule } from '@/components/recommendations/schedule-backoff'
+import { recommendationBackoffSchedule } from '@/lib/recommendations/backoff-schedule'
 
 function makeRec(overrides: Partial<Recommendation> = {}): Recommendation {
   return {

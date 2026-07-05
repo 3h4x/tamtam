@@ -7,7 +7,7 @@ import { Pill } from '@/components/ui/Pill'
 import type { Recommendation } from '@/lib/client-api'
 import { AUTO_APPLICABLE_RECOMMENDATION_TYPES, isAutoRecommendation, isManualRecommendation } from '@/lib/client-api'
 import { formatAgo } from '@/lib/shared/format'
-import { recommendationBackoffSchedule } from '@/components/recommendations/schedule-backoff'
+import { recommendationBackoffSchedule } from '@/lib/recommendations/backoff-schedule'
 
 function typeLabel(type: string): string {
   if (type === 'agent_schedule_backoff') return 'schedule'
