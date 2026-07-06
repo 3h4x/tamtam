@@ -1,16 +1,18 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { resolveProjectPath } from '@/lib/shared/project-data';
 import { exec } from '@/lib/shared/shell';
+import { swrGet, type SwrStore } from '@/lib/shared/swr-cache';
 
 interface BehindAhead { behind: number; ahead: number }
 
 // The behind/ahead count needs a `git fetch` (network, ~0.5–5s) to be accurate
-// against origin. This endpoint fires on EVERY project-tab mount (badge), so an
-// uncached fetch made every tab load wait seconds. Cache the result per project
-// with a short TTL — a "N commits behind" badge does not need to be fresher than
-// this — and single-flight concurrent misses so the two mount fires (mount +
-// poll) share one fetch instead of racing two. Pinned to globalThis because
-// Next.js duplicates route modules across bundle realms.
+// against origin. This endpoint fires on EVERY project-tab mount (badge). Serve
+// it stale-while-revalidate: once a value exists, return it immediately and do
+// the git fetch in the background — a "N commits behind" badge tolerates being a
+// bit stale, and this keeps the blocking network fetch off the mount critical
+// path (it was the header's long pole). Only the first-ever load per project
+// pays the fetch. Pinned to globalThis because Next.js duplicates route modules
+// across bundle realms.
 declare global {
   var __tamtamBehindCache: Map<string, { value: BehindAhead; time: number }> | undefined;
   var __tamtamBehindInflight: Map<string, Promise<BehindAhead>> | undefined;
@@ -81,33 +83,17 @@ export async function GET(
   const projPath = resolveProjectPath(projectName);
   if (!projPath) return NextResponse.json({ detail: 'project not found' }, { status: 404 });
 
-  const cache = (globalThis.__tamtamBehindCache ??= new Map());
-  const inflight = (globalThis.__tamtamBehindInflight ??= new Map());
-
-  const hit = cache.get(projectName);
-  if (hit && Date.now() - hit.time < BEHIND_TTL_MS) {
-    return NextResponse.json(hit.value);
-  }
-
-  // Single-flight: the mount fire and a poll can hit the cold cache together —
-  // share one git fetch instead of racing two network round-trips.
-  let pending = inflight.get(projectName);
-  if (!pending) {
-    pending = computeBehindAhead(projPath)
-      .then((value) => {
-        cache.set(projectName, { value, time: Date.now() });
-        return value;
-      })
-      .finally(() => {
-        inflight.delete(projectName);
-      });
-    inflight.set(projectName, pending);
-  }
+  const store: SwrStore<BehindAhead> = {
+    cache: (globalThis.__tamtamBehindCache ??= new Map()),
+    inflight: (globalThis.__tamtamBehindInflight ??= new Map()),
+  };
 
   try {
-    return NextResponse.json(await pending);
+    return NextResponse.json(await swrGet(store, projectName, BEHIND_TTL_MS, () => computeBehindAhead(projPath)));
   } catch {
-    // git failed (timeout, missing remote) — don't render a misleading badge.
+    // git failed (timeout, missing remote) on the first (cold) load — don't
+    // render a misleading badge. (Stale loads never reach here: they return the
+    // last good value and swallow background-refresh errors.)
     return NextResponse.json({ behind: 0, ahead: 0 });
   }
 }

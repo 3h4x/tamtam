@@ -635,11 +635,44 @@ describe('deriveInboxSignals', () => {
       baseInput({
         tasks: [makeTask({ project: 'epsilon', ci: 'success', github: 'owner/epsilon' })],
         jobs: [makeJob({ project: 'epsilon', kind: 'review', startedAt: 500, finishedAt: 900, verdict: 'LGTM' })],
-        openPrByProject: { epsilon: { number: 7, ciGreen: true, reviewDecision: null } },
+        openPrByProject: { epsilon: { number: 7, ciGreen: true, reviewDecision: null, authorTrusted: true } },
       }),
     );
     const s = signals.find((x) => x.type === 'pr_ready_to_merge');
     expect(s).toMatchObject({ severity: 'green', action: { kind: 'merge', prNumber: 7 } });
+  });
+
+  it('does NOT flag ready-to-merge when the PR author is untrusted (e.g. dependabot / a public-repo contributor)', () => {
+    const signals = deriveInboxSignals(
+      baseInput({
+        tasks: [makeTask({ project: 'epsilon', ci: 'success', github: 'owner/epsilon' })],
+        // The project has a green CI + an LGTM (from its own unrelated review),
+        // but the representative open PR is from an author NOT in safe_users /
+        // trusted_github_users. A one-click "ready to merge" must not appear —
+        // that would nudge merging untrusted code onto the default branch.
+        jobs: [makeJob({ project: 'epsilon', kind: 'review', startedAt: 500, finishedAt: 900, verdict: 'LGTM' })],
+        openPrByProject: {
+          epsilon: { number: 30, ciGreen: true, reviewDecision: null, mergeable: 'MERGEABLE', authorLogin: 'dependabot[bot]', authorTrusted: false },
+        },
+      }),
+    );
+    expect(signals.find((x) => x.type === 'pr_ready_to_merge')).toBeUndefined();
+  });
+
+  it('flags ready-to-merge for a MERGEABLE PR from a trusted author', () => {
+    const signals = deriveInboxSignals(
+      baseInput({
+        tasks: [makeTask({ project: 'epsilon', ci: 'success', github: 'owner/epsilon' })],
+        jobs: [makeJob({ project: 'epsilon', kind: 'review', startedAt: 500, finishedAt: 900, verdict: 'LGTM' })],
+        openPrByProject: {
+          epsilon: { number: 31, ciGreen: true, reviewDecision: null, mergeable: 'MERGEABLE', authorLogin: '3h4x', authorTrusted: true },
+        },
+      }),
+    );
+    expect(signals.find((x) => x.type === 'pr_ready_to_merge')).toMatchObject({
+      severity: 'green',
+      action: { kind: 'merge', prNumber: 31 },
+    });
   });
 
   it('does not flag a mergeable PR when CI is not green', () => {
@@ -681,7 +714,7 @@ describe('deriveInboxSignals', () => {
       baseInput({
         tasks: [makeTask({ project: 'epsilon', ci: 'success' })],
         jobs: [makeJob({ project: 'epsilon', kind: 'review', startedAt: 500, finishedAt: 900, verdict: 'LGTM' })],
-        openPrByProject: { epsilon: { number: 7, ciGreen: true, reviewDecision: null, mergeable: 'MERGEABLE' } },
+        openPrByProject: { epsilon: { number: 7, ciGreen: true, reviewDecision: null, mergeable: 'MERGEABLE', authorTrusted: true } },
       }),
     );
     expect(signals.find((x) => x.type === 'pr_ready_to_merge')).toMatchObject({
@@ -768,7 +801,7 @@ describe('deriveInboxSignals', () => {
           makeTask({ project: 'green1', ci: 'success', github: 'o/green1' }),
         ],
         jobs: [makeJob({ project: 'green1', kind: 'review', startedAt: 1, finishedAt: 2, verdict: 'LGTM' })],
-        openPrByProject: { green1: { number: 1, ciGreen: true, reviewDecision: null } },
+        openPrByProject: { green1: { number: 1, ciGreen: true, reviewDecision: null, authorTrusted: true } },
       }),
     );
     expect(signals.map((s) => s.severity)).toEqual(['red', 'yellow', 'green']);

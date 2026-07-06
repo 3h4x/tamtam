@@ -6,6 +6,7 @@ import { getSettings } from '@/lib/shared/config';
 import { db, schema } from '@/lib/db';
 import { homedir } from 'os';
 import { isUserTrusted } from '@/lib/shared/untrusted';
+import { getPrAuthorLogin } from '@/lib/github/pr-author';
 import { ensureIssueBranch, checkoutPrBranch, issueBranchName } from '@/lib/github/issue-branch';
 import { findOpenPrForIssue, type IssuePrMatch } from '@/lib/github/find-issue-pr';
 import { listJobs } from '@/lib/jobs/job-storage';
@@ -662,6 +663,26 @@ export async function POST(
   const expanded = projPath.startsWith('~') ? projPath.replace('~', homedir()) : projPath;
   const repo = await getGhRepo(projectName, expanded);
   if (!repo) return NextResponse.json({ detail: 'could not determine GitHub repo' }, { status: 422 });
+
+  // Security gate: never let TamTam approve or merge a PR whose author is not in
+  // the project's safe_users / trusted_github_users. On a public repo anyone can
+  // open a PR; green CI plus a decoupled project-level LGTM must not become a
+  // one-click merge of untrusted code onto the default branch (which may then
+  // auto-deploy). Fail closed if the author can't be resolved. To land such a PR
+  // deliberately, add the author to safe_users / trusted_github_users, or act on
+  // it directly on GitHub.
+  const prAuthor = await getPrAuthorLogin(repo, prNumber);
+  if (!prAuthor || !isUserTrusted(prAuthor, projPath)) {
+    return NextResponse.json(
+      {
+        detail: prAuthor
+          ? `Refusing to ${action} PR #${prNumber}: author ${prAuthor} is not in this project's safe_users / trusted_github_users. Add them to trust this author, or ${action} the PR directly on GitHub.`
+          : `Refusing to ${action} PR #${prNumber}: could not verify the PR author for trust. Retry, or ${action} the PR directly on GitHub.`,
+        untrustedAuthor: prAuthor ?? null,
+      },
+      { status: 403 },
+    );
+  }
 
   if (action === 'approve') {
     const result = await exec(

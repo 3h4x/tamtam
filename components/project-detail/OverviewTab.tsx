@@ -19,6 +19,7 @@ import { Button } from '@/components/ui/Button'
 import { Spinner } from '@/components/ui/Spinner'
 import { PulseDot } from '@/components/ui/PulseDot'
 import { formatAgo } from '@/lib/shared/format'
+import { useDeferredMount } from '@/hooks/useDeferredMount'
 import type { JobInfo, ProjectConfig } from '@/lib/client-api'
 
 type Verdict = 'LGTM' | 'NEEDS ATTENTION' | 'DO NOT SHIP'
@@ -85,6 +86,10 @@ export function OverviewTab({
   onRefresh,
 }: OverviewTabProps) {
   const router = useRouter()
+  // Defer the below-the-fold stats panels' mount (and their fetches) until the
+  // browser is idle, so their requests don't compete with the header's for the
+  // ~6 connection sockets and the server event loop during the mount burst.
+  const deferredPanels = useDeferredMount()
   const activeCounts = runningJobs.reduce(
     (acc, job) => {
       acc[bucketOf(job.kind)] += 1
@@ -247,11 +252,15 @@ export function OverviewTab({
         </div>
       )}
 
-      <AgentsStats projectName={projectName} />
+      {deferredPanels && (
+        <>
+          <AgentsStats projectName={projectName} />
 
-      <PipelineStatsPanel projectName={projectName} compact />
+          <PipelineStatsPanel projectName={projectName} compact />
 
-      <PromptInsightsPanel projectName={projectName} />
+          <PromptInsightsPanel projectName={projectName} />
+        </>
+      )}
     </>
   )
 }

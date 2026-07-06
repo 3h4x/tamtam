@@ -1,4 +1,5 @@
-import { fetchProjectData } from '@/lib/shared/project-data';
+import { fetchProjectData, resolveProjectPath } from '@/lib/shared/project-data';
+import { isUserTrusted } from '@/lib/shared/untrusted';
 import { listJobs } from '@/lib/jobs/storage';
 import { getVerdict } from '@/lib/jobs/verdict';
 import { listAutomationQueue, type AutomationQueueItem } from '@/lib/workflows/automation-queue';
@@ -107,6 +108,15 @@ export interface InboxOpenPr {
    *  test fixtures without it read as "unknown" — only an explicit CONFLICTING
    *  suppresses the ready signal. */
   mergeable?: string | null;
+  /** The PR author's GitHub login, or null when unknown. */
+  authorLogin?: string | null;
+  /** Whether the PR author is in the project's safe_users / trusted_github_users.
+   *  Resolved at load time (see loadOpenPrs). A one-click "ready to merge" is only
+   *  offered for a TRUSTED author: an external PR (dependabot, a public-repo
+   *  contributor, an attacker) can have green CI and be paired with an unrelated
+   *  project-level LGTM, so surfacing it as ready-to-merge would nudge merging
+   *  untrusted code. Defaults to false when omitted — fail closed. */
+  authorTrusted?: boolean;
 }
 
 export interface InboxInput {
@@ -506,7 +516,7 @@ export function deriveInboxSignals(input: InboxInput): InboxSignal[] {
               action: { kind: 'resolve-conflicts', label: 'Resolve conflicts', prNumber: pr.number },
             });
           }
-        } else {
+        } else if (pr.authorTrusted) {
           signals.push({
             id: `pr_ready_to_merge:${project}`,
             type: 'pr_ready_to_merge',
@@ -520,6 +530,16 @@ export function deriveInboxSignals(input: InboxInput): InboxSignal[] {
             action: { kind: 'merge', label: 'Merge', prNumber: pr.number },
           });
         }
+        // else: the representative PR's author is NOT in safe_users /
+        // trusted_github_users. Do NOT offer a one-click "ready to merge" — an
+        // external PR (e.g. dependabot, a public-repo contributor, or an
+        // attacker) can carry green CI and get paired with an unrelated
+        // project-level LGTM, so a "Merge" nudge would push untrusted code onto
+        // the default branch. A PR that earned a real TamTam LGTM already passed
+        // the pr-branch execution gate (trusted authors) to be reviewed at all,
+        // so this only suppresses the false-positive. The Issues tab already
+        // filters untrusted-author PRs out of its display, and the merge route
+        // refuses an untrusted-author merge — all three stay consistent.
       }
     }
   }
@@ -625,6 +645,7 @@ interface CachedPr {
   reviewDecision?: string | null;
   mergeable?: string | null;
   statusCheckRollup?: Array<{ conclusion?: string | null }> | null;
+  author?: { login?: string | null } | null;
 }
 
 // Check conclusions that count as PASSING (non-blocking). SUCCESS is an explicit
@@ -688,11 +709,20 @@ async function loadOpenPrs(
       numbersByProject[row.project] = openPrs.map((p) => p.number as number);
       const open = selectRepresentativePr(openPrs, ciByProject[row.project] ?? null);
       if (!open || typeof open.number !== 'number') continue;
+      // Resolve the PR author's trust here (data layer) so the pure signal
+      // derivation stays I/O-free. Fail closed: an unresolvable project path or
+      // a missing author login reads as untrusted, so an external PR is never
+      // surfaced as one-click ready-to-merge.
+      const authorLogin = typeof open.author?.login === 'string' ? open.author.login : null;
+      const projPath = resolveProjectPath(row.project);
+      const authorTrusted = !!(authorLogin && projPath && isUserTrusted(authorLogin, projPath));
       byProject[row.project] = {
         number: open.number,
         ciGreen: rollupIsGreen(open.statusCheckRollup, ciByProject[row.project] ?? null),
         reviewDecision: open.reviewDecision ?? null,
         mergeable: open.mergeable ?? null,
+        authorLogin,
+        authorTrusted,
       };
     }
   } catch {

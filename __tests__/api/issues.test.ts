@@ -15,6 +15,7 @@ const mocks = vi.hoisted(() => ({
   loadFileConfig: vi.fn(),
   getSettings: vi.fn(),
   getDb: vi.fn(),
+  getPrAuthorLogin: vi.fn(),
 }));
 
 vi.mock('@/lib/shared/project-data', () => ({
@@ -46,6 +47,9 @@ vi.mock('@/lib/skills/tamtam-file-config', () => ({
 }));
 vi.mock('@/lib/shared/config', () => ({
   getSettings: mocks.getSettings,
+}));
+vi.mock('@/lib/github/pr-author', () => ({
+  getPrAuthorLogin: mocks.getPrAuthorLogin,
 }));
 
 // Import route once at module scope — the mocks above are hoisted before this.
@@ -488,7 +492,11 @@ describe('POST /api/projects/by-project/[projectName]/issues', () => {
     mocks.resolveProjectPath.mockReset().mockReturnValue('/path/to/proj');
     mocks.clearProjectDataCache.mockReset();
     mocks.loadFileConfig.mockReset().mockReturnValue(null);
-    mocks.getSettings.mockReset().mockReturnValue({ trusted_github_users: [], github_owner: '' });
+    // Default: the PR author is a trusted user, so the merge/approve trust gate
+    // passes and the existing merge-flow tests exercise the happy path. Cases
+    // that assert the gate override getPrAuthorLogin per-test.
+    mocks.getSettings.mockReset().mockReturnValue({ trusted_github_users: ['trusted-user'], github_owner: '' });
+    mocks.getPrAuthorLogin.mockReset().mockResolvedValue('trusted-user');
     mocks.getDb.mockReturnValue(sharedHandle.db);
     clearTrustedUsersCache();
   });
@@ -543,6 +551,38 @@ describe('POST /api/projects/by-project/[projectName]/issues', () => {
     const data = await res.json();
     expect(data.status).toBe('merged');
     expect(data.pr).toBe(42);
+  });
+
+  it('refuses to merge a PR whose author is NOT in safe_users / trusted_github_users (public-repo attacker / dependabot)', async () => {
+    mocks.getPrAuthorLogin.mockResolvedValue('dependabot[bot]'); // untrusted author
+    // Only the repo lookup should run — the merge must be refused before it.
+    mocks.exec.mockImplementationOnce(() => resp(0, 'https://github.com/owner/myproj.git')); // git remote get-url
+
+    const res = await POST(makeReq({ prNumber: 30, action: 'merge' }), { params: Promise.resolve({ projectName: 'myproj' }) });
+    expect(res.status).toBe(403);
+    const data = await res.json();
+    expect(data.detail).toContain('dependabot[bot]');
+    expect(data.untrustedAuthor).toBe('dependabot[bot]');
+    // `gh pr merge` was never invoked (only the repo lookup ran).
+    expect(mocks.exec).toHaveBeenCalledTimes(1);
+  });
+
+  it('fails closed (403) when the PR author cannot be resolved', async () => {
+    mocks.getPrAuthorLogin.mockResolvedValue(null); // lookup failed / no author
+    mocks.exec.mockImplementationOnce(() => resp(0, 'https://github.com/owner/myproj.git')); // git remote get-url
+
+    const res = await POST(makeReq({ prNumber: 30, action: 'merge' }), { params: Promise.resolve({ projectName: 'myproj' }) });
+    expect(res.status).toBe(403);
+    expect(mocks.exec).toHaveBeenCalledTimes(1);
+  });
+
+  it('refuses to approve a PR from an untrusted author', async () => {
+    mocks.getPrAuthorLogin.mockResolvedValue('outsider'); // untrusted author
+    mocks.exec.mockImplementationOnce(() => resp(0, 'https://github.com/owner/myproj.git')); // git remote get-url
+
+    const res = await POST(makeReq({ prNumber: 30, action: 'approve' }), { params: Promise.resolve({ projectName: 'myproj' }) });
+    expect(res.status).toBe(403);
+    expect(mocks.exec).toHaveBeenCalledTimes(1);
   });
 
   it('resolves an outstanding pr-wait HITL when the PR is merged (stamps prWaitReason=merged)', async () => {

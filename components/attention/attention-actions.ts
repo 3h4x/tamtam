@@ -121,7 +121,18 @@ async function dispatchRecommendation(item: AttentionItem, action: AttentionActi
         throw new Error('Cancelled')
       }
       await updateAgent(id, { enabled: false })
-      return `Disabled ${agentName} in ${project}`
+      // A disabled agent will never run again, so its "isn't producing changes"
+      // recommendation can never auto-resolve (that only fires on a later
+      // productive run). Dismiss it here so disabling from the card actually
+      // clears the card instead of leaving stale advice for a stopped agent.
+      if (recId) {
+        try {
+          await updateRecommendation(project, recId, 'dismissed')
+        } catch {
+          /* best effort — the agent is disabled regardless */
+        }
+      }
+      return `Disabled ${agentName} in ${project} — recommendation cleared`
     }
     default:
       throw new Error(`Unsupported recommendation action: ${action.kind}`)
